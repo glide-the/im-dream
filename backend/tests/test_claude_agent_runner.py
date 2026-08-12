@@ -2362,6 +2362,26 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 class TestClaudeSdkEnvHelper(unittest.TestCase):
     """Project dotenv loading only forwards SDK-level keys."""
 
+    def test_project_runtime_options_set_claude_code_retry_default_to_three(self):
+        options = _SDK_OPTIONS()
+
+        sdk_env_module.apply_project_sdk_runtime_options(
+            options,
+            env_file=Path("/tmp/does-not-exist"),
+        )
+
+        self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "3")
+
+    def test_project_runtime_options_preserve_explicit_retry_override(self):
+        options = _SDK_OPTIONS(env={"CLAUDE_CODE_MAX_RETRIES": "2"})
+
+        sdk_env_module.apply_project_sdk_runtime_options(
+            options,
+            env_file=Path("/tmp/does-not-exist"),
+        )
+
+        self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "2")
+
     def test_project_dotenv_env_filters_non_sdk_keys(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             env_file = Path(temp_dir) / ".env"

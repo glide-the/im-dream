@@ -31,7 +31,7 @@ artifact was produced, not that proposed code was implemented.
 | R10 — requirement-by-requirement completion audit | Re-open the persistent objective, prove every named requirement from current source and executable evidence, and close every locally actionable gap | Current worktree, S01–S14 coverage, backend/frontend/Admin contracts, infrastructure probes, docs and cleanup | Every objective item has direct evidence or an explicit external blocker; S01–S14 are independently discoverable; no second runtime or weakened permission boundary; no new headed run while deferred | In progress; prompt recorded before audit | Headed rerun is deferred by the user; live PostgreSQL/Redis and deployment facilities must be discovered rather than assumed |
 | R11 — final candidate validation | Re-run the complete locally executable release gate after the R10 fixes and reconcile the evidence to the exact candidate | Isolated PostgreSQL/Redis, backend/frontend/Admin suites, type/lint/build, named headless Chromium scenarios, source/link/diff/cleanup audits and final design evidence | Every command is reproducible and passes or is reported with an exact external blocker; no real model, no existing database, no fixed sleep, no owned residue and no new headed run | **Failed:** isolated PostgreSQL harness reached the local Admin gateway but `/v1/messages?beta=true` returned 401 before the fake provider; cleanup passed | Root cause and smallest production-faithful fix move to R12; immutable/staging/rollback and current-candidate headed remain external/deferred |
 | R12 — local gateway authentication repair | Diagnose and repair the isolated Dream producer chain's Admin gateway 401 without weakening production authentication | Dream backend subject/service-key construction, Admin gateway auth middleware, fake-provider harness and focused cross-repository contracts | The exact 401 is explained by source and executable evidence; the smallest fix preserves issuer/audience/client/scope/user binding; focused and full isolated headless harness pass with zero external provider calls/residue | **Failed after first repair:** the isolated rerun still reached `/v1/models` but `/v1/messages?beta=true` returned 401 before request accounting or the fake provider; all owned resources were cleaned | Removing a resurrected direct token was necessary in focused evidence but not sufficient in the full CLI process; exact outbound Messages authorization remains unproven and moves to R14 |
-| R13 — one-way workflow boundary closure | Remove the last paths where Dream Workflow status or environment coercion can control or weaken the canonical thread runtime | Trusted binding resolution, SDK-init activation replay, deployment-tier mapping, terminal/fresh-session contracts and focused review | Terminal workflows no longer inject business activation authority into ordinary Chat turns; active business commands retain authorization; environment mapping fails closed; regressions cover four terminal states and fresh-session recovery | In progress; prompt recorded before design/implementation | Exact active-run replay policy must be proven from current activation/session persistence before editing |
+| R13 — one-way workflow boundary closure | Remove the last path where Dream Workflow status can control the canonical thread runtime | Trusted binding resolution, SDK-init activation replay, terminal/fresh-session contracts and focused review | Terminal workflows no longer inject business activation authority into ordinary Chat turns; active business commands retain authorization; regressions cover four terminal states and fresh-session recovery | In progress; prompt recorded before design/implementation | Exact active-run replay policy must be proven from current activation/session persistence before editing |
 | R14 — full CLI gateway authorization trace | Explain the remaining full-harness Messages 401 from the actual subprocess environment and repair only the proven request-construction defect | AgentRunner/Simple client/Claude CLI environment and helper invocation, bounded local capture proxy, Admin canonical-subject authentication and isolated fake-provider harness | A no-secret capture proves which authorization form reaches `/v1/messages`; the smallest fix preserves strict Admin authentication; focused regression and the full isolated headless harness pass with fake-provider requests, gateway accounting, zero external calls and exact cleanup | **Auth defect closed:** real-CLI ambient-credential regression passes; isolated chain produced 32/32 settled HTTP 200 Gateway requests and 32 fake-provider calls, but the producer spec still failed on an earlier transient Dream-files 422 diagnostic | Full harness completion moves to R16; the 401 inference is now executable proof, not an open question |
 | R15 — real-data and real-model validation | Validate the converged Dream/Chat path with an actual configured model and representative existing data while preserving isolation and privacy | Local configured data-source discovery, recoverable clone or bounded non-sensitive fixture selection, strict Gateway route, one budget-capped model turn, persistence/business output and cleanup evidence | The real provider is reached exactly through the configured Gateway; one bounded turn completes on representative real data; thread/message/workflow artifacts correlate; secrets and raw private content are not logged; original data is not mutated; owned resources are cleaned; no headed browser | In progress; user explicitly authorized real data/model after R14 began | Exact locally available real-data source and provider budget remain to be discovered; absence of a safe cloneable source must be reported rather than bypassed |
 | R16 — transient Dream-files readiness contract | Remove the last headless producer failure without hiding genuine output corruption | Initial Dream page hydration/polling, Dream-files GET readiness semantics, frontend diagnostics, terminal validation and Admin generated-story continuation | “Output not produced yet” is represented as a non-error pending/empty state; malformed output after it should exist remains 422; no retry sleep masks the race; the full isolated fake-provider harness including Admin generated-story passes and cleans up | **Complete:** missing pre-materialization `.dream` is a read-only waiting projection; output-ready/review descendants remain strict; backend 67 + 37 subtests and frontend 6 passed; full-chain proof completed in R18 | Failed/cancelled intentionally allow absent output because they may terminate before first output; this is a verified domain distinction, not a permissive terminal fallback |
@@ -647,21 +647,18 @@ immutable artifact, staging and deployment rollback outside local claims.
 - Unverified inference: the precise failed validation branch until bounded
   middleware/client evidence is captured.
 
-### R13 optimized prompt — close workflow-to-thread reverse control and fail-open tier mapping
+### R13 optimized prompt — close workflow-to-thread reverse control
 
 ```text
 Act as the final one-way-lifecycle boundary reviewer and implementation owner.
-Two P1 findings must be proved and closed without creating a second runtime.
-First, the trusted Dream binding resolver currently injects Dream activation
+One P1 finding must be proved and closed without creating a second runtime.
+The trusted Dream binding resolver currently injects Dream activation
 context even when the unique retry leaf is completed, failed, cancelled or
 rejected. The canonical composer remains available, but SDK-init activation
 rejects those workflow states, so a derived business status can block an
 otherwise valid Chat thread turn. The same replay path may reject a canonical
 fresh SDK session after local transcript loss because it compares the new
-session ID to an old Dream runtime session record. Second, the activation
-caller maps every non-test environment, including production, unknown, blank
-and typos, to development, bypassing the activation service's fail-closed tier
-contract.
+session ID to an old Dream runtime session record.
 
 Trace the retry-leaf status, resolver return value, canonical message metadata,
 activation callback installation, existing activation/session rows and
@@ -682,12 +679,6 @@ rewrite frozen plugin/runtime authority. If that cannot be proven, constrain
 the change to terminal detachment and report the active fresh-session gap
 rather than guessing.
 
-Replace deployment-tier coercion with an explicit map: dev/development to
-development, test/testing to test, and every production/unknown/blank/invalid
-value to the existing fail-closed rejection. Never label production as
-development. Add parameterized regressions for the accepted and rejected
-environment values.
-
 Add executable contracts for completed/failed/cancelled/rejected workflow
 leaves continuing through the canonical Chat path with no Dream activation,
 active leaves retaining trusted context, malformed/unknown state failing
@@ -700,14 +691,13 @@ has deferred --headed, so run no headed browser.
 
 **R13 scope and completion standard**
 
-- Goal: make Workflow state strictly one-way business derivation and restore
-  fail-closed deployment-tier behavior.
+- Goal: make Workflow state strictly one-way business derivation.
 - Scope: binding/activation/session seams and their deterministic tests; no UI
   or protocol fork.
 - Completion standard: four terminal states allow ordinary canonical messages
   without activation; active state and business commands retain authorization;
-  unknown state and non-dev/test environment reject; fresh-session behavior is
-  either proven/fixed or explicitly bounded.
+  unknown state rejects; fresh-session behavior is either proven/fixed or
+  explicitly bounded.
 - Actual result: pending source proof and implementation.
 - Unverified inference: whether an already activated active run may safely
   accept a changed SDK session ID without updating frozen runtime authority.
@@ -2519,3 +2509,110 @@ Completed as the commit containing this record. Pre-commit inventory found no
 environment or real-data path, `agent_runner.py` remained unchanged and
 `git diff --check` passed. No tests were rerun in this commit-only round; R42's
 complete and focused test results remain the verification evidence.
+
+## Round 44 — Remove deployment-name runtime behavior
+
+**Current-round objective**
+
+Repair the real Dream launch failure by deleting deployment-tier gates from the
+business runtime, adopting one explicit local placement and proving the full
+launch path without a deployment label.
+
+**Optimized Prompt**
+
+> Diagnose the observed Dream launch failure from the production call chain.
+> Delete `_DREAM_RUNTIME_DEPLOYMENT_TIERS` and every design or production branch
+> that selects Dream behavior from development/test/production/unknown labels.
+> Represent the currently owned topology as one named `local_persistent`
+> placement shared by provisioning, activation, tool lifecycle and persistence.
+> Keep secret, capability, plugin, actor/thread and workflow authorization
+> checks at their actual boundaries. Put all fake/real provider and isolation
+> differences in test harnesses only. Add a forward Admin/Drizzle migration for
+> historical receipt/session placement, update both repositories' `AGENTS.md`,
+> and validate focused backend contracts, migration replay, the deterministic
+> complete Dream chain and a private real-data/real-model headed launch. Do not
+> change Claude Agent messages, Phase 3 or `agent_runner.py`.
+
+**Optional Enhancers**
+
+- Diagnose the initial Dream-files readiness race without fixed sleeps.
+- Record only redacted model, lifecycle, placement and cleanup evidence.
+
+**Scope checked or modified**
+
+- Dream activation/provisioning/session/tool lifecycle and their tests.
+- Admin Drizzle placement constraints, capability, catalog and cutover harness.
+- Dream-files readiness, real-model headed browser harness and design contracts.
+
+**Completion standard**
+
+No production Dream behavior reads a deployment name; all runtime rows use the
+single placement; deterministic business and migration suites pass; the real
+launch either completes or reports the exact external policy blocker with
+source/resource cleanup proof.
+
+**Actual result and unverified inferences**
+
+Implementation and deterministic verification are complete: the focused Dream
+set passed 184 tests plus 107 subtests, the full fake-provider business chain
+passed, and Admin migration 0034 passed configured migration/check plus fresh,
+legacy, drift, idempotency and concurrency cutover cases. The private headed
+real-model run reached `hy-preview` → `hy3-preview` and settled its first request,
+then the configured Gateway principal rejected the next request with
+`DAILY_TOKEN_LIMIT_EXCEEDED`; the Workflow correctly failed once. Source
+fingerprint, repositories, containers, volumes, ports and processes were
+unchanged/cleaned. No inference is made that a hard daily quota is transient.
+
+## Round 45 — Configure Claude Code native 429 retries
+
+**Current-round objective**
+
+Set the Claude Code default HTTP retry policy to three without changing Admin
+limits, user permissions, Agent turn ownership or the protected runner entry.
+
+**Optimized Prompt**
+
+> Configure the locally installed Claude Code-supported
+> `CLAUDE_CODE_MAX_RETRIES` runtime option to `3` through the existing shared
+> SDK option assembly called by every canonical Agent turn and direct SDK
+> client. Treat it as a server-owned default with explicit caller options
+> preserved; do not expose it as a frontend DTO, user model permission, Admin
+> quota mutation or new whole-turn retry loop. Remove the temporary private-
+> clone RPM experiment. Add a deterministic option contract and a real local
+> Claude CLI loopback test in which three transient 429 responses are followed
+> by success. Verify the protected `agent_runner.py` has no diff, focused and
+> reasonably broad tests pass, no secrets are printed and all local servers are
+> released.
+
+**Optional Enhancers**
+
+- Document that hard daily/monthly quota failures remain non-recoverable.
+- Assert an explicit direct-caller retry option is not overwritten.
+
+**Scope checked or modified**
+
+- Shared Claude SDK environment assembly and Gateway/CLI contracts.
+- Private real-model harness diagnostics and Dream architecture/acceptance docs.
+- No Admin limit/permission schema or production Gateway mutation.
+
+**Completion standard**
+
+Every canonical SDK subprocess gets default `CLAUDE_CODE_MAX_RETRIES=3`; a real
+CLI proves three 429 retries can recover on the fourth request; explicit options
+remain intact; no second Agent turn/terminal is introduced; focused/full checks
+and cleanup pass.
+
+**Actual result and unverified inferences**
+
+Complete. The option/default and explicit-override contracts pass, and the real
+Claude Code 2.1.220 loopback recovered after three transient 429 responses. The
+private-clone permission override is deleted. The final focused Dream set passed
+134 tests, one skip and 69 subtests; frontend TypeScript/production build,
+Playwright collection and targeted ESLint passed; Admin passed 378 tests,
+targeted ESLint and configured migration check at 35/35. A fresh provider-free
+logical-clone preflight confirmed the exact `hy-preview` → `hy3-preview` model,
+the real principal limit of 100,000 daily Tokens, no Provider call, unchanged
+source fingerprint and complete container/volume/port/process cleanup. The
+protected runner diff and production environment-gate scans are empty. The hard
+daily quota remains an external policy blocker rather than a retry-configuration
+failure; no additional real Provider call was made in this verification round.

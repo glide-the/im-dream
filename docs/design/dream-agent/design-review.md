@@ -574,6 +574,7 @@ subagent 展示位置和 generic story projection。业务方裁决其中任一�
 | R39-06 | Dreamflow 缺完整 tool/action/Agent ownership 与时序 | 新增 `dreamflow-tool-boundaries.md` 与 Story Workspace workflow-actions 模块 |
 | R39-07 | Dream context 作为 `ClaudeAgentRunRequest` 字段跨 router/dispatcher 传递，改变了 Chat 报文语义 | 目标改为 actor + thread 在 assembly 内服务端映射，Chat request/SSE 无 Dream 字段 |
 | R39-08 | 不存在的 post-confirmation Workflow 状态被写入设计、代码和 DDL | 设计状态机改为 Workflow 保持 `confirmed`，Thread 独立显示运行；要求 Admin 前向数据/约束迁移 |
+| R39-09 | 历史 Deck 测试合同把 deployment 环境名称误当作 Dream runtime capability | 设计只保留服务器所有的 `local_persistent` placement；删除部署标签激活分支和 tool lifecycle 短路，Admin 以前向迁移规范化 receipt/session |
 
 ### 对抗性设计检查
 
@@ -593,6 +594,9 @@ subagent 展示位置和 generic story projection。业务方裁决其中任一�
    Workflow terminal 仍由 domain fact，检查通过。
 8. **最小范围**：复用现有 resolver、context builder、registry、event classifier、
    Chat runtime 和 owning services，不引入新 broker/store/provider，检查通过。
+9. **单一运行路径**：Dream activation、工具写后 lifecycle、receipt/session 与
+   materialization 不读取 deployment 环境标签；测试 harness 仅注入依赖、capability、
+   secret、provider 和隔离存储，检查通过。
 
 ### 接受条件
 
@@ -604,6 +608,8 @@ subagent 展示位置和 generic story projection。业务方裁决其中任一�
 - Router 无 `_CLIENT_THREAD_FIELDS`、`_CLIENT_MESSAGE_FIELDS`、
   `_PUBLIC_TOOL_CHOICES`；
 - live Dream/Frontend/Admin schema 无被删除的 Workflow 状态；
+- production source 与当前设计无 deployment-label Dream 行为分支；
+  receipt/session 只接受 `local`；
 - protected runner diff 为空；聚焦测试、类型/构建和 diff check 通过。
 
 ## 十三、R41 实现接受复审（2026-08-12）
@@ -622,6 +628,10 @@ subagent 展示位置和 generic story projection。业务方裁决其中任一�
 | Dream UI | `StoryWorkspaceDreamThreadChat` 组合唯一 `ChatPanel`，无 Dream EventSource/parser/reducer | 通过 |
 | Workflow | 不存在的 post-confirmation 阶段已从 live code/docs/DDL 移除；Admin 0033 前向归一历史数据 | 通过 |
 | 权限/数据 | Workflow/Artifact 写仍校验 actor、thread ownership、run/binding/revision/idempotency；配置库 capability 满足 | 通过 |
+
+R42 的 application-service 简化与唯一 `run_streaming()` 入口不改变上述边界：
+`local_persistent` placement 由 provisioning/activation 的标准类共享，部署环境不参与
+Dream 业务判断；测试差异全部留在 harness，不进入 application service。
 
 结果由全量后端、前端契约、Admin 单测/构建、真实 PostgreSQL
 迁移检查、一次 `hy3-preview` 真实模型链路以及 headless/headed

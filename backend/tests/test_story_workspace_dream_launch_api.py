@@ -402,10 +402,13 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.environment = patch.dict(
             os.environ,
             {
-                "INK_ENVIRONMENT": "test",
                 "INK_WORKFLOW_TOKEN_SECRET": (
                     "ink-dream-development-workflow-token-secret-v1"
                 ),
+                "INK_DECK_HOST_COMPATIBLE": "1",
+                "INK_CLAUDE_AGENT_CONTRACT_COMPATIBLE": "1",
+                "INK_STORY_SCHEMA_COMPATIBLE": "1",
+                "INK_DECK_RUNTIME_CONFIG_COMPATIBLE": "1",
             },
             clear=False,
         )
@@ -839,7 +842,7 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
             entry = runtime_lock.claude_code_plugins[0]
             artifact_set_hash = compute_artifact_set_hash(runtime_lock)
             expected_key = "sha256:" + hashlib.sha256(
-                f"test\0dream-launch\0{entry.claude_code_plugin_id}\0"
+                f"ink-local\0dream-launch\0{entry.claude_code_plugin_id}\0"
                 f"{entry.resolved_version}\0{entry.artifact_digest}\0"
                 f"{artifact_set_hash}".encode("utf-8")
             ).hexdigest()

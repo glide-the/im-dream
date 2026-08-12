@@ -220,24 +220,6 @@ _TRUSTED_STORY_WORKSPACE_ENV_KEYS = frozenset({
     "INK_AGENT_WORKFLOW_RUN_ID",
     "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
 })
-_DREAM_RUNTIME_DEPLOYMENT_TIERS = {
-    "dev": "development",
-    "development": "development",
-    "test": "test",
-    "testing": "test",
-}
-
-
-def _dream_runtime_deployment_tier(environment: str) -> str:
-    """Map only explicitly supported local environments to receipt tiers."""
-
-    normalized = str(environment).strip().lower()
-    try:
-        return _DREAM_RUNTIME_DEPLOYMENT_TIERS[normalized]
-    except KeyError as exc:
-        raise ValueError("Dream runtime deployment tier is not configured") from exc
-
-
 def _pack_thread_workspace_plugins(
     cwd: str,
     deck_id: Optional[str],
@@ -307,14 +289,6 @@ async def _activate_story_workspace_dream_runtime(
             db.rollback()
         if row is None or row["source_voice_thread_id"] != context.thread_id:
             raise PermissionError("Dream runtime actor/run/thread scope mismatch")
-        environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
-        try:
-            deployment_tier = _dream_runtime_deployment_tier(environment)
-        except ValueError as exc:
-            raise StoryWorkspaceDreamRuntimeActivationError(
-                DREAM_RUNTIME_NOT_READY,
-                "Dream runtime is disabled outside explicit development/test tiers",
-            ) from exc
         try:
             # A queued Run may outlive an older materialization identity
             # algorithm. Rebuild only the server-frozen lock's evidence from
@@ -334,8 +308,6 @@ async def _activate_story_workspace_dream_runtime(
             await StoryWorkspaceDreamRuntimeActivationService(
                 db,
                 token_secret=story_workspace_workflow_token_secret(),
-                environment_id=environment,
-                deployment_tier=deployment_tier,
             ).activate_from_assembled_context(
                 workflow_run_id=context.workflow_run_id,
                 actor_context=AuthenticatedActorContext(

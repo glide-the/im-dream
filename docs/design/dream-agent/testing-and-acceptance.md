@@ -808,6 +808,18 @@ For every P0/P1 row, append or link a record with this schema:
 - [x] Protected runner diff is empty and runner/service focused regressions pass.
 - [x] R42 sole public `run_streaming` entry, same-turn completion, explicit
       application services and closure-free Dream launch structure pass.
+- [x] Dream launch without a deployment label executes the same production
+      path; production-source scan contains no deployment-name business gate;
+      Admin 0034 normalizes receipt/session placement to `local` and publishes
+      `dream.runtime.local-placement.v1`.
+- [x] Shared SDK option assembly pins Claude Code native request retries to
+      three; a real local Claude CLI contract survives three transient 429
+      responses on the same request boundary without adding an Agent turn loop.
+- [ ] The latest full headed real-model launch is blocked after its first
+      settled `hy3-preview` request by the configured principal's hard
+      `DAILY_TOKEN_LIMIT_EXCEEDED` Gateway policy. Source data and owned
+      resources remain unchanged; no permission/limit override is accepted as
+      a substitute for this external quota prerequisite.
 - [x] Proxy/reconnect functional gates pass.
 - [ ] Production performance/load baseline and threshold gates remain unrun.
 - [x] Redis isolated adapter and Gateway loopback suites pass; this does not claim

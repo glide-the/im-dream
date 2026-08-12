@@ -10,7 +10,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import Any
 import uuid
@@ -39,6 +38,7 @@ try:
         Scope,
     )
     from services.errors.error_registry import ApiRouteError
+    from services.runtime_plugin.local_placement import LocalRuntimePlacement
 except ModuleNotFoundError:  # Support backend directory on PYTHONPATH.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
     from backend.models.runtime_plugin import compute_artifact_set_hash
@@ -58,13 +58,7 @@ except ModuleNotFoundError:  # Support backend directory on PYTHONPATH.
         Scope,
     )
     from backend.services.errors.error_registry import ApiRouteError
-
-
-_DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "test", "testing"}
-
-
-def _environment() -> str:
-    return os.getenv("INK_ENVIRONMENT", "unknown").strip().lower() or "unknown"
+    from backend.services.runtime_plugin.local_placement import LocalRuntimePlacement
 
 
 def _json_list(value: Any) -> list[str]:
@@ -232,20 +226,7 @@ class DeckPluginAdminService:
         _version: str,
         runtime_lock: DeckRuntimePluginLock,
     ) -> RuntimePreparation:
-        environment = _environment()
-        if environment not in _DEVELOPMENT_ENVIRONMENTS:
-            return RuntimePreparation(
-                runtime_readiness="production_gate_required",
-                lock_materialized=False,
-                load_smoke_passed=False,
-                error_code="RUNTIME_PLUGIN_NOT_READY",
-                error_summary="runtime plugin materialization is not approved for this environment",
-            )
-        if runtime_lock.production_ready:
-            # Production-ready locks are still allowed in development, but this
-            # adapter never upgrades an environment's rollout approval.
-            pass
-
+        placement = LocalRuntimePlacement()
         now = datetime.now(UTC).isoformat()
         artifact_set_hash = compute_artifact_set_hash(runtime_lock)
         for entry in runtime_lock.claude_code_plugins:
@@ -278,7 +259,8 @@ class DeckPluginAdminService:
                 )
 
             materialization_key = "sha256:" + hashlib.sha256(
-                f"{environment}\0local\0{entry.claude_code_plugin_id}\0"
+                f"{placement.runtime_environment_id}\0local\0"
+                f"{entry.claude_code_plugin_id}\0"
                 f"{entry.resolved_version}\0{entry.artifact_digest}\0"
                 f"{artifact_set_hash}".encode("utf-8")
             ).hexdigest()
@@ -301,12 +283,12 @@ class DeckPluginAdminService:
                         created_at, updated_at
                     ) VALUES (%s, %s, %s, 'local', %s, %s, %s, %s, %s, 'deck-admin/v1',
                               'declared', 'materialized', 'loadable', %s, %s, 1,
-                              'verified', 'development_cache', %s, %s, %s)
+                              'verified', 'local_cache', %s, %s, %s)
                     """,
                     (
                         f"rpm_{uuid.uuid4().hex}",
-                        environment,
-                        environment,
+                        placement.runtime_environment_id,
+                        placement.runtime_pool_id,
                         entry.claude_code_plugin_id,
                         entry.resolved_version,
                         entry.artifact_digest,

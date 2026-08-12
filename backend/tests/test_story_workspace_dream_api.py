@@ -629,7 +629,6 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         if thread is not None:
             selected_thread = thread
         with (
-            patch.dict(os.environ, {"INK_ENVIRONMENT": "test"}),
             patch.object(gateway_module.database, "get_db", return_value=db),
             patch.object(gateway_module, "WorkflowRunService") as service_class,
             patch.object(
@@ -1028,12 +1027,31 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             ("OUTPUT_CONTRACT_INVALID", 422),
         )
 
-    async def test_missing_workspace_is_not_created(self) -> None:
+    async def test_missing_workspace_is_read_only_waiting_projection(self) -> None:
         shutil.rmtree(self.workspace)
         with self.wired():
+            result = await self.call()
+        self.assertEqual(result.run_revision, 0)
+        self.assertEqual(result.stages, {})
+        self.assertFalse(result.can_confirm)
+        self.assertFalse(self.workspace.exists())
+
+    async def test_output_required_run_with_missing_workspace_fails_closed(self) -> None:
+        shutil.rmtree(self.workspace)
+        completed = authoritative_run(
+            status=RunStatus.COMPLETED,
+            status_version=7,
+            runtime_load_receipt_id="receipt-1",
+            agent_session_id="as_" + "1" * 32,
+            completed_at=datetime(2026, 8, 4, 1, tzinfo=timezone.utc),
+        )
+        with self.wired(run=completed):
             with self.assertRaises(ApiRouteError) as raised:
                 await self.call()
-        self.assertEqual(raised.exception.status_code, 404)
+        self.assertEqual(
+            (raised.exception.code, raised.exception.status_code),
+            ("AGENT_EXECUTION_FAILED", 404),
+        )
         self.assertFalse(self.workspace.exists())
 
     async def test_missing_static_dream_directory_is_waiting_before_output_required(

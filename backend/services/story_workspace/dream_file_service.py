@@ -1386,6 +1386,19 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
 class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
     """Read-only snapshot loader; missing stages are a legal waiting state."""
 
+    @classmethod
+    def waiting_response(
+        cls,
+        workflow_run: WorkflowRun,
+        *,
+        thread_id: str,
+    ) -> StoryWorkspaceDreamFilesResponse:
+        """Project an authorized pre-output run without touching the filesystem."""
+
+        _validate_authoritative_thread(workflow_run, thread_id)
+        run_id, source = _authoritative_context(workflow_run)
+        return cls._waiting_response(run_id, thread_id, source)
+
     def read_run(
         self,
         workflow_run: WorkflowRun,
@@ -1470,7 +1483,7 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
         run_id, source = _authoritative_context(workflow_run)
         with self._locked_run(run_id, create=False, exclusive=False) as run:
             if run is None:
-                return self._waiting_response(run_id, thread_id, source)
+                return self.waiting_response(workflow_run, thread_id=thread_id)
             run_file = self._read_model(
                 run.run_descriptor,
                 "run.json",
@@ -1479,7 +1492,7 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
             )
             self._verify_run(run)
             if run_file is None:
-                return self._waiting_response(run_id, thread_id, source)
+                return self.waiting_response(workflow_run, thread_id=thread_id)
             StoryWorkspaceDreamFileWriter._validate_run_authority(
                 run_file,
                 run_id=run_id,

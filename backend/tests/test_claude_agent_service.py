@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -56,11 +56,6 @@ from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from claude_agent.stream_events import NormalizedAgentEvent
 from libs.claude_agent_kit.types import AgentRunResult, ToolEventPayload
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
-from services.story_workspace.dream_runtime_activation_service import (
-    StoryWorkspaceDreamRuntimeActivationError,
-)
-
-
 class _FakeContextBuilder:
     def __init__(self) -> None:
         self.system_prompt_calls: list[tuple[str, str | None]] = []
@@ -272,21 +267,16 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(hasattr(service, "_make_dream_runtime_init_cb"))
 
-    def test_dream_runtime_deployment_tier_is_explicit_and_fail_closed(self):
-        for environment, expected in (
-            ("dev", "development"),
-            ("development", "development"),
-            ("test", "test"),
-            ("testing", "test"),
-        ):
-            with self.subTest(environment=environment):
-                self.assertEqual(
-                    service_module._dream_runtime_deployment_tier(environment),
-                    expected,
-                )
-        for environment in ("production", "unknown", "", "developmnt"):
-            with self.subTest(environment=environment), self.assertRaises(ValueError):
-                service_module._dream_runtime_deployment_tier(environment)
+    def test_dream_runtime_has_no_deployment_environment_gate(self):
+        from services.story_workspace.dream_runtime_activation_service import (
+            StoryWorkspaceDreamRuntimeActivationService,
+        )
+
+        parameters = inspect.signature(
+            StoryWorkspaceDreamRuntimeActivationService
+        ).parameters
+        self.assertNotIn("environment_id", parameters)
+        self.assertNotIn("deployment_tier", parameters)
 
     async def test_dream_sdk_init_reprovisions_frozen_runtime_evidence_before_activation(self):
         context = self._dream_context()
@@ -327,81 +317,21 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 return_value=b"runtime-test-secret",
             ),
         ):
-            with unittest.mock.patch.dict(
-                os.environ,
-                {"INK_ENVIRONMENT": "test"},
-            ):
-                await service_module._activate_story_workspace_dream_runtime(
-                    context=context,
-                    actor_id="7",
-                    cwd="/server-owned/thread-workspace",
-                    remote_session_ref=init["session_id"],
-                )
+            await service_module._activate_story_workspace_dream_runtime(
+                context=context,
+                actor_id="7",
+                cwd="/server-owned/thread-workspace",
+                remote_session_ref=init["session_id"],
+            )
 
         provisioner_factory.assert_called_once_with(db)
         provisioner.ensure_frozen_runtime_evidence.assert_called_once_with(
             context.runtime_plugin_lock_id
         )
         activation.activate_from_assembled_context.assert_awaited_once()
-        self.assertEqual(
-            activation_factory.call_args.kwargs["deployment_tier"],
-            "test",
-        )
+        self.assertNotIn("deployment_tier", activation_factory.call_args.kwargs)
+        self.assertNotIn("environment_id", activation_factory.call_args.kwargs)
         db.close.assert_called_once_with()
-
-    async def test_dream_runtime_rejects_undeclared_tier_before_provisioning(self):
-        context = self._dream_context()
-        init = {
-            "session_id": "claude-session-runtime-rejected-tier",
-            "tools": ["mcp__story_workspace__write_dream_run"],
-        }
-
-        for environment in ("production", "unknown", "", "developmnt"):
-            db = unittest.mock.Mock()
-            db.in_transaction = True
-            db.execute.return_value.fetchone.return_value = {
-                "workspace_id": "workspace-dream",
-                "source_voice_thread_id": context.thread_id,
-            }
-            provisioner_factory = unittest.mock.Mock()
-            activation_factory = unittest.mock.Mock()
-            with (
-                self.subTest(environment=environment),
-                unittest.mock.patch.dict(
-                    os.environ,
-                    {"INK_ENVIRONMENT": environment},
-                ),
-                unittest.mock.patch.object(
-                    service_module._db,
-                    "get_db",
-                    return_value=db,
-                ),
-                unittest.mock.patch(
-                    "libs.claude_agent_kit.server.plugin_launcher.read_workspace_launch_manifest",
-                    return_value=[],
-                ),
-                unittest.mock.patch(
-                    "services.story_workspace.dream_launch_infrastructure.DreamRuntimeProvisioningService",
-                    provisioner_factory,
-                ),
-                unittest.mock.patch(
-                    "services.story_workspace.dream_runtime_activation_service.StoryWorkspaceDreamRuntimeActivationService",
-                    activation_factory,
-                ),
-            ):
-                with self.assertRaises(
-                    StoryWorkspaceDreamRuntimeActivationError
-                ) as captured:
-                    await service_module._activate_story_workspace_dream_runtime(
-                        context=context,
-                        actor_id="7",
-                        cwd="/server-owned/thread-workspace",
-                        remote_session_ref=init["session_id"],
-                    )
-            self.assertEqual(captured.exception.code, "DREAM_RUNTIME_NOT_READY")
-            provisioner_factory.assert_not_called()
-            activation_factory.assert_not_called()
-            db.close.assert_called_once_with()
 
     async def test_only_server_owned_episode_action_reaches_private_context_builder(self):
         builder = _FakeContextBuilder()
@@ -803,7 +733,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_system_config_is_loaded_before_resume_db_lookup(self):
         builder = _FakeContextBuilder()
-        service = ClaudeAgentService(context_builder=builder)
+        service = ClaudeAgentService(
+            context_builder=builder,
+            dream_context_mapper=_StaticDreamContextMapper(None),
+        )
         state = AgentRunState(session_id="thread_service_config")
         request = ClaudeAgentRunRequest(
             user_id="7",
@@ -1043,7 +976,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
     async def test_workspace_attach_materializes_notion_snapshot_into_workspace_files(self):
         builder = _FakeContextBuilder()
-        service = ClaudeAgentService(context_builder=builder)
+        service = ClaudeAgentService(
+            context_builder=builder,
+            dream_context_mapper=_StaticDreamContextMapper(None),
+        )
         state = AgentRunState(session_id="thread_notion_attach")
         request = ClaudeAgentRunRequest(
             user_id="7",

@@ -171,7 +171,7 @@ class RuntimePluginFixture:
             runtime_node_id="node-dev-1",
             artifact_set_hash=compute_artifact_set_hash(self.lock),
             policy_revision="policy-7",
-            deployment_tier="test",
+            deployment_tier="local",
         )
         self.settings_writer = FakeSettingsWriter()
         self.source_policy = AllowlistRuntimeSourcePolicy(

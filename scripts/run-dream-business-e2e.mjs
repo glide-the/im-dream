@@ -196,12 +196,12 @@ async function verifyDreamLaunchPrerequisites(env) {
   const source = [
     'import asyncio, database, json',
     'from services.admin_gateway import resolve_platform_model_alias',
-    'from services.story_workspace.dream_launch_gateway import StoryWorkspaceDreamLaunchProvisioner',
+    'from services.story_workspace.dream_launch_infrastructure import DreamRuntimeProvisioningService',
     'async def main():',
     ' model=resolve_platform_model_alias(101)',
     ' db=database.get_db()',
     ' try:',
-    '  binding=await StoryWorkspaceDreamLaunchProvisioner(db).ensure_binding(deck_id="deck-dream-producer-e2e",actor_id="101",workspace_id="workspace-dream-producer-e2e")',
+    '  binding=await DreamRuntimeProvisioningService(db).ensure_binding(deck_id="deck-dream-producer-e2e",actor_id="101",workspace_id="workspace-dream-producer-e2e")',
     '  print(json.dumps({"catalog":"callable","modelAlias":model,"deckBinding":"ready","bindingRevision":binding.binding_revision},separators=(",",":")))',
     ' finally:',
     '  db.close()',
@@ -458,8 +458,11 @@ try {
     INK_GATEWAY_SERVICE_CLIENT_ID: gatewayClientId,
     INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS: '240',
     INK_GATEWAY_TEXT_MODEL_ALIAS: fixture.modelAliases[0],
-    INK_ENVIRONMENT: 'test',
     INK_WORKFLOW_TOKEN_SECRET: `workflow_${randomBytes(48).toString('base64url')}`,
+    INK_DECK_HOST_COMPATIBLE: '1',
+    INK_CLAUDE_AGENT_CONTRACT_COMPATIBLE: '1',
+    INK_STORY_SCHEMA_COMPATIBLE: '1',
+    INK_DECK_RUNTIME_CONFIG_COMPATIBLE: '1',
   };
   console.log(await verifyDreamLaunchPrerequisites(dreamEnv));
   const dreamApi = startOwned(resolve(backendRoot, '.venv/bin/uvicorn'), ['server:app', '--host', '127.0.0.1', '--port', String(dreamApiPort)], { cwd: backendRoot, env: dreamEnv });

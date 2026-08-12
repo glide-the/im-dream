@@ -61,9 +61,24 @@ one Thread turn with Dream business authority:
 5. Build the user context and trusted Dream tool environment from that internal
    object.
 6. Activate required Dream business runtime receipts before Session Execution,
-   using named service methods and verified workspace/plugin facts.
+   using named service methods, verified workspace/plugin facts and the
+   server-owned `local_persistent` placement. Deployment labels never select
+   runtime behavior.
 7. Return `_TurnExecution.dream_context` for internal consumers and Observer
    registration. Never mutate the incoming request with Dream data.
+
+`local_persistent` is a topology contract, not shorthand for a development or
+test environment. Plugin materialization, receipt/session creation and
+Workflow activation execute the same production path in every deployment.
+Missing secrets, schema capabilities, plugin evidence or actor authority fail
+at their owning boundary; no broad environment gate substitutes for them.
+
+Claude Code transport retries are configured once in the shared SDK option
+assembly: `CLAUDE_CODE_MAX_RETRIES=3`. This retries a transient HTTP request
+inside the same canonical turn; it does not create a new Workflow Run, replay a
+user message, emit another terminal event or bypass Gateway quota decisions.
+Non-transient quota errors such as a daily Token limit remain terminal for that
+turn after Claude Code exhausts its transport policy.
 
 ```mermaid
 sequenceDiagram

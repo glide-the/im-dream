@@ -204,7 +204,7 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
             runtime_node_id="node-test",
             artifact_set_hash=artifact_set_hash,
             policy_revision="policy-test-v1",
-            deployment_tier="test",
+            deployment_tier="local",
             scope="session",
             readiness_state="session_loaded",
             required_entries_ready=True,
@@ -540,7 +540,6 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
 
         management = ManagementSmokeContext(
             management_session_id="mgmt_idle-test",
-            deployment_tier="test",
             plugins=[plugin],
         )
         smoke_guard = RemoteInteractionGuard(
@@ -560,20 +559,6 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(allowed.writes_readiness)
         self.assertFalse(allowed.creates_receipt)
         self.assertFalse(allowed.production_authorized)
-
-        production = management.model_copy(update={"deployment_tier": "production"})
-        production_guard = RemoteInteractionGuard(
-            self.fixture.db,
-            management_context_reader=lambda _session_id: production,
-        )
-        denied_production = await production_guard.guard_reload(
-            workflow_run_id=None,
-            agent_session_id=production.management_session_id,
-            proposed_plugins=[plugin],
-            proposed_capabilities=[CAPABILITY],
-        )
-        self.assertFalse(denied_production.allowed)
-
 
 if __name__ == "__main__":
     unittest.main()

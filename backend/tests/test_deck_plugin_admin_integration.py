@@ -70,11 +70,20 @@ class DeckPluginAdminIntegrationTests(unittest.TestCase):
         }
         self.app.include_router(deck_plugins.router)
         self.app.include_router(story_workspace.router)
-        self._environment = patch.dict(os.environ, {"INK_ENVIRONMENT": "test"}, clear=False)
-        self._environment.start()
+        self._capabilities = patch.dict(
+            os.environ,
+            {
+                "INK_DECK_HOST_COMPATIBLE": "1",
+                "INK_CLAUDE_AGENT_CONTRACT_COMPATIBLE": "1",
+                "INK_STORY_SCHEMA_COMPATIBLE": "1",
+                "INK_DECK_RUNTIME_CONFIG_COMPATIBLE": "1",
+            },
+            clear=False,
+        )
+        self._capabilities.start()
 
     def tearDown(self) -> None:
-        self._environment.stop()
+        self._capabilities.stop()
         self._database_fixture.stop()
         self._tmp.cleanup()
 

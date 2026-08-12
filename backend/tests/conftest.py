@@ -20,6 +20,10 @@ from psycopg import IntegrityError as PostgresIntegrityError
 # Never let importing backend/server.py inherit the developer's runtime DSN.
 # Tests that need PostgreSQL must opt in through validated TEST_DATABASE_URL.
 os.environ["INK_LOAD_DATABASE_URL_FROM_ENV_FILE"] = "0"
+os.environ.setdefault(
+    "INK_WORKFLOW_TOKEN_SECRET",
+    "ink-dream-test-workflow-token-secret-v1",
+)
 
 
 _ORIGINAL_CONNECT = sqlite3.connect

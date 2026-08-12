@@ -30,6 +30,7 @@ try:
         WorkflowRun,
     )
     from backend.services.claude_agent.session_manager import SessionManager
+    from backend.services.runtime_plugin.local_placement import LocalRuntimePlacement
     from backend.services.runtime_plugin.reconcile_service import ReconcileService
     from backend.services.workflow.run_service import WorkflowRunService
 except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
@@ -44,6 +45,7 @@ except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
     )
     from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
     from services.claude_agent.session_manager import SessionManager
+    from services.runtime_plugin.local_placement import LocalRuntimePlacement
     from services.runtime_plugin.reconcile_service import ReconcileService
     from services.workflow.run_service import WorkflowRunService
 
@@ -124,26 +126,12 @@ class StoryWorkspaceDreamRuntimeActivationService:
         db: Any,
         *,
         token_secret: bytes | str,
-        environment_id: str,
-        deployment_tier: str,
-        runtime_node_id: str = "local",
+        runtime_placement: LocalRuntimePlacement | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        environment_id = environment_id.strip()
-        deployment_tier = deployment_tier.strip().lower()
-        runtime_node_id = runtime_node_id.strip()
-        if not environment_id or not runtime_node_id:
-            raise ValueError("runtime placement is required")
-        if deployment_tier not in {"development", "test"}:
-            raise StoryWorkspaceDreamRuntimeActivationError(
-                DREAM_RUNTIME_NOT_READY,
-                "Dream local runtime receipts are disabled outside development/test",
-            )
         self.db = db
         self._token_secret = token_secret
-        self._environment_id = environment_id
-        self._deployment_tier = deployment_tier
-        self._runtime_node_id = runtime_node_id
+        self._runtime_placement = runtime_placement or LocalRuntimePlacement()
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def activate_from_assembled_context(
@@ -185,18 +173,18 @@ class StoryWorkspaceDreamRuntimeActivationService:
         now = self._now()
         placement = RuntimePlacementContext(
             workflow_run_id=run.workflow_run_id,
-            runtime_environment_id=self._environment_id,
-            runtime_pool_id=self._environment_id,
-            distribution_mode="local_persistent",
-            runtime_node_id=self._runtime_node_id,
+            runtime_environment_id=self._runtime_placement.runtime_environment_id,
+            runtime_pool_id=self._runtime_placement.runtime_pool_id,
+            distribution_mode=self._runtime_placement.distribution_mode,
+            runtime_node_id=self._runtime_placement.runtime_node_id,
             artifact_set_hash=compute_artifact_set_hash(runtime_lock),
             policy_revision=policy_revision,
-            deployment_tier=self._deployment_tier,
+            deployment_tier=self._runtime_placement.deployment_tier,
         )
         observed = ReconcileResult(
             attempt_id="rpa_" + uuid.uuid4().hex,
             workflow_run_id=run.workflow_run_id,
-            runtime_node_id=self._runtime_node_id,
+            runtime_node_id=self._runtime_placement.runtime_node_id,
             policy_revision=policy_revision,
             settings_intent={
                 "evidence": "verified-workspace-manifest+assembled-thread-context",
@@ -307,9 +295,9 @@ class StoryWorkspaceDreamRuntimeActivationService:
             ORDER BY claude_code_plugin_id
             """,
             (
-                self._environment_id,
-                self._environment_id,
-                self._runtime_node_id,
+                self._runtime_placement.runtime_environment_id,
+                self._runtime_placement.runtime_pool_id,
+                self._runtime_placement.runtime_node_id,
                 compute_artifact_set_hash(runtime_lock),
                 _DREAM_MATERIALIZATION_POLICY_REVISION,
             ),

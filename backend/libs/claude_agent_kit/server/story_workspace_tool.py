@@ -704,14 +704,8 @@ async def _advance_workflow_lifecycle(
     output_ready: bool = False,
     episode_complete: bool = False,
 ) -> None:
-    """Advance formal Run state only in configured development/test runtimes."""
+    """Advance the authoritative Run lifecycle after a successful tool write."""
 
-    environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
-    if environment not in {"development", "dev", "test", "testing"}:
-        # Dependency-light unit fixtures do not provision formal run/session
-        # tables. Production is required to declare one of the supported
-        # runtime tiers and therefore never takes this compatibility branch.
-        return
     import database
     from services.story_workspace.workflow_security import (
         story_workspace_workflow_token_secret,

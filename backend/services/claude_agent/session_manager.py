@@ -505,7 +505,7 @@ class SessionManager:
             or receipt.artifact_set_hash != expected_artifact_set
             or receipt.scope != "session"
             or receipt.readiness_state != "session_loaded"
-            or receipt.deployment_tier not in {"development", "test"}
+            or receipt.deployment_tier != "local"
             or any(
                 receipt_row[key] != value
                 for key, value in persisted_fields.items()

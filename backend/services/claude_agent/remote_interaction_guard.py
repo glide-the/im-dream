@@ -37,7 +37,6 @@ class PluginRef(_StrictFrozenModel):
 
 class ManagementSmokeContext(_StrictFrozenModel):
     management_session_id: str = Field(pattern=r"^mgmt_[A-Za-z0-9._-]+$")
-    deployment_tier: str
     plugins: list[PluginRef]
 
 
@@ -71,7 +70,7 @@ class RemoteInteractionGuard:
         proposed_plugins: list[PluginRef],
         proposed_capabilities: list[str],
     ) -> GuardResult:
-        """Allow only a proven idle dev/test management smoke diagnostic."""
+        """Allow only a proven idle management smoke diagnostic."""
 
         if proposed_capabilities != sorted(set(proposed_capabilities)):
             return self._deny()
@@ -97,7 +96,6 @@ class RemoteInteractionGuard:
         if (
             context is None
             or context.management_session_id != agent_session_id
-            or context.deployment_tier not in {"development", "test"}
         ):
             return self._deny()
         current = {

@@ -1305,18 +1305,35 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
                 thread_id_value = str(thread["id"]) if thread else None
             if thread_id_value != thread_id:
                 raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
-            workspace = self._thread_workspace(thread_id)
-            reader = StoryWorkspaceDreamFileReader(workspace)
-            reader_workspace = Path(reader.workspace_root)
-            canonical_parent = workspace.parent
-            if (
-                reader_workspace != workspace
-                or reader_workspace.parent != canonical_parent
-                or reader_workspace.name != thread_id
-                or not reader_workspace.is_relative_to(canonical_parent)
-            ):
-                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-            projection = reader.read(workflow_run, thread_id=thread_id)
+            try:
+                workspace = self._thread_workspace(thread_id)
+            except ApiRouteError as exc:
+                if not (
+                    exc.code == "AGENT_EXECUTION_FAILED"
+                    and exc.status_code == 404
+                    and workflow_run.status not in _DREAM_OUTPUT_REQUIRED_STATUSES
+                ):
+                    raise
+                # Launch returns before its background turn assembles the
+                # canonical Thread workspace.  GET remains read-only and
+                # reports the existing wire-level waiting projection instead
+                # of turning normal scheduling latency into a 404.
+                projection = StoryWorkspaceDreamFileReader.waiting_response(
+                    workflow_run,
+                    thread_id=thread_id,
+                )
+            else:
+                reader = StoryWorkspaceDreamFileReader(workspace)
+                reader_workspace = Path(reader.workspace_root)
+                canonical_parent = workspace.parent
+                if (
+                    reader_workspace != workspace
+                    or reader_workspace.parent != canonical_parent
+                    or reader_workspace.name != thread_id
+                    or not reader_workspace.is_relative_to(canonical_parent)
+                ):
+                    raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+                projection = reader.read(workflow_run, thread_id=thread_id)
             self._require_dream_output_for_ready_status(
                 workflow_run,
                 projection,

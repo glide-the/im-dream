@@ -51,6 +51,9 @@
 #                    kept as a wrapper; constant renamed
 #                    _PLAN_MODE_CONFIG_HOME_DIRNAME → _CLAUDE_CONFIG_HOME_DIRNAME
 #                    with alias).
+# [Sync] 2026-08-12: set Claude Code's native transient-request retry default
+#                    to three through CLAUDE_CODE_MAX_RETRIES. This is a
+#                    server-owned CLI default, not an Agent turn retry loop.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -67,6 +70,8 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _PROJECT_ENV_FILE = _BACKEND_ROOT / ".env"
 _CLAUDE_SETTING_SOURCES_ARG = "setting-sources"
 _CLAUDE_PROJECT_SETTING_SOURCE = "project"
+_CLAUDE_CODE_MAX_RETRIES_ENV_NAME = "CLAUDE_CODE_MAX_RETRIES"
+CLAUDE_CODE_MAX_RETRIES_DEFAULT = "3"
 
 logger = logging.getLogger(__name__)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
@@ -275,6 +280,14 @@ def apply_project_sdk_runtime_options(
 ) -> Any:
     """Apply all project-level Claude SDK runtime defaults."""
     apply_project_dotenv_to_options(options, env_file)
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    existing_env.setdefault(
+        _CLAUDE_CODE_MAX_RETRIES_ENV_NAME,
+        CLAUDE_CODE_MAX_RETRIES_DEFAULT,
+    )
+    options.env = existing_env
     apply_project_setting_sources_to_options(options)
     return options
 

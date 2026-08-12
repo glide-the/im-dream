@@ -71,7 +71,12 @@ class DeckChatContextTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.environment = mock.patch.dict(
             os.environ,
-            {"INK_ENVIRONMENT": "test"},
+            {
+                "INK_DECK_HOST_COMPATIBLE": "1",
+                "INK_CLAUDE_AGENT_CONTRACT_COMPATIBLE": "1",
+                "INK_STORY_SCHEMA_COMPATIBLE": "1",
+                "INK_DECK_RUNTIME_CONFIG_COMPATIBLE": "1",
+            },
         )
         self.environment.start()
         self.fixture = BindingFixture()

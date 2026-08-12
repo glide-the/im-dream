@@ -331,6 +331,175 @@ def test_real_claude_cli_refreshes_helper_token_after_gateway_401():
     assert len(token_ids) >= 2
 
 
+def test_real_claude_cli_uses_three_native_retries_for_429(tmp_path):
+    """The server-owned default reaches Claude Code's HTTP retry transport."""
+
+    claude = shutil.which("claude")
+    if claude is None:
+        pytest.skip("real Claude CLI is not installed")
+
+    attempts: list[int] = []
+    paths: list[str] = []
+    retry_counts: list[str | None] = []
+    request_models: list[str | None] = []
+    request_message_counts: list[int] = []
+    request_bodies: list[bytes] = []
+    response_statuses: list[int] = []
+
+    class RetryGatewayHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, _format, *_args):
+            return
+
+        def do_POST(self):  # noqa: N802 - stdlib handler contract
+            size = int(self.headers.get("content-length", "0"))
+            body = self.rfile.read(size)
+            attempts.append(len(attempts) + 1)
+            paths.append(self.path)
+            retry_counts.append(self.headers.get("x-stainless-retry-count"))
+            request_payload = json.loads(body)
+            request_bodies.append(body)
+            request_models.append(request_payload.get("model"))
+            request_message_counts.append(len(request_payload.get("messages", [])))
+            if len(attempts) <= 3:
+                status = 429
+                payload = {
+                    "type": "error",
+                    "error": {
+                        "type": "rate_limit_error",
+                        "code": "REQUEST_RATE_LIMIT_EXCEEDED",
+                        "message": "transient test throttle",
+                    },
+                }
+            else:
+                status = 200
+                events = (
+                    (
+                        "message_start",
+                        {
+                            "type": "message_start",
+                            "message": {
+                                "id": "msg_claude_code_retry_test",
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [],
+                                "model": "claude-code-retry-test",
+                                "stop_reason": None,
+                                "stop_sequence": None,
+                                "usage": {"input_tokens": 1, "output_tokens": 0},
+                            },
+                        },
+                    ),
+                    (
+                        "content_block_start",
+                        {
+                            "type": "content_block_start",
+                            "index": 0,
+                            "content_block": {"type": "text", "text": ""},
+                        },
+                    ),
+                    (
+                        "content_block_delta",
+                        {
+                            "type": "content_block_delta",
+                            "index": 0,
+                            "delta": {"type": "text_delta", "text": "ok"},
+                        },
+                    ),
+                    (
+                        "content_block_stop",
+                        {"type": "content_block_stop", "index": 0},
+                    ),
+                    (
+                        "message_delta",
+                        {
+                            "type": "message_delta",
+                            "delta": {
+                                "stop_reason": "end_turn",
+                                "stop_sequence": None,
+                            },
+                            "usage": {"output_tokens": 1},
+                        },
+                    ),
+                    ("message_stop", {"type": "message_stop"}),
+                )
+                encoded = "".join(
+                    f"event: {event}\ndata: {json.dumps(data)}\n\n"
+                    for event, data in events
+                ).encode("utf-8")
+            if status == 429:
+                encoded = json.dumps(payload).encode("utf-8")
+            response_statuses.append(status)
+            self.send_response(status)
+            self.send_header(
+                "content-type",
+                "application/json" if status == 429 else "text/event-stream",
+            )
+            self.send_header("content-length", str(len(encoded)))
+            if status == 429:
+                self.send_header("retry-after", "0")
+            self.end_headers()
+            self.wfile.write(encoded)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RetryGatewayHandler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        options = Options(
+            env={
+                "ANTHROPIC_AUTH_TOKEN": "test-token",
+                "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.server_port}",
+            }
+        )
+        apply_project_sdk_runtime_options(
+            options,
+            env_file=tmp_path / "missing.env",
+        )
+        environment = {
+            **os.environ,
+            **options.env,
+            "ANTHROPIC_API_KEY": "",
+            "CLAUDE_CODE_OAUTH_TOKEN": "",
+            "CLAUDE_CONFIG_DIR": str(tmp_path / "claude-home"),
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        }
+        completed = subprocess.run(
+            [
+                claude,
+                "--print",
+                "reply with ok",
+                "--output-format",
+                "json",
+                "--model",
+                "claude-code-retry-test",
+                "--tools",
+                "",
+                "--max-turns",
+                "1",
+            ],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
+
+    assert completed.returncode == 0, completed.stderr[-500:]
+    assert response_statuses[:4] == [429, 429, 429, 200], (
+        paths,
+        retry_counts,
+        request_models,
+        request_message_counts,
+    )
+    assert len(set(request_bodies[:4])) == 1
+
+
 def test_enabled_gateway_fails_closed_for_missing_subject_or_configuration():
     with pytest.raises(AdminGatewayConfigurationError):
         apply_gateway_sdk_env_to_options(

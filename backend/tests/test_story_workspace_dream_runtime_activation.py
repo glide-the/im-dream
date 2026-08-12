@@ -92,7 +92,7 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
                 materialization_key, attempt_id, attempt_count,
                 verification_status, retention_state, cache_ref,
                 created_at, updated_at
-            ) VALUES (?, 'runtime-test', 'runtime-test', 'local', ?, ?, ?, ?, ?,
+            ) VALUES (?, 'ink-local', 'ink-local', 'local', ?, ?, ?, ?, ?,
                       'dream-launch/v1', 'declared', 'materialized', 'loadable',
                       ?, ?, 1, 'verified', 'shared_artifact', 'cache:test', ?, ?)
             """,
@@ -115,8 +115,6 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         return StoryWorkspaceDreamRuntimeActivationService(
             self.fixture.db,
             token_secret=self.fixture.service._token_secret,
-            environment_id="runtime-test",
-            deployment_tier="test",
             clock=lambda: self.fixture.now,
         )
 
@@ -156,7 +154,10 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         ).fetchone()
         self.assertEqual(receipt["workflow_run_id"], run.workflow_run_id)
         self.assertEqual(receipt["required_entries_ready"], 1)
+        self.assertEqual(receipt["runtime_environment_id"], "ink-local")
+        self.assertEqual(receipt["deployment_tier"], "local")
         self.assertEqual(session["status"], "active")
+        self.assertEqual(session["deployment_tier"], "local")
         self.assertEqual(session["remote_session_ref"], "thread-dream-runtime-1")
         self.assertEqual(
             self.fixture.db.execute(
@@ -243,7 +244,7 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
                 created_at, updated_at
             ) VALUES (?, 'runtime-test', 'runtime-test', 'local', ?, ?, ?, ?, ?,
                       'deck-admin/v1', 'declared', 'materialized', 'loadable',
-                      ?, ?, 1, 'verified', 'development_cache', 'cache:admin', ?, ?)
+                      ?, ?, 1, 'verified', 'local_cache', 'cache:admin', ?, ?)
             """,
             (
                 "rm_" + "a" * 32,

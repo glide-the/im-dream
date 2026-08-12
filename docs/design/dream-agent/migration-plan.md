@@ -45,13 +45,23 @@ Chat Thread maps to none and one valid Dream Thread maps to exactly one leaf.
 1. Replace the SDK-message closure with a named runtime activation dependency.
 2. Use verified workspace manifest, frozen plugin lock, context mapping and
    canonical session facts during assembly.
-3. Record the runtime receipt and queued→running transition before Phase 3.
-4. Leave `AgentStreamingCallbacks` and the existing Phase 3 call to
+3. Use one server-owned `local_persistent` placement in every deployment;
+   remove environment-name maps, activation gates and lifecycle short-circuits
+   from production modules.
+4. Record the runtime receipt and queued→running transition before Phase 3.
+5. Leave `AgentStreamingCallbacks` and the existing Phase 3 call to
    `runner.run_streaming(run_options, callbacks)` free of Dream initialization.
-5. Do not modify `agent_runner.py`.
+6. Do not modify `agent_runner.py`.
+
+Admin/Drizzle owns the forward-only placement normalization: migration 0034
+converts historical receipt/session labels to `local`, constrains future rows
+to that one value and publishes `dream.runtime.local-placement.v1`. Harness
+configuration remains in tests/scripts and never creates a second business
+path.
 
 Exit: no `_make_dream_runtime_init_cb`, no Dream `on_message` callback, no
-protected runner diff, and activation failure closes the canonical turn once.
+protected runner diff, no deployment-label business branch, and activation
+failure closes the canonical turn once.
 
 ## Phase 4 — SessionObserverRegistry ownership
 

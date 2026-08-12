@@ -19,6 +19,7 @@ import { pipeline } from 'node:stream/promises';
 const dreamRoot = resolve(new URL('../', import.meta.url).pathname);
 const adminRoot = resolve(dreamRoot, '../ink-admin-memory');
 const backendRoot = resolve(dreamRoot, 'backend');
+const frontendRoot = resolve(dreamRoot, 'frontend');
 const python = resolve(backendRoot, '.venv/bin/python');
 const pgIsReady = '/opt/homebrew/opt/libpq/bin/pg_isready';
 const sourcePostgresContainer = 'ink-memory-postgres';
@@ -184,10 +185,23 @@ function startOwned(command, args, { cwd, env }) {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   }));
-  child.stdout.resume();
-  child.stderr.resume();
-  ownedProcesses.push({ child, command });
+  const tail = [];
+  const collect = (chunk) => {
+    tail.push(String(chunk));
+    if (tail.length > 160) tail.shift();
+  };
+  child.stdout.on('data', collect);
+  child.stderr.on('data', collect);
+  ownedProcesses.push({ child, command, tail });
   return child;
+}
+
+function safeProcessTail(value) {
+  return String(value)
+    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]')
+    .replace(/postgres(?:ql)?:\/\/[^\s]+/gi, '[REDACTED_DATABASE_URL]')
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED_JWT]')
+    .slice(-12_000);
 }
 
 async function stopOwned() {
@@ -363,6 +377,102 @@ async function provisionCloneUser(databaseUrl) {
   ));
 }
 
+async function provisionCloneDreamSurface(databaseUrl, canonicalUserId) {
+  const workspaceId = `workspace-r44-${suffix}`;
+  const deckId = `deck-r44-${suffix}`;
+  const voiceId = `voice-r44-${suffix}`;
+  const source = [
+    'import json,os,psycopg,sys',
+    'try:',
+    ' with psycopg.connect(os.environ["INK_R44_DATABASE_URL"]) as c:',
+    '  c.execute("""INSERT INTO story_workspace_workspaces (id,name,owner_id,settings,status) VALUES (%s,%s,%s,%s::jsonb,\'active\')""",(sys.argv[2],"Real Model Dream Clone",int(sys.argv[1]),"{}"))',
+    '  c.execute("""INSERT INTO decks (id,name,name_zh,owner_id,enabled) VALUES (%s,%s,%s,%s,TRUE)""",(sys.argv[3],"Real Model Dream","真实模型 Dream",int(sys.argv[1])))',
+    '  c.execute("""INSERT INTO voices (id,deck_id,name,name_zh,system_prompt,enabled,order_index) VALUES (%s,%s,%s,%s,%s,TRUE,0)""",(sys.argv[4],sys.argv[3],"Dream Producer","Dream 剧本 Agent","Execute the server-authorized Dream producer workflow."))',
+    ' print(json.dumps({"ok":True,"workspaceId":sys.argv[2],"deckId":sys.argv[3],"voiceId":sys.argv[4]},separators=(",",":")))',
+    'except Exception as exc:',
+    ' diagnostic=getattr(exc,"diag",None)',
+    ' print(json.dumps({"ok":False,"errorClass":type(exc).__name__,"sqlstate":getattr(exc,"sqlstate",None),"constraint":getattr(diagnostic,"constraint_name",None)},separators=(",",":")))',
+  ].join('\n');
+  const result = JSON.parse(await execute(
+    python,
+    ['-c', source, canonicalUserId, workspaceId, deckId, voiceId],
+    {
+      cwd: backendRoot,
+      env: {
+        ...process.env,
+        PYTHONPATH: backendRoot,
+        INK_R44_DATABASE_URL: databaseUrl,
+      },
+    },
+  ));
+  if (result.ok !== true) {
+    console.error(JSON.stringify({
+      phase: 'clone-dream-surface-provision-detail',
+      errorClass: result.errorClass ?? 'Error',
+      sqlstate: result.sqlstate ?? null,
+      constraint: result.constraint ?? null,
+    }));
+    throw new Error(`clone Dream surface provision failed: ${result.errorClass ?? 'Error'}:${result.sqlstate ?? 'unknown'}:${result.constraint ?? 'unknown'}`);
+  }
+  return {
+    workspaceId: result.workspaceId,
+    deckId: result.deckId,
+    voiceId: result.voiceId,
+  };
+}
+
+async function verifyCloneDreamLaunch(databaseUrl, canonicalUserId, platformUserId) {
+  const source = [
+    'import json,os,psycopg,sys',
+    'with psycopg.connect(os.environ["INK_R44_DATABASE_URL"], options="-c default_transaction_read_only=on") as c:',
+    ' run=c.execute("""SELECT id,status,status_version,source_voice_thread_id,runtime_load_receipt_id,agent_session_id FROM workflow_runs WHERE created_by=%s AND workspace_id=%s ORDER BY created_at DESC""",(sys.argv[1],sys.argv[3])).fetchall()',
+    ' assert len(run)==1',
+    ' run=run[0]',
+    ' assert run[1]=="pending_review" and run[3] and run[4] and run[5]',
+    ' sessions=c.execute("""SELECT status,deployment_tier,runtime_environment_id,runtime_pool_id,runtime_node_id,distribution_mode FROM agent_sessions WHERE workflow_run_id=%s""",(run[0],)).fetchall()',
+    ' assert len(sessions)==1 and sessions[0]==("terminated","local","ink-local","ink-local","local","local_persistent")',
+    ' receipts=c.execute("""SELECT deployment_tier,runtime_environment_id,runtime_pool_id,runtime_node_id,distribution_mode FROM runtime_load_receipts WHERE workflow_run_id=%s""",(run[0],)).fetchall()',
+    ' assert len(receipts)>=1 and all(row==("local","ink-local","ink-local","local","local_persistent") for row in receipts)',
+    ' requests=c.execute("""SELECT status,outcome,http_status,requested_model,resolved_model,response_summary->>\'model\',settled_at IS NOT NULL FROM gateway_requests WHERE platform_user_id=%s ORDER BY created_at""",(sys.argv[2],)).fetchall()',
+    ' assert len(requests)>=1',
+    ' assert all(row[0]=="settled" and row[1]=="succeeded" and row[2]==200 and row[3]==sys.argv[4] and row[4]==sys.argv[5] and row[5]==sys.argv[5] and row[6] for row in requests)',
+    ' reserved=c.execute("""SELECT COALESCE(SUM(reserved_tokens),0) FROM subscription_usage_allowances WHERE platform_user_id=%s""",(sys.argv[2],)).fetchone()[0]',
+    ' assert int(reserved)==0',
+    ' messages=c.execute("SELECT role,COUNT(*) FROM chat_message WHERE thread_id=%s GROUP BY role",(run[3],)).fetchall()',
+    ' counts={role:int(count) for role,count in messages}',
+    ' assert counts.get("user",0)>=1 and counts.get("assistant",0)>=1',
+    ' terminals=c.execute("SELECT COUNT(*) FROM workflow_run_transitions WHERE workflow_run_id=%s AND to_status IN (\'completed\',\'failed\',\'cancelled\')",(run[0],)).fetchone()[0]',
+    ' assert int(terminals)==0',
+    ' print(json.dumps({"workflowRunId":run[0],"workflowStatus":run[1],"statusVersion":int(run[2]),"threadId":run[3],"agentSessionStatus":sessions[0][0],"placement":{"tier":sessions[0][1],"environment":sessions[0][2],"pool":sessions[0][3],"node":sessions[0][4],"distribution":sessions[0][5]},"gatewayRequestCount":len(requests),"requestedAlias":requests[0][3],"resolvedUpstream":requests[0][4],"gatewaySettled":True,"reservedTokens":int(reserved),"messageRoleCounts":counts,"workflowTerminalTransitions":int(terminals)},separators=(",",":"),sort_keys=True))',
+  ].join('\n');
+  return JSON.parse(await execute(
+    python,
+    ['-c', source, canonicalUserId, platformUserId, `workspace-r44-${suffix}`, targetModelAlias, expectedUpstreamModel],
+    {
+      cwd: backendRoot,
+      env: { ...process.env, INK_R44_DATABASE_URL: databaseUrl },
+    },
+  ));
+}
+
+async function diagnoseCloneDreamFailure(databaseUrl) {
+  const source = [
+    'import json,os,psycopg',
+    'with psycopg.connect(os.environ["INK_R44_DATABASE_URL"], options="-c default_transaction_read_only=on") as c:',
+    ' run=c.execute("""SELECT id,status,status_version,failed_step,error_code,source_voice_thread_id,agent_session_id FROM workflow_runs WHERE workspace_id LIKE \'workspace-r44-%\' ORDER BY created_at DESC LIMIT 1""").fetchone()',
+    ' if run is None: print(json.dumps({"run":None},separators=(",",":"))); raise SystemExit(0)',
+    ' transitions=c.execute("""SELECT transition_seq,from_status,to_status,reason_code,failed_step,error_code FROM workflow_run_transitions WHERE workflow_run_id=%s ORDER BY transition_seq""",(run[0],)).fetchall()',
+    ' sessions=c.execute("""SELECT status,error_code,termination_reason_code,deployment_tier,runtime_environment_id,runtime_pool_id,runtime_node_id FROM agent_sessions WHERE workflow_run_id=%s ORDER BY attempt_number""",(run[0],)).fetchall()',
+    ' gateway=c.execute("""SELECT status,outcome,http_status,error_code,requested_model,resolved_model,COUNT(*) FROM gateway_requests WHERE platform_user_id IN (SELECT id FROM platform_users WHERE source=\'ink-dream\' AND external_user_id=(SELECT created_by FROM workflow_runs WHERE id=%s)) GROUP BY status,outcome,http_status,error_code,requested_model,resolved_model ORDER BY status,outcome,http_status,error_code""",(run[0],)).fetchall()',
+    ' messages=c.execute("SELECT role,COUNT(*) FROM chat_message WHERE thread_id=%s GROUP BY role ORDER BY role",(run[5],)).fetchall() if run[5] else []',
+    ' print(json.dumps({"run":{"id":run[0],"status":run[1],"statusVersion":int(run[2]),"failedStep":run[3],"errorCode":run[4],"threadPresent":bool(run[5]),"sessionPresent":bool(run[6])},"transitions":[{"sequence":int(row[0]),"from":row[1],"to":row[2],"reasonCode":row[3],"failedStep":row[4],"errorCode":row[5]} for row in transitions],"sessions":[{"status":row[0],"errorCode":row[1],"terminationReason":row[2],"tier":row[3],"environment":row[4],"pool":row[5],"node":row[6]} for row in sessions],"gateway":[{"status":row[0],"outcome":row[1],"httpStatus":row[2],"errorCode":row[3],"requestedModel":row[4],"resolvedModel":row[5],"count":int(row[6])} for row in gateway],"messageRoles":{row[0]:int(row[1]) for row in messages}},separators=(",",":"),sort_keys=True))',
+  ].join('\n');
+  return JSON.parse(await execute(python, ['-c', source], {
+    cwd: backendRoot,
+    env: { ...process.env, INK_R44_DATABASE_URL: databaseUrl },
+  }));
+}
+
 async function verifyCloneModel(databaseUrl) {
   const source = [
     'import json,os,psycopg,sys',
@@ -377,6 +487,21 @@ async function verifyCloneModel(databaseUrl) {
     python,
     ['-c', source, targetModelAlias, expectedUpstreamModel],
     { cwd: backendRoot, env: { ...process.env, INK_R24_DATABASE_URL: databaseUrl } },
+  ));
+}
+
+async function verifyCloneEffectiveLimits(databaseUrl, platformUserId) {
+  const source = [
+    'import json,os,psycopg,sys',
+    'with psycopg.connect(os.environ["INK_R44_DATABASE_URL"], options="-c default_transaction_read_only=on") as c:',
+    ' row=c.execute("""SELECT plan.code,entitlement.requests_per_minute,entitlement.daily_token_limit,entitlement.monthly_token_limit,permission.requests_per_minute,permission.daily_token_limit,permission.monthly_token_limit,allowance.granted_tokens+allowance.bonus_granted_tokens-allowance.reserved_tokens-allowance.consumed_tokens,platform_user.daily_token_limit,platform_user.monthly_token_limit FROM subscriptions subscription JOIN subscription_plan_versions version ON version.id=subscription.plan_version_id JOIN subscription_plans plan ON plan.id=version.plan_id JOIN subscription_plan_entitlements entitlement ON entitlement.plan_version_id=version.id JOIN ai_models model ON model.id=entitlement.model_id AND model.code=%s JOIN platform_users platform_user ON platform_user.id=subscription.platform_user_id LEFT JOIN user_model_permissions permission ON permission.platform_user_id=subscription.platform_user_id AND permission.model_id=model.id LEFT JOIN subscription_usage_allowances allowance ON allowance.subscription_id=subscription.id AND allowance.period_start=subscription.current_period_start AND allowance.period_end=subscription.current_period_end WHERE subscription.platform_user_id=%s AND subscription.status IN (\'active\',\'trial\',\'cancel_at_period_end\')""",(sys.argv[2],sys.argv[1])).fetchone()',
+    ' assert row is not None',
+    ' print(json.dumps({"planCode":row[0],"entitlementRpm":row[1],"entitlementDailyTokens":row[2],"entitlementMonthlyTokens":row[3],"userModelRpm":row[4],"userModelDailyTokens":row[5],"userModelMonthlyTokens":row[6],"allowanceRemainingTokens":int(row[7]) if row[7] is not None else None,"principalDailyTokens":int(row[8]) if row[8] is not None else None,"principalMonthlyTokens":int(row[9]) if row[9] is not None else None},separators=(",",":")))',
+  ].join('\n');
+  return JSON.parse(await execute(
+    python,
+    ['-c', source, platformUserId, targetModelAlias],
+    { cwd: backendRoot, env: { ...process.env, INK_R44_DATABASE_URL: databaseUrl } },
   ));
 }
 
@@ -451,7 +576,8 @@ try {
   const postgresPort = await availablePort();
   const adminPort = await availablePort();
   const dreamApiPort = await availablePort();
-  ownedPorts = [postgresPort, adminPort, dreamApiPort];
+  const dreamWebPort = await availablePort();
+  ownedPorts = [postgresPort, adminPort, dreamApiPort, dreamWebPort];
   targetDatabaseUrl = `postgresql://postgres:${encodeURIComponent(postgresPassword)}@127.0.0.1:${postgresPort}/${databaseName}`;
   const targetPgEnv = pgEnv(targetDatabaseUrl);
 
@@ -562,15 +688,23 @@ try {
     env: migrationEnv,
   });
 
-  runPhase = 'clone-subject-and-model-preflight';
+  runPhase = 'clone-subject-provision';
   const cloneUser = await provisionCloneUser(targetDatabaseUrl);
+  runPhase = 'clone-dream-surface-provision';
+  const dreamSurface = await provisionCloneDreamSurface(
+    targetDatabaseUrl,
+    cloneUser.canonicalUserId,
+  );
+  runPhase = 'clone-model-contract';
   const modelEvidence = await verifyCloneModel(targetDatabaseUrl);
+  runPhase = 'clone-fresh-thread-precondition';
   const fallbackEvidence = await verifyFreshThreadFallback(
     targetDatabaseUrl,
     cloneUser.canonicalUserId,
   );
   const adminBaseUrl = `http://127.0.0.1:${adminPort}`;
   const dreamApiBase = `http://127.0.0.1:${dreamApiPort}`;
+  const dreamWebBase = `http://127.0.0.1:${dreamWebPort}`;
   const productOrigin = dreamApiBase;
   const adminEnv = {
     ...process.env,
@@ -616,8 +750,12 @@ try {
     INK_GATEWAY_TEXT_MODEL_ALIAS: targetModelAlias,
     INK_ADMIN_PRODUCT_API_BASE_URL: adminBaseUrl,
     INK_ADMIN_PRODUCT_ORIGIN: productOrigin,
-    INK_ENVIRONMENT: 'test',
-    INK_AGENT_MAX_TURNS: '1',
+    INK_WORKFLOW_TOKEN_SECRET: `workflow_${randomBytes(48).toString('base64url')}`,
+    INK_CORS_ALLOW_ORIGINS: dreamWebBase,
+    INK_DECK_HOST_COMPATIBLE: '1',
+    INK_CLAUDE_AGENT_CONTRACT_COMPATIBLE: '1',
+    INK_STORY_SCHEMA_COMPATIBLE: '1',
+    INK_DECK_RUNTIME_CONFIG_COMPATIBLE: '1',
     ANTHROPIC_API_KEY: '',
     ANTHROPIC_AUTH_TOKEN: '',
     CLAUDE_CODE_OAUTH_TOKEN: '',
@@ -628,7 +766,7 @@ try {
   ], { cwd: backendRoot, env: dreamEnv });
   await waitForUrl(`${dreamApiBase}/api/health`, dreamApi, 'isolated Dream API');
 
-  runPhase = preflightOnly ? 'provider-free-contract-preflight' : 'real-model-contract-proof';
+  runPhase = 'provider-free-contract-preflight';
   await execute(python, ['script/verify_gateway_e2e.py'], {
     cwd: backendRoot,
     env: {
@@ -639,10 +777,48 @@ try {
       INK_GATEWAY_E2E_EXPECTED_UPSTREAM_MODEL: expectedUpstreamModel,
       INK_GATEWAY_E2E_PROVISION_SUBSCRIPTION: '1',
       INK_GATEWAY_E2E_PRODUCT_ORIGIN: productOrigin,
-      INK_GATEWAY_E2E_PREFLIGHT_ONLY: preflightOnly ? '1' : '0',
+      INK_GATEWAY_E2E_PREFLIGHT_ONLY: '1',
     },
     inherit: true,
   });
+  const effectiveLimits = await verifyCloneEffectiveLimits(
+    targetDatabaseUrl,
+    cloneUser.platformUserId,
+  );
+
+  let browserEvidence = null;
+  if (!preflightOnly) {
+    runPhase = 'real-model-headed-dream-launch';
+    const dreamWeb = startOwned(
+      'pnpm',
+      ['exec', 'vite', '--host', '127.0.0.1', '--port', String(dreamWebPort), '--strictPort'],
+      {
+        cwd: frontendRoot,
+        env: { ...dreamEnv, VITE_DEV_API_PROXY_TARGET: dreamApiBase },
+      },
+    );
+    await waitForUrl(dreamWebBase, dreamWeb, 'isolated Dream web');
+    await execute('pnpm', [
+      'exec', 'playwright', 'test', 'e2e/dream-launch-real-model.spec.ts',
+      '--headed', '--workers=1', '--reporter=line',
+      `--output=${join(runtimeRoot, 'playwright-output')}`,
+    ], {
+      cwd: frontendRoot,
+      env: {
+        ...dreamEnv,
+        E2E_WEB_BASE: dreamWebBase,
+        INK_REAL_DREAM_API_BASE: dreamApiBase,
+        INK_REAL_DREAM_LAUNCH_QA: '1',
+        INK_REAL_DREAM_LAUNCH_EMAIL: cloneEmail,
+      },
+      inherit: true,
+    });
+    browserEvidence = await verifyCloneDreamLaunch(
+      targetDatabaseUrl,
+      cloneUser.canonicalUserId,
+      cloneUser.platformUserId,
+    );
+  }
 
   runPhase = 'evidence-assembly';
   runEvidence = {
@@ -657,16 +833,35 @@ try {
     },
     cloneOnlyCanonicalUser: Boolean(cloneUser.canonicalUserId),
     cloneOnlyPlatformProjection: Boolean(cloneUser.platformUserId),
+    dreamSurface,
     conversationFixture: fallbackEvidence,
     adminRuntimeCheckout: 'isolated-head-clone',
     adminBundler: 'webpack-isolated-external-dependency-link',
     model: modelEvidence,
+    effectiveLimits,
     preflightOnly,
-    browser: 'provider-proof-only; run headed Dream/Chat convergence separately',
+    browser: preflightOnly ? 'provider-free' : 'headed-chromium-workers-1',
+    dreamLaunch: browserEvidence,
   };
 } catch (error) {
   runError = error;
   failedPhase = runPhase;
+  if (targetDatabaseUrl) {
+    const failureEvidence = await diagnoseCloneDreamFailure(targetDatabaseUrl)
+      .catch(() => ({ unavailable: true }));
+    console.error(JSON.stringify({ phase: 'clone-dream-failure-evidence', failureEvidence }));
+  }
+  const failedProcesses = ownedProcesses
+    .filter((item) => item.child.exitCode !== null || item.child.signalCode !== null)
+    .map((item) => ({
+      command: item.command,
+      exitCode: item.child.exitCode,
+      signal: item.child.signalCode,
+      tail: safeProcessTail(item.tail.join('')),
+    }));
+  if (failedProcesses.length > 0) {
+    console.error(JSON.stringify({ phase: 'owned-process-diagnostics', failedProcesses }));
+  }
 } finally {
   cleanupPhase = true;
   await stopOwned();

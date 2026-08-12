@@ -206,7 +206,7 @@ sequenceDiagram
     Factory->>Service: assemble_context before Session Execution
     Service->>Service: resolve actor + thread to internal Dream context
     Service->>Activation: activate_from_assembled_context(run, actor, verified manifest)
-    Activation->>Activation: 校验 runtime adapter、required tool capability、plugin lock
+    Activation->>Activation: 校验 local_persistent placement、runtime adapter、required tool capability、plugin lock
     alt 证明完整
         Activation->>WF: queued → running(receipt, agent_session_id)
         Service->>Bus: normalized events
@@ -219,7 +219,9 @@ sequenceDiagram
 ```
 
 **规则**：201、task accepted、SDK assistant text 都不是 running/completed 的充分
-证据；运行激活失败必须先于可信 Dream output。
+证据；运行激活失败必须先于可信 Dream output。`local_persistent` 是服务器运行拓扑，
+不是部署环境开关。启动、receipt、workflow transition 与工具后置推进不得根据部署
+标签跳过业务逻辑。
 
 **证据**：`dream_runtime_activation_service.py`、`claude_agent/service.py`、
 `test_story_workspace_dream_runtime_activation.py`。

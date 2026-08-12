@@ -26,12 +26,9 @@ def _json_strings(value: object) -> set[str]:
 
 
 def _compatibility_flag(name: str) -> bool:
-    """Default to incompatible unless the environment or signal is explicit."""
+    """Default to incompatible unless the server capability is explicit."""
     raw = os.getenv(name)
-    if raw is not None:
-        return raw.strip().lower() in {"1", "true", "yes", "on"}
-    environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
-    return environment in {"development", "dev", "test", "testing"}
+    return raw is not None and raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _installation_row(

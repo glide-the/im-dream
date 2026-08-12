@@ -14,7 +14,6 @@ import hashlib
 import inspect
 import json
 import logging
-import os
 import re
 from functools import partial
 from typing import Any, Callable
@@ -70,6 +69,7 @@ try:
         NormalizedTurnOutcome,
         drain_chat_agent_turn,
     )
+    from services.runtime_plugin.local_placement import LocalRuntimePlacement
     from services.workflow.preflight_service import PreflightService, PreflightStatus
     from services.workflow.run_service import WorkflowRunError, WorkflowRunService
     from story_workspace.contracts import (
@@ -124,6 +124,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         NormalizedTurnOutcome,
         drain_chat_agent_turn,
     )
+    from backend.services.runtime_plugin.local_placement import LocalRuntimePlacement
     from backend.services.workflow.preflight_service import (
         PreflightService,
         PreflightStatus,
@@ -390,11 +391,13 @@ class DreamRuntimeProvisioningService:
         self,
         db: Any,
         *,
+        runtime_placement: LocalRuntimePlacement | None = None,
         claude_installer_factory: Callable[[Any], Any] = (
             PluginInstallService
         ),
     ) -> None:
         self.db = db
+        self._runtime_placement = runtime_placement or LocalRuntimePlacement()
         self._claude_installer_factory = claude_installer_factory
 
     async def ensure_binding(
@@ -560,11 +563,12 @@ class DreamRuntimeProvisioningService:
         installation: dict[str, Any],
     ) -> None:
         entry = next(item for item in runtime_lock.claude_code_plugins if item.required)
-        environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
+        placement = self._runtime_placement
         now = datetime.now(UTC).isoformat()
         artifact_set_hash = compute_artifact_set_hash(runtime_lock)
         key = "sha256:" + hashlib.sha256(
-            f"{environment}\0dream-launch\0{entry.claude_code_plugin_id}\0"
+            f"{placement.runtime_environment_id}\0dream-launch\0"
+            f"{entry.claude_code_plugin_id}\0"
             f"{entry.resolved_version}\0{entry.artifact_digest}\0"
             f"{artifact_set_hash}".encode("utf-8")
         ).hexdigest()
@@ -592,8 +596,8 @@ class DreamRuntimeProvisioningService:
                     """,
                     (
                         "rm_" + uuid.uuid4().hex,
-                        environment,
-                        environment,
+                        placement.runtime_environment_id,
+                        placement.runtime_pool_id,
                         entry.claude_code_plugin_id,
                         entry.resolved_version,
                         entry.artifact_digest,
