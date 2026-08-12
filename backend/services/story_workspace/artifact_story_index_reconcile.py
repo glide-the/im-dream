@@ -493,14 +493,14 @@ class ArtifactStoryIndexReconcileService:
     @staticmethod
     def _resolve_thread_workspace(thread_id: str) -> Path:
         try:
-            from services.deck.story_workflow_gateway import (
-                StoryWorkflowApplicationGateway,
+            from services.deck.story_workflow_application import (
+                DreamArtifactApplicationService,
             )
         except ModuleNotFoundError:  # pragma: no cover - repository-root imports.
-            from backend.services.deck.story_workflow_gateway import (
-                StoryWorkflowApplicationGateway,
+            from backend.services.deck.story_workflow_application import (
+                DreamArtifactApplicationService,
             )
-        return StoryWorkflowApplicationGateway._thread_workspace(thread_id)
+        return DreamArtifactApplicationService._thread_workspace(thread_id)
 
     @staticmethod
     def _read_surface(

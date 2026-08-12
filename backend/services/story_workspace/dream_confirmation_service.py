@@ -33,7 +33,7 @@ try:
         StoryWorkspaceDreamStage,
     )
     from services.story_workspace.dream_lifecycle_observer import (
-        drain_normalized_agent_turn,
+        drain_chat_agent_turn,
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.models.workflow_run import WorkflowRun
@@ -46,7 +46,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceDreamStage,
     )
     from backend.services.story_workspace.dream_lifecycle_observer import (
-        drain_normalized_agent_turn,
+        drain_chat_agent_turn,
     )
 
 
@@ -854,7 +854,7 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
 ) -> StoryWorkspaceDreamConfirmationDispatcher:
     """Queue a resumed turn even while the same thread is currently running.
 
-    ``ClaudeAgentThreadFactory.run_events`` owns a per-thread lock. Starting
+    ``ClaudeAgentThreadFactory.run_streaming`` owns a per-thread lock. Starting
     this drain task immediately therefore queues behind an in-flight turn and
     preserves ordering without a lifecycle pre-check that could lose work.
     """
@@ -885,7 +885,7 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
                 message_parts=parts,
                 message_metadata=metadata,
             )
-            result = await drain_normalized_agent_turn(selected_factory, request)
+            result = await drain_chat_agent_turn(selected_factory, request)
             return result.completed
         except asyncio.CancelledError:
             raise

@@ -169,7 +169,7 @@ it does not redefine completion around already-green tests.
 |---|---|---|
 | One Chat thread/SSE interaction runtime | Dream wrapper directly composes `ChatPanel`; source has one production `useChat`; S01–S10 exercise send, incremental text, Dream↔Chat handoff, confirmation, subagent, Stop, failure, reconnect and reload | Direct PASS in both headless and current-candidate headed Chromium |
 | Delete Dream conversation protocol | Deleted routes/adapter/service/hook/reducer; production source, OpenAPI and built bundle contain zero legacy conversation endpoints | Direct PASS |
-| Build Dream above `ClaudeAgentService` | `ClaudeAgentThreadFactory.run_events` emits normalized events, public streams use `ChatStreamAdapter`, Dream context is server-resolved, and protected `agent_runner.py` matches HEAD | Direct PASS |
+| Build Dream above `ClaudeAgentService` | `ClaudeAgentThreadFactory.run_streaming` is the sole public turn entry, exposes canonical Chat SSE plus its same-turn completion handle, Dream context is server-resolved, and protected `agent_runner.py` matches HEAD | Direct PASS |
 | Observer is idempotent and non-authoritative | S11–S13 plus focused Observer tests cover trusted identity, bounded dedup/order/gap handling, single terminal, safe operation scopes, sink failure isolation and cleanup | Direct PASS |
 | Reuse thread/message/session/reconnect/confirm/Stop persistence | Canonical API/service tests plus S01–S10 prove the same thread IDs, message IDs, running status and post-EOF hydration without a second send | Direct local PASS |
 | Dream Flow remains business-only and authorized | Actor-scoped Dream-files, strict binding resolver, workflow command owners and display-only `agentActivity` tests prove one-way projection and unchanged business authorization | Direct local PASS |
@@ -452,9 +452,9 @@ Any threshold change requires reviewer approval and a recorded baseline.
 - Final source scan has no production `/dream-agent/events`, Dream message hook,
   Dream adapter, confirmation bridge or runtime transport selector.
 - The guarded production-only `rg` command below finds no
-  `iter_dream_run_events|DreamStreamAdapter` match after `dream_launch_gateway.py`,
+  `iter_dream_run_events|DreamStreamAdapter` match after `dream_launch_infrastructure.py`,
   `dream_confirmation_service.py` and `dream_internal_command_service.py` use
-  the canonical normalized `run_events`/Coordinator drain.
+  the canonical `run_streaming`/same-turn completion drain.
 - Launch failure handling, business-confirmation dispatch claim/heartbeat/
   ack, and message/episode dispatch claim/release focused tests still pass.
 - Final route/OpenAPI snapshot has no legacy conversation endpoints.
@@ -717,6 +717,25 @@ Dream/Chat switching and lifecycle races; it is intentionally separate from the
 single paid/provider request. Neither result is presented as production load,
 staging or canary evidence.
 
+## R42 application-service and turn-entry verification (2026-08-12)
+
+| Gate | Current result |
+|---|---|
+| Complete backend repository tests | `1954 passed, 22 skipped, 651 subtests passed` from explicit `backend/tests` collection |
+| Application ownership | Launch, Run, Artifact, Episode and Confirmation routes inject separate services; former broad gateway symbols have zero production matches |
+| Agent turn entry | `run_streaming()` is the only public start; same-turn completion contract and AST guard pass |
+| Dream launch structure | Four launch modules contain zero nested function/lambda definitions; dispatch and runtime preparation are named classes |
+| Protected SDK runner | `git diff -- backend/libs/claude_agent_kit/server/agent_runner.py` is empty |
+| Static integrity | Changed Python compiles; production legacy-symbol scans and `git diff --check` pass |
+
+An unscoped backend-root pytest attempt is not a product failure: it recursively
+collected 629 duplicate `test_basic.py`/`test_exec.py` copies inside real
+`backend/data/agent-workspace` plugin workspaces and stopped at import-file
+mismatch. Those user/runtime data directories were not deleted or modified. The
+repository-owned suite is the explicit `backend/tests` boundary recorded above.
+No frontend, provider, database migration or browser behavior changed in R42,
+so the R41 real-model/UI evidence remains the applicable wire-level evidence.
+
 ## Fake-provider, isolation and cleanup contract
 
 - Backend and E2E tests inject a deterministic fake provider/runner; any attempt
@@ -787,6 +806,8 @@ For every P0/P1 row, append or link a record with this schema:
 - [x] Fake provider, isolated temporary DB/workspace and zero-residual-process/
       task/Future/subscriber cleanup gates pass.
 - [x] Protected runner diff is empty and runner/service focused regressions pass.
+- [x] R42 sole public `run_streaming` entry, same-turn completion, explicit
+      application services and closure-free Dream launch structure pass.
 - [x] Proxy/reconnect functional gates pass.
 - [ ] Production performance/load baseline and threshold gates remain unrun.
 - [x] Redis isolated adapter and Gateway loopback suites pass; this does not claim

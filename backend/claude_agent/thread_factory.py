@@ -20,9 +20,10 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import logging
 import os
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Optional
 from uuid import uuid4
 
 from claude_agent.event_bus import IEventBus, create_event_bus
@@ -131,6 +132,63 @@ def _stop_wait_seconds() -> float:
 _STOP_WAIT_SECONDS: float = _stop_wait_seconds()
 
 
+@dataclass(frozen=True, slots=True)
+class _ChatTurnCompletion:
+    saw_message_final: bool
+    saw_finish: bool
+    finish_reason: str | None
+    cancelled: bool
+
+
+class _ChatTurnCompletionTracker:
+    def __init__(self) -> None:
+        self.saw_message_final = False
+        self.saw_finish = False
+        self.finish_reason: str | None = None
+        self.cancelled = False
+
+    def observe(self, event: NormalizedAgentEvent) -> None:
+        if event.is_keepalive or self.saw_finish:
+            return
+        if event.type == "message-final":
+            self.saw_message_final = True
+            return
+        if event.type != "finish":
+            return
+        self.saw_finish = True
+        self.finish_reason = str(event.data.get("finishReason") or "") or None
+        self.cancelled = event.data.get("cancelled") is True
+
+    def result(self) -> _ChatTurnCompletion:
+        return _ChatTurnCompletion(
+            saw_message_final=self.saw_message_final,
+            saw_finish=self.saw_finish,
+            finish_reason=self.finish_reason,
+            cancelled=self.cancelled,
+        )
+
+
+class _ChatTurnStream(AsyncIterator[str]):
+    """One Chat SSE iterator plus the completion of that exact same turn."""
+
+    def __init__(
+        self,
+        source: AsyncGenerator[str, None],
+        completion: asyncio.Future[_ChatTurnCompletion],
+    ) -> None:
+        self._source = source
+        self.completion = completion
+
+    def __aiter__(self) -> _ChatTurnStream:
+        return self
+
+    async def __anext__(self) -> str:
+        return await anext(self._source)
+
+    async def aclose(self) -> None:
+        await self._source.aclose()
+
+
 def build_session_id(request: ClaudeAgentRunRequest) -> str:
     """Return a stable session_id for *request*."""
     sid = request.thread_id
@@ -226,36 +284,49 @@ class ClaudeAgentThreadFactory:
     # Primary API: streaming turn / reconnect
     # ------------------------------------------------------------------
 
-    async def run_streaming(
+    def run_streaming(
         self,
         request: ClaudeAgentRunRequest,
+    ) -> _ChatTurnStream:
+        """Return the sole public Agent turn stream and its completion handle."""
+
+        completion: asyncio.Future[_ChatTurnCompletion] = (
+            asyncio.get_running_loop().create_future()
+        )
+        return _ChatTurnStream(
+            self._run_streaming_frames(request, completion),
+            completion,
+        )
+
+    async def _run_streaming_frames(
+        self,
+        request: ClaudeAgentRunRequest,
+        completion: asyncio.Future[_ChatTurnCompletion],
     ) -> AsyncGenerator[str, None]:
-        """Execute a turn using the public Chat SSE adapter."""
-
-        adapter = ChatStreamAdapter()
-        async for event in self.run_events(request):
-            yield adapter.encode(event)
-
-    async def run_events(
-        self,
-        request: ClaudeAgentRunRequest,
-    ) -> AsyncGenerator[NormalizedAgentEvent, None]:
-        """Execute a turn and expose only protocol-neutral internal events."""
+        """Private implementation for the canonical Chat turn stream."""
 
         self._require_accepting_runs()
+        tracker = _ChatTurnCompletionTracker()
         session_id = build_session_id(request)
         if request.reconnect:
-            async for event in self.subscribe_events(session_id):
-                yield event
+            adapter = ChatStreamAdapter()
+            try:
+                async for event in self._subscribe_events(session_id):
+                    tracker.observe(event)
+                    yield adapter.encode(event)
+            finally:
+                if not completion.done():
+                    completion.set_result(tracker.result())
             return
 
+        adapter = ChatStreamAdapter()
         lock = self._pool.get_lock(session_id)
         await lock.acquire()
         release_lock_on_exit = True
         state: AgentRunState | None = None
         try:
             # ``aclose`` can start while this request is queued behind another
-            # turn.  Recheck after acquisition before creating/reviving state.
+            # turn. Recheck after acquisition before creating/reviving state.
             self._require_accepting_runs()
             state = self._pool.get_or_create(session_id)
             if state.lifecycle == AgentRunLifecycle.RUNNING:
@@ -290,7 +361,8 @@ class ClaudeAgentThreadFactory:
             token = await bus.subscribe()
             try:
                 async for event in bus.read(token):
-                    yield event
+                    tracker.observe(event)
+                    yield adapter.encode(event)
             finally:
                 await bus.unsubscribe(token)
         finally:
@@ -304,15 +376,17 @@ class ClaudeAgentThreadFactory:
                     if state.lifecycle == AgentRunLifecycle.RUNNING:
                         state.mark_idle()
                 lock.release()
+            if not completion.done():
+                completion.set_result(tracker.result())
 
     async def subscribe_stream(self, session_id: str) -> AsyncGenerator[str, None]:
         """Subscribe to an in-flight turn using the public Chat SSE adapter."""
 
         adapter = ChatStreamAdapter()
-        async for event in self.subscribe_events(session_id):
+        async for event in self._subscribe_events(session_id):
             yield adapter.encode(event)
 
-    async def subscribe_events(
+    async def _subscribe_events(
         self,
         session_id: str,
     ) -> AsyncGenerator[NormalizedAgentEvent, None]:

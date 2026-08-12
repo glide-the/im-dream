@@ -8,11 +8,11 @@ import unittest
 
 from pydantic import ValidationError
 
-from services.story_workspace.dream_launch_service import (
-    StoryWorkspaceDreamLaunchIdempotencyConflict,
-    StoryWorkspaceDreamLaunchProvenanceError,
-    StoryWorkspaceDreamLaunchService,
-    StoryWorkspaceDreamLaunchSource,
+from services.story_workspace.dream_launch_application_service import (
+    DreamLaunchApplicationService,
+    DreamLaunchIdempotencyConflict,
+    DreamLaunchProvenanceError,
+    DreamLaunchSource,
 )
 from story_workspace.contracts import (
     StoryWorkspaceDreamLaunchCommand,
@@ -45,11 +45,11 @@ class RecordingSourceAdapter:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
         self.created_sources: dict[
-            tuple[str, str, str], StoryWorkspaceDreamLaunchSource
+            tuple[str, str, str], DreamLaunchSource
         ] = {}
         self.fingerprints: dict[tuple[str, str, str], str] = {}
 
-    async def ensure_source(self, **values: object) -> StoryWorkspaceDreamLaunchSource:
+    async def ensure_source(self, **values: object) -> DreamLaunchSource:
         self.calls.append(values)
         scope = (
             str(values["workspace_id"]),
@@ -59,17 +59,17 @@ class RecordingSourceAdapter:
         fingerprint = str(values["request_fingerprint"])
         existing_fingerprint = self.fingerprints.get(scope)
         if existing_fingerprint is not None and existing_fingerprint != fingerprint:
-            raise StoryWorkspaceDreamLaunchIdempotencyConflict()
+            raise DreamLaunchIdempotencyConflict()
         existing = self.created_sources.get(scope)
         if existing is not None:
-            return StoryWorkspaceDreamLaunchSource(
+            return DreamLaunchSource(
                 thread_id=existing.thread_id,
                 message_id=existing.message_id,
                 message_time=existing.message_time,
                 request_fingerprint=existing.request_fingerprint,
                 created=False,
             )
-        created = StoryWorkspaceDreamLaunchSource(
+        created = DreamLaunchSource(
             thread_id=str(values["thread_id"]),
             message_id=str(values["message_id"]),
             message_time=MESSAGE_TIME,
@@ -91,15 +91,18 @@ class DreamLaunchFixture:
         self.created_runs: dict[tuple[str, str, str], SimpleNamespace] = {}
         self.binding_error: Exception | None = None
         self.run_overrides: dict[str, object] = {}
-        self.service = StoryWorkspaceDreamLaunchService(
-            source_adapter=self.source_adapter,
-            binding_resolver=self.resolve_binding,
-            preflight_creator=self.create_preflight,
-            run_creator=self.create_run,
+        self.service = DreamLaunchApplicationService(
+            source_repository=self.source_adapter,
+            workflow=self,
             dispatcher=self.dispatcher,
         )
 
-    async def resolve_binding(self, **values: object) -> SimpleNamespace:
+    async def prepare(
+        self,
+        launch_command: StoryWorkspaceDreamLaunchCommand,
+        **values: object,
+    ) -> SimpleNamespace:
+        values = {"deck_id": launch_command.deck_id, **values}
         self.binding_calls.append(values)
         if self.binding_error is not None:
             raise self.binding_error
@@ -168,7 +171,7 @@ class RecordingDispatcher:
             self.failures_remaining -= 1
             raise RuntimeError("dispatch unavailable")
         source = values["source"]
-        assert isinstance(source, StoryWorkspaceDreamLaunchSource)
+        assert isinstance(source, DreamLaunchSource)
         if source.message_id in self.dispatched_messages:
             return False
         self.dispatched_messages.add(source.message_id)
@@ -189,7 +192,7 @@ class StoryWorkspaceDreamLaunchContractTest(unittest.TestCase):
             command(goal="   ")
 
 
-class StoryWorkspaceDreamLaunchServiceTest(unittest.IsolatedAsyncioTestCase):
+class DreamLaunchApplicationServiceTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.fixture = DreamLaunchFixture()
 
@@ -270,7 +273,7 @@ class StoryWorkspaceDreamLaunchServiceTest(unittest.IsolatedAsyncioTestCase):
             command(), actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID
         )
 
-        with self.assertRaises(StoryWorkspaceDreamLaunchIdempotencyConflict):
+        with self.assertRaises(DreamLaunchIdempotencyConflict):
             await self.fixture.service.launch(
                 command(goal="改成一个太空喜剧"),
                 actor_id=ACTOR_ID,
@@ -285,7 +288,7 @@ class StoryWorkspaceDreamLaunchServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_mismatched_authoritative_run_provenance_is_rejected(self) -> None:
         self.fixture.run_overrides["runtime_plugin_lock_id"] = "rpl_wrong"
 
-        with self.assertRaises(StoryWorkspaceDreamLaunchProvenanceError):
+        with self.assertRaises(DreamLaunchProvenanceError):
             await self.fixture.service.launch(
                 command(), actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID
             )

@@ -315,7 +315,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 return_value=[{"package_spec": "ink-dream-story@platform-builtin"}],
             ),
             unittest.mock.patch(
-                "services.story_workspace.dream_launch_gateway.StoryWorkspaceDreamLaunchProvisioner",
+                "services.story_workspace.dream_launch_infrastructure.DreamRuntimeProvisioningService",
                 provisioner_factory,
             ),
             unittest.mock.patch(
@@ -323,7 +323,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 activation_factory,
             ),
             unittest.mock.patch(
-                "services.deck.story_workflow_gateway.story_workspace_workflow_token_secret",
+                "services.story_workspace.workflow_security.story_workspace_workflow_token_secret",
                 return_value=b"runtime-test-secret",
             ),
         ):
@@ -381,7 +381,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     return_value=[],
                 ),
                 unittest.mock.patch(
-                    "services.story_workspace.dream_launch_gateway.StoryWorkspaceDreamLaunchProvisioner",
+                    "services.story_workspace.dream_launch_infrastructure.DreamRuntimeProvisioningService",
                     provisioner_factory,
                 ),
                 unittest.mock.patch(

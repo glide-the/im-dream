@@ -25,7 +25,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from routers import story_workspace  # noqa: E402
-from services.deck import story_workflow_gateway as gateway_module  # noqa: E402
+from services.deck import story_workflow_application as gateway_module  # noqa: E402
 from services.story_workspace.episode_binding_service import (  # noqa: E402
     StoryWorkspaceEpisodeBindingContext,
     StoryWorkspaceEpisodeBindingService,
@@ -1172,7 +1172,7 @@ def test_routes_keep_path_identity_out_of_recover_and_require_if_match() -> None
     app.dependency_overrides[story_workspace.get_current_user] = lambda: {
         "user_id": int(ACTOR_ID),
     }
-    app.dependency_overrides[story_workspace.get_story_workflow_gateway] = lambda: gateway
+    app.dependency_overrides[story_workspace.get_episode_service] = lambda: gateway
     app.include_router(story_workspace.router)
 
     with TestClient(app) as client:
@@ -1433,7 +1433,7 @@ def _gateway_app(gateway, actor: dict[str, int]) -> FastAPI:
     app.dependency_overrides[story_workspace.get_current_user] = lambda: {
         "user_id": actor["value"],
     }
-    app.dependency_overrides[story_workspace.get_story_workflow_gateway] = lambda: gateway
+    app.dependency_overrides[story_workspace.get_episode_service] = lambda: gateway
     app.include_router(story_workspace.router)
     return app
 
@@ -1462,7 +1462,7 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
             encoding="utf-8",
         )
 
-        gateway = gateway_module.StoryWorkflowApplicationGateway()
+        gateway = gateway_module.EpisodeApplicationService()
         scheduled: list[object] = []
         gateway._dream_internal_command_coordinator = SimpleNamespace(  # noqa: SLF001
             schedule=lambda pending: scheduled.append(pending) or True
@@ -1481,7 +1481,7 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
                 return_value=workspace_root,
             ),
             patch.object(
-                gateway_module.StoryWorkflowApplicationGateway,
+                gateway_module.EpisodeApplicationService,
                 "_dream_agent_thread_factory",
                 return_value=_IdleFactory(),
             ),
@@ -1628,7 +1628,7 @@ def test_real_gateway_recovery_is_path_free_and_keeps_unproven_run_unbound() -> 
         _create_gateway_schema(db)
         _seed_gateway_run(db, episode_uid=None)
         db.close()
-        gateway = gateway_module.StoryWorkflowApplicationGateway()
+        gateway = gateway_module.EpisodeApplicationService()
         scheduled: list[object] = []
         gateway._dream_internal_command_coordinator = SimpleNamespace(  # noqa: SLF001
             schedule=lambda pending: scheduled.append(pending) or True
@@ -1641,7 +1641,7 @@ def test_real_gateway_recovery_is_path_free_and_keeps_unproven_run_unbound() -> 
                 side_effect=lambda: _open_gateway_test_db(db_path),
             ),
             patch.object(
-                gateway_module.StoryWorkflowApplicationGateway,
+                gateway_module.EpisodeApplicationService,
                 "_dream_agent_thread_factory",
                 return_value=_IdleFactory(),
             ),
@@ -2046,7 +2046,7 @@ def test_bound_http_surface_includes_workflow_and_etag_changes_with_fact_revisio
         binding_path.write_text(json.dumps(payload), encoding="utf-8")
         assert binding.episode_uid != EPISODE_ID
 
-        gateway = gateway_module.StoryWorkflowApplicationGateway()
+        gateway = gateway_module.EpisodeApplicationService()
         app = _gateway_app(gateway, {"value": int(ACTOR_ID)})
         with (
             patch.object(
@@ -2117,7 +2117,7 @@ def test_real_http_concurrency_keeps_one_action_claim_and_stable_identity() -> N
             "---\ntitle: Demo\n---\n# Story Goals\n- Begin\n",
             encoding="utf-8",
         )
-        gateway = gateway_module.StoryWorkflowApplicationGateway()
+        gateway = gateway_module.EpisodeApplicationService()
         scheduled: list[object] = []
         gateway._dream_agent_message_coordinator = SimpleNamespace(  # noqa: SLF001
             schedule=lambda pending: scheduled.append(pending) or True
@@ -2135,7 +2135,7 @@ def test_real_http_concurrency_keeps_one_action_claim_and_stable_identity() -> N
                 return_value=workspace_root,
             ),
             patch.object(
-                gateway_module.StoryWorkflowApplicationGateway,
+                gateway_module.EpisodeApplicationService,
                 "_dream_agent_thread_factory",
                 return_value=_IdleFactory(),
             ),
@@ -2261,7 +2261,7 @@ def test_episode_http_authorization_tampering_fails_before_workspace_probe(
         db.execute(tamper_sql, tamper_parameters)
         db.commit()
         db.close()
-        gateway = gateway_module.StoryWorkflowApplicationGateway()
+        gateway = gateway_module.EpisodeApplicationService()
         app = _gateway_app(gateway, {"value": int(ACTOR_ID)})
         with (
             patch.object(

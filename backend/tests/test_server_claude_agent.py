@@ -1554,7 +1554,7 @@ class TestFactoryLifecycle(unittest.TestCase):
         gateway.aclose_internal_dream_dispatches = unittest.mock.AsyncMock()
         with unittest.mock.patch.object(
             self.srv,
-            "get_story_workflow_application_gateway",
+            "get_episode_application_service",
             return_value=gateway,
         ):
             asyncio.run(
@@ -1567,7 +1567,7 @@ class TestFactoryLifecycle(unittest.TestCase):
         gateway = unittest.mock.Mock()
         with unittest.mock.patch.object(
             self.srv,
-            "get_story_workflow_application_gateway",
+            "get_episode_application_service",
             return_value=gateway,
         ):
             asyncio.run(
@@ -1623,7 +1623,7 @@ class TestFactoryLifecycle(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 self.srv,
-                "get_story_workflow_application_gateway",
+                "get_episode_application_service",
                 return_value=gateway,
             ),
             unittest.mock.patch.object(

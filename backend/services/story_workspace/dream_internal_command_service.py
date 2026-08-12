@@ -34,7 +34,7 @@ try:
         story_workspace_read_dream_confirmation_fact,
     )
     from services.story_workspace.dream_lifecycle_observer import (
-        drain_normalized_agent_turn,
+        drain_chat_agent_turn,
     )
 except ModuleNotFoundError:
     from backend.story_workspace.contracts import (
@@ -47,7 +47,7 @@ except ModuleNotFoundError:
         story_workspace_read_dream_confirmation_fact,
     )
     from backend.services.story_workspace.dream_lifecycle_observer import (
-        drain_normalized_agent_turn,
+        drain_chat_agent_turn,
     )
 
 
@@ -766,7 +766,7 @@ class StoryWorkspaceDreamInternalCommandService:
         )
 
     async def dispatch(self, pending: StoryWorkspaceDreamInternalPendingDispatch) -> bool:
-        """Drain one claimed command through canonical ``factory.run_events``."""
+        """Drain one claimed command through canonical ``factory.run_streaming``."""
 
         claim_id = str(pending.metadata.get("dispatch_claim_id") or "")
         if self._thread_factory is None or not claim_id:
@@ -793,7 +793,7 @@ class StoryWorkspaceDreamInternalCommandService:
                 name=f"story-workspace-dream-command-lease-{pending.message_id}",
             )
             turn_task = asyncio.create_task(
-                drain_normalized_agent_turn(self._thread_factory, request),
+                drain_chat_agent_turn(self._thread_factory, request),
                 name=f"story-workspace-dream-command-turn-{pending.message_id}",
             )
             done, _pending = await asyncio.wait(

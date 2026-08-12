@@ -102,13 +102,13 @@ class NormalizedAgentTurnClassifier:
         )
 
 
-async def drain_normalized_agent_turn(
+async def drain_chat_agent_turn(
     factory: Any,
     request: Any,
     *,
     on_event: Callable[[NormalizedAgentEvent], Any] | None = None,
 ) -> NormalizedTurnResult:
-    """Drain the canonical normalized stream through its sentinel.
+    """Drain the canonical Chat stream through its terminal frame.
 
     Internal launch/confirmation/episode owners use the result only to settle
     their existing claims.  They do not expose this drain as a browser stream.
@@ -116,15 +116,50 @@ async def drain_normalized_agent_turn(
     """
 
     classifier = NormalizedAgentTurnClassifier()
-    async for event in factory.run_events(request):
-        if not isinstance(event, NormalizedAgentEvent):
-            raise TypeError("ClaudeAgentThreadFactory.run_events must yield normalized events")
+    stream = factory.run_streaming(request)
+    completion = getattr(stream, "completion", None)
+    adapter = None
+    if on_event is not None or completion is None:
+        # Import lazily so domain-service module loading cannot initialize the
+        # Claude Agent package while its tool modules are still being imported.
+        try:
+            from claude_agent.chat_stream_adapter import ChatStreamAdapter
+        except ModuleNotFoundError:  # Support package imports from repository root.
+            from backend.claude_agent.chat_stream_adapter import ChatStreamAdapter
+
+        adapter = ChatStreamAdapter()
+
+    async for frame in stream:
+        if adapter is None:
+            continue
+        event = adapter.decode(frame)
         if on_event is not None:
             observed = on_event(event)
             if inspect.isawaitable(observed):
                 await observed
-        classifier.observe(event)
-    return classifier.result()
+        if completion is None:
+            classifier.observe(event)
+
+    if completion is None:
+        return classifier.result()
+
+    settled = await completion
+    if settled.cancelled:
+        outcome = NormalizedTurnOutcome.CANCELLED
+    elif settled.finish_reason == "error":
+        outcome = NormalizedTurnOutcome.FAILED
+    elif settled.saw_finish and settled.saw_message_final:
+        outcome = NormalizedTurnOutcome.COMPLETED
+    elif settled.saw_finish:
+        outcome = NormalizedTurnOutcome.CANCELLED
+    else:
+        outcome = NormalizedTurnOutcome.INCOMPLETE
+    return NormalizedTurnResult(
+        outcome=outcome,
+        saw_message_final=settled.saw_message_final,
+        saw_finish=settled.saw_finish,
+        finish_reason=settled.finish_reason,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1109,5 +1144,5 @@ __all__ = [
     "NormalizedTurnOutcome",
     "NormalizedTurnResult",
     "NullDreamBusinessSink",
-    "drain_normalized_agent_turn",
+    "drain_chat_agent_turn",
 ]

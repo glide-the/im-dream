@@ -796,9 +796,12 @@ async def shutdown_scheduler():
 
 from agent_factory import claude_agent_thread_factory
 from claude_agent.event_bus_redis import RedisStreamEventBus
-from services.deck.story_workflow_gateway import (
-    get_story_workflow_application_gateway,
+from services.deck.story_workflow_application import (
+    get_episode_application_service,
     story_workspace_get_dream_confirmation_coordinator,
+)
+from services.story_workspace.dream_launch_endpoint_service import (
+    get_dream_launch_endpoint_service,
 )
 from routers import admin as admin_router_module
 from routers.admin import router as admin_router
@@ -893,10 +896,17 @@ async def story_workspace_startup_dream_confirmation_coordinator():
 
 
 @app.on_event("startup")
+async def story_workspace_startup_dream_launch_dispatches():
+    """Enable process-owned launch turn drains."""
+
+    get_dream_launch_endpoint_service().start()
+
+
+@app.on_event("startup")
 async def story_workspace_startup_dream_internal_dispatches():
     """Recover pending or expired internal commands without a GET side effect."""
 
-    get_story_workflow_application_gateway().start_internal_dream_dispatches()
+    get_episode_application_service().start_internal_dream_dispatches()
 
 
 @app.on_event("startup")
@@ -976,11 +986,18 @@ async def story_workspace_shutdown_dream_confirmation_coordinator():
 
 
 @app.on_event("shutdown")
+async def story_workspace_shutdown_dream_launch_dispatches():
+    """Await launch turn drains before closing the Claude Agent factory."""
+
+    await get_dream_launch_endpoint_service().aclose()
+
+
+@app.on_event("shutdown")
 async def story_workspace_shutdown_dream_internal_dispatches():
     """Await internal episode/workflow command drains before factory close."""
 
-    gateway = get_story_workflow_application_gateway()
-    await gateway.aclose_internal_dream_dispatches()
+    episode_service = get_episode_application_service()
+    await episode_service.aclose_internal_dream_dispatches()
 
 
 @app.on_event("shutdown")

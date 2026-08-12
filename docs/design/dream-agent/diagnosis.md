@@ -87,16 +87,17 @@ flowchart LR
 
 ### Server call chains
 
-**Chat live turn — verified at the pre-migration baseline**
+**Chat live turn — current canonical path**
 
 1. `POST /api/claude-agent` authorizes thread ownership in
    `backend/routers/claude_agent.py:258-295`.
 2. It builds `ClaudeAgentRunRequest` and calls the factory in
    `backend/routers/claude_agent.py:466-494`.
-3. `ClaudeAgentThreadFactory.run_events` creates one normalized EventBus in
-   `backend/claude_agent/thread_factory.py:150-187`.
-4. `run_streaming` encodes each event with `ChatStreamAdapter` in
-   `backend/claude_agent/thread_factory.py:140-148`.
+3. `ClaudeAgentThreadFactory.run_streaming` is the only public turn-start API;
+   its private implementation creates one normalized EventBus and one
+   `_run_turn_task` supervisor.
+4. The same stream encodes each event with `ChatStreamAdapter` and exposes a
+   completion handle for that exact turn; there is no public `run_events` path.
 5. Reconnect uses the same adapter through the thread endpoint at
    `backend/routers/claude_agent.py:716-739`.
 
@@ -106,7 +107,7 @@ flowchart LR
    `backend/routers/story_workspace.py:1635-1725`.
 2. The gateway derives immutable run/thread/Deck context and proves actor,
    workspace, thread and Deck ownership in
-   `backend/services/deck/story_workflow_gateway.py:1266-1329`.
+   `backend/services/deck/story_workflow_application.py:1266-1329`.
 3. The service takes normalized events and creates a filtered Dream stream in
    baseline `backend/services/story_workspace/dream_agent_message_service.py:1411-1496`.
 4. `DreamStreamAdapter` converts only selected text and terminal events in
@@ -117,7 +118,7 @@ flowchart LR
 The Dream adapter also has three non-browser consumers that drain its internal
 iterator and therefore block simple deletion:
 
-- first launch at `backend/services/story_workspace/dream_launch_gateway.py:813`;
+- first launch at `backend/services/story_workspace/dream_launch_infrastructure.py:813`;
 - business-confirmation post-confirmation dispatch at
   `backend/services/story_workspace/dream_confirmation_service.py:889`;
 - persisted message/episode dispatch at baseline
@@ -125,9 +126,11 @@ iterator and therefore block simple deletion:
   retained owner is now
   `backend/services/story_workspace/dream_internal_command_service.py`.
 
-They have different durable claim/heartbeat/ack behavior. All must move to the
-canonical normalized `thread_factory.run_events` path (or one minimal lifecycle
-Coordinator drain) before `DreamStreamAdapter` is removed.
+They have different durable claim/heartbeat/ack behavior. All now use the
+canonical `thread_factory.run_streaming` path. Callers that only settle durable
+claims use its same-turn completion handle; launch failure classification uses
+the shared Chat decoder only for the required error events. No Dream stream
+adapter or second execution API remains.
 
 ### GET side-effect finding
 
@@ -136,7 +139,7 @@ The pinned Dream snapshot GET was not a pure read. At `a506c83`,
 awaited `_recover_dream_agent_messages`; that recovery reclaimed pending/expired
 persisted commands and called
 `_dream_agent_message_coordinator.schedule(item)` (`git show
-a506c83:backend/services/deck/story_workflow_gateway.py`, baseline lines
+a506c83:backend/services/deck/story_workflow_application.py`, baseline lines
 `1000-1120`). Therefore an authenticated
 `GET .../dream-agent/messages` could schedule an SDK turn. The baseline
 `GET .../dream-agent/events` attached to an already authenticated thread
@@ -145,7 +148,7 @@ EventBus, but did not itself synthesize a new command.
 The migration deletes both public Dream GET routes. Current Dream re-entry uses
 the actor-scoped `GET .../dream-files` read at
 `backend/routers/story_workspace.py:1419-1437`; its gateway method only projects
-authorized files (`backend/services/deck/story_workflow_gateway.py:933-945`).
+authorized files (`backend/services/deck/story_workflow_application.py:933-945`).
 `backend/tests/test_story_workspace_dream_api.py:606-626` proves the read does
 not create runtime files, while internal pending-command recovery is invoked
 only by the application startup owner

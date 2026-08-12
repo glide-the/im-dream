@@ -282,12 +282,12 @@ async def _activate_story_workspace_dream_runtime(
         read_workspace_launch_manifest,
     )
     from models.workflow_run import AuthenticatedActorContext
-    from services.deck.story_workflow_gateway import (
+    from services.story_workspace.workflow_security import (
         story_workspace_workflow_token_secret,
     )
-    from services.story_workspace.dream_launch_gateway import (
-        StoryWorkspaceDreamLaunchGatewayError,
-        StoryWorkspaceDreamLaunchProvisioner,
+    from services.story_workspace.dream_launch_infrastructure import (
+        DreamLaunchApplicationError,
+        DreamRuntimeProvisioningService,
     )
     from services.story_workspace.dream_runtime_activation_service import (
         DREAM_RUNTIME_NOT_READY,
@@ -321,12 +321,12 @@ async def _activate_story_workspace_dream_runtime(
             # the verified immutable installation before enforcing the exact
             # activation join. Never accept the stale row as equivalent.
             try:
-                StoryWorkspaceDreamLaunchProvisioner(
+                DreamRuntimeProvisioningService(
                     db
                 ).ensure_frozen_runtime_evidence(
                     context.runtime_plugin_lock_id
                 )
-            except StoryWorkspaceDreamLaunchGatewayError as exc:
+            except DreamLaunchApplicationError as exc:
                 raise StoryWorkspaceDreamRuntimeActivationError(
                     DREAM_RUNTIME_NOT_READY,
                     "Dream runtime materialization could not be refreshed",

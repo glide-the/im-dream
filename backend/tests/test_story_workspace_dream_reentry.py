@@ -684,7 +684,7 @@ class StoryWorkspaceDreamReentryRouteTest(unittest.TestCase):
         app = FastAPI()
         gateway = Gateway()
         app.dependency_overrides[story_workspace.get_current_user] = lambda: {"user_id": 7}
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = lambda: gateway
+        app.dependency_overrides[story_workspace.get_dream_artifact_service] = lambda: gateway
         app.include_router(story_workspace.router)
         with TestClient(app) as client:
             response = client.get("/api/story-workspace/dream-runs")

@@ -225,7 +225,13 @@ class ApiRouteContractTests(unittest.TestCase):
 
         story_app = FastAPI()
         story_app.dependency_overrides[story_workspace.get_current_user] = _authenticated_user
-        story_app.dependency_overrides[story_workspace.get_story_workflow_gateway] = _StoryGateway
+        for dependency in (
+            story_workspace.get_story_workflow_run_service,
+            story_workspace.get_dream_artifact_service,
+            story_workspace.get_episode_service,
+            story_workspace.get_dream_confirmation_service,
+        ):
+            story_app.dependency_overrides[dependency] = _StoryGateway
         story_app.include_router(story_workspace.router)
         self.story_client = TestClient(story_app)
 

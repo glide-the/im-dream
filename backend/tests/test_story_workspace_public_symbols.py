@@ -44,6 +44,28 @@ def dream_route_functions(relative_path: str) -> set[str]:
 
 
 class StoryWorkspacePublicSymbolTests(unittest.TestCase):
+    def test_thread_factory_has_one_public_turn_start_entry(self) -> None:
+        tree = ast.parse(
+            (BACKEND_ROOT / "claude_agent/thread_factory.py").read_text(
+                encoding="utf-8"
+            )
+        )
+        factory = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == "ClaudeAgentThreadFactory"
+        )
+        methods = {
+            node.name
+            for node in factory.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self.assertIn("run_streaming", methods)
+        self.assertNotIn("run_events", methods)
+        self.assertIn("_run_streaming_frames", methods)
+        self.assertIn("_run_turn_task", methods)
+
     def test_dream_confirmation_module_uses_dec_004_prefixes(self) -> None:
         definitions = public_definitions(
             "services/story_workspace/dream_confirmation_service.py"
@@ -83,18 +105,23 @@ class StoryWorkspacePublicSymbolTests(unittest.TestCase):
         self.assertNotIn("handle_story_workspace_dream_tool", tool_definitions)
         self.assertNotIn("create_story_workspace_mcp_server", server_definitions)
 
-    def test_task3_gateway_functions_are_scanned_not_enumerated(self) -> None:
-        gateway = public_definitions("services/deck/story_workflow_gateway.py")
-        preexisting = {"get_story_workflow_application_gateway"}
+    def test_application_service_factories_are_explicit(self) -> None:
+        gateway = public_definitions("services/deck/story_workflow_application.py")
         candidates = {
             name
             for name, kind in gateway.items()
-            if kind == "function" and name not in preexisting
+            if kind == "function" and name.startswith("get_")
         }
-        self.assertGreaterEqual(len(candidates), 2)
-        for name in candidates:
-            with self.subTest(name=name):
-                self.assertTrue(name.startswith("story_workspace_"), name)
+        self.assertEqual(
+            candidates,
+            {
+                "get_story_workflow_run_application_service",
+                "get_dream_artifact_application_service",
+                "get_episode_application_service",
+                "get_dream_confirmation_application_service",
+            },
+        )
+        self.assertNotIn("get_story_workflow_application_gateway", gateway)
 
     def test_all_dream_router_handlers_use_dec_004_prefix(self) -> None:
         names = dream_route_functions("routers/story_workspace.py")

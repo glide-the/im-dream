@@ -375,8 +375,8 @@ class DreamAgentS11ObserverOffPathAcceptance(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         """Tool/subagent/content/workflow progress is correlated, not copied."""
 
-        from services.deck.story_workflow_gateway import (
-            StoryWorkflowApplicationGateway,
+        from services.deck.story_workflow_application import (
+            DreamArtifactApplicationService,
         )
         from story_workspace.contracts import (
             StoryWorkspaceDreamFilesResponse,
@@ -474,7 +474,7 @@ class DreamAgentS11ObserverOffPathAcceptance(unittest.IsolatedAsyncioTestCase):
         )
         sink = DreamWorkflowActivityProjectionSink(max_entries=4)
         await sink.project(typed[-1], DreamTurnLease(identity))
-        gateway = StoryWorkflowApplicationGateway()
+        gateway = DreamArtifactApplicationService()
         factory = SimpleNamespace(
             dream_workflow_activity_projection=lambda: sink.snapshot()
         )
@@ -881,12 +881,12 @@ class DreamAgentS14MigrationAcceptance(unittest.IsolatedAsyncioTestCase):
 
         listed = await route_module.story_workspace_list_dream_runs(
             current_user={"user_id": int(ACTOR_ID)},
-            gateway=gateway,
+            service=gateway,
         )
         files = await route_module.story_workspace_get_workflow_run_dream_files(
             RUN_ID,
             current_user={"user_id": int(ACTOR_ID)},
-            gateway=gateway,
+            service=gateway,
         )
         self.assertEqual(listed, [])
         self.assertEqual(files["threadId"], THREAD_ID)
@@ -903,7 +903,7 @@ class DreamAgentS14MigrationAcceptance(unittest.IsolatedAsyncioTestCase):
         denied_gateway.list_dream_runs = mock.AsyncMock()
         denied = await route_module.story_workspace_list_dream_runs(
             current_user={},
-            gateway=denied_gateway,
+            service=denied_gateway,
         )
         self.assertEqual(denied.status_code, 403)
         denied_gateway.list_dream_runs.assert_not_awaited()
@@ -915,7 +915,7 @@ class DreamAgentS14MigrationAcceptance(unittest.IsolatedAsyncioTestCase):
         )
         with mock.patch.object(
             server,
-            "get_story_workflow_application_gateway",
+            "get_episode_application_service",
             return_value=gateway,
         ):
             await server.story_workspace_startup_dream_internal_dispatches()

@@ -46,8 +46,14 @@ from .deps import get_current_user
 
 try:
     from services.errors.error_registry import ApiRouteError, build_error_payload
-    from services.deck.story_workflow_gateway import (
-        get_story_workflow_application_gateway,
+    from services.deck.story_workflow_application import (
+        get_dream_artifact_application_service,
+        get_dream_confirmation_application_service,
+        get_episode_application_service,
+        get_story_workflow_run_application_service,
+    )
+    from services.story_workspace.dream_launch_endpoint_service import (
+        get_dream_launch_endpoint_service,
     )
     from services.story_workspace.episode_action_service import (
         StoryWorkspaceEpisodeActionError,
@@ -57,8 +63,14 @@ try:
     )
 except ModuleNotFoundError:
     from backend.services.errors.error_registry import ApiRouteError, build_error_payload
-    from backend.services.deck.story_workflow_gateway import (
-        get_story_workflow_application_gateway,
+    from backend.services.deck.story_workflow_application import (
+        get_dream_artifact_application_service,
+        get_dream_confirmation_application_service,
+        get_episode_application_service,
+        get_story_workflow_run_application_service,
+    )
+    from backend.services.story_workspace.dream_launch_endpoint_service import (
+        get_dream_launch_endpoint_service,
     )
     from backend.services.story_workspace.episode_action_service import (
         StoryWorkspaceEpisodeActionError,
@@ -184,7 +196,7 @@ class _WorkflowRunCancelRequest(BaseModel):
     reason: str = Field(default="Cancelled from Dream", min_length=1, max_length=500)
 
 
-class StoryWorkflowGateway(Protocol):
+class DreamLaunchEndpoint(Protocol):
     async def start_dream_run(
         self,
         request: StoryWorkspaceDreamLaunchCommand,
@@ -192,6 +204,8 @@ class StoryWorkflowGateway(Protocol):
         actor: dict[str, str],
     ) -> Any: ...
 
+
+class StoryWorkflowRunService(Protocol):
     async def create_preflight(
         self,
         request: _WorkflowPreflightRequest,
@@ -210,6 +224,32 @@ class StoryWorkflowGateway(Protocol):
 
     async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]) -> Any: ...
 
+    async def retry_run(
+        self,
+        workflow_run_id: str,
+        request: _WorkflowRunRetryRequest,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def cancel_run(
+        self,
+        workflow_run_id: str,
+        request: _WorkflowRunCancelRequest,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def submit_guidance(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceGuidanceCommandPayload,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+
+class DreamArtifactService(Protocol):
     async def get_dream_files(
         self,
         workflow_run_id: str,
@@ -240,6 +280,14 @@ class StoryWorkflowGateway(Protocol):
         if_match: str,
     ) -> Any: ...
 
+    async def list_dream_runs(
+        self,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+
+class EpisodeService(Protocol):
     async def recover_episode_binding(
         self,
         workflow_run_id: str,
@@ -258,12 +306,8 @@ class StoryWorkflowGateway(Protocol):
         if_match: str,
     ) -> Any: ...
 
-    async def list_dream_runs(
-        self,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
 
+class DreamConfirmationService(Protocol):
     async def submit_dream_confirmation(
         self,
         workflow_run_id: str,
@@ -272,43 +316,21 @@ class StoryWorkflowGateway(Protocol):
         actor: dict[str, str],
     ) -> Any: ...
 
-    async def retry_run(
-        self,
-        workflow_run_id: str,
-        request: _WorkflowRunRetryRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
 
-    async def cancel_run(
-        self,
-        workflow_run_id: str,
-        request: _WorkflowRunCancelRequest,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def submit_guidance(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceGuidanceCommandPayload,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
+def get_story_workflow_run_service() -> StoryWorkflowRunService:
+    return get_story_workflow_run_application_service()
 
 
-class _UnavailableStoryWorkflowGateway:
-    def __getattr__(self, _name: str):
-        async def unavailable(*_args: Any, **_kwargs: Any) -> Any:
-            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
-
-        return unavailable
+def get_dream_artifact_service() -> DreamArtifactService:
+    return get_dream_artifact_application_service()
 
 
-def get_story_workflow_gateway() -> StoryWorkflowGateway:
-    """Return the application wiring for authoritative preflight/run services."""
+def get_episode_service() -> EpisodeService:
+    return get_episode_application_service()
 
-    return get_story_workflow_application_gateway()
+
+def get_dream_confirmation_service() -> DreamConfirmationService:
+    return get_dream_confirmation_application_service()
 
 
 async def _story_workflow_current_user(
@@ -401,7 +423,7 @@ async def _story_index_call(awaitable: Any) -> Any:
     except ApiRouteError as exc:
         allowed_statuses = _STORY_INDEX_ROUTE_ERROR_STATUSES.get(exc.code)
         if allowed_statuses is None or exc.status_code not in allowed_statuses:
-            logger.error("Story index gateway returned a non-public error")
+            logger.error("Story index application service returned a non-public error")
             return JSONResponse(
                 status_code=503,
                 content=build_error_payload("story_index_database_unavailable"),
@@ -1317,7 +1339,7 @@ def receive_agent_story_output(
 async def create_workflow_preflight(
     request: _WorkflowPreflightRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1326,14 +1348,14 @@ async def create_workflow_preflight(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.create_preflight(request, actor=actor))
+    return await _workflow_call(service.create_preflight(request, actor=actor))
 
 
 @router.post("/dream-runs/start", status_code=201)
 async def story_workspace_start_dream_run(
     request: StoryWorkspaceDreamLaunchCommand,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    launch_service: DreamLaunchEndpoint = Depends(get_dream_launch_endpoint_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1344,7 +1366,7 @@ async def story_workspace_start_dream_run(
         )
 
     async def accepted_response() -> StoryWorkspaceDreamLaunchAccepted:
-        context = await gateway.start_dream_run(request, actor=actor)
+        context = await launch_service.start_dream_run(request, actor=actor)
         return StoryWorkspaceDreamLaunchAccepted.from_context(context)
 
     return await _workflow_call(accepted_response(), by_alias=True)
@@ -1353,7 +1375,7 @@ async def story_workspace_start_dream_run(
 @router.get("/dream-runs")
 async def story_workspace_list_dream_runs(
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ) -> Any:
     """List only durable Dream runs visible to the authenticated actor."""
 
@@ -1365,14 +1387,14 @@ async def story_workspace_list_dream_runs(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.list_dream_runs(actor=actor), by_alias=True)
+    return await _workflow_call(service.list_dream_runs(actor=actor), by_alias=True)
 
 
 @router.get("/workflow-preflights/{preflight_id}")
 async def get_workflow_preflight(
     preflight_id: str,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1381,14 +1403,14 @@ async def get_workflow_preflight(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.get_preflight(preflight_id, actor=actor))
+    return await _workflow_call(service.get_preflight(preflight_id, actor=actor))
 
 
 @router.post("/workflow-runs", status_code=201)
 async def create_workflow_run(
     request: _WorkflowRunCreateRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1397,14 +1419,14 @@ async def create_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.create_run(request, actor=actor))
+    return await _workflow_call(service.create_run(request, actor=actor))
 
 
 @router.get("/workflow-runs/{workflow_run_id}")
 async def get_workflow_run(
     workflow_run_id: str,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1413,14 +1435,14 @@ async def get_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.get_run(workflow_run_id, actor=actor))
+    return await _workflow_call(service.get_run(workflow_run_id, actor=actor))
 
 
 @router.get("/workflow-runs/{workflow_run_id}/dream-files")
 async def story_workspace_get_workflow_run_dream_files(
     workflow_run_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ):
     try:
         actor = {"actor_id": str(current_user["user_id"])}
@@ -1431,7 +1453,7 @@ async def story_workspace_get_workflow_run_dream_files(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(
-        gateway.get_dream_files(workflow_run_id, actor=actor),
+        service.get_dream_files(workflow_run_id, actor=actor),
         by_alias=True,
     )
 
@@ -1441,7 +1463,7 @@ async def story_workspace_get_workflow_run_episode_artifacts(
     workflow_run_id: str,
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ):
     """Return only the server-bound Episode surface; no path input is accepted."""
 
@@ -1454,7 +1476,7 @@ async def story_workspace_get_workflow_run_episode_artifacts(
             content=build_error_payload(exc.code),
         )
     result = await _workflow_call(
-        gateway.get_episode_artifacts(workflow_run_id, actor=actor),
+        service.get_episode_artifacts(workflow_run_id, actor=actor),
         by_alias=True,
     )
     if isinstance(result, JSONResponse):
@@ -1474,7 +1496,7 @@ async def story_workspace_get_workflow_run_story_index(
     workflow_run_id: str,
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ):
     """Compare server-bound Artifact revisions with PostgreSQL without writing."""
 
@@ -1486,7 +1508,7 @@ async def story_workspace_get_workflow_run_story_index(
             content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
         )
     result = await _story_index_call(
-        gateway.get_story_index(workflow_run_id, actor=actor)
+        service.get_story_index(workflow_run_id, actor=actor)
     )
     if isinstance(result, JSONResponse):
         return result
@@ -1511,7 +1533,7 @@ async def story_workspace_reconcile_workflow_run_story_index(
         pattern=r'^"sha256:[0-9a-f]{64}"$',
     ),
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ):
     """Retry one revision-guarded materialization; no locator input is accepted."""
 
@@ -1523,7 +1545,7 @@ async def story_workspace_reconcile_workflow_run_story_index(
             content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
         )
     result = await _story_index_call(
-        gateway.reconcile_story_index(
+        service.reconcile_story_index(
             workflow_run_id,
             request,
             actor=actor,
@@ -1545,7 +1567,7 @@ async def story_workspace_recover_workflow_run_episode_binding(
     workflow_run_id: str,
     request: StoryWorkspaceEpisodeBindingRecoveryCommand,
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: EpisodeService = Depends(get_episode_service),
 ):
     """Dispatch the path-free, server-owned first-Episode recovery intent."""
 
@@ -1558,7 +1580,7 @@ async def story_workspace_recover_workflow_run_episode_binding(
             content=build_error_payload(exc.code),
         )
     return await _episode_action_call(
-        gateway.recover_episode_binding(
+        service.recover_episode_binding(
             workflow_run_id,
             request,
             actor=actor,
@@ -1576,7 +1598,7 @@ async def story_workspace_continue_workflow_run_episode_action(
     | StoryWorkspaceEpisodeActionContinueCommandV2,
     if_match: str = Header(alias="If-Match", min_length=73, max_length=73),
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: EpisodeService = Depends(get_episode_service),
 ):
     """Dispatch one capability only after authority and manifest revalidation."""
 
@@ -1589,7 +1611,7 @@ async def story_workspace_continue_workflow_run_episode_action(
             content=build_error_payload(exc.code),
         )
     return await _episode_action_call(
-        gateway.continue_episode_action(
+        service.continue_episode_action(
             workflow_run_id,
             request,
             actor=actor,
@@ -1606,7 +1628,7 @@ async def story_workspace_submit_workflow_run_dream_confirmation(
     workflow_run_id: str,
     request: StoryWorkspaceDreamConfirmationCommand,
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamConfirmationService = Depends(get_dream_confirmation_service),
 ):
     """Persist one hidden confirmation and queue the originating Chat Agent."""
 
@@ -1619,7 +1641,7 @@ async def story_workspace_submit_workflow_run_dream_confirmation(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(
-        gateway.submit_dream_confirmation(
+        service.submit_dream_confirmation(
             workflow_run_id,
             request,
             actor=actor,
@@ -1633,7 +1655,7 @@ async def retry_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunRetryRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1642,7 +1664,7 @@ async def retry_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.retry_run(workflow_run_id, request, actor=actor))
+    return await _workflow_call(service.retry_run(workflow_run_id, request, actor=actor))
 
 
 @router.post("/workflow-runs/{workflow_run_id}/cancel")
@@ -1650,7 +1672,7 @@ async def cancel_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunCancelRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1659,7 +1681,7 @@ async def cancel_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.cancel_run(workflow_run_id, request, actor=actor))
+    return await _workflow_call(service.cancel_run(workflow_run_id, request, actor=actor))
 
 
 @router.post("/runs/{workflow_run_id}/guidance", status_code=202)
@@ -1667,7 +1689,7 @@ async def submit_run_guidance(
     workflow_run_id: str,
     request: StoryWorkspaceGuidanceCommandPayload,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     """Submit one idempotent guidance command to a guidable run.
 
@@ -1685,5 +1707,5 @@ async def submit_run_guidance(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(
-        gateway.submit_guidance(workflow_run_id, request, actor=actor)
+        service.submit_guidance(workflow_run_id, request, actor=actor)
     )

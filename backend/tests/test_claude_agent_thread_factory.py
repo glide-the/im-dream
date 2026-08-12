@@ -396,6 +396,21 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             _run(self._collect_gen(req))
         self.assertEqual(len(getattr(self.factory, "_test_runner_instances", [])), 1)
 
+    def test_run_streaming_exposes_same_turn_completion_handle(self):
+        async def collect():
+            stream = self.factory.run_streaming(_make_request("completion-handle"))
+            frames = [frame async for frame in stream]
+            return frames, await stream.completion
+
+        with unittest.mock.patch(
+            "claude_agent.thread_factory.ClaudeAgentRunner",
+            self._FakeRunner,
+        ):
+            frames, completion = _run(collect())
+
+        self.assertTrue(frames)
+        self.assertTrue(completion.saw_finish)
+
     def test_runner_reused_on_second_turn(self):
         req = _make_request("user_runner_2")
         with unittest.mock.patch("claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner):
@@ -1082,12 +1097,12 @@ class TestFactoryAclose(unittest.TestCase):
                 "closing-rejected",
                 thread_id="thread-closing-rejected",
             )
-            stream = factory.run_events(request)
+            stream = factory.run_streaming(request)
             with self.assertRaisesRegex(RuntimeError, "closing"):
                 await anext(stream)
             await stream.aclose()
 
-            reconnect = factory.run_events(
+            reconnect = factory.run_streaming(
                 ClaudeAgentRunRequest(
                     user_id="closing-rejected",
                     thread_id="thread-closing-rejected",
@@ -1122,7 +1137,7 @@ class TestFactoryAclose(unittest.TestCase):
             )
             lock = factory._pool.get_lock(request.thread_id)
             await lock.acquire()
-            stream = factory.run_events(request)
+            stream = factory.run_streaming(request)
             queued = asyncio.create_task(anext(stream))
             await asyncio.sleep(0)
             self.assertFalse(queued.done())

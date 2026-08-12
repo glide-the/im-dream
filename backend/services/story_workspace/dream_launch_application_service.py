@@ -1,8 +1,8 @@
-"""Trusted orchestration core for starting a Dream workspace run.
+"""Single application use case for starting a Dream workspace run.
 
 Persistence, workflow services, and Agent dispatch are injected at the service
-boundary.  This keeps the launch contract independent from router request
-models and lets the gateway provide the existing SQLite-backed adapters.
+boundary. This keeps the launch contract independent from router request
+models and concrete PostgreSQL/runtime adapters.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Protocol
 import uuid
 
 try:
@@ -30,8 +30,8 @@ DREAM_LAUNCH_IDEMPOTENCY_CONFLICT = "DREAM_LAUNCH_IDEMPOTENCY_CONFLICT"
 DREAM_LAUNCH_PROVENANCE_INVALID = "DREAM_LAUNCH_PROVENANCE_INVALID"
 
 
-class StoryWorkspaceDreamLaunchError(RuntimeError):
-    """Base error exposed by the gateway-facing launch service."""
+class DreamLaunchError(RuntimeError):
+    """Base error exposed by the launch application service."""
 
     code = "DREAM_LAUNCH_INVALID"
 
@@ -39,16 +39,14 @@ class StoryWorkspaceDreamLaunchError(RuntimeError):
         super().__init__(summary)
 
 
-class StoryWorkspaceDreamLaunchIdempotencyConflict(
-    StoryWorkspaceDreamLaunchError
-):
+class DreamLaunchIdempotencyConflict(DreamLaunchError):
     code = DREAM_LAUNCH_IDEMPOTENCY_CONFLICT
 
     def __init__(self) -> None:
         super().__init__("idempotency key was reused with different Dream content")
 
 
-class StoryWorkspaceDreamLaunchProvenanceError(StoryWorkspaceDreamLaunchError):
+class DreamLaunchProvenanceError(DreamLaunchError):
     code = DREAM_LAUNCH_PROVENANCE_INVALID
 
     def __init__(self, field: str) -> None:
@@ -57,7 +55,7 @@ class StoryWorkspaceDreamLaunchProvenanceError(StoryWorkspaceDreamLaunchError):
 
 
 @dataclass(frozen=True)
-class StoryWorkspaceDreamLaunchSource:
+class DreamLaunchSource:
     """Atomically ensured Deck-bound thread and hidden launch message."""
 
     thread_id: str
@@ -75,7 +73,7 @@ class StoryWorkspaceDreamLaunchSource:
             raise ValueError("Dream launch source fingerprint must be sha256")
 
 
-class StoryWorkspaceDreamLaunchSourceAdapter(Protocol):
+class DreamLaunchSourceRepository(Protocol):
     """Persistence seam that atomically creates or replays a launch source."""
 
     async def ensure_source(
@@ -90,14 +88,56 @@ class StoryWorkspaceDreamLaunchSourceAdapter(Protocol):
         request_fingerprint: str,
         thread_id: str,
         message_id: str,
-    ) -> StoryWorkspaceDreamLaunchSource:
+    ) -> DreamLaunchSource:
         ...
 
 
-StoryWorkspaceDreamLaunchAsyncSeam = Callable[..., Awaitable[Any]]
+class DreamLaunchWorkflowOperations(Protocol):
+    """Named application dependencies for one launch request.
+
+    The production implementation owns authorization, model eligibility,
+    idempotent WorkflowRun replay and the concrete preflight/run services.
+    Keeping these as methods on one request-scoped object avoids the former
+    local callback closures without turning the adapter into a second launch
+    use case.
+    """
+
+    async def prepare(
+        self,
+        command: StoryWorkspaceDreamLaunchCommand,
+        *,
+        actor_id: str,
+        workspace_id: str,
+    ) -> Any:
+        ...
+
+    async def create_preflight(
+        self,
+        *,
+        deck_id: str,
+        binding_revision: int,
+        input_data: dict[str, Any],
+        actor_id: str,
+        workspace_id: str,
+    ) -> Any:
+        ...
+
+    async def create_run(
+        self,
+        *,
+        preflight_id: str,
+        preflight_token: str,
+        idempotency_key: str,
+        source_thread_id: str,
+        source_message_id: str,
+        source_message_time: datetime,
+        actor_id: str,
+        workspace_id: str,
+    ) -> Any:
+        ...
 
 
-class StoryWorkspaceDreamLaunchDispatcher(Protocol):
+class DreamLaunchDispatcher(Protocol):
     """Durably claim and dispatch one deterministic launch message.
 
     Implementations must deduplicate by ``source.message_id`` and leave an
@@ -110,7 +150,7 @@ class StoryWorkspaceDreamLaunchDispatcher(Protocol):
         *,
         actor_id: str,
         goal: str,
-        source: StoryWorkspaceDreamLaunchSource,
+        source: DreamLaunchSource,
         context: StoryWorkspaceDreamRunContext,
     ) -> Any:
         ...
@@ -137,22 +177,18 @@ def _field(value: Any, name: str) -> Any:
     return getattr(value, name, None)
 
 
-class StoryWorkspaceDreamLaunchService:
+class DreamLaunchApplicationService:
     """Create one idempotent Dream source/run and dispatch its first turn."""
 
     def __init__(
         self,
         *,
-        source_adapter: StoryWorkspaceDreamLaunchSourceAdapter,
-        binding_resolver: StoryWorkspaceDreamLaunchAsyncSeam,
-        preflight_creator: StoryWorkspaceDreamLaunchAsyncSeam,
-        run_creator: StoryWorkspaceDreamLaunchAsyncSeam,
-        dispatcher: StoryWorkspaceDreamLaunchDispatcher,
+        source_repository: DreamLaunchSourceRepository,
+        workflow: DreamLaunchWorkflowOperations,
+        dispatcher: DreamLaunchDispatcher,
     ) -> None:
-        self._source_adapter = source_adapter
-        self._binding_resolver = binding_resolver
-        self._preflight_creator = preflight_creator
-        self._run_creator = run_creator
+        self._source_repository = source_repository
+        self._workflow = workflow
         self._dispatcher = dispatcher
 
     async def launch(
@@ -167,24 +203,24 @@ class StoryWorkspaceDreamLaunchService:
         actor_id = actor_id.strip()
         workspace_id = workspace_id.strip()
         if not actor_id or not workspace_id:
-            raise StoryWorkspaceDreamLaunchError(
+            raise DreamLaunchError(
                 "trusted actor and workspace identifiers are required"
             )
 
         # Resolve authorization and the active binding before creating any
         # backing Chat records for the requested Deck.
-        binding = await self._binding_resolver(
-            deck_id=command.deck_id,
+        binding = await self._workflow.prepare(
+            command,
             actor_id=actor_id,
             workspace_id=workspace_id,
         )
         binding_revision = _field(binding, "binding_revision")
         if isinstance(binding_revision, bool) or not isinstance(binding_revision, int):
-            raise StoryWorkspaceDreamLaunchProvenanceError(
+            raise DreamLaunchProvenanceError(
                 "binding.binding_revision"
             )
         if binding_revision < 1:
-            raise StoryWorkspaceDreamLaunchProvenanceError(
+            raise DreamLaunchProvenanceError(
                 "binding.binding_revision"
             )
 
@@ -200,7 +236,7 @@ class StoryWorkspaceDreamLaunchService:
             workspace_id=workspace_id,
             idempotency_key=command.idempotency_key,
         )
-        source = await self._source_adapter.ensure_source(
+        source = await self._source_repository.ensure_source(
             actor_id=actor_id,
             workspace_id=workspace_id,
             deck_id=command.deck_id,
@@ -219,7 +255,7 @@ class StoryWorkspaceDreamLaunchService:
             fingerprint,
         )
 
-        preflight = await self._preflight_creator(
+        preflight = await self._workflow.create_preflight(
             deck_id=command.deck_id,
             binding_revision=binding_revision,
             input_data={"goal": command.goal},
@@ -234,15 +270,15 @@ class StoryWorkspaceDreamLaunchService:
         preflight_id = _field(preflight, "workflow_preflight_id")
         preflight_token = _field(preflight, "preflight_token")
         if not isinstance(preflight_id, str) or not preflight_id:
-            raise StoryWorkspaceDreamLaunchProvenanceError(
+            raise DreamLaunchProvenanceError(
                 "preflight.workflow_preflight_id"
             )
         if not isinstance(preflight_token, str) or not preflight_token:
-            raise StoryWorkspaceDreamLaunchProvenanceError(
+            raise DreamLaunchProvenanceError(
                 "preflight.preflight_token"
             )
 
-        run = await self._run_creator(
+        run = await self._workflow.create_run(
             preflight_id=preflight_id,
             preflight_token=preflight_token,
             idempotency_key=command.idempotency_key,
@@ -320,7 +356,7 @@ class StoryWorkspaceDreamLaunchService:
             if not isinstance(_field(preflight, name), str) or not _field(
                 preflight, name
             ):
-                raise StoryWorkspaceDreamLaunchProvenanceError(
+                raise DreamLaunchProvenanceError(
                     f"preflight.{name}"
                 )
 
@@ -329,7 +365,7 @@ class StoryWorkspaceDreamLaunchService:
         cls,
         run: Any,
         *,
-        source: StoryWorkspaceDreamLaunchSource,
+        source: DreamLaunchSource,
         actor_id: str,
         workspace_id: str,
         binding: Any,
@@ -355,11 +391,11 @@ class StoryWorkspaceDreamLaunchService:
             cls._require_equal(f"run.{name}", _field(run, name), value)
         run_id = _field(run, "workflow_run_id")
         if not isinstance(run_id, str) or not run_id:
-            raise StoryWorkspaceDreamLaunchProvenanceError(
+            raise DreamLaunchProvenanceError(
                 "run.workflow_run_id"
             )
 
     @staticmethod
     def _require_equal(field: str, actual: Any, expected: Any) -> None:
         if actual != expected:
-            raise StoryWorkspaceDreamLaunchProvenanceError(field)
+            raise DreamLaunchProvenanceError(field)

@@ -22,7 +22,7 @@ from backend.services.story_workspace.dream_reentry_service import (
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _PRODUCTION_SQL_FILES = (
     "backend/services/deck/admin_gateway.py",
-    "backend/services/deck/story_workflow_gateway.py",
+    "backend/services/deck/story_workflow_application.py",
     "backend/services/deck_plugin/installation_service.py",
     "backend/services/deck_plugin/compatibility_service.py",
     "backend/services/deck_plugin/manifest_validator.py",
@@ -31,7 +31,7 @@ _PRODUCTION_SQL_FILES = (
     "backend/services/story_workspace/dream_confirmation_service.py",
     "backend/services/story_workspace/dream_internal_command_service.py",
     "backend/services/story_workspace/agent_integration.py",
-    "backend/services/story_workspace/dream_launch_gateway.py",
+    "backend/services/story_workspace/dream_launch_infrastructure.py",
     "backend/services/story_workspace/dream_reentry_service.py",
     "backend/libs/claude_agent_kit/server/story_workspace_tool.py",
     "backend/routers/story_workspace.py",

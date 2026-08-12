@@ -58,7 +58,7 @@
   397-430` 已持有 server-side active turn 和可信 Dream provenance，可作为精确
   identity 的权威来源。
 - 审查基线中的旧 adapter 有三个生产调用方，且职责不同：
-  `backend/services/story_workspace/dream_launch_gateway.py:813`、
+  `backend/services/story_workspace/dream_launch_infrastructure.py:813`、
   `backend/services/story_workspace/dream_confirmation_service.py:889`、
   `backend/services/story_workspace/dream_agent_message_service.py:1891`；最后一项
   已迁移为 `backend/services/story_workspace/dream_internal_command_service.py`。
@@ -165,12 +165,12 @@ settled tombstone 和 cleanup 尚未实现；所有 negative/concurrent/capacity
 - `testing-and-acceptance.md:307-326` 把三个 caller 的聚焦回归、normalized drain、
   protected runner 和最终 source scan 设为 release gate。
 
-当前证据：生产源码搜索仍准确得到三个调用点：`:813`、`:889`、`:1891`。这证明
-inventory 完整，也证明删除尚未发生。
-
-未验证内容：三个 caller 尚未改为 canonical `run_events`/Coordinator drain；
-`rg 'iter_dream_run_events|DreamStreamAdapter' backend frontend` 当前预期仍非空，
-对应 owner 回归测试尚未运行。
+实施结果：三个 durable caller 均通过唯一公开入口
+`ClaudeAgentThreadFactory.run_streaming()` 启动 turn；普通 claim settlement 等待该
+流的 same-turn completion handle，只有 launch safe-error 提取按需使用共享
+`ChatStreamAdapter.decode()`。`run_events` 不再存在，`_run_streaming_frames`、
+`_run_turn_task` 和 `_subscribe_events` 均为私有实现。原 claim/heartbeat/ack/release
+测试与 ThreadFactory completion 契约测试通过。
 
 ### DR-005 — Coordinator 全出口资源清理 — CLOSED
 

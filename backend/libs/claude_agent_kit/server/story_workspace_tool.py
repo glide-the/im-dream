@@ -713,7 +713,7 @@ async def _advance_workflow_lifecycle(
         # runtime tiers and therefore never takes this compatibility branch.
         return
     import database
-    from services.deck.story_workflow_gateway import (
+    from services.story_workspace.workflow_security import (
         story_workspace_workflow_token_secret,
     )
     from services.story_workspace.dream_workflow_lifecycle_service import (

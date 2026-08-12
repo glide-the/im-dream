@@ -148,7 +148,8 @@ sequenceDiagram
     actor User as 创作者
     participant Page as Dream Launch 页面
     participant API as POST /dream-runs/start
-    participant Gateway as DreamLaunchGateway
+    participant Endpoint as DreamLaunchEndpointService
+    participant Launch as DreamLaunchApplicationService
     participant Auth as Binding / eligibility owners
     participant WF as Preflight + WorkflowRunService
     participant ChatDB as Chat thread/message DB
@@ -157,31 +158,32 @@ sequenceDiagram
     User->>Page: 选择 Deck + Agent，填写 goal
     Page->>Page: 生成并保留 idempotencyKey
     Page->>API: deckId, agentId, goal, idempotencyKey
-    API->>Gateway: authenticated actor + workspace
-    Gateway->>Auth: 校验 Deck ownership、Agent scope、model eligibility
+    API->>Endpoint: authenticated actor + workspace
+    Endpoint->>Launch: request-scoped DB + named workflow adapter
+    Launch->>Auth: 校验 Deck ownership、Agent scope、model eligibility
     alt 不可用/无权限/额度或配置失败
         Auth-->>API: safe 4xx/5xx
         API-->>Page: 保留可编辑表单，不创建部分 run
     else 可启动
-        Gateway->>ChatDB: ensure deterministic source thread/message
-        Gateway->>WF: create preflight with frozen binding/runtime facts
-        Gateway->>WF: create queued WorkflowRun bound to source thread
-        Gateway->>Dispatcher: persist/claim first-turn launch envelope
+        Launch->>ChatDB: ensure deterministic source thread/message
+        Launch->>WF: create preflight with frozen binding/runtime facts
+        Launch->>WF: create queued WorkflowRun bound to source thread
+        Launch->>Dispatcher: persist/claim first-turn launch envelope
         API-->>Page: workflowRunId + threadId
         Page->>Page: navigate /dream?run=workflowRunId
     end
     opt 相同 key + 相同 payload 重放
-        Gateway-->>Page: 同一 source/run，不重复 turn
+        Launch-->>Page: 同一 source/run，不重复 turn
     end
     opt 相同 key + 不同 payload
-        Gateway-->>Page: 409 idempotency conflict
+        Launch-->>Page: 409 idempotency conflict
     end
 ```
 
 **权限边界**：浏览器不得提交 provenance、adapter spec、runtime snapshot 或
 plugin lock；跨 actor Deck 在 source 创建前拒绝。
 
-**证据**：`dream_launch_service.py`、`dream_launch_gateway.py`、
+**证据**：`dream_launch_application_service.py`、`dream_launch_infrastructure.py`、
 `test_story_workspace_dream_launch_api.py`。
 
 ## 6. B03 — runtime 激活与首轮 Agent
@@ -200,7 +202,7 @@ sequenceDiagram
     participant WF as WorkflowRunService
     participant Bus as EventBus
 
-    Dispatcher->>Factory: run_events(standard canonical thread request)
+    Dispatcher->>Factory: run_streaming(standard canonical thread request)
     Factory->>Service: assemble_context before Session Execution
     Service->>Service: resolve actor + thread to internal Dream context
     Service->>Activation: activate_from_assembled_context(run, actor, verified manifest)
@@ -208,6 +210,7 @@ sequenceDiagram
     alt 证明完整
         Activation->>WF: queued → running(receipt, agent_session_id)
         Service->>Bus: normalized events
+        Factory-->>Dispatcher: same-turn completion handle
     else 证明缺失/不匹配
         Activation-->>Service: fail closed
         Service->>Bus: one failed finish
@@ -273,15 +276,15 @@ sequenceDiagram
     participant Page as Dream Page
     participant Hook as useStoryWorkspaceDreamFiles
     participant API as GET /workflow-runs/{run}/dream-files
-    participant Gateway as StoryWorkflowGateway
+    participant Artifact as DreamArtifactApplicationService
     participant Reader as DreamFileReader
     participant Files as Workspace files
 
     User->>Page: 打开/刷新 Dream run
     Page->>Hook: runId + current business lifecycle
     Hook->>API: actor-authenticated GET
-    API->>Gateway: actor only；不创建 workspace
-    Gateway->>Reader: resolve owned run/thread/workspace
+    API->>Artifact: actor only；不创建 workspace
+    Artifact->>Reader: resolve owned run/thread/workspace
     Reader->>Files: read-only validate run/stages/source containment
     alt 尚未物化
         Reader-->>Page: runRevision=0 + empty stages (waiting)
@@ -1029,7 +1032,7 @@ model/accounting path，不应被写成 Dream terminal workspace binding 或 Dre
 
 | 领域 | 核心源码 | 主要测试 |
 |---|---|---|
-| Launch/reentry | `dream_launch_service.py`, `dream_launch_gateway.py`, `dream_reentry_service.py` | `test_story_workspace_dream_launch_api.py`, reentry tests |
+| Launch/reentry | `dream_launch_application_service.py`, `dream_launch_infrastructure.py`, `dream_reentry_service.py` | `test_story_workspace_dream_launch_api.py`, reentry tests |
 | Dream files | `dream_file_service.py`, `story_workspace_tool.py` | `test_story_workspace_dream_files.py`, `test_story_workspace_dream_api.py` |
 | Confirmation/internal command | `dream_confirmation_service.py`, `dream_internal_command_service.py` | confirmation/internal/recovery tests |
 | Shared conversation | `claude_agent/service.py`, `thread_factory.py`, `ChatPanel.tsx` | S01–S10, Chat component tests |

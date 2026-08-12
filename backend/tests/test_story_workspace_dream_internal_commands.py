@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from agent_stream_events import NormalizedAgentEvent
+from claude_agent.chat_stream_adapter import ChatStreamAdapter
 from services.story_workspace.dream_internal_command_service import (
     StoryWorkspaceDreamInternalCommandCoordinator,
     StoryWorkspaceDreamInternalCommandError,
@@ -86,7 +87,7 @@ class _Factory:
     def session_snapshot(self, _thread_id: str):
         return {"lifecycle": "running"} if self.running else None
 
-    async def run_events(self, request):
+    async def run_streaming(self, request):
         self.requests.append(request)
         self.started.set()
         if self.block:
@@ -96,7 +97,7 @@ class _Factory:
                 self.cancelled.set()
                 raise
         for event in self.events:
-            yield event
+            yield ChatStreamAdapter.encode(event)
 
 
 class DreamInternalCommandServiceTest(unittest.TestCase):

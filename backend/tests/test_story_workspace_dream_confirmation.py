@@ -31,6 +31,7 @@ import tests._sdk_stubs  # noqa: F401 - stub optional SDK before service import
 
 import database
 from agent_stream_events import NormalizedAgentEvent
+from claude_agent.chat_stream_adapter import ChatStreamAdapter
 from backend.schema import legacy_main_sqlite
 from backend.tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 import story_workspace.contracts as contracts_module
@@ -44,7 +45,7 @@ from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from models.workflow_run import RunStatus, WorkflowRun
 from routers import story_workspace
-from services.deck import story_workflow_gateway as gateway_module
+from services.deck import story_workflow_application as gateway_module
 import services.story_workspace.dream_confirmation_service as confirmation_module
 from services.story_workspace.dream_confirmation_service import (
     STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND,
@@ -1971,11 +1972,15 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
         requests = []
 
         class FakeFactory:
-            async def run_events(self, request):
+            async def run_streaming(self, request):
                 requests.append(request)
-                yield NormalizedAgentEvent.create("message-final", {"text": "done"})
-                yield NormalizedAgentEvent.create(
-                    "finish", {"finishReason": "stop"}
+                yield ChatStreamAdapter.encode(
+                    NormalizedAgentEvent.create("message-final", {"text": "done"})
+                )
+                yield ChatStreamAdapter.encode(
+                    NormalizedAgentEvent.create(
+                        "finish", {"finishReason": "stop"}
+                    )
                 )
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2075,13 +2080,17 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
         requests = []
 
         class FakeFactory:
-            async def run_events(self, request):
+            async def run_streaming(self, request):
                 requests.append(request)
                 entered.set()
                 await release.wait()
-                yield NormalizedAgentEvent.create("message-final", {"text": "done"})
-                yield NormalizedAgentEvent.create(
-                    "finish", {"finishReason": "stop"}
+                yield ChatStreamAdapter.encode(
+                    NormalizedAgentEvent.create("message-final", {"text": "done"})
+                )
+                yield ChatStreamAdapter.encode(
+                    NormalizedAgentEvent.create(
+                        "finish", {"finishReason": "stop"}
+                    )
                 )
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
@@ -2109,7 +2118,7 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
 
     async def test_dispatcher_exception_does_not_raise_to_caller(self) -> None:
         class BrokenFactory:
-            def run_events(self, _request):
+            def run_streaming(self, _request):
                 raise RuntimeError("dispatcher broke")
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
@@ -2122,12 +2131,16 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
 
     async def test_error_frame_is_not_successful_consumption(self) -> None:
         class ErrorFactory:
-            async def run_events(self, _request):
-                yield NormalizedAgentEvent.create(
-                    "error", {"errorText": "agent failed"}
+            async def run_streaming(self, _request):
+                yield ChatStreamAdapter.encode(
+                    NormalizedAgentEvent.create(
+                        "error", {"errorText": "agent failed"}
+                    )
                 )
-                yield NormalizedAgentEvent.create(
-                    "finish", {"finishReason": "error"}
+                yield ChatStreamAdapter.encode(
+                    NormalizedAgentEvent.create(
+                        "finish", {"finishReason": "error"}
+                    )
                 )
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
@@ -2140,9 +2153,11 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
 
     async def test_finish_stop_without_message_final_is_not_consumed(self) -> None:
         class CancelledFactory:
-            async def run_events(self, _request):
-                yield NormalizedAgentEvent.create(
-                    "finish", {"finishReason": "stop"}
+            async def run_streaming(self, _request):
+                yield ChatStreamAdapter.encode(
+                    NormalizedAgentEvent.create(
+                        "finish", {"finishReason": "stop"}
+                    )
                 )
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
@@ -2155,8 +2170,10 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
 
     async def test_message_final_without_terminal_finish_is_not_consumed(self) -> None:
         class TruncatedFactory:
-            async def run_events(self, _request):
-                yield NormalizedAgentEvent.create("message-final", {"text": "done"})
+            async def run_streaming(self, _request):
+                yield ChatStreamAdapter.encode(
+                    NormalizedAgentEvent.create("message-final", {"text": "done"})
+                )
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             TruncatedFactory(),
@@ -2204,7 +2221,7 @@ class StoryWorkspaceDreamConfirmationRouteTests(unittest.TestCase):
             "user_id": int(ACTOR_ID),
             "email": "dream-confirmation@example.com",
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = Gateway
+        app.dependency_overrides[story_workspace.get_dream_confirmation_service] = Gateway
         app.include_router(story_workspace.router)
         with (
             patch.object(
@@ -2241,7 +2258,7 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
     async def test_sync_chain_schedules_durable_work_without_claiming_completion(self) -> None:
         coordinator = unittest.mock.Mock()
         coordinator.schedule.return_value = True
-        gateway = gateway_module.StoryWorkflowApplicationGateway(
+        gateway = gateway_module.DreamConfirmationApplicationService(
             dream_confirmation_coordinator=coordinator,
         )
         main_thread = threading.get_ident()
@@ -2306,7 +2323,7 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
     async def test_in_flight_replay_remains_pending_without_duplicate_schedule(self) -> None:
         coordinator = unittest.mock.Mock()
         coordinator.schedule.side_effect = [True, False]
-        gateway = gateway_module.StoryWorkflowApplicationGateway(
+        gateway = gateway_module.DreamConfirmationApplicationService(
             dream_confirmation_coordinator=coordinator,
         )
         pending = StoryWorkspaceDreamConfirmationAccepted(
@@ -2362,7 +2379,7 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
     async def test_dispatch_exception_keeps_accepted_result(self) -> None:
         coordinator = unittest.mock.Mock()
         coordinator.schedule.side_effect = RuntimeError("scheduler unavailable")
-        gateway = gateway_module.StoryWorkflowApplicationGateway(
+        gateway = gateway_module.DreamConfirmationApplicationService(
             dream_confirmation_coordinator=coordinator,
         )
         accepted = StoryWorkspaceDreamConfirmationAccepted(

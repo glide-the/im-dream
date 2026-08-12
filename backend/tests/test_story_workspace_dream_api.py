@@ -30,7 +30,7 @@ import database
 from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
 from routers import story_workspace
-from services.deck import story_workflow_gateway as gateway_module
+from services.deck import story_workflow_application as gateway_module
 from services.errors.error_registry import ApiRouteError, build_error_payload
 import services.story_workspace.dream_file_service as dream_files
 from services.story_workspace.dream_file_service import (
@@ -181,7 +181,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+        app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
             lambda: gateway
         )
         app.include_router(story_workspace.router)
@@ -328,7 +328,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+        app.dependency_overrides[story_workspace.get_story_workflow_run_service] = (
             lambda: gateway
         )
         app.include_router(story_workspace.router)
@@ -354,7 +354,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+        app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
             lambda: gateway
         )
         app.include_router(story_workspace.router)
@@ -398,8 +398,8 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                     "email": "writer@example.com",
                 }
                 app.dependency_overrides[
-                    story_workspace.get_story_workflow_gateway
-                ] = gateway_module.StoryWorkflowApplicationGateway
+                    story_workspace.get_dream_artifact_service
+                ] = gateway_module.DreamArtifactApplicationService
                 app.include_router(story_workspace.router)
 
                 creator = story_workspace.get_or_create_default_workspace
@@ -468,7 +468,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                     "email": "writer@example.com",
                 }
                 app.dependency_overrides[
-                    story_workspace.get_story_workflow_gateway
+                    story_workspace.get_dream_artifact_service
                 ] = lambda: gateway
                 app.include_router(story_workspace.router)
 
@@ -532,8 +532,8 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                     "email": "writer@example.com",
                 }
                 app.dependency_overrides[
-                    story_workspace.get_story_workflow_gateway
-                ] = gateway_module.StoryWorkflowApplicationGateway
+                    story_workspace.get_dream_artifact_service
+                ] = gateway_module.DreamArtifactApplicationService
                 app.include_router(story_workspace.router)
 
                 get_db = (
@@ -579,7 +579,7 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             '{"schema_version":"dream-surface/v1"}\n', encoding="utf-8"
         )
         self.run = authoritative_run()
-        self.gateway = gateway_module.StoryWorkflowApplicationGateway()
+        self.gateway = gateway_module.DreamArtifactApplicationService()
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()

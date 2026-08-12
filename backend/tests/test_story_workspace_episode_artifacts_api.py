@@ -24,7 +24,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from routers import story_workspace
-from services.deck import story_workflow_gateway as gateway_module
+from services.deck import story_workflow_application as gateway_module
 from services.errors.error_registry import ApiRouteError
 from services.story_workspace.episode_artifact_service import (
     StoryWorkspaceEpisodeArtifactError,
@@ -214,7 +214,7 @@ def _story_index_client(gateway: object) -> TestClient:
     app.dependency_overrides[story_workspace.get_current_user] = lambda: {
         "user_id": int(ACTOR_ID),
     }
-    app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+    app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
         lambda: gateway
     )
     app.include_router(story_workspace.router)
@@ -391,7 +391,7 @@ def test_route_passes_only_run_and_actor_and_honors_etag() -> None:
     app.dependency_overrides[story_workspace.get_current_user] = lambda: {
         "user_id": int(ACTOR_ID),
     }
-    app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+    app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
         lambda: gateway
     )
     app.include_router(story_workspace.router)
@@ -423,7 +423,7 @@ def test_route_returns_304_only_for_the_exact_quoted_manifest_etag() -> None:
     app.dependency_overrides[story_workspace.get_current_user] = lambda: {
         "user_id": int(ACTOR_ID),
     }
-    app.dependency_overrides[story_workspace.get_story_workflow_gateway] = lambda: gateway
+    app.dependency_overrides[story_workspace.get_dream_artifact_service] = lambda: gateway
     app.include_router(story_workspace.router)
     with TestClient(app) as client:
         response = client.get(
@@ -1262,7 +1262,7 @@ def test_story_index_authorizes_actor_run_workspace_deck_thread_and_message_befo
     if mutation is not None:
         db.execute(mutation)
         db.commit()
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with patch.object(
         gateway,
@@ -1312,7 +1312,7 @@ def test_story_index_post_second_surface_read_maps_safe_errors_without_writing(
         episode_authority=object(),
         refreshed_surface=object(),
     )
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     def raise_surface_error(*_args, **_kwargs):
         raise surface_error
@@ -1369,7 +1369,7 @@ def test_story_index_post_rechecks_surface_etag_before_materialize() -> None:
         episode_authority=object(),
         refreshed_surface=object(),
     )
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with (
         patch.object(gateway_module.database, "get_db", return_value=db),
@@ -1440,7 +1440,7 @@ def test_story_index_post_writes_frozen_projection_with_exact_db_cas() -> None:
         episode_authority=object(),
         refreshed_surface=object(),
     )
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with (
         patch.object(gateway_module.database, "get_db", return_value=db),
@@ -1519,7 +1519,7 @@ def test_gateway_authorizes_full_provenance_before_any_workspace_probe() -> None
     db.row_factory = sqlite3.Row
     _create_gateway_schema(db)
     _seed_authorized_gateway_run(db)
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with patch.object(
         gateway,
@@ -1543,7 +1543,7 @@ def test_gateway_missing_authority_is_unbound_before_thread_workspace_probe() ->
     db.row_factory = sqlite3.Row
     _create_gateway_schema(db)
     _seed_authorized_gateway_run(db)
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with patch.object(
         gateway,
@@ -1586,7 +1586,7 @@ def test_gateway_hides_every_broken_run_deck_thread_provenance_before_probe(
     _seed_authorized_gateway_run(db)
     db.execute(mutation)
     db.commit()
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with patch.object(
         gateway,
@@ -1610,7 +1610,7 @@ def test_gateway_owner_get_reads_bound_episode_after_full_authorization() -> Non
     db.row_factory = sqlite3.Row
     _create_gateway_schema(db)
     _seed_authorized_gateway_run(db)
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
     with tempfile.TemporaryDirectory() as temporary_directory:
         root = Path(temporary_directory)
         workspace = root / THREAD_ID
@@ -1675,8 +1675,8 @@ def test_real_route_owner_etag_refresh_and_other_actor_invisibility() -> None:
             "user_id": current_actor["value"],
         }
         app.dependency_overrides[
-            story_workspace.get_story_workflow_gateway
-        ] = gateway_module.StoryWorkflowApplicationGateway
+            story_workspace.get_dream_artifact_service
+        ] = gateway_module.DreamArtifactApplicationService
         app.include_router(story_workspace.router)
         with (
             patch.object(
@@ -1739,7 +1739,7 @@ def test_episode_workspace_invisibility_has_one_public_404_boundary(
     _create_gateway_schema(db)
     _seed_authorized_gateway_run(db)
     _set_gateway_episode_authority(db, "a" * 32)
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with patch.object(gateway, "_thread_workspace", side_effect=workspace_error):
         with pytest.raises(ApiRouteError) as captured:

@@ -37,7 +37,7 @@ The two planes are one-way coupled:
 The refactor must not change:
 
 - Claude Agent HTTP request/response or SSE frames;
-- the `ClaudeAgentRunRequest` public/internal dispatch shape with a Dream field;
+- `ClaudeAgentRunRequest` by adding a Dream-specific public/internal field;
 - the entry function called by ThreadFactory for Phase 3 execution;
 - `backend/libs/claude_agent_kit/server/agent_runner.py` classification,
   permission, cancellation or `run_streaming` behavior;
@@ -156,6 +156,31 @@ introduced.
 | Story identity/index | Dream materializer/repository | directory scan, Admin upsert |
 | review fields | Admin revision-bound command | Dream Agent inference |
 | Observer resources | `DreamObserver` via registry | ThreadFactory Dream branch |
+
+## Application service boundaries
+
+Dream business HTTP commands no longer pass through one broad workflow gateway:
+
+| Service | Owns | Does not own |
+|---|---|---|
+| `DreamLaunchEndpointService` | request DB scope and launch task-registry lifecycle | Agent execution or workflow projection |
+| `DreamLaunchApplicationService` | launch authorization, idempotency, preflight/run creation orchestration | SSE parsing or post-turn observation |
+| `StoryWorkflowRunApplicationService` | preflight/run/retry/cancel/guidance commands | Artifact and Episode commands |
+| `DreamArtifactApplicationService` | Dream files, Episode Artifact surface, Story Index and run re-entry queries | Agent lifecycle |
+| `EpisodeApplicationService` | Episode recovery/continue commands and durable internal-command dispatch | Artifact truth or Chat terminal |
+| `DreamConfirmationApplicationService` | business confirmation persistence and dispatch | Chat tool confirmation |
+
+Infrastructure is named by what it does: `DreamLaunchSourceRepository`,
+`DreamLaunchWorkflowOperationsAdapter`, `DreamRuntimeProvisioningService`,
+`DreamAgentTurnDispatcher` and the durable `DreamLaunchEnvelopeDispatcher`. There is
+no `StoryWorkspaceDreamLaunchGateway` or `StoryWorkflowApplicationGateway`.
+
+`ClaudeAgentThreadFactory.run_streaming()` is the only public method that starts
+an Agent turn. It returns the canonical Chat SSE iterator plus the completion
+handle for that same turn. `_run_streaming_frames()`, `_run_turn_task()` and
+`_subscribe_events()` are private implementation/supervision methods;
+`subscribe_stream()` only attaches to an already-running turn. Server-owned
+Dream drains therefore do not have a second normalized-event execution API.
 
 The full Project/Episode contract is in
 [Project / Episode Artifact contract](./project-episode-artifact-contract.md),

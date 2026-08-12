@@ -448,7 +448,7 @@ class StoryWorkspaceGuidanceRouteTests(unittest.TestCase):
             "workspace_id": WORKSPACE_ID,
             "role": "user",
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+        app.dependency_overrides[story_workspace.get_story_workflow_run_service] = (
             lambda: _RealServiceGateway(self.fixture)
         )
         app.include_router(story_workspace.router)

@@ -6,7 +6,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from services.deck import story_workflow_gateway as gateway_module
+from services.deck import story_workflow_application as gateway_module
 from services.story_workspace.dream_internal_command_service import (
     StoryWorkspaceDreamInternalCommandError,
 )
@@ -127,8 +127,8 @@ class _RecoveryDB:
         self.closed = True
 
 
-def _gateway() -> gateway_module.StoryWorkflowApplicationGateway:
-    return gateway_module.StoryWorkflowApplicationGateway()
+def _gateway() -> gateway_module.EpisodeApplicationService:
+    return gateway_module.EpisodeApplicationService()
 
 
 def test_recovery_scans_reserved_prefix_with_bound_and_passes_atomic_provenance() -> None:

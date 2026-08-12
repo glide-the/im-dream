@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import unittest
 
 from agent_stream_events import NormalizedAgentEvent
+from claude_agent.chat_stream_adapter import ChatStreamAdapter
 from claude_agent.event_bus import InMemoryEventBus
 from services.story_workspace.dream_lifecycle_observer import (
     DreamLifecycleCoordinator,
@@ -14,7 +15,7 @@ from services.story_workspace.dream_lifecycle_observer import (
     DreamWorkflowActivityProjectionSink,
     NormalizedAgentTurnClassifier,
     NormalizedTurnOutcome,
-    drain_normalized_agent_turn,
+    drain_chat_agent_turn,
 )
 
 
@@ -32,9 +33,9 @@ class _Factory:
     def __init__(self, events: list[NormalizedAgentEvent]) -> None:
         self.events = events
 
-    async def run_events(self, _request: object):
+    async def run_streaming(self, _request: object):
         for event in self.events:
-            yield event
+            yield ChatStreamAdapter.encode(event)
 
 
 class _RecordingSink:
@@ -155,15 +156,15 @@ class NormalizedAgentTurnClassifierTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(terminal.terminal_outcome, "cancelled")
 
     async def test_drain_classifies_failure_cancel_and_incomplete(self) -> None:
-        failed = await drain_normalized_agent_turn(
+        failed = await drain_chat_agent_turn(
             _Factory([_event("error"), _event("finish", finishReason="error")]),
             object(),
         )
-        cancelled = await drain_normalized_agent_turn(
+        cancelled = await drain_chat_agent_turn(
             _Factory([_event("text-delta", delta="x"), _event("finish", finishReason="stop")]),
             object(),
         )
-        incomplete = await drain_normalized_agent_turn(
+        incomplete = await drain_chat_agent_turn(
             _Factory([_event("message-final", text="x")]),
             object(),
         )
@@ -171,13 +172,13 @@ class NormalizedAgentTurnClassifierTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cancelled.outcome, NormalizedTurnOutcome.CANCELLED)
         self.assertEqual(incomplete.outcome, NormalizedTurnOutcome.INCOMPLETE)
 
-    async def test_drain_rejects_encoded_legacy_frames(self) -> None:
-        class LegacyFactory:
-            async def run_events(self, _request):
-                yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+    async def test_drain_rejects_non_chat_frame_values(self) -> None:
+        class BrokenFactory:
+            async def run_streaming(self, _request):
+                yield _event("finish", finishReason="stop")
 
-        with self.assertRaisesRegex(TypeError, "normalized events"):
-            await drain_normalized_agent_turn(LegacyFactory(), object())
+        with self.assertRaisesRegex(TypeError, "Chat SSE frame"):
+            await drain_chat_agent_turn(BrokenFactory(), object())
 
 
 class DreamLifecycleObserverTest(unittest.TestCase):

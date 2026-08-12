@@ -202,7 +202,7 @@ thread/turn/toolCall. Cover typed AskUser, network and reject_only validation,
 atomic single resolve, stable settled replay and timeout/reject/Stop/cancel/
 terminal/context/session/factory-close cleanup. Do not modify agent_runner.py.
 
-List and migrate dream_launch_gateway.py:813,
+List and migrate dream_launch_infrastructure.py:813,
 dream_confirmation_service.py:889 and dream_agent_message_service.py:1891 from
 iter_dream_run_events to canonical normalized run_events or one minimal
 Coordinator drain while preserving their distinct claim/ack semantics. Define
@@ -1969,7 +1969,7 @@ Dream event encoder in the target graph.
   provenance in `backend/claude_agent/service.py:935-970,1203-1226,1295-1304,
   1495-1600`.
 - Existing gateway derives exact actor/run/thread/Deck authority at
-  `story_workflow_gateway.py:1266-1329`.
+  `story_workflow_application.py:1266-1329`.
 
 **Decision/artifact effect**
 
@@ -2425,3 +2425,97 @@ Current-candidate Chromium passed S01-S10 both headless and visibly headed with
 one worker. No fixed sleep exists in the convergence spec. Final diff/link/source
 and process cleanup gates are recorded in the acceptance document. No production
 load/canary inference is made from these local results.
+
+## Round 42 — Application-service simplification and single turn entry
+
+**Current-round objective**
+
+Remove the opaque Dream launch/workflow gateway shells and make
+`ClaudeAgentThreadFactory.run_streaming()` the only public Agent turn-start
+entry without modifying Phase 3 or the protected SDK runner.
+
+**Optimized Prompt**
+
+> Refactor the accepted Dream design into explicit application services. Replace
+> the launch service/gateway pair with one `DreamLaunchApplicationService`, a
+> request-scoped endpoint service and named repository/workflow/provisioning/
+> dispatch adapters. Split the monolithic Story workflow gateway into Run,
+> Artifact, Episode and Confirmation application services, and inject each only
+> into the routes it owns. Keep authorization, preflight, idempotency, run
+> creation and commands out of `DreamObserver`. Remove public `run_events` and
+> start every Chat/Dream/internal turn through `run_streaming`; retain private
+> turn supervision, EventBus, Stop and reconnect behavior, and expose a
+> completion handle for the same stream instead of a second execution API.
+> Replace Dream launch closures with named classes. Do not change
+> `agent_runner.py`, SDK message handling or the Claude Agent Phase 3 call.
+
+**Optional Enhancers**
+
+- Add AST guards for the single public entry and closure-free launch modules.
+- Keep shared Chat decoding only where a durable launch needs one safe error.
+
+**Scope checked or modified**
+
+- ThreadFactory Chat stream/completion implementation and Dream drains.
+- Dream launch endpoint/application/infrastructure and preflight builder.
+- Story Run/Artifact/Episode/Confirmation application services, router and
+  Server lifecycle wiring.
+- Focused architecture contracts, business sequences and acceptance docs.
+
+**Completion standard**
+
+Production source contains no former launch/workflow gateway, public
+`run_events` or launch nested callable; all turn producers call
+`run_streaming`; the protected runner has no diff; focused and complete
+`backend/tests` pass; Python compile and `git diff --check` pass.
+
+**Actual result and unverified inferences**
+
+Completed. Launch uses `DreamLaunchEndpointService` →
+`DreamLaunchApplicationService` with named infrastructure classes. Story APIs
+inject `StoryWorkflowRunApplicationService`, `DreamArtifactApplicationService`,
+`EpisodeApplicationService` or `DreamConfirmationApplicationService`; the broad
+gateway symbols and file are gone. `run_streaming()` returns canonical Chat SSE
+and its same-turn completion handle; `_run_streaming_frames`, `_run_turn_task`
+and `_subscribe_events` remain private. Production legacy-symbol and nested-
+callable scans are empty, `agent_runner.py` has no diff, and complete repository
+tests passed: 1,954 passed, 22 skipped and 651 subtests. An unscoped `pytest`
+attempt also collected real `backend/data/agent-workspace` plugin test copies
+and stopped with 629 duplicate-module collection errors; no real data was
+deleted, and the authoritative `backend/tests` boundary passed. Frontend,
+Admin, real-provider and browser tests were not rerun because this round changes
+only backend application wiring and preserves the already-tested public wire/UI
+contracts.
+
+## Round 43 — Atomic architecture commit
+
+**Current-round objective**
+
+Commit only the reviewed Dream application-service and single-turn-entry change
+set as one recoverable Git unit.
+
+**Optimized Prompt**
+
+> Audit the current Dream repository worktree and stage only files directly
+> related to the R42 application-service split, sole `run_streaming()` entry,
+> Observer/router/Server wiring, contract tests and synchronized design docs.
+> Exclude environment files, real Agent workspace data, dependencies and Admin
+> repository state. Verify the protected runner is unchanged and
+> `git diff --check` passes, then create one descriptive architecture commit.
+
+**Scope checked or modified**
+
+- R42 backend implementation, tests and directly synchronized design documents.
+- No `backend/data`, environment, dependency or Admin files.
+
+**Completion standard**
+
+The staged diff exactly matches the R42 change set, passes whitespace review,
+contains no protected-runner diff and is committed as one atomic unit.
+
+**Actual result and unverified inferences**
+
+Completed as the commit containing this record. Pre-commit inventory found no
+environment or real-data path, `agent_runner.py` remained unchanged and
+`git diff --check` passed. No tests were rerun in this commit-only round; R42's
+complete and focused test results remain the verification evidence.

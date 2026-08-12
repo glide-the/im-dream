@@ -1,6 +1,6 @@
 # Dream Agent conversation convergence design
 
-> Status: **R41 corrected integration and business design ACCEPT**.
+> Status: **R42 simplified application architecture ACCEPT**.
 > The current candidate passed full backend/frontend/Admin checks, disposable
 > and configured PostgreSQL checks, one real `hy3-preview` proof, and S01–S10
 > in both headless and visible Chromium with one worker. The B01–B21 business
@@ -8,7 +8,7 @@
 > staging/canary, immutable rollback and production load were not run.
 > [Diagnosis](./diagnosis.md) is intentionally pinned to the historical
 > `platform@a506c83d5fa9a07d37afa10b2fb947c05c9c7408` baseline. All other current
-> implementation claims refer to the 2026-08-12 migration worktree. R17–R41
+> implementation claims refer to the 2026-08-12 migration worktree. R17–R42
 > executable evidence is recorded in
 > [Testing and acceptance](./testing-and-acceptance.md). It is not staging,
 > canary, immutable-build rollback or production-load evidence.
@@ -168,11 +168,13 @@ For this migration, conflicts are resolved in this order:
 | Shared normalized server EventBus and canonical Chat thread endpoints | Verified worktree |
 | Dream wrapper composing `ChatPanel` plus `threadSessionHydration.ts` | Verified worktree |
 | Server-side Dream retry-leaf resolver during context assembly | Verified worktree in `dream_thread_binding.py` + `ClaudeAgentService.assemble_context` |
+| Explicit Dream application services | R42: Launch, Run, Artifact, Episode and Confirmation are separate injected owners; former broad gateway shells are deleted |
+| Sole public Agent turn start | R42: `ClaudeAgentThreadFactory.run_streaming()` owns canonical SSE plus same-turn completion; no public `run_events` remains |
 | Canonical bounded confirmation policy/Future store | Verified worktree in `tool_confirmation_store.py` |
 | Registry-owned `DreamObserver` and bounded latest-hint sink | Verified worktree through `SessionObserverRegistry`; failures remain outside the Agent stream |
 | Optional shared Redis EventBus runtime dependency | `redis>=5,<8` declared; isolated Redis and Gateway loopback checks PASS for known-turn stream/replay/terminal semantics |
 | Direct caller replacement and hard deletion of the old protocol | Local source, OpenAPI and built-bundle inventories PASS; immutable release artifact and rollback exercise pending |
-| Backend and frontend regression | R41: backend 1,952 passed / 22 skipped / 654 subtests; frontend 338 unit/contract tests plus TypeScript, lint and production build PASS |
+| Backend and frontend regression | R42 backend: 1,954 passed / 22 skipped / 651 subtests; R41 frontend: 338 unit/contract tests plus TypeScript, lint and production build PASS |
 | Named cross-layer interaction matrix | R41: S01–S10 PASS headless and visible headed Chromium with semantic waits and one worker; S11–S14 remain covered by backend/source/OpenAPI acceptance |
 | Production-shaped fake-provider chain | R17 full owned PostgreSQL/Admin/fake-provider chain PASS with balanced ledger, zero external calls and exact cleanup |
 | Admin canonical artifact contract | R20: 28 tests and Admin TypeScript PASS after the scoped stale assertion correction |
