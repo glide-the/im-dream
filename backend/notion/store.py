@@ -4,7 +4,7 @@
 
 """PostgreSQL persistence for Notion resource connectors.
 
-The five tables are created only by Dream-owned Alembic migrations.  This
+The five tables are created only by Admin-owned Drizzle migrations. This
 module owns runtime queries and transactions; it never creates schema objects
 and has no alternate database implementation.
 """

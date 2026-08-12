@@ -60,7 +60,7 @@ def _dream_tables() -> frozenset[str]:
     tables = frozenset(str(table["name"]) for table in manifest["tables"])
     if len(tables) != 48:
         raise RuntimeError("Dream role bootstrap requires the exact 43+5 manifest")
-    return tables | {"dream_alembic_version"}
+    return tables
 
 
 def _create_roles(connection: psycopg.Connection, roles: RoleNames) -> None:

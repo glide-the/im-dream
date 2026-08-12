@@ -1,8 +1,8 @@
 """Deterministic PostgreSQL application-catalog fingerprinting.
 
-The snapshot excludes Alembic's bookkeeping table and identity sequences.  It
-captures the structural facts needed by the Dream 43-core + 5-Notion table
-migration gate, then hashes canonical JSON rather than PostgreSQL display text.
+Admin migration bookkeeping lives outside the application schema. The snapshot
+captures the structural facts needed by the Dream 43-core + 5-Notion data gate,
+then hashes canonical JSON rather than PostgreSQL display text.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ EXPECTED_APPLICATION_TABLE_COUNT: Final = 48
 SOURCE_COLUMN_COUNT: Final = 567
 TARGET_COLUMN_COUNT: Final = 569
 SOURCE_EXPLICIT_INDEX_COUNT: Final = 78
-TARGET_EXPLICIT_INDEX_COUNT: Final = 81
+TARGET_EXPLICIT_INDEX_COUNT: Final = 82
 
 # ``EXPECTED_*`` names are the public readiness API.  Unqualified compatibility
 # names always describe the PostgreSQL target, never the legacy source.
@@ -49,7 +49,6 @@ FROM pg_catalog.pg_class AS c
 JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
 WHERE n.nspname = %s
   AND c.relkind IN ('r', 'p')
-  AND c.relname <> 'alembic_version'
 ORDER BY n.nspname, c.relname
 """
 
@@ -81,7 +80,6 @@ LEFT JOIN pg_catalog.pg_collation AS co ON co.oid = a.attcollation
 LEFT JOIN pg_catalog.pg_namespace AS cn ON cn.oid = co.collnamespace
 WHERE n.nspname = %s
   AND c.relkind IN ('r', 'p')
-  AND c.relname <> 'alembic_version'
   AND a.attnum > 0
   AND NOT a.attisdropped
 ORDER BY n.nspname, c.relname, a.attnum
@@ -118,7 +116,6 @@ LEFT JOIN pg_catalog.pg_class AS rc ON rc.oid = con.confrelid
 LEFT JOIN pg_catalog.pg_namespace AS rn ON rn.oid = rc.relnamespace
 WHERE n.nspname = %s
   AND c.relkind IN ('r', 'p')
-  AND c.relname <> 'alembic_version'
   AND con.contype IN ('p', 'u', 'c', 'f')
 ORDER BY n.nspname, c.relname, con.contype, con.conname
 """
@@ -155,7 +152,6 @@ CROSS JOIN LATERAL generate_series(1, i.indnatts) AS key(position)
 LEFT JOIN pg_catalog.pg_constraint AS con ON con.conindid = i.indexrelid
 WHERE n.nspname = %s
   AND c.relkind IN ('r', 'p')
-  AND c.relname <> 'alembic_version'
   AND con.oid IS NULL
 ORDER BY n.nspname, c.relname, ic.relname, key.position
 """
@@ -185,7 +181,6 @@ JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
 JOIN pg_catalog.pg_proc AS p ON p.oid = t.tgfoid
 WHERE n.nspname = %s
   AND c.relkind IN ('r', 'p')
-  AND c.relname <> 'alembic_version'
   AND NOT t.tgisinternal
 ORDER BY n.nspname, c.relname, t.tgname
 """
@@ -293,7 +288,7 @@ def _expected_table_names(
                 raise CatalogMismatchError()
         else:
             table_name = value
-        if table_name == "alembic_version" or table_name in normalized:
+        if table_name in normalized:
             raise CatalogMismatchError()
         normalized.add(table_name)
     return frozenset(normalized)
@@ -343,7 +338,7 @@ def catalog_snapshot(
     for raw_row in table_rows:
         row = _record(raw_row, table_fields)
         key = (str(row["schema_name"]), str(row["table_name"]))
-        if key[0] != schema or key[1] == "alembic_version" or key in tables:
+        if key[0] != schema or key in tables:
             raise CatalogMismatchError()
         tables[key] = {
             "schema": key[0],

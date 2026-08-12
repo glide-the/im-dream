@@ -15,9 +15,8 @@ def test_role_names_are_non_login_and_domain_specific() -> None:
 
 def test_role_bootstrap_uses_exact_dream_43_plus_5_manifest() -> None:
     tables = _dream_tables()
-    assert len(tables) == 49
+    assert len(tables) == 48
     assert "users" in tables
     assert "story_workspace_workspaces" in tables
     assert "story_workspace_stories" in tables
     assert "connector_resources" in tables
-    assert "dream_alembic_version" in tables

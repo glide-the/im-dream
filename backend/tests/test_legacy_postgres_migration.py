@@ -187,6 +187,23 @@ def test_approved_story_target_extensions_do_not_enter_legacy_source_columns() -
             "story_workspace_stories"
         ]
     )
+    assert [name for name, _ in target_columns[19:]] == [
+        "artifact_source_type",
+        "source_run_id",
+        "source_thread_ref",
+        "source_project_id",
+        "episode_count",
+        "artifact_manifest_revision",
+        "script_revision",
+        "artifact_sync_status",
+        "artifact_indexed_at",
+        "artifact_sync_error_code",
+        "script_size_bytes",
+        "artifact_available",
+        "reconcile_version",
+        "reviewed_script_revision",
+        "artifact_status",
+    ]
     expected_indexes = legacy_importer._expected_target_indexes(
         manifest,
         enabled_extensions=frozenset({"story_workspace_stories"}),
@@ -195,6 +212,10 @@ def test_approved_story_target_extensions_do_not_enter_legacy_source_columns() -
         name: expected_indexes[name]
         for name in legacy_importer.APPROVED_TARGET_INDEX_EXTENSIONS
     } == legacy_importer.APPROVED_TARGET_INDEX_EXTENSIONS
+    assert (
+        "story_workspace_stories",
+        "story_workspace_artifact_status_compatibility_trigger",
+    ) in legacy_importer.APPROVED_EXTERNAL_TRIGGERS
 
 
 def test_live_source_column_order_and_approved_default_drift_are_compatible() -> None:
@@ -587,7 +608,7 @@ def test_migration_sql_has_no_implicit_overwrite_or_destructive_target_statement
 
 @pytest.mark.skipif(
     os.getenv("INK_RUN_LEGACY_PG_MIGRATION_TEST") != "1",
-    reason="requires an explicitly owned, Alembic-head, empty TEST_DATABASE_URL",
+    reason="requires an explicitly owned, capability-ready, empty TEST_DATABASE_URL",
 )
 def test_isolated_postgres_full_48_table_rehearsal_rolls_back(tmp_path: Path) -> None:
     expected_database = os.environ.get("INK_EXPECTED_TEST_DATABASE", "")
@@ -608,7 +629,7 @@ def test_isolated_postgres_full_48_table_rehearsal_rolls_back(tmp_path: Path) ->
 
 @pytest.mark.skipif(
     os.getenv("INK_RUN_LEGACY_PG_MIGRATION_TEST") != "1",
-    reason="requires an explicitly owned, Alembic-head, empty TEST_DATABASE_URL",
+    reason="requires an explicitly owned, capability-ready, empty TEST_DATABASE_URL",
 )
 def test_isolated_postgres_baseline_exact_match_and_drift_are_distinguished(
     tmp_path: Path,

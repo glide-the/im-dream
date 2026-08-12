@@ -126,9 +126,6 @@ class _PooledConnectionLease:
 
 _runtime_pool: PostgresPool | None = None
 _runtime_pool_lock = RLock()
-_DREAM_ALEMBIC_HEAD = "20260809_06"
-
-
 def _open_runtime_pool() -> PostgresPool:
     global _runtime_pool
     with _runtime_pool_lock:
@@ -212,19 +209,30 @@ def get_db() -> _PooledConnectionLease:
     return _PooledConnectionLease(pool, connection)
 
 def init_db():
-    """Open PostgreSQL and fail closed unless Dream Alembic is at head.
+    """Open PostgreSQL and fail closed unless required capabilities exist.
 
     Runtime startup never creates, alters, seeds, or migrates schema.  Schema
-    ownership belongs to the reviewed Dream Alembic command.
+    DDL ownership belongs to Admin/Drizzle. Frozen legacy migration receipts
+    are historical audit data and are never accepted as runtime authority.
     """
+
+    try:
+        from schema.capabilities import (
+            REQUIRED_RUNTIME_CAPABILITIES,
+            inspect_schema_authority,
+        )
+    except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+        from backend.schema.capabilities import (
+            REQUIRED_RUNTIME_CAPABILITIES,
+            inspect_schema_authority,
+        )
 
     db = get_db()
     try:
-        row = db.execute(
-            "SELECT version_num FROM dream_alembic_version LIMIT 1"
-        ).fetchone()
-        if row is None or str(row["version_num"]) != _DREAM_ALEMBIC_HEAD:
-            raise RuntimeError("Dream PostgreSQL schema is not at the required Alembic head")
+        receipt = inspect_schema_authority(
+            db,
+            required_capabilities=REQUIRED_RUNTIME_CAPABILITIES,
+        )
         db.rollback()
     except Exception:
         db.rollback()

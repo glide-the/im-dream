@@ -138,12 +138,21 @@ PostgreSQL driver (`psycopg`) or the rest of the backend dependencies.
 ### PostgreSQL migration
 
 Dream does not create tables at application startup and has no SQLite/JSON/
-memory fallback. Dream Alembic owns the 48 canonical table definitions and the
-Dream importer owns snapshot/staging/validation; Admin Drizzle owns the ordered
-data-migration registry and subscription bootstrap. A fresh database must run
-Admin `0000–0026`, Dream Alembic head `20260809_06`, Admin `0027–0028`, then
-the two `drizzle/data` runners. This order lets Dream exactly adopt the three
-canonical tables before the approved Admin Story extensions are applied.
+memory fallback. Admin Drizzle is the sole PostgreSQL DDL/version authority;
+Dream owns repositories, transactions, business data and importer semantics.
+Dream startup performs a read-only capability check and never runs a migration.
+Create or upgrade the complete Admin + Dream schema from the Admin repository:
+
+```bash
+pnpm db:migrate
+pnpm db:migrate:check
+```
+
+The required runtime capabilities are `dream.schema.unified.v1`,
+`dream.workflow.thread-lookup.v1`, and `dream.story-artifact-contract.v2`.
+Dream no longer accepts an Alembic head as runtime authority. Admin migration
+`0032_dream_schema_authority_cutover` adopts verified historical `06/07`
+databases and publishes these capabilities before the Dream process starts.
 
 The importer defaults to a source-only dry run; production execution
 additionally requires exact database/host/port/owner and an explicit approval
@@ -164,18 +173,15 @@ PostgreSQL installations use `--mode verify-existing`; post-cutover changes
 are accepted only with the explicit flag and only when every source PK exists
 and the target timestamp proves that the PostgreSQL row is newer.
 
-The local Admin-owned `localhost:5433/ink-memory` was re-verified on
-2026-08-10 with Admin migration count 29 and Dream head `20260809_06`. All 48
-source tables / 4,921 source primary keys are present: 4,919 rows match exactly
-and 2 rows are verified newer PostgreSQL writes; no source row is missing and
-the adoption transaction wrote no business data. The append-only Drizzle
-registry contains two runs and 48 table results; all 30 canonical users have
-their internal projection, billing account, and Subscription, and all three
-default Plans exist. The 48-table total is the complete 43-table Dream main
-source plus the 5-table Notion Connector source; it is not the earlier
-three-table Admin importer.
-See the Admin architecture runbook and correction worklog before migrating a
-different environment.
+The checked-in disposable PostgreSQL E2E initializes the schema using only the
+33 Admin migrations, imports the current real 43+5 source inventory, validates
+count/PK/row/FK/sequence/trigger contracts, writes the V2 Drizzle receipt and
+proves idempotent adoption. Counts are source facts, not a hard-coded schema
+version: the 2026-08-12 source scan contains 4,930 rows. Existing successful V1
+receipts remain valid and are reused by source fingerprint.
+
+See [Database schema authority](docs/design/database-schema-authority.md)
+before migrating another environment.
 
 ### Frontend Setup
 
@@ -204,7 +210,7 @@ This creates an organic rhythm—voices chime in naturally rather than constantl
 
 **Frontend:** React 19 + TypeScript, Vite, TipTap editor with custom extensions
 
-**Backend:** FastAPI + Python, PolyCLI for LLM orchestration, PostgreSQL 16 with psycopg 3 pooling and Dream-owned Alembic
+**Backend:** FastAPI + Python, PolyCLI for LLM orchestration, PostgreSQL 16 with psycopg 3 pooling and capability-checked Admin/Drizzle schema
 
 **AI:** Multi-model support (GPT-4, Claude, DeepSeek, Gemini), structured outputs via Pydantic
 
@@ -226,7 +232,7 @@ This creates an organic rhythm—voices chime in naturally rather than constantl
 The current backend requires PostgreSQL and must not be deployed with the old
 Cloud Storage FUSE/SQLite persistence path. The commands below remain legacy
 deployment scaffolding until its environment is updated for `DATABASE_URL`,
-Alembic and the PostgreSQL cutover gates:
+the Admin Drizzle release job and the PostgreSQL capability gates:
 
 ```bash
 export GCP_PROJECT_ID=your-project-id

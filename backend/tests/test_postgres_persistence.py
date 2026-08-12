@@ -528,13 +528,13 @@ class CatalogFingerprintTest(unittest.TestCase):
         self.assertEqual(EXPECTED_TARGET_APPLICATION_COLUMN_COUNT, 569)
         self.assertEqual(EXPECTED_APPLICATION_COLUMN_COUNT, 569)
         self.assertEqual(EXPECTED_SOURCE_EXPLICIT_INDEX_COUNT, 78)
-        self.assertEqual(EXPECTED_TARGET_EXPLICIT_INDEX_COUNT, 81)
-        self.assertEqual(EXPECTED_EXPLICIT_INDEX_COUNT, 81)
+        self.assertEqual(EXPECTED_TARGET_EXPLICIT_INDEX_COUNT, 82)
+        self.assertEqual(EXPECTED_EXPLICIT_INDEX_COUNT, 82)
 
         target = CatalogExpectations.dream_43_plus_5()
         self.assertEqual(target.tables, 48)
         self.assertEqual(target.columns, 569)
-        self.assertEqual(target.explicit_indexes, 81)
+        self.assertEqual(target.explicit_indexes, 82)
         self.assertEqual(target.triggers, 25)
 
     def test_fingerprint_is_order_independent_and_structurally_sensitive(self):

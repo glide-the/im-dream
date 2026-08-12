@@ -30,17 +30,58 @@ from typing import Any, Final
 from uuid import UUID, uuid4
 
 from .catalog import BASELINE_TABLES, load_manifest
-from .postgres import BASELINE_INDEX_DDL
+from .capabilities import (
+    SchemaCapabilityError,
+    UNIFIED_DREAM_CAPABILITY,
+    inspect_schema_authority,
+)
 
 
 CONTRACT: Final = "ink-dream-legacy-postgres-import-v1"
-EXPECTED_ALEMBIC_HEAD: Final = "20260809_06"
 DEFAULT_MAIN_FILENAME: Final = "ink-and-memory.db"
 DEFAULT_NOTION_FILENAME: Final = "notion-connectors.db"
 TARGET_SCHEMA: Final = "public"
 APPROVED_EXTERNAL_TRIGGERS: Final = {
+    (
+        "story_workspace_stories",
+        "story_workspace_artifact_status_compatibility_trigger",
+    ),
     ("users", "users_sync_billing_identity"),
     ("users", "zz_users_default_free_subscription"),
+}
+APPROVED_TARGET_INDEXES: Final = {
+    "users_email_uidx": ("users", True),
+    "users_status_updated_idx": ("users", False),
+    "story_workspace_workspaces_owner_idx": (
+        "story_workspace_workspaces",
+        False,
+    ),
+    "story_workspace_workspaces_status_updated_idx": (
+        "story_workspace_workspaces",
+        False,
+    ),
+    "story_workspace_stories_author_updated_idx": (
+        "story_workspace_stories",
+        False,
+    ),
+    "story_workspace_stories_workspace_updated_idx": (
+        "story_workspace_stories",
+        False,
+    ),
+    "story_workspace_stories_status_updated_idx": (
+        "story_workspace_stories",
+        False,
+    ),
+    "story_workspace_stories_review_updated_idx": (
+        "story_workspace_stories",
+        False,
+    ),
+    "story_workspace_stories_type_updated_idx": (
+        "story_workspace_stories",
+        False,
+    ),
+    "story_workspace_stories_title_idx": ("story_workspace_stories", False),
+    "idx_workflow_runs_source_voice_thread": ("workflow_runs", False),
 }
 APPROVED_TARGET_COLUMN_EXTENSIONS: Final = {
     "story_workspace_stories": (
@@ -49,7 +90,6 @@ APPROVED_TARGET_COLUMN_EXTENSIONS: Final = {
         ("source_thread_ref", "text"),
         ("source_project_id", "text"),
         ("episode_count", "integer"),
-        ("artifact_status", "text"),
         ("artifact_manifest_revision", "text"),
         ("script_revision", "text"),
         ("artifact_sync_status", "text"),
@@ -59,6 +99,9 @@ APPROVED_TARGET_COLUMN_EXTENSIONS: Final = {
         ("artifact_available", "boolean"),
         ("reconcile_version", "integer"),
         ("reviewed_script_revision", "text"),
+        # Added by Admin 0030 after the 0027 artifact columns, so its physical
+        # ordinal is intentionally last even though it is logically a status.
+        ("artifact_status", "text"),
     ),
 }
 APPROVED_TARGET_INDEX_EXTENSIONS: Final = {
@@ -970,19 +1013,7 @@ def _expected_target_indexes(
                 name,
                 bool(re.match(r"^\s*CREATE\s+UNIQUE\s+INDEX\b", source_sql, re.I)),
             )
-    for statement in BASELINE_INDEX_DDL:
-        match = re.match(
-            r"^CREATE\s+(?P<unique>UNIQUE\s+)?INDEX\s+(?P<name>[a-z0-9_]+)\s+ON\s+"
-            r"(?P<table>[a-z0-9_]+)",
-            statement,
-            re.I,
-        )
-        if not match:
-            raise LegacyMigrationError("MANIFEST_BASELINE_INDEX_INVALID", phase="manifest")
-        expected[match.group("name")] = (
-            match.group("table"),
-            bool(match.group("unique")),
-        )
+    expected.update(APPROVED_TARGET_INDEXES)
     expected.update(
         {
             name: contract
@@ -1170,11 +1201,10 @@ def _validate_target_catalog(
     connection: Any, manifest: Mapping[str, Any]
 ) -> dict[str, Any]:
     try:
-        version = _fetch_scalar(
-            connection, "SELECT version_num FROM dream_alembic_version"
+        schema_authority = inspect_schema_authority(
+            connection,
+            required_capabilities={UNIFIED_DREAM_CAPABILITY: 1},
         )
-        if str(version) != EXPECTED_ALEMBIC_HEAD:
-            raise LegacyMigrationError("TARGET_ALEMBIC_HEAD_MISMATCH", phase="target")
         database_name = str(_fetch_scalar(connection, "SELECT current_database()"))
         rows = connection.execute(
             "SELECT table_name, column_name, data_type "
@@ -1262,7 +1292,7 @@ def _validate_target_catalog(
         )
         return {
             "databaseSha256": hashlib.sha256(database_name.encode("utf-8")).hexdigest(),
-            "alembicHead": EXPECTED_ALEMBIC_HEAD,
+            "schemaAuthority": schema_authority.safe_dict(),
             "tables": len(manifest["tables"]),
             "columns": sum(
                 len(columns_by_table[str(table["name"])])
@@ -1275,6 +1305,10 @@ def _validate_target_catalog(
             ).hexdigest(),
             **constraint_receipt,
         }
+    except SchemaCapabilityError:
+        raise LegacyMigrationError(
+            "TARGET_SCHEMA_CAPABILITY_MISMATCH", phase="target"
+        ) from None
     except LegacyMigrationError:
         raise
     except Exception:
@@ -2333,10 +2367,10 @@ def run_legacy_migration(
 
 
 __all__ = [
+    "APPROVED_TARGET_INDEXES",
     "CONTRACT",
     "DEFAULT_MAIN_FILENAME",
     "DEFAULT_NOTION_FILENAME",
-    "EXPECTED_ALEMBIC_HEAD",
     "LegacyMigrationError",
     "SnapshotBundle",
     "SnapshotFile",

@@ -24,7 +24,6 @@ from typing import Any, Callable, Iterable
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = BACKEND_ROOT.parent
 MANIFEST_PATH = Path(__file__).with_name("legacy_schema_manifest.json.gz.b64")
-POSTGRES_SCHEMA_PATH = Path(__file__).with_name("postgres_schema.sql")
 
 EXPECTED_COUNTS = {
     "main": {"tables": 43, "columns": 522, "explicit_indexes": 73, "triggers": 25},
@@ -35,7 +34,7 @@ EXPECTED_COUNTS = {
 EXPECTED_POSTGRES_COUNTS = {
     "tables": 48,
     "columns": 569,
-    "explicit_indexes": 81,
+    "explicit_indexes": 82,
     "triggers": 25,
 }
 
@@ -622,5 +621,18 @@ def render_manifest(payload: dict[str, Any]) -> str:
     # deterministic gzip + base64 so the checked-in artifact remains compact;
     # export/verify commands expose a human-readable aggregate receipt.
     raw = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
-    encoded = base64.b64encode(gzip.compress(raw, compresslevel=9, mtime=0)).decode("ascii")
+    compressed = io.BytesIO()
+    # ``gzip.compress(..., mtime=0)`` delegates to zlib on some CPython
+    # versions and emits a host-specific OS header byte. GzipFile emits the
+    # RFC 1952 "unknown" byte consistently across the project's 3.12/3.13
+    # venvs while retaining deterministic mtime and an empty filename.
+    with gzip.GzipFile(
+        filename="",
+        mode="wb",
+        fileobj=compressed,
+        compresslevel=9,
+        mtime=0,
+    ) as archive:
+        archive.write(raw)
+    encoded = base64.b64encode(compressed.getvalue()).decode("ascii")
     return "\n".join(encoded[offset : offset + 76] for offset in range(0, len(encoded), 76)) + "\n"

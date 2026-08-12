@@ -14,7 +14,6 @@ const adminRoot = resolve(dreamRoot, '../ink-admin-memory');
 const backendRoot = resolve(dreamRoot, 'backend');
 const frontendRoot = resolve(dreamRoot, 'frontend');
 const python = resolve(backendRoot, '.venv/bin/python');
-const alembic = resolve(backendRoot, '.venv/bin/alembic');
 const suffix = randomBytes(6).toString('hex');
 const databaseName = `ink_memory_dream_business_${suffix}_test`;
 const containerName = `ink-dream-business-e2e-${suffix}`;
@@ -131,15 +130,15 @@ async function waitForPostgres(databaseUrl) {
   await execute(python, ['-c', probe, databaseUrl], { cwd: backendRoot });
 }
 
-async function baselineAclSha256(databaseUrl) {
+async function verifyDreamThreadLookupIndex(databaseUrl) {
   const source = [
     'import json, psycopg, sys',
     'with psycopg.connect(sys.argv[1]) as c:',
-    ' rows=c.execute("""SELECT table_name, grantee, privilege_type, is_grantable FROM information_schema.role_table_grants WHERE table_schema=current_schema() AND table_name=ANY(%s::text[]) ORDER BY table_name, grantee, privilege_type, is_grantable""", (["story_workspace_stories","story_workspace_workspaces","users"],)).fetchall()',
-    ' print(json.dumps([[str(v) for v in row] for row in rows],separators=(",",":")))',
+    ' row=c.execute("""SELECT i.indisunique, i.indisvalid, i.indisready, array_agg(a.attname ORDER BY k.ordinality) FROM pg_class idx JOIN pg_index i ON i.indexrelid=idx.oid JOIN pg_class tbl ON tbl.oid=i.indrelid JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ordinality) ON TRUE JOIN pg_attribute a ON a.attrelid=tbl.oid AND a.attnum=k.attnum WHERE idx.relname=%s AND tbl.relname=%s GROUP BY i.indisunique,i.indisvalid,i.indisready""", ("idx_workflow_runs_source_voice_thread","workflow_runs")).fetchone()',
+    ' assert row == (False, True, True, ["source_voice_thread_id"]), f"Dream thread index mismatch: {row!r}"',
+    ' print(json.dumps({"index":"idx_workflow_runs_source_voice_thread","unique":row[0],"valid":row[1],"ready":row[2],"columns":row[3]},separators=(",",":")))',
   ].join('\n');
-  const rows = await execute(python, ['-c', source, databaseUrl], { cwd: backendRoot });
-  return createHash('sha256').update(rows).digest('hex');
+  return execute(python, ['-c', source, databaseUrl], { cwd: backendRoot });
 }
 
 async function provisionUsers(databaseUrl) {
@@ -161,8 +160,9 @@ async function seedLegacyArtifactStatusBackfill(databaseUrl) {
   const source = [
     'import psycopg, sys',
     'with psycopg.connect(sys.argv[1]) as c:',
-    ' c.execute("""INSERT INTO story_workspace_workspaces (id,name,owner_id,settings,status) VALUES (%s,%s,102,%s::jsonb,\'active\')""", ("workspace-artifact-backfill", "Artifact Backfill", "{}"))',
-    ' c.execute("""INSERT INTO story_workspace_stories (id,identifier,title,status,review_status,type,author_id,workspace_id,artifact_source_type,source_run_id,source_thread_ref,source_project_id,episode_count,artifact_manifest_revision,script_revision,artifact_sync_status,artifact_indexed_at,script_size_bytes,artifact_available,reconcile_version) VALUES (%s,%s,%s,\'draft\',\'pending\',\'script\',102,%s,\'dream_episode\',%s,%s,%s,1,%s,%s,\'indexed\',CURRENT_TIMESTAMP,128,TRUE,1)""", ("08f3f1dd-d601-59dd-ab31-b966cfd14d52", "artifact-backfill", "Artifact Backfill", "workspace-artifact-backfill", "run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "thread-artifact-backfill", "artifact-backfill", "sha256:"+"a"*64, "sha256:"+"b"*64))',
+    ' c.execute("""INSERT INTO users (id,email,password_hash,display_name,role) VALUES (103,%s,%s,%s,\'user\')""", ("artifact-backfill@example.invalid", "fixture-hash-not-a-secret", "Artifact Backfill"))',
+    ' c.execute("""INSERT INTO story_workspace_workspaces (id,name,owner_id,settings,status) VALUES (%s,%s,103,%s::jsonb,\'active\')""", ("workspace-artifact-backfill", "Artifact Backfill", "{}"))',
+    ' c.execute("""INSERT INTO story_workspace_stories (id,identifier,title,status,review_status,type,author_id,workspace_id,artifact_source_type,source_run_id,source_thread_ref,source_project_id,episode_count,artifact_manifest_revision,script_revision,artifact_sync_status,artifact_indexed_at,script_size_bytes,artifact_available,reconcile_version) VALUES (%s,%s,%s,\'draft\',\'pending\',\'script\',103,%s,\'dream_episode\',%s,%s,%s,1,%s,%s,\'indexed\',CURRENT_TIMESTAMP,128,TRUE,1)""", ("08f3f1dd-d601-59dd-ab31-b966cfd14d52", "artifact-backfill", "Artifact Backfill", "workspace-artifact-backfill", "run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "thread-artifact-backfill", "artifact-backfill", "sha256:"+"a"*64, "sha256:"+"b"*64))',
   ].join('\n');
   await execute(python, ['-c', source, databaseUrl], { cwd: backendRoot });
 }
@@ -179,6 +179,17 @@ async function verifyLegacyArtifactStatusBackfill(databaseUrl) {
   ].join('\n');
   const receipt = await execute(python, ['-c', source, databaseUrl], { cwd: backendRoot });
   console.log(receipt);
+}
+
+async function cleanupLegacyArtifactStatusBackfill(databaseUrl) {
+  const source = [
+    'import psycopg, sys',
+    'with psycopg.connect(sys.argv[1]) as c:',
+    ' c.execute("DELETE FROM story_workspace_stories WHERE id=%s", ("08f3f1dd-d601-59dd-ab31-b966cfd14d52",))',
+    ' c.execute("DELETE FROM story_workspace_workspaces WHERE id=%s", ("workspace-artifact-backfill",))',
+    ' c.execute("DELETE FROM users WHERE id=103 AND email=%s", ("artifact-backfill@example.invalid",))',
+  ].join('\n');
+  await execute(python, ['-c', source, databaseUrl], { cwd: backendRoot });
 }
 
 async function verifyDreamLaunchPrerequisites(env) {
@@ -353,15 +364,21 @@ try {
   containerStarted = true;
   await waitForPostgres(databaseUrl);
 
-  const migrationEnv = { ...process.env, DATABASE_URL: databaseUrl, TEST_DATABASE_URL: databaseUrl, INK_USE_TEST_DATABASE_URL: '1' };
-  console.log('Applying the owned unified schema in the supported 0026 → Dream → Admin order...');
-  await execute('node', ['scripts/migrate.mjs', '--through', '0026_harsh_victor_mancha'], { cwd: adminRoot, env: migrationEnv });
-  const aclSha256 = await baselineAclSha256(databaseUrl);
-  await execute(alembic, ['-c', resolve(backendRoot, 'alembic.ini'), 'upgrade', 'head'], {
-    cwd: backendRoot,
-    env: { ...process.env, DATABASE_URL: '', TEST_DATABASE_URL: databaseUrl, DREAM_EXPECTED_BASELINE_OWNER: 'postgres', DREAM_EXPECTED_BASELINE_ACL_SHA256: aclSha256 },
-  });
+  const migrationEnv = {
+    ...process.env,
+    MIGRATION_DATABASE_URL: databaseUrl,
+    DATABASE_URL: databaseUrl,
+    TEST_DATABASE_URL: databaseUrl,
+    INK_USE_TEST_DATABASE_URL: '1',
+  };
+  console.log('Applying Admin migrations through 0029 for the legacy artifact fixture...');
   await execute('node', ['scripts/migrate.mjs', '--through', '0029_solid_garia'], { cwd: adminRoot, env: migrationEnv });
+  await seedLegacyArtifactStatusBackfill(databaseUrl);
+  console.log('Applying the complete Admin/Drizzle-owned unified schema...');
+  await execute('node', ['scripts/migrate.mjs'], { cwd: adminRoot, env: migrationEnv });
+  await verifyLegacyArtifactStatusBackfill(databaseUrl);
+  await cleanupLegacyArtifactStatusBackfill(databaseUrl);
+  console.log(await verifyDreamThreadLookupIndex(databaseUrl));
   console.log('Running rollback-only PostgreSQL runtime service integration on the owned empty clone...');
   await execute(python, [
     '-m', 'pytest', '-q',
@@ -376,10 +393,23 @@ try {
     },
     inherit: true,
   });
+  console.log('Running rollback-only general PostgreSQL helper integration on the owned clone...');
+  await execute(python, [
+    '-m', 'pytest', '-q',
+    'tests/test_database_postgres_runtime.py',
+  ], {
+    cwd: backendRoot,
+    env: {
+      ...migrationEnv,
+      DATABASE_URL: '',
+      TEST_DATABASE_URL: databaseUrl,
+      INK_RUN_DATABASE_RUNTIME_PG_TEST: '1',
+      INK_EXPECTED_TEST_DATABASE: databaseName,
+      PYTHONPATH: backendRoot,
+    },
+    inherit: true,
+  });
   await provisionUsers(databaseUrl);
-  await seedLegacyArtifactStatusBackfill(databaseUrl);
-  await execute('node', ['scripts/migrate.mjs'], { cwd: adminRoot, env: migrationEnv });
-  await verifyLegacyArtifactStatusBackfill(databaseUrl);
   console.log('Running Story Artifact PostgreSQL contract tests on the owned clone...');
   await execute(python, [
     '-m', 'pytest', '-q',
