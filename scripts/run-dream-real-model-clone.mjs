@@ -31,8 +31,12 @@ const databaseName = `ink_memory_r22_${suffix}_test`;
 const containerName = `${runLabel}-postgres`;
 const volumeName = `${runLabel}-pgdata`;
 const postgresPassword = `pg_${randomBytes(24).toString('base64url')}`;
-const cloneEmail = `gateway-real-${suffix}@example.test`;
-const clonePlatformUserId = `platform_r22_${suffix}`;
+const testAccountEmail = String(
+  process.env.INK_REAL_DREAM_ACCOUNT_EMAIL ?? '',
+).trim().toLowerCase();
+if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testAccountEmail)) {
+  throw new Error('INK_REAL_DREAM_ACCOUNT_EMAIL must name the existing account under test');
+}
 const cloneJwtSecret = `jwt_${randomBytes(48).toString('base64url')}`;
 const preflightOnly = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.INK_R22_PREFLIGHT_ONLY ?? '').trim().toLowerCase(),
@@ -356,23 +360,17 @@ function fingerprintDigest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-async function provisionCloneUser(databaseUrl) {
+async function resolveCloneAccount(databaseUrl) {
   const source = [
     'import json,os,psycopg,sys',
-    'with psycopg.connect(os.environ["INK_R24_DATABASE_URL"]) as c:',
-    ' row=c.execute("""INSERT INTO users (email,password_hash,display_name,role,status) VALUES (%s,%s,%s,\'user\',\'active\') RETURNING id""",(sys.argv[1],"clone-only-no-login","Gateway Real Model Clone")).fetchone()',
-    ' user_id=str(row[0])',
-    ' projection=c.execute("SELECT id FROM platform_users WHERE source=\'ink-dream\' AND external_user_id=%s",(user_id,)).fetchone()',
-    ' if projection is None:',
-    '  c.execute("""INSERT INTO platform_users (id,source,external_user_id,email,display_name,tier,status,metadata) VALUES (%s,\'ink-dream\',%s,%s,%s,\'free\',\'active\',\'{}\'::jsonb)""",(sys.argv[2],user_id,sys.argv[1],"Gateway Real Model Clone"))',
-    '  platform_id=sys.argv[2]',
-    ' else:',
-    '  platform_id=str(projection[0])',
-    'print(json.dumps({"canonicalUserId":user_id,"platformUserId":platform_id},separators=(",",":")))',
+    'with psycopg.connect(os.environ["INK_R24_DATABASE_URL"], options="-c default_transaction_read_only=on") as c:',
+    ' row=c.execute("""SELECT canonical.id,projection.id,canonical.status,projection.status FROM users canonical JOIN platform_users projection ON projection.source=\'ink-dream\' AND projection.external_user_id=canonical.id::text WHERE lower(canonical.email)=lower(%s)""",(sys.argv[1],)).fetchone()',
+    ' assert row is not None and row[2]=="active" and row[3]=="active"',
+    ' print(json.dumps({"canonicalUserId":str(row[0]),"platformUserId":str(row[1]),"existingAccountResolved":True},separators=(",",":")))',
   ].join('\n');
   return JSON.parse(await execute(
     python,
-    ['-c', source, cloneEmail, clonePlatformUserId],
+    ['-c', source, testAccountEmail],
     { cwd: backendRoot, env: { ...process.env, INK_R24_DATABASE_URL: databaseUrl } },
   ));
 }
@@ -505,13 +503,12 @@ async function verifyCloneEffectiveLimits(databaseUrl, platformUserId) {
   ));
 }
 
-async function verifyFreshThreadFallback(databaseUrl, canonicalUserId) {
+async function inspectCloneAccountDreamHistory(databaseUrl, canonicalUserId) {
   const source = [
     'import json,os,psycopg,sys',
     'with psycopg.connect(os.environ["INK_R24_DATABASE_URL"], options="-c default_transaction_read_only=on") as c:',
     ' count=c.execute("""SELECT COUNT(*) FROM workflow_runs AS run JOIN chat_thread AS thread ON thread.id=run.source_voice_thread_id WHERE thread.user_id=%s AND run.status IN (\'completed\',\'failed\',\'cancelled\') AND run.source_voice_thread_id IS NOT NULL""",(int(sys.argv[1]),)).fetchone()[0]',
-    ' assert int(count)==0',
-    ' print(json.dumps({"eligibleTerminalDreamThreads":int(count),"freshGenericThreadFallback":True},separators=(",",":")))',
+    ' print(json.dumps({"existingTerminalDreamThreads":int(count)},separators=(",",":")))',
   ].join('\n');
   return JSON.parse(await execute(python, ['-c', source, canonicalUserId], {
     cwd: backendRoot,
@@ -688,8 +685,8 @@ try {
     env: migrationEnv,
   });
 
-  runPhase = 'clone-subject-provision';
-  const cloneUser = await provisionCloneUser(targetDatabaseUrl);
+  runPhase = 'clone-existing-account-resolution';
+  const cloneUser = await resolveCloneAccount(targetDatabaseUrl);
   runPhase = 'clone-dream-surface-provision';
   const dreamSurface = await provisionCloneDreamSurface(
     targetDatabaseUrl,
@@ -697,8 +694,8 @@ try {
   );
   runPhase = 'clone-model-contract';
   const modelEvidence = await verifyCloneModel(targetDatabaseUrl);
-  runPhase = 'clone-fresh-thread-precondition';
-  const fallbackEvidence = await verifyFreshThreadFallback(
+  runPhase = 'clone-account-history-inspection';
+  const accountHistoryEvidence = await inspectCloneAccountDreamHistory(
     targetDatabaseUrl,
     cloneUser.canonicalUserId,
   );
@@ -771,11 +768,11 @@ try {
     cwd: backendRoot,
     env: {
       ...dreamEnv,
-      INK_GATEWAY_E2E_EMAIL: cloneEmail,
+      INK_GATEWAY_E2E_EMAIL: testAccountEmail,
       INK_GATEWAY_E2E_DREAM_BASE_URL: dreamApiBase,
       INK_GATEWAY_E2E_MODEL_ALIAS: targetModelAlias,
       INK_GATEWAY_E2E_EXPECTED_UPSTREAM_MODEL: expectedUpstreamModel,
-      INK_GATEWAY_E2E_PROVISION_SUBSCRIPTION: '1',
+      INK_GATEWAY_E2E_PROVISION_SUBSCRIPTION: '0',
       INK_GATEWAY_E2E_PRODUCT_ORIGIN: productOrigin,
       INK_GATEWAY_E2E_PREFLIGHT_ONLY: '1',
     },
@@ -809,7 +806,8 @@ try {
         E2E_WEB_BASE: dreamWebBase,
         INK_REAL_DREAM_API_BASE: dreamApiBase,
         INK_REAL_DREAM_LAUNCH_QA: '1',
-        INK_REAL_DREAM_LAUNCH_EMAIL: cloneEmail,
+        INK_REAL_DREAM_LAUNCH_EMAIL: testAccountEmail,
+        INK_REAL_DREAM_LAUNCH_DECK_ID: dreamSurface.deckId,
       },
       inherit: true,
     });
@@ -831,10 +829,10 @@ try {
       targetServer: targetServerMajor,
       restoreClient: restoreClientMajor,
     },
-    cloneOnlyCanonicalUser: Boolean(cloneUser.canonicalUserId),
-    cloneOnlyPlatformProjection: Boolean(cloneUser.platformUserId),
+    existingAccountResolved: cloneUser.existingAccountResolved === true,
+    existingPlatformProjectionResolved: Boolean(cloneUser.platformUserId),
     dreamSurface,
-    conversationFixture: fallbackEvidence,
+    accountHistory: accountHistoryEvidence,
     adminRuntimeCheckout: 'isolated-head-clone',
     adminBundler: 'webpack-isolated-external-dependency-link',
     model: modelEvidence,

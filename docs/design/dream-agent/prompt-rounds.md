@@ -2616,3 +2616,109 @@ source fingerprint and complete container/volume/port/process cleanup. The
 protected runner diff and production environment-gate scans are empty. The hard
 daily quota remains an external policy blocker rather than a retry-configuration
 failure; no additional real Provider call was made in this verification round.
+
+## Round 46 — Existing-account real Dream verification
+
+**Current-round objective**
+
+Run the real-data, real-`hy3-preview`, headed Dream launch with the explicitly
+selected existing account while preserving source data and account policy.
+
+**Optimized Prompt**
+
+> Validate the Dream launch as the existing account supplied through
+> `INK_REAL_DREAM_ACCOUNT_EMAIL`; for this round the operator supplies
+> `dmeck123@suoxya.com`. Resolve that account, its `ink-dream` platform
+> projection, subscription, entitlement and principal limits from a read-only
+> PostgreSQL source snapshot. Never create a replacement identity, change the
+> account's model permission or quota, or print its token, database URL,
+> credential, private history or full business artifact. Restore the snapshot
+> into an owned private PostgreSQL clone, apply current Admin migrations, add
+> only a clone-local Dream workspace/Deck/Agent owned by the resolved account,
+> and select that Deck explicitly in the browser URL. Run the production Dream
+> route with the real `hy-preview` alias resolving to `hy3-preview`, headed
+> Chromium and `--workers=1`; install diagnostics before navigation and use only
+> semantic waits. Verify Dream-files readiness, canonical Thread history and
+> Dream→Chat→Dream recovery when the account policy permits completion. If the
+> Gateway rejects the run, report the exact redacted policy code and persisted
+> single-terminal evidence instead of changing limits. In every outcome prove
+> source fingerprint stability and remove owned browser, processes, ports,
+> container, volume and temporary clone.
+
+**Optional Enhancers**
+
+- Run a provider-free account preflight before the paid headed request.
+- Keep the account email out of emitted evidence after resolution.
+
+**Scope checked or modified**
+
+- Private logical-clone real-model harness and its headed Playwright spec.
+- Existing account resolution, exact Deck selection and redacted evidence.
+- No Dream/Admin production business behavior or Gateway policy mutation.
+
+**Completion standard**
+
+The harness proves it used the requested existing account and unmodified policy,
+then either completes the full headed Dream/Chat flow or produces the exact
+external policy blocker; provider use is bounded and all source/resources remain
+unchanged.
+
+**Actual result and unverified inferences**
+
+The existing canonical account and active `ink-dream` projection resolved from
+the read-only source, with one active `free v2` subscription and 50,000,000
+daily/monthly principal Token limits. Provider-free preflight then failed closed
+because that plan has exactly one entitlement, `deepseek-v4-flash`, and no
+`hy-preview`/`hy3-preview` entitlement. No Provider call occurred; source
+fingerprint and all owned container/volume/port/process resources were cleaned.
+Headed execution is blocked pending explicit authority to change the real
+subscription; no clone-only permission fiction was introduced.
+
+## Round 47 — Inject the Run-isolated layout into Dream context assembly
+
+**Current-round objective**
+
+Make every server-resolved Dream turn understand the normative run-isolated
+Project/Episode Artifact tree before the existing-account real-model test.
+
+**Optimized Prompt**
+
+> Add the exact `# Run-isolated layout` tree supplied by the business owner to
+> the Dream context built during `ClaudeAgentService.assemble_context`. Keep the
+> layout in a named Story Workspace instruction constant and append it inside
+> the existing `<story_workspace_dream_context>` only when the server-side
+> actor+Thread mapper resolves a trusted Dream binding. State that `<run-id>` is
+> the trusted `workflow_run_id`, shared root and Thread key are server-derived,
+> sealed Run snapshots are isolated/immutable, and only Story Workspace MCP
+> tools may write `.dream/**`. Do not add a request DTO field, frontend payload,
+> SSE event, alternate Agent entry or generic Chat instruction. Add context
+> builder contracts for every required path and for generic-Chat absence;
+> preserve the protected runner and Phase 3 entry. Then restart the selected
+> account's provider-free and headed real-model verification against the updated
+> prompt.
+
+**Optional Enhancers**
+
+- Keep the exact Markdown heading and code tree for prompt inspection.
+- Assert layout guidance precedes the user's text in the same Dream turn.
+
+**Scope checked or modified**
+
+- Story Workspace canonical instruction, Dream context builder and focused
+  contracts.
+- Architecture description and the pending existing-account real-model harness.
+- No public Chat/Dream wire or Agent execution entry.
+
+**Completion standard**
+
+Focused tests prove the exact layout exists only in trusted Dream context and
+the protected runner remains unchanged; the updated prompt is then exercised by
+the account-specific real-model browser run.
+
+**Actual result and unverified inferences**
+
+Complete in code and focused verification: 77 tests and 22 subtests pass. The
+exact heading/tree is injected only in server-resolved Dream context, generic
+Chat absence is asserted, and no protected runner or public wire changed. The
+account-specific Provider proof cannot exercise the updated prompt until the
+separate model-entitlement blocker from R46 is resolved.

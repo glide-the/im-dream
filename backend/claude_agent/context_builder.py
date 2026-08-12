@@ -42,6 +42,10 @@
 # [Sync] 2026-06-22: accept Settings SYSTEM_PROMPT from service Phase 1 and render
 #                    it as a lower-priority configurable block under the engine
 #                    _SYSTEM_PROMPT_TEMPLATE priority rules.
+# [Sync] 2026-08-12: inject the normative Run-isolated Project/Episode Artifact
+#                    layout only for server-resolved Dream turns. The layout is
+#                    guidance inside the existing trusted Dream context block;
+#                    it does not add a client field or Agent wire contract.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -73,6 +77,7 @@ try:
     from services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
         STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX,
+        STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION,
     )
     from services.story_workspace.episode_workflow_instruction import (
         story_workspace_private_episode_completion_guidance,
@@ -81,6 +86,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
         STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX,
+        STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION,
     )
     from backend.services.story_workspace.episode_workflow_instruction import (
         story_workspace_private_episode_completion_guidance,
@@ -487,6 +493,7 @@ class ClaudeAgentContextBuilder:
                         "is complete, call it for storyboards.\n"
                         f"{STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION}\n"
                         f"{STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX}\n"
+                        f"{STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION}\n"
                         "</story_workspace_dream_context>"
                     ),
                 }

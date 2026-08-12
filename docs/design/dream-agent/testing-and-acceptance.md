@@ -815,11 +815,20 @@ For every P0/P1 row, append or link a record with this schema:
 - [x] Shared SDK option assembly pins Claude Code native request retries to
       three; a real local Claude CLI contract survives three transient 429
       responses on the same request boundary without adding an Agent turn loop.
+- [x] Trusted Dream context assembly includes the exact `# Run-isolated layout`
+      tree, binds `<run-id>` to server-resolved `workflow_run_id`, reserves
+      `.dream/**` writes for Story Workspace MCP tools and remains absent from
+      generic Chat.
 - [ ] The latest full headed real-model launch is blocked after its first
       settled `hy3-preview` request by the configured principal's hard
       `DAILY_TOKEN_LIMIT_EXCEEDED` Gateway policy. Source data and owned
       resources remain unchanged; no permission/limit override is accepted as
       a substitute for this external quota prerequisite.
+- [ ] Existing-account headed `hy3-preview` verification is blocked before any
+      Provider call: the selected active account has `free v2` with only the
+      `deepseek-v4-flash` entitlement. Its 50,000,000 daily/monthly principal
+      limits do not grant an absent model entitlement. Changing the real
+      subscription requires explicit operator authorization.
 - [x] Proxy/reconnect functional gates pass.
 - [ ] Production performance/load baseline and threshold gates remain unrun.
 - [x] Redis isolated adapter and Gateway loopback suites pass; this does not claim

@@ -281,6 +281,21 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("郑州暴雨夜 → proj-396e4c1b", combined)
         self.assertIn("规范项目身份成立后，才能写入 storyboard", combined)
         self.assertIn("expectedBindingRevision=0", combined)
+        self.assertIn("# Run-isolated layout", combined)
+        self.assertIn(
+            "<shared-root>/<server-derived-thread-key>/.dream/runtime/runs/<run-id>/",
+            combined,
+        )
+        self.assertIn("episode.json", combined)
+        self.assertIn("episode-workflow.json", combined)
+        self.assertIn("artifact/", combined)
+        self.assertIn("stories/<source-project-id>/", combined)
+        self.assertIn("episodes/<EPxx>/", combined)
+        self.assertIn("script.md", combined)
+        self.assertIn("episode-outline.md", combined)
+        self.assertIn("review-report.md", combined)
+        self.assertIn("server-trusted workflow_run_id", combined)
+        self.assertIn("tools must never write this private layout", combined)
         self.assertLess(
             combined.index("<story_workspace_dream_context>"),
             combined.rindex("create the story"),
@@ -355,6 +370,8 @@ class TestBuildUserMessage(unittest.TestCase):
 
         self.assertNotIn("record_episode_workflow_completion", generic)
         self.assertNotIn("record_episode_workflow_completion", plain_dream)
+        self.assertNotIn("# Run-isolated layout", generic)
+        self.assertIn("# Run-isolated layout", plain_dream)
 
     def test_recovery_or_malformed_provenance_cannot_gain_private_completion(self):
         context = StoryWorkspaceDreamRunContext(

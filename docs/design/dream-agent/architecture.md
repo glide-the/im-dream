@@ -80,6 +80,14 @@ user message, emit another terminal event or bypass Gateway quota decisions.
 Non-transient quota errors such as a daily Token limit remain terminal for that
 turn after Claude Code exhausts its transport policy.
 
+During `ClaudeAgentService.assemble_context`, a server-resolved Dream binding
+causes `ClaudeAgentContextBuilder` to append the normative `# Run-isolated
+layout` tree inside the existing trusted Dream context block. The block binds
+`<run-id>` to the resolved `workflow_run_id`, states that root/Thread keys are
+server-derived, and reserves `.dream/**` writes for Story Workspace MCP tools.
+Generic Chat receives no Artifact-layout instruction, and no HTTP/Claude SSE
+field is added.
+
 ```mermaid
 sequenceDiagram
     participant Factory as "ThreadFactory"

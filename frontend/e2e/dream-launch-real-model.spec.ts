@@ -12,6 +12,7 @@ const ENABLED = process.env.INK_REAL_DREAM_LAUNCH_QA === '1';
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:4177';
 const API_BASE = process.env.INK_REAL_DREAM_API_BASE ?? 'http://127.0.0.1:8765';
 const TEST_EMAIL = process.env.INK_REAL_DREAM_LAUNCH_EMAIL ?? '';
+const TEST_DECK_ID = process.env.INK_REAL_DREAM_LAUNCH_DECK_ID ?? '';
 const BACKEND_ROOT = resolve(process.cwd(), '../backend');
 const PYTHON = resolve(BACKEND_ROOT, '.venv/bin/python');
 
@@ -34,6 +35,7 @@ type DreamFiles = {
 
 function createToken(): string {
   if (!TEST_EMAIL) throw new Error('INK_REAL_DREAM_LAUNCH_EMAIL is required.');
+  if (!TEST_DECK_ID) throw new Error('INK_REAL_DREAM_LAUNCH_DECK_ID is required.');
   const source = [
     'import auth,database,sys',
     'db=database.get_db()',
@@ -102,8 +104,11 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
   }, token);
   await page.setViewportSize({ width: 1440, height: 1000 });
 
-  await page.goto(`${WEB_BASE}/story-workspace/dream`);
+  await page.goto(
+    `${WEB_BASE}/story-workspace/dream?deck=${encodeURIComponent(TEST_DECK_ID)}`,
+  );
   await expect(page.getByRole('heading', { name: '发起一次 Dream' })).toBeVisible();
+  await expect(page.getByText('真实模型 Dream · Dream 剧本 Agent')).toBeVisible();
   await page.getByRole('textbox', { name: '创作目标' }).fill(
     '创作一个雨夜末班车短篇：两位旧友在终点站重逢，人物关系克制，结尾保留悬念。请完成人物、场景和分镜草稿。',
   );

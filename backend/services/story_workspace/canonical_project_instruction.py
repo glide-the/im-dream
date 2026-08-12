@@ -41,6 +41,29 @@ STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX = (
     "expectedBindingRevision=0。"
 )
 
+STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION = """# Run-isolated layout
+
+```text
+<shared-root>/<server-derived-thread-key>/.dream/runtime/runs/<run-id>/
+  episode.json
+  episode-workflow.json
+  artifact/
+    stories/<source-project-id>/
+      project.yaml
+      episodes/<EPxx>/
+        script.md
+        episode-outline.md
+        storyboard.yaml
+        review-report.md
+```
+
+`<run-id>` is the server-trusted workflow_run_id in this Dream context. The
+server derives `<shared-root>` and `<server-derived-thread-key>`; never infer,
+replace or accept either from browser/user text. Treat every Run snapshot as
+isolated and immutable after sealing. Use only Story Workspace MCP tools for
+`.dream/**` registry, workflow and Artifact publication; generic file or Bash
+tools must never write this private layout."""
+
 STORY_WORKSPACE_CANONICAL_PROJECT_RECOVERY_INSTRUCTION = (
     "若尚无规范项目，先按上述 drama-init 语义完成初始化。"
     "仅当工作区恰有一个非规范 story 目录，其中 project.yaml 给出唯一合法 ASCII "
@@ -55,5 +78,6 @@ __all__ = [
     "STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION",
     "STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX",
     "STORY_WORKSPACE_CANONICAL_PROJECT_RECOVERY_INSTRUCTION",
+    "STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION",
     "story_workspace_canonical_project_fallback_slug",
 ]
