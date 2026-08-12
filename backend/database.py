@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from threading import RLock
 from typing import Optional, Union
 import json
+from psycopg import Error as PostgresError
 from psycopg import IntegrityError as PostgresIntegrityError
 from psycopg.pq import TransactionStatus
 
@@ -42,6 +43,17 @@ except ModuleNotFoundError:  # pragma: no cover - package import compatibility
     from backend.persistence.postgres import PostgresPool
 
 logger = logging.getLogger(__name__)
+
+
+class ChatMessageIdentityConflict(RuntimeError):
+    """A message id is already bound to a different immutable envelope."""
+
+    code = "CHAT_MESSAGE_IDENTITY_CONFLICT"
+    status_code = 409
+
+    def __init__(self, message_id: str) -> None:
+        self.message_id = message_id
+        super().__init__(self.code)
 
 
 class PostgresRow(Mapping[str, object]):
@@ -2738,6 +2750,40 @@ def _touch_chat_thread(db, thread_id: str) -> None:
     )
 
 
+def _chat_message_json_value(
+    value: object,
+    *,
+    field: str,
+    expected_type: type,
+    nullable: bool = False,
+) -> object:
+    """Decode and type-check one Chat JSON field for semantic CAS comparison."""
+
+    decoded = value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be valid JSON") from exc
+    if nullable and decoded is None:
+        return None
+    if not isinstance(decoded, expected_type):
+        raise ValueError(f"{field} has an invalid JSON shape")
+    return decoded
+
+
+def _canonical_chat_message_json(value: object) -> str:
+    """Canonicalize JSON so key order/whitespace never changes identity."""
+
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
 def save_chat_message(
     thread_id: str,
     role: str,
@@ -2748,7 +2794,7 @@ def save_chat_message(
     parts_json: Optional[str] = None,
     metadata_json: Optional[str] = None,
 ) -> str:
-    """Persist one chat message. Returns the message_id.
+    """Insert one immutable chat-message identity or accept an exact replay.
 
     Fully aligned with better-chatbot ChatMessageTable — no ``content`` column.
     Text lives inside ``parts`` as ``{type: "text", text: "..."}`` entries.
@@ -2756,6 +2802,11 @@ def save_chat_message(
       - ``parts``    list[dict] — UIMessage['parts'] array; required; serialized internally.
       - ``metadata`` dict       — ChatMetadata (usage / chatModel / toolCount); nullable.
       - ``message_id`` — AI-SDK message.id from the frontend; auto-generated if omitted.
+
+    A supplied id is permanently bound to its thread, role, parts and metadata.
+    JSON object key order and whitespace are ignored for exact replay; any
+    semantic difference raises :class:`ChatMessageIdentityConflict`.  This
+    function never reparents or overwrites an existing row.
     """
     import uuid
     if not message_id:
@@ -2763,33 +2814,95 @@ def save_chat_message(
 
     # Resolve parts: prefer list param, fall back to deprecated string param.
     if parts_json is not None and not parts:
-        parts_str = parts_json
+        parts_value = _chat_message_json_value(
+            parts_json,
+            field="parts",
+            expected_type=list,
+        )
     else:
-        parts_str = json.dumps(parts, ensure_ascii=False)
+        parts_value = _chat_message_json_value(
+            parts,
+            field="parts",
+            expected_type=list,
+        )
+    parts_str = _canonical_chat_message_json(parts_value)
 
     # Resolve metadata: prefer dict param, fall back to deprecated string param.
     if metadata is not None:
-        metadata_str: Optional[str] = json.dumps(metadata, ensure_ascii=False)
+        metadata_value = _chat_message_json_value(
+            metadata,
+            field="metadata",
+            expected_type=dict,
+            nullable=True,
+        )
     elif metadata_json is not None:
-        metadata_str = metadata_json
+        metadata_value = _chat_message_json_value(
+            metadata_json,
+            field="metadata",
+            expected_type=dict,
+            nullable=True,
+        )
     else:
-        metadata_str = None
+        metadata_value = None
+    metadata_str: Optional[str] = (
+        _canonical_chat_message_json(metadata_value)
+        if metadata_value is not None
+        else None
+    )
 
     db = get_db()
     try:
-        db.execute(
+        inserted = db.execute(
             """
             INSERT INTO chat_message (id, thread_id, role, parts, metadata)
             VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (id) DO UPDATE SET
-              thread_id = excluded.thread_id,
-              role = excluded.role,
-              parts = excluded.parts,
-              metadata = excluded.metadata
+            ON CONFLICT (id) DO NOTHING
+            RETURNING id
             """,
             (message_id, thread_id, role, parts_str, metadata_str),
-        )
-        _touch_chat_thread(db, thread_id)
+        ).fetchone()
+        if inserted is not None:
+            _touch_chat_thread(db, thread_id)
+            db.commit()
+            return message_id
+
+        existing = db.execute(
+            "SELECT thread_id, role, parts, metadata "
+            "FROM chat_message WHERE id = %s",
+            (message_id,),
+        ).fetchone()
+        if existing is None:
+            raise ChatMessageIdentityConflict(message_id)
+        try:
+            existing_parts = _chat_message_json_value(
+                existing["parts"],
+                field="stored parts",
+                expected_type=list,
+            )
+            existing_metadata = _chat_message_json_value(
+                existing["metadata"],
+                field="stored metadata",
+                expected_type=dict,
+                nullable=True,
+            )
+            existing_thread_id = existing["thread_id"]
+            existing_role = existing["role"]
+            existing_parts_str = _canonical_chat_message_json(existing_parts)
+            existing_metadata_str = (
+                _canonical_chat_message_json(existing_metadata)
+                if existing_metadata is not None
+                else None
+            )
+        except (KeyError, TypeError, ValueError):
+            raise ChatMessageIdentityConflict(message_id) from None
+        if not (
+            existing_thread_id == thread_id
+            and existing_role == role
+            and existing_parts_str == parts_str
+            and existing_metadata_str == metadata_str
+        ):
+            raise ChatMessageIdentityConflict(message_id)
+        # Exact replay is a read-only success: do not reorder the thread.
         db.commit()
         return message_id
     finally:
@@ -2812,6 +2925,11 @@ def list_chat_messages(thread_id: str) -> list[dict]:
         results = []
         for row in rows:
             m = dict(row)
+            # Keep SQL NULL (a valid "no metadata" value) distinguishable
+            # from a corrupt stored JSON envelope.  The HTTP projection uses
+            # this internal flag to withhold message parts fail-closed; the
+            # flag itself is never part of the client response allowlist.
+            m["metadata_decode_error"] = False
             try:
                 m["parts"] = json.loads(m["parts"]) if m["parts"] else []
             except Exception:
@@ -2819,8 +2937,15 @@ def list_chat_messages(thread_id: str) -> list[dict]:
             if m.get("metadata"):
                 try:
                     m["metadata"] = json.loads(m["metadata"])
+                    if not isinstance(m["metadata"], dict):
+                        # A stored JSON scalar/array (including literal null)
+                        # is not the SQL NULL "no metadata" state.  Preserve
+                        # that distinction so the client projection fails
+                        # closed even when JSON decoding itself succeeds.
+                        m["metadata_decode_error"] = True
                 except Exception:
                     m["metadata"] = None
+                    m["metadata_decode_error"] = True
             results.append(m)
         return results
     finally:

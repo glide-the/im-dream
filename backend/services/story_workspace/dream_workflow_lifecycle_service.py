@@ -67,7 +67,6 @@ class StoryWorkspaceDreamWorkflowLifecycleService:
         if status in {
             RunStatus.PENDING_REVIEW,
             RunStatus.CONFIRMED,
-            RunStatus.CONTINUING,
             RunStatus.COMPLETED,
         }:
             return run
@@ -94,27 +93,22 @@ class StoryWorkspaceDreamWorkflowLifecycleService:
             )
         if status in {
             RunStatus.CONFIRMED,
-            RunStatus.CONTINUING,
             RunStatus.COMPLETED,
         }:
             return run
         raise IllegalRunTransition()
 
-    async def record_continuation_dispatched(
+    async def record_post_confirmation_dispatched(
         self,
         workflow_run_id: str,
         actor_context: AuthenticatedActorContext,
     ) -> WorkflowRun:
         run = self._read_run(workflow_run_id, actor_context)
         status = self._status(run)
-        if status == RunStatus.CONFIRMED:
-            return await self._service.transition_run(
-                workflow_run_id,
-                RunStatus.CONTINUING,
-                actor_context,
-                reason_code="dream_continuation_dispatched",
-            )
-        if status in {RunStatus.CONTINUING, RunStatus.COMPLETED}:
+        # Dispatch is a private Chat command fact, not a Workflow lifecycle
+        # transition. The shared Thread reports the active Agent turn while the
+        # Workflow remains confirmed until an owning domain terminal fact.
+        if status in {RunStatus.CONFIRMED, RunStatus.COMPLETED}:
             return run
         raise IllegalRunTransition()
 
@@ -129,7 +123,7 @@ class StoryWorkspaceDreamWorkflowLifecycleService:
             raise ValueError("Episode workflow still has a server-derived next action")
         run = self._read_run(workflow_run_id, actor_context)
         status = self._status(run)
-        if status == RunStatus.CONTINUING:
+        if status == RunStatus.CONFIRMED:
             return await self._service.transition_run(
                 workflow_run_id,
                 RunStatus.COMPLETED,

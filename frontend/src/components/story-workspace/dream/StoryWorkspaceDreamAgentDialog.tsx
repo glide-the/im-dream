@@ -1,31 +1,23 @@
-/* eslint-disable react-refresh/only-export-components -- R3 exports a deterministic menu split seam. */
-// [Input] Safe Dream Agent view model, not generic Chat messages or transport.
-// [Output] Floating Dream workbench extension with focus-safe input and history.
-// [Pos] Dream Agent dialog (design_008 §8/§15).
+/* eslint-disable react-refresh/only-export-components -- deterministic workflow action seam. */
+// [Input] Actor-scoped threadId plus independent Episode business actions.
+// [Output] Dream dialog composing canonical ChatPanel and workflow controls.
+// [Pos] Dream business shell; it owns no Agent transport/parser/reducer/state machine.
 
-import { useEffect, useId, useRef, useState } from 'react';
-import {
-  storyWorkspaceNewDreamAgentIdempotencyKey,
-  type StoryWorkspaceDreamAgentViewModel,
-} from '../../../hooks/story-workspace';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from './storyWorkspaceDreamAgentFocus';
-import { StoryWorkspaceDreamAgentMessageList } from './StoryWorkspaceDreamAgentMessageList';
-import { StoryWorkspaceDreamAgentComposerButton } from './StoryWorkspaceDreamAgentComposerButton';
-import { StoryWorkspaceDreamToolConfirmation } from './StoryWorkspaceDreamToolConfirmation';
-import {
-  storyWorkspaceDreamAgentContentRevision,
-  useStoryWorkspaceDreamAgentAnnouncement,
-  useStoryWorkspaceDreamAgentScroll,
-} from './useStoryWorkspaceDreamAgentScroll';
+import { StoryWorkspaceDreamThreadChat } from './StoryWorkspaceDreamThreadChat';
 
 export interface StoryWorkspaceDreamAgentDialogProps {
-  readonly agent: StoryWorkspaceDreamAgentViewModel;
   readonly deckName: string;
   readonly runId: string;
+  readonly threadId: string;
+  readonly refreshNonce?: number;
+  readonly expectedMessageId?: string | null;
   readonly workflowActions: readonly StoryWorkspaceDreamAgentWorkflowActionViewModel[];
   readonly onRequestWorkflowAction: (identity: string) => void;
   readonly onClose: () => void;
-  readonly restoreFocusRef: React.RefObject<HTMLButtonElement | null>;
+  readonly onSettled?: () => void;
+  readonly restoreFocusRef: RefObject<HTMLButtonElement | null>;
   readonly initialWorkflowFocus?: {
     readonly actionId: string;
     readonly wasOverflow: boolean;
@@ -55,36 +47,12 @@ export function storyWorkspaceSplitDreamAgentWorkflowActions(
   return { direct: actions.slice(0, 2), overflow: actions.slice(2) };
 }
 
-function storyWorkspaceDreamAgentInputHint(agent: StoryWorkspaceDreamAgentViewModel): string | null {
-  switch (agent.snapshot?.sendBlockReason) {
-    case 'generating': return 'Dream Agent 正在完成初始创作。';
-    case 'waiting_confirmation': return '请先在页面修改并确认；留言不会代替确认。';
-    case 'confirming': return '正在保存本次确认。';
-    case 'continuing': return 'Dream Agent 正在根据已确认内容继续。';
-    case 'busy': return 'Dream Agent 正在处理上一条消息。';
-    default: return null;
-  }
-}
-
-function storyWorkspaceDreamAgentDialogStatus(agent: StoryWorkspaceDreamAgentViewModel) {
-  if (agent.terminalOutcome === 'failed') return { icon: '!', label: 'Dream Agent 本轮执行失败' };
-  if (agent.terminalOutcome === 'cancelled') return { icon: '◇', label: 'Dream Agent 本轮已取消' };
-  if (agent.snapshot?.lifecycle === 'streaming') {
-    return { icon: '◌', label: 'Dream Agent 正在执行' };
-  }
-  if (agent.snapshot?.canSend) {
-    return { icon: '✓', label: 'Dream Agent 已完成本轮输出' };
-  }
-  return { icon: '◇', label: storyWorkspaceDreamAgentInputHint(agent) ?? 'Dream Agent 正在准备内容' };
-}
-
-function storyWorkspaceDreamAgentVisibleFocusables(root: HTMLElement | null): readonly HTMLElement[] {
+function visibleFocusables(root: HTMLElement | null): readonly HTMLElement[] {
   if (root === null) return [];
   const candidates = root.querySelectorAll<HTMLElement>(
     'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"]), select:not(:disabled):not([tabindex="-1"]), textarea:not(:disabled):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])',
   );
   return Array.from(candidates).filter((element) => {
-    if (element.matches(':disabled')) return false;
     if (element.closest('[hidden], [inert], [aria-hidden="true"]') !== null) return false;
     const style = window.getComputedStyle(element);
     return style.display !== 'none'
@@ -95,51 +63,28 @@ function storyWorkspaceDreamAgentVisibleFocusables(root: HTMLElement | null): re
 }
 
 export function StoryWorkspaceDreamAgentDialog({
-  agent, deckName, runId, workflowActions, onRequestWorkflowAction, onClose, restoreFocusRef,
+  deckName,
+  runId,
+  threadId,
+  refreshNonce = 0,
+  expectedMessageId = null,
+  workflowActions,
+  onRequestWorkflowAction,
+  onClose,
+  onSettled,
+  restoreFocusRef,
   initialWorkflowFocus = null,
 }: StoryWorkspaceDreamAgentDialogProps) {
-  const [draft, setDraft] = useState('');
   const [isNarrow, setIsNarrow] = useState(false);
   const [workflowOverflowOpen, setWorkflowOverflowOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const pendingKeyRef = useRef<string | null>(null);
   const workflowOverflowId = useId();
   const workflowOverflowTriggerRef = useRef<HTMLButtonElement>(null);
   const workflowActionRefs = useRef(new Map<string, HTMLButtonElement>());
   const pendingInitialWorkflowFocusRef = useRef(initialWorkflowFocus);
-  const inputHint = storyWorkspaceDreamAgentInputHint(agent);
-  const status = storyWorkspaceDreamAgentDialogStatus(agent);
-  const { markRead, snapshot, streamText } = agent;
-  const contentRevision = storyWorkspaceDreamAgentContentRevision(agent.streamContent);
-  const announcement = useStoryWorkspaceDreamAgentAnnouncement({
-    streamContent: agent.streamContent,
-    streamText: agent.streamText,
-  });
-  const canSend = Boolean(agent.snapshot?.canSend && draft.trim() && !agent.isSending);
   const workflowActionGroups = storyWorkspaceSplitDreamAgentWorkflowActions(workflowActions);
   const workflowActionIdentity = workflowActions.map((action) => action.id).join('\u0000');
-  const {
-    bottomRef,
-    handleHistoryScroll,
-    historyRef,
-    scrollToLatest,
-    showScrollToLatest,
-  } = useStoryWorkspaceDreamAgentScroll({
-    contentRevision,
-    messageCount: snapshot?.messages.length ?? 0,
-    streamText,
-  });
-
-  useEffect(() => {
-    if (agent.pendingToolConfirmation) {
-      dialogRef.current?.querySelector<HTMLElement>(
-        '.story-workspace-dream-tool-confirmation button:not(:disabled), .story-workspace-dream-tool-confirmation input:not(:disabled), .story-workspace-dream-tool-confirmation select:not(:disabled), .story-workspace-dream-tool-confirmation textarea:not(:disabled)',
-      )?.focus();
-    } else if (!snapshot?.canSend) headingRef.current?.focus();
-    else inputRef.current?.focus();
-  }, [agent.pendingToolConfirmation, snapshot?.canSend]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');
@@ -151,6 +96,7 @@ export function StoryWorkspaceDreamAgentDialog({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         if (workflowOverflowOpen) {
@@ -162,11 +108,18 @@ export function StoryWorkspaceDreamAgentDialog({
         return;
       }
       if (event.key !== 'Tab' || !window.matchMedia('(max-width: 767px)').matches) return;
-      const focusable = storyWorkspaceDreamAgentVisibleFocusables(dialogRef.current);
+      const focusable = visibleFocusables(dialogRef.current);
       if (focusable.length === 0) return;
       const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-      const nextIndex = storyWorkspaceDreamAgentFocusCycleIndex(currentIndex, focusable.length, event.shiftKey);
-      if (nextIndex !== currentIndex) { event.preventDefault(); focusable[nextIndex]?.focus(); }
+      const nextIndex = storyWorkspaceDreamAgentFocusCycleIndex(
+        currentIndex,
+        focusable.length,
+        event.shiftKey,
+      );
+      if (nextIndex !== currentIndex) {
+        event.preventDefault();
+        focusable[nextIndex]?.focus();
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
@@ -178,8 +131,7 @@ export function StoryWorkspaceDreamAgentDialog({
 
   useEffect(() => {
     pendingInitialWorkflowFocusRef.current = initialWorkflowFocus;
-    if (initialWorkflowFocus === null) return;
-    if (initialWorkflowFocus.wasOverflow && workflowActionGroups.overflow.length > 0) {
+    if (initialWorkflowFocus?.wasOverflow && workflowActionGroups.overflow.length > 0) {
       setWorkflowOverflowOpen(true);
     }
   }, [initialWorkflowFocus, workflowActionGroups.overflow.length]);
@@ -187,36 +139,22 @@ export function StoryWorkspaceDreamAgentDialog({
   useEffect(() => {
     const pendingFocus = pendingInitialWorkflowFocusRef.current;
     if (pendingFocus === null) return undefined;
-    if (
-      pendingFocus.wasOverflow
+    if (pendingFocus.wasOverflow
       && workflowActionGroups.overflow.length > 0
-      && !workflowOverflowOpen
-    ) return undefined;
+      && !workflowOverflowOpen) return undefined;
     pendingInitialWorkflowFocusRef.current = null;
     const frame = requestAnimationFrame(() => {
-      const action = workflowActionRefs.current.get(pendingFocus.actionId);
-      if (action !== undefined) {
-        action.focus();
-      } else if (pendingFocus.wasOverflow) {
-        workflowOverflowTriggerRef.current?.focus();
-      } else {
-        headingRef.current?.focus();
-      }
+      const target = workflowActionRefs.current.get(pendingFocus.actionId);
+      if (target) target.focus();
+      else if (pendingFocus.wasOverflow) workflowOverflowTriggerRef.current?.focus();
+      else headingRef.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [
-    workflowActionGroups.overflow.length,
-    workflowActionIdentity,
-    workflowOverflowOpen,
-  ]);
+  }, [workflowActionGroups.overflow.length, workflowActionIdentity, workflowOverflowOpen]);
 
   useEffect(() => () => {
     requestAnimationFrame(() => restoreFocusRef.current?.focus());
   }, [restoreFocusRef]);
-
-  useEffect(() => {
-    markRead();
-  }, [markRead, snapshot?.messages, streamText]);
 
   useEffect(() => {
     if (!isNarrow) return undefined;
@@ -228,7 +166,7 @@ export function StoryWorkspaceDreamAgentDialog({
     }> = [];
     let branch: HTMLElement | null = dialogRef.current;
     while (branch?.parentElement && branch.parentElement !== document.body) {
-      const parent: HTMLElement = branch.parentElement;
+      const parent = branch.parentElement;
       for (const sibling of Array.from(parent.children)) {
         if (!(sibling instanceof HTMLElement) || sibling === branch) continue;
         background.push({
@@ -252,30 +190,16 @@ export function StoryWorkspaceDreamAgentDialog({
     };
   }, [isNarrow]);
 
-  const submit = async () => {
-    if (!canSend) return;
-    if (!pendingKeyRef.current) pendingKeyRef.current = storyWorkspaceNewDreamAgentIdempotencyKey();
-    const accepted = await agent.send(draft, pendingKeyRef.current);
-    if (accepted) {
-      setDraft('');
-      pendingKeyRef.current = null;
-      scrollToLatest();
-    }
-  };
-
   const workflowActionButton = (
     action: StoryWorkspaceDreamAgentWorkflowActionViewModel,
   ) => {
     const availability = action.availability
       ?? (action.isCurrent ? (action.canDispatch ? 'executable' : 'blocked') : 'preview');
     const isRecommended = action.isRecommended ?? action.isCurrent;
-    const agentBusy = !agent.snapshot?.canSend || agent.isSending;
-    const disabled = !action.canDispatch || action.pending || agentBusy;
+    const disabled = !action.canDispatch || action.pending;
     const disabledReason = action.pending
       ? '已交给 Dream Agent，等待服务端事实更新'
-      : agentBusy && action.canDispatch
-        ? 'Dream Agent 完成本轮后可继续'
-        : action.disabledReason;
+      : action.disabledReason;
     return (
       <button
         aria-current={action.isCurrent ? 'step' : undefined}
@@ -301,15 +225,11 @@ export function StoryWorkspaceDreamAgentDialog({
             {action.displayCommand}
           </small>
         </span>
-        <b>{
-          action.pending
-            ? '处理中'
-            : availability === 'executable'
-              ? isRecommended ? '推荐操作 · 当前可执行' : '当前可执行'
-              : availability === 'blocked'
-                ? '暂不可用'
-                : '未来可用'
-        }</b>
+        <b>{action.pending
+          ? '处理中'
+          : availability === 'executable'
+            ? isRecommended ? '推荐操作 · 当前可执行' : '当前可执行'
+            : availability === 'blocked' ? '暂不可用' : '未来可用'}</b>
       </button>
     );
   };
@@ -329,94 +249,54 @@ export function StoryWorkspaceDreamAgentDialog({
             <p>Dream Agent</p>
             <span>{deckName} · Run …{runId.slice(-6)}</span>
           </div>
-          <h2 id="story-workspace-dream-agent-dialog-title" ref={headingRef} tabIndex={-1}>Dream Agent</h2>
+          <h2 id="story-workspace-dream-agent-dialog-title" ref={headingRef} tabIndex={-1}>
+            Dream Agent
+          </h2>
           <p className="story-workspace-dream-agent-dialog__status" role="status">
-            <b aria-hidden="true">{status.icon}</b>{status.label}
+            与 Chat 共用同一 thread
           </p>
         </div>
         <button aria-label="收起 Dream Agent" onClick={onClose} type="button">收起</button>
       </header>
-      <div className="story-workspace-dream-agent-dialog__history-shell">
-        <div className="story-workspace-dream-agent-dialog__history" onScroll={handleHistoryScroll} ref={historyRef}>
-          <StoryWorkspaceDreamAgentMessageList
-            messages={agent.snapshot?.messages ?? []}
-            streamContent={agent.streamContent}
-            streamText={agent.streamText}
-          />
-          <div aria-hidden="true" ref={bottomRef} />
-        </div>
-        {showScrollToLatest && (
-          <button
-            aria-label="前往最新消息"
-            className="story-workspace-dream-agent-scroll-to-latest"
-            onClick={() => scrollToLatest()}
-            title="前往最新消息"
-            type="button"
-          >↓ <span>前往最新消息</span></button>
-        )}
-      </div>
-      <p className="story-workspace-dream-agent-dialog__stream-announcement" aria-atomic="false" aria-live="polite">{announcement}</p>
-      {agent.pendingToolConfirmation ? (
-        <StoryWorkspaceDreamToolConfirmation
-          confirmation={agent.pendingToolConfirmation}
-          errorMessage={agent.error ? '本次确认尚未提交，请检查连接后再试。' : null}
-          isResolving={agent.isConfirmingTool}
-          onResolve={agent.confirmTool}
-        />
-      ) : (
-        <>
-          {workflowActions.length > 0 && (
-            <div
-              aria-label="Episode 工作流操作"
-              className="story-workspace-dream-agent-dialog__workflow-actions"
-              role="group"
-            >
-              <p>当前与后续 Episode</p>
-              <div className="story-workspace-dream-agent-dialog__workflow-primary">
-                {workflowActionGroups.direct.map(workflowActionButton)}
-              </div>
-              {workflowActionGroups.overflow.length > 0 && (
-                <>
-                  <button
-                    aria-controls={workflowOverflowId}
-                    aria-expanded={workflowOverflowOpen}
-                    className="story-workspace-dream-agent-dialog__workflow-disclosure"
-                    onClick={() => setWorkflowOverflowOpen((open) => !open)}
-                    ref={workflowOverflowTriggerRef}
-                    type="button"
-                  >更多工作流操作（{workflowActionGroups.overflow.length}）</button>
-                  <div
-                    aria-label="更多 Episode 工作流操作"
-                    className="story-workspace-dream-agent-dialog__workflow-overflow"
-                    hidden={!workflowOverflowOpen}
-                    id={workflowOverflowId}
-                    role="group"
-                  >{workflowActionGroups.overflow.map(workflowActionButton)}</div>
-                </>
-              )}
-            </div>
+      {workflowActions.length > 0 && (
+        <div
+          aria-label="Episode 工作流操作"
+          className="story-workspace-dream-agent-dialog__workflow-actions"
+          role="group"
+        >
+          <p>当前与后续 Episode</p>
+          <div className="story-workspace-dream-agent-dialog__workflow-primary">
+            {workflowActionGroups.direct.map(workflowActionButton)}
+          </div>
+          {workflowActionGroups.overflow.length > 0 && (
+            <>
+              <button
+                aria-controls={workflowOverflowId}
+                aria-expanded={workflowOverflowOpen}
+                className="story-workspace-dream-agent-dialog__workflow-disclosure"
+                onClick={() => setWorkflowOverflowOpen((open) => !open)}
+                ref={workflowOverflowTriggerRef}
+                type="button"
+              >更多工作流操作（{workflowActionGroups.overflow.length}）</button>
+              <div
+                aria-label="更多 Episode 工作流操作"
+                className="story-workspace-dream-agent-dialog__workflow-overflow"
+                hidden={!workflowOverflowOpen}
+                id={workflowOverflowId}
+                role="group"
+              >{workflowActionGroups.overflow.map(workflowActionButton)}</div>
+            </>
           )}
-          <form className="story-workspace-dream-agent-dialog__composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-            {inputHint && <p role="status">{inputHint}</p>}
-            {agent.error && <p role="status">{agent.terminalOutcome === 'failed' ? '本次执行失败，请重试。' : '正在恢复 Dream Agent 消息。'}</p>}
-            {!agent.error && agent.terminalOutcome === 'cancelled' && <p role="status">本次执行已取消。</p>}
-            <label>
-              <span>给 Dream Agent 留言</span>
-              <textarea
-                aria-label="给 Dream Agent 留言"
-                disabled={!agent.snapshot?.canSend || agent.isSending}
-                onChange={(event) => { pendingKeyRef.current = null; setDraft(event.currentTarget.value); }}
-                onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }}
-                placeholder="写下后续创作指令…"
-                ref={inputRef}
-                rows={2}
-                value={draft}
-              />
-            </label>
-            <StoryWorkspaceDreamAgentComposerButton agent={agent} canSend={canSend} />
-          </form>
-        </>
+        </div>
       )}
+      <div className="story-workspace-dream-agent-dialog__thread-chat">
+        <StoryWorkspaceDreamThreadChat
+          expectedMessageId={expectedMessageId}
+          onSettled={onSettled}
+          refreshNonce={refreshNonce}
+          threadId={threadId}
+        />
+      </div>
     </div>
   );
 }

@@ -3,7 +3,7 @@
 > **Design ID**: `design_001_deck-integration-delta`
 > **关联 Issue**: `SUO-215`、`SUO-236`、`SUO-250`
 > **父级裁决**: `SUO-235`
-> **基线**: `docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
+> **基线**: `docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
 > **最后更新**: 2026-08-02
 > **设计阶段**: `design → issue → task → stage`
 > **当前 canonical 真相源**: `docs/design/deck/deck-integration-delta.md`
@@ -303,7 +303,7 @@ WorkflowPreflight: configuring → ready / failed / expired
 
 StoryWorkflowRun:
 preflight → queued → running → output_validating → pending_review → confirmed
-                │              │                 │              ├→ continuing → completed
+                │              │                 │              ├→ completed
                 │              │                 │              └→ completed
                 │              │                 └→ rejected（重试创建新 run）
                 ├──────────────┴────────────────────────────────→ failed

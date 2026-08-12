@@ -6,7 +6,7 @@
 - Paperclip Issue: `SUO-304`
 - 来源控制项: `SUO-217`
 - 关联 Issue: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` §3 `DECK-007`
-- 关联设计稿: `docs/design/deck-plugin-voice-ink-dream-integration.md` §11.1~§11.4；`docs/design/story-workspace/story-workspace-layout-design.md` §5.6
+- 关联设计稿: `docs/design/deck-plugin-voice-ink-dream-integration.md` §11.1~§11.4；`docs/design/story-workspace/product-scope-and-navigation.md` §5.6
 - 关联 Stage: `docs/stage/stage_deck-plugin-voice-ink-dream-integration.md` §18，Stage 2 / Wave 2
 - 前置执行: `SUO-281` Workflow Preflight、`SUO-296` Backend Deck Plugin Binding
 - 执行 Agent: `ExecTaskAgent`
@@ -60,7 +60,7 @@
 | 1 | 保留 SUO-198 字段并新增 §11.1 字段 | PASS | `WorkflowRun` 严格模型与 schema 字段逐项对应 |
 | 2 | workspace/actor 仅认证上下文派生且不可变；唯一域精确 | PASS | `AuthenticatedActorContext`、Preflight+Binding 双重 identity 校验、三字段 UNIQUE、不可变 trigger、跨 workspace 测试 |
 | 3 | fingerprint 服务端 canonical 计算且不含 token/preflight ID | PASS | `_semantic_fingerprint` 只读取冻结来源、lock digest、voice source/retry provenance；fresh equivalent preflight 返回相同 run |
-| 4 | 合法状态机且终态不可复活 | PASS | transition allowlist、terminal guard、confirmed→continuing/completed、rejected/cancelled/failed 路径测试 |
+| 4 | 合法状态机且终态不可复活 | PASS | transition allowlist、terminal guard、confirmed→completed、rejected/cancelled/failed 路径测试 |
 | 5 | 同 scope/key/语义完整 token 校验后返回原 run，新 token 原子映射 | PASS | exact replay、过期后 exact replay、fresh equivalent token 测试 |
 | 6 | key/语义或 consumed-token identity 绑定冲突统一 fail closed | PASS | key/voice/actor/workspace 冲突矩阵均抛 `IDEMPOTENCY_CONFLICT`，异常不含原 run ID |
 | 7 | run/token/initial transition 原子，并发只产生一个 run | PASS | 4 个创建故障注入点全部回滚；双连接并发仅 1 run、1 token consumption、1 initial transition |
@@ -145,4 +145,3 @@
 - 回滚文件：删除本 task 新增的 `backend/models/workflow_run.py`、`backend/services/workflow/run_service.py`、`backend/tests/test_workflow_run.py`、本报告；在 `backend/database.py` 中仅逆向移除 `create_workflow_run_tables` 增量。
 - 回滚方式：使用版本控制生成并应用只覆盖上述五个路径/区段的 inverse patch；不得对脏工作树执行 reset/checkout，不得移除前序 manifest/lock/install/binding/preflight schema。
 - 数据注意事项：若环境已创建 run 表且已有数据，代码回滚前应先导出 `workflow_runs`、`workflow_run_token_consumptions`、`workflow_run_transitions`；不要直接 DROP，以免丢失不可变执行证据。
-

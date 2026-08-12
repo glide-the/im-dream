@@ -47,7 +47,7 @@ def main() -> None:
     parser.add_argument("--user-email", required=True)
     parser.add_argument("--thread-id", required=True)
     parser.add_argument("--deck-id", required=True)
-    parser.add_argument("--status", default="continuing")
+    parser.add_argument("--status", default="confirmed")
     parser.add_argument("--seed", required=True, help="uniqueness seed for ids")
     args = parser.parse_args()
 

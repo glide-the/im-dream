@@ -5,7 +5,7 @@
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
 > **上游 Stage**: `stage_story-workspace.md` (SUO-208) + `stage_story-workspace-episodes-metadata.md` (SUO-245)  
 > **任务输入来源**:
-> - 设计稿: `docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md` (SUO-241)
+> - 设计稿: `docs/design/story-workspace/project-and-episode-workbench.md` (SUO-241)
 > - 后端 task (3): `task_241_backend_episode-adapter-projection.md` + `task_241_backend_run-record-audit.md` + `task_241_backend_review-gate-conflict.md`
 > - 前端 task (5): `task_241_frontend_episode-workspace.md` + `task_241_frontend_episode-list-table.md` + `task_241_frontend_episode-detail-tabs.md` + `task_241_frontend_episode-review-panel.md` + `task_241_frontend_episode-states.md`
 > - shared task (2): `task_241_shared_episode-projection-e2e.md` + `task_241_shared_review-gate-conflict-e2e.md`

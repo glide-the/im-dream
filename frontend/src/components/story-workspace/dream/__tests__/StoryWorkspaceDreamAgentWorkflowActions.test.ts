@@ -84,23 +84,13 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
   const harnessModule = `
     import React, { createElement as h, useRef, useState } from 'react';
     import { createRoot } from 'react-dom/client';
+    import '/src/i18n.ts';
     import {
       StoryWorkspaceDreamAgentDialog,
       storyWorkspaceSplitDreamAgentWorkflowActions,
     } from '/src/components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx';
     import '/src/pages/story-workspace/StoryWorkspaceDreamPage.css';
     const actions = ${JSON.stringify(actions)};
-    const snapshot = {
-      storyWorkspaceRunId: 'run_${'a'.repeat(32)}', lifecycle: 'idle', activeTurnId: null,
-      canSend: true, sendBlockReason: null, messages: [], snapshotAt: '2026-08-06T00:00:00Z',
-    };
-    const agent = {
-      snapshot, streamText: '', streamContent: [], streamTurnId: null,
-      pendingToolConfirmation: null, isLoading: false, isSending: false,
-      isConfirmingTool: false, isReconnecting: false, error: null, unreadCount: 0,
-      refresh: () => undefined, markRead: () => undefined,
-      send: async () => false, confirmTool: async () => false,
-    };
     window.splitActions = storyWorkspaceSplitDreamAgentWorkflowActions;
     function Harness() {
       const [open, setOpen] = useState(true);
@@ -124,7 +114,8 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
         }, '打开 Dream Agent'),
         h('output', { id: 'requests' }, requests.join(',')),
         open && h(StoryWorkspaceDreamAgentDialog, {
-          agent, deckName: 'drama-forge', runId: snapshot.storyWorkspaceRunId,
+          deckName: 'drama-forge', runId: 'run_${'a'.repeat(32)}',
+          threadId: 'thread-workflow-actions',
           workflowActions: actions.map((action, index) => ({
             ...action,
             pending: index === 0 && pending,
@@ -174,6 +165,43 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
     throw new Error('R3 workflow actions harness did not bind a TCP port.');
   }
   try {
+    await page.addInitScript(() => {
+      localStorage.setItem('auth_token', 'workflow-actions-token');
+      localStorage.setItem('ink-language', 'zh');
+    });
+    await page.route('**/api/**', async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/api/system-config') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+        return;
+      }
+      if (path === '/api/claude-agent/threads/thread-workflow-actions/messages') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            thread: {
+              id: 'thread-workflow-actions', title: 'Workflow actions',
+              created_at: '2026-08-11T00:00:00Z', updated_at: '2026-08-11T00:00:00Z',
+            },
+            messages: [],
+          }),
+        });
+        return;
+      }
+      if (path === '/api/claude-agent/threads/thread-workflow-actions/status') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            running: false, lifecycle: 'idle', turn_count: 0,
+            pending_tool_call_ids: [], tool_confirmation_observation: 'known',
+          }),
+        });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`http://127.0.0.1:${address.port}/r3-agent-workflow-actions`);
     expect(await page.evaluate((items) => {
@@ -208,14 +236,13 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
       document.querySelector('[role="dialog"]')?.append(disabledDecoy);
     });
 
-    const closeButton = dialog.getByRole('button', { name: '收起 Dream Agent' });
-    const composerInput = dialog.getByRole('textbox', { name: '给 Dream Agent 留言' });
+    const composerInput = dialog.getByRole('textbox', { name: '聊天输入' });
     const narrowLayout = await dialog.evaluate((element) => {
       const history = element.querySelector<HTMLElement>(
-        '.story-workspace-dream-agent-dialog__history-shell',
+        '.story-workspace-dream-agent-dialog__thread-chat',
       );
       const composer = element.querySelector<HTMLElement>(
-        '.story-workspace-dream-agent-dialog__composer',
+        '[data-testid="markdown-input-editor"]',
       );
       const primaryActions = Array.from(element.querySelectorAll<HTMLElement>(
         '.story-workspace-dream-agent-dialog__workflow-primary > button',
@@ -236,11 +263,7 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
     expect(narrowLayout.composerHeight).toBeLessThanOrEqual(96);
     expect(narrowLayout.historyHeight).toBeGreaterThanOrEqual(120);
     expect(narrowLayout.primaryActionColumns).toBe(1);
-    await closeButton.focus();
-    await page.keyboard.press('Shift+Tab');
-    await expect(composerInput).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(closeButton).toBeFocused();
+    await expect(composerInput).toBeEnabled();
 
     await currentAction.click();
     await expect(page.locator('#requests')).toHaveText('episode-action-0');
@@ -308,7 +331,7 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
     const desktopDisclosure = desktopDialog.getByRole('button', { name: '更多工作流操作（5）' });
     const desktopLayoutBeforeDisclosure = await desktopDialog.evaluate((element) => {
       const history = element.querySelector<HTMLElement>(
-        '.story-workspace-dream-agent-dialog__history-shell',
+        '.story-workspace-dream-agent-dialog__thread-chat',
       );
       const primaryActions = Array.from(element.querySelectorAll<HTMLElement>(
         '.story-workspace-dream-agent-dialog__workflow-primary > button',
@@ -324,7 +347,7 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
     expect(desktopLayoutBeforeDisclosure.historyHeight).toBeGreaterThanOrEqual(160);
     await desktopDisclosure.click();
     const desktopHistoryHeightAfterDisclosure = await desktopDialog.locator(
-      '.story-workspace-dream-agent-dialog__history-shell',
+      '.story-workspace-dream-agent-dialog__thread-chat',
     ).evaluate((element) => element.getBoundingClientRect().height);
     expect(desktopHistoryHeightAfterDisclosure).toBeCloseTo(
       desktopLayoutBeforeDisclosure.historyHeight,

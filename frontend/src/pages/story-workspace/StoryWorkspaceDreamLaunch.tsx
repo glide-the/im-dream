@@ -20,7 +20,7 @@ export interface StoryWorkspaceDreamLaunchProps {
 const STORY_WORKSPACE_DREAM_REENTRY_COPY: Record<StoryWorkspaceDreamReentryItem['lifecycle'], string> = {
   generating: 'Dream Agent 正在创作',
   waiting_confirmation: '等待你修改并确认',
-  continuing: 'Dream Agent 正在继续',
+  running: 'Dream Agent 正在执行',
   recent: '最近完成本轮输出',
 };
 

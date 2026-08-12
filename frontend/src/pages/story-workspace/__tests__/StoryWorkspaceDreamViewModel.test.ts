@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test';
 import type { StoryWorkspaceDreamFilesResponse } from '../../../hooks/story-workspace/contracts';
 import {
   storyWorkspaceDreamStageSnapshotsFromFiles,
+  storyWorkspaceDreamAgentActivityNotice,
   storyWorkspaceDreamLifecycleFromPersistence,
   storyWorkspaceDreamPersistenceNotice,
   storyWorkspaceDreamRunFailureNotice,
@@ -47,8 +48,74 @@ function projection(): StoryWorkspaceDreamFilesResponse {
     confirmationDispatched: false,
     canConfirm: false,
     confirmationLabel: '确认并继续',
+    agentActivity: null,
   };
 }
+
+test('maps content-free Observer hints to display copy without lifecycle state', () => {
+  const operationId = 'a'.repeat(64);
+  expect(storyWorkspaceDreamAgentActivityNotice({
+    activity: 'activity_started_hint',
+    sequence: 3,
+    terminalOutcome: null,
+    needsReconcile: false,
+    operationScope: 'content_generation',
+    operationState: 'started',
+    operationId,
+  })).toBe('Dream 内容生成正在运行');
+  expect(storyWorkspaceDreamAgentActivityNotice({
+    activity: 'activity_settled_hint',
+    sequence: 4,
+    terminalOutcome: null,
+    needsReconcile: false,
+    operationScope: 'workflow_operation',
+    operationState: 'failed',
+    operationId,
+  })).toBe('Dream 工作流操作执行失败');
+  expect(storyWorkspaceDreamAgentActivityNotice({
+    activity: 'reconcile_requested',
+    sequence: -1,
+    terminalOutcome: null,
+    needsReconcile: true,
+    operationScope: null,
+    operationState: null,
+    operationId: null,
+  })).toBe('正在校验 Dream 业务投影');
+  expect(storyWorkspaceDreamAgentActivityNotice(null)).toBeNull();
+});
+
+test('does not turn Agent lifecycle, confirmation, subagent, or generic tool hints into business copy', () => {
+  const operationId = 'b'.repeat(64);
+  expect(storyWorkspaceDreamAgentActivityNotice({
+    activity: 'turn_settled_hint',
+    sequence: 7,
+    terminalOutcome: 'completed',
+    needsReconcile: false,
+    operationScope: null,
+    operationState: null,
+    operationId: null,
+  })).toBeNull();
+  expect(storyWorkspaceDreamAgentActivityNotice({
+    activity: 'waiting_confirmation_hint',
+    sequence: 8,
+    terminalOutcome: null,
+    needsReconcile: false,
+    operationScope: 'workflow_operation',
+    operationState: 'waiting_confirmation',
+    operationId,
+  })).toBeNull();
+  for (const operationScope of ['subagent', 'tool'] as const) {
+    expect(storyWorkspaceDreamAgentActivityNotice({
+      activity: 'activity_started_hint',
+      sequence: 9,
+      terminalOutcome: null,
+      needsReconcile: false,
+      operationScope,
+      operationState: 'started',
+      operationId,
+    })).toBeNull();
+  }
+});
 
 test('maps only the three server-whitelisted editable fields into local state', () => {
   const snapshots = storyWorkspaceDreamStageSnapshotsFromFiles(projection());
@@ -86,21 +153,21 @@ test('restores the one-confirm lifecycle from durable confirmation and run facts
     'failed',
     'story-workspace-dream-editing',
   )).toBe('story-workspace-dream-editing');
-  expect(storyWorkspaceDreamPersistenceNotice(saved, 'continuing')).toBe(
+  expect(storyWorkspaceDreamPersistenceNotice(saved, 'running')).toBe(
     '命令已保存，等待同一 Dream Agent 接续',
   );
   expect(storyWorkspaceDreamLifecycleFromPersistence(
     saved,
     'completed',
     'story-workspace-dream-editing',
-  )).toBe('story-workspace-dream-continuing');
+  )).toBe('story-workspace-dream-running');
   expect(storyWorkspaceDreamPersistenceNotice(saved, 'completed')).toBe(
     '命令已保存，等待同一 Dream Agent 接续',
   );
 
   const dispatched = { ...saved, confirmationDispatched: true };
-  expect(storyWorkspaceDreamPersistenceNotice(dispatched, 'continuing')).toBe(
-    '同一 Dream Agent 正在继续',
+  expect(storyWorkspaceDreamPersistenceNotice(dispatched, 'running')).toBe(
+    '同一 Dream Agent 正在执行',
   );
   expect(storyWorkspaceDreamLifecycleFromPersistence(
     dispatched,
@@ -112,7 +179,7 @@ test('restores the one-confirm lifecycle from durable confirmation and run facts
   );
 });
 
-test('renders a safe durable Workflow failure instead of continuing copy', () => {
+test('renders a safe durable Workflow failure instead of running copy', () => {
   expect(storyWorkspaceDreamRunFailureNotice({
     status: 'failed',
     error_code: 'GATEWAY_UNAVAILABLE',

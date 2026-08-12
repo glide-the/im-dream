@@ -181,7 +181,7 @@ export interface StoryWorkspaceDreamReentryItem {
   readonly deckDisplayName: string;
   readonly workflowDisplayName: 'Dream';
   readonly deckPluginVersion: string;
-  readonly lifecycle: 'generating' | 'waiting_confirmation' | 'continuing' | 'recent';
+  readonly lifecycle: 'generating' | 'waiting_confirmation' | 'running' | 'recent';
   readonly group: 'in_progress' | 'recent';
   readonly stageRevisions: Readonly<Partial<Record<StoryWorkspaceDreamStage, number>>>;
   readonly confirmationAccepted: boolean;
@@ -264,6 +264,35 @@ export interface StoryWorkspaceDreamStageProjection {
   readonly items: readonly StoryWorkspaceDreamStageItem[];
 }
 
+export type StoryWorkspaceDreamAgentActivityKind =
+  | 'activity_started_hint'
+  | 'activity_settled_hint'
+  | 'waiting_confirmation_hint'
+  | 'turn_settled_hint'
+  | 'reconcile_requested';
+
+export type StoryWorkspaceDreamAgentOperationScope =
+  | 'tool'
+  | 'subagent'
+  | 'content_generation'
+  | 'workflow_operation';
+
+export interface StoryWorkspaceDreamAgentActivityProjection {
+  readonly activity: StoryWorkspaceDreamAgentActivityKind;
+  readonly sequence: number;
+  readonly terminalOutcome: 'completed' | 'failed' | 'cancelled' | null;
+  readonly needsReconcile: boolean;
+  readonly operationScope: StoryWorkspaceDreamAgentOperationScope | null;
+  readonly operationState:
+    | 'started'
+    | 'waiting_confirmation'
+    | 'succeeded'
+    | 'failed'
+    | null;
+  /** SHA-256 correlation only; the raw tool/subagent call id is never exposed. */
+  readonly operationId: string | null;
+}
+
 /**
  * Response of GET /api/story-workspace/workflow-runs/{runId}/dream-files.
  * A missing run.json is represented by runRevision=0 and an empty stages map;
@@ -285,140 +314,27 @@ export interface StoryWorkspaceDreamFilesResponse {
   readonly confirmationDispatched: boolean;
   readonly canConfirm: boolean;
   readonly confirmationLabel: '确认并继续';
+  /** Display-only Observer hint; never controls Chat or Workflow lifecycle. */
+  readonly agentActivity: StoryWorkspaceDreamAgentActivityProjection | null;
 }
-
-export type StoryWorkspaceDreamAgentActivityCategory =
-  | 'workspace_read'
-  | 'dream_write'
-  | 'reference_lookup'
-  | 'delegation'
-  | 'other';
-
-export interface StoryWorkspaceDreamAgentTextContent {
-  readonly kind: 'text';
-  readonly text: string;
-  readonly truncated: boolean;
-}
-
-export interface StoryWorkspaceDreamAgentActivityContent {
-  readonly kind: 'activity';
-  readonly id: string;
-  readonly category: StoryWorkspaceDreamAgentActivityCategory;
-  readonly label: '读取工作区资料' | '更新 Dream 内容' | '查找参考资料' | '协同处理创作任务' | '处理 Dream 创作任务';
-  readonly status: 'running' | 'completed' | 'stopped';
-}
-
-export type StoryWorkspaceDreamAgentContent =
-  | StoryWorkspaceDreamAgentTextContent
-  | StoryWorkspaceDreamAgentActivityContent;
-
-/** Safe message rendered by the Dream Agent workbench. */
-export interface StoryWorkspaceDreamAgentMessage {
-  readonly id: string;
-  readonly role: 'user' | 'assistant';
-  readonly text: string;
-  readonly truncated: boolean;
-  readonly content: readonly StoryWorkspaceDreamAgentContent[];
-  readonly createdAt: string;
-}
-
-/** Persisted Dream Agent history plus the server-owned send gate. */
-export interface StoryWorkspaceDreamAgentMessageSnapshot {
-  readonly storyWorkspaceRunId: string;
-  readonly lifecycle: 'idle' | 'streaming';
-  readonly activeTurnId: string | null;
-  readonly canSend: boolean;
-  readonly sendBlockReason: 'generating' | 'waiting_confirmation' | 'confirming' | 'continuing' | 'busy' | null;
-  readonly messages: readonly StoryWorkspaceDreamAgentMessage[];
-  readonly pendingToolConfirmations: readonly StoryWorkspaceDreamAgentToolConfirmation[];
-  readonly toolConfirmationObservation: 'known' | 'unknown';
-  readonly snapshotAt: string;
-}
-
-/** The browser submits only text and its idempotency key; all binding stays server-side. */
-export interface StoryWorkspaceDreamAgentMessageCommand {
-  readonly text: string;
-  readonly idempotencyKey: string;
-}
-
-export interface StoryWorkspaceDreamAgentMessageAccepted {
-  readonly storyWorkspaceRunId: string;
-  readonly messageId: string;
-  readonly accepted: true;
-}
-
-/** User-facing, server-allowlisted description of one pending Dream Agent tool decision. */
-export interface StoryWorkspaceDreamAgentToolConfirmationOption {
-  readonly label: string;
-  readonly value: string;
-}
-
-export interface StoryWorkspaceDreamAgentToolConfirmationQuestion {
-  readonly id: string;
-  readonly question: string;
-  readonly type: 'text' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'number';
-  readonly required: boolean;
-  readonly multiSelect?: boolean;
-  readonly options?: readonly StoryWorkspaceDreamAgentToolConfirmationOption[];
-  readonly placeholder?: string;
-}
-
-export interface StoryWorkspaceDreamAgentToolConfirmation {
-  readonly toolCallId: string;
-  readonly kind: 'approval' | 'ask_user' | 'sandbox_network' | 'reject_only';
-  readonly toolName: string;
-  readonly questions?: readonly StoryWorkspaceDreamAgentToolConfirmationQuestion[];
-  readonly network?: {
-    readonly host: string | null;
-    readonly policy: 'allowlist' | 'open' | 'deny' | 'unknown';
-  };
-}
-
-/** Run-scoped browser command; thread and Deck binding remain server-owned. */
-export interface StoryWorkspaceDreamAgentToolConfirmationCommand {
-  readonly toolCallId: string;
-  readonly approved: boolean;
-  readonly reason?: string;
-  readonly answers?: Readonly<Record<string, unknown>>;
-}
-
-export interface StoryWorkspaceDreamAgentToolConfirmationResolved {
-  readonly storyWorkspaceRunId: string;
-  readonly toolCallId: string;
-  readonly resolved: true;
-}
-
-export type StoryWorkspaceDreamAgentTerminalOutcome = 'completed' | 'failed' | 'cancelled';
-
-/** Allowlisted event surface emitted by the Story Workspace Dream SSE adapter. */
-export type StoryWorkspaceDreamAgentEvent =
-  | { readonly type: 'assistant_text_delta'; readonly cursor: string; readonly turnId: string; readonly delta: string }
-  | { readonly type: 'agent_activity_started'; readonly cursor: string; readonly turnId: string; readonly activity: StoryWorkspaceDreamAgentActivityContent }
-  | { readonly type: 'agent_activity_finished'; readonly cursor: string; readonly turnId: string; readonly activity: StoryWorkspaceDreamAgentActivityContent }
-  | { readonly type: 'assistant_message_committed'; readonly turnId: string }
-  | { readonly type: 'agent_turn_failed'; readonly cursor: string; readonly turnId: string; readonly code: 'DREAM_AGENT_TURN_FAILED' }
-  | { readonly type: 'agent_turn_cancelled'; readonly cursor: string; readonly turnId: string }
-  | { readonly type: 'tool_confirmation_requested'; readonly cursor: string; readonly turnId: string; readonly confirmation: StoryWorkspaceDreamAgentToolConfirmation }
-  | { readonly type: 'tool_confirmation_resolved'; readonly cursor: string; readonly turnId: string; readonly toolCallId: string }
-  | { readonly type: 'status'; readonly lifecycle: 'idle' | 'streaming' };
 
 /** Dream's only page lifecycle; it intentionally has no rejection/failure arm. */
 export type StoryWorkspaceDreamLifecycleState =
   | 'story-workspace-dream-waiting-files'
   | 'story-workspace-dream-editing'
   | 'story-workspace-dream-confirming'
-  | 'story-workspace-dream-continuing'
+  | 'story-workspace-dream-running'
   | 'story-workspace-dream-completed';
 
 /**
  * Server aggregate compatibility stages. The Dream UI exposes lifecycle
- * links for pending_review/confirmed/continuing/completed only; the two
+ * links for pending_review/confirmed/running/completed only; the two
  * legacy branches remain accepted as transport values but render no action.
  */
 export type StoryWorkspaceSurfaceLinkStage =
   | 'pending_review'
   | 'confirmed'
-  | 'continuing'
+  | 'running'
   | 'completed'
   | 'failed'
   | 'rejected';

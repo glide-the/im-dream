@@ -1,10 +1,10 @@
-"""Activate one queued Dream Workflow Run from verified Claude SDK init evidence.
+"""Activate one queued Dream Workflow Run from assembled server evidence.
 
 The workspace packer proves the frozen plugin bytes before the Claude subprocess
-starts.  The SDK ``init`` system frame then proves that the subprocess accepted
-that launch configuration before any Assistant output is processed.  This
-service joins those two server-owned facts into the existing immutable runtime
-load receipt and Agent Session contracts; it never accepts browser provenance.
+starts. Context assembly joins those verified bytes, the actor-owned canonical
+Thread and the frozen Workflow binding into the existing immutable runtime load
+receipt and Agent Session contracts before Session Execution. It never accepts
+browser provenance and never controls the Claude query.
 """
 
 from __future__ import annotations
@@ -79,8 +79,8 @@ class _UnavailableReconcileDependency:
         raise RuntimeError("receipt-only reconcile dependency is unavailable")
 
 
-class _ObservedSdkSessionAdapter:
-    """Acknowledge the SDK session that emitted the trusted init frame."""
+class _AssembledThreadSessionAdapter:
+    """Bind the runtime receipt to the canonical Thread assembled for the turn."""
 
     def __init__(self, remote_session_ref: str) -> None:
         self._remote_session_ref = remote_session_ref
@@ -117,7 +117,7 @@ class _ObservedSdkSessionAdapter:
 
 
 class StoryWorkspaceDreamRuntimeActivationService:
-    """Join verified workspace bytes and an SDK init frame to start one Run."""
+    """Join verified workspace bytes and Thread authority to start one Run."""
 
     def __init__(
         self,
@@ -146,15 +146,15 @@ class StoryWorkspaceDreamRuntimeActivationService:
         self._runtime_node_id = runtime_node_id
         self._clock = clock or (lambda: datetime.now(UTC))
 
-    async def activate_from_sdk_init(
+    async def activate_from_assembled_context(
         self,
         *,
         workflow_run_id: str,
         actor_context: AuthenticatedActorContext,
-        sdk_init: dict[str, Any],
+        remote_session_ref: str,
         verified_plugins: list[dict[str, Any]],
     ) -> WorkflowRun:
-        remote_session_ref = self._validate_sdk_init(sdk_init)
+        remote_session_ref = self._validate_remote_session_ref(remote_session_ref)
         run_reader = WorkflowRunService(
             self.db,
             token_secret=self._token_secret,
@@ -164,11 +164,15 @@ class StoryWorkspaceDreamRuntimeActivationService:
         run_status = str(getattr(run.status, "value", run.status))
         if run_status in {
             RunStatus.RUNNING.value,
+            RunStatus.OUTPUT_VALIDATING.value,
             RunStatus.PENDING_REVIEW.value,
             RunStatus.CONFIRMED.value,
-            RunStatus.CONTINUING.value,
         }:
-            return self._validate_running_replay(run, remote_session_ref)
+            runtime_lock, _materializations, _policy_revision = self._load_evidence(
+                run
+            )
+            self._validate_verified_plugins(runtime_lock, verified_plugins)
+            return self._validate_active_runtime(run)
         if run_status != RunStatus.QUEUED.value:
             self._rollback_read()
             raise StoryWorkspaceDreamRuntimeActivationError(
@@ -195,7 +199,7 @@ class StoryWorkspaceDreamRuntimeActivationService:
             runtime_node_id=self._runtime_node_id,
             policy_revision=policy_revision,
             settings_intent={
-                "evidence": "verified-workspace-manifest+claude-sdk-init",
+                "evidence": "verified-workspace-manifest+assembled-thread-context",
                 "requiredTool": _REQUIRED_DREAM_TOOL,
             },
             plugins=[
@@ -237,7 +241,7 @@ class StoryWorkspaceDreamRuntimeActivationService:
         session_manager = SessionManager(
             self.db,
             receipt_reader=receipt_service,
-            adapter=_ObservedSdkSessionAdapter(remote_session_ref),
+            adapter=_AssembledThreadSessionAdapter(remote_session_ref),
             workflow_run_service=run_service,
             clock=self._clock,
         )
@@ -335,21 +339,17 @@ class StoryWorkspaceDreamRuntimeActivationService:
         return runtime_lock, materializations, next(iter(policy_revisions))
 
     @staticmethod
-    def _validate_sdk_init(sdk_init: dict[str, Any]) -> str:
-        session_id = sdk_init.get("session_id")
-        tools = sdk_init.get("tools")
+    def _validate_remote_session_ref(remote_session_ref: object) -> str:
         if (
-            not isinstance(session_id, str)
-            or not session_id.strip()
-            or len(session_id) > 255
-            or not isinstance(tools, list)
-            or _REQUIRED_DREAM_TOOL not in tools
+            not isinstance(remote_session_ref, str)
+            or not remote_session_ref.strip()
+            or len(remote_session_ref) > 255
         ):
             raise StoryWorkspaceDreamRuntimeActivationError(
                 DREAM_RUNTIME_INIT_INVALID,
-                "Claude SDK init did not expose the required Dream runtime",
+                "Assembled Dream Thread identity is invalid",
             )
-        return session_id.strip()
+        return remote_session_ref.strip()
 
     @staticmethod
     def _validate_verified_plugins(
@@ -389,13 +389,20 @@ class StoryWorkspaceDreamRuntimeActivationService:
                 "Verified workspace plugins do not match the frozen runtime lock",
             )
 
-    def _validate_running_replay(
-        self,
-        run: WorkflowRun,
-        remote_session_ref: str,
-    ) -> WorkflowRun:
+    def _validate_active_runtime(self, run: WorkflowRun) -> WorkflowRun:
+        """Prove durable runtime authority without controlling Chat resume.
+
+        ``remote_session_ref`` records the SDK acknowledgement observed during
+        the initial queued->running activation. It is not the canonical Chat
+        transcript cursor: Chat intentionally allocates a fresh SDK session
+        when the local transcript is unavailable. Keep the original reference
+        immutable as audit evidence and validate the authoritative run/session/
+        receipt/lock join for every active turn instead.
+        """
+
         row = self.db.execute(
-            "SELECT remote_session_ref, status FROM agent_sessions "
+            "SELECT workflow_run_id, runtime_load_receipt_id, "
+            "runtime_plugin_lock_id, status FROM agent_sessions "
             "WHERE agent_session_id = %s AND workflow_run_id = %s",
             (run.agent_session_id, run.workflow_run_id),
         ).fetchone()
@@ -403,11 +410,13 @@ class StoryWorkspaceDreamRuntimeActivationService:
         if (
             row is None
             or row["status"] != "active"
-            or row["remote_session_ref"] != remote_session_ref
+            or row["workflow_run_id"] != run.workflow_run_id
+            or row["runtime_load_receipt_id"] != run.runtime_load_receipt_id
+            or row["runtime_plugin_lock_id"] != run.runtime_plugin_lock_id
         ):
             raise StoryWorkspaceDreamRuntimeActivationError(
                 DREAM_RUNTIME_INIT_INVALID,
-                "Claude SDK init does not match the active Dream Session",
+                "Active Dream runtime bindings are inconsistent",
             )
         return run
 

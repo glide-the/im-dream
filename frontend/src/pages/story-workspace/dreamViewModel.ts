@@ -3,6 +3,7 @@
 // [Pos] Story Workspace Dream page pure view-model seam (Task 3 F4)
 
 import type {
+  StoryWorkspaceDreamAgentActivityProjection,
   StoryWorkspaceDreamFieldValue,
   StoryWorkspaceDreamFilesResponse,
   StoryWorkspaceDreamLifecycleState,
@@ -80,7 +81,7 @@ export function storyWorkspaceDreamLifecycleFromPersistence(
   if (!persistence?.confirmationAccepted) return fallback;
   return persistence.confirmationDispatched && runStatus === 'completed'
     ? 'story-workspace-dream-completed'
-    : 'story-workspace-dream-continuing';
+    : 'story-workspace-dream-running';
 }
 
 export function storyWorkspaceDreamRunFailureNotice(
@@ -110,11 +111,54 @@ export function storyWorkspaceDreamRunFailureNotice(
 /** Copy has no rejected/failed/retry branch: acceptance is monotonic. */
 export function storyWorkspaceDreamPersistenceNotice(
   persistence: StoryWorkspaceDreamConfirmationPersistence | null,
-  lifecycle: 'continuing' | 'completed',
+  lifecycle: 'running' | 'completed',
 ): string {
   if (persistence?.confirmationAccepted && !persistence.confirmationDispatched) {
     return '命令已保存，等待同一 Dream Agent 接续';
   }
   if (lifecycle === 'completed') return '同一 Dream Agent 已完成后续执行';
-  return '同一 Dream Agent 正在继续';
+  return '同一 Dream Agent 正在执行';
+}
+
+const DREAM_AGENT_OPERATION_LABELS: Partial<Record<
+  NonNullable<StoryWorkspaceDreamAgentActivityProjection['operationScope']>,
+  string
+>> = {
+  content_generation: 'Dream 内容生成',
+  workflow_operation: 'Dream 工作流操作',
+};
+
+const DREAM_AGENT_OPERATION_STATE_COPY: Record<
+  NonNullable<StoryWorkspaceDreamAgentActivityProjection['operationState']>,
+  string
+> = {
+  started: '正在运行',
+  waiting_confirmation: '等待确认',
+  succeeded: '已完成',
+  failed: '执行失败',
+};
+
+/**
+ * Render a content-free Observer hint. This copy is informational only: callers
+ * must never use it to drive Chat controls, confirmation, or Workflow state.
+ */
+export function storyWorkspaceDreamAgentActivityNotice(
+  activity: StoryWorkspaceDreamAgentActivityProjection | null | undefined,
+): string | null {
+  if (!activity) return null;
+  if (activity.activity === 'reconcile_requested') {
+    return '正在校验 Dream 业务投影';
+  }
+  if (
+    activity.activity !== 'activity_started_hint'
+    && activity.activity !== 'activity_settled_hint'
+  ) return null;
+  if (
+    !activity.operationScope
+    || !activity.operationState
+    || activity.operationState === 'waiting_confirmation'
+  ) return null;
+  const operationLabel = DREAM_AGENT_OPERATION_LABELS[activity.operationScope];
+  if (!operationLabel) return null;
+  return `${operationLabel}${DREAM_AGENT_OPERATION_STATE_COPY[activity.operationState]}`;
 }

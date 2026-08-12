@@ -13,10 +13,10 @@ Story Workspace REST API 实现
 - **标签**: `api`, `rest`, `crud`
 - **增量 Issue**: `SUO-230-BE-001` — 审阅 gate 服务端聚合与防绕过验证
 - **来源设计稿**:
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §6.1–6.2（API 路由设计、查询参数规范）
-  - `docs/design/story-workspace/story-workspace-prd.md` §4.2（命名映射）
-  - `docs/design/story-workspace/story-workspace-prd.md` §6.1–6.2（API 路由设计）
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.6.2（Gate 规则，SUO-230 增量）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §6.1–6.2（API 路由设计、查询参数规范）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §4.2（命名映射）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §6.1–6.2（API 路由设计）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §3.6.2（Gate 规则，SUO-230 增量）
 - **Issue 清单**: `docs/issue/ISSUES_story-workspace.md` §3 Issue 明细
 - **增量同步**: `task_230_backend_review-gate-aggregation.md` (SUO-230-BE-001, DEC-018)
 

@@ -50,7 +50,7 @@ export const STORY_WORKSPACE_SURFACE_LINK_LABELS: Partial<Record<
 >> = {
   pending_review: { label: '打开 Dream 修改', target: 'review' },
   confirmed: { label: '进入后续执行', target: 'execution' },
-  continuing: { label: '查看执行内容', target: 'execution' },
+  running: { label: '查看执行内容', target: 'execution' },
   completed: { label: '查看最新内容', target: 'execution' },
 };
 

@@ -295,6 +295,9 @@ def _active_episode_action_provenance(
         or set(action)
         != {
             "schema",
+            "workflow_run_id",
+            "thread_id",
+            "actor_id",
             "action",
             "episode_uid",
             "input_revision",
@@ -303,6 +306,9 @@ def _active_episode_action_provenance(
             "expected_workflow_revision",
         }
         or action.get("schema") != "story-workspace-episode-action/v1"
+        or action.get("workflow_run_id") != workflow_run_id
+        or action.get("thread_id") != thread_id
+        or str(action.get("actor_id") or "") != str(actor_id)
     ):
         raise PermissionError("Story Workspace action provenance is unavailable")
     return action

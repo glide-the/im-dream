@@ -70,8 +70,7 @@ test('Chat hides private Dream actions and does not let stale subagent transcrip
   `;
   let subagentsRunning = true;
   let dreamConfirmationPending = false;
-  const dreamConfirmationRequests: Array<Record<string, unknown>> = [];
-  let genericConfirmationRequestCount = 0;
+  const threadConfirmationRequests: Array<Record<string, unknown>> = [];
   const harnessPort = await reserveEphemeralPort();
   const server = await createServer({
     root: fileURLToPath(new URL('../../../../', import.meta.url)),
@@ -170,6 +169,20 @@ test('Chat hides private Dream actions and does not let stale subagent transcrip
               metadata: {},
               created_at: '2026-08-11T08:08:54Z',
             },
+            ...(dreamConfirmationPending ? [{
+              id: 'dream-assistant-confirmation',
+              role: 'assistant',
+              parts: [{
+                type: 'dynamic-tool',
+                toolCallId: 'dream-tool-write',
+                toolName: 'Write',
+                state: 'input-available',
+                input: { file_path: 'story.md' },
+                toolMetadata: { approvalRequested: true },
+              }],
+              metadata: {},
+              created_at: '2026-08-11T08:08:55Z',
+            }] : []),
           ],
         }),
       });
@@ -183,7 +196,7 @@ test('Chat hides private Dream actions and does not let stale subagent transcrip
           running: dreamConfirmationPending,
           lifecycle: dreamConfirmationPending ? 'running' : 'idle',
           turn_count: 1,
-          pending_tool_call_ids: [],
+          pending_tool_call_ids: dreamConfirmationPending ? ['dream-tool-write'] : [],
           tool_confirmation_observation: 'known',
         }),
       });
@@ -198,45 +211,14 @@ test('Chat hides private Dream actions and does not let stale subagent transcrip
       });
       return;
     }
-    if (path === `/api/story-workspace/workflow-runs/${dreamRunId}/dream-agent/messages`) {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          storyWorkspaceRunId: dreamRunId,
-          lifecycle: dreamConfirmationPending ? 'streaming' : 'idle',
-          activeTurnId: dreamConfirmationPending ? 'turn-dream-confirmation' : null,
-          canSend: !dreamConfirmationPending,
-          sendBlockReason: dreamConfirmationPending ? 'waiting_confirmation' : null,
-          messages: [],
-          pendingToolConfirmations: dreamConfirmationPending ? [{
-            toolCallId: 'dream-tool-write',
-            kind: 'approval',
-            toolName: 'Write',
-          }] : [],
-          toolConfirmationObservation: 'known',
-          snapshotAt: '2026-08-11T08:08:56Z',
-        }),
-      });
-      return;
-    }
-    if (path === `/api/story-workspace/workflow-runs/${dreamRunId}/dream-agent/tool-confirm`) {
-      dreamConfirmationRequests.push(await request.postDataJSON() as Record<string, unknown>);
+    if (path === '/api/claude-agent/tool-confirm') {
+      threadConfirmationRequests.push(await request.postDataJSON() as Record<string, unknown>);
       dreamConfirmationPending = false;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          storyWorkspaceRunId: dreamRunId,
-          toolCallId: 'dream-tool-write',
-          resolved: true,
-        }),
+        body: JSON.stringify({ ok: true, approved: true }),
       });
-      return;
-    }
-    if (path === '/api/claude-agent/tool-confirm') {
-      genericConfirmationRequestCount += 1;
-      await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
       return;
     }
     if (path === '/api/claude-agent/threads/thread-dream-subagents/subagents') {
@@ -312,11 +294,11 @@ test('Chat hides private Dream actions and does not let stale subagent transcrip
     await expect(confirmationDock).toBeVisible();
     await confirmationDock.getByRole('button', { name: 'Approve' }).click();
     await expect(confirmationDock).toHaveCount(0);
-    expect(dreamConfirmationRequests).toEqual([{
-      toolCallId: 'dream-tool-write',
+    expect(threadConfirmationRequests).toEqual([{
+      thread_id: 'thread-dream-subagents',
+      tool_call_id: 'dream-tool-write',
       approved: true,
     }]);
-    expect(genericConfirmationRequestCount).toBe(0);
     expect(diagnostics).toEqual([]);
   } finally {
     await page.close();

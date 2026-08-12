@@ -37,7 +37,6 @@ export {
   storyWorkspaceReduceDreamFilesFetch,
   storyWorkspaceShouldInvalidateDreamFiles,
   storyWorkspaceShouldPollDreamFiles,
-  storyWorkspaceShouldReadDreamFilesForAgent,
   useStoryWorkspaceDreamFiles,
 } from './useStoryWorkspaceDreamFiles';
 export type {
@@ -81,23 +80,6 @@ export {
   useStoryWorkspaceDreamRuns,
 } from './useStoryWorkspaceDreamRuns';
 export type { StoryWorkspaceDreamRunsState } from './useStoryWorkspaceDreamRuns';
-export {
-  storyWorkspaceDreamAgentEventsEndpoint,
-  storyWorkspaceDreamAgentMessagesEndpoint,
-  storyWorkspaceDreamAgentToolConfirmationEndpoint,
-  storyWorkspaceBuildDreamAgentToolConfirmationPayload,
-  storyWorkspaceBuildDreamAgentSendPayload,
-  storyWorkspaceFetchDreamAgentSnapshot,
-  storyWorkspaceNewDreamAgentIdempotencyKey,
-  storyWorkspaceParseDreamAgentEvent,
-  storyWorkspaceParseDreamAgentSnapshot,
-  storyWorkspaceReadDreamAgentEventStream,
-  storyWorkspaceReduceDreamAgentEvents,
-  storyWorkspaceSubmitDreamAgentMessage,
-  storyWorkspaceSubmitDreamAgentToolConfirmation,
-  useStoryWorkspaceDreamAgent,
-} from './useStoryWorkspaceDreamAgent';
-export type { StoryWorkspaceDreamAgentViewModel } from './useStoryWorkspaceDreamAgent';
 export type {
   StoryWorkspaceCharacter,
   StoryWorkspaceDreamConfirmationCommand,
@@ -109,16 +91,6 @@ export type {
   StoryWorkspaceDreamReentryItem,
   StoryWorkspaceDreamFieldValue,
   StoryWorkspaceDreamFilesResponse,
-  StoryWorkspaceDreamAgentEvent,
-  StoryWorkspaceDreamAgentMessage,
-  StoryWorkspaceDreamAgentMessageAccepted,
-  StoryWorkspaceDreamAgentMessageCommand,
-  StoryWorkspaceDreamAgentMessageSnapshot,
-  StoryWorkspaceDreamAgentToolConfirmation,
-  StoryWorkspaceDreamAgentToolConfirmationCommand,
-  StoryWorkspaceDreamAgentToolConfirmationOption,
-  StoryWorkspaceDreamAgentToolConfirmationQuestion,
-  StoryWorkspaceDreamAgentToolConfirmationResolved,
   StoryWorkspaceDreamLifecycleState,
   StoryWorkspaceDreamSource,
   StoryWorkspaceDreamStage,

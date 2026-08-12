@@ -30,10 +30,11 @@ try:
         StoryWorkspaceDreamConfirmationAccepted,
         StoryWorkspaceDreamConfirmationCommand,
         StoryWorkspaceDreamFilesResponse,
-        StoryWorkspaceDreamRunContext,
         StoryWorkspaceDreamStage,
     )
-    from services.story_workspace.dream_stream_adapter import iter_dream_run_events
+    from services.story_workspace.dream_lifecycle_observer import (
+        drain_normalized_agent_turn,
+    )
 except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.models.workflow_run import WorkflowRun
     from backend.story_workspace.contracts import (
@@ -42,11 +43,10 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceDreamConfirmationAccepted,
         StoryWorkspaceDreamConfirmationCommand,
         StoryWorkspaceDreamFilesResponse,
-        StoryWorkspaceDreamRunContext,
         StoryWorkspaceDreamStage,
     )
-    from backend.services.story_workspace.dream_stream_adapter import (
-        iter_dream_run_events,
+    from backend.services.story_workspace.dream_lifecycle_observer import (
+        drain_normalized_agent_turn,
     )
 
 
@@ -529,6 +529,7 @@ def story_workspace_guard_persisted_dream_confirmation_turn(
     message_id: str,
     parts: list,
     metadata: Optional[dict],
+    clock: Callable[[], float] = time.time,
 ) -> bool:
     """Classify and verify a server-owned Dream confirmation turn.
 
@@ -577,6 +578,17 @@ def story_workspace_guard_persisted_dream_confirmation_turn(
 
     current = _decode_confirmation_dispatch_row(row) if row is not None else None
     try:
+        current_lease = (
+            current.metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
+            if current is not None
+            else None
+        )
+        request_lease = (
+            metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
+            if isinstance(metadata, dict)
+            else None
+        )
+        now_s = clock()
         valid = (
             current is not None
             and current.thread_id == thread_id
@@ -589,12 +601,13 @@ def story_workspace_guard_persisted_dream_confirmation_turn(
             == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
             and metadata.get("dispatch_status")
             == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
-            and _valid_lease_deadline(
-                current.metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
-            )
-            and _valid_lease_deadline(
-                metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
-            )
+            and _valid_lease_deadline(now_s)
+            and _valid_lease_deadline(current_lease)
+            and _valid_lease_deadline(request_lease)
+            and float(current_lease) > float(now_s)
+            # The queued request may hold a pre-heartbeat snapshot.  It may
+            # never claim a lease newer than the authoritative row.
+            and float(request_lease) <= float(current_lease)
         )
     except PostgresError as exc:
         raise StoryWorkspaceDreamConfirmationError(
@@ -838,13 +851,10 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
     factory: Any | None = None,
     *,
     request_factory: Callable[..., Any] | None = None,
-    context_loader: Callable[
-        [str, str, dict], StoryWorkspaceDreamRunContext
-    ] | None = None,
 ) -> StoryWorkspaceDreamConfirmationDispatcher:
     """Queue a resumed turn even while the same thread is currently running.
 
-    ``ClaudeAgentThreadFactory.run_streaming`` owns a per-thread lock. Starting
+    ``ClaudeAgentThreadFactory.run_events`` owns a per-thread lock. Starting
     this drain task immediately therefore queues behind an in-flight turn and
     preserves ordering without a lifecycle pre-check that could lose work.
     """
@@ -867,15 +877,6 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
                 from claude_agent.service import ClaudeAgentRunRequest
 
                 selected_request_factory = ClaudeAgentRunRequest
-            dream_context = (
-                context_loader(thread_id, str(actor_id), metadata)
-                if context_loader is not None
-                else _story_workspace_load_confirmation_dream_context(
-                    thread_id,
-                    str(actor_id),
-                    metadata,
-                )
-            )
             request = selected_request_factory(
                 user_id=str(actor_id),
                 thread_id=thread_id,
@@ -883,19 +884,9 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
                 message_id=message_id,
                 message_parts=parts,
                 message_metadata=metadata,
-                story_workspace_dream_context=dream_context,
             )
-            saw_message_final = False
-            async for event in iter_dream_run_events(selected_factory, request):
-                if event.type == "error":
-                    return False
-                if event.type == "message-final":
-                    saw_message_final = True
-                if event.type == "finish":
-                    if event.data.get("finishReason") == "error":
-                        return False
-                    return saw_message_final
-            return False
+            result = await drain_normalized_agent_turn(selected_factory, request)
+            return result.completed
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -923,63 +914,6 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
 
     return dispatch
 
-
-def _story_workspace_load_confirmation_dream_context(
-    thread_id: str,
-    actor_id: str,
-    metadata: dict,
-) -> StoryWorkspaceDreamRunContext:
-    """Rebuild trusted Dream provenance for a durable confirmation resume."""
-
-    if metadata.get("kind") != STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND:
-        raise PermissionError("confirmation metadata kind is invalid")
-    if (
-        metadata.get("thread_id") != thread_id
-        or str(metadata.get("actor") or "") != actor_id
-    ):
-        raise PermissionError("confirmation identity metadata is invalid")
-    run_id = metadata.get("story_workspace_run_id")
-    if not isinstance(run_id, str):
-        raise PermissionError("confirmation workflow run is unavailable")
-    if not actor_id.isdigit() or int(actor_id) <= 0:
-        raise PermissionError("confirmation actor is invalid")
-
-    import database
-
-    db = database.get_db()
-    try:
-        row = db.execute(
-            """
-            SELECT run.id AS workflow_run_id,
-                   run.source_voice_thread_id AS thread_id,
-                   binding.deck_id AS deck_id,
-                   run.deck_plugin_id AS deck_plugin_id,
-                   run.deck_plugin_version AS deck_plugin_version,
-                   run.deck_plugin_binding_id AS deck_plugin_binding_id,
-                   run.binding_revision AS binding_revision,
-                   run.deck_runtime_snapshot_id AS deck_runtime_snapshot_id,
-                   run.runtime_plugin_lock_id AS runtime_plugin_lock_id
-            FROM workflow_runs AS run
-            JOIN story_workspace_workspaces AS workspace
-              ON workspace.id = run.workspace_id
-            JOIN deck_plugin_bindings AS binding
-              ON binding.deck_plugin_binding_id = run.deck_plugin_binding_id
-             AND binding.binding_revision = run.binding_revision
-             AND binding.deck_plugin_id = run.deck_plugin_id
-             AND binding.deck_plugin_version = run.deck_plugin_version
-            WHERE run.id = %s
-              AND run.source_voice_thread_id = %s
-              AND run.created_by = %s
-              AND workspace.owner_id = %s
-            LIMIT 1
-            """,
-            (run_id, thread_id, actor_id, int(actor_id)),
-        ).fetchone()
-        if row is None:
-            raise PermissionError("confirmation Dream run is unavailable")
-        return StoryWorkspaceDreamRunContext.model_validate(dict(row))
-    finally:
-        db.close()
 
 
 @dataclass(frozen=True)
@@ -1312,7 +1246,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
 
 
 class StoryWorkspaceDreamConfirmationService:
-    """Validate and atomically persist a one-shot Dream continuation command."""
+    """Validate and atomically persist a one-shot Dream follow-up command."""
 
     def __init__(
         self,

@@ -15,7 +15,6 @@ import { getToolName, type DynamicToolUIPart, type ToolUIPart, type UIMessage } 
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
 import { isEditorWriteTool } from './editorWriteTools';
-import type { StoryWorkspaceDreamAgentToolConfirmation } from '../../hooks/story-workspace/contracts';
 
 export type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
 
@@ -41,10 +40,11 @@ export async function loadChatHistoryThenRuntimeStatus<T>(
   let history = await loadHistory();
   const status = await loadStatus();
   // A turn can finish after the first history read but before the status read.
-  // Once idle is observed, persistence is stable; read once more so opening
+  // Once any authoritative non-running state is observed, persistence is
+  // stable; read once more so opening
   // Chat from Dream cannot miss the just-completed assistant turn and then
   // skip SSE reconnect because the runtime is already idle.
-  if (status?.lifecycle === 'idle') {
+  if (status && !status.running) {
     history = await loadHistory();
   }
   return { history, status };
@@ -226,6 +226,7 @@ export interface SandboxNetworkRequestInfo {
 }
 
 export const SANDBOX_NETWORK_CONFIRMATION_KIND = 'sandbox_network';
+export const REJECT_ONLY_CONFIRMATION_KIND = 'reject_only';
 
 /** Return the sandbox network request metadata when the backend marked this
  * part as a SandboxPermissionRequest confirmation; null otherwise. */
@@ -245,11 +246,6 @@ export function resolveSandboxNetworkRequest(part: AnyToolUIPart): SandboxNetwor
 
 export type PendingConfirmationKind = 'confirm' | 'askuser' | 'sandbox-network' | 'reject-only';
 
-export interface PendingDreamToolConfirmationSource {
-  runId: string;
-  confirmation: StoryWorkspaceDreamAgentToolConfirmation;
-}
-
 export interface PendingToolConfirmation {
   kind: PendingConfirmationKind;
   partKey: string;
@@ -259,52 +255,6 @@ export interface PendingToolConfirmation {
   input: unknown;
   /** Present only when kind === 'sandbox-network'. */
   networkRequest?: SandboxNetworkRequestInfo | null;
-  /** Safe Dream adapter source; confirmation must use the run-scoped endpoint. */
-  dream?: PendingDreamToolConfirmationSource;
-}
-
-/** Convert the already-validated Dream public projection into Chat's dock model. */
-export function pendingToolConfirmationFromDream(
-  runId: string,
-  confirmation: StoryWorkspaceDreamAgentToolConfirmation,
-): PendingToolConfirmation {
-  const kind: PendingConfirmationKind = confirmation.kind === 'ask_user'
-    ? 'askuser'
-    : confirmation.kind === 'sandbox_network'
-      ? 'sandbox-network'
-      : confirmation.kind === 'reject_only'
-        ? 'reject-only'
-        : 'confirm';
-  return {
-    kind,
-    partKey: `dream-confirmation-${confirmation.toolCallId}`,
-    toolCallId: confirmation.toolCallId,
-    toolName: confirmation.toolName,
-    input: confirmation.questions ? { questions: confirmation.questions } : {},
-    networkRequest: confirmation.network
-      ? {
-          host: confirmation.network.host,
-          policyMode: confirmation.network.policy,
-          matchedAllowedDomain: null,
-        }
-      : undefined,
-    dream: { runId, confirmation },
-  };
-}
-
-/** Translate Chat's question-text answer keys back to Dream's opaque public IDs. */
-export function dreamToolConfirmationAnswers(
-  confirmation: StoryWorkspaceDreamAgentToolConfirmation,
-  answers?: Readonly<Record<string, unknown>>,
-): Readonly<Record<string, unknown>> | undefined {
-  if (!confirmation.questions) return answers;
-  const mapped: Record<string, unknown> = {};
-  for (const question of confirmation.questions) {
-    if (Object.prototype.hasOwnProperty.call(answers ?? {}, question.question)) {
-      mapped[question.id] = answers?.[question.question];
-    }
-  }
-  return mapped;
 }
 
 /**
@@ -329,15 +279,23 @@ export function resolvePendingToolConfirmation(
   settledToolCallIds: ReadonlySet<string> = new Set<string>(),
   runtimePendingToolCallIds: ReadonlySet<string> = new Set<string>(),
 ): PendingConfirmationKind | null {
-  if (settledToolCallIds.has(part.toolCallId)) return null;
+  const runtimeOwnsPendingCall = runtimePendingToolCallIds.has(part.toolCallId);
+  if (settledToolCallIds.has(part.toolCallId) && !runtimeOwnsPendingCall) return null;
   if (TOOL_COMPLETED_STATES.has(part.state ?? '')) return null;
   const input = 'input' in part ? part.input : undefined;
   if (input === undefined || input === null) return null;
   const toolName = resolveToolName(part);
   if (toolName && isEditorWriteTool(toolName)) return null;
+  const metadata = (part as unknown as { toolMetadata?: Record<string, unknown> }).toolMetadata;
+  // The primary POST transport carries canonical settlement as tool metadata,
+  // while reconnect updates the settled-id set directly. Honour both paths.
+  // An authoritative runtime-pending snapshot wins over a stale marker.
+  if (metadata?.approvalSettled === true && !runtimeOwnsPendingCall) return null;
   if (isAskUserQuestionPart(part)) return 'askuser';
+  if (isApprovalRequestedPart(part)
+    && metadata?.confirmationKind === REJECT_ONLY_CONFIRMATION_KIND) return 'reject-only';
   if (isApprovalRequestedPart(part) && resolveSandboxNetworkRequest(part)) return 'sandbox-network';
-  if (runtimePendingToolCallIds.has(part.toolCallId)) return 'confirm';
+  if (runtimeOwnsPendingCall) return 'confirm';
   if (isApprovalRequestedPart(part) || toolChoice === 'manual') return 'confirm';
   return null;
 }

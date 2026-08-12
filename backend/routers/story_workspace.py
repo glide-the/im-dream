@@ -19,15 +19,12 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import database
-from claude_agent.sse import streaming_sse_response
 from story_workspace.contracts import (
     STORY_WORKSPACE_REVIEW_NOTES_MAX_LENGTH,
     StoryWorkspaceAgentStoryPayload,
     StoryWorkspaceBatchAction,
     StoryWorkspaceCharacterPatch,
     StoryWorkspaceDreamConfirmationCommand,
-    StoryWorkspaceDreamAgentMessageCommand,
-    StoryWorkspaceDreamAgentToolConfirmationCommand,
     StoryWorkspaceDreamLaunchAccepted,
     StoryWorkspaceDreamLaunchCommand,
     StoryWorkspaceEpisodeActionContinueCommand,
@@ -271,37 +268,6 @@ class StoryWorkflowGateway(Protocol):
         self,
         workflow_run_id: str,
         request: StoryWorkspaceDreamConfirmationCommand,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def get_dream_agent_messages(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def stream_dream_agent_events(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-        after: str | None,
-    ) -> Any: ...
-
-    async def submit_dream_agent_message(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceDreamAgentMessageCommand,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def confirm_dream_agent_tool(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceDreamAgentToolConfirmationCommand,
         *,
         actor: dict[str, str],
     ) -> Any: ...
@@ -1629,99 +1595,6 @@ async def story_workspace_continue_workflow_run_episode_action(
             actor=actor,
             if_match=if_match,
         )
-    )
-
-
-@router.get("/workflow-runs/{workflow_run_id}/dream-agent/messages")
-async def story_workspace_get_dream_agent_messages(
-    workflow_run_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
-):
-    """Return the server-filtered Dream Agent message snapshot for one run."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(status_code=exc.status_code, content=build_error_payload(exc.code))
-    return await _workflow_call(
-        gateway.get_dream_agent_messages(workflow_run_id, actor=actor),
-        by_alias=True,
-    )
-
-
-@router.get("/workflow-runs/{workflow_run_id}/dream-agent/events")
-async def story_workspace_stream_dream_agent_events(
-    workflow_run_id: str,
-    after: Optional[str] = Query(default=None, max_length=512),
-    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
-    current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
-):
-    """Expose only normalized text/status SSE frames for the bound Dream run."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(status_code=exc.status_code, content=build_error_payload(exc.code))
-    try:
-        frames = await gateway.stream_dream_agent_events(
-            workflow_run_id,
-            actor=actor,
-            after=after or last_event_id,
-        )
-    except ApiRouteError as exc:
-        return JSONResponse(status_code=exc.status_code, content=build_error_payload(exc.code))
-    except Exception:
-        return JSONResponse(
-            status_code=503,
-            content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),
-        )
-    return streaming_sse_response(frames)
-
-
-@router.post("/workflow-runs/{workflow_run_id}/dream-agent/messages", status_code=202)
-async def story_workspace_submit_dream_agent_message(
-    workflow_run_id: str,
-    request: StoryWorkspaceDreamAgentMessageCommand,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
-):
-    """Persist and dispatch one trusted same-run Dream Agent message."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(status_code=exc.status_code, content=build_error_payload(exc.code))
-    return await _workflow_call(
-        gateway.submit_dream_agent_message(workflow_run_id, request, actor=actor),
-        by_alias=True,
-    )
-
-
-@router.post("/workflow-runs/{workflow_run_id}/dream-agent/tool-confirm")
-async def story_workspace_confirm_dream_agent_tool(
-    workflow_run_id: str,
-    request: StoryWorkspaceDreamAgentToolConfirmationCommand,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
-):
-    """Resolve one tool without accepting a browser-authored thread or Deck."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    return await _workflow_call(
-        gateway.confirm_dream_agent_tool(workflow_run_id, request, actor=actor),
-        by_alias=True,
     )
 
 

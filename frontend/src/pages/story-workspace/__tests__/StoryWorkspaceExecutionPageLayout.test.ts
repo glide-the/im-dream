@@ -58,7 +58,7 @@ test('execution page uses exactly one dashed rule', () => {
 });
 
 test('execution status preview opens the Dream Agent floating dialog without mounting ChatView', () => {
-  expect(PAGE_SOURCE).toContain('useStoryWorkspaceDreamAgent');
+  expect(PAGE_SOURCE).toContain('threadId={files.data.threadId}');
   expect(PAGE_SOURCE).toContain('<StoryWorkspaceDreamAgentDialog');
   expect(PAGE_SOURCE).toMatch(
     /onClick=\{\(\) => \{\s*setDreamAgentInitialWorkflowFocus\(null\);\s*setAgentDialogOpen\(true\);\s*\}\}/,
@@ -66,6 +66,8 @@ test('execution status preview opens the Dream Agent floating dialog without mou
   expect(PAGE_SOURCE).toContain('Dream Agent 消息预览');
   expect(PAGE_SOURCE).toContain('aria-controls="story-workspace-dream-agent-dialog"');
   expect(DIALOG_SOURCE).toContain('id="story-workspace-dream-agent-dialog"');
+  expect(DIALOG_SOURCE).toContain('<StoryWorkspaceDreamThreadChat');
+  expect(PAGE_SOURCE).not.toContain('useStoryWorkspaceDreamAgent');
   expect(PAGE_SOURCE).not.toContain('<ChatView');
 });
 
@@ -168,7 +170,7 @@ test('Episode layout exposes keyboard focus, wrapping, and reduced-motion safegu
   expect(reducedMotion).toContain('transition-duration: .01ms !important');
 });
 
-test('Episode continuation dialog owns a viewport-safe confirmation workplane', () => {
+test('Episode action dialog owns a viewport-safe confirmation workplane', () => {
   expect(PAGE_SOURCE).toContain('story-workspace-episode-action-dialog');
   expect(PAGE_SOURCE).toContain('aria-modal="true"');
   expect(CSS_SOURCE).toMatch(

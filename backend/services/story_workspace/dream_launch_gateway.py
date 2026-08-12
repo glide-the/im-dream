@@ -65,7 +65,10 @@ try:
     from services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
     )
-    from services.story_workspace.dream_stream_adapter import iter_dream_run_events
+    from services.story_workspace.dream_lifecycle_observer import (
+        NormalizedTurnOutcome,
+        drain_normalized_agent_turn,
+    )
     from services.workflow.preflight_service import PreflightService, PreflightStatus
     from services.workflow.run_service import WorkflowRunError, WorkflowRunService
     from story_workspace.contracts import (
@@ -116,8 +119,9 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
     )
-    from backend.services.story_workspace.dream_stream_adapter import (
-        iter_dream_run_events,
+    from backend.services.story_workspace.dream_lifecycle_observer import (
+        NormalizedTurnOutcome,
+        drain_normalized_agent_turn,
     )
     from backend.services.workflow.preflight_service import (
         PreflightService,
@@ -777,11 +781,72 @@ def _dream_launch_event_error_code(event: Any) -> str | None:
     return None
 
 
+class StoryWorkspaceDreamLaunchTaskRegistry:
+    """Process owner for launch drains that outlive their HTTP request."""
+
+    def __init__(self) -> None:
+        self._tasks: set[asyncio.Task[Any]] = set()
+        self._accepting = True
+
+    def start(self) -> None:
+        self._accepting = True
+
+    def create_task(
+        self,
+        task_factory: Callable[[], Any],
+        *,
+        name: str,
+    ) -> asyncio.Task[Any]:
+        """Create and own a drain, or reject it before its coroutine exists."""
+
+        if not self._accepting:
+            raise RuntimeError("Dream launch task registry is closed")
+        task = asyncio.create_task(task_factory(), name=name)
+        self._tasks.add(task)
+        task.add_done_callback(self._task_done)
+        return task
+
+    def _task_done(self, task: asyncio.Task[Any]) -> None:
+        if task not in self._tasks:
+            return
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        try:
+            failure = task.exception()
+        except asyncio.CancelledError:
+            return
+        if failure is not None:
+            logger.error(
+                "Dream launch drain failed",
+                exc_info=(type(failure), failure, failure.__traceback__),
+            )
+
+    async def aclose(self) -> None:
+        self._accepting = False
+        tasks = list(self._tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for task in tasks:
+            self._task_done(task)
+
+    def diagnostics(self) -> dict[str, int]:
+        return {
+            "launch_owned_tasks": len(self._tasks),
+            "launch_running_tasks": sum(
+                not task.done() for task in self._tasks
+            ),
+        }
+
+
 def story_workspace_build_dream_launch_turn_dispatcher(
     factory: Any | None = None,
     *,
     request_factory: Callable[..., Any] | None = None,
     failure_handler: Callable[..., Any] | None = None,
+    task_registry: StoryWorkspaceDreamLaunchTaskRegistry | None = None,
 ) -> Callable[..., Any]:
     """Resolve the U2b Agent request only when a launch is dispatched."""
 
@@ -804,18 +869,32 @@ def story_workspace_build_dream_launch_turn_dispatcher(
             message_id=values["message_id"],
             message_parts=values["parts"],
             message_metadata=values["metadata"],
-            story_workspace_dream_context=values["context"],
             system_prompt=values.get("system_prompt"),
         )
         async def consume() -> None:
             error_code = None
+            cancelled = False
             try:
-                async for event in iter_dream_run_events(selected_factory, request):
-                    error_code = _dream_launch_event_error_code(event)
-                    if error_code is not None:
-                        break
+                def observe(event: Any) -> None:
+                    nonlocal error_code
+                    candidate = _dream_launch_event_error_code(event)
+                    if error_code is None and candidate is not None:
+                        error_code = candidate
+
+                result = await drain_normalized_agent_turn(
+                    selected_factory,
+                    request,
+                    on_event=observe,
+                )
+                if (
+                    error_code is None
+                    and result.outcome
+                    in {NormalizedTurnOutcome.FAILED, NormalizedTurnOutcome.INCOMPLETE}
+                ):
+                    error_code = "DREAM_AGENT_DISPATCH_FAILED"
             except asyncio.CancelledError:
-                raise
+                error_code = "DREAM_AGENT_DISPATCH_CANCELLED"
+                cancelled = True
             except Exception:
                 error_code = "DREAM_AGENT_DISPATCH_FAILED"
             if error_code is not None and failure_handler is not None:
@@ -827,11 +906,13 @@ def story_workspace_build_dream_launch_turn_dispatcher(
                 )
                 if inspect.isawaitable(result):
                     await result
+            if cancelled:
+                raise asyncio.CancelledError
 
-        return asyncio.create_task(
-            consume(),
-            name=f"dream-launch-turn-{values['message_id']}",
-        )
+        task_name = f"dream-launch-turn-{values['message_id']}"
+        if task_registry is not None:
+            return task_registry.create_task(consume, name=task_name)
+        return asyncio.create_task(consume(), name=task_name)
 
     return dispatch
 
@@ -1024,6 +1105,7 @@ class StoryWorkspaceDreamLaunchGateway:
             PluginInstallService
         ),
         turn_dispatcher: Callable[..., Any] | None = None,
+        launch_task_registry: StoryWorkspaceDreamLaunchTaskRegistry | None = None,
         dispatch_before_claim: Callable[[], Any] | None = None,
         platform_model_resolver: Callable[[int | str, str | None], str] = (
             resolve_platform_model_alias
@@ -1045,6 +1127,7 @@ class StoryWorkspaceDreamLaunchGateway:
                 turn_dispatcher
                 or story_workspace_build_dream_launch_turn_dispatcher(
                     failure_handler=self._record_dispatch_failure,
+                    task_registry=launch_task_registry,
                 )
             ),
             before_claim=dispatch_before_claim,

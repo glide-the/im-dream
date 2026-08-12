@@ -38,6 +38,7 @@ import json
 import logging
 import os
 import re
+from enum import Enum
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -50,6 +51,10 @@ from claude_agent import ClaudeAgentRunRequest
 from claude_agent.service import build_thread_plan_payload, build_thread_todos_payload
 from claude_agent.sse import streaming_sse_response
 from claude_agent.subagent_projection import build_thread_subagents_payload
+from claude_agent.tool_confirmation_store import (
+    ToolConfirmationError,
+    ToolConfirmationResolution,
+)
 from claude_agent.thread_retrieval import (
     build_chat_thread_search_config,
     is_chat_history_search_requested,
@@ -80,6 +85,202 @@ router = APIRouter()
 
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
 _PLATFORM_MODEL_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
+_SERVER_MESSAGE_ID_PREFIXES = ("dream_agent_", "dream_confirm_", "guide_")
+_PRIVATE_STORY_WORKSPACE_MESSAGE_KINDS = frozenset({
+    "story-workspace-dream-launch",
+    "story-workspace-guidance",
+    "story-workspace-dream-confirmation",
+})
+
+
+class PublicDispatchStatus(str, Enum):
+    PENDING = "pending"
+    DISPATCHING = "dispatching"
+    DISPATCHED = "dispatched"
+    FAILED = "failed"
+
+
+class PublicToolChoice(str, Enum):
+    AUTO = "auto"
+    MANUAL = "manual"
+    NONE = "none"
+
+
+class PublicChatThreadDto(BaseModel):
+    id: Any = None
+    title: Any = None
+    deck_id: Any = None
+    voice_id: Any = None
+    created_at: Any = None
+    updated_at: Any = None
+
+    @classmethod
+    def from_storage(cls, thread: dict[str, Any]) -> "PublicChatThreadDto":
+        return cls.model_validate(thread)
+
+
+class PublicChatMetadataDto(BaseModel):
+    kind: str | None = None
+    visibility: str | None = None
+    dispatch_status: PublicDispatchStatus | None = None
+    usage: dict[str, int | float] | None = None
+    chatModel: dict[str, str] | None = None
+    toolChoice: PublicToolChoice | None = None
+    toolCount: int | None = None
+    is_partial: bool | None = None
+
+    @classmethod
+    def from_storage(
+        cls,
+        metadata: dict[str, Any],
+    ) -> tuple["PublicChatMetadataDto", bool]:
+        values: dict[str, Any] = {}
+        malformed_discriminator = False
+
+        kind = metadata.get("kind")
+        if "kind" in metadata:
+            if isinstance(kind, str) and kind:
+                values["kind"] = kind
+            else:
+                malformed_discriminator = True
+
+        visibility = metadata.get("visibility")
+        if "visibility" in metadata:
+            if isinstance(visibility, str) and visibility:
+                values["visibility"] = visibility
+            else:
+                malformed_discriminator = True
+
+        snake_status = metadata.get("dispatch_status")
+        camel_status = metadata.get("dispatchStatus")
+        if (
+            "dispatch_status" in metadata
+            and "dispatchStatus" in metadata
+            and snake_status != camel_status
+        ):
+            malformed_discriminator = True
+            dispatch_status = None
+        elif "dispatch_status" in metadata:
+            dispatch_status = snake_status
+        else:
+            dispatch_status = camel_status
+        if "dispatch_status" in metadata or "dispatchStatus" in metadata:
+            try:
+                values["dispatch_status"] = PublicDispatchStatus(dispatch_status)
+            except (TypeError, ValueError):
+                malformed_discriminator = True
+
+        usage = metadata.get("usage")
+        if isinstance(usage, dict):
+            public_usage = {
+                field: value
+                for field in ("inputTokens", "outputTokens", "totalTokens")
+                if isinstance((value := usage.get(field)), (int, float))
+                and not isinstance(value, bool)
+                and value >= 0
+            }
+            if public_usage:
+                values["usage"] = public_usage
+
+        chat_model = metadata.get("chatModel")
+        if isinstance(chat_model, dict):
+            provider = chat_model.get("provider")
+            model = chat_model.get("model")
+            if (
+                isinstance(provider, str)
+                and provider
+                and isinstance(model, str)
+                and model
+            ):
+                values["chatModel"] = {"provider": provider, "model": model}
+
+        tool_choice = metadata.get("toolChoice")
+        try:
+            values["toolChoice"] = PublicToolChoice(tool_choice)
+        except (TypeError, ValueError):
+            pass
+        tool_count = metadata.get("toolCount")
+        if (
+            isinstance(tool_count, int)
+            and not isinstance(tool_count, bool)
+            and tool_count >= 0
+        ):
+            values["toolCount"] = tool_count
+        is_partial = metadata.get("is_partial")
+        if isinstance(is_partial, bool):
+            values["is_partial"] = is_partial
+
+        private = (
+            malformed_discriminator
+            or visibility == "system-hidden"
+            or kind in _PRIVATE_STORY_WORKSPACE_MESSAGE_KINDS
+            or "story_workspace_episode_action" in metadata
+        )
+        return cls.model_validate(values), private
+
+
+class PublicChatMessageDto(BaseModel):
+    id: Any = None
+    role: Any = None
+    created_at: Any = None
+    parts: list[Any] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_storage(cls, message: dict[str, Any]) -> "PublicChatMessageDto":
+        parts = message.get("parts")
+        metadata = message.get("metadata")
+        if message.get("metadata_decode_error") is True:
+            public_metadata: dict[str, Any] = {}
+            is_private = True
+        elif metadata is None:
+            public_metadata = {}
+            is_private = False
+        elif isinstance(metadata, dict):
+            dto, is_private = PublicChatMetadataDto.from_storage(metadata)
+            public_metadata = dto.model_dump(exclude_none=True, mode="json")
+        else:
+            public_metadata = {}
+            is_private = True
+        values = {
+            key: message[key]
+            for key in ("id", "role", "created_at")
+            if key in message
+        }
+        values["parts"] = (
+            [] if is_private else parts if isinstance(parts, list) else []
+        )
+        values["metadata"] = public_metadata
+        return cls.model_validate(values)
+
+
+def _project_chat_thread_for_client(thread: dict[str, Any]) -> dict[str, Any]:
+    """Expose display identity only, never owner/runtime binding columns."""
+
+    return PublicChatThreadDto.from_storage(thread).model_dump(exclude_unset=True)
+
+
+def _project_public_chat_metadata(
+    metadata: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Return a value-validated metadata allowlist plus privacy fail-closed bit."""
+
+    dto, private = PublicChatMetadataDto.from_storage(metadata)
+    return dto.model_dump(exclude_none=True, mode="json"), private
+
+
+def _project_chat_message_for_client(message: dict[str, Any]) -> dict[str, Any]:
+    """Redact server-owned control envelopes from canonical thread history.
+
+    Control rows remain addressable by message id so shared Chat/Dream
+    hydration can settle a durable dispatch. Their instruction parts and
+    authority-bearing metadata are never browser-readable.
+    """
+
+    return PublicChatMessageDto.from_storage(message).model_dump(
+        exclude_unset=True,
+        mode="json",
+    )
 
 
 async def _resolve_platform_model_alias(
@@ -276,6 +477,29 @@ async def claude_agent_stream(
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
+    _msg_dict = body.message if isinstance(body.message, dict) else None
+    message_id = _msg_dict.get("id") if _msg_dict else None
+    if message_id is not None and (
+        not isinstance(message_id, str) or not message_id
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "CHAT_MESSAGE_ID_INVALID",
+                "message": "The message identifier must be non-empty text.",
+            },
+        )
+    if isinstance(message_id, str) and message_id.startswith(
+        _SERVER_MESSAGE_ID_PREFIXES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "CHAT_RESERVED_MESSAGE_ID",
+                "message": "The message identifier uses a reserved namespace.",
+            },
+        )
+
     if body.reconnect:
         snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
         if snapshot is None or snapshot.get("lifecycle") != "running":
@@ -366,7 +590,6 @@ async def claude_agent_stream(
 
     platform_model_alias = await _resolve_platform_model_alias(user_id, body.model)
 
-    _msg_dict = body.message if isinstance(body.message, dict) else None
     message_parts = list(_msg_dict.get("parts") or []) if _msg_dict else None
 
     # Process attachments: download from file storage and sync to workspace when
@@ -463,6 +686,35 @@ async def claude_agent_stream(
                         exc,
                     )
 
+    message_metadata = None
+    if message_id is not None:
+        # Reserve the immutable public message identity before returning an SSE
+        # response or starting the Agent runtime.  The service repeats the same
+        # write as an exact CAS replay, closing the route/service race without
+        # granting browser IDs any server-command authority.
+        resolved_user_parts = (
+            list(message_parts)
+            if message_parts
+            else [{"type": "text", "text": ""}]
+        )
+        try:
+            await asyncio.to_thread(
+                database.save_chat_message,
+                thread_id,
+                "user",
+                resolved_user_parts,
+                message_id,
+                message_metadata,
+            )
+        except database.ChatMessageIdentityConflict as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={
+                    "error_code": exc.code,
+                    "message": "The message identifier is already bound.",
+                },
+            ) from exc
+
     request = ClaudeAgentRunRequest(
         user_id=str(user_id),
         thread_id=thread_id,
@@ -471,7 +723,7 @@ async def claude_agent_stream(
         model=platform_model_alias,
         max_turns=body.max_turns,
         cwd=body.cwd,
-        message_id=_msg_dict.get("id") if _msg_dict else None,
+        message_id=message_id,
         message_parts=message_parts,
         attachments=attachment_payloads or None,
         editor_state=body.editor_state,
@@ -480,6 +732,7 @@ async def claude_agent_stream(
             if deck_context is not None
             else body.system_prompt or None
         ),
+        message_metadata=message_metadata,
         # NOTE (2026-08-02, deck-integration-delta): Deck plugin
         # settings/paths are no longer passed here.  The thread-locked Deck's
         # plugin installations are packed into the thread workspace by the
@@ -685,8 +938,14 @@ async def claude_agent_thread_messages(
     thread = database.get_chat_thread(thread_id, user_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    messages = database.list_chat_messages(thread_id)
-    return {"thread": thread, "messages": messages}
+    messages = [
+        _project_chat_message_for_client(message)
+        for message in database.list_chat_messages(thread_id)
+    ]
+    return {
+        "thread": _project_chat_thread_for_client(thread),
+        "messages": messages,
+    }
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/subagents")
@@ -934,10 +1193,10 @@ async def claude_agent_session_status(
 
     *session_id* must be a valid ``thread_id``.
     """
-    del current_user
-
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id (thread_id) is required")
+    if database.get_chat_thread(session_id, current_user["user_id"]) is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
     snapshot = claude_agent_thread_factory.session_snapshot(session_id)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="No active session found")
@@ -954,10 +1213,10 @@ async def claude_agent_session_close(
     Triggers Phase 4 lifecycle hooks; the next request will start a fresh session.
     *session_id* must be a valid ``thread_id``.
     """
-    del current_user
-
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id (thread_id) is required")
+    if database.get_chat_thread(session_id, current_user["user_id"]) is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
     claude_agent_thread_factory.close_thread(session_id)
     return {"ok": True, "session_id": session_id}
 
@@ -979,13 +1238,23 @@ async def claude_agent_tool_confirm(
     user_id = current_user["user_id"]
     if database.get_chat_thread(session_id, user_id) is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    resolved = claude_agent_thread_factory.confirm_tool(
-        session_id=session_id,
-        tool_call_id=body.tool_call_id,
-        approved=body.approved,
-        reason=body.reason,
-        answers=body.answers,
-    )
+    try:
+        resolved = await claude_agent_thread_factory.confirm_tool(
+            session_id=session_id,
+            tool_call_id=body.tool_call_id,
+            approved=body.approved,
+            reason=body.reason,
+            answers=body.answers,
+            actor_id=str(user_id),
+        )
+    except ToolConfirmationError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "code": exc.code,
+                "tool_call_id": body.tool_call_id,
+            },
+        ) from exc
     if not resolved:
         raise HTTPException(
             status_code=409,
@@ -994,4 +1263,13 @@ async def claude_agent_tool_confirm(
                 "tool_call_id": body.tool_call_id,
             },
         )
-    return {"ok": True, "approved": body.approved}
+    if not isinstance(resolved, ToolConfirmationResolution):
+        # Fail closed if an out-of-date factory bypasses the exact policy API.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "TOOL_CONFIRMATION_NOT_PENDING",
+                "tool_call_id": body.tool_call_id,
+            },
+        )
+    return {"ok": True, "approved": resolved.result.approved}

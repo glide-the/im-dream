@@ -8,6 +8,16 @@
 > - `backend/claude_agent/thread_factory.py` — 当前 turn 取消与完成确认
 > - `backend/claude_agent/service.py` — 取消路径的部分消息持久化与 SSE 收尾
 
+> **[Sync 2026-08-11 / current deployment boundary]** Stop 仍是拥有 active turn 的
+> `ClaudeAgentThreadFactory` 进程内控制操作。active-turn registry、`/status`、pending
+> confirmation Future 和 HTTP stream routing 都没有迁入 Redis。Redis EventBus 只为
+> 已知 `(session_id, turn_id)` 共享事件 replay/writer/单终态，不能定位或取消另一个
+> Worker/Pod 的 task。当前 backend Dockerfile 启动单个 uvicorn worker，Cloud Run
+> backend 固定 `--max-instances=1`，因此当前 Stop 契约成立；未来放宽部署并发前必须
+> 先增加分布式 owner discovery/routing/Stop/confirmation 设计与验收。另，Stop 响应
+> 不确定时的当前 UI 契约是保持输入锁并 status+reconnect，不能因为本地 reader 已
+> abort 就宣称 cancelled。
+
 ## 1. 问题判断
 
 当前“前端无法主动停止 Agent”的根因不是 Claude SDK session ID 持久化本身，而是 2026-06-09 的 SSE 重连设计改变了断线语义：
@@ -56,8 +66,8 @@
 |---|---|---|
 | `running` | `useChat.status` 为 `submitted/streaming` 或 reconnect 中 | 显示停止按钮 |
 | `stopping` | 用户点击停止，stop API 请求未返回 | 停止按钮禁用，显示加载图标，输入保持不可发送 |
-| `stopped` | stop API 返回或本地流结束 | 停止按钮消失，恢复输入 |
-| `failed` | stop API 失败 | 本地流仍已 abort；前端恢复输入，后端若仍 running 会在下次进入该 thread 时触发 reconnect |
+| `stopped` | history/status 恢复证明当前主 turn 已 idle/terminal | 停止按钮消失，恢复输入 |
+| `failed/uncertain` | stop API 非 2xx、超时、响应畸形或 `running=true` | 保持输入锁；立即读取 status 并重连当前 thread stream，直到权威 idle/terminal 后才声明 cancelled |
 
 前端点击停止时执行：
 
@@ -116,7 +126,8 @@ Authorization: Bearer <token>
 - 复用已有 `bg_task.cancel()`、`_persist_partial_assistant()`、EventBus 和 `/status` 语义。
 - 新增 API 是显式用户控制命令，不改变普通 SSE 断线重连行为。
 - 不新增数据库字段；停止结果由当前运行态和已持久化消息自然表达。
-- 不把“停止”扩展成跨进程任务控制平台；多进程 EventBus/Redis replay 仍由现有配置边界处理。
+- 不把“停止”扩展成跨进程任务控制平台；Redis 只共享已知 turn 的 stream/replay/
+  terminal arbitration，不共享 active-turn owner、status、Stop 或 confirmation。
 
 保留的设计点：
 

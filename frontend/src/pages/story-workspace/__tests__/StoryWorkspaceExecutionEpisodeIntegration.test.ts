@@ -111,14 +111,14 @@ test('shows honest loading, unbound, invalid and last-good states', () => {
   ]) expect(PAGE_SOURCE).toContain(expected);
 });
 
-test('dispatches only U10F recovery and continuation with the current surface', () => {
+test('dispatches only U10F recovery and follow-up actions with the current surface', () => {
   expect(PAGE_SOURCE).toContain('storyWorkspaceRecoverEpisodeBinding(runId, episodeSurface');
   expect(PAGE_SOURCE).toContain('storyWorkspaceContinueEpisodeAction(runId, episodeSurface');
   expect(PAGE_SOURCE).not.toMatch(/storyWorkspaceContinueEpisodeAction\([^)]*\{\s*action\s*:/s);
   expect(PAGE_SOURCE).not.toMatch(/storyWorkspaceRecoverEpisodeBinding\([^)]*\{[^}]*\b(?:story|path|episode)\s*:/s);
 });
 
-test('opens a dedicated Episode confirmation before continuation and never substitutes Agent chat', () => {
+test('opens a dedicated Episode confirmation before the action and never substitutes Agent chat', () => {
   for (const expected of [
     '<StoryWorkspaceEpisodeContinueDialog',
     'setEpisodeContinueDialogOpen(true)',
@@ -136,9 +136,14 @@ test('opens a dedicated Episode confirmation before continuation and never subst
   expect(continueHandler).not.toContain('markAccepted');
 });
 
-test('holds accepted identity until REST facts change and announces reconcile focus movement', () => {
+test('holds accepted identity until shared thread settlement or REST facts change', () => {
   for (const expected of [
     'episodeDispatchedIdentity === episodeActionIdentity',
+    'episodeDispatchedActionRef.current',
+    'expectedMessageId={episodeDispatchedAction?.messageId ?? null}',
+    'episodeActionKeys.rotate(runId, dispatchedAction.fact, dispatchedAction.action)',
+    '本轮结束但尚未检测到新产物',
+    'onSettled={() =>',
     '当前镜头已在新版本中移除',
     'aria-live="polite"',
     'pendingEpisodeFocusKeyRef',
@@ -146,6 +151,11 @@ test('holds accepted identity until REST facts change and announces reconcile fo
     'storyWorkspaceEpisodeEscapeSelection(',
     '.navigationParent',
   ]) expect(PAGE_SOURCE).toContain(expected);
+  const settledHandler = PAGE_SOURCE.slice(
+    PAGE_SOURCE.indexOf('onSettled={() =>'),
+    PAGE_SOURCE.indexOf('refreshNonce={threadSessionRefreshNonce}'),
+  );
+  expect(settledHandler).not.toMatch(/(?:snapshot|messages|subagent|transcript)/i);
 });
 
 test('keeps selection and expansion session-only and reconciles instead of remounting by revision', () => {
@@ -501,12 +511,16 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
   const badResponses: string[] = [];
+  const scriptResponses: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors.push(message.text());
   });
   page.on('response', (response) => {
     if (response.status() >= 400) badResponses.push(`${response.status()} ${response.url()}`);
+    if (response.request().resourceType() === 'script') {
+      scriptResponses.push(`${response.url()} ${response.headers()['content-type'] ?? ''}`);
+    }
   });
   const runId = `run_${'7'.repeat(32)}`;
   const episodeModule = `
@@ -596,7 +610,6 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
     }
   `;
   const storyWorkspaceHooksModule = `
-    import { useSyncExternalStore } from 'react';
     const RUN_ID = '${runId}';
     const files = {
       storyWorkspaceRunId: RUN_ID,
@@ -611,28 +624,8 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
       confirmationDispatched: true, canConfirm: false,
       confirmationLabel: '确认并继续',
     };
-    let agentSnapshot = {
-      storyWorkspaceRunId: RUN_ID,
-      messages: [], canSend: false, lifecycle: 'idle', activeTurnId: null,
-      sendBlockReason: 'continuing', snapshotAt: '2026-08-06T00:00:00Z',
-    };
-    const agentListeners = new Set();
-    const subscribeAgent = (listener) => {
-      agentListeners.add(listener);
-      return () => agentListeners.delete(listener);
-    };
-    const agent = {
-      streamText: '', streamContent: [], isSending: false, error: null,
-      pendingToolConfirmation: null, isConfirmingTool: false,
-      isLoading: false, isReconnecting: false, unreadCount: 0,
-      markRead: () => undefined, refresh: () => undefined,
-    };
     export function useStoryWorkspaceDreamFiles() {
       return { data: files, error: null, isLoading: false };
-    }
-    export function useStoryWorkspaceDreamAgent() {
-      const snapshot = useSyncExternalStore(subscribeAgent, () => agentSnapshot, () => agentSnapshot);
-      return { ...agent, snapshot };
     }
     export class StoryWorkspaceStoryIndexHttpError extends Error {
       constructor(status) {
@@ -646,22 +639,6 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
         isShowingLastGood: false, refresh: () => undefined,
         reconcile: async () => { throw new Error('Story Index retry is outside this harness'); },
       };
-    }
-    export function __u11SetAgentSettled(messageId) {
-      agentSnapshot = {
-        ...agentSnapshot,
-        canSend: true,
-        sendBlockReason: null,
-        snapshotAt: '2026-08-06T00:00:03Z',
-        messages: [
-          {
-            id: messageId, role: 'user', text: '受控 Episode 操作', truncated: false,
-            content: [{ kind: 'text', text: '受控 Episode 操作', truncated: false }],
-            createdAt: '2026-08-06T00:00:01Z',
-          },
-        ],
-      };
-      for (const listener of agentListeners) listener();
     }
   `;
   const workflowRunModule = `
@@ -680,10 +657,8 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
     import { createRoot } from 'react-dom/client';
     import { StoryWorkspaceExecutionPage } from '/src/pages/story-workspace/StoryWorkspaceExecutionPage.tsx';
     import { __u11Settle, __u11Stats, __u11ToSurfaceB } from 'virtual:u11-episode-artifacts';
-    import { __u11SetAgentSettled } from 'virtual:u11-story-workspace-hooks';
     window.__u11Deferred = {
       settle: __u11Settle,
-      settleAgent: __u11SetAgentSettled,
       stats: __u11Stats,
       toB: __u11ToSurfaceB,
     };
@@ -741,7 +716,6 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
   }
   type DeferredHarness = {
     readonly settle: (value: 'a' | 'b', outcome: 'resolve' | 'reject') => void;
-    readonly settleAgent: (messageId: string) => void;
     readonly stats: () => {
       readonly refreshCount: number;
       readonly calls: ReadonlyArray<{
@@ -763,10 +737,94 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
     window as unknown as { __u11Deferred: DeferredHarness }
   ).__u11Deferred.stats());
 
+  let sharedThreadPhase: 'prestart' | 'running' | 'terminal' = 'prestart';
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (!path.startsWith('/api/')) {
+      await route.continue();
+      return;
+    }
+    if (path === '/api/system-config') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ im_full_access: false }),
+      });
+      return;
+    }
+    if (path === '/api/claude-agent/threads/thread-u11/messages') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          thread: {
+            id: 'thread-u11', title: 'Shared Dream thread',
+            created_at: '2026-08-11T00:00:00Z', updated_at: '2026-08-11T00:00:02Z',
+          },
+          messages: [{
+            id: 'assistant-settled-b', role: 'assistant',
+            parts: [{ type: 'text', text: '本轮已完成' }], metadata: {},
+            created_at: '2026-08-11T00:00:02Z',
+          }, {
+            id: 'message-b', role: 'user',
+            parts: [{ type: 'text', text: 'PRIVATE INTERNAL EPISODE ACTION' }],
+            metadata: {
+              kind: 'story-workspace-dream-agent-user',
+              visibility: 'system-hidden',
+              dispatch_status: 'dispatched',
+            },
+            created_at: '2026-08-11T00:00:01Z',
+          }],
+        }),
+      });
+      return;
+    }
+    if (path === '/api/claude-agent/threads/thread-u11/status') {
+      const phase = sharedThreadPhase;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          running: phase === 'running',
+          lifecycle: phase === 'running' ? 'running' : 'idle',
+          turn_count: phase === 'terminal' ? 2 : 1,
+          pending_tool_call_ids: [], tool_confirmation_observation: 'known',
+        }),
+      });
+      return;
+    }
+    if (path === '/api/claude-agent/threads/thread-u11/stream') {
+      sharedThreadPhase = 'terminal';
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream; charset=utf-8',
+        headers: { 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' },
+        body: 'data: {"type":"finish","finishReason":"stop"}\n\n',
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({}),
+    });
+  });
+
   try {
     for (const staleOutcome of ['resolve', 'reject'] as const) {
+      sharedThreadPhase = 'prestart';
       await page.goto(`http://127.0.0.1:${address.port}/u11-real-page-deferred`);
-      await expect.poll(() => page.evaluate(() => '__u11Deferred' in window)).toBe(true);
+      try {
+        await expect.poll(() => page.evaluate(() => '__u11Deferred' in window)).toBe(true);
+      } catch (cause) {
+        throw new Error(`U11 harness did not boot: ${JSON.stringify({
+          pageErrors,
+          consoleErrors,
+          badResponses,
+          scriptResponses,
+          body: (await page.locator('body').innerText()).slice(0, 1_000),
+        })}`, { cause });
+      }
       expect({ pageErrors, consoleErrors, badResponses }).toEqual({
         pageErrors: [], consoleErrors: [], badResponses: [],
       });
@@ -801,17 +859,15 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
 
       await settle('b', 'resolve');
       await expect(page.getByRole('dialog', { name: '确认 Episode 下一步' })).toHaveCount(0);
+      await expect(page.getByText('本轮结束但尚未检测到新产物')).toHaveCount(0);
       await expect(page.getByRole('button', { name: '已交给 Dream Agent' })).toBeDisabled();
-      expect((await stats()).refreshCount).toBe(1);
-
-      await page.evaluate(() => {
-        (window as unknown as { __u11Deferred: DeferredHarness })
-          .__u11Deferred.settleAgent('message-b');
-      });
-      await expect(page.getByRole('button', { name: '生成镜头 Prompt' })).toBeEnabled();
-      await expect(page.getByText('本轮结束但尚未检测到新产物'))
+      await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
+      await expect(page.getByText('本轮结束但尚未检测到新产物；页面会继续读取服务端 revisions。'))
         .toBeVisible();
-      expect((await stats()).refreshCount).toBe(2);
+      await expect.poll(async () => (await stats()).refreshCount).toBe(2);
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#story-workspace-dream-agent-dialog')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: '生成镜头 Prompt' })).toBeEnabled();
 
       await page.getByRole('button', { name: '生成镜头 Prompt' }).click();
       await page.getByRole('button', { name: '确认并继续' }).click();

@@ -1057,7 +1057,7 @@ def create_workflow_run_tables(db):
       status TEXT NOT NULL DEFAULT 'preflight'
         CHECK(status IN (
           'preflight', 'queued', 'running', 'output_validating',
-          'pending_review', 'confirmed', 'rejected', 'continuing',
+          'pending_review', 'confirmed', 'rejected',
           'completed', 'failed', 'cancelled'
         )),
       failed_step TEXT,
@@ -1547,7 +1547,7 @@ def create_agent_session_tables(db):
       OR (
         NEW.status IN (
           'running', 'output_validating', 'pending_review', 'confirmed',
-          'rejected', 'continuing', 'completed'
+          'rejected', 'completed'
         )
         AND NEW.runtime_load_receipt_id IS NULL
       )
@@ -1703,4 +1703,3 @@ def drop_story_workspace_tables(db) -> None:
     for table in tables:
         db.execute(f"DROP TABLE IF EXISTS {table}")
     db.commit()
-

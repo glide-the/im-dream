@@ -755,15 +755,8 @@ timeline_gen_scheduler = AsyncIOScheduler()
 
 @app.on_event("startup")
 async def startup_database():
-    """Open PostgreSQL and verify the reviewed Dream Alembic head."""
+    """Open PostgreSQL and verify the required Admin/Drizzle capabilities."""
     database.init_db()
-
-
-@app.on_event("shutdown")
-async def shutdown_database():
-    """Release the process-wide PostgreSQL connection pool."""
-
-    database.close_db()
 
 
 @app.on_event("startup")
@@ -802,7 +795,9 @@ async def shutdown_scheduler():
 # ========== Claude Agent Factory ==========
 
 from agent_factory import claude_agent_thread_factory
+from claude_agent.event_bus_redis import RedisStreamEventBus
 from services.deck.story_workflow_gateway import (
+    get_story_workflow_application_gateway,
     story_workspace_get_dream_confirmation_coordinator,
 )
 from routers import admin as admin_router_module
@@ -869,6 +864,21 @@ async def oauth_protocol_error_handler(request, exc: OAuthProtocolError):
 
 
 @app.on_event("startup")
+async def startup_validate_claude_agent_event_bus():
+    """Reject invalid/unreachable shared EventBus configuration before turns."""
+
+    backend = (
+        os.environ.get("INK_AGENT_EVENT_BUS_BACKEND") or "memory"
+    ).strip().lower()
+    if backend not in {"memory", "redis"}:
+        raise RuntimeError(
+            "INK_AGENT_EVENT_BUS_BACKEND must be either 'memory' or 'redis'"
+        )
+    if backend == "redis":
+        await RedisStreamEventBus.validate_connection()
+
+
+@app.on_event("startup")
 async def startup_claude_agent():
     """Start the Claude Agent session pool sweeper."""
     claude_agent_thread_factory.start()
@@ -880,6 +890,13 @@ async def story_workspace_startup_dream_confirmation_coordinator():
     """Reconcile accepted Dream confirmations after the Agent is ready."""
 
     story_workspace_get_dream_confirmation_coordinator().start()
+
+
+@app.on_event("startup")
+async def story_workspace_startup_dream_internal_dispatches():
+    """Recover pending or expired internal commands without a GET side effect."""
+
+    get_story_workflow_application_gateway().start_internal_dream_dispatches()
 
 
 @app.on_event("startup")
@@ -959,10 +976,34 @@ async def story_workspace_shutdown_dream_confirmation_coordinator():
 
 
 @app.on_event("shutdown")
+async def story_workspace_shutdown_dream_internal_dispatches():
+    """Await internal episode/workflow command drains before factory close."""
+
+    gateway = get_story_workflow_application_gateway()
+    await gateway.aclose_internal_dream_dispatches()
+
+
+@app.on_event("shutdown")
 async def shutdown_claude_agent():
     """Gracefully close all Claude Agent sessions."""
-    await claude_agent_thread_factory.aclose()
+    try:
+        await claude_agent_thread_factory.aclose()
+    except Exception:
+        logging.getLogger(__name__).exception("Claude Agent factory close failed")
+    try:
+        # No producer may retain the process-wide Redis connection after the
+        # factory drain. ``aclose`` resets its slot for test/app reloads.
+        await RedisStreamEventBus.aclose()
+    except Exception:
+        logging.getLogger(__name__).exception("Agent Redis EventBus close failed")
     print("✅ Claude Agent factory closed\n")
+
+
+@app.on_event("shutdown")
+async def shutdown_database():
+    """Close PostgreSQL only after every Agent/business owner has settled."""
+
+    database.close_db()
 
 
 

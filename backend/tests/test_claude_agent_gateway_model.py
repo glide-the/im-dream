@@ -74,6 +74,61 @@ def test_complete_http_turn_passes_saved_platform_alias_to_agent_runner(monkeypa
     assert captured_requests[0].user_id == "7"
 
 
+def test_complete_http_turn_keeps_dream_binding_out_of_public_request(monkeypatch) -> None:
+    captured_requests = []
+    catalog = type(
+        "Catalog",
+        (),
+        {"fetch_catalog": lambda self: GatewayModelCatalog((model(),), "dream-balanced")},
+    )()
+    monkeypatch.setattr(route_module, "GatewayModelCatalogClient", lambda _user_id: catalog)
+    monkeypatch.setattr(
+        route_module.database,
+        "get_system_config",
+        lambda _user_id: {"model": "dream-balanced"},
+    )
+    monkeypatch.setattr(
+        route_module.database,
+        "get_chat_thread",
+        lambda _thread_id, _user_id: {
+            "id": "thread-dream",
+            "user_id": 7,
+            "deck_id": None,
+            "voice_id": None,
+        },
+    )
+    monkeypatch.setattr(
+        route_module.database,
+        "save_chat_message",
+        lambda *_args, **_kwargs: "browser-message-1",
+    )
+
+    async def run_streaming(request):
+        captured_requests.append(request)
+        yield 'data: {"type":"finish"}\n\n'
+
+    monkeypatch.setattr(route_module.claude_agent_thread_factory, "run_streaming", run_streaming)
+
+    async def exercise() -> None:
+        response = await route_module.claude_agent_stream(
+            route_module.ClaudeAgentRequestBody(
+                thread_id="thread-dream",
+                message={
+                    "id": "browser-message-1",
+                    "parts": [{"type": "text", "text": "continue"}],
+                },
+            ),
+            current_user={"user_id": 7},
+        )
+        async for _chunk in response.body_iterator:
+            pass
+
+    asyncio.run(exercise())
+    request = captured_requests[0]
+    assert not hasattr(request, "story_workspace_dream_context")
+    assert request.message_metadata is None
+
+
 def test_free_default_is_used_when_user_has_no_saved_model(monkeypatch) -> None:
     catalog = type("Catalog", (), {"fetch_catalog": lambda self: GatewayModelCatalog((model(),), "dream-balanced")})()
     monkeypatch.setattr(route_module, "GatewayModelCatalogClient", lambda _user_id: catalog)

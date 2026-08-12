@@ -24,6 +24,7 @@ from services.admin_gateway.config import (
 )
 from services.admin_gateway.sdk import apply_gateway_sdk_env_to_options
 from services.admin_gateway.token import issue_gateway_subject_token
+from libs.claude_agent_kit.server.sdk_env import apply_project_sdk_runtime_options
 
 
 @dataclass
@@ -72,13 +73,105 @@ def test_enabled_gateway_uses_refreshable_helper_and_binds_canonical_subject():
         "x-api-key: " + values["INK_GATEWAY_SERVICE_KEY"]
         + "\nx-ink-turn-idempotency-key: dream-turn-" + "a" * 64
     )
-    assert "ANTHROPIC_API_KEY" not in options.env
-    assert "ANTHROPIC_AUTH_TOKEN" not in options.env
-    assert "ANTHROPIC_API_KEY" not in options.env
+    assert options.env["ANTHROPIC_API_KEY"] == ""
+    assert options.env["ANTHROPIC_AUTH_TOKEN"] == ""
+    assert options.env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
     assert options.env["INK_GATEWAY_CANONICAL_SUBJECT"] == "205"
     assert options.env["CLAUDE_CODE_API_KEY_HELPER_TTL_MS"] == "120000"
     settings = json.loads(options.settings or "")
     assert "services.admin_gateway.subject_token_helper" in settings["apiKeyHelper"]
+
+
+def test_gateway_credentials_survive_the_sdk_runtime_defaults_reapply(tmp_path):
+    """The SDK's second env merge must not restore a direct Provider token."""
+
+    values = configured_environment()
+    options = Options()
+    apply_gateway_sdk_env_to_options(
+        options,
+        "205",
+        gateway_idempotency_key="dream-turn-" + "c" * 64,
+        environment=values,
+    )
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "ANTHROPIC_AUTH_TOKEN=direct-provider-token-must-not-return",
+                "ANTHROPIC_BASE_URL=https://provider-bypass.example.test",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    apply_project_sdk_runtime_options(options, env_file=env_file)
+
+    assert options.env["ANTHROPIC_API_KEY"] == ""
+    assert options.env["ANTHROPIC_AUTH_TOKEN"] == ""
+    assert options.env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
+    assert options.env["ANTHROPIC_BASE_URL"] == values["INK_GATEWAY_BASE_URL"]
+    assert options.env["ANTHROPIC_CUSTOM_HEADERS"].startswith(
+        "x-api-key: " + values["INK_GATEWAY_SERVICE_KEY"]
+    )
+
+
+def test_gateway_tombstones_parent_process_credentials_on_sdk_reapply(
+    tmp_path,
+    monkeypatch,
+):
+    values = configured_environment()
+    options = Options()
+    apply_gateway_sdk_env_to_options(
+        options,
+        "205",
+        environment=values,
+    )
+    for name in (
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+    ):
+        monkeypatch.setenv(name, f"ambient-{name.lower()}-must-not-flow")
+
+    apply_project_sdk_runtime_options(options, env_file=tmp_path / "missing.env")
+
+    assert options.env["ANTHROPIC_API_KEY"] == ""
+    assert options.env["ANTHROPIC_AUTH_TOKEN"] == ""
+    assert options.env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
+    assert json.loads(options.settings or "")["apiKeyHelper"]
+
+
+def test_disabled_gateway_still_loads_direct_provider_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "ANTHROPIC_AUTH_TOKEN=direct-provider-token\n",
+        encoding="utf-8",
+    )
+    options = Options()
+
+    apply_project_sdk_runtime_options(options, env_file=env_file)
+
+    assert options.env["ANTHROPIC_AUTH_TOKEN"] == "direct-provider-token"
+
+
+def test_explicit_primary_gateway_disable_wins_over_legacy_enable(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "ANTHROPIC_AUTH_TOKEN=direct-provider-token\n",
+        encoding="utf-8",
+    )
+    options = Options(
+        env={
+            "INK_GATEWAY_ENABLED": "0",
+            "INK_GATEWAY_CLAUDE_AGENT_ENABLED": "1",
+        }
+    )
+
+    apply_project_sdk_runtime_options(options, env_file=env_file)
+
+    assert options.env["ANTHROPIC_AUTH_TOKEN"] == "direct-provider-token"
 
 
 def test_subject_helper_issues_fresh_short_lived_tokens(monkeypatch, capsys):
@@ -108,7 +201,7 @@ def test_subject_helper_issues_fresh_short_lived_tokens(monkeypatch, capsys):
 
 
 def test_real_claude_cli_refreshes_helper_token_after_gateway_401():
-    """The installed CLI must replace, not replay, a rejected subject JWT."""
+    """The helper must win over inherited credentials and refresh after 401."""
 
     claude = shutil.which("claude")
     if claude is None:
@@ -175,8 +268,18 @@ def test_real_claude_cli_refreshes_helper_token_after_gateway_401():
             environment=values,
         )
         environment = dict(os.environ)
-        environment.pop("ANTHROPIC_API_KEY", None)
-        environment.pop("ANTHROPIC_AUTH_TOKEN", None)
+        # Match the SDK transport, which inherits the parent process before
+        # overlaying options.env. These inert sentinels must not replace the
+        # canonical-subject helper configured by the server.
+        environment.update(
+            {
+                "ANTHROPIC_API_KEY": "ambient-api-key-must-not-flow",
+                "ANTHROPIC_AUTH_TOKEN": "ambient-auth-token-must-not-flow",
+                "CLAUDE_CODE_OAUTH_TOKEN": "ambient-oauth-must-not-flow",
+                "ANTHROPIC_FEDERATION_RULE_ID": "ambient-rule-must-not-flow",
+                "ANTHROPIC_ORGANIZATION_ID": "ambient-org-must-not-flow",
+            }
+        )
         environment.update(options.env)
         environment["CLAUDE_CODE_MAX_RETRIES"] = "1"
         with tempfile.TemporaryDirectory() as config_home:

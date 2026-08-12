@@ -8,11 +8,13 @@
 import { expect, test } from '@playwright/test';
 import {
   filterStoryWorkspaceGuidanceMessages,
+  isSystemHiddenMessageMetadata,
   isStoryWorkspacePrivateEpisodeActionMetadata,
   isStoryWorkspaceGuidanceMetadata,
   STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
   STORY_WORKSPACE_EPISODE_ACTION_SCHEMA,
   STORY_WORKSPACE_GUIDANCE_KIND,
+  SYSTEM_HIDDEN_MESSAGE_VISIBILITY,
 } from '../story-workspace-guidance';
 
 test('kind constant matches the Task 3 persistence marker', () => {
@@ -41,12 +43,29 @@ test('rejects non-guidance and malformed metadata shapes', () => {
   expect(isStoryWorkspaceGuidanceMetadata({ kind: 42 })).toBe(false);
 });
 
+test('recognizes only the explicit system-hidden visibility marker', () => {
+  expect(isSystemHiddenMessageMetadata({
+    kind: STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+    visibility: SYSTEM_HIDDEN_MESSAGE_VISIBILITY,
+  })).toBe(true);
+  expect(isSystemHiddenMessageMetadata({ visibility: 'public' })).toBe(false);
+  expect(isSystemHiddenMessageMetadata(null)).toBe(false);
+});
+
 test('Chat compatibility filter drops guidance and Dream confirmation rows', () => {
   const messages = [
     { id: 'm1', role: 'user', metadata: undefined },
     { id: 'guide_k-1', role: 'user', metadata: { kind: 'story-workspace-guidance', actor: '11' } },
     { id: 'm2', role: 'assistant', metadata: { kind: 'other' } },
     { id: 'dream_k-1', role: 'user', metadata: { kind: 'story-workspace-dream-confirmation' } },
+    {
+      id: 'dream_launch_goal',
+      role: 'user',
+      metadata: {
+        kind: STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+        visibility: SYSTEM_HIDDEN_MESSAGE_VISIBILITY,
+      },
+    },
     {
       id: 'dream_agent_private',
       role: 'user',

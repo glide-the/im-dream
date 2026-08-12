@@ -568,7 +568,11 @@ class _StoryWorkspaceDreamFilesystem:
                     workspace_descriptor,
                     ".dream",
                     create=False,
+                    optional=not create,
                 )
+                if dream_descriptor is None:
+                    yield None
+                    return
                 assert dream_descriptor is not None
                 descriptors.append(dream_descriptor)
                 runtime_descriptor = self._open_child_directory(

@@ -355,18 +355,18 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         generating_old = self._add_run(2, complete=True, updated_at="2026-08-05T13:00:00+00:00")
         self.live_threads.add("thread-2")
         waiting = self._add_run(3, complete=True, updated_at="2026-08-05T12:00:00+00:00")
-        continuing = self._add_run(4, complete=True, confirmation="accepted", updated_at="2026-08-05T11:00:00+00:00")
+        confirmed = self._add_run(4, complete=True, confirmation="accepted", updated_at="2026-08-05T11:00:00+00:00")
         recent = self._add_run(5, complete=True, confirmation="dispatched", updated_at="2026-08-05T15:00:00+00:00")
 
         response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
 
         self.assertEqual(
             [item.story_workspace_run_id for item in response.runs],
-            [generating_new, generating_old, waiting, continuing, recent],
+            [generating_new, generating_old, waiting, confirmed, recent],
         )
         self.assertEqual(
             [item.lifecycle.value for item in response.runs],
-            ["generating", "generating", "waiting_confirmation", "continuing", "recent"],
+            ["generating", "generating", "waiting_confirmation", "running", "recent"],
         )
         self.assertEqual(
             [item.group for item in response.runs],

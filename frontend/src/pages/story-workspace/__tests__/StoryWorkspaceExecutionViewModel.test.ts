@@ -64,6 +64,7 @@ function files(): StoryWorkspaceDreamFilesResponse {
     confirmationDispatched: true,
     canConfirm: false,
     confirmationLabel: '确认并继续',
+    agentActivity: null,
   };
 }
 

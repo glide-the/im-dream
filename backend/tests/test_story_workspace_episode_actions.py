@@ -1,4 +1,4 @@
-"""TDD coverage for controlled Episode workflow continuation and recovery."""
+"""TDD coverage for controlled Episode workflow actions and recovery."""
 
 from __future__ import annotations
 
@@ -956,7 +956,7 @@ class TestStoryWorkspaceEpisodeActionService:
     def test_same_key_same_fingerprint_reuses_one_persisted_message(self) -> None:
         surface = _surface({"episode-outline.md"})
         with patch(
-            "services.story_workspace.dream_agent_message_service."
+            "services.story_workspace.dream_internal_command_service."
             "story_workspace_read_dream_confirmation_fact",
             return_value=(True, True),
         ):
@@ -997,7 +997,7 @@ class TestStoryWorkspaceEpisodeActionService:
     def test_same_key_different_content_conflicts_and_different_key_is_busy(self) -> None:
         surface = _surface({"episode-outline.md"})
         with patch(
-            "services.story_workspace.dream_agent_message_service."
+            "services.story_workspace.dream_internal_command_service."
             "story_workspace_read_dream_confirmation_fact",
             return_value=(True, True),
         ):
@@ -1035,7 +1035,7 @@ class TestStoryWorkspaceEpisodeActionService:
     def test_continue_revalidates_episode_manifest_action_and_live_turn(self) -> None:
         surface = _surface({"episode-outline.md"})
         with patch(
-            "services.story_workspace.dream_agent_message_service."
+            "services.story_workspace.dream_internal_command_service."
             "story_workspace_read_dream_confirmation_fact",
             return_value=(True, True),
         ):
@@ -1084,7 +1084,7 @@ class TestStoryWorkspaceEpisodeActionService:
             idempotencyKey="recover-1"
         )
         with patch(
-            "services.story_workspace.dream_agent_message_service."
+            "services.story_workspace.dream_internal_command_service."
             "story_workspace_read_dream_confirmation_fact",
             return_value=(True, True),
         ):
@@ -1229,7 +1229,7 @@ def test_claim_lease_expiry_recovers_same_identity_without_second_message() -> N
     service = StoryWorkspaceEpisodeActionService(db, thread_factory=_IdleFactory())
     command = StoryWorkspaceEpisodeBindingRecoveryCommand(idempotencyKey="recover-lease")
     with patch(
-        "services.story_workspace.dream_agent_message_service."
+        "services.story_workspace.dream_internal_command_service."
         "story_workspace_read_dream_confirmation_fact",
         return_value=(True, True),
     ):
@@ -1268,9 +1268,9 @@ def test_coordinator_schedules_one_active_dispatch_per_message_identity() -> Non
     scheduled: list[str] = []
 
     async def exercise() -> None:
-        from services.story_workspace.dream_agent_message_service import (
-            StoryWorkspaceDreamAgentMessageCoordinator,
-            StoryWorkspaceDreamAgentPendingDispatch,
+        from services.story_workspace.dream_internal_command_service import (
+            StoryWorkspaceDreamInternalCommandCoordinator,
+            StoryWorkspaceDreamInternalPendingDispatch,
         )
 
         entered = asyncio.Event()
@@ -1281,7 +1281,7 @@ def test_coordinator_schedules_one_active_dispatch_per_message_identity() -> Non
             entered.set()
             await release.wait()
 
-        pending = StoryWorkspaceDreamAgentPendingDispatch(
+        pending = StoryWorkspaceDreamInternalPendingDispatch(
             thread_id=THREAD_ID,
             actor_id=ACTOR_ID,
             context=_context(),
@@ -1289,7 +1289,7 @@ def test_coordinator_schedules_one_active_dispatch_per_message_identity() -> Non
             parts=[{"type": "text", "text": "受控意图"}],
             metadata={"dispatch_claim_id": "claim-one"},
         )
-        coordinator = StoryWorkspaceDreamAgentMessageCoordinator(dispatch)
+        coordinator = StoryWorkspaceDreamInternalCommandCoordinator(dispatch)
         assert coordinator.schedule(pending) is True
         await entered.wait()
         assert coordinator.schedule(pending) is False
@@ -1464,7 +1464,7 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
 
         gateway = gateway_module.StoryWorkflowApplicationGateway()
         scheduled: list[object] = []
-        gateway._dream_agent_message_coordinator = SimpleNamespace(  # noqa: SLF001
+        gateway._dream_internal_command_coordinator = SimpleNamespace(  # noqa: SLF001
             schedule=lambda pending: scheduled.append(pending) or True
         )
         actor = {"value": int(ACTOR_ID)}
@@ -1486,7 +1486,7 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
                 return_value=_IdleFactory(),
             ),
             patch(
-                "services.story_workspace.dream_agent_message_service."
+                "services.story_workspace.dream_internal_command_service."
                 "story_workspace_read_dream_confirmation_fact",
                 return_value=(True, True),
             ),
@@ -1596,6 +1596,9 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
         assert action_count == 1
         assert set(action_metadata) == {
             "schema",
+            "workflow_run_id",
+            "thread_id",
+            "actor_id",
             "action",
             "episode_uid",
             "input_revision",
@@ -1603,6 +1606,9 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
             "expected_manifest_revision",
             "expected_workflow_revision",
         }
+        assert action_metadata["workflow_run_id"] == RUN_ID
+        assert action_metadata["thread_id"] == THREAD_ID
+        assert action_metadata["actor_id"] == ACTOR_ID
         assert action_metadata["action"] == "write_script"
         assert action_metadata["episode_uid"] == EPISODE_ID
         assert action_metadata["input_revision"].startswith("sha256:")
@@ -1624,7 +1630,7 @@ def test_real_gateway_recovery_is_path_free_and_keeps_unproven_run_unbound() -> 
         db.close()
         gateway = gateway_module.StoryWorkflowApplicationGateway()
         scheduled: list[object] = []
-        gateway._dream_agent_message_coordinator = SimpleNamespace(  # noqa: SLF001
+        gateway._dream_internal_command_coordinator = SimpleNamespace(  # noqa: SLF001
             schedule=lambda pending: scheduled.append(pending) or True
         )
         app = _gateway_app(gateway, {"value": int(ACTOR_ID)})
@@ -1645,7 +1651,7 @@ def test_real_gateway_recovery_is_path_free_and_keeps_unproven_run_unbound() -> 
                 side_effect=AssertionError("recovery must not probe an unproven path"),
             ) as workspace_probe,
             patch(
-                "services.story_workspace.dream_agent_message_service."
+                "services.story_workspace.dream_internal_command_service."
                 "story_workspace_read_dream_confirmation_fact",
                 return_value=(True, True),
             ),
@@ -2134,7 +2140,7 @@ def test_real_http_concurrency_keeps_one_action_claim_and_stable_identity() -> N
                 return_value=_IdleFactory(),
             ),
             patch(
-                "services.story_workspace.dream_agent_message_service."
+                "services.story_workspace.dream_internal_command_service."
                 "story_workspace_read_dream_confirmation_fact",
                 return_value=(True, True),
             ),

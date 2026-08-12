@@ -109,7 +109,7 @@ SUO-230-SH-001: Story Workspace 审阅 Gate 确认幂等、版本校验与防绕
 5.1 全部确认后放行：
 - 全部 story/character/scene 确认后，ReviewGate 显示第四步解锁。
 - 点击「继续」或「结束」。
-- 期望：请求成功，`workflow_run` 状态流转为 `continuing`/`completed`。
+- 期望：请求成功，`workflow_run` 保持 `confirmed` 执行业务写入并最终流转为 `completed`。
 
 5.2 继续请求幂等：
 - 在第一次继续请求成功后，再次发送相同 continue 请求。
@@ -451,7 +451,7 @@ test('已确认但继续失败时不回滚确认状态', async ({ page, api }) =
 |---|---|---|
 | 验证范围 | 单个产出项 confirm/reject | 运行级 gate 聚合、幂等、版本校验、防绕过 |
 | 入口 | 故事列表 → Review Panel | Dream 页面 → ReviewGate → Review Panel |
-| 状态机 | `pending → confirmed/rejected` | 增加 `confirmed → continuing/completed/failed` |
+| 状态机 | `pending → confirmed/rejected` | 增加 `confirmed → completed/failed` |
 | 安全维度 | 基础权限 | 客户端绕过防护、过期版本拒绝 |
 
 **无冲突声明**：本增量在基线审阅 E2E 之上追加运行级 gate 验证，不推翻基线单个产出项的审阅流程。

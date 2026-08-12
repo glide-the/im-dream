@@ -98,14 +98,34 @@ def test_runtime_helpers_execute_on_postgres_and_rollback(monkeypatch) -> None:
         )[0]["prompt"] == "PostgreSQL range"
 
         thread_id = database.create_chat_thread(user_id, title="PostgreSQL chat")
+        message_id = f"pg-message-{suffix}"
         database.save_chat_message(
             thread_id,
             "user",
             [{"type": "text", "text": "hello"}],
-            message_id=f"pg-message-{suffix}",
+            message_id=message_id,
+            metadata={"b": 2, "a": 1},
         )
+        database.save_chat_message(
+            thread_id,
+            "user",
+            [{"text": "hello", "type": "text"}],
+            message_id=message_id,
+            metadata={"a": 1, "b": 2},
+        )
+        with pytest.raises(database.ChatMessageIdentityConflict):
+            database.save_chat_message(
+                thread_id,
+                "assistant",
+                [{"type": "text", "text": "reparent attempt"}],
+                message_id=message_id,
+                metadata={"a": 1, "b": 2},
+            )
         assert database.get_chat_thread(thread_id, user_id)["title"] == "PostgreSQL chat"
-        assert database.list_chat_messages(thread_id)[0]["role"] == "user"
+        messages = database.list_chat_messages(thread_id)
+        assert len(messages) == 1
+        assert messages[0]["role"] == "user"
+        assert messages[0]["parts"][0]["text"] == "hello"
 
         task_id = database.create_reflection_task(
             user_id,

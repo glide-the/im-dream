@@ -98,6 +98,7 @@ test('Dream confirmation rows are hidden together with guidance rows', () => {
     { id: 'normal', metadata: null },
     { id: 'dream', metadata: { kind: 'story-workspace-dream-confirmation' } },
     { id: 'guidance', metadata: { kind: 'story-workspace-guidance' } },
+    { id: 'launch', metadata: { kind: 'story-workspace-dream-agent-user', visibility: 'system-hidden' } },
   ]);
   expect(visible.map((message) => message.id)).toEqual(['normal']);
 });

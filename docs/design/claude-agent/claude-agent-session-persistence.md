@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS chat_message (
 |------|------|
 | `create_chat_thread(user_id)` | 创建新会话，返回 `thread_id`（UUID） |
 | `get_chat_thread(thread_id, user_id)` | 权限校验 + 返回会话 row（含 `claude_session_id` / `agent_contract_version`） |
-| `save_chat_message(thread_id, role, content, *, parts, message_id, metadata)` | `INSERT OR REPLACE`，`parts: list`（序列化在 DB 层），`metadata: dict`，同时 BUMP `chat_thread.updated_at` |
+| `save_chat_message(thread_id, role, parts, message_id=None, metadata=None)` | immutable CAS：`INSERT ... ON CONFLICT DO NOTHING RETURNING`；仅 thread/role/parts/metadata JSON 语义完全一致时接受重放，冲突返回 `CHAT_MESSAGE_IDENTITY_CONFLICT`，绝不覆盖或 reparent；仅首次插入 BUMP thread |
 | `list_chat_messages(thread_id)` | 按 `created_at ASC` 返回全部消息；`parts` 已反序列化为 Python list，`metadata` 已反序列化为 dict |
 | `update_chat_thread_title(thread_id, title)` | 首轮写入时自动从 user_text 截取标题（前 50 字符） |
 | `update_chat_thread_claude_session(thread_id, claude_session_id, agent_contract_version)` | **新增（2026-05-29）**：每次成功 turn 后由 `_persist_turn` 调用，将 `result.session_id` 与当前 `_AGENT_RUNTIME_CONTRACT_VERSION` 写回，供下轮 `assemble_context` 的 resume 判断使用 |
@@ -335,4 +335,4 @@ GET /api/claude-agent/threads/{thread_id}/messages
 | Claude SDK `session_id` 续接 | ✅ **已落地（2026-05-29）**：`_persist_turn` 将 `result.session_id` + `_AGENT_RUNTIME_CONTRACT_VERSION` 写入 `chat_thread`；`assemble_context` 读取并通过 `_has_usable_claude_resume` + 本地文件探针决定是否 `--resume` | 可添加"turn-window 满时开新 session"策略（对齐 Pawkeyland `_session_turn_window_is_full`） |
 | 多文本块交错 | 所有文本 delta 合并为单一 text part（追加在 parts 末尾） | 若需精确还原多块交错顺序，可在 `on_text_done` 时追加中间 text part |
 | `parts_json` 大小 | 无限制（SQLite TEXT 列） | 若工具输出超大，可在 `_persist_turn` 中对 `output` 字段做截断处理 |
-| `message_id` 稳定性 | 前端 AI-SDK 提供的 `message_id` 原样存储，`INSERT OR REPLACE` 保幂等 | 重发场景自动覆盖，无需额外去重逻辑 |
+| `message_id` 稳定性 | 前端 AI-SDK ID 只能绑定一次 immutable message envelope；同内容可重放，异构重用返回 409 | 公共 Chat POST 同时拒绝 `dream_agent_`、`dream_confirm_`、`guide_` 服务端命名空间；服务端业务命令继续走受权 direct CAS |

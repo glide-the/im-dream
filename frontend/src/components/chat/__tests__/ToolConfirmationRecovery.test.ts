@@ -5,7 +5,9 @@
 import { expect, test } from '@playwright/test';
 import type { DynamicToolUIPart } from 'ai';
 import { ClaudeAgentChatTransport } from '../../../lib/claude-agent-transport';
+import { toolConfirmationKeyboardDecision } from '../chatRuntimeState';
 import {
+  applyBackendEventToMessages,
   consumeClaudeAgentSseStream,
   parseClaudeAgentSseBuffer,
 } from '../../../lib/claude-agent-sse-utils';
@@ -14,11 +16,9 @@ import {
 } from '../chatRecovery';
 import {
   deriveSettledToolCallIdsFromHistory,
-  dreamToolConfirmationAnswers,
   interpretToolConfirmationResponse,
   loadChatHistoryThenRuntimeStatus,
   parseChatThreadStatus,
-  pendingToolConfirmationFromDream,
   resolvePendingToolConfirmation,
   runtimePendingToolCallIdsFromStatus,
 } from '../toolConfirmation';
@@ -32,52 +32,72 @@ const stalePart: DynamicToolUIPart = {
   toolMetadata: { approvalRequested: true },
 };
 
-test('Dream safe confirmations map into Chat without exposing generic runtime parts', () => {
-  const runId = 'run_0123456789abcdef0123456789abcdef';
-  const askUser = pendingToolConfirmationFromDream(runId, {
-    toolCallId: 'dream-tool-ask',
-    kind: 'ask_user',
-    toolName: 'AskUserQuestion',
-    questions: [{
-      id: 'q0',
-      question: '选择叙事视角',
-      type: 'radio',
-      required: true,
-      options: [{ label: '第一人称', value: 'first_person' }],
-    }],
-  });
-  const rejectOnly = pendingToolConfirmationFromDream(runId, {
-    toolCallId: 'dream-tool-reject',
-    kind: 'reject_only',
-    toolName: 'UnsupportedTool',
-  });
-  const network = pendingToolConfirmationFromDream(runId, {
-    toolCallId: 'dream-tool-network',
-    kind: 'sandbox_network',
-    toolName: 'WebFetch',
-    network: { host: 'example.com', policy: 'allowlist' },
-  });
+test('reject-only consumes approval shortcut while Escape remains rejection', () => {
+  expect(toolConfirmationKeyboardDecision('reject-only', {
+    key: 'Enter', ctrlKey: true, metaKey: false,
+  })).toBe('consume');
+  expect(toolConfirmationKeyboardDecision('confirm', {
+    key: 'Enter', ctrlKey: false, metaKey: true,
+  })).toBe('approve');
+  expect(toolConfirmationKeyboardDecision('reject-only', {
+    key: 'Escape', ctrlKey: false, metaKey: false,
+  })).toBe('reject');
+});
 
-  expect(askUser).toMatchObject({
-    kind: 'askuser',
-    toolCallId: 'dream-tool-ask',
-    dream: { runId },
-    input: { questions: [{ id: 'q0', question: '选择叙事视角' }] },
+test('reconnect approval preserves prior input and recognizes reject-only policy', () => {
+  const priorInput = { command: 'python -m pytest', cwd: '/workspace' };
+  const messages = [{
+    id: 'assistant-confirmation',
+    role: 'assistant' as const,
+    parts: [{
+      type: 'dynamic-tool' as const,
+      toolCallId: 'call-reject-only',
+      toolName: 'Bash',
+      state: 'input-available' as const,
+      input: priorInput,
+    }],
+  }];
+  const replayed = applyBackendEventToMessages(messages, {
+    type: 'tool-approval-request',
+    toolCallId: 'call-reject-only',
+    toolName: 'Bash',
+    input: {},
+    confirmationKind: 'reject_only',
   });
-  expect(rejectOnly).toMatchObject({
-    kind: 'reject-only',
-    toolCallId: 'dream-tool-reject',
-    dream: { runId },
-  });
-  expect(network).toMatchObject({
-    kind: 'sandbox-network',
-    networkRequest: { host: 'example.com', policyMode: 'allowlist' },
-    dream: { runId },
-  });
-  expect(dreamToolConfirmationAnswers(
-    askUser.dream!.confirmation,
-    { '选择叙事视角': 'first_person', ignored: 'not-forwarded' },
-  )).toEqual({ q0: 'first_person' });
+  const part = replayed[0].parts[0] as DynamicToolUIPart;
+  expect(part.input).toEqual(priorInput);
+  expect(resolvePendingToolConfirmation(part, 'auto')).toBe('reject-only');
+});
+
+test('direct settlement marker closes AskUser and manual confirmation unless runtime still owns it', () => {
+  const settledAskUser = {
+    type: 'dynamic-tool' as const,
+    toolCallId: 'call-ask-settled',
+    toolName: 'AskUserQuestion',
+    state: 'input-available' as const,
+    input: { questions: [{ question: '继续吗？', options: ['继续', '停止'] }] },
+    toolMetadata: { approvalRequested: false, approvalSettled: true },
+  } as DynamicToolUIPart;
+  const settledManual = {
+    ...stalePart,
+    toolCallId: 'call-manual-settled',
+    toolMetadata: { approvalRequested: false, approvalSettled: true },
+  } as DynamicToolUIPart;
+
+  expect(resolvePendingToolConfirmation(settledAskUser, 'auto')).toBeNull();
+  expect(resolvePendingToolConfirmation(settledManual, 'manual')).toBeNull();
+  expect(resolvePendingToolConfirmation(
+    settledAskUser,
+    'auto',
+    new Set(),
+    new Set(['call-ask-settled']),
+  )).toBe('askuser');
+  expect(resolvePendingToolConfirmation(
+    settledManual,
+    'manual',
+    new Set(['call-manual-settled']),
+    new Set(['call-manual-settled']),
+  )).toBe('confirm');
 });
 
 test('a locally settled replayed tool part cannot reopen the confirmation dock', () => {
@@ -216,6 +236,27 @@ test('idle observed after history reloads the terminal turn before Chat resumes'
     { id: 'dream-user' },
     { id: 'dream-assistant-terminal' },
   ]);
+});
+
+test('destroyed and not_found authoritative states also stabilize terminal history', async () => {
+  for (const lifecycle of ['destroyed', 'not_found'] as const) {
+    let historyRead = 0;
+    const recovery = await loadChatHistoryThenRuntimeStatus(
+      async () => {
+        historyRead += 1;
+        return historyRead === 1 ? ['before-close'] : ['before-close', `after-${lifecycle}`];
+      },
+      async () => ({
+        running: false,
+        lifecycle,
+        turn_count: 1,
+        pending_tool_call_ids: [],
+        tool_confirmation_observation: 'known',
+      }),
+    );
+    expect(historyRead).toBe(2);
+    expect(recovery.history).toEqual(['before-close', `after-${lifecycle}`]);
+  }
 });
 
 test('a delayed reconnect snapshot cannot overwrite a newer local turn', () => {

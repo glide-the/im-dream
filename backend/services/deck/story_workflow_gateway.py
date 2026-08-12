@@ -24,8 +24,8 @@ try:
     from models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
     from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
     from story_workspace.contracts import (
-        StoryWorkspaceDreamAgentMessageCommand,
-        StoryWorkspaceDreamAgentToolConfirmationCommand,
+        StoryWorkspaceDreamAgentActivityResponse,
+        StoryWorkspaceDreamInternalCommand,
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceEpisodeActionContinueCommand,
         StoryWorkspaceEpisodeActionContinueCommandV2,
@@ -68,6 +68,7 @@ try:
     from services.story_workspace.dream_launch_gateway import (
         StoryWorkspaceDreamLaunchGateway,
         StoryWorkspaceDreamLaunchGatewayError,
+        StoryWorkspaceDreamLaunchTaskRegistry,
     )
     from services.story_workspace.dream_launch_service import (
         StoryWorkspaceDreamLaunchIdempotencyConflict,
@@ -105,10 +106,15 @@ try:
         StoryWorkspaceEpisodeActionSelectionError,
         StoryWorkspaceTrustedEpisodeActionSelector,
     )
-    from services.story_workspace.dream_agent_message_service import (
-        StoryWorkspaceDreamAgentMessageError,
-        StoryWorkspaceDreamAgentMessageCoordinator,
-        StoryWorkspaceDreamAgentMessageService,
+    from services.story_workspace.dream_internal_command_service import (
+        STORY_WORKSPACE_DREAM_INTERNAL_COMMAND_KIND,
+        StoryWorkspaceDreamInternalCommandCoordinator,
+        StoryWorkspaceDreamInternalCommandError,
+        StoryWorkspaceDreamInternalCommandService,
+    )
+    from services.story_workspace.dream_thread_binding import (
+        DreamRunBindingResolver,
+        DreamThreadBindingConflict,
     )
     from services.story_workspace.artifact_story_index_projector import (
         ArtifactStoryProjectionError,
@@ -125,8 +131,8 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
     from backend.models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
     from backend.story_workspace.contracts import (
-        StoryWorkspaceDreamAgentMessageCommand,
-        StoryWorkspaceDreamAgentToolConfirmationCommand,
+        StoryWorkspaceDreamAgentActivityResponse,
+        StoryWorkspaceDreamInternalCommand,
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceEpisodeActionContinueCommand,
         StoryWorkspaceEpisodeActionContinueCommandV2,
@@ -169,6 +175,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.services.story_workspace.dream_launch_gateway import (
         StoryWorkspaceDreamLaunchGateway,
         StoryWorkspaceDreamLaunchGatewayError,
+        StoryWorkspaceDreamLaunchTaskRegistry,
     )
     from backend.services.story_workspace.dream_launch_service import (
         StoryWorkspaceDreamLaunchIdempotencyConflict,
@@ -206,10 +213,15 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceEpisodeActionSelectionError,
         StoryWorkspaceTrustedEpisodeActionSelector,
     )
-    from backend.services.story_workspace.dream_agent_message_service import (
-        StoryWorkspaceDreamAgentMessageError,
-        StoryWorkspaceDreamAgentMessageCoordinator,
-        StoryWorkspaceDreamAgentMessageService,
+    from backend.services.story_workspace.dream_internal_command_service import (
+        STORY_WORKSPACE_DREAM_INTERNAL_COMMAND_KIND,
+        StoryWorkspaceDreamInternalCommandCoordinator,
+        StoryWorkspaceDreamInternalCommandError,
+        StoryWorkspaceDreamInternalCommandService,
+    )
+    from backend.services.story_workspace.dream_thread_binding import (
+        DreamRunBindingResolver,
+        DreamThreadBindingConflict,
     )
     from backend.services.story_workspace.artifact_story_index_projector import (
         ArtifactStoryProjectionError,
@@ -225,6 +237,15 @@ except ModuleNotFoundError:  # Support package imports from repository root.
 
 
 _DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "test", "testing"}
+_DREAM_OUTPUT_REQUIRED_STATUSES = frozenset(
+    {
+        RunStatus.OUTPUT_VALIDATING,
+        RunStatus.PENDING_REVIEW,
+        RunStatus.CONFIRMED,
+        RunStatus.REJECTED,
+        RunStatus.COMPLETED,
+    }
+)
 _STORY_INDEX_ERROR_STATUSES = {
     "artifact_missing": 404,
     "story_index_revision_conflict": 409,
@@ -324,7 +345,7 @@ def story_workspace_workflow_token_secret() -> str:
     return _token_secret()
 
 
-def _advance_dream_continuation_before_ack(
+def _advance_dream_post_confirmation_before_ack(
     db: Any,
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
 ) -> None:
@@ -344,7 +365,7 @@ def _advance_dream_continuation_before_ack(
         StoryWorkspaceDreamWorkflowLifecycleService(
             db,
             token_secret=_token_secret(),
-        ).record_continuation_dispatched(
+        ).record_post_confirmation_dispatched(
             run_id,
             AuthenticatedActorContext(
                 actor_id=dispatch.actor_id,
@@ -356,7 +377,7 @@ def _advance_dream_continuation_before_ack(
 
 _DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator(
     database.get_db,
-    before_dispatched_ack=_advance_dream_continuation_before_ack,
+    before_dispatched_ack=_advance_dream_post_confirmation_before_ack,
 )
 
 
@@ -371,11 +392,32 @@ class StoryWorkflowApplicationGateway:
         self._dream_confirmation_coordinator = (
             dream_confirmation_coordinator or _DREAM_CONFIRMATION_COORDINATOR
         )
-        self._dream_agent_message_coordinator = (
-            StoryWorkspaceDreamAgentMessageCoordinator(
-                self._dispatch_dream_agent_message
+        self._dream_internal_command_coordinator = (
+            StoryWorkspaceDreamInternalCommandCoordinator(
+                self._dispatch_dream_internal_command,
+                recoverer=self._recover_dream_internal_commands,
             )
         )
+        self._dream_internal_recovery_cursor: tuple[Any, str] | None = None
+        self._dream_launch_task_registry = StoryWorkspaceDreamLaunchTaskRegistry()
+
+    def start_internal_dream_dispatches(self) -> None:
+        """Start non-HTTP recovery for pending/expired durable commands."""
+
+        self._dream_launch_task_registry.start()
+        self._dream_internal_command_coordinator.start()
+
+    async def aclose_internal_dream_dispatches(self) -> None:
+        """Cancel and await owned drains while preserving durable claim leases."""
+
+        await self._dream_launch_task_registry.aclose()
+        await self._dream_internal_command_coordinator.aclose()
+
+    def internal_dream_dispatch_diagnostics(self) -> dict[str, int]:
+        return {
+            **self._dream_internal_command_coordinator.diagnostics(),
+            **self._dream_launch_task_registry.diagnostics(),
+        }
 
     @staticmethod
     def _actor(actor: dict[str, str]) -> AuthenticatedActorContext:
@@ -832,6 +874,7 @@ class StoryWorkflowApplicationGateway:
                 db,
                 preflight_service=self._preflight_service(db, actor),
                 token_secret=_token_secret(),
+                launch_task_registry=self._dream_launch_task_registry,
             )
             return await gateway.start(request, actor=actor)
         except StoryWorkspaceDreamLaunchIdempotencyConflict as exc:
@@ -906,11 +949,71 @@ class StoryWorkflowApplicationGateway:
     ) -> Any:
         """Project Dream files without blocking the application event loop."""
 
-        return await asyncio.to_thread(
+        projection = await asyncio.to_thread(
             self._get_dream_files_sync,
             workflow_run_id,
             actor,
         )
+        return self._attach_dream_agent_activity(
+            projection,
+            workflow_run_id=workflow_run_id,
+            actor_id=str(actor["actor_id"]),
+        )
+
+    def _attach_dream_agent_activity(
+        self,
+        projection: Any,
+        *,
+        workflow_run_id: str,
+        actor_id: str,
+    ) -> Any:
+        """Add a safe display hint without making Observer availability fatal.
+
+        Authorization and thread ownership have already been established by the
+        Dream-files projection.  The optional process-local hint cannot change
+        workflow fields, confirmation eligibility, Chat state, or HTTP success.
+        """
+
+        try:
+            factory = self._dream_agent_thread_factory()
+            snapshot = (
+                factory.dream_workflow_activity_projection()
+                if factory is not None
+                else []
+            )
+            thread_id = str(getattr(projection, "thread_id", "") or "")
+            candidates = [
+                item
+                for item in snapshot
+                if str(getattr(item, "run_id", "") or "") == workflow_run_id
+                and str(getattr(item, "thread_id", "") or "") == thread_id
+                and str(getattr(item, "actor_id", "") or "") == actor_id
+            ]
+            if not candidates:
+                return projection
+            latest = max(
+                candidates,
+                key=lambda item: (
+                    int(getattr(item, "generation", -1)),
+                    int(getattr(item, "sequence", -1)),
+                ),
+            )
+            activity = StoryWorkspaceDreamAgentActivityResponse(
+                activity=str(getattr(latest, "activity", "") or ""),
+                sequence=int(getattr(latest, "sequence", -1)),
+                terminal_outcome=getattr(latest, "terminal_outcome", None),
+                needs_reconcile=bool(getattr(latest, "needs_reconcile", False)),
+                operation_scope=getattr(latest, "operation_scope", None),
+                operation_state=getattr(latest, "operation_state", None),
+                operation_id=getattr(latest, "operation_id", None),
+            )
+            return projection.model_copy(update={"agent_activity": activity})
+        except Exception:
+            logger.exception(
+                "Dream Observer projection unavailable for run_id=%s",
+                workflow_run_id,
+            )
+            return projection
 
     async def get_episode_artifacts(
         self,
@@ -974,7 +1077,7 @@ class StoryWorkflowApplicationGateway:
             actor,
         )
         if pending is not None:
-            self._dream_agent_message_coordinator.schedule(pending)
+            self._dream_internal_command_coordinator.schedule(pending)
         return accepted
 
     async def continue_episode_action(
@@ -996,192 +1099,8 @@ class StoryWorkflowApplicationGateway:
             if_match,
         )
         if pending is not None:
-            self._dream_agent_message_coordinator.schedule(pending)
+            self._dream_internal_command_coordinator.schedule(pending)
         return accepted
-
-    async def get_dream_agent_messages(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-    ) -> Any:
-        """Return only the allowlisted persisted message projection for a run."""
-
-        snapshot = await asyncio.to_thread(
-            self._get_dream_agent_messages_sync, workflow_run_id, actor
-        )
-        await self._recover_dream_agent_messages(workflow_run_id, actor)
-        return snapshot
-
-    async def stream_dream_agent_events(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-        after: str | None,
-    ) -> Any:
-        """Authorize before exposing a filtered, run-bound SSE generator."""
-
-        context = await asyncio.to_thread(
-            self._load_dream_agent_context_sync, workflow_run_id, actor
-        )
-        db = database.get_db()
-        try:
-            service = StoryWorkspaceDreamAgentMessageService(
-                db,
-                thread_factory=self._dream_agent_thread_factory(),
-                db_factory=database.get_db,
-            )
-        finally:
-            # events() uses only the authenticated thread factory; durable data
-            # is always read through the snapshot endpoint.
-            db.close()
-        return service.events(
-            thread_id=context.thread_id,
-            run_id=workflow_run_id,
-            actor_id=actor["actor_id"],
-            after=after,
-        )
-
-    async def submit_dream_agent_message(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceDreamAgentMessageCommand,
-        *,
-        actor: dict[str, str],
-    ) -> Any:
-        """Claim one same-thread command, then dispatch it without holding HTTP."""
-
-        accepted, pending = await asyncio.to_thread(
-            self._claim_dream_agent_message_sync,
-            workflow_run_id,
-            request,
-            actor,
-        )
-        if pending is not None:
-            self._dream_agent_message_coordinator.schedule(pending)
-        return accepted
-
-    async def confirm_dream_agent_tool(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceDreamAgentToolConfirmationCommand,
-        *,
-        actor: dict[str, str],
-    ) -> Any:
-        """Resolve a tool against the server-derived run thread and live turn."""
-
-        context = await asyncio.to_thread(
-            self._load_dream_agent_context_sync,
-            workflow_run_id,
-            actor,
-        )
-        db = database.get_db()
-        try:
-            service = StoryWorkspaceDreamAgentMessageService(
-                db,
-                thread_factory=self._dream_agent_thread_factory(),
-            )
-            try:
-                return service.confirm_tool(
-                    run_id=workflow_run_id,
-                    thread_id=context.thread_id,
-                    actor_id=actor["actor_id"],
-                    command=request,
-                )
-            except StoryWorkspaceDreamAgentMessageError as exc:
-                raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
-        finally:
-            db.close()
-
-    async def _recover_dream_agent_messages(
-        self,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> None:
-        """Resume a durable pending/expired claim when its owner re-enters."""
-
-        try:
-            pending = await asyncio.to_thread(
-                self._recover_dream_agent_messages_sync,
-                workflow_run_id,
-                actor,
-            )
-        except Exception:
-            logger.exception(
-                "Dream Agent pending recovery deferred for run_id=%s",
-                workflow_run_id,
-            )
-            return
-        for item in pending:
-            self._dream_agent_message_coordinator.schedule(item)
-
-    def _recover_dream_agent_messages_sync(
-        self,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> list[Any]:
-        """Reclaim only the same durable key; never synthesize a new command."""
-
-        db = database.get_db()
-        try:
-            context = self._load_dream_agent_context_from_db(
-                db, workflow_run_id, actor
-            )
-            rows = db.execute(
-                "SELECT id, parts, metadata FROM chat_message "
-                "WHERE thread_id = %s AND role = 'user'",
-                (context.thread_id,),
-            ).fetchall()
-            service = StoryWorkspaceDreamAgentMessageService(
-                db,
-                thread_factory=self._dream_agent_thread_factory(),
-                db_factory=database.get_db,
-            )
-            pending: list[Any] = []
-            for row in rows:
-                try:
-                    metadata = json.loads(row["metadata"] or "{}")
-                    parts = json.loads(row["parts"] or "[]")
-                except (TypeError, ValueError):
-                    continue
-                if not (
-                    isinstance(metadata, dict)
-                    and metadata.get("kind") == "story-workspace-dream-agent-user"
-                    and metadata.get("story_workspace_run_id") == workflow_run_id
-                    and str(metadata.get("actor_id") or "") == actor["actor_id"]
-                    and metadata.get("dispatch_status") in {"pending", "dispatching"}
-                    and isinstance(metadata.get("idempotency_key"), str)
-                ):
-                    continue
-                text = "".join(
-                    part.get("text", "")
-                    for part in parts
-                    if isinstance(part, dict)
-                    and part.get("type") == "text"
-                    and isinstance(part.get("text"), str)
-                ).strip()
-                if not text:
-                    continue
-                try:
-                    command = StoryWorkspaceDreamAgentMessageCommand(
-                        text=text,
-                        idempotencyKey=metadata["idempotency_key"],
-                    )
-                    _accepted, dispatch = service.claim_message(
-                        run_id=workflow_run_id,
-                        thread_id=context.thread_id,
-                        actor_id=actor["actor_id"],
-                        context=context,
-                        command=command,
-                    )
-                except StoryWorkspaceDreamAgentMessageError:
-                    continue
-                if dispatch is not None:
-                    pending.append(dispatch)
-            return pending
-        finally:
-            db.close()
 
     @staticmethod
     def _dream_agent_thread_factory() -> Any | None:
@@ -1194,61 +1113,12 @@ class StoryWorkflowApplicationGateway:
             # it simply has no live stream to attach.
             return None
 
-    def _get_dream_agent_messages_sync(
-        self,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> Any:
-        db = database.get_db()
-        try:
-            context = self._load_dream_agent_context_from_db(
-                db, workflow_run_id, actor
-            )
-            return StoryWorkspaceDreamAgentMessageService(
-                db,
-                thread_factory=self._dream_agent_thread_factory(),
-            ).snapshot(
-                run_id=workflow_run_id,
-                thread_id=context.thread_id,
-                actor_id=actor["actor_id"],
-            )
-        finally:
-            db.close()
-
-    def _claim_dream_agent_message_sync(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceDreamAgentMessageCommand,
-        actor: dict[str, str],
-    ) -> Any:
-        db = database.get_db()
-        try:
-            context = self._load_dream_agent_context_from_db(
-                db, workflow_run_id, actor
-            )
-            try:
-                return StoryWorkspaceDreamAgentMessageService(
-                    db,
-                    thread_factory=self._dream_agent_thread_factory(),
-                    db_factory=database.get_db,
-                ).claim_message(
-                    run_id=workflow_run_id,
-                    thread_id=context.thread_id,
-                    actor_id=actor["actor_id"],
-                    context=context,
-                    command=request,
-                )
-            except StoryWorkspaceDreamAgentMessageError as exc:
-                raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
-        finally:
-            db.close()
-
-    async def _dispatch_dream_agent_message(self, pending: Any) -> None:
+    async def _dispatch_dream_internal_command(self, pending: Any) -> None:
         """Run a previously committed claim using a fresh acknowledgement DB."""
 
         db = database.get_db()
         try:
-            service = StoryWorkspaceDreamAgentMessageService(
+            service = StoryWorkspaceDreamInternalCommandService(
                 db,
                 thread_factory=self._dream_agent_thread_factory(),
                 db_factory=database.get_db,
@@ -1259,20 +1129,220 @@ class StoryWorkflowApplicationGateway:
             await service.dispatch(pending)
         except Exception:
             logger.exception(
-                "Dream Agent dispatch task failed for message_id=%s",
+                "Dream internal command dispatch failed for message_id=%s",
                 pending.message_id,
             )
 
-    def _load_dream_agent_context_sync(
+    async def _recover_dream_internal_commands(
         self,
-        workflow_run_id: str,
-        actor: dict[str, str],
-    ) -> StoryWorkspaceDreamRunContext:
+        max_items: int,
+    ) -> list[Any]:
+        """Reclaim durable work without giving any GET endpoint side effects."""
+
+        return await asyncio.to_thread(
+            self._recover_dream_internal_commands_sync,
+            max_items,
+        )
+
+    def _recover_dream_internal_commands_sync(self, max_items: int) -> list[Any]:
+        """Scan one bounded prefix page and recover only the current retry leaf."""
+
+        capacity = max(0, int(max_items))
+        if capacity <= 0:
+            return []
+        scan_limit = min(64, max(8, capacity * 8))
+
         db = database.get_db()
         try:
-            return self._load_dream_agent_context_from_db(db, workflow_run_id, actor)
+            cursor = self._dream_internal_recovery_cursor
+            if cursor is None:
+                rows = db.execute(
+                    "SELECT id, thread_id, parts, metadata, created_at "
+                    "FROM chat_message WHERE role = 'user' "
+                    "AND id >= %s AND id < %s "
+                    "ORDER BY created_at ASC, id ASC LIMIT %s",
+                    ("dream_agent_", "dream_agent`", scan_limit),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT id, thread_id, parts, metadata, created_at "
+                    "FROM chat_message WHERE role = 'user' "
+                    "AND id >= %s AND id < %s "
+                    "AND (created_at > %s OR (created_at = %s AND id > %s)) "
+                    "ORDER BY created_at ASC, id ASC LIMIT %s",
+                    (
+                        "dream_agent_",
+                        "dream_agent`",
+                        cursor[0],
+                        cursor[0],
+                        cursor[1],
+                        scan_limit,
+                    ),
+                ).fetchall()
+            # Release the read snapshot before claim_message owns BEGIN/CAS.
+            if db.in_transaction:
+                db.rollback()
+            service = StoryWorkspaceDreamInternalCommandService(
+                db,
+                thread_factory=self._dream_agent_thread_factory(),
+                db_factory=database.get_db,
+            )
+            pending: list[Any] = []
+            stopped_early = False
+            for row in rows:
+                self._dream_internal_recovery_cursor = (
+                    row["created_at"],
+                    str(row["id"]),
+                )
+                try:
+                    metadata = json.loads(row["metadata"] or "{}")
+                    parts = json.loads(row["parts"] or "[]")
+                except (TypeError, ValueError):
+                    continue
+                if not (
+                    isinstance(metadata, dict)
+                    and metadata.get("kind")
+                    == STORY_WORKSPACE_DREAM_INTERNAL_COMMAND_KIND
+                    and metadata.get("dispatch_status") in {"pending", "dispatching"}
+                    and isinstance(metadata.get("story_workspace_run_id"), str)
+                    and isinstance(metadata.get("actor_id"), str)
+                    and isinstance(metadata.get("idempotency_key"), str)
+                ):
+                    continue
+                run_id = metadata["story_workspace_run_id"]
+                actor_id = metadata["actor_id"]
+                try:
+                    numeric_actor_id = int(actor_id)
+                    owned_thread = db.execute(
+                        "SELECT id, user_id, deck_id, voice_id "
+                        "FROM chat_thread WHERE id = %s AND user_id = %s",
+                        (str(row["thread_id"]), numeric_actor_id),
+                    ).fetchone()
+                    if owned_thread is None:
+                        raise DreamThreadBindingConflict("missing_owned_thread")
+                    context = DreamRunBindingResolver(db).resolve(
+                        actor_id=numeric_actor_id,
+                        thread_id=str(row["thread_id"]),
+                        owned_thread=owned_thread,
+                    )
+                    if (
+                        context is None
+                        or context.workflow_run_id != run_id
+                        or context.thread_id != str(row["thread_id"])
+                    ):
+                        raise DreamThreadBindingConflict(
+                            "internal_command_not_retry_leaf"
+                        )
+                    if db.in_transaction:
+                        db.rollback()
+                except (DreamThreadBindingConflict, TypeError, ValueError):
+                    if db.in_transaction:
+                        db.rollback()
+                    self._quarantine_dream_internal_command(
+                        db,
+                        row=row,
+                        metadata=metadata,
+                        error_code="DREAM_AGENT_BINDING_INVALID",
+                    )
+                    continue
+                text = "".join(
+                    part.get("text", "")
+                    for part in parts
+                    if isinstance(part, dict)
+                    and part.get("type") == "text"
+                    and isinstance(part.get("text"), str)
+                ).strip()
+                if not text:
+                    self._quarantine_dream_internal_command(
+                        db,
+                        row=row,
+                        metadata=metadata,
+                        error_code="DREAM_AGENT_PROVENANCE_INVALID",
+                    )
+                    continue
+                try:
+                    command = StoryWorkspaceDreamInternalCommand(
+                        text=text,
+                        idempotencyKey=metadata["idempotency_key"],
+                    )
+                    _accepted, dispatch = service.claim_message(
+                        run_id=run_id,
+                        thread_id=context.thread_id,
+                        actor_id=actor_id,
+                        context=context,
+                        command=command,
+                        provenance=metadata.get(
+                            "story_workspace_episode_action"
+                        ),
+                    )
+                except StoryWorkspaceDreamInternalCommandError as exc:
+                    # Missing/tampered immutable provenance and stale retry
+                    # ancestors must never be promoted by recovery.  Busy or
+                    # not-ready work remains eligible for a later bounded pass.
+                    if exc.code in {
+                        "WORKFLOW_PERMISSION_DENIED",
+                        "IDEMPOTENCY_CONFLICT",
+                    }:
+                        self._quarantine_dream_internal_command(
+                            db,
+                            row=row,
+                            metadata=metadata,
+                            error_code="DREAM_AGENT_PROVENANCE_INVALID",
+                        )
+                    continue
+                if dispatch is not None:
+                    pending.append(dispatch)
+                    if len(pending) >= capacity:
+                        stopped_early = True
+                        break
+            if len(rows) < scan_limit and not stopped_early:
+                self._dream_internal_recovery_cursor = None
+            return pending
         finally:
             db.close()
+
+    @staticmethod
+    def _quarantine_dream_internal_command(
+        db: Any,
+        *,
+        row: Any,
+        metadata: dict[str, Any],
+        error_code: str,
+    ) -> None:
+        """CAS-settle an invalid reserved row without adding provenance."""
+
+        if (
+            not str(row["id"]).startswith("dream_agent_")
+            or metadata.get("kind")
+            != STORY_WORKSPACE_DREAM_INTERNAL_COMMAND_KIND
+            or metadata.get("dispatch_status") not in {"pending", "dispatching"}
+        ):
+            return
+        previous = row["metadata"]
+        quarantined = dict(metadata)
+        quarantined["visibility"] = "system-hidden"
+        quarantined["dispatch_status"] = "failed"
+        quarantined["dispatch_claim_lease_until"] = 0
+        quarantined["dispatch_error_code"] = error_code
+        quarantined["dispatch_failed_at"] = datetime.now(UTC).isoformat()
+        try:
+            db.execute("BEGIN")
+            updated = db.execute(
+                "UPDATE chat_message SET metadata = %s "
+                "WHERE id = %s AND metadata = %s",
+                (
+                    _canonical_json(quarantined),
+                    str(row["id"]),
+                    previous,
+                ),
+            )
+            if updated.rowcount == 1:
+                db.commit()
+            else:
+                db.rollback()
+        except PostgresError:
+            if db.in_transaction:
+                db.rollback()
 
     def _load_dream_agent_context_from_db(
         self,
@@ -1725,7 +1795,7 @@ class StoryWorkflowApplicationGateway:
                     context=context,
                     command=request,
                 )
-            except StoryWorkspaceDreamAgentMessageError as exc:
+            except StoryWorkspaceDreamInternalCommandError as exc:
                 raise StoryWorkspaceEpisodeActionError(
                     exc.code,
                     exc.status_code,
@@ -1899,7 +1969,7 @@ class StoryWorkflowApplicationGateway:
                     if_match=if_match,
                     command=request,
                 )
-            except StoryWorkspaceDreamAgentMessageError as exc:
+            except StoryWorkspaceDreamInternalCommandError as exc:
                 raise StoryWorkspaceEpisodeActionError(
                     exc.code,
                     exc.status_code,
@@ -2125,6 +2195,10 @@ class StoryWorkflowApplicationGateway:
             ):
                 raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
             projection = reader.read(workflow_run, thread_id=thread_id)
+            self._require_dream_output_for_ready_status(
+                workflow_run,
+                projection,
+            )
             if not include_confirmation:
                 return projection
             confirmation_accepted, confirmation_dispatched = (
@@ -2151,6 +2225,37 @@ class StoryWorkflowApplicationGateway:
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE",
                 status_code=503,
             ) from exc
+
+    @staticmethod
+    def _require_dream_output_for_ready_status(
+        workflow_run: WorkflowRun,
+        projection: Any,
+    ) -> None:
+        """Fail closed only after the lifecycle proves output must exist.
+
+        A freshly accepted/running turn may not have materialized ``.dream``
+        yet, so its empty projection is an ordinary read-only waiting state.
+        Output-validating and review descendants, however, are reachable only
+        after the required three-stage output has been produced; absence in
+        those states is contract corruption rather than readiness latency.
+
+        Failed/cancelled runs are deliberately excluded because either may be
+        terminal before the first output exists.
+        """
+
+        if workflow_run.status not in _DREAM_OUTPUT_REQUIRED_STATUSES:
+            return
+        run_revision = getattr(projection, "run_revision", 0)
+        stages = getattr(projection, "stages", None)
+        required_stages = getattr(projection, "required_stages", None)
+        if (
+            not isinstance(run_revision, int)
+            or run_revision < 1
+            or not isinstance(stages, dict)
+            or not isinstance(required_stages, list)
+            or set(stages) != set(required_stages)
+        ):
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
 
     async def submit_dream_confirmation(
         self,

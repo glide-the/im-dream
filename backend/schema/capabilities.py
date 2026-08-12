@@ -9,10 +9,14 @@ from typing import Any, Final, Mapping
 
 SCHEMA_CAPABILITIES_RELATION: Final = "drizzle.schema_capabilities"
 UNIFIED_DREAM_CAPABILITY: Final = "dream.schema.unified.v1"
+DREAM_WORKFLOW_NO_CONTINUING_CAPABILITY: Final = (
+    "dream.workflow.no-continuing.v1"
+)
 REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     UNIFIED_DREAM_CAPABILITY: 1,
     "dream.workflow.thread-lookup.v1": 1,
     "dream.story-artifact-contract.v2": 2,
+    DREAM_WORKFLOW_NO_CONTINUING_CAPABILITY: 1,
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -96,6 +100,7 @@ def inspect_schema_authority(
 
 
 __all__ = [
+    "DREAM_WORKFLOW_NO_CONTINUING_CAPABILITY",
     "REQUIRED_RUNTIME_CAPABILITIES",
     "SCHEMA_CAPABILITIES_RELATION",
     "SchemaAuthorityReceipt",

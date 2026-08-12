@@ -134,6 +134,29 @@ function getToolInput(part: ToolUIPart | DynamicToolUIPart): unknown {
   return 'input' in part ? part.input : undefined;
 }
 
+function isEmptyRecord(value: unknown): boolean {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.keys(value as Record<string, unknown>).length === 0;
+}
+
+/** Approval frames may omit input (or carry the adapter's empty placeholder).
+ * Preserve the already-normalized tool input instead of erasing it on replay. */
+function replayToolInput(
+  eventType: string,
+  eventInput: unknown,
+  previous: ToolUIPart | DynamicToolUIPart | undefined,
+): unknown {
+  const previousInput = previous ? getToolInput(previous) : undefined;
+  if (eventType === 'tool-approval-request'
+    && previousInput !== undefined
+    && (eventInput === undefined || eventInput === null || isEmptyRecord(eventInput))) {
+    return previousInput;
+  }
+  return eventInput ?? previousInput ?? {};
+}
+
 export function applyBackendEventToMessages(
   messages: UIMessage[],
   event: BackendEvent,
@@ -181,12 +204,15 @@ export function applyBackendEventToMessages(
       const existing = parts.findIndex(
         (p) => isToolUIPart(p) && p.toolCallId === toolCallId,
       );
+      const previous = existing >= 0 && isToolUIPart(parts[existing])
+        ? parts[existing] as ToolUIPart | DynamicToolUIPart
+        : undefined;
       const invocation: DynamicToolUIPart = {
         type: 'dynamic-tool',
         toolCallId,
         toolName,
         state: 'input-available',
-        input: event.input ?? {},
+        input: replayToolInput(event.type, event.input, previous),
         ...(event.type === 'tool-approval-request'
           ? {
               toolMetadata: {

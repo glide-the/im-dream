@@ -311,6 +311,9 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             "dispatch_claim_lease_until": time.time() + 60,
             "story_workspace_episode_action": {
                 "schema": "story-workspace-episode-action/v1",
+                "workflow_run_id": RUN_ID,
+                "thread_id": THREAD_ID,
+                "actor_id": "7",
                 "action": action,
                 "episode_uid": episode_uid,
                 "input_revision": input_revision,

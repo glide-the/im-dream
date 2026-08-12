@@ -186,7 +186,13 @@ from libs.claude_agent_kit.server.workspace import (
     get_workspace_root,
     read_task_items,
 )
-from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
+from claude_agent.tool_confirmation_store import (
+    ToolConfirmationNotPending,
+    ToolConfirmationPolicyConflict,
+    ToolConfirmationResolution,
+    ToolConfirmationResult,
+    ToolConfirmationStore,
+)
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 from services.story_workspace.agent_integration import (
@@ -194,6 +200,7 @@ from services.story_workspace.agent_integration import (
     parse_agent_story_output,
     store_agent_story_output,
 )
+from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
 from story_workspace.contracts import (
     StoryWorkspaceAgentStoryPayload,
     StoryWorkspaceDreamRunContext,
@@ -213,6 +220,22 @@ _TRUSTED_STORY_WORKSPACE_ENV_KEYS = frozenset({
     "INK_AGENT_WORKFLOW_RUN_ID",
     "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
 })
+_DREAM_RUNTIME_DEPLOYMENT_TIERS = {
+    "dev": "development",
+    "development": "development",
+    "test": "test",
+    "testing": "test",
+}
+
+
+def _dream_runtime_deployment_tier(environment: str) -> str:
+    """Map only explicitly supported local environments to receipt tiers."""
+
+    normalized = str(environment).strip().lower()
+    try:
+        return _DREAM_RUNTIME_DEPLOYMENT_TIERS[normalized]
+    except KeyError as exc:
+        raise ValueError("Dream runtime deployment tier is not configured") from exc
 
 
 def _pack_thread_workspace_plugins(
@@ -250,10 +273,10 @@ async def _activate_story_workspace_dream_runtime(
     *,
     context: StoryWorkspaceDreamRunContext,
     actor_id: str,
-    sdk_init: dict[str, Any],
     cwd: str,
+    remote_session_ref: str,
 ) -> None:
-    """Bind verified Claude init evidence to the authoritative Workflow Run."""
+    """Bind verified assembled workspace facts to the Workflow Run."""
 
     from libs.claude_agent_kit.server.plugin_launcher import (
         read_workspace_launch_manifest,
@@ -285,9 +308,13 @@ async def _activate_story_workspace_dream_runtime(
         if row is None or row["source_voice_thread_id"] != context.thread_id:
             raise PermissionError("Dream runtime actor/run/thread scope mismatch")
         environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
-        deployment_tier = (
-            "test" if environment in {"test", "testing"} else "development"
-        )
+        try:
+            deployment_tier = _dream_runtime_deployment_tier(environment)
+        except ValueError as exc:
+            raise StoryWorkspaceDreamRuntimeActivationError(
+                DREAM_RUNTIME_NOT_READY,
+                "Dream runtime is disabled outside explicit development/test tiers",
+            ) from exc
         try:
             # A queued Run may outlive an older materialization identity
             # algorithm. Rebuild only the server-frozen lock's evidence from
@@ -309,26 +336,20 @@ async def _activate_story_workspace_dream_runtime(
                 token_secret=story_workspace_workflow_token_secret(),
                 environment_id=environment,
                 deployment_tier=deployment_tier,
-            ).activate_from_sdk_init(
+            ).activate_from_assembled_context(
                 workflow_run_id=context.workflow_run_id,
                 actor_context=AuthenticatedActorContext(
                     actor_id=actor_id,
                     workspace_id=str(row["workspace_id"]),
                 ),
-                sdk_init=sdk_init,
+                remote_session_ref=remote_session_ref,
                 verified_plugins=verified_plugins,
             )
         except StoryWorkspaceDreamRuntimeActivationError:
-            tools = sdk_init.get("tools")
-            mcp_servers = sdk_init.get("mcp_servers")
             logger.warning(
-                "Dream SDK init rejected: run=%s tools_count=%s "
-                "has_story_workspace_tool=%s mcp_server_names=%s",
+                "Dream assembled runtime rejected: run=%s verified_plugins=%s",
                 context.workflow_run_id,
-                len(tools) if isinstance(tools, list) else None,
-                isinstance(tools, list)
-                and "mcp__story_workspace__write_dream_run" in tools,
-                sorted(mcp_servers) if isinstance(mcp_servers, dict) else [],
+                len(verified_plugins),
             )
             raise
     finally:
@@ -935,15 +956,16 @@ def _format_exception_for_sse(exc: BaseException | None) -> str:
 def _attach_story_workspace_dream_assistant_source(
     assistant_metadata: dict[str, Any],
     request: "ClaudeAgentRunRequest",
+    context: StoryWorkspaceDreamRunContext | None,
 ) -> None:
-    """Mark only a server-authenticated Dream reply with its exact user source.
+    """Persist server-authenticated Dream business correlation on the reply.
 
-    Generic Chat assistant rows intentionally receive no marker. The Dream
-    adapter re-proves this marker against the persisted user row before it can
-    expose text, so a raw metadata value cannot promote an unrelated reply.
+    Generic Chat rows intentionally receive no marker.  The metadata supports
+    canonical persistence and workflow projection after ownership validation;
+    it does not alter the shared Chat message-visibility contract or create a
+    Dream-specific transport.
     """
 
-    context = request.story_workspace_dream_context
     source_metadata = request.message_metadata or {}
     source_kind = (
         source_metadata.get("kind")
@@ -972,6 +994,7 @@ def _attach_story_workspace_dream_assistant_source(
 
 def _trusted_story_workspace_episode_action(
     request: "ClaudeAgentRunRequest",
+    context: StoryWorkspaceDreamRunContext | None,
 ) -> dict[str, object] | None:
     """Return only a server-authored Episode action matching this Dream turn.
 
@@ -980,7 +1003,6 @@ def _trusted_story_workspace_episode_action(
     tool re-reads that row before accepting any write.
     """
 
-    context = request.story_workspace_dream_context
     request_metadata = request.message_metadata
     if not (
         context is not None
@@ -1109,11 +1131,6 @@ class ClaudeAgentRunRequest:
     editor_state: Optional[dict[str, Any]] = None
     # Voice / deck system prompt injected as context into each user message.
     system_prompt: Optional[str] = None
-    # Internal server-derived Dream provenance. Never hydrate this field from
-    # an HTTP client payload.
-    story_workspace_dream_context: Optional[
-        StoryWorkspaceDreamRunContext
-    ] = None
     # NOTE (2026-08-02, deck-integration-delta): ``claude_settings_json`` and
     # ``claude_plugin_paths`` were removed.  Per-turn requests must never
     # carry settings JSON or plugin paths: plugins are resolved from the
@@ -1159,6 +1176,10 @@ class _TurnContext:
     # Dedup sets for SSE emission.
     registered_tool_call_ids: set = field(default_factory=set)
     emitted_tool_input_ids: set = field(default_factory=set)
+    # Confirmation callbacks can be duplicated by the SDK. The first callback
+    # owns policy registration; identical duplicates join the same pending
+    # decision without introducing another public Agent event.
+    confirmation_policy_fingerprints: dict[str, str] = field(default_factory=dict)
     # tool_call_id → tool_name mapping built as tool_use* events arrive.
     # Used by the tool_result branch to identify editor write tools when the
     # result event itself does not carry tool_name.
@@ -1187,6 +1208,7 @@ class ClaudeAgentService:
         self,
         context_builder: Optional[ClaudeAgentContextBuilder] = None,
         platform_model_resolver: Callable[[int | str, str | None], str] | None = None,
+        dream_context_mapper: DreamThreadContextMapper | None = None,
         dream_runtime_init_activator: (
             Callable[..., Awaitable[None]] | None
         ) = None,
@@ -1195,35 +1217,11 @@ class ClaudeAgentService:
         self._platform_model_resolver = (
             platform_model_resolver or resolve_platform_model_alias
         )
+        self._dream_context_mapper = dream_context_mapper or DreamThreadContextMapper()
         self._dream_runtime_init_activator = (
             dream_runtime_init_activator
             or _activate_story_workspace_dream_runtime
         )
-
-    def _make_dream_runtime_init_cb(
-        self,
-        execution: "_TurnExecution",
-    ) -> Callable[[Any], Awaitable[None]]:
-        """Activate a Dream Run on the SDK init frame, before output callbacks."""
-
-        async def on_message(message: Any) -> None:
-            context = execution.request.story_workspace_dream_context
-            if context is None or getattr(message, "subtype", None) != "init":
-                return
-            data = getattr(message, "data", None)
-            if not isinstance(data, dict):
-                raise RuntimeError("Claude SDK init payload is invalid")
-            cwd = str(getattr(execution.run_options, "cwd", "") or "")
-            if not cwd:
-                raise RuntimeError("Dream SDK init has no server-owned workspace")
-            await self._dream_runtime_init_activator(
-                context=context,
-                actor_id=execution.request.user_id,
-                sdk_init=data,
-                cwd=cwd,
-            )
-
-        return on_message
 
     # ------------------------------------------------------------------
     # Phase 1: Context Assembly
@@ -1245,6 +1243,15 @@ class ClaudeAgentService:
 
         Returns a ``_TurnExecution`` ready to pass to ``execute_session``.
         """
+        # Dream authority is derived from the authenticated actor + canonical
+        # Thread during Phase 1. The request and public Chat protocol never
+        # carry a Dream Run selector or context object.
+        dream_context = await asyncio.to_thread(
+            self._dream_context_mapper.resolve,
+            actor_id=request.user_id,
+            thread_id=request.thread_id,
+        )
+
         # Load user-configured agent settings from system config before system
         # prompt and cwd resolution.  Settings SYSTEM_PROMPT participates in the
         # cached system_prompt, while the remaining flags feed AgentRunOptions
@@ -1292,7 +1299,7 @@ class ClaudeAgentService:
                 e,
             )
 
-        if request.story_workspace_dream_context is not None:
+        if dream_context is not None:
             # Internal Dream dispatchers bypass the public Chat router. Resolve
             # the live server-owned alias here so every Dream turn is subject
             # to the same catalog/entitlement boundary immediately before the
@@ -1492,7 +1499,6 @@ class ClaudeAgentService:
                 str((existing_session or {}).get("deck_id") or "").strip() or None
             )
             if thread_deck_id:
-                dream_context = request.story_workspace_dream_context
                 if dream_context is not None:
                     if (
                         dream_context.thread_id != request.thread_id
@@ -1516,9 +1522,9 @@ class ClaudeAgentService:
                         thread_deck_id,
                     )
                     raise
-            elif request.story_workspace_dream_context is not None:
+            elif dream_context is not None:
                 raise ValueError("Story Workspace Dream turn requires a thread-locked Deck")
-        elif request.story_workspace_dream_context is not None:
+        elif dream_context is not None:
             raise ValueError("Story Workspace Dream turn requires Workspace Mode")
 
         # editor_session_id is user_sessions.id from /api/sessions, carried in
@@ -1545,9 +1551,9 @@ class ClaudeAgentService:
             cwd=cwd,
             editor_session_id=editor_session_id,
             voice_system_prompt=request.system_prompt or None,
-            story_workspace_dream_context=request.story_workspace_dream_context,
+            story_workspace_dream_context=dream_context,
             story_workspace_episode_action=(
-                _trusted_story_workspace_episode_action(request)
+                _trusted_story_workspace_episode_action(request, dream_context)
             ),
         )
 
@@ -1582,7 +1588,7 @@ class ClaudeAgentService:
                 **(
                     {
                         "INK_AGENT_WORKFLOW_RUN_ID": (
-                            request.story_workspace_dream_context.workflow_run_id
+                            dream_context.workflow_run_id
                         ),
                         **(
                             {
@@ -1595,7 +1601,7 @@ class ClaudeAgentService:
                             else {}
                         ),
                     }
-                    if request.story_workspace_dream_context is not None
+                    if dream_context is not None
                     else {}
                 ),
             },
@@ -1611,9 +1617,25 @@ class ClaudeAgentService:
             editor_state_setter=(lambda v, s=state: s.with_editor_state(v, s.editor_user_id)) if active_editor_state is not None else None,
         )
 
+        if dream_context is not None:
+            if not cwd:
+                raise RuntimeError("Dream runtime assembly has no server-owned workspace")
+            await self._dream_runtime_init_activator(
+                context=dream_context,
+                actor_id=request.user_id,
+                cwd=cwd,
+                # Runtime receipts bind to the canonical Thread assembled for
+                # this turn. The Claude SDK transcript/session remains owned by
+                # the unchanged Phase 3 runner and normal Chat persistence.
+                remote_session_ref=request.thread_id,
+            )
+
         from claude_agent.event_bus import BusProxyQueue
 
-        confirmation_store = ToolConfirmationStore()
+        confirmation_store = ToolConfirmationStore(
+            thread_id=state.session_id,
+            turn_id=state.current_turn_id,
+        )
         turn_ctx = _TurnContext(
             queue=BusProxyQueue(bus),
             confirmation_store=confirmation_store,
@@ -1626,6 +1648,7 @@ class ClaudeAgentService:
             runner=runner,
             run_options=run_options,
             turn_context=turn_ctx,
+            dream_context=dream_context,
             resume_existing_session=resume_existing_session,
         )
 
@@ -1634,6 +1657,18 @@ class ClaudeAgentService:
     # ------------------------------------------------------------------
 
     async def execute_session(self, execution: "_TurnExecution") -> None:
+        """Execute a turn and unconditionally release confirmation resources."""
+
+        try:
+            await self._execute_session_inner(execution)
+        finally:
+            # Timeout/reject leaves only a bounded tombstone while the turn is
+            # active.  Every terminal/error/cancellation path clears both live
+            # policy/Futures and those tombstones before the factory drops the
+            # turn context.
+            execution.turn_context.confirmation_store.cancel_all()
+
+    async def _execute_session_inner(self, execution: "_TurnExecution") -> None:
         """Stream the agent turn and emit SSE events via the queue.
 
         User message is persisted immediately before inference starts so that
@@ -1665,14 +1700,6 @@ class ClaudeAgentService:
         callbacks = AgentStreamingCallbacks(
             on_text_delta=self._make_text_delta_cb(queue, execution.turn_context),
             on_text_done=self._make_text_done_cb(queue, execution.turn_context),
-            # Chat turns do not install or execute Dream lifecycle policy.
-            # Dream runtime activation remains an opt-in source adapter for a
-            # request that carries a server-authored Dream context.
-            on_message=(
-                self._make_dream_runtime_init_cb(execution)
-                if execution.request.story_workspace_dream_context is not None
-                else None
-            ),
             on_tool_event=self._make_tool_event_cb(
                 queue, execution.turn_context, execution.state
             ),
@@ -1688,8 +1715,13 @@ class ClaudeAgentService:
             # Explicit stop / shutdown cancellation — flush partial assistant
             # content so the next load of this thread shows completed pieces.
             await self._persist_partial_assistant(execution)
-            await queue.put(_event("finish", {"finishReason": "stop"}))
-            await queue.put(None)
+            await _put_terminal(
+                queue,
+                _event(
+                    "finish",
+                    {"finishReason": "stop", "cancelled": True},
+                ),
+            )
             raise
 
         if result.success:
@@ -1709,17 +1741,17 @@ class ClaudeAgentService:
             story_output = await self._store_story_workspace_output(execution, full_text)
             if story_output is not None:
                 await queue.put(_event("story-workspace-output", story_output))
-            await queue.put(_event("finish", {"finishReason": "stop"}))
+            terminal = _event("finish", {"finishReason": "stop"})
         else:
             error_msg = _format_exception_for_sse(result.error)
             if not error_event_emitted:
                 error_event_emitted = True
                 await queue.put(_event("error", {"errorText": error_msg}))
-            await queue.put(_event("finish", {"finishReason": "error"}))
             # Even on error, flush whatever partial assistant content was collected.
             await self._persist_partial_assistant(execution)
+            terminal = _event("finish", {"finishReason": "error"})
 
-        await queue.put(None)  # Sentinel: end of stream
+        await _put_terminal(queue, terminal)
 
     async def _store_story_workspace_output(
         self,
@@ -1728,11 +1760,7 @@ class ClaudeAgentService:
     ) -> Optional[dict[str, Any]]:
         """Persist an explicit JSON story bundle without changing Chat outcome."""
 
-        if getattr(
-            execution.request,
-            "story_workspace_dream_context",
-            None,
-        ) is not None:
+        if execution.dream_context is not None:
             return None
 
         thread_id = execution.request.thread_id
@@ -1783,18 +1811,18 @@ class ClaudeAgentService:
                 StoryWorkspaceDreamConfirmationError,
                 story_workspace_guard_persisted_dream_confirmation_turn,
             )
-            from services.story_workspace.dream_agent_message_service import (
-                StoryWorkspaceDreamAgentMessageError,
-                story_workspace_guard_persisted_dream_agent_message_turn,
+            from services.story_workspace.dream_internal_command_service import (
+                StoryWorkspaceDreamInternalCommandError,
+                story_workspace_guard_persisted_dream_internal_command_turn,
             )
         except ModuleNotFoundError:
             from backend.services.story_workspace.dream_confirmation_service import (
                 StoryWorkspaceDreamConfirmationError,
                 story_workspace_guard_persisted_dream_confirmation_turn,
             )
-            from backend.services.story_workspace.dream_agent_message_service import (
-                StoryWorkspaceDreamAgentMessageError,
-                story_workspace_guard_persisted_dream_agent_message_turn,
+            from backend.services.story_workspace.dream_internal_command_service import (
+                StoryWorkspaceDreamInternalCommandError,
+                story_workspace_guard_persisted_dream_internal_command_turn,
             )
 
         def _save_user() -> None:
@@ -1811,12 +1839,13 @@ class ClaudeAgentService:
                         metadata=message_metadata,
                     )
                 )
-                is_persisted_dream_agent_message = (
-                    story_workspace_guard_persisted_dream_agent_message_turn(
+                is_persisted_dream_internal_command = (
+                    story_workspace_guard_persisted_dream_internal_command_turn(
                         db,
                         thread_id=thread_id,
                         actor_id=str(execution.request.user_id),
                         message_id=user_message_id,
+                        parts=resolved_user_parts,
                         metadata=message_metadata,
                     )
                 )
@@ -1827,7 +1856,7 @@ class ClaudeAgentService:
                 # In particular, never replace its newer durable claim lease
                 # with the older request snapshot carried through a thread lock.
                 return
-            if is_persisted_dream_agent_message:
+            if is_persisted_dream_internal_command:
                 return
             database.save_chat_message(
                 thread_id, "user",
@@ -1846,11 +1875,20 @@ class ClaudeAgentService:
             await loop.run_in_executor(None, _save_user)
         except (
             StoryWorkspaceDreamConfirmationError,
-            StoryWorkspaceDreamAgentMessageError,
+            StoryWorkspaceDreamInternalCommandError,
         ):
             logger.exception(
-                "Rejected non-authoritative Dream confirmation persistence "
+                "Rejected non-authoritative Dream control persistence "
                 "for thread_id=%s",
+                thread_id,
+            )
+            raise
+        except (
+            database.ChatMessageIdentityConflict,
+            database.PostgresError,
+        ):
+            logger.exception(
+                "Canonical user message persistence rejected for thread_id=%s",
                 thread_id,
             )
             raise
@@ -1882,6 +1920,7 @@ class ClaudeAgentService:
         _attach_story_workspace_dream_assistant_source(
             asst_metadata,
             execution.request,
+            execution.dream_context,
         )
         if execution.request.model:
             asst_metadata["chatModel"] = {"provider": "gateway", "model": execution.request.model}
@@ -1928,6 +1967,7 @@ class ClaudeAgentService:
             _attach_story_workspace_dream_assistant_source(
                 asst_metadata,
                 execution.request,
+                execution.dream_context,
             )
             if result and result.usage:
                 input_t = result.usage.get("input_tokens")
@@ -1985,23 +2025,41 @@ class ClaudeAgentService:
     # Tool confirmation (called from HTTP endpoint via factory)
     # ------------------------------------------------------------------
 
-    def confirm_tool(
+    async def confirm_tool(
         self,
         state: AgentRunState,
         tool_call_id: str,
         approved: bool,
         reason: Optional[str] = None,
         answers: Optional[dict[str, Any]] = None,
-    ) -> bool:
-        """Resolve a pending tool confirmation."""
+        *,
+        thread_id: str,
+        turn_id: str,
+    ) -> ToolConfirmationResolution | None:
+        """Validate and resolve one exact active-turn confirmation."""
+
+        if state.session_id != thread_id or state.current_turn_id != turn_id:
+            logger.warning(
+                "confirm_tool: active turn changed for session_id=%s",
+                state.session_id,
+            )
+            return None
         turn_ctx = state.turn_context
         if turn_ctx is None:
             logger.warning(
                 "confirm_tool: no active turn_context for session_id=%s", state.session_id
             )
-            return False
+            return None
         result = ToolConfirmationResult(approved=approved, reason=reason, answers=answers)
-        return turn_ctx.confirmation_store.resolve(tool_call_id, result)
+        try:
+            return await turn_ctx.confirmation_store.resolve_exact(
+                thread_id=thread_id,
+                turn_id=turn_id,
+                tool_call_id=tool_call_id,
+                result=result,
+            )
+        except ToolConfirmationNotPending:
+            return None
 
     # ------------------------------------------------------------------
     # SSE callback factories (aligned with Pawkeyland SSE protocol)
@@ -2245,12 +2303,26 @@ class ClaudeAgentService:
             tool_name: str = payload.get("tool_name", "") or payload.get("toolName", "")
             tool_input: dict[str, Any] = payload.get("input") or {}
 
-            # Step 0: register Future before any SSE that can trigger an immediate
-            # POST /tool-confirm (fast clients must not resolve ahead of registration).
-            # Guard: if the hook fires twice for the same tool call (SDK quirk), skip
-            # re-registration and join the existing waiter to avoid RuntimeError +
-            # the immediate-deny path in agent_runner._pre_tool_use_hook.
-            if store.has_pending(tool_call_id):
+            # Step 0: derive immutable server policy and atomically register it
+            # together with the Future before any client-visible frame.  An SDK
+            # duplicate may join only when the policy fingerprint is identical.
+            policy = store.policy_from_payload(payload)
+            policy_fingerprint = policy.fingerprint
+            registered_fingerprint = (
+                turn_ctx.confirmation_policy_fingerprints.get(tool_call_id)
+            )
+            if registered_fingerprint is not None:
+                if registered_fingerprint != policy_fingerprint:
+                    raise ToolConfirmationPolicyConflict(
+                        "duplicate callback policy mismatch"
+                    )
+                registered = False
+            else:
+                registered = store.register_pending(policy)
+                turn_ctx.confirmation_policy_fingerprints[
+                    tool_call_id
+                ] = policy_fingerprint
+            if not registered:
                 logger.debug(
                     "on_tool_confirmation_request: duplicate hook invocation for "
                     "tool_call_id=%s — joining existing Future",
@@ -2264,8 +2336,6 @@ class ClaudeAgentService:
                 except asyncio.CancelledError:
                     store.cancel_pending(tool_call_id)
                     raise
-
-            store.begin_pending(tool_call_id)
 
             # Step 1: emit tool-input-start + tool-input-available with dedup so that
             # events already sent by _make_tool_event_cb are not repeated.
@@ -2284,10 +2354,14 @@ class ClaudeAgentService:
             # the network-variant confirmation card; generic confirmations omit
             # both keys (backward compatible).
             approval_event: dict[str, Any] = {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}
-            if payload.get("confirmationKind"):
-                approval_event["confirmationKind"] = payload["confirmationKind"]
-            if isinstance(payload.get("networkRequest"), dict):
-                approval_event["networkRequest"] = payload["networkRequest"]
+            if policy.kind != "approval":
+                approval_event["confirmationKind"] = policy.kind
+            if policy.kind == "sandbox_network":
+                approval_event["networkRequest"] = {
+                    "host": policy.network_host,
+                    "policyMode": policy.network_policy,
+                    "matchedAllowedDomain": None,
+                }
             await queue.put(_event("tool-approval-request", approval_event))
 
             # Step 3 & 4: block until user responds.
@@ -2368,6 +2442,9 @@ class _TurnExecution:
     runner: ClaudeAgentRunner
     run_options: AgentRunOptions
     turn_context: _TurnContext
+    # Internal server-derived Dream authority. It is assembled from actor +
+    # canonical Thread and is never part of ClaudeAgentRunRequest or HTTP/SSE.
+    dream_context: StoryWorkspaceDreamRunContext | None = None
     # The DB row used to source claude_session_id for resume / persistence;
     # None on the first turn of a session.
     resume_existing_session: Optional[dict] = None
@@ -2455,6 +2532,17 @@ def _event(event_type: str, data: dict[str, Any]) -> NormalizedAgentEvent:
     """Create one protocol-neutral event for the internal EventBus."""
 
     return NormalizedAgentEvent.create(event_type, data)
+
+
+async def _put_terminal(queue: Any, event: NormalizedAgentEvent) -> None:
+    """Use the EventBus atomic terminal seam, retaining plain-queue tests."""
+
+    put_terminal = getattr(queue, "put_terminal", None)
+    if callable(put_terminal):
+        await put_terminal(event)
+        return
+    await queue.put(event)
+    await queue.put(None)
 
 
 def _sse(event_type: str, data: dict[str, Any]) -> str:

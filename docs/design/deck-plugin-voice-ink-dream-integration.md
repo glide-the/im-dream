@@ -18,8 +18,8 @@ SUO-198 已在 story-workspace 设计中冻结了 Deck 工作流的运行追溯�
 
 本文补齐上述 design 阶段真相源，供 `IssueDispatcher` 在 CEOOrchestrator 验收后拆解。本文不替代以下稳定设计：
 
-- `docs/design/story-workspace/story-workspace-prd.md`
-- `docs/design/story-workspace/story-workspace-layout-design.md`
+- `docs/design/story-workspace/product-scope-and-navigation.md`
+- `docs/design/story-workspace/product-scope-and-navigation.md`
 - `docs/design/deck/deck-integration-delta.md`
 - `docs/design/plugin-remote-interaction.md`
 - `docs/design/deck-claude-agent.md`
@@ -559,7 +559,7 @@ created_by / created_at
 | `deck_plugin_version` | 精确发布版本；禁止保存范围或 latest |
 | `workflow_definition_ref` | 已发布不可变引用；禁止指向可变内容 |
 | `deck_runtime_snapshot_id` | Deck 所有的受控快照引用；禁止复制敏感值到 run/UI/event |
-| `status` | `preflight / queued / running / output_validating / pending_review / confirmed / rejected / continuing / completed / failed / cancelled` |
+| `status` | `preflight / queued / running / output_validating / pending_review / confirmed / rejected / completed / failed / cancelled` |
 | `failed_step` / `error_code` | 非敏感、结构化失败定位；失败时保留 |
 | `retry_of_run_id` | 重试直接来源；普通新运行为空 |
 
@@ -589,7 +589,7 @@ created_by / created_at / started_at / completed_at
 
 ```text
 preflight → queued → running → output_validating → pending_review → confirmed
-                │              │                 │              ├→ continuing → completed
+                │              │                 │              ├→ completed
                 │              │                 │              └→ completed
                 │              │                 └→ rejected（重试创建新 run）
                 ├──────────────┴────────────────────────────────→ failed
@@ -602,7 +602,7 @@ preflight → queued → running → output_validating → pending_review → co
 - `queued → running` 需要 `runtime_load_receipt` 全部 required 项成功。
 - `running → output_validating` 表示 Agent 已提交候选结果，story-workspace 正在校验输出合同并原子持久化。
 - `output_validating → pending_review` 需要规范化结果完整校验并原子持久化；`pending_review` 是唯一 API 审阅态，`awaiting review` 仅可作为展示文案。
-- `pending_review → confirmed` 需要当前运行的全部必审项通过；有后续步骤时再进入 `continuing`，无后续步骤时进入 `completed`。
+- `pending_review → confirmed` 需要当前运行的全部必审项通过；确认后的工具步骤仍属于 `confirmed`，完成业务写入后进入 `completed`。
 - `pending_review → rejected` 记录驳回事实并终止当前 attempt；重新生成创建新 run，默认沿用原锁定来源。
 - 任一终态不得恢复为非终态；重试创建新 run。
 

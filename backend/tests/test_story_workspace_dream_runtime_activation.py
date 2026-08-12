@@ -133,16 +133,13 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
             }
         ]
 
-    async def test_verified_sdk_init_activates_same_run_before_agent_output(self) -> None:
+    async def test_verified_assembled_context_activates_same_run_before_session_execution(self) -> None:
         run = await self.fixture.create("dream-runtime-init")
 
-        activated = await self._service().activate_from_sdk_init(
+        activated = await self._service().activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
             actor_context=self.fixture.actor,
-            sdk_init={
-                "session_id": "claude-session-runtime-1",
-                "tools": ["mcp__story_workspace__write_dream_run"],
-            },
+            remote_session_ref="thread-dream-runtime-1",
             verified_plugins=self._verified_plugins(),
         )
 
@@ -160,7 +157,7 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         self.assertEqual(receipt["workflow_run_id"], run.workflow_run_id)
         self.assertEqual(receipt["required_entries_ready"], 1)
         self.assertEqual(session["status"], "active")
-        self.assertEqual(session["remote_session_ref"], "claude-session-runtime-1")
+        self.assertEqual(session["remote_session_ref"], "thread-dream-runtime-1")
         self.assertEqual(
             self.fixture.db.execute(
                 "SELECT activation_status FROM runtime_plugin_materializations"
@@ -168,13 +165,10 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
             "loaded",
         )
 
-        replay = await self._service().activate_from_sdk_init(
+        replay = await self._service().activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
             actor_context=self.fixture.actor,
-            sdk_init={
-                "session_id": "claude-session-runtime-1",
-                "tools": ["mcp__story_workspace__write_dream_run"],
-            },
+            remote_session_ref="thread-dream-runtime-1",
             verified_plugins=self._verified_plugins(),
         )
         self.assertEqual(replay.agent_session_id, activated.agent_session_id)
@@ -201,13 +195,10 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
             *self._verified_plugins(),
         ]
 
-        activated = await self._service().activate_from_sdk_init(
+        activated = await self._service().activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
             actor_context=self.fixture.actor,
-            sdk_init={
-                "session_id": "claude-session-with-deck-plugin",
-                "tools": ["mcp__story_workspace__write_dream_run"],
-            },
+            remote_session_ref="thread-with-deck-plugin",
             verified_plugins=verified_plugins,
         )
 
@@ -228,13 +219,10 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         )
 
         with self.assertRaises(StoryWorkspaceDreamRuntimeActivationError) as captured:
-            await self._service().activate_from_sdk_init(
+            await self._service().activate_from_assembled_context(
                 workflow_run_id=run.workflow_run_id,
                 actor_context=self.fixture.actor,
-                sdk_init={
-                    "session_id": "claude-session-wrong-adapter",
-                    "tools": ["mcp__story_workspace__write_dream_run"],
-                },
+                remote_session_ref="thread-wrong-adapter",
                 verified_plugins=verified_plugins,
             )
 
@@ -273,13 +261,10 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         self.fixture.db.commit()
         run = await self.fixture.create("dream-runtime-policy-isolation")
 
-        activated = await self._service().activate_from_sdk_init(
+        activated = await self._service().activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
             actor_context=self.fixture.actor,
-            sdk_init={
-                "session_id": "claude-session-policy-isolation",
-                "tools": ["mcp__story_workspace__write_dream_run"],
-            },
+            remote_session_ref="thread-policy-isolation",
             verified_plugins=self._verified_plugins(),
         )
 
@@ -291,19 +276,40 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         ).fetchone()
         self.assertEqual(receipt["policy_revision"], "dream-launch/v1")
 
-    async def test_same_active_session_reenters_review_and_continuation_states(self) -> None:
+    async def test_active_runtime_accepts_fresh_chat_sessions_without_rebinding(self) -> None:
         run = await self.fixture.create("dream-runtime-resume-states")
         service = self._service()
-        sdk_init = {
-            "session_id": "claude-session-runtime-resume",
+        activation_init = {
+            "session_id": "claude-session-runtime-activation",
             "tools": ["mcp__story_workspace__write_dream_run"],
         }
-        running = await service.activate_from_sdk_init(
+        running = await service.activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
             actor_context=self.fixture.actor,
-            sdk_init=sdk_init,
+            remote_session_ref=activation_init["session_id"],
             verified_plugins=self._verified_plugins(),
         )
+        replayed_running = await service.activate_from_assembled_context(
+            workflow_run_id=run.workflow_run_id,
+            actor_context=self.fixture.actor,
+            remote_session_ref="thread-runtime-fresh-running",
+            verified_plugins=self._verified_plugins(),
+        )
+        self.assertEqual(replayed_running.status, RunStatus.RUNNING)
+
+        output_validating = await self.fixture.service.transition_run(
+            running.workflow_run_id,
+            RunStatus.OUTPUT_VALIDATING,
+            self.fixture.actor,
+            reason_code="test_output_validation_started",
+        )
+        replayed_validating = await service.activate_from_assembled_context(
+            workflow_run_id=run.workflow_run_id,
+            actor_context=self.fixture.actor,
+            remote_session_ref="thread-runtime-fresh-validating",
+            verified_plugins=self._verified_plugins(),
+        )
+        self.assertEqual(replayed_validating.status, RunStatus.OUTPUT_VALIDATING)
         lifecycle = StoryWorkspaceDreamWorkflowLifecycleService(
             self.fixture.db,
             token_secret=self.fixture.service._token_secret,
@@ -311,14 +317,14 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         )
 
         pending = await lifecycle.record_output_ready(
-            running.workflow_run_id,
+            output_validating.workflow_run_id,
             self.fixture.actor,
             normalized_result_ready=True,
         )
-        replayed_pending = await service.activate_from_sdk_init(
+        replayed_pending = await service.activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
             actor_context=self.fixture.actor,
-            sdk_init=sdk_init,
+            remote_session_ref="thread-runtime-fresh-pending",
             verified_plugins=self._verified_plugins(),
         )
         self.assertEqual(replayed_pending.status, RunStatus.PENDING_REVIEW)
@@ -328,31 +334,103 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
             self.fixture.actor,
             review_items_approved=True,
         )
-        replayed_confirmed = await service.activate_from_sdk_init(
+        replayed_confirmed = await service.activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
             actor_context=self.fixture.actor,
-            sdk_init=sdk_init,
+            remote_session_ref="thread-runtime-fresh-confirmed",
             verified_plugins=self._verified_plugins(),
         )
         self.assertEqual(replayed_confirmed.status, RunStatus.CONFIRMED)
 
-        continuing = await lifecycle.record_continuation_dispatched(
+        confirmed = await lifecycle.record_post_confirmation_dispatched(
             confirmed.workflow_run_id,
             self.fixture.actor,
         )
-        replayed_continuing = await service.activate_from_sdk_init(
+        replayed_confirmed = await service.activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
             actor_context=self.fixture.actor,
-            sdk_init=sdk_init,
+            remote_session_ref="thread-runtime-fresh-confirmed",
             verified_plugins=self._verified_plugins(),
         )
-        self.assertEqual(replayed_continuing.status, RunStatus.CONTINUING)
+        self.assertEqual(replayed_confirmed.status, RunStatus.CONFIRMED)
+        session = self.fixture.db.execute(
+            "SELECT remote_session_ref FROM agent_sessions "
+            "WHERE agent_session_id = ?",
+            (running.agent_session_id,),
+        ).fetchone()
+        self.assertEqual(
+            session["remote_session_ref"],
+            "claude-session-runtime-activation",
+        )
+        self.assertEqual(
+            self.fixture.db.execute(
+                "SELECT COUNT(*) AS count FROM agent_sessions "
+                "WHERE workflow_run_id = ?",
+                (run.workflow_run_id,),
+            ).fetchone()["count"],
+            1,
+        )
+        self.assertEqual(
+            self.fixture.db.execute(
+                "SELECT COUNT(*) AS count FROM runtime_load_receipts "
+                "WHERE workflow_run_id = ?",
+                (run.workflow_run_id,),
+            ).fetchone()["count"],
+            1,
+        )
 
-    async def test_missing_required_tool_or_plugin_fails_closed_without_receipt(self) -> None:
+    async def test_active_runtime_revalidates_tool_manifest_and_session_binding(self) -> None:
+        run = await self.fixture.create("dream-runtime-active-revalidation")
+        service = self._service()
+        init = {
+            "session_id": "claude-session-runtime-original",
+            "tools": ["mcp__story_workspace__write_dream_run"],
+        }
+        activated = await service.activate_from_assembled_context(
+            workflow_run_id=run.workflow_run_id,
+            actor_context=self.fixture.actor,
+            remote_session_ref=init["session_id"],
+            verified_plugins=self._verified_plugins(),
+        )
+
+        tampered = self._verified_plugins()
+        tampered[0]["artifact_digest"] = "sha256:" + "0" * 64
+        invalid_cases = [
+            ({**init, "session_id": "fresh-tampered-plugin"}, tampered)
+        ]
+        for sdk_init, plugins in invalid_cases:
+            with self.subTest(session=sdk_init["session_id"]), self.assertRaises(
+                StoryWorkspaceDreamRuntimeActivationError
+            ) as captured:
+                await service.activate_from_assembled_context(
+                    workflow_run_id=run.workflow_run_id,
+                    actor_context=self.fixture.actor,
+                    remote_session_ref=sdk_init["session_id"],
+                    verified_plugins=plugins,
+                )
+            self.assertEqual(captured.exception.code, DREAM_RUNTIME_INIT_INVALID)
+
+        self.fixture.db.execute(
+            "UPDATE agent_sessions SET status = 'terminated', "
+            "terminated_at = ?, termination_reason_code = 'test_terminated' "
+            "WHERE agent_session_id = ?",
+            (self.fixture.now.isoformat(), activated.agent_session_id),
+        )
+        self.fixture.db.commit()
+        with self.assertRaises(StoryWorkspaceDreamRuntimeActivationError) as captured:
+            await service.activate_from_assembled_context(
+                workflow_run_id=run.workflow_run_id,
+                actor_context=self.fixture.actor,
+                remote_session_ref="fresh-inactive-binding",
+                verified_plugins=self._verified_plugins(),
+            )
+        self.assertEqual(captured.exception.code, DREAM_RUNTIME_INIT_INVALID)
+
+    async def test_invalid_thread_or_missing_plugin_fails_closed_without_receipt(self) -> None:
         run = await self.fixture.create("dream-runtime-init-invalid")
 
         for init, plugins in (
-            ({"session_id": "claude-session-runtime-2", "tools": []}, self._verified_plugins()),
+            ({"session_id": "", "tools": []}, self._verified_plugins()),
             (
                 {
                     "session_id": "claude-session-runtime-2",
@@ -363,10 +441,10 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         ):
             with self.subTest(init=init, plugins=plugins):
                 with self.assertRaises(StoryWorkspaceDreamRuntimeActivationError) as captured:
-                    await self._service().activate_from_sdk_init(
+                    await self._service().activate_from_assembled_context(
                         workflow_run_id=run.workflow_run_id,
                         actor_context=self.fixture.actor,
-                        sdk_init=init,
+                        remote_session_ref=init["session_id"],
                         verified_plugins=plugins,
                     )
                 self.assertEqual(captured.exception.code, DREAM_RUNTIME_INIT_INVALID)
@@ -382,13 +460,10 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
 
     async def test_server_facts_advance_full_dream_run_lifecycle(self) -> None:
         run = await self.fixture.create("dream-runtime-lifecycle")
-        running = await self._service().activate_from_sdk_init(
+        running = await self._service().activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
             actor_context=self.fixture.actor,
-            sdk_init={
-                "session_id": "claude-session-lifecycle",
-                "tools": ["mcp__story_workspace__write_dream_run"],
-            },
+            remote_session_ref="thread-lifecycle",
             verified_plugins=self._verified_plugins(),
         )
         lifecycle = StoryWorkspaceDreamWorkflowLifecycleService(
@@ -411,11 +486,11 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         )
         self.assertEqual(confirmed.status, RunStatus.CONFIRMED)
 
-        continuing = await lifecycle.record_continuation_dispatched(
+        confirmed = await lifecycle.record_post_confirmation_dispatched(
             running.workflow_run_id,
             self.fixture.actor,
         )
-        self.assertEqual(continuing.status, RunStatus.CONTINUING)
+        self.assertEqual(confirmed.status, RunStatus.CONFIRMED)
 
         completed = await lifecycle.record_episode_complete(
             running.workflow_run_id,
@@ -437,7 +512,6 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
                 "output_validating",
                 "pending_review",
                 "confirmed",
-                "continuing",
                 "completed",
             ],
         )

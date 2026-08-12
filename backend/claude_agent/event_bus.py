@@ -77,6 +77,11 @@ class IEventBus(ABC):
         ...
 
     @abstractmethod
+    async def publish_terminal(self, event: NormalizedAgentEvent) -> None:
+        """Atomically publish the first ``finish`` event and stream sentinel."""
+        ...
+
+    @abstractmethod
     async def subscribe(self) -> object:
         """Register a new consumer. Returns an opaque subscription token."""
         ...
@@ -119,6 +124,7 @@ class InMemoryEventBus(IEventBus):
         self._buffer: list[Optional[NormalizedAgentEvent]] = []
         self._subscribers: list[asyncio.Queue] = []
         self._done: bool = False
+        self._finish_published: bool = False
         self._lock: asyncio.Lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -126,15 +132,37 @@ class InMemoryEventBus(IEventBus):
     # ------------------------------------------------------------------
 
     async def publish(self, event: Optional[NormalizedAgentEvent]) -> None:
+        normalized = None if event is None else coerce_normalized_event(event)
+        if normalized is not None and normalized.type == "finish":
+            await self.publish_terminal(normalized)
+            return
         async with self._lock:
             if self._done:
                 return  # idempotent after sentinel
-            normalized = None if event is None else coerce_normalized_event(event)
             self._buffer.append(normalized)
             if normalized is None:
                 self._done = True
             for q in list(self._subscribers):
-                await q.put(normalized)
+                q.put_nowait(normalized)
+
+    async def publish_terminal(self, event: NormalizedAgentEvent) -> None:
+        normalized = coerce_normalized_event(event)
+        if normalized.type != "finish":
+            raise ValueError("terminal EventBus event must have type=finish")
+        async with self._lock:
+            if self._done:
+                return
+            terminal_items: list[Optional[NormalizedAgentEvent]] = []
+            if not self._finish_published:
+                self._finish_published = True
+                self._buffer.append(normalized)
+                terminal_items.append(normalized)
+            self._buffer.append(None)
+            terminal_items.append(None)
+            self._done = True
+            for q in list(self._subscribers):
+                for item in terminal_items:
+                    q.put_nowait(item)
 
     async def subscribe(self) -> asyncio.Queue:
         """Return a new queue pre-loaded with the replay buffer."""
@@ -168,7 +196,10 @@ class InMemoryEventBus(IEventBus):
                     break
                 yield NormalizedAgentEvent.keepalive()
             except asyncio.CancelledError:
-                break
+                # Cancellation belongs to the caller.  Treating it like the
+                # stream sentinel makes shutdown/stop races look like a clean
+                # EOF and can let outer owners skip their cancellation path.
+                raise
 
     @property
     def is_done(self) -> bool:
@@ -197,6 +228,9 @@ class BusProxyQueue:
     async def put(self, event: Optional[NormalizedAgentEvent]) -> None:
         await self._bus.publish(event)
 
+    async def put_terminal(self, event: NormalizedAgentEvent) -> None:
+        await self._bus.publish_terminal(event)
+
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -213,16 +247,24 @@ def create_event_bus(session_id: str, turn_id: str) -> IEventBus:
     backend = (os.getenv("INK_AGENT_EVENT_BUS_BACKEND") or "memory").strip().lower()
     if backend == "redis":
         try:
-            from claude_agent.event_bus_redis import RedisStreamEventBus  # noqa: PLC0415
-            logger.debug(
-                "EventBus backend=redis session_id=%s turn_id=%s", session_id, turn_id
-            )
-            return RedisStreamEventBus(session_id, turn_id)
-        except ImportError:
-            logger.warning(
-                "redis backend requested but redis-py is not installed; "
-                "falling back to memory backend"
-            )
+            # Import the lazy runtime dependency here so a configured Redis
+            # deployment cannot construct an adapter that fails only on its
+            # first publish (or silently diverges into process memory).
+            import redis.asyncio as _redis_runtime  # noqa: F401, PLC0415
+        except ImportError as exc:
+            raise RuntimeError(
+                "INK_AGENT_EVENT_BUS_BACKEND=redis requires the redis runtime dependency"
+            ) from exc
+        from claude_agent.event_bus_redis import RedisStreamEventBus  # noqa: PLC0415
+
+        logger.debug(
+            "EventBus backend=redis session_id=%s turn_id=%s", session_id, turn_id
+        )
+        return RedisStreamEventBus(session_id, turn_id)
+    if backend != "memory":
+        raise RuntimeError(
+            "INK_AGENT_EVENT_BUS_BACKEND must be either 'memory' or 'redis'"
+        )
     logger.debug(
         "EventBus backend=memory session_id=%s turn_id=%s", session_id, turn_id
     )

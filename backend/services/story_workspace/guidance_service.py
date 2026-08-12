@@ -10,6 +10,8 @@ Contract source: design_004 §5.3 / DEC-032.
 - Idempotency: the message id derives from the client idempotency key
   (``guide_<key>``). The service SELECTs first: same key + same content →
   202 replay (no duplicate injection); same key + different content → 409.
+  The database helper repeats that check atomically, closing concurrent claims
+  without overwriting or reparenting the winning message.
 - Injection (review note R5): there is no mid-turn injection channel, so the
   guidance message is handed to the runner as a *new user turn on the same
   chat thread* (``source_voice_thread_id`` of the run). The dispatcher seam
@@ -50,10 +52,9 @@ GUIDANCE_METADATA_KIND = "story-workspace-guidance"
 GUIDANCE_MESSAGE_ID_PREFIX = "guide_"
 GUIDANCE_TEXT_SUMMARY_MAX_LENGTH = 200
 
-# Runs accept guidance while execution is in flight; failed runs accept the
+# Confirmed runs accept guidance after business review; failed runs accept the
 # sidebar-controlled "retry failed step" command (design_004 §5.2/§5.4).
-# `awaiting-guidance` is a projection of CONTINUING, not a RunStatus value.
-GUIDABLE_RUN_STATUSES = frozenset({RunStatus.CONTINUING, RunStatus.FAILED})
+GUIDABLE_RUN_STATUSES = frozenset({RunStatus.CONFIRMED, RunStatus.FAILED})
 
 RunReader = Callable[[str], WorkflowRun]
 GuidanceDispatcher = Callable[[str, str, str, list, dict], bool]
@@ -238,13 +239,16 @@ class StoryWorkspaceGuidanceService:
             "review_action": StoryWorkspaceReviewEventAction.GUIDE.value,
             "command_fingerprint": fingerprint,
         }
-        database.save_chat_message(
-            thread_id,
-            "user",
-            parts=parts,
-            message_id=message_id,
-            metadata=metadata,
-        )
+        try:
+            database.save_chat_message(
+                thread_id,
+                "user",
+                parts=parts,
+                message_id=message_id,
+                metadata=metadata,
+            )
+        except database.ChatMessageIdentityConflict as exc:
+            raise StoryWorkspaceGuidanceError("IDEMPOTENCY_CONFLICT", 409) from exc
 
         dispatched = False
         try:

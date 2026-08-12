@@ -7,8 +7,8 @@
 - 逻辑 Issue: `DECK-012`
 - 来源控制项: `SUO-217`
 - 关联设计稿:
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §2.3、§4.5
-  - `docs/design/story-workspace/story-workspace-prd.md`
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §2.3、§4.5
+  - `docs/design/story-workspace/product-scope-and-navigation.md`
   - `docs/design/deck/design_002_deck-plugin-decision-gates.md` §4.5
 - 关联 Stage: `docs/stage/stage_deck-plugin-voice-ink-dream-integration.md` §21.2，Stage 3 / Wave 1
 - Task 文档: `docs/task/task_213_frontend_story_workspace_status.md`

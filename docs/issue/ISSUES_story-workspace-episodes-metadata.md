@@ -14,10 +14,10 @@
 
 - Issue 清单文件：`docs/issue/ISSUES_story-workspace-episodes-metadata.md`
 - 来源设计稿：
-  - 主设计稿：`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md`
-  - 稳定基线设计稿：`docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
+  - 主设计稿：`docs/design/story-workspace/project-and-episode-workbench.md`
+  - 稳定基线设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
   - 背景设计稿：`docs/CLAUDE.md`（Agent 服务集成说明）
-  - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
+  - 参考设计稿：`docs/design/story-workspace/README.md`
 - 生成 Agent：`IssueDispatcher`
 - 所属流水线阶段：`issue`
 - 上游阶段：`design`（SUO-241）
@@ -35,11 +35,11 @@
 
 ## 1. 关联设计稿信息
 
-- 主设计稿：`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md`
-- 稳定基线设计稿：`docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
+- 主设计稿：`docs/design/story-workspace/project-and-episode-workbench.md`
+- 稳定基线设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
 - 关联设计稿：`docs/design/deck/deck-integration-delta.md`
 - 背景设计稿：`docs/CLAUDE.md`（claude-agent 服务集成）
-- 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
+- 参考设计稿：`docs/design/story-workspace/README.md`
 
 - 本清单覆盖范围：
   - `output/episodes` 元信息到工作空间统一投影的映射与渲染

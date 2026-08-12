@@ -32,8 +32,8 @@ Story Workspace 前后端合同 canonical 迁移与 Python 启动恢复
 
 ### 3.1 权威输入
 
-- `docs/design/story-workspace/story-workspace-prd.md` §3.5.4 / `DEC-026`
-- `docs/design/story-workspace/story-workspace-layout-design.md` §10.5 / §11.7 / `DEC-026`
+- `docs/design/story-workspace/product-scope-and-navigation.md` §3.5.4 / `DEC-026`
+- `docs/design/story-workspace/product-scope-and-navigation.md` §10.5 / §11.7 / `DEC-026`
 - `docs/issue/ISSUES_story-workspace.md` §3.4 `SUO-299-SH-001`、§6.4、§7.6、§8.2
 - `docs/task/task_205_backend_story-workspace-shared-types.md`
 - `docs/exec/exec_task_205_story-workspace-shared-types.md`

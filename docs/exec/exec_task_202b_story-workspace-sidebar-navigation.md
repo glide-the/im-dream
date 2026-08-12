@@ -5,7 +5,7 @@
 - Task ID: `task_202b`
 - 执行 Issue: `SUO-265`
 - 关联 Issue: `SUO-201-FE-002`，父 Issue `SUO-198`
-- 关联设计稿: `docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
+- 关联设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
 - 关联 Stage: `docs/stage/stage_story-workspace.md`（`stage_001_story-workspace` / Wave 2）
 - 关联 Task: `docs/task/task_202b_frontend_sidebar-navigation.md`
 - 执行 Agent: `ExecTaskAgent`

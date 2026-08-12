@@ -1,7 +1,7 @@
 """Unit tests for workspace-init ``surfaces[]`` validation and .dream materialization.
 
-Design: docs/design/story-workspace/design_004_story-workspace-dream-surface-execution-page.md §3
-Plan:   docs/design/story-workspace/2026-08-03-dream-surface-execution-implementation-plan.md Task 1
+Design: docs/design/story-workspace/product-scope-and-navigation.md §3
+Plan:   docs/design/story-workspace/README.md Task 1
 """
 
 from __future__ import annotations
@@ -216,13 +216,12 @@ class MaterializeDreamSurfaceTests(unittest.TestCase):
         readme = (self.workspace / ".dream" / "README.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("REST API 是运行内容的真相源", readme)
-        self.assertIn("waiting、editing、continuing", readme)
-        self.assertIn("最长每 5 秒", readme)
-        self.assertIn("story-workspace-output", readme)
-        self.assertIn("匹配当前 workflow_run_id 的 runId", readme)
-        self.assertIn("受控 writer 尚不主动发布 run-scoped SSE", readme)
-        self.assertNotIn("SSE 只通知页面重新读取", readme)
+        self.assertIn("REST API 只读取 Workflow 与 Artifact 业务投影", readme)
+        self.assertIn("标准 Thread history/status/SSE", readme)
+        self.assertIn("同一 thread_id", readme)
+        self.assertIn("DreamObserver", readme)
+        self.assertNotIn("story-workspace-output", readme)
+        self.assertNotIn("run-scoped SSE", readme)
 
     def test_materialize_is_byte_identical_on_repack(self) -> None:
         materialize_dream_surface(

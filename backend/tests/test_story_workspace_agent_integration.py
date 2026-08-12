@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import database
+from agent_stream_events import NormalizedAgentEvent
 from routers import story_workspace
 from story_workspace.contracts import (
     StoryWorkspaceAgentCharacterPayload,
@@ -409,6 +410,7 @@ class ClaudeAgentStoryOutputIsolationTest(unittest.IsolatedAsyncioTestCase):
                 confirmation_store=unittest.mock.Mock(),
                 collected_parts=[],
             ),
+            dream_context=None,
         )
         service = ClaudeAgentService()
 
@@ -435,11 +437,12 @@ class ClaudeAgentStoryOutputIsolationTest(unittest.IsolatedAsyncioTestCase):
         frames = []
         while not queue.empty():
             frames.append(queue.get_nowait())
-        serialized = "\n".join(frame for frame in frames if isinstance(frame, str))
-        self.assertIn('"type": "message-final"', serialized)
-        self.assertIn('"type": "finish"', serialized)
-        self.assertIn('"finishReason": "stop"', serialized)
-        self.assertNotIn('"type": "error"', serialized)
+        events = [frame for frame in frames if isinstance(frame, NormalizedAgentEvent)]
+        self.assertIn("message-final", [event.type for event in events])
+        self.assertIn("finish", [event.type for event in events])
+        terminal = next(event for event in events if event.type == "finish")
+        self.assertEqual(terminal.data.get("finishReason"), "stop")
+        self.assertNotIn("error", [event.type for event in events])
         self.assertIsNone(frames[-1])
         self.assertIn("thread_id=thread-isolation stage=store", "\n".join(logs.output))
 

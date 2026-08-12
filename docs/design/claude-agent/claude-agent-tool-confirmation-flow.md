@@ -632,24 +632,33 @@ ChatPanel
 EventBus 重连允许重放历史 SSE 帧，因此旧 `tool-approval-request` 不能单独作为
 “此工具仍等待用户确认”的权威事实。确认状态按以下合同收敛：
 
-1. 用户批准或拒绝成功后，`ChatPanel` 在当前 thread 内记录精确
-   `tool_call_id` tombstone；`resolvePendingToolConfirmation` 在派生确认面板前先
-   排除这些 ID。tombstone 不跨 thread 复用。
-2. `POST /api/claude-agent/tool-confirm` 必须先验证当前用户拥有 `session_id`
+1. `ToolConfirmationStore.await_pending(tool_call_id)` 返回最终结果后，SDK callback
+   按既有合同把确认结果交还 runner；不得为了 Dream 或重连新增 Claude Agent SSE
+   事件。批准后是否已经执行以既有 `tool-output-available` 为准，拒绝/超时继续
+   fail-closed。
+2. 相同 SDK duplicate callback 只能绑定同一个 pending policy 与 Future；policy
+   不一致必须拒绝。确认是否仍 pending 由 active `(thread_id, turn_id,
+   tool_call_id)` store 和 thread status 端点提供，不从 SSE 重放反推。
+3. 用户批准或拒绝成功后，`ChatPanel` 在当前 thread 内记录精确
+   `tool_call_id` tombstone，作为当前渲染帧与 POST 返回之间的即时 UI 防抖；它不跨
+   thread 复用，也不是 reconnect 的权威状态源。
+4. `POST /api/claude-agent/tool-confirm` 必须先验证当前用户拥有 `session_id`
    对应的 Chat thread。无权访问统一返回 404，且不得进入 Agent runtime。
-3. 线程属于当前用户、但对应确认 Future 已结束或不存在时，返回
+5. 线程属于当前用户、但对应确认 Future 已结束或不存在时，返回
    `409` 与 `detail.code="TOOL_CONFIRMATION_NOT_PENDING"`，并回显精确
    `tool_call_id`。前端只有在状态码、code 和回显 ID 全部匹配时，才把它视为
    幂等终态并关闭面板；普通 404、鉴权失败、网络失败和畸形响应仍显示为可重试
    错误，不能伪装成成功。
-4. `finish` 事件早于后端 partial assistant 持久化，不能作为读取历史的边界。
+6. 主 turn 在确认尚无决定时被取消只清理 pending Future；既有
+   `finish`/EOF 负责结束页面 lifecycle。
+   `finish` 早于后端 partial assistant 持久化，不能作为读取历史的边界。
    前端继续消费到 SSE EOF 后才请求权威快照；Stop 完成也走同一恢复路径。
    每个请求携带 thread、reconnect nonce 与本地 turn generation checkpoint，三者
    任一变化都丢弃迟到快照，避免覆盖快照获取期间开始的新一轮消息。
-5. 类型化 409 只消除过期确认 UI，不凭空生成工具输出。最终工具状态继续由
+7. 本地 tombstone、权威 status 或类型化 409 只消除过期确认 UI，不凭空生成工具输出。最终工具状态继续由
    持久化消息和后续事件负责。普通 Dock、editor-write 专用确认和消息折叠行的
    「待确认」徽标共用同一 settled ID 集，不能出现两份漂移状态。
-6. 确认组件使用同步 in-flight guard，保证按钮双击、快捷键与点击并发最多发出
+8. 确认组件使用同步 in-flight guard，保证按钮双击、快捷键与点击并发最多发出
    一次 POST；React key 包含 `toolCallId`，A/B call 复用消息槽位时不继承状态。
 
 ```mermaid
@@ -664,9 +673,9 @@ sequenceDiagram
     Browser->>API: POST tool-confirm(call_id)
     API->>API: 校验 thread 所有权
     API->>Store: confirm_tool(call_id)
-    Store-->>API: 已无 pending Future
-    API-->>Browser: 409 TOOL_CONFIRMATION_NOT_PENDING + call_id
-    Browser->>Browser: 写入本 thread 精确 tombstone\n关闭确认面板
+    Store-->>API: settlement ack
+    Browser->>Browser: 记录 thread-local tool_call_id tombstone
+    Note over Browser,API: POST 重试晚于 settlement 时，409 NOT_PENDING 仅作幂等 fallback
     EventBus-->>Browser: finish（仅 UI 终态，不刷新）
     EventBus-->>Browser: SSE EOF（持久化已完成）
     Browser->>History: 以 thread / nonce / turn checkpoint 请求快照

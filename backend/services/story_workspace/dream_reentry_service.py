@@ -64,7 +64,7 @@ _STORY_WORKSPACE_DREAM_LAUNCH_ALLOWED_KEYS = frozenset({
     "dreamContext",
     "story_workspace_episode_identity",
 })
-_STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED = object()
+_STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED = object()
 
 
 class StoryWorkspaceDreamReentryService:
@@ -420,7 +420,7 @@ class StoryWorkspaceDreamReentryService:
         if not confirmation_accepted:
             return StoryWorkspaceDreamRunLifecycle.WAITING_CONFIRMATION
         if not confirmation_dispatched or live_turn:
-            return StoryWorkspaceDreamRunLifecycle.CONTINUING
+            return StoryWorkspaceDreamRunLifecycle.RUNNING
         return StoryWorkspaceDreamRunLifecycle.RECENT
 
     @staticmethod
@@ -438,7 +438,7 @@ class StoryWorkspaceDreamReentryService:
         binding_revision: int,
         runtime_snapshot_id: str,
         runtime_lock_id: str,
-        thread_agent_id: Any = _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED,
+        thread_agent_id: Any = _STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED,
     ) -> bool:
         try:
             metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else {}
@@ -486,7 +486,7 @@ class StoryWorkspaceDreamReentryService:
                 return False
         elif top_agent_present or context_agent_present:
             return False
-        if thread_agent_id is not _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED:
+        if thread_agent_id is not _STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED:
             if thread_agent_id is not None and (
                 not isinstance(thread_agent_id, str) or not thread_agent_id
             ):
@@ -503,7 +503,7 @@ class StoryWorkspaceDreamReentryService:
             if top_agent != context_agent:
                 return False
             if (
-                thread_agent_id is not _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED
+                thread_agent_id is not _STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED
                 and top_agent != thread_agent_id
             ):
                 return False
@@ -549,7 +549,7 @@ class StoryWorkspaceDreamReentryService:
         return {
             StoryWorkspaceDreamRunLifecycle.GENERATING: 0,
             StoryWorkspaceDreamRunLifecycle.WAITING_CONFIRMATION: 1,
-            StoryWorkspaceDreamRunLifecycle.CONTINUING: 2,
+            StoryWorkspaceDreamRunLifecycle.RUNNING: 2,
             StoryWorkspaceDreamRunLifecycle.RECENT: 3,
         }[lifecycle]
 

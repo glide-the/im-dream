@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- U11 exports deterministic action seams for Node verification. */
 // [Input] Confirmed run identity, `.dream` projections, and authoritative Episode artifact surface.
-// [Output] Revision-stable Episode workbench with controlled Dream Agent continuation.
+// [Output] Revision-stable Episode workbench with controlled Dream Agent actions.
 // [Pos] /story-workspace/runs/:storyWorkspaceRunId/execution (Task 3 U11)
 // [Sync] 2026-08-06: compose Episode artifacts without changing their REST ownership.
 
@@ -21,11 +21,9 @@ import {
 } from '../../components/story-workspace';
 import {
   StoryWorkspaceStoryIndexHttpError,
-  useStoryWorkspaceDreamAgent,
   useStoryWorkspaceDreamFiles,
   useStoryWorkspaceStoryIndex,
 } from '../../hooks/story-workspace';
-import { storyWorkspaceDreamAgentHasSettledMessage } from '../../hooks/story-workspace/useStoryWorkspaceDreamAgent';
 import type {
   StoryWorkspaceEpisodeAssociationCoverage,
   StoryWorkspaceEpisodeArtifactAvailability,
@@ -150,6 +148,8 @@ export class StoryWorkspaceEpisodeActionSessionKeys {
 }
 
 interface StoryWorkspaceEpisodeDispatchedAction {
+  readonly action: string;
+  readonly fact: string;
   readonly identity: string;
   readonly messageId: string;
 }
@@ -519,8 +519,10 @@ export function StoryWorkspaceExecutionPage({
     useState<'recover' | 'continue' | null>(null);
   const [episodeActionError, setEpisodeActionError] = useState<string | null>(null);
   const [episodeActionNotice, setEpisodeActionNotice] = useState<string | null>(null);
+  const [threadSessionRefreshNonce, setThreadSessionRefreshNonce] = useState(0);
   const [episodeDispatchedAction, setEpisodeDispatchedAction] =
     useState<StoryWorkspaceEpisodeDispatchedAction | null>(null);
+  const episodeDispatchedActionRef = useRef<StoryWorkspaceEpisodeDispatchedAction | null>(null);
   const episodeDispatchedIdentity = episodeDispatchedAction?.identity ?? null;
   const [episodeActionKeys] = useState(() => new StoryWorkspaceEpisodeActionSessionKeys(
     () => `story-workspace-episode:${globalThis.crypto.randomUUID()}`,
@@ -531,7 +533,6 @@ export function StoryWorkspaceExecutionPage({
   const episodeArtifactReaderRef = useRef<HTMLDivElement>(null);
   const { run, selectRun } = useWorkflowRun({ eventsEnabled: true });
   const currentRun = run?.workflow_run_id === runId ? run : null;
-  const dreamAgent = useStoryWorkspaceDreamAgent(runId);
 
   const navigate = useCallback((href: string, notice?: string) => {
     if (onNavigate) {
@@ -551,7 +552,7 @@ export function StoryWorkspaceExecutionPage({
   const files = useStoryWorkspaceDreamFiles(runId, {
     lifecycleState: currentRun?.status === 'completed'
       ? 'story-workspace-dream-completed'
-      : 'story-workspace-dream-continuing',
+      : 'story-workspace-dream-running',
   });
   const canQueryEpisode = files.data !== null
     && storyWorkspaceCanAccessExecution(files.data);
@@ -725,32 +726,9 @@ export function StoryWorkspaceExecutionPage({
     setEpisodeActionError(null);
     setEpisodeActionNotice(null);
     setEpisodeContinueDialogOpen(false);
+    episodeDispatchedActionRef.current = null;
     setEpisodeDispatchedAction(null);
   }, [episodeActionIdentity]);
-
-  useEffect(() => {
-    if (
-      episodeDispatchedAction === null
-      || episodeDispatchedAction.identity !== episodeActionIdentity
-      || !storyWorkspaceDreamAgentHasSettledMessage(
-        dreamAgent.snapshot,
-        episodeDispatchedAction.messageId,
-      )
-    ) return;
-    episodeActionKeys.rotate(runId, episodeActionFact, episodeActionName);
-    setEpisodeDispatchedAction(null);
-    setEpisodeActionNotice('本轮结束但尚未检测到新产物；页面会继续读取服务端 revisions。');
-    refreshEpisodeArtifacts();
-  }, [
-    dreamAgent.snapshot,
-    episodeActionFact,
-    episodeActionIdentity,
-    episodeActionKeys,
-    episodeActionName,
-    refreshEpisodeArtifacts,
-    episodeDispatchedAction,
-    runId,
-  ]);
 
   useEffect(() => {
     if (!focusKey || allEntries.some((entry) => entry.key === focusKey)) return;
@@ -811,10 +789,8 @@ export function StoryWorkspaceExecutionPage({
     ? '命令已保存，等待同一 Dream Agent 接续'
     : currentRun?.status === 'completed'
       ? '同一 Dream Agent 已完成后续执行'
-      : '同一 Dream Agent 正在继续';
-  const agentPreview = dreamAgent.streamText
-    || dreamAgent.snapshot?.messages.filter((message) => message.role === 'assistant').at(-1)?.text
-    || agentStateCopy;
+      : '同一 Dream Agent 正在执行';
+  const agentPreview = agentStateCopy;
   const focusByKey = (key: string | null) => {
     if (key) setFocusKey(key);
   };
@@ -881,14 +857,18 @@ export function StoryWorkspaceExecutionPage({
         token: getAuthToken(),
       });
       if (!episodeActionTicketIsFresh(ticket)) return;
-      setEpisodeDispatchedAction({
+      const dispatchedAction: StoryWorkspaceEpisodeDispatchedAction = {
+        action,
+        fact: episodeActionFact,
         identity: episodeActionIdentity,
         messageId: accepted.messageId,
-      });
+      };
+      episodeDispatchedActionRef.current = dispatchedAction;
+      setEpisodeDispatchedAction(dispatchedAction);
       setEpisodeActionNotice('已交给同一 Dream Agent；第一集关联将从服务端事实恢复。');
       setDreamAgentInitialWorkflowFocus(null);
       setAgentDialogOpen(true);
-      dreamAgent.refresh();
+      setThreadSessionRefreshNonce((value) => value + 1);
       refreshEpisodeArtifacts();
     } catch {
       if (!episodeActionTicketIsFresh(ticket)) return;
@@ -929,15 +909,19 @@ export function StoryWorkspaceExecutionPage({
         userGuidance,
       });
       if (!episodeActionTicketIsFresh(ticket)) return;
-      setEpisodeDispatchedAction({
+      const dispatchedAction: StoryWorkspaceEpisodeDispatchedAction = {
+        action: actionIdentity,
+        fact: episodeActionFact,
         identity: episodeActionIdentity,
         messageId: accepted.messageId,
-      });
+      };
+      episodeDispatchedActionRef.current = dispatchedAction;
+      setEpisodeDispatchedAction(dispatchedAction);
       setEpisodeActionNotice('已交给同一 Dream Agent；新产物仍以 REST revisions 到达为准。');
       setEpisodeContinueDialogOpen(false);
       setSelectedEpisodeWorkflowActionId(null);
       setDreamAgentInitialWorkflowFocus(null);
-      dreamAgent.refresh();
+      setThreadSessionRefreshNonce((value) => value + 1);
       refreshEpisodeArtifacts();
     } catch {
       if (!episodeActionTicketIsFresh(ticket)) return;
@@ -1489,13 +1473,30 @@ export function StoryWorkspaceExecutionPage({
 
       {agentDialogOpen && (
         <StoryWorkspaceDreamAgentDialog
-          agent={dreamAgent}
           deckName={currentRun?.deck_plugin_display_name ?? '当前 Deck'}
+          expectedMessageId={episodeDispatchedAction?.messageId ?? null}
           initialWorkflowFocus={dreamAgentInitialWorkflowFocus}
           onRequestWorkflowAction={handleDreamAgentWorkflowAction}
           onClose={() => setAgentDialogOpen(false)}
+          onSettled={() => {
+            const dispatchedAction = episodeDispatchedActionRef.current;
+            if (dispatchedAction?.identity === episodeActionCurrentIdentityRef.current) {
+              episodeDispatchedActionRef.current = null;
+              episodeActionKeys.rotate(runId, dispatchedAction.fact, dispatchedAction.action);
+              setEpisodeDispatchedAction((current) => (
+                current?.messageId === dispatchedAction.messageId ? null : current
+              ));
+              setEpisodeActionNotice(
+                '本轮结束但尚未检测到新产物；页面会继续读取服务端 revisions。',
+              );
+            }
+            refreshEpisodeArtifacts();
+            storyIndex.refresh();
+          }}
+          refreshNonce={threadSessionRefreshNonce}
           restoreFocusRef={agentPreviewTriggerRef}
           runId={runId}
+          threadId={files.data.threadId}
           workflowActions={dreamAgentWorkflowActions}
         />
       )}

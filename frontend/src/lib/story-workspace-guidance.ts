@@ -1,7 +1,7 @@
 // [Input] Chat message metadata carried on UIMessage / RawChatMessage rows.
 // [Output] Predicates + list filters hiding story-workspace control rows from
 //          every Chat rendering surface. Guidance and the Dream confirmation
-//          persist for audit/Agent continuation but never appear as bubbles.
+//          persist for audit/Agent follow-up but never appear as bubbles.
 // [Pos] story-workspace guidance filter seam (Task 4 Step 0)
 // [Sync] 2026-08-04: initial implementation; consumed by ChatView message
 //                    loading and ChatPanel rendering/export seams.
@@ -13,6 +13,15 @@ export const STORY_WORKSPACE_GUIDANCE_KIND = 'story-workspace-guidance';
 export const STORY_WORKSPACE_DREAM_CONFIRMATION_KIND = 'story-workspace-dream-confirmation';
 export const STORY_WORKSPACE_DREAM_AGENT_USER_KIND = 'story-workspace-dream-agent-user';
 export const STORY_WORKSPACE_EPISODE_ACTION_SCHEMA = 'story-workspace-episode-action/v1';
+export const SYSTEM_HIDDEN_MESSAGE_VISIBILITY = 'system-hidden';
+
+/** Server-attested control rows (including the Dream launch goal) persist for
+ * Agent continuity but are never user-visible on either Chat or Dream. */
+export function isSystemHiddenMessageMetadata(metadata: unknown): boolean {
+  if (typeof metadata !== 'object' || metadata === null) return false;
+  return (metadata as Record<string, unknown>).visibility
+    === SYSTEM_HIDDEN_MESSAGE_VISIBILITY;
+}
 
 /**
  * True when a message metadata payload marks a story-workspace guidance row
@@ -49,7 +58,8 @@ export function filterStoryWorkspaceControlMessages<T extends { metadata?: unkno
   messages: readonly T[],
 ): T[] {
   return messages.filter((message) => (
-    !isStoryWorkspaceGuidanceMetadata(message.metadata)
+    !isSystemHiddenMessageMetadata(message.metadata)
+    && !isStoryWorkspaceGuidanceMetadata(message.metadata)
     && !isStoryWorkspaceDreamConfirmationMetadata(message.metadata)
     && !isStoryWorkspacePrivateEpisodeActionMetadata(message.metadata)
   ));

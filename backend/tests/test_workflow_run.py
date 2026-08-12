@@ -785,7 +785,7 @@ class WorkflowRunTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(running.status, RunStatus.RUNNING)
 
-    async def test_continuing_rejected_and_cancelled_legal_terminal_paths(self):
+    async def test_confirmed_rejected_and_cancelled_legal_terminal_paths(self):
         async def advance_to_pending(key: str) -> WorkflowRun:
             candidate = await self.fixture.create(key)
             receipt_id = self.fixture.ready_receipt(candidate, f"receipt-{key}")
@@ -819,24 +819,19 @@ class WorkflowRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rejected.status, RunStatus.REJECTED)
         self.assertIsNotNone(rejected.completed_at)
 
-        continuing = await advance_to_pending("continue-path")
-        continuing = await self.fixture.service.transition_run(
-            continuing.workflow_run_id,
+        confirmed = await advance_to_pending("confirm-path")
+        confirmed = await self.fixture.service.transition_run(
+            confirmed.workflow_run_id,
             RunStatus.CONFIRMED,
             self.fixture.actor,
             review_items_approved=True,
         )
-        continuing = await self.fixture.service.transition_run(
-            continuing.workflow_run_id,
-            RunStatus.CONTINUING,
-            self.fixture.actor,
-        )
-        continuing = await self.fixture.service.transition_run(
-            continuing.workflow_run_id,
+        confirmed = await self.fixture.service.transition_run(
+            confirmed.workflow_run_id,
             RunStatus.COMPLETED,
             self.fixture.actor,
         )
-        self.assertEqual(continuing.status, RunStatus.COMPLETED)
+        self.assertEqual(confirmed.status, RunStatus.COMPLETED)
 
         cancelled = await self.fixture.create("cancel-path")
         cancelled = await self.fixture.service.transition_run(

@@ -118,7 +118,7 @@ export function WorkflowRunStatusPanel({
         <code className="workflow-run-panel__id">{run.workflow_run_id}</code>
       </header>
 
-      {['preflight', 'queued', 'running', 'output_validating', 'continuing'].includes(state) && (
+      {['preflight', 'queued', 'running', 'output_validating', 'confirmed'].includes(state) && (
         <>
           <div
             aria-label={`运行进度 ${progress}%`}
@@ -143,7 +143,7 @@ export function WorkflowRunStatusPanel({
               ))}
             </ol>
           )}
-          {onCancel && ['queued', 'running', 'continuing'].includes(state) && (
+          {onCancel && ['queued', 'running', 'confirmed'].includes(state) && (
             <button className="workflow-button" disabled={isMutating} onClick={onCancel} type="button">取消运行</button>
           )}
         </>

@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import database
+from agent_stream_events import NormalizedAgentEvent
 from backend.tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 from routers import story_workspace
 from services.deck.builtin_plugin import (
@@ -35,6 +36,7 @@ from services.story_workspace.dream_launch_gateway import (
     StoryWorkspaceDreamLaunchGateway,
     StoryWorkspaceDreamLaunchGatewayError,
     StoryWorkspaceDreamLaunchProvisioner,
+    StoryWorkspaceDreamLaunchTaskRegistry,
     _decode_json_object,
     story_workspace_build_dream_launch_turn_dispatcher,
 )
@@ -532,8 +534,18 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         failures: list[dict[str, str]] = []
 
         class Factory:
-            async def run_streaming(self, _request):
-                yield 'data: {"type":"error","errorText":"[GATEWAY_UNAVAILABLE] upstream unavailable"}\n\n'
+            async def run_events(self, _request):
+                yield NormalizedAgentEvent.create(
+                    "error",
+                    {
+                        "errorText": (
+                            "[GATEWAY_UNAVAILABLE] upstream unavailable"
+                        )
+                    },
+                )
+                yield NormalizedAgentEvent.create(
+                    "finish", {"finishReason": "error"}
+                )
 
         async def record_failure(**values):
             failures.append(values)
@@ -572,6 +584,120 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
                 "message_id": "dream-launch-error-message",
                 "error_code": "GATEWAY_UNAVAILABLE",
             }],
+        )
+
+    async def test_launch_registry_cancels_and_awaits_owned_turn_drain(self):
+        turn_started = asyncio.Event()
+        failure_started = asyncio.Event()
+        release_failure = asyncio.Event()
+        failures: list[dict[str, str]] = []
+
+        class BlockingFactory:
+            async def run_events(self, _request):
+                turn_started.set()
+                await asyncio.Event().wait()
+                yield  # pragma: no cover - cancellation is the contract
+
+        async def record_failure(**values):
+            failures.append(values)
+            failure_started.set()
+            await release_failure.wait()
+
+        registry = StoryWorkspaceDreamLaunchTaskRegistry()
+        dispatcher = story_workspace_build_dream_launch_turn_dispatcher(
+            factory=BlockingFactory(),
+            request_factory=lambda **values: values,
+            failure_handler=record_failure,
+            task_registry=registry,
+        )
+        context = StoryWorkspaceDreamRunContext(
+            workflow_run_id="run_" + "5" * 32,
+            thread_id="thread-dream-cancel",
+            deck_id=DECK_ID,
+            deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
+            deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
+            deck_plugin_binding_id="dpb_" + "6" * 32,
+            binding_revision=1,
+            deck_runtime_snapshot_id="drs_" + "7" * 32,
+            runtime_plugin_lock_id="rpl_" + "8" * 32,
+        )
+        dispatcher(
+            actor_id=ACTOR_ID,
+            thread_id=context.thread_id,
+            message_id="dream-launch-cancel-message",
+            parts=[{"type": "text", "text": "launch"}],
+            metadata={},
+            context=context,
+            system_prompt=None,
+        )
+        await turn_started.wait()
+
+        close_task = asyncio.create_task(registry.aclose())
+        await failure_started.wait()
+        self.assertFalse(close_task.done())
+        self.assertEqual(registry.diagnostics()["launch_owned_tasks"], 1)
+        release_failure.set()
+        await close_task
+
+        self.assertEqual(
+            failures,
+            [{
+                "workflow_run_id": context.workflow_run_id,
+                "actor_id": ACTOR_ID,
+                "message_id": "dream-launch-cancel-message",
+                "error_code": "DREAM_AGENT_DISPATCH_CANCELLED",
+            }],
+        )
+        self.assertEqual(
+            registry.diagnostics(),
+            {"launch_owned_tasks": 0, "launch_running_tasks": 0},
+        )
+
+    async def test_closed_launch_registry_rejects_before_turn_creation(self):
+        factory_called = False
+
+        class Factory:
+            async def run_events(self, _request):
+                nonlocal factory_called
+                factory_called = True
+                yield NormalizedAgentEvent.create(
+                    "finish", {"finishReason": "stop"}
+                )
+
+        registry = StoryWorkspaceDreamLaunchTaskRegistry()
+        await registry.aclose()
+        dispatcher = story_workspace_build_dream_launch_turn_dispatcher(
+            factory=Factory(),
+            request_factory=lambda **values: values,
+            task_registry=registry,
+        )
+        context = StoryWorkspaceDreamRunContext(
+            workflow_run_id="run_" + "9" * 32,
+            thread_id="thread-dream-closed",
+            deck_id=DECK_ID,
+            deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
+            deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
+            deck_plugin_binding_id="dpb_" + "a" * 32,
+            binding_revision=1,
+            deck_runtime_snapshot_id="drs_" + "b" * 32,
+            runtime_plugin_lock_id="rpl_" + "c" * 32,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "registry is closed"):
+            dispatcher(
+                actor_id=ACTOR_ID,
+                thread_id=context.thread_id,
+                message_id="dream-launch-closed-message",
+                parts=[{"type": "text", "text": "launch"}],
+                metadata={},
+                context=context,
+                system_prompt=None,
+            )
+
+        self.assertFalse(factory_called)
+        self.assertEqual(
+            registry.diagnostics(),
+            {"launch_owned_tasks": 0, "launch_running_tasks": 0},
         )
 
     async def test_terminal_dispatch_error_marks_run_and_source_failed(self):

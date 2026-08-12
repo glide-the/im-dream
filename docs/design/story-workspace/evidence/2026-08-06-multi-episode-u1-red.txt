@@ -1,6 +1,0 @@
-U1 Red
-Command: backend/.venv/bin/python -m pytest -q backend/tests/test_story_workspace_multi_episode_actions.py
-Result: collection failed as expected
-
-ModuleNotFoundError: No module named 'services.story_workspace.multi_episode_action_service'
-1 error in 0.07s

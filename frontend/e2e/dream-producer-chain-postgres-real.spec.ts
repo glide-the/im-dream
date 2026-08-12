@@ -94,11 +94,20 @@ type EpisodeSurface = {
   };
 };
 
-type DreamAgentReadySnapshot = {
-  lifecycle: 'idle' | 'streaming';
-  activeTurnId: string | null;
-  canSend: boolean;
+type ClaudeThreadStatus = {
+  running: boolean;
+  lifecycle: 'idle' | 'running' | 'destroyed' | 'not_found';
+  turn_count: number;
+  pending_tool_call_ids: string[];
 };
+
+function actorScopedThreadId(files: Record<string, unknown>): string {
+  const threadId = files.threadId;
+  if (typeof threadId !== 'string' || threadId.length === 0) {
+    throw new Error('Dream files did not return an actor-scoped threadId.');
+  }
+  return threadId;
+}
 
 async function initialDreamSettlementEvidence(
   page: Page,
@@ -106,10 +115,22 @@ async function initialDreamSettlementEvidence(
   token: string,
   diagnostics: readonly string[],
 ): Promise<Record<string, unknown>> {
-  const [run, files, messages] = await Promise.all([
+  const [run, files] = await Promise.all([
     getJson<Record<string, unknown>>(page.request, `/api/story-workspace/workflow-runs/${runId}`, token),
     getJson<Record<string, unknown>>(page.request, `/api/story-workspace/workflow-runs/${runId}/dream-files`, token),
-    getJson<Record<string, unknown>>(page.request, `/api/story-workspace/workflow-runs/${runId}/dream-agent/messages`, token),
+  ]);
+  const threadId = actorScopedThreadId(files);
+  const [messages, status] = await Promise.all([
+    getJson<Record<string, unknown>>(
+      page.request,
+      `/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`,
+      token,
+    ),
+    getJson<ClaudeThreadStatus>(
+      page.request,
+      `/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
+      token,
+    ),
   ]);
   const messageItems = Array.isArray(messages.messages) ? messages.messages : [];
   return {
@@ -136,14 +157,14 @@ async function initialDreamSettlementEvidence(
         : [],
     },
     agent: {
-      lifecycle: messages.lifecycle,
-      activeTurnId: messages.activeTurnId,
-      canSend: messages.canSend,
-      sendBlockReason: messages.sendBlockReason,
+      threadId,
+      lifecycle: status.lifecycle,
+      running: status.running,
+      turnCount: status.turn_count,
+      pendingToolCallIds: status.pending_tool_call_ids,
       messages: messageItems.map((message) => ({
         id: message && typeof message === 'object' ? message.id : undefined,
         role: message && typeof message === 'object' ? message.role : undefined,
-        status: message && typeof message === 'object' ? message.status : undefined,
       })),
     },
     browser: await page.evaluate((capturedDiagnostics) => {
@@ -171,15 +192,19 @@ async function waitForAgentReady(
   runId: string,
   token: string,
 ): Promise<void> {
+  const files = await getJson<Record<string, unknown>>(
+    request,
+    `/api/story-workspace/workflow-runs/${runId}/dream-files`,
+    token,
+  );
+  const threadId = actorScopedThreadId(files);
   await expect.poll(async () => {
-    const snapshot = await getJson<DreamAgentReadySnapshot>(
+    const status = await getJson<ClaudeThreadStatus>(
       request,
-      `/api/story-workspace/workflow-runs/${runId}/dream-agent/messages`,
+      `/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
       token,
     );
-    return snapshot.lifecycle === 'idle'
-      && snapshot.activeTurnId === null
-      && snapshot.canSend;
+    return status.running === false && status.lifecycle === 'idle';
   }, { timeout: 30_000, intervals: [250, 500, 1_000] }).toBe(true);
 }
 
@@ -239,7 +264,27 @@ test('same new Run reaches Gateway-billed completed Episode and survives reentry
   await page.setViewportSize({ width: 1440, height: 1000 });
   diagnosticPhase = 'launch-form';
   await page.goto(`${WEB_BASE}/story-workspace/dream`);
-  await expect(page.getByRole('heading', { name: '发起一次 Dream' })).toBeVisible();
+  try {
+    await expect(page.getByRole('heading', { name: '发起一次 Dream' })).toBeVisible();
+  } catch (cause) {
+    await diagnosticState.settle();
+    const evidence = await page.evaluate((capturedDiagnostics) => ({
+      href: window.location.pathname + window.location.search,
+      title: document.title,
+      rootChildCount: document.querySelector('#root')?.childElementCount ?? null,
+      headings: [...document.querySelectorAll('h1, h2, h3')]
+        .map((element) => element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 160))
+        .filter(Boolean),
+      statuses: [...document.querySelectorAll<HTMLElement>('[role="status"], [role="alert"]')]
+        .map((element) => element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 240))
+        .filter(Boolean),
+      loginFormPresent: Boolean(document.querySelector('input[type="password"]')),
+      diagnostics: capturedDiagnostics,
+    }), diagnostics);
+    throw new Error(`Dream launch surface did not render: ${JSON.stringify(evidence)}`, {
+      cause,
+    });
+  }
   await expect(page.getByText(/Dream 剧本生产 · 剧本生产 Agent/)).toBeVisible();
   await page.getByRole('textbox', { name: '创作目标' }).fill('创作一个雨夜末班车短剧，并生产完整第一集受控产物。');
   const launchResponse = page.waitForResponse((response) => (
@@ -350,20 +395,32 @@ test('same new Run reaches Gateway-billed completed Episode and survives reentry
 
   diagnosticPhase = 'terminal-read';
 
-  const [run, files, messages, storyIndex] = await Promise.all([
+  const [run, files, storyIndex] = await Promise.all([
     getJson<Record<string, unknown>>(page.request, `/api/story-workspace/workflow-runs/${runId}`, token),
     getJson<Record<string, unknown>>(page.request, `/api/story-workspace/workflow-runs/${runId}/dream-files`, token),
-    getJson<Record<string, unknown>>(page.request, `/api/story-workspace/workflow-runs/${runId}/dream-agent/messages`, token),
     getJson<Record<string, unknown>>(page.request, `/api/story-workspace/workflow-runs/${runId}/story-index`, token),
+  ]);
+  const terminalThreadId = actorScopedThreadId(files);
+  const [messages, status] = await Promise.all([
+    getJson<Record<string, unknown>>(
+      page.request,
+      `/api/claude-agent/threads/${encodeURIComponent(terminalThreadId)}/messages`,
+      token,
+    ),
+    getJson<ClaudeThreadStatus>(
+      page.request,
+      `/api/claude-agent/threads/${encodeURIComponent(terminalThreadId)}/status`,
+      token,
+    ),
   ]);
   expect(run).toMatchObject({ status: 'completed' });
   expect(files).toMatchObject({ storyWorkspaceRunId: runId, canConfirm: false });
-  expect(messages).toMatchObject({
-    storyWorkspaceRunId: runId,
+  expect(status).toMatchObject({
     lifecycle: 'idle',
-    activeTurnId: null,
-    canSend: true,
+    running: false,
   });
+  expect(Array.isArray(messages.messages)).toBe(true);
+  expect((messages.messages as unknown[]).length).toBeGreaterThan(0);
   expect(storyIndex).toMatchObject({
     runId,
     status: 'indexed',

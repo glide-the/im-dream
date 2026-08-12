@@ -9,8 +9,8 @@
 - 来源 Issue: [SUO-301](/SUO/issues/SUO-301)；业务映射 `SUO-201-BE-003`
 - Parent / Ancestor: [SUO-301](/SUO/issues/SUO-301) / [SUO-273](/SUO/issues/SUO-273) / [SUO-198](/SUO/issues/SUO-198)
 - 关联设计稿:
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §6.1
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.1 `DEC-007` / `DEC-008`、§4.5.1～§4.5.4
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §6.1
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §3.1 `DEC-007` / `DEC-008`、§4.5.1～§4.5.4
 - 关联 Task: `docs/task/task_203_backend_story-workspace-review-workflow.md`
 - 关联 Stage: `docs/stage/stage_story-workspace.md` §13.2、§13.4
 - 执行 Agent: `ExecTaskAgent`

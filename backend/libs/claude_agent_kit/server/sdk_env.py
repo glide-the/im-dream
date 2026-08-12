@@ -88,6 +88,11 @@ _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
     }
 )
 _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES = frozenset({"ANTHROPIC_API_KEY"})
+_GATEWAY_COMPETING_CREDENTIAL_ENV_NAMES = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+)
 _USER_SDK_ENV_NAMES = frozenset(
     {
         "API_TIMEOUT_MS",
@@ -124,6 +129,20 @@ _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME = "CLAUDE_CODE_TASK_LIST_ID"
 # workspace.get_tasks_dir() resolves the same constant — single source.
 CLAUDE_CODE_TASK_LIST_ID_VALUE = "main"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def apply_gateway_credential_tombstones(environment: dict[str, str]) -> None:
+    """Override credentials inherited by the SDK subprocess when Gateway is on.
+
+    ``claude-agent-sdk`` overlays ``options.env`` onto the full parent process
+    environment. Removing a key from ``options.env`` therefore cannot remove a
+    credential already present in uvicorn's ``os.environ``. Empty values are
+    the subprocess transport's only deletion-equivalent and make Claude Code
+    select the server-owned ``apiKeyHelper`` instead.
+    """
+
+    for name in _GATEWAY_COMPETING_CREDENTIAL_ENV_NAMES:
+        environment[name] = ""
 
 
 def task_v2_enabled() -> bool:
@@ -199,6 +218,25 @@ def merge_project_dotenv_env(
         )
     for key in _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES:
         merged.pop(key, None)
+    # ``ClaudeAgentRunner`` applies the server-owned Gateway configuration
+    # after the first project/runtime merge. ``SimpleClaudeAgentSDKClient``
+    # deliberately reapplies these defaults for direct callers immediately
+    # before spawning Claude Code. That second merge must not resurrect a
+    # direct Provider bearer token from backend/.env or the parent process:
+    # Claude Code gives ANTHROPIC_AUTH_TOKEN precedence over apiKeyHelper, so
+    # the canonical Gateway subject JWT would otherwise be replaced and the
+    # request would correctly fail authentication at the Admin boundary. Keep
+    # empty tombstones instead of popping: the Python SDK inherits the entire
+    # parent environment before overlaying this map.
+    primary_gateway_flag = str(merged.get("INK_GATEWAY_ENABLED", "")).strip()
+    legacy_gateway_flag = str(
+        merged.get("INK_GATEWAY_CLAUDE_AGENT_ENABLED", "")
+    ).strip()
+    gateway_enabled = (
+        primary_gateway_flag or legacy_gateway_flag
+    ).lower() in _TRUE_ENV_VALUES
+    if gateway_enabled:
+        apply_gateway_credential_tombstones(merged)
     return merged
 
 

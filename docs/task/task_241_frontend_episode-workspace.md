@@ -54,7 +54,7 @@
 ### 4.4 展示运行进度
 
 1. 显示当前 `storyWorkspaceRunId`、attempt、canonical status、当前步骤和已到达 artifact kinds。
-2. queued/running、output-validating、pending-review、confirmed、continuing/failed 等均消费服务端 canonical 状态。
+2. queued/running、output-validating、pending-review、confirmed、completed/failed 等均消费服务端 canonical 状态。
 3. 刷新、深链、关闭右栏后重新拉取服务端状态，不依赖组件本地状态恢复授权事实。
 
 ### 4.5 接口与并行开发边界

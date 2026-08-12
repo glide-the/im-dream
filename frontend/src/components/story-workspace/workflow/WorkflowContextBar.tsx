@@ -53,7 +53,7 @@ export function WorkflowContextBar({
   onOpenReview,
 }: WorkflowContextBarProps) {
   const hasWorkflow = Boolean(deckPluginDisplayName && deckPluginVersion);
-  const canCancel = state === 'queued' || state === 'running' || state === 'continuing';
+  const canCancel = state === 'queued' || state === 'running' || state === 'confirmed';
   const canStart = hasWorkflow && runtimeReady === true
     && (state === 'ready' || state === 'completed' || state === 'cancelled');
 

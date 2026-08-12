@@ -28,7 +28,7 @@ function stubRun(runId: string): WorkflowRun {
     runtime_plugin_lock_id: 'lock-1',
     runtime_load_receipt_id: null,
     workflow_preflight_id: 'pf-1',
-    status: 'continuing',
+    status: 'running',
     status_version: 3,
     failed_step: null,
     error_code: null,

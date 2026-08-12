@@ -11,8 +11,8 @@
 - Task readiness: [SUO-270](/SUO/issues/SUO-270)
 - Stage Gate: [SUO-272](/SUO/issues/SUO-272)
 - 关联设计稿:
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §5.1～5.5、§6.1、§10.2
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.1 `DEC-007`、`DEC-008`
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §5.1～5.5、§6.1、§10.2
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §3.1 `DEC-007`、`DEC-008`
   - `docs/CLAUDE.md` §Thread Lifecycle
 - Task 文档: `docs/task/task_204_backend_story-workspace-agent-integration.md`
 - Stage 文档: `docs/stage/stage_story-workspace.md`

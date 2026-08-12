@@ -15,6 +15,13 @@
 > **[Sync] 2026-07-20**: 登记 claude-todo 新 SSE 事件 `todo-updated`（§4.5.2 事件表 + §4.5.4 收集表 + §4.7.9 报文示例），生命周期帧、不入 `collected_parts`、不映射 UIMessageChunk；配套 `GET /api/claude-agent/threads/{thread_id}/todos` REST 端点契约见 [`claude-todo.md`](./claude-todo.md) §5.5。
 > **[Sync] 2026-07-23**: SandboxPermissionRequest——`tool-approval-request` 新增可选字段 `confirmationKind:"sandbox_network"` 与 `networkRequest:{host, policyMode, matchedAllowedDomain}`（§4.5.2 事件表）；字段缺失时前端回退通用确认卡，向后兼容。设计见 `claude-agent-sandbox-network-permission-tool.md`。
 > **[Sync] 2026-07-26**: 触发条件④修订——PreToolUse 网络门禁拆除后，沙箱网络确认仅来自 SDK `can_use_tool` 通道的 `SandboxNetworkAccess` 运行时沙箱代理询问（§4.5.2 事件表）；曾短暂存在的 `networkRequest.source` 字段取消。
+> **[Sync] 2026-08-11**: 本文成为 Chat 与 Dream surface 的唯一 thread conversation
+> HTTP/SSE 合同。Dream 使用相同 history/status/stream/send/tool-confirm/stop；浏览器不传
+> workflow run/actor/turn selector，服务端以 authenticated actor + owned thread 解析可信
+> Dream retry leaf/context。`finish` 是唯一终态；失败必须为 `error` 后单个
+> `finish{finishReason:"error"}`，`message-final` 只是成功输出/持久化证据。确认 policy
+> 由服务端在 approval publish 前绑定 active `(threadId,turnId,toolCallId)` 并原子校验
+> AskUser/network/reject-only；Dream run-scoped messages/events/tool-confirm 不再是公开合同。
 
 # Ink & Memory Claude Agent 服务入参与SSE响应报文整理
 
@@ -28,7 +35,8 @@
 
 ## 1. 背景与目标
 
-Ink & Memory Claude Agent 业务主入口为 `POST /api/claude-agent`，SSE 协议与 Pawkeyland 保持一致。
+Ink & Memory Claude Agent 业务主入口为 `POST /api/claude-agent`；Chat 页面与
+Dream 页面共同消费这一个 thread SSE 协议。
 
 本文目标是把服务的两类协议整理为可直接消费的设计真相源：
 
@@ -41,7 +49,8 @@ Ink & Memory Claude Agent 业务主入口为 `POST /api/claude-agent`，SSE 协�
 
 - `POST /api/claude-agent` 的请求体契约、默认值、校验与服务层归一规则。
 - `POST /api/claude-agent/tool-confirm` 的请求/响应契约。
-- Claude Agent SSE 通道的传输约定、事件全集、事件顺序和字段语义。
+- Claude Agent SSE 通道的传输约定、事件全集、事件顺序和字段语义；该合同同样适用
+  于 Dream surface。
 - `pet_info`、`runtime`、硬件状态、`long_term_profile` 在服务层中的实际消费方式。
 
 ### 2.2 本文不覆盖
@@ -141,7 +150,8 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 - 每个事件都序列化为一行 `data: {json}\n\n`。
 - 当前实现不写 `event:` 字段，因此客户端必须读取 `data` 内 JSON 的 `type` 字段来分发事件。
 - 流开始时一定先发一条 `message-metadata`。
-- 流正常结束时一定发 `finish`；异常结束时发 `error` 后关闭流，通常不会再补 `finish`。
+- 每个 turn 恰好一个 `finish`：正常为 `finishReason:"stop"`；异常先发 `error`，再发
+  `finishReason:"error"`。日志不得进入 SSE 正文，`message-final` 不关闭 lifecycle。
 
 #### 4.5.2 事件全集（Ink & Memory 当前实现）
 

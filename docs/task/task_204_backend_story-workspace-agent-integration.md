@@ -12,10 +12,10 @@ Story Workspace Agent 产出数据接收与存储集成
 - **优先级**: P0
 - **标签**: `agent`, `integration`, `sse`
 - **来源设计稿**:
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §5.1–5.5（数据表结构）
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §6.1（API 路由设计）
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §10.2（与 claude-agent 服务的集成）
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.1 `DEC-007`, `DEC-008`（核心工作流、用户不手动创建）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §5.1–5.5（数据表结构）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §6.1（API 路由设计）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §10.2（与 claude-agent 服务的集成）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §3.1 `DEC-007`, `DEC-008`（核心工作流、用户不手动创建）
   - `docs/CLAUDE.md` §Thread Lifecycle
 - **Issue 清单**: `docs/issue/ISSUES_story-workspace.md` §3 Issue 明细
 

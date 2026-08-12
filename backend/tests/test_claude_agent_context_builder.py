@@ -300,6 +300,9 @@ class TestBuildUserMessage(unittest.TestCase):
         )
         provenance = {
             "schema": "story-workspace-episode-action/v1",
+            "workflow_run_id": context.workflow_run_id,
+            "thread_id": context.thread_id,
+            "actor_id": "7",
             "action": "write_script",
             "episode_uid": "a" * 32,
             "input_revision": "sha256:" + "b" * 64,
@@ -367,6 +370,9 @@ class TestBuildUserMessage(unittest.TestCase):
         )
         recovery = {
             "schema": "story-workspace-episode-action/v1",
+            "workflow_run_id": context.workflow_run_id,
+            "thread_id": context.thread_id,
+            "actor_id": "7",
             "action": "recover_first_episode_binding",
             "episode_uid": None,
             "input_revision": None,

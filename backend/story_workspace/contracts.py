@@ -38,16 +38,7 @@ STORY_WORKSPACE_DREAM_ITEMS_MAX = 1000
 STORY_WORKSPACE_DREAM_RELATIONS_MAX = 100
 STORY_WORKSPACE_DREAM_EDITS_MAX = 1000
 STORY_WORKSPACE_DREAM_EDIT_FIELDS_MAX = 64
-STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX = 4000
-STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX = 255
-STORY_WORKSPACE_DREAM_AGENT_TOOL_REASON_MAX = 500
-STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX_BYTES = 8192
-STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX = 20
-STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX = 128
-STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX = 300
-STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX = 120
-STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX = 160
-STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX = 1000
+STORY_WORKSPACE_DREAM_INTERNAL_COMMAND_TEXT_MAX = 4000
 _StoryWorkspaceDreamPositiveInt = Annotated[StrictInt, Field(ge=1)]
 _StoryWorkspaceDreamNonNegativeInt = Annotated[StrictInt, Field(ge=0)]
 
@@ -129,7 +120,7 @@ class StoryWorkspaceDreamRunLifecycle(str, Enum):
 
     GENERATING = "generating"
     WAITING_CONFIRMATION = "waiting_confirmation"
-    CONTINUING = "continuing"
+    RUNNING = "running"
     RECENT = "recent"
 
 
@@ -291,10 +282,13 @@ class StoryWorkspaceDreamLaunchAccepted(_StoryWorkspaceDreamWireModel):
         return cls.model_validate(context.model_dump(mode="json"))
 
 
-class StoryWorkspaceDreamAgentMessageCommand(_StoryWorkspaceDreamWireModel):
-    """Untrusted text command for the run-bound Dream Agent widget."""
+class StoryWorkspaceDreamInternalCommand(_StoryWorkspaceDreamWireModel):
+    """Server-built episode/workflow command, never an HTTP request body."""
 
-    text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
+    text: str = Field(
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_INTERNAL_COMMAND_TEXT_MAX,
+    )
     idempotency_key: str = Field(
         min_length=1,
         max_length=255,
@@ -305,240 +299,16 @@ class StoryWorkspaceDreamAgentMessageCommand(_StoryWorkspaceDreamWireModel):
     @classmethod
     def message_text_must_not_be_blank(cls, value: str) -> str:
         if not value.strip():
-            raise ValueError("Dream Agent message text must not be blank")
+            raise ValueError("Dream internal command text must not be blank")
         return value
 
 
-_STORY_WORKSPACE_DREAM_AGENT_ACTIVITY_LABELS = {
-    "workspace_read": "读取工作区资料",
-    "dream_write": "更新 Dream 内容",
-    "reference_lookup": "查找参考资料",
-    "delegation": "协同处理创作任务",
-    "other": "处理 Dream 创作任务",
-}
-
-
-class StoryWorkspaceDreamAgentTextContent(_StoryWorkspaceDreamWireModel):
-    """One bounded public text part in its persisted message order."""
-
-    kind: Literal["text"] = "text"
-    text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
-    truncated: bool = False
-
-
-class StoryWorkspaceDreamAgentActivityContent(_StoryWorkspaceDreamWireModel):
-    """Server-authored activity summary; raw generic tool data is never carried."""
-
-    kind: Literal["activity"] = "activity"
-    id: str = Field(pattern=r"^dream_activity_[0-9a-f]{32,64}$")
-    category: Literal[
-        "workspace_read", "dream_write", "reference_lookup", "delegation", "other"
-    ]
-    label: Literal[
-        "读取工作区资料",
-        "更新 Dream 内容",
-        "查找参考资料",
-        "协同处理创作任务",
-        "处理 Dream 创作任务",
-    ]
-    status: Literal["running", "completed", "stopped"]
-
-    @model_validator(mode="after")
-    def label_matches_category(self) -> "StoryWorkspaceDreamAgentActivityContent":
-        if self.label != _STORY_WORKSPACE_DREAM_AGENT_ACTIVITY_LABELS[self.category]:
-            raise ValueError("Dream Agent activity label must match its fixed category")
-        return self
-
-
-StoryWorkspaceDreamAgentContent = (
-    StoryWorkspaceDreamAgentTextContent | StoryWorkspaceDreamAgentActivityContent
-)
-
-
-class StoryWorkspaceDreamAgentMessage(_StoryWorkspaceDreamWireModel):
-    """Safe message plus ordered Dream-only public content projection."""
-
-    id: str = Field(min_length=1, max_length=255)
-    role: Literal["user", "assistant"]
-    text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
-    truncated: bool = False
-    content: list[StoryWorkspaceDreamAgentContent]
-    created_at: datetime
-
-
-class StoryWorkspaceDreamAgentToolConfirmationOption(_StoryWorkspaceDreamWireModel):
-    """One bounded public option; runner IDs and raw values never cross the wire."""
-
-    label: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX)
-    value: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX)
-
-
-class StoryWorkspaceDreamAgentToolConfirmationQuestion(_StoryWorkspaceDreamWireModel):
-    """Server-authored AskUser question with an opaque public identity."""
-
-    id: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
-        pattern=r"^q[0-9]+$",
-    )
-    question: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
-    )
-    type: Literal["text", "textarea", "select", "checkbox", "radio", "number"]
-    required: StrictBool
-    multi_select: Optional[StrictBool] = None
-    options: Optional[
-        list[StoryWorkspaceDreamAgentToolConfirmationOption]
-    ] = Field(default=None, max_length=12)
-    placeholder: Optional[str] = Field(
-        default=None,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
-    )
-
-
-class StoryWorkspaceDreamAgentToolConfirmationNetwork(_StoryWorkspaceDreamWireModel):
-    """Allowlisted network summary without raw request parameters."""
-
-    host: Optional[str] = Field(
-        default=None,
-        max_length=253,
-        pattern=(
-            r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?"
-            r"|[A-Fa-f0-9:]+)(?::[0-9]{1,5})?$"
-        ),
-    )
-    policy: Literal["allowlist", "open", "deny", "unknown"]
-
-
-class StoryWorkspaceDreamAgentToolConfirmation(_StoryWorkspaceDreamWireModel):
-    """Safe display projection for one runtime-pending Dream tool decision."""
-
-    tool_call_id: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
-        pattern=r"^[A-Za-z0-9._:/-]+$",
-    )
-    kind: Literal["approval", "ask_user", "sandbox_network", "reject_only"]
-    tool_name: str = Field(
-        min_length=1,
-        max_length=80,
-        pattern=r"^[A-Za-z0-9 .:-]+$",
-    )
-    questions: Optional[
-        list[StoryWorkspaceDreamAgentToolConfirmationQuestion]
-    ] = Field(default=None, max_length=8)
-    network: Optional[StoryWorkspaceDreamAgentToolConfirmationNetwork] = None
-
-    @model_validator(mode="after")
-    def fields_match_confirmation_kind(self) -> "StoryWorkspaceDreamAgentToolConfirmation":
-        if self.kind == "ask_user":
-            if not self.questions or self.network is not None:
-                raise ValueError("AskUser confirmation requires questions only")
-        elif self.kind == "sandbox_network":
-            if self.network is None or self.questions is not None:
-                raise ValueError("Sandbox confirmation requires network only")
-        elif self.questions is not None or self.network is not None:
-            raise ValueError("Untyped confirmation cannot carry typed details")
-        return self
-
-
-class StoryWorkspaceDreamAgentMessageSnapshot(_StoryWorkspaceDreamWireModel):
-    """Persisted safe history plus transient execution availability."""
-
-    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
-    lifecycle: Literal["idle", "streaming"]
-    active_turn_id: Optional[str] = Field(default=None, max_length=255)
-    can_send: bool
-    send_block_reason: Optional[
-        Literal["generating", "waiting_confirmation", "confirming", "continuing", "busy"]
-    ] = None
-    messages: list[StoryWorkspaceDreamAgentMessage]
-    pending_tool_confirmations: list[StoryWorkspaceDreamAgentToolConfirmation] = Field(
-        default_factory=list,
-        max_length=256,
-    )
-    tool_confirmation_observation: Literal["known", "unknown"]
-    snapshot_at: datetime
-
-
-class StoryWorkspaceDreamAgentMessageAccepted(_StoryWorkspaceDreamWireModel):
-    """Acknowledge one durable, idempotently claimed widget command."""
+class StoryWorkspaceDreamInternalCommandAccepted(_StoryWorkspaceDreamWireModel):
+    """Internal claim result consumed by an owning workflow service."""
 
     story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     message_id: str = Field(min_length=1, max_length=255)
     accepted: Literal[True] = True
-
-
-_StoryWorkspaceDreamToolAnswerText = Annotated[
-    StrictStr,
-    Field(max_length=STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX),
-]
-_StoryWorkspaceDreamToolAnswerInteger = Annotated[
-    StrictInt,
-    Field(ge=-1_000_000_000, le=1_000_000_000),
-]
-_StoryWorkspaceDreamToolAnswerValue = (
-    _StoryWorkspaceDreamToolAnswerText
-    | StrictBool
-    | _StoryWorkspaceDreamToolAnswerInteger
-    | Annotated[list[_StoryWorkspaceDreamToolAnswerText], Field(max_length=20)]
-)
-
-
-class StoryWorkspaceDreamAgentToolConfirmationCommand(_StoryWorkspaceDreamWireModel):
-    """Untrusted decision for one pending tool on the run-bound Dream turn."""
-
-    tool_call_id: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
-        pattern=r"^[A-Za-z0-9._:/-]+$",
-    )
-    approved: StrictBool
-    reason: Optional[str] = Field(
-        default=None,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_REASON_MAX,
-    )
-    answers: Optional[
-        dict[
-            Annotated[
-                StrictStr,
-                Field(
-                    min_length=1,
-                    max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
-                ),
-            ],
-            _StoryWorkspaceDreamToolAnswerValue,
-        ]
-    ] = Field(default=None, max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX)
-
-    @model_validator(mode="after")
-    def validate_tool_confirmation_payload(
-        self,
-    ) -> "StoryWorkspaceDreamAgentToolConfirmationCommand":
-        if self.reason is not None and not self.reason.strip():
-            raise ValueError("reason must not be blank")
-        if self.answers is not None:
-            encoded = json.dumps(
-                self.answers,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ).encode("utf-8")
-            if len(encoded) > STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX_BYTES:
-                raise ValueError("answers payload is too large")
-        return self
-
-
-class StoryWorkspaceDreamAgentToolConfirmationAccepted(_StoryWorkspaceDreamWireModel):
-    """Safe acknowledgement without exposing the hidden thread or tool input."""
-
-    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
-    tool_call_id: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
-    )
-    approved: StrictBool
-    resolved: Literal[True] = True
 
 
 class StoryWorkspaceDreamToolInput(BaseModel):
@@ -784,6 +554,72 @@ class StoryWorkspaceDreamStageResponse(_StoryWorkspaceDreamWireModel):
         return self
 
 
+class StoryWorkspaceDreamAgentActivityResponse(_StoryWorkspaceDreamWireModel):
+    """Display-only Observer projection; never a Chat or Workflow truth source."""
+
+    activity: Literal[
+        "activity_started_hint",
+        "activity_settled_hint",
+        "waiting_confirmation_hint",
+        "turn_settled_hint",
+        "reconcile_requested",
+    ]
+    sequence: int = Field(ge=-1)
+    terminal_outcome: Literal["completed", "failed", "cancelled"] | None = None
+    needs_reconcile: bool = False
+    operation_scope: Literal[
+        "tool",
+        "subagent",
+        "content_generation",
+        "workflow_operation",
+    ] | None = None
+    operation_state: Literal[
+        "started",
+        "waiting_confirmation",
+        "succeeded",
+        "failed",
+    ] | None = None
+    operation_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def fields_match_activity_kind(self) -> "StoryWorkspaceDreamAgentActivityResponse":
+        if self.activity == "turn_settled_hint":
+            if (
+                self.terminal_outcome is None
+                or self.needs_reconcile
+                or self.operation_scope is not None
+                or self.operation_state is not None
+                or self.operation_id is not None
+            ):
+                raise ValueError("turn settlement requires only terminal_outcome")
+            return self
+        if self.terminal_outcome is not None:
+            raise ValueError("only turn settlement may expose terminal_outcome")
+
+        if self.activity == "reconcile_requested":
+            if (
+                not self.needs_reconcile
+                or self.operation_scope is not None
+                or self.operation_state is not None
+                or self.operation_id is not None
+            ):
+                raise ValueError("reconcile activity requires no operation")
+            return self
+        if self.needs_reconcile:
+            raise ValueError("needs_reconcile requires reconcile activity")
+
+        expected_states = {
+            "activity_started_hint": {"started"},
+            "activity_settled_hint": {"succeeded", "failed"},
+            "waiting_confirmation_hint": {"waiting_confirmation"},
+        }
+        if self.operation_scope is None or self.operation_state not in expected_states[
+            self.activity
+        ]:
+            raise ValueError("operation state does not match activity")
+        return self
+
+
 class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
     story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     thread_id: str = Field(min_length=1, max_length=255)
@@ -798,6 +634,12 @@ class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
     confirmation_accepted: bool = False
     confirmation_dispatched: bool = False
     confirmation_label: Literal["确认并继续"] = "确认并继续"
+    # Preserve the established wire contract when no live process-local hint
+    # exists; FastAPI/Pydantic only emit ``agentActivity`` for a real value.
+    agent_activity: StoryWorkspaceDreamAgentActivityResponse | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def confirmation_matches_file_completeness(
@@ -2847,7 +2689,7 @@ class StoryWorkspaceExecutionProjection:
     """Read-side execution facts projection consumed by the execution page.
 
     ``phase`` may carry projection states such as ``awaiting-guidance`` —
-    inferred from ``continuing`` plus blocked-step markers — which are
+    inferred from confirmed/failed domain facts plus blocked-step markers — which are
     deliberately NOT ``RunStatus`` enum values (audit note D13).
     """
 
@@ -3016,20 +2858,10 @@ __all__ = [
     "StoryWorkspaceContentStatus",
     "StoryWorkspaceDreamConfirmationAccepted",
     "StoryWorkspaceDreamConfirmationCommand",
-    "StoryWorkspaceDreamAgentMessage",
-    "StoryWorkspaceDreamAgentActivityContent",
-    "StoryWorkspaceDreamAgentContent",
-    "StoryWorkspaceDreamAgentMessageAccepted",
-    "StoryWorkspaceDreamAgentMessageCommand",
-    "StoryWorkspaceDreamAgentMessageSnapshot",
-    "StoryWorkspaceDreamAgentTextContent",
-    "StoryWorkspaceDreamAgentToolConfirmation",
-    "StoryWorkspaceDreamAgentToolConfirmationAccepted",
-    "StoryWorkspaceDreamAgentToolConfirmationCommand",
-    "StoryWorkspaceDreamAgentToolConfirmationNetwork",
-    "StoryWorkspaceDreamAgentToolConfirmationOption",
-    "StoryWorkspaceDreamAgentToolConfirmationQuestion",
+    "StoryWorkspaceDreamInternalCommand",
+    "StoryWorkspaceDreamInternalCommandAccepted",
     "StoryWorkspaceDreamEdit",
+    "StoryWorkspaceDreamAgentActivityResponse",
     "StoryWorkspaceDreamFilesResponse",
     "StoryWorkspaceDreamReentryCollection",
     "StoryWorkspaceDreamReentryItem",

@@ -78,10 +78,7 @@ import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
 import AIInputDock from './AIInputDock';
-import ChatPanel, {
-  type ChatPanelDreamToolConfirmationSnapshot,
-  type ChatPanelRecoverySnapshot,
-} from './ChatPanel';
+import ChatPanel, { type ChatPanelRecoverySnapshot } from './ChatPanel';
 import {
   type Attachment,
   type UploadedFile,
@@ -104,27 +101,18 @@ import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
-import { filterStoryWorkspaceGuidanceMessages } from '../../lib/story-workspace-guidance';
-import { storyWorkspaceFetchDreamAgentSnapshot } from '../../hooks/story-workspace/useStoryWorkspaceDreamAgent';
 import { getDateLocale } from '../../i18n';
 import { listDecks, getDeck, type Deck } from '../../api/voiceApi';
 import DeckChatSelector from '../deck/DeckChatSelector';
 import PluginReceiptBadge from './PluginReceiptBadge';
 import {
-  deriveSettledToolCallIdsFromHistory,
-  loadChatHistoryThenRuntimeStatus,
-  parseChatThreadStatus,
-  runtimePendingToolCallIdsFromStatus,
-  type ChatThreadStatusResult,
-} from './toolConfirmation';
+  claudeThreadHydrationRetryDelayMs,
+  hydrateClaudeThreadSession,
+  type ClaudeThreadRecord,
+} from './threadSessionHydration';
+import { chatReconnectNonceForHydratedThread } from './chatRuntimeState';
 
-interface ChatThread {
-  id: string;
-  title: string | null;
-  deck_id?: string | null;
-  voice_id?: string | null;
-  created_at: string;
-  updated_at: string;
+interface ChatThread extends ClaudeThreadRecord {
   match?: {
     strategy: string;
     retriever?: string;
@@ -132,16 +120,6 @@ interface ChatThread {
     fields: string[];
     excerpt?: string;
   };
-}
-
-interface RawChatMessage {
-  id: string;
-  role: string;
-  /** Parsed UIMessage['parts'] array — returned by the API already deserialized. */
-  parts: UIMessage['parts'];
-  /** Parsed ChatMetadata — returned by the API already deserialized. */
-  metadata?: Record<string, unknown>;
-  created_at: string;
 }
 
 interface ChatViewProps {
@@ -339,82 +317,6 @@ async function deleteThread(threadId: string): Promise<boolean> {
   }
 }
 
-async function fetchThreadStatus(threadId: string): Promise<ChatThreadStatusResult | null> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
-      { headers: { 'Authorization': `Bearer ${getAuthToken()}` } },
-    );
-    if (!res.ok) return null;
-    return parseChatThreadStatus(await res.json());
-  } catch {
-    return null;
-  }
-}
-
-interface ThreadMessagesSnapshot {
-  thread?: ChatThread;
-  messages: UIMessage[];
-  dreamRunId?: string | null;
-}
-
-const STORY_WORKSPACE_RUN_ID = /^run_[0-9a-f]{32}$/;
-
-function resolveThreadDreamRunId(messages: readonly RawChatMessage[]): string | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const metadata = messages[index]?.metadata;
-    if (!metadata) continue;
-    const candidate = metadata.story_workspace_run_id ?? metadata.workflowRunId;
-    if (typeof candidate === 'string' && STORY_WORKSPACE_RUN_ID.test(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-async function fetchChatDreamToolConfirmations(
-  runId: string | null | undefined,
-  running: boolean,
-): Promise<ChatPanelDreamToolConfirmationSnapshot | null> {
-  if (!runId || !running) return null;
-  try {
-    const snapshot = await storyWorkspaceFetchDreamAgentSnapshot(runId);
-    if (snapshot.toolConfirmationObservation !== 'known'
-      || snapshot.pendingToolConfirmations.length === 0) return null;
-    return { runId, confirmations: snapshot.pendingToolConfirmations };
-  } catch {
-    return null;
-  }
-}
-
-async function fetchThreadMessages(threadId: string): Promise<ThreadMessagesSnapshot> {
-  try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
-    if (!res.ok) return { messages: [] };
-    const data = await res.json() as { thread?: ChatThread; messages?: RawChatMessage[] };
-    const msgs = data.messages ?? [];
-    // DEC-032: guidance rows persist in chat_message but never render as Chat
-    // bubbles — filter them at the history-load seam (Task 4 Step 0).
-    return { thread: data.thread, dreamRunId: resolveThreadDreamRunId(msgs), messages: filterStoryWorkspaceGuidanceMessages(msgs.map((m) => {
-      // parts is already a parsed list — aligned with better-chatbot
-      // ChatRepository.selectMessagesByThreadId which returns parts directly.
-      const parts: UIMessage['parts'] = Array.isArray(m.parts) && m.parts.length > 0
-        ? m.parts
-        : [{ type: 'text', text: '' }];
-      const metadata = m.metadata && typeof m.metadata === 'object' ? m.metadata : undefined;
-      return {
-        id: m.id,
-        role: m.role as UIMessage['role'],
-        parts,
-        metadata,
-        createdAt: new Date(m.created_at),
-      };
-    })) };
-  } catch {
-    return { messages: [] };
-  }
-}
-
 function ChatViewContent({
   threadId: initialThreadId,
   requestedThreadId,
@@ -463,7 +365,7 @@ function ChatViewContent({
   const [initialRuntimePendingToolCallIds, setInitialRuntimePendingToolCallIds] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
-  const [initialDreamToolConfirmations, setInitialDreamToolConfirmations] = useState<ChatPanelDreamToolConfirmationSnapshot | null>(null);
+  const [initialRuntimeRunning, setInitialRuntimeRunning] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [draftInputError, setDraftInputError] = useState<string | null>(null);
   const [availableDecks, setAvailableDecks] = useState<Deck[]>([]);
@@ -674,7 +576,7 @@ function ChatViewContent({
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
-    setInitialDreamToolConfirmations(null);
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(true);
     if (requestedThreadId === activeThreadId) {
       setThreadReloadNonce((value) => value + 1);
@@ -700,7 +602,7 @@ function ChatViewContent({
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
-    setInitialDreamToolConfirmations(null);
+    setInitialRuntimeRunning(false);
     setHasConversationStarted(false);
     setQueuedPrompt('');
     setQueuedAttachments([]);
@@ -711,6 +613,7 @@ function ChatViewContent({
   // Fetch messages for the active thread (following better-chatbot pattern:
   // parent fetches history and passes as initialMessages to the chat component).
   // Load history, then reconnect SSE when the backend turn is still running.
+  const hydratedMessagesThreadRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeThreadId) return;
     if (freshQueuedThreadIdRef.current === activeThreadId) {
@@ -718,34 +621,44 @@ function ChatViewContent({
       return;
     }
     let cancelled = false;
+    let retryTimer: number | null = null;
+    let hydrationAttempt = 0;
+    const threadChanged = hydratedMessagesThreadRef.current !== activeThreadId;
+    hydratedMessagesThreadRef.current = activeThreadId;
     setIsLoadingMessages(true);
-    setThreadMessages(null);
-    setInitialSettledToolCallIds(new Set<string>());
-    setInitialRuntimePendingToolCallIds(new Set<string>());
-    setInitialDreamToolConfirmations(null);
+    if (threadChanged) {
+      setThreadMessages(null);
+      setInitialSettledToolCallIds(new Set<string>());
+      setInitialRuntimePendingToolCallIds(new Set<string>());
+      setInitialRuntimeRunning(false);
+    }
 
-    void (async () => {
-      const { history: snapshot, status } = await loadChatHistoryThenRuntimeStatus(
-        () => fetchThreadMessages(activeThreadId),
-        () => fetchThreadStatus(activeThreadId),
-      );
+    const hydrate = async () => {
+      let snapshot;
+      try {
+        snapshot = await hydrateClaudeThreadSession(activeThreadId);
+      } catch {
+        if (!cancelled) {
+          retryTimer = window.setTimeout(
+            () => void hydrate(),
+            claudeThreadHydrationRetryDelayMs(hydrationAttempt),
+          );
+          hydrationAttempt += 1;
+        }
+        return;
+      }
       if (cancelled) return;
       const msgs = snapshot.messages;
-      const dreamToolConfirmations = await fetchChatDreamToolConfirmations(
-        snapshot.dreamRunId,
-        status?.running === true,
-      );
-      if (cancelled) return;
-      setInitialSettledToolCallIds(deriveSettledToolCallIdsFromHistory(msgs, status));
-      setInitialRuntimePendingToolCallIds(runtimePendingToolCallIdsFromStatus(status));
-      setInitialDreamToolConfirmations(dreamToolConfirmations);
+      setInitialSettledToolCallIds(snapshot.settledToolCallIds);
+      setInitialRuntimePendingToolCallIds(snapshot.runtimePendingToolCallIds);
+      setInitialRuntimeRunning(snapshot.running);
       setThreadMessages(msgs);
       setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
       setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
       if (msgs.length > 0) setHasConversationStarted(true);
       setIsLoadingMessages(false);
 
-      if (status?.running) {
+      if (snapshot.running) {
         setReconnectStreamNonce((value) => value + 1);
       }
 
@@ -753,10 +666,12 @@ function ChatViewContent({
       void hydrateThreadPlan(activeThreadId);
       // claude-todo §5.6: 并行水合 todos store，恢复弹层「待办」分区。
       void hydrateThreadTodos(activeThreadId);
-    })();
+    };
+    void hydrate();
 
     return () => {
       cancelled = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
   }, [activeThreadId, threadReloadNonce]);
 
@@ -766,28 +681,19 @@ function ChatViewContent({
   const handleReconnectComplete = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     if (!activeThreadId) return undefined;
     const requestedThreadId = activeThreadId;
-    const { history: snapshot, status } = await loadChatHistoryThenRuntimeStatus(
-      () => fetchThreadMessages(requestedThreadId),
-      () => fetchThreadStatus(requestedThreadId),
-    );
+    const snapshot = await hydrateClaudeThreadSession(requestedThreadId);
     if (activeThreadIdRef.current !== requestedThreadId) return undefined;
-    const settledToolCallIds = deriveSettledToolCallIdsFromHistory(snapshot.messages, status);
-    const runtimePendingToolCallIds = runtimePendingToolCallIdsFromStatus(status);
-    const dreamToolConfirmations = await fetchChatDreamToolConfirmations(
-      snapshot.dreamRunId,
-      status?.running === true,
-    );
-    setInitialSettledToolCallIds(settledToolCallIds);
-    setInitialRuntimePendingToolCallIds(runtimePendingToolCallIds);
-    setInitialDreamToolConfirmations(dreamToolConfirmations);
+    setInitialSettledToolCallIds(snapshot.settledToolCallIds);
+    setInitialRuntimePendingToolCallIds(snapshot.runtimePendingToolCallIds);
+    setInitialRuntimeRunning(snapshot.running);
     setThreadMessages(snapshot.messages);
     setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
     setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
     return {
       messages: snapshot.messages,
-      settledToolCallIds,
-      runtimePendingToolCallIds,
-      dreamToolConfirmations,
+      settledToolCallIds: snapshot.settledToolCallIds,
+      runtimePendingToolCallIds: snapshot.runtimePendingToolCallIds,
+      running: snapshot.running,
     };
   }, [activeThreadId]);
 
@@ -805,7 +711,7 @@ function ChatViewContent({
     setThreadMessages([]);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
-    setInitialDreamToolConfirmations(null);
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(false);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
@@ -857,7 +763,7 @@ function ChatViewContent({
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
-    setInitialDreamToolConfirmations(null);
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(false);
     setActiveThreadId(null);
     setHasConversationStarted(false);
@@ -878,7 +784,7 @@ function ChatViewContent({
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
-    setInitialDreamToolConfirmations(null);
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(true);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
@@ -1025,7 +931,7 @@ function ChatViewContent({
       setThreadMessages(null);
       setInitialSettledToolCallIds(new Set<string>());
       setInitialRuntimePendingToolCallIds(new Set<string>());
-      setInitialDreamToolConfirmations(null);
+      setInitialRuntimeRunning(false);
       setHasConversationStarted(false);
       setQueuedPrompt('');
       setQueuedAttachments([]);
@@ -1253,10 +1159,13 @@ function ChatViewContent({
                   threadId={activeThreadId}
                   initialMessages={threadMessages ?? undefined}
                   isLoading={isLoadingMessages}
-                  reconnectStreamNonce={reconnectStreamNonce}
+                  reconnectStreamNonce={chatReconnectNonceForHydratedThread(
+                    initialRuntimeRunning,
+                    reconnectStreamNonce,
+                  )}
                   initialSettledToolCallIds={initialSettledToolCallIds}
                   initialRuntimePendingToolCallIds={initialRuntimePendingToolCallIds}
-                  initialDreamToolConfirmations={initialDreamToolConfirmations}
+                  initialRuntimeRunning={initialRuntimeRunning}
                   onReconnectComplete={notifyReconnectComplete}
                   queuedPrompt={queuedPrompt}
                   queuedAttachments={queuedAttachments}

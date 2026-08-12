@@ -7,8 +7,8 @@
 - 来源 Issue: [SUO-300](/SUO/issues/SUO-300) / `SUO-299-SH-001`
 - Parent / Ancestor: [SUO-301](/SUO/issues/SUO-301) / [SUO-273](/SUO/issues/SUO-273) / [SUO-198](/SUO/issues/SUO-198)
 - 关联设计稿:
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.5.4 / §7.5 / `DEC-026`
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §10.5 / §11.7 / `DEC-026`
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §3.5.4 / §7.5 / `DEC-026`
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §10.5 / §11.7 / `DEC-026`
 - 关联任务: `docs/task/task_205b_backend_story-workspace-contract-migration.md`
 - 关联 Stage: `docs/stage/stage_story-workspace.md` §13.2～§13.3（`SUO-301-direct-repair`）
 - 执行 Agent: `ExecTaskAgent`

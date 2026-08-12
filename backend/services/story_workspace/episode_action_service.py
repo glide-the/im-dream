@@ -1,4 +1,4 @@
-"""Evidence-derived Episode actions dispatched through the Dream message seam."""
+"""Evidence-derived Episode actions dispatched as internal Dream commands."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 try:
-    from services.story_workspace.dream_agent_message_service import (
-        STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
-        StoryWorkspaceDreamAgentMessageService,
-        StoryWorkspaceDreamAgentPendingDispatch,
+    from services.story_workspace.dream_internal_command_service import (
+        STORY_WORKSPACE_DREAM_INTERNAL_COMMAND_KIND,
+        StoryWorkspaceDreamInternalCommandService,
+        StoryWorkspaceDreamInternalPendingDispatch,
     )
     from services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
@@ -37,7 +37,7 @@ try:
         story_workspace_trusted_episode_action_instruction,
     )
     from story_workspace.contracts import (
-        StoryWorkspaceDreamAgentMessageCommand,
+        StoryWorkspaceDreamInternalCommand,
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceEpisodeAction,
         StoryWorkspaceEpisodeActionAccepted,
@@ -54,10 +54,10 @@ try:
         StoryWorkspaceEpisodeWorkflowProjection,
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
-    from backend.services.story_workspace.dream_agent_message_service import (
-        STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
-        StoryWorkspaceDreamAgentMessageService,
-        StoryWorkspaceDreamAgentPendingDispatch,
+    from backend.services.story_workspace.dream_internal_command_service import (
+        STORY_WORKSPACE_DREAM_INTERNAL_COMMAND_KIND,
+        StoryWorkspaceDreamInternalCommandService,
+        StoryWorkspaceDreamInternalPendingDispatch,
     )
     from backend.services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
@@ -74,7 +74,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         story_workspace_trusted_episode_action_instruction,
     )
     from backend.story_workspace.contracts import (
-        StoryWorkspaceDreamAgentMessageCommand,
+        StoryWorkspaceDreamInternalCommand,
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceEpisodeAction,
         StoryWorkspaceEpisodeActionAccepted,
@@ -1201,7 +1201,7 @@ class StoryWorkspaceEpisodeNextActionResolver:
 
 
 class StoryWorkspaceEpisodeActionService:
-    """Build controlled envelopes, then reuse the durable Dream message claim."""
+    """Build controlled envelopes, then reuse the durable internal command claim."""
 
     def __init__(
         self,
@@ -1212,7 +1212,7 @@ class StoryWorkspaceEpisodeActionService:
         resolver: StoryWorkspaceEpisodeNextActionResolver | None = None,
     ) -> None:
         self._db = db
-        self._message_service = StoryWorkspaceDreamAgentMessageService(
+        self._message_service = StoryWorkspaceDreamInternalCommandService(
             db,
             thread_factory=thread_factory,
             db_factory=db_factory,
@@ -1238,7 +1238,7 @@ class StoryWorkspaceEpisodeActionService:
                 continue
             if (
                 isinstance(metadata, dict)
-                and metadata.get("kind") == STORY_WORKSPACE_DREAM_AGENT_USER_KIND
+                and metadata.get("kind") == STORY_WORKSPACE_DREAM_INTERNAL_COMMAND_KIND
                 and metadata.get("story_workspace_run_id") == run_id
                 and str(metadata.get("actor_id") or "") == actor_id
                 and metadata.get("idempotency_key") == key
@@ -1262,7 +1262,7 @@ class StoryWorkspaceEpisodeActionService:
         text: str,
     ) -> tuple[
         StoryWorkspaceEpisodeActionAccepted,
-        StoryWorkspaceDreamAgentPendingDispatch | None,
+        StoryWorkspaceDreamInternalPendingDispatch | None,
     ]:
         replayed = self._has_existing_key(
             run_id=run_id,
@@ -1270,18 +1270,11 @@ class StoryWorkspaceEpisodeActionService:
             actor_id=actor_id,
             key=key,
         )
-        accepted, pending = self._message_service.claim_message(
-            run_id=run_id,
-            thread_id=context.thread_id,
-            actor_id=actor_id,
-            context=context,
-            command=StoryWorkspaceDreamAgentMessageCommand(
-                text=text,
-                idempotencyKey=key,
-            ),
-        )
         provenance = {
             "schema": "story-workspace-episode-action/v1",
+            "workflow_run_id": run_id,
+            "thread_id": context.thread_id,
+            "actor_id": actor_id,
             "action": (
                 capability.value
                 if isinstance(capability, StoryWorkspaceEpisodeAction)
@@ -1293,64 +1286,17 @@ class StoryWorkspaceEpisodeActionService:
             "expected_manifest_revision": manifest_revision,
             "expected_workflow_revision": workflow_revision,
         }
-        row = self._db.execute(
-            "SELECT metadata FROM chat_message WHERE id = %s",
-            (accepted.message_id,),
-        ).fetchone()
-        if row is None:
-            raise StoryWorkspaceEpisodeActionError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                503,
-            )
-        try:
-            metadata = json.loads(row["metadata"] or "{}")
-        except (TypeError, ValueError) as exc:
-            raise StoryWorkspaceEpisodeActionError(
-                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
-                503,
-            ) from exc
-        existing = metadata.get("story_workspace_episode_action")
-        if existing is not None and existing != provenance:
-            raise StoryWorkspaceEpisodeActionError("IDEMPOTENCY_CONFLICT", 409)
-        if existing is None:
-            previous = row["metadata"]
-            metadata["story_workspace_episode_action"] = provenance
-            updated = self._db.execute(
-                "UPDATE chat_message SET metadata = %s WHERE id = %s AND metadata = %s",
-                (
-                    json.dumps(
-                        metadata,
-                        ensure_ascii=False,
-                        allow_nan=False,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    ),
-                    accepted.message_id,
-                    previous,
-                ),
-            )
-            if updated.rowcount != 1:
-                self._db.rollback()
-                raced = self._db.execute(
-                    "SELECT metadata FROM chat_message WHERE id = %s",
-                    (accepted.message_id,),
-                ).fetchone()
-                try:
-                    raced_metadata = json.loads(raced["metadata"] or "{}")
-                except (TypeError, ValueError, KeyError) as exc:
-                    raise StoryWorkspaceEpisodeActionError(
-                        "DREAM_AGENT_MESSAGE_BUSY",
-                        409,
-                    ) from exc
-                if raced_metadata.get("story_workspace_episode_action") != provenance:
-                    raise StoryWorkspaceEpisodeActionError(
-                        "DREAM_AGENT_MESSAGE_BUSY",
-                        409,
-                    )
-            else:
-                self._db.commit()
-            if pending is not None:
-                pending.metadata["story_workspace_episode_action"] = provenance
+        accepted, pending = self._message_service.claim_message(
+            run_id=run_id,
+            thread_id=context.thread_id,
+            actor_id=actor_id,
+            context=context,
+            command=StoryWorkspaceDreamInternalCommand(
+                text=text,
+                idempotencyKey=key,
+            ),
+            provenance=provenance,
+        )
         return StoryWorkspaceEpisodeActionAccepted(
             runId=run_id,
             episodeId=episode_id,
@@ -1417,7 +1363,7 @@ class StoryWorkspaceEpisodeActionService:
         command: StoryWorkspaceEpisodeBindingRecoveryCommand,
     ) -> tuple[
         StoryWorkspaceEpisodeActionAccepted,
-        StoryWorkspaceDreamAgentPendingDispatch | None,
+        StoryWorkspaceDreamInternalPendingDispatch | None,
     ]:
         return self._claim(
             run_id=run_id,
@@ -1446,7 +1392,7 @@ class StoryWorkspaceEpisodeActionService:
         command: StoryWorkspaceEpisodeActionContinueCommand,
     ) -> tuple[
         StoryWorkspaceEpisodeActionAccepted,
-        StoryWorkspaceDreamAgentPendingDispatch | None,
+        StoryWorkspaceDreamInternalPendingDispatch | None,
     ]:
         manifest_revision = getattr(surface, "manifest_revision", None)
         surface_revision = getattr(surface, "etag", None) or manifest_revision
@@ -1552,7 +1498,7 @@ class StoryWorkspaceEpisodeActionService:
         selected: StoryWorkspaceTrustedEpisodeAction,
     ) -> tuple[
         StoryWorkspaceEpisodeActionAccepted,
-        StoryWorkspaceDreamAgentPendingDispatch | None,
+        StoryWorkspaceDreamInternalPendingDispatch | None,
     ]:
         """Dispatch a server-selected V2 option without trusting browser target data."""
 

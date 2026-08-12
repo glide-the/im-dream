@@ -60,7 +60,6 @@ export type WorkflowRunStatus =
   | 'pending_review'
   | 'confirmed'
   | 'rejected'
-  | 'continuing'
   | 'completed'
   | 'failed'
   | 'cancelled';
@@ -339,7 +338,7 @@ function storyWorkspaceValidateDreamRunLifecycle(
     && (confirmationAccepted || confirmationDispatched)) {
     throw new Error('Dream re-entry response has incompatible pre-confirmation facts.');
   }
-  if ((lifecycle === 'continuing' || lifecycle === 'recent') && !confirmationAccepted) {
+  if ((lifecycle === 'running' || lifecycle === 'recent') && !confirmationAccepted) {
     throw new Error('Dream re-entry response has incompatible post-confirmation facts.');
   }
   if (lifecycle === 'recent' && !confirmationDispatched) {
@@ -355,7 +354,7 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
     const run = storyWorkspaceReadDreamRunRecord(candidate, 'run');
     const lifecycle = storyWorkspaceReadDreamRunString(run.lifecycle, 'lifecycle');
     const group = storyWorkspaceReadDreamRunString(run.group, 'group');
-    if (!['generating', 'waiting_confirmation', 'continuing', 'recent'].includes(lifecycle)) {
+    if (!['generating', 'waiting_confirmation', 'running', 'recent'].includes(lifecycle)) {
       throw new Error('Dream re-entry response has invalid lifecycle.');
     }
     if (group !== 'in_progress' && group !== 'recent') {

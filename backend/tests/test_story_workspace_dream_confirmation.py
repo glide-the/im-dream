@@ -1,4 +1,4 @@
-"""Focused tests for the one-shot Dream confirmation continuation."""
+"""Focused tests for the one-shot Dream confirmation follow-up."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +30,7 @@ for candidate in (str(BACKEND_ROOT), str(REPOSITORY_ROOT)):
 import tests._sdk_stubs  # noqa: F401 - stub optional SDK before service import
 
 import database
+from agent_stream_events import NormalizedAgentEvent
 from backend.schema import legacy_main_sqlite
 from backend.tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 import story_workspace.contracts as contracts_module
@@ -515,25 +517,26 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
 
     def test_agent_resave_cannot_roll_back_authoritative_claim_lease(self) -> None:
         persisted = self.submit()
+        lease_base = time.time()
         claimed = self.fixture.claim(
             persisted.dispatch,
             claim_id="claim-resave-owner",
-            now_s=0.0,
+            now_s=lease_base,
             lease_duration_s=2.0,
         )
         coordinator = StoryWorkspaceDreamConfirmationCoordinator(
             database.get_db,
-            lease_clock=ManualClock(98.0),
+            lease_clock=ManualClock(lease_base + 98.0),
         )
         self.assertTrue(coordinator._set_claim_lease_sync(claimed, 2.0))
         authoritative = self.fixture.rows()[0]
         self.assertEqual(
             authoritative["metadata"]["dispatch_claim_lease_until"],
-            100.0,
+            lease_base + 100.0,
         )
         self.assertEqual(
             claimed.metadata["dispatch_claim_lease_until"],
-            2.0,
+            lease_base + 2.0,
         )
 
         async def _resave() -> None:
@@ -562,7 +565,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         self.assertEqual(rewritten, authoritative)
         self.assertEqual(
             rewritten["metadata"]["dispatch_claim_lease_until"],
-            100.0,
+            lease_base + 100.0,
         )
         self.assertEqual(
             rewritten["metadata"]["kind"],
@@ -573,6 +576,63 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
             structured["command"],
             command().model_dump(mode="json", by_alias=True),
         )
+
+    def test_confirmation_turn_guard_requires_current_lease_and_allows_heartbeat_drift(
+        self,
+    ) -> None:
+        persisted = self.submit()
+        claimed = self.fixture.claim(
+            persisted.dispatch,
+            claim_id="claim-guard",
+            now_s=100.0,
+            lease_duration_s=30.0,
+        )
+        with database.get_db() as db:
+            row = db.execute(
+                "SELECT metadata FROM chat_message WHERE id = ?",
+                (claimed.message_id,),
+            ).fetchone()
+            authoritative = json.loads(row["metadata"])
+            authoritative["dispatch_claim_lease_until"] = 200.0
+            db.execute(
+                "UPDATE chat_message SET metadata = ? WHERE id = ?",
+                (json.dumps(authoritative), claimed.message_id),
+            )
+            db.commit()
+
+            self.assertTrue(
+                confirmation_module.story_workspace_guard_persisted_dream_confirmation_turn(
+                    db,
+                    thread_id=THREAD_ID,
+                    actor_id=ACTOR_ID,
+                    message_id=claimed.message_id,
+                    parts=claimed.parts,
+                    metadata=claimed.metadata,
+                    clock=ManualClock(150.0),
+                )
+            )
+            with self.assertRaises(StoryWorkspaceDreamConfirmationError):
+                confirmation_module.story_workspace_guard_persisted_dream_confirmation_turn(
+                    db,
+                    thread_id=THREAD_ID,
+                    actor_id=ACTOR_ID,
+                    message_id=claimed.message_id,
+                    parts=claimed.parts,
+                    metadata=claimed.metadata,
+                    clock=ManualClock(201.0),
+                )
+            forged_future = dict(claimed.metadata)
+            forged_future["dispatch_claim_lease_until"] = 201.0
+            with self.assertRaises(StoryWorkspaceDreamConfirmationError):
+                confirmation_module.story_workspace_guard_persisted_dream_confirmation_turn(
+                    db,
+                    thread_id=THREAD_ID,
+                    actor_id=ACTOR_ID,
+                    message_id=claimed.message_id,
+                    parts=claimed.parts,
+                    metadata=forged_future,
+                    clock=ManualClock(150.0),
+                )
 
     def test_agent_cannot_recreate_missing_hidden_confirmation_row(self) -> None:
         persisted = self.submit()
@@ -725,29 +785,31 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
             ).fetchone()
         self.assertIsNone(row)
 
-    def test_ordinary_chat_messages_still_insert_and_update(self) -> None:
+    def test_ordinary_chat_message_identity_is_immutable(self) -> None:
         message_id = "ordinary-user-message"
+        parts = [{"type": "text", "text": "first"}]
+        metadata = {"kind": "ordinary-chat", "revision": 1}
         self.persist_agent_request(
             message_id=message_id,
-            parts=[{"type": "text", "text": "first"}],
-            metadata={"kind": "ordinary-chat", "revision": 1},
+            parts=parts,
+            metadata=metadata,
         )
         self.persist_agent_request(
             message_id=message_id,
-            parts=[{"type": "text", "text": "updated"}],
-            metadata={"kind": "ordinary-chat", "revision": 2},
+            parts=parts,
+            metadata=metadata,
         )
+        with self.assertRaises(database.ChatMessageIdentityConflict):
+            self.persist_agent_request(
+                message_id=message_id,
+                parts=[{"type": "text", "text": "updated"}],
+                metadata={"kind": "ordinary-chat", "revision": 2},
+            )
         row = next(
             item for item in self.fixture.rows() if item["id"] == message_id
         )
-        self.assertEqual(
-            row["parts"],
-            [{"type": "text", "text": "updated"}],
-        )
-        self.assertEqual(
-            row["metadata"],
-            {"kind": "ordinary-chat", "revision": 2},
-        )
+        self.assertEqual(row["parts"], parts)
+        self.assertEqual(row["metadata"], metadata)
 
     def test_url_body_and_authoritative_thread_mismatches_are_rejected(self) -> None:
         self.assert_error(409, storyWorkspaceRunId=OTHER_RUN_ID)
@@ -1179,7 +1241,11 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             database.get_db,
             dispatcher_factory=lambda: consume,
             reconcile_interval_s=3600,
-            lease_clock=ManualClock(3_000.0),
+            # The Agent-side guard intentionally uses production wall time.
+            # Keep this integration test's coordinator lease on the same
+            # clock domain; fixed historical seconds make an otherwise valid
+            # claim look expired before the request can observe it.
+            lease_clock=ManualClock(time.time()),
             claim_id_factory=lambda: "claim-agent-resave",
         )
         self.assertTrue(coordinator.schedule(persisted.dispatch))
@@ -1905,10 +1971,12 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
         requests = []
 
         class FakeFactory:
-            async def run_streaming(self, request):
+            async def run_events(self, request):
                 requests.append(request)
-                yield 'data: {"type":"message-final","text":"done"}\n\n'
-                yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+                yield NormalizedAgentEvent.create("message-final", {"text": "done"})
+                yield NormalizedAgentEvent.create(
+                    "finish", {"finishReason": "stop"}
+                )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "resume-context.db"
@@ -1997,11 +2065,9 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
                     )
                 )
 
-        context = requests[0].story_workspace_dream_context
-        self.assertEqual(context.workflow_run_id, RUN_ID)
-        self.assertEqual(context.thread_id, THREAD_ID)
-        self.assertEqual(context.deck_id, "deck-dream")
-        self.assertEqual(context.binding_revision, 1)
+        request = requests[0]
+        self.assertEqual(request.thread_id, THREAD_ID)
+        self.assertFalse(hasattr(request, "story_workspace_dream_context"))
 
     async def test_running_thread_is_queued_on_factory_lock_and_uses_same_turn_data(self) -> None:
         release = asyncio.Event()
@@ -2009,27 +2075,18 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
         requests = []
 
         class FakeFactory:
-            async def run_streaming(self, request):
+            async def run_events(self, request):
                 requests.append(request)
                 entered.set()
                 await release.wait()
-                yield 'data: {"type":"message-final","text":"done"}\n\n'
-                yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+                yield NormalizedAgentEvent.create("message-final", {"text": "done"})
+                yield NormalizedAgentEvent.create(
+                    "finish", {"finishReason": "stop"}
+                )
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             FakeFactory(),
             request_factory=lambda **values: SimpleNamespace(**values),
-            context_loader=lambda thread_id, actor_id, metadata: StoryWorkspaceDreamRunContext(
-                workflow_run_id=RUN_ID,
-                thread_id=thread_id,
-                deck_id="deck-dream",
-                deck_plugin_id="ink.dream.story-workflow",
-                deck_plugin_version="1.0.0",
-                deck_plugin_binding_id="dpb_" + "2" * 32,
-                binding_revision=1,
-                deck_runtime_snapshot_id="drs_" + "5" * 32,
-                runtime_plugin_lock_id="rpl_" + "1" * 32,
-            ),
         )
         parts = [{"type": "text", "text": "structured"}]
         metadata = {
@@ -2048,14 +2105,11 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
         self.assertTrue(request.resume)
         self.assertIs(request.message_parts, parts)
         self.assertIs(request.message_metadata, metadata)
-        self.assertEqual(
-            request.story_workspace_dream_context.workflow_run_id,
-            RUN_ID,
-        )
+        self.assertFalse(hasattr(request, "story_workspace_dream_context"))
 
     async def test_dispatcher_exception_does_not_raise_to_caller(self) -> None:
         class BrokenFactory:
-            def run_streaming(self, _request):
+            def run_events(self, _request):
                 raise RuntimeError("dispatcher broke")
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
@@ -2068,8 +2122,13 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
 
     async def test_error_frame_is_not_successful_consumption(self) -> None:
         class ErrorFactory:
-            async def run_streaming(self, _request):
-                yield 'data: {"type":"error","errorText":"agent failed"}\n\n'
+            async def run_events(self, _request):
+                yield NormalizedAgentEvent.create(
+                    "error", {"errorText": "agent failed"}
+                )
+                yield NormalizedAgentEvent.create(
+                    "finish", {"finishReason": "error"}
+                )
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             ErrorFactory(),
@@ -2081,8 +2140,10 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
 
     async def test_finish_stop_without_message_final_is_not_consumed(self) -> None:
         class CancelledFactory:
-            async def run_streaming(self, _request):
-                yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+            async def run_events(self, _request):
+                yield NormalizedAgentEvent.create(
+                    "finish", {"finishReason": "stop"}
+                )
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             CancelledFactory(),
@@ -2094,8 +2155,8 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
 
     async def test_message_final_without_terminal_finish_is_not_consumed(self) -> None:
         class TruncatedFactory:
-            async def run_streaming(self, _request):
-                yield 'data: {"type":"message-final","text":"done"}\n\n'
+            async def run_events(self, _request):
+                yield NormalizedAgentEvent.create("message-final", {"text": "done"})
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             TruncatedFactory(),
@@ -2107,6 +2168,21 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
 
 
 class StoryWorkspaceDreamConfirmationRouteTests(unittest.TestCase):
+    def test_public_router_has_no_legacy_dream_conversation_protocol(self) -> None:
+        paths = {route.path for route in story_workspace.router.routes}
+        self.assertFalse(
+            {
+                path
+                for path in paths
+                if "/dream-agent/" in path
+            }
+        )
+        self.assertIn(
+            "/api/story-workspace/workflow-runs/"
+            "{workflow_run_id}/dream-confirmation",
+            paths,
+        )
+
     def test_post_returns_202_camel_and_passes_only_authenticated_actor(self) -> None:
         calls = []
 

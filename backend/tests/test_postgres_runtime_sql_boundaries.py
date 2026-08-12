@@ -29,7 +29,7 @@ _PRODUCTION_SQL_FILES = (
     "backend/services/deck_plugin/revocation_service.py",
     "backend/services/claude_plugin/workspace_packer.py",
     "backend/services/story_workspace/dream_confirmation_service.py",
-    "backend/services/story_workspace/dream_agent_message_service.py",
+    "backend/services/story_workspace/dream_internal_command_service.py",
     "backend/services/story_workspace/agent_integration.py",
     "backend/services/story_workspace/dream_launch_gateway.py",
     "backend/services/story_workspace/dream_reentry_service.py",

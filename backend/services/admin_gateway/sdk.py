@@ -8,6 +8,10 @@ import shlex
 import sys
 from typing import Any
 
+from libs.claude_agent_kit.server.sdk_env import (
+    apply_gateway_credential_tombstones,
+)
+
 from .config import AdminGatewayConfig, AdminGatewayConfigurationError
 from .token import validate_gateway_subject
 
@@ -98,8 +102,7 @@ def apply_gateway_sdk_env_to_options(
     subject = validate_gateway_subject(canonical_user_id or "")
     existing = getattr(options, "env", None) or {}
     env = dict(existing)
-    env.pop("ANTHROPIC_API_KEY", None)
-    env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    apply_gateway_credential_tombstones(env)
     env["ANTHROPIC_BASE_URL"] = configured.base_url
     custom_headers = f"x-api-key: {configured.service_key}"
     if gateway_idempotency_key is not None:

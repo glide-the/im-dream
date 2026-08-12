@@ -2037,7 +2037,7 @@ test('U10F unbound recovery posts only caller idempotency and accepts a strict r
   expect(result).toEqual(acceptedActionResponse('recover_first_episode_binding', null));
 });
 
-test('U10F bound continuation derives the action and exact If-Match from latest workflow truth', async () => {
+test('U10F bound action derives the command and exact If-Match from latest workflow truth', async () => {
   const surface = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(
     REVISION_1,
     [],
@@ -2080,7 +2080,7 @@ test('U10F bound continuation derives the action and exact If-Match from latest 
   expect(result).toEqual(acceptedActionResponse('generate_prompts'));
 });
 
-test('U10F action gates reject bound recovery, unbound continuation, none, invalid, and missing identity', async () => {
+test('U10F action gates reject bound recovery, unbound follow-up, none, invalid, and missing identity', async () => {
   let fetches = 0;
   const options = {
     idempotencyKey: 'gate:test-003',

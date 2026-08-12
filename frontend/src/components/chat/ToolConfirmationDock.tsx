@@ -17,19 +17,18 @@
 //        (target host + sandbox policy mode, binary 拒绝/同意, no "remember" in this iteration)
 //        when kind==='sandbox-network'; generic card unchanged when the discriminator is absent
 //        (design: claude-agent-sandbox-network-permission-tool.md §5A).
-// [Sync] 2026-08-11: resolve bridged Dream confirmations through their run-scoped
-//                    safe endpoint, including reject-only and opaque question IDs.
+// [Sync] 2026-08-11: every surface resolves confirmations through the owned
+//                    canonical thread endpoint, including reject-only policy.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
 import {
   confirmToolCall,
-  dreamToolConfirmationAnswers,
   type PendingToolConfirmation,
 } from './toolConfirmation';
 import { isShellTool, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 import { IconCheck, IconLoader, IconX } from './Icons';
-import { storyWorkspaceSubmitDreamAgentToolConfirmation } from '../../hooks/story-workspace/useStoryWorkspaceDreamAgent';
+import { toolConfirmationKeyboardDecision } from './chatRuntimeState';
 
 type DockStatus = 'idle' | 'confirming' | 'confirmed' | 'rejected';
 
@@ -50,7 +49,7 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
   const { t } = useTranslation();
   const [status, setStatus] = useState<DockStatus>('idle');
   const requestInFlightRef = useRef(false);
-  const { kind, toolCallId, toolName, input, dream } = confirmation;
+  const { kind, toolCallId, toolName, input } = confirmation;
 
   const summaryText = useMemo(() => summarizeToolInvocation(toolName, input), [toolName, input]);
   const commandText = useMemo(() => (isShellTool(toolName) ? resolveToolInputSummary(input).command : ''), [toolName, input]);
@@ -70,25 +69,13 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
     requestInFlightRef.current = true;
     setStatus('confirming');
     try {
-      const dreamAnswers = dream
-        ? dreamToolConfirmationAnswers(dream.confirmation, answers)
-        : answers;
-      const result = dream
-        ? await storyWorkspaceSubmitDreamAgentToolConfirmation(dream.runId, {
-            toolCallId,
-            approved,
-            ...(reason ? { reason } : {}),
-            ...(dreamAnswers ? { answers: dreamAnswers } : {}),
-          }).then(() => ({ state: 'resolved' as const, approved }))
-        : await confirmToolCall(threadId, toolCallId, approved, reason, answers);
+      const result = await confirmToolCall(threadId, toolCallId, approved, reason, answers);
       if (result.state === 'resolved') {
-        if (!dream) {
-          addToolResult?.({
-            tool: toolName,
-            toolCallId,
-            output: answers ?? (approved ? { approved: true } : { approved: false, cancelled: true }),
-          });
-        }
+        addToolResult?.({
+          tool: toolName,
+          toolCallId,
+          output: answers ?? (approved ? { approved: true } : { approved: false, cancelled: true }),
+        });
         setStatus(approved ? 'confirmed' : 'rejected');
         onSettled(toolCallId);
         return;
@@ -105,12 +92,15 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
     }
     requestInFlightRef.current = false;
     setStatus('idle');
-  }, [addToolResult, dream, onSettled, threadId, toolCallId, toolName]);
+  }, [addToolResult, onSettled, threadId, toolCallId, toolName]);
 
   const handleApprove = useCallback(() => void runConfirm(true), [runConfirm]);
   const handleReject = useCallback(() => void runConfirm(false, t('chat.toolConfirmation.userRejectedTool')), [runConfirm, t]);
   const handleAskUserSubmit = useCallback((answers: Record<string, unknown>) => void runConfirm(true, undefined, answers), [runConfirm]);
   const handleAskUserCancel = useCallback(() => void runConfirm(false, t('chat.toolConfirmation.userCancelledAnswer')), [runConfirm, t]);
+  const isAskUser = kind === 'askuser';
+  const isSandboxNetwork = kind === 'sandbox-network';
+  const isRejectOnly = kind === 'reject-only';
 
   // Keyboard shortcuts for the confirm variants (generic + sandbox network):
   // Esc = 拒绝, ⌘/Ctrl+⏎ = 同意.
@@ -118,21 +108,18 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
   useEffect(() => {
     if (kind === 'askuser' || status !== 'idle') return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      const decision = toolConfirmationKeyboardDecision(kind, event);
+      if (decision !== null) {
         event.preventDefault();
-        handleApprove();
-      } else if (event.key === 'Escape') {
-        event.preventDefault();
-        handleReject();
+        event.stopImmediatePropagation();
+        if (decision === 'approve') handleApprove();
+        if (decision === 'reject') handleReject();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [handleApprove, handleReject, kind, status]);
 
-  const isAskUser = kind === 'askuser';
-  const isSandboxNetwork = kind === 'sandbox-network';
-  const isRejectOnly = kind === 'reject-only';
   const networkRequest = confirmation.networkRequest ?? null;
   const networkPolicyModeText = networkRequest?.policyMode === 'allowlist'
     ? t('chat.toolConfirmation.networkPolicyAllowlist')

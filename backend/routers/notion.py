@@ -27,7 +27,7 @@ from .deps import get_current_user
 
 @asynccontextmanager
 async def _notion_store_lifespan(_app: Any) -> AsyncIterator[None]:
-    """Own the pool lifecycle; schema creation belongs only to Alembic."""
+    """Own the pool lifecycle; schema creation belongs only to Admin/Drizzle."""
 
     open_default_store()
     try:

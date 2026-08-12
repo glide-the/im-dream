@@ -426,6 +426,9 @@ def story_workspace_private_episode_completion_guidance(
 
     if not isinstance(provenance, Mapping) or set(provenance) != {
         "schema",
+        "workflow_run_id",
+        "thread_id",
+        "actor_id",
         "action",
         "episode_uid",
         "input_revision",
@@ -445,6 +448,10 @@ def story_workspace_private_episode_completion_guidance(
     workflow_revision = provenance.get("expected_workflow_revision")
     if (
         provenance.get("schema") != "story-workspace-episode-action/v1"
+        or provenance.get("workflow_run_id") != context.workflow_run_id
+        or provenance.get("thread_id") != context.thread_id
+        or not isinstance(provenance.get("actor_id"), str)
+        or not str(provenance.get("actor_id") or "").strip()
         or action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE
         or not isinstance(episode_uid, str)
         or _EPISODE_UID.fullmatch(episode_uid) is None

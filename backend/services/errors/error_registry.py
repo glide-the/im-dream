@@ -115,7 +115,7 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
     "WORKFLOW_RUN_NOT_GUIDABLE": {
         "phase": "run",
         "meaning": "The run is not in a guidable state or has no guidance channel.",
-        "recovery": "Confirm the run review and submit guidance while it is continuing.",
+        "recovery": "Confirm the run review and submit guidance while it is eligible.",
     },
     "AGENT_EXECUTION_FAILED": {
         "phase": "run",

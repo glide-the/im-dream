@@ -236,6 +236,8 @@ function parseSSEChunk(raw: string): BackendEvent[] {
 interface ConversionState {
   started: boolean;
   toolInputs: Record<string, unknown>;
+  toolNames: Record<string, string>;
+  settledToolCallIds: Set<string>;
   /** Chat/thread id used to route plan-* lifecycle frames to the plan store. */
   threadId?: string;
 }
@@ -309,6 +311,7 @@ function convertEvent(
     // -----------------------------------------------------------------------
     case 'tool-input-start': {
       ensureStarted();
+      state.toolNames[event.toolCallId] = event.toolName;
       chunks.push({
         type: 'tool-input-start',
         toolCallId: event.toolCallId,
@@ -333,6 +336,7 @@ function convertEvent(
     case 'tool-input-available': {
       ensureStarted();
       state.toolInputs[event.toolCallId] = event.input;
+      state.toolNames[event.toolCallId] = event.toolName;
       chunks.push({
         type: 'tool-input-available',
         toolCallId: event.toolCallId,
@@ -372,6 +376,8 @@ function convertEvent(
     // even when the session is in auto mode.
     case 'tool-approval-request': {
       ensureStarted();
+      state.settledToolCallIds.delete(event.toolCallId);
+      state.toolNames[event.toolCallId] = event.toolName;
       chunks.push({
         type: 'tool-input-available',
         toolCallId: event.toolCallId,
@@ -483,7 +489,13 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
     stream: ReadableStream<Uint8Array>,
   ): ReadableStream<UIMessageChunk> {
     const decoder = new TextDecoder();
-    const conversionState: ConversionState = { started: false, toolInputs: {}, threadId: this.threadId };
+    const conversionState: ConversionState = {
+      started: false,
+      toolInputs: {},
+      toolNames: {},
+      settledToolCallIds: new Set<string>(),
+      threadId: this.threadId,
+    };
     let sseBuffer = '';
 
     const dispatch = (

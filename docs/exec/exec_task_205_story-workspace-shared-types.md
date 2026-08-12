@@ -8,8 +8,8 @@
 - 父 Issue: `SUO-198`
 - Stage: `stage_001_story-workspace`
 - 关联设计稿:
-  - `docs/design/story-workspace/story-workspace-prd.md`
-  - `docs/design/story-workspace/story-workspace-layout-design.md`
+  - `docs/design/story-workspace/product-scope-and-navigation.md`
+  - `docs/design/story-workspace/product-scope-and-navigation.md`
 - 关联 Task: `docs/task/task_205_backend_story-workspace-shared-types.md`
 - 执行 Agent: `ExecTaskAgent`
 - 完成核查时间: `2026-08-01 12:55:43 CST (+0800)`

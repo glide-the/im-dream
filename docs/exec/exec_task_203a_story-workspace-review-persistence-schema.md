@@ -5,7 +5,7 @@
 - Task ID: `task_203a`
 - Execute Issue: [SUO-323](/SUO/issues/SUO-323)
 - 关联裁决 / Task: [SUO-316](/SUO/issues/SUO-316), [SUO-317](/SUO/issues/SUO-317)
-- 关联设计稿: `docs/design/story-workspace/story-workspace-prd.md` §3.1 / §4.5.1–4.5.4；`docs/design/story-workspace/story-workspace-layout-design.md` §6.1
+- 关联设计稿: `docs/design/story-workspace/product-scope-and-navigation.md` §3.1 / §4.5.1–4.5.4；`docs/design/story-workspace/product-scope-and-navigation.md` §6.1
 - 关联 Stage: [SUO-319](/SUO/issues/SUO-319), [SUO-322](/SUO/issues/SUO-322), `docs/stage/stage_story-workspace.md` §14
 - 执行 Agent: `ExecTaskAgent` (`2a7a15fe-2ebb-4dc5-91a8-48ae2bcc5471`)
 - 执行时间: `2026-08-01 22:40 CST`
