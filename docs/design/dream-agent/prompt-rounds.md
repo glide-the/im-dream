@@ -2766,3 +2766,961 @@ Confirmed from the authoritative Admin form and current contracts:
 identity. The existing harness already uses exactly that pair, so no production
 or test code change is required. The earlier attempt to reinterpret
 `hy3-preview` as the public request value was incorrect and was not implemented.
+
+## Round 49 — Continue the existing-account real Dream business verification
+
+**Current-round objective**
+
+Exercise the complete Dream launch business flow with the requested existing
+account, real cloned data and the real `hy3-preview` Provider model, including a
+final Chromium headed run with one worker.
+
+**Optimized Prompt**
+
+> Run the durable private-clone Dream real-model harness for the existing
+> account selected by `INK_REAL_DREAM_ACCOUNT_EMAIL`. Use `hy-preview` as the
+> public request alias and prove that Admin Gateway resolves it to
+> `hy3-preview`. First run repository/port/browser and provider-free policy
+> preflight. If it passes, execute the focused Playwright spec with Chromium
+> headed and `--workers=1`, using semantic waits and the real public production
+> endpoints for Dream launch, shared Thread SSE/history, workflow projection
+> and artifact access. Capture redacted evidence for the request alias,
+> upstream model, terminal Thread/workflow state, Project/Episode artifacts,
+> browser diagnostics and source-data immutability. Do not mutate the source
+> account, plan, permission, quota or content; do not call the Provider after a
+> failed preflight. Always stop owned processes, release ports and delete the
+> exact isolated database/container/runtime resources.
+
+**Optional Enhancers**
+
+- Preserve a minimal failure artifact only when it materially helps diagnosis.
+- If the product path fails, repair the smallest production defect and rerun
+  focused contracts before restarting the real-model lane.
+
+**Scope checked or modified**
+
+- Existing-account private clone, Admin Gateway and Dream API/UI business path.
+- Focused headed Chromium spec and run-isolated artifact assertions.
+- No source-account writes or alternate Agent runtime.
+
+**Completion standard**
+
+Provider-free preflight passes, the headed one-worker browser flow reaches one
+terminal state with correct shared Thread/workflow/artifact evidence, zero
+Ink-Dream browser diagnostics, and cleanup proves source and owned resources are
+unchanged; otherwise the exact genuine blocker is isolated with no Provider or
+source mutation beyond authorized scope.
+
+**Actual result and unverified inferences**
+
+Pending preflight and headed execution.
+
+## Round 50 — Preserve safe business failure evidence in the real-model harness
+
+**Current-round objective**
+
+Make the provider-free preflight identify its exact non-sensitive business
+blocker instead of collapsing every explicit subscription failure into the
+generic Python class `RuntimeError`.
+
+**Optimized Prompt**
+
+> Introduce a narrow structured preflight exception in the real Gateway E2E
+> verification script. Give every subscription eligibility failure a stable,
+> non-sensitive phase and error code, and make the safe entrypoint emit only
+> that code plus the existing privacy assertions. Never emit response bodies,
+> account identifiers, tokens, secrets, Provider content or exception text.
+> Add focused contracts for structured output and retain generic redaction for
+> unexpected exceptions. Update the script/test folder contracts, run the
+> focused backend test, then repeat the private-clone provider-free preflight.
+> Do not change Product/Gateway production policy merely to make the test pass.
+
+**Optional Enhancers**
+
+- Use a closed set of literal codes instead of deriving output from exception
+  messages.
+
+**Scope checked or modified**
+
+- `backend/script/verify_gateway_e2e.py`, its focused contract tests and folder
+  documentation.
+- No production request, model, subscription or Agent behavior.
+
+**Completion standard**
+
+Focused tests prove expected preflight failures expose a stable safe code while
+unexpected errors remain redacted; the rerun reports an actionable phase/code
+without calling the Provider or leaking private data.
+
+**Actual result and unverified inferences**
+
+Pending harness diagnostic change and provider-free rerun.
+
+## Round 51 — Close the Gateway model-entitlement authorization gap
+
+**Current-round objective**
+
+Resolve the observed production contradiction where Gateway/Dream model catalogs
+mark `hy-preview` callable for the existing account while Product subscription
+context reports no exact model entitlement.
+
+**Optimized Prompt**
+
+> Trace Admin Gateway model callability and message preparation from
+> `listAvailableGatewayModels` through billable-model resolution, allowance
+> reservation and Provider dispatch. Prove whether the selected current plan has
+> an enabled `messages:create` entitlement for the resolved model row before any
+> Provider request. Treat a missing entitlement as `upgrade_required` in the
+> public catalog when an eligible plan exists, otherwise fail closed with a
+> stable authorization error. Apply the smallest Admin production fix at the
+> shared server-owned boundary and add contracts proving catalog and inference
+> cannot disagree. Do not grant or synthesize an entitlement, alter the existing
+> account, or weaken quota/user-permission checks. After focused Admin tests,
+> rerun the Dream provider-free clone preflight; enter the paid headed lane only
+> if the real subscription genuinely authorizes `hy-preview`.
+
+**Optional Enhancers**
+
+- Assert missing entitlement is rejected before request reservation and
+  Provider transport.
+
+**Scope checked or modified**
+
+- Admin Gateway catalog, resolver/request-preparation authorization and focused
+  contracts.
+- Dream private-clone preflight as cross-repository acceptance evidence.
+- No subscription or account mutation.
+
+**Completion standard**
+
+Catalog callability and Provider dispatch enforce the same exact model-row
+entitlement, focused tests pass, and the rerun either proceeds legitimately or
+stops before Provider use with one accurate business blocker.
+
+**Actual result and unverified inferences**
+
+Provider-free evidence shows `hy-preview` passed both Admin and Dream catalog
+callability checks but failed Product exact-entitlement preflight. Source review
+initially suggested a missing `entitlement_id` condition in catalog evaluation.
+Deeper review rejected that inference: Admin's existing catalog and
+subscription-Gateway contracts explicitly support `allowance-only` access to an
+enabled model without a per-plan model entitlement, while still enforcing
+subscription state/period, user-model denial and Token reservation before
+Provider dispatch. No Admin production change was made; the contradiction is in
+the real-model harness's stricter assumption.
+
+## Round 52 — Align real-model preflight with allowance-only Gateway policy
+
+**Current-round objective**
+
+Remove the harness-only exact-entitlement requirement that contradicts the
+production Token allowance contract, without weakening any production or test
+authorization boundary.
+
+**Optimized Prompt**
+
+> Keep Admin `/v1/models` and Dream `/api/gateway/models` as the server-owned
+> source of exact model callability. In the existing-account real-model harness,
+> accept the current subscription when its period Token allowance is positive
+> even if Product context does not list a plan-specific `hy-preview`
+> entitlement; record this as `allowance-only`. Continue to fail closed when the
+> catalog model is not callable, the subscription/allowance is absent or
+> exhausted, an explicit user-model permission denies access, or Gateway
+> preauthorization rejects the request. Add focused contracts for exact
+> entitlement and allowance-only modes. Validate the existing Admin allowance
+> policy tests, rerun provider-free preflight, then execute the real headed
+> Dream browser flow with one worker. Do not create/change a subscription or
+> bypass Gateway request preparation.
+
+**Optional Enhancers**
+
+- Emit the access mode in redacted evidence so entitlement-backed and
+  allowance-only runs cannot be confused.
+
+**Scope checked or modified**
+
+- Dream real-model verification harness and its focused contracts.
+- Read-only execution of existing Admin Gateway/subscription tests.
+- No Admin production code or real account mutation.
+
+**Completion standard**
+
+Tests prove the harness mirrors the production allowance-only policy, the
+provider-free preflight succeeds for the existing account without provisioning,
+and the headed run reaches a real terminal business outcome with cleanup.
+
+**Actual result and unverified inferences**
+
+Pending harness alignment, focused tests and real execution.
+
+## Round 53 — Diagnose the real Dream launch Artifact timeout by lifecycle layer
+
+**Current-round objective**
+
+Identify why the headed real-model Dream launch accepted a Run but failed to
+reach settled `dream-files` within 360 seconds, instead of increasing timeouts or
+replaying an unobservable paid request.
+
+**Optimized Prompt**
+
+> Improve the private-clone failure receipt so a headed Dream launch records the
+> accepted workflow Run and Thread IDs outside private browser content, then on
+> failure queries the owned clone read-only for: workflow Run status/version and
+> error code, source Thread/runtime binding, Agent session state, Thread running
+> status and terminal messages, Gateway requested/resolved model plus safe
+> outcome/error code, Observer projection receipt, and Project/Episode Artifact
+> row/file counts. Use opaque presence/count/state evidence only. Diagnose before
+> clone cleanup and never print prompts, assistant text, paths containing user
+> content, account identifiers, Provider bodies or secrets. Add focused harness
+> contracts where practical. Rerun provider-free checks after any change, then
+> one headed real-model flow only when the new receipt can distinguish launch,
+> Agent, workflow and Artifact failures. Do not extend the 360-second semantic
+> wait to hide the defect.
+
+**Optional Enhancers**
+
+- Persist only the final redacted diagnostic JSON when the run fails.
+
+**Scope checked or modified**
+
+- Headed Dream E2E accepted-run handoff, private-clone failure diagnostics and
+  the business endpoints polled by the spec.
+- No production lifecycle change until evidence identifies the failing owner.
+
+**Completion standard**
+
+A failed rerun produces a non-null, content-free lifecycle receipt that assigns
+the fault to one state owner, or the corrected run passes the full Artifact and
+same-Thread Chat/Dream acceptance path; cleanup remains complete.
+
+**Actual result and unverified inferences**
+
+The first headed run passed both model catalogs and allowance-only preflight,
+started one Chromium worker, then timed out at the 360-second settled
+`dream-files` predicate. Existing failure evidence returned `run:null`, so the
+failing lifecycle layer is still unverified. All source and owned resources were
+cleaned.
+
+## Round 54 — Handle a completed Agent turn with incomplete Dream output
+
+**Current-round objective**
+
+Fix the observed lifecycle split where the shared Agent turn ends normally
+after only `write_dream_run`, while the Dream workflow remains waiting forever
+for characters, scenes and storyboards.
+
+**Optimized Prompt**
+
+> Use the headed browser evidence as authoritative: the Agent produced a
+> `write_dream_run` result with `changedStages: []`, emitted prose promising the
+> next initialization step, then the shared Thread turn stopped and no Stop
+> control remained. Trace the Dream launch request's `max_turns` and tool budget
+> through the single public `ClaudeAgentThreadFactory.run_streaming()` entry,
+> without changing the Claude SDK runner entrypoint. Determine whether a
+> one-turn limit prematurely stops the required multi-tool flow. Ensure one
+> Dream launch permits enough SDK agentic turns to complete the documented
+> `write_dream_run` plus characters/scenes/storyboards sequence in the same main
+> turn. Independently, make `DreamObserver`/launch completion validation project
+> a stable `DREAM_OUTPUT_INCOMPLETE` failure when a normal shared turn ends
+> without all required persisted stages; never leave workflow `running` after
+> Thread idle, never create a `continuing` state, and never auto-start a second
+> Agent turn. Add lifecycle contracts for success, incomplete normal finish,
+> error and single terminal transition. Then rerun focused tests and the headed
+> real-model flow.
+
+**Optional Enhancers**
+
+- Surface the incomplete-output error immediately in Dream instead of waiting
+  for polling timeout.
+
+**Scope checked or modified**
+
+- Dream launch turn options, the single `run_streaming()` caller, DreamObserver
+  or post-turn output validation, workflow transition projection and focused
+  UI/API contracts.
+- Protected Claude Agent runner and shared Chat wire remain unchanged.
+
+**Completion standard**
+
+The required multi-tool flow is not truncated by a one-turn SDK budget; a
+normal incomplete finish transitions once to failed and becomes immediately
+visible; a complete run reaches pending review; no workflow remains running
+after Thread idle and no `continuing` state appears.
+
+**Actual result and unverified inferences**
+
+Headed evidence confirms the shared turn ended after `write_dream_run` with
+zero changed stages and only prose announcing future work. The filesystem held
+`run.json` but no stage files. Whether a `max_turns=1` launch option caused this
+premature normal finish is not yet verified.
+
+Source inspection verified Dream launch inherits the shared `max_turns=100`;
+the turn was not truncated by a one-turn SDK budget. The business owner
+classified the premature finish as a model-capability issue and explicitly
+selected `deepseek-v4-pro` for the next run. No lifecycle/prompt production
+change from this round was implemented; incomplete-turn fail-closed handling
+remains a separate hardening item rather than a prerequisite for the requested
+model comparison.
+
+## Round 55 — Restart the real Dream flow with DeepSeek V4 Pro
+
+**Current-round objective**
+
+Repeat the full existing-account Dream business test from a fresh isolated
+clone using the real `deepseek-v4-pro` model instead of `hy3-preview`.
+
+**Optimized Prompt**
+
+> Parameterize the durable private-clone real-model harness with an explicit
+> public request alias and expected upstream model, and select
+> `deepseek-v4-pro` for both values after verifying the current Admin model row.
+> Preserve every existing safety boundary: the requested account is resolved
+> read-only from source, allowance/catalog/model checks run Provider-free first,
+> source data and subscriptions are never modified, and the headed run uses
+> Chromium `--headed --workers=1`. Start from a new clone and new Dream Run.
+> Assert the Agent completes `write_dream_run`, characters, scenes and
+> storyboards, reaches pending review, exposes editable Dream files, restores
+> the same Thread in Chat and Dream, emits no duplicate terminal, and leaves no
+> owned process/container/volume/port. If the turn stops after partial output,
+> report the last content-free stage receipt immediately rather than waiting on
+> backend process liveness. Write the scenario as a normal human journey:
+> navigate the Dream page, select the visible Deck, enter a natural creation
+> goal, click the launch control, observe the visible Agent session, and treat
+> the Agent's visible stop as terminal. Use API reads only to verify persisted
+> facts behind that UI journey. Never keep polling artifacts after the shared
+> Thread has stopped with at least one turn and incomplete stages.
+
+**Optional Enhancers**
+
+- Keep alias and upstream independently required so an accidental routing
+  mismatch fails before Provider use.
+
+**Scope checked or modified**
+
+- Real-model harness configuration and focused source/contract checks.
+- Fresh Provider-free and headed Dream business execution.
+- No production Agent, workflow, SSE or account policy change.
+
+**Completion standard**
+
+The exact DeepSeek model contract passes preflight and one fresh headed flow
+either completes all Dream/Thread/Artifact acceptance assertions or yields a
+precise model/business failure with complete cleanup.
+
+**Actual result and unverified inferences**
+
+The read-only Admin row proves public alias, upstream model and display name are
+all `deepseek-v4-pro`; the model and Anthropic-protocol Provider are enabled and
+active. The harness is now explicitly parameterized, and the browser scenario
+fails immediately when a human-visible Agent stop leaves required stages
+incomplete instead of waiting for the Artifact timeout. Fresh execution is
+pending.
+
+## Round 56 — Make human business journeys mandatory in the Playwright QA skill
+
+**Current-round objective**
+
+Persist the business owner's testing rule in the repository QA skill so future
+browser tests do not confuse process/API liveness with a user's visible
+business flow.
+
+**Optimized Prompt**
+
+> Update `ink-dream-playwright-qa/SKILL.md` and its project workflow reference
+> with a mandatory human-journey rule. Browser E2E scenarios must perform the
+> meaningful actions a normal user performs through visible UI, observe visible
+> progress and terminal controls, and judge completion at the same point a user
+> would. API calls may create isolated prerequisites or verify persistence, but
+> may not replace the business interaction under test. Service/process health
+> proves only infrastructure liveness. When the visible Agent/Thread has
+> stopped, the test must immediately validate the visible/persisted business
+> result and fail if required output is incomplete; it must not continue long
+> polling because backend processes remain alive. Require semantic waits and
+> prohibit fixed sleeps or inflated timeouts that mask a stopped business flow.
+> Include a concise Dream example and preserve all existing isolation,
+> diagnostics and cleanup rules.
+
+**Optional Enhancers**
+
+- Require each E2E name to read as a user outcome rather than an implementation
+  endpoint sequence.
+
+**Scope checked or modified**
+
+- Repository-local `ink-dream-playwright-qa` skill and its project workflow
+  reference.
+- No production or test execution behavior in this documentation-only round.
+
+**Completion standard**
+
+The skill unambiguously directs future agents to test visible human business
+journeys, stop on the visible terminal, use APIs only as supporting evidence,
+and distinguish infrastructure health from business progress.
+
+**Actual result and unverified inferences**
+
+Complete. The core skill now requires visible human business journeys, treats
+visible Agent/Thread stop as terminal, separates infrastructure liveness from
+business progress, and limits API reads to fixture setup or persisted-fact
+corroboration. The project workflow includes the exact Dream stopped-turn
+example. Frontmatter and `git diff --check` passed; the skill remains a compact
+143 lines.
+
+## Round 57 — Remove the last entitlement-only assumption from model preflight
+
+**Current-round objective**
+
+Allow the verified `deepseek-v4-pro` model to reach the production catalog
+preflight under the same allowance-only policy already accepted elsewhere, and
+prevent pre-launch failures from reporting unrelated historical Runs.
+
+**Optimized Prompt**
+
+> Update only the private-clone harness. In model-row verification require the
+> exact public alias/upstream pair, enabled model, active Provider, usable
+> credential and active pricing; record published entitlement count as evidence
+> but do not require it, because final account callability is decided by the
+> authenticated Admin/Dream catalogs plus subscription allowance policy. When
+> no accepted browser Run receipt exists, failure diagnostics must report
+> `receiptPresent=false` and `runPresent=false` rather than selecting the newest
+> historical Run from the cloned account. Keep provider-free execution and full
+> cleanup, then restart the DeepSeek preflight and headed human journey.
+
+**Optional Enhancers**
+
+- Assert pre-launch phases can never emit historical workflow evidence.
+
+**Scope checked or modified**
+
+- Private real-model clone model-row and failure-diagnostic checks only.
+- No production model authorization, account, workflow or Agent behavior.
+
+**Completion standard**
+
+DeepSeek reaches authenticated catalog/account preflight without a fake
+entitlement requirement; any pre-launch failure contains no unrelated Run; no
+Provider call occurs before the headed lane.
+
+**Actual result and unverified inferences**
+
+The first DeepSeek provider-free attempt stopped at `clone-model-contract`
+because the harness still asserted `publishedEntitlements > 0`. No current Run
+or Provider request existed. The old fallback diagnosis incorrectly displayed
+an unrelated historical failed Run from the clone.
+
+## Round 58 — Restore the isolated Product dependency before Provider use
+
+**Current-round objective**
+
+Resolve the repeatable `503 PRODUCT_DEPENDENCY_UNAVAILABLE` returned by the
+Dream Product plans BFF during DeepSeek provider-free preflight.
+
+**Optimized Prompt**
+
+> Trace the private-clone Product call from Dream's
+> `/api/story-workspace/subscription/plans` through its Admin Product client to
+> the exact isolated Admin route, JWT/service credentials and Origin policy.
+> Compare the harness environment with the production DTO/config contract and
+> the previously passing HY preflight. Add a readiness check for the actual
+> Product dependency rather than treating an unauthenticated `/v1/models`
+> response as sufficient Admin readiness. Preserve redaction: report only route
+> status and stable error codes, not JWTs, service keys, account IDs, DSNs or
+> response bodies. Fix the smallest harness/config defect, run focused Product
+> client contracts, and repeat Provider-free DeepSeek preflight. Do not create a
+> Dream Run or call the Provider until Product plans succeeds.
+
+**Optional Enhancers**
+
+- Distinguish Admin process readiness from Product route authorization in the
+  final preflight evidence.
+
+**Scope checked or modified**
+
+- Dream Admin Product client configuration and private-clone readiness/config.
+- Focused read-only HTTP/config diagnostics; no Provider or account mutation.
+
+**Completion standard**
+
+The isolated Product plans route returns its valid authenticated contract in
+provider-free preflight, with repeatable startup readiness and full cleanup.
+
+**Actual result and unverified inferences**
+
+Two fresh DeepSeek preflights passed model/account catalog checks but returned
+the same `503 PRODUCT_DEPENDENCY_UNAVAILABLE` before Run creation. Both cleaned
+all resources. A mere Admin cold-start transient is therefore rejected.
+
+## Round 59 — Align Dream ProductPlan with the Admin authority contract
+
+**Current-round objective**
+
+Repair the verified Admin/Dream Product plans DTO drift without weakening the
+Dream BFF response firewall.
+
+**Optimized Prompt**
+
+> Treat the Admin Product projection as the authoritative business contract.
+> Preserve Dream's strict Pydantic parsing, extra-field rejection, safe
+> identifiers, Token-only firewall and commercial-value invariants. Update only
+> the availability relationship that contradicts Admin: a published plan may be
+> unavailable when its runtime/commercial configuration is incomplete, with
+> null commercial values, a non-null `configuration_incomplete` reason and no
+> available actions. Keep draft plans tied to
+> `commercial_parameters_pending`. Add a focused client contract test using the
+> exact shape, run Product unit tests, then repeat the isolated DeepSeek
+> Provider-free preflight. Do not call the Provider until both the direct Admin
+> contract and Dream BFF contract pass.
+
+**Optional Enhancers**
+
+- Retain the authenticated Admin Product readiness receipt as future harness
+  evidence so HTTP process readiness cannot mask DTO drift again.
+
+**Scope checked or modified**
+
+- Dream Product plans DTO availability validator and focused client test.
+- Real-model clone harness Product readiness evidence.
+
+**Completion standard**
+
+Both authoritative Admin unavailable-plan variants validate through Dream,
+invalid commercial/action combinations still fail closed, and the full
+Provider-free DeepSeek preflight passes with no Run or Provider call.
+
+**Actual result and unverified inferences**
+
+Complete. The Dream validator now accepts an Admin-authoritative published plan
+that is unavailable solely because configuration is incomplete, while still
+requiring null commercial values and no available actions. The direct Product
+probe validates with three plans, 46 focused Product/BFF/harness tests pass, and
+the complete DeepSeek Provider-free private-clone preflight passes. It resolves
+the existing account in allowance-only mode, makes no Provider call, preserves
+the source fingerprint and removes every owned resource.
+
+## Round 60 — Headed DeepSeek Dream business journey
+
+**Current-round objective**
+
+Execute one fresh, visible Dream launch with the existing account and exact
+`deepseek-v4-pro` model after every Provider-free gate passed.
+
+**Optimized Prompt**
+
+> Run the focused Dream Playwright scenario in visible Chromium with exactly
+> one worker against the private logical PostgreSQL clone and isolated Admin,
+> Dream API, Vite and workspace roots. Behave as a normal user: open the Dream
+> page, choose the visible Deck, enter a realistic Chinese story-production
+> goal, submit through the visible launch action, observe the shared Chat thread
+> streaming state and inspect the resulting Dream business panels/artifacts.
+> Use APIs only for authenticated supporting evidence. Poll Thread lifecycle and
+> Artifact projection together; once the Agent turn is no longer running, stop
+> waiting and fail immediately if characters, scenes or storyboard output is
+> incomplete. Verify the accepted Run/thread receipt, exact requested/resolved
+> model, settled Gateway accounting, single workflow terminal semantics and
+> full cleanup. Never log prompts, model output, JWTs, DSNs or source history.
+
+**Optional Enhancers**
+
+- Preserve a content-free lifecycle receipt for a failed stopped turn so model
+  capability can be distinguished from infrastructure liveness.
+
+**Scope checked or modified**
+
+- One headed `--workers=1` Dream launch using the focused human-journey spec.
+- Read-only post-run lifecycle, message-role, Gateway and cleanup receipts.
+
+**Completion standard**
+
+The visible user journey reaches complete Dream business output and the
+expected review-ready state through one shared Thread turn, with exact
+DeepSeek/Gateway evidence and no source or resource residue; otherwise report
+the first true business terminal and its content-free evidence.
+
+**Actual result and unverified inferences**
+
+Rejected and interrupted by the owner. The headed user journey reached a live
+running Dream turn and seven successfully settled exact-DeepSeek Gateway
+requests, but the harness wrote all Gateway receipts to a private clone. The
+owner's normal Admin console therefore could not observe them. The run was
+stopped immediately; source data remained unchanged and every owned process,
+port, container, volume and temporary clone was removed. This execution is not
+accepted as business evidence.
+
+## Round 61 — Observable live Admin Dream journey
+
+**Current-round objective**
+
+Replace the invisible clone-only headed proof with a real local business test
+whose Gateway receipts are visible in the owner's normal Admin console.
+
+**Optimized Prompt**
+
+> Use the existing account `dmeck123@suoxya.com`, the normal Admin/Gateway
+> service and its actual PostgreSQL data, and exact model alias
+> `deepseek-v4-pro`. First verify the normal Admin service, Dream API and web
+> endpoints and identify an existing enabled Dream Deck without creating a fake
+> clone-only Deck. Adapt the focused Playwright case so it behaves like a human
+> through visible UI and does not assert clone fixture labels. Create one fresh
+> Dream Run through the visible launch action, observe shared Thread streaming,
+> require characters/scenes/storyboards and review readiness, then verify the
+> corresponding requested/resolved model and settlement receipts through the
+> same database/API used by the Admin console. Keep the resulting business Run
+> and receipts observable for owner review; stop owned service/browser
+> processes without deleting the accepted business evidence. Do not print
+> prompts, model output, JWTs, credentials or DSNs.
+
+**Optional Enhancers**
+
+- Record a content-free Run/thread identifier and creation time so the owner can
+  locate the exact entry in Admin without exposing conversation content.
+
+**Scope checked or modified**
+
+- Standard local Admin/Dream/Vite service readiness and live-data focused E2E.
+- Existing-account Deck discovery and content-free post-run receipt checks.
+
+**Completion standard**
+
+The headed one-worker Dream journey is visible in the normal Admin Gateway log
+view and reaches the required business output, or fails at the true Agent/Run
+terminal with an exact content-free diagnosis; no unrelated service is killed.
+
+**Actual result and unverified inferences**
+
+Pending live-service readiness and observable test execution. This round will
+write a real Run and Gateway receipts to the account's normal database by
+explicit owner request.
+
+## Round 63 — Load normal backend identity config in the headed harness
+
+**Current-round objective**
+
+Unblock the live-data Playwright login preparation without introducing a test
+database or test-only authentication path.
+
+**Optimized Prompt**
+
+> Keep authentication against the existing active account and the normal
+> backend JWT implementation. In the Playwright-only helper process, explicitly
+> load `backend/.env` with non-overriding dotenv semantics before opening the
+> production PostgreSQL pool, matching normal FastAPI startup. Do not copy
+> credentials into test source, print the token/DSN, create a shadow account or
+> bypass `auth.create_access_token`. Prove the focused spec still passes ESLint
+> and discovery, then rerun headed Chromium against ports 5173/8765 and the
+> existing Admin on 3000. Confirm no Run or Provider request was created by the
+> failed pre-browser attempt.
+
+**Optional Enhancers**
+
+- Keep API-issued auth as test setup only; every business action remains a
+  visible browser interaction.
+
+**Scope checked or modified**
+
+- Playwright login preparation and the next live headed execution only.
+
+**Completion standard**
+
+The existing account authenticates without exposing secrets, the browser
+reaches the visible Dream launch form, and all subsequent writes use the normal
+local business database.
+
+**Actual result and unverified inferences**
+
+Complete. The helper now loads normal backend configuration without overriding
+the process environment, preserves the real auth implementation and reaches
+the visible Dream launch form. ESLint and Playwright discovery pass. The next
+live attempt created a normal observable Run, proving authentication and the
+local real-data route are working.
+
+## Round 64 — Handle Dream tool confirmation as a visible human action
+
+**Current-round objective**
+
+Correct the human-journey E2E after the live Run waited six minutes for an
+unanswered built-in `Write` confirmation.
+
+**Optimized Prompt**
+
+> Keep production confirmation policy unchanged. Extend the headed Dream test
+> to observe the shared Chat confirmation dock on the visible page while the
+> Run is streaming. Approve only an explicitly allowlisted built-in `Write`
+> confirmation needed to create the run-isolated Dream artifacts, by clicking
+> the visible localized Approve button and waiting for that exact dialog to
+> settle. Never approve Bash, network access, an unknown tool or arbitrary
+> confirmation content; fail immediately with a content-free error instead.
+> Count approvals in the private receipt without recording tool input. Continue
+> polling Thread lifecycle and Artifact output after approval. Update the
+> Playwright QA skill so every business journey must respond to required visible
+> confirmations like a human rather than waiting behind them. Rerun lint,
+> focused confirmation contracts and headed real-data Chromium. Preserve the
+> cancelled failed Run and its normal Admin receipts as evidence.
+
+**Optional Enhancers**
+
+- If AskUserQuestion appears in a future scenario, answer it through its visible
+  form using case-specific business input; never invent a generic silent answer.
+
+**Scope checked or modified**
+
+- Focused real-model Dream Playwright case and Playwright QA skill.
+- No production confirmation, Claude runner or Agent lifecycle changes.
+
+**Completion standard**
+
+The test cannot remain blocked behind an unanswered visible confirmation,
+approves only reviewed Dream Write operations, and reaches either complete
+artifacts or the next true business terminal.
+
+**Actual result and unverified inferences**
+
+Partially complete. The first normal local-data Run produced eight successful
+settled DeepSeek requests, then waited on `Write`; the old test timed out. The
+updated browser visibly approved one `Write` in the next real Run and Provider
+traffic resumed, proving the interaction works. It then failed closed on a
+second confirmation whose content-free accessible name identified the built-in
+`Agent` tool with the safe summary `Compute project slug hash`. Both incomplete
+Runs were stopped and persisted as `cancelled`; normal Admin receipts remain.
+
+## Round 65 — Approve the expected Dream subagent through visible UI
+
+**Current-round objective**
+
+Permit the case-specific built-in `Agent` subagent confirmation required by the
+Dream workflow while keeping the headed test fail-closed for all other tools.
+
+**Optimized Prompt**
+
+> Extend the visible confirmation helper from one exact tool to the closed set
+> `{Write, Agent}`. Parse only the confirmation dialog's accessible title, never
+> its parameters. Click the localized Approve button for a single visible
+> built-in `Write` or `Agent` dialog, wait for that exact dialog to close and
+> count each tool type separately in the content-free receipt. `Agent` is
+> allowed because this scenario explicitly covers Dream subagent delegation;
+> Bash, network, AskUserQuestion without scenario answers, reject-only and every
+> unknown tool must still fail immediately. Run ESLint/discovery and restart a
+> new normal local-data headed journey. Preserve prior cancelled Runs and Admin
+> receipts.
+
+**Optional Enhancers**
+
+- Corroborate subagent start/completion from the shared Thread projection after
+  the main turn settles without reading its transcript.
+
+**Scope checked or modified**
+
+- Focused Playwright confirmation allowlist and content-free receipt only.
+
+**Completion standard**
+
+Expected Write and Agent dialogs are handled like explicit human approvals,
+unexpected confirmations remain blocked, and the Dream turn advances to
+business artifacts or a new exact terminal.
+
+**Actual result and unverified inferences**
+
+Implemented and statically validated. The headed test recognizes only one
+visible exact `Write` or `Agent` dialog at a time, requires its Approve control
+to be inside the viewport, and records separate content-free counts. The latest
+real Run visibly approved one Write and two Agent operations; no unknown,
+Bash/network or AskUserQuestion operation was approved. The Run later failed
+the Artifact completion deadline for the separate orchestration reason recorded
+in Round 68.
+
+## Round 62 — Make local real data mandatory for real business QA
+
+**Current-round objective**
+
+Codify the owner's rule that every real business/model acceptance test uses the
+normal local services and local real PostgreSQL data, never a clone substitute.
+
+**Optimized Prompt**
+
+> Update both Dream and Admin root `AGENTS.md` files with one unambiguous
+> cross-repository rule: anything described as real business testing, real-data
+> testing or real-model acceptance must execute against this machine's normal
+> Admin, Dream, Gateway and current local PostgreSQL data. It must use the
+> requested existing account and existing business entities; do not create a
+> cloned database, shadow account, clone-only Deck, synthetic subscription,
+> isolated ledger or alternate Admin runtime to stand in for the business
+> system. Runs, Gateway receipts and failures must be visible through the normal
+> Admin console. Keep migration, backfill, destructive and repeatable
+> persistence tests isolated, and explicitly prohibit reporting those technical
+> tests as real business acceptance. Reconcile existing broad isolation wording
+> so the two classes do not contradict each other.
+
+**Optional Enhancers**
+
+- Preserve owner-requested real Run and Gateway receipts for review unless the
+  owner explicitly asks to remove them.
+
+**Scope checked or modified**
+
+- Dream and Admin root Agent instructions only, plus this round record.
+
+**Completion standard**
+
+Both repositories state the same enforceable rule and no existing sentence
+still requires a database clone for an owner-authorized real business test.
+
+**Actual result and unverified inferences**
+
+Complete. Both root `AGENTS.md` files require owner-authorized real business,
+real-data and real-model acceptance to use the normal local Admin, Dream,
+Gateway and current local PostgreSQL data. They prohibit clone/shadow business
+substitutes and require evidence to remain visible in normal Admin, while
+retaining isolation for destructive migration/backfill and provider-free
+technical tests.
+
+## Round 66 — Fit the headed Dream journey inside the visible window
+
+**Current-round objective**
+
+Keep the full Dream business page and its shared Chat controls usable inside a
+normal headed Chromium window while continuing the local real-data journey.
+
+**Optimized Prompt**
+
+> Replace the test's oversized 1440×1000 runtime viewport with an explicit,
+> bounded headed Chromium outer window and a smaller deterministic content
+> viewport that fit the current desktop. Do not use browser zoom, CSS scaling,
+> hidden panels or maximization to mask layout defects. Assert that the document
+> has no horizontal overflow, the Dream launch heading and primary action are
+> inside the viewport, and every visible confirmation dialog is brought into
+> view and remains operable before approval. Record the same rule in the
+> Playwright QA skill. Run lint and test discovery first, then resume the normal
+> local Admin/Dream/Gateway journey with the existing real account and data.
+
+**Optional Enhancers**
+
+- Capture a failure screenshot only if a real responsive-layout assertion
+  fails, without recording private model output in logs.
+
+**Scope checked or modified**
+
+- The focused Dream real-model Playwright case and its QA skill guidance.
+- Product layout code only if the bounded-window assertions expose a genuine
+  application overflow.
+
+**Completion standard**
+
+The headed browser fits the desktop, the launch action and confirmation UI are
+usable without clipping or zoom, and the business test can continue through
+the normal visible page.
+
+**Actual result and unverified inferences**
+
+Complete. The headed Chromium outer window was bounded to 1280×800 with a
+1200×720 content viewport. The launch heading and primary action were inside
+the viewport, every handled confirmation dialog and Approve button was inside
+the viewport, and the Dream, Chat and back-to-Dream routes passed the
+document-level horizontal-overflow assertion wherever reached. No browser zoom,
+maximization, hidden panel or product CSS workaround was used.
+
+## Round 67 — Enforce the run-isolated Artifact boundary found by real QA
+
+**Current-round objective**
+
+Diagnose and correct the normal local-data Run that wrote Project/character/
+scene files outside its server-derived `.dream/runtime/runs/<run-id>/artifact`
+root and therefore did not finish the storyboard projection in time.
+
+**Optimized Prompt**
+
+> Use the cancelled real Run's content-free lifecycle facts and current code to
+> trace `ClaudeAgentService.assemble_context`, Dream context construction,
+> permission/tool exposure and Dream Artifact projection. Prove whether the
+> server-derived run root and canonical Project/Episode Artifact contract are
+> present in the actual Dream system context. Prove whether generic `Write` or
+> shell tools can bypass that boundary by writing to the Thread workspace root.
+> Enforce the boundary in server-owned runtime/tool policy rather than merely
+> adding another advisory prompt. Preserve the single public
+> `ClaudeAgentThreadFactory.run_streaming()` entry and the existing Claude
+> runner entry. Add focused contracts for exact run-root injection and rejection
+> of non-run-isolated Dream artifact mutation. Do not expose model transcript or
+> business contents in test output. After focused tests, repeat one bounded
+> visible local-data journey only if the boundary is proven.
+
+**Optional Enhancers**
+
+- Make the test receipt record only canonical Artifact counts and a boolean
+  proving no legacy workspace-root artifact path was used.
+
+**Scope checked or modified**
+
+- Dream context assembly, Dream-specific tool/runtime policy, Artifact path
+  resolution and focused contracts.
+- No Claude SDK runner entry, external Dream SSE protocol or unrelated global
+  filesystem policy changes.
+
+**Completion standard**
+
+The actual Dream context contains one exact server-derived run layout, generic
+tools cannot create Project/Episode artifacts outside it, and the focused
+contracts plus a visible real Run prove canonical characters, scenes and
+storyboard projection.
+
+**Actual result and unverified inferences**
+
+The bounded headed window and all viewport assertions passed. The real Run
+projected three characters and two scenes within six minutes and had also
+created the canonical storyboard source file, while the shared Thread remained
+a cancellable main turn. It was stopped through the Thread endpoint and then
+persisted as `cancelled`. Code inspection disproved the initial bypass
+inference: `assets/` and `stories/` are the editable source workspace, generic
+tools are hard-denied from `.dream/**`, and `bind_first_episode` publishes the
+server-owned Artifact snapshot only after the source contract is complete. The
+actual Dream message includes the exact Run-isolated layout. No runtime boundary
+change is warranted from this evidence.
+
+## Round 68 — Use a human-sized active-turn deadline for real Dream generation
+
+**Current-round objective**
+
+Allow the full real-model Project/Episode workflow to finish while preserving
+the rule that a stopped Agent with incomplete output fails immediately.
+
+**Optimized Prompt**
+
+> Keep the bounded 1280×800 headed window and all viewport assertions. Increase
+> only the focused real-model case's total timeout and semantic Artifact poll so
+> a genuinely running `deepseek-v4-pro` turn has up to twelve minutes to create
+> canonical source files, publish all three Dream stages and bind the first
+> Episode. Continue checking visible confirmations, WorkflowRun failure and the
+> shared Thread status on every poll. If the Thread stops with missing output,
+> fail immediately; never use a fixed sleep, service liveness or a reconnect
+> loop as progress. Run static checks first, then execute one normal local-data
+> headed journey with one worker. On failure, use standard Thread Stop and
+> workflow cancel and keep Admin receipts.
+
+**Optional Enhancers**
+
+- Record source/project and published Artifact presence only as booleans or
+  counts, without storing model content in Playwright failure snapshots.
+
+**Scope checked or modified**
+
+- Focused Dream real-model Playwright timing contract only.
+- No production lifecycle, model, prompt, runner, SSE or workflow change.
+
+**Completion standard**
+
+The test finishes the visible same-Thread Dream→Chat→Dream journey within the
+bounded active-turn window, or reports the first genuine business terminal
+without leaving a running Agent.
+
+**Actual result and unverified inferences**
+
+The timing contract and static checks passed, but the real business acceptance
+did not complete. Run `run_1d6380cea6fc4a91b0586c1e79856ec4` remained a real
+cancellable main turn for twelve minutes, with one visible Write confirmation
+and two visible Agent confirmations approved inside the bounded window. Admin
+showed the latest `deepseek-v4-pro` requests settled successfully, but no
+canonical source files or stages were produced before the semantic deadline.
+At the deadline the Thread projection showed two running subagents and no
+completed main turn. Standard Thread Stop returned `stop_requested=true`, the
+WorkflowRun was persisted as `cancelled`, and both subagent projections were
+then released as completed. This is a model/subagent orchestration performance
+failure, not a window, Provider availability, model alias, SSE or Run-isolated
+layout failure. A full successful Artifact and Dream→Chat→Dream business result
+remains unverified.

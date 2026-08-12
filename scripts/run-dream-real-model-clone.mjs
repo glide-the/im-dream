@@ -23,8 +23,21 @@ const frontendRoot = resolve(dreamRoot, 'frontend');
 const python = resolve(backendRoot, '.venv/bin/python');
 const pgIsReady = '/opt/homebrew/opt/libpq/bin/pg_isready';
 const sourcePostgresContainer = 'ink-memory-postgres';
-const targetModelAlias = 'hy-preview';
-const expectedUpstreamModel = 'hy3-preview';
+const targetModelAlias = String(
+  process.env.INK_REAL_DREAM_MODEL_ALIAS ?? '',
+).trim();
+const expectedUpstreamModel = String(
+  process.env.INK_REAL_DREAM_EXPECTED_UPSTREAM_MODEL ?? '',
+).trim();
+const modelIdentifier = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
+if (
+  !modelIdentifier.test(targetModelAlias)
+  || !modelIdentifier.test(expectedUpstreamModel)
+) {
+  throw new Error(
+    'INK_REAL_DREAM_MODEL_ALIAS and INK_REAL_DREAM_EXPECTED_UPSTREAM_MODEL are required',
+  );
+}
 const suffix = randomBytes(6).toString('hex');
 const runLabel = `ink-r22-real-model-${suffix}`;
 const databaseName = `ink_memory_r22_${suffix}_test`;
@@ -65,6 +78,7 @@ const dumpPath = join(runtimeRoot, 'source-readonly.dump');
 const workspaceRoot = join(runtimeRoot, 'workspace');
 const localFilesRoot = join(runtimeRoot, 'files');
 const adminRuntimeRoot = join(runtimeRoot, 'admin-src');
+const launchReceiptPath = join(runtimeRoot, 'accepted-run.json');
 await mkdir(workspaceRoot, { recursive: true, mode: 0o700 });
 await mkdir(localFilesRoot, { recursive: true, mode: 0o700 });
 const adminDistName = `.next-e2e-r22-${suffix}`;
@@ -287,6 +301,67 @@ async function waitForUrl(url, child, label) {
   throw new Error(`${label} did not become ready`);
 }
 
+async function verifyAdminProductPlans(
+  baseUrl,
+  canonicalUserId,
+  configuration,
+) {
+  const requestId = `r22_product_${suffix}`;
+  const source = [
+    'import json,os,re,sys',
+    'from datetime import UTC,datetime',
+    'import httpx,jwt',
+    'from pydantic import ValidationError',
+    'from services.admin_product.models import PlansEnvelope',
+    'now=int(datetime.now(UTC).timestamp())',
+    'token=jwt.encode({"sub":sys.argv[2],"iss":os.environ["INK_R22_PRODUCT_ISSUER"],"aud":os.environ["INK_R22_PRODUCT_AUDIENCE"],"client_id":os.environ["INK_R22_PRODUCT_CLIENT_ID"],"scope":"product:read","iat":now,"exp":now+240,"jti":sys.argv[3]},os.environ["INK_R22_PRODUCT_SECRET"],algorithm="HS256")',
+    'try:',
+    ' response=httpx.get(sys.argv[1]+"/api/product/v1/plans",params={"page":1,"pageSize":20},headers={"accept":"application/json","authorization":"Bearer "+token,"x-request-id":sys.argv[3]},timeout=15,follow_redirects=False,trust_env=False)',
+    ' try: payload=response.json()',
+    ' except (ValueError,UnicodeError): payload={}',
+    ' error=payload.get("error") if isinstance(payload,dict) else None',
+    ' code=error.get("code") if isinstance(error,dict) else None',
+    ' meta=payload.get("meta") if isinstance(payload,dict) else None',
+    ' data=payload.get("data") if isinstance(payload,dict) else None',
+    ' safe_code=code if isinstance(code,str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",code) else None',
+    ' issues=[]',
+    ' try: PlansEnvelope.model_validate(payload); contract_valid=True',
+    ' except ValidationError as exc: contract_valid=False; issues=[{"path":".".join(str(item) for item in issue.get("loc",())),"type":str(issue.get("type","invalid"))} for issue in exc.errors()[:8]]',
+    ' print(json.dumps({"status":response.status_code,"errorCode":safe_code,"requestIdMatches":isinstance(meta,dict) and meta.get("requestId")==sys.argv[3],"planCount":len(data) if isinstance(data,list) else None,"contractValid":contract_valid,"issues":issues},separators=(",",":")))',
+    'except httpx.HTTPError:',
+    ' print(json.dumps({"status":None,"errorCode":"PRODUCT_ROUTE_UNREACHABLE","requestIdMatches":False,"planCount":None},separators=(",",":")))',
+  ].join('\n');
+  const result = JSON.parse(await execute(python, [
+    '-c', source, baseUrl, canonicalUserId, requestId,
+  ], {
+    cwd: backendRoot,
+    env: {
+      ...process.env,
+      INK_R22_PRODUCT_SECRET: configuration.jwtSecret,
+      INK_R22_PRODUCT_ISSUER: configuration.jwtIssuer,
+      INK_R22_PRODUCT_AUDIENCE: configuration.jwtAudience,
+      INK_R22_PRODUCT_CLIENT_ID: configuration.clientId,
+    },
+  }));
+  if (
+    result.status !== 200
+    || result.requestIdMatches !== true
+    || !Number.isInteger(result.planCount)
+    || result.contractValid !== true
+  ) {
+    console.error(JSON.stringify({
+      phase: 'isolated-admin-product-contract',
+      status: result.status,
+      errorCode: result.errorCode,
+      requestIdMatches: result.requestIdMatches === true,
+      contractValid: result.contractValid === true,
+      issues: Array.isArray(result.issues) ? result.issues : [],
+    }));
+    throw new Error('isolated Admin Product plans contract is unavailable');
+  }
+  return result;
+}
+
 async function listenerPids(port) {
   try {
     return (await execute('lsof', [
@@ -453,22 +528,64 @@ async function verifyCloneDreamLaunch(databaseUrl, canonicalUserId, platformUser
   ));
 }
 
-async function diagnoseCloneDreamFailure(databaseUrl) {
+async function readLaunchReceipt() {
+  try {
+    const value = JSON.parse(await readFile(launchReceiptPath, 'utf8'));
+    if (
+      !value
+      || typeof value !== 'object'
+      || !/^run_[0-9a-f]{32}$/.test(String(value.workflowRunId ?? ''))
+      || !/^[0-9a-f-]{36}$/.test(String(value.threadId ?? ''))
+    ) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+async function diagnoseCloneDreamFailure(databaseUrl, launchReceipt) {
+  if (!launchReceipt) {
+    return {
+      receiptPresent: false,
+      runPresent: false,
+      browserReceipt: null,
+    };
+  }
   const source = [
-    'import json,os,psycopg',
+    'import json,os,psycopg,sys',
     'with psycopg.connect(os.environ["INK_R44_DATABASE_URL"], options="-c default_transaction_read_only=on") as c:',
-    ' run=c.execute("""SELECT id,status,status_version,failed_step,error_code,source_voice_thread_id,agent_session_id FROM workflow_runs WHERE workspace_id LIKE \'workspace-r44-%\' ORDER BY created_at DESC LIMIT 1""").fetchone()',
-    ' if run is None: print(json.dumps({"run":None},separators=(",",":"))); raise SystemExit(0)',
+    ' run=c.execute("""SELECT id,status,status_version,failed_step,error_code,source_voice_thread_id,agent_session_id FROM workflow_runs WHERE id=%s""",(sys.argv[1],)).fetchone()',
+    ' if run is None: print(json.dumps({"receiptPresent":bool(sys.argv[1]),"runPresent":False},separators=(",",":"))); raise SystemExit(0)',
     ' transitions=c.execute("""SELECT transition_seq,from_status,to_status,reason_code,failed_step,error_code FROM workflow_run_transitions WHERE workflow_run_id=%s ORDER BY transition_seq""",(run[0],)).fetchall()',
     ' sessions=c.execute("""SELECT status,error_code,termination_reason_code,deployment_tier,runtime_environment_id,runtime_pool_id,runtime_node_id FROM agent_sessions WHERE workflow_run_id=%s ORDER BY attempt_number""",(run[0],)).fetchall()',
     ' gateway=c.execute("""SELECT status,outcome,http_status,error_code,requested_model,resolved_model,COUNT(*) FROM gateway_requests WHERE platform_user_id IN (SELECT id FROM platform_users WHERE source=\'ink-dream\' AND external_user_id=(SELECT created_by FROM workflow_runs WHERE id=%s)) GROUP BY status,outcome,http_status,error_code,requested_model,resolved_model ORDER BY status,outcome,http_status,error_code""",(run[0],)).fetchall()',
     ' messages=c.execute("SELECT role,COUNT(*) FROM chat_message WHERE thread_id=%s GROUP BY role ORDER BY role",(run[5],)).fetchall() if run[5] else []',
-    ' print(json.dumps({"run":{"id":run[0],"status":run[1],"statusVersion":int(run[2]),"failedStep":run[3],"errorCode":run[4],"threadPresent":bool(run[5]),"sessionPresent":bool(run[6])},"transitions":[{"sequence":int(row[0]),"from":row[1],"to":row[2],"reasonCode":row[3],"failedStep":row[4],"errorCode":row[5]} for row in transitions],"sessions":[{"status":row[0],"errorCode":row[1],"terminationReason":row[2],"tier":row[3],"environment":row[4],"pool":row[5],"node":row[6]} for row in sessions],"gateway":[{"status":row[0],"outcome":row[1],"httpStatus":row[2],"errorCode":row[3],"requestedModel":row[4],"resolvedModel":row[5],"count":int(row[6])} for row in gateway],"messageRoles":{row[0]:int(row[1]) for row in messages}},separators=(",",":"),sort_keys=True))',
+    ' thread=c.execute("SELECT claude_session_id IS NOT NULL,agent_contract_version IS NOT NULL FROM chat_thread WHERE id=%s",(run[5],)).fetchone() if run[5] else None',
+    ' print(json.dumps({"receiptPresent":bool(sys.argv[1]),"runPresent":True,"run":{"status":run[1],"statusVersion":int(run[2]),"failedStep":run[3],"errorCode":run[4],"threadPresent":bool(run[5]),"threadMatchesReceipt":bool(sys.argv[2]) and run[5]==sys.argv[2],"sessionPresent":bool(run[6])},"transitions":[{"sequence":int(row[0]),"from":row[1],"to":row[2],"reasonCode":row[3],"failedStep":row[4],"errorCode":row[5]} for row in transitions],"sessions":[{"status":row[0],"errorCode":row[1],"terminationReason":row[2],"tier":row[3],"environment":row[4],"pool":row[5],"node":row[6]} for row in sessions],"gateway":[{"status":row[0],"outcome":row[1],"httpStatus":row[2],"errorCode":row[3],"requestedModel":row[4],"resolvedModel":row[5],"count":int(row[6])} for row in gateway],"messageRoles":{row[0]:int(row[1]) for row in messages},"thread":{"present":thread is not None,"sdkSessionPresent":bool(thread and thread[0]),"agentContractPresent":bool(thread and thread[1])}},separators=(",",":"),sort_keys=True))',
   ].join('\n');
-  return JSON.parse(await execute(python, ['-c', source], {
+  const databaseEvidence = JSON.parse(await execute(python, [
+    '-c', source,
+    launchReceipt?.workflowRunId ?? '',
+    launchReceipt?.threadId ?? '',
+  ], {
     cwd: backendRoot,
     env: { ...process.env, INK_R44_DATABASE_URL: databaseUrl },
   }));
+  const safeBrowserReceipt = launchReceipt ? {
+    runStatus: String(launchReceipt.runStatus ?? 'unknown'),
+    runErrorCode: typeof launchReceipt.runErrorCode === 'string'
+      ? launchReceipt.runErrorCode
+      : null,
+    runRevision: Number(launchReceipt.runRevision ?? 0),
+    canConfirm: launchReceipt.canConfirm === true,
+    stages: Object.fromEntries(Object.entries(launchReceipt.stages ?? {}).map(
+      ([stage, value]) => [stage, {
+        revision: Number(value?.revision ?? 0),
+        itemCount: Number(value?.itemCount ?? 0),
+      }],
+    )),
+  } : null;
+  return { ...databaseEvidence, browserReceipt: safeBrowserReceipt };
 }
 
 async function verifyCloneModel(databaseUrl) {
@@ -478,7 +595,7 @@ async function verifyCloneModel(databaseUrl) {
     ' rows=c.execute("""SELECT m.code,m.upstream_model,m.enabled,p.protocol,p.status,(p.api_key_ciphertext IS NOT NULL AND p.api_key_iv IS NOT NULL AND p.api_key_tag IS NOT NULL),COUNT(pr.id) FILTER (WHERE pr.status=\'active\' AND pr.effective_from<=now() AND (pr.effective_to IS NULL OR pr.effective_to>now())),COUNT(e.id) FILTER (WHERE e.enabled AND e.gateway_scopes @> ARRAY[\'messages:create\']::text[] AND v.status=\'published\') FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id LEFT JOIN ai_pricing_rules pr ON pr.model_id=m.id LEFT JOIN subscription_plan_entitlements e ON e.model_id=m.id LEFT JOIN subscription_plan_versions v ON v.id=e.plan_version_id WHERE m.code=%s AND m.upstream_model=%s GROUP BY m.id,p.id""",(sys.argv[1],sys.argv[2])).fetchall()',
     ' assert len(rows)==1',
     ' row=rows[0]',
-    ' assert row[2] and row[4]=="active" and row[5] and int(row[6])>0 and int(row[7])>0',
+    ' assert row[2] and row[4]=="active" and row[5] and int(row[6])>0',
     ' print(json.dumps({"alias":row[0],"upstream":row[1],"enabled":bool(row[2]),"protocol":row[3],"providerActive":row[4]=="active","credentialReady":bool(row[5]),"activePricing":int(row[6]),"publishedEntitlements":int(row[7])},separators=(",",":")))',
   ].join('\n');
   return JSON.parse(await execute(
@@ -492,9 +609,10 @@ async function verifyCloneEffectiveLimits(databaseUrl, platformUserId) {
   const source = [
     'import json,os,psycopg,sys',
     'with psycopg.connect(os.environ["INK_R44_DATABASE_URL"], options="-c default_transaction_read_only=on") as c:',
-    ' row=c.execute("""SELECT plan.code,entitlement.requests_per_minute,entitlement.daily_token_limit,entitlement.monthly_token_limit,permission.requests_per_minute,permission.daily_token_limit,permission.monthly_token_limit,allowance.granted_tokens+allowance.bonus_granted_tokens-allowance.reserved_tokens-allowance.consumed_tokens,platform_user.daily_token_limit,platform_user.monthly_token_limit FROM subscriptions subscription JOIN subscription_plan_versions version ON version.id=subscription.plan_version_id JOIN subscription_plans plan ON plan.id=version.plan_id JOIN subscription_plan_entitlements entitlement ON entitlement.plan_version_id=version.id JOIN ai_models model ON model.id=entitlement.model_id AND model.code=%s JOIN platform_users platform_user ON platform_user.id=subscription.platform_user_id LEFT JOIN user_model_permissions permission ON permission.platform_user_id=subscription.platform_user_id AND permission.model_id=model.id LEFT JOIN subscription_usage_allowances allowance ON allowance.subscription_id=subscription.id AND allowance.period_start=subscription.current_period_start AND allowance.period_end=subscription.current_period_end WHERE subscription.platform_user_id=%s AND subscription.status IN (\'active\',\'trial\',\'cancel_at_period_end\')""",(sys.argv[2],sys.argv[1])).fetchone()',
+    ' row=c.execute("""SELECT plan.code,entitlement.id,entitlement.requests_per_minute,entitlement.daily_token_limit,entitlement.monthly_token_limit,permission.enabled,permission.requests_per_minute,permission.daily_token_limit,permission.monthly_token_limit,allowance.granted_tokens+allowance.bonus_granted_tokens-allowance.reserved_tokens-allowance.consumed_tokens,platform_user.daily_token_limit,platform_user.monthly_token_limit FROM subscriptions subscription JOIN subscription_plan_versions version ON version.id=subscription.plan_version_id JOIN subscription_plans plan ON plan.id=version.plan_id JOIN ai_models model ON model.code=%s JOIN platform_users platform_user ON platform_user.id=subscription.platform_user_id LEFT JOIN subscription_plan_entitlements entitlement ON entitlement.plan_version_id=version.id AND entitlement.model_id=model.id AND entitlement.enabled AND entitlement.gateway_scopes @> ARRAY[\'messages:create\']::text[] LEFT JOIN user_model_permissions permission ON permission.platform_user_id=subscription.platform_user_id AND permission.model_id=model.id LEFT JOIN subscription_usage_allowances allowance ON allowance.subscription_id=subscription.id AND allowance.period_start=subscription.current_period_start AND allowance.period_end=subscription.current_period_end WHERE subscription.platform_user_id=%s AND subscription.status IN (\'active\',\'trial\',\'cancel_at_period_end\')""",(sys.argv[2],sys.argv[1])).fetchone()',
     ' assert row is not None',
-    ' print(json.dumps({"planCode":row[0],"entitlementRpm":row[1],"entitlementDailyTokens":row[2],"entitlementMonthlyTokens":row[3],"userModelRpm":row[4],"userModelDailyTokens":row[5],"userModelMonthlyTokens":row[6],"allowanceRemainingTokens":int(row[7]) if row[7] is not None else None,"principalDailyTokens":int(row[8]) if row[8] is not None else None,"principalMonthlyTokens":int(row[9]) if row[9] is not None else None},separators=(",",":")))',
+    ' assert row[5] is not False and row[9] is not None and int(row[9])>0',
+    ' print(json.dumps({"planCode":row[0],"accessMode":"plan-entitlement" if row[1] is not None else "allowance-only","entitlementRpm":row[2],"entitlementDailyTokens":row[3],"entitlementMonthlyTokens":row[4],"userPermissionEnabled":row[5],"userModelRpm":row[6],"userModelDailyTokens":row[7],"userModelMonthlyTokens":row[8],"allowanceRemainingTokens":int(row[9]),"principalDailyTokens":int(row[10]) if row[10] is not None else None,"principalMonthlyTokens":int(row[11]) if row[11] is not None else None},separators=(",",":")))',
   ].join('\n');
   return JSON.parse(await execute(
     python,
@@ -538,6 +656,9 @@ for (const name of [
   'INK_GATEWAY_SUBJECT_JWT_AUDIENCE',
   'INK_GATEWAY_SERVICE_CLIENT_ID',
   'INK_ADMIN_PRODUCT_JWT_SECRET',
+  'INK_ADMIN_PRODUCT_JWT_ISSUER',
+  'INK_ADMIN_PRODUCT_JWT_AUDIENCE',
+  'INK_ADMIN_PRODUCT_CLIENT_ID',
 ]) {
   if (!backendFileEnv[name]) throw new Error(`Dream ${name} is not configured`);
 }
@@ -729,6 +850,17 @@ try {
     },
   );
   await waitForUrl(`${adminBaseUrl}/v1/models`, admin, 'isolated Admin Gateway');
+  runPhase = 'isolated-admin-product-contract';
+  const productPlansEvidence = await verifyAdminProductPlans(
+    adminBaseUrl,
+    cloneUser.canonicalUserId,
+    {
+      jwtSecret: backendFileEnv.INK_ADMIN_PRODUCT_JWT_SECRET,
+      jwtIssuer: backendFileEnv.INK_ADMIN_PRODUCT_JWT_ISSUER,
+      jwtAudience: backendFileEnv.INK_ADMIN_PRODUCT_JWT_AUDIENCE,
+      clientId: backendFileEnv.INK_ADMIN_PRODUCT_CLIENT_ID,
+    },
+  );
 
   runPhase = 'isolated-dream-start';
   const dreamEnv = {
@@ -808,6 +940,7 @@ try {
         INK_REAL_DREAM_LAUNCH_QA: '1',
         INK_REAL_DREAM_LAUNCH_EMAIL: testAccountEmail,
         INK_REAL_DREAM_LAUNCH_DECK_ID: dreamSurface.deckId,
+        INK_REAL_DREAM_LAUNCH_RECEIPT_PATH: launchReceiptPath,
       },
       inherit: true,
     });
@@ -833,6 +966,7 @@ try {
     existingPlatformProjectionResolved: Boolean(cloneUser.platformUserId),
     dreamSurface,
     accountHistory: accountHistoryEvidence,
+    productPlans: productPlansEvidence,
     adminRuntimeCheckout: 'isolated-head-clone',
     adminBundler: 'webpack-isolated-external-dependency-link',
     model: modelEvidence,
@@ -845,7 +979,11 @@ try {
   runError = error;
   failedPhase = runPhase;
   if (targetDatabaseUrl) {
-    const failureEvidence = await diagnoseCloneDreamFailure(targetDatabaseUrl)
+    const launchReceipt = await readLaunchReceipt();
+    const failureEvidence = await diagnoseCloneDreamFailure(
+      targetDatabaseUrl,
+      launchReceipt,
+    )
       .catch(() => ({ unavailable: true }));
     console.error(JSON.stringify({ phase: 'clone-dream-failure-evidence', failureEvidence }));
   }

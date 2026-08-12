@@ -1,6 +1,6 @@
 ---
 name: ink-dream-playwright-qa
-description: Run reliable Playwright automation and visual QA for the Ink-Dream repository. Use when Codex needs to create, debug, or execute frontend browser tests; validate authenticated Chat, Dream, Settings, SubAgent, theme, language, responsive, Markdown, console, or resize behavior; stage isolated backend/workspace fixtures; or diagnose flaky local Playwright runs on ports 5173 and 8765.
+description: Run reliable human-journey Playwright automation and visual QA for the Ink-Dream repository. Use when Codex needs to create, debug, or execute frontend browser tests; validate authenticated Chat, Dream, Settings, SubAgent, theme, language, responsive, Markdown, console, or resize behavior; stage isolated backend/workspace fixtures; or diagnose flaky local Playwright runs on ports 5173 and 8765.
 ---
 
 # Ink-Dream Playwright QA
@@ -16,6 +16,23 @@ Read [references/project-workflow.md](references/project-workflow.md) before sta
 - Use a temporary `INK_DATABASE_PATH` and absolute `AGENT_CWD` for tests that create users, threads, workspaces, or Agent records.
 - Treat ports `5173` and `8765` as owned only after resolving their listener PIDs. Never kill an unidentified process.
 - Register API, console, page-error, and request-failure listeners before navigation.
+- Write business E2E scenarios as normal human journeys through visible UI. API
+  calls may stage isolated prerequisites or verify persisted facts, but must not
+  replace the meaningful user interaction under test.
+- Treat visible Agent/Thread termination as the business terminal. Once the UI
+  shows that the Agent has stopped, immediately validate required output and
+  fail if it is incomplete; process, port, SSE reconnect, or HTTP health alone
+  must never justify continued business polling.
+- Handle required tool confirmations through the visible UI as part of the
+  human journey. Approve only case-specific allowlisted operations after the
+  test identifies the displayed tool; fail on unknown, Bash, network, or other
+  unreviewed confirmations instead of silently approving or polling behind
+  them. AskUserQuestion answers must come from explicit scenario input.
+- Keep headed browser windows within the current desktop using an explicit
+  bounded outer window and deterministic content viewport. Never use zoom,
+  CSS scaling, maximization, or hidden panels to conceal a responsive defect;
+  require zero document-level horizontal overflow and keep the scenario's
+  heading, primary action, and blocking dialogs inside the visible viewport.
 - Prefer roles, labels, titles, and test ids. Do not use forced clicks to make a test pass; use keyboard activation only when intentionally validating or bypassing the known Writing overlay.
 - Wait for visible state and known transitions. Do not replace readiness checks with arbitrary long sleeps.
 - Verify behavior with assertions before taking screenshots.
@@ -78,6 +95,21 @@ Never hand-edit the normal development database for browser QA.
 
 ### 5. Author stable browser assertions
 
+- Name and order the scenario as an outcome a user recognizes: navigate to the
+  feature, make visible choices, enter realistic input, submit, observe visible
+  progress, then inspect the visible result. Keep direct API reads as supporting
+  contract evidence after or alongside that UI journey.
+- Model business and infrastructure terminals separately. A healthy backend can
+  coexist with a stopped Agent and incomplete workflow. Poll the shared Thread
+  status together with derived business output; when the Thread has completed a
+  turn and is no longer running, stop waiting and assert the output immediately.
+- While a turn is running, sample the visible confirmation surface before each
+  business-state poll. Resolve an expected confirmation using its labeled UI and
+  wait for that exact dialog to settle before expecting downstream artifacts.
+- In headed runs, size the browser for the actual desktop before navigation and
+  assert that critical controls are in the viewport. Internal content scrolling
+  is acceptable; document-level horizontal overflow and clipped blocking
+  controls are failures.
 - Assert the URL or route after navigation.
 - Assert loading completion before interaction.
 - Assert semantic content, ARIA state, message order, absence of forbidden controls, and persisted API state.

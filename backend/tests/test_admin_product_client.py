@@ -347,6 +347,67 @@ class AdminProductConfigurationTests(unittest.TestCase):
 
 
 class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_published_configuration_incomplete_plan_is_valid(self) -> None:
+        unavailable = {
+            **_plan(),
+            "monthlyAllowanceTokens": None,
+            "monthlyPriceMicrousd": None,
+            "available": False,
+            "unavailableReason": "configuration_incomplete",
+            "eligibility": {
+                "eligible": False,
+                "reasonCode": "PLAN_NOT_AVAILABLE",
+                "appliesAt": None,
+            },
+            "availableActions": [],
+        }
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "data": [unavailable],
+                    "meta": {**_meta(), "total": 1, "page": 1, "pageSize": 20},
+                },
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as http_client:
+            client = AdminProductClient(_configuration(), client=http_client)
+            result = await client.plans("7", PlansQuery(), "req_test")
+
+        self.assertEqual(result["data"][0]["versionStatus"], "published")
+        self.assertEqual(
+            result["data"][0]["unavailableReason"], "configuration_incomplete"
+        )
+
+    async def test_unavailable_plan_with_commercial_values_is_rejected(self) -> None:
+        invalid = {
+            **_plan(),
+            "available": False,
+            "unavailableReason": "configuration_incomplete",
+            "availableActions": [],
+        }
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "data": [invalid],
+                    "meta": {**_meta(), "total": 1, "page": 1, "pageSize": 20},
+                },
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as http_client:
+            client = AdminProductClient(_configuration(), client=http_client)
+            with self.assertRaises(ProductBffError) as raised:
+                await client.plans("7", PlansQuery(), "req_test")
+
+        self.assertEqual(raised.exception.status_code, 503)
+
     async def test_product_routes_claim_scopes_and_write_idempotency(self) -> None:
         configuration = _configuration()
         observed: list[httpx.Request] = []

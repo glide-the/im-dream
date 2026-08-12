@@ -221,14 +221,26 @@ class ProductPlan(StrictModel):
                 or self.unavailableReason is not None
             ):
                 raise ValueError("available plan must expose a published commercial version")
-        elif (
-            any(value is not None for value in commercial)
-            or self.unavailableReason is None
-            or self.availableActions
-            or ((self.planVersionId is None) != (self.version is None))
-            or (self.planVersionId is not None and self.versionStatus not in {"draft", "retired"})
-        ):
-            raise ValueError("unavailable plan must expose no commercial values or actions")
+        else:
+            has_version = self.planVersionId is not None
+            if (
+                any(value is not None for value in commercial)
+                or self.unavailableReason is None
+                or self.availableActions
+                or (has_version != (self.version is not None))
+                or (has_version != (self.versionStatus is not None))
+                or (
+                    self.unavailableReason == "commercial_parameters_pending"
+                    and (not has_version or self.versionStatus != "draft")
+                )
+                or (
+                    self.unavailableReason == "configuration_incomplete"
+                    and self.versionStatus == "draft"
+                )
+            ):
+                raise ValueError(
+                    "unavailable plan must expose no commercial values or actions"
+                )
         return self
 
 

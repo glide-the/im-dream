@@ -2,7 +2,8 @@
 """Run a real local Admin Gateway -> Dream -> Claude Agent smoke test.
 
 The command is intentionally pinned to the named local E2E canonical user. It
-never prints access tokens, service keys, provider responses, or assistant text.
+never prints access tokens, service keys, provider responses, or assistant text;
+expected Product preflight failures use a closed set of safe diagnostic codes.
 """
 
 from __future__ import annotations
@@ -77,6 +78,15 @@ class ModelContractError(RuntimeError):
 
 class SSEProtocolError(RuntimeError):
     """The streamed response violated the canonical Chat SSE contract."""
+
+
+class BusinessPreflightError(RuntimeError):
+    """An expected provider-free Product preflight boundary rejected the run."""
+
+    def __init__(self, phase: str, error_code: str) -> None:
+        super().__init__(error_code)
+        self.phase = phase
+        self.error_code = error_code
 
 
 def _required_model_contract() -> tuple[str, str]:
@@ -362,8 +372,32 @@ def _remaining_tokens(context_data: dict) -> int:
     return int(remaining) if isinstance(remaining, int) and not isinstance(remaining, bool) else 0
 
 
+def _current_subscription_access_evidence(
+    context_data: dict, model_alias: str
+) -> dict | None:
+    """Describe an existing Product subject using Gateway's allowance policy."""
+
+    subscription = context_data.get("subscription")
+    plan = context_data.get("planVersion")
+    if (
+        not isinstance(subscription, dict)
+        or not isinstance(plan, dict)
+        or _remaining_tokens(context_data) <= 0
+    ):
+        return None
+    exact_entitlement = model_alias in _model_aliases(
+        context_data.get("entitlements")
+    )
+    return {
+        "provisioned": False,
+        "planCode": plan.get("planCode"),
+        "remainingTokensPositive": True,
+        "accessMode": "plan-entitlement" if exact_entitlement else "allowance-only",
+    }
+
+
 def _ensure_subscription(auth_headers: dict[str, str], model_alias: str) -> dict:
-    """Provision only an explicitly authorized clone-only Product subject."""
+    """Accept an eligible subject or provision an authorized clone-only one."""
 
     context_response = requests.get(
         f"{DREAM_BASE_URL}/api/story-workspace/subscription/context",
@@ -373,22 +407,21 @@ def _ensure_subscription(auth_headers: dict[str, str], model_alias: str) -> dict
     context_payload = _require_json_response(context_response, "subscription-context")
     context_data = context_payload.get("data")
     if not isinstance(context_data, dict):
-        raise RuntimeError("subscription-context failed: invalid payload")
-    if (
-        model_alias in _model_aliases(context_data.get("entitlements"))
-        and _remaining_tokens(context_data) > 0
-    ):
-        plan = context_data.get("planVersion")
-        return {
-            "provisioned": False,
-            "planCode": plan.get("planCode") if isinstance(plan, dict) else None,
-            "remainingTokensPositive": True,
-        }
+        raise BusinessPreflightError(
+            "subscription-context", "INVALID_PRODUCT_CONTEXT_PAYLOAD"
+        )
+    existing_access = _current_subscription_access_evidence(
+        context_data, model_alias
+    )
+    if existing_access is not None:
+        return existing_access
     if not PROVISION_SUBSCRIPTION:
-        raise RuntimeError("subscription-preflight failed: exact model entitlement unavailable")
+        raise BusinessPreflightError(
+            "subscription-preflight", "SUBSCRIPTION_OR_ALLOWANCE_UNAVAILABLE"
+        )
     if context_data.get("subscription") is not None:
-        raise RuntimeError(
-            "subscription-preflight failed: existing subject lacks exact entitlement"
+        raise BusinessPreflightError(
+            "subscription-preflight", "EXISTING_SUBJECT_LACKS_EXACT_ENTITLEMENT"
         )
 
     plans_response = requests.get(
@@ -400,7 +433,9 @@ def _ensure_subscription(auth_headers: dict[str, str], model_alias: str) -> dict
     plans_payload = _require_json_response(plans_response, "subscription-plans")
     plans = plans_payload.get("data")
     if not isinstance(plans, list):
-        raise RuntimeError("subscription-plans failed: invalid payload")
+        raise BusinessPreflightError(
+            "subscription-plans", "INVALID_PRODUCT_PLANS_PAYLOAD"
+        )
     candidates = [
         plan
         for plan in plans
@@ -418,10 +453,14 @@ def _ensure_subscription(auth_headers: dict[str, str], model_alias: str) -> dict
         )
     )
     if not candidates:
-        raise RuntimeError("subscription-plans failed: no creatable exact-model plan")
+        raise BusinessPreflightError(
+            "subscription-plans", "NO_CREATABLE_EXACT_MODEL_PLAN"
+        )
     target = candidates[0]
     if int(target.get("monthlyPriceMicrousd") or 0) != 0:
-        raise RuntimeError("subscription-plans failed: paid plan requires external authority")
+        raise BusinessPreflightError(
+            "subscription-plans", "PAID_PLAN_REQUIRES_EXTERNAL_AUTHORITY"
+        )
 
     write_headers = {
         **auth_headers,
@@ -450,7 +489,9 @@ def _ensure_subscription(auth_headers: dict[str, str], model_alias: str) -> dict
         )
         or (preview.get("gatewayImpact") or {}).get("callableAfterExecute") is not True
     ):
-        raise RuntimeError("subscription-preview failed: exact entitlement not authorized")
+        raise BusinessPreflightError(
+            "subscription-preview", "EXACT_ENTITLEMENT_NOT_AUTHORIZED"
+        )
 
     execute_headers = {
         **write_headers,
@@ -474,7 +515,9 @@ def _ensure_subscription(auth_headers: dict[str, str], model_alias: str) -> dict
     execute_payload = _require_json_response(execute_response, "subscription-execute")
     result = execute_payload.get("data")
     if not isinstance(result, dict) or result.get("outcome") != "applied":
-        raise RuntimeError("subscription-execute failed: subscription not applied")
+        raise BusinessPreflightError(
+            "subscription-execute", "SUBSCRIPTION_NOT_APPLIED"
+        )
 
     verified_response = requests.get(
         f"{DREAM_BASE_URL}/api/story-workspace/subscription/context",
@@ -488,11 +531,14 @@ def _ensure_subscription(auth_headers: dict[str, str], model_alias: str) -> dict
         or model_alias not in _model_aliases(verified.get("entitlements"))
         or _remaining_tokens(verified) <= 0
     ):
-        raise RuntimeError("subscription-verify failed: entitlement or allowance missing")
+        raise BusinessPreflightError(
+            "subscription-verify", "ENTITLEMENT_OR_ALLOWANCE_MISSING"
+        )
     return {
         "provisioned": True,
         "planCode": target.get("planCode"),
         "remainingTokensPositive": True,
+        "accessMode": "plan-entitlement",
     }
 
 
@@ -1090,18 +1136,25 @@ def _safe_entrypoint() -> int:
     try:
         return main()
     except Exception as exc:
-        if isinstance(exc, ModelContractError):
+        error_code = None
+        if isinstance(exc, BusinessPreflightError):
+            phase = exc.phase
+            error_code = exc.error_code
+        elif isinstance(exc, ModelContractError):
             phase = "model-contract"
         elif isinstance(exc, SSEProtocolError):
             phase = "claude-agent-sse-contract"
         else:
             phase = "gateway-real-e2e"
-        print(json.dumps({
+        diagnostic = {
             "phase": phase,
             "errorClass": type(exc).__name__,
             "secretsPrinted": False,
             "privateContentPrinted": False,
-        }, sort_keys=True))
+        }
+        if error_code is not None:
+            diagnostic["errorCode"] = error_code
+        print(json.dumps(diagnostic, sort_keys=True))
         return 3
 
 

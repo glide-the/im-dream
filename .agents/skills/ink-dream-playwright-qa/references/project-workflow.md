@@ -109,6 +109,13 @@ Selector priority:
 
 Avoid `force: true`. It hides overlays, stale state, and layout defects. Keyboard activation is acceptable when it is the intended accessibility path or the known Writing overlay is irrelevant to the feature.
 
+For headed QA, declare both a bounded Chromium outer window and a deterministic
+content viewport that fit the current desktop. Do not rely on maximize or zoom.
+Assert `document.documentElement.scrollWidth <= clientWidth + 1` and require the
+scenario heading, primary action, and any blocking dialog to be in the viewport
+before interacting with them. A panel's intentional internal vertical scroll is
+not a failure.
+
 Use web-first assertions:
 
 ```ts
@@ -117,6 +124,31 @@ await page.getByTitle('Subagents').click();
 await expect(page.locator('[data-subagent-view="list"]')).toBeVisible();
 await expect(page.getByTitle('Subagents')).toHaveAttribute('aria-expanded', 'true');
 ```
+
+### Human business journey rule
+
+Structure business E2E cases in the order a normal user experiences them:
+
+1. Open the visible feature page and confirm its identity.
+2. Make required choices with labeled controls.
+3. Enter realistic business input and submit through the visible primary action.
+4. Observe the visible running state, streamed output, confirmation, or other
+   progress the user relies on.
+5. If a visible tool confirmation blocks the turn, identify the displayed tool
+   and use the labeled controls to make the scenario's explicit decision. Never
+   approve an unknown/Bash/network operation merely to advance the test, and do
+   not answer AskUserQuestion without case-specific input.
+6. Treat the visible Agent/Thread stop as terminal and immediately inspect the
+   resulting business state.
+7. Use authenticated API reads only to corroborate Thread identity,
+   persistence, workflow state, or artifacts behind the already-exercised UI.
+
+For Dream, if the shared Thread has at least one completed turn and
+`running=false`, do not keep polling characters/scenes/storyboards merely
+because FastAPI, Vite, Admin, PostgreSQL, or an SSE reconnect loop is alive.
+Assert the currently visible/persisted stages immediately; incomplete output is
+a business failure. A fixed sleep or a longer Artifact timeout cannot convert a
+stopped Agent into a running Dream workflow.
 
 For a 250ms sidebar width transition, wait on the semantic state first, then poll until two consecutive bounding-box widths are equal. A bounded delay of about 350ms is an acceptable fallback after the semantic assertion; long sleeps are not a readiness strategy.
 

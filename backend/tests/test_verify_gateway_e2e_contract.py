@@ -221,6 +221,111 @@ def test_missing_model_contract_fails_before_database_access(
     }
 
 
+def test_business_preflight_failure_emits_only_safe_structured_code(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        verifier,
+        "main",
+        lambda: (_ for _ in ()).throw(
+            verifier.BusinessPreflightError(
+                "subscription-preflight",
+                "SUBSCRIPTION_OR_ALLOWANCE_UNAVAILABLE",
+            )
+        ),
+    )
+
+    assert verifier._safe_entrypoint() == 3
+    assert json.loads(capsys.readouterr().out) == {
+        "errorClass": "BusinessPreflightError",
+        "errorCode": "SUBSCRIPTION_OR_ALLOWANCE_UNAVAILABLE",
+        "phase": "subscription-preflight",
+        "privateContentPrinted": False,
+        "secretsPrinted": False,
+    }
+
+
+def test_existing_subscription_can_use_gateway_allowance_without_exact_entitlement() -> None:
+    evidence = verifier._current_subscription_access_evidence(
+        {
+            "subscription": {"id": "sub-private"},
+            "planVersion": {"planCode": "free"},
+            "entitlements": [
+                {"modelAliases": ["another-model"]},
+            ],
+            "allowance": {"remaining": 50_000_000},
+        },
+        "hy-preview",
+    )
+
+    assert evidence == {
+        "provisioned": False,
+        "planCode": "free",
+        "remainingTokensPositive": True,
+        "accessMode": "allowance-only",
+    }
+
+
+def test_existing_subscription_records_exact_plan_entitlement_mode() -> None:
+    evidence = verifier._current_subscription_access_evidence(
+        {
+            "subscription": {"id": "sub-private"},
+            "planVersion": {"planCode": "dream"},
+            "entitlements": [{"modelAliases": ["hy-preview"]}],
+            "allowance": {"remaining": 1},
+        },
+        "hy-preview",
+    )
+
+    assert evidence == {
+        "provisioned": False,
+        "planCode": "dream",
+        "remainingTokensPositive": True,
+        "accessMode": "plan-entitlement",
+    }
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"planVersion": {"planCode": "free"}, "allowance": {"remaining": 1}},
+        {
+            "subscription": {"id": "sub-private"},
+            "planVersion": {"planCode": "free"},
+            "allowance": {"remaining": 0},
+        },
+    ],
+)
+def test_existing_subscription_requires_subscription_and_positive_allowance(
+    context: dict,
+) -> None:
+    assert verifier._current_subscription_access_evidence(
+        context, "hy-preview"
+    ) is None
+
+
+def test_unexpected_failure_does_not_emit_exception_message(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        verifier,
+        "main",
+        lambda: (_ for _ in ()).throw(RuntimeError("private-account-content")),
+    )
+
+    assert verifier._safe_entrypoint() == 3
+    output = capsys.readouterr().out
+    assert "private-account-content" not in output
+    assert json.loads(output) == {
+        "errorClass": "RuntimeError",
+        "phase": "gateway-real-e2e",
+        "privateContentPrinted": False,
+        "secretsPrinted": False,
+    }
+
+
 def test_thread_receipt_uses_text_json_casts_and_exact_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
