@@ -21,6 +21,9 @@
 # [Sync] 2026-07-26: assert sandbox_fs_allowed_write_paths passes from
 #                    system_config through assemble_context into
 #                    get_or_create_workspace.
+# [Sync] 2026-08-12: cover shared Chat/Dream SDK-native Session ID persistence
+#                    through on_message before a cancelled turn can skip the
+#                    successful assistant persistence path.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -256,9 +259,69 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             execution.run_options.gateway_idempotency_key,
             expected_gateway_key,
         )
+        self.assertFalse(execution.run_options.resume)
+        self.assertIsNone(execution.resume_existing_session)
         self.assertEqual(
             builder.user_message_calls[0]["model"],
             "dream-balanced",
+        )
+
+    async def test_shared_thread_resume_uses_persisted_claude_session(self):
+        service = ClaudeAgentService(
+            context_builder=_FakeContextBuilder(),
+            platform_model_resolver=lambda _user_id, _alias: "dream-balanced",
+            dream_context_mapper=_StaticDreamContextMapper(None),
+        )
+        session_id = "11111111-1111-4111-8111-111111111111"
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread-shared-resume",
+            resume=True,
+            message_parts=[{"type": "text", "text": "继续"}],
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace_path = Path(tmp_dir) / request.thread_id
+            transcript = (
+                workspace_path
+                / ".claude-home"
+                / "projects"
+                / "project"
+                / f"{session_id}.jsonl"
+            )
+            transcript.parent.mkdir(parents=True)
+            transcript.write_text("{}\n", encoding="utf-8")
+            with (
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_system_config",
+                    return_value={"workspace_enabled": True},
+                ),
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_chat_thread",
+                    return_value={
+                        "claude_session_id": session_id,
+                        "agent_contract_version": service_module._AGENT_RUNTIME_CONTRACT_VERSION,
+                    },
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "get_or_create_workspace",
+                    return_value=workspace_path,
+                ),
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=AgentRunState(session_id=request.thread_id),
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertTrue(execution.run_options.resume)
+        self.assertEqual(execution.run_options.thread_id, session_id)
+        self.assertEqual(
+            execution.resume_existing_session["claude_session_id"],
+            session_id,
         )
 
     def test_dream_runtime_has_no_stream_message_callback(self):
@@ -1226,10 +1289,15 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
                 thread_id="thread-stop-service",
                 message_parts=[{"type": "text", "text": "hello"}],
             )
+            session_id = "44444444-4444-4444-8444-444444444444"
 
             class _CancelRunner:
                 async def run_streaming(self, opts, callbacks):
                     del opts
+                    assert callbacks.on_message is not None
+                    await callbacks.on_message(
+                        SimpleNamespace(data={"session_id": session_id})
+                    )
                     await callbacks.on_text_delta("partial")
                     raise asyncio.CancelledError()
 
@@ -1252,6 +1320,10 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
                     "_persist_partial_assistant",
                     new=unittest.mock.AsyncMock(),
                 ) as persist_partial,
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "update_chat_thread_claude_session",
+                ) as persist_session,
             ):
                 with self.assertRaises(asyncio.CancelledError):
                     await service.execute_session(execution)
@@ -1259,12 +1331,17 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
             frames: list[str | None] = []
             while not queue.empty():
                 frames.append(queue.get_nowait())
-            return persist_user, persist_partial, frames
+            return persist_user, persist_partial, persist_session, frames
 
-        persist_user, persist_partial, frames = _run(scenario())
+        persist_user, persist_partial, persist_session, frames = _run(scenario())
 
         persist_user.assert_awaited_once()
         persist_partial.assert_awaited_once()
+        persist_session.assert_called_once_with(
+            "thread-stop-service",
+            "44444444-4444-4444-8444-444444444444",
+            service_module._AGENT_RUNTIME_CONTRACT_VERSION,
+        )
         parsed_frames = [_parse_sse(frame) for frame in frames if frame is not None]
         self.assertEqual(parsed_frames[-1]["type"], "finish")
         self.assertEqual(parsed_frames[-1]["finishReason"], "stop")

@@ -69,6 +69,11 @@
 #                    module; carried into the runner via
 #                    AgentRunOptions.claude_config_home, so CLAUDE_CONFIG_DIR
 #                    is no longer decided inside the run_streaming lifecycle.
+# [Sync] 2026-08-12: shared Chat/Dream Session persistence now writes the
+#                    SDK-native session_id from the existing on_message callback
+#                    as soon as the stream exposes it, before Stop/error can
+#                    bypass successful-turn persistence. Resume resolution and
+#                    claude_session_id semantics remain unchanged.
 # [Sync] 2026-06-13: remove assemble_context local database import that shadowed
 #                    module-level _db before system_config lookup.
 # [Sync] 2026-06-09: P2 fix — split _persist_turn into _persist_user_message (called
@@ -170,6 +175,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, AsyncGenerator, Awaitable, Callable, Mapping, Optional
 from uuid import uuid4
@@ -1677,6 +1683,7 @@ class ClaudeAgentService:
             ),
             on_tool_confirmation_request=self._make_tool_confirm_cb(queue, store, execution.turn_context),
             on_error=on_error,
+            on_message=partial(self._persist_sdk_session_from_message, execution),
             on_plan_file_changed=self._make_plan_file_changed_cb(queue, execution.state),
             on_tasks_changed=self._make_tasks_changed_cb(queue, execution.state),
         )
@@ -1913,6 +1920,37 @@ class ClaudeAgentService:
         except Exception:
             logger.exception(
                 "Failed to persist partial assistant for thread_id=%s", thread_id
+            )
+
+    async def _persist_sdk_session_from_message(
+        self,
+        execution: "_TurnExecution",
+        message: Any,
+    ) -> None:
+        """Persist the SDK-native Session ID as soon as the stream exposes it."""
+
+        data = getattr(message, "data", None)
+        if not isinstance(data, Mapping):
+            return
+        session_id = str(data.get("session_id") or "").strip()
+        if not session_id:
+            return
+        resumed_session_id = str(
+            (execution.resume_existing_session or {}).get("claude_session_id") or ""
+        ).strip()
+        if session_id == resumed_session_id:
+            return
+        try:
+            await asyncio.to_thread(
+                _db.update_chat_thread_claude_session,
+                execution.request.thread_id,
+                session_id,
+                _AGENT_RUNTIME_CONTRACT_VERSION,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist observed Claude Session: thread_id=%s",
+                execution.request.thread_id,
             )
 
     async def _persist_assistant_turn(

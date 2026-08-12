@@ -3724,3 +3724,223 @@ then released as completed. This is a model/subagent orchestration performance
 failure, not a window, Provider availability, model alias, SSE or Run-isolated
 layout failure. A full successful Artifact and Dream→Chat→Dream business result
 remains unverified.
+
+## Round 69 — Prove and enforce Dream Claude Session continuity
+
+**Current-round objective**
+
+Diagnose why a user message such as “继续” on an existing Dream Thread can be
+handled without the prior Claude Code context, and make every non-initial Dream
+turn resume the authoritative persisted Claude Session.
+
+**Optimized Prompt**
+
+> Trace Dream launch, shared Dream Chat composer, confirmation, guidance and
+> internal-command dispatch into `ClaudeAgentThreadFactory.run_streaming()` and
+> `ClaudeAgentService.assemble_context`. For each path, prove the value of
+> `request.resume`, the authoritative `chat_thread.claude_session_id`, the local
+> transcript probe and the resulting SDK `thread_id`. Inspect the affected real
+> Thread using content-minimal database evidence. Preserve `resume=false` only
+> for the first turn that has no Claude Session. For every later Dream turn,
+> require a usable persisted Session and fail closed with a stable lifecycle
+> error if its Session identity or transcript is unavailable; do not silently
+> start a fresh Claude Session and pretend history was resumed. Keep ordinary
+> Chat's existing recovery semantics unless a shared invariant is demonstrably
+> required. Do not pass Dream context in the public Claude message, modify the
+> Claude runner entry, or create a second runtime. Add focused contracts for
+> initial launch, shared-composer continuation, internal commands and missing
+> transcript/session behavior, then run proportional backend/frontend tests.
+
+**Optional Enhancers**
+
+- Emit content-free logs containing only Thread ID, resume decision and a stable
+  reason code so future continuity failures are diagnosable without transcripts.
+
+**Scope checked or modified**
+
+- Dream dispatch request construction, Session resolution in context assembly,
+  persistence/continuity contracts and focused tests.
+- No Claude SDK entry, public Chat/Dream wire format, Dream SSE or unrelated
+  workflow lifecycle changes.
+
+**Completion standard**
+
+The initial Dream turn starts exactly once without resume; every subsequent
+Dream turn uses the same persisted Claude Session and its history, while a
+missing/unusable Session fails explicitly instead of silently starting over.
+
+**Actual result and unverified inferences**
+
+Real Thread evidence proved the defect: the initial Dream turn created Claude
+Session `14ab0bb4-30c8-4982-a4b1-e7d96b9415d6`, but Stop persisted only the
+partial Chat assistant message and not that Session pointer. The later “继续”
+request did carry `resume=true`; because `chat_thread.claude_session_id` was
+empty, the service silently created Session
+`6cffe7cd-1c59-4916-ae3e-08bab6b79d2c`. This was a Session lifecycle defect,
+not proof of weak model context handling.
+
+The historical-Dream classification proposed during this round was rejected by
+business review because Dream and Chat already share the same Thread and Agent
+runtime. It would have changed terminal Thread behavior and has been completely
+removed. The transcript-scanning compensation proposed afterwards was also
+removed because it inferred Session identity outside the existing SDK contract.
+Round 71 replaces both with the shared SDK-native `on_message` persistence fix.
+The affected cancelled real Thread was repaired to point back to its original
+Session without deleting either transcript or any message. A new real-model
+“继续” turn was not submitted during this round.
+
+## Round 70 — Remove historical Dream classification from Agent runtime
+
+**Current-round objective**
+
+Correct the Session continuity fix so it does not reinterpret terminal Dream
+workflow provenance as a second Claude Agent runtime category.
+
+**Optimized Prompt**
+
+> Remove `dream_thread_has_history`, `has_dream_history()` and every test or
+> document claim that gives a terminal/historical Dream Thread special Agent
+> execution semantics. Preserve the original boundary: only a currently
+> resolved internal `dream_context` activates Dream business assembly; after a
+> WorkflowRun is terminal, the same durable Thread follows the ordinary shared
+> Chat lifecycle. Fix the observed continuity defect solely by persisting the
+> Claude Session pointer when a first Dream turn is stopped or fails, recovering
+> a unique missing pointer while the active Dream context is still authoritative,
+> and honoring the existing public `resume=true` Chat request thereafter. Do
+> not change the Claude runner entry, public message, mapper business meaning,
+> workflow permissions or ordinary Chat transcript fallback.
+
+**Optional Enhancers**
+
+- Retain a regression proving a cancelled first Dream turn persists the new
+  Claude Session ID before the next shared Chat message.
+
+**Scope checked or modified**
+
+- ClaudeAgentService Session persistence/resume logic, Dream binding mapper,
+  focused tests and affected folder/design documentation.
+
+**Completion standard**
+
+The historical Dream classifier no longer exists; active Dream can never
+silently restart when resume was requested; a stopped first Dream turn saves
+its Session pointer; terminal Threads retain unchanged standard Chat behavior.
+
+**Actual result and unverified inferences**
+
+**Rejected and superseded by Round 71.** Historical Dream classification was
+removed as required. The intermediate proposal to recover Session identity by
+scanning transcript filenames was also rejected because the existing runner
+already exposes the SDK-native Session ID through `on_message`; introducing a
+second recovery definition was unnecessary.
+
+## Round 71 — Re-audit shared Chat/Dream Claude Session management
+
+**Current-round objective**
+
+Re-check the reported “继续” context loss using the authoritative business
+boundary that Dream and Chat share one Thread, one `chat_thread` row and one
+ClaudeAgentService Session lifecycle.
+
+**Optimized Prompt**
+
+> Re-audit every production turn dispatcher and the full
+> `ClaudeAgentService.assemble_context → ClaudeAgentRunner.run_streaming →
+> persistence` path. Treat Dream and Chat as the same Agent runtime over the
+> same durable `thread_id` and `chat_thread.claude_session_id`. Do not introduce
+> a historical-Dream classifier, Dream-only resume state, new Session ID
+> meaning, transcript-derived business identity, or changes to
+> `existing_claude_session_id`, `should_resume`, `thread_id_for_agent` and the
+> protected runner entry. Prove which callers send `resume=true`, when the SDK
+> first emits its native Session ID, and which success/error/Stop paths persist
+> it. Fix only the demonstrated missing persistence point through the existing
+> shared callback/lifecycle contract, so every later standard `resume=true`
+> request finds the original Session. Add focused shared Chat/Dream tests and
+> verify the affected real Thread using IDs/status only.
+
+**Optional Enhancers**
+
+- Persist the SDK-native Session ID at first observation and keep the existing
+  successful-turn write as an idempotent terminal safeguard.
+
+**Scope checked or modified**
+
+- Production Dream/Chat dispatchers, shared context assembly, runner callback
+  contract, Session persistence, focused tests and affected documentation.
+
+**Completion standard**
+
+Every non-initial Dream path is proven to request resume; the original resume
+resolution code is unchanged; the SDK-native Session ID is persisted before a
+Stop can discard it; no Dream-only Session state or ID definition remains.
+
+**Actual result and unverified inferences**
+
+Fresh audit confirmed that `ChatPanel`, guidance, confirmation and internal
+commands all send `resume=true`; only the first Dream launch sends the required
+`resume=false`. `assemble_context` already loads the same
+`chat_thread.claude_session_id`, validates the existing contract/transcript and
+sets the original `resume_existing_session`, `existing_claude_session_id`,
+`should_resume` and SDK `thread_id` values. Those lines are unchanged.
+
+The actual missing write was after context assembly: the runner receives the
+SDK-native Session ID in `SystemMessage(init)` and forwards that message through
+its pre-existing `on_message` callback, but ClaudeAgentService did not register
+the callback. It only persisted `result.session_id` after a successful turn, so
+Stop skipped the write. The shared service now registers `on_message` and writes
+that exact SDK-native ID to the same `chat_thread` immediately; resumed turns
+are recognized and not redundantly rewritten, while the successful terminal
+write remains unchanged and idempotent. No Dream-only state, transcript scan,
+historical classifier, new ID definition, public DTO or runner-entry change
+remains.
+
+Verification passed 151 focused backend tests with 38 subtests; two unrelated
+tests were skipped by their existing conditions. Coverage includes standard
+Thread resume from the persisted ID, SDK-init ID persistence before cancellation,
+Dream confirmation/internal recovery, ThreadFactory and Dream acceptance. The
+dispatcher-focused launch/guidance/confirmation/internal-command/service set
+also passed 148 tests with 60 subtests (three existing conditional skips), and
+the shared Dream/Chat frontend reconnect/layout contracts passed 7 tests with
+one worker. The affected real Thread still points to its original Session and
+the restarted local backend is healthy. A new real-provider continuation
+response remains unverified.
+
+## Round 72 — Review and commit the shared Session persistence fix
+
+**Current-round objective**
+
+Review the completed shared Chat/Dream Claude Session continuity change and
+commit only the files belonging to that fix.
+
+**Optimized Prompt**
+
+> Inspect the working tree and confirm that the pending change preserves the
+> original `claude_session_id`, `existing_claude_session_id`, `should_resume`
+> and `thread_id_for_agent` business definitions. Verify that the only runtime
+> behavior change is early persistence of the SDK-native Session ID through the
+> existing shared `on_message` callback, with focused cancellation and resume
+> tests plus synchronized folder documentation. Exclude unrelated user work,
+> run the proportional regression and whitespace checks, then create one
+> descriptive Git commit without amending or rewriting history.
+
+**Optional Enhancers**
+
+- Include the test counts and commit hash in the final handoff.
+
+**Scope checked or modified**
+
+- Shared ClaudeAgentService Session persistence, focused tests, folder
+  contracts and this execution record only.
+
+**Completion standard**
+
+The reviewed diff contains no Dream-only Session semantics or unrelated files;
+the focused tests and `git diff --check` pass; one normal Git commit is created.
+
+**Actual result and unverified inferences**
+
+The reviewed diff contains exactly the shared service implementation, its
+focused tests, the two affected folder contracts and this execution record. The
+two critical Session resume/cancellation tests passed and `git diff --check`
+reported no whitespace errors. No new real-model request is part of this commit
+round; provider-level semantic continuation remains outside this Git operation.
