@@ -1,6 +1,5 @@
-/* eslint-disable react-refresh/only-export-components -- U11 exports deterministic action seams for Node verification. */
 // [Input] Confirmed run identity, `.dream` projections, and authoritative Episode artifact surface.
-// [Output] Revision-stable Episode workbench with controlled Dream Agent actions.
+// [Output] Revision-stable Episode workbench with the shared Dream Agent thread.
 // [Pos] /story-workspace/runs/:storyWorkspaceRunId/execution (Task 3 U11)
 // [Sync] 2026-08-06: compose Episode artifacts without changing their REST ownership.
 // [Sync] 2026-08-13: describe an unbound EP01 as a pending artifact-association
@@ -32,19 +31,9 @@ import type {
   StoryWorkspaceEpisodeAssociationCoverage,
   StoryWorkspaceEpisodeArtifactAvailability,
   StoryWorkspaceEpisodeArtifactSurface,
-  StoryWorkspaceEpisodeDispatchAction,
-  StoryWorkspaceEpisodeActionOptionV2,
 } from '../../hooks/story-workspace/contracts';
-import { storyWorkspaceEpisodeOptionCanonicalInputs } from '../../hooks/story-workspace/contracts';
-import {
-  storyWorkspaceContinueEpisodeAction,
-  useStoryWorkspaceEpisodeArtifacts,
-} from '../../hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts';
-import { getAuthToken } from '../../contexts/AuthContext';
-import {
-  StoryWorkspaceDreamAgentDialog,
-  type StoryWorkspaceDreamAgentWorkflowActionViewModel,
-} from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog';
+import { useStoryWorkspaceEpisodeArtifacts } from '../../hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts';
+import { StoryWorkspaceDreamAgentDialog } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog';
 import { StoryWorkspaceEpisodeNarrativeWorkbench } from '../../components/story-workspace/episode/StoryWorkspaceEpisodeNarrativeWorkbench';
 import {
   StoryWorkspaceEpisodeArtifactReader,
@@ -80,18 +69,6 @@ const MODULE_COPY: Record<ExecutionModule, { label: string; description: string 
   outline: { label: 'Outline', description: '故事线与叙事点' },
 };
 
-const EPISODE_ACTION_LABELS: Readonly<Record<StoryWorkspaceEpisodeDispatchAction, string>> = {
-  plan_episode: '生成第一集大纲',
-  write_script: '继续生成剧本',
-  review_script: '审阅剧本',
-  refresh_assets: '刷新角色与场景资产',
-  regenerate_storyboard: '更新详细分镜',
-  generate_prompts: '生成镜头 Prompt',
-  review_full_chain: '审阅完整第一集',
-  validate_episode: '校验第一集产物',
-  prepare_render_guide: '生成制作指导',
-};
-
 const EPISODE_ARTIFACT_LABELS: Readonly<Record<string, string>> = {
   'episode-outline.md': 'Episode Outline',
   'script.md': 'Script',
@@ -101,14 +78,6 @@ const EPISODE_ARTIFACT_LABELS: Readonly<Record<string, string>> = {
   'review-report.md': 'Review Report',
 };
 
-const EPISODE_ARTIFACT_AVAILABILITY_LABELS:
-Readonly<Record<StoryWorkspaceEpisodeArtifactAvailability, string>> = {
-  available: '已生成',
-  not_generated: '尚未生成',
-  invalid: '来源无效',
-  unavailable: '当前不可用',
-};
-
 const EPISODE_UNAVAILABLE_COVERAGE: StoryWorkspaceEpisodeAssociationCoverage = {
   availability: 'unavailable',
   linked: 0,
@@ -116,85 +85,7 @@ const EPISODE_UNAVAILABLE_COVERAGE: StoryWorkspaceEpisodeAssociationCoverage = {
   ratio: null,
 };
 
-export function storyWorkspaceEpisodeNextActionLabel(action: string): string | null {
-  return Object.prototype.hasOwnProperty.call(EPISODE_ACTION_LABELS, action)
-    ? EPISODE_ACTION_LABELS[action as StoryWorkspaceEpisodeDispatchAction]
-    : null;
-}
-
-interface StoryWorkspaceEpisodePendingActionKey {
-  readonly identity: string;
-  readonly key: string;
-}
-
-/** One mounted page reuses a key only while retrying the same server fact/action. */
-export class StoryWorkspaceEpisodeActionSessionKeys {
-  private pending: StoryWorkspaceEpisodePendingActionKey | null = null;
-  private readonly createKey: () => string;
-
-  constructor(createKey: () => string) {
-    this.createKey = createKey;
-  }
-
-  keyFor(runId: string, fact: string, action: string): string {
-    const identity = `${runId}\u0000${fact}\u0000${action}`;
-    if (this.pending?.identity === identity) return this.pending.key;
-    const key = this.createKey();
-    this.pending = { identity, key };
-    return key;
-  }
-
-  rotate(runId: string, fact: string, action: string): void {
-    const identity = `${runId}\u0000${fact}\u0000${action}`;
-    if (this.pending?.identity === identity) this.pending = null;
-  }
-}
-
-interface StoryWorkspaceEpisodeDispatchedAction {
-  readonly action: string;
-  readonly fact: string;
-  readonly identity: string;
-  readonly messageId: string;
-}
-
-export interface StoryWorkspaceEpisodeActionTicket {
-  readonly identity: string;
-  readonly generation: number;
-}
-
-export function storyWorkspaceEpisodeActionTicketIsFresh(
-  ticket: StoryWorkspaceEpisodeActionTicket,
-  currentIdentity: string,
-  currentGeneration: number,
-  mounted: boolean,
-): boolean {
-  return mounted
-    && ticket.identity === currentIdentity
-    && ticket.generation === currentGeneration;
-}
-
-export function storyWorkspaceNormalizeEpisodeGuidance(value: string): string | null {
-  const normalized = value.trim();
-  return normalized.length === 0 ? null : normalized;
-}
-
-export interface StoryWorkspaceEpisodeCanonicalInput {
-  readonly label: string;
-  readonly availability: string;
-  readonly revision: string | null;
-}
-
-export function storyWorkspaceEpisodeCanonicalInputs(
-  surface: Pick<StoryWorkspaceEpisodeArtifactSurface, 'artifacts'>,
-): readonly StoryWorkspaceEpisodeCanonicalInput[] {
-  return surface.artifacts.map((artifact) => ({
-    label: EPISODE_ARTIFACT_LABELS[artifact.relativeKey] ?? '受控产物',
-    availability: EPISODE_ARTIFACT_AVAILABILITY_LABELS[artifact.availability],
-    revision: artifact.contentRevision,
-  }));
-}
-
-export function storyWorkspaceEpisodeEscapeSelection(
+function storyWorkspaceEpisodeEscapeSelection(
   viewModel: StoryWorkspaceEpisodeExecutionViewModel,
   expandedKeys: ReadonlySet<string>,
   selection: StoryWorkspaceEpisodeSelection,
@@ -230,7 +121,7 @@ export interface StoryWorkspaceEpisodeRevisionSelectionState {
   readonly onLocateSelection: (selection: StoryWorkspaceEpisodeSelection) => void;
 }
 
-export function useStoryWorkspaceEpisodeRevisionSelection(
+function useStoryWorkspaceEpisodeRevisionSelection(
   runId: string,
   viewModel: StoryWorkspaceEpisodeExecutionViewModel | null,
 ): StoryWorkspaceEpisodeRevisionSelectionState {
@@ -374,131 +265,6 @@ function EmptyWorkspaceModule({ module }: { module: ExecutionModule }) {
   );
 }
 
-export interface StoryWorkspaceEpisodeContinueDialogProps {
-  readonly actionLabel: string;
-  readonly targetEpisodeLabel?: string;
-  readonly canonicalInputs: readonly StoryWorkspaceEpisodeCanonicalInput[];
-  readonly consequences?: readonly string[];
-  readonly busy: boolean;
-  readonly error: string | null;
-  readonly onCancel: () => void;
-  readonly onConfirm: (userGuidance: string | null) => Promise<void>;
-  readonly restoreFocusRef: RefObject<HTMLButtonElement | null>;
-}
-
-export function StoryWorkspaceEpisodeContinueDialog({
-  actionLabel,
-  targetEpisodeLabel = 'EP01',
-  canonicalInputs,
-  consequences = [],
-  busy,
-  error,
-  onCancel,
-  onConfirm,
-  restoreFocusRef,
-}: StoryWorkspaceEpisodeContinueDialogProps) {
-  const [draft, setDraft] = useState('');
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const guidanceRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const restoreFocusTarget = restoreFocusRef.current;
-    guidanceRef.current?.focus();
-    return () => restoreFocusTarget?.focus();
-  }, [restoreFocusRef]);
-
-  useEffect(() => {
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy) {
-        event.preventDefault();
-        onCancel();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const focusable = Array.from(
-        dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-        ) ?? [],
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [busy, onCancel]);
-
-  return (
-    <div
-      aria-labelledby="story-workspace-episode-continue-dialog-title"
-      aria-modal="true"
-      className="story-workspace-dream-agent-dialog story-workspace-episode-action-dialog"
-      id="story-workspace-episode-continue-dialog"
-      ref={dialogRef}
-      role="dialog"
-    >
-      <header className="story-workspace-dream-agent-dialog__header">
-        <div>
-          <p>Episode 下一步</p>
-          <h2 id="story-workspace-episode-continue-dialog-title">确认 Episode 下一步</h2>
-          <span>目标 Episode：{targetEpisodeLabel} · {actionLabel}</span>
-        </div>
-        <button disabled={busy} onClick={onCancel} type="button">取消</button>
-      </header>
-      <section aria-label="Canonical 输入快照">
-        <h3>Canonical 输入与 revisions</h3>
-        <ul>
-          {canonicalInputs.map((input) => (
-            <li key={input.label}>
-              <strong>{input.label}</strong>
-              <span> · {input.availability}</span>
-              <small> · Revision：{input.revision ?? '尚未生成'}</small>
-            </li>
-          ))}
-        </ul>
-      </section>
-      {consequences.length > 0 && (
-        <section aria-label="下游影响">
-          <h3>确认后需要更新</h3>
-          <ul>{consequences.map((item) => <li key={item}>{item}</li>)}</ul>
-        </section>
-      )}
-      <form
-        className="story-workspace-dream-agent-dialog__composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (busy) return;
-          void onConfirm(storyWorkspaceNormalizeEpisodeGuidance(draft));
-        }}
-      >
-        <label>
-          <span>补充创作要求（可选）</span>
-          <textarea
-            aria-label="补充创作要求（可选）"
-            disabled={busy}
-            onChange={(event) => setDraft(event.currentTarget.value)}
-            placeholder="例如：保留雨夜场景的克制氛围"
-            ref={guidanceRef}
-            rows={3}
-            value={draft}
-          />
-        </label>
-        {error !== null && <p role="alert">{error}</p>}
-        <button disabled={busy} type="submit">
-          {busy ? '正在交给 Dream Agent…' : '确认并继续'}
-        </button>
-      </form>
-    </div>
-  );
-}
-
 export function StoryWorkspaceExecutionPage({
   runId,
   episodeId,
@@ -507,31 +273,13 @@ export function StoryWorkspaceExecutionPage({
   const [activeModule, setActiveModule] = useState<ExecutionModule>('outline');
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
-  const [episodeContinueDialogOpen, setEpisodeContinueDialogOpen] = useState(false);
-  const [selectedEpisodeWorkflowActionId, setSelectedEpisodeWorkflowActionId] =
-    useState<string | null>(null);
-  const [dreamAgentInitialWorkflowFocus, setDreamAgentInitialWorkflowFocus] =
-    useState<{ readonly actionId: string; readonly wasOverflow: boolean } | null>(null);
   const [focusedArtifact, setFocusedArtifact] =
     useState<StoryWorkspaceEpisodeReadableArtifact>('storyboard.yaml');
   const [pendingArtifactReaderFocus, setPendingArtifactReaderFocus] =
     useState<StoryWorkspaceEpisodeReadableArtifact | null>(null);
   const [episodeExpandedKeys, setEpisodeExpandedKeys] =
     useState<ReadonlySet<string>>(() => new Set());
-  const [episodeActionBusy, setEpisodeActionBusy] =
-    useState<'continue' | null>(null);
-  const [episodeActionError, setEpisodeActionError] = useState<string | null>(null);
-  const [episodeActionNotice, setEpisodeActionNotice] = useState<string | null>(null);
-  const [threadSessionRefreshNonce, setThreadSessionRefreshNonce] = useState(0);
-  const [episodeDispatchedAction, setEpisodeDispatchedAction] =
-    useState<StoryWorkspaceEpisodeDispatchedAction | null>(null);
-  const episodeDispatchedActionRef = useRef<StoryWorkspaceEpisodeDispatchedAction | null>(null);
-  const episodeDispatchedIdentity = episodeDispatchedAction?.identity ?? null;
-  const [episodeActionKeys] = useState(() => new StoryWorkspaceEpisodeActionSessionKeys(
-    () => `story-workspace-episode:${globalThis.crypto.randomUUID()}`,
-  ));
   const agentPreviewTriggerRef = useRef<HTMLButtonElement>(null);
-  const episodeContinueTriggerRef = useRef<HTMLButtonElement>(null);
   const dreamProjectionDetailsRef = useRef<HTMLDetailsElement>(null);
   const episodeArtifactReaderRef = useRef<HTMLDivElement>(null);
   const { run, selectRun } = useWorkflowRun({ eventsEnabled: true });
@@ -581,20 +329,6 @@ export function StoryWorkspaceExecutionPage({
       : null,
     [episodeSurface],
   );
-  const episodeActionFact = episodeSurface?.bindingAvailability === 'bound'
-    ? episodeSurface.etag ?? 'bound-without-etag'
-    : episodeSurface === null
-      ? 'loading'
-      : `unbound:${episodeSurface.bindingRecovery.autoRepairAttempted}`;
-  const episodeActionName = episodeSurface?.bindingAvailability === 'bound'
-    ? episodeSurface.actionProjection?.recommendedActionId
-      ?? episodeSurface?.workflow?.nextAction.action
-      ?? 'none_in_scope'
-    : 'none_in_scope';
-  const episodeActionIdentity = `${runId}\u0000${episodeActionFact}\u0000${episodeActionName}`;
-  const episodeActionCurrentIdentityRef = useRef(episodeActionIdentity);
-  const episodeActionGenerationRef = useRef(0);
-  const episodeActionMountedRef = useRef(false);
   const {
     announcement: episodeSelectionAnnouncement,
     onLocateSelection: locateEpisodeSelection,
@@ -710,29 +444,6 @@ export function StoryWorkspaceExecutionPage({
     return () => window.cancelAnimationFrame(frame);
   }, [focusedArtifact, focusedEntry?.stage, pendingArtifactReaderFocus]);
 
-  useLayoutEffect(() => {
-    if (episodeActionCurrentIdentityRef.current === episodeActionIdentity) return;
-    episodeActionCurrentIdentityRef.current = episodeActionIdentity;
-    episodeActionGenerationRef.current += 1;
-  }, [episodeActionIdentity]);
-
-  useLayoutEffect(() => {
-    episodeActionMountedRef.current = true;
-    return () => {
-      episodeActionMountedRef.current = false;
-      episodeActionGenerationRef.current += 1;
-    };
-  }, []);
-
-  useEffect(() => {
-    setEpisodeActionBusy(null);
-    setEpisodeActionError(null);
-    setEpisodeActionNotice(null);
-    setEpisodeContinueDialogOpen(false);
-    episodeDispatchedActionRef.current = null;
-    setEpisodeDispatchedAction(null);
-  }, [episodeActionIdentity]);
-
   useEffect(() => {
     if (!focusKey || allEntries.some((entry) => entry.key === focusKey)) return;
     setFocusKey(null);
@@ -823,96 +534,9 @@ export function StoryWorkspaceExecutionPage({
       setEpisodeSelection(parent);
     }
   };
-  const beginEpisodeAction = (): StoryWorkspaceEpisodeActionTicket => {
-    if (episodeActionCurrentIdentityRef.current !== episodeActionIdentity) {
-      episodeActionCurrentIdentityRef.current = episodeActionIdentity;
-      episodeActionGenerationRef.current += 1;
-    }
-    episodeActionGenerationRef.current += 1;
-    return {
-      identity: episodeActionIdentity,
-      generation: episodeActionGenerationRef.current,
-    };
-  };
-  const episodeActionTicketIsFresh = (ticket: StoryWorkspaceEpisodeActionTicket) => (
-    storyWorkspaceEpisodeActionTicketIsFresh(
-      ticket,
-      episodeActionCurrentIdentityRef.current,
-      episodeActionGenerationRef.current,
-      episodeActionMountedRef.current,
-    )
-  );
-  const recommendedEpisodeWorkflowAction: StoryWorkspaceEpisodeActionOptionV2 | null =
-    episodeSurface?.actionProjection?.actionOptions.find(
-      (option) => option.actionId === episodeSurface.actionProjection?.recommendedActionId,
-    ) ?? null;
-  const selectedEpisodeWorkflowAction: StoryWorkspaceEpisodeActionOptionV2 | null =
-    episodeSurface?.actionProjection?.actionOptions.find(
-      (option) => option.actionId === selectedEpisodeWorkflowActionId,
-    ) ?? null;
-  const handleEpisodeContinue = async (userGuidance: string | null) => {
-    const action = selectedEpisodeWorkflowAction?.action
-      ?? episodeSurface?.workflow?.nextAction.action;
-    const actionIdentity = selectedEpisodeWorkflowAction?.actionId ?? action;
-    if (
-      episodeSurface === null
-      || episodeSurface.bindingAvailability !== 'bound'
-      || action === undefined
-      || actionIdentity === undefined
-      || storyWorkspaceEpisodeNextActionLabel(action) === null
-      || episodeDispatchedIdentity === episodeActionIdentity
-    ) return;
-    const idempotencyKey = episodeActionKeys.keyFor(runId, episodeActionFact, actionIdentity);
-    const ticket = beginEpisodeAction();
-    setEpisodeActionBusy('continue');
-    setEpisodeActionError(null);
-    try {
-      const accepted = await storyWorkspaceContinueEpisodeAction(runId, episodeSurface, {
-        actionId: selectedEpisodeWorkflowAction?.actionId,
-        idempotencyKey,
-        token: getAuthToken(),
-        userGuidance,
-      });
-      if (!episodeActionTicketIsFresh(ticket)) return;
-      const dispatchedAction: StoryWorkspaceEpisodeDispatchedAction = {
-        action: actionIdentity,
-        fact: episodeActionFact,
-        identity: episodeActionIdentity,
-        messageId: accepted.messageId,
-      };
-      episodeDispatchedActionRef.current = dispatchedAction;
-      setEpisodeDispatchedAction(dispatchedAction);
-      setEpisodeActionNotice('已交给同一 Dream Agent；新产物仍以 REST revisions 到达为准。');
-      setEpisodeContinueDialogOpen(false);
-      setSelectedEpisodeWorkflowActionId(null);
-      setDreamAgentInitialWorkflowFocus(null);
-      setThreadSessionRefreshNonce((value) => value + 1);
-      refreshEpisodeArtifacts();
-    } catch {
-      if (!episodeActionTicketIsFresh(ticket)) return;
-      setEpisodeActionError('本次继续操作暂未被接受；页面会读取最新工作流事实。');
-      refreshEpisodeArtifacts();
-    } finally {
-      if (episodeActionTicketIsFresh(ticket)) setEpisodeActionBusy(null);
-    }
-  };
   const selectedEpisodeShot = episodeSelection?.kind === 'shot'
     ? episodeViewModel?.shotsById[episodeSelection.id] ?? null
     : null;
-  const nextEpisodeAction = episodeSurface?.workflow?.nextAction ?? null;
-  const nextEpisodeActionLabel = nextEpisodeAction === null
-    ? null
-    : storyWorkspaceEpisodeNextActionLabel(nextEpisodeAction.action);
-  const episodeContinueActionLabel = selectedEpisodeWorkflowAction?.label
-    ?? recommendedEpisodeWorkflowAction?.label
-    ?? nextEpisodeActionLabel;
-  const primaryEpisodeActionLabel = recommendedEpisodeWorkflowAction?.label
-    ?? nextEpisodeActionLabel;
-  const primaryEpisodeActionCanDispatch = recommendedEpisodeWorkflowAction?.canDispatch
-    ?? nextEpisodeAction?.canDispatch
-    ?? false;
-  const episodeActionBlockedByLastGood = episodeArtifacts.isShowingLastGood
-    || episodeArtifacts.diagnostic !== null;
   const scriptArtifactAvailability = episodeSurface?.bindingAvailability === 'bound'
     ? storyWorkspaceEpisodeArtifactAvailability(episodeSurface, 'script.md')
     : 'not_generated';
@@ -932,62 +556,6 @@ export function StoryWorkspaceExecutionPage({
               : scriptArtifactAvailability === 'invalid'
                 ? 'invalid'
                 : 'unavailable';
-  const dreamAgentWorkflowActions: readonly StoryWorkspaceDreamAgentWorkflowActionViewModel[] =
-    episodeSurface?.bindingAvailability === 'bound'
-        ? episodeSurface.actionProjection !== null
-          && episodeSurface.actionProjection !== undefined
-          ? episodeSurface.actionProjection.actionOptions.map((option) => ({
-            id: option.actionId,
-            label: option.label,
-            displayCommand: option.displayCommand,
-            description: option.description,
-            targetEpisodeLabel: option.targetEpisode.displayLabel,
-            availability: option.availability,
-            isRecommended: option.isRecommended,
-            isCurrent: option.isRecommended,
-            canDispatch: option.canDispatch && !episodeActionBlockedByLastGood,
-            pending: selectedEpisodeWorkflowActionId === option.actionId
-              && episodeActionBusy === 'continue',
-            disabledReason: episodeActionBlockedByLastGood && option.canDispatch
-              ? '当前正在展示最近一次有效事实，暂不可派发'
-              : option.disabledReason,
-          }))
-          : (episodeSurface.workflow?.actionOptions ?? []).map((option) => ({
-            id: option.action,
-            label: option.label,
-            displayCommand: option.displayCommand,
-            isCurrent: option.isCurrent,
-            canDispatch: option.canDispatch && !episodeActionBlockedByLastGood,
-            pending: option.isCurrent && episodeDispatchedIdentity === episodeActionIdentity,
-            disabledReason: option.isCurrent
-              ? episodeActionBlockedByLastGood
-                ? '当前正在展示最近一次有效事实，暂不可派发'
-                : null
-              : '完成当前步骤后可用',
-          }))
-        : [];
-  const handleDreamAgentWorkflowAction = (actionId: string) => {
-    const action = dreamAgentWorkflowActions.find((candidate) => candidate.id === actionId);
-    if (action === undefined || !action.canDispatch || action.pending) return;
-    if (
-      episodeSurface?.actionProjection === null
-      || episodeSurface?.actionProjection === undefined
-    ) {
-      if (action.id !== nextEpisodeAction?.action) return;
-    } else if (!episodeSurface.actionProjection.actionOptions.some(
-      (option) => option.actionId === action.id && option.canDispatch,
-    )) return;
-    setEpisodeActionError(null);
-    setDreamAgentInitialWorkflowFocus({
-      actionId,
-      wasOverflow: dreamAgentWorkflowActions.findIndex(
-        (candidate) => candidate.id === actionId,
-      ) >= 2,
-    });
-    setSelectedEpisodeWorkflowActionId(action.id);
-    setAgentDialogOpen(false);
-    setEpisodeContinueDialogOpen(true);
-  };
   let currentReviewSelection: StoryWorkspaceEpisodeReviewLocateSelection | null = null;
   if (episodeSelection?.kind === 'narrative-beat') {
     currentReviewSelection = { kind: 'narrative-beat', id: episodeSelection.id };
@@ -1025,11 +593,7 @@ export function StoryWorkspaceExecutionPage({
           aria-expanded={agentDialogOpen}
           aria-label="打开 Dream Agent 消息预览"
           className="story-workspace-collaboration__agent-state"
-          disabled={episodeContinueDialogOpen}
-          onClick={() => {
-            setDreamAgentInitialWorkflowFocus(null);
-            setAgentDialogOpen(true);
-          }}
+          onClick={() => setAgentDialogOpen(true)}
           ref={agentPreviewTriggerRef}
           type="button"
         >
@@ -1097,6 +661,7 @@ export function StoryWorkspaceExecutionPage({
                       activeArtifact={focusedArtifact}
                       artifacts={episodeSurface.artifacts}
                       documents={episodeSurface.documents ?? []}
+                      episodeCode={episodeSurface.episodeCode ?? 'Episode'}
                       onArtifactSelection={setFocusedArtifact}
                       onShotSelection={(shotId) => setEpisodeSelection({ kind: 'shot', id: shotId })}
                       selectedShotId={selectedEpisodeShot?.id ?? null}
@@ -1205,21 +770,21 @@ export function StoryWorkspaceExecutionPage({
         </div>
       </details>
       )}
-      <section aria-label="第一集产物工作台">
+      <section aria-label="Episode 产物工作台">
         {episodeSurface === null ? (
           <div role="status">
             {episodeArtifacts.diagnostic !== null ? (
-              <p>第一集产物来源无效，暂无法读取。</p>
+              <p>Episode 产物来源无效，暂无法读取。</p>
             ) : episodeArtifacts.error !== null ? (
-              <p>第一集产物尚未同步，页面会继续读取。</p>
+              <p>Episode 产物尚未同步，页面会继续读取。</p>
             ) : (
-              <p>正在读取第一集产物…</p>
+              <p>正在读取 Episode 产物…</p>
             )}
           </div>
         ) : episodeSurface.bindingAvailability === 'unbound' ? (
           <main aria-labelledby="story-workspace-episode-unbound-title">
-            <h2 id="story-workspace-episode-unbound-title">尚未构建第一集产物关联</h2>
-            <p role="status">关联状态：等待确认后的自动发布与绑定</p>
+            <h2 id="story-workspace-episode-unbound-title">尚未构建 Episode 产物关联</h2>
+            <p role="status">关联状态：等待主 Agent 成功构建并自动发布</p>
             <p>
               确认后的 Dream Agent 成功生成并通过服务端校验后，系统会自动发布产物、
               构建关联并由页面读取更新，无需手动构建。
@@ -1228,11 +793,12 @@ export function StoryWorkspaceExecutionPage({
         ) : (
           <main aria-labelledby="story-workspace-episode-title">
             <header>
-              <p>EP01 · Episode execution</p>
+              <p>{episodeSurface.episodeCode} · Episode execution</p>
               <h2 id="story-workspace-episode-title">
-                {episodeSurface.narrative?.overview.title ?? '第一集'}
+                {episodeSurface.narrative?.overview.title
+                  ?? `${episodeSurface.episodeCode} 产物`}
               </h2>
-              <p role="status">第一集产物关联：已关联</p>
+              <p role="status">{episodeSurface.episodeCode} 产物关联：已关联</p>
               <StoryWorkspaceStoryIndexStatus
                 error={storyIndex.error}
                 fileStatus={storyIndexFileStatus}
@@ -1272,40 +838,6 @@ export function StoryWorkspaceExecutionPage({
               {episodeArtifacts.error !== null && (
                 <p role="status">暂时无法检查新 revision；当前内容没有被消息覆盖。</p>
               )}
-              <div aria-label="Episode 下一步">
-                {primaryEpisodeActionCanDispatch && primaryEpisodeActionLabel !== null ? (
-                  <button
-                    aria-controls="story-workspace-episode-continue-dialog"
-                    aria-expanded={episodeContinueDialogOpen}
-                    disabled={
-                      episodeActionBusy !== null
-                      || episodeActionBlockedByLastGood
-                      || episodeDispatchedIdentity === episodeActionIdentity
-                    }
-                    onClick={() => {
-                      setEpisodeActionError(null);
-                      setDreamAgentInitialWorkflowFocus(null);
-                      setSelectedEpisodeWorkflowActionId(
-                        recommendedEpisodeWorkflowAction?.actionId ?? null,
-                      );
-                      setEpisodeContinueDialogOpen(true);
-                    }}
-                    ref={episodeContinueTriggerRef}
-                    type="button"
-                  >
-                    {episodeDispatchedIdentity === episodeActionIdentity
-                      ? '已交给 Dream Agent'
-                      : primaryEpisodeActionLabel}
-                  </button>
-                ) : (
-                  <p>当前没有可派发的下一步，页面会继续读取工作流事实。</p>
-                )}
-                {nextEpisodeAction?.diagnostic === 'needs_confirmation' && (
-                  <small>下一步需要由同一 Dream Agent 结合现有产物确认。</small>
-                )}
-                {episodeActionError !== null && <p role="alert">{episodeActionError}</p>}
-                {episodeActionNotice !== null && <p aria-live="polite">{episodeActionNotice}</p>}
-              </div>
             </header>
 
             {episodeViewModel === null || episodeSelection === null ? (
@@ -1322,6 +854,7 @@ export function StoryWorkspaceExecutionPage({
                 <p aria-live="polite">{episodeSelectionAnnouncement}</p>
                 <StoryWorkspaceEpisodeNarrativeWorkbench
                   artifactProgress={episodeSurface.artifacts}
+                  episodeCode={episodeSurface.episodeCode ?? 'Episode'}
                   auxiliarySlot={(
                     <>
                       {selectedEpisodeShot !== null && (
@@ -1380,60 +913,17 @@ export function StoryWorkspaceExecutionPage({
         )}
       </section>
 
-      {episodeContinueDialogOpen
-        && episodeSurface?.bindingAvailability === 'bound'
-        && episodeContinueActionLabel !== null && (
-        <StoryWorkspaceEpisodeContinueDialog
-          actionLabel={episodeContinueActionLabel}
-          busy={episodeActionBusy === 'continue'}
-          canonicalInputs={selectedEpisodeWorkflowAction === null
-            ? storyWorkspaceEpisodeCanonicalInputs(episodeSurface)
-            : storyWorkspaceEpisodeOptionCanonicalInputs(selectedEpisodeWorkflowAction)}
-          consequences={selectedEpisodeWorkflowAction?.consequences ?? []}
-          error={episodeActionError}
-          onCancel={() => {
-            if (episodeActionBusy === 'continue') return;
-            const returnToAgent = dreamAgentInitialWorkflowFocus !== null;
-            setEpisodeActionError(null);
-            setEpisodeContinueDialogOpen(false);
-            setSelectedEpisodeWorkflowActionId(null);
-            if (returnToAgent) setAgentDialogOpen(true);
-          }}
-          onConfirm={(userGuidance) => handleEpisodeContinue(userGuidance)}
-          restoreFocusRef={dreamAgentInitialWorkflowFocus === null
-            ? episodeContinueTriggerRef
-            : agentPreviewTriggerRef}
-          targetEpisodeLabel={selectedEpisodeWorkflowAction?.targetEpisode.displayLabel ?? 'EP01'}
-        />
-      )}
-
       {agentDialogOpen && (
         <StoryWorkspaceDreamAgentDialog
           deckName={currentRun?.deck_plugin_display_name ?? '当前 Deck'}
-          expectedMessageId={episodeDispatchedAction?.messageId ?? null}
-          initialWorkflowFocus={dreamAgentInitialWorkflowFocus}
-          onRequestWorkflowAction={handleDreamAgentWorkflowAction}
           onClose={() => setAgentDialogOpen(false)}
           onSettled={() => {
-            const dispatchedAction = episodeDispatchedActionRef.current;
-            if (dispatchedAction?.identity === episodeActionCurrentIdentityRef.current) {
-              episodeDispatchedActionRef.current = null;
-              episodeActionKeys.rotate(runId, dispatchedAction.fact, dispatchedAction.action);
-              setEpisodeDispatchedAction((current) => (
-                current?.messageId === dispatchedAction.messageId ? null : current
-              ));
-              setEpisodeActionNotice(
-                '本轮结束但尚未检测到新产物；页面会继续读取服务端 revisions。',
-              );
-            }
             refreshEpisodeArtifacts();
             storyIndex.refresh();
           }}
-          refreshNonce={threadSessionRefreshNonce}
           restoreFocusRef={agentPreviewTriggerRef}
           runId={runId}
           threadId={files.data.threadId}
-          workflowActions={dreamAgentWorkflowActions}
         />
       )}
     </section>

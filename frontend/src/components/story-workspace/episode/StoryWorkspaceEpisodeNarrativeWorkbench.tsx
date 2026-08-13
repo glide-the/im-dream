@@ -28,6 +28,7 @@ import {
 } from '../../../pages/story-workspace/episodeExecutionViewModel';
 
 export interface StoryWorkspaceEpisodeNarrativeWorkbenchProps {
+  readonly episodeCode: string;
   readonly viewModel: StoryWorkspaceEpisodeExecutionViewModel;
   readonly selection: StoryWorkspaceEpisodeSelection;
   readonly expandedKeys: ReadonlySet<string>;
@@ -278,11 +279,13 @@ function navigationLabel(
 }
 
 function EpisodeOverviewContent({
+  episodeCode,
   viewModel,
   overview,
   artifactProgress,
   onArtifactRead,
 }: {
+  readonly episodeCode: string;
   readonly viewModel: StoryWorkspaceEpisodeExecutionViewModel;
   readonly overview: StoryWorkspaceEpisodeOverview | null;
   readonly artifactProgress: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
@@ -299,7 +302,7 @@ function EpisodeOverviewContent({
     h(
       'ol',
       {
-        'aria-label': '第一集产物进度',
+        'aria-label': `${episodeCode} 产物进度`,
         className: 'story-workspace-episode-artifact-progress',
       },
       artifactProgress.map((artifact) => {
@@ -562,6 +565,7 @@ function ShotContent({
 }
 
 function NarrativeContent({
+  episodeCode,
   viewModel,
   selection,
   episodeOverview,
@@ -570,6 +574,7 @@ function NarrativeContent({
   onNavigate,
   auxiliaryGroup,
 }: {
+  readonly episodeCode: string;
   readonly viewModel: StoryWorkspaceEpisodeExecutionViewModel;
   readonly selection: StoryWorkspaceEpisodeSelection;
   readonly episodeOverview: StoryWorkspaceEpisodeOverview | null;
@@ -581,6 +586,7 @@ function NarrativeContent({
   if (selection.kind === 'episode' || selection.kind === 'story-arc') {
     return h(EpisodeOverviewContent, {
       viewModel,
+      episodeCode,
       overview: episodeOverview,
       artifactProgress,
       onArtifactRead,
@@ -624,6 +630,7 @@ function NarrativeContent({
 }
 
 export function StoryWorkspaceEpisodeNarrativeWorkbench({
+  episodeCode,
   viewModel,
   selection,
   expandedKeys,
@@ -856,6 +863,7 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
           h(NarrativeContent, {
             viewModel,
             selection: activeSelection,
+            episodeCode,
             episodeOverview,
             artifactProgress,
             onArtifactRead,

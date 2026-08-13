@@ -1,55 +1,47 @@
-# Dream Agent 设计审查
+# Dream Agent Skill 与自动同步设计审查
 
-> 结论：**接受**。当前最小业务已实现并通过真实模型、真实数据和真实页面验收。
+> 审查结论：**修改后接受**。旧多 Episode 推荐按钮状态机已被拒绝并从当前设计与生产
+> 代码移除；接受的是“已安装 Skill 推荐 + 成功边界 Hook 自动同步”的最小方案。
 
-## 1. 审查结论
+## 审查矩阵
 
-| 问题 | 结论 |
+| 审查问题 | 结论 |
 |---|---|
-| 是否形成第二套 Agent runtime/SSE/reducer | 否；Dream 直接复用 Chat thread、SSE 和 `ChatPanel`。 |
-| 是否修改 Claude Agent 入口 | 否；`ClaudeAgentRunner.run_streaming` 与 `agent_runner.py` 未改。 |
-| 是否修改 session identity | 否；原始 `claude_session_id` 和 resume 语义保持不变。 |
-| 同步是否依赖 Agent 主动 MCP | 否；宿主在成功根 turn 后自动同步。 |
-| 是否建立命令 DAG/next action/checkpoint | 否；同步只看实际文件。 |
-| Observer 是否成为状态 owner | 否；Observer 不参与文件发布或 Agent 控制。 |
-| 页面是否增加新协议 | 否；继续使用 actor-scoped `dream-files`。 |
-| 权限是否削弱 | 否；before/after 都绑定可信 actor/thread/Run/binding。 |
-| 是否发布失败/取消半成品 | 否；只有 root turn success 调用 after hook。 |
-| 是否把 preview 冒充 Admin Artifact | 否；合同明确区分 Run preview 与 sealed Artifact。 |
-| 页面是否适应窗口 | 是；共享主容器限制根级横向溢出，真实 1200×720 验证通过。 |
+| 是否形成第二套 Agent runtime/SSE/reducer | 否；Dream 组合共享 Chat thread、SSE、`ChatPanel`。 |
+| 是否存在 Skill 阶段状态机 | 否；除首次 init 外，Skill 可随机、重复执行。 |
+| 是否仍有推荐按钮或 Episode action POST | 否；页面只提供 Chat Slash 建议和只读 Artifact 工作台。 |
+| Slash 选择是否隐式执行 | 否；只向输入框插入普通文本。 |
+| Skill 来源是否真实 | 是；Deck 引用、ready installation、digest/version 和 thread 冻结回执共同决定。 |
+| 同步是否依赖 Agent 主动 MCP | 否；before/after Hook 是确定性 owner。 |
+| Observer 是否控制同步或 Agent | 否；仅做非控制型投影、审计与告警。 |
+| Hook 失败是否会伪装成功 | 否；沿同一 Chat turn 返回唯一失败终态，保留 last-good。 |
+| 是否修改 Claude Agent 入口/报文/session | 否；不改 runner、标准报文和 session identity。 |
+| 权限是否削弱 | 否；actor/thread/Run/Workspace/Deck 与文件边界继续 fail closed。 |
 
-## 2. 被拒绝的过度设计
+## 被拒绝的过度设计
 
-- 固定或随机 `/drama-*` 命令注册表；
-- next action、recommended action 或 checkpoint 决定同步；
-- Agent 必须调用 MCP 才能让页面显示；
-- 文件 watcher、每个 PostToolUse 或子 Agent 完成时提前发布；
-- Observer 读取工作台、重试发布或推进 Workflow；
-- Dream 专用 EventSource、transport、parser、reducer 或第二终态；
-- 多环境部署分支和 runtime tier 判断。
+- EP01→EP02→EP03 推荐按钮、action projection 与“更多工作流操作”；
+- next action、completion fact、checkpoint 和 Skill DAG；
+- 专用 Episode 确认弹窗、恢复 POST、内部命令派发器；
+- 由前端根据文件推断下一阶段；
+- Agent 必须调用 MCP 才能同步；
+- Observer 扫描文件、创建 binding、重试发布或推进 Workflow；
+- 文件 watcher、子 Agent 完成即提前发布；
+- 新增 Dream SSE、EventSource、transport、parser、reducer 或终态；
+- 多环境 runtime tier 分支。
 
-## 3. 安全与一致性
+## 安全审查
 
-- 工作区、thread、Run 和 Project/Episode 私有路径全部由服务端派生。
-- 文件读取拒绝 traversal、符号链接、非法编码、超限数量和超限大小。
-- 私有写入使用目录锁、`O_NOFOLLOW`、临时文件、fsync 和原子替换。
-- `manifest.json` 最后写，是已发布 preview 的提交标记。
-- Hook 异常与 Chat 流隔离；日志不进入 SSE 正文。
-- Workflow 写命令继续检查用户身份、thread 所有权、权限和 revision。
+- Slash inventory 只接受安全 Skill 名称、ready 安装和匹配的冻结插件事实；
+- Hook 使用服务端派生身份，拒绝路径穿越、符号链接和越界文件；
+- 私有发布加锁、写临时文件、fsync、原子替换，manifest 最后提交；
+- GET 只读，不恢复、调度或启动 SDK turn；
+- MCP 和 Observer 的失败不会成为绕过权限的备用写路径。
 
-## 4. 验收证据
+## 实施范围审查
 
-- 真实账号、真实本机数据、真实 `deepseek-v4-pro`。
-- 最终 Run：`run_604125a31ad9478990622b675a996863`。
-- 产物：2 人物、1 场景、1 分镜、`project.yaml`、`EP01/storyboard.yaml`。
-- `.dream`：3 个 stage、2 个私有文件副本、最终 manifest；源/副本 SHA-256 一致。
-- Dream 刷新、Dream→Chat→Dream、同 thread history、窗口适配均通过。
-- 有头 Chromium：`--headed --workers=1`，`1 passed (1.2m)`。
-- 后端聚焦：131 passed、2 skipped、59 subtests。
-- 共享 Chat/layout：24 passed；生产构建、ESLint、py_compile、diff check 通过。
-- Admin Gateway 中本轮模型请求为 settled/succeeded/HTTP 200，可在“请求日志”查看。
+方案没有新增 DDL、队列、事件存储、业务状态表或第二 API 协议。保留静态
+`producerAction` 仅用于说明某类 Artifact 通常由哪个 Skill 产生，不参与可执行性、顺序、
+禁用或推荐判断。
 
-## 5. 未宣称的内容
-
-本审查只接受本机当前业务闭环，不授予 staging、canary、生产发布、负载或 Admin sealed
-Artifact 验收结论。
+因此该方案是当前目标下的最小实现；删除旧状态机后再实施，而不是为其增加兼容双写。

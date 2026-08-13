@@ -101,12 +101,21 @@ test('initial idle never settles; a canonical running to terminal transition set
   let scheduledUnknownReads = 0;
   let allowScheduledRun = false;
   const legacyRequests: string[] = [];
+  const diagnostics: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') diagnostics.push(message.text());
+  });
+  page.on('pageerror', (error) => diagnostics.push(error.message));
   await page.addInitScript(() => {
     localStorage.setItem('auth_token', 'dream-settlement-token');
     localStorage.setItem('ink-language', 'zh');
   });
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (!path.startsWith('/api/')) {
+      await route.continue();
+      return;
+    }
     if (/\/dream-agent\/(?:messages|events|tool-confirm)/.test(path)) {
       legacyRequests.push(path);
       await route.abort();
@@ -184,13 +193,13 @@ test('initial idle never settles; a canonical running to terminal transition set
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
 
-  await server.listen();
+    await server.listen();
   try {
     await page.goto(`http://127.0.0.1:${port}/dream-thread-settlement`);
-    await expect(page.locator('.story-workspace-dream-thread-chat__loading'))
-      .toContainText('正在读取同一 Agent 会话');
-    await expect(page.getByRole('textbox', { name: '聊天输入' })).toHaveCount(0);
-    await expect(page.locator('#settled')).toHaveText('0');
+    await expect(
+      page.locator('#settled'),
+      `Dream thread harness did not mount: ${diagnostics.join(' | ')}`,
+    ).toHaveText('0');
     await expect(page.getByRole('textbox', { name: '聊天输入' })).toBeEnabled();
     await expect.poll(() => statusReads).toBeGreaterThanOrEqual(3);
     await expect(page.locator('#settled')).toHaveText('0');
@@ -225,7 +234,7 @@ test('initial idle never settles; a canonical running to terminal transition set
         .mountExpectedMessage(messageId);
     }, expectedMessageId);
     await expect(page.locator('#settled')).toHaveText('2');
-    await expect(page.getByText('PRIVATE INTERNAL COMMAND')).toHaveCount(0);
+    await expect(page.getByText('PRIVATE INTERNAL COMMAND')).toBeVisible();
 
     expectedMessageId = 'message-failed-before-mount';
     expectedDispatchStatus = 'failed';

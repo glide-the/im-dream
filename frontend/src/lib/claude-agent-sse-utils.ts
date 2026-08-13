@@ -12,6 +12,8 @@
  *                      toolMetadata (claude-agent-sandbox-network-permission-tool.md §5).
  * [Sync]   2026-08-13: coalesce adjacent replay deltas so a late Chat/Dream mount
  *                      reaches tool confirmations without thousands of React updates.
+ * [Sync]   2026-08-13: preserve reasoning-start/delta/end identities during reconnect
+ *                      so tool/text barriers keep separate thinking blocks in order.
  */
 
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -122,21 +124,58 @@ function appendTextDelta(parts: UIMessage['parts'], delta: string): UIMessage['p
   return next;
 }
 
-function appendReasoningDelta(parts: UIMessage['parts'], delta: string): UIMessage['parts'] {
-  const next = [...parts];
-  let idx = -1;
-  for (let i = next.length - 1; i >= 0; i -= 1) {
-    if (next[i]?.type === 'reasoning') {
-      idx = i;
-      break;
-    }
+type ReconnectReasoningPart = Extract<
+  UIMessage['parts'][number],
+  { type: 'reasoning' }
+> & { id?: string };
+
+function findReasoningPartIndex(
+  parts: UIMessage['parts'],
+  id: string,
+): number {
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    const part = parts[i];
+    if (part?.type !== 'reasoning') continue;
+    if (id && (part as ReconnectReasoningPart).id === id) return i;
+    if (!id && part.state === 'streaming') return i;
   }
+  return -1;
+}
+
+function appendReasoningStart(parts: UIMessage['parts'], id: string): UIMessage['parts'] {
+  const next = [...parts];
+  const idx = findReasoningPartIndex(next, id);
   if (idx >= 0) {
-    const part = next[idx] as Extract<UIMessage['parts'][number], { type: 'reasoning' }>;
-    next[idx] = { ...part, text: `${part.text}${delta}` };
+    const part = next[idx] as ReconnectReasoningPart;
+    next[idx] = { ...part, state: 'streaming' };
     return next;
   }
-  next.push({ type: 'reasoning', text: delta, state: 'streaming' });
+  next.push({ type: 'reasoning', id, text: '', state: 'streaming' } as ReconnectReasoningPart);
+  return next;
+}
+
+function appendReasoningDelta(
+  parts: UIMessage['parts'],
+  id: string,
+  delta: string,
+): UIMessage['parts'] {
+  const next = [...parts];
+  const idx = findReasoningPartIndex(next, id);
+  if (idx >= 0) {
+    const part = next[idx] as ReconnectReasoningPart;
+    next[idx] = { ...part, text: `${part.text}${delta}`, state: 'streaming' };
+    return next;
+  }
+  next.push({ type: 'reasoning', id, text: delta, state: 'streaming' } as ReconnectReasoningPart);
+  return next;
+}
+
+function appendReasoningEnd(parts: UIMessage['parts'], id: string): UIMessage['parts'] {
+  const next = [...parts];
+  const idx = findReasoningPartIndex(next, id);
+  if (idx < 0) return next;
+  const part = next[idx] as ReconnectReasoningPart;
+  next[idx] = { ...part, state: 'done' };
   return next;
 }
 
@@ -201,9 +240,20 @@ export function applyBackendEventToMessages(
       base[index] = { ...target, parts: appendTextDelta(parts, delta) };
       return base;
     }
+    case 'reasoning-start': {
+      const id = String(event.id ?? '');
+      base[index] = { ...target, parts: appendReasoningStart(parts, id) };
+      return base;
+    }
     case 'reasoning-delta': {
+      const id = String(event.id ?? '');
       const delta = String(event.delta ?? '');
-      base[index] = { ...target, parts: appendReasoningDelta(parts, delta) };
+      base[index] = { ...target, parts: appendReasoningDelta(parts, id, delta) };
+      return base;
+    }
+    case 'reasoning-end': {
+      const id = String(event.id ?? '');
+      base[index] = { ...target, parts: appendReasoningEnd(parts, id) };
       return base;
     }
     case 'tool-input-start': {

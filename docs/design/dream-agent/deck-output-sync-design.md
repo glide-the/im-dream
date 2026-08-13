@@ -74,7 +74,10 @@ ClaudeAgentService.assemble_context
 
 `DreamArtifactTurnHook` 是标准类，不是闭包；它不调用 Agent、不产生 SSE、不改变 Claude session、不推进 Workflow 状态，也不通过 Observer 反向控制 `ClaudeAgentService`。
 
-只有根 turn `success` 执行 after hook。Stop、取消和 runner failure 不发布本轮文件。hook 异常写服务端日志，保留 Chat 自身唯一终态；下一次成功根 turn会重新读取工作台并可自然修复投影。
+只有根 turn `success` 执行 after hook。Stop、取消和 runner failure 不发布本轮文件。
+Hook 若无法完成权限校验或原子发布，同一 Chat turn 使用既有失败路径结束并保留 last-good；
+不得记录成功后继续发出 `finish`，也不得另造第二个终态。下一次成功根 turn 会重新读取
+工作台并可自然修复投影。
 
 ## 4. 页面投影规则
 
@@ -139,7 +142,7 @@ sequenceDiagram
         A-->>S: success
         S->>H: after_main_turn
         H--xS: 安全错误并记录日志
-        Note over S,P: 旧 manifest 保持权威；Chat 不产生第二终态
+        Note over S,P: 旧 manifest 保持权威；同一 Chat turn 失败且不产生第二终态
     end
 ```
 
@@ -177,7 +180,8 @@ sequenceDiagram
 
 ## 9. 明确不实现
 
-- 不按 `/drama-*` 命令建立服务端顺序或命令注册表。
+- 不由页面维护 `/drama-*` 固定清单；Slash 建议只读取实际安装 inventory。
+- 不按 `/drama-*` 建立服务端顺序、禁用规则或推荐状态。
 - 不使用 next action、recommended action 或 checkpoint 决定同步。
 - 不要求 Agent 调用 MCP 才同步，也不增加专用 resync MCP。
 - 不使用文件 watcher、PostToolUse 或子 Agent 回调提前发布。
@@ -192,4 +196,5 @@ sequenceDiagram
 - 重复内容同步为 no-op；修改文件后 manifest 内容摘要变化。
 - Stop、取消、输出失败不发布本轮半成品。
 - 页面无需新协议即可显示人物、场景和分镜；刷新和 Chat↔Dream 切换后仍一致。
+- Chat 输入 `/` 时只推荐当前 Deck/thread 实际安装的 Skill，并只插入普通文本。
 - Admin 服务端日志包含同步结果或明确异常，日志不进入 SSE 正文。

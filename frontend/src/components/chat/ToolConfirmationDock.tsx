@@ -19,6 +19,8 @@
 //        (design: claude-agent-sandbox-network-permission-tool.md §5A).
 // [Sync] 2026-08-11: every surface resolves confirmations through the owned
 //                    canonical thread endpoint, including reject-only policy.
+// [Sync] 2026-08-13: inherit the available composer height and keep AskUserQuestion actions
+//                    fixed while only the long question body scrolls.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
@@ -150,13 +152,13 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
         display: 'flex',
         flexDirection: 'column',
         gap: '0.55rem',
-        // Cap the panel height so long AskUserQuestion forms never dominate the
-        // chat viewport — the content scrolls internally instead.
-        maxHeight: 'min(46vh, 24rem)',
-        overflowY: 'auto',
+        minHeight: 0,
+        maxHeight: '100%',
+        flex: '1 1 auto',
+        overflow: 'hidden',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', flexShrink: 0 }}>
         <span aria-hidden="true" style={{ marginTop: '0.35rem', width: '0.55rem', height: '0.55rem', borderRadius: '999px', background: '#f59e0b', flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0, fontSize: '0.95rem', fontWeight: 600, lineHeight: 1.5, color: 'var(--color-text-primary)', wordBreak: 'break-word' }}>
           {title}
@@ -167,17 +169,19 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
       </div>
 
       {status === 'idle' && isAskUser ? (
-        <AskUserQuestionUI
-          input={(input ?? {}) as AskUserQuestionInput}
-          toolCallId={toolCallId}
-          toolName={toolName}
-          isProcessing={false}
-          framed={false}
-          showHeader={false}
-          compact
-          onSubmit={handleAskUserSubmit}
-          onCancel={handleAskUserCancel}
-        />
+        <div style={{ display: 'flex', minHeight: 0, flex: '1 1 auto', overflow: 'hidden' }}>
+          <AskUserQuestionUI
+            input={(input ?? {}) as AskUserQuestionInput}
+            toolCallId={toolCallId}
+            toolName={toolName}
+            isProcessing={false}
+            framed={false}
+            showHeader={false}
+            compact
+            onSubmit={handleAskUserSubmit}
+            onCancel={handleAskUserCancel}
+          />
+        </div>
       ) : status === 'idle' && isSandboxNetwork ? (
         <div
           style={{

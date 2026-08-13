@@ -1,6 +1,8 @@
-// [Input] Shared AskUserQuestion dock with multiSelect questions.
-// [Output] Checkbox rendering and canonical string[] confirmation contract shared by Chat and Dream.
+// [Input] Shared AskUserQuestion dock with multiSelect questions inside a Dream-sized constrained panel.
+// [Output] Checkbox/string[] confirmation contract plus always-visible submit/cancel actions in constrained height.
 // [Pos] AskUserQuestion multi-select regression and browser contract seam.
+// [Sync] 2026-08-13: constrain the browser harness to a short Dream rail and assert
+//                    that long question content cannot push the action buttons below it.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node harness intentionally imports Node APIs.
@@ -64,18 +66,33 @@ test('required multiSelect renders checkboxes and submits string[] under the Chi
             { label: '温柔叙事', value: 'gentle', description: '克制而温暖' },
             { label: '悬疑推进', value: 'mystery' },
             '开放结局',
+            '双时空叙事',
+            '不可靠叙述者',
+            '群像视角',
+            '现实锚点',
+            '留白收束',
           ],
         }],
       },
     };
     createRoot(document.querySelector('#root')).render(
-      React.createElement(ToolConfirmationDock, {
+      React.createElement('div', {
+        id: 'dream-panel-fixture',
+        style: {
+          display: 'flex',
+          flexDirection: 'column',
+          width: '360px',
+          height: '220px',
+          minHeight: 0,
+          overflow: 'hidden',
+        },
+      }, React.createElement(ToolConfirmationDock, {
         confirmation,
         threadId: 'thread-shared-ask-user',
         onSettled: (toolCallId) => {
           document.querySelector('#settled').textContent = toolCallId;
         },
-      }),
+      })),
     );
   `;
   const port = await reserveEphemeralPort();
@@ -111,6 +128,14 @@ test('required multiSelect renders checkboxes and submits string[] under the Chi
   });
 
   const requests: Array<Record<string, unknown>> = [];
+  const diagnostics: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+  page.on('requestfailed', (request) => {
+    diagnostics.push(`requestfailed: ${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
+  });
   await page.addInitScript(() => {
     localStorage.setItem('auth_token', 'ask-user-token');
     localStorage.setItem('ink-language', 'zh');
@@ -128,10 +153,21 @@ test('required multiSelect renders checkboxes and submits string[] under the Chi
   try {
     await page.goto(`http://127.0.0.1:${port}/ask-user-multi-select`);
     const submit = page.getByRole('button', { name: '提交' });
+    const cancel = page.getByRole('button', { name: '取消' });
     const gentle = page.getByRole('checkbox', { name: /温柔叙事/ });
     const mystery = page.getByRole('checkbox', { name: /悬疑推进/ });
 
     await expect(page.getByText('请选择叙事方向')).toBeVisible();
+    await expect(submit).toBeInViewport();
+    await expect(cancel).toBeInViewport();
+    const panelBox = await page.locator('#dream-panel-fixture').boundingBox();
+    const submitBox = await submit.boundingBox();
+    const cancelBox = await cancel.boundingBox();
+    expect(panelBox).not.toBeNull();
+    expect(submitBox).not.toBeNull();
+    expect(cancelBox).not.toBeNull();
+    expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(panelBox!.y + panelBox!.height);
+    expect(cancelBox!.y + cancelBox!.height).toBeLessThanOrEqual(panelBox!.y + panelBox!.height);
     await expect(submit).toBeDisabled();
     await page.keyboard.press('Control+Enter');
     expect(requests).toEqual([]);
@@ -152,6 +188,7 @@ test('required multiSelect renders checkboxes and submits string[] under the Chi
       approved: true,
       answers: { '请选择叙事方向': ['gentle', 'mystery'] },
     }]);
+    expect(diagnostics).toEqual([]);
 
   } finally {
     await server.close();

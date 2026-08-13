@@ -51,7 +51,6 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
   mkdirSync(EVIDENCE_DIR, { recursive: true });
   const diagnostics: string[] = [];
   const apiFailures: string[] = [];
-  const episodeActionPosts: string[] = [];
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
   page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
@@ -71,12 +70,6 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     if (response.status() >= 400 && response.url().includes('/api/story-workspace/')) {
       apiFailures.push(`${response.status()} ${response.url()}`);
     }
-  });
-  page.on('request', (request) => {
-    if (
-      request.method() === 'POST'
-      && request.url().includes('/episode-actions/')
-    ) episodeActionPosts.push(request.url());
   });
   if (API_BASE !== undefined) {
     await page.route('**/api/**', async (route) => {
@@ -159,19 +152,6 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
           };
         };
       } | null;
-      actionProjection?: {
-        recommendedActionId: string | null;
-        actionOptions: Array<{
-          actionId: string;
-          action: string;
-          label: string;
-          targetEpisode: { displayLabel: string; relation: string };
-          availability: string;
-          canDispatch: boolean;
-          disabledReason: string | null;
-          canonicalInputs: unknown[];
-        }>;
-      } | null;
     };
     expect(surface.bindingAvailability).toBe('bound');
     expect(surface.documents?.map((document) => document.relativeKey)).toEqual([
@@ -188,12 +168,6 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       total: 22,
       ratio: 1,
     });
-    const actionOptions = surface.actionProjection?.actionOptions ?? [];
-    expect(actionOptions.length).toBeGreaterThan(0);
-    const recommendedAction = actionOptions.find(
-      (option) => option.actionId === surface.actionProjection?.recommendedActionId,
-    );
-    expect(recommendedAction).toBeDefined();
     writeFileSync(
       resolve(EVIDENCE_DIR, 'episode-artifact-manifest.json'),
       JSON.stringify({
@@ -215,28 +189,6 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
         projectedPromptCount: surface.auxiliary?.prompts?.total ?? 0,
         promptPageItemCount: surface.auxiliary?.prompts?.items.length ?? 0,
         shotPromptCoverage: surface.auxiliary?.associations?.shotPromptCoverage ?? null,
-      }, null, 2),
-      'utf-8',
-    );
-    writeFileSync(
-      resolve(EVIDENCE_DIR, 'workflow-action-projection.json'),
-      JSON.stringify({
-        runId: RUN_ID,
-        actorEmail: ACTOR_EMAIL,
-        opaqueEpisodeId: surface.opaqueEpisodeId,
-        manifestRevision: surface.manifestRevision,
-        aggregateEtag: surface.etag,
-        recommendedActionId: surface.actionProjection?.recommendedActionId ?? null,
-        actionOptions: surface.actionProjection?.actionOptions.map((option) => ({
-          actionId: option.actionId,
-          action: option.action,
-          label: option.label,
-          targetEpisode: option.targetEpisode,
-          availability: option.availability,
-          canDispatch: option.canDispatch,
-          disabledReason: option.disabledReason,
-          canonicalInputCount: option.canonicalInputs.length,
-        })) ?? [],
       }, null, 2),
       'utf-8',
     );
@@ -269,31 +221,16 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
     await openAgent.click();
     let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
-    const recommendedButton = agentDialog.getByRole('button').filter({
-      hasText: recommendedAction!.label,
-    });
-    await expect(recommendedButton).toHaveCount(1);
-    if (recommendedAction!.canDispatch) await expect(recommendedButton).toBeEnabled();
-    else await expect(recommendedButton).toBeDisabled();
-    let disclosure = agentDialog.getByRole('button', { name: /^更多工作流操作/ });
-    if (actionOptions.length > 1) {
-      await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-      await disclosure.click();
-    } else {
-      await expect(disclosure).toHaveCount(0);
-    }
+    await expect(agentDialog).toBeVisible();
+    await expect(agentDialog.getByText('Episode 下一步')).toHaveCount(0);
     await page.screenshot({
-      path: resolve(EVIDENCE_DIR, 'workflow-actions-desktop-1440x1000.png'),
+      path: resolve(EVIDENCE_DIR, 'dream-agent-desktop-1440x1000.png'),
       fullPage: true,
     });
-    if (actionOptions.length > 1) {
-      await page.keyboard.press('Escape');
-      await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-    }
     await page.keyboard.press('Escape');
     await expect(agentDialog).toHaveCount(0);
     await expect(openAgent).toBeFocused();
-    const progress = overview.getByRole('list', { name: '第一集产物进度' });
+    const progress = overview.getByRole('list', { name: 'EP01 产物进度' });
     await expect(progress).toBeVisible();
     await expect(progress.locator('li')).toHaveCount(6);
     await expect(progress.getByRole('button')).toHaveCount(hasStoryboardReaderHost ? 4 : 0);
@@ -310,7 +247,7 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       fullPage: true,
     });
 
-    const reader = page.getByRole('region', { name: '第一集文件阅读器' });
+    const reader = page.getByRole('region', { name: 'EP01 文件阅读器' });
     if (hasStoryboardReaderHost) {
       for (const label of ['阅读分集大纲', '阅读剧本', '阅读分镜', '阅读审阅报告']) {
         await expect(progress.getByRole('button', { name: label })).toBeVisible();
@@ -375,7 +312,7 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     if (hasStoryboardReaderHost) {
       await expect(reader).toBeVisible();
       await page.evaluate(() => {
-        const element = document.querySelector<HTMLElement>('nav[aria-label="第一集文件导航"]');
+        const element = document.querySelector<HTMLElement>('nav[aria-label="EP01 文件导航"]');
         if (element === null) throw new Error('Episode artifact navigation is missing.');
         element.scrollIntoView({ block: 'start' });
       });
@@ -390,33 +327,12 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     });
     await openAgent.click();
     agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
-    disclosure = agentDialog.getByRole('button', { name: /^更多工作流操作/ });
-    if (actionOptions.length > 1) await disclosure.click();
     await expect(agentDialog).toBeVisible();
     expect(await agentDialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))
       .toBe(true);
-    if (actionOptions.length > 1) {
-      const overflowActionBoxes = await agentDialog.getByRole('group', {
-        name: '更多 Episode 工作流操作',
-      }).getByRole('button').evaluateAll((buttons) => buttons.map((button) => {
-        const box = button.getBoundingClientRect();
-        return {
-          top: box.top,
-          bottom: box.bottom,
-          height: box.height,
-          contentFits: button.scrollHeight <= button.clientHeight + 1,
-        };
-      }));
-      expect(overflowActionBoxes.every((box, index) => (
-        box.height >= 44
-        && box.contentFits
-        && (index === 0 || box.top >= (overflowActionBoxes[index - 1]?.bottom ?? 0) - 0.5)
-      ))).toBe(true);
-    }
     await page.screenshot({
-      path: resolve(EVIDENCE_DIR, 'workflow-actions-narrow-390x844.png'),
+      path: resolve(EVIDENCE_DIR, 'dream-agent-narrow-390x844.png'),
     });
-    if (actionOptions.length > 1) await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
 
     const bodyText = await page.locator('body').innerText();
@@ -424,7 +340,6 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     expect(bodyText).not.toContain('第一集产物来源无效');
     expect(apiFailures).toEqual([]);
     expect(diagnostics).toEqual([]);
-    expect(episodeActionPosts).toEqual([]);
   } finally {
     await context.close();
   }

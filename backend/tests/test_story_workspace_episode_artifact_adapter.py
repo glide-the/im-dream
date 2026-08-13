@@ -957,17 +957,14 @@ def test_u4_surface_serialization_drops_invalid_narrative_text(tmp_path: Path) -
         f"---\ntitle: {unsafe_text}\n---\n# Safe\n",
         encoding="utf-8",
     )
-    binding = StoryWorkspaceEpisodeBindingService(
-        tmp_path
-    ).resolve_or_repair_binding(
+    binding = StoryWorkspaceEpisodeBindingService(tmp_path).bind_first_episode(
         StoryWorkspaceEpisodeBindingContext(
             workflow_run_id=RUN_ID,
             trusted_project_story_slug="didi-zhengzhou",
             locked_context_story_slug="didi-zhengzhou",
             run_provenance_story_slug="didi-zhengzhou",
         )
-    ).binding
-    assert binding is not None
+    )
     episode_authority = {
         "schema": "story-workspace-episode-authority/v1",
         "workflow_run_id": binding.workflow_run_id,

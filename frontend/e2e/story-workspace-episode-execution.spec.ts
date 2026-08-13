@@ -1,7 +1,11 @@
 // [Input] Deterministic actor-scoped Dream/Episode REST snapshots served at the browser boundary.
 // [Output] Chromium evidence for responsive Episode navigation, read-only binding state, and revision-stable selection.
 // [Pos] Story Workspace Episode Execution mocked-browser QA (U12); never claims external workflow success.
-// [Sync] 2026-08-13: unbound EP01 remains read-only even when recovery capability is advertised.
+// [Sync] 2026-08-13: unbound EP01 remains read-only while the turn Hook publishes and binds.
+// [Sync] 2026-08-13: Dream Agent dialog uses its full conversation row and contains long
+//                    Chat content without page- or message-level horizontal overflow.
+// [Sync] 2026-08-13: scrolling the Episode workbench must not move the open Dream Agent
+//                    dialog outside the desktop viewport.
 
 // @ts-expect-error Playwright E2E has Node built-ins; the browser app tsconfig omits Node types.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -35,11 +39,6 @@ const AGGREGATE_ETAGS = [
   `sha256:${'6'.repeat(64)}`,
   `sha256:${'7'.repeat(64)}`,
 ] as const;
-const ACTION_IDS = Array.from(
-  { length: 7 },
-  (_, index) => `episode_action_${String(index + 1).repeat(64)}`,
-);
-const NEXT_EPISODE_CANDIDATE_ID = `episode_candidate_${'8'.repeat(64)}`;
 const ALL_ARTIFACTS = [
   ['episode-outline.md', 'plan_episode', ['episode_overview', 'storyline_navigator', 'narrative_workbench']],
   ['script.md', 'write_script', ['narrative_workbench', 'shot_inspector']],
@@ -138,72 +137,15 @@ function storyIndexProjection() {
   };
 }
 
-function projectedAction(
-  index: number,
-  action: 'generate_prompts' | 'regenerate_storyboard' | 'review_full_chain'
-    | 'validate_episode' | 'prepare_render_guide' | 'plan_episode' | 'write_script',
-  label: string,
-  displayCommand: string,
-  availability: 'executable' | 'preview' | 'blocked',
-  target: 'current' | 'next' = 'current',
-) {
-  const executable = availability === 'executable';
-  return {
-    actionId: ACTION_IDS[index],
-    action,
-    inputRevision: CONTENT_REVISION,
-    targetEpisode: target === 'current' ? {
-      opaqueEpisodeId: EPISODE_ID,
-      candidateId: null,
-      displayLabel: 'EP01',
-      relation: 'current',
-    } : {
-      opaqueEpisodeId: null,
-      candidateId: NEXT_EPISODE_CANDIDATE_ID,
-      displayLabel: 'EP02',
-      relation: 'next',
-    },
-    label,
-    description: target === 'current'
-      ? '使用服务端确认的 EP01 canonical revisions。'
-      : '等待 EP01 完整产物校验后开始 EP02。',
-    displayCommand,
-    availability,
-    isRecommended: index === 0,
-    canDispatch: executable,
-    disabledReason: executable ? null : target === 'next'
-      ? '完成 EP01 完整产物校验后可用'
-      : '完成当前 EP01 步骤后可用',
-    canonicalInputs: [{
-      sourceType: 'episode_artifact',
-      artifact: action === 'regenerate_storyboard' ? 'script' : 'storyboard',
-      owner: 'episode_artifact_manifest',
-      label: target === 'current' ? 'EP01 canonical 输入' : 'EP02 前置输入',
-      availability: executable ? 'available' : 'not_generated',
-      publicRevision: executable ? CONTENT_REVISION : null,
-      revisionKind: 'content',
-      requirement: 'required',
-    }],
-    consequences: action === 'regenerate_storyboard'
-      ? ['Prompt 包', '完整产物审阅', '校验提交']
-      : [],
-    dispatchState: 'idle',
-  };
-}
-
 function episodeSurface(revisionIndex: 0 | 1) {
   const revision = MANIFEST_REVISIONS[revisionIndex];
   return {
     runId: RUN_ID,
     opaqueEpisodeId: EPISODE_ID,
+    episodeCode: 'EP01',
     manifestRevision: revision,
     etag: AGGREGATE_ETAGS[revisionIndex],
     bindingAvailability: 'bound',
-    bindingRecovery: {
-      autoRepairAttempted: false,
-      canDispatch: false,
-      publicReason: null,
-    },
     artifacts: ALL_ARTIFACTS.map(([relativeKey, producerAction, consumers]) => ({
       relativeKey,
       availability: 'available',
@@ -390,54 +332,6 @@ function episodeSurface(revisionIndex: 0 | 1) {
         duplicateQueueShotIds: [],
       },
     },
-    workflow: {
-      factsRevision: revisionIndex,
-      nextAction: { action: 'generate_prompts', diagnostic: 'needs_confirmation', canDispatch: true },
-      prerequisites: ['regenerate_storyboard'],
-      actionOptions: [
-        {
-          action: 'generate_prompts',
-          label: '生成 EP01 Prompt 包',
-          displayCommand: '/drama-prompt (EP01)',
-          isCurrent: true,
-          canDispatch: true,
-        },
-        {
-          action: 'review_full_chain',
-          label: '审阅 EP01 完整产物',
-          displayCommand: '完整链路审查',
-          isCurrent: false,
-          canDispatch: false,
-        },
-        {
-          action: 'validate_episode',
-          label: '校验并提交 EP01',
-          displayCommand: '校验完整产物',
-          isCurrent: false,
-          canDispatch: false,
-        },
-        {
-          action: 'prepare_render_guide',
-          label: '准备 EP01 渲染与配音指引',
-          displayCommand: '/drama-render + /drama-voice',
-          isCurrent: false,
-          canDispatch: false,
-        },
-      ],
-      legacyPartial: false,
-    },
-    actionProjection: {
-      recommendedActionId: ACTION_IDS[0],
-      actionOptions: [
-        projectedAction(0, 'generate_prompts', '生成 EP01 Prompt 包', '/drama-prompt (EP01)', 'executable'),
-        projectedAction(1, 'regenerate_storyboard', '基于最新剧本更新 EP01 详细分镜', '/drama-storyboard (EP01)', 'executable'),
-        projectedAction(2, 'review_full_chain', '审阅 EP01 完整产物', 'script-reviewer · EP01 完整链路', 'preview'),
-        projectedAction(3, 'validate_episode', '校验并提交 EP01', '校验并提交 · EP01', 'preview'),
-        projectedAction(4, 'prepare_render_guide', '准备 EP01 渲染与配音指引', '/drama-render + /drama-voice · EP01', 'preview'),
-        projectedAction(5, 'plan_episode', '开始 EP02 分集规划', '/drama-plan', 'blocked', 'next'),
-        projectedAction(6, 'write_script', '创作 EP02 剧本', '/drama-script (EP02)', 'preview', 'next'),
-      ],
-    },
   };
 }
 
@@ -445,19 +339,14 @@ function unboundEpisodeSurface() {
   return {
     runId: RUN_ID,
     opaqueEpisodeId: null,
+    episodeCode: null,
     manifestRevision: null,
     etag: null,
     bindingAvailability: 'unbound',
-    bindingRecovery: {
-      autoRepairAttempted: false,
-      canDispatch: true,
-      publicReason: 'episode_binding_unproven',
-    },
     artifacts: [],
     documents: [],
     narrative: null,
     auxiliary: null,
-    workflow: null,
   };
 }
 
@@ -473,7 +362,6 @@ function json(route: Route, body: unknown, status = 200, headers?: Record<string
 type BrowserFixtureState = {
   revisionIndex: 0 | 1;
   artifactReads: number;
-  continueRequests: Array<Record<string, unknown>>;
   bindingAvailability?: 'bound' | 'unbound';
 };
 
@@ -594,6 +482,16 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       await json(route, { data: { im_full_access_enabled: false } });
       return;
     }
+    if (matches('GET', '/api/claude-agent/threads/thread-u12-browser/plugin-load-receipt')) {
+      await json(route, {
+        thread_id: 'thread-u12-browser',
+        deck_id: null,
+        workspace_found: false,
+        receipt: null,
+        launch_manifest: null,
+      });
+      return;
+    }
     if (matches('GET', '/api/claude-agent/threads/thread-u12-browser/messages')) {
       await json(route, {
         thread: {
@@ -605,7 +503,10 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
         messages: [{
           id: 'message-u12-browser',
           role: 'assistant',
-          parts: [{ type: 'text', text: '第一集产物已同步到工作台。' }],
+          parts: [{
+            type: 'text',
+            text: `第一集产物已同步到工作台。\n\n${'storyboard_payload_'.repeat(80)}`,
+          }],
           metadata: {},
           created_at: '2026-08-06T01:04:00Z',
         }],
@@ -632,18 +533,6 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
     }
     if (matches('POST', '/api/claude-agent/tool-confirm')) {
       await json(route, { ok: true, approved: true });
-      return;
-    }
-    if (matches('POST', `/api/story-workspace/workflow-runs/${RUN_ID}/episode-actions/continue`)) {
-      state.continueRequests.push(request.postDataJSON() as Record<string, unknown>);
-      await json(route, {
-        runId: RUN_ID,
-        episodeId: EPISODE_ID,
-        capability: 'generate_prompts',
-        messageId: 'dream-agent-u12-continue',
-        accepted: true,
-        replayed: false,
-      }, 202);
       return;
     }
     if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/episode-artifacts`)) {
@@ -673,6 +562,47 @@ async function expectNoHorizontalOverflow(page: Page) {
       return element !== null && element.scrollWidth <= element.clientWidth + 1;
     })(),
   }))).toEqual({ document: true, body: true, workbench: true });
+}
+
+async function expectDreamAgentConversationLayout(page: Page) {
+  const metrics = await page.getByRole('dialog', { name: 'Dream Agent' }).evaluate((dialog) => {
+    const header = dialog.querySelector<HTMLElement>('.story-workspace-dream-agent-dialog__header');
+    const thread = dialog.querySelector<HTMLElement>('.story-workspace-dream-agent-dialog__thread-chat');
+    const messageScroller = dialog.querySelector<HTMLElement>('[data-chat-scroll-region="messages"]');
+    if (header === null || thread === null) throw new Error('Dream Agent dialog regions are missing.');
+    const dialogRect = dialog.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
+    const threadRect = thread.getBoundingClientRect();
+    return {
+      gridRowCount: getComputedStyle(dialog).gridTemplateRows.split(/\s+/).filter(Boolean).length,
+      threadTopGap: Math.abs(threadRect.top - headerRect.bottom),
+      threadBottomGap: Math.abs(dialogRect.bottom - threadRect.bottom),
+      dialogHorizontalOverflow: dialog.scrollWidth - dialog.clientWidth,
+      messageHorizontalOverflow: messageScroller === null
+        ? null
+        : messageScroller.scrollWidth - messageScroller.clientWidth,
+      messageOverscrollY: messageScroller === null
+        ? null
+        : getComputedStyle(messageScroller).overscrollBehaviorY,
+      viewportBounds: {
+        top: dialogRect.top,
+        right: window.innerWidth - dialogRect.right,
+        bottom: window.innerHeight - dialogRect.bottom,
+        left: dialogRect.left,
+      },
+    };
+  });
+  expect(metrics.gridRowCount).toBe(2);
+  expect(metrics.threadTopGap).toBeLessThanOrEqual(1);
+  expect(metrics.threadBottomGap).toBeLessThanOrEqual(2);
+  expect(metrics.dialogHorizontalOverflow).toBeLessThanOrEqual(1);
+  expect(metrics.messageHorizontalOverflow).not.toBeNull();
+  expect(metrics.messageHorizontalOverflow!).toBeLessThanOrEqual(1);
+  expect(metrics.messageOverscrollY).toBe('contain');
+  expect(metrics.viewportBounds.top).toBeGreaterThanOrEqual(0);
+  expect(metrics.viewportBounds.right).toBeGreaterThanOrEqual(0);
+  expect(metrics.viewportBounds.bottom).toBeGreaterThanOrEqual(0);
+  expect(metrics.viewportBounds.left).toBeGreaterThanOrEqual(0);
 }
 
 async function selectShotWithKeyboard(page: Page) {
@@ -727,7 +657,6 @@ test('keeps an unbound first Episode read-only while automatic publication and b
   const state: BrowserFixtureState = {
     revisionIndex: 0,
     artifactReads: 0,
-    continueRequests: [],
     bindingAvailability: 'unbound',
   };
   await page.clock.setFixedTime(FROZEN_NOW);
@@ -739,9 +668,9 @@ test('keeps an unbound first Episode read-only while automatic publication and b
   });
 
   await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
-  await expect(page.getByRole('heading', { name: '尚未构建第一集产物关联' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '尚未构建 Episode 产物关联' })).toBeVisible();
   await expect(page.getByRole('status').filter({
-    hasText: '关联状态：等待确认后的自动发布与绑定',
+    hasText: '关联状态：等待主 Agent 成功构建并自动发布',
   })).toBeVisible();
   await expect(page.locator(
     'main[aria-labelledby="story-workspace-episode-unbound-title"] > p',
@@ -767,7 +696,6 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
   const state: BrowserFixtureState = {
     revisionIndex: 0,
     artifactReads: 0,
-    continueRequests: [],
   };
   page.on('console', (message) => {
     if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
@@ -799,16 +727,16 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
       timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
     }))).toEqual({ now: FROZEN_NOW, timezoneId: 'Asia/Shanghai' });
     await expect(page.getByRole('heading', { name: '雨夜重逢' }).first()).toBeVisible();
-    await expect(page.getByRole('status').filter({ hasText: '第一集产物关联：已关联' }))
+    await expect(page.getByRole('status').filter({ hasText: 'EP01 产物关联：已关联' }))
       .toBeVisible();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
     const executionRoot = page.locator('.story-workspace-collaboration');
     const dreamProjection = page.locator('details').filter({ hasText: 'Dream 初稿阶段投影' });
-    const artifactWorkbench = page.locator('section[aria-label="第一集产物工作台"]');
+    const artifactWorkbench = page.locator('section[aria-label="Episode 产物工作台"]');
     await expect(dreamProjection).toHaveCount(1);
     await expect(artifactWorkbench).toHaveCount(1);
     expect(await dreamProjection.evaluate((projection) => {
-      const artifact = document.querySelector('section[aria-label="第一集产物工作台"]');
+      const artifact = document.querySelector('section[aria-label="Episode 产物工作台"]');
       return artifact !== null && Boolean(
         projection.compareDocumentPosition(artifact) & Node.DOCUMENT_POSITION_FOLLOWING
       );
@@ -822,7 +750,7 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
       scrollHeight: root.scrollHeight,
     }));
     expect(desktopScrollRange.scrollHeight).toBeGreaterThanOrEqual(desktopScrollRange.clientHeight);
-    const artifactProgress = page.getByRole('list', { name: '第一集产物进度' });
+    const artifactProgress = page.getByRole('list', { name: 'EP01 产物进度' });
     await expect(artifactProgress.getByRole('button')).toHaveCount(4);
     await expect(artifactProgress.getByRole('button', { name: '阅读Prompts' })).toHaveCount(0);
     await expect(artifactProgress.getByRole('button', { name: '阅读渲染指引' })).toHaveCount(0);
@@ -832,7 +760,7 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     expect(await dreamProjection.evaluate((projection) => (
       (projection as HTMLDetailsElement).open
     ))).toBe(true);
-    const artifactReader = page.getByRole('region', { name: '第一集文件阅读器' });
+    const artifactReader = page.getByRole('region', { name: 'EP01 文件阅读器' });
     await expect(artifactReader).toBeVisible();
     await expect(artifactReader).toBeInViewport();
     await expect(artifactReader.getByRole('tab', { name: /分集大纲/ }))
@@ -855,62 +783,34 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
 
     const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
     await openAgent.click();
-    let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
-    await expect(agentDialog.getByRole('button', { name: /生成 EP01 Prompt 包.*推荐操作.*当前可执行/ }))
-      .toBeEnabled();
-    const storyboardAction = agentDialog.getByRole('button', {
-      name: /基于最新剧本更新 EP01 详细分镜.*当前可执行/,
-    });
-    await expect(storyboardAction).toBeEnabled();
-    const workflowDisclosure = agentDialog.getByRole('button', {
-      name: '更多工作流操作（5）',
-    });
-    await expect(workflowDisclosure).toHaveAttribute('aria-expanded', 'false');
-    await workflowDisclosure.click();
-    await expect(agentDialog.getByRole('button', {
-      name: /开始 EP02 分集规划.*暂不可用/,
-    })).toBeDisabled();
-    await page.keyboard.press('Escape');
-    await storyboardAction.click();
-    let continueDialog = page.getByRole('dialog', { name: '确认 Episode 下一步' });
-    await expect(continueDialog.getByText('目标 Episode：EP01')).toBeVisible();
-    await expect(continueDialog.getByText('EP01 canonical 输入')).toBeVisible();
-    await continueDialog.getByRole('button', { name: '取消' }).click();
-    agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
-    await expect(agentDialog.getByRole('button', {
-      name: /基于最新剧本更新 EP01 详细分镜.*当前可执行/,
-    })).toBeFocused();
-    await page.keyboard.press('Escape');
-
-    let continueAction = page.getByRole('button', { name: '生成 EP01 Prompt 包' });
-    await continueAction.click();
-    continueDialog = page.getByRole('dialog', { name: '确认 Episode 下一步' });
-    await expect(continueDialog).toBeVisible();
-    await expect(continueDialog.getByText('Canonical 输入与 revisions')).toBeVisible();
-    const guidance = continueDialog.getByRole('textbox', { name: '补充创作要求（可选）' });
-    await expect(guidance).toBeFocused();
-    await guidance.press('Escape');
-    await expect(continueDialog).toBeHidden();
-    await expect(continueAction).toBeFocused();
-
-    await continueAction.click();
-    await guidance.fill('  保留克制感  ');
-    await continueDialog.getByRole('button', { name: '确认并继续' }).click();
-    await expect(continueDialog).toBeHidden();
-    expect(state.continueRequests).toHaveLength(1);
-    expect(state.continueRequests[0]).toMatchObject({
-      actionId: ACTION_IDS[0],
-      userGuidance: '保留克制感',
-    });
-    expect(state.continueRequests[0]).not.toHaveProperty('action');
-    expect(state.continueRequests[0]).not.toHaveProperty('episodeId');
-    expect(state.continueRequests[0]).not.toHaveProperty('displayCommand');
-    await expect(page.getByRole('dialog', { name: 'Dream Agent' })).toHaveCount(0);
-    await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
-    await expect(page.getByRole('dialog', { name: 'Dream Agent' })).toBeVisible();
+    const agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    await expect(agentDialog).toBeVisible();
+    await expect(agentDialog.getByText('Episode 下一步')).toHaveCount(0);
+    await expect(agentDialog.getByText('更多工作流操作')).toHaveCount(0);
+    await expectDreamAgentConversationLayout(page);
+    const workbenchScrollLimit = await executionRoot.evaluate(
+      (root) => Math.max(0, root.scrollHeight - root.clientHeight),
+    );
+    expect(workbenchScrollLimit).toBeGreaterThan(0);
+    await executionRoot.evaluate((root) => root.scrollTo({ top: root.scrollHeight }));
+    await expect.poll(() => executionRoot.evaluate((root) => root.scrollTop))
+      .toBeGreaterThan(0);
+    await expectDreamAgentConversationLayout(page);
+    await executionRoot.evaluate((root) => root.scrollTo({
+      top: Math.max(1, (root.scrollHeight - root.clientHeight) / 2),
+    }));
+    const scrollTopBeforeMessageOverscroll = await executionRoot.evaluate((root) => root.scrollTop);
+    const messageScroller = agentDialog.locator('[data-chat-scroll-region="messages"]');
+    await messageScroller.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+    await messageScroller.hover();
+    await page.mouse.wheel(0, 1_200);
+    expect(await executionRoot.evaluate((root) => root.scrollTop))
+      .toBe(scrollTopBeforeMessageOverscroll);
+    await expectDreamAgentConversationLayout(page);
+    await page.screenshot({ path: resolve(EVIDENCE_DIR, 'dream-agent-desktop-1440x1000.png') });
     await page.getByRole('button', { name: '收起 Dream Agent' }).click();
-    continueAction = page.getByRole('button', { name: '已交给 Dream Agent' });
-    await expect(continueAction).toBeDisabled();
+    await expect(agentDialog).toBeHidden();
+    await expect(openAgent).toBeFocused();
 
     let shot = await selectShotWithKeyboard(page);
     await expect(shot).toHaveAttribute('aria-current', 'true');
@@ -931,8 +831,6 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     expect(await dreamProjection.evaluate((projection) => (
       (projection as HTMLDetailsElement).open
     ))).toBe(true);
-    continueAction = page.getByRole('button', { name: '生成 EP01 Prompt 包' });
-    await expect(continueAction).toBeEnabled();
 
     await shot.press('Escape');
     await expect(page.getByRole('treeitem', { name: 'S01 车站外', exact: true }))
@@ -956,8 +854,6 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
       scrollHeight: root.scrollHeight,
     }));
     expect(narrowScrollRange.scrollHeight).toBeGreaterThanOrEqual(narrowScrollRange.clientHeight);
-    await continueAction.scrollIntoViewIfNeeded();
-    await expect(continueAction).toBeInViewport();
     const storylineToggle = page.getByRole('button', { name: '打开故事线' });
     await expect(storylineToggle).toHaveAttribute('aria-expanded', 'false');
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeHidden();
@@ -972,6 +868,15 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     }
     await page.screenshot({ path: resolve(EVIDENCE_DIR, 'narrow-390x844.png'), fullPage: true });
 
+    await openAgent.click();
+    await expect(agentDialog).toBeVisible();
+    await expect(agentDialog).toBeInViewport();
+    await expectDreamAgentConversationLayout(page);
+    await page.screenshot({ path: resolve(EVIDENCE_DIR, 'dream-agent-narrow-390x844.png') });
+    await page.getByRole('button', { name: '收起 Dream Agent' }).click();
+    await expect(agentDialog).toBeHidden();
+    await expect(openAgent).toBeFocused();
+
     await storylineToggle.click();
     const storylineSheet = page.getByRole('dialog', { name: '故事线' });
     await expect(storylineSheet).toBeVisible();
@@ -985,20 +890,6 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await page.keyboard.press('Escape');
     await expect(storylineSheet).toBeHidden();
     await expect(storylineToggle).toBeFocused();
-
-    await continueAction.click();
-    await expect(continueDialog).toBeVisible();
-    await expect(guidance).toBeFocused();
-    const dialogBox = await continueDialog.boundingBox();
-    expect(dialogBox).not.toBeNull();
-    expect(dialogBox?.x).toBeGreaterThanOrEqual(9);
-    expect(dialogBox?.y).toBeGreaterThanOrEqual(9);
-    expect((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0)).toBeLessThanOrEqual(381);
-    expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(835);
-    await page.screenshot({ path: resolve(EVIDENCE_DIR, 'narrow-dialog-390x844.png') });
-    await guidance.press('Escape');
-    await expect(continueDialog).toBeHidden();
-    await expect(continueAction).toBeFocused();
 
     const bodyText = await page.locator('body').innerText();
     for (const forbidden of [

@@ -797,7 +797,6 @@ async def shutdown_scheduler():
 from agent_factory import claude_agent_thread_factory
 from claude_agent.event_bus_redis import RedisStreamEventBus
 from services.deck.story_workflow_application import (
-    get_episode_application_service,
     story_workspace_get_dream_confirmation_coordinator,
 )
 from services.story_workspace.dream_launch_endpoint_service import (
@@ -903,13 +902,6 @@ async def story_workspace_startup_dream_launch_dispatches():
 
 
 @app.on_event("startup")
-async def story_workspace_startup_dream_internal_dispatches():
-    """Recover pending or expired internal commands without a GET side effect."""
-
-    get_episode_application_service().start_internal_dream_dispatches()
-
-
-@app.on_event("startup")
 async def startup_claude_plugin_seed():
     """Seed platform-builtin Claude plugins and backfill Deck references.
 
@@ -990,14 +982,6 @@ async def story_workspace_shutdown_dream_launch_dispatches():
     """Await launch turn drains before closing the Claude Agent factory."""
 
     await get_dream_launch_endpoint_service().aclose()
-
-
-@app.on_event("shutdown")
-async def story_workspace_shutdown_dream_internal_dispatches():
-    """Await internal episode/workflow command drains before factory close."""
-
-    episode_service = get_episode_application_service()
-    await episode_service.aclose_internal_dream_dispatches()
 
 
 @app.on_event("shutdown")

@@ -1207,6 +1207,7 @@ function ChatViewContent({
                     ) : null}
                     <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, paddingBottom: '0.25rem' }}>
                       <AIInputDock
+                        deckId={selectedDeckId}
                         onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
                           void startThreadWithQueuedSend(message, uploadedFiles, toolChoice);
                         }}

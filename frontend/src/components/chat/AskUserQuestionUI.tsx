@@ -11,6 +11,8 @@
 // [Sync] 2026-07-20: i18n — submit/cancel defaults and form copy (header, select placeholder,
 //        fallback question, Yes option) resolve through chat.toolConfirmation / chat.askUser
 //        namespaces (en + zh) via useTranslation.
+// [Sync] 2026-08-13: compact unframed forms scroll only their question body so the submit
+//                    and cancel actions remain visible in height-constrained Dream rails.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconCheck, IconX } from './Icons';
@@ -193,7 +195,9 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
   }, [getCleanAnswers, isValid, onCancel, onSubmit]);
 
   return (
-    <div style={framed ? { overflow: 'hidden', borderRadius: '14px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)' } : { width: '100%' }}>
+    <div style={framed
+      ? { overflow: 'hidden', borderRadius: '14px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)' }
+      : { width: '100%', minHeight: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {framed && showHeader ? (
         <div style={{ padding: '0.95rem 1rem', borderBottom: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -204,8 +208,31 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
         </div>
       ) : null}
 
-      <form onSubmit={(event) => { event.preventDefault(); onSubmit(getCleanAnswers()); }} style={{ padding: framed ? (compact ? '0.75rem' : '1rem') : 0, display: 'flex', flexDirection: 'column', gap: formGap }}>
-        {questions.map((question, index) => {
+      <form
+        onSubmit={(event) => { event.preventDefault(); onSubmit(getCleanAnswers()); }}
+        style={{
+          padding: framed ? (compact ? '0.75rem' : '1rem') : 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: formGap,
+          minHeight: framed ? undefined : 0,
+          flex: framed ? undefined : '1 1 auto',
+          overflow: framed ? undefined : 'hidden',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: formGap,
+            minHeight: framed ? undefined : 0,
+            flex: framed ? undefined : '1 1 auto',
+            overflowY: framed ? undefined : 'auto',
+            overscrollBehavior: framed ? undefined : 'contain',
+            paddingRight: framed ? undefined : '0.15rem',
+          }}
+        >
+          {questions.map((question, index) => {
           const answerKey = question.question || question.id || `q${index}`;
           const fieldId = question.id || `q${index}`;
           const value = answers[answerKey];
@@ -295,9 +322,10 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
               )}
             </div>
           );
-        })}
+          })}
+        </div>
 
-        <div style={{ display: 'flex', gap: compact ? '0.5rem' : '0.75rem', paddingTop: compact ? 0 : '0.25rem' }}>
+        <div style={{ display: 'flex', flexShrink: 0, gap: compact ? '0.5rem' : '0.75rem', paddingTop: compact ? 0 : '0.25rem' }}>
           <button type="submit" disabled={isProcessing || !isValid} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', border: 'none', ...buttonStyle, background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontWeight: 600, cursor: isProcessing || !isValid ? 'not-allowed' : 'pointer', opacity: isProcessing || !isValid ? 0.55 : 1 }}>
             <IconCheck style={{ width: compact ? '0.85rem' : '1rem', height: compact ? '0.85rem' : '1rem' }} />
             {resolvedSubmitLabel}

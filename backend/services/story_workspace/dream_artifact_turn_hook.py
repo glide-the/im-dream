@@ -1,7 +1,7 @@
 # [Input] Consume trusted Dream Run context, WorkflowRun authority, canonical
 #         Story Workspace files, and existing Dream file reader/writer contracts.
-# [Output] Project page stages, publish one Run-private preview, advance output
-#          readiness, and bind EP01 after the confirmed follow-up turn.
+# [Output] Before-turn canonical snapshot plus successful-turn deterministic
+#          synchronization into the Run-private preview and EP01 binding.
 # [Pos] Dream post-turn business Hook above ClaudeAgentService; not an Agent
 #       runtime, Observer, SSE adapter, or SDK entry point.
 # [Sync] 2026-08-13: added host-owned automatic workbench synchronization.
@@ -47,14 +47,6 @@ try:
     from services.story_workspace.episode_artifact_service import (
         StoryWorkspaceEpisodeAuthority,
     )
-    from services.story_workspace.episode_artifact_adapter import (
-        StoryWorkspaceEpisodeArtifactAdapter,
-        StoryWorkspaceEpisodeArtifactParseError,
-    )
-    from services.story_workspace.episode_auxiliary_artifact_adapter import (
-        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
-        story_workspace_episode_review_markdown_body,
-    )
     from services.story_workspace.dream_workflow_lifecycle_service import (
         StoryWorkspaceDreamWorkflowLifecycleService,
     )
@@ -88,14 +80,6 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     )
     from backend.services.story_workspace.episode_artifact_service import (
         StoryWorkspaceEpisodeAuthority,
-    )
-    from backend.services.story_workspace.episode_artifact_adapter import (
-        StoryWorkspaceEpisodeArtifactAdapter,
-        StoryWorkspaceEpisodeArtifactParseError,
-    )
-    from backend.services.story_workspace.episode_auxiliary_artifact_adapter import (
-        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
-        story_workspace_episode_review_markdown_body,
     )
     from backend.services.story_workspace.dream_workflow_lifecycle_service import (
         StoryWorkspaceDreamWorkflowLifecycleService,
@@ -145,7 +129,7 @@ class DreamArtifactTurnTicket:
     context: StoryWorkspaceDreamRunContext
     actor_id: str
     workspace_root: Path
-    source_kind: str | None = None
+    baseline_files: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -155,6 +139,7 @@ class DreamArtifactTurnResult:
     changed_stages: tuple[str, ...]
     private_artifact_changed: bool
     private_files: tuple[str, ...]
+    changed_source_files: tuple[str, ...]
     episode_bound: bool
 
 
@@ -426,7 +411,6 @@ class DreamArtifactTurnHook:
         context: StoryWorkspaceDreamRunContext,
         actor_id: str | int,
         cwd: str,
-        source_kind: str | None = None,
     ) -> DreamArtifactTurnTicket:
         try:
             workspace = Path(cwd).resolve(strict=True)
@@ -443,7 +427,7 @@ class DreamArtifactTurnHook:
             context=context,
             actor_id=str(actor_id),
             workspace_root=workspace,
-            source_kind=source_kind,
+            baseline_files=self._canonical_source_snapshot(workspace),
         )
 
     def after_main_turn(
@@ -487,11 +471,6 @@ class DreamArtifactTurnHook:
             changed_stages.append(projection.stage.value)
 
         private_files = self._collect_private_artifact_files(ticket.workspace_root)
-        if ticket.source_kind == "story-workspace-dream-confirmation":
-            self._validate_confirmed_first_episode(
-                ticket,
-                private_files=private_files,
-            )
         private_changed = StoryWorkspaceDreamArtifactPublisher(
             ticket.workspace_root
         ).publish(
@@ -502,77 +481,28 @@ class DreamArtifactTurnHook:
             STORY_WORKSPACE_DREAM_REQUIRED_STAGES
         ):
             self._record_output_ready(ticket, workflow_run)
-        episode_bound = False
-        if ticket.source_kind == "story-workspace-dream-confirmation":
-            self._bind_confirmed_first_episode(
-                ticket,
-                workflow_run,
-                private_files=private_files,
+        episode_bound = self._ensure_first_episode_binding(
+            ticket,
+            workflow_run,
+            private_files=private_files,
+        )
+        latest_snapshot = self._canonical_source_snapshot(ticket.workspace_root)
+        before = dict(ticket.baseline_files)
+        after = dict(latest_snapshot)
+        changed_source_files = tuple(
+            sorted(
+                path
+                for path in set(before) | set(after)
+                if before.get(path) != after.get(path)
             )
-            episode_bound = True
+        )
         return DreamArtifactTurnResult(
             changed_stages=tuple(changed_stages),
             private_artifact_changed=private_changed,
             private_files=tuple(sorted(private_files)),
+            changed_source_files=changed_source_files,
             episode_bound=episode_bound,
         )
-
-    @staticmethod
-    def _validate_confirmed_first_episode(
-        ticket: DreamArtifactTurnTicket,
-        *,
-        private_files: Mapping[str, bytes],
-    ) -> None:
-        """Require the same readable EP01 contract consumed by the UI surface."""
-
-        story_slug = StoryWorkspaceEpisodeBindingService(
-            ticket.workspace_root
-        ).discover_unique_canonical_project_story_slug()
-        if story_slug is None:
-            raise DreamArtifactTurnHookError(
-                "confirmed Dream output has no unique canonical project"
-            )
-        episode_root = f"stories/{story_slug}/episodes/EP01"
-        names = (
-            "episode-outline.md",
-            "script.md",
-            "storyboard.yaml",
-            "review-report.md",
-        )
-        files = {
-            name: private_files.get(f"{episode_root}/{name}") for name in names
-        }
-        if any(content is None for content in files.values()):
-            raise DreamArtifactTurnHookError(
-                "confirmed Dream output is missing the EP01 workbench"
-            )
-        adapter = StoryWorkspaceEpisodeArtifactAdapter(episode_uid="0" * 32)
-        try:
-            adapter.project(
-                outline=files["episode-outline.md"],
-                script=None,
-                storyboard=None,
-            )
-            adapter.project(
-                outline=None,
-                script=files["script.md"],
-                storyboard=None,
-            )
-            adapter.project(
-                outline=None,
-                script=None,
-                storyboard=files["storyboard.yaml"],
-            )
-            story_workspace_episode_review_markdown_body(
-                files["review-report.md"]
-            )
-        except (
-            StoryWorkspaceEpisodeArtifactParseError,
-            StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
-        ) as exc:
-            raise DreamArtifactTurnHookError(
-                "confirmed Dream output contains an invalid EP01 artifact"
-            ) from exc
 
     @staticmethod
     def _record_output_ready(
@@ -614,32 +544,20 @@ class DreamArtifactTurnHook:
         return value
 
     @classmethod
-    def _bind_confirmed_first_episode(
+    def _ensure_first_episode_binding(
         cls,
         ticket: DreamArtifactTurnTicket,
         workflow_run: WorkflowRun,
         *,
         private_files: Mapping[str, bytes],
-    ) -> None:
+    ) -> bool:
         binding_service = StoryWorkspaceEpisodeBindingService(ticket.workspace_root)
         story_slug = binding_service.discover_unique_canonical_project_story_slug()
         if story_slug is None:
-            raise DreamArtifactTurnHookError(
-                "confirmed Dream output has no unique canonical project"
-            )
-        expected_episode_files = {
-            f"stories/{story_slug}/episodes/EP01/{name}"
-            for name in (
-                "episode-outline.md",
-                "script.md",
-                "storyboard.yaml",
-                "review-report.md",
-            )
-        }
-        if not expected_episode_files.issubset(private_files):
-            raise DreamArtifactTurnHookError(
-                "confirmed Dream output is missing the EP01 workbench"
-            )
+            return False
+        episode_prefix = f"stories/{story_slug}/episodes/EP01/"
+        if not any(path.startswith(episode_prefix) for path in private_files):
+            return False
         source_message_id = workflow_run.source_message_id
         if not isinstance(source_message_id, str) or not source_message_id:
             raise DreamArtifactTurnHookError("Dream launch source is unavailable")
@@ -760,6 +678,7 @@ class DreamArtifactTurnHook:
                 episode_uid=episode_uid,
             )
         )
+        return True
 
     @staticmethod
     def _load_authoritative_run(ticket: DreamArtifactTurnTicket) -> WorkflowRun:
@@ -840,6 +759,70 @@ class DreamArtifactTurnHook:
         if len(payload) != metadata.st_size:
             raise DreamArtifactTurnHookError("workbench source changed during read")
         return payload
+
+    @classmethod
+    def _canonical_source_snapshot(
+        cls,
+        workspace: Path,
+    ) -> tuple[tuple[str, str], ...]:
+        """Capture a bounded before/after digest without interpreting content."""
+
+        candidates: set[str] = set()
+        for directory in ("assets/characters", "assets/scenes"):
+            root = workspace / directory
+            if not root.exists():
+                continue
+            try:
+                for path in root.iterdir():
+                    if path.suffix.lower() in {".md", ".yaml", ".yml"}:
+                        candidates.add(path.relative_to(workspace).as_posix())
+            except OSError as exc:
+                raise DreamArtifactTurnHookError(
+                    "canonical asset directory cannot be inspected"
+                ) from exc
+        stories = workspace / "stories"
+        if stories.exists():
+            try:
+                story_roots = tuple(stories.iterdir())
+            except OSError as exc:
+                raise DreamArtifactTurnHookError(
+                    "canonical stories directory cannot be inspected"
+                ) from exc
+            for story in story_roots:
+                if story.is_symlink() or not story.is_dir() or _STORY_SLUG.fullmatch(story.name) is None:
+                    continue
+                project = story / "project.yaml"
+                if project.exists():
+                    candidates.add(project.relative_to(workspace).as_posix())
+                episodes = story / "episodes"
+                if not episodes.exists() or episodes.is_symlink() or not episodes.is_dir():
+                    continue
+                try:
+                    episode_roots = tuple(episodes.iterdir())
+                except OSError as exc:
+                    raise DreamArtifactTurnHookError(
+                        "canonical Episode directory cannot be inspected"
+                    ) from exc
+                for episode in episode_roots:
+                    if (
+                        episode.is_symlink()
+                        or not episode.is_dir()
+                        or _EPISODE_CODE.fullmatch(episode.name) is None
+                    ):
+                        continue
+                    for name in _PRIVATE_FILE_NAMES - {"project.yaml"}:
+                        artifact = episode / name
+                        if artifact.exists():
+                            candidates.add(artifact.relative_to(workspace).as_posix())
+        if len(candidates) > STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX:
+            raise DreamArtifactTurnHookError("canonical source count exceeds contract")
+        return tuple(
+            (
+                relative,
+                "sha256:" + hashlib.sha256(cls._safe_file(workspace, relative)).hexdigest(),
+            )
+            for relative in sorted(candidates)
+        )
 
     @staticmethod
     def _frontmatter(payload: bytes) -> tuple[dict[str, Any], str]:

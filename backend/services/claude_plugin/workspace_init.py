@@ -270,13 +270,13 @@ DREAM_SURFACE_README = """# .dream/ — Dream Surface 协议目录
 - 页面描述位于 runtime/runs/<workflow_run_id>/run.json 与 stages/*.json。
 - Agent 只能调用 mcp__story_workspace__write_dream_run 和
   mcp__story_workspace__write_dream_stage 更新运行内容层。
-- 第一集只允许通过 mcp__story_workspace__bind_first_episode 建立服务端
-  绑定，通过 mcp__story_workspace__record_episode_workflow_completion 记录受控的
-  技术完成修订；两者均校验 host 注入的 run/thread/message 上下文，
-  不持有剧情、剧本、分镜、Prompt 或渲染内容。
+- 主 Agent turn 前后由服务端 Hook 检查 canonical Project/Episode 产物，
+  在权限与 run/thread 绑定校验后自动同步到私有 Run 发布路径；该同步不依赖
+  Agent 主动调用工具，也不产生 Episode 阶段或“下一步”状态。
 - 禁止使用 Write、Edit 或 Bash 直接修改 .dream；受控工具会从 host 读取
   actor、thread 与冻结的 WorkflowRun 来源字段，并校验 revision 和 source files。
-- 先写人物、场景或分镜的 canonical 工作区文件，再调用 stage 工具同步页面元信息。
+- 先写人物、场景、剧本或分镜的 canonical 工作区文件；stage 工具仅用于即时预览，
+  成功 turn 的最终同步由服务端 Hook 保证。
 - Agent 对话的真相源是标准 Thread history/status/SSE；Dream 与 Chat
   使用同一 thread_id 恢复消息、确认、Stop 和终态。
 - story-workspace REST API 只读取 Workflow 与 Artifact 业务投影；投影由

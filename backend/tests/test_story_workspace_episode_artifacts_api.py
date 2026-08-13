@@ -42,7 +42,6 @@ from story_workspace.contracts import (
     StoryWorkspaceEpisodeArtifactAvailability,
     StoryWorkspaceEpisodeArtifactSurface,
     StoryWorkspaceEpisodeBindingAvailability,
-    StoryWorkspaceEpisodeBindingRecovery,
     StoryWorkspaceStoryIndexProjection,
     StoryWorkspaceStoryIndexReconcileCommand,
 )
@@ -102,11 +101,6 @@ def _unbound_surface() -> StoryWorkspaceEpisodeArtifactSurface:
     return StoryWorkspaceEpisodeArtifactSurface(
         runId=RUN_ID,
         bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
-        bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
-            autoRepairAttempted=True,
-            canDispatch=True,
-            publicReason="episode_binding_unproven",
-        ),
     )
 
 
@@ -455,8 +449,7 @@ class TestStoryWorkspaceEpisodeArtifactService:
         )
         self.binding = StoryWorkspaceEpisodeBindingService(
             self.workspace
-        ).resolve_or_repair_binding(_binding_context()).binding
-        assert self.binding is not None
+        ).bind_first_episode(_binding_context())
         self.authority = _episode_authority(self.binding.episode_uid)
         self.service = StoryWorkspaceEpisodeArtifactService(self.workspace)
 
@@ -1623,8 +1616,7 @@ def test_gateway_owner_get_reads_bound_episode_after_full_authorization() -> Non
         )
         binding = StoryWorkspaceEpisodeBindingService(
             workspace
-        ).resolve_or_repair_binding(_binding_context()).binding
-        assert binding is not None
+        ).bind_first_episode(_binding_context())
         _set_gateway_episode_authority(db, binding.episode_uid)
 
         with patch.object(gateway, "_thread_workspace", return_value=workspace):
@@ -1637,6 +1629,58 @@ def test_gateway_owner_get_reads_bound_episode_after_full_authorization() -> Non
     assert surface.binding_availability is StoryWorkspaceEpisodeBindingAvailability.BOUND
     assert surface.opaque_episode_id == binding.episode_uid
     assert len(surface.artifacts) == 6
+    db.close()
+
+
+def test_gateway_projects_the_registry_active_episode_without_rewriting_launch_authority() -> None:
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    _create_gateway_schema(db)
+    _seed_authorized_gateway_run(db)
+    gateway = gateway_module.DreamArtifactApplicationService()
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        root = Path(temporary_directory)
+        workspace = root / THREAD_ID
+        (workspace / ".dream").mkdir(parents=True)
+        story = workspace / "stories" / "didi-zhengzhou"
+        (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "project.yaml").write_text(
+            "project_id: didi-zhengzhou\nformat:\n  total_episodes: 3\n",
+            encoding="utf-8",
+        )
+        binding_service = StoryWorkspaceEpisodeBindingService(workspace)
+        first = binding_service.bind_first_episode(_binding_context())
+        _set_gateway_episode_authority(db, first.episode_uid)
+        with_ep02 = binding_service.ensure_next_episode(
+            _binding_context(),
+            expected_revision=1,
+            total_episodes=3,
+        )
+        ep02 = with_ep02.episodes[1]
+        (story / "episodes" / "EP02").mkdir(parents=True)
+        active = binding_service.activate_episode(
+            _binding_context(),
+            episode_uid=ep02.episode_uid,
+            expected_revision=with_ep02.revision,
+        )
+
+        with patch.object(gateway, "_thread_workspace", return_value=workspace):
+            surface = gateway._get_episode_artifacts_from_db(
+                db,
+                RUN_ID,
+                {"actor_id": ACTOR_ID},
+            )
+
+    source_authority = gateway._episode_authority_from_source(
+        gateway._authorized_episode_row(db, RUN_ID, {"actor_id": ACTOR_ID}),
+        RUN_ID,
+    )
+    assert source_authority is not None
+    assert source_authority.episode_uid == first.episode_uid
+    assert active.active_episode_uid == ep02.episode_uid
+    assert surface.opaque_episode_id == ep02.episode_uid
+    assert surface.episode_code == "EP02"
+    assert all(item.availability.value == "not_generated" for item in surface.artifacts)
     db.close()
 
 
@@ -1660,7 +1704,7 @@ def test_real_route_owner_etag_refresh_and_other_actor_invisibility() -> None:
             "project_id: didi-zhengzhou\n",
             encoding="utf-8",
         )
-        StoryWorkspaceEpisodeBindingService(workspace).resolve_or_repair_binding(
+        StoryWorkspaceEpisodeBindingService(workspace).bind_first_episode(
             _binding_context()
         )
         binding_path = workspace / ".dream" / "runtime" / "runs" / RUN_ID / "episode.json"

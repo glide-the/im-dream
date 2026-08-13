@@ -73,40 +73,43 @@ sequenceDiagram
     Note over P: manifest 是当前 preview 的提交标记
 ```
 
-## 4. 确认后自动构建第一集产物关联
+## 4. 成功 turn 后自动构建首集产物关联
 
-普通用户只提交 Dream 页面上的“确认并继续”，不在 execution 页面或 Dream Agent
-消息面板中手动构建第一集产物关联。确认 turn 成功后，宿主 Hook 按以下顺序处理：
+用户不在 Execution 页面或 Dream Agent 消息面板中手动构建产物关联。任意 Dream 根
+turn 成功后，宿主 Hook 按以下顺序处理：
 
-1. 读取并使用 execution 页面同一产物合同校验 EP01 的大纲、剧本、分镜和审阅报告；
-2. 自动发布 Run-private preview，并在阶段完整时推进输出就绪；
-3. 从服务端持有的 actor、thread、run、Project 与 Episode 身份构建 EP01 产物关联；
-4. execution 页面继续读取 actor-scoped REST 事实，只读显示“尚未构建第一集产物关联”或
-   “第一集产物关联：已关联”。
+1. 重新读取当前 canonical 工作台的 allowlist 文件并校验路径与内容边界；
+2. 自动发布完整的 Run-private preview；
+3. 若已存在唯一 Project 且 EP01 至少构建了一项 canonical 产物，则用服务端持有的
+   actor、thread、Run、Project 与 Episode 身份幂等构建 EP01 产物关联；
+4. Execution 页面继续读取 actor-scoped REST，只读显示“尚未构建 EP01 产物关联”或
+   “EP01 产物关联：已关联”。
 
 ```mermaid
 sequenceDiagram
     actor U as 用户
-    participant D as Dream 页面
-    participant A as 同一 Dream Agent
+    participant C as 共享 Chat
+    participant A as 同一主 Agent
     participant H as DreamArtifactTurnHook
     participant B as Episode Binding
     participant E as Execution 页面
 
-    U->>D: 确认并继续
-    D->>A: 在同一 thread 执行确认 turn
-    A->>A: 写入 EP01 四项 canonical 文件
+    U->>C: 发送任意已安装 Skill 或自然语言要求
+    C->>A: 在同一 thread/session 执行根 turn
+    A->>A: 创建或修改 canonical 文件
     A-->>H: 根 turn 成功
-    H->>H: 校验产物并自动发布 preview
-    H->>B: 自动构建 EP01 产物关联
+    H->>H: 校验当前快照并自动发布 preview
+    opt 唯一 Project 且存在 EP01 产物
+        H->>B: 幂等构建 EP01 产物关联
+    end
     E->>B: 只读查询最新关联事实
     B-->>E: 尚未构建或已关联
     Note over E: 不提供手动构建按钮
 ```
 
-确认 turn 失败、取消、产物缺失或产物无法通过现有解析合同校验时，不发布本轮 preview，
-也不构建关联。后端既有恢复 capability 可继续作为服务端兼容边界存在，但不是普通用户
-工作台动作。
+Agent turn 失败、取消或 Hook 发布失败时不提交本轮 manifest，也不构建新关联。某个
+Episode 文件尚未生成不是失败：Hook 发布已经存在的文件，页面据实显示缺失项。关联
+建立不代表该 Episode 的所有产物已经完成，也不产生“下一步”或 completion fact。
 
 ## 5. 与 Admin sealed Artifact 的区别
 

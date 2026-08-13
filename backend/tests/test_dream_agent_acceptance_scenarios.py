@@ -866,18 +866,16 @@ class DreamAgentS14MigrationAcceptance(unittest.IsolatedAsyncioTestCase):
             (ROOT / "services/story_workspace/dream_stream_adapter.py").exists()
         )
 
-    async def test_s14_dream_gets_are_actor_scoped_reads_and_recovery_is_startup_only(
+    async def test_s14_dream_gets_are_actor_scoped_reads_without_dispatch_side_effects(
         self,
     ) -> None:
         import routers.story_workspace as route_module
-        import server
 
         gateway = mock.Mock()
         gateway.list_dream_runs = mock.AsyncMock(return_value=[])
         gateway.get_dream_files = mock.AsyncMock(
             return_value={"threadId": THREAD_ID, "files": []}
         )
-        gateway.start_internal_dream_dispatches = mock.Mock()
 
         listed = await route_module.story_workspace_list_dream_runs(
             current_user={"user_id": int(ACTOR_ID)},
@@ -897,7 +895,6 @@ class DreamAgentS14MigrationAcceptance(unittest.IsolatedAsyncioTestCase):
             RUN_ID,
             actor={"actor_id": ACTOR_ID},
         )
-        gateway.start_internal_dream_dispatches.assert_not_called()
 
         denied_gateway = mock.Mock()
         denied_gateway.list_dream_runs = mock.AsyncMock()
@@ -907,20 +904,6 @@ class DreamAgentS14MigrationAcceptance(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(denied.status_code, 403)
         denied_gateway.list_dream_runs.assert_not_awaited()
-
-        startup_names = [handler.__name__ for handler in server.app.router.on_startup]
-        self.assertIn(
-            "story_workspace_startup_dream_internal_dispatches",
-            startup_names,
-        )
-        with mock.patch.object(
-            server,
-            "get_episode_application_service",
-            return_value=gateway,
-        ):
-            await server.story_workspace_startup_dream_internal_dispatches()
-        gateway.start_internal_dream_dispatches.assert_called_once_with()
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,12 @@
 //                    history-load remount cannot replay the same /api/claude-agent POST.
 // [Sync] 2026-08-11: keep the composer bound to the main thread runtime;
 //                    transcript-derived subagent counts are observation-only.
+// [Sync] 2026-08-13: let pending confirmation docks shrink within short Dream rails while
+//                    preserving the normal composer's fixed-height layout.
+// [Sync] 2026-08-13: contain message scrolling on the vertical axis so narrow Dream dialogs
+//                    never expose a panel-level horizontal scrollbar.
+// [Sync] 2026-08-13: keep auto-scroll and wheel overscroll owned by the message region;
+//                    never scroll Story Workspace ancestors or move its Agent dialog.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -228,7 +234,6 @@ export default function ChatPanel({
   const [systemConfig, setSystemConfig] = useState<SystemConfigData>();
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const hasInitializedRef = useRef(false);
   const turnGenerationRef = useRef(0);
@@ -874,10 +879,6 @@ export default function ChatPanel({
     }
     isNearBottomRef.current = true;
     setShowScrollToBottom(false);
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-      return;
-    }
     element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
   }, []);
 
@@ -890,7 +891,7 @@ export default function ChatPanel({
     if (isNearBottomRef.current) {
       setShowScrollToBottom(false);
       const frameId = requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
       });
       return () => cancelAnimationFrame(frameId);
     }
@@ -903,7 +904,12 @@ export default function ChatPanel({
   return (
     <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
       {shouldShowMessageSurface ? (
-        <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', background: 'var(--color-bg-app)', padding: '1rem 1rem 1.5rem' }}>
+        <div
+          data-chat-scroll-region="messages"
+          ref={chatContainerRef}
+          onScroll={handleScroll}
+          style={{ minWidth: 0, minHeight: 0, flex: 1, overflowX: 'hidden', overflowY: 'auto', overscrollBehaviorY: 'contain', borderRadius: '1.5rem', background: 'var(--color-bg-app)', padding: '1rem 1rem 1.5rem' }}
+        >
           <ChatMessageList
             messages={visibleMessages}
             threadId={threadId}
@@ -919,11 +925,26 @@ export default function ChatPanel({
             settledToolCallIds={settledToolCallIds}
             onToolConfirmationSettled={markToolConfirmationSettled}
           />
-          <div ref={bottomRef} aria-hidden="true" />
+          <div aria-hidden="true" />
         </div>
       ) : null}
 
-      <div style={{ position: 'relative', zIndex: 10, width: '100%', margin: '0.75rem 0 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
+      <div
+        style={{
+          position: 'relative',
+          zIndex: 10,
+          width: '100%',
+          boxSizing: 'border-box',
+          margin: '0.75rem 0 0',
+          minHeight: pendingConfirmation ? 0 : undefined,
+          maxHeight: pendingConfirmation ? 'min(46vh, 24rem)' : undefined,
+          flexShrink: pendingConfirmation ? 1 : 0,
+          display: pendingConfirmation ? 'flex' : undefined,
+          flexDirection: pendingConfirmation ? 'column' : undefined,
+          overflow: pendingConfirmation ? 'hidden' : undefined,
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)',
+        }}
+      >
         {shouldShowMessageSurface && showScrollToBottom ? (
           <button
             type="button"
@@ -963,6 +984,8 @@ export default function ChatPanel({
           />
         ) : (
           <AIInputDock
+            deckId={deckId}
+            threadId={threadId}
             openFileDialogSignal={openFileDialogSignal}
             fullAccessEnabled={imFullAccessEnabled}
             onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {

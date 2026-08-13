@@ -475,7 +475,7 @@
   font-weight: 500;
 }
 
-.story-workspace-episode-artifact-reader [aria-label="第一集文件导航"] {
+.story-workspace-episode-artifact-reader [aria-label$="文件导航"] {
   display: flex;
   justify-content: flex-end;
   gap: 0;
@@ -716,14 +716,14 @@
 
 /* Episode artifacts stay in one reading surface: progress and workflow facts
    lead into narrative navigation, detail, then quieter auxiliary evidence. */
-.story-workspace-collaboration > section[aria-label="第一集产物工作台"] {
+.story-workspace-collaboration > section[aria-label="Episode 产物工作台"] {
   width: 100%;
   min-width: 0;
   flex: 0 0 auto;
   padding: 0 clamp(20px, 3.2vw, 48px) 48px;
 }
 
-.story-workspace-collaboration > section[aria-label="第一集产物工作台"] > main {
+.story-workspace-collaboration > section[aria-label="Episode 产物工作台"] > main {
   width: min(100%, 1440px);
   min-width: 0;
   margin: 0 auto;
@@ -1165,69 +1165,6 @@
   letter-spacing: .05em;
 }
 
-.story-workspace-collaboration .story-workspace-episode-action-dialog {
-  position: fixed;
-  top: 50%;
-  right: auto;
-  bottom: auto;
-  left: 50%;
-  z-index: 50;
-  width: min(560px, calc(100vw - 48px));
-  max-height: calc(100dvh - 48px);
-  min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  transform: translate(-50%, -50%);
-  box-shadow:
-    0 0 0 100vmax color-mix(in srgb, var(--collaboration-ink) 24%, transparent),
-    0 14px 34px color-mix(in srgb, var(--collaboration-ink) 17%, transparent);
-}
-
-.story-workspace-episode-action-dialog > section {
-  min-height: 0;
-  padding: 16px 19px;
-  overflow-y: auto;
-  border-bottom: 1px solid var(--collaboration-rule);
-}
-
-.story-workspace-episode-action-dialog > section h3 {
-  margin: 0 0 10px;
-  color: var(--collaboration-ink);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.story-workspace-episode-action-dialog > section ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.story-workspace-episode-action-dialog > section li {
-  padding: 8px 0;
-  overflow-wrap: anywhere;
-  color: var(--collaboration-body);
-  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 62%, transparent);
-  font-size: 11px;
-  line-height: 1.55;
-}
-
-.story-workspace-episode-action-dialog > section strong {
-  color: var(--collaboration-ink);
-  font-weight: 650;
-}
-
-.story-workspace-episode-action-dialog > section small {
-  color: var(--collaboration-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-}
-
-.story-workspace-collaboration .story-workspace-episode-action-dialog button {
-  min-width: 44px;
-  min-height: 44px;
-}
-
 .story-workspace-collaboration button:focus-visible,
 .story-workspace-collaboration a:focus-visible,
 .story-workspace-collaboration [role="treeitem"]:focus-visible,
@@ -1278,18 +1215,7 @@
     max-width: none;
   }
 
-  .story-workspace-collaboration .story-workspace-episode-action-dialog {
-    inset: 10px;
-    width: auto;
-    max-height: calc(100dvh - 20px);
-    transform: none;
-  }
-
-  .story-workspace-episode-action-dialog > section {
-    padding: 13px 15px;
-  }
-
-  .story-workspace-collaboration > section[aria-label="第一集产物工作台"] {
+  .story-workspace-collaboration > section[aria-label="Episode 产物工作台"] {
     padding-right: 18px;
     padding-bottom: 34px;
     padding-left: 18px;
@@ -1350,7 +1276,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .story-workspace-episode-artifact-reader [aria-label="第一集文件导航"] {
+  .story-workspace-episode-artifact-reader [aria-label$="文件导航"] {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     justify-content: flex-start;

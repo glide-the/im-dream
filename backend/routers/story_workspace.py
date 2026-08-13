@@ -27,9 +27,6 @@ from story_workspace.contracts import (
     StoryWorkspaceDreamConfirmationCommand,
     StoryWorkspaceDreamLaunchAccepted,
     StoryWorkspaceDreamLaunchCommand,
-    StoryWorkspaceEpisodeActionContinueCommand,
-    StoryWorkspaceEpisodeActionContinueCommandV2,
-    StoryWorkspaceEpisodeBindingRecoveryCommand,
     StoryWorkspaceGuidanceCommandPayload,
     StoryWorkspaceResourceType,
     StoryWorkspaceScenePatch,
@@ -49,14 +46,10 @@ try:
     from services.deck.story_workflow_application import (
         get_dream_artifact_application_service,
         get_dream_confirmation_application_service,
-        get_episode_application_service,
         get_story_workflow_run_application_service,
     )
     from services.story_workspace.dream_launch_endpoint_service import (
         get_dream_launch_endpoint_service,
-    )
-    from services.story_workspace.episode_action_service import (
-        StoryWorkspaceEpisodeActionError,
     )
     from services.story_workspace.artifact_story_index_repository import (
         StoryWorkspacePublicStoryRepository,
@@ -66,14 +59,10 @@ except ModuleNotFoundError:
     from backend.services.deck.story_workflow_application import (
         get_dream_artifact_application_service,
         get_dream_confirmation_application_service,
-        get_episode_application_service,
         get_story_workflow_run_application_service,
     )
     from backend.services.story_workspace.dream_launch_endpoint_service import (
         get_dream_launch_endpoint_service,
-    )
-    from backend.services.story_workspace.episode_action_service import (
-        StoryWorkspaceEpisodeActionError,
     )
     from backend.services.story_workspace.artifact_story_index_repository import (
         StoryWorkspacePublicStoryRepository,
@@ -287,26 +276,6 @@ class DreamArtifactService(Protocol):
     ) -> Any: ...
 
 
-class EpisodeService(Protocol):
-    async def recover_episode_binding(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceEpisodeBindingRecoveryCommand,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def continue_episode_action(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceEpisodeActionContinueCommand
-        | StoryWorkspaceEpisodeActionContinueCommandV2,
-        *,
-        actor: dict[str, str],
-        if_match: str,
-    ) -> Any: ...
-
-
 class DreamConfirmationService(Protocol):
     async def submit_dream_confirmation(
         self,
@@ -323,10 +292,6 @@ def get_story_workflow_run_service() -> StoryWorkflowRunService:
 
 def get_dream_artifact_service() -> DreamArtifactService:
     return get_dream_artifact_application_service()
-
-
-def get_episode_service() -> EpisodeService:
-    return get_episode_application_service()
 
 
 def get_dream_confirmation_service() -> DreamConfirmationService:
@@ -379,36 +344,6 @@ async def _workflow_call(awaitable: Any, *, by_alias: bool = False) -> Any:
         )
     except Exception:
         logger.exception("Story Workspace workflow call failed closed")
-        return JSONResponse(
-            status_code=503,
-            content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),
-        )
-
-
-async def _episode_action_call(awaitable: Any) -> Any:
-    """Serialize only allowlisted action conflicts and their latest safe surface."""
-
-    try:
-        return _workflow_json(await awaitable, by_alias=True)
-    except StoryWorkspaceEpisodeActionError as exc:
-        payload = build_error_payload(exc.code)
-        if exc.latest_surface is not None:
-            payload["latestSurface"] = _workflow_json(
-                exc.latest_surface,
-                by_alias=True,
-            )
-        if exc.resolution is not None:
-            payload["resolution"] = _workflow_json(
-                exc.resolution,
-                by_alias=True,
-            )
-        return JSONResponse(status_code=exc.status_code, content=payload)
-    except ApiRouteError as exc:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    except Exception:
         return JSONResponse(
             status_code=503,
             content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),
@@ -1557,67 +1492,6 @@ async def story_workspace_reconcile_workflow_run_story_index(
     etag = result.get("etag") if isinstance(result, dict) else None
     headers = {"ETag": f'"{etag}"'} if isinstance(etag, str) else {}
     return JSONResponse(content=result, headers=headers)
-
-
-@router.post(
-    "/workflow-runs/{workflow_run_id}/episode-binding/recover",
-    status_code=202,
-)
-async def story_workspace_recover_workflow_run_episode_binding(
-    workflow_run_id: str,
-    request: StoryWorkspaceEpisodeBindingRecoveryCommand,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    service: EpisodeService = Depends(get_episode_service),
-):
-    """Dispatch the path-free, server-owned first-Episode recovery intent."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    return await _episode_action_call(
-        service.recover_episode_binding(
-            workflow_run_id,
-            request,
-            actor=actor,
-        )
-    )
-
-
-@router.post(
-    "/workflow-runs/{workflow_run_id}/episode-actions/continue",
-    status_code=202,
-)
-async def story_workspace_continue_workflow_run_episode_action(
-    workflow_run_id: str,
-    request: StoryWorkspaceEpisodeActionContinueCommand
-    | StoryWorkspaceEpisodeActionContinueCommandV2,
-    if_match: str = Header(alias="If-Match", min_length=73, max_length=73),
-    current_user: dict[str, Any] = Depends(get_current_user),
-    service: EpisodeService = Depends(get_episode_service),
-):
-    """Dispatch one capability only after authority and manifest revalidation."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    return await _episode_action_call(
-        service.continue_episode_action(
-            workflow_run_id,
-            request,
-            actor=actor,
-            if_match=if_match,
-        )
-    )
 
 
 @router.post(

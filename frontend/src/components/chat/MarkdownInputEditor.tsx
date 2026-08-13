@@ -1,8 +1,9 @@
 // [Input] User-authored rich text, Markdown value, and composer keyboard/focus callbacks.
-// [Output] Accessible Tiptap composer that round-trips user input to Markdown for chat transport and rendering.
+// [Output] Accessible Tiptap composer that round-trips user input to Markdown and exposes optional autocomplete semantics.
 // [Pos] markdown-input-editor component node in frontend/src/components/chat
 // [Sync] 2026-08-06: replace the plain chat textarea with a Markdown-aware editor so user-authored
 //                    paragraphs, lists, inline code, and placeholder paths survive the user bubble round trip.
+// [Sync] 2026-08-13: expose listbox ARIA attributes for installed-Skill slash suggestions.
 import { useEffect, type FocusEventHandler, type KeyboardEventHandler } from 'react';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Markdown } from '@tiptap/markdown';
@@ -16,6 +17,9 @@ interface MarkdownInputEditorProps {
   placeholder: string;
   ariaLabel: string;
   ariaDescribedBy?: string;
+  ariaControls?: string;
+  ariaActiveDescendant?: string;
+  ariaAutocomplete?: 'list';
   disabled?: boolean;
   onChange: (markdown: string) => void;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
@@ -29,6 +33,9 @@ export default function MarkdownInputEditor({
   placeholder,
   ariaLabel,
   ariaDescribedBy,
+  ariaControls,
+  ariaActiveDescendant,
+  ariaAutocomplete,
   disabled = false,
   onChange,
   onKeyDown,
@@ -82,6 +89,9 @@ export default function MarkdownInputEditor({
           id,
           role: 'textbox',
           'aria-label': ariaLabel,
+          ...(ariaControls ? { 'aria-controls': ariaControls } : {}),
+          ...(ariaActiveDescendant ? { 'aria-activedescendant': ariaActiveDescendant } : {}),
+          ...(ariaAutocomplete ? { 'aria-autocomplete': ariaAutocomplete } : {}),
           ...(ariaDescribedBy ? { 'aria-describedby': ariaDescribedBy } : {}),
           'aria-disabled': String(disabled),
           'aria-multiline': 'true',
@@ -89,7 +99,16 @@ export default function MarkdownInputEditor({
         },
       },
     });
-  }, [ariaDescribedBy, ariaLabel, disabled, editor, id]);
+  }, [
+    ariaActiveDescendant,
+    ariaAutocomplete,
+    ariaControls,
+    ariaDescribedBy,
+    ariaLabel,
+    disabled,
+    editor,
+    id,
+  ]);
 
   return (
     <div

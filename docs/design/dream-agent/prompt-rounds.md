@@ -5127,3 +5127,83 @@ before publisher implementation.
 - `agent_runner.py` 与 `thread_factory.py` 工作树零差异；生产源码不存在手动“构建第一集产物关联”按钮；Dream/story-workspace 设计文档不再使用“可信的第一集关联”措辞。
 - 最终真实持久化核验：Run `confirmed`、error null、同一 source thread、有 Claude session、恰好一条 confirmation 且 `dispatched`；`.dream` 为 `dream-episode/v1` revision 1、manifest 5 文件，四项 Episode 产物均通过权威解析器，10 个分镜 ID 全部唯一；Story Index HTTP 200、status `indexed`、error null、episodeCount 1。
 - 5173、3000 和本任务 8765 均继续监听；没有残留本轮 Playwright spec 进程。系统已有多个 Codex Playwright MCP 常驻进程，未归属本轮且未停止。
+
+## 第 113 轮——恢复多 Episode 推荐按钮状态机
+
+**当前轮次目标**
+
+继续历史任务 `019fd74e-e06f-7073-a714-fe86cdada2ce`，在当前 Dream 单一 thread runtime 和自动产物发布重构之上，完成多 Episode 推荐按钮状态机从服务端事实到 Dream/Execution UI、确认、派发和刷新恢复的全链路实现。
+
+**优化后的执行提示词**
+
+> 在当前 `platform` 分支上恢复并完成历史任务的多 Episode 工作流能力。以服务端 Episode registry、artifact manifest 与 workflow facts 为唯一业务真相，完整实现 EP01→EP02→EP03 的推荐按钮状态机：每阶段仅一个 recommended action，其余动作明确为可执行返工或不可执行预览；所有 label、canonical input revision、idempotency、确认、刷新恢复均绑定正确 EP，前端不得推导命令或工作流状态。先对照旧提交 `489af74` 与当前重构差异，再更新中文设计时序图、补齐生产代码和契约测试，最后通过聚焦后端、前端 seam、TypeScript、ESLint 与浏览器验证。不得回退 ClaudeAgentService、thread/session 和 Dream 自动发布链路。
+
+**本轮检查或修改范围**
+
+- 历史任务与提交 `489af74` 的 Episode action projection、确认和 UI 合同。
+- 当前 `backend/services/story_workspace`、Dream/Execution 页面、相关 API、测试和中文业务设计。
+- 不修改 Claude SDK 入口、`thread_factory.py`、Claude session ID 定义或现有 EP01 自动发布/绑定 owner。
+
+**本轮完成标准**
+
+- EP01、EP02、EP03 均由服务端绑定生成不同且正确的动作 identity、label 和 canonical inputs。
+- 每阶段只有一个推荐动作；返工动作、未来预览和不可执行原因不会混淆。
+- 当前 Dream/Execution UI 可以展示、确认、派发并在刷新或重新进入后恢复这些动作。
+- 中文设计包含状态机、业务时序和 truth ownership；聚焦后端/前端测试、TypeScript、ESLint 与浏览器验证通过。
+
+**本轮实际结果和未验证推断**
+
+- 历史任务读取确认旧提交 `489af74` 已实现一版阶段矩阵、每动作独立 revision 与 action ID intent，且该提交仍位于当前分支历史中。
+- 当前代码尚有两个已确认缺口：Artifact GET 始终读取 launch metadata 中固定的 EP01 authority；下一 Episode 的完成 MCP 也要求 episode UID 等于 EP01 source authority，因此 EP02 虽能创建 binding 和派发，却无法成为 active Episode 或完成闭环。
+
+## 第 114 轮——删除推荐状态机，收束为已安装 Skill 与成功 Hook
+
+**当前轮次目标**
+
+撤销第 113 轮的多 Episode 推荐按钮方向。除首次 `/drama-init` 外，十三个业务 Skill
+允许用户在同一 Chat thread 中随机、重复执行；页面输入 `/` 时只推荐当前 Deck/thread
+实际安装的 Skill。删除 next action、completion fact、action projection、专用确认/恢复
+API 和前端阶段按钮。主 Agent before/after Hook 负责成功 turn 后确定性扫描 canonical
+工作台、发布 `.dream` 和幂等构建已有 Episode 产物关联；Observer 与 MCP 都不是同步 owner。
+
+**优化后的执行提示词**
+
+> 在不修改 Claude runner、标准报文、thread/session/claude_session_id 的前提下，把
+> Dream/Story Workspace 从代码级 Episode 状态机收束为“真实安装 Skill 的 Slash 建议 +
+> 主 Agent 成功边界 Hook 自动同步”。完整移除推荐按钮、next-action/completion-fact DTO、
+> action/recovery POST、内部派发器、专用 reducer 和冲突设计；保留首次 init、权限、
+> Project/Episode Artifact 合同、原子发布、同 thread Chat、Stop/确认/历史恢复。Slash 选择
+> 只插入普通文本。Hook 失败沿同一 Chat turn 唯一失败路径返回，Observer 仅作非控制型
+> 投影。用聚焦后端、前端契约、类型、lint、构建和真实本机 Chromium 验证。
+
+**本轮检查或修改范围**
+
+- `backend/services/story_workspace`、Story Workspace router/contracts/MCP、
+  `ClaudeAgentService` 的既有 Hook 调用点；
+- Chat composer、Dream/Execution 页面、Episode artifact GET/parser/reducer；
+- `docs/design/dream-agent` 和 `docs/design/story-workspace` 当前业务文档与测试。
+
+**本轮完成标准**
+
+- 生产代码不再提供 Episode action/recovery API、action DTO、状态机或推荐控件；
+- Slash 建议来自 enabled/ready/digest 匹配及 thread 冻结加载事实；
+- Hook 在任意成功 Dream 根 turn 后发布当前快照，MCP 未调用也成立；
+- GET 保持只读，Observer 不控制同步，权限和原子性不削弱；
+- 中文业务时序、设计审查、聚焦测试、类型、lint、构建和真实页面验证通过。
+
+**本轮实际结果和未验证推断**
+
+- 第 113 轮方向已明确被当前业务要求取代；旧 action/recovery 生产模块、API、前端控件、
+  reducer 和专用测试已删除；MCP 不再推进 Workflow，未使用的 Episode 完成方法已删除。
+- 首次 `/drama-init` 的三页面产物 readiness 仍由成功后 Hook 负责，以保留“确认并继续”；
+  它不用于后续十三 Skill 的推荐、禁用、排序或完成判断。
+- 后端全量：`1772 passed, 21 skipped, 584 subtests`；退出码 0。测试进程退出时仍有既有
+  psycopg pool worker 关闭超时提示，未发现残留 pytest 进程。
+- 前端全量：`298 passed`；TypeScript 与 production build 通过；ESLint 为 0 error、
+  21 个既有 Hook dependency warning；`git diff --check` 通过。
+- 真实有头 Chromium 使用账号 `dmeck123@suoxya.com`、Run
+  `run_21d5990b83ea49f984e56ff068228188` 和本机冻结 receipt：完整展示 13 个 Drama Skill
+  加 1 个实际安装平台 Skill，Slash 选择不发送、无推荐按钮、1280×800 无横向溢出。
+- 同一真实 thread 发送只读 `/drama-query` 后成功恢复原 Claude session；持久化 assistant
+  模型为 `gateway/deepseek-v4-pro`、正文 5818 字符；Artifact manifest revision 与 5 个
+  文件保持不变。Playwright 最终回执为 `passed`，worker 已退出。

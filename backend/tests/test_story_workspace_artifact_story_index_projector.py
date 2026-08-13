@@ -106,8 +106,7 @@ def projector_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Projecto
         run_provenance_story_slug=PROJECT_ID,
     )
     binding_service = StoryWorkspaceEpisodeBindingService(workspace)
-    binding = binding_service.resolve_or_repair_binding(context).binding
-    assert binding is not None
+    binding = binding_service.bind_first_episode(context)
     authority = {
         "schema": "story-workspace-episode-authority/v1",
         "workflow_run_id": RUN_ID,

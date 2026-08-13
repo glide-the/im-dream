@@ -1532,53 +1532,11 @@ class TestFactoryLifecycle(unittest.TestCase):
             ),
         )
         self.assertLess(
-            startup_names.index("startup_claude_agent"),
-            startup_names.index("story_workspace_startup_dream_internal_dispatches"),
-        )
-        self.assertLess(
             shutdown_names.index(
                 "story_workspace_shutdown_dream_confirmation_coordinator"
             ),
-            shutdown_names.index(
-                "story_workspace_shutdown_dream_internal_dispatches"
-            ),
-        )
-        self.assertLess(
-            shutdown_names.index(
-                "story_workspace_shutdown_dream_internal_dispatches"
-            ),
             shutdown_names.index("shutdown_claude_agent"),
         )
-        self.assertLess(
-            shutdown_names.index("shutdown_claude_agent"),
-            shutdown_names.index("shutdown_database"),
-        )
-
-    def test_internal_dream_dispatches_are_awaited_on_shutdown(self):
-        gateway = unittest.mock.Mock()
-        gateway.aclose_internal_dream_dispatches = unittest.mock.AsyncMock()
-        with unittest.mock.patch.object(
-            self.srv,
-            "get_episode_application_service",
-            return_value=gateway,
-        ):
-            asyncio.run(
-                self.srv.story_workspace_shutdown_dream_internal_dispatches()
-            )
-
-        gateway.aclose_internal_dream_dispatches.assert_awaited_once_with()
-
-    def test_internal_recovery_starts_only_from_startup_handler(self):
-        gateway = unittest.mock.Mock()
-        with unittest.mock.patch.object(
-            self.srv,
-            "get_episode_application_service",
-            return_value=gateway,
-        ):
-            asyncio.run(
-                self.srv.story_workspace_startup_dream_internal_dispatches()
-            )
-        gateway.start_internal_dream_dispatches.assert_called_once_with()
 
     def test_event_bus_startup_validation_is_strict_and_redis_is_pinged(self):
         validate = unittest.mock.AsyncMock()
@@ -1609,10 +1567,6 @@ class TestFactoryLifecycle(unittest.TestCase):
         confirmation.stop = unittest.mock.AsyncMock(
             side_effect=lambda: calls.append("confirmation")
         )
-        gateway = unittest.mock.Mock()
-        gateway.aclose_internal_dream_dispatches = unittest.mock.AsyncMock(
-            side_effect=lambda: calls.append("internal")
-        )
 
         async def close_factory():
             calls.append("factory")
@@ -1625,11 +1579,6 @@ class TestFactoryLifecycle(unittest.TestCase):
                 self.srv,
                 "story_workspace_get_dream_confirmation_coordinator",
                 return_value=confirmation,
-            ),
-            unittest.mock.patch.object(
-                self.srv,
-                "get_episode_application_service",
-                return_value=gateway,
             ),
             unittest.mock.patch.object(
                 self.srv.claude_agent_thread_factory,
@@ -1649,7 +1598,6 @@ class TestFactoryLifecycle(unittest.TestCase):
         ):
             async def exercise():
                 await self.srv.story_workspace_shutdown_dream_confirmation_coordinator()
-                await self.srv.story_workspace_shutdown_dream_internal_dispatches()
                 await self.srv.shutdown_claude_agent()
                 await self.srv.shutdown_database()
 
@@ -1657,7 +1605,7 @@ class TestFactoryLifecycle(unittest.TestCase):
 
         self.assertEqual(
             calls,
-            ["confirmation", "internal", "factory", "redis", "database"],
+            ["confirmation", "factory", "redis", "database"],
         )
         close_event_bus.assert_awaited_once_with()
 

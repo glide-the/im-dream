@@ -34,7 +34,7 @@ sequenceDiagram
     participant Files as canonical 工作台
     participant Private as .dream 私有 Run
 
-    Service->>Hook: before_main_turn(可信 context)
+    Service->>Hook: before_main_turn(服务端派生 context)
     Service->>Agent: runner.run_streaming
     Agent->>Files: 按用户要求构建或修改产物
     alt 根 turn success
@@ -59,7 +59,7 @@ SDK 内部子 Agent 不单独触发 Hook；根 turn 完成时只结算一次。�
 
 ## 6. 被删除的设计前提
 
-- 固定或随机 `/drama-*` 命令注册表；
+- 由页面维护固定 `/drama-*` 清单或阶段顺序；
 - `next_action/no_next_action` 作为文件同步或 Workflow 完成条件；
 - Agent 必须主动调用 MCP 才能让页面看到产物；
 - Observer 负责后置同步；

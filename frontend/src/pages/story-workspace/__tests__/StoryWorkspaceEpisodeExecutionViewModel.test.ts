@@ -527,14 +527,10 @@ function surface(
   const wireSurface = {
     runId: `run_${'2'.repeat(32)}`,
     opaqueEpisodeId: EPISODE_ID,
+    episodeCode: 'EP01',
     manifestRevision: revision('2'),
     etag: AGGREGATE_ETAG,
     bindingAvailability: 'bound',
-    bindingRecovery: {
-      autoRepairAttempted: false,
-      canDispatch: false,
-      publicReason: null,
-    },
     artifacts: ARTIFACT_SPECS.map(([relativeKey, producerAction, consumers]) => ({
       relativeKey,
       availability: available.has(relativeKey) ? 'available' : 'not_generated',
@@ -545,20 +541,10 @@ function surface(
       consumers: [...consumers],
     })),
     narrative: narrativeProjection,
+    documents: [],
     auxiliary: auxiliaryProjection === null
       ? null
       : { ...auxiliaryProjection, manifestRevision: revision('2') },
-    workflow: {
-      factsRevision: 0,
-      nextAction: {
-        action: 'none_in_scope',
-        diagnostic: 'ready',
-        canDispatch: false,
-      },
-      prerequisites: [],
-      actionOptions: [],
-      legacyPartial: false,
-    },
   };
   return storyWorkspaceParseEpisodeArtifactSurface(wireSurface);
 }

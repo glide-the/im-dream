@@ -459,7 +459,7 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
             0,
         )
 
-    async def test_server_facts_advance_full_dream_run_lifecycle(self) -> None:
+    async def test_initial_output_and_confirmation_advance_only_launch_lifecycle(self) -> None:
         run = await self.fixture.create("dream-runtime-lifecycle")
         running = await self._service().activate_from_assembled_context(
             workflow_run_id=run.workflow_run_id,
@@ -493,12 +493,6 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
         )
         self.assertEqual(confirmed.status, RunStatus.CONFIRMED)
 
-        completed = await lifecycle.record_episode_complete(
-            running.workflow_run_id,
-            self.fixture.actor,
-            no_next_action=True,
-        )
-        self.assertEqual(completed.status, RunStatus.COMPLETED)
         transitions = self.fixture.db.execute(
             "SELECT to_status FROM workflow_run_transitions "
             "WHERE workflow_run_id = ? ORDER BY transition_seq",
@@ -513,11 +507,10 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
                 "output_validating",
                 "pending_review",
                 "confirmed",
-                "completed",
             ],
         )
 
-    async def test_lifecycle_rejects_unproven_output_and_episode_completion(self) -> None:
+    async def test_lifecycle_rejects_unproven_initial_output(self) -> None:
         run = await self.fixture.create("dream-runtime-lifecycle-guard")
         lifecycle = StoryWorkspaceDreamWorkflowLifecycleService(
             self.fixture.db,
@@ -531,13 +524,5 @@ class StoryWorkspaceDreamRuntimeActivationTests(unittest.IsolatedAsyncioTestCase
                 self.fixture.actor,
                 normalized_result_ready=False,
             )
-        with self.assertRaises(ValueError):
-            await lifecycle.record_episode_complete(
-                run.workflow_run_id,
-                self.fixture.actor,
-                no_next_action=False,
-            )
-
-
 if __name__ == "__main__":
     unittest.main()

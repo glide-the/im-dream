@@ -117,7 +117,6 @@ class StoryWorkspacePublicSymbolTests(unittest.TestCase):
             {
                 "get_story_workflow_run_application_service",
                 "get_dream_artifact_application_service",
-                "get_episode_application_service",
                 "get_dream_confirmation_application_service",
             },
         )

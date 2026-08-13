@@ -2,9 +2,9 @@
 
 > 状态：**已实现并通过本机真实业务验收（2026-08-13）**。
 
-当前 Dream Agent 只解决一个完整业务：主 Agent 在当前 thread 工作区构建创作产物；
-根 turn 成功后，宿主把实际文件同步到当前 Run 的 `.dream` 私有目录；Dream 页面读取
-人物、场景和分镜并正常显示。
+当前 Dream Agent 解决两个直接业务：Chat 输入 `/` 时建议当前 Deck/thread 实际安装的
+Skill；主 Agent 在当前 thread 工作区构建创作产物后，宿主在根 turn 成功边界把实际
+文件同步到当前 Run 的 `.dream` 私有目录，供 Dream 页面读取人物、场景和分镜。
 
 ## 1. 当前架构
 
@@ -27,8 +27,10 @@ Dream 没有第二套 Agent runtime、SSE、parser 或 reducer。
 
 ## 2. 当前业务范围
 
-- Dream 发起时创建可信 Workflow Run，并绑定同一 actor-owned Chat thread。
+- Dream 发起时创建经权限校验的 Workflow Run，并绑定同一 actor-owned Chat thread。
 - 服务端给首轮 Agent 明确的项目 ID；Agent 只构建工作台产物，不写 `.dream`。
+- Chat 输入 `/` 时只读取启用且安装就绪、摘要和版本匹配的 Skill；选择建议只填入输入框。
+- 除首次 `/drama-init` 默认引导外，Skill 可以任意、重复执行，不由代码推导下一步。
 - 根 turn 成功后，Hook 校验人物、场景、分镜和 Project/Episode allowlist 产物。
 - Hook 原子同步当前 Run 的页面 stage 和 `artifact/manifest.json`。
 - Dream 页面通过既有 actor-scoped `dream-files` GET 展示，不新增页面协议。
@@ -43,6 +45,7 @@ Observer 主动同步、MCP 作为同步前置条件，以及 Admin sealed Artif
 | 文档 | 用途 |
 |---|---|
 | [全业务交互](./business-interaction-design.md) | 当前可用业务及逐项时序 |
+| [Skill 与工作台同步](../story-workspace/skill-commands-and-workbench-sync.md) | 十三个 Skill、Slash 建议与 Hook 自动发布 |
 | [工作台自动同步](./deck-output-sync-design.md) | 文件发现、投影、幂等和失败边界 |
 | [Project / Episode 合同](./project-episode-artifact-contract.md) | 当前 Run preview 与 Admin 权威 Artifact 的区别 |
 | [工具与自动同步边界](./dreamflow-tool-boundaries.md) | Agent、Hook、Observer、MCP 的职责 |

@@ -122,9 +122,9 @@ iterator and therefore block simple deletion:
 - business-confirmation post-confirmation dispatch at
   `backend/services/story_workspace/dream_confirmation_service.py:889`;
 - persisted message/episode dispatch at baseline
-  `backend/services/story_workspace/dream_agent_message_service.py:1891`; its
-  retained owner is now
-  `backend/services/story_workspace/dream_internal_command_service.py`.
+  `backend/services/story_workspace/dream_agent_message_service.py:1891`.
+  The later internal Episode command service was removed when the recommendation
+  state machine was deleted; no current production caller remains.
 
 They have different durable claim/heartbeat/ack behavior. All now use the
 canonical `thread_factory.run_streaming` path. Callers that only settle durable
@@ -301,7 +301,7 @@ evidence that the two public protocols do not form clean product boundaries.
 | Document class | Files | Treatment |
 |---|---|---|
 | Former two-protocol specification | Deleted legacy paths `docs/chat-dream-agent-interaction-design.md`, `docs/design/sse-streaming-interaction-design.md` | Unique diagnosis/Git facts extracted here; recover either file from `a506c83` |
-| Durable business owner | `docs/design/story-workspace/workflow-execution.md` | Keep; reconcile terminology |
+| 当前 Skill 与同步业务 owner | `docs/design/story-workspace/skill-commands-and-workbench-sync.md` | 保留；Skill 可随机调用，Hook 按文件事实同步，不定义 Episode 状态机 |
 | Unique UX/safety owner | `docs/design/story-workspace/dream-workspace-and-reentry.md` | Extract unique requirements, then update transport sections |
 | Business/file owners | design006 and design007 under `docs/design/story-workspace/` | Keep business semantics; mark old lifecycle guidance superseded |
 | Historical implementation records | dated task/rework/audit documents under `docs/design/story-workspace/` | Archive or delete only after canonical extraction |

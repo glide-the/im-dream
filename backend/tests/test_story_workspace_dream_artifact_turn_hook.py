@@ -145,6 +145,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
+            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
         ):
             result = hook.after_main_turn(ticket)
 
@@ -153,6 +154,8 @@ shots:
             ("characters", "scenes", "storyboards"),
         )
         self.assertTrue(result.private_artifact_changed)
+        self.assertTrue(result.episode_bound)
+        self.assertEqual(result.changed_source_files, ())
         projection = StoryWorkspaceDreamFileReader(self.workspace).read(
             authoritative_run(),
             thread_id=THREAD_ID,
@@ -176,41 +179,6 @@ shots:
             set(result.private_files),
         )
 
-    def test_confirmation_rejects_invalid_storyboard_before_publish_or_bind(
-        self,
-    ) -> None:
-        episode = self.workspace / "stories/demo-project/episodes/EP01"
-        (episode / "storyboard.yaml").write_text(
-            "shots:\n  - shot: 1\n    description: Missing canonical shot id.\n",
-            encoding="utf-8",
-        )
-        hook = DreamArtifactTurnHook()
-        ticket = hook.before_main_turn(
-            context=context(),
-            actor_id="actor-1",
-            cwd=str(self.workspace),
-            source_kind="story-workspace-dream-confirmation",
-        )
-        with (
-            patch.object(
-                hook,
-                "_load_authoritative_run",
-                return_value=authoritative_run(),
-            ),
-            patch(
-                "services.story_workspace.dream_artifact_turn_hook."
-                "StoryWorkspaceDreamArtifactPublisher.publish"
-            ) as publish,
-            patch.object(hook, "_bind_confirmed_first_episode") as bind,
-        ):
-            with self.assertRaisesRegex(
-                DreamArtifactTurnHookError,
-                "invalid EP01 artifact",
-            ):
-                hook.after_main_turn(ticket)
-        publish.assert_not_called()
-        bind.assert_not_called()
-
     def test_repeated_root_turn_is_idempotent_and_changed_file_republishes(self) -> None:
         hook = DreamArtifactTurnHook()
         ticket = hook.before_main_turn(
@@ -221,6 +189,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
+            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
         ):
             first = hook.after_main_turn(ticket)
             second = hook.after_main_turn(ticket)
@@ -236,10 +205,15 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
+            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
         ):
             third = hook.after_main_turn(ticket)
         self.assertEqual(third.changed_stages, ())
         self.assertTrue(third.private_artifact_changed)
+        self.assertEqual(
+            third.changed_source_files,
+            ("stories/demo-project/episodes/EP01/script.md",),
+        )
         private_script = (
             self.workspace
             / ".dream"
@@ -255,41 +229,21 @@ shots:
         )
         self.assertIn("继续", private_script.read_text(encoding="utf-8"))
 
-    def test_confirmation_requires_complete_episode_workbench_before_binding(self) -> None:
-        (self.workspace / "stories" / "demo-project" / "episodes" / "EP01" / "script.md").unlink()
+    def test_any_successful_dream_turn_attempts_idempotent_episode_binding(self) -> None:
         hook = DreamArtifactTurnHook()
         ticket = hook.before_main_turn(
             context=context(),
             actor_id="actor-1",
             cwd=str(self.workspace),
-            source_kind="story-workspace-dream-confirmation",
         )
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            self.assertRaisesRegex(
-                DreamArtifactTurnHookError,
-                "missing the EP01 workbench",
-            ),
-        ):
-            hook.after_main_turn(ticket)
-
-    def test_non_confirmation_turn_never_binds_episode(self) -> None:
-        hook = DreamArtifactTurnHook()
-        ticket = hook.before_main_turn(
-            context=context(),
-            actor_id="actor-1",
-            cwd=str(self.workspace),
-            source_kind="story-workspace-dream-agent-user",
-        )
-        with (
-            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
-            patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_bind_confirmed_first_episode") as bind,
+            patch.object(hook, "_ensure_first_episode_binding", return_value=True) as bind,
         ):
             result = hook.after_main_turn(ticket)
-        bind.assert_not_called()
-        self.assertFalse(result.episode_bound)
+        bind.assert_called_once()
+        self.assertTrue(result.episode_bound)
 
     def test_historical_unicode_and_header_only_assets_form_page_projection(self) -> None:
         (self.workspace / "assets" / "characters" / "凌波.yaml").write_text(

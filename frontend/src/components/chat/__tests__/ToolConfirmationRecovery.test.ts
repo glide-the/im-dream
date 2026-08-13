@@ -1,5 +1,5 @@
-// [Input] Chat tool confirmation response decoder and pending-part classifier.
-// [Output] Regression coverage for already-resolved confirmations after SSE reconnect.
+// [Input] Chat reconnect SSE events, tool confirmation response decoder, and pending-part classifier.
+// [Output] Regression coverage for ordered reasoning replay and already-resolved confirmations.
 // [Pos] Generic Chat confirmation recovery TDD seam.
 
 import { expect, test } from '@playwright/test';
@@ -32,6 +32,53 @@ const stalePart: DynamicToolUIPart = {
   input: { description: 'Compute sha256 project slug' },
   toolMetadata: { approvalRequested: true },
 };
+
+test('reconnect replay preserves separate reasoning blocks across text and tool barriers', () => {
+  const replay = [
+    { type: 'reasoning-start', id: 'reasoning-1' },
+    { type: 'reasoning-delta', id: 'reasoning-1', delta: '先分析需求' },
+    { type: 'reasoning-end', id: 'reasoning-1' },
+    { type: 'text-start', id: 'text-1' },
+    { type: 'text-delta', id: 'text-1', delta: '先给用户一个阶段结论' },
+    { type: 'text-end', id: 'text-1' },
+    { type: 'tool-input-start', toolCallId: 'call-read', toolName: 'Read' },
+    {
+      type: 'tool-input-available',
+      toolCallId: 'call-read',
+      toolName: 'Read',
+      input: { file_path: 'story.md' },
+    },
+    {
+      type: 'tool-output-available',
+      toolCallId: 'call-read',
+      output: 'story contents',
+      isError: false,
+    },
+    { type: 'reasoning-start', id: 'reasoning-2' },
+    { type: 'reasoning-delta', id: 'reasoning-2', delta: '结合工具结果继续分析' },
+    { type: 'reasoning-end', id: 'reasoning-2' },
+    { type: 'text-start', id: 'text-2' },
+    { type: 'text-delta', id: 'text-2', delta: '给出最终回复' },
+    { type: 'text-end', id: 'text-2' },
+  ];
+
+  const messages = replay.reduce(applyBackendEventToMessages, []);
+  expect(messages).toHaveLength(1);
+  expect(messages[0].id).toMatch(/^reconnect-asst-/);
+  expect(messages[0].parts.map((part) => part.type)).toEqual([
+    'reasoning',
+    'text',
+    'dynamic-tool',
+    'reasoning',
+    'text',
+  ]);
+  expect(messages[0].parts[0]).toMatchObject({
+    type: 'reasoning', id: 'reasoning-1', text: '先分析需求', state: 'done',
+  });
+  expect(messages[0].parts[3]).toMatchObject({
+    type: 'reasoning', id: 'reasoning-2', text: '结合工具结果继续分析', state: 'done',
+  });
+});
 
 test('large reconnect replay coalesces deltas without crossing the approval boundary', () => {
   const replay = [

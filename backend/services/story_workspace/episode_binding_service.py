@@ -18,18 +18,14 @@ from pydantic import ValidationError
 
 try:
     from story_workspace.contracts import (
-        StoryWorkspaceEpisodeBindingAvailability,
         StoryWorkspaceEpisodeBindingEntry,
         StoryWorkspaceEpisodeBindingFile,
-        StoryWorkspaceEpisodeBindingRecovery,
         StoryWorkspaceEpisodeRegistryFile,
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.story_workspace.contracts import (
-        StoryWorkspaceEpisodeBindingAvailability,
         StoryWorkspaceEpisodeBindingEntry,
         StoryWorkspaceEpisodeBindingFile,
-        StoryWorkspaceEpisodeBindingRecovery,
         StoryWorkspaceEpisodeRegistryFile,
     )
 
@@ -98,15 +94,6 @@ class StoryWorkspaceEpisodeBindingContext:
     locked_context_story_slug: str | None
     run_provenance_story_slug: str | None
     episode_uid: str | None = None
-
-
-@dataclass(frozen=True)
-class StoryWorkspaceEpisodeBindingResolution:
-    """Internal resolution result used to build the public Episode surface."""
-
-    binding_availability: StoryWorkspaceEpisodeBindingAvailability
-    recovery: StoryWorkspaceEpisodeBindingRecovery
-    binding: StoryWorkspaceEpisodeBindingFile | None = None
 
 
 class StoryWorkspaceEpisodeBindingService:
@@ -1214,29 +1201,3 @@ class StoryWorkspaceEpisodeBindingService:
                 episode_uid=context.episode_uid,
             )
             return committed
-
-    def resolve_or_repair_binding(
-        self,
-        context: StoryWorkspaceEpisodeBindingContext,
-    ) -> StoryWorkspaceEpisodeBindingResolution:
-        """Repair a provable legacy binding without guessing or artifact probing."""
-
-        story_slug = self._proved_story_slug(context, allow_unproven=True)
-        if story_slug is None:
-            return StoryWorkspaceEpisodeBindingResolution(
-                binding_availability=StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
-                recovery=StoryWorkspaceEpisodeBindingRecovery(
-                    autoRepairAttempted=True,
-                    canDispatch=True,
-                    publicReason="episode_binding_unproven",
-                ),
-            )
-        binding = self.bind_first_episode(context)
-        return StoryWorkspaceEpisodeBindingResolution(
-            binding_availability=StoryWorkspaceEpisodeBindingAvailability.BOUND,
-            recovery=StoryWorkspaceEpisodeBindingRecovery(
-                autoRepairAttempted=True,
-                canDispatch=False,
-            ),
-            binding=binding,
-        )

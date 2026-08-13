@@ -112,28 +112,6 @@ class StoryWorkspaceDreamWorkflowLifecycleService:
             return run
         raise IllegalRunTransition()
 
-    async def record_episode_complete(
-        self,
-        workflow_run_id: str,
-        actor_context: AuthenticatedActorContext,
-        *,
-        no_next_action: bool,
-    ) -> WorkflowRun:
-        if no_next_action is not True:
-            raise ValueError("Episode workflow still has a server-derived next action")
-        run = self._read_run(workflow_run_id, actor_context)
-        status = self._status(run)
-        if status == RunStatus.CONFIRMED:
-            return await self._service.transition_run(
-                workflow_run_id,
-                RunStatus.COMPLETED,
-                actor_context,
-                reason_code="episode_artifact_workflow_complete",
-            )
-        if status == RunStatus.COMPLETED:
-            return run
-        raise IllegalRunTransition()
-
     @staticmethod
     def _status(run: WorkflowRun) -> RunStatus:
         return RunStatus(str(getattr(run.status, "value", run.status)))

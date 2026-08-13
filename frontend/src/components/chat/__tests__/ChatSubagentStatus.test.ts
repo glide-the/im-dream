@@ -1,6 +1,6 @@
-// [Input] A Chat thread containing human Dream messages, a private episode-action
+// [Input] A Chat thread containing human Dream messages, a historical internal JSON
 //         envelope, and thread-owned subagents that outlive the main stream.
-// [Output] Browser regression proving private envelopes stay hidden while the
+// [Output] Browser regression proving message bodies remain visible while the
 //          composer uses the main thread runtime rather than transcript counts.
 // [Pos] Dream-to-Chat rendering and subagent composer status regression seam.
 
@@ -51,7 +51,7 @@ function subagentTask(index: number, status: 'running' | 'completed') {
   };
 }
 
-test('Chat hides private Dream actions and does not let stale subagent transcripts block input', async ({ page }) => {
+test('Chat preserves Dream message bodies and does not let stale subagent transcripts block input', async ({ page }) => {
   const dreamRunId = 'run_0123456789abcdef0123456789abcdef';
   const harnessModule = `
     import React from 'react';
@@ -267,7 +267,7 @@ test('Chat hides private Dream actions and does not let stale subagent transcrip
       `Chat harness failed to restore history. Body: ${await page.locator('body').innerText()}. Diagnostics: ${diagnostics.join(' | ')}`,
     ).toBeVisible();
     await expect(page.getByText('Dream result remains visible in Chat', { exact: true })).toBeVisible();
-    await expect(page.getByText('PRIVATE ACTION MUST NOT RENDER', { exact: false })).toHaveCount(0);
+    await expect(page.getByText('PRIVATE ACTION MUST NOT RENDER', { exact: false })).toBeVisible();
 
     const subagentButton = page.getByRole('button', {
       name: 'Subagent tasks: 4 running · 4 completed',

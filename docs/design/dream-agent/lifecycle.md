@@ -1,162 +1,90 @@
-# Dream Agent lifecycle
+# Dream Agent 生命周期边界
 
-## Independent state domains
+Dream 不定义业务阶段状态机。Agent turn 的运行、工具确认、Stop、失败、取消、断线和恢复
+全部使用 Chat 的 thread 生命周期；Skill 与 Artifact 不参与这些状态的计算。
 
-Dream renders three independent domains:
-
-1. Canonical Thread turn lifecycle.
-2. Dream Workflow Run lifecycle.
-3. Artifact/Story projection status.
-
-They share immutable actor/thread/run provenance but never form a bidirectional
-state loop.
-
-## Canonical Thread turn
-
-```mermaid
-stateDiagram-v2
-    [*] --> idle
-    idle --> submitting: user or authorized business command
-    submitting --> streaming: turn accepted
-    streaming --> waiting_confirmation: runtime tool/AskUserQuestion
-    waiting_confirmation --> confirming: decision submitted
-    confirming --> streaming: runner receives decision
-    waiting_confirmation --> rejected: reject
-    rejected --> failed: runner closes rejected turn
-    streaming --> completed: one success terminal
-    submitting --> failed: setup/output-before-start failure
-    streaming --> failed: one failure terminal
-    streaming --> cancelling: Stop current main turn
-    waiting_confirmation --> cancelling: Stop current main turn
-    cancelling --> cancelled: one cancelled terminal
-    streaming --> disconnected: browser transport loss only
-    waiting_confirmation --> disconnected: browser transport loss only
-    disconnected --> reconnecting: same thread stream/history
-    reconnecting --> streaming: turn still running
-    reconnecting --> waiting_confirmation: pending decision replayed
-    reconnecting --> completed: terminal/history recovered
-    reconnecting --> failed: failed terminal/history recovered
-    reconnecting --> cancelled: cancelled terminal/history recovered
-```
-
-There is no extra lifecycle stage between a confirmation decision and resumed
-streaming. `message-final` and EOF are not terminal; one `finish` outcome closes
-the turn. Exactly one of completed, failed or cancelled is observed.
-
-Stop is available only when the factory owns a non-finished main-turn task.
-Historical subagent transcripts or business activity cannot expose Stop or
-block the composer.
-
-## Workflow Run
-
-```mermaid
-stateDiagram-v2
-    [*] --> preflight
-    preflight --> queued: launch committed
-    queued --> running: runtime activation fact
-    running --> output_validating: owning output fact
-    output_validating --> pending_review: valid review projection
-    pending_review --> confirmed: user business CAS
-    pending_review --> rejected: user business CAS
-    rejected --> queued: authorized child retry/revision
-    confirmed --> completed: domain completion fact
-    preflight --> failed
-    queued --> failed
-    running --> failed
-    output_validating --> failed
-    pending_review --> failed
-    confirmed --> failed
-    queued --> cancelled
-    running --> cancelled
-    confirmed --> cancelled
-```
-
-Rejected Workflow Runs are terminal attempts. An authorized retry or revision
-creates a new child attempt and queues that child; it never reopens the
-rejected row. After business confirmation the Workflow Run remains `confirmed` while any
-follow-up Agent work executes. The Thread lifecycle shows whether that work is
-currently submitting, streaming, awaiting confirmation, stopped or terminal.
-Only an Artifact/action owning service can move the Workflow to completed,
-failed or cancelled.
-
-## Artifact and Story projection
-
-```mermaid
-stateDiagram-v2
-    [*] --> generating
-    generating --> available: stable valid observation
-    generating --> missing: expected output absent
-    generating --> invalid: contract violation
-    available --> generating: new authorized revision starts
-    available --> missing: current source file absent
-    available --> invalid: current source fails contract
-    missing --> available: later valid revision
-    invalid --> available: later valid revision
-```
-
-Storage outage or unstable observation is `unavailable/degraded`, not a durable
-missing transition. Story Index independently reports syncing, indexed, stale,
-missing or failed. Review is bound to a complete script revision.
-
-## Confirmation comparison
-
-| Concern | Runtime confirmation | Dream business confirmation |
-|---|---|---|
-| Owner | canonical Thread confirmation store | Workflow domain service |
-| Trigger | tool policy / AskUserQuestion | reviewed Dream draft |
-| Identity | thread + turn + tool call | actor + run + expected version + idempotency |
-| Effect | resolve runner Future | `pending_review -> confirmed`, dispatch private Thread command once |
-| UI | shared Chat confirmation | Dream business confirmation bar |
-| Terminal proof | none | none; later domain fact required |
-
-## Disconnect, refresh and switching
+## 1. 单一 Agent 生命周期
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Surface as "Chat or Dream"
-    participant API as "Canonical Thread API"
-    participant Business as "Dream business API"
+    actor U as 用户
+    participant UI as Chat 或 Dream 的共享 ChatPanel
+    participant T as ThreadFactory
+    participant S as ClaudeAgentService
+    participant A as Claude runner
 
-    User->>Surface: refresh/switch with threadId
-    Surface->>API: load history + status
-    alt running
-        Surface->>API: reconnect same Thread stream
-    else terminal/idle
-        API-->>Surface: persisted history/status
-    end
-    opt Dream surface
-        Surface->>Business: load authorized workflow/artifact projection
+    U->>UI: 发送普通消息或 /skill 文本
+    UI->>T: run_streaming(threadId)
+    T->>S: assemble_context + execute_session
+    S->>A: 原 SDK run_streaming
+    A-->>UI: 增量文本、工具、确认或 AskUserQuestion
+    alt 用户 Stop
+        U->>UI: Stop 当前可取消主 turn
+        UI->>T: cancel thread main turn
+        T-->>UI: 单一 cancelled 结果
+    else Agent 成功
+        A-->>UI: 单一 completed 结果
+    else Agent 或 Hook 失败
+        A-->>UI: 单一 failed 结果
     end
 ```
 
-GET and reconnect do not start a model turn. Business projection cannot rewrite
-Thread status. Thread history cannot mark Workflow complete.
+页面不保存第二份 `submitting/streaming/waiting_confirmation` 业务状态，也不根据历史子 Agent
+transcript、Artifact、Observer 或 Workflow 行显示 Stop。
 
-## Observer lifecycle
+## 2. 刷新、断线与页面切换
 
 ```mermaid
-stateDiagram-v2
-    [*] --> unbound
-    unbound --> observing: registry after-context hook + valid Dream context
-    observing --> projecting: normalized event accepted
-    projecting --> observing: idempotent sink success/duplicate ignored
-    observing --> terminal_fenced: one business terminal observed
-    projecting --> terminal_fenced: one business terminal observed
-    terminal_fenced --> closed: unsubscribe/drain/close
-    observing --> closed: turn/session close
-    projecting --> closed: cancellation/failure close
+sequenceDiagram
+    actor U as 用户
+    participant P as Chat/Dream 页面
+    participant H as Thread history/status
+    participant E as Thread SSE
+
+    U->>P: 刷新、断线恢复或切换页面
+    P->>H: 用同一 threadId 读取历史和状态
+    alt 主 turn 仍运行
+        P->>E: 重连同一 stream
+        E-->>P: 继续增量、确认或终态
+    else 已结束
+        H-->>P: 持久化历史与终态
+    end
 ```
 
-Identity is `(actorId, threadId, turnId, workflowRunId, generation)`. Derived
-event IDs and monotonically checked sequences make replay/duplicates idempotent.
-After a business terminal fence, late business updates are ignored. Observer
-errors are isolated and never alter Chat terminal or SSE delivery.
+GET 不启动新 turn。切换页面不创建 thread、不重发首轮消息，也不改变 Claude session ID。
 
-## Single-terminal rules
+## 3. Hook 生命周期
 
-- EventBus atomically accepts the first Chat terminal and rejects later ones.
-- Workflow service validates one legal terminal transition and idempotent replay.
-- Observer may observe both domains but cannot create a Chat terminal.
-- Agent/session cleanup runs in `finally`; business sink cleanup is registry
-  Observer responsibility and cannot strand Thread locks.
+```mermaid
+sequenceDiagram
+    participant S as ClaudeAgentService
+    participant H as DreamArtifactTurnHook
+    participant P as .dream last-good
+
+    S->>H: before_main_turn
+    H-->>S: 服务端派生 ticket + 文件摘要基线
+    alt 根 turn 成功
+        S->>H: after_main_turn
+        H->>P: 校验并原子提交当前快照
+    else failed/cancelled/waiting confirmation
+        Note over S,P: 不执行 after_main_turn
+    end
+```
+
+Hook 只在 Dream 根 turn 上执行一次；SDK 内部子 Agent 不单独提交快照。Hook 不生成第二
+终态，但 Hook 失败会使同一 Chat turn 走既有唯一失败路径，不能继续宣称完成。
+
+## 4. Observer 生命周期
+
+Observer 由 `SessionObserverRegistry` 创建和关闭，订阅标准事件，使用 thread/turn/event
+身份去重并忽略终态后的迟到业务提示。它没有持久状态账本，不扫描工作台、不发布文件、
+不构建 Episode 关联，也不改变 Agent 或 Workflow 状态。异常由 registry 隔离，资源在
+turn/session close 时释放。
+
+## 5. 明确没有的生命周期
+
+- 没有 Continuing 阶段；
+- 没有 Skill 阶段、推荐动作、next action 或 completion fact；
+- 没有 Episode action 的确认、派发、恢复或刷新状态机；
+- 没有用 Artifact availability 推进 Agent turn；
+- 没有用 Observer 投影反向控制 Chat 输入、Stop 或终态。

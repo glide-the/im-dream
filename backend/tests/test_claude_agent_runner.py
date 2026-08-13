@@ -1054,8 +1054,6 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             for tool_name in (
                 "mcp__story_workspace__write_dream_run",
                 "mcp__story_workspace__write_dream_stage",
-                "mcp__story_workspace__bind_first_episode",
-                "mcp__story_workspace__record_episode_workflow_completion",
             ):
                 result = await hook(
                     {
@@ -1079,15 +1077,6 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "mcp__story_workspace__write_dream_stage",
             agent_runner_module.DEFAULT_ALLOWED_TOOLS,
         )
-        self.assertIn(
-            "mcp__story_workspace__bind_first_episode",
-            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
-        )
-        self.assertIn(
-            "mcp__story_workspace__record_episode_workflow_completion",
-            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
-        )
-
     async def test_story_workspace_stdio_receives_only_trusted_run_identity_env(self):
         self.set_query([])
         runner = self.make_runner()

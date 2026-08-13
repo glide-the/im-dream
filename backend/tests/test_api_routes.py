@@ -228,7 +228,6 @@ class ApiRouteContractTests(unittest.TestCase):
         for dependency in (
             story_workspace.get_story_workflow_run_service,
             story_workspace.get_dream_artifact_service,
-            story_workspace.get_episode_service,
             story_workspace.get_dream_confirmation_service,
         ):
             story_app.dependency_overrides[dependency] = _StoryGateway

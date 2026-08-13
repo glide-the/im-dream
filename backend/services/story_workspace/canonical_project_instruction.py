@@ -39,8 +39,7 @@ STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION = (
 STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX = (
     "规范项目身份成立后，宿主会在主 Agent turn 成功结束时自动同步工作台文件。"
     "Story Workspace MCP 写工具仅用于主动即时预览或显式修复，不是同步成功的前置条件；"
-    "若当前业务确需首次绑定 Episode，mcp__story_workspace__bind_first_episode "
-    "仍必须传 expectedBindingRevision=0。"
+    "首次 Episode 绑定与 .dream 私有发布由服务端 turn Hook 根据 canonical 产物自动完成。"
 )
 
 STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION = """# Run-isolated layout
