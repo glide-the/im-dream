@@ -4,6 +4,7 @@
 /* [Sync] 2026-08-13: style re-entry search, result counts, empty state, and per-group pagination. */
 /* [Sync] 2026-08-13: remove the obsolete workflow row from desktop/mobile Dream Agent conversations. */
 /* [Sync] 2026-08-13: anchor conversation dialogs to the viewport so workbench scrolling cannot move them off-screen. */
+/* [Sync] 2026-08-13: style direct canonical-Chat actions in Agent rail/dialog surfaces. */
 
 .story-workspace-dream,
 .story-workspace-dream-launch {
@@ -412,6 +413,31 @@
   letter-spacing: .04em;
 }
 
+.story-workspace-dream-agent-rail__chat-link {
+  justify-self: start;
+  padding: 0;
+  color: var(--dream-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: .02em;
+}
+
+.story-workspace-dream-agent-rail__chat-link:hover,
+.story-workspace-dream-agent-rail__chat-link:focus-visible,
+.story-workspace-dream-agent-dialog__chat-link:hover,
+.story-workspace-dream-agent-dialog__chat-link:focus-visible {
+  color: var(--dream-action);
+}
+
+.story-workspace-dream-agent-rail__chat-link:disabled {
+  color: var(--dream-muted);
+  cursor: wait;
+  opacity: .65;
+}
+
 .story-workspace-dream-agent-rail__details {
   padding: 0 4px 13px;
   color: var(--dream-muted);
@@ -499,6 +525,7 @@
 }
 
 .story-workspace-dream-agent-dialog__heading-copy { min-width: 0; }
+.story-workspace-dream-agent-dialog__header-actions { display: flex; flex: none; align-items: center; gap: 13px; }
 .story-workspace-dream-agent-dialog__kicker { display: flex; min-width: 0; align-items: center; gap: 8px; }
 .story-workspace-dream-agent-dialog__kicker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -519,6 +546,9 @@
 .story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__header h2 { margin: 3px 0 0; font-size: 20px; line-height: 1.15; }
 .story-workspace-dream-agent-dialog__header button,
 .story-workspace-dream-agent-dialog__composer > button { padding: 0; color: var(--dream-action); background: transparent; border: 0; border-bottom: 1px solid currentColor; cursor: pointer; font: inherit; font-size: 11px; }
+.story-workspace-dream-agent-dialog__header .story-workspace-dream-agent-dialog__chat-link { color: var(--dream-muted); border-bottom: 0; font-size: 10px; }
+.story-workspace-dream-agent-dialog__header .story-workspace-dream-agent-dialog__chat-link:hover,
+.story-workspace-dream-agent-dialog__header .story-workspace-dream-agent-dialog__chat-link:focus-visible { color: var(--dream-action); }
 
 .story-workspace-dream-agent-dialog__history-shell { position: relative; min-height: 0; }
 .story-workspace-dream-agent-dialog__history { height: 100%; min-height: 0; box-sizing: border-box; padding: 16px 18px 18px; overflow: auto; overscroll-behavior: contain; }
@@ -1405,6 +1435,7 @@
   .story-workspace-dream-agent-rail__meta { grid-column: 1 / -1; }
   .story-workspace-dream-agent-dialog { position: fixed; inset: auto 8px 8px; width: auto; max-height: min(88dvh, 760px); min-height: min(520px, 82dvh); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--dream-ink) 24%, transparent), 0 12px 30px color-mix(in srgb, var(--dream-ink) 13%, transparent); }
   .story-workspace-dream-agent-dialog--conversation { height: min(760px, calc(100dvh - 16px)); min-height: 0; max-height: none; grid-template-rows: auto minmax(0, 1fr); }
+  .story-workspace-dream-agent-dialog__header-actions { align-items: flex-end; flex-direction: column; gap: 6px; }
   .story-workspace-dream__confirmation { position: fixed; right: 0; bottom: 0; left: 0; min-height: 60px; gap: 12px; padding: 9px 18px; }
   .story-workspace-dream__confirmation > div:first-child { min-width: 0; }
   .story-workspace-dream__confirmation span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,9 +1,11 @@
 // [Input] Dream page/dialog/panel source, responsive CSS, and shared thread chat adapter.
-// [Output] Architectural/layout regression gate: Dream composes ChatPanel and reserves no obsolete dialog row.
+// [Output] Architectural/layout regression gate: Dream composes ChatPanel,
+//          exposes the bound-thread Chat handoff, and reserves no obsolete row.
 // [Sync] 2026-08-13: require the desktop and mobile conversation dialog to allocate
 //                    exactly a header row plus one minmax thread row.
 // [Sync] 2026-08-13: require Chat auto-scroll to target only its owned message region,
 //                    never scrollable Story Workspace ancestors via scrollIntoView.
+// [Sync] 2026-08-13: require both Dream Agent surfaces to open their bound Chat thread.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -16,6 +18,8 @@ const PANEL = readFileSync(new URL('../../../components/story-workspace/dream/St
 const DIALOG = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx', import.meta.url), 'utf8');
 const THREAD_CHAT = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx', import.meta.url), 'utf8');
 const CHAT_PANEL = readFileSync(new URL('../../../components/chat/ChatPanel.tsx', import.meta.url), 'utf8');
+const RAIL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentRail.tsx', import.meta.url), 'utf8');
+const ROUTER = readFileSync(new URL('../../../router/story-workspace.tsx', import.meta.url), 'utf8');
 const DREAM_CSS = readFileSync(new URL('../StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
 
 test('Dream gets the actor-scoped threadId from dream-files and composes canonical ChatPanel', () => {
@@ -60,6 +64,15 @@ test('Dream confirmation keeps the exact accepted message latch through the shar
   expect(PAGE).toContain('setExpectedConfirmationMessageId(accepted.messageId)');
   expect(PAGE).toContain('expectedMessageId={expectedConfirmationMessageId}');
   expect(PANEL).toContain('expectedMessageId={expectedMessageId}');
+});
+
+test('Dream rail and execution dialog hand the exact bound thread to canonical Chat', () => {
+  expect(RAIL).toContain("onOpenChatThread(threadId)");
+  expect(DIALOG).toContain("onOpenChatThread(threadId)");
+  expect(RAIL).toContain('Chat ↗');
+  expect(DIALOG).toContain('Chat ↗');
+  expect(ROUTER).toContain('handleNavigate(STORY_WORKSPACE_PATHS.chat, undefined, threadId)');
+  expect(ROUTER).toContain('onChatThreadRequest?.(chatThreadId)');
 });
 
 test('mobile focus cycle remains bounded after runtime convergence', () => {

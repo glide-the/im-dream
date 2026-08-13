@@ -1,6 +1,8 @@
 // [Input] Actor-scoped Story Workspace run and the shared Claude Agent thread.
-// [Output] Dream business shell around the canonical Chat thread UI.
+// [Output] Dream business shell around the canonical Chat thread UI, with a
+//          direct handoff to the same thread in the full Chat workspace.
 // [Pos] Dream owns presentation only; it has no workflow action state machine.
+// [Sync] 2026-08-13: expose an explicit full-Chat thread handoff beside close.
 
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from './storyWorkspaceDreamAgentFocus';
@@ -13,6 +15,7 @@ export interface StoryWorkspaceDreamAgentDialogProps {
   readonly refreshNonce?: number;
   readonly expectedMessageId?: string | null;
   readonly onClose: () => void;
+  readonly onOpenChatThread: (threadId: string) => void;
   readonly onSettled?: () => void;
   readonly restoreFocusRef: RefObject<HTMLButtonElement | null>;
 }
@@ -39,6 +42,7 @@ export function StoryWorkspaceDreamAgentDialog({
   refreshNonce = 0,
   expectedMessageId = null,
   onClose,
+  onOpenChatThread,
   onSettled,
   restoreFocusRef,
 }: StoryWorkspaceDreamAgentDialogProps) {
@@ -140,7 +144,18 @@ export function StoryWorkspaceDreamAgentDialog({
             与 Chat 共用同一 thread
           </p>
         </div>
-        <button aria-label="收起 Dream Agent" onClick={onClose} type="button">收起</button>
+        <div className="story-workspace-dream-agent-dialog__header-actions">
+          <button
+            aria-label="在 Chat 中打开当前 thread"
+            className="story-workspace-dream-agent-dialog__chat-link"
+            onClick={() => onOpenChatThread(threadId)}
+            title="在 Chat 中打开"
+            type="button"
+          >
+            Chat ↗
+          </button>
+          <button aria-label="收起 Dream Agent" onClick={onClose} type="button">收起</button>
+        </div>
       </header>
       <div className="story-workspace-dream-agent-dialog__thread-chat">
         <StoryWorkspaceDreamThreadChat

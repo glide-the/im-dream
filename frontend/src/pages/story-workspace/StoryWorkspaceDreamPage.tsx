@@ -2,6 +2,7 @@
 // [Output] Workspace-file-driven Dream editor or the no-run Dream start surface.
 // [Pos] Canonical /story-workspace/dream business page (Task 3 F4)
 // [Sync] 2026-08-04: implement Agent files -> render -> edit/one confirm -> continue.
+// [Sync] 2026-08-13: hand the bound Dream thread to canonical Chat on request.
 
 import {
   useCallback,
@@ -73,6 +74,7 @@ export interface StoryWorkspaceDreamPageProps {
   /** Router-resolved, actor-scoped run context; Dream files remain stage truth. */
   resolvedRun?: Pick<WorkflowRun, 'workflow_run_id' | 'deck_plugin_display_name' | 'deck_plugin_version' | 'workflow_summary' | 'deck_runtime_snapshot_id' | 'runtime_plugin_lock_id'> | null;
   onNavigate?: (path: string) => void;
+  onOpenChatThread: (threadId: string) => void;
 }
 
 function selectionExists(
@@ -129,6 +131,7 @@ export function StoryWorkspaceDreamPage({
   runId,
   resolvedRun = null,
   onNavigate,
+  onOpenChatThread,
 }: StoryWorkspaceDreamPageProps) {
   const [dreamState, setDreamState] = useState<StoryWorkspaceDreamState | null>(null);
   const [activeStage, setActiveStage] = useState<StoryWorkspaceDreamStage>(initialStage);
@@ -430,6 +433,7 @@ export function StoryWorkspaceDreamPage({
             runtimeSnapshotId={agentRuntimeSnapshotId}
             stageLine={agentStageLine}
             threadId={threadId}
+            onOpenChatThread={onOpenChatThread}
           />
         </div>
       )}
@@ -539,6 +543,7 @@ export function StoryWorkspaceDreamPage({
               runtimeSnapshotId={agentRuntimeSnapshotId}
               stageLine={agentStageLine}
               threadId={threadId}
+              onOpenChatThread={onOpenChatThread}
             />
           )}
           <div className="story-workspace-dream__agent-panel">

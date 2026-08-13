@@ -13,6 +13,8 @@
 // [Sync] 2026-08-04: Dream routes project every selected run to the fixed
 //                    story_workspace_dream context state; raw WorkflowRun
 //                    statuses never reach WorkflowContextBar.
+// [Sync] 2026-08-13: explicit Dream/Execution Chat actions carry their bound
+//                    thread through the router before opening canonical Chat.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
@@ -115,6 +117,7 @@ function renderStoryWorkspaceRoute(
   onReview: (selection: StoryWorkspaceReviewSelection) => void,
   refreshNonce: number,
   onNavigate: (path: string, notice?: string) => void,
+  onOpenChatThread: (threadId: string) => void,
   resolvedDreamRun: WorkflowRun | null,
   decksContent: ReactNode,
   legacyContent: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>,
@@ -141,6 +144,7 @@ function renderStoryWorkspaceRoute(
             initialStage={dreamStage}
             initialDeckId={initialDeckId}
             onNavigate={onNavigate}
+            onOpenChatThread={onOpenChatThread}
             resolvedRun={resolvedDreamRun}
             runId={runId}
           />
@@ -154,6 +158,7 @@ function renderStoryWorkspaceRoute(
             initialStage={dreamStage}
             initialDeckId={initialDeckId}
             onNavigate={onNavigate}
+            onOpenChatThread={onOpenChatThread}
             resolvedRun={resolvedDreamRun}
             runId={runId}
           />
@@ -187,6 +192,7 @@ function renderStoryWorkspaceRoute(
         <StoryWorkspaceExecutionPage
           key={match.params.storyWorkspaceRunId}
           onNavigate={onNavigate}
+          onOpenChatThread={onOpenChatThread}
           runId={match.params.storyWorkspaceRunId}
         />
       );
@@ -197,6 +203,7 @@ function renderStoryWorkspaceRoute(
         <StoryWorkspaceDreamPage
           initialDeckId={initialDeckId}
           onNavigate={onNavigate}
+          onOpenChatThread={onOpenChatThread}
           resolvedRun={resolvedDreamRun}
           runId={runId}
         />
@@ -316,17 +323,21 @@ export function StoryWorkspaceRouter({
     return () => window.removeEventListener('popstate', syncFromLocation);
   }, [syncFromLocation]);
 
-  const handleNavigate = useCallback((path: string, notice?: string) => {
+  const handleNavigate = useCallback((
+    path: string,
+    notice?: string,
+    requestedChatThreadId?: string,
+  ) => {
     const { pathname, search } = splitStoryWorkspaceHref(path);
     const navigation = storyWorkspaceNavigationTarget(pathname, search);
     if (!navigation) return;
 
-    const dreamThreadId = storyWorkspaceDreamChatThread(
+    const chatThreadId = requestedChatThreadId?.trim() || storyWorkspaceDreamChatThread(
       activeMatch,
       navigation.match.route,
       runDeepLink.run,
     );
-    if (dreamThreadId) onChatThreadRequest?.(dreamThreadId);
+    if (chatThreadId) onChatThreadRequest?.(chatThreadId);
 
     const target = navigation.href;
     if (window.location.pathname + window.location.search !== target) {
@@ -343,6 +354,10 @@ export function StoryWorkspaceRouter({
     onRouteChange?.(navigation.match.route);
     setRouteNotice(notice ?? null);
   }, [activeMatch, onChatThreadRequest, onRouteChange, runDeepLink.run]);
+
+  const handleOpenChatThread = useCallback((threadId: string) => {
+    handleNavigate(STORY_WORKSPACE_PATHS.chat, undefined, threadId);
+  }, [handleNavigate]);
 
   // DEC-030: the execution page keeps the Dream entry selected in the app
   // chrome (it is a Dream surface page, not a fifth sidebar entry).
@@ -405,6 +420,7 @@ export function StoryWorkspaceRouter({
         handleOpenReview,
         resourceRefreshNonce,
         handleNavigate,
+        handleOpenChatThread,
         runDeepLink.run,
         decksContent,
         legacyContent,

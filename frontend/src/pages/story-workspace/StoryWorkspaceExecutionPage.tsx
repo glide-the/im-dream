@@ -6,6 +6,7 @@
 //                    build, reserving trust language for server identity checks.
 // [Sync] 2026-08-13: keep EP01 association state read-only; confirmed turns
 //                    publish and bind automatically without a manual UI action.
+// [Sync] 2026-08-13: hand the dialog's bound Dream thread to canonical Chat.
 
 import {
   useCallback,
@@ -239,6 +240,7 @@ export interface StoryWorkspaceExecutionPageProps {
   runId: string;
   episodeId?: string | null;
   onNavigate?: (href: string, notice?: string) => void;
+  onOpenChatThread: (threadId: string) => void;
 }
 
 function focusListItem(
@@ -269,6 +271,7 @@ export function StoryWorkspaceExecutionPage({
   runId,
   episodeId,
   onNavigate,
+  onOpenChatThread,
 }: StoryWorkspaceExecutionPageProps) {
   const [activeModule, setActiveModule] = useState<ExecutionModule>('outline');
   const [focusKey, setFocusKey] = useState<string | null>(null);
@@ -917,6 +920,7 @@ export function StoryWorkspaceExecutionPage({
         <StoryWorkspaceDreamAgentDialog
           deckName={currentRun?.deck_plugin_display_name ?? '当前 Deck'}
           onClose={() => setAgentDialogOpen(false)}
+          onOpenChatThread={onOpenChatThread}
           onSettled={() => {
             refreshEpisodeArtifacts();
             storyIndex.refresh();
