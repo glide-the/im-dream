@@ -1,3 +1,8 @@
+/* [Input] Story Workspace Dream page state, durable run projections, and shared color tokens. */
+/* [Output] Responsive Dream editor, searchable/paginated re-entry, launch, and Agent-panel presentation. */
+/* [Pos] Canonical styling for the Story Workspace Dream business page. */
+/* [Sync] 2026-08-13: style re-entry search, result counts, empty state, and per-group pagination. */
+
 .story-workspace-dream,
 .story-workspace-dream-launch {
   --dream-canvas: var(--color-bg-app, #f6efe5);
@@ -930,6 +935,55 @@
   flex: 1 1 0;
   width: 100%;
   min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 20px;
+}
+
+.story-workspace-dream-reentry__search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  padding-bottom: 13px;
+  border-bottom: 1px dashed var(--dream-rule);
+}
+
+.story-workspace-dream-reentry__search label {
+  color: var(--dream-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.story-workspace-dream-reentry__search input {
+  min-width: 0;
+  padding: 7px 2px;
+  color: var(--dream-ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--dream-rule);
+  border-radius: 0;
+  outline: none;
+  font: inherit;
+  font-size: 12px;
+}
+
+.story-workspace-dream-reentry__search input:focus {
+  border-bottom-color: var(--dream-action);
+  box-shadow: 0 1px 0 var(--dream-action);
+}
+
+.story-workspace-dream-reentry__search > span {
+  color: var(--dream-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.story-workspace-dream-reentry__groups {
+  display: grid;
+  min-height: 0;
   grid-auto-rows: minmax(0, 1fr);
   gap: 24px;
 }
@@ -937,18 +991,32 @@
 .story-workspace-dream-reentry__group {
   display: grid;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.story-workspace-dream-reentry__group > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
 }
 
 .story-workspace-dream-reentry__group h2 {
-  margin: 0 0 9px;
+  margin: 0;
   color: var(--dream-ink);
   font-family: Georgia, "Times New Roman", serif;
   font-size: 18px;
   font-weight: 500;
 }
 
-.story-workspace-dream-reentry__group > div {
+.story-workspace-dream-reentry__group > header span {
+  color: var(--dream-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+}
+
+.story-workspace-dream-reentry__items {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1010,6 +1078,47 @@
 .story-workspace-dream-reentry__loading,
 .story-workspace-dream-reentry__error {
   margin: 0;
+}
+
+.story-workspace-dream-reentry__pagination {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding-top: 10px;
+  color: var(--dream-muted);
+  font-size: 10px;
+}
+
+.story-workspace-dream-reentry__pagination button {
+  justify-self: start;
+  padding: 0;
+  color: var(--dream-action);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.story-workspace-dream-reentry__pagination button:last-child {
+  justify-self: end;
+}
+
+.story-workspace-dream-reentry__pagination button:disabled {
+  cursor: default;
+  opacity: .36;
+}
+
+.story-workspace-dream-reentry__empty {
+  align-self: start;
+  margin: 0;
+  padding: 18px 0;
+  color: var(--dream-muted);
+  border-top: 1px solid color-mix(in srgb, var(--dream-rule) 70%, transparent);
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .story-workspace-dream-launch__guide,
