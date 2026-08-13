@@ -87,7 +87,7 @@ export function claudeThreadPartIsVisible(part: unknown): boolean {
   }
 }
 
-/** Apply the exact private-row contract and drop zero-visible-part rows. */
+/** Preserve the shared Dream/Chat transcript and drop only empty render rows. */
 export function filterClaudeThreadVisibleMessages<T extends UIMessage>(
   messages: readonly T[],
 ): T[] {

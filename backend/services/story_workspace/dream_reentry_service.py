@@ -62,6 +62,7 @@ _STORY_WORKSPACE_DREAM_LAUNCH_ALLOWED_KEYS = frozenset({
     "workflowRunId",
     "threadId",
     "dreamContext",
+    "projectStorySlug",
     "story_workspace_episode_identity",
 })
 _STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED = object()
@@ -313,7 +314,11 @@ class StoryWorkspaceDreamReentryService:
                 f"{last_activity_at.isoformat()}:"
                 f"{created_at.isoformat()}:{run_id}"
             ),
-            href=f"/story-workspace/dream?run={run_id}",
+            href=(
+                f"/story-workspace/runs/{run_id}/execution"
+                if confirmation_accepted
+                else f"/story-workspace/dream?run={run_id}"
+            ),
         )
 
     def _stage_snapshot(

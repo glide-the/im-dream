@@ -309,10 +309,10 @@ def _sha256(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _advance_dream_post_confirmation_before_ack(
+def _dream_confirmation_actor_context(
     db: Any,
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
-) -> None:
+) -> tuple[str, AuthenticatedActorContext]:
     run_id = dispatch.metadata.get("story_workspace_run_id")
     if not isinstance(run_id, str) or not run_id:
         raise PermissionError("Dream confirmation Run scope is unavailable")
@@ -325,22 +325,60 @@ def _advance_dream_post_confirmation_before_ack(
         db.rollback()
     if row is None or row["source_voice_thread_id"] != dispatch.thread_id:
         raise PermissionError("Dream confirmation actor/thread scope mismatch")
+    return run_id, AuthenticatedActorContext(
+        actor_id=dispatch.actor_id,
+        workspace_id=str(row["workspace_id"]),
+    )
+
+
+def _prepare_dream_confirmation_before_dispatch(
+    db: Any,
+    dispatch: StoryWorkspaceDreamConfirmationDispatch,
+) -> None:
+    run_id, actor_context = _dream_confirmation_actor_context(db, dispatch)
+    lifecycle = StoryWorkspaceDreamWorkflowLifecycleService(
+        db,
+        token_secret=story_workspace_workflow_token_secret(),
+    )
+    # The confirmation row can only be persisted after the server validates all
+    # required Dream stage revisions. That durable row therefore proves both
+    # output readiness and the user's review acceptance, including recovery of
+    # the historical `running + dispatching` split state.
+    asyncio.run(
+        lifecycle.record_output_ready(
+            run_id,
+            actor_context,
+            normalized_result_ready=True,
+        )
+    )
+    asyncio.run(
+        lifecycle.record_confirmation_accepted(
+            run_id,
+            actor_context,
+            review_items_approved=True,
+        )
+    )
+
+
+def _advance_dream_post_confirmation_before_ack(
+    db: Any,
+    dispatch: StoryWorkspaceDreamConfirmationDispatch,
+) -> None:
+    run_id, actor_context = _dream_confirmation_actor_context(db, dispatch)
     asyncio.run(
         StoryWorkspaceDreamWorkflowLifecycleService(
             db,
             token_secret=story_workspace_workflow_token_secret(),
         ).record_post_confirmation_dispatched(
             run_id,
-            AuthenticatedActorContext(
-                actor_id=dispatch.actor_id,
-                workspace_id=str(row["workspace_id"]),
-            ),
+            actor_context,
         )
     )
 
 
 _DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator(
     database.get_db,
+    before_dispatch=_prepare_dream_confirmation_before_dispatch,
     before_dispatched_ack=_advance_dream_post_confirmation_before_ack,
 )
 

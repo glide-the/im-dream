@@ -304,7 +304,7 @@ export function StoryWorkspaceDreamPage({
   }, [dreamState, selection]);
 
   const confirmAndContinue = useCallback(async () => {
-    if (!dreamState) return;
+    if (!runId || !dreamState) return;
     const previous = dreamState;
     try {
       const started = storyWorkspaceBeginDreamConfirmation(
@@ -320,11 +320,14 @@ export function StoryWorkspaceDreamPage({
       ));
       refreshDreamFiles();
       setEditorError(null);
+      onNavigate?.(
+        `/story-workspace/runs/${encodeURIComponent(runId)}/execution`,
+      );
     } catch (reason) {
       setDreamState(previous);
       setEditorError(reason instanceof Error ? reason.message : '确认命令未提交');
     }
-  }, [confirmation, dreamState, refreshDreamFiles]);
+  }, [confirmation, dreamState, onNavigate, refreshDreamFiles, runId]);
 
   if (!runId) {
     if (initialDeckId) {

@@ -1033,6 +1033,9 @@ class DreamLaunchEnvelopeDispatcher:
                 "workflowRunId": context.workflow_run_id,
                 "threadId": context.thread_id,
                 "dreamContext": context.model_dump(mode="json"),
+                "projectStorySlug": (
+                    story_workspace_canonical_project_fallback_slug(goal)
+                ),
                 "dispatchStatus": "dispatching",
                 "dispatchClaimId": claim_id,
                 "dispatchClaimedAt": now.isoformat(),

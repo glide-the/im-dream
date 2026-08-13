@@ -9,6 +9,7 @@ import { resolveRunDeepLink } from '../../../hooks/story-workspace/useRunDeepLin
 import { storyWorkspaceDreamResolvedRunId } from '../../../router/storyWorkspacePath';
 
 const LAUNCH_SOURCE = readFileSync(new URL('../StoryWorkspaceDreamLaunch.tsx', import.meta.url), 'utf8');
+const PAGE_SOURCE = readFileSync(new URL('../StoryWorkspaceDreamPage.tsx', import.meta.url), 'utf8');
 const DREAM_CSS = readFileSync(new URL('../StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
 const ROUTER_SOURCE = readFileSync(new URL('../../../router/story-workspace.tsx', import.meta.url), 'utf8');
 const LAYOUT_SOURCE = readFileSync(new URL('../../../components/story-workspace/layout/StoryWorkspaceLayout.tsx', import.meta.url), 'utf8');
@@ -23,6 +24,21 @@ test('no-run Dream workbench renders durable re-entry list before the new Dream 
   expect(LAUNCH_SOURCE).toContain('<strong>{run.goalPrefix}</strong>');
   expect(LAUNCH_SOURCE).toContain('<small>{run.deckDisplayName}');
   expect(LAUNCH_SOURCE).not.toContain('localStorage');
+});
+
+test('accepted confirmation navigates directly to the run execution workbench', () => {
+  const confirmationHandler = PAGE_SOURCE.slice(
+    PAGE_SOURCE.indexOf('const confirmAndContinue'),
+    PAGE_SOURCE.indexOf("if (!runId)", PAGE_SOURCE.indexOf('const confirmAndContinue')),
+  );
+  expect(confirmationHandler).toContain('const accepted = await confirmation.submit(started.command)');
+  expect(confirmationHandler).toContain('onNavigate?.(');
+  expect(confirmationHandler).toContain(
+    '`/story-workspace/runs/${encodeURIComponent(runId)}/execution`',
+  );
+  expect(confirmationHandler.indexOf('onNavigate?.(')).toBeGreaterThan(
+    confirmationHandler.indexOf('await confirmation.submit(started.command)'),
+  );
 });
 
 test('Dream re-entry groups scroll their item lists without growing the workbench', () => {

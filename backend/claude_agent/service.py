@@ -1624,6 +1624,9 @@ class ClaudeAgentService:
                     context=dream_context,
                     actor_id=request.user_id,
                     cwd=cwd,
+                    source_kind=(request.message_metadata or {}).get("kind")
+                    if isinstance(request.message_metadata, dict)
+                    else None,
                 )
             )
 
@@ -1746,13 +1749,20 @@ class ClaudeAgentService:
                         len(sync_result.private_files),
                     )
                 except Exception:
-                    # The canonical Chat turn has already completed.  Projection
-                    # repair remains retryable on the next root turn and must not
-                    # manufacture a second Agent terminal outcome.
                     logger.exception(
                         "Dream workbench synchronization failed for thread_id=%s",
                         execution.request.thread_id,
                     )
+                    if (
+                        dream_artifact_turn_ticket.source_kind
+                        == "story-workspace-dream-confirmation"
+                    ):
+                        # The confirmed follow-up is not complete until its
+                        # canonical EP01 package and authority binding commit.
+                        # Propagate the business postcondition failure through
+                        # the existing single Chat turn terminal path so the
+                        # durable confirmation remains retryable, never ACKed.
+                        raise
             full_text = result.full_text
             await queue.put(
                 _event("message-final", {

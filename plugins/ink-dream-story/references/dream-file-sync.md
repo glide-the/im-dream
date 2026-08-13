@@ -1,90 +1,47 @@
-# Dream workspace file synchronization
+# Dream 工作台文件同步
 
-This reference defines when the current Chat Agent makes Dream pages visible.
-The Deck plugin describes the workflow; the host owns identity, authorization,
-fixed routes, schemas, and `.dream` durability.
+本参考定义 Dream Agent 与故事工作台之间的文件合同。Deck 插件负责构建创作产物，宿主负责身份、权限、固定路由、Schema、workflow 生命周期和 `.dream` 产物同步。
 
-## Non-forgeable context
+## 权威边界
 
-Use only the `workflowRunId` supplied by the host-started flow or by the hidden
-Dream confirmation command. Do not guess a recent run, use a Chat thread ID as
-a run ID, or supply actor, thread, plugin binding, snapshot, or lock fields.
+- 只使用宿主消息提供的 `workflowRunId`、thread 和 project identity；不得猜测最近 Run，也不得把 thread ID 当作 Run ID。
+- Agent 只写当前 Chat workspace 的 canonical 文件，禁止用 Write、Edit 或 Bash 写 `.dream/**`。
+- 主 Agent turn 成功结束后，宿主 Hook 会读取并校验 canonical 产物、更新 Dream 页面 stage，并把允许的 Project/Episode 产物同步到该 Run 的 `.dream/runtime/runs/<run-id>/artifact/`。
+- `mcp__story_workspace__write_dream_run` 与 `mcp__story_workspace__write_dream_stage` 只用于需要立即预览或显式修复的场景，不是正常同步的完成条件；不得用 MCP 返回值代替 canonical 文件。
 
-Do not write `.dream` with Write, Edit, or Bash. Those paths are protected.
-Only use:
+## 初次 Dream 输出
 
-- `mcp__story_workspace__write_dream_run`
-- `mcp__story_workspace__write_dream_stage`
+先按宿主分配的 `project_id/project_slug` 构建以下工作台产物：
 
-Both tools use compare-and-swap. Pass the current `expectedRevision`: `0` only
-when the corresponding run or stage file does not yet exist. On a later update,
-use the revision returned by the latest tool call or the hidden confirmation's
-base revisions. Never overwrite after a revision mismatch.
-
-## 1. Establish the Dream run
-
-At the start of a host-bound Dream turn, call
-`mcp__story_workspace__write_dream_run` with:
-
-```json
-{
-  "workflowRunId": "run_<32 lowercase hex>",
-  "expectedRevision": 0
-}
+```text
+assets/characters/*.md
+assets/scenes/*.md
+stories/<project-id>/project.yaml
+stories/<project-id>/episodes/EP01/storyboard.yaml
 ```
 
-The host writes `runtime/runs/<workflowRunId>/run.json` with the authoritative
-thread, source provenance, fixed projection route, and the three required stages.
-This call does not advance the WorkflowRun state machine.
+文件必须完整、可读且使用合法 UTF-8。完成后直接结束本轮；宿主自动投影人物、场景和分镜三类 stage，页面据此提供一次“确认并继续”。
 
-## 2. Characters
+## 确认并继续
 
-1. Write complete canonical character files under `assets/characters/`.
-2. Verify that every file named in `sourceFiles` exists in this workspace.
-3. Call `mcp__story_workspace__write_dream_stage` with `stage: "characters"`,
-   the `sourceFiles`, normalized page `items`, and the current
-   `expectedRevision`.
+`metadata.kind="story-workspace-dream-confirmation"` 的用户消息就是创作者的一次确认，正文中的 JSON 可以直接读取和展示。
 
-Only after step 3 does the characters page become available. Each item contains
-`entityId`, `displayName`, nullable `summary`, one declared `sourceFile`, and
-string `relations`.
+收到确认后按顺序完成：
 
-## 3. Scenes
+1. 第一动作直接使用内建 Write/Edit；不要先规划、解释、读取 schema 或调用 Dream MCP。
+2. 即使失败重试已留下旧文件，也要覆盖四项 Episode 文件；`storyboard.yaml` 每个 `shot_id` 都必须是带引号的 ASCII 字符串，例如 `"shot-001"`，不能写成数字 `shot_id: 1`。
+3. `edits` 非空时，将 `displayName`、`summary`、`relations` 修改写回当前 session 已知的对应 canonical 文件。
+4. 不再次询问确认，在同一 canonical Project 下完成首集协作包：
 
-1. Write complete canonical scene files under `assets/scenes/`.
-2. Call the same stage tool with `stage: "scenes"`, existing `sourceFiles`,
-   normalized items, and the current `expectedRevision`.
+```text
+stories/<project-id>/episodes/EP01/
+  episode-outline.md
+  script.md
+  storyboard.yaml
+  review-report.md
+```
 
-Characters and scenes may be prepared in parallel, but each stage appears only
-after all of its canonical files are complete.
+5. 必须真实写入四个文件，不能只在 Assistant 回复中粘贴内容；分镜 shot 使用唯一 `shot_id` 和 `shot_type/visual/camera.movement/timing.duration_sec` 最小形状。
+6. 文件完成后只回复一句并结束本轮。宿主校验四项产物、更新 stage、同步 `.dream` 私有副本并构建 EP01 产物关联；`episode-workflow.json` 在第一次真实 Episode action completion 时按需创建。
 
-## 4. Storyboards
-
-1. Write the canonical storyboard first, normally
-   `stories/<project>/episodes/EP??/storyboard.yaml`.
-2. If drama-forge reports or artifacts already exist, they may be additional
-   source references; they never replace `storyboard.yaml` as the canonical
-   storyboard.
-3. Call the stage tool with `stage: "storyboards"`, the existing
-   `sourceFiles`, normalized shot/beat items, and the current
-   `expectedRevision`.
-
-The upstream drama-forge package writes its own YAML and Markdown files; it does
-not write `.dream`. This adapter step is required after its canonical output.
-
-## 5. Hidden confirmation command
-
-The command with `metadata.kind="story-workspace-dream-confirmation"` contains
-the complete camelCase edits and base revisions. It is already the creator's
-one confirmation.
-
-1. Apply each allowed edit (`displayName`, `summary`, or `relations`) to the
-   referenced canonical workspace file.
-2. For every affected stage, call the stage tool with the command's base
-   revision as `expectedRevision` and the complete updated stage projection.
-3. Continue the locked Deck workflow in this same Chat thread.
-4. Do not ask for another confirmation.
-
-Later canonical changes follow the same rule: finish the workspace files first,
-then CAS-update the affected Dream stage so the page can re-read the latest
-revision.
+任何必需文件缺失、路径不安全、Project identity 不一致、产物同步失败或产物关联未构建，都不算确认后业务完成，确认消息保持可恢复状态。

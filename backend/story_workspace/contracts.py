@@ -2323,7 +2323,12 @@ class StoryWorkspaceDreamReentryItem(_StoryWorkspaceDreamWireModel):
     last_activity_at: datetime
     created_at: datetime
     sort_key: str = Field(min_length=1, max_length=512)
-    href: str = Field(pattern=r"^/story-workspace/dream\?run=run_[0-9a-f]{32}$")
+    href: str = Field(
+        pattern=(
+            r"^(?:/story-workspace/dream\?run=run_[0-9a-f]{32}|"
+            r"/story-workspace/runs/run_[0-9a-f]{32}/execution)$"
+        )
+    )
 
     @model_validator(mode="after")
     def lifecycle_matches_confirmation_facts(

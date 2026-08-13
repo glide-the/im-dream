@@ -3,6 +3,10 @@
 // [Output] Revision-stable Episode workbench with controlled Dream Agent actions.
 // [Pos] /story-workspace/runs/:storyWorkspaceRunId/execution (Task 3 U11)
 // [Sync] 2026-08-06: compose Episode artifacts without changing their REST ownership.
+// [Sync] 2026-08-13: describe an unbound EP01 as a pending artifact-association
+//                    build, reserving trust language for server identity checks.
+// [Sync] 2026-08-13: keep EP01 association state read-only; confirmed turns
+//                    publish and bind automatically without a manual UI action.
 
 import {
   useCallback,
@@ -34,7 +38,6 @@ import type {
 import { storyWorkspaceEpisodeOptionCanonicalInputs } from '../../hooks/story-workspace/contracts';
 import {
   storyWorkspaceContinueEpisodeAction,
-  storyWorkspaceRecoverEpisodeBinding,
   useStoryWorkspaceEpisodeArtifacts,
 } from '../../hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -85,7 +88,7 @@ const EPISODE_ACTION_LABELS: Readonly<Record<StoryWorkspaceEpisodeDispatchAction
   regenerate_storyboard: '更新详细分镜',
   generate_prompts: '生成镜头 Prompt',
   review_full_chain: '审阅完整第一集',
-  validate_episode: '验证第一集产物',
+  validate_episode: '校验第一集产物',
   prepare_render_guide: '生成制作指导',
 };
 
@@ -516,7 +519,7 @@ export function StoryWorkspaceExecutionPage({
   const [episodeExpandedKeys, setEpisodeExpandedKeys] =
     useState<ReadonlySet<string>>(() => new Set());
   const [episodeActionBusy, setEpisodeActionBusy] =
-    useState<'recover' | 'continue' | null>(null);
+    useState<'continue' | null>(null);
   const [episodeActionError, setEpisodeActionError] = useState<string | null>(null);
   const [episodeActionNotice, setEpisodeActionNotice] = useState<string | null>(null);
   const [threadSessionRefreshNonce, setThreadSessionRefreshNonce] = useState(0);
@@ -583,11 +586,11 @@ export function StoryWorkspaceExecutionPage({
     : episodeSurface === null
       ? 'loading'
       : `unbound:${episodeSurface.bindingRecovery.autoRepairAttempted}`;
-  const episodeActionName = episodeSurface?.bindingAvailability === 'unbound'
-    ? 'recover_first_episode_binding'
-    : episodeSurface?.actionProjection?.recommendedActionId
+  const episodeActionName = episodeSurface?.bindingAvailability === 'bound'
+    ? episodeSurface.actionProjection?.recommendedActionId
       ?? episodeSurface?.workflow?.nextAction.action
-      ?? 'none_in_scope';
+      ?? 'none_in_scope'
+    : 'none_in_scope';
   const episodeActionIdentity = `${runId}\u0000${episodeActionFact}\u0000${episodeActionName}`;
   const episodeActionCurrentIdentityRef = useRef(episodeActionIdentity);
   const episodeActionGenerationRef = useRef(0);
@@ -839,44 +842,6 @@ export function StoryWorkspaceExecutionPage({
       episodeActionMountedRef.current,
     )
   );
-  const handleEpisodeRecovery = async () => {
-    if (
-      episodeSurface === null
-      || episodeSurface.bindingAvailability !== 'unbound'
-      || !episodeSurface.bindingRecovery.canDispatch
-      || episodeDispatchedIdentity === episodeActionIdentity
-    ) return;
-    const action = 'recover_first_episode_binding';
-    const idempotencyKey = episodeActionKeys.keyFor(runId, episodeActionFact, action);
-    const ticket = beginEpisodeAction();
-    setEpisodeActionBusy('recover');
-    setEpisodeActionError(null);
-    try {
-      const accepted = await storyWorkspaceRecoverEpisodeBinding(runId, episodeSurface, {
-        idempotencyKey,
-        token: getAuthToken(),
-      });
-      if (!episodeActionTicketIsFresh(ticket)) return;
-      const dispatchedAction: StoryWorkspaceEpisodeDispatchedAction = {
-        action,
-        fact: episodeActionFact,
-        identity: episodeActionIdentity,
-        messageId: accepted.messageId,
-      };
-      episodeDispatchedActionRef.current = dispatchedAction;
-      setEpisodeDispatchedAction(dispatchedAction);
-      setEpisodeActionNotice('已交给同一 Dream Agent；第一集关联将从服务端事实恢复。');
-      setDreamAgentInitialWorkflowFocus(null);
-      setAgentDialogOpen(true);
-      setThreadSessionRefreshNonce((value) => value + 1);
-      refreshEpisodeArtifacts();
-    } catch {
-      if (!episodeActionTicketIsFresh(ticket)) return;
-      setEpisodeActionError('第一集关联暂未恢复，页面会继续读取服务端事实。');
-    } finally {
-      if (episodeActionTicketIsFresh(ticket)) setEpisodeActionBusy(null);
-    }
-  };
   const recommendedEpisodeWorkflowAction: StoryWorkspaceEpisodeActionOptionV2 | null =
     episodeSurface?.actionProjection?.actionOptions.find(
       (option) => option.actionId === episodeSurface.actionProjection?.recommendedActionId,
@@ -968,19 +933,7 @@ export function StoryWorkspaceExecutionPage({
                 ? 'invalid'
                 : 'unavailable';
   const dreamAgentWorkflowActions: readonly StoryWorkspaceDreamAgentWorkflowActionViewModel[] =
-    episodeSurface?.bindingAvailability === 'unbound'
-      ? [{
-        id: 'recover_first_episode_binding',
-        label: '恢复第一集关联',
-        displayCommand: '恢复可信 Episode 关联',
-        isCurrent: true,
-        canDispatch: episodeSurface.bindingRecovery.canDispatch,
-        pending: episodeDispatchedIdentity === episodeActionIdentity,
-        disabledReason: episodeSurface.bindingRecovery.canDispatch
-          ? null
-          : '当前没有可恢复的可信 Episode 关联',
-      }]
-      : episodeSurface?.bindingAvailability === 'bound'
+    episodeSurface?.bindingAvailability === 'bound'
         ? episodeSurface.actionProjection !== null
           && episodeSurface.actionProjection !== undefined
           ? episodeSurface.actionProjection.actionOptions.map((option) => ({
@@ -1016,10 +969,6 @@ export function StoryWorkspaceExecutionPage({
   const handleDreamAgentWorkflowAction = (actionId: string) => {
     const action = dreamAgentWorkflowActions.find((candidate) => candidate.id === actionId);
     if (action === undefined || !action.canDispatch || action.pending) return;
-    if (action.id === 'recover_first_episode_binding') {
-      void handleEpisodeRecovery();
-      return;
-    }
     if (
       episodeSurface?.actionProjection === null
       || episodeSurface?.actionProjection === undefined
@@ -1269,26 +1218,12 @@ export function StoryWorkspaceExecutionPage({
           </div>
         ) : episodeSurface.bindingAvailability === 'unbound' ? (
           <main aria-labelledby="story-workspace-episode-unbound-title">
-            <h2 id="story-workspace-episode-unbound-title">尚未建立可信的第一集关联</h2>
-            <p>页面不会猜测 story、Episode 或目录；恢复结果以服务端绑定事实为准。</p>
-            {episodeSurface.bindingRecovery.canDispatch && (
-              <button
-                disabled={
-                  episodeActionBusy !== null
-                  || episodeDispatchedIdentity === episodeActionIdentity
-                }
-                onClick={() => void handleEpisodeRecovery()}
-                type="button"
-              >
-                {episodeDispatchedIdentity === episodeActionIdentity
-                  ? '已提交关联恢复'
-                  : episodeActionBusy === 'recover'
-                    ? '正在恢复…'
-                    : '恢复第一集关联'}
-              </button>
-            )}
-            {episodeActionError !== null && <p role="alert">{episodeActionError}</p>}
-            {episodeActionNotice !== null && <p aria-live="polite">{episodeActionNotice}</p>}
+            <h2 id="story-workspace-episode-unbound-title">尚未构建第一集产物关联</h2>
+            <p role="status">关联状态：等待确认后的自动发布与绑定</p>
+            <p>
+              确认后的 Dream Agent 成功生成并通过服务端校验后，系统会自动发布产物、
+              构建关联并由页面读取更新，无需手动构建。
+            </p>
           </main>
         ) : (
           <main aria-labelledby="story-workspace-episode-title">
@@ -1297,6 +1232,7 @@ export function StoryWorkspaceExecutionPage({
               <h2 id="story-workspace-episode-title">
                 {episodeSurface.narrative?.overview.title ?? '第一集'}
               </h2>
+              <p role="status">第一集产物关联：已关联</p>
               <StoryWorkspaceStoryIndexStatus
                 error={storyIndex.error}
                 fileStatus={storyIndexFileStatus}

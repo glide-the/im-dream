@@ -395,7 +395,10 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
       confirmationDispatched,
     );
     const href = storyWorkspaceReadDreamRunString(run.href, 'href');
-    if (href !== `/story-workspace/dream?run=${storyWorkspaceRunId}`) {
+    const expectedHref = confirmationAccepted
+      ? `/story-workspace/runs/${storyWorkspaceRunId}/execution`
+      : `/story-workspace/dream?run=${storyWorkspaceRunId}`;
+    if (href !== expectedHref) {
       throw new Error('Dream re-entry response has invalid href.');
     }
     const deckDisplayName = storyWorkspaceReadBoundedDreamRunString(

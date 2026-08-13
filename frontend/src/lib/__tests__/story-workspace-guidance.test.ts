@@ -1,8 +1,7 @@
 // [Input] Synthetic chat message metadata shapes (Playwright node-side runner).
-// [Output] Contract tests for the story-workspace guidance filter: DEC-032
-//          requires guidance rows (metadata.kind="story-workspace-guidance")
-//          to persist in chat_message yet never render as Chat bubbles.
-// [Pos] story-workspace guidance filter test node (Task 4 Step 0)
+// [Output] Contract tests proving Dream business rows persist and render in the
+//          exact shared Chat transcript without a frontend visibility filter.
+// [Pos] Story Workspace message classification/pass-through contract tests.
 // [Sync] 2026-08-04: initial coverage - predicate + list filter semantics.
 
 import { expect, test } from '@playwright/test';
@@ -52,7 +51,7 @@ test('recognizes only the explicit system-hidden visibility marker', () => {
   expect(isSystemHiddenMessageMetadata(null)).toBe(false);
 });
 
-test('Chat compatibility filter drops guidance and Dream confirmation rows', () => {
+test('Chat compatibility seam preserves every Dream business row', () => {
   const messages = [
     { id: 'm1', role: 'user', metadata: undefined },
     { id: 'guide_k-1', role: 'user', metadata: { kind: 'story-workspace-guidance', actor: '11' } },
@@ -82,6 +81,18 @@ test('Chat compatibility filter drops guidance and Dream confirmation rows', () 
       role: 'user',
       metadata: { kind: STORY_WORKSPACE_DREAM_AGENT_USER_KIND },
     },
+    {
+      id: 'dream_json_control',
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text: '{"action":"confirm_and_continue","run":"run_abc"}',
+      }],
+      metadata: {
+        kind: 'story-workspace-dream-confirmation',
+        visibility: SYSTEM_HIDDEN_MESSAGE_VISIBILITY,
+      },
+    },
     { id: 'm3', role: 'assistant' },
     { id: 'guide_k-2', role: 'user', metadata: { kind: 'story-workspace-guidance' } },
   ];
@@ -89,10 +100,20 @@ test('Chat compatibility filter drops guidance and Dream confirmation rows', () 
   const visible = filterStoryWorkspaceGuidanceMessages(messages);
   expect(visible.map((message) => message.id)).toEqual([
     'm1',
+    'guide_k-1',
     'm2',
+    'dream_k-1',
+    'dream_launch_goal',
+    'dream_agent_private',
     'dream_agent_human',
+    'dream_json_control',
     'm3',
+    'guide_k-2',
   ]);
+  expect(visible.find((message) => message.id === 'dream_json_control')?.parts).toEqual([{
+    type: 'text',
+    text: '{"action":"confirm_and_continue","run":"run_abc"}',
+  }]);
 });
 
 test('recognizes only server-attested private episode actions', () => {
@@ -114,7 +135,8 @@ test('recognizes only server-attested private episode actions', () => {
 test('filter preserves the input array and handles empty lists', () => {
   const messages = [{ id: 'm1', metadata: { kind: 'story-workspace-guidance' } }];
   const visible = filterStoryWorkspaceGuidanceMessages(messages);
-  expect(visible).toEqual([]);
+  expect(visible).toEqual(messages);
+  expect(visible).not.toBe(messages);
   expect(messages).toHaveLength(1);
   expect(filterStoryWorkspaceGuidanceMessages([])).toEqual([]);
 });

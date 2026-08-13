@@ -43,7 +43,7 @@ const response = {
       lastActivityAt: '2026-08-04T10:00:00Z',
       createdAt: '2026-08-04T09:00:00Z',
       sortKey: '03:2026-08-04T10:00:00Z:2026-08-04T09:00:00Z:run_b',
-      href: '/story-workspace/dream?run=run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      href: '/story-workspace/runs/run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/execution',
     },
   ],
 };
@@ -56,6 +56,19 @@ test('canonical Dream runs endpoint and parser preserve server ordering', () => 
     'run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   ]);
   expect(parsed.runs.map((run) => run.group)).toEqual(['in_progress', 'recent']);
+  expect(parsed.runs.map((run) => run.href)).toEqual([
+    '/story-workspace/dream?run=run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    '/story-workspace/runs/run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/execution',
+  ]);
+});
+
+test('confirmed Dream re-entry must target the execution workbench', () => {
+  expect(() => storyWorkspaceParseDreamRuns({
+    runs: [{
+      ...response.runs[1],
+      href: '/story-workspace/dream?run=run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    }],
+  })).toThrow(/href/i);
 });
 
 test('Dream runs from a pre-goalPrefix backend remain visible with the Deck title fallback', () => {

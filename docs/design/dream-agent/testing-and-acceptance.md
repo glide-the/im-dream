@@ -368,10 +368,9 @@ and latest-hint memory.
   status + stream reconnect.
 - Post-EOF history replaces transient parts only for the same thread/generation.
 - Stale async recovery from a prior thread cannot overwrite the active thread.
-- History, live render, reconnect and export share
-  `filterStoryWorkspaceControlMessages`; private guidance/Dream-confirmation/
-  episode-envelope rows are absent, zero-visible-part rows create no blank
-  bubble, and visible owner parts match across Dream and Chat.
+- History、实时渲染、重连和 export 必须保留 Dream launch、guidance、
+  confirmation、episode action、普通用户消息及内部 JSON 正文；后端不得置空，前端不得
+  按 Dream kind/visibility 过滤。零可见 part 不生成空白气泡，Dream 与 Chat 的正文一致。
 - Dream `markRead`, scroll-follow, focus return and polite announcement behavior
   survives ChatPanel composition.
 
@@ -411,11 +410,11 @@ Executable transition evidence is
 - The same fixtures on Dream and Chat produce identical visible rows/parts for
   text, reasoning state/text, tool identity/name/state/input/output/error and
   canonical client-safe provider/turn errors.
-- `story-workspace-guidance`, `story-workspace-dream-confirmation` and
-  server-attested episode-action envelope rows never render or export. A row with
-  zero visible parts produces no empty text/bubble.
-- Export consumes the filtered visible model and cannot re-read raw persistence;
-  private rows never enter export artifacts.
+- `story-workspace-guidance`、`story-workspace-dream-confirmation`、launch 与
+  server-attested episode-action envelope 的正文均渲染并进入 owner export；内部 JSON
+  不脱敏。只有零可见 part 不产生空白气泡。
+- Export 与页面消费相同的 DTO allowlist：正文原样保留，但 actor、claim、lease、指纹、
+  session 等未公开元数据不得从 raw persistence 旁路进入客户端。
 - Observer observations, diagnostics and logs contain no prompt, response,
   answers, tool input, token, credential or filesystem path.
 - `agentActivity.operationId` is either absent/null or exactly a lowercase
@@ -792,8 +791,8 @@ For every P0/P1 row, append or link a record with this schema:
       and page copy rejects terminal/confirmation/subagent/tool hints.
 - [x] Workflow owner transition tests pass.
 - [x] Accessibility and cross-surface switch tests pass headlessly.
-- [x] Shared visibility/private-row/zero-part/export snapshots pass on both
-      surfaces.
+- [x] Shared Dream-body-visible/metadata-allowlist/zero-part/export snapshots
+      pass on both surfaces.
 - [x] Stop eligibility, failure/timeout/`running=true`, subagent-history and
       unmount/navigation input-lock tests pass.
 - [x] TypeScript, ESLint, build and frontend contracts pass; final documentation

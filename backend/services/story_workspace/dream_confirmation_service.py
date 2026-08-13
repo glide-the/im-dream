@@ -1,11 +1,13 @@
-"""Persist one Dream confirmation and queue the original Chat Agent.
+"""Persist one visible Dream confirmation and queue the original Chat Agent.
 
-The confirmation is a hidden ``chat_message`` user turn. PostgreSQL persistence
-is atomic (message insert plus thread touch) and idempotent without adding a
-table or changing DDL. Dream files live on a separate filesystem durability
-domain, so their revisions are read once before and once while holding the
-PostgreSQL write transaction; the command retains the accepted base revisions so
-the Agent must apply them with the file protocol's own compare-and-swap rules.
+The confirmation is a normal ``chat_message`` user turn whose complete JSON
+control body remains visible in shared Chat/Dream history. PostgreSQL
+persistence is atomic (message insert plus thread touch) and idempotent without
+adding a table or changing DDL. Dream files live on a separate filesystem
+durability domain, so their revisions are read once before and once while
+holding the PostgreSQL write transaction; the command retains the accepted base
+revisions so the Agent must apply them with the file protocol's own
+compare-and-swap rules.
 """
 
 from __future__ import annotations
@@ -161,15 +163,76 @@ def _hidden_parts(
         "kind": STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND,
         "command": _command_wire(payload),
         "instructions": {
-            "first": (
-                "Write the edits to canonical workspace files and update each "
-                "affected Dream stage revision."
+            "first_action": (
+                "Your first action MUST be a built-in Write or Edit tool call. "
+                "Do not explain, plan, inspect, or reason before that tool call."
             ),
-            "then": "Continue the same plugin in this Chat thread.",
-            "confirmation": "Do not ask for another confirmation.",
+            "edits": (
+                "If command.edits is non-empty, apply only those edits to the "
+                "canonical files already known in this session."
+            ),
+            "files": (
+                "In the existing canonical Project path, create or overwrite "
+                "episodes/EP01/episode-outline.md, script.md, storyboard.yaml, "
+                "and review-report.md with built-in Write/Edit tools. Real files, "
+                "not assistant-message code blocks, are the only completion fact."
+            ),
+            "storyboard_contract": (
+                "Overwrite storyboard.yaml even if a previous attempt created it. "
+                "Every shots item must use a quoted ASCII string shot_id such as "
+                "\"shot-001\"; an integer such as shot_id: 1 is invalid. Each item "
+                "must use exactly this minimal shape: {shot_id: \"shot-001\", "
+                "shot_type: \"wide\", visual: \"...\", camera: {movement: "
+                "\"static\"}, timing: {duration_sec: 6}}. shot_id values must be "
+                "unique and match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$. Do not "
+                "research another schema."
+            ),
+            "forbidden": (
+                "Do not call Dream MCP, Agent, Read, Grep, Glob, Bash, WebFetch, "
+                "WebSearch, or AskUserQuestion. Do not inspect plugins or schemas. "
+                "Do not write .dream. Do not ask for another confirmation."
+            ),
+            "finish": (
+                "After the four file writes succeed, reply with one short completion "
+                "sentence and stop. The host alone validates, updates Dream stages, "
+                "publishes the Run-private .dream copy, and binds EP01."
+            ),
         },
     }
     return [{"type": "text", "text": _canonical_json(envelope)}]
+
+
+def _current_confirmation_parts(parts: list) -> Optional[list[dict[str, str]]]:
+    """Rebuild a persisted confirmation with the current visible instructions.
+
+    The command itself remains the immutable, fingerprinted user decision. Only
+    the server-owned instruction block is refreshed so confirmations persisted
+    by an older application version are not repeatedly dispatched with an
+    obsolete output contract. The refreshed JSON is written back before the
+    Agent turn starts, keeping visible history identical to the Agent input.
+    """
+
+    if len(parts) != 1 or not isinstance(parts[0], dict):
+        return None
+    text = parts[0].get("text")
+    if parts[0].get("type") != "text" or not isinstance(text, str):
+        return None
+    try:
+        envelope = json.loads(text)
+        command = envelope.get("command") if isinstance(envelope, dict) else None
+        if not (
+            isinstance(envelope, dict)
+            and envelope.get("kind")
+            == STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND
+            and isinstance(command, dict)
+        ):
+            return None
+        payload = StoryWorkspaceDreamConfirmationCommand.model_validate(command)
+    except (TypeError, ValueError):
+        return None
+    if _command_wire(payload) != command:
+        return None
+    return _hidden_parts(payload)
 
 
 def _validate_edit_value(field: str, value: Any) -> None:
@@ -393,11 +456,17 @@ def story_workspace_mark_dream_confirmation_dispatched(
         metadata.pop(_DISPATCH_CLAIM_ID, None)
         metadata.pop(_DISPATCH_CLAIM_LEASE_UNTIL, None)
         updated = db.execute(
-            "UPDATE chat_message SET metadata = %s WHERE id = %s",
-            (_canonical_json(metadata), dispatch.message_id),
+            "UPDATE chat_message SET metadata = %s WHERE id = %s "
+            "AND metadata = %s",
+            (
+                _canonical_json(metadata),
+                dispatch.message_id,
+                row["metadata"],
+            ),
         )
         if updated.rowcount != 1:
-            raise StoryWorkspaceDreamConfirmationError("RESULT_COMMIT_FAILED", 503)
+            db.rollback()
+            return False
         db.commit()
         return True
     except StoryWorkspaceDreamConfirmationError:
@@ -698,6 +767,11 @@ def story_workspace_claim_dream_confirmation(
             db.commit()
             return None
 
+        claimed_parts = _current_confirmation_parts(current.parts)
+        if claimed_parts is None:
+            db.commit()
+            return None
+
         claimed_metadata = dict(metadata)
         claimed_metadata["dispatch_status"] = (
             STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
@@ -708,19 +782,25 @@ def story_workspace_claim_dream_confirmation(
         )
         claimed_metadata.pop(_DISPATCH_ACK_CLAIM_SHA256, None)
         updated = db.execute(
-            "UPDATE chat_message SET metadata = %s WHERE id = %s",
-            (_canonical_json(claimed_metadata), current.message_id),
+            "UPDATE chat_message SET parts = %s, metadata = %s WHERE id = %s "
+            "AND parts = %s AND metadata = %s",
+            (
+                _canonical_json(claimed_parts),
+                _canonical_json(claimed_metadata),
+                current.message_id,
+                row["parts"],
+                row["metadata"],
+            ),
         )
         if updated.rowcount != 1:
-            raise StoryWorkspaceDreamConfirmationError(
-                "RESULT_COMMIT_FAILED", 503
-            )
+            db.rollback()
+            return None
         db.commit()
         return StoryWorkspaceDreamConfirmationDispatch(
             thread_id=current.thread_id,
             actor_id=current.actor_id,
             message_id=current.message_id,
-            parts=current.parts,
+            parts=claimed_parts,
             metadata=claimed_metadata,
         )
     except StoryWorkspaceDreamConfirmationError:
@@ -781,13 +861,17 @@ def _story_workspace_set_dream_confirmation_claim_lease(
             float(now_s) + float(lease_duration_s)
         )
         updated = db.execute(
-            "UPDATE chat_message SET metadata = %s WHERE id = %s",
-            (_canonical_json(metadata), dispatch.message_id),
+            "UPDATE chat_message SET metadata = %s WHERE id = %s "
+            "AND metadata = %s",
+            (
+                _canonical_json(metadata),
+                dispatch.message_id,
+                row["metadata"],
+            ),
         )
         if updated.rowcount != 1:
-            raise StoryWorkspaceDreamConfirmationError(
-                "RESULT_COMMIT_FAILED", 503
-            )
+            db.rollback()
+            return False
         db.commit()
         return True
     except StoryWorkspaceDreamConfirmationError:
@@ -949,6 +1033,10 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         claim_id_factory: Callable[[], str] = lambda: uuid4().hex,
         retry_base_s: float = 2.0,
         retry_max_s: float = 60.0,
+        before_dispatch: (
+            Callable[[Any, StoryWorkspaceDreamConfirmationDispatch], None]
+            | None
+        ) = None,
         before_dispatched_ack: (
             Callable[[Any, StoryWorkspaceDreamConfirmationDispatch], None]
             | None
@@ -986,6 +1074,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         self._claim_id_factory = claim_id_factory
         self._retry_base_s = max(float(retry_base_s), 0.01)
         self._retry_max_s = max(float(retry_max_s), self._retry_base_s)
+        self._before_dispatch = before_dispatch
         self._before_dispatched_ack = before_dispatched_ack
         self._in_flight: dict[str, asyncio.Task[None]] = {}
         self._retry_state: dict[str, _StoryWorkspaceDreamRetryState] = {}
@@ -1089,6 +1178,18 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         finally:
             db.close()
 
+    def _prepare_dispatch_sync(
+        self,
+        dispatch: StoryWorkspaceDreamConfirmationDispatch,
+    ) -> None:
+        if self._before_dispatch is None:
+            return
+        db = self._db_factory()
+        try:
+            self._before_dispatch(db, dispatch)
+        finally:
+            db.close()
+
     def _set_claim_lease_sync(
         self,
         dispatch: StoryWorkspaceDreamConfirmationDispatch,
@@ -1140,7 +1241,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
     async def _renew_owned_claim(
         self,
         dispatch: StoryWorkspaceDreamConfirmationDispatch,
-    ) -> None:
+    ) -> bool:
         while True:
             await asyncio.sleep(self._lease_renew_interval_s)
             try:
@@ -1159,17 +1260,15 @@ class StoryWorkspaceDreamConfirmationCoordinator:
                 )
                 continue
             if not renewed:
-                return
+                return False
 
     async def _consume_and_ack(
         self,
         dispatch: StoryWorkspaceDreamConfirmationDispatch,
     ) -> None:
         completion_observed = False
-        heartbeat: Optional[asyncio.Task[None]] = asyncio.create_task(
-            self._renew_owned_claim(dispatch),
-            name=f"dream-confirmation-lease-{dispatch.message_id}",
-        )
+        heartbeat: Optional[asyncio.Task[bool]] = None
+        turn_task: Optional[asyncio.Task[bool]] = None
 
         async def stop_heartbeat() -> None:
             nonlocal heartbeat
@@ -1180,22 +1279,61 @@ class StoryWorkspaceDreamConfirmationCoordinator:
             heartbeat = None
 
         try:
-            dispatcher = self._dispatcher_factory()
-            completed = await dispatcher(
-                dispatch.thread_id,
-                dispatch.actor_id,
-                dispatch.message_id,
-                dispatch.parts,
-                dispatch.metadata,
+            heartbeat = asyncio.create_task(
+                self._renew_owned_claim(dispatch),
+                name=f"dream-confirmation-lease-{dispatch.message_id}",
             )
-            await stop_heartbeat()
+            # A persisted, actor/thread-scoped confirmation is the durable
+            # review fact. Reconcile its workflow state before inference so a
+            # lifecycle error cannot run the same expensive Agent turn again.
+            await asyncio.to_thread(self._prepare_dispatch_sync, dispatch)
+            if heartbeat.done():
+                # Preparation outlived or lost the claim. Do not start a turn
+                # after another coordinator is allowed to reclaim it.
+                return
+            dispatcher = self._dispatcher_factory()
+            turn_task = asyncio.ensure_future(
+                dispatcher(
+                    dispatch.thread_id,
+                    dispatch.actor_id,
+                    dispatch.message_id,
+                    dispatch.parts,
+                    dispatch.metadata,
+                )
+            )
+            turn_task.set_name(f"dream-confirmation-turn-{dispatch.message_id}")
+            done, _pending = await asyncio.wait(
+                {heartbeat, turn_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if heartbeat in done and turn_task not in done:
+                # A process that lost its durable lease must not keep running
+                # the same Agent turn while a new owner reclaims the command.
+                turn_task.cancel()
+                await asyncio.gather(turn_task, return_exceptions=True)
+                return
+            completed = await turn_task
             if completed:
                 completion_observed = True
-                await asyncio.to_thread(self._mark_dispatched_sync, dispatch)
-                self._retry_state.pop(dispatch.message_id, None)
+                # Freeze the lease snapshot before the ACK CAS. No heartbeat
+                # can rewrite metadata between ACK read and conditional update.
+                await stop_heartbeat()
+                acknowledged = await asyncio.to_thread(
+                    self._mark_dispatched_sync,
+                    dispatch,
+                )
+                if acknowledged:
+                    self._retry_state.pop(dispatch.message_id, None)
+                else:
+                    _logger.warning(
+                        "Dream confirmation ACK lost durable ownership for "
+                        "message_id=%s",
+                        dispatch.message_id,
+                    )
             else:
                 delay = self._record_retry(dispatch.message_id)
                 await self._defer_owned_claim(dispatch, delay)
+            await stop_heartbeat()
         except asyncio.CancelledError:
             await stop_heartbeat()
             self._record_retry(dispatch.message_id)
@@ -1215,6 +1353,9 @@ class StoryWorkspaceDreamConfirmationCoordinator:
             )
         finally:
             await stop_heartbeat()
+            if turn_task is not None and not turn_task.done():
+                turn_task.cancel()
+                await asyncio.gather(turn_task, return_exceptions=True)
             current = asyncio.current_task()
             if self._in_flight.get(dispatch.message_id) is current:
                 self._in_flight.pop(dispatch.message_id, None)

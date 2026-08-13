@@ -86,7 +86,7 @@ test('rejects URL/body drift, non-202 responses, and malformed accepted payloads
   })).toThrow();
 });
 
-test('Dream confirmation rows are hidden together with guidance rows', () => {
+test('Dream confirmation, guidance, and launch rows remain visible', () => {
   expect(isStoryWorkspaceDreamConfirmationMetadata({
     kind: 'story-workspace-dream-confirmation',
     story_workspace_run_id: RUN_ID,
@@ -100,5 +100,10 @@ test('Dream confirmation rows are hidden together with guidance rows', () => {
     { id: 'guidance', metadata: { kind: 'story-workspace-guidance' } },
     { id: 'launch', metadata: { kind: 'story-workspace-dream-agent-user', visibility: 'system-hidden' } },
   ]);
-  expect(visible.map((message) => message.id)).toEqual(['normal']);
+  expect(visible.map((message) => message.id)).toEqual([
+    'normal',
+    'dream',
+    'guidance',
+    'launch',
+  ]);
 });

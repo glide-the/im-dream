@@ -86,13 +86,6 @@ router = APIRouter()
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
 _PLATFORM_MODEL_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
 _SERVER_MESSAGE_ID_PREFIXES = ("dream_agent_", "dream_confirm_", "guide_")
-_PRIVATE_STORY_WORKSPACE_MESSAGE_KINDS = frozenset({
-    "story-workspace-dream-launch",
-    "story-workspace-guidance",
-    "story-workspace-dream-confirmation",
-})
-
-
 class PublicDispatchStatus(str, Enum):
     PENDING = "pending"
     DISPATCHING = "dispatching"
@@ -210,13 +203,12 @@ class PublicChatMetadataDto(BaseModel):
         if isinstance(is_partial, bool):
             values["is_partial"] = is_partial
 
-        private = (
-            malformed_discriminator
-            or visibility == "system-hidden"
-            or kind in _PRIVATE_STORY_WORKSPACE_MESSAGE_KINDS
-            or "story_workspace_episode_action" in metadata
-        )
-        return cls.model_validate(values), private
+        # Dream business rows use the shared Chat history as their visible
+        # transcript.  Their body must not be redacted merely because the row
+        # carries a server-owned kind, episode action, or legacy visibility
+        # marker.  Malformed discriminators still fail closed because their
+        # business provenance cannot be established safely.
+        return cls.model_validate(values), malformed_discriminator
 
 
 class PublicChatMessageDto(BaseModel):
@@ -232,23 +224,23 @@ class PublicChatMessageDto(BaseModel):
         metadata = message.get("metadata")
         if message.get("metadata_decode_error") is True:
             public_metadata: dict[str, Any] = {}
-            is_private = True
+            suppress_parts = True
         elif metadata is None:
             public_metadata = {}
-            is_private = False
+            suppress_parts = False
         elif isinstance(metadata, dict):
-            dto, is_private = PublicChatMetadataDto.from_storage(metadata)
+            dto, suppress_parts = PublicChatMetadataDto.from_storage(metadata)
             public_metadata = dto.model_dump(exclude_none=True, mode="json")
         else:
             public_metadata = {}
-            is_private = True
+            suppress_parts = True
         values = {
             key: message[key]
             for key in ("id", "role", "created_at")
             if key in message
         }
         values["parts"] = (
-            [] if is_private else parts if isinstance(parts, list) else []
+            [] if suppress_parts else parts if isinstance(parts, list) else []
         )
         values["metadata"] = public_metadata
         return cls.model_validate(values)

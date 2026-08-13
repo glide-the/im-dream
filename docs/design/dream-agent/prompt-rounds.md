@@ -4622,3 +4622,508 @@ before publisher implementation.
 
 - 提交前检查确认当前改动均属于已验收的最小闭环；未发现环境变量、凭证、业务正文或测试生成目录。
 - 最终 commit ID 和提交后工作树状态在本轮 Git 操作完成后确认。
+
+## 第 94 轮——确认后工作台生成与 Dream 消息原文可见
+
+**当前轮次目标**
+
+修复 Dream“确认并继续”后只输出文字、不生成 Episode 工作台产物且重复执行确认的问题；确认成功后进入并默认重返故事协作工作台。同时取消 Dream 业务消息正文的后端脱敏和前端过滤。
+
+**优化后的执行提示词**
+
+> 基于真实 Run `run_ba96a80d55a04d0f8a2799ecd8a824cf` 的 workflow、thread、确认消息和 canonical 文件证据，修复 Dream 确认提交、Agent 执行、成功 Hook、Episode 绑定、工作台路由之间的业务断点。确认前的成功主 turn 必须把 Run 推进到待确认；确认命令必须明确要求插件写入首集工作台 canonical 文件；确认 turn 成功后自动同步 `.dream`、建立权威 Episode 绑定并进入执行页。同一确认只能消费一次，失败可恢复但不得重复产生 Agent turn。Dream 的 launch、guidance、confirmation、episode action 和普通用户消息正文必须通过共享 Chat history/SSE 原文显示，不得在后端置空或在前端筛除；只保留元数据字段最小公开边界。不得修改 Claude SDK 入口、Claude session ID 语义或标准 SSE 报文，不得克隆真实数据。
+
+**可选增强项**
+
+- 对旧的 `running + 已持久化确认` 状态提供一次事实驱动的幂等修复，使已发生故障的真实 Run 能停止重复调度。
+
+**本轮检查或修改范围**
+
+- Dream workflow 生命周期、确认协调器、成功 turn Hook、Episode 绑定、确认指令、重入链接和执行页导航。
+- Chat history 的 Dream 正文投影与前端消息消费过滤。
+- 对应中文设计、后端/前端契约测试和真实浏览器业务验收。
+
+**本轮完成标准**
+
+- 确认后产生首集工作台文件和 Episode 绑定，执行页可读取并显示。
+- 确认只触发一个 Agent turn，Run 生命周期可幂等恢复。
+- Dream 用户消息和内部 JSON 控制正文在 Chat/Dream 两侧都可见。
+- 身份、权限、thread/run 绑定与内部元数据边界未削弱。
+- 聚焦测试、类型检查、构建及真实 UI 流程通过；未执行项明确记录。
+
+**本轮实际结果和未验证推断**
+
+- 实现和验证进行中。当前已确认：真实 Run 的确认消息处于 `dispatching`，workflow 仍为 `running`，ACK 前生命周期转换因此失败并重复调度；后端 `PublicChatMessageDto` 与前端 `filterStoryWorkspaceControlMessages` 同时隐藏了 Dream 业务正文。
+
+## 第 95 轮——三条业务合同并行审查
+
+**当前轮次目标**
+
+按用户要求用并行对话分别审查确认调度、Episode 产物绑定、消息可见性与页面导航，再由主线完成无冲突集成。
+
+**优化后的执行提示词**
+
+> 将 Dream 确认后故障拆为三个独立合同并行处理：一，确认状态必须在 Agent 调度前依据已持久化、已授权、stage 完整的确认事实幂等收敛，不能在完成 ACK 时才发现非法状态并重复运行；二，成功确认 turn 必须写入首集 canonical 文件、由宿主 Hook 同步 `.dream` 并建立 EP01 权威绑定，执行页只读这些事实；三，Dream launch、guidance、confirmation、episode action、普通用户消息和内部 JSON 控制正文必须经共享 Chat history/SSE 原样展示，确认后进入且重返 execution route。每条对话只检查自己的文件和测试边界，禁止修改 Claude SDK 入口、thread/session 语义和标准报文；主线负责合并结论、冲突检查及真实业务验证。
+
+**本轮检查或修改范围**
+
+- 并行对话仅做指定边界的代码审查或测试补充；生产实现和最终集成由主线负责。
+
+**本轮完成标准**
+
+- 三条对话都有独立证据和结论，且不存在重复实现或互相冲突的状态源。
+- 主线根据审查修正代码并统一运行聚焦与真实业务测试。
+
+**本轮实际结果和未验证推断**
+
+- 并行审查已启动，结果待合并。
+
+## 第 96 轮——确认工作台与消息原文验证
+
+**当前轮次目标**
+
+验证并行审查修正后的确认调度、四文件后置条件、Episode binding、execution 导航和 Dream 正文可见合同，并完成本机真实业务验收。
+
+**优化后的执行提示词**
+
+> 先以聚焦后端合同证明 claim/lease/ACK 的并发所有权、确认前 lifecycle 收敛、确认 turn 四文件后置条件、EP01 authority/binding 和 Dream 正文原样投影；再执行前端消息/导航合同、TypeScript、ESLint、生产构建与 `git diff --check`。然后只重启本会话拥有的后端，使用本机真实账号、真实 Run、真实模型，从可见 UI 走完“确认并继续 → execution 页面 → EP01 四产物显示 → 用户/内部 JSON 消息可见”的正常人类路径。禁止克隆业务数据、影子账号、直接数据库造数、固定 sleep、停止用户服务或隐藏失败证据。
+
+**本轮检查或修改范围**
+
+- 当前未提交业务改动、相关后端/前端测试、真实本机服务和真实 Run。
+- 不再扩大到无关 Story Workspace 功能或 Claude SDK 入口。
+
+**本轮完成标准**
+
+- 聚焦测试、类型、lint、build、diff check 通过。
+- 真实 UI 中确认只运行一次，execution 能显示 EP01 产物，重入继续进入 execution。
+- Dream/Chat 能看到用户消息与确认 JSON 正文，Admin 能追踪真实模型请求。
+- 所有本轮自有异步任务/浏览器退出，用户服务和数据保持。
+
+**本轮实际结果和未验证推断**
+
+- 验证进行中。并行审查已促成 claim/lease/ACK CAS、lease 丢失取消 turn、服务端 project slug authority、四文件 postcondition 与确认后 Hook 失败传播等修正。
+
+## 第 97 轮——产物构建术语修正
+
+**当前轮次目标**
+
+按用户要求区分“产物构建过程”和“安全信任边界”，删除用“可信”替代第一集产物构建/关联的业务文案。
+
+**优化后的执行提示词**
+
+> 扫描全部 Dream/Story Workspace 当前设计稿、页面文案、测试和插件说明。凡描述用户尚未完成的 Project/Episode 工作台、文件、产物绑定或页面准备过程，统一使用“尚未构建第一集产物关联”“第一集产物关联待构建”等业务表达，不得使用“可信/权威”代替“构建”。仅在 actor/thread/run 身份、server-derived provenance、权限、CAS 和安全校验的技术边界中保留“可信/权威”。同步更新 Mermaid、验收条件和 UI 断言，不改变 thread/session、SSE 或 Episode identity 安全实现。
+
+**本轮检查或修改范围**
+
+- `docs/design/dream-agent/**`、`docs/design/story-workspace/**`、Story Workspace 页面文案、对应测试和插件当前说明。
+- 历史 Prompt 执行记录只保留原始证据，不回写已经发生的历史引用；当前业务结论必须采用新术语。
+
+**本轮完成标准**
+
+- 页面统一显示“尚未构建第一集产物关联”。
+- 当前设计中构建过程使用“产物构建/产物关联”，安全术语只用于真实信任边界。
+- 相关文案测试和 Markdown 引用检查通过后继续真实业务验证。
+
+**本轮实际结果和未验证推断**
+
+- 已扫描 `docs/design/dream-agent/**`、`docs/design/story-workspace/**`、相关前后端、插件文案和测试；执行页将未绑定状态改为“尚未构建第一集产物关联”，关联动作、等待和失败文案统一使用构建/同步/校验产物语义。
+- 当前设计时序、Artifact 合同与插件说明已同步；`actor/thread/run/project` 服务端派生身份、来源证明、权限、CAS、manifest 提交标记和 Admin 跨系统合同仍保留“可信/权威”。
+- 聚焦验证通过：执行页 Playwright `16 passed`；插件合同 `3 passed, 20 subtests passed`；两个前端文件 ESLint 通过；Markdown 清单/引用路径和 `git diff --check` 通过。
+- 未运行真实模型或真实业务数据验收；本轮仅改文案、设计与对应静态/聚焦合同，不改变 thread/session、SSE 或 Episode identity 实现。
+
+## 第 98 轮——旧确认恢复与真实业务续测
+
+**当前轮次目标**
+
+不中断原任务；修复旧版本已持久化确认仍携带过时指令、因而重复调用真实模型却不生成首集工作台的问题，并继续真实页面验收。
+
+**优化后的执行提示词**
+
+> 在不修改 Claude Agent 入口、thread/session 定义、Claude session ID 和标准报文的前提下，为已持久化的 Dream 确认提供原子、可见的当前合同升级：保留用户已确认且已指纹校验的 command，只更新服务器所有的 instructions，并在 Agent turn 开始前将更新后的完整 JSON 写回同一条 Chat 消息，保证页面所见与 Agent 输入一致。随后使用同一本机真实账号、真实数据和真实模型走完“确认并继续 → 写出 EP01 四项 canonical 文件 → 成功 Hook 同步 `.dream` → 构建第一集产物关联 → execution 页面显示”的正常人类路径。失败不得 ACK，不得隐藏消息，不得克隆业务数据。
+
+**本轮检查或修改范围**
+
+- Dream 确认 claim 的旧消息兼容、可见控制正文、对应聚焦测试。
+- 当前任务拥有的 8765 后端、既有 5173/3000 用户服务、真实 Run 恢复及后续有头 E2E。
+- 并行 Codex 新任务只负责术语/设计稿，不暂停当前业务实现。
+
+**本轮完成标准**
+
+- 旧确认在调度前升级为当前四文件输出合同，数据库可见正文与 Agent 输入完全一致。
+- 同一确认不再使用旧指令反复产生无效真实模型调用。
+- 真实执行页可读取 EP01 四项产物并显示；Chat/Dream 保留完整用户及内部 JSON 消息。
+- 聚焦测试、静态检查、构建、真实有头单 worker E2E 均有明确结果。
+
+**本轮实际结果和未验证推断**
+
+- 已确认旧真实 Run 的失败不是 session 丢失，而是确认消息在新合同发布前已经持久化；恢复协调器忠实重放了旧正文，模型只回复文本，成功 Hook 因缺少 EP01 四项文件正确拒绝 ACK。兼容升级和续测进行中。
+
+## 第 99 轮——全新 Run 真实有头验收
+
+**当前轮次目标**
+
+在旧 Run 已真实恢复后，再用全新 Run 验证普通用户从 Dream 发起到首集执行工作台的完整生产路径，排除仅靠历史数据修复成功的可能。
+
+**优化后的执行提示词**
+
+> 使用本机真实账号 `dmeck123@suoxya.com`、当前真实 Deck/model 配置和正常 PostgreSQL，从可见 Dream 页面发起一个全新创作任务。主 Agent 完成人物、场景和分镜后，通过页面“确认并继续”提交同一 thread 的可见 JSON 确认；等待 Agent 写出 `episode-outline.md`、`script.md`、`storyboard.yaml`、`review-report.md`，由成功 Hook 同步到 Run-private `.dream` 并构建 EP01 产物关联。页面必须进入 execution、显示 EP01，Dream Agent 面板必须保留确认 JSON 正文；回到 Dream 后该 Run 默认重入 execution。只批准可见且预期的 Write/Agent 工具；Agent 终止而产物不完整时立即失败，禁止固定 sleep、数据克隆或 API 替代关键交互。
+
+**本轮检查或修改范围**
+
+- `frontend/e2e/dream-launch-real-model.spec.ts` 对应的人类路径。
+- 本任务拥有的 8765 后端、用户已有的 5173 与 3000 服务、本机真实数据和真实 Gateway 模型。
+- 测试生成的真实 Run、Thread 和 Admin 日志按协议保留供用户复核。
+
+**本轮完成标准**
+
+- 有头 Chromium、`--workers=1` 完成完整 UI 路径。
+- 新 Run 的三阶段草稿、四项 EP01 产物、`.dream` 同步、Episode 关联和默认重入均有可见/持久化证据。
+- 页面无横向溢出、关键控件位于窗口内、无 Ink-Dream console/page/request 错误。
+- 失败时保留真实 Run 回执和后台日志，不伪报成功。
+
+**本轮实际结果和未验证推断**
+
+- 真实有头验证开始；preflight 已确认仓库依赖和 5173/8765 监听正常。
+
+## 第 100 轮——可见 Agent 面板后的确认续测
+
+**当前轮次目标**
+
+修正真实人类路径中 Agent 消息面板展开后遮蔽 Dream 内容操作的问题，再从页面完成确认与首集工作台生成。
+
+**优化后的执行提示词**
+
+> 保持 Dream Agent 完整消息可见合同。主 Agent 完成后，如果页面当前展开“Dream Agent 完整消息”，测试必须像正常用户一样点击“返回 Dream 内容”，再查找并点击“确认并继续”；禁止用强制点击、隐藏面板、DOM 注入或直接 API 提交替代。随后继续验证同一 thread 的确认 turn、四文件产出、`.dream` 同步、EP01 产物关联、execution 显示和默认重入。
+
+**本轮检查或修改范围**
+
+- 仅修正真实 E2E 的面板状态处理；不改变生产 UI 的消息可见性或 Agent lifecycle。
+- 保留已生成的真实 Run 作为失败证据，并用修正后的完整可见路径再次验收。
+
+**本轮完成标准**
+
+- E2E 通过语义按钮返回内容，确认按钮真实可见、在窗口内且可操作。
+- 不因消息面板展开而误判业务按钮缺失。
+- 后续四文件与 execution 验收继续按第 99 轮标准执行。
+
+**本轮实际结果和未验证推断**
+
+- 首次全新 Run `run_ca43dc1cb9ff40e48e59d3f00f5f36c4` 已真实完成三阶段产物，Run 为 `pending_review`、revision 1、三阶段 item 数为 2/1/1。失败快照证明页面停在已展开的 Dream Agent 完整消息面板，因此“确认并继续”不在当前可见内容面板；模型、Hook 和三阶段产出没有失败。
+
+## 第 101 轮——四产物可读性后置条件
+
+**当前轮次目标**
+
+修复 Hook 只按路径存在就构建 Episode 关联、却允许 execution 页面把其中产物判为 invalid 的合同缺口。
+
+**优化后的执行提示词**
+
+> Dream 确认 turn 的成功后置条件必须与 execution 页面读取合同一致，而不是只判断四个文件路径存在。Hook 在 Run-private `.dream` 发布和 Episode 关联之前，分别使用现有 Episode outline、script、storyboard、review 解析器验证四项 canonical 文件；任一产物 invalid 时，同一 turn 失败、不 ACK、不发布、不构建产物关联。确认 JSON 明确要求 storyboard 每个 shots 项使用唯一 `shot_id`，并使用现有 canonical 字段形状，禁止另建简化 schema 或让前端容忍错误文件。
+
+**本轮检查或修改范围**
+
+- 确认指令、Dream 成功 Hook、现有 Episode 解析器复用、对应后端测试和真实有头 E2E。
+- 不修改 Claude Agent 入口、SSE、thread/session 或 execution 页面解析器。
+
+**本轮完成标准**
+
+- invalid storyboard 在发布/绑定前被 Hook 拒绝，确认保持可恢复。
+- 四项均能被现有页面解析器读取后才允许 `.dream` 发布和 EP01 产物关联。
+- 新确认正文能让模型生成含 `shot_id` 的 canonical storyboard。
+- 聚焦测试与全新真实有头流程通过。
+
+**本轮实际结果和未验证推断**
+
+- 真实 Run `run_bdda2d39eec244ed955e88201f53d70b` 暴露根因：确认 turn 写出了四个路径并被旧 Hook 绑定，但 storyboard 使用 `shot/type/description/duration_sec`，缺少页面权威解析器要求的 `shot_id`，因此 API 显示 `storyboard.yaml=invalid`。修复与续测进行中。
+- 确认指令已明确 `shot_id/shot_type/visual/camera.movement/timing.duration_sec` 合同；成功 Hook 在发布和绑定前复用现有 Episode outline、script、storyboard、review 解析器，invalid 文件会使 turn 失败且 publisher/binder 均不执行。
+- 聚焦确认/Hook 验证通过：`57 passed, 2 skipped, 16 subtests passed`。第三次真实 Run `run_425f38e32e1649ccb206f0cc1b7ee076` 已生成包含 12 个唯一 `shot_id` 的 canonical storyboard，四项文件被发布到 Run-private `.dream` 且页面均显示为可阅读。
+
+## 第 102 轮——执行页语义断言与故事索引验收
+
+**当前轮次目标**
+
+在四项真实 EP01 产物已经通过页面解析器并显示后，修正 E2E 对旧 `EP01` 文案的错误精确匹配，并把“Story Index 尚未建立”的可恢复合同与其他 HTTP 故障分开验收。
+
+**优化后的执行提示词**
+
+> 继续使用本机真实账号、真实数据、真实模型和可见浏览器完成 Dream 全链路。四项 Episode 产物均为 `available` 且绑定为 `bound` 后，按当前页面语义断言 `EP01 · Episode execution` 和四项可读入口；若 PostgreSQL Story Index 初始为 `missing`，像正常用户一样点击页面提供的“重试索引同步”，等待状态变为“已就绪”。诊断器可单独记录该契约允许的 Story Index `404 → 200` 过程，但不得忽略 Dream files、Episode artifacts 或其他 API 的 4xx/5xx。最后继续验证 Dream Agent 内可见确认 JSON、同一 thread 历史和默认重入 execution。
+
+**本轮检查或修改范围**
+
+- `frontend/e2e/dream-launch-real-model.spec.ts` 的页面语义断言、Story Index 状态记录和正常用户同步动作。
+- 第三次全新真实 Run 的页面快照、Run-private 文件和 API 事实；不修改生产 Agent lifecycle。
+
+**本轮完成标准**
+
+- E2E 不再因已删除的独立 `EP01` 文案误报失败。
+- Story Index 缺失状态有明确、可见、幂等的恢复动作，最终必须为 `200/已就绪`。
+- 其他 API 错误仍使测试失败；四项产物、消息原文、同 thread 和默认重入继续完整验证。
+
+**本轮实际结果和未验证推断**
+
+- 第三次真实 Run `run_425f38e32e1649ccb206f0cc1b7ee076` 已达到 `bound`，四项 Episode 产物均为 `available`，页面可阅读分集大纲、剧本、分镜和审阅报告。
+- 失败快照中的唯一业务断言失败是测试精确查找独立 `EP01`，而页面当前输出为 `EP01 · Episode execution`；Story Index 随后从 `404/missing` 经幂等同步变为 `200`。测试修正与最终续测进行中。
+
+## 第 103 轮——隐藏手动关联入口后的最终集成验证
+
+**当前轮次目标**
+
+集成独立 Codex 对话完成的“隐藏手动构建第一集产物关联”改动，验证普通用户只需一次“确认并继续”即可自动生成、发布、绑定并进入可读 Episode 页面，然后完成最终真实有头验收。
+
+**优化后的执行提示词**
+
+> 审核共享工作树中的执行页改动：未关联时只读显示等待确认后的自动发布与绑定，execution 页面及 Dream Agent 操作区都不得暴露“构建第一集产物关联”按钮；不得删除后端成功 Hook、产物解析、Run-private `.dream` 发布或 `bind_first_episode`。依次运行聚焦前后端合同、TypeScript、目标 ESLint、生产构建、Python 编译、`git diff --check` 和受保护入口零差异检查。最后使用 `dmeck123@suoxya.com`、真实 Deck/model、本机真实 PostgreSQL 和可见 Chromium `--headed --workers=1`，从 Dream 发起全新任务，完成 Chat 往返、确认并继续、四项 EP01 文件、Story Index 同步、消息原文、同 thread 历史和默认 execution 重入；禁止克隆数据、固定 sleep、直接 API 替代关键点击或停止用户服务。
+
+**本轮检查或修改范围**
+
+- 当前全部 Dream 重构改动、按钮隐藏对话的前端/文档改动和真实 E2E。
+- 受保护的 `agent_runner.py` 与 `thread_factory.py` 只做零差异检查；5173/3000 用户服务保持运行。
+
+**本轮完成标准**
+
+- 页面没有手动关联入口，自动链路仍能真实构建四项可读产物和 Episode 关联。
+- 后端聚焦、前端合同、类型、lint、build、diff check 均通过。
+- 最终真实有头单 worker 流程通过；失败则保留 Run/thread 回执并继续按事实修复，不伪报成功。
+
+**本轮实际结果和未验证推断**
+
+- 独立 Codex 对话 `019ffa6d-ffe7-7e43-b8e3-ff4e9f98e83b` 已移除 execution 未关联页和 Dream Agent 操作区的手动构建入口；聚焦源级合同 `16 passed`、mocked Chromium `2 passed`、TypeScript、目标 ESLint、Markdown 链接和 `git diff --check` 均通过。
+- 主线最终集成和全新真实有头验收进行中。
+
+## 第 104 轮——真实轮询瞬时连接恢复
+
+**当前轮次目标**
+
+修正真实 E2E 在后端仍健康且相邻请求持续为 200 时，因单次 `ECONNRESET` 立即终止整个长时确认流程的问题；保持业务失败快速暴露。
+
+**优化后的执行提示词**
+
+> 保留真实浏览器、真实账号、真实模型和真实数据路径。Episode 产物的 `expect.poll` 读取允许有限、连续的瞬时网络失败：读取成功即清零计数，连续达到 5 次才抛出原始错误；Run 进入失败/取消、主 Agent 已停止但四项产物不完整、API 返回非 200 合同错误等业务失败仍立即失败。禁止固定 sleep、无限重试、隐藏业务错误或重启/克隆数据替代恢复。先检查已接受 Run 的同一 confirmation turn 是否继续完成，再重跑完整有头流程。
+
+**本轮检查或修改范围**
+
+- `frontend/e2e/dream-launch-real-model.spec.ts` 的 Episode 产物轮询错误边界。
+- 真实 Run `run_bfcb11a1062d453095d57229d172c0c0` 的后台完成、四项文件和绑定事实。
+
+**本轮完成标准**
+
+- 单次连接重置不再中止长时真实流程，连续故障仍在有界次数后失败。
+- 业务终态和产物不完整仍快速、明确失败。
+- 同一真实 Run 不因浏览器测试退出而重复调度；最终有头完整路径通过。
+
+**本轮实际结果和未验证推断**
+
+- 8765 PID 77836 在失败前后保持监听，日志显示同一 Run 的 `episode-artifacts` 在一次客户端 `ECONNRESET` 前后持续返回 200；确认 turn 由服务端协调器继续拥有。修正与续测进行中。
+
+## 第 105 轮——确认指令去歧义与首动作写入
+
+**当前轮次目标**
+
+修复确认指令同时要求“更新 stage revision”和“宿主自动同步”导致模型过度规划、误把可选 Dream MCP 当成前置步骤并在 Write 前耗尽输出的问题。
+
+**优化后的执行提示词**
+
+> Dream confirmation 的可见 JSON 必须给出单一、强顺序完成合同：第一动作必须是内建 Write/Edit；不在工具前解释或规划；若 command.edits 非空，只把它们写回本 session 已知的 canonical 文件；随后在当前已存在的 canonical Project/EP01 路径创建或覆盖 `episode-outline.md`、`script.md`、`storyboard.yaml`、`review-report.md`。禁止调用 Dream MCP、Agent、Read、Grep、Glob、Bash、Web 和 AskUserQuestion，禁止研究 schema/插件，禁止写 `.dream`。storyboard 每个 shot 使用唯一 `shot_id` 和最小 `shot_type/visual/camera.movement/timing.duration_sec` 形状。四次写入成功后只回复一句完成并结束。stage revision、解析、发布和绑定全部由宿主成功 Hook 负责。
+
+**本轮检查或修改范围**
+
+- Dream confirmation 可见指令构建、旧确认 claim 升级、对应单测和插件中文执行规则。
+- 不改变 command 指纹、用户确认内容、Claude session ID、共享 SSE 或 Hook 的四产物后置条件。
+
+**本轮完成标准**
+
+- 指令中不再出现“Agent 更新 Dream stage revision”或把 MCP 作为正常完成步骤。
+- 模型第一动作明确为 Write/Edit，四项路径和最小 storyboard 合同无歧义。
+- 旧持久化确认在下一次 claim 时原子升级；同一用户 command/fingerprint 不变。
+- 聚焦测试和真实恢复验证通过。
+
+**本轮实际结果和未验证推断**
+
+- 真实 Run `run_3e9ef2688feb4feca8fbca074b92e3a3` 的确认 turn 正确 resume 同一 Claude session，但模型生成约 35,000 字符 planning，反复讨论 Dream MCP、stage revision 和 schema，在任何工具调用前以 partial 结束；Hook 正确拒绝发布/绑定/ACK。指令收敛与恢复验证进行中。
+
+## 第 106 轮——分镜标识类型合同与失败产物覆盖
+
+**当前轮次目标**
+
+修复真实确认重试已写出四个文件、但 `storyboard.yaml` 把 `shot_id` 写成 YAML 数字，导致权威 Episode 解析器拒绝发布和绑定的问题。
+
+**优化后的执行提示词**
+
+> 保持同一 Run、thread、Claude session 和 confirmation command，不手工修改真实数据。确认指令必须明确：即使失败尝试留下旧文件，也要覆盖 `storyboard.yaml`；每个 `shot_id` 必须是带引号的非空 ASCII 字符串，例如 `"shot-001"`，数字 `shot_id: 1` 无效；值必须唯一并匹配 `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`。给出可直接照写的最小 shot 形状 `{shot_id: "shot-001", shot_type: "wide", visual: "...", camera: {movement: "static"}, timing: {duration_sec: 6}}`。由 Agent 使用 Write/Edit 覆盖 canonical 文件，宿主继续负责解析、发布、绑定和 ACK。
+
+**本轮检查或修改范围**
+
+- Dream confirmation 可见指令、旧确认 claim 指令升级、对应单测和 Dream 插件执行规则。
+- 真实 Run `run_3e9ef2688feb4feca8fbca074b92e3a3` 的同 session 恢复验证。
+- 不放宽 Episode 解析器，不修改真实文件、不改变 Claude session ID、thread 或 command 指纹。
+
+**本轮完成标准**
+
+- 指令明确区分字符串 `shot_id` 与无效数字值，并要求覆盖失败遗留文件。
+- 聚焦测试通过；重启本任务后端后，持久化确认使用新指令恢复。
+- Agent 自行写出可被现有解析器读取的四项产物，Hook 才发布 `.dream`、绑定 EP01 并 ACK 一次。
+
+**本轮实际结果和未验证推断**
+
+- 代码检查确认 `_required_identity_text` 只接受 ASCII `str`；修复前真实 `storyboard.yaml` 的 `shot_id: 1..12` 被 YAML 解析为整数，因此确定触发 `invalid_shot_id`。
+- 聚焦确认、Hook 和插件合同测试通过：`60 passed, 2 skipped, 36 subtests passed`；TypeScript 和 `git diff --check` 通过。
+- 重启本任务持有的 8765 后端后，同一 confirmation message 原子升级为新指令并继续 resume 同一 Claude session。Agent 自行把 12 个 `shot_id` 覆盖为带引号的 `shot-001..shot-012`；确认最终只 ACK 为 `dispatched`。
+- Run-private `.dream` 已包含 `dream-episode/v1` 绑定、五文件 manifest、四项 EP01 产物；canonical 与 private 副本均通过现有 outline/script/storyboard/review 解析器，分镜为 12 个唯一标识。未手工修改真实产物。
+
+## 第 107 轮——隐藏手动入口后的最终真实有头验收
+
+**当前轮次目标**
+
+以全新真实 Run 验证当前最终代码：用户不再看到手动“构建第一集产物关联”，一次“确认并继续”即可由 Agent 构建四项产物并由宿主自动发布、绑定和打开 execution。
+
+**优化后的执行提示词**
+
+> 使用本机真实账号 `dmeck123@suoxya.com`、本机真实 PostgreSQL、Admin 当前真实 Deck/model 配置和真实模型，从 `http://127.0.0.1:5173/story-workspace/dream` 运行可见 Chromium `--headed --workers=1`。像正常用户一样填写创作目标、发起 Dream、观察 Agent 输出、在 Dream 与 Chat 间切换、返回 Dream 内容并点击一次“确认并继续”。页面不得出现手动“构建第一集产物关联”；Agent 必须在同一 thread/session 写出四项 canonical EP01 文件，宿主校验后自动同步 Run-private `.dream`、绑定 EP01、显示四项可读产物和 Story Index，并默认重入 execution。保留用户消息和内部 JSON 正文；禁止克隆数据、固定 sleep、API 替代关键 UI 操作或停止 5173/3000 用户服务。
+
+**本轮检查或修改范围**
+
+- `frontend/e2e/dream-launch-real-model.spec.ts` 与当前真实 5173/8765/3000 服务。
+- 当前全部 Dream 重构改动的最终用户路径；不再改动受保护 Agent 入口。
+
+**本轮完成标准**
+
+- 新 Run 完成三阶段草稿、一次确认、四项可读 Episode 产物、`.dream` 发布和 EP01 自动绑定。
+- Dream↔Chat 使用同一 thread，确认 JSON 和用户消息可见，返回 Dream 默认进入 execution。
+- 可见窗口无横向溢出；无非预期 console/page/request 错误；不存在手动关联按钮。
+- 有头单 worker E2E 通过并留下不含正文的真实 Run 回执。
+
+**本轮实际结果和未验证推断**
+
+- 最终真实有头验证开始；旧 Run 恢复已证明新字符串 `shot_id` 合同和自动绑定 Hook 可执行，但尚需用全新 Run 排除只依赖重试历史的可能。
+
+## 第 108 轮——Story Index 可见恢复动作
+
+**当前轮次目标**
+
+在全新 Run 的四项产物和自动绑定已经完成后，使真实 E2E 按页面现有状态机处理 Story Index 的短暂读取失败，不把成功的 Agent 业务误报为失败。
+
+**优化后的执行提示词**
+
+> 保持真实 Run 和生产页面行为。点击一次“重试索引同步”后，如果状态区域短暂显示“故事索引状态暂时无法读取”并提供“重新检查”，测试必须像正常用户一样点击可见且可用的“重新检查”；如果随后仍显示可重试的“未建立/版本过期”，可再次点击“重试索引同步”。最多执行 3 次可见恢复动作，并在 60 秒内等待 `data-index-status=indexed` 与“PostgreSQL 索引 已就绪”。不得固定 sleep、直接调用 reconcile API、无限重试或忽略其他 HTTP 错误。
+
+**本轮检查或修改范围**
+
+- 仅 `frontend/e2e/dream-launch-real-model.spec.ts` 的 Story Index 后置验收。
+- 全新真实 Run `run_2cb9ffabc5114e86b993aa002c9bf3fc` 的已有产物、自动绑定和 Story Index 后端事实。
+
+**本轮完成标准**
+
+- 页面提供的“重试索引同步/重新检查”是唯一恢复入口，每次动作均可见、可用且位于窗口内。
+- 后端最终 200 后页面进入 `indexed/已就绪`；超过 3 次或 60 秒仍未成功则保留失败。
+- 随后继续验证消息原文、同 thread、默认 execution 重入和手动关联按钮不存在。
+
+**本轮实际结果和未验证推断**
+
+- 第 107 轮新 Run 已完成四项产物与自动绑定；首次 E2E 仅在 Story Index 后置断言超时。后台日志显示状态从 404 变为 200，而页面曾从 `missing` 短暂进入带“重新检查”的 error 状态；修正和重入验收进行中。
+
+## 第 109 轮——预期 Story Index 404 的控制台归因
+
+**当前轮次目标**
+
+避免浏览器对允许的 Story Index `404/missing` 同时输出无 URL 的通用 console error，导致网络诊断已正确分类后又被重复判失败。
+
+**优化后的执行提示词**
+
+> 网络 response 仍是 HTTP 事实来源：只有 `GET .../story-index` 的 404 可作为未建立状态继续，其余 API 4xx/5xx 必须失败；Story Index 最终必须出现 200。把 Chromium 的通用 `Failed to load resource ... 404` 单独计数，最终数量不得超过 response 诊断实际记录的 Story Index 404 数量；其他 console error、pageerror 和 requestfailed 均保留为失败。不得按字符串无条件忽略所有 404。
+
+**本轮检查或修改范围**
+
+- 仅真实 E2E 的诊断归因和最终断言。
+- 全新真实 Run `run_3a4a92661112424c8840a14383fa000d` 的已完成 Agent 产物、自动绑定、Story Index reconcile 与默认重入事实。
+
+**本轮完成标准**
+
+- 无 URL console 404 必须由相同数量的 Story Index response 404 覆盖；超出即失败。
+- Story Index 200、所有 Dream files 200、其他诊断错误为空。
+- 修正后最终有头单 worker 路径通过。
+
+**本轮实际结果和未验证推断**
+
+- 第 108 轮全新 Run 已完成业务路径和可见 Story Index 恢复，后台 `GET story-index 404 → 200`、`POST reconcile 200`；E2E 最后仅因两条预期 404 的重复 console 记录失败。归因修正与最终复测进行中。
+
+## 第 110 轮——真实项目身份隔离
+
+**当前轮次目标**
+
+修正真实 E2E 反复使用完全相同项目名称造成的 PostgreSQL Story Index 身份冲突，使每次验收创建一个正常、可区分的真实项目，而不是复用同一 `project_id` 覆盖旧项目事实。
+
+**优化后的执行提示词**
+
+> 每次真实有头验收在用户可见的创作目标中使用一个人类可读、带北京时间的独立项目名，例如《雨夜末班车·2026-08-13-18-12-30》；其余人物关系、场景和结尾目标保持一致。由真实 Agent 按正常初始化规则生成新 canonical Project identity，禁止克隆现有数据、直接改数据库、手工改 `project.yaml` 或在服务端注入测试 ID。Story Index 仍必须经页面可见动作建立并达到 `indexed`。
+
+**本轮检查或修改范围**
+
+- 仅真实 E2E 填写的可见项目名称及最终验收。
+- 已失败 Run `run_d67dc6eee51a47b89889d268729e05be` 保留为冲突证据，不做数据修补。
+
+**本轮完成标准**
+
+- 新 Run 的 Agent 创建与历史 Run 不同的 Project identity。
+- 四项 EP01 产物、自动绑定、Story Index、消息可见性、同 thread 和默认重入全部通过。
+- 不使用克隆数据或测试专用后端分支。
+
+**本轮实际结果和未验证推断**
+
+- 真实 200 响应证明第 109 轮页面没有进入 indexed 的原因是 `status=failed,errorCode=story_index_conflict,retryable=false`；observed revisions 与同一 `proj-575fa8bd` 的历史 indexed revisions 不一致。根因是多轮 E2E 都提交完全相同的项目名，使 Agent 按确定性 fallback 复用了相同 `project_id`，不是前端 reducer 丢状态。独立项目名修正与最终复测进行中。
+
+## 第 111 轮——自动绑定后的页面轮询等待
+
+**当前轮次目标**
+
+使真实 E2E 在服务端 Episode 已 bound 后，等待生产 hook 既有的 5 秒 ETag 轮询把 execution 未关联占位替换为已关联工作台，而不是用默认 5 秒断言与同一轮询临界竞争。
+
+**优化后的执行提示词**
+
+> 服务端 `episode-artifacts` 返回 `bound` 且四项产物 `available` 后，不直接刷新页面、不调用隐藏命令，也不添加固定 sleep。使用语义 locator 等待 `EP01 · Episode execution` 最多 30 秒，让生产 `useStoryWorkspaceEpisodeArtifacts` 的现有 5 秒 ETag polling 自行获取新 revision 并更新页面。若 30 秒仍显示“尚未构建第一集产物关联”，保留失败，视为真实自动刷新缺陷。
+
+**本轮检查或修改范围**
+
+- 仅真实 E2E 中服务端完成事实到页面可见事实的等待上限。
+- 新 Run `run_2ff110bde1a446ff89c68704ef4017a9` 的自动绑定与页面轮询证据。
+
+**本轮完成标准**
+
+- 不借助手工关联、reload 或 API mutation，页面在生产轮询周期内出现 EP01 execution。
+- 随后完成 Story Index、消息正文、同 thread 和默认重入验收。
+- TypeScript、ESLint、diff check 与最终有头流程通过。
+
+**本轮实际结果和未验证推断**
+
+- 第 110 轮独立项目 Run 已由 API 证明 bound 且四项 available；失败快照恰在服务端完成后的默认 5 秒 UI 断言处仍显示自动绑定等待占位。hook 最小轮询为 5 秒，后台随后返回新的 Episode 200，因此当前证据指向测试与轮询临界竞态；扩大语义等待后复测。
+
+## 第 112 轮——最终回归与资源清理
+
+**当前轮次目标**
+
+在真实有头完整路径通过后，对当前 Dream 重构工作树运行最终聚焦回归、静态检查、构建、受保护入口检查和异步资源审计，并记录仍未验证的边界。
+
+**优化后的执行提示词**
+
+> 对当前所有 Dream 相关改动运行：修改过的后端测试集合、前端源级合同与 mocked Chromium、TypeScript、目标 ESLint、生产 build、Python compile、`git diff --check`、旧手动关联入口生产扫描、旧不当用词扫描和 `agent_runner.py/thread_factory.py` 工作树零差异检查。确认最终真实有头回执 `run_1ad5696aba324f8886f7074790d4bbdf` 为同一 thread、恰好一条 dispatched confirmation、四项 canonical/private 产物可解析、Episode 已 bound、Story Index indexed。清理 Playwright 进程；保留本任务 8765 后端供用户复测，不停止用户的 5173/3000。任何未通过项必须如实记录，不提交代码。
+
+**本轮检查或修改范围**
+
+- 当前 Dream 重构涉及的后端、前端、插件和 `docs/design/dream-agent`。
+- 测试生成的真实 Run 只读核验，不删除或克隆。
+
+**本轮完成标准**
+
+- 聚焦回归、类型、lint、build、compile 和 diff check 全部通过。
+- 最终真实 Run 的持久化事实与 `1 passed (2.1m)` 一致。
+- 无残留 Playwright 进程；用户服务保持运行；无受保护入口工作树改动。
+
+**本轮实际结果和未验证推断**
+
+- 最终有头 Chromium `--workers=1` 已通过：`1 passed (2.1m)`；Run `run_1ad5696aba324f8886f7074790d4bbdf`。
+- 后端聚焦回归通过：`270 passed, 2 skipped, 63 subtests passed`。测试进程退出时 psycopg pool 打印延迟关闭警告，但进程已经结束且没有残留测试 Python 进程；本任务 8765 服务保持运行。
+- 前端源级合同通过 `45 passed`；两项 mocked Chromium 在正确的 `INK_E2E_WEB_BASE=http://127.0.0.1:5173` 下通过 `2 passed`。第一次误用 Node 原生 runner、以及第一次漏写该环境变量导致的失败均属于命令配置错误，未计为代码通过证据。
+- TypeScript、目标 ESLint、生产 build、Python compile、`git diff --check` 均通过；build 仅保留既有大 chunk 和 ineffective dynamic import 警告。
+- `agent_runner.py` 与 `thread_factory.py` 工作树零差异；生产源码不存在手动“构建第一集产物关联”按钮；Dream/story-workspace 设计文档不再使用“可信的第一集关联”措辞。
+- 最终真实持久化核验：Run `confirmed`、error null、同一 source thread、有 Claude session、恰好一条 confirmation 且 `dispatched`；`.dream` 为 `dream-episode/v1` revision 1、manifest 5 文件，四项 Episode 产物均通过权威解析器，10 个分镜 ID 全部唯一；Story Index HTTP 200、status `indexed`、error null、episodeCount 1。
+- 5173、3000 和本任务 8765 均继续监听；没有残留本轮 Playwright spec 进程。系统已有多个 Codex Playwright MCP 常驻进程，未归属本轮且未停止。

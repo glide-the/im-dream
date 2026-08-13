@@ -12,13 +12,13 @@ Dream 不维护命令状态机。用户在共享 Chat thread 中用自然语言�
 |---|---|---|
 | 主 Agent / Deck skill | 理解用户意图；读取上下文；写 canonical 工作台文件 | 写 `.dream/**`；声明服务端同步已成功 |
 | `ClaudeAgentService` | 组装 Dream 上下文；调用原 `run_streaming`；成功后调用 Hook；保持 Chat 单终态 | 解析业务文件；建立第二套 Agent runtime |
-| `DreamArtifactTurnHook` | 重验 actor/thread/run；收集页面投影；发布私有 artifact | 调用模型；推进 Workflow；发送 SSE |
+| `DreamArtifactTurnHook` | 重验 actor/thread/run；校验页面产物；同步私有 artifact | 调用模型；推进 Workflow；发送 SSE |
 | `DreamObserver` | 监听标准 Agent 事件并维护派生业务提示 | 文件同步；控制 Agent；改变 thread terminal |
 | Dream 页面 | 用共享 Chat runtime 对话；用 `dream-files` GET 展示业务投影 | 从 transcript 猜文件；用页面状态覆盖 thread 生命周期 |
 
 ## 3. 文件工具规则
 
-- canonical 工作台可由 Agent 使用其正常受控写工具生成。
+- canonical 工作台产物由 Agent 使用其正常受控写工具构建。
 - `.dream/**` 是服务端私有面；普通 file/shell mutation 必须拒绝。
 - 既有 Story Workspace MCP writers 可以用于兼容或调试，但不是正常自动同步的前提。
 - 不增加 `inspect_dream_artifacts`、`sync_dream_artifacts`、stage checkpoint 或 action completion 工具。
@@ -36,7 +36,7 @@ sequenceDiagram
 
     Service->>Hook: before_main_turn(可信 context)
     Service->>Agent: runner.run_streaming
-    Agent->>Files: 按用户要求生成或修改文件
+    Agent->>Files: 按用户要求构建或修改产物
     alt 根 turn success
         Agent-->>Service: success
         Service->>Hook: after_main_turn(ticket)

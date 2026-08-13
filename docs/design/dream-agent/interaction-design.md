@@ -553,18 +553,17 @@ dual-protocol artifact. The hard removal and rollback gates are in
   source mismatch fails closed with 409. No newest-run heuristic is allowed.
 - Tool confirmation policy is server-owned. The UI cannot turn a `reject_only`
   request into an approval.
-- Direct Chat adoption uses the same owner-visible row/part/export contract on
-  both surfaces; server-private control rows and zero-visible-part rows remain
-  hidden.
+- Dream 和 Chat 使用同一 owner-visible row/part/export 合同。Dream launch、
+  guidance、confirmation、episode action、普通用户消息及其 JSON 正文均原样可见；
+  只有没有任何可渲染 part 的空行不生成气泡。
 
 ## Shared visibility and export behavior
 
-History, live render, reconnect recovery and export all apply
-`filterStoryWorkspaceControlMessages` before rendering parts. Rows marked
-`story-workspace-guidance`, `story-workspace-dream-confirmation`, or a
-server-attested `story-workspace-episode-action/v1` envelope are omitted
-entirely. A remaining row with no visible parts is skipped; no empty text part or
-blank bubble is synthesized.
+History、实时渲染、重连恢复和 export 使用相同的共享 thread 消息集合。
+`filterStoryWorkspaceControlMessages` 仅作为兼容调用面保留并返回所有消息，不再按
+Dream kind 或 `visibility=system-hidden` 删除正文。后端也不再对合法 Dream 业务行把
+`parts` 置空；元数据仍通过 DTO allowlist，仅公开显示与 settlement 所需字段。只有正文
+解码/判别字段损坏时 fail closed，或整行没有任何可渲染 part 时才不生成气泡。
 
 For every remaining owner-visible row, Dream and Chat show/export the same
 canonical fields: text; reasoning text/state under the existing collapsed UI;

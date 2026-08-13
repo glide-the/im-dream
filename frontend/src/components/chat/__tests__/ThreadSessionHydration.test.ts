@@ -88,7 +88,7 @@ test('visibility matches ChatMessageList renderers and retains workspace file at
     .toBe(false);
 });
 
-test('filters private control rows and every zero-visible-part row without hiding human Dream chat', () => {
+test('preserves every Dream business row and drops only zero-visible-part rows', () => {
   const visible = filterClaudeThreadVisibleMessages([
     message('dream-launch', [{ type: 'text', text: 'private launch goal' }], {
       kind: 'story-workspace-dream-agent-user',
@@ -109,6 +109,13 @@ test('filters private control rows and every zero-visible-part row without hidin
     message('human-dream', [{ type: 'text', text: '保留这条 Dream 对话' }], {
       kind: 'story-workspace-dream-agent-user',
     }),
+    message('user-json-control', [{
+      type: 'text',
+      text: '{"action":"confirm_and_continue","run":"run_abc"}',
+    }], {
+      kind: 'story-workspace-dream-confirmation',
+      visibility: 'system-hidden',
+    }),
     message('workspace-file', [{
       type: 'file',
       filename: 'episode-outline.md',
@@ -117,7 +124,19 @@ test('filters private control rows and every zero-visible-part row without hidin
     }]),
   ]);
 
-  expect(visible.map((item) => item.id)).toEqual(['human-dream', 'workspace-file']);
+  expect(visible.map((item) => item.id)).toEqual([
+    'dream-launch',
+    'guidance',
+    'confirmation',
+    'episode-action',
+    'human-dream',
+    'user-json-control',
+    'workspace-file',
+  ]);
+  expect(visible.find((item) => item.id === 'user-json-control')?.parts).toEqual([{
+    type: 'text',
+    text: '{"action":"confirm_and_continue","run":"run_abc"}',
+  }]);
 });
 
 test('only the exact persisted internal command can settle an idle pre-mounted observer', () => {

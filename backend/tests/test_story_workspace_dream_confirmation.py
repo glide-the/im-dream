@@ -448,7 +448,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
             self.submit(**overrides)
         self.assertEqual(raised.exception.status_code, expected_status)
 
-    def test_success_persists_one_hidden_command_with_exact_audit_shape(self) -> None:
+    def test_success_persists_one_visible_command_with_exact_audit_shape(self) -> None:
         persisted = self.submit()
         self.assertFalse(persisted.accepted.replayed)
         self.assertFalse(persisted.accepted.dispatched)
@@ -508,13 +508,61 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         self.assertIn('"baseRevisions"', text)
         self.assertIn('"entityId"', text)
         self.assertIn('"displayName"', text)
-        self.assertIn("canonical workspace files", text)
-        self.assertIn("stage revision", text)
-        self.assertIn("same plugin", text)
+        self.assertIn("canonical files already known in this session", text)
+        self.assertIn("first action MUST be a built-in Write or Edit", text)
+        self.assertIn("episode-outline.md", text)
+        self.assertIn("not assistant-message code blocks", text)
+        self.assertIn("Do not call Dream MCP", text)
         self.assertIn("Do not ask for another confirmation", text)
+        self.assertIn("host alone validates, updates Dream stages", text)
+        self.assertNotIn("update each affected Dream stage revision", text)
         forbidden = ("reject", "failure", "retry", "archive")
         serialized = json.dumps(row, ensure_ascii=False).lower()
         self.assertFalse(any(word in serialized for word in forbidden))
+
+    def test_claim_upgrades_legacy_visible_instructions_before_agent_turn(
+        self,
+    ) -> None:
+        persisted = self.submit()
+        row = self.fixture.rows()[0]
+        envelope = json.loads(row["parts"][0]["text"])
+        envelope["instructions"] = {
+            "then": "Continue the workflow and answer with the result."
+        }
+        legacy_parts = [{
+            "type": "text",
+            "text": confirmation_module._canonical_json(envelope),
+        }]
+        with database.get_db() as db:
+            db.execute(
+                "UPDATE chat_message SET parts = ? WHERE id = ?",
+                (
+                    confirmation_module._canonical_json(legacy_parts),
+                    persisted.accepted.message_id,
+                ),
+            )
+            db.commit()
+
+        claimed = self.fixture.claim(persisted.dispatch)
+        claimed_text = claimed.parts[0]["text"]
+        self.assertIn("episode-outline.md", claimed_text)
+        self.assertIn("script.md", claimed_text)
+        self.assertIn("storyboard.yaml", claimed_text)
+        self.assertIn("review-report.md", claimed_text)
+        self.assertIn("shot_id values must be unique", claimed_text)
+        self.assertIn('quoted ASCII string shot_id such as \\"shot-001\\"', claimed_text)
+        self.assertIn("an integer such as shot_id: 1 is invalid", claimed_text)
+        self.assertIn("Overwrite storyboard.yaml", claimed_text)
+        self.assertIn("first action MUST be a built-in Write or Edit", claimed_text)
+        self.assertIn("Do not call Dream MCP", claimed_text)
+        self.assertNotIn("answer with the result", claimed_text)
+
+        stored = self.fixture.rows()[0]
+        self.assertEqual(stored["parts"], claimed.parts)
+        self.assertEqual(
+            json.loads(stored["parts"][0]["text"])["command"],
+            envelope["command"],
+        )
 
     def test_agent_resave_cannot_roll_back_authoritative_claim_lease(self) -> None:
         persisted = self.submit()

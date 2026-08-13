@@ -73,19 +73,54 @@ sequenceDiagram
     Note over P: manifest 是当前 preview 的提交标记
 ```
 
-## 4. 与 Admin sealed Artifact 的区别
+## 4. 确认后自动构建第一集产物关联
 
-当前 preview 只证明“这个 Run 已把哪些工作台字节发布给 Dream 页面”。它不会：
+普通用户只提交 Dream 页面上的“确认并继续”，不在 execution 页面或 Dream Agent
+消息面板中手动构建第一集产物关联。确认 turn 成功后，宿主 Hook 按以下顺序处理：
+
+1. 读取并使用 execution 页面同一产物合同校验 EP01 的大纲、剧本、分镜和审阅报告；
+2. 自动发布 Run-private preview，并在阶段完整时推进输出就绪；
+3. 从服务端持有的 actor、thread、run、Project 与 Episode 身份构建 EP01 产物关联；
+4. execution 页面继续读取 actor-scoped REST 事实，只读显示“尚未构建第一集产物关联”或
+   “第一集产物关联：已关联”。
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant D as Dream 页面
+    participant A as 同一 Dream Agent
+    participant H as DreamArtifactTurnHook
+    participant B as Episode Binding
+    participant E as Execution 页面
+
+    U->>D: 确认并继续
+    D->>A: 在同一 thread 执行确认 turn
+    A->>A: 写入 EP01 四项 canonical 文件
+    A-->>H: 根 turn 成功
+    H->>H: 校验产物并自动发布 preview
+    H->>B: 自动构建 EP01 产物关联
+    E->>B: 只读查询最新关联事实
+    B-->>E: 尚未构建或已关联
+    Note over E: 不提供手动构建按钮
+```
+
+确认 turn 失败、取消、产物缺失或产物无法通过现有解析合同校验时，不发布本轮 preview，
+也不构建关联。后端既有恢复 capability 可继续作为服务端兼容边界存在，但不是普通用户
+工作台动作。
+
+## 5. 与 Admin sealed Artifact 的区别
+
+当前 preview 只证明“这个 Run 已把哪些工作台字节同步给 Dream 页面”。它不会：
 
 - 创建或切换 Admin canonical Story；
-- 生成权威 `episode.json` / `episode-workflow.json`；
+- 构建 Admin `episode.json` / `episode-workflow.json` 产物关联；
 - 完成 Source Message authority、完整 Artifact 校验或 Story CAS；
 - 把 Chat finish、stage revision 或 preview manifest 当作业务发布完成。
 
 未来实现 sealed Artifact 时，必须直接遵循 Admin 权威合同，不得把当前 preview 扩展
 成第二套版本账本或 lifecycle truth source。
 
-## 5. 权限与一致性
+## 6. 权限与一致性
 
 发布前必须证明：Run 属于当前用户和 Workspace；source message 属于同一 owned
 thread；冻结 Deck binding 与 Run 一致；Project/Episode 目录和文件身份一致。任何不一致

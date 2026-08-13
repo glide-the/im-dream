@@ -1,6 +1,7 @@
 // [Input] Deterministic actor-scoped Dream/Episode REST snapshots served at the browser boundary.
-// [Output] Chromium evidence for responsive Episode navigation, recovery, and revision-stable selection.
+// [Output] Chromium evidence for responsive Episode navigation, read-only binding state, and revision-stable selection.
 // [Pos] Story Workspace Episode Execution mocked-browser QA (U12); never claims external workflow success.
+// [Sync] 2026-08-13: unbound EP01 remains read-only even when recovery capability is advertised.
 
 // @ts-expect-error Playwright E2E has Node built-ins; the browser app tsconfig omits Node types.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -440,6 +441,26 @@ function episodeSurface(revisionIndex: 0 | 1) {
   };
 }
 
+function unboundEpisodeSurface() {
+  return {
+    runId: RUN_ID,
+    opaqueEpisodeId: null,
+    manifestRevision: null,
+    etag: null,
+    bindingAvailability: 'unbound',
+    bindingRecovery: {
+      autoRepairAttempted: false,
+      canDispatch: true,
+      publicReason: 'episode_binding_unproven',
+    },
+    artifacts: [],
+    documents: [],
+    narrative: null,
+    auxiliary: null,
+    workflow: null,
+  };
+}
+
 function json(route: Route, body: unknown, status = 200, headers?: Record<string, string>) {
   return route.fulfill({
     status,
@@ -453,6 +474,7 @@ type BrowserFixtureState = {
   revisionIndex: 0 | 1;
   artifactReads: number;
   continueRequests: Array<Record<string, unknown>>;
+  bindingAvailability?: 'bound' | 'unbound';
 };
 
 async function installApiFixture(page: Page, state: BrowserFixtureState) {
@@ -476,6 +498,10 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       return;
     }
     if (matches('GET', '/api/default-voices')) {
+      await json(route, {});
+      return;
+    }
+    if (matches('GET', '/api/storage')) {
       await json(route, {});
       return;
     }
@@ -622,6 +648,10 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
     }
     if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/episode-artifacts`)) {
       state.artifactReads += 1;
+      if (state.bindingAvailability === 'unbound') {
+        await json(route, unboundEpisodeSurface());
+        return;
+      }
       const etag = AGGREGATE_ETAGS[state.revisionIndex];
       if (request.headers()['if-none-match'] === `"${etag}"`) {
         await route.fulfill({ status: 304, headers: { ETag: `"${etag}"` } });
@@ -670,6 +700,63 @@ async function selectShotWithKeyboard(page: Page) {
   return shot;
 }
 
+test('keeps an unbound first Episode read-only while automatic publication and binding finish', async ({
+  page,
+}) => {
+  const diagnostics: string[] = [];
+  const recoveryRequests: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+  page.on('requestfailed', (request) => {
+    const url = request.url();
+    if (request.failure()?.errorText === 'net::ERR_ABORTED') return;
+    if (!url.includes('fonts.googleapis.com') && !url.includes('fonts.gstatic.com')
+      && !url.includes('react-grab.com')) {
+      diagnostics.push(`requestfailed: ${request.failure()?.errorText ?? 'failed'} ${url}`);
+    }
+  });
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST'
+      && new URL(request.url()).pathname.endsWith('/episode-binding/recover')
+    ) recoveryRequests.push(request.url());
+  });
+
+  const state: BrowserFixtureState = {
+    revisionIndex: 0,
+    artifactReads: 0,
+    continueRequests: [],
+    bindingAvailability: 'unbound',
+  };
+  await page.clock.setFixedTime(FROZEN_NOW);
+  await installApiFixture(page, state);
+  await page.addInitScript(() => {
+    localStorage.setItem('auth_token', 'u12-browser-token');
+    localStorage.setItem('migration_completed', 'true');
+    localStorage.setItem('ink-language', 'zh');
+  });
+
+  await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
+  await expect(page.getByRole('heading', { name: '尚未构建第一集产物关联' })).toBeVisible();
+  await expect(page.getByRole('status').filter({
+    hasText: '关联状态：等待确认后的自动发布与绑定',
+  })).toBeVisible();
+  await expect(page.locator(
+    'main[aria-labelledby="story-workspace-episode-unbound-title"] > p',
+  ).last()).toContainText('无需手动构建');
+  await expect(page.getByRole('button', { name: '构建第一集产物关联' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
+  const agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+  await expect(agentDialog).toBeVisible();
+  await expect(agentDialog.getByRole('group', { name: 'Episode 工作流操作' })).toHaveCount(0);
+  await expect(agentDialog.getByText('构建第一集产物关联', { exact: true })).toHaveCount(0);
+  expect(recoveryRequests).toEqual([]);
+  expect(diagnostics).toEqual([]);
+});
+
 test('mocked REST facts recover responsively and preserve the selected shot across revisions', async ({
   context,
   page,
@@ -712,6 +799,8 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
       timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
     }))).toEqual({ now: FROZEN_NOW, timezoneId: 'Asia/Shanghai' });
     await expect(page.getByRole('heading', { name: '雨夜重逢' }).first()).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: '第一集产物关联：已关联' }))
+      .toBeVisible();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
     const executionRoot = page.locator('.story-workspace-collaboration');
     const dreamProjection = page.locator('details').filter({ hasText: 'Dream 初稿阶段投影' });
@@ -816,6 +905,8 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     expect(state.continueRequests[0]).not.toHaveProperty('action');
     expect(state.continueRequests[0]).not.toHaveProperty('episodeId');
     expect(state.continueRequests[0]).not.toHaveProperty('displayCommand');
+    await expect(page.getByRole('dialog', { name: 'Dream Agent' })).toHaveCount(0);
+    await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
     await expect(page.getByRole('dialog', { name: 'Dream Agent' })).toBeVisible();
     await page.getByRole('button', { name: '收起 Dream Agent' }).click();
     continueAction = page.getByRole('button', { name: '已交给 Dream Agent' });

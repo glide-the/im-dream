@@ -498,7 +498,7 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
         self.assertNotIn("SECRET_CORRUPT_INSTRUCTION", json.dumps(payload))
         self.assertNotIn("SECRET_JSON_NULL_INSTRUCTION", json.dumps(payload))
 
-    def test_private_control_rows_expose_only_settlement_projection(self):
+    def test_dream_control_rows_expose_body_with_settlement_projection(self):
         import routers.claude_agent as route_module
 
         messages = [
@@ -702,21 +702,26 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
             [{"type": "text", "text": "public answer"}],
         )
         self.assertEqual(payload["messages"][6]["metadata"], {})
-        for index in (1, 2, 3, 4, 6):
-            private_message = payload["messages"][index]
-            self.assertEqual(private_message["parts"], [])
+        for index, expected_text in (
+            (1, "SECRET_LAUNCH_INSTRUCTION"),
+            (2, "SECRET_GUIDANCE"),
+            (3, "SECRET_CONFIRMATION"),
+            (4, "SECRET_EPISODE_COMMAND"),
+        ):
+            self.assertEqual(
+                payload["messages"][index]["parts"],
+                [{"type": "text", "text": expected_text}],
+            )
+        self.assertEqual(payload["messages"][6]["parts"], [])
         encoded = json.dumps(payload, ensure_ascii=False)
         for secret in (
             "SECRET_TOP_LEVEL",
             "run-visible",
             "SECRET_CLAUDE_SESSION",
             "SECRET_CONTRACT_VERSION",
-            "SECRET_LAUNCH_INSTRUCTION",
             "SECRET_CONTEXT",
             "SECRET_FINGERPRINT",
-            "SECRET_CONFIRMATION",
             "SECRET_CLAIM",
-            "SECRET_EPISODE_COMMAND",
             "SECRET_INPUT_REVISION",
             "SECRET_NESTED_SESSION",
             "SECRET_MODEL_PROVENANCE",

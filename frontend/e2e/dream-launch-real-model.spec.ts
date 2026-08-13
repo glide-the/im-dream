@@ -43,6 +43,14 @@ type DreamFiles = {
   stages: Record<string, { revision: number; items: unknown[] }>;
 };
 
+type EpisodeArtifacts = {
+  bindingAvailability: 'bound' | 'unbound';
+  artifacts: Array<{
+    relativeKey: string;
+    availability: 'available' | 'not_generated' | 'invalid' | 'unavailable';
+  }>;
+};
+
 function createToken(): string {
   if (!TEST_EMAIL) throw new Error('INK_REAL_DREAM_LAUNCH_EMAIL is required.');
   if (!RUN_RECEIPT_PATH) throw new Error('INK_REAL_DREAM_LAUNCH_RECEIPT_PATH is required.');
@@ -120,6 +128,15 @@ async function expectPageFitsViewport(page: Page): Promise<void> {
   }).toBeLessThanOrEqual(1);
 }
 
+async function showDreamContent(page: Page): Promise<void> {
+  const backToContent = page.getByRole('button', { name: '← 返回 Dream 内容' });
+  if (await backToContent.isVisible()) {
+    await expect(backToContent).toBeInViewport();
+    await backToContent.click();
+    await expect(backToContent).toBeHidden();
+  }
+}
+
 async function getJson<T>(request: APIRequestContext, path: string, token: string): Promise<T> {
   const response = await request.get(`${API_BASE}${path}`, {
     headers: { authorization: `Bearer ${token}` },
@@ -128,16 +145,29 @@ async function getJson<T>(request: APIRequestContext, path: string, token: strin
   return await response.json() as T;
 }
 
+function isTransientApiReadFailure(error: unknown): boolean {
+  return error instanceof Error
+    && /(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|socket hang up)/.test(error.message);
+}
+
 function installDiagnostics(page: Page): {
   readonly errors: string[];
   readonly dreamFileStatuses: number[];
+  readonly storyIndexStatuses: number[];
+  readonly genericNotFoundConsoleErrors: string[];
   settle: () => Promise<void>;
 } {
   const errors: string[] = [];
   const dreamFileStatuses: number[] = [];
+  const storyIndexStatuses: number[] = [];
+  const genericNotFoundConsoleErrors: string[] = [];
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     if (message.text().includes('WebSocket connection to') && message.text().includes('/?token=')) return;
+    if (/^Failed to load resource: the server responded with a status of 404/.test(message.text())) {
+      genericNotFoundConsoleErrors.push(message.text());
+      return;
+    }
     errors.push(`console: ${message.text()}`);
   });
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
@@ -149,12 +179,18 @@ function installDiagnostics(page: Page): {
     if (/\/api\/story-workspace\/workflow-runs\/run_[0-9a-f]{32}\/dream-files$/.test(response.url())) {
       dreamFileStatuses.push(response.status());
     }
+    if (/\/api\/story-workspace\/workflow-runs\/run_[0-9a-f]{32}\/story-index$/.test(response.url())) {
+      storyIndexStatuses.push(response.status());
+      if (response.status() === 404) return;
+    }
     if (response.status() < 400 || !response.url().includes('/api/')) return;
     errors.push(`http ${response.status()}: ${response.url()}`);
   });
   return {
     errors,
     dreamFileStatuses,
+    storyIndexStatuses,
+    genericNotFoundConsoleErrors,
     settle: async () => {},
   };
 }
@@ -178,8 +214,12 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
   await expect(
     page.locator('.story-workspace-dream-launch__selection strong'),
   ).toContainText('·');
+  const humanProjectName = `雨夜末班车·${new Date().toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour12: false,
+  }).replace(/[/:\s]/g, '-')}`;
   await page.getByRole('textbox', { name: '创作目标' }).fill(
-    '创作一个雨夜末班车短篇：两位旧友在终点站重逢，人物关系克制，结尾保留悬念。请完成人物、场景和分镜草稿。',
+    `创作短篇《${humanProjectName}》：两位旧友在终点站重逢，人物关系克制，结尾保留悬念。请完成人物、场景和分镜草稿。`,
   );
 
   const launchResponsePromise = page.waitForResponse((response) => (
@@ -312,6 +352,7 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
 
   expect(settledFiles!.storyWorkspaceRunId).toBe(accepted.workflowRunId);
   expect(settledFiles!.threadId).toBe(accepted.threadId);
+  await showDreamContent(page);
   await expect(page.getByRole('button', { name: '确认并继续' })).toBeEnabled();
 
   await expect.poll(async () => {
@@ -345,10 +386,147 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
   await page.evaluate(() => window.history.back());
   await page.waitForURL(new RegExp(`/story-workspace/dream\\?run=${accepted.workflowRunId}$`));
   await expectPageFitsViewport(page);
+  await showDreamContent(page);
   await expect(page.getByRole('button', { name: '确认并继续' })).toBeEnabled();
+
+  const confirmationResponsePromise = page.waitForResponse((response) => (
+    response.url().endsWith(
+      `/api/story-workspace/workflow-runs/${accepted.workflowRunId}/dream-confirmation`,
+    ) && response.request().method() === 'POST'
+  ), { timeout: 30_000 });
+  await page.getByRole('button', { name: '确认并继续' }).click();
+  const confirmationResponse = await confirmationResponsePromise;
+  expect(confirmationResponse.status(), await confirmationResponse.text()).toBe(202);
+  await page.waitForURL(
+    `${WEB_BASE}/story-workspace/runs/${accepted.workflowRunId}/execution`,
+  );
+  await expectPageFitsViewport(page);
+  await expect(page.getByText('后续执行', { exact: true })).toBeVisible();
+
+  let episodeArtifacts: EpisodeArtifacts | null = null;
+  let consecutiveEpisodeReadFailures = 0;
+  await expect.poll(async () => {
+    try {
+      const approvedTool = await approveExpectedToolConfirmation(page);
+      if (approvedTool) return false;
+      episodeArtifacts = await getJson<EpisodeArtifacts>(
+        page.request,
+        `/api/story-workspace/workflow-runs/${accepted.workflowRunId}/episode-artifacts`,
+        token,
+      );
+      const required = new Map(
+        episodeArtifacts.artifacts.map((artifact) => [artifact.relativeKey, artifact.availability]),
+      );
+      const complete = episodeArtifacts.bindingAvailability === 'bound'
+        && ['episode-outline.md', 'script.md', 'storyboard.yaml', 'review-report.md']
+          .every((key) => required.get(key) === 'available');
+      if (!complete) {
+        const status = await getJson<ThreadStatus>(
+          page.request,
+          `/api/claude-agent/threads/${encodeURIComponent(accepted.threadId)}/status`,
+          token,
+        );
+        if (status.running === false && status.turn_count >= 2) {
+          throw new Error(
+            `Dream confirmation stopped before EP01 workbench: ${JSON.stringify({
+              bindingAvailability: episodeArtifacts.bindingAvailability,
+              artifacts: Object.fromEntries(required),
+            })}`,
+          );
+        }
+      }
+      consecutiveEpisodeReadFailures = 0;
+      return complete;
+    } catch (error) {
+      if (
+        error instanceof Error
+        && error.message.startsWith('Dream confirmation stopped ')
+      ) throw error;
+      if (!isTransientApiReadFailure(error)) throw error;
+      consecutiveEpisodeReadFailures += 1;
+      if (consecutiveEpisodeReadFailures >= 5) throw error;
+      return false;
+    }
+  }, {
+    timeout: 720_000,
+    intervals: [500, 1_000, 2_000, 5_000],
+  }).toBe(true);
+
+  await expect(
+    page.getByText('EP01 · Episode execution', { exact: true }),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByRole('button', { name: '构建第一集产物关联' }),
+  ).toHaveCount(0);
+  const storyIndexStatus = page.getByRole('region', { name: '故事文件与索引状态' });
+  await expect(storyIndexStatus).toContainText('文件可读');
+  const retryStoryIndexButton = storyIndexStatus.getByRole('button', { name: '重试索引同步' });
+  if (await retryStoryIndexButton.isVisible()) {
+    await expect(retryStoryIndexButton).toBeEnabled();
+    await expect(retryStoryIndexButton).toBeInViewport();
+    await retryStoryIndexButton.click();
+  }
+  let storyIndexRecoveryActions = 0;
+  await expect.poll(async () => {
+    if (await storyIndexStatus.getAttribute('data-index-status') === 'indexed') return true;
+    if (storyIndexRecoveryActions >= 3) return false;
+    const recheckButton = storyIndexStatus.getByRole('button', { name: '重新检查' });
+    if (await recheckButton.isVisible() && await recheckButton.isEnabled()) {
+      await expect(recheckButton).toBeInViewport();
+      await recheckButton.click();
+      storyIndexRecoveryActions += 1;
+      return false;
+    }
+    if (await retryStoryIndexButton.isVisible() && await retryStoryIndexButton.isEnabled()) {
+      await expect(retryStoryIndexButton).toBeInViewport();
+      await retryStoryIndexButton.click();
+      storyIndexRecoveryActions += 1;
+    }
+    return false;
+  }, {
+    message: 'A normal user must be able to recover the Story Index with visible actions.',
+    timeout: 60_000,
+    intervals: [500, 1_000, 2_000, 5_000],
+  }).toBe(true);
+  await expect(storyIndexStatus).toContainText(/PostgreSQL 索引\s*已就绪/);
+  await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
+  const agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+  await expect(agentDialog).toBeVisible();
+  await expect(agentDialog).toContainText('story-workspace-dream-confirmation');
+  await expect(agentDialog).toContainText('episode-outline.md');
+  await page.getByRole('button', { name: '收起 Dream Agent' }).click();
+
+  const settledHistory = await getJson<{
+    messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>;
+  }>(
+    page.request,
+    `/api/claude-agent/threads/${encodeURIComponent(accepted.threadId)}/messages`,
+    token,
+  );
+  const confirmationRows = settledHistory.messages.filter((message) => (
+    message.role === 'user'
+    && message.parts.some((part) => part.type === 'text'
+      && part.text?.includes('story-workspace-dream-confirmation'))
+  ));
+  expect(confirmationRows).toHaveLength(1);
+
+  await page.goto(`${WEB_BASE}/story-workspace/dream`);
+  await expect(page.getByRole('heading', { name: '发起一次 Dream' })).toBeVisible();
+  const reentry = page.locator('.story-workspace-dream-reentry__item').filter({
+    hasText: `…${accepted.workflowRunId.slice(-6)}`,
+  });
+  await expect(reentry).toBeVisible();
+  await reentry.click();
+  await page.waitForURL(
+    `${WEB_BASE}/story-workspace/runs/${accepted.workflowRunId}/execution`,
+  );
 
   await diagnostics.settle();
   expect(diagnostics.dreamFileStatuses.length).toBeGreaterThan(0);
   expect(diagnostics.dreamFileStatuses.every((status) => status === 200)).toBe(true);
+  expect(diagnostics.storyIndexStatuses).toContain(200);
+  expect(diagnostics.genericNotFoundConsoleErrors.length).toBeLessThanOrEqual(
+    diagnostics.storyIndexStatuses.filter((status) => status === 404).length,
+  );
   expect(diagnostics.errors).toEqual([]);
 });

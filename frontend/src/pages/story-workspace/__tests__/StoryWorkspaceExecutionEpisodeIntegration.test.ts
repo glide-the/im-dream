@@ -1,6 +1,10 @@
 // [Input] Execution Page source and its pure Episode action session seam.
 // [Output] Deterministic integration guards for U5-U10 composition and revision-stable UI state.
 // [Pos] Story Workspace Execution Episode integration Node seam (Task 3 U11).
+// [Sync] 2026-08-13: guard artifact-build copy and reject trust wording for
+//                    an Episode association that has not been constructed yet.
+// [Sync] 2026-08-13: assert the unbound surface is read-only and never exposes
+//                    the manual recovery dispatch through page or Agent UI.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -100,22 +104,39 @@ test('keeps Dream confirmation and Agent preview boundaries without browser-owne
   ]) expect(PAGE_SOURCE).not.toContain(forbidden);
 });
 
-test('shows honest loading, unbound, invalid and last-good states', () => {
+test('shows honest read-only association, invalid and last-good states', () => {
   for (const expected of [
     '正在读取第一集产物…',
-    '尚未建立可信的第一集关联',
-    '恢复第一集关联',
+    '尚未构建第一集产物关联',
+    '关联状态：等待确认后的自动发布与绑定',
+    '系统会自动发布产物',
+    '无需手动构建',
+    '第一集产物关联：已关联',
+    '校验第一集产物',
     '尚未生成',
     '来源无效',
     '最近一次有效内容',
   ]) expect(PAGE_SOURCE).toContain(expected);
+  for (const forbidden of [
+    '尚未建立可信的第一集关联',
+    '恢复可信 Episode 关联',
+    '可恢复的可信 Episode 关联',
+    '第一集关联将从服务端事实恢复',
+    '第一集关联暂未恢复',
+    '验证第一集产物',
+  ]) expect(PAGE_SOURCE).not.toContain(forbidden);
+  const unboundBranch = PAGE_SOURCE.slice(
+    PAGE_SOURCE.indexOf("episodeSurface.bindingAvailability === 'unbound' ? ("),
+    PAGE_SOURCE.indexOf("<main aria-labelledby=\"story-workspace-episode-title\">"),
+  );
+  expect(unboundBranch).not.toContain('<button');
 });
 
-test('dispatches only U10F recovery and follow-up actions with the current surface', () => {
-  expect(PAGE_SOURCE).toContain('storyWorkspaceRecoverEpisodeBinding(runId, episodeSurface');
+test('does not dispatch manual binding recovery and keeps bound follow-up actions', () => {
   expect(PAGE_SOURCE).toContain('storyWorkspaceContinueEpisodeAction(runId, episodeSurface');
+  expect(PAGE_SOURCE).not.toContain('storyWorkspaceRecoverEpisodeBinding');
+  expect(PAGE_SOURCE).not.toContain('recover_first_episode_binding');
   expect(PAGE_SOURCE).not.toMatch(/storyWorkspaceContinueEpisodeAction\([^)]*\{\s*action\s*:/s);
-  expect(PAGE_SOURCE).not.toMatch(/storyWorkspaceRecoverEpisodeBinding\([^)]*\{[^}]*\b(?:story|path|episode)\s*:/s);
 });
 
 test('opens a dedicated Episode confirmation before the action and never substitutes Agent chat', () => {
@@ -584,9 +605,6 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
       return await new Promise((resolve, reject) => {
         pending.set(actionSurface.etag, { resolve, reject });
       });
-    }
-    export async function storyWorkspaceRecoverEpisodeBinding() {
-      throw new Error('recovery is outside this harness');
     }
     export function __u11ToSurfaceB() {
       current = surface('b', 'generate_prompts');

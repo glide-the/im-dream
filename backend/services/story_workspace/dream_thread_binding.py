@@ -23,9 +23,15 @@ from pydantic import ValidationError
 
 try:
     from models.workflow_run import RunStatus, TERMINAL_RUN_STATUSES
+    from services.story_workspace.canonical_project_instruction import (
+        story_workspace_canonical_project_fallback_slug,
+    )
     from story_workspace.contracts import StoryWorkspaceDreamRunContext
 except ModuleNotFoundError:  # pragma: no cover - package-style test imports
     from backend.models.workflow_run import RunStatus, TERMINAL_RUN_STATUSES
+    from backend.services.story_workspace.canonical_project_instruction import (
+        story_workspace_canonical_project_fallback_slug,
+    )
     from backend.story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 logger = logging.getLogger(__name__)
@@ -248,6 +254,8 @@ def _validate_source_message_provenance(
             and metadata.get("workflowRunId") == root_run_id
             and isinstance(goal, str)
             and bool(goal.strip())
+            and metadata.get("projectStorySlug")
+            in {None, story_workspace_canonical_project_fallback_slug(goal)}
             and metadata.get("requestFingerprint")
             == _sha256_json(fingerprint_payload)
             and attempt.input_hash == _sha256_json({"goal": goal})

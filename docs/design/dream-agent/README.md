@@ -2,7 +2,7 @@
 
 > 状态：**已实现并通过本机真实业务验收（2026-08-13）**。
 
-当前 Dream Agent 只解决一个完整业务：主 Agent 在当前 thread 工作区生成创作文件；
+当前 Dream Agent 只解决一个完整业务：主 Agent 在当前 thread 工作区构建创作产物；
 根 turn 成功后，宿主把实际文件同步到当前 Run 的 `.dream` 私有目录；Dream 页面读取
 人物、场景和分镜并正常显示。
 
@@ -28,9 +28,9 @@ Dream 没有第二套 Agent runtime、SSE、parser 或 reducer。
 ## 2. 当前业务范围
 
 - Dream 发起时创建可信 Workflow Run，并绑定同一 actor-owned Chat thread。
-- 服务端给首轮 Agent 明确的项目 ID；Agent 只生成工作台文件，不写 `.dream`。
-- 根 turn 成功后，Hook 收集人物、场景、分镜和 Project/Episode allowlist 文件。
-- Hook 原子更新当前 Run 的页面 stage 和 `artifact/manifest.json`。
+- 服务端给首轮 Agent 明确的项目 ID；Agent 只构建工作台产物，不写 `.dream`。
+- 根 turn 成功后，Hook 校验人物、场景、分镜和 Project/Episode allowlist 产物。
+- Hook 原子同步当前 Run 的页面 stage 和 `artifact/manifest.json`。
 - Dream 页面通过既有 actor-scoped `dream-files` GET 展示，不新增页面协议。
 - 刷新、Dream→Chat→Dream 都继续使用同一 thread，不重新发起首轮消息。
 - Agent failed/cancelled/Stop 时不发布本轮半成品；同步异常不制造第二个 Chat 终态。
