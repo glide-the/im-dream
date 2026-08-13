@@ -1,11 +1,13 @@
-// [Input] Product API transport with injectable fetch responses.
+// [Input] Product API transport with injectable fetch responses and the Admin unavailable-plan state matrix.
 // [Output] Contract, security, error, and command receipt regression evidence.
 // [Pos] Focused browser-transport unit tests for the Token-only subscription surface.
+// [Sync] 2026-08-13: cover published configuration-incomplete plans returned by the real Admin Product API.
 
 import { expect, test } from '@playwright/test';
 import {
   PRODUCT_BFF_ENDPOINTS,
   ProductApiError,
+  fetchProductPlans,
   fetchProductSubscriptionContext,
   submitProductSubscriptionCommand,
 } from '../productApi';
@@ -65,6 +67,34 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
+function unavailablePlan(overrides: Record<string, unknown> = {}) {
+  return {
+    planCode: 'free',
+    planName: 'Free',
+    eyebrow: 'A quiet beginning',
+    note: 'Start with one story goal',
+    details: ['Open the Story Workspace'],
+    description: null,
+    planVersionId: 'planv_free_v3',
+    version: 3,
+    versionStatus: 'published',
+    billingCycle: 'monthly',
+    monthlyAllowanceTokens: null,
+    monthlyPriceMicrousd: null,
+    currency: 'USD',
+    available: false,
+    unavailableReason: 'configuration_incomplete',
+    entitlements: [],
+    eligibility: {
+      eligible: false,
+      reasonCode: 'PLAN_NOT_AVAILABLE',
+      appliesAt: null,
+    },
+    availableActions: [],
+    ...overrides,
+  };
+}
+
 test('the browser product boundary contains exactly the six approved same-origin routes', () => {
   expect(Object.values(PRODUCT_BFF_ENDPOINTS)).toEqual([
     '/api/story-workspace/subscription/context',
@@ -108,6 +138,40 @@ test('context parsing preserves the supported past-due renewal state', async () 
     status: 'past_due',
     allowedActions: ['renew'],
   });
+});
+
+test('plans parsing accepts the Admin published configuration-incomplete state and rejects mismatched reasons', async () => {
+  const fetchPlans = (plan: ReturnType<typeof unavailablePlan>) => fetchProductPlans(
+    { page: 1, pageSize: 20 },
+    {
+      token: null,
+      resolveUrl: (path) => path,
+      fetchImpl: (async () => jsonResponse({
+        data: [plan],
+        meta: { total: 1, page: 1, pageSize: 20, requestId: 'req_plans' },
+      })) as typeof fetch,
+    },
+  );
+
+  await expect(fetchPlans(unavailablePlan())).resolves.toMatchObject({
+    data: [{
+      planCode: 'free',
+      available: false,
+      unavailableReason: 'configuration_incomplete',
+      versionStatus: 'published',
+    }],
+  });
+
+  for (const invalidPlan of [
+    unavailablePlan({ unavailableReason: 'commercial_parameters_pending' }),
+    unavailablePlan({ versionStatus: 'draft' }),
+    unavailablePlan({ version: null }),
+  ]) {
+    await expect(fetchPlans(invalidPlan)).rejects.toMatchObject({
+      status: 503,
+      code: 'PRODUCT_RESPONSE_CONTRACT_INVALID',
+    });
+  }
 });
 
 test('strict parsing rejects unknown nested fields, unsafe integers, and broken conservation', async () => {

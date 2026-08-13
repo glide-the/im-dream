@@ -1,6 +1,7 @@
-// [Input] Five same-origin Dream Product BFF routes and the current Dream auth token.
+// [Input] Six same-origin Dream Product BFF routes, the Admin Product plan-state contract, and the current Dream auth token.
 // [Output] Strict Token-only subscription, usage, model, and command contracts.
 // [Pos] Sole browser transport boundary for the Dream monthly Token subscription experience.
+// [Sync] 2026-08-13: align unavailable published-plan parsing with the Admin/Dream configuration-incomplete contract.
 
 import { z } from 'zod';
 import { getAuthToken } from '../contexts/AuthContext';
@@ -86,14 +87,25 @@ const productPlanSchema = z.object({
     if (plan.versionStatus !== 'published' || plan.planVersionId === null || plan.version === null || commercial.some((value) => value === null) || plan.unavailableReason !== null) {
       context.addIssue({ code: 'custom', message: 'Available plan must expose a published commercial version.' });
     }
-  } else if (
-    commercial.some((value) => value !== null)
-    || plan.unavailableReason === null
-    || plan.availableActions.length > 0
-    || ((plan.planVersionId === null) !== (plan.version === null))
-    || (plan.planVersionId !== null && plan.versionStatus !== 'draft' && plan.versionStatus !== 'retired')
-  ) {
-    context.addIssue({ code: 'custom', message: 'Unavailable plan must not expose commercial values or actions.' });
+  } else {
+    const hasVersion = plan.planVersionId !== null;
+    if (
+      commercial.some((value) => value !== null)
+      || plan.unavailableReason === null
+      || plan.availableActions.length > 0
+      || hasVersion !== (plan.version !== null)
+      || hasVersion !== (plan.versionStatus !== null)
+      || (
+        plan.unavailableReason === 'commercial_parameters_pending'
+        && (!hasVersion || plan.versionStatus !== 'draft')
+      )
+      || (
+        plan.unavailableReason === 'configuration_incomplete'
+        && plan.versionStatus === 'draft'
+      )
+    ) {
+      context.addIssue({ code: 'custom', message: 'Unavailable plan must not expose commercial values or actions.' });
+    }
   }
 });
 
