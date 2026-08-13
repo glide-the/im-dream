@@ -8,6 +8,7 @@ import { ClaudeAgentChatTransport } from '../../../lib/claude-agent-transport';
 import { toolConfirmationKeyboardDecision } from '../chatRuntimeState';
 import {
   applyBackendEventToMessages,
+  coalesceClaudeAgentSseEvents,
   consumeClaudeAgentSseStream,
   parseClaudeAgentSseBuffer,
 } from '../../../lib/claude-agent-sse-utils';
@@ -31,6 +32,51 @@ const stalePart: DynamicToolUIPart = {
   input: { description: 'Compute sha256 project slug' },
   toolMetadata: { approvalRequested: true },
 };
+
+test('large reconnect replay coalesces deltas without crossing the approval boundary', () => {
+  const replay = [
+    ...Array.from({ length: 10_000 }, () => ({
+      type: 'reasoning-delta', id: 'reasoning-1', delta: '想',
+    })),
+    { type: 'tool-input-start', toolCallId: 'call-agent', toolName: 'Agent' },
+    {
+      type: 'tool-input-available',
+      toolCallId: 'call-agent',
+      toolName: 'Agent',
+      input: { description: '初始化工作台' },
+    },
+    {
+      type: 'tool-approval-request',
+      toolCallId: 'call-agent',
+      toolName: 'Agent',
+      input: { description: '初始化工作台' },
+    },
+    ...Array.from({ length: 4_000 }, () => ({
+      type: 'text-delta', id: 'text-1', delta: '好',
+    })),
+  ];
+
+  const coalesced = coalesceClaudeAgentSseEvents(replay);
+  expect(coalesced).toHaveLength(5);
+  expect(coalesced[0]).toMatchObject({ type: 'reasoning-delta', id: 'reasoning-1' });
+  expect(String(coalesced[0].delta)).toHaveLength(10_000);
+  expect(coalesced[3]).toMatchObject({
+    type: 'tool-approval-request', toolCallId: 'call-agent', toolName: 'Agent',
+  });
+  expect(String(coalesced[4].delta)).toHaveLength(4_000);
+
+  const messages = coalesced.reduce(applyBackendEventToMessages, []);
+  const toolPart = messages[0].parts.find((part) => (
+    part.type === 'dynamic-tool' && part.toolCallId === 'call-agent'
+  )) as DynamicToolUIPart | undefined;
+  expect(toolPart?.toolMetadata?.approvalRequested).toBe(true);
+  expect(resolvePendingToolConfirmation(
+    toolPart!,
+    'auto',
+    new Set(),
+    new Set(['call-agent']),
+  )).toBe('confirm');
+});
 
 test('reject-only consumes approval shortcut while Escape remains rejection', () => {
   expect(toolConfirmationKeyboardDecision('reject-only', {

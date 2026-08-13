@@ -91,7 +91,9 @@ import {
 } from './threadSessionHydration';
 import {
   applyBackendEventToMessages,
+  coalesceClaudeAgentSseEvents,
   consumeClaudeAgentSseStream,
+  type BackendEvent,
 } from '../../lib/claude-agent-sse-utils';
 import { applyPlanEvent, type ThreadPlanEvent } from '../../hooks/useThreadPlan';
 import { applyTodoEvent, type ThreadTodoEvent } from '../../hooks/useThreadTodos';
@@ -582,6 +584,59 @@ export default function ChatPanel({
     reconnectAbortRef.current = abort;
     const activeThreadId = threadId;
     let finished = false;
+    let replayFrameId: number | null = null;
+    let replayEvents: BackendEvent[] = [];
+
+    const flushReplayEvents = () => {
+      replayFrameId = null;
+      if (replayEvents.length === 0) return;
+      const events = coalesceClaudeAgentSseEvents(replayEvents);
+      replayEvents = [];
+      const messageEvents: BackendEvent[] = [];
+      for (const event of events) {
+        if (event.type === 'finish') {
+          // Persistence becomes authoritative only after stream EOF.
+          continue;
+        }
+        if (event.type === 'plan-mode-changed' || event.type === 'plan-updated') {
+          applyPlanEvent(activeThreadId, event as unknown as ThreadPlanEvent);
+          continue;
+        }
+        if (event.type === 'todo-updated') {
+          applyTodoEvent(activeThreadId, event as unknown as ThreadTodoEvent);
+          continue;
+        }
+        if (event.type === 'story-workspace-output') {
+          publishStoryWorkspaceOutput(event as unknown as StoryWorkspaceOutputReceipt);
+          continue;
+        }
+        if (event.type === 'tool-approval-request') {
+          const toolCallId = String(event.toolCallId ?? '');
+          if (toolCallId) {
+            setSettledToolCallIds((current) => {
+              if (!current.has(toolCallId)) return current;
+              const next = new Set(current);
+              next.delete(toolCallId);
+              return next;
+            });
+          }
+        }
+        messageEvents.push(event);
+      }
+      const applyMessages = setMessagesRef.current;
+      if (!applyMessages || messageEvents.length === 0) return;
+      applyMessages((current) => messageEvents.reduce(
+        (next, event) => applyBackendEventToMessages(next, event),
+        current,
+      ));
+    };
+
+    const enqueueReplayEvent = (event: BackendEvent) => {
+      replayEvents.push(event);
+      if (replayFrameId === null) {
+        replayFrameId = window.requestAnimationFrame(flushReplayEvents);
+      }
+    };
 
     const finishReconnect = async () => {
       if (finished) return;
@@ -622,43 +677,12 @@ export default function ChatPanel({
         }
 
         const reader = response.body.getReader();
-        await consumeClaudeAgentSseStream(reader, (event) => {
-          if (event.type === 'finish') {
-            // The backend persists partial/final assistant state after emitting
-            // finish. Keep consuming until EOF; only then is history readable.
-            return;
-          }
-          // plan-* 生命周期帧不产生消息气泡，转发 plan store（claude-plan.md §5.4）。
-          if (event.type === 'plan-mode-changed' || event.type === 'plan-updated') {
-            applyPlanEvent(activeThreadId, event as unknown as ThreadPlanEvent);
-            return;
-          }
-          // todo-updated 生命周期帧不产生消息气泡，转发 todos store（claude-todo.md §5.4）。
-          if (event.type === 'todo-updated') {
-            applyTodoEvent(activeThreadId, event as unknown as ThreadTodoEvent);
-            return;
-          }
-          if (event.type === 'story-workspace-output') {
-            publishStoryWorkspaceOutput(event as unknown as StoryWorkspaceOutputReceipt);
-            return;
-          }
-          if (event.type === 'tool-approval-request') {
-            const toolCallId = String(event.toolCallId ?? '');
-            if (toolCallId) {
-              setSettledToolCallIds((current) => {
-                if (!current.has(toolCallId)) return current;
-                const next = new Set(current);
-                next.delete(toolCallId);
-                return next;
-              });
-            }
-          }
-          const applyMessages = setMessagesRef.current;
-          if (!applyMessages) {
-            return;
-          }
-          applyMessages((current) => applyBackendEventToMessages(current, event));
-        });
+        await consumeClaudeAgentSseStream(reader, enqueueReplayEvent);
+        if (replayFrameId !== null) {
+          window.cancelAnimationFrame(replayFrameId);
+          replayFrameId = null;
+        }
+        flushReplayEvents();
         await finishReconnect();
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
@@ -675,6 +699,11 @@ export default function ChatPanel({
 
     return () => {
       abort.abort();
+      if (replayFrameId !== null) {
+        window.cancelAnimationFrame(replayFrameId);
+        replayFrameId = null;
+      }
+      replayEvents = [];
       if (reconnectRetryTimerRef.current !== null) {
         window.clearTimeout(reconnectRetryTimerRef.current);
         reconnectRetryTimerRef.current = null;

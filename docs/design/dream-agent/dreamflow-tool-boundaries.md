@@ -1,146 +1,67 @@
-# Dreamflow tool and Agent interaction boundaries
+# Dream 工具与自动同步边界
 
-## Purpose
+## 1. 当前业务边界
 
-Dreamflow is the business workflow above the shared Claude Agent runtime. It
-decides which authorized Project/Episode operation is available and validates
-its input/output facts. It does not own message streaming, tool confirmation,
-Stop, reconnect, thread history or terminal delivery.
+Dream 不维护命令状态机。用户在共享 Chat thread 中用自然语言或 Deck skill 与主 Agent 交互；Agent 把业务结果写到 canonical 工作台。服务端只在根 turn 成功后收集实际存在的文件，不推断用户执行了哪个命令。
 
-## Ownership
+完整文件合同见[Dream 工作台文件自动同步](./deck-output-sync-design.md)和 [Project/Episode Artifact 合同](./project-episode-artifact-contract.md)。
 
-| Concern | Owner |
-|---|---|
-| message, delta, tool invocation, confirmation, Stop, terminal | `ClaudeAgentService` + canonical Chat thread |
-| Dream context lookup | server-side Thread mapping during `assemble_context` |
-| safe business event classification | `DreamObserver` through `SessionObserverRegistry` |
-| Workflow Run transition | Workflow owning service using explicit business facts |
-| Project/Episode Artifact write and revision | Dreamflow tool/domain service |
-| action availability | Dream artifact/workflow projection service |
-| page rendering | Dream wrapper plus shared `ChatPanel` |
+## 2. 职责
 
-`DreamObserver` may observe that a tool started, settled or emitted a safe
-result class. It cannot approve tools, cancel the Agent, create a Chat terminal
-or make a Workflow Run successful merely because the Agent turn ended.
+| 参与者 | 负责 | 不负责 |
+|---|---|---|
+| 主 Agent / Deck skill | 理解用户意图；读取上下文；写 canonical 工作台文件 | 写 `.dream/**`；声明服务端同步已成功 |
+| `ClaudeAgentService` | 组装 Dream 上下文；调用原 `run_streaming`；成功后调用 Hook；保持 Chat 单终态 | 解析业务文件；建立第二套 Agent runtime |
+| `DreamArtifactTurnHook` | 重验 actor/thread/run；收集页面投影；发布私有 artifact | 调用模型；推进 Workflow；发送 SSE |
+| `DreamObserver` | 监听标准 Agent 事件并维护派生业务提示 | 文件同步；控制 Agent；改变 thread terminal |
+| Dream 页面 | 用共享 Chat runtime 对话；用 `dream-files` GET 展示业务投影 | 从 transcript 猜文件；用页面状态覆盖 thread 生命周期 |
 
-## Tool categories
+## 3. 文件工具规则
 
-1. **Runtime tools**: standard Claude tools governed by canonical Chat
-   confirmation. Sandbox, network, reject-only and AskUserQuestion use the same
-   thread-scoped policy in Chat and Dream.
-2. **Dream Artifact tools**: server-installed tools that read/write only the
-   authorized Run staging root. They revalidate Run/Thread/Workspace/Deck and
-   expected revisions at execution time.
-3. **Dream business commands**: REST/internal commands for launch, one business
-   confirmation, guidance, retry/cancel and reconcile. They persist a private
-   canonical user message and dispatch the same Thread; they do not call a
-   Dream-specific stream.
-4. **Display actions**: page recommendations derived from Artifact and workflow
-   facts. A disabled or stale action never becomes a tool request.
+- canonical 工作台可由 Agent 使用其正常受控写工具生成。
+- `.dream/**` 是服务端私有面；普通 file/shell mutation 必须拒绝。
+- 既有 Story Workspace MCP writers 可以用于兼容或调试，但不是正常自动同步的前提。
+- 不增加 `inspect_dream_artifacts`、`sync_dream_artifacts`、stage checkpoint 或 action completion 工具。
+- Project/Episode 目标路径由服务端派生，不接受浏览器或模型提供绝对路径。
 
-## Action boundary
-
-| Action | Required input | Success fact | May change Story source |
-|---|---|---|---|
-| `plan_episode` | sealed predecessor, target next Episode | outline/plan completion | yes, after full snapshot CAS |
-| `write_script` | registered Episode + plan revision | available script + completion | yes |
-| `review_script` | expected script revision | review report completion | yes |
-| `build_assets` | reviewed script revision | storyboard/assets completion | yes |
-| `regenerate_storyboard` | current script + storyboard revision | new storyboard revision | yes |
-| `review_full_chain` | all required files/revisions | full-chain report completion | yes |
-| `commit_episode` | complete valid Episode | committed completion | yes |
-| `prepare_render_guide` | committed Episode revision | render guide completion | yes |
-
-Every operation claims an idempotency key and expected input revision before it
-enters the Agent queue. The tool re-reads the private message, context mapping
-and Artifact facts before writing. Settlement marks the claim dispatched or
-failed; it never trusts the browser's action, run, revision or path.
-
-## End-to-end interaction
+## 4. 根 turn 时序
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Page as "Dream page"
-    participant Business as "Dream business command"
-    participant DB as "Dream repositories"
-    participant Chat as "Canonical thread API"
-    participant Service as "ClaudeAgentService"
-    participant Observer as "DreamObserver"
-    participant Tool as "Dreamflow tool"
-    participant Artifact as "Run Artifact"
+    participant Service as ClaudeAgentService
+    participant Hook as DreamArtifactTurnHook
+    participant Agent as 主 Agent
+    participant Files as canonical 工作台
+    participant Private as .dream 私有 Run
 
-    User->>Page: choose available operation
-    Page->>Business: command + public expected revision/idempotency key
-    Business->>DB: authorize actor/thread/run/workspace, claim private message
-    Business->>Chat: dispatch standard thread turn
-    Chat->>Service: standard ClaudeAgentRunRequest
-    Service->>DB: resolve Dream context by actor + thread
-    Service->>Service: assemble context, workspace and verified tool pack
-    Service-->>Observer: after context assembly (internal metadata only)
-    Service->>Tool: canonical Agent tool call
-    Tool->>DB: revalidate claim, authority and expected revisions
-    Tool->>Artifact: isolated write, validate and seal
-    Tool->>DB: CAS Story/action completion
-    Tool-->>Service: structured result
-    Service-->>Page: canonical Chat SSE/result/terminal
-    Observer->>DB: idempotent business projection only when owning fact permits
-    Page->>Business: refresh Artifact/workflow projection
+    Service->>Hook: before_main_turn(可信 context)
+    Service->>Agent: runner.run_streaming
+    Agent->>Files: 按用户要求生成或修改文件
+    alt 根 turn success
+        Agent-->>Service: success
+        Service->>Hook: after_main_turn(ticket)
+        Hook->>Files: 安全读取实际文件
+        Hook->>Private: 幂等写 stage、artifact、manifest
+    else failed / cancelled
+        Agent-->>Service: failed / cancelled
+        Note over Service,Private: 不执行 after hook
+    end
+    Note over Service,Private: Chat 终态仍由共享 runtime 唯一产生
 ```
 
-## Confirmation boundary
+SDK 内部子 Agent 不单独触发 Hook；根 turn 完成时只结算一次。确认等待还不是根 turn success，因此不会提前同步半成品。
 
-Dream business confirmation and runtime tool confirmation are intentionally
-different:
+## 5. 与 Workflow 的关系
 
-- Business confirmation accepts the reviewed Dream draft once and persists the
-  Workflow Run's `confirmed` fact.
-- A later runtime tool may still require canonical Chat confirmation.
-- After business confirmation, the Workflow Run remains `confirmed` until a
-  domain completion, failure or cancellation fact arrives. There is no
-  intermediate business lifecycle stage for “continue”. The current Agent turn
-  is represented by the shared Thread status (`running`, confirmation wait,
-  cancelled, failed or completed).
+文件同步只形成当前 Run 的业务投影，不能把 Workflow 标记 completed/failed/cancelled。Workflow 权限、Run 绑定和 Story current source 仍由各自领域服务控制。
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant Dream
-    participant Workflow
-    participant Chat
-    participant Tool
+`DreamObserver` 可以观察“Agent 已结束”或“工具活动”供页面业务提示使用，但不能检查文件、重试发布或把 projection 反向写成 thread lifecycle。
 
-    User->>Dream: accept reviewed draft
-    Dream->>Workflow: CAS pending_review -> confirmed
-    Workflow->>Chat: enqueue private standard-thread command once
-    Chat->>Tool: execute next authorized action
-    alt runtime confirmation required
-        Tool-->>Chat: canonical confirmation request
-        User->>Chat: approve / reject / answer
-    end
-    alt domain completion fact
-        Tool->>Workflow: confirmed -> completed
-    else domain failure/cancel fact
-        Tool->>Workflow: confirmed -> failed/cancelled
-    end
-```
+## 6. 被删除的设计前提
 
-## Failure and retry
-
-- Invalid/stale input fails before dispatch and does not create an Agent turn.
-- A claimed private message is dispatchable once; retry creates or reclaims only
-  according to the command's explicit idempotency policy.
-- Agent output without a domain completion fact leaves the Workflow state
-  unchanged and exposes a retryable diagnostic.
-- Tool failure after partial output produces the canonical Chat failure terminal
-  and an owning-service failure fact where one is available.
-- Observer failure is logged/isolated and never changes Chat delivery.
-- Stop cancels only a genuinely running main turn. Business cancellation is a
-  separate authorized command and cannot be inferred from a disconnected page.
-
-## Page switching
-
-Dream → Chat and Chat → Dream carry only `threadId`. Both pages hydrate the same
-history/status and reconnect to the same stream. Dream independently calls its
-actor-scoped business APIs to map that Thread to Workspace/Run/Artifact panels.
-No Dream field is added to the Chat request or SSE frame.
+- 固定或随机 `/drama-*` 命令注册表；
+- `next_action/no_next_action` 作为文件同步或 Workflow 完成条件；
+- Agent 必须主动调用 MCP 才能让页面看到产物；
+- Observer 负责后置同步；
+- 文件 watcher 或每个 PostToolUse 都尝试发布；
+- 为 Dream 增加第二套 transport/parser/reducer。

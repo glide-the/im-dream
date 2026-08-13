@@ -46,6 +46,9 @@
 #                    layout only for server-resolved Dream turns. The layout is
 #                    guidance inside the existing trusted Dream context block;
 #                    it does not add a client field or Agent wire contract.
+# [Sync] 2026-08-13: Dream context now directs the Agent to canonical workbench
+#                    files and documents host-owned after-turn synchronization;
+#                    MCP stage writers are optional rather than a completion gate.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -482,15 +485,15 @@ class ClaudeAgentContextBuilder:
                         f"{provenance}\n"
                         "This is server-trusted provenance for this Dream turn. "
                         "Use only this workflow_run_id and never infer or replace it.\n"
-                        "Call mcp__story_workspace__write_dream_run first. "
                         "Write canonical workspace files with built-in file tools; "
                         "never use generic file or Bash tools to write .dream/.\n"
-                        "After all required character files under assets/characters/ "
-                        "are complete, call mcp__story_workspace__write_dream_stage "
-                        "for characters. After all required scene files under "
-                        "assets/scenes/ are complete, call it for scenes. After the "
-                        "canonical stories/<project_slug>/episodes/EP??/storyboard.yaml "
-                        "is complete, call it for storyboards.\n"
+                        "Canonical character cards belong under assets/characters/, "
+                        "scene cards under assets/scenes/, and Project/Episode files "
+                        "under stories/<project_slug>/.\n"
+                        "The host synchronizes completed canonical workbench files into "
+                        "the private Run after the root turn succeeds. The Story Workspace "
+                        "MCP writer tools are optional helpers for an immediate preview or "
+                        "explicit repair; correctness must not depend on calling them.\n"
                         f"{STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION}\n"
                         f"{STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX}\n"
                         f"{STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION}\n"

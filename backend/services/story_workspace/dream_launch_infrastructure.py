@@ -64,6 +64,7 @@ try:
     )
     from services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
+        story_workspace_canonical_project_fallback_slug,
     )
     from services.story_workspace.dream_lifecycle_observer import (
         NormalizedTurnOutcome,
@@ -119,6 +120,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     )
     from backend.services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
+        story_workspace_canonical_project_fallback_slug,
     )
     from backend.services.story_workspace.dream_lifecycle_observer import (
         NormalizedTurnOutcome,
@@ -772,17 +774,26 @@ class DreamRuntimeProvisioningService:
 
 
 def _launch_instruction(goal: str) -> str:
+    project_slug = story_workspace_canonical_project_fallback_slug(goal)
     return (
         f"{goal}\n\n"
-        "你正在执行 Dream 工作空间生成流程。\n"
-        "必须遵守：\n"
-        "1. 首先调用 write_dream_run，使用宿主提供的 workflowRunId。\n"
-        "2. 仅在 canonical 人物文件完成后调用 write_dream_stage(characters)。\n"
-        "3. 仅在 canonical 场景文件完成后调用 write_dream_stage(scenes)。\n"
-        "4. 仅在 canonical 分镜文件完成后调用 write_dream_stage(storyboards)。\n"
-        "5. Dream flow 不调用 AskUserQuestion；缺少字段时写明"
-        "显式假设，形成可编辑草稿。\n"
-        "6. 完成人物、场景、分镜后停在 Dream 页面等待用户确认。\n"
+        "你正在执行首次 Dream 的最小工作台初始化。不要运行或研究完整 drama 命令。\n"
+        f"服务器已分配 project_id/project_slug：{project_slug}。必须原样使用，"
+        "不要计算、查询或验证哈希。\n"
+        "只完成以下工作：\n"
+        "1. 使用内建 Write 工具直接写文件；不要读取/搜索插件源码、CLAUDE.md、模板，"
+        "不要调用 Agent、WebFetch、WebSearch、AskUserQuestion 或 Dream MCP。\n"
+        "2. 至少创建 assets/characters/lead-a.md 与 assets/characters/lead-b.md；"
+        "每个文件用 YAML "
+        "frontmatter 提供 char_id、char_name，正文写简短人物关系和动机。\n"
+        "3. 至少创建 assets/scenes/terminal.md；用 YAML frontmatter 提供 "
+        "scene_id、scene_name，正文写简短场景氛围和空间信息。\n"
+        f"4. 创建 stories/{project_slug}/project.yaml，其中 project_id 与 "
+        f"project_slug 都严格等于 {project_slug}，project_name 使用本次创作的中文短标题。\n"
+        f"5. 创建 stories/{project_slug}/episodes/EP01/storyboard.yaml，至少提供 "
+        "total_shots、total_duration_sec 和 shots 列表，形成可编辑的简洁分镜草稿。\n"
+        "6. 不要写 .dream；宿主会在 root turn 成功结束后自动同步。"
+        "五类工作台文件写完后立即结束，不做联网调查、额外规划或自检循环。\n"
         f"{STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION}"
     )
 

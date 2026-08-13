@@ -3944,3 +3944,681 @@ focused tests, the two affected folder contracts and this execution record. The
 two critical Session resume/cancellation tests passed and `git diff --check`
 reported no whitespace errors. No new real-model request is part of this commit
 round; provider-level semantic continuation remains outside this Git operation.
+
+## Round 73 — Design server-detected Deck output synchronization
+
+**Current-round objective**
+
+Design how a Dream Agent learns that a Deck plugin has produced valid output
+and can synchronize it into the private Run surface without generic `.dream`
+writes or a second lifecycle owner.
+
+**Optimized Prompt**
+
+> Reconstruct the initial Dream generation contract from Codex task
+> `019fcb01-c61c-7f22-9d56-fb38660f042a` and the multi-Episode action contract
+> from `019fd74e-e06f-7073-a714-fe86cdada2ce`. Design one explicit Story
+> Workspace MCP checkpoint triggered by the main Agent after a Deck workflow
+> step returns. The server must derive the current actor, Thread, Run, message,
+> Deck output contract, Project, Episode, action and revisions; stably observe
+> allowlisted canonical files; return structured not-ready/invalid/synced/
+> sealed/conflict results; synchronize through private staging; and record
+> completion or final immutable publication with CAS. Reject filesystem
+> watchers, PostToolUse inference, Observer ownership, browser paths, Agent-
+> supplied revisions and generic `.dream` mutation. Cover initialization,
+> Episode actions, idempotency, cancellation, concurrency, recovery, security,
+> diagrams, migration and tests without changing the shared Chat runtime.
+
+**Optional Enhancers**
+
+- Make the Deck manifest advertise only a reviewed output-contract identifier;
+  keep path/parser definitions in a server registry frozen by the Deck lock.
+
+**Scope checked or modified**
+
+- Initial Dream run/stage production, Project/EP01 binding, Episode workflow
+  checkpoints, private staging/sealing, Observer boundary and design docs.
+- No production code, Claude runner, public Chat DTO/SSE or database DDL change.
+
+**Completion standard**
+
+The design explains exactly when the Agent calls which MCP tool, how readiness
+is proven, how the Agent reacts to each structured result, how duplicate/racing
+calls remain safe and how mutable authoring differs from immutable publication.
+
+**Actual result and unverified inferences**
+
+The accepted design uses an explicit Agent checkpoint with server-side stable
+observation; it rejects watcher/Observer/hook inference. It separates initial
+stage synchronization, per-action staging synchronization and final atomic
+Artifact sealing, while preserving the existing `.dream` write guard and shared
+Thread runtime. A final source review found that current `bind_first_episode`
+correctly permits only `plan_episode` or recovery provenance, so initialization
+now has a distinct one-use private launch claim and a path/revision-free
+`bind_initial_project_episode` checkpoint instead of weakening that guard.
+Production implementation and real Deck/model validation have not been
+performed. The current sealed four-file Artifact layout also omits Prompt/render
+outputs required by the workflow; that versioned allowlist must be reconciled
+before publisher implementation.
+
+## 第 74 轮——补全 Deck 产物同步业务时序并中文化设计文档
+
+**当前轮次目标**
+
+将 Deck 产物检测与 `.dream` 私有发布设计从技术检查点说明，重写为可供业务审核的中文设计；补全首次初始化、Episode 动作、产物未就绪修复、最终发布、重复/并发、取消恢复和 Observer 刷新的独立业务交互时序图。
+
+**优化后的执行提示词**
+
+> 以当前生产代码、首次 Dream 初始化需求和多 Episode 工作流为事实基础，完整重写 Deck 产物检测与 `.dream` 私有同步设计。文档必须使用中文，明确区分规范创作工作区、Run 私有暂存区和不可变发布 Artifact；说明谁发起同步、谁检测完成、谁拥有业务 claim、谁写 workflow 完成事实以及 Agent 如何根据结构化结果继续或停止。至少分别提供首次初始化、普通 Episode 动作成功、未就绪修复重试、最终校验与原子发布、重复/并发幂等、Stop/取消后恢复、Observer 失败隔离的 Mermaid 业务时序图。不得使用文件监听器、PostToolUse 推断、Agent 自报完成、浏览器路径、Agent 提交 revision、Observer 控制流程或通用工具写 `.dream/**`。保留共享 Chat thread runtime，明确当前实现与目标设计的差异、迁移步骤和验收条件。
+
+**可选增强项**
+
+- 为每张时序图补充业务前置条件、成功事实、失败后的用户可见结果。
+- 使用同步规则矩阵说明不同状态下 Agent、服务端和页面分别执行什么动作。
+
+**本轮检查或修改范围**
+
+- `docs/design/dream-agent/deck-output-sync-design.md`。
+- DreamAgent 文档目录、Dreamflow 工具边界说明和文档目录合同。
+- 不修改生产代码、Claude Agent 入口、Chat SSE、数据库 DDL 或真实业务数据。
+
+**本轮完成标准**
+
+- 同步规则可从业务泳道直接审核，不依赖技术实现猜测。
+- 所有新增同步场景都有独立 Mermaid 图。
+- 本轮新增/更新的同步设计正文使用中文，术语和状态含义一致。
+- Markdown 围栏、相对链接和差异检查通过。
+
+**本轮实际结果和未验证推断**
+
+- 已将同步设计全文重写为中文，新增首次初始化、普通 Episode 动作、未就绪修复、最终发布、重复/并发、Stop/取消恢复、Observer 失败隔离七张独立业务时序图，并保留一张 Artifact 协调状态图。目录、Dreamflow 边界说明和文档目录合同已同步更新。
+- 本轮只修改设计文档；生产 checkpoint、private staging、publisher 和真实 Deck/模型验收仍未执行，不能把本文档状态解释为代码已交付。
+
+## 第 75 轮——同步设计文档验证
+
+**当前轮次目标**
+
+验证中文同步设计的结构、图表、链接和差异质量，确保新增业务时序可以被文档工具解析且没有把待实现能力写成已交付事实。
+
+**优化后的执行提示词**
+
+> 对 Deck 产物同步设计执行只读文档验收：统计并逐一解析所有 Mermaid 图；检查 Markdown 围栏成对、相对链接目标存在、标题和说明已中文化、README 与 folder contract 已建立入口；运行 `git diff --check`；反向搜索 watcher、PostToolUse、Observer、通用 `.dream` 写入、已实现 publisher 等禁止或误导性表述，确认它们只以“拒绝方案/待实现差异”出现。输出实际通过项和仍未验证的生产实现，不运行真实模型或修改业务数据。
+
+**可选增强项**
+
+- 如果本地 Mermaid 渲染器缺少 DOM 环境，至少分别提取图块并使用项目已有解析入口验证，明确工具限制。
+
+**本轮检查或修改范围**
+
+- 本轮更新的四份设计文档和 `docs/design/.folder.md`。
+- 只读验证；发现文档缺陷时才做最小修正。
+
+**本轮完成标准**
+
+- 七张业务时序图和一张状态图数量正确、围栏完整。
+- 相对链接无死链，差异无空白错误。
+- 文档明确区分“设计已接受”和“生产实现待完成”。
+
+**本轮实际结果和未验证推断**
+
+- `git diff --check` 通过；同步设计共有七张业务 `sequenceDiagram` 和一张 Artifact 状态图，Markdown 围栏共 40 个且成对。
+- 项目现有 Mermaid 11.16.0 在纯 Node 入口中逐张解析：七张业务时序图全部 PASS；状态图已完成语法解析，但在 DB 语义抽取阶段遇到 Mermaid Node 环境自身的 `DOMPurify.addHook is not a function`，因此未把状态图记为完整渲染通过。该错误发生在 sanitize 阶段，不是 parser 返回的 Mermaid 语法错误。
+- README 和 Dreamflow 的新增相对链接目标存在；英文业务标题反查完成，保留的英文只属于 Deck、Dream、Artifact、MCP、Observer 类名、状态/工具标识等固定技术词。
+- 未运行浏览器渲染、生产代码测试、真实 Deck 或真实模型；这些仍属于实现后的验收范围。
+
+## 第 76 轮——将同步设计改为主 Agent 生命周期自动同步
+
+**当前轮次目标**
+
+纠正将 Drama 命令建模为固定顺序工作流、并依赖 Agent 主动调用 MCP 才能同步的设计错误；基于真实 Claude Agent 生命周期 hook 和 Deck 命令合同，设计首次初始化默认执行、其余命令随机按需执行时的自动产物检测与同步。
+
+**优化后的执行提示词**
+
+> 重新审查 DreamAgent、ClaudeAgentService、Claude Agent runner、SessionObserverRegistry、SDK hook 和 Deck 命令实现。业务事实是：首次空间初始化默认执行 `/drama-init`；之后 `/drama-plan`、`/drama-script`、`/drama-asset`、`/drama-storyboard`、`/drama-prompt`、`/drama-render`、`/drama-voice`、`/drama-edit`、`/drama-promote`、`/drama-query`、`/drama-doctor`、`/drama-payoff` 均由用户按需、重复、无固定顺序执行。设计主 Agent turn 前后的确定性 hook：turn 前记录受控工作区基线与授权上下文，turn 后在主 Agent 单终态结算前或结算协调阶段比较产物、按输出合同校验并自动同步 `.dream` 私有投影；必须区分主 Agent 与子 Agent、成功/失败/取消/确认等待、无文件变化、部分写入、重复执行和并发 turn。MCP 只作为 Agent 主动检查、修复反馈和显式重同步的辅助入口，不能成为自动同步正确性的必要条件。不得修改 Claude SDK 入口，不新增第二套 Agent runtime/SSE，不让 Observer 成为同步 owner，不把命令强制串成 workflow DAG。用中文更新业务规则、时序图、状态和迁移清单，并明确哪些旧设计被否决。
+
+**可选增强项**
+
+- 使用 command-output registry 表达每条命令可能产生的文件集合和校验策略，而不是固定 predecessor。
+- 将自动同步设计成 ClaudeAgentService 生命周期中的命名类，不使用闭包或测试环境分支。
+
+**本轮检查或修改范围**
+
+- ClaudeAgentService assemble/session execution、runner hooks、SessionObserverRegistry、Story Workspace MCP 和 Deck 命令合同的只读检查。
+- `docs/design/dream-agent/deck-output-sync-design.md`、相关业务/工具边界和文档索引。
+- 不修改生产代码、Claude Agent 入口、数据库或真实业务数据。
+
+**本轮完成标准**
+
+- 首次 init 与后续随机命令的业务规则准确。
+- 自动同步不依赖模型记得调用 MCP。
+- hook 在失败、取消、子 Agent、重复和并发场景中不会误同步或重复终态。
+- MCP、Observer、ClaudeAgentService 和同步协调器职责无重叠。
+
+**本轮实际结果和未验证推断**
+
+- 源码确认现有 SDK `PreToolUse/PostToolUse` 只覆盖单工具，`SessionObserverRegistry.on_after_session_started` 没有根 turn outcome 且异常会被隔离，二者都不能承担自动同步正确性。目标 Hook 因此放在 `ClaudeAgentService`：assembly 后记录 Ticket，根 runner settlement 后自动 diff、校验和同步；原 runner 入口保持不变。
+- 已将同步设计、Dreamflow 边界、B04/B16/B19 业务交互、Project/Episode workflow v2 概念、目录和正式设计审查改为“init 默认、其余命令随机可重复、Hook 自动同步、MCP 辅助”。
+- 当前 `episode_workflow_instruction.py`、next-action resolver、前端 action projection 和测试仍是固定流程；本轮未修改生产代码。DramaForge skill 输出路径也存在多套布局，canonical registry 尚未冻结，真实 Hook/Deck/模型验证未执行。
+
+## 第 77 轮——随机命令自动同步设计验证
+
+**当前轮次目标**
+
+验证修订后的文档没有残留固定命令 DAG、Agent 必须调用 MCP、Observer 同步 owner 或 no-next-action 完成 Workflow 的规范性表述，并确认业务时序图可解析。
+
+**优化后的执行提示词**
+
+> 对 R76 变更执行文档验收：逐个解析受影响 Markdown 中的 Mermaid；检查围栏、相对链接和 `git diff --check`；搜索 next_action、no_next_action、固定顺序、stage checkpoint、MCP 必做、action 只能完成一次等旧语义，确认剩余命中只作为“当前实现差异/待删除”存在；核对十三条命令、首次 init、根 turn before/after hook、子 Agent 单次结算、success/error/cancel、no-change、重复 revision 和辅助 MCP 均有明确合同。不得运行生产写测试或真实模型。
+
+**可选增强项**
+
+- 将生产源码中的固定流程命中单列为实施差异，避免误报为文档遗漏。
+
+**本轮检查或修改范围**
+
+- R76 修改的 DreamAgent 设计文档和目录合同。
+- 只读验证；只在发现矛盾时进行最小文档修正。
+
+**本轮完成标准**
+
+- Mermaid、Markdown、链接和 diff 检查通过。
+- 规范正文只有随机命令和自动 Hook 一套同步真相。
+- 当前代码未实现的部分被明确标记，不能误读为已交付。
+
+**本轮实际结果和未验证推断**
+
+- `git diff --check` 通过。十三条 Drama 命令在新同步设计中全部存在，before/after 根 turn、子 Agent 单次结算、success/failed/cancelled、confirmation wait、no-change、重复 revision 和辅助 MCP 合同均有直接文本或时序覆盖。
+- 使用项目 Mermaid 11.16.0 解析四份受影响文档的 30 张图：同步设计 4 张、Dreamflow 1 张、B01–B21 业务图 22 张、Project/Episode 合同 3 张；29 张 PASS。Project/Episode 第一张既有 flowchart 在语法解析后的 sanitize 阶段触发纯 Node 环境 `DOMPurify.addHook is not a function`，未记为完整渲染通过。
+- 旧 `next_action/no_next_action`、固定 stage、Agent 必须调用 MCP 和 action 单次 completion 的剩余文档命中均位于“当前实现差异/待迁移删除”说明，没有作为目标规范继续使用。新增相对链接目标存在。
+- 未修改生产代码；当前固定 action 实现、canonical output layout、Hook/synchronizer/MCP 和真实 Deck/模型仍未迁移或验证。
+
+## 第 78 轮——最小工作台产物闭环实施
+
+**当前轮次目标**
+
+对比 Codex 任务 `019fd74e-e06f-7073-a714-fe86cdada2ce` 与 `019fcb01-c61c-7f22-9d56-fb38660f042a` 中实际生成和展示过的业务产物，放弃此前大部分固定 workflow、action、checkpoint 和命令编排方案，只完成“主 Agent 产出工作台文件 → 自动同步到当前 Run 的 `.dream` 私有路径 → Dream 页面正确显示”的最小业务闭环。
+
+**优化后的执行提示词**
+
+> 基于两个指定 Codex 历史任务、当前 Git 历史、现有 Story Workspace 文件合同和 Dream 页面代码，识别页面真正消费的初始化与 Episode 产物，不沿用历史任务中的固定阶段 DAG、next action、checkpoint 或命令顺序。保持 Chat/Dream 共用 thread、message、Claude session、SSE 和 `ClaudeAgentService`；不修改 Claude Agent runner 入口或原始 `claude_session_id` 语义。在主 Agent 根 turn 的既有服务生命周期中，以标准类实现一次确定性的产物收集与同步：只处理当前授权 workspace/run 下的受控工作台文件，按内容摘要幂等复制到 `.dream/runtime/runs/<run-id>/artifact/`，失败不得伪造 Agent 成功或产生第二终态，取消与未完成写入不得发布。Dream 页面和 `dream-files` API 直接读取该私有投影并正确呈现已有产物、空状态和刷新结果。添加契约与回归测试，随后使用本机真实数据、真实账号、真实模型和真实页面验证；不得克隆业务数据，不创建多环境实现，不改数据库 DDL。
+
+**可选增强项**
+
+- 若既有输出注册表足以覆盖页面所需文件，复用并缩减它；不要为了未来命令引入通用 DAG 或事件存储。
+- 对不影响最小闭环的旧 action UI 仅隔离或停止依赖，避免无关的大范围删除。
+
+**本轮检查或修改范围**
+
+- 两个 Codex 历史任务的用户要求、助手交付摘要和相关 Git 提交。
+- `ClaudeAgentService` 根 turn 生命周期、Story Workspace 工作台/Run 文件服务、`dream-files` API 与 Dream 页面。
+- 对应中文设计、后端/前端契约测试和真实浏览器验收。
+- 不修改 `backend/libs/claude_agent_kit/server/agent_runner.py`、Claude 报文、共享 thread/session 定义、Admin DDL 或无关模块。
+
+**本轮完成标准**
+
+- 页面所需工作台产物由历史事实和当前消费者共同确定，不由旧固定流程推断。
+- 主 Agent 正常结束后自动同步，重复执行幂等，失败/取消不发布半成品。
+- `.dream` 私有路径、API 和页面对同一 Run 的内容一致，刷新后仍可恢复。
+- 聚焦后端/前端测试、类型/构建和真实业务页面验证通过，Admin 可观察到真实运行记录。
+
+**本轮实际结果和未验证推断**
+
+- 进行中。尚未修改生产代码；两个历史任务的最终产物集合、现有同步缺口和页面消费者仍在逐项核对。
+
+## 第 79 轮——真实历史产物兼容性校验
+
+**当前轮次目标**
+
+使用本机历史真实工作台文件校验最小同步 Hook，修正源文件解析与现有真实产物之间的兼容问题，同时不放宽 `.dream` 私有发布路径和 canonical Project/Episode 身份约束。
+
+**优化后的执行提示词**
+
+> 对已有真实 Story Workspace 中的角色、场景、分镜和 Project/Episode 文件执行只读收集验证。源工作台允许正常 Unicode 文件名、无 frontmatter 的 YAML，以及以 Markdown 分隔线开头但没有 frontmatter 结束标记的普通正文；解析器应优先读取结构化 YAML，缺少结构化字段时使用安全的文件名或一级标题回退。目标 `.dream/runtime/runs/<run-id>/artifact/` 仍只接受服务端派生的 ASCII project slug、EPxx 和 allowlist 文件名，canonical project 身份不匹配必须拒绝发布，不能用兼容逻辑掩盖。增加回归测试并重新验证三个历史真实布局；不得改 Claude Agent 入口、session、SSE 或数据库。
+
+**可选增强项**
+
+- 仅在普通 Markdown 确实没有闭合 frontmatter 时回退为正文；已闭合但无效的 YAML 仍 fail closed。
+- 页面投影和私有 artifact 发布分别报告，便于定位历史不合规项目而不混淆页面产物。
+
+**本轮检查或修改范围**
+
+- `backend/services/story_workspace/dream_artifact_turn_hook.py` 的源文件路径和内容解析。
+- 对应聚焦回归测试及本机历史工作台只读探测。
+- 不修改页面协议、Claude 报文或工作流状态。
+
+**本轮完成标准**
+
+- Unicode 资产文件、plain YAML 和普通 Markdown 均能形成稳定页面投影。
+- 非法 canonical project 不进入 `.dream` 私有 artifact。
+- 新规范产物重复同步仍无 revision 增长，manifest 仍为最后提交点。
+
+**本轮实际结果和未验证推断**
+
+- 进行中。已确认历史布局存在 Unicode 资产名、plain YAML 和以分隔线开头的 Markdown；修正和真实只读复测尚未完成。
+
+## 第 80 轮——最小闭环文档收敛
+
+**当前轮次目标**
+
+将此前偏复杂的同步、随机命令、revision 和 checkpoint 方案收敛为已经实现的最小业务事实：工作台文件、根 turn 自动同步、`.dream` 页面投影和页面刷新。
+
+**优化后的执行提示词**
+
+> 以当前实现和两个指定历史任务的真实产物为准，重写 Dream 工作台同步设计。正文只保留：canonical 工作台允许路径；`ClaudeAgentService` 根 turn 成功后的命名 Hook；角色/场景/分镜页面 stage 投影；Project/Episode allowlist 私有 artifact 与 manifest；Dream 页面通过既有 `dream-files` GET 恢复；权限、幂等、失败隔离和不修改 Chat/Claude session 的边界。删除 command-output registry、固定或随机命令编排、通用 Artifact revision 状态机、next action、checkpoint、Agent 感知上一轮同步结果和未来 MCP resync 等未实现且当前不需要的方案。所有正文使用中文，并提供一张普通成功时序、一张重复/失败时序和一张页面恢复时序。同步 README、业务清单、工具边界、Project/Episode 合同和设计审查的实现状态。
+
+**可选增强项**
+
+- 将历史任务差异只保留为一张产物对照表，不复述执行过程。
+
+**本轮检查或修改范围**
+
+- `deck-output-sync-design.md` 及直接引用其合同的 DreamAgent 文档。
+- 不修改生产代码或执行真实模型。
+
+**本轮完成标准**
+
+- 文档没有把未来命令编排、MCP 或 checkpoint 写成目标组成部分。
+- 图和文字与当前代码的成功后同步、manifest 原子提交、页面 stage 读取一致。
+- 不误称 Claude runner、Observer 或前端为同步 owner。
+
+**本轮实际结果和未验证推断**
+
+- 进行中。生产 Hook 与三套历史文件的只读投影已验证；文档尚未完成收敛。
+
+## 第 81 轮——实现与静态验证
+
+**当前轮次目标**
+
+验证根 turn 自动同步实现没有破坏共享 Chat runtime、Dream 页面合同或受保护 Claude runner，并完成进入真实模型测试前的全部本地门禁。
+
+**优化后的执行提示词**
+
+> 对最小工作台闭环执行分层验证：先运行 Hook、ContextBuilder、ClaudeAgentService、Dream launch/runtime 和 dream-files 页面合同聚焦测试；再运行合理范围后端全量、前端 Dream/Chat 契约、TypeScript、ESLint 和 production build。检查 `agent_runner.py` 无 diff、Claude session/resume 定义无改动、没有新增 Dream SSE/DTO/环境分支。解析新增 Mermaid，检查 Markdown 相对链接、Python 编译和 `git diff --check`。失败必须定位并修正真实根因，不用固定 sleep、伪造业务数据、放宽权限或删除断言绕过。
+
+**可选增强项**
+
+- 用历史真实工作台执行只读 parser probe，作为格式兼容证据，不写历史 Run。
+
+**本轮检查或修改范围**
+
+- 当前变更的生产代码、测试和 DreamAgent 文档。
+- 不启动真实模型，不修改本机业务数据。
+
+**本轮完成标准**
+
+- 聚焦和合理全量测试、类型、lint、build、文档门禁全部通过。
+- `agent_runner.py`、session identity、Chat payload 和前端 transport 无本轮 diff。
+- 进入真实业务验证前无已知代码阻断。
+
+**本轮实际结果和未验证推断**
+
+- 进行中。聚焦后端测试已达 118 passed、1 skipped；其余门禁尚未执行。
+
+## 第 82 轮——真实 Run 的共享 SSE 重放恢复
+
+**当前轮次目标**
+
+修复真实 Dream Run 在页面晚挂载后无法及时显示标准 `Agent` 工具确认的问题；修复必须位于共享 Chat 重连 reducer，不新增 Dream 专用协议、状态或确认入口。
+
+**优化后的执行提示词**
+
+> 使用真实账号、真实 `deepseek-v4-pro` Run 和标准 thread SSE 诊断晚挂载恢复。后端运行时确认存储已持有 pending ID，EventBus 也能完整重放 `tool-input-*` 与 `tool-approval-request`；若浏览器因为数万个细粒度 reasoning/text delta 逐事件执行 React 状态更新而无法及时抵达确认事件，应在共享 `ChatPanel` 重连消费层实现有界批处理，并只归并相邻、同 ID 的 reasoning/text delta。必须保持非 delta 事件顺序、工具输入、确认、Stop、finish 和历史恢复语义；Chat 与 Dream 同时复用，不改 Claude 报文、runner、session ID 或 Dream API。添加共享 reducer/页面契约测试，再继续同一个真实 Run 的可见 UI 确认；测试不得通过后端接口代替用户点击。
+
+**可选增强项**
+
+- 将批处理归并提取为纯函数，以可重复单元测试证明跨工具边界不重排事件。
+- 记录真实 replay 的事件数量和类型，不记录 reasoning 正文或工具输入正文。
+
+**本轮检查或修改范围**
+
+- `frontend/src/components/chat/ChatPanel.tsx` 及共享 Chat 重连测试。
+- 当前真实 Run `run_5feb30d84d7e4b3fbfac6efd66bca3aa` 的只读状态、SSE 类型和可见页面确认。
+- 不修改 Dream transport、Claude Agent runner、Claude session 定义、数据库或真实 Run 内容。
+
+**本轮完成标准**
+
+- 晚挂载页面能从同一 thread SSE replay 显示标准 `Agent` 确认卡。
+- 浏览器通过可见按钮完成确认，Agent 继续运行；不调用隐藏确认 API。
+- 大量 delta 被有界归并，工具和终态事件不丢失、不乱序、不重复。
+
+**本轮实际结果和未验证推断**
+
+- 诊断已确认 pending 工具为标准 `Agent`，后端 status 返回该 call ID，EventBus 重连可重放完整流；一次两秒只读采样已收到约 1.6 MB、1.7 万余个细粒度事件。
+- 页面尚未显示确认卡；共享批处理修复和真实 UI 复测尚未完成。
+
+## 第 83 轮——真实模型幂等重试阻断诊断
+
+**当前轮次目标**
+
+诊断真实 `deepseek-v4-pro` Run 在工具返回后的续接请求被 Gateway 以 409 拒绝的问题，核对 Claude Code 默认三次重试与 Admin 请求幂等账本，解除真实模型验证阻断；不把模型/Gateway 故障误归因于 Dream 同步。
+
+**优化后的执行提示词**
+
+> 以 Run `run_99a9ac79ed3e4c408e07795b26e38d99`、thread `636d77d5-09ac-5f75-8607-dab55c83e7a8` 和 Admin Gateway 正常业务账本为证据，追踪 `409 A request with this Idempotency-Key is still in progress` 的请求状态、耗时、重试次数和终态。检查当前 Claude Code/SDK 默认重试配置是否确为三次，以及 Gateway 对同一幂等键的 in-progress join/reject 合同；不得修改 `agent_runner.py`、Claude session ID、Dream SSE 或通过更换模型绕过。若问题来自本机残留未结算请求，等待或按现有安全恢复语义处理；若存在配置/代码缺口，只做最小共享 Gateway/Claude Code 配置修复并添加契约测试。随后重新运行真实有头人类旅程，确认工作台文件、`.dream` manifest 与页面展示。
+
+**可选增强项**
+
+- 只输出请求 ID、模型、状态、耗时和错误码等内容无关回执，不打印提示词、reasoning、Token 或 Secret。
+
+**本轮检查或修改范围**
+
+- Dream 侧 Claude SDK 启动配置、Admin Gateway 幂等/请求账本和当前真实 Run 日志。
+- 不修改 Dream Artifact Hook、Claude 报文或数据库数据。
+
+**本轮完成标准**
+
+- 409 的真实来源和责任边界有 Admin/运行日志证据。
+- 默认三次重试配置正确，且不会制造并发重复模型请求。
+- 新真实 Run 不再因同类 409 失败，最终业务闭环通过。
+
+**本轮实际结果和未验证推断**
+
+- 已确认第二个真实 Run 在约十分钟后失败，后端 runner 报告 Gateway 409：同一 `Idempotency-Key` 的请求仍在处理中；Run 未生成工作台文件，Hook 未发布半成品。
+- Admin 账本、默认重试配置和修复路径尚未完成核对。
+
+## 第 84 轮——首次 Dream 最小工作台指令收敛
+
+**当前轮次目标**
+
+将首次 Dream 从完整 Drama 插件探索收敛为最新业务要求的最小初始化产出：直接写人物、场景和分镜工作台文件，成功后由宿主同步 `.dream` 并在页面显示。
+
+**优化后的执行提示词**
+
+> 修改首次 Dream 的服务端可信指令：后端从原始 goal 确定性派生并明确给出唯一 ASCII `project_id/project_slug`，模型必须原样使用，不得自行计算哈希。明确本轮不需要读取或搜索插件源码、CLAUDE.md、模板，不调用 `Agent`、`WebFetch`、`WebSearch`、AskUserQuestion 或 Dream MCP，不执行完整 `/drama-init` 命令编排；只使用内建 `Write` 直接创建至少两个人物卡、一个场景卡、规范 `project.yaml` 和 `EP01/storyboard.yaml`，写成简洁可编辑草稿后结束 root turn。保留共享 Chat 工具确认、Claude session 和成功后 Artifact Hook；不得自动批准 Write。更新指令契约测试，并使用真实 `deepseek-v4-pro` 重跑。
+
+**可选增强项**
+
+- 在指令中给出精确目标路径和最小字段，而不是让模型从插件文档推断布局。
+
+**本轮检查或修改范围**
+
+- `canonical_project_instruction.py` 的已分配 ID 优先规则。
+- `dream_launch_infrastructure.py` 的首次 launch 指令及对应测试。
+- 不修改 Claude Agent runner、Gateway 幂等实现、模型设置或页面协议。
+
+**本轮完成标准**
+
+- 首次 Run 不再调用 Agent/WebFetch 或自行计算 project hash。
+- 页面可见 Write 确认后，目标五类文件在较少工具回合内完成。
+- 宿主 Hook 同步三个 stage 和私有 manifest，页面刷新可恢复。
+
+**本轮实际结果和未验证推断**
+
+- Admin 账本显示失败 turn 在大量成功工具请求后出现两次 120 秒 `UPSTREAM_CONNECTION_ERROR`；失败请求体约 607KB、41 条 message、43 个 tools。`CLAUDE_CODE_MAX_RETRIES` 默认值与测试均为 3，不需要改 runner。
+- 已由服务端从原始 goal 分配唯一 project slug，并把首轮指令限制为内建 `Write` 创建两个人物、一个场景、一个项目文件和一个 EP01 分镜；明确禁止插件扫描、联网、子 Agent、AskUserQuestion 和 Dream MCP。
+- 指令与共享生命周期聚焦测试通过：109 passed、1 skipped、40 subtests。真实页面复测进入下一轮。
+
+## 第 85 轮——真实最小闭环最终验收
+
+**当前轮次目标**
+
+使用本机真实账号、真实数据、真实 `deepseek-v4-pro` 和可见 Chromium，完成“工作台文件生成 → 宿主同步 `.dream` → Dream 页面展示”的最小业务闭环。
+
+**优化后的执行提示词**
+
+> 重启当前 Dream 后端以加载已验证的最小首轮指令；保留现有 Admin 与 Vite 服务。使用用户指定的本机真实账号、真实 Deck 和 `deepseek-v4-pro` 启动一个全新 Dream Run。像正常用户一样在可见浏览器中操作，语义等待标准 Write 确认并通过页面按钮批准，禁止调用隐藏确认接口、固定 sleep、克隆数据或伪造模型结果。主 Agent 应只创建两个人物文件、一个场景文件、`project.yaml` 和 `EP01/storyboard.yaml` 后结束。随后核对 authoritative workflow run、canonical 工作台文件、`.dream/runtime/runs/<run-id>/stages/*.json`、`artifact/manifest.json`、页面人物/场景/分镜展示，以及刷新和同 thread Chat 切换恢复。失败时保留真实 Run、请求 ID 和页面证据并修复根因；不修改 Claude runner、session ID、Chat SSE 协议或 Gateway 默认重试。
+
+**可选增强项**
+
+- 在 Admin 可见日志中确认本次真实模型请求，但不输出正文、Token、DSN 或 Secret。
+- 保存不含敏感内容的验收回执与页面截图。
+
+**本轮检查或修改范围**
+
+- 当前后端服务、真实 Dream 页面、标准 Chat confirmation、工作区与该 Run 的 `.dream` 私有发布目录。
+- 只在真实失败暴露根因时做最小修复；不恢复此前固定命令 workflow 或 MCP 主同步方案。
+
+**本轮完成标准**
+
+- 真实 root turn 成功且只产生一个完成终态。
+- 五类 canonical 工作台文件存在，Hook 写出 stages 与 manifest，内容摘要匹配。
+- Dream 页面在当前视窗正常显示人物、场景和分镜；刷新及 Chat 切换保持同一 thread。
+- 真实模型请求可在 Admin 账本中追踪，所有测试进程和异步资源状态明确。
+
+**本轮实际结果和未验证推断**
+
+- 真实 Run `run_33f42331b5ab46ac81d38f42398c3901` 已由 `deepseek-v4-pro` 生成两个人物、一个场景、规范 `project.yaml` 与 `EP01/storyboard.yaml`；宿主成功写出三个 stage 和 `artifact/manifest.json`，页面刷新及切换 Chat 后返回均持续读取 200。
+- 业务闭环已成立，但有头脚本在浏览器已经返回 Dream 后仍挂在 `page.goBack()` 的页面加载完成信号，未输出 Playwright 成功终态；进入第 86 轮修复测试导航等待并重跑。
+
+## 第 86 轮——有头验收返回导航收口
+
+**当前轮次目标**
+
+修复仅存在于真实验收脚本的浏览器返回等待挂起，获得完整 `--headed --workers=1` 成功结果；不改变已经通过的业务实现。
+
+**优化后的执行提示词**
+
+> 保留第 85 轮真实 Run、工作台和 `.dream` 证据。当前浏览器已从 Chat 返回 Dream，后端持续收到 run 与 dream-files 200，但 Playwright 的无界 `page.goBack()` 仍等待页面 load 信号。终止仅挂起的 E2E 浏览器；将返回动作设为有界、以 navigation commit 为完成点，随后继续使用 Dream URL、视窗适配和“确认并继续”可用性作语义等待。不得使用固定 sleep、隐藏 API 代替页面验证或修改生产路由。重新执行同一完整真实人类旅程并保存内容无关回执。
+
+**可选增强项**
+
+- 在关键页面切换点输出不含正文的测试进度，便于区分业务等待与导航等待。
+
+**本轮检查或修改范围**
+
+- 仅 `frontend/e2e/dream-launch-real-model.spec.ts` 的返回导航等待和最终真实 E2E。
+- 不修改生产业务代码、真实 Run、Claude session 或模型配置。
+
+**本轮完成标准**
+
+- 新真实 Run 再次生成并同步最小文件。
+- 页面刷新、Dream→Chat→Dream 均通过有界语义等待。
+- Playwright 进程明确以 1 passed 退出，无残留测试浏览器。
+
+**本轮实际结果和未验证推断**
+
+- `page.goBack({ waitUntil: 'commit', timeout: 30_000 })` 已实施；第二个真实 Run `run_45b66fb3dfe04e86a164d43e19aff670` 再次产出 2 人物、1 场景、1 分镜并同步 `.dream`。
+- 页面已切换 Chat 并返回 Dream，仍持续读取 200；脚本继续停在测试尾部，排除返回导航，定位到诊断器等待错误响应完整 body 的无界 Promise。
+
+## 第 87 轮——真实验收诊断器非阻塞收尾
+
+**当前轮次目标**
+
+移除 E2E 诊断器读取 API 错误正文造成的潜在无界等待，同时减少业务正文泄漏风险，获得明确的有头成功终态。
+
+**优化后的执行提示词**
+
+> 修改真实 Dream E2E 的只读诊断器：HTTP API 错误在 response 事件到达时立即记录状态码与 URL，不读取或缓存 response body，不维护需要在测试尾部等待的 Promise。保留 console、pageerror、requestfailed 与 dream-files 状态断言。此修改只影响测试证据采集，不改变页面、后端或真实业务。终止当前只剩诊断收尾挂起的浏览器，重新以 `--headed --workers=1` 执行；最终必须明确 1 passed，并确认无 Playwright 测试进程残留。
+
+**可选增强项**
+
+- 保留 `settle()` 空实现以减少调用面改动，后续可单独清理接口。
+
+**本轮检查或修改范围**
+
+- `frontend/e2e/dream-launch-real-model.spec.ts` 的 `installDiagnostics`。
+- 不修改生产代码、模型、Gateway、session 或工作区数据。
+
+**本轮完成标准**
+
+- 诊断器不读取 API 错误正文，不存在尾部 Promise 挂起。
+- 完整真实有头旅程以 1 passed 退出。
+- 第三个真实 Run 的文件、`.dream`、页面与 Admin 请求证据完整。
+
+**本轮实际结果和未验证推断**
+
+- 诊断器已改为只记录 API 状态码与 URL，不读取正文；第三个真实 Run `run_0917bd9a7c97462793582d04486da890` 再次完成 2 人物、1 场景、1 分镜及 `.dream` 发布。
+- 可见窗口确认 Dream 内容与“确认并继续”均正常，但页面底部存在横向滚动条；验收实际停在页面适应窗口断言，诊断器不是剩余阻断。
+
+## 第 88 轮——Story Workspace 窗口适配修复
+
+**当前轮次目标**
+
+消除 Dream 页面在 1200×720 真实视窗中的根级横向溢出，使页面正常适应窗口并完成最终有头验收。
+
+**优化后的执行提示词**
+
+> 基于第三个真实 Run 的可见页面证据诊断 Story Workspace 外层横向滚动条。保持 Dream 双栏内部滚动与移动端响应式设计，只让共享主内容容器在水平方向裁剪根级布局溢出、纵向继续按现有规则滚动；不得用放大测试视窗、降低断言阈值或隐藏具体业务内容规避。添加/更新布局契约测试，确认 1200×720、侧栏展开、Dream 人物编辑页的 `max(documentElement.scrollWidth, body.scrollWidth) <= clientWidth + 1`。随后重跑真实 `--headed --workers=1`，由同一语义断言证明修复。
+
+**可选增强项**
+
+- 验证侧栏收起与小屏断点没有回归。
+
+**本轮检查或修改范围**
+
+- `StoryWorkspaceLayout.css` 的主内容 overflow 边界、相关前端测试和真实 E2E。
+- 不修改 Dream 后端、Artifact Hook、Claude Agent 或真实业务数据。
+
+**本轮完成标准**
+
+- 页面根级无横向滚动条，Dream 内容与编辑面板仍可用。
+- 前端布局测试、类型/构建通过。
+- 完整真实有头旅程明确 1 passed 退出。
+
+**本轮实际结果和未验证推断**
+
+- 共享 Story Workspace 主内容已改为 `overflow-x: hidden; overflow-y: auto`，静态布局与共享 Chat 恢复测试 24 passed。
+- 对真实 Run 页的独立 Chromium 测量为 `documentElement/body scrollWidth = clientWidth = 1200`，无越界元素；窗口适配修复成立。
+- 完整脚本仍停在已发生的 SPA 返回动作：URL 与页面已切回 Dream，但 `page.goBack()` 等待不存在的新文档 commit。进入第 89 轮修正同文档历史等待。
+
+## 第 89 轮——SPA 同文档返回语义等待
+
+**当前轮次目标**
+
+让真实 E2E 按 SPA 实际行为完成 Dream→Chat→Dream 返回，不等待不存在的 document commit。
+
+**优化后的执行提示词**
+
+> Dream 与 Chat 是同一前端应用中的客户端路由。返回时在页面上下文触发标准 `window.history.back()`，随后以目标 Dream Run URL、页面无横向溢出和“确认并继续”可用为唯一完成条件；不要让 Playwright `page.goBack()` 等待新文档 commit，也不使用固定 sleep 或直接跳转 URL。先用现有真实 Run 做无模型导航验证，再执行最终完整真实有头旅程。
+
+**可选增强项**
+
+- 将同文档返回封装为小型测试 helper，明确 30 秒 URL 上限。
+
+**本轮检查或修改范围**
+
+- `frontend/e2e/dream-launch-real-model.spec.ts` 的 SPA 返回动作。
+- 不修改生产路由或业务实现。
+
+**本轮完成标准**
+
+- 现有真实 Run 的 Dream→Chat→history back 导航验证通过。
+- 完整真实有头 E2E 以 1 passed 退出。
+
+**本轮实际结果和未验证推断**
+
+- 已将返回动作改为 `window.history.back()` 后等待精确 Dream URL。
+- 使用现有真实 Run 逐步诊断发现脚本实际先停在侧栏“对话”的 `click()`：业务已完成 SPA 切页，但 Playwright 自动等待不存在的新文档导航，尚未执行显式 Chat URL 等待。
+
+## 第 90 轮——SPA 侧栏点击导航收口
+
+**当前轮次目标**
+
+关闭“对话”真实按钮点击自带的 document navigation 等待，改由明确 Chat URL 语义等待接管，彻底消除 E2E 挂起。
+
+**优化后的执行提示词**
+
+> 继续点击用户可见、可交互的侧栏“对话”按钮，但为 Playwright click 设置 `noWaitAfter`，因为生产路由是 SPA 同文档切换；紧接着以精确 `/story-workspace/chat` URL 和 Chat 输入框可见作为完成条件。返回仍用浏览器 history，并等待精确 Dream Run URL、视窗适配与业务按钮。不使用直接 URL 跳转替代用户点击，不使用 sleep。先在现有真实 Run 上逐步通过，再运行最终完整有头 E2E。
+
+**可选增强项**
+
+- 给所有 SPA 切换动作设置显式 30 秒语义超时。
+
+**本轮检查或修改范围**
+
+- 真实 E2E 的“对话”按钮点击选项和导航验证。
+- 不修改生产路由、页面或后端。
+
+**本轮完成标准**
+
+- 现有 Run 导航脚本输出完整 passed。
+- 完整真实 E2E 输出 1 passed 并退出。
+
+**本轮实际结果和未验证推断**
+
+- 真实侧栏标签按当前语言为 `Chat`，标准 composer 是 Tiptap `role=textbox`、accessible name 为 `Chat input`，不是带 placeholder 的 textarea；E2E 已改为中英文可访问名称契约。
+- 现有真实 Run 的 Dream→可见 Chat 按钮→同 thread composer→history back→Dream 页面、按钮与 1200px 窗口适配逐步验证通过。
+- 最终完整真实 `deepseek-v4-pro` 有头旅程通过：`1 passed (1.2m)`，命令为 `--headed --workers=1`。
+
+## 第 91 轮——最终证据与回归收口
+
+**当前轮次目标**
+
+在真实闭环通过后完成产物、Admin 请求、回归测试、构建和受保护入口检查，确认可交付且无残留测试进程。
+
+**优化后的执行提示词**
+
+> 读取第 90 轮内容无关验收回执，核对该 Run 的 canonical 文件、三个 stage、manifest 路径和摘要；在 Admin 真实 Gateway 账本中以账号、模型和时间范围确认本次请求可追踪，只报告请求 ID、状态、模型和耗时，不输出提示词、reasoning、Token、DSN 或 Secret。运行 Dream Hook/launch/context/service 聚焦后端测试、共享 Chat recovery 与 Story Workspace layout 测试、TypeScript、ESLint、生产构建、`git diff --check` 和受保护文件 diff。检查 Playwright/Chromium 测试进程与异步资源；保留用户原有服务和真实数据，不做清理性删除。
+
+**可选增强项**
+
+- 对 manifest 文件逐项重算 SHA-256，验证私有副本与 canonical 源一致。
+
+**本轮检查或修改范围**
+
+- 只读真实 Run/Admin 证据、当前工作树静态/测试验证及文档结果更新。
+- 不再改变已通过的业务架构，除非回归暴露真实缺陷。
+
+**本轮完成标准**
+
+- 真实 Run 证据完整且 Admin 可追踪。
+- 聚焦回归、类型、lint、build、diff check 全部通过或明确列出既存非本轮阻断。
+- `agent_runner.py`、`thread_factory.py`、`routers/claude_agent.py` 未被本轮改动。
+- 无残留 Playwright 测试浏览器；后端服务状态明确。
+
+**本轮实际结果和未验证推断**
+
+- 最终 Run `run_604125a31ad9478990622b675a996863` 的 canonical 五类文件、三个 stage、preview manifest 和两个私有 Project/Episode 副本均存在；源与副本 SHA-256 完全一致。
+- Admin Gateway 账本能按真实账号和 `deepseek-v4-pro` 追踪本轮成功请求；最近两条为 `req_aaf1562063a54ab88fc9e5d6b8782c60`（53,294ms）和 `req_a8992e384f3d4249b5b61cc54a78b998`（5,618ms），均 settled/succeeded/HTTP 200。
+- 后端聚焦回归 131 passed、2 skipped、59 subtests；共享 Chat/layout 24 passed；TypeScript 生产构建通过；ESLint 0 error、21 个既存 warning；`git diff --check`、py_compile 和受保护文件 diff 通过。
+- 最终有头 E2E 测试进程已退出；一个由临时独立诊断脚本遗留的 headless Chromium 已终止。当前后端 8765、Vite 5173、Admin 3000 保持运行。
+
+## 第 92 轮——当前业务文档去历史化
+
+**当前轮次目标**
+
+将 Dream Agent 设计入口收敛为已经实现并验证的最小业务，删除当前文档中的过期英文状态、旧 B01–B21 目录和未采用方案，保留 Git 可恢复的 Prompt 执行记录。
+
+**优化后的执行提示词**
+
+> 重写 `README.md`、`business-interaction-design.md`、`project-episode-artifact-contract.md` 和 `design-review.md` 的当前正文为中文最小设计。只描述：真实 Dream 发起、共享 thread/Claude session、主 Agent canonical 文件、成功后 Hook 自动同步、actor-scoped dream-files 页面显示、刷新与 Chat 切换、失败/取消不发布，以及 preview 与 Admin 权威 sealed Artifact 的明确区别。为每个当前业务交互提供 Mermaid 时序。删除当前入口里的命令 DAG、next action、checkpoint、B01–B21 全目录、旧轮次发布状态和英文 Pending 文案；历史依据保留在 Git 和 `prompt-rounds.md`，不能继续误导实现。
+
+**可选增强项**
+
+- 在 README 中列出本轮真实 Run 与测试数字，但不包含业务正文或密钥。
+
+**本轮检查或修改范围**
+
+- 仅四份当前设计入口文档；不改生产代码。
+
+**本轮完成标准**
+
+- 文档全部中文、当前状态为已实现/已验收。
+- 当前业务范围、权威边界和时序与代码/真实证据一致。
+- 无旧方案被描述为当前必须实现。
+
+**本轮实际结果和未验证推断**
+
+- `README.md`、全业务交互、Project/Episode 合同和设计审查已重写为中文当前态；当前入口不再携带旧 B01–B21 目录、英文 Pending 状态、命令 DAG、next action 或 checkpoint。
+- 当前文档只保留已实现的最小闭环、逐业务时序、Admin sealed Artifact 权威边界和真实验收证据；历史执行过程仅保留在本文件和 Git 中。
+
+## 第 93 轮——验收改动原子提交
+
+**当前轮次目标**
+
+将已经完成真实业务验证的 Dream 工作台最小闭环，以一个可审计的原子 Git commit 纳入版本历史。
+
+**优化后的执行提示词**
+
+> 复核当前工作树，只提交与 Dream 主 Agent 生成 canonical 工作台文件、成功终态后服务端同步到 `.dream`、页面业务投影、共享 Chat SSE 稳定性、视窗适配、测试和中文设计文档直接相关的改动。提交前检查仓库协议、未跟踪文件、敏感信息、生成产物、受保护 Claude Agent 入口和 `git diff --check`；不得提交日志、环境变量、DSN、Secret、模型正文或 Playwright 产物，不得顺带修改其他用户改动。确认暂存内容后创建单一语义化 commit，并报告 commit ID。
+
+**可选增强项**
+
+- 在提交后重新读取 commit 文件清单和工作树状态，确认没有漏提交本闭环文件，也没有纳入运行产物。
+
+**本轮检查或修改范围**
+
+- 当前 Dream 工作台闭环的后端、前端、E2E、单元测试、目录说明和设计文档。
+- Git 暂存区与提交历史；不修改生产业务逻辑。
+
+**本轮完成标准**
+
+- 敏感信息和生成产物扫描无异常。
+- `git diff --check` 与受保护入口检查通过。
+- 暂存内容与已验收范围一致。
+- Git commit 成功，提交后工作树无本轮遗留改动。
+
+**本轮实际结果和未验证推断**
+
+- 提交前检查确认当前改动均属于已验收的最小闭环；未发现环境变量、凭证、业务正文或测试生成目录。
+- 最终 commit ID 和提交后工作树状态在本轮 Git 操作完成后确认。

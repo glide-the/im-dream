@@ -299,7 +299,7 @@ class WorkflowRunFixture:
                 artifact_set_hash, policy_revision, deployment_tier,
                 scope, readiness_state, required_entries_ready, created_at
             ) VALUES (?, ?, ?, ?, 'env-test', 'env-test', 'local_persistent',
-                      'node-test', ?, 'policy-test', 'test', 'session',
+                      'node-test', ?, 'policy-test', 'local', 'session',
                       'session_loaded', 1, ?)
             """,
             (

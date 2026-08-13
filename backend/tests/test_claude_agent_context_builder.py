@@ -240,7 +240,7 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIsInstance(blocks, list)
         self.assertTrue(all(isinstance(b, dict) for b in blocks))
 
-    def test_dream_turn_injects_trusted_run_context_and_stage_schedule(self):
+    def test_dream_turn_injects_trusted_run_context_and_host_sync_contract(self):
         context = StoryWorkspaceDreamRunContext(
             workflow_run_id="run_" + "1" * 32,
             thread_id="thread-dream-context",
@@ -262,11 +262,12 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("<story_workspace_dream_context>", combined)
         self.assertIn(context.workflow_run_id, combined)
         self.assertIn(context.deck_plugin_binding_id, combined)
-        self.assertIn("mcp__story_workspace__write_dream_run", combined)
         self.assertIn("assets/characters", combined)
         self.assertIn("assets/scenes", combined)
         self.assertIn("storyboard.yaml", combined)
-        self.assertIn("mcp__story_workspace__write_dream_stage", combined)
+        self.assertIn("host synchronizes completed canonical workbench files", combined)
+        self.assertIn("optional helpers", combined)
+        self.assertIn("correctness must not depend on calling them", combined)
         self.assertIn("先完成 drama-init 的项目初始化语义", combined)
         self.assertIn("stories/<project_slug>/project.yaml", combined)
         self.assertIn("project_slug 必须与 project_id 完全相同", combined)
@@ -295,7 +296,7 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("episode-outline.md", combined)
         self.assertIn("review-report.md", combined)
         self.assertIn("server-trusted workflow_run_id", combined)
-        self.assertIn("tools must never write this private layout", combined)
+        self.assertIn("Generic file or Bash tools must never", combined)
         self.assertLess(
             combined.index("<story_workspace_dream_context>"),
             combined.rindex("create the story"),

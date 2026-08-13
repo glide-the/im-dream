@@ -1,268 +1,94 @@
-# Project / Episode Artifact contract
+# Project / Episode Artifact 合同
 
-> Normative concept definition for Dream. The cross-system authority is
-> `/Users/dmeck/project/ink-admin-memory/docs/design/modules/story-business/admin-dream-interaction-design.md`.
-> This document restates the Dream-facing rules; conflicting details must be
-> corrected in both repositories, with the Admin document remaining the shared
-> contract authority.
+跨系统权威文档是
+`/Users/dmeck/project/ink-admin-memory/docs/design/modules/story-business/admin-dream-interaction-design.md`。
+本文只定义 Dream 当前最小闭环使用的概念和边界；若出现冲突，以 Admin 权威合同为准。
 
-## Business meaning
+## 1. 概念
 
-- **Project** is the stable creative container identified by
-  `source_project_id` inside one Workspace.
-- **Episode** is one ordered unit in that Project. Its display identity is
-  `EP01`–`EP99`; its durable identity is `episode_uid`.
-- **Workflow Run** is one retryable execution attempt. It is not the Project,
-  Episode or Story identity.
-- **Thread** is the Agent conversation/session and the server-side Artifact-root
-  locator. It is not a Story identity and never becomes a browser file path.
-- **Artifact** is one complete, run-isolated Project snapshot. Sealed bytes are
-  the content truth.
-- **Story Index** is the PostgreSQL search, relationship, status and revision
-  projection. It is not a copy of the script.
+| 概念 | 含义 | 不是 |
+|---|---|---|
+| Project | 稳定的创作容器，由 `project_id/project_slug` 标识 | Workflow Run 或 thread |
+| Episode | Project 中的分集，目录身份为 `EP01`–`EP99` | 一次 Agent turn |
+| Thread | Chat/Dream 共用的对话与 Claude session 容器 | Story 身份或浏览器路径 |
+| Workflow Run | 一次可审计执行尝试 | Project/Episode 稳定身份 |
+| Run preview | 当前 Run 工作台文件的私有发布副本 | Admin sealed Artifact |
 
-Dream is the only writer of Project/Episode Artifact bytes and the canonical
-Story identity/index. Admin reads the same PostgreSQL index, mounts Artifact
-storage read-only and may update only review fields through revision-bound CAS.
-
-## Stable identity
+## 2. canonical 工作台合同
 
 ```text
-story stable key = (workspace_id, "dream_episode", source_project_id)
-story id = UUIDv5(
-  NAMESPACE_URL,
-  "urn:ink-memory:artifact-story:v1:"
-  + workspace_id + ":dream_episode:" + source_project_id
-)
+<thread-workspace>/
+  assets/
+    characters/*.{md,yaml,yml}
+    scenes/*.{md,yaml,yml}
+  stories/<project-id>/
+    project.yaml
+    episodes/<EPxx>/
+      episode-outline.md
+      script.md
+      storyboard.yaml
+      review-report.md
 ```
 
-Consequences:
+- `project.yaml` 的 `project_id` 和 `project_slug` 必须与目录完全一致。
+- Project ID 必须匹配 `^[a-z0-9]+(?:-[a-z0-9]+)*$`。
+- Episode 目录必须匹配 `^EP[0-9]{2}$`。
+- 当前同步只复制上述五类 Project/Episode 核心文件；资产卡只生成页面 stage。
+- 浏览器、模型正文和绝对路径都不能覆盖服务端派生的 thread/run 根目录。
 
-1. One Project maps to one Story in one Workspace.
-2. Adding an Episode updates that Story; it does not create another Story.
-3. Run ID, Thread ID, Episode UID and Episode code never enter the Story key.
-4. A retry may change the current source Run only after predecessor CAS and a
-   complete Artifact validation; the Story ID remains stable.
-5. A cross-thread Project rebind is a Dream-owned server command. The browser
-   cannot declare it and files from two Threads cannot be merged by name.
-
-## Run-isolated layout
+## 3. 当前 Run 私有发布
 
 ```text
-<shared-root>/<server-derived-thread-key>/.dream/runtime/runs/<run-id>/
-  episode.json
-  episode-workflow.json
+<thread-workspace>/.dream/runtime/runs/<run-id>/
+  run.json
+  stages/
+    characters.json
+    scenes.json
+    storyboards.json
   artifact/
-    stories/<source-project-id>/
+    manifest.json
+    stories/<project-id>/
       project.yaml
       episodes/<EPxx>/
-        script.md
         episode-outline.md
+        script.md
         storyboard.yaml
         review-report.md
 ```
 
-The visible path is conceptual. Resolver code derives the single Thread
-directory key from the owned `chat_thread.id`, opens through a canonical root
-directory descriptor and rejects traversal, symlink escape and browser-supplied
-paths.
-
-A Run writes into a sibling staging directory, fsyncs files and directories,
-then publishes the one `artifact/` directory by atomic rename. A pre-existing
-snapshot is accepted only when bytes are identical. A sealed snapshot is never
-overwritten. If Story CAS loses to a concurrent successor, the snapshot remains
-non-current and cannot affect Admin reads.
-
-## Identity files
-
-All schemas are strict: UTF-8 without BOM, no unlisted fields, bounded depth and
-size, UTC RFC 3339 timestamps and no YAML tags, aliases, duplicate keys or
-multiple documents.
-
-### `project.yaml`
-
-```yaml
-schema: dream-project/v1
-project_id: rainy-night-letter
-workspace_id: workspace-01
-project_name: 雨夜来信
-planned_episode_count: 12
-```
-
-`project_id` must equal `source_project_id` and the server-derived Project
-directory. `planned_episode_count` is `null` or 1–99 and never replaces the
-actual Episode registry.
-
-### `episode.json`
-
-`episode.json` uses `dream-episode-registry/v1` and is the complete Project
-registry for that Run, not an Episode fragment. It contains:
-
-- `workflow_run_id`, `predecessor_run_id`, `workspace_id` and
-  `source_project_id`;
-- `active_episode_uid`, monotonically increasing `registry_revision` and
-  `sealed=true`;
-- 1–99 ordered entries whose `episode_number` is contiguous, code is the
-  matching `EP01`–`EP99`, UID is unique and `relative_root` is server-derived.
-
-The first snapshot has no predecessor and revision 1. Every successor names the
-Story's locked current source Run and increments its registry revision by one.
-Two successors of one predecessor cannot both become current.
-
-### `episode-workflow.json`
-
-`episode-workflow.json` uses `dream-episode-workflow/v1` and records sealed,
-idempotent Episode action completion facts. Its Run, Workspace, Project,
-Episode and registry revision must match database authority and `episode.json`.
-Each action appears at most once and carries its input revision, resulting
-manifest revision, private command message ID and recorded time.
-
-Allowed actions are:
-
-```text
-plan_episode
-write_script
-review_script
-build_assets
-regenerate_storyboard
-review_full_chain
-commit_episode
-prepare_render_guide
-```
-
-This file does not control the Chat thread and an Agent `finish` event does not
-prove an action completed. Only the owning tool/service may append a completion
-fact after verifying the expected input and output revisions.
-
-## Cross-check before materialization
-
-Dream must prove all of the following in one authorized operation:
-
-1. Run belongs to the authenticated user and Workspace.
-2. Run's source message belongs to the same owned Thread.
-3. Thread, frozen Deck binding and plugin lock match the Run.
-4. Database authority, `project.yaml`, `episode.json` and
-   `episode-workflow.json` agree on Project/Episode identity.
-5. Registry predecessor equals the Story source locked at operation start.
-6. Every directory and allowlisted filename is derived from that identity.
-
-Mismatch is `artifact_identity_conflict` (409) or
-`artifact_contract_invalid` (422). Dream must not guess, scan for a replacement
-or join partial identities.
-
-## Revisions
-
-| Revision | Definition | Consumer |
-|---|---|---|
-| per-file revision | SHA-256 of exact bytes | ETag and file CAS |
-| `script_revision` | SHA-256 of the ordered complete Episode script facts | Admin review CAS |
-| `artifact_manifest_revision` | SHA-256 of registry plus all allowlisted file facts | Project snapshot comparison |
-| observation ETag | SHA-256 of public Artifact observation plus current Story index facts | Dream reconcile `If-Match` |
-
-The complete script revision exists only when the sealed registry is valid and
-every registered Episode has exactly one available script. During generation,
-missing or invalid states, the last complete revision may be displayed as stale
-history but must not authorize review, publish or reconcile success.
-
-An observation reads identity files and allowlisted content using directory-fd
-operations, records `dev/ino/size/mtime_ns/hash`, then restats every entry. Any
-change retries the whole bounded observation; exhaustion returns degraded 503,
-not `missing`.
-
-## Two independent state tracks
-
-```mermaid
-flowchart LR
-    Agent["Dream Agent + tools"] --> Snapshot["Run-isolated sealed Artifact"]
-    Snapshot --> Materializer["Dream materializer"]
-    Materializer --> Story["Canonical Story index"]
-    Snapshot --> DreamUI["Dream Artifact workbench"]
-    Story --> DreamUI
-    Story --> AdminList["Admin PostgreSQL list"]
-    Snapshot --> AdminPreview["Admin read-only preview"]
-    AdminList --> AdminPreview
-```
-
-- Artifact availability: `generating | available | missing | invalid`.
-- Story index: `syncing | indexed | stale | missing | failed`.
-- Review: `pending | confirmed | rejected`, bound to `script_revision`.
-
-File success and index success are always reported separately. A missing index
-does not make files missing; missing files do not delete Story metadata; a
-storage outage is degraded 503 rather than missing; revision drift is `stale`.
-
-## Write and read boundaries
-
-| Operation | Dream | Admin |
-|---|---|---|
-| create Project/Episode | owns | forbidden |
-| write/seal Artifact | owns | OS/container read-only |
-| calculate revisions | owns | verifies bounded reads |
-| create/update Story identity/index | owns | forbidden |
-| reconcile | owns, actor + ETag + idempotency | may request a controlled Dream command |
-| read list metadata | actor-scoped | operator-scoped |
-| review | displays | owns CAS on expected script revision |
-
-Admin lists only PostgreSQL rows. Artifact preview starts from an authorized
-Story ID, resolves a server-only locator and reads only registered allowlist
-files. Public DTOs never contain filesystem paths, Thread directory keys,
-source-message metadata, credentials or raw internal exceptions.
-
-## Business interaction: publish and index
+`manifest.json` 使用 `dream-artifact-manifest/v1`，记录当前 Run、内容 revision、每个
+已发布文件的相对路径、大小和 SHA-256。文件先写，manifest 最后原子提交；manifest
+未引用的旧物理文件不属于当前发布集合。
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Chat as "Shared Chat thread"
-    participant Tool as "Dreamflow tool"
-    participant Artifact as "Artifact writer"
-    participant DB as "Dream repositories"
-    participant Admin as "Admin read model"
+    participant W as canonical 工作台
+    participant H as DreamArtifactTurnHook
+    participant P as Run preview
 
-    User->>Chat: request Project/Episode operation
-    Chat->>Tool: canonical tool call
-    Tool->>DB: authorize user, Thread, Run, Workspace, Deck
-    Tool->>Artifact: copy predecessor into isolated staging
-    Tool->>Artifact: write identity + allowlisted files
-    Artifact->>Artifact: fsync, atomic publish, seal, stable reread
-    Tool->>DB: lock stable Story key and compare predecessor
-    alt predecessor and revisions still match
-        Tool->>DB: upsert same Story and current source Run
-        Tool->>DB: record Episode action completion
-        Tool-->>Chat: structured success
-        Admin->>DB: list/read Story metadata
-    else concurrent successor or revision drift
-        Tool-->>Chat: 409 conflict, current Story unchanged
-    end
+    H->>W: 校验并读取 allowlist
+    H->>P: 写内容文件
+    H->>P: fsync 文件和目录
+    H->>P: 原子替换 manifest
+    Note over P: manifest 是当前 preview 的提交标记
 ```
 
-## Business interaction: Admin review
+## 4. 与 Admin sealed Artifact 的区别
 
-```mermaid
-sequenceDiagram
-    actor Operator
-    participant Admin
-    participant DB
-    participant Artifact as "Read-only Artifact mount"
+当前 preview 只证明“这个 Run 已把哪些工作台字节发布给 Dream 页面”。它不会：
 
-    Operator->>Admin: open Story
-    Admin->>DB: authorize and read metadata/current source
-    Admin->>Artifact: stable allowlist read with expected manifest revision
-    Artifact-->>Admin: bounded preview + observed revisions
-    Operator->>Admin: confirm/reject expectedScriptRevision
-    Admin->>DB: CAS review fields
-    alt script revision unchanged
-        DB-->>Admin: updated review
-    else script changed
-        DB-->>Admin: 409 revision conflict
-    end
-```
+- 创建或切换 Admin canonical Story；
+- 生成权威 `episode.json` / `episode-workflow.json`；
+- 完成 Source Message authority、完整 Artifact 校验或 Story CAS；
+- 把 Chat finish、stage revision 或 preview manifest 当作业务发布完成。
 
-## Prohibited shortcuts
+未来实现 sealed Artifact 时，必须直接遵循 Admin 权威合同，不得把当前 preview 扩展
+成第二套版本账本或 lifecycle truth source。
 
-- Treat Run, Thread or Episode as Story ID.
-- Let the browser submit a path or Dream run binding to Chat.
-- Scan directories to invent Episode registry entries or Admin list rows.
-- Overwrite a sealed snapshot or silently upsert through a conflict.
-- Infer workflow completion from assistant prose, SSE EOF or page state.
-- Store full script content, prompt text, secrets or paths in Story index/logs.
+## 5. 权限与一致性
+
+发布前必须证明：Run 属于当前用户和 Workspace；source message 属于同一 owned
+thread；冻结 Deck binding 与 Run 一致；Project/Episode 目录和文件身份一致。任何不一致
+都 fail closed，不扫描替代目录、不按文件名合并跨 thread 内容。
+
+成功后重复同步相同字节必须是 no-op；failed/cancelled turn 不提交新 manifest。

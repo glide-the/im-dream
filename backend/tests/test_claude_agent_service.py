@@ -1277,7 +1277,8 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
 class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
     def test_execute_session_cancel_flushes_partial_and_closes_stream(self):
         async def scenario():
-            service = ClaudeAgentService()
+            artifact_hook = unittest.mock.Mock()
+            service = ClaudeAgentService(dream_artifact_turn_hook=artifact_hook)
             queue: asyncio.Queue[str | None] = asyncio.Queue()
             turn_ctx = _TurnContext(
                 queue=queue,
@@ -1307,6 +1308,7 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
                 runner=_CancelRunner(),
                 run_options=unittest.mock.Mock(),
                 turn_context=turn_ctx,
+                dream_artifact_turn_ticket=unittest.mock.sentinel.dream_ticket,
             )
 
             with (
@@ -1331,9 +1333,9 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
             frames: list[str | None] = []
             while not queue.empty():
                 frames.append(queue.get_nowait())
-            return persist_user, persist_partial, persist_session, frames
+            return persist_user, persist_partial, persist_session, frames, artifact_hook
 
-        persist_user, persist_partial, persist_session, frames = _run(scenario())
+        persist_user, persist_partial, persist_session, frames, artifact_hook = _run(scenario())
 
         persist_user.assert_awaited_once()
         persist_partial.assert_awaited_once()
@@ -1347,6 +1349,7 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
         self.assertEqual(parsed_frames[-1]["finishReason"], "stop")
         self.assertIs(parsed_frames[-1]["cancelled"], True)
         self.assertIsNone(frames[-1])
+        artifact_hook.after_main_turn.assert_not_called()
 
 
 class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
@@ -1414,7 +1417,8 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
 class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
     def test_execute_session_emits_one_error_when_runner_also_calls_on_error(self):
         async def scenario():
-            service = ClaudeAgentService()
+            artifact_hook = unittest.mock.Mock()
+            service = ClaudeAgentService(dream_artifact_turn_hook=artifact_hook)
             queue: asyncio.Queue[str | None] = asyncio.Queue()
             turn_ctx = _TurnContext(
                 queue=queue,
@@ -1448,6 +1452,7 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
                 runner=_CallbackAndResultErrorRunner(),
                 run_options=unittest.mock.Mock(),
                 turn_context=turn_ctx,
+                dream_artifact_turn_ticket=unittest.mock.sentinel.dream_ticket,
             )
 
             with (
@@ -1467,9 +1472,9 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
             frames: list[str | None] = []
             while not queue.empty():
                 frames.append(queue.get_nowait())
-            return frames
+            return frames, artifact_hook
 
-        frames = _run(scenario())
+        frames, artifact_hook = _run(scenario())
         parsed_frames = [_parse_sse(frame) for frame in frames if frame is not None]
 
         self.assertEqual(
@@ -1484,6 +1489,76 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
             1,
         )
         self.assertEqual(sum(frame is None for frame in frames), 1)
+        self.assertIsNone(frames[-1])
+        artifact_hook.after_main_turn.assert_not_called()
+
+    def test_successful_root_turn_synchronizes_before_terminal_finish(self):
+        async def scenario():
+            artifact_hook = unittest.mock.Mock()
+            artifact_hook.after_main_turn.return_value = SimpleNamespace(
+                changed_stages=("characters",),
+                private_artifact_changed=True,
+                private_files=("stories/demo/project.yaml",),
+            )
+            service = ClaudeAgentService(dream_artifact_turn_hook=artifact_hook)
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            turn_ctx = _TurnContext(
+                queue=queue,
+                confirmation_store=ToolConfirmationStore(),
+            )
+            state = AgentRunState(session_id="thread-success-service")
+            request = ClaudeAgentRunRequest(
+                user_id="7",
+                thread_id="thread-success-service",
+                message_parts=[{"type": "text", "text": "hello"}],
+            )
+
+            class _SuccessRunner:
+                async def run_streaming(self, opts, callbacks):
+                    del opts, callbacks
+                    return AgentRunResult(
+                        full_text="done",
+                        session_id="55555555-5555-4555-8555-555555555555",
+                        success=True,
+                    )
+
+            execution = service_module._TurnExecution(
+                request=request,
+                state=state,
+                runner=_SuccessRunner(),
+                run_options=unittest.mock.Mock(),
+                turn_context=turn_ctx,
+                dream_artifact_turn_ticket=unittest.mock.sentinel.dream_ticket,
+            )
+            with (
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_user_message",
+                    new=unittest.mock.AsyncMock(),
+                ),
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_assistant_turn",
+                    new=unittest.mock.AsyncMock(),
+                ),
+                unittest.mock.patch.object(
+                    service,
+                    "_store_story_workspace_output",
+                    new=unittest.mock.AsyncMock(return_value=None),
+                ),
+            ):
+                await service.execute_session(execution)
+            frames: list[str | None] = []
+            while not queue.empty():
+                frames.append(queue.get_nowait())
+            return artifact_hook, frames
+
+        artifact_hook, frames = _run(scenario())
+        artifact_hook.after_main_turn.assert_called_once_with(
+            unittest.mock.sentinel.dream_ticket
+        )
+        parsed_frames = [_parse_sse(frame) for frame in frames if frame is not None]
+        self.assertEqual(parsed_frames[-1]["type"], "finish")
         self.assertIsNone(frames[-1])
 
     def test_make_error_cb_includes_exception_notes(self):

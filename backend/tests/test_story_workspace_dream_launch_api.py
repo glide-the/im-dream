@@ -47,6 +47,9 @@ from services.admin_gateway import GatewayInferenceError
 from services.story_workspace.dream_launch_application_service import (
     DreamLaunchIdempotencyConflict,
 )
+from services.story_workspace.canonical_project_instruction import (
+    story_workspace_canonical_project_fallback_slug,
+)
 from story_workspace.contracts import (
     StoryWorkspaceDreamLaunchCommand,
     StoryWorkspaceDreamRunContext,
@@ -825,10 +828,26 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(dispatch["resume"])
         self.assertEqual(dispatch["context"], context)
         launch_text = dispatch["parts"][0]["text"]
-        self.assertIn("write_dream_run", launch_text)
-        self.assertIn("write_dream_stage", launch_text)
-        self.assertIn("AskUserQuestion", launch_text)
-        self.assertIn("可编辑草稿", launch_text)
+        project_slug = story_workspace_canonical_project_fallback_slug(
+            launch_command().goal
+        )
+        self.assertIn("首次 Dream 的最小工作台初始化", launch_text)
+        self.assertIn(
+            f"服务器已分配 project_id/project_slug：{project_slug}", launch_text
+        )
+        self.assertIn("assets/characters/lead-a.md", launch_text)
+        self.assertIn("assets/characters/lead-b.md", launch_text)
+        self.assertIn("assets/scenes/terminal.md", launch_text)
+        self.assertIn(f"stories/{project_slug}/project.yaml", launch_text)
+        self.assertIn(
+            f"stories/{project_slug}/episodes/EP01/storyboard.yaml", launch_text
+        )
+        self.assertIn("宿主会在 root turn 成功结束后自动同步", launch_text)
+        self.assertIn(
+            "不要调用 Agent、WebFetch、WebSearch、AskUserQuestion 或 Dream MCP",
+            launch_text,
+        )
+        self.assertIn("五类工作台文件写完后立即结束", launch_text)
 
     async def test_materialization_identity_includes_the_artifact_set_hash(self) -> None:
         await self.start(launch_command())
@@ -1103,26 +1122,30 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
 
         launch_text = self.turn_dispatcher.calls[0]["parts"][0]["text"]
         self.assertTrue(launch_text.startswith(goal))
-        self.assertIn("不调用 AskUserQuestion", launch_text)
-        self.assertIn("可编辑草稿", launch_text)
-
-    async def test_launch_requires_canonical_project_identity_before_storyboard(self) -> None:
-        await self.start(launch_command())
-
-        launch_text = self.turn_dispatcher.calls[0]["parts"][0]["text"]
-        self.assertIn("先完成 drama-init 的项目初始化语义", launch_text)
-        self.assertIn("stories/<project_slug>/project.yaml", launch_text)
-        self.assertIn("project_slug 必须与 project_id 完全相同", launch_text)
-        self.assertIn("^[a-z0-9]+(?:-[a-z0-9]+)*$", launch_text)
-        self.assertIn("project_name 只用于显示", launch_text)
-        self.assertIn("全中文 project_name 不得直接成为物理项目身份", launch_text)
+        self.assertIn("首次 Dream 的最小工作台初始化", launch_text)
         self.assertIn(
-            "sha256(原始 project_name 的 UTF-8 bytes).hexdigest()[:8]",
+            "不要调用 Agent、WebFetch、WebSearch、AskUserQuestion 或 Dream MCP",
             launch_text,
         )
-        self.assertIn("不对 project_name 做 Unicode normalization", launch_text)
-        self.assertIn("郑州暴雨夜 → proj-396e4c1b", launch_text)
-        self.assertIn("规范项目身份成立后，才能写入 storyboard", launch_text)
+
+    async def test_launch_assigns_canonical_project_identity_before_storyboard(self) -> None:
+        command = launch_command()
+        await self.start(command)
+
+        launch_text = self.turn_dispatcher.calls[0]["parts"][0]["text"]
+        project_slug = story_workspace_canonical_project_fallback_slug(command.goal)
+        self.assertIn(
+            f"服务器已分配 project_id/project_slug：{project_slug}", launch_text
+        )
+        self.assertIn("必须原样使用", launch_text)
+        self.assertIn("不要计算、查询或验证哈希", launch_text)
+        self.assertIn(f"stories/{project_slug}/project.yaml", launch_text)
+        self.assertIn(
+            f"project_id 与 project_slug 都严格等于 {project_slug}", launch_text
+        )
+        self.assertIn(
+            f"stories/{project_slug}/episodes/EP01/storyboard.yaml", launch_text
+        )
         self.assertNotIn("mcp__", launch_text)
         self.assertNotIn("expectedBindingRevision", launch_text)
 

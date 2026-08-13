@@ -135,7 +135,6 @@ function installDiagnostics(page: Page): {
 } {
   const errors: string[] = [];
   const dreamFileStatuses: number[] = [];
-  const pending: Promise<void>[] = [];
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     if (message.text().includes('WebSocket connection to') && message.text().includes('/?token=')) return;
@@ -151,16 +150,12 @@ function installDiagnostics(page: Page): {
       dreamFileStatuses.push(response.status());
     }
     if (response.status() < 400 || !response.url().includes('/api/')) return;
-    pending.push(response.text().then((body) => {
-      errors.push(`http ${response.status()}: ${response.url()} body=${body.slice(0, 300)}`);
-    }).catch(() => {
-      errors.push(`http ${response.status()}: ${response.url()} body=<unavailable>`);
-    }));
+    errors.push(`http ${response.status()}: ${response.url()}`);
   });
   return {
     errors,
     dreamFileStatuses,
-    settle: async () => { await Promise.allSettled(pending); },
+    settle: async () => {},
   };
 }
 
@@ -336,10 +331,10 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
 
   await page.reload();
   await expect(page.getByRole('button', { name: '确认并继续' })).toBeEnabled();
-  await page.getByRole('button', { name: '对话', exact: true }).click();
+  await page.getByRole('button', { name: /^(对话|Chat)$/ }).click({ noWaitAfter: true });
   await page.waitForURL(`${WEB_BASE}/story-workspace/chat`);
   await expectPageFitsViewport(page);
-  await expect(page.getByPlaceholder('Ask Ink & Memory…')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ })).toBeVisible();
   const chatHistory = await getJson<{ messages: unknown[] }>(
     page.request,
     `/api/claude-agent/threads/${encodeURIComponent(accepted.threadId)}/messages`,
@@ -347,7 +342,7 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
   );
   expect(chatHistory.messages).toHaveLength(dreamHistory.messages.length);
 
-  await page.goBack();
+  await page.evaluate(() => window.history.back());
   await page.waitForURL(new RegExp(`/story-workspace/dream\\?run=${accepted.workflowRunId}$`));
   await expectPageFitsViewport(page);
   await expect(page.getByRole('button', { name: '确认并继续' })).toBeEnabled();

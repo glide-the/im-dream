@@ -136,6 +136,9 @@
 #                    settings.json filesystem.allowWrite gains the user's extra
 #                    writable paths (mirrors the sandbox_network_allowed_domains
 #                    plumbing pattern).
+# [Sync] 2026-08-13: assemble a server-scoped DreamArtifactTurnTicket and invoke
+#                    the named after-turn Hook only after a successful root turn;
+#                    runner/session/SSE entry points remain unchanged.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -207,6 +210,10 @@ from services.story_workspace.agent_integration import (
     store_agent_story_output,
 )
 from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
+from services.story_workspace.dream_artifact_turn_hook import (
+    DreamArtifactTurnHook,
+    DreamArtifactTurnTicket,
+)
 from story_workspace.contracts import (
     StoryWorkspaceAgentStoryPayload,
     StoryWorkspaceDreamRunContext,
@@ -1190,6 +1197,7 @@ class ClaudeAgentService:
         dream_runtime_init_activator: (
             Callable[..., Awaitable[None]] | None
         ) = None,
+        dream_artifact_turn_hook: DreamArtifactTurnHook | None = None,
     ) -> None:
         self._context_builder = context_builder or ClaudeAgentContextBuilder()
         self._platform_model_resolver = (
@@ -1199,6 +1207,9 @@ class ClaudeAgentService:
         self._dream_runtime_init_activator = (
             dream_runtime_init_activator
             or _activate_story_workspace_dream_runtime
+        )
+        self._dream_artifact_turn_hook = (
+            dream_artifact_turn_hook or DreamArtifactTurnHook()
         )
 
     # ------------------------------------------------------------------
@@ -1595,6 +1606,7 @@ class ClaudeAgentService:
             editor_state_setter=(lambda v, s=state: s.with_editor_state(v, s.editor_user_id)) if active_editor_state is not None else None,
         )
 
+        dream_artifact_turn_ticket: DreamArtifactTurnTicket | None = None
         if dream_context is not None:
             if not cwd:
                 raise RuntimeError("Dream runtime assembly has no server-owned workspace")
@@ -1606,6 +1618,13 @@ class ClaudeAgentService:
                 # this turn. The Claude SDK transcript/session remains owned by
                 # the unchanged Phase 3 runner and normal Chat persistence.
                 remote_session_ref=request.thread_id,
+            )
+            dream_artifact_turn_ticket = (
+                self._dream_artifact_turn_hook.before_main_turn(
+                    context=dream_context,
+                    actor_id=request.user_id,
+                    cwd=cwd,
+                )
             )
 
         from claude_agent.event_bus import BusProxyQueue
@@ -1627,6 +1646,7 @@ class ClaudeAgentService:
             run_options=run_options,
             turn_context=turn_ctx,
             dream_context=dream_context,
+            dream_artifact_turn_ticket=dream_artifact_turn_ticket,
             resume_existing_session=resume_existing_session,
         )
 
@@ -1704,6 +1724,35 @@ class ClaudeAgentService:
             raise
 
         if result.success:
+            dream_artifact_turn_ticket = getattr(
+                execution,
+                "dream_artifact_turn_ticket",
+                None,
+            )
+            if dream_artifact_turn_ticket is not None:
+                try:
+                    sync_result = await asyncio.to_thread(
+                        self._dream_artifact_turn_hook.after_main_turn,
+                        dream_artifact_turn_ticket,
+                    )
+                    logger.info(
+                        "Dream workbench synchronized run_id=%s changed_stages=%s "
+                        "private_artifact_changed=%s private_files=%s",
+                        execution.dream_context.workflow_run_id
+                        if execution.dream_context is not None
+                        else "",
+                        list(sync_result.changed_stages),
+                        sync_result.private_artifact_changed,
+                        len(sync_result.private_files),
+                    )
+                except Exception:
+                    # The canonical Chat turn has already completed.  Projection
+                    # repair remains retryable on the next root turn and must not
+                    # manufacture a second Agent terminal outcome.
+                    logger.exception(
+                        "Dream workbench synchronization failed for thread_id=%s",
+                        execution.request.thread_id,
+                    )
             full_text = result.full_text
             await queue.put(
                 _event("message-final", {
@@ -2455,6 +2504,9 @@ class _TurnExecution:
     # Internal server-derived Dream authority. It is assembled from actor +
     # canonical Thread and is never part of ClaudeAgentRunRequest or HTTP/SSE.
     dream_context: StoryWorkspaceDreamRunContext | None = None
+    # Root-turn business projection ticket assembled from the same trusted
+    # Dream context. It is internal and never enters the Chat/SSE payload.
+    dream_artifact_turn_ticket: DreamArtifactTurnTicket | None = None
     # The DB row used to source claude_session_id for resume / persistence;
     # None on the first turn of a session.
     resume_existing_session: Optional[dict] = None

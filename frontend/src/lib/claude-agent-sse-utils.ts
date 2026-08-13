@@ -1,6 +1,6 @@
 /**
  * [Input]  Pawkeyland-aligned Claude Agent SSE event shapes.
- * [Output] parseClaudeAgentSseBuffer, applyBackendEventToMessages, consumeClaudeAgentSseStream.
+ * [Output] parse/coalesce helpers, applyBackendEventToMessages, consumeClaudeAgentSseStream.
  * [Pos]    shared SSE helpers in frontend/src/lib
  * [Sync]   2026-06-09: extracted from claude-agent-transport for thread SSE reconnect.
  * [Sync]   2026-06-09: add consumeClaudeAgentSseStream with incremental frame buffering.
@@ -10,6 +10,8 @@
  * [Sync]   2026-07-23: SandboxPermissionRequest — replayed tool-approval-request
  *                      frames also forward confirmationKind / networkRequest into
  *                      toolMetadata (claude-agent-sandbox-network-permission-tool.md §5).
+ * [Sync]   2026-08-13: coalesce adjacent replay deltas so a late Chat/Dream mount
+ *                      reaches tool confirmations without thousands of React updates.
  */
 
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -18,6 +20,34 @@ export type BackendEvent = {
   type: string;
   [key: string]: unknown;
 };
+
+const COALESCIBLE_DELTA_EVENT_TYPES = new Set(['reasoning-delta', 'text-delta']);
+
+/** Collapse only adjacent deltas from the same stream part. Structural events
+ * remain exact ordering barriers, so tool/approval/terminal semantics cannot be
+ * reordered by reconnect replay batching. */
+export function coalesceClaudeAgentSseEvents(
+  events: readonly BackendEvent[],
+): BackendEvent[] {
+  const result: BackendEvent[] = [];
+  for (const event of events) {
+    const previous = result.at(-1);
+    if (
+      previous
+      && event.type === previous.type
+      && COALESCIBLE_DELTA_EVENT_TYPES.has(event.type)
+      && String(event.id ?? '') === String(previous.id ?? '')
+    ) {
+      result[result.length - 1] = {
+        ...previous,
+        delta: `${String(previous.delta ?? '')}${String(event.delta ?? '')}`,
+      };
+      continue;
+    }
+    result.push(event);
+  }
+  return result;
+}
 
 export function drainClaudeAgentSseFrames(buffer: string): {
   buffer: string;

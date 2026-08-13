@@ -52,7 +52,6 @@ except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
 
 DREAM_RUNTIME_INIT_INVALID = "DREAM_RUNTIME_INIT_INVALID"
 DREAM_RUNTIME_NOT_READY = "DREAM_RUNTIME_NOT_READY"
-_REQUIRED_DREAM_TOOL = "mcp__story_workspace__write_dream_run"
 _DREAM_MATERIALIZATION_POLICY_REVISION = "dream-launch/v1"
 
 
@@ -188,7 +187,7 @@ class StoryWorkspaceDreamRuntimeActivationService:
             policy_revision=policy_revision,
             settings_intent={
                 "evidence": "verified-workspace-manifest+assembled-thread-context",
-                "requiredTool": _REQUIRED_DREAM_TOOL,
+                "artifactSync": "host-root-turn-hook/v1",
             },
             plugins=[
                 HeadlessPluginState(
