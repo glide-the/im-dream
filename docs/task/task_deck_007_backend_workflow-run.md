@@ -13,7 +13,7 @@ Workflow Run 创建、状态与幂等重试
 - **标签**: `story-workspace`, `workflow-run`, `idempotency`
 - **来源设计稿**:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §11.1, §11.2, §11.3, §11.4
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §5.6
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §5.6
 - **Issue 清单**: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` §3 DECK-007
 
 ## 3. 任务目标
@@ -68,7 +68,6 @@ class RunStatus(str, Enum):
     PENDING_REVIEW = "pending_review"
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
-    CONTINUING = "continuing"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -78,7 +77,7 @@ class RunStatus(str, Enum):
 
 ```text
 preflight → queued → running → output_validating → pending_review → confirmed
-                │              │                 │              ├→ continuing → completed
+                │              │                 │              ├→ completed
                 │              │                 │              └→ completed
                 │              │                 └→ rejected
                 ├──────────────┴────────────────────────────────→ failed
@@ -89,7 +88,7 @@ preflight → queued → running → output_validating → pending_review → co
 - `preflight` 失败通常留在独立 Preflight；若运行已原子创建，则只能转 `failed`
 - `queued → running` 需要读取既有、不可变的 `runtime_load_receipt` 就绪投影，并验证 receipt 绑定当前 `workflow_run_id`、runtime lock/digest 且全部 required 项成功；`runtime_load_receipt_id` 只允许在该事务中从 `NULL` 赋值一次，之后不可变
 - `running → output_validating → pending_review` 需要规范化结果完整校验并原子持久化
-- `pending_review → confirmed → continuing/completed` 由用户确认触发；`pending_review → rejected` 终止当前 run，重新生成必须新建 run
+- `pending_review → confirmed → completed` 由用户确认及后续业务完成触发；`pending_review → rejected` 终止当前 run，重新生成必须新建 run
 - `pending_review` 是唯一 API 审阅态；`awaiting review` 仅可作为 UI 文案
 - 任一终态不得恢复为非终态；重试创建新 run
 - 每次创建或合法状态变化必须在同一数据库事务追加一条 `workflow_run_transitions`；状态更新成功但 transition 缺失、或 transition 成功但状态未更新都必须整体回滚

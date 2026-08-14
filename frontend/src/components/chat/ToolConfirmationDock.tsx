@@ -17,12 +17,20 @@
 //        (target host + sandbox policy mode, binary 拒绝/同意, no "remember" in this iteration)
 //        when kind==='sandbox-network'; generic card unchanged when the discriminator is absent
 //        (design: claude-agent-sandbox-network-permission-tool.md §5A).
+// [Sync] 2026-08-11: every surface resolves confirmations through the owned
+//                    canonical thread endpoint, including reject-only policy.
+// [Sync] 2026-08-13: inherit the available composer height and keep AskUserQuestion actions
+//                    fixed while only the long question body scrolls.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
-import { confirmToolCall, type PendingToolConfirmation } from './toolConfirmation';
+import {
+  confirmToolCall,
+  type PendingToolConfirmation,
+} from './toolConfirmation';
 import { isShellTool, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 import { IconCheck, IconLoader, IconX } from './Icons';
+import { toolConfirmationKeyboardDecision } from './chatRuntimeState';
 
 type DockStatus = 'idle' | 'confirming' | 'confirmed' | 'rejected';
 
@@ -92,6 +100,9 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
   const handleReject = useCallback(() => void runConfirm(false, t('chat.toolConfirmation.userRejectedTool')), [runConfirm, t]);
   const handleAskUserSubmit = useCallback((answers: Record<string, unknown>) => void runConfirm(true, undefined, answers), [runConfirm]);
   const handleAskUserCancel = useCallback(() => void runConfirm(false, t('chat.toolConfirmation.userCancelledAnswer')), [runConfirm, t]);
+  const isAskUser = kind === 'askuser';
+  const isSandboxNetwork = kind === 'sandbox-network';
+  const isRejectOnly = kind === 'reject-only';
 
   // Keyboard shortcuts for the confirm variants (generic + sandbox network):
   // Esc = 拒绝, ⌘/Ctrl+⏎ = 同意.
@@ -99,20 +110,18 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
   useEffect(() => {
     if (kind === 'askuser' || status !== 'idle') return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      const decision = toolConfirmationKeyboardDecision(kind, event);
+      if (decision !== null) {
         event.preventDefault();
-        handleApprove();
-      } else if (event.key === 'Escape') {
-        event.preventDefault();
-        handleReject();
+        event.stopImmediatePropagation();
+        if (decision === 'approve') handleApprove();
+        if (decision === 'reject') handleReject();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [handleApprove, handleReject, kind, status]);
 
-  const isAskUser = kind === 'askuser';
-  const isSandboxNetwork = kind === 'sandbox-network';
   const networkRequest = confirmation.networkRequest ?? null;
   const networkPolicyModeText = networkRequest?.policyMode === 'allowlist'
     ? t('chat.toolConfirmation.networkPolicyAllowlist')
@@ -123,7 +132,9 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
     ? t('chat.toolConfirmation.askUserTitle')
     : isSandboxNetwork
       ? t('chat.toolConfirmation.networkConfirmTitle', { tool: toolName || t('chat.toolConfirmation.unknownTool') })
-      : t('chat.toolConfirmation.confirmTitle', { tool: toolName || t('chat.toolConfirmation.unknownTool') })
+      : isRejectOnly
+        ? t('chat.toolConfirmation.rejectOnlyTitle')
+        : t('chat.toolConfirmation.confirmTitle', { tool: toolName || t('chat.toolConfirmation.unknownTool') })
         + (summaryText ? t('chat.toolConfirmation.withSummary', { summary: summaryText }) : '');
 
   return (
@@ -141,13 +152,13 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
         display: 'flex',
         flexDirection: 'column',
         gap: '0.55rem',
-        // Cap the panel height so long AskUserQuestion forms never dominate the
-        // chat viewport — the content scrolls internally instead.
-        maxHeight: 'min(46vh, 24rem)',
-        overflowY: 'auto',
+        minHeight: 0,
+        maxHeight: '100%',
+        flex: '1 1 auto',
+        overflow: 'hidden',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', flexShrink: 0 }}>
         <span aria-hidden="true" style={{ marginTop: '0.35rem', width: '0.55rem', height: '0.55rem', borderRadius: '999px', background: '#f59e0b', flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0, fontSize: '0.95rem', fontWeight: 600, lineHeight: 1.5, color: 'var(--color-text-primary)', wordBreak: 'break-word' }}>
           {title}
@@ -158,17 +169,19 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
       </div>
 
       {status === 'idle' && isAskUser ? (
-        <AskUserQuestionUI
-          input={(input ?? {}) as AskUserQuestionInput}
-          toolCallId={toolCallId}
-          toolName={toolName}
-          isProcessing={false}
-          framed={false}
-          showHeader={false}
-          compact
-          onSubmit={handleAskUserSubmit}
-          onCancel={handleAskUserCancel}
-        />
+        <div style={{ display: 'flex', minHeight: 0, flex: '1 1 auto', overflow: 'hidden' }}>
+          <AskUserQuestionUI
+            input={(input ?? {}) as AskUserQuestionInput}
+            toolCallId={toolCallId}
+            toolName={toolName}
+            isProcessing={false}
+            framed={false}
+            showHeader={false}
+            compact
+            onSubmit={handleAskUserSubmit}
+            onCancel={handleAskUserCancel}
+          />
+        </div>
       ) : status === 'idle' && isSandboxNetwork ? (
         <div
           style={{
@@ -223,7 +236,23 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
         </div>
       ) : null}
 
-      {status === 'idle' && !isAskUser ? (
+      {status === 'idle' && isRejectOnly ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+          <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: '0.85rem', lineHeight: 1.65 }}>
+            {t('chat.toolConfirmation.rejectOnlyDescription')}
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={handleReject}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', borderRadius: '999px', padding: '0.5rem 1.05rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', fontSize: '0.86rem', fontWeight: 600, cursor: 'pointer' }}
+            >
+              {t('chat.toolConfirmation.rejectAndContinue')}
+              <KbdHint label="ESC" />
+            </button>
+          </div>
+        </div>
+      ) : status === 'idle' && !isAskUser && !isRejectOnly ? (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>
           <button
             type="button"

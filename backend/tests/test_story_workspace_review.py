@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 
 import database
 from routers import story_workspace
+from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 
 
 _SCHEMA = """
@@ -110,8 +111,11 @@ class _CaptureHandler(logging.Handler):
 class StoryWorkspaceReviewTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.old_db_path = database.DB_PATH
-        database.DB_PATH = Path(self.temp_dir.name) / "story-review-test.db"
+        self.database_fixture = LegacyDatabaseModuleFixture(
+            database,
+            Path(self.temp_dir.name) / "story-review-test.db",
+        )
+        self.database_fixture.start()
         db = database.get_db()
         db.executescript(_SCHEMA)
         db.executemany("INSERT INTO users (id) VALUES (?)", [(1,), (2,)])
@@ -133,7 +137,7 @@ class StoryWorkspaceReviewTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.client.close()
-        database.DB_PATH = self.old_db_path
+        self.database_fixture.stop()
         self.temp_dir.cleanup()
 
     @staticmethod
@@ -259,7 +263,7 @@ class StoryWorkspaceReviewTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["review_status"], "confirmed")
         self.assertEqual(response.json()["status"], "published")
-        self.assertEqual(response.json()["execution"]["status"], "completed")
+        self.assertNotIn("execution", response.json())
         self.assertEqual(
             self._db_value("story_workspace_characters", "character-bundle", "review_status"),
             "confirmed",
@@ -337,6 +341,16 @@ class StoryWorkspaceReviewTest(unittest.TestCase):
             [item["id"] for item in response.json()["updated_items"]],
             ["story-pending-confirm"],
         )
+        for forbidden in (
+            "content",
+            "source_thread_ref",
+            "artifact_source_type",
+            "reviewed_script_revision",
+        ):
+            self.assertNotIn(
+                forbidden,
+                response.json()["updated_items"][0],
+            )
 
         response = self.client.post(
             "/api/story-workspace/batch",

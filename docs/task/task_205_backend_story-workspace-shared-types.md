@@ -12,11 +12,11 @@ Story Workspace 命名规范与类型定义共享包（后端主责）
 - **优先级**: P0
 - **标签**: `naming`, `types`, `shared`
 - **来源设计稿**:
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.1 `DEC-004`（`story-workspace` 前缀命名）
-  - `docs/design/story-workspace/story-workspace-prd.md` §4.2（命名映射）
-  - `docs/design/story-workspace/story-workspace-prd.md` §14.1（命名前缀汇总）
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §5.1–5.5（数据表结构）
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §8（Zustand Store 结构）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §3.1 `DEC-004`（`story-workspace` 前缀命名）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §4.2（命名映射）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §14.1（命名前缀汇总）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §5.1–5.5（数据表结构）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §8（Zustand Store 结构）
 - **Issue 清单**: `docs/issue/ISSUES_story-workspace.md` §3 Issue 明细、§5 分发去向说明
 - **主责 Agent**: `BackendTaskAgent`
 - **协作 Agent**: `FrontendTaskAgent`
@@ -243,8 +243,8 @@ export interface PaginatedResponse<T> {
 
 ### 输入
 
-- 设计稿数据表结构：`docs/design/story-workspace/story-workspace-layout-design.md` §5.1–5.5
-- 设计稿命名映射：`docs/design/story-workspace/story-workspace-prd.md` §4.2、§14.1
+- 设计稿数据表结构：`docs/design/story-workspace/product-scope-and-navigation.md` §5.1–5.5
+- 设计稿命名映射：`docs/design/story-workspace/product-scope-and-navigation.md` §4.2、§14.1
 - Issue 清单：`docs/issue/ISSUES_story-workspace.md` §3
 - 现有后端技术栈：Python 3.12 + FastAPI + SQLite（项目当前使用 dataclass / Pydantic 混合风格）
 - 现有前端技术栈：TypeScript + React

@@ -14,13 +14,13 @@
 
 - Issue 清单文件：`docs/issue/ISSUES_story-workspace.md`
 - 来源设计稿：
-  - 主设计稿：`docs/design/story-workspace/story-workspace-prd.md`（DEC-009～DEC-011、**DEC-017～DEC-018**）
-  - 布局设计稿：`docs/design/story-workspace/story-workspace-layout-design.md`
+  - 主设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`（DEC-009～DEC-011、**DEC-017～DEC-018**）
+  - 布局设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`
   - 增量 Delta 设计稿：`docs/design/deck/deck-integration-delta.md`
-  - **SUO-230 增量设计稿**：`docs/design/story-workspace/story-workspace-prd.md` §3.6 / `docs/design/story-workspace/story-workspace-layout-design.md` §2.4
-  - **SUO-298 合同归属增量**：`docs/design/story-workspace/story-workspace-prd.md` §3.5.4、`docs/design/story-workspace/story-workspace-layout-design.md` §10.5 / §11.7、`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md` DEC-026
+  - **SUO-230 增量设计稿**：`docs/design/story-workspace/product-scope-and-navigation.md` §3.6 / `docs/design/story-workspace/product-scope-and-navigation.md` §2.4
+  - **SUO-298 合同归属增量**：`docs/design/story-workspace/product-scope-and-navigation.md` §3.5.4、`docs/design/story-workspace/product-scope-and-navigation.md` §10.5 / §11.7、`docs/design/story-workspace/project-and-episode-workbench.md` DEC-026
   - 背景设计稿：`docs/CLAUDE.md`（Agent 服务集成说明）
-  - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
+  - 参考设计稿：`docs/design/story-workspace/README.md`
 - 生成 Agent：`IssueDispatcher`
 - SUO-299 增量修订 Agent：`CEOOrchestrator`（仅本次 direct repair）
 - 所属流水线阶段：`issue`
@@ -44,13 +44,13 @@
 
 ## 1. 关联设计稿信息
 
-- 主设计稿：`docs/design/story-workspace/story-workspace-prd.md`
-- 重点补充设计稿：`docs/design/story-workspace/story-workspace-layout-design.md`
+- 主设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`
+- 重点补充设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`
 - **增量 Delta 设计稿**：`docs/design/deck/deck-integration-delta.md`
-- **SUO-230 增量设计稿**：`docs/design/story-workspace/story-workspace-prd.md` §3.6、`docs/design/story-workspace/story-workspace-layout-design.md` §2.4
-- **SUO-298 合同归属增量**：`docs/design/story-workspace/story-workspace-prd.md` §3.5.4、`docs/design/story-workspace/story-workspace-layout-design.md` §10.5 / §11.7、`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md` DEC-026
+- **SUO-230 增量设计稿**：`docs/design/story-workspace/product-scope-and-navigation.md` §3.6、`docs/design/story-workspace/product-scope-and-navigation.md` §2.4
+- **SUO-298 合同归属增量**：`docs/design/story-workspace/product-scope-and-navigation.md` §3.5.4、`docs/design/story-workspace/product-scope-and-navigation.md` §10.5 / §11.7、`docs/design/story-workspace/project-and-episode-workbench.md` DEC-026
 - 关联设计稿：`docs/CLAUDE.md`（claude-agent 服务集成）
-- 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
+- 参考设计稿：`docs/design/story-workspace/README.md`
 
 - 本清单覆盖范围：
   - Workspace 布局骨架：三栏桌面端布局、导航、侧边栏、主内容区

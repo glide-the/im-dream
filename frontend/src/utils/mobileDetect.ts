@@ -12,7 +12,8 @@ export function isMobile(): boolean {
   if (width < 768) return true;
 
   // Check user agent for mobile devices
-  const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
+  const legacyWindow = window as Window & { opera?: string };
+  const userAgent = navigator.userAgent || navigator.vendor || legacyWindow.opera || '';
 
   // Mobile device patterns
   const mobilePatterns = [

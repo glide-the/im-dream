@@ -3,14 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import sqlite3
-
+from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-try:
-    from backend.database import create_agent_session_tables
-except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
-    from database import create_agent_session_tables
 
 
 RUNTIME_PLUGIN_RELOAD_UNSUPPORTED = "RUNTIME_PLUGIN_RELOAD_UNSUPPORTED"
@@ -43,7 +37,6 @@ class PluginRef(_StrictFrozenModel):
 
 class ManagementSmokeContext(_StrictFrozenModel):
     management_session_id: str = Field(pattern=r"^mgmt_[A-Za-z0-9._-]+$")
-    deployment_tier: str
     plugins: list[PluginRef]
 
 
@@ -62,13 +55,11 @@ ManagementContextReader = Callable[[str], ManagementSmokeContext | None]
 class RemoteInteractionGuard:
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         management_context_reader: ManagementContextReader | None = None,
     ) -> None:
-        create_agent_session_tables(db)
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._management_context_reader = management_context_reader
 
     async def guard_reload(
@@ -79,13 +70,13 @@ class RemoteInteractionGuard:
         proposed_plugins: list[PluginRef],
         proposed_capabilities: list[str],
     ) -> GuardResult:
-        """Allow only a proven idle dev/test management smoke diagnostic."""
+        """Allow only a proven idle management smoke diagnostic."""
 
         if proposed_capabilities != sorted(set(proposed_capabilities)):
             return self._deny()
         if workflow_run_id is not None:
             run = self.db.execute(
-                "SELECT status FROM workflow_runs WHERE id = ?",
+                "SELECT status FROM workflow_runs WHERE id = %s",
                 (workflow_run_id,),
             ).fetchone()
             if run is not None:
@@ -94,7 +85,7 @@ class RemoteInteractionGuard:
         if agent_session_id is None:
             return self._deny()
         run_session = self.db.execute(
-            "SELECT status FROM agent_sessions WHERE agent_session_id = ?",
+            "SELECT status FROM agent_sessions WHERE agent_session_id = %s",
             (agent_session_id,),
         ).fetchone()
         if run_session is not None:
@@ -105,7 +96,6 @@ class RemoteInteractionGuard:
         if (
             context is None
             or context.management_session_id != agent_session_id
-            or context.deployment_tier not in {"development", "test"}
         ):
             return self._deny()
         current = {

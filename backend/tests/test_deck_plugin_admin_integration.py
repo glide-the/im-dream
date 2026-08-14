@@ -10,12 +10,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import database
+from models.deck_plugin import DeckRuntimePluginLock
+from models.runtime_plugin import compute_artifact_set_hash
 from routers import deck_plugins, story_workspace
+from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 from services.deck.builtin_plugin import (
     BUILTIN_DECK_PLUGIN_ID,
     BUILTIN_DECK_PLUGIN_VERSION,
     BUILTIN_SOURCE_REF,
     builtin_plugin_path,
+    seed_builtin_deck_plugin,
 )
 from services.deck.chat_context import DeckChatContextService
 
@@ -23,12 +27,11 @@ from services.deck.chat_context import DeckChatContextService
 class DeckPluginAdminIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self._old_path = database.DB_PATH
-        self._old_dir = database.DB_DIR
-        database.DB_PATH = Path(self._tmp.name) / "deck-admin.db"
-        database.DB_DIR = database.DB_PATH.parent
-        with patch.dict(os.environ, {"INK_ENVIRONMENT": "test"}, clear=False):
-            database.init_db()
+        self._database_fixture = LegacyDatabaseModuleFixture(
+            database,
+            Path(self._tmp.name) / "deck-admin.db",
+        )
+        self._database_fixture.start(initialize_legacy_schema=True)
         db = database.get_db()
         try:
             with db:
@@ -38,6 +41,11 @@ class DeckPluginAdminIntegrationTests(unittest.TestCase):
                     VALUES (101, 'deck-admin@example.test', 'unused', 'Deck Admin', 'admin')
                     """
                 )
+                db.execute(
+                    "INSERT INTO story_workspace_workspaces (id, name, owner_id) "
+                    "VALUES ('workspace-deck-admin', 'Deck Admin', 101)"
+                )
+            seed_builtin_deck_plugin(db)
         finally:
             db.close()
 
@@ -46,21 +54,37 @@ class DeckPluginAdminIntegrationTests(unittest.TestCase):
             "user_id": 101,
             "email": "deck-admin@example.test",
             "role": "admin",
+            "workspace_id": "workspace-deck-admin",
+        }
+        self.app.dependency_overrides[deck_plugins._deck_plugin_current_user] = lambda: {
+            "user_id": 101,
+            "email": "deck-admin@example.test",
+            "role": "admin",
+            "workspace_id": "workspace-deck-admin",
         }
         self.app.dependency_overrides[story_workspace.get_current_user] = lambda: {
             "user_id": 101,
             "email": "deck-admin@example.test",
             "role": "admin",
+            "workspace_id": "workspace-deck-admin",
         }
         self.app.include_router(deck_plugins.router)
         self.app.include_router(story_workspace.router)
-        self._environment = patch.dict(os.environ, {"INK_ENVIRONMENT": "test"}, clear=False)
-        self._environment.start()
+        self._capabilities = patch.dict(
+            os.environ,
+            {
+                "INK_DECK_HOST_COMPATIBLE": "1",
+                "INK_CLAUDE_AGENT_CONTRACT_COMPATIBLE": "1",
+                "INK_STORY_SCHEMA_COMPATIBLE": "1",
+                "INK_DECK_RUNTIME_CONFIG_COMPATIBLE": "1",
+            },
+            clear=False,
+        )
+        self._capabilities.start()
 
     def tearDown(self) -> None:
-        self._environment.stop()
-        database.DB_PATH = self._old_path
-        database.DB_DIR = self._old_dir
+        self._capabilities.stop()
+        self._database_fixture.stop()
         self._tmp.cleanup()
 
     def test_install_list_and_readiness_use_real_materialized_plugin(self) -> None:
@@ -101,9 +125,14 @@ class DeckPluginAdminIntegrationTests(unittest.TestCase):
             materialization = db.execute(
                 """
                 SELECT cache_ref, verification_status, materialization_status,
-                       activation_status
+                       activation_status, artifact_set_hash
                 FROM runtime_plugin_materializations
                 """
+            ).fetchone()
+            lock_row = db.execute(
+                "SELECT lock_json FROM deck_runtime_plugin_locks "
+                "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
+                (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
             ).fetchone()
         finally:
             db.close()
@@ -111,6 +140,12 @@ class DeckPluginAdminIntegrationTests(unittest.TestCase):
         self.assertEqual(materialization["verification_status"], "verified")
         self.assertEqual(materialization["materialization_status"], "materialized")
         self.assertEqual(materialization["activation_status"], "loadable")
+        self.assertEqual(
+            materialization["artifact_set_hash"],
+            compute_artifact_set_hash(
+                DeckRuntimePluginLock.model_validate_json(lock_row["lock_json"])
+            ),
+        )
 
         # New architecture (deck-integration-delta): the chat plugin path is
         # shared-installation based.  The legacy binding above stays for the

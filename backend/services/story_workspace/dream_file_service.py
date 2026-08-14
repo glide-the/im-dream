@@ -568,7 +568,11 @@ class _StoryWorkspaceDreamFilesystem:
                     workspace_descriptor,
                     ".dream",
                     create=False,
+                    optional=not create,
                 )
+                if dream_descriptor is None:
+                    yield None
+                    return
                 assert dream_descriptor is not None
                 descriptors.append(dream_descriptor)
                 runtime_descriptor = self._open_child_directory(
@@ -1302,7 +1306,9 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                         run_id,
                         canonical_stage,
                     )
-                    self._validate_source_files(current, run.workspace_descriptor)
+                    # Candidate sources are validated above.  The previous
+                    # projection may legitimately reference files removed by
+                    # an arbitrary Skill before this replacement turn.
                 current_revision = current.revision if current is not None else 0
                 if expected_revision != current_revision:
                     raise StoryWorkspaceDreamFileConflict(
@@ -1325,6 +1331,86 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                     ),
                 )
                 return candidate
+
+    def delete_stage(
+        self,
+        workflow_run: WorkflowRun,
+        *,
+        stage: StoryWorkspaceDreamStage | str,
+        expected_revision: int,
+    ) -> bool:
+        """Remove a stale stage after its complete canonical source set vanished.
+
+        The caller supplies the revision read under the same actor/thread/run
+        authority.  Source files are intentionally not revalidated here: their
+        absence is the business fact this operation reconciles.
+        """
+
+        _validate_expected_revision(expected_revision)
+        canonical_stage = _coerce_stage(stage)
+        canonical_filename = _STAGE_FILENAMES[canonical_stage]
+        run_id, source = _authoritative_context(workflow_run)
+        thread_id = _authoritative_thread_id(workflow_run)
+        with self._locked_run(run_id, create=False, exclusive=True) as run:
+            if run is None:
+                raise StoryWorkspaceDreamContractError(
+                    "Dream run has not been created"
+                )
+            self._verify_run(run)
+            run_file = self._read_model(
+                run.run_descriptor,
+                "run.json",
+                StoryWorkspaceDreamRunFile,
+                required=True,
+            )
+            assert run_file is not None
+            self._validate_run_authority(
+                run_file,
+                run_id=run_id,
+                source=source,
+                thread_id=thread_id,
+            )
+            with self._stages_directory(run, create=False) as stages:
+                if stages is None:
+                    if expected_revision != 0:
+                        raise StoryWorkspaceDreamFileConflict(expected_revision, 0)
+                    return False
+
+                def verify_stage_context() -> None:
+                    self._verify_run(run)
+                    self._verify_child_identity(
+                        stages.parent_descriptor,
+                        stages.name,
+                        stages.descriptor,
+                    )
+
+                verify_stage_context()
+                current = self._read_model(
+                    stages.descriptor,
+                    canonical_filename,
+                    StoryWorkspaceDreamStageFile,
+                    required=False,
+                )
+                verify_stage_context()
+                if current is None:
+                    if expected_revision != 0:
+                        raise StoryWorkspaceDreamFileConflict(expected_revision, 0)
+                    return False
+                self._validate_stage_identity(current, run_id, canonical_stage)
+                if current.revision != expected_revision:
+                    raise StoryWorkspaceDreamFileConflict(
+                        expected_revision,
+                        current.revision,
+                    )
+                try:
+                    os.unlink(canonical_filename, dir_fd=stages.descriptor)
+                    os.fsync(stages.descriptor)
+                    verify_stage_context()
+                except OSError as exc:
+                    raise StoryWorkspaceDreamIOError(
+                        "Dream stage file cannot be removed"
+                    ) from exc
+                return True
 
     @staticmethod
     def _serialize(model: BaseModel) -> bytes:
@@ -1382,6 +1468,19 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
 class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
     """Read-only snapshot loader; missing stages are a legal waiting state."""
 
+    @classmethod
+    def waiting_response(
+        cls,
+        workflow_run: WorkflowRun,
+        *,
+        thread_id: str,
+    ) -> StoryWorkspaceDreamFilesResponse:
+        """Project an authorized pre-output run without touching the filesystem."""
+
+        _validate_authoritative_thread(workflow_run, thread_id)
+        run_id, source = _authoritative_context(workflow_run)
+        return cls._waiting_response(run_id, thread_id, source)
+
     def read_run(
         self,
         workflow_run: WorkflowRun,
@@ -1407,6 +1506,7 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
         workflow_run: WorkflowRun,
         *,
         stage: StoryWorkspaceDreamStage | str,
+        validate_source_files: bool = True,
     ) -> StoryWorkspaceDreamStageFile | None:
         thread_id = _authoritative_thread_id(workflow_run)
         canonical_stage = _coerce_stage(stage)
@@ -1433,12 +1533,19 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
                 self._verify_read_context(run, stages)
                 if stage_file is None:
                     return None
-                self._validate_stage(
-                    stage_file,
-                    run_id,
-                    canonical_stage,
-                    run.workspace_descriptor,
-                )
+                if validate_source_files:
+                    self._validate_stage(
+                        stage_file,
+                        run_id,
+                        canonical_stage,
+                        run.workspace_descriptor,
+                    )
+                else:
+                    StoryWorkspaceDreamFileWriter._validate_stage_identity(
+                        stage_file,
+                        run_id,
+                        canonical_stage,
+                    )
                 return stage_file
 
     def read_stage_file(
@@ -1466,7 +1573,7 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
         run_id, source = _authoritative_context(workflow_run)
         with self._locked_run(run_id, create=False, exclusive=False) as run:
             if run is None:
-                return self._waiting_response(run_id, thread_id, source)
+                return self.waiting_response(workflow_run, thread_id=thread_id)
             run_file = self._read_model(
                 run.run_descriptor,
                 "run.json",
@@ -1475,7 +1582,7 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
             )
             self._verify_run(run)
             if run_file is None:
-                return self._waiting_response(run_id, thread_id, source)
+                return self.waiting_response(workflow_run, thread_id=thread_id)
             StoryWorkspaceDreamFileWriter._validate_run_authority(
                 run_file,
                 run_id=run_id,

@@ -19,8 +19,8 @@
 - 来源设计稿:
   - 主设计稿: `docs/design/deck-plugin-voice-ink-dream-integration.md` (SUO-218)
   - 补充设计稿: `docs/design/plugin-remote-interaction.md`
-  - 背景设计稿: `docs/design/story-workspace/story-workspace-prd.md`
-  - 背景设计稿: `docs/design/story-workspace/story-workspace-layout-design.md`
+  - 背景设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`
+  - 背景设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`
   - 背景设计稿: `docs/design/deck/deck-integration-delta.md`
   - 参考设计稿: `docs/design/deck-claude-agent.md`
 - 生成 Agent: `IssueDispatcher`
@@ -44,8 +44,8 @@
 
 - 主设计稿: `docs/design/deck-plugin-voice-ink-dream-integration.md` (SUO-218)
 - 重点补充设计稿: `docs/design/plugin-remote-interaction.md`
-- 关联设计稿: `docs/design/story-workspace/story-workspace-prd.md`
-- 关联设计稿: `docs/design/story-workspace/story-workspace-layout-design.md`
+- 关联设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`
+- 关联设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`
 - 关联设计稿: `docs/design/deck/deck-integration-delta.md`
 - 参考设计稿: `docs/design/deck-claude-agent.md`
 
@@ -358,7 +358,7 @@
 - 优先级: P0
 - 标签: `story-workspace`,`workflow-run`,`idempotency`
 - 描述:
-  实现 Workflow Run 的创建、状态管理和幂等重试。包括 run 模型（保留 SUO-198 字段并新增 `deck_plugin_manifest_hash`、`runtime_plugin_lock_id`、`runtime_load_receipt_id`、`workflow_preflight_id`、`agent_session_id`、`source_voice_thread_id` 等）、状态机（`preflight` → `queued` → `running` → `output_validating` → `pending_review` → `continuing` → `completed` / `failed` / `cancelled`）、幂等启动（`idempotency_key`）、重试（创建新 run 并设置 `retry_of_run_id`，默认沿用原 release/Deck 运行配置 snapshot/runtime lock）。
+  实现 Workflow Run 的创建、状态管理和幂等重试。包括 run 模型（保留 SUO-198 字段并新增 `deck_plugin_manifest_hash`、`runtime_plugin_lock_id`、`runtime_load_receipt_id`、`workflow_preflight_id`、`agent_session_id`、`source_voice_thread_id` 等）、状态机（`preflight` → `queued` → `running` → `output_validating` → `pending_review` → `confirmed` → `completed` / `failed` / `cancelled`）、幂等启动（`idempotency_key`）、重试（创建新 run 并设置 `retry_of_run_id`，默认沿用原 release/Deck 运行配置 snapshot/runtime lock）。
 
 - 验收条件:
   - [ ] Run 模型完整，保留 SUO-198 全部字段并新增设计稿 §11.1 字段
@@ -374,7 +374,7 @@
 
 - 关联路径:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §11.1, §11.2, §11.3, §11.4
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §5.6
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §5.6
   - 后端: workflow run service / state machine
 
 - 分发去向: `@TaskDesignAgent`
@@ -574,7 +574,7 @@
 
 - 关联路径:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §13.1
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §2.3, §4.5
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §2.3, §4.5
   - 前端: story-workspace status components / error recovery UI
 
 - 分发去向: `@TaskDesignAgent`

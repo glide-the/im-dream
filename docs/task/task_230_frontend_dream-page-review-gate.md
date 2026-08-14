@@ -84,12 +84,12 @@ Story Workspace Dream 页面（`StoryWorkspaceDreamPage`）与审阅 Gate（`Sto
 | `story-workspace-rejected` | 任一必审项 `rejected` | 第三步红色状态，显示修改意见与"沿原快照重新生成" | 锁定 |
 | `story-workspace-confirming` | 确认请求提交中 | 操作按钮 Loading 且防重复提交 | 锁定 |
 | `story-workspace-confirmed` | 全部必审项 `confirmed` | 第三步完成，第四步解锁 | 仅此状态可请求继续或结束 |
-| `story-workspace-continuing` / `story-workspace-completed` | 已确认后继续/终点 | 第四步显示执行中或已结束；来源信息只读 | 已放行 |
+| `story-workspace-dream-running` / `story-workspace-completed` | 已确认后执行/终点 | 第四步显示执行中或已结束；来源信息只读 | 已放行 |
 | `story-workspace-failed` | 任一步失败 | 显示非敏感错误、失败步骤与可恢复动作 | 锁定；按幂等规则重试 |
 
 **Gate 规则实现**：
 1. `pending_review` 是与 SUO-215 运行状态机一致的 canonical API 状态；既有文案"待审阅/awaiting review"只是展示语义，不新增第二个 API 枚举
-2. 运行级 gate 以该 `workflow_run_id` 的全部必审故事、角色、场景为聚合集合；任一项仍为 `pending` 或 `rejected` 时，不得进入 `confirmed`、`continuing` 或 `completed`
+2. 运行级 gate 以该 `workflow_run_id` 的全部必审故事、角色、场景为聚合集合；任一项仍为 `pending` 或 `rejected` 时，不得进入 `confirmed` 或 `completed`
 3. "保存"只更新内容并保持待审阅；只有"确认通过"或"保存并确认"可确认当前版本。确认必须校验运行 ID 与审阅版本，避免对过期 Agent 产出放行
 4. 确认动作必须幂等：首次合法确认后只发出一次继续/结束信号；重复点击、刷新或网络重试不得重复推进 Claude Agent
 5. 驳回只记录意见并锁住 gate；重新生成创建可审计的新 run attempt，默认沿用 DEC-010 的插件/配置快照，不能在原运行上静默覆盖
@@ -191,7 +191,7 @@ interface StoryWorkspaceState {
 ## 8. 测试策略
 
 1. **Gate 状态流转测试**：
-   - `queued` → `running` → `output_validating` → `pending_review` → `confirmed` → `continuing`/`completed`
+   - `queued` → `running` → `output_validating` → `pending_review` → `confirmed` → `completed`
    - 每一步 UI 状态正确映射
    - 失败状态正确显示错误和恢复动作
 

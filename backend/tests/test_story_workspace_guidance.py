@@ -19,6 +19,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -33,6 +34,8 @@ for candidate in (str(ROOT), str(REPO_ROOT)):
         sys.path.insert(0, candidate)
 
 import database
+from backend.schema import legacy_main_sqlite
+from backend.tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 from models.workflow_run import RunStatus, WorkflowRun
 from services.workflow.run_service import RunNotFound, WorkflowRunError
 from routers import story_workspace
@@ -132,10 +135,13 @@ class GuidanceFixture:
 
     def __init__(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.old_db_path = database.DB_PATH
-        database.DB_PATH = Path(self.temp_dir.name) / "guidance-test.db"
+        self.database_fixture = LegacyDatabaseModuleFixture(
+            database,
+            Path(self.temp_dir.name) / "guidance-test.db",
+        )
+        self.database_fixture.start()
         db = database.get_db()
-        database.create_tables(db)
+        legacy_main_sqlite.create_tables(db)
         db.execute(
             "INSERT INTO users (id, email, password_hash) VALUES (?, ?, 'hash')",
             (USER_ID, "guidance@example.com"),
@@ -204,7 +210,7 @@ class GuidanceFixture:
         return messages
 
     def close(self) -> None:
-        database.DB_PATH = self.old_db_path
+        self.database_fixture.stop()
         self.temp_dir.cleanup()
 
 
@@ -226,8 +232,8 @@ class StoryWorkspaceGuidanceServiceTests(unittest.TestCase):
         command = StoryWorkspaceGuidanceCommandPayload(**body)
         return self.fixture.service.submit_guidance(run_id, command, actor_id=ACTOR)
 
-    def test_guidance_accepted_when_run_continuing(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+    def test_guidance_accepted_when_run_confirmed(self):
+        self.fixture.add_run(RunStatus.CONFIRMED)
         result = self.submit()
         self.assertEqual(result["status"], "accepted")
         self.assertFalse(result["replayed"])
@@ -257,7 +263,7 @@ class StoryWorkspaceGuidanceServiceTests(unittest.TestCase):
         self.assertIn("第二集节奏放慢", json.dumps(dispatch["parts"], ensure_ascii=False))
 
     def test_guidance_idempotent_replay(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         body = {"kind": "retry-step", "step_id": "s3",
                 "idempotency_key": "k-2", "actor": ACTOR}
         r1 = self.submit(**body)
@@ -272,7 +278,7 @@ class StoryWorkspaceGuidanceServiceTests(unittest.TestCase):
         self.assertEqual(len(self.fixture.dispatcher.calls), 1)
 
     def test_guidance_conflicting_replay_returns_409(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         self.submit(text="A", idempotency_key="k-3")
         with self.assertRaises(StoryWorkspaceGuidanceError) as ctx:
             self.submit(text="B", idempotency_key="k-3")
@@ -283,6 +289,19 @@ class StoryWorkspaceGuidanceServiceTests(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("A", messages[0]["metadata"]["text_summary"])
         self.assertEqual(len(self.fixture.dispatcher.calls), 1)
+
+    def test_concurrent_database_identity_conflict_maps_to_guidance_409(self):
+        self.fixture.add_run(RunStatus.CONFIRMED)
+        with unittest.mock.patch.object(
+            database,
+            "save_chat_message",
+            side_effect=database.ChatMessageIdentityConflict("guide_k-race"),
+        ):
+            with self.assertRaises(StoryWorkspaceGuidanceError) as raised:
+                self.submit(idempotency_key="k-race")
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.code, "IDEMPOTENCY_CONFLICT")
+        self.assertEqual(self.fixture.dispatcher.calls, [])
 
     def test_guidance_rejected_when_not_confirmed(self):
         self.fixture.add_run(RunStatus.PENDING_REVIEW)
@@ -300,20 +319,20 @@ class StoryWorkspaceGuidanceServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "WORKFLOW_RUN_NOT_GUIDABLE")
 
     def test_guidance_rejected_without_source_thread(self):
-        self.fixture.add_run(RunStatus.CONTINUING, thread_id=None)
+        self.fixture.add_run(RunStatus.CONFIRMED, thread_id=None)
         with self.assertRaises(StoryWorkspaceGuidanceError) as ctx:
             self.submit(idempotency_key="k-6")
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertEqual(ctx.exception.code, "WORKFLOW_RUN_NOT_GUIDABLE")
 
     def test_guidance_rejected_when_thread_not_owned(self):
-        self.fixture.add_run(RunStatus.CONTINUING, thread_id="thread-other")
+        self.fixture.add_run(RunStatus.CONFIRMED, thread_id="thread-other")
         with self.assertRaises(StoryWorkspaceGuidanceError) as ctx:
             self.submit(idempotency_key="k-7")
         self.assertEqual(ctx.exception.status_code, 409)
 
     def test_guidance_rejected_when_actor_mismatch(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         with self.assertRaises(StoryWorkspaceGuidanceError) as ctx:
             self.fixture.service.submit_guidance(
                 RUN_ID,
@@ -329,7 +348,7 @@ class StoryWorkspaceGuidanceServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "WORKFLOW_PERMISSION_DENIED")
 
     def test_guidance_retry_step_accepted(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         result = self.submit(
             kind="retry-step", step_id="s3", text=None, idempotency_key="k-9"
         )
@@ -341,7 +360,7 @@ class StoryWorkspaceGuidanceServiceTests(unittest.TestCase):
 
     def test_guidance_dispatch_failure_still_accepted(self):
         self.fixture.dispatcher.delivered = False
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         result = self.submit(idempotency_key="k-10")
         # 202 semantics: persisted and queued even when no live runner turn
         # could be started (mid-turn injection channel does not exist, R5).
@@ -382,13 +401,13 @@ class StoryWorkspaceGuidanceContractTests(unittest.TestCase):
     def test_execution_projection_shape(self):
         projection = StoryWorkspaceExecutionProjection(
             run_id=RUN_ID,
-            phase="continuing",
+            phase="confirmed",
             steps=[{"step_id": "s3", "status": "blocked"}],
             assets_ref=None,
             events=[{"type": "story-workspace.execution.guidance-submitted"}],
         )
         self.assertEqual(projection.run_id, RUN_ID)
-        self.assertEqual(projection.phase, "continuing")
+        self.assertEqual(projection.phase, "confirmed")
         self.assertEqual(len(projection.steps), 1)
 
 
@@ -429,7 +448,7 @@ class StoryWorkspaceGuidanceRouteTests(unittest.TestCase):
             "workspace_id": WORKSPACE_ID,
             "role": "user",
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+        app.dependency_overrides[story_workspace.get_story_workflow_run_service] = (
             lambda: _RealServiceGateway(self.fixture)
         )
         app.include_router(story_workspace.router)
@@ -452,7 +471,7 @@ class StoryWorkspaceGuidanceRouteTests(unittest.TestCase):
         )
 
     def test_post_guidance_accepted_returns_202(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         resp = self.post_guidance()
         self.assertEqual(resp.status_code, 202)
         payload = resp.json()
@@ -463,7 +482,7 @@ class StoryWorkspaceGuidanceRouteTests(unittest.TestCase):
         self.assertEqual(len(self.fixture.guidance_messages_for(RUN_ID)), 1)
 
     def test_post_guidance_idempotent_replay_returns_202(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         body = {"kind": "retry-step", "step_id": "s3",
                 "idempotency_key": "k-2", "actor": ACTOR}
         r1 = self.post_guidance(**body)
@@ -474,7 +493,7 @@ class StoryWorkspaceGuidanceRouteTests(unittest.TestCase):
         self.assertEqual(len(self.fixture.guidance_messages_for(RUN_ID)), 1)
 
     def test_post_guidance_conflicting_replay_returns_409(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         self.post_guidance(text="A", idempotency_key="k-3")
         resp = self.post_guidance(text="B", idempotency_key="k-3")
         self.assertEqual(resp.status_code, 409)
@@ -491,7 +510,7 @@ class StoryWorkspaceGuidanceRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_post_guidance_validation_error_returns_422(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         resp = self.client.post(
             f"/api/story-workspace/runs/{RUN_ID}/guidance",
             json={"kind": "free-text", "idempotency_key": "k-x", "actor": ACTOR},
@@ -499,7 +518,7 @@ class StoryWorkspaceGuidanceRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 422)
 
     def test_post_guidance_actor_mismatch_returns_403(self):
-        self.fixture.add_run(RunStatus.CONTINUING)
+        self.fixture.add_run(RunStatus.CONFIRMED)
         resp = self.post_guidance(actor="someone-else", idempotency_key="k-8")
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json()["error"]["code"], "WORKFLOW_PERMISSION_DENIED")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [Input] Consume authenticated users, Story Workspace SQLite tables, and REST requests.
+# [Input] Consume authenticated users, canonical PostgreSQL Story Workspace tables, and REST requests.
 # [Output] Publish user-scoped Story Workspace read and controlled-update API routes.
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
 # [Sync] 2026-08-01: add task_202 workspace, story, character, and scene REST baseline.
@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterator, Optional, Protocol
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import database
@@ -26,17 +25,13 @@ from story_workspace.contracts import (
     StoryWorkspaceBatchAction,
     StoryWorkspaceCharacterPatch,
     StoryWorkspaceDreamConfirmationCommand,
-    StoryWorkspaceDreamAgentMessageCommand,
-    StoryWorkspaceDreamAgentToolConfirmationCommand,
     StoryWorkspaceDreamLaunchAccepted,
     StoryWorkspaceDreamLaunchCommand,
-    StoryWorkspaceEpisodeActionContinueCommand,
-    StoryWorkspaceEpisodeActionContinueCommandV2,
-    StoryWorkspaceEpisodeBindingRecoveryCommand,
     StoryWorkspaceGuidanceCommandPayload,
     StoryWorkspaceResourceType,
     StoryWorkspaceScenePatch,
     StoryWorkspaceStoryPatch,
+    StoryWorkspaceStoryIndexReconcileCommand,
     StoryWorkspaceWorkspacePatch,
 )
 from services.story_workspace.agent_integration import (
@@ -48,24 +43,44 @@ from .deps import get_current_user
 
 try:
     from services.errors.error_registry import ApiRouteError, build_error_payload
-    from services.deck.story_workflow_gateway import (
-        get_story_workflow_application_gateway,
+    from services.deck.story_workflow_application import (
+        get_dream_artifact_application_service,
+        get_dream_confirmation_application_service,
+        get_story_workflow_run_application_service,
     )
-    from services.story_workspace.episode_action_service import (
-        StoryWorkspaceEpisodeActionError,
+    from services.story_workspace.dream_launch_endpoint_service import (
+        get_dream_launch_endpoint_service,
+    )
+    from services.story_workspace.artifact_story_index_repository import (
+        StoryWorkspacePublicStoryRepository,
     )
 except ModuleNotFoundError:
     from backend.services.errors.error_registry import ApiRouteError, build_error_payload
-    from backend.services.deck.story_workflow_gateway import (
-        get_story_workflow_application_gateway,
+    from backend.services.deck.story_workflow_application import (
+        get_dream_artifact_application_service,
+        get_dream_confirmation_application_service,
+        get_story_workflow_run_application_service,
     )
-    from backend.services.story_workspace.episode_action_service import (
-        StoryWorkspaceEpisodeActionError,
+    from backend.services.story_workspace.dream_launch_endpoint_service import (
+        get_dream_launch_endpoint_service,
+    )
+    from backend.services.story_workspace.artifact_story_index_repository import (
+        StoryWorkspacePublicStoryRepository,
     )
 
 
 router = APIRouter(prefix="/api/story-workspace", tags=["story-workspace"])
 logger = logging.getLogger(__name__)
+_STORY_INDEX_ROUTE_ERROR_STATUSES: dict[str, frozenset[int]] = {
+    "WORKFLOW_PERMISSION_DENIED": frozenset({403, 404}),
+    "artifact_missing": frozenset({404}),
+    "story_index_revision_conflict": frozenset({409}),
+    "story_index_conflict": frozenset({409}),
+    "story_index_invalid_artifact": frozenset({422}),
+    "story_index_schema_unavailable": frozenset({503}),
+    "story_index_database_unavailable": frozenset({503}),
+    "story_index_write_failed": frozenset({503}),
+}
 
 _STORY_SORT_FIELDS = {"updated_at", "created_at", "title"}
 _CHARACTER_SORT_FIELDS = {"updated_at", "created_at", "name"}
@@ -76,6 +91,38 @@ _REVIEW_RESOURCES = {
     StoryWorkspaceResourceType.CHARACTER: "story_workspace_characters",
     StoryWorkspaceResourceType.SCENE: "story_workspace_scenes",
 }
+
+_RESOURCE_IDENTIFIER_POLICY = {
+    "story_workspace_workspaces": {
+        "owner_column": "owner_id",
+        "mutable_columns": frozenset({"name", "settings"}),
+    },
+    "story_workspace_stories": {
+        "owner_column": "author_id",
+        "mutable_columns": frozenset({"title", "description", "content", "type"}),
+    },
+    "story_workspace_characters": {
+        "owner_column": "author_id",
+        "mutable_columns": frozenset(
+            {
+                "name",
+                "identity",
+                "personality",
+                "background",
+                "catchphrase",
+                "tags",
+                "avatar_url",
+            }
+        ),
+    },
+    "story_workspace_scenes": {
+        "owner_column": "author_id",
+        "mutable_columns": frozenset(
+            {"name", "description", "story_id", "order_index"}
+        ),
+    },
+}
+_FILTER_COLUMNS = frozenset({"review_status", "status", "type"})
 
 
 class _ReviewActionRequest(BaseModel):
@@ -138,7 +185,7 @@ class _WorkflowRunCancelRequest(BaseModel):
     reason: str = Field(default="Cancelled from Dream", min_length=1, max_length=500)
 
 
-class StoryWorkflowGateway(Protocol):
+class DreamLaunchEndpoint(Protocol):
     async def start_dream_run(
         self,
         request: StoryWorkspaceDreamLaunchCommand,
@@ -146,6 +193,8 @@ class StoryWorkflowGateway(Protocol):
         actor: dict[str, str],
     ) -> Any: ...
 
+
+class StoryWorkflowRunService(Protocol):
     async def create_preflight(
         self,
         request: _WorkflowPreflightRequest,
@@ -163,83 +212,6 @@ class StoryWorkflowGateway(Protocol):
     ) -> Any: ...
 
     async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]) -> Any: ...
-
-    async def get_dream_files(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def get_episode_artifacts(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def recover_episode_binding(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceEpisodeBindingRecoveryCommand,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def continue_episode_action(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceEpisodeActionContinueCommand
-        | StoryWorkspaceEpisodeActionContinueCommandV2,
-        *,
-        actor: dict[str, str],
-        if_match: str,
-    ) -> Any: ...
-
-    async def list_dream_runs(
-        self,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def submit_dream_confirmation(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceDreamConfirmationCommand,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def get_dream_agent_messages(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def stream_dream_agent_events(
-        self,
-        workflow_run_id: str,
-        *,
-        actor: dict[str, str],
-        after: str | None,
-    ) -> Any: ...
-
-    async def submit_dream_agent_message(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceDreamAgentMessageCommand,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
-
-    async def confirm_dream_agent_tool(
-        self,
-        workflow_run_id: str,
-        request: StoryWorkspaceDreamAgentToolConfirmationCommand,
-        *,
-        actor: dict[str, str],
-    ) -> Any: ...
 
     async def retry_run(
         self,
@@ -266,18 +238,64 @@ class StoryWorkflowGateway(Protocol):
     ) -> Any: ...
 
 
-class _UnavailableStoryWorkflowGateway:
-    def __getattr__(self, _name: str):
-        async def unavailable(*_args: Any, **_kwargs: Any) -> Any:
-            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
+class DreamArtifactService(Protocol):
+    async def get_dream_files(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
 
-        return unavailable
+    async def get_episode_artifacts(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def get_story_index(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def reconcile_story_index(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceStoryIndexReconcileCommand,
+        *,
+        actor: dict[str, str],
+        if_match: str,
+    ) -> Any: ...
+
+    async def list_dream_runs(
+        self,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
 
 
-def get_story_workflow_gateway() -> StoryWorkflowGateway:
-    """Return the application wiring for authoritative preflight/run services."""
+class DreamConfirmationService(Protocol):
+    async def submit_dream_confirmation(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceDreamConfirmationCommand,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
 
-    return get_story_workflow_application_gateway()
+
+def get_story_workflow_run_service() -> StoryWorkflowRunService:
+    return get_story_workflow_run_application_service()
+
+
+def get_dream_artifact_service() -> DreamArtifactService:
+    return get_dream_artifact_application_service()
+
+
+def get_dream_confirmation_service() -> DreamConfirmationService:
+    return get_dream_confirmation_application_service()
 
 
 async def _story_workflow_current_user(
@@ -325,43 +343,39 @@ async def _workflow_call(awaitable: Any, *, by_alias: bool = False) -> Any:
             ),
         )
     except Exception:
+        logger.exception("Story Workspace workflow call failed closed")
         return JSONResponse(
             status_code=503,
             content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),
         )
 
 
-async def _episode_action_call(awaitable: Any) -> Any:
-    """Serialize only allowlisted action conflicts and their latest safe surface."""
+async def _story_index_call(awaitable: Any) -> Any:
+    """Serialize only the fixed Story index error vocabulary."""
 
     try:
         return _workflow_json(await awaitable, by_alias=True)
-    except StoryWorkspaceEpisodeActionError as exc:
-        payload = build_error_payload(exc.code)
-        if exc.latest_surface is not None:
-            payload["latestSurface"] = _workflow_json(
-                exc.latest_surface,
-                by_alias=True,
-            )
-        if exc.resolution is not None:
-            payload["resolution"] = _workflow_json(
-                exc.resolution,
-                by_alias=True,
-            )
-        return JSONResponse(status_code=exc.status_code, content=payload)
     except ApiRouteError as exc:
+        allowed_statuses = _STORY_INDEX_ROUTE_ERROR_STATUSES.get(exc.code)
+        if allowed_statuses is None or exc.status_code not in allowed_statuses:
+            logger.error("Story index application service returned a non-public error")
+            return JSONResponse(
+                status_code=503,
+                content=build_error_payload("story_index_database_unavailable"),
+            )
         return JSONResponse(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
     except Exception:
+        logger.exception("Story index request failed")
         return JSONResponse(
             status_code=503,
-            content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),
+            content=build_error_payload("story_index_database_unavailable"),
         )
 
 
-def _story_db() -> Iterator[sqlite3.Connection]:
+def _story_db() -> Iterator[Any]:
     db = database.get_db()
     try:
         yield db
@@ -384,7 +398,7 @@ def _decode_json(value: Any, default: Any) -> Any:
         return default
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _row_to_dict(row: Any) -> dict[str, Any]:
     item = dict(row)
     if "settings" in item:
         item["settings"] = _decode_json(item["settings"], {})
@@ -407,10 +421,12 @@ def _append_in_filter(
     column: str,
     raw: Optional[str],
 ) -> None:
+    if column not in _FILTER_COLUMNS:
+        raise HTTPException(status_code=400, detail="Unsupported filter field")
     values = _csv_values(raw)
     if not values:
         return
-    conditions.append(f"{column} IN ({', '.join('?' for _ in values)})")
+    conditions.append(f"{column} IN ({', '.join('%s' for _ in values)})")
     params.extend(values)
 
 
@@ -424,7 +440,7 @@ def _sort_clause(sort: str, order: str, allowed: set[str]) -> str:
 
 
 def _paginate_query(
-    db: sqlite3.Connection,
+    db: Any,
     select_sql: str,
     count_sql: str,
     params: list[Any],
@@ -434,7 +450,7 @@ def _paginate_query(
     total = int(db.execute(count_sql, tuple(params)).fetchone()[0])
     offset = (page - 1) * per_page
     rows = db.execute(
-        select_sql + " LIMIT ? OFFSET ?",
+        select_sql + " LIMIT %s OFFSET %s",
         tuple(params) + (per_page, offset),
     ).fetchall()
     return {
@@ -449,14 +465,17 @@ def _paginate_query(
 
 
 def _owned_row(
-    db: sqlite3.Connection,
+    db: Any,
     table: str,
     resource_id: str,
     owner_column: str,
     user_id: int,
-) -> sqlite3.Row:
+) -> Any:
+    policy = _RESOURCE_IDENTIFIER_POLICY.get(table)
+    if policy is None or policy["owner_column"] != owner_column:
+        raise HTTPException(status_code=400, detail="Unsupported resource mapping")
     row = db.execute(
-        f"SELECT * FROM {table} WHERE id = ? AND {owner_column} = ?",
+        f"SELECT * FROM {table} WHERE id = %s AND {owner_column} = %s",
         (resource_id, user_id),
     ).fetchone()
     if row is None:
@@ -465,7 +484,7 @@ def _owned_row(
 
 
 def _patch_owned_row(
-    db: sqlite3.Connection,
+    db: Any,
     table: str,
     resource_id: str,
     owner_column: str,
@@ -476,28 +495,43 @@ def _patch_owned_row(
     if not values:
         raise HTTPException(status_code=400, detail="At least one field is required")
     columns = list(values)
-    assignments = ", ".join(f"{column} = ?" for column in columns)
+    allowed_columns = _RESOURCE_IDENTIFIER_POLICY[table]["mutable_columns"]
+    unsupported_columns = set(columns) - allowed_columns
+    if unsupported_columns:
+        raise HTTPException(status_code=400, detail="Unsupported patch field")
+    assignments = ", ".join(f"{column} = %s" for column in columns)
     cursor = db.execute(
         f"UPDATE {table} SET {assignments}, updated_at = CURRENT_TIMESTAMP "
-        f"WHERE id = ? AND {owner_column} = ?",
+        f"WHERE id = %s AND {owner_column} = %s",
         tuple(values[column] for column in columns) + (resource_id, user_id),
     )
     if cursor.rowcount != 1:
         db.rollback()
         raise HTTPException(status_code=404, detail="Resource not found")
     db.commit()
+    if table == "story_workspace_stories":
+        public_story = StoryWorkspacePublicStoryRepository(db).get_story_row(
+            story_id=resource_id,
+            author_id=user_id,
+        )
+        if public_story is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        return public_story
     return _row_to_dict(_owned_row(db, table, resource_id, owner_column, user_id))
 
 
 def _owned_review_row(
-    db: sqlite3.Connection,
+    db: Any,
     table: str,
     resource_id: str,
     user_id: int,
-) -> sqlite3.Row:
+) -> Any:
+    policy = _RESOURCE_IDENTIFIER_POLICY.get(table)
+    if policy is None or policy["owner_column"] != "author_id":
+        raise HTTPException(status_code=400, detail="Unsupported review resource")
     row = db.execute(
         f"SELECT * FROM {table} "
-        "WHERE id = ? AND author_id = ? AND agent_generated = 1",
+        "WHERE id = %s AND author_id = %s AND agent_generated = 1",
         (resource_id, user_id),
     ).fetchone()
     if row is None:
@@ -531,7 +565,7 @@ def _audit_review_action(
 
 
 def _transition_pending_review(
-    db: sqlite3.Connection,
+    db: Any,
     user_id: int,
     resource_type: StoryWorkspaceResourceType,
     resource_id: str,
@@ -540,7 +574,7 @@ def _transition_pending_review(
 ) -> dict[str, Any]:
     table = _REVIEW_RESOURCES[resource_type]
     try:
-        db.execute("BEGIN IMMEDIATE")
+        db.execute("BEGIN")
         previous = _owned_review_row(db, table, resource_id, user_id)
         if previous["status"] == "archived" or previous["review_status"] != "pending":
             raise HTTPException(
@@ -554,7 +588,7 @@ def _transition_pending_review(
                     f"UPDATE {table} SET review_status = 'confirmed', status = 'published', "
                     "confirmed_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP, "
                     "updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+                    "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
                     "AND review_status = 'pending' AND status != 'archived'",
                     (resource_id, user_id),
                 )
@@ -566,7 +600,7 @@ def _transition_pending_review(
                     UPDATE story_workspace_scenes
                     SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE story_id = ? AND author_id = ? AND agent_generated = 1
+                    WHERE story_id = %s AND author_id = %s AND agent_generated = 1
                       AND review_status = 'pending' AND status != 'archived'
                     """,
                     (resource_id, user_id),
@@ -576,11 +610,11 @@ def _transition_pending_review(
                     UPDATE story_workspace_characters
                     SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE author_id = ? AND agent_generated = 1
+                    WHERE author_id = %s AND agent_generated = 1
                       AND review_status = 'pending' AND status != 'archived'
                       AND id IN (
                         SELECT character_id FROM story_workspace_story_characters
-                        WHERE story_id = ?
+                        WHERE story_id = %s
                       )
                     """,
                     (user_id, resource_id),
@@ -589,16 +623,16 @@ def _transition_pending_review(
                 cursor = db.execute(
                     f"UPDATE {table} SET review_status = 'confirmed', "
                     "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+                    "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
                     "AND review_status = 'pending' AND status != 'archived'",
                     (resource_id, user_id),
                 )
             new_status = "confirmed"
         else:
             cursor = db.execute(
-                f"UPDATE {table} SET review_status = 'rejected', review_notes = ?, "
+                f"UPDATE {table} SET review_status = 'rejected', review_notes = %s, "
                 "updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+                "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
                 "AND review_status = 'pending' AND status != 'archived'",
                 (review_notes, resource_id, user_id),
             )
@@ -609,13 +643,15 @@ def _transition_pending_review(
                 status_code=400,
                 detail="Item is not in pending review status",
             )
-        updated = _row_to_dict(_owned_review_row(db, table, resource_id, user_id))
-        if action == StoryWorkspaceBatchAction.CONFIRM and resource_type == StoryWorkspaceResourceType.STORY:
-            updated["execution"] = {
-                "action": "publish_story_bundle",
-                "status": "completed",
-                "completed_at": updated.get("published_at"),
-            }
+        if resource_type == StoryWorkspaceResourceType.STORY:
+            updated = StoryWorkspacePublicStoryRepository(db).get_story_row(
+                story_id=resource_id,
+                author_id=user_id,
+            )
+            if updated is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+        else:
+            updated = _row_to_dict(_owned_review_row(db, table, resource_id, user_id))
         db.commit()
     except Exception:
         db.rollback()
@@ -634,12 +670,12 @@ def _transition_pending_review(
 
 
 def _archive_story(
-    db: sqlite3.Connection,
+    db: Any,
     user_id: int,
     story_id: str,
 ) -> dict[str, Any]:
     try:
-        db.execute("BEGIN IMMEDIATE")
+        db.execute("BEGIN")
         previous = _owned_review_row(
             db,
             _REVIEW_RESOURCES[StoryWorkspaceResourceType.STORY],
@@ -651,20 +687,18 @@ def _archive_story(
         cursor = db.execute(
             "UPDATE story_workspace_stories "
             "SET status = 'archived', updated_at = CURRENT_TIMESTAMP "
-            "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+            "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
             "AND status != 'archived'",
             (story_id, user_id),
         )
         if cursor.rowcount != 1:
             raise HTTPException(status_code=400, detail="Item is already archived")
-        updated = _row_to_dict(
-            _owned_review_row(
-                db,
-                _REVIEW_RESOURCES[StoryWorkspaceResourceType.STORY],
-                story_id,
-                user_id,
-            )
+        updated = StoryWorkspacePublicStoryRepository(db).get_story_row(
+            story_id=story_id,
+            author_id=user_id,
         )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
         db.commit()
     except Exception:
         db.rollback()
@@ -682,17 +716,17 @@ def _archive_story(
 
 
 def _batch_review(
-    db: sqlite3.Connection,
+    db: Any,
     user_id: int,
     request: _BatchReviewRequest,
 ) -> dict[str, Any]:
     table = _REVIEW_RESOURCES[request.resource_type]
-    placeholders = ", ".join("?" for _ in request.ids)
+    placeholders = ", ".join("%s" for _ in request.ids)
     try:
-        db.execute("BEGIN IMMEDIATE")
+        db.execute("BEGIN")
         rows = db.execute(
             f"SELECT * FROM {table} WHERE id IN ({placeholders}) "
-            "AND author_id = ? AND agent_generated = 1",
+            "AND author_id = %s AND agent_generated = 1",
             tuple(request.ids) + (user_id,),
         ).fetchall()
         previous_by_id = {str(row["id"]): row for row in rows}
@@ -705,9 +739,9 @@ def _batch_review(
         ]
 
         if eligible_ids:
-            eligible_placeholders = ", ".join("?" for _ in eligible_ids)
+            eligible_placeholders = ", ".join("%s" for _ in eligible_ids)
             common_where = (
-                f"WHERE id IN ({eligible_placeholders}) AND author_id = ? "
+                f"WHERE id IN ({eligible_placeholders}) AND author_id = %s "
                 "AND agent_generated = 1 AND review_status = 'pending' "
                 "AND status != 'archived'"
             )
@@ -724,17 +758,17 @@ def _batch_review(
                         db.execute(
                             "UPDATE story_workspace_scenes SET review_status = 'confirmed', "
                             "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                            "WHERE story_id = ? AND author_id = ? AND agent_generated = 1 "
+                            "WHERE story_id = %s AND author_id = %s AND agent_generated = 1 "
                             "AND review_status = 'pending' AND status != 'archived'",
                             (story_id, user_id),
                         )
                         db.execute(
                             "UPDATE story_workspace_characters SET review_status = 'confirmed', "
                             "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                            "WHERE author_id = ? AND agent_generated = 1 "
+                            "WHERE author_id = %s AND agent_generated = 1 "
                             "AND review_status = 'pending' AND status != 'archived' "
                             "AND id IN (SELECT character_id FROM story_workspace_story_characters "
-                            "WHERE story_id = ?)",
+                            "WHERE story_id = %s)",
                             (user_id, story_id),
                         )
                 else:
@@ -748,7 +782,7 @@ def _batch_review(
             elif request.action == StoryWorkspaceBatchAction.REJECT:
                 cursor = db.execute(
                     f"UPDATE {table} SET review_status = 'rejected', "
-                    "review_notes = ?, updated_at = CURRENT_TIMESTAMP "
+                    "review_notes = %s, updated_at = CURRENT_TIMESTAMP "
                     + common_where,
                     (request.review_notes,) + params,
                 )
@@ -770,14 +804,29 @@ def _batch_review(
                     detail="Review state changed during batch operation",
                 )
 
-            updated_rows = db.execute(
-                f"SELECT * FROM {table} WHERE id IN ({eligible_placeholders}) "
-                "AND author_id = ?",
-                params,
-            ).fetchall()
-            updated_by_id = {
-                str(row["id"]): _row_to_dict(row) for row in updated_rows
-            }
+            if request.resource_type == StoryWorkspaceResourceType.STORY:
+                public_repository = StoryWorkspacePublicStoryRepository(db)
+                updated_by_id = {}
+                for story_id in eligible_ids:
+                    public_story = public_repository.get_story_row(
+                        story_id=story_id,
+                        author_id=user_id,
+                    )
+                    if public_story is None:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Resource not found",
+                        )
+                    updated_by_id[story_id] = public_story
+            else:
+                updated_rows = db.execute(
+                    f"SELECT * FROM {table} WHERE id IN ({eligible_placeholders}) "
+                    "AND author_id = %s",
+                    params,
+                ).fetchall()
+                updated_by_id = {
+                    str(row["id"]): _row_to_dict(row) for row in updated_rows
+                }
         else:
             new_status = request.action.value
             updated_by_id = {}
@@ -822,11 +871,11 @@ def _batch_review(
 @router.get("/workspace")
 def get_workspace(
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     user_id = _user_id(current_user)
     row = db.execute(
-        "SELECT * FROM story_workspace_workspaces WHERE owner_id = ? "
+        "SELECT * FROM story_workspace_workspaces WHERE owner_id = %s "
         "ORDER BY created_at ASC, id ASC LIMIT 1",
         (user_id,),
     ).fetchone()
@@ -834,12 +883,12 @@ def get_workspace(
         workspace_id = str(uuid4())
         db.execute(
             "INSERT INTO story_workspace_workspaces (id, name, owner_id, settings) "
-            "VALUES (?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s)",
             (workspace_id, "默认工作区", user_id, "{}"),
         )
         db.commit()
         row = db.execute(
-            "SELECT * FROM story_workspace_workspaces WHERE id = ? AND owner_id = ?",
+            "SELECT * FROM story_workspace_workspaces WHERE id = %s AND owner_id = %s",
             (workspace_id, user_id),
         ).fetchone()
     return _row_to_dict(row)
@@ -850,7 +899,7 @@ def patch_workspace(
     workspace_id: str,
     patch: StoryWorkspaceWorkspacePatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     values = patch.model_dump(exclude_unset=True)
     if "settings" in values:
@@ -876,48 +925,37 @@ def list_stories(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
-    conditions = ["author_id = ?"]
-    params: list[Any] = [_user_id(current_user)]
-    if q:
-        conditions.append("title LIKE ?")
-        params.append(f"%{q}%")
-    _append_in_filter(conditions, params, "review_status", review_status)
-    _append_in_filter(conditions, params, "status", status)
-    _append_in_filter(conditions, params, "type", type)
-    where = " WHERE " + " AND ".join(conditions)
-    select_sql = "SELECT * FROM story_workspace_stories" + where
-    select_sql += _sort_clause(sort, order, _STORY_SORT_FIELDS)
-    count_sql = "SELECT COUNT(*) FROM story_workspace_stories" + where
-    return _paginate_query(db, select_sql, count_sql, params, page, per_page)
+    try:
+        return StoryWorkspacePublicStoryRepository(db).list_stories(
+            author_id=_user_id(current_user),
+            q=q,
+            review_status=review_status,
+            status=status,
+            story_type=type,
+            sort=sort,
+            order=order,
+            page=page,
+            per_page=per_page,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Unsupported Story query") from exc
 
 
 @router.get("/stories/{story_id}")
 def get_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    result = _row_to_dict(
-        _owned_row(db, "story_workspace_stories", story_id, "author_id", user_id)
-    )
-    characters = db.execute(
-        "SELECT c.*, sc.role_type FROM story_workspace_characters c "
-        "JOIN story_workspace_story_characters sc ON sc.character_id = c.id "
-        "WHERE sc.story_id = ? AND c.author_id = ? "
-        "ORDER BY c.name ASC, c.id ASC",
-        (story_id, user_id),
-    ).fetchall()
-    scenes = db.execute(
-        "SELECT * FROM story_workspace_scenes "
-        "WHERE story_id = ? AND author_id = ? ORDER BY order_index ASC, id ASC",
-        (story_id, user_id),
-    ).fetchall()
-    result["characters"] = [_row_to_dict(row) for row in characters]
-    result["scenes"] = [_row_to_dict(row) for row in scenes]
-    return result
+    try:
+        return StoryWorkspacePublicStoryRepository(db).get_story(
+            story_id=story_id,
+            author_id=_user_id(current_user),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Resource not found") from exc
 
 
 @router.patch("/stories/{story_id}")
@@ -925,7 +963,7 @@ def patch_story(
     story_id: str,
     patch: StoryWorkspaceStoryPatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _patch_owned_row(
         db,
@@ -946,12 +984,12 @@ def list_characters(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
-    conditions = ["author_id = ?"]
+    conditions = ["author_id = %s"]
     params: list[Any] = [_user_id(current_user)]
     if q:
-        conditions.append("name LIKE ?")
+        conditions.append("name ILIKE %s")
         params.append(f"%{q}%")
     _append_in_filter(conditions, params, "review_status", review_status)
     where = " WHERE " + " AND ".join(conditions)
@@ -965,7 +1003,7 @@ def list_characters(
 def get_character(
     character_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     user_id = _user_id(current_user)
     result = _row_to_dict(
@@ -977,14 +1015,12 @@ def get_character(
             user_id,
         )
     )
-    stories = db.execute(
-        "SELECT s.*, sc.role_type FROM story_workspace_stories s "
-        "JOIN story_workspace_story_characters sc ON sc.story_id = s.id "
-        "WHERE sc.character_id = ? AND s.author_id = ? "
-        "ORDER BY s.updated_at DESC, s.id ASC",
-        (character_id, user_id),
-    ).fetchall()
-    result["stories"] = [_row_to_dict(row) for row in stories]
+    result["stories"] = StoryWorkspacePublicStoryRepository(
+        db
+    ).list_stories_for_character(
+        character_id=character_id,
+        author_id=user_id,
+    )
     return result
 
 
@@ -993,7 +1029,7 @@ def patch_character(
     character_id: str,
     patch: StoryWorkspaceCharacterPatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     values = patch.model_dump(exclude_unset=True)
     if "tags" in values:
@@ -1018,15 +1054,15 @@ def list_scenes(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
-    conditions = ["author_id = ?"]
+    conditions = ["author_id = %s"]
     params: list[Any] = [_user_id(current_user)]
     if q:
-        conditions.append("name LIKE ?")
+        conditions.append("name ILIKE %s")
         params.append(f"%{q}%")
     if story_id:
-        conditions.append("story_id = ?")
+        conditions.append("story_id = %s")
         params.append(story_id)
     _append_in_filter(conditions, params, "review_status", review_status)
     where = " WHERE " + " AND ".join(conditions)
@@ -1040,7 +1076,7 @@ def list_scenes(
 def get_scene(
     scene_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     user_id = _user_id(current_user)
     result = _row_to_dict(
@@ -1048,16 +1084,14 @@ def get_scene(
     )
     story = None
     if result.get("story_id"):
-        story_row = db.execute(
-            "SELECT * FROM story_workspace_stories WHERE id = ? AND author_id = ?",
-            (result["story_id"], user_id),
-        ).fetchone()
-        if story_row is not None:
-            story = _row_to_dict(story_row)
+        story = StoryWorkspacePublicStoryRepository(db).get_story_row(
+            story_id=str(result["story_id"]),
+            author_id=user_id,
+        )
     characters = db.execute(
         "SELECT c.* FROM story_workspace_characters c "
         "JOIN story_workspace_scene_characters sc ON sc.character_id = c.id "
-        "WHERE sc.scene_id = ? AND c.author_id = ? "
+        "WHERE sc.scene_id = %s AND c.author_id = %s "
         "ORDER BY c.name ASC, c.id ASC",
         (scene_id, user_id),
     ).fetchall()
@@ -1071,7 +1105,7 @@ def patch_scene(
     scene_id: str,
     patch: StoryWorkspaceScenePatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     user_id = _user_id(current_user)
     values = patch.model_dump(exclude_unset=True)
@@ -1097,7 +1131,7 @@ def patch_scene(
 def confirm_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1113,7 +1147,7 @@ def reject_story(
     story_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1129,7 +1163,7 @@ def reject_story(
 def archive_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _archive_story(db, _user_id(current_user), story_id)
 
@@ -1138,7 +1172,7 @@ def archive_story(
 def confirm_character(
     character_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1154,7 +1188,7 @@ def reject_character(
     character_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1170,7 +1204,7 @@ def reject_character(
 def confirm_scene(
     scene_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1186,7 +1220,7 @@ def reject_scene(
     scene_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1202,7 +1236,7 @@ def reject_scene(
 def batch_review(
     body: _BatchReviewRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _batch_review(db, _user_id(current_user), body)
 
@@ -1212,7 +1246,7 @@ def receive_agent_story_output(
     body: StoryWorkspaceAgentStoryPayload,
     agent_session_id: Optional[str] = Header(None, alias="X-Agent-Session-Id"),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     """Receive one authenticated Agent story bundle and persist it atomically."""
 
@@ -1240,7 +1274,7 @@ def receive_agent_story_output(
 async def create_workflow_preflight(
     request: _WorkflowPreflightRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1249,14 +1283,14 @@ async def create_workflow_preflight(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.create_preflight(request, actor=actor))
+    return await _workflow_call(service.create_preflight(request, actor=actor))
 
 
 @router.post("/dream-runs/start", status_code=201)
 async def story_workspace_start_dream_run(
     request: StoryWorkspaceDreamLaunchCommand,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    launch_service: DreamLaunchEndpoint = Depends(get_dream_launch_endpoint_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1267,7 +1301,7 @@ async def story_workspace_start_dream_run(
         )
 
     async def accepted_response() -> StoryWorkspaceDreamLaunchAccepted:
-        context = await gateway.start_dream_run(request, actor=actor)
+        context = await launch_service.start_dream_run(request, actor=actor)
         return StoryWorkspaceDreamLaunchAccepted.from_context(context)
 
     return await _workflow_call(accepted_response(), by_alias=True)
@@ -1276,7 +1310,7 @@ async def story_workspace_start_dream_run(
 @router.get("/dream-runs")
 async def story_workspace_list_dream_runs(
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ) -> Any:
     """List only durable Dream runs visible to the authenticated actor."""
 
@@ -1288,14 +1322,14 @@ async def story_workspace_list_dream_runs(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.list_dream_runs(actor=actor), by_alias=True)
+    return await _workflow_call(service.list_dream_runs(actor=actor), by_alias=True)
 
 
 @router.get("/workflow-preflights/{preflight_id}")
 async def get_workflow_preflight(
     preflight_id: str,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1304,14 +1338,14 @@ async def get_workflow_preflight(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.get_preflight(preflight_id, actor=actor))
+    return await _workflow_call(service.get_preflight(preflight_id, actor=actor))
 
 
 @router.post("/workflow-runs", status_code=201)
 async def create_workflow_run(
     request: _WorkflowRunCreateRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1320,14 +1354,14 @@ async def create_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.create_run(request, actor=actor))
+    return await _workflow_call(service.create_run(request, actor=actor))
 
 
 @router.get("/workflow-runs/{workflow_run_id}")
 async def get_workflow_run(
     workflow_run_id: str,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1336,14 +1370,14 @@ async def get_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.get_run(workflow_run_id, actor=actor))
+    return await _workflow_call(service.get_run(workflow_run_id, actor=actor))
 
 
 @router.get("/workflow-runs/{workflow_run_id}/dream-files")
 async def story_workspace_get_workflow_run_dream_files(
     workflow_run_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ):
     try:
         actor = {"actor_id": str(current_user["user_id"])}
@@ -1354,7 +1388,7 @@ async def story_workspace_get_workflow_run_dream_files(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(
-        gateway.get_dream_files(workflow_run_id, actor=actor),
+        service.get_dream_files(workflow_run_id, actor=actor),
         by_alias=True,
     )
 
@@ -1364,7 +1398,7 @@ async def story_workspace_get_workflow_run_episode_artifacts(
     workflow_run_id: str,
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ):
     """Return only the server-bound Episode surface; no path input is accepted."""
 
@@ -1377,7 +1411,7 @@ async def story_workspace_get_workflow_run_episode_artifacts(
             content=build_error_payload(exc.code),
         )
     result = await _workflow_call(
-        gateway.get_episode_artifacts(workflow_run_id, actor=actor),
+        service.get_episode_artifacts(workflow_run_id, actor=actor),
         by_alias=True,
     )
     if isinstance(result, JSONResponse):
@@ -1392,162 +1426,72 @@ async def story_workspace_get_workflow_run_episode_artifacts(
     return JSONResponse(content=result, headers=headers)
 
 
-@router.post(
-    "/workflow-runs/{workflow_run_id}/episode-binding/recover",
-    status_code=202,
-)
-async def story_workspace_recover_workflow_run_episode_binding(
+@router.get("/workflow-runs/{workflow_run_id}/story-index")
+async def story_workspace_get_workflow_run_story_index(
     workflow_run_id: str,
-    request: StoryWorkspaceEpisodeBindingRecoveryCommand,
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ):
-    """Dispatch the path-free, server-owned first-Episode recovery intent."""
+    """Compare server-bound Artifact revisions with PostgreSQL without writing."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
     except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
+            status_code=403,
+            content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
         )
-    return await _episode_action_call(
-        gateway.recover_episode_binding(
-            workflow_run_id,
-            request,
-            actor=actor,
-        )
+    result = await _story_index_call(
+        service.get_story_index(workflow_run_id, actor=actor)
     )
+    if isinstance(result, JSONResponse):
+        return result
+    etag = result.get("etag") if isinstance(result, dict) else None
+    headers: dict[str, str] = {}
+    if isinstance(etag, str):
+        quoted = f'"{etag}"'
+        headers["ETag"] = quoted
+        if if_none_match is not None and if_none_match.strip() == quoted:
+            return Response(status_code=304, headers=headers)
+    return JSONResponse(content=result, headers=headers)
 
 
-@router.post(
-    "/workflow-runs/{workflow_run_id}/episode-actions/continue",
-    status_code=202,
-)
-async def story_workspace_continue_workflow_run_episode_action(
+@router.post("/workflow-runs/{workflow_run_id}/story-index/reconcile")
+async def story_workspace_reconcile_workflow_run_story_index(
     workflow_run_id: str,
-    request: StoryWorkspaceEpisodeActionContinueCommand
-    | StoryWorkspaceEpisodeActionContinueCommandV2,
-    if_match: str = Header(alias="If-Match", min_length=73, max_length=73),
+    request: StoryWorkspaceStoryIndexReconcileCommand,
+    if_match: str = Header(
+        alias="If-Match",
+        min_length=73,
+        max_length=73,
+        pattern=r'^"sha256:[0-9a-f]{64}"$',
+    ),
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
 ):
-    """Dispatch one capability only after authority and manifest revalidation."""
+    """Retry one revision-guarded materialization; no locator input is accepted."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
     except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
+            status_code=403,
+            content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
         )
-    return await _episode_action_call(
-        gateway.continue_episode_action(
+    result = await _story_index_call(
+        service.reconcile_story_index(
             workflow_run_id,
             request,
             actor=actor,
             if_match=if_match,
         )
     )
-
-
-@router.get("/workflow-runs/{workflow_run_id}/dream-agent/messages")
-async def story_workspace_get_dream_agent_messages(
-    workflow_run_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
-):
-    """Return the server-filtered Dream Agent message snapshot for one run."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(status_code=exc.status_code, content=build_error_payload(exc.code))
-    return await _workflow_call(
-        gateway.get_dream_agent_messages(workflow_run_id, actor=actor),
-        by_alias=True,
-    )
-
-
-@router.get("/workflow-runs/{workflow_run_id}/dream-agent/events")
-async def story_workspace_stream_dream_agent_events(
-    workflow_run_id: str,
-    after: Optional[str] = Query(default=None, max_length=512),
-    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
-    current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
-):
-    """Expose only normalized text/status SSE frames for the bound Dream run."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(status_code=exc.status_code, content=build_error_payload(exc.code))
-    try:
-        frames = await gateway.stream_dream_agent_events(
-            workflow_run_id,
-            actor=actor,
-            after=after or last_event_id,
-        )
-    except ApiRouteError as exc:
-        return JSONResponse(status_code=exc.status_code, content=build_error_payload(exc.code))
-    except Exception:
-        return JSONResponse(
-            status_code=503,
-            content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),
-        )
-    return StreamingResponse(
-        frames,
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.post("/workflow-runs/{workflow_run_id}/dream-agent/messages", status_code=202)
-async def story_workspace_submit_dream_agent_message(
-    workflow_run_id: str,
-    request: StoryWorkspaceDreamAgentMessageCommand,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
-):
-    """Persist and dispatch one trusted same-run Dream Agent message."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(status_code=exc.status_code, content=build_error_payload(exc.code))
-    return await _workflow_call(
-        gateway.submit_dream_agent_message(workflow_run_id, request, actor=actor),
-        by_alias=True,
-    )
-
-
-@router.post("/workflow-runs/{workflow_run_id}/dream-agent/tool-confirm")
-async def story_workspace_confirm_dream_agent_tool(
-    workflow_run_id: str,
-    request: StoryWorkspaceDreamAgentToolConfirmationCommand,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
-):
-    """Resolve one tool without accepting a browser-authored thread or Deck."""
-
-    try:
-        actor = {"actor_id": str(current_user["user_id"])}
-    except (KeyError, TypeError, ValueError):
-        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    return await _workflow_call(
-        gateway.confirm_dream_agent_tool(workflow_run_id, request, actor=actor),
-        by_alias=True,
-    )
+    if isinstance(result, JSONResponse):
+        return result
+    etag = result.get("etag") if isinstance(result, dict) else None
+    headers = {"ETag": f'"{etag}"'} if isinstance(etag, str) else {}
+    return JSONResponse(content=result, headers=headers)
 
 
 @router.post(
@@ -1558,7 +1502,7 @@ async def story_workspace_submit_workflow_run_dream_confirmation(
     workflow_run_id: str,
     request: StoryWorkspaceDreamConfirmationCommand,
     current_user: dict[str, Any] = Depends(get_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: DreamConfirmationService = Depends(get_dream_confirmation_service),
 ):
     """Persist one hidden confirmation and queue the originating Chat Agent."""
 
@@ -1571,7 +1515,7 @@ async def story_workspace_submit_workflow_run_dream_confirmation(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(
-        gateway.submit_dream_confirmation(
+        service.submit_dream_confirmation(
             workflow_run_id,
             request,
             actor=actor,
@@ -1585,7 +1529,7 @@ async def retry_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunRetryRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1594,7 +1538,7 @@ async def retry_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.retry_run(workflow_run_id, request, actor=actor))
+    return await _workflow_call(service.retry_run(workflow_run_id, request, actor=actor))
 
 
 @router.post("/workflow-runs/{workflow_run_id}/cancel")
@@ -1602,7 +1546,7 @@ async def cancel_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunCancelRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1611,7 +1555,7 @@ async def cancel_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(gateway.cancel_run(workflow_run_id, request, actor=actor))
+    return await _workflow_call(service.cancel_run(workflow_run_id, request, actor=actor))
 
 
 @router.post("/runs/{workflow_run_id}/guidance", status_code=202)
@@ -1619,7 +1563,7 @@ async def submit_run_guidance(
     workflow_run_id: str,
     request: StoryWorkspaceGuidanceCommandPayload,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
 ):
     """Submit one idempotent guidance command to a guidable run.
 
@@ -1637,5 +1581,5 @@ async def submit_run_guidance(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(
-        gateway.submit_guidance(workflow_run_id, request, actor=actor)
+        service.submit_guidance(workflow_run_id, request, actor=actor)
     )

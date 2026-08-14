@@ -1,6 +1,7 @@
-// [Input] Enabled Decks, one creation goal, and the dedicated Dream start hook.
-// [Output] Dream-only launch form that navigates to the accepted run projection.
+// [Input] Enabled Decks, durable Dream runs, one creation goal, and the dedicated Dream start hook.
+// [Output] Canonical-title-first Dream re-entry plus a launch form that navigates to the accepted run projection.
 // [Pos] Story Workspace Dream no-run surface (Task 3 U4)
+// [Sync] 2026-08-13: add client-side re-entry search and per-group pagination without changing server order.
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { getDeck, listDecks, type Deck } from '../../api/voiceApi';
@@ -11,18 +12,18 @@ import {
   useStoryWorkspaceDreamRuns,
   type StoryWorkspaceDreamReentryItem,
 } from '../../hooks/story-workspace';
+import {
+  storyWorkspaceDreamReentryLifecycleCopy,
+  storyWorkspaceFilterDreamReentryRuns,
+  storyWorkspacePaginateDreamReentryRuns,
+} from './dreamReentryViewModel';
 
 export interface StoryWorkspaceDreamLaunchProps {
   initialDeckId?: string | null;
   onNavigate?: (path: string) => void;
 }
 
-const STORY_WORKSPACE_DREAM_REENTRY_COPY: Record<StoryWorkspaceDreamReentryItem['lifecycle'], string> = {
-  generating: 'Dream Agent 正在创作',
-  waiting_confirmation: '等待你修改并确认',
-  continuing: 'Dream Agent 正在继续',
-  recent: '最近完成本轮输出',
-};
+type StoryWorkspaceDreamReentryGroup = StoryWorkspaceDreamReentryItem['group'];
 
 function StoryWorkspaceDreamReentryList({
   runs,
@@ -31,8 +32,17 @@ function StoryWorkspaceDreamReentryList({
   runs: readonly StoryWorkspaceDreamReentryItem[];
   onNavigate?: (path: string) => void;
 }) {
-  const inProgress = runs.filter((run) => run.group === 'in_progress');
-  const recent = runs.filter((run) => run.group === 'recent');
+  const [query, setQuery] = useState('');
+  const [pages, setPages] = useState<Record<StoryWorkspaceDreamReentryGroup, number>>({
+    in_progress: 1,
+    recent: 1,
+  });
+  const filteredRuns = useMemo(
+    () => storyWorkspaceFilterDreamReentryRuns(runs, query),
+    [query, runs],
+  );
+  const inProgress = filteredRuns.filter((run) => run.group === 'in_progress');
+  const recent = filteredRuns.filter((run) => run.group === 'recent');
   const renderRun = (run: StoryWorkspaceDreamReentryItem) => (
     <button
       className="story-workspace-dream-reentry__item"
@@ -41,27 +51,77 @@ function StoryWorkspaceDreamReentryList({
       type="button"
     >
       <span className="story-workspace-dream-reentry__item-copy">
-        <strong>{run.goalPrefix}</strong>
-        <small>{run.deckDisplayName} · {STORY_WORKSPACE_DREAM_REENTRY_COPY[run.lifecycle]} · {run.deckPluginVersion} · Run …{run.storyWorkspaceRunId.slice(-6)}</small>
+        <strong>{run.displayTitle}</strong>
+        <small>{run.deckDisplayName} · {storyWorkspaceDreamReentryLifecycleCopy(run.lifecycle)} · {run.deckPluginVersion} · Run …{run.storyWorkspaceRunId.slice(-6)}</small>
       </span>
       <span aria-hidden="true">打开</span>
     </button>
   );
+  const renderGroup = (
+    group: StoryWorkspaceDreamReentryGroup,
+    title: string,
+    groupRuns: readonly StoryWorkspaceDreamReentryItem[],
+  ) => {
+    if (groupRuns.length === 0) return null;
+    const pagination = storyWorkspacePaginateDreamReentryRuns(groupRuns, pages[group]);
+    const setPage = (page: number) => {
+      setPages((current) => ({ ...current, [group]: page }));
+    };
+    return (
+      <div className="story-workspace-dream-reentry__group">
+        <header>
+          <h2>{title}</h2>
+          <span>{groupRuns.length}</span>
+        </header>
+        <div className="story-workspace-dream-reentry__items">
+          {pagination.items.map(renderRun)}
+        </div>
+        {pagination.totalPages > 1 && (
+          <nav aria-label={`${title} 分页`} className="story-workspace-dream-reentry__pagination">
+            <button
+              aria-label={`上一页，当前第 ${pagination.page} 页`}
+              disabled={pagination.page === 1}
+              onClick={() => setPage(pagination.page - 1)}
+              type="button"
+            >上一页</button>
+            <span aria-live="polite">{pagination.page} / {pagination.totalPages}</span>
+            <button
+              aria-label={`下一页，当前第 ${pagination.page} 页`}
+              disabled={pagination.page === pagination.totalPages}
+              onClick={() => setPage(pagination.page + 1)}
+              type="button"
+            >下一页</button>
+          </nav>
+        )}
+      </div>
+    );
+  };
 
   return (
     <section className="story-workspace-dream-reentry" aria-label="可恢复的 Dream">
-      {inProgress.length > 0 && (
-        <div className="story-workspace-dream-reentry__group">
-          <h2>进行中的 Dream</h2>
-          <div>{inProgress.map(renderRun)}</div>
-        </div>
-      )}
-      {recent.length > 0 && (
-        <div className="story-workspace-dream-reentry__group">
-          <h2>最近的 Dream</h2>
-          <div>{recent.map(renderRun)}</div>
-        </div>
-      )}
+      <div className="story-workspace-dream-reentry__search" role="search">
+        <label htmlFor="story-workspace-dream-search">搜索 Dream</label>
+        <input
+          id="story-workspace-dream-search"
+          onChange={(event) => {
+            setQuery(event.currentTarget.value);
+            setPages({ in_progress: 1, recent: 1 });
+          }}
+          placeholder="目标、Deck 或 Run ID"
+          type="search"
+          value={query}
+        />
+        <span>{query.trim() ? `${filteredRuns.length} 个结果` : `共 ${runs.length} 个`}</span>
+      </div>
+      <div className="story-workspace-dream-reentry__groups">
+        {renderGroup('in_progress', '进行中的 Dream', inProgress)}
+        {renderGroup('recent', '最近的 Dream', recent)}
+        {filteredRuns.length === 0 && (
+          <p className="story-workspace-dream-reentry__empty" role="status">
+            没有匹配的 Dream，试试目标、Deck 名称或 Run ID。
+          </p>
+        )}
+      </div>
     </section>
   );
 }

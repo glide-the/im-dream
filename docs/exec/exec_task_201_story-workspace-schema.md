@@ -7,8 +7,8 @@
 - **Task ID**: `task_201`
 - **Task 文档**: `docs/task/task_201_backend_story-workspace-schema.md`
 - **关联设计稿**:
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §5.1–5.5
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.1 `DEC-004`
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §5.1–5.5
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §3.1 `DEC-004`
 - **关联 Stage**: `docs/stage/stage_story-workspace.md`（`stage_001_story-workspace`，Wave 1）
 - **执行 Agent**: `ExecTaskAgent` (`2a7a15fe-2ebb-4dc5-91a8-48ae2bcc5471`)
 - **执行时间**: `2026-08-01 08:00 CST (+0800)`

@@ -10,6 +10,8 @@ Contract source: design_004 §5.3 / DEC-032.
 - Idempotency: the message id derives from the client idempotency key
   (``guide_<key>``). The service SELECTs first: same key + same content →
   202 replay (no duplicate injection); same key + different content → 409.
+  The database helper repeats that check atomically, closing concurrent claims
+  without overwriting or reparenting the winning message.
 - Injection (review note R5): there is no mid-turn injection channel, so the
   guidance message is handed to the runner as a *new user turn on the same
   chat thread* (``source_voice_thread_id`` of the run). The dispatcher seam
@@ -23,7 +25,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import sqlite3
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
@@ -51,10 +52,9 @@ GUIDANCE_METADATA_KIND = "story-workspace-guidance"
 GUIDANCE_MESSAGE_ID_PREFIX = "guide_"
 GUIDANCE_TEXT_SUMMARY_MAX_LENGTH = 200
 
-# Runs accept guidance while execution is in flight; failed runs accept the
+# Confirmed runs accept guidance after business review; failed runs accept the
 # sidebar-controlled "retry failed step" command (design_004 §5.2/§5.4).
-# `awaiting-guidance` is a projection of CONTINUING, not a RunStatus value.
-GUIDABLE_RUN_STATUSES = frozenset({RunStatus.CONTINUING, RunStatus.FAILED})
+GUIDABLE_RUN_STATUSES = frozenset({RunStatus.CONFIRMED, RunStatus.FAILED})
 
 RunReader = Callable[[str], WorkflowRun]
 GuidanceDispatcher = Callable[[str, str, str, list, dict], bool]
@@ -132,6 +132,7 @@ def build_thread_turn_dispatcher() -> GuidanceDispatcher:
     ) -> bool:
         from agent_factory import claude_agent_thread_factory
         from claude_agent.service import ClaudeAgentRunRequest
+        from services.admin_gateway import resolve_platform_model_alias
 
         snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
         if snapshot and snapshot.get("lifecycle") == "running":
@@ -147,6 +148,7 @@ def build_thread_turn_dispatcher() -> GuidanceDispatcher:
             user_id=str(actor_id),
             thread_id=thread_id,
             resume=True,
+            model=resolve_platform_model_alias(actor_id),
             message_id=message_id,
             message_parts=parts,
             message_metadata=metadata,
@@ -174,7 +176,7 @@ class StoryWorkspaceGuidanceService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         run_reader: RunReader,
         dispatcher: Optional[GuidanceDispatcher] = None,
@@ -237,13 +239,16 @@ class StoryWorkspaceGuidanceService:
             "review_action": StoryWorkspaceReviewEventAction.GUIDE.value,
             "command_fingerprint": fingerprint,
         }
-        database.save_chat_message(
-            thread_id,
-            "user",
-            parts=parts,
-            message_id=message_id,
-            metadata=metadata,
-        )
+        try:
+            database.save_chat_message(
+                thread_id,
+                "user",
+                parts=parts,
+                message_id=message_id,
+                metadata=metadata,
+            )
+        except database.ChatMessageIdentityConflict as exc:
+            raise StoryWorkspaceGuidanceError("IDEMPOTENCY_CONFLICT", 409) from exc
 
         dispatched = False
         try:
@@ -282,14 +287,14 @@ class StoryWorkspaceGuidanceService:
 
     def _thread_owned_by(self, thread_id: str, actor_id: str) -> bool:
         row = self._db.execute(
-            "SELECT user_id FROM chat_thread WHERE id = ?",
+            "SELECT user_id FROM chat_thread WHERE id = %s",
             (thread_id,),
         ).fetchone()
         return row is not None and str(row["user_id"]) == str(actor_id)
 
     def _select_guidance_message(self, message_id: str) -> Optional[dict[str, Any]]:
         row = self._db.execute(
-            "SELECT id, metadata FROM chat_message WHERE id = ?",
+            "SELECT id, metadata FROM chat_message WHERE id = %s",
             (message_id,),
         ).fetchone()
         if row is None:

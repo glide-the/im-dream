@@ -5,7 +5,7 @@ Updated: 2026-08-01
 Scope: Story Workspace Episodes metadata/review delta task-document generation
 
 > [Input]
-> - `docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md`
+> - `docs/design/story-workspace/project-and-episode-workbench.md`
 > - `docs/issue/ISSUES_story-workspace-suo241-delta.md`
 > - `docs/issue/ISSUES_story-workspace.md`（稳定基线，仅用于映射核对）
 >

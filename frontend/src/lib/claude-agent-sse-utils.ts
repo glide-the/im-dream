@@ -1,6 +1,6 @@
 /**
  * [Input]  Pawkeyland-aligned Claude Agent SSE event shapes.
- * [Output] parseClaudeAgentSseBuffer, applyBackendEventToMessages, consumeClaudeAgentSseStream.
+ * [Output] parse/coalesce helpers, applyBackendEventToMessages, consumeClaudeAgentSseStream.
  * [Pos]    shared SSE helpers in frontend/src/lib
  * [Sync]   2026-06-09: extracted from claude-agent-transport for thread SSE reconnect.
  * [Sync]   2026-06-09: add consumeClaudeAgentSseStream with incremental frame buffering.
@@ -10,6 +10,10 @@
  * [Sync]   2026-07-23: SandboxPermissionRequest — replayed tool-approval-request
  *                      frames also forward confirmationKind / networkRequest into
  *                      toolMetadata (claude-agent-sandbox-network-permission-tool.md §5).
+ * [Sync]   2026-08-13: coalesce adjacent replay deltas so a late Chat/Dream mount
+ *                      reaches tool confirmations without thousands of React updates.
+ * [Sync]   2026-08-13: preserve reasoning-start/delta/end identities during reconnect
+ *                      so tool/text barriers keep separate thinking blocks in order.
  */
 
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -19,33 +23,76 @@ export type BackendEvent = {
   [key: string]: unknown;
 };
 
+const COALESCIBLE_DELTA_EVENT_TYPES = new Set(['reasoning-delta', 'text-delta']);
+
+/** Collapse only adjacent deltas from the same stream part. Structural events
+ * remain exact ordering barriers, so tool/approval/terminal semantics cannot be
+ * reordered by reconnect replay batching. */
+export function coalesceClaudeAgentSseEvents(
+  events: readonly BackendEvent[],
+): BackendEvent[] {
+  const result: BackendEvent[] = [];
+  for (const event of events) {
+    const previous = result.at(-1);
+    if (
+      previous
+      && event.type === previous.type
+      && COALESCIBLE_DELTA_EVENT_TYPES.has(event.type)
+      && String(event.id ?? '') === String(previous.id ?? '')
+    ) {
+      result[result.length - 1] = {
+        ...previous,
+        delta: `${String(previous.delta ?? '')}${String(event.delta ?? '')}`,
+      };
+      continue;
+    }
+    result.push(event);
+  }
+  return result;
+}
+
 export function drainClaudeAgentSseFrames(buffer: string): {
   buffer: string;
   frames: string[];
 } {
-  const parts = buffer.split('\n\n');
+  const frames: string[] = [];
+  let remaining = buffer;
+  const blankLine = /(?:\r\n|\n|\r)(?:\r\n|\n|\r)/;
+  let boundary = blankLine.exec(remaining);
+  while (boundary?.index !== undefined) {
+    frames.push(remaining.slice(0, boundary.index));
+    remaining = remaining.slice(boundary.index + boundary[0].length);
+    boundary = blankLine.exec(remaining);
+  }
   return {
-    buffer: parts.pop() ?? '',
-    frames: parts.filter((frame) => frame.trim() && !frame.startsWith(':')),
+    buffer: remaining,
+    frames: frames.filter((frame) => frame.trim()),
   };
 }
 
 export function parseClaudeAgentSseBuffer(raw: string): BackendEvent[] {
   const events: BackendEvent[] = [];
-  const frames = raw.split(/\n\n+/);
+  const frames = raw.split(/(?:\r\n|\n|\r){2,}/);
   for (const frame of frames) {
-    for (const line of frame.split('\n')) {
-      if (!line.startsWith('data: ')) continue;
-      const json = line.slice('data: '.length).trim();
-      if (!json) continue;
-      try {
-        const parsed = JSON.parse(json) as BackendEvent;
-        if (parsed && typeof parsed.type === 'string') {
-          events.push(parsed);
-        }
-      } catch {
-        // ignore malformed frames
+    const dataLines: string[] = [];
+    for (const line of frame.split(/\r\n|\n|\r/)) {
+      if (!line || line.startsWith(':')) continue;
+      const separator = line.indexOf(':');
+      const field = separator < 0 ? line : line.slice(0, separator);
+      if (field !== 'data') continue;
+      let value = separator < 0 ? '' : line.slice(separator + 1);
+      if (value.startsWith(' ')) value = value.slice(1);
+      dataLines.push(value);
+    }
+    if (!dataLines.length) continue;
+    try {
+      const parsed = JSON.parse(dataLines.join('\n')) as BackendEvent;
+      if (parsed && typeof parsed.type === 'string') {
+        events.push(parsed);
       }
+    } catch {
+      // Ignore malformed or non-JSON application frames. The caller retains
+      // incomplete frames until a blank-line boundary has arrived.
     }
   }
   return events;
@@ -77,21 +124,58 @@ function appendTextDelta(parts: UIMessage['parts'], delta: string): UIMessage['p
   return next;
 }
 
-function appendReasoningDelta(parts: UIMessage['parts'], delta: string): UIMessage['parts'] {
-  const next = [...parts];
-  let idx = -1;
-  for (let i = next.length - 1; i >= 0; i -= 1) {
-    if (next[i]?.type === 'reasoning') {
-      idx = i;
-      break;
-    }
+type ReconnectReasoningPart = Extract<
+  UIMessage['parts'][number],
+  { type: 'reasoning' }
+> & { id?: string };
+
+function findReasoningPartIndex(
+  parts: UIMessage['parts'],
+  id: string,
+): number {
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    const part = parts[i];
+    if (part?.type !== 'reasoning') continue;
+    if (id && (part as ReconnectReasoningPart).id === id) return i;
+    if (!id && part.state === 'streaming') return i;
   }
+  return -1;
+}
+
+function appendReasoningStart(parts: UIMessage['parts'], id: string): UIMessage['parts'] {
+  const next = [...parts];
+  const idx = findReasoningPartIndex(next, id);
   if (idx >= 0) {
-    const part = next[idx] as Extract<UIMessage['parts'][number], { type: 'reasoning' }>;
-    next[idx] = { ...part, text: `${part.text}${delta}` };
+    const part = next[idx] as ReconnectReasoningPart;
+    next[idx] = { ...part, state: 'streaming' };
     return next;
   }
-  next.push({ type: 'reasoning', text: delta, state: 'streaming' });
+  next.push({ type: 'reasoning', id, text: '', state: 'streaming' } as ReconnectReasoningPart);
+  return next;
+}
+
+function appendReasoningDelta(
+  parts: UIMessage['parts'],
+  id: string,
+  delta: string,
+): UIMessage['parts'] {
+  const next = [...parts];
+  const idx = findReasoningPartIndex(next, id);
+  if (idx >= 0) {
+    const part = next[idx] as ReconnectReasoningPart;
+    next[idx] = { ...part, text: `${part.text}${delta}`, state: 'streaming' };
+    return next;
+  }
+  next.push({ type: 'reasoning', id, text: delta, state: 'streaming' } as ReconnectReasoningPart);
+  return next;
+}
+
+function appendReasoningEnd(parts: UIMessage['parts'], id: string): UIMessage['parts'] {
+  const next = [...parts];
+  const idx = findReasoningPartIndex(next, id);
+  if (idx < 0) return next;
+  const part = next[idx] as ReconnectReasoningPart;
+  next[idx] = { ...part, state: 'done' };
   return next;
 }
 
@@ -119,6 +203,29 @@ function getToolInput(part: ToolUIPart | DynamicToolUIPart): unknown {
   return 'input' in part ? part.input : undefined;
 }
 
+function isEmptyRecord(value: unknown): boolean {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.keys(value as Record<string, unknown>).length === 0;
+}
+
+/** Approval frames may omit input (or carry the adapter's empty placeholder).
+ * Preserve the already-normalized tool input instead of erasing it on replay. */
+function replayToolInput(
+  eventType: string,
+  eventInput: unknown,
+  previous: ToolUIPart | DynamicToolUIPart | undefined,
+): unknown {
+  const previousInput = previous ? getToolInput(previous) : undefined;
+  if (eventType === 'tool-approval-request'
+    && previousInput !== undefined
+    && (eventInput === undefined || eventInput === null || isEmptyRecord(eventInput))) {
+    return previousInput;
+  }
+  return eventInput ?? previousInput ?? {};
+}
+
 export function applyBackendEventToMessages(
   messages: UIMessage[],
   event: BackendEvent,
@@ -133,9 +240,20 @@ export function applyBackendEventToMessages(
       base[index] = { ...target, parts: appendTextDelta(parts, delta) };
       return base;
     }
+    case 'reasoning-start': {
+      const id = String(event.id ?? '');
+      base[index] = { ...target, parts: appendReasoningStart(parts, id) };
+      return base;
+    }
     case 'reasoning-delta': {
+      const id = String(event.id ?? '');
       const delta = String(event.delta ?? '');
-      base[index] = { ...target, parts: appendReasoningDelta(parts, delta) };
+      base[index] = { ...target, parts: appendReasoningDelta(parts, id, delta) };
+      return base;
+    }
+    case 'reasoning-end': {
+      const id = String(event.id ?? '');
+      base[index] = { ...target, parts: appendReasoningEnd(parts, id) };
       return base;
     }
     case 'tool-input-start': {
@@ -166,12 +284,15 @@ export function applyBackendEventToMessages(
       const existing = parts.findIndex(
         (p) => isToolUIPart(p) && p.toolCallId === toolCallId,
       );
+      const previous = existing >= 0 && isToolUIPart(parts[existing])
+        ? parts[existing] as ToolUIPart | DynamicToolUIPart
+        : undefined;
       const invocation: DynamicToolUIPart = {
         type: 'dynamic-tool',
         toolCallId,
         toolName,
         state: 'input-available',
-        input: event.input ?? {},
+        input: replayToolInput(event.type, event.input, previous),
         ...(event.type === 'tool-approval-request'
           ? {
               toolMetadata: {
@@ -294,7 +415,7 @@ export async function consumeClaudeAgentSseStream(
   if (tail) {
     sseBuffer += tail;
   }
-  if (sseBuffer.trim() && !sseBuffer.startsWith(':')) {
+  if (sseBuffer.trim()) {
     dispatchBuffer(`${sseBuffer}\n\n`);
   }
 }

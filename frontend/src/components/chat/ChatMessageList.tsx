@@ -10,6 +10,8 @@
 // [Sync] 2026-05-29: fix history-replay regression — history-loaded DynamicToolUIPart may lack toolName field causing getToolName() to return 'invocation'; add resolveToolName() with direct field fallback and hoist editor write completed check above Terminal block, decoupled from outputText.
 // [Sync] 2026-05-30: fix reasoning SSE display — auto-expand reasoning when state==='streaming'; show spin loader + blinking cursor during stream; border dims when done; hide manual expand toggle while streaming.
 // [Sync] 2026-05-30: reasoning blocks default to expanded (isExpandedActual ?? true) so thinking content stays visible after streaming ends; user can click to collapse; toggle flips isExpandedActual.
+// [Sync] 2026-08-13: allow long uninterrupted Chat text to wrap inside narrow Dream dialogs
+//                    without widening the shared message scroll region.
 // [Sync] 2026-06-02: delegate user text bubbles to UserMessagePart so user prompts render through the shared GFM Markdown path.
 // [Sync] 2026-06-06: render toolMetadata.approvalRequested tool parts directly with approval UI so auto-mode backend confirmations are visible.
 // [Sync] 2026-06-13: render built-in Write tool input-streaming/input-complete states
@@ -234,11 +236,11 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   };
 
   return (
-    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <div style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowWrap: 'anywhere' }}>
       {messages.map((message, index) => {
         const isLastMessage = index === messages.length - 1;
         return (
-          <div key={message.id} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div key={message.id} style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {message.parts?.map((part, partIndex) => {
               const partKey = `${message.id}-${partIndex}`;
               const isExpanded = expandedParts[partKey] ?? false;

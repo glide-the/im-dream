@@ -20,6 +20,7 @@ export type StoryWorkspaceEpisodeReadableArtifact =
   | 'review-report.md';
 
 export interface StoryWorkspaceEpisodeArtifactReaderProps {
+  readonly episodeCode: string;
   readonly activeArtifact: StoryWorkspaceEpisodeReadableArtifact;
   readonly artifacts: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
   readonly documents: readonly StoryWorkspaceEpisodeArtifactDocument[];
@@ -238,6 +239,7 @@ function StoryboardInspector({
 }
 
 export function StoryWorkspaceEpisodeArtifactReader({
+  episodeCode,
   activeArtifact,
   artifacts,
   documents,
@@ -260,15 +262,15 @@ export function StoryWorkspaceEpisodeArtifactReader({
   };
   return (
     <section
-      aria-label="第一集文件阅读器"
+      aria-label={`${episodeCode} 文件阅读器`}
       className="story-workspace-episode-artifact-reader"
     >
       <header>
         <div>
-          <p>EP01 · Canonical artifacts</p>
-          <h3>第一集产物查阅</h3>
+          <p>{episodeCode} · Canonical artifacts</p>
+          <h3>{episodeCode} 产物查阅</h3>
         </div>
-        <nav aria-label="第一集文件导航" role="tablist">
+        <nav aria-label={`${episodeCode} 文件导航`} role="tablist">
           {ARTIFACT_TABS.map((tab) => (
             <button
               aria-controls="story-workspace-episode-artifact-content"

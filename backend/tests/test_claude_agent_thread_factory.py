@@ -40,7 +40,10 @@ if "claude_agent_sdk" not in sys.modules:
     sys.modules["claude_agent_sdk"] = _sdk_stub
     sys.modules["claude_agent_sdk.types"] = types.ModuleType("claude_agent_sdk.types")
 
+import claude_agent.thread_factory as thread_factory_module
 from claude_agent.thread_factory import ClaudeAgentThreadFactory, build_session_id
+from claude_agent.event_bus import create_event_bus
+from claude_agent.stream_events import NormalizedAgentEvent
 from claude_agent.thread_pool import (
     AgentRunLifecycle,
     AgentRunState,
@@ -49,6 +52,7 @@ from claude_agent.thread_pool import (
 )
 from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService
 from claude_agent.observer import LoggingObserver, SessionObserverRegistry
+from services.story_workspace.dream_lifecycle_observer import DreamObserver
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 
@@ -320,139 +324,6 @@ class TestAgentRunStateSweeper(unittest.TestCase):
         _run(self.sweeper.stop())  # should not raise
 
 
-class TestFactoryStoryWorkspaceDreamTurn(unittest.TestCase):
-    def setUp(self):
-        self.factory = ClaudeAgentThreadFactory()
-        self.run_id = "run_" + "1" * 32
-        self.thread_id = "thread_dream_trusted"
-        self.actor_id = "actor-dream"
-
-    def _running_state(self, *, kind: str = "story-workspace-dream-agent-user"):
-        state = self.factory._pool.get_or_create(self.thread_id)
-        state.current_turn_id = "turn-dream-trusted"
-        state.current_dream_context = _make_dream_context(
-            run_id=self.run_id,
-            thread_id=self.thread_id,
-        )
-        state.current_message_metadata = {
-            "kind": kind,
-            "story_workspace_run_id": self.run_id,
-            "thread_id": self.thread_id,
-            "actor_id": self.actor_id,
-        }
-        state.current_user_id = self.actor_id
-        state.turn_context = SimpleNamespace(
-            confirmation_store=SimpleNamespace(
-                pending_ids=lambda: ["tool-write", "tool-ask"]
-            )
-        )
-        state.mark_running()
-        return state
-
-    def test_trusted_dream_turn_snapshot_returns_only_runtime_pending_ids(self):
-        self._running_state()
-
-        snapshot = self.factory.story_workspace_dream_turn_snapshot(
-            self.thread_id,
-            self.run_id,
-            self.actor_id,
-        )
-
-        self.assertEqual(snapshot, {
-            "turn_id": "turn-dream-trusted",
-            "pending_tool_call_ids": ["tool-write", "tool-ask"],
-            "pending_tool_call_ids_observation": "known",
-        })
-        self.assertNotIn(
-            "current_turn_id",
-            self.factory.session_snapshot(self.thread_id),
-        )
-
-    def test_trusted_dream_turn_snapshot_marks_pending_observation_unknown_on_failure(self):
-        state = self._running_state()
-        state.turn_context.confirmation_store.pending_ids = unittest.mock.Mock(
-            side_effect=RuntimeError("observation failed")
-        )
-
-        snapshot = self.factory.story_workspace_dream_turn_snapshot(
-            self.thread_id,
-            self.run_id,
-            self.actor_id,
-        )
-
-        self.assertEqual(snapshot, {
-            "turn_id": "turn-dream-trusted",
-            "pending_tool_call_ids": [],
-            "pending_tool_call_ids_observation": "unknown",
-        })
-
-    def test_trusted_dream_turn_snapshot_marks_missing_store_observation_unknown(self):
-        state = self._running_state()
-        state.turn_context = SimpleNamespace(confirmation_store=None)
-
-        snapshot = self.factory.story_workspace_dream_turn_snapshot(
-            self.thread_id,
-            self.run_id,
-            self.actor_id,
-        )
-
-        self.assertEqual(snapshot, {
-            "turn_id": "turn-dream-trusted",
-            "pending_tool_call_ids": [],
-            "pending_tool_call_ids_observation": "unknown",
-        })
-
-    def test_trusted_dream_turn_snapshot_fails_closed_for_wrong_binding(self):
-        state = self._running_state()
-        self.assertIsNone(self.factory.story_workspace_dream_turn_snapshot(
-            self.thread_id,
-            "run_" + "9" * 32,
-            self.actor_id,
-        ))
-        self.assertIsNone(self.factory.story_workspace_dream_turn_snapshot(
-            self.thread_id,
-            self.run_id,
-            "other-actor",
-        ))
-
-        state.current_message_metadata = {"kind": "generic-chat-user"}
-        self.assertIsNone(self.factory.story_workspace_dream_turn_snapshot(
-            self.thread_id,
-            self.run_id,
-            self.actor_id,
-        ))
-
-    def test_turn_finally_cleans_only_the_completed_turn_public_projections(self):
-        async def exercise():
-            state = self._running_state()
-            lock = self.factory._pool.get_lock(self.thread_id)
-            await lock.acquire()
-            self.factory._story_workspace_dream_public_tool_confirmations = {
-                (self.thread_id, "turn-dream-trusted", self.run_id, self.actor_id, "tool-write"): {
-                    "toolCallId": "tool-write",
-                },
-                (self.thread_id, "other-turn", self.run_id, self.actor_id, "tool-other"): {
-                    "toolCallId": "tool-other",
-                },
-            }
-
-            async def _execute(_execution):
-                return None
-
-            self.factory._service.execute_session = _execute
-            await self.factory._run_turn_task(object(), state, lock)
-            return self.factory._story_workspace_dream_public_tool_confirmations
-
-        registry = _run(exercise())
-        self.assertNotIn(
-            (self.thread_id, "turn-dream-trusted", self.run_id, self.actor_id, "tool-write"),
-            registry,
-        )
-        self.assertIn(
-            (self.thread_id, "other-turn", self.run_id, self.actor_id, "tool-other"),
-            registry,
-        )
-
 # ---------------------------------------------------------------------------
 # ClaudeAgentThreadFactory — runner flyweight (Phase 2)
 # ---------------------------------------------------------------------------
@@ -525,6 +396,21 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             _run(self._collect_gen(req))
         self.assertEqual(len(getattr(self.factory, "_test_runner_instances", [])), 1)
 
+    def test_run_streaming_exposes_same_turn_completion_handle(self):
+        async def collect():
+            stream = self.factory.run_streaming(_make_request("completion-handle"))
+            frames = [frame async for frame in stream]
+            return frames, await stream.completion
+
+        with unittest.mock.patch(
+            "claude_agent.thread_factory.ClaudeAgentRunner",
+            self._FakeRunner,
+        ):
+            frames, completion = _run(collect())
+
+        self.assertTrue(frames)
+        self.assertTrue(completion.saw_finish)
+
     def test_runner_reused_on_second_turn(self):
         req = _make_request("user_runner_2")
         with unittest.mock.patch("claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner):
@@ -533,8 +419,198 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
         instances = getattr(self.factory, "_test_runner_instances", [])
         self.assertEqual(len(instances), 1, "Runner should be created only once within TTL")
 
-    def test_dream_continuation_queues_behind_first_in_flight_turn(self):
-        """The real factory lock must serialize the hidden continuation."""
+    def _install_dream_observer(self, coordinator) -> None:
+        self.factory.unregister_observer(self.factory._dream_observer)
+        self.factory._dream_observer = DreamObserver(coordinator)
+        self.factory.register_observer(self.factory._dream_observer)
+
+    def _assemble_with_dream_context(self, context, calls=None) -> None:
+        original_assemble = self.factory._service.assemble_context
+
+        async def assemble(*args, **kwargs):
+            execution = await original_assemble(*args, **kwargs)
+            execution.dream_context = context
+            if calls is not None:
+                calls.append(("assemble", kwargs["state"].current_turn_id))
+            return execution
+
+        self.factory._service.assemble_context = assemble
+
+    def test_dream_observer_attaches_after_context_and_closes_after_turn(self):
+        calls: list[tuple[str, str | None]] = []
+
+        class RecordingCoordinator:
+            async def attach_before_session_execution(
+                self,
+                *,
+                context,
+                actor_id,
+                turn_id,
+                bus,
+            ):
+                self.assertions = (context, actor_id, turn_id, bus)
+                calls.append(("attach", turn_id))
+
+            async def close_turn(self, _thread_id, turn_id, *, reason):
+                calls.append((reason, turn_id))
+
+        coordinator = RecordingCoordinator()
+        self._install_dream_observer(coordinator)
+        context = _make_dream_context(thread_id="thread_dream_observed")
+        self._assemble_with_dream_context(context, calls)
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id=context.thread_id,
+            message_parts=[{"type": "text", "text": "dream"}],
+        )
+
+        async def scenario():
+            await self._collect_gen(request)
+            state = self.factory._pool.get(context.thread_id)
+            task = state.bg_task if state is not None else None
+            if task is not None:
+                await task
+
+        with unittest.mock.patch(
+            "claude_agent.thread_factory.ClaudeAgentRunner",
+            self._FakeRunner,
+        ):
+            _run(scenario())
+
+        self.assertEqual(calls[0][0], "assemble")
+        self.assertEqual(calls[1][0], "attach")
+        self.assertIn(("session_execution_finished", calls[0][1]), calls)
+
+    def test_public_run_request_has_no_dream_context_field(self):
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread-requested",
+            message_parts=[{"type": "text", "text": "dream"}],
+        )
+        self.assertFalse(hasattr(request, "story_workspace_dream_context"))
+
+    def test_dream_observer_attach_failure_is_off_path_and_still_cleaned(self):
+        closed: list[tuple[str, str]] = []
+
+        class FailingCoordinator:
+            async def attach_before_session_execution(self, **_kwargs):
+                raise RuntimeError("observer unavailable")
+
+            async def close_turn(self, thread_id, _turn_id, *, reason):
+                closed.append((thread_id, reason))
+
+        self._install_dream_observer(FailingCoordinator())
+        context = _make_dream_context(thread_id="thread-dream-off-path")
+        self._assemble_with_dream_context(context)
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id=context.thread_id,
+            message_parts=[{"type": "text", "text": "dream"}],
+        )
+
+        async def scenario():
+            await self._collect_gen(request)
+            state = self.factory._pool.get(context.thread_id)
+            task = state.bg_task if state is not None else None
+            if task is not None:
+                await task
+
+        with (
+            unittest.mock.patch(
+                "claude_agent.thread_factory.ClaudeAgentRunner",
+                self._FakeRunner,
+            ),
+            unittest.mock.patch("claude_agent.thread_factory.logger.exception"),
+        ):
+            _run(scenario())
+
+        self.assertIn((context.thread_id, "session_execution_finished"), closed)
+
+    def test_dream_close_failure_after_run_cannot_strand_state_or_lock(self):
+        class FailingCloseCoordinator:
+            def __init__(self):
+                self.close_calls = 0
+
+            async def attach_before_session_execution(self, **_kwargs):
+                return None
+
+            async def close_turn(self, *_args, **_kwargs):
+                self.close_calls += 1
+                raise RuntimeError("dream close unavailable")
+
+        coordinator = FailingCloseCoordinator()
+        self._install_dream_observer(coordinator)
+        context = _make_dream_context(thread_id="thread-dream-close-fails")
+        self._assemble_with_dream_context(context)
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id=context.thread_id,
+            message_parts=[{"type": "text", "text": "dream"}],
+        )
+
+        async def scenario():
+            await self._collect_gen(request)
+            state = self.factory._pool.get(context.thread_id)
+            for _ in range(100):
+                if state is not None and state.bg_task is None:
+                    break
+                await asyncio.sleep(0.01)
+            return state, self.factory._pool.get_lock(context.thread_id).locked()
+
+        with (
+            unittest.mock.patch(
+                "claude_agent.thread_factory.ClaudeAgentRunner",
+                self._FakeRunner,
+            ),
+            unittest.mock.patch("claude_agent.thread_factory.logger.exception"),
+        ):
+            state, lock_is_held = _run(scenario())
+
+        self.assertEqual(coordinator.close_calls, 1)
+        self.assertIsNotNone(state)
+        self.assertEqual(state.lifecycle, AgentRunLifecycle.IDLE)
+        self.assertIsNone(state.event_bus)
+        self.assertFalse(lock_is_held)
+
+    def test_pre_assembly_setup_failure_does_not_attach_dream_observer(self):
+        class RecordingCoordinator:
+            def __init__(self):
+                self.attach_calls = 0
+                self.close_calls = 0
+
+            async def attach_before_session_execution(self, **_kwargs):
+                self.attach_calls += 1
+
+            async def close_turn(self, *_args, **_kwargs):
+                self.close_calls += 1
+
+        coordinator = RecordingCoordinator()
+        self._install_dream_observer(coordinator)
+        context = _make_dream_context(thread_id="thread-dream-setup-fails")
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id=context.thread_id,
+            message_parts=[{"type": "text", "text": "dream"}],
+        )
+        state = self.factory._pool.get_or_create(context.thread_id)
+        state.mark_running = unittest.mock.Mock(
+            side_effect=RuntimeError("primary setup failed")
+        )
+
+        with (
+            self.assertRaisesRegex(RuntimeError, "primary setup failed"),
+            unittest.mock.patch("claude_agent.thread_factory.logger.exception"),
+        ):
+            _run(self._collect_gen(request))
+
+        self.assertEqual(coordinator.attach_calls, 0)
+        self.assertEqual(coordinator.close_calls, 0)
+        self.assertEqual(state.lifecycle, AgentRunLifecycle.IDLE)
+        self.assertIsNone(state.event_bus)
+        self.assertFalse(self.factory._pool.get_lock(context.thread_id).locked())
+
+    def test_dream_confirmation_followup_queues_behind_in_flight_turn(self):
+        """The real factory lock serializes a confirmed business follow-up."""
 
         from services.story_workspace.dream_confirmation_service import (
             story_workspace_build_dream_confirmation_turn_dispatcher,
@@ -580,17 +656,6 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
                 self.factory,
                 request_factory=ClaudeAgentRunRequest,
-                context_loader=lambda *_args: StoryWorkspaceDreamRunContext(
-                    workflow_run_id="run_" + "1" * 32,
-                    thread_id="thread_dream_queue",
-                    deck_id="deck-dream",
-                    deck_plugin_id="ink.dream.story-workflow",
-                    deck_plugin_version="1.0.0",
-                    deck_plugin_binding_id="dpb_" + "2" * 32,
-                    binding_revision=1,
-                    deck_runtime_snapshot_id="drs_" + "3" * 32,
-                    runtime_plugin_lock_id="rpl_" + "4" * 32,
-                ),
             )
 
             with unittest.mock.patch(
@@ -631,54 +696,6 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             ["first", "structured confirmation"],
         )
         self.assertEqual(snapshot["lifecycle"], "idle")
-
-    def test_starting_a_new_turn_cleans_the_replaced_turn_public_projection(self):
-        async def _scenario():
-            thread_id = "thread_dream_replacement"
-            run_id = "run_" + "5" * 32
-            actor_id = "actor-replacement"
-            state = self.factory._pool.get_or_create(thread_id)
-            state.current_turn_id = "turn-replaced"
-            old_key = (
-                thread_id,
-                "turn-replaced",
-                run_id,
-                actor_id,
-                "tool-stale",
-            )
-            self.factory._story_workspace_dream_public_tool_confirmations[old_key] = {
-                "toolCallId": "tool-stale",
-            }
-            started = asyncio.Event()
-            release = asyncio.Event()
-
-            async def _execute(execution):
-                started.set()
-                await release.wait()
-                await execution.turn_context.queue.put(
-                    'data: {"type":"finish","reason":"success"}\n\n'
-                )
-                await execution.turn_context.queue.put(None)
-
-            self.factory._service.execute_session = _execute
-            request = _make_request(
-                actor_id,
-                thread_id=thread_id,
-            )
-            with unittest.mock.patch(
-                "claude_agent.thread_factory.ClaudeAgentRunner",
-                self._FakeRunner,
-            ):
-                consumer = asyncio.create_task(self._collect_gen(request))
-                await asyncio.wait_for(started.wait(), timeout=1.0)
-                self.assertNotIn(
-                    old_key,
-                    self.factory._story_workspace_dream_public_tool_confirmations,
-                )
-                release.set()
-                await asyncio.wait_for(consumer, timeout=1.0)
-
-        _run(_scenario())
 
     async def _collect_gen(self, req):
         async for _ in self.factory.run_streaming(req):
@@ -831,6 +848,144 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
         self.assertEqual(snapshot["lifecycle"], "idle")
         self.assertTrue(any('"finishReason":"stop"' in frame for frame in frames))
 
+    def test_stop_during_context_assembly_has_one_cancel_terminal(self):
+        request = _make_request("assemble_stop", thread_id="thread_assemble_stop")
+
+        async def scenario():
+            entered = asyncio.Event()
+
+            async def assemble(_request, *, state, bus, runner):
+                del state, bus, runner
+                entered.set()
+                await asyncio.Event().wait()
+
+            self.factory._service.assemble_context = assemble
+            frames: list[str] = []
+            with unittest.mock.patch(
+                "claude_agent.thread_factory.ClaudeAgentRunner",
+                self._FakeRunner,
+            ):
+                consumer = asyncio.create_task(self._collect_frames(request, frames))
+                await asyncio.wait_for(entered.wait(), timeout=0.2)
+                state = self.factory._pool.get(request.thread_id)
+                self.assertIsNotNone(state)
+                self.assertEqual(state.lifecycle, AgentRunLifecycle.RUNNING)
+                self.assertIsNotNone(state.bg_task)
+                self.assertFalse(state.bg_task.done())
+                stopped = await self.factory.stop_thread(request.thread_id)
+                await asyncio.wait_for(consumer, timeout=0.5)
+            return stopped, frames
+
+        stopped, frames = _run(scenario())
+        self.assertEqual(stopped["lifecycle"], "idle")
+        self.assertEqual(
+            sum('"type":"finish"' in frame.replace(" ", "") for frame in frames),
+            1,
+        )
+        self.assertIn('"finishReason":"stop"', "".join(frames).replace(" ", ""))
+
+    def test_stop_after_service_terminal_does_not_add_second_finish(self):
+        request = _make_request("terminal_stop", thread_id="thread_terminal_stop")
+
+        async def scenario():
+            terminal_published = asyncio.Event()
+
+            async def execute(execution):
+                await execution.turn_context.queue.put(
+                    NormalizedAgentEvent.create("message-final", {"text": "done"})
+                )
+                await execution.turn_context.queue.put(
+                    NormalizedAgentEvent.create(
+                        "finish", {"finishReason": "stop"}
+                    )
+                )
+                terminal_published.set()
+                await asyncio.Event().wait()
+
+            self.factory._service.execute_session = execute
+            frames: list[str] = []
+            with unittest.mock.patch(
+                "claude_agent.thread_factory.ClaudeAgentRunner",
+                self._FakeRunner,
+            ):
+                consumer = asyncio.create_task(self._collect_frames(request, frames))
+                await asyncio.wait_for(terminal_published.wait(), timeout=0.2)
+                await asyncio.wait_for(consumer, timeout=0.2)
+                stopped = await self.factory.stop_thread(request.thread_id)
+            return stopped, frames
+
+        stopped, frames = _run(scenario())
+        self.assertEqual(stopped["lifecycle"], "idle")
+        self.assertEqual(
+            sum('"type":"finish"' in frame.replace(" ", "") for frame in frames),
+            1,
+        )
+
+    def test_repeated_cancel_during_terminal_write_still_closes_once(self):
+        async def scenario():
+            factory = ClaudeAgentThreadFactory()
+            state = factory._pool.get_or_create("thread_double_cancel")
+            state.mark_running()
+            state.current_turn_id = "turn-double-cancel"
+            state.runner = unittest.mock.Mock()
+            bus = create_event_bus(state.session_id, state.current_turn_id)
+            state.event_bus = bus
+            lock = factory._pool.get_lock(state.session_id)
+            await lock.acquire()
+            execute_entered = asyncio.Event()
+            terminal_entered = asyncio.Event()
+            release_terminal = asyncio.Event()
+
+            async def assemble(_request, *, state, bus, runner):
+                del state, bus, runner
+                return SimpleNamespace(dream_context=None)
+
+            async def execute(_execution):
+                execute_entered.set()
+                await asyncio.Event().wait()
+
+            original = thread_factory_module._publish_cancelled_terminal
+
+            async def blocked_terminal(selected_bus):
+                terminal_entered.set()
+                await release_terminal.wait()
+                await original(selected_bus)
+
+            factory._service.assemble_context = assemble
+            factory._service.execute_session = execute
+            token = await bus.subscribe()
+            with unittest.mock.patch.object(
+                thread_factory_module,
+                "_publish_cancelled_terminal",
+                blocked_terminal,
+            ):
+                task = asyncio.create_task(
+                    factory._run_turn_task(
+                        _make_request(
+                            "double_cancel",
+                            thread_id=state.session_id,
+                        ),
+                        state,
+                        bus,
+                        lock,
+                    )
+                )
+                await asyncio.wait_for(execute_entered.wait(), timeout=0.2)
+                task.cancel()
+                await asyncio.wait_for(terminal_entered.wait(), timeout=0.2)
+                task.cancel()
+                release_terminal.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            events = [event async for event in bus.read(token)]
+            await bus.unsubscribe(token)
+            return events
+
+        events = _run(scenario())
+        self.assertEqual([event.type for event in events], ["finish"])
+        self.assertEqual(events[0].data["finishReason"], "stop")
+        self.assertIs(events[0].data["cancelled"], True)
+
     async def _collect_frames(self, req, frames):
         async for frame in self.factory.run_streaming(req):
             frames.append(frame)
@@ -871,6 +1026,134 @@ class TestFactoryAclose(unittest.TestCase):
             state = factory._pool._states.get(sid)
             self.assertEqual(state.lifecycle, AgentRunLifecycle.DESTROYED)
 
+    def test_close_thread_cleanup_remains_factory_owned_until_aclose(self):
+        async def scenario():
+            class Coordinator:
+                def __init__(self):
+                    self.entered = asyncio.Event()
+                    self.release = asyncio.Event()
+                    self.closed = False
+
+                async def close_session(self, _session_id, *, reason):
+                    self.assert_reason = reason
+                    self.entered.set()
+                    await self.release.wait()
+
+                async def aclose(self):
+                    self.closed = True
+
+            coordinator = Coordinator()
+            factory = ClaudeAgentThreadFactory(
+                dream_observer=DreamObserver(coordinator),
+            )
+            state = factory._pool.get_or_create("thread-close-owned")
+            state.mark_running()
+            turn_entered = asyncio.Event()
+
+            async def turn():
+                turn_entered.set()
+                await asyncio.Event().wait()
+
+            state.bg_task = asyncio.create_task(turn())
+            await turn_entered.wait()
+            factory.close_thread(state.session_id)
+            await asyncio.wait_for(coordinator.entered.wait(), timeout=0.2)
+            self.assertEqual(len(factory._phase4_tasks), 1)
+
+            closing = asyncio.create_task(factory.aclose())
+            await asyncio.sleep(0)
+            self.assertFalse(closing.done())
+            coordinator.release.set()
+            await asyncio.wait_for(closing, timeout=0.2)
+            self.assertEqual(factory._closing_turn_tasks, set())
+            self.assertEqual(factory._phase4_tasks, set())
+            self.assertTrue(coordinator.closed)
+
+        _run(scenario())
+
+    def test_aclose_is_idempotent_and_sets_gate_before_drain_await(self):
+        async def scenario():
+            class Coordinator:
+                def __init__(self):
+                    self.calls = 0
+                    self.entered = asyncio.Event()
+                    self.release = asyncio.Event()
+
+                async def aclose(self):
+                    self.calls += 1
+                    self.entered.set()
+                    await self.release.wait()
+
+            coordinator = Coordinator()
+            factory = ClaudeAgentThreadFactory(
+                dream_observer=DreamObserver(coordinator),
+            )
+            first = asyncio.create_task(factory.aclose())
+            await asyncio.wait_for(coordinator.entered.wait(), timeout=0.2)
+            self.assertTrue(factory._closing)
+            second = asyncio.create_task(factory.aclose())
+
+            request = _make_request(
+                "closing-rejected",
+                thread_id="thread-closing-rejected",
+            )
+            stream = factory.run_streaming(request)
+            with self.assertRaisesRegex(RuntimeError, "closing"):
+                await anext(stream)
+            await stream.aclose()
+
+            reconnect = factory.run_streaming(
+                ClaudeAgentRunRequest(
+                    user_id="closing-rejected",
+                    thread_id="thread-closing-rejected",
+                    reconnect=True,
+                )
+            )
+            with self.assertRaisesRegex(RuntimeError, "closing"):
+                await anext(reconnect)
+            await reconnect.aclose()
+
+            coordinator.release.set()
+            await asyncio.wait_for(asyncio.gather(first, second), timeout=0.2)
+            await factory.aclose()
+            return coordinator.calls, factory._closed
+
+        calls, closed = _run(scenario())
+        self.assertEqual(calls, 1)
+        self.assertTrue(closed)
+
+    def test_turn_queued_on_lock_rechecks_close_gate_after_acquire(self):
+        async def scenario():
+            class Coordinator:
+                async def aclose(self):
+                    return None
+
+            factory = ClaudeAgentThreadFactory(
+                dream_observer=DreamObserver(Coordinator()),
+            )
+            request = _make_request(
+                "close-race",
+                thread_id="thread-close-race",
+            )
+            lock = factory._pool.get_lock(request.thread_id)
+            await lock.acquire()
+            stream = factory.run_streaming(request)
+            queued = asyncio.create_task(anext(stream))
+            await asyncio.sleep(0)
+            self.assertFalse(queued.done())
+
+            await factory.aclose()
+            self.assertFalse(queued.done())
+            lock.release()
+            with self.assertRaisesRegex(RuntimeError, "closing"):
+                await asyncio.wait_for(queued, timeout=0.2)
+            await stream.aclose()
+            return factory._pool.get(request.thread_id), lock.locked()
+
+        state, lock_is_held = _run(scenario())
+        self.assertIsNone(state)
+        self.assertFalse(lock_is_held)
+
 
 # ---------------------------------------------------------------------------
 # assemble_context failure (workspace pack) → SSE error frame
@@ -905,16 +1188,21 @@ class TestAssembleContextFailure(unittest.TestCase):
         )
         req = _make_request("user_pack_fail_1")
         frames = self._drain(req)
-        error_frames = [f for f in frames if '"type": "error"' in f]
+        error_frames = [f for f in frames if '"type":"error"' in f.replace(" ", "")]
         self.assertTrue(error_frames, f"expected an SSE error frame, got: {frames!r}")
         self.assertIn("WORKSPACE_PACK_DIGEST_MISMATCH", error_frames[0])
         self.assertIn("digest mismatch", error_frames[0])
+        self.assertEqual(
+            sum('"type":"finish"' in frame.replace(" ", "") for frame in frames),
+            1,
+        )
+        self.assertIn('"finishReason":"error"', "".join(frames))
 
     def test_generic_failure_emits_sse_error_frame(self):
         self._fail_assemble(RuntimeError("kaboom"))
         req = _make_request("user_pack_fail_generic")
         frames = self._drain(req)
-        error_frames = [f for f in frames if '"type": "error"' in f]
+        error_frames = [f for f in frames if '"type":"error"' in f.replace(" ", "")]
         self.assertTrue(error_frames, f"expected an SSE error frame, got: {frames!r}")
         self.assertIn("kaboom", error_frames[0])
 
@@ -931,12 +1219,59 @@ class TestAssembleContextFailure(unittest.TestCase):
         # Retry on the same session must NOT raise "already running";
         # it should run the turn again and emit another error frame.
         frames = self._drain(req)
-        error_frames = [f for f in frames if '"type": "error"' in f]
+        error_frames = [f for f in frames if '"type":"error"' in f.replace(" ", "")]
         self.assertTrue(
             error_frames,
             "retry after pack failure should emit a fresh error frame, "
             f"got: {frames!r}",
         )
+
+    def test_unexpected_execution_failure_closes_the_stream_once(self):
+        async def exercise():
+            factory = ClaudeAgentThreadFactory()
+            state = factory._pool.get_or_create("thread_unexpected_failure")
+            state.mark_running()
+            state.current_turn_id = "turn-unexpected"
+            bus = create_event_bus(state.session_id, state.current_turn_id)
+            state.event_bus = bus
+            lock = factory._pool.get_lock(state.session_id)
+            await lock.acquire()
+
+            async def _execute(_execution):
+                raise RuntimeError("unexpected persistence failure")
+
+            async def _assemble(_request, *, state, bus, runner):
+                del state, bus, runner
+                return object()
+
+            state.runner = unittest.mock.Mock()
+            factory._service.assemble_context = _assemble
+            factory._service.execute_session = _execute
+            token = await bus.subscribe()
+            task = asyncio.create_task(
+                factory._run_turn_task(
+                    _make_request(
+                        "unexpected_failure",
+                        thread_id="thread_unexpected_failure",
+                    ),
+                    state,
+                    bus,
+                    lock,
+                )
+            )
+            events = [event async for event in bus.read(token)]
+            await task
+            await bus.unsubscribe(token)
+            return events, state
+
+        events, state = _run(exercise())
+        self.assertEqual(
+            [event.type for event in events],
+            ["error", "finish"],
+        )
+        self.assertEqual(events[1].data["finishReason"], "error")
+        self.assertEqual(state.lifecycle, AgentRunLifecycle.IDLE)
+        self.assertIsNone(state.event_bus)
 
 
 if __name__ == "__main__":

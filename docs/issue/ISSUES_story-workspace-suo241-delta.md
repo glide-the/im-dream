@@ -14,10 +14,10 @@
 
 - Issue 清单文件：`docs/issue/ISSUES_story-workspace-suo241-delta.md`
 - 来源设计稿：
-  - 主设计稿：`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md`（DEC-020～DEC-025）
-  - 稳定基线设计稿：`docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
+  - 主设计稿：`docs/design/story-workspace/project-and-episode-workbench.md`（DEC-020～DEC-025）
+  - 稳定基线设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
   - Deck 集成 Delta：`docs/design/deck/deck-integration-delta.md`（DEC-009～DEC-019）
-  - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
+  - 参考设计稿：`docs/design/story-workspace/README.md`
 - 生成 Agent：`IssueDispatcher`
 - 所属流水线阶段：`issue`
 - 上游阶段：`design`（SUO-241）
@@ -35,10 +35,10 @@
 
 ## 1. 关联设计稿信息
 
-- 主设计稿：`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md`
-- 稳定基线设计稿：`docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
+- 主设计稿：`docs/design/story-workspace/project-and-episode-workbench.md`
+- 稳定基线设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
 - Deck 集成 Delta：`docs/design/deck/deck-integration-delta.md`
-- 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
+- 参考设计稿：`docs/design/story-workspace/README.md`
 
 - 本清单覆盖范围：
   - `output/episodes` 元信息到工作空间投影的适配与映射
@@ -49,7 +49,7 @@
   - EpisodeReviewPanel 分集审阅区（artifact 完整性、Agent findings、用户意见、审阅动作）
   - 运行记录与审计最小合同（RunRecord、ArtifactVersion、ReviewEvent、ExecutionGateRecord）
   - 审阅 Gate 与冲突阻断（版本冲突、时长差异、审查不完整、跨文件不一致）
-  - 页面状态：empty、submitting、running、validating、metadata-incomplete、artifact-version-conflict、pending-review、rejected、regenerating、confirmed、continuing、completed、failed、stale-review
+  - 页面状态：empty、submitting、running、validating、metadata-incomplete、artifact-version-conflict、pending-review、rejected、regenerating、confirmed、completed、failed、stale-review
   - 不可变 attempt/version 与重新生成语义
 
 - 明确排除范围：

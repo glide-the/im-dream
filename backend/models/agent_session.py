@@ -53,7 +53,7 @@ class AgentSession(_StrictFrozenModel):
     runtime_node_id: str = Field(min_length=1)
     artifact_set_hash: str = Field(pattern=SHA256_PATTERN)
     policy_revision: str = Field(min_length=1)
-    deployment_tier: Literal["development", "test"]
+    deployment_tier: Literal["local"]
     runtime_plugin_lock_id: str = Field(min_length=1)
     runtime_plugin_lock_digest: str = Field(pattern=SHA256_PATTERN)
     settings_json: str = Field(min_length=2)

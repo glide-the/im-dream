@@ -1,5 +1,29 @@
+/* [Input] Shared color tokens and the product UI font policy. */
+/* [Output] Global document sizing and inherited Microsoft YaHei-first UI typography. */
+/* [Pos] global-style sheet in frontend/src */
+/* [Sync] 2026-08-14: make Microsoft YaHei the default page and form-control font
+   while leaving explicit serif and monospace content styles intact. */
 @import './styles/tokens.css';
+
+:root {
+  --font-family-ui: "Microsoft YaHei", "微软雅黑", system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html,
+body,
+#root {
+  font-family: var(--font-family-ui);
+}
+
 body {
   margin: 0;
   min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }

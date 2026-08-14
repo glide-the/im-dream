@@ -60,7 +60,7 @@ Requirement-first gate 已通过：先填充 `docs/task/TASK-REQUIREMENT-task_23
 1. Manifest、兼容性、preflight、run、session、event 与 API 合同统一为 Deck runtime 类型/字段/错误码。
 2. Preflight 不再要求 Ink-Dream 创建第二份配置快照表；改为通过单一 Deck API owner 创建/复用不可变快照，本地只保存受控引用与脱敏摘要。
 3. Capability 交集统一为 `manifest_requested ∩ installation_approved ∩ deck_runtime_snapshot_policy ∩ user_and_workspace_grants ∩ claude_agent_runtime_supported`。
-4. Workflow Run 状态机补齐 `output_validating → pending_review → confirmed/rejected → continuing/completed`，并明确重试创建新 run。
+4. Workflow Run 状态机补齐 `output_validating → pending_review → confirmed/rejected → completed`，并明确重试创建新 run。
 5. UI 状态、错误恢复、来源展示和 Episodes composer gate 同步使用 Deck 运行配置就绪语义。
 6. 不存在的旧编号 task 文件依赖改为已有 task，或显式标注 `SUO-226-*` canonical Issue gate；不再伪装成可直接读取的 task 文件。
 7. 三处旧 delta 路径引用统一到 `docs/design/deck/deck-integration-delta.md`。

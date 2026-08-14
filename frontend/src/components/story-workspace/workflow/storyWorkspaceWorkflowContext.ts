@@ -18,7 +18,6 @@ const STORY_WORKSPACE_WORKFLOW_CONTEXT_LABELS: Record<WorkflowContextState, stri
   pending_review: '待审阅',
   confirmed: '已确认',
   rejected: '已驳回',
-  continuing: '继续运行中…',
   completed: '已完成',
   failed: '运行失败',
   cancelled: '已取消',

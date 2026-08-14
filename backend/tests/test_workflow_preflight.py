@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 import sqlite3
 import unittest
 from unittest.mock import Mock
 
 from pydantic import ValidationError
 
-from backend.database import create_tables
+from backend.schema.legacy_main_sqlite import create_tables
 from backend.models.workflow_preflight import (
     PreflightCheck,
     PreflightStatus,
@@ -33,6 +33,7 @@ TOKEN_SECRET = b"workflow-preflight-test-secret-32-bytes-minimum"
 class WorkflowPreflightTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
         create_tables(self.db)
         self.now = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
         self.calls: list[PreflightCheck] = []
@@ -187,6 +188,27 @@ class WorkflowPreflightTests(unittest.IsolatedAsyncioTestCase):
                 "runtime_config",
             }
         )
+
+    def test_datetime_parser_accepts_psycopg_native_datetime_and_iso_text(self):
+        aware = datetime(2026, 8, 1, 17, 0, tzinfo=timezone(timedelta(hours=8)))
+        naive = datetime(2026, 8, 1, 9, 0)
+
+        self.assertEqual(
+            self.service._parse_datetime(aware),
+            datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+        )
+        self.assertEqual(
+            self.service._parse_datetime(naive),
+            datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+        )
+        self.assertEqual(
+            self.service._parse_datetime("2026-08-01T09:00:00Z"),
+            datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+        )
+        with self.assertRaises(ValueError):
+            self.service._parse_datetime("not-a-timestamp")
+        with self.assertRaises(TypeError):
+            self.service._parse_datetime(1)  # type: ignore[arg-type]
 
     async def test_snapshot_owner_payload_rejects_sensitive_or_extra_configuration(self):
         self.snapshot_payload = {

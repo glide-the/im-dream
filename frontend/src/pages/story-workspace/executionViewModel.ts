@@ -1,6 +1,7 @@
 // [Input] Authoritative Dream file projections after the single confirmation.
-// [Output] Assets / Outline collaboration indexes and focus navigation seams.
+// [Output] Canonical-first Project title plus Assets / Outline indexes, compact summaries, complete focus documents, and navigation seams.
 // [Pos] Story Workspace execution page pure view-model (Task 3 F5)
+// [Sync] 2026-08-14: preserve Hook-published full asset content for the focus reader.
 
 import type {
   StoryWorkspaceDreamFilesResponse,
@@ -17,6 +18,21 @@ const STAGE_COPY: Record<StoryWorkspaceDreamStage, {
   storyboards: { label: '分镜', module: 'Outline' },
 };
 
+const STORY_WORKSPACE_CREATION_GOAL_PREFIX_MAX = 80;
+
+/** Keep Project display naming consistent with the server-owned re-entry list. */
+export function storyWorkspaceResolveDreamDisplayTitle(
+  projectTitle: string | null | undefined,
+  creationGoal: string | null | undefined,
+): string {
+  const canonical = projectTitle?.trim();
+  if (canonical) return canonical;
+  const fallback = creationGoal?.trim();
+  return fallback
+    ? fallback.slice(0, STORY_WORKSPACE_CREATION_GOAL_PREFIX_MAX)
+    : '故事协作工作台';
+}
+
 export interface StoryWorkspaceExecutionEntry {
   readonly key: string;
   readonly stage: StoryWorkspaceDreamStage;
@@ -25,6 +41,7 @@ export interface StoryWorkspaceExecutionEntry {
   readonly entityId: string;
   readonly title: string;
   readonly summary: string | null;
+  readonly content: string | null;
   readonly relations: readonly string[];
   readonly sourceFile: string;
   readonly revision: number;
@@ -64,6 +81,7 @@ function toEntry(
     entityId: item.entityId,
     title: item.displayName,
     summary: item.summary,
+    content: item.content ?? null,
     relations: [...item.relations],
     sourceFile: item.sourceFile,
     revision,

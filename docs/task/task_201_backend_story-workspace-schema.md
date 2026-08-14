@@ -12,8 +12,8 @@ Story Workspace 数据库 Schema 与数据表初始化
 - **优先级**: P0
 - **标签**: `database`, `schema`, `migration`
 - **来源设计稿**:
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §5.1–5.5（数据表结构）
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.1 `DEC-004`（`story-workspace` 前缀命名）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §5.1–5.5（数据表结构）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §3.1 `DEC-004`（`story-workspace` 前缀命名）
 - **Issue 清单**: `docs/issue/ISSUES_story-workspace.md` §3 Issue 明细
 
 ## 3. 任务目标
@@ -224,7 +224,7 @@ def drop_story_workspace_tables(db):
 
 ### 输入
 
-- 设计稿数据表结构：`docs/design/story-workspace/story-workspace-layout-design.md` §5.1–5.5
+- 设计稿数据表结构：`docs/design/story-workspace/product-scope-and-navigation.md` §5.1–5.5
 - 现有数据库模式：`backend/database.py` 中 `create_tables()` 的实现模式
 - 现有用户表：`users(id INTEGER PRIMARY KEY AUTOINCREMENT, ...)`
 - 现有 chat_thread 表：`chat_thread(id TEXT PRIMARY KEY, ...)` — 用于 `agent_session_id` 外键关联

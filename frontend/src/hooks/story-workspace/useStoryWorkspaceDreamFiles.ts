@@ -2,11 +2,14 @@
 // [Output] Strict parser/fetch/reducer seams plus useStoryWorkspaceDreamFiles().
 // [Pos] story-workspace hooks node - Dream workspace file read boundary (Task 3 F2)
 // [Sync] 2026-08-04: initial implementation; REST is authoritative, SSE only invalidates.
+// [Sync] 2026-08-14: preserve optional Hook-published complete asset content;
+//                    legacy stage items without it normalize to null.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { apiUrl } from '../../lib/apiBase';
 import type {
+  StoryWorkspaceDreamAgentActivityProjection,
   StoryWorkspaceDreamFilesResponse,
   StoryWorkspaceDreamLifecycleState,
   StoryWorkspaceDreamSource,
@@ -19,6 +22,27 @@ import type {
 const REQUIRED_STAGES = ['characters', 'scenes', 'storyboards'] as const;
 const RUN_ID_PATTERN = /^run_[0-9a-f]{32}$/;
 const DREAM_OUTPUT_EVENT = 'ink:story-workspace-output';
+const AGENT_ACTIVITY_KINDS = new Set([
+  'activity_started_hint',
+  'activity_settled_hint',
+  'waiting_confirmation_hint',
+  'turn_settled_hint',
+  'reconcile_requested',
+]);
+const AGENT_OPERATION_SCOPES = new Set([
+  'tool',
+  'subagent',
+  'content_generation',
+  'workflow_operation',
+]);
+const AGENT_OPERATION_STATES = new Set([
+  'started',
+  'waiting_confirmation',
+  'succeeded',
+  'failed',
+]);
+const AGENT_TERMINAL_OUTCOMES = new Set(['completed', 'failed', 'cancelled']);
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -102,10 +126,17 @@ function parseItem(value: unknown, sourceFiles: readonly string[]): StoryWorkspa
   if (summary !== null && typeof summary !== 'string') {
     throw new Error('Dream stage item has invalid summary.');
   }
+  const content = value.content === undefined || value.content === null
+    ? null
+    : value.content;
+  if (content !== null && typeof content !== 'string') {
+    throw new Error('Dream stage item has invalid content.');
+  }
   return {
     entityId: requiredString(value.entityId, 'stage.item.entityId'),
     displayName: requiredString(value.displayName, 'stage.item.displayName'),
     summary,
+    content,
     sourceFile,
     relations: stringArray(value.relations, 'stage.item.relations'),
   };
@@ -132,6 +163,108 @@ function parseStage(
     page: parsePage(value.page, expectedStage, runId),
     items,
   };
+}
+
+function nullableEnum(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+  field: string,
+): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string' || !allowed.has(value)) {
+    throw new Error(`Dream files response has invalid ${field}.`);
+  }
+  return value;
+}
+
+function nullableSha256(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string' || !SHA256_HEX_PATTERN.test(value)) {
+    throw new Error(`Dream files response has invalid ${field}.`);
+  }
+  return value;
+}
+
+function parseAgentActivity(value: unknown): StoryWorkspaceDreamAgentActivityProjection | null {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value) || typeof value.activity !== 'string'
+    || !AGENT_ACTIVITY_KINDS.has(value.activity)) {
+    throw new Error('Dream files response has invalid agentActivity.');
+  }
+  const terminalOutcome = nullableEnum(
+    value.terminalOutcome,
+    AGENT_TERMINAL_OUTCOMES,
+    'agentActivity.terminalOutcome',
+  ) as StoryWorkspaceDreamAgentActivityProjection['terminalOutcome'];
+  const operationScope = nullableEnum(
+    value.operationScope,
+    AGENT_OPERATION_SCOPES,
+    'agentActivity.operationScope',
+  ) as StoryWorkspaceDreamAgentActivityProjection['operationScope'];
+  const operationState = nullableEnum(
+    value.operationState,
+    AGENT_OPERATION_STATES,
+    'agentActivity.operationState',
+  ) as StoryWorkspaceDreamAgentActivityProjection['operationState'];
+  const operationId = nullableSha256(
+    value.operationId,
+    'agentActivity.operationId',
+  );
+  if (value.activity === 'turn_settled_hint') {
+    if (
+      terminalOutcome === null
+      || operationScope !== null
+      || operationState !== null
+      || operationId !== null
+    ) {
+      throw new Error('Dream files response has inconsistent terminal agentActivity.');
+    }
+  } else if (terminalOutcome !== null) {
+    throw new Error('Dream files response has inconsistent agentActivity terminal outcome.');
+  }
+  if (typeof value.needsReconcile !== 'boolean'
+    || value.needsReconcile !== (value.activity === 'reconcile_requested')) {
+    throw new Error('Dream files response has inconsistent agentActivity reconciliation.');
+  }
+  if (value.activity === 'reconcile_requested') {
+    if (operationScope !== null || operationState !== null || operationId !== null) {
+      throw new Error('Dream files response has inconsistent reconciliation operation.');
+    }
+  } else if (value.activity !== 'turn_settled_hint') {
+    const validOperationStates: Record<string, ReadonlySet<string>> = {
+      activity_started_hint: new Set(['started']),
+      activity_settled_hint: new Set(['succeeded', 'failed']),
+      waiting_confirmation_hint: new Set(['waiting_confirmation']),
+    };
+    if (
+      operationScope === null
+      || operationState === null
+      || !validOperationStates[value.activity]?.has(operationState)
+    ) {
+      throw new Error('Dream files response has inconsistent agentActivity operation.');
+    }
+  }
+  return {
+    activity: value.activity as StoryWorkspaceDreamAgentActivityProjection['activity'],
+    sequence: integer(value.sequence, 'agentActivity.sequence', -1),
+    terminalOutcome,
+    needsReconcile: value.needsReconcile,
+    operationScope,
+    operationState,
+    operationId,
+  };
+}
+
+function safeParseAgentActivity(
+  value: unknown,
+): StoryWorkspaceDreamAgentActivityProjection | null {
+  try {
+    return parseAgentActivity(value);
+  } catch {
+    // Observer hints are display-only. A malformed optional hint must never
+    // discard the authorized threadId/files projection or block ChatPanel.
+    return null;
+  }
 }
 
 /** Validate the backend's explicit camelCase REST boundary before hydration. */
@@ -186,6 +319,7 @@ export function storyWorkspaceParseDreamFiles(value: unknown): StoryWorkspaceDre
     confirmationDispatched: value.confirmationDispatched,
     canConfirm: value.canConfirm,
     confirmationLabel: '确认并继续',
+    agentActivity: safeParseAgentActivity(value.agentActivity),
   };
 }
 
@@ -226,7 +360,7 @@ export function storyWorkspaceShouldPollDreamFiles(
 ): boolean {
   return state === 'story-workspace-dream-waiting-files'
     || state === 'story-workspace-dream-editing'
-    || state === 'story-workspace-dream-continuing';
+    || state === 'story-workspace-dream-running';
 }
 
 /** SSE notices carry identity only; their content never replaces a REST snapshot. */
@@ -277,6 +411,8 @@ export function storyWorkspaceReduceDreamFilesFetch(
 
 export interface StoryWorkspaceDreamFilesUseOptions {
   lifecycleState: StoryWorkspaceDreamLifecycleState;
+  enabled?: boolean;
+  updatesEnabled?: boolean;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch;
   token?: string | null;
@@ -304,9 +440,11 @@ export function useStoryWorkspaceDreamFiles(
   );
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const enabled = options.enabled !== false;
+  const updatesEnabled = options.updatesEnabled ?? enabled;
 
   const refresh = useCallback(() => {
-    if (!runId) return;
+    if (!runId || !enabled) return;
     controller.current?.abort();
     const nextController = new AbortController();
     controller.current = nextController;
@@ -330,35 +468,39 @@ export function useStoryWorkspaceDreamFiles(
         });
       }
     });
-  }, [options.fetchImpl, options.token, runId]);
+  }, [enabled, options.fetchImpl, options.token, runId]);
 
   useEffect(() => {
-    if (!runId) {
+    controller.current?.abort();
+    generation.current += 1;
+    dispatch({ type: 'reset' });
+  }, [runId]);
+
+  useEffect(() => {
+    if (!runId || !enabled) {
       controller.current?.abort();
-      generation.current += 1;
-      dispatch({ type: 'reset' });
       return;
     }
     refresh();
     return () => controller.current?.abort();
-  }, [refresh, runId]);
+  }, [enabled, refresh, runId]);
 
   useEffect(() => {
-    if (!runId || !storyWorkspaceShouldPollDreamFiles(options.lifecycleState)) return;
+    if (!runId || !updatesEnabled || !storyWorkspaceShouldPollDreamFiles(options.lifecycleState)) return;
     const intervalMs = Math.max(options.pollIntervalMs ?? 5000, 5000);
     const interval = window.setInterval(refresh, intervalMs);
     return () => window.clearInterval(interval);
-  }, [options.lifecycleState, options.pollIntervalMs, refresh, runId]);
+  }, [options.lifecycleState, options.pollIntervalMs, refresh, runId, updatesEnabled]);
 
   useEffect(() => {
-    if (!runId) return;
+    if (!runId || !updatesEnabled) return;
     const handleOutput = (event: Event) => {
       const detail = (event as CustomEvent<unknown>).detail;
       if (storyWorkspaceShouldInvalidateDreamFiles(detail, runId)) refresh();
     };
     window.addEventListener(DREAM_OUTPUT_EVENT, handleOutput);
     return () => window.removeEventListener(DREAM_OUTPUT_EVENT, handleOutput);
-  }, [refresh, runId]);
+  }, [refresh, runId, updatesEnabled]);
 
   return {
     data: state.data,

@@ -4,6 +4,22 @@
 > **关联文件**: `backend/claude_agent/thread_factory.py`, `backend/claude_agent/thread_pool.py`,  
 > `backend/claude_agent/event_bus.py`（新建），`frontend/src/components/chat/ChatView.tsx`
 
+> **[Sync 2026-08-11 / current contract]** 本文的“浏览器断线只取消 subscriber、
+> producer 继续、replay 后再 live、sentinel 单次关闭”仍有效。EventBus 当前存储并广播
+> `NormalizedAgentEvent`，不是已经编码的 SSE 字符串；`ChatStreamAdapter` 只在 HTTP
+> 边界编码。Chat 与 Dream surface 都经同一 thread status/stream/ChatPanel 恢复，Dream
+> 不再拥有第二个 EventSource/parser/reducer。下文把 `frame: str`、`BusProxyQueue` 字符串
+> 和“ChatView-only”写成目标的旧代码片段仅是 v2.1 历史，不得覆盖
+> [`../dream-agent/architecture.md`](../dream-agent/architecture.md) 与当前源码。
+>
+> Redis 的当前边界也比 v2.1 设想更窄：它只为**已经知道**
+> `(session_id, turn_id)` 的调用方提供共享 stream、跨进程 writer/replay 和原子单终态。
+> active-turn registry、`/status`、Stop、confirmation 以及 HTTP stream 路由仍在进程内。
+> 因此 Redis adapter 本身不构成任意 Worker/Pod 都可接管的 HTTP reconnect/control
+> plane。当前后端镜像以单个 uvicorn worker 启动，Cloud Run backend 也固定
+> `--max-instances=1`；若要放宽这两个限制，必须先另行设计并验证分布式 active-turn
+> discovery、请求亲和/路由、Stop 和 confirmation ownership。
+
 ---
 
 ## 1. 现状问题诊断
@@ -65,7 +81,7 @@ execute_session ──put──→ asyncio.Queue ──get──→ _drain_queue
                              │ 依赖抽象
                 ┌────────────▼────────────┐
                 │   IEventBus  (Port)      │
-                │  + publish(frame)        │
+                │  + publish(event)        │
                 │  + subscribe() → token   │
                 │  + unsubscribe(token)    │
                 │  + is_done: bool         │
@@ -74,7 +90,7 @@ execute_session ──put──→ asyncio.Queue ──get──→ _drain_queue
           ┌────────────▼──┐  ┌───▼─────────────────┐
           │InMemoryEventBus│  │  RedisStreamEventBus │  (future: RabbitMQ…)
           │(asyncio-based) │  │  (Redis Streams)     │
-          │ 开发 / 单实例   │  │  生产 / 多实例        │
+          │ 默认 / 单进程   │  │ 已知 turn 的共享 stream│
           └────────────────┘  └──────────────────────┘
 ```
 
@@ -135,7 +151,7 @@ def create_event_bus(session_id: str, turn_id: str) -> IEventBus:
 
     INK_AGENT_EVENT_BUS_BACKEND:
         memory  — InMemoryEventBus（默认，开发 / 单实例）
-        redis   — RedisStreamEventBus（生产多实例）
+        redis   — RedisStreamEventBus（已知 turn 的共享 stream）
     """
     backend = (os.getenv("INK_AGENT_EVENT_BUS_BACKEND") or "memory").lower()
     if backend == "redis":
@@ -208,7 +224,19 @@ class InMemoryEventBus(IEventBus):
 
 ---
 
-## 6. Adapter B：RedisStreamEventBus（生产多实例）
+## 6. Adapter B：RedisStreamEventBus（共享事件流，不是分布式控制面）
+
+当前实现的可执行范围是：同一 `(session_id, turn_id)` 的跨进程 writer、历史回放、
+RESP2/RESP3 live `XREAD`、同 Redis Cluster slot 的 terminal marker，以及并发 writer
+之间的单 `finish`/单 sentinel 仲裁。它不负责发现哪个进程拥有 active turn，也不共享
+ThreadFactory 的 session/task registry、status、Stop 或 confirmation Future。以下 v2.1
+代码块保留历史设计形态；当前实现与契约以
+`backend/claude_agent/event_bus_redis.py` 为准。
+
+当前 rolling-compatible stream key 仍是 `ink:sse:{session_id}:{turn_id}`；terminal
+marker 以整个 stream key 作为 hash tag，形如
+`{ink:sse:<session_id>:<turn_id>}:terminal`，确保 Lua 的两个 `KEYS` 位于同一
+Redis Cluster slot。
 
 ```python
 # backend/claude_agent/event_bus_redis.py（新建）
@@ -216,9 +244,11 @@ class InMemoryEventBus(IEventBus):
 """RedisStreamEventBus — 基于 Redis Streams 的分布式 EventBus Adapter。
 
 适用场景：
-  - 多 Worker / 多 Pod 部署（不同 Worker 可接入同一 session 的 bus）
-  - 需要持久化 SSE 历史（Redis Stream 自带有序存储）
-  - 跨进程重连（新 Worker 可回放旧 Worker 产生的历史帧）
+  - 已知 session/turn 的跨进程 writer 与 replay
+  - Redis TTL 窗口内的有序事件历史
+  - 跨进程单终态仲裁
+
+不提供：active turn discovery、跨进程 Stop/confirmation/status 或 HTTP 路由接管。
 
 依赖：
   pip install redis[hiredis] asyncio  (redis-py >= 5.0 支持 async)
@@ -533,7 +563,7 @@ sequenceDiagram
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `INK_AGENT_EVENT_BUS_BACKEND` | `memory` | EventBus 后端：`memory`（进程内 asyncio）或 `redis`（Redis Streams，多 Worker/Pod） |
+| `INK_AGENT_EVENT_BUS_BACKEND` | `memory` | EventBus 后端：`memory`（进程内 asyncio）或 `redis`（已知 session/turn 的共享 Redis Stream） |
 | `INK_AGENT_REDIS_URL` | `redis://localhost:6379/0` | Redis 连接 URL；仅 `INK_AGENT_EVENT_BUS_BACKEND=redis` 时生效 |
 | `INK_AGENT_EVENT_BUS_TTL_S` | `3600` | Redis Stream key 过期时间（秒）；仅 redis 模式生效 |
 | `INK_AGENT_SSE_KEEPALIVE_S` | `15` | SSE 空闲 keepalive 注释帧间隔（秒）；`service.py` 与 `InMemoryEventBus.read()` 共用 |
@@ -550,7 +580,7 @@ sequenceDiagram
 ```dotenv
 # SSE EventBus backend for Claude Agent stream reconnect (memory | redis).
 # memory: single-process InMemoryEventBus (default, no extra deps).
-# redis:  RedisStreamEventBus for multi-worker / multi-pod deployments.
+# redis:  shared stream/replay/terminal arbitration for a known session+turn.
 INK_AGENT_EVENT_BUS_BACKEND=memory
 
 # Redis connection URL — required when INK_AGENT_EVENT_BUS_BACKEND=redis.
@@ -565,9 +595,11 @@ INK_AGENT_EVENT_BUS_TTL_S=3600
 | `INK_AGENT_EVENT_BUS_BACKEND` | 依赖 | 适用场景 |
 |------------------------------|------|---------|
 | `memory`（默认）| 无 | 开发、单机、单 uvicorn worker |
-| `redis` | `redis` PyPI 包 + 可连通的 Redis | 多 Worker（`uvicorn -w N`）、K8s 多 Pod |
+| `redis` | `redis>=5,<8` + 可连通的 Redis | 已知 `(session_id, turn_id)` 的跨进程 writer/replay 和 terminal arbitration |
 
-- `redis` 模式下若 `redis-py` 未安装或 import 失败，`create_event_bus()` **降级**为 `InMemoryEventBus` 并打 warning 日志。
+- `redis` 模式不静默降级。依赖缺失或 backend 名称错误会 fail fast；应用 lifespan
+  在接受请求前执行 Redis `PING`，连接不可用时启动失败，避免多个进程各自退回内存后
+  形成不一致的终态。
 - `INK_AGENT_SSE_KEEPALIVE_S` 控制消费者长时间无事件时发送的 `: keepalive\n\n` 注释帧，避免代理/负载均衡因空闲断开 SSE。
 
 ### 11.2 部署选型矩阵
@@ -576,8 +608,15 @@ INK_AGENT_EVENT_BUS_TTL_S=3600
 |------|---------|------|
 | 开发环境 / 单机 | `InMemoryEventBus` | 零依赖，asyncio 原生 |
 | 生产单实例 | `InMemoryEventBus` | 单进程内 bus 可靠 |
-| 生产多 Worker（uvicorn -w N）| `RedisStreamEventBus` | 不同 Worker 可共享同一 stream |
-| 生产多 Pod（K8s）| `RedisStreamEventBus` | 跨 Pod 重连唯一依赖 Redis |
+| 当前生产后端：单 uvicorn worker、Cloud Run `max-instances=1` | `InMemoryEventBus` 或按运维要求启用 Redis | 当前进程内 active-turn/status/Stop/confirmation/HTTP routing 契约完整 |
+| 已知 turn 的跨进程 producer/replay 测试或受控 writer | `RedisStreamEventBus` | 共享 stream、TTL 和单终态；调用方必须已经拥有 session/turn identity |
+| 多 uvicorn worker / 多 Pod HTTP 服务 | **未由 EventBus 单独支持** | 还需要分布式 active-turn registry、请求路由/亲和、Stop 与 confirmation owner；不得仅切换 Redis 后宣称支持 |
+
+2026-08-11 的隔离真实 Redis 验证已通过 4 个 test method 和 2 个 RESP2/RESP3
+subtest：live `XREAD`、跨进程写入/回放、并发单终态、legacy finish 无 sentinel 修复、
+TTL 与精确 key 清理均通过。该结果只验证上述 EventBus adapter 契约，不验证
+multi-worker/pod HTTP reconnect。复现命令和证据边界见
+[`../dream-agent/testing-and-acceptance.md`](../dream-agent/testing-and-acceptance.md)。
 
 ---
 
@@ -619,6 +658,6 @@ INK_AGENT_EVENT_BUS_TTL_S=3600
 | 重连时 bus 已完成（`is_done=True`）| `subscribe()` 回放全部 buffer（含 sentinel），read() 立即结束 |
 | 多个标签页同时连接同一 thread | 各自 `subscribe()` 获取独立 token，正常广播 |
 | 重连时发送了新消息（非 reconnect）| Factory Lock 串行排队，等 RUNNING 结束后开始新轮 |
-| bg_task 因异常退出 | `publish(error_frame)` + `publish(None)`，消费者正常收到 finish |
-| Redis 连接失败 | `create_event_bus` fallback 到 `InMemoryEventBus`（可配置）|
-| 用户主动 Stop | 调用 `/threads/{id}/stop` → Factory 取消 bg_task → bus 发 error + sentinel |
+| bg_task 因异常退出 | 发布 normalized `error`、唯一 `finish(error)`，再发布 sentinel；消费者按 canonical terminal 收敛 |
+| Redis 依赖/连接失败 | 配置选择或应用 lifespan fail fast；不回退到进程内 memory |
+| 用户主动 Stop | 调用 `/threads/{id}/stop` → 拥有 active turn 的进程取消 bg_task → bus 发 `finish(stop)` + sentinel；Redis 不负责定位该 owner |

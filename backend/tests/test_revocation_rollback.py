@@ -11,6 +11,7 @@ import unittest
 import uuid
 
 from backend import database
+from backend.schema import legacy_main_sqlite
 from backend.models.deck_plugin import (
     DeckPluginManifestV1,
     DeckRuntimePluginLock,
@@ -453,7 +454,7 @@ class RevocationTests(unittest.IsolatedAsyncioTestCase):
     async def test_sqlite_repository_persists_barrier_outboxes_and_append_only_audit(self):
         db = sqlite3.connect(":memory:")
         db.execute("PRAGMA foreign_keys=ON")
-        repository = SQLiteRevocationRepository(db)
+        repository = SQLiteRevocationRepository(db, allow_test_fixture=True)
         self.repository = repository
         self.runs.termination_outcomes[("run-queued", "hard")] = "ack"
         self.runs.termination_outcomes[("run-running", "hard")] = "ack"
@@ -468,7 +469,7 @@ class RevocationTests(unittest.IsolatedAsyncioTestCase):
             approved_by=None,
             grace=0,
         )
-        reopened = SQLiteRevocationRepository(db)
+        reopened = SQLiteRevocationRepository(db, allow_test_fixture=True)
         self.assertEqual(
             reopened.find_idempotency("sqlite-persisted").revocation_id,
             result.revocation_id,
@@ -772,8 +773,8 @@ class RollbackManagerTests(unittest.IsolatedAsyncioTestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
-        database.create_tables(self.db)
-        database.create_workflow_run_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
+        legacy_main_sqlite.create_workflow_run_tables(self.db)
         self.add_release("3.1.0")
         self.add_release("3.2.0")
         self.installation_id = f"dpi_{uuid.uuid4().hex}"
@@ -892,7 +893,27 @@ class RollbackManagerTests(unittest.IsolatedAsyncioTestCase):
         binding_projection = tuple(
             self.db.execute("SELECT * FROM deck_plugin_bindings ORDER BY deck_plugin_binding_id").fetchall()
         )
-        result = await self.manager().rollback_installation(
+        manager = self.manager()
+
+        def sqlite_projection(table, key_column, key_value):
+            self.assertIn(
+                (table, key_column),
+                {
+                    ("deck_plugin_bindings", "deck_plugin_id"),
+                    ("workflow_runs", "deck_plugin_id"),
+                },
+            )
+            rows = self.db.execute(
+                f"SELECT * FROM {table} WHERE {key_column} = ?",
+                (key_value,),
+            ).fetchall()
+            return tuple(sorted(tuple(row) for row in rows))
+
+        # PostgreSQL catalog introspection is covered by the production query
+        # boundary; this legacy fixture injects only the equivalent immutable
+        # row projection so the rollback behavior remains executable offline.
+        manager._table_projection = sqlite_projection
+        result = await manager.rollback_installation(
             self.installation_id, "3.1.0", "plugin-admin"
         )
         installation = self.installation_service.get(self.installation_id)

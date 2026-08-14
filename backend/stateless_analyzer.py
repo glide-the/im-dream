@@ -208,7 +208,6 @@ These are hard blacklists. If you cannot comply, return null. These override any
 
     result = agent.run(
         prompt,
-        model=config.VOICE_ANALYSIS_MODEL,
         cli="no-tools",
         schema_cls=SingleVoiceAnalysis,
         tracked=True,

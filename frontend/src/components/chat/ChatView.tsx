@@ -68,6 +68,9 @@
 // [Sync] 2026-08-03: share button now opens ChatShareDialog (复制链接 placeholder +
 //                    导出图片 long-image export via chat-export-registry + exportThreadImage).
 // [Sync] 2026-08-04: add thread subagent summary/right sidebar; Agent/Task chat buttons focus the matching task row.
+// [Sync] 2026-08-11: keep a lazy-created thread's first ChatPanel mounted while
+//                    it streams, and make ChatView own queued-turn consumption
+//                    so remounts cannot duplicate the /api/claude-agent request.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -98,26 +101,18 @@ import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
-import { filterStoryWorkspaceGuidanceMessages } from '../../lib/story-workspace-guidance';
 import { getDateLocale } from '../../i18n';
 import { listDecks, getDeck, type Deck } from '../../api/voiceApi';
 import DeckChatSelector from '../deck/DeckChatSelector';
 import PluginReceiptBadge from './PluginReceiptBadge';
 import {
-  deriveSettledToolCallIdsFromHistory,
-  loadChatHistoryThenRuntimeStatus,
-  parseChatThreadStatus,
-  runtimePendingToolCallIdsFromStatus,
-  type ChatThreadStatusResult,
-} from './toolConfirmation';
+  claudeThreadHydrationRetryDelayMs,
+  hydrateClaudeThreadSession,
+  type ClaudeThreadRecord,
+} from './threadSessionHydration';
+import { chatReconnectNonceForHydratedThread } from './chatRuntimeState';
 
-interface ChatThread {
-  id: string;
-  title: string | null;
-  deck_id?: string | null;
-  voice_id?: string | null;
-  created_at: string;
-  updated_at: string;
+interface ChatThread extends ClaudeThreadRecord {
   match?: {
     strategy: string;
     retriever?: string;
@@ -127,20 +122,12 @@ interface ChatThread {
   };
 }
 
-interface RawChatMessage {
-  id: string;
-  role: string;
-  /** Parsed UIMessage['parts'] array — returned by the API already deserialized. */
-  parts: UIMessage['parts'];
-  /** Parsed ChatMetadata — returned by the API already deserialized. */
-  metadata?: Record<string, unknown>;
-  created_at: string;
-}
-
 interface ChatViewProps {
   threadId?: string;
   /** When set, the view switches to this thread (used for external navigation from Deck / editor widgets). */
   requestedThreadId?: string;
+  /** Bump-only companion so reopening the same external thread refreshes status and reconnects SSE. */
+  requestedThreadNonce?: number;
   /** When set (with requestedDeckNonce), preselect this Deck in the input dock and land on a fresh conversation (Deck editor "Chat →"). */
   requestedDeckId?: string;
   /** Agent selected under requestedDeckId. */
@@ -330,55 +317,10 @@ async function deleteThread(threadId: string): Promise<boolean> {
   }
 }
 
-async function fetchThreadStatus(threadId: string): Promise<ChatThreadStatusResult | null> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
-      { headers: { 'Authorization': `Bearer ${getAuthToken()}` } },
-    );
-    if (!res.ok) return null;
-    return parseChatThreadStatus(await res.json());
-  } catch {
-    return null;
-  }
-}
-
-interface ThreadMessagesSnapshot {
-  thread?: ChatThread;
-  messages: UIMessage[];
-}
-
-async function fetchThreadMessages(threadId: string): Promise<ThreadMessagesSnapshot> {
-  try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
-    if (!res.ok) return { messages: [] };
-    const data = await res.json() as { thread?: ChatThread; messages?: RawChatMessage[] };
-    const msgs = data.messages ?? [];
-    // DEC-032: guidance rows persist in chat_message but never render as Chat
-    // bubbles — filter them at the history-load seam (Task 4 Step 0).
-    return { thread: data.thread, messages: filterStoryWorkspaceGuidanceMessages(msgs.map((m) => {
-      // parts is already a parsed list — aligned with better-chatbot
-      // ChatRepository.selectMessagesByThreadId which returns parts directly.
-      const parts: UIMessage['parts'] = Array.isArray(m.parts) && m.parts.length > 0
-        ? m.parts
-        : [{ type: 'text', text: '' }];
-      const metadata = m.metadata && typeof m.metadata === 'object' ? m.metadata : undefined;
-      return {
-        id: m.id,
-        role: m.role as UIMessage['role'],
-        parts,
-        metadata,
-        createdAt: new Date(m.created_at),
-      };
-    })) };
-  } catch {
-    return { messages: [] };
-  }
-}
-
 function ChatViewContent({
   threadId: initialThreadId,
   requestedThreadId,
+  requestedThreadNonce,
   requestedDeckId,
   requestedAgentId,
   requestedDeckNonce,
@@ -400,8 +342,16 @@ function ChatViewContent({
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
   const [queuedToolChoice, setQueuedToolChoice] = useState<ToolChoice>('auto');
   const [queuedPromptNonce, setQueuedPromptNonce] = useState(0);
+  // This ref belongs to ChatView, which remains mounted while the child ChatPanel
+  // is temporarily removed for active-thread history loading. A ChatPanel-local
+  // useRef resets during that remount and cannot provide request-level de-duplication.
+  const lastClaimedQueuedPromptNonceRef = useRef(0);
   const [hasConversationStarted, setHasConversationStarted] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
+  const [threadReloadNonce, setThreadReloadNonce] = useState(0);
+  // A thread created by this view is known to have no history yet. Skipping its
+  // first hydration keeps the ChatPanel (and its live fetch reader) mounted.
+  const freshQueuedThreadIdRef = useRef<string | null>(null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadSidebarOpen, setThreadSidebarOpen] = useState(false);
   const [isLoadingThreads, setIsLoadingThreads] = useState(false);
@@ -415,6 +365,7 @@ function ChatViewContent({
   const [initialRuntimePendingToolCallIds, setInitialRuntimePendingToolCallIds] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
+  const [initialRuntimeRunning, setInitialRuntimeRunning] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [draftInputError, setDraftInputError] = useState<string | null>(null);
   const [availableDecks, setAvailableDecks] = useState<Deck[]>([]);
@@ -617,14 +568,21 @@ function ChatViewContent({
     setSubagentSidebarOpen(false);
   }, [activeThreadId]);
 
-  // @@@ External navigation: switch to a specific thread when requestedThreadId changes.
+  // @@@ External navigation: switch threads, or rehydrate/reconnect when the
+  // same thread is explicitly reopened after another surface consumed it.
   useEffect(() => {
-    if (!requestedThreadId || requestedThreadId === activeThreadId) return;
+    if (!requestedThreadId) return;
+    if (requestedThreadId === activeThreadId && requestedThreadNonce === undefined) return;
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(true);
-    setActiveThreadId(requestedThreadId);
+    if (requestedThreadId === activeThreadId) {
+      setThreadReloadNonce((value) => value + 1);
+    } else {
+      setActiveThreadId(requestedThreadId);
+    }
     setHasConversationStarted(true);
     onLandingTabChange('history');
     setQueuedPrompt('');
@@ -632,7 +590,7 @@ function ChatViewContent({
     setQueuedToolChoice('auto');
     void reloadThreads();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedThreadId]);
+  }, [requestedThreadId, requestedThreadNonce]);
 
   // @@@ External navigation (Deck editor "Chat →"): preselect the Agent under
   // its Deck and land on a fresh conversation.
@@ -644,6 +602,7 @@ function ChatViewContent({
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
     setHasConversationStarted(false);
     setQueuedPrompt('');
     setQueuedAttachments([]);
@@ -654,30 +613,52 @@ function ChatViewContent({
   // Fetch messages for the active thread (following better-chatbot pattern:
   // parent fetches history and passes as initialMessages to the chat component).
   // Load history, then reconnect SSE when the backend turn is still running.
+  const hydratedMessagesThreadRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeThreadId) return;
+    if (freshQueuedThreadIdRef.current === activeThreadId) {
+      freshQueuedThreadIdRef.current = null;
+      return;
+    }
     let cancelled = false;
+    let retryTimer: number | null = null;
+    let hydrationAttempt = 0;
+    const threadChanged = hydratedMessagesThreadRef.current !== activeThreadId;
+    hydratedMessagesThreadRef.current = activeThreadId;
     setIsLoadingMessages(true);
-    setThreadMessages(null);
-    setInitialSettledToolCallIds(new Set<string>());
-    setInitialRuntimePendingToolCallIds(new Set<string>());
+    if (threadChanged) {
+      setThreadMessages(null);
+      setInitialSettledToolCallIds(new Set<string>());
+      setInitialRuntimePendingToolCallIds(new Set<string>());
+      setInitialRuntimeRunning(false);
+    }
 
-    void (async () => {
-      const { history: snapshot, status } = await loadChatHistoryThenRuntimeStatus(
-        () => fetchThreadMessages(activeThreadId),
-        () => fetchThreadStatus(activeThreadId),
-      );
+    const hydrate = async () => {
+      let snapshot;
+      try {
+        snapshot = await hydrateClaudeThreadSession(activeThreadId);
+      } catch {
+        if (!cancelled) {
+          retryTimer = window.setTimeout(
+            () => void hydrate(),
+            claudeThreadHydrationRetryDelayMs(hydrationAttempt),
+          );
+          hydrationAttempt += 1;
+        }
+        return;
+      }
       if (cancelled) return;
       const msgs = snapshot.messages;
-      setInitialSettledToolCallIds(deriveSettledToolCallIdsFromHistory(msgs, status));
-      setInitialRuntimePendingToolCallIds(runtimePendingToolCallIdsFromStatus(status));
+      setInitialSettledToolCallIds(snapshot.settledToolCallIds);
+      setInitialRuntimePendingToolCallIds(snapshot.runtimePendingToolCallIds);
+      setInitialRuntimeRunning(snapshot.running);
       setThreadMessages(msgs);
       setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
       setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
       if (msgs.length > 0) setHasConversationStarted(true);
       setIsLoadingMessages(false);
 
-      if (status?.running) {
+      if (snapshot.running) {
         setReconnectStreamNonce((value) => value + 1);
       }
 
@@ -685,12 +666,14 @@ function ChatViewContent({
       void hydrateThreadPlan(activeThreadId);
       // claude-todo §5.6: 并行水合 todos store，恢复弹层「待办」分区。
       void hydrateThreadTodos(activeThreadId);
-    })();
+    };
+    void hydrate();
 
     return () => {
       cancelled = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
-  }, [activeThreadId]);
+  }, [activeThreadId, threadReloadNonce]);
 
   const activeThreadIdRef = useRef(activeThreadId);
   activeThreadIdRef.current = activeThreadId;
@@ -698,19 +681,20 @@ function ChatViewContent({
   const handleReconnectComplete = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     if (!activeThreadId) return undefined;
     const requestedThreadId = activeThreadId;
-    const { history: snapshot, status } = await loadChatHistoryThenRuntimeStatus(
-      () => fetchThreadMessages(requestedThreadId),
-      () => fetchThreadStatus(requestedThreadId),
-    );
+    const snapshot = await hydrateClaudeThreadSession(requestedThreadId);
     if (activeThreadIdRef.current !== requestedThreadId) return undefined;
-    const settledToolCallIds = deriveSettledToolCallIdsFromHistory(snapshot.messages, status);
-    const runtimePendingToolCallIds = runtimePendingToolCallIdsFromStatus(status);
-    setInitialSettledToolCallIds(settledToolCallIds);
-    setInitialRuntimePendingToolCallIds(runtimePendingToolCallIds);
+    setInitialSettledToolCallIds(snapshot.settledToolCallIds);
+    setInitialRuntimePendingToolCallIds(snapshot.runtimePendingToolCallIds);
+    setInitialRuntimeRunning(snapshot.running);
     setThreadMessages(snapshot.messages);
     setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
     setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
-    return { messages: snapshot.messages, settledToolCallIds, runtimePendingToolCallIds };
+    return {
+      messages: snapshot.messages,
+      settledToolCallIds: snapshot.settledToolCallIds,
+      runtimePendingToolCallIds: snapshot.runtimePendingToolCallIds,
+      running: snapshot.running,
+    };
   }, [activeThreadId]);
 
   const notifyReconnectComplete = useCallback(() => {
@@ -723,9 +707,11 @@ function ChatViewContent({
     attachments: Attachment[] = [],
     toolChoice: ToolChoice = 'auto',
   ) => {
+    freshQueuedThreadIdRef.current = threadId;
     setThreadMessages([]);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(false);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
@@ -736,6 +722,20 @@ function ChatViewContent({
     setQueuedPromptNonce((value) => value + 1);
     void reloadThreads();
   }, [onLandingTabChange, reloadThreads]);
+
+  const claimQueuedPrompt = useCallback((nonce: number): boolean => {
+    if (nonce <= lastClaimedQueuedPromptNonceRef.current) {
+      return false;
+    }
+    lastClaimedQueuedPromptNonceRef.current = nonce;
+
+    // Clear the payload as soon as it has an owner. The nonce remains monotonic
+    // so delayed child effects can still be rejected by the gate above.
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
+    return true;
+  }, []);
 
   const startThreadWithQueuedSend = useCallback(async (
     message: string,
@@ -763,6 +763,7 @@ function ChatViewContent({
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(false);
     setActiveThreadId(null);
     setHasConversationStarted(false);
@@ -783,6 +784,7 @@ function ChatViewContent({
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(true);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
@@ -929,6 +931,7 @@ function ChatViewContent({
       setThreadMessages(null);
       setInitialSettledToolCallIds(new Set<string>());
       setInitialRuntimePendingToolCallIds(new Set<string>());
+      setInitialRuntimeRunning(false);
       setHasConversationStarted(false);
       setQueuedPrompt('');
       setQueuedAttachments([]);
@@ -1156,14 +1159,19 @@ function ChatViewContent({
                   threadId={activeThreadId}
                   initialMessages={threadMessages ?? undefined}
                   isLoading={isLoadingMessages}
-                  reconnectStreamNonce={reconnectStreamNonce}
+                  reconnectStreamNonce={chatReconnectNonceForHydratedThread(
+                    initialRuntimeRunning,
+                    reconnectStreamNonce,
+                  )}
                   initialSettledToolCallIds={initialSettledToolCallIds}
                   initialRuntimePendingToolCallIds={initialRuntimePendingToolCallIds}
+                  initialRuntimeRunning={initialRuntimeRunning}
                   onReconnectComplete={notifyReconnectComplete}
                   queuedPrompt={queuedPrompt}
                   queuedAttachments={queuedAttachments}
                   queuedToolChoice={queuedToolChoice}
                   queuedPromptNonce={queuedPromptNonce}
+                  claimQueuedPrompt={claimQueuedPrompt}
                   inputPlaceholder="Ask Ink & Memory…"
                   editorState={editorState}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
@@ -1199,6 +1207,7 @@ function ChatViewContent({
                     ) : null}
                     <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, paddingBottom: '0.25rem' }}>
                       <AIInputDock
+                        deckId={selectedDeckId}
                         onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
                           void startThreadWithQueuedSend(message, uploadedFiles, toolChoice);
                         }}

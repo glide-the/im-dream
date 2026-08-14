@@ -3,7 +3,7 @@
 ## 1. 交付范围
 
 - Paperclip Issue：`SUO-245`
-- 输入设计：`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md`
+- 输入设计：`docs/design/story-workspace/project-and-episode-workbench.md`
 - 增量 Issue：`docs/issue/ISSUES_story-workspace-suo241-delta.md`
 - 稳定映射基线：`docs/issue/ISSUES_story-workspace.md`
 - 写入范围：仅 `docs/task/`

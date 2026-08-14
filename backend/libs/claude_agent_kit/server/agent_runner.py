@@ -6,6 +6,8 @@
 # [Pos] core runner node in libs/claude_agent_kit/server
 # [Sync] 2026-08-04: force Agent/Task run_in_background=false at the PreToolUse
 #                    boundary so the parent turn consumes child completion.
+# [Sync] 2026-08-14: allow only confirmation-gated, single-file canonical
+#                    character/scene/prop deletion; keep .dream and broad Bash mutation denied.
 # [Sync] 2026-05-09: forward stdio MCP tool input and result events for frontend traces.
 # [Sync] 2026-05-09: merge project .env SDK injection, stderr capture, and PreToolUse confirmation hooks while keeping Pet Chat's narrow stdio MCP surface.
 # [Sync] 2026-05-09: expose zero-argument necklace intent tools while keeping server-owned upstream parameters.
@@ -205,6 +207,7 @@ import logging
 import os
 import re
 import shlex
+import stat
 import sys
 import tempfile
 import time
@@ -393,6 +396,11 @@ _STORY_WORKSPACE_DREAM_CANONICAL_ROOTS: tuple[str, ...] = (
     "stories",
     ".dramaforge",
 )
+_STORY_WORKSPACE_DREAM_ASSET_DIRECTORIES: frozenset[str] = frozenset({
+    "characters",
+    "scenes",
+    "props",
+})
 
 # Read-only / navigation shell commands that carry no filesystem side effects.
 # Any command whose first token matches one of these and contains no shell
@@ -762,11 +770,61 @@ def _is_dream_mutating_bash_command(command: str, cwd: Optional[str]) -> bool:
     """
 
     tokens = _split_shell_command(command)
+    if _is_explicit_canonical_asset_delete(command, tokens, cwd):
+        return False
     if _workspace_has_dream_surface(cwd):
         return not _is_definitely_read_only_dream_bash_command(command, tokens)
     if not _bash_command_may_reference_dream_surface(command, tokens, cwd):
         return False
     return not _is_definitely_read_only_dream_bash_command(command, tokens)
+
+
+def _is_explicit_canonical_asset_delete(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+) -> bool:
+    """Allow one reviewed character/scene/prop deletion to reach confirmation.
+
+    Claude Code has no built-in Delete file tool. A natural-language asset
+    deletion therefore needs one narrow shell seam. This classifier permits
+    only ``rm [--|-f] <one existing regular canonical asset file>`` and leaves
+    the normal Bash permission channel to request visible user confirmation.
+    Recursive, globbed, scripted, symlinked, out-of-workspace, and ``.dream``
+    targets remain hard denied.
+    """
+
+    if not cwd or _SHELL_METACHAR_RE.search(command) or "\n" in command or "\r" in command:
+        return False
+    if not tokens or tokens[0] != "rm":
+        return False
+    index = 1
+    if index < len(tokens) and tokens[index] in {"-f", "--"}:
+        index += 1
+    if index >= len(tokens) or len(tokens[index:]) != 1:
+        return False
+    raw_target = tokens[index]
+    if any(character in raw_target for character in "*?[]{}"):
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=True)
+        supplied = Path(raw_target).expanduser()
+        if not supplied.is_absolute():
+            supplied = workspace / supplied
+        visible = supplied.lstat()
+        target = supplied.resolve(strict=True)
+        relative = target.relative_to(workspace)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return False
+    if stat.S_ISLNK(visible.st_mode) or not stat.S_ISREG(visible.st_mode):
+        return False
+    if target.suffix.lower() not in {".md", ".yaml", ".yml"}:
+        return False
+    return (
+        len(relative.parts) == 3
+        and relative.parts[0] == "assets"
+        and relative.parts[1] in _STORY_WORKSPACE_DREAM_ASSET_DIRECTORIES
+    )
 
 
 def _apply_dream_surface_write_guard(
@@ -938,6 +996,13 @@ def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeAgentOptions) -> 
     present_keys = [key for key in _CLAUDE_SDK_ENV_KEYS if bool(env.get(key))]
     missing_keys = [key for key in _CLAUDE_SDK_ENV_KEYS if not env.get(key)]
     has_auth_key = any(bool(env.get(key)) for key in _CLAUDE_SDK_AUTH_ENV_KEYS)
+    if not has_auth_key:
+        try:
+            from services.admin_gateway.sdk import gateway_sdk_helper_is_configured
+
+            has_auth_key = gateway_sdk_helper_is_configured(sdk_options)
+        except (ImportError, RuntimeError, TypeError, ValueError):
+            has_auth_key = False
 
     if not has_auth_key:
         logger.warning(
@@ -949,7 +1014,8 @@ def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeAgentOptions) -> 
         )
         raise RuntimeError(
             f"Claude SDK has no auth key in subprocess env; "
-            f"expected one of {_CLAUDE_SDK_AUTH_ENV_KEYS!r}. "
+            f"expected one of {_CLAUDE_SDK_AUTH_ENV_KEYS!r} or the "
+            "server-owned Gateway apiKeyHelper. "
             f"present_keys={present_keys!r} env_count={len(env)}"
         )
 
@@ -2724,6 +2790,17 @@ class ClaudeAgentRunner:
         apply_task_v2_env_to_options(sdk_options)
         # Overlay user-scoped SDK env vars (higher priority than backend/.env).
         apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
+        # Gateway enforcement runs after every project/user overlay. When the
+        # canary is enabled, missing service configuration or canonical user
+        # identity fails closed before the Claude subprocess starts.
+        from services.admin_gateway import apply_gateway_sdk_env_to_options, gateway_enabled
+
+        gateway_model_override = gateway_enabled()
+        apply_gateway_sdk_env_to_options(
+            sdk_options,
+            opts.canonical_user_id,
+            gateway_idempotency_key=opts.gateway_idempotency_key,
+        )
         existing_extra_args = getattr(sdk_options, "extra_args", None)
         sdk_options.extra_args = dict(existing_extra_args or {})
         if tool_choice == "none":
@@ -2733,7 +2810,10 @@ class ClaudeAgentRunner:
         sdk_options.stderr = _make_cli_stderr_capture(_stderr_buf)
         if resume:
             sdk_options.resume = thread_id
-        _apply_request_model_override_if_allowed(sdk_options, model)
+        if gateway_model_override and model:
+            sdk_options.model = model
+        else:
+            _apply_request_model_override_if_allowed(sdk_options, model)
         if system_prompt:
             sdk_options.system_prompt = system_prompt
         # ------------------------------------------------------------------

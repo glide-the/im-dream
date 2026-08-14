@@ -28,9 +28,12 @@
 # [Sync] 2026-06-25: cover open sandbox network mode omitting sandbox.network
 #                    instead of writing unsupported allowedDomains ["*"].
 # [Sync] 2026-07-26: cover sandbox fs write policy — default Claude TMPDIR
-#                    allowWrite (cwd-* zsh noise fix), CLAUDE_TMPDIR override,
+#                    allowWrite (cwd-* zsh noise fix), temp-root override,
 #                    sandbox_fs_allowed_write_paths append + denyWrite
 #                    unchanged, disabled-sandbox shape unchanged.
+# [Sync] 2026-08-14: canonical assets remain covered by the thread root and
+#                    .dream is denied; CLAUDE_CODE_TMPDIR is the single exact
+#                    sandbox temp write root (no broad /tmp or dynamic cwd-*).
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -170,6 +173,22 @@ class TestInitWorkspace(unittest.TestCase):
             sandbox["filesystem"]["denyWrite"],
         )
         self.assertIn(
+            str((ws / ".dream").resolve()),
+            sandbox["filesystem"]["denyWrite"],
+        )
+        # The sandbox owns capability boundaries, not Dream asset semantics:
+        # every canonical asset family is writable through the thread root,
+        # while the private .dream projection above remains deny-listed.
+        for canonical_dir in (
+            ws / "assets" / "characters",
+            ws / "assets" / "scenes",
+            ws / "assets" / "props",
+            ws / "stories",
+        ):
+            self.assertTrue(
+                canonical_dir.resolve(strict=False).is_relative_to(ws.resolve())
+            )
+        self.assertIn(
             str((ws / ".claude" / "settings.json").resolve()),
             sandbox["filesystem"]["denyWrite"],
         )
@@ -231,20 +250,30 @@ class TestInitWorkspace(unittest.TestCase):
     def test_enabled_sandbox_allows_claude_tmpdir_writes(self):
         """Claude Code's sandbox TMPDIR (cwd-* shell-hook files) is writable
         by default — kills the zsh operation-not-permitted noise."""
-        ws = init_workspace("sandbox-claude-tmp")
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            os.environ["AGENT_CWD"] = self._tmp.name
+            ws = init_workspace("sandbox-claude-tmp")
         settings = json.loads((ws / ".claude" / "settings.json").read_text())
         allow_write = settings["sandbox"]["filesystem"]["allowWrite"]
         self.assertEqual(allow_write[0], str(ws.resolve()))
-        self.assertEqual(allow_write[1:], _sandbox_claude_tmp_write_paths())
+        self.assertEqual(
+            allow_write[1:],
+            [str(Path("/tmp/claude").resolve(strict=False))],
+        )
+        self.assertNotIn("/tmp", allow_write)
+        self.assertFalse(any("cwd-" in path for path in allow_write))
 
     def test_claude_tmpdir_env_override_is_honored(self):
         with unittest.mock.patch.dict(
-            os.environ, {"CLAUDE_TMPDIR": "/custom/claude-tmp"}
+            os.environ, {"CLAUDE_CODE_TMPDIR": "/custom/claude-tmp"}
         ):
             ws = init_workspace("sandbox-claude-tmp-env")
         settings = json.loads((ws / ".claude" / "settings.json").read_text())
         allow_write = settings["sandbox"]["filesystem"]["allowWrite"]
-        self.assertIn("/custom/claude-tmp", allow_write)
+        self.assertIn(
+            str(Path("/custom/claude-tmp").resolve(strict=False)),
+            allow_write,
+        )
 
     def test_extra_fs_write_paths_appended_after_workspace_and_tmp(self):
         ws = init_workspace(
@@ -260,7 +289,7 @@ class TestInitWorkspace(unittest.TestCase):
         sandbox = settings["sandbox"]
         allow_write = sandbox["filesystem"]["allowWrite"]
         # Relative paths dropped, trailing-slash dedupe, order preserved:
-        # workspace → claude tmp → user extras.
+        # workspace → existing Claude tmp policy → user extras.
         self.assertEqual(
             allow_write,
             [
@@ -274,6 +303,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertEqual(
             sandbox["filesystem"]["denyWrite"],
             [
+                str(ws.resolve() / ".dream"),
                 str(ws.resolve() / ".claude" / "settings.json"),
                 str(ws.resolve() / ".claude" / "settings.local.json"),
                 str(ws.resolve() / ".claude" / "hooks"),

@@ -7,7 +7,7 @@
 - 来源 Issue: `SUO-201-BE-002`
 - Parent: `[SUO-198](/SUO/issues/SUO-198)`
 - Task 文档: `docs/task/task_202_backend_story-workspace-rest-api.md`
-- 关联设计稿: `docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
+- 关联设计稿: `docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
 - 关联 Stage: `docs/stage/stage_story-workspace.md` / `stage_001_story-workspace` / Wave 2
 - 执行 Agent: `ExecTaskAgent`
 - 执行时间: `2026-08-01 16:30:40 CST`

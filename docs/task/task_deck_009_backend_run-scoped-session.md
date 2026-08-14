@@ -218,7 +218,7 @@ class RunSessionAdapter(Protocol):
 - 数据库注入失败点（Session 更新后、Run 更新后、transition 写入后）均不得留下部分提交；重试必须返回已有完整成功结果或执行受控恢复。
 - 用户取消：run 使用既有 `cancelled` 合法流转，Session 终止原因记录为 `USER_CANCELLED`。
 - runtime/session 错误：run 使用 `failed`，保存 `failed_step/error_code`，Session 转 `failed`。
-- 正常执行结束：Session 转 `terminated`；Workflow Run 的 `output_validating/pending_review/confirmed/continuing/completed` 业务流转仍由既有 Workflow Run/下游 owner 驱动，本 task 不把 Session 关闭直接伪装为业务完成。
+- 正常执行结束：Session 转 `terminated`；Workflow Run 的 `output_validating/pending_review/confirmed/completed` 业务流转仍由既有 Workflow Run/下游 owner 驱动，本 task 不把 Session 关闭直接伪装为业务完成。
 - 安全撤销只消费已冻结的结构化 reason 并执行终止；撤销策略、11 项 evidence pack 和事件审计分别属于后续安全/审计 task，本 task 不扩大 production rollout。
 
 ### Step 7: 远程热刷新守卫与插件集合不可变
@@ -238,7 +238,7 @@ async def guard_reload(
 
 强制规则：
 
-- 任何 run-bound `creating|active` Session，及 `running|output_validating|pending_review|confirmed|continuing` Workflow Run，均拒绝 `apply_flag_settings`/`reload_plugins`，返回 `RUNTIME_PLUGIN_RELOAD_UNSUPPORTED`。
+- 任何 run-bound `creating|active` Session，及 `running|output_validating|pending_review|confirmed` Workflow Run，均拒绝 `apply_flag_settings`/`reload_plugins`，返回 `RUNTIME_PLUGIN_RELOAD_UNSUPPORTED`。
 - 已终止/失败的 run-scoped Session 也不得复活或热刷新；配置/版本/digest/能力变化必须走新 preflight/new run/new Receipt/new Session。
 - 仅 `workflow_run_id is None` 且 `agent_session_id` 明确属于空闲管理 smoke 上下文时，才可考虑热刷新；插件必须已物化，marketplace 已缓存，版本/digest/capability 未扩大，环境仍为 development/test。
 - smoke 结果只返回诊断证据，不写 Workflow Run readiness、不创建 Receipt、不授权 production、不改变任何活动 Session。

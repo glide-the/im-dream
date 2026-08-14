@@ -3,7 +3,7 @@
 > **Design ID**: `design_001_deck-integration-delta`
 > **关联 Issue**: `SUO-215`、`SUO-236`、`SUO-250`
 > **父级裁决**: `SUO-235`
-> **基线**: `docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
+> **基线**: `docs/design/story-workspace/product-scope-and-navigation.md`、`docs/design/story-workspace/product-scope-and-navigation.md`
 > **最后更新**: 2026-08-02
 > **设计阶段**: `design → issue → task → stage`
 > **当前 canonical 真相源**: `docs/design/deck/deck-integration-delta.md`
@@ -303,7 +303,7 @@ WorkflowPreflight: configuring → ready / failed / expired
 
 StoryWorkflowRun:
 preflight → queued → running → output_validating → pending_review → confirmed
-                │              │                 │              ├→ continuing → completed
+                │              │                 │              ├→ completed
                 │              │                 │              └→ completed
                 │              │                 └→ rejected（重试创建新 run）
                 ├──────────────┴────────────────────────────────→ failed
@@ -495,7 +495,7 @@ sequenceDiagram
 | Persistence/API | `backend/database.py`、`backend/routers/claude_agent.py` | `chat_thread.deck_id`、不可切换与权属校验 |
 | Plugin control plane | `backend/services/deck/admin_gateway.py`、`backend/routers/deck_plugins.py`、`frontend/src/components/plugin-admin/PluginAdminPage.tsx` | 安装、启停、升级、回滚、卸载、审批、readiness 与来源约束 |
 | Built-in runtime plugin | `backend/services/deck/builtin_plugin.py`、`plugins/ink-dream-story/` | 发布并校验内置故事工作流插件与不可变 runtime lock |
-| Deck domain | `backend/services/deck/chat_context.py`、`runtime_context.py`、`story_workflow_gateway.py` | Deck/Voice/Binding 解析、preflight/run、不可变快照、readiness 与 SDK 设置生成 |
+| Deck domain | `backend/services/deck/chat_context.py`、`runtime_context.py`、`story_workflow_application.py` | Deck/Voice/Binding 解析、preflight/run、不可变快照、readiness 与 SDK 设置生成 |
 | Claude runtime | `backend/claude_agent/service.py`、`backend/libs/claude_agent_kit/types.py`、`agent_runner.py` | 把服务端 settings 与已验证本地 plugin path 传入 Claude Agent SDK |
 | Review persistence | `backend/claude_agent/service.py`、`backend/services/story_workspace/agent_integration.py`、`backend/routers/story_workspace.py` | 合同输出原子写入待审阅资源；确认故事后原子发布故事并确认关联角色/场景 |
 | Review UI | `frontend/src/lib/story-workspace-events.ts`、`StoryWorkspaceReviewDetail.tsx`、`frontend/src/api/storyWorkspaceReviewApi.ts` | 接收 Agent receipt、自动打开审阅栏、编辑/驳回/确认及发布完成反馈 |

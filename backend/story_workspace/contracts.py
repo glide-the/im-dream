@@ -1,3 +1,9 @@
+# [Input] Server-owned Story Workspace domain facts.
+# [Output] Strict persistence and wire DTOs, including separate Project and
+#          Episode presentation contracts.
+# [Pos] Pure domain contract module; no runtime, database, or transport owner.
+# [Sync] 2026-08-14: add optional complete asset content beside compact Dream summaries.
+
 """Canonical contracts for the Story Workspace domain.
 
 This module owns the data shapes shared by Story Workspace API, review, and
@@ -6,7 +12,7 @@ respective router and service modules.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import json
 import math
@@ -33,21 +39,12 @@ STORY_WORKSPACE_GUIDANCE_IDEMPOTENCY_KEY_MAX_LENGTH = 255
 # intentionally does not assign numeric policy values. Keep these centralized
 # so a later product/security decision can revise them without schema drift.
 STORY_WORKSPACE_DREAM_FILE_MAX_BYTES = 1024 * 1024
+STORY_WORKSPACE_DREAM_ITEM_CONTENT_MAX_LENGTH = STORY_WORKSPACE_DREAM_FILE_MAX_BYTES
 STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX = 256
 STORY_WORKSPACE_DREAM_ITEMS_MAX = 1000
 STORY_WORKSPACE_DREAM_RELATIONS_MAX = 100
 STORY_WORKSPACE_DREAM_EDITS_MAX = 1000
 STORY_WORKSPACE_DREAM_EDIT_FIELDS_MAX = 64
-STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX = 4000
-STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX = 255
-STORY_WORKSPACE_DREAM_AGENT_TOOL_REASON_MAX = 500
-STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX_BYTES = 8192
-STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX = 20
-STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX = 128
-STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX = 300
-STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX = 120
-STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX = 160
-STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX = 1000
 _StoryWorkspaceDreamPositiveInt = Annotated[StrictInt, Field(ge=1)]
 _StoryWorkspaceDreamNonNegativeInt = Annotated[StrictInt, Field(ge=0)]
 
@@ -129,7 +126,7 @@ class StoryWorkspaceDreamRunLifecycle(str, Enum):
 
     GENERATING = "generating"
     WAITING_CONFIRMATION = "waiting_confirmation"
-    CONTINUING = "continuing"
+    RUNNING = "running"
     RECENT = "recent"
 
 
@@ -291,256 +288,6 @@ class StoryWorkspaceDreamLaunchAccepted(_StoryWorkspaceDreamWireModel):
         return cls.model_validate(context.model_dump(mode="json"))
 
 
-class StoryWorkspaceDreamAgentMessageCommand(_StoryWorkspaceDreamWireModel):
-    """Untrusted text command for the run-bound Dream Agent widget."""
-
-    text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
-    idempotency_key: str = Field(
-        min_length=1,
-        max_length=255,
-        pattern=r"^[A-Za-z0-9._:-]+$",
-    )
-
-    @field_validator("text")
-    @classmethod
-    def message_text_must_not_be_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Dream Agent message text must not be blank")
-        return value
-
-
-_STORY_WORKSPACE_DREAM_AGENT_ACTIVITY_LABELS = {
-    "workspace_read": "读取工作区资料",
-    "dream_write": "更新 Dream 内容",
-    "reference_lookup": "查找参考资料",
-    "delegation": "协同处理创作任务",
-    "other": "处理 Dream 创作任务",
-}
-
-
-class StoryWorkspaceDreamAgentTextContent(_StoryWorkspaceDreamWireModel):
-    """One bounded public text part in its persisted message order."""
-
-    kind: Literal["text"] = "text"
-    text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
-    truncated: bool = False
-
-
-class StoryWorkspaceDreamAgentActivityContent(_StoryWorkspaceDreamWireModel):
-    """Server-authored activity summary; raw generic tool data is never carried."""
-
-    kind: Literal["activity"] = "activity"
-    id: str = Field(pattern=r"^dream_activity_[0-9a-f]{32,64}$")
-    category: Literal[
-        "workspace_read", "dream_write", "reference_lookup", "delegation", "other"
-    ]
-    label: Literal[
-        "读取工作区资料",
-        "更新 Dream 内容",
-        "查找参考资料",
-        "协同处理创作任务",
-        "处理 Dream 创作任务",
-    ]
-    status: Literal["running", "completed", "stopped"]
-
-    @model_validator(mode="after")
-    def label_matches_category(self) -> "StoryWorkspaceDreamAgentActivityContent":
-        if self.label != _STORY_WORKSPACE_DREAM_AGENT_ACTIVITY_LABELS[self.category]:
-            raise ValueError("Dream Agent activity label must match its fixed category")
-        return self
-
-
-StoryWorkspaceDreamAgentContent = (
-    StoryWorkspaceDreamAgentTextContent | StoryWorkspaceDreamAgentActivityContent
-)
-
-
-class StoryWorkspaceDreamAgentMessage(_StoryWorkspaceDreamWireModel):
-    """Safe message plus ordered Dream-only public content projection."""
-
-    id: str = Field(min_length=1, max_length=255)
-    role: Literal["user", "assistant"]
-    text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
-    truncated: bool = False
-    content: list[StoryWorkspaceDreamAgentContent]
-    created_at: datetime
-
-
-class StoryWorkspaceDreamAgentToolConfirmationOption(_StoryWorkspaceDreamWireModel):
-    """One bounded public option; runner IDs and raw values never cross the wire."""
-
-    label: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX)
-    value: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX)
-
-
-class StoryWorkspaceDreamAgentToolConfirmationQuestion(_StoryWorkspaceDreamWireModel):
-    """Server-authored AskUser question with an opaque public identity."""
-
-    id: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
-        pattern=r"^q[0-9]+$",
-    )
-    question: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
-    )
-    type: Literal["text", "textarea", "select", "checkbox", "radio", "number"]
-    required: StrictBool
-    multi_select: Optional[StrictBool] = None
-    options: Optional[
-        list[StoryWorkspaceDreamAgentToolConfirmationOption]
-    ] = Field(default=None, max_length=12)
-    placeholder: Optional[str] = Field(
-        default=None,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
-    )
-
-
-class StoryWorkspaceDreamAgentToolConfirmationNetwork(_StoryWorkspaceDreamWireModel):
-    """Allowlisted network summary without raw request parameters."""
-
-    host: Optional[str] = Field(
-        default=None,
-        max_length=253,
-        pattern=(
-            r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?"
-            r"|[A-Fa-f0-9:]+)(?::[0-9]{1,5})?$"
-        ),
-    )
-    policy: Literal["allowlist", "open", "deny", "unknown"]
-
-
-class StoryWorkspaceDreamAgentToolConfirmation(_StoryWorkspaceDreamWireModel):
-    """Safe display projection for one runtime-pending Dream tool decision."""
-
-    tool_call_id: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
-        pattern=r"^[A-Za-z0-9._:/-]+$",
-    )
-    kind: Literal["approval", "ask_user", "sandbox_network", "reject_only"]
-    tool_name: str = Field(
-        min_length=1,
-        max_length=80,
-        pattern=r"^[A-Za-z0-9 .:-]+$",
-    )
-    questions: Optional[
-        list[StoryWorkspaceDreamAgentToolConfirmationQuestion]
-    ] = Field(default=None, max_length=8)
-    network: Optional[StoryWorkspaceDreamAgentToolConfirmationNetwork] = None
-
-    @model_validator(mode="after")
-    def fields_match_confirmation_kind(self) -> "StoryWorkspaceDreamAgentToolConfirmation":
-        if self.kind == "ask_user":
-            if not self.questions or self.network is not None:
-                raise ValueError("AskUser confirmation requires questions only")
-        elif self.kind == "sandbox_network":
-            if self.network is None or self.questions is not None:
-                raise ValueError("Sandbox confirmation requires network only")
-        elif self.questions is not None or self.network is not None:
-            raise ValueError("Untyped confirmation cannot carry typed details")
-        return self
-
-
-class StoryWorkspaceDreamAgentMessageSnapshot(_StoryWorkspaceDreamWireModel):
-    """Persisted safe history plus transient execution availability."""
-
-    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
-    lifecycle: Literal["idle", "streaming"]
-    active_turn_id: Optional[str] = Field(default=None, max_length=255)
-    can_send: bool
-    send_block_reason: Optional[
-        Literal["generating", "waiting_confirmation", "confirming", "continuing", "busy"]
-    ] = None
-    messages: list[StoryWorkspaceDreamAgentMessage]
-    pending_tool_confirmations: list[StoryWorkspaceDreamAgentToolConfirmation] = Field(
-        default_factory=list,
-        max_length=256,
-    )
-    tool_confirmation_observation: Literal["known", "unknown"]
-    snapshot_at: datetime
-
-
-class StoryWorkspaceDreamAgentMessageAccepted(_StoryWorkspaceDreamWireModel):
-    """Acknowledge one durable, idempotently claimed widget command."""
-
-    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
-    message_id: str = Field(min_length=1, max_length=255)
-    accepted: Literal[True] = True
-
-
-_StoryWorkspaceDreamToolAnswerText = Annotated[
-    StrictStr,
-    Field(max_length=STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX),
-]
-_StoryWorkspaceDreamToolAnswerInteger = Annotated[
-    StrictInt,
-    Field(ge=-1_000_000_000, le=1_000_000_000),
-]
-_StoryWorkspaceDreamToolAnswerValue = (
-    _StoryWorkspaceDreamToolAnswerText
-    | StrictBool
-    | _StoryWorkspaceDreamToolAnswerInteger
-    | Annotated[list[_StoryWorkspaceDreamToolAnswerText], Field(max_length=20)]
-)
-
-
-class StoryWorkspaceDreamAgentToolConfirmationCommand(_StoryWorkspaceDreamWireModel):
-    """Untrusted decision for one pending tool on the run-bound Dream turn."""
-
-    tool_call_id: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
-        pattern=r"^[A-Za-z0-9._:/-]+$",
-    )
-    approved: StrictBool
-    reason: Optional[str] = Field(
-        default=None,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_REASON_MAX,
-    )
-    answers: Optional[
-        dict[
-            Annotated[
-                StrictStr,
-                Field(
-                    min_length=1,
-                    max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
-                ),
-            ],
-            _StoryWorkspaceDreamToolAnswerValue,
-        ]
-    ] = Field(default=None, max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX)
-
-    @model_validator(mode="after")
-    def validate_tool_confirmation_payload(
-        self,
-    ) -> "StoryWorkspaceDreamAgentToolConfirmationCommand":
-        if self.reason is not None and not self.reason.strip():
-            raise ValueError("reason must not be blank")
-        if self.answers is not None:
-            encoded = json.dumps(
-                self.answers,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ).encode("utf-8")
-            if len(encoded) > STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX_BYTES:
-                raise ValueError("answers payload is too large")
-        return self
-
-
-class StoryWorkspaceDreamAgentToolConfirmationAccepted(_StoryWorkspaceDreamWireModel):
-    """Safe acknowledgement without exposing the hidden thread or tool input."""
-
-    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
-    tool_call_id: str = Field(
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
-    )
-    approved: StrictBool
-    resolved: Literal[True] = True
-
-
 class StoryWorkspaceDreamToolInput(BaseModel):
     """Canonical base for Agent-visible Dream MCP input contracts."""
 
@@ -663,6 +410,10 @@ class StoryWorkspaceDreamStageItem(_StoryWorkspaceDreamStorageModel):
     entity_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=200)
     summary: Optional[str] = Field(default=None, max_length=4000)
+    content: Optional[str] = Field(
+        default=None,
+        max_length=STORY_WORKSPACE_DREAM_ITEM_CONTENT_MAX_LENGTH,
+    )
     source_file: str = Field(min_length=1, max_length=1024)
     relations: list[str] = Field(
         default_factory=list,
@@ -729,6 +480,10 @@ class StoryWorkspaceDreamStageItemResponse(_StoryWorkspaceDreamWireModel):
     entity_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=200)
     summary: Optional[str] = Field(default=None, max_length=4000)
+    content: Optional[str] = Field(
+        default=None,
+        max_length=STORY_WORKSPACE_DREAM_ITEM_CONTENT_MAX_LENGTH,
+    )
     source_file: str = Field(min_length=1, max_length=1024)
     relations: list[str] = Field(
         default_factory=list,
@@ -784,6 +539,72 @@ class StoryWorkspaceDreamStageResponse(_StoryWorkspaceDreamWireModel):
         return self
 
 
+class StoryWorkspaceDreamAgentActivityResponse(_StoryWorkspaceDreamWireModel):
+    """Display-only Observer projection; never a Chat or Workflow truth source."""
+
+    activity: Literal[
+        "activity_started_hint",
+        "activity_settled_hint",
+        "waiting_confirmation_hint",
+        "turn_settled_hint",
+        "reconcile_requested",
+    ]
+    sequence: int = Field(ge=-1)
+    terminal_outcome: Literal["completed", "failed", "cancelled"] | None = None
+    needs_reconcile: bool = False
+    operation_scope: Literal[
+        "tool",
+        "subagent",
+        "content_generation",
+        "workflow_operation",
+    ] | None = None
+    operation_state: Literal[
+        "started",
+        "waiting_confirmation",
+        "succeeded",
+        "failed",
+    ] | None = None
+    operation_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def fields_match_activity_kind(self) -> "StoryWorkspaceDreamAgentActivityResponse":
+        if self.activity == "turn_settled_hint":
+            if (
+                self.terminal_outcome is None
+                or self.needs_reconcile
+                or self.operation_scope is not None
+                or self.operation_state is not None
+                or self.operation_id is not None
+            ):
+                raise ValueError("turn settlement requires only terminal_outcome")
+            return self
+        if self.terminal_outcome is not None:
+            raise ValueError("only turn settlement may expose terminal_outcome")
+
+        if self.activity == "reconcile_requested":
+            if (
+                not self.needs_reconcile
+                or self.operation_scope is not None
+                or self.operation_state is not None
+                or self.operation_id is not None
+            ):
+                raise ValueError("reconcile activity requires no operation")
+            return self
+        if self.needs_reconcile:
+            raise ValueError("needs_reconcile requires reconcile activity")
+
+        expected_states = {
+            "activity_started_hint": {"started"},
+            "activity_settled_hint": {"succeeded", "failed"},
+            "waiting_confirmation_hint": {"waiting_confirmation"},
+        }
+        if self.operation_scope is None or self.operation_state not in expected_states[
+            self.activity
+        ]:
+            raise ValueError("operation state does not match activity")
+        return self
+
+
 class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
     story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     thread_id: str = Field(min_length=1, max_length=255)
@@ -798,6 +619,12 @@ class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
     confirmation_accepted: bool = False
     confirmation_dispatched: bool = False
     confirmation_label: Literal["确认并继续"] = "确认并继续"
+    # Preserve the established wire contract when no live process-local hint
+    # exists; FastAPI/Pydantic only emit ``agentActivity`` for a real value.
+    agent_activity: StoryWorkspaceDreamAgentActivityResponse | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def confirmation_matches_file_completeness(
@@ -841,12 +668,6 @@ class StoryWorkspaceEpisodeBindingAvailability(str, Enum):
     UNBOUND = "unbound"
 
 
-class StoryWorkspaceEpisodeBindingPublicReason(str, Enum):
-    """Allowlisted public recovery reasons without internal diagnostics."""
-
-    EPISODE_BINDING_UNPROVEN = "episode_binding_unproven"
-
-
 class StoryWorkspaceEpisodeArtifactAvailability(str, Enum):
     """Filesystem/parse availability, not an Episode business lifecycle."""
 
@@ -870,541 +691,86 @@ class StoryWorkspaceEpisodeProducerAction(str, Enum):
     PREPARE_RENDER_GUIDE = "prepare_render_guide"
 
 
-class StoryWorkspaceEpisodeAction(str, Enum):
-    """Server-derived Episode capabilities, never persisted lifecycle states."""
+class StoryWorkspaceStoryIndexReconcileCommand(_StoryWorkspaceDreamWireModel):
+    """Path-free request for one synchronous idempotent index retry."""
 
-    PLAN_EPISODE = "plan_episode"
-    WRITE_SCRIPT = "write_script"
-    REVIEW_SCRIPT = "review_script"
-    REFRESH_ASSETS = "refresh_assets"
-    REGENERATE_STORYBOARD = "regenerate_storyboard"
-    GENERATE_PROMPTS = "generate_prompts"
-    REVIEW_FULL_CHAIN = "review_full_chain"
-    VALIDATE_EPISODE = "validate_episode"
-    PREPARE_RENDER_GUIDE = "prepare_render_guide"
-    NONE_IN_SCOPE = "none_in_scope"
-
-
-class StoryWorkspaceEpisodeActionDiagnostic(str, Enum):
-    """Evidence quality for a derived action, not an Episode business status."""
-
-    READY = "ready"
-    NEEDS_CONFIRMATION = "needs_confirmation"
-
-
-class StoryWorkspaceEpisodeWorkflowCompletion(_StoryWorkspaceDreamStorageModel):
-    """One technical completion fact tied to a canonical input snapshot."""
-
-    action: StoryWorkspaceEpisodeAction
-    input_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    manifest_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    message_id: str = Field(pattern=r"^dream_agent_[0-9a-f]{64}$")
-    recorded_at: datetime
-
-    @model_validator(mode="after")
-    def action_is_completable(self) -> "StoryWorkspaceEpisodeWorkflowCompletion":
-        if self.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
-            raise ValueError("none_in_scope cannot be recorded as completion")
-        return self
-
-
-class StoryWorkspaceEpisodeWorkflowFile(_StoryWorkspaceDreamStorageModel):
-    """Revisioned workflow evidence; never an owner of creative content."""
-
-    schema_version: Literal["dream-episode-workflow/v1"] = (
-        "dream-episode-workflow/v1"
-    )
-    workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
-    episode_uid: str = Field(pattern=r"^[0-9a-f]{32}$")
-    revision: _StoryWorkspaceDreamNonNegativeInt = 0
-    completions: list[StoryWorkspaceEpisodeWorkflowCompletion] = Field(
-        default_factory=list,
-        max_length=9,
-    )
-    updated_at: datetime
-
-    @model_validator(mode="after")
-    def actions_are_unique(self) -> "StoryWorkspaceEpisodeWorkflowFile":
-        actions = [item.action for item in self.completions]
-        if len(actions) != len(set(actions)):
-            raise ValueError("workflow completion actions must be unique")
-        return self
-
-
-class StoryWorkspaceEpisodeWorkflowCompletionToolInput(
-    StoryWorkspaceDreamToolInput
-):
-    """Path-free request; the host message owns all completion evidence."""
-
-    workflow_run_id: str = Field(
-        alias="workflowRunId",
-        pattern=r"^run_[0-9a-f]{32}$",
-    )
-
-
-class StoryWorkspaceEpisodeActionResolution(_StoryWorkspaceDreamWireModel):
-    """One evidence-derived next capability and its diagnostic confidence."""
-
-    action: StoryWorkspaceEpisodeAction
-    diagnostic: StoryWorkspaceEpisodeActionDiagnostic
-    can_dispatch: StrictBool
-
-    @model_validator(mode="after")
-    def dispatch_matches_action(self) -> "StoryWorkspaceEpisodeActionResolution":
-        if (
-            self.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE
-            and self.can_dispatch
-        ):
-            raise ValueError("none_in_scope cannot be dispatched")
-        return self
-
-
-class StoryWorkspaceEpisodeActionAvailability(str, Enum):
-    """Public option eligibility derived from current server facts."""
-
-    EXECUTABLE = "executable"
-    PREVIEW = "preview"
-    BLOCKED = "blocked"
-
-
-class StoryWorkspaceEpisodeActionDispatchState(str, Enum):
-    """Technical dispatch coordination, never an Episode lifecycle."""
-
-    IDLE = "idle"
-    ACCEPTED = "accepted"
-    DISPATCHING = "dispatching"
-    DISPATCHED = "dispatched"
-
-
-class StoryWorkspaceEpisodeRelation(str, Enum):
-    """The bounded current/next Episode window exposed by the resolver."""
-
-    CURRENT = "current"
-    NEXT = "next"
-
-
-class StoryWorkspaceEpisodeActionTarget(_StoryWorkspaceDreamWireModel):
-    """Path-free Episode display identity issued by the server."""
-
-    opaque_episode_id: Optional[str] = Field(
+    idempotency_key: Optional[str] = Field(
         default=None,
-        pattern=r"^[0-9a-f]{32}$",
-    )
-    candidate_id: Optional[str] = Field(
-        default=None,
-        pattern=r"^episode_candidate_[0-9a-f]{64}$",
-    )
-    display_label: StrictStr = Field(pattern=r"^EP[0-9]{2,}$")
-    relation: StoryWorkspaceEpisodeRelation
-
-    @model_validator(mode="after")
-    def identity_matches_relation(self) -> "StoryWorkspaceEpisodeActionTarget":
-        if (self.opaque_episode_id is None) == (self.candidate_id is None):
-            raise ValueError("an Episode target requires exactly one opaque identity")
-        if (
-            self.relation is StoryWorkspaceEpisodeRelation.CURRENT
-            and self.opaque_episode_id is None
-        ):
-            raise ValueError("the current Episode target must already be bound")
-        return self
-
-
-class StoryWorkspaceEpisodeArtifactCanonicalInput(_StoryWorkspaceDreamWireModel):
-    """One Episode-manifest-owned public canonical input."""
-
-    source_type: Literal["episode_artifact"] = "episode_artifact"
-    artifact: Literal[
-        "episode_outline",
-        "script",
-        "review_report",
-        "storyboard",
-        "prompts",
-        "renders",
-    ]
-    owner: Literal["episode_artifact_manifest"] = "episode_artifact_manifest"
-    label: StrictStr = Field(min_length=1, max_length=120)
-    availability: Literal["available", "not_generated", "invalid", "unavailable"]
-    public_revision: Optional[str] = Field(
-        default=None,
-        pattern=r"^sha256:[0-9a-f]{64}$",
-    )
-    revision_kind: Literal["content"] = "content"
-    requirement: Literal["required", "context"]
-
-
-class StoryWorkspaceProjectArtifactCanonicalInput(_StoryWorkspaceDreamWireModel):
-    """One allowlisted canonical project-file input without its path."""
-
-    source_type: Literal["project_artifact"] = "project_artifact"
-    artifact: Literal[
-        "project_definition",
-        "master_outline",
-        "worldbuilding",
-        "character_arc_ledger",
-    ]
-    owner: Literal["canonical_project_files"] = "canonical_project_files"
-    label: StrictStr = Field(min_length=1, max_length=120)
-    availability: Literal["available", "not_generated", "invalid", "unavailable"]
-    public_revision: Optional[str] = Field(
-        default=None,
-        pattern=r"^sha256:[0-9a-f]{64}$",
-    )
-    revision_kind: Literal["content"] = "content"
-    requirement: Literal["required", "context"]
-
-
-class StoryWorkspaceAssetContextCanonicalInput(_StoryWorkspaceDreamWireModel):
-    """Public aggregate status for canonical project asset inventory."""
-
-    source_type: Literal["asset_context"] = "asset_context"
-    context: Literal["character_scene_prop_inventory"] = (
-        "character_scene_prop_inventory"
-    )
-    owner: Literal["canonical_project_asset_inventory"] = (
-        "canonical_project_asset_inventory"
-    )
-    label: StrictStr = Field(min_length=1, max_length=120)
-    availability: Literal["current", "stale", "unavailable"]
-    public_revision: Optional[str] = Field(
-        default=None,
-        pattern=r"^sha256:[0-9a-f]{64}$",
-    )
-    revision_kind: Literal["aggregate"] = "aggregate"
-    requirement: Literal["context"] = "context"
-
-
-class StoryWorkspaceWorkflowFactCanonicalInput(_StoryWorkspaceDreamWireModel):
-    """One workflow-fact-owned prerequisite exposed without internal metadata."""
-
-    source_type: Literal["workflow_fact"] = "workflow_fact"
-    fact: Literal[
-        "refresh_assets_completion",
-        "full_chain_review",
-        "validation",
-        "prior_episode_validation",
-    ]
-    owner: Literal["episode_workflow_facts"] = "episode_workflow_facts"
-    label: StrictStr = Field(min_length=1, max_length=120)
-    availability: Literal["current", "stale", "missing"]
-    public_revision: Optional[str] = Field(
-        default=None,
-        pattern=r"^sha256:[0-9a-f]{64}$",
-    )
-    revision_kind: Literal["input", "facts"]
-    requirement: Literal["required"] = "required"
-
-
-StoryWorkspaceEpisodeActionCanonicalInput = Annotated[
-    StoryWorkspaceEpisodeArtifactCanonicalInput
-    | StoryWorkspaceProjectArtifactCanonicalInput
-    | StoryWorkspaceAssetContextCanonicalInput
-    | StoryWorkspaceWorkflowFactCanonicalInput,
-    Field(discriminator="source_type"),
-]
-
-
-class StoryWorkspaceEpisodeActionOptionV2(_StoryWorkspaceDreamWireModel):
-    """One opaque, target-aware server-owned workflow action option."""
-
-    action_id: str = Field(pattern=r"^episode_action_[0-9a-f]{64}$")
-    action: StoryWorkspaceEpisodeAction
-    input_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    target_episode: StoryWorkspaceEpisodeActionTarget
-    label: StrictStr = Field(min_length=1, max_length=160)
-    description: StrictStr = Field(min_length=1, max_length=500)
-    display_command: StrictStr = Field(min_length=1, max_length=160)
-    availability: StoryWorkspaceEpisodeActionAvailability
-    is_recommended: StrictBool
-    can_dispatch: StrictBool
-    disabled_reason: Optional[StrictStr] = Field(default=None, max_length=300)
-    canonical_inputs: list[StoryWorkspaceEpisodeActionCanonicalInput] = Field(
-        default_factory=list,
-        max_length=16,
-    )
-    consequences: list[StrictStr] = Field(default_factory=list, max_length=8)
-    dispatch_state: StoryWorkspaceEpisodeActionDispatchState = (
-        StoryWorkspaceEpisodeActionDispatchState.IDLE
-    )
-
-    @model_validator(mode="after")
-    def option_state_is_consistent(self) -> "StoryWorkspaceEpisodeActionOptionV2":
-        if self.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
-            raise ValueError("none_in_scope cannot be rendered as an option")
-        if any(
-            marker in self.display_command
-            for marker in ("mcp__", "workflowRunId", "expectedBindingRevision")
-        ):
-            raise ValueError("display_command must not expose internal tool details")
-        if self.availability in {
-            StoryWorkspaceEpisodeActionAvailability.PREVIEW,
-            StoryWorkspaceEpisodeActionAvailability.BLOCKED,
-        }:
-            if self.dispatch_state is not StoryWorkspaceEpisodeActionDispatchState.IDLE:
-                raise ValueError("preview and blocked options must remain idle")
-            if self.can_dispatch:
-                raise ValueError("preview and blocked options cannot be dispatched")
-        if self.dispatch_state in {
-            StoryWorkspaceEpisodeActionDispatchState.ACCEPTED,
-            StoryWorkspaceEpisodeActionDispatchState.DISPATCHING,
-            StoryWorkspaceEpisodeActionDispatchState.DISPATCHED,
-        } and self.can_dispatch:
-            raise ValueError("non-idle options cannot be dispatched")
-        if self.can_dispatch and (
-            self.availability is not StoryWorkspaceEpisodeActionAvailability.EXECUTABLE
-            or self.disabled_reason is not None
-        ):
-            raise ValueError("dispatchable options must be executable without a reason")
-        if not self.can_dispatch and self.disabled_reason is None:
-            raise ValueError("non-dispatchable options require a public reason")
-        return self
-
-
-class StoryWorkspaceEpisodeActionProjectionV2(_StoryWorkspaceDreamWireModel):
-    """A bounded server-ordered current/next Episode action projection."""
-
-    recommended_action_id: Optional[str] = Field(
-        default=None,
-        pattern=r"^episode_action_[0-9a-f]{64}$",
-    )
-    action_options: list[StoryWorkspaceEpisodeActionOptionV2] = Field(
-        default_factory=list,
-        max_length=9,
-    )
-
-    @model_validator(mode="after")
-    def options_match_recommendation(self) -> "StoryWorkspaceEpisodeActionProjectionV2":
-        if not self.action_options:
-            if self.recommended_action_id is not None:
-                raise ValueError("an empty projection cannot recommend an action")
-            return self
-        if self.recommended_action_id != self.action_options[0].action_id:
-            raise ValueError("the first option must match recommended_action_id")
-        recommended = [item for item in self.action_options if item.is_recommended]
-        if len(recommended) != 1 or recommended[0].action_id != self.recommended_action_id:
-            raise ValueError("a non-empty projection requires one recommendation")
-        identities = [item.action_id for item in self.action_options]
-        if len(identities) != len(set(identities)):
-            raise ValueError("action option identities must be unique")
-        return self
-
-
-class StoryWorkspaceEpisodeActionOption(_StoryWorkspaceDreamWireModel):
-    """One server-ordered workflow option exposed for navigation only."""
-
-    action: StoryWorkspaceEpisodeAction
-    label: StrictStr = Field(min_length=1, max_length=120)
-    display_command: StrictStr = Field(min_length=1, max_length=120)
-    is_current: StrictBool
-    can_dispatch: StrictBool
-
-    @model_validator(mode="after")
-    def dispatch_requires_current_option(self) -> "StoryWorkspaceEpisodeActionOption":
-        if self.can_dispatch and not self.is_current:
-            raise ValueError("only the current workflow option can be dispatched")
-        if any(
-            marker in self.display_command
-            for marker in ("mcp__", "workflowRunId", "expectedBindingRevision")
-        ):
-            raise ValueError("display_command must not expose internal tool details")
-        return self
-
-
-class StoryWorkspaceEpisodeWorkflowProjection(_StoryWorkspaceDreamWireModel):
-    """Derived workflow navigation plus the revision of technical facts."""
-
-    facts_revision: _StoryWorkspaceDreamNonNegativeInt
-    next_action: StoryWorkspaceEpisodeActionResolution
-    prerequisites: list[StoryWorkspaceEpisodeAction] = Field(
-        default_factory=list,
-        max_length=9,
-    )
-    action_options: list[StoryWorkspaceEpisodeActionOption] = Field(
-        default_factory=list,
-        max_length=9,
-    )
-    legacy_partial: StrictBool
-
-    @field_validator("prerequisites")
-    @classmethod
-    def prerequisites_are_unique_and_completed(
-        cls,
-        values: list[StoryWorkspaceEpisodeAction],
-    ) -> list[StoryWorkspaceEpisodeAction]:
-        if len(values) != len(set(values)):
-            raise ValueError("workflow prerequisites must be unique")
-        if StoryWorkspaceEpisodeAction.NONE_IN_SCOPE in values:
-            raise ValueError("none_in_scope is not a prerequisite")
-        return values
-
-    @model_validator(mode="after")
-    def action_options_match_next_action(
-        self,
-    ) -> "StoryWorkspaceEpisodeWorkflowProjection":
-        if self.next_action.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
-            if self.action_options:
-                raise ValueError("none_in_scope cannot expose workflow options")
-            return self
-        if not self.action_options:
-            raise ValueError("an active workflow requires ordered action options")
-        current = self.action_options[0]
-        if (
-            current.action is not self.next_action.action
-            or not current.is_current
-            or current.can_dispatch != self.next_action.can_dispatch
-        ):
-            raise ValueError("the first workflow option must match next_action")
-        if any(option.is_current or option.can_dispatch for option in self.action_options[1:]):
-            raise ValueError("upcoming workflow options are display-only")
-        actions = [option.action for option in self.action_options]
-        if len(actions) != len(set(actions)):
-            raise ValueError("workflow action options must be unique")
-        return self
-
-
-class StoryWorkspaceEpisodeBindingRecoveryCommand(_StoryWorkspaceDreamWireModel):
-    """Path-free request for the server-owned first-Episode recovery intent."""
-
-    idempotency_key: str = Field(
-        min_length=1,
-        max_length=255,
-        pattern=r"^[A-Za-z0-9._:-]+$",
+        pattern=r"^[A-Za-z0-9._:-]{1,255}$",
     )
 
 
-_STORY_WORKSPACE_EPISODE_GUIDANCE_DENYLIST = (
-    re.compile(r"(?:^|\s)/drama-[a-z-]+\b", re.IGNORECASE),
-    re.compile(
-        r"\b(?:hidden|internal)\s+(?:reasoning|thoughts?)\b|"
-        r"\bchain\s+of\s+thought\b|\bsystem\s+prompt\b|"
-        r"隐藏推理|内部推理|思维链|系统提示词",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\bBearer\s+\S+", re.IGNORECASE),
-    re.compile(
-        r"(?<![A-Za-z0-9_-])(?:sk-(?:ant-|proj-)?|gh[pousr]_|xox[baprs]-)"
-        r"[A-Za-z0-9_-]{16,}",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?<![A-Za-z0-9])/(?:Users|home)/[^\s]+|"
-        r"(?<![A-Za-z0-9])[A-Za-z]:\\Users\\[^\s]+",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:\$\{?HOME\}?|~)/(?:\.[^/\s]+|[^/\s]+)/(?:[^\s]+)|"
-        r"(?<![A-Za-z0-9])/(?:etc)/(?:passwd|shadow)(?![A-Za-z0-9])",
-        re.IGNORECASE,
-    ),
-    re.compile(r"(?<![A-Za-z0-9_])\.\.?/[^\s]+"),
-    re.compile(
-        r"(?:^|[\r\n;&|])\s*(?:[$>#]\s*)?"
-        r"(?:git|python(?:3(?:\.\d+)*)?|npx|rm|sudo|node|bash|sh)\b"
-        r"\s+(?:--?[A-Za-z0-9]|[A-Za-z0-9_./@])",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:process\.)?env(?:\s*\||\s*\[|\.)|\bprintenv\b|"
-        r"\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|CREDENTIALS?)\s*=",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:curl|wget)\b.{0,500}\|\s*(?:ba|z|fi)?sh\b",
-        re.IGNORECASE,
-    ),
-    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
-    re.compile(
-        r"\bmcp__[a-z0-9_]+\b|\brecord_episode_workflow_completion\b|"
-        r"story_workspace_(?:dream_context|episode_action|run_id)|"
-        r"dispatch_(?:claim_id|claim_lease_until|status)",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:workflowRunId|expectedFactsRevision|expectedManifestRevision|"
-        r"expectedWorkflowRevision|inputRevision|factsRevision|manifestRevision|"
-        r"workflow_run_id|expected_facts_revision|expected_manifest_revision|"
-        r"expected_workflow_revision|input_revision)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\bsha256:[0-9a-f]{64}\b", re.IGNORECASE),
-    re.compile(
-        r"(?<![A-Za-z0-9_])CAS(?![A-Za-z0-9_])|"
-        r"\bcompare[- ]and[- ](?:swap|set)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:忽略|无视|覆盖).{0,24}(?:上文|以上|之前|前述|限制|约束)"
-        r".{0,48}(?:继续|执行|运行|下一步|后续)|"
-        r"\b(?:ignore|override|disregard)\b.{0,64}"
-        r"\b(?:previous|prior|above|instructions?|constraints?)\b.{0,64}"
-        r"\b(?:continue|execute|run|next|remaining|subsequent)\b",
-        re.IGNORECASE,
-    ),
-)
-
-
-class StoryWorkspaceEpisodeActionContinueCommand(_StoryWorkspaceDreamWireModel):
-    """Untrusted request to dispatch one server-revalidated Episode capability."""
-
-    episode_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    action: StoryWorkspaceEpisodeAction
-    idempotency_key: str = Field(
-        min_length=1,
-        max_length=255,
-        pattern=r"^[A-Za-z0-9._:-]+$",
-    )
-    user_guidance: Optional[StrictStr] = Field(default=None, max_length=2000)
-
-    @field_validator("user_guidance")
-    @classmethod
-    def guidance_is_bounded_plain_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip()
-        if not normalized:
-            return None
-        if any(
-            ord(character) < 32 and character not in "\n\t"
-            for character in normalized
-        ):
-            raise ValueError("user guidance must be bounded plain text")
-        if any(
-            pattern.search(normalized)
-            for pattern in _STORY_WORKSPACE_EPISODE_GUIDANCE_DENYLIST
-        ):
-            raise ValueError("user guidance contains disallowed sensitive content")
-        return normalized
-
-
-class StoryWorkspaceEpisodeActionContinueCommandV2(_StoryWorkspaceDreamWireModel):
-    """Opaque request; target Episode and capability are reselected server-side."""
-
-    action_id: str = Field(pattern=r"^episode_action_[0-9a-f]{64}$")
-    idempotency_key: str = Field(
-        min_length=1,
-        max_length=255,
-        pattern=r"^[A-Za-z0-9._:-]+$",
-    )
-    user_guidance: Optional[StrictStr] = Field(default=None, max_length=2000)
-
-    @field_validator("user_guidance")
-    @classmethod
-    def guidance_is_bounded_plain_text(cls, value: str | None) -> str | None:
-        return StoryWorkspaceEpisodeActionContinueCommand.guidance_is_bounded_plain_text(
-            value
-        )
-
-
-class StoryWorkspaceEpisodeActionAccepted(_StoryWorkspaceDreamWireModel):
-    """Durable dispatch acknowledgement; canonical files remain authoritative."""
+class StoryWorkspaceStoryIndexProjection(_StoryWorkspaceDreamWireModel):
+    """Browser-safe comparison of current Artifact and PostgreSQL revisions."""
 
     run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
-    episode_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
-    capability: StoryWorkspaceEpisodeAction | Literal[
-        "recover_first_episode_binding"
-    ]
-    message_id: str = Field(min_length=1, max_length=255)
-    accepted: Literal[True] = True
-    replayed: StrictBool
+    project_id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    project_title: str = Field(min_length=1, max_length=255)
+    story_id: Optional[str] = Field(
+        default=None,
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        ),
+    )
+    status: Literal["indexed", "stale", "missing", "failed"]
+    observed_manifest_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    observed_script_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    indexed_manifest_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    indexed_script_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    episode_count: int = Field(ge=1, le=99)
+    last_indexed_at: Optional[datetime] = None
+    error_code: Optional[
+        Literal[
+            "story_index_row_missing",
+            "story_index_schema_unavailable",
+            "story_index_database_unavailable",
+            "story_index_write_failed",
+            "story_index_conflict",
+            "story_index_invalid_artifact",
+            "story_index_revision_conflict",
+            "artifact_missing",
+        ]
+    ] = None
+    retryable: StrictBool
+    etag: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+    @field_validator("last_indexed_at")
+    @classmethod
+    def last_indexed_at_is_utc(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def indexed_state_is_revision_exact(self) -> "StoryWorkspaceStoryIndexProjection":
+        if self.status == "indexed" and (
+            self.story_id is None
+            or self.error_code is not None
+            or self.observed_manifest_revision is None
+            or self.observed_script_revision is None
+            or self.observed_manifest_revision != self.indexed_manifest_revision
+            or self.observed_script_revision != self.indexed_script_revision
+        ):
+            raise ValueError("indexed Story projections require matching revisions")
+        return self
 
 
 class StoryWorkspaceEpisodeArtifactConsumer(str, Enum):
@@ -1486,24 +852,6 @@ class StoryWorkspaceEpisodeRegistryFile(_StoryWorkspaceDreamStorageModel):
             seen_uids.add(episode.episode_uid)
         if self.active_episode_uid not in seen_uids:
             raise ValueError("active Episode must exist in the registry")
-        return self
-
-
-class StoryWorkspaceEpisodeBindingRecovery(_StoryWorkspaceDreamWireModel):
-    """Public recovery facts without story paths or internal failure details."""
-
-    auto_repair_attempted: StrictBool
-    can_dispatch: StrictBool
-    public_reason: Optional[StoryWorkspaceEpisodeBindingPublicReason] = None
-
-    @model_validator(mode="after")
-    def reason_matches_dispatch_capability(
-        self,
-    ) -> "StoryWorkspaceEpisodeBindingRecovery":
-        if self.can_dispatch != (self.public_reason is not None):
-            raise ValueError(
-                "only an unbound recoverable surface exposes a recovery reason"
-            )
         return self
 
 
@@ -2307,6 +1655,10 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
         default=None,
         pattern=r"^[0-9a-f]{32}$",
     )
+    episode_code: Optional[str] = Field(
+        default=None,
+        pattern=r"^EP[0-9]{2}$",
+    )
     manifest_revision: Optional[str] = Field(
         default=None,
         pattern=r"^sha256:[0-9a-f]{64}$",
@@ -2316,7 +1668,6 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
         pattern=r"^sha256:[0-9a-f]{64}$",
     )
     binding_availability: StoryWorkspaceEpisodeBindingAvailability
-    binding_recovery: StoryWorkspaceEpisodeBindingRecovery
     artifacts: list[StoryWorkspaceEpisodeArtifactManifestEntry] = Field(
         default_factory=list,
         max_length=256,
@@ -2327,8 +1678,6 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
     )
     narrative: Optional[StoryWorkspaceEpisodeNarrativeProjection] = None
     auxiliary: Optional[StoryWorkspaceEpisodeAuxiliaryProjection] = None
-    workflow: Optional[StoryWorkspaceEpisodeWorkflowProjection] = None
-    action_projection: Optional[StoryWorkspaceEpisodeActionProjectionV2] = None
 
     @model_validator(mode="after")
     def binding_controls_episode_surface(
@@ -2337,6 +1686,7 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
         if self.binding_availability is StoryWorkspaceEpisodeBindingAvailability.BOUND:
             if (
                 self.opaque_episode_id is None
+                or self.episode_code is None
                 or self.manifest_revision is None
                 or self.etag is None
             ):
@@ -2354,14 +1704,13 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
                 raise ValueError("bound surfaces require all six root artifacts")
         elif (
             self.opaque_episode_id is not None
+            or self.episode_code is not None
             or self.manifest_revision is not None
             or self.etag is not None
             or self.artifacts
             or self.documents
             or self.narrative is not None
             or self.auxiliary is not None
-            or self.workflow is not None
-            or self.action_projection is not None
         ):
             raise ValueError("unbound surfaces cannot expose Episode artifacts")
         relative_keys = [artifact.relative_key for artifact in self.artifacts]
@@ -2387,6 +1736,7 @@ class StoryWorkspaceDreamReentryItem(_StoryWorkspaceDreamWireModel):
     """One permission-checked Dream run rendered by the canonical workbench."""
 
     story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    display_title: str = Field(min_length=1, max_length=255)
     goal_prefix: str = Field(min_length=1, max_length=80)
     deck_id: str = Field(min_length=1, max_length=255)
     deck_display_name: str = Field(min_length=1, max_length=255)
@@ -2400,7 +1750,12 @@ class StoryWorkspaceDreamReentryItem(_StoryWorkspaceDreamWireModel):
     last_activity_at: datetime
     created_at: datetime
     sort_key: str = Field(min_length=1, max_length=512)
-    href: str = Field(pattern=r"^/story-workspace/dream\?run=run_[0-9a-f]{32}$")
+    href: str = Field(
+        pattern=(
+            r"^(?:/story-workspace/dream\?run=run_[0-9a-f]{32}|"
+            r"/story-workspace/runs/run_[0-9a-f]{32}/execution)$"
+        )
+    )
 
     @model_validator(mode="after")
     def lifecycle_matches_confirmation_facts(
@@ -2495,7 +1850,6 @@ class StoryWorkspaceStory:
     status: StoryWorkspaceContentStatus = StoryWorkspaceContentStatus.DRAFT
     review_status: StoryWorkspaceReviewStatus = StoryWorkspaceReviewStatus.PENDING
     type: StoryWorkspaceStoryType = StoryWorkspaceStoryType.SHORT
-    content: Optional[str] = None
     author_id: int = 0
     workspace_id: str = ""
     character_count: int = 0
@@ -2507,6 +1861,17 @@ class StoryWorkspaceStory:
     updated_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
+    source_run_id: Optional[str] = None
+    source_project_id: Optional[str] = None
+    episode_count: Optional[int] = None
+    artifact_manifest_revision: Optional[str] = None
+    script_revision: Optional[str] = None
+    artifact_sync_status: Optional[str] = None
+    artifact_indexed_at: Optional[datetime] = None
+    artifact_sync_error_code: Optional[str] = None
+    script_size_bytes: Optional[int] = None
+    artifact_available: Optional[bool] = None
+    reconcile_version: Optional[int] = None
 
 
 @dataclass
@@ -2756,7 +2121,7 @@ class StoryWorkspaceExecutionProjection:
     """Read-side execution facts projection consumed by the execution page.
 
     ``phase`` may carry projection states such as ``awaiting-guidance`` —
-    inferred from ``continuing`` plus blocked-step markers — which are
+    inferred from confirmed/failed domain facts plus blocked-step markers — which are
     deliberately NOT ``RunStatus`` enum values (audit note D13).
     """
 
@@ -2925,20 +2290,8 @@ __all__ = [
     "StoryWorkspaceContentStatus",
     "StoryWorkspaceDreamConfirmationAccepted",
     "StoryWorkspaceDreamConfirmationCommand",
-    "StoryWorkspaceDreamAgentMessage",
-    "StoryWorkspaceDreamAgentActivityContent",
-    "StoryWorkspaceDreamAgentContent",
-    "StoryWorkspaceDreamAgentMessageAccepted",
-    "StoryWorkspaceDreamAgentMessageCommand",
-    "StoryWorkspaceDreamAgentMessageSnapshot",
-    "StoryWorkspaceDreamAgentTextContent",
-    "StoryWorkspaceDreamAgentToolConfirmation",
-    "StoryWorkspaceDreamAgentToolConfirmationAccepted",
-    "StoryWorkspaceDreamAgentToolConfirmationCommand",
-    "StoryWorkspaceDreamAgentToolConfirmationNetwork",
-    "StoryWorkspaceDreamAgentToolConfirmationOption",
-    "StoryWorkspaceDreamAgentToolConfirmationQuestion",
     "StoryWorkspaceDreamEdit",
+    "StoryWorkspaceDreamAgentActivityResponse",
     "StoryWorkspaceDreamFilesResponse",
     "StoryWorkspaceDreamReentryCollection",
     "StoryWorkspaceDreamReentryItem",
@@ -2957,20 +2310,6 @@ __all__ = [
     "StoryWorkspaceDreamStageResponse",
     "StoryWorkspaceDreamStageToolInput",
     "StoryWorkspaceDreamToolInput",
-    "StoryWorkspaceEpisodeAction",
-    "StoryWorkspaceEpisodeActionAvailability",
-    "StoryWorkspaceEpisodeActionAccepted",
-    "StoryWorkspaceEpisodeActionCanonicalInput",
-    "StoryWorkspaceEpisodeActionContinueCommand",
-    "StoryWorkspaceEpisodeActionDiagnostic",
-    "StoryWorkspaceEpisodeActionDispatchState",
-    "StoryWorkspaceEpisodeActionOption",
-    "StoryWorkspaceEpisodeActionOptionV2",
-    "StoryWorkspaceEpisodeActionProjectionV2",
-    "StoryWorkspaceEpisodeActionResolution",
-    "StoryWorkspaceEpisodeActionTarget",
-    "StoryWorkspaceEpisodeArtifactCanonicalInput",
-    "StoryWorkspaceAssetContextCanonicalInput",
     "StoryWorkspaceEpisodeBindingToolInput",
     "StoryWorkspaceEpisodeArtifactSection",
     "StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics",
@@ -2987,14 +2326,8 @@ __all__ = [
     "StoryWorkspaceEpisodeReviewTarget",
     "StoryWorkspaceEpisodeReviewTargetKind",
     "StoryWorkspaceEpisodeReviewedSourceRevision",
-    "StoryWorkspaceEpisodeRelation",
-    "StoryWorkspaceEpisodeWorkflowCompletion",
-    "StoryWorkspaceEpisodeWorkflowCompletionToolInput",
-    "StoryWorkspaceEpisodeWorkflowFile",
-    "StoryWorkspaceEpisodeWorkflowProjection",
-    "StoryWorkspaceProjectArtifactCanonicalInput",
-    "StoryWorkspaceWorkflowFactCanonicalInput",
-    "StoryWorkspaceEpisodeBindingRecoveryCommand",
+    "StoryWorkspaceStoryIndexProjection",
+    "StoryWorkspaceStoryIndexReconcileCommand",
     "StoryWorkspaceExecutionProjection",
     "StoryWorkspaceGuidanceCommand",
     "StoryWorkspaceGuidanceCommandPayload",

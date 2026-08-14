@@ -57,7 +57,7 @@ class RuntimePlacementContext(_StrictFrozenModel):
     runtime_node_id: str = Field(min_length=1)
     artifact_set_hash: str = Field(pattern=SHA256_PATTERN)
     policy_revision: str = Field(min_length=1)
-    deployment_tier: Literal["development", "test"]
+    deployment_tier: Literal["local"]
 
     @model_validator(mode="after")
     def is_supported_single_node_placement(self) -> "RuntimePlacementContext":
@@ -178,7 +178,7 @@ class RuntimeLoadReceipt(_StrictFrozenModel):
     runtime_node_id: str = Field(min_length=1)
     artifact_set_hash: str = Field(pattern=SHA256_PATTERN)
     policy_revision: str = Field(min_length=1)
-    deployment_tier: Literal["development", "test"]
+    deployment_tier: Literal["local"]
     scope: Literal["session"]
     readiness_state: Literal["session_loaded"]
     required_entries_ready: bool

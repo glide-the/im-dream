@@ -66,8 +66,8 @@ Story Workspace 前端任务总览与验证边界
 
 **参考输入**（只读）：
 - `docs/issue/ISSUES_story-workspace.md`
-- `docs/design/story-workspace/story-workspace-prd.md`
-- `docs/design/story-workspace/story-workspace-layout-design.md`
+- `docs/design/story-workspace/product-scope-and-navigation.md`
+- `docs/design/story-workspace/product-scope-and-navigation.md`
 - `docs/CLAUDE.md`
 - `frontend/src/styles/tokens.css`
 - `frontend/src/components/AppLayout.tsx`

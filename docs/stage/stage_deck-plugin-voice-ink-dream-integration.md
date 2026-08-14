@@ -13,8 +13,8 @@
 
 - **主设计稿**: `docs/design/deck-plugin-voice-ink-dream-integration.md` (SUO-218 / SUO-236)
 - **补充设计稿**: `docs/design/plugin-remote-interaction.md`
-- **背景设计稿**: `docs/design/story-workspace/story-workspace-prd.md`
-- **背景设计稿**: `docs/design/story-workspace/story-workspace-layout-design.md`
+- **背景设计稿**: `docs/design/story-workspace/product-scope-and-navigation.md`
+- **背景设计稿**: `docs/design/story-workspace/product-scope-and-navigation.md`
 - **背景设计稿**: `docs/design/deck/deck-integration-delta.md`（原 `story-workspace/story-workspace-deck-integration-delta.md` 已迁移）
 - **补充设计稿**: `docs/design/deck/design_002_deck-plugin-decision-gates.md`
 - **参考设计稿**: `docs/design/deck-claude-agent.md`

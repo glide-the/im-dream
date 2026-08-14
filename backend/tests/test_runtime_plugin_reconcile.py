@@ -12,7 +12,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from backend.database import (
+from backend.schema.legacy_main_sqlite import (
     create_agent_session_tables,
     create_runtime_plugin_tables,
     create_tables,
@@ -171,7 +171,7 @@ class RuntimePluginFixture:
             runtime_node_id="node-dev-1",
             artifact_set_hash=compute_artifact_set_hash(self.lock),
             policy_revision="policy-7",
-            deployment_tier="test",
+            deployment_tier="local",
         )
         self.settings_writer = FakeSettingsWriter()
         self.source_policy = AllowlistRuntimeSourcePolicy(
@@ -405,6 +405,19 @@ class RuntimePluginReconcileTests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         self.fixture.close()
+
+    def test_datetime_parser_accepts_psycopg_native_datetime_and_iso_text(self) -> None:
+        native = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+
+        self.assertEqual(ReconcileService._parse_datetime(native), native)
+        self.assertEqual(
+            ReconcileService._parse_datetime("2026-08-01T12:00:00Z"),
+            native,
+        )
+        with self.assertRaises(ValueError):
+            ReconcileService._parse_datetime("not-a-timestamp")
+        with self.assertRaises(TypeError):
+            ReconcileService._parse_datetime(1)  # type: ignore[arg-type]
 
     def test_placement_fails_closed_for_pool_mismatch_and_production(self) -> None:
         base = self.fixture.placement.model_dump()
@@ -739,6 +752,54 @@ class RuntimePluginReconcileTests(unittest.IsolatedAsyncioTestCase):
             )
         if self.fixture.db.in_transaction:
             self.fixture.db.rollback()
+
+    async def test_receipt_closes_psycopg_validation_reads_before_persisting(self) -> None:
+        manager, _, _ = self.fixture.materialization_manager()
+        materialization = await manager.materialize(
+            self.fixture.placement,
+            PLUGIN_ID,
+            PLUGIN_VERSION,
+            ARTIFACT_DIGEST,
+        )
+        service, _, _ = self.fixture.reconcile_service()
+        reconcile = await service.declare_and_reconcile(
+            self.fixture.lock,
+            self.fixture.placement,
+        )
+
+        class PsycopgReadTransactionConnection:
+            def __init__(self, target):
+                self.target = target
+                self.read_transaction = False
+
+            @property
+            def in_transaction(self):
+                return self.read_transaction or self.target.in_transaction
+
+            def execute(self, statement, params=()):
+                cursor = self.target.execute(statement, params)
+                if statement.lstrip().upper().startswith("SELECT"):
+                    self.read_transaction = True
+                return cursor
+
+            def rollback(self):
+                self.target.rollback()
+                self.read_transaction = False
+
+            def commit(self):
+                self.target.commit()
+                self.read_transaction = False
+
+        service.db = PsycopgReadTransactionConnection(self.fixture.db)
+
+        receipt = service.create_load_receipt(
+            runtime_lock=self.fixture.lock,
+            placement_context=self.fixture.placement,
+            reconcile_result=reconcile,
+            materializations=[materialization],
+        )
+
+        self.assertTrue(receipt.required_entries_ready)
 
     async def test_missing_capability_creates_not_ready_receipt(self) -> None:
         manager, _, _ = self.fixture.materialization_manager()

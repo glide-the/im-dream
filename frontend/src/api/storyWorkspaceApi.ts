@@ -1,5 +1,5 @@
 // [Input] Story Workspace workflow REST/SSE contracts and the current auth token.
-// [Output] Typed, authenticated API helpers for workflow preflight and run operations.
+// [Output] Typed, authenticated API helpers, including canonical-first Dream display titles.
 // [Pos] Story Workspace workflow API client; it never derives authoritative workflow state locally.
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -60,7 +60,6 @@ export type WorkflowRunStatus =
   | 'pending_review'
   | 'confirmed'
   | 'rejected'
-  | 'continuing'
   | 'completed'
   | 'failed'
   | 'cancelled';
@@ -339,7 +338,7 @@ function storyWorkspaceValidateDreamRunLifecycle(
     && (confirmationAccepted || confirmationDispatched)) {
     throw new Error('Dream re-entry response has incompatible pre-confirmation facts.');
   }
-  if ((lifecycle === 'continuing' || lifecycle === 'recent') && !confirmationAccepted) {
+  if ((lifecycle === 'running' || lifecycle === 'recent') && !confirmationAccepted) {
     throw new Error('Dream re-entry response has incompatible post-confirmation facts.');
   }
   if (lifecycle === 'recent' && !confirmationDispatched) {
@@ -355,7 +354,7 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
     const run = storyWorkspaceReadDreamRunRecord(candidate, 'run');
     const lifecycle = storyWorkspaceReadDreamRunString(run.lifecycle, 'lifecycle');
     const group = storyWorkspaceReadDreamRunString(run.group, 'group');
-    if (!['generating', 'waiting_confirmation', 'continuing', 'recent'].includes(lifecycle)) {
+    if (!['generating', 'waiting_confirmation', 'running', 'recent'].includes(lifecycle)) {
       throw new Error('Dream re-entry response has invalid lifecycle.');
     }
     if (group !== 'in_progress' && group !== 'recent') {
@@ -396,7 +395,10 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
       confirmationDispatched,
     );
     const href = storyWorkspaceReadDreamRunString(run.href, 'href');
-    if (href !== `/story-workspace/dream?run=${storyWorkspaceRunId}`) {
+    const expectedHref = confirmationAccepted
+      ? `/story-workspace/runs/${storyWorkspaceRunId}/execution`
+      : `/story-workspace/dream?run=${storyWorkspaceRunId}`;
+    if (href !== expectedHref) {
       throw new Error('Dream re-entry response has invalid href.');
     }
     const deckDisplayName = storyWorkspaceReadBoundedDreamRunString(
@@ -406,6 +408,11 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
     );
     return {
       storyWorkspaceRunId,
+      displayTitle: storyWorkspaceReadBoundedDreamRunString(
+        run.displayTitle,
+        'displayTitle',
+        255,
+      ),
       goalPrefix: run.goalPrefix === undefined
         ? deckDisplayName
         : storyWorkspaceReadBoundedDreamRunString(run.goalPrefix, 'goalPrefix', 80),

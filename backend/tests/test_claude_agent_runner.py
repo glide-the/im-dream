@@ -66,6 +66,8 @@
 # [Sync] 2026-08-04: when a workspace has a real .dream surface, cover
 #                    read-only-by-default Bash policy against dynamically
 #                    constructed paths and prewritten mutation scripts.
+# [Sync] 2026-08-14: cover server-owned CLAUDE_CODE_TMPDIR injection and
+#                    rejection of caller relocation outside sandbox Settings.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -81,6 +83,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import sys
 import tempfile
 import unittest
@@ -373,6 +376,20 @@ class _RunnerBase(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self._mock_client = _MockSDKClient()
+        # These tests exercise the SDK runner in isolation.  A developer's
+        # live backend configuration may enable the Admin Gateway while the
+        # synthetic AgentRunOptions below intentionally have no authenticated
+        # canonical user.  Keep that integration disabled for this base seam;
+        # its fail-closed and refresh-helper contracts have dedicated tests.
+        self._gateway_env_patch = patch.dict(
+            os.environ,
+            {
+                "INK_GATEWAY_ENABLED": "0",
+                "INK_GATEWAY_CLAUDE_AGENT_ENABLED": "0",
+            },
+            clear=False,
+        )
+        self._gateway_env_patch.start()
         # Bypass the real auth-key check: these tests exercise runner logic,
         # not env propagation (see TestClaudeAgentRunnerSdkEnvDiagnostics).
         self._verify_patch = patch.object(
@@ -383,6 +400,7 @@ class _RunnerBase(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         self._verify_patch.stop()
+        self._gateway_env_patch.stop()
 
     def make_runner(self, session_id: str = "test-session") -> ClaudeAgentRunner:
         return ClaudeAgentRunner(sdk_client=self._mock_client)
@@ -1039,8 +1057,6 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             for tool_name in (
                 "mcp__story_workspace__write_dream_run",
                 "mcp__story_workspace__write_dream_stage",
-                "mcp__story_workspace__bind_first_episode",
-                "mcp__story_workspace__record_episode_workflow_completion",
             ):
                 result = await hook(
                     {
@@ -1064,15 +1080,6 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "mcp__story_workspace__write_dream_stage",
             agent_runner_module.DEFAULT_ALLOWED_TOOLS,
         )
-        self.assertIn(
-            "mcp__story_workspace__bind_first_episode",
-            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
-        )
-        self.assertIn(
-            "mcp__story_workspace__record_episode_workflow_completion",
-            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
-        )
-
     async def test_story_workspace_stdio_receives_only_trusted_run_identity_env(self):
         self.set_query([])
         runner = self.make_runner()
@@ -1259,6 +1266,98 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                     _hook_specific(read_result, {}).get("permissionDecision"),
                     "allow",
                 )
+
+    async def test_canonical_asset_single_file_delete_uses_visible_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            character = workspace / "assets" / "characters" / "qa-guide.md"
+            character.parent.mkdir(parents=True)
+            character.write_text("---\nchar_id: qa-guide\nchar_name: QA\n---\n")
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+            command = f"rm -- {shlex.quote(str(character))}"
+            result = await hook(
+                {"tool_name": "Bash", "tool_input": {"command": command}},
+                "call-canonical-asset-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(confirmation_requests[0]["tool_name"], "Bash")
+        self.assertEqual(
+            _hook_specific(result, {}).get("permissionDecision"),
+            "allow",
+        )
+
+    async def test_canonical_prop_single_file_delete_uses_visible_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            prop = workspace / "assets" / "props" / "PR-QA.md"
+            prop.parent.mkdir(parents=True)
+            prop.write_text("---\nprop_id: PR-QA\nname: QA\n---\n")
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": f"rm -- {shlex.quote(str(prop))}"},
+                },
+                "call-canonical-prop-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(
+            _hook_specific(result, {}).get("permissionDecision"),
+            "allow",
+        )
+
+    async def test_canonical_asset_delete_rejects_recursive_glob_and_symlink(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            characters = workspace / "assets" / "characters"
+            characters.mkdir(parents=True)
+            target = characters / "qa-guide.md"
+            target.write_text("qa")
+            link = characters / "qa-link.md"
+            link.symlink_to(target)
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            for command in (
+                f"rm -rf {characters}",
+                f"rm -- {characters}/*.md",
+                f"rm -- {link}",
+                f"rm -- {target} {characters / 'other.md'}",
+            ):
+                with self.subTest(command=command):
+                    result = await hook(
+                        {"tool_name": "Bash", "tool_input": {"command": command}},
+                        "call-invalid-asset-delete",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(
+                        _hook_specific(result, {}).get("permissionDecision"),
+                        "deny",
+                    )
 
     async def test_bash_dream_guard_denies_find_env_glob_and_normalized_path_bypasses(self):
         for full_access in (False, True):
@@ -2307,6 +2406,29 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
         warning.assert_not_called()
 
+    def test_server_owned_gateway_api_key_helper_counts_as_auth(self):
+        from services.admin_gateway.sdk import apply_gateway_sdk_env_to_options
+
+        options = _SDK_OPTIONS(env={})
+        apply_gateway_sdk_env_to_options(
+            options,
+            "205",
+            environment={
+                "INK_GATEWAY_ENABLED": "1",
+                "INK_GATEWAY_BASE_URL": "https://admin.example.test",
+                "INK_GATEWAY_SERVICE_KEY": "gw_" + "k" * 43,
+                "INK_GATEWAY_SUBJECT_JWT_ISSUER": "https://dream.example.test",
+                "INK_GATEWAY_SUBJECT_JWT_AUDIENCE": "ink-memory-gateway",
+                "INK_GATEWAY_SERVICE_CLIENT_ID": "dream-bff",
+                "INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS": "240",
+            },
+        )
+
+        with patch.object(agent_runner_module.logger, "warning") as warning:
+            agent_runner_module._verify_claude_sdk_env_for_query_stream(options)
+
+        warning.assert_not_called()
+
     def test_missing_auth_warns_and_raises_for_anthropic_auth_token(self):
         options = _SDK_OPTIONS(env={})
 
@@ -2323,6 +2445,76 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
 class TestClaudeSdkEnvHelper(unittest.TestCase):
     """Project dotenv loading only forwards SDK-level keys."""
+
+    def test_project_runtime_options_set_claude_code_retry_default_to_three(self):
+        options = _SDK_OPTIONS()
+
+        sdk_env_module.apply_project_sdk_runtime_options(
+            options,
+            env_file=Path("/tmp/does-not-exist"),
+        )
+
+        self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "3")
+
+    def test_project_runtime_options_preserve_explicit_retry_override(self):
+        options = _SDK_OPTIONS(env={"CLAUDE_CODE_MAX_RETRIES": "2"})
+
+        sdk_env_module.apply_project_sdk_runtime_options(
+            options,
+            env_file=Path("/tmp/does-not-exist"),
+        )
+
+        self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "2")
+
+    def test_project_runtime_options_set_claude_code_tmpdir_default(self):
+        options = _SDK_OPTIONS()
+
+        with patch.dict(os.environ, {}, clear=True):
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env["CLAUDE_CODE_TMPDIR"],
+            str(Path("/tmp/claude").resolve(strict=False)),
+        )
+
+    def test_project_runtime_options_use_process_tmpdir_not_caller_value(self):
+        options = _SDK_OPTIONS(env={"CLAUDE_CODE_TMPDIR": "/caller/escape"})
+
+        with patch.dict(
+            os.environ,
+            {"CLAUDE_CODE_TMPDIR": "/var/tmp/ink-claude"},
+            clear=True,
+        ):
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env["CLAUDE_CODE_TMPDIR"],
+            str(Path("/var/tmp/ink-claude").resolve(strict=False)),
+        )
+
+    def test_project_runtime_options_reject_tmpdir_resolving_to_root(self):
+        options = _SDK_OPTIONS(env={"CLAUDE_CODE_TMPDIR": "/caller/escape"})
+
+        with patch.dict(
+            os.environ,
+            {"CLAUDE_CODE_TMPDIR": "/tmp/../.."},
+            clear=True,
+        ):
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env["CLAUDE_CODE_TMPDIR"],
+            str(Path("/tmp/claude").resolve(strict=False)),
+        )
 
     def test_project_dotenv_env_filters_non_sdk_keys(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2424,6 +2616,33 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             {
                 "ANTHROPIC_AUTH_TOKEN": "cloud-secret-token",
                 "ANTHROPIC_MODEL": "cloud-model",
+            },
+        )
+
+    def test_user_sdk_env_cannot_override_provider_credentials_or_routing(self):
+        options = _SDK_OPTIONS(
+            env={
+                "ANTHROPIC_AUTH_TOKEN": "server-token",
+                "ANTHROPIC_BASE_URL": "https://gateway.example",
+            }
+        )
+
+        sdk_env_module.apply_user_sdk_env_to_options(
+            options,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "user-token",
+                "ANTHROPIC_BASE_URL": "https://bypass.example",
+                "ANTHROPIC_MODEL": "provider-model",
+                "API_TIMEOUT_MS": "120000",
+            },
+        )
+
+        self.assertEqual(
+            options.env,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "server-token",
+                "ANTHROPIC_BASE_URL": "https://gateway.example",
+                "API_TIMEOUT_MS": "120000",
             },
         )
 

@@ -37,7 +37,7 @@ export interface WidgetCell {
   id: string;
   type: 'widget';
   widgetType: 'chat' | 'greeting' | 'other';
-  data: any;  // Widget-specific data
+  data: unknown;  // Widget-specific data; consumers narrow by widgetType before use
 }
 
 export interface ChatMessage {
@@ -163,7 +163,8 @@ export class EditorEngine {
 
   // @@@ Update voice configurations from settings
   // No-op: Backend now loads voice configs from database, not from frontend
-  setVoiceConfigs(_configs: Record<string, any>) {
+  setVoiceConfigs(configs: Record<string, unknown>) {
+    void configs;
     // Kept for backward compatibility, but does nothing
   }
 
@@ -204,7 +205,7 @@ export class EditorEngine {
     });
 
     // Check if we should request analysis
-    this.checkAnalysisTrigger(combinedText, energy);
+    this.checkAnalysisTrigger(combinedText);
 
     // Check if we can apply commentors
     const result = this.checkCommentorApplication(combinedText, energy);
@@ -270,7 +271,7 @@ export class EditorEngine {
 
 
   // @@@ Check if we should send text for analysis
-  private checkAnalysisTrigger(text: string, _currentEnergy: number) {
+  private checkAnalysisTrigger(text: string) {
     const completedSentences = getCompletedSentences(text);
 
     // Skip if no completed sentences or already requesting
@@ -525,7 +526,7 @@ export class EditorEngine {
         this.sentCache.delete(completedSentences);
         // Trigger a fresh request immediately
         setTimeout(() => {
-          this.checkAnalysisTrigger(text, currentEnergy);
+          this.checkAnalysisTrigger(text);
         }, 50);
       }
     }
@@ -533,7 +534,7 @@ export class EditorEngine {
     else if (result.appliedAny) {
       // Give a small delay to let the UI update
       setTimeout(() => {
-        this.checkAnalysisTrigger(text, currentEnergy);
+        this.checkAnalysisTrigger(text);
       }, 50);
     }
   }
@@ -542,7 +543,6 @@ export class EditorEngine {
   private mergeConsecutiveTextCells() {
     const merged: Cell[] = [];
     let i = 0;
-    let mergeCount = 0;
 
     while (i < this.state.cells.length) {
       const cell = this.state.cells[i];
@@ -551,16 +551,9 @@ export class EditorEngine {
         // Collect all consecutive text cells
         let combinedContent = (cell as TextCell).content;
         let j = i + 1;
-        let mergedCells = 0;
-
         while (j < this.state.cells.length && this.state.cells[j].type === 'text') {
           combinedContent += (this.state.cells[j] as TextCell).content;
           j++;
-          mergedCells++;
-        }
-
-        if (mergedCells > 0) {
-          mergeCount += mergedCells;
         }
 
         // Add merged text cell
@@ -581,7 +574,7 @@ export class EditorEngine {
   }
 
   // @@@ Insert widget at cursor, removing @ character if present
-  insertWidgetAtCursor(cellId: string, cursorPosition: number, widgetType: WidgetCell['widgetType'], data: any) {
+  insertWidgetAtCursor(cellId: string, cursorPosition: number, widgetType: WidgetCell['widgetType'], data: unknown) {
     const cell = this.state.cells.find(c => c.id === cellId);
     if (!cell || cell.type !== 'text') return;
 
@@ -627,7 +620,7 @@ export class EditorEngine {
   }
 
   // @@@ Add a widget cell after a specific text position in a specific cell
-  insertWidgetAfterLine(cellId: string, cursorPosition: number, widgetType: WidgetCell['widgetType'], data: any) {
+  insertWidgetAfterLine(cellId: string, cursorPosition: number, widgetType: WidgetCell['widgetType'], data: unknown) {
     // Find the specific cell and its index
     const cellIndex = this.state.cells.findIndex(c => c.id === cellId);
     if (cellIndex === -1) return;
@@ -689,7 +682,7 @@ export class EditorEngine {
   }
 
   // @@@ Add a widget cell at the end
-  addWidgetCell(widgetType: WidgetCell['widgetType'], data: any) {
+  addWidgetCell(widgetType: WidgetCell['widgetType'], data: unknown) {
     const widget: WidgetCell = {
       id: generateId(),
       type: 'widget',
@@ -701,7 +694,7 @@ export class EditorEngine {
   }
 
   // @@@ Update widget data (for chat messages)
-  updateWidgetData(widgetId: string, data: any) {
+  updateWidgetData(widgetId: string, data: unknown) {
     const widget = this.state.cells.find(c => c.type === 'widget' && c.id === widgetId);
     if (widget && widget.type === 'widget') {
       widget.data = data;
@@ -803,7 +796,7 @@ export class EditorEngine {
   }
 
   // @@@ Set feedback for a comment
-  setCommentFeedback(commentId: string, feedback: 'star' | 'kill') {
+  setCommentFeedback(commentId: string, feedback: 'star' | 'kill' | undefined) {
     const comment = this.state.commentors.find(c => c.id === commentId);
     if (!comment) return;
 

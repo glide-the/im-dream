@@ -21,7 +21,6 @@ from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
-import sqlite3
 from typing import Any, Iterator
 import uuid
 
@@ -81,7 +80,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _row_to_dict(row: Any) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
@@ -303,7 +302,7 @@ def _ensure_marketplace(spec: PackageSpec, evidence: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _insert_operation(db: sqlite3.Connection, operation: dict[str, Any]) -> None:
+def _insert_operation(db: Any, operation: dict[str, Any]) -> None:
     db.execute(
         """
         INSERT INTO claude_plugin_operations (
@@ -311,7 +310,7 @@ def _insert_operation(db: sqlite3.Connection, operation: dict[str, Any]) -> None
             progress, message, executable, argv_json, cwd, cli_version,
             exit_code, evidence_path, installation_id, error_code,
             error_summary, created_at, updated_at, finished_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             operation["id"],
@@ -337,32 +336,32 @@ def _insert_operation(db: sqlite3.Connection, operation: dict[str, Any]) -> None
     )
 
 
-def _update_operation(db: sqlite3.Connection, operation_id: str, **fields: Any) -> None:
+def _update_operation(db: Any, operation_id: str, **fields: Any) -> None:
     if not fields:
         return
-    assignments = ", ".join(f"{key} = ?" for key in fields)
+    assignments = ", ".join(f"{key} = %s" for key in fields)
     values = [value if not isinstance(value, (dict, list)) else json.dumps(value) for value in fields.values()]
     db.execute(
-        f"UPDATE claude_plugin_operations SET {assignments}, updated_at = ? WHERE id = ?",
+        f"UPDATE claude_plugin_operations SET {assignments}, updated_at = %s WHERE id = %s",
         (*values, _now(), operation_id),
     )
 
 
 def _find_installation_by_artifact(
-    db: sqlite3.Connection, spec: PackageSpec, resolved_version: str, digest: str
+    db: Any, spec: PackageSpec, resolved_version: str, digest: str
 ) -> dict[str, Any] | None:
     row = db.execute(
         """
         SELECT * FROM claude_plugin_installations
-        WHERE package_name = ? AND marketplace = ?
-          AND resolved_version = ? AND artifact_digest = ?
+        WHERE package_name = %s AND marketplace = %s
+          AND resolved_version = %s AND artifact_digest = %s
         """,
         (spec.package_name, spec.marketplace, resolved_version, digest),
     ).fetchone()
     return _row_to_dict(row) if row is not None else None
 
 
-def _insert_installation(db: sqlite3.Connection, record: dict[str, Any]) -> None:
+def _insert_installation(db: Any, record: dict[str, Any]) -> None:
     db.execute(
         """
         INSERT INTO claude_plugin_installations (
@@ -372,7 +371,7 @@ def _insert_installation(db: sqlite3.Connection, record: dict[str, Any]) -> None
             cli_git_commit_sha, manifest_json, component_inventory_json,
             compatibility_json, status, operation_id, error_code,
             error_summary, file_count, created_at, updated_at, installed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             record["id"],
@@ -402,7 +401,7 @@ def _insert_installation(db: sqlite3.Connection, record: dict[str, Any]) -> None
 
 
 def _revive_installation(
-    db: sqlite3.Connection, installation_id: str, record: dict[str, Any]
+    db: Any, installation_id: str, record: dict[str, Any]
 ) -> None:
     """Bring an existing non-ready installation row back to ready in place.
 
@@ -415,14 +414,14 @@ def _revive_installation(
     db.execute(
         """
         UPDATE claude_plugin_installations SET
-            requested_package_spec = ?, requested_version = ?,
-            source_type = ?, artifact_path = ?, claude_cli_version = ?,
-            cli_git_commit_sha = ?, manifest_json = ?,
-            component_inventory_json = ?, compatibility_json = ?,
-            status = 'ready', operation_id = ?,
+            requested_package_spec = %s, requested_version = %s,
+            source_type = %s, artifact_path = %s, claude_cli_version = %s,
+            cli_git_commit_sha = %s, manifest_json = %s,
+            component_inventory_json = %s, compatibility_json = %s,
+            status = 'ready', operation_id = %s,
             error_code = NULL, error_summary = NULL,
-            file_count = ?, updated_at = ?, installed_at = ?
-        WHERE id = ?
+            file_count = %s, updated_at = %s, installed_at = %s
+        WHERE id = %s
         """,
         (
             record["requested_package_spec"],
@@ -451,10 +450,8 @@ def _revive_installation(
 class PluginInstallService:
     """Coordinates real CLI installs into the shared artifact store."""
 
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: Any) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
-
     # -- public API ---------------------------------------------------------
 
     def install(
@@ -499,7 +496,7 @@ class PluginInstallService:
                 self._fail_operation(operation, error)
                 raise error from None
             except Exception as exc:
-                # Unexpected failures (e.g. sqlite3.IntegrityError) must still
+                # Unexpected failures (e.g. PostgresIntegrityError) must still
                 # move the operation to a terminal error state — otherwise the
                 # row stays in 'running' forever and the background task
                 # crashes without any user-visible error.
@@ -512,13 +509,13 @@ class PluginInstallService:
 
     def get_operation(self, operation_id: str) -> dict[str, Any] | None:
         row = self.db.execute(
-            "SELECT * FROM claude_plugin_operations WHERE id = ?", (operation_id,)
+            "SELECT * FROM claude_plugin_operations WHERE id = %s", (operation_id,)
         ).fetchone()
         return _row_to_dict(row) if row is not None else None
 
     def get_installation(self, installation_id: str) -> dict[str, Any] | None:
         row = self.db.execute(
-            "SELECT * FROM claude_plugin_installations WHERE id = ?", (installation_id,)
+            "SELECT * FROM claude_plugin_installations WHERE id = %s", (installation_id,)
         ).fetchone()
         return _row_to_dict(row) if row is not None else None
 
@@ -545,12 +542,12 @@ class PluginInstallService:
         with self.db:
             self.db.execute(
                 "UPDATE claude_plugin_installations SET status = 'uninstalled', "
-                "updated_at = ? WHERE id = ?",
+                "updated_at = %s WHERE id = %s",
                 (_now(), installation_id),
             )
             self.db.execute(
-                "UPDATE deck_claude_plugin_refs SET enabled = 0, updated_at = ? "
-                "WHERE plugin_installation_id = ?",
+                "UPDATE deck_claude_plugin_refs SET enabled = 0, updated_at = %s "
+                "WHERE plugin_installation_id = %s",
                 (_now(), installation_id),
             )
         updated = self.get_installation(installation_id)
@@ -605,7 +602,7 @@ class PluginInstallService:
         }
         with self.db:
             existing = self.db.execute(
-                "SELECT id FROM claude_plugin_operations WHERE id = ?",
+                "SELECT id FROM claude_plugin_operations WHERE id = %s",
                 (operation["id"],),
             ).fetchone()
             if existing is not None:

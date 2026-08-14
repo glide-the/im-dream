@@ -12,9 +12,9 @@ Story Workspace 审阅状态流转与批量操作 API
 - **优先级**: P0
 - **标签**: `api`, `review`, `workflow`
 - **来源设计稿**:
-  - `docs/design/story-workspace/story-workspace-layout-design.md` §6.1（confirm/reject/archive 端点）
-  - `docs/design/story-workspace/story-workspace-prd.md` §4.5.1–4.5.4（交互设计）
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.1 `DEC-007`, `DEC-008`（核心工作流、用户不手动创建）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §6.1（confirm/reject/archive 端点）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §4.5.1–4.5.4（交互设计）
+  - `docs/design/story-workspace/product-scope-and-navigation.md` §3.1 `DEC-007`, `DEC-008`（核心工作流、用户不手动创建）
 - **Issue 清单**: `docs/issue/ISSUES_story-workspace.md` §3 Issue 明细
 
 ## 3. 任务目标

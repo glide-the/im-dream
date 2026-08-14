@@ -6,6 +6,9 @@
 [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public SEO endpoint notes.
 [Sync] 2026-06-21: document system-config sandbox network policy fields.
 [Sync] 2026-06-23: document Google OAuth, auth cookie aliases, and OAuth Device Flow endpoints.
+[Sync] 2026-08-14: document transactional default Free provisioning and Admin-default model resolution for email and Google registration.
+[Sync] 2026-08-14: document screenplay-only Deck visibility and atomic drama-forge v1.0.1 binding on Deck creation.
+[Sync] 2026-08-14: document explicit zero-ref default screenplay Deck reconciliation.
 -->
 
 **Version:** 2.0.0
@@ -49,6 +52,18 @@ Returns a structured AI-search summary describing Ink & Memory, primary public p
 
 Register a new user.
 
+The successful response is emitted only after the Admin-owned PostgreSQL
+registration triggers have created the canonical user's billing projection,
+active Free subscription, current-period Token allowance, and activation
+event in the same transaction. Dream does not write or reconstruct billing
+state. Google OAuth signup has the same postcondition because it uses the same
+canonical user creation path.
+
+The Free plan's Admin-owned default entitlement supplies the effective model
+when the user has not saved an explicit model preference. Dream does not copy
+that alias into a second registration-time default; Settings and Claude Agent
+resolve the live callable `defaultModelAlias` from the Gateway catalog.
+
 **Request:**
 ```json
 {
@@ -73,6 +88,8 @@ Register a new user.
 **Errors:**
 - `400` - Email/password missing or password < 6 chars
 - `400` - Email already exists
+- `503` - Canonical user/default Free provisioning transaction could not
+  commit; retry after the registration dependency is restored
 
 ---
 
@@ -164,7 +181,8 @@ Starts Google OAuth/OIDC login through the Python backend Authlib client.
 
 OAuth callback registered in Google Cloud Console. The backend validates OAuth
 state through the session cookie, exchanges the Google code, binds or creates
-the local user, then issues this system's own access/refresh tokens.
+the local user (including transactional default Free provisioning for a new
+canonical user), then issues this system's own access/refresh tokens.
 
 **Response:** `302` redirect to frontend with auth cookies set.
 
@@ -340,9 +358,11 @@ flat domain-pattern list; use `open` mode instead of sending a bare `*`.
 The sandbox network fields are consumed on the next Claude Agent workspace
 initialization and written to the thread-local `.claude/settings.json`
 `sandbox.network` block; `sandbox_fs_allowed_write_paths` is appended to the
-`sandbox.filesystem.allowWrite` list after the thread workspace and Claude
-Code's own sandbox TMPDIR (`$CLAUDE_TMPDIR` or `/tmp/claude-$UID`, always
-allowed when the sandbox is enabled).
+`sandbox.filesystem.allowWrite` list after the thread workspace and the exact
+server-owned Claude Code temp root (`CLAUDE_CODE_TMPDIR`, default
+`/tmp/claude`, canonicalized before subprocess/sandbox use and always allowed
+when the sandbox is enabled). The application
+does not broadly allow `/tmp` or guess per-UID/dynamic `cwd-*` paths.
 
 ---
 
@@ -943,6 +963,56 @@ Get default voice configurations (no auth required).
   ...
 }
 ```
+
+---
+
+## Deck Endpoints
+
+### GET `/api/decks`
+
+Returns the authenticated user's Decks and Voices. The active product default is
+the five-role screenplay-creation Deck. Untouched forks of the retired
+introspection, scholar, and philosophy system defaults are omitted; user-created
+Decks and retired forks with Deck- or Voice-level local changes remain visible.
+
+### POST `/api/decks`
+
+Creates a user Deck and binds the configured default Claude plugin in one
+PostgreSQL transaction. The browser submits only Deck display fields; the server
+resolves the exact configured package/version (default `drama-forge` `1.0.1`),
+requires a ready installation, and verifies artifact digest and Claude CLI
+compatibility before committing the Deck and plugin reference.
+
+**Response:**
+```json
+{
+  "deck_id": "c6654ae3-3de5-4ab9-b882-c9034a0d8fa6"
+}
+```
+
+**Errors:**
+- `409` - The configured default plugin is missing, not ready, digest-invalid,
+  incompatible, or changes before the transaction commits. No Deck is created.
+
+### POST `/api/decks/defaults/reconcile`
+
+Idempotently repairs an existing untouched screenplay default Deck when, and
+only when, it has no Claude plugin references. The backend resolves and verifies
+the configured `drama-forge` `1.0.1` installation before the transaction. Any
+existing plugin ref preserves the user's selection and prevents repair.
+
+**Response:**
+```json
+{
+  "deck_id": "c1b3ecf1-5fca-4a51-8806-202f19bef348",
+  "reconciled": true,
+  "reason": "missing_ref"
+}
+```
+
+`reason` is one of `missing_ref`, `refs_preserved`, or `default_not_found`.
+Returns `409` when the configured installation cannot be verified; Deck and
+existing refs remain unchanged.
 
 ---
 

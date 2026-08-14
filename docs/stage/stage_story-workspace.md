@@ -4,8 +4,8 @@
 > **关联 Issue**: [SUO-208](/SUO/issues/SUO-208) / [SUO-240](/SUO/issues/SUO-240) / [SUO-301](/SUO/issues/SUO-301) / [SUO-319](/SUO/issues/SUO-319) / [SUO-320](/SUO/issues/SUO-320)
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
 > **关联设计稿**:
-> - `docs/design/story-workspace/story-workspace-prd.md` (SUO-199)
-> - `docs/design/story-workspace/story-workspace-layout-design.md` (SUO-199)
+> - `docs/design/story-workspace/product-scope-and-navigation.md` (SUO-199)
+> - `docs/design/story-workspace/product-scope-and-navigation.md` (SUO-199)
 > - `docs/design/deck/deck-integration-delta.md` (SUO-215)
 > **任务输入来源**:
 > - Issue 清单: `docs/issue/ISSUES_story-workspace.md` (SUO-201)

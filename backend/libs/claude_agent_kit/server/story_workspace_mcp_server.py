@@ -9,7 +9,7 @@ from mcp.server import Server as McpServer
 
 from .story_workspace_tool import (
     STORY_WORKSPACE_DREAM_TOOL_SPECS,
-    story_workspace_handle_dream_tool,
+    story_workspace_handle_dream_tool_async,
 )
 
 
@@ -42,7 +42,7 @@ def story_workspace_create_mcp_server() -> McpServer:
     ) -> list[mcp_types.TextContent]:
         if name not in STORY_WORKSPACE_DREAM_TOOL_SPECS:
             raise ValueError("Unknown Story Workspace tool")
-        result_text = story_workspace_handle_dream_tool(name, arguments)
+        result_text = await story_workspace_handle_dream_tool_async(name, arguments)
         return [mcp_types.TextContent(type="text", text=result_text)]
 
     return server

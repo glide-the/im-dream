@@ -15,6 +15,7 @@
 # [Sync] 2026-07-04: register the Notion resource connector router so connector
 #                    auth, discovery, selection, and canonical snapshot sync
 #                    endpoints are exposed alongside the rest of the backend API.
+# [Sync] 2026-08-14: the mounted Deck router includes explicit default-plugin reconciliation.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -25,6 +26,14 @@ from dotenv import load_dotenv
 
 _BACKEND_ENV_FILE = Path(__file__).resolve().with_name(".env")
 load_dotenv(_BACKEND_ENV_FILE, override=False)
+
+try:
+    from persistence.config import load_database_url_from_env_file
+except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+    from backend.persistence.config import load_database_url_from_env_file
+
+if os.environ.get("INK_LOAD_DATABASE_URL_FROM_ENV_FILE") == "1":
+    load_database_url_from_env_file()
 
 
 def _drop_unsupported_agent_env() -> None:
@@ -105,15 +114,8 @@ except ImportError:
             "stateless_analyzer dependencies are required for stateless analysis"
         )
 
-try:
-    from speech_recognition import init_speech_recognition
-except ImportError:
-    async def init_speech_recognition(*args, **kwargs):
-        raise RuntimeError(
-            "speech recognition dependencies are required for websocket recognition"
-        )
-
 import config
+from services.admin_gateway import GatewayPolyAgent
 from seo_content import build_llms_txt, build_robots_txt, build_sitemap_xml
 from picture_service import _generate_picture_for_date, _today_in_tz
 from typing import Optional, List, Any
@@ -258,7 +260,7 @@ def get_writing_suggestion(
     print(f"🎭 Selected voice: {voice_info['name']} ({voice_key})")
     print(f"📚 Selected from {len(voices)} enabled voices")
 
-    agent = PolyAgent(id="writing-suggester")
+    agent = GatewayPolyAgent(user_id, agent_id="writing-suggester")
 
     # Build system prompt - voice gives inspiration, not continuation
     system_prompt = f"""You are {voice_info["name"]}, an inner voice persona.
@@ -301,11 +303,10 @@ Speak in {voice_info["name"]}'s characteristic style, but keep it brief and insp
 Give them ONE very short, gentle nudge about what to write next (max 15 words)."""
 
     # Generate inspiration
-    print(f"📤 Calling agent.run() with model='{config.VOICE_INSPIRATION_MODEL}'...")
+    print("📤 Calling Admin Gateway for writing inspiration...")
     result = agent.run(
         user_prompt,
         system_prompt=system_prompt,
-        model=config.VOICE_INSPIRATION_MODEL,
         cli="no-tools",
         tracked=True,
     )
@@ -378,7 +379,7 @@ def chat_with_voice(
             "error": f"Voice {voice_id} not found in your enabled decks. Please enable it in the Decks tab.",
         }
 
-    agent = PolyAgent(id=f"voice-chat-{voice_name.lower()}")
+    agent = GatewayPolyAgent(user_id, agent_id=f"voice-chat-{voice_name.lower()}")
 
     # Build system prompt for this voice
     system_prompt = f"""You are {voice_name}, an inner voice archetype from Disco Elysium.
@@ -425,7 +426,7 @@ User's current state:
     prompt += f"\n\nUser: {user_message}\n\n{voice_name}:"
 
     # Get response from LLM
-    result = agent.run(prompt, model=config.VOICE_CHAT_MODEL, cli="no-tools", tracked=True)
+    result = agent.run(prompt, cli="no-tools", tracked=True)
 
     if not result.is_success or not result.content:
         response = "..."
@@ -480,7 +481,7 @@ def analyze_text(
         f"📚 Loaded {len(voices)} enabled voices from deck system: {list(voices.keys()) if voices else 'None (will use defaults)'}"
     )
 
-    agent = PolyAgent(id="voice-analyzer")
+    agent = GatewayPolyAgent(user_id, agent_id="voice-analyzer")
 
     # Get voices from stateless analyzer
     result = analyze_stateless(
@@ -523,7 +524,7 @@ def analyze_echoes(user_id: int, language: str = "en"):
     print(f"   Language: {language_code}")
     print(f"{'=' * 60}\n")
 
-    agent = PolyAgent(id="echoes-analyzer")
+    agent = GatewayPolyAgent(user_id, agent_id="echoes-analyzer")
 
     prompt = f"""Analyze these personal notes and identify recurring themes, topics, or concerns that keep appearing.
 
@@ -546,7 +547,7 @@ Format as a JSON array:
 Return ONLY the JSON array, no other text."""
     prompt += f"\n\n{language_instruction(language_code, 'All titles, descriptions, and examples should use this language. Keep the JSON keys the same.')}"
 
-    result = agent.run(prompt, model=config.ECHO_ANALYSIS_MODEL, cli="no-tools", tracked=True)
+    result = agent.run(prompt, cli="no-tools", tracked=True)
 
     if not result.is_success or not result.content:
         return {"echoes": []}
@@ -580,7 +581,7 @@ def analyze_traits(user_id: int, language: str = "en"):
     print(f"   Language: {language_code}")
     print(f"{'=' * 60}\n")
 
-    agent = PolyAgent(id="traits-analyzer")
+    agent = GatewayPolyAgent(user_id, agent_id="traits-analyzer")
 
     prompt = f"""Analyze these personal notes and identify personality traits and characteristics.
 
@@ -603,7 +604,7 @@ Format as a JSON array:
 Return ONLY the JSON array, no other text."""
     prompt += f"\n\n{language_instruction(language_code, 'Use this language for trait names, explanations, and evidence (JSON keys stay in English).')}"
 
-    result = agent.run(prompt, model=config.TRAIT_ANALYSIS_MODEL, cli="no-tools", tracked=True)
+    result = agent.run(prompt, cli="no-tools", tracked=True)
 
     if not result.is_success or not result.content:
         return {"traits": []}
@@ -639,7 +640,7 @@ def analyze_patterns(
     print(f"   Language: {language_code}")
     print(f"{'=' * 60}\n")
 
-    agent = PolyAgent(id="patterns-analyzer")
+    agent = GatewayPolyAgent(user_id, agent_id="patterns-analyzer")
 
     prompt = f"""Analyze these personal notes and identify behavioral patterns or habits.
 
@@ -662,7 +663,7 @@ Format as a JSON array:
 Return ONLY the JSON array, no other text."""
     prompt += f"\n\n{language_instruction(language_code, 'Use this language for pattern names, descriptions, and frequency notes (JSON keys stay in English).')}"
 
-    result = agent.run(prompt, model=config.PATTERN_ANALYSIS_MODEL, cli="no-tools", tracked=True)
+    result = agent.run(prompt, cli="no-tools", tracked=True)
 
     if not result.is_success or not result.content:
         return {"patterns": []}
@@ -755,7 +756,7 @@ timeline_gen_scheduler = AsyncIOScheduler()
 
 @app.on_event("startup")
 async def startup_database():
-    """Initialize SQLite schema and idempotent auth migrations."""
+    """Open PostgreSQL and verify the required Admin/Drizzle capabilities."""
     database.init_db()
 
 
@@ -795,8 +796,12 @@ async def shutdown_scheduler():
 # ========== Claude Agent Factory ==========
 
 from agent_factory import claude_agent_thread_factory
-from services.deck.story_workflow_gateway import (
+from claude_agent.event_bus_redis import RedisStreamEventBus
+from services.deck.story_workflow_application import (
     story_workspace_get_dream_confirmation_coordinator,
+)
+from services.story_workspace.dream_launch_endpoint_service import (
+    get_dream_launch_endpoint_service,
 )
 from routers import admin as admin_router_module
 from routers.admin import router as admin_router
@@ -823,6 +828,7 @@ from routers.oauth import router as oauth_router
 from routers.pictures import GeneratePictureRequest, router as pictures_router
 from routers.preferences import router as preferences_router
 from routers.notion import router as notion_router
+from routers.product import router as product_router
 from routers.reports import router as reports_router
 from routers.sessions import SessionBatchRequest, router as sessions_router
 from routers.storage import UploadUrlRequest, router as storage_router
@@ -831,6 +837,7 @@ from routers.claude_plugins import router as claude_plugins_router
 from routers.deck_plugin_binding import router as deck_plugin_binding_router
 from routers.story_workspace import router as story_workspace_router
 from routers.system_config import router as system_config_router
+from routers.gateway_models import router as gateway_models_router
 from routers.workspace import router as workspace_router
 from routers.reflections import router as reflections_router
 from routers.voices import (
@@ -860,6 +867,21 @@ async def oauth_protocol_error_handler(request, exc: OAuthProtocolError):
 
 
 @app.on_event("startup")
+async def startup_validate_claude_agent_event_bus():
+    """Reject invalid/unreachable shared EventBus configuration before turns."""
+
+    backend = (
+        os.environ.get("INK_AGENT_EVENT_BUS_BACKEND") or "memory"
+    ).strip().lower()
+    if backend not in {"memory", "redis"}:
+        raise RuntimeError(
+            "INK_AGENT_EVENT_BUS_BACKEND must be either 'memory' or 'redis'"
+        )
+    if backend == "redis":
+        await RedisStreamEventBus.validate_connection()
+
+
+@app.on_event("startup")
 async def startup_claude_agent():
     """Start the Claude Agent session pool sweeper."""
     claude_agent_thread_factory.start()
@@ -871,6 +893,13 @@ async def story_workspace_startup_dream_confirmation_coordinator():
     """Reconcile accepted Dream confirmations after the Agent is ready."""
 
     story_workspace_get_dream_confirmation_coordinator().start()
+
+
+@app.on_event("startup")
+async def story_workspace_startup_dream_launch_dispatches():
+    """Enable process-owned launch turn drains."""
+
+    get_dream_launch_endpoint_service().start()
 
 
 @app.on_event("startup")
@@ -896,8 +925,8 @@ async def startup_claude_plugin_seed():
             for canonical in PLATFORM_BUILTIN_SOURCES:
                 existing = db.execute(
                     "SELECT id, resolved_version, artifact_digest FROM "
-                    "claude_plugin_installations WHERE package_name = ? AND "
-                    "marketplace = ? AND status = 'ready' ORDER BY created_at DESC "
+                    "claude_plugin_installations WHERE package_name = %s AND "
+                    "marketplace = %s AND status = 'ready' ORDER BY created_at DESC "
                     "LIMIT 1",
                     (canonical.split("@")[0], canonical.split("@")[1]),
                 ).fetchone()
@@ -913,8 +942,8 @@ async def startup_claude_plugin_seed():
                         continue
                     existing = db.execute(
                         "SELECT id, resolved_version, artifact_digest FROM "
-                        "claude_plugin_installations WHERE package_name = ? AND "
-                        "marketplace = ? AND status = 'ready' ORDER BY created_at "
+                        "claude_plugin_installations WHERE package_name = %s AND "
+                        "marketplace = %s AND status = 'ready' ORDER BY created_at "
                         "DESC LIMIT 1",
                         (canonical.split("@")[0], canonical.split("@")[1]),
                     ).fetchone()
@@ -950,10 +979,33 @@ async def story_workspace_shutdown_dream_confirmation_coordinator():
 
 
 @app.on_event("shutdown")
+async def story_workspace_shutdown_dream_launch_dispatches():
+    """Await launch turn drains before closing the Claude Agent factory."""
+
+    await get_dream_launch_endpoint_service().aclose()
+
+
+@app.on_event("shutdown")
 async def shutdown_claude_agent():
     """Gracefully close all Claude Agent sessions."""
-    await claude_agent_thread_factory.aclose()
+    try:
+        await claude_agent_thread_factory.aclose()
+    except Exception:
+        logging.getLogger(__name__).exception("Claude Agent factory close failed")
+    try:
+        # No producer may retain the process-wide Redis connection after the
+        # factory drain. ``aclose`` resets its slot for test/app reloads.
+        await RedisStreamEventBus.aclose()
+    except Exception:
+        logging.getLogger(__name__).exception("Agent Redis EventBus close failed")
     print("✅ Claude Agent factory closed\n")
+
+
+@app.on_event("shutdown")
+async def shutdown_database():
+    """Close PostgreSQL only after every Agent/business owner has settled."""
+
+    database.close_db()
 
 
 
@@ -1016,6 +1068,7 @@ app.include_router(sessions_router)
 app.include_router(pictures_router)
 app.include_router(preferences_router)
 app.include_router(notion_router)
+app.include_router(product_router)
 app.include_router(reports_router)
 app.include_router(admin_router)
 app.include_router(voices_router)
@@ -1027,15 +1080,17 @@ app.include_router(claude_plugins_router)
 app.include_router(deck_plugin_binding_router)
 app.include_router(story_workspace_router)
 app.include_router(system_config_router)
+app.include_router(gateway_models_router)
 app.include_router(workspace_router)
 app.include_router(reflections_router)
 
 
 @app.websocket("/ws/speech-recognition")
 async def speech_recognition(websocket: WebSocket):
-    # TODO: find a way of authentication for websocket
-    await websocket.accept()
-    await init_speech_recognition(websocket)
+    # ASR Gateway is explicitly deferred for the Token-only release. Keep the
+    # legacy route fail-closed so no browser can stream audio or trigger a
+    # third-party request without the future authentication/limit design.
+    await websocket.close(code=1008, reason="Speech recognition is not enabled")
 
 
 registry = get_registry()

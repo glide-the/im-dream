@@ -6,7 +6,7 @@
 - 执行 Issue：`SUO-277` — `[execute][story-workspace][task_202c] 三类数据表与页面接入`
 - 来源业务 Issue：`SUO-201-FE-003`
 - 父项：`SUO-273`；祖先：`SUO-198`
-- 关联设计稿：`docs/design/story-workspace/story-workspace-prd.md`
+- 关联设计稿：`docs/design/story-workspace/product-scope-and-navigation.md`
 - 关联 Task：`docs/task/task_202c_frontend_data-table-components.md`
 - 关联 Stage：`docs/stage/stage_story-workspace.md`，`stage_001_story-workspace` / Wave 2
 - 执行 Agent：`ExecTaskAgent`

@@ -10,3 +10,12 @@ export {
   type StoryWorkspaceSurfaceLinkTarget,
 } from './surfaceLink';
 export { StoryWorkspaceSurfaceLinkButton } from './StoryWorkspaceSurfaceLinkButton';
+export {
+  StoryWorkspaceStoryIndexStatus,
+  storyWorkspaceStoryIndexCanRetry,
+  storyWorkspaceStoryIndexCombinedCopy,
+  storyWorkspaceStoryIndexDisplayStatus,
+  type StoryWorkspaceStoryIndexDisplayStatus,
+  type StoryWorkspaceStoryIndexFileStatus,
+  type StoryWorkspaceStoryIndexStatusProps,
+} from './episode/StoryWorkspaceStoryIndexStatus';

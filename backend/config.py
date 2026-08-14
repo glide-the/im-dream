@@ -1,51 +1,104 @@
-"""Voice archetypes configuration - Echo system."""
+# [Input] Environment-backed runtime policy values and repository prompt files.
+# [Output] Central configuration for image retries, voice archetypes, screenplay Deck defaults,
+#          and the default Claude plugin selected for newly created Decks.
+# [Pos] backend configuration source of truth
+# [Sync] 2026-08-14: define the screenplay-creation Deck template, retire legacy
+#                    system Deck defaults, and select drama-forge v1.0.1 for new Decks.
+"""Voice archetypes and product-default configuration."""
 
 import os
-from typing import Optional
 
-# ---------------------------------------------------------------------------
-# Text model configuration — read from environment variables.
-#
-# All LLM text-generation roles (voice analysis, chat, echo / trait /
-# pattern analysis, image description) are configured entirely through .env.
-# ---------------------------------------------------------------------------
 
-# Shared provider endpoint and API key used by the PolyAgent text roles.
-TEXT_API_ENDPOINT: str = os.getenv("TEXT_API_ENDPOINT", "")
-TEXT_API_KEY: str = os.getenv("TEXT_API_KEY", "")
+def _csv_env(name: str, fallback: str) -> tuple[str, ...]:
+    """Read an ordered, de-duplicated comma-separated policy list."""
 
-# Default model used as fallback for all text roles when no per-role override
-# is set.
-_TEXT_MODEL_DEFAULT: str = os.getenv(
-    "INK_TEXT_MODEL_DEFAULT", "google/gemini-3-flash-preview"
+    values: list[str] = []
+    for raw in os.getenv(name, fallback).split(","):
+        value = raw.strip()
+        if value and value not in values:
+            values.append(value)
+    return tuple(values)
+
+
+DEFAULT_SYSTEM_DECK_ID = os.getenv(
+    "INK_DEFAULT_SYSTEM_DECK_ID",
+    "screenplay_creation_deck",
+).strip()
+RETIRED_SYSTEM_DECK_IDS = _csv_env(
+    "INK_RETIRED_SYSTEM_DECK_IDS",
+    "introspection_deck,scholar_deck,philosophy_deck",
 )
+DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME = os.getenv(
+    "INK_DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME",
+    "drama-forge",
+).strip()
+DEFAULT_DECK_CLAUDE_PLUGIN_VERSION = os.getenv(
+    "INK_DEFAULT_DECK_CLAUDE_PLUGIN_VERSION",
+    "1.0.1",
+).strip()
 
-VOICE_ANALYSIS_MODEL: str = os.getenv("INK_VOICE_ANALYSIS_MODEL", _TEXT_MODEL_DEFAULT)
-VOICE_INSPIRATION_MODEL: str = os.getenv(
-    "INK_VOICE_INSPIRATION_MODEL", _TEXT_MODEL_DEFAULT
-)
-VOICE_CHAT_MODEL: str = os.getenv("INK_VOICE_CHAT_MODEL", _TEXT_MODEL_DEFAULT)
-ECHO_ANALYSIS_MODEL: str = os.getenv("INK_ECHO_ANALYSIS_MODEL", _TEXT_MODEL_DEFAULT)
-TRAIT_ANALYSIS_MODEL: str = os.getenv("INK_TRAIT_ANALYSIS_MODEL", _TEXT_MODEL_DEFAULT)
-PATTERN_ANALYSIS_MODEL: str = os.getenv(
-    "INK_PATTERN_ANALYSIS_MODEL", _TEXT_MODEL_DEFAULT
-)
+SCREENPLAY_DECK_TEMPLATE = {
+    "id": DEFAULT_SYSTEM_DECK_ID,
+    "name": "剧本创作团队",
+    "name_zh": "剧本创作团队",
+    "name_en": "Screenplay Creation Team",
+    "description": "覆盖剧情、结构、人物、对白和连续性的剧本创作角色",
+    "description_zh": "覆盖剧情、结构、人物、对白和连续性的剧本创作角色",
+    "description_en": "Screenplay roles for story, structure, character, dialogue, and continuity",
+    "icon": "masks",
+    "color": "purple",
+    "voices": (
+        {
+            "id": "screenplay_screenwriter",
+            "name": "编剧",
+            "name_zh": "编剧",
+            "name_en": "Screenwriter",
+            "system_prompt": "你是一名专业编剧。把创作目标发展为可拍摄的剧情、场景和行动，确保冲突清晰、选择具体，并尊重项目已经确定的世界观与人物事实。",
+            "icon": "masks",
+            "color": "purple",
+        },
+        {
+            "id": "screenplay_dramaturg",
+            "name": "戏剧结构师",
+            "name_zh": "戏剧结构师",
+            "name_en": "Dramaturg",
+            "system_prompt": "你是一名戏剧结构师。检查目标、阻力、节拍、转折、铺垫与回收，指出结构问题并给出最小、可执行的调整建议，不替用户擅自改写核心主题。",
+            "icon": "compass",
+            "color": "blue",
+        },
+        {
+            "id": "screenplay_character_designer",
+            "name": "人物塑造师",
+            "name_zh": "人物塑造师",
+            "name_en": "Character Designer",
+            "system_prompt": "你是一名人物塑造师。维护人物欲望、阻力、秘密、关系和弧光的一致性，让行动来自人物选择，并明确区分已确定事实与创作建议。",
+            "icon": "heart",
+            "color": "pink",
+        },
+        {
+            "id": "screenplay_dialogue_editor",
+            "name": "对白编辑",
+            "name_zh": "对白编辑",
+            "name_en": "Dialogue Editor",
+            "system_prompt": "你是一名对白编辑。改善潜台词、人物声线、节奏和可表演性，删去解释性重复，同时保持剧情事实、人物身份和场景目的不变。",
+            "icon": "masks",
+            "color": "green",
+        },
+        {
+            "id": "screenplay_continuity_editor",
+            "name": "连续性审校",
+            "name_zh": "连续性审校",
+            "name_en": "Continuity Editor",
+            "system_prompt": "你是一名连续性审校。检查时间、空间、道具、人物状态、信息获知顺序和前后因果，列出可定位的矛盾及最小修正，不制造新的权威事实。",
+            "icon": "eye",
+            "color": "yellow",
+        },
+    ),
+}
 
-# Image description uses the same API provider as image generation by default,
-# but the model name can be overridden independently.
-IMAGE_DESCRIPTION_MODEL: str = os.getenv(
-    "INK_IMAGE_DESCRIPTION_MODEL", "anthropic/claude-haiku-4.5"
-)
-
-# ---------------------------------------------------------------------------
-# Image generation model configuration — read from environment variables.
-# ---------------------------------------------------------------------------
-
-IMAGE_GENERATION_MODEL: str = os.getenv(
-    "INK_IMAGE_GENERATION_MODEL", "google/gemini-2.5-flash-image-preview"
-)
-IMAGE_API_KEY: Optional[str] = os.getenv("INK_IMAGE_API_KEY")
-IMAGE_API_ENDPOINT: Optional[str] = os.getenv("INK_IMAGE_API_ENDPOINT")
+# Runtime model routing and credentials are intentionally absent here. Every
+# inference entrypoint resolves an Admin-published alias through
+# services.admin_gateway and has no direct Provider endpoint/key fallback.
 
 # Retry configuration for image generation
 IMAGE_RETRY_MAX_ATTEMPTS: int = int(os.getenv("INK_IMAGE_RETRY_MAX_ATTEMPTS", "3"))
@@ -134,4 +187,3 @@ IMPORTANT:
 - Phrase must be verbatim from text
 - Each voice should be distinct
 """
-

@@ -1,13 +1,17 @@
 /* eslint-disable react-refresh/only-export-components -- route metadata helper intentionally shares this page module. */
-import { useMemo, useState, type ReactNode } from 'react';
-import { FaArrowLeft, FaCog, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRegCreditCard, FaRobot, FaSearch } from 'react-icons/fa';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { FaArrowLeft, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import AboutView from '../../components/AboutView';
+import { IconMonitor, IconMoon, IconSun } from '../../components/chat/Icons';
 import ClaudePluginAdminPage from '../../components/claude-plugin-admin/ClaudePluginAdminPage';
 import ConnectorNotionDetailPage from '../../components/dashboard/ConnectorNotionDetailPage';
 import ConnectorSettingsSection from '../../components/dashboard/ConnectorSettingsSection';
 import ModelConfigSection from '../../components/dashboard/ModelConfigSection';
+import { getAuthToken } from '../../contexts/AuthContext';
+import { API_BASE } from '../../lib/apiBase';
 import type { StoryWorkspaceStaticRoute } from '../../router/storyWorkspacePath';
+import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
 import { StoryWorkspaceSubscriptionPage } from './StoryWorkspaceSubscriptionPage';
 import './StoryWorkspaceSettingsPage.css';
 
@@ -39,6 +43,54 @@ interface SettingsNavItem {
   label: string;
   icon: typeof FaCog;
   path: string;
+}
+
+const THEME_OPTIONS: { mode: ThemeMode; label: string; Icon: typeof IconSun }[] = [
+  { mode: 'light', label: '浅色', Icon: IconSun },
+  { mode: 'system', label: '跟随系统', Icon: IconMonitor },
+  { mode: 'dark', label: '深色', Icon: IconMoon },
+];
+
+function AppearanceThemeSetting() {
+  const [theme, setTheme] = useState<ThemeMode>(() => getThemeMode());
+
+  useEffect(() => {
+    const unsubscribe = onThemeChange((_resolved, mode) => setTheme(mode));
+    return () => { unsubscribe(); };
+  }, []);
+
+  const handleThemeChange = useCallback((mode: ThemeMode) => {
+    setThemeMode(mode);
+    void fetch(`${API_BASE}/api/system-config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
+      body: JSON.stringify({ theme: mode }),
+    }).catch(() => undefined);
+  }, []);
+
+  return (
+    <div className="story-workspace-settings__theme-field">
+      <strong id="story-workspace-theme-label">外观主题 / Theme</strong>
+      <p>选择工作区的显示外观。</p>
+      <div aria-labelledby="story-workspace-theme-label" className="story-workspace-settings__theme-options" role="group">
+        {THEME_OPTIONS.map(({ mode, label, Icon }) => {
+          const isActive = theme === mode;
+          return (
+            <button
+              aria-pressed={isActive}
+              className={`story-workspace-settings__theme-button${isActive ? ' is-active' : ''}`}
+              key={mode}
+              onClick={() => handleThemeChange(mode)}
+              type="button"
+            >
+              <Icon />
+              <span>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function SettingsSection({
@@ -81,7 +133,7 @@ export function StoryWorkspaceSettingsPage({
   const [searchQuery, setSearchQuery] = useState('');
   const navItems = useMemo<SettingsNavItem[]>(() => [
     { id: 'settings', label: '常规', icon: FaCog, path: '/story-workspace/settings' },
-    { id: 'settings-subscription', label: '订阅', icon: FaRegCreditCard, path: '/story-workspace/subscription' },
+    { id: 'settings-subscription', label: '订阅', icon: FaCoins, path: '/story-workspace/subscription' },
     { id: 'settings-resources', label: '资源连接', icon: FaDatabase, path: '/story-workspace/settings/resources' },
     { id: 'settings-plugins', label: '插件', icon: FaPuzzlePiece, path: '/story-workspace/settings/plugins' },
     { id: 'settings-model', label: 'AI 模型', icon: FaRobot, path: '/story-workspace/settings/model' },
@@ -139,6 +191,7 @@ export function StoryWorkspaceSettingsPage({
           </div>
           <p className="story-workspace-settings__hint">{t('settings.language.preview')}</p>
         </div>
+        <AppearanceThemeSetting />
         <div className="story-workspace-settings__toggle-row">
           <div>
             <strong>Energy Bar / 能量条</strong>

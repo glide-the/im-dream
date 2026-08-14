@@ -9,13 +9,11 @@ import inspect
 import os
 from pathlib import Path
 import re
-import sqlite3
 import tempfile
-from typing import Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 import uuid
 
 try:
-    from backend.database import create_runtime_plugin_tables
     from backend.models.runtime_plugin import (
         ActivationStatus,
         DeclarationStatus,
@@ -27,7 +25,6 @@ try:
         sha256_digest,
     )
 except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
-    from database import create_runtime_plugin_tables
     from models.runtime_plugin import (
         ActivationStatus,
         DeclarationStatus,
@@ -142,16 +139,14 @@ class MaterializationManager:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         artifact_provider: ArtifactProvider,
         retention_evidence_reader: RetentionEvidenceReader,
         publisher: AtomicArtifactPublisher,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        create_runtime_plugin_tables(db)
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._artifact_provider = artifact_provider
         self._retention_evidence_reader = retention_evidence_reader
         self._publisher = publisher
@@ -279,12 +274,12 @@ class MaterializationManager:
             self.db.execute(
                 """
                 UPDATE runtime_plugin_materializations
-                SET materialized_digest = ?, materialization_status = 'materialized',
-                    activation_status = 'loadable', verification_status = ?,
-                    signature_bundle_ref = ?, retention_state = ?,
-                    restore_source_ref = ?, cache_ref = ?, last_error = NULL,
-                    updated_at = ?
-                WHERE runtime_materialization_id = ? AND attempt_id = ?
+                SET materialized_digest = %s, materialization_status = 'materialized',
+                    activation_status = 'loadable', verification_status = %s,
+                    signature_bundle_ref = %s, retention_state = %s,
+                    restore_source_ref = %s, cache_ref = %s, last_error = NULL,
+                    updated_at = %s
+                WHERE runtime_materialization_id = %s AND attempt_id = %s
                 """,
                 (
                     actual_digest,
@@ -314,8 +309,8 @@ class MaterializationManager:
                 """
                 UPDATE runtime_plugin_materializations
                 SET materialization_status = 'failed', activation_status = 'inactive',
-                    last_error = ?, updated_at = ?
-                WHERE runtime_materialization_id = ? AND attempt_id = ?
+                    last_error = %s, updated_at = %s
+                WHERE runtime_materialization_id = %s AND attempt_id = %s
                 """,
                 (
                     self._sanitize_error(error.summary),
@@ -352,8 +347,8 @@ class MaterializationManager:
                     policy_revision, declaration_status, materialization_status,
                     activation_status, materialization_key, attempt_id,
                     attempt_count, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'declared',
-                          'materializing', 'inactive', ?, ?, 1, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'declared',
+                          'materializing', 'inactive', %s, %s, 1, %s, %s)
                 """,
                 (
                     materialization_id,
@@ -379,25 +374,25 @@ class MaterializationManager:
                 """
                 UPDATE runtime_plugin_materializations
                 SET materialized_digest = NULL, materialization_status = 'materializing',
-                    activation_status = 'inactive', attempt_id = ?, attempt_count = ?,
+                    activation_status = 'inactive', attempt_id = %s, attempt_count = %s,
                     verification_status = NULL, signature_bundle_ref = NULL,
                     retention_state = NULL, restore_source_ref = NULL,
-                    cache_ref = NULL, last_error = NULL, updated_at = ?
-                WHERE materialization_key = ?
+                    cache_ref = NULL, last_error = NULL, updated_at = %s
+                WHERE materialization_key = %s
                 """,
                 (attempt_id, attempt_count, self._iso(now), materialization_key),
             )
         self.db.commit()
         return materialization_id, attempt_id, attempt_count, created_at
 
-    def _select(self, materialization_key: str) -> sqlite3.Row | None:
+    def _select(self, materialization_key: str) -> Any | None:
         return self.db.execute(
-            "SELECT * FROM runtime_plugin_materializations WHERE materialization_key = ?",
+            "SELECT * FROM runtime_plugin_materializations WHERE materialization_key = %s",
             (materialization_key,),
         ).fetchone()
 
     @classmethod
-    def _row_to_materialization(cls, row: sqlite3.Row) -> RuntimePluginMaterialization:
+    def _row_to_materialization(cls, row: Any) -> RuntimePluginMaterialization:
         return RuntimePluginMaterialization(
             runtime_materialization_id=row["runtime_materialization_id"],
             runtime_environment_id=row["runtime_environment_id"],

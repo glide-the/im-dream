@@ -10,8 +10,8 @@
 - Task 文档: `docs/task/task_202a_frontend_three-column-layout.md`
 - Stage 文档: `docs/stage/stage_story-workspace.md`
 - 关联设计稿:
-  - `docs/design/story-workspace/story-workspace-prd.md`
-  - `docs/design/story-workspace/story-workspace-layout-design.md`
+  - `docs/design/story-workspace/product-scope-and-navigation.md`
+  - `docs/design/story-workspace/product-scope-and-navigation.md`
 - 设计决策: `DEC-001`, `DEC-003`, `DEC-006`
 - 执行 Agent: `ExecTaskAgent` (`2a7a15fe-2ebb-4dc5-91a8-48ae2bcc5471`)
 - 执行时间: 2026-08-01 07:55–08:15 CST

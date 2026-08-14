@@ -1,6 +1,10 @@
 // [Input] Story Workspace sidebar, router, App Decks handoff and subscription page sources.
-// [Output] Node seam for R2 navigation labels, concrete Decks reuse and static subscription boundary.
+// [Output] Node seam for the current Chat/Dream/Decks navigation, retained legacy
+//          routes, concrete Decks reuse, and the Product BFF subscription boundary.
 // [Pos] Story Workspace sidebar R2 Red/Green regression test.
+// [Sync] 2026-08-14: assert Writing, Timeline, and Analysis are hidden from the
+//                    sidebar while their route implementations remain intact.
+// [Sync] 2026-08-14: assert the visible primary order is Chat, Dream, Decks.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam reads source only; browser app omits Node types.
@@ -14,13 +18,26 @@ const SUBSCRIPTION = readFileSync(new URL('../../../../pages/story-workspace/Sto
 const SETTINGS = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSettingsPage.tsx', import.meta.url), 'utf8');
 const DREAM_LAUNCH = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceDreamLaunch.tsx', import.meta.url), 'utf8');
 
-test('sidebar replaces legacy resource management with Dream and Decks', () => {
+test('sidebar exposes only Chat, Dream, and Decks in that order', () => {
   expect(SIDEBAR).toContain("dream: '/story-workspace/dream'");
   expect(SIDEBAR).toContain("decks: '/story-workspace/decks'");
-  expect(SIDEBAR).toContain("writing: '/story-workspace/writing'");
-  expect(SIDEBAR).toContain("timeline: '/story-workspace/timeline'");
-  expect(SIDEBAR).toContain("analysis: '/story-workspace/analysis'");
   expect(SIDEBAR).toContain("chat: '/story-workspace/chat'");
+  expect(SIDEBAR).not.toContain("writing: '/story-workspace/writing'");
+  expect(SIDEBAR).not.toContain("timeline: '/story-workspace/timeline'");
+  expect(SIDEBAR).not.toContain("analysis: '/story-workspace/analysis'");
+  expect(SIDEBAR).not.toContain("view: 'writing'");
+  expect(SIDEBAR).not.toContain("view: 'timeline'");
+  expect(SIDEBAR).not.toContain("view: 'analysis'");
+  const primaryNavigation = SIDEBAR.slice(
+    SIDEBAR.indexOf('<nav aria-label="Story Workspace 导航"'),
+    SIDEBAR.indexOf('</nav>'),
+  );
+  expect(primaryNavigation.indexOf("view: 'chat'")).toBeLessThan(
+    primaryNavigation.indexOf("view: 'dream'"),
+  );
+  expect(primaryNavigation.indexOf("view: 'dream'")).toBeLessThan(
+    primaryNavigation.indexOf("view: 'decks'"),
+  );
   expect(SIDEBAR).toContain('const Icon = item.icon as IconType;');
   expect(SIDEBAR).toContain('story-workspace-sidebar__icon');
   expect(SIDEBAR).toContain('aria-label={collapsed ? item.label : undefined}');
@@ -65,16 +82,21 @@ test('sidebar theme switch is a footer utility that follows the shared theme own
   expect(SIDEBAR).not.toContain('localStorage');
 });
 
-test('Dream keeps its durable recent list while subscription stays a static, accessible three-plan page', () => {
+test('Dream keeps its durable recent list while subscription uses the real monthly Token boundary', () => {
   expect(PATHS).toContain("subscription: '/story-workspace/subscription'");
   expect(ROUTER).toContain("case 'subscription'");
   expect(DREAM_LAUNCH).toContain('最近的 Dream');
-  expect(SUBSCRIPTION).toContain('Free');
-  expect(SUBSCRIPTION).toContain('Dream');
-  expect(SUBSCRIPTION).toContain('is Dreaming');
+  expect(SUBSCRIPTION).toContain('useStoryWorkspaceSubscription');
+  expect(SUBSCRIPTION).toContain('Dream · Subscription');
+  expect(SUBSCRIPTION).toContain("{ id: 'info', label: '订阅信息' }");
+  expect(SUBSCRIPTION).toContain("{ id: 'allowance', label: '我的额度' }");
+  expect(SUBSCRIPTION).toContain("{ id: 'plans', label: '可选套餐' }");
   expect(SUBSCRIPTION).toContain('aria-labelledby');
+  expect(SUBSCRIPTION).not.toContain('STORY_WORKSPACE_DREAM_PLANS');
+  expect(SUBSCRIPTION).not.toContain('订阅功能即将开放');
   expect(SUBSCRIPTION).not.toContain('fetch(');
   expect(SUBSCRIPTION).not.toContain('apiUrl');
+  expect(SUBSCRIPTION).not.toContain('localStorage');
 });
 
 test('subscription moves into the focused Settings layout', () => {

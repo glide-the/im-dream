@@ -147,6 +147,11 @@ class SessionObserverRegistry:
     ) -> None:
         await self._emit("on_after_session_ended", session_id, result)
 
+    async def aclose(self) -> None:
+        """Close Observer-owned resources without knowing concrete types."""
+
+        await self._emit("aclose")
+
 
 # ---------------------------------------------------------------------------
 # Built-in observers

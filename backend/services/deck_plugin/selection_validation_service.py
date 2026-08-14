@@ -5,8 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 import inspect
 import json
-import sqlite3
-
+from typing import Any
 try:
     from backend.models.deck_plugin import (
         CompatibilityCheck,
@@ -81,12 +80,11 @@ class SelectionValidationService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         runtime_context_resolver: RuntimeContextResolver | None = None,
     ) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._runtime_context_resolver = runtime_context_resolver
         self._compatibility = CompatibilityService(db)
 
@@ -109,7 +107,7 @@ class SelectionValidationService:
             """
             SELECT display_name, status
             FROM deck_plugin_releases
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
             """,
             (deck_plugin_id, deck_plugin_version),
         ).fetchone()
@@ -284,11 +282,11 @@ class SelectionValidationService:
         self,
         workspace_id: str,
         deck_plugin_id: str,
-    ) -> tuple[Scope | None, sqlite3.Row | None]:
+    ) -> tuple[Scope | None, Any | None]:
         row = self.db.execute(
             """
             SELECT * FROM deck_plugin_installations
-            WHERE scope_type = 'workspace' AND scope_id = ? AND deck_plugin_id = ?
+            WHERE scope_type = 'workspace' AND scope_id = %s AND deck_plugin_id = %s
             """,
             (workspace_id, deck_plugin_id),
         ).fetchone()
@@ -297,7 +295,7 @@ class SelectionValidationService:
         row = self.db.execute(
             """
             SELECT * FROM deck_plugin_installations
-            WHERE scope_type = 'instance' AND deck_plugin_id = ?
+            WHERE scope_type = 'instance' AND deck_plugin_id = %s
             ORDER BY created_at DESC, id DESC
             LIMIT 1
             """,

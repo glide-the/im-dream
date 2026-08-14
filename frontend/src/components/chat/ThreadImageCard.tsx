@@ -56,7 +56,7 @@ export interface ExportConfirmationQuestion {
 }
 
 export interface ExportPendingConfirmation {
-  kind: 'confirm' | 'askuser' | 'sandbox-network';
+  kind: 'confirm' | 'askuser' | 'sandbox-network' | 'reject-only';
   title: string;
   badge: string;
   /** Mono detail block for the generic confirm variant (command or truncated JSON). */
@@ -302,7 +302,7 @@ function PendingConfirmationCard({ confirmation }: { confirmation: ExportPending
       {/* 静态按钮区 — 仅作画面还原，图片中不可点击 */}
       <div style={{ display: 'flex', gap: '0.7rem', marginTop: '0.25rem' }}>
         <span style={{
-          flex: 1.4,
+          flex: confirmation.kind === 'reject-only' ? 1 : 1.4,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -314,9 +314,9 @@ function PendingConfirmationCard({ confirmation }: { confirmation: ExportPending
           fontSize: '0.85rem',
           fontWeight: 600,
         }}>
-          ✓ {confirmation.primaryActionLabel}
+          {confirmation.kind === 'reject-only' ? '✕' : '✓'} {confirmation.primaryActionLabel}
         </span>
-        <span style={{
+        {confirmation.kind !== 'reject-only' ? <span style={{
           flex: 1,
           display: 'flex',
           alignItems: 'center',
@@ -331,7 +331,7 @@ function PendingConfirmationCard({ confirmation }: { confirmation: ExportPending
           fontWeight: 600,
         }}>
           ✕ {confirmation.secondaryActionLabel}
-        </span>
+        </span> : null}
       </div>
     </div>
   );

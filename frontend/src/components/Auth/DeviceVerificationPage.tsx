@@ -7,6 +7,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiUrl } from '../../lib/apiBase';
 import { getAuthToken, useAuth } from '../../contexts/AuthContext';
+import { getErrorMessage } from '../../utils/errorMessage';
 import LoginForm from './LoginForm';
 import RegisterForm from './RegisterForm';
 
@@ -17,14 +18,6 @@ type VerificationInfo = {
   user_code: string;
   expires_at: string;
 };
-
-function errorMessage(error: any): string {
-  const detail = error?.detail;
-  if (typeof detail === 'string') return detail;
-  if (detail?.error_description) return detail.error_description;
-  if (detail?.error) return detail.error;
-  return error?.message || 'Request failed';
-}
 
 function readInitialUserCode(): string {
   const params = new URLSearchParams(window.location.search);
@@ -55,7 +48,7 @@ export default function DeviceVerificationPage() {
       })
       .catch((err) => {
         setInfo(null);
-        setError(errorMessage(err));
+        setError(getErrorMessage(err, 'Request failed'));
       })
       .finally(() => setIsLoading(false));
   }, [normalizedCode]);
@@ -78,7 +71,7 @@ export default function DeviceVerificationPage() {
       if (!res.ok) throw data;
       setInfo((current) => current ? { ...current, status: data.status } : current);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(getErrorMessage(err, 'Request failed'));
     } finally {
       setIsSubmitting(false);
     }

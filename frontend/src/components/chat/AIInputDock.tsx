@@ -16,9 +16,13 @@
 //                    (en + zh) via useTranslation.
 // [Sync] 2026-08-06: replace the plain textarea with MarkdownInputEditor; user-authored rich text is
 //                    serialized to Markdown before transport and rendered through the shared chat chain.
+// [Sync] 2026-08-11: accept a passive loading label so subagent-only activity is
+//                    announced accurately without exposing a non-functional Stop action.
+// [Sync] 2026-08-13: suggest installed Deck Skills when a Chat draft starts with slash.
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -45,6 +49,11 @@ import { getAuthToken } from '../../contexts/AuthContext';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
 import MarkdownInputEditor from './MarkdownInputEditor';
+import {
+  filterInstalledSkillCommands,
+  loadInstalledSkillCommands,
+  type InstalledSkillCommand,
+} from './slashSkillCommands';
 
 type AIInputDockMode = 'simple' | 'full';
 
@@ -57,6 +66,8 @@ interface AIInputDockProps {
   placeholder?: string;
   disabled?: boolean;
   loading?: boolean;
+  /** Accessible status for passive loading states that do not expose Stop. */
+  loadingLabel?: string;
   defaultToolChoice?: ToolChoice;
   openFileDialogSignal?: number;
   onStop?: () => void | Promise<void>;
@@ -66,6 +77,10 @@ interface AIInputDockProps {
   fullAccessEnabled?: boolean;
   /** Optional business context control rendered with the composer controls. */
   contextControl?: ReactNode;
+  /** Immutable Deck whose enabled plugin Skills may be suggested. */
+  deckId?: string;
+  /** Existing thread whose frozen plugin receipt narrows suggestions. */
+  threadId?: string;
 }
 
 const MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024;
@@ -116,6 +131,7 @@ export default function AIInputDock({
   placeholder = 'Ask Ink & Memory…',
   disabled = false,
   loading = false,
+  loadingLabel,
   defaultToolChoice = 'auto',
   openFileDialogSignal,
   onStop,
@@ -124,6 +140,8 @@ export default function AIInputDock({
   workspaceSessionId,
   fullAccessEnabled,
   contextControl,
+  deckId,
+  threadId,
 }: AIInputDockProps) {
   const { t } = useTranslation();
   const toolChoiceOptions = useMemo(() => buildToolChoiceOptions(t), [t]);
@@ -134,9 +152,46 @@ export default function AIInputDock({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [toolChoice, setToolChoice] = useState<ToolChoice>(defaultToolChoice);
   const [resolvedFullAccessEnabled, setResolvedFullAccessEnabled] = useState(fullAccessEnabled ?? false);
+  const [installedSkillCommands, setInstalledSkillCommands] = useState<readonly InstalledSkillCommand[]>([]);
+  const [activeSkillIndex, setActiveSkillIndex] = useState(0);
+  const [dismissedSlashDraft, setDismissedSlashDraft] = useState<string | null>(null);
+  const skillListboxId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastHandledOpenFileDialogSignalRef = useRef(0);
   const { upload, error: uploadHookError } = useFileUpload();
+
+  useEffect(() => {
+    let active = true;
+    setInstalledSkillCommands([]);
+    if (!deckId && !threadId) return () => { active = false; };
+    void loadInstalledSkillCommands({ deckId, threadId })
+      .then((commands) => {
+        if (active) setInstalledSkillCommands(commands);
+      })
+      .catch(() => {
+        if (active) setInstalledSkillCommands([]);
+      });
+    return () => { active = false; };
+  }, [deckId, threadId]);
+
+  const matchingSkillCommands = useMemo(
+    () => !isInputFocused || dismissedSlashDraft === query
+      ? []
+      : filterInstalledSkillCommands(query, installedSkillCommands),
+    [dismissedSlashDraft, installedSkillCommands, isInputFocused, query],
+  );
+
+  useEffect(() => {
+    setActiveSkillIndex(0);
+    if (dismissedSlashDraft !== null && dismissedSlashDraft !== query) {
+      setDismissedSlashDraft(null);
+    }
+  }, [dismissedSlashDraft, query]);
+
+  const selectSkillCommand = useCallback((command: InstalledSkillCommand) => {
+    setQuery(`${command.command} `);
+    setDismissedSlashDraft(null);
+  }, []);
 
   useEffect(() => {
     if (fullAccessEnabled !== undefined) {
@@ -537,6 +592,11 @@ export default function AIInputDock({
         id="chat-input"
         ariaLabel={t('chat.inputDock.inputAria')}
         ariaDescribedBy={showUploadHint ? 'chat-upload-hint' : undefined}
+        ariaAutocomplete={matchingSkillCommands.length > 0 ? 'list' : undefined}
+        ariaControls={matchingSkillCommands.length > 0 ? skillListboxId : undefined}
+        ariaActiveDescendant={matchingSkillCommands.length > 0
+          ? `${skillListboxId}-option-${activeSkillIndex}`
+          : undefined}
         placeholder={placeholder}
         value={query}
         onChange={setQuery}
@@ -544,6 +604,30 @@ export default function AIInputDock({
         onBlur={() => setIsInputFocused(false)}
         disabled={disabled}
         onKeyDown={(event) => {
+          if (matchingSkillCommands.length > 0) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              setActiveSkillIndex((current) => (current + 1) % matchingSkillCommands.length);
+              return;
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              setActiveSkillIndex((current) => (
+                current - 1 + matchingSkillCommands.length
+              ) % matchingSkillCommands.length);
+              return;
+            }
+            if (event.key === 'Enter' || event.key === 'Tab') {
+              event.preventDefault();
+              selectSkillCommand(matchingSkillCommands[activeSkillIndex] ?? matchingSkillCommands[0]);
+              return;
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setDismissedSlashDraft(query);
+              return;
+            }
+          }
           if (!shouldSendWithKeyboard(mode, event)) {
             return;
           }
@@ -551,6 +635,56 @@ export default function AIInputDock({
           handleSend();
         }}
       />
+
+      {matchingSkillCommands.length > 0 ? (
+        <div
+          aria-label="已安装的 Skill 指令"
+          id={skillListboxId}
+          role="listbox"
+          style={{
+            display: 'grid',
+            gap: '0.25rem',
+            marginTop: '0.5rem',
+            maxHeight: '15rem',
+            overflowY: 'auto',
+            padding: '0.35rem',
+            border: '1px solid var(--color-border-paper)',
+            borderRadius: '0.75rem',
+            background: 'var(--color-bg-surface-solid)',
+          }}
+        >
+          {matchingSkillCommands.map((command, index) => (
+            <button
+              aria-selected={index === activeSkillIndex}
+              id={`${skillListboxId}-option-${index}`}
+              key={`${command.packageSpec}:${command.command}`}
+              onClick={() => selectSkillCommand(command)}
+              onMouseDown={(event) => event.preventDefault()}
+              role="option"
+              type="button"
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: '1rem',
+                width: '100%',
+                padding: '0.55rem 0.65rem',
+                border: 'none',
+                borderRadius: '0.55rem',
+                background: index === activeSkillIndex
+                  ? 'var(--color-bg-hover)'
+                  : 'transparent',
+                color: 'var(--color-text-primary)',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <strong>{command.command}</strong>
+              <small style={{ color: 'var(--color-text-muted)' }}>{command.packageSpec}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.65rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
@@ -665,8 +799,8 @@ export default function AIInputDock({
           <button
             type="button"
             disabled
-            title={t('chat.inputDock.generating')}
-            aria-label={t('chat.inputDock.generating')}
+            title={loadingLabel ?? t('chat.inputDock.generating')}
+            aria-label={loadingLabel ?? t('chat.inputDock.generating')}
             style={{
               display: 'grid',
               placeItems: 'center',

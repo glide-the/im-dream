@@ -18,6 +18,7 @@ function narrowLayoutCss(): string {
 test('desktop and explicit collapsed sidebar widths remain canonical', () => {
   expect(CSS).toMatch(/\.story-workspace-layout__sidebar\s*{[^}]*flex:\s*0 0 240px;[^}]*width:\s*240px;[^}]*min-width:\s*240px;/s);
   expect(CSS).toMatch(/\[data-sidebar-state='collapsed'\] \.story-workspace-layout__sidebar\s*{[^}]*flex:\s*0 0 72px;[^}]*width:\s*72px;[^}]*min-width:\s*72px;/s);
+  expect(CSS).toMatch(/\.story-workspace-layout__main\s*{[^}]*min-width:\s*0;[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s);
 });
 
 test('narrow workspace keeps a 72px navigation rail without a JS viewport owner', () => {

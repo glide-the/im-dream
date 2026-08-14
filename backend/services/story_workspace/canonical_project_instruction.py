@@ -19,7 +19,9 @@ _FALLBACK_EXAMPLE_PROJECT_SLUG = story_workspace_canonical_project_fallback_slug
 
 
 STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION = (
-    "先完成 drama-init 的项目初始化语义，再推进任何 Episode 工作。\n"
+    "如果当前 server-trusted Dream 消息已经明确给出分配好的 project_id/project_slug，"
+    "必须原样使用，禁止重新计算或替换；只有未给出分配值时，才先完成 drama-init "
+    "的项目初始化语义，再推进任何 Episode 工作。\n"
     "规范项目身份要求：先创建 stories/<project_slug>/project.yaml；"
     "project_slug 必须与 project_id 完全相同，并且两者都必须匹配 "
     "^[a-z0-9]+(?:-[a-z0-9]+)*$。\n"
@@ -35,11 +37,33 @@ STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION = (
 )
 
 STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX = (
-    "规范项目身份成立后，才能调用 "
-    "mcp__story_workspace__write_dream_stage(storyboards)；首次调用 "
-    "mcp__story_workspace__bind_first_episode 必须传 "
-    "expectedBindingRevision=0。"
+    "规范项目身份成立后，宿主会在主 Agent turn 成功结束时自动同步工作台文件。"
+    "Story Workspace MCP 写工具仅用于主动即时预览或显式修复，不是同步成功的前置条件；"
+    "首次 Episode 绑定与 .dream 私有发布由服务端 turn Hook 根据 canonical 产物自动完成。"
 )
+
+STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION = """# Run-isolated layout
+
+```text
+<shared-root>/<server-derived-thread-key>/.dream/runtime/runs/<run-id>/
+  episode.json
+  episode-workflow.json
+  artifact/
+    stories/<source-project-id>/
+      project.yaml
+      episodes/<EPxx>/
+        script.md
+        episode-outline.md
+        storyboard.yaml
+        review-report.md
+```
+
+`<run-id>` is the server-trusted workflow_run_id in this Dream context. The
+server derives `<shared-root>` and `<server-derived-thread-key>`; never infer,
+replace or accept either from browser/user text. The host owns `.dream/**`
+publication and automatically synchronizes completed canonical workbench
+files after a successful root turn. Generic file or Bash tools must never
+write this private layout."""
 
 STORY_WORKSPACE_CANONICAL_PROJECT_RECOVERY_INSTRUCTION = (
     "若尚无规范项目，先按上述 drama-init 语义完成初始化。"
@@ -55,5 +79,6 @@ __all__ = [
     "STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION",
     "STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX",
     "STORY_WORKSPACE_CANONICAL_PROJECT_RECOVERY_INSTRUCTION",
+    "STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION",
     "story_workspace_canonical_project_fallback_slug",
 ]

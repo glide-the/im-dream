@@ -213,6 +213,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// AuthProvider and its hook intentionally share the same private context; moving the
+// hook would require exporting that implementation detail and weaken the boundary.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -224,6 +227,9 @@ export function useAuth() {
 /**
  * Get current auth token for API calls
  */
+// This storage accessor is part of the established AuthContext import boundary used
+// by API clients; it has no module state and cannot affect component refresh identity.
+// eslint-disable-next-line react-refresh/only-export-components
 export function getAuthToken(): string | null {
   return localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
 }

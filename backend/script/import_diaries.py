@@ -207,7 +207,7 @@ def _build_agent_token(user_id: int) -> str:
     """Generate a short-lived JWT for internal script-to-service calls."""
     db = database.get_db()
     try:
-        row = db.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+        row = db.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
         if not row:
             raise SystemExit(f"Cannot build agent token: user {user_id} not found.")
         email = row["email"]
@@ -598,7 +598,7 @@ def resolve_timezone(tz_arg: str | None, user_id: int) -> ZoneInfo:
         db = database.get_db()
         try:
             row = db.execute(
-                "SELECT timezone FROM user_preferences WHERE user_id = ?",
+                "SELECT timezone FROM user_preferences WHERE user_id = %s",
                 (user_id,),
             ).fetchone()
             tz_name = row["timezone"] if row and row["timezone"] else None
@@ -1117,7 +1117,7 @@ def fetch_existing_sessions(user_id: int, tz: ZoneInfo) -> list[ExistingSession]
             """
             SELECT id, name, editor_state_json, created_at, updated_at
             FROM user_sessions
-            WHERE user_id = ?
+            WHERE user_id = %s
             """,
             (user_id,),
         ).fetchall()
@@ -1248,9 +1248,9 @@ def preserve_import_timestamps(user_id: int, entry: DiaryEntry) -> None:
         db.execute(
             """
             UPDATE user_sessions
-            SET created_at = ?,
-                updated_at = ?
-            WHERE user_id = ? AND id = ?
+            SET created_at = %s,
+                updated_at = %s
+            WHERE user_id = %s AND id = %s
             """,
             (entry.created_at_db, entry.created_at_db, user_id, entry.session_id),
         )

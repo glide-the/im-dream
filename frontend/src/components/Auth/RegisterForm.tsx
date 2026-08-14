@@ -10,6 +10,7 @@
 import React, { useState } from 'react';
 import { FaGoogle } from 'react-icons/fa';
 import { useAuth } from '../../contexts/AuthContext';
+import { getErrorMessage } from '../../utils/errorMessage';
 
 interface RegisterFormProps {
   onSuccess: () => void;
@@ -38,8 +39,8 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
     try {
       await register(email, password, displayName || undefined);
       onSuccess();
-    } catch (err: any) {
-      setError(err.message || 'Registration failed');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Registration failed'));
     } finally {
       setIsSubmitting(false);
     }

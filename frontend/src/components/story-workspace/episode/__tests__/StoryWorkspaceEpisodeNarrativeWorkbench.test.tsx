@@ -62,14 +62,10 @@ function surface(stage: 'outline' | 'script' | 'storyboard'): StoryWorkspaceEpis
   return {
     runId: `run_${'1'.repeat(32)}`,
     opaqueEpisodeId: EPISODE_ID,
+    episodeCode: 'EP01',
     manifestRevision: `sha256:${'a'.repeat(64)}`,
     etag: `sha256:${'a'.repeat(64)}`,
     bindingAvailability: 'bound',
-    bindingRecovery: {
-      autoRepairAttempted: false,
-      canDispatch: true,
-      publicReason: null,
-    },
     artifacts: [],
     narrative: {
       episodeId: EPISODE_ID,
@@ -252,22 +248,8 @@ function surface(stage: 'outline' | 'script' | 'storyboard'): StoryWorkspaceEpis
         orphanArtifacts: [],
       },
     },
+    documents: [],
     auxiliary: null,
-    workflow: {
-      factsRevision: 0,
-      nextAction: {
-        action: stage === 'outline'
-          ? 'write_script'
-          : stage === 'script'
-            ? 'review_script'
-            : 'generate_prompts',
-        diagnostic: 'ready',
-        canDispatch: true,
-      },
-      prerequisites: [],
-      actionOptions: [],
-      legacyPartial: false,
-    },
   };
 }
 
@@ -433,11 +415,11 @@ function surfaceWithAuxiliary(): StoryWorkspaceEpisodeArtifactSurface {
 const noOp = () => undefined;
 
 function renderWorkbench(
-  props: ComponentProps<typeof StoryWorkspaceEpisodeNarrativeWorkbench>,
+  props: Omit<ComponentProps<typeof StoryWorkspaceEpisodeNarrativeWorkbench>, 'episodeCode'>,
 ): string {
   return renderToStaticMarkup(createElement(
     StoryWorkspaceEpisodeNarrativeWorkbench,
-    props,
+    { ...props, episodeCode: 'EP01' },
   ));
 }
 

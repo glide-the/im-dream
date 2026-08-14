@@ -185,6 +185,18 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
         self.assertFalse(waiting.can_confirm)
         self.assertEqual(self.tree_snapshot(self.workspace), before)
 
+    def test_missing_dream_root_is_a_read_only_waiting_state(self) -> None:
+        shutil.rmtree(self.dream)
+        before = self.tree_snapshot(self.workspace)
+
+        waiting = self.reader.read(self.run, thread_id="thread-1")
+
+        self.assertEqual(waiting.run_revision, 0)
+        self.assertEqual(waiting.stages, {})
+        self.assertFalse(waiting.can_confirm)
+        self.assertEqual(self.tree_snapshot(self.workspace), before)
+        self.assertFalse(self.dream.exists())
+
     def test_storage_validation_rejects_camel_case_and_mixed_keys(self) -> None:
         canonical_source = {
             "deck_plugin_binding_id": "binding-1",

@@ -8,7 +8,18 @@ import {
   storyWorkspaceBuildExecutionWorkspace,
   storyWorkspaceCanAccessExecution,
   storyWorkspaceExecutionFocusNeighbors,
+  storyWorkspaceResolveDreamDisplayTitle,
 } from '../executionViewModel';
+
+test('Dream display title prefers canonical Project and otherwise uses the goal prefix', () => {
+  expect(storyWorkspaceResolveDreamDisplayTitle('  雾中黑海湖  ', '很长的创作目标'))
+    .toBe('雾中黑海湖');
+  expect(storyWorkspaceResolveDreamDisplayTitle(null, '  尚未初始化的创作目标  '))
+    .toBe('尚未初始化的创作目标');
+  expect(storyWorkspaceResolveDreamDisplayTitle(null, '甲'.repeat(100)))
+    .toBe('甲'.repeat(80));
+  expect(storyWorkspaceResolveDreamDisplayTitle(null, null)).toBe('故事协作工作台');
+});
 
 const RUN_ID = `run_${'2'.repeat(32)}`;
 
@@ -32,6 +43,7 @@ function files(): StoryWorkspaceDreamFilesResponse {
         page: { title: '人物', entryRoute: `/story-workspace/characters?run=${RUN_ID}` },
         items: [{
           entityId: 'lead', displayName: '林默', summary: '寻找真相。',
+          content: '# 林默\n\n身份：调查记者。\n\n动机：寻找真相。',
           sourceFile: 'assets/characters/lead.md', relations: ['苏遥'],
         }],
       },
@@ -64,6 +76,7 @@ function files(): StoryWorkspaceDreamFilesResponse {
     confirmationDispatched: true,
     canConfirm: false,
     confirmationLabel: '确认并继续',
+    agentActivity: null,
   };
 }
 
@@ -76,6 +89,10 @@ test('builds Assets and Outline from workspace files without approval states', (
     key: 'storyboards:beat-02',
     revision: 5,
     relations: ['林默', '苏遥'],
+  });
+  expect(workspace.assets[0]).toMatchObject({
+    summary: '寻找真相。',
+    content: '# 林默\n\n身份：调查记者。\n\n动机：寻找真相。',
   });
   expect(workspace.activity.map((entry) => entry.label)).toEqual([
     '分镜文件已写入 r5',

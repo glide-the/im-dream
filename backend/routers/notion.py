@@ -7,7 +7,8 @@
 """Notion resource connector HTTP routes."""
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Iterable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -18,11 +19,24 @@ from notion import (
     NotionConnectorNotFoundError,
     NotionSnapshotNotReadyError,
     build_notion_facade,
+    close_default_store,
+    open_default_store,
 )
 
 from .deps import get_current_user
 
-router = APIRouter()
+@asynccontextmanager
+async def _notion_store_lifespan(_app: Any) -> AsyncIterator[None]:
+    """Own the pool lifecycle; schema creation belongs only to Admin/Drizzle."""
+
+    open_default_store()
+    try:
+        yield
+    finally:
+        close_default_store()
+
+
+router = APIRouter(lifespan=_notion_store_lifespan)
 
 
 class ConnectorCreateRequest(BaseModel):
@@ -253,4 +267,3 @@ def delete_resource(
         return {"deleted": deleted}
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
-

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-# [Input] Consume SQLite, filesystem paths, JSON data, optional session text extraction,
+# [Input] Consume PostgreSQL connections, filesystem paths, JSON data, and optional session text extraction,
 #         and memory workspace defaults.
 # [Output] Provide persistence helpers for users, sessions, decks, voices, reports,
 #          auth/OAuth state, Claude Agent threads/messages, and voice partition
-#          Memory configs.
+#          Memory configs; user creation commits only after Admin-owned billing
+#          identity/default-Free triggers complete.
 # [Pos] database node in backend
 # [Sync] 2026-06-06: add procedural Memory workspace default config seeding,
 #                    backfill, and voice fork/sync propagation.
@@ -17,8 +18,19 @@
 # [Sync] 2026-07-09: allow Chat thread lists to page newest-first with
 #                    limit/offset so the frontend history panel can scroll load.
 # [Sync] 2026-08-01: add the Story Workspace schema, indexes, and rollback helper.
+# [Sync] 2026-08-14: distinguish duplicate email from unavailable transactional
+#                    user/default-Free provisioning and verify the complete Free
+#                    subscription/default-model postcondition before commit.
+# [Sync] 2026-08-14: make first-login preference writes a single PostgreSQL
+#                    upsert so concurrent hydration cannot race on the PK.
+# [Sync] 2026-08-14: make screenplay roles the active Deck default, retire
+#                    untouched legacy forks from business reads, and atomically
+#                    persist verified default plugin refs for new Decks.
+# [Sync] 2026-08-14: repair only untouched screenplay defaults with zero plugin
+#                    refs while preserving every explicit user selection.
+# [Sync] 2026-08-14: keep PostgreSQL community Deck aggregation valid by grouping author display names.
 """
-SQLite database setup and migrations for Ink & Memory.
+PostgreSQL runtime persistence helpers for Ink & Memory.
 
 Schema:
 - users: User accounts (email, password_hash)
@@ -28,22 +40,147 @@ Schema:
 """
 
 import logging
-import os
-from pathlib import Path
-import sqlite3
+from collections.abc import Iterator, Mapping
 from datetime import datetime, timedelta, timezone
+from threading import RLock
 from typing import Optional, Union
 import json
+from psycopg import Error as PostgresError
+from psycopg import IntegrityError as PostgresIntegrityError
+from psycopg.pq import TransactionStatus
 
-# Database location
-_DEFAULT_DB_PATH = Path(__file__).parent / "data" / "ink-and-memory.db"
-DB_PATH = Path(os.getenv("INK_DATABASE_PATH", str(_DEFAULT_DB_PATH))).expanduser()
-DB_DIR = DB_PATH.parent
+try:
+    from persistence.postgres import PostgresPool
+except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+    from backend.persistence.postgres import PostgresPool
 
 logger = logging.getLogger(__name__)
 
-# Ensure data directory exists
-DB_DIR.mkdir(parents=True, exist_ok=True)
+
+class ChatMessageIdentityConflict(RuntimeError):
+    """A message id is already bound to a different immutable envelope."""
+
+    code = "CHAT_MESSAGE_IDENTITY_CONFLICT"
+    status_code = 409
+
+    def __init__(self, message_id: str) -> None:
+        self.message_id = message_id
+        super().__init__(self.code)
+
+
+class UserRegistrationUnavailable(RuntimeError):
+    """The canonical user/default-Free registration transaction could not commit."""
+
+    code = "USER_REGISTRATION_UNAVAILABLE"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
+class PostgresRow(Mapping[str, object]):
+    """Small named-and-positional mapping returned by psycopg.
+
+    Existing domain services use both named lookup and positional lookup while
+    they are moved behind repositories.  Keeping that row behaviour at the
+    driver boundary avoids leaking tuple/dict branching through the domain;
+    it does not translate SQL or provide a SQLite fallback.
+    """
+
+    __slots__ = ("_names", "_values", "_positions")
+
+    def __init__(self, names: tuple[str, ...], values: tuple[object, ...]) -> None:
+        self._names = names
+        self._values = values
+        self._positions = {name: index for index, name in enumerate(names)}
+
+    def __getitem__(self, key: str | int) -> object:
+        if isinstance(key, int):
+            return self._values[key]
+        return self._values[self._positions[key]]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._names)
+
+    def __len__(self) -> int:
+        return len(self._names)
+
+    def keys(self) -> tuple[str, ...]:
+        return self._names
+
+
+def _postgres_row_factory(cursor):
+    names = tuple(column.name for column in (cursor.description or ()))
+
+    def make_row(values: tuple[object, ...]) -> PostgresRow:
+        return PostgresRow(names, values)
+
+    return make_row
+
+
+class _PooledConnectionLease:
+    """Connection facade whose ``close`` returns the lease to the pool."""
+
+    __slots__ = ("_pool", "_connection", "_closed")
+
+    def __init__(self, pool: PostgresPool, connection) -> None:
+        self._pool = pool
+        self._connection = connection
+        self._closed = False
+
+    def __getattr__(self, name: str):
+        return getattr(self._connection, name)
+
+    def __enter__(self):
+        if self._closed:
+            raise RuntimeError("PostgreSQL connection lease is closed")
+        return self
+
+    @property
+    def in_transaction(self) -> bool:
+        return self._connection.info.transaction_status is not TransactionStatus.IDLE
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        if exc_type is None:
+            self._connection.commit()
+        else:
+            self._connection.rollback()
+        return False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self._connection.info.transaction_status is not TransactionStatus.IDLE:
+                self._connection.rollback()
+        finally:
+            self._pool.raw_pool.putconn(self._connection)
+
+
+_runtime_pool: PostgresPool | None = None
+_runtime_pool_lock = RLock()
+def _open_runtime_pool() -> PostgresPool:
+    global _runtime_pool
+    with _runtime_pool_lock:
+        if _runtime_pool is not None and _runtime_pool.opened:
+            return _runtime_pool
+        pool = PostgresPool.from_env(
+            application_name="ink-dream-memory-runtime",
+            connection_kwargs={"row_factory": _postgres_row_factory},
+        )
+        pool.open()
+        _runtime_pool = pool
+        return pool
+
+
+def close_db() -> None:
+    """Close the process-wide PostgreSQL pool; safe to call repeatedly."""
+
+    global _runtime_pool
+    with _runtime_pool_lock:
+        pool, _runtime_pool = _runtime_pool, None
+    if pool is not None:
+        pool.close()
 
 
 def _default_memory_workspace_config() -> dict:
@@ -66,19 +203,19 @@ def _memory_workspace_config_json(memory_workspace_config: Optional[dict]) -> st
 
 
 def _utcnow_sql() -> str:
-    """Return UTC timestamp in SQLite CURRENT_TIMESTAMP-compatible format."""
+    """Return a stable UTC timestamp string accepted by PostgreSQL."""
 
     return datetime.utcnow().replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _datetime_to_sql(value: datetime) -> str:
-    """Serialize datetimes for SQLite text DATETIME columns."""
+    """Serialize datetimes for PostgreSQL temporal parameters."""
 
     return value.replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _parse_sql_datetime(value: Optional[str]) -> Optional[datetime]:
-    """Parse project DATETIME strings from SQLite."""
+    """Parse project temporal values returned by PostgreSQL or legacy imports."""
 
     if not value:
         return None
@@ -97,1700 +234,46 @@ def parse_sql_datetime(value: Optional[str]) -> Optional[datetime]:
     return _parse_sql_datetime(value)
 
 
-def _backfill_default_memory_workspace_config(db) -> None:
-    """Backfill voices that predate voices.memory_workspace_config.
+def get_db() -> _PooledConnectionLease:
+    """Acquire a PostgreSQL connection; no SQLite/JSON/in-memory fallback."""
 
-    This writes the default config into the partition table so runtime Memory
-    workspace initialization still reads from ``voices.memory_workspace_config``
-    rather than from project template files.
-    """
-
-    try:
-        db.execute(
-            """
-            UPDATE voices
-            SET memory_workspace_config = ?
-            WHERE memory_workspace_config IS NULL OR TRIM(memory_workspace_config) = ''
-            """,
-            (_default_memory_workspace_config_json(),),
-        )
-        db.commit()
-    except Exception as exc:
-        logger.warning("Memory workspace config backfill skipped: %s", exc)
-
-def get_db():
-    """Get database connection with WAL mode enabled."""
-    db = sqlite3.connect(DB_PATH)
-    db.row_factory = sqlite3.Row  # Access columns by name
-
-    # @@@ Enable WAL mode for concurrent reads + 1 write
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA foreign_keys=ON")
-
-    return db
+    pool = _open_runtime_pool()
+    connection = pool.raw_pool.getconn(timeout=pool.config.timeout)
+    return _PooledConnectionLease(pool, connection)
 
 def init_db():
-    """Initialize database by creating all tables."""
+    """Open PostgreSQL and fail closed unless required capabilities exist.
+
+    Runtime startup never creates, alters, seeds, or migrates schema.  Schema
+    DDL ownership belongs to Admin/Drizzle. Frozen legacy migration receipts
+    are historical audit data and are never accepted as runtime authority.
+    """
+
+    try:
+        from schema.capabilities import (
+            REQUIRED_RUNTIME_CAPABILITIES,
+            inspect_schema_authority,
+        )
+    except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+        from backend.schema.capabilities import (
+            REQUIRED_RUNTIME_CAPABILITIES,
+            inspect_schema_authority,
+        )
+
     db = get_db()
-    create_tables(db)
-    # Deck Plugin execution storage is an application dependency, not a test-only
-    # appendix. The helper is idempotent and recursively creates workflow/runtime
-    # tables before the run-scoped ClaudeAgent session tables.
-    create_agent_session_tables(db)
-    create_claude_plugin_tables(db)
     try:
-        from services.deck.builtin_plugin import seed_builtin_deck_plugin
-    except ModuleNotFoundError:
-        from backend.services.deck.builtin_plugin import seed_builtin_deck_plugin
-    seed_builtin_deck_plugin(db)
-    db.commit()
-    db.close()
-    print(f"✅ Database initialized at {DB_PATH}")
-
-    # Seed system decks
-    seed_system_decks()
-
-
-_STORY_WORKSPACE_REVIEW_COLUMNS = (
-    (
-        "status",
-        "TEXT NOT NULL DEFAULT 'active' "
-        "CHECK(status IN ('active', 'archived'))",
-        "TEXT",
-        True,
-        "'active'",
-    ),
-    (
-        "review_notes",
-        "TEXT CHECK(review_notes IS NULL OR length(review_notes) <= 2000)",
-        "TEXT",
-        False,
-        None,
-    ),
-    ("confirmed_at", "DATETIME", "DATETIME", False, None),
-    ("archived_at", "DATETIME", "DATETIME", False, None),
-)
-
-
-def _migrate_story_workspace_review_persistence(db):
-    """Add and verify the character/scene review-persistence columns."""
-
-    tables = ("story_workspace_characters", "story_workspace_scenes")
-    savepoint = "story_workspace_review_persistence"
-    db.execute(f"SAVEPOINT {savepoint}")
-    try:
-        for table in tables:
-            existing = {
-                row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()
-            }
-            for column, declaration, _, _, _ in _STORY_WORKSPACE_REVIEW_COLUMNS:
-                if column not in existing:
-                    db.execute(
-                        f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
-                    )
-
-        for table in tables:
-            columns = {
-                row[1]: row
-                for row in db.execute(f"PRAGMA table_info({table})").fetchall()
-            }
-            for column, _, expected_type, expected_not_null, expected_default in (
-                _STORY_WORKSPACE_REVIEW_COLUMNS
-            ):
-                row = columns.get(column)
-                if row is None:
-                    raise RuntimeError(f"{table}.{column} migration did not complete")
-                actual = (row[2].upper(), bool(row[3]), row[4])
-                expected = (expected_type, expected_not_null, expected_default)
-                if actual != expected:
-                    raise RuntimeError(
-                        f"{table}.{column} has incompatible schema: "
-                        f"expected {expected}, got {actual}"
-                    )
-
-            table_sql_row = db.execute(
-                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
-                (table,),
-            ).fetchone()
-            normalized_sql = " ".join(table_sql_row[0].lower().split())
-            required_checks = (
-                "check(status in ('active', 'archived'))",
-                "check(review_notes is null or length(review_notes) <= 2000)",
-            )
-            if any(check not in normalized_sql for check in required_checks):
-                raise RuntimeError(f"{table} review constraints are incomplete")
-
-        db.execute(f"RELEASE SAVEPOINT {savepoint}")
+        receipt = inspect_schema_authority(
+            db,
+            required_capabilities=REQUIRED_RUNTIME_CAPABILITIES,
+        )
+        db.rollback()
     except Exception:
-        db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-        db.execute(f"RELEASE SAVEPOINT {savepoint}")
+        db.rollback()
+        db.close()
+        close_db()
         raise
-
-
-def create_event_tables(db):
-    """Create the authoritative append-only canonical event audit store."""
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS events (
-      event_id TEXT PRIMARY KEY,
-      event_type TEXT NOT NULL,
-      event_version INTEGER NOT NULL CHECK(event_version >= 1),
-      occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      workspace_id TEXT NOT NULL,
-      aggregate_id TEXT NOT NULL,
-      aggregate_version INTEGER NOT NULL CHECK(aggregate_version >= 1),
-      correlation_id TEXT NOT NULL,
-      causation_id TEXT,
-      payload_json TEXT NOT NULL,
-      UNIQUE(aggregate_id, aggregate_version)
-    )
-    """)
-    for index_sql in (
-        "CREATE INDEX IF NOT EXISTS idx_events_aggregate "
-        "ON events(aggregate_id, aggregate_version)",
-        "CREATE INDEX IF NOT EXISTS idx_events_type "
-        "ON events(event_type, occurred_at)",
-        "CREATE INDEX IF NOT EXISTS idx_events_correlation "
-        "ON events(correlation_id)",
-    ):
-        db.execute(index_sql)
-    for trigger_name, operation in (
-        ("events_no_update", "UPDATE"),
-        ("events_no_delete", "DELETE"),
-    ):
-        db.execute(
-            f"""
-            CREATE TRIGGER IF NOT EXISTS {trigger_name}
-            BEFORE {operation} ON events
-            BEGIN
-              SELECT RAISE(ABORT, 'events is append-only');
-            END
-            """
-        )
-
-
-def create_tables(db):
-    """Create all database tables."""
-    print("📦 Creating database tables...")
-
-    create_event_tables(db)
-
-    # Users table
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      display_name TEXT,
-      avatar_url TEXT,
-      role TEXT DEFAULT 'user',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-    for column_sql in (
-        "ALTER TABLE users ADD COLUMN avatar_url TEXT",
-        "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
-        "ALTER TABLE users ADD COLUMN updated_at DATETIME",
-    ):
-        try:
-            db.execute(column_sql)
-        except Exception:
-            pass
-    db.execute(
-        """
-        UPDATE users
-        SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP),
-            role = COALESCE(role, 'user')
-        """
-    )
-
-    # User sessions (editor states)
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS user_sessions (
-      id TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      name TEXT,
-      editor_state_json TEXT NOT NULL,
-      labels TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id)")
-
-    # Migration: add labels column for Agent-note collaboration (2026-05-31).
-    try:
-        db.execute("ALTER TABLE user_sessions ADD COLUMN labels TEXT")
-    except Exception:
-        pass
-
-    # Daily pictures (generated images) - no UNIQUE constraint, allows multiple per day
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS daily_pictures (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      date TEXT NOT NULL,
-      image_base64 TEXT NOT NULL,
-      prompt TEXT,
-      thumbnail_base64 TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_pictures_user_date ON daily_pictures(user_id, date)")
-
-    # User preferences (voice configs, meta prompts, etc.)
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS user_preferences (
-      user_id INTEGER PRIMARY KEY,
-      voice_configs_json TEXT,
-      meta_prompt TEXT,
-      state_config_json TEXT,
-      selected_state TEXT,
-      timezone TEXT,
-      first_login_completed INTEGER DEFAULT 0,
-      system_config_json TEXT,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-
-    try:
-        db.execute("ALTER TABLE user_preferences ADD COLUMN timezone TEXT")
-    except Exception:
-        pass
-
-    try:
-        db.execute("ALTER TABLE user_preferences ADD COLUMN system_config_json TEXT")
-    except Exception:
-        pass
-
-    # Auth sessions
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS auth_sessions (
-      token TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      expires_at DATETIME NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_auth_user ON auth_sessions(user_id)")
-
-    # OAuth account bindings. Google access/id/refresh tokens are optional and
-    # must be encrypted by the caller before storage.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS oauth_accounts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      provider TEXT NOT NULL,
-      provider_sub TEXT NOT NULL,
-      email TEXT NOT NULL,
-      access_token_encrypted TEXT,
-      refresh_token_encrypted TEXT,
-      id_token_encrypted TEXT,
-      expires_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(provider, provider_sub),
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_oauth_accounts_user ON oauth_accounts(user_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_oauth_accounts_email ON oauth_accounts(email)")
-
-    # Refresh tokens are opaque outside the server; only hashes are persisted.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS refresh_tokens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      token_hash TEXT UNIQUE NOT NULL,
-      expires_at DATETIME NOT NULL,
-      revoked_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at)")
-
-    # OAuth 2.0 Device Authorization Grant state.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS device_authorizations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      client_id TEXT NOT NULL,
-      device_code_hash TEXT UNIQUE NOT NULL,
-      user_code_hash TEXT UNIQUE NOT NULL,
-      user_id INTEGER,
-      scope TEXT,
-      status TEXT NOT NULL,
-      interval_seconds INTEGER NOT NULL,
-      last_poll_at DATETIME,
-      expires_at DATETIME NOT NULL,
-      approved_at DATETIME,
-      consumed_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_device_authorizations_device_code_hash ON device_authorizations(device_code_hash)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_device_authorizations_user_code_hash ON device_authorizations(user_code_hash)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_device_authorizations_status_expires ON device_authorizations(status, expires_at)")
-
-    # Analysis reports
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS analysis_reports (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      report_type TEXT NOT NULL,
-      report_data_json TEXT NOT NULL,
-      all_notes_text TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_reports_user ON analysis_reports(user_id, created_at)")
-
-    # @@@ Decks table - organize voices into themed collections
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS decks (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      name_zh TEXT,
-      name_en TEXT,
-      description TEXT,
-      description_zh TEXT,
-      description_en TEXT,
-      icon TEXT,
-      color TEXT,
-      is_system BOOLEAN DEFAULT 0,
-      parent_id TEXT,
-      owner_id INTEGER,
-      enabled BOOLEAN DEFAULT 1,
-      has_local_changes BOOLEAN DEFAULT 0,
-      order_index INTEGER,
-      published BOOLEAN DEFAULT 0,
-      author_name TEXT,
-      install_count INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (parent_id) REFERENCES decks(id),
-      FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_decks_owner ON decks(owner_id)")
-
-    # @@@ Migration: Add publishing columns to existing decks table
-    try:
-        db.execute("ALTER TABLE decks ADD COLUMN published BOOLEAN DEFAULT 0")
-    except:
-        pass  # Column already exists
-    try:
-        db.execute("ALTER TABLE decks ADD COLUMN author_name TEXT")
-    except:
-        pass
-    try:
-        db.execute("ALTER TABLE decks ADD COLUMN install_count INTEGER DEFAULT 0")
-    except:
-        pass
-
-    # @@@ Voices table - individual voice personas within decks
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS voices (
-      id TEXT PRIMARY KEY,
-      deck_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      name_zh TEXT,
-      name_en TEXT,
-      system_prompt TEXT NOT NULL,
-      icon TEXT,
-      color TEXT,
-      is_system BOOLEAN DEFAULT 0,
-      parent_id TEXT,
-      owner_id INTEGER,
-      enabled BOOLEAN DEFAULT 1,
-      has_local_changes BOOLEAN DEFAULT 0,
-      order_index INTEGER,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE,
-      FOREIGN KEY (parent_id) REFERENCES voices(id),
-      FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_voices_deck ON voices(deck_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_voices_owner ON voices(owner_id)")
-
-    # @@@ Migration: add thread_id column for Claude-agent thread association
-    try:
-        db.execute("ALTER TABLE voices ADD COLUMN thread_id TEXT")
-        db.commit()
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-
-    # @@@ Migration: add memory_workspace_config column for per-voice memory workspace configuration
-    try:
-        db.execute("ALTER TABLE voices ADD COLUMN memory_workspace_config TEXT")
-        db.commit()
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-    _backfill_default_memory_workspace_config(db)
-
-    # @@@ Friendships table - bidirectional friend relationships
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS friendships (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      friend_id INTEGER NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('pending', 'accepted', 'rejected')),
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      FOREIGN KEY (friend_id) REFERENCES users (id) ON DELETE CASCADE,
-      UNIQUE(user_id, friend_id)
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_friendships_user ON friendships(user_id, status)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_friendships_friend ON friendships(friend_id, status)")
-
-    # @@@ Friend invites table - one-time invite codes
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS friend_invites (
-      code TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      expires_at DATETIME NOT NULL,
-      used_by INTEGER,
-      used_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      FOREIGN KEY (used_by) REFERENCES users (id) ON DELETE SET NULL
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_invites_user ON friend_invites(user_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_invites_expires ON friend_invites(expires_at)")
-
-    # @@@ Claude Agent chat threads
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS chat_thread (
-      id TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      title TEXT,
-      deck_id TEXT,
-      voice_id TEXT,
-      claude_session_id TEXT,
-      agent_contract_version TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      FOREIGN KEY (deck_id) REFERENCES decks (id) ON DELETE SET NULL,
-      FOREIGN KEY (voice_id) REFERENCES voices (id) ON DELETE SET NULL
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_chat_thread_user ON chat_thread(user_id, updated_at)")
-    # Migration: add Deck provenance and Claude resume fields.
-    for _col, _type in (("deck_id", "TEXT"), ("voice_id", "TEXT"), ("claude_session_id", "TEXT"), ("agent_contract_version", "TEXT")):
-        try:
-            db.execute(f"ALTER TABLE chat_thread ADD COLUMN {_col} {_type}")
-        except Exception:
-            pass  # Column already exists
-
-    # @@@ Claude Agent chat messages (one row per user/assistant turn)
-    # Schema fully aligned with better-chatbot ChatMessageTable (schema.pg.ts):
-    #   id TEXT PK (AI-SDK message ID), thread_id FK, role, parts JSON array, metadata JSON, created_at
-    # No `content` column — exactly matching better-chatbot where text lives inside parts[].text.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS chat_message (
-      id TEXT PRIMARY KEY,
-      thread_id TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-      parts TEXT NOT NULL DEFAULT '[]',
-      metadata TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (thread_id) REFERENCES chat_thread (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_chat_message_thread ON chat_message(thread_id, created_at)")
-    # Migration: add metadata column for databases pre-dating this column.
-    try:
-        db.execute("ALTER TABLE chat_message ADD COLUMN metadata TEXT")
-        db.commit()
-    except sqlite3.OperationalError as exc:
-        if "duplicate column name" not in str(exc).lower():
-            logger.warning("Unexpected error adding metadata column: %s", exc)
-    # Migration: add parts column (replaces parts_json) for databases pre-dating this column.
-    # parts is NOT NULL with default '[]'; existing rows with parts_json data are backfilled below.
-    try:
-        db.execute("ALTER TABLE chat_message ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'")
-        db.commit()
-    except sqlite3.OperationalError as exc:
-        if "duplicate column name" not in str(exc).lower():
-            logger.warning("Unexpected error adding parts column: %s", exc)
-    # Backfill: copy parts_json → parts for rows that still have the old column populated.
-    # For rows with no parts_json, build a text part from the content column if it exists.
-    # Both columns (parts_json, content) may not exist on new or already-migrated DBs —
-    # skip silently in that case, matching the pattern used by the DROP COLUMN blocks below.
-    try:
-        db.execute("""
-            UPDATE chat_message
-            SET parts = parts_json
-            WHERE parts_json IS NOT NULL AND parts = '[]'
-        """)
-        db.commit()
-    except sqlite3.OperationalError as exc:
-        msg = str(exc).lower()
-        if "no such column" not in msg and "unknown column" not in msg:
-            logger.warning("Parts backfill migration warning (non-fatal): %s", exc)
-    try:
-        # content column may still exist on old DBs — use it as fallback text source.
-        db.execute("""
-            UPDATE chat_message
-            SET parts = json_array(json_object('type', 'text', 'text', content))
-            WHERE (parts_json IS NULL OR parts_json = '') AND parts = '[]'
-              AND content IS NOT NULL
-        """)
-        db.commit()
-    except sqlite3.OperationalError as exc:
-        msg = str(exc).lower()
-        if "no such column" not in msg and "unknown column" not in msg:
-            logger.warning("Parts backfill migration warning (non-fatal): %s", exc)
-    # Migration: drop legacy content column (not in better-chatbot schema).
-    # SQLite supports DROP COLUMN since 3.35.0 (2021); skip gracefully on older builds.
-    try:
-        db.execute("ALTER TABLE chat_message DROP COLUMN content")
-        db.commit()
-    except sqlite3.OperationalError as exc:
-        msg = str(exc).lower()
-        if "no such column" in msg or "unknown column" in msg or "cannot drop" in msg:
-            pass  # already dropped or not present on new DBs
-        else:
-            logger.warning("Drop content column warning (non-fatal): %s", exc)
-    # Migration: drop legacy parts_json column (superseded by parts).
-    try:
-        db.execute("ALTER TABLE chat_message DROP COLUMN parts_json")
-        db.commit()
-    except sqlite3.OperationalError as exc:
-        msg = str(exc).lower()
-        if "no such column" in msg or "unknown column" in msg or "cannot drop" in msg:
-            pass
-        else:
-            logger.warning("Drop parts_json column warning (non-fatal): %s", exc)
-
-    # Story Workspace tables. Keep parent tables before their dependants so the
-    # same migration works with foreign-key enforcement enabled.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS story_workspace_workspaces (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      owner_id INTEGER NOT NULL,
-      settings TEXT DEFAULT '{}',
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (owner_id) REFERENCES users (id)
-    )
-    """)
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS story_workspace_stories (
-      id TEXT PRIMARY KEY,
-      identifier TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      status TEXT NOT NULL DEFAULT 'draft'
-        CHECK(status IN ('draft', 'published', 'archived')),
-      review_status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(review_status IN ('pending', 'confirmed', 'rejected')),
-      type TEXT NOT NULL DEFAULT 'short'
-        CHECK(type IN ('short', 'long', 'script', 'outline')),
-      content TEXT,
-      author_id INTEGER NOT NULL,
-      workspace_id TEXT NOT NULL,
-      character_count INTEGER NOT NULL DEFAULT 0,
-      scene_count INTEGER NOT NULL DEFAULT 0,
-      agent_generated INTEGER NOT NULL DEFAULT 1
-        CHECK(agent_generated IN (0, 1)),
-      agent_session_id TEXT,
-      review_notes TEXT,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      confirmed_at DATETIME,
-      published_at DATETIME,
-      FOREIGN KEY (author_id) REFERENCES users (id),
-      FOREIGN KEY (workspace_id) REFERENCES story_workspace_workspaces (id)
-    )
-    """)
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS story_workspace_characters (
-      id TEXT PRIMARY KEY,
-      identifier TEXT NOT NULL,
-      name TEXT NOT NULL,
-      avatar_url TEXT,
-      identity TEXT,
-      personality TEXT,
-      background TEXT,
-      catchphrase TEXT,
-      tags TEXT DEFAULT '[]',
-      notes TEXT,
-      author_id INTEGER NOT NULL,
-      workspace_id TEXT NOT NULL,
-      story_count INTEGER NOT NULL DEFAULT 0,
-      review_status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(review_status IN ('pending', 'confirmed', 'rejected')),
-      agent_generated INTEGER NOT NULL DEFAULT 1
-        CHECK(agent_generated IN (0, 1)),
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      status TEXT NOT NULL DEFAULT 'active'
-        CHECK(status IN ('active', 'archived')),
-      review_notes TEXT
-        CHECK(review_notes IS NULL OR length(review_notes) <= 2000),
-      confirmed_at DATETIME,
-      archived_at DATETIME,
-      FOREIGN KEY (author_id) REFERENCES users (id),
-      FOREIGN KEY (workspace_id) REFERENCES story_workspace_workspaces (id)
-    )
-    """)
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS story_workspace_scenes (
-      id TEXT PRIMARY KEY,
-      identifier TEXT NOT NULL,
-      name TEXT NOT NULL,
-      description TEXT,
-      story_id TEXT,
-      author_id INTEGER NOT NULL,
-      workspace_id TEXT NOT NULL,
-      character_count INTEGER NOT NULL DEFAULT 0,
-      order_index INTEGER NOT NULL DEFAULT 0,
-      review_status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(review_status IN ('pending', 'confirmed', 'rejected')),
-      agent_generated INTEGER NOT NULL DEFAULT 1
-        CHECK(agent_generated IN (0, 1)),
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      status TEXT NOT NULL DEFAULT 'active'
-        CHECK(status IN ('active', 'archived')),
-      review_notes TEXT
-        CHECK(review_notes IS NULL OR length(review_notes) <= 2000),
-      confirmed_at DATETIME,
-      archived_at DATETIME,
-      FOREIGN KEY (story_id) REFERENCES story_workspace_stories (id),
-      FOREIGN KEY (author_id) REFERENCES users (id),
-      FOREIGN KEY (workspace_id) REFERENCES story_workspace_workspaces (id)
-    )
-    """)
-
-    _migrate_story_workspace_review_persistence(db)
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS story_workspace_story_characters (
-      story_id TEXT NOT NULL,
-      character_id TEXT NOT NULL,
-      role_type TEXT,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (story_id, character_id),
-      FOREIGN KEY (story_id) REFERENCES story_workspace_stories (id),
-      FOREIGN KEY (character_id) REFERENCES story_workspace_characters (id)
-    )
-    """)
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS story_workspace_scene_characters (
-      scene_id TEXT NOT NULL,
-      character_id TEXT NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (scene_id, character_id),
-      FOREIGN KEY (scene_id) REFERENCES story_workspace_scenes (id),
-      FOREIGN KEY (character_id) REFERENCES story_workspace_characters (id)
-    )
-    """)
-
-    story_workspace_indexes = (
-        "CREATE INDEX IF NOT EXISTS idx_sw_workspaces_owner "
-        "ON story_workspace_workspaces(owner_id)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_stories_author "
-        "ON story_workspace_stories(author_id, updated_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_stories_review_status "
-        "ON story_workspace_stories(review_status, updated_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_stories_status "
-        "ON story_workspace_stories(status, updated_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_stories_type "
-        "ON story_workspace_stories(type, updated_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_stories_search "
-        "ON story_workspace_stories(title)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_stories_agent "
-        "ON story_workspace_stories(agent_session_id)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_characters_author "
-        "ON story_workspace_characters(author_id, updated_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_characters_name "
-        "ON story_workspace_characters(name)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_characters_review "
-        "ON story_workspace_characters(review_status, updated_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_scenes_story "
-        "ON story_workspace_scenes(story_id, order_index)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_scenes_author "
-        "ON story_workspace_scenes(author_id, updated_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_sw_scenes_review "
-        "ON story_workspace_scenes(review_status, updated_at DESC)",
-    )
-    for index_sql in story_workspace_indexes:
-        db.execute(index_sql)
-
-    # Versioned Deck Plugin workflow manifests. Published manifest content is
-    # immutable; lifecycle changes are recorded in the separate status column.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS deck_plugin_releases (
-      id TEXT PRIMARY KEY,
-      deck_plugin_id TEXT NOT NULL,
-      deck_plugin_version TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      description TEXT,
-      author TEXT,
-      status TEXT NOT NULL DEFAULT 'draft'
-        CHECK(status IN ('draft', 'validating', 'published', 'deprecated', 'revoked')),
-      manifest_json TEXT NOT NULL,
-      manifest_hash TEXT NOT NULL,
-      workflow_definition_ref TEXT NOT NULL,
-      input_schema_ref TEXT,
-      output_schema_ref TEXT,
-      capabilities_json TEXT,
-      compatibility_json TEXT,
-      deck_runtime_contract_json TEXT,
-      runtime_spec_json TEXT,
-      dependencies_json TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      published_at DATETIME,
-      UNIQUE(deck_plugin_id, deck_plugin_version)
-    )
-    """)
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_deck_plugin_releases_id_version "
-        "ON deck_plugin_releases(deck_plugin_id, deck_plugin_version)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_deck_plugin_releases_status "
-        "ON deck_plugin_releases(status)"
-    )
-
-    # Immutable runtime dependency resolution for a published Deck Plugin release.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS deck_runtime_plugin_locks (
-      id TEXT PRIMARY KEY,
-      deck_plugin_id TEXT NOT NULL,
-      deck_plugin_version TEXT NOT NULL,
-      deck_plugin_manifest_hash TEXT NOT NULL,
-      lock_json TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(deck_plugin_id, deck_plugin_version),
-      FOREIGN KEY (deck_plugin_id, deck_plugin_version)
-        REFERENCES deck_plugin_releases(deck_plugin_id, deck_plugin_version)
-        ON DELETE RESTRICT
-    )
-    """)
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_runtime_locks_deck_plugin "
-        "ON deck_runtime_plugin_locks(deck_plugin_id, deck_plugin_version)"
-    )
-
-    # Deck-domain installation control plane. Runtime cache/materialization state
-    # remains separate; pending columns only coordinate an atomic version switch.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS deck_plugin_installations (
-      id TEXT PRIMARY KEY,
-      scope_type TEXT NOT NULL
-        CHECK(scope_type IN ('instance', 'workspace')),
-      scope_id TEXT NOT NULL,
-      deck_plugin_id TEXT NOT NULL,
-      installed_versions_json TEXT NOT NULL DEFAULT '[]',
-      default_version TEXT,
-      status TEXT NOT NULL DEFAULT 'installing'
-        CHECK(status IN (
-          'installing', 'ready', 'disabled', 'error',
-          'upgrade_pending', 'uninstalled'
-        )),
-      approved_capabilities_json TEXT NOT NULL DEFAULT '[]',
-      source_policy_id TEXT NOT NULL,
-      last_error_code TEXT,
-      last_error_summary TEXT,
-      pending_version TEXT,
-      pending_capabilities_json TEXT,
-      revision INTEGER NOT NULL DEFAULT 0,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(scope_type, scope_id, deck_plugin_id)
-    )
-    """)
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_installations_deck_plugin "
-        "ON deck_plugin_installations(deck_plugin_id)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_installations_scope "
-        "ON deck_plugin_installations(scope_type, scope_id)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_installations_status "
-        "ON deck_plugin_installations(status)"
-    )
-
-    # Versioned next-run Deck Plugin bindings. Each update keeps the previous
-    # revision as stale audit history and atomically creates one active revision.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS deck_plugin_bindings (
-      deck_plugin_binding_id TEXT PRIMARY KEY,
-      deck_id TEXT NOT NULL,
-      workspace_id TEXT NOT NULL,
-      creator_id TEXT NOT NULL,
-      deck_plugin_id TEXT NOT NULL,
-      deck_plugin_version TEXT NOT NULL,
-      binding_revision INTEGER NOT NULL CHECK(binding_revision >= 1),
-      status TEXT NOT NULL DEFAULT 'active'
-        CHECK(status IN ('active', 'stale')),
-      applied_to TEXT NOT NULL DEFAULT 'next_run'
-        CHECK(applied_to = 'next_run'),
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(deck_id, binding_revision),
-      FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE RESTRICT,
-      FOREIGN KEY (deck_plugin_id, deck_plugin_version)
-        REFERENCES deck_plugin_releases(deck_plugin_id, deck_plugin_version)
-        ON DELETE RESTRICT
-    )
-    """)
-    db.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_deck_plugin_bindings_active_deck "
-        "ON deck_plugin_bindings(deck_id) WHERE status = 'active'"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_deck_plugin_bindings_deck_revision "
-        "ON deck_plugin_bindings(deck_id, binding_revision DESC)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_deck_plugin_bindings_workspace "
-        "ON deck_plugin_bindings(workspace_id, updated_at DESC)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_deck_plugin_bindings_release "
-        "ON deck_plugin_bindings(deck_plugin_id, deck_plugin_version)"
-    )
-
-    # Deck-owned immutable runtime snapshots. Story Workspace receives only the
-    # snapshot identifier and sanitized summary hash during preflight.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS deck_runtime_snapshots (
-      deck_runtime_snapshot_id TEXT PRIMARY KEY,
-      deck_id TEXT NOT NULL,
-      deck_plugin_binding_id TEXT NOT NULL,
-      binding_revision INTEGER NOT NULL CHECK(binding_revision >= 1),
-      deck_runtime_profile_id TEXT NOT NULL,
-      snapshot_contract TEXT NOT NULL,
-      config_hash TEXT NOT NULL,
-      config_json TEXT NOT NULL,
-      sanitized_summary_hash TEXT NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(deck_id, binding_revision, deck_runtime_profile_id, config_hash),
-      FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE RESTRICT,
-      FOREIGN KEY (deck_plugin_binding_id)
-        REFERENCES deck_plugin_bindings(deck_plugin_binding_id) ON DELETE RESTRICT
-    )
-    """)
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_deck_runtime_snapshots_deck "
-        "ON deck_runtime_snapshots(deck_id, binding_revision, created_at DESC)"
-    )
-    for trigger_name, operation in (
-        ("deck_runtime_snapshots_no_update", "UPDATE"),
-        ("deck_runtime_snapshots_no_delete", "DELETE"),
-    ):
-        db.execute(
-            f"""
-            CREATE TRIGGER IF NOT EXISTS {trigger_name}
-            BEFORE {operation} ON deck_runtime_snapshots
-            BEGIN
-              SELECT RAISE(ABORT, 'deck_runtime_snapshots is append-only');
-            END
-            """
-        )
-
-    # Story Workspace owns only the preflight record. Deck remains the single
-    # owner of immutable runtime snapshots; this table stores the controlled ID
-    # and a sanitized summary hash, never prompt, secret, or runtime config data.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS workflow_preflights (
-      workflow_preflight_id TEXT PRIMARY KEY,
-      request_fingerprint TEXT NOT NULL,
-      deck_id TEXT NOT NULL,
-      binding_revision INTEGER NOT NULL CHECK(binding_revision >= 0),
-      deck_plugin_id TEXT NOT NULL,
-      deck_plugin_version TEXT NOT NULL,
-      runtime_plugin_lock_id TEXT NOT NULL,
-      deck_runtime_profile_id TEXT NOT NULL,
-      deck_runtime_snapshot_id TEXT,
-      deck_runtime_snapshot_summary_hash TEXT,
-      input_hash TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'checking'
-        CHECK(status IN ('checking', 'passed', 'failed', 'expired')),
-      error_code TEXT,
-      failed_check TEXT,
-      expires_at DATETIME NOT NULL,
-      preflight_token_hash TEXT UNIQUE,
-      consumed_at DATETIME,
-      created_by TEXT NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CHECK(
-        (status = 'failed' AND error_code IS NOT NULL AND failed_check IS NOT NULL)
-        OR
-        (status != 'failed' AND error_code IS NULL AND failed_check IS NULL)
-      )
-    )
-    """)
-    db.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_preflights_active_request "
-        "ON workflow_preflights(request_fingerprint) "
-        "WHERE status IN ('checking', 'passed') AND consumed_at IS NULL"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_workflow_preflights_deck_revision "
-        "ON workflow_preflights(deck_id, binding_revision)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_workflow_preflights_status_expiry "
-        "ON workflow_preflights(status, expires_at)"
-    )
-
-    # Reflections section configs — per-user custom prompt files for each section.
-    # Falls back to reflections_config.py defaults when no row exists.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS reflections_section_configs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      section TEXT NOT NULL CHECK(section IN ('echoes', 'traits', 'patterns')),
-      prompt_files TEXT NOT NULL DEFAULT '{}',
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(user_id, section),
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_reflections_cfg_user "
-        "ON reflections_section_configs(user_id, section)"
-    )
-
-    # Reflections-agent async task metadata.  The Reflections page should read
-    # task/result truth from these tables instead of relying on frontend memory.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS reflection_task (
-      id TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      sections TEXT NOT NULL DEFAULT '[]',
-      input_snapshot TEXT NOT NULL DEFAULT '{}',
-      workspace_path TEXT,
-      agent_contract_version TEXT,
-      error_summary TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      started_at DATETIME,
-      completed_at DATETIME,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_task_user ON reflection_task(user_id, updated_at)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_task_status ON reflection_task(status)")
-
-    # Reflections-agent structured section results.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS reflection_result (
-      id TEXT PRIMARY KEY,
-      task_id TEXT NOT NULL,
-      user_id INTEGER NOT NULL,
-      section TEXT NOT NULL CHECK(section IN ('echoes', 'traits', 'patterns')),
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      related_session_ids TEXT NOT NULL DEFAULT '[]',
-      evidence TEXT,
-      confidence TEXT NOT NULL CHECK(confidence IN ('high', 'medium', 'low')),
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (task_id) REFERENCES reflection_task (id) ON DELETE CASCADE,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_result_task ON reflection_result(task_id, section)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_result_user ON reflection_result(user_id, created_at)")
-
-    # Reflections-agent lifecycle/event audit log, populated by the minimal
-    # TaskPersistenceObserver.
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS reflection_task_event (
-      id TEXT PRIMARY KEY,
-      task_id TEXT NOT NULL,
-      sequence INTEGER,
-      event_type TEXT NOT NULL,
-      payload TEXT NOT NULL DEFAULT '{}',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (task_id) REFERENCES reflection_task (id) ON DELETE CASCADE
-    )
-    """)
-    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_task_event_task ON reflection_task_event(task_id, sequence, created_at)")
-    db.commit()
-
-    print("✅ Tables created")
-
-
-def create_workflow_run_tables(db):
-    """Create the run-owned schema when the Workflow Run service is enabled.
-
-    Keeping this activation explicit preserves the Preflight/Binding contract:
-    those services do not create pseudo run storage merely by initializing their
-    own dependencies.
-    """
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS workflow_runs (
-      id TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL,
-      deck_plugin_id TEXT NOT NULL,
-      deck_plugin_version TEXT NOT NULL,
-      workflow_definition_ref TEXT NOT NULL,
-      deck_runtime_snapshot_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'preflight'
-        CHECK(status IN (
-          'preflight', 'queued', 'running', 'output_validating',
-          'pending_review', 'confirmed', 'rejected', 'continuing',
-          'completed', 'failed', 'cancelled'
-        )),
-      failed_step TEXT,
-      error_code TEXT,
-      retry_of_run_id TEXT,
-      deck_plugin_manifest_hash TEXT NOT NULL,
-      deck_plugin_binding_id TEXT NOT NULL,
-      binding_revision INTEGER NOT NULL CHECK(binding_revision >= 1),
-      runtime_plugin_lock_id TEXT NOT NULL,
-      runtime_load_receipt_id TEXT,
-      workflow_preflight_id TEXT NOT NULL,
-      agent_session_id TEXT,
-      source_voice_thread_id TEXT,
-      source_message_id TEXT,
-      source_message_time DATETIME,
-      idempotency_key TEXT NOT NULL,
-      input_hash TEXT NOT NULL,
-      semantic_fingerprint TEXT NOT NULL,
-      status_version INTEGER NOT NULL DEFAULT 1 CHECK(status_version >= 1),
-      created_by TEXT NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      started_at DATETIME,
-      completed_at DATETIME,
-      UNIQUE(workspace_id, created_by, idempotency_key),
-      FOREIGN KEY (retry_of_run_id) REFERENCES workflow_runs(id) ON DELETE RESTRICT,
-      FOREIGN KEY (deck_plugin_binding_id)
-        REFERENCES deck_plugin_bindings(deck_plugin_binding_id) ON DELETE RESTRICT,
-      FOREIGN KEY (runtime_plugin_lock_id)
-        REFERENCES deck_runtime_plugin_locks(id) ON DELETE RESTRICT,
-      FOREIGN KEY (workflow_preflight_id)
-        REFERENCES workflow_preflights(workflow_preflight_id) ON DELETE RESTRICT
-    )
-    """)
-    workflow_run_columns = {
-        row[1] for row in db.execute("PRAGMA table_info(workflow_runs)").fetchall()
-    }
-    for column_name, column_type in (
-        ("source_message_id", "TEXT"),
-        ("source_message_time", "DATETIME"),
-    ):
-        if column_name not in workflow_run_columns:
-            db.execute(
-                f"ALTER TABLE workflow_runs ADD COLUMN {column_name} {column_type}"
-            )
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS workflow_run_token_consumptions (
-      token_digest TEXT PRIMARY KEY,
-      workflow_run_id TEXT NOT NULL,
-      workflow_preflight_id TEXT NOT NULL,
-      workspace_id TEXT NOT NULL,
-      actor_id TEXT NOT NULL,
-      idempotency_key TEXT NOT NULL,
-      semantic_fingerprint TEXT NOT NULL,
-      consumed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id) ON DELETE RESTRICT,
-      FOREIGN KEY (workflow_preflight_id)
-        REFERENCES workflow_preflights(workflow_preflight_id) ON DELETE RESTRICT
-    )
-    """)
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS workflow_run_transitions (
-      id TEXT PRIMARY KEY,
-      workflow_run_id TEXT NOT NULL,
-      transition_seq INTEGER NOT NULL CHECK(transition_seq >= 1),
-      from_status TEXT,
-      to_status TEXT NOT NULL,
-      actor_id TEXT NOT NULL,
-      reason_code TEXT,
-      failed_step TEXT,
-      error_code TEXT,
-      occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(workflow_run_id, transition_seq),
-      FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id) ON DELETE RESTRICT
-    )
-    """)
-    for index_sql in (
-        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_deck_plugin "
-        "ON workflow_runs(deck_plugin_id, deck_plugin_version)",
-        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_status "
-        "ON workflow_runs(status)",
-        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_idempotency "
-        "ON workflow_runs(workspace_id, created_by, idempotency_key)",
-        "CREATE INDEX IF NOT EXISTS idx_workflow_runs_retry "
-        "ON workflow_runs(retry_of_run_id)",
-        "CREATE INDEX IF NOT EXISTS idx_workflow_run_token_consumptions_run "
-        "ON workflow_run_token_consumptions(workflow_run_id)",
-        "CREATE INDEX IF NOT EXISTS idx_workflow_run_transitions_run "
-        "ON workflow_run_transitions(workflow_run_id, transition_seq)",
-    ):
-        db.execute(index_sql)
-
-    for trigger_name, table_name, operation in (
-        ("workflow_run_token_consumptions_no_update", "workflow_run_token_consumptions", "UPDATE"),
-        ("workflow_run_token_consumptions_no_delete", "workflow_run_token_consumptions", "DELETE"),
-        ("workflow_run_transitions_no_update", "workflow_run_transitions", "UPDATE"),
-        ("workflow_run_transitions_no_delete", "workflow_run_transitions", "DELETE"),
-    ):
-        db.execute(
-            f"""
-            CREATE TRIGGER IF NOT EXISTS {trigger_name}
-            BEFORE {operation} ON {table_name}
-            BEGIN
-              SELECT RAISE(ABORT, '{table_name} is append-only');
-            END
-            """
-        )
-
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS workflow_runs_immutable_provenance
-    BEFORE UPDATE ON workflow_runs
-    WHEN OLD.id IS NOT NEW.id
-      OR OLD.workspace_id IS NOT NEW.workspace_id
-      OR OLD.deck_plugin_id IS NOT NEW.deck_plugin_id
-      OR OLD.deck_plugin_version IS NOT NEW.deck_plugin_version
-      OR OLD.workflow_definition_ref IS NOT NEW.workflow_definition_ref
-      OR OLD.deck_runtime_snapshot_id IS NOT NEW.deck_runtime_snapshot_id
-      OR OLD.retry_of_run_id IS NOT NEW.retry_of_run_id
-      OR OLD.deck_plugin_manifest_hash IS NOT NEW.deck_plugin_manifest_hash
-      OR OLD.deck_plugin_binding_id IS NOT NEW.deck_plugin_binding_id
-      OR OLD.binding_revision IS NOT NEW.binding_revision
-      OR OLD.runtime_plugin_lock_id IS NOT NEW.runtime_plugin_lock_id
-      OR OLD.workflow_preflight_id IS NOT NEW.workflow_preflight_id
-      OR OLD.source_voice_thread_id IS NOT NEW.source_voice_thread_id
-      OR OLD.idempotency_key IS NOT NEW.idempotency_key
-      OR OLD.input_hash IS NOT NEW.input_hash
-      OR OLD.semantic_fingerprint IS NOT NEW.semantic_fingerprint
-      OR OLD.created_by IS NOT NEW.created_by
-      OR OLD.created_at IS NOT NEW.created_at
-      OR (
-        OLD.runtime_load_receipt_id IS NOT NEW.runtime_load_receipt_id
-        AND NOT (
-          OLD.runtime_load_receipt_id IS NULL
-          AND NEW.runtime_load_receipt_id IS NOT NULL
-          AND OLD.status = 'queued'
-          AND NEW.status = 'running'
-        )
-      )
-    BEGIN
-      SELECT RAISE(ABORT, 'workflow run provenance is immutable');
-    END
-    """)
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS workflow_runs_status_version_guard
-    BEFORE UPDATE ON workflow_runs
-    WHEN (
-      OLD.status IS NOT NEW.status
-      AND NEW.status_version != OLD.status_version + 1
-    ) OR (
-      OLD.status IS NEW.status
-      AND NEW.status_version != OLD.status_version
-    )
-    BEGIN
-      SELECT RAISE(ABORT, 'workflow run status_version mismatch');
-    END
-    """)
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS workflow_runs_voice_source_insert_guard
-    BEFORE INSERT ON workflow_runs
-    WHEN (
-      (NEW.source_voice_thread_id IS NOT NULL)
-      + (NEW.source_message_id IS NOT NULL)
-      + (NEW.source_message_time IS NOT NULL)
-    ) NOT IN (0, 3)
-    BEGIN
-      SELECT RAISE(ABORT, 'Voice source requires thread, message, and time');
-    END
-    """)
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS workflow_runs_voice_source_immutable
-    BEFORE UPDATE ON workflow_runs
-    WHEN OLD.source_voice_thread_id IS NOT NEW.source_voice_thread_id
-      OR OLD.source_message_id IS NOT NEW.source_message_id
-      OR OLD.source_message_time IS NOT NEW.source_message_time
-    BEGIN
-      SELECT RAISE(ABORT, 'workflow run Voice source is immutable');
-    END
-    """)
-    db.commit()
-
-
-def create_runtime_plugin_tables(db):
-    """Append task_008 materialization, reconcile, and receipt storage."""
-
-    create_workflow_run_tables(db)
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS runtime_plugin_materializations (
-      runtime_materialization_id TEXT PRIMARY KEY,
-      runtime_environment_id TEXT NOT NULL,
-      runtime_pool_id TEXT NOT NULL,
-      runtime_node_id TEXT NOT NULL,
-      claude_code_plugin_id TEXT NOT NULL,
-      resolved_version TEXT NOT NULL,
-      artifact_digest TEXT NOT NULL,
-      materialized_digest TEXT,
-      artifact_set_hash TEXT NOT NULL,
-      policy_revision TEXT NOT NULL,
-      declaration_status TEXT NOT NULL
-        CHECK(declaration_status IN ('undeclared', 'declared', 'disabled')),
-      materialization_status TEXT NOT NULL
-        CHECK(materialization_status IN ('missing', 'materializing', 'materialized', 'failed')),
-      activation_status TEXT NOT NULL
-        CHECK(activation_status IN ('inactive', 'loadable', 'loaded', 'load_failed')),
-      materialization_key TEXT NOT NULL UNIQUE,
-      attempt_id TEXT NOT NULL,
-      attempt_count INTEGER NOT NULL CHECK(attempt_count >= 1),
-      verification_status TEXT
-        CHECK(verification_status IS NULL OR verification_status IN ('verified', 'legacy_unverified')),
-      signature_bundle_ref TEXT,
-      retention_state TEXT,
-      restore_source_ref TEXT,
-      cache_ref TEXT,
-      last_error TEXT,
-      created_at DATETIME NOT NULL,
-      updated_at DATETIME NOT NULL,
-      CHECK(runtime_pool_id = runtime_environment_id)
-    )
-    """)
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS runtime_plugin_reconcile_attempts (
-      attempt_id TEXT PRIMARY KEY,
-      workflow_run_id TEXT,
-      reconcile_path TEXT NOT NULL CHECK(reconcile_path IN ('headless', 'cli')),
-      claude_code_plugin_id TEXT,
-      resolved_version TEXT,
-      runtime_node_id TEXT,
-      policy_revision TEXT NOT NULL,
-      argv_json TEXT,
-      timeout_seconds INTEGER,
-      exit_code INTEGER,
-      stdout_summary TEXT,
-      stderr_summary TEXT,
-      result_status TEXT NOT NULL CHECK(result_status IN ('succeeded', 'failed')),
-      error_code TEXT,
-      created_at DATETIME NOT NULL,
-      FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id) ON DELETE RESTRICT
-    )
-    """)
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS runtime_load_receipts (
-      receipt_id TEXT PRIMARY KEY,
-      workflow_run_id TEXT NOT NULL,
-      runtime_plugin_lock_id TEXT NOT NULL,
-      runtime_plugin_lock_digest TEXT NOT NULL,
-      runtime_environment_id TEXT NOT NULL,
-      runtime_pool_id TEXT NOT NULL,
-      distribution_mode TEXT NOT NULL CHECK(distribution_mode = 'local_persistent'),
-      runtime_node_id TEXT NOT NULL,
-      artifact_set_hash TEXT NOT NULL,
-      policy_revision TEXT NOT NULL,
-      deployment_tier TEXT NOT NULL CHECK(deployment_tier IN ('development', 'test')),
-      scope TEXT NOT NULL CHECK(scope = 'session'),
-      readiness_state TEXT NOT NULL CHECK(readiness_state = 'session_loaded'),
-      required_entries_ready INTEGER NOT NULL CHECK(required_entries_ready IN (0, 1)),
-      created_at DATETIME NOT NULL,
-      CHECK(runtime_pool_id = runtime_environment_id),
-      FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id) ON DELETE RESTRICT,
-      FOREIGN KEY (runtime_plugin_lock_id)
-        REFERENCES deck_runtime_plugin_locks(id) ON DELETE RESTRICT
-    )
-    """)
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS runtime_load_receipt_entries (
-      receipt_id TEXT NOT NULL,
-      claude_code_plugin_id TEXT NOT NULL,
-      resolved_version TEXT NOT NULL,
-      artifact_digest TEXT NOT NULL,
-      materialized_digest TEXT NOT NULL,
-      verification_status TEXT NOT NULL
-        CHECK(verification_status IN ('verified', 'legacy_unverified')),
-      signature_bundle_ref TEXT,
-      retention_state TEXT NOT NULL,
-      restore_source_ref TEXT,
-      required INTEGER NOT NULL CHECK(required IN (0, 1)),
-      loaded_capabilities_json TEXT NOT NULL,
-      load_status TEXT NOT NULL CHECK(load_status IN ('loaded', 'load_failed', 'skipped')),
-      loaded_at DATETIME NOT NULL,
-      PRIMARY KEY (receipt_id, claude_code_plugin_id),
-      FOREIGN KEY (receipt_id) REFERENCES runtime_load_receipts(receipt_id)
-        ON DELETE RESTRICT
-    )
-    """)
-
-    for index_sql in (
-        "CREATE INDEX IF NOT EXISTS idx_runtime_materializations_lookup "
-        "ON runtime_plugin_materializations(runtime_environment_id, runtime_node_id, claude_code_plugin_id)",
-        "CREATE INDEX IF NOT EXISTS idx_runtime_materializations_status "
-        "ON runtime_plugin_materializations(materialization_status, activation_status)",
-        "CREATE INDEX IF NOT EXISTS idx_runtime_reconcile_attempts_run "
-        "ON runtime_plugin_reconcile_attempts(workflow_run_id, created_at)",
-        "CREATE INDEX IF NOT EXISTS idx_runtime_load_receipts_run "
-        "ON runtime_load_receipts(workflow_run_id, created_at)",
-        "CREATE INDEX IF NOT EXISTS idx_runtime_load_receipts_placement "
-        "ON runtime_load_receipts(runtime_environment_id, runtime_node_id)",
-    ):
-        db.execute(index_sql)
-
-    for trigger_name, table_name, operation in (
-        ("runtime_reconcile_attempts_no_update", "runtime_plugin_reconcile_attempts", "UPDATE"),
-        ("runtime_reconcile_attempts_no_delete", "runtime_plugin_reconcile_attempts", "DELETE"),
-        ("runtime_load_receipts_no_update", "runtime_load_receipts", "UPDATE"),
-        ("runtime_load_receipts_no_delete", "runtime_load_receipts", "DELETE"),
-        ("runtime_load_receipt_entries_no_update", "runtime_load_receipt_entries", "UPDATE"),
-        ("runtime_load_receipt_entries_no_delete", "runtime_load_receipt_entries", "DELETE"),
-    ):
-        db.execute(
-            f"""
-            CREATE TRIGGER IF NOT EXISTS {trigger_name}
-            BEFORE {operation} ON {table_name}
-            BEGIN
-              SELECT RAISE(ABORT, '{table_name} is append-only');
-            END
-            """
-        )
-
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS runtime_materializations_immutable_identity
-    BEFORE UPDATE ON runtime_plugin_materializations
-    WHEN OLD.runtime_materialization_id IS NOT NEW.runtime_materialization_id
-      OR OLD.runtime_environment_id IS NOT NEW.runtime_environment_id
-      OR OLD.runtime_pool_id IS NOT NEW.runtime_pool_id
-      OR OLD.runtime_node_id IS NOT NEW.runtime_node_id
-      OR OLD.claude_code_plugin_id IS NOT NEW.claude_code_plugin_id
-      OR OLD.resolved_version IS NOT NEW.resolved_version
-      OR OLD.artifact_digest IS NOT NEW.artifact_digest
-      OR OLD.artifact_set_hash IS NOT NEW.artifact_set_hash
-      OR OLD.policy_revision IS NOT NEW.policy_revision
-      OR OLD.materialization_key IS NOT NEW.materialization_key
-      OR OLD.created_at IS NOT NEW.created_at
-    BEGIN
-      SELECT RAISE(ABORT, 'runtime materialization identity is immutable');
-    END
-    """)
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS workflow_runs_runtime_receipt_binding_guard
-    BEFORE UPDATE OF runtime_load_receipt_id ON workflow_runs
-    WHEN NEW.runtime_load_receipt_id IS NOT NULL
-      AND OLD.runtime_load_receipt_id IS NOT NEW.runtime_load_receipt_id
-      AND NOT EXISTS (
-        SELECT 1
-        FROM runtime_load_receipts AS receipt
-        WHERE receipt.receipt_id = NEW.runtime_load_receipt_id
-          AND receipt.workflow_run_id = NEW.id
-      )
-    BEGIN
-      SELECT RAISE(ABORT, 'runtime load receipt is missing or bound to another run');
-    END
-    """)
-    db.commit()
-
-
-def create_agent_session_tables(db):
-    """Append task_009 run-scoped Session storage and binding guards."""
-
-    create_runtime_plugin_tables(db)
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS agent_sessions (
-      agent_session_id TEXT PRIMARY KEY,
-      workflow_run_id TEXT NOT NULL,
-      runtime_load_receipt_id TEXT NOT NULL,
-      runtime_environment_id TEXT NOT NULL,
-      runtime_pool_id TEXT NOT NULL,
-      distribution_mode TEXT NOT NULL CHECK(distribution_mode = 'local_persistent'),
-      runtime_node_id TEXT NOT NULL,
-      artifact_set_hash TEXT NOT NULL,
-      policy_revision TEXT NOT NULL,
-      deployment_tier TEXT NOT NULL CHECK(deployment_tier IN ('development', 'test')),
-      runtime_plugin_lock_id TEXT NOT NULL,
-      runtime_plugin_lock_digest TEXT NOT NULL,
-      settings_json TEXT NOT NULL,
-      settings_hash TEXT NOT NULL,
-      plugin_set_hash TEXT NOT NULL,
-      session_request_key TEXT NOT NULL UNIQUE,
-      attempt_number INTEGER NOT NULL CHECK(attempt_number >= 1),
-      status TEXT NOT NULL CHECK(status IN ('creating', 'active', 'terminated', 'failed')),
-      error_code TEXT,
-      termination_reason_code TEXT,
-      created_at DATETIME NOT NULL,
-      started_at DATETIME,
-      terminated_at DATETIME,
-      lease_expires_at DATETIME,
-      owner_token TEXT,
-      remote_session_ref TEXT,
-      UNIQUE(workflow_run_id, attempt_number),
-      CHECK(runtime_pool_id = runtime_environment_id),
-      FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id) ON DELETE RESTRICT,
-      FOREIGN KEY (runtime_load_receipt_id)
-        REFERENCES runtime_load_receipts(receipt_id) ON DELETE RESTRICT,
-      FOREIGN KEY (runtime_plugin_lock_id)
-        REFERENCES deck_runtime_plugin_locks(id) ON DELETE RESTRICT
-    )
-    """)
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_agent_sessions_run "
-        "ON agent_sessions(workflow_run_id, attempt_number)"
-    )
-    db.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_one_live_run "
-        "ON agent_sessions(workflow_run_id) "
-        "WHERE status IN ('creating', 'active')"
-    )
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS agent_sessions_immutable_binding
-    BEFORE UPDATE ON agent_sessions
-    WHEN OLD.agent_session_id IS NOT NEW.agent_session_id
-      OR OLD.workflow_run_id IS NOT NEW.workflow_run_id
-      OR OLD.runtime_load_receipt_id IS NOT NEW.runtime_load_receipt_id
-      OR OLD.runtime_environment_id IS NOT NEW.runtime_environment_id
-      OR OLD.runtime_pool_id IS NOT NEW.runtime_pool_id
-      OR OLD.distribution_mode IS NOT NEW.distribution_mode
-      OR OLD.runtime_node_id IS NOT NEW.runtime_node_id
-      OR OLD.artifact_set_hash IS NOT NEW.artifact_set_hash
-      OR OLD.policy_revision IS NOT NEW.policy_revision
-      OR OLD.deployment_tier IS NOT NEW.deployment_tier
-      OR OLD.runtime_plugin_lock_id IS NOT NEW.runtime_plugin_lock_id
-      OR OLD.runtime_plugin_lock_digest IS NOT NEW.runtime_plugin_lock_digest
-      OR OLD.settings_json IS NOT NEW.settings_json
-      OR OLD.settings_hash IS NOT NEW.settings_hash
-      OR OLD.plugin_set_hash IS NOT NEW.plugin_set_hash
-      OR OLD.session_request_key IS NOT NEW.session_request_key
-      OR OLD.attempt_number IS NOT NEW.attempt_number
-      OR OLD.created_at IS NOT NEW.created_at
-    BEGIN
-      SELECT RAISE(ABORT, 'agent session binding is immutable');
-    END
-    """)
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS agent_sessions_status_guard
-    BEFORE UPDATE OF status ON agent_sessions
-    WHEN OLD.status IS NOT NEW.status
-      AND NOT (
-        (OLD.status = 'creating' AND NEW.status IN ('active', 'failed'))
-        OR (OLD.status = 'active' AND NEW.status IN ('terminated', 'failed'))
-      )
-    BEGIN
-      SELECT RAISE(ABORT, 'agent session transition is not allowed');
-    END
-    """)
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS agent_sessions_lifecycle_insert_guard
-    BEFORE INSERT ON agent_sessions
-    WHEN NEW.status != 'creating'
-      OR NEW.started_at IS NOT NULL
-      OR NEW.terminated_at IS NOT NULL
-      OR NEW.error_code IS NOT NULL
-      OR NEW.termination_reason_code IS NOT NULL
-      OR NEW.lease_expires_at IS NULL
-    BEGIN
-      SELECT RAISE(ABORT, 'new agent session must start with a creating lease');
-    END
-    """)
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS agent_sessions_lifecycle_update_guard
-    BEFORE UPDATE ON agent_sessions
-    WHEN (NEW.status = 'active' AND (
-        NEW.started_at IS NULL OR NEW.terminated_at IS NOT NULL
-        OR NEW.error_code IS NOT NULL OR NEW.termination_reason_code IS NOT NULL
-      ))
-      OR (NEW.status = 'terminated' AND (
-        NEW.started_at IS NULL OR NEW.terminated_at IS NULL
-        OR NEW.error_code IS NOT NULL OR NEW.termination_reason_code IS NULL
-      ))
-      OR (NEW.status = 'failed' AND (
-        NEW.terminated_at IS NULL OR NEW.error_code IS NULL
-        OR NEW.termination_reason_code IS NULL
-      ))
-    BEGIN
-      SELECT RAISE(ABORT, 'agent session lifecycle fields are inconsistent');
-    END
-    """)
-    db.execute("""
-    CREATE TRIGGER IF NOT EXISTS workflow_runs_joint_session_binding_guard
-    BEFORE UPDATE ON workflow_runs
-    WHEN (NEW.runtime_load_receipt_id IS NULL) != (NEW.agent_session_id IS NULL)
-      OR (
-        OLD.runtime_load_receipt_id IS NULL
-        AND OLD.agent_session_id IS NULL
-        AND NEW.runtime_load_receipt_id IS NOT NULL
-        AND NOT (OLD.status = 'queued' AND NEW.status = 'running')
-      )
-      OR (
-        OLD.runtime_load_receipt_id IS NOT NULL
-        AND (
-          OLD.runtime_load_receipt_id IS NOT NEW.runtime_load_receipt_id
-          OR OLD.agent_session_id IS NOT NEW.agent_session_id
-        )
-      )
-      OR (
-        NEW.status IN (
-          'running', 'output_validating', 'pending_review', 'confirmed',
-          'rejected', 'continuing', 'completed'
-        )
-        AND NEW.runtime_load_receipt_id IS NULL
-      )
-      OR (
-        NEW.status IN ('preflight', 'queued')
-        AND NEW.runtime_load_receipt_id IS NOT NULL
-      )
-      OR (
-        NEW.agent_session_id IS NOT NULL
-        AND (
-          NEW.agent_session_id = NEW.source_voice_thread_id
-          OR NEW.agent_session_id = NEW.source_message_id
-        )
-      )
-      OR (
-        NEW.agent_session_id IS NOT NULL
-        AND OLD.agent_session_id IS NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM agent_sessions AS session
-          WHERE session.agent_session_id = NEW.agent_session_id
-            AND session.workflow_run_id = NEW.id
-            AND session.runtime_load_receipt_id = NEW.runtime_load_receipt_id
-            AND session.runtime_plugin_lock_id = NEW.runtime_plugin_lock_id
-            AND session.status = 'active'
-        )
-      )
-    BEGIN
-      SELECT RAISE(ABORT, 'workflow run receipt and session binding is invalid');
-    END
-    """)
-    db.commit()
-
-
-def create_claude_plugin_tables(db):
-    """Shared Claude Code plugin installation storage (deck-integration-delta).
-
-    These tables back the real-CLI plugin pipeline:
-
-    - ``claude_plugin_installations``: shared, digest-pinned install records
-      produced by real ``claude plugin install`` executions inside the
-      server-managed runtime root (or server-declared platform-builtin
-      sources).  A row only exists for successful installs (status ready);
-      failures live only in ``claude_plugin_operations``.
-    - ``claude_plugin_operations``: per-operation evidence pointers (argv,
-      cwd, CLI version, exit code, evidence file path).
-    - ``deck_claude_plugin_refs``: Deck → installation references.  Decks
-      never store paths, settings JSON, workflows, or SDK plugin options.
-    """
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS claude_plugin_installations (
-      id TEXT PRIMARY KEY,
-      requested_package_spec TEXT NOT NULL,
-      package_name TEXT NOT NULL,
-      marketplace TEXT NOT NULL,
-      requested_version TEXT,
-      resolved_version TEXT NOT NULL,
-      source_type TEXT NOT NULL
-        CHECK(source_type IN ('claude-official', 'marketplace', 'github', 'platform-builtin')),
-      artifact_digest TEXT NOT NULL,
-      artifact_path TEXT NOT NULL,
-      claude_cli_version TEXT NOT NULL,
-      cli_git_commit_sha TEXT,
-      manifest_json TEXT,
-      component_inventory_json TEXT NOT NULL DEFAULT '{}',
-      compatibility_json TEXT NOT NULL DEFAULT '{}',
-      status TEXT NOT NULL DEFAULT 'installing'
-        CHECK(status IN ('installing', 'ready', 'error', 'uninstalled')),
-      operation_id TEXT NOT NULL,
-      error_code TEXT,
-      error_summary TEXT,
-      file_count INTEGER NOT NULL DEFAULT 0,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      installed_at DATETIME,
-      UNIQUE(package_name, marketplace, resolved_version, artifact_digest)
-    )
-    """)
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_claude_plugin_installations_status "
-        "ON claude_plugin_installations(status)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_claude_plugin_installations_pkg "
-        "ON claude_plugin_installations(package_name, marketplace)"
-    )
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS claude_plugin_operations (
-      id TEXT PRIMARY KEY,
-      operation_kind TEXT NOT NULL
-        CHECK(operation_kind IN ('install', 'uninstall', 'validate', 'revalidate')),
-      requested_package_spec TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'queued'
-        CHECK(status IN ('queued', 'running', 'ready', 'error')),
-      phase TEXT NOT NULL DEFAULT 'queued',
-      progress INTEGER NOT NULL DEFAULT 0,
-      message TEXT,
-      executable TEXT,
-      argv_json TEXT,
-      cwd TEXT,
-      cli_version TEXT,
-      exit_code INTEGER,
-      evidence_path TEXT,
-      installation_id TEXT,
-      error_code TEXT,
-      error_summary TEXT,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      finished_at DATETIME
-    )
-    """)
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_claude_plugin_operations_status "
-        "ON claude_plugin_operations(status, created_at)"
-    )
-
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS deck_claude_plugin_refs (
-      deck_id TEXT NOT NULL,
-      plugin_installation_id TEXT NOT NULL,
-      package_spec TEXT NOT NULL,
-      resolved_version TEXT NOT NULL,
-      artifact_digest TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      order_index INTEGER NOT NULL DEFAULT 0,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (deck_id, plugin_installation_id),
-      FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE RESTRICT,
-      FOREIGN KEY (plugin_installation_id)
-        REFERENCES claude_plugin_installations(id) ON DELETE RESTRICT
-    )
-    """)
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_deck_claude_plugin_refs_deck "
-        "ON deck_claude_plugin_refs(deck_id, enabled, order_index)"
-    )
-    db.commit()
+    else:
+        db.close()
 
 
 def replace_deck_claude_plugin_refs(
@@ -1805,7 +288,7 @@ def replace_deck_claude_plugin_refs(
     """
     now = datetime.now(timezone.utc).isoformat()
     with db:
-        db.execute("DELETE FROM deck_claude_plugin_refs WHERE deck_id = ?", (deck_id,))
+        db.execute("DELETE FROM deck_claude_plugin_refs WHERE deck_id = %s", (deck_id,))
         for position, ref in enumerate(refs):
             db.execute(
                 """
@@ -1813,7 +296,7 @@ def replace_deck_claude_plugin_refs(
                     deck_id, plugin_installation_id, package_spec,
                     resolved_version, artifact_digest, enabled, order_index,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     deck_id,
@@ -1837,13 +320,12 @@ def list_deck_claude_plugin_refs(db, deck_id: str) -> list[dict]:
                i.claude_cli_version, i.manifest_json
         FROM deck_claude_plugin_refs r
         JOIN claude_plugin_installations i ON i.id = r.plugin_installation_id
-        WHERE r.deck_id = ?
+        WHERE r.deck_id = %s
         ORDER BY r.order_index, r.created_at, r.plugin_installation_id
         """,
         (deck_id,),
     )
-    columns = [desc[0] for desc in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    return [dict(row) for row in cursor.fetchall()]
 
 
 def backfill_builtin_deck_plugin_refs(db, builtin_installation_id: str,
@@ -1853,7 +335,8 @@ def backfill_builtin_deck_plugin_refs(db, builtin_installation_id: str,
     the new platform-builtin Claude plugin installation.
 
     Legacy signal: an active ``deck_plugin_bindings`` row for
-    ``ink.dream.story-workflow``.  Idempotent (INSERT OR IGNORE).  Returns the
+    ``ink.dream.story-workflow``.  Idempotent via an explicit primary-key
+    conflict policy.  Returns the
     number of refs created.  Old threads and the legacy workflow tables are
     untouched.
     """
@@ -1869,11 +352,12 @@ def backfill_builtin_deck_plugin_refs(db, builtin_installation_id: str,
         for row in rows:
             cursor = db.execute(
                 """
-                INSERT OR IGNORE INTO deck_claude_plugin_refs (
+                INSERT INTO deck_claude_plugin_refs (
                     deck_id, plugin_installation_id, package_spec,
                     resolved_version, artifact_digest, enabled, order_index,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, 1, 0, %s, %s)
+                ON CONFLICT (deck_id, plugin_installation_id) DO NOTHING
                 """,
                 (
                     row[0],
@@ -1889,127 +373,107 @@ def backfill_builtin_deck_plugin_refs(db, builtin_installation_id: str,
     return created
 
 
-def drop_story_workspace_tables(db):
-    """Drop Story Workspace tables for migration rollback or isolated tests."""
-
-    tables = (
-        "story_workspace_scene_characters",
-        "story_workspace_story_characters",
-        "story_workspace_scenes",
-        "story_workspace_characters",
-        "story_workspace_stories",
-        "story_workspace_workspaces",
-    )
-    for table in tables:
-        db.execute(f"DROP TABLE IF EXISTS {table}")
-    db.commit()
-
 def seed_system_decks():
-    """Seed system decks and voices. Idempotent - safe to call multiple times."""
-    db = get_db()
+    """Seed only the active screenplay template when invoked explicitly.
 
-    # Check if already seeded
-    existing = db.execute("SELECT COUNT(*) FROM decks WHERE is_system = 1").fetchone()[0]
-    if existing > 0:
-        print("⏭️  System decks already seeded, skipping")
-        db.close()
-        return
+    Runtime startup does not call this helper. Admin/Drizzle remains the owner
+    of shared database rollout; this helper is retained for explicit fixture or
+    import flows that already have the published Deck tables.
+    """
 
-    print("🌱 Seeding system decks...")
-
-    # ========== Deck 1: Introspection Deck ==========
-    db.execute("""
-    INSERT INTO decks (id, name, name_zh, name_en, description, description_zh, description_en, icon, color, is_system, enabled, has_local_changes, order_index)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, ('introspection_deck', '内省卡组', '内省卡组', 'Introspection Deck',
-          '内心对话原型', '内心对话原型', 'Inner dialogue archetypes',
-          'brain', 'purple', 1, 1, 0, 0))
-
-    # Import config to get existing voice prompts
     import config
+
+    template = config.SCREENPLAY_DECK_TEMPLATE
     memory_config_json = _default_memory_workspace_config_json()
-
-    # Introspection voices (from existing VOICE_ARCHETYPES)
-    introspection_voices = [
-        ('holder', config.VOICE_ARCHETYPES['holder']['name'], '接纳者', 'The Holder',
-         config.VOICE_ARCHETYPES['holder']['systemPrompt'], 'heart', 'pink', 0),
-        ('starter', config.VOICE_ARCHETYPES['starter']['name'], '启动者', 'The Starter',
-         config.VOICE_ARCHETYPES['starter']['systemPrompt'], 'fist', 'yellow', 1),
-        ('mirror', config.VOICE_ARCHETYPES['mirror']['name'], '照镜者', 'The Mirror',
-         config.VOICE_ARCHETYPES['mirror']['systemPrompt'], 'eye', 'green', 2),
-        ('weaver', config.VOICE_ARCHETYPES['weaver']['name'], '连接者', 'The Weaver',
-         config.VOICE_ARCHETYPES['weaver']['systemPrompt'], 'compass', 'purple', 3),
-        ('absurdist', config.VOICE_ARCHETYPES['absurdist']['name'], '幽默者', 'The Absurdist',
-         config.VOICE_ARCHETYPES['absurdist']['systemPrompt'], 'masks', 'pink', 4),
-    ]
-
-    for voice_id, name, name_zh, name_en, prompt, icon, color, order in introspection_voices:
-        db.execute("""
-        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index, memory_workspace_config)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-        """, (voice_id, 'introspection_deck', name, name_zh, name_en, prompt, icon, color, 1, 1, order, memory_config_json))
-
-    # ========== Deck 2: Scholar Deck ==========
-    db.execute("""
-    INSERT INTO decks (id, name, name_zh, name_en, description, description_zh, description_en, icon, color, is_system, enabled, has_local_changes, order_index)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, ('scholar_deck', '学者卡组', '学者卡组', 'Scholar Deck',
-          '从学术角度分析思考', '从学术角度分析思考', 'Analyze from academic perspectives',
-          'lightbulb', 'blue', 1, 1, 0, 1))
-
-    # Scholar voices (placeholder prompts - TODO: write detailed prompts)
-    scholar_voices = [
-        ('linguist', '语言学家', '语言学家', 'Linguist',
-         'Analyze from linguistic structure, semantics, and pragmatics.', 'compass', 'blue', 0),
-        ('painter', '画家', '画家', 'Painter',
-         'Analyze from aesthetics, visual imagery, and mood.', 'eye', 'pink', 1),
-        ('physicist', '物理学家', '物理学家', 'Physicist',
-         'Analyze using physics laws, mechanics, and energy.', 'lightbulb', 'yellow', 2),
-        ('computer_scientist', '计算机科学家', '计算机科学家', 'Computer Scientist',
-         'Analyze using algorithms, data structures, and complexity.', 'brain', 'purple', 3),
-        ('doctor', '医生', '医生', 'Doctor',
-         'Analyze from medical, physiological, and psychological health perspectives.', 'heart', 'pink', 4),
-        ('historian', '历史学家', '历史学家', 'Historian',
-         'Provide historical context, cultural background, and patterns.', 'compass', 'green', 5),
-    ]
-
-    for voice_id, name, name_zh, name_en, prompt, icon, color, order in scholar_voices:
-        db.execute("""
-        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index, memory_workspace_config)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-        """, (voice_id, 'scholar_deck', name, name_zh, name_en, prompt, icon, color, 1, 1, order, memory_config_json))
-
-    # ========== Deck 3: Philosophy Deck ==========
-    db.execute("""
-    INSERT INTO decks (id, name, name_zh, name_en, description, description_zh, description_en, icon, color, is_system, enabled, has_local_changes, order_index)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, ('philosophy_deck', '哲学卡组', '哲学卡组', 'Philosophy Deck',
-          '不同哲学流派的审视', '不同哲学流派的审视', 'Examine through philosophical lenses',
-          'cloud', 'purple', 1, 1, 0, 2))
-
-    # Philosophy voices (placeholder prompts - TODO: write detailed prompts)
-    philosophy_voices = [
-        ('stoic', '斯多葛派', '斯多葛派', 'Stoic',
-         'Emphasize reason, self-control, and acceptance of the uncontrollable.', 'shield', 'blue', 0),
-        ('taoist', '道家', '道家', 'Taoist',
-         'Emphasize wu-wei (effortless action), natural flow, and simplicity.', 'wind', 'green', 1),
-        ('existentialist', '存在主义者', '存在主义者', 'Existentialist',
-         'Emphasize choice, freedom, responsibility, and creating meaning.', 'question', 'purple', 2),
-        ('pragmatist', '实用主义者', '实用主义者', 'Pragmatist',
-         'Focus on practical effects, usefulness, and real-world results.', 'fist', 'yellow', 3),
-    ]
-
-    for voice_id, name, name_zh, name_en, prompt, icon, color, order in philosophy_voices:
-        db.execute("""
-        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index, memory_workspace_config)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-        """, (voice_id, 'philosophy_deck', name, name_zh, name_en, prompt, icon, color, 1, 1, order, memory_config_json))
-
-    db.commit()
-    db.close()
-    print("✅ System decks seeded (3 decks, 15 voices)")
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO decks (
+                id, name, name_zh, name_en, description, description_zh,
+                description_en, icon, color, is_system, enabled,
+                has_local_changes, order_index
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, TRUE, FALSE, 0)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                name_zh = EXCLUDED.name_zh,
+                name_en = EXCLUDED.name_en,
+                description = EXCLUDED.description,
+                description_zh = EXCLUDED.description_zh,
+                description_en = EXCLUDED.description_en,
+                icon = EXCLUDED.icon,
+                color = EXCLUDED.color,
+                enabled = TRUE,
+                order_index = 0,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                template["id"], template["name"], template["name_zh"],
+                template["name_en"], template["description"],
+                template["description_zh"], template["description_en"],
+                template["icon"], template["color"],
+            ),
+        )
+        for order, voice in enumerate(template["voices"]):
+            db.execute(
+                """
+                INSERT INTO voices (
+                    id, deck_id, name, name_zh, name_en, system_prompt, icon,
+                    color, is_system, enabled, has_local_changes, order_index,
+                    memory_workspace_config
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, TRUE, TRUE, FALSE, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    deck_id = EXCLUDED.deck_id,
+                    name = EXCLUDED.name,
+                    name_zh = EXCLUDED.name_zh,
+                    name_en = EXCLUDED.name_en,
+                    system_prompt = EXCLUDED.system_prompt,
+                    icon = EXCLUDED.icon,
+                    color = EXCLUDED.color,
+                    enabled = TRUE,
+                    order_index = EXCLUDED.order_index,
+                    memory_workspace_config = EXCLUDED.memory_workspace_config,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    voice["id"], template["id"], voice["name"],
+                    voice["name_zh"], voice["name_en"], voice["system_prompt"],
+                    voice["icon"], voice["color"], order, memory_config_json,
+                ),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 # ========== Deck CRUD ==========
+
+
+def _retired_system_deck_visibility(alias: str = "d") -> tuple[str, list[str]]:
+    """Hide untouched retired-template forks while preserving user work."""
+
+    import config
+
+    retired_ids = list(config.RETIRED_SYSTEM_DECK_IDS)
+    if not retired_ids:
+        return "", []
+    placeholders = ",".join("%s" for _ in retired_ids)
+    clause = f"""
+        AND (
+            {alias}.parent_id IS NULL
+            OR {alias}.parent_id NOT IN ({placeholders})
+            OR {alias}.has_local_changes IS TRUE
+            OR EXISTS (
+                SELECT 1 FROM voices changed_voice
+                WHERE changed_voice.deck_id = {alias}.id
+                  AND changed_voice.has_local_changes IS TRUE
+            )
+        )
+    """
+    return clause, retired_ids
+
 
 def get_user_decks(user_id: int):
     """
@@ -2018,16 +482,18 @@ def get_user_decks(user_id: int):
 
     @@@ Users only see their own forked copies, never system decks directly
     """
+    visibility_sql, visibility_params = _retired_system_deck_visibility()
     db = get_db()
     try:
-        rows = db.execute("""
+        rows = db.execute(f"""
         SELECT d.*, COUNT(v.id) as voice_count
         FROM decks d
-        LEFT JOIN voices v ON d.id = v.deck_id AND v.enabled = 1
-        WHERE d.owner_id = ?
+        LEFT JOIN voices v ON d.id = v.deck_id AND v.enabled IS TRUE
+        WHERE d.owner_id = %s
+        {visibility_sql}
         GROUP BY d.id
         ORDER BY d.order_index, d.created_at
-        """, (user_id,)).fetchall()
+        """, (user_id, *visibility_params)).fetchall()
         return [dict(row) for row in rows]
     finally:
         db.close()
@@ -2042,10 +508,10 @@ def get_published_decks():
         rows = db.execute("""
         SELECT d.*, COUNT(v.id) as voice_count, u.display_name as author_display_name
         FROM decks d
-        LEFT JOIN voices v ON d.id = v.deck_id AND v.enabled = 1
+        LEFT JOIN voices v ON d.id = v.deck_id AND v.enabled IS TRUE
         LEFT JOIN users u ON d.owner_id = u.id
-        WHERE d.published = 1
-        GROUP BY d.id
+        WHERE d.published IS TRUE
+        GROUP BY d.id, u.display_name
         ORDER BY d.install_count DESC, d.created_at DESC
         """).fetchall()
         return [dict(row) for row in rows]
@@ -2060,15 +526,15 @@ def publish_deck(deck_id: str, user_id: int):
     db = get_db()
     try:
         # Get user's display name for author_name
-        user = db.execute("SELECT display_name FROM users WHERE id = ?", (user_id,)).fetchone()
+        user = db.execute("SELECT display_name FROM users WHERE id = %s", (user_id,)).fetchone()
         author_name = user['display_name'] if user and user['display_name'] else f"User {user_id}"
 
         db.execute("""
         UPDATE decks
-        SET published = 1,
-            author_name = ?,
+        SET published = TRUE,
+            author_name = %s,
             parent_id = NULL
-        WHERE id = ? AND owner_id = ?
+        WHERE id = %s AND owner_id = %s
         """, (author_name, deck_id, user_id))
         db.commit()
     finally:
@@ -2082,8 +548,8 @@ def unpublish_deck(deck_id: str, user_id: int):
     try:
         db.execute("""
         UPDATE decks
-        SET published = 0
-        WHERE id = ? AND owner_id = ?
+        SET published = FALSE
+        WHERE id = %s AND owner_id = %s
         """, (deck_id, user_id))
         db.commit()
     finally:
@@ -2098,7 +564,7 @@ def increment_deck_install_count(deck_id: str):
         db.execute("""
         UPDATE decks
         SET install_count = install_count + 1
-        WHERE id = ?
+        WHERE id = %s
         """, (deck_id,))
         db.commit()
     finally:
@@ -2128,7 +594,7 @@ def get_deck_with_voices(user_id: int, deck_id: str):
         # Get deck (must be user's own)
         deck_row = db.execute("""
         SELECT * FROM decks
-        WHERE id = ? AND owner_id = ?
+        WHERE id = %s AND owner_id = %s
         """, (deck_id, user_id)).fetchone()
 
         if not deck_row:
@@ -2139,7 +605,7 @@ def get_deck_with_voices(user_id: int, deck_id: str):
         # Get voices in this deck
         voice_rows = db.execute("""
         SELECT * FROM voices
-        WHERE deck_id = ?
+        WHERE deck_id = %s
         ORDER BY order_index, created_at
         """, (deck_id,)).fetchall()
 
@@ -2148,11 +614,152 @@ def get_deck_with_voices(user_id: int, deck_id: str):
     finally:
         db.close()
 
+def _verified_default_deck_plugin_installation(db, default_plugin_ref: dict) -> dict:
+    """Lock and re-check the installation snapshot before a Deck ref write."""
+
+    installation = db.execute(
+        """
+        SELECT id, package_name, marketplace, resolved_version,
+               artifact_digest, status
+        FROM claude_plugin_installations
+        WHERE id = %s
+        FOR SHARE
+        """,
+        (default_plugin_ref["plugin_installation_id"],),
+    ).fetchone()
+    expected = (
+        default_plugin_ref["package_name"],
+        default_plugin_ref["resolved_version"],
+        default_plugin_ref["artifact_digest"],
+    )
+    actual = (
+        installation["package_name"] if installation else None,
+        installation["resolved_version"] if installation else None,
+        installation["artifact_digest"] if installation else None,
+    )
+    if installation is None or installation["status"] != "ready" or actual != expected:
+        raise ValueError("DEFAULT_DECK_PLUGIN_UNAVAILABLE")
+    return installation
+
+
+def _upsert_default_deck_plugin_ref(db, deck_id: str, default_plugin_ref: dict) -> None:
+    """Persist one enabled configured ref without removing other selections."""
+
+    installation = _verified_default_deck_plugin_installation(db, default_plugin_ref)
+    db.execute(
+        """
+        INSERT INTO deck_claude_plugin_refs (
+            deck_id, plugin_installation_id, package_spec,
+            resolved_version, artifact_digest, enabled, order_index,
+            created_at, updated_at
+        ) VALUES (%s, %s, %s, %s, %s, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (deck_id, plugin_installation_id) DO UPDATE SET
+            package_spec = EXCLUDED.package_spec,
+            resolved_version = EXCLUDED.resolved_version,
+            artifact_digest = EXCLUDED.artifact_digest,
+            enabled = 1,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            deck_id,
+            installation["id"],
+            f"{installation['package_name']}@{installation['marketplace']}",
+            installation["resolved_version"],
+            installation["artifact_digest"],
+        ),
+    )
+
+
+def reconcile_default_screenplay_deck_plugin_ref(
+    user_id: int,
+    default_plugin_ref: dict,
+) -> dict:
+    """Repair one untouched default screenplay Deck only when refs are empty.
+
+    Existing refs, including a user's explicit deselection/replacement state,
+    are never overwritten.  The fallback fingerprint is derived entirely from
+    the configured template because fallback Decks have no shared parent row.
+    """
+
+    import config
+
+    template = config.SCREENPLAY_DECK_TEMPLATE
+    role_names = [voice["name"] for voice in template["voices"]]
+    role_placeholders = ",".join("%s" for _ in role_names)
+    db = get_db()
+    try:
+        deck = db.execute(
+            f"""
+            SELECT d.id
+            FROM decks d
+            WHERE d.owner_id = %s
+              AND d.is_system IS FALSE
+              AND d.has_local_changes IS FALSE
+              AND (
+                d.parent_id = %s
+                OR (
+                  d.parent_id IS NULL
+                  AND d.name = %s
+                  AND d.name_zh = %s
+                  AND d.name_en = %s
+                  AND (SELECT COUNT(*) FROM voices v WHERE v.deck_id = d.id) = %s
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM voices v
+                    WHERE v.deck_id = d.id
+                      AND (
+                        v.has_local_changes IS TRUE
+                        OR COALESCE(v.name_zh, v.name) NOT IN ({role_placeholders})
+                      )
+                  )
+                )
+              )
+            ORDER BY d.created_at
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (
+                user_id,
+                config.DEFAULT_SYSTEM_DECK_ID,
+                template["name"],
+                template["name_zh"],
+                template["name_en"],
+                len(role_names),
+                *role_names,
+            ),
+        ).fetchone()
+        if deck is None:
+            db.rollback()
+            return {"deck_id": None, "reconciled": False, "reason": "default_not_found"}
+
+        existing_ref = db.execute(
+            "SELECT 1 FROM deck_claude_plugin_refs WHERE deck_id = %s LIMIT 1",
+            (deck["id"],),
+        ).fetchone()
+        if existing_ref is not None:
+            db.rollback()
+            return {
+                "deck_id": deck["id"],
+                "reconciled": False,
+                "reason": "refs_preserved",
+            }
+
+        _upsert_default_deck_plugin_ref(db, deck["id"], default_plugin_ref)
+        db.commit()
+        return {"deck_id": deck["id"], "reconciled": True, "reason": "missing_ref"}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def create_deck(user_id: int, name: str, description: str = None,
                 name_zh: str = None, name_en: str = None,
                 description_zh: str = None, description_en: str = None,
                 icon: str = None, color: str = None,
-                order_index: int = None) -> str:
+                order_index: int = None,
+                default_plugin_ref: Optional[dict] = None) -> str:
     """
     Create a new user deck. Returns deck_id.
     """
@@ -2165,7 +772,7 @@ def create_deck(user_id: int, name: str, description: str = None,
         # Get max order_index if not provided
         if order_index is None:
             max_order = db.execute(
-                "SELECT MAX(order_index) as max_order FROM decks WHERE owner_id = ?",
+                "SELECT MAX(order_index) as max_order FROM decks WHERE owner_id = %s",
                 (user_id,)
             ).fetchone()['max_order']
             order_index = (max_order or 0) + 1
@@ -2173,12 +780,18 @@ def create_deck(user_id: int, name: str, description: str = None,
         db.execute("""
         INSERT INTO decks (id, name, name_zh, name_en, description, description_zh, description_en,
                           icon, color, is_system, owner_id, enabled, has_local_changes, order_index)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 0, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s)
         """, (deck_id, name, name_zh, name_en, description, description_zh, description_en,
               icon, color, user_id, order_index))
 
+        if default_plugin_ref is not None:
+            _upsert_default_deck_plugin_ref(db, deck_id, default_plugin_ref)
+
         db.commit()
         return deck_id
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -2197,7 +810,7 @@ def update_deck(user_id: int, deck_id: str, updates: dict) -> bool:
     try:
         # Check ownership
         deck = db.execute(
-            "SELECT owner_id FROM decks WHERE id = ?",
+            "SELECT owner_id FROM decks WHERE id = %s",
             (deck_id,)
         ).fetchone()
 
@@ -2214,8 +827,9 @@ def update_deck(user_id: int, deck_id: str, updates: dict) -> bool:
         params = []
         for field in allowed_fields:
             if field in updates:
-                update_fields.append(f"{field} = ?")
-                params.append(updates[field])
+                value = bool(updates[field]) if field == "enabled" else updates[field]
+                update_fields.append(f"{field} = %s")
+                params.append(value)
 
         if not update_fields:
             return True  # No updates
@@ -2223,13 +837,13 @@ def update_deck(user_id: int, deck_id: str, updates: dict) -> bool:
         # @@@ Mark as locally changed if content fields are modified
         has_content_change = any(field in updates for field in content_fields)
         if has_content_change:
-            update_fields.append("has_local_changes = 1")
+            update_fields.append("has_local_changes = TRUE")
 
         update_fields.append("updated_at = CURRENT_TIMESTAMP")
         params.append(deck_id)
 
         db.execute(
-            f"UPDATE decks SET {', '.join(update_fields)} WHERE id = ?",
+            f"UPDATE decks SET {', '.join(update_fields)} WHERE id = %s",
             params
         )
         db.commit()
@@ -2247,43 +861,116 @@ def delete_deck(user_id: int, deck_id: str) -> bool:
     try:
         # Check ownership
         deck = db.execute(
-            "SELECT owner_id FROM decks WHERE id = ?",
+            "SELECT owner_id FROM decks WHERE id = %s",
             (deck_id,)
         ).fetchone()
 
         if not deck or deck['owner_id'] != user_id:
             return False
 
-        db.execute("DELETE FROM decks WHERE id = ?", (deck_id,))
+        db.execute("DELETE FROM decks WHERE id = %s", (deck_id,))
         db.commit()
         return True
     finally:
         db.close()
 
-def auto_fork_system_decks(user_id: int):
+def auto_fork_system_decks(user_id: int, default_plugin_ref: dict) -> str:
     """
-    Auto-fork all system decks for a new user.
+    Provision the one active screenplay Deck for a new user.
     Called on user registration/first login.
     """
-    # @@@ Get deck list then close connection BEFORE forking (avoid deadlock)
+    import config
+
+    # Resolve the shared template before fork_deck opens its own lease.
     db = get_db()
     try:
-        system_decks = db.execute(
-            "SELECT id FROM decks WHERE is_system = 1 ORDER BY order_index"
-        ).fetchall()
-        deck_ids = [deck['id'] for deck in system_decks]
+        system_deck = db.execute(
+            "SELECT id FROM decks WHERE id = %s AND is_system IS TRUE",
+            (config.DEFAULT_SYSTEM_DECK_ID,),
+        ).fetchone()
     finally:
         db.close()
 
-    # Fork each deck (each fork opens its own connection)
-    # @@@ Only enable introspection deck by default
-    for deck_id in deck_ids:
-        should_enable = (deck_id == 'introspection_deck')
-        fork_deck(user_id, deck_id, enabled=should_enable)
+    if system_deck is not None:
+        deck_id = fork_deck(
+            user_id,
+            system_deck["id"],
+            enabled=True,
+            default_plugin_ref=default_plugin_ref,
+        )
+    else:
+        deck_id = create_default_screenplay_deck(
+            user_id,
+            default_plugin_ref=default_plugin_ref,
+        )
+    print(f"✅ Provisioned screenplay Deck {deck_id} for user {user_id}")
+    return deck_id
 
-    print(f"✅ Auto-forked {len(deck_ids)} system decks for user {user_id}")
 
-def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
+def create_default_screenplay_deck(user_id: int, default_plugin_ref: dict) -> str:
+    """Create the configured screenplay template as a user-owned Deck.
+
+    This fallback writes only normal Deck/Voice rows for the registering user;
+    it never creates shared schema or system rows at runtime.
+    """
+
+    import config
+    import uuid
+
+    template = config.SCREENPLAY_DECK_TEMPLATE
+    deck_id = str(uuid.uuid4())
+    memory_config_json = _default_memory_workspace_config_json()
+    db = get_db()
+    try:
+        max_order = db.execute(
+            "SELECT MAX(order_index) AS max_order FROM decks WHERE owner_id = %s",
+            (user_id,),
+        ).fetchone()["max_order"]
+        db.execute(
+            """
+            INSERT INTO decks (
+                id, name, name_zh, name_en, description, description_zh,
+                description_en, icon, color, is_system, owner_id, enabled,
+                has_local_changes, order_index
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s)
+            """,
+            (
+                deck_id, template["name"], template["name_zh"], template["name_en"],
+                template["description"], template["description_zh"],
+                template["description_en"], template["icon"], template["color"],
+                user_id, (max_order or 0) + 1,
+            ),
+        )
+        for order, voice in enumerate(template["voices"]):
+            db.execute(
+                """
+                INSERT INTO voices (
+                    id, deck_id, name, name_zh, name_en, system_prompt, icon,
+                    color, is_system, owner_id, enabled, has_local_changes,
+                    order_index, memory_workspace_config
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s, %s)
+                """,
+                (
+                    str(uuid.uuid4()), deck_id, voice["name"], voice["name_zh"],
+                    voice["name_en"], voice["system_prompt"], voice["icon"],
+                    voice["color"], user_id, order, memory_config_json,
+                ),
+            )
+        _upsert_default_deck_plugin_ref(db, deck_id, default_plugin_ref)
+        db.commit()
+        return deck_id
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+def fork_deck(
+    user_id: int,
+    deck_id: str,
+    enabled: bool = True,
+    default_plugin_ref: Optional[dict] = None,
+) -> str:
     """
     Fork a deck to create user's own copy.
     Copies deck + all voices. Returns new deck_id.
@@ -2298,7 +985,7 @@ def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
     db = get_db()
     try:
         # Get source deck
-        source_deck = db.execute("SELECT * FROM decks WHERE id = ?", (deck_id,)).fetchone()
+        source_deck = db.execute("SELECT * FROM decks WHERE id = %s", (deck_id,)).fetchone()
         if not source_deck:
             raise ValueError(f"Deck {deck_id} not found")
 
@@ -2309,7 +996,7 @@ def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
         db.execute("""
         INSERT INTO decks (id, name, name_zh, name_en, description, description_zh, description_en,
                           icon, color, is_system, parent_id, owner_id, enabled, has_local_changes, order_index)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, %s, FALSE, %s)
         """, (new_deck_id,
               source_deck['name'],
               source_deck['name_zh'],
@@ -2321,12 +1008,12 @@ def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
               source_deck['color'],
               deck_id,  # parent_id tracks fork source
               user_id,
-              1 if enabled else 0,  # @@@ enabled parameter
+              bool(enabled),
               source_deck['order_index']))
 
         # Copy all voices
         source_voices = db.execute(
-            "SELECT * FROM voices WHERE deck_id = ? ORDER BY order_index",
+            "SELECT * FROM voices WHERE deck_id = %s ORDER BY order_index",
             (deck_id,)
         ).fetchall()
 
@@ -2336,7 +1023,7 @@ def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
             db.execute("""
             INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
                               icon, color, is_system, parent_id, owner_id, enabled, has_local_changes, order_index, memory_workspace_config)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, 0, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, TRUE, FALSE, %s, %s)
             """, (new_voice_id,
                   new_deck_id,
                   voice['name'],
@@ -2349,6 +1036,28 @@ def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
                   user_id,
                   voice['order_index'],
                   memory_config_json))
+
+        # A system/community Deck's verified plugin selection is part of the
+        # template. The fork stores the same installation references, never
+        # filesystem paths or mutable discovery state.
+        db.execute(
+            """
+            INSERT INTO deck_claude_plugin_refs (
+                deck_id, plugin_installation_id, package_spec,
+                resolved_version, artifact_digest, enabled, order_index,
+                created_at, updated_at
+            )
+            SELECT %s, plugin_installation_id, package_spec,
+                   resolved_version, artifact_digest, enabled, order_index,
+                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            FROM deck_claude_plugin_refs
+            WHERE deck_id = %s
+            """,
+            (new_deck_id, deck_id),
+        )
+
+        if default_plugin_ref is not None:
+            _upsert_default_deck_plugin_ref(db, new_deck_id, default_plugin_ref)
 
         db.commit()
         return new_deck_id
@@ -2371,7 +1080,7 @@ def sync_deck_with_parent(user_id: int, deck_id: str, force: bool = False) -> di
     try:
         # Get user's deck
         deck = db.execute(
-            "SELECT * FROM decks WHERE id = ? AND owner_id = ?",
+            "SELECT * FROM decks WHERE id = %s AND owner_id = %s",
             (deck_id, user_id)
         ).fetchone()
 
@@ -2383,7 +1092,7 @@ def sync_deck_with_parent(user_id: int, deck_id: str, force: bool = False) -> di
 
         # Get parent deck
         parent = db.execute(
-            "SELECT * FROM decks WHERE id = ?",
+            "SELECT * FROM decks WHERE id = %s",
             (deck['parent_id'],)
         ).fetchone()
 
@@ -2393,23 +1102,23 @@ def sync_deck_with_parent(user_id: int, deck_id: str, force: bool = False) -> di
         # @@@ Step 1: Sync deck metadata (preserve user preferences like enabled/order)
         db.execute("""
         UPDATE decks SET
-            name = ?, name_zh = ?, name_en = ?,
-            description = ?, description_zh = ?, description_en = ?,
-            icon = ?, color = ?,
-            has_local_changes = 0,
+            name = %s, name_zh = %s, name_en = %s,
+            description = %s, description_zh = %s, description_en = %s,
+            icon = %s, color = %s,
+            has_local_changes = FALSE,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        WHERE id = %s
         """, (parent['name'], parent['name_zh'], parent['name_en'],
               parent['description'], parent['description_zh'], parent['description_en'],
               parent['icon'], parent['color'],
               deck_id))
 
         # @@@ Step 2: Delete ALL user's voices in this deck
-        db.execute("DELETE FROM voices WHERE deck_id = ?", (deck_id,))
+        db.execute("DELETE FROM voices WHERE deck_id = %s", (deck_id,))
 
         # @@@ Step 3: Re-create all voices from parent (fresh copy)
         parent_voices = db.execute(
-            "SELECT * FROM voices WHERE deck_id = ? ORDER BY order_index",
+            "SELECT * FROM voices WHERE deck_id = %s ORDER BY order_index",
             (deck['parent_id'],)
         ).fetchall()
 
@@ -2420,7 +1129,7 @@ def sync_deck_with_parent(user_id: int, deck_id: str, force: bool = False) -> di
             db.execute("""
             INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
                               icon, color, is_system, parent_id, owner_id, enabled, has_local_changes, order_index, memory_workspace_config)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, 0, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s, TRUE, FALSE, %s, %s)
             """, (new_voice_id,
                   deck_id,  # User's deck
                   parent_voice['name'],
@@ -2447,14 +1156,16 @@ def load_voices_from_user_decks(user_id: int) -> dict:
     Returns dict format: {voice_id: {name, systemPrompt, icon, color}}
     Compatible with analyze_stateless() expectations.
     """
+    visibility_sql, visibility_params = _retired_system_deck_visibility()
     db = get_db()
     try:
         # Get all user's enabled decks
-        enabled_decks = db.execute("""
-        SELECT id FROM decks
-        WHERE owner_id = ? AND enabled = 1
-        ORDER BY order_index, created_at
-        """, (user_id,)).fetchall()
+        enabled_decks = db.execute(f"""
+        SELECT d.id FROM decks d
+        WHERE d.owner_id = %s AND d.enabled IS TRUE
+        {visibility_sql}
+        ORDER BY d.order_index, d.created_at
+        """, (user_id, *visibility_params)).fetchall()
 
         if not enabled_decks:
             return {}
@@ -2462,11 +1173,11 @@ def load_voices_from_user_decks(user_id: int) -> dict:
         deck_ids = [deck['id'] for deck in enabled_decks]
 
         # Get all enabled voices from these decks
-        placeholders = ','.join('?' * len(deck_ids))
+        placeholders = ','.join('%s' for _ in deck_ids)
         voices = db.execute(f"""
         SELECT id, name, system_prompt, icon, color
         FROM voices
-        WHERE deck_id IN ({placeholders}) AND enabled = 1
+        WHERE deck_id IN ({placeholders}) AND enabled IS TRUE
         ORDER BY order_index, created_at
         """, deck_ids).fetchall()
 
@@ -2501,7 +1212,7 @@ def create_voice(user_id: int, deck_id: str, name: str, system_prompt: str,
     try:
         # Check deck ownership
         deck = db.execute(
-            "SELECT owner_id FROM decks WHERE id = ?",
+            "SELECT owner_id FROM decks WHERE id = %s",
             (deck_id,)
         ).fetchone()
 
@@ -2513,7 +1224,7 @@ def create_voice(user_id: int, deck_id: str, name: str, system_prompt: str,
         # Get max order_index if not provided
         if order_index is None:
             max_order = db.execute(
-                "SELECT MAX(order_index) as max_order FROM voices WHERE deck_id = ?",
+                "SELECT MAX(order_index) as max_order FROM voices WHERE deck_id = %s",
                 (deck_id,)
             ).fetchone()['max_order']
             order_index = (max_order or 0) + 1
@@ -2524,7 +1235,7 @@ def create_voice(user_id: int, deck_id: str, name: str, system_prompt: str,
         INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
                            icon, color, is_system, owner_id, enabled, has_local_changes,
                            order_index, memory_workspace_config)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 0, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s, %s)
         """, (voice_id, deck_id, name, name_zh, name_en, system_prompt,
               icon, color, user_id, order_index, memory_config_json))
 
@@ -2548,7 +1259,7 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
     try:
         # Check ownership
         voice = db.execute(
-            "SELECT owner_id FROM voices WHERE id = ?",
+            "SELECT owner_id FROM voices WHERE id = %s",
             (voice_id,)
         ).fetchone()
 
@@ -2567,10 +1278,12 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
         for field in allowed_fields:
             if field in updates:
                 value = updates[field]
+                if field == "enabled":
+                    value = bool(value)
                 # Serialise memory_workspace_config dict to JSON string.
                 if field == 'memory_workspace_config' and isinstance(value, dict):
                     value = json.dumps(value, ensure_ascii=False)
-                update_fields.append(f"{field} = ?")
+                update_fields.append(f"{field} = %s")
                 params.append(value)
 
         if not update_fields:
@@ -2579,13 +1292,13 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
         # @@@ Mark as locally changed if content fields are modified
         has_content_change = any(field in updates for field in content_fields)
         if has_content_change:
-            update_fields.append("has_local_changes = 1")
+            update_fields.append("has_local_changes = TRUE")
 
         update_fields.append("updated_at = CURRENT_TIMESTAMP")
         params.append(voice_id)
 
         db.execute(
-            f"UPDATE voices SET {', '.join(update_fields)} WHERE id = ?",
+            f"UPDATE voices SET {', '.join(update_fields)} WHERE id = %s",
             params
         )
         db.commit()
@@ -2602,14 +1315,14 @@ def delete_voice(user_id: int, voice_id: str) -> bool:
     try:
         # Check ownership
         voice = db.execute(
-            "SELECT owner_id FROM voices WHERE id = ?",
+            "SELECT owner_id FROM voices WHERE id = %s",
             (voice_id,)
         ).fetchone()
 
         if not voice or voice['owner_id'] != user_id:
             return False
 
-        db.execute("DELETE FROM voices WHERE id = ?", (voice_id,))
+        db.execute("DELETE FROM voices WHERE id = %s", (voice_id,))
         db.commit()
         return True
     finally:
@@ -2626,7 +1339,7 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
     try:
         # Check target deck ownership
         deck = db.execute(
-            "SELECT owner_id FROM decks WHERE id = ?",
+            "SELECT owner_id FROM decks WHERE id = %s",
             (target_deck_id,)
         ).fetchone()
 
@@ -2634,7 +1347,7 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
             raise ValueError("Target deck not found or permission denied")
 
         # Get source voice
-        source_voice = db.execute("SELECT * FROM voices WHERE id = ?", (voice_id,)).fetchone()
+        source_voice = db.execute("SELECT * FROM voices WHERE id = %s", (voice_id,)).fetchone()
         if not source_voice:
             raise ValueError(f"Voice {voice_id} not found")
 
@@ -2643,7 +1356,7 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
 
         # Get max order_index in target deck
         max_order = db.execute(
-            "SELECT MAX(order_index) as max_order FROM voices WHERE deck_id = ?",
+            "SELECT MAX(order_index) as max_order FROM voices WHERE deck_id = %s",
             (target_deck_id,)
         ).fetchone()['max_order']
         order_index = (max_order or 0) + 1
@@ -2652,7 +1365,7 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
         db.execute("""
         INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
                            icon, color, is_system, parent_id, owner_id, enabled, order_index, memory_workspace_config)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (new_voice_id,
               target_deck_id,
               source_voice['name'],
@@ -2661,8 +1374,10 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
               source_voice['system_prompt'],
               source_voice['icon'],
               source_voice['color'],
+              False,
               voice_id,  # parent_id tracks fork source
               user_id,
+              True,
               order_index,
               memory_config_json))
 
@@ -2680,22 +1395,71 @@ def create_user(
     avatar_url: str = None,
     role: str = "user",
 ) -> int:
-    """Create a new user. Returns user_id."""
+    """Create a user only when Admin-owned Free/default-model provisioning is complete."""
     db = get_db()
     try:
         normalized_email = email.strip().lower()
         cursor = db.execute(
             """
             INSERT INTO users (email, password_hash, display_name, avatar_url, role, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            RETURNING id
             """,
             (normalized_email, password_hash, display_name, avatar_url, role or "user")
         )
-        user_id = cursor.lastrowid
+        user_id = int(cursor.fetchone()["id"])
+        registration = db.execute(
+            """
+            SELECT subscription.id
+            FROM platform_users AS platform_user
+            JOIN subscriptions AS subscription
+              ON subscription.platform_user_id = platform_user.id
+             AND subscription.status = 'active'
+            JOIN subscription_plan_versions AS version
+              ON version.id = subscription.plan_version_id
+             AND version.status = 'published'
+            JOIN subscription_plans AS plan
+              ON plan.id = version.plan_id
+             AND plan.code = 'free'
+             AND plan.status = 'active'
+            JOIN subscription_plan_entitlements AS entitlement
+              ON entitlement.plan_version_id = version.id
+             AND entitlement.enabled = TRUE
+             AND entitlement.is_default = TRUE
+             AND entitlement.gateway_scopes @> ARRAY['messages:create']::text[]
+            JOIN ai_models AS model
+              ON model.id = entitlement.model_id
+             AND model.enabled = TRUE
+            JOIN subscription_usage_allowances AS allowance
+              ON allowance.subscription_id = subscription.id
+             AND allowance.period_number = subscription.current_period_number
+             AND allowance.granted_tokens > 0
+            JOIN subscription_events AS event
+              ON event.subscription_id = subscription.id
+             AND event.event_type = 'activated'
+            WHERE platform_user.source = 'ink-dream'
+              AND platform_user.external_user_id = %s
+              AND platform_user.status = 'active'
+            LIMIT 1
+            """,
+            (str(user_id),),
+        ).fetchone()
+        if registration is None:
+            raise UserRegistrationUnavailable()
         db.commit()
         return user_id
-    except sqlite3.IntegrityError:
-        raise ValueError("Email already exists")
+    except UserRegistrationUnavailable:
+        db.rollback()
+        raise
+    except PostgresIntegrityError as exc:
+        db.rollback()
+        constraint_name = getattr(getattr(exc, "diag", None), "constraint_name", None)
+        if constraint_name in {"users_email_uidx", "users_email_unique"}:
+            raise ValueError("Email already exists") from None
+        raise UserRegistrationUnavailable() from None
+    except PostgresError:
+        db.rollback()
+        raise UserRegistrationUnavailable() from None
     finally:
         db.close()
 
@@ -2708,7 +1472,7 @@ def get_user_by_email(email: str):
             """
             SELECT id, email, password_hash, display_name, avatar_url, role, created_at, updated_at
             FROM users
-            WHERE email = ?
+            WHERE email = %s
             """,
             (normalized_email,)
         ).fetchone()
@@ -2724,7 +1488,7 @@ def get_user_by_id(user_id: int):
             """
             SELECT id, email, display_name, avatar_url, role, created_at, updated_at
             FROM users
-            WHERE id = ?
+            WHERE id = %s
             """,
             (user_id,)
         ).fetchone()
@@ -2743,7 +1507,7 @@ def get_user_by_oauth_account(provider: str, provider_sub: str) -> Optional[dict
             SELECT u.id, u.email, u.display_name, u.avatar_url, u.role, u.created_at, u.updated_at
             FROM oauth_accounts oa
             JOIN users u ON u.id = oa.user_id
-            WHERE oa.provider = ? AND oa.provider_sub = ?
+            WHERE oa.provider = %s AND oa.provider_sub = %s
             LIMIT 1
             """,
             (provider, provider_sub),
@@ -2774,7 +1538,7 @@ def upsert_oauth_account(
               access_token_encrypted, refresh_token_encrypted, id_token_encrypted,
               expires_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
             ON CONFLICT(provider, provider_sub) DO UPDATE SET
               user_id = excluded.user_id,
               email = excluded.email,
@@ -2808,7 +1572,7 @@ def create_refresh_token(user_id: int, token_hash: str, expires_at: datetime) ->
         db.execute(
             """
             INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
-            VALUES (?, ?, ?)
+            VALUES (%s, %s, %s)
             """,
             (user_id, token_hash, _datetime_to_sql(expires_at)),
         )
@@ -2826,7 +1590,7 @@ def get_refresh_token(token_hash: str) -> Optional[dict]:
             """
             SELECT id, user_id, token_hash, expires_at, revoked_at, created_at
             FROM refresh_tokens
-            WHERE token_hash = ? AND revoked_at IS NULL
+            WHERE token_hash = %s AND revoked_at IS NULL
             LIMIT 1
             """,
             (token_hash,),
@@ -2845,7 +1609,7 @@ def revoke_refresh_token(token_hash: str) -> bool:
             """
             UPDATE refresh_tokens
             SET revoked_at = CURRENT_TIMESTAMP
-            WHERE token_hash = ? AND revoked_at IS NULL
+            WHERE token_hash = %s AND revoked_at IS NULL
             """,
             (token_hash,),
         )
@@ -2864,7 +1628,7 @@ def revoke_user_refresh_tokens(user_id: int) -> int:
             """
             UPDATE refresh_tokens
             SET revoked_at = CURRENT_TIMESTAMP
-            WHERE user_id = ? AND revoked_at IS NULL
+            WHERE user_id = %s AND revoked_at IS NULL
             """,
             (user_id,),
         )
@@ -2892,7 +1656,8 @@ def create_device_authorization(
               client_id, device_code_hash, user_code_hash, scope,
               status, interval_seconds, expires_at, updated_at
             )
-            VALUES (?, ?, ?, ?, 'pending', ?, ?, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, 'pending', %s, %s, CURRENT_TIMESTAMP)
+            RETURNING id
             """,
             (
                 client_id,
@@ -2903,8 +1668,9 @@ def create_device_authorization(
                 _datetime_to_sql(expires_at),
             ),
         )
+        authorization_id = int(cursor.fetchone()["id"])
         db.commit()
-        return cursor.lastrowid
+        return authorization_id
     finally:
         db.close()
 
@@ -2918,7 +1684,7 @@ def get_device_authorization_by_device_code_hash(device_code_hash: str) -> Optio
             """
             SELECT *
             FROM device_authorizations
-            WHERE device_code_hash = ?
+            WHERE device_code_hash = %s
             LIMIT 1
             """,
             (device_code_hash,),
@@ -2937,7 +1703,7 @@ def get_device_authorization_by_user_code_hash(user_code_hash: str) -> Optional[
             """
             SELECT *
             FROM device_authorizations
-            WHERE user_code_hash = ?
+            WHERE user_code_hash = %s
             LIMIT 1
             """,
             (user_code_hash,),
@@ -2958,10 +1724,10 @@ def update_device_authorization_status(
         "approved": "approved_at",
         "consumed": "consumed_at",
     }.get(status)
-    assignments = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
+    assignments = ["status = %s", "updated_at = CURRENT_TIMESTAMP"]
     params: list[object] = [status]
     if user_id is not None:
-        assignments.append("user_id = ?")
+        assignments.append("user_id = %s")
         params.append(user_id)
     if timestamp_column:
         assignments.append(f"{timestamp_column} = CURRENT_TIMESTAMP")
@@ -2970,7 +1736,7 @@ def update_device_authorization_status(
     db = get_db()
     try:
         db.execute(
-            f"UPDATE device_authorizations SET {', '.join(assignments)} WHERE id = ?",
+            f"UPDATE device_authorizations SET {', '.join(assignments)} WHERE id = %s",
             tuple(params),
         )
         db.commit()
@@ -2988,7 +1754,7 @@ def record_device_authorization_poll(authorization_id: int, interval_seconds: Op
                 """
                 UPDATE device_authorizations
                 SET last_poll_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE id = %s
                 """,
                 (authorization_id,),
             )
@@ -2997,9 +1763,9 @@ def record_device_authorization_poll(authorization_id: int, interval_seconds: Op
                 """
                 UPDATE device_authorizations
                 SET last_poll_at = CURRENT_TIMESTAMP,
-                    interval_seconds = ?,
+                    interval_seconds = %s,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE id = %s
                 """,
                 (interval_seconds, authorization_id),
             )
@@ -3090,7 +1856,7 @@ def save_session(user_id: int, session_id: str, editor_state: dict, name: str = 
         labels_json = json.dumps(labels, ensure_ascii=False) if labels is not None else None
         db.execute("""
         INSERT INTO user_sessions (id, user_id, name, editor_state_json, labels, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+        VALUES (%s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
           editor_state_json = excluded.editor_state_json,
           name = COALESCE(excluded.name, user_sessions.name),
@@ -3108,7 +1874,7 @@ def get_session(user_id: int, session_id: str):
         row = db.execute("""
         SELECT id, name, editor_state_json, labels, created_at, updated_at
         FROM user_sessions
-        WHERE user_id = ? AND id = ?
+        WHERE user_id = %s AND id = %s
         """, (user_id, session_id)).fetchone()
 
         if row:
@@ -3131,11 +1897,11 @@ def get_sessions_batch(user_id: int, session_ids: list[str]) -> list[dict]:
 
     db = get_db()
     try:
-        placeholders = ",".join("?" for _ in session_ids)
+        placeholders = ",".join("%s" for _ in session_ids)
         query = f"""
         SELECT id, name, editor_state_json, labels, created_at, updated_at
         FROM user_sessions
-        WHERE user_id = ? AND id IN ({placeholders})
+        WHERE user_id = %s AND id IN ({placeholders})
         """
         rows = db.execute(query, (user_id, *session_ids)).fetchall()
         sessions = []
@@ -3169,7 +1935,7 @@ def list_sessions(user_id: int):
         rows = db.execute("""
         SELECT id, name, editor_state_json, labels, created_at, updated_at
         FROM user_sessions
-        WHERE user_id = ?
+        WHERE user_id = %s
         ORDER BY updated_at DESC
         """, (user_id,)).fetchall()
 
@@ -3207,9 +1973,9 @@ def list_sessions_in_range(
         rows = db.execute(f"""
         SELECT id, name, editor_state_json, labels, created_at, updated_at
         FROM user_sessions
-        WHERE user_id = ?
-          AND (? IS NULL OR date(COALESCE(created_at, updated_at)) >= ?)
-          AND (? IS NULL OR date(COALESCE(created_at, updated_at)) <= ?)
+        WHERE user_id = %s
+          AND (CAST(%s AS date) IS NULL OR date(COALESCE(created_at, updated_at)) >= CAST(%s AS date))
+          AND (CAST(%s AS date) IS NULL OR date(COALESCE(created_at, updated_at)) <= CAST(%s AS date))
         ORDER BY updated_at DESC
         """, (user_id, start_date, start_date, end_date, end_date)).fetchall()
 
@@ -3242,7 +2008,7 @@ def get_all_sessions_with_text(user_id: int) -> list[dict]:
         rows = db.execute("""
         SELECT id, name, editor_state_json, created_at, updated_at
         FROM user_sessions
-        WHERE user_id = ?
+        WHERE user_id = %s
         ORDER BY updated_at DESC
         """, (user_id,)).fetchall()
 
@@ -3274,7 +2040,7 @@ def delete_session(user_id: int, session_id: str):
     """Delete a session."""
     db = get_db()
     try:
-        db.execute("DELETE FROM user_sessions WHERE user_id = ? AND id = ?", (user_id, session_id))
+        db.execute("DELETE FROM user_sessions WHERE user_id = %s AND id = %s", (user_id, session_id))
         db.commit()
     finally:
         db.close()
@@ -3315,7 +2081,7 @@ def get_users_with_activity_on_date(target_date: str, timezone: str = 'Asia/Shan
         rows = db.execute("""
             SELECT DISTINCT user_id, editor_state_json
             FROM user_sessions
-            WHERE updated_at >= ? AND updated_at <= ?
+            WHERE updated_at >= %s AND updated_at <= %s
         """, (start_utc.isoformat(), end_utc.isoformat())).fetchall()
 
         # Filter users with non-empty content
@@ -3371,9 +2137,9 @@ def extract_text_from_sessions_on_date(user_id: int, target_date: str, timezone:
         rows = db.execute("""
             SELECT editor_state_json
             FROM user_sessions
-            WHERE user_id = ?
-              AND updated_at >= ?
-              AND updated_at <= ?
+            WHERE user_id = %s
+              AND updated_at >= %s
+              AND updated_at <= %s
             ORDER BY updated_at DESC
         """, (user_id, start_utc.isoformat(), end_utc.isoformat())).fetchall()
 
@@ -3407,13 +2173,13 @@ def save_daily_picture(user_id: int, date: str, image_base64: str, prompt: str =
         # This ensures only ONE picture per day while avoiding UNIQUE constraint timezone issues
         db.execute("""
         DELETE FROM daily_pictures
-        WHERE user_id = ? AND date = ?
+        WHERE user_id = %s AND date = %s
         """, (user_id, date))
 
         # Insert the new picture
         db.execute("""
         INSERT INTO daily_pictures (user_id, date, image_base64, thumbnail_base64, prompt)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s)
         """, (user_id, date, image_base64, thumbnail_base64, prompt))
 
         db.commit()
@@ -3429,9 +2195,9 @@ def get_daily_pictures(user_id: int, limit: int = 30):
         rows = db.execute("""
         SELECT date, COALESCE(thumbnail_base64, image_base64) as base64, prompt, created_at
         FROM daily_pictures
-        WHERE user_id = ?
+        WHERE user_id = %s
         ORDER BY date DESC
-        LIMIT ?
+        LIMIT %s
         """, (user_id, limit)).fetchall()
         return [{
             'date': row['date'],
@@ -3449,7 +2215,7 @@ def get_daily_picture_full(user_id: int, date: str):
         row = db.execute("""
         SELECT image_base64
         FROM daily_pictures
-        WHERE user_id = ? AND date = ?
+        WHERE user_id = %s AND date = %s
         ORDER BY created_at DESC
         LIMIT 1
         """, (user_id, date)).fetchone()
@@ -3468,8 +2234,8 @@ def get_friend_picture_full(user_id: int, friend_id: int, date: str):
         friendship = db.execute("""
         SELECT id FROM friendships
         WHERE status = 'accepted' AND (
-          (user_id = ? AND friend_id = ?) OR
-          (user_id = ? AND friend_id = ?)
+          (user_id = %s AND friend_id = %s) OR
+          (user_id = %s AND friend_id = %s)
         )
         """, (user_id, friend_id, friend_id, user_id)).fetchone()
 
@@ -3479,7 +2245,7 @@ def get_friend_picture_full(user_id: int, friend_id: int, date: str):
         row = db.execute("""
         SELECT image_base64
         FROM daily_pictures
-        WHERE user_id = ? AND date = ?
+        WHERE user_id = %s AND date = %s
         ORDER BY created_at DESC
         LIMIT 1
         """, (friend_id, date)).fetchone()
@@ -3494,47 +2260,27 @@ def get_friend_picture_full(user_id: int, friend_id: int, date: str):
 
 def save_preferences(user_id: int, voice_configs: dict = None, meta_prompt: str = None,
                     state_config: dict = None, selected_state: str = None, timezone: str = None):
-    """Save or update user preferences."""
+    """Atomically merge user preferences without a first-login insert race."""
     db = get_db()
     try:
-        # Check if preferences exist
-        existing = db.execute("SELECT user_id FROM user_preferences WHERE user_id = ?", (user_id,)).fetchone()
-
-        if existing:
-            # Update
-            updates = []
-            params = []
-            if voice_configs is not None:
-                updates.append("voice_configs_json = ?")
-                params.append(json.dumps(voice_configs))
-            if meta_prompt is not None:
-                updates.append("meta_prompt = ?")
-                params.append(meta_prompt)
-            if state_config is not None:
-                updates.append("state_config_json = ?")
-                params.append(json.dumps(state_config))
-            if selected_state is not None:
-                updates.append("selected_state = ?")
-                params.append(selected_state)
-            if timezone is not None:
-                updates.append("timezone = ?")
-                params.append(timezone)
-
-            if updates:
-                updates.append("updated_at = CURRENT_TIMESTAMP")
-                params.append(user_id)
-                db.execute(f"UPDATE user_preferences SET {', '.join(updates)} WHERE user_id = ?", params)
-        else:
-            # Insert
-            db.execute("""
+        db.execute("""
             INSERT INTO user_preferences (user_id, voice_configs_json, meta_prompt, state_config_json, selected_state, timezone)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id,
-                  json.dumps(voice_configs) if voice_configs else None,
-                  meta_prompt,
-                  json.dumps(state_config) if state_config else None,
-                  selected_state,
-                  timezone))
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
+                voice_configs_json = COALESCE(EXCLUDED.voice_configs_json, user_preferences.voice_configs_json),
+                meta_prompt = COALESCE(EXCLUDED.meta_prompt, user_preferences.meta_prompt),
+                state_config_json = COALESCE(EXCLUDED.state_config_json, user_preferences.state_config_json),
+                selected_state = COALESCE(EXCLUDED.selected_state, user_preferences.selected_state),
+                timezone = COALESCE(EXCLUDED.timezone, user_preferences.timezone),
+                updated_at = CURRENT_TIMESTAMP
+            """, (
+                user_id,
+                json.dumps(voice_configs) if voice_configs is not None else None,
+                meta_prompt,
+                json.dumps(state_config) if state_config is not None else None,
+                selected_state,
+                timezone,
+            ))
 
         db.commit()
     finally:
@@ -3548,7 +2294,7 @@ def get_preferences(user_id: int):
         SELECT voice_configs_json, meta_prompt, state_config_json, selected_state,
                timezone, first_login_completed, updated_at
         FROM user_preferences
-        WHERE user_id = ?
+        WHERE user_id = %s
         """, (user_id,)).fetchone()
 
         if row:
@@ -3575,7 +2321,7 @@ def get_system_config(user_id: int) -> dict:
     db = get_db()
     try:
         row = db.execute(
-            "SELECT system_config_json FROM user_preferences WHERE user_id = ?",
+            "SELECT system_config_json FROM user_preferences WHERE user_id = %s",
             (user_id,),
         ).fetchone()
         if row and row["system_config_json"]:
@@ -3593,19 +2339,19 @@ def save_system_config(user_id: int, patch: dict) -> None:
     db = get_db()
     try:
         existing = db.execute(
-            "SELECT system_config_json FROM user_preferences WHERE user_id = ?",
+            "SELECT system_config_json FROM user_preferences WHERE user_id = %s",
             (user_id,),
         ).fetchone()
         if existing:
             current = json.loads(existing["system_config_json"]) if existing["system_config_json"] else {}
             current.update(patch)
             db.execute(
-                "UPDATE user_preferences SET system_config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                "UPDATE user_preferences SET system_config_json = %s, updated_at = CURRENT_TIMESTAMP WHERE user_id = %s",
                 (json.dumps(current), user_id),
             )
         else:
             db.execute(
-                "INSERT INTO user_preferences (user_id, system_config_json) VALUES (?, ?)",
+                "INSERT INTO user_preferences (user_id, system_config_json) VALUES (%s, %s)",
                 (user_id, json.dumps(patch)),
             )
         db.commit()
@@ -3618,20 +2364,20 @@ def set_first_login_completed(user_id: int):
     db = get_db()
     try:
         # Check if preferences exist
-        existing = db.execute("SELECT user_id FROM user_preferences WHERE user_id = ?", (user_id,)).fetchone()
+        existing = db.execute("SELECT user_id FROM user_preferences WHERE user_id = %s", (user_id,)).fetchone()
 
         if existing:
             # Update existing
             db.execute("""
             UPDATE user_preferences
             SET first_login_completed = 1, updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = ?
+            WHERE user_id = %s
             """, (user_id,))
         else:
             # Insert new
             db.execute("""
             INSERT INTO user_preferences (user_id, first_login_completed)
-            VALUES (?, 1)
+            VALUES (%s, 1)
             """, (user_id,))
 
         db.commit()
@@ -3646,7 +2392,7 @@ def save_analysis_report(user_id: int, report_type: str, report_data: dict, all_
     try:
         db.execute("""
         INSERT INTO analysis_reports (user_id, report_type, report_data_json, all_notes_text)
-        VALUES (?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s)
         """, (user_id, report_type, json.dumps(report_data), all_notes_text))
         db.commit()
     finally:
@@ -3659,9 +2405,9 @@ def get_analysis_reports(user_id: int, limit: int = 10):
         rows = db.execute("""
         SELECT id, report_type, report_data_json, created_at
         FROM analysis_reports
-        WHERE user_id = ?
+        WHERE user_id = %s
         ORDER BY created_at DESC
-        LIMIT ?
+        LIMIT %s
         """, (user_id, limit)).fetchall()
 
         results = []
@@ -3692,23 +2438,34 @@ def import_user_data(user_id: int, sessions: list, pictures: list, preferences: 
         # Import sessions
         for session in sessions:
             db.execute("""
-            INSERT OR REPLACE INTO user_sessions (id, user_id, name, editor_state_json)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO user_sessions (id, user_id, name, editor_state_json)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+              user_id = excluded.user_id,
+              name = excluded.name,
+              editor_state_json = excluded.editor_state_json,
+              updated_at = CURRENT_TIMESTAMP
             """, (session['id'], user_id, session.get('name'), json.dumps(session['editor_state'])))
 
         # Import pictures
         for picture in pictures:
             db.execute("""
-            INSERT OR REPLACE INTO daily_pictures (user_id, date, image_base64, prompt)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO daily_pictures (user_id, date, image_base64, prompt)
+            VALUES (%s, %s, %s, %s)
             """, (user_id, picture['date'], picture['image_base64'], picture.get('prompt')))
 
         # Import preferences
         if preferences:
             db.execute("""
-            INSERT OR REPLACE INTO user_preferences
+            INSERT INTO user_preferences
             (user_id, voice_configs_json, meta_prompt, state_config_json, selected_state)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
+              voice_configs_json = excluded.voice_configs_json,
+              meta_prompt = excluded.meta_prompt,
+              state_config_json = excluded.state_config_json,
+              selected_state = excluded.selected_state,
+              updated_at = CURRENT_TIMESTAMP
             """, (user_id,
                   json.dumps(preferences.get('voice_configs')) if preferences.get('voice_configs') else None,
                   preferences.get('meta_prompt'),
@@ -3720,7 +2477,7 @@ def import_user_data(user_id: int, sessions: list, pictures: list, preferences: 
             for report in reports:
                 db.execute("""
                 INSERT INTO analysis_reports (user_id, report_type, report_data_json, all_notes_text)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
                 """, (user_id, report.get('type', 'unknown'), json.dumps(report.get('data', {})), report.get('allNotes')))
 
         db.commit()
@@ -3746,17 +2503,17 @@ def generate_invite_code(user_id: int) -> dict:
             code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
             # Check if code already exists and is not expired
             existing = db.execute(
-                "SELECT code FROM friend_invites WHERE code = ? AND expires_at > datetime('now')",
+                "SELECT code FROM friend_invites WHERE code = %s AND expires_at > CURRENT_TIMESTAMP",
                 (code,)
             ).fetchone()
             if not existing:
                 break
 
-        expires_at = (datetime.now() + timedelta(days=7)).isoformat()
+        expires_at = datetime.now(timezone.utc) + timedelta(days=7)
 
         db.execute("""
         INSERT INTO friend_invites (code, user_id, expires_at)
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
         """, (code, user_id, expires_at))
 
         db.commit()
@@ -3777,7 +2534,7 @@ def use_invite_code(code: str, requesting_user_id: int) -> dict:
         invite = db.execute("""
         SELECT user_id, expires_at, used_by
         FROM friend_invites
-        WHERE code = ?
+        WHERE code = %s
         """, (code,)).fetchone()
 
         if not invite:
@@ -3786,7 +2543,12 @@ def use_invite_code(code: str, requesting_user_id: int) -> dict:
         if invite['used_by']:
             return {"success": False, "error": "Invite code already used"}
 
-        if datetime.fromisoformat(invite['expires_at']) < datetime.now():
+        invite_expires_at = _parse_sql_datetime(invite['expires_at'])
+        if invite_expires_at is None:
+            return {"success": False, "error": "Invite code expired"}
+        if invite_expires_at.tzinfo is None:
+            invite_expires_at = invite_expires_at.replace(tzinfo=timezone.utc)
+        if invite_expires_at < datetime.now(timezone.utc):
             return {"success": False, "error": "Invite code expired"}
 
         inviter_id = invite['user_id']
@@ -3797,7 +2559,7 @@ def use_invite_code(code: str, requesting_user_id: int) -> dict:
         # Check if friendship already exists
         existing = db.execute("""
         SELECT id, status FROM friendships
-        WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)
+        WHERE (user_id = %s AND friend_id = %s) OR (user_id = %s AND friend_id = %s)
         """, (requesting_user_id, inviter_id, inviter_id, requesting_user_id)).fetchone()
 
         if existing:
@@ -3808,23 +2570,24 @@ def use_invite_code(code: str, requesting_user_id: int) -> dict:
 
         # Get inviter's display name
         inviter = db.execute(
-            "SELECT display_name, email FROM users WHERE id = ?",
+            "SELECT display_name, email FROM users WHERE id = %s",
             (inviter_id,)
         ).fetchone()
 
         # Create friendship request (requesting_user sends request to inviter)
         cursor = db.execute("""
         INSERT INTO friendships (user_id, friend_id, status)
-        VALUES (?, ?, 'pending')
+        VALUES (%s, %s, 'pending')
+        RETURNING id
         """, (requesting_user_id, inviter_id))
 
-        friend_request_id = cursor.lastrowid
+        friend_request_id = int(cursor.fetchone()["id"])
 
         # Mark invite as used
         db.execute("""
         UPDATE friend_invites
-        SET used_by = ?, used_at = datetime('now')
-        WHERE code = ?
+        SET used_by = %s, used_at = CURRENT_TIMESTAMP
+        WHERE code = %s
         """, (requesting_user_id, code))
 
         db.commit()
@@ -3849,7 +2612,7 @@ def get_friend_requests(user_id: int) -> list:
         SELECT f.id, f.user_id as requester_id, u.display_name, u.email, f.created_at
         FROM friendships f
         JOIN users u ON f.user_id = u.id
-        WHERE f.friend_id = ? AND f.status = 'pending'
+        WHERE f.friend_id = %s AND f.status = 'pending'
         ORDER BY f.created_at DESC
         """, (user_id,)).fetchall()
 
@@ -3865,7 +2628,7 @@ def get_friend_requests(user_id: int) -> list:
 def accept_friend_request(request_id: int, user_id: int) -> dict:
     """
     Accept a friend request. user_id must be the friend_id in the request.
-    Returns: {success, error?}
+    Returns: {success, error%s}
     """
     db = get_db()
     try:
@@ -3873,7 +2636,7 @@ def accept_friend_request(request_id: int, user_id: int) -> dict:
         request = db.execute("""
         SELECT user_id, friend_id, status
         FROM friendships
-        WHERE id = ?
+        WHERE id = %s
         """, (request_id,)).fetchone()
 
         if not request:
@@ -3888,8 +2651,8 @@ def accept_friend_request(request_id: int, user_id: int) -> dict:
         # Update status to accepted
         db.execute("""
         UPDATE friendships
-        SET status = 'accepted', updated_at = datetime('now')
-        WHERE id = ?
+        SET status = 'accepted', updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
         """, (request_id,))
 
         db.commit()
@@ -3900,7 +2663,7 @@ def accept_friend_request(request_id: int, user_id: int) -> dict:
 def reject_friend_request(request_id: int, user_id: int) -> dict:
     """
     Reject a friend request. user_id must be the friend_id in the request.
-    Returns: {success, error?}
+    Returns: {success, error%s}
     """
     db = get_db()
     try:
@@ -3908,7 +2671,7 @@ def reject_friend_request(request_id: int, user_id: int) -> dict:
         request = db.execute("""
         SELECT user_id, friend_id, status
         FROM friendships
-        WHERE id = ?
+        WHERE id = %s
         """, (request_id,)).fetchone()
 
         if not request:
@@ -3923,8 +2686,8 @@ def reject_friend_request(request_id: int, user_id: int) -> dict:
         # Update status to rejected
         db.execute("""
         UPDATE friendships
-        SET status = 'rejected', updated_at = datetime('now')
-        WHERE id = ?
+        SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
         """, (request_id,))
 
         db.commit()
@@ -3944,7 +2707,7 @@ def get_friends(user_id: int) -> list:
         SELECT f.friend_id as friend_id, u.display_name, u.email, f.updated_at
         FROM friendships f
         JOIN users u ON f.friend_id = u.id
-        WHERE f.user_id = ? AND f.status = 'accepted'
+        WHERE f.user_id = %s AND f.status = 'accepted'
         """, (user_id,)).fetchall()
 
         # Get friends where they sent the request
@@ -3952,7 +2715,7 @@ def get_friends(user_id: int) -> list:
         SELECT f.user_id as friend_id, u.display_name, u.email, f.updated_at
         FROM friendships f
         JOIN users u ON f.user_id = u.id
-        WHERE f.friend_id = ? AND f.status = 'accepted'
+        WHERE f.friend_id = %s AND f.status = 'accepted'
         """, (user_id,)).fetchall()
 
         all_friends = []
@@ -3974,7 +2737,7 @@ def get_friends(user_id: int) -> list:
 def remove_friend(user_id: int, friend_id: int) -> dict:
     """
     Remove a friend relationship.
-    Returns: {success, error?}
+    Returns: {success, error%s}
     """
     db = get_db()
     try:
@@ -3982,8 +2745,8 @@ def remove_friend(user_id: int, friend_id: int) -> dict:
         result = db.execute("""
         DELETE FROM friendships
         WHERE status = 'accepted' AND (
-          (user_id = ? AND friend_id = ?) OR
-          (user_id = ? AND friend_id = ?)
+          (user_id = %s AND friend_id = %s) OR
+          (user_id = %s AND friend_id = %s)
         )
         """, (user_id, friend_id, friend_id, user_id))
 
@@ -4006,8 +2769,8 @@ def get_friend_timeline(user_id: int, friend_id: int, limit: int = 30) -> list:
         friendship = db.execute("""
         SELECT id FROM friendships
         WHERE status = 'accepted' AND (
-          (user_id = ? AND friend_id = ?) OR
-          (user_id = ? AND friend_id = ?)
+          (user_id = %s AND friend_id = %s) OR
+          (user_id = %s AND friend_id = %s)
         )
         """, (user_id, friend_id, friend_id, user_id)).fetchone()
 
@@ -4018,9 +2781,9 @@ def get_friend_timeline(user_id: int, friend_id: int, limit: int = 30) -> list:
         rows = db.execute("""
         SELECT date, COALESCE(thumbnail_base64, image_base64) as base64, prompt, created_at
         FROM daily_pictures
-        WHERE user_id = ?
+        WHERE user_id = %s
         ORDER BY date DESC
-        LIMIT ?
+        LIMIT %s
         """, (friend_id, limit)).fetchall()
 
         return [{
@@ -4041,11 +2804,11 @@ def get_daily_pictures_range(user_id: int, start_date: Optional[str], end_date: 
         rows = db.execute("""
         SELECT date, COALESCE(thumbnail_base64, image_base64) as base64, prompt, created_at
         FROM daily_pictures
-        WHERE user_id = ?
-          AND (? IS NULL OR date(date) >= ?)
-          AND (? IS NULL OR date(date) <= ?)
+        WHERE user_id = %s
+          AND (CAST(%s AS date) IS NULL OR date(date) >= CAST(%s AS date))
+          AND (CAST(%s AS date) IS NULL OR date(date) <= CAST(%s AS date))
         ORDER BY date DESC
-        LIMIT ?
+        LIMIT %s
         """, (user_id, start_date, start_date, end_date, end_date, limit)).fetchall()
 
         return [{
@@ -4072,7 +2835,7 @@ def create_chat_thread(
     db = get_db()
     try:
         db.execute(
-            "INSERT INTO chat_thread (id, user_id, title, deck_id, voice_id) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO chat_thread (id, user_id, title, deck_id, voice_id) VALUES (%s, %s, %s, %s, %s)",
             (thread_id, user_id, title, deck_id, voice_id),
         )
         db.commit()
@@ -4087,7 +2850,7 @@ def get_chat_thread(thread_id: str, user_id: int) -> Optional[dict]:
     try:
         row = db.execute(
             "SELECT id, user_id, title, deck_id, voice_id, claude_session_id, agent_contract_version, created_at, updated_at"
-            " FROM chat_thread WHERE id = ? AND user_id = ?",
+            " FROM chat_thread WHERE id = %s AND user_id = %s",
             (thread_id, user_id),
         ).fetchone()
         return dict(row) if row else None
@@ -4102,8 +2865,8 @@ def bind_chat_thread_deck(thread_id: str, user_id: int, deck_id: str) -> bool:
         cursor = db.execute(
             """
             UPDATE chat_thread
-            SET deck_id = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND user_id = ? AND deck_id IS NULL
+            SET deck_id = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s AND user_id = %s AND deck_id IS NULL
             """,
             (deck_id, thread_id, user_id),
         )
@@ -4111,7 +2874,7 @@ def bind_chat_thread_deck(thread_id: str, user_id: int, deck_id: str) -> bool:
         if cursor.rowcount == 1:
             return True
         row = db.execute(
-            "SELECT deck_id FROM chat_thread WHERE id = ? AND user_id = ?",
+            "SELECT deck_id FROM chat_thread WHERE id = %s AND user_id = %s",
             (thread_id, user_id),
         ).fetchone()
         return bool(row and row["deck_id"] == deck_id)
@@ -4126,8 +2889,8 @@ def bind_chat_thread_voice(thread_id: str, user_id: int, voice_id: str) -> bool:
         cursor = db.execute(
             """
             UPDATE chat_thread
-            SET voice_id = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND user_id = ? AND voice_id IS NULL
+            SET voice_id = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s AND user_id = %s AND voice_id IS NULL
             """,
             (voice_id, thread_id, user_id),
         )
@@ -4135,7 +2898,7 @@ def bind_chat_thread_voice(thread_id: str, user_id: int, voice_id: str) -> bool:
         if cursor.rowcount == 1:
             return True
         row = db.execute(
-            "SELECT voice_id FROM chat_thread WHERE id = ? AND user_id = ?",
+            "SELECT voice_id FROM chat_thread WHERE id = %s AND user_id = %s",
             (thread_id, user_id),
         ).fetchone()
         return bool(row and row["voice_id"] == voice_id)
@@ -4152,15 +2915,15 @@ def list_chat_threads(user_id: int, limit: Optional[int] = None, offset: int = 0
                 """
                 SELECT id, title, deck_id, voice_id, created_at, updated_at
                 FROM chat_thread
-                WHERE user_id = ?
+                WHERE user_id = %s
                 ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?
+                LIMIT %s OFFSET %s
                 """,
                 (user_id, limit, max(0, offset)),
             ).fetchall()
         else:
             rows = db.execute(
-                "SELECT id, title, deck_id, voice_id, created_at, updated_at FROM chat_thread WHERE user_id = ? ORDER BY updated_at DESC",
+                "SELECT id, title, deck_id, voice_id, created_at, updated_at FROM chat_thread WHERE user_id = %s ORDER BY updated_at DESC",
                 (user_id,),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -4184,7 +2947,7 @@ def list_chat_threads_for_search(user_id: int) -> list[dict]:
               m.parts AS message_parts
             FROM chat_thread t
             LEFT JOIN chat_message m ON m.thread_id = t.id
-            WHERE t.user_id = ?
+            WHERE t.user_id = %s
             ORDER BY t.updated_at DESC, m.created_at ASC
             """,
             (user_id,),
@@ -4223,7 +2986,7 @@ def delete_chat_thread(thread_id: str, user_id: int) -> bool:
     db = get_db()
     try:
         cursor = db.execute(
-            "DELETE FROM chat_thread WHERE id = ? AND user_id = ?",
+            "DELETE FROM chat_thread WHERE id = %s AND user_id = %s",
             (thread_id, user_id),
         )
         db.commit()
@@ -4237,7 +3000,7 @@ def update_chat_thread_title(thread_id: str, title: str) -> None:
     db = get_db()
     try:
         db.execute(
-            "UPDATE chat_thread SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE chat_thread SET title = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
             (title, thread_id),
         )
         db.commit()
@@ -4259,8 +3022,8 @@ def update_chat_thread_claude_session(
     try:
         db.execute(
             "UPDATE chat_thread"
-            " SET claude_session_id = ?, agent_contract_version = ?, updated_at = CURRENT_TIMESTAMP"
-            " WHERE id = ?",
+            " SET claude_session_id = %s, agent_contract_version = %s, updated_at = CURRENT_TIMESTAMP"
+            " WHERE id = %s",
             (claude_session_id, agent_contract_version, thread_id),
         )
         db.commit()
@@ -4271,8 +3034,42 @@ def update_chat_thread_claude_session(
 def _touch_chat_thread(db, thread_id: str) -> None:
     """Bump the updated_at timestamp of a thread (same connection, no commit)."""
     db.execute(
-        "UPDATE chat_thread SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE chat_thread SET updated_at = CURRENT_TIMESTAMP WHERE id = %s",
         (thread_id,),
+    )
+
+
+def _chat_message_json_value(
+    value: object,
+    *,
+    field: str,
+    expected_type: type,
+    nullable: bool = False,
+) -> object:
+    """Decode and type-check one Chat JSON field for semantic CAS comparison."""
+
+    decoded = value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be valid JSON") from exc
+    if nullable and decoded is None:
+        return None
+    if not isinstance(decoded, expected_type):
+        raise ValueError(f"{field} has an invalid JSON shape")
+    return decoded
+
+
+def _canonical_chat_message_json(value: object) -> str:
+    """Canonicalize JSON so key order/whitespace never changes identity."""
+
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
     )
 
 
@@ -4286,7 +3083,7 @@ def save_chat_message(
     parts_json: Optional[str] = None,
     metadata_json: Optional[str] = None,
 ) -> str:
-    """Persist one chat message. Returns the message_id.
+    """Insert one immutable chat-message identity or accept an exact replay.
 
     Fully aligned with better-chatbot ChatMessageTable — no ``content`` column.
     Text lives inside ``parts`` as ``{type: "text", text: "..."}`` entries.
@@ -4294,6 +3091,11 @@ def save_chat_message(
       - ``parts``    list[dict] — UIMessage['parts'] array; required; serialized internally.
       - ``metadata`` dict       — ChatMetadata (usage / chatModel / toolCount); nullable.
       - ``message_id`` — AI-SDK message.id from the frontend; auto-generated if omitted.
+
+    A supplied id is permanently bound to its thread, role, parts and metadata.
+    JSON object key order and whitespace are ignored for exact replay; any
+    semantic difference raises :class:`ChatMessageIdentityConflict`.  This
+    function never reparents or overwrites an existing row.
     """
     import uuid
     if not message_id:
@@ -4301,25 +3103,95 @@ def save_chat_message(
 
     # Resolve parts: prefer list param, fall back to deprecated string param.
     if parts_json is not None and not parts:
-        parts_str = parts_json
+        parts_value = _chat_message_json_value(
+            parts_json,
+            field="parts",
+            expected_type=list,
+        )
     else:
-        parts_str = json.dumps(parts, ensure_ascii=False)
+        parts_value = _chat_message_json_value(
+            parts,
+            field="parts",
+            expected_type=list,
+        )
+    parts_str = _canonical_chat_message_json(parts_value)
 
     # Resolve metadata: prefer dict param, fall back to deprecated string param.
     if metadata is not None:
-        metadata_str: Optional[str] = json.dumps(metadata, ensure_ascii=False)
+        metadata_value = _chat_message_json_value(
+            metadata,
+            field="metadata",
+            expected_type=dict,
+            nullable=True,
+        )
     elif metadata_json is not None:
-        metadata_str = metadata_json
+        metadata_value = _chat_message_json_value(
+            metadata_json,
+            field="metadata",
+            expected_type=dict,
+            nullable=True,
+        )
     else:
-        metadata_str = None
+        metadata_value = None
+    metadata_str: Optional[str] = (
+        _canonical_chat_message_json(metadata_value)
+        if metadata_value is not None
+        else None
+    )
 
     db = get_db()
     try:
-        db.execute(
-            "INSERT OR REPLACE INTO chat_message (id, thread_id, role, parts, metadata) VALUES (?, ?, ?, ?, ?)",
+        inserted = db.execute(
+            """
+            INSERT INTO chat_message (id, thread_id, role, parts, metadata)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO NOTHING
+            RETURNING id
+            """,
             (message_id, thread_id, role, parts_str, metadata_str),
-        )
-        _touch_chat_thread(db, thread_id)
+        ).fetchone()
+        if inserted is not None:
+            _touch_chat_thread(db, thread_id)
+            db.commit()
+            return message_id
+
+        existing = db.execute(
+            "SELECT thread_id, role, parts, metadata "
+            "FROM chat_message WHERE id = %s",
+            (message_id,),
+        ).fetchone()
+        if existing is None:
+            raise ChatMessageIdentityConflict(message_id)
+        try:
+            existing_parts = _chat_message_json_value(
+                existing["parts"],
+                field="stored parts",
+                expected_type=list,
+            )
+            existing_metadata = _chat_message_json_value(
+                existing["metadata"],
+                field="stored metadata",
+                expected_type=dict,
+                nullable=True,
+            )
+            existing_thread_id = existing["thread_id"]
+            existing_role = existing["role"]
+            existing_parts_str = _canonical_chat_message_json(existing_parts)
+            existing_metadata_str = (
+                _canonical_chat_message_json(existing_metadata)
+                if existing_metadata is not None
+                else None
+            )
+        except (KeyError, TypeError, ValueError):
+            raise ChatMessageIdentityConflict(message_id) from None
+        if not (
+            existing_thread_id == thread_id
+            and existing_role == role
+            and existing_parts_str == parts_str
+            and existing_metadata_str == metadata_str
+        ):
+            raise ChatMessageIdentityConflict(message_id)
+        # Exact replay is a read-only success: do not reorder the thread.
         db.commit()
         return message_id
     finally:
@@ -4336,12 +3208,17 @@ def list_chat_messages(thread_id: str) -> list[dict]:
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT id, role, parts, metadata, created_at FROM chat_message WHERE thread_id = ? ORDER BY created_at ASC",
+            "SELECT id, role, parts, metadata, created_at FROM chat_message WHERE thread_id = %s ORDER BY created_at ASC",
             (thread_id,),
         ).fetchall()
         results = []
         for row in rows:
             m = dict(row)
+            # Keep SQL NULL (a valid "no metadata" value) distinguishable
+            # from a corrupt stored JSON envelope.  The HTTP projection uses
+            # this internal flag to withhold message parts fail-closed; the
+            # flag itself is never part of the client response allowlist.
+            m["metadata_decode_error"] = False
             try:
                 m["parts"] = json.loads(m["parts"]) if m["parts"] else []
             except Exception:
@@ -4349,8 +3226,15 @@ def list_chat_messages(thread_id: str) -> list[dict]:
             if m.get("metadata"):
                 try:
                     m["metadata"] = json.loads(m["metadata"])
+                    if not isinstance(m["metadata"], dict):
+                        # A stored JSON scalar/array (including literal null)
+                        # is not the SQL NULL "no metadata" state.  Preserve
+                        # that distinction so the client projection fails
+                        # closed even when JSON decoding itself succeeds.
+                        m["metadata_decode_error"] = True
                 except Exception:
                     m["metadata"] = None
+                    m["metadata_decode_error"] = True
             results.append(m)
         return results
     finally:
@@ -4373,7 +3257,7 @@ def get_voice_memory_config_by_thread(thread_id: str) -> Optional[dict]:
     db = get_db()
     try:
         row = db.execute(
-            "SELECT id, memory_workspace_config FROM voices WHERE thread_id = ? LIMIT 1",
+            "SELECT id, memory_workspace_config FROM voices WHERE thread_id = %s LIMIT 1",
             (thread_id,),
         ).fetchone()
         if row is None:
@@ -4385,7 +3269,7 @@ def get_voice_memory_config_by_thread(thread_id: str) -> Optional[dict]:
 
         config = _default_memory_workspace_config()
         db.execute(
-            "UPDATE voices SET memory_workspace_config = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE voices SET memory_workspace_config = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
             (json.dumps(config, ensure_ascii=False), parsed["id"]),
         )
         db.commit()
@@ -4410,7 +3294,7 @@ def get_reflections_section_config(user_id: int, section: str) -> Optional[dict]
     try:
         row = db.execute(
             "SELECT prompt_files FROM reflections_section_configs "
-            "WHERE user_id = ? AND section = ? LIMIT 1",
+            "WHERE user_id = %s AND section = %s LIMIT 1",
             (user_id, section),
         ).fetchone()
         if row is None:
@@ -4436,7 +3320,7 @@ def save_reflections_section_config(user_id: int, section: str, prompt_files: di
         db.execute(
             """
             INSERT INTO reflections_section_configs (user_id, section, prompt_files, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
             ON CONFLICT(user_id, section) DO UPDATE SET
                 prompt_files = excluded.prompt_files,
                 updated_at = CURRENT_TIMESTAMP
@@ -4456,7 +3340,7 @@ def delete_reflections_section_config(user_id: int, section: str) -> bool:
     db = get_db()
     try:
         cursor = db.execute(
-            "DELETE FROM reflections_section_configs WHERE user_id = ? AND section = ?",
+            "DELETE FROM reflections_section_configs WHERE user_id = %s AND section = %s",
             (user_id, section),
         )
         db.commit()
@@ -4520,7 +3404,7 @@ def create_reflection_task(
               id, user_id, status, sections, input_snapshot,
               agent_contract_version, updated_at
             )
-            VALUES (?, ?, 'CREATED', ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, 'CREATED', %s, %s, %s, CURRENT_TIMESTAMP)
             """,
             (
                 task_id,
@@ -4547,7 +3431,7 @@ def update_reflection_task_status(
     completed_at: Optional[str] = None,
 ) -> None:
     """Update task lifecycle status and optional metadata fields."""
-    assignments = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
+    assignments = ["status = %s", "updated_at = CURRENT_TIMESTAMP"]
     params: list = [status]
     optional_fields = {
         "workspace_path": workspace_path,
@@ -4558,14 +3442,14 @@ def update_reflection_task_status(
     }
     for field, value in optional_fields.items():
         if value is not None:
-            assignments.append(f"{field} = ?")
+            assignments.append(f"{field} = %s")
             params.append(value)
     params.append(task_id)
 
     db = get_db()
     try:
         db.execute(
-            f"UPDATE reflection_task SET {', '.join(assignments)} WHERE id = ?",
+            f"UPDATE reflection_task SET {', '.join(assignments)} WHERE id = %s",
             tuple(params),
         )
         db.commit()
@@ -4578,10 +3462,10 @@ def get_reflection_task(task_id: str, user_id: Optional[int] = None) -> Optional
     db = get_db()
     try:
         if user_id is None:
-            row = db.execute("SELECT * FROM reflection_task WHERE id = ? LIMIT 1", (task_id,)).fetchone()
+            row = db.execute("SELECT * FROM reflection_task WHERE id = %s LIMIT 1", (task_id,)).fetchone()
         else:
             row = db.execute(
-                "SELECT * FROM reflection_task WHERE id = ? AND user_id = ? LIMIT 1",
+                "SELECT * FROM reflection_task WHERE id = %s AND user_id = %s LIMIT 1",
                 (task_id, user_id),
             ).fetchone()
         return _reflection_task_from_row(row)
@@ -4596,7 +3480,7 @@ def get_latest_reflection_task(user_id: int) -> Optional[dict]:
         row = db.execute(
             """
             SELECT * FROM reflection_task
-            WHERE user_id = ?
+            WHERE user_id = %s
             ORDER BY updated_at DESC, created_at DESC
             LIMIT 1
             """,
@@ -4619,7 +3503,7 @@ def replace_reflection_section_results(
     db = get_db()
     try:
         db.execute(
-            "DELETE FROM reflection_result WHERE task_id = ? AND user_id = ? AND section = ?",
+            "DELETE FROM reflection_result WHERE task_id = %s AND user_id = %s AND section = %s",
             (task_id, user_id, section),
         )
         for item in results:
@@ -4629,7 +3513,7 @@ def replace_reflection_section_results(
                   id, task_id, user_id, section, title, description,
                   related_session_ids, evidence, confidence
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -4657,7 +3541,7 @@ def list_reflection_results(task_id: str, user_id: int) -> list[dict]:
             SELECT r.*
             FROM reflection_result r
             JOIN reflection_task t ON t.id = r.task_id
-            WHERE r.task_id = ? AND r.user_id = ? AND t.user_id = ?
+            WHERE r.task_id = %s AND r.user_id = %s AND t.user_id = %s
             ORDER BY r.section, r.created_at, r.id
             """,
             (task_id, user_id, user_id),
@@ -4675,7 +3559,7 @@ def list_latest_reflection_results(user_id: int) -> list[dict]:
             """
             SELECT *
             FROM reflection_task
-            WHERE user_id = ? AND status IN ('COMPLETED', 'PARTIAL_FAILED')
+            WHERE user_id = %s AND status IN ('COMPLETED', 'PARTIAL_FAILED')
             ORDER BY completed_at DESC, updated_at DESC
             LIMIT 1
             """,
@@ -4706,10 +3590,11 @@ def append_reflection_task_event(
     try:
         db.execute(
             """
-            INSERT OR REPLACE INTO reflection_task_event (
+            INSERT INTO reflection_task_event (
               id, task_id, sequence, event_type, payload, created_at
             )
-            VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            VALUES (%s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
+            ON CONFLICT (id) DO NOTHING
             """,
             (
                 event_id,
@@ -4741,7 +3626,7 @@ def list_reflection_task_events(
                 SELECT e.sequence
                 FROM reflection_task_event e
                 JOIN reflection_task t ON t.id = e.task_id
-                WHERE e.id = ? AND e.task_id = ? AND t.user_id = ?
+                WHERE e.id = %s AND e.task_id = %s AND t.user_id = %s
                 LIMIT 1
                 """,
                 (after_event_id, task_id, user_id),
@@ -4755,7 +3640,7 @@ def list_reflection_task_events(
                 SELECT e.*
                 FROM reflection_task_event e
                 JOIN reflection_task t ON t.id = e.task_id
-                WHERE e.task_id = ? AND t.user_id = ?
+                WHERE e.task_id = %s AND t.user_id = %s
                 ORDER BY e.sequence, e.created_at
                 """,
                 (task_id, user_id),
@@ -4766,7 +3651,7 @@ def list_reflection_task_events(
                 SELECT e.*
                 FROM reflection_task_event e
                 JOIN reflection_task t ON t.id = e.task_id
-                WHERE e.task_id = ? AND t.user_id = ? AND e.sequence > ?
+                WHERE e.task_id = %s AND t.user_id = %s AND e.sequence > %s
                 ORDER BY e.sequence, e.created_at
                 """,
                 (task_id, user_id, after_sequence),

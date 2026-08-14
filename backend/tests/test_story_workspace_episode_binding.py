@@ -27,7 +27,6 @@ from story_workspace.contracts import (
     StoryWorkspaceEpisodeArtifactSurface,
     StoryWorkspaceEpisodeBindingAvailability,
     StoryWorkspaceEpisodeBindingFile,
-    StoryWorkspaceEpisodeBindingRecovery,
     StoryWorkspaceEpisodeProducerAction,
 )
 
@@ -147,13 +146,10 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
         return StoryWorkspaceEpisodeArtifactSurface(
             runId=RUN_ID,
             opaqueEpisodeId="a" * 32,
+            episodeCode="EP01",
             manifestRevision=manifest_revision,
             etag=etag or manifest_revision,
             bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.BOUND,
-            bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
-                autoRepairAttempted=False,
-                canDispatch=False,
-            ),
             artifacts=artifacts if artifacts is not None else cls.manifest_entries(),
         )
 
@@ -279,51 +275,6 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
                 )
                 with self.assertRaises(StoryWorkspaceEpisodeBindingContractError):
                     self.service.bind_first_episode(self.context())
-
-    def test_proven_legacy_context_is_auto_repaired(self) -> None:
-        result = self.service.resolve_or_repair_binding(self.context())
-
-        self.assertEqual(
-            result.binding_availability,
-            StoryWorkspaceEpisodeBindingAvailability.BOUND,
-        )
-        self.assertIsNotNone(result.binding)
-        self.assertTrue(result.recovery.auto_repair_attempted)
-        self.assertFalse(result.recovery.can_dispatch)
-        self.assertTrue(self.binding_path.is_file())
-
-    def test_unproven_legacy_evidence_matrix_never_probes_episode(self) -> None:
-        cases = (
-            {"story_slug": None},
-            {"locked_story_slug": None},
-            {"run_story_slug": None},
-            {"story_slug": "other"},
-            {"locked_story_slug": "other"},
-            {"run_story_slug": "other"},
-        )
-        for overrides in cases:
-            with self.subTest(overrides=overrides):
-                with patch.object(
-                    self.service,
-                    "_validate_episode_root",
-                    side_effect=AssertionError("episode root must not be probed"),
-                ) as probe:
-                    result = self.service.resolve_or_repair_binding(
-                        self.context(**overrides)
-                    )
-                self.assertEqual(
-                    result.binding_availability,
-                    StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
-                )
-                self.assertIsNone(result.binding)
-                self.assertTrue(result.recovery.auto_repair_attempted)
-                self.assertTrue(result.recovery.can_dispatch)
-                self.assertEqual(
-                    result.recovery.public_reason,
-                    "episode_binding_unproven",
-                )
-                probe.assert_not_called()
-                self.assertFalse((self.workspace / ".dream" / "runtime").exists())
 
     def test_invalid_story_segments_are_rejected_before_writing(self) -> None:
         for invalid in ("../demo", "demo/../../outside", "/absolute", "Demo"):
@@ -507,14 +458,6 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
                 for item in payload["artifacts"]
             )
         )
-
-    def test_recovery_public_reason_is_a_controlled_value(self) -> None:
-        with self.assertRaises(ValidationError):
-            StoryWorkspaceEpisodeBindingRecovery(
-                autoRepairAttempted=True,
-                canDispatch=False,
-                publicReason="raw internal path: /tmp/secret",
-            )
 
     def test_artifact_mapping_is_fixed_by_key_or_prefix(self) -> None:
         for relative_key, producer_action, consumers in ARTIFACT_SPECS:

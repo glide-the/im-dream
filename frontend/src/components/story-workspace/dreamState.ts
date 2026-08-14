@@ -25,7 +25,7 @@ export const STORY_WORKSPACE_DREAM_STATES = [
   'story-workspace-dream-waiting-files',
   'story-workspace-dream-editing',
   'story-workspace-dream-confirming',
-  'story-workspace-dream-continuing',
+  'story-workspace-dream-running',
   'story-workspace-dream-completed',
 ] as const;
 
@@ -646,7 +646,7 @@ export function storyWorkspaceAcceptDreamConfirmation(
     throw new Error(`Dream confirmation cannot be accepted while ${state.status}`);
   }
   return withDerivedState(state, {
-    status: 'story-workspace-dream-continuing',
+    status: 'story-workspace-dream-running',
     localEdits: [],
     staleStages: [],
   });
@@ -655,7 +655,7 @@ export function storyWorkspaceAcceptDreamConfirmation(
 export function storyWorkspaceCompleteDream(
   state: StoryWorkspaceDreamState,
 ): StoryWorkspaceDreamState {
-  if (state.status !== 'story-workspace-dream-continuing') {
+  if (state.status !== 'story-workspace-dream-running') {
     throw new Error(`Dream cannot be completed while ${state.status}`);
   }
   return withDerivedState(state, { status: 'story-workspace-dream-completed' });

@@ -1,5 +1,6 @@
 // [Input] Voice deck API client, i18n labels, and deck editor modal.
-// [Output] Deck management surface for local and community voice decks.
+// [Output] Deck management surface for local and community voice decks; initial
+//          load reconciles a missing plugin ref on the untouched default team.
 // [Pos] deck-manager-view node in frontend/src/components
 // [Sync] 2026-07-08: replace light-only Decks cards, loading/error states, and publish modal colors
 //                    with semantic theme tokens so the Decks surface adapts to dark mode.
@@ -7,10 +8,13 @@
 //                    paper/ink primary button treatment used by Settings actions.
 // [Sync] 2026-07-09: align the Decks page with the light paper / dashed boundary color system;
 //                    deck items now use flat paper rows, weak boundaries, and small accent marks.
+// [Sync] 2026-08-14: reconcile legacy default-team plugin refs before the first list read;
+//                    a rolling-deploy mismatch cannot hide the persisted Deck list.
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   listDecks,
+  reconcileDefaultDeckPlugin,
   getDeck,
   createDeck,
   updateDeck,
@@ -64,7 +68,7 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    loadDecks();
+    void loadDecks();
     loadCommunityDecks();
   }, []);
 
@@ -104,6 +108,14 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
     try {
       if (!preserveScroll) {
         setLoading(true);
+        try {
+          await reconcileDefaultDeckPlugin();
+        } catch (reconcileError) {
+          console.warn(
+            'Default Deck plugin reconciliation is temporarily unavailable; loading persisted Decks.',
+            reconcileError,
+          );
+        }
       }
       const fetchedDecks = await listDecks();
 

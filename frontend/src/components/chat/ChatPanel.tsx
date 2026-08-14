@@ -40,6 +40,16 @@
 // [Sync] 2026-08-03: register a live message getter in chat-export-registry for the share
 //                    dialog long-image export.
 // [Sync] 2026-08-04: forward Agent/Task chat-row navigation to ChatView's subagent sidebar.
+// [Sync] 2026-08-11: claim parent-owned queued first turns before send so a ChatPanel
+//                    history-load remount cannot replay the same /api/claude-agent POST.
+// [Sync] 2026-08-11: keep the composer bound to the main thread runtime;
+//                    transcript-derived subagent counts are observation-only.
+// [Sync] 2026-08-13: let pending confirmation docks shrink within short Dream rails while
+//                    preserving the normal composer's fixed-height layout.
+// [Sync] 2026-08-13: contain message scrolling on the vertical axis so narrow Dream dialogs
+//                    never expose a panel-level horizontal scrollbar.
+// [Sync] 2026-08-13: keep auto-scroll and wheel overscroll owned by the message region;
+//                    never scroll Story Workspace ancestors or move its Agent dialog.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -57,9 +67,7 @@ import { useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import {
   type ChatApiSchemaRequestBody,
   type ChatAttachment,
-  type ChatModel,
   type ToolChoice,
-  DEFAULT_CHAT_MODEL,
 } from '../../lib/chat-schema';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
 import {
@@ -82,10 +90,16 @@ import {
   publishStoryWorkspaceOutput,
   type StoryWorkspaceOutputReceipt,
 } from '../../lib/story-workspace-events';
-import { filterStoryWorkspaceGuidanceMessages } from '../../lib/story-workspace-guidance';
+import {
+  claudeThreadHydrationRetryDelayMs,
+  fetchClaudeThreadStatus,
+  filterClaudeThreadVisibleMessages,
+} from './threadSessionHydration';
 import {
   applyBackendEventToMessages,
+  coalesceClaudeAgentSseEvents,
   consumeClaudeAgentSseStream,
+  type BackendEvent,
 } from '../../lib/claude-agent-sse-utils';
 import { applyPlanEvent, type ThreadPlanEvent } from '../../hooks/useThreadPlan';
 import { applyTodoEvent, type ThreadTodoEvent } from '../../hooks/useThreadTodos';
@@ -95,20 +109,22 @@ import {
   type ChatHistoryRecoveryCheckpoint,
 } from './chatRecovery';
 import { API_BASE } from '../../lib/apiBase';
+import {
+  chatMainTurnCanStop,
+  claimChatReconnect,
+  chatStopMayAbortLocalReaders,
+  parseThreadStopResponse,
+} from './chatRuntimeState';
 const CHAT_BOTTOM_PROXIMITY_PX = 120;
 const EMPTY_TOOL_CALL_IDS: ReadonlySet<string> = new Set<string>();
 
 interface SystemConfigData {
-  provider?: string;
-  model?: string;
   system_prompt?: string;
   im_full_access_enabled?: boolean;
 }
 
 interface SystemConfigResponse {
   data?: SystemConfigData;
-  provider?: string;
-  model?: string;
   system_prompt?: string;
   im_full_access_enabled?: boolean;
 }
@@ -123,6 +139,8 @@ interface ChatPanelProps {
   initialSettledToolCallIds?: ReadonlySet<string>;
   /** Exact historical tool calls still owned by the active runtime turn. */
   initialRuntimePendingToolCallIds?: ReadonlySet<string>;
+  /** Authoritative main-turn status sampled after history hydration. */
+  initialRuntimeRunning?: boolean;
   /** Called after reconnect stream finishes so parent can reload persisted messages. */
   onReconnectComplete?: () => (
     Promise<ChatPanelRecoverySnapshot | undefined>
@@ -135,8 +153,15 @@ interface ChatPanelProps {
   queuedAttachments?: Attachment[];
   queuedToolChoice?: ToolChoice;
   queuedPromptNonce?: number;
+  /**
+   * Parent-owned at-most-once gate for queued sends. ChatPanel-local refs do not
+   * survive the history-load remount that follows lazy thread creation.
+   */
+  claimQueuedPrompt?: (nonce: number) => boolean;
   openFileDialogSignal?: number;
   onConversationStart?: () => void;
+  /** Called after direct or reconnected turns settle and persistence is rehydrated. */
+  onConversationSettled?: () => void;
   /** Current EditorState snapshot forwarded to the backend agent runner via editor_state request field. */
   editorState?: Record<string, unknown> | null;
   /** Called after an editor write tool is confirmed so the Writing view can reload from the database. */
@@ -157,6 +182,7 @@ export interface ChatPanelRecoverySnapshot {
   messages: UIMessage[];
   settledToolCallIds: ReadonlySet<string>;
   runtimePendingToolCallIds: ReadonlySet<string>;
+  running: boolean;
 }
 
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
@@ -164,8 +190,6 @@ function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData 
     return payload.data;
   }
   if (
-    payload.provider ||
-    payload.model ||
     payload.system_prompt ||
     payload.im_full_access_enabled !== undefined
   ) {
@@ -181,6 +205,7 @@ export default function ChatPanel({
   reconnectStreamNonce = 0,
   initialSettledToolCallIds = EMPTY_TOOL_CALL_IDS,
   initialRuntimePendingToolCallIds = EMPTY_TOOL_CALL_IDS,
+  initialRuntimeRunning = false,
   onReconnectComplete,
   className,
   inputPlaceholder = 'Press i to chat',
@@ -188,8 +213,10 @@ export default function ChatPanel({
   queuedAttachments = [],
   queuedToolChoice = 'auto',
   queuedPromptNonce,
+  claimQueuedPrompt,
   openFileDialogSignal,
   onConversationStart,
+  onConversationSettled,
   editorState,
   onEditorWriteConfirmed,
   onOpenSubagentTask,
@@ -207,13 +234,14 @@ export default function ChatPanel({
   const [systemConfig, setSystemConfig] = useState<SystemConfigData>();
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const hasInitializedRef = useRef(false);
   const turnGenerationRef = useRef(0);
   const lastQueuedNonceRef = useRef<number | undefined>(undefined);
   const lastReconnectNonceRef = useRef(0);
+  const lastReconnectCountersRef = useRef({ external: 0, retry: 0 });
   const onReconnectCompleteRef = useRef(onReconnectComplete);
+  const onConversationSettledRef = useRef(onConversationSettled);
   const setMessagesRef = useRef<
     ((value: UIMessage[] | ((messages: UIMessage[]) => UIMessage[])) => void) | null
   >(null);
@@ -225,10 +253,41 @@ export default function ChatPanel({
   const [runtimePendingToolCallIds, setRuntimePendingToolCallIds] = useState<ReadonlySet<string>>(
     () => new Set(initialRuntimePendingToolCallIds),
   );
+  const [runtimeRunning, setRuntimeRunning] = useState(initialRuntimeRunning);
+  const [reconnectRetryNonce, setReconnectRetryNonce] = useState(0);
+  const reconnectRetryTimerRef = useRef<number | null>(null);
+  const reconnectRecoveryAttemptRef = useRef(0);
+  const localCompletionRetryTimerRef = useRef<number | null>(null);
+  const stopRequestAbortRef = useRef<AbortController | null>(null);
+  const stopRequestTimerRef = useRef<number | null>(null);
+  const stopRecoveryTimerRef = useRef<number | null>(null);
+  const chatPanelMountedRef = useRef(true);
+  const previousChatStatusRef = useRef<string>('ready');
   const reconnectAbortRef = useRef<AbortController | null>(null);
   const { setActiveSessionId, workspaceEnabled } = useWorkspaceSession();
 
   onReconnectCompleteRef.current = onReconnectComplete;
+  onConversationSettledRef.current = onConversationSettled;
+
+  useEffect(() => {
+    chatPanelMountedRef.current = true;
+    return () => {
+      chatPanelMountedRef.current = false;
+      stopRequestAbortRef.current?.abort();
+      stopRequestAbortRef.current = null;
+      reconnectAbortRef.current?.abort();
+      reconnectAbortRef.current = null;
+      for (const timerRef of [
+        reconnectRetryTimerRef,
+        localCompletionRetryTimerRef,
+        stopRequestTimerRef,
+        stopRecoveryTimerRef,
+      ]) {
+        if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -294,10 +353,6 @@ export default function ChatPanel({
             hash: file.hash,
           }));
 
-        const resolvedChatModel: ChatModel = systemConfig?.provider && systemConfig?.model
-          ? { provider: systemConfig.provider, model: systemConfig.model }
-          : DEFAULT_CHAT_MODEL;
-
         const requestToolChoice: ToolChoice = imFullAccessEnabled
           ? 'auto'
           : getPendingData()?.toolChoice ?? currentToolChoice;
@@ -308,7 +363,6 @@ export default function ChatPanel({
           ...(voiceId ? { voiceId } : {}),
           resume: true,
           message: lastMessage,
-          chatModel: resolvedChatModel,
           toolChoice: requestToolChoice,
           allowedAppDefaultToolkit: [],
           allowedMcpServers: {},
@@ -333,7 +387,7 @@ export default function ChatPanel({
   // never render as Chat bubbles — every render/export seam below consumes
   // visibleMessages instead of the raw useChat list (Task 4 Step 0).
   const visibleMessages = useMemo(
-    () => filterStoryWorkspaceGuidanceMessages(messages),
+    () => filterClaudeThreadVisibleMessages(messages),
     [messages],
   );
 
@@ -367,6 +421,12 @@ export default function ChatPanel({
   useEffect(() => {
     setSettledToolCallIds(new Set(initialSettledToolCallIds));
     setRuntimePendingToolCallIds(new Set(initialRuntimePendingToolCallIds));
+    setRuntimeRunning(initialRuntimeRunning);
+    setReconnectRetryNonce(0);
+    reconnectRecoveryAttemptRef.current = 0;
+    lastReconnectNonceRef.current = 0;
+    lastReconnectCountersRef.current = { external: 0, retry: 0 };
+    previousChatStatusRef.current = 'ready';
     turnGenerationRef.current = 0;
   // ChatView keys panels by threadId; the explicit reset also keeps direct
   // consumers safe if they reuse an instance for another thread.
@@ -386,6 +446,10 @@ export default function ChatPanel({
   }, [initialRuntimePendingToolCallIds]);
 
   useEffect(() => {
+    setRuntimeRunning(initialRuntimeRunning);
+  }, [initialRuntimeRunning]);
+
+  useEffect(() => {
     if (hasInitializedRef.current) {
       return;
     }
@@ -403,6 +467,10 @@ export default function ChatPanel({
       return;
     }
     if (!queuedPrompt?.trim() && queuedAttachments.length === 0) {
+      return;
+    }
+    if (claimQueuedPrompt && !claimQueuedPrompt(queuedPromptNonce)) {
+      lastQueuedNonceRef.current = queuedPromptNonce;
       return;
     }
     lastQueuedNonceRef.current = queuedPromptNonce;
@@ -433,53 +501,170 @@ export default function ChatPanel({
       turnGenerationRef.current += 1;
       await sendMessage({ role: 'user', parts: queuedMessageParts });
     })();
-  }, [onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendMessage]);
+  }, [claimQueuedPrompt, onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendMessage]);
 
-  const recoverAuthoritativeHistory = useCallback(() => {
+  const recoverAuthoritativeHistory = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     const requestedAt: ChatHistoryRecoveryCheckpoint = {
       threadId,
       reconnectNonce: lastReconnectNonceRef.current,
       turnGeneration: turnGenerationRef.current,
     };
     const recovery = onReconnectCompleteRef.current?.();
-    if (recovery === undefined) return;
-    void Promise.resolve(recovery).then((snapshot) => {
+    if (recovery === undefined) return undefined;
+    try {
+      const snapshot = await Promise.resolve(recovery);
       const current: ChatHistoryRecoveryCheckpoint = {
         threadId,
         reconnectNonce: lastReconnectNonceRef.current,
         turnGeneration: turnGenerationRef.current,
       };
-      if (!snapshot) return;
+      if (!snapshot) return undefined;
       const recoveredMessages = snapshot.messages;
-      if (!shouldApplyChatHistoryRecoverySnapshot(requestedAt, current, recoveredMessages)) return;
+      if (!shouldApplyChatHistoryRecoverySnapshot(requestedAt, current, recoveredMessages)) {
+        return undefined;
+      }
       setSettledToolCallIds((settled) => {
         const next = new Set(settled);
         snapshot.settledToolCallIds.forEach((toolCallId) => next.add(toolCallId));
         return next.size === settled.size ? settled : next;
       });
       setRuntimePendingToolCallIds(new Set(snapshot.runtimePendingToolCallIds));
+      setRuntimeRunning(snapshot.running);
       setMessagesRef.current?.(recoveredMessages);
-    });
+      if (!snapshot.running) onConversationSettledRef.current?.();
+      return snapshot;
+    } catch {
+      return undefined;
+    }
   }, [threadId]);
 
-  useEffect(() => {
-    if (!reconnectStreamNonce || reconnectStreamNonce === lastReconnectNonceRef.current) {
+  const recoverLocalCompletion = useCallback(async (attempt = 0): Promise<void> => {
+    const snapshot = await recoverAuthoritativeHistory();
+    if (!chatPanelMountedRef.current) return;
+    if (snapshot && !snapshot.running) return;
+    setRuntimeRunning(true);
+    if (snapshot?.running) {
+      // The POST reader ended while the canonical turn still owns the thread.
+      // Switch immediately to GET /stream instead of polling away deltas.
+      setReconnectRetryNonce((value) => value + 1);
       return;
     }
-    lastReconnectNonceRef.current = reconnectStreamNonce;
+    localCompletionRetryTimerRef.current = window.setTimeout(() => {
+      localCompletionRetryTimerRef.current = null;
+      void recoverLocalCompletion(attempt + 1);
+    }, claudeThreadHydrationRetryDelayMs(attempt));
+  }, [recoverAuthoritativeHistory]);
+
+  useEffect(() => {
+    const previous = previousChatStatusRef.current;
+    const wasBusy = previous === 'submitted' || previous === 'streaming';
+    const isBusy = status === 'submitted' || status === 'streaming';
+    previousChatStatusRef.current = status;
+    if (isBusy) {
+      if (localCompletionRetryTimerRef.current !== null) {
+        window.clearTimeout(localCompletionRetryTimerRef.current);
+        localCompletionRetryTimerRef.current = null;
+      }
+      setRuntimeRunning(true);
+      return;
+    }
+    if (wasBusy) void recoverLocalCompletion();
+  }, [recoverLocalCompletion, status]);
+
+  useEffect(() => {
+    const reconnectClaim = claimChatReconnect(
+      runtimeRunning,
+      reconnectStreamNonce,
+      reconnectRetryNonce,
+      lastReconnectCountersRef.current,
+    );
+    // A retry token is meaningful only while this panel still has evidence of
+    // a live main turn. Once authoritative recovery says idle, an old retry
+    // must not manufacture another GET stream or a transient Stop button.
+    if (reconnectClaim === null) return;
+    lastReconnectCountersRef.current = reconnectClaim;
+    lastReconnectNonceRef.current += 1;
 
     const abort = new AbortController();
     reconnectAbortRef.current = abort;
     const activeThreadId = threadId;
     let finished = false;
+    let replayFrameId: number | null = null;
+    let replayEvents: BackendEvent[] = [];
 
-    const finishReconnect = () => {
+    const flushReplayEvents = () => {
+      replayFrameId = null;
+      if (replayEvents.length === 0) return;
+      const events = coalesceClaudeAgentSseEvents(replayEvents);
+      replayEvents = [];
+      const messageEvents: BackendEvent[] = [];
+      for (const event of events) {
+        if (event.type === 'finish') {
+          // Persistence becomes authoritative only after stream EOF.
+          continue;
+        }
+        if (event.type === 'plan-mode-changed' || event.type === 'plan-updated') {
+          applyPlanEvent(activeThreadId, event as unknown as ThreadPlanEvent);
+          continue;
+        }
+        if (event.type === 'todo-updated') {
+          applyTodoEvent(activeThreadId, event as unknown as ThreadTodoEvent);
+          continue;
+        }
+        if (event.type === 'story-workspace-output') {
+          publishStoryWorkspaceOutput(event as unknown as StoryWorkspaceOutputReceipt);
+          continue;
+        }
+        if (event.type === 'tool-approval-request') {
+          const toolCallId = String(event.toolCallId ?? '');
+          if (toolCallId) {
+            setSettledToolCallIds((current) => {
+              if (!current.has(toolCallId)) return current;
+              const next = new Set(current);
+              next.delete(toolCallId);
+              return next;
+            });
+          }
+        }
+        messageEvents.push(event);
+      }
+      const applyMessages = setMessagesRef.current;
+      if (!applyMessages || messageEvents.length === 0) return;
+      applyMessages((current) => messageEvents.reduce(
+        (next, event) => applyBackendEventToMessages(next, event),
+        current,
+      ));
+    };
+
+    const enqueueReplayEvent = (event: BackendEvent) => {
+      replayEvents.push(event);
+      if (replayFrameId === null) {
+        replayFrameId = window.requestAnimationFrame(flushReplayEvents);
+      }
+    };
+
+    const finishReconnect = async () => {
       if (finished) return;
       finished = true;
       setIsReconnecting(false);
-      recoverAuthoritativeHistory();
+      const snapshot = await recoverAuthoritativeHistory();
+      if (abort.signal.aborted) return;
+      if (snapshot?.running === true) {
+        reconnectRecoveryAttemptRef.current = 0;
+        setReconnectRetryNonce((value) => value + 1);
+      } else if (snapshot === undefined) {
+        const attempt = reconnectRecoveryAttemptRef.current;
+        reconnectRecoveryAttemptRef.current += 1;
+        reconnectRetryTimerRef.current = window.setTimeout(() => {
+          reconnectRetryTimerRef.current = null;
+          setReconnectRetryNonce((value) => value + 1);
+        }, claudeThreadHydrationRetryDelayMs(attempt));
+      } else {
+        reconnectRecoveryAttemptRef.current = 0;
+      }
     };
 
+    setRuntimeRunning(true);
     setIsReconnecting(true);
 
     void (async () => {
@@ -492,44 +677,24 @@ export default function ChatPanel({
           },
         );
         if (!response.ok || !response.body) {
-          finishReconnect();
+          await finishReconnect();
           return;
         }
 
         const reader = response.body.getReader();
-        await consumeClaudeAgentSseStream(reader, (event) => {
-          if (event.type === 'finish') {
-            // The backend persists partial/final assistant state after emitting
-            // finish. Keep consuming until EOF; only then is history readable.
-            return;
-          }
-          // plan-* 生命周期帧不产生消息气泡，转发 plan store（claude-plan.md §5.4）。
-          if (event.type === 'plan-mode-changed' || event.type === 'plan-updated') {
-            applyPlanEvent(activeThreadId, event as unknown as ThreadPlanEvent);
-            return;
-          }
-          // todo-updated 生命周期帧不产生消息气泡，转发 todos store（claude-todo.md §5.4）。
-          if (event.type === 'todo-updated') {
-            applyTodoEvent(activeThreadId, event as unknown as ThreadTodoEvent);
-            return;
-          }
-          if (event.type === 'story-workspace-output') {
-            publishStoryWorkspaceOutput(event as unknown as StoryWorkspaceOutputReceipt);
-            return;
-          }
-          const applyMessages = setMessagesRef.current;
-          if (!applyMessages) {
-            return;
-          }
-          applyMessages((current) => applyBackendEventToMessages(current, event));
-        });
-        finishReconnect();
+        await consumeClaudeAgentSseStream(reader, enqueueReplayEvent);
+        if (replayFrameId !== null) {
+          window.cancelAnimationFrame(replayFrameId);
+          replayFrameId = null;
+        }
+        flushReplayEvents();
+        await finishReconnect();
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
           setIsReconnecting(false);
           return;
         }
-        finishReconnect();
+        await finishReconnect();
       } finally {
         if (reconnectAbortRef.current === abort) {
           reconnectAbortRef.current = null;
@@ -539,6 +704,15 @@ export default function ChatPanel({
 
     return () => {
       abort.abort();
+      if (replayFrameId !== null) {
+        window.cancelAnimationFrame(replayFrameId);
+        replayFrameId = null;
+      }
+      replayEvents = [];
+      if (reconnectRetryTimerRef.current !== null) {
+        window.clearTimeout(reconnectRetryTimerRef.current);
+        reconnectRetryTimerRef.current = null;
+      }
       if (reconnectAbortRef.current === abort) {
         reconnectAbortRef.current = null;
       }
@@ -546,9 +720,10 @@ export default function ChatPanel({
         setIsReconnecting(false);
       }
     };
-  }, [reconnectStreamNonce, recoverAuthoritativeHistory, threadId]);
+  }, [reconnectRetryNonce, reconnectStreamNonce, recoverAuthoritativeHistory, runtimeRunning, threadId]);
 
-  const agentBusy = status === 'streaming' || status === 'submitted' || isReconnecting || isStopping;
+  const canStopMainTurn = chatMainTurnCanStop(status, runtimeRunning, isReconnecting);
+  const agentBusy = canStopMainTurn || isStopping;
   const chatLoading = agentBusy || isLoading;
 
   const markToolConfirmationSettled = useCallback((toolCallId: string) => {
@@ -560,31 +735,77 @@ export default function ChatPanel({
     });
   }, []);
 
+  const abortLocalReaders = useCallback(() => {
+    reconnectAbortRef.current?.abort();
+    reconnectAbortRef.current = null;
+    void stop();
+  }, [stop]);
+
+  const recoverAfterStop = useCallback(async (attempt = 0): Promise<void> => {
+    if (!chatPanelMountedRef.current) return;
+    let authoritativeIdle = false;
+    try {
+      const runtimeStatus = await fetchClaudeThreadStatus(threadId);
+      authoritativeIdle = !runtimeStatus.running;
+    } catch {
+      // Unknown is not idle. Preserve the lock and last-good transcript.
+    }
+    if (!chatPanelMountedRef.current) return;
+    if (chatStopMayAbortLocalReaders(null, !authoritativeIdle)) {
+      abortLocalReaders();
+      const recovered = await recoverAuthoritativeHistory();
+      if (recovered && !recovered.running) return;
+    }
+    setRuntimeRunning(true);
+    stopRecoveryTimerRef.current = window.setTimeout(() => {
+      stopRecoveryTimerRef.current = null;
+      void recoverAfterStop(attempt + 1);
+    }, claudeThreadHydrationRetryDelayMs(attempt));
+  }, [abortLocalReaders, recoverAuthoritativeHistory, threadId]);
+
   const handleStop = useCallback(async () => {
-    if (isStopping) {
+    if (isStopping || !canStopMainTurn) {
       return;
     }
     setIsStopping(true);
-    reconnectAbortRef.current?.abort();
-    reconnectAbortRef.current = null;
-    setIsReconnecting(false);
-    stop();
+    // A failed/ambiguous Stop is not permission to unlock the composer.
+    setRuntimeRunning(true);
+    const controller = new AbortController();
+    stopRequestAbortRef.current?.abort();
+    stopRequestAbortRef.current = controller;
+    if (stopRequestTimerRef.current !== null) window.clearTimeout(stopRequestTimerRef.current);
+    stopRequestTimerRef.current = window.setTimeout(() => controller.abort(), 10_000);
+    let acknowledged = false;
     try {
-      await fetch(
+      const response = await fetch(
         `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/stop`,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${getAuthToken()}` },
+          signal: controller.signal,
         },
       );
+      if (!response.ok) throw new Error(`Stop failed (${response.status}).`);
+      const stopResult = parseThreadStopResponse(await response.json());
+      if (stopResult === null) {
+        throw new Error('Stop response is malformed.');
+      }
+      acknowledged = stopResult.stopRequested;
     } catch {
-      // The local stream is already stopped; the next status check/reconnect
-      // will reconcile whether the backend turn is still running.
+      // Network/malformed/non-2xx is authoritative-unknown.
     } finally {
-      setIsStopping(false);
-      recoverAuthoritativeHistory();
+      if (stopRequestTimerRef.current !== null) {
+        window.clearTimeout(stopRequestTimerRef.current);
+        stopRequestTimerRef.current = null;
+      }
+      if (stopRequestAbortRef.current === controller) stopRequestAbortRef.current = null;
+      if (chatPanelMountedRef.current) {
+        if (chatStopMayAbortLocalReaders(acknowledged, null)) abortLocalReaders();
+        setIsStopping(false);
+        if (stopRecoveryTimerRef.current === null) void recoverAfterStop();
+      }
     }
-  }, [isStopping, recoverAuthoritativeHistory, stop, threadId]);
+  }, [abortLocalReaders, canStopMainTurn, isStopping, recoverAfterStop, threadId]);
   const shouldShowMessageSurface = visibleMessages.length > 0 || Boolean(error) || chatLoading;
 
   const effectiveToolChoice: ToolChoice = imFullAccessEnabled ? 'auto' : currentToolChoice;
@@ -658,10 +879,6 @@ export default function ChatPanel({
     }
     isNearBottomRef.current = true;
     setShowScrollToBottom(false);
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-      return;
-    }
     element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
   }, []);
 
@@ -674,7 +891,7 @@ export default function ChatPanel({
     if (isNearBottomRef.current) {
       setShowScrollToBottom(false);
       const frameId = requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
       });
       return () => cancelAnimationFrame(frameId);
     }
@@ -687,7 +904,12 @@ export default function ChatPanel({
   return (
     <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
       {shouldShowMessageSurface ? (
-        <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', background: 'var(--color-bg-app)', padding: '1rem 1rem 1.5rem' }}>
+        <div
+          data-chat-scroll-region="messages"
+          ref={chatContainerRef}
+          onScroll={handleScroll}
+          style={{ minWidth: 0, minHeight: 0, flex: 1, overflowX: 'hidden', overflowY: 'auto', overscrollBehaviorY: 'contain', borderRadius: '1.5rem', background: 'var(--color-bg-app)', padding: '1rem 1rem 1.5rem' }}
+        >
           <ChatMessageList
             messages={visibleMessages}
             threadId={threadId}
@@ -703,11 +925,26 @@ export default function ChatPanel({
             settledToolCallIds={settledToolCallIds}
             onToolConfirmationSettled={markToolConfirmationSettled}
           />
-          <div ref={bottomRef} aria-hidden="true" />
+          <div aria-hidden="true" />
         </div>
       ) : null}
 
-      <div style={{ position: 'relative', zIndex: 10, width: '100%', margin: '0.75rem 0 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
+      <div
+        style={{
+          position: 'relative',
+          zIndex: 10,
+          width: '100%',
+          boxSizing: 'border-box',
+          margin: '0.75rem 0 0',
+          minHeight: pendingConfirmation ? 0 : undefined,
+          maxHeight: pendingConfirmation ? 'min(46vh, 24rem)' : undefined,
+          flexShrink: pendingConfirmation ? 1 : 0,
+          display: pendingConfirmation ? 'flex' : undefined,
+          flexDirection: pendingConfirmation ? 'column' : undefined,
+          overflow: pendingConfirmation ? 'hidden' : undefined,
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)',
+        }}
+      >
         {shouldShowMessageSurface && showScrollToBottom ? (
           <button
             type="button"
@@ -747,6 +984,8 @@ export default function ChatPanel({
           />
         ) : (
           <AIInputDock
+            deckId={deckId}
+            threadId={threadId}
             openFileDialogSignal={openFileDialogSignal}
             fullAccessEnabled={imFullAccessEnabled}
             onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {
@@ -774,8 +1013,8 @@ export default function ChatPanel({
               await sendMessage({ role: 'user', parts });
             }}
             placeholder={inputPlaceholder}
-            loading={agentBusy}
-            onStop={agentBusy ? handleStop : undefined}
+            loading={chatLoading}
+            onStop={canStopMainTurn ? handleStop : undefined}
             stopPending={isStopping}
             workspaceSessionId={workspaceEnabled ? threadId : undefined}
             contextControl={inputContextControl}

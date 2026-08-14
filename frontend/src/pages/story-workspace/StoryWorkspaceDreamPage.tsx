@@ -2,6 +2,7 @@
 // [Output] Workspace-file-driven Dream editor or the no-run Dream start surface.
 // [Pos] Canonical /story-workspace/dream business page (Task 3 F4)
 // [Sync] 2026-08-04: implement Agent files -> render -> edit/one confirm -> continue.
+// [Sync] 2026-08-13: hand the bound Dream thread to canonical Chat on request.
 
 import {
   useCallback,
@@ -26,7 +27,6 @@ import {
 import {
   storyWorkspaceNewDreamConfirmationIdempotencyKey,
   useStoryWorkspaceDreamConfirmation,
-  useStoryWorkspaceDreamAgent,
   useStoryWorkspaceDreamFiles,
   type StoryWorkspaceDreamFieldValue,
   type StoryWorkspaceDreamStage,
@@ -40,10 +40,12 @@ import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import type { WorkflowRun } from '../../api/storyWorkspaceApi';
 import {
   storyWorkspaceDreamStageSnapshotsFromFiles,
+  storyWorkspaceDreamAgentActivityNotice,
   storyWorkspaceParseDreamEditorValue,
   storyWorkspaceDreamEditorValue,
   storyWorkspaceDreamLifecycleFromPersistence,
   storyWorkspaceDreamPersistenceNotice,
+  storyWorkspaceDreamRunFailureNotice,
 } from './dreamViewModel';
 import { StoryWorkspaceDreamLaunch } from './StoryWorkspaceDreamLaunch';
 import {
@@ -72,6 +74,7 @@ export interface StoryWorkspaceDreamPageProps {
   /** Router-resolved, actor-scoped run context; Dream files remain stage truth. */
   resolvedRun?: Pick<WorkflowRun, 'workflow_run_id' | 'deck_plugin_display_name' | 'deck_plugin_version' | 'workflow_summary' | 'deck_runtime_snapshot_id' | 'runtime_plugin_lock_id'> | null;
   onNavigate?: (path: string) => void;
+  onOpenChatThread: (threadId: string) => void;
 }
 
 function selectionExists(
@@ -89,8 +92,13 @@ function draftIsValid(
   files: ReturnType<typeof useStoryWorkspaceDreamFiles>['data'],
 ): boolean {
   if (!state || !files) return false;
-  return STORY_WORKSPACE_DREAM_STAGES.every((stage) => (
-    files.stages[stage]?.items.every((item) => {
+  return STORY_WORKSPACE_DREAM_STAGES.every((stage) => {
+    const projected = files.stages[stage];
+    const hydrated = state.stageData[stage];
+    if (!projected || !hydrated) return false;
+    const hydratedIds = new Set(hydrated.items.map((item) => item.entityId));
+    return projected.items.every((item) => {
+      if (!hydratedIds.has(item.entityId)) return false;
       const displayName = storyWorkspaceReadDreamField(
         state,
         stage,
@@ -98,8 +106,8 @@ function draftIsValid(
         'displayName',
       );
       return typeof displayName === 'string' && displayName.trim().length > 0;
-    }) ?? false
-  ));
+    });
+  });
 }
 
 function revisionLine(state: StoryWorkspaceDreamState | null): string {
@@ -123,25 +131,33 @@ export function StoryWorkspaceDreamPage({
   runId,
   resolvedRun = null,
   onNavigate,
+  onOpenChatThread,
 }: StoryWorkspaceDreamPageProps) {
   const [dreamState, setDreamState] = useState<StoryWorkspaceDreamState | null>(null);
   const [activeStage, setActiveStage] = useState<StoryWorkspaceDreamStage>(initialStage);
   const [selection, setSelection] = useState<DreamSelection | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [rightSection, setRightSection] = useState<DreamRightSection>('content');
-  const [pendingToolAnnouncementId, setPendingToolAnnouncementId] = useState<string | null>(null);
+  const [threadSessionRefreshNonce, setThreadSessionRefreshNonce] = useState(0);
+  const [expectedConfirmationMessageId, setExpectedConfirmationMessageId] = useState<string | null>(null);
   const agentPanelOpen = rightSection === 'agent';
   const mastheadAgentTriggerRef = useRef<HTMLButtonElement>(null);
-  const announcedToolCallIdsRef = useRef(new Set<string>());
 
   const draftLifecycleState = dreamState?.status ?? 'story-workspace-dream-waiting-files';
-  const files = useStoryWorkspaceDreamFiles(runId, { lifecycleState: draftLifecycleState });
+  const files = useStoryWorkspaceDreamFiles(runId, {
+    lifecycleState: draftLifecycleState,
+  });
   const confirmation = useStoryWorkspaceDreamConfirmation(runId ?? '');
-  const dreamAgent = useStoryWorkspaceDreamAgent(runId);
-  const pendingToolCallId = dreamAgent.pendingToolConfirmation?.toolCallId ?? null;
-  const { run: workflowRun, selectRun } = useWorkflowRun({ eventsEnabled: Boolean(runId) });
+  const refreshDreamFiles = files.refresh;
+  const {
+    run: workflowRun,
+    error: workflowRunError,
+    refreshRun,
+    selectRun,
+  } = useWorkflowRun({ eventsEnabled: Boolean(runId) });
   const currentWorkflowRun = workflowRun?.workflow_run_id === runId ? workflowRun : null;
   const agentContextRun = resolvedRun?.workflow_run_id === runId ? resolvedRun : currentWorkflowRun;
+  const runFailureNotice = storyWorkspaceDreamRunFailureNotice(currentWorkflowRun);
 
   const confirmationPersistence = useMemo(() => ({
     confirmationAccepted: Boolean(
@@ -156,13 +172,17 @@ export function StoryWorkspaceDreamPage({
     currentWorkflowRun?.status,
     draftLifecycleState,
   );
-  const isReadOnly = lifecycleState === 'story-workspace-dream-continuing'
-    || lifecycleState === 'story-workspace-dream-completed';
-  const activityCopy = lifecycleState === 'story-workspace-dream-completed'
+  const isReadOnly = lifecycleState === 'story-workspace-dream-running'
+    || lifecycleState === 'story-workspace-dream-completed'
+    || Boolean(runFailureNotice);
+  const observerActivityCopy = storyWorkspaceDreamAgentActivityNotice(
+    files.data?.agentActivity,
+  );
+  const activityCopy = runFailureNotice ?? (lifecycleState === 'story-workspace-dream-completed'
     ? storyWorkspaceDreamPersistenceNotice(confirmationPersistence, 'completed')
-    : lifecycleState === 'story-workspace-dream-continuing'
-      ? storyWorkspaceDreamPersistenceNotice(confirmationPersistence, 'continuing')
-      : '读取 Agent 工作空间';
+    : lifecycleState === 'story-workspace-dream-running'
+      ? storyWorkspaceDreamPersistenceNotice(confirmationPersistence, 'running')
+      : observerActivityCopy ?? '读取 Agent 工作空间');
 
   useEffect(() => {
     setDreamState(null);
@@ -170,19 +190,9 @@ export function StoryWorkspaceDreamPage({
     setActiveStage(initialStage);
     setEditorError(null);
     setRightSection('content');
-    setPendingToolAnnouncementId(null);
-    announcedToolCallIdsRef.current.clear();
+    setThreadSessionRefreshNonce(0);
+    setExpectedConfirmationMessageId(null);
   }, [initialStage, runId]);
-
-  useEffect(() => {
-    if (!pendingToolCallId) {
-      setPendingToolAnnouncementId(null);
-      return;
-    }
-    if (announcedToolCallIdsRef.current.has(pendingToolCallId)) return;
-    announcedToolCallIdsRef.current.add(pendingToolCallId);
-    setPendingToolAnnouncementId(pendingToolCallId);
-  }, [pendingToolCallId]);
 
   useEffect(() => {
     if (!runId) return;
@@ -297,7 +307,7 @@ export function StoryWorkspaceDreamPage({
   }, [dreamState, selection]);
 
   const confirmAndContinue = useCallback(async () => {
-    if (!dreamState) return;
+    if (!runId || !dreamState) return;
     const previous = dreamState;
     try {
       const started = storyWorkspaceBeginDreamConfirmation(
@@ -305,17 +315,22 @@ export function StoryWorkspaceDreamPage({
         storyWorkspaceNewDreamConfirmationIdempotencyKey(),
       );
       setDreamState(started.state);
-      await confirmation.submit(started.command);
+      const accepted = await confirmation.submit(started.command);
+      setExpectedConfirmationMessageId(accepted.messageId);
+      setThreadSessionRefreshNonce((value) => value + 1);
       setDreamState((current) => (
         current ? storyWorkspaceAcceptDreamConfirmation(current) : current
       ));
-      files.refresh();
+      refreshDreamFiles();
       setEditorError(null);
+      onNavigate?.(
+        `/story-workspace/runs/${encodeURIComponent(runId)}/execution`,
+      );
     } catch (reason) {
       setDreamState(previous);
       setEditorError(reason instanceof Error ? reason.message : '确认命令未提交');
     }
-  }, [confirmation, dreamState, files]);
+  }, [confirmation, dreamState, onNavigate, refreshDreamFiles, runId]);
 
   if (!runId) {
     if (initialDeckId) {
@@ -329,7 +344,8 @@ export function StoryWorkspaceDreamPage({
     && files.data?.canConfirm
     && draftIsValid(dreamState, files.data)
     && storyWorkspaceCanConfirmDream(dreamState)
-    && confirmation.status !== 'confirming',
+    && confirmation.status !== 'confirming'
+    && !runFailureNotice
   );
   const deckName = agentContextRun?.deck_plugin_display_name ?? '当前 Deck';
   const agentRuntimeLockId = agentContextRun?.runtime_plugin_lock_id
@@ -339,13 +355,9 @@ export function StoryWorkspaceDreamPage({
     ?? files.data?.source.deckRuntimeSnapshotId
     ?? null;
   const agentStageLine = storyWorkspaceDreamAgentStageLine(activeStage, revisionLine(dreamState));
-  const agentPreview = dreamAgent.pendingToolConfirmation
-    ? 'Dream Agent 等待你确认一项操作'
-    : dreamAgent.streamText
-      || dreamAgent.snapshot?.messages.filter((message) => message.role === 'assistant').at(-1)?.text
-      || activityCopy;
+  const threadId = files.data?.threadId ?? null;
+  const agentPreview = threadId ? `打开同一 Agent 会话 · ${activityCopy}` : activityCopy;
   const openDreamAgent = () => {
-    dreamAgent.markRead();
     setRightSection('agent');
   };
   const showDreamContent = (nextSelection: DreamSelection | null) => {
@@ -384,11 +396,8 @@ export function StoryWorkspaceDreamPage({
         <button
           aria-controls={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}
           aria-expanded={agentPanelOpen}
-          aria-label={dreamAgent.pendingToolConfirmation
-            ? '打开 Dream Agent：等待你确认一项操作'
-            : '打开 Dream Agent 消息预览'}
+          aria-label="打开 Dream Agent 消息"
           className="story-workspace-dream__activity"
-          data-pending={Boolean(dreamAgent.pendingToolConfirmation) || undefined}
           onClick={openDreamAgent}
           ref={mastheadAgentTriggerRef}
           type="button"
@@ -396,26 +405,35 @@ export function StoryWorkspaceDreamPage({
           <span className="story-workspace-dream__activity-mark" />
           <span className="story-workspace-dream__activity-copy">{agentPreview}</span>
         </button>
-        {pendingToolAnnouncementId ? (
-          <span
-            aria-atomic="true"
-            aria-live="polite"
-            className="story-workspace-dream__pending-announcement"
-            key={pendingToolAnnouncementId}
-            role="status"
-          >Dream Agent 等待你确认一项操作</span>
-        ) : null}
       </header>
+
+      {runFailureNotice ? (
+        <div className="story-workspace-dream__run-alert" role="alert">
+          <strong>Dream 运行失败</strong>
+          <p>{runFailureNotice}</p>
+          <div>
+            <button onClick={() => { void refreshRun().catch(() => undefined); }} type="button">重新读取运行状态</button>
+            <a href="/story-workspace/dream">返回 Dream 重新开始</a>
+          </div>
+        </div>
+      ) : workflowRunError && !currentWorkflowRun ? (
+        <div className="story-workspace-dream__run-alert" role="alert">
+          <strong>暂时无法读取运行状态</strong>
+          <p>页面不会根据本地界面推断工作流结果。</p>
+          <button onClick={() => { void selectRun(runId).catch(() => undefined); }} type="button">重新读取运行状态</button>
+        </div>
+      ) : null}
 
       {agentPanelOpen && (
         <div className="story-workspace-dream__mobile-agent">
           <StoryWorkspaceDreamAgentRail
-            agent={dreamAgent}
             deckName={deckName}
             runId={runId}
             runtimeLockId={agentRuntimeLockId}
             runtimeSnapshotId={agentRuntimeSnapshotId}
             stageLine={agentStageLine}
+            threadId={threadId}
+            onOpenChatThread={onOpenChatThread}
           />
         </div>
       )}
@@ -519,20 +537,33 @@ export function StoryWorkspaceDreamPage({
         >
           {agentPanelOpen && (
             <StoryWorkspaceDreamAgentRail
-              agent={dreamAgent}
               deckName={deckName}
               runId={runId}
               runtimeLockId={agentRuntimeLockId}
               runtimeSnapshotId={agentRuntimeSnapshotId}
               stageLine={agentStageLine}
+              threadId={threadId}
+              onOpenChatThread={onOpenChatThread}
             />
           )}
           <div className="story-workspace-dream__agent-panel">
             <StoryWorkspaceDreamAgentPanel
-              agent={dreamAgent}
+              expectedMessageId={expectedConfirmationMessageId}
               isOpen={agentPanelOpen}
               onClose={() => setRightSection('content')}
+              onSettled={() => {
+                const settledMessageId = expectedConfirmationMessageId;
+                if (settledMessageId !== null) {
+                  setExpectedConfirmationMessageId((current) => (
+                    current === settledMessageId ? null : current
+                  ));
+                }
+                refreshDreamFiles();
+                void selectRun(runId).catch(() => undefined);
+              }}
+              refreshNonce={threadSessionRefreshNonce}
               restoreFocusRef={mastheadAgentTriggerRef}
+              threadId={threadId}
             />
           </div>
           {!agentPanelOpen && (selection && dreamState && selectedFileItem ? (
@@ -634,7 +665,7 @@ export function StoryWorkspaceDreamPage({
             {editorError && <em role="status">{editorError}</em>}
           </div>
           {isReadOnly ? (
-            <div className="story-workspace-dream__continuing-actions">
+            <div className="story-workspace-dream__running-actions">
               <span>{activityCopy}</span>
               {confirmationPersistence.confirmationDispatched && (
                 <button

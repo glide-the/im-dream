@@ -129,6 +129,7 @@ test('uses wrapping arrow, Home and End keyboard navigation for file tabs', asyn
 test('renders Markdown tabs through semantic markup and never as raw source text', async () => {
   const html = await renderReader({
     activeArtifact: 'review-report.md',
+    episodeCode: 'EP01',
     artifacts,
     documents,
     shots: [shot],
@@ -137,7 +138,7 @@ test('renders Markdown tabs through semantic markup and never as raw source text
     onShotSelection: noOp,
   });
 
-  expect(html).toContain('aria-label="第一集文件导航"');
+  expect(html).toContain('aria-label="EP01 文件导航"');
   expect(html).toContain('分集大纲');
   expect(html).toContain('剧本');
   expect(html).toContain('分镜');
@@ -150,6 +151,7 @@ test('renders Markdown tabs through semantic markup and never as raw source text
 test('projects storyboard YAML properties for the selected stable shot identity', async () => {
   const html = await renderReader({
     activeArtifact: 'storyboard.yaml',
+    episodeCode: 'EP01',
     artifacts,
     documents,
     shots: [shot],

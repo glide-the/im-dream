@@ -145,6 +145,17 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self.fixture.close()
 
+    def test_datetime_parser_accepts_psycopg_native_datetime(self) -> None:
+        native = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+
+        self.assertEqual(SessionManager._parse_datetime(native), native)
+        self.assertEqual(
+            SessionManager._parse_datetime("2026-08-01T12:00:00Z"),
+            native,
+        )
+        with self.assertRaises(TypeError):
+            SessionManager._parse_datetime(1)  # type: ignore[arg-type]
+
     async def prepare(
         self,
         key: str = "session-start",
@@ -193,7 +204,7 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
             runtime_node_id="node-test",
             artifact_set_hash=artifact_set_hash,
             policy_revision="policy-test-v1",
-            deployment_tier="test",
+            deployment_tier="local",
             scope="session",
             readiness_state="session_loaded",
             required_entries_ready=True,
@@ -293,6 +304,41 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
         replay = await self._start(manager, run, reader)
         self.assertEqual(replay.agent_session_id, session.agent_session_id)
         self.assertEqual(adapter.starts, 1)
+
+    async def test_psycopg_validation_reads_end_before_session_write(self) -> None:
+        manager, _, reader, run = await self.prepare("session-postgres-boundary")
+
+        class PsycopgReadTransactionConnection:
+            def __init__(self, target):
+                self.target = target
+                self.read_transaction = False
+
+            @property
+            def in_transaction(self):
+                return self.read_transaction or self.target.in_transaction
+
+            def execute(self, statement, params=()):
+                normalized = statement.lstrip().upper()
+                if normalized == "BEGIN" and self.read_transaction:
+                    raise RuntimeError("cannot begin inside psycopg read transaction")
+                cursor = self.target.execute(statement, params)
+                if normalized.startswith("SELECT"):
+                    self.read_transaction = True
+                return cursor
+
+            def rollback(self):
+                self.target.rollback()
+                self.read_transaction = False
+
+            def commit(self):
+                self.target.commit()
+                self.read_transaction = False
+
+        manager.db = PsycopgReadTransactionConnection(self.fixture.db)
+
+        session = await self._start(manager, run, reader)
+
+        self.assertEqual(session.status, AgentSessionStatus.ACTIVE)
 
     async def test_concurrent_same_key_has_one_owner_and_competing_settings_fail(self) -> None:
         adapter = FakeRunSessionAdapter()
@@ -494,7 +540,6 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
 
         management = ManagementSmokeContext(
             management_session_id="mgmt_idle-test",
-            deployment_tier="test",
             plugins=[plugin],
         )
         smoke_guard = RemoteInteractionGuard(
@@ -514,20 +559,6 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(allowed.writes_readiness)
         self.assertFalse(allowed.creates_receipt)
         self.assertFalse(allowed.production_authorized)
-
-        production = management.model_copy(update={"deployment_tier": "production"})
-        production_guard = RemoteInteractionGuard(
-            self.fixture.db,
-            management_context_reader=lambda _session_id: production,
-        )
-        denied_production = await production_guard.guard_reload(
-            workflow_run_id=None,
-            agent_session_id=production.management_session_id,
-            proposed_plugins=[plugin],
-            proposed_capabilities=[CAPABILITY],
-        )
-        self.assertFalse(denied_production.allowed)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,3 +1,8 @@
+// [Input] Actor-scoped Story Workspace REST response values.
+// [Output] Shared strict frontend DTOs with separate Project and Episode titles.
+// [Pos] Story Workspace browser contract declarations; no transport or reducer state.
+// [Sync] 2026-08-14: carry optional Hook-published complete asset content.
+
 export type StoryWorkspaceReviewStatus = 'pending' | 'confirmed' | 'rejected' | 'archived';
 
 export type StoryWorkspaceSortOrder = 'asc' | 'desc';
@@ -33,6 +38,28 @@ export interface StoryWorkspaceSceneQuery extends StoryWorkspaceListQuery {
 
 export type StoryWorkspaceStoryType = 'short' | 'long' | 'script' | 'outline';
 
+export type StoryWorkspaceArtifactSyncStatus =
+  | 'syncing'
+  | 'indexed'
+  | 'stale'
+  | 'missing'
+  | 'failed';
+
+export type StoryWorkspaceStoryIndexStatus = Exclude<
+  StoryWorkspaceArtifactSyncStatus,
+  'syncing'
+>;
+
+export type StoryWorkspaceStoryIndexErrorCode =
+  | 'story_index_row_missing'
+  | 'story_index_schema_unavailable'
+  | 'story_index_database_unavailable'
+  | 'story_index_write_failed'
+  | 'story_index_conflict'
+  | 'story_index_invalid_artifact'
+  | 'story_index_revision_conflict'
+  | 'artifact_missing';
+
 export interface StoryWorkspaceStory {
   id: string;
   identifier: string;
@@ -46,6 +73,35 @@ export interface StoryWorkspaceStory {
   created_at: string;
   updated_at: string;
   confirmed_at: string | null;
+  source_run_id: string | null;
+  source_project_id: string | null;
+  episode_count: number | null;
+  artifact_manifest_revision: string | null;
+  script_revision: string | null;
+  artifact_sync_status: StoryWorkspaceArtifactSyncStatus | null;
+  artifact_indexed_at: string | null;
+  artifact_sync_error_code: StoryWorkspaceStoryIndexErrorCode | null;
+  script_size_bytes: number | null;
+  artifact_available: boolean | null;
+  reconcile_version: number | null;
+}
+
+/** GET/POST /api/story-workspace/workflow-runs/{runId}/story-index. */
+export interface StoryWorkspaceStoryIndexProjection {
+  readonly runId: string;
+  readonly projectId: string;
+  readonly projectTitle: string;
+  readonly storyId: string | null;
+  readonly status: StoryWorkspaceStoryIndexStatus;
+  readonly observedManifestRevision: string | null;
+  readonly observedScriptRevision: string | null;
+  readonly indexedManifestRevision: string | null;
+  readonly indexedScriptRevision: string | null;
+  readonly episodeCount: number;
+  readonly lastIndexedAt: string | null;
+  readonly errorCode: StoryWorkspaceStoryIndexErrorCode | null;
+  readonly retryable: boolean;
+  readonly etag: string;
 }
 
 export interface StoryWorkspaceCharacter {
@@ -126,12 +182,14 @@ export interface StoryWorkspaceDreamLaunchAccepted {
 /** One durable, actor-scoped run row rendered by Dream's canonical workbench. */
 export interface StoryWorkspaceDreamReentryItem {
   readonly storyWorkspaceRunId: string;
+  /** Canonical Project title, or the launch-goal prefix before Project creation. */
+  readonly displayTitle: string;
   readonly goalPrefix: string;
   readonly deckId: string;
   readonly deckDisplayName: string;
   readonly workflowDisplayName: 'Dream';
   readonly deckPluginVersion: string;
-  readonly lifecycle: 'generating' | 'waiting_confirmation' | 'continuing' | 'recent';
+  readonly lifecycle: 'generating' | 'waiting_confirmation' | 'running' | 'recent';
   readonly group: 'in_progress' | 'recent';
   readonly stageRevisions: Readonly<Partial<Record<StoryWorkspaceDreamStage, number>>>;
   readonly confirmationAccepted: boolean;
@@ -202,6 +260,8 @@ export interface StoryWorkspaceDreamStageItem {
   readonly entityId: string;
   readonly displayName: string;
   readonly summary: string | null;
+  /** Full last-good source document published by the successful main-turn Hook. */
+  readonly content?: string | null;
   readonly sourceFile: string;
   readonly relations: readonly string[];
 }
@@ -212,6 +272,35 @@ export interface StoryWorkspaceDreamStageProjection {
   readonly sourceFiles: readonly string[];
   readonly page: StoryWorkspaceDreamStagePage;
   readonly items: readonly StoryWorkspaceDreamStageItem[];
+}
+
+export type StoryWorkspaceDreamAgentActivityKind =
+  | 'activity_started_hint'
+  | 'activity_settled_hint'
+  | 'waiting_confirmation_hint'
+  | 'turn_settled_hint'
+  | 'reconcile_requested';
+
+export type StoryWorkspaceDreamAgentOperationScope =
+  | 'tool'
+  | 'subagent'
+  | 'content_generation'
+  | 'workflow_operation';
+
+export interface StoryWorkspaceDreamAgentActivityProjection {
+  readonly activity: StoryWorkspaceDreamAgentActivityKind;
+  readonly sequence: number;
+  readonly terminalOutcome: 'completed' | 'failed' | 'cancelled' | null;
+  readonly needsReconcile: boolean;
+  readonly operationScope: StoryWorkspaceDreamAgentOperationScope | null;
+  readonly operationState:
+    | 'started'
+    | 'waiting_confirmation'
+    | 'succeeded'
+    | 'failed'
+    | null;
+  /** SHA-256 correlation only; the raw tool/subagent call id is never exposed. */
+  readonly operationId: string | null;
 }
 
 /**
@@ -235,136 +324,27 @@ export interface StoryWorkspaceDreamFilesResponse {
   readonly confirmationDispatched: boolean;
   readonly canConfirm: boolean;
   readonly confirmationLabel: '确认并继续';
+  /** Display-only Observer hint; never controls Chat or Workflow lifecycle. */
+  readonly agentActivity: StoryWorkspaceDreamAgentActivityProjection | null;
 }
-
-export type StoryWorkspaceDreamAgentActivityCategory =
-  | 'workspace_read'
-  | 'dream_write'
-  | 'reference_lookup'
-  | 'delegation'
-  | 'other';
-
-export interface StoryWorkspaceDreamAgentTextContent {
-  readonly kind: 'text';
-  readonly text: string;
-  readonly truncated: boolean;
-}
-
-export interface StoryWorkspaceDreamAgentActivityContent {
-  readonly kind: 'activity';
-  readonly id: string;
-  readonly category: StoryWorkspaceDreamAgentActivityCategory;
-  readonly label: '读取工作区资料' | '更新 Dream 内容' | '查找参考资料' | '协同处理创作任务' | '处理 Dream 创作任务';
-  readonly status: 'running' | 'completed' | 'stopped';
-}
-
-export type StoryWorkspaceDreamAgentContent =
-  | StoryWorkspaceDreamAgentTextContent
-  | StoryWorkspaceDreamAgentActivityContent;
-
-/** Safe message rendered by the Dream Agent workbench. */
-export interface StoryWorkspaceDreamAgentMessage {
-  readonly id: string;
-  readonly role: 'user' | 'assistant';
-  readonly text: string;
-  readonly truncated: boolean;
-  readonly content: readonly StoryWorkspaceDreamAgentContent[];
-  readonly createdAt: string;
-}
-
-/** Persisted Dream Agent history plus the server-owned send gate. */
-export interface StoryWorkspaceDreamAgentMessageSnapshot {
-  readonly storyWorkspaceRunId: string;
-  readonly lifecycle: 'idle' | 'streaming';
-  readonly activeTurnId: string | null;
-  readonly canSend: boolean;
-  readonly sendBlockReason: 'generating' | 'waiting_confirmation' | 'confirming' | 'continuing' | 'busy' | null;
-  readonly messages: readonly StoryWorkspaceDreamAgentMessage[];
-  readonly pendingToolConfirmations: readonly StoryWorkspaceDreamAgentToolConfirmation[];
-  readonly toolConfirmationObservation: 'known' | 'unknown';
-  readonly snapshotAt: string;
-}
-
-/** The browser submits only text and its idempotency key; all binding stays server-side. */
-export interface StoryWorkspaceDreamAgentMessageCommand {
-  readonly text: string;
-  readonly idempotencyKey: string;
-}
-
-export interface StoryWorkspaceDreamAgentMessageAccepted {
-  readonly storyWorkspaceRunId: string;
-  readonly messageId: string;
-  readonly accepted: true;
-}
-
-/** User-facing, server-allowlisted description of one pending Dream Agent tool decision. */
-export interface StoryWorkspaceDreamAgentToolConfirmationOption {
-  readonly label: string;
-  readonly value: string;
-}
-
-export interface StoryWorkspaceDreamAgentToolConfirmationQuestion {
-  readonly id: string;
-  readonly question: string;
-  readonly type: 'text' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'number';
-  readonly required: boolean;
-  readonly multiSelect?: boolean;
-  readonly options?: readonly StoryWorkspaceDreamAgentToolConfirmationOption[];
-  readonly placeholder?: string;
-}
-
-export interface StoryWorkspaceDreamAgentToolConfirmation {
-  readonly toolCallId: string;
-  readonly kind: 'approval' | 'ask_user' | 'sandbox_network' | 'reject_only';
-  readonly toolName: string;
-  readonly questions?: readonly StoryWorkspaceDreamAgentToolConfirmationQuestion[];
-  readonly network?: {
-    readonly host: string | null;
-    readonly policy: 'allowlist' | 'open' | 'deny' | 'unknown';
-  };
-}
-
-/** Run-scoped browser command; thread and Deck binding remain server-owned. */
-export interface StoryWorkspaceDreamAgentToolConfirmationCommand {
-  readonly toolCallId: string;
-  readonly approved: boolean;
-  readonly reason?: string;
-  readonly answers?: Readonly<Record<string, unknown>>;
-}
-
-export interface StoryWorkspaceDreamAgentToolConfirmationResolved {
-  readonly storyWorkspaceRunId: string;
-  readonly toolCallId: string;
-  readonly resolved: true;
-}
-
-/** Allowlisted event surface emitted by the Story Workspace Dream SSE adapter. */
-export type StoryWorkspaceDreamAgentEvent =
-  | { readonly type: 'assistant_text_delta'; readonly cursor: string; readonly turnId: string; readonly delta: string }
-  | { readonly type: 'agent_activity_started'; readonly cursor: string; readonly turnId: string; readonly activity: StoryWorkspaceDreamAgentActivityContent }
-  | { readonly type: 'agent_activity_finished'; readonly cursor: string; readonly turnId: string; readonly activity: StoryWorkspaceDreamAgentActivityContent }
-  | { readonly type: 'assistant_message_committed'; readonly turnId: string }
-  | { readonly type: 'tool_confirmation_requested'; readonly cursor: string; readonly turnId: string; readonly confirmation: StoryWorkspaceDreamAgentToolConfirmation }
-  | { readonly type: 'tool_confirmation_resolved'; readonly cursor: string; readonly turnId: string; readonly toolCallId: string }
-  | { readonly type: 'status'; readonly lifecycle: 'idle' | 'streaming' };
 
 /** Dream's only page lifecycle; it intentionally has no rejection/failure arm. */
 export type StoryWorkspaceDreamLifecycleState =
   | 'story-workspace-dream-waiting-files'
   | 'story-workspace-dream-editing'
   | 'story-workspace-dream-confirming'
-  | 'story-workspace-dream-continuing'
+  | 'story-workspace-dream-running'
   | 'story-workspace-dream-completed';
 
 /**
  * Server aggregate compatibility stages. The Dream UI exposes lifecycle
- * links for pending_review/confirmed/continuing/completed only; the two
+ * links for pending_review/confirmed/running/completed only; the two
  * legacy branches remain accepted as transport values but render no action.
  */
 export type StoryWorkspaceSurfaceLinkStage =
   | 'pending_review'
   | 'confirmed'
-  | 'continuing'
+  | 'running'
   | 'completed'
   | 'failed'
   | 'rejected';
@@ -449,7 +429,6 @@ export interface StoryWorkspaceGuidanceHistoryEntry {
  * ------------------------------------------------------------------------ */
 
 export type StoryWorkspaceEpisodeBindingAvailability = 'bound' | 'unbound';
-export type StoryWorkspaceEpisodeBindingPublicReason = 'episode_binding_unproven';
 export type StoryWorkspaceEpisodeArtifactAvailability =
   | 'not_generated'
   | 'available'
@@ -476,148 +455,6 @@ export type StoryWorkspaceEpisodeArtifactConsumer =
 export type StoryWorkspaceEpisodeAssociationStatus = 'linked' | 'unlinked' | 'orphan';
 export type StoryWorkspaceEpisodeMetricAvailability = 'available' | 'unavailable';
 export type StoryWorkspaceEpisodeReviewScope = 'script' | 'full-chain' | 'unknown';
-export const STORY_WORKSPACE_EPISODE_ACTIONS = [
-  'plan_episode',
-  'write_script',
-  'review_script',
-  'refresh_assets',
-  'regenerate_storyboard',
-  'generate_prompts',
-  'review_full_chain',
-  'validate_episode',
-  'prepare_render_guide',
-  'none_in_scope',
-] as const;
-export type StoryWorkspaceEpisodeAction = typeof STORY_WORKSPACE_EPISODE_ACTIONS[number];
-export type StoryWorkspaceEpisodeActionDiagnostic = 'ready' | 'needs_confirmation';
-export type StoryWorkspaceEpisodeDispatchAction = Exclude<
-  StoryWorkspaceEpisodeAction,
-  'none_in_scope'
->;
-const STORY_WORKSPACE_EPISODE_ACTION_DISPLAY_COMMANDS = {
-  plan_episode: '/drama-plan',
-  write_script: '/drama-script (EP01)',
-  review_script: '剧本审查',
-  refresh_assets: '/drama-asset',
-  regenerate_storyboard: '/drama-storyboard (EP01)',
-  generate_prompts: '/drama-prompt (EP01)',
-  review_full_chain: '完整链路审查',
-  validate_episode: '校验完整产物',
-  prepare_render_guide: '/drama-render + /drama-voice',
-} as const satisfies Readonly<Record<StoryWorkspaceEpisodeDispatchAction, string>>;
-export type StoryWorkspaceEpisodeActionCapability =
-  | StoryWorkspaceEpisodeAction
-  | 'recover_first_episode_binding';
-
-export interface StoryWorkspaceEpisodeBindingRecovery {
-  readonly autoRepairAttempted: boolean;
-  readonly canDispatch: boolean;
-  readonly publicReason: StoryWorkspaceEpisodeBindingPublicReason | null;
-}
-
-export interface StoryWorkspaceEpisodeActionResolution {
-  readonly action: StoryWorkspaceEpisodeAction;
-  readonly diagnostic: StoryWorkspaceEpisodeActionDiagnostic;
-  readonly canDispatch: boolean;
-}
-
-export interface StoryWorkspaceEpisodeActionOption {
-  readonly action: StoryWorkspaceEpisodeDispatchAction;
-  readonly label: string;
-  readonly displayCommand: string;
-  readonly isCurrent: boolean;
-  readonly canDispatch: boolean;
-}
-
-export interface StoryWorkspaceEpisodeWorkflowProjection {
-  readonly factsRevision: number;
-  readonly nextAction: StoryWorkspaceEpisodeActionResolution;
-  readonly prerequisites: readonly StoryWorkspaceEpisodeAction[];
-  readonly actionOptions: readonly StoryWorkspaceEpisodeActionOption[];
-  readonly legacyPartial: boolean;
-}
-
-export type StoryWorkspaceEpisodeActionAvailabilityV2 =
-  | 'executable'
-  | 'preview'
-  | 'blocked';
-export type StoryWorkspaceEpisodeActionDispatchStateV2 =
-  | 'idle'
-  | 'accepted'
-  | 'dispatching'
-  | 'dispatched';
-
-export interface StoryWorkspaceEpisodeActionTargetV2 {
-  readonly opaqueEpisodeId: string | null;
-  readonly candidateId: string | null;
-  readonly displayLabel: string;
-  readonly relation: 'current' | 'next';
-}
-
-export interface StoryWorkspaceEpisodeActionCanonicalInputV2 {
-  readonly sourceType: 'episode_artifact' | 'project_artifact' | 'asset_context' | 'workflow_fact';
-  readonly label: string;
-  readonly availability: string;
-  readonly publicRevision: string | null;
-  readonly revisionKind: 'content' | 'aggregate' | 'input' | 'facts';
-  readonly requirement: 'required' | 'context';
-  readonly [key: string]: unknown;
-}
-
-export interface StoryWorkspaceEpisodeActionOptionV2 {
-  readonly actionId: string;
-  readonly action: StoryWorkspaceEpisodeDispatchAction;
-  readonly inputRevision: string;
-  readonly targetEpisode: StoryWorkspaceEpisodeActionTargetV2;
-  readonly label: string;
-  readonly description: string;
-  readonly displayCommand: string;
-  readonly availability: StoryWorkspaceEpisodeActionAvailabilityV2;
-  readonly isRecommended: boolean;
-  readonly canDispatch: boolean;
-  readonly disabledReason: string | null;
-  readonly canonicalInputs: readonly StoryWorkspaceEpisodeActionCanonicalInputV2[];
-  readonly consequences: readonly string[];
-  readonly dispatchState: StoryWorkspaceEpisodeActionDispatchStateV2;
-}
-
-export interface StoryWorkspaceEpisodeActionProjectionV2 {
-  readonly recommendedActionId: string | null;
-  readonly actionOptions: readonly StoryWorkspaceEpisodeActionOptionV2[];
-}
-
-export interface StoryWorkspaceEpisodeCanonicalInputV2 {
-  readonly label: string;
-  readonly availability: string;
-  readonly revision: string | null;
-}
-
-export interface StoryWorkspaceEpisodeBindingRecoveryRequest {
-  readonly idempotencyKey: string;
-}
-
-export interface StoryWorkspaceEpisodeActionContinueRequest {
-  readonly episodeId: string;
-  readonly action: StoryWorkspaceEpisodeDispatchAction;
-  readonly idempotencyKey: string;
-  readonly userGuidance: string | null;
-}
-
-export interface StoryWorkspaceEpisodeActionContinueRequestV2 {
-  readonly actionId: string;
-  readonly idempotencyKey: string;
-  readonly userGuidance: string | null;
-}
-
-export interface StoryWorkspaceEpisodeActionAccepted {
-  readonly runId: string;
-  readonly episodeId: string | null;
-  readonly capability: StoryWorkspaceEpisodeActionCapability;
-  readonly messageId: string;
-  readonly accepted: true;
-  readonly replayed: boolean;
-}
-
 export interface StoryWorkspaceEpisodeArtifactManifestEntry {
   readonly relativeKey: string;
   readonly availability: StoryWorkspaceEpisodeArtifactAvailability;
@@ -888,17 +725,15 @@ export interface StoryWorkspaceEpisodeAuxiliaryProjection {
 export interface StoryWorkspaceEpisodeArtifactSurface {
   readonly runId: string;
   readonly opaqueEpisodeId: string | null;
+  readonly episodeCode: string | null;
   readonly manifestRevision: string | null;
   readonly etag: string | null;
   readonly bindingAvailability: StoryWorkspaceEpisodeBindingAvailability;
-  readonly bindingRecovery: StoryWorkspaceEpisodeBindingRecovery;
   readonly artifacts: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
   /** Additive v1.2 reader projection; absent only while talking to an older backend. */
   readonly documents?: readonly StoryWorkspaceEpisodeArtifactDocument[];
   readonly narrative: StoryWorkspaceEpisodeNarrativeProjection | null;
   readonly auxiliary: StoryWorkspaceEpisodeAuxiliaryProjection | null;
-  readonly workflow: StoryWorkspaceEpisodeWorkflowProjection | null;
-  readonly actionProjection?: StoryWorkspaceEpisodeActionProjectionV2 | null;
 }
 
 export type StoryWorkspaceEpisodeStringFieldClass =
@@ -911,41 +746,10 @@ export type StoryWorkspaceEpisodeStringFieldClass =
 export const storyWorkspaceEpisodeStringFieldClassification = {
   'surface.runId': 'machine_enum_or_pattern',
   'surface.opaqueEpisodeId': 'machine_enum_or_pattern',
+  'surface.episodeCode': 'machine_enum_or_pattern',
   'surface.manifestRevision': 'machine_enum_or_pattern',
   'surface.etag': 'machine_enum_or_pattern',
   'surface.bindingAvailability': 'machine_enum_or_pattern',
-  'bindingRecovery.publicReason': 'machine_enum_or_pattern',
-  'workflow.nextAction.action': 'machine_enum_or_pattern',
-  'workflow.nextAction.diagnostic': 'machine_enum_or_pattern',
-  'workflow.prerequisites[]': 'machine_enum_or_pattern',
-  'workflow.actionOptions[].action': 'machine_enum_or_pattern',
-  'workflow.actionOptions[].label': 'public_text',
-  'workflow.actionOptions[].displayCommand': 'public_text',
-  'actionProjection.recommendedActionId': 'machine_enum_or_pattern',
-  'actionProjection.actionOptions[].actionId': 'machine_enum_or_pattern',
-  'actionProjection.actionOptions[].action': 'machine_enum_or_pattern',
-  'actionProjection.actionOptions[].inputRevision': 'machine_enum_or_pattern',
-  'actionProjection.actionOptions[].targetEpisode.opaqueEpisodeId': 'machine_enum_or_pattern',
-  'actionProjection.actionOptions[].targetEpisode.candidateId': 'machine_enum_or_pattern',
-  'actionProjection.actionOptions[].targetEpisode.displayLabel': 'public_text',
-  'actionProjection.actionOptions[].targetEpisode.relation': 'machine_enum_or_pattern',
-  'actionProjection.actionOptions[].label': 'public_text',
-  'actionProjection.actionOptions[].description': 'public_text',
-  'actionProjection.actionOptions[].displayCommand': 'public_text',
-  'actionProjection.actionOptions[].availability': 'machine_enum_or_pattern',
-  'actionProjection.actionOptions[].disabledReason': 'public_text',
-  'actionProjection.actionOptions[].consequences[]': 'public_text',
-  'actionProjection.actionOptions[].dispatchState': 'machine_enum_or_pattern',
-  'actionProjection.canonicalInputs[].sourceType': 'machine_enum_or_pattern',
-  'actionProjection.canonicalInputs[].artifact': 'machine_enum_or_pattern',
-  'actionProjection.canonicalInputs[].context': 'machine_enum_or_pattern',
-  'actionProjection.canonicalInputs[].fact': 'machine_enum_or_pattern',
-  'actionProjection.canonicalInputs[].owner': 'machine_enum_or_pattern',
-  'actionProjection.canonicalInputs[].label': 'public_text',
-  'actionProjection.canonicalInputs[].availability': 'machine_enum_or_pattern',
-  'actionProjection.canonicalInputs[].publicRevision': 'machine_enum_or_pattern',
-  'actionProjection.canonicalInputs[].revisionKind': 'machine_enum_or_pattern',
-  'actionProjection.canonicalInputs[].requirement': 'machine_enum_or_pattern',
   'artifacts[].relativeKey': 'canonical_relative_key',
   'artifacts[].availability': 'machine_enum_or_pattern',
   'artifacts[].contentRevision': 'machine_enum_or_pattern',
@@ -1113,9 +917,6 @@ const STORY_WORKSPACE_EPISODE_PRIVATE_MODEL_TEXT = /(?:\bchain[\s_-]*(?:of[\s_-]
 const STORY_WORKSPACE_EPISODE_RAW_COMMAND = /(?:^|[\s`])(?:\$\s+|sudo\s+|curl\b|wget\b|(?:ba|z|fi)?sh\b|python(?:3(?:\.\d+)?)?\b|node(?=\s+(?:--?[A-Za-z0-9]|[./~$]|[A-Za-z0-9_.-]+\/|[A-Za-z0-9_.-]+\.(?:c?js|mjs|ts|tsx|json)\b))|npm\b|npx\b|pnpm\b|yarn\b|git\b|claude\b|rm\s+(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+|cat\s+(?:~?\/\.ssh\/|\/etc\/(?:passwd|shadow)|\S*(?:credential|secret|token|private[_-]?key))|dd\s+[^\n]{0,240}\bif=\S+[^\n]{0,240}\bof=\S+|\/drama-forge:[a-z0-9_-]+|(?:tool(?:_name)?|renderer|raw_command|command(?:_line)?)\s*[:=])/i;
 const STORY_WORKSPACE_EPISODE_SENSITIVE_OPTION = /(?<![A-Za-z0-9_-])--(?:api[-_]?key|token|secret|password|credential|authorization)(?:[=\s]|$)/i;
 const STORY_WORKSPACE_EPISODE_TOOL_OPTION = /(?<![A-Za-z0-9_-])(?:tool|renderer)\b[^\r\n]*?(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*/i;
-const STORY_WORKSPACE_EPISODE_INTERNAL_WORKFLOW_MARKER =
-  /(?:agent_?id|binding_?revision|expected_?(?:binding_?)?revision|workflow_?run_?id|thread_?id|tool_?call_?id|bind_first_episode|write_dream_(?:run|stage)|record_episode_workflow_completion|dream_write_rejected|mcp__)/i;
-
 type StoryWorkspaceEpisodeWireRecord = Record<string, unknown>;
 type StoryWorkspaceEpisodeStringFieldVisitor = (
   field: string,
@@ -1283,11 +1084,6 @@ function storyWorkspaceEpisodeNullableString(
   },
 ): string | null {
   return value === null ? null : storyWorkspaceEpisodeString(value, label, options);
-}
-
-function storyWorkspaceEpisodeBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== 'boolean') throw new Error(`${label} must be a boolean.`);
-  return value;
 }
 
 function storyWorkspaceEpisodeNumber(
@@ -1462,478 +1258,7 @@ function storyWorkspaceParseEpisodeCoverage(
   return { availability, linked, total, ratio };
 }
 
-function storyWorkspaceParseEpisodeBindingRecovery(value: unknown): StoryWorkspaceEpisodeBindingRecovery {
-  const record = storyWorkspaceEpisodeRecord(value, 'bindingRecovery', [
-    'autoRepairAttempted', 'canDispatch', 'publicReason',
-  ]);
-  const canDispatch = storyWorkspaceEpisodeBoolean(record.canDispatch, 'bindingRecovery.canDispatch');
-  const publicReason = record.publicReason === null
-    ? null
-    : storyWorkspaceEpisodeEnum(
-      record.publicReason,
-      'bindingRecovery.publicReason',
-      ['episode_binding_unproven'],
-    );
-  if (canDispatch !== (publicReason !== null)) {
-    throw new Error('bindingRecovery reason is inconsistent.');
-  }
-  return {
-    autoRepairAttempted: storyWorkspaceEpisodeBoolean(
-      record.autoRepairAttempted,
-      'bindingRecovery.autoRepairAttempted',
-    ),
-    canDispatch,
-    publicReason,
-  };
-}
-
-function storyWorkspaceParseEpisodeWorkflow(
-  value: unknown,
-): StoryWorkspaceEpisodeWorkflowProjection {
-  const record = storyWorkspaceEpisodeRecord(value, 'workflow', [
-    'factsRevision', 'nextAction', 'prerequisites', 'actionOptions', 'legacyPartial',
-  ]);
-  const nextActionRecord = storyWorkspaceEpisodeRecord(record.nextAction, 'workflow.nextAction', [
-    'action', 'diagnostic', 'canDispatch',
-  ]);
-  const nextAction: StoryWorkspaceEpisodeActionResolution = {
-    action: storyWorkspaceEpisodeEnum(
-      nextActionRecord.action,
-      'workflow.nextAction.action',
-      STORY_WORKSPACE_EPISODE_ACTIONS,
-    ),
-    diagnostic: storyWorkspaceEpisodeEnum(
-      nextActionRecord.diagnostic,
-      'workflow.nextAction.diagnostic',
-      ['ready', 'needs_confirmation'],
-    ),
-    canDispatch: storyWorkspaceEpisodeBoolean(
-      nextActionRecord.canDispatch,
-      'workflow.nextAction.canDispatch',
-    ),
-  };
-  if (nextAction.action === 'none_in_scope' && nextAction.canDispatch) {
-    throw new Error('workflow.nextAction cannot dispatch none_in_scope.');
-  }
-  const prerequisites = storyWorkspaceEpisodeArray(
-    record.prerequisites,
-    'workflow.prerequisites',
-    (item, index): StoryWorkspaceEpisodeAction => storyWorkspaceEpisodeEnum(
-      item,
-      `workflow.prerequisites[${index}]`,
-      STORY_WORKSPACE_EPISODE_ACTIONS,
-    ),
-    9,
-  );
-  storyWorkspaceEpisodeUnique(prerequisites, 'workflow.prerequisites');
-  if (prerequisites.includes('none_in_scope')) {
-    throw new Error('workflow.prerequisites cannot contain none_in_scope.');
-  }
-  const dispatchActions = STORY_WORKSPACE_EPISODE_ACTIONS.filter(
-    (action): action is StoryWorkspaceEpisodeDispatchAction => action !== 'none_in_scope',
-  );
-  const actionOptions = storyWorkspaceEpisodeArray(
-    record.actionOptions,
-    'workflow.actionOptions',
-    (item, index): StoryWorkspaceEpisodeActionOption => {
-      const label = `workflow.actionOptions[${index}]`;
-      const option = storyWorkspaceEpisodeRecord(item, label, [
-        'action', 'label', 'displayCommand', 'isCurrent', 'canDispatch',
-      ]);
-      const optionAction = storyWorkspaceEpisodeEnum(
-        option.action,
-        `${label}.action`,
-        dispatchActions,
-      );
-      if (
-        (typeof option.label === 'string'
-          && STORY_WORKSPACE_EPISODE_INTERNAL_WORKFLOW_MARKER.test(option.label))
-        || (typeof option.displayCommand === 'string'
-          && STORY_WORKSPACE_EPISODE_INTERNAL_WORKFLOW_MARKER.test(option.displayCommand))
-      ) {
-        throw new Error(`${label} contains an internal workflow marker.`);
-      }
-      const optionLabel = storyWorkspaceEpisodePublicText(option.label, `${label}.label`, {
-        min: 1,
-        max: 120,
-      });
-      const displayCommand = storyWorkspaceEpisodeString(
-        option.displayCommand,
-        `${label}.displayCommand`,
-        { min: 1, max: 120, pathAudit: false },
-      );
-      if (displayCommand !== STORY_WORKSPACE_EPISODE_ACTION_DISPLAY_COMMANDS[optionAction]) {
-        throw new Error(`${label}.displayCommand does not match its action.`);
-      }
-      return {
-        action: optionAction,
-        label: optionLabel,
-        displayCommand,
-        isCurrent: storyWorkspaceEpisodeBoolean(option.isCurrent, `${label}.isCurrent`),
-        canDispatch: storyWorkspaceEpisodeBoolean(option.canDispatch, `${label}.canDispatch`),
-      };
-    },
-    9,
-  );
-  storyWorkspaceEpisodeUnique(
-    actionOptions.map((option) => option.action),
-    'workflow.actionOptions',
-  );
-  if (nextAction.action === 'none_in_scope') {
-    if (actionOptions.length !== 0) {
-      throw new Error('workflow.actionOptions must be empty for none_in_scope.');
-    }
-  } else {
-    const currentIndex = dispatchActions.indexOf(nextAction.action);
-    const expectedActions = dispatchActions.slice(currentIndex);
-    if (
-      actionOptions.length !== expectedActions.length
-      || actionOptions.some((option, index) => option.action !== expectedActions[index])
-    ) {
-      throw new Error('workflow.actionOptions must be the ordered workflow suffix.');
-    }
-    const current = actionOptions[0];
-    if (
-      current === undefined
-      || !current.isCurrent
-      || current.canDispatch !== nextAction.canDispatch
-      || actionOptions.slice(1).some((option) => option.isCurrent || option.canDispatch)
-    ) {
-      throw new Error('workflow.actionOptions has an invalid current action.');
-    }
-  }
-  return {
-    factsRevision: storyWorkspaceEpisodeNumber(record.factsRevision, 'workflow.factsRevision', {
-      integer: true,
-      min: 0,
-      max: Number.MAX_SAFE_INTEGER,
-    }),
-    nextAction,
-    prerequisites,
-    actionOptions,
-    legacyPartial: storyWorkspaceEpisodeBoolean(record.legacyPartial, 'workflow.legacyPartial'),
-  };
-}
-
-const STORY_WORKSPACE_EPISODE_ACTION_ID = /^episode_action_[0-9a-f]{64}$/;
-const STORY_WORKSPACE_EPISODE_CANDIDATE_ID = /^episode_candidate_[0-9a-f]{64}$/;
 const STORY_WORKSPACE_EPISODE_DISPLAY_LABEL = /^EP[0-9]{2}$/;
-
-function storyWorkspaceParseEpisodeActionCanonicalInputV2(
-  value: unknown,
-  index: number,
-): StoryWorkspaceEpisodeActionCanonicalInputV2 {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`actionProjection.canonicalInputs[${index}] must be an object.`);
-  }
-  const base = value as StoryWorkspaceEpisodeWireRecord;
-  const sourceType = storyWorkspaceEpisodeEnum(
-    base.sourceType,
-    `actionProjection.canonicalInputs[${index}].sourceType`,
-    ['episode_artifact', 'project_artifact', 'asset_context', 'workflow_fact'],
-  );
-  const allowedKeys = {
-    episode_artifact: [
-      'sourceType', 'artifact', 'owner', 'label', 'availability',
-      'publicRevision', 'revisionKind', 'requirement',
-    ],
-    project_artifact: [
-      'sourceType', 'artifact', 'owner', 'label', 'availability',
-      'publicRevision', 'revisionKind', 'requirement',
-    ],
-    asset_context: [
-      'sourceType', 'context', 'owner', 'label', 'availability',
-      'publicRevision', 'revisionKind', 'requirement',
-    ],
-    workflow_fact: [
-      'sourceType', 'fact', 'owner', 'label', 'availability',
-      'publicRevision', 'revisionKind', 'requirement',
-    ],
-  } as const;
-  const record = storyWorkspaceEpisodeRecord(
-    value,
-    `actionProjection.canonicalInputs[${index}]`,
-    allowedKeys[sourceType],
-  );
-  let identityFields: Readonly<Record<string, string>>;
-  if (sourceType === 'episode_artifact') {
-    identityFields = {
-      artifact: storyWorkspaceEpisodeEnum(
-        record.artifact,
-        `actionProjection.canonicalInputs[${index}].artifact`,
-        ['episode_outline', 'script', 'review_report', 'storyboard', 'prompts', 'renders'],
-      ),
-      owner: storyWorkspaceEpisodeEnum(
-        record.owner,
-        `actionProjection.canonicalInputs[${index}].owner`,
-        ['episode_artifact_manifest'],
-      ),
-    };
-  } else if (sourceType === 'project_artifact') {
-    identityFields = {
-      artifact: storyWorkspaceEpisodeEnum(
-        record.artifact,
-        `actionProjection.canonicalInputs[${index}].artifact`,
-        ['project_definition', 'master_outline', 'worldbuilding', 'character_arc_ledger'],
-      ),
-      owner: storyWorkspaceEpisodeEnum(
-        record.owner,
-        `actionProjection.canonicalInputs[${index}].owner`,
-        ['canonical_project_files'],
-      ),
-    };
-  } else if (sourceType === 'asset_context') {
-    identityFields = {
-      context: storyWorkspaceEpisodeEnum(
-        record.context,
-        `actionProjection.canonicalInputs[${index}].context`,
-        ['character_scene_prop_inventory'],
-      ),
-      owner: storyWorkspaceEpisodeEnum(
-        record.owner,
-        `actionProjection.canonicalInputs[${index}].owner`,
-        ['canonical_project_asset_inventory'],
-      ),
-    };
-  } else {
-    identityFields = {
-      fact: storyWorkspaceEpisodeEnum(
-        record.fact,
-        `actionProjection.canonicalInputs[${index}].fact`,
-        ['refresh_assets_completion', 'full_chain_review', 'validation', 'prior_episode_validation'],
-      ),
-      owner: storyWorkspaceEpisodeEnum(
-        record.owner,
-        `actionProjection.canonicalInputs[${index}].owner`,
-        ['episode_workflow_facts'],
-      ),
-    };
-  }
-  const publicRevision = record.publicRevision === null
-    ? null
-    : storyWorkspaceEpisodeString(
-      record.publicRevision,
-      `actionProjection.canonicalInputs[${index}].publicRevision`,
-      { pattern: STORY_WORKSPACE_EPISODE_REVISION },
-    );
-  return {
-    ...record,
-    ...identityFields,
-    sourceType,
-    label: storyWorkspaceEpisodePublicText(
-      record.label,
-      `actionProjection.canonicalInputs[${index}].label`,
-      { min: 1, max: 120 },
-    ),
-    availability: storyWorkspaceEpisodeEnum(
-      record.availability,
-      `actionProjection.canonicalInputs[${index}].availability`,
-      [
-        'available', 'not_generated', 'invalid', 'unavailable',
-        'current', 'stale', 'missing',
-      ],
-    ),
-    publicRevision,
-    revisionKind: storyWorkspaceEpisodeEnum(
-      record.revisionKind,
-      `actionProjection.canonicalInputs[${index}].revisionKind`,
-      ['content', 'aggregate', 'input', 'facts'],
-    ),
-    requirement: storyWorkspaceEpisodeEnum(
-      record.requirement,
-      `actionProjection.canonicalInputs[${index}].requirement`,
-      ['required', 'context'],
-    ),
-  };
-}
-
-export function storyWorkspaceParseEpisodeActionProjectionV2(
-  value: unknown,
-  options: {
-    readonly onStringField?: (
-      field: string,
-      classification: StoryWorkspaceEpisodeStringFieldClass,
-    ) => void;
-  } = {},
-): StoryWorkspaceEpisodeActionProjectionV2 {
-  const visitor = options.onStringField;
-  if (visitor !== undefined) storyWorkspaceEpisodeStringFieldVisitors.push(visitor);
-  try {
-  const record = storyWorkspaceEpisodeRecord(value, 'actionProjection', [
-    'recommendedActionId', 'actionOptions',
-  ]);
-  const recommendedActionId = record.recommendedActionId === null
-    ? null
-    : storyWorkspaceEpisodeString(
-      record.recommendedActionId,
-      'actionProjection.recommendedActionId',
-      { pattern: STORY_WORKSPACE_EPISODE_ACTION_ID },
-    );
-  const dispatchActions = STORY_WORKSPACE_EPISODE_ACTIONS.filter(
-    (action): action is StoryWorkspaceEpisodeDispatchAction => action !== 'none_in_scope',
-  );
-  const actionOptions = storyWorkspaceEpisodeArray(
-    record.actionOptions,
-    'actionProjection.actionOptions',
-    (item, index): StoryWorkspaceEpisodeActionOptionV2 => {
-      const label = `actionProjection.actionOptions[${index}]`;
-      const option = storyWorkspaceEpisodeRecord(item, label, [
-        'actionId', 'action', 'inputRevision', 'targetEpisode', 'label',
-        'description', 'displayCommand', 'availability', 'isRecommended',
-        'canDispatch', 'disabledReason', 'canonicalInputs', 'consequences',
-        'dispatchState',
-      ]);
-      const targetRecord = storyWorkspaceEpisodeRecord(
-        option.targetEpisode,
-        `${label}.targetEpisode`,
-        ['opaqueEpisodeId', 'candidateId', 'displayLabel', 'relation'],
-      );
-      const opaqueEpisodeId = targetRecord.opaqueEpisodeId === null
-        ? null
-        : storyWorkspaceEpisodeString(
-          targetRecord.opaqueEpisodeId,
-          `${label}.targetEpisode.opaqueEpisodeId`,
-          { pattern: STORY_WORKSPACE_EPISODE_HEX_ID },
-        );
-      const candidateId = targetRecord.candidateId === null
-        ? null
-        : storyWorkspaceEpisodeString(
-          targetRecord.candidateId,
-          `${label}.targetEpisode.candidateId`,
-          { pattern: STORY_WORKSPACE_EPISODE_CANDIDATE_ID },
-        );
-      const relation = storyWorkspaceEpisodeEnum(
-        targetRecord.relation,
-        `${label}.targetEpisode.relation`,
-        ['current', 'next'],
-      );
-      if ((opaqueEpisodeId === null) === (candidateId === null)) {
-        throw new Error(`${label}.targetEpisode requires one opaque identity.`);
-      }
-      if (relation === 'current' && opaqueEpisodeId === null) {
-        throw new Error(`${label}.targetEpisode current identity must be bound.`);
-      }
-      const availability = storyWorkspaceEpisodeEnum(
-        option.availability,
-        `${label}.availability`,
-        ['executable', 'preview', 'blocked'],
-      );
-      const canDispatch = storyWorkspaceEpisodeBoolean(option.canDispatch, `${label}.canDispatch`);
-      const disabledReason = option.disabledReason === null
-        ? null
-        : storyWorkspaceEpisodePublicText(option.disabledReason, `${label}.disabledReason`, {
-          min: 1, max: 300,
-        });
-      const dispatchState = storyWorkspaceEpisodeEnum(
-        option.dispatchState,
-        `${label}.dispatchState`,
-        ['idle', 'accepted', 'dispatching', 'dispatched'],
-      );
-      if (availability !== 'executable' && (canDispatch || dispatchState !== 'idle')) {
-        throw new Error(`${label} preview/blocked state cannot dispatch.`);
-      }
-      if (canDispatch && (disabledReason !== null || dispatchState !== 'idle')) {
-        throw new Error(`${label} executable state is inconsistent.`);
-      }
-      if (!canDispatch && disabledReason === null) {
-        throw new Error(`${label} non-dispatchable option requires a reason.`);
-      }
-      const displayCommand = storyWorkspaceEpisodeString(
-        option.displayCommand,
-        `${label}.displayCommand`,
-        { min: 1, max: 160, pathAudit: false },
-      );
-      if (STORY_WORKSPACE_EPISODE_INTERNAL_WORKFLOW_MARKER.test(displayCommand)) {
-        throw new Error(`${label}.displayCommand contains an internal marker.`);
-      }
-      return {
-        actionId: storyWorkspaceEpisodeString(option.actionId, `${label}.actionId`, {
-          pattern: STORY_WORKSPACE_EPISODE_ACTION_ID,
-        }),
-        action: storyWorkspaceEpisodeEnum(option.action, `${label}.action`, dispatchActions),
-        inputRevision: storyWorkspaceEpisodeString(
-          option.inputRevision,
-          `${label}.inputRevision`,
-          { pattern: STORY_WORKSPACE_EPISODE_REVISION },
-        ),
-        targetEpisode: {
-          opaqueEpisodeId,
-          candidateId,
-          displayLabel: storyWorkspaceEpisodeString(
-            targetRecord.displayLabel,
-            `${label}.targetEpisode.displayLabel`,
-            { pattern: STORY_WORKSPACE_EPISODE_DISPLAY_LABEL },
-          ),
-          relation,
-        },
-        label: storyWorkspaceEpisodePublicText(option.label, `${label}.label`, {
-          min: 1, max: 160,
-        }),
-        description: storyWorkspaceEpisodePublicText(
-          option.description,
-          `${label}.description`,
-          { min: 1, max: 500 },
-        ),
-        displayCommand,
-        availability,
-        isRecommended: storyWorkspaceEpisodeBoolean(
-          option.isRecommended,
-          `${label}.isRecommended`,
-        ),
-        canDispatch,
-        disabledReason,
-        canonicalInputs: storyWorkspaceEpisodeArray(
-          option.canonicalInputs,
-          `${label}.canonicalInputs`,
-          storyWorkspaceParseEpisodeActionCanonicalInputV2,
-          16,
-        ),
-        consequences: storyWorkspaceEpisodeArray(
-          option.consequences,
-          `${label}.consequences`,
-          (consequence, consequenceIndex) => storyWorkspaceEpisodePublicText(
-            consequence,
-            `${label}.consequences[${consequenceIndex}]`,
-            { min: 1, max: 200 },
-          ),
-          8,
-        ),
-        dispatchState,
-      };
-    },
-    9,
-  );
-  storyWorkspaceEpisodeUnique(
-    actionOptions.map((option) => option.actionId),
-    'actionProjection.actionOptions.actionId',
-  );
-  if (actionOptions.length === 0) {
-    if (recommendedActionId !== null) {
-      throw new Error('empty actionProjection cannot recommend an action.');
-    }
-  } else if (
-    recommendedActionId !== actionOptions[0]?.actionId
-    || actionOptions.filter((option) => option.isRecommended).length !== 1
-    || !actionOptions[0]?.isRecommended
-  ) {
-    throw new Error('actionProjection recommendation is inconsistent.');
-  }
-    return { recommendedActionId, actionOptions };
-  } finally {
-    if (visitor !== undefined) storyWorkspaceEpisodeStringFieldVisitors.pop();
-  }
-}
-
-export function storyWorkspaceEpisodeOptionCanonicalInputs(
-  option: StoryWorkspaceEpisodeActionOptionV2,
-): readonly StoryWorkspaceEpisodeCanonicalInputV2[] {
-  return option.canonicalInputs.map((input) => ({
-    label: input.label,
-    availability: input.availability,
-    revision: input.publicRevision,
-  }));
-}
-
 const STORY_WORKSPACE_EPISODE_ARTIFACT_RULES = {
   'episode-outline.md': ['plan_episode', ['episode_overview', 'storyline_navigator', 'narrative_workbench']],
   'script.md': ['write_script', ['narrative_workbench', 'shot_inspector']],
@@ -2525,13 +1850,11 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
     if (!Object.prototype.hasOwnProperty.call(compatibleRecord, 'documents')) {
       compatibleRecord.documents = [];
     }
-    if (!Object.prototype.hasOwnProperty.call(compatibleRecord, 'actionProjection')) {
-      compatibleRecord.actionProjection = null;
-    }
     compatibleValue = compatibleRecord;
   }
   const record = storyWorkspaceEpisodeRecord(compatibleValue, 'Episode artifact surface', [
-    'runId', 'opaqueEpisodeId', 'manifestRevision', 'etag', 'bindingAvailability', 'bindingRecovery', 'artifacts', 'documents', 'narrative', 'auxiliary', 'workflow', 'actionProjection',
+    'runId', 'opaqueEpisodeId', 'episodeCode', 'manifestRevision', 'etag',
+    'bindingAvailability', 'artifacts', 'documents', 'narrative', 'auxiliary',
   ]);
   const runId = storyWorkspaceEpisodeString(record.runId, 'surface.runId', { pattern: STORY_WORKSPACE_EPISODE_RUN_ID });
   const bindingAvailability = storyWorkspaceEpisodeEnum(
@@ -2540,13 +1863,17 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
     ['bound', 'unbound'],
   );
   const opaqueEpisodeId = storyWorkspaceEpisodeNullableId(record.opaqueEpisodeId, 'surface.opaqueEpisodeId');
+  const episodeCode = record.episodeCode === null
+    ? null
+    : storyWorkspaceEpisodeString(record.episodeCode, 'surface.episodeCode', {
+      pattern: STORY_WORKSPACE_EPISODE_DISPLAY_LABEL,
+    });
   const manifestRevision = record.manifestRevision === null
     ? null
     : storyWorkspaceEpisodeString(record.manifestRevision, 'surface.manifestRevision', { pattern: STORY_WORKSPACE_EPISODE_REVISION });
   const etag = record.etag === null
     ? null
     : storyWorkspaceEpisodeString(record.etag, 'surface.etag', { pattern: STORY_WORKSPACE_EPISODE_REVISION });
-  const bindingRecovery = storyWorkspaceParseEpisodeBindingRecovery(record.bindingRecovery);
   const artifacts = storyWorkspaceEpisodeArray(record.artifacts, 'artifacts', storyWorkspaceParseEpisodeManifestEntry, 256);
   storyWorkspaceEpisodeUnique(artifacts.map((item) => item.relativeKey), 'artifacts.relativeKey');
   const documents = storyWorkspaceEpisodeArray(
@@ -2558,13 +1885,14 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
   storyWorkspaceEpisodeUnique(documents.map((item) => item.relativeKey), 'documents.relativeKey');
   const narrative = record.narrative === null ? null : storyWorkspaceParseEpisodeNarrative(record.narrative);
   const auxiliary = record.auxiliary === null ? null : storyWorkspaceParseEpisodeAuxiliary(record.auxiliary);
-  const workflow = record.workflow === null ? null : storyWorkspaceParseEpisodeWorkflow(record.workflow);
-  const actionProjection = record.actionProjection === null
-    ? null
-    : storyWorkspaceParseEpisodeActionProjectionV2(record.actionProjection);
   if (bindingAvailability === 'bound') {
-    if (opaqueEpisodeId === null || manifestRevision === null || etag === null || workflow === null) {
-      throw new Error('bound Episode artifact surface requires identity, revisions, and workflow.');
+    if (
+      opaqueEpisodeId === null
+      || episodeCode === null
+      || manifestRevision === null
+      || etag === null
+    ) {
+      throw new Error('bound Episode artifact surface requires identity and revisions.');
     }
     const expectedKeys = Object.keys(STORY_WORKSPACE_EPISODE_ARTIFACT_RULES);
     if (
@@ -2583,28 +1911,25 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
     }
   } else if (
     opaqueEpisodeId !== null
+    || episodeCode !== null
     || manifestRevision !== null
     || etag !== null
     || artifacts.length > 0
     || documents.length > 0
     || narrative !== null
     || auxiliary !== null
-    || workflow !== null
-    || actionProjection !== null
   ) throw new Error('unbound Episode artifact surface cannot contain artifacts.');
   const surface: StoryWorkspaceEpisodeArtifactSurface = {
     runId,
     opaqueEpisodeId,
+    episodeCode,
     manifestRevision,
     etag,
     bindingAvailability,
-    bindingRecovery,
     artifacts,
     documents,
     narrative,
     auxiliary,
-    workflow,
-    actionProjection,
   };
   storyWorkspaceEpisodeAssertLinks(surface);
   return surface;
@@ -2630,57 +1955,4 @@ export function storyWorkspaceParseEpisodeArtifactSurface(
     storyWorkspaceEpisodeStringFieldVisitors.pop();
   }
   return surface;
-}
-
-const STORY_WORKSPACE_EPISODE_ACTION_MESSAGE_ID =
-  /^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/;
-
-function storyWorkspaceEpisodeActionMachineString(
-  value: unknown,
-  pattern: RegExp,
-): string {
-  if (typeof value !== 'string' || !pattern.test(value)) {
-    throw new Error('Episode action response contains an invalid machine value.');
-  }
-  return value;
-}
-
-/** Strictly hydrate the public 202 response without accepting Agent payload fields. */
-export function storyWorkspaceParseEpisodeActionAccepted(
-  value: unknown,
-): StoryWorkspaceEpisodeActionAccepted {
-  const record = storyWorkspaceEpisodeRecord(value, 'Episode action response', [
-    'runId', 'episodeId', 'capability', 'messageId', 'accepted', 'replayed',
-  ]);
-  const runId = storyWorkspaceEpisodeActionMachineString(
-    record.runId,
-    STORY_WORKSPACE_EPISODE_RUN_ID,
-  );
-  const episodeId = record.episodeId === null
-    ? null
-    : storyWorkspaceEpisodeActionMachineString(record.episodeId, STORY_WORKSPACE_EPISODE_HEX_ID);
-  const capabilities: readonly StoryWorkspaceEpisodeActionCapability[] = [
-    ...STORY_WORKSPACE_EPISODE_ACTIONS,
-    'recover_first_episode_binding',
-  ];
-  if (typeof record.capability !== 'string' || !capabilities.includes(
-    record.capability as StoryWorkspaceEpisodeActionCapability,
-  )) {
-    throw new Error('Episode action response contains an invalid capability.');
-  }
-  const messageId = storyWorkspaceEpisodeActionMachineString(
-    record.messageId,
-    STORY_WORKSPACE_EPISODE_ACTION_MESSAGE_ID,
-  );
-  if (record.accepted !== true || typeof record.replayed !== 'boolean') {
-    throw new Error('Episode action response contains an invalid acceptance state.');
-  }
-  return {
-    runId,
-    episodeId,
-    capability: record.capability as StoryWorkspaceEpisodeActionCapability,
-    messageId,
-    accepted: true,
-    replayed: record.replayed,
-  };
 }

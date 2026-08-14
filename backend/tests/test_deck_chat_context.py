@@ -23,6 +23,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from services.deck.chat_context import DeckChatContextError, DeckChatContextService
 from services.deck.runtime_context import _compatibility_flag
 import database
+from backend.schema import legacy_main_sqlite
 from tests.test_deck_plugin_binding import BindingFixture, DECK_ID
 
 
@@ -70,12 +71,17 @@ class DeckChatContextTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.environment = mock.patch.dict(
             os.environ,
-            {"INK_ENVIRONMENT": "test"},
+            {
+                "INK_DECK_HOST_COMPATIBLE": "1",
+                "INK_CLAUDE_AGENT_CONTRACT_COMPATIBLE": "1",
+                "INK_STORY_SCHEMA_COMPATIBLE": "1",
+                "INK_DECK_RUNTIME_CONFIG_COMPATIBLE": "1",
+            },
         )
         self.environment.start()
         self.fixture = BindingFixture()
-        database.create_runtime_plugin_tables(self.fixture.db)
-        database.create_claude_plugin_tables(self.fixture.db)
+        legacy_main_sqlite.create_runtime_plugin_tables(self.fixture.db)
+        legacy_main_sqlite.create_claude_plugin_tables(self.fixture.db)
         self.fixture.db.execute(
             """
             INSERT INTO voices (

@@ -106,6 +106,7 @@
 
 .story-workspace-settings__nav-item:focus-visible,
 .story-workspace-settings__language-button:focus-visible,
+.story-workspace-settings__theme-button:focus-visible,
 .story-workspace-settings__switch:focus-visible {
   outline: 2px solid var(--color-border-focus);
   outline-offset: 2px;
@@ -200,6 +201,7 @@
 }
 
 .story-workspace-settings__field label,
+.story-workspace-settings__theme-field strong,
 .story-workspace-settings__toggle-row strong {
   color: var(--color-text-primary);
   font-size: 14px;
@@ -207,6 +209,7 @@
 }
 
 .story-workspace-settings__field p,
+.story-workspace-settings__theme-field p,
 .story-workspace-settings__toggle-row p {
   margin: 6px 0 0;
   color: var(--color-text-secondary);
@@ -241,6 +244,50 @@
 .story-workspace-settings__hint {
   color: var(--color-text-muted) !important;
   font-size: 12px !important;
+}
+
+.story-workspace-settings__theme-field {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--color-border-paper);
+}
+
+.story-workspace-settings__theme-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.story-workspace-settings__theme-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-paper);
+  border-radius: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+}
+
+.story-workspace-settings__theme-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.story-workspace-settings__theme-button:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.story-workspace-settings__theme-button.is-active {
+  color: var(--color-text-on-action);
+  background: var(--color-text-primary);
+  border-color: var(--color-text-primary);
 }
 
 .story-workspace-settings__toggle-row {

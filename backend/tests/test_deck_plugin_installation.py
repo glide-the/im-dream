@@ -11,6 +11,7 @@ import unittest
 import uuid
 
 from backend import database
+from backend.schema import legacy_main_sqlite
 from backend.models.deck_plugin import (
     DeckPluginInstallation,
     DeckPluginManifestV1,
@@ -52,7 +53,7 @@ class InstallationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
-        database.create_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
         self.add_release("3.1.0")
         self.service = InstallationService(self.db, runtime_preparer=ready_preparer)
 
@@ -417,7 +418,7 @@ class InstallationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_database_constraints_indexes_and_idempotent_initialization(self):
-        database.create_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
         indexes = {
             row["name"]
             for row in self.db.execute(

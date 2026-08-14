@@ -1,244 +1,1092 @@
-# [Input] Notion connector persistence and canonical snapshot storage.
-# [Output] Provide SQLite-backed connector, resource, and snapshot helpers.
-# [Pos] store node in backend/notion
-# [Sync] 2026-07-04: initial Notion connector persistence layer with selected
-#                    resource persistence, snapshot history, and workspace attach
-#                    helpers for canonical snapshot materialization.
-# [Sync] 2026-07-08: expose selected connector resources on connector rows so
-#                    Settings refreshes and Chat linked-resource summaries use
-#                    persisted database state instead of optimistic UI state.
+# [Input] Unified PostgreSQL pool/UoW and canonical Notion snapshot payloads.
+# [Output] Domain-scoped connector, resource, snapshot, page, and thread storage.
+# [Pos] PostgreSQL-only runtime store for backend/notion.
 
-"""SQLite-backed persistence for Notion resource connectors."""
+"""PostgreSQL persistence for Notion resource connectors.
+
+The five tables are created only by Admin-owned Drizzle migrations. This
+module owns runtime queries and transactions; it never creates schema objects
+and has no alternate database implementation.
+"""
+
 from __future__ import annotations
 
-import json
-import os
-import sqlite3
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional
+import json
+from threading import RLock
+from typing import Any, Optional, Protocol, cast
 from uuid import uuid4
+
+try:
+    from persistence.postgres import ConnectionPool, PostgresPool
+    from persistence.unit_of_work import PostgresUnitOfWork, UnitOfWork
+except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+    from backend.persistence.postgres import ConnectionPool, PostgresPool
+    from backend.persistence.unit_of_work import PostgresUnitOfWork, UnitOfWork
 
 from libs.claude_agent_kit.server.notion_snapshot import (
     CanonicalWorkspaceSnapshot,
     SnapshotLifecycleState,
-    SnapshotMetadata,
-    get_notion_snapshot_resource_data,
-    snapshot_identity,
 )
 
-from .errors import NotionConnectorNotFoundError, NotionSnapshotNotReadyError
+from .errors import (
+    NotionConnectorError,
+    NotionConnectorNotFoundError,
+    NotionSnapshotNotReadyError,
+)
 
 
-def _default_db_path() -> Path:
-    configured = os.environ.get("INK_AGENT_NOTION_DB_PATH", "").strip()
-    if configured:
-        return Path(configured).expanduser()
-    return Path(__file__).resolve().parents[1] / "data" / "notion-connectors.db"
+class _Cursor(Protocol):
+    rowcount: int
+
+    def fetchone(self) -> Any: ...
+
+    def fetchall(self) -> list[Any]: ...
 
 
-DB_PATH = _default_db_path()
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+UnitOfWorkFactory = Callable[[bool], UnitOfWork]
 
 
-def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0)
 
 
 def _json_dumps(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
-def _json_loads(value: Any, default: Any) -> Any:
+def _json_loads(value: Any, *, field: str, expected: type[Any]) -> Any:
+    if isinstance(value, expected):
+        return value
     if value in (None, ""):
-        return default
-    try:
-        parsed = json.loads(value)
-        return parsed if parsed is not None else default
-    except Exception:  # noqa: BLE001
-        return default
+        parsed: Any = expected()
+    else:
+        try:
+            parsed = json.loads(str(value))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise NotionConnectorError(f"Stored {field} is invalid.") from None
+    if not isinstance(parsed, expected):
+        raise NotionConnectorError(f"Stored {field} has an invalid shape.")
+    return parsed
 
 
 def _mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _snapshot_payload(snapshot: CanonicalWorkspaceSnapshot | dict[str, Any]) -> dict[str, Any]:
+def _snapshot_payload(
+    snapshot: CanonicalWorkspaceSnapshot | dict[str, Any],
+) -> dict[str, Any]:
     if is_dataclass(snapshot):
-        return asdict(snapshot)
+        return cast(dict[str, Any], asdict(snapshot))
     if isinstance(snapshot, dict):
         return dict(snapshot)
     return {}
 
 
-def get_db() -> sqlite3.Connection:
-    db = sqlite3.connect(DB_PATH)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys=ON")
-    _create_tables(db)
-    return db
-
-
-def _create_tables(db: sqlite3.Connection) -> None:
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS resource_connectors (
-          id TEXT PRIMARY KEY,
-          user_id INTEGER NOT NULL,
-          name TEXT NOT NULL,
-          platform TEXT NOT NULL,
-          auth_status TEXT NOT NULL DEFAULT 'pending',
-          config_json TEXT NOT NULL DEFAULT '{}',
-          current_snapshot_version TEXT,
-          current_source_revision TEXT,
-          current_sync_cursor TEXT,
-          last_synced_at TEXT,
-          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_resource_connectors_user_updated "
-        "ON resource_connectors(user_id, updated_at DESC)"
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS connector_resources (
-          id TEXT PRIMARY KEY,
-          connector_id TEXT NOT NULL,
-          resource_type TEXT NOT NULL,
-          external_id TEXT,
-          title TEXT NOT NULL,
-          metadata_json TEXT NOT NULL DEFAULT '{}',
-          sync_status TEXT NOT NULL DEFAULT 'synced',
-          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (connector_id) REFERENCES resource_connectors(id) ON DELETE CASCADE,
-          UNIQUE(connector_id, resource_type, external_id)
-        )
-        """
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_connector_resources_connector "
-        "ON connector_resources(connector_id, resource_type, updated_at DESC)"
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS connector_resource_pages (
-          id TEXT PRIMARY KEY,
-          resource_id TEXT NOT NULL,
-          page_id TEXT NOT NULL,
-          title TEXT NOT NULL,
-          last_edited TEXT,
-          properties_json TEXT,
-          page_json TEXT,
-          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (resource_id) REFERENCES connector_resources(id) ON DELETE CASCADE,
-          UNIQUE(resource_id, page_id)
-        )
-        """
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_connector_resource_pages_resource "
-        "ON connector_resource_pages(resource_id, last_edited DESC)"
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS connector_snapshots (
-          id TEXT PRIMARY KEY,
-          connector_id TEXT NOT NULL,
-          snapshot_version TEXT NOT NULL,
-          source_revision TEXT NOT NULL,
-          sync_cursor TEXT NOT NULL,
-          fetched_at TEXT NOT NULL,
-          state TEXT NOT NULL DEFAULT 'snapshot_ready',
-          snapshot_json TEXT NOT NULL,
-          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (connector_id) REFERENCES resource_connectors(id) ON DELETE CASCADE,
-          UNIQUE(connector_id, snapshot_version)
-        )
-        """
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_connector_snapshots_connector "
-        "ON connector_snapshots(connector_id, created_at DESC)"
-    )
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS connector_chat_threads (
-          id TEXT PRIMARY KEY,
-          connector_id TEXT NOT NULL,
-          thread_id TEXT NOT NULL,
-          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (connector_id) REFERENCES resource_connectors(id) ON DELETE CASCADE,
-          UNIQUE(connector_id, thread_id)
-        )
-        """
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_connector_chat_threads_connector "
-        "ON connector_chat_threads(connector_id, updated_at DESC)"
-    )
-    db.commit()
-
-
-def _connector_from_row(row: sqlite3.Row | None) -> Optional[dict[str, Any]]:
+def _row_mapping(row: Any | None) -> Optional[dict[str, Any]]:
     if row is None:
         return None
-    data = dict(row)
-    config = _json_loads(data.get("config_json"), {})
-    if not isinstance(config, dict):
-        config = {}
-    data["config"] = config
-    data["selected_databases"] = list(config.get("selected_databases") or [])
-    data["selected_pages"] = list(config.get("selected_pages") or [])
-    data.pop("config_json", None)
-    return data
+    if isinstance(row, Mapping):
+        return dict(row)
+    try:
+        return dict(row)
+    except (TypeError, ValueError):
+        raise NotionConnectorError("PostgreSQL returned an invalid row shape.") from None
 
 
-def _attach_connector_resources(connector: dict[str, Any] | None, user_id: int) -> dict[str, Any] | None:
-    if connector is None:
+def _iso_timestamp(value: Any) -> Any:
+    if isinstance(value, datetime):
+        normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        return normalized.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return value
+
+
+def _db_timestamp(
+    value: Any,
+    *,
+    required: bool = False,
+    field: str = "timestamp",
+) -> datetime | None:
+    if value in (None, ""):
+        if required:
+            raise NotionSnapshotNotReadyError(f"Snapshot {field} is missing.")
         return None
-    connector = dict(connector)
-    connector["sources"] = _list_connector_resources_unchecked(str(connector["id"]))
-    return connector
-
-
-def _resource_from_row(row: sqlite3.Row) -> dict[str, Any]:
-    data = dict(row)
-    data["metadata"] = _json_loads(data.get("metadata_json"), {})
-    data.pop("metadata_json", None)
-    return data
-
-
-def _snapshot_from_row(row: sqlite3.Row | None) -> Optional[dict[str, Any]]:
-    if row is None:
-        return None
-    data = dict(row)
-    snapshot = _json_loads(data.get("snapshot_json"), {})
-    if not isinstance(snapshot, dict):
-        snapshot = {}
-    return snapshot
-
-
-def _require_connector(connector_id: str, user_id: int) -> dict[str, Any]:
-    connector = get_connector(connector_id, user_id)
-    if connector is None:
-        raise NotionConnectorNotFoundError(
-            f"Connector {connector_id!r} not found for user_id={user_id}"
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            raise NotionSnapshotNotReadyError(
+                f"Snapshot {field} must be an ISO timestamp with timezone."
+            ) from None
+    if parsed.tzinfo is None:
+        raise NotionSnapshotNotReadyError(
+            f"Snapshot {field} must include a timezone."
         )
-    return connector
+    return parsed.astimezone(timezone.utc)
+
+
+class NotionConnectorRepository:
+    """Domain SQL for the five canonical Notion Connector tables."""
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def _execute(self, query: str, parameters: tuple[Any, ...] = ()) -> _Cursor:
+        return cast(_Cursor, self._connection.execute(query, parameters))
+
+    def insert_connector(
+        self,
+        *,
+        connector_id: str,
+        user_id: int,
+        name: str,
+        platform: str,
+        config_json: str,
+        now: datetime,
+    ) -> dict[str, Any]:
+        row = self._execute(
+            """
+            /* notion.connector.insert */
+            INSERT INTO resource_connectors (
+              id, user_id, name, platform, auth_status, config_json,
+              created_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, 'pending', %s, %s, %s)
+            RETURNING *
+            """,
+            (connector_id, user_id, name, platform, config_json, now, now),
+        ).fetchone()
+        return _row_mapping(row) or {}
+
+    def list_connectors(self, user_id: int) -> list[dict[str, Any]]:
+        rows = self._execute(
+            """
+            /* notion.connector.list */
+            SELECT *
+            FROM resource_connectors
+            WHERE user_id = %s
+            ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+            """,
+            (user_id,),
+        ).fetchall()
+        return [_row_mapping(row) or {} for row in rows]
+
+    def get_connector(
+        self,
+        connector_id: str,
+        user_id: int | None = None,
+        *,
+        for_update: bool = False,
+    ) -> Optional[dict[str, Any]]:
+        marker = (
+            "/* notion.connector.get_user_for_update */"
+            if user_id is not None and for_update
+            else "/* notion.connector.get_user */"
+            if user_id is not None
+            else "/* notion.connector.get_any_for_update */"
+            if for_update
+            else "/* notion.connector.get_any */"
+        )
+        user_clause = "AND user_id = %s" if user_id is not None else ""
+        lock_clause = "FOR UPDATE" if for_update else ""
+        parameters: tuple[Any, ...] = (
+            (connector_id, user_id) if user_id is not None else (connector_id,)
+        )
+        row = self._execute(
+            f"""
+            {marker}
+            SELECT *
+            FROM resource_connectors
+            WHERE id = %s {user_clause}
+            LIMIT 1
+            {lock_clause}
+            """,
+            parameters,
+        ).fetchone()
+        return _row_mapping(row)
+
+    def get_active_connector(self, user_id: int) -> Optional[dict[str, Any]]:
+        row = self._execute(
+            """
+            /* notion.connector.active */
+            SELECT *
+            FROM resource_connectors
+            WHERE user_id = %s
+            ORDER BY
+              CASE auth_status
+                WHEN 'authenticated' THEN 0
+                WHEN 'pending' THEN 1
+                WHEN 'expired' THEN 2
+                ELSE 3
+              END,
+              updated_at DESC NULLS LAST,
+              created_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        return _row_mapping(row)
+
+    def update_connector(
+        self,
+        row: Mapping[str, Any],
+        *,
+        user_id: int,
+    ) -> Optional[dict[str, Any]]:
+        result = self._execute(
+            """
+            /* notion.connector.update */
+            UPDATE resource_connectors
+            SET name = %s,
+                platform = %s,
+                auth_status = %s,
+                config_json = %s,
+                current_snapshot_version = %s,
+                current_source_revision = %s,
+                current_sync_cursor = %s,
+                last_synced_at = %s,
+                updated_at = %s
+            WHERE id = %s AND user_id = %s
+            RETURNING *
+            """,
+            (
+                row["name"],
+                row["platform"],
+                row["auth_status"],
+                row["config_json"],
+                row.get("current_snapshot_version"),
+                row.get("current_source_revision"),
+                row.get("current_sync_cursor"),
+                _db_timestamp(row.get("last_synced_at"), field="last_synced_at"),
+                row["updated_at"],
+                row["id"],
+                user_id,
+            ),
+        ).fetchone()
+        return _row_mapping(result)
+
+    def delete_connector(self, connector_id: str, user_id: int) -> bool:
+        return (
+            self._execute(
+                """
+                /* notion.connector.delete */
+                DELETE FROM resource_connectors
+                WHERE id = %s AND user_id = %s
+                RETURNING id
+                """,
+                (connector_id, user_id),
+            ).fetchone()
+            is not None
+        )
+
+    def delete_selected_resources(self, connector_id: str) -> None:
+        self._execute(
+            """
+            /* notion.resource.delete_selected */
+            DELETE FROM connector_resources
+            WHERE connector_id = %s
+              AND resource_type IN ('notion_database', 'notion_page')
+            """,
+            (connector_id,),
+        )
+
+    def insert_resource(
+        self,
+        *,
+        resource_id: str,
+        connector_id: str,
+        resource_type: str,
+        external_id: str,
+        title: str,
+        metadata_json: str,
+        now: datetime,
+    ) -> None:
+        self._execute(
+            """
+            /* notion.resource.insert */
+            INSERT INTO connector_resources (
+              id, connector_id, resource_type, external_id, title,
+              metadata_json, sync_status, created_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, 'synced', %s, %s)
+            """,
+            (
+                resource_id,
+                connector_id,
+                resource_type,
+                external_id,
+                title,
+                metadata_json,
+                now,
+                now,
+            ),
+        )
+
+    def list_resources(self, connector_id: str) -> list[dict[str, Any]]:
+        rows = self._execute(
+            """
+            /* notion.resource.list */
+            SELECT *
+            FROM connector_resources
+            WHERE connector_id = %s
+            ORDER BY resource_type, lower(title), title, created_at DESC NULLS LAST
+            """,
+            (connector_id,),
+        ).fetchall()
+        return [_row_mapping(row) or {} for row in rows]
+
+    def delete_resource(self, connector_id: str, resource_id: str) -> bool:
+        return (
+            self._execute(
+                """
+                /* notion.resource.delete */
+                DELETE FROM connector_resources
+                WHERE id = %s AND connector_id = %s
+                RETURNING id
+                """,
+                (resource_id, connector_id),
+            ).fetchone()
+            is not None
+        )
+
+    def upsert_snapshot(
+        self,
+        *,
+        snapshot_id: str,
+        connector_id: str,
+        snapshot_version: str,
+        source_revision: str,
+        sync_cursor: str,
+        fetched_at: datetime,
+        state: str,
+        snapshot_json: str,
+        now: datetime,
+    ) -> dict[str, Any]:
+        row = self._execute(
+            """
+            /* notion.snapshot.upsert */
+            INSERT INTO connector_snapshots (
+              id, connector_id, snapshot_version, source_revision, sync_cursor,
+              fetched_at, state, snapshot_json, created_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (connector_id, snapshot_version) DO UPDATE SET
+              source_revision = EXCLUDED.source_revision,
+              sync_cursor = EXCLUDED.sync_cursor,
+              fetched_at = EXCLUDED.fetched_at,
+              state = EXCLUDED.state,
+              snapshot_json = EXCLUDED.snapshot_json,
+              updated_at = EXCLUDED.updated_at
+            RETURNING *
+            """,
+            (
+                snapshot_id,
+                connector_id,
+                snapshot_version,
+                source_revision,
+                sync_cursor,
+                fetched_at,
+                state,
+                snapshot_json,
+                fetched_at,
+                now,
+            ),
+        ).fetchone()
+        return _row_mapping(row) or {}
+
+    def find_database_resource(
+        self, connector_id: str, external_id: str
+    ) -> Optional[str]:
+        row = self._execute(
+            """
+            /* notion.resource.find_database */
+            SELECT id
+            FROM connector_resources
+            WHERE connector_id = %s
+              AND resource_type = 'notion_database'
+              AND external_id = %s
+            LIMIT 1
+            """,
+            (connector_id, external_id),
+        ).fetchone()
+        mapped = _row_mapping(row)
+        return str(mapped["id"]) if mapped is not None else None
+
+    def replace_resource_pages(
+        self,
+        resource_id: str,
+        pages: Iterable[Mapping[str, Any]],
+        *,
+        fetched_at: datetime,
+        now: datetime,
+    ) -> None:
+        self._execute(
+            """
+            /* notion.resource_page.delete */
+            DELETE FROM connector_resource_pages
+            WHERE resource_id = %s
+            """,
+            (resource_id,),
+        )
+        for page in pages:
+            page_map = dict(page)
+            page_id = str(page_map.get("page_id") or page_map.get("id") or "").strip()
+            if not page_id:
+                continue
+            self._execute(
+                """
+                /* notion.resource_page.insert */
+                INSERT INTO connector_resource_pages (
+                  id, resource_id, page_id, title, last_edited,
+                  properties_json, page_json, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    str(uuid4()),
+                    resource_id,
+                    page_id,
+                    str(page_map.get("title") or page_id),
+                    _db_timestamp(page_map.get("last_edited"), field="last_edited"),
+                    _json_dumps(page_map.get("properties") or {}),
+                    _json_dumps(page_map),
+                    fetched_at,
+                    now,
+                ),
+            )
+
+    def get_current_snapshot(
+        self, connector_id: str, user_id: int
+    ) -> Optional[dict[str, Any]]:
+        row = self._execute(
+            """
+            /* notion.snapshot.current */
+            SELECT s.*
+            FROM resource_connectors AS c
+            JOIN connector_snapshots AS s
+              ON s.connector_id = c.id
+             AND s.snapshot_version = c.current_snapshot_version
+            WHERE c.id = %s AND c.user_id = %s
+            LIMIT 1
+            """,
+            (connector_id, user_id),
+        ).fetchone()
+        return _row_mapping(row)
+
+    def get_snapshot(
+        self, connector_id: str, snapshot_version: str, user_id: int
+    ) -> Optional[dict[str, Any]]:
+        row = self._execute(
+            """
+            /* notion.snapshot.get */
+            SELECT s.*
+            FROM connector_snapshots AS s
+            JOIN resource_connectors AS c ON c.id = s.connector_id
+            WHERE s.connector_id = %s
+              AND s.snapshot_version = %s
+              AND c.user_id = %s
+            LIMIT 1
+            """,
+            (connector_id, snapshot_version, user_id),
+        ).fetchone()
+        return _row_mapping(row)
+
+    def list_snapshots(self, connector_id: str, user_id: int) -> list[dict[str, Any]]:
+        rows = self._execute(
+            """
+            /* notion.snapshot.list */
+            SELECT s.*
+            FROM connector_snapshots AS s
+            JOIN resource_connectors AS c ON c.id = s.connector_id
+            WHERE s.connector_id = %s AND c.user_id = %s
+            ORDER BY s.created_at DESC NULLS LAST
+            """,
+            (connector_id, user_id),
+        ).fetchall()
+        return [_row_mapping(row) or {} for row in rows]
+
+    def attach_thread(
+        self,
+        connector_id: str,
+        thread_id: str,
+        *,
+        now: datetime,
+    ) -> None:
+        self._execute(
+            """
+            /* notion.thread.upsert */
+            INSERT INTO connector_chat_threads (
+              id, connector_id, thread_id, created_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (connector_id, thread_id) DO UPDATE SET
+              updated_at = EXCLUDED.updated_at
+            """,
+            (str(uuid4()), connector_id, thread_id, now, now),
+        )
+
+    def get_connector_for_thread(
+        self, thread_id: str, user_id: int
+    ) -> Optional[dict[str, Any]]:
+        row = self._execute(
+            """
+            /* notion.thread.connector */
+            SELECT c.*
+            FROM connector_chat_threads AS t
+            JOIN resource_connectors AS c ON c.id = t.connector_id
+            WHERE t.thread_id = %s AND c.user_id = %s
+            ORDER BY t.updated_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            (thread_id, user_id),
+        ).fetchone()
+        return _row_mapping(row)
+
+
+class NotionConnectorStore:
+    """Transactional application service preserving the historical store API."""
+
+    def __init__(
+        self,
+        pool: ConnectionPool | None = None,
+        *,
+        unit_of_work_factory: UnitOfWorkFactory | None = None,
+    ) -> None:
+        if (pool is None) == (unit_of_work_factory is None):
+            raise ValueError("exactly one PostgreSQL dependency is required")
+        self._unit_of_work_factory = unit_of_work_factory or (
+            lambda read_only: PostgresUnitOfWork(
+                cast(ConnectionPool, pool), read_only=read_only
+            )
+        )
+
+    def _unit_of_work(self, *, read_only: bool) -> UnitOfWork:
+        return self._unit_of_work_factory(read_only)
+
+    @staticmethod
+    def _connector_from_row(row: Any | None) -> Optional[dict[str, Any]]:
+        data = _row_mapping(row)
+        if data is None:
+            return None
+        config = _json_loads(data.get("config_json"), field="connector config", expected=dict)
+        data["config"] = config
+        data["selected_databases"] = list(config.get("selected_databases") or [])
+        data["selected_pages"] = list(config.get("selected_pages") or [])
+        data.pop("config_json", None)
+        for field in ("last_synced_at", "created_at", "updated_at"):
+            data[field] = _iso_timestamp(data.get(field))
+        return data
+
+    @staticmethod
+    def _resource_from_row(row: Any) -> dict[str, Any]:
+        data = _row_mapping(row) or {}
+        data["metadata"] = _json_loads(
+            data.get("metadata_json"), field="resource metadata", expected=dict
+        )
+        data.pop("metadata_json", None)
+        for field in ("created_at", "updated_at"):
+            data[field] = _iso_timestamp(data.get(field))
+        data["selected"] = True
+        return data
+
+    @staticmethod
+    def _snapshot_from_row(row: Any | None) -> Optional[dict[str, Any]]:
+        data = _row_mapping(row)
+        if data is None:
+            return None
+        return cast(
+            dict[str, Any],
+            _json_loads(data.get("snapshot_json"), field="snapshot", expected=dict),
+        )
+
+    def _attach_connector_resources(
+        self,
+        repository: NotionConnectorRepository,
+        connector: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if connector is None:
+            return None
+        result = dict(connector)
+        result["sources"] = [
+            self._resource_from_row(row)
+            for row in repository.list_resources(str(result["id"]))
+        ]
+        return result
+
+    @staticmethod
+    def _require_connector_row(
+        repository: NotionConnectorRepository,
+        connector_id: str,
+        user_id: int,
+        *,
+        for_update: bool = False,
+    ) -> dict[str, Any]:
+        connector = repository.get_connector(
+            connector_id, user_id, for_update=for_update
+        )
+        if connector is None:
+            raise NotionConnectorNotFoundError(
+                f"Connector {connector_id!r} not found for user_id={user_id}"
+            )
+        return connector
+
+    def create_connector(
+        self,
+        user_id: int,
+        name: str,
+        platform: str = "notion",
+        config: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        with self._unit_of_work(read_only=False) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            row = repository.insert_connector(
+                connector_id=str(uuid4()),
+                user_id=user_id,
+                name=name.strip() or "Notion Connector",
+                platform=platform.strip() or "notion",
+                config_json=_json_dumps(config or {}),
+                now=_utcnow(),
+            )
+            connector = self._attach_connector_resources(
+                repository, self._connector_from_row(row)
+            )
+            unit_of_work.commit()
+        return connector or {}
+
+    def list_connectors(self, user_id: int) -> list[dict[str, Any]]:
+        with self._unit_of_work(read_only=True) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            connectors: list[dict[str, Any]] = []
+            for row in repository.list_connectors(user_id):
+                connector = self._attach_connector_resources(
+                    repository, self._connector_from_row(row)
+                )
+                if connector is not None:
+                    connectors.append(connector)
+            return connectors
+
+    def get_connector(
+        self, connector_id: str, user_id: Optional[int] = None
+    ) -> Optional[dict[str, Any]]:
+        with self._unit_of_work(read_only=True) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            connector = self._connector_from_row(
+                repository.get_connector(connector_id, user_id)
+            )
+            return self._attach_connector_resources(repository, connector)
+
+    def get_active_connector_for_user(self, user_id: int) -> Optional[dict[str, Any]]:
+        with self._unit_of_work(read_only=True) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            return self._connector_from_row(repository.get_active_connector(user_id))
+
+    def update_connector(
+        self,
+        connector_id: str,
+        user_id: int,
+        updates: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        with self._unit_of_work(read_only=False) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            row = self._require_connector_row(
+                repository, connector_id, user_id, for_update=True
+            )
+            config = _json_loads(
+                row.get("config_json"), field="connector config", expected=dict
+            )
+            for field in ("name", "platform", "auth_status"):
+                value = updates.get(field)
+                if value is not None and str(value).strip():
+                    row[field] = str(value).strip()
+            if isinstance(updates.get("config"), Mapping):
+                config.update(dict(cast(Mapping[str, Any], updates["config"])))
+            for field in (
+                "current_snapshot_version",
+                "current_source_revision",
+                "current_sync_cursor",
+                "last_synced_at",
+            ):
+                if field in updates:
+                    row[field] = updates[field]
+            row["config_json"] = _json_dumps(config)
+            row["updated_at"] = _utcnow()
+            updated = repository.update_connector(row, user_id=user_id)
+            connector = self._attach_connector_resources(
+                repository, self._connector_from_row(updated)
+            )
+            unit_of_work.commit()
+        return connector or {}
+
+    def delete_connector(self, connector_id: str, user_id: int) -> bool:
+        with self._unit_of_work(read_only=False) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            deleted = repository.delete_connector(connector_id, user_id)
+            unit_of_work.commit()
+            return deleted
+
+    def save_auth_state(
+        self,
+        connector_id: str,
+        user_id: int,
+        *,
+        auth_status: str,
+        config_patch: Optional[Mapping[str, Any]] = None,
+        verification_url: Optional[str] = None,
+        verification_code: Optional[str] = None,
+        poll_interval_seconds: Optional[int] = None,
+        error_detail: Optional[str] = None,
+    ) -> dict[str, Any]:
+        with self._unit_of_work(read_only=False) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            row = self._require_connector_row(
+                repository, connector_id, user_id, for_update=True
+            )
+            config = _json_loads(
+                row.get("config_json"), field="connector config", expected=dict
+            )
+            if config_patch:
+                config.update({key: value for key, value in config_patch.items() if value is not None})
+            if verification_url is not None:
+                config["verification_url"] = verification_url
+            if verification_code is not None:
+                config["verification_code"] = verification_code
+            if poll_interval_seconds is not None:
+                config["poll_interval_seconds"] = int(poll_interval_seconds)
+            if error_detail is not None:
+                config["auth_error"] = error_detail
+            row["auth_status"] = auth_status
+            row["config_json"] = _json_dumps(config)
+            row["updated_at"] = _utcnow()
+            updated = repository.update_connector(row, user_id=user_id)
+            connector = self._attach_connector_resources(
+                repository, self._connector_from_row(updated)
+            )
+            unit_of_work.commit()
+        return connector or {}
+
+    def replace_connector_resources(
+        self,
+        connector_id: str,
+        user_id: int,
+        databases: Iterable[Mapping[str, Any]],
+        pages: Iterable[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        selected_databases = [dict(item) for item in databases]
+        selected_pages = [dict(item) for item in pages]
+        with self._unit_of_work(read_only=False) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            connector_row = self._require_connector_row(
+                repository, connector_id, user_id, for_update=True
+            )
+            repository.delete_selected_resources(connector_id)
+            now = _utcnow()
+            for item in selected_databases:
+                external_id = str(item.get("database_id") or item.get("id") or "").strip()
+                if not external_id:
+                    continue
+                repository.insert_resource(
+                    resource_id=str(uuid4()),
+                    connector_id=connector_id,
+                    resource_type="notion_database",
+                    external_id=external_id,
+                    title=str(item.get("title") or external_id),
+                    metadata_json=_json_dumps(
+                        {
+                            "page_count": item.get("page_count"),
+                            "properties_schema": item.get("properties_schema") or {},
+                            "url": item.get("url") or "",
+                            "last_edited": item.get("last_edited") or "",
+                            "raw": item.get("raw") or {},
+                        }
+                    ),
+                    now=now,
+                )
+            for item in selected_pages:
+                external_id = str(item.get("page_id") or item.get("id") or "").strip()
+                if not external_id:
+                    continue
+                repository.insert_resource(
+                    resource_id=str(uuid4()),
+                    connector_id=connector_id,
+                    resource_type="notion_page",
+                    external_id=external_id,
+                    title=str(item.get("title") or external_id),
+                    metadata_json=_json_dumps(
+                        {
+                            "url": item.get("url") or "",
+                            "last_edited": item.get("last_edited") or "",
+                            "parent": item.get("parent") or {},
+                            "raw": item.get("raw") or {},
+                        }
+                    ),
+                    now=now,
+                )
+            config = _json_loads(
+                connector_row.get("config_json"),
+                field="connector config",
+                expected=dict,
+            )
+            config.update(
+                {
+                    "selected_databases": [
+                        item.get("database_id") or item.get("id")
+                        for item in selected_databases
+                        if item.get("database_id") or item.get("id")
+                    ],
+                    "selected_pages": [
+                        item.get("page_id") or item.get("id")
+                        for item in selected_pages
+                        if item.get("page_id") or item.get("id")
+                    ],
+                }
+            )
+            connector_row["config_json"] = _json_dumps(config)
+            connector_row["updated_at"] = now
+            updated = repository.update_connector(connector_row, user_id=user_id)
+            connector = self._attach_connector_resources(
+                repository, self._connector_from_row(updated)
+            )
+            resources = [
+                self._resource_from_row(row)
+                for row in repository.list_resources(connector_id)
+            ]
+            unit_of_work.commit()
+        return {"connector": connector or {}, "resources": resources}
+
+    def list_connector_resources(
+        self, connector_id: str, user_id: int
+    ) -> list[dict[str, Any]]:
+        with self._unit_of_work(read_only=True) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            self._require_connector_row(repository, connector_id, user_id)
+            return [
+                self._resource_from_row(row)
+                for row in repository.list_resources(connector_id)
+            ]
+
+    def delete_connector_resource(
+        self, connector_id: str, user_id: int, resource_id: str
+    ) -> bool:
+        with self._unit_of_work(read_only=False) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            self._require_connector_row(
+                repository, connector_id, user_id, for_update=True
+            )
+            deleted = repository.delete_resource(connector_id, resource_id)
+            unit_of_work.commit()
+            return deleted
+
+    def save_snapshot(
+        self,
+        connector_id: str,
+        user_id: int,
+        workspace_id: str,
+        snapshot: CanonicalWorkspaceSnapshot | dict[str, Any],
+    ) -> dict[str, Any]:
+        del workspace_id  # The canonical payload already carries workspace identity.
+        payload = _snapshot_payload(snapshot)
+        metadata = _mapping(payload.get("metadata"))
+        if not metadata:
+            raise NotionSnapshotNotReadyError("Snapshot metadata is missing.")
+        snapshot_version = str(metadata.get("snapshot_version") or "").strip()
+        source_revision = str(metadata.get("source_revision") or "").strip()
+        sync_cursor = str(metadata.get("sync_cursor") or "").strip()
+        if not snapshot_version:
+            raise NotionSnapshotNotReadyError("Snapshot version is missing.")
+        if not source_revision:
+            raise NotionSnapshotNotReadyError("Snapshot source revision is missing.")
+        if not sync_cursor:
+            raise NotionSnapshotNotReadyError("Snapshot sync cursor is missing.")
+        fetched_at = _db_timestamp(
+            metadata.get("fetched_at") or _utcnow(),
+            required=True,
+            field="fetched_at",
+        )
+        assert fetched_at is not None
+        state_value = metadata.get("state") or SnapshotLifecycleState.SNAPSHOT_READY.value
+        state = state_value.value if isinstance(state_value, SnapshotLifecycleState) else str(state_value)
+        now = _utcnow()
+        with self._unit_of_work(read_only=False) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            connector_row = self._require_connector_row(
+                repository, connector_id, user_id, for_update=True
+            )
+            repository.upsert_snapshot(
+                snapshot_id=str(uuid4()),
+                connector_id=connector_id,
+                snapshot_version=snapshot_version,
+                source_revision=source_revision,
+                sync_cursor=sync_cursor,
+                fetched_at=fetched_at,
+                state=state,
+                snapshot_json=_json_dumps(payload),
+                now=now,
+            )
+            connector_row.update(
+                {
+                    "current_snapshot_version": snapshot_version,
+                    "current_source_revision": source_revision,
+                    "current_sync_cursor": sync_cursor,
+                    "last_synced_at": fetched_at,
+                    "auth_status": "authenticated",
+                    "updated_at": now,
+                }
+            )
+            repository.update_connector(connector_row, user_id=user_id)
+            database_pages = _mapping(payload.get("database_pages"))
+            for database_id, pages in database_pages.items():
+                if not isinstance(pages, list):
+                    continue
+                resource_id = repository.find_database_resource(
+                    connector_id, str(database_id)
+                )
+                if resource_id is None:
+                    continue
+                repository.replace_resource_pages(
+                    resource_id,
+                    [item for item in pages if isinstance(item, Mapping)],
+                    fetched_at=fetched_at,
+                    now=now,
+                )
+            unit_of_work.commit()
+        return payload
+
+    def get_current_snapshot(
+        self, workspace_id: str, connector_id: str, user_id: int
+    ) -> Optional[dict[str, Any]]:
+        del workspace_id
+        with self._unit_of_work(read_only=True) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            return self._snapshot_from_row(
+                repository.get_current_snapshot(connector_id, user_id)
+            )
+
+    def get_snapshot(
+        self, connector_id: str, snapshot_version: str, user_id: int
+    ) -> Optional[dict[str, Any]]:
+        with self._unit_of_work(read_only=True) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            self._require_connector_row(repository, connector_id, user_id)
+            return self._snapshot_from_row(
+                repository.get_snapshot(connector_id, snapshot_version, user_id)
+            )
+
+    def list_snapshots(
+        self, connector_id: str, user_id: int
+    ) -> list[dict[str, Any]]:
+        with self._unit_of_work(read_only=True) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            self._require_connector_row(repository, connector_id, user_id)
+            snapshots: list[dict[str, Any]] = []
+            for row in repository.list_snapshots(connector_id, user_id):
+                item = dict(row)
+                item["snapshot"] = self._snapshot_from_row(row)
+                item.pop("snapshot_json", None)
+                for field in ("fetched_at", "created_at", "updated_at"):
+                    item[field] = _iso_timestamp(item.get(field))
+                snapshots.append(item)
+            return snapshots
+
+    def attach_thread_to_connector(
+        self, connector_id: str, user_id: int, thread_id: str
+    ) -> dict[str, Any]:
+        with self._unit_of_work(read_only=False) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            connector_row = self._require_connector_row(
+                repository, connector_id, user_id, for_update=True
+            )
+            repository.attach_thread(connector_id, thread_id, now=_utcnow())
+            connector = self._attach_connector_resources(
+                repository, self._connector_from_row(connector_row)
+            )
+            unit_of_work.commit()
+        return connector or {}
+
+    def get_connector_for_thread(
+        self, thread_id: str, user_id: int
+    ) -> Optional[dict[str, Any]]:
+        with self._unit_of_work(read_only=True) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            return self._connector_from_row(
+                repository.get_connector_for_thread(thread_id, user_id)
+            )
+
+
+class _DefaultNotionStoreRuntime:
+    """Own the default pool lifecycle without doing work at module import."""
+
+    def __init__(self) -> None:
+        self._lock = RLock()
+        self._store: NotionConnectorStore | None = None
+        self._owned_pool: PostgresPool | None = None
+
+    def open(
+        self,
+        *,
+        pool: ConnectionPool | None = None,
+        store: NotionConnectorStore | None = None,
+    ) -> NotionConnectorStore:
+        if pool is not None and store is not None:
+            raise ValueError("configure either a PostgreSQL pool or a store")
+        with self._lock:
+            if self._store is not None:
+                return self._store
+            owned_pool: PostgresPool | None = None
+            if store is None:
+                if pool is None:
+                    owned_pool = PostgresPool.from_env(
+                        application_name="ink-dream-notion-connectors"
+                    )
+                    try:
+                        owned_pool.open()
+                    except Exception:
+                        try:
+                            owned_pool.close()
+                        except Exception:
+                            pass
+                        raise
+                    pool = owned_pool
+                store = NotionConnectorStore(pool)
+            self._store = store
+            self._owned_pool = owned_pool
+            return store
+
+    def get(self) -> NotionConnectorStore:
+        with self._lock:
+            existing = self._store
+        return existing if existing is not None else self.open()
+
+    def close(self) -> None:
+        with self._lock:
+            pool = self._owned_pool
+            self._owned_pool = None
+            self._store = None
+        if pool is not None:
+            pool.close()
+
+
+_default_runtime = _DefaultNotionStoreRuntime()
+
+
+def open_default_store(
+    *,
+    pool: ConnectionPool | None = None,
+    store: NotionConnectorStore | None = None,
+) -> NotionConnectorStore:
+    """Open or explicitly inject the default runtime store."""
+
+    return _default_runtime.open(pool=pool, store=store)
+
+
+def close_default_store() -> None:
+    """Close the owned runtime pool and forget injected test state."""
+
+    _default_runtime.close()
 
 
 def create_connector(
@@ -247,173 +1095,31 @@ def create_connector(
     platform: str = "notion",
     config: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Create a connector row and return the persisted record."""
-
-    connector_id = str(uuid4())
-    db = get_db()
-    try:
-        db.execute(
-            """
-            INSERT INTO resource_connectors (
-              id, user_id, name, platform, auth_status, config_json,
-              created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
-            """,
-            (
-                connector_id,
-                user_id,
-                name.strip() or "Notion Connector",
-                platform.strip() or "notion",
-                _json_dumps(config or {}),
-                _utcnow_iso(),
-                _utcnow_iso(),
-            ),
-        )
-        db.commit()
-        return get_connector(connector_id, user_id) or {}
-    finally:
-        db.close()
+    return _default_runtime.get().create_connector(user_id, name, platform, config)
 
 
 def list_connectors(user_id: int) -> list[dict[str, Any]]:
-    db = get_db()
-    try:
-        rows = db.execute(
-            """
-            SELECT *
-            FROM resource_connectors
-            WHERE user_id = ?
-            ORDER BY updated_at DESC, created_at DESC
-            """,
-            (user_id,),
-        ).fetchall()
-        connectors = []
-        for row in rows:
-            connector = _connector_from_row(row)
-            with_resources = _attach_connector_resources(connector, user_id)
-            if with_resources:
-                connectors.append(with_resources)
-        return connectors
-    finally:
-        db.close()
+    return _default_runtime.get().list_connectors(user_id)
 
 
-def get_connector(connector_id: str, user_id: Optional[int] = None) -> Optional[dict[str, Any]]:
-    db = get_db()
-    try:
-        if user_id is None:
-            row = db.execute(
-                "SELECT * FROM resource_connectors WHERE id = ? LIMIT 1",
-                (connector_id,),
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT * FROM resource_connectors WHERE id = ? AND user_id = ? LIMIT 1",
-                (connector_id, user_id),
-            ).fetchone()
-        connector = _connector_from_row(row)
-        if connector is None:
-            return None
-        if user_id is None:
-            user_id = int(connector["user_id"])
-        return _attach_connector_resources(connector, int(user_id))
-    finally:
-        db.close()
+def get_connector(
+    connector_id: str, user_id: Optional[int] = None
+) -> Optional[dict[str, Any]]:
+    return _default_runtime.get().get_connector(connector_id, user_id)
 
 
 def get_active_connector_for_user(user_id: int) -> Optional[dict[str, Any]]:
-    """Return the most recently updated connector, preferring authenticated rows."""
-
-    db = get_db()
-    try:
-        row = db.execute(
-            """
-            SELECT *
-            FROM resource_connectors
-            WHERE user_id = ?
-            ORDER BY
-              CASE auth_status
-                WHEN 'authenticated' THEN 0
-                WHEN 'pending' THEN 1
-                WHEN 'expired' THEN 2
-                ELSE 3
-              END,
-              updated_at DESC,
-              created_at DESC
-            LIMIT 1
-            """,
-            (user_id,),
-        ).fetchone()
-        return _connector_from_row(row)
-    finally:
-        db.close()
+    return _default_runtime.get().get_active_connector_for_user(user_id)
 
 
 def update_connector(
-    connector_id: str,
-    user_id: int,
-    updates: Mapping[str, Any],
+    connector_id: str, user_id: int, updates: Mapping[str, Any]
 ) -> dict[str, Any]:
-    connector = _require_connector(connector_id, user_id)
-    config = dict(connector.get("config") or {})
-    assignments: list[str] = []
-    params: list[Any] = []
-
-    if "name" in updates and str(updates["name"]).strip():
-        assignments.append("name = ?")
-        params.append(str(updates["name"]).strip())
-    if "platform" in updates and str(updates["platform"]).strip():
-        assignments.append("platform = ?")
-        params.append(str(updates["platform"]).strip())
-    if "auth_status" in updates and str(updates["auth_status"]).strip():
-        assignments.append("auth_status = ?")
-        params.append(str(updates["auth_status"]).strip())
-    if "config" in updates and isinstance(updates["config"], Mapping):
-        config.update(dict(updates["config"]))
-
-    if "current_snapshot_version" in updates:
-        assignments.append("current_snapshot_version = ?")
-        params.append(updates["current_snapshot_version"])
-    if "current_source_revision" in updates:
-        assignments.append("current_source_revision = ?")
-        params.append(updates["current_source_revision"])
-    if "current_sync_cursor" in updates:
-        assignments.append("current_sync_cursor = ?")
-        params.append(updates["current_sync_cursor"])
-    if "last_synced_at" in updates:
-        assignments.append("last_synced_at = ?")
-        params.append(updates["last_synced_at"])
-
-    assignments.append("config_json = ?")
-    params.append(_json_dumps(config))
-    assignments.append("updated_at = ?")
-    params.append(_utcnow_iso())
-    params.extend([connector_id, user_id])
-
-    db = get_db()
-    try:
-        db.execute(
-            f"UPDATE resource_connectors SET {', '.join(assignments)} WHERE id = ? AND user_id = ?",
-            tuple(params),
-        )
-        db.commit()
-        return get_connector(connector_id, user_id) or {}
-    finally:
-        db.close()
+    return _default_runtime.get().update_connector(connector_id, user_id, updates)
 
 
 def delete_connector(connector_id: str, user_id: int) -> bool:
-    db = get_db()
-    try:
-        cursor = db.execute(
-            "DELETE FROM resource_connectors WHERE id = ? AND user_id = ?",
-            (connector_id, user_id),
-        )
-        db.commit()
-        return cursor.rowcount > 0
-    finally:
-        db.close()
+    return _default_runtime.get().delete_connector(connector_id, user_id)
 
 
 def save_auth_state(
@@ -427,35 +1133,16 @@ def save_auth_state(
     poll_interval_seconds: Optional[int] = None,
     error_detail: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Persist auth state and optional login metadata in the connector config."""
-
-    connector = _require_connector(connector_id, user_id)
-    config = dict(connector.get("config") or {})
-    if config_patch:
-        config.update({k: v for k, v in config_patch.items() if v is not None})
-    if verification_url is not None:
-        config["verification_url"] = verification_url
-    if verification_code is not None:
-        config["verification_code"] = verification_code
-    if poll_interval_seconds is not None:
-        config["poll_interval_seconds"] = int(poll_interval_seconds)
-    if error_detail is not None:
-        config["auth_error"] = error_detail
-
-    db = get_db()
-    try:
-        db.execute(
-            """
-            UPDATE resource_connectors
-            SET auth_status = ?, config_json = ?, updated_at = ?
-            WHERE id = ? AND user_id = ?
-            """,
-            (auth_status, _json_dumps(config), _utcnow_iso(), connector_id, user_id),
-        )
-        db.commit()
-        return get_connector(connector_id, user_id) or {}
-    finally:
-        db.close()
+    return _default_runtime.get().save_auth_state(
+        connector_id,
+        user_id,
+        auth_status=auth_status,
+        config_patch=config_patch,
+        verification_url=verification_url,
+        verification_code=verification_code,
+        poll_interval_seconds=poll_interval_seconds,
+        error_detail=error_detail,
+    )
 
 
 def replace_connector_resources(
@@ -464,150 +1151,21 @@ def replace_connector_resources(
     databases: Iterable[Mapping[str, Any]],
     pages: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Replace the selected notion_database/notion_page resources."""
-
-    _require_connector(connector_id, user_id)
-    selected_databases = [dict(item) for item in databases]
-    selected_pages = [dict(item) for item in pages]
-    config_patch = {
-        "selected_databases": [item.get("database_id") or item.get("id") for item in selected_databases if item.get("database_id") or item.get("id")],
-        "selected_pages": [item.get("page_id") or item.get("id") for item in selected_pages if item.get("page_id") or item.get("id")],
-    }
-
-    db = get_db()
-    try:
-        db.execute(
-            "DELETE FROM connector_resources WHERE connector_id = ? AND resource_type IN ('notion_database', 'notion_page')",
-            (connector_id,),
-        )
-        now = _utcnow_iso()
-        for item in selected_databases:
-            external_id = str(item.get("database_id") or item.get("id") or "").strip()
-            if not external_id:
-                continue
-            resource_id = str(uuid4())
-            metadata = {
-                "page_count": item.get("page_count"),
-                "properties_schema": item.get("properties_schema") or {},
-                "url": item.get("url") or "",
-                "last_edited": item.get("last_edited") or "",
-                "raw": item.get("raw") or {},
-            }
-            db.execute(
-                """
-                INSERT INTO connector_resources (
-                  id, connector_id, resource_type, external_id, title,
-                  metadata_json, sync_status, created_at, updated_at
-                )
-                VALUES (?, ?, 'notion_database', ?, ?, ?, 'synced', ?, ?)
-                """,
-                (
-                    resource_id,
-                    connector_id,
-                    external_id,
-                    str(item.get("title") or external_id),
-                    _json_dumps(metadata),
-                    now,
-                    now,
-                ),
-            )
-
-        for item in selected_pages:
-            external_id = str(item.get("page_id") or item.get("id") or "").strip()
-            if not external_id:
-                continue
-            resource_id = str(uuid4())
-            metadata = {
-                "url": item.get("url") or "",
-                "last_edited": item.get("last_edited") or "",
-                "parent": item.get("parent") or {},
-                "raw": item.get("raw") or {},
-            }
-            db.execute(
-                """
-                INSERT INTO connector_resources (
-                  id, connector_id, resource_type, external_id, title,
-                  metadata_json, sync_status, created_at, updated_at
-                )
-                VALUES (?, ?, 'notion_page', ?, ?, ?, 'synced', ?, ?)
-                """,
-                (
-                    resource_id,
-                    connector_id,
-                    external_id,
-                    str(item.get("title") or external_id),
-                    _json_dumps(metadata),
-                    now,
-                    now,
-                ),
-            )
-
-        db.execute(
-            """
-            UPDATE resource_connectors
-            SET config_json = ?, auth_status = COALESCE(auth_status, 'pending'), updated_at = ?
-            WHERE id = ? AND user_id = ?
-            """,
-            (
-                _json_dumps(
-                    {
-                        **dict(_require_connector(connector_id, user_id).get("config") or {}),
-                        **config_patch,
-                    }
-                ),
-                now,
-                connector_id,
-                user_id,
-            ),
-        )
-        db.commit()
-        return {
-            "connector": get_connector(connector_id, user_id) or {},
-            "resources": list_connector_resources(connector_id, user_id),
-        }
-    finally:
-        db.close()
-
-
-def _list_connector_resources_unchecked(connector_id: str) -> list[dict[str, Any]]:
-    db = get_db()
-    try:
-        rows = db.execute(
-            """
-            SELECT *
-            FROM connector_resources
-            WHERE connector_id = ?
-            ORDER BY resource_type, title COLLATE NOCASE, created_at DESC
-            """,
-            (connector_id,),
-        ).fetchall()
-        resources = []
-        for row in rows:
-            item = _resource_from_row(row)
-            item["selected"] = True
-            resources.append(item)
-        return resources
-    finally:
-        db.close()
+    return _default_runtime.get().replace_connector_resources(
+        connector_id, user_id, databases, pages
+    )
 
 
 def list_connector_resources(connector_id: str, user_id: int) -> list[dict[str, Any]]:
-    _require_connector(connector_id, user_id)
-    return _list_connector_resources_unchecked(connector_id)
+    return _default_runtime.get().list_connector_resources(connector_id, user_id)
 
 
-def delete_connector_resource(connector_id: str, user_id: int, resource_id: str) -> bool:
-    _require_connector(connector_id, user_id)
-    db = get_db()
-    try:
-        cursor = db.execute(
-            "DELETE FROM connector_resources WHERE id = ? AND connector_id = ?",
-            (resource_id, connector_id),
-        )
-        db.commit()
-        return cursor.rowcount > 0
-    finally:
-        db.close()
+def delete_connector_resource(
+    connector_id: str, user_id: int, resource_id: str
+) -> bool:
+    return _default_runtime.get().delete_connector_resource(
+        connector_id, user_id, resource_id
+    )
 
 
 def save_snapshot(
@@ -616,232 +1174,64 @@ def save_snapshot(
     workspace_id: str,
     snapshot: CanonicalWorkspaceSnapshot | dict[str, Any],
 ) -> dict[str, Any]:
-    """Persist a canonical snapshot and update the connector pointer."""
-
-    connector = _require_connector(connector_id, user_id)
-    payload = _snapshot_payload(snapshot)
-    metadata = _mapping(payload.get("metadata"))
-    if not metadata:
-        raise NotionSnapshotNotReadyError("Snapshot metadata is missing.")
-
-    snapshot_version = str(metadata.get("snapshot_version") or "").strip()
-    source_revision = str(metadata.get("source_revision") or "").strip()
-    sync_cursor = str(metadata.get("sync_cursor") or "").strip()
-    fetched_at = str(metadata.get("fetched_at") or "").strip() or _utcnow_iso()
-    if not snapshot_version:
-        raise NotionSnapshotNotReadyError("Snapshot version is missing.")
-
-    db = get_db()
-    try:
-        db.execute(
-            """
-            INSERT INTO connector_snapshots (
-              id, connector_id, snapshot_version, source_revision, sync_cursor,
-              fetched_at, state, snapshot_json, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(connector_id, snapshot_version) DO UPDATE SET
-              source_revision = excluded.source_revision,
-              sync_cursor = excluded.sync_cursor,
-              fetched_at = excluded.fetched_at,
-              state = excluded.state,
-              snapshot_json = excluded.snapshot_json,
-              updated_at = excluded.updated_at
-            """,
-            (
-                str(uuid4()),
-                connector_id,
-                snapshot_version,
-                source_revision,
-                sync_cursor,
-                fetched_at,
-                str(metadata.get("state") or SnapshotLifecycleState.SNAPSHOT_READY.value),
-                _json_dumps(payload),
-                fetched_at,
-                _utcnow_iso(),
-            ),
-        )
-
-        db.execute(
-            """
-            UPDATE resource_connectors
-            SET current_snapshot_version = ?,
-                current_source_revision = ?,
-                current_sync_cursor = ?,
-                last_synced_at = ?,
-                auth_status = 'authenticated',
-                updated_at = ?
-            WHERE id = ? AND user_id = ?
-            """,
-            (
-                snapshot_version,
-                source_revision,
-                sync_cursor,
-                fetched_at,
-                _utcnow_iso(),
-                connector_id,
-                user_id,
-            ),
-        )
-
-        # Update the selected resource page materialization for database rows.
-        database_pages = _mapping(payload.get("database_pages"))
-        for database_id, pages in database_pages.items():
-            if not isinstance(pages, list):
-                continue
-            resource_row = db.execute(
-                """
-                SELECT id
-                FROM connector_resources
-                WHERE connector_id = ? AND resource_type = 'notion_database' AND external_id = ?
-                LIMIT 1
-                """,
-                (connector_id, str(database_id)),
-            ).fetchone()
-            if resource_row is None:
-                continue
-            resource_id = str(resource_row["id"])
-            db.execute(
-                "DELETE FROM connector_resource_pages WHERE resource_id = ?",
-                (resource_id,),
-            )
-            for page in pages:
-                if not isinstance(page, Mapping):
-                    continue
-                page_map = dict(page)
-                page_id = str(page_map.get("page_id") or page_map.get("id") or "").strip()
-                if not page_id:
-                    continue
-                db.execute(
-                    """
-                    INSERT INTO connector_resource_pages (
-                      id, resource_id, page_id, title, last_edited,
-                      properties_json, page_json, created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(uuid4()),
-                        resource_id,
-                        page_id,
-                        str(page_map.get("title") or page_id),
-                        str(page_map.get("last_edited") or ""),
-                        _json_dumps(page_map.get("properties") or {}),
-                        _json_dumps(page_map),
-                        fetched_at,
-                        _utcnow_iso(),
-                    ),
-                )
-
-        db.commit()
-        return get_current_snapshot(workspace_id, connector_id, user_id) or payload
-    finally:
-        db.close()
+    return _default_runtime.get().save_snapshot(
+        connector_id, user_id, workspace_id, snapshot
+    )
 
 
 def get_current_snapshot(
-    workspace_id: str,
-    connector_id: str,
-    user_id: int,
+    workspace_id: str, connector_id: str, user_id: int
 ) -> Optional[dict[str, Any]]:
-    """Return the current canonical snapshot for a connector and workspace."""
-
-    connector = get_connector(connector_id, user_id)
-    if connector is None:
-        return None
-    current_version = connector.get("current_snapshot_version") or ""
-    if not current_version:
-        return None
-    snapshot = get_snapshot(connector_id, current_version, user_id)
-    if not snapshot:
-        return None
-    return snapshot
+    return _default_runtime.get().get_current_snapshot(
+        workspace_id, connector_id, user_id
+    )
 
 
 def get_snapshot(
-    connector_id: str,
-    snapshot_version: str,
-    user_id: int,
+    connector_id: str, snapshot_version: str, user_id: int
 ) -> Optional[dict[str, Any]]:
-    connector = _require_connector(connector_id, user_id)
-    db = get_db()
-    try:
-        row = db.execute(
-            """
-            SELECT *
-            FROM connector_snapshots
-            WHERE connector_id = ? AND snapshot_version = ?
-            LIMIT 1
-            """,
-            (connector_id, snapshot_version),
-        ).fetchone()
-        snapshot = _snapshot_from_row(row)
-        if snapshot is None:
-            return None
-        return snapshot
-    finally:
-        db.close()
+    return _default_runtime.get().get_snapshot(
+        connector_id, snapshot_version, user_id
+    )
 
 
 def list_snapshots(connector_id: str, user_id: int) -> list[dict[str, Any]]:
-    _require_connector(connector_id, user_id)
-    db = get_db()
-    try:
-        rows = db.execute(
-            """
-            SELECT *
-            FROM connector_snapshots
-            WHERE connector_id = ?
-            ORDER BY created_at DESC
-            """,
-            (connector_id,),
-        ).fetchall()
-        snapshots = []
-        for row in rows:
-            item = dict(row)
-            item["snapshot"] = _snapshot_from_row(row)
-            item.pop("snapshot_json", None)
-            snapshots.append(item)
-        return snapshots
-    finally:
-        db.close()
+    return _default_runtime.get().list_snapshots(connector_id, user_id)
 
 
-def attach_thread_to_connector(connector_id: str, user_id: int, thread_id: str) -> dict[str, Any]:
-    """Associate a chat thread with a connector for later workspace attach."""
-
-    _require_connector(connector_id, user_id)
-    db = get_db()
-    try:
-        db.execute(
-            """
-            INSERT INTO connector_chat_threads (id, connector_id, thread_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(connector_id, thread_id) DO UPDATE SET
-              updated_at = excluded.updated_at
-            """,
-            (str(uuid4()), connector_id, thread_id, _utcnow_iso(), _utcnow_iso()),
-        )
-        db.commit()
-        return get_connector(connector_id, user_id) or {}
-    finally:
-        db.close()
+def attach_thread_to_connector(
+    connector_id: str, user_id: int, thread_id: str
+) -> dict[str, Any]:
+    return _default_runtime.get().attach_thread_to_connector(
+        connector_id, user_id, thread_id
+    )
 
 
-def get_connector_for_thread(thread_id: str, user_id: int) -> Optional[dict[str, Any]]:
-    db = get_db()
-    try:
-        row = db.execute(
-            """
-            SELECT c.*
-            FROM connector_chat_threads t
-            JOIN resource_connectors c ON c.id = t.connector_id
-            WHERE t.thread_id = ? AND c.user_id = ?
-            ORDER BY t.updated_at DESC
-            LIMIT 1
-            """,
-            (thread_id, user_id),
-        ).fetchone()
-        return _connector_from_row(row)
-    finally:
-        db.close()
+def get_connector_for_thread(
+    thread_id: str, user_id: int
+) -> Optional[dict[str, Any]]:
+    return _default_runtime.get().get_connector_for_thread(thread_id, user_id)
+
+
+__all__ = [
+    "NotionConnectorRepository",
+    "NotionConnectorStore",
+    "attach_thread_to_connector",
+    "close_default_store",
+    "create_connector",
+    "delete_connector",
+    "delete_connector_resource",
+    "get_active_connector_for_user",
+    "get_connector",
+    "get_connector_for_thread",
+    "get_current_snapshot",
+    "get_snapshot",
+    "list_connector_resources",
+    "list_connectors",
+    "list_snapshots",
+    "open_default_store",
+    "replace_connector_resources",
+    "save_auth_state",
+    "save_snapshot",
+    "update_connector",
+]

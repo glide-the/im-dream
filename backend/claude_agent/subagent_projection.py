@@ -510,11 +510,49 @@ def _project_task(meta_path: Path) -> dict[str, Any] | None:
     }
 
 
+def _reconcile_task_with_inactive_runtime(task: dict[str, Any]) -> dict[str, Any]:
+    """Settle an unclosed transcript once its owning thread is no longer live.
+
+    Transcript files are an observation surface, not a process-liveness source.
+    A task whose last JSONL record lacks a terminal marker may be running only
+    while the owning Agent runtime is running.  After a process restart or an
+    already-settled parent turn it is an interrupted historical task.
+    """
+
+    if task.get("status") != "running":
+        return task
+    messages = [
+        {
+            **message,
+            **(
+                {"status": "cancelled"}
+                if message.get("kind") == "status"
+                else {}
+            ),
+        }
+        for message in task.get("messages", [])
+        if isinstance(message, dict)
+    ]
+    return {
+        **task,
+        "status": "cancelled",
+        "messages": messages,
+        "message_count": len(messages),
+    }
+
+
 def build_thread_subagents_payload(
     thread_id: str,
     workspace_root: Path,
+    *,
+    runtime_running: bool | None = None,
 ) -> dict[str, Any]:
-    """Return a safe, newest-first projection for one authenticated thread."""
+    """Return a safe, newest-first projection for one authenticated thread.
+
+    ``runtime_running`` is supplied by the authenticated HTTP boundary.  The
+    default ``None`` preserves the standalone filesystem projection used by
+    diagnostics and fixtures; ``False`` settles orphaned running transcripts.
+    """
 
     empty = {
         "thread_id": thread_id,
@@ -537,6 +575,8 @@ def build_thread_subagents_payload(
     tasks = [task for path in meta_paths if (task := _project_task(path)) is not None]
     tasks.sort(key=lambda task: task.get("started_at") or "", reverse=True)
     tasks = tasks[:max_items]
+    if runtime_running is False:
+        tasks = [_reconcile_task_with_inactive_runtime(task) for task in tasks]
 
     running = sum(task["status"] == "running" for task in tasks)
     completed = sum(task["status"] == "completed" for task in tasks)

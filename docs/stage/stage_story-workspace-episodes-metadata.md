@@ -4,9 +4,9 @@
 > **关联 Issue**: [SUO-241](/SUO/issues/SUO-241) / [SUO-246](/SUO/issues/SUO-246)  
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
 > **关联设计稿**:
-> - `docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md` (SUO-241, DEC-020~DEC-025)
-> - `docs/design/story-workspace/story-workspace-prd.md` (SUO-199)
-> - `docs/design/story-workspace/story-workspace-layout-design.md` (SUO-199)
+> - `docs/design/story-workspace/project-and-episode-workbench.md` (SUO-241, DEC-020~DEC-025)
+> - `docs/design/story-workspace/product-scope-and-navigation.md` (SUO-199)
+> - `docs/design/story-workspace/product-scope-and-navigation.md` (SUO-199)
 > **稳定基线 Stage**: `docs/stage/stage_story-workspace.md` (stage_001, SUO-208/SUO-240，含 14 份基线 task + 4 份 SUO-230 增量 task)
 > **任务输入来源**:
 > - Issue 清单: `docs/issue/ISSUES_story-workspace-suo241-delta.md` (SUO-243)

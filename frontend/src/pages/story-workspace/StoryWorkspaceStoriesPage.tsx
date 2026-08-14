@@ -138,7 +138,9 @@ export function StoryWorkspaceStoriesPage({ onReview, refreshNonce = 0 }: StoryW
           {stories.error.message}
         </div>
       ) : stories.data.length === 0 ? (
-        <div className="story-workspace-table-message">暂无故事，等待 Agent 生成。</div>
+        <div className="story-workspace-table-message">
+          PostgreSQL 中暂无故事索引；已生成文件请在对应 Dream 执行页检查同步状态。
+        </div>
       ) : (
         <StoryWorkspaceStoryTable
           items={stories.data}

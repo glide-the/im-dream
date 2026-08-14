@@ -24,7 +24,6 @@ import json
 import logging
 import os
 from pathlib import Path
-import sqlite3
 import stat
 from typing import Any
 from uuid import uuid4
@@ -63,11 +62,11 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _row_to_dict(row: Any) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
-def load_deck_plugin_refs(db: sqlite3.Connection, deck_id: str) -> list[dict[str, Any]]:
+def load_deck_plugin_refs(db: Any, deck_id: str) -> list[dict[str, Any]]:
     """Enabled, ordered plugin installation references for a Deck."""
     rows = db.execute(
         """
@@ -76,7 +75,7 @@ def load_deck_plugin_refs(db: sqlite3.Connection, deck_id: str) -> list[dict[str
                i.compatibility_json AS installation_compatibility_json
         FROM deck_claude_plugin_refs r
         JOIN claude_plugin_installations i ON i.id = r.plugin_installation_id
-        WHERE r.deck_id = ? AND r.enabled = 1
+        WHERE r.deck_id = %s AND r.enabled = 1
         ORDER BY r.order_index, r.created_at, r.plugin_installation_id
         """,
         (deck_id,),
@@ -85,7 +84,7 @@ def load_deck_plugin_refs(db: sqlite3.Connection, deck_id: str) -> list[dict[str
 
 
 def _load_server_adapter_refs(
-    db: sqlite3.Connection,
+    db: Any,
     package_specs: tuple[str, ...],
 ) -> list[dict[str, Any]]:
     """Resolve server-selected adapters to ready, digest-pinned installs.
@@ -110,16 +109,16 @@ def _load_server_adapter_refs(
             continue
         seen.add(canonical)
 
-        predicates = ["package_name = ?", "marketplace = ?"]
+        predicates = ["package_name = %s", "marketplace = %s"]
         params: list[Any] = [spec.package_name, spec.marketplace]
         if spec.requested_version is not None:
-            predicates.append("resolved_version = ?")
+            predicates.append("resolved_version = %s")
             params.append(spec.requested_version)
         rows = db.execute(
             f"""
             SELECT * FROM claude_plugin_installations
             WHERE {' AND '.join(predicates)}
-            ORDER BY rowid DESC
+            ORDER BY installed_at DESC NULLS LAST, created_at DESC, id DESC
             """,
             params,
         ).fetchall()
@@ -367,7 +366,7 @@ def _ensure_dream_drama_compatibility(
 
 
 def pack_workspace_plugins(
-    db: sqlite3.Connection,
+    db: Any,
     *,
     workspace: Path,
     deck_id: str | None,

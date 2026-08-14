@@ -1,7 +1,7 @@
 """Unit tests for workspace-init ``surfaces[]`` validation and .dream materialization.
 
-Design: docs/design/story-workspace/design_004_story-workspace-dream-surface-execution-page.md §3
-Plan:   docs/design/story-workspace/2026-08-03-dream-surface-execution-implementation-plan.md Task 1
+Design: docs/design/story-workspace/product-scope-and-navigation.md §3
+Plan:   docs/design/story-workspace/README.md Task 1
 """
 
 from __future__ import annotations
@@ -25,6 +25,10 @@ from services.claude_plugin.workspace_init import (
     load_init_profile,
     materialize_dream_surface,
     validate_surfaces,
+)
+from story_workspace.dream_workbench_context import (
+    load_dream_asset_collaboration_contract,
+    load_dream_workbench_contract,
 )
 from services.claude_plugin.workspace_packer import (
     WorkspacePackError,
@@ -199,12 +203,27 @@ class MaterializeDreamSurfaceTests(unittest.TestCase):
             },
         )
         readme = (self.workspace / ".dream" / "README.md").read_text()
+        workbench = (self.workspace / ".dream" / "WORKBENCH.md").read_text(
+            encoding="utf-8"
+        )
+        asset_collaboration = (
+            self.workspace / ".dream" / "ASSET-COLLABORATION.md"
+        ).read_text(encoding="utf-8")
         self.assertIn("静态启动层只读", readme)
         self.assertIn("workspace.json", readme)
         self.assertIn("runtime/runs/<workflow_run_id>", readme)
         self.assertIn("mcp__story_workspace__write_dream_run", readme)
         self.assertIn("mcp__story_workspace__write_dream_stage", readme)
         self.assertIn("禁止使用 Write、Edit 或 Bash", readme)
+        self.assertEqual(workbench, load_dream_workbench_contract())
+        self.assertEqual(
+            asset_collaboration,
+            load_dream_asset_collaboration_contract(),
+        )
+        self.assertIn("页面上看到的名称和上下文", asset_collaboration)
+        self.assertIn("不得要求用户提供 `char_id`", asset_collaboration)
+        self.assertIn("成功 Bash 回执", asset_collaboration)
+        self.assertNotIn("workflow_run_id", workbench)
         self.assertEqual(step["step"], "materialize-surface")
         self.assertEqual(step["surface"], "dream")
 
@@ -216,26 +235,64 @@ class MaterializeDreamSurfaceTests(unittest.TestCase):
         readme = (self.workspace / ".dream" / "README.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("REST API 是运行内容的真相源", readme)
-        self.assertIn("waiting、editing、continuing", readme)
-        self.assertIn("最长每 5 秒", readme)
-        self.assertIn("story-workspace-output", readme)
-        self.assertIn("匹配当前 workflow_run_id 的 runId", readme)
-        self.assertIn("受控 writer 尚不主动发布 run-scoped SSE", readme)
-        self.assertNotIn("SSE 只通知页面重新读取", readme)
+        self.assertIn("REST API 只读取 Workflow 与 Artifact 业务投影", readme)
+        self.assertIn("标准 Thread history/status/SSE", readme)
+        self.assertIn("同一 thread_id", readme)
+        self.assertIn("DreamObserver", readme)
+        self.assertNotIn("story-workspace-output", readme)
+        self.assertNotIn("run-scoped SSE", readme)
 
     def test_materialize_is_byte_identical_on_repack(self) -> None:
         materialize_dream_surface(
             self.workspace, "deck-1", self.PLUGINS, "/story-workspace/dream"
         )
         first = (self.workspace / ".dream" / "workspace.json").read_bytes()
+        first_workbench = (self.workspace / ".dream" / "WORKBENCH.md").read_bytes()
+        first_asset_collaboration = (
+            self.workspace / ".dream" / "ASSET-COLLABORATION.md"
+        ).read_bytes()
         materialize_dream_surface(
             self.workspace, "deck-1", self.PLUGINS, "/story-workspace/dream"
         )
         self.assertEqual(
             (self.workspace / ".dream" / "workspace.json").read_bytes(), first
         )
+        self.assertEqual(
+            (self.workspace / ".dream" / "WORKBENCH.md").read_bytes(),
+            first_workbench,
+        )
+        self.assertEqual(
+            (
+                self.workspace / ".dream" / "ASSET-COLLABORATION.md"
+            ).read_bytes(),
+            first_asset_collaboration,
+        )
         self.assertNotIn("workflow_run_id", json.loads(first))  # no run-level facts
+
+    def test_existing_surface_repairs_missing_agent_contracts(self) -> None:
+        materialize_dream_surface(
+            self.workspace, "deck-1", self.PLUGINS, "/story-workspace/dream"
+        )
+        dream = self.workspace / ".dream"
+        runtime_fact = dream / "runtime" / "runs" / "preserved.json"
+        runtime_fact.parent.mkdir(parents=True)
+        runtime_fact.write_text("preserve", encoding="utf-8")
+        (dream / "WORKBENCH.md").unlink()
+        (dream / "ASSET-COLLABORATION.md").unlink()
+
+        materialize_dream_surface(
+            self.workspace, "deck-1", self.PLUGINS, "/story-workspace/dream"
+        )
+
+        self.assertEqual(runtime_fact.read_text("utf-8"), "preserve")
+        self.assertEqual(
+            (dream / "WORKBENCH.md").read_text("utf-8"),
+            load_dream_workbench_contract(),
+        )
+        self.assertEqual(
+            (dream / "ASSET-COLLABORATION.md").read_text("utf-8"),
+            load_dream_asset_collaboration_contract(),
+        )
 
     def test_materialize_write_failure_leaves_no_partial_dream(self) -> None:
         """Atomic failure path (Task 1 review follow-up, audit A4): a write
@@ -343,7 +400,9 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
               claude_cli_version TEXT NOT NULL,
               compatibility_json TEXT NOT NULL DEFAULT '{}',
               status TEXT NOT NULL DEFAULT 'ready', operation_id TEXT NOT NULL,
-              file_count INTEGER NOT NULL DEFAULT 0
+              file_count INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              installed_at TEXT
             );
             CREATE TABLE deck_claude_plugin_refs (
               deck_id TEXT NOT NULL, plugin_installation_id TEXT NOT NULL,

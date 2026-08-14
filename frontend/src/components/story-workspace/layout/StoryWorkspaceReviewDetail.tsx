@@ -64,12 +64,11 @@ function draftFromResource(
 ): Draft {
   if (type === 'story') {
     const story = resource as StoryWorkspaceReviewResource & {
-      title: string; description?: string | null; content?: string | null; type: string;
+      title: string; description?: string | null; type: string;
     };
     return {
       title: story.title,
       description: story.description ?? '',
-      content: story.content ?? '',
       type: story.type,
     };
   }
@@ -102,7 +101,6 @@ function patchFromDraft(type: StoryWorkspaceReviewResourceType, draft: Draft) {
     return {
       title: draft.title.trim(),
       description: draft.description.trim() || null,
-      content: draft.content.trim() || null,
       type: draft.type,
     };
   }
@@ -248,7 +246,6 @@ export function StoryWorkspaceReviewDetail({
         <dl className="story-workspace-review-detail__source">
           <div><dt>来源</dt><dd>Dream Chat</dd></div>
           <div><dt>Deck</dt><dd>{deckName || '未使用 Deck'}</dd></div>
-          <div><dt>Thread</dt><dd><code>{sourceReceipt.chat_thread_id}</code></dd></div>
         </dl>
       )}
 
@@ -268,7 +265,6 @@ export function StoryWorkspaceReviewDetail({
             <label>标题<input disabled={!isPending || saving} value={draft.title} onChange={(event) => update('title', event.target.value)} /></label>
             <label>类型<select disabled={!isPending || saving} value={draft.type} onChange={(event) => update('type', event.target.value)}><option value="short">短剧</option><option value="long">长篇</option><option value="script">剧本</option><option value="outline">大纲</option></select></label>
             <label>创作说明<textarea disabled={!isPending || saving} rows={3} value={draft.description} onChange={(event) => update('description', event.target.value)} /></label>
-            <label>正文<textarea disabled={!isPending || saving} rows={9} value={draft.content} onChange={(event) => update('content', event.target.value)} /></label>
           </>
         )}
         {selection.resourceType === 'character' && (

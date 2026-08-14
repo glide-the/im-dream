@@ -19,6 +19,7 @@ from unittest.mock import Mock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -26,9 +27,10 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 import database
+from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
 from routers import story_workspace
-from services.deck import story_workflow_gateway as gateway_module
+from services.deck import story_workflow_application as gateway_module
 from services.errors.error_registry import ApiRouteError, build_error_payload
 import services.story_workspace.dream_file_service as dream_files
 from services.story_workspace.dream_file_service import (
@@ -42,6 +44,7 @@ from services.story_workspace.dream_file_service import (
 )
 from services.workflow.run_service import WorkflowRunError
 from story_workspace.contracts import (
+    StoryWorkspaceDreamAgentActivityResponse,
     StoryWorkspaceDreamFilesResponse,
     StoryWorkspaceDreamSourceResponse,
     StoryWorkspaceDreamStage,
@@ -178,7 +181,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+        app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
             lambda: gateway
         )
         app.include_router(story_workspace.router)
@@ -232,6 +235,85 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
         self.assertIn("entityId", character["items"][0])
         self.assertFalse(any("_" in key for key in payload))
 
+    def test_observer_wire_activity_and_operation_state_are_strictly_bound(self) -> None:
+        operation_id = "a" * 64
+        valid = [
+            {
+                "activity": "activity_started_hint",
+                "operation_scope": "content_generation",
+                "operation_state": "started",
+                "operation_id": operation_id,
+            },
+            {
+                "activity": "activity_settled_hint",
+                "operation_scope": "workflow_operation",
+                "operation_state": "succeeded",
+                "operation_id": operation_id,
+            },
+            {
+                "activity": "activity_settled_hint",
+                "operation_scope": "workflow_operation",
+                "operation_state": "failed",
+                "operation_id": operation_id,
+            },
+            {
+                "activity": "waiting_confirmation_hint",
+                "operation_scope": "workflow_operation",
+                "operation_state": "waiting_confirmation",
+                "operation_id": operation_id,
+            },
+            {
+                "activity": "turn_settled_hint",
+                "terminal_outcome": "completed",
+            },
+            {
+                "activity": "reconcile_requested",
+                "needs_reconcile": True,
+            },
+        ]
+        for value in valid:
+            with self.subTest(value=value):
+                model = StoryWorkspaceDreamAgentActivityResponse(
+                    sequence=1,
+                    **value,
+                )
+                wire = model.model_dump(mode="json", by_alias=True)
+                self.assertNotIn("actorId", wire)
+                self.assertNotIn("generation", wire)
+
+        invalid = [
+            {
+                "activity": "activity_started_hint",
+                "operation_scope": "content_generation",
+                "operation_state": "succeeded",
+            },
+            {
+                "activity": "activity_settled_hint",
+                "operation_scope": "workflow_operation",
+                "operation_state": "started",
+            },
+            {
+                "activity": "waiting_confirmation_hint",
+                "operation_scope": "workflow_operation",
+                "operation_state": "failed",
+            },
+            {
+                "activity": "turn_settled_hint",
+                "terminal_outcome": "completed",
+                "operation_scope": "tool",
+                "operation_state": "started",
+            },
+            {
+                "activity": "reconcile_requested",
+                "needs_reconcile": True,
+                "operation_scope": "tool",
+                "operation_state": "started",
+            },
+        ]
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                StoryWorkspaceDreamAgentActivityResponse(sequence=1, **value)
+
     def test_existing_run_endpoint_remains_snake_case(self) -> None:
         class RunGateway(_RecordingGateway):
             async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]):
@@ -246,7 +328,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+        app.dependency_overrides[story_workspace.get_story_workflow_run_service] = (
             lambda: gateway
         )
         app.include_router(story_workspace.router)
@@ -272,7 +354,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
             "user_id": int(ACTOR_ID),
             "workspace_id": WORKSPACE_ID,
         }
-        app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+        app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
             lambda: gateway
         )
         app.include_router(story_workspace.router)
@@ -289,8 +371,11 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
 
     def test_jwt_without_workspace_never_creates_one_for_dream_get(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            old_db_path = database.DB_PATH
-            database.DB_PATH = Path(temporary_directory) / "read-only-route.db"
+            database_fixture = LegacyDatabaseModuleFixture(
+                database,
+                Path(temporary_directory) / "read-only-route.db",
+            )
+            database_fixture.start()
             try:
                 db = database.get_db()
                 db.execute(
@@ -313,8 +398,8 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                     "email": "writer@example.com",
                 }
                 app.dependency_overrides[
-                    story_workspace.get_story_workflow_gateway
-                ] = gateway_module.StoryWorkflowApplicationGateway
+                    story_workspace.get_dream_artifact_service
+                ] = gateway_module.DreamArtifactApplicationService
                 app.include_router(story_workspace.router)
 
                 creator = story_workspace.get_or_create_default_workspace
@@ -336,7 +421,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 ).fetchone()[0]
                 db.close()
             finally:
-                database.DB_PATH = old_db_path
+                database_fixture.stop()
 
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(response.json()["error"]["code"], "WORKFLOW_PERMISSION_DENIED")
@@ -347,8 +432,11 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            old_db_path = database.DB_PATH
-            database.DB_PATH = Path(temporary_directory) / "read-only-route.db"
+            database_fixture = LegacyDatabaseModuleFixture(
+                database,
+                Path(temporary_directory) / "read-only-route.db",
+            )
+            database_fixture.start()
             try:
                 db = database.get_db()
                 db.execute(
@@ -380,7 +468,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                     "email": "writer@example.com",
                 }
                 app.dependency_overrides[
-                    story_workspace.get_story_workflow_gateway
+                    story_workspace.get_dream_artifact_service
                 ] = lambda: gateway
                 app.include_router(story_workspace.router)
 
@@ -410,7 +498,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 ).fetchone()[0]
                 db.close()
             finally:
-                database.DB_PATH = old_db_path
+                database_fixture.stop()
 
         self.assertEqual(response.status_code, 200, response.text)
         create_workspace.assert_not_called()
@@ -444,8 +532,8 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                     "email": "writer@example.com",
                 }
                 app.dependency_overrides[
-                    story_workspace.get_story_workflow_gateway
-                ] = gateway_module.StoryWorkflowApplicationGateway
+                    story_workspace.get_dream_artifact_service
+                ] = gateway_module.DreamArtifactApplicationService
                 app.include_router(story_workspace.router)
 
                 get_db = (
@@ -491,7 +579,7 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             '{"schema_version":"dream-surface/v1"}\n', encoding="utf-8"
         )
         self.run = authoritative_run()
-        self.gateway = gateway_module.StoryWorkflowApplicationGateway()
+        self.gateway = gateway_module.DreamArtifactApplicationService()
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -541,7 +629,6 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         if thread is not None:
             selected_thread = thread
         with (
-            patch.dict(os.environ, {"INK_ENVIRONMENT": "test"}),
             patch.object(gateway_module.database, "get_db", return_value=db),
             patch.object(gateway_module, "WorkflowRunService") as service_class,
             patch.object(
@@ -602,6 +689,143 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         db.close.assert_called_once_with()
         self.assertEqual(result.story_workspace_run_id, RUN_ID)
 
+    async def test_authorized_read_attaches_only_matching_safe_observer_hint(
+        self,
+    ) -> None:
+        operation_id = "a" * 64
+        matching = Mock(
+            run_id=RUN_ID,
+            thread_id=THREAD_ID,
+            turn_id="turn-1",
+            actor_id=ACTOR_ID,
+            generation=2,
+            event_id="event-1",
+            sequence=8,
+            activity="activity_started_hint",
+            terminal_outcome=None,
+            needs_reconcile=False,
+            operation_scope="content_generation",
+            operation_state="started",
+            operation_id=operation_id,
+        )
+        newer_other_run = Mock(
+            run_id=OTHER_RUN_ID,
+            thread_id=THREAD_ID,
+            actor_id=ACTOR_ID,
+            generation=99,
+            sequence=99,
+        )
+        newer_other_actor = Mock(
+            run_id=RUN_ID,
+            thread_id=THREAD_ID,
+            actor_id="8",
+            generation=100,
+            sequence=100,
+        )
+        older_generation_higher_sequence = Mock(
+            run_id=RUN_ID,
+            thread_id=THREAD_ID,
+            actor_id=ACTOR_ID,
+            generation=1,
+            sequence=999,
+        )
+        factory = Mock()
+        factory.dream_workflow_activity_projection.return_value = [
+            newer_other_run,
+            newer_other_actor,
+            older_generation_higher_sequence,
+            matching,
+        ]
+
+        with (
+            self.wired(),
+            patch.object(
+                self.gateway,
+                "_dream_agent_thread_factory",
+                return_value=factory,
+            ),
+        ):
+            result = await self.call()
+
+        self.assertIsNotNone(result.agent_activity)
+        self.assertEqual(
+            result.agent_activity.model_dump(mode="json", by_alias=True),
+            {
+                "activity": "activity_started_hint",
+                "sequence": 8,
+                "terminalOutcome": None,
+                "needsReconcile": False,
+                "operationScope": "content_generation",
+                "operationState": "started",
+                "operationId": operation_id,
+            },
+        )
+        # A display hint cannot change durable workflow/confirmation fields.
+        self.assertFalse(result.confirmation_accepted)
+        self.assertFalse(result.confirmation_dispatched)
+        self.assertFalse(result.can_confirm)
+
+    async def test_observer_hint_never_crosses_run_or_thread_scope(self) -> None:
+        factory = Mock()
+        factory.dream_workflow_activity_projection.return_value = [
+            Mock(
+                run_id=OTHER_RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                generation=10,
+                sequence=10,
+            ),
+            Mock(
+                run_id=RUN_ID,
+                thread_id="thread-other",
+                actor_id=ACTOR_ID,
+                generation=11,
+                sequence=11,
+            ),
+            Mock(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id="8",
+                generation=12,
+                sequence=12,
+            ),
+        ]
+        with (
+            self.wired(),
+            patch.object(
+                self.gateway,
+                "_dream_agent_thread_factory",
+                return_value=factory,
+            ),
+        ):
+            result = await self.call()
+
+        self.assertIsNone(result.agent_activity)
+        self.assertNotIn(
+            "agentActivity",
+            result.model_dump(mode="json", by_alias=True),
+        )
+
+    async def test_observer_failure_cannot_fail_authorized_dream_files_read(
+        self,
+    ) -> None:
+        with (
+            self.wired(),
+            patch.object(
+                self.gateway,
+                "_dream_agent_thread_factory",
+                side_effect=RuntimeError("observer unavailable"),
+            ),
+        ):
+            result = await self.call()
+
+        self.assertEqual(result.story_workspace_run_id, RUN_ID)
+        self.assertIsNone(result.agent_activity)
+        self.assertNotIn(
+            "agentActivity",
+            result.model_dump(mode="json", by_alias=True),
+        )
+
     async def test_actor_with_multiple_workspaces_uses_run_owned_workspace(self) -> None:
         selected_workspace = "workspace-newer-owned-by-run"
         selected_run = authoritative_run(workspace_id=selected_workspace)
@@ -636,6 +860,71 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.stages, {})
         self.assertFalse(result.can_confirm)
         self.assertEqual(self.tree_snapshot(self.root), before)
+
+    async def test_running_before_dream_materialization_is_waiting_and_read_only(
+        self,
+    ) -> None:
+        shutil.rmtree(self.dream)
+        before = self.tree_snapshot(self.root)
+        running = authoritative_run(
+            status=RunStatus.RUNNING,
+            status_version=2,
+            runtime_load_receipt_id="receipt-1",
+            agent_session_id="as_" + "1" * 32,
+        )
+
+        with self.wired(run=running):
+            result = await self.call()
+
+        self.assertEqual(result.run_revision, 0)
+        self.assertEqual(result.stages, {})
+        self.assertFalse(result.can_confirm)
+        self.assertEqual(self.tree_snapshot(self.root), before)
+        self.assertFalse(self.dream.exists())
+
+    async def test_completed_run_missing_required_output_fails_closed(self) -> None:
+        shutil.rmtree(self.dream)
+        completed = authoritative_run(
+            status=RunStatus.COMPLETED,
+            status_version=7,
+            runtime_load_receipt_id="receipt-1",
+            agent_session_id="as_" + "1" * 32,
+            completed_at=datetime(2026, 8, 4, 1, tzinfo=timezone.utc),
+        )
+
+        with self.wired(run=completed):
+            with self.assertRaises(ApiRouteError) as raised:
+                await self.call()
+
+        self.assertEqual(
+            (raised.exception.code, raised.exception.status_code),
+            ("OUTPUT_CONTRACT_INVALID", 422),
+        )
+
+    async def test_completed_run_with_run_file_but_partial_stages_fails_closed(
+        self,
+    ) -> None:
+        completed = authoritative_run(
+            status=RunStatus.COMPLETED,
+            status_version=7,
+            runtime_load_receipt_id="receipt-1",
+            agent_session_id="as_" + "1" * 32,
+            completed_at=datetime(2026, 8, 4, 1, tzinfo=timezone.utc),
+        )
+        StoryWorkspaceDreamFileWriter(self.workspace).write_run(
+            completed,
+            thread_id=THREAD_ID,
+            expected_revision=0,
+        )
+
+        with self.wired(run=completed):
+            with self.assertRaises(ApiRouteError) as raised:
+                await self.call()
+
+        self.assertEqual(
+            (raised.exception.code, raised.exception.status_code),
+            ("OUTPUT_CONTRACT_INVALID", 422),
+        )
 
     async def test_complete_three_stage_projection_has_source_and_is_confirmable(
         self,
@@ -738,23 +1027,42 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             ("OUTPUT_CONTRACT_INVALID", 422),
         )
 
-    async def test_missing_workspace_is_not_created(self) -> None:
+    async def test_missing_workspace_is_read_only_waiting_projection(self) -> None:
         shutil.rmtree(self.workspace)
         with self.wired():
-            with self.assertRaises(ApiRouteError) as raised:
-                await self.call()
-        self.assertEqual(raised.exception.status_code, 404)
+            result = await self.call()
+        self.assertEqual(result.run_revision, 0)
+        self.assertEqual(result.stages, {})
+        self.assertFalse(result.can_confirm)
         self.assertFalse(self.workspace.exists())
 
-    async def test_missing_static_dream_directory_is_not_a_waiting_success(self) -> None:
-        shutil.rmtree(self.dream)
-        with self.wired():
+    async def test_output_required_run_with_missing_workspace_fails_closed(self) -> None:
+        shutil.rmtree(self.workspace)
+        completed = authoritative_run(
+            status=RunStatus.COMPLETED,
+            status_version=7,
+            runtime_load_receipt_id="receipt-1",
+            agent_session_id="as_" + "1" * 32,
+            completed_at=datetime(2026, 8, 4, 1, tzinfo=timezone.utc),
+        )
+        with self.wired(run=completed):
             with self.assertRaises(ApiRouteError) as raised:
                 await self.call()
         self.assertEqual(
             (raised.exception.code, raised.exception.status_code),
-            ("OUTPUT_CONTRACT_INVALID", 422),
+            ("AGENT_EXECUTION_FAILED", 404),
         )
+        self.assertFalse(self.workspace.exists())
+
+    async def test_missing_static_dream_directory_is_waiting_before_output_required(
+        self,
+    ) -> None:
+        shutil.rmtree(self.dream)
+        with self.wired():
+            result = await self.call()
+        self.assertEqual(result.run_revision, 0)
+        self.assertEqual(result.stages, {})
+        self.assertFalse(result.can_confirm)
         self.assertFalse(self.dream.exists())
 
     async def test_workspace_symlink_and_escape_are_rejected(self) -> None:

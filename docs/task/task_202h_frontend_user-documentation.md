@@ -73,8 +73,8 @@ Story Workspace 使用文档编写
 - `docs/task/story-workspace-user-guide.md`（或等效路径）
 
 **参考输入**（只读）：
-- `docs/design/story-workspace/story-workspace-prd.md`
-- `docs/design/story-workspace/story-workspace-layout-design.md`
+- `docs/design/story-workspace/product-scope-and-navigation.md`
+- `docs/design/story-workspace/product-scope-and-navigation.md`
 - `docs/issue/ISSUES_story-workspace.md`
 
 ---

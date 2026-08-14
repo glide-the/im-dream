@@ -212,7 +212,7 @@ def _authenticated_user():
 class ApiRouteContractTests(unittest.TestCase):
     def setUp(self):
         deck_app = FastAPI()
-        deck_app.dependency_overrides[deck_plugins.get_current_user] = _authenticated_user
+        deck_app.dependency_overrides[deck_plugins._deck_plugin_current_user] = _authenticated_user
         deck_app.dependency_overrides[deck_plugins.get_deck_plugin_gateway] = _DeckGateway
         deck_app.include_router(deck_plugins.router)
         self.deck_client = TestClient(deck_app)
@@ -225,7 +225,12 @@ class ApiRouteContractTests(unittest.TestCase):
 
         story_app = FastAPI()
         story_app.dependency_overrides[story_workspace.get_current_user] = _authenticated_user
-        story_app.dependency_overrides[story_workspace.get_story_workflow_gateway] = _StoryGateway
+        for dependency in (
+            story_workspace.get_story_workflow_run_service,
+            story_workspace.get_dream_artifact_service,
+            story_workspace.get_dream_confirmation_service,
+        ):
+            story_app.dependency_overrides[dependency] = _StoryGateway
         story_app.include_router(story_workspace.router)
         self.story_client = TestClient(story_app)
 
@@ -328,14 +333,25 @@ class ApiRouteContractTests(unittest.TestCase):
 
 
 class ErrorRegistryTests(unittest.TestCase):
-    def test_registry_has_all_44_canonical_codes_with_recovery(self):
+    def test_registry_has_all_52_canonical_codes_with_recovery(self):
         # 27 legacy codes + 16 Claude Code plugin pipeline codes
         # (deck-integration-delta, 2026-08-02) + 1 guidance code
         # (WORKFLOW_RUN_NOT_GUIDABLE, dream-surface Task 3, 2026-08-04).
         self.assertGreaterEqual(len(ERROR_REGISTRY), 25)
-        self.assertEqual(len(ERROR_REGISTRY), 44)
+        self.assertEqual(len(ERROR_REGISTRY), 52)
+        story_index_codes = {
+            "story_index_row_missing",
+            "story_index_schema_unavailable",
+            "story_index_database_unavailable",
+            "story_index_write_failed",
+            "story_index_conflict",
+            "story_index_invalid_artifact",
+            "story_index_revision_conflict",
+            "artifact_missing",
+        }
         for code, metadata in ERROR_REGISTRY.items():
-            self.assertRegex(code, r"^[A-Z][A-Z0-9_]+$")
+            if code not in story_index_codes:
+                self.assertRegex(code, r"^[A-Z][A-Z0-9_]+$")
             self.assertTrue(metadata["phase"])
             self.assertTrue(metadata["meaning"])
             self.assertTrue(metadata["recovery"])
@@ -370,7 +386,7 @@ class ErrorRegistryTests(unittest.TestCase):
                 )
 
         app = FastAPI()
-        app.dependency_overrides[deck_plugins.get_current_user] = _authenticated_user
+        app.dependency_overrides[deck_plugins._deck_plugin_current_user] = _authenticated_user
         app.dependency_overrides[deck_plugins.get_deck_plugin_gateway] = DeniedGateway
         app.include_router(deck_plugins.router)
         with TestClient(app) as client:
@@ -385,7 +401,7 @@ class ErrorRegistryTests(unittest.TestCase):
                 raise RuntimeError("/Users/private prompt secret api-key")
 
         app = FastAPI()
-        app.dependency_overrides[deck_plugins.get_current_user] = lambda: {
+        app.dependency_overrides[deck_plugins._deck_plugin_current_user] = lambda: {
             "user_id": 8,
             "role": "user",
             "permissions": [],

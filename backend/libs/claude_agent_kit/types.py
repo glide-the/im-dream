@@ -172,6 +172,14 @@ class AgentRunOptions:
     # context processing; when a plain string is provided the runner wraps it
     # in a single text block.
     user_message: Union[str, list[dict[str, Any]]]
+    # Canonical PostgreSQL users.id bound by the authenticated Dream session.
+    # Required when the Admin Gateway Claude canary is enabled; never accepted
+    # from a browser header or model payload.
+    canonical_user_id: Optional[str] = None
+    # Server-derived stable key that correlates one persisted Dream message
+    # with exactly one Admin Gateway settlement. Never accept the raw header
+    # value from a browser request.
+    gateway_idempotency_key: Optional[str] = None
     # Whether to resume an existing conversation.
     resume: bool = False
     # Model to use.

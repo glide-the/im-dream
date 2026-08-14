@@ -60,6 +60,10 @@ import {
   publishStoryWorkspaceOutput,
   type StoryWorkspaceOutputReceipt,
 } from './story-workspace-events';
+import {
+  drainClaudeAgentSseFrames,
+  parseClaudeAgentSseBuffer,
+} from './claude-agent-sse-utils';
 
 // ---------------------------------------------------------------------------
 // Backend event shapes (Pawkeyland-aligned)
@@ -226,30 +230,14 @@ type BackendEvent =
  * "data: " carry the JSON payload.
  */
 function parseSSEChunk(raw: string): BackendEvent[] {
-  const events: BackendEvent[] = [];
-  const frames = raw.split(/\n\n+/);
-  for (const frame of frames) {
-    for (const line of frame.split('\n')) {
-      if (line.startsWith('data: ')) {
-        const json = line.slice('data: '.length).trim();
-        if (!json) continue;
-        try {
-          const parsed = JSON.parse(json) as BackendEvent;
-          if (parsed && typeof parsed.type === 'string') {
-            events.push(parsed);
-          }
-        } catch {
-          // Ignore malformed JSON lines
-        }
-      }
-    }
-  }
-  return events;
+  return parseClaudeAgentSseBuffer(raw) as BackendEvent[];
 }
 
 interface ConversionState {
   started: boolean;
   toolInputs: Record<string, unknown>;
+  toolNames: Record<string, string>;
+  settledToolCallIds: Set<string>;
   /** Chat/thread id used to route plan-* lifecycle frames to the plan store. */
   threadId?: string;
 }
@@ -323,6 +311,7 @@ function convertEvent(
     // -----------------------------------------------------------------------
     case 'tool-input-start': {
       ensureStarted();
+      state.toolNames[event.toolCallId] = event.toolName;
       chunks.push({
         type: 'tool-input-start',
         toolCallId: event.toolCallId,
@@ -347,6 +336,7 @@ function convertEvent(
     case 'tool-input-available': {
       ensureStarted();
       state.toolInputs[event.toolCallId] = event.input;
+      state.toolNames[event.toolCallId] = event.toolName;
       chunks.push({
         type: 'tool-input-available',
         toolCallId: event.toolCallId,
@@ -386,6 +376,8 @@ function convertEvent(
     // even when the session is in auto mode.
     case 'tool-approval-request': {
       ensureStarted();
+      state.settledToolCallIds.delete(event.toolCallId);
+      state.toolNames[event.toolCallId] = event.toolName;
       chunks.push({
         type: 'tool-input-available',
         toolCallId: event.toolCallId,
@@ -497,19 +489,37 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
     stream: ReadableStream<Uint8Array>,
   ): ReadableStream<UIMessageChunk> {
     const decoder = new TextDecoder();
-    const conversionState: ConversionState = { started: false, toolInputs: {}, threadId: this.threadId };
+    const conversionState: ConversionState = {
+      started: false,
+      toolInputs: {},
+      toolNames: {},
+      settledToolCallIds: new Set<string>(),
+      threadId: this.threadId,
+    };
+    let sseBuffer = '';
+
+    const dispatch = (
+      raw: string,
+      controller: TransformStreamDefaultController<UIMessageChunk>,
+    ) => {
+      const events = parseSSEChunk(raw);
+      for (const event of events) {
+        const uiChunks = convertEvent(event, conversionState);
+        for (const uiChunk of uiChunks) {
+          controller.enqueue(uiChunk);
+        }
+      }
+    };
 
     return stream.pipeThrough(
       new TransformStream<Uint8Array, UIMessageChunk>({
         transform(chunk, controller) {
-          const text = decoder.decode(chunk, { stream: true });
-          const events = parseSSEChunk(text);
-          for (const event of events) {
+          sseBuffer += decoder.decode(chunk, { stream: true });
+          const drained = drainClaudeAgentSseFrames(sseBuffer);
+          sseBuffer = drained.buffer;
+          for (const frame of drained.frames) {
             try {
-              const uiChunks = convertEvent(event, conversionState);
-              for (const uiChunk of uiChunks) {
-                controller.enqueue(uiChunk);
-              }
+              dispatch(`${frame}\n\n`, controller);
             } catch (err) {
               controller.error(err);
               return;
@@ -517,20 +527,12 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
           }
         },
         flush(controller) {
-          const remaining = decoder.decode();
-          if (remaining) {
-            const events = parseSSEChunk(remaining);
-            for (const event of events) {
-              try {
-                const uiChunks = convertEvent(event, conversionState);
-                for (const uiChunk of uiChunks) {
-                  controller.enqueue(uiChunk);
-                }
-              } catch (err) {
-                controller.error(err);
-                return;
-              }
-            }
+          sseBuffer += decoder.decode();
+          if (!sseBuffer.trim()) return;
+          try {
+            dispatch(`${sseBuffer}\n\n`, controller);
+          } catch (err) {
+            controller.error(err);
           }
         },
       }),

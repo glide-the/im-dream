@@ -38,13 +38,13 @@ function props(overrides: Partial<StoryWorkspaceSurfaceLinkButtonProps> = {}): S
 const STAGE_CASES: Array<[StoryWorkspaceSurfaceLinkStage, string, string]> = [
   ['pending_review', '打开 Dream 修改', '/story-workspace/episodes/ep1/review?run=r1'],
   ['confirmed', '进入后续执行', '/story-workspace/runs/r1/execution'],
-  ['continuing', '查看执行内容', '/story-workspace/runs/r1/execution'],
+  ['running', '查看执行内容', '/story-workspace/runs/r1/execution'],
   ['completed', '查看最新内容', '/story-workspace/runs/r1/execution'],
 ];
 
 test('label table exposes only the four design_007 lifecycle bridge stages', () => {
   expect(Object.keys(STORY_WORKSPACE_SURFACE_LINK_LABELS).sort()).toEqual([
-    'completed', 'confirmed', 'continuing', 'pending_review',
+    'completed', 'confirmed', 'pending_review', 'running',
   ]);
 });
 

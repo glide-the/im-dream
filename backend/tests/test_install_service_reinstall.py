@@ -23,6 +23,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 import database
+from backend.schema import legacy_main_sqlite
 from services.claude_plugin import cli as plugin_cli
 from services.claude_plugin import install_service
 from services.claude_plugin.install_service import (
@@ -70,7 +71,8 @@ class ReinstallReviveTests(unittest.TestCase):
         (self.plugin_root / "skills").mkdir(parents=True)
         (self.plugin_root / "skills" / "SKILL.md").write_text("# skill")
         self.db = sqlite3.connect(":memory:")
-        database.create_claude_plugin_tables(self.db)
+        self.db.row_factory = sqlite3.Row
+        legacy_main_sqlite.create_claude_plugin_tables(self.db)
         self.db.commit()
         # Stub the CLI boundary: marketplace ensure, registry lookup, run.
         self._patches = [

@@ -7,7 +7,7 @@ interface LogEntry {
   timestamp: number;
   category: 'waitlist' | 'skip' | 'overlap' | 'apply' | 'phrase_not_found' | 'energy' | 'collision' | 'request';
   message: string;
-  data?: any;
+  data?: unknown;
 }
 
 class DebugLogger {
@@ -15,7 +15,7 @@ class DebugLogger {
   private maxLogs: number = 200;
   private enabled: boolean = true;
 
-  log(category: LogEntry['category'], message: string, data?: any) {
+  log(category: LogEntry['category'], message: string, data?: unknown) {
     if (!this.enabled) return;
 
     this.logs.push({
@@ -138,11 +138,21 @@ class DebugLogger {
 // Global singleton
 export const debugLogger = new DebugLogger();
 
+declare global {
+  interface Window {
+    debugLogger: DebugLogger;
+    dumpLogs: () => void;
+    copyLogs: () => Promise<boolean>;
+    clearLogs: () => void;
+    logStats: () => void;
+  }
+}
+
 // Expose to window for easy console access
 if (typeof window !== 'undefined') {
-  (window as any).debugLogger = debugLogger;
-  (window as any).dumpLogs = () => debugLogger.dump();
-  (window as any).copyLogs = () => debugLogger.copyToClipboard();
-  (window as any).clearLogs = () => debugLogger.clear();
-  (window as any).logStats = () => console.table(debugLogger.getStats());
+  window.debugLogger = debugLogger;
+  window.dumpLogs = () => debugLogger.dump();
+  window.copyLogs = () => debugLogger.copyToClipboard();
+  window.clearLogs = () => debugLogger.clear();
+  window.logStats = () => console.table(debugLogger.getStats());
 }

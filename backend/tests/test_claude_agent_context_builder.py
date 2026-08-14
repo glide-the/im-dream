@@ -44,9 +44,6 @@ from claude_agent.workspace_context import (
     build_workspace_context_block,
 )
 from services.story_workspace import canonical_project_instruction
-from services.story_workspace.episode_workflow_instruction import (
-    story_workspace_private_episode_completion_guidance,
-)
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 # ---------------------------------------------------------------------------
@@ -240,7 +237,7 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIsInstance(blocks, list)
         self.assertTrue(all(isinstance(b, dict) for b in blocks))
 
-    def test_dream_turn_injects_trusted_run_context_and_stage_schedule(self):
+    def test_dream_turn_injects_trusted_run_context_and_host_sync_contract(self):
         context = StoryWorkspaceDreamRunContext(
             workflow_run_id="run_" + "1" * 32,
             thread_id="thread-dream-context",
@@ -256,17 +253,21 @@ class TestBuildUserMessage(unittest.TestCase):
         blocks = self.builder.build_user_message(
             self._parts("create the story"),
             story_workspace_dream_context=context,
+            story_workspace_dream_workbench_instruction=(
+                "<story_workspace_dream_workbench>每次编辑 project.yaml</story_workspace_dream_workbench>"
+            ),
         )
         combined = self._text_blocks(blocks)
 
         self.assertIn("<story_workspace_dream_context>", combined)
         self.assertIn(context.workflow_run_id, combined)
         self.assertIn(context.deck_plugin_binding_id, combined)
-        self.assertIn("mcp__story_workspace__write_dream_run", combined)
         self.assertIn("assets/characters", combined)
         self.assertIn("assets/scenes", combined)
         self.assertIn("storyboard.yaml", combined)
-        self.assertIn("mcp__story_workspace__write_dream_stage", combined)
+        self.assertIn("host synchronizes completed canonical workbench files", combined)
+        self.assertIn("optional helpers", combined)
+        self.assertIn("correctness must not depend on calling them", combined)
         self.assertIn("先完成 drama-init 的项目初始化语义", combined)
         self.assertIn("stories/<project_slug>/project.yaml", combined)
         self.assertIn("project_slug 必须与 project_id 完全相同", combined)
@@ -280,113 +281,25 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("不对 project_name 做 Unicode normalization", combined)
         self.assertIn("郑州暴雨夜 → proj-396e4c1b", combined)
         self.assertIn("规范项目身份成立后，才能写入 storyboard", combined)
-        self.assertIn("expectedBindingRevision=0", combined)
+        self.assertIn("# Run-isolated layout", combined)
+        self.assertIn(
+            "<shared-root>/<server-derived-thread-key>/.dream/runtime/runs/<run-id>/",
+            combined,
+        )
+        self.assertIn("episode.json", combined)
+        self.assertIn("episode-workflow.json", combined)
+        self.assertIn("artifact/", combined)
+        self.assertIn("stories/<source-project-id>/", combined)
+        self.assertIn("episodes/<EPxx>/", combined)
+        self.assertIn("script.md", combined)
+        self.assertIn("episode-outline.md", combined)
+        self.assertIn("review-report.md", combined)
+        self.assertIn("server-trusted workflow_run_id", combined)
+        self.assertIn("Generic file or Bash tools must never", combined)
+        self.assertIn("每次编辑 project.yaml", combined)
         self.assertLess(
             combined.index("<story_workspace_dream_context>"),
             combined.rindex("create the story"),
-        )
-
-    def test_trusted_episode_action_injects_private_completion_handshake(self):
-        context = StoryWorkspaceDreamRunContext(
-            workflow_run_id="run_" + "1" * 32,
-            thread_id="thread-dream-context",
-            deck_id="deck-dream",
-            deck_plugin_id="ink.dream.story-workflow",
-            deck_plugin_version="1.0.0",
-            deck_plugin_binding_id="dpb_" + "2" * 32,
-            binding_revision=3,
-            deck_runtime_snapshot_id="drs_" + "4" * 32,
-            runtime_plugin_lock_id="rpl_" + "5" * 32,
-        )
-        provenance = {
-            "schema": "story-workspace-episode-action/v1",
-            "action": "write_script",
-            "episode_uid": "a" * 32,
-            "input_revision": "sha256:" + "b" * 64,
-            "expected_facts_revision": 2,
-            "expected_manifest_revision": "sha256:" + "c" * 64,
-            "expected_workflow_revision": "sha256:" + "d" * 64,
-        }
-
-        guidance = story_workspace_private_episode_completion_guidance(
-            context,
-            provenance,
-        )
-        blocks = self.builder.build_user_message(
-            self._parts("继续写剧本"),
-            story_workspace_dream_context=context,
-            story_workspace_episode_action=provenance,
-        )
-        combined = self._text_blocks(blocks)
-
-        self.assertIsNotNone(guidance)
-        self.assertIn(
-            "mcp__story_workspace__record_episode_workflow_completion",
-            combined,
-        )
-        self.assertIn(context.workflow_run_id, combined)
-        self.assertIn("重新读取并核验本轮规范产物", combined)
-        self.assertIn("无论成功或 fail closed 都立即停止", combined)
-
-    def test_generic_and_plain_dream_messages_have_no_private_completion_handshake(self):
-        context = StoryWorkspaceDreamRunContext(
-            workflow_run_id="run_" + "1" * 32,
-            thread_id="thread-dream-context",
-            deck_id="deck-dream",
-            deck_plugin_id="ink.dream.story-workflow",
-            deck_plugin_version="1.0.0",
-            deck_plugin_binding_id="dpb_" + "2" * 32,
-            binding_revision=3,
-            deck_runtime_snapshot_id="drs_" + "4" * 32,
-            runtime_plugin_lock_id="rpl_" + "5" * 32,
-        )
-        generic = self._text_blocks(
-            self.builder.build_user_message(self._parts("普通聊天"))
-        )
-        plain_dream = self._text_blocks(
-            self.builder.build_user_message(
-                self._parts("普通 Dream 留言"),
-                story_workspace_dream_context=context,
-            )
-        )
-
-        self.assertNotIn("record_episode_workflow_completion", generic)
-        self.assertNotIn("record_episode_workflow_completion", plain_dream)
-
-    def test_recovery_or_malformed_provenance_cannot_gain_private_completion(self):
-        context = StoryWorkspaceDreamRunContext(
-            workflow_run_id="run_" + "1" * 32,
-            thread_id="thread-dream-context",
-            deck_id="deck-dream",
-            deck_plugin_id="ink.dream.story-workflow",
-            deck_plugin_version="1.0.0",
-            deck_plugin_binding_id="dpb_" + "2" * 32,
-            binding_revision=3,
-            deck_runtime_snapshot_id="drs_" + "4" * 32,
-            runtime_plugin_lock_id="rpl_" + "5" * 32,
-        )
-        recovery = {
-            "schema": "story-workspace-episode-action/v1",
-            "action": "recover_first_episode_binding",
-            "episode_uid": None,
-            "input_revision": None,
-            "expected_facts_revision": None,
-            "expected_manifest_revision": None,
-            "expected_workflow_revision": None,
-        }
-        malformed = {**recovery, "action": "write_script"}
-
-        self.assertIsNone(
-            story_workspace_private_episode_completion_guidance(
-                context,
-                recovery,
-            )
-        )
-        self.assertIsNone(
-            story_workspace_private_episode_completion_guidance(
-                context,
-                malformed,
-            )
         )
 
     def test_canonical_project_fallback_slug_is_byte_exact_without_normalization(self):

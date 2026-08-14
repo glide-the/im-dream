@@ -1,4 +1,22 @@
 export { useStories } from './useStories';
+export {
+  StoryWorkspaceStoryIndexContractError,
+  StoryWorkspaceStoryIndexHttpError,
+  storyWorkspaceFetchStoryIndex,
+  storyWorkspaceNewStoryIndexIdempotencyKey,
+  storyWorkspaceParseStoryIndexProjection,
+  storyWorkspaceReconcileStoryIndex,
+  storyWorkspaceStoryIndexEndpoint,
+  storyWorkspaceStoryIndexQueryIdentity,
+  storyWorkspaceStoryIndexReconcileEndpoint,
+  storyWorkspaceShouldPollStoryIndex,
+  STORY_WORKSPACE_STORY_INDEX_POLL_INTERVAL_MS,
+  useStoryWorkspaceStoryIndex,
+} from './useStoryWorkspaceStoryIndex';
+export type {
+  StoryWorkspaceStoryIndexState,
+  StoryWorkspaceStoryIndexUseOptions,
+} from './useStoryWorkspaceStoryIndex';
 export { useCharacters } from './useCharacters';
 export { useScenes } from './useScenes';
 export { useWorkspaceSurfaces } from './useWorkspaceSurfaces';
@@ -62,23 +80,6 @@ export {
   useStoryWorkspaceDreamRuns,
 } from './useStoryWorkspaceDreamRuns';
 export type { StoryWorkspaceDreamRunsState } from './useStoryWorkspaceDreamRuns';
-export {
-  storyWorkspaceDreamAgentEventsEndpoint,
-  storyWorkspaceDreamAgentMessagesEndpoint,
-  storyWorkspaceDreamAgentToolConfirmationEndpoint,
-  storyWorkspaceBuildDreamAgentToolConfirmationPayload,
-  storyWorkspaceBuildDreamAgentSendPayload,
-  storyWorkspaceFetchDreamAgentSnapshot,
-  storyWorkspaceNewDreamAgentIdempotencyKey,
-  storyWorkspaceParseDreamAgentEvent,
-  storyWorkspaceParseDreamAgentSnapshot,
-  storyWorkspaceReadDreamAgentEventStream,
-  storyWorkspaceReduceDreamAgentEvents,
-  storyWorkspaceSubmitDreamAgentMessage,
-  storyWorkspaceSubmitDreamAgentToolConfirmation,
-  useStoryWorkspaceDreamAgent,
-} from './useStoryWorkspaceDreamAgent';
-export type { StoryWorkspaceDreamAgentViewModel } from './useStoryWorkspaceDreamAgent';
 export type {
   StoryWorkspaceCharacter,
   StoryWorkspaceDreamConfirmationCommand,
@@ -90,16 +91,6 @@ export type {
   StoryWorkspaceDreamReentryItem,
   StoryWorkspaceDreamFieldValue,
   StoryWorkspaceDreamFilesResponse,
-  StoryWorkspaceDreamAgentEvent,
-  StoryWorkspaceDreamAgentMessage,
-  StoryWorkspaceDreamAgentMessageAccepted,
-  StoryWorkspaceDreamAgentMessageCommand,
-  StoryWorkspaceDreamAgentMessageSnapshot,
-  StoryWorkspaceDreamAgentToolConfirmation,
-  StoryWorkspaceDreamAgentToolConfirmationCommand,
-  StoryWorkspaceDreamAgentToolConfirmationOption,
-  StoryWorkspaceDreamAgentToolConfirmationQuestion,
-  StoryWorkspaceDreamAgentToolConfirmationResolved,
   StoryWorkspaceDreamLifecycleState,
   StoryWorkspaceDreamSource,
   StoryWorkspaceDreamStage,
@@ -118,6 +109,10 @@ export type {
   StoryWorkspaceSceneQuery,
   StoryWorkspaceSortOrder,
   StoryWorkspaceStory,
+  StoryWorkspaceArtifactSyncStatus,
+  StoryWorkspaceStoryIndexErrorCode,
+  StoryWorkspaceStoryIndexProjection,
+  StoryWorkspaceStoryIndexStatus,
   StoryWorkspaceStoryQuery,
   StoryWorkspaceStoryType,
   StoryWorkspaceSurface,

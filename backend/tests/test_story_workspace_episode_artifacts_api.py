@@ -9,7 +9,9 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -22,9 +24,10 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from routers import story_workspace
-from services.deck import story_workflow_gateway as gateway_module
+from services.deck import story_workflow_application as gateway_module
 from services.errors.error_registry import ApiRouteError
 from services.story_workspace.episode_artifact_service import (
+    StoryWorkspaceEpisodeArtifactError,
     StoryWorkspaceEpisodeArtifactPathError,
     StoryWorkspaceEpisodeArtifactService,
 )
@@ -39,7 +42,8 @@ from story_workspace.contracts import (
     StoryWorkspaceEpisodeArtifactAvailability,
     StoryWorkspaceEpisodeArtifactSurface,
     StoryWorkspaceEpisodeBindingAvailability,
-    StoryWorkspaceEpisodeBindingRecovery,
+    StoryWorkspaceStoryIndexProjection,
+    StoryWorkspaceStoryIndexReconcileCommand,
 )
 
 
@@ -58,6 +62,15 @@ VENDOR_EPISODE = (
     / "episodes"
     / "EP01"
 )
+
+
+def _open_gateway_test_db(path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(path, timeout=10, check_same_thread=False)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.execute("PRAGMA busy_timeout=10000")
+    connection.execute("PRAGMA journal_mode=WAL")
+    return connection
 
 
 def _binding_context(run_id: str = RUN_ID, story_slug: str = "didi-zhengzhou"):
@@ -88,11 +101,6 @@ def _unbound_surface() -> StoryWorkspaceEpisodeArtifactSurface:
     return StoryWorkspaceEpisodeArtifactSurface(
         runId=RUN_ID,
         bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
-        bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
-            autoRepairAttempted=True,
-            canDispatch=True,
-            publicReason="episode_binding_unproven",
-        ),
     )
 
 
@@ -111,6 +119,267 @@ class _RecordingGateway:
         return self.response
 
 
+def _story_index_projection(
+    *,
+    status: str = "missing",
+    story_id: str | None = None,
+) -> StoryWorkspaceStoryIndexProjection:
+    revision = "sha256:" + "b" * 64
+    return StoryWorkspaceStoryIndexProjection(
+        runId=RUN_ID,
+        projectId="didi-zhengzhou",
+        projectTitle="滴滴郑州",
+        storyId=story_id,
+        status=status,
+        observedManifestRevision=revision,
+        observedScriptRevision=revision,
+        indexedManifestRevision=revision if status == "indexed" else None,
+        indexedScriptRevision=revision if status == "indexed" else None,
+        episodeCount=1,
+        lastIndexedAt=None,
+        errorCode="story_index_row_missing" if status == "missing" else None,
+        retryable=status != "indexed",
+        etag="sha256:" + "c" * 64,
+    )
+
+
+def test_story_index_contract_rejects_non_v5_story_ids() -> None:
+    with pytest.raises(ValueError):
+        _story_index_projection(
+            story_id="9e8e17bd-d586-4eb1-a0cf-a7a98d44c9b3",
+        )
+
+
+def test_story_index_contract_normalizes_last_indexed_at_to_utc() -> None:
+    projection = StoryWorkspaceStoryIndexProjection(
+        runId=RUN_ID,
+        projectId="didi-zhengzhou",
+        projectTitle="滴滴郑州",
+        storyId="9e8e17bd-d586-5eb1-a0cf-a7a98d44c9b3",
+        status="indexed",
+        observedManifestRevision="sha256:" + "b" * 64,
+        observedScriptRevision="sha256:" + "c" * 64,
+        indexedManifestRevision="sha256:" + "b" * 64,
+        indexedScriptRevision="sha256:" + "c" * 64,
+        episodeCount=1,
+        lastIndexedAt=datetime(
+            2026,
+            8,
+            10,
+            9,
+            0,
+            tzinfo=timezone(timedelta(hours=8)),
+        ),
+        errorCode=None,
+        retryable=False,
+        etag="sha256:" + "d" * 64,
+    )
+
+    assert projection.last_indexed_at is not None
+    assert projection.last_indexed_at.utcoffset() == timedelta(0)
+    assert projection.model_dump(mode="json", by_alias=True)["lastIndexedAt"] in {
+        "2026-08-10T01:00:00Z",
+        "2026-08-10T01:00:00+00:00",
+    }
+
+
+class _StoryIndexGateway:
+    def __init__(self, response: StoryWorkspaceStoryIndexProjection) -> None:
+        self.response = response
+        self.get_calls: list[tuple[str, dict[str, str]]] = []
+        self.post_calls: list[tuple[str, object, dict[str, str], str]] = []
+
+    async def get_story_index(self, workflow_run_id: str, *, actor: dict[str, str]):
+        self.get_calls.append((workflow_run_id, actor))
+        return self.response
+
+    async def reconcile_story_index(
+        self,
+        workflow_run_id: str,
+        request: object,
+        *,
+        actor: dict[str, str],
+        if_match: str,
+    ):
+        self.post_calls.append((workflow_run_id, request, actor, if_match))
+        return self.response
+
+
+def _story_index_client(gateway: object) -> TestClient:
+    app = FastAPI()
+    app.dependency_overrides[story_workspace.get_current_user] = lambda: {
+        "user_id": int(ACTOR_ID),
+    }
+    app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
+        lambda: gateway
+    )
+    app.include_router(story_workspace.router)
+    return TestClient(app)
+
+
+def test_story_index_route_has_an_independent_exact_etag_contract() -> None:
+    gateway = _StoryIndexGateway(_story_index_projection())
+    quoted = '"sha256:' + "c" * 64 + '"'
+    with _story_index_client(gateway) as client:
+        first = client.get(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/story-index"
+        )
+        cached = client.get(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/story-index",
+            headers={"If-None-Match": quoted},
+        )
+    assert first.status_code == 200
+    assert first.headers["etag"] == quoted
+    assert first.json()["status"] == "missing"
+    assert "sourceThreadRef" not in first.text
+    assert cached.status_code == 304
+    assert gateway.get_calls == [
+        (RUN_ID, {"actor_id": ACTOR_ID}),
+        (RUN_ID, {"actor_id": ACTOR_ID}),
+    ]
+
+
+def test_story_index_reconcile_accepts_only_optional_idempotency_and_if_match() -> None:
+    gateway = _StoryIndexGateway(
+        _story_index_projection(
+            status="indexed",
+            story_id="9e8e17bd-d586-5eb1-a0cf-a7a98d44c9b3",
+        )
+    )
+    quoted = '"sha256:' + "c" * 64 + '"'
+    with _story_index_client(gateway) as client:
+        response = client.post(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/story-index/reconcile",
+            headers={"If-Match": quoted},
+            json={"idempotencyKey": "retry-1"},
+        )
+        rejected = client.post(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/story-index/reconcile",
+            headers={"If-Match": quoted},
+            json={"projectId": "didi-zhengzhou"},
+        )
+    assert response.status_code == 200
+    assert response.headers["etag"] == quoted
+    assert len(gateway.post_calls) == 1
+    call = gateway.post_calls[0]
+    assert call[0] == RUN_ID
+    assert call[2] == {"actor_id": ACTOR_ID}
+    assert call[3] == quoted
+    assert rejected.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "if_match",
+    [
+        "sha256:" + "c" * 64,
+        'W/"sha256:' + "c" * 64 + '"',
+        '"sha256:' + "C" * 64 + '"',
+        '"sha256:' + "c" * 63 + '"',
+        '"sha256:' + "c" * 64 + '", "sha256:' + "d" * 64 + '"',
+        "*",
+    ],
+)
+def test_story_index_reconcile_rejects_every_non_exact_if_match(
+    if_match: str,
+) -> None:
+    gateway = _StoryIndexGateway(_story_index_projection())
+    with _story_index_client(gateway) as client:
+        response = client.post(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/story-index/reconcile",
+            headers={"If-Match": if_match},
+            json={},
+        )
+    assert response.status_code == 422
+    assert gateway.post_calls == []
+
+
+def test_story_index_reconcile_requires_if_match() -> None:
+    gateway = _StoryIndexGateway(_story_index_projection())
+    with _story_index_client(gateway) as client:
+        response = client.post(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/story-index/reconcile",
+            json={},
+        )
+    assert response.status_code == 422
+    assert gateway.post_calls == []
+
+
+@pytest.mark.parametrize(
+    ("code", "status"),
+    [
+        ("artifact_missing", 404),
+        ("story_index_revision_conflict", 409),
+        ("story_index_invalid_artifact", 422),
+        ("story_index_database_unavailable", 503),
+    ],
+)
+def test_story_index_route_serializes_only_fixed_safe_errors(
+    code: str,
+    status: int,
+) -> None:
+    class FailingGateway(_StoryIndexGateway):
+        async def get_story_index(
+            self,
+            workflow_run_id: str,
+            *,
+            actor: dict[str, str],
+        ):
+            raise ApiRouteError(code, status_code=status)
+
+    with _story_index_client(FailingGateway(_story_index_projection())) as client:
+        response = client.get(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/story-index"
+        )
+    assert response.status_code == status
+    assert response.json()["error"]["code"] == code
+    assert set(response.json()["error"]) == {
+        "code",
+        "phase",
+        "message",
+        "recovery_action",
+    }
+
+
+def test_story_index_route_collapses_unexpected_details_to_safe_503() -> None:
+    class FailingGateway(_StoryIndexGateway):
+        async def get_story_index(
+            self,
+            workflow_run_id: str,
+            *,
+            actor: dict[str, str],
+        ):
+            raise RuntimeError("/Users/private/secret-story-index")
+
+    with _story_index_client(FailingGateway(_story_index_projection())) as client:
+        response = client.get(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/story-index"
+        )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "story_index_database_unavailable"
+    assert "private" not in response.text
+    assert "secret" not in response.text
+
+
+def test_story_index_route_never_forwards_unknown_api_error_or_500_status() -> None:
+    class FailingGateway(_StoryIndexGateway):
+        async def get_story_index(
+            self,
+            workflow_run_id: str,
+            *,
+            actor: dict[str, str],
+        ):
+            raise ApiRouteError("/Users/private/secret-story-index", status_code=500)
+
+    with _story_index_client(FailingGateway(_story_index_projection())) as client:
+        response = client.get(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/story-index"
+        )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "story_index_database_unavailable"
+    assert "private" not in response.text
+    assert "secret" not in response.text
+
+
 def test_route_passes_only_run_and_actor_and_honors_etag() -> None:
     surface = _unbound_surface()
     app = FastAPI()
@@ -118,7 +387,7 @@ def test_route_passes_only_run_and_actor_and_honors_etag() -> None:
     app.dependency_overrides[story_workspace.get_current_user] = lambda: {
         "user_id": int(ACTOR_ID),
     }
-    app.dependency_overrides[story_workspace.get_story_workflow_gateway] = (
+    app.dependency_overrides[story_workspace.get_dream_artifact_service] = (
         lambda: gateway
     )
     app.include_router(story_workspace.router)
@@ -150,7 +419,7 @@ def test_route_returns_304_only_for_the_exact_quoted_manifest_etag() -> None:
     app.dependency_overrides[story_workspace.get_current_user] = lambda: {
         "user_id": int(ACTOR_ID),
     }
-    app.dependency_overrides[story_workspace.get_story_workflow_gateway] = lambda: gateway
+    app.dependency_overrides[story_workspace.get_dream_artifact_service] = lambda: gateway
     app.include_router(story_workspace.router)
     with TestClient(app) as client:
         response = client.get(
@@ -182,8 +451,7 @@ class TestStoryWorkspaceEpisodeArtifactService:
         )
         self.binding = StoryWorkspaceEpisodeBindingService(
             self.workspace
-        ).resolve_or_repair_binding(_binding_context()).binding
-        assert self.binding is not None
+        ).bind_first_episode(_binding_context())
         self.authority = _episode_authority(self.binding.episode_uid)
         self.service = StoryWorkspaceEpisodeArtifactService(self.workspace)
 
@@ -965,12 +1233,288 @@ def _set_gateway_episode_authority(
     db.commit()
 
 
+@pytest.mark.parametrize(
+    ("actor_id", "mutation"),
+    [
+        ("8", None),
+        (ACTOR_ID, "UPDATE workflow_runs SET created_by = '8'"),
+        (ACTOR_ID, "UPDATE story_workspace_workspaces SET owner_id = 8"),
+        (ACTOR_ID, "UPDATE decks SET owner_id = 8"),
+        (ACTOR_ID, "UPDATE chat_thread SET user_id = 8"),
+        (ACTOR_ID, "UPDATE chat_message SET role = 'assistant'"),
+        (ACTOR_ID, "UPDATE chat_message SET metadata = '{}'"),
+    ],
+)
+def test_story_index_authorizes_actor_run_workspace_deck_thread_and_message_before_files(
+    actor_id: str,
+    mutation: str | None,
+) -> None:
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    _create_gateway_schema(db)
+    _seed_authorized_gateway_run(db)
+    _set_gateway_episode_authority(db, "a" * 32)
+    if mutation is not None:
+        db.execute(mutation)
+        db.commit()
+    gateway = gateway_module.DreamArtifactApplicationService()
+
+    with patch.object(
+        gateway,
+        "_thread_workspace",
+        side_effect=AssertionError("unauthorized Story index path probe"),
+    ) as workspace_probe:
+        with pytest.raises(ApiRouteError) as captured:
+            gateway._authorized_story_index_context(
+                db,
+                RUN_ID,
+                {"actor_id": actor_id},
+            )
+
+    assert captured.value.status_code == 404
+    assert captured.value.code == "WORKFLOW_PERMISSION_DENIED"
+    workspace_probe.assert_not_called()
+    db.close()
+
+
+@pytest.mark.parametrize(
+    ("surface_error", "expected_code", "expected_status"),
+    [
+        (
+            StoryWorkspaceEpisodeArtifactPathError("/Users/private/story-index"),
+            "artifact_missing",
+            404,
+        ),
+        (
+            StoryWorkspaceEpisodeArtifactError("/Users/private/story-index"),
+            "story_index_invalid_artifact",
+            422,
+        ),
+    ],
+)
+def test_story_index_post_second_surface_read_maps_safe_errors_without_writing(
+    surface_error: Exception,
+    expected_code: str,
+    expected_status: int,
+) -> None:
+    etag = "sha256:" + "c" * 64
+    db = SimpleNamespace(close=lambda: None)
+    context = SimpleNamespace(
+        workflow_run_row={"run_id": RUN_ID},
+        actor_id=int(ACTOR_ID),
+        thread_id=THREAD_ID,
+        thread_workspace=Path("/server-owned/thread-workspace"),
+        episode_authority=object(),
+        refreshed_surface=object(),
+    )
+    gateway = gateway_module.DreamArtifactApplicationService()
+
+    def raise_surface_error(*_args, **_kwargs):
+        raise surface_error
+
+    with (
+        patch.object(gateway_module.database, "get_db", return_value=db),
+        patch.object(
+            gateway,
+            "_authorized_story_index_context",
+            return_value=context,
+        ),
+        patch.object(
+            gateway,
+            "_inspect_story_index_snapshot",
+            return_value=SimpleNamespace(
+                observation=SimpleNamespace(etag=etag),
+                projection=object(),
+                record=None,
+            ),
+        ),
+        patch.object(
+            gateway_module,
+            "StoryWorkspaceEpisodeArtifactService",
+            return_value=SimpleNamespace(read_surface=raise_surface_error),
+        ),
+        patch.object(
+            gateway_module.ArtifactStoryIndexService,
+            "materialize_projection",
+        ) as materialize,
+    ):
+        with pytest.raises(ApiRouteError) as captured:
+            gateway._reconcile_story_index_sync(
+                RUN_ID,
+                StoryWorkspaceStoryIndexReconcileCommand(),
+                {"actor_id": ACTOR_ID},
+                f'"{etag}"',
+            )
+
+    assert captured.value.code == expected_code
+    assert captured.value.status_code == expected_status
+    assert "private" not in str(captured.value)
+    materialize.assert_not_called()
+
+
+def test_story_index_post_rechecks_surface_etag_before_materialize() -> None:
+    initial_etag = "sha256:" + "c" * 64
+    changed_etag = "sha256:" + "d" * 64
+    db = SimpleNamespace(close=lambda: None)
+    context = SimpleNamespace(
+        workflow_run_row={"run_id": RUN_ID},
+        actor_id=int(ACTOR_ID),
+        thread_id=THREAD_ID,
+        thread_workspace=Path("/server-owned/thread-workspace"),
+        episode_authority=object(),
+        refreshed_surface=object(),
+    )
+    gateway = gateway_module.DreamArtifactApplicationService()
+
+    with (
+        patch.object(gateway_module.database, "get_db", return_value=db),
+        patch.object(
+            gateway,
+            "_authorized_story_index_context",
+            return_value=context,
+        ),
+        patch.object(
+            gateway,
+            "_inspect_story_index_snapshot",
+            side_effect=[
+                SimpleNamespace(
+                    observation=SimpleNamespace(etag=initial_etag),
+                    projection=object(),
+                    record=None,
+                ),
+                SimpleNamespace(
+                    observation=SimpleNamespace(etag=changed_etag),
+                    projection=object(),
+                    record=None,
+                ),
+            ],
+        ) as inspect,
+        patch.object(
+            gateway,
+            "_read_story_index_surface",
+            return_value=object(),
+        ) as reread,
+        patch.object(
+            gateway_module.ArtifactStoryIndexService,
+            "materialize_projection",
+        ) as materialize,
+    ):
+        with pytest.raises(ApiRouteError) as captured:
+            gateway._reconcile_story_index_sync(
+                RUN_ID,
+                StoryWorkspaceStoryIndexReconcileCommand(),
+                {"actor_id": ACTOR_ID},
+                f'"{initial_etag}"',
+            )
+
+    assert captured.value.code == "story_index_revision_conflict"
+    assert captured.value.status_code == 409
+    assert inspect.call_count == 2
+    reread.assert_called_once()
+    materialize.assert_not_called()
+
+
+def test_story_index_post_writes_frozen_projection_with_exact_db_cas() -> None:
+    etag = "sha256:" + "c" * 64
+    db = SimpleNamespace(close=lambda: None)
+    initial_projection = object()
+    fresh_projection = object()
+    initial_record = object()
+    fresh_record = object()
+    final_observation = object()
+    fresh_surface = object()
+    expected_response = _story_index_projection(
+        status="indexed",
+        story_id="9e8e17bd-d586-5eb1-a0cf-a7a98d44c9b3",
+    )
+    context = SimpleNamespace(
+        workflow_run_row={"run_id": RUN_ID},
+        actor_id=int(ACTOR_ID),
+        thread_id=THREAD_ID,
+        thread_workspace=Path("/server-owned/thread-workspace"),
+        episode_authority=object(),
+        refreshed_surface=object(),
+    )
+    gateway = gateway_module.DreamArtifactApplicationService()
+
+    with (
+        patch.object(gateway_module.database, "get_db", return_value=db),
+        patch.object(
+            gateway,
+            "_authorized_story_index_context",
+            return_value=context,
+        ),
+        patch.object(
+            gateway,
+            "_inspect_story_index_snapshot",
+            side_effect=[
+                SimpleNamespace(
+                    observation=SimpleNamespace(etag=etag),
+                    projection=initial_projection,
+                    record=initial_record,
+                ),
+                SimpleNamespace(
+                    observation=SimpleNamespace(etag=etag),
+                    projection=fresh_projection,
+                    record=fresh_record,
+                ),
+            ],
+        ),
+        patch.object(
+            gateway,
+            "_read_story_index_surface",
+            return_value=fresh_surface,
+        ) as reread,
+        patch.object(
+            gateway_module.ArtifactStoryIndexService,
+            "materialize_projection",
+            return_value={
+                "status": "updated",
+                "storyId": expected_response.story_id,
+                "errorCode": None,
+                "retryable": False,
+            },
+        ) as materialize,
+        patch.object(
+            gateway_module.ArtifactStoryIndexService,
+            "inspect_projection",
+            return_value=SimpleNamespace(observation=final_observation),
+        ) as final_inspect,
+        patch.object(
+            gateway,
+            "_story_index_wire_projection",
+            return_value=expected_response,
+        ) as serialize,
+    ):
+        response = gateway._reconcile_story_index_sync(
+            RUN_ID,
+            StoryWorkspaceStoryIndexReconcileCommand(),
+            {"actor_id": ACTOR_ID},
+            f'"{etag}"',
+        )
+
+    assert response == expected_response
+    reread.assert_called_once_with(
+        context.thread_workspace,
+        RUN_ID,
+        context.episode_authority,
+    )
+    materialize.assert_called_once_with(
+        db=db,
+        projection=fresh_projection,
+        expected_record=fresh_record,
+        require_expected_record=True,
+    )
+    final_inspect.assert_called_once_with(db=db, projection=fresh_projection)
+    serialize.assert_called_once_with(final_observation)
+
+
 def test_gateway_authorizes_full_provenance_before_any_workspace_probe() -> None:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     _create_gateway_schema(db)
     _seed_authorized_gateway_run(db)
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with patch.object(
         gateway,
@@ -994,7 +1538,7 @@ def test_gateway_missing_authority_is_unbound_before_thread_workspace_probe() ->
     db.row_factory = sqlite3.Row
     _create_gateway_schema(db)
     _seed_authorized_gateway_run(db)
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with patch.object(
         gateway,
@@ -1037,7 +1581,7 @@ def test_gateway_hides_every_broken_run_deck_thread_provenance_before_probe(
     _seed_authorized_gateway_run(db)
     db.execute(mutation)
     db.commit()
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with patch.object(
         gateway,
@@ -1061,7 +1605,7 @@ def test_gateway_owner_get_reads_bound_episode_after_full_authorization() -> Non
     db.row_factory = sqlite3.Row
     _create_gateway_schema(db)
     _seed_authorized_gateway_run(db)
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
     with tempfile.TemporaryDirectory() as temporary_directory:
         root = Path(temporary_directory)
         workspace = root / THREAD_ID
@@ -1074,8 +1618,7 @@ def test_gateway_owner_get_reads_bound_episode_after_full_authorization() -> Non
         )
         binding = StoryWorkspaceEpisodeBindingService(
             workspace
-        ).resolve_or_repair_binding(_binding_context()).binding
-        assert binding is not None
+        ).bind_first_episode(_binding_context())
         _set_gateway_episode_authority(db, binding.episode_uid)
 
         with patch.object(gateway, "_thread_workspace", return_value=workspace):
@@ -1088,6 +1631,58 @@ def test_gateway_owner_get_reads_bound_episode_after_full_authorization() -> Non
     assert surface.binding_availability is StoryWorkspaceEpisodeBindingAvailability.BOUND
     assert surface.opaque_episode_id == binding.episode_uid
     assert len(surface.artifacts) == 6
+    db.close()
+
+
+def test_gateway_projects_the_registry_active_episode_without_rewriting_launch_authority() -> None:
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    _create_gateway_schema(db)
+    _seed_authorized_gateway_run(db)
+    gateway = gateway_module.DreamArtifactApplicationService()
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        root = Path(temporary_directory)
+        workspace = root / THREAD_ID
+        (workspace / ".dream").mkdir(parents=True)
+        story = workspace / "stories" / "didi-zhengzhou"
+        (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "project.yaml").write_text(
+            "project_id: didi-zhengzhou\nformat:\n  total_episodes: 3\n",
+            encoding="utf-8",
+        )
+        binding_service = StoryWorkspaceEpisodeBindingService(workspace)
+        first = binding_service.bind_first_episode(_binding_context())
+        _set_gateway_episode_authority(db, first.episode_uid)
+        with_ep02 = binding_service.ensure_next_episode(
+            _binding_context(),
+            expected_revision=1,
+            total_episodes=3,
+        )
+        ep02 = with_ep02.episodes[1]
+        (story / "episodes" / "EP02").mkdir(parents=True)
+        active = binding_service.activate_episode(
+            _binding_context(),
+            episode_uid=ep02.episode_uid,
+            expected_revision=with_ep02.revision,
+        )
+
+        with patch.object(gateway, "_thread_workspace", return_value=workspace):
+            surface = gateway._get_episode_artifacts_from_db(
+                db,
+                RUN_ID,
+                {"actor_id": ACTOR_ID},
+            )
+
+    source_authority = gateway._episode_authority_from_source(
+        gateway._authorized_episode_row(db, RUN_ID, {"actor_id": ACTOR_ID}),
+        RUN_ID,
+    )
+    assert source_authority is not None
+    assert source_authority.episode_uid == first.episode_uid
+    assert active.active_episode_uid == ep02.episode_uid
+    assert surface.opaque_episode_id == ep02.episode_uid
+    assert surface.episode_code == "EP02"
+    assert all(item.availability.value == "not_generated" for item in surface.artifacts)
     db.close()
 
 
@@ -1111,7 +1706,7 @@ def test_real_route_owner_etag_refresh_and_other_actor_invisibility() -> None:
             "project_id: didi-zhengzhou\n",
             encoding="utf-8",
         )
-        StoryWorkspaceEpisodeBindingService(workspace).resolve_or_repair_binding(
+        StoryWorkspaceEpisodeBindingService(workspace).bind_first_episode(
             _binding_context()
         )
         binding_path = workspace / ".dream" / "runtime" / "runs" / RUN_ID / "episode.json"
@@ -1126,11 +1721,15 @@ def test_real_route_owner_etag_refresh_and_other_actor_invisibility() -> None:
             "user_id": current_actor["value"],
         }
         app.dependency_overrides[
-            story_workspace.get_story_workflow_gateway
-        ] = gateway_module.StoryWorkflowApplicationGateway
+            story_workspace.get_dream_artifact_service
+        ] = gateway_module.DreamArtifactApplicationService
         app.include_router(story_workspace.router)
         with (
-            patch.object(gateway_module.database, "DB_PATH", db_path),
+            patch.object(
+                gateway_module.database,
+                "get_db",
+                side_effect=lambda: _open_gateway_test_db(db_path),
+            ),
             patch.object(
                 gateway_module,
                 "story_workspace_get_workspace_root",
@@ -1186,7 +1785,7 @@ def test_episode_workspace_invisibility_has_one_public_404_boundary(
     _create_gateway_schema(db)
     _seed_authorized_gateway_run(db)
     _set_gateway_episode_authority(db, "a" * 32)
-    gateway = gateway_module.StoryWorkflowApplicationGateway()
+    gateway = gateway_module.DreamArtifactApplicationService()
 
     with patch.object(gateway, "_thread_workspace", side_effect=workspace_error):
         with pytest.raises(ApiRouteError) as captured:

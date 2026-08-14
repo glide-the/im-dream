@@ -1,9 +1,12 @@
 /* [Input] Ink & Memory UI v2 warm-paper semantic tokens. */
-/* [Output] Warm-paper Episode master-detail workbench and legacy Dream projection. */
+/* [Output] Warm-paper Episode master-detail workbench and complete Dream asset projection. */
 /* [Pos] Story Workspace post-confirmation execution page (Task 3 U12) */
+/* [Sync] 2026-08-14: style complete Hook-published Markdown/YAML asset documents. */
+/* [Sync] 2026-08-14: source the Execution canvas from the shared app background
+   token so dark mode cannot fall back to a hard-coded light canvas. */
 
 .story-workspace-collaboration {
-  --collaboration-canvas: var(--color-bg-warm, #f6efe5);
+  --collaboration-canvas: var(--color-bg-app, #f6efe5);
   --collaboration-paper: var(--color-bg-paper, #fffaf2);
   --collaboration-ink: var(--color-text-primary, #352820);
   --collaboration-body: var(--color-text-body, #6a5144);
@@ -423,6 +426,50 @@
   line-height: 1.9;
 }
 
+.story-workspace-collaboration__asset-document {
+  max-width: 920px;
+  margin-top: 13px;
+  color: var(--collaboration-ink);
+  font-family: Georgia, serif;
+  font-size: 16px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+
+.story-workspace-collaboration__asset-document > :first-child {
+  margin-top: 0;
+}
+
+.story-workspace-collaboration__asset-document > :last-child {
+  margin-bottom: 0;
+}
+
+.story-workspace-collaboration__asset-document h1,
+.story-workspace-collaboration__asset-document h2,
+.story-workspace-collaboration__asset-document h3 {
+  margin: 1.4em 0 .55em;
+  color: var(--collaboration-ink);
+  font-family: Georgia, serif;
+  line-height: 1.35;
+}
+
+.story-workspace-collaboration__asset-document ul,
+.story-workspace-collaboration__asset-document ol {
+  margin: .75em 0;
+  padding-left: 1.6em;
+}
+
+.story-workspace-collaboration__asset-document pre {
+  max-width: 100%;
+  padding: 16px;
+  overflow-x: auto;
+  color: var(--collaboration-paper);
+  background: var(--collaboration-ink);
+  border-radius: 3px;
+  font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+}
+
 .story-workspace-collaboration__shot-note > div {
   display: grid;
   max-width: 920px;
@@ -475,7 +522,7 @@
   font-weight: 500;
 }
 
-.story-workspace-episode-artifact-reader [aria-label="第一集文件导航"] {
+.story-workspace-episode-artifact-reader [aria-label$="文件导航"] {
   display: flex;
   justify-content: flex-end;
   gap: 0;
@@ -716,14 +763,14 @@
 
 /* Episode artifacts stay in one reading surface: progress and workflow facts
    lead into narrative navigation, detail, then quieter auxiliary evidence. */
-.story-workspace-collaboration > section[aria-label="第一集产物工作台"] {
+.story-workspace-collaboration > section[aria-label="Episode 产物工作台"] {
   width: 100%;
   min-width: 0;
   flex: 0 0 auto;
   padding: 0 clamp(20px, 3.2vw, 48px) 48px;
 }
 
-.story-workspace-collaboration > section[aria-label="第一集产物工作台"] > main {
+.story-workspace-collaboration > section[aria-label="Episode 产物工作台"] > main {
   width: min(100%, 1440px);
   min-width: 0;
   margin: 0 auto;
@@ -759,6 +806,76 @@
   font-size: clamp(28px, 3vw, 42px);
   font-weight: 500;
   letter-spacing: -.035em;
+}
+
+.story-workspace-story-index-status {
+  display: grid;
+  min-width: 0;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px 22px;
+  padding: 13px 0;
+  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 56%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--collaboration-rule) 56%, transparent);
+}
+
+.story-workspace-story-index-status dl {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 7px 22px;
+  margin: 0;
+}
+
+.story-workspace-story-index-status dl > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 7px;
+}
+
+.story-workspace-story-index-status dt {
+  color: var(--collaboration-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.story-workspace-story-index-status dd {
+  margin: 0;
+  color: var(--collaboration-ink);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.story-workspace-story-index-status > p {
+  grid-column: 1;
+  margin: 0;
+  color: var(--collaboration-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.story-workspace-story-index-status > code {
+  min-width: 0;
+  grid-column: 1;
+  overflow-wrap: anywhere;
+  color: var(--collaboration-muted);
+  font-size: 9px;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header .story-workspace-story-index-status > button {
+  min-height: 36px;
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: center;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--collaboration-action);
 }
 
 .story-workspace-episode-artifact-progress {
@@ -1095,69 +1212,6 @@
   letter-spacing: .05em;
 }
 
-.story-workspace-collaboration .story-workspace-episode-action-dialog {
-  position: fixed;
-  top: 50%;
-  right: auto;
-  bottom: auto;
-  left: 50%;
-  z-index: 50;
-  width: min(560px, calc(100vw - 48px));
-  max-height: calc(100dvh - 48px);
-  min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  transform: translate(-50%, -50%);
-  box-shadow:
-    0 0 0 100vmax color-mix(in srgb, var(--collaboration-ink) 24%, transparent),
-    0 14px 34px color-mix(in srgb, var(--collaboration-ink) 17%, transparent);
-}
-
-.story-workspace-episode-action-dialog > section {
-  min-height: 0;
-  padding: 16px 19px;
-  overflow-y: auto;
-  border-bottom: 1px solid var(--collaboration-rule);
-}
-
-.story-workspace-episode-action-dialog > section h3 {
-  margin: 0 0 10px;
-  color: var(--collaboration-ink);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.story-workspace-episode-action-dialog > section ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.story-workspace-episode-action-dialog > section li {
-  padding: 8px 0;
-  overflow-wrap: anywhere;
-  color: var(--collaboration-body);
-  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 62%, transparent);
-  font-size: 11px;
-  line-height: 1.55;
-}
-
-.story-workspace-episode-action-dialog > section strong {
-  color: var(--collaboration-ink);
-  font-weight: 650;
-}
-
-.story-workspace-episode-action-dialog > section small {
-  color: var(--collaboration-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-}
-
-.story-workspace-collaboration .story-workspace-episode-action-dialog button {
-  min-width: 44px;
-  min-height: 44px;
-}
-
 .story-workspace-collaboration button:focus-visible,
 .story-workspace-collaboration a:focus-visible,
 .story-workspace-collaboration [role="treeitem"]:focus-visible,
@@ -1208,18 +1262,7 @@
     max-width: none;
   }
 
-  .story-workspace-collaboration .story-workspace-episode-action-dialog {
-    inset: 10px;
-    width: auto;
-    max-height: calc(100dvh - 20px);
-    transform: none;
-  }
-
-  .story-workspace-episode-action-dialog > section {
-    padding: 13px 15px;
-  }
-
-  .story-workspace-collaboration > section[aria-label="第一集产物工作台"] {
+  .story-workspace-collaboration > section[aria-label="Episode 产物工作台"] {
     padding-right: 18px;
     padding-bottom: 34px;
     padding-left: 18px;
@@ -1241,6 +1284,17 @@
     place-items: start;
     max-width: none;
     text-align: left;
+  }
+
+  .story-workspace-story-index-status {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header .story-workspace-story-index-status > button {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
   }
 
   .story-workspace-episode-artifact-progress {
@@ -1269,7 +1323,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .story-workspace-episode-artifact-reader [aria-label="第一集文件导航"] {
+  .story-workspace-episode-artifact-reader [aria-label$="文件导航"] {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     justify-content: flex-start;

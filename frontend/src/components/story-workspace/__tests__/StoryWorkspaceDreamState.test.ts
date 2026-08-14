@@ -124,7 +124,7 @@ test('Dream exposes only the five design_007 lifecycle states', () => {
     'story-workspace-dream-waiting-files',
     'story-workspace-dream-editing',
     'story-workspace-dream-confirming',
-    'story-workspace-dream-continuing',
+    'story-workspace-dream-running',
     'story-workspace-dream-completed',
   ]);
   expect(STORY_WORKSPACE_DREAM_STAGES).toEqual([
@@ -289,10 +289,10 @@ test('all public states and the canonical command are deeply frozen against exte
   const stale = storyWorkspaceHydrateDreamState(edited, [stageSnapshot('characters', 4)]);
   const resolved = storyWorkspaceResolveDreamRevisionConflict(stale, 'characters', 'keep-local');
   const confirmation = storyWorkspaceBeginDreamConfirmation(resolved, 'swc_frozen');
-  const continuing = storyWorkspaceAcceptDreamConfirmation(confirmation.state);
-  const completed = storyWorkspaceCompleteDream(continuing);
+  const running = storyWorkspaceAcceptDreamConfirmation(confirmation.state);
+  const completed = storyWorkspaceCompleteDream(running);
 
-  for (const state of [created, hydrated, edited, reset, stale, resolved, confirmation.state, continuing, completed]) {
+  for (const state of [created, hydrated, edited, reset, stale, resolved, confirmation.state, running, completed]) {
     expect(Object.isFrozen(state)).toBe(true);
     expect(Object.isFrozen(state.availableStages)).toBe(true);
     expect(Object.isFrozen(state.baseRevisions)).toBe(true);
@@ -558,7 +558,7 @@ test('accepted clears submitted drafts so a higher Agent revision becomes author
   const confirmation = storyWorkspaceBeginDreamConfirmation(edited, 'swc_ack');
   let state = storyWorkspaceAcceptDreamConfirmation(confirmation.state);
 
-  expect(state.status).toBe('story-workspace-dream-continuing');
+  expect(state.status).toBe('story-workspace-dream-running');
   expect(state.confirmationCommand).toBe(confirmation.command);
   expect(state.dirtyCount).toBe(0);
   expect(state.localEdits).toEqual([]);
@@ -568,7 +568,7 @@ test('accepted clears submitted drafts so a higher Agent revision becomes author
     'characters_primary',
     'summary',
     'too late',
-  )).toThrow(/continuing/i);
+  )).toThrow(/running/i);
 
   state = storyWorkspaceHydrateDreamState(state, [stageSnapshot('characters', 6, {
     summary: 'authoritative Agent character r6',

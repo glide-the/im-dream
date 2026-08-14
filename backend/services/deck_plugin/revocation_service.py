@@ -463,7 +463,12 @@ class InMemoryRevocationRepository:
 
 
 class SQLiteRevocationRepository:
-    """Durable append-only repository owned entirely by the revocation domain."""
+    """Explicit SQLite-only test fixture for the deferred revocation schema.
+
+    The revocation tables are not part of the canonical PostgreSQL 48-table
+    baseline.  Runtime callers therefore fail closed unless a test opts in to
+    this isolated fixture explicitly.
+    """
 
     _APPEND_ONLY_TABLES = (
         "security_revocations",
@@ -475,7 +480,16 @@ class SQLiteRevocationRepository:
         "revocation_quarantined_targets",
     )
 
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(
+        self,
+        db: sqlite3.Connection,
+        *,
+        allow_test_fixture: bool = False,
+    ) -> None:
+        if not allow_test_fixture or not isinstance(db, sqlite3.Connection):
+            raise RuntimeError(
+                "SQLiteRevocationRepository is restricted to explicit tests"
+            )
         if db.in_transaction:
             raise RuntimeError("revocation repository requires a clean transaction boundary")
         self.db = db

@@ -88,6 +88,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 
+// The fallback hook must read the same private context as WorkspaceProvider; keeping
+// both here avoids exporting the context itself and does not alter refresh state.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useWorkspaceSession() {
   const context = useContext(WorkspaceContext);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);

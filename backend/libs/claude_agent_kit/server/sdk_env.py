@@ -51,6 +51,12 @@
 #                    kept as a wrapper; constant renamed
 #                    _PLAN_MODE_CONFIG_HOME_DIRNAME → _CLAUDE_CONFIG_HOME_DIRNAME
 #                    with alias).
+# [Sync] 2026-08-12: set Claude Code's native transient-request retry default
+#                    to three through CLAUDE_CODE_MAX_RETRIES. This is a
+#                    server-owned CLI default, not an Agent turn retry loop.
+# [Sync] 2026-08-14: pin Claude Code's native temp root through a canonicalized
+#                    CLAUDE_CODE_TMPDIR (configured default /tmp/claude) so its
+#                    per-uid cwd-* files stay under the exact allowWrite root.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -67,6 +73,10 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _PROJECT_ENV_FILE = _BACKEND_ROOT / ".env"
 _CLAUDE_SETTING_SOURCES_ARG = "setting-sources"
 _CLAUDE_PROJECT_SETTING_SOURCE = "project"
+_CLAUDE_CODE_MAX_RETRIES_ENV_NAME = "CLAUDE_CODE_MAX_RETRIES"
+CLAUDE_CODE_MAX_RETRIES_DEFAULT = "3"
+_CLAUDE_CODE_TMPDIR_ENV_NAME = "CLAUDE_CODE_TMPDIR"
+CLAUDE_CODE_TMPDIR_DEFAULT = "/tmp/claude"
 
 logger = logging.getLogger(__name__)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
@@ -88,6 +98,18 @@ _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
     }
 )
 _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES = frozenset({"ANTHROPIC_API_KEY"})
+_GATEWAY_COMPETING_CREDENTIAL_ENV_NAMES = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+)
+_USER_SDK_ENV_NAMES = frozenset(
+    {
+        "API_TIMEOUT_MS",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+        "DISABLE_INTERLEAVED_THINKING",
+    }
+)
 
 # Plan Mode / config-home injection (claude-plan §5.1).  CLAUDE_CONFIG_DIR is
 # deliberately NOT in ``_PROJECT_DOTENV_SDK_ENV_NAMES`` so backend/.env cannot
@@ -117,6 +139,57 @@ _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME = "CLAUDE_CODE_TASK_LIST_ID"
 # workspace.get_tasks_dir() resolves the same constant — single source.
 CLAUDE_CODE_TASK_LIST_ID_VALUE = "main"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def resolve_claude_code_tmpdir(
+    process_env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Return the server-owned Claude Code temporary root.
+
+    Claude Code 2.1.220 derives its per-uid ``claude-UID/cwd-*`` shell files
+    beneath ``CLAUDE_CODE_TMPDIR``.  Keeping this root explicit makes the CLI
+    subprocess environment and workspace sandbox use one stable path instead
+    of trying to predict a generated ``cwd-*`` name.
+
+    Only an absolute process-level override is accepted. Browser/user env
+    settings cannot relocate this security boundary.
+    """
+
+    source = os.environ if process_env is None else process_env
+    configured = str(source.get(_CLAUDE_CODE_TMPDIR_ENV_NAME) or "").strip()
+    fallback = str(Path(CLAUDE_CODE_TMPDIR_DEFAULT).resolve(strict=False))
+    raw = Path(configured or CLAUDE_CODE_TMPDIR_DEFAULT).expanduser()
+    try:
+        resolved = raw.resolve(strict=False)
+    except (OSError, RuntimeError):
+        resolved = Path("/")
+    if raw.is_absolute() and resolved != Path("/"):
+        # macOS exposes /tmp as a symlink to /private/tmp. Claude's sandbox
+        # canonicalizes command paths before applying allowWrite, so both the
+        # subprocess and settings must receive the same canonical path.
+        return str(resolved)
+    if configured:
+        logger.warning(
+            "%s=%r is not a safe absolute directory; using %s.",
+            _CLAUDE_CODE_TMPDIR_ENV_NAME,
+            configured,
+            fallback,
+        )
+    return fallback
+
+
+def apply_gateway_credential_tombstones(environment: dict[str, str]) -> None:
+    """Override credentials inherited by the SDK subprocess when Gateway is on.
+
+    ``claude-agent-sdk`` overlays ``options.env`` onto the full parent process
+    environment. Removing a key from ``options.env`` therefore cannot remove a
+    credential already present in uvicorn's ``os.environ``. Empty values are
+    the subprocess transport's only deletion-equivalent and make Claude Code
+    select the server-owned ``apiKeyHelper`` instead.
+    """
+
+    for name in _GATEWAY_COMPETING_CREDENTIAL_ENV_NAMES:
+        environment[name] = ""
 
 
 def task_v2_enabled() -> bool:
@@ -192,6 +265,25 @@ def merge_project_dotenv_env(
         )
     for key in _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES:
         merged.pop(key, None)
+    # ``ClaudeAgentRunner`` applies the server-owned Gateway configuration
+    # after the first project/runtime merge. ``SimpleClaudeAgentSDKClient``
+    # deliberately reapplies these defaults for direct callers immediately
+    # before spawning Claude Code. That second merge must not resurrect a
+    # direct Provider bearer token from backend/.env or the parent process:
+    # Claude Code gives ANTHROPIC_AUTH_TOKEN precedence over apiKeyHelper, so
+    # the canonical Gateway subject JWT would otherwise be replaced and the
+    # request would correctly fail authentication at the Admin boundary. Keep
+    # empty tombstones instead of popping: the Python SDK inherits the entire
+    # parent environment before overlaying this map.
+    primary_gateway_flag = str(merged.get("INK_GATEWAY_ENABLED", "")).strip()
+    legacy_gateway_flag = str(
+        merged.get("INK_GATEWAY_CLAUDE_AGENT_ENABLED", "")
+    ).strip()
+    gateway_enabled = (
+        primary_gateway_flag or legacy_gateway_flag
+    ).lower() in _TRUE_ENV_VALUES
+    if gateway_enabled:
+        apply_gateway_credential_tombstones(merged)
     return merged
 
 
@@ -230,6 +322,18 @@ def apply_project_sdk_runtime_options(
 ) -> Any:
     """Apply all project-level Claude SDK runtime defaults."""
     apply_project_dotenv_to_options(options, env_file)
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    existing_env.setdefault(
+        _CLAUDE_CODE_MAX_RETRIES_ENV_NAME,
+        CLAUDE_CODE_MAX_RETRIES_DEFAULT,
+    )
+    # Server-owned and intentionally assigned rather than setdefault: the
+    # workspace sandbox is generated from the same resolver, so an arbitrary
+    # caller value must not move Claude's cwd-* files outside allowWrite.
+    existing_env[_CLAUDE_CODE_TMPDIR_ENV_NAME] = resolve_claude_code_tmpdir()
+    options.env = existing_env
     apply_project_setting_sources_to_options(options)
     return options
 
@@ -416,7 +520,7 @@ def apply_user_sdk_env_to_options(
     filtered = {
         str(k): str(v)
         for k, v in user_env.items()
-        if k and v is not None and _is_project_dotenv_sdk_env_key(str(k))
+        if k and v is not None and str(k) in _USER_SDK_ENV_NAMES
     }
     # Merge: filtered user env overlays existing (which already has backend/.env).
     merged = {**existing_env, **filtered}

@@ -1,12 +1,14 @@
-"""SQLite-backed lifecycle service for Deck Plugin releases."""
+"""PostgreSQL-backed lifecycle service for Deck Plugin releases."""
 
 from __future__ import annotations
 
+from psycopg import IntegrityError as PostgresIntegrityError
+
 import hashlib
 import json
-import sqlite3
 import uuid
 from collections.abc import Iterable
+from typing import Any
 
 try:
     from backend import database
@@ -90,17 +92,16 @@ def _manifest_hash(manifest_json: str) -> str:
 class DeckPluginReleaseService:
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         source_allowlist: Iterable[str],
         production: bool = True,
     ) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self.source_allowlist = tuple(source_allowlist)
         self.production = production
 
-    def _row_to_release(self, row: sqlite3.Row) -> DeckPluginRelease:
+    def _row_to_release(self, row: Any) -> DeckPluginRelease:
         return DeckPluginRelease(
             id=row["id"],
             deck_plugin_id=row["deck_plugin_id"],
@@ -117,9 +118,9 @@ class DeckPluginReleaseService:
             published_at=row["published_at"],
         )
 
-    def _get_by_id(self, release_id: str) -> sqlite3.Row:
+    def _get_by_id(self, release_id: str) -> Any:
         row = self.db.execute(
-            "SELECT * FROM deck_plugin_releases WHERE id = ?", (release_id,)
+            "SELECT * FROM deck_plugin_releases WHERE id = %s", (release_id,)
         ).fetchone()
         if row is None:
             raise KeyError(f"Deck Plugin release not found: {release_id}")
@@ -147,7 +148,7 @@ class DeckPluginReleaseService:
                         capabilities_json, compatibility_json,
                         deck_runtime_contract_json, runtime_spec_json,
                         dependencies_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         release_id,
@@ -177,7 +178,7 @@ class DeckPluginReleaseService:
                         parsed.dependencies.model_dump_json(),
                     ),
                 )
-        except sqlite3.IntegrityError as exc:
+        except PostgresIntegrityError as exc:
             raise DeckPluginValidationError(
                 "DECK_PLUGIN_MANIFEST_INVALID",
                 "deck_plugin_id and deck_plugin_version must identify a unique release",
@@ -197,7 +198,7 @@ class DeckPluginReleaseService:
             assert_release_transition(current, DeckPluginReleaseStatus.VALIDATING)
             self.db.execute(
                 "UPDATE deck_plugin_releases SET status = 'validating', "
-                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "updated_at = CURRENT_TIMESTAMP WHERE id = %s",
                 (release_id,),
             )
             draft_manifest = DeckPluginManifestV1.model_validate_json(row["manifest_json"])
@@ -219,10 +220,10 @@ class DeckPluginReleaseService:
             self.db.execute(
                 """
                 UPDATE deck_plugin_releases
-                SET status = 'published', manifest_json = ?, manifest_hash = ?,
+                SET status = 'published', manifest_json = %s, manifest_hash = %s,
                     updated_at = CURRENT_TIMESTAMP,
                     published_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE id = %s
                 """,
                 (manifest_json, _manifest_hash(manifest_json), release_id),
             )
@@ -244,7 +245,7 @@ class DeckPluginReleaseService:
             assert_release_transition(current, DeckPluginReleaseStatus.VALIDATING)
             self.db.execute(
                 "UPDATE deck_plugin_releases SET status = 'validating', "
-                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "updated_at = CURRENT_TIMESTAMP WHERE id = %s",
                 (release_id,),
             )
             draft_manifest = DeckPluginManifestV1.model_validate_json(row["manifest_json"])
@@ -272,7 +273,7 @@ class DeckPluginReleaseService:
             existing_row = self.db.execute(
                 """
                 SELECT lock_json FROM deck_runtime_plugin_locks
-                WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+                WHERE deck_plugin_id = %s AND deck_plugin_version = %s
                 """,
                 (published_manifest.deck_plugin_id, published_manifest.deck_plugin_version),
             ).fetchone()
@@ -291,7 +292,7 @@ class DeckPluginReleaseService:
                 INSERT INTO deck_runtime_plugin_locks (
                     id, deck_plugin_id, deck_plugin_version,
                     deck_plugin_manifest_hash, lock_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (
                     runtime_lock.runtime_plugin_lock_id,
@@ -309,10 +310,10 @@ class DeckPluginReleaseService:
             self.db.execute(
                 """
                 UPDATE deck_plugin_releases
-                SET status = 'published', manifest_json = ?, manifest_hash = ?,
+                SET status = 'published', manifest_json = %s, manifest_hash = %s,
                     updated_at = CURRENT_TIMESTAMP,
                     published_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE id = %s
                 """,
                 (manifest_json, manifest_hash, release_id),
             )
@@ -326,7 +327,7 @@ class DeckPluginReleaseService:
         row = self.db.execute(
             """
             SELECT lock_json FROM deck_runtime_plugin_locks
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
             """,
             (deck_plugin_id, version),
         ).fetchone()
@@ -356,8 +357,8 @@ class DeckPluginReleaseService:
             current = DeckPluginReleaseStatus(row["status"])
             assert_release_transition(current, target)
             self.db.execute(
-                "UPDATE deck_plugin_releases SET status = ?, "
-                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE deck_plugin_releases SET status = %s, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = %s",
                 (target.value, release_id),
             )
         return self._row_to_release(self._get_by_id(release_id))
@@ -368,7 +369,7 @@ class DeckPluginReleaseService:
         row = self.db.execute(
             """
             SELECT * FROM deck_plugin_releases
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
             """,
             (deck_plugin_id, version),
         ).fetchone()

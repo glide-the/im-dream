@@ -37,8 +37,16 @@ export async function loadChatHistoryThenRuntimeStatus<T>(
   loadHistory: () => Promise<T>,
   loadStatus: () => Promise<ChatThreadStatusResult | null>,
 ): Promise<{ history: T; status: ChatThreadStatusResult | null }> {
-  const history = await loadHistory();
+  let history = await loadHistory();
   const status = await loadStatus();
+  // A turn can finish after the first history read but before the status read.
+  // Once any authoritative non-running state is observed, persistence is
+  // stable; read once more so opening
+  // Chat from Dream cannot miss the just-completed assistant turn and then
+  // skip SSE reconnect because the runtime is already idle.
+  if (status && !status.running) {
+    history = await loadHistory();
+  }
   return { history, status };
 }
 
@@ -218,6 +226,7 @@ export interface SandboxNetworkRequestInfo {
 }
 
 export const SANDBOX_NETWORK_CONFIRMATION_KIND = 'sandbox_network';
+export const REJECT_ONLY_CONFIRMATION_KIND = 'reject_only';
 
 /** Return the sandbox network request metadata when the backend marked this
  * part as a SandboxPermissionRequest confirmation; null otherwise. */
@@ -235,7 +244,7 @@ export function resolveSandboxNetworkRequest(part: AnyToolUIPart): SandboxNetwor
   };
 }
 
-export type PendingConfirmationKind = 'confirm' | 'askuser' | 'sandbox-network';
+export type PendingConfirmationKind = 'confirm' | 'askuser' | 'sandbox-network' | 'reject-only';
 
 export interface PendingToolConfirmation {
   kind: PendingConfirmationKind;
@@ -270,15 +279,23 @@ export function resolvePendingToolConfirmation(
   settledToolCallIds: ReadonlySet<string> = new Set<string>(),
   runtimePendingToolCallIds: ReadonlySet<string> = new Set<string>(),
 ): PendingConfirmationKind | null {
-  if (settledToolCallIds.has(part.toolCallId)) return null;
+  const runtimeOwnsPendingCall = runtimePendingToolCallIds.has(part.toolCallId);
+  if (settledToolCallIds.has(part.toolCallId) && !runtimeOwnsPendingCall) return null;
   if (TOOL_COMPLETED_STATES.has(part.state ?? '')) return null;
   const input = 'input' in part ? part.input : undefined;
   if (input === undefined || input === null) return null;
   const toolName = resolveToolName(part);
   if (toolName && isEditorWriteTool(toolName)) return null;
+  const metadata = (part as unknown as { toolMetadata?: Record<string, unknown> }).toolMetadata;
+  // The primary POST transport carries canonical settlement as tool metadata,
+  // while reconnect updates the settled-id set directly. Honour both paths.
+  // An authoritative runtime-pending snapshot wins over a stale marker.
+  if (metadata?.approvalSettled === true && !runtimeOwnsPendingCall) return null;
   if (isAskUserQuestionPart(part)) return 'askuser';
+  if (isApprovalRequestedPart(part)
+    && metadata?.confirmationKind === REJECT_ONLY_CONFIRMATION_KIND) return 'reject-only';
   if (isApprovalRequestedPart(part) && resolveSandboxNetworkRequest(part)) return 'sandbox-network';
-  if (runtimePendingToolCallIds.has(part.toolCallId)) return 'confirm';
+  if (runtimeOwnsPendingCall) return 'confirm';
   if (isApprovalRequestedPart(part) || toolChoice === 'manual') return 'confirm';
   return null;
 }

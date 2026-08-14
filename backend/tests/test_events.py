@@ -10,7 +10,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from backend.database import create_event_tables
+from backend.schema.legacy_main_sqlite import create_event_tables
 from backend.models.events import (
     CANONICAL_EVENT_TYPES,
     CanonicalEventType,
@@ -98,6 +98,7 @@ class EventFixture:
         self.path = Path(self.temp_dir.name) / "events.db"
         self.db = sqlite3.connect(self.path)
         self.db.row_factory = sqlite3.Row
+        create_event_tables(self.db)
         self.queue_events: list[EventEnvelope] = []
         self.projections: list[dict] = []
         self.emitter = EventEmitter(

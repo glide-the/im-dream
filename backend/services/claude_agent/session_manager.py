@@ -6,12 +6,10 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 import inspect
 import json
-import sqlite3
 from typing import Any, Literal, Protocol
 import uuid
 
 try:
-    from backend.database import create_agent_session_tables
     from backend.models.agent_session import (
         AgentSession,
         AgentSessionStatus,
@@ -35,7 +33,6 @@ try:
     )
     from backend.services.workflow.run_service import WorkflowRunService
 except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
-    from database import create_agent_session_tables
     from models.agent_session import (
         AgentSession,
         AgentSessionStatus,
@@ -111,7 +108,7 @@ class SessionManager:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         receipt_reader: ReceiptReader,
         adapter: RunSessionAdapter,
@@ -123,9 +120,7 @@ class SessionManager:
             raise ValueError("creating lease must be within 1..300 seconds")
         if db.in_transaction:
             raise RuntimeError("session manager requires a clean transaction boundary")
-        create_agent_session_tables(db)
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._receipt_reader = receipt_reader
         self._adapter = adapter
         self._run_service = workflow_run_service
@@ -175,13 +170,16 @@ class SessionManager:
                 trusted_marketplaces=trusted_marketplaces,
             )
         except AgentSessionError:
+            self._rollback_read_transaction()
             raise
         except Exception as exc:
+            self._rollback_read_transaction()
             raise AgentSessionError(
                 AGENT_SESSION_RECEIPT_INVALID,
                 "runtime load receipt or frozen Session inputs are invalid",
             ) from exc
 
+        self._rollback_read_transaction()
         request_key = compute_session_request_key(
             workflow_run_id,
             runtime_load_receipt_id,
@@ -302,10 +300,10 @@ class SessionManager:
             self.db.execute(
                 """
                 UPDATE agent_sessions
-                SET status = 'terminated', terminated_at = ?,
-                    termination_reason_code = ?, lease_expires_at = NULL,
+                SET status = 'terminated', terminated_at = %s,
+                    termination_reason_code = %s, lease_expires_at = NULL,
                     owner_token = NULL
-                WHERE agent_session_id = ? AND status = 'active'
+                WHERE agent_session_id = %s AND status = 'active'
                 """,
                 (now, reason_code, agent_session_id),
             )
@@ -339,7 +337,7 @@ class SessionManager:
 
     def read_session(self, agent_session_id: str) -> AgentSession:
         row = self.db.execute(
-            "SELECT * FROM agent_sessions WHERE agent_session_id = ?",
+            "SELECT * FROM agent_sessions WHERE agent_session_id = %s",
             (agent_session_id,),
         ).fetchone()
         if row is None:
@@ -354,7 +352,7 @@ class SessionManager:
         row = self.db.execute(
             """
             SELECT * FROM workflow_runs
-            WHERE id = ? AND workspace_id = ? AND created_by = ?
+            WHERE id = %s AND workspace_id = %s AND created_by = %s
             """,
             (
                 workflow_run_id,
@@ -376,7 +374,7 @@ class SessionManager:
             existing = self.db.execute(
                 """
                 SELECT * FROM agent_sessions
-                WHERE workflow_run_id = ? AND status = 'active'
+                WHERE workflow_run_id = %s AND status = 'active'
                 """,
                 (workflow_run_id,),
             ).fetchone()
@@ -401,11 +399,11 @@ class SessionManager:
         runtime_lock: DeckRuntimePluginLock,
     ) -> None:
         lock_row = self.db.execute(
-            "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = ?",
+            "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = %s",
             (run.runtime_plugin_lock_id,),
         ).fetchone()
         receipt_row = self.db.execute(
-            "SELECT * FROM runtime_load_receipts WHERE receipt_id = ?",
+            "SELECT * FROM runtime_load_receipts WHERE receipt_id = %s",
             (receipt.receipt_id,),
         ).fetchone()
         if lock_row is None or receipt_row is None:
@@ -455,7 +453,7 @@ class SessionManager:
         persisted_entry_rows = self.db.execute(
             """
             SELECT * FROM runtime_load_receipt_entries
-            WHERE receipt_id = ? ORDER BY claude_code_plugin_id
+            WHERE receipt_id = %s ORDER BY claude_code_plugin_id
             """,
             (receipt.receipt_id,),
         ).fetchall()
@@ -507,7 +505,7 @@ class SessionManager:
             or receipt.artifact_set_hash != expected_artifact_set
             or receipt.scope != "session"
             or receipt.readiness_state != "session_loaded"
-            or receipt.deployment_tier not in {"development", "test"}
+            or receipt.deployment_tier != "local"
             or any(
                 receipt_row[key] != value
                 for key, value in persisted_fields.items()
@@ -642,9 +640,9 @@ class SessionManager:
         lease_expires = now + timedelta(seconds=self._creating_lease_seconds)
         owner_token = uuid.uuid4().hex
         try:
-            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("BEGIN")
             existing_key = self.db.execute(
-                "SELECT * FROM agent_sessions WHERE session_request_key = ?",
+                "SELECT * FROM agent_sessions WHERE session_request_key = %s",
                 (session_request_key,),
             ).fetchone()
             if existing_key is not None:
@@ -661,9 +659,9 @@ class SessionManager:
                 cursor = self.db.execute(
                     """
                     UPDATE agent_sessions
-                    SET lease_expires_at = ?, owner_token = ?
-                    WHERE agent_session_id = ? AND status = 'creating'
-                      AND lease_expires_at <= ?
+                    SET lease_expires_at = %s, owner_token = %s
+                    WHERE agent_session_id = %s AND status = 'creating'
+                      AND lease_expires_at <= %s
                     """,
                     (
                         self._iso(lease_expires),
@@ -678,7 +676,7 @@ class SessionManager:
                         "Session ownership changed during recovery",
                     )
                 row = self.db.execute(
-                    "SELECT * FROM agent_sessions WHERE agent_session_id = ?",
+                    "SELECT * FROM agent_sessions WHERE agent_session_id = %s",
                     (existing.agent_session_id,),
                 ).fetchone()
                 assert row is not None
@@ -688,7 +686,7 @@ class SessionManager:
             live = self.db.execute(
                 """
                 SELECT * FROM agent_sessions
-                WHERE workflow_run_id = ? AND status IN ('creating', 'active')
+                WHERE workflow_run_id = %s AND status IN ('creating', 'active')
                 """,
                 (run.workflow_run_id,),
             ).fetchone()
@@ -701,7 +699,7 @@ class SessionManager:
                 self.db.execute(
                     """
                     SELECT COALESCE(MAX(attempt_number), 0) + 1
-                    FROM agent_sessions WHERE workflow_run_id = ?
+                    FROM agent_sessions WHERE workflow_run_id = %s
                     """,
                     (run.workflow_run_id,),
                 ).fetchone()[0]
@@ -717,8 +715,8 @@ class SessionManager:
                     runtime_plugin_lock_digest, settings_json, settings_hash,
                     plugin_set_hash, session_request_key, attempt_number, status,
                     created_at, lease_expires_at, owner_token
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          'creating', ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                          'creating', %s, %s, %s)
                 """,
                 (
                     agent_session_id,
@@ -744,7 +742,7 @@ class SessionManager:
                 ),
             )
             row = self.db.execute(
-                "SELECT * FROM agent_sessions WHERE agent_session_id = ?",
+                "SELECT * FROM agent_sessions WHERE agent_session_id = %s",
                 (agent_session_id,),
             ).fetchone()
             assert row is not None
@@ -763,8 +761,8 @@ class SessionManager:
         cursor = self.db.execute(
             """
             UPDATE agent_sessions
-            SET remote_session_ref = ?
-            WHERE agent_session_id = ? AND status = 'creating' AND owner_token = ?
+            SET remote_session_ref = %s
+            WHERE agent_session_id = %s AND status = 'creating' AND owner_token = %s
             """,
             (result.remote_session_ref, result.agent_session_id, owner_token),
         )
@@ -786,9 +784,9 @@ class SessionManager:
         self.db.execute(
             """
             UPDATE agent_sessions
-            SET status = 'failed', error_code = ?, termination_reason_code = ?,
-                terminated_at = ?, lease_expires_at = NULL, owner_token = NULL
-            WHERE agent_session_id = ? AND status IN ('creating', 'active')
+            SET status = 'failed', error_code = %s, termination_reason_code = %s,
+                terminated_at = %s, lease_expires_at = NULL, owner_token = NULL
+            WHERE agent_session_id = %s AND status IN ('creating', 'active')
             """,
             (error_code, reason_code, self._iso(self._now()), agent_session_id),
         )
@@ -799,14 +797,14 @@ class SessionManager:
         self.db.execute(
             """
             UPDATE agent_sessions
-            SET lease_expires_at = ?, owner_token = 'compensation_pending'
-            WHERE agent_session_id = ? AND status = 'creating'
+            SET lease_expires_at = %s, owner_token = 'compensation_pending'
+            WHERE agent_session_id = %s AND status = 'creating'
             """,
             (self._iso(lease), agent_session_id),
         )
         self.db.commit()
 
-    def _row_to_session(self, row: sqlite3.Row) -> AgentSession:
+    def _row_to_session(self, row: Any) -> AgentSession:
         return AgentSession(
             agent_session_id=row["agent_session_id"],
             workflow_run_id=row["workflow_run_id"],
@@ -847,9 +845,18 @@ class SessionManager:
             value = value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
 
+    def _rollback_read_transaction(self) -> None:
+        if self.db.in_transaction:
+            self.db.rollback()
+
     @staticmethod
-    def _parse_datetime(value: str) -> datetime:
-        parsed = datetime.fromisoformat(value)
+    def _parse_datetime(value: datetime | str) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, str):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            raise TypeError("agent session timestamp must be datetime or ISO-8601 text")
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
         return parsed.astimezone(UTC)

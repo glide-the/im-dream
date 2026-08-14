@@ -20,6 +20,7 @@ function fullProjection() {
     entityId: 'lead',
     displayName: '主角',
     summary: '人物摘要',
+    content: '# 主角\n\n身份：调查记者。\n\n动机：寻找真相。',
     sourceFile: 'assets/characters/lead.md',
     relations: [],
   };
@@ -75,6 +76,7 @@ function fullProjection() {
     confirmationDispatched: false,
     canConfirm: true,
     confirmationLabel: '确认并继续',
+    agentActivity: null,
   };
 }
 
@@ -91,6 +93,30 @@ test('strictly parses waiting and complete camelCase projections', () => {
   expect(complete.confirmationAccepted).toBe(false);
   expect(complete.confirmationDispatched).toBe(false);
   expect(complete.stages.characters?.revision).toBe(2);
+  expect(complete.stages.characters?.items[0].content).toContain('动机：寻找真相。');
+  expect(complete.agentActivity).toBeNull();
+
+  const withActivity = storyWorkspaceParseDreamFiles({
+    ...fullProjection(),
+    agentActivity: {
+      activity: 'activity_started_hint',
+      sequence: 4,
+      terminalOutcome: null,
+      needsReconcile: false,
+      operationScope: 'content_generation',
+      operationState: 'started',
+      operationId: 'a'.repeat(64),
+    },
+  });
+  expect(withActivity.agentActivity).toEqual({
+    activity: 'activity_started_hint',
+    sequence: 4,
+    terminalOutcome: null,
+    needsReconcile: false,
+    operationScope: 'content_generation',
+    operationState: 'started',
+    operationId: 'a'.repeat(64),
+  });
 
   const accepted = storyWorkspaceParseDreamFiles({
     ...fullProjection(),
@@ -119,6 +145,19 @@ test('strictly parses waiting and complete camelCase projections', () => {
   })).toThrow();
   expect(() => storyWorkspaceParseDreamFiles({
     ...fullProjection(),
+    stages: {
+      ...fullProjection().stages,
+      characters: {
+        ...fullProjection().stages.characters,
+        items: [{ ...fullProjection().stages.characters.items[0], content: 42 }],
+      },
+    },
+  })).toThrow();
+  const legacy = fullProjection();
+  delete (legacy.stages.characters.items[0] as { content?: string }).content;
+  expect(storyWorkspaceParseDreamFiles(legacy).stages.characters?.items[0].content).toBeNull();
+  expect(() => storyWorkspaceParseDreamFiles({
+    ...fullProjection(),
     stages: { characters: { ...fullProjection().stages.characters, revision: true } },
   })).toThrow();
   expect(() => storyWorkspaceParseDreamFiles({
@@ -135,6 +174,35 @@ test('strictly parses waiting and complete camelCase projections', () => {
   const withoutConfirmationFacts = { ...fullProjection() } as Record<string, unknown>;
   delete withoutConfirmationFacts.confirmationAccepted;
   expect(() => storyWorkspaceParseDreamFiles(withoutConfirmationFacts)).toThrow();
+  const malformedOptionalActivity = storyWorkspaceParseDreamFiles({
+    ...fullProjection(),
+    agentActivity: {
+      activity: 'turn_settled_hint',
+      sequence: 5,
+      terminalOutcome: 'completed',
+      needsReconcile: false,
+      operationScope: 'tool',
+      operationState: 'succeeded',
+      operationId: 'raw-tool-call-id',
+    },
+  });
+  expect(malformedOptionalActivity.agentActivity).toBeNull();
+  expect(malformedOptionalActivity.threadId).toBe('thread-1');
+  expect(malformedOptionalActivity.stages.characters?.revision).toBe(2);
+  const inconsistentOptionalActivity = storyWorkspaceParseDreamFiles({
+    ...fullProjection(),
+    agentActivity: {
+      activity: 'activity_started_hint',
+      sequence: 6,
+      terminalOutcome: null,
+      needsReconcile: false,
+      operationScope: 'content_generation',
+      operationState: 'succeeded',
+      operationId: 'b'.repeat(64),
+    },
+  });
+  expect(inconsistentOptionalActivity.agentActivity).toBeNull();
+  expect(inconsistentOptionalActivity.threadId).toBe('thread-1');
 });
 
 test('fetch seam sends auth and rejects HTTP or malformed JSON', async () => {
@@ -155,6 +223,19 @@ test('fetch seam sends auth and rejects HTTP or malformed JSON', async () => {
   expect(new Headers(calls[0].init?.headers).get('Authorization')).toBe('Bearer token-1');
   expect(calls[0].init?.credentials).toBe('include');
 
+  const waiting = await storyWorkspaceFetchDreamFiles('/api/dream', {
+    fetchImpl: (async () => new Response(JSON.stringify({
+      ...fullProjection(),
+      runRevision: 0,
+      stages: {},
+      canConfirm: false,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as unknown as typeof fetch,
+  });
+  expect(waiting).toMatchObject({ runRevision: 0, stages: {}, canConfirm: false });
+
   await expect(storyWorkspaceFetchDreamFiles('/api/dream', {
     fetchImpl: (async () => new Response('{}', { status: 409 })) as unknown as typeof fetch,
   })).rejects.toThrow();
@@ -166,7 +247,7 @@ test('fetch seam sends auth and rejects HTTP or malformed JSON', async () => {
 test('polling includes editing so Agent revision conflicts surface within five seconds', () => {
   expect(storyWorkspaceShouldPollDreamFiles('story-workspace-dream-waiting-files')).toBe(true);
   expect(storyWorkspaceShouldPollDreamFiles('story-workspace-dream-editing')).toBe(true);
-  expect(storyWorkspaceShouldPollDreamFiles('story-workspace-dream-continuing')).toBe(true);
+  expect(storyWorkspaceShouldPollDreamFiles('story-workspace-dream-running')).toBe(true);
   for (const state of [
     'story-workspace-dream-confirming',
     'story-workspace-dream-completed',

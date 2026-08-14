@@ -11,6 +11,7 @@ import unittest
 from pydantic import ValidationError
 
 from backend import database
+from backend.schema import legacy_main_sqlite
 from backend.models.deck_plugin import (
     CapabilityDiff,
     CompatibilityCheck,
@@ -105,7 +106,7 @@ class CompatibilityServiceTests(unittest.IsolatedAsyncioTestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
-        database.create_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
         self.manifest, self.runtime_lock = self._seed_release_and_installation()
         self.service = CompatibilityService(
             self.db,

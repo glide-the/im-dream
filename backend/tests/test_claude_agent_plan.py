@@ -38,6 +38,7 @@ if str(ROOT) not in sys.path:
 
 import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before kit imports
 
+from agent_stream_events import NormalizedAgentEvent
 from libs.claude_agent_kit.server import sdk_env as sdk_env_module
 from libs.claude_agent_kit.server import workspace as workspace_module
 from libs.claude_agent_kit.server.sdk_env import apply_plan_mode_env_to_options
@@ -194,9 +195,9 @@ class TestPlanModeSseFrames(unittest.IsolatedAsyncioTestCase):
     def _drain(queue: asyncio.Queue) -> list[dict]:
         frames = []
         while not queue.empty():
-            raw = queue.get_nowait()
-            assert raw.startswith("data: ") and raw.endswith("\n\n")
-            frames.append(json.loads(raw[len("data: "):-2]))
+            event = queue.get_nowait()
+            assert isinstance(event, NormalizedAgentEvent)
+            frames.append(event.payload())
         return frames
 
     async def test_enter_plan_mode_emits_plan_mode_changed_not_collected(self):

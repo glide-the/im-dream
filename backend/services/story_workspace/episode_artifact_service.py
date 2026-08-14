@@ -44,7 +44,6 @@ try:
         StoryWorkspaceEpisodeArtifactSurface,
         StoryWorkspaceEpisodeBindingAvailability,
         StoryWorkspaceEpisodeBindingFile,
-        StoryWorkspaceEpisodeBindingRecovery,
         StoryWorkspaceEpisodeRegistryFile,
         StoryWorkspaceEpisodeProducerAction,
         StoryWorkspaceEpisodeReviewScope,
@@ -78,7 +77,6 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceEpisodeArtifactSurface,
         StoryWorkspaceEpisodeBindingAvailability,
         StoryWorkspaceEpisodeBindingFile,
-        StoryWorkspaceEpisodeBindingRecovery,
         StoryWorkspaceEpisodeRegistryFile,
         StoryWorkspaceEpisodeProducerAction,
         StoryWorkspaceEpisodeReviewScope,
@@ -865,11 +863,6 @@ class StoryWorkspaceEpisodeArtifactService:
         return StoryWorkspaceEpisodeArtifactSurface(
             runId=workflow_run_id,
             bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
-            bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
-                autoRepairAttempted=False,
-                canDispatch=True,
-                publicReason="episode_binding_unproven",
-            ),
         )
 
     def read_surface(
@@ -1083,13 +1076,10 @@ class StoryWorkspaceEpisodeArtifactService:
         return StoryWorkspaceEpisodeArtifactSurface(
             runId=workflow_run_id,
             opaqueEpisodeId=binding.episode_uid,
+            episodeCode=binding.episode_code,
             manifestRevision=manifest_revision,
             etag=manifest_revision,
             bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.BOUND,
-            bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
-                autoRepairAttempted=False,
-                canDispatch=False,
-            ),
             artifacts=artifacts,
             documents=documents,
             narrative=narrative,

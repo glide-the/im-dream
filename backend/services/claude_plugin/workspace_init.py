@@ -14,7 +14,9 @@ agent workspace it:
 
 Init runs only on first pack; frozen workspaces never re-run init steps
 (the venv is a derived cache and may be rebuilt — plugin versions and init
-results stay frozen).
+results stay frozen). Dream surface initialization also deploys the reviewed
+Story Workspace Agent contract; per-turn facts are refreshed later by
+``ClaudeAgentService.assemble_context``.
 """
 
 from __future__ import annotations
@@ -262,6 +264,7 @@ DREAM_SURFACE_README = """# .dream/ — Dream Surface 协议目录
 ## 静态启动层只读
 
 - README.md 与 workspace.json 由 packer 写入，Agent 不得修改或删除。
+- WORKBENCH.md 与 ASSET-COLLABORATION.md 在 Dream surface 首次初始化时随本目录原子部署；ClaudeAgentService 在每个 Dream turn 组装时刷新合同和当前 server-trusted run/project 事实，并注入两个实际路径要求 Agent 先读取。Agent 可读但不得修改。
 - workspace.json 只记录 deck_id、插件制品清单和入口路由；pack 后保持冻结，
   不含 workflow_run_id、来源五字段或时间戳。
 
@@ -270,17 +273,19 @@ DREAM_SURFACE_README = """# .dream/ — Dream Surface 协议目录
 - 页面描述位于 runtime/runs/<workflow_run_id>/run.json 与 stages/*.json。
 - Agent 只能调用 mcp__story_workspace__write_dream_run 和
   mcp__story_workspace__write_dream_stage 更新运行内容层。
-- 第一集只允许通过 mcp__story_workspace__bind_first_episode 建立服务端
-  绑定，通过 mcp__story_workspace__record_episode_workflow_completion 记录受控的
-  技术完成修订；两者均校验 host 注入的 run/thread/message 上下文，
-  不持有剧情、剧本、分镜、Prompt 或渲染内容。
+- 主 Agent turn 前后由服务端 Hook 检查 canonical Project/Episode 产物，
+  在权限与 run/thread 绑定校验后自动同步到私有 Run 发布路径；该同步不依赖
+  Agent 主动调用工具，也不产生 Episode 阶段或“下一步”状态。
+- Hook 对人物、场景、分镜执行完整文件事实对账：Skill 删除全部源文件时移除旧 stage，写入新源后重新生成，不保留 launch seed 作为页面事实。
+- 用户自然语言资产变更必须先修改 canonical 人物、场景或分镜文件；普通 Chat 的 standalone proposal JSON 不能替代文件操作。
 - 禁止使用 Write、Edit 或 Bash 直接修改 .dream；受控工具会从 host 读取
   actor、thread 与冻结的 WorkflowRun 来源字段，并校验 revision 和 source files。
-- 先写人物、场景或分镜的 canonical 工作区文件，再调用 stage 工具同步页面元信息。
-- story-workspace REST API 是运行内容的真相源；Dream 页面在
-  waiting、editing、continuing 阶段最长每 5 秒轮询一次。
-- 仅当兼容的 story-workspace-output 事件携带匹配当前 workflow_run_id 的 runId
-  时，页面才立即重新读取；受控 writer 尚不主动发布 run-scoped SSE，此能力仍是遗留。
+- 先写人物、场景、剧本或分镜的 canonical 工作区文件；stage 工具仅用于即时预览，
+  成功 turn 的最终同步由服务端 Hook 保证。
+- Agent 对话的真相源是标准 Thread history/status/SSE；Dream 与 Chat
+  使用同一 thread_id 恢复消息、确认、Stop 和终态。
+- story-workspace REST API 只读取 Workflow 与 Artifact 业务投影；投影由
+  DreamObserver 基于内部 EventBus 事实幂等更新，不产生第二套前端 SSE。
 
 入口路由：/story-workspace/dream
 """
@@ -299,9 +304,15 @@ def materialize_dream_surface(
     is byte-identical.  The payload holds launch facts only — no
     workflow_run_id, no timestamps (DEC-029).
     """
+    from story_workspace.dream_workbench_context import (  # noqa: PLC0415
+        DreamWorkbenchContext,
+    )
+
     workspace = Path(workspace)
     dream_dir = workspace / ".dream"
+    workbench_context = DreamWorkbenchContext()
     if (dream_dir / "workspace.json").is_file() and (dream_dir / "README.md").is_file():
+        workbench_context.initialize_surface(dream_dir)
         return {"step": "materialize-surface", "surface": "dream", "path": ".dream/"}
     payload = {
         "schema_version": "dream-surface/v1",
@@ -319,6 +330,7 @@ def materialize_dream_surface(
             encoding="utf-8",
         )
         (tmp_dir / "README.md").write_text(DREAM_SURFACE_README, encoding="utf-8")
+        workbench_context.initialize_surface(tmp_dir)
         if dream_dir.exists():
             shutil.rmtree(dream_dir)  # clear a half-written dir before rebuild
         os.rename(tmp_dir, dream_dir)

@@ -48,7 +48,7 @@
 ### 状态映射（`StoryWorkspaceReviewGateState`）
 
 ```
-story-workspace-agent-running → story-workspace-rendering → story-workspace-pending-review → story-workspace-confirmed → story-workspace-continuing/story-workspace-completed
+story-workspace-agent-running → story-workspace-rendering → story-workspace-pending-review → story-workspace-confirmed → story-workspace-dream-running/story-workspace-completed
 ```
 
 ---

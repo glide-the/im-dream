@@ -64,6 +64,7 @@ function seoHtmlReplacementPlugin(publicSiteUrl: string): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   const publicSiteUrl = env.VITE_PUBLIC_SITE_URL || DEFAULT_PUBLIC_SITE_URL
+  const devApiProxyTarget = env.VITE_DEV_API_PROXY_TARGET || 'http://localhost:8765'
 
   return {
     plugins: [react(), seoHtmlReplacementPlugin(publicSiteUrl)],
@@ -113,15 +114,15 @@ export default defineConfig(({ mode }) => {
       allowedHosts: ['dream.suoxya.com'],
       proxy: {
         '/api': {
-          target: 'http://localhost:8765',
+          target: devApiProxyTarget,
           changeOrigin: true,
         },
         '/auth': {
-          target: 'http://localhost:8765',
+          target: devApiProxyTarget,
           changeOrigin: true,
         },
         '/oauth/device/verify': {
-          target: 'http://localhost:8765',
+          target: devApiProxyTarget,
           changeOrigin: true,
           bypass(req) {
             if (req.method === 'GET' && req.headers.accept?.includes('text/html')) {
@@ -130,11 +131,11 @@ export default defineConfig(({ mode }) => {
           },
         },
         '/oauth': {
-          target: 'http://localhost:8765',
+          target: devApiProxyTarget,
           changeOrigin: true,
         },
         '/polycli': {
-          target: 'http://localhost:8765',
+          target: devApiProxyTarget,
           changeOrigin: true,
         }
       }

@@ -1,6 +1,7 @@
 // [Input] Execution page JSX/CSS source after Dream confirmation.
 // [Output] Two-depth layout guard: one overview workplane, then full-width focus replacement.
 // [Pos] Story Workspace execution page structural seam (Task 3 F10).
+// [Sync] 2026-08-14: guard the Execution canvas against a light-only fallback in dark mode.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -53,24 +54,42 @@ test('focus replaces the overview layer and keeps only full-width context naviga
   expect(focusBranch).not.toContain('WorkspaceIndexList');
 });
 
+test('asset focus renders the Hook-published complete document while indexes keep summaries', () => {
+  expect(PAGE_SOURCE).toContain("focusedEntry.content ? '完整资产资料' : '主要信息'");
+  expect(PAGE_SOURCE).toContain('<StoryWorkspaceAssetContent');
+  expect(PAGE_SOURCE).toContain('<ReactMarkdown');
+  expect(PAGE_SOURCE).toContain('skipHtml');
+  expect(PAGE_SOURCE).toContain("<p>{entry.summary || '等待 Agent 补充主要信息。'}</p>");
+  expect(CSS_SOURCE).toContain('.story-workspace-collaboration__asset-document');
+});
+
 test('execution page uses exactly one dashed rule', () => {
   expect(CSS_SOURCE.match(/dashed/g) ?? []).toHaveLength(1);
 });
 
+test('execution canvas follows the shared app background token in every theme', () => {
+  expect(CSS_SOURCE).toContain(
+    '--collaboration-canvas: var(--color-bg-app, #f6efe5);',
+  );
+  expect(CSS_SOURCE).not.toContain('--color-bg-warm');
+});
+
 test('execution status preview opens the Dream Agent floating dialog without mounting ChatView', () => {
-  expect(PAGE_SOURCE).toContain('useStoryWorkspaceDreamAgent');
+  expect(PAGE_SOURCE).toContain('threadId={files.data.threadId}');
   expect(PAGE_SOURCE).toContain('<StoryWorkspaceDreamAgentDialog');
   expect(PAGE_SOURCE).toContain('onClick={() => setAgentDialogOpen(true)}');
   expect(PAGE_SOURCE).toContain('Dream Agent 消息预览');
   expect(PAGE_SOURCE).toContain('aria-controls="story-workspace-dream-agent-dialog"');
   expect(DIALOG_SOURCE).toContain('id="story-workspace-dream-agent-dialog"');
+  expect(DIALOG_SOURCE).toContain('<StoryWorkspaceDreamThreadChat');
+  expect(PAGE_SOURCE).not.toContain('useStoryWorkspaceDreamAgent');
   expect(PAGE_SOURCE).not.toContain('<ChatView');
 });
 
 test('Episode artifacts unfold after the Dream projection on the same run execution route', () => {
   const projectionStart = PAGE_SOURCE.indexOf('<details ref={dreamProjectionDetailsRef}>');
   const projectionEnd = PAGE_SOURCE.indexOf('</details>', projectionStart);
-  const artifactMarker = 'aria-label="第一集产物工作台"';
+  const artifactMarker = 'aria-label="Episode 产物工作台"';
   const artifactStart = PAGE_SOURCE.indexOf(artifactMarker);
   const agentDialogStart = PAGE_SOURCE.indexOf('<StoryWorkspaceDreamAgentDialog');
 
@@ -108,11 +127,26 @@ test('places the artifact progress directly below the Episode Overview title', (
   const overviewEnd = EPISODE_WORKBENCH_SOURCE.indexOf('function BeatContent', overviewStart);
   const overview = EPISODE_WORKBENCH_SOURCE.slice(overviewStart, overviewEnd);
   const title = overview.indexOf("h('h2'");
-  const progress = overview.indexOf("'aria-label': '第一集产物进度'");
+  const progress = overview.indexOf("'aria-label': `${episodeCode} 产物进度`");
 
   expect(title).toBeGreaterThan(-1);
   expect(progress).toBeGreaterThan(title);
-  expect(PAGE_SOURCE.match(/aria-label="第一集产物进度"/g) ?? []).toHaveLength(0);
+  expect(PAGE_SOURCE.match(/aria-label="EP01 产物进度"/g) ?? []).toHaveLength(0);
+});
+
+test('places the independent Story Index facts below the Episode title without a next-action control', () => {
+  const episodeHeader = PAGE_SOURCE.slice(
+    PAGE_SOURCE.indexOf('<main aria-labelledby="story-workspace-episode-title">'),
+    PAGE_SOURCE.indexOf('</header>', PAGE_SOURCE.indexOf('<main aria-labelledby="story-workspace-episode-title">')),
+  );
+  const title = episodeHeader.indexOf('id="story-workspace-episode-title"');
+  const indexStatus = episodeHeader.indexOf('<StoryWorkspaceStoryIndexStatus');
+  expect(title).toBeGreaterThan(-1);
+  expect(indexStatus).toBeGreaterThan(title);
+  expect(episodeHeader).not.toContain('Episode 下一步');
+  expect(CSS_SOURCE).toMatch(
+    /\.story-workspace-story-index-status\s*\{[^}]*min-width:\s*0;[^}]*grid-column:\s*1\s*\/\s*-1;/s,
+  );
 });
 
 test('Episode layout has a mobile storyline sheet and 44px controls below 768px', () => {
@@ -129,7 +163,7 @@ test('Episode layout has a mobile storyline sheet and 44px controls below 768px'
   expect(narrow).toContain('.story-workspace-episode-storyline-sheet');
   expect(narrow).toContain('position: fixed');
   expect(narrow).toMatch(
-    /\[aria-label="第一集文件导航"\][^{]*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+    /\[aria-label\$="文件导航"\][^{]*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
   );
   expect(narrow).toMatch(
     /\.story-workspace-episode-artifact-reader__markdown table\s*\{[^}]*overflow-x:\s*auto/s,
@@ -150,17 +184,9 @@ test('Episode layout exposes keyboard focus, wrapping, and reduced-motion safegu
   expect(reducedMotion).toContain('transition-duration: .01ms !important');
 });
 
-test('Episode continuation dialog owns a viewport-safe confirmation workplane', () => {
-  expect(PAGE_SOURCE).toContain('story-workspace-episode-action-dialog');
-  expect(PAGE_SOURCE).toContain('aria-modal="true"');
-  expect(CSS_SOURCE).toMatch(
-    /\.story-workspace-collaboration \.story-workspace-episode-action-dialog\s*\{[^}]*position:\s*fixed;[^}]*max-height:\s*calc\(100dvh - 48px\)/s,
-  );
-  expect(CSS_SOURCE).toContain('.story-workspace-episode-action-dialog > section');
-  const narrowStart = CSS_SOURCE.indexOf('@media (max-width: 767px)');
-  expect(CSS_SOURCE.slice(narrowStart)).toMatch(
-    /\.story-workspace-collaboration \.story-workspace-episode-action-dialog\s*\{[^}]*inset:\s*10px;[^}]*max-height:\s*calc\(100dvh - 20px\)/s,
-  );
+test('Episode layout contains no dedicated workflow action confirmation workplane', () => {
+  expect(PAGE_SOURCE).not.toContain('story-workspace-episode-action-dialog');
+  expect(CSS_SOURCE).not.toContain('story-workspace-episode-action-dialog');
 });
 
 test('Episode browser QA freezes the date and timezone before navigation', () => {

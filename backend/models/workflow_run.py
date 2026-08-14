@@ -31,7 +31,6 @@ class RunStatus(str, Enum):
     PENDING_REVIEW = "pending_review"
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
-    CONTINUING = "continuing"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -122,7 +121,6 @@ class WorkflowRun(_StrictFrozenModel):
             RunStatus.PENDING_REVIEW,
             RunStatus.CONFIRMED,
             RunStatus.REJECTED,
-            RunStatus.CONTINUING,
             RunStatus.COMPLETED,
         }
         if requires_start_bindings and not has_receipt:

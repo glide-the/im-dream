@@ -34,7 +34,7 @@ interface E2EContext {
   threadId: string;
   packageSpec: string;
   artifactDigest: string;
-  continuingRunId: string;
+  confirmedRunId: string;
   pendingRunId: string;
   guidanceKey: string;
 }
@@ -47,7 +47,7 @@ const ctx: E2EContext = {
   threadId: '',
   packageSpec: '',
   artifactDigest: '',
-  continuingRunId: '',
+  confirmedRunId: '',
   pendingRunId: '',
   guidanceKey: '',
 };
@@ -275,7 +275,7 @@ test('legacy sessions without surfaces stay surface-less (DEC-028)', async ({ re
 test('execution page + guidance loop against the real backend', async ({ page, request }) => {
   test.setTimeout(300_000);
 
-  ctx.continuingRunId = stageRun('continuing', `${ctx.email}:continuing`);
+  ctx.confirmedRunId = stageRun('confirmed', `${ctx.email}:confirmed`);
 
   await page.addInitScript(({ token }) => {
     localStorage.setItem('auth_token', token);
@@ -284,18 +284,18 @@ test('execution page + guidance loop against the real backend', async ({ page, r
   }, { token: ctx.token });
 
   // 1. Direct-open the execution route: story-workspace view, run loaded from
-  //    the real backend, continuing state rendered, degraded (no projection)
+  //    the real backend, confirmed state rendered, degraded (no projection)
   //    data tabs show explicit empty states instead of errors.
-  await page.goto(`${WEB_BASE}/story-workspace/runs/${ctx.continuingRunId}/execution`);
-  await expect(page).toHaveURL(new RegExp(`/story-workspace/runs/${ctx.continuingRunId}/execution$`));
-  await expect(page.getByText(ctx.continuingRunId, { exact: false }).first()).toBeVisible();
+  await page.goto(`${WEB_BASE}/story-workspace/runs/${ctx.confirmedRunId}/execution`);
+  await expect(page).toHaveURL(new RegExp(`/story-workspace/runs/${ctx.confirmedRunId}/execution$`));
+  await expect(page.getByText(ctx.confirmedRunId, { exact: false }).first()).toBeVisible();
   await expect(page.getByText('暂无步骤数据', { exact: false })).toBeVisible();
 
   // 2. Submit free-text guidance from the sidebar → real 202.
   const guidanceText = '第二集节奏放慢，保留雨夜电台主线';
   await page.getByLabel('指导指令输入框').fill(guidanceText);
   const guidanceResponsePromise = page.waitForResponse((response) => (
-    response.url().includes(`/api/story-workspace/runs/${ctx.continuingRunId}/guidance`)
+    response.url().includes(`/api/story-workspace/runs/${ctx.confirmedRunId}/guidance`)
     && response.request().method() === 'POST'
   ));
   await page.getByRole('button', { name: '发送指导' }).click();
@@ -336,7 +336,7 @@ test('execution page + guidance loop against the real backend', async ({ page, r
   expect(guidanceRow!.id).toBe(accepted.message_id);
   expect(guidanceRow!.role).toBe('user');
   expect(guidanceRow!.metadata).toMatchObject({
-    story_workspace_run_id: ctx.continuingRunId,
+    story_workspace_run_id: ctx.confirmedRunId,
     command_kind: 'free-text',
     review_action: 'guide',
     request_id: accepted.request_id,
@@ -356,14 +356,14 @@ test('execution page + guidance loop against the real backend', async ({ page, r
     actor,
   };
   const replay = await request.post(
-    `${API_BASE}/api/story-workspace/runs/${ctx.continuingRunId}/guidance`,
+    `${API_BASE}/api/story-workspace/runs/${ctx.confirmedRunId}/guidance`,
     { headers: authHeaders(), data: replayBody },
   );
   expect(replay.status()).toBe(202);
   expect((await replay.json() as { replayed: boolean }).replayed).toBeTruthy();
 
   const conflict = await request.post(
-    `${API_BASE}/api/story-workspace/runs/${ctx.continuingRunId}/guidance`,
+    `${API_BASE}/api/story-workspace/runs/${ctx.confirmedRunId}/guidance`,
     { headers: authHeaders(), data: { ...replayBody, text: '不同的指导内容' } },
   );
   expect(conflict.status()).toBe(409);

@@ -1,3 +1,9 @@
+# [Input] Actor-owned Dream Run provenance, canonical Story projection, launch
+#         goal, Dream stage files, and live shared-thread status.
+# [Output] Ordered re-entry rows whose display title prefers the canonical
+#          Project title and falls back to the launch-goal prefix.
+# [Pos] Story Workspace Dream list query; it does not author Project titles.
+
 """Actor-scoped durable projection for the Dream workbench re-entry list."""
 
 from __future__ import annotations
@@ -5,7 +11,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 import json
-import sqlite3
 from typing import Any
 
 try:
@@ -28,7 +33,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     )
 
 
-_StoryWorkspaceDreamProjectionLoader = Callable[[sqlite3.Row, dict[str, str], sqlite3.Connection], Any]
+_StoryWorkspaceDreamProjectionLoader = Callable[[Any, dict[str, str], Any], Any]
 _StoryWorkspaceDreamLiveTurnLookup = Callable[[str], bool]
 _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE = 400
 _STORY_WORKSPACE_DREAM_REENTRY_RECENT_LIMIT = 20
@@ -63,9 +68,10 @@ _STORY_WORKSPACE_DREAM_LAUNCH_ALLOWED_KEYS = frozenset({
     "workflowRunId",
     "threadId",
     "dreamContext",
+    "projectStorySlug",
     "story_workspace_episode_identity",
 })
-_STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED = object()
+_STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED = object()
 
 
 class StoryWorkspaceDreamReentryService:
@@ -79,7 +85,7 @@ class StoryWorkspaceDreamReentryService:
     def __init__(
         self,
         *,
-        db_factory: Callable[[], sqlite3.Connection],
+        db_factory: Callable[[], Any],
         dream_files_loader: _StoryWorkspaceDreamProjectionLoader,
         live_turn_lookup: _StoryWorkspaceDreamLiveTurnLookup | None = None,
         close_connections: bool = True,
@@ -96,9 +102,9 @@ class StoryWorkspaceDreamReentryService:
     ) -> StoryWorkspaceDreamReentryCollection:
         actor_id = self._actor_id(actor)
         db = self._db_factory()
-        db.row_factory = sqlite3.Row
         try:
             rows = self._query_authorized_rows(db, actor_id)
+            project_titles = self._project_titles(db, rows)
             confirmation_facts = self._confirmation_facts(db, rows, actor_id)
             items = [
                 item
@@ -108,6 +114,7 @@ class StoryWorkspaceDreamReentryService:
                     row,
                     actor_id,
                     confirmation_facts.get(str(row["run_id"]), (False, False)),
+                    project_title=project_titles.get(str(row["run_id"])),
                 )) is not None
             ]
             items.sort(key=self._sort_tuple)
@@ -132,14 +139,35 @@ class StoryWorkspaceDreamReentryService:
 
     @staticmethod
     def _query_authorized_rows(
-        db: sqlite3.Connection,
+        db: Any,
         actor_id: int,
-    ) -> list[sqlite3.Row]:
+        *,
+        workflow_run_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[Any]:
         """Select only DB-consistent candidates before file projection.
 
         Workflow run status is intentionally absent: legacy status is not a
         durable Dream lifecycle fact (DEC-034/035).
         """
+
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000
+        ):
+            raise ValueError("authorized Dream row limit is invalid")
+        run_filter = "AND run.id = %s " if workflow_run_id is not None else ""
+        limit_clause = " LIMIT %s" if limit is not None else ""
+        parameters: list[Any] = [
+            str(actor_id),
+            actor_id,
+            actor_id,
+            actor_id,
+            _STORY_WORKSPACE_DREAM_LAUNCH_SCHEMA,
+        ]
+        if workflow_run_id is not None:
+            parameters.append(workflow_run_id)
+        if limit is not None:
+            parameters.append(limit)
 
         return db.execute(
             "SELECT "
@@ -166,14 +194,19 @@ class StoryWorkspaceDreamReentryService:
             "AND release.deck_plugin_version = run.deck_plugin_version "
             "AND release.workflow_definition_ref = run.workflow_definition_ref "
             "AND release.manifest_hash = run.deck_plugin_manifest_hash "
-            "AND json_valid(release.manifest_json) "
             "AND ("
-            "EXISTS (SELECT 1 FROM json_each(release.manifest_json, '$.surfaces') AS surface "
-            "WHERE json_extract(surface.value, '$.name') = 'dream') "
-            "OR EXISTS (SELECT 1 FROM json_each(release.manifest_json, '$.capabilities') AS capability "
+            "EXISTS (SELECT 1 FROM jsonb_array_elements("
+            "COALESCE(release.manifest_json::jsonb -> 'surfaces', '[]'::jsonb)) AS surface(value) "
+            "WHERE surface.value ->> 'name' = 'dream') "
+            "OR EXISTS (SELECT 1 FROM jsonb_array_elements_text("
+            "COALESCE(release.manifest_json::jsonb -> 'capabilities', '[]'::jsonb)) AS capability(value) "
             "WHERE capability.value = 'story.workspace.propose') "
-            "OR EXISTS (SELECT 1 FROM json_each(release.manifest_json, '$.runtime.claude_code_plugins') AS plugin "
-            "JOIN json_each(plugin.value, '$.capability_bindings') AS binding_capability "
+            "OR EXISTS (SELECT 1 FROM jsonb_array_elements("
+            "COALESCE(release.manifest_json::jsonb #> '{runtime,claude_code_plugins}', "
+            "'[]'::jsonb)) AS plugin(value) "
+            "CROSS JOIN LATERAL jsonb_array_elements_text("
+            "COALESCE(plugin.value -> 'capability_bindings', '[]'::jsonb)) "
+            "AS binding_capability(value) "
             "WHERE binding_capability.value = 'story.workspace.propose')"
             ") "
             "JOIN deck_runtime_plugin_locks AS runtime_lock "
@@ -190,10 +223,10 @@ class StoryWorkspaceDreamReentryService:
             "JOIN chat_thread AS thread ON thread.id = run.source_voice_thread_id "
             "JOIN chat_message AS source "
             "ON source.id = run.source_message_id AND source.thread_id = thread.id "
-            "WHERE run.created_by = ? "
-            "AND workspace.owner_id = ? "
-            "AND deck.owner_id = ? AND deck.enabled = 1 "
-            "AND thread.user_id = ? AND thread.deck_id = binding.deck_id "
+            "WHERE run.created_by = %s "
+            "AND workspace.owner_id = %s "
+            "AND deck.owner_id = %s AND deck.enabled IS TRUE "
+            "AND thread.user_id = %s AND thread.deck_id = binding.deck_id "
             "AND source.role = 'user' "
             "AND preflight.created_by = run.created_by "
             "AND preflight.deck_id = binding.deck_id "
@@ -207,32 +240,31 @@ class StoryWorkspaceDreamReentryService:
             "AND binding.deck_plugin_id = run.deck_plugin_id "
             "AND binding.deck_plugin_version = run.deck_plugin_version "
             "AND binding.binding_revision = run.binding_revision "
-            "AND CASE WHEN json_valid(source.metadata) THEN ("
-            "(json_type(source.metadata, '$.schemaVersion') IS NULL "
-            "AND json_type(source.metadata, '$.agentId') IS NULL "
-            "AND json_type(source.metadata, '$.dreamContext.agent_id') IS NULL) "
-            "OR (json_extract(source.metadata, '$.schemaVersion') = ? "
-            "AND json_type(source.metadata, '$.agentId') IS NOT NULL "
-            "AND json_type(source.metadata, '$.dreamContext.agent_id') IS NOT NULL "
-            "AND json_extract(source.metadata, '$.agentId') IS thread.voice_id "
-            "AND json_extract(source.metadata, '$.dreamContext.agent_id') IS thread.voice_id)"
-            ") ELSE 0 END "
-            "ORDER BY run.created_at DESC, run.id ASC",
-            (
-                str(actor_id),
-                actor_id,
-                actor_id,
-                actor_id,
-                _STORY_WORKSPACE_DREAM_LAUNCH_SCHEMA,
-            ),
+            "AND ("
+            "((COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb ->> 'schemaVersion') IS NULL "
+            "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb ->> 'agentId') IS NULL "
+            "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
+            "#>> '{dreamContext,agent_id}') IS NULL) "
+            "OR ((COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
+            "->> 'schemaVersion') = %s "
+            "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
+            "->> 'agentId') IS NOT DISTINCT FROM thread.voice_id "
+            "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
+            "#>> '{dreamContext,agent_id}') IS NOT DISTINCT FROM thread.voice_id)) "
+            + run_filter
+            + "ORDER BY run.created_at DESC, run.id ASC"
+            + limit_clause,
+            tuple(parameters),
         ).fetchall()
 
     def _project_row(
         self,
-        db: sqlite3.Connection,
-        row: sqlite3.Row,
+        db: Any,
+        row: Any,
         actor_id: int,
         confirmation_facts: tuple[bool, bool],
+        *,
+        project_title: str | None,
     ) -> StoryWorkspaceDreamReentryItem | None:
         run_id = str(row["run_id"])
         thread_id = str(row["thread_id"])
@@ -271,12 +303,17 @@ class StoryWorkspaceDreamReentryService:
         created_at = self._parse_datetime(row["run_created_at"])
         group = "recent" if lifecycle is StoryWorkspaceDreamRunLifecycle.RECENT else "in_progress"
         deck_display_name = str(row["deck_name"] or deck_id)
+        goal_prefix = self._source_goal_prefix(
+            row["source_metadata"],
+            fallback=deck_display_name,
+        )
         return StoryWorkspaceDreamReentryItem(
             story_workspace_run_id=run_id,
-            goal_prefix=self._source_goal_prefix(
-                row["source_metadata"],
-                fallback=deck_display_name,
+            display_title=self._display_title(
+                project_title,
+                goal_prefix=goal_prefix,
             ),
+            goal_prefix=goal_prefix,
             deck_id=deck_id,
             deck_display_name=deck_display_name,
             deck_plugin_version=str(row["deck_plugin_version"]),
@@ -292,13 +329,90 @@ class StoryWorkspaceDreamReentryService:
                 f"{last_activity_at.isoformat()}:"
                 f"{created_at.isoformat()}:{run_id}"
             ),
-            href=f"/story-workspace/dream?run={run_id}",
+            href=(
+                f"/story-workspace/runs/{run_id}/execution"
+                if confirmation_accepted
+                else f"/story-workspace/dream?run={run_id}"
+            ),
         )
+
+    @staticmethod
+    def _project_titles(db: Any, rows: list[Any]) -> dict[str, str]:
+        """Batch-read optional Project titles after Run authorization succeeds.
+
+        A historical Run can still belong to the same stable Project after the
+        Story's current ``source_run_id`` advances, so the source metadata's
+        Project slug is the secondary lookup key.
+        """
+
+        result_by_run: dict[str, str] = {}
+        result_by_project: dict[tuple[str, str], str] = {}
+        for offset in range(
+            0,
+            len(rows),
+            _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE,
+        ):
+            batch = rows[
+                offset:offset + _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE
+            ]
+            run_ids = tuple(dict.fromkeys(str(row["run_id"]) for row in batch))
+            project_keys = tuple(dict.fromkeys(
+                (str(row["workspace_id"]), project_slug)
+                for row in batch
+                if (project_slug := StoryWorkspaceDreamReentryService._source_project_slug(
+                    row["source_metadata"]
+                )) is not None
+            ))
+            clauses = [
+                f"source_run_id IN ({', '.join('%s' for _ in run_ids)})"
+            ]
+            parameters: list[str] = list(run_ids)
+            if project_keys:
+                clauses.append("(" + " OR ".join(
+                    "(workspace_id = %s AND source_project_id = %s)"
+                    for _ in project_keys
+                ) + ")")
+                parameters.extend(value for key in project_keys for value in key)
+            title_rows = db.execute(
+                "SELECT source_run_id, workspace_id, source_project_id, title "
+                "FROM story_workspace_stories "
+                "WHERE artifact_source_type = 'dream_episode' "
+                f"AND ({' OR '.join(clauses)}) "
+                "ORDER BY updated_at DESC, id ASC",
+                tuple(parameters),
+            ).fetchall()
+            for title_row in title_rows:
+                title = title_row["title"]
+                if not isinstance(title, str):
+                    continue
+                source_run_id = title_row["source_run_id"]
+                if source_run_id is not None:
+                    result_by_run.setdefault(str(source_run_id), title)
+                workspace_id = title_row["workspace_id"]
+                source_project_id = title_row["source_project_id"]
+                if workspace_id is not None and source_project_id is not None:
+                    result_by_project.setdefault(
+                        (str(workspace_id), str(source_project_id)),
+                        title,
+                    )
+
+        resolved: dict[str, str] = {}
+        for row in rows:
+            run_id = str(row["run_id"])
+            title = result_by_run.get(run_id)
+            project_slug = StoryWorkspaceDreamReentryService._source_project_slug(
+                row["source_metadata"]
+            )
+            if title is None and project_slug is not None:
+                title = result_by_project.get((str(row["workspace_id"]), project_slug))
+            if title is not None:
+                resolved[run_id] = title
+        return resolved
 
     def _stage_snapshot(
         self,
-        db: sqlite3.Connection,
-        row: sqlite3.Row,
+        db: Any,
+        row: Any,
         actor_id: int,
     ) -> tuple[dict[StoryWorkspaceDreamStage, int], datetime | None]:
         """Read stage truth through the established Dream files adapter only."""
@@ -330,8 +444,8 @@ class StoryWorkspaceDreamReentryService:
 
     @staticmethod
     def _confirmation_facts(
-        db: sqlite3.Connection,
-        rows: list[sqlite3.Row],
+        db: Any,
+        rows: list[Any],
         actor_id: int,
     ) -> dict[str, tuple[bool, bool]]:
         """Read at most one durable confirmation per re-entry candidate.
@@ -350,13 +464,12 @@ class StoryWorkspaceDreamReentryService:
         thread_ids = list(by_thread)
         for start in range(0, len(thread_ids), _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE):
             batch = thread_ids[start:start + _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE]
-            placeholders = ", ".join("?" for _ in batch)
+            placeholders = ", ".join("%s" for _ in batch)
             matches = db.execute(
                 "SELECT thread_id, metadata FROM chat_message "
                 "WHERE role = 'user' AND thread_id IN (" + placeholders + ") "
-                "AND json_valid(metadata) "
-                "AND json_extract(metadata, '$.kind') = ? "
-                "ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT ?",
+                "AND (COALESCE(NULLIF(BTRIM(metadata), ''), '{}')::jsonb ->> 'kind') = %s "
+                "ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT %s",
                 (*batch, "story-workspace-dream-confirmation", len(batch) + 1),
             ).fetchall()
             if len(matches) > len(batch):
@@ -400,7 +513,7 @@ class StoryWorkspaceDreamReentryService:
         if not confirmation_accepted:
             return StoryWorkspaceDreamRunLifecycle.WAITING_CONFIRMATION
         if not confirmation_dispatched or live_turn:
-            return StoryWorkspaceDreamRunLifecycle.CONTINUING
+            return StoryWorkspaceDreamRunLifecycle.RUNNING
         return StoryWorkspaceDreamRunLifecycle.RECENT
 
     @staticmethod
@@ -418,7 +531,7 @@ class StoryWorkspaceDreamReentryService:
         binding_revision: int,
         runtime_snapshot_id: str,
         runtime_lock_id: str,
-        thread_agent_id: Any = _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED,
+        thread_agent_id: Any = _STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED,
     ) -> bool:
         try:
             metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else {}
@@ -466,7 +579,7 @@ class StoryWorkspaceDreamReentryService:
                 return False
         elif top_agent_present or context_agent_present:
             return False
-        if thread_agent_id is not _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED:
+        if thread_agent_id is not _STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED:
             if thread_agent_id is not None and (
                 not isinstance(thread_agent_id, str) or not thread_agent_id
             ):
@@ -483,7 +596,7 @@ class StoryWorkspaceDreamReentryService:
             if top_agent != context_agent:
                 return False
             if (
-                thread_agent_id is not _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED
+                thread_agent_id is not _STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED
                 and top_agent != thread_agent_id
             ):
                 return False
@@ -512,6 +625,38 @@ class StoryWorkspaceDreamReentryService:
         return fallback[:_STORY_WORKSPACE_DREAM_GOAL_PREFIX_MAX]
 
     @staticmethod
+    def _source_project_slug(raw_metadata: Any) -> str | None:
+        try:
+            metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else {}
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(metadata, dict):
+            return None
+        nested = metadata.get("story_workspace_episode_identity")
+        candidates = [
+            metadata.get("projectStorySlug"),
+            nested.get("story_slug") if isinstance(nested, dict) else None,
+        ]
+        for candidate in candidates:
+            if (
+                isinstance(candidate, str)
+                and candidate == candidate.strip()
+                and 1 <= len(candidate) <= 255
+            ):
+                return candidate
+        return None
+
+    @staticmethod
+    def _display_title(project_title: Any, *, goal_prefix: str) -> str:
+        """Resolve one Project-facing title without conflating Episode names."""
+
+        if isinstance(project_title, str):
+            normalized = project_title.strip()
+            if 1 <= len(normalized) <= 255:
+                return normalized
+        return goal_prefix
+
+    @staticmethod
     def _parse_datetime(value: Any) -> datetime:
         if isinstance(value, datetime):
             parsed = value
@@ -529,7 +674,7 @@ class StoryWorkspaceDreamReentryService:
         return {
             StoryWorkspaceDreamRunLifecycle.GENERATING: 0,
             StoryWorkspaceDreamRunLifecycle.WAITING_CONFIRMATION: 1,
-            StoryWorkspaceDreamRunLifecycle.CONTINUING: 2,
+            StoryWorkspaceDreamRunLifecycle.RUNNING: 2,
             StoryWorkspaceDreamRunLifecycle.RECENT: 3,
         }[lifecycle]
 

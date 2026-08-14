@@ -11,14 +11,19 @@
 // [Sync] 2026-07-20: i18n — submit/cancel defaults and form copy (header, select placeholder,
 //        fallback question, Yes option) resolve through chat.toolConfirmation / chat.askUser
 //        namespaces (en + zh) via useTranslation.
+// [Sync] 2026-08-13: compact unframed forms scroll only their question body so the submit
+//                    and cancel actions remain visible in height-constrained Dream rails.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconCheck, IconX } from './Icons';
+import {
+  normalizeMultiSelectAnswer,
+  questionAnswerIsPresent,
+  questionOptionValue,
+  type QuestionOption,
+} from './askUserQuestionAnswers';
 
-export type QuestionOption =
-  | string
-  | { value: string; label: string }
-  | { label: string; description?: string; value?: string };
+export type { QuestionOption } from './askUserQuestionAnswers';
 
 export interface QuestionField {
   id?: string;
@@ -28,7 +33,7 @@ export interface QuestionField {
   type?: 'text' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'number';
   options?: QuestionOption[];
   required?: boolean;
-  default?: string | number | boolean;
+  default?: string | number | boolean | string[];
   placeholder?: string;
   description?: string;
   multiSelect?: boolean;
@@ -128,7 +133,8 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
     const initial: Record<string, unknown> = {};
     questions.forEach((question) => {
       const key = question.question || question.id || 'answer';
-      if (question.default !== undefined) initial[key] = question.default;
+      if (question.multiSelect) initial[key] = normalizeMultiSelectAnswer(question.default);
+      else if (question.default !== undefined) initial[key] = question.default;
       else if (question.type === 'checkbox') initial[key] = false;
       else initial[key] = '';
     });
@@ -140,7 +146,9 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
       const next: Record<string, unknown> = {};
       questions.forEach((question) => {
         const key = question.question || question.id || 'answer';
-        next[key] = current[key] ?? (question.default ?? (question.type === 'checkbox' ? false : ''));
+        next[key] = current[key] ?? (question.multiSelect
+          ? normalizeMultiSelectAnswer(question.default)
+          : (question.default ?? (question.type === 'checkbox' ? false : '')));
       });
       return next;
     });
@@ -153,40 +161,43 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
   const getCleanAnswers = useCallback(() => {
     const cleaned: Record<string, unknown> = {};
     Object.entries(answers).forEach(([key, value]) => {
-      if (value !== '' && value !== undefined && value !== null) {
+      if (value !== '' && value !== undefined && value !== null && (!Array.isArray(value) || value.length > 0)) {
         cleaned[key] = value;
       }
     });
     return cleaned;
   }, [answers]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-        event.preventDefault();
-        onSubmit(getCleanAnswers());
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCancel();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [getCleanAnswers, onCancel, onSubmit]);
-
   const isValid = useMemo(() => {
     return questions.every((question) => {
       if (!question.required) return true;
       const key = question.question || question.id || 'answer';
-      const value = answers[key];
-      return value !== undefined && value !== null && value !== '';
+      return questionAnswerIsPresent(answers[key], question.multiSelect === true);
     });
   }, [answers, questions]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (isValid) onSubmit(getCleanAnswers());
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onCancel();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+  }, [getCleanAnswers, isValid, onCancel, onSubmit]);
+
   return (
-    <div style={framed ? { overflow: 'hidden', borderRadius: '14px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)' } : { width: '100%' }}>
+    <div style={framed
+      ? { overflow: 'hidden', borderRadius: '14px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)' }
+      : { width: '100%', minHeight: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {framed && showHeader ? (
         <div style={{ padding: '0.95rem 1rem', borderBottom: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -197,27 +208,87 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
         </div>
       ) : null}
 
-      <form onSubmit={(event) => { event.preventDefault(); onSubmit(getCleanAnswers()); }} style={{ padding: framed ? (compact ? '0.75rem' : '1rem') : 0, display: 'flex', flexDirection: 'column', gap: formGap }}>
-        {questions.map((question, index) => {
+      <form
+        onSubmit={(event) => { event.preventDefault(); onSubmit(getCleanAnswers()); }}
+        style={{
+          padding: framed ? (compact ? '0.75rem' : '1rem') : 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: formGap,
+          minHeight: framed ? undefined : 0,
+          flex: framed ? undefined : '1 1 auto',
+          overflow: framed ? undefined : 'hidden',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: formGap,
+            minHeight: framed ? undefined : 0,
+            flex: framed ? undefined : '1 1 auto',
+            overflowY: framed ? undefined : 'auto',
+            overscrollBehavior: framed ? undefined : 'contain',
+            paddingRight: framed ? undefined : '0.15rem',
+          }}
+        >
+          {questions.map((question, index) => {
           const answerKey = question.question || question.id || `q${index}`;
           const fieldId = question.id || `q${index}`;
           const value = answers[answerKey];
 
           return (
             <div key={fieldId} style={{ display: 'flex', flexDirection: 'column', gap: questionGap }}>
-              <label htmlFor={fieldId} style={{ fontSize: labelFontSize, fontWeight: 600, color: 'var(--color-text-primary)' }}>
+              <label id={`${fieldId}-label`} htmlFor={question.multiSelect ? undefined : fieldId} style={{ fontSize: labelFontSize, fontWeight: 600, color: 'var(--color-text-primary)' }}>
                 {question.question}
                 {question.required ? <span style={{ color: 'var(--color-state-danger)', marginLeft: '0.25rem' }}>*</span> : null}
               </label>
               {question.description ? <p style={{ margin: 0, fontSize: descriptionFontSize, color: 'var(--color-text-muted)' }}>{question.description}</p> : null}
 
-              {question.type === 'textarea' ? (
+              {question.multiSelect && question.options ? (
+                <div
+                  role="group"
+                  aria-labelledby={`${fieldId}-label`}
+                  style={{ display: 'flex', flexDirection: 'column', gap: compact ? '0.3rem' : '0.5rem' }}
+                >
+                  {question.options.map((option, optionIndex) => {
+                    const optionValue = questionOptionValue(option);
+                    const optionLabel = typeof option === 'string' ? option : option.label;
+                    const optionDescription = typeof option === 'string' ? undefined : ('description' in option ? option.description : undefined);
+                    const selectedValues = normalizeMultiSelectAnswer(value);
+                    const optionId = `${fieldId}-${optionIndex}`;
+                    return (
+                      <label key={`${optionValue}-${optionIndex}`} htmlFor={optionId} style={{ display: 'flex', alignItems: compact ? 'center' : undefined, gap: compact ? '0.5rem' : '0.75rem', padding: compact ? '0.4rem 0.6rem' : '0.7rem 0.85rem', borderRadius: compact ? '8px' : '10px', background: 'var(--color-bg-surface)', cursor: 'pointer' }}>
+                        <input
+                          id={optionId}
+                          type="checkbox"
+                          name={fieldId}
+                          value={optionValue}
+                          checked={selectedValues.includes(optionValue)}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? [...selectedValues, optionValue]
+                              : selectedValues.filter((selected) => selected !== optionValue);
+                            handleChange(answerKey, next);
+                          }}
+                          disabled={isProcessing}
+                          style={compact ? { margin: 0 } : undefined}
+                        />
+                        <span>
+                          <span style={{ display: 'block', fontSize: compact ? '0.82rem' : '0.9rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>{optionLabel}</span>
+                          {optionDescription ? <span style={{ display: 'block', marginTop: '0.15rem', fontSize: descriptionFontSize, color: 'var(--color-text-muted)' }}>{optionDescription}</span> : null}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : question.type === 'textarea' ? (
                 <textarea id={fieldId} value={String(value || '')} onChange={(event) => handleChange(answerKey, event.target.value)} placeholder={question.placeholder} rows={compact ? 3 : 4} style={{ ...effectiveFieldStyle, resize: 'vertical' }} required={question.required} disabled={isProcessing} />
               ) : question.type === 'select' && question.options ? (
                 <select id={fieldId} value={String(value || '')} onChange={(event) => handleChange(answerKey, event.target.value)} style={effectiveFieldStyle} required={question.required} disabled={isProcessing}>
                   <option value="">{t('chat.askUser.selectOption')}</option>
                   {question.options.map((option) => {
-                    const optionValue = typeof option === 'string' ? option : option.value || option.label;
+                    const optionValue = questionOptionValue(option);
                     const optionLabel = typeof option === 'string' ? option : option.label;
                     return <option key={optionValue} value={optionValue}>{optionLabel}</option>;
                   })}
@@ -225,7 +296,7 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
               ) : question.type === 'radio' && question.options ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? '0.3rem' : '0.5rem' }}>
                   {question.options.map((option) => {
-                    const optionValue = typeof option === 'string' ? option : option.value || option.label;
+                    const optionValue = questionOptionValue(option);
                     const optionLabel = typeof option === 'string' ? option : option.label;
                     const optionDescription = typeof option === 'string' ? undefined : ('description' in option ? option.description : undefined);
                     return (
@@ -251,9 +322,10 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
               )}
             </div>
           );
-        })}
+          })}
+        </div>
 
-        <div style={{ display: 'flex', gap: compact ? '0.5rem' : '0.75rem', paddingTop: compact ? 0 : '0.25rem' }}>
+        <div style={{ display: 'flex', flexShrink: 0, gap: compact ? '0.5rem' : '0.75rem', paddingTop: compact ? 0 : '0.25rem' }}>
           <button type="submit" disabled={isProcessing || !isValid} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', border: 'none', ...buttonStyle, background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontWeight: 600, cursor: isProcessing || !isValid ? 'not-allowed' : 'pointer', opacity: isProcessing || !isValid ? 0.55 : 1 }}>
             <IconCheck style={{ width: compact ? '0.85rem' : '1rem', height: compact ? '0.85rem' : '1rem' }} />
             {resolvedSubmitLabel}

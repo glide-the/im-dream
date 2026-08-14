@@ -3,14 +3,15 @@
 ## Contents
 
 1. [Repository facts](#repository-facts)
-2. [Isolated runtime](#isolated-runtime)
-3. [Authentication and navigation](#authentication-and-navigation)
-4. [Selectors and readiness](#selectors-and-readiness)
-5. [Visual matrix](#visual-matrix)
-6. [SubAgent fixtures](#subagent-fixtures)
-7. [Console and network audit](#console-and-network-audit)
-8. [Cleanup](#cleanup)
-9. [Command reference](#command-reference)
+2. [Dream business concepts and impact scope](#dream-business-concepts-and-impact-scope)
+3. [Runtime lanes](#runtime-lanes)
+4. [Authentication and navigation](#authentication-and-navigation)
+5. [Selectors and readiness](#selectors-and-readiness)
+6. [Visual matrix](#visual-matrix)
+7. [SubAgent fixtures](#subagent-fixtures)
+8. [Console and network audit](#console-and-network-audit)
+9. [Cleanup](#cleanup)
+10. [Command reference](#command-reference)
 
 ## Repository facts
 
@@ -29,7 +30,96 @@
 
 Use `npx playwright test`, not `playwright-cli`. A Codex Playwright/MCP wrapper may be unavailable even while the repository-local package works correctly.
 
-## Isolated runtime
+## Dream business concepts and impact scope
+
+Define the scenario in business terms before opening a browser or invoking a
+model. The following boundaries are independent even when an initial project
+uses the same text for several titles:
+
+| Concept | Authority | Meaning | Primary consumers |
+| --- | --- | --- | --- |
+| Project | `stories/<project-id>/project.yaml` | workspace-level identity; `project_name` is the Project display title | PostgreSQL Story title, Story Index API `projectTitle`, Execution page level-1 heading |
+| Episode | `stories/<project-id>/episodes/<EPxx>/` | one episode's narrative identity and production artifacts | Episode Artifact API, EP navigation, Episode execution heading and readers |
+| Canonical Artifact | files under `stories/` | current Agent-authored business fact | after-turn Hook input |
+| Run-private Artifact | `.dream/runtime/runs/<run-id>/artifact/` plus manifest | immutable-by-client publication of current canonical facts for one Run | server readers, binding, materializer |
+| Story projection | PostgreSQL row materialized from current Project/Episode files | queryable business projection, not a second authoring source | Story Index API and page Project heading |
+| Observer projection | non-controlling workflow/status observation | diagnostics and derived business status only | secondary panels; never canonical files or Agent lifecycle |
+
+The successful main-turn Hook owns deterministic synchronization after any
+Skill or ordinary Agent turn. MCP write/validation tools help the Agent create
+correct files, but they do not replace the Hook and do not prove publication or
+database materialization.
+
+Before test execution, capture a baseline and fill an impact matrix:
+
+| Fact/surface | Baseline | Expected after turn | Classification | Evidence |
+| --- | --- | --- | --- | --- |
+| Project title | current `project_name` | requested Project title | changes | canonical/private SHA, DB, API, page h1 |
+| EPxx title | current Episode artifact title | same unless explicitly requested | must remain unchanged | Episode files/API/page heading |
+| Thread/session | current ids | same ids with a new turn | must remain unchanged | persisted thread and Claude session |
+| Other Episodes/assets | current revisions | same unless explicitly requested | out of scope | manifest/revisions |
+
+Never write an assertion against the phrase “the title” without first mapping
+it to Project or a named Episode. In the current Workbench contract, a request
+to change the project title maps to `project.yaml.project_name`; it must update
+the Project consumers but leave EP01 narrative content unchanged. If a user
+intends a series-wide or Episode rewrite, the dialogue and expected artifact
+set must say so explicitly.
+
+## Runtime lanes
+
+### Real business lane
+
+When the user asks for real data, a real model, or an existing Run, use the
+normal local Dream, Admin, Gateway, PostgreSQL, named account, installed Deck,
+and public UI/API path. Confirm ownership read-only before interaction. Do not
+clone files or databases, stage a lookalike Run, or use an isolated receipt that
+cannot be found in the user's normal Admin.
+
+Define the expected dialogue before execution:
+
+| Turn | Visible user request | Agent/tool expectation | Canonical and Hook expectation | DB/API expectation | Visible page expectation | Must remain unchanged |
+|---|---|---|---|---|---|---|
+| 1 | Realistic business mutation | Same Thread resumes; only expected tools are confirmed | Canonical fact changes; Hook publishes current facts | Authoritative projection reflects the change | Actual consumer route shows the new value | all out-of-scope Project/Episode facts |
+| 2 | Follow-up correction or continuation | Prior context is understood without restating the story | Hook republishes or performs an idempotent no-op | Projection remains revision-consistent | Reloaded page remains correct | thread/session identity |
+| 3 | Read-only continuity question | Workbench context is read again; no write confirmation | No file or revision mutation | DB/API facts remain unchanged | Project and Episode semantics remain visible | all files and revisions |
+
+After each Agent terminal, validate that row before sending the next message.
+Matching canonical and private SHA values proves only the file boundary; the
+database-backed API and actual consumer page must also pass.
+
+The visible utterance column must contain normal page language, for example
+“加一个叫小岚的场记”“把刚才的雨棚写成雨夜”“删掉刚才那个人物”“第一集最后那个镜头不要
+了”. It must not contain an Agent-facing `char_id`, `scene_id`, `shot_id`,
+absolute path, filename, contract-read instruction, exact `rm` command, Hook,
+or `.dream` implementation detail. Discover those facts after the first turn
+and use them only in assertions or confirmation allowlisting.
+
+For character/scene/prop/storyboard collaboration, define the entire conversation
+before the first browser action. The minimum complete journey is:
+
+1. add one uniquely named temporary character, one temporary scene, one
+   temporary prop, and one temporary storyboard shot that references them;
+2. update all four while retaining their canonical IDs and paths;
+3. request deletion while references exist and verify the Agent removes or
+   resolves references atomically (or asks a visible clarification question);
+4. delete the remaining temporary shot/assets and prove the baseline has been
+   restored.
+
+For file deletion, require the matching Bash invocation to finish with
+`output-available` and zero exit status before accepting canonical absence.
+This catches the case where `rm` executes but Claude Code later reports a
+`cwd-*` shell-hook error; the UI must never tell a user that such a turn
+succeeded or failed inconsistently with its persisted tool receipt.
+
+After every turn, inspect the persisted assistant tool parts and require Reads
+of both `.dream/WORKBENCH.md` and `.dream/ASSET-COLLABORATION.md`. Then compare
+canonical files, Hook stage revisions, the authenticated `dream-files` API,
+and the visible Execution Assets/Outline views. Do not postpone all assertions
+until the final cleanup turn. Real-data cleanup must be another visible Agent
+turn on the same Thread, never a direct filesystem or SQL rewrite.
+
+### Technical isolated lane
 
 Use a temp database because `/api/register`, thread creation, Deck binding, and preferences mutate SQLite. Use a temp Agent root because workspace lookup depends on the backend process environment.
 
@@ -59,7 +149,9 @@ lsof -nP -iTCP:5173 -sTCP:LISTEN
 
 If a port is occupied, inspect the PID, command, and working directory. Reuse it only when its database/workspace configuration matches the test. Otherwise stop it only with clear ownership.
 
-For tests intended to exercise the user's normal development database, obtain explicit authorization; isolation is the default.
+Use this lane only for provider-free repeatable contracts, destructive cases,
+migrations, or fault injection. Never report it as real business or real-model
+acceptance.
 
 ## Authentication and navigation
 
@@ -109,6 +201,13 @@ Selector priority:
 
 Avoid `force: true`. It hides overlays, stale state, and layout defects. Keyboard activation is acceptable when it is the intended accessibility path or the known Writing overlay is irrelevant to the feature.
 
+For headed QA, declare both a bounded Chromium outer window and a deterministic
+content viewport that fit the current desktop. Do not rely on maximize or zoom.
+Assert `document.documentElement.scrollWidth <= clientWidth + 1` and require the
+scenario heading, primary action, and any blocking dialog to be in the viewport
+before interacting with them. A panel's intentional internal vertical scroll is
+not a failure.
+
 Use web-first assertions:
 
 ```ts
@@ -117,6 +216,34 @@ await page.getByTitle('Subagents').click();
 await expect(page.locator('[data-subagent-view="list"]')).toBeVisible();
 await expect(page.getByTitle('Subagents')).toHaveAttribute('aria-expanded', 'true');
 ```
+
+### Human business journey rule
+
+Structure business E2E cases in the order a normal user experiences them:
+
+1. Open the visible feature page and confirm its identity.
+2. Make required choices with labeled controls.
+3. Enter realistic business input and submit through the visible primary action.
+4. Observe the visible running state, streamed output, confirmation, or other
+   progress the user relies on.
+5. If a visible tool confirmation blocks the turn, identify the displayed tool
+   and use the labeled controls to make the scenario's explicit decision. Never
+   approve an unknown/Bash/network operation merely to advance the test, and do
+   not answer AskUserQuestion without case-specific input.
+6. Treat the visible Agent/Thread stop as terminal and immediately inspect the
+   resulting business state.
+7. Use authenticated API reads only to corroborate Thread identity,
+   persistence, workflow state, or artifacts behind the already-exercised UI.
+8. For each visible mutation, assert the canonical source, after-turn Hook,
+   private publication when present, PostgreSQL projection, public API, and the
+   final consuming page before continuing to the next dialogue.
+
+For Dream, if the shared Thread has at least one completed turn and
+`running=false`, do not keep polling characters/scenes/storyboards merely
+because FastAPI, Vite, Admin, PostgreSQL, or an SSE reconnect loop is alive.
+Assert the currently visible/persisted stages immediately; incomplete output is
+a business failure. A fixed sleep or a longer Artifact timeout cannot convert a
+stopped Agent into a running Dream workflow.
 
 For a 250ms sidebar width transition, wait on the semantic state first, then poll until two consecutive bounding-box widths are equal. A bounded delay of about 350ms is an acceptable fallback after the semantic assertion; long sleeps are not a readiness strategy.
 
