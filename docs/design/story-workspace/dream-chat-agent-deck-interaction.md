@@ -76,7 +76,9 @@ Dream 无选中 Run 时只保留三段：
 2. **社区卡组（N）**：真实可收藏 Deck 接口返回“配置指定的活动系统默认 Deck + 其他用户公开
    Deck”。系统默认项显示 `System default Deck` 来源标签，即使其兼容类型仍为 `chat` 也在这里
    展示，安装后继续沿用既有 fork 与 Dream 类型绑定路径。N 为实际结果长度；接口无结果时显示
-   空状态，不造假卡片。
+   空状态，不造假卡片。若本地 PostgreSQL 尚未发布共享系统模板，则使用用户 Deck 接口中服务端
+   标记为 `publish_block_reason=default_initialized` 的当前账号默认 Deck 作为展示回退；该项直接
+   “在 Chat 中使用”，不 fork 自己，也不根据 Deck 名称推断身份。
 3. **我的 Dream**：复用 actor-scoped re-entry 接口和既有详情路由，只展示 Dream 领域真实存在的
    `初始状态 / 进行中` 两态。生成中或等待确认属于初始状态；确认后执行中或最近活动属于进行中。底层 Workflow
    终态不扩展为 Dream 页面中的“完成/失败”业务状态。

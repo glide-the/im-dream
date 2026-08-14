@@ -43,14 +43,16 @@ const dreamDeck = {
   }],
 };
 
-const systemDefaultDeck = {
+const actorSystemDefaultDeck = {
   ...dreamDeck,
-  id: 'screenplay-system-default-e2e',
+  id: 'screenplay-actor-default-e2e',
   name: '剧本创作团队',
   name_zh: '剧本创作团队',
   description: '覆盖剧情、结构、人物、对白和连续性的剧本创作角色。',
-  is_system: true,
-  agent_type: 'chat',
+  is_system: false,
+  publish_block_reason: 'default_initialized',
+  can_publish: false,
+  agent_type: 'dream',
   agent_type_revision: 0,
   voices: [],
 };
@@ -141,11 +143,14 @@ test('Dream active Deck context → workbench → Chat active tab → production
     if (pathname === '/api/system-config') return route.fulfill({ json: { data: { im_full_access_enabled: false, workspace_enabled: false } } });
     if (pathname === '/api/decks' && request.method() === 'GET') {
       const decks = url.searchParams.get('published') === 'true'
-        ? [systemDefaultDeck, dreamDeck]
-        : [dreamDeck];
+        ? [dreamDeck]
+        : [actorSystemDefaultDeck, dreamDeck];
       return route.fulfill({ json: { decks } });
     }
     if (pathname === `/api/decks/${dreamDeck.id}` && request.method() === 'GET') return route.fulfill({ json: dreamDeck });
+    if (pathname === `/api/decks/${actorSystemDefaultDeck.id}` && request.method() === 'GET') {
+      return route.fulfill({ json: actorSystemDefaultDeck });
+    }
     if (pathname === '/api/claude-plugins/installations') return route.fulfill({ json: { installations: [] } });
     if (pathname === `/api/decks/${dreamDeck.id}/claude-plugins`) return route.fulfill({ json: { deck_id: dreamDeck.id, refs: [] } });
     if (pathname === '/api/claude-agent/threads' && request.method() === 'GET') return route.fulfill({ json: { threads: [] } });
@@ -240,6 +245,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(page.getByRole('heading', { name: '社区卡组（2）' })).toBeVisible();
   await expect(page.getByText('System default Deck', { exact: true })).toBeVisible();
   await expect(page.getByText('剧本创作团队', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '在 Chat 中使用' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '我的 Dream' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '进行中', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '初始状态', exact: true })).toBeVisible();

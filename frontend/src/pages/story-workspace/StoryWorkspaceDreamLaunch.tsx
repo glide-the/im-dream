@@ -8,6 +8,8 @@
 // [Sync] 2026-08-14: group My Dream by the real initial/in-progress phase only.
 // [Sync] 2026-08-14: simplify the active section to a borderless three-item preview with explicit reveal.
 // [Sync] 2026-08-14: include and label the server-projected system default in Community Decks.
+// [Sync] 2026-08-14: fall back to the actor's server-identified initialized default
+//                    when the shared system template row is not published locally.
 
 import { useEffect, useMemo, useState } from 'react';
 import { forkDeck, listDecks, type Deck } from '../../api/voiceApi';
@@ -144,6 +146,10 @@ function deckMonogram(deck: Deck): string {
   return icon && Array.from(icon).length <= 2 ? icon : Array.from(deckDisplayName(deck))[0] || '✦';
 }
 
+function isSystemDefaultDeck(deck: Deck): boolean {
+  return deck.is_system || deck.publish_block_reason === 'default_initialized';
+}
+
 function DreamDeckCard({
   deck,
   action,
@@ -161,8 +167,8 @@ function DreamDeckCard({
       <div className="story-workspace-dream-home__deck-copy">
         <strong>{deckDisplayName(deck)}</strong>
         <span>{deck.description_zh || deck.description || '使用这个 Deck 在 Chat 中开始 Dream。'}</span>
-        {deck.is_system ? <small>System default Deck</small> : null}
-        {!deck.is_system && deck.author_name ? <small>{deck.author_name}</small> : null}
+        {isSystemDefaultDeck(deck) ? <small>System default Deck</small> : null}
+        {!isSystemDefaultDeck(deck) && deck.author_name ? <small>{deck.author_name}</small> : null}
       </div>
       <button disabled={pending} onClick={action} type="button">
         {pending ? '处理中…' : actionLabel}
@@ -226,10 +232,20 @@ export function StoryWorkspaceDreamLaunch({
   const loadCommunityDecks = () => {
     setCommunityLoading(true);
     setCommunityError(null);
-    void listDecks(true).then((decks) => {
-      setCommunityDecks(decks.filter(
-        (deck) => deck.enabled && (deck.is_system || deck.agent_type === 'dream'),
-      ));
+    void Promise.all([listDecks(true), listDecks()]).then(([collectableDecks, actorDecks]) => {
+      const sharedSystemDefault = collectableDecks.find(
+        (deck) => deck.enabled && deck.is_system,
+      );
+      const actorSystemDefault = actorDecks.find(
+        (deck) => deck.enabled && deck.publish_block_reason === 'default_initialized',
+      );
+      const systemDefault = sharedSystemDefault ?? actorSystemDefault;
+      const publishedDreamDecks = collectableDecks.filter(
+        (deck) => deck.enabled && !deck.is_system && deck.agent_type === 'dream',
+      );
+      setCommunityDecks(systemDefault
+        ? [systemDefault, ...publishedDreamDecks]
+        : publishedDreamDecks);
     }).catch(() => setCommunityError('社区卡组暂时无法加载，请重试。'))
       .finally(() => setCommunityLoading(false));
   };
@@ -298,8 +314,18 @@ export function StoryWorkspaceDreamLaunch({
           <div className="story-workspace-dream-home__deck-grid">
             {communityDecks.map((deck) => (
               <DreamDeckCard
-                action={() => void installCommunityDeck(deck)}
-                actionLabel="安装并使用"
+                action={() => {
+                  if (!deck.is_system && deck.publish_block_reason === 'default_initialized') {
+                    openChat(deck.id);
+                    return;
+                  }
+                  void installCommunityDeck(deck);
+                }}
+                actionLabel={
+                  !deck.is_system && deck.publish_block_reason === 'default_initialized'
+                    ? '在 Chat 中使用'
+                    : '安装并使用'
+                }
                 deck={deck}
                 key={deck.id}
                 pending={installingDeckId === deck.id}

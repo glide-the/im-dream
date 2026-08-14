@@ -3,6 +3,7 @@
 // [Pos] Story Workspace Dream launch layout seam test (Task 3 U4)
 // [Sync] 2026-08-14: lock the borderless three-item active preview and explicit reveal control.
 // [Sync] 2026-08-14: lock system-default inclusion and visible provenance in Community Decks.
+// [Sync] 2026-08-14: lock the actor-default fallback when no shared system row exists.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -122,8 +123,11 @@ test('Dream launch surface follows the shared dark theme canvas and action contr
 
 test('Dream community count is real and installation preserves Dream type', () => {
   expect(LAUNCH_SOURCE).toContain('社区卡组（{communityDecks.length}）');
-  expect(LAUNCH_SOURCE).toContain("deck.enabled && (deck.is_system || deck.agent_type === 'dream')");
+  expect(LAUNCH_SOURCE).toContain('Promise.all([listDecks(true), listDecks()])');
+  expect(LAUNCH_SOURCE).toContain("deck.publish_block_reason === 'default_initialized'");
+  expect(LAUNCH_SOURCE).toContain('const systemDefault = sharedSystemDefault ?? actorSystemDefault');
   expect(LAUNCH_SOURCE).toContain('<small>System default Deck</small>');
+  expect(LAUNCH_SOURCE).toContain("? '在 Chat 中使用'");
   expect(LAUNCH_SOURCE).toContain("await updateDeckAgentType(installed.deck_id, 'dream', 0)");
   expect(LAUNCH_SOURCE).not.toContain('社区卡组（0）');
 });
