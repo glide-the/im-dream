@@ -7,6 +7,12 @@ with the Agent in one canonical Thread, inspect Project/Episode outputs, edit
 bounded business data, confirm a reviewed result and continue with authorized
 Dreamflow actions without losing identity or revision context.
 
+Authenticated root entry is Chat-first: `/` is replaced with
+`/story-workspace/chat`, while explicit authorized deep links keep their target.
+The current primary sidebar exposes Chat, Dream and Decks in that order. Legacy
+Writing, Timeline and Analysis routes remain implemented but their sidebar
+entries are temporarily hidden.
+
 ## Roles
 
 - Creator: owns Workspaces, Threads and Dream Workflow Runs; reads/writes the

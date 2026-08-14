@@ -1,9 +1,22 @@
 #!/usr/bin/env python3
-"""Test deck and voice API endpoints with authentication."""
+# [Input] Explicit opt-in live backend at 127.0.0.1:8765 and its named test account.
+# [Output] Destructive Deck/Voice HTTP lifecycle smoke test with final cleanup.
+# [Pos] Manually enabled live API harness in backend/tests
+# [Sync] 2026-08-14: exclude the stateful live-server script from default pytest;
+#                    the isolated Deck-default contract and browser journey own CI coverage.
+"""Test Deck and Voice API endpoints against an explicitly selected live backend."""
 
 import requests
 import json
 import os
+
+import pytest
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("INK_RUN_LIVE_API_TESTS") != "1",
+    reason="stateful live API smoke test requires INK_RUN_LIVE_API_TESTS=1",
+)
 
 # Disable proxy for local testing
 os.environ.pop('http_proxy', None)
@@ -54,7 +67,7 @@ def test_api_endpoints():
     headers = {"Authorization": f"Bearer {token}"}
     print(f"Token: {token[:20]}...\n")
 
-    # Step 2: List decks (should see 3 system decks)
+    # Step 2: List Decks (should include the screenplay-creation default)
     print("--- Step 2: List decks ---")
     response = requests.get(f"{BASE_URL}/api/decks", headers=headers)
     assert response.status_code == 200, f"Expected 200, got {response.status_code}"

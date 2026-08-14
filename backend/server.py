@@ -15,6 +15,7 @@
 # [Sync] 2026-07-04: register the Notion resource connector router so connector
 #                    auth, discovery, selection, and canonical snapshot sync
 #                    endpoints are exposed alongside the rest of the backend API.
+# [Sync] 2026-08-14: the mounted Deck router includes explicit default-plugin reconciliation.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os

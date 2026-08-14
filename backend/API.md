@@ -7,6 +7,8 @@
 [Sync] 2026-06-21: document system-config sandbox network policy fields.
 [Sync] 2026-06-23: document Google OAuth, auth cookie aliases, and OAuth Device Flow endpoints.
 [Sync] 2026-08-14: document transactional default Free provisioning and Admin-default model resolution for email and Google registration.
+[Sync] 2026-08-14: document screenplay-only Deck visibility and atomic drama-forge v1.0.1 binding on Deck creation.
+[Sync] 2026-08-14: document explicit zero-ref default screenplay Deck reconciliation.
 -->
 
 **Version:** 2.0.0
@@ -961,6 +963,56 @@ Get default voice configurations (no auth required).
   ...
 }
 ```
+
+---
+
+## Deck Endpoints
+
+### GET `/api/decks`
+
+Returns the authenticated user's Decks and Voices. The active product default is
+the five-role screenplay-creation Deck. Untouched forks of the retired
+introspection, scholar, and philosophy system defaults are omitted; user-created
+Decks and retired forks with Deck- or Voice-level local changes remain visible.
+
+### POST `/api/decks`
+
+Creates a user Deck and binds the configured default Claude plugin in one
+PostgreSQL transaction. The browser submits only Deck display fields; the server
+resolves the exact configured package/version (default `drama-forge` `1.0.1`),
+requires a ready installation, and verifies artifact digest and Claude CLI
+compatibility before committing the Deck and plugin reference.
+
+**Response:**
+```json
+{
+  "deck_id": "c6654ae3-3de5-4ab9-b882-c9034a0d8fa6"
+}
+```
+
+**Errors:**
+- `409` - The configured default plugin is missing, not ready, digest-invalid,
+  incompatible, or changes before the transaction commits. No Deck is created.
+
+### POST `/api/decks/defaults/reconcile`
+
+Idempotently repairs an existing untouched screenplay default Deck when, and
+only when, it has no Claude plugin references. The backend resolves and verifies
+the configured `drama-forge` `1.0.1` installation before the transaction. Any
+existing plugin ref preserves the user's selection and prevents repair.
+
+**Response:**
+```json
+{
+  "deck_id": "c1b3ecf1-5fca-4a51-8806-202f19bef348",
+  "reconciled": true,
+  "reason": "missing_ref"
+}
+```
+
+`reason` is one of `missing_ref`, `refs_preserved`, or `default_not_found`.
+Returns `409` when the configured installation cannot be verified; Deck and
+existing refs remain unchanged.
 
 ---
 

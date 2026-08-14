@@ -18,6 +18,8 @@
 // [Sync] 2026-07-07: route the connector entry into ChatView so the connector workbench lives under the chat shell instead of a standalone page.
 // [Sync] 2026-07-07: mount ChatView in a fixed flex viewport so embedded connector panels cannot force page-level overflow.
 // [Sync] 2026-07-08: route Connector navigation to Settings resource-link management and keep Chat on the lightweight landing panel only.
+// [Sync] 2026-08-14: replace the authenticated root entry with canonical Story Workspace Chat
+//                    while preserving explicit deep links and browser history semantics.
 // [Sync] 2026-08-14: defer authenticated Deck voice loading until registration/login completes.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -185,6 +187,17 @@ export default function App() {
   //                    replaces the whole Settings viewport instead of expanding inline within the
   //                    resource-link card, matching the connector interaction design's page navigation.
   const [showNotionConnectorDetail, setShowNotionConnectorDetail] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!isAuthenticated || isDeviceVerificationRoute || window.location.pathname !== '/') return;
+    window.history.replaceState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      STORY_WORKSPACE_PATHS.chat,
+    );
+    setStoryWorkspaceLegacyView(null);
+    setCurrentView('story-workspace');
+  }, [isAuthenticated, isDeviceVerificationRoute]);
 
   const openConnectorSettings = useCallback(() => {
     window.history.pushState(
@@ -1617,7 +1630,7 @@ export default function App() {
           transform: storyWorkspaceLegacyView === 'writing' ? 'translateZ(0)' : undefined,
           paddingTop: storyWorkspaceLegacyView === 'writing' ? 0 : mobileTopInset,
           paddingBottom: writingBottomPadding,  // @@@ Space for fixed stats bar + mobile nav
-          fontFamily: 'system-ui, -apple-system, sans-serif',
+          fontFamily: 'var(--font-family-ui)',
           boxSizing: 'border-box'
         }}>
           {/* New Session "+" button - top left (desktop only) */}

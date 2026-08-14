@@ -1,19 +1,20 @@
 // [Input] Current Story Workspace path, navigation callbacks, collapse state, and the existing auth context.
-// [Output] Render the collapsible desktop Story Workspace navigation sidebar.
+// [Output] Render the collapsible desktop Story Workspace navigation sidebar with
+//          Chat, Dream, and Decks as the current primary-entry order.
 // [Pos] Story Workspace left layout region.
+// [Sync] 2026-08-14: temporarily hide Writing, Timeline, and Analysis entries while
+//                    retaining their routes and content for authorized deep links.
+// [Sync] 2026-08-14: order visible entries as Chat, Dream, then Decks.
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { IconType } from 'react-icons';
 import {
   FaBookOpen,
-  FaChartLine,
   FaChevronLeft,
   FaChevronRight,
   FaComments,
   FaCog,
   FaMoon,
-  FaPenNib,
-  FaStream,
   FaSun,
   FaThLarge,
   FaUserCircle,
@@ -22,12 +23,9 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { getTheme, onThemeChange, toggleTheme } from '../../../utils/theme';
 
 const storyWorkspaceMainNavPaths = {
-  writing: '/story-workspace/writing',
-  timeline: '/story-workspace/timeline',
-  analysis: '/story-workspace/analysis',
-  decks: '/story-workspace/decks',
-  dream: '/story-workspace/dream',
   chat: '/story-workspace/chat',
+  dream: '/story-workspace/dream',
+  decks: '/story-workspace/decks',
 } as const;
 
 export interface StoryWorkspaceSidebarProps {
@@ -95,7 +93,7 @@ export function StoryWorkspaceSidebar({
           box-sizing: border-box;
           color: var(--color-text-body);
           background: var(--color-bg-paper);
-          font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          font-family: var(--font-family-ui);
           transition: width 180ms ease, min-width 180ms ease, padding 180ms ease;
         }
 
@@ -406,12 +404,9 @@ export function StoryWorkspaceSidebar({
 
       <nav aria-label="Story Workspace 导航" className="story-workspace-sidebar__nav">
         {([
-          { icon: FaPenNib, label: t('nav.writing'), view: 'writing', path: storyWorkspaceMainNavPaths.writing },
-          { icon: FaStream, label: t('nav.timeline'), view: 'timeline', path: storyWorkspaceMainNavPaths.timeline },
-          { icon: FaChartLine, label: t('nav.analysis'), view: 'analysis', path: storyWorkspaceMainNavPaths.analysis },
-          { icon: FaThLarge, label: t('nav.decks'), view: 'decks', path: storyWorkspaceMainNavPaths.decks },
-          { icon: FaBookOpen, label: t('nav.dream'), view: 'dream', path: storyWorkspaceMainNavPaths.dream },
           { icon: FaComments, label: t('nav.chat'), view: 'chat', path: storyWorkspaceMainNavPaths.chat },
+          { icon: FaBookOpen, label: t('nav.dream'), view: 'dream', path: storyWorkspaceMainNavPaths.dream },
+          { icon: FaThLarge, label: t('nav.decks'), view: 'decks', path: storyWorkspaceMainNavPaths.decks },
         ] as const).map((item) => {
           const isCurrent = currentPath === item.path;
           const Icon = item.icon as IconType;

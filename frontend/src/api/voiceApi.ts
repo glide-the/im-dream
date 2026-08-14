@@ -9,6 +9,7 @@
 // [Sync] 2026-06-12: consume centralized runtime API_BASE for cross-origin deployments.
 // [Sync] 2026-06-25: Reflections analysis now uses backend Reflections-agent tasks:
 //         POST task(auto_start=false) → subscribe SSE → POST start → stream events → fetch results.
+// [Sync] 2026-08-14: add explicit default screenplay Deck plugin reconciliation.
 /**
  * API client for voice analysis backend - FastAPI sync API version
  * [Sync] 2026-06-01: normalize user_sessions.labels in session API responses for frontend display.
@@ -1257,6 +1258,28 @@ export async function listDecks(published?: boolean): Promise<Deck[]> {
 
   const data = await response.json();
   return data.decks;
+}
+
+/**
+ * Reconcile a legacy untouched screenplay default whose plugin refs are empty.
+ * Existing user selections are preserved by the backend.
+ */
+export async function reconcileDefaultDeckPlugin(): Promise<{
+  deck_id: string | null;
+  reconciled: boolean;
+  reason: 'missing_ref' | 'refs_preserved' | 'default_not_found';
+}> {
+  const response = await fetch(`${API_BASE}/api/decks/defaults/reconcile`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Reconcile default Deck plugin failed');
+  }
+
+  return await response.json();
 }
 
 /**

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# [Input] Consume auth/database modules and shared current-user dependency.
+# [Input] Consume auth/database modules, Deck-default provisioning service, and
+#         shared current-user dependency.
 # [Output] Register authentication, logout, current-user, and first-login
 #          import routes; registration commits with Admin-owned default Free
 #          provisioning or fails closed.
@@ -9,6 +10,7 @@
 #                    Device Flow token clients while keeping /api/me.
 # [Sync] 2026-08-14: map transactional user/default-Free provisioning failure
 #                    to a retryable 503 instead of an email-conflict 400.
+# [Sync] 2026-08-14: provision new/empty accounts with the verified default Deck plugin.
 
 from typing import Optional
 
@@ -17,6 +19,11 @@ from pydantic import BaseModel
 
 import auth
 import database
+
+try:
+    from services.deck.defaults import provision_default_screenplay_deck
+except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+    from backend.services.deck.defaults import provision_default_screenplay_deck
 
 from .deps import get_current_user
 
@@ -79,7 +86,7 @@ def register(request: RegisterRequest):
             detail="Registration service is temporarily unavailable",
         ) from None
 
-    database.auto_fork_system_decks(user_id)
+    provision_default_screenplay_deck(user_id)
     token = auth.create_access_token(user_id, request.email)
 
     return {
@@ -108,7 +115,7 @@ def login(request: LoginRequest):
 
     user_decks = database.get_user_decks(user["id"])
     if len(user_decks) == 0:
-        database.auto_fork_system_decks(user["id"])
+        provision_default_screenplay_deck(user["id"])
 
     token = auth.create_access_token(user["id"], user["email"])
 

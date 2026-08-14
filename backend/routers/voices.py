@@ -1,13 +1,33 @@
 #!/usr/bin/env python3
-# [Input] Consume database deck/voice APIs and shared auth dependency.
-# [Output] Register /api/decks* and /api/voices* endpoints.
+# [Input] Consume database Deck/Voice APIs, the shared Deck-default service,
+#         and shared auth dependency.
+# [Output] Register /api/decks* and /api/voices* endpoints; new Deck creation
+#          fails closed unless its configured default plugin ref is verified;
+#          default-team repair is explicit and idempotent.
 # [Pos] deck-and-voice route node in backend/routers
 # [Sync] 2026-05-25: extracted deck and voice management routes from backend/server.py.
+# [Sync] 2026-08-14: atomically bind the configured drama-forge version to every
+#                    newly created Deck after ready/digest/CLI verification.
+# [Sync] 2026-08-14: expose transactional default-team plugin reconciliation for existing accounts.
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 import database
+import config
+
+try:
+    from services.deck.defaults import (
+        DefaultDeckPluginUnavailable,
+        reconcile_default_screenplay_deck_plugin,
+        resolve_default_deck_plugin_ref,
+    )
+except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+    from backend.services.deck.defaults import (
+        DefaultDeckPluginUnavailable,
+        reconcile_default_screenplay_deck_plugin,
+        resolve_default_deck_plugin_ref,
+    )
 
 from .deps import get_current_user
 
@@ -77,6 +97,25 @@ def list_decks(published: bool = False, current_user: dict = Depends(get_current
     return {"decks": decks}
 
 
+@router.post("/api/decks/defaults/reconcile")
+def reconcile_deck_defaults(current_user: dict = Depends(get_current_user)):
+    """Repair an untouched screenplay default only when it has zero refs."""
+
+    try:
+        return reconcile_default_screenplay_deck_plugin(current_user["user_id"])
+    except (DefaultDeckPluginUnavailable, ValueError) as exc:
+        if isinstance(exc, ValueError) and str(exc) != "DEFAULT_DECK_PLUGIN_UNAVAILABLE":
+            raise
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Default Deck plugin "
+                f"{config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME} "
+                f"v{config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION} is unavailable"
+            ),
+        ) from None
+
+
 @router.get("/api/decks/{deck_id}")
 def get_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
     """Get deck with all voices"""
@@ -91,19 +130,33 @@ def get_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
 def create_deck(
     request: DeckCreateRequest, current_user: dict = Depends(get_current_user)
 ):
-    """Create a new user deck"""
+    """Create a user Deck with its verified product-default Claude plugin."""
     user_id = current_user["user_id"]
-    deck_id = database.create_deck(
-        user_id,
-        name=request.name,
-        description=request.description,
-        name_zh=request.name_zh,
-        name_en=request.name_en,
-        description_zh=request.description_zh,
-        description_en=request.description_en,
-        icon=request.icon,
-        color=request.color,
-    )
+    try:
+        default_plugin_ref = resolve_default_deck_plugin_ref()
+        deck_id = database.create_deck(
+            user_id,
+            name=request.name,
+            description=request.description,
+            name_zh=request.name_zh,
+            name_en=request.name_en,
+            description_zh=request.description_zh,
+            description_en=request.description_en,
+            icon=request.icon,
+            color=request.color,
+            default_plugin_ref=default_plugin_ref,
+        )
+    except (DefaultDeckPluginUnavailable, ValueError) as exc:
+        if isinstance(exc, ValueError) and str(exc) != "DEFAULT_DECK_PLUGIN_UNAVAILABLE":
+            raise
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Default Deck plugin "
+                f"{config.DEFAULT_DECK_CLAUDE_PLUGIN_PACKAGE_NAME} "
+                f"v{config.DEFAULT_DECK_CLAUDE_PLUGIN_VERSION} is unavailable"
+            ),
+        ) from None
     return {"deck_id": deck_id}
 
 

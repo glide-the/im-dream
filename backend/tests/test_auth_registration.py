@@ -152,7 +152,7 @@ class TestRegistrationProvisioningBoundary(unittest.TestCase):
                 "create_user",
                 side_effect=auth_router.database.UserRegistrationUnavailable(),
             ),
-            mock.patch.object(auth_router.database, "auto_fork_system_decks") as fork,
+            mock.patch.object(auth_router, "provision_default_screenplay_deck") as fork,
         ):
             response = self.client.post(
                 "/api/register",
@@ -189,7 +189,7 @@ class TestRegistrationProvisioningBoundary(unittest.TestCase):
                 "create_user",
                 side_effect=oauth_router.database.UserRegistrationUnavailable(),
             ),
-            mock.patch.object(oauth_router.database, "auto_fork_system_decks") as fork,
+            mock.patch.object(oauth_router, "provision_default_screenplay_deck") as fork,
         ):
             with self.assertRaises(HTTPException) as raised:
                 oauth_router._resolve_oauth_user(

@@ -23,6 +23,12 @@
 #                    subscription/default-model postcondition before commit.
 # [Sync] 2026-08-14: make first-login preference writes a single PostgreSQL
 #                    upsert so concurrent hydration cannot race on the PK.
+# [Sync] 2026-08-14: make screenplay roles the active Deck default, retire
+#                    untouched legacy forks from business reads, and atomically
+#                    persist verified default plugin refs for new Decks.
+# [Sync] 2026-08-14: repair only untouched screenplay defaults with zero plugin
+#                    refs while preserving every explicit user selection.
+# [Sync] 2026-08-14: keep PostgreSQL community Deck aggregation valid by grouping author display names.
 """
 PostgreSQL runtime persistence helpers for Ink & Memory.
 
@@ -368,111 +374,106 @@ def backfill_builtin_deck_plugin_refs(db, builtin_installation_id: str,
 
 
 def seed_system_decks():
-    """Seed system decks and voices. Idempotent - safe to call multiple times."""
-    db = get_db()
+    """Seed only the active screenplay template when invoked explicitly.
 
-    # Check if already seeded
-    existing = db.execute("SELECT COUNT(*) FROM decks WHERE is_system IS TRUE").fetchone()[0]
-    if existing > 0:
-        print("⏭️  System decks already seeded, skipping")
-        db.close()
-        return
+    Runtime startup does not call this helper. Admin/Drizzle remains the owner
+    of shared database rollout; this helper is retained for explicit fixture or
+    import flows that already have the published Deck tables.
+    """
 
-    print("🌱 Seeding system decks...")
-
-    # ========== Deck 1: Introspection Deck ==========
-    db.execute("""
-    INSERT INTO decks (id, name, name_zh, name_en, description, description_zh, description_en, icon, color, is_system, enabled, has_local_changes, order_index)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, ('introspection_deck', '内省卡组', '内省卡组', 'Introspection Deck',
-          '内心对话原型', '内心对话原型', 'Inner dialogue archetypes',
-          'brain', 'purple', True, True, False, 0))
-
-    # Import config to get existing voice prompts
     import config
+
+    template = config.SCREENPLAY_DECK_TEMPLATE
     memory_config_json = _default_memory_workspace_config_json()
-
-    # Introspection voices (from existing VOICE_ARCHETYPES)
-    introspection_voices = [
-        ('holder', config.VOICE_ARCHETYPES['holder']['name'], '接纳者', 'The Holder',
-         config.VOICE_ARCHETYPES['holder']['systemPrompt'], 'heart', 'pink', 0),
-        ('starter', config.VOICE_ARCHETYPES['starter']['name'], '启动者', 'The Starter',
-         config.VOICE_ARCHETYPES['starter']['systemPrompt'], 'fist', 'yellow', 1),
-        ('mirror', config.VOICE_ARCHETYPES['mirror']['name'], '照镜者', 'The Mirror',
-         config.VOICE_ARCHETYPES['mirror']['systemPrompt'], 'eye', 'green', 2),
-        ('weaver', config.VOICE_ARCHETYPES['weaver']['name'], '连接者', 'The Weaver',
-         config.VOICE_ARCHETYPES['weaver']['systemPrompt'], 'compass', 'purple', 3),
-        ('absurdist', config.VOICE_ARCHETYPES['absurdist']['name'], '幽默者', 'The Absurdist',
-         config.VOICE_ARCHETYPES['absurdist']['systemPrompt'], 'masks', 'pink', 4),
-    ]
-
-    for voice_id, name, name_zh, name_en, prompt, icon, color, order in introspection_voices:
-        db.execute("""
-        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index, memory_workspace_config)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s)
-        """, (voice_id, 'introspection_deck', name, name_zh, name_en, prompt, icon, color, True, True, order, memory_config_json))
-
-    # ========== Deck 2: Scholar Deck ==========
-    db.execute("""
-    INSERT INTO decks (id, name, name_zh, name_en, description, description_zh, description_en, icon, color, is_system, enabled, has_local_changes, order_index)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, ('scholar_deck', '学者卡组', '学者卡组', 'Scholar Deck',
-          '从学术角度分析思考', '从学术角度分析思考', 'Analyze from academic perspectives',
-          'lightbulb', 'blue', True, True, False, 1))
-
-    # Scholar voices (placeholder prompts - TODO: write detailed prompts)
-    scholar_voices = [
-        ('linguist', '语言学家', '语言学家', 'Linguist',
-         'Analyze from linguistic structure, semantics, and pragmatics.', 'compass', 'blue', 0),
-        ('painter', '画家', '画家', 'Painter',
-         'Analyze from aesthetics, visual imagery, and mood.', 'eye', 'pink', 1),
-        ('physicist', '物理学家', '物理学家', 'Physicist',
-         'Analyze using physics laws, mechanics, and energy.', 'lightbulb', 'yellow', 2),
-        ('computer_scientist', '计算机科学家', '计算机科学家', 'Computer Scientist',
-         'Analyze using algorithms, data structures, and complexity.', 'brain', 'purple', 3),
-        ('doctor', '医生', '医生', 'Doctor',
-         'Analyze from medical, physiological, and psychological health perspectives.', 'heart', 'pink', 4),
-        ('historian', '历史学家', '历史学家', 'Historian',
-         'Provide historical context, cultural background, and patterns.', 'compass', 'green', 5),
-    ]
-
-    for voice_id, name, name_zh, name_en, prompt, icon, color, order in scholar_voices:
-        db.execute("""
-        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index, memory_workspace_config)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s)
-        """, (voice_id, 'scholar_deck', name, name_zh, name_en, prompt, icon, color, True, True, order, memory_config_json))
-
-    # ========== Deck 3: Philosophy Deck ==========
-    db.execute("""
-    INSERT INTO decks (id, name, name_zh, name_en, description, description_zh, description_en, icon, color, is_system, enabled, has_local_changes, order_index)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, ('philosophy_deck', '哲学卡组', '哲学卡组', 'Philosophy Deck',
-          '不同哲学流派的审视', '不同哲学流派的审视', 'Examine through philosophical lenses',
-          'cloud', 'purple', True, True, False, 2))
-
-    # Philosophy voices (placeholder prompts - TODO: write detailed prompts)
-    philosophy_voices = [
-        ('stoic', '斯多葛派', '斯多葛派', 'Stoic',
-         'Emphasize reason, self-control, and acceptance of the uncontrollable.', 'shield', 'blue', 0),
-        ('taoist', '道家', '道家', 'Taoist',
-         'Emphasize wu-wei (effortless action), natural flow, and simplicity.', 'wind', 'green', 1),
-        ('existentialist', '存在主义者', '存在主义者', 'Existentialist',
-         'Emphasize choice, freedom, responsibility, and creating meaning.', 'question', 'purple', 2),
-        ('pragmatist', '实用主义者', '实用主义者', 'Pragmatist',
-         'Focus on practical effects, usefulness, and real-world results.', 'fist', 'yellow', 3),
-    ]
-
-    for voice_id, name, name_zh, name_en, prompt, icon, color, order in philosophy_voices:
-        db.execute("""
-        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index, memory_workspace_config)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s)
-        """, (voice_id, 'philosophy_deck', name, name_zh, name_en, prompt, icon, color, True, True, order, memory_config_json))
-
-    db.commit()
-    db.close()
-    print("✅ System decks seeded (3 decks, 15 voices)")
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO decks (
+                id, name, name_zh, name_en, description, description_zh,
+                description_en, icon, color, is_system, enabled,
+                has_local_changes, order_index
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, TRUE, FALSE, 0)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                name_zh = EXCLUDED.name_zh,
+                name_en = EXCLUDED.name_en,
+                description = EXCLUDED.description,
+                description_zh = EXCLUDED.description_zh,
+                description_en = EXCLUDED.description_en,
+                icon = EXCLUDED.icon,
+                color = EXCLUDED.color,
+                enabled = TRUE,
+                order_index = 0,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                template["id"], template["name"], template["name_zh"],
+                template["name_en"], template["description"],
+                template["description_zh"], template["description_en"],
+                template["icon"], template["color"],
+            ),
+        )
+        for order, voice in enumerate(template["voices"]):
+            db.execute(
+                """
+                INSERT INTO voices (
+                    id, deck_id, name, name_zh, name_en, system_prompt, icon,
+                    color, is_system, enabled, has_local_changes, order_index,
+                    memory_workspace_config
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, TRUE, TRUE, FALSE, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    deck_id = EXCLUDED.deck_id,
+                    name = EXCLUDED.name,
+                    name_zh = EXCLUDED.name_zh,
+                    name_en = EXCLUDED.name_en,
+                    system_prompt = EXCLUDED.system_prompt,
+                    icon = EXCLUDED.icon,
+                    color = EXCLUDED.color,
+                    enabled = TRUE,
+                    order_index = EXCLUDED.order_index,
+                    memory_workspace_config = EXCLUDED.memory_workspace_config,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    voice["id"], template["id"], voice["name"],
+                    voice["name_zh"], voice["name_en"], voice["system_prompt"],
+                    voice["icon"], voice["color"], order, memory_config_json,
+                ),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 # ========== Deck CRUD ==========
+
+
+def _retired_system_deck_visibility(alias: str = "d") -> tuple[str, list[str]]:
+    """Hide untouched retired-template forks while preserving user work."""
+
+    import config
+
+    retired_ids = list(config.RETIRED_SYSTEM_DECK_IDS)
+    if not retired_ids:
+        return "", []
+    placeholders = ",".join("%s" for _ in retired_ids)
+    clause = f"""
+        AND (
+            {alias}.parent_id IS NULL
+            OR {alias}.parent_id NOT IN ({placeholders})
+            OR {alias}.has_local_changes IS TRUE
+            OR EXISTS (
+                SELECT 1 FROM voices changed_voice
+                WHERE changed_voice.deck_id = {alias}.id
+                  AND changed_voice.has_local_changes IS TRUE
+            )
+        )
+    """
+    return clause, retired_ids
+
 
 def get_user_decks(user_id: int):
     """
@@ -481,16 +482,18 @@ def get_user_decks(user_id: int):
 
     @@@ Users only see their own forked copies, never system decks directly
     """
+    visibility_sql, visibility_params = _retired_system_deck_visibility()
     db = get_db()
     try:
-        rows = db.execute("""
+        rows = db.execute(f"""
         SELECT d.*, COUNT(v.id) as voice_count
         FROM decks d
         LEFT JOIN voices v ON d.id = v.deck_id AND v.enabled IS TRUE
         WHERE d.owner_id = %s
+        {visibility_sql}
         GROUP BY d.id
         ORDER BY d.order_index, d.created_at
-        """, (user_id,)).fetchall()
+        """, (user_id, *visibility_params)).fetchall()
         return [dict(row) for row in rows]
     finally:
         db.close()
@@ -508,7 +511,7 @@ def get_published_decks():
         LEFT JOIN voices v ON d.id = v.deck_id AND v.enabled IS TRUE
         LEFT JOIN users u ON d.owner_id = u.id
         WHERE d.published IS TRUE
-        GROUP BY d.id
+        GROUP BY d.id, u.display_name
         ORDER BY d.install_count DESC, d.created_at DESC
         """).fetchall()
         return [dict(row) for row in rows]
@@ -611,11 +614,152 @@ def get_deck_with_voices(user_id: int, deck_id: str):
     finally:
         db.close()
 
+def _verified_default_deck_plugin_installation(db, default_plugin_ref: dict) -> dict:
+    """Lock and re-check the installation snapshot before a Deck ref write."""
+
+    installation = db.execute(
+        """
+        SELECT id, package_name, marketplace, resolved_version,
+               artifact_digest, status
+        FROM claude_plugin_installations
+        WHERE id = %s
+        FOR SHARE
+        """,
+        (default_plugin_ref["plugin_installation_id"],),
+    ).fetchone()
+    expected = (
+        default_plugin_ref["package_name"],
+        default_plugin_ref["resolved_version"],
+        default_plugin_ref["artifact_digest"],
+    )
+    actual = (
+        installation["package_name"] if installation else None,
+        installation["resolved_version"] if installation else None,
+        installation["artifact_digest"] if installation else None,
+    )
+    if installation is None or installation["status"] != "ready" or actual != expected:
+        raise ValueError("DEFAULT_DECK_PLUGIN_UNAVAILABLE")
+    return installation
+
+
+def _upsert_default_deck_plugin_ref(db, deck_id: str, default_plugin_ref: dict) -> None:
+    """Persist one enabled configured ref without removing other selections."""
+
+    installation = _verified_default_deck_plugin_installation(db, default_plugin_ref)
+    db.execute(
+        """
+        INSERT INTO deck_claude_plugin_refs (
+            deck_id, plugin_installation_id, package_spec,
+            resolved_version, artifact_digest, enabled, order_index,
+            created_at, updated_at
+        ) VALUES (%s, %s, %s, %s, %s, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (deck_id, plugin_installation_id) DO UPDATE SET
+            package_spec = EXCLUDED.package_spec,
+            resolved_version = EXCLUDED.resolved_version,
+            artifact_digest = EXCLUDED.artifact_digest,
+            enabled = 1,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            deck_id,
+            installation["id"],
+            f"{installation['package_name']}@{installation['marketplace']}",
+            installation["resolved_version"],
+            installation["artifact_digest"],
+        ),
+    )
+
+
+def reconcile_default_screenplay_deck_plugin_ref(
+    user_id: int,
+    default_plugin_ref: dict,
+) -> dict:
+    """Repair one untouched default screenplay Deck only when refs are empty.
+
+    Existing refs, including a user's explicit deselection/replacement state,
+    are never overwritten.  The fallback fingerprint is derived entirely from
+    the configured template because fallback Decks have no shared parent row.
+    """
+
+    import config
+
+    template = config.SCREENPLAY_DECK_TEMPLATE
+    role_names = [voice["name"] for voice in template["voices"]]
+    role_placeholders = ",".join("%s" for _ in role_names)
+    db = get_db()
+    try:
+        deck = db.execute(
+            f"""
+            SELECT d.id
+            FROM decks d
+            WHERE d.owner_id = %s
+              AND d.is_system IS FALSE
+              AND d.has_local_changes IS FALSE
+              AND (
+                d.parent_id = %s
+                OR (
+                  d.parent_id IS NULL
+                  AND d.name = %s
+                  AND d.name_zh = %s
+                  AND d.name_en = %s
+                  AND (SELECT COUNT(*) FROM voices v WHERE v.deck_id = d.id) = %s
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM voices v
+                    WHERE v.deck_id = d.id
+                      AND (
+                        v.has_local_changes IS TRUE
+                        OR COALESCE(v.name_zh, v.name) NOT IN ({role_placeholders})
+                      )
+                  )
+                )
+              )
+            ORDER BY d.created_at
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (
+                user_id,
+                config.DEFAULT_SYSTEM_DECK_ID,
+                template["name"],
+                template["name_zh"],
+                template["name_en"],
+                len(role_names),
+                *role_names,
+            ),
+        ).fetchone()
+        if deck is None:
+            db.rollback()
+            return {"deck_id": None, "reconciled": False, "reason": "default_not_found"}
+
+        existing_ref = db.execute(
+            "SELECT 1 FROM deck_claude_plugin_refs WHERE deck_id = %s LIMIT 1",
+            (deck["id"],),
+        ).fetchone()
+        if existing_ref is not None:
+            db.rollback()
+            return {
+                "deck_id": deck["id"],
+                "reconciled": False,
+                "reason": "refs_preserved",
+            }
+
+        _upsert_default_deck_plugin_ref(db, deck["id"], default_plugin_ref)
+        db.commit()
+        return {"deck_id": deck["id"], "reconciled": True, "reason": "missing_ref"}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def create_deck(user_id: int, name: str, description: str = None,
                 name_zh: str = None, name_en: str = None,
                 description_zh: str = None, description_en: str = None,
                 icon: str = None, color: str = None,
-                order_index: int = None) -> str:
+                order_index: int = None,
+                default_plugin_ref: Optional[dict] = None) -> str:
     """
     Create a new user deck. Returns deck_id.
     """
@@ -640,8 +784,14 @@ def create_deck(user_id: int, name: str, description: str = None,
         """, (deck_id, name, name_zh, name_en, description, description_zh, description_en,
               icon, color, user_id, order_index))
 
+        if default_plugin_ref is not None:
+            _upsert_default_deck_plugin_ref(db, deck_id, default_plugin_ref)
+
         db.commit()
         return deck_id
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -724,30 +874,103 @@ def delete_deck(user_id: int, deck_id: str) -> bool:
     finally:
         db.close()
 
-def auto_fork_system_decks(user_id: int):
+def auto_fork_system_decks(user_id: int, default_plugin_ref: dict) -> str:
     """
-    Auto-fork all system decks for a new user.
+    Provision the one active screenplay Deck for a new user.
     Called on user registration/first login.
     """
-    # @@@ Get deck list then close connection BEFORE forking (avoid deadlock)
+    import config
+
+    # Resolve the shared template before fork_deck opens its own lease.
     db = get_db()
     try:
-        system_decks = db.execute(
-            "SELECT id FROM decks WHERE is_system IS TRUE ORDER BY order_index"
-        ).fetchall()
-        deck_ids = [deck['id'] for deck in system_decks]
+        system_deck = db.execute(
+            "SELECT id FROM decks WHERE id = %s AND is_system IS TRUE",
+            (config.DEFAULT_SYSTEM_DECK_ID,),
+        ).fetchone()
     finally:
         db.close()
 
-    # Fork each deck (each fork opens its own connection)
-    # @@@ Only enable introspection deck by default
-    for deck_id in deck_ids:
-        should_enable = (deck_id == 'introspection_deck')
-        fork_deck(user_id, deck_id, enabled=should_enable)
+    if system_deck is not None:
+        deck_id = fork_deck(
+            user_id,
+            system_deck["id"],
+            enabled=True,
+            default_plugin_ref=default_plugin_ref,
+        )
+    else:
+        deck_id = create_default_screenplay_deck(
+            user_id,
+            default_plugin_ref=default_plugin_ref,
+        )
+    print(f"✅ Provisioned screenplay Deck {deck_id} for user {user_id}")
+    return deck_id
 
-    print(f"✅ Auto-forked {len(deck_ids)} system decks for user {user_id}")
 
-def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
+def create_default_screenplay_deck(user_id: int, default_plugin_ref: dict) -> str:
+    """Create the configured screenplay template as a user-owned Deck.
+
+    This fallback writes only normal Deck/Voice rows for the registering user;
+    it never creates shared schema or system rows at runtime.
+    """
+
+    import config
+    import uuid
+
+    template = config.SCREENPLAY_DECK_TEMPLATE
+    deck_id = str(uuid.uuid4())
+    memory_config_json = _default_memory_workspace_config_json()
+    db = get_db()
+    try:
+        max_order = db.execute(
+            "SELECT MAX(order_index) AS max_order FROM decks WHERE owner_id = %s",
+            (user_id,),
+        ).fetchone()["max_order"]
+        db.execute(
+            """
+            INSERT INTO decks (
+                id, name, name_zh, name_en, description, description_zh,
+                description_en, icon, color, is_system, owner_id, enabled,
+                has_local_changes, order_index
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s)
+            """,
+            (
+                deck_id, template["name"], template["name_zh"], template["name_en"],
+                template["description"], template["description_zh"],
+                template["description_en"], template["icon"], template["color"],
+                user_id, (max_order or 0) + 1,
+            ),
+        )
+        for order, voice in enumerate(template["voices"]):
+            db.execute(
+                """
+                INSERT INTO voices (
+                    id, deck_id, name, name_zh, name_en, system_prompt, icon,
+                    color, is_system, owner_id, enabled, has_local_changes,
+                    order_index, memory_workspace_config
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s, %s)
+                """,
+                (
+                    str(uuid.uuid4()), deck_id, voice["name"], voice["name_zh"],
+                    voice["name_en"], voice["system_prompt"], voice["icon"],
+                    voice["color"], user_id, order, memory_config_json,
+                ),
+            )
+        _upsert_default_deck_plugin_ref(db, deck_id, default_plugin_ref)
+        db.commit()
+        return deck_id
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+def fork_deck(
+    user_id: int,
+    deck_id: str,
+    enabled: bool = True,
+    default_plugin_ref: Optional[dict] = None,
+) -> str:
     """
     Fork a deck to create user's own copy.
     Copies deck + all voices. Returns new deck_id.
@@ -813,6 +1036,28 @@ def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
                   user_id,
                   voice['order_index'],
                   memory_config_json))
+
+        # A system/community Deck's verified plugin selection is part of the
+        # template. The fork stores the same installation references, never
+        # filesystem paths or mutable discovery state.
+        db.execute(
+            """
+            INSERT INTO deck_claude_plugin_refs (
+                deck_id, plugin_installation_id, package_spec,
+                resolved_version, artifact_digest, enabled, order_index,
+                created_at, updated_at
+            )
+            SELECT %s, plugin_installation_id, package_spec,
+                   resolved_version, artifact_digest, enabled, order_index,
+                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            FROM deck_claude_plugin_refs
+            WHERE deck_id = %s
+            """,
+            (new_deck_id, deck_id),
+        )
+
+        if default_plugin_ref is not None:
+            _upsert_default_deck_plugin_ref(db, new_deck_id, default_plugin_ref)
 
         db.commit()
         return new_deck_id
@@ -911,14 +1156,16 @@ def load_voices_from_user_decks(user_id: int) -> dict:
     Returns dict format: {voice_id: {name, systemPrompt, icon, color}}
     Compatible with analyze_stateless() expectations.
     """
+    visibility_sql, visibility_params = _retired_system_deck_visibility()
     db = get_db()
     try:
         # Get all user's enabled decks
-        enabled_decks = db.execute("""
-        SELECT id FROM decks
-        WHERE owner_id = %s AND enabled IS TRUE
-        ORDER BY order_index, created_at
-        """, (user_id,)).fetchall()
+        enabled_decks = db.execute(f"""
+        SELECT d.id FROM decks d
+        WHERE d.owner_id = %s AND d.enabled IS TRUE
+        {visibility_sql}
+        ORDER BY d.order_index, d.created_at
+        """, (user_id, *visibility_params)).fetchall()
 
         if not enabled_decks:
             return {}
