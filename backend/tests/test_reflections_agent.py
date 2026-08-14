@@ -3,6 +3,8 @@
 #          results, events, and API endpoints.
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-25: add first-release Reflections-agent functional coverage.
+# [Sync] 2026-08-14: keep the explicit SQLite fixture outside the production
+#                    PostgreSQL registration/default-Free boundary.
 
 from __future__ import annotations
 
@@ -94,11 +96,21 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
         )
         self.database_fixture.start(initialize_legacy_schema=True)
         os.environ["AGENT_CWD"] = str(Path(self.tmp.name) / "agent-workspace")
-        self.user_id = database.create_user(
-            "reflections-agent@example.com",
-            auth.hash_password("secret123"),
-            "Reflections Agent",
+        # This explicit SQLite fixture intentionally bypasses the production
+        # registration boundary, whose PostgreSQL contract includes Admin-owned
+        # billing tables and default-Free provisioning.
+        fixture_connection = self.database_fixture.connect()
+        cursor = fixture_connection.execute(
+            "INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
+            (
+                "reflections-agent@example.com",
+                auth.hash_password("secret123"),
+                "Reflections Agent",
+            ),
         )
+        fixture_connection.commit()
+        self.user_id = int(cursor.lastrowid)
+        fixture_connection.close()
         database.save_session(
             self.user_id,
             "session-a",
