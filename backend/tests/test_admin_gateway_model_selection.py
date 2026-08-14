@@ -1,3 +1,8 @@
+# [Input] Admin Gateway catalog responses and saved Dream system config.
+# [Output] Verify server-owned explicit/default model selection and stale-state denial.
+# [Pos] Admin Gateway model-selection contract test in backend/tests
+# [Sync] 2026-08-14: prove users without a saved alias use Admin's callable default.
+
 from __future__ import annotations
 
 import pytest
@@ -39,6 +44,18 @@ def test_saved_callable_alias_is_the_server_selected_model() -> None:
             GatewayModelCatalog((_model("dream-balanced"),), "dream-balanced")
         ),
         system_config_reader=lambda _user_id: {"model": "dream-balanced"},
+    )
+    assert result == "dream-balanced"
+
+
+def test_no_saved_alias_uses_admin_callable_default() -> None:
+    result = resolve_platform_model_alias(
+        7,
+        None,
+        catalog_client_factory=lambda _user_id: _CatalogClient(
+            GatewayModelCatalog((_model("dream-balanced"),), "dream-balanced")
+        ),
+        system_config_reader=lambda _user_id: {},
     )
     assert result == "dream-balanced"
 

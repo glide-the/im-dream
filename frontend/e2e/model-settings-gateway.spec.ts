@@ -1,3 +1,9 @@
+// [Input] Browser-mocked Gateway catalog and system-config API responses.
+// [Output] Model Settings browser contracts for default selection, explicit save,
+//          stale catalog recovery, and honest empty state.
+// [Pos] Mocked-browser model selection acceptance in frontend/e2e
+// [Sync] 2026-08-14: new users with no saved alias select Admin's live default.
+
 import { expect, test, type Page, type Route } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
@@ -41,7 +47,7 @@ function collectDiagnostics(
   return diagnostics;
 }
 
-test('platform Gateway catalog drives model selection and persists only alias', async ({ page }) => {
+test('platform Gateway default selects an unsaved new-user model and persists only an explicit change', async ({ page }) => {
   const diagnostics = collectDiagnostics(page);
   await page.setViewportSize({ width: 1440, height: 1000 });
   const updates: Array<Record<string, unknown>> = [];
@@ -67,12 +73,13 @@ test('platform Gateway catalog drives model selection and persists only alias', 
       await json(route, { success: true, data: { model: patch.model, provider: 'gateway', workspace_enabled: true } });
       return;
     }
-    await json(route, { model: 'deepseek-v4-flash', provider: 'gateway', workspace_enabled: true });
+    await json(route, { provider: 'gateway', workspace_enabled: true });
   });
 
   await page.goto(`${WEB_BASE}/e2e/model-settings-harness`);
   const current = page.getByRole('radio', { name: /DeepSeek V4 Flash/ });
   await expect(current).toBeChecked();
+  expect(updates).toEqual([]);
   await expect(page.getByRole('radio', { name: /HY Preview/ })).toBeDisabled();
   await expect(page.getByText(/需要 dream 套餐/i)).toBeVisible();
   await page.getByRole('radio', { name: /Dream Fast/ }).check();

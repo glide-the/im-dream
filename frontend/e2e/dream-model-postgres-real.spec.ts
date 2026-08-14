@@ -1,4 +1,8 @@
-// Opt-in isolated real browser: Vite UI -> Dream FastAPI -> PostgreSQL -> local Gateway stub.
+// [Input] Owned isolated Dream/Admin/Gateway services and enabled model catalog.
+// [Output] Browser proof that all enabled aliases stay visible and preferences persist.
+// [Pos] Opt-in real PostgreSQL model-settings business journey.
+// [Sync] 2026-08-14: include the enabled registration-default alias added by the
+//                    Free bootstrap regression fixture.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -14,6 +18,8 @@ const PYTHON = resolve(BACKEND_ROOT, '.venv/bin/python');
 const TEST_EMAIL = 'ink-dream-round-20260810@example.invalid';
 const BALANCED_ALIAS = process.env.INK_E2E_BALANCED_ALIAS ?? 'dream-balanced';
 const FAST_ALIAS = process.env.INK_E2E_FAST_ALIAS ?? 'dream-fast';
+const REGISTRATION_ALIAS = process.env.INK_E2E_REGISTRATION_ALIAS
+  ?? 'dream-registration-default';
 const VITE_CLIENT_WITHOUT_HMR = `
 const hotContext = { data: {}, accept() {}, acceptExports() {}, decline() {}, dispose() {}, invalidate() {}, off() {}, on() {}, prune() {}, send() {} };
 export function createHotContext() { return hotContext; }
@@ -112,6 +118,7 @@ test('real Dream BFF persists only a live platform alias and restores it on mobi
   expect(catalog.data.map((model) => model.modelAlias)).toEqual([
     BALANCED_ALIAS,
     FAST_ALIAS,
+    REGISTRATION_ALIAS,
   ]);
   expect(catalog.data.every((model) => model.callable)).toBe(true);
   expect(diagnostics).toEqual([]);

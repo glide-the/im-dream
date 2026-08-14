@@ -1,4 +1,11 @@
 #!/usr/bin/env node
+// [Input] Repository sources plus Docker and local Node/Python runtimes.
+// [Output] Owned, disposable full-business verification across Admin, Dream,
+//          browser registration, Free/default model, Agent, Gateway and artifacts.
+// [Pos] Root orchestration script for isolated cross-service business acceptance.
+// [Sync] 2026-08-14: make the registration lane bootstrap a priced model with
+//                    no prior entitlement, then cover signup -> Free -> default
+//                    model -> first turn without the retired Episode state leg.
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -24,6 +31,12 @@ const adminPassword = 'Dream-business-E2E-2026!';
 const gatewayIssuer = `ink-admin-e2e-${suffix}`;
 const gatewayAudience = `ink-dream-e2e-${suffix}`;
 const gatewayClientId = `ink-dream-business-${suffix}`;
+const productJwtSecret = `product_${randomBytes(48).toString('base64url')}`;
+const productIssuer = `ink-dream-product-e2e-${suffix}`;
+const productAudience = `ink-admin-product-e2e-${suffix}`;
+const productClientId = `ink-dream-product-${suffix}`;
+const registrationEmail = `dream-free-registration-${suffix}@example.invalid`;
+const registrationDefaultsOnly = process.env.INK_REGISTRATION_DEFAULTS_ONLY === '1';
 const adminDistDir = `.next-e2e-dream-business-${suffix}`;
 const outputRoot = await mkdtemp(join(tmpdir(), 'ink-dream-business-e2e-'));
 const artifactRoot = await mkdtemp(join(tmpdir(), 'ink-dream-agent-workspaces-'));
@@ -240,10 +253,19 @@ async function bootstrapBusiness(adminBaseUrl, providerUrl) {
     timeoutMs: 5_000, maxRetries: 0, config: { authMode: 'x-api-key' },
   });
   const modelIds = [];
-  const modelAliases = [`dream-e2e-balanced-${suffix}`, `dream-e2e-fast-${suffix}`];
+  const registrationDefaultModel = {
+    alias: `dream-e2e-registration-default-${suffix}`,
+    displayName: 'Dream Registration Default',
+  };
+  const modelAliases = [
+    `dream-e2e-balanced-${suffix}`,
+    `dream-e2e-fast-${suffix}`,
+    registrationDefaultModel.alias,
+  ];
   for (const [code, upstreamModel, displayName] of [
     [modelAliases[0], 'dream-producer-upstream-balanced', 'Dream Balanced'],
     [modelAliases[1], 'dream-producer-upstream-fast', 'Dream Fast'],
+    [modelAliases[2], 'dream-registration-upstream-default', registrationDefaultModel.displayName],
   ]) {
     const model = await request('/api/admin/models', 'POST', {
       providerId: providerRow.id, code, upstreamModel, displayName,
@@ -260,7 +282,9 @@ async function bootstrapBusiness(adminBaseUrl, providerUrl) {
   }
   const plan = await request('/api/admin/subscription-plans', 'POST', { code: `dream-e2e-${suffix}`, name: 'Dream E2E', description: 'Owned cross-service E2E' });
   const version = await request('/api/admin/subscription-plan-versions', 'POST', { planId: plan.id, trialDays: 0, gracePeriodDays: 0, allowanceTokens: 5_000_000 });
-  for (const [index, modelId] of modelIds.entries()) {
+  // The registration default intentionally has no existing published
+  // entitlement. The default-plan seed must be able to bootstrap it.
+  for (const [index, modelId] of modelIds.slice(0, 2).entries()) {
     await request('/api/admin/subscription-entitlements', 'POST', {
       planVersionId: version.id, modelId, gatewayScopes: ['messages:create', 'models:list'],
       requestsPerMinute: 500, dailyTokenLimit: 5_000_000, monthlyTokenLimit: 5_000_000,
@@ -276,7 +300,13 @@ async function bootstrapBusiness(adminBaseUrl, providerUrl) {
     subjectMode: 'canonical_subject', serviceClientId: gatewayClientId,
     name: 'Dream business E2E BFF', scopes: ['messages:create', 'models:list'], expiresAt: null,
   });
-  return { plaintextKey: gatewayKey.plaintextKey, subscriptionId: subscription.id, platformUserId, modelAliases };
+  return {
+    plaintextKey: gatewayKey.plaintextKey,
+    subscriptionId: subscription.id,
+    platformUserId,
+    modelAliases,
+    registrationDefaultModel,
+  };
 }
 
 async function queryProducedStory(databaseUrl) {
@@ -359,6 +389,9 @@ try {
   const adminPort = await availablePort();
   const dreamApiPort = await availablePort();
   const dreamWebPort = await availablePort();
+  const adminBaseUrl = `http://127.0.0.1:${adminPort}`;
+  const dreamApiBase = `http://127.0.0.1:${dreamApiPort}`;
+  const dreamWebBase = `http://127.0.0.1:${dreamWebPort}`;
   databaseUrl = `postgresql://postgres:${encodeURIComponent(postgresPassword)}@127.0.0.1:${postgresPort}/${databaseName}`;
   await execute('docker', ['run', '--detach', '--rm', '--name', containerName, '--env', 'POSTGRES_USER=postgres', '--env', `POSTGRES_PASSWORD=${postgresPassword}`, '--env', `POSTGRES_DB=${databaseName}`, '--publish', `127.0.0.1:${postgresPort}:5432`, 'postgres:16-alpine']);
   containerStarted = true;
@@ -393,22 +426,6 @@ try {
     },
     inherit: true,
   });
-  console.log('Running rollback-only general PostgreSQL helper integration on the owned clone...');
-  await execute(python, [
-    '-m', 'pytest', '-q',
-    'tests/test_database_postgres_runtime.py',
-  ], {
-    cwd: backendRoot,
-    env: {
-      ...migrationEnv,
-      DATABASE_URL: '',
-      TEST_DATABASE_URL: databaseUrl,
-      INK_RUN_DATABASE_RUNTIME_PG_TEST: '1',
-      INK_EXPECTED_TEST_DATABASE: databaseName,
-      PYTHONPATH: backendRoot,
-    },
-    inherit: true,
-  });
   await provisionUsers(databaseUrl);
   console.log('Running Story Artifact PostgreSQL contract tests on the owned clone...');
   await execute(python, [
@@ -428,7 +445,6 @@ try {
 
   provider = await startDreamProducerProvider();
   const providerUrl = provider.url;
-  const adminBaseUrl = `http://127.0.0.1:${adminPort}`;
   const adminEnv = {
     ...migrationEnv, NODE_ENV: 'development', PORT: String(adminPort),
     ADMIN_CONSOLE_ENABLED: 'true', ADMIN_BOOTSTRAP_TOKEN: bootstrapToken,
@@ -438,15 +454,52 @@ try {
     AI_CREDENTIAL_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
     AI_PROVIDER_ALLOW_INSECURE_LOCALHOST: 'true', AI_PROVIDER_HOST_ALLOWLIST: '127.0.0.1,localhost',
     GATEWAY_SUBJECT_JWT_ISSUER: gatewayIssuer, GATEWAY_SUBJECT_JWT_AUDIENCE: gatewayAudience,
+    PRODUCT_API_JWT_SECRET: productJwtSecret,
+    PRODUCT_API_JWT_ISSUER: productIssuer,
+    PRODUCT_API_JWT_AUDIENCE: productAudience,
+    PRODUCT_API_ORIGIN_ALLOWLIST: dreamWebBase,
     INK_ADMIN_E2E_DIST_DIR: adminDistDir,
     ARTIFACT_WORKSPACE_ROOT: artifactRoot,
   };
   const admin = startOwned('pnpm', ['dev', '--hostname', '127.0.0.1'], { cwd: adminRoot, env: adminEnv });
   await waitForUrl(`${adminBaseUrl}/api/admin/auth/bootstrap`, admin, 'Admin Gateway');
   const fixture = await bootstrapBusiness(adminBaseUrl, providerUrl);
+  console.log('Publishing the Admin-owned Free plan with the isolated default model...');
+  await execute('pnpm', ['plans:seed'], {
+    cwd: adminRoot,
+    env: {
+      ...migrationEnv,
+      INK_FREE_PLAN_MODEL_ALIAS: fixture.registrationDefaultModel.alias,
+      INK_FREE_PLAN_MONTHLY_TOKENS: '100000',
+    },
+    inherit: true,
+  });
+  await execute('pnpm', ['plans:check'], {
+    cwd: adminRoot,
+    env: {
+      ...migrationEnv,
+      INK_FREE_PLAN_MODEL_ALIAS: fixture.registrationDefaultModel.alias,
+      INK_FREE_PLAN_MONTHLY_TOKENS: '100000',
+    },
+    inherit: true,
+  });
+  console.log('Running rollback-only registration/runtime PostgreSQL integration after the real plan seed...');
+  await execute(python, [
+    '-m', 'pytest', '-q',
+    'tests/test_database_postgres_runtime.py',
+  ], {
+    cwd: backendRoot,
+    env: {
+      ...migrationEnv,
+      DATABASE_URL: '',
+      TEST_DATABASE_URL: databaseUrl,
+      INK_RUN_DATABASE_RUNTIME_PG_TEST: '1',
+      INK_EXPECTED_TEST_DATABASE: databaseName,
+      PYTHONPATH: backendRoot,
+    },
+    inherit: true,
+  });
 
-  const dreamApiBase = `http://127.0.0.1:${dreamApiPort}`;
-  const dreamWebBase = `http://127.0.0.1:${dreamWebPort}`;
   const dreamEnv = {
     ...process.env, DATABASE_URL: databaseUrl, TEST_DATABASE_URL: databaseUrl,
     INK_USE_TEST_DATABASE_URL: '1', JWT_SECRET: `jwt_${randomBytes(48).toString('base64url')}`,
@@ -458,6 +511,12 @@ try {
     INK_GATEWAY_SERVICE_CLIENT_ID: gatewayClientId,
     INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS: '240',
     INK_GATEWAY_TEXT_MODEL_ALIAS: fixture.modelAliases[0],
+    INK_ADMIN_PRODUCT_API_BASE_URL: adminBaseUrl,
+    INK_ADMIN_PRODUCT_ORIGIN: dreamWebBase,
+    INK_ADMIN_PRODUCT_JWT_SECRET: productJwtSecret,
+    INK_ADMIN_PRODUCT_JWT_ISSUER: productIssuer,
+    INK_ADMIN_PRODUCT_JWT_AUDIENCE: productAudience,
+    INK_ADMIN_PRODUCT_CLIENT_ID: productClientId,
     INK_WORKFLOW_TOKEN_SECRET: `workflow_${randomBytes(48).toString('base64url')}`,
     INK_DECK_HOST_COMPATIBLE: '1',
     INK_CLAUDE_AGENT_CONTRACT_COMPATIBLE: '1',
@@ -478,28 +537,36 @@ try {
     INK_REAL_DREAM_PG_QA: '1', INK_REAL_DREAM_BUSINESS_QA: '1',
     INK_E2E_BALANCED_ALIAS: fixture.modelAliases[0],
     INK_E2E_FAST_ALIAS: fixture.modelAliases[1],
+    INK_E2E_REGISTRATION_ALIAS: fixture.registrationDefaultModel.alias,
+    INK_E2E_REGISTRATION_MODEL_NAME: fixture.registrationDefaultModel.displayName,
+    INK_REAL_DREAM_REGISTRATION_QA: '1',
+    INK_E2E_REGISTRATION_EMAIL: registrationEmail,
   };
-  console.log('Running real Chromium model selection and Gateway-backed Agent turn...');
+  console.log('Running real Chromium registration, Free/default-model, and first Agent turn...');
+  await execute('pnpm', ['exec', 'playwright', 'test', 'e2e/registration-defaults-postgres-real.spec.ts', '--reporter=line', '--workers=1', `--output=${outputRoot}`], { cwd: frontendRoot, env: playwrightEnv, inherit: true });
+  console.log('Running real Chromium explicit model selection and Gateway-backed Dream turns...');
   await execute('pnpm', ['exec', 'playwright', 'test', 'e2e/dream-model-postgres-real.spec.ts', '--reporter=line', '--workers=1', `--output=${outputRoot}`], { cwd: frontendRoot, env: playwrightEnv, inherit: true });
-  await execute('pnpm', ['exec', 'playwright', 'test', 'e2e/dream-producer-chain-postgres-real.spec.ts', '--reporter=line', '--workers=1', `--output=${outputRoot}`], { cwd: frontendRoot, env: playwrightEnv, inherit: true });
+  if (!registrationDefaultsOnly) {
+    await execute('pnpm', ['exec', 'playwright', 'test', 'e2e/dream-producer-chain-postgres-real.spec.ts', '--reporter=line', '--workers=1', `--output=${outputRoot}`], { cwd: frontendRoot, env: playwrightEnv, inherit: true });
 
-  const producedStory = await queryProducedStory(databaseUrl);
-  console.log('Running real Chromium Admin read/review against the same generated Dream Story...');
-  await execute('pnpm', ['exec', 'playwright', 'test', 'e2e/admin-dream-story-generated-real.spec.ts', '--reporter=line', '--workers=1', `--output=${outputRoot}`], {
-    cwd: frontendRoot,
-    env: {
-      ...playwrightEnv,
-      INK_REAL_ADMIN_DREAM_STORY_QA: '1',
-      INK_REAL_ADMIN_BASE_URL: adminBaseUrl,
-      INK_REAL_ADMIN_STORY_ID: producedStory.id,
-      INK_REAL_ADMIN_PROJECT_ID: producedStory.source_project_id,
-      INK_REAL_ADMIN_RUN_ID: producedStory.source_run_id,
-      INK_REAL_ADMIN_SCRIPT_REVISION: producedStory.script_revision,
-      INK_REAL_ADMIN_EMAIL: adminEmail,
-      INK_REAL_ADMIN_PASSWORD: adminPassword,
-    },
-    inherit: true,
-  });
+    const producedStory = await queryProducedStory(databaseUrl);
+    console.log('Running real Chromium Admin read/review against the same generated Dream Story...');
+    await execute('pnpm', ['exec', 'playwright', 'test', 'e2e/admin-dream-story-generated-real.spec.ts', '--reporter=line', '--workers=1', `--output=${outputRoot}`], {
+      cwd: frontendRoot,
+      env: {
+        ...playwrightEnv,
+        INK_REAL_ADMIN_DREAM_STORY_QA: '1',
+        INK_REAL_ADMIN_BASE_URL: adminBaseUrl,
+        INK_REAL_ADMIN_STORY_ID: producedStory.id,
+        INK_REAL_ADMIN_PROJECT_ID: producedStory.source_project_id,
+        INK_REAL_ADMIN_RUN_ID: producedStory.source_run_id,
+        INK_REAL_ADMIN_SCRIPT_REVISION: producedStory.script_revision,
+        INK_REAL_ADMIN_EMAIL: adminEmail,
+        INK_REAL_ADMIN_PASSWORD: adminPassword,
+      },
+      inherit: true,
+    });
+  }
 
   const gatewayEvidence = await verifyBusinessGatewayState(databaseUrl, provider.observations.length);
   console.log(JSON.stringify({ gatewayTokenEvidence: gatewayEvidence }));
@@ -507,7 +574,11 @@ try {
     providerRequests: provider.observations.length,
     providerModels: [...new Set(provider.observations.map((item) => item.model))],
     providerKinds: [...new Set(provider.observations.map((item) => item.kind))],
-    allProviderRequestsBoundToRun: provider.observations.every((item) => item.hasRunId),
+    allDreamProviderRequestsBoundToRun: provider.observations
+      .filter((item) => item.kind !== 'generic')
+      .every((item) => item.hasRunId),
+    registrationFirstTurnRequests: provider.observations.filter((item) => item.kind === 'generic').length,
+    businessLane: registrationDefaultsOnly ? 'registration-defaults' : 'dream-producer',
     database: databaseName,
     externalProviderCalls: 0,
   }));
@@ -520,7 +591,10 @@ try {
       providerRequests: provider.observations.length,
       providerModels: [...new Set(provider.observations.map((item) => item.model))],
       providerKinds: [...new Set(provider.observations.map((item) => item.kind))],
-      allProviderRequestsBoundToRun: provider.observations.every((item) => item.hasRunId),
+      allDreamProviderRequestsBoundToRun: provider.observations
+        .filter((item) => item.kind !== 'generic')
+        .every((item) => item.hasRunId),
+      registrationFirstTurnRequests: provider.observations.filter((item) => item.kind === 'generic').length,
       providerSequence: provider.observations.map((item) => ({
         requestNumber: item.requestNumber,
         kind: item.kind,

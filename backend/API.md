@@ -6,6 +6,7 @@
 [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public SEO endpoint notes.
 [Sync] 2026-06-21: document system-config sandbox network policy fields.
 [Sync] 2026-06-23: document Google OAuth, auth cookie aliases, and OAuth Device Flow endpoints.
+[Sync] 2026-08-14: document transactional default Free provisioning and Admin-default model resolution for email and Google registration.
 -->
 
 **Version:** 2.0.0
@@ -49,6 +50,18 @@ Returns a structured AI-search summary describing Ink & Memory, primary public p
 
 Register a new user.
 
+The successful response is emitted only after the Admin-owned PostgreSQL
+registration triggers have created the canonical user's billing projection,
+active Free subscription, current-period Token allowance, and activation
+event in the same transaction. Dream does not write or reconstruct billing
+state. Google OAuth signup has the same postcondition because it uses the same
+canonical user creation path.
+
+The Free plan's Admin-owned default entitlement supplies the effective model
+when the user has not saved an explicit model preference. Dream does not copy
+that alias into a second registration-time default; Settings and Claude Agent
+resolve the live callable `defaultModelAlias` from the Gateway catalog.
+
 **Request:**
 ```json
 {
@@ -73,6 +86,8 @@ Register a new user.
 **Errors:**
 - `400` - Email/password missing or password < 6 chars
 - `400` - Email already exists
+- `503` - Canonical user/default Free provisioning transaction could not
+  commit; retry after the registration dependency is restored
 
 ---
 
@@ -164,7 +179,8 @@ Starts Google OAuth/OIDC login through the Python backend Authlib client.
 
 OAuth callback registered in Google Cloud Console. The backend validates OAuth
 state through the session cookie, exchanges the Google code, binds or creates
-the local user, then issues this system's own access/refresh tokens.
+the local user (including transactional default Free provisioning for a new
+canonical user), then issues this system's own access/refresh tokens.
 
 **Response:** `302` redirect to frontend with auth cookies set.
 

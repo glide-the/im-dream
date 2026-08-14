@@ -29,6 +29,8 @@
 //                    while keeping the high-risk internet access warning.
 // [Sync] 2026-08-10: move appearance controls to General settings and simplify
 //                    model choices to names plus only actionable availability.
+// [Sync] 2026-08-14: hydrate an unsaved new user with Admin's callable
+//                    defaultModelAlias instead of leaving model selection blank.
 import { useCallback, useEffect, useState } from 'react';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { emitImFullAccessChanged, emitWorkspaceModeChanged } from '../../lib/system-config-events';
@@ -36,6 +38,7 @@ import { API_BASE } from '../../lib/apiBase';
 import {
   fetchGatewayModels,
   gatewayModelsErrorMessage,
+  resolveGatewayModelSelection,
   type GatewayModel,
 } from '../../api/gatewayModelsApi';
 export type SandboxNetworkMode = 'disabled' | 'allowlist' | 'open';
@@ -191,7 +194,11 @@ export default function ModelConfigSection() {
         setSandboxFsStatus(null);
         setSandboxNetworkStatus(null);
         setImFullAccessEnabled(config.im_full_access_enabled ?? false);
-        setSelectedModel(config.model ?? '');
+        setSelectedModel(
+          modelsResult.status === 'fulfilled'
+            ? resolveGatewayModelSelection(config.model, modelsResult.value)
+            : (config.model ?? ''),
+        );
         const savedEnvVars = config.env_vars ?? {};
         setEnvVars(Object.entries(savedEnvVars).map(([key, value]) => ({ key, value })));
         setDirty(false);

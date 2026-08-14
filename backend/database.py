@@ -3,7 +3,8 @@
 #         and memory workspace defaults.
 # [Output] Provide persistence helpers for users, sessions, decks, voices, reports,
 #          auth/OAuth state, Claude Agent threads/messages, and voice partition
-#          Memory configs.
+#          Memory configs; user creation commits only after Admin-owned billing
+#          identity/default-Free triggers complete.
 # [Pos] database node in backend
 # [Sync] 2026-06-06: add procedural Memory workspace default config seeding,
 #                    backfill, and voice fork/sync propagation.
@@ -17,6 +18,11 @@
 # [Sync] 2026-07-09: allow Chat thread lists to page newest-first with
 #                    limit/offset so the frontend history panel can scroll load.
 # [Sync] 2026-08-01: add the Story Workspace schema, indexes, and rollback helper.
+# [Sync] 2026-08-14: distinguish duplicate email from unavailable transactional
+#                    user/default-Free provisioning and verify the complete Free
+#                    subscription/default-model postcondition before commit.
+# [Sync] 2026-08-14: make first-login preference writes a single PostgreSQL
+#                    upsert so concurrent hydration cannot race on the PK.
 """
 PostgreSQL runtime persistence helpers for Ink & Memory.
 
@@ -53,6 +59,15 @@ class ChatMessageIdentityConflict(RuntimeError):
 
     def __init__(self, message_id: str) -> None:
         self.message_id = message_id
+        super().__init__(self.code)
+
+
+class UserRegistrationUnavailable(RuntimeError):
+    """The canonical user/default-Free registration transaction could not commit."""
+
+    code = "USER_REGISTRATION_UNAVAILABLE"
+
+    def __init__(self) -> None:
         super().__init__(self.code)
 
 
@@ -1133,7 +1148,7 @@ def create_user(
     avatar_url: str = None,
     role: str = "user",
 ) -> int:
-    """Create a new user. Returns user_id."""
+    """Create a user only when Admin-owned Free/default-model provisioning is complete."""
     db = get_db()
     try:
         normalized_email = email.strip().lower()
@@ -1146,11 +1161,58 @@ def create_user(
             (normalized_email, password_hash, display_name, avatar_url, role or "user")
         )
         user_id = int(cursor.fetchone()["id"])
+        registration = db.execute(
+            """
+            SELECT subscription.id
+            FROM platform_users AS platform_user
+            JOIN subscriptions AS subscription
+              ON subscription.platform_user_id = platform_user.id
+             AND subscription.status = 'active'
+            JOIN subscription_plan_versions AS version
+              ON version.id = subscription.plan_version_id
+             AND version.status = 'published'
+            JOIN subscription_plans AS plan
+              ON plan.id = version.plan_id
+             AND plan.code = 'free'
+             AND plan.status = 'active'
+            JOIN subscription_plan_entitlements AS entitlement
+              ON entitlement.plan_version_id = version.id
+             AND entitlement.enabled = TRUE
+             AND entitlement.is_default = TRUE
+             AND entitlement.gateway_scopes @> ARRAY['messages:create']::text[]
+            JOIN ai_models AS model
+              ON model.id = entitlement.model_id
+             AND model.enabled = TRUE
+            JOIN subscription_usage_allowances AS allowance
+              ON allowance.subscription_id = subscription.id
+             AND allowance.period_number = subscription.current_period_number
+             AND allowance.granted_tokens > 0
+            JOIN subscription_events AS event
+              ON event.subscription_id = subscription.id
+             AND event.event_type = 'activated'
+            WHERE platform_user.source = 'ink-dream'
+              AND platform_user.external_user_id = %s
+              AND platform_user.status = 'active'
+            LIMIT 1
+            """,
+            (str(user_id),),
+        ).fetchone()
+        if registration is None:
+            raise UserRegistrationUnavailable()
         db.commit()
         return user_id
-    except PostgresIntegrityError:
+    except UserRegistrationUnavailable:
         db.rollback()
-        raise ValueError("Email already exists")
+        raise
+    except PostgresIntegrityError as exc:
+        db.rollback()
+        constraint_name = getattr(getattr(exc, "diag", None), "constraint_name", None)
+        if constraint_name in {"users_email_uidx", "users_email_unique"}:
+            raise ValueError("Email already exists") from None
+        raise UserRegistrationUnavailable() from None
+    except PostgresError:
+        db.rollback()
+        raise UserRegistrationUnavailable() from None
     finally:
         db.close()
 
@@ -1951,47 +2013,27 @@ def get_friend_picture_full(user_id: int, friend_id: int, date: str):
 
 def save_preferences(user_id: int, voice_configs: dict = None, meta_prompt: str = None,
                     state_config: dict = None, selected_state: str = None, timezone: str = None):
-    """Save or update user preferences."""
+    """Atomically merge user preferences without a first-login insert race."""
     db = get_db()
     try:
-        # Check if preferences exist
-        existing = db.execute("SELECT user_id FROM user_preferences WHERE user_id = %s", (user_id,)).fetchone()
-
-        if existing:
-            # Update
-            updates = []
-            params = []
-            if voice_configs is not None:
-                updates.append("voice_configs_json = %s")
-                params.append(json.dumps(voice_configs))
-            if meta_prompt is not None:
-                updates.append("meta_prompt = %s")
-                params.append(meta_prompt)
-            if state_config is not None:
-                updates.append("state_config_json = %s")
-                params.append(json.dumps(state_config))
-            if selected_state is not None:
-                updates.append("selected_state = %s")
-                params.append(selected_state)
-            if timezone is not None:
-                updates.append("timezone = %s")
-                params.append(timezone)
-
-            if updates:
-                updates.append("updated_at = CURRENT_TIMESTAMP")
-                params.append(user_id)
-                db.execute(f"UPDATE user_preferences SET {', '.join(updates)} WHERE user_id = %s", params)
-        else:
-            # Insert
-            db.execute("""
+        db.execute("""
             INSERT INTO user_preferences (user_id, voice_configs_json, meta_prompt, state_config_json, selected_state, timezone)
             VALUES (%s, %s, %s, %s, %s, %s)
-            """, (user_id,
-                  json.dumps(voice_configs) if voice_configs else None,
-                  meta_prompt,
-                  json.dumps(state_config) if state_config else None,
-                  selected_state,
-                  timezone))
+            ON CONFLICT (user_id) DO UPDATE SET
+                voice_configs_json = COALESCE(EXCLUDED.voice_configs_json, user_preferences.voice_configs_json),
+                meta_prompt = COALESCE(EXCLUDED.meta_prompt, user_preferences.meta_prompt),
+                state_config_json = COALESCE(EXCLUDED.state_config_json, user_preferences.state_config_json),
+                selected_state = COALESCE(EXCLUDED.selected_state, user_preferences.selected_state),
+                timezone = COALESCE(EXCLUDED.timezone, user_preferences.timezone),
+                updated_at = CURRENT_TIMESTAMP
+            """, (
+                user_id,
+                json.dumps(voice_configs) if voice_configs is not None else None,
+                meta_prompt,
+                json.dumps(state_config) if state_config is not None else None,
+                selected_state,
+                timezone,
+            ))
 
         db.commit()
     finally:

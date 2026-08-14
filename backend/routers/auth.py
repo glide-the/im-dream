@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # [Input] Consume auth/database modules and shared current-user dependency.
 # [Output] Register authentication, logout, current-user, and first-login
-#          import routes.
+#          import routes; registration commits with Admin-owned default Free
+#          provisioning or fails closed.
 # [Pos] auth route node in backend/routers
 # [Sync] 2026-05-25: extracted auth and migration endpoints from backend/server.py.
 # [Sync] 2026-06-23: add /auth/me and /auth/logout aliases for OAuth and
 #                    Device Flow token clients while keeping /api/me.
+# [Sync] 2026-08-14: map transactional user/default-Free provisioning failure
+#                    to a retryable 503 instead of an email-conflict 400.
 
 from typing import Optional
 
@@ -70,6 +73,11 @@ def register(request: RegisterRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except database.UserRegistrationUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Registration service is temporarily unavailable",
+        ) from None
 
     database.auto_fork_system_decks(user_id)
     token = auth.create_access_token(user_id, request.email)

@@ -7,13 +7,20 @@
 // [Sync] 2026-07-23: theme control now reads/writes the unified theme store
 //                    (utils/theme) instead of its own 'dashboard-theme' key and
 //                    private data-theme effect, matching ModelConfigSection.
+// [Sync] 2026-08-14: show Admin's callable default model for users without a
+//                    saved model preference.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
 import { emitWorkspaceModeChanged } from '../../lib/system-config-events';
 import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
-import { fetchGatewayModels, gatewayModelsErrorMessage, type GatewayModel } from '../../api/gatewayModelsApi';
+import {
+  fetchGatewayModels,
+  gatewayModelsErrorMessage,
+  resolveGatewayModelSelection,
+  type GatewayModel,
+} from '../../api/gatewayModelsApi';
 
 export type { ThemeMode };
 
@@ -70,7 +77,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
         setWorkspaceMode(config.workspace_enabled ?? true);
         setModelOptions(catalog.models);
         setModelError(null);
-        setSelectedModel(config.model ?? '');
+        setSelectedModel(resolveGatewayModelSelection(config.model, catalog));
         setDirty(false);
       } catch (error) {
         if (active) setModelError(gatewayModelsErrorMessage(error));

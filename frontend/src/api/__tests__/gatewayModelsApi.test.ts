@@ -1,5 +1,14 @@
+// [Input] Gateway model catalog payloads and frontend effective-selection helper.
+// [Output] Verify strict catalog validation and Admin-default selection for new users.
+// [Pos] gateway model API contract test in frontend/src/api/__tests__
+// [Sync] 2026-08-14: cover callable Admin default fallback and invalid default rejection.
+
 import { expect, test } from '@playwright/test';
-import { GatewayModelsApiError, parseGatewayModelCatalog } from '../gatewayModelsApi';
+import {
+  GatewayModelsApiError,
+  parseGatewayModelCatalog,
+  resolveGatewayModelSelection,
+} from '../gatewayModelsApi';
 
 const catalog = {
   data: [{
@@ -37,6 +46,21 @@ test('catalog preserves visible locked models and a callable Free default', () =
     ['dream-balanced', true],
     ['dream-premium', false],
   ]);
+});
+
+test('new users use the Admin callable default without creating a browser default', () => {
+  const parsed = parseGatewayModelCatalog(catalog);
+  expect(resolveGatewayModelSelection(undefined, parsed)).toBe('dream-balanced');
+  expect(resolveGatewayModelSelection('', parsed)).toBe('dream-balanced');
+  expect(resolveGatewayModelSelection('dream-premium', parsed)).toBe('dream-premium');
+});
+
+test('catalog rejects a default alias that is absent or not callable', () => {
+  const lockedDefault = structuredClone(catalog) as unknown as {
+    defaultModelAlias: string;
+  };
+  lockedDefault.defaultModelAlias = 'dream-premium';
+  expect(() => parseGatewayModelCatalog(lockedDefault)).toThrow(GatewayModelsApiError);
 });
 
 test('catalog fails closed on legacy scope fields or missing availability metadata', () => {

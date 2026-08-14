@@ -1,4 +1,19 @@
-"""Opt-in, rollback-only contract for Dream's PostgreSQL runtime helpers."""
+# [Input] Consume backend/database.py against an explicitly owned disposable
+#         PostgreSQL database with Admin plan seed.
+# [Output] Verify runtime SQL and same-transaction canonical user/default-Free
+#          behavior with rollback-only cleanup.
+# [Pos] opt-in PostgreSQL runtime contract test in backend/tests
+# [Sync] 2026-08-14: assert user creation yields active Free Subscription,
+#                    its enabled default model entitlement, conserved Allowance,
+#                    and activation Event.
+# [Sync] 2026-08-14: rollback verification compares the pre-test database
+#                    baseline because the full-business harness has seeded users.
+
+"""Opt-in, rollback-only contract for Dream's PostgreSQL runtime helpers.
+
+The disposable target must include the Admin plan seed so canonical user
+creation can prove its same-transaction default-Free postcondition.
+"""
 
 from __future__ import annotations
 
@@ -52,6 +67,17 @@ def test_runtime_helpers_execute_on_postgres_and_rollback(monkeypatch) -> None:
     database.close_db()
 
     real_lease = database.get_db()
+    count_query = """
+        SELECT
+          (SELECT count(*) FROM users) AS users,
+          (SELECT count(*) FROM user_sessions) AS sessions,
+          (SELECT count(*) FROM daily_pictures) AS daily_pictures,
+          (SELECT count(*) FROM chat_thread) AS threads,
+          (SELECT count(*) FROM reflection_task) AS reflection_tasks,
+          (SELECT count(*) FROM decks) AS decks,
+          (SELECT count(*) FROM voices) AS voices
+    """
+    baseline_counts = dict(real_lease.execute(count_query).fetchone())
     rollback_lease = _RollbackOnlyLease(real_lease)
     original_get_db = database.get_db
     database.get_db = lambda: rollback_lease
@@ -64,6 +90,54 @@ def test_runtime_helpers_execute_on_postgres_and_rollback(monkeypatch) -> None:
             "PostgreSQL Runtime",
         )
         assert database.get_user_by_id(user_id)["email"].startswith("pg-runtime-")
+        free_registration = real_lease.execute(
+            """
+            SELECT
+              plan.code AS plan_code,
+              subscription.status AS subscription_status,
+              allowance.granted_tokens,
+              allowance.bonus_granted_tokens,
+              allowance.reserved_tokens,
+              allowance.consumed_tokens,
+              event.event_type,
+              model.code AS default_model_alias
+            FROM platform_users AS platform_user
+            JOIN subscriptions AS subscription
+              ON subscription.platform_user_id = platform_user.id
+            JOIN subscription_plan_versions AS version
+              ON version.id = subscription.plan_version_id
+            JOIN subscription_plans AS plan ON plan.id = version.plan_id
+            JOIN subscription_plan_entitlements AS entitlement
+              ON entitlement.plan_version_id = version.id
+             AND entitlement.enabled = TRUE
+             AND entitlement.is_default = TRUE
+            JOIN ai_models AS model
+              ON model.id = entitlement.model_id
+             AND model.enabled = TRUE
+            JOIN subscription_usage_allowances AS allowance
+              ON allowance.subscription_id = subscription.id
+            JOIN subscription_events AS event
+              ON event.subscription_id = subscription.id
+            WHERE platform_user.source = 'ink-dream'
+              AND platform_user.external_user_id = %s
+              AND subscription.status = 'active'
+              AND plan.code = 'free'
+              AND event.event_type = 'activated'
+            """,
+            (str(user_id),),
+        ).fetchone()
+        assert free_registration is not None
+        assert free_registration["plan_code"] == "free"
+        assert free_registration["subscription_status"] == "active"
+        assert free_registration["event_type"] == "activated"
+        assert free_registration["default_model_alias"]
+        assert free_registration["granted_tokens"] > 0
+        assert (
+            free_registration["reserved_tokens"]
+            + free_registration["consumed_tokens"]
+            <= free_registration["granted_tokens"]
+            + free_registration["bonus_granted_tokens"]
+        )
 
         database.save_preferences(
             user_id,
@@ -168,27 +242,8 @@ def test_runtime_helpers_execute_on_postgres_and_rollback(monkeypatch) -> None:
 
     verification = database.get_db()
     try:
-        counts = verification.execute(
-            """
-            SELECT
-              (SELECT count(*) FROM users) AS users,
-              (SELECT count(*) FROM user_sessions) AS sessions,
-              (SELECT count(*) FROM daily_pictures) AS daily_pictures,
-              (SELECT count(*) FROM chat_thread) AS threads,
-              (SELECT count(*) FROM reflection_task) AS reflection_tasks,
-              (SELECT count(*) FROM decks) AS decks,
-              (SELECT count(*) FROM voices) AS voices
-            """
-        ).fetchone()
-        assert dict(counts) == {
-            "users": 0,
-            "sessions": 0,
-            "daily_pictures": 0,
-            "threads": 0,
-            "reflection_tasks": 0,
-            "decks": 0,
-            "voices": 0,
-        }
+        counts = verification.execute(count_query).fetchone()
+        assert dict(counts) == baseline_counts
     finally:
         verification.close()
         database.close_db()

@@ -1,6 +1,9 @@
 // [Input] Auth token and Dream same-origin Gateway models BFF.
-// [Output] Strict platform model catalog DTOs for Settings controls.
+// [Output] Strict platform model catalog DTOs and effective saved/default
+//          selection resolution for Settings controls.
 // [Pos] frontend API boundary for Admin public Gateway models.
+// [Sync] 2026-08-14: use Admin's callable defaultModelAlias when a new user
+//                    has not saved an explicit model preference.
 import { z } from 'zod';
 import { getAuthToken } from '../contexts/AuthContext';
 import { API_BASE } from '../lib/apiBase';
@@ -35,7 +38,20 @@ const gatewayModelSchema = z.object({
 const gatewayModelsEnvelopeSchema = z.object({
   data: z.array(gatewayModelSchema),
   defaultModelAlias: aliasSchema.nullable(),
-}).strict();
+}).strict().superRefine((catalog, context) => {
+  if (
+    catalog.defaultModelAlias !== null
+    && !catalog.data.some(
+      (model) => model.modelAlias === catalog.defaultModelAlias && model.callable,
+    )
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['defaultModelAlias'],
+      message: 'Default model must be present and callable.',
+    });
+  }
+});
 
 export type GatewayModel = z.infer<typeof gatewayModelSchema>;
 export type GatewayModelCatalog = {
@@ -56,6 +72,18 @@ export function parseGatewayModelCatalog(payload: unknown): GatewayModelCatalog 
   const parsed = gatewayModelsEnvelopeSchema.safeParse(payload);
   if (!parsed.success) throw new GatewayModelsApiError(502);
   return { models: parsed.data.data, defaultModelAlias: parsed.data.defaultModelAlias };
+}
+
+export function resolveGatewayModelSelection(
+  savedModelAlias: string | null | undefined,
+  catalog: GatewayModelCatalog,
+): string {
+  const saved = savedModelAlias?.trim() ?? '';
+  if (saved) return saved;
+  const fallback = catalog.defaultModelAlias;
+  return fallback && catalog.models.some(
+    (model) => model.modelAlias === fallback && model.callable,
+  ) ? fallback : '';
 }
 
 export async function fetchGatewayModels(signal?: AbortSignal): Promise<GatewayModelCatalog> {

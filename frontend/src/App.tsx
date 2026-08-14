@@ -18,6 +18,7 @@
 // [Sync] 2026-07-07: route the connector entry into ChatView so the connector workbench lives under the chat shell instead of a standalone page.
 // [Sync] 2026-07-07: mount ChatView in a fixed flex viewport so embedded connector panels cannot force page-level overflow.
 // [Sync] 2026-07-08: route Connector navigation to Settings resource-link management and keep Chat on the lightweight landing panel only.
+// [Sync] 2026-08-14: defer authenticated Deck voice loading until registration/login completes.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -570,6 +571,7 @@ export default function App() {
 
   // @@@ Fetch default voices from backend and load from deck system
   useEffect(() => {
+    let active = true;
     getDefaultVoices().then(async backendVoices => {
       const converted: Record<string, VoiceConfig> = {};
       for (const [name, data] of Object.entries(backendVoices)) {
@@ -584,7 +586,8 @@ export default function App() {
       }
 
       // @@@ Try loading from deck system first, then localStorage, then defaults
-      const deckVoices = await loadVoicesFromDecks();
+      const deckVoices = isAuthenticated ? await loadVoicesFromDecks() : {};
+      if (!active) return;
       const hasDecks = Object.keys(deckVoices).length > 0;
       const configs = hasDecks ? deckVoices : (getVoices() || converted);
       setVoiceConfigs(configs);
@@ -596,7 +599,10 @@ export default function App() {
         engineRef.current.setVoiceConfigs(configs);
       }
     });
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [engineRef, isAuthenticated]);
 
   // @@@ Update engine when voice configs change
   useEffect(() => {
