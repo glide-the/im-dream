@@ -110,6 +110,16 @@ Hook 若无法完成权限校验或原子发布，同一 Chat turn 使用既有�
 - 同一或后续 turn 生成新源文件：Hook 从新文件重建 stage；
 - launch seed 没有特殊保留权，不能覆盖 `/drama-init` 或其他 Skill 的新文件事实。
 
+Execution 剧本创作台消费每个 stage 的当前集合，只显示可阅读的人物、场景、分镜和 Episode
+产物。页面不再把 stage revision 派生成“工作空间更新流”、“Agent 工作空间历史”、变更
+时间线或来源文件计数。
+revision 继续服务 Hook 幂等、并发校验和 last-good 恢复，但不是独立的用户业务模块。
+
+Execution 默认把三个 stage 作为“初稿”主工作面直接展示，不使用折叠容器。Episode Artifact
+与 Story Index 位于互斥的“同步”扩展视图；用户通过 Dream Agent 标题栏中 Chat 旁的
+“初稿 / 同步”按钮切换。该本地选择不进入 stage、manifest、Observer 或数据库，刷新和切换
+Run 后默认回到初稿。
+
 Dream 页面继续使用现有 actor-scoped `GET .../dream-files`。该 GET 只读 `run.json` 和 stage 文件，无调度、恢复或启动 Agent 的副作用。页面运行中轮询，根 turn 结束后立即刷新；刷新浏览器或从 Chat 切回 Dream 时仍由同一 thread/run 恢复。
 
 Dream 回访查询和 Admin 只读查询不扫描工作台文件。它们优先读取 Hook 已物化的
@@ -261,6 +271,8 @@ sequenceDiagram
 - 重复内容同步为 no-op；修改文件后 manifest 内容摘要变化。
 - `/drama-init` 或任意 Skill 删除旧源后旧 stage 消失；新源出现后页面仅显示新文件事实。
 - 后续自然语言“修改标题”会更新 canonical `project.yaml.project_name`，并在成功 turn 后同步到 `.dream` 私有副本、PostgreSQL Story 投影和 Execution 页 Project 标题。
+- Execution 页面不出现“工作空间更新流”或 revision 时间线；删除该区块不影响 Hook、stage、
+  Artifact、Story Index、同 thread 对话和当前产物阅读。
 - Project 标题和 Episode 标题分别来自 `project.yaml` 与 Episode 文件；两者不得相互覆盖。
 - 新 workspace 初始化时即存在静态 `WORKBENCH.md`；后续每个 Dream turn 都刷新动态事实，
   持久化 tool parts 能证明真实 Agent 读取了本轮注入的实际路径。

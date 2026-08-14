@@ -531,6 +531,30 @@
 
 .story-workspace-dream-agent-dialog__heading-copy { min-width: 0; }
 .story-workspace-dream-agent-dialog__header-actions { display: flex; flex: none; align-items: center; gap: 13px; }
+.story-workspace-dream-agent-dialog__view-switch {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 1px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--dream-rule) 70%, transparent);
+  border: 1px solid var(--dream-rule);
+  border-radius: 999px;
+}
+.story-workspace-dream-agent-dialog__header .story-workspace-dream-agent-dialog__view-switch button {
+  min-width: 42px;
+  min-height: 26px;
+  padding: 3px 9px;
+  color: var(--dream-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1;
+}
+.story-workspace-dream-agent-dialog__header .story-workspace-dream-agent-dialog__view-switch button[aria-pressed="true"] {
+  color: var(--dream-paper);
+  background: var(--dream-action);
+}
 .story-workspace-dream-agent-dialog__kicker { display: flex; min-width: 0; align-items: center; gap: 8px; }
 .story-workspace-dream-agent-dialog__kicker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1440,7 +1464,8 @@
   .story-workspace-dream-agent-rail__meta { grid-column: 1 / -1; }
   .story-workspace-dream-agent-dialog { position: fixed; inset: auto 8px 8px; width: auto; max-height: min(88dvh, 760px); min-height: min(520px, 82dvh); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--dream-ink) 24%, transparent), 0 12px 30px color-mix(in srgb, var(--dream-ink) 13%, transparent); }
   .story-workspace-dream-agent-dialog--conversation { height: min(760px, calc(100dvh - 16px)); min-height: 0; max-height: none; grid-template-rows: auto minmax(0, 1fr); }
-  .story-workspace-dream-agent-dialog__header-actions { align-items: flex-end; flex-direction: column; gap: 6px; }
+  .story-workspace-dream-agent-dialog__header-actions { max-width: 146px; flex-wrap: wrap; justify-content: flex-end; gap: 6px 10px; }
+  .story-workspace-dream-agent-dialog__view-switch { flex: 0 0 100%; margin-left: auto; }
   .story-workspace-dream__confirmation { position: fixed; right: 0; bottom: 0; left: 0; min-height: 60px; gap: 12px; padding: 9px 18px; }
   .story-workspace-dream__confirmation > div:first-child { min-width: 0; }
   .story-workspace-dream__confirmation span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

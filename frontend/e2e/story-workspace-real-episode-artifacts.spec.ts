@@ -216,13 +216,16 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     }, RUN_ID);
     expect(browserParserError).toBeNull();
 
-    const overview = page.getByRole('article', { name: 'Episode Overview' });
-    await expect(overview).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Dream 初稿工作台' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Episode 产物工作台' })).toHaveCount(0);
     const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
     await openAgent.click();
     let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
     await expect(agentDialog).toBeVisible();
     await expect(agentDialog.getByText('Episode 下一步')).toHaveCount(0);
+    await agentDialog.getByRole('button', { name: '同步', exact: true }).click();
+    await expect(agentDialog.getByRole('button', { name: '同步', exact: true }))
+      .toHaveAttribute('aria-pressed', 'true');
     await page.screenshot({
       path: resolve(EVIDENCE_DIR, 'dream-agent-desktop-1440x1000.png'),
       fullPage: true,
@@ -230,6 +233,8 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     await page.keyboard.press('Escape');
     await expect(agentDialog).toHaveCount(0);
     await expect(openAgent).toBeFocused();
+    const overview = page.getByRole('article', { name: 'Episode Overview' });
+    await expect(overview).toBeVisible();
     const progress = overview.getByRole('list', { name: 'EP01 产物进度' });
     await expect(progress).toBeVisible();
     await expect(progress.locator('li')).toHaveCount(6);
@@ -257,8 +262,6 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       await readScript.press('Enter');
       await expect(reader).toBeVisible();
       await expect(reader).toBeInViewport();
-      await expect(page.locator('details').filter({ hasText: 'Dream 初稿阶段投影' }))
-        .toHaveAttribute('open', '');
       await expect(reader.getByRole('tab', { name: /剧本/ }))
         .toHaveAttribute('aria-selected', 'true');
       await expect(reader.getByRole('tab', { name: /剧本/ })).toBeFocused();

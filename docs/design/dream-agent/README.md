@@ -39,6 +39,11 @@ Dream 没有第二套 Agent runtime、SSE、parser 或 reducer。
 - 可索引 Episode 存在时，Hook 幂等刷新 PostgreSQL Story Project 投影；Execution 顶部显示 Project 标题，Episode 区保留独立标题。
 - Dream 工作空间标题在 Execution、Dream 回访和 Admin 列表中统一读取 Project 投影；Project 尚未构建时才显示 launch 创作目标前 80 字符。
 - Dream 页面通过既有 actor-scoped `dream-files` GET 展示，不新增页面协议。
+- Execution 剧本创作台只展示当前人物、场景、分镜和 Episode 产物，不展示“工作空间更新流”、
+  stage revision 时间线或来源文件计数；revision 仅作为服务端幂等与读取一致性事实存在。
+- Execution 默认直接显示人物、场景和分镜“初稿”工作台，不保留初稿折叠层；Dream Agent
+  标题栏在 Chat 旁提供“初稿 / 同步”切换，“同步”按需显示 Episode Artifact、文件 reader、
+  Story Index、审阅和辅助产物。切换是非持久化页面状态，不触发 Hook 或 Agent turn。
 - 刷新、Dream→Chat→Dream 都继续使用同一 thread，不重新发起首轮消息。
 - Agent failed/cancelled/Stop 时不发布本轮半成品；同步异常不制造第二个 Chat 终态。
 

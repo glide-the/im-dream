@@ -188,6 +188,29 @@ async function sendDialogueAndWait(
 async function expectExecutionProjection(page: Page, token: string): Promise<void> {
   await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
   await expect(page.getByRole('heading', { level: 1, name: EXPECTED_TITLE })).toBeVisible();
+  const projection = page.getByRole('region', { name: 'Dream 初稿工作台' });
+  await expect(projection).toBeVisible();
+  await expect(page.locator('#story-workspace-episode-title')).toHaveCount(0);
+  await expect(page.getByText('工作空间更新流', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('stage revisions', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Agent 工作空间历史', { exact: true })).toHaveCount(0);
+
+  await projection.getByRole('tab', { name: /^Assets/ }).click();
+  const assetIndex = projection.locator('#story-workspace-execution-index');
+  await expect(assetIndex).toBeVisible();
+  expect(await assetIndex.getByRole('button').count()).toBeGreaterThan(0);
+  await assetIndex.getByRole('button').first().click();
+  await expect(projection.getByRole('button', { name: '← 返回故事线' })).toBeVisible();
+  await projection.getByRole('button', { name: '← 返回故事线' }).click();
+  await projection.getByRole('tab', { name: /^Outline/ }).click();
+  const outlineIndex = projection.locator('#story-workspace-execution-index');
+  await expect(outlineIndex).toBeVisible();
+  expect(await outlineIndex.getByRole('button').count()).toBeGreaterThan(0);
+
+  await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
+  const agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+  await agentDialog.getByRole('button', { name: '同步', exact: true }).click();
+  await agentDialog.getByRole('button', { name: '收起 Dream Agent' }).click();
   await expect(page.locator('#story-workspace-episode-title'))
     .toHaveText(EXPECTED_EPISODE_TITLE);
   const response = await page.request.get(

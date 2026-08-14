@@ -1,6 +1,7 @@
 // [Input] Story Workspace execution and Dream dialog sources.
 // [Output] Static integration guards for read-only artifacts and shared Chat interaction.
 // [Pos] Prevents the deleted Episode action state machine from returning.
+// [Sync] 2026-08-14: keep Episode artifacts behind the presentation-only sync view.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -36,6 +37,9 @@ test('Dream dialog composes the shared Chat panel without workflow recommendatio
   expect(DIALOG_SOURCE).not.toContain('recommendedAction');
   expect(DIALOG_SOURCE).not.toContain('workflowActions');
   expect(DIALOG_SOURCE).not.toContain('Episode 下一步');
+  expect(DIALOG_SOURCE).toContain('aria-label="工作台视图"');
+  expect(DIALOG_SOURCE).toContain('初稿');
+  expect(DIALOG_SOURCE).toContain('同步');
 });
 
 test('Episode artifact query exposes GET, ETag, polling and invalidation only', () => {

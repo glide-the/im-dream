@@ -12,6 +12,12 @@
 // [Sync] 2026-08-13: hand the dialog's bound Dream thread to canonical Chat.
 // [Sync] 2026-08-14: render Hook-published complete character/scene documents
 //                    in the focus layer while keeping index summaries compact.
+// [Sync] 2026-08-14: remove the revision-derived workspace update feed; keep
+//                    the screenplay workbench focused on current artifacts.
+// [Sync] 2026-08-14: separate YAML frontmatter from Markdown prose and bind
+//                    storyboard notes to the selected projected shot.
+// [Sync] 2026-08-14: make the Dream draft the default full workbench and move
+//                    Episode artifacts behind the dialog's draft/sync switch.
 
 import {
   useCallback,
@@ -42,7 +48,10 @@ import type {
   StoryWorkspaceEpisodeArtifactSurface,
 } from '../../hooks/story-workspace/contracts';
 import { useStoryWorkspaceEpisodeArtifacts } from '../../hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts';
-import { StoryWorkspaceDreamAgentDialog } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog';
+import {
+  StoryWorkspaceDreamAgentDialog,
+  type StoryWorkspaceExecutionView,
+} from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog';
 import { StoryWorkspaceEpisodeNarrativeWorkbench } from '../../components/story-workspace/episode/StoryWorkspaceEpisodeNarrativeWorkbench';
 import {
   StoryWorkspaceEpisodeArtifactReader,
@@ -69,6 +78,7 @@ import {
   storyWorkspaceExecutionFocusNeighbors,
   storyWorkspaceResolveDreamDisplayTitle,
 } from './executionViewModel';
+import { storyWorkspaceBuildAssetDocumentViewModel } from './assetDocumentViewModel';
 import './StoryWorkspaceExecutionPage.css';
 import './StoryWorkspaceDreamPage.css';
 
@@ -108,14 +118,34 @@ function StoryWorkspaceAssetContent({
   if (!sourceFile.toLowerCase().endsWith('.md')) {
     return <pre><code>{content}</code></pre>;
   }
+  const document = storyWorkspaceBuildAssetDocumentViewModel(content);
   return (
-    <ReactMarkdown
-      components={ASSET_MARKDOWN_COMPONENTS}
-      remarkPlugins={[remarkGfm]}
-      skipHtml
-    >
-      {content}
-    </ReactMarkdown>
+    <>
+      {document.metadata.length > 0 && (
+        <dl aria-label="资产元数据" className="story-workspace-collaboration__asset-metadata">
+          {document.metadata.map((entry) => (
+            <div key={entry.key}>
+              <dt>{entry.label}</dt>
+              <dd>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {document.metadataFallback !== null && (
+        <pre aria-label="资产元数据原文"><code>{document.metadataFallback}</code></pre>
+      )}
+      {document.body && (
+        <div className="story-workspace-collaboration__asset-prose">
+          <ReactMarkdown
+            components={ASSET_MARKDOWN_COMPONENTS}
+            remarkPlugins={[remarkGfm]}
+            skipHtml
+          >
+            {document.body}
+          </ReactMarkdown>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -316,6 +346,7 @@ export function StoryWorkspaceExecutionPage({
   const [activeModule, setActiveModule] = useState<ExecutionModule>('outline');
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
+  const [workspaceView, setWorkspaceView] = useState<StoryWorkspaceExecutionView>('draft');
   const [focusedArtifact, setFocusedArtifact] =
     useState<StoryWorkspaceEpisodeReadableArtifact>('storyboard.yaml');
   const [pendingArtifactReaderFocus, setPendingArtifactReaderFocus] =
@@ -323,7 +354,6 @@ export function StoryWorkspaceExecutionPage({
   const [episodeExpandedKeys, setEpisodeExpandedKeys] =
     useState<ReadonlySet<string>>(() => new Set());
   const agentPreviewTriggerRef = useRef<HTMLButtonElement>(null);
-  const dreamProjectionDetailsRef = useRef<HTMLDetailsElement>(null);
   const episodeArtifactReaderRef = useRef<HTMLDivElement>(null);
   const { run, selectRun } = useWorkflowRun({ eventsEnabled: true });
   const currentRun = run?.workflow_run_id === runId ? run : null;
@@ -432,9 +462,6 @@ export function StoryWorkspaceExecutionPage({
     () => [...(workspace?.assets ?? []), ...(workspace?.outline ?? [])],
     [workspace],
   );
-  const storyboardFocusEntry = workspace?.outline.find(
-    (entry) => entry.stage === 'storyboards',
-  ) ?? null;
   const focusedEntry = focusKey
     ? allEntries.find((entry) => entry.key === focusKey) ?? null
     : null;
@@ -446,6 +473,7 @@ export function StoryWorkspaceExecutionPage({
   }, [focusKey, focusedEntry?.module, workspace?.assets, workspace?.outline]);
 
   useEffect(() => {
+    setWorkspaceView('draft');
     setActiveModule('outline');
     setFocusKey(null);
     setFocusedArtifact('storyboard.yaml');
@@ -456,23 +484,18 @@ export function StoryWorkspaceExecutionPage({
   const handleEpisodeArtifactRead = useCallback((
     artifact: StoryWorkspaceEpisodeReadableArtifact,
   ) => {
-    if (storyboardFocusEntry === null) return;
-    if (dreamProjectionDetailsRef.current !== null) {
-      dreamProjectionDetailsRef.current.open = true;
-    }
-    setActiveModule('outline');
-    setFocusKey(storyboardFocusEntry.key);
+    setWorkspaceView('sync');
     setFocusedArtifact(artifact);
     setPendingArtifactReaderFocus(artifact);
-  }, [storyboardFocusEntry]);
-  const episodeArtifactReadAction = storyboardFocusEntry === null
-    ? undefined
-    : handleEpisodeArtifactRead;
+  }, []);
+  const episodeArtifactReadAction = episodeSurface?.bindingAvailability === 'bound'
+    ? handleEpisodeArtifactRead
+    : undefined;
 
   useEffect(() => {
     if (
       pendingArtifactReaderFocus === null
-      || focusedEntry?.stage !== 'storyboards'
+      || workspaceView !== 'sync'
       || focusedArtifact !== pendingArtifactReaderFocus
     ) return;
     const frame = window.requestAnimationFrame(() => {
@@ -492,7 +515,7 @@ export function StoryWorkspaceExecutionPage({
       ));
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focusedArtifact, focusedEntry?.stage, pendingArtifactReaderFocus]);
+  }, [focusedArtifact, pendingArtifactReaderFocus, workspaceView]);
 
   useEffect(() => {
     if (!focusKey || allEntries.some((entry) => entry.key === focusKey)) return;
@@ -587,6 +610,14 @@ export function StoryWorkspaceExecutionPage({
   const selectedEpisodeShot = episodeSelection?.kind === 'shot'
     ? episodeViewModel?.shotsById[episodeSelection.id] ?? null
     : null;
+  const storyboardShots = episodeSurface?.bindingAvailability === 'bound'
+    ? episodeSurface.narrative?.shots ?? []
+    : [];
+  const focusedStoryboardShot = selectedEpisodeShot ?? storyboardShots[0] ?? null;
+  const storyboardDurationSeconds = storyboardShots.reduce(
+    (total, shot) => total + (shot.timing.durationSec ?? 0),
+    0,
+  );
   const scriptArtifactAvailability = episodeSurface?.bindingAvailability === 'bound'
     ? storyWorkspaceEpisodeArtifactAvailability(episodeSurface, 'script.md')
     : 'not_generated';
@@ -658,9 +689,12 @@ export function StoryWorkspaceExecutionPage({
         </button>
       </header>
 
-      {episodeSurface?.bindingAvailability === 'bound' && (
-      <details ref={dreamProjectionDetailsRef}>
-        <summary>Dream 初稿阶段投影</summary>
+      {workspaceView === 'draft' && (
+      <section
+        aria-label="Dream 初稿工作台"
+        className="story-workspace-collaboration__draft-surface"
+        id="story-workspace-draft-surface"
+      >
         <div className="story-workspace-collaboration__surface">
         {focusedEntry ? (
           <main
@@ -696,8 +730,16 @@ export function StoryWorkspaceExecutionPage({
               </div>
 
               <section className="story-workspace-collaboration__prose">
-                <span>{focusedEntry.content ? '完整资产资料' : '主要信息'}</span>
-                {focusedEntry.content ? (
+                <span>{focusedEntry.stage === 'storyboards'
+                  ? '分镜概览'
+                  : focusedEntry.content ? '完整资产资料' : '主要信息'}</span>
+                {focusedEntry.stage === 'storyboards' ? (
+                  <p>
+                    {storyboardShots.length > 0
+                      ? `共 ${storyboardShots.length} 个镜头 · ${storyboardDurationSeconds} 秒`
+                      : '当前尚未投影出可阅读镜头。'}
+                  </p>
+                ) : focusedEntry.content ? (
                   <div className="story-workspace-collaboration__asset-document">
                     <StoryWorkspaceAssetContent
                       content={focusedEntry.content}
@@ -714,37 +756,13 @@ export function StoryWorkspaceExecutionPage({
                   <section className="story-workspace-collaboration__shot-note">
                     <span>镜头说明</span>
                     <div>
-                      <b>01</b>
-                      <p>{focusedEntry.summary || '等待镜头说明写入工作空间。'}</p>
+                      <code>{focusedStoryboardShot?.shotId ?? focusedEntry.entityId}</code>
+                      <p>{focusedStoryboardShot?.visual ?? '等待镜头说明写入工作空间。'}</p>
                     </div>
                   </section>
-                  <div ref={episodeArtifactReaderRef}>
-                    <StoryWorkspaceEpisodeArtifactReader
-                      activeArtifact={focusedArtifact}
-                      artifacts={episodeSurface.artifacts}
-                      documents={episodeSurface.documents ?? []}
-                      episodeCode={episodeSurface.episodeCode ?? 'Episode'}
-                      onArtifactSelection={setFocusedArtifact}
-                      onShotSelection={(shotId) => setEpisodeSelection({ kind: 'shot', id: shotId })}
-                      selectedShotId={selectedEpisodeShot?.id ?? null}
-                      shots={episodeSurface.narrative?.shots ?? []}
-                    />
-                  </div>
                 </>
               )}
 
-              <section className="story-workspace-collaboration__history">
-                <header>
-                  <span>Agent 工作空间历史</span>
-                  <small>来自受控 stage 文件</small>
-                </header>
-                <ol>
-                  <li>
-                    <span>当前条目写入 r{focusedEntry.revision}</span>
-                    <code>{focusedEntry.sourceFile}</code>
-                  </li>
-                </ol>
-              </section>
             </article>
           </main>
         ) : (
@@ -809,30 +827,14 @@ export function StoryWorkspaceExecutionPage({
                 )}
               </section>
 
-              <section className="story-workspace-collaboration__activity">
-                <header>
-                  <span>工作空间更新流</span>
-                  <small>stage revisions</small>
-                </header>
-                <ol>
-                  {(workspace?.activity ?? []).map((entry) => (
-                    <li key={entry.key}>
-                      <span aria-hidden="true" />
-                      <div>
-                        <strong>{entry.label}</strong>
-                        <small>{entry.sourceCount} 个来源文件</small>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              </section>
             </div>
           </main>
         )}
         </div>
-      </details>
+      </section>
       )}
-      <section aria-label="Episode 产物工作台">
+      {workspaceView === 'sync' && (
+      <section aria-label="Episode 产物工作台" id="story-workspace-sync-surface">
         {episodeSurface === null ? (
           <div role="status">
             {episodeArtifacts.diagnostic !== null ? (
@@ -971,15 +973,29 @@ export function StoryWorkspaceExecutionPage({
                 />
               </div>
             )}
+            <div ref={episodeArtifactReaderRef}>
+              <StoryWorkspaceEpisodeArtifactReader
+                activeArtifact={focusedArtifact}
+                artifacts={episodeSurface.artifacts}
+                documents={episodeSurface.documents ?? []}
+                episodeCode={episodeSurface.episodeCode ?? 'Episode'}
+                onArtifactSelection={setFocusedArtifact}
+                onShotSelection={(shotId) => setEpisodeSelection({ kind: 'shot', id: shotId })}
+                selectedShotId={selectedEpisodeShot?.id ?? null}
+                shots={episodeSurface.narrative?.shots ?? []}
+              />
+            </div>
           </main>
         )}
       </section>
+      )}
 
       {agentDialogOpen && (
         <StoryWorkspaceDreamAgentDialog
           deckName={currentRun?.deck_plugin_display_name ?? '当前 Deck'}
           onClose={() => setAgentDialogOpen(false)}
           onOpenChatThread={onOpenChatThread}
+          onWorkspaceViewChange={setWorkspaceView}
           onSettled={() => {
             refreshEpisodeArtifacts();
             storyIndex.refresh();
@@ -987,6 +1003,7 @@ export function StoryWorkspaceExecutionPage({
           restoreFocusRef={agentPreviewTriggerRef}
           runId={runId}
           threadId={files.data.threadId}
+          workspaceView={workspaceView}
         />
       )}
     </section>

@@ -213,9 +213,11 @@ test('real user reads the complete 老头 character document without changing wo
     expect(String(character?.content ?? '')).toContain('动机：隐忍多年的商地故人');
 
     await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
-    await page.getByText('Dream 初稿阶段投影', { exact: true }).click();
-    await page.getByRole('tab', { name: /Assets/ }).click();
-    await page.getByRole('button').filter({ hasText: '老头（庖丁）' }).click();
+    const draft = page.getByRole('region', { name: 'Dream 初稿工作台' });
+    await expect(draft).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Episode 产物工作台' })).toHaveCount(0);
+    await draft.getByRole('tab', { name: /Assets/ }).click();
+    await draft.getByRole('button').filter({ hasText: '老头（庖丁）' }).click();
     await expect(page.getByText('完整资产资料', { exact: true })).toBeVisible();
     await expect(page.getByText('外形：满头白发，围裙满是油渍，佝偻但有精气神。', { exact: true }))
       .toBeVisible();

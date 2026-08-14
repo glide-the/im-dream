@@ -35,6 +35,7 @@ Claude session 在该 Run 中持续存在且同一 thread 历史完整，因此�
 | 工作台合同 | `.dream/WORKBENCH.md` 与 `.dream/ASSET-COLLABORATION.md` | 每轮先读取，Agent 只读 |
 | Hook | `DreamArtifactTurnHook.after_main_turn` | 成功根 turn 后按完整文件事实刷新 stage |
 | 私有页面投影 | `.dream/runtime/runs/<run-id>/stages/*.json` | Hook 生成，Agent 不直接写 |
+| Execution 当前产物 | 已发布 stage 与 Episode Artifact | 显示当前人物、场景、分镜和正文；不显示更新流 |
 | Chat/Claude session | 共享 thread、history、SSE、确认、Stop、resume | 保持不变 |
 | Claude Code 临时根 | 服务端 `CLAUDE_CODE_TMPDIR` 与 sandbox 精确 allowWrite | 统一为 `/tmp/claude` |
 
@@ -122,8 +123,11 @@ Agent 在删除或重命名身份前必须搜索 `character_refs`、`scene_refs`
 - `summary` 只承载列表摘要，保持现有索引密度；
 - `content` 是可选、受 Dream stage 文件大小上限约束的完整源文档正文，由成功根 turn 后的
   `DreamArtifactTurnHook` 与 `display_name`、`summary` 一起写入同一个 stage revision；
-- Markdown 人物/场景在聚焦页按 Markdown 显示完整标题、段落、列表和关系描述；YAML 资产按
-  原文显示，避免前端猜测 Deck 自定义字段；
+- Markdown 人物/场景在聚焦页先把 YAML frontmatter 与正文分离：frontmatter 递归展平为
+  通用元数据网格，正文继续由共享 Markdown 渲染器显示标题、段落、列表和关系描述；未知
+  Deck 字段不得丢弃或写入固定业务 DTO，解析失败时以紧凑原文回退；
+- plain YAML 资产继续按原文显示。frontmatter 分隔符不得进入 Markdown 解析器，避免 YAML
+  键值被误解释为 Setext 标题、分隔线或超大正文；
 - 旧 stage 没有 `content` 时继续用 `summary`，下一次成功根 turn 会按当前文件事实升级投影；
 - 页面不得绕过 Hook 直接读取 canonical 文件，也不得在 GET 时触发同步。失败、Stop、取消或
   Hook 失败时，页面继续显示 last-good stage，不暴露半成品文件。
@@ -131,7 +135,36 @@ Agent 在删除或重命名身份前必须搜索 `character_refs`、`scene_refs`
 该合同不为“身份、外形、动机”等字段建立固定状态机或数据库列。随机执行的 Skill 可以继续
 扩展资产文档；只要内容存在于成功发布的源文件，聚焦页就能完整呈现。
 
+Execution 不根据 stage revision 构造“工作空间更新流”或“Agent 工作空间历史”。revision
+仍保留在 stage 合同中，用于 Hook 幂等、并发与 last-good 读取；用户只需要看到当前可用
+产物及其聚焦内容，不需要额外的 revision 时间线、来源文件计数或伪造的业务进度。
+
+分镜聚焦页不重复显示扁平化的整个 storyboard 摘要：顶部只显示镜头数量和累计时长；“镜头
+说明”使用 Episode Artifact reader 当前选择的真实 `shot_id` 与 `visual`，尚未选择时显示第一
+个已投影镜头。该选择仅是只读页面联动，不建立镜头顺序状态机；其他镜头属性仍来自同一个
+storyboard 投影。
+
 ## 4. 业务时序
+
+### 4.0 已发布资产的安全呈现
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant P as Execution 页面
+    participant API as Dream files API
+    participant S as 已发布 stage
+    participant V as 资产文档视图模型
+    U->>P: 打开人物、场景或分镜详情
+    P->>API: GET 当前 run 的 files
+    API->>S: 读取 last-good stage
+    S-->>API: content、summary、entity_id
+    API-->>P: 当前 revision 的只读投影
+    P->>V: 拆分 frontmatter 与 Markdown 正文
+    V-->>P: 通用元数据行 + 正文
+    P-->>U: 响应式资产资料或当前 shot_id + visual
+    Note over P,S: 不写 canonical 文件，不触发 Hook，不改变 revision
+```
 
 ### 4.1 新增人物或场景
 
@@ -318,8 +351,13 @@ sequenceDiagram
 - 人物、场景、道具、分镜分别完成新增、更新、删除，并在每轮后验证 canonical 文件；
 - 删除引用资产不会留下已知悬空引用；
 - 成功后 Hook 更新对应 `.dream` stage，页面刷新可见；
+- Execution 只显示当前资产和 Episode 产物，不出现“工作空间更新流”、stage revision 时间线
+  或来源文件计数；
 - 人物/场景列表继续显示简短摘要；进入聚焦页后，源文档中的标题、段落、列表、关系和动机
-  均可见，旧 stage 在没有 `content` 时安全回退摘要；
+  均可见；YAML frontmatter 的嵌套字段以紧凑网格完整呈现，不产生超大标题或横向溢出；旧
+  stage 在没有 `content` 时安全回退摘要；
+- 分镜详情只显示镜头数量/时长概览；“镜头说明”随 Artifact reader 的选择显示真实
+  `shot_id + visual`，不重复整个 storyboard 摘要，也不使用固定 `01`；
 - 失败/Stop 不发布，重复无变化不增加 revision；
 - 普通 Chat 保留既有 proposal 行为，Dream turn 不再收到 legacy standalone JSON 合同；
 - 不调用真实业务的克隆数据或替代服务；真实浏览器测试使用原始本机数据和无头模式。

@@ -281,9 +281,9 @@ async function expectVisibleAssets(
 ): Promise<void> {
   await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
   await expect(page.locator('h1').first()).toBeVisible();
-  const details = page.getByText('Dream 初稿阶段投影', { exact: true });
-  await details.click();
-  await page.getByRole('tab', { name: /Assets/ }).click();
+  const draft = page.getByRole('region', { name: 'Dream 初稿工作台' });
+  await expect(draft).toBeVisible();
+  await draft.getByRole('tab', { name: /Assets/ }).click();
   for (const name of expectedNames) {
     await expect(page.getByText(name, { exact: true })).toBeVisible();
   }

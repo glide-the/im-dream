@@ -414,6 +414,10 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       await json(route, { sessions: [] });
       return;
     }
+    if (matches('POST', '/api/sessions')) {
+      await json(route, { ok: true });
+      return;
+    }
     if (
       matches(
         'GET',
@@ -669,6 +673,11 @@ test('keeps an unbound first Episode read-only while automatic publication and b
   });
 
   await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
+  await expect(page.getByRole('region', { name: 'Dream 初稿工作台' })).toBeVisible();
+  await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
+  let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+  await agentDialog.getByRole('button', { name: '同步', exact: true }).click();
+  await agentDialog.getByRole('button', { name: '收起 Dream Agent' }).click();
   await expect(page.getByRole('heading', { name: '尚未构建 Episode 产物关联' })).toBeVisible();
   await expect(page.getByRole('status').filter({
     hasText: '关联状态：等待主 Agent 成功构建并自动发布',
@@ -679,7 +688,7 @@ test('keeps an unbound first Episode read-only while automatic publication and b
   await expect(page.getByRole('button', { name: '构建第一集产物关联' })).toHaveCount(0);
 
   await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
-  const agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+  agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
   await expect(agentDialog).toBeVisible();
   await expect(agentDialog.getByRole('group', { name: 'Episode 工作流操作' })).toHaveCount(0);
   await expect(agentDialog.getByText('构建第一集产物关联', { exact: true })).toHaveCount(0);
@@ -727,24 +736,27 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
       now: new Date().toISOString(),
       timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
     }))).toEqual({ now: FROZEN_NOW, timezoneId: 'Asia/Shanghai' });
+    await expect(page.getByRole('heading', { name: '雨夜归途' }).first()).toBeVisible();
+    const executionRoot = page.locator('.story-workspace-collaboration');
+    const dreamDraft = page.getByRole('region', { name: 'Dream 初稿工作台' });
+    const artifactWorkbench = page.getByRole('region', { name: 'Episode 产物工作台' });
+    const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
+    await expect(dreamDraft).toBeVisible();
+    await expect(artifactWorkbench).toHaveCount(0);
+    await openAgent.click();
+    let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    await expect(agentDialog.getByRole('button', { name: '初稿', exact: true }))
+      .toHaveAttribute('aria-pressed', 'true');
+    await agentDialog.getByRole('button', { name: '同步', exact: true }).click();
+    await expect(agentDialog.getByRole('button', { name: '同步', exact: true }))
+      .toHaveAttribute('aria-pressed', 'true');
+    await agentDialog.getByRole('button', { name: '收起 Dream Agent' }).click();
+    await expect(dreamDraft).toHaveCount(0);
+    await expect(artifactWorkbench).toBeVisible();
     await expect(page.getByRole('heading', { name: '雨夜重逢' }).first()).toBeVisible();
     await expect(page.getByRole('status').filter({ hasText: 'EP01 产物关联：已关联' }))
       .toBeVisible();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
-    const executionRoot = page.locator('.story-workspace-collaboration');
-    const dreamProjection = page.locator('details').filter({ hasText: 'Dream 初稿阶段投影' });
-    const artifactWorkbench = page.locator('section[aria-label="Episode 产物工作台"]');
-    await expect(dreamProjection).toHaveCount(1);
-    await expect(artifactWorkbench).toHaveCount(1);
-    expect(await dreamProjection.evaluate((projection) => {
-      const artifact = document.querySelector('section[aria-label="Episode 产物工作台"]');
-      return artifact !== null && Boolean(
-        projection.compareDocumentPosition(artifact) & Node.DOCUMENT_POSITION_FOLLOWING
-      );
-    })).toBe(true);
-    expect(await dreamProjection.evaluate((projection) => (
-      (projection as HTMLDetailsElement).open
-    ))).toBe(false);
     expect(await executionRoot.evaluate((root) => getComputedStyle(root).overflowY)).toBe('auto');
     const desktopScrollRange = await executionRoot.evaluate((root) => ({
       clientHeight: root.clientHeight,
@@ -758,9 +770,6 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     const readOutline = artifactProgress.getByRole('button', { name: '阅读分集大纲' });
     await readOutline.focus();
     await readOutline.press('Enter');
-    expect(await dreamProjection.evaluate((projection) => (
-      (projection as HTMLDetailsElement).open
-    ))).toBe(true);
     const artifactReader = page.getByRole('region', { name: 'EP01 文件阅读器' });
     await expect(artifactReader).toBeVisible();
     await expect(artifactReader).toBeInViewport();
@@ -782,9 +791,8 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await expect(page.locator('[aria-label="Episode 内容工作面"] [aria-label="Episode 辅助视图"]'))
       .toBeVisible();
 
-    const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
     await openAgent.click();
-    const agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
     await expect(agentDialog).toBeVisible();
     await expect(agentDialog.getByText('Episode 下一步')).toHaveCount(0);
     await expect(agentDialog.getByText('更多工作流操作')).toHaveCount(0);
@@ -828,10 +836,8 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await expect.poll(() => state.artifactReads).toBeGreaterThan(readsBeforeRevision);
     shot = page.getByRole('treeitem', { name: 'S01-E01-C01-SH001', exact: true });
     await expect(shot).toHaveAttribute('aria-current', 'true');
-    await expect(page.getByText('雨夜车站，车灯从背景掠过。', { exact: true })).toBeVisible();
-    expect(await dreamProjection.evaluate((projection) => (
-      (projection as HTMLDetailsElement).open
-    ))).toBe(true);
+    await expect(page.getByRole('article', { name: 'Shot Detail' })
+      .getByText('雨夜车站，车灯从背景掠过。', { exact: true })).toBeVisible();
 
     await shot.press('Escape');
     await expect(page.getByRole('treeitem', { name: 'S01 车站外', exact: true }))
@@ -839,12 +845,19 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
 
     const readsBeforeReload = state.artifactReads;
     await page.reload();
+    await expect(dreamDraft).toBeVisible();
+    await openAgent.click();
+    agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    await agentDialog.getByRole('button', { name: '同步', exact: true }).click();
+    await agentDialog.getByRole('button', { name: '收起 Dream Agent' }).click();
+    await expect(agentDialog).toBeHidden();
+    await expect(openAgent).toBeFocused();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
     await expect.poll(() => state.artifactReads).toBeGreaterThan(readsBeforeReload);
-    await expect(page.getByText('雨夜车站，车灯从背景掠过。', { exact: true }))
-      .toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'EP01 文件阅读器' })).toBeVisible();
     await selectShotWithKeyboard(page);
-    await expect(page.getByText('雨夜车站，车灯从背景掠过。', { exact: true }))
+    await expect(page.getByRole('article', { name: 'Shot Detail' })
+      .getByText('雨夜车站，车灯从背景掠过。', { exact: true }))
       .toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -874,9 +887,15 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await expect(agentDialog).toBeInViewport();
     await expectDreamAgentConversationLayout(page);
     await page.screenshot({ path: resolve(EVIDENCE_DIR, 'dream-agent-narrow-390x844.png') });
-    await page.getByRole('button', { name: '收起 Dream Agent' }).click();
+    await agentDialog.getByRole('button', { name: '初稿', exact: true }).click();
     await expect(agentDialog).toBeHidden();
     await expect(openAgent).toBeFocused();
+    await expect(dreamDraft).toBeVisible();
+    await expect(artifactWorkbench).toHaveCount(0);
+    await openAgent.click();
+    await agentDialog.getByRole('button', { name: '同步', exact: true }).click();
+    await expect(agentDialog).toBeHidden();
+    await expect(artifactWorkbench).toBeVisible();
 
     await storylineToggle.click();
     const storylineSheet = page.getByRole('dialog', { name: '故事线' });

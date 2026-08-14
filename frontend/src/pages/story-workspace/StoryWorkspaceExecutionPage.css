@@ -4,6 +4,11 @@
 /* [Sync] 2026-08-14: style complete Hook-published Markdown/YAML asset documents. */
 /* [Sync] 2026-08-14: source the Execution canvas from the shared app background
    token so dark mode cannot fall back to a hard-coded light canvas. */
+/* [Sync] 2026-08-14: remove the obsolete workspace update-feed presentation. */
+/* [Sync] 2026-08-14: present asset frontmatter as responsive metadata and use
+   stable storyboard identifiers in compact shot notes. */
+/* [Sync] 2026-08-14: make the draft surface primary and keep Episode artifacts
+   in an exclusive sync surface selected from the Dream Agent header. */
 
 .story-workspace-collaboration {
   --collaboration-canvas: var(--color-bg-app, #f6efe5);
@@ -139,6 +144,13 @@
   overflow: hidden;
 }
 
+.story-workspace-collaboration__draft-surface {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
 .story-workspace-collaboration__overview-layer,
 .story-workspace-collaboration__focus-layer {
   width: 100%;
@@ -239,9 +251,7 @@
   line-height: 1.7;
 }
 
-.story-workspace-collaboration__manuscript,
-.story-workspace-collaboration__activity ol,
-.story-workspace-collaboration__history ol {
+.story-workspace-collaboration__manuscript {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -307,56 +317,6 @@
   color: var(--collaboration-action);
   font-size: 15px;
   font-weight: 400;
-}
-
-.story-workspace-collaboration__activity,
-.story-workspace-collaboration__history {
-  margin-top: 38px;
-}
-
-.story-workspace-collaboration__activity > header,
-.story-workspace-collaboration__history > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 8px;
-  color: var(--collaboration-muted);
-  border-bottom: 1px solid color-mix(in srgb, var(--collaboration-rule) 72%, transparent);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .08em;
-}
-
-.story-workspace-collaboration__activity li {
-  display: grid;
-  grid-template-columns: 12px minmax(0, 1fr);
-  gap: 12px;
-  padding: 12px 2px;
-}
-
-.story-workspace-collaboration__activity li > span {
-  width: 7px;
-  height: 7px;
-  margin-top: 4px;
-  background: var(--collaboration-action);
-  border-radius: 50%;
-}
-
-.story-workspace-collaboration__activity li div {
-  display: grid;
-  gap: 4px;
-}
-
-.story-workspace-collaboration__activity strong {
-  color: var(--collaboration-ink);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.story-workspace-collaboration__activity small {
-  color: var(--collaboration-muted);
-  font-size: 9px;
 }
 
 .story-workspace-collaboration__focus-nav {
@@ -436,6 +396,41 @@
   overflow-wrap: anywhere;
 }
 
+.story-workspace-collaboration__asset-metadata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  background: var(--collaboration-rule);
+  border: 1px solid var(--collaboration-rule);
+  border-radius: 3px;
+}
+
+.story-workspace-collaboration__asset-metadata > div {
+  min-width: 0;
+  padding: 11px 13px 12px;
+  background: var(--collaboration-canvas);
+}
+
+.story-workspace-collaboration__asset-metadata dt {
+  overflow-wrap: anywhere;
+  color: var(--collaboration-muted);
+  font: 700 9px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .045em;
+}
+
+.story-workspace-collaboration__asset-metadata dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--collaboration-ink);
+  font: 13px/1.65 Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.story-workspace-collaboration__asset-prose {
+  margin-top: 28px;
+}
+
 .story-workspace-collaboration__asset-document > :first-child {
   margin-top: 0;
 }
@@ -451,6 +446,18 @@
   color: var(--collaboration-ink);
   font-family: Georgia, serif;
   line-height: 1.35;
+}
+
+.story-workspace-collaboration__asset-document h1 {
+  font-size: clamp(25px, 3vw, 34px);
+}
+
+.story-workspace-collaboration__asset-document h2 {
+  font-size: clamp(20px, 2.2vw, 26px);
+}
+
+.story-workspace-collaboration__asset-document h3 {
+  font-size: clamp(17px, 1.8vw, 21px);
 }
 
 .story-workspace-collaboration__asset-document ul,
@@ -473,11 +480,14 @@
 .story-workspace-collaboration__shot-note > div {
   display: grid;
   max-width: 920px;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: minmax(88px, max-content) minmax(0, 1fr);
+  gap: 16px;
   margin-top: 15px;
 }
 
-.story-workspace-collaboration__shot-note b {
+.story-workspace-collaboration__shot-note code {
+  align-self: start;
+  overflow-wrap: anywhere;
   color: var(--collaboration-action);
   font-family: ui-monospace, monospace;
   font-size: 10px;
@@ -645,7 +655,7 @@
 
 .story-workspace-episode-artifact-reader__storyboard > nav button {
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   padding: 8px 10px;
   color: var(--collaboration-muted);
   background: transparent;
@@ -714,23 +724,6 @@
 .story-workspace-episode-artifact-reader__storyboard dd {
   margin: 3px 0 0;
   color: var(--collaboration-ink);
-}
-
-.story-workspace-collaboration__history li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
-  gap: 20px;
-  padding: 13px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--collaboration-rule) 64%, transparent);
-  color: var(--collaboration-ink);
-  font-size: 11px;
-}
-
-.story-workspace-collaboration__history code {
-  overflow-wrap: anywhere;
-  color: var(--collaboration-muted);
-  font-size: 9px;
-  text-align: right;
 }
 
 .story-workspace-collaboration__empty {
@@ -1194,24 +1187,6 @@
   border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 80%, transparent);
 }
 
-.story-workspace-collaboration > details {
-  flex: 0 0 auto;
-  margin: 0 clamp(20px, 3.2vw, 48px) 48px;
-  padding-top: 14px;
-  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 72%, transparent);
-}
-
-.story-workspace-collaboration > details > summary {
-  width: fit-content;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 8px 0;
-  color: var(--collaboration-muted);
-  cursor: pointer;
-  font-size: 10px;
-  letter-spacing: .05em;
-}
-
 .story-workspace-collaboration button:focus-visible,
 .story-workspace-collaboration a:focus-visible,
 .story-workspace-collaboration [role="treeitem"]:focus-visible,
@@ -1254,6 +1229,11 @@
 
   .story-workspace-collaboration__masthead h1 {
     font-size: 27px;
+  }
+
+  .story-workspace-collaboration__shot-note > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
   }
 
   .story-workspace-collaboration__agent-state,
@@ -1466,11 +1446,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .story-workspace-collaboration > details {
-    margin-right: 18px;
-    margin-bottom: 34px;
-    margin-left: 18px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

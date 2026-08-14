@@ -2,6 +2,8 @@
 // [Output] Canonical-first Project title plus Assets / Outline indexes, compact summaries, complete focus documents, and navigation seams.
 // [Pos] Story Workspace execution page pure view-model (Task 3 F5)
 // [Sync] 2026-08-14: preserve Hook-published full asset content for the focus reader.
+// [Sync] 2026-08-14: remove the revision-derived workspace update feed; the
+//                    Execution surface presents current artifacts only.
 
 import type {
   StoryWorkspaceDreamFilesResponse,
@@ -47,18 +49,9 @@ export interface StoryWorkspaceExecutionEntry {
   readonly revision: number;
 }
 
-export interface StoryWorkspaceExecutionActivity {
-  readonly key: string;
-  readonly label: string;
-  readonly sourceCount: number;
-  readonly revision: number;
-}
-
 export interface StoryWorkspaceExecutionWorkspace {
   readonly assets: readonly StoryWorkspaceExecutionEntry[];
   readonly outline: readonly StoryWorkspaceExecutionEntry[];
-  readonly activity: readonly StoryWorkspaceExecutionActivity[];
-  readonly runRevision: number;
 }
 
 /** Access guard uses the persisted Dream command, never legacy run statuses. */
@@ -97,23 +90,15 @@ export function storyWorkspaceBuildExecutionWorkspace(
 ): StoryWorkspaceExecutionWorkspace {
   const assets: StoryWorkspaceExecutionEntry[] = [];
   const outline: StoryWorkspaceExecutionEntry[] = [];
-  const activity: StoryWorkspaceExecutionActivity[] = [];
 
   for (const stage of ['characters', 'scenes', 'storyboards'] as const) {
     const projection = files.stages[stage];
     if (!projection) continue;
     const target = stage === 'storyboards' ? outline : assets;
     target.push(...projection.items.map((item) => toEntry(stage, projection.revision, item)));
-    activity.push({
-      key: `${stage}:r${projection.revision}`,
-      label: `${STAGE_COPY[stage].label}文件已写入 r${projection.revision}`,
-      sourceCount: projection.sourceFiles.length,
-      revision: projection.revision,
-    });
   }
 
-  activity.sort((left, right) => right.revision - left.revision);
-  return { assets, outline, activity, runRevision: files.runRevision };
+  return { assets, outline };
 }
 
 export function storyWorkspaceExecutionFocusNeighbors(

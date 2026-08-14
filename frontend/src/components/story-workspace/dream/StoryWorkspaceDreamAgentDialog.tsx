@@ -3,10 +3,13 @@
 //          direct handoff to the same thread in the full Chat workspace.
 // [Pos] Dream owns presentation only; it has no workflow action state machine.
 // [Sync] 2026-08-13: expose an explicit full-Chat thread handoff beside close.
+// [Sync] 2026-08-14: expose the Execution page's draft/sync presentation switch.
 
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from './storyWorkspaceDreamAgentFocus';
 import { StoryWorkspaceDreamThreadChat } from './StoryWorkspaceDreamThreadChat';
+
+export type StoryWorkspaceExecutionView = 'draft' | 'sync';
 
 export interface StoryWorkspaceDreamAgentDialogProps {
   readonly deckName: string;
@@ -16,8 +19,10 @@ export interface StoryWorkspaceDreamAgentDialogProps {
   readonly expectedMessageId?: string | null;
   readonly onClose: () => void;
   readonly onOpenChatThread: (threadId: string) => void;
+  readonly onWorkspaceViewChange: (view: StoryWorkspaceExecutionView) => void;
   readonly onSettled?: () => void;
   readonly restoreFocusRef: RefObject<HTMLButtonElement | null>;
+  readonly workspaceView: StoryWorkspaceExecutionView;
 }
 
 function visibleFocusables(root: HTMLElement | null): readonly HTMLElement[] {
@@ -43,8 +48,10 @@ export function StoryWorkspaceDreamAgentDialog({
   expectedMessageId = null,
   onClose,
   onOpenChatThread,
+  onWorkspaceViewChange,
   onSettled,
   restoreFocusRef,
+  workspaceView,
 }: StoryWorkspaceDreamAgentDialogProps) {
   const [isNarrow, setIsNarrow] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -122,6 +129,11 @@ export function StoryWorkspaceDreamAgentDialog({
     };
   }, [isNarrow]);
 
+  const selectWorkspaceView = (view: StoryWorkspaceExecutionView) => {
+    onWorkspaceViewChange(view);
+    if (isNarrow) onClose();
+  };
+
   return (
     <div
       aria-labelledby="story-workspace-dream-agent-dialog-title"
@@ -145,6 +157,28 @@ export function StoryWorkspaceDreamAgentDialog({
           </p>
         </div>
         <div className="story-workspace-dream-agent-dialog__header-actions">
+          <div
+            aria-label="工作台视图"
+            className="story-workspace-dream-agent-dialog__view-switch"
+            role="group"
+          >
+            <button
+              aria-controls="story-workspace-draft-surface"
+              aria-pressed={workspaceView === 'draft'}
+              onClick={() => selectWorkspaceView('draft')}
+              type="button"
+            >
+              初稿
+            </button>
+            <button
+              aria-controls="story-workspace-sync-surface"
+              aria-pressed={workspaceView === 'sync'}
+              onClick={() => selectWorkspaceView('sync')}
+              type="button"
+            >
+              同步
+            </button>
+          </div>
           <button
             aria-label="在 Chat 中打开当前 thread"
             className="story-workspace-dream-agent-dialog__chat-link"

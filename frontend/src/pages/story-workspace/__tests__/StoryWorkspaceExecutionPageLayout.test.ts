@@ -2,6 +2,9 @@
 // [Output] Two-depth layout guard: one overview workplane, then full-width focus replacement.
 // [Pos] Story Workspace execution page structural seam (Task 3 F10).
 // [Sync] 2026-08-14: guard the Execution canvas against a light-only fallback in dark mode.
+// [Sync] 2026-08-14: guard against restoring the removed workspace update feed.
+// [Sync] 2026-08-14: guard structured frontmatter and real storyboard note identifiers.
+// [Sync] 2026-08-14: guard default draft and exclusive dialog-selected sync surfaces.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -40,6 +43,16 @@ test('overview is one workplane with tabs and index content, never a fixed rail 
   expect(CSS_SOURCE).not.toContain('story-workspace-collaboration__rail');
 });
 
+test('screenplay workbench presents current artifacts without a workspace update feed', () => {
+  expect(PAGE_SOURCE).not.toContain('工作空间更新流');
+  expect(PAGE_SOURCE).not.toContain('stage revisions');
+  expect(PAGE_SOURCE).not.toContain('story-workspace-collaboration__activity');
+  expect(PAGE_SOURCE).not.toContain('Agent 工作空间历史');
+  expect(PAGE_SOURCE).not.toContain('story-workspace-collaboration__history');
+  expect(CSS_SOURCE).not.toContain('story-workspace-collaboration__activity');
+  expect(CSS_SOURCE).not.toContain('story-workspace-collaboration__history');
+});
+
 test('focus replaces the overview layer and keeps only full-width context navigation', () => {
   const focusStart = PAGE_SOURCE.indexOf('data-execution-depth="focus"');
   const overviewStart = PAGE_SOURCE.indexOf('data-execution-depth="overview"');
@@ -58,9 +71,22 @@ test('asset focus renders the Hook-published complete document while indexes kee
   expect(PAGE_SOURCE).toContain("focusedEntry.content ? '完整资产资料' : '主要信息'");
   expect(PAGE_SOURCE).toContain('<StoryWorkspaceAssetContent');
   expect(PAGE_SOURCE).toContain('<ReactMarkdown');
+  expect(PAGE_SOURCE).toContain('storyWorkspaceBuildAssetDocumentViewModel(content)');
+  expect(PAGE_SOURCE).toContain('aria-label="资产元数据"');
+  expect(PAGE_SOURCE).toContain('{document.body}');
   expect(PAGE_SOURCE).toContain('skipHtml');
   expect(PAGE_SOURCE).toContain("<p>{entry.summary || '等待 Agent 补充主要信息。'}</p>");
   expect(CSS_SOURCE).toContain('.story-workspace-collaboration__asset-document');
+  expect(CSS_SOURCE).toContain('.story-workspace-collaboration__asset-metadata');
+  expect(CSS_SOURCE).toMatch(/asset-document h1\s*\{[^}]*font-size:\s*clamp\(25px,\s*3vw,\s*34px\)/s);
+});
+
+test('storyboard overview and note follow projected shots instead of the flattened stage summary', () => {
+  expect(PAGE_SOURCE).toContain('focusedStoryboardShot?.shotId ?? focusedEntry.entityId');
+  expect(PAGE_SOURCE).toContain("focusedStoryboardShot?.visual ?? '等待镜头说明写入工作空间。'");
+  expect(PAGE_SOURCE).toContain('`共 ${storyboardShots.length} 个镜头 · ${storyboardDurationSeconds} 秒`');
+  expect(PAGE_SOURCE).not.toContain('<b>01</b>');
+  expect(CSS_SOURCE).toContain('.story-workspace-collaboration__shot-note code');
 });
 
 test('execution page uses exactly one dashed rule', () => {
@@ -86,22 +112,30 @@ test('execution status preview opens the Dream Agent floating dialog without mou
   expect(PAGE_SOURCE).not.toContain('<ChatView');
 });
 
-test('Episode artifacts unfold after the Dream projection on the same run execution route', () => {
-  const projectionStart = PAGE_SOURCE.indexOf('<details ref={dreamProjectionDetailsRef}>');
-  const projectionEnd = PAGE_SOURCE.indexOf('</details>', projectionStart);
+test('draft is the default full surface and Episode artifacts are an exclusive sync view', () => {
+  const projectionStart = PAGE_SOURCE.indexOf('aria-label="Dream 初稿工作台"');
   const artifactMarker = 'aria-label="Episode 产物工作台"';
   const artifactStart = PAGE_SOURCE.indexOf(artifactMarker);
   const agentDialogStart = PAGE_SOURCE.indexOf('<StoryWorkspaceDreamAgentDialog');
 
   expect(projectionStart).toBeGreaterThan(-1);
-  expect(projectionEnd).toBeGreaterThan(projectionStart);
   expect(PAGE_SOURCE.match(new RegExp(artifactMarker, 'g')) ?? []).toHaveLength(1);
-  expect(artifactStart).toBeGreaterThan(projectionEnd);
+  expect(artifactStart).toBeGreaterThan(projectionStart);
   expect(agentDialogStart).toBeGreaterThan(artifactStart);
-  expect(PAGE_SOURCE.slice(projectionStart, PAGE_SOURCE.indexOf('>', projectionStart) + 1))
-    .toBe('<details ref={dreamProjectionDetailsRef}>');
+  expect(PAGE_SOURCE).toContain("useState<StoryWorkspaceExecutionView>('draft')");
+  expect(PAGE_SOURCE).toContain("workspaceView === 'draft'");
+  expect(PAGE_SOURCE).toContain("workspaceView === 'sync'");
+  expect(PAGE_SOURCE).toContain('onWorkspaceViewChange={setWorkspaceView}');
+  expect(PAGE_SOURCE).not.toContain('<summary>Dream 初稿阶段投影</summary>');
+  expect(PAGE_SOURCE).not.toContain('dreamProjectionDetailsRef');
+  expect(DIALOG_SOURCE).toContain('aria-label="工作台视图"');
+  expect(DIALOG_SOURCE).toContain('aria-pressed={workspaceView === \'draft\'}');
+  expect(DIALOG_SOURCE).toContain('aria-pressed={workspaceView === \'sync\'}');
   expect(CSS_SOURCE).toMatch(
     /\.story-workspace-collaboration\s*\{[^}]*overflow-y:\s*auto;/s,
+  );
+  expect(CSS_SOURCE).toMatch(
+    /\.story-workspace-collaboration__draft-surface\s*\{[^}]*flex:\s*1 1 auto;/s,
   );
   expect(ROUTER_SOURCE).toContain("case 'run-execution':");
   expect(ROUTER_SOURCE).toContain('key={match.params.storyWorkspaceRunId}');

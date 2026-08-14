@@ -6,6 +6,7 @@
 // [Sync] 2026-08-13: require Chat auto-scroll to target only its owned message region,
 //                    never scrollable Story Workspace ancestors via scrollIntoView.
 // [Sync] 2026-08-13: require both Dream Agent surfaces to open their bound Chat thread.
+// [Sync] 2026-08-14: require the Execution draft/sync switch beside Chat.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -73,6 +74,18 @@ test('Dream rail and execution dialog hand the exact bound thread to canonical C
   expect(DIALOG).toContain('Chat ↗');
   expect(ROUTER).toContain('handleNavigate(STORY_WORKSPACE_PATHS.chat, undefined, threadId)');
   expect(ROUTER).toContain('onChatThreadRequest?.(chatThreadId)');
+});
+
+test('execution dialog switches the page between default draft and sync views beside Chat', () => {
+  const switchStart = DIALOG.indexOf('aria-label="工作台视图"');
+  const chatStart = DIALOG.indexOf('aria-label="在 Chat 中打开当前 thread"');
+  expect(switchStart).toBeGreaterThan(-1);
+  expect(chatStart).toBeGreaterThan(switchStart);
+  expect(DIALOG).toContain('aria-controls="story-workspace-draft-surface"');
+  expect(DIALOG).toContain('aria-controls="story-workspace-sync-surface"');
+  expect(DIALOG).toContain("onWorkspaceViewChange(view)");
+  expect(EXECUTION).toContain("useState<StoryWorkspaceExecutionView>('draft')");
+  expect(EXECUTION).not.toContain('Dream 初稿阶段投影');
 });
 
 test('mobile focus cycle remains bounded after runtime convergence', () => {

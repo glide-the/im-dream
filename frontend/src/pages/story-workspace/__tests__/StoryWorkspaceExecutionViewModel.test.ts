@@ -1,6 +1,7 @@
 // [Input] Run-scoped Dream file projections used after the single confirmation.
-// [Output] Assets / Outline indexes, revision activity and focus navigation coverage.
+// [Output] Assets / Outline indexes, current artifact content, and focus navigation coverage.
 // [Pos] Story Workspace execution collaboration view-model test (Task 3 F5)
+// [Sync] 2026-08-14: remove update-feed assertions with the deleted view-model seam.
 
 import { expect, test } from '@playwright/test';
 import type { StoryWorkspaceDreamFilesResponse } from '../../../hooks/story-workspace/contracts';
@@ -94,12 +95,7 @@ test('builds Assets and Outline from workspace files without approval states', (
     summary: '寻找真相。',
     content: '# 林默\n\n身份：调查记者。\n\n动机：寻找真相。',
   });
-  expect(workspace.activity.map((entry) => entry.label)).toEqual([
-    '分镜文件已写入 r5',
-    '人物文件已写入 r3',
-    '场景文件已写入 r2',
-  ]);
-  expect(Object.keys(workspace)).toEqual(['assets', 'outline', 'activity', 'runRevision']);
+  expect(Object.keys(workspace)).toEqual(['assets', 'outline']);
 });
 
 test('focus neighbors stay inside the ordered Outline manuscript', () => {
