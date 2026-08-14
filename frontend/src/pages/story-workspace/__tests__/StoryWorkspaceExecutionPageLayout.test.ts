@@ -1,6 +1,7 @@
 // [Input] Execution page JSX/CSS source after Dream confirmation.
 // [Output] Two-depth layout guard: one overview workplane, then full-width focus replacement.
 // [Pos] Story Workspace execution page structural seam (Task 3 F10).
+// [Sync] 2026-08-14: guard the Execution canvas against a light-only fallback in dark mode.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -55,6 +56,13 @@ test('focus replaces the overview layer and keeps only full-width context naviga
 
 test('execution page uses exactly one dashed rule', () => {
   expect(CSS_SOURCE.match(/dashed/g) ?? []).toHaveLength(1);
+});
+
+test('execution canvas follows the shared app background token in every theme', () => {
+  expect(CSS_SOURCE).toContain(
+    '--collaboration-canvas: var(--color-bg-app, #f6efe5);',
+  );
+  expect(CSS_SOURCE).not.toContain('--color-bg-warm');
 });
 
 test('execution status preview opens the Dream Agent floating dialog without mounting ChatView', () => {

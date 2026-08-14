@@ -1,9 +1,11 @@
 /* [Input] Ink & Memory UI v2 warm-paper semantic tokens. */
 /* [Output] Warm-paper Episode master-detail workbench and legacy Dream projection. */
 /* [Pos] Story Workspace post-confirmation execution page (Task 3 U12) */
+/* [Sync] 2026-08-14: source the Execution canvas from the shared app background
+   token so dark mode cannot fall back to a hard-coded light canvas. */
 
 .story-workspace-collaboration {
-  --collaboration-canvas: var(--color-bg-warm, #f6efe5);
+  --collaboration-canvas: var(--color-bg-app, #f6efe5);
   --collaboration-paper: var(--color-bg-paper, #fffaf2);
   --collaboration-ink: var(--color-text-primary, #352820);
   --collaboration-body: var(--color-text-body, #6a5144);
