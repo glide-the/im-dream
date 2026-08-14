@@ -1,5 +1,5 @@
 // [Input] Enabled Decks, durable Dream runs, one creation goal, and the dedicated Dream start hook.
-// [Output] Searchable, paginated Dream re-entry plus a launch form that navigates to the accepted run projection.
+// [Output] Canonical-title-first Dream re-entry plus a launch form that navigates to the accepted run projection.
 // [Pos] Story Workspace Dream no-run surface (Task 3 U4)
 // [Sync] 2026-08-13: add client-side re-entry search and per-group pagination without changing server order.
 
@@ -51,7 +51,7 @@ function StoryWorkspaceDreamReentryList({
       type="button"
     >
       <span className="story-workspace-dream-reentry__item-copy">
-        <strong>{run.goalPrefix}</strong>
+        <strong>{run.displayTitle}</strong>
         <small>{run.deckDisplayName} · {storyWorkspaceDreamReentryLifecycleCopy(run.lifecycle)} · {run.deckPluginVersion} · Run …{run.storyWorkspaceRunId.slice(-6)}</small>
       </span>
       <span aria-hidden="true">打开</span>

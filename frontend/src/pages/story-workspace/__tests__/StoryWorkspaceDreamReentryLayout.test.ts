@@ -27,7 +27,7 @@ test('no-run Dream workbench renders durable re-entry list before the new Dream 
   expect(LAUNCH_SOURCE).toContain('进行中的 Dream');
   expect(LAUNCH_SOURCE).toContain('最近的 Dream');
   expect(LAUNCH_SOURCE).toContain('story-workspace-dream-reentry');
-  expect(LAUNCH_SOURCE).toContain('<strong>{run.goalPrefix}</strong>');
+  expect(LAUNCH_SOURCE).toContain('<strong>{run.displayTitle}</strong>');
   expect(LAUNCH_SOURCE).toContain('<small>{run.deckDisplayName}');
   expect(LAUNCH_SOURCE).toContain('type="search"');
   expect(LAUNCH_SOURCE).toContain('story-workspace-dream-reentry__pagination');
@@ -41,6 +41,7 @@ function dreamRun(
   const storyWorkspaceRunId = `run_${number.toString(16).padStart(32, '0')}`;
   return {
     storyWorkspaceRunId,
+    displayTitle: `雨夜故事 ${number}`,
     goalPrefix: `雨夜故事 ${number}`,
     deckId: 'deck-story',
     deckDisplayName: '故事创作',
@@ -62,7 +63,7 @@ function dreamRun(
 test('Dream re-entry search matches user-facing fields without changing server order', () => {
   const runs = [
     dreamRun(1),
-    dreamRun(2, { goalPrefix: '海边来信', deckDisplayName: '克制叙事' }),
+    dreamRun(2, { displayTitle: '海边来信', goalPrefix: '旧创作目标', deckDisplayName: '克制叙事' }),
     dreamRun(3, { lifecycle: 'running', group: 'in_progress' }),
   ];
   expect(storyWorkspaceFilterDreamReentryRuns(runs, '  海边  ')).toEqual([runs[1]]);

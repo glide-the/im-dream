@@ -128,6 +128,7 @@ def _story_index_projection(
     return StoryWorkspaceStoryIndexProjection(
         runId=RUN_ID,
         projectId="didi-zhengzhou",
+        projectTitle="滴滴郑州",
         storyId=story_id,
         status=status,
         observedManifestRevision=revision,
@@ -153,6 +154,7 @@ def test_story_index_contract_normalizes_last_indexed_at_to_utc() -> None:
     projection = StoryWorkspaceStoryIndexProjection(
         runId=RUN_ID,
         projectId="didi-zhengzhou",
+        projectTitle="滴滴郑州",
         storyId="9e8e17bd-d586-5eb1-a0cf-a7a98d44c9b3",
         status="indexed",
         observedManifestRevision="sha256:" + "b" * 64,

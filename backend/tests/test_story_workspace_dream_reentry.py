@@ -119,6 +119,15 @@ def _create_schema(db: sqlite3.Connection) -> None:
           metadata TEXT,
           created_at TEXT
         );
+        CREATE TABLE story_workspace_stories (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          artifact_source_type TEXT,
+          source_run_id TEXT,
+          workspace_id TEXT,
+          source_project_id TEXT,
+          updated_at TEXT
+        );
         """
     )
 
@@ -336,6 +345,15 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         )
         self.db.commit()
 
+    def _add_project_title(self, number: int, title: str) -> None:
+        self.db.execute(
+            "INSERT INTO story_workspace_stories "
+            "(id, title, artifact_source_type, source_run_id, updated_at) "
+            "VALUES (?, ?, 'dream_episode', ?, ?)",
+            (f"story-{number}", title, run_id(number), "2026-08-05T16:00:00+00:00"),
+        )
+        self.db.commit()
+
     def _service(self, loader=None):
         from services.story_workspace.dream_reentry_service import (
             StoryWorkspaceDreamReentryService,
@@ -382,6 +400,46 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
 
         self.assertEqual(response.runs[0].story_workspace_run_id, value)
         self.assertEqual(response.runs[0].goal_prefix, goal[:80])
+        self.assertEqual(response.runs[0].display_title, goal[:80])
+
+    def test_display_title_prefers_canonical_project_title(self) -> None:
+        goal = "根据今天的长篇创作目标生成故事"
+        value = self._add_run(31, complete=True, goal=goal)
+        self._add_project_title(31, "雾中黑海湖")
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(response.runs[0].story_workspace_run_id, value)
+        self.assertEqual(response.runs[0].display_title, "雾中黑海湖")
+        self.assertEqual(response.runs[0].goal_prefix, goal)
+
+    def test_historical_run_resolves_the_same_project_title_by_stable_slug(self) -> None:
+        goal = "旧 Run 的原始创作目标"
+        value = self._add_run(32, complete=True, goal=goal)
+        metadata = self._source_metadata(32)
+        metadata["projectStorySlug"] = "proj-shared"
+        self._replace_source_metadata(32, metadata)
+        self.db.execute(
+            "INSERT INTO story_workspace_stories "
+            "(id, title, artifact_source_type, source_run_id, workspace_id, "
+            "source_project_id, updated_at) "
+            "VALUES (?, ?, 'dream_episode', ?, ?, ?, ?)",
+            (
+                "story-shared",
+                "共享 Project 标题",
+                run_id(999),
+                WORKSPACE_ID,
+                "proj-shared",
+                "2026-08-05T16:00:00+00:00",
+            ),
+        )
+        self.db.commit()
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(response.runs[0].story_workspace_run_id, value)
+        self.assertEqual(response.runs[0].display_title, "共享 Project 标题")
+        self.assertEqual(response.runs[0].goal_prefix, goal)
 
     def test_legacy_launch_without_goal_remains_visible_with_deck_fallback(self) -> None:
         value = self._add_run(7, complete=False, include_goal=False)
@@ -390,6 +448,7 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
 
         self.assertEqual(response.runs[0].story_workspace_run_id, value)
         self.assertEqual(response.runs[0].goal_prefix, "甲板一")
+        self.assertEqual(response.runs[0].display_title, "甲板一")
 
     def test_real_launch_agent_provenance_and_legacy_missing_fields_are_visible(self) -> None:
         legacy = self._add_run(8, complete=False)
@@ -586,7 +645,8 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         self.assertEqual(len(loader_calls), 102)
         self.assertEqual(len({connection_id for _, connection_id in loader_calls}), 1)
         selects = [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]
-        self.assertEqual(len(selects), 2)
+        self.assertEqual(len(selects), 3)
+        self.assertIn("STORY_WORKSPACE_STORIES", selects[1].upper())
 
     def test_only_missing_stage_file_is_empty_and_permission_or_contract_errors_propagate(self) -> None:
         value = self._add_run(40, complete=False)
@@ -638,8 +698,9 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
 
         selects = [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]
-        self.assertEqual(len(selects), 2)
-        self.assertIn("LIMIT", selects[1].upper())
+        self.assertEqual(len(selects), 3)
+        self.assertIn("STORY_WORKSPACE_STORIES", selects[1].upper())
+        self.assertIn("LIMIT", selects[2].upper())
 
     def test_rejects_malformed_actor_and_does_not_fall_back_to_another_workspace(self) -> None:
         self._add_run(20, complete=False)
@@ -664,6 +725,7 @@ class StoryWorkspaceDreamReentryRouteTest(unittest.TestCase):
                 return StoryWorkspaceDreamReentryCollection(runs=[
                     StoryWorkspaceDreamReentryItem(
                         story_workspace_run_id=run_id(99),
+                        display_title="雨夜站台",
                         goal_prefix="创作一个雨夜车站重逢的短篇故事",
                         deck_id="deck-1",
                         deck_display_name="甲板一",
@@ -692,5 +754,6 @@ class StoryWorkspaceDreamReentryRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(gateway.actor, {"actor_id": ACTOR_ID})
         self.assertEqual(response.json()["runs"][0]["storyWorkspaceRunId"], run_id(99))
+        self.assertEqual(response.json()["runs"][0]["displayTitle"], "雨夜站台")
         self.assertEqual(response.json()["runs"][0]["goalPrefix"], "创作一个雨夜车站重逢的短篇故事")
         self.assertNotIn("threadId", response.text)

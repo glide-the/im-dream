@@ -1,3 +1,9 @@
+# [Input] Authorized canonical Project/Episode files, pinned Episode authority,
+#         and the current PostgreSQL Story row.
+# [Output] Idempotent Story materialization plus a browser-safe comparison that
+#          includes the bounded Project display title.
+# [Pos] Story Workspace application service; no Agent runtime or page state.
+
 """Application orchestration for Artifact → PostgreSQL Story indexing."""
 
 from __future__ import annotations
@@ -65,6 +71,7 @@ def _canonical_timestamp(value: object | None) -> str | None:
 class ArtifactStoryIndexObservation:
     run_id: str
     project_id: str
+    project_title: str
     story_id: str | None
     status: str
     observed_manifest_revision: str | None
@@ -81,6 +88,7 @@ class ArtifactStoryIndexObservation:
         return {
             "runId": self.run_id,
             "projectId": self.project_id,
+            "projectTitle": self.project_title,
             "storyId": self.story_id,
             "status": self.status,
             "observedManifestRevision": self.observed_manifest_revision,
@@ -404,6 +412,7 @@ class ArtifactStoryIndexService:
         return ArtifactStoryIndexObservation(
             run_id=projection.source_run_id,
             project_id=projection.source_project_id,
+            project_title=projection.title,
             story_id=public_story_id,
             status=status,
             observed_manifest_revision=projection.artifact_manifest_revision,

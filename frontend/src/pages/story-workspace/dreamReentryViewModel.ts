@@ -1,5 +1,5 @@
 // [Input] Server-ordered durable Dream re-entry rows and a user-entered query/page.
-// [Output] Pure lifecycle copy, filtering, and bounded pagination projections for the Dream launch page.
+// [Output] Pure lifecycle copy, canonical-title search, and bounded pagination for Dream re-entry.
 // [Pos] Story Workspace Dream re-entry presentation policy; it never recomputes server status or order.
 // [Sync] 2026-08-13: extract searchable, per-group client pagination from the React surface.
 
@@ -27,6 +27,7 @@ export function storyWorkspaceFilterDreamReentryRuns(
   const normalizedQuery = query.trim().toLocaleLowerCase();
   if (!normalizedQuery) return runs;
   return runs.filter((run) => [
+    run.displayTitle,
     run.goalPrefix,
     run.deckDisplayName,
     run.deckPluginVersion,

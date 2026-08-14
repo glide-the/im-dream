@@ -123,6 +123,7 @@ function storyIndexProjection() {
   return {
     runId: RUN_ID,
     projectId: 'rainy-night',
+    projectTitle: '雨夜归途',
     storyId: STORY_INDEX_ID,
     status: 'indexed',
     observedManifestRevision: MANIFEST_REVISIONS[0],

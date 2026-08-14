@@ -8,7 +8,18 @@ import {
   storyWorkspaceBuildExecutionWorkspace,
   storyWorkspaceCanAccessExecution,
   storyWorkspaceExecutionFocusNeighbors,
+  storyWorkspaceResolveDreamDisplayTitle,
 } from '../executionViewModel';
+
+test('Dream display title prefers canonical Project and otherwise uses the goal prefix', () => {
+  expect(storyWorkspaceResolveDreamDisplayTitle('  雾中黑海湖  ', '很长的创作目标'))
+    .toBe('雾中黑海湖');
+  expect(storyWorkspaceResolveDreamDisplayTitle(null, '  尚未初始化的创作目标  '))
+    .toBe('尚未初始化的创作目标');
+  expect(storyWorkspaceResolveDreamDisplayTitle(null, '甲'.repeat(100)))
+    .toBe('甲'.repeat(80));
+  expect(storyWorkspaceResolveDreamDisplayTitle(null, null)).toBe('故事协作工作台');
+});
 
 const RUN_ID = `run_${'2'.repeat(32)}`;
 

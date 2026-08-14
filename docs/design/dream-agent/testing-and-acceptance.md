@@ -5,6 +5,10 @@
 
 ## 1. 验收原则
 
+- Dream 测试开始前先定义业务概念和影响矩阵：每个 Project/Episode/Artifact 事实分别标记
+  “应变化”“必须保持不变”或“不在范围”，并写明 canonical、Hook、数据库/API 和页面证据。
+- 未把自然语言中的“标题”解析为 Project 或指定 Episode 时，不得启动真实模型或浏览器；
+  仍有歧义时应把澄清作为用户旅程的一部分。
 - 根因测试优先于只断言页面文案的测试。
 - Dream 与 Chat 必须对同一 thread 执行同一组交互契约。
 - Skill 建议从真实安装与 Deck/thread receipt 推导，不写死十三个命令。
@@ -34,6 +38,17 @@
 - 重复执行同字节无副作用；被删除文件不再出现在新 manifest。
 - failed、cancelled、Stop 或同步校验失败不得发布半成品。
 - Hook 异常沿同一 turn 的既有失败路径处理，不产生第二终态。
+- 可索引 Episode 存在时，Hook 还必须幂等刷新 PostgreSQL Story 投影；修改
+  `project.yaml.project_name` 后，Story Index API 与 Execution 页 Project 标题同步更新。
+- 文件 SHA 或模型回复不是完整验收。真实业务测试必须逐轮验证共享 Thread、canonical
+  文件、`.dream` manifest、PostgreSQL Story、actor-scoped API 和最终页面。
+- Project 标题与 Episode 标题分别断言，防止把项目重命名错误投射到 Episode。
+- 同一 Run 已有 Project 投影时，Execution、Dream 回访列表、Admin Story 与 Admin Dream
+  Run 列表必须显示同一个 Project 标题；不得继续显示旧创作目标、Deck 或 Episode 标题。
+- 尚无 Project 投影的 Run 必须显示 launch 创作目标前 80 个字符；Project 首次同步或后续
+  重命名后，重新读取列表必须自动切换为最新 Project 标题，不写第二份 Run 标题。
+- 同一 Project 的历史 Run 即使已不是 Story current source Run，也必须按 Workspace + stable
+  Project slug 显示当前 Project 标题；不得退回历史 goal。
 
 ### 2.3 权限和读取
 

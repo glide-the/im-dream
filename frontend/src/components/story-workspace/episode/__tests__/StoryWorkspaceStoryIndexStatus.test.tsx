@@ -21,6 +21,7 @@ function projection(
   return {
     runId: `run_${'1'.repeat(32)}`,
     projectId: 'rainy-night',
+    projectTitle: '雨夜归途',
     storyId: status === 'missing' ? null : STORY_ID,
     status,
     observedManifestRevision: REVISION,

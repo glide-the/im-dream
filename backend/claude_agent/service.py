@@ -74,6 +74,8 @@
 #                    as soon as the stream exposes it, before Stop/error can
 #                    bypass successful-turn persistence. Resume resolution and
 #                    claude_session_id semantics remain unchanged.
+# [Sync] 2026-08-14: trusted Dream bindings select the Deck workspace-file
+#                    prompt in assemble_context; ordinary Chat keeps proposal mode.
 # [Sync] 2026-06-13: remove assemble_context local database import that shadowed
 #                    module-level _db before system_config lookup.
 # [Sync] 2026-06-09: P2 fix — split _persist_turn into _persist_user_message (called
@@ -139,6 +141,9 @@
 # [Sync] 2026-08-13: assemble a server-scoped DreamArtifactTurnTicket and invoke
 #                    the named after-turn Hook only after a successful root turn;
 #                    runner/session/SSE entry points remain unchanged.
+# [Sync] 2026-08-13: refresh the host-owned Dream workbench context and inject
+#                    its validated actual path plus current run/project facts
+#                    on every Dream turn.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -213,12 +218,14 @@ from services.story_workspace.dream_artifact_turn_hook import (
     DreamArtifactTurnHook,
     DreamArtifactTurnTicket,
 )
+from story_workspace.dream_workbench_context import DreamWorkbenchContext
 from story_workspace.contracts import (
     StoryWorkspaceAgentStoryPayload,
     StoryWorkspaceDreamRunContext,
 )
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
 from services.claude_plugin.workspace_packer import pack_workspace_plugins
+from services.deck.chat_context import DeckChatContextService
 from services.admin_gateway import resolve_platform_model_alias
 from session_events import EditSessionEvent, session_event_bus
 from claude_agent.chat_stream_adapter import ChatStreamAdapter
@@ -259,6 +266,32 @@ def _pack_thread_workspace_plugins(
                 ("ink-dream-story@platform-builtin",) if dream_mode else ()
             ),
         )
+    finally:
+        db.close()
+
+
+async def _resolve_story_workspace_dream_deck_prompt(
+    *,
+    context: StoryWorkspaceDreamRunContext,
+    actor_id: str | int,
+) -> str:
+    """Resolve the current Deck prompt in workspace-file mode.
+
+    The browser and public Chat request cannot claim Dream authority. Only the
+    server-trusted binding resolved by ``assemble_context`` selects this mode,
+    preventing the ordinary standalone proposal contract from entering a
+    Dream asset turn.
+    """
+
+    db = _db.get_db()
+    try:
+        resolved = await DeckChatContextService(db).resolve(
+            deck_id=context.deck_id,
+            actor_id=str(actor_id),
+            voice_id=context.agent_id,
+            dream_mode=True,
+        )
+        return resolved.system_prompt
     finally:
         db.close()
 
@@ -1098,6 +1131,7 @@ class ClaudeAgentService:
             Callable[..., Awaitable[None]] | None
         ) = None,
         dream_artifact_turn_hook: DreamArtifactTurnHook | None = None,
+        dream_workbench_context: DreamWorkbenchContext | None = None,
     ) -> None:
         self._context_builder = context_builder or ClaudeAgentContextBuilder()
         self._platform_model_resolver = (
@@ -1110,6 +1144,9 @@ class ClaudeAgentService:
         )
         self._dream_artifact_turn_hook = (
             dream_artifact_turn_hook or DreamArtifactTurnHook()
+        )
+        self._dream_workbench_context = (
+            dream_workbench_context or DreamWorkbenchContext()
         )
 
     # ------------------------------------------------------------------
@@ -1416,6 +1453,22 @@ class ClaudeAgentService:
         elif dream_context is not None:
             raise ValueError("Story Workspace Dream turn requires Workspace Mode")
 
+        dream_workbench_instruction: str | None = None
+        turn_voice_system_prompt = request.system_prompt or None
+        if dream_context is not None:
+            dream_workbench_turn = await asyncio.to_thread(
+                self._dream_workbench_context.refresh_for_turn,
+                context=dream_context,
+                workspace_root=cwd,
+            )
+            dream_workbench_instruction = dream_workbench_turn.instruction
+            turn_voice_system_prompt = (
+                await _resolve_story_workspace_dream_deck_prompt(
+                    context=dream_context,
+                    actor_id=request.user_id,
+                )
+            )
+
         # editor_session_id is user_sessions.id from /api/sessions, carried in
         # editor_state["id"].  This is distinct from state.session_id (Claude thread ID)
         # and os.path.basename(cwd) (workspace directory name).
@@ -1439,8 +1492,11 @@ class ClaudeAgentService:
             resume=should_resume,
             cwd=cwd,
             editor_session_id=editor_session_id,
-            voice_system_prompt=request.system_prompt or None,
+            voice_system_prompt=turn_voice_system_prompt,
             story_workspace_dream_context=dream_context,
+            story_workspace_dream_workbench_instruction=(
+                dream_workbench_instruction
+            ),
         )
 
         run_options = AgentRunOptions(
@@ -1634,13 +1690,15 @@ class ClaudeAgentService:
                     )
                     logger.info(
                         "Dream workbench synchronized run_id=%s changed_stages=%s "
-                        "private_artifact_changed=%s private_files=%s",
+                        "private_artifact_changed=%s private_files=%s "
+                        "story_index_status=%s",
                         execution.dream_context.workflow_run_id
                         if execution.dream_context is not None
                         else "",
                         list(sync_result.changed_stages),
                         sync_result.private_artifact_changed,
                         len(sync_result.private_files),
+                        sync_result.story_index_status,
                     )
                 except Exception:
                     logger.exception(

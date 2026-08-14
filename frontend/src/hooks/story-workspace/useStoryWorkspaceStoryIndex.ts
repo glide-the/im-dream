@@ -1,5 +1,5 @@
 // [Input] Actor-scoped Dream run identity and the dedicated Story Index REST projection.
-// [Output] Strict ETag reads, last-good state, and one idempotent reconcile mutation.
+// [Output] Strict ETag reads with bounded Project title, last-good state, and one idempotent reconcile mutation.
 // [Pos] Story Workspace Story Index query boundary; independent from Episode Artifact CAS.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
@@ -40,6 +40,7 @@ const STORY_WORKSPACE_STORY_INDEX_ERROR_CODES = new Set<StoryWorkspaceStoryIndex
 const STORY_WORKSPACE_STORY_INDEX_KEYS = [
   'runId',
   'projectId',
+  'projectTitle',
   'storyId',
   'status',
   'observedManifestRevision',
@@ -155,6 +156,9 @@ export function storyWorkspaceParseStoryIndexProjection(
     || typeof value.projectId !== 'string'
     || value.projectId.length > 255
     || !STORY_WORKSPACE_STORY_INDEX_PROJECT_ID.test(value.projectId)
+    || typeof value.projectTitle !== 'string'
+    || value.projectTitle.trim().length === 0
+    || value.projectTitle.length > 255
     || (
       value.storyId !== null
       && (typeof value.storyId !== 'string' || !STORY_WORKSPACE_STORY_INDEX_UUID5.test(value.storyId))
@@ -172,6 +176,7 @@ export function storyWorkspaceParseStoryIndexProjection(
   const projection: StoryWorkspaceStoryIndexProjection = {
     runId: value.runId,
     projectId: value.projectId,
+    projectTitle: value.projectTitle,
     storyId: value.storyId,
     status: value.status as StoryWorkspaceStoryIndexStatus,
     observedManifestRevision: storyWorkspaceStoryIndexNullableRevision(

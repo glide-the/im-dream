@@ -253,6 +253,9 @@ class TestBuildUserMessage(unittest.TestCase):
         blocks = self.builder.build_user_message(
             self._parts("create the story"),
             story_workspace_dream_context=context,
+            story_workspace_dream_workbench_instruction=(
+                "<story_workspace_dream_workbench>每次编辑 project.yaml</story_workspace_dream_workbench>"
+            ),
         )
         combined = self._text_blocks(blocks)
 
@@ -293,6 +296,7 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("review-report.md", combined)
         self.assertIn("server-trusted workflow_run_id", combined)
         self.assertIn("Generic file or Bash tools must never", combined)
+        self.assertIn("每次编辑 project.yaml", combined)
         self.assertLess(
             combined.index("<story_workspace_dream_context>"),
             combined.rindex("create the story"),

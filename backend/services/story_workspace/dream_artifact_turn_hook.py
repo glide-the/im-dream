@@ -1,10 +1,13 @@
 # [Input] Consume trusted Dream Run context, WorkflowRun authority, canonical
 #         Story Workspace files, and existing Dream file reader/writer contracts.
 # [Output] Before-turn canonical snapshot plus successful-turn deterministic
-#          synchronization into the Run-private preview and EP01 binding.
+#          synchronization into the Run-private preview, EP01 binding, and
+#          PostgreSQL Story projection consumed by the Execution page.
 # [Pos] Dream post-turn business Hook above ClaudeAgentService; not an Agent
 #       runtime, Observer, SSE adapter, or SDK entry point.
 # [Sync] 2026-08-13: added host-owned automatic workbench synchronization.
+# [Sync] 2026-08-13: reconcile all three stages as complete file facts,
+#                    including deletion when a Skill removes every source.
 
 """Root-turn synchronization from canonical workbench files to one Dream Run.
 
@@ -46,6 +49,11 @@ try:
     )
     from services.story_workspace.episode_artifact_service import (
         StoryWorkspaceEpisodeAuthority,
+        StoryWorkspaceEpisodeArtifactError,
+        StoryWorkspaceEpisodeArtifactService,
+    )
+    from services.story_workspace.artifact_story_index_service import (
+        ArtifactStoryIndexService,
     )
     from services.story_workspace.dream_workflow_lifecycle_service import (
         StoryWorkspaceDreamWorkflowLifecycleService,
@@ -80,6 +88,11 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     )
     from backend.services.story_workspace.episode_artifact_service import (
         StoryWorkspaceEpisodeAuthority,
+        StoryWorkspaceEpisodeArtifactError,
+        StoryWorkspaceEpisodeArtifactService,
+    )
+    from backend.services.story_workspace.artifact_story_index_service import (
+        ArtifactStoryIndexService,
     )
     from backend.services.story_workspace.dream_workflow_lifecycle_service import (
         StoryWorkspaceDreamWorkflowLifecycleService,
@@ -141,6 +154,7 @@ class DreamArtifactTurnResult:
     private_files: tuple[str, ...]
     changed_source_files: tuple[str, ...]
     episode_bound: bool
+    story_index_status: str | None
 
 
 @dataclass(frozen=True)
@@ -452,9 +466,25 @@ class DreamArtifactTurnHook:
             raise DreamArtifactTurnHookError("Dream run projection changed identity")
 
         projections = self._collect_stage_projections(ticket.workspace_root)
+        projection_by_stage = {
+            projection.stage: projection for projection in projections
+        }
         changed_stages: list[str] = []
-        for projection in projections:
-            current = reader.read_stage(workflow_run, stage=projection.stage)
+        for stage in STORY_WORKSPACE_DREAM_REQUIRED_STAGES:
+            projection = projection_by_stage.get(stage)
+            current = reader.read_stage(
+                workflow_run,
+                stage=stage,
+                validate_source_files=False,
+            )
+            if projection is None:
+                if current is not None and writer.delete_stage(
+                    workflow_run,
+                    stage=stage,
+                    expected_revision=current.revision,
+                ):
+                    changed_stages.append(stage.value)
+                continue
             if self._stage_is_current(
                 current,
                 projection,
@@ -477,14 +507,19 @@ class DreamArtifactTurnHook:
             workflow_run_id=ticket.context.workflow_run_id,
             files=private_files,
         )
-        if {projection.stage for projection in projections} == set(
+        if set(projection_by_stage) == set(
             STORY_WORKSPACE_DREAM_REQUIRED_STAGES
         ):
             self._record_output_ready(ticket, workflow_run)
-        episode_bound = self._ensure_first_episode_binding(
+        episode_authority = self._ensure_first_episode_binding(
             ticket,
             workflow_run,
             private_files=private_files,
+        )
+        story_index_status = self._materialize_story_index(
+            ticket,
+            workflow_run,
+            episode_authority=episode_authority,
         )
         latest_snapshot = self._canonical_source_snapshot(ticket.workspace_root)
         before = dict(ticket.baseline_files)
@@ -501,7 +536,63 @@ class DreamArtifactTurnHook:
             private_artifact_changed=private_changed,
             private_files=tuple(sorted(private_files)),
             changed_source_files=changed_source_files,
-            episode_bound=episode_bound,
+            episode_bound=episode_authority is not None,
+            story_index_status=story_index_status,
+        )
+
+    @staticmethod
+    def _materialize_story_index(
+        ticket: DreamArtifactTurnTicket,
+        workflow_run: WorkflowRun,
+        *,
+        episode_authority: StoryWorkspaceEpisodeAuthority | None,
+    ) -> str | None:
+        """Project current Project/Episode facts for the page after every turn.
+
+        A Project can exist before ``script.md`` does.  That ordinary partial
+        workspace is not a synchronization failure and remains unindexed until
+        a later successful turn supplies the required Episode file.  Once the
+        surface is indexable, every successful turn performs the same
+        idempotent upsert so edits such as ``project_name`` reach PostgreSQL
+        without a user-facing reconcile button.
+        """
+
+        if episode_authority is None:
+            return None
+        try:
+            surface = StoryWorkspaceEpisodeArtifactService(
+                ticket.workspace_root
+            ).read_surface(
+                ticket.context.workflow_run_id,
+                episode_authority=episode_authority,
+            )
+        except StoryWorkspaceEpisodeArtifactError as exc:
+            raise DreamArtifactTurnHookError(
+                "Dream Episode projection cannot be read"
+            ) from exc
+
+        db = database.get_db()
+        try:
+            result = ArtifactStoryIndexService().materialize(
+                db=db,
+                workspace_root=ticket.workspace_root,
+                workflow_run=workflow_run,
+                actor_id=ticket.actor_id,
+                thread_id=ticket.context.thread_id,
+                episode_authority=episode_authority,
+                refreshed_surface=surface,
+            )
+        finally:
+            db.close()
+
+        status = str(result.get("status") or "failed")
+        if status in {"created", "updated", "same_revision"}:
+            return status
+        error_code = str(result.get("errorCode") or "story_index_write_failed")
+        if error_code == "artifact_missing":
+            return "not_ready"
+        raise DreamArtifactTurnHookError(
+            f"Dream Story projection failed: {error_code}"
         )
 
     @staticmethod
@@ -550,14 +641,14 @@ class DreamArtifactTurnHook:
         workflow_run: WorkflowRun,
         *,
         private_files: Mapping[str, bytes],
-    ) -> bool:
+    ) -> StoryWorkspaceEpisodeAuthority | None:
         binding_service = StoryWorkspaceEpisodeBindingService(ticket.workspace_root)
         story_slug = binding_service.discover_unique_canonical_project_story_slug()
         if story_slug is None:
-            return False
+            return None
         episode_prefix = f"stories/{story_slug}/episodes/EP01/"
         if not any(path.startswith(episode_prefix) for path in private_files):
-            return False
+            return None
         source_message_id = workflow_run.source_message_id
         if not isinstance(source_message_id, str) or not source_message_id:
             raise DreamArtifactTurnHookError("Dream launch source is unavailable")
@@ -678,7 +769,12 @@ class DreamArtifactTurnHook:
                 episode_uid=episode_uid,
             )
         )
-        return True
+        return StoryWorkspaceEpisodeAuthority(
+            workflow_run_id=ticket.context.workflow_run_id,
+            episode_uid=episode_uid,
+            story_slug=story_slug,
+            episode_code="EP01",
+        )
 
     @staticmethod
     def _load_authoritative_run(ticket: DreamArtifactTurnTicket) -> WorkflowRun:

@@ -24,6 +24,8 @@
 # [Sync] 2026-08-12: cover shared Chat/Dream SDK-native Session ID persistence
 #                    through on_message before a cancelled turn can skip the
 #                    successful assistant persistence path.
+# [Sync] 2026-08-14: cover trusted Dream binding selecting the Deck
+#                    workspace-file prompt without changing Chat/session DTOs.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -195,6 +197,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace_path = Path(tmp_dir) / "thread_dream_turn"
             workspace_path.mkdir()
+            (workspace_path / ".dream").mkdir()
             with (
                 unittest.mock.patch.object(
                     service_module._db,
@@ -215,6 +218,13 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     service_module,
                     "_pack_thread_workspace_plugins",
                 ) as pack,
+                unittest.mock.patch.object(
+                    service_module,
+                    "_resolve_story_workspace_dream_deck_prompt",
+                    new=unittest.mock.AsyncMock(
+                        return_value="dream-workspace-file-prompt"
+                    ),
+                ) as resolve_dream_prompt,
             ):
                 execution = await service.assemble_context(
                     request,
@@ -232,6 +242,28 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             builder.user_message_calls[0]["story_workspace_dream_context"],
             context,
         )
+        self.assertIn(
+            str(workspace_path.resolve() / ".dream" / "WORKBENCH.md"),
+            builder.user_message_calls[0][
+                "story_workspace_dream_workbench_instruction"
+            ],
+        )
+        self.assertIn(
+            str(
+                workspace_path.resolve()
+                / ".dream"
+                / "ASSET-COLLABORATION.md"
+            ),
+            builder.user_message_calls[0][
+                "story_workspace_dream_workbench_instruction"
+            ],
+        )
+        self.assertIn(
+            "必须使用 Read 工具读取",
+            builder.user_message_calls[0][
+                "story_workspace_dream_workbench_instruction"
+            ],
+        )
         self.assertEqual(
             execution.run_options.mcp_env["INK_AGENT_WORKFLOW_RUN_ID"],
             context.workflow_run_id,
@@ -243,6 +275,14 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             request.message_id,
         )
         self.assertEqual(selected_models, [("7", None)])
+        resolve_dream_prompt.assert_awaited_once_with(
+            context=context,
+            actor_id="7",
+        )
+        self.assertEqual(
+            builder.user_message_calls[0]["voice_system_prompt"],
+            "dream-workspace-file-prompt",
+        )
         self.assertEqual(mapper.calls, [("7", "thread_dream_turn")])
         activator.assert_awaited_once_with(
             context=context,
@@ -1152,6 +1192,7 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
                 changed_stages=("characters",),
                 private_artifact_changed=True,
                 private_files=("stories/demo/project.yaml",),
+                story_index_status="updated",
             )
             service = ClaudeAgentService(dream_artifact_turn_hook=artifact_hook)
             queue: asyncio.Queue[str | None] = asyncio.Queue()

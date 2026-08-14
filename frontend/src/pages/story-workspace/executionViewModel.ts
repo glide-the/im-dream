@@ -1,5 +1,5 @@
 // [Input] Authoritative Dream file projections after the single confirmation.
-// [Output] Assets / Outline collaboration indexes and focus navigation seams.
+// [Output] Canonical-first Project title plus Assets / Outline collaboration indexes and focus navigation seams.
 // [Pos] Story Workspace execution page pure view-model (Task 3 F5)
 
 import type {
@@ -16,6 +16,21 @@ const STAGE_COPY: Record<StoryWorkspaceDreamStage, {
   scenes: { label: '场景', module: 'Assets' },
   storyboards: { label: '分镜', module: 'Outline' },
 };
+
+const STORY_WORKSPACE_CREATION_GOAL_PREFIX_MAX = 80;
+
+/** Keep Project display naming consistent with the server-owned re-entry list. */
+export function storyWorkspaceResolveDreamDisplayTitle(
+  projectTitle: string | null | undefined,
+  creationGoal: string | null | undefined,
+): string {
+  const canonical = projectTitle?.trim();
+  if (canonical) return canonical;
+  const fallback = creationGoal?.trim();
+  return fallback
+    ? fallback.slice(0, STORY_WORKSPACE_CREATION_GOAL_PREFIX_MAX)
+    : '故事协作工作台';
+}
 
 export interface StoryWorkspaceExecutionEntry {
   readonly key: string;

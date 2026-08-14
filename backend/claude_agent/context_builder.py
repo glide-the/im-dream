@@ -49,6 +49,8 @@
 # [Sync] 2026-08-13: Dream context now directs the Agent to canonical workbench
 #                    files and documents host-owned after-turn synchronization;
 #                    MCP stage writers are optional rather than a completion gate.
+# [Sync] 2026-08-13: append the host-materialized Dream workbench instruction
+#                    on every bound turn so natural-language edits stay file-backed.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -339,6 +341,7 @@ class ClaudeAgentContextBuilder:
         story_workspace_dream_context: Optional[
             StoryWorkspaceDreamRunContext
         ] = None,
+        story_workspace_dream_workbench_instruction: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Build the content blocks for a user turn.
 
@@ -480,7 +483,14 @@ class ClaudeAgentContextBuilder:
                         f"{STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION}\n"
                         f"{STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX}\n"
                         f"{STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION}\n"
-                        "</story_workspace_dream_context>"
+                        + (
+                            story_workspace_dream_workbench_instruction.strip()
+                            + "\n"
+                            if story_workspace_dream_workbench_instruction
+                            and story_workspace_dream_workbench_instruction.strip()
+                            else ""
+                        )
+                        + "</story_workspace_dream_context>"
                     ),
                 }
             )

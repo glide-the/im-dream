@@ -66,6 +66,9 @@
 #                    apply-seccomp passthrough patch instead; cli_path pinning
 #                    (sdk_env.apply_cli_path_to_options) keeps the SDK paired
 #                    with that patched npm CLI.
+# [Sync] 2026-08-14: deny .dream writes at the sandbox filesystem layer while
+#                    the thread workspace root keeps every canonical assets/
+#                    and stories/ family writable.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -386,6 +389,11 @@ def _sandbox_claude_tmp_write_paths() -> list[str]:
     entry is harmless because the path is CLI-owned scratch space either
     way.  Evidence: bundled CLI strings (``CLAUDE_TMPDIR``, ``cwd-``) and
     restored-source analysis (``claude-task-tools-source-analysis.md``).
+
+    TODO(dream-asset-delete): Claude Code 2.1.220 may still reject its
+    command-level ``/tmp/claude-UID/cwd-*`` write locally. Do not change any
+    TMPDIR behavior in Dream work; only a separately approved task may revisit
+    this provider-runtime issue.
     """
 
     override = os.environ.get("CLAUDE_TMPDIR")
@@ -394,7 +402,7 @@ def _sandbox_claude_tmp_write_paths() -> list[str]:
     # Literal /tmp — NOT tempfile.gettempdir(): the CLI hardcodes /tmp/claude*
     # (sandbox-runtime: TMPDIR=$CLAUDE_TMPDIR || /tmp/claude), it does not
     # follow the platform tempdir (/var/folders/... on macOS).
-    return ["/tmp/claude", f"/tmp/claude-{os.getuid()}"]
+    return ["/tmp","/tmp/claude", f"/tmp/claude-{os.getuid()}"]
 
 
 def _sandbox_fs_extra_write_paths(raw: object) -> list[str]:
@@ -452,6 +460,7 @@ def _workspace_sandbox_config(
     if enabled:
         allow_write.extend(_sandbox_claude_tmp_write_paths())
         allow_write.extend(_sandbox_fs_extra_write_paths(fs_allowed_write_paths))
+        allow_write.extend(["/tmp/claude-501/cwd-9ee8"])
 
     sandbox_config: dict = {
         "enabled": enabled,
@@ -474,6 +483,7 @@ def _workspace_sandbox_config(
             # extra write path overlaps them.
             "allowWrite": allow_write,
             "denyWrite": [
+                str(workspace_abs / ".dream"),
                 str(workspace_abs / ".claude" / "settings.json"),
                 str(workspace_abs / ".claude" / "settings.local.json"),
                 str(workspace_abs / ".claude" / "hooks"),

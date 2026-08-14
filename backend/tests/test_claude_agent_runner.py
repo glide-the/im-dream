@@ -81,6 +81,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import sys
 import tempfile
 import unittest
@@ -1263,6 +1264,98 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                     _hook_specific(read_result, {}).get("permissionDecision"),
                     "allow",
                 )
+
+    async def test_canonical_asset_single_file_delete_uses_visible_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            character = workspace / "assets" / "characters" / "qa-guide.md"
+            character.parent.mkdir(parents=True)
+            character.write_text("---\nchar_id: qa-guide\nchar_name: QA\n---\n")
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+            command = f"rm -- {shlex.quote(str(character))}"
+            result = await hook(
+                {"tool_name": "Bash", "tool_input": {"command": command}},
+                "call-canonical-asset-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(confirmation_requests[0]["tool_name"], "Bash")
+        self.assertEqual(
+            _hook_specific(result, {}).get("permissionDecision"),
+            "allow",
+        )
+
+    async def test_canonical_prop_single_file_delete_uses_visible_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            prop = workspace / "assets" / "props" / "PR-QA.md"
+            prop.parent.mkdir(parents=True)
+            prop.write_text("---\nprop_id: PR-QA\nname: QA\n---\n")
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": f"rm -- {shlex.quote(str(prop))}"},
+                },
+                "call-canonical-prop-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(
+            _hook_specific(result, {}).get("permissionDecision"),
+            "allow",
+        )
+
+    async def test_canonical_asset_delete_rejects_recursive_glob_and_symlink(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            characters = workspace / "assets" / "characters"
+            characters.mkdir(parents=True)
+            target = characters / "qa-guide.md"
+            target.write_text("qa")
+            link = characters / "qa-link.md"
+            link.symlink_to(target)
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            for command in (
+                f"rm -rf {characters}",
+                f"rm -- {characters}/*.md",
+                f"rm -- {link}",
+                f"rm -- {target} {characters / 'other.md'}",
+            ):
+                with self.subTest(command=command):
+                    result = await hook(
+                        {"tool_name": "Bash", "tool_input": {"command": command}},
+                        "call-invalid-asset-delete",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(
+                        _hook_specific(result, {}).get("permissionDecision"),
+                        "deny",
+                    )
 
     async def test_bash_dream_guard_denies_find_env_glob_and_normalized_path_bypasses(self):
         for full_access in (False, True):

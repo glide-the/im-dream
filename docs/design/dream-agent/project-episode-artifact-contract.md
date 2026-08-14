@@ -14,6 +14,44 @@
 | Workflow Run | 一次可审计执行尝试 | Project/Episode 稳定身份 |
 | Run preview | 当前 Run 工作台文件的私有发布副本 | Admin sealed Artifact |
 
+### 1.1 属性修改的影响范围
+
+任何测试或实现修改开始前，都必须先把用户自然语言映射到明确的业务事实，不能用笼统的
+“标题”同时代表 Project 与 Episode：
+
+| 用户意图 | 权威写入 | 必须更新的消费面 | 必须保持不变 |
+|---|---|---|---|
+| 修改 Project 标题 | `project.yaml.project_name` | Run preview、PostgreSQL Story title、Story Index `projectTitle`、Execution 页一级标题 | 各 Episode 标题、剧本正文和分镜 |
+| 修改指定 Episode 标题 | 对应 `episodes/<EPxx>/` 文件合同 | Run preview、Episode Artifact API、Episode 工作面 | Project `project_name`、其他 Episode |
+| 修改 Episode 正文/制作产物 | 对应 EPxx 的具体 artifact | manifest revision、Episode API 和对应阅读面 | Project 身份及未点名产物 |
+| 只确认上下文 | 无写入 | 新的 thread 消息和同一 session 连续性 | canonical、preview、数据库 revision 和页面业务事实 |
+
+`DreamArtifactTurnHook.after_main_turn` 只同步本轮结束时真实存在的文件事实，并更新这些
+事实既有的下游投影；它不能把 Project 重命名扩张成 Episode 改写，也不能因为测试只关注
+页面标题就跳过 `.dream`、数据库或 API 消费链。
+
+### 1.2 Dream 工作空间展示标题
+
+Dream 工作空间在所有消费面使用同一派生标题，不新增 `workflow_runs.title`，也不把标题写回
+Run：
+
+```text
+displayTitle
+  = 已构建 Project 的 PostgreSQL Story title
+  ?? launch source message 中创作目标的前 80 个字符
+```
+
+- Project 已构建后，Execution 一级标题、Dream 回访列表、Admin Story 列表和 Admin Dream
+  Run 列表都显示同一个 Project 标题。
+- Story 的 current source Run 更新后，历史 Run 仍通过 Workspace + stable Project slug 解析同一
+  Story 标题，不能退回各自过期的 launch goal。
+- Project 尚未构建时，Run 列表才使用创作目标前缀，便于用户识别尚未产出
+  `project.yaml` 的工作空间；这不是新的 canonical 标题。
+- Execution 在 Story Index 暂无 Project 时使用同一创作目标前缀；若连创作目标也不存在，
+  才显示固定空态“故事协作工作台”。
+- Episode 标题、Deck 名称、thread 名称和旧 `workflow_summary` 都不能覆盖已存在的 Project
+  标题。Project 重命名经成功 Hook 同步后，各列表在下一次读取时自然更新。
+
 ## 2. canonical 工作台合同
 
 ```text
@@ -82,7 +120,9 @@ turn 成功后，宿主 Hook 按以下顺序处理：
 2. 自动发布完整的 Run-private preview；
 3. 若已存在唯一 Project 且 EP01 至少构建了一项 canonical 产物，则用服务端持有的
    actor、thread、Run、Project 与 Episode 身份幂等构建 EP01 产物关联；
-4. Execution 页面继续读取 actor-scoped REST，只读显示“尚未构建 EP01 产物关联”或
+4. 当 EP01 已包含可索引 `script.md` 时，按当前 Project/Episode 文件幂等物化
+   PostgreSQL Story 投影；`project.yaml.project_name` 成为 Project 展示标题；
+5. Execution 页面继续读取 actor-scoped REST，只读显示“尚未构建 EP01 产物关联”或
    “EP01 产物关联：已关联”。
 
 ```mermaid
@@ -92,6 +132,7 @@ sequenceDiagram
     participant A as 同一主 Agent
     participant H as DreamArtifactTurnHook
     participant B as Episode Binding
+    participant I as PostgreSQL Story Index
     participant E as Execution 页面
 
     U->>C: 发送任意已安装 Skill 或自然语言要求
@@ -101,15 +142,22 @@ sequenceDiagram
     H->>H: 校验当前快照并自动发布 preview
     opt 唯一 Project 且存在 EP01 产物
         H->>B: 幂等构建 EP01 产物关联
+        H->>I: 幂等物化 Project 标题与 Episode revision
     end
-    E->>B: 只读查询最新关联事实
-    B-->>E: 尚未构建或已关联
+    E->>B: 只读查询最新关联和 Episode 事实
+    E->>I: 只读查询 Project 投影
+    B-->>E: Episode 标题与产物
+    I-->>E: Project 标题与索引状态
     Note over E: 不提供手动构建按钮
 ```
 
 Agent turn 失败、取消或 Hook 发布失败时不提交本轮 manifest，也不构建新关联。某个
 Episode 文件尚未生成不是失败：Hook 发布已经存在的文件，页面据实显示缺失项。关联
 建立不代表该 Episode 的所有产物已经完成，也不产生“下一步”或 completion fact。
+
+Project 与 Episode 的展示语义必须分开：Project 标题来自
+`project.yaml.project_name`，Episode 标题来自当前 Episode 大纲/剧本/分镜投影。修改
+Project 标题不能顺带重命名 EP01，也不能继续用旧的 workflow summary 冒充 Project 标题。
 
 ## 5. 与 Admin sealed Artifact 的区别
 

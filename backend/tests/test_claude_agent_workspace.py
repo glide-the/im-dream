@@ -31,6 +31,9 @@
 #                    allowWrite (cwd-* zsh noise fix), CLAUDE_TMPDIR override,
 #                    sandbox_fs_allowed_write_paths append + denyWrite
 #                    unchanged, disabled-sandbox shape unchanged.
+# [Sync] 2026-08-14: add only Dream's capability boundary: canonical assets
+#                    remain covered by the thread root and .dream is denied;
+#                    existing TMPDIR behavior is unchanged.
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -170,6 +173,22 @@ class TestInitWorkspace(unittest.TestCase):
             sandbox["filesystem"]["denyWrite"],
         )
         self.assertIn(
+            str((ws / ".dream").resolve()),
+            sandbox["filesystem"]["denyWrite"],
+        )
+        # The sandbox owns capability boundaries, not Dream asset semantics:
+        # every canonical asset family is writable through the thread root,
+        # while the private .dream projection above remains deny-listed.
+        for canonical_dir in (
+            ws / "assets" / "characters",
+            ws / "assets" / "scenes",
+            ws / "assets" / "props",
+            ws / "stories",
+        ):
+            self.assertTrue(
+                canonical_dir.resolve(strict=False).is_relative_to(ws.resolve())
+            )
+        self.assertIn(
             str((ws / ".claude" / "settings.json").resolve()),
             sandbox["filesystem"]["denyWrite"],
         )
@@ -260,7 +279,7 @@ class TestInitWorkspace(unittest.TestCase):
         sandbox = settings["sandbox"]
         allow_write = sandbox["filesystem"]["allowWrite"]
         # Relative paths dropped, trailing-slash dedupe, order preserved:
-        # workspace → claude tmp → user extras.
+        # workspace → existing Claude tmp policy → user extras.
         self.assertEqual(
             allow_write,
             [
@@ -274,6 +293,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertEqual(
             sandbox["filesystem"]["denyWrite"],
             [
+                str(ws.resolve() / ".dream"),
                 str(ws.resolve() / ".claude" / "settings.json"),
                 str(ws.resolve() / ".claude" / "settings.local.json"),
                 str(ws.resolve() / ".claude" / "hooks"),

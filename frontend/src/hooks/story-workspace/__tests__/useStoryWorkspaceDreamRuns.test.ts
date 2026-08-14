@@ -13,6 +13,7 @@ const response = {
   runs: [
     {
       storyWorkspaceRunId: 'run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      displayTitle: '雨夜站台',
       goalPrefix: '创作一个发生在雨夜车站的短篇故事',
       deckId: 'deck-a',
       deckDisplayName: '雨夜站台',
@@ -30,6 +31,7 @@ const response = {
     },
     {
       storyWorkspaceRunId: 'run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      displayTitle: '海边旧城',
       goalPrefix: '写一个关于海边旧城重逢的故事',
       deckId: 'deck-b',
       deckDisplayName: '海边旧城',
@@ -105,6 +107,8 @@ test('Dream run parser fails closed on naive dates and bounded display metadata'
     { createdAt: 'not-a-date' },
     { goalPrefix: '' },
     { goalPrefix: 'x'.repeat(81) },
+    { displayTitle: '' },
+    { displayTitle: 'x'.repeat(256) },
     { deckId: 'x'.repeat(256) },
     { deckDisplayName: 'x'.repeat(256) },
     { deckPluginVersion: 'x'.repeat(256) },

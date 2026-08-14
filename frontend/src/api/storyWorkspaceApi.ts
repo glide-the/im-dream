@@ -1,5 +1,5 @@
 // [Input] Story Workspace workflow REST/SSE contracts and the current auth token.
-// [Output] Typed, authenticated API helpers for workflow preflight and run operations.
+// [Output] Typed, authenticated API helpers, including canonical-first Dream display titles.
 // [Pos] Story Workspace workflow API client; it never derives authoritative workflow state locally.
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -408,6 +408,11 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
     );
     return {
       storyWorkspaceRunId,
+      displayTitle: storyWorkspaceReadBoundedDreamRunString(
+        run.displayTitle,
+        'displayTitle',
+        255,
+      ),
       goalPrefix: run.goalPrefix === undefined
         ? deckDisplayName
         : storyWorkspaceReadBoundedDreamRunString(run.goalPrefix, 'goalPrefix', 80),

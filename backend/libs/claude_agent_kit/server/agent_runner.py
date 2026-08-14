@@ -6,6 +6,8 @@
 # [Pos] core runner node in libs/claude_agent_kit/server
 # [Sync] 2026-08-04: force Agent/Task run_in_background=false at the PreToolUse
 #                    boundary so the parent turn consumes child completion.
+# [Sync] 2026-08-14: allow only confirmation-gated, single-file canonical
+#                    character/scene/prop deletion; keep .dream and broad Bash mutation denied.
 # [Sync] 2026-05-09: forward stdio MCP tool input and result events for frontend traces.
 # [Sync] 2026-05-09: merge project .env SDK injection, stderr capture, and PreToolUse confirmation hooks while keeping Pet Chat's narrow stdio MCP surface.
 # [Sync] 2026-05-09: expose zero-argument necklace intent tools while keeping server-owned upstream parameters.
@@ -205,6 +207,7 @@ import logging
 import os
 import re
 import shlex
+import stat
 import sys
 import tempfile
 import time
@@ -393,6 +396,11 @@ _STORY_WORKSPACE_DREAM_CANONICAL_ROOTS: tuple[str, ...] = (
     "stories",
     ".dramaforge",
 )
+_STORY_WORKSPACE_DREAM_ASSET_DIRECTORIES: frozenset[str] = frozenset({
+    "characters",
+    "scenes",
+    "props",
+})
 
 # Read-only / navigation shell commands that carry no filesystem side effects.
 # Any command whose first token matches one of these and contains no shell
@@ -762,11 +770,61 @@ def _is_dream_mutating_bash_command(command: str, cwd: Optional[str]) -> bool:
     """
 
     tokens = _split_shell_command(command)
+    if _is_explicit_canonical_asset_delete(command, tokens, cwd):
+        return False
     if _workspace_has_dream_surface(cwd):
         return not _is_definitely_read_only_dream_bash_command(command, tokens)
     if not _bash_command_may_reference_dream_surface(command, tokens, cwd):
         return False
     return not _is_definitely_read_only_dream_bash_command(command, tokens)
+
+
+def _is_explicit_canonical_asset_delete(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+) -> bool:
+    """Allow one reviewed character/scene/prop deletion to reach confirmation.
+
+    Claude Code has no built-in Delete file tool. A natural-language asset
+    deletion therefore needs one narrow shell seam. This classifier permits
+    only ``rm [--|-f] <one existing regular canonical asset file>`` and leaves
+    the normal Bash permission channel to request visible user confirmation.
+    Recursive, globbed, scripted, symlinked, out-of-workspace, and ``.dream``
+    targets remain hard denied.
+    """
+
+    if not cwd or _SHELL_METACHAR_RE.search(command) or "\n" in command or "\r" in command:
+        return False
+    if not tokens or tokens[0] != "rm":
+        return False
+    index = 1
+    if index < len(tokens) and tokens[index] in {"-f", "--"}:
+        index += 1
+    if index >= len(tokens) or len(tokens[index:]) != 1:
+        return False
+    raw_target = tokens[index]
+    if any(character in raw_target for character in "*?[]{}"):
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=True)
+        supplied = Path(raw_target).expanduser()
+        if not supplied.is_absolute():
+            supplied = workspace / supplied
+        visible = supplied.lstat()
+        target = supplied.resolve(strict=True)
+        relative = target.relative_to(workspace)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return False
+    if stat.S_ISLNK(visible.st_mode) or not stat.S_ISREG(visible.st_mode):
+        return False
+    if target.suffix.lower() not in {".md", ".yaml", ".yml"}:
+        return False
+    return (
+        len(relative.parts) == 3
+        and relative.parts[0] == "assets"
+        and relative.parts[1] in _STORY_WORKSPACE_DREAM_ASSET_DIRECTORIES
+    )
 
 
 def _apply_dream_surface_write_guard(

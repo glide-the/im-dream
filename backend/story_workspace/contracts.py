@@ -1,3 +1,8 @@
+# [Input] Server-owned Story Workspace domain facts.
+# [Output] Strict persistence and wire DTOs, including separate Project and
+#          Episode presentation contracts.
+# [Pos] Pure domain contract module; no runtime, database, or transport owner.
+
 """Canonical contracts for the Story Workspace domain.
 
 This module owns the data shapes shared by Story Workspace API, review, and
@@ -690,6 +695,7 @@ class StoryWorkspaceStoryIndexProjection(_StoryWorkspaceDreamWireModel):
 
     run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     project_id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    project_title: str = Field(min_length=1, max_length=255)
     story_id: Optional[str] = Field(
         default=None,
         pattern=(
@@ -1720,6 +1726,7 @@ class StoryWorkspaceDreamReentryItem(_StoryWorkspaceDreamWireModel):
     """One permission-checked Dream run rendered by the canonical workbench."""
 
     story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    display_title: str = Field(min_length=1, max_length=255)
     goal_prefix: str = Field(min_length=1, max_length=80)
     deck_id: str = Field(min_length=1, max_length=255)
     deck_display_name: str = Field(min_length=1, max_length=255)

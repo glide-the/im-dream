@@ -1,3 +1,9 @@
+# [Input] Actor-owned Dream Run provenance, canonical Story projection, launch
+#         goal, Dream stage files, and live shared-thread status.
+# [Output] Ordered re-entry rows whose display title prefers the canonical
+#          Project title and falls back to the launch-goal prefix.
+# [Pos] Story Workspace Dream list query; it does not author Project titles.
+
 """Actor-scoped durable projection for the Dream workbench re-entry list."""
 
 from __future__ import annotations
@@ -98,6 +104,7 @@ class StoryWorkspaceDreamReentryService:
         db = self._db_factory()
         try:
             rows = self._query_authorized_rows(db, actor_id)
+            project_titles = self._project_titles(db, rows)
             confirmation_facts = self._confirmation_facts(db, rows, actor_id)
             items = [
                 item
@@ -107,6 +114,7 @@ class StoryWorkspaceDreamReentryService:
                     row,
                     actor_id,
                     confirmation_facts.get(str(row["run_id"]), (False, False)),
+                    project_title=project_titles.get(str(row["run_id"])),
                 )) is not None
             ]
             items.sort(key=self._sort_tuple)
@@ -255,6 +263,8 @@ class StoryWorkspaceDreamReentryService:
         row: Any,
         actor_id: int,
         confirmation_facts: tuple[bool, bool],
+        *,
+        project_title: str | None,
     ) -> StoryWorkspaceDreamReentryItem | None:
         run_id = str(row["run_id"])
         thread_id = str(row["thread_id"])
@@ -293,12 +303,17 @@ class StoryWorkspaceDreamReentryService:
         created_at = self._parse_datetime(row["run_created_at"])
         group = "recent" if lifecycle is StoryWorkspaceDreamRunLifecycle.RECENT else "in_progress"
         deck_display_name = str(row["deck_name"] or deck_id)
+        goal_prefix = self._source_goal_prefix(
+            row["source_metadata"],
+            fallback=deck_display_name,
+        )
         return StoryWorkspaceDreamReentryItem(
             story_workspace_run_id=run_id,
-            goal_prefix=self._source_goal_prefix(
-                row["source_metadata"],
-                fallback=deck_display_name,
+            display_title=self._display_title(
+                project_title,
+                goal_prefix=goal_prefix,
             ),
+            goal_prefix=goal_prefix,
             deck_id=deck_id,
             deck_display_name=deck_display_name,
             deck_plugin_version=str(row["deck_plugin_version"]),
@@ -320,6 +335,79 @@ class StoryWorkspaceDreamReentryService:
                 else f"/story-workspace/dream?run={run_id}"
             ),
         )
+
+    @staticmethod
+    def _project_titles(db: Any, rows: list[Any]) -> dict[str, str]:
+        """Batch-read optional Project titles after Run authorization succeeds.
+
+        A historical Run can still belong to the same stable Project after the
+        Story's current ``source_run_id`` advances, so the source metadata's
+        Project slug is the secondary lookup key.
+        """
+
+        result_by_run: dict[str, str] = {}
+        result_by_project: dict[tuple[str, str], str] = {}
+        for offset in range(
+            0,
+            len(rows),
+            _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE,
+        ):
+            batch = rows[
+                offset:offset + _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE
+            ]
+            run_ids = tuple(dict.fromkeys(str(row["run_id"]) for row in batch))
+            project_keys = tuple(dict.fromkeys(
+                (str(row["workspace_id"]), project_slug)
+                for row in batch
+                if (project_slug := StoryWorkspaceDreamReentryService._source_project_slug(
+                    row["source_metadata"]
+                )) is not None
+            ))
+            clauses = [
+                f"source_run_id IN ({', '.join('%s' for _ in run_ids)})"
+            ]
+            parameters: list[str] = list(run_ids)
+            if project_keys:
+                clauses.append("(" + " OR ".join(
+                    "(workspace_id = %s AND source_project_id = %s)"
+                    for _ in project_keys
+                ) + ")")
+                parameters.extend(value for key in project_keys for value in key)
+            title_rows = db.execute(
+                "SELECT source_run_id, workspace_id, source_project_id, title "
+                "FROM story_workspace_stories "
+                "WHERE artifact_source_type = 'dream_episode' "
+                f"AND ({' OR '.join(clauses)}) "
+                "ORDER BY updated_at DESC, id ASC",
+                tuple(parameters),
+            ).fetchall()
+            for title_row in title_rows:
+                title = title_row["title"]
+                if not isinstance(title, str):
+                    continue
+                source_run_id = title_row["source_run_id"]
+                if source_run_id is not None:
+                    result_by_run.setdefault(str(source_run_id), title)
+                workspace_id = title_row["workspace_id"]
+                source_project_id = title_row["source_project_id"]
+                if workspace_id is not None and source_project_id is not None:
+                    result_by_project.setdefault(
+                        (str(workspace_id), str(source_project_id)),
+                        title,
+                    )
+
+        resolved: dict[str, str] = {}
+        for row in rows:
+            run_id = str(row["run_id"])
+            title = result_by_run.get(run_id)
+            project_slug = StoryWorkspaceDreamReentryService._source_project_slug(
+                row["source_metadata"]
+            )
+            if title is None and project_slug is not None:
+                title = result_by_project.get((str(row["workspace_id"]), project_slug))
+            if title is not None:
+                resolved[run_id] = title
+        return resolved
 
     def _stage_snapshot(
         self,
@@ -535,6 +623,38 @@ class StoryWorkspaceDreamReentryService:
         ):
             return goal[:_STORY_WORKSPACE_DREAM_GOAL_PREFIX_MAX]
         return fallback[:_STORY_WORKSPACE_DREAM_GOAL_PREFIX_MAX]
+
+    @staticmethod
+    def _source_project_slug(raw_metadata: Any) -> str | None:
+        try:
+            metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else {}
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(metadata, dict):
+            return None
+        nested = metadata.get("story_workspace_episode_identity")
+        candidates = [
+            metadata.get("projectStorySlug"),
+            nested.get("story_slug") if isinstance(nested, dict) else None,
+        ]
+        for candidate in candidates:
+            if (
+                isinstance(candidate, str)
+                and candidate == candidate.strip()
+                and 1 <= len(candidate) <= 255
+            ):
+                return candidate
+        return None
+
+    @staticmethod
+    def _display_title(project_title: Any, *, goal_prefix: str) -> str:
+        """Resolve one Project-facing title without conflating Episode names."""
+
+        if isinstance(project_title, str):
+            normalized = project_title.strip()
+            if 1 <= len(normalized) <= 255:
+                return normalized
+        return goal_prefix
 
     @staticmethod
     def _parse_datetime(value: Any) -> datetime:

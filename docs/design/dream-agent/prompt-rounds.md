@@ -5207,3 +5207,335 @@ API 和前端阶段按钮。主 Agent before/after Hook 负责成功 turn 后确
 - 同一真实 thread 发送只读 `/drama-query` 后成功恢复原 Claude session；持久化 assistant
   模型为 `gateway/deepseek-v4-pro`、正文 5818 字符；Artifact manifest revision 与 5 个
   文件保持不变。Playwright 最终回执为 `passed`，worker 已退出。
+
+## 第 115 轮——Skill 重初始化后的文件事实对账与连续编辑上下文
+
+**当前轮次目标**
+
+修复两个真实缺口：`/drama-init` 删除 launch seed 后旧 stage 仍可能留在 `.dream` 页面；
+同一 Dream thread 的后续自然语言“修改标题”缺少稳定的工作台定位，模型可能只返回故事
+JSON 而不编辑 `project.yaml`。
+
+**优化后的执行提示词**
+
+> 以“Skill 任意执行、Hook 根据文件事实同步、Observer 只做非控制型投影”为前提，
+> 在 `ClaudeAgentService.assemble_context` 既有生命周期内部署 Agent 只读的
+> `.dream/WORKBENCH.md`，并为每个 Dream turn 注入服务端解析的 run/thread/唯一 Project
+> 文件上下文。Hook 对人物、场景和分镜执行完整集合对账：源集合为空时删除旧 stage，
+> 新源出现时重建；项目属性修改后覆盖私有 Project 副本并提交新 manifest。不得增加
+> 命令顺序状态机、Observer 控制、Dream SSE、新 DTO 或新的 Agent 执行入口。
+
+**本轮检查或修改范围**
+
+- `ClaudeAgentService.assemble_context`、`ClaudeAgentContextBuilder`；
+- `DreamArtifactTurnHook` 与安全 Dream stage writer/reader；
+- `backend/story_workspace/dream_workbench_context.py`；
+- 工作台同步中文设计、聚焦后端合同测试和真实模型 Dream 页面旅程。
+
+**本轮完成标准**
+
+- 删除某类全部 canonical 源文件后旧 stage 消失，新文件出现后只显示新事实；
+- 每个 Dream turn 均能读取 WORKBENCH 合同并获知当前 run/thread/project；
+- “修改标题”为文件编辑，`project.yaml.project_name` 与 `.dream` 私有副本一致；
+- 不改变公开 Chat 报文、Claude session ID、runner 入口和 Observer 边界；
+- 聚焦测试、构建、静态检查和本机真实模型自动化验收通过。
+
+**本轮实际结果和未验证推断**
+
+- 真实 run `run_8956be79389b4bd3aa40b5107a5bb233` 证明 canonical 文件与旧 stage
+  均存在，历史“修改标题”消息随后得到脱离文件的结构化故事 JSON；根因合同已定位。
+- 已新增服务端维护的 `.dream/WORKBENCH.md` 和每 turn 动态上下文；未修改公开 Chat
+  报文、Claude session ID、runner 入口或 Observer。Hook 已按当前完整源集合删除旧 stage，
+  并可在新源出现时重建页面投影。
+- 后端全量为 `1775 passed, 21 skipped, 584 subtests`；聚焦合同测试为
+  `135 passed, 52 subtests`。TypeScript、production build、目标 E2E ESLint、
+  `git diff --check` 均通过。
+- 真实有头 Chromium 使用本机账号 `dmeck123@suoxya.com`、原始 Run
+  `run_8956be79389b4bd3aa40b5107a5bb233` 和真实 `deepseek-v4-pro`：自然语言标题修改
+  已实际写入 canonical `project.yaml`，Hook 同步后的私有副本和 manifest SHA 一致，
+  页面无横向溢出，Playwright `--headed --workers=1` 为 `1 passed`。
+- 仍需产品层面继续观察开放式创作指令的模型质量；文件同步与连续编辑合同本轮已有自动化
+  和真实模型证据，不再作为未验证推断。
+
+## 第 116 轮——初始化部署与逐轮实际路径读取
+
+**当前轮次目标**
+
+纠正第 115 轮只在 `assemble_context` 生成文件、只注入相对路径的不足：Dream surface 初始化
+时即部署 Agent 工作台合同；每个 Dream turn 刷新动态事实后，将服务端校验的实际文件路径
+注入消息并要求 Agent 本轮先读取。
+
+**优化后的执行提示词**
+
+> 审计当前未提交实现和真实调用链，区分 Dream workspace 首次初始化与每个用户 turn 的
+> context assembly。把稳定合同移到 `backend/story_workspace` 下的 Markdown 源文件，首次
+> Dream surface 原子部署 `.dream/WORKBENCH.md`；`ClaudeAgentService.assemble_context`
+> 每轮验证/刷新 run、thread、workspace、Project、Episode 事实，并在不修改公开 DTO、runner、
+> session 或 Observer 的前提下，向同一 Agent message 注入同步后文件的实际路径，明确要求
+> 先 Read 再处理用户请求。以合同测试、全量检查和真实模型持久化 tool parts 证明行为。
+
+**本轮检查或修改范围**
+
+- `backend/story_workspace` 的静态 Agent 合同和安全刷新类；
+- Dream surface 的 workspace 初始化；
+- `ClaudeAgentService.assemble_context` 与内部 context builder；
+- 中文交互设计、时序、审查、合同测试和真实模型 E2E。
+
+**本轮完成标准**
+
+- 新 workspace 初始化即存在静态 WORKBENCH；
+- 每个 Dream turn 的文件和注入内容都含服务端可信实际路径及动态事实；
+- 真实模型持久化 parts 证明读取 WORKBENCH 后再操作 canonical 工作台；
+- 普通 Chat、Claude session、runner、公开报文、Hook/Observer 边界保持不变；
+- 聚焦测试、全量合理检查、构建和真实本机有头 Playwright 通过。
+
+**本轮实际结果和未验证推断**
+
+- 设计审计已证明旧实现未在 Dream surface 初始化时部署 WORKBENCH，且每轮指令只包含相对
+  路径；设计已修改后接受。
+- 静态合同已迁移到 `backend/story_workspace/dream_workbench_context.md`；新 Dream surface
+  初始化原子部署该文件，已有 surface 缺失时只补文件而保留 runtime。每个 Dream turn 刷新
+  run/thread/workspace/project/Episode 事实，并注入绝对、经校验的路径要求 Agent 先 Read。
+- 合同测试为 `110 passed, 13 subtests`；后端项目全量为
+  `1778 passed, 21 skipped, 584 subtests`。Python 编译、目标 ESLint、TypeScript、production
+  build 和 `git diff --check` 通过。
+- 真实有头 Chromium 使用账号 `dmeck123@suoxya.com`、原始 Run
+  `run_8956be79389b4bd3aa40b5107a5bb233` 与真实 `deepseek-v4-pro`，结果 `1 passed (39.3s)`。
+  assistant `fa525153-ece7-44d0-a6c7-616c3dff611b` 的持久化 tool parts 依次记录了绝对
+  `WORKBENCH.md` 和 canonical `project.yaml` 的 Read；工作台含本轮 run/thread/实际路径，
+  项目标题仍为“隔壁的病友”，canonical/private SHA 与 manifest SHA 一致。
+- 开放式创作质量仍属于模型质量观察项；“每轮真实读取当前工作台上下文”本轮已有真实模型
+  证据，不再是推断。
+
+## 第 117 轮——Project 标题的完整消费链同步
+
+**当前轮次目标**
+
+修复真实 Run 的 canonical `project.yaml.project_name` 已修改、`.dream` 私有副本也正确，
+但 `after_main_turn` 未刷新 PostgreSQL Story 投影，Execution 页面仍显示旧业务标题的问题；
+同时把 Playwright Skill 从“问题点/文件检查”升级为逐轮完整业务旅程验证。
+
+**优化后的执行提示词**
+
+> 以真实 Run `run_8956be79389b4bd3aa40b5107a5bb233` 和账号
+> `dmeck123@suoxya.com` 为唯一业务验收对象，追踪可见用户对话、同一 Claude session、
+> canonical Project/Episode 文件、成功后 Hook、Run-private `.dream`、PostgreSQL Story、
+> actor-scoped API 与 Execution 页面。复用现有 Artifact Story projector/repository，在
+> `after_main_turn` 幂等物化 Project 投影；DTO增加 bounded Project title，页面明确分开
+> Project 与 Episode 标题。不得新增状态机、Observer 控制、前端写回、数据克隆或替代服务。
+> 为每轮正常人类对话先定义预期，再验证完整消费链。
+
+**本轮检查或修改范围**
+
+- `DreamArtifactTurnHook.after_main_turn` 与既有 Artifact Story Index；
+- Story Index 后端/前端 DTO 和 Execution masthead；
+- Project/Episode、同步、测试与设计审查文档；
+- `ink-dream-playwright-qa` Skill 和真实 Run 两轮对话 E2E。
+
+**本轮完成标准**
+
+- 成功 Dream turn 对可索引 Episode 自动物化 Story Project，不需要页面手动 reconcile；
+- `project.yaml.project_name` 通过 PostgreSQL/API 到达 Execution Project 标题；
+- Episode 标题保持独立，不被 Project 重命名覆盖；
+- 两轮真实对话保持同一 Claude session，第二轮只读且文件/revision 不变；
+- 聚焦后端、前端合同、ESLint、构建、diff gate 和真实 Chromium 通过。
+
+**本轮实际结果和未验证推断**
+
+- 根因确认：旧 Hook 只负责 stage、private artifact/manifest 和 EP01 binding；Story Index
+  materialize 仅存在于显式 reconcile POST，因此文件正确不代表页面消费闭环完成。
+- Hook 已复用 `ArtifactStoryIndexService` 自动物化，Story Index wire 增加安全
+  `projectTitle`；Execution 顶部显示 Project“隔壁的病友”，Episode 仍显示“凌晨五点的敲墙声”。
+- QA Skill 已明确真实业务不得克隆数据，并要求每条对话验证 Thread→文件→Hook→DB/API→页面。
+- 真实 `deepseek-v4-pro` 有头两轮 E2E 为 `1 passed (32.4s)`；同一 Claude session、逐轮
+  WORKBENCH Read、第二轮无文件变化、PostgreSQL/API `indexed` 和页面双标题均通过。用户随后
+  要求关闭有头模式，浏览器已退出，后续未再启动。
+- 聚焦后端为 `159 passed, 3 skipped, 2 subtests passed`；前端合同 16 passed、mocked
+  Execution 2 passed；目标 ESLint、TypeScript/production build 和 `git diff --check` 通过。
+- 未执行 staging/生产环境或并发负载验证；本轮只声明本机真实业务闭环。
+
+## 第 118 轮——先定义 Dream 业务影响范围，再执行无头真实验收
+
+**当前轮次目标**
+
+纠正“看到 Episode 仍是旧标题就判断 Project 同步失败”的测试概念混淆，并按用户要求
+继续完成代码、Skill 和真实 Run 的完整闭环验证，不再只检查问题点。
+
+**优化后的执行提示词**
+
+> 在测试前先定义 Project、Episode、canonical Artifact、Run-private `.dream`、成功后
+> Hook、PostgreSQL/API 投影和最终 UI 消费面；对每个事实标记应变化、必须保持不变或不在
+> 范围。针对真实 Run `run_8956be79389b4bd3aa40b5107a5bb233`，验证 Project 标题
+> `project.yaml.project_name=隔壁的病友` 经 `after_main_turn` 到达 `.dream`、Story row、
+> Story Index API 和 Execution `<h1>`；同时验证 EP01 标题“凌晨五点的敲墙声”、同一
+> thread/session 和未点名产物不被修改。使用真实账号、真实数据、`deepseek-v4-pro` 和
+> 无头 Chromium，不克隆数据、不启动替代 runtime、不使用有头模式。
+
+**本轮检查或修改范围**
+
+- Dream Project/Episode 业务合同和测试验收文档；
+- `ink-dream-playwright-qa` 的测试前概念/影响门禁；
+- `DreamArtifactTurnHook`、Story Index DTO/页面的既有未提交实现；
+- 真实 Run 两轮对话 E2E 的变化与不变断言。
+
+**本轮完成标准**
+
+- Skill 强制在浏览器/模型运行前输出业务概念与影响矩阵；
+- Project 标题完整消费链正确，Episode 语义保持独立；
+- 两轮对话使用同一 Claude session，每轮都验证文件、Hook、数据库、API 和页面；
+- 聚焦测试、静态检查、构建、Markdown/diff gate 和无头真实 E2E 通过。
+
+**本轮实际结果和未验证推断**
+
+- 页面截图已确认 Project 一级标题为“隔壁的病友”，EP01 仍显示“凌晨五点的敲墙声”；
+  这是 Project-only 修改的正确业务结果，不是 Hook 漏同步 Episode。
+- Skill、参考流程和真实 E2E 已加入强制影响范围合同，明确应变化和必须保持不变的事实。
+- 后端聚焦测试 `125 passed, 2 subtests passed`，前端合同 `16 passed`，目标 ESLint 通过。
+- 真实 `deepseek-v4-pro` 无头 E2E 使用原始 Run、真实账号和同一 thread，两轮完整业务链
+  验收为 `1 passed (29.4s)`；未启动有头 Chromium。
+- staging/生产环境和并发负载仍未验证，本轮只声明本机真实业务闭环。
+
+## 第 119 轮——统一 Dream 工作空间展示标题
+
+**当前轮次目标**
+
+重新定义 Dream 工作空间标题，使 Execution、Dream 回访列表和 Admin 列表在 Project
+存在后统一显示 canonical Project 标题；只有尚未构建 Project 时才显示创作目标前缀。
+
+**优化后的执行提示词**
+
+> 追踪 Dream 标题从 canonical `project.yaml.project_name`、成功后 Hook、PostgreSQL
+> Story 投影、Story Index、Dream Run 回访 API 到 Dream/Admin UI 的完整读取链。定义唯一
+> 派生顺序为“Project/Story title 优先，launch goal 前 80 字符仅兜底”，不得新增数据库
+> 标题字段、文件扫描、双写、第二状态源或 Episode/Deck/workflow summary 覆盖。更新权威
+> 设计、DTO、查询、页面和契约测试，并使用现有本机真实数据做无头只读验证。
+
+**本轮检查或修改范围**
+
+- Dream Run 回访后端投影、DTO、前端解析与列表；
+- Execution Project 一级标题解析；
+- Admin Story/Dream Run 只读查询和列表；
+- Project/Episode、同步、测试验收及目录合同；
+- 聚焦单元/契约测试、静态检查、构建和无头真实页面。
+
+**本轮完成标准**
+
+- 已存在 Project 的 Run 在所有列表与 Execution 显示同一 Project 标题；
+- 尚无 Project 的 Run 显示 launch goal 前 80 字符；
+- Episode 标题不受影响，Admin 不写业务数据且不扫描 Artifact；
+- 聚焦测试、类型检查、构建、`git diff --check` 和无头真实验证通过。
+
+**本轮实际结果和未验证推断**
+
+- Dream Run DTO增加服务端派生 `displayTitle`；回访列表和 Execution 统一以 Project 标题优先，
+  尚无 Project 时使用 launch goal 前 80 字符。历史 Run 通过 Workspace + stable Project slug
+  解析同一 Story，不受 current `source_run_id` 更新影响。
+- Admin 恢复只读 `/admin/story/workflow-runs` 页面，首列使用同一标题顺序；查询只连接共享
+  PostgreSQL，不扫描或写 Artifact，也不新增 DDL/Run title。
+- 后端聚焦测试 `113 passed, 2 subtests passed`；前端合同 `19 passed`；Admin Repository
+  `7 passed`。Dream/Admin 目标 ESLint、Python 编译、两端 production build 和两个仓库
+  `git diff --check` 均通过。
+- 无头真实 Playwright 使用账号 `dmeck123@suoxya.com` 和本机原始数据，验证
+  `run_ddb53a9a261d497c98ad9a6c1ec3a1c2` 在 API、Dream 回访和 Execution 均显示
+  “雾中黑海湖”；无 Project 的 `run_1d6380cea6fc4a91b0586c1e79856ec4` 显示 goal 前缀，
+  最终结果 `1 passed (3.5s)`；关联 mocked Execution E2E `2 passed (4.7s)`。未发送消息、
+  未调用模型、未执行有头测试。
+- Admin SQL 已在相同真实 PostgreSQL 上只读验证 canonical 与 fallback 两种结果；Admin 登录
+  UI 本轮未自动化，页面路由、Repository 契约与 production build 已覆盖。
+
+## 第 120 轮——Dream Agent 自然语言资产协作
+
+**当前轮次目标**
+
+修复真实 Run 中用户要求新增/修改人物却只得到 JSON 文本、canonical 文件和页面均未变化的
+问题；定义人物、场景、分镜的完整 Agent 协作合同，并验证成功后 Hook 文件事实同步。
+
+**优化后的执行提示词**
+
+> 诊断真实 Run `run_ddb53a9a261d497c98ad9a6c1ec3a1c2` 的持久化消息、Claude
+> session、Deck prompt、canonical 文件与 `.dream` stage。新增唯一 Agent 可执行资产协作
+> 合同，覆盖人物、场景、分镜 CRUD、稳定 ID、引用完整性和失败边界；随 Dream surface
+> 初始化并在每个 `ClaudeAgentService.assemble_context` 注入实际路径。Dream turn 必须使用
+> workspace-file 合同而非普通 Chat standalone JSON proposal。不得修改 runner、公开消息
+> DTO、session/resume、SSE，不新增状态机、Observer 控制、Watcher 或 MCP 强依赖。编写中文
+> 设计与时序，审查后实施，并用真实账号、原始 Run、真实模型和无头 Chromium 验证完整
+> 新增→更新→引用删除→清理流程。
+
+**本轮检查或修改范围**
+
+- `DeckChatContextService` 的既有 Dream mode 与 `ClaudeAgentService.assemble_context`；
+- `backend/story_workspace` 工作台/资产 Agent 合同及 Dream surface 初始化；
+- `DreamArtifactTurnHook` 已有完整文件事实扫描与 stage 对账；
+- 人物、场景、分镜 CRUD 合同测试和真实业务 E2E。
+
+**本轮完成标准**
+
+- 每个 Dream turn 先 Read WORKBENCH 和资产协作合同；
+- Dream turn 不再收到 legacy standalone JSON proposal；普通 Chat 行为不变；
+- 三类资产增删改与引用完整性经过 canonical、Hook、`.dream` API 和页面验证；
+- 无头真实测试不克隆数据、不启动替代服务，并清理测试临时资产；
+- 聚焦测试、静态检查、构建和 `git diff --check` 通过。
+
+**本轮实际结果和未验证推断**
+
+- 已确认目标 thread 有可用 `claude_session_id` 且连续历史完整；失败的两个 assistant turn
+  没有任何文件工具调用，只返回同一 JSON proposal。
+- 根因已定位到公共 Chat Deck prompt 的 legacy JSON 合同仍进入 Dream turn，以及现有
+  WORKBENCH 未定义资产 CRUD；不是 session 丢失或 Hook 漏扫已写文件。
+- 中文设计、五类业务时序和设计审查已完成，结论为“修改后接受”；人物、场景、道具、分镜
+  合同随 Dream surface 部署，并在每个可信 Dream turn 的 `assemble_context` 中注入实际路径。
+- Dream turn 已切换到既有 `dream_mode` 文件协作合同；成功主轮 Hook 按完整 canonical 文件
+  事实同步 `.dream` stage。sandbox 以 thread workspace 覆盖全部 canonical `assets/**`，
+  `.dream/**` denyWrite；PreToolUse 只开放确认式单资产删除，不改变 runner 公开执行入口。
+- 后端聚焦回归 `380 passed, 1 skipped, 113 subtests passed`；前端业务合同 `35 passed`，
+  mocked Execution E2E `2 passed`；TypeScript、目标 ESLint、production build 和
+  `git diff --check` 均通过。
+- 真实账号 `dmeck123@suoxya.com`、原始 Run、`deepseek-v4-pro`、同一 Claude session
+  `9d94db3d-c0b2-4e81-a04b-4c2be8cb531d` 已实际完成无头四轮；新增、稳定 ID 更新、引用解除、
+  删除及最终清理均经过 canonical、Hook、API 和页面核对，基线恢复为 2 人物、1 场景、0 道具、
+  EP01 8 镜/48 秒。该次运行曾在临时诊断版本中通过，但其放宽的删除回执断言已随 `/tmp`
+  实验一并回滚，不能作为最终 spec 通过记录。
+- 三条删除 Bash receipt 仍因既有 Claude Code command-level 临时目录问题记录为
+  `output-error`，但删除后的 canonical 文件事实及 Hook/API/UI 投影均已验证。用户已决定跳过
+  该基础设施问题；最终 E2E 恢复要求 `output-available`，故该项保持未通过/未重跑，不以放宽
+  断言规避。本轮没有修改临时目录策略，也不推断其已解决。未执行有头或生产环境验证。
+
+## 第 121 轮——撤销 `/tmp` 兼容实验并冻结边界
+
+**当前轮次目标**
+
+撤销本轮为 Claude Code command-level 临时目录故障引入的全部实现、测试和设计变更；保留
+原有临时目录策略，并增加明确 TODO，禁止 Dream 后续任务继续改动该边界。
+
+**优化后的执行提示词**
+
+> 精确审计本轮与 `/tmp`、`TMPDIR`、`CLAUDE_TMPDIR`、短路径、符号链接和 `.claude-tmp`
+> 有关的差异。只撤销本轮实验，不回退原仓库既有 Claude Code 临时目录实现，也不影响
+> `_workspace_sandbox_config` 对 canonical `assets/**` 可写和 `.dream/**` 只读的 Dream
+> 业务边界。删除为临时目录故障新增的测试豁免和设计说明；在代码与根 Agent 规则中保留
+> 一个冻结 TODO，规定除用户单独批准的专项任务外不得再修改。完成后运行聚焦测试和差异审计。
+
+**本轮检查或修改范围**
+
+- Claude Agent runner 环境变量组装；
+- workspace sandbox 原有临时目录策略；
+- 资产协作设计和真实 E2E 中与临时目录故障耦合的说明；
+- 根 `AGENTS.md` 的持续约束。
+
+**本轮完成标准**
+
+- 不存在本轮新增的 TMPDIR 注入、短路径、符号链接或 `.claude-tmp`；
+- 原有 `_sandbox_claude_tmp_write_paths()` 行为保持不变；
+- Dream `assets/**`/`.dream/**` capability 边界不被误回滚；
+- 只保留冻结 TODO，聚焦测试和 `git diff --check` 通过。
+
+**本轮实际结果和未验证推断**
+
+- 已撤销 runner 的临时目录环境注入、短目录/符号链接实现、相关测试豁免和设计故障方案；
+  原有 Claude Code 临时目录函数与返回值未改变。
+- 根规则和临时目录函数加入冻结 TODO；Dream sandbox 的 canonical workspace 写权限及
+  `.dream` denyWrite 是独立业务改动，予以保留。
+- workspace/runner 聚焦测试 `146 passed, 1 skipped, 98 subtests passed`；运行时代码残留
+  扫描只命中本轮记录和唯一冻结 TODO，`git diff --check` 通过。
+- Claude Code 自身的 command-level 临时目录问题明确不在本轮修复范围，不能推断其已解决；
+  本轮未新增 TMPDIR 注入、短路径、符号链接、`.claude-tmp` 或 sandbox 放行。

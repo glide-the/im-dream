@@ -38,6 +38,7 @@ function projection(status: StoryWorkspaceStoryIndexStatus): StoryWorkspaceStory
   const base: StoryWorkspaceStoryIndexProjection = {
     runId: RUN_ID,
     projectId: 'rainy-night',
+    projectTitle: '雨夜归途',
     storyId: STORY_ID,
     status,
     observedManifestRevision: MANIFEST_1,

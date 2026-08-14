@@ -1,3 +1,7 @@
+// [Input] Actor-scoped Story Workspace REST response values.
+// [Output] Shared strict frontend DTOs with separate Project and Episode titles.
+// [Pos] Story Workspace browser contract declarations; no transport or reducer state.
+
 export type StoryWorkspaceReviewStatus = 'pending' | 'confirmed' | 'rejected' | 'archived';
 
 export type StoryWorkspaceSortOrder = 'asc' | 'desc';
@@ -85,6 +89,7 @@ export interface StoryWorkspaceStory {
 export interface StoryWorkspaceStoryIndexProjection {
   readonly runId: string;
   readonly projectId: string;
+  readonly projectTitle: string;
   readonly storyId: string | null;
   readonly status: StoryWorkspaceStoryIndexStatus;
   readonly observedManifestRevision: string | null;
@@ -176,6 +181,8 @@ export interface StoryWorkspaceDreamLaunchAccepted {
 /** One durable, actor-scoped run row rendered by Dream's canonical workbench. */
 export interface StoryWorkspaceDreamReentryItem {
   readonly storyWorkspaceRunId: string;
+  /** Canonical Project title, or the launch-goal prefix before Project creation. */
+  readonly displayTitle: string;
   readonly goalPrefix: string;
   readonly deckId: string;
   readonly deckDisplayName: string;

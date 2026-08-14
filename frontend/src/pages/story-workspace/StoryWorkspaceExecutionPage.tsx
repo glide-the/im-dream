@@ -1,11 +1,14 @@
-// [Input] Confirmed run identity, `.dream` projections, and authoritative Episode artifact surface.
-// [Output] Revision-stable Episode workbench with the shared Dream Agent thread.
+// [Input] Confirmed run identity, `.dream` projections, authoritative Project
+//         Story index, and Episode artifact surface.
+// [Output] Current Project title and revision-stable Episode workbench with the
+//          shared Dream Agent thread.
 // [Pos] /story-workspace/runs/:storyWorkspaceRunId/execution (Task 3 U11)
 // [Sync] 2026-08-06: compose Episode artifacts without changing their REST ownership.
 // [Sync] 2026-08-13: describe an unbound EP01 as a pending artifact-association
 //                    build, reserving trust language for server identity checks.
 // [Sync] 2026-08-13: keep EP01 association state read-only; confirmed turns
 //                    publish and bind automatically without a manual UI action.
+// [Sync] 2026-08-13: render canonical Project title separately from Episode title.
 // [Sync] 2026-08-13: hand the dialog's bound Dream thread to canonical Chat.
 
 import {
@@ -26,6 +29,7 @@ import {
 import {
   StoryWorkspaceStoryIndexHttpError,
   useStoryWorkspaceDreamFiles,
+  useStoryWorkspaceDreamRuns,
   useStoryWorkspaceStoryIndex,
 } from '../../hooks/story-workspace';
 import type {
@@ -59,6 +63,7 @@ import {
   storyWorkspaceBuildExecutionWorkspace,
   storyWorkspaceCanAccessExecution,
   storyWorkspaceExecutionFocusNeighbors,
+  storyWorkspaceResolveDreamDisplayTitle,
 } from './executionViewModel';
 import './StoryWorkspaceExecutionPage.css';
 import './StoryWorkspaceDreamPage.css';
@@ -287,6 +292,13 @@ export function StoryWorkspaceExecutionPage({
   const episodeArtifactReaderRef = useRef<HTMLDivElement>(null);
   const { run, selectRun } = useWorkflowRun({ eventsEnabled: true });
   const currentRun = run?.workflow_run_id === runId ? run : null;
+  const dreamRuns = useStoryWorkspaceDreamRuns();
+  const currentDreamRun = useMemo(
+    () => dreamRuns.data?.runs.find((candidate) => (
+      candidate.storyWorkspaceRunId === runId
+    )) ?? null,
+    [dreamRuns.data, runId],
+  );
 
   const navigate = useCallback((href: string, notice?: string) => {
     if (onNavigate) {
@@ -588,7 +600,10 @@ export function StoryWorkspaceExecutionPage({
             <span>后续执行</span>
           </nav>
           <h1 id="story-workspace-collaboration-title">
-            {currentRun?.workflow_summary?.trim() || '故事协作工作台'}
+            {storyWorkspaceResolveDreamDisplayTitle(
+              storyIndex.data?.projectTitle,
+              currentDreamRun?.goalPrefix,
+            )}
           </h1>
         </div>
         <button
