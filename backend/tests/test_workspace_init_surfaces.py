@@ -220,6 +220,9 @@ class MaterializeDreamSurfaceTests(unittest.TestCase):
             asset_collaboration,
             load_dream_asset_collaboration_contract(),
         )
+        self.assertIn("页面上看到的名称和上下文", asset_collaboration)
+        self.assertIn("不得要求用户提供 `char_id`", asset_collaboration)
+        self.assertIn("成功 Bash 回执", asset_collaboration)
         self.assertNotIn("workflow_run_id", workbench)
         self.assertEqual(step["step"], "materialize-surface")
         self.assertEqual(step["surface"], "dream")

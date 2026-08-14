@@ -8,13 +8,17 @@
 用户在 Dream 工作台中会直接用自然语言要求 Agent 新增、修改或删除人物、场景、道具和分镜。
 这些请求不是“生成待确认提案”，而是对当前 thread canonical 工作台文件的协作编辑。
 
-真实 Run `run_ddb53a9a261d497c98ad9a6c1ec3a1c2` 已证明旧链路存在两项缺口：
+真实 Run `run_ddb53a9a261d497c98ad9a6c1ec3a1c2` 已证明旧链路存在三项缺口：
 
 1. 每轮 `.dream/WORKBENCH.md` 只说明了目录与宿主同步边界，没有定义资产 CRUD、稳定 ID、
    文件格式和引用完整性；
 2. 公共 Chat 入口解析 Deck context 时未选择已有 `dream_mode`，导致 Dream turn 仍收到
    “只返回一个 JSON proposal”的旧 Chat 合同。Agent 因而两次只输出 JSON，没有调用
-   Read、Write 或 Edit，canonical 文件和页面都没有变化。
+   Read、Write 或 Edit，canonical 文件和页面都没有变化；
+3. Claude Code 2.1.220 使用 `CLAUDE_CODE_TMPDIR` 决定 per-uid `cwd-*` shell 文件根目录，
+   现有实现却只猜测 `/tmp/claude-$UID` 并把 `/tmp`、某个动态 `cwd-*` 写进 sandbox。
+   `rm` 可能先删除文件，随后 zsh hook 报 `operation not permitted`，导致工具持久化为
+   `output-error`、Agent 向用户报告失败，而 Hook 后读取到的文件事实已经变化。
 
 Claude session 在该 Run 中持续存在且同一 thread 历史完整，因此本问题不是 resume/session
 丢失，也不应通过重建 session 或重复首轮指令修复。
@@ -32,6 +36,7 @@ Claude session 在该 Run 中持续存在且同一 thread 历史完整，因此�
 | Hook | `DreamArtifactTurnHook.after_main_turn` | 成功根 turn 后按完整文件事实刷新 stage |
 | 私有页面投影 | `.dream/runtime/runs/<run-id>/stages/*.json` | Hook 生成，Agent 不直接写 |
 | Chat/Claude session | 共享 thread、history、SSE、确认、Stop、resume | 保持不变 |
+| Claude Code 临时根 | 服务端 `CLAUDE_CODE_TMPDIR` 与 sandbox 精确 allowWrite | 统一为 `/tmp/claude` |
 
 不属于本次范围：把资产编辑建模为 workflow 状态机、为每种 CRUD 增加 REST 命令、解析
 assistant JSON 代替文件写入、让 Observer 或 MCP 成为同步 owner、修改 Claude runner 的
@@ -49,6 +54,11 @@ assistant JSON 代替文件写入、让 Observer 或 MCP 成为同步 owner、�
 
 Agent 必须先 Read 两个文件，再检查与本次请求有关的 canonical 文件。Deck voice 或普通 Chat
 提案格式只能约束最终文字表达，不能替代 Dream 文件操作。
+
+用户消息不要求包含任何内部身份。Agent 应从展示名称、当前 Episode、同一 thread 最近上下文
+和现存文件事实解析“阿酷”“俱乐部负责人”“刚才那个雨棚”“第一集最后一个镜头”。只有多个
+目标确实会产生不同业务结果时才 AskUserQuestion；不得把 `char_id`、绝对路径或 exact `rm`
+命令变成用户必须知道的协议。
 
 ### 3.2 人物、场景和道具
 
@@ -69,8 +79,16 @@ Agent 必须先 Read 两个文件，再检查与本次请求有关的 canonical 
 `_workspace_sandbox_config` 以整个 thread workspace 作为唯一业务写根，因此 `assets/**` 与
 `stories/**` 都在 canonical 写边界内；`.dream/**` 在 sandbox `denyWrite` 中，Agent 只读。
 
+共享 `sdk_env.apply_project_sdk_runtime_options()` 为所有 Chat/Dream turn 注入服务端
+`CLAUDE_CODE_TMPDIR`。配置默认 `/tmp/claude`，注入前解析系统路径别名（macOS 上为
+`/private/tmp/claude`）；`_workspace_sandbox_config` 通过同一解析函数只把该规范化精确根
+加入 `allowWrite`；Claude Code 自己可在其下创建 per-uid 与 `cwd-*` 子项。不得持久化整个
+`/tmp`、旧 `/tmp/claude-$UID` 或某一轮生成的动态 `cwd-*` 路径。
+
 PreToolUse 仍只让明确的单资产 `rm --` 进入共享可见确认；目录、多文件、通配符、符号链接与
 越界删除继续拒绝。成功删除后由主轮 Hook 根据现存文件事实刷新投影。
+只有 Bash 工具得到成功回执且目标文件确认不存在，Agent 才能回复“已删除”；非零退出或
+`operation not permitted` 必须维持失败语义，不能因文件可能已先被 `rm` 移除而改判成功。
 
 这里不在 sandbox 中逐项硬编码“人物/场景/道具”的业务目录 allowlist：`allowWrite` 的对象是
 当前 thread 的完整 canonical 工作区能力，未来已安装 Skill 产生的其他合法 `assets/**` 文件
@@ -202,6 +220,33 @@ sequenceDiagram
     end
 ```
 
+### 4.6 模糊页面术语与成功删除
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant P as Dream 页面输入框
+    participant S as ClaudeAgentService
+    participant E as 共享 SDK 环境
+    participant A as 主 Agent
+    participant C as canonical 工作台
+    participant H as after_main_turn Hook
+    participant V as 页面投影
+    U->>P: “删除刚才那个阿酷”
+    P->>S: 标准 thread 消息，不含 ID/路径
+    S->>E: CLAUDE_CODE_TMPDIR=/tmp/claude
+    S-->>A: 同一 session + 工作台合同路径
+    A->>C: 通过展示名/最近上下文定位唯一人物并检查引用
+    A->>P: 请求确认单文件 Bash 删除
+    U-->>A: 可见批准
+    A->>C: rm -- 单个 canonical 文件
+    C-->>A: output-available / exit 0
+    A->>C: 确认文件不存在
+    A-->>S: 自然语言说明已删除
+    S->>H: 成功主轮后同步
+    H->>V: characters revision 与页面移除人物
+```
+
 ## 5. 设计审查
 
 结论：**修改后接受**。
@@ -212,6 +257,8 @@ sequenceDiagram
    Dream binding 后选择 `dream_mode`，不能让公共路由或浏览器声明 Dream 身份；
 2. 资产协作正文只维护在 `backend/story_workspace` 的一个 Markdown 源文件，工作区部署和
    每轮路径注入复用现有 `DreamWorkbenchContext`，不能在 Python prompt 中复制第二份规则。
+3. Claude Code 临时根必须在共享 SDK env 层和 workspace sandbox 通过同一 resolver 定义；
+   删除 broad `/tmp` 与动态 `cwd-*`，不能形成 Dream 专用环境分支。
 
 通过审查的理由：
 
@@ -234,3 +281,7 @@ sequenceDiagram
 - 失败/Stop 不发布，重复无变化不增加 revision；
 - 普通 Chat 保留既有 proposal 行为，Dream turn 不再收到 legacy standalone JSON 合同；
 - 不调用真实业务的克隆数据或替代服务；真实浏览器测试使用原始本机数据和无头模式。
+- 真实用户消息只使用页面展示名称、“当前/刚才/第一集”等术语，不向 Agent提供内部 ID、路径、
+  文件名、合同读取步骤或 exact shell 命令；测试在操作后发现内部身份用于断言。
+- 删除 Bash 必须持久化为 `output-available` 且目标文件、Hook、API、页面一致消失；任何
+  `cwd-* operation not permitted` 都使验收失败。

@@ -54,6 +54,9 @@
 # [Sync] 2026-08-12: set Claude Code's native transient-request retry default
 #                    to three through CLAUDE_CODE_MAX_RETRIES. This is a
 #                    server-owned CLI default, not an Agent turn retry loop.
+# [Sync] 2026-08-14: pin Claude Code's native temp root through a canonicalized
+#                    CLAUDE_CODE_TMPDIR (configured default /tmp/claude) so its
+#                    per-uid cwd-* files stay under the exact allowWrite root.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -72,6 +75,8 @@ _CLAUDE_SETTING_SOURCES_ARG = "setting-sources"
 _CLAUDE_PROJECT_SETTING_SOURCE = "project"
 _CLAUDE_CODE_MAX_RETRIES_ENV_NAME = "CLAUDE_CODE_MAX_RETRIES"
 CLAUDE_CODE_MAX_RETRIES_DEFAULT = "3"
+_CLAUDE_CODE_TMPDIR_ENV_NAME = "CLAUDE_CODE_TMPDIR"
+CLAUDE_CODE_TMPDIR_DEFAULT = "/tmp/claude"
 
 logger = logging.getLogger(__name__)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
@@ -134,6 +139,43 @@ _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME = "CLAUDE_CODE_TASK_LIST_ID"
 # workspace.get_tasks_dir() resolves the same constant — single source.
 CLAUDE_CODE_TASK_LIST_ID_VALUE = "main"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def resolve_claude_code_tmpdir(
+    process_env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Return the server-owned Claude Code temporary root.
+
+    Claude Code 2.1.220 derives its per-uid ``claude-UID/cwd-*`` shell files
+    beneath ``CLAUDE_CODE_TMPDIR``.  Keeping this root explicit makes the CLI
+    subprocess environment and workspace sandbox use one stable path instead
+    of trying to predict a generated ``cwd-*`` name.
+
+    Only an absolute process-level override is accepted. Browser/user env
+    settings cannot relocate this security boundary.
+    """
+
+    source = os.environ if process_env is None else process_env
+    configured = str(source.get(_CLAUDE_CODE_TMPDIR_ENV_NAME) or "").strip()
+    fallback = str(Path(CLAUDE_CODE_TMPDIR_DEFAULT).resolve(strict=False))
+    raw = Path(configured or CLAUDE_CODE_TMPDIR_DEFAULT).expanduser()
+    try:
+        resolved = raw.resolve(strict=False)
+    except (OSError, RuntimeError):
+        resolved = Path("/")
+    if raw.is_absolute() and resolved != Path("/"):
+        # macOS exposes /tmp as a symlink to /private/tmp. Claude's sandbox
+        # canonicalizes command paths before applying allowWrite, so both the
+        # subprocess and settings must receive the same canonical path.
+        return str(resolved)
+    if configured:
+        logger.warning(
+            "%s=%r is not a safe absolute directory; using %s.",
+            _CLAUDE_CODE_TMPDIR_ENV_NAME,
+            configured,
+            fallback,
+        )
+    return fallback
 
 
 def apply_gateway_credential_tombstones(environment: dict[str, str]) -> None:
@@ -287,6 +329,10 @@ def apply_project_sdk_runtime_options(
         _CLAUDE_CODE_MAX_RETRIES_ENV_NAME,
         CLAUDE_CODE_MAX_RETRIES_DEFAULT,
     )
+    # Server-owned and intentionally assigned rather than setdefault: the
+    # workspace sandbox is generated from the same resolver, so an arbitrary
+    # caller value must not move Claude's cwd-* files outside allowWrite.
+    existing_env[_CLAUDE_CODE_TMPDIR_ENV_NAME] = resolve_claude_code_tmpdir()
     options.env = existing_env
     apply_project_setting_sources_to_options(options)
     return options

@@ -88,6 +88,13 @@ After each Agent terminal, validate that row before sending the next message.
 Matching canonical and private SHA values proves only the file boundary; the
 database-backed API and actual consumer page must also pass.
 
+The visible utterance column must contain normal page language, for example
+“加一个叫小岚的场记”“把刚才的雨棚写成雨夜”“删掉刚才那个人物”“第一集最后那个镜头不要
+了”. It must not contain an Agent-facing `char_id`, `scene_id`, `shot_id`,
+absolute path, filename, contract-read instruction, exact `rm` command, Hook,
+or `.dream` implementation detail. Discover those facts after the first turn
+and use them only in assertions or confirmation allowlisting.
+
 For character/scene/prop/storyboard collaboration, define the entire conversation
 before the first browser action. The minimum complete journey is:
 
@@ -98,6 +105,12 @@ before the first browser action. The minimum complete journey is:
    resolves references atomically (or asks a visible clarification question);
 4. delete the remaining temporary shot/assets and prove the baseline has been
    restored.
+
+For file deletion, require the matching Bash invocation to finish with
+`output-available` and zero exit status before accepting canonical absence.
+This catches the case where `rm` executes but Claude Code later reports a
+`cwd-*` shell-hook error; the UI must never tell a user that such a turn
+succeeded or failed inconsistently with its persisted tool receipt.
 
 After every turn, inspect the persisted assistant tool parts and require Reads
 of both `.dream/WORKBENCH.md` and `.dream/ASSET-COLLABORATION.md`. Then compare

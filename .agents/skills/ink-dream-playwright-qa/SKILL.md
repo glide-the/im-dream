@@ -31,6 +31,12 @@ Read [references/project-workflow.md](references/project-workflow.md) before sta
 - Write business E2E scenarios as normal human journeys through visible UI. API
   calls may stage isolated prerequisites or verify persisted facts, but must not
   replace the meaningful user interaction under test.
+- Real Agent dialogue must use only language a user can derive from the page
+  and conversation. Do not put internal IDs, absolute paths, filenames,
+  `.dream` contracts, Hook instructions, canonical terminology, or exact tool
+  commands in the user's message. Test code may discover stable IDs and paths
+  after the turn for assertions and confirmation safety, but must never teach
+  them to the model through the composer.
 - A business mutation is complete only when the whole consumer chain is proven:
   visible request → shared Thread/Agent action → canonical file → successful
   after-turn Hook → private `.dream` publication when applicable → PostgreSQL
@@ -173,6 +179,16 @@ Never hand-edit the normal development database for browser QA.
   actor-scoped `dream-files` API returned the same facts, and the refreshed
   workbench page showed them. A single happy-path mutation or a final snapshot
   is not a complete asset-collaboration test.
+- At least one follow-up must rely on conversational references such as “刚才
+  那个人物/场景/镜头” or a visible display name. Assert that the Agent resolves
+  it from the synchronized workbench and same Claude session without the test
+  repeating internal identity. If several visible targets genuinely match,
+  require a visible AskUserQuestion rather than silently choosing one.
+- A delete passes only when the visible confirmation names the expected single
+  file, the persisted Bash tool state is `output-available`, the command has a
+  zero exit result, and the file/Hook/API/page all show absence. Never accept
+  an `operation not permitted` or other `output-error` merely because the file
+  happened to disappear before a shell hook failed.
 - Include one reference-integrity step whenever deletion is in scope. Create a
   temporary test-only character/scene/prop/shot relationship through the visible
   Agent, then require the Agent either to update/remove the references in the

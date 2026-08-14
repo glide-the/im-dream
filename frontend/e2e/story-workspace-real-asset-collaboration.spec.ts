@@ -1,5 +1,5 @@
 // [Input] Named real Dream Run, real actor/model, visible shared Chat composer, and canonical asset workspace.
-// [Output] Full human journey proving character/scene/prop/storyboard add, update, reference-safe delete, cleanup, Hook/API/UI.
+// [Output] Human-language journey proving character/scene/prop/storyboard add, update, reference-safe delete, cleanup, Hook/API/UI.
 // [Pos] Opt-in headless real-data Dream Agent asset-collaboration acceptance test.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
@@ -16,17 +16,13 @@ const THREAD_ID = process.env.INK_REAL_ASSET_QA_THREAD_ID
   ?? '5cb50934-c592-501d-9a37-8b058a1f413b';
 const ACTOR_EMAIL = process.env.INK_REAL_ASSET_QA_ACTOR_EMAIL
   ?? 'dmeck123@suoxya.com';
-const SUFFIX = process.env.INK_REAL_ASSET_QA_SUFFIX ?? 'codex-asset-0814';
-const CHARACTER_ID = `qa-character-${SUFFIX}`;
-const SCENE_ID = `qa-scene-${SUFFIX}`;
-const SHOT_ID = `qa-shot-${SUFFIX}`;
-const PROP_ID = `QA-PROP-${SUFFIX}`;
-const CHARACTER_NAME = `临时场记-${SUFFIX}`;
-const UPDATED_CHARACTER_NAME = `临时场记（短发）-${SUFFIX}`;
-const SCENE_NAME = `临时器材帐篷-${SUFFIX}`;
-const UPDATED_SCENE_NAME = `临时器材帐篷（雨夜）-${SUFFIX}`;
-const PROP_NAME = `临时场记板-${SUFFIX}`;
-const UPDATED_PROP_NAME = `临时雨夜场记板-${SUFFIX}`;
+const SUFFIX = process.env.INK_REAL_ASSET_QA_SUFFIX ?? '0814甲';
+const CHARACTER_NAME = `场记小岚（${SUFFIX}）`;
+const UPDATED_CHARACTER_NAME = `短发场记小岚（${SUFFIX}）`;
+const SCENE_NAME = `备用雨棚（${SUFFIX}）`;
+const UPDATED_SCENE_NAME = `雨夜备用雨棚（${SUFFIX}）`;
+const PROP_NAME = `蓝边场记板（${SUFFIX}）`;
+const UPDATED_PROP_NAME = `黄胶带蓝边场记板（${SUFFIX}）`;
 const REPO_ROOT = resolve(process.cwd(), '..');
 const BACKEND_DIR = resolve(REPO_ROOT, 'backend');
 const BACKEND_PYTHON = resolve(BACKEND_DIR, '.venv/bin/python');
@@ -35,14 +31,19 @@ const FACT_READER = resolve(process.cwd(), 'e2e/helpers/read_asset_collaboration
 /**
  * Business concepts and impact matrix:
  *
- * | Fact | Authority | Expected impact |
- * | Character/scene/prop | canonical assets files | temporary add -> stable-ID update -> reference-safe delete |
- * | EP01 storyboard | canonical storyboard.yaml | temporary shot add -> update -> refs removed -> shot deleted |
- * | Run-private stages | successful after_main_turn Hook | only changed stage revisions advance; final items return to baseline |
+ * | User-visible concept | Authority | Expected impact |
+ * | “小岚/刚才那个人” | canonical character file | add -> same-identity update -> reference-safe delete |
+ * | “雨棚/刚才那个场景” | canonical scene file | add -> same-identity update -> reference-safe delete |
+ * | “场记板/刚才那个道具” | canonical prop file | add -> same-identity update -> reference-safe delete |
+ * | “第一集最后那个镜头” | EP01 storyboard.yaml item | add -> same-identity update -> unlink -> delete |
+ * | Run-private stages | successful after_main_turn Hook | only file facts drive revisions/projection |
  * | Project/other assets | existing canonical files | must remain unchanged |
- * | Shared conversation | Chat thread + Claude session | same IDs for all four visible turns |
- * | Public consumer | actor-scoped dream-files + Execution Assets/Outline | shows each post-turn fact after refresh |
- * | PostgreSQL Story | Project/Episode materialization | not directly changed by temporary stage-only assets |
+ * | Shared conversation | Chat thread + Claude session | same IDs and real model across all turns |
+ * | Public consumer | actor-scoped dream-files + Execution Assets/Outline | shows each settled post-turn fact |
+ *
+ * The visible requests deliberately contain no internal ID, file path, file name,
+ * `.dream`, Hook, canonical, tool, or shell terminology. Internal identities are
+ * discovered only after the first turn and are used solely for acceptance evidence.
  */
 const DREAM_ASSET_IMPACT_SCOPE = Object.freeze({
   temporaryAssetsAndShot: 'add-update-reference-safe-delete',
@@ -62,6 +63,7 @@ interface ToolFact {
   readonly name: string;
   readonly input: Record<string, unknown>;
   readonly state: string | null;
+  readonly output: unknown;
 }
 
 interface ThreadFacts {
@@ -106,6 +108,17 @@ interface AssetFacts {
   readonly assetContractExists: boolean;
 }
 
+interface CreatedFacts {
+  readonly characterId: string;
+  readonly character: AssetEntry;
+  readonly sceneId: string;
+  readonly scene: AssetEntry;
+  readonly propId: string;
+  readonly prop: AssetEntry;
+  readonly shotId: string;
+  readonly shot: Record<string, unknown>;
+}
+
 function runBackendScript(source: string, args: readonly string[]): string {
   return execFileSync(BACKEND_PYTHON, ['-c', source, ...args], {
     cwd: BACKEND_DIR,
@@ -137,7 +150,7 @@ function readThreadFacts(threadId: string): ThreadFacts {
     'db.close()',
     "metadata=json.loads(row['metadata']) if row and isinstance(row['metadata'],str) else (row['metadata'] if row else {})",
     "parts=json.loads(row['parts']) if row and isinstance(row['parts'],str) else (row['parts'] if row else [])",
-    "tools=[{'name':p.get('toolName'),'input':p.get('input') or {},'state':p.get('state')} for p in parts if isinstance(p,dict) and p.get('type')=='tool-invocation']",
+    "tools=[{'name':p.get('toolName'),'input':p.get('input') or {},'state':p.get('state'),'output':p.get('output')} for p in parts if isinstance(p,dict) and p.get('type')=='tool-invocation']",
     "text='\\n'.join(str(p.get('text') or '') for p in parts if isinstance(p,dict) and p.get('type')=='text')",
     "print(json.dumps({'assistantId':row['id'] if row else None,'claudeSessionId':thread['claude_session_id'] if thread else None,'model':metadata.get('chatModel',{}).get('model') if isinstance(metadata,dict) else None,'text':text,'tools':tools},ensure_ascii=False))",
   ].join(';'), [threadId])) as ThreadFacts;
@@ -150,8 +163,19 @@ function readAssetFacts(): AssetFacts {
   }).trim()) as AssetFacts;
 }
 
-function shotById(facts: AssetFacts): Record<string, unknown> | undefined {
-  return facts.storyboard.shots.find((shot) => shot.shot_id === SHOT_ID);
+function newKeys<T>(before: Readonly<Record<string, T>>, after: Readonly<Record<string, T>>): string[] {
+  return Object.keys(after).filter((key) => before[key] === undefined);
+}
+
+function newShotIds(before: AssetFacts, after: AssetFacts): string[] {
+  const previous = new Set(before.storyboard.shots.map((shot) => String(shot.shot_id ?? '')));
+  return after.storyboard.shots
+    .map((shot) => String(shot.shot_id ?? ''))
+    .filter((id) => id.length > 0 && !previous.has(id));
+}
+
+function shotById(facts: AssetFacts, shotId: string): Record<string, unknown> | undefined {
+  return facts.storyboard.shots.find((shot) => shot.shot_id === shotId);
 }
 
 function readPaths(facts: ThreadFacts): string[] {
@@ -160,17 +184,23 @@ function readPaths(facts: ThreadFacts): string[] {
     .map((tool) => String(tool.input.file_path ?? ''));
 }
 
-async function approveExpectedConfirmation(page: Page): Promise<boolean> {
+async function approveExpectedConfirmation(
+  page: Page,
+  reviewedDeletePaths: readonly string[],
+): Promise<boolean> {
   const dialog = page.locator('[role="alertdialog"]:visible');
   if (await dialog.count() === 0) return false;
   if (await dialog.count() !== 1) throw new Error('Multiple confirmation dialogs are visible.');
   const label = await dialog.first().getAttribute('aria-label') ?? '';
   const content = await dialog.first().innerText();
-  const fileTool = /(?:Edit|Write|MultiEdit) (?:工具|tool)/.test(label);
+  const fileTool = /(?:Edit|Write|MultiEdit) (?:工具|tool)/.test(label)
+    && !content.includes('.dream');
   const reviewedDelete = /Bash/.test(label)
     && content.includes('rm --')
-    && (content.includes(CHARACTER_ID) || content.includes(SCENE_ID) || content.includes(PROP_ID))
-    && !content.includes('.dream');
+    && reviewedDeletePaths.some((path) => content.includes(path))
+    && !content.includes('.dream')
+    && !content.includes('*')
+    && !/\brm\s+-[^-]*r/.test(content);
   if (!fileTool && !reviewedDelete) {
     throw new Error(`Unexpected confirmation dialog: ${label}\n${content}`);
   }
@@ -190,7 +220,12 @@ async function ensureAgentOpen(page: Page): Promise<void> {
   await expect(composer).toBeEnabled();
 }
 
-async function sendTurn(page: Page, request: string, before: ThreadFacts): Promise<ThreadFacts> {
+async function sendTurn(
+  page: Page,
+  request: string,
+  before: ThreadFacts,
+  reviewedDeletePaths: readonly string[] = [],
+): Promise<ThreadFacts> {
   await ensureAgentOpen(page);
   const composer = page.getByRole('textbox', { name: '聊天输入' });
   await composer.fill(request);
@@ -198,7 +233,7 @@ async function sendTurn(page: Page, request: string, before: ThreadFacts): Promi
   await expect(page.getByText(request, { exact: true }).last()).toBeVisible();
   let after = before;
   await expect.poll(async () => {
-    await approveExpectedConfirmation(page);
+    await approveExpectedConfirmation(page, reviewedDeletePaths);
     after = readThreadFacts(THREAD_ID);
     return after.assistantId === before.assistantId ? null : after.assistantId;
   }, {
@@ -218,6 +253,18 @@ function expectContractsRead(turn: ThreadFacts, facts: AssetFacts): void {
   expect(turn.model).toBe('deepseek-v4-pro');
 }
 
+function expectSuccessfulDeleteReceipt(turn: ThreadFacts, relativePath: string): void {
+  const tools = turn.tools.filter((tool) => {
+    const command = String(tool.input.command ?? '');
+    return tool.name === 'Bash' && command.includes('rm --') && command.includes(relativePath);
+  });
+  expect(tools.length, `missing visible delete receipt for ${relativePath}`).toBeGreaterThan(0);
+  expect(tools.some((tool) => tool.state === 'output-available')).toBe(true);
+  const output = JSON.stringify(tools.map((tool) => tool.output));
+  expect(output).not.toContain('operation not permitted');
+  expect(output).not.toContain('cwd-');
+}
+
 async function readDreamFilesApi(page: Page, token: string): Promise<Record<string, unknown>> {
   const response = await page.request.get(
     `${WEB_BASE}/api/story-workspace/workflow-runs/${RUN_ID}/dream-files`,
@@ -233,7 +280,7 @@ async function expectVisibleAssets(
   absentNames: readonly string[],
 ): Promise<void> {
   await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
-  await expect(page.getByRole('heading', { level: 1, name: '雾中黑海湖' })).toBeVisible();
+  await expect(page.locator('h1').first()).toBeVisible();
   const details = page.getByText('Dream 初稿阶段投影', { exact: true });
   await details.click();
   await page.getByRole('tab', { name: /Assets/ }).click();
@@ -250,7 +297,7 @@ async function expectVisibleAssets(
   ))).toBeLessThanOrEqual(1);
 }
 
-test('real Agent completes full asset CRUD and restores the temporary facts', async ({ browser }) => {
+test('real Agent completes a human-language asset journey and restores temporary facts', async ({ browser }) => {
   test.setTimeout(1_500_000);
   expect(DREAM_ASSET_IMPACT_SCOPE).toEqual({
     temporaryAssetsAndShot: 'add-update-reference-safe-delete',
@@ -259,10 +306,9 @@ test('real Agent completes full asset CRUD and restores the temporary facts', as
     storyProjection: 'not-directly-changed',
   });
   const baseline = readAssetFacts();
-  expect(baseline.characters[CHARACTER_ID]).toBeUndefined();
-  expect(baseline.scenes[SCENE_ID]).toBeUndefined();
-  expect(baseline.props[PROP_ID]).toBeUndefined();
-  expect(shotById(baseline)).toBeUndefined();
+  expect(Object.values(baseline.characters).some((asset) => asset.name === CHARACTER_NAME)).toBe(false);
+  expect(Object.values(baseline.scenes).some((asset) => asset.name === SCENE_NAME)).toBe(false);
+  expect(Object.values(baseline.props).some((asset) => asset.name === PROP_NAME)).toBe(false);
   const baselineCharacterHashes = Object.fromEntries(
     Object.entries(baseline.characters).map(([id, asset]) => [id, asset.sha256]),
   );
@@ -272,6 +318,8 @@ test('real Agent completes full asset CRUD and restores the temporary facts', as
   const baselinePropHashes = Object.fromEntries(
     Object.entries(baseline.props).map(([id, asset]) => [id, asset.sha256]),
   );
+  const baselineShotIds = baseline.storyboard.shots.map((shot) => String(shot.shot_id ?? ''));
+  const baselineTotalDuration = baseline.storyboard.total_duration_sec;
   const baselineSession = readThreadFacts(THREAD_ID).claudeSessionId;
   expect(baselineSession).toBeTruthy();
 
@@ -299,71 +347,95 @@ test('real Agent completes full asset CRUD and restores the temporary facts', as
   }, token);
 
   let latest = readThreadFacts(THREAD_ID);
+  let created: CreatedFacts | null = null;
   try {
     await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
 
-    const addRequest = `请在当前 Dream 工作台完成一次真实资产新增：新增人物“${CHARACTER_NAME}”，固定 char_id 为 ${CHARACTER_ID}，描述为负责记录高原拍摄连续性；新增场景“${SCENE_NAME}”，固定 scene_id 为 ${SCENE_ID}，描述为存放相机与雨具的帐篷；新增道具“${PROP_NAME}”，固定 prop_id 为 ${PROP_ID}，描述为黑白拍板；并在 EP01 storyboard.yaml 新增 shot_id 为 "${SHOT_ID}" 的 3 秒 medium 镜头，scene_ref=${SCENE_ID}、characters 包含 ${CHARACTER_ID}、props 包含 ${PROP_ID}，visual 写“场记在器材帐篷举起场记板”。请先读取本轮两份 Dream 合同，必须写入真实 canonical 文件并正确重算分镜总数和总时长，不要只返回 JSON。`;
+    const addRequest = `给这个故事加一个叫“${CHARACTER_NAME}”的场记姑娘，她负责记录高原拍摄的连续性；再加一个叫“${SCENE_NAME}”的临时场景，里面存放相机和雨具；她随身有一块“${PROP_NAME}”。第一集结尾再补一个三秒的中景：她在那个雨棚里举起那块场记板。`;
     latest = await sendTurn(page, addRequest, latest);
     let facts = readAssetFacts();
     expectContractsRead(latest, facts);
-    expect(facts.characters[CHARACTER_ID]?.name).toBe(CHARACTER_NAME);
-    expect(facts.scenes[SCENE_ID]?.name).toBe(SCENE_NAME);
-    expect(facts.props[PROP_ID]?.name).toBe(PROP_NAME);
-    expect(shotById(facts)).toMatchObject({
-      scene_ref: SCENE_ID,
-      characters: [CHARACTER_ID],
-      props: [PROP_ID],
-      visual: '场记在器材帐篷举起场记板',
+    const characterIds = newKeys(baseline.characters, facts.characters);
+    const sceneIds = newKeys(baseline.scenes, facts.scenes);
+    const propIds = newKeys(baseline.props, facts.props);
+    const shotIds = newShotIds(baseline, facts);
+    expect(characterIds).toHaveLength(1);
+    expect(sceneIds).toHaveLength(1);
+    expect(propIds).toHaveLength(1);
+    expect(shotIds).toHaveLength(1);
+    const characterId = characterIds[0];
+    const sceneId = sceneIds[0];
+    const propId = propIds[0];
+    const shotId = shotIds[0];
+    const shot = shotById(facts, shotId);
+    expect(facts.characters[characterId]?.name).toBe(CHARACTER_NAME);
+    expect(facts.scenes[sceneId]?.name).toBe(SCENE_NAME);
+    expect(facts.props[propId]?.name).toBe(PROP_NAME);
+    expect(shot).toMatchObject({
+      scene_ref: sceneId,
+      characters: expect.arrayContaining([characterId]),
+      props: expect.arrayContaining([propId]),
+      timing: { duration_sec: 3 },
     });
+    expect(String(shot?.visual ?? '')).toContain('场记');
     expect(facts.storyboard.total_shots).toBe(facts.storyboard.shots.length);
+    expect(facts.storyboard.total_duration_sec).toBe(baselineTotalDuration + 3);
     expect(facts.workbenchExists).toBe(true);
     expect(facts.assetContractExists).toBe(true);
+    created = {
+      characterId,
+      character: facts.characters[characterId],
+      sceneId,
+      scene: facts.scenes[sceneId],
+      propId,
+      prop: facts.props[propId],
+      shotId,
+      shot: shot ?? {},
+    };
     const addApi = await readDreamFilesApi(page, token) as {
       stages: Record<string, { items: Array<{ entityId: string; displayName: string }> }>;
     };
     expect(addApi.stages.characters.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ entityId: CHARACTER_ID, displayName: CHARACTER_NAME }),
+      expect.objectContaining({ entityId: characterId, displayName: CHARACTER_NAME }),
     ]));
     expect(addApi.stages.scenes.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ entityId: SCENE_ID, displayName: SCENE_NAME }),
+      expect.objectContaining({ entityId: sceneId, displayName: SCENE_NAME }),
     ]));
     await expectVisibleAssets(page, [CHARACTER_NAME, SCENE_NAME], []);
 
-    const stableCharacterPath = facts.characters[CHARACTER_ID].path;
-    const stableScenePath = facts.scenes[SCENE_ID].path;
-    const stablePropPath = facts.props[PROP_ID].path;
     const revisionsAfterAdd = Object.fromEntries(
       Object.entries(facts.stages).map(([stage, payload]) => [stage, payload.revision]),
     );
-    const updateRequest = `继续修改刚新增的四个资产：保持 char_id=${CHARACTER_ID}、scene_id=${SCENE_ID}、prop_id=${PROP_ID}、shot_id="${SHOT_ID}" 和原文件路径不变；把人物显示名改为“${UPDATED_CHARACTER_NAME}”并补充“短发、黑色冲锋衣”；把场景名改为“${UPDATED_SCENE_NAME}”并补充“雨水敲击篷布”；把道具名改为“${UPDATED_PROP_NAME}”并补充“边缘贴有黄色胶带”；把该镜头 visual 改为“短发场记在雨夜器材帐篷举起贴黄胶带的场记板”，时长改为 5 秒。请读取两份合同和现有文件后直接编辑，并重算分镜总时长。`;
+    const updateRequest = `把刚才的小岚改成短发、穿黑色冲锋衣，页面上的名字也改成“${UPDATED_CHARACTER_NAME}”；刚才的雨棚改成雨夜环境，名字改成“${UPDATED_SCENE_NAME}”，能听见雨水敲击篷布；她的场记板边缘贴上黄色胶带，名字改成“${UPDATED_PROP_NAME}”；刚加在第一集结尾的镜头改成五秒，画面要能看见这些变化。`;
     const beforeUpdate = latest;
     latest = await sendTurn(page, updateRequest, latest);
     facts = readAssetFacts();
     expectContractsRead(latest, facts);
     expect(latest.claudeSessionId).toBe(beforeUpdate.claudeSessionId);
-    expect(facts.characters[CHARACTER_ID]).toMatchObject({
+    expect(facts.characters[characterId]).toMatchObject({
       name: UPDATED_CHARACTER_NAME,
-      path: stableCharacterPath,
+      path: created.character.path,
     });
-    expect(facts.characters[CHARACTER_ID].text).toContain('短发');
-    expect(facts.scenes[SCENE_ID]).toMatchObject({
+    expect(facts.characters[characterId].text).toContain('短发');
+    expect(facts.scenes[sceneId]).toMatchObject({
       name: UPDATED_SCENE_NAME,
-      path: stableScenePath,
+      path: created.scene.path,
     });
-    expect(facts.scenes[SCENE_ID].text).toContain('雨水敲击篷布');
-    expect(facts.props[PROP_ID]).toMatchObject({
+    expect(facts.scenes[sceneId].text).toContain('雨水敲击篷布');
+    expect(facts.props[propId]).toMatchObject({
       name: UPDATED_PROP_NAME,
-      path: stablePropPath,
+      path: created.prop.path,
     });
-    expect(facts.props[PROP_ID].text).toContain('黄色胶带');
-    expect(shotById(facts)).toMatchObject({
-      shot_id: SHOT_ID,
-      scene_ref: SCENE_ID,
-      characters: [CHARACTER_ID],
-      props: [PROP_ID],
-      visual: '短发场记在雨夜器材帐篷举起贴黄胶带的场记板',
+    expect(facts.props[propId].text).toContain('黄色胶带');
+    expect(shotById(facts, shotId)).toMatchObject({
+      shot_id: shotId,
+      scene_ref: sceneId,
+      characters: expect.arrayContaining([characterId]),
+      props: expect.arrayContaining([propId]),
       timing: { duration_sec: 5 },
     });
+    expect(String(shotById(facts, shotId)?.visual ?? '')).toContain('短发');
+    expect(facts.storyboard.total_duration_sec).toBe(baselineTotalDuration + 5);
     for (const stage of ['characters', 'scenes', 'storyboards'] as const) {
       expect(facts.stages[stage].revision).toBe(revisionsAfterAdd[stage] + 1);
     }
@@ -372,38 +444,33 @@ test('real Agent completes full asset CRUD and restores the temporary facts', as
       SCENE_NAME,
     ]);
 
-    const unlinkRequest = `现在明确删除人物 ${CHARACTER_ID}、场景 ${SCENE_ID} 和道具 ${PROP_ID}，但暂时保留镜头 ${SHOT_ID}。请先读取两份合同并检查引用；在同一轮先从这个镜头移除 characters 中的 ${CHARACTER_ID}、scene_ref=${SCENE_ID} 和 props 中的 ${PROP_ID}，保留镜头其他字段，然后分别使用三条精确的单文件 rm -- 命令删除对应人物、场景和道具文件。不得合并多目标命令，不得删除其他资产、镜头或目录，不得留下悬空引用。`;
-    latest = await sendTurn(page, unlinkRequest, latest);
+    const deletePaths = [created.character.path, created.scene.path, created.prop.path];
+    const unlinkRequest = '删掉刚才的小岚、备用雨棚和那块场记板，但先保留第一集结尾刚加的镜头。把镜头里对这三项的关联一起清掉，其他故事内容都不要动。';
+    latest = await sendTurn(page, unlinkRequest, latest, deletePaths);
     facts = readAssetFacts();
     expectContractsRead(latest, facts);
-    expect(facts.characters[CHARACTER_ID]).toBeUndefined();
-    expect(facts.scenes[SCENE_ID]).toBeUndefined();
-    expect(facts.props[PROP_ID]).toBeUndefined();
-    const unlinkedShot = shotById(facts);
+    expect(facts.characters[characterId]).toBeUndefined();
+    expect(facts.scenes[sceneId]).toBeUndefined();
+    expect(facts.props[propId]).toBeUndefined();
+    const unlinkedShot = shotById(facts, shotId);
     expect(unlinkedShot).toBeDefined();
     expect(unlinkedShot?.scene_ref).toBeUndefined();
-    expect(unlinkedShot?.characters ?? []).not.toContain(CHARACTER_ID);
-    expect(unlinkedShot?.props ?? []).not.toContain(PROP_ID);
-    const bashTools = latest.tools.filter((tool) => tool.name === 'Bash');
-    for (const expectedId of [CHARACTER_ID, SCENE_ID, PROP_ID]) {
-      const targetDeleteTools = bashTools.filter((tool) => {
-        const command = String(tool.input.command ?? '');
-        return command.startsWith('rm --') && command.includes(expectedId);
-      });
-      expect(targetDeleteTools.length).toBeGreaterThan(0);
-      expect(targetDeleteTools.some((tool) => tool.state === 'output-available')).toBe(true);
-    }
+    expect(unlinkedShot?.characters ?? []).not.toContain(characterId);
+    expect(unlinkedShot?.props ?? []).not.toContain(propId);
+    for (const path of deletePaths) expectSuccessfulDeleteReceipt(latest, path);
     await expectVisibleAssets(page, [], [UPDATED_CHARACTER_NAME, UPDATED_SCENE_NAME]);
 
-    const cleanupRequest = `最后清理本次测试：从 EP01 storyboard.yaml 删除 shot_id="${SHOT_ID}" 这一项，只删除该临时镜头，保留其他镜头及其全部字段；然后正确重算 total_shots 和 total_duration_sec。人物 ${CHARACTER_ID} 与场景 ${SCENE_ID} 已删除，不要重建。请读取两份合同后直接编辑真实文件。`;
+    const cleanupRequest = '第一集结尾刚才新增的那个测试镜头现在也删掉，其他镜头一个都不要动，总镜头数和总时长要保持正确。';
     latest = await sendTurn(page, cleanupRequest, latest);
     facts = readAssetFacts();
     expectContractsRead(latest, facts);
-    expect(shotById(facts)).toBeUndefined();
-    expect(facts.characters[CHARACTER_ID]).toBeUndefined();
-    expect(facts.scenes[SCENE_ID]).toBeUndefined();
-    expect(facts.props[PROP_ID]).toBeUndefined();
+    expect(shotById(facts, shotId)).toBeUndefined();
+    expect(facts.characters[characterId]).toBeUndefined();
+    expect(facts.scenes[sceneId]).toBeUndefined();
+    expect(facts.props[propId]).toBeUndefined();
     expect(facts.storyboard.total_shots).toBe(facts.storyboard.shots.length);
+    expect(facts.storyboard.shots.map((item) => String(item.shot_id ?? ''))).toEqual(baselineShotIds);
+    expect(facts.storyboard.total_duration_sec).toBe(baselineTotalDuration);
     expect(Object.fromEntries(
       Object.entries(facts.characters).map(([id, asset]) => [id, asset.sha256]),
     )).toEqual(baselineCharacterHashes);
@@ -417,18 +484,33 @@ test('real Agent completes full asset CRUD and restores the temporary facts', as
     const finalApi = await readDreamFilesApi(page, token) as {
       stages: Record<string, { items: Array<{ entityId: string }> }>;
     };
-    expect(finalApi.stages.characters.items.some((item) => item.entityId === CHARACTER_ID)).toBe(false);
-    expect(finalApi.stages.scenes.items.some((item) => item.entityId === SCENE_ID)).toBe(false);
-    await expectVisibleAssets(page, [], [CHARACTER_NAME, UPDATED_CHARACTER_NAME, SCENE_NAME, UPDATED_SCENE_NAME]);
+    expect(finalApi.stages.characters.items.some((item) => item.entityId === characterId)).toBe(false);
+    expect(finalApi.stages.scenes.items.some((item) => item.entityId === sceneId)).toBe(false);
+    await expectVisibleAssets(page, [], [
+      CHARACTER_NAME,
+      UPDATED_CHARACTER_NAME,
+      SCENE_NAME,
+      UPDATED_SCENE_NAME,
+    ]);
     expect(diagnostics).toEqual([]);
   } finally {
     const remaining = readAssetFacts();
-    if (remaining.characters[CHARACTER_ID] || remaining.scenes[SCENE_ID]
-      || remaining.props[PROP_ID] || shotById(remaining)) {
+    const createdCharacter = created && remaining.characters[created.characterId];
+    const createdScene = created && remaining.scenes[created.sceneId];
+    const createdProp = created && remaining.props[created.propId];
+    const createdShot = created && shotById(remaining, created.shotId);
+    if (created && (createdCharacter || createdScene || createdProp || createdShot)) {
       try {
         await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
         const beforeCleanup = readThreadFacts(THREAD_ID);
-        await sendTurn(page, `清理刚才 ID 前缀为 ${SUFFIX} 的临时测试资产：先移除 EP01 中 shot_id="${SHOT_ID}" 及其引用，再分别使用三条单目标 rm -- 命令精确删除 char_id=${CHARACTER_ID}、scene_id=${SCENE_ID}、prop_id=${PROP_ID} 的单个文件；不要修改任何其他资产。`, beforeCleanup);
+        const cleanupPaths = [createdCharacter?.path, createdScene?.path, createdProp?.path]
+          .filter((value): value is string => Boolean(value));
+        await sendTurn(
+          page,
+          `把这次刚加的“${CHARACTER_NAME}”“${UPDATED_CHARACTER_NAME}”“${SCENE_NAME}”“${UPDATED_SCENE_NAME}”“${PROP_NAME}”“${UPDATED_PROP_NAME}”以及第一集结尾与它们一起新增的镜头清理掉，其他内容不要修改。`,
+          beforeCleanup,
+          cleanupPaths,
+        );
       } catch (error) {
         diagnostics.push(`best-effort Agent cleanup failed: ${String(error)}`);
       }

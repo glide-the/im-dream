@@ -16,6 +16,25 @@ Dream thread 工作区部署，由宿主维护并在每个 Dream turn 前刷新�
 5. Deck voice 或普通 Chat 的结构化回复格式只能约束最终文字说明，不能替代 Dream 文件操作。
    文件写入成功后，用简短自然语言说明实际变更；不要把完整资产重新输出为 standalone JSON。
 
+## 理解用户在页面上的说法
+
+用户通常只会说页面上看到的名称和上下文，例如“把阿酷写得更利落一些”“增加一个俱乐部
+负责人”“删掉刚才那个雨棚”“第一集最后那个镜头不要了”。不得要求用户提供 `char_id`、
+`scene_id`、`shot_id`、文件名、绝对路径或 `.dream` 内部结构才能完成操作。
+
+处理这类请求时：
+
+1. 先读取 WORKBENCH、本合同和当前资产目录/当前 Episode 文件；以展示名称、标题、正文别名、
+   本 thread 最近一轮创建或修改的资产，以及用户说的“当前/刚才/这个”解析目标。
+2. 展示名称或明确别名只命中一个资产时，直接使用该资产已有稳定 ID 和路径；不要为一次更新
+   重新创建 ID，也不要让用户理解内部编号。
+3. 新增时由 Agent 从现有文件事实选择未占用的稳定 ASCII ID。用户没有给 ID 是正常情况，
+   不能因此只输出建议或 JSON。
+4. “第一集”“最后一个镜头”“刚才加的镜头”等页面术语要先映射到唯一 Episode/shot；映射
+   唯一时直接操作，只有确实存在多个同名资产或会产生不同业务结果时才使用 AskUserQuestion。
+5. 最终回复使用用户使用的展示名称描述结果；ID/路径只在能帮助排错时作为次要信息，不得把
+   内部实现要求反推给用户。
+
 ## Canonical 路径
 
 ```text
@@ -59,6 +78,9 @@ char_name: 展示名称
   `character_refs`、shot `characters`、关系字段和明确正文引用。Claude Code 没有内建 Delete
   时，只可用一次精确 `rm -- <单个人物文件实际路径>`，不得使用通配符、递归或删除目录，且
   必须接受用户可见的 Bash 确认。
+- 删除命令必须返回成功回执，并在同一轮确认目标文件已经不存在，才可回复“已删除”。任何
+  `operation not permitted`、非零 exit code 或 `cwd-*` 临时目录错误都属于真实失败，不能根据
+  推测或缓存状态宣称完成。
 
 可选 frontmatter 如 `occupation`、`personality.core_traits`、`relationships` 可以保留或按用户
 要求更新；不要为了满足最小示例删除已有字段。
@@ -141,6 +163,8 @@ shots:
 ## 完成与同步
 
 - 文件工具成功完成所有用户要求且引用完整后，才可以回复完成。
+- 对新增/更新，以重新读取或检索后的现存文件事实为准；对删除，以成功 Bash 回执和文件不存在
+  两项同时成立为准。Agent 的文字说明不得与工具事实冲突。
 - 根 Agent turn 成功结束后，宿主 `DreamArtifactTurnHook.after_main_turn` 会扫描完整文件事实，
   幂等刷新 `.dream/runtime/runs/<run-id>/stages/` 和页面投影。
 - Agent 不需要也不得直接写 stage、revision、manifest 或 completion fact。

@@ -31,7 +31,7 @@
 
 - 当前仓库可能同时包含用户和其他 Agent 的未提交改动；不得回退、覆盖或格式化无关文件。
 - migration、回填、破坏性测试和可重复执行的持久化自动化测试只允许使用明确命名、可删除的隔离数据库，并必须验证目标身份；真实业务测试按下方“本机真实业务测试协议”执行。
-- TODO（Claude Code 临时目录冻结）：保留当前 `/tmp`、`TMPDIR`、`CLAUDE_TMPDIR` 和 Claude Code command-level `cwd-*` 行为不变。Dream 功能、资产协作、测试或故障绕行不得新增临时目录、短路径、符号链接、环境变量注入或扩大 sandbox 放行；只有用户单独批准的专项任务才可重新评估。
+- Claude Code 临时目录协议：SDK 子进程统一使用服务端 `CLAUDE_CODE_TMPDIR`（配置默认 `/tmp/claude`，注入前规范化为真实绝对路径），workspace sandbox 只放行同一个规范化根目录。禁止放行整个 `/tmp`、旧 `/tmp/claude-$UID`、动态 `cwd-*`，也禁止 Dream 功能通过短路径、符号链接或用户设置绕过该边界；修改此协议必须由用户单独批准并用真实 Bash 工具回执验证。
 
 ## 单一运行路径与 Harness 协议
 

@@ -66,6 +66,8 @@
 # [Sync] 2026-08-04: when a workspace has a real .dream surface, cover
 #                    read-only-by-default Bash policy against dynamically
 #                    constructed paths and prewritten mutation scripts.
+# [Sync] 2026-08-14: cover server-owned CLAUDE_CODE_TMPDIR injection and
+#                    rejection of caller relocation outside sandbox Settings.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -2463,6 +2465,56 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
         )
 
         self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "2")
+
+    def test_project_runtime_options_set_claude_code_tmpdir_default(self):
+        options = _SDK_OPTIONS()
+
+        with patch.dict(os.environ, {}, clear=True):
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env["CLAUDE_CODE_TMPDIR"],
+            str(Path("/tmp/claude").resolve(strict=False)),
+        )
+
+    def test_project_runtime_options_use_process_tmpdir_not_caller_value(self):
+        options = _SDK_OPTIONS(env={"CLAUDE_CODE_TMPDIR": "/caller/escape"})
+
+        with patch.dict(
+            os.environ,
+            {"CLAUDE_CODE_TMPDIR": "/var/tmp/ink-claude"},
+            clear=True,
+        ):
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env["CLAUDE_CODE_TMPDIR"],
+            str(Path("/var/tmp/ink-claude").resolve(strict=False)),
+        )
+
+    def test_project_runtime_options_reject_tmpdir_resolving_to_root(self):
+        options = _SDK_OPTIONS(env={"CLAUDE_CODE_TMPDIR": "/caller/escape"})
+
+        with patch.dict(
+            os.environ,
+            {"CLAUDE_CODE_TMPDIR": "/tmp/../.."},
+            clear=True,
+        ):
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env["CLAUDE_CODE_TMPDIR"],
+            str(Path("/tmp/claude").resolve(strict=False)),
+        )
 
     def test_project_dotenv_env_filters_non_sdk_keys(self):
         with tempfile.TemporaryDirectory() as temp_dir:

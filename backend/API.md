@@ -340,9 +340,11 @@ flat domain-pattern list; use `open` mode instead of sending a bare `*`.
 The sandbox network fields are consumed on the next Claude Agent workspace
 initialization and written to the thread-local `.claude/settings.json`
 `sandbox.network` block; `sandbox_fs_allowed_write_paths` is appended to the
-`sandbox.filesystem.allowWrite` list after the thread workspace and Claude
-Code's own sandbox TMPDIR (`$CLAUDE_TMPDIR` or `/tmp/claude-$UID`, always
-allowed when the sandbox is enabled).
+`sandbox.filesystem.allowWrite` list after the thread workspace and the exact
+server-owned Claude Code temp root (`CLAUDE_CODE_TMPDIR`, default
+`/tmp/claude`, canonicalized before subprocess/sandbox use and always allowed
+when the sandbox is enabled). The application
+does not broadly allow `/tmp` or guess per-UID/dynamic `cwd-*` paths.
 
 ---
 

@@ -5539,3 +5539,69 @@ JSON 而不编辑 `project.yaml`。
   扫描只命中本轮记录和唯一冻结 TODO，`git diff --check` 通过。
 - Claude Code 自身的 command-level 临时目录问题明确不在本轮修复范围，不能推断其已解决；
   本轮未新增 TMPDIR 注入、短路径、符号链接、`.claude-tmp` 或 sandbox 放行。
+
+## 第 122 轮——人类语言资产全流程与 Claude Code 删除回执修复
+
+**当前轮次目标**
+
+修复真实 Dream 用户用“删除阿酷”等页面术语删除资产时，Claude Code shell 回执因
+`/tmp/claude-501/cwd-*` 被 sandbox 拒绝而失败的问题；完善 Agent 对模糊页面术语的资产协作
+规则，并以真实 Run、账号、模型完成新增、更新、引用解除、删除、Hook 同步、API 与页面显示
+及最终清理的完整无头业务验证。
+
+**优化后的执行提示词**
+
+> 基于真实 Run `run_ddb53a9a261d497c98ad9a6c1ec3a1c2`、同一 Chat/Dream thread、账号
+> `dmeck123@suoxya.com` 与真实模型 `deepseek-v4-pro`，先评估人物、场景、道具、EP01 分镜、
+> Project/Episode、Hook 投影、API、页面和 Claude session 的影响边界。诊断并修复 Claude Code
+> 2.1.220 删除工具产生 `zsh: operation not permitted: /tmp/claude-501/cwd-*` 的共享运行时
+> 根因：使用服务端权威 `CLAUDE_CODE_TMPDIR`，SDK 子进程与 workspace sandbox 必须共享同一
+> 精确根，禁止放行整个 `/tmp`、猜测 per-UID 路径或记录动态 `cwd-*`。完善每轮部署的资产协作
+> 合同，使 Agent 能以展示名称、“刚才那个”“第一集最后一个镜头”等自然语言定位唯一资产，
+> 不要求用户理解 ID、路径、文件名、工具、Hook 或 `.dream`。重写真实 Playwright E2E，页面
+> 消息只能使用正常人类表达；内部身份只能在首轮完成后由测试读取用于证据与确认安全检查。
+> 完整验证新增→同身份更新→解除引用→精确删除→删除镜头→恢复基线，并逐轮核对 canonical
+> 文件、成功 Bash receipt、after_main_turn Hook、`.dream`、actor-scoped API、页面、模型和同一
+> Claude session。不得克隆数据、直接清库或绕过 Agent 清理；不改公开 Agent 入口、SSE/DTO、
+> session/resume、Observer 控制边界，不增加状态机或 Dream 专用临时目录实现。
+
+**本轮检查或修改范围**
+
+- `sdk_env.py` 的共享 Claude SDK subprocess 环境；
+- `workspace.py` 的 thread sandbox 精确写目录；
+- Dream Agent 资产协作合同及其每 turn 部署/读取测试；
+- 真实资产 E2E 的用户话术、动态身份发现、删除确认与完整消费者证据；
+- 相关中文设计、API、Agent/测试技能和文件夹同步记录。
+
+**本轮完成标准**
+
+- SDK 与 sandbox 都使用服务端 `CLAUDE_CODE_TMPDIR` 的同一规范化根（配置默认
+  `/tmp/claude`，本机为 `/private/tmp/claude`），调用方不能漂移；
+- 不再放行整个 `/tmp`、旧 `/tmp/claude-$UID` 或动态 `cwd-*`；
+- 用户话术不含内部 ID/路径/工具指令，仍能完成四类资产的增改删；
+- 删除必须有用户可见确认、Bash `output-available` 且不存在 operation-not-permitted 回执；
+- 每轮 canonical→Hook→`.dream`→API→页面一致，thread/session/model 不变，其他业务事实不变；
+- 测试临时资产经同一 Agent 对话清理，最终恢复真实数据基线；
+- 后端聚焦回归、前端类型/ESLint/build、无头 Chromium 和 `git diff --check` 通过。
+
+**本轮实际结果和未验证推断**
+
+- 已用本机 Claude 2.1.220 二进制字符串和真实失败 tool receipt 确认支持变量为
+  `CLAUDE_CODE_TMPDIR`；旧代码使用了错误变量/推断路径，并把 `/tmp` 与一次性的 `cwd-*`
+  加入 sandbox，造成命令事实与 Agent 回执不一致。
+- 已完成共享运行时最小修复、模糊页面术语合同、QA 技能规则、中文设计与 E2E 重写；聚焦
+  workspace/runner 单测已先通过 `148 passed, 1 skipped, 98 subtests passed`。
+- 首次真实重跑已证明自然语言增改与 Hook/API/页面链路，但三条删除 receipt 仍为
+  `operation not permitted: /tmp/claude/claude-501/cwd-*`；原因是 macOS 将实际访问规范化为
+  `/private/tmp/...`，而 settings 中仍保存 `/tmp/...` 别名。测试正确失败并用同一可见 Agent
+  对话恢复 2 人物、1 场景、0 道具、8 镜/48 秒。
+- 追加共享路径规范化后，真实账号、原始 Run、`deepseek-v4-pro` 与同一 Claude session
+  `9d94db3d-c0b2-4e81-a04b-4c2be8cb531d` 的第二次无头四轮 E2E 通过：`1 passed (4.6m)`。
+  所有页面消息均为普通人类术语；三条精确 `rm --` receipt 均为 `output-available` 且无
+  `operation not permitted`，人物/场景/道具/分镜的 canonical→Hook→API→页面证据通过。
+- 最终真实数据恢复为 `lead-a`、`lead-b`、`terminal`、0 道具、EP01 `shot-001` 至
+  `shot-008` 共 8 镜/48 秒；sandbox `allowWrite` 仅含 thread workspace 与
+  `/private/tmp/claude`，`.dream` 继续 denyWrite。
+- 聚焦回归为 `189 passed, 1 skipped, 109 subtests passed`；广覆盖 Story Workspace/Claude
+  回归在正确 backend 工作目录为 `889 passed, 6 skipped, 260 subtests passed`。前端 ESLint
+  0 errors（21 个既有 warnings），production build 通过。未执行有头或生产环境验证。
