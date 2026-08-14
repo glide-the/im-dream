@@ -50,6 +50,8 @@
 //                    never expose a panel-level horizontal scrollbar.
 // [Sync] 2026-08-13: keep auto-scroll and wheel overscroll owned by the message region;
 //                    never scroll Story Workspace ancestors or move its Agent dialog.
+// [Sync] 2026-08-13: await the editor persistence barrier before sending any
+//                    Agent turn that carries an editor_state snapshot.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -164,6 +166,7 @@ interface ChatPanelProps {
   onConversationSettled?: () => void;
   /** Current EditorState snapshot forwarded to the backend agent runner via editor_state request field. */
   editorState?: Record<string, unknown> | null;
+  ensureEditorSessionPersisted?: () => Promise<void>;
   /** Called after an editor write tool is confirmed so the Writing view can reload from the database. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
   /** Opens the right-side subagent detail panel for a chat tool invocation. */
@@ -218,6 +221,7 @@ export default function ChatPanel({
   onConversationStart,
   onConversationSettled,
   editorState,
+  ensureEditorSessionPersisted,
   onEditorWriteConfirmed,
   onOpenSubagentTask,
   voiceSystemPrompt,
@@ -498,10 +502,13 @@ export default function ChatPanel({
       if (queuedMessageParts.length === 0) {
         return;
       }
+      if (editorState && ensureEditorSessionPersisted) {
+        await ensureEditorSessionPersisted();
+      }
       turnGenerationRef.current += 1;
       await sendMessage({ role: 'user', parts: queuedMessageParts });
     })();
-  }, [claimQueuedPrompt, onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendMessage]);
+  }, [claimQueuedPrompt, editorState, ensureEditorSessionPersisted, onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendMessage]);
 
   const recoverAuthoritativeHistory = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     const requestedAt: ChatHistoryRecoveryCheckpoint = {
@@ -1008,6 +1015,9 @@ export default function ChatPanel({
               }
               if (parts.length === 0) {
                 return;
+              }
+              if (editorState && ensureEditorSessionPersisted) {
+                await ensureEditorSessionPersisted();
               }
               turnGenerationRef.current += 1;
               await sendMessage({ role: 'user', parts });

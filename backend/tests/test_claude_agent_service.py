@@ -26,6 +26,8 @@
 #                    successful assistant persistence path.
 # [Sync] 2026-08-14: cover trusted Dream binding selecting the Deck
 #                    workspace-file prompt without changing Chat/session DTOs.
+# [Sync] 2026-08-13: cover editor MCP structured business failures as tool
+#                    errors with no editor refresh or session_updated event.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -970,6 +972,53 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             self.assertEqual(state.editor_state["cells"][0]["content"], "new")
 
         _run(scenario())
+
+    def test_editor_write_business_failure_is_tool_error_without_side_effects(self):
+        async def scenario(error: str):
+            queue: asyncio.Queue = asyncio.Queue()
+            turn_ctx = _TurnContext(queue=queue, confirmation_store=ToolConfirmationStore())
+            turn_ctx.tool_name_by_id["tool-call-failed"] = "mcp__editor__write_segment"
+            turn_ctx.registered_tool_call_ids.add("tool-call-failed")
+            state = AgentRunState(session_id="thread-editor-write-failed")
+            original_state = {
+                "id": "session-editor-write",
+                "cells": [{"id": "cell-1", "type": "text", "content": "old"}],
+            }
+            state.with_editor_state(original_state, 7)
+            callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx, state)
+            subscription = await service_module.session_event_bus.subscribe("7")
+
+            try:
+                with unittest.mock.patch.object(service_module._db, "get_session") as get_session:
+                    output = {"ok": False, "error": error, "cellId": "cell-1"}
+                    await callback(ToolEventPayload(
+                        type="tool_result",
+                        tool_name="mcp__editor__write_segment",
+                        tool_call_id="tool-call-failed",
+                        output=output,
+                        is_error=False,
+                    ))
+                    frame = await queue.get()
+                    with self.assertRaises(asyncio.TimeoutError):
+                        await asyncio.wait_for(subscription.get(), timeout=0.01)
+            finally:
+                await service_module.session_event_bus.unsubscribe("7", subscription)
+
+            self.assertEqual(frame.type, "tool-output-available")
+            self.assertTrue(frame.data["isError"])
+            self.assertEqual(frame.data["output"], output)
+            self.assertEqual(turn_ctx.collected_parts[-1]["isError"], True)
+            self.assertIs(state.editor_state, original_state)
+            get_session.assert_not_called()
+
+        for error in ("cell_not_found", "save_failed"):
+            with self.subTest(error=error):
+                _run(scenario(error))
+
+    def test_non_editor_structured_output_is_not_reclassified(self):
+        self.assertFalse(service_module._is_editor_tool_result_error(
+            "mcp__other__tool", {"ok": False, "error": "domain_result"}
+        ))
 
 
 class TestClaudeAgentServiceStopCancellation(unittest.TestCase):

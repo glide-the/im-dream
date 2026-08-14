@@ -23,6 +23,8 @@
 // [Sync] 2026-06-09: stable onReconnectComplete callback so editorState re-renders do not abort SSE stream.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin thread APIs.
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
+// [Sync] 2026-08-13: forward the Editor Session persistence barrier so Chat
+//                    cannot expose an unpersisted snapshot to the Agent.
 // [Sync] 2026-06-22: hide the workspace file sidebar entry when Settings
 //                    Workspace Mode is disabled.
 // [Sync] 2026-06-27: add Chat history search over thread titles and persisted
@@ -159,6 +161,7 @@ interface ChatViewProps {
   quickActions?: QuickActionStripItem[];
   /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
   editorState?: Record<string, unknown> | null;
+  ensureEditorSessionPersisted?: () => Promise<void>;
   /** Called when an editor write tool is confirmed so the Writing view can reload. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
   /** Active deck / voice info — displayed in the top-right badge and forwarded to the backend as voice context. */
@@ -346,6 +349,7 @@ function ChatViewContent({
   onNewChat,
   quickActions,
   editorState,
+  ensureEditorSessionPersisted,
   onEditorWriteConfirmed,
   activeVoice,
   landingTab,
@@ -1266,6 +1270,7 @@ function ChatViewContent({
                   claimQueuedPrompt={claimQueuedPrompt}
                   inputPlaceholder="Ask Ink & Memory…"
                   editorState={editorState}
+                  ensureEditorSessionPersisted={ensureEditorSessionPersisted}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
                   onOpenSubagentTask={(toolCallId) => {
                     setFocusedSubagentToolCallId(toolCallId);

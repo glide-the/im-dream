@@ -1,5 +1,5 @@
 // [Input] Chat reconnect SSE events, tool confirmation response decoder, and pending-part classifier.
-// [Output] Regression coverage for ordered reasoning replay and already-resolved confirmations.
+// [Output] Regression coverage for ordered reasoning replay, editor tool failures, and already-resolved confirmations.
 // [Pos] Generic Chat confirmation recovery TDD seam.
 
 import { expect, test } from '@playwright/test';
@@ -23,6 +23,7 @@ import {
   resolvePendingToolConfirmation,
   runtimePendingToolCallIdsFromStatus,
 } from '../toolConfirmation';
+import { getEditorStatePersistenceSignature } from '../../../hooks/useSessionLifecycle';
 
 const stalePart: DynamicToolUIPart = {
   type: 'dynamic-tool',
@@ -78,6 +79,38 @@ test('reconnect replay preserves separate reasoning blocks across text and tool 
   expect(messages[0].parts[3]).toMatchObject({
     type: 'reasoning', id: 'reasoning-2', text: '结合工具结果继续分析', state: 'done',
   });
+});
+
+test('editor write business failure replays as output-error with structured detail', () => {
+  const messages = [
+    {
+      type: 'tool-input-available',
+      toolCallId: 'call-editor-failed',
+      toolName: 'mcp__editor__write_segment',
+      input: { editor_session_id: 'session-a', cellId: 'cell-a', text: 'new' },
+    },
+    {
+      type: 'tool-output-available',
+      toolCallId: 'call-editor-failed',
+      output: { ok: false, error: 'cell_not_found', cellId: 'cell-a' },
+      isError: true,
+    },
+  ].reduce(applyBackendEventToMessages, []);
+
+  expect(messages[0].parts[0]).toMatchObject({
+    type: 'dynamic-tool',
+    state: 'output-error',
+  });
+  expect((messages[0].parts[0] as DynamicToolUIPart).errorText).toContain('cell_not_found');
+});
+
+test('editor persistence signature includes session identity', () => {
+  const base = {
+    cells: [{ id: 'cell-a', type: 'text' as const, content: '' }],
+    commentors: [], tasks: [], weightPath: [], overlappedPhrases: [], notFoundPhrases: [],
+  };
+  expect(getEditorStatePersistenceSignature({ ...base, id: 'session-a' }))
+    .not.toBe(getEditorStatePersistenceSignature({ ...base, id: 'session-b' }));
 });
 
 test('large reconnect replay coalesces deltas without crossing the approval boundary', () => {

@@ -92,6 +92,8 @@
 # [Sync] 2026-06-14: publish Edit Session session_updated events after successful
 #                    editor MCP write tool results so the frontend can reload
 #                    without a fixed 2000ms wait.
+# [Sync] 2026-08-13: normalize structured editor MCP {ok:false} results to
+#                    tool errors before live SSE, history persistence, and side effects.
 # [Sync] 2026-06-17: include runner exception notes in SSE errorText so sandbox
 #                    startup diagnostics (e.g. seccomp-denied hints) reach UI.
 # [Sync] 2026-06-21: pass Settings sandbox network policy to workspace init
@@ -921,6 +923,17 @@ def _tool_result_ok(output: Any) -> bool:
     if isinstance(output, dict) and output.get("ok") is False:
         return False
     return True
+
+
+def _is_editor_tool_result_error(tool_name: str, output: Any) -> bool:
+    """Return whether an editor write result is an explicit business failure.
+
+    The SDK's transport-level ``is_error`` flag does not describe MCP handlers
+    that successfully return a structured ``{"ok": false}`` payload.  Normalize
+    only the named editor write tools so unrelated tool output remains unchanged.
+    """
+
+    return tool_name in _EDITOR_WRITE_TOOL_NAMES and not _tool_result_ok(output)
 
 
 def _has_usable_claude_resume(existing_session: Optional[Mapping[str, Any]]) -> bool:
@@ -2232,7 +2245,10 @@ class ClaudeAgentService:
                     fallback_evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}
                     await queue.put(_event("tool-input-available", {"toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}))
                     turn_ctx.collected_parts.append(fallback_evt)
-                is_error = bool(payload.is_error)
+                resolved_tool_name = tool_name or turn_ctx.tool_name_by_id.get(tool_call_id, "")
+                is_error = bool(payload.is_error) or _is_editor_tool_result_error(
+                    resolved_tool_name, payload.output
+                )
                 evt = {"type": "tool-output-available", "toolCallId": tool_call_id, "output": payload.output, "isError": is_error}
                 await queue.put(_event("tool-output-available", {"toolCallId": tool_call_id, "output": payload.output, "isError": is_error}))
                 turn_ctx.collected_parts.append(evt)
@@ -2240,7 +2256,6 @@ class ClaudeAgentService:
                 # After a confirmed editor write-tool result, reload editor_state from
                 # DB so that same-turn PreToolUse reads and subsequent turns see the
                 # updated document content.
-                resolved_tool_name = tool_name or turn_ctx.tool_name_by_id.get(tool_call_id, "")
                 if (
                     not is_error
                     and _tool_result_ok(payload.output)

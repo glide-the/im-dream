@@ -7,6 +7,8 @@
 // [Sync] 2026-05-29: keep ChatView mounted after first open so chat state survives app view switches.
 // [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
 // [Sync] 2026-06-14: replace 2s MCP write blind wait with Edit Session SSE event sync plus timeout fallback.
+// [Sync] 2026-08-13: persist the current Editor Session before Chat sends its
+//                    snapshot to an Agent that may invoke database-backed MCP writes.
 // [Sync] 2026-08-14: route Deck selection to canonical Story Workspace Chat
 //                    with stable Deck/Agent intent; mode is re-read from the server.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
@@ -304,6 +306,7 @@ export default function App() {
     ensureStateForPersistence,
     getFirstLineFromState,
     saveSessionToDatabase,
+    ensureSessionPersistedForAgent,
     startDetachedBlankSession,
     handleNewSession,
     confirmStartFresh
@@ -899,7 +902,7 @@ export default function App() {
       setDropdownTriggerCellId(lastTextCell.id);
       setDropdownVisible(true);
     }, 0);
-  }, [state]);
+  }, [ensureSessionPersistedForAgent, state]);
 
   // @@@ Toggle comment alignment
   const handleToggleAlign = useCallback(() => {
@@ -1263,6 +1266,9 @@ export default function App() {
 
     const systemPrompt = widgetData.voiceConfig.tagline || '';
 
+    if (state) {
+      await ensureSessionPersistedForAgent();
+    }
     await chatWithVoiceSSE({
       threadId,
       message,
@@ -1314,7 +1320,7 @@ export default function App() {
         setChatStreaming(prev => { const m = new Map(prev); m.delete(widgetId); return m; });
       },
     });
-  }, [state]);
+  }, [ensureSessionPersistedForAgent, state]);
 
   // @@@ Helper to get watercolor background
   const getWatercolorBg = (color: string) => {
@@ -1586,6 +1592,7 @@ export default function App() {
                 <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
                   <ChatView
                     editorState={state ? (state as unknown as Record<string, unknown>) : null}
+                    ensureEditorSessionPersisted={ensureSessionPersistedForAgent}
                     onEditorWriteConfirmed={handleEditorWriteConfirmed}
                     requestedThreadId={requestedChatThreadId}
                     requestedThreadNonce={requestedChatThreadNonce}
@@ -2367,6 +2374,7 @@ export default function App() {
         }}>
           <ChatView
             editorState={state ? (state as unknown as Record<string, unknown>) : null}
+            ensureEditorSessionPersisted={ensureSessionPersistedForAgent}
             onEditorWriteConfirmed={handleEditorWriteConfirmed}
             requestedThreadId={requestedChatThreadId}
             requestedThreadNonce={requestedChatThreadNonce}

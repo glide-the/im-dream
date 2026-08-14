@@ -4,6 +4,8 @@
 // [Sync] 2026-06-01: expose current user_session.labels for the writing view StateChooser.
 // [Sync] 2026-06-14: skip one automatic save after remote Agent-write session reload.
 // [Sync] 2026-06-14: avoid scheduling auto-save debounce when the editor content signature is unchanged.
+// [Sync] 2026-08-13: scope persistence signatures by session id and expose an
+//                    immediate pre-Agent persistence barrier for editor snapshots.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorEngine } from '../engine/EditorEngine';
 import type { EditorState, TextCell } from '../engine/EditorEngine';
@@ -20,8 +22,9 @@ function createSessionId() {
   return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function getEditorStateContentSignature(editorState: EditorState): string {
+export function getEditorStatePersistenceSignature(editorState: EditorState): string {
   return JSON.stringify({
+    id: editorState.id,
     cells: editorState.cells,
     commentors: editorState.commentors,
     tasks: editorState.tasks,
@@ -94,7 +97,7 @@ export function useSessionLifecycle({
   }, []);
 
   const markSessionPersisted = useCallback((editorState: EditorState) => {
-    const signature = getEditorStateContentSignature(editorState);
+    const signature = getEditorStatePersistenceSignature(editorState);
     lastPersistedSessionSignatureRef.current = signature;
     if (pendingAutoSaveSignatureRef.current === signature) {
       pendingAutoSaveSignatureRef.current = null;
@@ -151,6 +154,16 @@ export function useSessionLifecycle({
       console.error('Failed to persist session immediately:', error);
     }
   }, [getFirstLineFromState, isAuthenticated, saveSessionToDatabase]);
+
+  const ensureSessionPersistedForAgent = useCallback(async () => {
+    if (!isAuthenticated) return;
+    const editorState = latestStateRef.current;
+    if (!editorState) throw new Error('Editor state is missing, cannot start Agent turn');
+    const signature = getEditorStatePersistenceSignature(editorState);
+    if (signature === lastPersistedSessionSignatureRef.current) return;
+    clearAutoSaveTimer();
+    await saveSessionToDatabase(editorState);
+  }, [clearAutoSaveTimer, isAuthenticated, saveSessionToDatabase]);
 
   const buildBlankState = useCallback((options: { preserveSelectedState?: boolean; selectedStateOverride?: string | null } = {}): EditorState => {
     const {
@@ -344,8 +357,6 @@ export function useSessionLifecycle({
       initialState.createdAt = new Date().toISOString();
       setState(initialState);
     }
-    markSessionPersisted(initialState);
-
     engine.subscribe((newState) => {
       setState({ ...newState });
       if (!isAuthenticated) {
@@ -563,7 +574,7 @@ export function useSessionLifecycle({
       return;
     }
 
-    const currentSignature = getEditorStateContentSignature(state);
+    const currentSignature = getEditorStatePersistenceSignature(state);
     if (currentSignature === lastPersistedSessionSignatureRef.current) {
       clearAutoSaveTimer();
       return;
@@ -587,7 +598,7 @@ export function useSessionLifecycle({
         return;
       }
 
-      const snapshotSignature = getEditorStateContentSignature(stateSnapshot);
+      const snapshotSignature = getEditorStatePersistenceSignature(stateSnapshot);
       if (snapshotSignature === lastPersistedSessionSignatureRef.current) {
         pendingAutoSaveSignatureRef.current = null;
         return;
@@ -649,6 +660,7 @@ export function useSessionLifecycle({
     getFirstLineFromState,
     saveSessionToDatabase,
     persistSessionImmediately,
+    ensureSessionPersistedForAgent,
     startDetachedBlankSession,
     handleNewSession,
     confirmStartFresh,

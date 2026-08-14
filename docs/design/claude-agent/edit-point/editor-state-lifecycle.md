@@ -11,13 +11,14 @@
 >          包括数据结构、六个阶段说明、业务时序图、AgentRunState软缓存决策、None 语义与双路径读取对比。
 > [Pos] lifecycle-design-doc in `docs/design/claude-agent/edit-point`
 > [Sync] 2026-05-29: initial design — editor_state snapshot lifecycle.
+> [Sync] 2026-08-13: add pre-send persistence, structured failure normalization, interaction sequence, and minimal-design review.
 > [Sync] 2026-05-29: editor_state 迁移至 AgentRunState 软缓存；新增阶段 3b（MCP写工具后DB刷新），
 >                    更新 §5 不持久化决策表（AgentRunState 改为软缓存 ✅），更新 §4 时序图。
 
 # `editor_state` 快照生命周期设计
 
 Status: Updated  
-Updated: 2026-05-29  
+Updated: 2026-08-13
 Scope: Design + 实现对应代码
 
 ---
@@ -540,3 +541,104 @@ Edit-point 上下文由两个互补但独立的层组成：
 | Agent 执行被取消（`CancelledError`） | `finally` 块仍执行，临时文件正常清理；`AgentRunState.editor_state` 保留写工具执行前值 |
 | Editor MCP 子进程崩溃 | Claude Code CLI 报告工具不可用；Agent 可降级使用路径 A（`read_file`）|
 | **写工具后 DB 刷新失败**（网络/DB 错误） | `logger.warning` 记录，跳过刷新；`run_options.editor_state` 保留写前快照；下一轮前端提供新快照覆盖 |
+
+---
+
+## 10. Editor write 读写一致性与结果协议（2026-08-13）
+
+### 10.1 故障证据与根因
+
+原始 SSE 报文显示，同一轮中 `.editor/cells.json` 从 `AgentRunState.editor_state` 软缓存读取到空白 cell，随后 `mcp__editor__write_segment` 用相同 `editor_session_id` 与 `cellId` 从 PostgreSQL `user_sessions` 加载，却两次返回 `{"ok":false,"error":"cell_not_found"}`；SDK 仍把 MCP 的正常 JSON 返回标作 transport `is_error=false`。这是两个相互叠加的协议缺口：
+
+1. `useSessionLifecycle` 初始化了只存在于浏览器内存的空白 state，却立即把其不含 session identity 的内容签名登记为“已持久化”。因此自动保存可跳过该 session，而 Chat 仍把快照交给 Agent，形成“虚拟索引可读、数据库写路径不可见”的短暂双源分裂。
+2. Editor MCP 用结构化 `ok:false` 表达业务失败；SDK 只知道 handler 成功返回 JSON，故 transport flag 保持 false。若 service 不在统一事件边界规范化，live SSE 与持久化 history 都会生成 `output-available`。
+
+数据库仍是写入权威；`AgentRunState` 仍只是同轮读取软缓存。禁止在 `cell_not_found` 时创建 cell，也禁止让 MCP 直接写缓存，因为两者都会绕过持久化与并发约束。
+
+### 10.2 最小充分交互方案
+
+- Chat 的 queued send、composer send 和 inline editor widget send 在调用生产 Agent API 前，共用 `ensureSessionPersistedForAgent()`。它比较包含 `editorState.id` 的签名；不同 session 即使内容完全相同也必须单独落库。保存失败会拒绝本次发送，而不是暴露不可写快照。
+- 输入流式预览、`PreToolUse` 确认 Store、`EditorWriteApprovalUI` 以及批准/拒绝协议保持不变。
+- service 只对已登记的 Editor write 工具检查结构化 `ok:false`，并在写入 live EventBus 和 `collected_parts` 前把它合并为 `isError:true`。普通工具的领域 JSON 不受影响。
+- 成功结果才允许 DB reload、刷新 `AgentRunState.editor_state` 和发布 `session_updated(source=agent)`；失败保留完整 JSON，进入 `output-error`，不 reload、不跳转。
+- live transport 与 reconnect reducer继续消费同一个后端 `isError` 字段；历史持久化也消费同一个已规范化 collected event，不另建 parser 或状态机。
+
+用户可见状态沿用现有组件：输入预览 → 等待确认 → 已拒绝，或成功完成卡（可跳转）；`cell_not_found`、`session_not_found`、`save_failed` 显示失败详情且无跳转按钮。失败后用户可保留草稿、重试保存或重新发送请求。
+
+### 10.3 完整业务时序
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Chat UI
+    participant Life as useSessionLifecycle
+    participant API as Chat API / ClaudeAgentService
+    participant Run as AgentRunState
+    participant Confirm as PreToolUse confirmation
+    participant MCP as Editor MCP
+    participant DB as PostgreSQL user_sessions
+    participant SSE as SSE transport/reducer
+    participant Card as EditorWriteCompletedCard
+    participant Reload as Edit Session event/reload
+
+    User->>UI: 发送编辑请求
+    UI->>Life: ensureSessionPersistedForAgent()
+    Life->>Life: 计算含 session id 的内容签名
+    alt 新 session 或内容未持久化
+        Life->>DB: saveSession(editor_state)
+        DB-->>Life: 保存成功
+    else 已持久化同一 session + 内容
+        Life-->>Life: 无需重复保存
+    end
+    Life-->>UI: persistence barrier 完成
+    UI->>API: POST turn + 同一 editor_state
+    API->>Run: 保存同一快照与 user identity
+    Run-->>API: .editor/cells.json 可读 cell
+    API-->>SSE: tool-input-start/delta/available
+    SSE-->>Card: 流式输入预览
+    API->>Confirm: PreToolUse 请求确认
+    Confirm-->>SSE: tool-approval-request
+    SSE-->>User: EditorWriteApprovalUI
+
+    alt 用户拒绝
+        User->>Confirm: Reject
+        Confirm-->>API: deny
+        API-->>SSE: 拒绝结果
+        SSE-->>Card: 已拒绝（无 reload/跳转）
+    else 用户批准
+        User->>Confirm: Approve
+        Confirm->>MCP: execute write_segment
+        MCP->>DB: load user_sessions.editor_state
+        alt session/cell 不存在或 save_failed
+            DB-->>MCP: not found / save failure
+            MCP-->>API: {ok:false,error,...}
+            API->>API: Editor write 业务失败 => isError:true
+            API-->>SSE: tool-output-available(isError=true)
+            SSE->>SSE: output-error（live 与 replay 同规则）
+            SSE-->>Card: 失败详情，无跳转按钮
+            Note over API,Reload: 不刷新 Run，不发布 session_updated
+        else 写入成功
+            DB-->>MCP: persisted
+            MCP-->>API: {ok:true,...}
+            API->>DB: reload authoritative editor_state
+            DB-->>API: fresh state
+            API->>Run: 刷新 editor_state
+            API-->>SSE: tool-output-available(isError=false)
+            API->>Reload: session_updated(source=agent)
+            SSE-->>Card: 成功完成 + 跳转操作
+            Reload->>DB: reload Edit Session
+            DB-->>Reload: 最新内容
+        end
+    end
+
+    opt 刷新或重连
+        UI->>API: history + reconnect stream
+        API-->>SSE: 持久化的同一 normalized tool event
+        SSE->>SSE: applyBackendEventToMessages
+        SSE-->>Card: 保持 success / output-error / rejected 语义
+    end
+```
+
+### 10.4 过度设计审查
+
+该方案直接满足读写同源、业务失败不误判、状态可理解、重连不变形。它没有新增状态机、存储层、事件类型或平行协议：只增加一个发送前持久化 barrier、把既有签名补上 session identity，并在既有 service 事件边界合并业务错误。删除/否决的多余方案包括：失败时临时建 cell、MCP 写软缓存、仅改变卡片颜色、在 live 与 history 各复制一次错误 parser、增加环境或 test-only 分支。最终最小边界为前端持久化语义、后端统一事件规范化和现有完成卡失败数据保真三处。

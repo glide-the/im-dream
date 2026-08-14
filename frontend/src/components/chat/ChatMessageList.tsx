@@ -5,6 +5,8 @@
 // [Sync] 2026-05-27: add toolChoice prop; render non-completed tool parts in manual mode directly with isManualToolInvocation=true so Approve/Cancel UI is shown.
 // [Sync] 2026-05-29: import isEditorWriteTool; render editor write tool parts directly (not collapsed) with isManualToolInvocation=true so specialized approval UI shows immediately.
 // [Sync] 2026-05-29: render completed editor write tool parts as EditorWriteCompletedCard instead of Terminal card.
+// [Sync] 2026-08-13: preserve structured output-error details in the editor
+//                    completion card so failures never regain success actions.
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ToolMessagePart for editor write tools.
 // [Sync] 2026-05-29: let the message list fill the available chat page width.
 // [Sync] 2026-05-29: fix history-replay regression — history-loaded DynamicToolUIPart may lack toolName field causing getToolName() to return 'invocation'; add resolveToolName() with direct field fallback and hoist editor write completed check above Terminal block, decoupled from outputText.
@@ -81,7 +83,25 @@ function getToolStatus(part: ToolUIPart | DynamicToolUIPart, isLoading: boolean)
 function getToolOutputText(part: ToolUIPart | DynamicToolUIPart): string | null {
   if ('output' in part && part.output != null) return typeof part.output === 'string' ? part.output : JSON.stringify(part.output, null, 2);
   if ('error' in part && part.error != null) return typeof part.error === 'string' ? part.error : JSON.stringify(part.error, null, 2);
+  if ('errorText' in part && typeof part.errorText === 'string') return part.errorText;
   return null;
+}
+
+function getEditorWriteOutput(part: ToolUIPart | DynamicToolUIPart, isError: boolean): EditorWriteOutput {
+  if ('output' in part && part.output && typeof part.output === 'object') {
+    return part.output as EditorWriteOutput;
+  }
+  if (isError) {
+    const errorText = getToolOutputText(part) ?? '';
+    try {
+      const parsed = JSON.parse(errorText) as unknown;
+      if (parsed && typeof parsed === 'object') return parsed as EditorWriteOutput;
+    } catch {
+      // Transport errors may be plain text; retain them as a failed result.
+    }
+    return { ok: false, error: errorText || 'editor_write_failed' };
+  }
+  return {};
 }
 
 function parseTerminalOutput(raw: string): { command: string | null; output: string; exitCode: string | null } {
@@ -352,13 +372,12 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 // the correct UI instead of falling through to the Terminal block.
                 if (isCompleted && isEditorWriteTool(toolName)) {
                   const rawInput = 'input' in toolPart ? (toolPart as { input?: unknown }).input : undefined;
-                  const rawOutput = 'output' in toolPart ? (toolPart as { output?: unknown }).output : undefined;
                   return (
                     <div key={partKey}>
                       <EditorWriteCompletedCard
                         toolName={toolName}
                         input={(rawInput ?? {}) as Record<string, unknown>}
-                        output={(rawOutput ?? {}) as EditorWriteOutput}
+                        output={getEditorWriteOutput(toolPart, isError)}
                       />
                     </div>
                   );
