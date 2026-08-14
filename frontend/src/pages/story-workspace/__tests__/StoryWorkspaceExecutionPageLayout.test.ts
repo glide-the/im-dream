@@ -54,6 +54,15 @@ test('focus replaces the overview layer and keeps only full-width context naviga
   expect(focusBranch).not.toContain('WorkspaceIndexList');
 });
 
+test('asset focus renders the Hook-published complete document while indexes keep summaries', () => {
+  expect(PAGE_SOURCE).toContain("focusedEntry.content ? '完整资产资料' : '主要信息'");
+  expect(PAGE_SOURCE).toContain('<StoryWorkspaceAssetContent');
+  expect(PAGE_SOURCE).toContain('<ReactMarkdown');
+  expect(PAGE_SOURCE).toContain('skipHtml');
+  expect(PAGE_SOURCE).toContain("<p>{entry.summary || '等待 Agent 补充主要信息。'}</p>");
+  expect(CSS_SOURCE).toContain('.story-workspace-collaboration__asset-document');
+});
+
 test('execution page uses exactly one dashed rule', () => {
   expect(CSS_SOURCE.match(/dashed/g) ?? []).toHaveLength(1);
 });

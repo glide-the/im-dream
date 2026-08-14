@@ -20,6 +20,7 @@ function fullProjection() {
     entityId: 'lead',
     displayName: '主角',
     summary: '人物摘要',
+    content: '# 主角\n\n身份：调查记者。\n\n动机：寻找真相。',
     sourceFile: 'assets/characters/lead.md',
     relations: [],
   };
@@ -92,6 +93,7 @@ test('strictly parses waiting and complete camelCase projections', () => {
   expect(complete.confirmationAccepted).toBe(false);
   expect(complete.confirmationDispatched).toBe(false);
   expect(complete.stages.characters?.revision).toBe(2);
+  expect(complete.stages.characters?.items[0].content).toContain('动机：寻找真相。');
   expect(complete.agentActivity).toBeNull();
 
   const withActivity = storyWorkspaceParseDreamFiles({
@@ -141,6 +143,19 @@ test('strictly parses waiting and complete camelCase projections', () => {
     ...fullProjection(),
     requiredStages: ['characters', 'scenes', 'failed'],
   })).toThrow();
+  expect(() => storyWorkspaceParseDreamFiles({
+    ...fullProjection(),
+    stages: {
+      ...fullProjection().stages,
+      characters: {
+        ...fullProjection().stages.characters,
+        items: [{ ...fullProjection().stages.characters.items[0], content: 42 }],
+      },
+    },
+  })).toThrow();
+  const legacy = fullProjection();
+  delete (legacy.stages.characters.items[0] as { content?: string }).content;
+  expect(storyWorkspaceParseDreamFiles(legacy).stages.characters?.items[0].content).toBeNull();
   expect(() => storyWorkspaceParseDreamFiles({
     ...fullProjection(),
     stages: { characters: { ...fullProjection().stages.characters, revision: true } },

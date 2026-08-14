@@ -2,6 +2,7 @@
 # [Output] Strict persistence and wire DTOs, including separate Project and
 #          Episode presentation contracts.
 # [Pos] Pure domain contract module; no runtime, database, or transport owner.
+# [Sync] 2026-08-14: add optional complete asset content beside compact Dream summaries.
 
 """Canonical contracts for the Story Workspace domain.
 
@@ -38,6 +39,7 @@ STORY_WORKSPACE_GUIDANCE_IDEMPOTENCY_KEY_MAX_LENGTH = 255
 # intentionally does not assign numeric policy values. Keep these centralized
 # so a later product/security decision can revise them without schema drift.
 STORY_WORKSPACE_DREAM_FILE_MAX_BYTES = 1024 * 1024
+STORY_WORKSPACE_DREAM_ITEM_CONTENT_MAX_LENGTH = STORY_WORKSPACE_DREAM_FILE_MAX_BYTES
 STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX = 256
 STORY_WORKSPACE_DREAM_ITEMS_MAX = 1000
 STORY_WORKSPACE_DREAM_RELATIONS_MAX = 100
@@ -408,6 +410,10 @@ class StoryWorkspaceDreamStageItem(_StoryWorkspaceDreamStorageModel):
     entity_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=200)
     summary: Optional[str] = Field(default=None, max_length=4000)
+    content: Optional[str] = Field(
+        default=None,
+        max_length=STORY_WORKSPACE_DREAM_ITEM_CONTENT_MAX_LENGTH,
+    )
     source_file: str = Field(min_length=1, max_length=1024)
     relations: list[str] = Field(
         default_factory=list,
@@ -474,6 +480,10 @@ class StoryWorkspaceDreamStageItemResponse(_StoryWorkspaceDreamWireModel):
     entity_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=200)
     summary: Optional[str] = Field(default=None, max_length=4000)
+    content: Optional[str] = Field(
+        default=None,
+        max_length=STORY_WORKSPACE_DREAM_ITEM_CONTENT_MAX_LENGTH,
+    )
     source_file: str = Field(min_length=1, max_length=1024)
     relations: list[str] = Field(
         default_factory=list,

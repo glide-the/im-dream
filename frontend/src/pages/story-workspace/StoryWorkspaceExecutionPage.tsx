@@ -10,6 +10,8 @@
 //                    publish and bind automatically without a manual UI action.
 // [Sync] 2026-08-13: render canonical Project title separately from Episode title.
 // [Sync] 2026-08-13: hand the dialog's bound Dream thread to canonical Chat.
+// [Sync] 2026-08-14: render Hook-published complete character/scene documents
+//                    in the focus layer while keeping index summaries compact.
 
 import {
   useCallback,
@@ -21,6 +23,8 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   StoryWorkspaceStoryIndexStatus,
   storyWorkspaceReviewDeepLink,
@@ -83,6 +87,37 @@ const EPISODE_ARTIFACT_LABELS: Readonly<Record<string, string>> = {
   'renders/': 'Render Guide',
   'review-report.md': 'Review Report',
 };
+
+const ASSET_MARKDOWN_COMPONENTS: Components = {
+  a({ children, href }) {
+    if (href === undefined) return <span>{children}</span>;
+    return <a href={href} rel="noreferrer" target="_blank">{children}</a>;
+  },
+  img({ alt }) {
+    return <span role="img" aria-label={alt ?? '资产图片'}>[图片：{alt ?? '未命名'}]</span>;
+  },
+};
+
+function StoryWorkspaceAssetContent({
+  content,
+  sourceFile,
+}: {
+  readonly content: string;
+  readonly sourceFile: string;
+}) {
+  if (!sourceFile.toLowerCase().endsWith('.md')) {
+    return <pre><code>{content}</code></pre>;
+  }
+  return (
+    <ReactMarkdown
+      components={ASSET_MARKDOWN_COMPONENTS}
+      remarkPlugins={[remarkGfm]}
+      skipHtml
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
 
 const EPISODE_UNAVAILABLE_COVERAGE: StoryWorkspaceEpisodeAssociationCoverage = {
   availability: 'unavailable',
@@ -661,8 +696,17 @@ export function StoryWorkspaceExecutionPage({
               </div>
 
               <section className="story-workspace-collaboration__prose">
-                <span>主要信息</span>
-                <p>{focusedEntry.summary || 'Agent 尚未写入摘要。'}</p>
+                <span>{focusedEntry.content ? '完整资产资料' : '主要信息'}</span>
+                {focusedEntry.content ? (
+                  <div className="story-workspace-collaboration__asset-document">
+                    <StoryWorkspaceAssetContent
+                      content={focusedEntry.content}
+                      sourceFile={focusedEntry.sourceFile}
+                    />
+                  </div>
+                ) : (
+                  <p>{focusedEntry.summary || 'Agent 尚未写入摘要。'}</p>
+                )}
               </section>
 
               {focusedEntry.stage === 'storyboards' && (

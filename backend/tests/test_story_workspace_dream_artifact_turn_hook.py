@@ -25,7 +25,10 @@ from services.story_workspace.dream_file_service import StoryWorkspaceDreamFileR
 from services.story_workspace.episode_artifact_service import (
     StoryWorkspaceEpisodeAuthority,
 )
-from story_workspace.contracts import StoryWorkspaceDreamRunContext
+from story_workspace.contracts import (
+    StoryWorkspaceDreamRunContext,
+    StoryWorkspaceDreamStage,
+)
 
 
 RUN_ID = "run_0123456789abcdef0123456789abcdef"
@@ -657,6 +660,47 @@ location: 城市中心
             "assets/characters/凌波.yaml",
         )
         self.assertEqual(scenes["studio"]["display_name"], "创作工作室")
+
+    def test_character_projection_keeps_compact_summary_and_complete_document(self) -> None:
+        character = self.workspace / "assets" / "characters" / "lao-tou.md"
+        source = """---
+char_id: lao-tou
+char_name: 老头（庖丁）
+---
+# 老头（庖丁）（lao-tou）
+
+身份：夏都王宫掌厨，实为商地出身的故人。
+
+外形：满头白发，围裙满是油渍，佝偻但有精气神。
+
+人物关系：
+- 对伊尹：识破其手法来历，暗中协助、传递商地情报。
+- 对夏桀：隐忍多年，潜伏于御膳房。
+
+动机：等待拨乱反正的一天。
+"""
+        character.write_text(source, encoding="utf-8")
+
+        projections = DreamArtifactTurnHook._collect_stage_projections(
+            self.workspace.resolve()
+        )
+        characters = next(
+            projection
+            for projection in projections
+            if projection.stage is StoryWorkspaceDreamStage.CHARACTERS
+        )
+        lao_tou = next(
+            item for item in characters.items if item["entity_id"] == "lao-tou"
+        )
+
+        self.assertEqual(
+            lao_tou["summary"],
+            "身份：夏都王宫掌厨，实为商地出身的故人。",
+        )
+        self.assertEqual(lao_tou["content"], source.strip())
+        self.assertIn("外形：满头白发", str(lao_tou["content"]))
+        self.assertIn("人物关系：", str(lao_tou["content"]))
+        self.assertIn("动机：等待拨乱反正的一天。", str(lao_tou["content"]))
 
 
 if __name__ == "__main__":

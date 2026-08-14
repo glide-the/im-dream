@@ -5605,3 +5605,51 @@ JSON 而不编辑 `project.yaml`。
 - 聚焦回归为 `189 passed, 1 skipped, 109 subtests passed`；广覆盖 Story Workspace/Claude
   回归在正确 backend 工作目录为 `889 passed, 6 skipped, 260 subtests passed`。前端 ESLint
   0 errors（21 个既有 warnings），production build 通过。未执行有头或生产环境验证。
+
+## 第 123 轮——完整角色资产正文投影
+
+**当前轮次目标**
+
+修复真实 Run `run_4d3599ecce724aed82af882ada451aae` 中
+`assets/characters/lao-tou.md` 只有首段身份进入页面、外形/人物关系/动机丢失的问题，并使用
+账号 `test111@suoxya.com` 验证现有业务数据的完整消费者链路。
+
+**优化后的执行提示词**
+
+> 逐字段比较 `lao-tou.md`、成功 Hook 生成的 characters stage、actor-scoped dream-files API
+> 与 Execution 聚焦页，确定信息丢失发生在哪个边界。保持 `summary` 为列表摘要，为 stage item
+> 增加向后兼容的完整正文投影，并在聚焦页安全渲染 Markdown；不得让 GET 启动同步、不得让
+> 页面绕过 Hook 直接读取 canonical 文件，也不得建立固定人物字段状态机。使用真实账号和原始
+> Run 无头验收，证明 Project、Episode、其他资产、thread/session 均未改变。
+
+**本轮检查或修改范围**
+
+- `DreamArtifactTurnHook` 的人物/场景文件投影；
+- Dream stage 存储/响应 DTO 与前端 TypeScript 合同；
+- Execution 列表摘要和聚焦全文渲染；
+- 中文资产协作设计、合同测试和真实 Run 无头验收。
+
+**本轮完成标准**
+
+- 列表仍显示摘要，聚焦页完整显示身份、外形、人物关系和动机；
+- 完整正文只在成功 Hook 后进入同一 stage revision；失败/取消保持 last-good；
+- 旧 stage 可读取并回退摘要，下一次成功 turn 自动升级；
+- 后端、前端、构建、差异检查和真实无头页面验收通过。
+
+**本轮实际结果和未验证推断**
+
+- 诊断已确认 `_first_body_text()` 遇到首个空行即停止，现有 `characters.json` 因而只包含身份
+  一句；页面按合同只消费该 `summary`，不是 CSS 截断或 Run/thread 绑定错误。
+- stage item 已增加向后兼容的可选 `content`；Hook 在同一成功 revision 发布规范化完整 UTF-8
+  源文档，列表继续用摘要，Execution 聚焦层安全渲染 Markdown/YAML。无变化 turn 的正文比较
+  已统一首尾空白，避免 revision 伪增长。
+- 实测还发现前端 `useStoryWorkspaceDreamFiles` 的手写 decoder 会静默丢弃新字段；已补齐严格
+  `content` 解析、非法类型拒绝和旧 stage `null` 回退。该问题说明只改 TypeScript 接口不足以
+  完成 wire contract 迁移。
+- 真实账号 `test111@suoxya.com`、Run `run_4d3599ecce724aed82af882ada451aae`、模型
+  `deepseek-v4-pro` 和原 Claude session `3a8745e3-4d27-4cc4-844d-d0dcd4d6986b` 的无头 E2E
+  通过：`1 passed (19.1s)`。普通用户只读消息后，canonical `assets/**`、`stories/**` 全文件
+  SHA-256 集合保持一致；actor API 与页面同时显示身份、外形、两条人物关系和动机。
+- 后端 Dream 扩大回归 `214 passed, 3 skipped, 76 subtests passed`；前端 Story Workspace
+  扩大回归 `146 passed`；目标 ESLint、TypeScript、production build 与 `git diff --check`
+  通过。未执行有头、移动端视觉或生产环境验证。

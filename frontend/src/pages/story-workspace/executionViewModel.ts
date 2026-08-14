@@ -1,6 +1,7 @@
 // [Input] Authoritative Dream file projections after the single confirmation.
-// [Output] Canonical-first Project title plus Assets / Outline collaboration indexes and focus navigation seams.
+// [Output] Canonical-first Project title plus Assets / Outline indexes, compact summaries, complete focus documents, and navigation seams.
 // [Pos] Story Workspace execution page pure view-model (Task 3 F5)
+// [Sync] 2026-08-14: preserve Hook-published full asset content for the focus reader.
 
 import type {
   StoryWorkspaceDreamFilesResponse,
@@ -40,6 +41,7 @@ export interface StoryWorkspaceExecutionEntry {
   readonly entityId: string;
   readonly title: string;
   readonly summary: string | null;
+  readonly content: string | null;
   readonly relations: readonly string[];
   readonly sourceFile: string;
   readonly revision: number;
@@ -79,6 +81,7 @@ function toEntry(
     entityId: item.entityId,
     title: item.displayName,
     summary: item.summary,
+    content: item.content ?? null,
     relations: [...item.relations],
     sourceFile: item.sourceFile,
     revision,

@@ -1,6 +1,7 @@
 // [Input] Actor-scoped Story Workspace REST response values.
 // [Output] Shared strict frontend DTOs with separate Project and Episode titles.
 // [Pos] Story Workspace browser contract declarations; no transport or reducer state.
+// [Sync] 2026-08-14: carry optional Hook-published complete asset content.
 
 export type StoryWorkspaceReviewStatus = 'pending' | 'confirmed' | 'rejected' | 'archived';
 
@@ -259,6 +260,8 @@ export interface StoryWorkspaceDreamStageItem {
   readonly entityId: string;
   readonly displayName: string;
   readonly summary: string | null;
+  /** Full last-good source document published by the successful main-turn Hook. */
+  readonly content?: string | null;
   readonly sourceFile: string;
   readonly relations: readonly string[];
 }

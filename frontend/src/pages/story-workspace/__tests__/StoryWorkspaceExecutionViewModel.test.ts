@@ -43,6 +43,7 @@ function files(): StoryWorkspaceDreamFilesResponse {
         page: { title: '人物', entryRoute: `/story-workspace/characters?run=${RUN_ID}` },
         items: [{
           entityId: 'lead', displayName: '林默', summary: '寻找真相。',
+          content: '# 林默\n\n身份：调查记者。\n\n动机：寻找真相。',
           sourceFile: 'assets/characters/lead.md', relations: ['苏遥'],
         }],
       },
@@ -88,6 +89,10 @@ test('builds Assets and Outline from workspace files without approval states', (
     key: 'storyboards:beat-02',
     revision: 5,
     relations: ['林默', '苏遥'],
+  });
+  expect(workspace.assets[0]).toMatchObject({
+    summary: '寻找真相。',
+    content: '# 林默\n\n身份：调查记者。\n\n动机：寻找真相。',
   });
   expect(workspace.activity.map((entry) => entry.label)).toEqual([
     '分镜文件已写入 r5',

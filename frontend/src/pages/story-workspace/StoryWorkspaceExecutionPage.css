@@ -1,6 +1,7 @@
 /* [Input] Ink & Memory UI v2 warm-paper semantic tokens. */
-/* [Output] Warm-paper Episode master-detail workbench and legacy Dream projection. */
+/* [Output] Warm-paper Episode master-detail workbench and complete Dream asset projection. */
 /* [Pos] Story Workspace post-confirmation execution page (Task 3 U12) */
+/* [Sync] 2026-08-14: style complete Hook-published Markdown/YAML asset documents. */
 /* [Sync] 2026-08-14: source the Execution canvas from the shared app background
    token so dark mode cannot fall back to a hard-coded light canvas. */
 
@@ -423,6 +424,50 @@
   font-family: Georgia, serif;
   font-size: 16px;
   line-height: 1.9;
+}
+
+.story-workspace-collaboration__asset-document {
+  max-width: 920px;
+  margin-top: 13px;
+  color: var(--collaboration-ink);
+  font-family: Georgia, serif;
+  font-size: 16px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+
+.story-workspace-collaboration__asset-document > :first-child {
+  margin-top: 0;
+}
+
+.story-workspace-collaboration__asset-document > :last-child {
+  margin-bottom: 0;
+}
+
+.story-workspace-collaboration__asset-document h1,
+.story-workspace-collaboration__asset-document h2,
+.story-workspace-collaboration__asset-document h3 {
+  margin: 1.4em 0 .55em;
+  color: var(--collaboration-ink);
+  font-family: Georgia, serif;
+  line-height: 1.35;
+}
+
+.story-workspace-collaboration__asset-document ul,
+.story-workspace-collaboration__asset-document ol {
+  margin: .75em 0;
+  padding-left: 1.6em;
+}
+
+.story-workspace-collaboration__asset-document pre {
+  max-width: 100%;
+  padding: 16px;
+  overflow-x: auto;
+  color: var(--collaboration-paper);
+  background: var(--collaboration-ink);
+  border-radius: 3px;
+  font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
 }
 
 .story-workspace-collaboration__shot-note > div {

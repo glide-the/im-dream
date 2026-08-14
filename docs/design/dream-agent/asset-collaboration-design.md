@@ -114,6 +114,23 @@ Agent 在删除或重命名身份前必须搜索 `character_refs`、`scene_refs`
 - 会改变未点名剧情事实、存在多个合理替代或无法判定时，使用 AskUserQuestion；
 - 不允许留下已知悬空引用，也不允许静默删除引用该资产的整段剧本或镜头。
 
+### 3.5 资产摘要与完整正文投影
+
+人物和场景索引需要同时满足“快速浏览”和“完整阅读”，两者不能继续共用一个被截断的
+`summary`：
+
+- `summary` 只承载列表摘要，保持现有索引密度；
+- `content` 是可选、受 Dream stage 文件大小上限约束的完整源文档正文，由成功根 turn 后的
+  `DreamArtifactTurnHook` 与 `display_name`、`summary` 一起写入同一个 stage revision；
+- Markdown 人物/场景在聚焦页按 Markdown 显示完整标题、段落、列表和关系描述；YAML 资产按
+  原文显示，避免前端猜测 Deck 自定义字段；
+- 旧 stage 没有 `content` 时继续用 `summary`，下一次成功根 turn 会按当前文件事实升级投影；
+- 页面不得绕过 Hook 直接读取 canonical 文件，也不得在 GET 时触发同步。失败、Stop、取消或
+  Hook 失败时，页面继续显示 last-good stage，不暴露半成品文件。
+
+该合同不为“身份、外形、动机”等字段建立固定状态机或数据库列。随机执行的 Skill 可以继续
+扩展资产文档；只要内容存在于成功发布的源文件，聚焦页就能完整呈现。
+
 ## 4. 业务时序
 
 ### 4.1 新增人物或场景
@@ -247,6 +264,27 @@ sequenceDiagram
     H->>V: characters revision 与页面移除人物
 ```
 
+### 4.7 完整人物资料发布与阅读
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant A as 主 Agent
+    participant C as canonical 人物文件
+    participant H as after_main_turn Hook
+    participant S as characters stage
+    participant API as actor-scoped dream-files API
+    participant P as Execution 聚焦页
+    U->>A: 用自然语言新增或补充人物资料
+    A->>C: Write/Edit 身份、外形、关系、动机等文件事实
+    A-->>H: 根 turn 成功
+    H->>C: 读取完整 UTF-8 源文档
+    H->>S: 同一 revision 写入摘要与完整 content
+    S-->>API: 返回授权后的 stage item
+    API-->>P: summary 用于索引，content 用于聚焦阅读
+    P-->>U: 完整显示标题、段落和列表
+```
+
 ## 5. 设计审查
 
 结论：**修改后接受**。
@@ -268,6 +306,8 @@ sequenceDiagram
 - Hook 继续只在成功根 turn 后读取文件事实，不解析 assistant JSON；
 - MCP 仍是可选辅助，不承担最终一致性；
 - 使用现有 Chat transport 和同一 thread，Dream↔Chat 行为一致。
+- 完整正文仍随现有 stage revision 发布，不新增详情 API、GET 副作用或页面直读 canonical
+  文件；`content` 是向后兼容的可选 DTO 字段，不形成第二套协议或生命周期。
 
 明确拒绝：通过正则识别用户意图、前端解析 JSON 后替 Agent 写文件、为三类资产复制三个
 同步器、把引用关系持久化成新的 workflow 状态，以及用模型输出内容判断 turn 是否完成。
@@ -278,6 +318,8 @@ sequenceDiagram
 - 人物、场景、道具、分镜分别完成新增、更新、删除，并在每轮后验证 canonical 文件；
 - 删除引用资产不会留下已知悬空引用；
 - 成功后 Hook 更新对应 `.dream` stage，页面刷新可见；
+- 人物/场景列表继续显示简短摘要；进入聚焦页后，源文档中的标题、段落、列表、关系和动机
+  均可见，旧 stage 在没有 `content` 时安全回退摘要；
 - 失败/Stop 不发布，重复无变化不增加 revision；
 - 普通 Chat 保留既有 proposal 行为，Dream turn 不再收到 legacy standalone JSON 合同；
 - 不调用真实业务的克隆数据或替代服务；真实浏览器测试使用原始本机数据和无头模式。

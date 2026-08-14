@@ -2,6 +2,8 @@
 // [Output] Strict parser/fetch/reducer seams plus useStoryWorkspaceDreamFiles().
 // [Pos] story-workspace hooks node - Dream workspace file read boundary (Task 3 F2)
 // [Sync] 2026-08-04: initial implementation; REST is authoritative, SSE only invalidates.
+// [Sync] 2026-08-14: preserve optional Hook-published complete asset content;
+//                    legacy stage items without it normalize to null.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -124,10 +126,17 @@ function parseItem(value: unknown, sourceFiles: readonly string[]): StoryWorkspa
   if (summary !== null && typeof summary !== 'string') {
     throw new Error('Dream stage item has invalid summary.');
   }
+  const content = value.content === undefined || value.content === null
+    ? null
+    : value.content;
+  if (content !== null && typeof content !== 'string') {
+    throw new Error('Dream stage item has invalid content.');
+  }
   return {
     entityId: requiredString(value.entityId, 'stage.item.entityId'),
     displayName: requiredString(value.displayName, 'stage.item.displayName'),
     summary,
+    content,
     sourceFile,
     relations: stringArray(value.relations, 'stage.item.relations'),
   };

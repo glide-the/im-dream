@@ -8,6 +8,10 @@
 # [Sync] 2026-08-13: added host-owned automatic workbench synchronization.
 # [Sync] 2026-08-13: reconcile all three stages as complete file facts,
 #                    including deletion when a Skill removes every source.
+# [Sync] 2026-08-14: publish complete character/scene source content beside
+#                    compact summaries for the Execution focus reader.
+# [Sync] 2026-08-14: compare stage projections through the canonical storage
+#                    model so whitespace/default normalization stays idempotent.
 
 """Root-turn synchronization from canonical workbench files to one Dream Run.
 
@@ -72,6 +76,7 @@ try:
         STORY_WORKSPACE_DREAM_REQUIRED_STAGES,
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceDreamStage,
+        StoryWorkspaceDreamStageItem,
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
     from backend import database
@@ -111,6 +116,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         STORY_WORKSPACE_DREAM_REQUIRED_STAGES,
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceDreamStage,
+        StoryWorkspaceDreamStageItem,
     )
 
 
@@ -1072,6 +1078,10 @@ class DreamArtifactTurnHook:
             relative = candidate.relative_to(workspace).as_posix()
             payload = cls._safe_file(workspace, relative)
             metadata, body = cls._frontmatter(payload)
+            # Stage DTOs strip surrounding whitespace. Normalize before both
+            # comparison and persistence so an unchanged trailing newline does
+            # not advance every asset stage revision on each successful turn.
+            source_content = payload.decode("utf-8").strip() or None
             if not metadata:
                 metadata = cls._plain_mapping(payload)
             if not metadata:
@@ -1121,6 +1131,7 @@ class DreamArtifactTurnHook:
                     "entity_id": identity,
                     "display_name": display_name[:200],
                     "summary": " · ".join(summary_parts)[:4000] or None,
+                    "content": source_content,
                     "source_file": relative,
                     "relations": cls._relation_strings(relationships),
                 }
@@ -1222,17 +1233,12 @@ class DreamArtifactTurnHook:
     ) -> bool:
         if current is None or tuple(current.source_files) != projection.source_files:
             return False
-        current_items = tuple(
-            {
-                "entity_id": item.entity_id,
-                "display_name": item.display_name,
-                "summary": item.summary,
-                "source_file": item.source_file,
-                "relations": list(item.relations),
-            }
-            for item in current.items
+        current_items = tuple(item.model_dump() for item in current.items)
+        projected_items = tuple(
+            StoryWorkspaceDreamStageItem.model_validate(item).model_dump()
+            for item in projection.items
         )
-        return current_items == projection.items
+        return current_items == projected_items
 
     @classmethod
     def _collect_private_artifact_files(cls, workspace: Path) -> dict[str, bytes]:
