@@ -1,8 +1,10 @@
 // [Input] Optional run deep link plus the dedicated Dream launch module.
-// [Output] Workspace-file-driven Dream editor or the no-run Dream start surface.
+// [Output] Workspace-file-driven Dream editor or the three-section Dream discovery/re-entry home.
 // [Pos] Canonical /story-workspace/dream business page (Task 3 F4)
 // [Sync] 2026-08-04: implement Agent files -> render -> edit/one confirm -> continue.
 // [Sync] 2026-08-13: hand the bound Dream thread to canonical Chat on request.
+// [Sync] 2026-08-14: no-run Dream now discovers Decks/runs only; all creation begins in Chat.
+// [Sync] 2026-08-14: open the bound Dream Agent editor by default when entering or switching runs.
 
 import {
   useCallback,
@@ -137,7 +139,7 @@ export function StoryWorkspaceDreamPage({
   const [activeStage, setActiveStage] = useState<StoryWorkspaceDreamStage>(initialStage);
   const [selection, setSelection] = useState<DreamSelection | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
-  const [rightSection, setRightSection] = useState<DreamRightSection>('content');
+  const [rightSection, setRightSection] = useState<DreamRightSection>('agent');
   const [threadSessionRefreshNonce, setThreadSessionRefreshNonce] = useState(0);
   const [expectedConfirmationMessageId, setExpectedConfirmationMessageId] = useState<string | null>(null);
   const agentPanelOpen = rightSection === 'agent';
@@ -189,7 +191,7 @@ export function StoryWorkspaceDreamPage({
     setSelection(null);
     setActiveStage(initialStage);
     setEditorError(null);
-    setRightSection('content');
+    setRightSection('agent');
     setThreadSessionRefreshNonce(0);
     setExpectedConfirmationMessageId(null);
   }, [initialStage, runId]);

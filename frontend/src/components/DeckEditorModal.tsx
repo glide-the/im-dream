@@ -1,10 +1,13 @@
-// [Input] Deck/voice API types, deck visual metadata, and optional Chat handoff callback.
-// [Output] Modal editor for deck metadata, voice list, selected voice prompt, and chat launch.
+// [Input] Deck/voice API types, capability-derived Agent type, visual metadata, and Chat handoff.
+// [Output] Modal editor for Deck Agent type, metadata, voice prompts, and unified Chat launch.
 // [Pos] deck-editor-modal ui in frontend/src/components
 // [Sync] 2026-07-08: replace light-only modal panels, form fields, and voice rows with semantic
 //                    theme tokens so the Deck editor stays readable in dark mode.
-import { useMemo } from 'react';
+// [Sync] 2026-08-14: add semantic Chat/Dream Agent radio options backed by the
+//                    server's optimistic binding revision; remove the duplicate Dream launch action.
+import { useEffect, useMemo, useState } from 'react';
 import type { Deck, Voice } from '../api/voiceApi';
+import type { DeckAgentType } from '../api/deckPluginApi';
 import { COLORS, iconMap } from './deckVisuals';
 import type { ActiveChatVoice } from '../lib/chat-schema';
 import DeckClaudePluginSelector from './DeckClaudePluginSelector';
@@ -18,12 +21,15 @@ interface Props {
   creatingVoiceId: string | null;
   onAddVoice: (deckId: string) => Promise<void>;
   onUpdateDeck: (deckId: string, data: Partial<Deck>) => Promise<void>;
+  onUpdateAgentType: (
+    deckId: string,
+    agentType: DeckAgentType,
+    expectedBindingRevision: number,
+  ) => Promise<number>;
   onUpdateVoice: (voiceId: string, data: Partial<Voice>) => Promise<void>;
   onToggleVoice: (voiceId: string, currentEnabled: boolean) => Promise<void>;
   onDeleteVoice: (voiceId: string) => Promise<void>;
   onChatWithDeck?: (deckId: string, voiceInfo: ActiveChatVoice) => void;
-  /** Opens Dream's canonical workbench with Deck selection as navigation intent only. */
-  onOpenDreamWithDeck?: (deckId: string) => void;
 }
 
 export default function DeckEditorModal({
@@ -35,17 +41,44 @@ export default function DeckEditorModal({
   creatingVoiceId,
   onAddVoice,
   onUpdateDeck,
+  onUpdateAgentType,
   onUpdateVoice,
   onToggleVoice,
   onDeleteVoice,
   onChatWithDeck,
-  onOpenDreamWithDeck,
 }: Props) {
   const voices = useMemo(() => deck.voices || [], [deck.voices]);
   const selectedVoice = useMemo(
     () => voices.find(v => v.id === selectedVoiceId) || null,
     [voices, selectedVoiceId]
   );
+  const [agentType, setAgentType] = useState<DeckAgentType>(deck.agent_type ?? 'chat');
+  const [agentTypeRevision, setAgentTypeRevision] = useState(deck.agent_type_revision ?? 0);
+  const [agentTypeSaving, setAgentTypeSaving] = useState(false);
+  const [agentTypeError, setAgentTypeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAgentType(deck.agent_type ?? 'chat');
+    setAgentTypeRevision(deck.agent_type_revision ?? 0);
+    setAgentTypeError(null);
+  }, [deck.agent_type, deck.agent_type_revision, deck.id]);
+
+  const handleAgentTypeChange = async (nextType: DeckAgentType) => {
+    if (isSystem || agentTypeSaving || nextType === agentType) return;
+    const previousType = agentType;
+    setAgentType(nextType);
+    setAgentTypeSaving(true);
+    setAgentTypeError(null);
+    try {
+      const revision = await onUpdateAgentType(deck.id, nextType, agentTypeRevision);
+      setAgentTypeRevision(revision);
+    } catch (error) {
+      setAgentType(previousType);
+      setAgentTypeError(error instanceof Error ? error.message : 'Agent 类型保存失败，请稍后重试。');
+    } finally {
+      setAgentTypeSaving(false);
+    }
+  };
 
   return (
     <div
@@ -252,6 +285,58 @@ export default function DeckEditorModal({
               />
             </div>
           </div>
+
+          <fieldset
+            disabled={isSystem || agentTypeSaving}
+            style={{
+              margin: 0,
+              border: '2px solid var(--color-border-neutral)',
+              borderRadius: 12,
+              padding: 16,
+              background: 'var(--color-bg-surface-solid)',
+              display: 'grid',
+              gap: 10,
+            }}
+          >
+            <legend style={{ padding: '0 0.4rem', fontSize: 13, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+              Agent 类型
+            </legend>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+              {([
+                ['chat', '普通 Chat Agent', '使用标准消息发送、流式回复与历史会话。'],
+                ['dream', 'Dream Agent', '在 Chat 中提交创作目标，并调用既有 Dream 工作流。'],
+              ] as const).map(([value, label, description]) => (
+                <label
+                  key={value}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    padding: '0.8rem',
+                    borderRadius: 10,
+                    border: `1px solid ${agentType === value ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`,
+                    background: agentType === value ? 'var(--color-bg-hover)' : 'var(--color-bg-paper)',
+                    cursor: isSystem || agentTypeSaving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name={`deck-agent-type-${deck.id}`}
+                    value={value}
+                    checked={agentType === value}
+                    onChange={() => void handleAgentTypeChange(value)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--color-text-primary)' }}>{label}</span>
+                    <span style={{ display: 'block', marginTop: 3, fontSize: 12, lineHeight: 1.5, color: 'var(--color-text-secondary)' }}>{description}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {agentTypeSaving ? <div role="status" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>正在保存 Agent 类型…</div> : null}
+            {agentTypeError ? <div role="alert" style={{ fontSize: 12, color: 'var(--color-state-error)' }}>{agentTypeError}</div> : null}
+          </fieldset>
 
           {/* Claude Code plugins: shared-installation references (digest-pinned). */}
           <DeckClaudePluginSelector deckId={deck.id} disabled={isSystem} />
@@ -552,24 +637,7 @@ export default function DeckEditorModal({
                             color: 'var(--color-text-on-action)'
                           }}
                         >
-                          Chat →
-                        </button>
-                      )}
-                      {onOpenDreamWithDeck && (
-                        <button
-                          onClick={() => onOpenDreamWithDeck(deck.id)}
-                          style={{
-                            padding: '8px 12px',
-                            background: 'var(--color-bg-paper)',
-                            border: '1px solid var(--color-border-neutral)',
-                            borderRadius: 6,
-                            cursor: 'pointer',
-                            fontSize: 12,
-                            color: 'var(--color-text-primary)'
-                          }}
-                          type="button"
-                        >
-                          打开 Dream
+                          在 Chat 中使用 →
                         </button>
                       )}
                     </div>

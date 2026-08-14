@@ -1,7 +1,7 @@
 // [Input] Server-ordered durable Dream re-entry rows and a user-entered query/page.
-// [Output] Pure lifecycle copy, canonical-title search, and bounded pagination for Dream re-entry.
+// [Output] Pure lifecycle/outcome copy, canonical-title search, and bounded pagination for Dream re-entry.
 // [Pos] Story Workspace Dream re-entry presentation policy; it never recomputes server status or order.
-// [Sync] 2026-08-13: extract searchable, per-group client pagination from the React surface.
+// [Sync] 2026-08-14: align visible outcome copy with Dream's initial/in-progress phases.
 
 import type { StoryWorkspaceDreamReentryItem } from '../../hooks/story-workspace';
 
@@ -14,10 +14,21 @@ const STORY_WORKSPACE_DREAM_REENTRY_COPY: Record<StoryWorkspaceDreamReentryItem[
   recent: '最近完成本轮输出',
 };
 
+const STORY_WORKSPACE_DREAM_OUTCOME_COPY: Record<StoryWorkspaceDreamReentryItem['outcome'], string> = {
+  initial: '初始状态',
+  in_progress: '进行中',
+};
+
 export function storyWorkspaceDreamReentryLifecycleCopy(
   lifecycle: StoryWorkspaceDreamReentryItem['lifecycle'],
 ): string {
   return STORY_WORKSPACE_DREAM_REENTRY_COPY[lifecycle];
+}
+
+export function storyWorkspaceDreamReentryOutcomeCopy(
+  outcome: StoryWorkspaceDreamReentryItem['outcome'],
+): string {
+  return STORY_WORKSPACE_DREAM_OUTCOME_COPY[outcome];
 }
 
 export function storyWorkspaceFilterDreamReentryRuns(
@@ -33,6 +44,7 @@ export function storyWorkspaceFilterDreamReentryRuns(
     run.deckPluginVersion,
     run.storyWorkspaceRunId,
     storyWorkspaceDreamReentryLifecycleCopy(run.lifecycle),
+    storyWorkspaceDreamReentryOutcomeCopy(run.outcome),
   ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery)));
 }
 

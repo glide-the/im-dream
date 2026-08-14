@@ -1,3 +1,8 @@
+// [Input] User locale and product-facing translation keys.
+// [Output] English and Simplified Chinese UI copy for Ink & Memory surfaces.
+// [Pos] Frontend i18next resource registry.
+// [Sync] 2026-08-14: add actor-owned publication and system-default sharing copy.
+
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
@@ -92,12 +97,14 @@ const resources = {
           install: 'Install',
           sync: 'Sync with Original',
           publish: 'Publish to Community',
+          publishUnavailable: 'System default · Cannot publish',
           unpublish: 'Unpublish',
           delete: 'Delete Deck'
         },
         sections: {
           myDecks: 'My Decks',
-          community: 'Community Decks ({{count}})'
+          community: 'Community Decks ({{count}})',
+          publishedByMe: 'My Published Decks ({{count}})'
         },
         labels: {
           system: 'System',
@@ -107,6 +114,8 @@ const resources = {
         },
         communityMeta: 'by {{author}} · {{voices}} voices · {{installs}} installs',
         communityEmpty: 'No published decks yet. Be the first to share!',
+        publishedByMeMeta: '{{voices}} voices · collected {{installs}} times',
+        publishedByMeEmpty: 'You have not published any Decks yet.',
         confirm: {
           delete: 'Delete this deck and all its voices?',
           sync: 'Sync with original template? This will overwrite any changes you made to this deck.'
@@ -121,7 +130,8 @@ const resources = {
         messages: {
           publishSuccess: '✅ Deck published to community!',
           unpublishSuccess: '✅ Deck unpublished',
-          installSuccess: '✅ Deck installed to your collection!'
+          installSuccess: '✅ Deck installed to your collection!',
+          defaultDeckPublishForbidden: 'System-initialized Decks cannot be published.'
         }
       },
       timeline: {
@@ -212,6 +222,7 @@ const resources = {
           loading: 'Loading…',
           loadingAgents: 'Loading Agents…',
           loadFailed: 'Failed to load Decks.',
+          routeUnavailable: 'This Deck no longer exists, is disabled, or you do not have access.',
           selectAria: 'Select one Deck for this conversation',
           selectTitle: 'Optionally load a Deck and its configured plugin for this conversation.',
           selectAgentAria: 'Select an Agent for this conversation',
@@ -319,7 +330,17 @@ const resources = {
         tabs: {
           switcherAria: 'Chat workspace switcher',
           history: 'Chat history',
-          connector: 'Resource connectors'
+          activeDreams: 'Dreams ({{count}})'
+        },
+        dream: {
+          selectAgent: 'Select an Agent in this Dream Deck first.',
+          attachmentsUnsupported: 'Start the Dream with a text goal; attachments are not supported by the current launch contract.',
+          launchFailed: 'Dream could not be started.',
+          refresh: 'Refresh',
+          listFailed: 'Dreams could not be loaded. Try again.',
+          empty: 'No Dreams are available to resume.',
+          listAria: 'Resumable Dreams',
+          open: 'Continue'
         },
         filters: {
           filterAll: 'Filter: All',
@@ -580,7 +601,7 @@ const resources = {
         },
         shellError: {
           history: 'Chat history',
-          connector: 'Connectors'
+          dreams: 'Active Dreams'
         },
         skeleton: {
           loading: 'Loading'
@@ -685,12 +706,14 @@ const resources = {
             install: '安装',
             sync: '与原版同步',
             publish: '发布到社区',
+            publishUnavailable: '系统默认 · 不可发布',
             unpublish: '取消发布',
             delete: '删除卡组'
           },
         sections: {
           myDecks: '我的卡组',
-          community: '社区卡组（{{count}}）'
+          community: '社区卡组（{{count}}）',
+          publishedByMe: '我发布的卡组（{{count}}）'
         },
         labels: {
           system: '系统',
@@ -700,6 +723,8 @@ const resources = {
         },
         communityMeta: '由 {{author}} 创作 · {{voices}} 条声线 · {{installs}} 次安装',
         communityEmpty: '尚无公开卡组，来做第一位分享的人吧！',
+        publishedByMeMeta: '{{voices}} 条声线 · 被收藏 {{installs}} 次',
+        publishedByMeEmpty: '你还没有发布任何卡组。',
         confirm: {
           delete: '确定删除这个卡组以及所有声线？',
           sync: '与原模板同步？这会覆盖你在卡组里的修改。'
@@ -714,7 +739,8 @@ const resources = {
         messages: {
           publishSuccess: '✅ 已发布到社区！',
           unpublishSuccess: '✅ 已取消发布',
-          installSuccess: '✅ 已安装到你的卡组'
+          installSuccess: '✅ 已安装到你的卡组',
+          defaultDeckPublishForbidden: '系统默认初始化的 Deck 不能发布。'
         }
       },
       timeline: {
@@ -805,6 +831,7 @@ const resources = {
           loading: '加载中…',
           loadingAgents: '正在读取 Agent…',
           loadFailed: 'Deck 加载失败。',
+          routeUnavailable: '该 Deck 不存在、已停用，或你没有访问权限。',
           selectAria: '为本次对话单选一个 Deck',
           selectTitle: '可选加载一个 Deck 及其已配置插件。',
           selectAgentAria: '为本次对话选择一个 Agent',
@@ -911,7 +938,17 @@ const resources = {
         tabs: {
           switcherAria: 'Chat 工作区切换',
           history: '聊天历史',
-          connector: '资源连接器'
+          activeDreams: 'Dream（{{count}}）'
+        },
+        dream: {
+          selectAgent: '请先在 Dream Deck 中选择一个 Agent。',
+          attachmentsUnsupported: '请先用文字目标发起 Dream；当前启动合同不接受附件。',
+          launchFailed: 'Dream 发起失败。',
+          refresh: '刷新',
+          listFailed: 'Dream 列表加载失败，请重试。',
+          empty: '当前没有可恢复的 Dream。',
+          listAria: '可恢复的 Dream',
+          open: '继续查看'
         },
         filters: {
           filterAll: '筛选：全部',
@@ -1170,7 +1207,7 @@ const resources = {
         },
         shellError: {
           history: '历史对话',
-          connector: '连接器'
+          dreams: '进行中的 Dream'
         },
         skeleton: {
           loading: '加载中'

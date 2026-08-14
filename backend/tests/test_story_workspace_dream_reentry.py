@@ -1,4 +1,4 @@
-"""Durable, actor-scoped Dream re-entry projection tests."""
+"""Durable, actor-scoped initial/in-progress Dream re-entry projection tests."""
 
 from __future__ import annotations
 
@@ -83,7 +83,8 @@ def _create_schema(db: sqlite3.Connection) -> None:
           source_voice_thread_id TEXT,
           source_message_id TEXT,
           created_by TEXT,
-          created_at TEXT
+          created_at TEXT,
+          status TEXT
         );
         CREATE TABLE deck_plugin_releases (
           deck_plugin_id TEXT,
@@ -214,6 +215,7 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         dream_release: bool = True,
         real_launch_metadata: bool = False,
         agent_id: str | None = None,
+        status: str = "running",
     ) -> str:
         value = run_id(number)
         thread = f"thread-{number}"
@@ -238,11 +240,11 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             (binding, deck, workspace, actor, plugin, "1.0.0", 1),
         )
         self.db.execute(
-            "INSERT INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 value, workspace, plugin, "1.0.0", workflow_definition_ref,
                 snapshot, manifest, binding, 1, lock, preflight,
-                thread, source, actor, created_at,
+                thread, source, actor, created_at, status,
             ),
         )
         self.db.execute(
@@ -374,7 +376,7 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         self.live_threads.add("thread-2")
         waiting = self._add_run(3, complete=True, updated_at="2026-08-05T12:00:00+00:00")
         confirmed = self._add_run(4, complete=True, confirmation="accepted", updated_at="2026-08-05T11:00:00+00:00")
-        recent = self._add_run(5, complete=True, confirmation="dispatched", updated_at="2026-08-05T15:00:00+00:00")
+        recent = self._add_run(5, complete=True, confirmation="dispatched", updated_at="2026-08-05T15:00:00+00:00", status="completed")
 
         response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
 
@@ -390,7 +392,19 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             [item.group for item in response.runs],
             ["in_progress", "in_progress", "in_progress", "in_progress", "recent"],
         )
+        self.assertEqual(
+            [item.outcome for item in response.runs],
+            ["initial", "initial", "initial", "in_progress", "in_progress"],
+        )
         self.assertTrue(all(item.sort_key for item in response.runs))
+
+    def test_workflow_failure_does_not_invent_a_dream_failure_state(self) -> None:
+        failed = self._add_run(30, complete=False, status="failed")
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(response.runs[0].story_workspace_run_id, failed)
+        self.assertEqual(response.runs[0].outcome, "initial")
 
     def test_projects_the_creation_goal_prefix_as_the_run_title(self) -> None:
         goal = "创作一个雨夜车站重逢的短篇故事，人物关系克制，结尾保留悬念。" * 3
@@ -732,6 +746,7 @@ class StoryWorkspaceDreamReentryRouteTest(unittest.TestCase):
                         workflow_display_name="Dream",
                         deck_plugin_version="1.0.0",
                         lifecycle=StoryWorkspaceDreamRunLifecycle.GENERATING,
+                        outcome="initial",
                         group="in_progress",
                         stage_revisions={},
                         confirmation_accepted=False,

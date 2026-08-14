@@ -1,4 +1,4 @@
-"""Deck Plugin manifest and release data models."""
+"""Deck Plugin manifest, release, binding, and product Agent-type models."""
 
 from __future__ import annotations
 
@@ -289,6 +289,13 @@ class DeckPluginBindingStatus(str, Enum):
     STALE = "stale"
 
 
+class DeckAgentType(str, Enum):
+    """Product interaction selected for a Deck; display copy stays client-owned."""
+
+    CHAT = "chat"
+    DREAM = "dream"
+
+
 class BindingApplyTo(str, Enum):
     NEXT_RUN = "next_run"
 
@@ -397,11 +404,20 @@ class DeckPluginBindingState(_StrictModel):
 
     @model_validator(mode="after")
     def revision_matches_binding(self) -> "DeckPluginBindingState":
-        if self.binding is None and self.binding_revision != 0:
-            raise ValueError("an empty binding state must have revision zero")
         if self.binding is not None and self.binding.binding_revision != self.binding_revision:
             raise ValueError("binding state revision must match the current binding")
         return self
+
+
+class DeckAgentTypeUpdateRequest(_StrictModel):
+    agent_type: DeckAgentType
+    expected_binding_revision: int = Field(ge=0)
+
+
+class DeckAgentTypeResponse(_StrictModel):
+    deck_id: str = Field(min_length=1)
+    agent_type: DeckAgentType
+    binding_revision: int = Field(ge=0)
 
 
 class DeckPluginOption(_StrictModel):

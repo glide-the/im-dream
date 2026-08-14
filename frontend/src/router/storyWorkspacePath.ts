@@ -10,6 +10,8 @@
 //                    path segments literally outside `:param` slots; canonical
 //                    builders stay byte-identical with the surface-link deep
 //                    links (Task 4 handoff note).
+// [Sync] 2026-08-14: parse stable Deck/Agent Chat intent; neither parameter
+//                    declares or authorizes Dream mode.
 
 export type StoryWorkspaceStaticRoute =
   | 'dream'
@@ -263,6 +265,12 @@ export function readStoryWorkspaceRunParam(query: URLSearchParams): string | nul
 export function readStoryWorkspaceDeckParam(query: URLSearchParams): string | null {
   const deck = query.get('deck');
   return deck && deck.trim() ? deck : null;
+}
+
+/** Optional Agent preselection stays subordinate to the server-resolved Deck. */
+export function readStoryWorkspaceAgentParam(query: URLSearchParams): string | null {
+  const agent = query.get('agent');
+  return agent && agent.trim() ? agent : null;
 }
 
 /** Run-bound asset routes reuse the Dream file surface at the matching stage. */

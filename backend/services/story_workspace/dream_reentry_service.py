@@ -1,8 +1,9 @@
 # [Input] Actor-owned Dream Run provenance, canonical Story projection, launch
 #         goal, Dream stage files, and live shared-thread status.
-# [Output] Ordered re-entry rows whose display title prefers the canonical
-#          Project title and falls back to the launch-goal prefix.
+# [Output] Ordered re-entry rows with canonical titles and Dream's two-state
+#          initial/in-progress projection derived from confirmation facts.
 # [Pos] Story Workspace Dream list query; it does not author Project titles.
+# [Sync] 2026-08-14: align re-entry outcome with Dream's initial/in-progress lifecycle.
 
 """Actor-scoped durable projection for the Dream workbench re-entry list."""
 
@@ -302,6 +303,14 @@ class StoryWorkspaceDreamReentryService:
         )
         created_at = self._parse_datetime(row["run_created_at"])
         group = "recent" if lifecycle is StoryWorkspaceDreamRunLifecycle.RECENT else "in_progress"
+        outcome = (
+            "initial"
+            if lifecycle in {
+                StoryWorkspaceDreamRunLifecycle.GENERATING,
+                StoryWorkspaceDreamRunLifecycle.WAITING_CONFIRMATION,
+            }
+            else "in_progress"
+        )
         deck_display_name = str(row["deck_name"] or deck_id)
         goal_prefix = self._source_goal_prefix(
             row["source_metadata"],
@@ -318,6 +327,7 @@ class StoryWorkspaceDreamReentryService:
             deck_display_name=deck_display_name,
             deck_plugin_version=str(row["deck_plugin_version"]),
             lifecycle=lifecycle,
+            outcome=outcome,
             group=group,
             stage_revisions=stage_revisions,
             confirmation_accepted=confirmation_accepted,

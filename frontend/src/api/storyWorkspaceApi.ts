@@ -1,6 +1,7 @@
 // [Input] Story Workspace workflow REST/SSE contracts and the current auth token.
 // [Output] Typed, authenticated API helpers, including canonical-first Dream display titles.
 // [Pos] Story Workspace workflow API client; it never derives authoritative workflow state locally.
+// [Sync] 2026-08-14: validate Dream's server-owned initial/in-progress outcome projection.
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
 import type {
@@ -325,6 +326,7 @@ function storyWorkspaceReadDreamRunBoolean(value: unknown, field: string): boole
 
 function storyWorkspaceValidateDreamRunLifecycle(
   lifecycle: StoryWorkspaceDreamReentryItem['lifecycle'],
+  outcome: StoryWorkspaceDreamReentryItem['outcome'],
   group: StoryWorkspaceDreamReentryItem['group'],
   confirmationAccepted: boolean,
   confirmationDispatched: boolean,
@@ -344,6 +346,12 @@ function storyWorkspaceValidateDreamRunLifecycle(
   if (lifecycle === 'recent' && !confirmationDispatched) {
     throw new Error('Dream re-entry response has incompatible recent facts.');
   }
+  const expectedOutcome = lifecycle === 'generating' || lifecycle === 'waiting_confirmation'
+    ? 'initial'
+    : 'in_progress';
+  if (outcome !== expectedOutcome) {
+    throw new Error('Dream re-entry response has incompatible outcome.');
+  }
 }
 
 /** Parse the server-owned collection without deriving client-side run status or order. */
@@ -353,12 +361,16 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
   const runs = payload.runs.map((candidate) => {
     const run = storyWorkspaceReadDreamRunRecord(candidate, 'run');
     const lifecycle = storyWorkspaceReadDreamRunString(run.lifecycle, 'lifecycle');
+    const outcome = storyWorkspaceReadDreamRunString(run.outcome, 'outcome');
     const group = storyWorkspaceReadDreamRunString(run.group, 'group');
     if (!['generating', 'waiting_confirmation', 'running', 'recent'].includes(lifecycle)) {
       throw new Error('Dream re-entry response has invalid lifecycle.');
     }
     if (group !== 'in_progress' && group !== 'recent') {
       throw new Error('Dream re-entry response has invalid group.');
+    }
+    if (!['initial', 'in_progress'].includes(outcome)) {
+      throw new Error('Dream re-entry response has invalid outcome.');
     }
     const storyWorkspaceRunId = storyWorkspaceReadDreamRunString(
       run.storyWorkspaceRunId,
@@ -390,6 +402,7 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
     );
     storyWorkspaceValidateDreamRunLifecycle(
       lifecycle as StoryWorkspaceDreamReentryItem['lifecycle'],
+      outcome as StoryWorkspaceDreamReentryItem['outcome'],
       group as StoryWorkspaceDreamReentryItem['group'],
       confirmationAccepted,
       confirmationDispatched,
@@ -425,6 +438,7 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
         255,
       ),
       lifecycle: lifecycle as StoryWorkspaceDreamReentryItem['lifecycle'],
+      outcome: outcome as StoryWorkspaceDreamReentryItem['outcome'],
       group: group as StoryWorkspaceDreamReentryItem['group'],
       stageRevisions: stageRevisions as StoryWorkspaceDreamReentryItem['stageRevisions'],
       confirmationAccepted,

@@ -2,7 +2,7 @@
 # [Output] Strict persistence and wire DTOs, including separate Project and
 #          Episode presentation contracts.
 # [Pos] Pure domain contract module; no runtime, database, or transport owner.
-# [Sync] 2026-08-14: add optional complete asset content beside compact Dream summaries.
+# [Sync] 2026-08-14: constrain Dream re-entry to initial/in-progress outcome states.
 
 """Canonical contracts for the Story Workspace domain.
 
@@ -1743,6 +1743,7 @@ class StoryWorkspaceDreamReentryItem(_StoryWorkspaceDreamWireModel):
     workflow_display_name: Literal["Dream"] = "Dream"
     deck_plugin_version: str = Field(min_length=1, max_length=255)
     lifecycle: StoryWorkspaceDreamRunLifecycle
+    outcome: Literal["initial", "in_progress"]
     group: Literal["in_progress", "recent"]
     stage_revisions: dict[StoryWorkspaceDreamStage, _StoryWorkspaceDreamNonNegativeInt]
     confirmation_accepted: bool
@@ -1768,6 +1769,13 @@ class StoryWorkspaceDreamReentryItem(_StoryWorkspaceDreamWireModel):
                 raise ValueError("recent requires dispatched confirmation")
         elif self.group != "in_progress":
             raise ValueError("non-recent lifecycle must be in_progress")
+        pre_confirmation = self.lifecycle in {
+            StoryWorkspaceDreamRunLifecycle.GENERATING,
+            StoryWorkspaceDreamRunLifecycle.WAITING_CONFIRMATION,
+        }
+        expected_outcome = "initial" if pre_confirmation else "in_progress"
+        if self.outcome != expected_outcome:
+            raise ValueError("Dream outcome must match confirmation lifecycle")
         return self
 
 

@@ -1,4 +1,4 @@
-"""Persistence and atomic optimistic locking for next-run Deck bindings."""
+"""Persistence, reversible deactivation, and optimistic locking for Deck bindings."""
 
 from __future__ import annotations
 
@@ -123,7 +123,10 @@ class BindingService:
         )
         row = self._current_row(deck_id)
         if row is None:
-            return DeckPluginBindingState(deck_id=deck_id, binding_revision=0)
+            return DeckPluginBindingState(
+                deck_id=deck_id,
+                binding_revision=self.latest_revision(deck_id),
+            )
         validation = await self._selection_validator.validate(
             deck_plugin_id=row["deck_plugin_id"],
             deck_plugin_version=row["deck_plugin_version"],
@@ -155,7 +158,7 @@ class BindingService:
                 requested_workspace_id=requested_workspace_id,
             )
             current = self._current_row(deck_id)
-            current_revision = int(current["binding_revision"]) if current else 0
+            current_revision = self.latest_revision(deck_id)
             if request.expected_binding_revision != current_revision:
                 raise BindingRevisionConflict(current_revision)
 
@@ -216,6 +219,51 @@ class BindingService:
             self.db.rollback()
             raise
 
+    def clear(
+        self,
+        *,
+        deck_id: str,
+        actor_id: str,
+        expected_binding_revision: int,
+        requested_workspace_id: str | None = None,
+    ) -> DeckPluginBindingState:
+        """Deactivate the workflow binding while preserving its audit history."""
+
+        if self.db.in_transaction:
+            raise RuntimeError("binding clear requires a clean transaction boundary")
+        self.db.execute("BEGIN")
+        try:
+            self.resolve_workspace_access(
+                deck_id=deck_id,
+                actor_id=actor_id,
+                requested_workspace_id=requested_workspace_id,
+            )
+            current = self._current_row(deck_id)
+            current_revision = self.latest_revision(deck_id)
+            if expected_binding_revision != current_revision:
+                raise BindingRevisionConflict(current_revision)
+            if current is not None:
+                cursor = self.db.execute(
+                    """
+                    UPDATE deck_plugin_bindings
+                    SET status = 'stale', updated_at = CURRENT_TIMESTAMP
+                    WHERE deck_plugin_binding_id = %s
+                      AND status = 'active'
+                      AND binding_revision = %s
+                    """,
+                    (current["deck_plugin_binding_id"], current["binding_revision"]),
+                )
+                if cursor.rowcount != 1:
+                    raise BindingRevisionConflict(self.latest_revision(deck_id))
+            self.db.commit()
+            return DeckPluginBindingState(
+                deck_id=deck_id,
+                binding_revision=current_revision,
+            )
+        except Exception:
+            self.db.rollback()
+            raise
+
     def _current_row(self, deck_id: str) -> Any | None:
         return self.db.execute(
             """
@@ -228,6 +276,14 @@ class BindingService:
     def _current_revision(self, deck_id: str) -> int:
         row = self._current_row(deck_id)
         return int(row["binding_revision"]) if row else 0
+
+    def latest_revision(self, deck_id: str) -> int:
+        row = self.db.execute(
+            "SELECT MAX(binding_revision) AS binding_revision "
+            "FROM deck_plugin_bindings WHERE deck_id = %s",
+            (deck_id,),
+        ).fetchone()
+        return int(row["binding_revision"] or 0) if row is not None else 0
 
     @staticmethod
     def _model(row: Any) -> DeckPluginBinding:

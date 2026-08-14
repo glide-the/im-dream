@@ -26,9 +26,15 @@
 # [Sync] 2026-08-14: make screenplay roles the active Deck default, retire
 #                    untouched legacy forks from business reads, and atomically
 #                    persist verified default plugin refs for new Decks.
+# [Sync] 2026-08-14: decorate Deck sharing eligibility, exclude self-owned community
+#                    results, and enforce publish/fork policy before writes.
 # [Sync] 2026-08-14: repair only untouched screenplay defaults with zero plugin
 #                    refs while preserving every explicit user selection.
 # [Sync] 2026-08-14: keep PostgreSQL community Deck aggregation valid by grouping author display names.
+# [Sync] 2026-08-14: include the configured active system-default Deck in the
+#                    collectable community projection without reviving retired defaults.
+# [Sync] 2026-08-14: decorate Deck list/detail reads with capability-derived
+#                    Chat/Dream Agent type and optimistic binding revision.
 """
 PostgreSQL runtime persistence helpers for Ink & Memory.
 
@@ -486,23 +492,35 @@ def get_user_decks(user_id: int):
     db = get_db()
     try:
         rows = db.execute(f"""
-        SELECT d.*, COUNT(v.id) as voice_count
+        SELECT d.*,
+               COUNT(v.id) FILTER (WHERE v.enabled IS TRUE) as voice_count,
+               COUNT(v.id) as total_voice_count
         FROM decks d
-        LEFT JOIN voices v ON d.id = v.deck_id AND v.enabled IS TRUE
+        LEFT JOIN voices v ON d.id = v.deck_id
         WHERE d.owner_id = %s
         {visibility_sql}
         GROUP BY d.id
         ORDER BY d.order_index, d.created_at
         """, (user_id, *visibility_params)).fetchall()
-        return [dict(row) for row in rows]
+        decks = [dict(row) for row in rows]
+        from services.deck.agent_type import decorate_decks_with_agent_type
+        from services.deck.sharing import decorate_decks_with_sharing_policy
+        decorate_decks_with_agent_type(db, decks)
+        decorate_decks_with_sharing_policy(decks)
+        return decks
     finally:
         db.close()
 
-def get_published_decks():
+def get_published_decks(exclude_owner_id: Optional[int] = None):
     """
-    Get all published decks (community deck store).
+    Get collectable Decks for the community store.
+
+    The projection includes the configured active system default plus Decks
+    published by other actors. Retired system defaults remain excluded.
     Returns list of deck dicts with voice counts and author info.
     """
+    import config
+
     db = get_db()
     try:
         rows = db.execute("""
@@ -510,11 +528,21 @@ def get_published_decks():
         FROM decks d
         LEFT JOIN voices v ON d.id = v.deck_id AND v.enabled IS TRUE
         LEFT JOIN users u ON d.owner_id = u.id
-        WHERE d.published IS TRUE
+        WHERE ((d.is_system IS TRUE AND d.id = %s) OR d.published IS TRUE)
+          AND (%s IS NULL OR d.owner_id IS NULL OR d.owner_id <> %s)
         GROUP BY d.id, u.display_name
         ORDER BY d.install_count DESC, d.created_at DESC
-        """).fetchall()
-        return [dict(row) for row in rows]
+        """, (
+            config.DEFAULT_SYSTEM_DECK_ID,
+            exclude_owner_id,
+            exclude_owner_id,
+        )).fetchall()
+        decks = [dict(row) for row in rows]
+        from services.deck.agent_type import decorate_decks_with_agent_type
+        from services.deck.sharing import decorate_decks_with_sharing_policy
+        decorate_decks_with_agent_type(db, decks)
+        decorate_decks_with_sharing_policy(decks)
+        return decks
     finally:
         db.close()
 
@@ -525,6 +553,21 @@ def publish_deck(deck_id: str, user_id: int):
     """
     db = get_db()
     try:
+        deck_row = db.execute(
+            "SELECT * FROM decks WHERE id = %s AND owner_id = %s FOR UPDATE",
+            (deck_id, user_id),
+        ).fetchone()
+        if deck_row is None:
+            raise ValueError("Deck not found or not owned by user")
+        deck = dict(deck_row)
+        voice_rows = db.execute(
+            "SELECT * FROM voices WHERE deck_id = %s ORDER BY order_index, created_at",
+            (deck_id,),
+        ).fetchall()
+        deck["voices"] = [dict(row) for row in voice_rows]
+        from services.deck.sharing import require_publishable
+        require_publishable(deck)
+
         # Get user's display name for author_name
         user = db.execute("SELECT display_name FROM users WHERE id = %s", (user_id,)).fetchone()
         author_name = user['display_name'] if user and user['display_name'] else f"User {user_id}"
@@ -601,6 +644,9 @@ def get_deck_with_voices(user_id: int, deck_id: str):
             return None
 
         deck = dict(deck_row)
+        from services.deck.agent_type import decorate_decks_with_agent_type
+        from services.deck.sharing import decorate_decks_with_sharing_policy
+        decorate_decks_with_agent_type(db, [deck])
 
         # Get voices in this deck
         voice_rows = db.execute("""
@@ -610,6 +656,7 @@ def get_deck_with_voices(user_id: int, deck_id: str):
         """, (deck_id,)).fetchall()
 
         deck['voices'] = [_parse_voice_row(dict(row)) for row in voice_rows]
+        decorate_decks_with_sharing_policy([deck])
         return deck
     finally:
         db.close()
@@ -988,6 +1035,8 @@ def fork_deck(
         source_deck = db.execute("SELECT * FROM decks WHERE id = %s", (deck_id,)).fetchone()
         if not source_deck:
             raise ValueError(f"Deck {deck_id} not found")
+        from services.deck.sharing import require_collectable
+        require_collectable(dict(source_deck), user_id)
 
         # Create new deck ID
         new_deck_id = str(uuid.uuid4())

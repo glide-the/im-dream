@@ -518,13 +518,14 @@ class BindingRouterTests(unittest.TestCase):
         self.client.close()
         self.fixture.close()
 
-    def test_four_authenticated_endpoints_and_frozen_success_shapes(self) -> None:
+    def test_authenticated_endpoints_and_frozen_success_shapes(self) -> None:
         methods: dict[str, set[str]] = {}
         for route in binding_router.router.routes:
             methods.setdefault(route.path, set()).update(route.methods)
         self.assertEqual(
             methods,
             {
+                "/api/voice-decks/{deck_id}/agent-type": {"PUT"},
                 "/api/voice-decks/{deck_id}/plugin-options": {"GET"},
                 "/api/voice-decks/{deck_id}/plugin-binding": {"GET", "PUT"},
                 "/api/voice-decks/{deck_id}/plugin-binding/validate": {"POST"},
@@ -540,6 +541,19 @@ class BindingRouterTests(unittest.TestCase):
                 "binding_revision": 0,
                 "applied_to": "next_run",
                 "binding": None,
+            },
+        )
+        chat_type = self.client.put(
+            f"/api/voice-decks/{DECK_ID}/agent-type",
+            json={"agent_type": "chat", "expected_binding_revision": 0},
+        )
+        self.assertEqual(chat_type.status_code, 200, chat_type.text)
+        self.assertEqual(
+            chat_type.json(),
+            {
+                "deck_id": DECK_ID,
+                "agent_type": "chat",
+                "binding_revision": 0,
             },
         )
         options = self.client.get(f"/api/voice-decks/{DECK_ID}/plugin-options")

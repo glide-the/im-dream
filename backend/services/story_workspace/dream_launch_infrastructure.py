@@ -1,8 +1,9 @@
 """Production persistence and runtime adapters for Dream launch.
 
-The browser supplies only a Deck, goal, and idempotency key.  This module owns
-all persisted source facts, server-selected plugin provisioning, workflow
-creation, and the durable first-turn dispatch envelope.
+The browser supplies only a Deck, goal, and idempotency key. This module owns
+all persisted source facts, requires an explicit server-side Dream binding,
+refreshes its runtime evidence, creates the workflow, and dispatches the
+durable first-turn envelope.
 """
 
 from __future__ import annotations
@@ -408,6 +409,7 @@ class DreamRuntimeProvisioningService:
         deck_id: str,
         actor_id: str,
         workspace_id: str,
+        expected_binding_revision: int | None = None,
     ) -> DreamLaunchBinding:
         self._require_scope(deck_id, actor_id, workspace_id)
         seed_builtin_deck_plugin(self.db)
@@ -419,7 +421,47 @@ class DreamRuntimeProvisioningService:
             deck_id=deck_id,
             actor_id=actor_id,
             workspace_id=workspace_id,
+            expected_binding_revision=expected_binding_revision,
         )
+
+    async def require_binding(
+        self,
+        *,
+        deck_id: str,
+        actor_id: str,
+        workspace_id: str,
+    ) -> DreamLaunchBinding:
+        """Require an explicit Dream selection, then refresh runtime evidence."""
+
+        self._require_scope(deck_id, actor_id, workspace_id)
+        current = self._active_binding_row(deck_id)
+        binding = self._expected_builtin_binding(
+            current,
+            actor_id=actor_id,
+            workspace_id=workspace_id,
+        )
+        if binding is None:
+            raise DreamLaunchApplicationError("WORKFLOW_SELECTION_REQUIRED", 409)
+        seed_builtin_deck_plugin(self.db)
+        runtime_lock = self._runtime_lock()
+        installation = self._ensure_claude_installation(runtime_lock)
+        self._ensure_materialization(runtime_lock, installation)
+        await self._ensure_deck_installation(runtime_lock, workspace_id)
+        validation = await SelectionValidationService(
+            self.db,
+            runtime_context_resolver=make_runtime_context_resolver(self.db),
+        ).validate(
+            deck_plugin_id=binding.deck_plugin_id,
+            deck_plugin_version=binding.deck_plugin_version,
+            workspace_id=workspace_id,
+            actor_id=actor_id,
+        )
+        if not validation.selectable:
+            raise DreamLaunchApplicationError(
+                validation.reason_code or "DECK_PLUGIN_UNAVAILABLE",
+                409,
+            )
+        return binding
 
     def ensure_frozen_runtime_evidence(self, runtime_plugin_lock_id: str) -> None:
         """Re-provision immutable launch evidence for an idempotent queued replay."""
@@ -684,6 +726,7 @@ class DreamRuntimeProvisioningService:
         deck_id: str,
         actor_id: str,
         workspace_id: str,
+        expected_binding_revision: int | None = None,
     ) -> DreamLaunchBinding:
         validator = SelectionValidationService(
             self.db,
@@ -704,8 +747,14 @@ class DreamRuntimeProvisioningService:
             if existing is not None:
                 return existing
             revision = (
-                int(current["binding_revision"]) if current is not None else 0
+                int(current["binding_revision"])
+                if current is not None
+                else self._latest_binding_revision(deck_id)
             )
+            if expected_binding_revision is not None and revision != expected_binding_revision:
+                raise BindingRevisionConflict(revision)
+            if self.db.in_transaction:
+                self.db.rollback()
             service = BindingService(self.db, selection_validator=validator)
             try:
                 response = await service.save(
@@ -720,6 +769,8 @@ class DreamRuntimeProvisioningService:
                     ),
                 )
             except BindingRevisionConflict as exc:
+                if expected_binding_revision is not None:
+                    raise
                 winner_row = self._active_binding_row(deck_id)
                 if self.db.in_transaction:
                     self.db.rollback()
@@ -742,6 +793,14 @@ class DreamRuntimeProvisioningService:
                 binding_revision=response.binding_revision,
             )
         raise DreamLaunchApplicationError("DECK_BINDING_CONFLICT", 409)
+
+    def _latest_binding_revision(self, deck_id: str) -> int:
+        row = self.db.execute(
+            "SELECT MAX(binding_revision) AS binding_revision "
+            "FROM deck_plugin_bindings WHERE deck_id = %s",
+            (deck_id,),
+        ).fetchone()
+        return int(row["binding_revision"] or 0) if row is not None else 0
 
     def _active_binding_row(self, deck_id: str) -> Any | None:
         return self.db.execute(
@@ -1315,7 +1374,7 @@ class DreamLaunchWorkflowOperationsAdapter:
                 deck_plugin_binding_id=existing_run["deck_plugin_binding_id"],
                 binding_revision=int(existing_run["binding_revision"]),
             )
-        return await self._provisioner.ensure_binding(
+        return await self._provisioner.require_binding(
             deck_id=command.deck_id,
             actor_id=actor_id,
             workspace_id=workspace_id,

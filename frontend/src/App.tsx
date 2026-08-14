@@ -7,6 +7,8 @@
 // [Sync] 2026-05-29: keep ChatView mounted after first open so chat state survives app view switches.
 // [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
 // [Sync] 2026-06-14: replace 2s MCP write blind wait with Edit Session SSE event sync plus timeout fallback.
+// [Sync] 2026-08-14: route Deck selection to canonical Story Workspace Chat
+//                    with stable Deck/Agent intent; mode is re-read from the server.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
 // [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect inserts widget, stays in writing view; handleChatSend uses chatWithVoice with full context (allText, metaPrompt, statePrompt); "Chat →" button available when thread exists.
 // [Sync] 2026-06-01: pass state as editorState to chatWithVoiceSSE in handleChatSend so inline widget agent receives editor_state.
@@ -178,7 +180,7 @@ export default function App() {
     resolveStoryWorkspacePath(window.location.pathname)?.route === 'writing' ? 'writing' : null
   ));
   const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
-  const [chatLandingTab, setChatLandingTab] = useState<'history' | 'connector'>('history');
+  const [chatLandingTab, setChatLandingTab] = useState<'history' | 'dreams'>('history');
   const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
   const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
@@ -208,7 +210,7 @@ export default function App() {
     setCurrentView('story-workspace');
     setShowNotionConnectorDetail(false);
     setConnectorSettingsFocusNonce((value) => value + 1);
-    setChatLandingTab('connector');
+    setChatLandingTab('history');
   }, []);
 
   const openNotionConnectorDetail = useCallback(() => {
@@ -254,12 +256,6 @@ export default function App() {
     }
     setCurrentView(view);
   }, [openConnectorSettings]);
-
-  const handleOpenDreamWithDeck = useCallback((deckId: string) => {
-    const href = `/story-workspace/dream?deck=${encodeURIComponent(deckId)}`;
-    window.history.pushState({ inkDreamView: 'story-workspace' }, '', href);
-    setCurrentView('story-workspace');
-  }, []);
 
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
@@ -1106,12 +1102,20 @@ export default function App() {
     setActiveChatVoice(undefined);
   }, []);
 
-  // @@@ Deck editor "Chat →": preselect the selected Agent and its parent Deck.
+  // @@@ Every Deck starts in canonical Story Workspace Chat. The URL carries
+  // only stable selection intent; Chat reloads the Deck's server-derived type.
   const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice) => {
     setRequestedChatThreadId(undefined);
     setRequestedChatDeck({ deckId, agentId: voiceInfo?.id, nonce: Date.now() });
     setActiveChatVoice(voiceInfo);
-    setCurrentView('chat');
+    const query = new URLSearchParams({ deck: deckId });
+    if (voiceInfo?.id) query.set('agent', voiceInfo.id);
+    window.history.pushState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      `${STORY_WORKSPACE_PATHS.chat}?${query.toString()}`,
+    );
+    setCurrentView('story-workspace');
     setHasOpenedChatView(true);
   }, []);
 
@@ -1132,7 +1136,6 @@ export default function App() {
     <DeckManager
       onUpdate={handleDeckManagerUpdate}
       onChatWithDeck={handleChatWithDeck}
-      onOpenDreamWithDeck={handleOpenDreamWithDeck}
     />
   );
 
@@ -1592,7 +1595,6 @@ export default function App() {
                     activeVoice={activeChatVoice}
                     isMobile={isMobile}
                     landingTab={chatLandingTab}
-                    onOpenConnectorSettings={openConnectorSettings}
                   />
                 </div>
               ),
@@ -2374,7 +2376,6 @@ export default function App() {
             activeVoice={activeChatVoice}
             isMobile={isMobile}
             landingTab={chatLandingTab}
-            onOpenConnectorSettings={openConnectorSettings}
           />
         </div>
       )}

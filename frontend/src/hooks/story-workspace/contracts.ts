@@ -1,7 +1,7 @@
 // [Input] Actor-scoped Story Workspace REST response values.
 // [Output] Shared strict frontend DTOs with separate Project and Episode titles.
 // [Pos] Story Workspace browser contract declarations; no transport or reducer state.
-// [Sync] 2026-08-14: carry optional Hook-published complete asset content.
+// [Sync] 2026-08-14: constrain Dream re-entry to its initial/in-progress outcome states.
 
 export type StoryWorkspaceReviewStatus = 'pending' | 'confirmed' | 'rejected' | 'archived';
 
@@ -190,6 +190,8 @@ export interface StoryWorkspaceDreamReentryItem {
   readonly workflowDisplayName: 'Dream';
   readonly deckPluginVersion: string;
   readonly lifecycle: 'generating' | 'waiting_confirmation' | 'running' | 'recent';
+  /** Server-derived Dream phase: pre-confirmation is initial; accepted work is in progress. */
+  readonly outcome: 'initial' | 'in_progress';
   readonly group: 'in_progress' | 'recent';
   readonly stageRevisions: Readonly<Partial<Record<StoryWorkspaceDreamStage, number>>>;
   readonly confirmationAccepted: boolean;

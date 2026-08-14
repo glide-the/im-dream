@@ -1,13 +1,18 @@
 /* [Input] Story Workspace Dream page state, durable run projections, and shared color tokens. */
-/* [Output] Responsive Dream editor, searchable/paginated re-entry, launch, and Agent-panel presentation. */
+/* [Output] Responsive Dream editor, discovery home, searchable re-entry, and Agent-panel presentation. */
 /* [Pos] Canonical styling for the Story Workspace Dream business page. */
 /* [Sync] 2026-08-13: style re-entry search, result counts, empty state, and per-group pagination. */
 /* [Sync] 2026-08-13: remove the obsolete workflow row from desktop/mobile Dream Agent conversations. */
 /* [Sync] 2026-08-13: anchor conversation dialogs to the viewport so workbench scrolling cannot move them off-screen. */
 /* [Sync] 2026-08-13: style direct canonical-Chat actions in Agent rail/dialog surfaces. */
+/* [Sync] 2026-08-14: make the no-run Dream home a natural-flow page owned by the layout scroller. */
+/* [Sync] 2026-08-14: promote actor-scoped in-progress Dream/Deck context into the first home section. */
+/* [Sync] 2026-08-14: style only Dream's initial/in-progress re-entry outcomes. */
+/* [Sync] 2026-08-14: replace bordered home cards with a quiet manuscript index and reveal control. */
 
 .story-workspace-dream,
-.story-workspace-dream-launch {
+.story-workspace-dream-launch,
+.story-workspace-dream-home {
   --dream-canvas: var(--color-bg-app, #f6efe5);
   --dream-paper: var(--color-bg-paper, #fffaf2);
   --dream-ink: var(--color-text-primary, #352820);
@@ -1445,6 +1450,509 @@
 @media (prefers-reduced-motion: reduce) {
   .story-workspace-dream * {
     scroll-behavior: auto !important;
+    transition-duration: 0s !important;
+  }
+}
+
+/* Dream discovery home: StoryWorkspaceLayout owns the only vertical scrollbar. */
+.story-workspace-dream-home {
+  display: block;
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  background: var(--dream-canvas);
+}
+
+.story-workspace-dream-home__header {
+  display: flex;
+  width: min(1080px, calc(100% - 64px));
+  align-items: end;
+  justify-content: space-between;
+  gap: 32px;
+  margin: 0 auto;
+  padding: clamp(52px, 7vw, 84px) 0 42px;
+}
+
+.story-workspace-dream-home__header-copy {
+  min-width: 0;
+}
+
+.story-workspace-dream-home__section > header p {
+  margin: 0 0 6px;
+  color: var(--dream-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.story-workspace-dream-home__header h1 {
+  margin: 0;
+  color: var(--dream-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(34px, 4vw, 52px);
+  font-weight: 500;
+  letter-spacing: -.035em;
+  line-height: 1;
+}
+
+.story-workspace-dream-home__header-copy > span {
+  display: block;
+  max-width: 680px;
+  margin-top: 12px;
+  color: var(--dream-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.story-workspace-dream-home__content {
+  display: grid;
+  gap: clamp(68px, 9vw, 112px);
+  width: min(1080px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 18px 0 max(104px, env(safe-area-inset-bottom));
+}
+
+.story-workspace-dream-home__section {
+  display: grid;
+  gap: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.story-workspace-dream-home__section--runs {
+  padding-bottom: 0;
+}
+
+.story-workspace-dream-home__section--active {
+  max-width: 780px;
+}
+
+.story-workspace-dream-home__section > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0;
+  border: 0;
+}
+
+.story-workspace-dream-home__section h2,
+.story-workspace-dream-home__section h3 {
+  margin: 0;
+  color: var(--dream-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+}
+
+.story-workspace-dream-home__section h2 {
+  font-size: clamp(21px, 2vw, 27px);
+}
+
+.story-workspace-dream-home__section > header > span {
+  color: var(--dream-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.story-workspace-dream-home__deck-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 40px 56px;
+}
+
+.story-workspace-dream-home__active-grid {
+  display: grid;
+  max-width: 780px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+
+.story-workspace-dream-home__active-card {
+  display: grid;
+  min-height: 72px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 28px;
+  margin-inline: -12px;
+  padding: 13px 12px;
+  color: inherit;
+  text-decoration: none;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.story-workspace-dream-home__active-card:hover {
+  color: inherit;
+  background: color-mix(in srgb, var(--dream-action) 5%, transparent);
+}
+
+.story-workspace-dream-home__active-card:focus-visible {
+  color: inherit;
+  outline: 2px solid var(--dream-action);
+  outline-offset: 3px;
+}
+
+.story-workspace-dream-home__active-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.story-workspace-dream-home__active-copy strong,
+.story-workspace-dream-home__active-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-workspace-dream-home__active-copy strong {
+  color: var(--dream-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.story-workspace-dream-home__active-copy span {
+  color: var(--dream-body);
+  font-size: 12px;
+}
+
+.story-workspace-dream-home__active-action {
+  color: var(--dream-action);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.story-workspace-dream-home__more {
+  width: max-content;
+  min-height: 36px;
+  padding: 6px 0;
+  color: var(--dream-action);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.story-workspace-dream-home__more:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.story-workspace-dream-home__more:focus-visible {
+  outline: 2px solid var(--dream-action);
+  outline-offset: 4px;
+}
+
+.story-workspace-dream-home__deck-card {
+  display: grid;
+  min-height: 116px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transition: color 140ms ease;
+}
+
+.story-workspace-dream-home__deck-card:hover {
+  color: var(--dream-ink);
+}
+
+.story-workspace-dream-home__deck-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  color: var(--dream-action);
+  background: transparent;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16px;
+}
+
+.story-workspace-dream-home__deck-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.story-workspace-dream-home__deck-copy strong {
+  overflow: hidden;
+  color: var(--dream-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-workspace-dream-home__deck-copy span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--dream-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.story-workspace-dream-home__deck-copy small {
+  color: var(--dream-muted);
+  font-size: 10px;
+}
+
+.story-workspace-dream-home__deck-card > button,
+.story-workspace-dream-home__error button {
+  min-height: 34px;
+  grid-column: 1 / -1;
+  justify-self: end;
+  padding: 7px 13px;
+  color: var(--dream-action);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.story-workspace-dream-home__deck-card > button:hover,
+.story-workspace-dream-home__deck-card > button:focus-visible,
+.story-workspace-dream-home__error button:hover,
+.story-workspace-dream-home__error button:focus-visible {
+  color: var(--dream-ink);
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  outline: none;
+}
+
+.story-workspace-dream-home__deck-card > button:focus-visible,
+.story-workspace-dream-home__error button:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dream-action) 22%, transparent);
+}
+
+.story-workspace-dream-home__deck-card button:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
+.story-workspace-dream-home__empty,
+.story-workspace-dream-reentry__empty {
+  margin: 0;
+  padding: 0;
+  color: var(--dream-muted);
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.story-workspace-dream-home__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  color: var(--color-state-error);
+  border: 0;
+  border-radius: 0;
+}
+
+.story-workspace-dream-home__runs,
+.story-workspace-dream-home .story-workspace-dream-reentry__group,
+.story-workspace-dream-home .story-workspace-dream-reentry__items {
+  display: grid;
+  min-height: auto;
+  overflow: visible;
+}
+
+.story-workspace-dream-home__runs {
+  gap: 16px;
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__search {
+  position: static;
+  padding: 2px 0 14px;
+  border-bottom: 0;
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__group {
+  grid-template-rows: auto auto auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__group > header {
+  margin-bottom: 4px;
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__group h3 {
+  font-size: 17px;
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__items {
+  border-top: 0;
+  scrollbar-gutter: auto;
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__item {
+  display: grid;
+  min-height: 66px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(132px, auto) auto;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 12px 4px;
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 0;
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__item:hover {
+  color: inherit;
+  background: color-mix(in srgb, var(--dream-action) 5%, transparent);
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__item:focus-visible {
+  color: inherit;
+  border-radius: 8px;
+  outline: 2px solid var(--dream-action);
+  outline-offset: 2px;
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__item-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-workspace-dream-reentry__item-status {
+  padding: 0;
+  color: var(--dream-muted);
+  background: transparent;
+  border-radius: 0;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.story-workspace-dream-reentry__item-status[data-outcome="in_progress"] {
+  color: var(--dream-action);
+  background: transparent;
+}
+
+.story-workspace-dream-home .story-workspace-dream-reentry__item time {
+  color: var(--dream-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.story-workspace-dream-reentry__item-action {
+  color: var(--dream-action);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .story-workspace-dream-home__header {
+    align-items: end;
+  }
+
+  .story-workspace-dream-home .story-workspace-dream-reentry__item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .story-workspace-dream-home .story-workspace-dream-reentry__item time {
+    grid-column: 1;
+  }
+
+  .story-workspace-dream-reentry__item-action {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .story-workspace-dream-home__header,
+  .story-workspace-dream-home__content {
+    width: calc(100% - 28px);
+  }
+
+  .story-workspace-dream-home__header {
+    padding: 24px 0 20px;
+  }
+
+  .story-workspace-dream-home__content {
+    gap: 64px;
+    padding-top: 10px;
+  }
+
+  .story-workspace-dream-home__section {
+    padding: 0;
+    border-radius: 0;
+  }
+
+  .story-workspace-dream-home__deck-card {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .story-workspace-dream-home__active-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+  }
+
+  .story-workspace-dream-home__active-action {
+    grid-column: auto;
+    justify-self: auto;
+  }
+
+  .story-workspace-dream-home__deck-card > button {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .story-workspace-dream-home .story-workspace-dream-reentry__search {
+    grid-template-columns: 1fr auto;
+  }
+
+  .story-workspace-dream-home .story-workspace-dream-reentry__search label {
+    grid-column: 1 / -1;
+  }
+
+  .story-workspace-dream-home .story-workspace-dream-reentry__group {
+    padding: 0;
+  }
+
+  .story-workspace-dream-home .story-workspace-dream-reentry__item {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px 10px;
+  }
+
+  .story-workspace-dream-home .story-workspace-dream-reentry__item-copy {
+    grid-column: 1 / -1;
+  }
+
+  .story-workspace-dream-home .story-workspace-dream-reentry__item time {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .story-workspace-dream-home * {
     transition-duration: 0s !important;
   }
 }

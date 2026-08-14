@@ -18,6 +18,8 @@ Drama Forge 插件。本次调整只收敛入口和默认值，不删除旧功�
 5. 既有账号中未经修改且插件 refs 为空的“剧本创作团队”，首次进入 Decks 时自动补齐同一
    `drama-forge` `1.0.1` 引用；已有任意插件选择时保持用户事实不变。
 6. 页面默认 UI 字体使用微软雅黑及跨平台回退，明确的标题衬线字体和等宽代码字体不受影响。
+7. Deck Manager 的下半区显示“我发布的卡组”，不混入其他用户的公开 Deck；系统初始化
+   Deck 不可发布，用户也不可收藏自己的已发布 Deck。
 
 ## 2. 当前实现与影响评估
 
@@ -30,6 +32,7 @@ Drama Forge 插件。本次调整只收敛入口和默认值，不删除旧功�
 | 既有默认 Deck 插件 | 已生成的 fallback 默认团队没有 parent，且 `deck_claude_plugin_refs` 为空；选择器忠实显示为未勾选 | Decks 首次加载前显式 `POST /api/decks/defaults/reconcile`；后端用配置模板指纹定位未经修改的默认团队，仅在 refs 完全为空时写入已验证引用 | 不在 GET 或选择器里伪造状态；不覆盖已有 refs、禁用状态或用户修改过的 Deck |
 | 字体 | `index.css` 只重置 margin；部分组件显式使用 system-ui、衬线或 monospace | 全局 UI 字体变量应用到 body 和表单控件；Story Workspace UI 继承该变量 | 保留创作正文专用字体、品牌衬线标题和代码等宽字体 |
 | 测试 | 已有 Story Workspace 默认入口和 Deck/Dream E2E，但默认入口断言仍指向 Dream | 更新为 Chat-first，并增加隐藏入口、根路径刷新、合法深链接、Deck 默认插件与字体断言 | 业务旅程必须注册/登录、导航、创建、保存、刷新；API 只用于准备隔离事实或验证持久化 |
+| Deck 发布与收藏 | Deck Manager 读取全站公开列表；fork 接口没有拒绝自己或未公开来源；发布接口没有识别初始化默认 Deck | 自有列表派生“我发布的卡组”；服务端共享策略派生 `can_publish` 并在 publish/fork 边界复核 | 前端禁用只是反馈，权限必须由服务端保证；不新增 Schema 字段 |
 
 ### 数据边界
 
@@ -112,6 +115,18 @@ BlinkMacSystemFont, "Segoe UI", sans-serif
 monospace；现有品牌或内容标题显式使用 Georgia 的场景保留，避免把“默认字体”扩大成全面
 视觉重做。
 
+### 3.6 我发布的卡组与分享权限
+
+- Deck Manager 的下半区只从当前用户的 `/api/decks` 结果中筛选 `published=true`，标题为
+  “我发布的卡组（N）”；不再请求全站公开 Deck，也不提供“安装/收藏自己”的按钮。
+- Dream 等社区发现页面继续使用 `GET /api/decks?published=true`；服务端排除当前用户拥有的
+  Deck，因此这些页面只返回可收藏的其他用户公开 Deck（以及合法系统来源）。
+- `can_publish` 与 `publish_block_reason` 由服务端根据 `is_system`、系统模板父级和严格的历史
+  fallback 指纹派生。浏览器不根据名称或固定 ID 自行猜测。
+- 系统初始化 Deck 若历史上已经发布，允许用户取消发布；取消后不可再次发布。
+- `POST /api/decks/{id}/fork` 同时拒绝自有来源和未公开的他人来源，避免通过猜测 ID 绕过
+  社区列表。
+
 ## 4. 状态与边界
 
 | 状态 | 页面行为 |
@@ -125,6 +140,10 @@ monospace；现有品牌或内容标题显式使用 Georgia 的场景保留，�
 | 历史 Deck 有用户修改 | 继续显示并可编辑；不因默认模板退役而删除 |
 | 直接访问隐藏路由 | 路由继续工作，侧栏不出现隐藏按钮 |
 | 浏览器前进/后退 | 根路径默认跳转使用 replace；用户主动导航继续使用既有 pushState |
+| 系统初始化 Deck | 发布按钮显示“系统默认 · 不可发布”并禁用；服务端 publish 返回 409 |
+| 自有已发布 Deck | 只出现在“我发布的卡组”，可取消发布，不显示安装/收藏 |
+| 其他用户公开 Deck | 只在社区发现接口返回；仍可按既有 fork/install 流程收藏 |
+| 自有或未公开来源被直接 fork | 服务端返回 409，不创建副本、不增加收藏计数 |
 
 ## 5. 业务时序
 
@@ -250,6 +269,38 @@ sequenceDiagram
     E-->>U: 显示已勾选
 ```
 
+### 5.6 发布与收藏权限
+
+```mermaid
+sequenceDiagram
+    actor U as 当前用户
+    participant M as DeckManager / Dream
+    participant API as Deck API
+    participant P as Deck sharing policy
+    participant DB as PostgreSQL
+    U->>M: 打开 Decks
+    M->>API: GET /api/decks
+    API->>P: 派生 can_publish / block reason
+    API-->>M: 当前用户 Deck 列表
+    M-->>U: 我发布的卡组（N）
+    alt 系统初始化 Deck 请求发布
+        U->>API: POST /api/decks/{id}/publish
+        API->>P: require_publishable
+        P-->>API: default_initialized
+        API-->>U: 409，不修改 published
+    else 收藏自己的 Deck
+        U->>API: POST /api/decks/{id}/fork
+        API->>P: require_collectable(owner == actor)
+        P-->>API: self_collection_forbidden
+        API-->>U: 409，不创建副本
+    else 收藏其他用户公开 Deck
+        U->>API: POST /api/decks/{id}/fork
+        API->>P: published 且 owner != actor
+        P->>DB: 创建用户副本并增加安装计数
+        API-->>U: 收藏成功
+    end
+```
+
 ## 6. 设计审查
 
 | 审查项 | 结论 |
@@ -261,6 +312,7 @@ sequenceDiagram
 | 是否引入第二套路由或插件状态机 | 否；复用 App、Story Workspace router、PluginInstallService 和 Deck refs |
 | 是否保护显式插件选择 | 是；对账只处理 refs 为空的严格默认模板，已有任意选择立即保留 |
 | 是否过度设计 | 否；只增加一个幂等业务动作与一个共享默认策略服务，不新增 feature flag、迁移框架、字体主题系统或客户端伪状态 |
+| 分享权限是否只靠 UI | 否；列表过滤、发布和 fork 都在服务端按 actor 与持久化事实复核 |
 
 ## 7. 验收标准
 
@@ -274,4 +326,9 @@ sequenceDiagram
 - 新建 Deck 后 API refs 和插件选择器均显示 `drama-forge v1.0.1` enabled；刷新后不丢失。
 - 默认插件缺失、非 ready、digest 失败或不兼容时创建失败，数据库不存在半成品 Deck。
 - `body` 和标准表单控件计算字体包含 Microsoft YaHei/微软雅黑；monospace 编辑器不被覆盖。
+- Deck Manager 显示“我发布的卡组（N）”，N 来自当前用户真实 `published` 结果，不展示其他
+  用户的公开 Deck，卡片不存在安装/收藏操作。
+- 系统初始化 Deck 的 `can_publish=false`，UI 禁用发布；直接调用发布接口返回 409 且状态不变。
+- 社区查询排除当前用户；直接 fork 自有 Deck 或他人未公开 Deck 返回 409，不新增 Deck 或
+  install count。
 - 聚焦单元/集成测试、TypeScript、ESLint、构建及 Playwright 完整业务旅程全部通过。

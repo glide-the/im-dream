@@ -5,6 +5,7 @@
 #          and atomic rollback behavior.
 # [Pos] Deck default policy and creation contract test in backend/tests
 # [Sync] 2026-08-14: cover new provisioning and non-destructive legacy repair.
+# [Sync] 2026-08-14: require the active system default in the collectable community query.
 
 from __future__ import annotations
 
@@ -72,10 +73,12 @@ class _SystemDeckLookupDb:
 class _PublishedDeckDb:
     def __init__(self) -> None:
         self.sql = ""
+        self.params: tuple[Any, ...] = ()
         self.closed = False
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()):
         self.sql = " ".join(sql.split())
+        self.params = tuple(params)
 
         class _Rows:
             @staticmethod
@@ -157,8 +160,12 @@ def test_published_decks_group_author_for_postgresql(monkeypatch) -> None:
     fake_db = _PublishedDeckDb()
     monkeypatch.setattr(database, "get_db", lambda: fake_db)
 
-    assert database.get_published_decks() == []
+    assert database.get_published_decks(exclude_owner_id=28) == []
     assert "GROUP BY d.id, u.display_name" in fake_db.sql
+    assert "d.is_system IS TRUE AND d.id = %s" in fake_db.sql
+    assert "OR d.published IS TRUE" in fake_db.sql
+    assert "d.owner_id <> %s" in fake_db.sql
+    assert fake_db.params == (config.DEFAULT_SYSTEM_DECK_ID, 28, 28)
     assert fake_db.closed is True
 
 

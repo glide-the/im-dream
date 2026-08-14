@@ -1,7 +1,9 @@
 // [Input] Dream workbench and Story Workspace router sources.
-// [Output] Regression coverage for searchable/paginated re-entry and context ownership.
+// [Output] Regression coverage for the two-state three-section Dream home, re-entry, context ownership,
+//          and the workbench's default-open Dream Agent editor.
 // [Pos] Story Workspace Dream re-entry Node seam (U2 Red).
-// [Sync] 2026-08-13: cover re-entry keyword matching, stable pagination, and pagination layout.
+// [Sync] 2026-08-14: cover natural-flow re-entry, canonical whole-row links, and pagination.
+// [Sync] 2026-08-14: cover initial/in-progress search copy without completed/failed groups.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -19,18 +21,26 @@ const PAGE_SOURCE = readFileSync(new URL('../StoryWorkspaceDreamPage.tsx', impor
 const DREAM_CSS = readFileSync(new URL('../StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
 const ROUTER_SOURCE = readFileSync(new URL('../../../router/story-workspace.tsx', import.meta.url), 'utf8');
 const LAYOUT_SOURCE = readFileSync(new URL('../../../components/story-workspace/layout/StoryWorkspaceLayout.tsx', import.meta.url), 'utf8');
+const LAYOUT_CSS = readFileSync(new URL('../../../components/story-workspace/layout/StoryWorkspaceLayout.css', import.meta.url), 'utf8');
 const DECK_SOURCE = readFileSync(new URL('../../../components/DeckEditorModal.tsx', import.meta.url), 'utf8');
 const APP_SOURCE = readFileSync(new URL('../../../App.tsx', import.meta.url), 'utf8');
 
-test('no-run Dream workbench renders durable re-entry list before the new Dream form', () => {
+test('no-run Dream home promotes active runs, community Decks, and durable re-entry without a launch form', () => {
   expect(LAUNCH_SOURCE).toContain('useStoryWorkspaceDreamRuns');
   expect(LAUNCH_SOURCE).toContain('进行中的 Dream');
-  expect(LAUNCH_SOURCE).toContain('最近的 Dream');
+  expect(LAUNCH_SOURCE).toContain("run.outcome === 'in_progress'");
+  expect(LAUNCH_SOURCE).toContain('社区卡组（{communityDecks.length}）');
+  expect(LAUNCH_SOURCE).toContain('我的 Dream');
+  expect(LAUNCH_SOURCE).toContain("deck.agent_type === 'dream'");
   expect(LAUNCH_SOURCE).toContain('story-workspace-dream-reentry');
   expect(LAUNCH_SOURCE).toContain('<strong>{run.displayTitle}</strong>');
   expect(LAUNCH_SOURCE).toContain('<small>{run.deckDisplayName}');
   expect(LAUNCH_SOURCE).toContain('type="search"');
   expect(LAUNCH_SOURCE).toContain('story-workspace-dream-reentry__pagination');
+  expect(LAUNCH_SOURCE).toContain('href={run.href}');
+  expect(LAUNCH_SOURCE).toContain('onNavigate(run.href)');
+  expect(LAUNCH_SOURCE).not.toContain('创作设置');
+  expect(LAUNCH_SOURCE).not.toContain('useStoryWorkspaceDreamLaunch');
   expect(LAUNCH_SOURCE).not.toContain('localStorage');
 });
 
@@ -48,6 +58,7 @@ function dreamRun(
     workflowDisplayName: 'Dream',
     deckPluginVersion: 'v1',
     lifecycle: 'recent',
+    outcome: 'in_progress',
     group: 'recent',
     stageRevisions: {},
     confirmationAccepted: true,
@@ -64,12 +75,21 @@ test('Dream re-entry search matches user-facing fields without changing server o
   const runs = [
     dreamRun(1),
     dreamRun(2, { displayTitle: '海边来信', goalPrefix: '旧创作目标', deckDisplayName: '克制叙事' }),
-    dreamRun(3, { lifecycle: 'running', group: 'in_progress' }),
+    dreamRun(3, { lifecycle: 'running', outcome: 'in_progress', group: 'in_progress' }),
+    dreamRun(4, {
+      lifecycle: 'waiting_confirmation',
+      outcome: 'initial',
+      group: 'in_progress',
+      confirmationAccepted: false,
+      confirmationDispatched: false,
+      href: '/story-workspace/dream?run=run_00000000000000000000000000000004',
+    }),
   ];
   expect(storyWorkspaceFilterDreamReentryRuns(runs, '  海边  ')).toEqual([runs[1]]);
   expect(storyWorkspaceFilterDreamReentryRuns(runs, '克制')).toEqual([runs[1]]);
   expect(storyWorkspaceFilterDreamReentryRuns(runs, runs[2].storyWorkspaceRunId.slice(-6))).toEqual([runs[2]]);
   expect(storyWorkspaceFilterDreamReentryRuns(runs, '正在执行')).toEqual([runs[2]]);
+  expect(storyWorkspaceFilterDreamReentryRuns(runs, '初始状态')).toEqual([runs[3]]);
   expect(storyWorkspaceFilterDreamReentryRuns(runs, '')).toBe(runs);
 });
 
@@ -102,10 +122,23 @@ test('accepted confirmation navigates directly to the run execution workbench', 
   );
 });
 
-test('Dream re-entry groups scroll their item lists without growing the workbench', () => {
-  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-launch__sheet\s*\{[^}]*overflow: hidden;/s);
-  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-reentry__group\s*\{[^}]*min-height: 0;/s);
-  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-reentry__items\s*\{[^}]*overflow-y: auto;/s);
+test('Dream workbench opens its bound Agent editor by default for every run', () => {
+  expect(PAGE_SOURCE).toContain("useState<DreamRightSection>('agent')");
+  const runResetEffect = PAGE_SOURCE.slice(
+    PAGE_SOURCE.indexOf('useEffect(() => {\n    setDreamState(null)'),
+    PAGE_SOURCE.indexOf('useEffect(() => {\n    if (!runId) return;', PAGE_SOURCE.indexOf('useEffect(() => {\n    setDreamState(null)')),
+  );
+  expect(runResetEffect).toContain("setRightSection('agent')");
+  expect(runResetEffect).toContain('[initialStage, runId]');
+  expect(PAGE_SOURCE).toContain('aria-label="Dream 内容编辑器"');
+  expect(PAGE_SOURCE).toContain('data-agent-open={agentPanelOpen || undefined}');
+});
+
+test('Dream home has one page scroller and no nested re-entry scrollbar', () => {
+  expect(LAYOUT_CSS).toMatch(/\.story-workspace-layout__main\s*\{[^}]*overflow-y: auto;/s);
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home\s*\{[^}]*height: auto;[^}]*overflow: visible;/s);
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home \.story-workspace-dream-reentry__items\s*\{[^}]*overflow: visible;/s);
+  expect(DREAM_CSS).not.toMatch(/\.story-workspace-dream-home\s*\{[^}]*overflow-y: auto;/s);
 });
 
 test('Dream route removes the top WorkflowContextBar while non-Dream route support remains', () => {
@@ -113,9 +146,12 @@ test('Dream route removes the top WorkflowContextBar while non-Dream route suppo
   expect(LAYOUT_SOURCE).toContain('<WorkflowContextBar {...workflowContext} />');
 });
 
-test('Deck editor offers only canonical Dream workbench navigation', () => {
-  expect(DECK_SOURCE).toContain('onOpenDreamWithDeck');
-  expect(APP_SOURCE).toContain('/story-workspace/dream?deck=');
+test('Deck editor exposes semantic Agent type and routes every Deck through Chat', () => {
+  expect(DECK_SOURCE).toContain('普通 Chat Agent');
+  expect(DECK_SOURCE).toContain('Dream Agent');
+  expect(DECK_SOURCE).toContain('type="radio"');
+  expect(DECK_SOURCE).not.toContain('onOpenDreamWithDeck');
+  expect(APP_SOURCE).toContain('`${STORY_WORKSPACE_PATHS.chat}?${query.toString()}`');
   expect(DECK_SOURCE).not.toContain('ChatView');
 });
 

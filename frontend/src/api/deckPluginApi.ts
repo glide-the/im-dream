@@ -1,11 +1,13 @@
-// [Input] Frozen task_210a Deck Plugin binding/options/validation API responses and browser auth state.
-// [Output] Typed frontend-only consumers for the four Deck Plugin binding endpoints.
+// [Input] Deck Plugin binding/options/validation and capability-backed Agent-type responses.
+// [Output] Typed consumers for binding endpoints plus optimistic Chat/Dream Agent selection.
 // [Pos] Deck Editor binding API client in frontend/src/api.
+// [Sync] 2026-08-14: add `chat | dream` Agent type update without exposing plugin IDs to UI copy.
 
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { apiUrl } from '../lib/apiBase';
 
 export type SelectionCompatibility = 'passed' | 'failed' | 'unknown';
+export type DeckAgentType = 'chat' | 'dream';
 
 export interface DeckPluginRecovery {
   owner: string;
@@ -74,6 +76,12 @@ interface DeckPluginErrorPayload {
   validation?: DeckPluginSelectionSummary;
 }
 
+export interface DeckAgentTypeResponse {
+  deck_id: string;
+  agent_type: DeckAgentType;
+  binding_revision: number;
+}
+
 export class DeckPluginApiError extends Error {
   readonly status: number;
   readonly errorCode: string | null;
@@ -132,6 +140,20 @@ export function getDeckPluginOptions(deckId: string): Promise<DeckPluginOptionsR
 
 export function getDeckPluginBinding(deckId: string): Promise<DeckPluginBindingState> {
   return request(deckPath(deckId, '/plugin-binding'));
+}
+
+export function updateDeckAgentType(
+  deckId: string,
+  agentType: DeckAgentType,
+  expectedBindingRevision: number,
+): Promise<DeckAgentTypeResponse> {
+  return request(deckPath(deckId, '/agent-type'), {
+    method: 'PUT',
+    body: JSON.stringify({
+      agent_type: agentType,
+      expected_binding_revision: expectedBindingRevision,
+    }),
+  });
 }
 
 export function updateDeckPluginBinding(

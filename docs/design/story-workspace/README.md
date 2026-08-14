@@ -13,7 +13,8 @@
 | [Artifact 阅读与降级](./artifact-reading-and-degradation.md) | 文件投影、revision、缺失、无效与降级显示 |
 | [Skill 指令与工作台自动同步](./skill-commands-and-workbench-sync.md) | 已安装 Skill 的自由调用、Chat Slash 菜单和主 Agent Hook 自动同步 |
 | [设置](./settings.md) | Story Workspace 设置导航与无障碍 |
-| [Chat-first 与剧本创作 Deck 默认交互设计](./chat-first-deck-defaults.md) | 隐藏旧入口、Chat 登录默认入口、剧本创作 Deck、默认/既有账号 Drama Forge 对账与全局字体 |
+| [Chat-first 与剧本创作 Deck 默认交互设计](./chat-first-deck-defaults.md) | 隐藏旧入口、Chat 登录默认入口、剧本创作 Deck、默认/既有账号 Drama Forge 对账、我发布的卡组及分享权限 |
+| [Dream / Chat Agent Deck 交互设计](./dream-chat-agent-deck-interaction.md) | Deck Agent 类型、无边框 Dream 首页、进行中三条预览/查看更多、Chat 横向列表与统一启动路径 |
 
 Agent 对话与 Project/Episode 跨系统合同由以下文档定义：
 

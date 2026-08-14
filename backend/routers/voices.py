@@ -9,6 +9,9 @@
 # [Sync] 2026-08-14: atomically bind the configured drama-forge version to every
 #                    newly created Deck after ready/digest/CLI verification.
 # [Sync] 2026-08-14: expose transactional default-team plugin reconciliation for existing accounts.
+# [Sync] 2026-08-14: enforce system-default publication and self-collection policy at the API boundary.
+# [Sync] 2026-08-14: expose the active system default alongside other actors'
+#                    published Decks in the collectable community projection.
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -28,6 +31,11 @@ except ModuleNotFoundError:  # pragma: no cover - package import compatibility
         reconcile_default_screenplay_deck_plugin,
         resolve_default_deck_plugin_ref,
     )
+
+try:
+    from services.deck.sharing import DeckSharingPolicyError
+except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+    from backend.services.deck.sharing import DeckSharingPolicyError
 
 from .deps import get_current_user
 
@@ -88,9 +96,11 @@ class VoiceForkRequest(BaseModel):
 
 @router.get("/api/decks")
 def list_decks(published: bool = False, current_user: dict = Depends(get_current_user)):
-    """Get decks - either user's own or published community decks"""
+    """Get actor Decks or collectable system/public community Decks."""
     if published:
-        decks = database.get_published_decks()
+        decks = database.get_published_decks(
+            exclude_owner_id=current_user["user_id"],
+        )
     else:
         user_id = current_user["user_id"]
         decks = database.get_user_decks(user_id)
@@ -198,6 +208,8 @@ def fork_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
         new_deck_id = database.fork_deck(user_id, deck_id)
         database.increment_deck_install_count(deck_id)
         return {"deck_id": new_deck_id}
+    except DeckSharingPolicyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -219,11 +231,14 @@ def publish_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
         if deck.get("published"):
             database.unpublish_deck(deck_id, user_id)
             return {"success": True, "published": False}
-        else:
-            database.publish_deck(deck_id, user_id)
-            return {"success": True, "published": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        database.publish_deck(deck_id, user_id)
+        return {"success": True, "published": True}
+    except HTTPException:
+        raise
+    except DeckSharingPolicyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
 
 
 @router.post("/api/decks/{deck_id}/sync")

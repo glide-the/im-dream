@@ -1,6 +1,6 @@
-// [Input] Voice deck API client, i18n labels, and deck editor modal.
-// [Output] Deck management surface for local and community voice decks; initial
-//          load reconciles a missing plugin ref on the untouched default team.
+// [Input] Voice Deck and capability-backed Agent type APIs, i18n labels, and editor modal.
+// [Output] Deck management surface for local Decks and the actor's published Decks;
+//          initial load reconciles a missing plugin ref on the untouched default team.
 // [Pos] deck-manager-view node in frontend/src/components
 // [Sync] 2026-07-08: replace light-only Decks cards, loading/error states, and publish modal colors
 //                    with semantic theme tokens so the Decks surface adapts to dark mode.
@@ -10,6 +10,10 @@
 //                    deck items now use flat paper rows, weak boundaries, and small accent marks.
 // [Sync] 2026-08-14: reconcile legacy default-team plugin refs before the first list read;
 //                    a rolling-deploy mismatch cannot hide the persisted Deck list.
+// [Sync] 2026-08-14: persist Chat/Dream Agent type through the server binding revision and
+//                    route every Deck interaction through Chat.
+// [Sync] 2026-08-14: replace the global community list with actor-owned publications and
+//                    honor server-derived default-Deck publication eligibility.
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -31,11 +35,11 @@ import {
 import DeckEditorModal from './DeckEditorModal';
 import { COLORS, iconMap } from './deckVisuals';
 import type { ActiveChatVoice } from '../lib/chat-schema';
+import { updateDeckAgentType, type DeckAgentType } from '../api/deckPluginApi';
 
 interface Props {
   onUpdate?: () => void;
   onChatWithDeck?: (deckId: string, voiceInfo: ActiveChatVoice) => void;
-  onOpenDreamWithDeck?: (deckId: string) => void;
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -48,13 +52,12 @@ const DECK_ITEM_BORDER = '1px solid color-mix(in srgb, var(--color-border-paper)
 const DECK_LIST_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 36%, transparent)';
 const DECK_ITEM_HOVER_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 58%, var(--color-bg-surface))';
 
-export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithDeck }: Props) {
+export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
   const { t } = useTranslation();
   const spinnerKeyframes = useMemo(() => (
     `@keyframes deck-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`
   ), []);
   const [decks, setDecks] = useState<Deck[]>([]);
-  const [communityDecks, setCommunityDecks] = useState<Deck[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deckIconPickerOpen, setDeckIconPickerOpen] = useState<string | null>(null); // @@@ Track which deck's icon+color picker is open
@@ -69,8 +72,12 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
 
   useEffect(() => {
     void loadDecks();
-    loadCommunityDecks();
   }, []);
+
+  const publishedDecks = useMemo(
+    () => decks.filter((deck) => deck.published),
+    [decks],
+  );
 
   useEffect(() => {
     setSelectedVoiceByDeck(prev => {
@@ -186,6 +193,21 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
     }
   }
 
+  async function handleUpdateAgentType(
+    deckId: string,
+    agentType: DeckAgentType,
+    expectedBindingRevision: number,
+  ): Promise<number> {
+    const saved = await updateDeckAgentType(deckId, agentType, expectedBindingRevision);
+    setDecks((current) => current.map((deck) => deck.id === deckId ? {
+      ...deck,
+      agent_type: saved.agent_type,
+      agent_type_revision: saved.binding_revision,
+    } : deck));
+    onUpdate?.();
+    return saved.binding_revision;
+  }
+
   async function handleDeleteDeck(deckId: string) {
     if (!confirm(t('deck.confirm.delete'))) return;
 
@@ -243,15 +265,6 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
     }
   }
 
-  async function loadCommunityDecks() {
-    try {
-      const published = await listDecks(true);
-      setCommunityDecks(published);
-    } catch (err: unknown) {
-      console.error('Failed to load community decks:', err);
-    }
-  }
-
   async function handleCreateDeck() {
     setCreatingDeck(true);
     try {
@@ -294,9 +307,13 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
   async function handlePublishClick(deck: Deck) {
     if (deck.published) {
       handlePublishToggle(deck.id);
-    } else {
-      setPublishWarning(deck.id);
+      return;
     }
+    if (deck.can_publish === false) {
+      alert(t('deck.messages.defaultDeckPublishForbidden'));
+      return;
+    }
+    setPublishWarning(deck.id);
   }
 
   async function handlePublishToggle(deckId: string) {
@@ -304,24 +321,11 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
       const result = await publishDeck(deckId);
       alert(result.published ? t('deck.messages.publishSuccess') : t('deck.messages.unpublishSuccess'));
       await loadDecks(true);
-      await loadCommunityDecks();
       onUpdate?.();
     } catch (err: unknown) {
       alert(`Failed: ${getErrorMessage(err, 'Unknown error')}`);
     } finally {
       setPublishWarning(null);
-    }
-  }
-
-  async function handleInstallDeck(deckId: string) {
-    try {
-      await forkDeck(deckId);
-      alert(t('deck.messages.installSuccess'));
-      await loadDecks(true);
-      await loadCommunityDecks();
-      onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to install deck: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -484,6 +488,7 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
           }}>
             {decks.map(deck => {
               const isSystem = !!deck.is_system;
+              const publishDisabled = !deck.published && deck.can_publish === false;
               const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
               const colorHex = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
               const voiceCount = deck.voice_count || deck.voices?.length || 0;
@@ -491,6 +496,8 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
 
               return (
                 <div
+                  data-deck-card-id={deck.id}
+                  data-deck-card-kind="owned"
                   key={deck.id}
                   onClick={() => toggleDeck(deck.id)}
                   style={{
@@ -646,7 +653,9 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
                           </button>
                         )}
                         <button
+                          disabled={publishDisabled}
                           onClick={() => handlePublishClick(deck)}
+                          title={publishDisabled ? t('deck.messages.defaultDeckPublishForbidden') : undefined}
                           style={{
                             padding: '6px 10px',
                             background: deck.published
@@ -655,12 +664,17 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
                             color: deck.published ? 'var(--color-state-warning)' : 'var(--color-text-primary)',
                             border: DECK_CONTROL_BORDER,
                             borderRadius: '999px',
-                            cursor: 'pointer',
+                            cursor: publishDisabled ? 'not-allowed' : 'pointer',
                             fontSize: 12,
-                            fontWeight: 600
+                            fontWeight: 600,
+                            opacity: publishDisabled ? 0.5 : 1
                           }}
                         >
-                          {deck.published ? 'Unpub' : 'Pub'}
+                          {deck.published
+                            ? t('deck.actions.unpublish')
+                            : publishDisabled
+                              ? t('deck.actions.publishUnavailable')
+                              : t('deck.actions.publish')}
                         </button>
                         <button
                           onClick={() => handleDeleteDeck(deck.id)}
@@ -685,7 +699,7 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
             })}
           </div>
 
-          {/* @@@ Community Decks Section */}
+          {/* Actor-owned publications; community discovery lives on Dream. */}
           <hr style={{ margin: '1rem 0 0', border: 0, borderTop: DECK_ITEM_BORDER }} />
 
           <h3 style={{
@@ -694,10 +708,10 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
             fontWeight: '500',
             color: 'var(--color-text-primary)'
           }}>
-            {t('deck.sections.community', { count: communityDecks.length })}
+            {t('deck.sections.publishedByMe', { count: publishedDecks.length })}
           </h3>
 
-          {communityDecks.length === 0 ? (
+          {publishedDecks.length === 0 ? (
             <p style={{
               color: 'var(--color-text-muted)',
               fontSize: '14px',
@@ -707,7 +721,7 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
               borderRadius: '0.75rem',
               background: DECK_LIST_SURFACE
             }}>
-              {t('deck.communityEmpty')}
+              {t('deck.publishedByMeEmpty')}
             </p>
           ) : (
             <div style={{
@@ -716,12 +730,14 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
               gap: 14,
               alignItems: 'stretch'
             }}>
-              {communityDecks.map(deck => {
+              {publishedDecks.map(deck => {
                 const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
                 const colorHex = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
 
                 return (
                   <div
+                    data-deck-card-id={deck.id}
+                    data-deck-card-kind="published-by-me"
                     key={deck.id}
                     style={{
                       background: DECK_LIST_SURFACE,
@@ -790,8 +806,7 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
                           fontSize: 11,
                           color: 'var(--color-text-muted)'
                         }}>
-                          {t('deck.communityMeta', {
-                            author: deck.author_name || t('deck.labels.anonymous'),
+                          {t('deck.publishedByMeMeta', {
                             voices: deck.voice_count || 0,
                             installs: deck.install_count || 0
                           })}
@@ -801,7 +816,7 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
 
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start' }}>
                       <button
-                        onClick={() => handleInstallDeck(deck.id)}
+                        onClick={() => handlePublishToggle(deck.id)}
                         style={{
                           padding: '6px 12px',
                           background: 'var(--color-text-primary)',
@@ -814,7 +829,7 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
                           transition: 'all 0.2s'
                         }}
                       >
-                        Install
+                        {t('deck.actions.unpublish')}
                       </button>
                     </div>
                   </div>
@@ -836,11 +851,11 @@ export default function DeckManager({ onUpdate, onChatWithDeck, onOpenDreamWithD
           creatingVoiceId={creatingVoice}
           onAddVoice={handleAddVoice}
           onUpdateDeck={handleUpdateDeck}
+          onUpdateAgentType={handleUpdateAgentType}
           onUpdateVoice={handleUpdateVoice}
           onToggleVoice={handleToggleVoice}
           onDeleteVoice={handleDeleteVoice}
           onChatWithDeck={onChatWithDeck}
-          onOpenDreamWithDeck={onOpenDreamWithDeck}
         />
       )}
 

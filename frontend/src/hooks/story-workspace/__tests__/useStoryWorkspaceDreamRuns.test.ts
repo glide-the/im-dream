@@ -1,6 +1,7 @@
 // [Input] Actor-scoped canonical Dream run collection payloads.
-// [Output] Strict transport parsing that preserves the server-provided group and order.
+// [Output] Strict two-state transport parsing that preserves server-provided group and order.
 // [Pos] Story Workspace Dream re-entry Node seam (U2 Red).
+// [Sync] 2026-08-14: reject outcomes outside initial/in-progress or incompatible with lifecycle.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -20,6 +21,7 @@ const response = {
       workflowDisplayName: 'Dream',
       deckPluginVersion: '1.4.0',
       lifecycle: 'waiting_confirmation',
+      outcome: 'initial',
       group: 'in_progress',
       stageRevisions: { characters: 1, scenes: 1, storyboards: 1 },
       confirmationAccepted: false,
@@ -38,6 +40,7 @@ const response = {
       workflowDisplayName: 'Dream',
       deckPluginVersion: '1.4.0',
       lifecycle: 'recent',
+      outcome: 'in_progress',
       group: 'recent',
       stageRevisions: { characters: 1, scenes: 1, storyboards: 1 },
       confirmationAccepted: true,
@@ -86,10 +89,20 @@ test('canonical Dream runs parser rejects browser-invented lifecycle/group combi
   })).toThrow(/recent/i);
 });
 
+test('canonical Dream runs parser rejects outcome phases that contradict confirmation lifecycle', () => {
+  expect(() => storyWorkspaceParseDreamRuns({
+    runs: [{ ...response.runs[0], outcome: 'in_progress' }],
+  })).toThrow(/outcome/i);
+  expect(() => storyWorkspaceParseDreamRuns({
+    runs: [{ ...response.runs[1], outcome: 'initial' }],
+  })).toThrow(/outcome/i);
+});
+
 test('canonical Dream runs parser rejects malformed IDs, unsafe booleans, unexpected stage keys and href drift', () => {
   const malformed = [
     { storyWorkspaceRunId: 'not-a-run' },
     { workflowDisplayName: 'Other workflow' },
+    { outcome: 'invented' },
     { confirmationAccepted: 'false' },
     { stageRevisions: { characters: 1, scenes: 1, storyboards: 1, raw: 1 } },
     { href: '/story-workspace/dream?run=run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },

@@ -10,6 +10,9 @@
 // [Sync] 2026-06-25: Reflections analysis now uses backend Reflections-agent tasks:
 //         POST task(auto_start=false) → subscribe SSE → POST start → stream events → fetch results.
 // [Sync] 2026-08-14: add explicit default screenplay Deck plugin reconciliation.
+// [Sync] 2026-08-14: consume server-derived Deck Agent type and binding revision
+//                    in list/detail DTOs; the browser does not infer Dream capability.
+// [Sync] 2026-08-14: expose server-derived Deck publication eligibility to management UI.
 /**
  * API client for voice analysis backend - FastAPI sync API version
  * [Sync] 2026-06-01: normalize user_sessions.labels in session API responses for frontend display.
@@ -97,6 +100,13 @@ export interface Deck {
   published?: boolean;
   author_name?: string;
   install_count?: number;
+  /** Server-owned publication policy; false for system-initialized Decks. */
+  can_publish?: boolean;
+  publish_block_reason?: 'default_initialized' | null;
+  /** Server-derived from the active published Deck Plugin capability. */
+  agent_type: 'chat' | 'dream';
+  /** Optimistic-lock token for Agent type changes. */
+  agent_type_revision: number;
 }
 
 export function normalizeSessionLabels(labels: unknown): SessionLabels {

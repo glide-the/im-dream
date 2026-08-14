@@ -46,7 +46,7 @@ test('sidebar exposes only Chat, Dream, and Decks in that order', () => {
   expect(SIDEBAR).not.toContain('角色管理');
   expect(SIDEBAR).not.toContain('场景管理');
   expect(SIDEBAR).not.toContain('创作者工作台');
-  expect(DREAM_LAUNCH).toContain('id="dream-launch-title">发起一次 Dream');
+  expect(DREAM_LAUNCH).toContain('id="dream-home-title">Dream');
 });
 
 test('Decks stays inside the workspace and projects the existing DeckManager into its main region', () => {
@@ -56,7 +56,8 @@ test('Decks stays inside the workspace and projects the existing DeckManager int
   expect(ROUTER).toContain('{decksContent}</div>');
   expect(ROUTER).toContain('story-workspace-decks-surface');
   expect(APP).toContain('<StoryWorkspaceRouter\n            decksContent={storyWorkspaceDeckManager}');
-  expect(APP).toContain('onOpenDreamWithDeck={handleOpenDreamWithDeck}');
+  expect(APP).toContain('onChatWithDeck={handleChatWithDeck}');
+  expect(APP).not.toContain('onOpenDreamWithDeck');
   expect(APP).not.toContain('handleStoryWorkspaceOpenDecks');
   expect(SIDEBAR).toContain("decks: '/story-workspace/decks'");
   expect(SIDEBAR).not.toContain("action: 'open-decks'");
@@ -82,10 +83,10 @@ test('sidebar theme switch is a footer utility that follows the shared theme own
   expect(SIDEBAR).not.toContain('localStorage');
 });
 
-test('Dream keeps its durable recent list while subscription uses the real monthly Token boundary', () => {
+test('Dream keeps its durable My Dream list while subscription uses the real monthly Token boundary', () => {
   expect(PATHS).toContain("subscription: '/story-workspace/subscription'");
   expect(ROUTER).toContain("case 'subscription'");
-  expect(DREAM_LAUNCH).toContain('最近的 Dream');
+  expect(DREAM_LAUNCH).toContain('我的 Dream');
   expect(SUBSCRIPTION).toContain('useStoryWorkspaceSubscription');
   expect(SUBSCRIPTION).toContain('Dream · Subscription');
   expect(SUBSCRIPTION).toContain("{ id: 'info', label: '订阅信息' }");

@@ -18,6 +18,9 @@ try:
         DeckPluginBindingResponse,
         DeckPluginBindingState,
         DeckPluginBindingUpdateRequest,
+        DeckAgentType,
+        DeckAgentTypeResponse,
+        DeckAgentTypeUpdateRequest,
         DeckPluginOptionsResponse,
         DeckPluginSelectionRequest,
         DeckPluginSelectionValidationResponse,
@@ -37,6 +40,9 @@ except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
         DeckPluginBindingResponse,
         DeckPluginBindingState,
         DeckPluginBindingUpdateRequest,
+        DeckAgentType,
+        DeckAgentTypeResponse,
+        DeckAgentTypeUpdateRequest,
         DeckPluginOptionsResponse,
         DeckPluginSelectionRequest,
         DeckPluginSelectionValidationResponse,
@@ -51,6 +57,15 @@ except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
         SelectionValidationService,
     )
     from services.deck.runtime_context import make_runtime_context_resolver
+    from services.story_workspace.dream_launch_infrastructure import (
+        DreamLaunchApplicationError,
+        DreamRuntimeProvisioningService,
+    )
+else:
+    from backend.services.story_workspace.dream_launch_infrastructure import (
+        DreamLaunchApplicationError,
+        DreamRuntimeProvisioningService,
+    )
 
 
 router = APIRouter(prefix="/api/voice-decks", tags=["deck-plugin-binding"])
@@ -111,6 +126,68 @@ def _access_denied() -> JSONResponse:
             "message": "Deck not found or permission denied.",
         },
     )
+
+
+@router.put(
+    "/{deck_id}/agent-type",
+    response_model=DeckAgentTypeResponse,
+)
+async def put_agent_type(
+    deck_id: str,
+    request: DeckAgentTypeUpdateRequest,
+    current_user: dict[str, Any] = Depends(_deck_current_user),
+    binding: BindingService = Depends(_binding_service),
+):
+    actor_id = _actor_id(current_user)
+    workspace_id = _requested_workspace(current_user)
+    try:
+        resolved_workspace = binding.resolve_workspace_access(
+            deck_id=deck_id,
+            actor_id=actor_id,
+            requested_workspace_id=workspace_id,
+        )
+        if binding.db.in_transaction:
+            binding.db.rollback()
+        if request.agent_type is DeckAgentType.CHAT:
+            state = binding.clear(
+                deck_id=deck_id,
+                actor_id=actor_id,
+                requested_workspace_id=resolved_workspace,
+                expected_binding_revision=request.expected_binding_revision,
+            )
+            return DeckAgentTypeResponse(
+                deck_id=deck_id,
+                agent_type=DeckAgentType.CHAT,
+                binding_revision=state.binding_revision,
+            )
+        provisioner = DreamRuntimeProvisioningService(binding.db)
+        selected = await provisioner.ensure_binding(
+            deck_id=deck_id,
+            actor_id=actor_id,
+            workspace_id=resolved_workspace,
+            expected_binding_revision=request.expected_binding_revision,
+        )
+        return DeckAgentTypeResponse(
+            deck_id=deck_id,
+            agent_type=DeckAgentType.DREAM,
+            binding_revision=selected.binding_revision,
+        )
+    except BindingAccessError:
+        return _access_denied()
+    except BindingRevisionConflict as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error_code": exc.code,
+                "current_revision": exc.current_revision,
+                "message": str(exc),
+            },
+        )
+    except DreamLaunchApplicationError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error_code": exc.code, "message": str(exc)},
+        )
 
 
 @router.get(

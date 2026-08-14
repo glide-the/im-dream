@@ -1,6 +1,8 @@
-// [Input] Dream page/router/App source after the dedicated Dream start integration.
-// [Output] Static regression checks that Dream no longer embeds the ordinary Chat UI.
+// [Input] Dream page/router/App source after Chat-unified Dream start integration.
+// [Output] Static regression checks for the quiet active preview, community discovery, and canonical navigation.
 // [Pos] Story Workspace Dream launch layout seam test (Task 3 U4)
+// [Sync] 2026-08-14: lock the borderless three-item active preview and explicit reveal control.
+// [Sync] 2026-08-14: lock system-default inclusion and visible provenance in Community Decks.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -20,13 +22,20 @@ const ROUTER_SOURCE = readFileSync(new URL(
 ), 'utf8');
 const APP_SOURCE = readFileSync(new URL('../../../App.tsx', import.meta.url), 'utf8');
 const DREAM_CSS = readFileSync(new URL('../StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
+const LAYOUT_CSS = readFileSync(new URL(
+  '../../../components/story-workspace/layout/StoryWorkspaceLayout.css',
+  import.meta.url,
+), 'utf8');
 
-test('no-run Dream mounts its own launch module instead of Chat children', () => {
+test('no-run Dream mounts its discovery module instead of Chat children', () => {
   expect(PAGE_SOURCE).toContain('<StoryWorkspaceDreamLaunch onNavigate={onNavigate} />');
   expect(PAGE_SOURCE).not.toContain('children: ReactNode');
   expect(PAGE_SOURCE).not.toContain('story-workspace-dream-launch__chat');
-  expect(LAUNCH_SOURCE).toContain('发起 Dream');
+  expect(LAUNCH_SOURCE).toContain('进行中的 Dream');
+  expect(LAUNCH_SOURCE).toContain('社区卡组');
+  expect(LAUNCH_SOURCE).toContain('我的 Dream');
   expect(LAUNCH_SOURCE).toContain('listDecks');
+  expect(LAUNCH_SOURCE).toContain("run.outcome === 'in_progress'");
   expect(LAUNCH_SOURCE).toContain('role="alert"');
 });
 
@@ -61,25 +70,47 @@ test('router keeps Decks content route-scoped and Dream free of Chat seams', () 
   expect(storyWorkspaceBranch).not.toContain('dreamContent=');
 });
 
-test('launch page keeps one primary action and no business failure branches', () => {
-  expect(LAUNCH_SOURCE.match(/>发起 Dream</g)).toHaveLength(1);
+test('discovery page removes the duplicate launch form and invented workflow actions', () => {
+  expect(LAUNCH_SOURCE).not.toContain('>发起 Dream<');
+  expect(LAUNCH_SOURCE).not.toContain('创作设置');
+  expect(LAUNCH_SOURCE).not.toContain('useStoryWorkspaceDreamLaunch');
   expect(LAUNCH_SOURCE).not.toContain('驳回');
   expect(LAUNCH_SOURCE).not.toContain('归档');
-  expect(LAUNCH_SOURCE).not.toContain('重试');
 });
 
-test('launch surface uses one concise lifecycle note instead of a four-step lifecycle guide', () => {
-  expect(LAUNCH_SOURCE).toContain('Dream 会逐步写入人物、场景与分镜');
+test('community discovery sends stable Deck intent to Chat while active runs use canonical hrefs', () => {
+  expect(LAUNCH_SOURCE).toContain('/story-workspace/chat?deck=');
+  expect(LAUNCH_SOURCE).toContain("deck.agent_type === 'dream'");
+  expect(LAUNCH_SOURCE).toContain('href={run.href}');
+  expect(LAUNCH_SOURCE).toContain('onNavigate(run.href)');
   expect(LAUNCH_SOURCE).not.toContain('Creation flow');
   expect(LAUNCH_SOURCE).not.toContain('从目标到可编辑稿件');
   expect(LAUNCH_SOURCE).not.toContain('<ol>');
 });
 
-test('launch form keeps its action visible while its fields scroll inside the workbench', () => {
-  expect(LAUNCH_SOURCE).toContain('story-workspace-dream-launch__form-body');
-  expect(LAUNCH_SOURCE).toContain('story-workspace-dream-launch__form-actions');
-  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-launch__form\s*\{[^}]*grid-template-rows: minmax\(0, 1fr\) auto;[^}]*overflow: hidden;/s);
-  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-launch__form-body\s*\{[^}]*overflow-y: auto;/s);
+test('Dream home uses the layout scroller and a natural-flow responsive card hierarchy', () => {
+  expect(LAUNCH_SOURCE).toContain('story-workspace-dream-home__active-grid');
+  expect(LAUNCH_SOURCE).toContain('story-workspace-dream-home__deck-grid');
+  expect(LAUNCH_SOURCE).toContain('<div className="story-workspace-dream-home"');
+  expect(LAUNCH_SOURCE).not.toContain('story-workspace-dream-launch story-workspace-dream-home');
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home__active-grid\s*\{[^}]*grid-template-columns:/s);
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home__deck-grid\s*\{[^}]*grid-template-columns:/s);
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home\s*\{[^}]*height: auto;[^}]*overflow: visible;/s);
+  expect(LAYOUT_CSS).toMatch(/\.story-workspace-layout__main\s*\{[^}]*overflow-y: auto;/s);
+  expect(DREAM_CSS).toContain('@media (max-width: 640px)');
+});
+
+test('active Dreams default to a quiet three-item preview with an accessible reveal', () => {
+  expect(LAUNCH_SOURCE).toContain('STORY_WORKSPACE_ACTIVE_DREAM_PREVIEW_COUNT = 3');
+  expect(LAUNCH_SOURCE).toContain('activeDreamRuns.slice(0, STORY_WORKSPACE_ACTIVE_DREAM_PREVIEW_COUNT)');
+  expect(LAUNCH_SOURCE).toContain('aria-controls="dream-active-list"');
+  expect(LAUNCH_SOURCE).toContain('aria-expanded={showAllActiveDreams}');
+  expect(LAUNCH_SOURCE).toContain("showAllActiveDreams ? '收起' : `查看更多（${hiddenActiveDreamCount}）`");
+  expect(LAUNCH_SOURCE).not.toContain('story-workspace-dream-home__active-mark');
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home__section\s*\{[^}]*border: 0;[^}]*background: transparent;[^}]*box-shadow: none;/s);
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home__section--active\s*\{[^}]*max-width: 780px;/s);
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home__active-card\s*\{[^}]*border: 0;[^}]*background: transparent;/s);
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home__more\s*\{[^}]*border: 0;/s);
 });
 
 test('Dream launch surface follows the shared dark theme canvas and action contrast tokens', () => {
@@ -89,10 +120,10 @@ test('Dream launch surface follows the shared dark theme canvas and action contr
   expect(DREAM_CSS).toContain('color: var(--color-state-error, #9b3d2e);');
 });
 
-test('Dream selects an Agent from Deck-grouped options instead of selecting a Deck', () => {
-  expect(LAUNCH_SOURCE).toContain("import DeckChatSelector from '../../components/deck/DeckChatSelector'");
-  expect(LAUNCH_SOURCE).toContain('allowNone={false}');
-  expect(LAUNCH_SOURCE).toContain('selectedAgentId={selectedAgentId}');
-  expect(LAUNCH_SOURCE).toContain('launch.start(selectedDeckId, selectedAgentId, goal)');
-  expect(LAUNCH_SOURCE).not.toContain('<select');
+test('Dream community count is real and installation preserves Dream type', () => {
+  expect(LAUNCH_SOURCE).toContain('社区卡组（{communityDecks.length}）');
+  expect(LAUNCH_SOURCE).toContain("deck.enabled && (deck.is_system || deck.agent_type === 'dream')");
+  expect(LAUNCH_SOURCE).toContain('<small>System default Deck</small>');
+  expect(LAUNCH_SOURCE).toContain("await updateDeckAgentType(installed.deck_id, 'dream', 0)");
+  expect(LAUNCH_SOURCE).not.toContain('社区卡组（0）');
 });

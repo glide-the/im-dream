@@ -448,6 +448,14 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
                     "VALUES (?, 'Alternate Dream Deck', ?, 1)",
                     (ALTERNATE_DECK_ID, int(ACTOR_ID)),
                 )
+            await DreamRuntimeProvisioningService(
+                db,
+                claude_installer_factory=FakeClaudePluginInstaller,
+            ).ensure_binding(
+                deck_id=DECK_ID,
+                actor_id=ACTOR_ID,
+                workspace_id=WORKSPACE_ID,
+            )
         finally:
             db.close()
         self.turn_dispatcher = RecordingTurnDispatcher()
@@ -523,6 +531,28 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
                         0,
                     )
                     self.assertEqual(self.turn_dispatcher.calls, [])
+        finally:
+            db.close()
+
+    async def test_unselected_chat_deck_cannot_enter_dream_launch(self):
+        db = database.get_db()
+        try:
+            actor = {"actor_id": ACTOR_ID, "workspace_id": WORKSPACE_ID}
+            command = launch_command().model_copy(update={"deck_id": ALTERNATE_DECK_ID})
+            with self.assertRaises(DreamLaunchApplicationError) as captured:
+                await self.make_launch_service(db, actor).launch(
+                    command,
+                    actor_id=ACTOR_ID,
+                    workspace_id=WORKSPACE_ID,
+                )
+            self.assertEqual(
+                (captured.exception.code, captured.exception.status_code),
+                ("WORKFLOW_SELECTION_REQUIRED", 409),
+            )
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM workflow_runs").fetchone()[0],
+                0,
+            )
         finally:
             db.close()
 
@@ -772,7 +802,7 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         finally:
             db.close()
 
-    async def test_provisions_binding_creates_authoritative_run_and_dispatches(self) -> None:
+    async def test_explicit_dream_binding_creates_authoritative_run_and_dispatches(self) -> None:
         context = await self.start(launch_command())
 
         self.assertEqual(context.deck_id, DECK_ID)
@@ -1082,6 +1112,13 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         binding_id = "dpb_" + "9" * 32
+        db = database.get_db()
+        with db:
+            db.execute(
+                "UPDATE deck_plugin_bindings SET status = 'stale' "
+                "WHERE deck_id = ? AND status = 'active'",
+                (DECK_ID,),
+            )
 
         class ConcurrentWinnerBindingService:
             def __init__(nested_self, db, *, selection_validator) -> None:
@@ -1094,7 +1131,7 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
                         "deck_plugin_binding_id, deck_id, workspace_id, creator_id, "
                         "deck_plugin_id, deck_plugin_version, binding_revision, "
                         "status, applied_to) "
-                        "VALUES (?, ?, ?, ?, ?, ?, 1, 'active', 'next_run')",
+                        "VALUES (?, ?, ?, ?, ?, ?, 2, 'active', 'next_run')",
                         (
                             binding_id,
                             DECK_ID,
@@ -1104,16 +1141,24 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
                             BUILTIN_DECK_PLUGIN_VERSION,
                         ),
                     )
-                raise BindingRevisionConflict(1)
+                raise BindingRevisionConflict(2)
 
         with patch(
             "services.story_workspace.dream_launch_infrastructure.BindingService",
             ConcurrentWinnerBindingService,
         ):
-            context = await self.start(launch_command())
+            selected = await DreamRuntimeProvisioningService(
+                db,
+                claude_installer_factory=FakeClaudePluginInstaller,
+            ).ensure_binding(
+                deck_id=DECK_ID,
+                actor_id=ACTOR_ID,
+                workspace_id=WORKSPACE_ID,
+            )
 
-        self.assertEqual(context.deck_plugin_binding_id, binding_id)
-        self.assertEqual(context.binding_revision, 1)
+        db.close()
+        self.assertEqual(selected.deck_plugin_binding_id, binding_id)
+        self.assertEqual(selected.binding_revision, 2)
 
     async def test_slash_command_remains_the_unmodified_launch_text_prefix(self) -> None:
         goal = "/drama-forge:drama-init"
