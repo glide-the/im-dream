@@ -10,6 +10,7 @@
 // [Sync] 2026-06-25: Reflections analysis now uses backend Reflections-agent tasks:
 //         POST task(auto_start=false) → subscribe SSE → POST start → stream events → fetch results.
 // [Sync] 2026-08-14: add explicit default screenplay Deck plugin reconciliation.
+// [Sync] 2026-08-15: reconciliation may create a missing actor default for legacy accounts.
 // [Sync] 2026-08-14: consume server-derived Deck Agent type and binding revision
 //                    in list/detail DTOs; the browser does not infer Dream capability.
 // [Sync] 2026-08-14: expose server-derived Deck publication eligibility to management UI.
@@ -1271,13 +1272,15 @@ export async function listDecks(published?: boolean): Promise<Deck[]> {
 }
 
 /**
- * Reconcile a legacy untouched screenplay default whose plugin refs are empty.
- * Existing user selections are preserved by the backend.
+ * Ensure the actor's screenplay default exists and reconcile empty plugin refs.
+ * Existing Decks and user selections are preserved by the backend.
  */
 export async function reconcileDefaultDeckPlugin(): Promise<{
   deck_id: string | null;
   reconciled: boolean;
-  reason: 'missing_ref' | 'refs_preserved' | 'default_not_found';
+  // `default_not_found` keeps the client compatible with an older backend
+  // during a rolling restart; current servers create the missing default.
+  reason: 'default_created' | 'missing_ref' | 'refs_preserved' | 'default_not_found';
 }> {
   const response = await fetch(`${API_BASE}/api/decks/defaults/reconcile`, {
     method: 'POST',

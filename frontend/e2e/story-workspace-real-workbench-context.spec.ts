@@ -1,7 +1,10 @@
 // [Input] Existing local Dream Run, real actor, real model, and visible shared Chat composer.
 // [Output] Human-journey proof of each dialogue through shared session, canonical
-//          files, after-turn Hook, PostgreSQL/API projection, and Execution UI.
+//          files, after-turn Hook, PostgreSQL/API/Admin projection, and the
+//          current-artifact-only Execution UI.
 // [Pos] Opt-in real-data full-business Dream projection acceptance test.
+// [Sync] 2026-08-14: use page-derived natural language and prove the screenplay
+//                    workbench has no workspace update feed.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -33,12 +36,16 @@ const BACKEND_PYTHON = resolve(BACKEND_DIR, '.venv/bin/python');
  * | EP01 title/content | EP01 canonical artifacts | must remain `EXPECTED_EPISODE_TITLE`; a Project rename is not an Episode rewrite |
  * | Run-private files | .dream/runtime/runs/<run>/artifact + manifest | match current canonical Project facts after every successful turn |
  * | Thread/Claude session | chat_thread | same ids across both visible dialogues |
+ * | Gateway request | Admin-owned gateway_requests | each visible real-model turn is queryable in the normal Admin database |
+ * | Execution workbench | actor-scoped stage and Episode APIs | current assets/outline/artifacts remain readable; workspace update feed is absent |
  * | Other assets/Episodes | canonical manifest | outside this scenario and must not be rewritten |
  */
 const DREAM_IMPACT_SCOPE = Object.freeze({
   projectTitle: 'changes-or-idempotently-confirms',
   episodeTitle: 'must-remain-unchanged',
   threadAndSession: 'must-remain-unchanged',
+  gatewayRequests: 'at-least-two-new-settled-requests-for-two-visible-turns',
+  executionUpdateFeed: 'removed-with-current-artifacts-unchanged',
   unrelatedArtifacts: 'out-of-scope',
 });
 
@@ -97,6 +104,27 @@ interface StoryDatabaseFacts {
   readonly artifactSyncStatus: string | null;
   readonly projectTitle: string | null;
   readonly sourceRunId: string | null;
+}
+
+interface GatewayFacts {
+  readonly count: number;
+  readonly latestOutcome: string | null;
+  readonly latestRequestedModel: string | null;
+  readonly latestStatus: string | null;
+}
+
+function readGatewayFacts(email: string): GatewayFacts {
+  return JSON.parse(runBackendScript([
+    'from dotenv import load_dotenv',
+    "load_dotenv('.env')",
+    'import json,os,psycopg,sys',
+    'with psycopg.connect(os.environ["DATABASE_URL"]) as db:',
+    " user=db.execute(\"select id from users where email=%s and status='active'\",(sys.argv[1],)).fetchone()",
+    " assert user is not None, 'actor not found'",
+    ' rows=db.execute("""select r.requested_model,r.outcome,r.status from gateway_requests r join platform_users pu on pu.id=r.platform_user_id where pu.source=\'ink-dream\' and pu.external_user_id=%s order by r.created_at""",(str(user[0]),)).fetchall()',
+    " latest=rows[-1] if rows else (None,None,None)",
+    " print(json.dumps({'count':len(rows),'latestRequestedModel':latest[0],'latestOutcome':latest[1],'latestStatus':latest[2]},ensure_ascii=False))",
+  ].join('\n'), [email])) as GatewayFacts;
 }
 
 function readStoryDatabaseFacts(runId: string): StoryDatabaseFacts {
@@ -235,10 +263,13 @@ test('each dialogue completes the real Project projection and preserves session 
 }) => {
   test.setTimeout(360_000);
   const before = readThreadFacts(THREAD_ID);
+  const gatewayBefore = readGatewayFacts(ACTOR_EMAIL);
   expect(DREAM_IMPACT_SCOPE).toEqual({
     projectTitle: 'changes-or-idempotently-confirms',
     episodeTitle: 'must-remain-unchanged',
     threadAndSession: 'must-remain-unchanged',
+    gatewayRequests: 'at-least-two-new-settled-requests-for-two-visible-turns',
+    executionUpdateFeed: 'removed-with-current-artifacts-unchanged',
     unrelatedArtifacts: 'out-of-scope',
   });
   const context = await browser.newContext({ viewport: { width: 1200, height: 720 } });
@@ -267,7 +298,7 @@ test('each dialogue completes the real Project projection and preserves session 
     await page.goto(`${WEB_BASE}/story-workspace/dream?run=${RUN_ID}`);
     await expect(page.getByRole('heading', { name: '创作工作空间' })).toBeVisible();
     await page.getByRole('button', { name: '打开 Dream Agent 消息' }).click();
-    const mutationRequest = `请先按照本轮工作区要求读取服务端给出的 Dream 工作台上下文文件；确认当前项目后，把项目标题设为「${EXPECTED_TITLE}」。如果文件已经是这个标题，不要改写 Episode 标题，确认当前工作台同步即可。`;
+    const mutationRequest = `这个项目的名字应该叫「${EXPECTED_TITLE}」。请确认一下；如果已经是这个名字，就告诉我第一集叫什么，不要改动第一集内容。`;
     const afterMutation = await sendDialogueAndWait(page, mutationRequest, before);
     expect(afterMutation.model).toBe('deepseek-v4-pro');
     expect(afterMutation.claudeSessionId).toBeTruthy();
@@ -284,7 +315,7 @@ test('each dialogue completes the real Project projection and preserves session 
 
     const unchangedBefore = readWorkspaceFacts(THREAD_ID, RUN_ID);
     await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
-    const continuityRequest = '继续。请再次读取本轮 Dream 工作台上下文，告诉我当前项目标题和 EP01 标题分别是什么；这次只确认上下文，不要修改任何文件。';
+    const continuityRequest = '继续。请告诉我这个项目和第一集现在分别叫什么；这次只查看，不要修改内容。';
     const afterContinuity = await sendDialogueAndWait(
       page,
       continuityRequest,
@@ -295,6 +326,15 @@ test('each dialogue completes the real Project projection and preserves session 
     expect(afterContinuity.readPaths).toContain(files.workbenchPath);
     expect(readWorkspaceFacts(THREAD_ID, RUN_ID)).toEqual(unchangedBefore);
     await expectExecutionProjection(page, token);
+
+    const gatewayAfter = readGatewayFacts(ACTOR_EMAIL);
+    // One visible Claude turn may make more than one Gateway request (for
+    // example, a provider retry). The shared account may also be active in
+    // another window, so the Admin contract is a lower bound, not exact count.
+    expect(gatewayAfter.count).toBeGreaterThanOrEqual(gatewayBefore.count + 2);
+    expect(gatewayAfter.latestRequestedModel).toBeTruthy();
+    expect(gatewayAfter.latestStatus).toBe('settled');
+    expect(gatewayAfter.latestOutcome).toBe('succeeded');
 
     const overflow = await page.evaluate(() => (
       document.documentElement.scrollWidth - document.documentElement.clientWidth

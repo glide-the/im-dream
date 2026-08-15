@@ -1,4 +1,4 @@
-// [Input] Capability-derived public Decks and actor-scoped Dream re-entry rows.
+// [Input] Capability-derived public Decks, default reconciliation, and actor-scoped Dream re-entry rows.
 // [Output] Dream home: active Dream Deck context, real community count, and My Dream list.
 // [Pos] Story Workspace Dream no-run surface; all new interactions start in canonical Chat.
 // [Sync] 2026-08-14: remove the duplicate creation form and reorganize the no-run page into
@@ -10,9 +10,16 @@
 // [Sync] 2026-08-14: include and label the server-projected system default in Community Decks.
 // [Sync] 2026-08-14: fall back to the actor's server-identified initialized default
 //                    when the shared system template row is not published locally.
+// [Sync] 2026-08-15: reconcile the actor default before community reads so legacy
+//                    accounts can see the System default Deck without relogging.
 
 import { useEffect, useMemo, useState } from 'react';
-import { forkDeck, listDecks, type Deck } from '../../api/voiceApi';
+import {
+  forkDeck,
+  listDecks,
+  reconcileDefaultDeckPlugin,
+  type Deck,
+} from '../../api/voiceApi';
 import { updateDeckAgentType } from '../../api/deckPluginApi';
 import {
   useStoryWorkspaceDreamRuns,
@@ -232,7 +239,12 @@ export function StoryWorkspaceDreamLaunch({
   const loadCommunityDecks = () => {
     setCommunityLoading(true);
     setCommunityError(null);
-    void Promise.all([listDecks(true), listDecks()]).then(([collectableDecks, actorDecks]) => {
+    void reconcileDefaultDeckPlugin().catch((error) => {
+      console.warn(
+        'Default Deck reconciliation is temporarily unavailable; loading persisted community Decks.',
+        error,
+      );
+    }).then(() => Promise.all([listDecks(true), listDecks()])).then(([collectableDecks, actorDecks]) => {
       const sharedSystemDefault = collectableDecks.find(
         (deck) => deck.enabled && deck.is_system,
       );

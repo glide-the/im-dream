@@ -4,6 +4,7 @@
 // [Sync] 2026-08-14: lock the borderless three-item active preview and explicit reveal control.
 // [Sync] 2026-08-14: lock system-default inclusion and visible provenance in Community Decks.
 // [Sync] 2026-08-14: lock the actor-default fallback when no shared system row exists.
+// [Sync] 2026-08-15: require default reconciliation before Dream community reads.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -36,6 +37,7 @@ test('no-run Dream mounts its discovery module instead of Chat children', () => 
   expect(LAUNCH_SOURCE).toContain('社区卡组');
   expect(LAUNCH_SOURCE).toContain('我的 Dream');
   expect(LAUNCH_SOURCE).toContain('listDecks');
+  expect(LAUNCH_SOURCE).toContain('reconcileDefaultDeckPlugin');
   expect(LAUNCH_SOURCE).toContain("run.outcome === 'in_progress'");
   expect(LAUNCH_SOURCE).toContain('role="alert"');
 });
@@ -124,6 +126,9 @@ test('Dream launch surface follows the shared dark theme canvas and action contr
 test('Dream community count is real and installation preserves Dream type', () => {
   expect(LAUNCH_SOURCE).toContain('社区卡组（{communityDecks.length}）');
   expect(LAUNCH_SOURCE).toContain('Promise.all([listDecks(true), listDecks()])');
+  expect(LAUNCH_SOURCE.indexOf('reconcileDefaultDeckPlugin()')).toBeLessThan(
+    LAUNCH_SOURCE.indexOf('Promise.all([listDecks(true), listDecks()])'),
+  );
   expect(LAUNCH_SOURCE).toContain("deck.publish_block_reason === 'default_initialized'");
   expect(LAUNCH_SOURCE).toContain('const systemDefault = sharedSystemDefault ?? actorSystemDefault');
   expect(LAUNCH_SOURCE).toContain('<small>System default Deck</small>');

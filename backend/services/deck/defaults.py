@@ -3,9 +3,11 @@
 [Input] Product Deck defaults, verified Claude plugin installations, and Deck
         persistence helpers.
 [Output] Provide one reusable policy boundary for new Deck provisioning and
-         idempotent repair of untouched default screenplay Decks with no refs.
+         idempotent creation/repair of the actor's default screenplay Deck.
 [Pos] Deck-default application service in backend/services/deck.
 [Sync] 2026-08-14: centralize drama-forge resolution and default-Deck repair.
+[Sync] 2026-08-15: default reconciliation now provisions a missing default for
+                   legacy actors while preserving existing Decks and refs.
 """
 
 from __future__ import annotations
@@ -72,7 +74,7 @@ def provision_default_screenplay_deck(user_id: int) -> str:
 
 
 def reconcile_default_screenplay_deck_plugin(user_id: int) -> dict[str, Any]:
-    """Repair only an untouched default Deck whose plugin refs are empty."""
+    """Ensure the actor default exists and repair only its empty plugin refs."""
 
     return database.reconcile_default_screenplay_deck_plugin_ref(
         user_id,

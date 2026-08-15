@@ -15,6 +15,7 @@
 | [设置](./settings.md) | Story Workspace 设置导航与无障碍 |
 | [Chat-first 与剧本创作 Deck 默认交互设计](./chat-first-deck-defaults.md) | 隐藏旧入口、Chat 登录默认入口、剧本创作 Deck、默认/既有账号 Drama Forge 对账、我发布的卡组及分享权限 |
 | [Dream / Chat Agent Deck 交互设计](./dream-chat-agent-deck-interaction.md) | Deck Agent 类型、无边框 Dream 首页、进行中三条预览/查看更多、Chat 横向列表与统一启动路径 |
+| [Deck 版本与 Chat 工作台升级](./deck-versioned-chat-workspace.md) | Deck 聚合 revision、历史对话固定版本、显式工作台升级及 Admin Drizzle capability 边界 |
 
 Agent 对话与 Project/Episode 跨系统合同由以下文档定义：
 

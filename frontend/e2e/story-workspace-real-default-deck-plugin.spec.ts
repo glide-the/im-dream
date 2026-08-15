@@ -84,9 +84,10 @@ test('default account sees drama-forge v1.0.1 selected on 剧本创作团队', a
 
   await page.goto(`${WEB_BASE}/story-workspace/decks`);
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/decks`);
-  const defaultDeck = page.getByText('剧本创作团队', { exact: true });
+  await page.getByRole('tab', { name: '创作 Deck' }).click();
+  const defaultDeck = page.locator('[data-deck-card-kind="owned"]').filter({ hasText: '剧本创作团队' });
   await expect(defaultDeck).toBeVisible();
-  await defaultDeck.click();
+  await defaultDeck.getByRole('button', { name: /编辑|查看模板/ }).click();
 
   await expect(page.getByText('Deck Editor', { exact: true })).toBeVisible();
   const dramaForge = page.locator('label').filter({ hasText: 'drama-forge' });

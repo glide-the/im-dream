@@ -9,6 +9,7 @@
 [Sync] 2026-08-14: document transactional default Free provisioning and Admin-default model resolution for email and Google registration.
 [Sync] 2026-08-14: document screenplay-only Deck visibility and atomic drama-forge v1.0.1 binding on Deck creation.
 [Sync] 2026-08-14: document explicit zero-ref default screenplay Deck reconciliation.
+[Sync] 2026-08-15: document missing default creation for legacy actors through the same reconciliation route.
 -->
 
 **Version:** 2.0.0
@@ -996,10 +997,11 @@ compatibility before committing the Deck and plugin reference.
 
 ### POST `/api/decks/defaults/reconcile`
 
-Idempotently repairs an existing untouched screenplay default Deck when, and
-only when, it has no Claude plugin references. The backend resolves and verifies
-the configured `drama-forge` `1.0.1` installation before the transaction. Any
-existing plugin ref preserves the user's selection and prevents repair.
+Idempotently ensures the actor owns the configured screenplay default Deck. If
+it is missing, the route creates the complete five-role team and verified
+`drama-forge` `1.0.1` reference in one transaction under the actor row lock. If
+the Deck exists with no refs, only the verified ref is added. Any existing
+plugin ref preserves the user's selection and prevents repair.
 
 **Response:**
 ```json
@@ -1010,7 +1012,9 @@ existing plugin ref preserves the user's selection and prevents repair.
 }
 ```
 
-`reason` is one of `missing_ref`, `refs_preserved`, or `default_not_found`.
+`reason` is one of `default_created`, `missing_ref`, or `refs_preserved`. During a
+rolling restart, an older server may still return the legacy `default_not_found`
+reason; clients should tolerate it and refresh after reconciliation.
 Returns `409` when the configured installation cannot be verified; Deck and
 existing refs remain unchanged.
 

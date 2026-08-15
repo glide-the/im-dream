@@ -81,6 +81,8 @@
 //                    and restore stable deckId route intent after refresh.
 // [Sync] 2026-08-14: make each Active Dream card a canonical whole-card run.href link.
 // [Sync] 2026-08-14: show Dream's initial/in-progress rows in an adaptive horizontal scroller.
+// [Sync] 2026-08-15: historical threads hide the immutable composer selector;
+//                    Deck/Agent context remains visible in the top bar.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -1280,15 +1282,6 @@ function ChatViewContent({
                   voiceSystemPrompt={voiceSystemPrompt}
                   deckId={selectedDeckId}
                   voiceId={selectedAgentId}
-                  inputContextControl={(
-                    <DeckChatSelector
-                      decks={availableDecks}
-                      selectedAgentId={selectedAgentId}
-                      loading={isLoadingDecks}
-                      error={deckLoadError}
-                      locked
-                    />
-                  )}
                   onConversationStart={() => {
                     setHasConversationStarted(true);
                     void reloadThreads();

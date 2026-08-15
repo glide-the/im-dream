@@ -12,6 +12,7 @@
 # [Sync] 2026-08-14: enforce system-default publication and self-collection policy at the API boundary.
 # [Sync] 2026-08-14: expose the active system default alongside other actors'
 #                    published Decks in the collectable community projection.
+# [Sync] 2026-08-15: reconcile missing legacy default teams as well as empty plugin refs.
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -109,7 +110,7 @@ def list_decks(published: bool = False, current_user: dict = Depends(get_current
 
 @router.post("/api/decks/defaults/reconcile")
 def reconcile_deck_defaults(current_user: dict = Depends(get_current_user)):
-    """Repair an untouched screenplay default only when it has zero refs."""
+    """Create a missing actor default or repair its empty verified plugin ref."""
 
     try:
         return reconcile_default_screenplay_deck_plugin(current_user["user_id"])

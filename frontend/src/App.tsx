@@ -11,6 +11,8 @@
 //                    snapshot to an Agent that may invoke database-backed MCP writes.
 // [Sync] 2026-08-14: route Deck selection to canonical Story Workspace Chat
 //                    with stable Deck/Agent intent; mode is re-read from the server.
+// [Sync] 2026-08-15: notify the mounted Story Workspace router after Deck-to-Chat
+//                    pushState so the visible page and URL change in the same interaction.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
 // [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect inserts widget, stays in writing view; handleChatSend uses chatWithVoice with full context (allText, metaPrompt, statePrompt); "Chat →" button available when thread exists.
 // [Sync] 2026-06-01: pass state as editorState to chatWithVoiceSSE in handleChatSend so inline widget agent receives editor_state.
@@ -1118,6 +1120,7 @@ export default function App() {
       '',
       `${STORY_WORKSPACE_PATHS.chat}?${query.toString()}`,
     );
+    window.dispatchEvent(new PopStateEvent('popstate'));
     setCurrentView('story-workspace');
     setHasOpenedChatView(true);
   }, []);

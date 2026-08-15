@@ -1,8 +1,10 @@
 // [Input] getThreadPluginLoadReceipt API plus the hydrated Deck bound to the thread.
-// [Output] Compact badge showing the packed plugin package/version/digest for the
-//          active chat thread; clicking opens a popover with the Deck metadata:
-//          Deck name, bundled agent names, and the plugin manifest.
+// [Output] Compact, stable Deck context badge for the active chat thread; clicking
+//          opens Deck metadata, bundled Agents, and plugin receipt provenance.
 // [Pos] Mounted next to the Deck voice badge in ChatView's top-right action row.
+// [Sync] 2026-08-15: keep the Deck name visible after a plugin receipt arrives;
+//                    plugin versions belong in the metadata popover, not in place
+//                    of the conversation's Deck identity.
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -236,16 +238,14 @@ export default function PluginReceiptBadge({
       >
         <span aria-hidden>🧩</span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {hasReceiptPlugins ? (
+          {deckName ?? (hasReceiptPlugins ? (
             plugins.map((plugin) => (
               <span key={`${plugin.package_spec}-${plugin.artifact_digest}`} style={{ marginRight: '0.5rem' }}>
                 {plugin.package_spec.split('@')[0]} v{plugin.resolved_version ?? '?'} ·{' '}
                 {shortDigest(plugin.artifact_digest)}
               </span>
             ))
-          ) : (
-            deckName
-          )}
+          ) : null)}
         </span>
         {frozen ? <span style={{ opacity: 0.75 }}>🔒</span> : null}
       </button>

@@ -33,6 +33,8 @@
 # [Sync] 2026-08-14: keep PostgreSQL community Deck aggregation valid by grouping author display names.
 # [Sync] 2026-08-14: include the configured active system-default Deck in the
 #                    collectable community projection without reviving retired defaults.
+# [Sync] 2026-08-15: make default reconciliation provision a missing user-owned
+#                    screenplay Deck under the actor row lock for legacy accounts.
 # [Sync] 2026-08-14: decorate Deck list/detail reads with capability-derived
 #                    Chat/Dream Agent type and optimistic binding revision.
 """
@@ -717,15 +719,67 @@ def _upsert_default_deck_plugin_ref(db, deck_id: str, default_plugin_ref: dict) 
     )
 
 
+def _insert_default_screenplay_deck(
+    db,
+    user_id: int,
+    default_plugin_ref: dict,
+) -> str:
+    """Insert the configured user-owned screenplay Deck in the caller transaction."""
+
+    import config
+    import uuid
+
+    template = config.SCREENPLAY_DECK_TEMPLATE
+    deck_id = str(uuid.uuid4())
+    memory_config_json = _default_memory_workspace_config_json()
+    max_order = db.execute(
+        "SELECT MAX(order_index) AS max_order FROM decks WHERE owner_id = %s",
+        (user_id,),
+    ).fetchone()["max_order"]
+    db.execute(
+        """
+        INSERT INTO decks (
+            id, name, name_zh, name_en, description, description_zh,
+            description_en, icon, color, is_system, owner_id, enabled,
+            has_local_changes, order_index
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s)
+        """,
+        (
+            deck_id, template["name"], template["name_zh"], template["name_en"],
+            template["description"], template["description_zh"],
+            template["description_en"], template["icon"], template["color"],
+            user_id, (max_order or 0) + 1,
+        ),
+    )
+    for order, voice in enumerate(template["voices"]):
+        db.execute(
+            """
+            INSERT INTO voices (
+                id, deck_id, name, name_zh, name_en, system_prompt, icon,
+                color, is_system, owner_id, enabled, has_local_changes,
+                order_index, memory_workspace_config
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s, %s)
+            """,
+            (
+                str(uuid.uuid4()), deck_id, voice["name"], voice["name_zh"],
+                voice["name_en"], voice["system_prompt"], voice["icon"],
+                voice["color"], user_id, order, memory_config_json,
+            ),
+        )
+    _upsert_default_deck_plugin_ref(db, deck_id, default_plugin_ref)
+    return deck_id
+
+
 def reconcile_default_screenplay_deck_plugin_ref(
     user_id: int,
     default_plugin_ref: dict,
 ) -> dict:
-    """Repair one untouched default screenplay Deck only when refs are empty.
+    """Ensure one untouched screenplay default and repair its empty refs.
 
     Existing refs, including a user's explicit deselection/replacement state,
     are never overwritten.  The fallback fingerprint is derived entirely from
     the configured template because fallback Decks have no shared parent row.
+    The actor row lock serializes missing-default creation across tabs.
     """
 
     import config
@@ -735,6 +789,13 @@ def reconcile_default_screenplay_deck_plugin_ref(
     role_placeholders = ",".join("%s" for _ in role_names)
     db = get_db()
     try:
+        actor = db.execute(
+            "SELECT id FROM users WHERE id = %s FOR UPDATE",
+            (user_id,),
+        ).fetchone()
+        if actor is None:
+            raise ValueError("DEFAULT_DECK_ACTOR_NOT_FOUND")
+
         deck = db.execute(
             f"""
             SELECT d.id
@@ -776,8 +837,9 @@ def reconcile_default_screenplay_deck_plugin_ref(
             ),
         ).fetchone()
         if deck is None:
-            db.rollback()
-            return {"deck_id": None, "reconciled": False, "reason": "default_not_found"}
+            deck_id = _insert_default_screenplay_deck(db, user_id, default_plugin_ref)
+            db.commit()
+            return {"deck_id": deck_id, "reconciled": True, "reason": "default_created"}
 
         existing_ref = db.execute(
             "SELECT 1 FROM deck_claude_plugin_refs WHERE deck_id = %s LIMIT 1",
@@ -961,49 +1023,9 @@ def create_default_screenplay_deck(user_id: int, default_plugin_ref: dict) -> st
     it never creates shared schema or system rows at runtime.
     """
 
-    import config
-    import uuid
-
-    template = config.SCREENPLAY_DECK_TEMPLATE
-    deck_id = str(uuid.uuid4())
-    memory_config_json = _default_memory_workspace_config_json()
     db = get_db()
     try:
-        max_order = db.execute(
-            "SELECT MAX(order_index) AS max_order FROM decks WHERE owner_id = %s",
-            (user_id,),
-        ).fetchone()["max_order"]
-        db.execute(
-            """
-            INSERT INTO decks (
-                id, name, name_zh, name_en, description, description_zh,
-                description_en, icon, color, is_system, owner_id, enabled,
-                has_local_changes, order_index
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s)
-            """,
-            (
-                deck_id, template["name"], template["name_zh"], template["name_en"],
-                template["description"], template["description_zh"],
-                template["description_en"], template["icon"], template["color"],
-                user_id, (max_order or 0) + 1,
-            ),
-        )
-        for order, voice in enumerate(template["voices"]):
-            db.execute(
-                """
-                INSERT INTO voices (
-                    id, deck_id, name, name_zh, name_en, system_prompt, icon,
-                    color, is_system, owner_id, enabled, has_local_changes,
-                    order_index, memory_workspace_config
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s, %s)
-                """,
-                (
-                    str(uuid.uuid4()), deck_id, voice["name"], voice["name_zh"],
-                    voice["name_en"], voice["system_prompt"], voice["icon"],
-                    voice["color"], user_id, order, memory_config_json,
-                ),
-            )
-        _upsert_default_deck_plugin_ref(db, deck_id, default_plugin_ref)
+        deck_id = _insert_default_screenplay_deck(db, user_id, default_plugin_ref)
         db.commit()
         return deck_id
     except Exception:

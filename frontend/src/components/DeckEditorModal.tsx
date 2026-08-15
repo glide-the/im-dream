@@ -5,6 +5,8 @@
 //                    theme tokens so the Deck editor stays readable in dark mode.
 // [Sync] 2026-08-14: add semantic Chat/Dream Agent radio options backed by the
 //                    server's optimistic binding revision; remove the duplicate Dream launch action.
+// [Sync] 2026-08-15: remove the misleading duplicate "Deck Prompt" editor that
+//                    wrote the description field, and expose labelled metadata controls/dialog semantics.
 import { useEffect, useMemo, useState } from 'react';
 import type { Deck, Voice } from '../api/voiceApi';
 import type { DeckAgentType } from '../api/deckPluginApi';
@@ -99,7 +101,10 @@ export default function DeckEditorModal({
       onClick={onClose}
     >
       <div
+        aria-labelledby="deck-editor-title"
+        aria-modal="true"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
         style={{
           width: 'min(1200px, 100%)',
           height: '85vh',
@@ -121,7 +126,7 @@ export default function DeckEditorModal({
           borderBottom: '1px solid var(--color-border-paper)',
           background: 'var(--color-bg-surface-solid)'
         }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-text-primary)', letterSpacing: -0.3 }}>
+          <div id="deck-editor-title" style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-text-primary)', letterSpacing: -0.3 }}>
             Deck Editor
           </div>
           <button
@@ -152,15 +157,10 @@ export default function DeckEditorModal({
         </div>
 
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16, flex: 1, overflowY: 'auto' }}>
-          {/* Deck metadata: name + description left, prompt right */}
-          <div style={{
-            display: 'flex',
-            gap: 12,
-            flexWrap: 'wrap'
-          }}>
+          {/* Deck metadata. There is no independent Deck prompt field in the persisted contract. */}
+          <div>
             <div style={{
-              flex: '0 1 360px',
-              minWidth: 260,
+              width: '100%',
               background: 'var(--color-bg-surface-solid)',
               border: '2px solid var(--color-border-neutral)',
               borderRadius: 12,
@@ -171,7 +171,7 @@ export default function DeckEditorModal({
               gap: 10,
               boxSizing: 'border-box'
             }}>
-              <div style={{
+              <label htmlFor={`deck-name-${deck.id}`} style={{
                 fontSize: 11,
                 fontWeight: 600,
                 color: 'var(--color-text-secondary)',
@@ -179,8 +179,9 @@ export default function DeckEditorModal({
                 textTransform: 'uppercase'
               }}>
                 Deck Name
-              </div>
+              </label>
               <input
+                id={`deck-name-${deck.id}`}
                 key={`${deck.id}-${deck.name}`}
                 type="text"
                 defaultValue={deck.name}
@@ -202,7 +203,7 @@ export default function DeckEditorModal({
                   boxSizing: 'border-box'
                 }}
               />
-              <div style={{
+              <label htmlFor={`deck-description-${deck.id}`} style={{
                 fontSize: 11,
                 fontWeight: 600,
                 color: 'var(--color-text-secondary)',
@@ -210,8 +211,9 @@ export default function DeckEditorModal({
                 textTransform: 'uppercase'
               }}>
                 Deck Description
-              </div>
+              </label>
               <textarea
+                id={`deck-description-${deck.id}`}
                 key={`${deck.id}-desc-${deck.description || ''}`}
                 defaultValue={deck.description || ''}
                 disabled={isSystem}
@@ -233,54 +235,6 @@ export default function DeckEditorModal({
                   resize: 'vertical',
                   boxSizing: 'border-box',
                   lineHeight: 1.5
-                }}
-              />
-            </div>
-
-            <div style={{
-              flex: '1 1 320px',
-              minWidth: 260,
-              background: 'var(--color-bg-surface-solid)',
-              border: '2px solid var(--color-border-neutral)',
-              borderRadius: 12,
-              padding: 16,
-              boxShadow: '0 2px 6px var(--color-shadow-soft)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              boxSizing: 'border-box'
-            }}>
-              <div style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: 'var(--color-text-secondary)',
-                letterSpacing: 0.5,
-                textTransform: 'uppercase'
-              }}>
-                Deck Prompt (shared)
-              </div>
-              <textarea
-                key={`${deck.id}-prompt-${deck.description || ''}`}
-                defaultValue={deck.description || ''}
-                disabled={isSystem}
-                onBlur={(e) => {
-                  if (!isSystem && e.target.value !== (deck.description || '')) {
-                    onUpdateDeck(deck.id, { description: e.target.value });
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  minHeight: 140,
-                  padding: '10px 12px',
-                  fontSize: 13,
-                  fontFamily: 'monospace',
-                  border: '2px solid var(--color-border-neutral)',
-                  borderRadius: 8,
-                  background: isSystem ? 'var(--color-disabled-bg)' : 'var(--color-bg-paper)',
-                  color: 'var(--color-text-primary)',
-                  resize: 'vertical',
-                  boxSizing: 'border-box',
-                  lineHeight: 1.6
                 }}
               />
             </div>
@@ -463,6 +417,7 @@ export default function DeckEditorModal({
                           {voice.name}
                         </div>
                         <input
+                          aria-label={`Toggle ${voice.name}`}
                           type="checkbox"
                           checked={voice.enabled}
                           onClick={(e) => e.stopPropagation()}
@@ -527,6 +482,7 @@ export default function DeckEditorModal({
                       </div>
 
                       <input
+                        aria-label="Agent Name"
                         key={`${selectedVoice.id}-${selectedVoice.name}`}
                         type="text"
                         defaultValue={selectedVoice.name}
@@ -550,6 +506,7 @@ export default function DeckEditorModal({
                       />
 
                       <select
+                        aria-label="Agent Icon"
                         value={selectedVoice.icon}
                         disabled={isSystem}
                         onChange={(e) => onUpdateVoice(selectedVoice.id, { icon: e.target.value })}
@@ -569,6 +526,7 @@ export default function DeckEditorModal({
                       </select>
 
                       <select
+                        aria-label="Agent Color"
                         value={selectedVoice.color}
                         disabled={isSystem}
                         onChange={(e) => onUpdateVoice(selectedVoice.id, { color: e.target.value })}
@@ -642,7 +600,7 @@ export default function DeckEditorModal({
                       )}
                     </div>
 
-                    <div style={{
+                    <label htmlFor={`agent-prompt-${selectedVoice.id}`} style={{
                       fontSize: 11,
                       fontWeight: 600,
                       color: 'var(--color-text-secondary)',
@@ -650,8 +608,9 @@ export default function DeckEditorModal({
                       textTransform: 'uppercase'
                     }}>
                       Agent Prompt
-                    </div>
+                    </label>
                     <textarea
+                      id={`agent-prompt-${selectedVoice.id}`}
                       key={`${selectedVoice.id}-${selectedVoice.system_prompt}`}
                       defaultValue={selectedVoice.system_prompt}
                       disabled={isSystem}

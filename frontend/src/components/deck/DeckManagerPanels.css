@@ -1,0 +1,400 @@
+/* [Input] Ink & Memory semantic theme tokens and DeckManager panel markup. */
+/* [Output] Quiet responsive use/create Deck task-mode presentation. */
+/* [Pos] DeckManager panel styles in frontend/src/components/deck. */
+/* [Sync] 2026-08-15: establish accessible task tabs, native Agent fields, and 44px actions. */
+
+@keyframes deck-manager-spin {
+  to { transform: rotate(360deg); }
+}
+
+.deck-manager-shell {
+  background: var(--color-bg-app);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.deck-manager-shell__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: clamp(1rem, 4vw, 2rem);
+}
+
+.deck-manager-shell__content {
+  border: 1px dashed color-mix(in srgb, var(--color-border-paper) 62%, transparent);
+  border-radius: 1.05rem;
+  display: grid;
+  gap: 1.5rem;
+  margin: 0 auto;
+  max-width: 75rem;
+  padding: clamp(0.9rem, 3vw, 1.5rem);
+}
+
+.deck-manager-shell__header h1 {
+  color: var(--color-text-primary);
+  font-family: Georgia, serif;
+  font-size: clamp(1.6rem, 3vw, 2rem);
+  margin: 0;
+}
+
+.deck-manager-shell__header p {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-style: italic;
+  margin: 0.4rem 0 0;
+}
+
+.deck-manager-status {
+  align-items: center;
+  background: var(--color-bg-app);
+  color: var(--color-text-secondary);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.75rem;
+  justify-content: center;
+  min-height: 20rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.deck-manager-status__spinner {
+  animation: deck-manager-spin 0.9s linear infinite;
+  border: 2px solid var(--color-border-neutral);
+  border-radius: 50%;
+  border-top-color: var(--color-text-secondary);
+  height: 1.1rem;
+  width: 1.1rem;
+}
+
+.deck-manager-dialog-backdrop {
+  align-items: center;
+  background: var(--color-bg-overlay);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: 9999;
+}
+
+.deck-manager-dialog {
+  background: var(--color-bg-surface-solid);
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 58%, transparent);
+  border-radius: 0.9rem;
+  box-shadow: 0 4px 12px var(--color-shadow-medium);
+  color: var(--color-text-primary);
+  max-width: 25rem;
+  padding: 1.5rem;
+}
+
+.deck-manager-dialog h2 {
+  font-size: 1.1rem;
+  margin: 0 0 1rem;
+}
+
+.deck-manager-dialog p {
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.deck-manager-dialog__warning {
+  color: var(--color-state-error);
+}
+
+.deck-manager-dialog__actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.deck-manager-mode {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.deck-manager-mode__tabs {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-bg-paper) 44%, transparent);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 0.25rem;
+  justify-self: start;
+  padding: 0.25rem;
+}
+
+.deck-manager-mode__tab {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 650;
+  min-height: 44px;
+  padding: 0.65rem 1rem;
+}
+
+.deck-manager-mode__tab[aria-selected='true'] {
+  background: var(--color-text-primary);
+  color: var(--color-bg-app);
+}
+
+.deck-manager-mode__tab:focus-visible,
+.deck-manager-primary-action:focus-visible,
+.deck-manager-secondary-action:focus-visible,
+.deck-manager-danger-action:focus-visible,
+.deck-manager-switch:focus-visible,
+.deck-manager-agent-field select:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.deck-manager-mode__description {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.deck-manager-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.deck-manager-panel__heading {
+  align-items: baseline;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.deck-manager-panel__heading--action {
+  align-items: center;
+}
+
+.deck-manager-panel__heading h2,
+.deck-manager-card h3 {
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.deck-manager-panel__heading h2 {
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.deck-manager-panel__heading span,
+.deck-manager-card__meta {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.deck-manager-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+}
+
+.deck-manager-card {
+  --deck-accent: var(--color-action-link);
+  background: color-mix(in srgb, var(--color-bg-paper) 38%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 38%, transparent);
+  border-inline-start: 3px solid var(--deck-accent);
+  border-radius: 0.8rem;
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+  padding: 0.95rem;
+}
+
+.deck-manager-card__identity {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.deck-manager-card__icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--deck-accent) 10%, var(--color-bg-paper));
+  border: 1px solid color-mix(in srgb, var(--deck-accent) 24%, var(--color-border-paper));
+  border-radius: 0.7rem;
+  color: var(--deck-accent);
+  display: inline-flex;
+  flex: 0 0 44px;
+  height: 44px;
+  justify-content: center;
+}
+
+.deck-manager-card__copy {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.deck-manager-card__copy h3 {
+  font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-manager-card__copy p,
+.deck-manager-card__notice {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.deck-manager-card__title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.deck-manager-card__type {
+  background: var(--color-bg-hover);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+  font-weight: 650;
+  padding: 0.2rem 0.45rem;
+}
+
+.deck-manager-agent-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.deck-manager-agent-field > span {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.deck-manager-agent-field select {
+  background: var(--color-bg-paper);
+  border: 1px solid var(--color-border-paper);
+  border-radius: 0.65rem;
+  color: var(--color-text-primary);
+  font: inherit;
+  min-height: 44px;
+  padding: 0.6rem 0.75rem;
+  width: 100%;
+}
+
+.deck-manager-card__actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.deck-manager-primary-action,
+.deck-manager-secondary-action,
+.deck-manager-danger-action,
+.deck-manager-switch {
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  min-height: 44px;
+  padding: 0.62rem 0.85rem;
+}
+
+.deck-manager-primary-action {
+  background: var(--color-text-primary);
+  border: 1px solid var(--color-text-primary);
+  color: var(--color-bg-app);
+  width: 100%;
+}
+
+.deck-manager-primary-action--compact {
+  padding-inline: 1.1rem;
+  width: auto;
+}
+
+.deck-manager-primary-action:disabled,
+.deck-manager-secondary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.deck-manager-secondary-action,
+.deck-manager-switch {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 62%, transparent);
+  color: var(--color-text-primary);
+}
+
+.deck-manager-danger-action {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--color-state-danger) 40%, var(--color-border-paper));
+  color: var(--color-state-danger);
+}
+
+.deck-manager-switch {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.4rem;
+}
+
+.deck-manager-switch > span {
+  background: var(--color-border-paper);
+  border-radius: 999px;
+  display: inline-block;
+  height: 0.75rem;
+  width: 0.75rem;
+}
+
+.deck-manager-switch[aria-checked='true'] > span {
+  background: var(--color-state-success);
+}
+
+.deck-manager-publications {
+  border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 38%, transparent);
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  padding-top: 1.25rem;
+}
+
+.deck-manager-empty {
+  background: color-mix(in srgb, var(--color-bg-paper) 30%, transparent);
+  border-radius: 0.75rem;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  margin: 0;
+  padding: 1.25rem;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .deck-manager-mode__tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    justify-self: stretch;
+  }
+
+  .deck-manager-panel__heading--action {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .deck-manager-primary-action--compact {
+    width: 100%;
+  }
+
+  .deck-manager-card__actions > button {
+    flex: 1 1 auto;
+  }
+}

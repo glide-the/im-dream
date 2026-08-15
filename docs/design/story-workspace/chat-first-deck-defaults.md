@@ -80,8 +80,9 @@ Drama Forge 插件。本次调整只收敛入口和默认值，不删除旧功�
 
 既有 fallback 副本没有共享 `parent_id`，因此对账只接受集中模板导出的严格指纹：Deck 本身
 未修改，中英文名称匹配，Voice 数量和角色名称集合完整且 Voice 均未修改。找到后还必须确认
-refs 完全为空才写入；只要已经存在任意 ref，就返回 `refs_preserved`，不把“产品默认值”变成
-每次进入页面都覆盖用户选择的策略。
+refs 完全为空才写入；只要已经存在任意 ref，就返回 `refs_preserved`。若旧账号已有其他 Deck
+但完全缺少该团队，则在 actor 行锁下同事务创建完整五角色团队和已验证引用，返回
+`default_created`；重复调用只会复用该团队，不覆盖用户选择。
 
 ### 3.4 新建 Deck 与默认 Claude 插件
 
@@ -235,12 +236,12 @@ sequenceDiagram
     M-->>U: 保持原列表并显示创建失败
 ```
 
-### 5.5 既有默认团队补齐缺失引用
+### 5.5 旧账号补建或修复默认团队
 
 ```mermaid
 sequenceDiagram
     actor U as 用户
-    participant M as DeckManager
+    participant M as DeckManager / Dream 首页
     participant API as Deck defaults API
     participant V as Deck default service
     participant DB as PostgreSQL
@@ -248,14 +249,15 @@ sequenceDiagram
     U->>M: 打开 Decks
     M->>API: POST /api/decks/defaults/reconcile
     API->>V: 解析并验证 drama-forge 1.0.1
-    V->>DB: 锁定未经修改的默认团队并检查 refs
-    alt refs 为空
+    V->>DB: 锁定 actor，查找严格匹配的默认团队并检查 refs
+    alt 默认团队不存在
+        V->>DB: 同事务创建五角色团队 + enabled ref
+        DB-->>API: default_created / reconciled=true
+    else refs 为空
         V->>DB: 同事务写入一个 enabled ref
         DB-->>API: missing_ref / reconciled=true
     else 已有任意 refs
         DB-->>API: refs_preserved / reconciled=false
-    else 不存在严格匹配的默认团队
-        DB-->>API: default_not_found / reconciled=false
     end
     API-->>M: 对账结果
     M->>API: GET /api/decks
@@ -318,8 +320,8 @@ sequenceDiagram
   Writing、Timeline、Analysis，三个恢复项进入既有生产页面，刷新恢复路由时保持展开，认证
   根路径仍进入 Chat。
 - 新用户默认 Deck 只包含剧本创作团队；退休系统副本不出现在列表，用户自建/修改 Deck 保留。
-- 既有默认账号打开 Decks 后，严格匹配且 refs 为空的剧本创作团队只补一个 enabled
-  `drama-forge v1.0.1`；再次对账幂等，已有任意 refs 不改变。
+- 旧账号打开 Decks 或 Dream 后，缺失的剧本创作团队原子补建完整五角色与一个 enabled
+  `drama-forge v1.0.1`；严格匹配且 refs 为空时只补引用；再次对账幂等，已有任意 refs 不改变。
 - 新建 Deck 后 API refs 和插件选择器均显示 `drama-forge v1.0.1` enabled；刷新后不丢失。
 - 默认插件缺失、非 ready、digest 失败或不兼容时创建失败，数据库不存在半成品 Deck。
 - `body` 和标准表单控件计算字体包含 Microsoft YaHei/微软雅黑；monospace 编辑器不被覆盖。

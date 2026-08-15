@@ -1,11 +1,11 @@
 # [Input] Screenplay Deck policy, Deck-default service, persistence helpers, and
 #         Deck routes.
-# [Output] Verify one screenplay-role default, retirement visibility, zero-ref
-#          repair, community query validity, verified drama-forge selection,
-#          and atomic rollback behavior.
+# [Output] Verify one screenplay-role default, retirement visibility, missing-default
+#          creation, zero-ref repair, community validity, and atomic rollback.
 # [Pos] Deck default policy and creation contract test in backend/tests
 # [Sync] 2026-08-14: cover new provisioning and non-destructive legacy repair.
 # [Sync] 2026-08-14: require the active system default in the collectable community query.
+# [Sync] 2026-08-15: cover idempotent legacy-account default creation under actor lock.
 
 from __future__ import annotations
 
@@ -92,19 +92,36 @@ class _PublishedDeckDb:
 
 
 class _ReconcileDb(_CreateDeckDb):
-    def __init__(self, existing_ref: dict[str, Any] | None) -> None:
+    def __init__(
+        self,
+        existing_ref: dict[str, Any] | None,
+        default_deck_id: str | None = "screenplay-user-deck",
+    ) -> None:
         super().__init__(_verified_installation())
         self.existing_ref = existing_ref
+        self.default_deck_id = default_deck_id
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _Cursor:
         normalized = " ".join(sql.split())
         self.statements.append((normalized, tuple(params)))
+        if "SELECT id FROM users" in normalized and "FOR UPDATE" in normalized:
+            return _Cursor({"id": 7})
         if "SELECT d.id FROM decks d" in normalized:
-            return _Cursor({"id": "screenplay-user-deck"})
+            return _Cursor(
+                {"id": self.default_deck_id}
+                if self.default_deck_id is not None
+                else None
+            )
         if "SELECT 1 FROM deck_claude_plugin_refs" in normalized:
             return _Cursor(self.existing_ref)
+        if "SELECT MAX(order_index)" in normalized:
+            return _Cursor({"max_order": 4})
         if "FROM claude_plugin_installations" in normalized:
             return _Cursor(self.installation)
+        if "INSERT INTO decks" in normalized:
+            self.default_deck_id = str(params[0])
+        if "INSERT INTO deck_claude_plugin_refs" in normalized:
+            self.existing_ref = {"exists": 1}
         return _Cursor()
 
 
@@ -236,6 +253,45 @@ def test_reconcile_empty_default_deck_refs_adds_only_drama_forge(monkeypatch) ->
     assert fake_db.commits == 1
     assert fake_db.rollbacks == 0
     assert fake_db.closed is True
+
+
+def test_reconcile_missing_legacy_default_creates_one_complete_team(monkeypatch) -> None:
+    fake_db = _ReconcileDb(existing_ref=None, default_deck_id=None)
+    monkeypatch.setattr(database, "get_db", lambda: fake_db)
+
+    result = database.reconcile_default_screenplay_deck_plugin_ref(7, _default_ref())
+
+    assert result["deck_id"]
+    assert result["reconciled"] is True
+    assert result["reason"] == "default_created"
+    assert sum("INSERT INTO decks" in sql for sql, _ in fake_db.statements) == 1
+    assert sum("INSERT INTO voices" in sql for sql, _ in fake_db.statements) == 5
+    assert sum(
+        "INSERT INTO deck_claude_plugin_refs" in sql
+        for sql, _ in fake_db.statements
+    ) == 1
+    assert "SELECT id FROM users WHERE id = %s FOR UPDATE" in fake_db.statements[0][0]
+    assert fake_db.commits == 1
+    assert fake_db.rollbacks == 0
+    assert fake_db.closed is True
+
+
+def test_reconcile_missing_legacy_default_is_idempotent(monkeypatch) -> None:
+    fake_db = _ReconcileDb(existing_ref=None, default_deck_id=None)
+    monkeypatch.setattr(database, "get_db", lambda: fake_db)
+
+    created = database.reconcile_default_screenplay_deck_plugin_ref(7, _default_ref())
+    repeated = database.reconcile_default_screenplay_deck_plugin_ref(7, _default_ref())
+
+    assert created["reason"] == "default_created"
+    assert repeated == {
+        "deck_id": created["deck_id"],
+        "reconciled": False,
+        "reason": "refs_preserved",
+    }
+    assert sum("INSERT INTO decks" in sql for sql, _ in fake_db.statements) == 1
+    assert fake_db.commits == 1
+    assert fake_db.rollbacks == 1
 
 
 def test_reconcile_preserves_any_existing_user_plugin_selection(monkeypatch) -> None:

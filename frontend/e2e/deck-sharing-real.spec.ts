@@ -1,7 +1,7 @@
 // [Input] Named existing actor, normal local Deck UI/API, and real PostgreSQL state.
 // [Output] Prove My Published Decks ownership, default-Deck publish denial, and self-collection denial.
 // [Pos] Opt-in real-business Deck sharing acceptance in frontend/e2e.
-// [Sync] 2026-08-14: add dmeck123@suoxya.com Deck sharing policy acceptance.
+// [Sync] 2026-08-15: enter creator mode before the real publication-policy assertions.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -110,6 +110,7 @@ test('named actor sees My Published Decks and cannot publish or collect their de
   }, token);
   await page.goto(`${WEB_BASE}/story-workspace/decks`);
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/decks`);
+  await page.getByRole('tab', { name: '创作 Deck' }).click();
   await expect(page.getByRole('heading', { name: /我发布的卡组（\d+）/ })).toBeVisible();
 
   const ownedCard = page.locator(

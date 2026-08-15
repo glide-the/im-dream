@@ -90,6 +90,18 @@ const resources = {
       deck: {
         heading: 'Voice Decks',
         subheading: 'Organize your inner voices into thematic collections',
+        loading: 'Loading Decks…',
+        mode: {
+          ariaLabel: 'Deck workspace mode',
+          use: {
+            label: 'Use Decks',
+            description: 'Choose an enabled Deck and Agent, then start a new conversation. Runtime settings are read-only here.'
+          },
+          create: {
+            label: 'Create Decks',
+            description: 'Create, edit, enable, sync, and publish Decks you manage.'
+          }
+        },
         actions: {
           retry: 'Retry',
           create: '+ Create New Deck',
@@ -101,10 +113,18 @@ const resources = {
           publish: 'Publish to Community',
           publishUnavailable: 'System default · Cannot publish',
           unpublish: 'Unpublish',
-          delete: 'Delete Deck'
+          delete: 'Delete Deck',
+          edit: 'Edit',
+          inspect: 'Inspect template',
+          fork: 'Fork',
+          enable: 'Enable',
+          disable: 'Disable',
+          useInChat: 'Use in Chat'
         },
         sections: {
           myDecks: 'My Decks',
+          availableDecks: 'Available Decks',
+          availableDecksCount: '{{count}} enabled',
           community: 'Community Decks ({{count}})',
           publishedByMe: 'My Published Decks ({{count}})'
         },
@@ -112,7 +132,20 @@ const resources = {
           system: 'System',
           noDescription: 'No description',
           voiceCount: '{{count}} voices',
-          anonymous: 'Anonymous'
+          anonymous: 'Anonymous',
+          agentType: {
+            chat: 'Chat Agent',
+            dream: 'Dream Agent'
+          }
+        },
+        use: {
+          empty: 'No enabled Deck is available. Enable one in Create Decks.',
+          agentLabel: 'Agent',
+          agentSelectAria: 'Choose an Agent from {{deck}}',
+          noAgent: 'This Deck has no enabled Agent and cannot start a conversation.'
+        },
+        creator: {
+          scopeHint: 'Runtime edits belong here; usage stays read-only.'
         },
         communityMeta: 'by {{author}} · {{voices}} voices · {{installs}} installs',
         communityEmpty: 'No published decks yet. Be the first to share!',
@@ -120,6 +153,7 @@ const resources = {
         publishedByMeEmpty: 'You have not published any Decks yet.',
         confirm: {
           delete: 'Delete this deck and all its voices?',
+          deleteAgent: 'Delete this Agent?',
           sync: 'Sync with original template? This will overwrite any changes you made to this deck.'
         },
         publishWarning: {
@@ -700,6 +734,18 @@ const resources = {
       deck: {
           heading: '声线卡组',
           subheading: '以主题整理你的心灵声线',
+          loading: '正在加载 Deck…',
+          mode: {
+            ariaLabel: 'Deck 工作台模式',
+            use: {
+              label: '使用 Deck',
+              description: '选择已启用的 Deck 和 Agent，然后开始新对话；这里不修改运行配置。'
+            },
+            create: {
+              label: '创作 Deck',
+              description: '创建、编辑、启停、同步和发布你管理的 Deck。'
+            }
+          },
           actions: {
             retry: '重试',
             create: '+ 新建卡组',
@@ -711,10 +757,18 @@ const resources = {
             publish: '发布到社区',
             publishUnavailable: '系统默认 · 不可发布',
             unpublish: '取消发布',
-            delete: '删除卡组'
+            delete: '删除卡组',
+            edit: '编辑',
+            inspect: '查看模板',
+            fork: '创建副本',
+            enable: '启用',
+            disable: '停用',
+            useInChat: '在 Chat 中使用'
           },
         sections: {
           myDecks: '我的卡组',
+          availableDecks: '可使用的 Deck',
+          availableDecksCount: '{{count}} 个已启用',
           community: '社区卡组（{{count}}）',
           publishedByMe: '我发布的卡组（{{count}}）'
         },
@@ -722,7 +776,20 @@ const resources = {
           system: '系统',
           noDescription: '暂无简介',
           voiceCount: '{{count}} 条声线',
-          anonymous: '匿名'
+          anonymous: '匿名',
+          agentType: {
+            chat: 'Chat Agent',
+            dream: 'Dream Agent'
+          }
+        },
+        use: {
+          empty: '当前没有可使用的 Deck，可前往“创作 Deck”启用。',
+          agentLabel: 'Agent',
+          agentSelectAria: '选择 {{deck}} 中的 Agent',
+          noAgent: '此 Deck 没有已启用的 Agent，暂时不能开始对话。'
+        },
+        creator: {
+          scopeHint: '运行配置在这里维护，使用入口保持只读。'
         },
         communityMeta: '由 {{author}} 创作 · {{voices}} 条声线 · {{installs}} 次安装',
         communityEmpty: '尚无公开卡组，来做第一位分享的人吧！',
@@ -730,6 +797,7 @@ const resources = {
         publishedByMeEmpty: '你还没有发布任何卡组。',
         confirm: {
           delete: '确定删除这个卡组以及所有声线？',
+          deleteAgent: '确定删除这个 Agent？',
           sync: '与原模板同步？这会覆盖你在卡组里的修改。'
         },
         publishWarning: {

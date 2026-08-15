@@ -1,7 +1,8 @@
 // [Input] Chat source, Deck DTO, and shell fallback after Dream Agent unification.
 // [Output] Static regression coverage for the red-box tab replacement, two-state horizontal card list,
-//          whole-card run links, dispatch split, and post-launch canonical workbench navigation.
+//          whole-card run links, dispatch split, historical selector removal, and workbench navigation.
 // [Pos] Chat/Dream Agent Deck integration source seam.
+// [Sync] 2026-08-15: historical threads keep top context and omit the immutable composer selector.
 
 // @ts-expect-error Playwright Node seam reads source only; browser app omits Node types.
 import { readFileSync } from 'node:fs';
@@ -10,6 +11,7 @@ import { expect, test } from '@playwright/test';
 const CHAT = readFileSync(new URL('../ChatView.tsx', import.meta.url), 'utf8');
 const CHAT_CSS = readFileSync(new URL('../ChatView.css', import.meta.url), 'utf8');
 const SHELL = readFileSync(new URL('../ChatShellError.tsx', import.meta.url), 'utf8');
+const DECK_CONTEXT = readFileSync(new URL('../PluginReceiptBadge.tsx', import.meta.url), 'utf8');
 const DECK_API = readFileSync(new URL('../../../api/voiceApi.ts', import.meta.url), 'utf8');
 
 test('Chat replaces only the connector peer tab with actor-scoped resumable Dreams', () => {
@@ -41,4 +43,19 @@ test('Chat trusts server Deck type and reuses the existing Dream launch hook', (
   expect(CHAT).toContain('await startThreadWithQueuedSend(message, uploadedFiles, toolChoice)');
   expect(CHAT).toContain('readStoryWorkspaceDeckParam(query)');
   expect(CHAT).not.toContain('isDream=true');
+});
+
+test('historical Chat hides the immutable composer selector and keeps top context', () => {
+  const activeThreadStart = CHAT.indexOf("activeThreadId && landingTab === 'history' ?");
+  const activeThreadBranch = CHAT.slice(
+    activeThreadStart,
+    CHAT.indexOf('              ) : (', activeThreadStart),
+  );
+  expect(activeThreadBranch).not.toContain('inputContextControl');
+  expect(activeThreadBranch).not.toContain('<DeckChatSelector');
+  expect(CHAT).not.toContain('locked');
+  expect(CHAT).toContain('const displayVoice = threadVoiceEntry');
+  expect(CHAT).toContain('<PluginReceiptBadge');
+  expect(DECK_CONTEXT).toContain('{deckName ?? (hasReceiptPlugins ? (');
+  expect(DECK_CONTEXT).toContain("t('chat.deck.metadataPlugins')");
 });

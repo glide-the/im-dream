@@ -2,6 +2,8 @@
 // [Output] Render a Deck-grouped, Agent-selecting cascade for Chat and Dream.
 // [Pos] Shared Deck -> Agent selection boundary.
 // [Sync] 2026-08-05: Decks are grouping labels only; selectable values are Agents.
+// [Sync] 2026-08-15: remove the unused locked presentation; historical Chat
+//                    shows immutable context only in its top bar.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Deck, Voice } from '../../api/voiceApi';
@@ -18,7 +20,6 @@ interface DeckChatSelectorProps {
   onChange?: (selection: DeckAgentSelection | undefined) => void;
   loading?: boolean;
   error?: string | null;
-  locked?: boolean;
   allowNone?: boolean;
   variant?: 'compact' | 'dream';
 }
@@ -55,16 +56,17 @@ export default function DeckChatSelector({
   onChange,
   loading = false,
   error,
-  locked = false,
   allowNone = true,
   variant = 'compact',
 }: DeckChatSelectorProps) {
   const { t, i18n } = useTranslation();
   const language = (i18n.language || 'en').split('-')[0];
-  const deckLabel = (deck: Deck) =>
-    ((language === 'zh' ? deck.name_zh : deck.name_en) || deck.name);
-  const agentLabel = (agent: Voice) =>
-    ((language === 'zh' ? agent.name_zh : agent.name_en) || agent.name);
+  const deckLabel = useCallback((deck: Deck) => (
+    (language === 'zh' ? deck.name_zh : deck.name_en) || deck.name
+  ), [language]);
+  const agentLabel = useCallback((agent: Voice) => (
+    (language === 'zh' ? agent.name_zh : agent.name_en) || agent.name
+  ), [language]);
 
   const selected = useMemo(() => decks
     .flatMap((deck) => enabledAgentsOf(deck).map((agent) => ({ deck, agent })))
@@ -93,7 +95,7 @@ export default function DeckChatSelector({
       ));
       return matchingAgents.length ? [{ deck, agents: matchingAgents }] : [];
     });
-  }, [decks, query, language]);
+  }, [agentLabel, deckLabel, decks, query]);
 
   const options = useMemo<(AgentOption | undefined)[]>(() => [
     ...(allowNone ? [undefined] : []),
@@ -181,22 +183,7 @@ export default function DeckChatSelector({
     }
   };
 
-  const trigger = locked ? (
-    <div
-      aria-label={t('chat.deck.lockedAgentAria', { name: selectedLabel })}
-      title={t('chat.deck.lockedTitle')}
-      className={variant === 'dream' ? 'deck-agent-selector deck-agent-selector--dream' : undefined}
-      style={variant === 'compact' ? {
-        display: 'inline-flex', minHeight: '1.8rem', maxWidth: '15rem', alignItems: 'center', gap: '0.42rem',
-        border: '1px solid var(--color-border-paper)', borderRadius: '999px', background: 'var(--color-bg-app)',
-        color: 'var(--color-text-secondary)', padding: '0 0.7rem', fontSize: '0.76rem', whiteSpace: 'nowrap',
-      } : undefined}
-    >
-      <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>Agent</span>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedLabel}</span>
-      <span aria-hidden="true" style={{ fontSize: '0.64rem', color: 'var(--color-text-muted)' }}>●</span>
-    </div>
-  ) : (
+  const trigger = (
     <button
       ref={triggerRef}
       type="button"

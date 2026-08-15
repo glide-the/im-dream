@@ -1,41 +1,35 @@
-// [Input] Voice Deck and capability-backed Agent type APIs, i18n labels, and editor modal.
-// [Output] Deck management surface for local Decks and the actor's published Decks;
-//          initial load reconciles a missing plugin ref on the untouched default team.
-// [Pos] deck-manager-view node in frontend/src/components
-// [Sync] 2026-07-08: replace light-only Decks cards, loading/error states, and publish modal colors
-//                    with semantic theme tokens so the Decks surface adapts to dark mode.
-// [Sync] 2026-07-09: replace the high-saturation create-deck gradient with the same theme-inverted
-//                    paper/ink primary button treatment used by Settings actions.
-// [Sync] 2026-07-09: align the Decks page with the light paper / dashed boundary color system;
-//                    deck items now use flat paper rows, weak boundaries, and small accent marks.
-// [Sync] 2026-08-14: reconcile legacy default-team plugin refs before the first list read;
-//                    a rolling-deploy mismatch cannot hide the persisted Deck list.
-// [Sync] 2026-08-14: persist Chat/Dream Agent type through the server binding revision and
-//                    route every Deck interaction through Chat.
-// [Sync] 2026-08-14: replace the global community list with actor-owned publications and
-//                    honor server-derived default-Deck publication eligibility.
-import { useMemo, useState, useEffect, useRef } from 'react';
+// [Input] Voice Deck and capability-backed Agent type APIs, task-mode panels, and editor modal.
+// [Output] Deck workspace split into use and creator tasks; creator writes remain server-owned.
+// [Pos] deck-manager-view node in frontend/src/components.
+// [Sync] 2026-08-15: separate "use Deck" from "create Deck" without inventing revision facts;
+//                    move presentation into deck/DeckManagerPanels and keep data/actions here.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  listDecks,
-  reconcileDefaultDeckPlugin,
-  getDeck,
   createDeck,
-  updateDeck,
-  deleteDeck,
-  forkDeck,
-  syncDeck,
   createVoice,
-  updateVoice,
+  deleteDeck,
   deleteVoice,
+  forkDeck,
+  getDeck,
+  listDecks,
   publishDeck,
+  reconcileDefaultDeckPlugin,
+  syncDeck,
+  updateDeck,
+  updateVoice,
   type Deck,
-  type Voice
+  type Voice,
 } from '../api/voiceApi';
-import DeckEditorModal from './DeckEditorModal';
-import { COLORS, iconMap } from './deckVisuals';
-import type { ActiveChatVoice } from '../lib/chat-schema';
 import { updateDeckAgentType, type DeckAgentType } from '../api/deckPluginApi';
+import type { ActiveChatVoice } from '../lib/chat-schema';
+import DeckEditorModal from './DeckEditorModal';
+import {
+  DeckCreatorPanel,
+  DeckManagerModeTabs,
+  DeckUsePanel,
+  type DeckManagerMode,
+} from './deck/DeckManagerPanels';
 
 interface Props {
   onUpdate?: () => void;
@@ -46,28 +40,17 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-const DECK_PAGE_BORDER = '1px dashed color-mix(in srgb, var(--color-border-paper) 62%, transparent)';
-const DECK_CONTROL_BORDER = '1px solid color-mix(in srgb, var(--color-border-paper) 58%, transparent)';
-const DECK_ITEM_BORDER = '1px solid color-mix(in srgb, var(--color-border-paper) 36%, transparent)';
-const DECK_LIST_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 36%, transparent)';
-const DECK_ITEM_HOVER_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 58%, var(--color-bg-surface))';
-
 export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
   const { t } = useTranslation();
-  const spinnerKeyframes = useMemo(() => (
-    `@keyframes deck-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`
-  ), []);
+  const [mode, setMode] = useState<DeckManagerMode>('use');
   const [decks, setDecks] = useState<Deck[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [deckIconPickerOpen, setDeckIconPickerOpen] = useState<string | null>(null); // @@@ Track which deck's icon+color picker is open
   const [creatingDeck, setCreatingDeck] = useState(false);
   const [creatingVoice, setCreatingVoice] = useState<string | null>(null);
   const [publishWarning, setPublishWarning] = useState<string | null>(null);
   const [selectedVoiceByDeck, setSelectedVoiceByDeck] = useState<Record<string, string | null>>({});
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
-
-  // @@@ Scroll position preservation
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -80,34 +63,29 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
   );
 
   useEffect(() => {
-    setSelectedVoiceByDeck(prev => {
+    setSelectedVoiceByDeck((previous) => {
       let changed = false;
-      const next = { ...prev };
+      const next = { ...previous };
 
       decks.forEach((deck) => {
-        const voiceIds = deck.voices?.map(v => v.id) || [];
+        const voiceIds = (deck.voices || []).filter((voice) => voice.enabled).map((voice) => voice.id);
         const currentSelection = next[deck.id];
-
         if (voiceIds.length === 0) {
           if (currentSelection !== null) {
             next[deck.id] = null;
             changed = true;
           }
-          return;
-        }
-
-        if (!currentSelection || !voiceIds.includes(currentSelection)) {
+        } else if (!currentSelection || !voiceIds.includes(currentSelection)) {
           next[deck.id] = voiceIds[0];
           changed = true;
         }
       });
 
-      return changed ? next : prev;
+      return changed ? next : previous;
     });
   }, [decks]);
 
   async function loadDecks(preserveScroll = false) {
-    // @@@ Save scroll position before reload
     const savedScrollTop = preserveScroll && scrollContainerRef.current
       ? scrollContainerRef.current.scrollTop
       : 0;
@@ -125,42 +103,36 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
         }
       }
       const fetchedDecks = await listDecks();
-
-      // Load voices for each deck
       const decksWithVoices = await Promise.all(
         fetchedDecks.map(async (deck) => {
           try {
             return await getDeck(deck.id);
-          } catch (err) {
-            console.error(`Failed to load voices for deck ${deck.id}:`, err);
+          } catch (deckError) {
+            console.error(`Failed to load voices for deck ${deck.id}:`, deckError);
             return deck;
           }
-        })
+        }),
       );
-
       setDecks(decksWithVoices);
       setError(null);
 
-      // @@@ Restore scroll position after render
       if (preserveScroll && scrollContainerRef.current) {
         setTimeout(() => {
-          if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollTop = savedScrollTop;
-          }
+          scrollContainerRef.current?.scrollTo({ top: savedScrollTop });
         }, 0);
       }
-    } catch (err: unknown) {
-      console.error('Failed to load decks:', err);
-      setError(getErrorMessage(err, 'Failed to load decks'));
+    } catch (loadError) {
+      console.error('Failed to load decks:', loadError);
+      setError(getErrorMessage(loadError, 'Failed to load decks'));
     } finally {
-      if (!preserveScroll) {
-        setLoading(false);
-      }
+      if (!preserveScroll) setLoading(false);
     }
   }
 
-  function toggleDeck(deckId: string) {
-    setActiveDeckId(deckId);
+  function handleModeChange(nextMode: DeckManagerMode) {
+    setMode(nextMode);
+    setActiveDeckId(null);
+    setPublishWarning(null);
   }
 
   async function handleForkDeck(deckId: string) {
@@ -168,8 +140,8 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
       await forkDeck(deckId);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to fork deck: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (forkError) {
+      alert(`Failed to fork deck: ${getErrorMessage(forkError, 'Unknown error')}`);
     }
   }
 
@@ -178,8 +150,8 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
       await updateDeck(deckId, { enabled: !currentEnabled });
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to toggle deck: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (toggleError) {
+      alert(`Failed to toggle deck: ${getErrorMessage(toggleError, 'Unknown error')}`);
     }
   }
 
@@ -188,8 +160,8 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
       await updateDeck(deckId, data);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to update deck: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (updateError) {
+      alert(`Failed to update deck: ${getErrorMessage(updateError, 'Unknown error')}`);
     }
   }
 
@@ -210,26 +182,24 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
 
   async function handleDeleteDeck(deckId: string) {
     if (!confirm(t('deck.confirm.delete'))) return;
-
     try {
       await deleteDeck(deckId);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to delete deck: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (deleteError) {
+      alert(`Failed to delete deck: ${getErrorMessage(deleteError, 'Unknown error')}`);
     }
   }
 
   async function handleSyncDeck(deckId: string) {
     if (!confirm(t('deck.confirm.sync'))) return;
-
     try {
       const result = await syncDeck(deckId);
       alert(`✅ Synced ${result.synced_voices} voices with original template`);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to sync deck: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (syncError) {
+      alert(`Failed to sync deck: ${getErrorMessage(syncError, 'Unknown error')}`);
     }
   }
 
@@ -238,8 +208,8 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
       await updateVoice(voiceId, { enabled: !currentEnabled });
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to toggle voice: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (toggleError) {
+      alert(`Failed to toggle voice: ${getErrorMessage(toggleError, 'Unknown error')}`);
     }
   }
 
@@ -248,20 +218,19 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
       await updateVoice(voiceId, data);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to update voice: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (updateError) {
+      alert(`Failed to update voice: ${getErrorMessage(updateError, 'Unknown error')}`);
     }
   }
 
   async function handleDeleteVoice(voiceId: string) {
-    if (!confirm('Delete this voice?')) return;
-
+    if (!confirm(t('deck.confirm.deleteAgent'))) return;
     try {
       await deleteVoice(voiceId);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to delete voice: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (deleteError) {
+      alert(`Failed to delete voice: ${getErrorMessage(deleteError, 'Unknown error')}`);
     }
   }
 
@@ -272,13 +241,13 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
         name: 'New Deck',
         description: 'Describe your deck here',
         icon: 'brain',
-        color: 'blue'
+        color: 'blue',
       });
       await loadDecks(true);
       setActiveDeckId(newDeck.deck_id);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to create deck: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (createError) {
+      alert(`Failed to create deck: ${getErrorMessage(createError, 'Unknown error')}`);
     } finally {
       setCreatingDeck(false);
     }
@@ -292,21 +261,21 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
         name: 'New Voice',
         system_prompt: 'You are a helpful assistant.',
         icon: 'brain',
-        color: 'blue'
+        color: 'blue',
       });
-      setSelectedVoiceByDeck(prev => ({ ...prev, [deckId]: newVoiceId }));
+      setSelectedVoiceByDeck((previous) => ({ ...previous, [deckId]: newVoiceId }));
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed to create voice: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (createError) {
+      alert(`Failed to create voice: ${getErrorMessage(createError, 'Unknown error')}`);
     } finally {
       setCreatingVoice(null);
     }
   }
 
-  async function handlePublishClick(deck: Deck) {
+  function handlePublishClick(deck: Deck) {
     if (deck.published) {
-      handlePublishToggle(deck.id);
+      void handlePublishToggle(deck.id);
       return;
     }
     if (deck.can_publish === false) {
@@ -322,8 +291,8 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
       alert(result.published ? t('deck.messages.publishSuccess') : t('deck.messages.unpublishSuccess'));
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: unknown) {
-      alert(`Failed: ${getErrorMessage(err, 'Unknown error')}`);
+    } catch (publishError) {
+      alert(`Failed: ${getErrorMessage(publishError, 'Unknown error')}`);
     } finally {
       setPublishWarning(null);
     }
@@ -331,606 +300,103 @@ export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
 
   if (loading) {
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '100%',
-        minHeight: '100vh',
-        background: 'var(--color-bg-app)'
-      }}>
-        <style>{spinnerKeyframes}</style>
-        <div style={{
-          fontSize: 18,
-          color: 'var(--color-text-secondary)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '0.75rem',
-          textAlign: 'center'
-        }}>
-          <span style={{
-            width: '18px',
-            height: '18px',
-            borderRadius: '50%',
-            border: '2px solid var(--color-border-neutral)',
-            borderTopColor: 'var(--color-text-secondary)',
-            animation: 'deck-spin 0.9s linear infinite'
-          }} />
-          Loading decks…
-        </div>
+      <div className="deck-manager-status" aria-live="polite">
+        <span className="deck-manager-status__spinner" aria-hidden="true" />
+        {t('deck.loading')}
       </div>
     );
   }
 
   if (error) {
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        background: 'var(--color-bg-app)',
-        gap: 16
-      }}>
-        <div style={{ fontSize: 18, color: 'var(--color-state-error)' }}>{error}</div>
-        <button
-          onClick={() => loadDecks()}
-          style={{
-            padding: '8px 16px',
-            background: 'var(--color-text-primary)',
-            color: 'var(--color-text-on-action)',
-            border: 'none',
-            borderRadius: '999px',
-            cursor: 'pointer'
-          }}
-        >
+      <div className="deck-manager-status" role="alert">
+        <span>{error}</span>
+        <button className="deck-manager-primary-action deck-manager-primary-action--compact" onClick={() => void loadDecks()} type="button">
           {t('deck.actions.retry')}
         </button>
       </div>
     );
   }
 
-  const activeDeck = decks.find(d => d.id === activeDeckId) || null;
+  const activeDeck = decks.find((deck) => deck.id === activeDeckId) || null;
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--color-bg-app)', overflow: 'hidden' }}>
-      {/* Scrollable Content with embedded header */}
-      <div ref={scrollContainerRef} style={{ flex: 1, overflowY: 'auto', padding: 'clamp(16px, 4vw, 32px)' }}>
-        <div style={{
-          maxWidth: 1200,
-          margin: '0 auto',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 24,
-          border: DECK_PAGE_BORDER,
-          borderRadius: '1.05rem',
-          padding: 'clamp(14px, 3vw, 24px)',
-          background: 'transparent',
-          boxShadow: 'none'
-        }}>
-          {/* Embedded Header */}
-          <div style={{
-            padding: '0 0 4px 0'
-          }}>
-            <h1 style={{
-              margin: 0,
-              fontSize: 28,
-              fontWeight: 700,
-              color: 'var(--color-text-primary)',
-              fontFamily: 'Georgia, serif',
-              letterSpacing: 0
-            }}>
-              {t('deck.heading')}
-            </h1>
-            <p style={{
-              margin: '6px 0 0',
-              fontSize: 14,
-              color: 'var(--color-text-secondary)',
-              fontStyle: 'italic'
-            }}>
-              {t('deck.subheading')}
-            </p>
-          </div>
-          {/* Create New Deck Button */}
-          <button
-            onClick={handleCreateDeck}
-            disabled={creatingDeck}
-            style={{
-              padding: '14px 28px',
-              marginBottom: '8px',
-              background: 'var(--color-text-primary)',
-              color: 'var(--color-bg-app)',
-              border: '1px solid color-mix(in srgb, var(--color-text-primary) 22%, var(--color-border-paper))',
-              borderRadius: '999px',
-              cursor: creatingDeck ? 'not-allowed' : 'pointer',
-              fontSize: '15px',
-              fontWeight: '600',
-              opacity: creatingDeck ? 0.6 : 1,
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-              alignSelf: 'flex-start',
-              boxShadow: 'none',
-              letterSpacing: 0
-            }}
-            onMouseEnter={(e) => {
-              if (!creatingDeck) {
-                e.currentTarget.style.transform = 'translateY(-1px)';
-                e.currentTarget.style.boxShadow = 'none';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!creatingDeck) {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = 'none';
-              }
-            }}
-          >
-            {creatingDeck ? t('deck.actions.creating') : t('deck.actions.create')}
-          </button>
+    <div className="deck-manager-shell" data-deck-manager-mode={mode}>
+      <div className="deck-manager-shell__scroll" ref={scrollContainerRef}>
+        <div className="deck-manager-shell__content">
+          <header className="deck-manager-shell__header">
+            <h1>{t('deck.heading')}</h1>
+            <p>{t('deck.subheading')}</p>
+          </header>
 
-          {/* My Decks Section Header */}
-          <h3 style={{
-            margin: '8px 0',
-            fontSize: '16px',
-            fontWeight: '500',
-            color: 'var(--color-text-primary)'
-          }}>
-            {t('deck.sections.myDecks')}
-          </h3>
+          <DeckManagerModeTabs mode={mode} onChange={handleModeChange} />
 
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 14,
-            alignItems: 'stretch'
-          }}>
-            {decks.map(deck => {
-              const isSystem = !!deck.is_system;
-              const publishDisabled = !deck.published && deck.can_publish === false;
-              const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
-              const colorHex = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
-              const voiceCount = deck.voice_count || deck.voices?.length || 0;
-              const voiceCountLabel = t('deck.labels.voiceCount', { count: voiceCount });
-
-              return (
-                <div
-                  data-deck-card-id={deck.id}
-                  data-deck-card-kind="owned"
-                  key={deck.id}
-                  onClick={() => toggleDeck(deck.id)}
-                  style={{
-                    background: DECK_LIST_SURFACE,
-                    border: DECK_ITEM_BORDER,
-                    borderLeft: `3px solid ${isSystem ? 'color-mix(in srgb, var(--color-border-paper) 82%, transparent)' : colorHex}`,
-                    borderRadius: '0.75rem',
-                    boxShadow: 'none',
-                    padding: '0.82rem 0.9rem',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 10,
-                    cursor: 'pointer',
-                    transition: 'transform 0.15s, background 0.15s',
-                    flex: '1 1 320px',
-                    minWidth: 0,
-                    maxWidth: '100%'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.background = DECK_ITEM_HOVER_SURFACE;
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.background = DECK_LIST_SURFACE;
-                  }}
-                >
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <div
-                      style={{ position: 'relative' }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div
-                        data-deck-icon={deck.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!isSystem) {
-                            setDeckIconPickerOpen(deckIconPickerOpen === deck.id ? null : deck.id);
-                          }
-                        }}
-                        style={{
-                          width: 46,
-                          height: 46,
-                          borderRadius: '0.72rem',
-                          border: `1px solid color-mix(in srgb, ${colorHex} 24%, var(--color-border-paper))`,
-                          background: `color-mix(in srgb, ${colorHex} 12%, var(--color-bg-paper))`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: colorHex,
-                          flexShrink: 0,
-                          boxShadow: 'none',
-                          cursor: isSystem ? 'default' : 'pointer',
-                          transition: 'transform 0.2s, background 0.2s'
-                        }}
-                      >
-                        <Icon size={22} />
-                      </div>
-                    </div>
-
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {deck.name}
-                        </div>
-                        {isSystem && (
-                          <span style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: 'var(--color-text-secondary)',
-                            background: 'var(--color-bg-hover)',
-                            padding: '2px 6px',
-                            borderRadius: 6
-                          }}>
-                            System
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.4, maxHeight: 36, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {deck.description || t('deck.labels.noDescription')}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{voiceCountLabel}</div>
-                    </div>
-
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleDeck(deck.id, deck.enabled);
-                      }}
-                      style={{
-                        width: 42,
-                        height: 20,
-                        borderRadius: 10,
-                        background: deck.enabled
-                          ? `color-mix(in srgb, ${colorHex} 38%, var(--color-bg-surface))`
-                          : 'color-mix(in srgb, var(--color-border-paper) 32%, transparent)',
-                        border: DECK_CONTROL_BORDER,
-                        position: 'relative',
-                        cursor: 'pointer',
-                        transition: 'background 0.3s',
-                        flexShrink: 0
-                      }}
-                      title={deck.enabled ? 'Disable deck' : 'Enable deck'}
-                    >
-                      <div style={{
-                        position: 'absolute',
-                        top: 2,
-                        left: deck.enabled ? 22 : 2,
-                        width: 16,
-                        height: 16,
-                        borderRadius: 8,
-                        background: 'var(--color-bg-paper)',
-                        transition: 'left 0.3s',
-                        boxShadow: 'none'
-                      }} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }} onClick={(e) => e.stopPropagation()}>
-                    {isSystem ? (
-                      <button
-                        onClick={() => handleForkDeck(deck.id)}
-                        style={{
-                          padding: '6px 10px',
-                          background: 'transparent',
-                          color: 'var(--color-text-primary)',
-                          border: DECK_CONTROL_BORDER,
-                          borderRadius: '999px',
-                          cursor: 'pointer',
-                          fontSize: 12,
-                          fontWeight: 600
-                        }}
-                      >
-                        Fork
-                      </button>
-                    ) : (
-                      <>
-                        {deck.parent_id && (
-                          <button
-                            onClick={() => handleSyncDeck(deck.id)}
-                            style={{
-                              padding: '6px 10px',
-                              background: 'transparent',
-                              color: 'var(--color-text-primary)',
-                              border: DECK_CONTROL_BORDER,
-                              borderRadius: '999px',
-                              cursor: 'pointer',
-                              fontSize: 12,
-                              fontWeight: 600
-                            }}
-                          >
-                            Sync
-                          </button>
-                        )}
-                        <button
-                          disabled={publishDisabled}
-                          onClick={() => handlePublishClick(deck)}
-                          title={publishDisabled ? t('deck.messages.defaultDeckPublishForbidden') : undefined}
-                          style={{
-                            padding: '6px 10px',
-                            background: deck.published
-                              ? 'color-mix(in srgb, var(--color-state-warning) 14%, var(--color-bg-surface))'
-                              : 'transparent',
-                            color: deck.published ? 'var(--color-state-warning)' : 'var(--color-text-primary)',
-                            border: DECK_CONTROL_BORDER,
-                            borderRadius: '999px',
-                            cursor: publishDisabled ? 'not-allowed' : 'pointer',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            opacity: publishDisabled ? 0.5 : 1
-                          }}
-                        >
-                          {deck.published
-                            ? t('deck.actions.unpublish')
-                            : publishDisabled
-                              ? t('deck.actions.publishUnavailable')
-                              : t('deck.actions.publish')}
-                        </button>
-                        <button
-                          onClick={() => handleDeleteDeck(deck.id)}
-                          style={{
-                            padding: '6px 10px',
-                            background: 'transparent',
-                            color: 'var(--color-state-danger)',
-                            border: '1px solid color-mix(in srgb, var(--color-state-danger) 38%, var(--color-border-paper))',
-                            borderRadius: '999px',
-                            cursor: 'pointer',
-                            fontSize: 12,
-                            fontWeight: 600
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Actor-owned publications; community discovery lives on Dream. */}
-          <hr style={{ margin: '1rem 0 0', border: 0, borderTop: DECK_ITEM_BORDER }} />
-
-          <h3 style={{
-            margin: '16px 0',
-            fontSize: '16px',
-            fontWeight: '500',
-            color: 'var(--color-text-primary)'
-          }}>
-            {t('deck.sections.publishedByMe', { count: publishedDecks.length })}
-          </h3>
-
-          {publishedDecks.length === 0 ? (
-            <p style={{
-              color: 'var(--color-text-muted)',
-              fontSize: '14px',
-              fontStyle: 'italic',
-              textAlign: 'center',
-              padding: '1.2rem',
-              borderRadius: '0.75rem',
-              background: DECK_LIST_SURFACE
-            }}>
-              {t('deck.publishedByMeEmpty')}
-            </p>
+          {mode === 'use' ? (
+            <DeckUsePanel
+              decks={decks}
+              onSelectVoice={(deckId, voiceId) => setSelectedVoiceByDeck((previous) => ({
+                ...previous,
+                [deckId]: voiceId,
+              }))}
+              onUseDeck={onChatWithDeck}
+              selectedVoiceByDeck={selectedVoiceByDeck}
+            />
           ) : (
-            <div style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 14,
-              alignItems: 'stretch'
-            }}>
-              {publishedDecks.map(deck => {
-                const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
-                const colorHex = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
-
-                return (
-                  <div
-                    data-deck-card-id={deck.id}
-                    data-deck-card-kind="published-by-me"
-                    key={deck.id}
-                    style={{
-                      background: DECK_LIST_SURFACE,
-                      border: DECK_ITEM_BORDER,
-                      borderLeft: `3px solid ${colorHex}`,
-                      borderRadius: '0.75rem',
-                      padding: '0.82rem 0.9rem',
-                      boxShadow: 'none',
-                      transition: 'transform 0.15s, background 0.15s',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 10,
-                      flex: '1 1 320px',
-                      minWidth: 0,
-                      maxWidth: '100%'
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-1px)';
-                      (e.currentTarget as HTMLDivElement).style.background = DECK_ITEM_HOVER_SURFACE;
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
-                      (e.currentTarget as HTMLDivElement).style.background = DECK_LIST_SURFACE;
-                    }}
-                  >
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                      <div style={{
-                        width: 50,
-                        height: 50,
-                        borderRadius: '0.72rem',
-                        border: `1px solid color-mix(in srgb, ${colorHex} 24%, var(--color-border-paper))`,
-                        background: `color-mix(in srgb, ${colorHex} 12%, var(--color-bg-paper))`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: colorHex,
-                        flexShrink: 0,
-                        boxShadow: 'none'
-                      }}>
-                        <Icon size={24} />
-                      </div>
-
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{
-                          fontSize: 17,
-                          fontWeight: 700,
-                          color: 'var(--color-text-primary)',
-                          marginBottom: 4,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap'
-                        }}>
-                          {deck.name}
-                        </div>
-                        <div style={{
-                          fontSize: 12,
-                          color: 'var(--color-text-secondary)',
-                          marginBottom: 4,
-                          lineHeight: 1.4,
-                          maxHeight: 32,
-                          overflow: 'hidden'
-                        }}>
-                          {deck.description || 'No description'}
-                        </div>
-                        <div style={{
-                          fontSize: 11,
-                          color: 'var(--color-text-muted)'
-                        }}>
-                          {t('deck.publishedByMeMeta', {
-                            voices: deck.voice_count || 0,
-                            installs: deck.install_count || 0
-                          })}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start' }}>
-                      <button
-                        onClick={() => handlePublishToggle(deck.id)}
-                        style={{
-                          padding: '6px 12px',
-                          background: 'var(--color-text-primary)',
-                          color: 'var(--color-bg-app)',
-                          border: 'none',
-                          borderRadius: '999px',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          transition: 'all 0.2s'
-                        }}
-                      >
-                        {t('deck.actions.unpublish')}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <DeckCreatorPanel
+              creatingDeck={creatingDeck}
+              decks={decks}
+              onCreateDeck={() => void handleCreateDeck()}
+              onDeleteDeck={(deckId) => void handleDeleteDeck(deckId)}
+              onForkDeck={(deckId) => void handleForkDeck(deckId)}
+              onOpenDeck={setActiveDeckId}
+              onPublishDeck={handlePublishClick}
+              onSyncDeck={(deckId) => void handleSyncDeck(deckId)}
+              onToggleDeck={(deckId, enabled) => void handleToggleDeck(deckId, enabled)}
+              onUnpublishDeck={(deckId) => void handlePublishToggle(deckId)}
+              publishedDecks={publishedDecks}
+            />
           )}
         </div>
       </div>
 
-      {/* Deck editor modal */}
-      {activeDeck && (
+      {mode === 'create' && activeDeck && (
         <DeckEditorModal
-          deck={activeDeck}
-          isSystem={!!activeDeck.is_system}
-          selectedVoiceId={selectedVoiceByDeck[activeDeck.id] || activeDeck.voices?.[0]?.id || null}
-          onSelectVoice={(voiceId) => setSelectedVoiceByDeck(prev => ({ ...prev, [activeDeck.id]: voiceId }))}
-          onClose={() => setActiveDeckId(null)}
           creatingVoiceId={creatingVoice}
+          deck={activeDeck}
+          isSystem={Boolean(activeDeck.is_system)}
           onAddVoice={handleAddVoice}
-          onUpdateDeck={handleUpdateDeck}
-          onUpdateAgentType={handleUpdateAgentType}
-          onUpdateVoice={handleUpdateVoice}
-          onToggleVoice={handleToggleVoice}
-          onDeleteVoice={handleDeleteVoice}
           onChatWithDeck={onChatWithDeck}
+          onClose={() => setActiveDeckId(null)}
+          onDeleteVoice={handleDeleteVoice}
+          onSelectVoice={(voiceId) => setSelectedVoiceByDeck((previous) => ({
+            ...previous,
+            [activeDeck.id]: voiceId,
+          }))}
+          onToggleVoice={handleToggleVoice}
+          onUpdateAgentType={handleUpdateAgentType}
+          onUpdateDeck={handleUpdateDeck}
+          onUpdateVoice={handleUpdateVoice}
+          selectedVoiceId={selectedVoiceByDeck[activeDeck.id] || activeDeck.voices?.[0]?.id || null}
         />
       )}
 
-      {/* @@@ Publish Warning Modal */}
       {publishWarning && (
-        <div
-          className="modal-overlay"
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'var(--color-bg-overlay)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999
-          }}
-          onClick={() => setPublishWarning(null)}
-        >
+        <div className="deck-manager-dialog-backdrop" onClick={() => setPublishWarning(null)}>
           <div
-            className="modal-content"
-            style={{
-              background: 'var(--color-bg-surface-solid)',
-              color: 'var(--color-text-primary)',
-              border: DECK_CONTROL_BORDER,
-              padding: '24px',
-              borderRadius: '0.9rem',
-              maxWidth: '400px',
-              boxShadow: '0 4px 12px var(--color-shadow-medium)'
-            }}
-            onClick={(e) => e.stopPropagation()}
+            aria-labelledby="deck-publish-warning-title"
+            aria-modal="true"
+            className="deck-manager-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
           >
-            <h3 style={{ marginBottom: '16px', fontSize: '18px', fontWeight: 600 }}>
-              {t('deck.publishWarning.heading')}
-            </h3>
-
-            <p style={{ marginBottom: '16px', lineHeight: '1.5', fontSize: '14px' }}>
-              <span dangerouslySetInnerHTML={{ __html: t('deck.publishWarning.body') }} />
-            </p>
-
-            <p style={{ marginBottom: '16px', color: 'var(--color-state-error)', fontSize: '13px', lineHeight: '1.5' }}>
-              {t('deck.publishWarning.note')}
-            </p>
-
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => setPublishWarning(null)}
-                style={{
-                  padding: '8px 16px',
-                  background: 'transparent',
-                  color: 'var(--color-text-primary)',
-                  border: DECK_CONTROL_BORDER,
-                  borderRadius: '999px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: 500
-                }}
-              >
+            <h2 id="deck-publish-warning-title">{t('deck.publishWarning.heading')}</h2>
+            <p dangerouslySetInnerHTML={{ __html: t('deck.publishWarning.body') }} />
+            <p className="deck-manager-dialog__warning">{t('deck.publishWarning.note')}</p>
+            <div className="deck-manager-dialog__actions">
+              <button className="deck-manager-secondary-action" onClick={() => setPublishWarning(null)} type="button">
                 {t('deck.publishWarning.cancel')}
               </button>
-              <button
-                onClick={() => handlePublishToggle(publishWarning)}
-                style={{
-                  padding: '8px 16px',
-                  background: 'var(--color-text-primary)',
-                  color: 'var(--color-bg-app)',
-                  border: 'none',
-                  borderRadius: '999px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: 500
-                }}
-              >
+              <button className="deck-manager-primary-action deck-manager-primary-action--compact" onClick={() => void handlePublishToggle(publishWarning)} type="button">
                 {t('deck.publishWarning.confirm')}
               </button>
             </div>

@@ -1,7 +1,7 @@
 // [Input] Production-shaped Deck ownership/sharing DTOs and Story Workspace Decks UI.
 // [Output] Verify My Published Decks, disabled default publication, and no self-collection action.
 // [Pos] Provider-free browser regression for Deck sharing presentation.
-// [Sync] 2026-08-14: add actor-owned publication UI coverage.
+// [Sync] 2026-08-15: enter explicit creator mode before publication management.
 
 import { expect, test } from '@playwright/test';
 
@@ -65,6 +65,7 @@ test('Decks shows actor publications and never offers self-collection', async ({
   });
 
   await page.goto(`${WEB_BASE}/story-workspace/decks`);
+  await page.getByRole('tab', { name: '创作 Deck' }).click();
   await expect(page.getByRole('heading', { name: '我发布的卡组（1）' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /社区卡组/ })).toHaveCount(0);
   const defaultCard = page.locator('[data-deck-card-kind="owned"][data-deck-card-id="default-deck"]');

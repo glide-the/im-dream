@@ -70,6 +70,7 @@ test('Decks stays inside the workspace and projects the existing DeckManager int
   expect(ROUTER).toContain('story-workspace-decks-surface');
   expect(APP).toContain('<StoryWorkspaceRouter\n            decksContent={storyWorkspaceDeckManager}');
   expect(APP).toContain('onChatWithDeck={handleChatWithDeck}');
+  expect(APP).toMatch(/handleChatWithDeck[\s\S]*?pushState[\s\S]*?dispatchEvent\(new PopStateEvent\('popstate'\)\)/);
   expect(APP).not.toContain('onOpenDreamWithDeck');
   expect(APP).not.toContain('handleStoryWorkspaceOpenDecks');
   expect(SIDEBAR).toContain("decks: '/story-workspace/decks'");
