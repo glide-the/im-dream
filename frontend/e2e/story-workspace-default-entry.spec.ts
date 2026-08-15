@@ -1,10 +1,13 @@
 // [Input] Authenticated root App entry with deterministic API responses.
 // [Output] Browser regression proving authenticated root entry is canonical Story
-//          Workspace Chat with hidden legacy navigation and global UI typography.
+//          Workspace Chat with restored collapsible navigation and global UI typography.
 // [Pos] Story Workspace authenticated-entry E2E seam.
 // [Sync] 2026-08-14: change the authenticated root expectation from Dream to Chat,
 //                    assert hidden entries, refresh persistence, and Microsoft YaHei.
 // [Sync] 2026-08-14: assert primary navigation order is Chat, Dream, Decks.
+// [Sync] 2026-08-15: restore Writing, Timeline, and Reflections in their original
+//                    positions while retaining Chat as the authenticated root entry.
+// [Sync] 2026-08-15: keep those entries collapsed under More until requested.
 
 import { expect, test } from '@playwright/test';
 
@@ -66,6 +69,14 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
       await route.fulfill({ json: { sessions: [] } });
       return;
     }
+    if (pathname === '/api/sessions/aggregate') {
+      await route.fulfill({ json: {
+        sessions: [],
+        stats: { total_days: 0, total_entries: 0, total_words: 0 },
+        timezone: 'UTC',
+      } });
+      return;
+    }
     if (pathname === '/api/pictures/range') {
       await route.fulfill({ json: { pictures: [] } });
       return;
@@ -106,6 +117,14 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
       await route.fulfill({ json: { runs: [] } });
       return;
     }
+    if (pathname === '/api/reports') {
+      await route.fulfill({ json: { reports: [] } });
+      return;
+    }
+    if (pathname === '/api/reflections/latest') {
+      await route.fulfill({ json: { task: null, results: [] } });
+      return;
+    }
     unexpectedApiRequests.push(`${request.method()} ${pathname}`);
     await route.fulfill({ json: {} });
   });
@@ -119,12 +138,41 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/chat`);
   const storyWorkspaceNavigation = page.getByRole('navigation', { name: 'Story Workspace 导航' });
   await expect(storyWorkspaceNavigation).toBeVisible();
-  await expect(storyWorkspaceNavigation.getByRole('button')).toHaveCount(3);
-  await expect(storyWorkspaceNavigation.getByRole('button')).toHaveText(['Chat', 'Dream', 'Decks']);
+  await expect(storyWorkspaceNavigation.getByRole('button')).toHaveCount(4);
+  await expect(storyWorkspaceNavigation.getByRole('button')).toHaveText([
+    'Chat',
+    'Dream',
+    'Decks',
+    'More',
+  ]);
   await expect(storyWorkspaceNavigation.getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-current', 'page');
+  const moreNavigation = storyWorkspaceNavigation.getByRole('button', { name: 'More' });
+  await expect(moreNavigation).toHaveAttribute('aria-expanded', 'false');
   await expect(storyWorkspaceNavigation.getByRole('button', { name: 'Writing' })).toHaveCount(0);
   await expect(storyWorkspaceNavigation.getByRole('button', { name: 'Timeline' })).toHaveCount(0);
   await expect(storyWorkspaceNavigation.getByRole('button', { name: 'Reflections' })).toHaveCount(0);
+  await moreNavigation.click();
+  await expect(moreNavigation).toHaveAttribute('aria-expanded', 'true');
+  await expect(storyWorkspaceNavigation.getByRole('button')).toHaveText([
+    'Chat',
+    'Dream',
+    'Decks',
+    'More',
+    'Writing',
+    'Timeline',
+    'Reflections',
+  ]);
+  const restoredNavigationGroup = storyWorkspaceNavigation.getByRole('group', { name: 'More' });
+  await expect.poll(() => restoredNavigationGroup.evaluate((element) => (
+    getComputedStyle(element).opacity
+  ))).toBe('1');
+  await page.screenshot({
+    path: 'output/playwright/story-workspace-chat-first/navigation-more-expanded.png',
+    fullPage: true,
+  });
+  await moreNavigation.click();
+  await expect(moreNavigation).toHaveAttribute('aria-expanded', 'false');
+  await expect(storyWorkspaceNavigation.getByRole('button', { name: 'Writing' })).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'Chat input' })).toBeVisible();
   await expect.poll(async () => page.locator('body').evaluate((body) => (
     getComputedStyle(body).fontFamily
@@ -135,12 +183,39 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
   const reloadedNavigation = page.getByRole('navigation', { name: 'Story Workspace 导航' });
   await expect(reloadedNavigation).toBeVisible();
   await expect(reloadedNavigation.getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-current', 'page');
+  await expect(reloadedNavigation.getByRole('button', { name: 'More' })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('textbox', { name: 'Chat input' })).toBeVisible();
 
   await page.screenshot({
     path: 'output/playwright/story-workspace-chat-first/login-default-desktop.png',
     fullPage: true,
   });
+
+  await reloadedNavigation.getByRole('button', { name: 'More' }).click();
+  await reloadedNavigation.getByRole('button', { name: 'Timeline' }).click();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/timeline`);
+  await expect(
+    reloadedNavigation.getByRole('button', { name: 'Timeline' }),
+  ).toHaveAttribute('aria-current', 'page');
+
+  await reloadedNavigation.getByRole('button', { name: 'Reflections' }).click();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/analysis`);
+  await expect(
+    reloadedNavigation.getByRole('button', { name: 'Reflections' }),
+  ).toHaveAttribute('aria-current', 'page');
+
+  await reloadedNavigation.getByRole('button', { name: 'Writing' }).click();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/writing`);
+  await expect(
+    reloadedNavigation.getByRole('button', { name: 'Writing' }),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByPlaceholder('Start writing...')).toBeVisible();
+
+  await page.reload();
+  const writingNavigation = page.getByRole('navigation', { name: 'Story Workspace 导航' });
+  await expect(writingNavigation.getByRole('button', { name: 'More' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(writingNavigation.getByRole('button', { name: 'Writing' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByPlaceholder('Start writing...')).toBeVisible();
 
   await page.goto(`${WEB_BASE}/story-workspace/dream`);
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/dream`);

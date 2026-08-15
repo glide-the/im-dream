@@ -1,10 +1,13 @@
 // [Input] Story Workspace sidebar, router, App Decks handoff and subscription page sources.
-// [Output] Node seam for the current Chat/Dream/Decks navigation, retained legacy
-//          routes, concrete Decks reuse, and the Product BFF subscription boundary.
+// [Output] Node seam for the three-entry primary navigation, accessible More
+//          disclosure, restored routes, and Product BFF subscription boundary.
 // [Pos] Story Workspace sidebar R2 Red/Green regression test.
 // [Sync] 2026-08-14: assert Writing, Timeline, and Analysis are hidden from the
 //                    sidebar while their route implementations remain intact.
 // [Sync] 2026-08-14: assert the visible primary order is Chat, Dream, Decks.
+// [Sync] 2026-08-15: assert Writing, Timeline, and Analysis are restored in their
+//                    original positions and continue using the existing routes.
+// [Sync] 2026-08-15: assert those restored entries live under the More disclosure.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam reads source only; browser app omits Node types.
@@ -18,26 +21,36 @@ const SUBSCRIPTION = readFileSync(new URL('../../../../pages/story-workspace/Sto
 const SETTINGS = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSettingsPage.tsx', import.meta.url), 'utf8');
 const DREAM_LAUNCH = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceDreamLaunch.tsx', import.meta.url), 'utf8');
 
-test('sidebar exposes only Chat, Dream, and Decks in that order', () => {
+test('sidebar restores legacy routes under an accessible More disclosure', () => {
   expect(SIDEBAR).toContain("dream: '/story-workspace/dream'");
   expect(SIDEBAR).toContain("decks: '/story-workspace/decks'");
   expect(SIDEBAR).toContain("chat: '/story-workspace/chat'");
-  expect(SIDEBAR).not.toContain("writing: '/story-workspace/writing'");
-  expect(SIDEBAR).not.toContain("timeline: '/story-workspace/timeline'");
-  expect(SIDEBAR).not.toContain("analysis: '/story-workspace/analysis'");
-  expect(SIDEBAR).not.toContain("view: 'writing'");
-  expect(SIDEBAR).not.toContain("view: 'timeline'");
-  expect(SIDEBAR).not.toContain("view: 'analysis'");
+  expect(SIDEBAR).toContain("writing: '/story-workspace/writing'");
+  expect(SIDEBAR).toContain("timeline: '/story-workspace/timeline'");
+  expect(SIDEBAR).toContain("analysis: '/story-workspace/analysis'");
   const primaryNavigation = SIDEBAR.slice(
     SIDEBAR.indexOf('<nav aria-label="Story Workspace 导航"'),
     SIDEBAR.indexOf('</nav>'),
   );
-  expect(primaryNavigation.indexOf("view: 'chat'")).toBeLessThan(
-    primaryNavigation.indexOf("view: 'dream'"),
+  const primaryOrder = ['chat', 'dream', 'decks'];
+  primaryOrder.slice(0, -1).forEach((view, index) => {
+    expect(primaryNavigation.indexOf(`view: '${view}'`)).toBeLessThan(
+      primaryNavigation.indexOf(`view: '${primaryOrder[index + 1]}'`),
+    );
+  });
+  const legacyNavigation = primaryNavigation.slice(
+    primaryNavigation.indexOf('id="story-workspace-more-navigation"'),
   );
-  expect(primaryNavigation.indexOf("view: 'dream'")).toBeLessThan(
-    primaryNavigation.indexOf("view: 'decks'"),
-  );
+  const legacyOrder = ['writing', 'timeline', 'analysis'];
+  legacyOrder.slice(0, -1).forEach((view, index) => {
+    expect(legacyNavigation.indexOf(`view: '${view}'`)).toBeLessThan(
+      legacyNavigation.indexOf(`view: '${legacyOrder[index + 1]}'`),
+    );
+  });
+  expect(SIDEBAR).toContain('aria-controls="story-workspace-more-navigation"');
+  expect(SIDEBAR).toContain('aria-expanded={showMoreNavigation}');
+  expect(SIDEBAR).toContain("t('nav.more')");
+  expect(SIDEBAR).toContain('currentPath === storyWorkspaceMainNavPaths.writing');
   expect(SIDEBAR).toContain('const Icon = item.icon as IconType;');
   expect(SIDEBAR).toContain('story-workspace-sidebar__icon');
   expect(SIDEBAR).toContain('aria-label={collapsed ? item.label : undefined}');
@@ -132,6 +145,8 @@ test('legacy page links render through the workspace router main region', () => 
   expect(PATHS).toContain("chat: '/story-workspace/chat'");
   expect(ROUTER).toContain('legacyContent');
   expect(ROUTER).toContain("case 'writing':");
+  expect(ROUTER).toContain("case 'timeline':");
+  expect(ROUTER).toContain("case 'analysis':");
   expect(ROUTER).toContain("case 'chat':");
   expect(APP).toContain('legacyContent={{');
   expect(APP).toContain('storyWorkspaceLegacyView');

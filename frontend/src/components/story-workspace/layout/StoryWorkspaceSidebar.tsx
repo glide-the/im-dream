@@ -1,20 +1,28 @@
 // [Input] Current Story Workspace path, navigation callbacks, collapse state, and the existing auth context.
 // [Output] Render the collapsible desktop Story Workspace navigation sidebar with
-//          Chat, Dream, and Decks as the current primary-entry order.
+//          Chat/Dream/Decks plus a More disclosure for restored legacy entries.
 // [Pos] Story Workspace left layout region.
 // [Sync] 2026-08-14: temporarily hide Writing, Timeline, and Analysis entries while
 //                    retaining their routes and content for authorized deep links.
 // [Sync] 2026-08-14: order visible entries as Chat, Dream, then Decks.
+// [Sync] 2026-08-15: restore Writing, Timeline, and Analysis in their original
+//                    sidebar positions, reusing the retained production routes.
+// [Sync] 2026-08-15: group restored Writing, Timeline, and Analysis under an
+//                    accessible More disclosure below Chat, Dream, and Decks.
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { IconType } from 'react-icons';
 import {
   FaBookOpen,
+  FaChartLine,
   FaChevronLeft,
   FaChevronRight,
   FaComments,
   FaCog,
+  FaEllipsisH,
   FaMoon,
+  FaPenNib,
+  FaStream,
   FaSun,
   FaThLarge,
   FaUserCircle,
@@ -23,9 +31,12 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { getTheme, onThemeChange, toggleTheme } from '../../../utils/theme';
 
 const storyWorkspaceMainNavPaths = {
-  chat: '/story-workspace/chat',
-  dream: '/story-workspace/dream',
+  writing: '/story-workspace/writing',
+  timeline: '/story-workspace/timeline',
+  analysis: '/story-workspace/analysis',
   decks: '/story-workspace/decks',
+  dream: '/story-workspace/dream',
+  chat: '/story-workspace/chat',
 } as const;
 
 export interface StoryWorkspaceSidebarProps {
@@ -45,6 +56,11 @@ export function StoryWorkspaceSidebar({
   const { t } = useTranslation();
   const [isDark, setIsDark] = useState(() => getTheme() === 'dark');
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showMoreNavigation, setShowMoreNavigation] = useState(() => (
+    currentPath === storyWorkspaceMainNavPaths.writing
+    || currentPath === storyWorkspaceMainNavPaths.timeline
+    || currentPath === storyWorkspaceMainNavPaths.analysis
+  ));
   const displayName = user?.display_name?.trim() || user?.email || 'Ink & Memory 用户';
   const avatarLabel = Array.from(displayName)[0]?.toUpperCase() || 'I';
   const themeToggleLabel = isDark ? '切换到浅色' : '切换到深色';
@@ -72,6 +88,16 @@ export function StoryWorkspaceSidebar({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showUserMenu]);
+
+  useEffect(() => {
+    if (
+      currentPath === storyWorkspaceMainNavPaths.writing
+      || currentPath === storyWorkspaceMainNavPaths.timeline
+      || currentPath === storyWorkspaceMainNavPaths.analysis
+    ) {
+      setShowMoreNavigation(true);
+    }
+  }, [currentPath]);
 
   const handleToggleTheme = () => {
     toggleTheme();
@@ -121,6 +147,7 @@ export function StoryWorkspaceSidebar({
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__label,
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__theme-label,
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__settings-label,
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__disclosure-chevron,
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__user-details {
           display: none;
         }
@@ -233,6 +260,54 @@ export function StoryWorkspaceSidebar({
           text-decoration-color: var(--color-voice-yellow);
           text-decoration-thickness: 2px;
           text-underline-offset: 4px;
+        }
+
+        .story-workspace-sidebar__more-button {
+          margin-top: 8px;
+        }
+
+        .story-workspace-sidebar__disclosure-chevron {
+          width: 12px;
+          height: 12px;
+          margin-left: auto;
+          color: var(--color-text-secondary);
+          transition: transform 160ms ease;
+        }
+
+        .story-workspace-sidebar__disclosure-chevron--open {
+          transform: rotate(90deg);
+        }
+
+        .story-workspace-sidebar__legacy-nav {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          animation: story-workspace-sidebar-reveal 160ms ease-out;
+        }
+
+        .story-workspace-sidebar__legacy-nav .story-workspace-sidebar__nav-button {
+          padding-left: 24px;
+          color: var(--color-text-secondary);
+          font-size: 13px;
+        }
+
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__legacy-nav .story-workspace-sidebar__nav-button {
+          padding-left: 0;
+        }
+
+        @keyframes story-workspace-sidebar-reveal {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .story-workspace-sidebar__legacy-nav {
+            animation: none;
+          }
+
+          .story-workspace-sidebar__disclosure-chevron {
+            transition: none;
+          }
         }
 
         .story-workspace-sidebar__icon {
@@ -425,6 +500,53 @@ export function StoryWorkspaceSidebar({
             </button>
           );
         })}
+        <button
+          aria-controls="story-workspace-more-navigation"
+          aria-expanded={showMoreNavigation}
+          aria-label={collapsed ? t('nav.more') : undefined}
+          className="story-workspace-sidebar__nav-button story-workspace-sidebar__more-button"
+          onClick={() => setShowMoreNavigation((visible) => !visible)}
+          title={collapsed ? t('nav.more') : undefined}
+          type="button"
+        >
+          <FaEllipsisH aria-hidden="true" className="story-workspace-sidebar__icon" />
+          <span className="story-workspace-sidebar__label">{t('nav.more')}</span>
+          <FaChevronRight
+            aria-hidden="true"
+            className={`story-workspace-sidebar__disclosure-chevron${showMoreNavigation ? ' story-workspace-sidebar__disclosure-chevron--open' : ''}`}
+          />
+        </button>
+        {showMoreNavigation ? (
+          <div
+            aria-label={t('nav.more')}
+            className="story-workspace-sidebar__legacy-nav"
+            id="story-workspace-more-navigation"
+            role="group"
+          >
+            {([
+              { icon: FaPenNib, label: t('nav.writing'), view: 'writing', path: storyWorkspaceMainNavPaths.writing },
+              { icon: FaStream, label: t('nav.timeline'), view: 'timeline', path: storyWorkspaceMainNavPaths.timeline },
+              { icon: FaChartLine, label: t('nav.analysis'), view: 'analysis', path: storyWorkspaceMainNavPaths.analysis },
+            ] as const).map((item) => {
+              const isCurrent = currentPath === item.path;
+              const Icon = item.icon as IconType;
+              return (
+                <button
+                  aria-label={collapsed ? item.label : undefined}
+                  aria-current={isCurrent ? 'page' : undefined}
+                  className="story-workspace-sidebar__nav-button"
+                  key={item.view}
+                  onClick={() => onNavigate(item.path)}
+                  title={collapsed ? item.label : undefined}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" className="story-workspace-sidebar__icon" />
+                  <span className="story-workspace-sidebar__label">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </nav>
 
       <footer className="story-workspace-sidebar__footer">

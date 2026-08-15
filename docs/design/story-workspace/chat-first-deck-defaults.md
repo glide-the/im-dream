@@ -9,8 +9,8 @@ Drama Forge 插件。本次调整只收敛入口和默认值，不删除旧功�
 
 目标：
 
-1. Story Workspace 侧栏只保留 Chat、Dream、Decks 三个主入口，Writing、Timeline、Analysis
-   暂时隐藏。
+1. Story Workspace 侧栏主区保留 Chat、Dream、Decks，并在其下通过“更多”折叠项恢复
+   Writing、Timeline、Analysis；认证根路径仍默认进入 Chat。
 2. 登录或已登录用户访问应用根路径时进入 `/story-workspace/chat`；合法深链接保持原目标。
 3. 默认系统 Deck 聚焦剧本创作角色，新用户不再获得旧内省、学者、哲学模板。
 4. 用户从 Deck Manager 新建 Deck 时，后端默认绑定 ready 且校验通过的
@@ -25,7 +25,7 @@ Drama Forge 插件。本次调整只收敛入口和默认值，不删除旧功�
 
 | 范围 | 当前事实 | 最小修改点 | 风险与保留项 |
 |---|---|---|---|
-| Story Workspace 导航 | `StoryWorkspaceSidebar.tsx` 内联六个主入口；路由在 `storyWorkspacePath.ts` 与 `story-workspace.tsx` 中仍有合法实现 | 只收敛侧栏导航清单 | 保留旧路由和页面，便于深链接及未来恢复；不删除业务代码 |
+| Story Workspace 导航 | `StoryWorkspaceSidebar.tsx` 与 `storyWorkspacePath.ts` 已保留六个合法入口 | Chat/Dream/Decks 直接显示；“更多”按原顺序披露 Writing/Timeline/Analysis | 直接复用原路由和页面；不复制或重建业务代码 |
 | 登录默认入口 | `App.tsx` 在非 Story Workspace 路径默认选择 Writing；认证上下文只负责身份，不负责业务路由 | 在认证完成且 pathname 为 `/` 时，以 `replaceState` 进入 `/story-workspace/chat` | 仅根路径使用默认入口；OAuth/设备验证和明确深链接不改写；避免 back 栈污染 |
 | 系统 Deck | `backend/database.py` 保存历史系统模板与注册时 auto-fork 逻辑；运行时启动不 seed/migrate | 用集中默认策略定义唯一剧本创作模板；注册只 fork 当前模板；列表排除未修改的退休系统副本 | 不运行启动时清理；用户自建、发布或有本地内容变化的 Deck 必须保留 |
 | 新建 Deck 插件 | `POST /api/decks` 只创建 Deck；`DeckClaudePluginSelector` 后续独立加载/保存 refs | 后端创建流程解析配置指定的包名和版本，验证 ready、digest、CLI 兼容后与 Deck/ref 同事务写入 | 插件缺失或校验失败返回冲突错误并 fail closed；浏览器不提交安装 ID |
@@ -47,15 +47,10 @@ Drama Forge 插件。本次调整只收敛入口和默认值，不删除旧功�
 
 ### 3.1 Story Workspace 导航
 
-主导航顺序固定为：
-
-1. Chat：默认对话与历史入口。
-2. Dream：发起或恢复剧本生产。
-3. Decks：管理创作团队和角色。
-
-Writing、Timeline、Analysis 不渲染按钮，不参与 Tab 顺序，也不提供折叠态 tooltip。其路由
-解析和内容渲染继续存在；用户通过既有合法深链接进入时不被强制重定向，侧栏没有伪造的
-选中项。
+主导航固定显示 Chat、Dream、Decks；其下的“更多”按钮通过 `aria-expanded` 与
+`aria-controls` 披露 Writing、Timeline、Analysis。三个恢复项使用既有翻译标签、图标、整栏
+折叠态 tooltip、键盘焦点和 `aria-current` 语义；点击后仍由 Story Workspace Router 装载原
+页面。进入三个恢复路由时“更多”自动展开；认证根路径保持 Chat-first。
 
 ### 3.2 Chat-first 登录入口
 
@@ -180,9 +175,10 @@ sequenceDiagram
     participant P as 目标页面
     U->>R: 打开 Story Workspace 路径
     R->>S: currentPath + navigate callback
-    S-->>U: 依次显示 Chat / Dream / Decks
-    Note over S: Writing / Timeline / Analysis 不渲染
-    U->>S: 选择可见入口
+    S-->>U: 显示 Chat / Dream / Decks / More
+    U->>S: 展开 More
+    S-->>U: 披露 Writing / Timeline / Analysis
+    U->>S: 选择入口
     S->>R: pushState(canonical path)
     R->>P: 渲染目标页面
     P-->>U: 显示业务内容
@@ -318,8 +314,9 @@ sequenceDiagram
 
 - 登录、注册及已认证根路径刷新后 URL 为 `/story-workspace/chat`，Chat 主界面可用。
 - 合法 `/story-workspace/dream` 深链接登录后仍停留 Dream。
-- Story Workspace 桌面/折叠导航都不存在 Writing、Timeline、Analysis 按钮，Chat、Dream、Decks
-  可键盘访问。
+- Story Workspace 导航默认显示 Chat、Dream、Decks 与“更多”；“更多”可由键盘展开
+  Writing、Timeline、Analysis，三个恢复项进入既有生产页面，刷新恢复路由时保持展开，认证
+  根路径仍进入 Chat。
 - 新用户默认 Deck 只包含剧本创作团队；退休系统副本不出现在列表，用户自建/修改 Deck 保留。
 - 既有默认账号打开 Decks 后，严格匹配且 refs 为空的剧本创作团队只补一个 enabled
   `drama-forge v1.0.1`；再次对账幂等，已有任意 refs 不改变。

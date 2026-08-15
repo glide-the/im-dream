@@ -9,9 +9,10 @@ Dreamflow actions without losing identity or revision context.
 
 Authenticated root entry is Chat-first: `/` is replaced with
 `/story-workspace/chat`, while explicit authorized deep links keep their target.
-The current primary sidebar exposes Chat, Dream and Decks in that order. Legacy
-Writing, Timeline and Analysis routes remain implemented but their sidebar
-entries are temporarily hidden.
+The primary sidebar keeps Chat, Dream and Decks visible. A “More” disclosure
+directly below them restores Writing, Timeline and Analysis without competing
+with the primary flow. These entries reuse the existing production routes and
+pages; authenticated root entry remains Chat-first.
 
 ## Roles
 

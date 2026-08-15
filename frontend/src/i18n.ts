@@ -2,6 +2,7 @@
 // [Output] English and Simplified Chinese UI copy for Ink & Memory surfaces.
 // [Pos] Frontend i18next resource registry.
 // [Sync] 2026-08-14: add actor-owned publication and system-default sharing copy.
+// [Sync] 2026-08-15: add the localized More disclosure for restored legacy navigation.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -19,6 +20,7 @@ const resources = {
         connector: 'Connector',
         dream: 'Dream',
         chat: 'Chat',
+        more: 'More',
         friends: 'Friends',
         settings: 'Settings'
       },
@@ -628,6 +630,7 @@ const resources = {
         connector: '连接器',
         dream: 'Dream',
         chat: '对话',
+        more: '更多',
         friends: '好友',
         settings: '设置'
       },
