@@ -1,261 +1,255 @@
+<!-- [Input] Current develop/story-workspace/Deck delivery state, Admin Gateway contract, and local runtime requirements. -->
+<!-- [Output] Reader-oriented setup, usage, branch status, scope boundaries, and feature TODOs. -->
+<!-- [Pos] Repository entry guide for Ink & Memory contributors and local users. -->
+<!-- [Sync] 2026-08-17: replace the historical progress diary with a concise usage-first project guide. -->
+
 # Ink & Memory
 
 <p align="center">
-  <img src="assets/banner.png" alt="Ink & Memory Banner" width="700"/>
+  <img src="assets/banner.png" alt="Ink & Memory" width="700" />
 </p>
 
-<p align="center">
-  <a href="README.zh.md">中文</a> · English
-</p>
+Ink & Memory 是一个围绕写作、Chat、Dream 和 Deck 构建的创作工作台。用户可以在同一套
+Story Workspace 中记录内容、与 Agent 对话、启动 Dream 创作流程，并通过 Deck 管理可用的
+Agent、插件引用和内容版本。
 
-> *Write. Reflect. Listen to the voices within.*
+## 可以做什么
 
-**Ink & Memory** is a journaling studio inspired by the inner monologues of *Disco Elysium*. As you write, a council of distinct personas chimes in—offering perspective, asking questions, or pointing out the absurdity of it all.
+- **Writing**：记录内容、保存写作 Session，并通过时间线和 Reflections 查看历史与分析结果。
+- **Chat**：使用 Deck 中的 Agent 对话；同一 Thread 保持固定 Deck，并可在 Deck 内切换 Agent。
+- **Dream**：从 DreamAgent Deck 发起独立 Dream Run，在工作台中审阅剧本、分镜、提示词和相关产物。
+- **Deck**：创建和维护 Deck、Agent、Prompt 与 Claude Plugin 引用；表单变更进入草稿，显式提交形成不可变内容版本。
+- **Settings / Work**：集中管理 Deck、资源链接和插件。系统 Deck 默认可用，用户 Deck 可在这里启停和维护。
+- **Agent 工作状态**：在侧边栏查看 SubAgent、计划和 TODO 的执行进度。
+- **认证与模型**：支持账号登录、Google OAuth 和 OAuth Device Flow；模型列表、订阅资格、用量与推理由 Admin Gateway 统一提供。
 
-This isn't just another notes app. It's a daily writing companion that saves your work, organizes your thoughts, and helps you notice patterns in your own thinking. It speaks both English and Chinese, switching seamlessly as you write.
+Deck 市场分发、注册、安装和分发治理本期不实现，也不提供占位入口。延期范围统一记录在
+[`docs/design/deck-register/`](docs/design/deck-register/README.md)。
 
----
+## 分支与集成状态
 
-## What Makes It Different
-
-<p align="center">
-  <img src="assets/writing-area.png" alt="Writing with inner voices" width="700"/>
-</p>
-
-**A clean writing space.** No toolbar clutter. Just a calm surface for your thoughts, with automatic saving so nothing gets lost.
-
-**A council of inner voices.** As you type, different personas highlight phrases and offer their takes—from the pattern-spotting Mirror to the darkly funny Absurdist. They appear as gentle watercolor highlights in the margins, never interrupting your flow.
-
-**Your timeline, visualized.** Every session is saved to a calendar. Each day generates a unique image from your writing—a visual diary that grows with you.
-
-**Fully customizable.** Don't like a voice? Edit it. Want new perspectives? Create your own deck. Share your creations with the community or discover what others have made.
-
----
-
-## The Voices
-
-The voices are organized into three decks. Enable the ones that resonate; disable the rest.
-
-### Introspection Deck
-*For processing emotions and understanding yourself*
-
-| | Voice | What it does |
+| 分支 | 用途 | 状态 |
 |---|---|---|
-| ❤️ | **Holder** | Offers gentle validation and support |
-| 👁️ | **Mirror** | Reflects patterns you might not notice |
-| 👊 | **Starter** | Breaks paralysis with tiny first steps |
-| 🧭 | **Weaver** | Finds hidden threads connecting your thoughts |
-| 🎭 | **Absurdist** | Lightens heaviness with dark humor |
+| [`develop`](https://github.com/glide-the/im/tree/develop) | 开发主分支；PR #2 合并后的功能以它为基线 | 当前主开发基线，尚未包含 PR #2 |
+| [`platform`](https://github.com/glide-the/im/tree/platform) | Admin 服务接入和平台能力 | 已完成主要接入 |
+| [`story-workspace`](https://github.com/glide-the/im/tree/story-workspace) | Story Workspace、Dream、Chat、订阅与工作台集成 | PR #2 已创建，当前为 Draft，等待合入 `develop` |
+| [`decks-version-man`](https://github.com/glide-the/im/tree/decks-version-man) | Deck Work、内容版本与 DreamAgent Demo 分流 | PR #1 已合入 `story-workspace` |
+| [`notion-session`](docs/design/notion-session/)（规划名） | Notion Device / 资源连接器设计 | 暂停；当前未保留同名远端分支，设计资料仍在仓库内 |
 
-### Scholar Deck
-*For intellectual and academic perspectives*
+相关 Pull Request：
 
-| | Voice | What it does |
-|---|---|---|
-| 🧭 | **Linguist** | Analyzes structure, semantics, meaning |
-| 👁️ | **Painter** | Focuses on imagery, aesthetics, mood |
-| 💡 | **Physicist** | Applies principles of energy and systems |
-| 🧠 | **Computer Scientist** | Thinks in algorithms and complexity |
-| ❤️ | **Doctor** | Offers health and psychological angles |
-| 🧭 | **Historian** | Provides context and historical patterns |
+- [PR #1：Deck management, versioning, and typed Dream launch](https://github.com/glide-the/im/pull/1)（已合并）
+- [PR #2：Merge Story Workspace into develop](https://github.com/glide-the/im/pull/2)（Draft，等待完整 CI 和评审）
 
-### Philosophy Deck
-*For examining life through different lenses*
+## 本地运行
 
-| | Voice | What it does |
-|---|---|---|
-| 🛡️ | **Stoic** | Emphasizes what you can and can't control |
-| 💨 | **Taoist** | Points toward effortless action and flow |
-| 🤔 | **Existentialist** | Asks about choice, freedom, meaning |
-| 👊 | **Pragmatist** | Focuses on what actually works |
+### 0. 选择代码基线
 
-### Making Your Own
-
-Each voice is just a system prompt, an icon, and a color. Fork any deck to customize it. Create voices that channel your favorite thinker, focus on specific aspects of your life, or just make you laugh. Share them in the community store.
-
----
-
-## Getting Started
-
-### You'll Need
-- Python 3.11+ with [uv](https://github.com/astral-sh/uv)
-- Node.js 18+
-
-### Backend Setup
+PR #2 合并前，Deck Work 和完整 Story Workspace 以 `story-workspace` 为可运行基线：
 
 ```bash
-cd backend
-uv venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-uv pip install -r requirements.txt
+git clone https://github.com/glide-the/im.git ink-dream-memory
+cd ink-dream-memory
+git switch story-workspace
 ```
 
-Configure the Admin Gateway in `backend/.env`. Dream has no direct Provider
-endpoint/key fallback: writing, chat, analysis, Claude Agent, workflows and
-daily-picture description/generation all use server-side Gateway aliases.
+PR #2 合并后，新功能统一从最新 `develop` 创建分支：
+
+```bash
+git switch develop
+git pull --ff-only origin develop
+```
+
+下文 Dream 命令均从 `ink-dream-memory` 根目录执行；Admin 推荐克隆为它的同级目录
+`../ink-admin-memory`。
+
+### 1. 准备依赖
+
+- Python 3.10+
+- [uv](https://github.com/astral-sh/uv)
+- Node.js 20+
+- pnpm 9+ 与 npm
+- Docker Desktop 或兼容 Docker Engine
+- [Ink Admin Memory](https://github.com/glide-the/ink-admin-memory)：负责 PostgreSQL Drizzle Schema、Admin、Gateway、模型目录、订阅和计费能力
+
+Dream 不会在启动时建表，也没有 SQLite 运行时回退。共享 PostgreSQL Schema 只能由 Admin
+仓库中的 Drizzle migration 管理。
+
+首次运行时，在 Dream 根目录执行以下命令获取 Admin、生成本机私有配置、启动 PostgreSQL/MinIO，
+并发布 Schema 和默认订阅数据：
+
+```bash
+test -d ../ink-admin-memory || (cd .. && git clone https://github.com/glide-the/ink-admin-memory.git)
+test -f backend/.env || cp backend/.env.example backend/.env
+(cd ../ink-admin-memory && pnpm install)
+(cd ../ink-admin-memory && pnpm env:setup)
+(cd ../ink-admin-memory && pnpm env:check)
+(cd ../ink-admin-memory && docker compose --env-file .env.local up -d postgres minio minio-init)
+(cd ../ink-admin-memory && pnpm db:migrate)
+(cd ../ink-admin-memory && pnpm db:migrate:check)
+(cd ../ink-admin-memory && pnpm db:data:subscriptions -- --apply)
+(cd ../ink-admin-memory && pnpm product:provision-local-dream)
+```
+
+最后一条命令会把 Product API 的共享身份写入 Admin 和 Dream 的 gitignored、权限为 `0600` 的
+环境文件。在终端 A 启动 Admin / Gateway：
+
+```bash
+(cd ../ink-admin-memory && pnpm dev)
+```
+
+打开 `http://localhost:3000/admin`。首次启动按 Admin 页面提示，使用
+`../ink-admin-memory/.env.local` 中的 `ADMIN_BOOTSTRAP_TOKEN` 创建首位管理员；随后在模型中心配置
+Provider、可调用模型 alias 和定价。Admin 不会生成上游 Provider Key。
+
+需要本机 Dream 调用真实 Gateway 时，先确认至少有一个启用、已定价且已配置 Provider 凭据的模型，
+然后停止终端 A 中的 Admin，在 Dream 根目录执行：
+
+```bash
+(cd ../ink-admin-memory && pnpm gateway:provision-local-dream)
+```
+
+该命令只接受 localhost 上名为 `ink-memory` 的数据库，并把 Gateway 服务身份和可调用模型 alias
+写入两边的私有环境文件；不要对共享或生产数据库执行。完成后在终端 A 重新运行
+`(cd ../ink-admin-memory && pnpm dev)`，让 Admin 加载新的 Product/Gateway 身份。Admin Gateway
+默认由 `http://127.0.0.1:3000` 提供。Admin migration 至少需要发布以下 Dream 运行 capability：
+
+- `dream.schema.unified.v1`
+- `dream.workflow.thread-lookup.v1`
+- `dream.story-artifact-contract.v2`
+- `dream.workflow.no-continuing.v1`
+
+Deck 内容版本还依赖 `dream.deck-content-versions.v1`；缺少时版本能力关闭，不得由 Dream 临时建表补齐。
+
+### 2. 启动 Dream 后端
+
+```bash
+(cd backend && uv venv)
+(cd backend && uv pip install --python .venv/bin/python -r requirements.txt)
+test -f backend/.env || cp backend/.env.example backend/.env
+```
+
+至少配置 PostgreSQL 和 Admin Gateway：
 
 ```dotenv
+DATABASE_URL=postgresql://<user>:<password>@127.0.0.1:<port>/<database>
+
 INK_GATEWAY_ENABLED=1
 INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
-INK_GATEWAY_SERVICE_KEY=
+INK_GATEWAY_SERVICE_KEY=replace-with-local-service-key
 INK_GATEWAY_TEXT_MODEL_ALIAS=dream-balanced
 INK_GATEWAY_IMAGE_DESCRIPTION_MODEL_ALIAS=dream-image-description
 INK_GATEWAY_IMAGE_GENERATION_MODEL_ALIAS=dream-image-generation
 ```
 
-The service key is injected at runtime and must never be committed, returned
-to the browser or written to application logs.
+本机 Admin 默认 PostgreSQL 地址是 `localhost:5433/ink-memory`；实际用户名、密码和连接串以
+`../ink-admin-memory/.env.local` 为准。若已运行上一步 Gateway provision，它会写入服务 Key、
+Subject JWT 和可调用模型 alias，请保留其结果，不要再用示例值覆盖。
 
-Dream Settings → AI 模型 does not contain a static model list. The browser
-calls Dream `GET /api/gateway/models`; Dream signs the canonical subject and
-calls Admin `GET /v1/models` with `models:list`. Saving a model stores only the
-platform alias, and every Claude Agent turn revalidates it before the SDK is
-forced through Admin Gateway. Provider IDs, upstream model names and Gateway
-credentials are never accepted from the browser.
+不要提交真实数据库密码、Gateway Service Key、Provider Key 或 OAuth Secret。Dream 只接收
+Admin 发布的平台模型 alias；浏览器不能直接传 Provider ID、上游模型名或密钥。
 
-Configure the PostgreSQL-only runtime in `backend/.env`. Set `DATABASE_URL`
-directly, or point Dream at an existing env file and it will load only that
-file's `DATABASE_URL` value:
+启动后端：
+
+```bash
+(cd backend && .venv/bin/python server.py)
+```
+
+后端默认监听 `http://127.0.0.1:8765`。
+
+### 3. 启动前端
+
+```bash
+(cd frontend && npm install)
+(cd frontend && npm run dev)
+```
+
+浏览器打开 `http://127.0.0.1:5173`。
+
+### 4. 可选认证配置
+
+密码登录可直接使用。需要 Google OAuth 时，在 `backend/.env` 配置：
 
 ```dotenv
-DATABASE_URL=postgresql://ink_memory:ink_memory@127.0.0.1:5433/ink-memory
-# Or load only DATABASE_URL from an existing environment file:
-INK_LOAD_DATABASE_URL_FROM_ENV_FILE=1
-INK_DATABASE_ENV_FILE=/absolute/path/to/ink-admin-memory/.env.local
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_OAUTH_SCOPE=openid email profile
+ENABLE_OAUTH_SIGNUP=true
 ```
 
-Then start the server:
+OAuth Device Flow 使用服务端允许的客户端 ID，具体协议与验证页面参见
+[`docs/architecture/auth-device.md`](docs/architecture/auth-device.md) 和 `backend/routers/device_oauth.py`。
+
+## 主要入口
+
+登录后默认进入 Story Workspace：
+
+| 页面 | 路径 | 用途 |
+|---|---|---|
+| Chat | `/story-workspace/chat` | 新对话、历史 Thread、Deck/Agent 选择 |
+| Dream | `/story-workspace/dream` | Dream 列表、Run 重入和独立创作工作台 |
+| Decks | `/story-workspace/decks` | 查看已启用且已发布的用户 Deck 和系统 Deck |
+| Work | `/story-workspace/settings/work` | 管理 Deck、资源链接与插件 |
+| Settings | `/story-workspace/settings` | 通用设置、订阅、模型与关于信息 |
+
+首次使用时，可在登录页选择“注册”创建账号；注册流程会应用 Admin 发布的默认产品、订阅和系统
+Deck。若 Admin/Gateway、数据库 capability、默认产品或可调用模型 alias 未准备好，注册或 Agent
+调用会 fail closed，不会使用本地伪数据兜底。
+
+使用 Deck 时：
+
+1. 在 Decks 页面打开 Deck 预览。
+2. Chat Agent 示例会进入 Chat 并预填内容，不会自动发送。
+3. DreamAgent 示例会创建 Dream Run，并进入独立 Dream 工作台。
+4. Deck 的完整维护、启停、版本记录和相关对话清理统一在 Settings / Work 中完成。
+
+首次创建用户 Deck 的最短路径：
+
+1. 打开 `/story-workspace/settings/work`，进入 Deck 页签并点击“创建”。
+2. 在弹窗中填写 Deck 信息，至少增加并启用一个 Agent。
+3. 保存草稿后显式提交为内容 `v1`。
+4. 在 Work 中启用 Deck；已启用、已发布且无未提交草稿的 Deck 才会出现在 Decks 主页面。
+
+## 常用验证命令
+
+默认技术验证不写真实业务数据：前端 lint/build 不需要服务；下方 Deck Playwright 用例通过公开页面
+和拦截的 API 合同验证 UI，只要求 `npm run dev` 正在 `5173` 端口运行；后端测试会在缺少专用测试
+数据库或 Provider 凭据时跳过相应集成用例，不得通过业务代码 fallback 强行放行。
 
 ```bash
-cd backend
-.venv/bin/python server.py  # Runs on http://localhost:8765
+# 前端检查
+(cd frontend && npm run lint)
+(cd frontend && npm run build)
+
+# 首次使用 Playwright 时安装浏览器；运行 E2E 前保持 Vite 在 5173 端口运行
+(cd frontend && npx playwright install chromium)
+(cd frontend && npx playwright test e2e/chat-first-deck-defaults.spec.ts --reporter=line --workers=1)
+
+# 后端测试
+(cd backend && .venv/bin/python -m pytest -q)
 ```
 
-Use the repository virtual environment shown above. Calling the system
-`python` directly is unsupported because it may not contain the locked
-PostgreSQL driver (`psycopg`) or the rest of the backend dependencies.
+真实业务测试必须使用正常运行的 Dream、Admin、Gateway、真实 PostgreSQL 和指定现有账号；
+所有步骤走页面或公开生产 API，保留正常 Admin 可查询的 Run、Thread、Gateway 和 Token 回执。
+隔离测试结果不能冒充真实业务验收，也不要用测试命令修改或清理无关真实数据。
 
-### PostgreSQL migration
+## 相关文档
 
-Dream does not create tables at application startup and has no SQLite/JSON/
-memory fallback. Admin Drizzle is the sole PostgreSQL DDL/version authority;
-Dream owns repositories, transactions, business data and importer semantics.
-Dream startup performs a read-only capability check and never runs a migration.
-Create or upgrade the complete Admin + Dream schema from the Admin repository:
+- [Deck 设计与需求追踪](docs/design/deck/README.md)
+- [延期的 Deck 市场分发需求](docs/design/deck-register/README.md)
+- [Story Workspace 设计](docs/design/story-workspace/)
+- [订阅业务设计](docs/design/subscription/06-subscription-business-design.md)
+- [模型服务接入设计](docs/design/model-service/07-model-service-integration-design.md)
+- [部署说明](docs/deploy/overview.md)
+- [Notion Developers](https://www.notion.so/developers)
 
-```bash
-pnpm db:migrate
-pnpm db:migrate:check
-```
+## 功能 TODO
 
-The required runtime capabilities are `dream.schema.unified.v1`,
-`dream.workflow.thread-lookup.v1`, and `dream.story-artifact-contract.v2`.
-Dream no longer accepts an Alembic head as runtime authority. Admin migration
-`0032_dream_schema_authority_cutover` adopts verified historical `06/07`
-databases and publishes these capabilities before the Dream process starts.
-
-The importer defaults to a source-only dry run; production execution
-additionally requires exact database/host/port/owner and an explicit approval
-string.
-
-```bash
-python backend/script/migrate_legacy_to_postgres.py \
-  --main-sqlite /absolute/path/to/ink-and-memory.db \
-  --notion-sqlite /absolute/path/to/notion-connectors.db
-```
-
-From the Admin repository, `pnpm db:data:legacy -- --main-sqlite <absolute>
---notion-sqlite <absolute> --mode execute --record` runs the same Dream-owned
-importer and records only safe table counts/digests. `pnpm
-db:data:subscriptions -- --apply` initializes `Free`, `Dream`, and `is
-Dreaming` plus the canonical-user subscription projections. Existing
-PostgreSQL installations use `--mode verify-existing`; post-cutover changes
-are accepted only with the explicit flag and only when every source PK exists
-and the target timestamp proves that the PostgreSQL row is newer.
-
-The checked-in disposable PostgreSQL E2E initializes the schema using only the
-33 Admin migrations, imports the current real 43+5 source inventory, validates
-count/PK/row/FK/sequence/trigger contracts, writes the V2 Drizzle receipt and
-proves idempotent adoption. Counts are source facts, not a hard-coded schema
-version: the 2026-08-12 source scan contains 4,930 rows. Existing successful V1
-receipts remain valid and are reused by source fingerprint.
-
-See [Database schema authority](docs/design/database-schema-authority.md)
-before migrating another environment.
-
-### Frontend Setup
-
-```bash
-cd frontend
-npm install
-npm run dev  # Listens on 0.0.0.0:5173; open http://<this-machine-ip>:5173 from another device
-```
-
----
-
-## How It Works
-
-The voice system uses a **trace-based energy model**:
-
-1. **Energy builds** as you write
-2. **Threshold triggers** analysis of recent text
-3. **Voices scan** for phrases that match their personality
-4. **Comments appear** as watercolor highlights in the margin
-
-This creates an organic rhythm—voices chime in naturally rather than constantly interrupting.
-
----
-
-## Technical Stack
-
-**Frontend:** React 19 + TypeScript, Vite, TipTap editor with custom extensions
-
-**Backend:** FastAPI + Python, PolyCLI for LLM orchestration, PostgreSQL 16 with psycopg 3 pooling and capability-checked Admin/Drizzle schema
-
-**AI:** Multi-model support (GPT-4, Claude, DeepSeek, Gemini), structured outputs via Pydantic
-
-**Architecture:** Deck-based voice system with parent-child relationships, community store for sharing
-
----
-
-## Roadmap
-
-- More voices and community-created decks
-- Richer visualizations of your writing patterns
-- Mobile app for writing on the go
-- Collaborative features
-
----
-
-## Deployment
-
-The current backend requires PostgreSQL and must not be deployed with the old
-Cloud Storage FUSE/SQLite persistence path. The commands below remain legacy
-deployment scaffolding until its environment is updated for `DATABASE_URL`,
-the Admin Drizzle release job and the PostgreSQL capability gates:
-
-```bash
-export GCP_PROJECT_ID=your-project-id
-./deploy/google-cloud/deploy.sh setup-storage  # one-time: GCS bucket + service account
-./deploy/google-cloud/deploy.sh setup-env      # one-time: secrets + env vars
-./deploy/google-cloud/deploy.sh deploy         # every release
-```
-
-See [docs/deploy/overview.md](docs/deploy/overview.md) for the full guide.
-
----
-
-## Contributing
-
-This is open source. We'd love your help.
-
-- **Found a bug?** Open an issue
-- **Have an idea?** Let's discuss it
-- **Want to code?** PRs welcome
-- **Created a cool deck?** Share it with the community
-
----
-
-<p align="center">
-  <i>Your thoughts deserve to be heard—even by yourself.</i>
-</p>
+- [ ] **P0**：完成支付系统设计、支付回调、订单状态与订阅结算闭环。
+- [ ] **P0**：完成 PR #2 的完整 CI、评审与合并；合并后统一以 `develop` 创建功能分支。
+- [ ] **P1**：基于新的 `develop` 功能分支恢复 `notion-session` 设计，完成 Notion Device 授权、资源选择、同步与异常恢复。
+- [ ] **P1**：继续完善工作区文件展示、存储服务和跨端同步能力。
+- [ ] **P1**：增加用户 Profile 定制，用于 Reflections 的回响、特质和模式深度分析。
+- [ ] **P2**：扩展 ASR 与语音输入/输出能力。
+- [ ] **P2**：补充阿里云部署、可观测性、备份和故障恢复文档。
+- [ ] **延期**：单独评审 Deck 市场注册、发布、安装和分发治理；本期不提前实现。

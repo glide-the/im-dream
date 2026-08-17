@@ -1,7 +1,8 @@
 // [Input] Runtime API base config, AuthContext token, workspace file APIs, and dashboard file UI state.
-// [Output] Workspace file sidebar with list/upload/delete/download behavior.
+// [Output] Workspace file sidebar with list/upload/delete and file/folder-download behavior.
 // [Pos] dashboard file-sidebar component node
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin workspace file requests.
+// [Sync] 2026-08-17: allow directory rows to download their contents as ZIP archives.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IconChevronDown, IconChevronRight, IconDownload, IconFile, IconFolder, IconLoader, IconPlus, IconTrash, IconX } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -109,7 +110,7 @@ function flattenVisible(nodes: FileInfo[], currentPath: string): FileInfo[] {
   return walk(nodes);
 }
 
-function buildWorkspaceFileDownloadUrl(sessionId: string, filePath: string): string {
+function buildWorkspaceDownloadUrl(sessionId: string, filePath: string): string {
   const params = new URLSearchParams({ sessionId, path: filePath });
   return `${API_BASE}/api/workspace/files/download?${params.toString()}`;
 }
@@ -230,9 +231,9 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
   }, [loadDirectoryData, sessionId]);
 
   const handleDownload = useCallback(async (file: FileInfo) => {
-    if (!sessionId || file.isDirectory) return;
+    if (!sessionId) return;
     try {
-      const response = await fetch(buildWorkspaceFileDownloadUrl(sessionId, file.path), {
+      const response = await fetch(buildWorkspaceDownloadUrl(sessionId, file.path), {
         headers: { 'Authorization': `Bearer ${getAuthToken()}` },
       });
       if (!response.ok) {
@@ -243,12 +244,13 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = file.name;
+      const downloadName = file.isDirectory ? `${file.name}.zip` : file.name;
+      link.download = downloadName;
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setNotice(`Started download: ${file.name}`);
+      setNotice(`Started download: ${downloadName}`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '下载失败');
     }
@@ -300,7 +302,15 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
                       <div style={{ fontSize: '0.83rem', color: 'var(--color-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.name}</div>
                       {!node.isDirectory ? <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>{formatFileSize(node.size)}</div> : null}
                     </div>
-                    {!node.isDirectory ? <button type="button" onClick={() => void handleDownload(node)} style={{ border: 'none', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer' }}><IconDownload style={{ width: '0.95rem', height: '0.95rem' }} /></button> : null}
+                    <button
+                      type="button"
+                      onClick={() => void handleDownload(node)}
+                      aria-label={node.isDirectory ? `Download ${node.name} as ZIP` : `Download ${node.name}`}
+                      title={node.isDirectory ? '下载文件夹 ZIP' : '下载文件'}
+                      style={{ border: 'none', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer' }}
+                    >
+                      <IconDownload style={{ width: '0.95rem', height: '0.95rem' }} />
+                    </button>
                     <button type="button" onClick={() => void handleDelete(node.path)} style={{ border: 'none', background: 'transparent', color: '#d9534f', cursor: 'pointer' }}><IconTrash style={{ width: '0.95rem', height: '0.95rem' }} /></button>
                   </div>
                 </div>

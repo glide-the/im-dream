@@ -1,7 +1,8 @@
 # [Input] None — reads AGENT_CWD env var and project root for template assets.
 # [Output] Provide get_workspace_root, init_workspace, get_or_create_workspace,
 #          extract_archive_in_skills, list_workspace_files, list_workspace_file_tree,
-#          read_workspace_file_content, write_workspace_file, delete_workspace_file,
+#          read_workspace_file_content, read_workspace_download_content,
+#          write_workspace_file, delete_workspace_file,
 #          move_workspace_file to application and API layers.
 # [Pos] workspace manager node in libs/claude_agent_kit/server
 # [Sync] 2026-05-06: initial implementation — WSK-01 workspace init + WSK-04 archive extraction
@@ -69,6 +70,8 @@
 # [Sync] 2026-08-14: align sandbox temp write access with the shared
 #                    CLAUDE_CODE_TMPDIR resolver; remove broad /tmp and dynamic
 #                    cwd-* allowances.
+# [Sync] 2026-08-17: add safe directory ZIP downloads while preserving single-file
+#                    download behavior and workspace containment checks.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -99,6 +102,7 @@ failure the original ``skills/`` content is preserved unchanged.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import os
@@ -1472,6 +1476,91 @@ def read_workspace_file_content(
         content=full_path.read_bytes(),
         file_name=full_path.name,
         size=stat.st_size,
+        modified_at=_mtime_iso(stat),
+    )
+
+
+def read_workspace_download_content(
+    workspace_path: Path,
+    file_path: str,
+) -> WorkspaceFileContent:
+    """Read a file or package a directory as a ZIP download.
+
+    Directory archives retain the selected directory as their top-level entry.
+    ``os.walk`` never follows directory symlinks, and every archived file target
+    is resolved against the workspace root before it is read.
+    """
+    full_path = _resolve_workspace_safe_path(workspace_path, file_path)
+
+    if not full_path.exists():
+        raise WorkspaceFileAccessError("NOT_FOUND", "File not found", 404)
+
+    if not full_path.is_dir():
+        return read_workspace_file_content(workspace_path, file_path)
+
+    workspace_root = workspace_path.resolve()
+    archive_root_name = full_path.name
+    archive_buffer = io.BytesIO()
+
+    def raise_walk_error(error: OSError) -> None:
+        raise error
+
+    def validate_archive_component(component: str) -> str:
+        if component in {"", ".", ".."} or "/" in component or "\\" in component:
+            raise WorkspaceFileAccessError(
+                "PATH_TRAVERSAL",
+                "Unsafe path component in directory archive",
+                400,
+            )
+        return component
+
+    validate_archive_component(archive_root_name)
+
+    with zipfile.ZipFile(
+        archive_buffer,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED,
+    ) as archive:
+        for current_root, directory_names, file_names in os.walk(
+            full_path,
+            topdown=True,
+            onerror=raise_walk_error,
+            followlinks=False,
+        ):
+            directory_names.sort(key=str.lower)
+            file_names.sort(key=str.lower)
+            current_path = Path(current_root)
+            relative_directory = current_path.relative_to(full_path)
+            safe_directory_parts = tuple(
+                validate_archive_component(part)
+                for part in relative_directory.parts
+            )
+            archive_directory = Path(archive_root_name, *safe_directory_parts)
+            archive.writestr(f"{archive_directory.as_posix().rstrip('/')}/", b"")
+
+            for file_name in file_names:
+                validate_archive_component(file_name)
+                entry_path = current_path / file_name
+                resolved_entry = entry_path.resolve()
+                try:
+                    resolved_entry.relative_to(workspace_root)
+                except ValueError:
+                    raise WorkspaceFileAccessError(
+                        "PATH_TRAVERSAL",
+                        "Path traversal not allowed",
+                        400,
+                    ) from None
+                if not resolved_entry.is_file():
+                    continue
+                archive_path = archive_directory / file_name
+                archive.write(resolved_entry, archive_path.as_posix())
+
+    content = archive_buffer.getvalue()
+    stat = full_path.stat()
+    return WorkspaceFileContent(
+        content=content,
+        file_name=f"{archive_root_name}.zip",
+        size=len(content),
         modified_at=_mtime_iso(stat),
     )
 

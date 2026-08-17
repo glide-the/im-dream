@@ -1,5 +1,5 @@
 # [Input] Consume backend/routers/workspace.py and workspace file manager APIs.
-# [Output] Validate workspace router download headers and Unicode filename handling.
+# [Output] Validate workspace file/download contracts, including safe directory ZIPs.
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-13: initial coverage for RFC 8187 download Content-Disposition.
 # [Sync] 2026-06-21: cover workspace file APIs preserving Settings-backed
@@ -8,16 +8,19 @@
 #                    before disabled refresh writes an explicit deny policy.
 # [Sync] 2026-07-26: cover refresh preserving sandbox_fs_allowed_write_paths
 #                    from Settings during workspace file API init.
+# [Sync] 2026-08-17: cover directory ZIP layout, Unicode names, and symlink escape denial.
 
 """Regression tests for the workspace file router."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
 import unittest.mock
+import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -76,6 +79,62 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
         self.assertIn('filename="', disposition)
         self.assertIn(f"filename*=UTF-8''{quote(filename, safe='')}", disposition)
         self.assertNotIn("二轮问卷", disposition)
+
+    def test_download_directory_returns_zip_with_selected_folder_root(self):
+        session_id = "download-directory"
+        directory_name = "第一章"
+        workspace = get_or_create_workspace(session_id)
+        target = workspace / "files" / directory_name
+        (target / "场景").mkdir(parents=True)
+        (target / "空目录").mkdir()
+        (target / "大纲.md").write_text("chapter outline", encoding="utf-8")
+        (target / "场景" / "开场.txt").write_text("opening scene", encoding="utf-8")
+
+        response = self.client.get(
+            "/api/workspace/files/download",
+            params={"sessionId": session_id, "path": f"files/{directory_name}"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["content-type"], "application/zip")
+        self.assertIn(
+            f"filename*=UTF-8''{quote(f'{directory_name}.zip', safe='')}",
+            response.headers["content-disposition"],
+        )
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            self.assertEqual(
+                archive.namelist(),
+                [
+                    f"{directory_name}/",
+                    f"{directory_name}/大纲.md",
+                    f"{directory_name}/场景/",
+                    f"{directory_name}/场景/开场.txt",
+                    f"{directory_name}/空目录/",
+                ],
+            )
+            self.assertEqual(
+                archive.read(f"{directory_name}/场景/开场.txt"),
+                b"opening scene",
+            )
+
+    def test_download_directory_rejects_symlink_escape(self):
+        session_id = "download-directory-symlink"
+        workspace = get_or_create_workspace(session_id)
+        target = workspace / "files" / "export"
+        target.mkdir(parents=True)
+        outside_file = Path(self._tmp.name) / "outside-secret.txt"
+        outside_file.write_text("secret", encoding="utf-8")
+        (target / "secret-link.txt").symlink_to(outside_file)
+
+        response = self.client.get(
+            "/api/workspace/files/download",
+            params={"sessionId": session_id, "path": "files/export"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "PATH_TRAVERSAL")
 
     def test_list_refresh_preserves_disabled_sandbox_network_policy(self):
         session_id = "network-disabled"

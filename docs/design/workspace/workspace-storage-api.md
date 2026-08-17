@@ -2,7 +2,7 @@
 
 > **参考来源**: `glide-the/claude-agent-next-kit → docs/design/storage-api.md`
 > **路径**: `backend/routers/workspace.py`
-> **最后更新**: 2026-05-25
+> **最后更新**: 2026-08-17
 
 ---
 
@@ -217,30 +217,30 @@ Content-Type: application/json
 
 ---
 
-### 5. 下载文件
+### 5. 下载文件或文件夹
 
 ```
 GET /api/workspace/files/download
 ```
 
-下载工作空间中的单个文件。
+下载工作空间中的单个文件；当 `path` 指向文件夹时，将所选文件夹作为顶层目录打包为同名 ZIP 下载。
 
 #### 查询参数
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `sessionId` | string | ✅ | 工作空间会话 ID |
-| `path` | string | ✅ | 文件的相对路径 |
+| `path` | string | ✅ | 文件或文件夹的相对路径 |
 
 #### 响应
 
-直接返回文件二进制内容，Content-Type 由文件名推断。
+文件直接返回原始二进制内容，Content-Type 由文件名推断。文件夹返回 `application/zip`，下载名为 `<文件夹名>.zip`；ZIP 保留空目录，并拒绝任何解析到工作空间之外的文件符号链接。
 
 #### 响应头
 
 | 头 | 示例值 |
 |----|--------|
-| `Content-Type` | `application/pdf` |
+| `Content-Type` | `application/pdf` 或 `application/zip` |
 | `Content-Length` | `123456` |
 | `Content-Disposition` | `attachment; filename="report.pdf"; filename*=UTF-8''report.pdf` |
 | `Cache-Control` | `private, no-store` |

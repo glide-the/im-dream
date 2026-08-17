@@ -18,6 +18,7 @@
 # [Sync] 2026-07-26: pass sandbox_fs_allowed_write_paths through workspace
 #                    init kwargs so file-API refreshes do not drop user fs
 #                    write paths from settings.json.
+# [Sync] 2026-08-17: download endpoint packages selected directories as ZIP files.
 
 """Workspace file management API.
 
@@ -27,7 +28,7 @@ GET    /api/workspace/files          — list files in a workspace directory
 POST   /api/workspace/files          — upload file(s) to a workspace
 DELETE /api/workspace/files          — delete a file or directory
 PATCH  /api/workspace/files          — move / rename a file
-GET    /api/workspace/files/download — download a single workspace file
+GET    /api/workspace/files/download — download a workspace file or directory ZIP
 """
 
 from __future__ import annotations
@@ -57,7 +58,7 @@ from libs.claude_agent_kit.server.workspace import (
     list_workspace_file_tree,
     list_workspace_files,
     move_workspace_file,
-    read_workspace_file_content,
+    read_workspace_download_content,
     write_workspace_file,
     WorkspaceFileInfo,
     WorkspaceFileTreeNode,
@@ -516,12 +517,12 @@ async def download_workspace_file(
     path: Annotated[str, Query()],
     current_user: dict = Depends(_require_workspace_auth),
 ) -> Response:
-    """Download a single workspace file.
+    """Download a workspace file or package a directory as ZIP.
 
     Query params
     ------------
     sessionId : str — workspace session identifier (required)
-    path      : str — relative path of the file to download (required)
+    path      : str — relative path of the file or directory to download (required)
     """
     if not session_id or not path:
         raise HTTPException(
@@ -532,7 +533,7 @@ async def download_workspace_file(
 
     try:
         workspace_path = _get_or_create_workspace_for_user(session_id, current_user)
-        file_obj = read_workspace_file_content(workspace_path, path)
+        file_obj = read_workspace_download_content(workspace_path, path)
     except WorkspaceFileAccessError as exc:
         raise HTTPException(
             status_code=exc.status,

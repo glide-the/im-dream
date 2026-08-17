@@ -3,7 +3,7 @@
 [Input] Backend test modules and their supported execution lanes.
 [Output] Human-readable test inventory, commands, and coverage summary.
 [Sync] 2026-08-16: document Deck deletion and exact runtime-binding history regression contracts.
-[Sync] 2026-08-17: document Deck-filtered Chat history and corrected deletion dependency classification.
+[Sync] 2026-08-17: document Deck-filtered Chat history, corrected deletion dependency classification, and workspace directory ZIP coverage.
 -->
 
 ## Overview
@@ -22,7 +22,7 @@ tests/
 │
 │ # Claude Agent module tests (migrated from Pawkeyland scripts/)
 ├── test_claude_agent_workspace.py       # Workspace lifecycle: root resolution, skeleton, idempotency
-├── test_workspace_router.py             # Workspace router: download header encoding
+├── test_workspace_router.py             # Workspace router: file headers + safe directory ZIP downloads
 ├── test_claude_agent_context_builder.py # Context builder: system_prompt assembly, session rendering
 ├── test_sessions_tool.py                # Agent get_sessions_range retrieval params and vector boundary
 ├── test_notion_snapshot_contract.py     # Notion canonical snapshot path resolution and staleness checks
@@ -147,6 +147,7 @@ python tests/test_seo_content.py -v
 
 ### Workspace Router (`test_workspace_router.py`)
 - ✅ `GET /api/workspace/files/download` — 中文等非 Latin 文件名使用 Latin-1-safe `filename` fallback + UTF-8 `filename*`
+- ✅ 文件夹下载 — 生成以所选目录为顶层的同名 ZIP，保留空目录，并拒绝越界文件符号链接
 
 ### Claude Agent — Context Builder (`test_claude_agent_context_builder.py`)
 - ✅ `_render_session_entry` — 日期/标题/摘要字段渲染
