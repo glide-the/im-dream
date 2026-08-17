@@ -261,11 +261,14 @@ export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = fa
         display: 'flex',
         flexDirection: 'column',
         gap: '0.9rem',
-        border: '1px solid var(--color-border-paper)',
-        borderRadius: '1.15rem',
-        background: 'var(--color-bg-surface)',
-        padding: isMobile ? '1rem' : '1.15rem',
-        boxShadow: '0 12px 28px var(--color-shadow-soft)',
+        // The settings page already provides the section layout and heading.
+        // Keep this module surface-level so it does not render a second outer card;
+        // individual connector option cards retain their own boundaries.
+        border: 0,
+        borderRadius: 0,
+        background: 'transparent',
+        padding: 0,
+        boxShadow: 'none',
       }}
     >
       <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>

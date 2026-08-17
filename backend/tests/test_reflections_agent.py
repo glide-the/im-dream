@@ -3,6 +3,8 @@
 #          results, events, and API endpoints.
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-25: add first-release Reflections-agent functional coverage.
+# [Sync] 2026-08-14: keep the explicit SQLite fixture outside the production
+#                    PostgreSQL registration/default-Free boundary.
 
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ from llm_json_parser import try_parse_json_array
 from reflections_agent import ReflectionsTaskEngine, create_reflections_task, get_or_create_reflection_event_bus
 from routers import deps as router_deps
 from routers.reflections import router as reflections_router
+from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 
 
 def _section_from_prompt(prompt: str) -> str:
@@ -86,16 +89,28 @@ def _run(coro):
 class ReflectionsAgentFunctionalTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        self.old_db_path = database.DB_PATH
         self.old_agent_cwd = os.environ.get("AGENT_CWD")
-        database.DB_PATH = Path(self.tmp.name) / "ink-test.db"
-        os.environ["AGENT_CWD"] = str(Path(self.tmp.name) / "agent-workspace")
-        database.init_db()
-        self.user_id = database.create_user(
-            "reflections-agent@example.com",
-            auth.hash_password("secret123"),
-            "Reflections Agent",
+        self.database_fixture = LegacyDatabaseModuleFixture(
+            database,
+            Path(self.tmp.name) / "ink-test.db",
         )
+        self.database_fixture.start(initialize_legacy_schema=True)
+        os.environ["AGENT_CWD"] = str(Path(self.tmp.name) / "agent-workspace")
+        # This explicit SQLite fixture intentionally bypasses the production
+        # registration boundary, whose PostgreSQL contract includes Admin-owned
+        # billing tables and default-Free provisioning.
+        fixture_connection = self.database_fixture.connect()
+        cursor = fixture_connection.execute(
+            "INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
+            (
+                "reflections-agent@example.com",
+                auth.hash_password("secret123"),
+                "Reflections Agent",
+            ),
+        )
+        fixture_connection.commit()
+        self.user_id = int(cursor.lastrowid)
+        fixture_connection.close()
         database.save_session(
             self.user_id,
             "session-a",
@@ -120,7 +135,7 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.claude_stream_patch.stop()
-        database.DB_PATH = self.old_db_path
+        self.database_fixture.stop()
         if self.old_agent_cwd is None:
             os.environ.pop("AGENT_CWD", None)
         else:

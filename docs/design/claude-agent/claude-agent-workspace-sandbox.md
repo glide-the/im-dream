@@ -19,6 +19,11 @@
 > read allowlist to avoid bubblewrap `/newroot/sbin` tmpfs mount failures.
 > [Sync] 2026-06-16: direct real writes under `.claude/skills/` are imported
 > into `workspace/skills/` on the next workspace sync before symlinks rebuild.
+> [Sync] 2026-08-04: `init_workspace()` pre-creates and repairs
+> `.claude/agents/`. Claude Code's Bash sandbox rejects creating new
+> directories inside the protected `.claude` tree at runtime; pre-creation
+> lets the built-in `Write` tool manage project subagent definitions without
+> broadening access to settings or hooks.
 > [Sync] 2026-06-21: add Settings-backed `sandbox.network` policy.
 > [Sync] 2026-06-22: Workspace Mode is now the workspace lifecycle gate:
 > when `workspace_enabled=false`, Claude Agent chat does not initialize a
@@ -29,10 +34,14 @@
 > workspace runtime path.
 > [Sync] 2026-06-25: `sandbox_network_mode="open"` omits `sandbox.network`
 > instead of writing unsupported `allowedDomains:["*"]`.
-> [Sync] 2026-07-26: filesystem write policy revision (§2.1) — default-allow
-> Claude Code's sandbox TMPDIR (`$CLAUDE_TMPDIR` / `/tmp/claude*` — both
-> `/tmp/claude` and `/tmp/claude-{uid}` conventions are allowed) to kill
-> the `zsh: operation not permitted: .../cwd-*` noise, and add the
+> [Sync] 2026-08-14: filesystem write policy correction (§2.1) — the server
+> injects the supported `CLAUDE_CODE_TMPDIR` into every SDK subprocess and
+> sandbox `allowWrite` uses that same canonical root (configured default
+> `/tmp/claude`; `/private/tmp/claude` on macOS after resolving the system
+> symlink). It
+> does not allow all of `/tmp`, guess `/tmp/claude-{uid}`, or persist a
+> generated `cwd-*` path. This fixes the shell receipt failure without
+> broadening the business workspace boundary. The
 > `sandbox_fs_allowed_write_paths` Settings key for user extra writable
 > absolute paths; denyWrite precedence documented.
 > [Sync] 2026-07-26: apply-seccomp passthrough revision — bundled-CLI shadowing
@@ -107,7 +116,7 @@ When `system_config.workspace_enabled=true`, workspace initialization writes:
       ],
       "allowWrite": [
         "{AGENT_CWD}/{thread_id}",
-        "<Claude sandbox TMPDIR: $CLAUDE_TMPDIR or /tmp/claude[{-uid}]>",
+        "<server-owned canonical CLAUDE_CODE_TMPDIR; configured default /tmp/claude>",
         "<user extra paths: system_config.sandbox_fs_allowed_write_paths>"
       ],
       "denyWrite": [
@@ -207,7 +216,7 @@ package managers. In `disabled` mode, `agent_runner.py` also rejects
 `WebFetch`, `WebSearch`, and common Bash network commands before full-access or
 low-sensitivity allow decisions. It does not install missing binaries.
 
-### 2.1 Filesystem write policy **[2026-07-26]**
+### 2.1 Filesystem write policy **[2026-08-14]**
 
 `filesystem.allowWrite` is an ordered allow list; per sandbox-runtime
 semantics `denyWrite` always wins over `allowWrite`, so the workspace-internal
@@ -215,21 +224,16 @@ deny entries above still take precedence even when a configured extra write
 path overlaps them.
 
 1. **`{AGENT_CWD}/{thread_id}`** — the thread workspace (product data root).
-2. **Claude sandbox TMPDIR (default-allowed)** — `$CLAUDE_TMPDIR` or
-   `/tmp/claude*`. Root cause of the sandboxed-Bash
-   `zsh: operation not permitted: /tmp/claude*/cwd-*` noise: Claude Code's
-   sandbox sets `TMPDIR` for sandboxed commands to this directory and its
-   shell hook writes `cwd-*` files there, but the previous workspace-only
-   `allowWrite` denied those writes. The default convention differs by CLI
-   version — sandbox-runtime uses `$CLAUDE_TMPDIR || /tmp/claude` (no uid;
-   observed in production), other builds use `/tmp/claude-{uid}` (restored
-   `filesystem.ts:331-346`) — so **both** `/tmp/claude` and
-   `/tmp/claude-{uid}` are allowed defensively. This is the CLI's own runtime
-   scratch area (evidence: bundled CLI `CLAUDE_TMPDIR` / `cwd-` strings;
-   restored-source analysis `claude-task-tools-source-analysis.md`), not
-   user data, so it is always appended when the sandbox is enabled. When
-   `sandbox_enabled=false` the `allowWrite` shape is unchanged (workspace
-   only).
+2. **Claude Code temp root (default-allowed)** — the application resolves a
+   server-process `CLAUDE_CODE_TMPDIR` (configured default `/tmp/claude`),
+   canonicalizes symlink aliases such as macOS `/tmp → /private/tmp`, injects it into
+   every Claude SDK subprocess, and appends that same exact root to
+   `allowWrite`. Claude Code creates its per-user `cwd-*` shell files beneath
+   that root. The sandbox must not allow `/tmp`, guess `/tmp/claude-{uid}`, or
+   persist one generated `cwd-*` directory: those alternatives either broaden
+   access or drift from the subprocess environment. Caller-provided SDK env
+   cannot override the server-owned value. When `sandbox_enabled=false`, the
+   `allowWrite` shape remains workspace-only.
 3. **User extra writable paths** — `system_config.sandbox_fs_allowed_write_paths`
    (new Settings field 「沙箱文件写入」). Sanitized to absolute paths only
    (trailing slashes stripped, deduped, capped at 32 entries / 512 chars),
@@ -268,6 +272,12 @@ replace entries there after a tool call has passed the product permission
 layer. On the next workspace sync, real files/directories written directly under
 `.claude/skills/` are moved into `{workspace}/skills/`, then the canonical
 `.claude/skills/` entry is rebuilt as a symlink.
+
+`{workspace}/.claude/agents/` is also intentionally outside `denyWrite` and is
+created before the sandboxed CLI starts. Agent definitions should be written
+with Claude Code's built-in `Write`/`Edit` tools. Sandboxed Bash remains unable
+to create new protected `.claude` subdirectories; settings, hooks, `.clawhub`,
+and worktree internals remain denied.
 
 The runtime dependency allowlist is generated by
 `workspace.py::_sandbox_runtime_read_allow_paths()` and contains only existing

@@ -4,6 +4,10 @@
 #         SimpleClaudeAgentSDKClient from simple_cas_client.py;
 # [Output] Provide ClaudeAgentRunner and create_agent_runner to application layers.
 # [Pos] core runner node in libs/claude_agent_kit/server
+# [Sync] 2026-08-04: force Agent/Task run_in_background=false at the PreToolUse
+#                    boundary so the parent turn consumes child completion.
+# [Sync] 2026-08-14: allow only confirmation-gated, single-file canonical
+#                    character/scene/prop deletion; keep .dream and broad Bash mutation denied.
 # [Sync] 2026-05-09: forward stdio MCP tool input and result events for frontend traces.
 # [Sync] 2026-05-09: merge project .env SDK injection, stderr capture, and PreToolUse confirmation hooks while keeping Pet Chat's narrow stdio MCP surface.
 # [Sync] 2026-05-09: expose zero-argument necklace intent tools while keeping server-owned upstream parameters.
@@ -86,6 +90,17 @@
 #                    claude-agent-permission-policy.md); add PostToolUse
 #                    plan-file observer hook with INK_AGENT_PLAN_EMIT_DEBOUNCE_MS
 #                    debounce firing callbacks.on_plan_file_changed.
+# [Sync] 2026-08-03: scope correction + injection hoist — CLAUDE_CONFIG_DIR
+#                    relocates the CLI's ENTIRE config home (plans/, tasks/,
+#                    projects/ transcripts, plugins/, agents/, caches), not
+#                    just Plan Mode.  apply_claude_config_home_to_options
+#                    (renamed from apply_plan_mode_env_to_options) now runs
+#                    FIRST on sdk_options, before apply_project_sdk_runtime_
+#                    options/plugin/cli_path/task_v2, consuming the
+#                    service-resolved AgentRunOptions.claude_config_home
+#                    (decision made right after workspace/cwd resolution, not
+#                    inside this lifecycle); falls back to resolving from cwd
+#                    for direct runner callers.
 # [Sync] 2026-07-20: claude-todo — DEFAULT_ALLOWED_TOOLS gains the v2 task
 #                    tools (TaskCreate/TaskUpdate/TaskList/TaskGet); all five
 #                    todo tools (+TodoWrite) classified low-sensitivity
@@ -166,6 +181,12 @@
 #                    (before plan/task env injection) so the system/npm CLI —
 #                    Docker's apply-seccomp-patched runtime — is not shadowed
 #                    by the SDK bundled CLI (bundled-first _find_cli in 0.2.128).
+# [Sync] 2026-08-04: harden the .dream Bash write guard against find mutation
+#                    actions, env/wrapper execution, glob paths, and normalized
+#                    relative/absolute paths with conservative read-only parsing.
+# [Sync] 2026-08-04: make Bash read-only-by-default whenever cwd contains a
+#                    real .dream surface, closing dynamic-path and prewritten-
+#                    script write bypasses that lexical inspection cannot solve.
 
 """Claude Agent Runner.
 
@@ -179,12 +200,14 @@ interface for the AI worker.
 from __future__ import annotations
 
 import asyncio
+from fnmatch import fnmatchcase
 import inspect
 import json
 import logging
 import os
 import re
 import shlex
+import stat
 import sys
 import tempfile
 import time
@@ -222,14 +245,16 @@ from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
+from .story_workspace_tool import story_workspace_allowed_tool_names
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
+    apply_claude_config_home_to_options,
     apply_cli_path_to_options,
-    apply_plan_mode_env_to_options,
     apply_project_sdk_runtime_options,
     apply_task_v2_env_to_options,
     apply_user_sdk_env_to_options,
 )
+from .plugin_launcher import apply_plugin_launch_options
 from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
 
 logger = logging.getLogger(__name__)
@@ -279,6 +304,7 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
     *allowed_editor_tool_names(),
+    *story_workspace_allowed_tool_names(),
 ]
 
 _AUTO_MODE_REQUIRED_ALLOWED_TOOLS: frozenset[str] = frozenset({
@@ -291,7 +317,11 @@ _USER_MCP_TOOL_PREFIX = "mcp__user__"
 _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
 _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
+_STORY_WORKSPACE_MCP_TOOL_PREFIX = "mcp__story_workspace__"
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
+_STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
+    story_workspace_allowed_tool_names()
+)
 _WORKSPACE_FILES_PERMISSION_TOOLS: frozenset[str] = frozenset({
     "Read",
     "Write",
@@ -355,6 +385,22 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
 
 # Shell metacharacters that would make a Bash command unsafe for auto-allow.
 _SHELL_METACHAR_RE = re.compile(r'[|;&<>`]|\$\(|\$\{')
+_DREAM_SURFACE_REFERENCE_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])\.dream(?=$|[/\\\s'\";&|<>])",
+    re.IGNORECASE,
+)
+_DREAM_PATH_FRAGMENT_RE = re.compile(r"\.[A-Za-z0-9_?*\[\]!.^-]+")
+_STORY_WORKSPACE_DREAM_RUN_RE = re.compile(r"^run_[0-9a-f]{32}$")
+_STORY_WORKSPACE_DREAM_CANONICAL_ROOTS: tuple[str, ...] = (
+    "assets",
+    "stories",
+    ".dramaforge",
+)
+_STORY_WORKSPACE_DREAM_ASSET_DIRECTORIES: frozenset[str] = frozenset({
+    "characters",
+    "scenes",
+    "props",
+})
 
 # Read-only / navigation shell commands that carry no filesystem side effects.
 # Any command whose first token matches one of these and contains no shell
@@ -414,6 +460,39 @@ _PACKAGE_NETWORK_SUBCOMMANDS: dict[str, frozenset[str]] = {
     "cargo": frozenset({"install", "search", "publish", "update"}),
 }
 _COMMAND_WRAPPERS: frozenset[str] = frozenset({"command", "exec", "sudo", "time"})
+_DREAM_READ_ONLY_BASH_COMMANDS: frozenset[str] = frozenset({
+    "ls",
+    "cd",
+    "pwd",
+    "echo",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "find",
+    "which",
+    "type",
+    "date",
+    "whoami",
+    "id",
+    "groups",
+    "printenv",
+    "uname",
+    "hostname",
+})
+_FIND_MUTATING_ACTIONS: frozenset[str] = frozenset({
+    "-delete",
+    "-exec",
+    "-execdir",
+    "-ok",
+    "-okdir",
+    # These write to a named output file. Deny conservatively whenever find
+    # traverses the controlled surface, even when that output is elsewhere.
+    "-fls",
+    "-fprint",
+    "-fprint0",
+    "-fprintf",
+})
 
 
 def _is_low_sensitivity_bash_command(command: str) -> bool:
@@ -503,6 +582,281 @@ def _is_network_bash_command(command: str) -> bool:
     if name == "uv" and tokens[1] == "pip" and len(tokens) >= 3:
         return tokens[2].lower() in {"install", "download", "wheel"}
     return tokens[1].lower() in subcommands
+
+
+def _is_path_inside_dream_surface(raw_path: str, cwd: Optional[str]) -> bool:
+    """Return whether a built-in file mutation resolves under ``{cwd}/.dream``."""
+
+    if not raw_path or not cwd:
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        dream_root = (workspace / ".dream").resolve(strict=False)
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        resolved = candidate.resolve(strict=False)
+        return resolved == dream_root or resolved.is_relative_to(dream_root)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _workspace_has_dream_surface(cwd: Optional[str]) -> bool:
+    """Return whether the current workspace contains an actual Dream directory."""
+
+    if not cwd:
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        return (workspace / ".dream").is_dir()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _dream_path_component_pattern_can_match(component: str) -> bool:
+    """Return whether a shell path component can expand to ``.dream``.
+
+    Leading-dot matching must be explicit in normal shell glob expansion, so
+    broad components such as ``*`` are not treated as Dream references. This
+    still catches ``.drea?``, ``.*``, and bracket forms such as ``[.]dream``.
+    """
+
+    pattern = component.strip(" \t\r\n'\"(){}:,;=+").lower()
+    if not pattern:
+        return False
+    explicitly_matches_dot = pattern.startswith(".") or bool(
+        re.match(r"^\[[^]]*\.", pattern)
+    )
+    if not explicitly_matches_dot:
+        return False
+    if fnmatchcase(".dream", pattern):
+        return True
+
+    # ``fnmatch`` does not model Bash brace/extglob syntax. If such syntax has
+    # a literal prefix compatible with .dream, treat it as a possible match;
+    # e.g. ``.dr{eam,aft}`` and ``.@(dream|draft)`` both fail closed.
+    expansion_indexes = [
+        pattern.find(char)
+        for char in "*?[]{}()|"
+        if char in pattern
+    ]
+    if not expansion_indexes:
+        return False
+    literal_prefix = pattern[:min(expansion_indexes)]
+    return ".dream".startswith(literal_prefix)
+
+
+def _shell_token_may_reference_dream_surface(token: str, cwd: Optional[str]) -> bool:
+    """Classify literal, normalized, symlinked, or globbed Dream path tokens."""
+
+    normalized_token = token.replace("\\", "/")
+    for component in normalized_token.split("/"):
+        candidates = [component, *_DREAM_PATH_FRAGMENT_RE.findall(component)]
+        if any(_dream_path_component_pattern_can_match(item) for item in candidates):
+            return True
+
+    if not cwd or any(char in token for char in "*?[]{}"):
+        return False
+    raw_path = token.strip(" \t\r\n'\"(){}:,;=+")
+    if not raw_path or raw_path.startswith("-"):
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        dream_root = (workspace / ".dream").resolve(strict=False)
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        resolved = candidate.resolve(strict=False)
+        return resolved == dream_root or resolved.is_relative_to(dream_root)
+    except (OSError, RuntimeError, ValueError):
+        # Lexical/glob classification above remains authoritative when a path
+        # cannot be resolved. Unknown resolution never turns a known match safe.
+        return False
+
+
+def _bash_command_may_reference_dream_surface(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+) -> bool:
+    """Return whether Bash could address the controlled Dream surface."""
+
+    if _DREAM_SURFACE_REFERENCE_RE.search(command) is not None:
+        return True
+    return any(
+        _shell_token_may_reference_dream_surface(token, cwd)
+        for token in tokens
+    )
+
+
+def _is_definitely_read_only_dream_bash_command(
+    command: str,
+    tokens: list[str],
+) -> bool:
+    """Allow only a narrow, parsed set of commands with no write capability."""
+
+    if _SHELL_METACHAR_RE.search(command) or "\n" in command or "\r" in command:
+        return False
+    unwrapped = _unwrap_dream_read_only_command_tokens(tokens)
+    if unwrapped is None:
+        return False
+    if not unwrapped:
+        return True
+
+    name = _command_name(unwrapped[0])
+    # A path whose basename merely looks safe can still be an arbitrary script
+    # (e.g. ``files/cat``). Permit command names, never caller-selected paths.
+    if unwrapped[0] != name:
+        return False
+    if name not in _DREAM_READ_ONLY_BASH_COMMANDS:
+        return False
+    if name == "find":
+        return not any(
+            token.lower() in _FIND_MUTATING_ACTIONS
+            for token in unwrapped[1:]
+        )
+    return True
+
+
+def _unwrap_dream_read_only_command_tokens(
+    tokens: list[str],
+) -> Optional[list[str]]:
+    """Strictly unwrap shell helpers for the protected-workspace allowlist.
+
+    Wrapper options and environment assignments are rejected because they can
+    redirect executable lookup (``env PATH=...``), inject code, or hide a
+    command inside an option. Plain ``env`` is the sole no-command safe form.
+    """
+
+    index = 0
+    while index < len(tokens):
+        raw_name = tokens[index]
+        name = _command_name(raw_name)
+        if raw_name != name:
+            return None
+        if name == "env":
+            index += 1
+            if index == len(tokens):
+                return []
+            if tokens[index] == "--":
+                index += 1
+                if index == len(tokens):
+                    return None
+            elif tokens[index].startswith("-") or "=" in tokens[index]:
+                return None
+            continue
+        if name in _COMMAND_WRAPPERS:
+            index += 1
+            if index < len(tokens) and tokens[index] == "--":
+                index += 1
+            elif index < len(tokens) and tokens[index].startswith("-"):
+                return None
+            if index == len(tokens):
+                return None
+            continue
+        return tokens[index:]
+    return None
+
+
+def _is_dream_mutating_bash_command(command: str, cwd: Optional[str]) -> bool:
+    """Conservatively identify shell attempts to mutate the Dream surface.
+
+    If cwd already contains ``.dream/``, static target inspection is not a safe
+    boundary: an interpreter can construct the path dynamically and a prewritten
+    script can hide it completely. In that workspace every Bash call therefore
+    defaults to deny unless parsing proves it is one of the narrow read-only
+    forms. Without an existing surface, the legacy lexical/path guard remains so
+    ordinary Bash behavior is unchanged. Writes must use the controlled MCP seam.
+    """
+
+    tokens = _split_shell_command(command)
+    if _is_explicit_canonical_asset_delete(command, tokens, cwd):
+        return False
+    if _workspace_has_dream_surface(cwd):
+        return not _is_definitely_read_only_dream_bash_command(command, tokens)
+    if not _bash_command_may_reference_dream_surface(command, tokens, cwd):
+        return False
+    return not _is_definitely_read_only_dream_bash_command(command, tokens)
+
+
+def _is_explicit_canonical_asset_delete(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+) -> bool:
+    """Allow one reviewed character/scene/prop deletion to reach confirmation.
+
+    Claude Code has no built-in Delete file tool. A natural-language asset
+    deletion therefore needs one narrow shell seam. This classifier permits
+    only ``rm [--|-f] <one existing regular canonical asset file>`` and leaves
+    the normal Bash permission channel to request visible user confirmation.
+    Recursive, globbed, scripted, symlinked, out-of-workspace, and ``.dream``
+    targets remain hard denied.
+    """
+
+    if not cwd or _SHELL_METACHAR_RE.search(command) or "\n" in command or "\r" in command:
+        return False
+    if not tokens or tokens[0] != "rm":
+        return False
+    index = 1
+    if index < len(tokens) and tokens[index] in {"-f", "--"}:
+        index += 1
+    if index >= len(tokens) or len(tokens[index:]) != 1:
+        return False
+    raw_target = tokens[index]
+    if any(character in raw_target for character in "*?[]{}"):
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=True)
+        supplied = Path(raw_target).expanduser()
+        if not supplied.is_absolute():
+            supplied = workspace / supplied
+        visible = supplied.lstat()
+        target = supplied.resolve(strict=True)
+        relative = target.relative_to(workspace)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return False
+    if stat.S_ISLNK(visible.st_mode) or not stat.S_ISREG(visible.st_mode):
+        return False
+    if target.suffix.lower() not in {".md", ".yaml", ".yml"}:
+        return False
+    return (
+        len(relative.parts) == 3
+        and relative.parts[0] == "assets"
+        and relative.parts[1] in _STORY_WORKSPACE_DREAM_ASSET_DIRECTORIES
+    )
+
+
+def _apply_dream_surface_write_guard(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: Optional[str],
+) -> Optional[HookJSONOutput]:
+    """Hard-deny every generic mutation path into the controlled Dream surface."""
+
+    denied = False
+    if tool_name in {"Write", "Edit", "MultiEdit"}:
+        denied = _is_path_inside_dream_surface(
+            _extract_builtin_file_tool_path(tool_input),
+            cwd,
+        )
+    elif tool_name == "Bash":
+        denied = _is_dream_mutating_bash_command(
+            str(tool_input.get("command") or ""),
+            cwd,
+        )
+    if not denied:
+        return None
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "The .dream runtime surface is controlled by Story Workspace; "
+                "use its MCP write tools instead of generic file or shell mutation."
+            ),
+        }
+    }
 
 
 def _apply_disabled_network_permission(
@@ -642,6 +996,13 @@ def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeAgentOptions) -> 
     present_keys = [key for key in _CLAUDE_SDK_ENV_KEYS if bool(env.get(key))]
     missing_keys = [key for key in _CLAUDE_SDK_ENV_KEYS if not env.get(key)]
     has_auth_key = any(bool(env.get(key)) for key in _CLAUDE_SDK_AUTH_ENV_KEYS)
+    if not has_auth_key:
+        try:
+            from services.admin_gateway.sdk import gateway_sdk_helper_is_configured
+
+            has_auth_key = gateway_sdk_helper_is_configured(sdk_options)
+        except (ImportError, RuntimeError, TypeError, ValueError):
+            has_auth_key = False
 
     if not has_auth_key:
         logger.warning(
@@ -653,7 +1014,8 @@ def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeAgentOptions) -> 
         )
         raise RuntimeError(
             f"Claude SDK has no auth key in subprocess env; "
-            f"expected one of {_CLAUDE_SDK_AUTH_ENV_KEYS!r}. "
+            f"expected one of {_CLAUDE_SDK_AUTH_ENV_KEYS!r} or the "
+            "server-owned Gateway apiKeyHelper. "
             f"present_keys={present_keys!r} env_count={len(env)}"
         )
 
@@ -1020,6 +1382,59 @@ def _editor_mcp_stdio_config() -> McpStdioServerConfig:
     )
 
 
+def _story_workspace_mcp_stdio_config(
+    mcp_env: dict[str, str],
+) -> McpStdioServerConfig:
+    """Build the Story Workspace MCP config with only trusted identity context."""
+
+    trusted_env = {
+        name: mcp_env[name]
+        for name in (
+            "INK_AGENT_USER_ID",
+            "INK_AGENT_THREAD_ID",
+            "INK_AGENT_WORKFLOW_RUN_ID",
+            "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
+        )
+        if mcp_env.get(name)
+    }
+    return McpStdioServerConfig(
+        type="stdio",
+        command=sys.executable,
+        args=["-m", "libs.claude_agent_kit.server.story_workspace_mcp_stdio"],
+        env=_stdio_env(extra_env=trusted_env),
+    )
+
+
+def _trusted_story_workspace_run_id(mcp_env: dict[str, str]) -> Optional[str]:
+    run_id = str(mcp_env.get("INK_AGENT_WORKFLOW_RUN_ID") or "").strip()
+    return run_id if _STORY_WORKSPACE_DREAM_RUN_RE.fullmatch(run_id) else None
+
+
+def _is_trusted_story_workspace_mcp_context(
+    cwd: Optional[str],
+    mcp_env: dict[str, str],
+) -> bool:
+    actor_id = str(mcp_env.get("INK_AGENT_USER_ID") or "").strip()
+    thread_id = str(mcp_env.get("INK_AGENT_THREAD_ID") or "").strip()
+    if (
+        not actor_id.isdigit()
+        or int(actor_id) <= 0
+        or not thread_id
+        or _trusted_story_workspace_run_id(mcp_env) is None
+    ):
+        return False
+    try:
+        workspace = Path(cwd or "").expanduser().resolve(strict=True)
+        workspace_root = Path(get_workspace_root()).expanduser().resolve(strict=True)
+        return (
+            workspace.is_dir()
+            and workspace.parent == workspace_root
+            and workspace.name == thread_id
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # .editor/ virtual index redirect helper
 # ---------------------------------------------------------------------------
@@ -1367,6 +1782,38 @@ def _apply_workspace_files_permission(
     }
 
 
+def _apply_story_workspace_dream_canonical_write_permission(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: Optional[str],
+    workflow_run_id: Optional[str],
+) -> Optional[HookJSONOutput]:
+    """Allow Dream Agent file writes only below its canonical content roots."""
+
+    if (
+        tool_name not in {"Write", "Edit", "MultiEdit"}
+        or workflow_run_id is None
+        or not cwd
+    ):
+        return None
+    raw_path = _extract_builtin_file_tool_path(tool_input)
+    if not raw_path:
+        return None
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        resolved = candidate.resolve(strict=False)
+        for root_name in _STORY_WORKSPACE_DREAM_CANONICAL_ROOTS:
+            root = (workspace / root_name).resolve(strict=False)
+            if resolved != root and resolved.is_relative_to(root):
+                return _explicit_pre_tool_use_allow()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return None
+
+
 def _apply_low_sensitivity_query_permission(
     tool_name: str,
     tool_input: Optional[dict[str, Any]] = None,
@@ -1405,15 +1852,41 @@ def _apply_low_sensitivity_query_permission(
     return None
 
 
-def _explicit_pre_tool_use_allow() -> HookJSONOutput:
+_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({"Agent", "Task"})
+
+
+def _force_foreground_subagent_input(
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Keep the parent turn alive until a spawned subagent returns.
+
+    Background Agent/Task calls can finish after the SDK query has already
+    emitted its terminal result. Their completion notification is then written
+    to the Claude transcript with no active parent model left to consume it.
+    Pinning foreground execution makes the tool result and the parent's final
+    response part of one streaming lifecycle.
+    """
+
+    if tool_name not in _SUBAGENT_TOOL_NAMES:
+        return tool_input, False
+    if tool_input.get("run_in_background") is False:
+        return tool_input, False
+    return {**tool_input, "run_in_background": False}, True
+
+
+def _explicit_pre_tool_use_allow(
+    updated_input: Optional[dict[str, Any]] = None,
+) -> HookJSONOutput:
     """Return the CLI 2.1+ explicit allow shape for PreToolUse hooks."""
 
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-        }
+    specific: dict[str, Any] = {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
     }
+    if updated_input is not None:
+        specific["updatedInput"] = updated_input
+    return {"hookSpecificOutput": specific}
 
 
 def _extract_hook_tool_name(hook_input: dict[str, Any]) -> str:
@@ -1532,6 +2005,19 @@ def _block_type(block: Any) -> Optional[str]:
     if block_name == "ToolResultBlock":
         return "tool_result"
     return None
+
+
+def _assistant_message_error_detail(message: AssistantMessage) -> str:
+    """Extract the provider's human-readable detail from a terminal error."""
+
+    text_parts: list[str] = []
+    for block in getattr(message, "content", None) or []:
+        if _block_type(block) != "text":
+            continue
+        text = _block_value(block, "text", "")
+        if isinstance(text, str) and text.strip():
+            text_parts.append(text.strip())
+    return "\n".join(text_parts)[:4096]
 
 
 def _maybe_json(value: str) -> Any:
@@ -1705,7 +2191,11 @@ class ClaudeAgentRunner:
         ) -> HookJSONOutput:
             del context
             tool_name = _extract_hook_tool_name(hook_input)
-            tool_input = _extract_hook_tool_input(hook_input)
+            original_tool_input = _extract_hook_tool_input(hook_input)
+            tool_input, forced_foreground_subagent = _force_foreground_subagent_input(
+                tool_name,
+                original_tool_input,
+            )
             tool_call_id = tool_use_id or str(uuid4())
             pending_tool_calls[tool_call_id] = {
                 "tool_name": tool_name,
@@ -1740,6 +2230,14 @@ class ClaudeAgentRunner:
             if redirect_result is not None:
                 return redirect_result
 
+            dream_write_guard = _apply_dream_surface_write_guard(
+                tool_name,
+                tool_input,
+                cwd,
+            )
+            if dream_write_guard is not None:
+                return dream_write_guard
+
             disabled_network_permission = _apply_disabled_network_permission(
                 sandbox_network_mode,
                 tool_name,
@@ -1757,12 +2255,33 @@ class ClaudeAgentRunner:
             if workspace_boundary_permission is not None:
                 return workspace_boundary_permission
 
+            if tool_choice == "auto":
+                dream_canonical_write_permission = (
+                    _apply_story_workspace_dream_canonical_write_permission(
+                        tool_name,
+                        tool_input,
+                        cwd,
+                        _trusted_story_workspace_run_id(mcp_env),
+                    )
+                )
+                if dream_canonical_write_permission is not None:
+                    return dream_canonical_write_permission
+
+            if (
+                tool_choice == "auto"
+                and _trusted_story_workspace_run_id(mcp_env) is not None
+                and tool_name in _STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES
+            ):
+                return _explicit_pre_tool_use_allow()
+
             if (
                 opts.im_full_access_enabled
                 and tool_choice != "none"
                 and tool_name not in _ANSWER_FORM_TOOL_NAMES
             ):
-                return _explicit_pre_tool_use_allow()
+                return _explicit_pre_tool_use_allow(
+                    tool_input if forced_foreground_subagent else None
+                )
 
             if tool_choice == "auto":
                 workspace_files_permission = _apply_workspace_files_permission(
@@ -1856,12 +2375,9 @@ class ClaudeAgentRunner:
                                 }
                             }
 
-                        return {
-                            "hookSpecificOutput": {
-                                "hookEventName": "PreToolUse",
-                                "permissionDecision": "allow",
-                            }
-                        }
+                        return _explicit_pre_tool_use_allow(
+                            tool_input if forced_foreground_subagent else None
+                        )
 
                     if confirmation_result["approved"] is False:
                         pending_tool_calls.pop(tool_call_id, None)
@@ -1918,6 +2434,10 @@ class ClaudeAgentRunner:
             context: ToolPermissionContext,
         ) -> PermissionResult:
             del context
+            input_data, _ = _force_foreground_subagent_input(
+                tool_name,
+                dict(input_data or {}),
+            )
             is_sandbox_network_ask = tool_name == SANDBOX_NETWORK_ACCESS_TOOL_NAME
             host = (
                 str(input_data.get("host") or "").strip().lower() or None
@@ -2187,45 +2707,80 @@ class ClaudeAgentRunner:
             mcp_servers["editor"] = _editor_mcp_stdio_config()
             logger.debug("Editor MCP enabled; session context flows via tool arguments.")
 
-        _stderr_buf = tempfile.TemporaryFile()
-        sdk_options = apply_project_sdk_runtime_options(
-            ClaudeAgentOptions(
-                max_turns=max_turns,
-                allowed_tools=effective_allowed_tools,
-                include_partial_messages=include_partial_messages,
-                hooks={
-                    "PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])],
-                    "PostToolUse": [
-                        HookMatcher(
-                            matcher=None,
-                            hooks=[
-                                _post_tool_use_hook,
-                                _plan_file_post_tool_use_hook,
-                                _tasks_changed_post_tool_use_hook,
-                            ],
-                        )
-                    ],
-                },
-                # SDK control channel for system-level permission asks the
-                # PreToolUse hook cannot see — primarily the sandbox-runtime
-                # network ask ("SandboxNetworkAccess"); routed through the same
-                # frontend confirmation side-channel.
-                can_use_tool=_can_use_tool,
-                cwd=cwd or os.getcwd(),
-                mcp_servers=mcp_servers,
+        if (
+            _is_trusted_story_workspace_mcp_context(cwd, mcp_env)
+            and any(
+                tool.startswith(_STORY_WORKSPACE_MCP_TOOL_PREFIX)
+                for tool in effective_allowed_tools
             )
+        ):
+            mcp_servers["story_workspace"] = _story_workspace_mcp_stdio_config(
+                mcp_env
+            )
+            logger.debug(
+                "Story Workspace MCP enabled with trusted actor/thread/run context."
+            )
+
+        _stderr_buf = tempfile.TemporaryFile()
+        sdk_options = ClaudeAgentOptions(
+            max_turns=max_turns,
+            allowed_tools=effective_allowed_tools,
+            include_partial_messages=include_partial_messages,
+            hooks={
+                "PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])],
+                "PostToolUse": [
+                    HookMatcher(
+                        matcher=None,
+                        hooks=[
+                            _post_tool_use_hook,
+                            _plan_file_post_tool_use_hook,
+                            _tasks_changed_post_tool_use_hook,
+                        ],
+                    )
+                ],
+            },
+            # SDK control channel for system-level permission asks the
+            # PreToolUse hook cannot see — primarily the sandbox-runtime
+            # network ask ("SandboxNetworkAccess"); routed through the same
+            # frontend confirmation side-channel.
+            can_use_tool=_can_use_tool,
+            cwd=cwd or os.getcwd(),
+            mcp_servers=mcp_servers,
+            # NOTE (2026-08-02, deck-integration-delta): no ``settings=``
+            # and no request-driven ``plugins=`` here.  Settings belong to
+            # the per-thread workspace (.claude-home via
+            # apply_claude_config_home_to_options below); plugins are attached
+            # right after construction from the server-controlled
+            # workspace launch manifest (literal --plugin-dir argv at the
+            # CLI launcher boundary), never from AgentRunOptions.
         )
+        # Claude config home FIRST — before every other claude module
+        # configures the env chain (2026-08-03).  The service layer resolves
+        # AgentRunOptions.claude_config_home right after workspace/cwd
+        # resolution; the runner only falls back to resolving from cwd for
+        # direct callers.  Setting CLAUDE_CONFIG_DIR here (before
+        # apply_project_sdk_runtime_options) makes it explicit options.env,
+        # so no later merge (backend/.env, process env, user_sdk_env) can
+        # relocate the CLI's config home — plans/, tasks/, projects/
+        # transcripts, plugins/, agents/ and caches all stay inside the
+        # per-thread workspace, never the user's real ~/.claude.
+        apply_claude_config_home_to_options(
+            sdk_options,
+            config_home=opts.claude_config_home,
+            cwd=cwd,
+        )
+        sdk_options = apply_project_sdk_runtime_options(sdk_options)
+        # Plugin launch boundary: read .ink/launch-manifest.json from the
+        # agent workspace (digest-verified, fail-closed) and attach each
+        # plugin as a literal `--plugin-dir <path>` argv element via the SDK's
+        # local-plugin channel (SubprocessCLITransport).  Clients cannot
+        # submit --plugin-dir and cannot control the manifest.
+        apply_plugin_launch_options(sdk_options, cwd)
         # CLI binary resolution: pin cli_path to the system/npm CLI when one
         # exists (Docker's apply-seccomp-patched runtime; local npm claude),
         # else leave unset so the SDK falls back to its bundled CLI.  An
         # explicit cli_path on options always wins.
         apply_cli_path_to_options(sdk_options)
-        # Plan Mode: point CLAUDE_CONFIG_DIR at {cwd}/.claude-home so CLI plan
-        # files land in the per-thread workspace (claude-plan §5.1).  Lowest
-        # priority in the env chain: an explicit CLAUDE_CONFIG_DIR already on
-        # options.env is preserved, and the user_sdk_env merge below still
-        # overlays on top.  No-op when cwd is falsy (Workspace Mode disabled).
-        apply_plan_mode_env_to_options(sdk_options, cwd)
         # Task v2 (claude-todo §5.1): always pin CLAUDE_CODE_TASK_LIST_ID=main
         # at the same lowest priority (explicit values preserved; user_sdk_env
         # below still overlays on top) so the new CLI's default-on task tools
@@ -2235,6 +2790,17 @@ class ClaudeAgentRunner:
         apply_task_v2_env_to_options(sdk_options)
         # Overlay user-scoped SDK env vars (higher priority than backend/.env).
         apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
+        # Gateway enforcement runs after every project/user overlay. When the
+        # canary is enabled, missing service configuration or canonical user
+        # identity fails closed before the Claude subprocess starts.
+        from services.admin_gateway import apply_gateway_sdk_env_to_options, gateway_enabled
+
+        gateway_model_override = gateway_enabled()
+        apply_gateway_sdk_env_to_options(
+            sdk_options,
+            opts.canonical_user_id,
+            gateway_idempotency_key=opts.gateway_idempotency_key,
+        )
         existing_extra_args = getattr(sdk_options, "extra_args", None)
         sdk_options.extra_args = dict(existing_extra_args or {})
         if tool_choice == "none":
@@ -2244,7 +2810,10 @@ class ClaudeAgentRunner:
         sdk_options.stderr = _make_cli_stderr_capture(_stderr_buf)
         if resume:
             sdk_options.resume = thread_id
-        _apply_request_model_override_if_allowed(sdk_options, model)
+        if gateway_model_override and model:
+            sdk_options.model = model
+        else:
+            _apply_request_model_override_if_allowed(sdk_options, model)
         if system_prompt:
             sdk_options.system_prompt = system_prompt
         # ------------------------------------------------------------------
@@ -2272,6 +2841,25 @@ class ClaudeAgentRunner:
 
                 # Raw message callback
                 await _call(callbacks.on_message, message)
+
+                # The SDK can report terminal protocol failures as an
+                # AssistantMessage.error without raising from query_stream.
+                # Treat that typed error exactly like a raised SDK failure so
+                # the existing on_error -> SSE error channel is preserved.
+                if isinstance(message, AssistantMessage):
+                    assistant_error = getattr(message, "error", None)
+                    if assistant_error:
+                        provider_detail = _assistant_message_error_detail(message)
+                        detail_suffix = (
+                            f" | provider_detail: {provider_detail}"
+                            if provider_detail
+                            else ""
+                        )
+                        raise RuntimeError(
+                            "Claude SDK AssistantMessage error: "
+                            f"{str(assistant_error).strip() or 'unknown'}"
+                            f"{detail_suffix}"
+                        )
 
                 # Route to typed handler
                 await self._process_message(

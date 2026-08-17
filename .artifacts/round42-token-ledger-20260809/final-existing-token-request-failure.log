@@ -1,0 +1,33 @@
+
+> ink-memory-admin@0.1.0 db:migrate /Users/dmeck/project/ink-admin-memory
+> node scripts/migrate.mjs
+
+/Users/dmeck/project/ink-admin-memory/node_modules/.pnpm/pg@8.17.2/node_modules/pg/lib/client.js:588
+          Error.captureStackTrace(err)
+                ^
+
+error: existing Token-covered Gateway requests require an operator-reviewed Token ledger backfill
+    at /Users/dmeck/project/ink-admin-memory/node_modules/.pnpm/pg@8.17.2/node_modules/pg/lib/client.js:588:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///Users/dmeck/project/ink-admin-memory/scripts/migrate.mjs:132:7 {
+  length: 250,
+  severity: 'ERROR',
+  code: '23514',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: 'PL/pgSQL function inline_code_block line 8 at RAISE',
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: 'subscription_token_ledger_backfill_required',
+  file: 'pl_exec.c',
+  line: '3897',
+  routine: 'exec_stmt_raise'
+}
+
+Node.js v26.4.0
+ ELIFECYCLE  Command failed with exit code 1.

@@ -1,5 +1,5 @@
 // [Input] Consume file upload hook, file proxy utility, input-dock helpers, chat icons, auth token, and keyboard interaction helpers.
-// [Output] Render the chat input dock, attachment upload controls, and message submit/stop actions.
+// [Output] Render the Markdown-aware chat input dock, attachment upload controls, and message submit/stop actions.
 // [Pos] chat-input-dock component node in frontend/src/components/chat
 // [Sync] 2026-05-25: remove frontend customer-context props and move helper exports to AIInputDock.helpers.
 // [Sync] 2026-05-27: add internal toolChoice state with Auto/逐步确认 segmented toggle; sends selected toolChoice via onSendMessage.
@@ -14,9 +14,16 @@
 // [Sync] 2026-07-20: i18n — tool-choice toggle, upload errors/hints, aria labels, and
 //                    send/stop button copy resolve through the chat.inputDock namespace
 //                    (en + zh) via useTranslation.
+// [Sync] 2026-08-06: replace the plain textarea with MarkdownInputEditor; user-authored rich text is
+//                    serialized to Markdown before transport and rendered through the shared chat chain.
+// [Sync] 2026-08-11: accept a passive loading label so subagent-only activity is
+//                    announced accurately without exposing a non-functional Stop action.
+// [Sync] 2026-08-13: suggest installed Deck Skills when a Chat draft starts with slash.
+// [Sync] 2026-08-17: accept nonce-scoped Deck preview copy as an editable, unsent Chat draft.
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -24,6 +31,7 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -41,6 +49,12 @@ import { shouldSendMessageOnKeyDown } from './interaction-utils';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
+import MarkdownInputEditor from './MarkdownInputEditor';
+import {
+  filterInstalledSkillCommands,
+  loadInstalledSkillCommands,
+  type InstalledSkillCommand,
+} from './slashSkillCommands';
 
 type AIInputDockMode = 'simple' | 'full';
 
@@ -53,6 +67,8 @@ interface AIInputDockProps {
   placeholder?: string;
   disabled?: boolean;
   loading?: boolean;
+  /** Accessible status for passive loading states that do not expose Stop. */
+  loadingLabel?: string;
   defaultToolChoice?: ToolChoice;
   openFileDialogSignal?: number;
   onStop?: () => void | Promise<void>;
@@ -60,10 +76,18 @@ interface AIInputDockProps {
   mode?: AIInputDockMode;
   workspaceSessionId?: string;
   fullAccessEnabled?: boolean;
+  /** Optional business context control rendered with the composer controls. */
+  contextControl?: ReactNode;
+  /** Immutable Deck whose enabled plugin Skills may be suggested. */
+  deckId?: string;
+  /** Existing thread whose frozen plugin receipt narrows suggestions. */
+  threadId?: string;
+  /** External draft text to apply only when prefillNonce changes. */
+  prefill?: string;
+  /** Request identity that prevents rerenders from overwriting user edits. */
+  prefillNonce?: number;
 }
 
-const QUERY_INPUT_MAX_HEIGHT = 320;
-const QUERY_INPUT_MIN_HEIGHT = 72;
 const MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 
 function generateFileId(): string {
@@ -84,7 +108,7 @@ function revokeObjectPreviewUrl(url?: string) {
 
 function shouldSendWithKeyboard(
   mode: AIInputDockMode,
-  event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+  event: KeyboardEvent<HTMLElement>,
 ): boolean {
   if (event.nativeEvent.isComposing) {
     return false;
@@ -112,6 +136,7 @@ export default function AIInputDock({
   placeholder = 'Ask Ink & Memory…',
   disabled = false,
   loading = false,
+  loadingLabel,
   defaultToolChoice = 'auto',
   openFileDialogSignal,
   onStop,
@@ -119,20 +144,69 @@ export default function AIInputDock({
   mode = 'simple',
   workspaceSessionId,
   fullAccessEnabled,
+  contextControl,
+  deckId,
+  threadId,
+  prefill,
+  prefillNonce,
 }: AIInputDockProps) {
   const { t } = useTranslation();
   const toolChoiceOptions = useMemo(() => buildToolChoiceOptions(t), [t]);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(() => prefill ?? '');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [toolChoice, setToolChoice] = useState<ToolChoice>(defaultToolChoice);
   const [resolvedFullAccessEnabled, setResolvedFullAccessEnabled] = useState(fullAccessEnabled ?? false);
+  const [installedSkillCommands, setInstalledSkillCommands] = useState<readonly InstalledSkillCommand[]>([]);
+  const [activeSkillIndex, setActiveSkillIndex] = useState(0);
+  const [dismissedSlashDraft, setDismissedSlashDraft] = useState<string | null>(null);
+  const skillListboxId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const lastHandledOpenFileDialogSignalRef = useRef(0);
+  const lastAppliedPrefillNonceRef = useRef<number | undefined>(undefined);
   const { upload, error: uploadHookError } = useFileUpload();
+
+  useEffect(() => {
+    if (prefillNonce === undefined || lastAppliedPrefillNonceRef.current === prefillNonce) return;
+    lastAppliedPrefillNonceRef.current = prefillNonce;
+    setQuery(prefill ?? '');
+    setDismissedSlashDraft(null);
+  }, [prefill, prefillNonce]);
+
+  useEffect(() => {
+    let active = true;
+    setInstalledSkillCommands([]);
+    if (!deckId && !threadId) return () => { active = false; };
+    void loadInstalledSkillCommands({ deckId, threadId })
+      .then((commands) => {
+        if (active) setInstalledSkillCommands(commands);
+      })
+      .catch(() => {
+        if (active) setInstalledSkillCommands([]);
+      });
+    return () => { active = false; };
+  }, [deckId, threadId]);
+
+  const matchingSkillCommands = useMemo(
+    () => !isInputFocused || dismissedSlashDraft === query
+      ? []
+      : filterInstalledSkillCommands(query, installedSkillCommands),
+    [dismissedSlashDraft, installedSkillCommands, isInputFocused, query],
+  );
+
+  useEffect(() => {
+    setActiveSkillIndex(0);
+    if (dismissedSlashDraft !== null && dismissedSlashDraft !== query) {
+      setDismissedSlashDraft(null);
+    }
+  }, [dismissedSlashDraft, query]);
+
+  const selectSkillCommand = useCallback((command: InstalledSkillCommand) => {
+    setQuery(`${command.command} `);
+    setDismissedSlashDraft(null);
+  }, []);
 
   useEffect(() => {
     if (fullAccessEnabled !== undefined) {
@@ -375,24 +449,6 @@ export default function AIInputDock({
     [handleFiles],
   );
 
-  const updateQueryInputHeight = useCallback(() => {
-    const input = queryInputRef.current;
-    if (!input) {
-      return;
-    }
-    input.style.height = 'auto';
-    const nextHeight = Math.min(
-      Math.max(input.scrollHeight, QUERY_INPUT_MIN_HEIGHT),
-      QUERY_INPUT_MAX_HEIGHT,
-    );
-    input.style.height = `${nextHeight}px`;
-    input.style.overflowY = input.scrollHeight > QUERY_INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
-  }, []);
-
-  useEffect(() => {
-    updateQueryInputHeight();
-  }, [query, updateQueryInputHeight]);
-
   const handleSend = useCallback(() => {
     if (loading) {
       return;
@@ -547,39 +603,103 @@ export default function AIInputDock({
         </div>
       ) : null}
 
-      <textarea
+      <MarkdownInputEditor
         id="chat-input"
-        ref={queryInputRef}
-        aria-label={t('chat.inputDock.inputAria')}
-        aria-describedby={showUploadHint ? 'chat-upload-hint' : undefined}
+        ariaLabel={t('chat.inputDock.inputAria')}
+        ariaDescribedBy={showUploadHint ? 'chat-upload-hint' : undefined}
+        ariaAutocomplete={matchingSkillCommands.length > 0 ? 'list' : undefined}
+        ariaControls={matchingSkillCommands.length > 0 ? skillListboxId : undefined}
+        ariaActiveDescendant={matchingSkillCommands.length > 0
+          ? `${skillListboxId}-option-${activeSkillIndex}`
+          : undefined}
         placeholder={placeholder}
         value={query}
-        rows={1}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={setQuery}
         onFocus={() => setIsInputFocused(true)}
         onBlur={() => setIsInputFocused(false)}
         disabled={disabled}
         onKeyDown={(event) => {
+          if (matchingSkillCommands.length > 0) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              setActiveSkillIndex((current) => (current + 1) % matchingSkillCommands.length);
+              return;
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              setActiveSkillIndex((current) => (
+                current - 1 + matchingSkillCommands.length
+              ) % matchingSkillCommands.length);
+              return;
+            }
+            if (event.key === 'Enter' || event.key === 'Tab') {
+              event.preventDefault();
+              selectSkillCommand(matchingSkillCommands[activeSkillIndex] ?? matchingSkillCommands[0]);
+              return;
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setDismissedSlashDraft(query);
+              return;
+            }
+          }
           if (!shouldSendWithKeyboard(mode, event)) {
             return;
           }
           event.preventDefault();
           handleSend();
         }}
-        style={{
-          width: '100%',
-          minHeight: '4.5rem',
-          resize: 'none',
-          border: 'none',
-          outline: 'none',
-          background: 'transparent',
-          color: 'var(--color-text-body)',
-          fontSize: '1rem',
-          lineHeight: 1.65,
-          fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif",
-          boxSizing: 'border-box',
-        }}
       />
+
+      {matchingSkillCommands.length > 0 ? (
+        <div
+          aria-label="已安装的 Skill 指令"
+          id={skillListboxId}
+          role="listbox"
+          style={{
+            display: 'grid',
+            gap: '0.25rem',
+            marginTop: '0.5rem',
+            maxHeight: '15rem',
+            overflowY: 'auto',
+            padding: '0.35rem',
+            border: '1px solid var(--color-border-paper)',
+            borderRadius: '0.75rem',
+            background: 'var(--color-bg-surface-solid)',
+          }}
+        >
+          {matchingSkillCommands.map((command, index) => (
+            <button
+              aria-selected={index === activeSkillIndex}
+              id={`${skillListboxId}-option-${index}`}
+              key={`${command.packageSpec}:${command.command}`}
+              onClick={() => selectSkillCommand(command)}
+              onMouseDown={(event) => event.preventDefault()}
+              role="option"
+              type="button"
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: '1rem',
+                width: '100%',
+                padding: '0.55rem 0.65rem',
+                border: 'none',
+                borderRadius: '0.55rem',
+                background: index === activeSkillIndex
+                  ? 'var(--color-bg-hover)'
+                  : 'transparent',
+                color: 'var(--color-text-primary)',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <strong>{command.command}</strong>
+              <small style={{ color: 'var(--color-text-muted)' }}>{command.packageSpec}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.65rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
@@ -601,6 +721,8 @@ export default function AIInputDock({
           >
             {t('chat.inputDock.addAttachment')}
           </button>
+
+          {contextControl}
 
           {resolvedFullAccessEnabled ? (
             <div
@@ -692,8 +814,8 @@ export default function AIInputDock({
           <button
             type="button"
             disabled
-            title={t('chat.inputDock.generating')}
-            aria-label={t('chat.inputDock.generating')}
+            title={loadingLabel ?? t('chat.inputDock.generating')}
+            aria-label={loadingLabel ?? t('chat.inputDock.generating')}
             style={{
               display: 'grid',
               placeItems: 'center',

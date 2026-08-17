@@ -1,13 +1,14 @@
 // [Input] Chat shell error details, landing-tab state, and recovery callbacks.
-// [Output] Render a warm-paper shell-level fallback with retry/reload actions and preserved Chat entry tabs.
+// [Output] Render a warm-paper fallback with retry/reload and preserved history/active-Dream tabs.
 // [Pos] chat-shell-error component node in frontend/src/components/chat
 // [Sync] 2026-07-07: add a recoverable shell fallback so ChatViewContent failures do not white-screen the page.
 // [Sync] 2026-07-08: replace light-only fallback gradients with semantic theme surfaces for dark mode.
 // [Sync] 2026-07-20: i18n — landing tab labels resolve through the chat.shellError namespace (en + zh).
+// [Sync] 2026-08-14: replace the hidden connector recovery tab with active Dreams.
 import { useTranslation } from 'react-i18next';
-import { IconClock, IconDatabase, IconX } from './Icons';
+import { IconClock, IconSparkles, IconX } from './Icons';
 
-export type ChatLandingTab = 'history' | 'connector';
+export type ChatLandingTab = 'history' | 'dreams';
 
 interface ChatShellErrorProps {
   error: Error | null;
@@ -26,10 +27,10 @@ function LandingTabButton({
 }: {
   active: boolean;
   label: string;
-  icon: 'history' | 'connector';
+  icon: 'history' | 'dreams';
   onClick: () => void;
 }) {
-  const Icon = icon === 'history' ? IconClock : IconDatabase;
+  const Icon = icon === 'history' ? IconClock : IconSparkles;
   return (
     <button
       type="button"
@@ -116,7 +117,7 @@ export default function ChatShellError({
                   Chat shell temporarily unavailable
                 </h1>
                 <p style={{ margin: '0.3rem 0 0', fontSize: '0.86rem', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}>
-                  The shell hit a render error. The input entry, quick actions, and connector tab can be restored without leaving the page.
+                  The shell hit a render error. The input entry, quick actions, and active Dream tab can be restored without leaving the page.
                 </p>
               </div>
             </div>
@@ -177,11 +178,11 @@ export default function ChatShellError({
             }}
           />
           <LandingTabButton
-            active={landingTab === 'connector'}
-            label={t('chat.shellError.connector')}
-            icon="connector"
+            active={landingTab === 'dreams'}
+            label={t('chat.shellError.dreams')}
+            icon="dreams"
             onClick={() => {
-              onSelectLandingTab('connector');
+              onSelectLandingTab('dreams');
             }}
           />
         </div>

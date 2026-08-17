@@ -10,6 +10,7 @@
 import React, { useState } from 'react';
 import { FaGoogle } from 'react-icons/fa';
 import { useAuth } from '../../contexts/AuthContext';
+import { getErrorMessage } from '../../utils/errorMessage';
 
 interface LoginFormProps {
   onSuccess: () => void;
@@ -31,8 +32,8 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
     try {
       await login(email, password);
       onSuccess();
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Login failed'));
     } finally {
       setIsSubmitting(false);
     }

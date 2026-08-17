@@ -2,6 +2,7 @@
 // [Output] Define frontend chat transport request body, attachment, model, tool, and metadata types.
 // [Pos] chat-schema type node in frontend/src/lib
 // [Sync] 2026-05-25: remove frontend customer-context request fields from the chat schema.
+// [Sync] 2026-08-17: expose per-message Deck/Agent provenance used by same-Deck Agent switching.
 import type { LanguageModelUsage, UIMessage } from 'ai';
 
 export type ChatAttachment = {
@@ -26,6 +27,10 @@ export type ToolChoice = 'auto' | 'none' | 'manual';
 
 export type ChatApiSchemaRequestBody = {
   id: string;
+  /** Parent Deck provides the selected Agent's plugin/runtime context. */
+  deckId?: string;
+  /** Agent within the parent Deck that supplies the persona prompt. */
+  voiceId?: string;
   resume?: boolean;
   message: UIMessage;
   chatModel?: ChatModel;
@@ -46,10 +51,13 @@ export type ChatMetadata = {
   agentId?: string;
   workspacePath?: string;
   workspaceSessionId?: string;
+  deckId?: string;
+  voiceId?: string;
 };
 
 /** Voice / deck info displayed in the Chat view and forwarded to the backend as voice context. */
 export interface ActiveChatVoice {
+  id?: string;
   name: string;
   systemPrompt: string;
   icon: string;

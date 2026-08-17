@@ -90,47 +90,105 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 uv pip install -r requirements.txt
 ```
 
-Create a `models.json` file for your LLM:
+Configure the Admin Gateway in `backend/.env`. Dream has no direct Provider
+endpoint/key fallback: writing, chat, analysis, Claude Agent, workflows and
+daily-picture description/generation all use server-side Gateway aliases.
 
-```json
-{
-  "models": {
-    "gemini-3-flash-preview": {
-      "endpoint": "https://openrouter.ai/api/v1",
-      "api_key": "your-key-here",
-      "model": "google/gemini-3-flash-preview"
-    }
-  },
-  "roles": {
-    "voice_analysis": "gemini-3-flash-preview",
-    "voice_chat": "gemini-3-flash-preview"
-  }
-}
+```dotenv
+INK_GATEWAY_ENABLED=1
+INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
+INK_GATEWAY_SERVICE_KEY=
+INK_GATEWAY_TEXT_MODEL_ALIAS=dream-balanced
+INK_GATEWAY_IMAGE_DESCRIPTION_MODEL_ALIAS=dream-image-description
+INK_GATEWAY_IMAGE_GENERATION_MODEL_ALIAS=dream-image-generation
 ```
 
-See `backend/models.json.example` for the full set of roles and image settings.
+The service key is injected at runtime and must never be committed, returned
+to the browser or written to application logs.
+
+Dream Settings → AI 模型 does not contain a static model list. The browser
+calls Dream `GET /api/gateway/models`; Dream signs the canonical subject and
+calls Admin `GET /v1/models` with `models:list`. Saving a model stores only the
+platform alias, and every Claude Agent turn revalidates it before the SDK is
+forced through Admin Gateway. Provider IDs, upstream model names and Gateway
+credentials are never accepted from the browser.
+
+Configure the PostgreSQL-only runtime in `backend/.env`. Set `DATABASE_URL`
+directly, or point Dream at an existing env file and it will load only that
+file's `DATABASE_URL` value:
+
+```dotenv
+DATABASE_URL=postgresql://ink_memory:ink_memory@127.0.0.1:5433/ink-memory
+# Or load only DATABASE_URL from an existing environment file:
+INK_LOAD_DATABASE_URL_FROM_ENV_FILE=1
+INK_DATABASE_ENV_FILE=/absolute/path/to/ink-admin-memory/.env.local
+```
 
 Then start the server:
 
 ```bash
-python server.py  # Runs on http://localhost:8765
+cd backend
+.venv/bin/python server.py  # Runs on http://localhost:8765
 ```
 
-### Manual database initialization
+Use the repository virtual environment shown above. Calling the system
+`python` directly is unsupported because it may not contain the locked
+PostgreSQL driver (`psycopg`) or the rest of the backend dependencies.
 
-You need to create the SQLite tables before first launch:
+### PostgreSQL migration
+
+Dream does not create tables at application startup and has no SQLite/JSON/
+memory fallback. Admin Drizzle is the sole PostgreSQL DDL/version authority;
+Dream owns repositories, transactions, business data and importer semantics.
+Dream startup performs a read-only capability check and never runs a migration.
+Create or upgrade the complete Admin + Dream schema from the Admin repository:
 
 ```bash
-cd backend
-python database.py
+pnpm db:migrate
+pnpm db:migrate:check
 ```
+
+The required runtime capabilities are `dream.schema.unified.v1`,
+`dream.workflow.thread-lookup.v1`, and `dream.story-artifact-contract.v2`.
+Dream no longer accepts an Alembic head as runtime authority. Admin migration
+`0032_dream_schema_authority_cutover` adopts verified historical `06/07`
+databases and publishes these capabilities before the Dream process starts.
+
+The importer defaults to a source-only dry run; production execution
+additionally requires exact database/host/port/owner and an explicit approval
+string.
+
+```bash
+python backend/script/migrate_legacy_to_postgres.py \
+  --main-sqlite /absolute/path/to/ink-and-memory.db \
+  --notion-sqlite /absolute/path/to/notion-connectors.db
+```
+
+From the Admin repository, `pnpm db:data:legacy -- --main-sqlite <absolute>
+--notion-sqlite <absolute> --mode execute --record` runs the same Dream-owned
+importer and records only safe table counts/digests. `pnpm
+db:data:subscriptions -- --apply` initializes `Free`, `Dream`, and `is
+Dreaming` plus the canonical-user subscription projections. Existing
+PostgreSQL installations use `--mode verify-existing`; post-cutover changes
+are accepted only with the explicit flag and only when every source PK exists
+and the target timestamp proves that the PostgreSQL row is newer.
+
+The checked-in disposable PostgreSQL E2E initializes the schema using only the
+33 Admin migrations, imports the current real 43+5 source inventory, validates
+count/PK/row/FK/sequence/trigger contracts, writes the V2 Drizzle receipt and
+proves idempotent adoption. Counts are source facts, not a hard-coded schema
+version: the 2026-08-12 source scan contains 4,930 rows. Existing successful V1
+receipts remain valid and are reused by source fingerprint.
+
+See [Database schema authority](docs/design/database-schema-authority.md)
+before migrating another environment.
 
 ### Frontend Setup
 
 ```bash
 cd frontend
 npm install
-npm run dev  # Runs on http://localhost:5173
+npm run dev  # Listens on 0.0.0.0:5173; open http://<this-machine-ip>:5173 from another device
 ```
 
 ---
@@ -152,7 +210,7 @@ This creates an organic rhythm—voices chime in naturally rather than constantl
 
 **Frontend:** React 19 + TypeScript, Vite, TipTap editor with custom extensions
 
-**Backend:** FastAPI + Python, PolyCLI for LLM orchestration, SQLite with WAL mode
+**Backend:** FastAPI + Python, PolyCLI for LLM orchestration, PostgreSQL 16 with psycopg 3 pooling and capability-checked Admin/Drizzle schema
 
 **AI:** Multi-model support (GPT-4, Claude, DeepSeek, Gemini), structured outputs via Pydantic
 
@@ -171,7 +229,10 @@ This creates an organic rhythm—voices chime in naturally rather than constantl
 
 ## Deployment
 
-To deploy Ink & Memory to **Google Cloud Run** (frontend + backend as separate services, with Cloud Storage FUSE persistence for SQLite):
+The current backend requires PostgreSQL and must not be deployed with the old
+Cloud Storage FUSE/SQLite persistence path. The commands below remain legacy
+deployment scaffolding until its environment is updated for `DATABASE_URL`,
+the Admin Drizzle release job and the PostgreSQL capability gates:
 
 ```bash
 export GCP_PROJECT_ID=your-project-id

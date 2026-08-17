@@ -1,0 +1,10 @@
+{
+  "schema_version": "workspace-init/v1",
+  "surfaces": [
+    {
+      "name": "dream",
+      "protocol_dir": ".dream",
+      "entry_route": "/story-workspace/dream"
+    }
+  ]
+}

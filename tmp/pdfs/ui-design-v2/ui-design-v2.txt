@@ -1,0 +1,644 @@
+Ink & Memory 原创潮玩 IP 品牌 UI
+           设计稿
+Memory Companion Landing Page · 品牌提案 / 官网首屏 / 产品视觉概念稿
+
+
+
+                           v2.1 · 2026-07-25
+               色彩系统已对齐《Color System PRD》与
+        frontend/src/styles/tokens.css（唯一权威色值来源）
+分区规则：减少面板 · 增加留白 · 视觉收敛 · 轻纸面分区 · 单一虚线边界 ·
+                               无卡片设计
+
+
+
+
+      Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 1 页
+1. 项目名称
+Ink & Memory — Memory Companion Landing Page
+页面类型：品牌提案展示页 / 官网首屏 / 产品视觉概念稿
+核心主题：记录灵感、收藏记忆、陪伴写作、温暖纸张、毛绒潮玩
+视觉方向：C4D 三维毛绒角色 + 温暖手写笔记本 UI + 高级商业品牌页
+
+
+2. 页面设计目标
+本设计稿需要呈现一个完整、可上线感强的 Ink & Memory 品牌 UI
+页面，而不是单纯角色海报。页面需要同时完成四件事：
+  • 建立 Ink & Memory 的品牌识别
+  • 展示原创毛绒潮玩 IP 角色
+  • 表达「写作、回忆、灵感、陪伴」的产品气质
+  • 形成适合品牌提案、作品集、官网首屏的高级视觉效果
+整体画面应像一个真实的品牌官网首页，具备清晰导航、Hero 主视觉、CTA
+按钮、角色信息卡、功能卡片和底部氛围区。
+
+
+3. 画布规格
+推荐画布尺寸
+  • 主方案：1600 × 1200 px
+  • 备选方案：1440 × 1080 px
+  • 构图比例：4:3 横向构图
+  • 页面风格：高保真 UI Mockup
+  • 背景：暖米色纸张质感（Warm Canvas #F6EFE5），不使用纯白背景
+
+页面安全边距
+  • 左右边距：80 px
+  • 顶部边距：40 px
+  • 内容最大宽度：1440 px
+  • 页面整体采用 12 栏栅格系统
+  • 主视觉区左右分栏：左侧内容 45%，右侧角色视觉 55%
+
+
+4. 品牌视觉关键词
+核心关键词
+Ink · Memory · Notebook · Reflection · Warm Paper · Plush Toy · Writing Desk ·
+Companion · Gentle Weirdness · Daily Record
+
+
+
+
+            Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 2 页
+中文关键词
+记录 · 灵感 · 记忆 · 陪伴 · 手写笔记 · 暖纸张 · 安静书桌 · 情绪收藏 · 毛绒小搭子
+
+
+
+
+        Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 3 页
+5. 色彩系统（v2.0 重写）
+本章已与产品《Color System PRD》对齐。唯一权威色值来源为
+frontend/src/styles/tokens.css；本稿全部颜色引用均可追溯到该语义 Token 体系，不使用孤立色值。
+
+5.1 主色板（亮色主题）
+
+     名称                         色值            用途
+
+     Warm Canvas 暖纸画布           #F6EFE5       页面主背景、纸张氛围（--color-bg-app）
+
+     Paper Cream 奶油纸面           #FFFAF2       卡片、浮层、按钮浅底（--color-bg-paper）
+
+     Solid Cream 实底奶油           #FFFDF8       菜单、Tooltip、Popover 不透明浮层（--color-bg-surface-solid）
+
+     Charcoal Brown 炭棕          #3F3429       主标题、Logo、图标、描边（--color-text-primary）
+
+     Body Brown 正文棕             #4B3F33       正文内容（--color-text-body）
+
+     Warm Brown 暖棕              #7A6A59       说明文字、辅助信息（--color-text-secondary）
+
+     Muted Tan 褐灰               #9A8A78       弱信息、时间戳、placeholder（--color-text-muted）
+
+     Action Brown 主操作棕          #5F4A36       CTA 主按钮、当前导航、深色带（--color-action-primary）
+
+     Border Paper 纸边棕           #D8C7B3       分割线、卡片边框、页边界（--color-border-paper）
+
+     Memory Yellow 记忆黄          #F39C12       徽章、下划线、重点 accent（--color-voice-yellow）
+
+     Spark Green 灵感绿            #27AE60       灵感星星、状态点、辅助 accent（--color-voice-green）
+
+     Link Blue 链接蓝              #4A90E2       链接、发送可用态（--color-action-link）
+
+
+5.2 色彩使用规则
+  • 页面大面积使用 Warm Canvas 和 Paper Cream，避免纯白全屏与冷灰渐变。
+  • Charcoal Brown 用于标题、图标、Logo 和主导航；正文用 Body Brown，不用纯黑。
+  • CTA 等主操作按钮背景统一用 Action Brown，前景文字用白色（--color-text-on-action
+  #FFFFFF）。
+  • Memory Yellow 只做小面积重点强调（徽章、手绘下划线、灵感光点），不大面积铺满。
+  • Spark Green 用于角色标志性配件和小面积灵感元素。
+  • Warm Brown / Muted Tan
+  承担说明文字与弱信息层级；阴影统一走暖棕体系（rgba(91,69,44,0.08 / 0.16)）。
+  • 半透明色一律由 Token 经 color-mix 派生，不新增孤立十六进制色值。
+  • 避免冷灰、蓝紫霓虹、赛博朋克色彩。
+
+5.3 旧版色板 → v2.0 映射
+
+旧色板（v1.0）             旧色值            v2.0 Token                       新色值
+
+Paper Beige           #F5E9D6        --color-bg-app (Warm Canvas)     #F6EFE5
+
+Soft Cream            #FFF8ED        --color-bg-paper (Paper Cream)   #FFFAF2
+
+
+
+
+              Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 4 页
+Ink Black             #111111      --color-text-primary (Charcoal Brown) #3F3429
+
+Memory Yellow         #FFD42A      --color-voice-yellow                  #F39C12
+
+Spark Green           #39D353      --color-voice-green                   #27AE60
+
+Warm Brown            #8A6A45      --color-text-secondary                #7A6A59
+
+Muted Tan             #C9B69A      --color-border-paper (Border Paper)   #D8C7B3
+
+rgba(138,106,69,·)    —            color-mix(--color-action-primary)     #5F4A36 派生
+
+
+5.4 分区与留白规则（轻纸面 · 无卡片）
+为减少显示过于突兀，全站分区遵循「少面板、多留白、视觉收敛」原则：
+
+  • 减少面板设计：页面内不叠加多层卡片面板，普通内容不使用卡片式容器承载。
+  • 增加留白：以留白、字号与字重层级代替边框和阴影来分区，分区之间保持充足呼吸感。
+  • 局部视觉收敛：强调色与装饰只集中在少数焦点（Hero、CTA、小面积
+  accent），其余区域保持安静。
+  • 轻纸面 / 分区视觉：分区使用 Paper Cream 浅底或透明混合 +
+  行分隔线表达层级，不用深色填充。
+  • 虚线边框：页面级承载只保留一条 Border Paper #D8C7B3
+  虚线边界；内部区块不再额外套实线卡片。
+  • 无卡片设计：条目行静止时不使用阴影、外框卡片或深色底；hover 才允许出现
+  --color-shadow-soft 轻阴影；选中态用细线或右侧对勾表达。
+
+
+
+
+              Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 5 页
+6. 字体系统
+6.1 Logo / 大标题
+字体气质：手写感、圆润、粗黑、带一点涂鸦感。
+参考方向：手写英文 Brush Font / Rounded Display Font。产品侧展示字体为 Excalifont /
+Georgia，中文优先 Xiaolai。
+  • Ink & Memory Logo
+  • Hero 大标题
+  • 局部装饰文字
+
+6.2 UI 正文字体
+字体气质：干净、清晰、现代、轻量（系统无衬线）。
+  • 导航栏
+  • 功能卡片
+  • 按钮
+  • 角色信息卡
+  • 说明文字
+
+6.3 中文字体
+中文风格：圆润、手账感、温暖，不使用过度商业黑体。
+  • 中文辅助文案
+  • 功能卡中文标题
+  • 角色说明文字
+
+
+7. 原创 IP 角色设定
+7.1 角色名称
+建议名称：Mimo
+中文定位：灵感记录员 / 记忆小搭子
+英文定位：Memory Companion
+
+
+8. 角色造型规范
+8.1 整体比例
+  • 头身比例约 2.5 头身
+  • 大头短身
+  • 方圆形头部
+  • 身体短小、圆润、软乎乎
+  • 四肢简化，像毛绒玩偶手办
+
+
+           Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 6 页
+ • 角色站姿或坐姿都要稳定可爱
+
+8.2 头部设计
+ • 头部为圆角方块形
+ • 边缘柔软，不出现硬直角
+ • 表面为暖纸米色短绒材质（近 Warm Canvas / Paper Cream）
+ • 顶部有炭棕色绒毛发簇（Charcoal Brown #3F3429），像一小撮墨迹或思想火苗
+ • 头部轮廓保持高度识别性
+
+8.3 五官设计
+ • 眼睛：炭棕色椭圆刺绣眼睛（Charcoal Brown，不用死黑）
+ • 嘴巴：极简弧线微笑
+ • 腮红：浅桃色圆形刺绣腮红
+ • 表情：温暖、安静、倾听感
+ • 不使用复杂表情，不做过度拟人化
+
+8.4 标志性配件
+角色必须拥有固定配件系统：
+ • 笔形侧耳：一侧像柔软的铅笔 / 钢笔，末端为炭棕笔尖，中段有 Memory Yellow #F39C12
+ 环形装饰。
+ • 折叠纸张耳朵：另一侧像折叠的小纸页或小本子，边缘有炭棕虚线缝线，角落可有折角。
+ • 黄色记忆徽章：位于头部左上区域，圆形 PVC 质感，Memory Yellow
+ #F39C12，中间有小笔图标。
+ • 绿色灵感星星：位于头部右上区域，Spark Green #27AE60 四角星形 PVC
+ 配件，表达灵感闪现。
+ • 炭棕斜挎包：从肩部斜跨到身体，包身炭棕，带一颗 Memory Yellow
+ 扣子，包内可插一本小记忆本。
+ • 小记忆本：米色纸张封面（Paper Cream），炭棕线圈装订，封面写有 “INK
+ MEMORY”，可作为手持物或包内配件。
+
+8.5 材质要求
+ • 主体：柔软短绒、毛绒玩偶质感
+ • 眼睛：刺绣线材质
+ • 徽章：微光泽 PVC
+ • 星星：绿色微光泽 PVC
+ • 小本子：纸质封面 + 炭棕线圈
+ • 包带：哑光皮革或布料质感
+ • 角色整体为 C4D 三维渲染，不是二维插画
+
+
+
+
+        Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 7 页
+9. 页面整体布局
+页面分为五个区域：
+  • 顶部导航栏
+  • Hero 首屏主视觉
+  • 角色信息卡
+  • 三张功能卡片
+  • 底部写作工作台氛围区
+整体布局需要形成从品牌认知到角色认知，再到产品功能认知的路径。
+
+
+10. 顶部导航栏设计
+10.1 布局
+  • 位置：页面顶部
+  • 高度：80 px
+  • 左右边距：80 px
+  • 背景：透明或半透明暖纸色（Warm Canvas 90% 左右透明混合）
+  • 圆角：可无圆角，也可使用轻微底部分割线（Border Paper）
+
+10.2 左侧 Logo
+内容：Ink & Memory
+  • 手写感粗黑字体
+  • 颜色：Charcoal Brown #3F3429
+  • 可在 Logo 旁加入一个小墨滴图标或微笑符号
+  • Logo 不要过度复杂，保持识别清晰
+
+10.3 导航项
+导航文字：Home · Characters · Memory Club · Stories · Shop
+  • 字号：15–16 px
+  • 字重：500
+  • 颜色：Charcoal Brown
+  • 当前项 Home 可加 Memory Yellow 短下划线
+  • 导航间距：32–40 px
+
+10.4 右侧 CTA
+按钮文字：Start Writing
+  • 背景：Action Brown #5F4A36
+  • 文字：白色 #FFFFFF（--color-text-on-action）
+  • 圆角：999 px 胶囊按钮
+
+
+
+           Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 8 页
+   • 高度：44 px
+   • 左右内边距：24 px
+   • hover 状态可加入 Memory Yellow 边缘光或轻微上浮阴影（--color-shadow-soft）
+
+
+11. Hero 首屏主视觉
+11.1 区域尺寸
+   • 位置：导航栏下方
+   • 高度：约 620 px
+   • 布局：左右分栏
+   • 左侧：文案与 CTA
+   • 右侧：3D 毛绒角色主视觉
+
+
+12. Hero 左侧内容
+12.1 主标题
+文字：Ink & Memory
+   • 大号手写感字体
+   • 字号：88–110 px
+   • 行高：0.95
+   • 颜色：Charcoal Brown #3F3429
+   • 文字下方加入 Memory Yellow #F39C12 手绘下划线
+   • 下划线应像笔刷划过，不要太工整
+
+12.2 英文副标题
+文字：Write today. Remember forever.
+   • 字号：24 px
+   • 字重：600
+   • 颜色：Charcoal Brown
+   • 与主标题间距：24 px
+
+12.3 中文辅助文案
+文字：把灵感写下来，让记忆留下来。
+   • 字号：20 px
+   • 颜色：Warm Brown #7A6A59
+   • 行高：1.6
+
+12.4 简短介绍
+文字：A warm little companion for writing, reflecting, and collecting everyday memories.
+
+
+
+             Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 9 页
+  • 字号：16 px
+  • 颜色：Warm Brown #7A6A59
+  • 最大宽度：480 px
+  • 行高：1.7
+
+12.5 主按钮组
+  • 按钮 1：Start Writing — 背景 Action Brown #5F4A36，文字白色 #FFFFFF，圆角 999
+  px，高度 52 px，左右内边距 30 px。
+  • 按钮 2：Meet Mimo — 背景 Paper Cream #FFFAF2，边框 1.5 px Charcoal Brown
+  #3F3429，文字 Charcoal Brown，圆角 999 px，高度 52 px，左右内边距 30 px。
+  • 按钮组间距：16 px
+
+12.6 功能标签
+四个标签：Write · Reflect · Collect · Grow
+  • 每个标签包含：一个手绘小图标、一个英文词、可选中文小字。
+  • 图标建议：Write 钢笔尖 / Reflect 小镜子或回声线 / Collect 爱心或记忆盒 / Grow 嫩芽。
+  • 样式：背景 Paper Cream 半透明，边框 Border Paper #D8C7B3，圆角 18 px，高度 42
+  px，内边距 14 px 18 px；不使用阴影，保持轻纸面条目感。
+
+
+
+
+           Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 10 页
+13. Hero 右侧角色主视觉
+13.1 主角色姿态
+角色 Mimo 坐在一张温暖的纸张舞台或木质书桌上。姿态建议：
+  • 一只手抱着小记忆本
+  • 一只手拿着钢笔
+  • 微微向左看向页面文案
+  • 表情温暖安静
+  • 身体略微前倾，有倾听感
+
+13.2 角色大小
+  • 角色视觉高度：约 520–620 px
+  • 占右侧区域 70% 高度
+  • 角色是页面视觉焦点
+  • 视觉注意力占比约 35%–45%
+
+13.3 角色周围元素
+围绕角色加入少量环境元素：
+  • 打开的笔记本
+  • 墨水瓶
+  • 便签纸
+  • 拍立得照片
+  • Memory Yellow 灵感光点
+  • 小星星涂鸦
+  • 一条弯曲墨线
+这些元素要辅助角色，不要抢主视觉。
+
+13.4 灯光
+  • 暖色主光从左上方照射
+  • 右侧弱补光
+  • 角色底部有柔和接触阴影（暖棕系）
+  • 轻微景深，背景元素略微虚化
+
+
+14. 角色信息卡设计
+14.1 位置
+放置在 Hero
+右侧角色旁边，或左侧文案下方偏右位置。信息卡以轻纸面条目形式贴合页面，不做悬浮卡片。
+
+
+
+
+           Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 11 页
+14.2 卡片尺寸
+  • 宽度：360–420 px
+  • 高度：190–230 px
+  • 圆角：12 px
+  • 背景：Paper Cream #FFFAF2 或透明混合
+  • 边框：1 px Border Paper #D8C7B3 虚线
+  • 阴影：无（不使用悬浮阴影）
+
+14.3 卡片内容
+标题：Character Card
+  • Name — Mimo
+  • Role — Memory Companion / 灵感记录员
+  • Personality — Curious, gentle, slightly weird, always listening.
+  • Accessories — Memory notebook, spark badge, tiny satchel, pencil ear.
+
+14.4 卡片视觉细节
+  • 左上角加入小头像图标
+  • 右上角加入 Memory Yellow 圆形记忆徽章
+  • 卡片背景可带极淡横线纸纹（Border Paper 低透明度派生）
+  • 分组之间用虚线或 Border Paper 分割线
+  • 字体清晰，避免密集
+
+
+15. 三张功能卡片设计
+15.1 区域位置
+  • 位于 Hero 下方，横向排列三张卡片
+  • 整体宽度：页面内容宽度 100%
+  • 卡片间距：24 px
+  • 卡片高度：220–260 px
+
+15.2 卡片 1：Record Ideas / 记录灵感
+说明文案：Catch tiny thoughts before they disappear.
+视觉元素：Mimo 手持钢笔；Memory Yellow 灵感线条从笔尖飘出；小便签图形。
+
+15.3 卡片 2：Reflect Memories / 回望记忆
+说明文案：Look back gently and find patterns in your days.
+视觉元素：Mimo 坐在小本子旁；背后有淡淡回声圆环；纸张纹理和小镜子图标。
+
+15.4 卡片 3：Collect Moments / 收藏瞬间
+
+
+
+            Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 12 页
+说明文案：Keep soft moments, moods, and little sparks together.
+视觉元素：Mimo 抱着小记忆盒或照片；周围有拍立得、小星星、Spark Green 灵感光点。
+
+15.5 卡片统一样式
+  • 背景：Paper Cream #FFFAF2 或透明混合
+  • 圆角：12 px
+  • 边框：1 px color-mix(--color-border-paper 55%,
+  transparent)，或仅靠留白与行分隔线分区
+  • 阴影：静止时无阴影；仅 hover 出现 --color-shadow-soft 轻阴影
+  • 标题颜色：Charcoal Brown
+  • 正文颜色：Warm Brown
+  • 图标颜色：Charcoal Brown + Memory Yellow 点缀
+  • 三条目整体避免多层卡片面板堆叠，保持轻纸面分区
+  • 每张卡片中的角色必须保持同一造型系统
+
+
+
+
+           Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 13 页
+16. 底部写作工作台氛围区
+16.1 区域定位
+底部作为品牌情绪收束区，不做复杂内容堆叠。它应像一个温暖的写作桌面，暗示用户每天写下
+一页。
+
+16.2 元素清单
+  • 打开的手账本
+  • 墨水瓶
+  • 钢笔
+  • 便签纸
+  • 拍立得照片
+  • 木桌边缘
+  • 小夹子
+  • 纸张纹理
+  • 暖光灯影
+  • 一杯咖啡或茶
+  • 小墨滴角色剪影
+
+16.3 文案
+主标语：One page a day.
+辅助标语：Small steps write great stories.
+小字氛围文案：Memories are inked softly in our hearts.
+
+16.4 视觉要求
+  • 元素数量适中
+  • 不要杂乱
+  • 留出呼吸感
+  • 让底部成为安静收尾，不要抢 Hero 主视觉
+
+
+17. 装饰图形系统
+页面中可加入手绘感装饰元素：
+  • Memory Yellow 手绘下划线
+  • 小星星
+  • 墨滴
+  • 微笑脸
+  • 小笔记本
+  • 纸张折角
+
+
+
+           Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 14 页
+   • 虚线缝线
+   • 回忆泡泡
+   • 灵感灯泡
+   • 手写箭头
+   • 轻微胶带贴纸
+装饰元素应遵循以下规则：
+   • 小面积使用
+   • 不破坏 UI 阅读
+   • 与角色配件保持同一图形语言
+   • Charcoal Brown 线条 + Memory Yellow / Spark Green 点缀
+   • 不使用复杂彩虹色
+
+
+18. 页面文案完整稿
+18.1 顶部导航
+Logo：Ink & Memory ｜ 导航：Home · Characters · Memory Club · Stories · Shop ｜
+按钮：Start Writing
+
+18.2 Hero 文案
+主标题：Ink & Memory
+副标题：Write today. Remember forever.
+中文辅助：把灵感写下来，让记忆留下来。
+介绍文案：A warm little companion for writing, reflecting, and collecting everyday
+memories.
+按钮：Start Writing / Meet Mimo ｜ 功能标签：Write · Reflect · Collect · Grow
+
+18.3 角色信息卡文案
+标题：Character Card
+Name: Mimo ｜ Role: Memory Companion / 灵感记录员
+Personality: Curious, gentle, slightly weird, always listening.
+Accessories: Memory notebook, spark badge, tiny satchel, pencil ear.
+
+18.4 功能卡片文案
+卡片一：Record Ideas / 记录灵感 — Catch tiny thoughts before they disappear.
+卡片二：Reflect Memories / 回望记忆 — Look back gently and find patterns in your days.
+卡片三：Collect Moments / 收藏瞬间 — Keep soft moments, moods, and little sparks
+together.
+
+18.5 底部文案
+
+
+              Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 15 页
+One page a day. Small steps write great stories. Memories are inked softly in our hearts.
+
+
+
+
+             Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 16 页
+19. 高保真视觉描述
+最终画面应表现为：
+一个温暖米色纸张质感（Warm Canvas #F6EFE5）的品牌官网 UI
+页面。顶部是轻盈导航栏，左侧手写感 Ink & Memory Logo，右侧是清晰的导航项和 Action
+Brown 胶囊 CTA 按钮。
+页面中部左侧是巨大手写风标题 “Ink & Memory”，标题下有 Memory Yellow
+手绘下划线。下方是英文副标题 “Write today. Remember forever.”
+和中文文案“把灵感写下来，让记忆留下来。”再往下是两个 CTA 按钮和四个功能标签。
+页面右侧是原创毛绒潮玩角色 Mimo。它有暖纸米色毛绒身体、圆角方形大头、炭棕椭圆刺绣眼
+睛、小微笑、浅腮红、炭棕绒毛发簇、笔形耳朵、折纸耳朵、Memory Yellow 记忆徽章、Spark
+Green 灵感星星、小记忆本和炭棕斜挎包。角色坐在温暖书桌或纸张舞台上，手里拿着小本子或
+钢笔，像一个安静陪伴用户写作的小精灵。
+角色附近有一张轻纸面角色信息条目（虚线纸边界、无悬浮阴影），介绍 Mimo 的名字、角色定
+位、性格和配件。页面下方有三个轻纸面功能条目，分别展示记录灵感、回望记忆、收藏瞬间，
+仅靠留白、细分隔线与单一虚线纸边界分区，静止无阴影，仅 hover
+出现轻阴影。每条都配有小图标或同一角色的小动作变体。
+底部是一条温暖写作工作台氛围区，有打开的手账本、墨水瓶、钢笔、便签纸、拍立得照片和木
+桌边缘，整体干净、柔和、安静，像一个能让人安心写作的记忆空间。
+
+
+20. 视觉质量标准
+最终设计稿必须满足：
+  • 完整 UI 页面，不是单个角色图
+  • 具备真实官网结构
+  • 导航、按钮、卡片、Hero、角色、底部氛围区清晰
+  • 角色造型前后一致
+  • 毛绒材质明显
+  • C4D 渲染质量高级
+  • 光影柔和精致
+  • 分区轻纸面化：无多层卡片堆叠，页面级只保留一条虚线纸边界，留白充足
+  • 颜色统一（全部命中 v2.0 色板，无孤立色值）
+  • 文案尽量清晰可读
+  • 适合品牌提案和作品集展示
+  • 原创度高，不像已有 IP
+  • 页面整体温暖、治愈、安静、有记忆感
+
+
+21. 负向约束
+禁止出现：
+
+
+
+         Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 17 页
+   • 复制参考图角色
+   • 复制任何现有 IP
+   • 明显像迪士尼、三丽鸥、泡泡玛特等已有角色
+   • 低清晰度
+   • 文字乱码
+   • UI 元素扭曲
+   • 杂乱背景
+   • 过度霓虹
+   • 赛博朋克风
+   • 恐怖风
+   • 廉价塑料感
+   • 过度儿童化
+   • 角色与 UI 风格割裂
+   • 只生成海报，不生成 UI 页面
+   • 只生成单个角色，不生成完整页面
+   • 使用 v1.0 旧色值（#F5E9D6 / #111111 / #FFD42A / #39D353 / #8A6A45 / #C9B69A）
+
+
+22. 图像生成用整合提示词
+请生成一张完整的高保真 UI 设计稿：
+主题为「Ink & Memory」原创潮玩 IP 品牌官网首页 / 品牌提案页。画面为 1600×1200 px，4:3
+横向构图，暖米色纸张背景（Warm Canvas
+#F6EFE5），整体风格温暖、治愈、安静、高级商业视觉。
+页面顶部是导航栏，左侧为手写感 Ink & Memory Logo，中间有 Home、Characters、Memory
+Club、Stories、Shop 导航项，右侧有 Action Brown #5F4A36 胶囊按钮 Start Writing。
+Hero 区域左侧为大标题 Ink & Memory，使用粗黑手写字体（Charcoal Brown
+#3F3429），标题下有 Memory Yellow #F39C12 手绘下划线。副标题为 Write today.
+Remember forever. 中文辅助文案为“把灵感写下来，让记忆留下来。”下方有两个按钮 Start
+Writing 和 Meet Mimo，并有四个功能标签
+Write、Reflect、Collect、Grow，配手绘图标、星星、墨滴、小笔记本和涂鸦线条。
+Hero 右侧展示原创毛绒潮玩角色 Mimo，角色是 Ink & Memory 的记忆小搭子 /
+灵感记录员。角色为 C4D 三维毛绒手办质感，暖纸米色短绒身体，圆角方形大头，大头短身约
+2.5 头身，炭棕椭圆刺绣眼睛，小微笑，浅腮红，炭棕绒毛发簇。角色带有笔形耳朵、折叠纸张
+耳朵、Memory Yellow 记忆徽章、Spark Green #27AE60 灵感星星、小记忆本和炭棕斜挎包。角
+色坐在温暖书桌或纸张舞台上，手持钢笔或小本子，姿态安静、亲近、略带怪趣。
+角色附近有一张轻纸面角色信息条目（圆角、虚线纸边界、无悬浮阴影），内容包括 Character
+Name: Mimo，Role: Memory Companion / 灵感记录员，Personality: curious, gentle, slightly
+weird, always listening，Accessories: memory notebook, spark badge, tiny satchel, pencil
+ear。
+
+
+
+             Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 18 页
+Hero 下方有三个轻纸面功能条目：Record Ideas / 记录灵感，Reflect Memories /
+回望记忆，Collect Moments / 收藏瞬间。每条配有小图标或同一角色的小动作变体；分区只靠
+留白、行分隔线与一条页面级虚线纸边界，静止无阴影，排版清晰，像真实产品功能模块。
+页面底部是温暖写作工作台氛围区，有打开的手账本、墨水瓶、钢笔、便签纸、拍立得照片、木
+桌边缘、小夹子和暖光灯影。底部出现短标语 One page a day. Small steps write great stories.
+Memories are inked softly in our hearts.
+整体采用 Warm Canvas #F6EFE5、Paper Cream #FFFAF2、Charcoal Brown #3F3429、Action
+Brown #5F4A36、Memory Yellow #F39C12、Spark Green #27AE60、Warm Brown
+#7A6A59、Border Paper #D8C7B3。画面干净，留白充分，UI
+层级清晰，商业提案感强，文字尽量清晰可读。不要复制任何现有 IP，不要低清晰度，不要乱码
+文字，不要赛博朋克，不要复杂脏乱背景，不要只生成单个角色，不要只生成海报。最终效果应
+是一张完整、精致、可上线感强的 Ink & Memory 潮玩 IP 品牌 UI 设计稿。
+
+
+
+
+             Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 19 页
+

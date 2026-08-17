@@ -172,12 +172,31 @@ class AgentRunOptions:
     # context processing; when a plain string is provided the runner wraps it
     # in a single text block.
     user_message: Union[str, list[dict[str, Any]]]
+    # Canonical PostgreSQL users.id bound by the authenticated Dream session.
+    # Required when the Admin Gateway Claude canary is enabled; never accepted
+    # from a browser header or model payload.
+    canonical_user_id: Optional[str] = None
+    # Server-derived stable key that correlates one persisted Dream message
+    # with exactly one Admin Gateway settlement. Never accept the raw header
+    # value from a browser request.
+    gateway_idempotency_key: Optional[str] = None
     # Whether to resume an existing conversation.
     resume: bool = False
     # Model to use.
     model: Optional[str] = None
     # Working directory for the agent.
     cwd: Optional[str] = None
+    # Server-resolved Claude config home for this thread (2026-08-03).
+    # Resolved by the service layer via sdk_env.resolve_claude_config_home()
+    # right after workspace/cwd resolution — BEFORE any claude module
+    # (resume probe, plugin pack, plan/tasks readers) touches the
+    # filesystem — so the redirect decision is not buried in the
+    # run_streaming lifecycle.  The runner applies it as the FIRST
+    # options-build step (CLAUDE_CONFIG_DIR), relocating the CLI's entire
+    # config home (plans/, tasks/, projects/ transcripts, plugins/, agents/,
+    # caches) into the per-thread workspace.  When None the runner falls
+    # back to resolving from ``cwd`` itself.
+    claude_config_home: Optional[str] = None
     # Maximum turns for the agent.
     max_turns: int = 100
     # Allowed tools for the agent.
@@ -198,6 +217,13 @@ class AgentRunOptions:
     sandbox_network_mode: Literal["disabled", "allowlist", "open"] = "allowlist"
     # System prompt override.
     system_prompt: Optional[str] = None
+    # NOTE (2026-08-02, deck-integration-delta): ``settings_json`` and
+    # ``local_plugin_paths`` were removed.  Per-run options must never carry
+    # workspace configuration or plugin artifact paths: settings belong to
+    # the per-thread workspace (``.claude-home`` / CLAUDE_CONFIG_DIR), and
+    # plugins are packed into the workspace and loaded through the
+    # server-controlled launch manifest at the CLI launcher boundary
+    # (plugin_launcher.apply_plugin_launch_options → literal --plugin-dir).
     # Deprecated: context processing is now owned by ClaudeAgentContextBuilder.
     # Kept for backward compatibility with callers that set it; ignored by runner.
     include_runtime_context: bool = True
@@ -282,6 +308,12 @@ class IClaudeAgentSDKClient(ABC):
     async def load_messages(
         self,
         session_id: Optional[str],
+        cwd: Optional[str] = None,
     ) -> dict[str, list[Any]]:
-        """Load message history for a session. Returns ``{"messages": [...]}``. """
+        """Load message history for a session. Returns ``{"messages": [...]}``.
+
+        *cwd* is the thread workspace in Workspace Mode; it locates
+        transcripts under ``{cwd}/.claude-home/projects`` instead of the
+        global ``~/.claude/projects``.
+        """
         ...

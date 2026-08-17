@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   generateInviteCode,
-  useInviteCode,
+  useInviteCode as redeemInviteCode,
   getFriendRequests,
   acceptFriendRequest,
   rejectFriendRequest,
@@ -12,6 +12,7 @@ import {
   type FriendRequest,
   type Friend
 } from '../api/voiceApi';
+import { getErrorMessage } from '../utils/errorMessage';
 
 interface Props {
   isVisible: boolean;
@@ -94,13 +95,16 @@ export default function FriendsView({ isVisible, onViewFriendTimeline }: Props) 
     setUsingCode(true);
     setCodeMessage('');
     try {
-      const result = await useInviteCode(inputCode.trim());
+      const result = await redeemInviteCode(inputCode.trim());
       setCodeMessage(result.message || t('friends.requestSent') || 'Friend request sent!');
       setInputCode('');
       // Refresh requests to see if there are any new ones
       setTimeout(() => loadRequests(), 500);
-    } catch (err: any) {
-      setCodeMessage(err.message || t('friends.useCodeError') || 'Invalid or expired code');
+    } catch (err: unknown) {
+      setCodeMessage(getErrorMessage(
+        err,
+        t('friends.useCodeError') || 'Invalid or expired code',
+      ));
     } finally {
       setUsingCode(false);
     }

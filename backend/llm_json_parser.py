@@ -112,11 +112,15 @@ def _repair_with_json_repair(value: str) -> str | None:
 
 
 def _try_loads(value: str) -> Any | None:
-    attempts = [value, _clean_json_string(value)]
-    repaired = _repair_with_json_repair(attempts[-1])
+    cleaned = _clean_json_string(value)
+    # Prefer the deterministic quote escaper before json_repair.  json_repair
+    # can otherwise discard a leading inner quote even though the intended
+    # JSON is recoverable without changing the value.
+    attempts = [value, cleaned, _escape_unescaped_quotes_in_strings(cleaned)]
+    repaired = _repair_with_json_repair(cleaned)
     if repaired:
         attempts.append(repaired)
-    attempts.append(_escape_unescaped_quotes_in_strings(attempts[-1]))
+        attempts.append(_escape_unescaped_quotes_in_strings(repaired))
     for attempt in attempts:
         try:
             return json.loads(attempt)

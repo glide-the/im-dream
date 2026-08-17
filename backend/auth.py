@@ -3,6 +3,8 @@
 # [Output] Provide password hashing, access-token JWT, refresh-token, and token hash helpers.
 # [Pos] auth utility node in backend
 # [Sync] 2026-06-23: support JWT_SECRET/JWT_EXPIRES_IN, token types, and refresh-token hashing for OAuth/Device Flow.
+# [Sync] 2026-08-03: default access-token lifetime is 1 hour with sliding renewal
+#                    (maybe_renew_access_token issues a fresh token on activity).
 """
 Authentication module for Ink & Memory.
 
@@ -55,11 +57,16 @@ def parse_duration(value: Optional[str], default: str = "7d") -> timedelta:
     raise ValueError(f"Invalid duration unit: {unit!r}")
 
 
-ACCESS_TOKEN_EXPIRE_DELTA = parse_duration(os.environ.get("JWT_EXPIRES_IN"), "7d")
+ACCESS_TOKEN_EXPIRE_DELTA = parse_duration(os.environ.get("JWT_EXPIRES_IN"), "1h")
 REFRESH_TOKEN_EXPIRE_DELTA = parse_duration(
     os.environ.get("REFRESH_TOKEN_EXPIRES_IN"), "30d"
 )
 ACCESS_TOKEN_EXPIRE_MINUTES = int(ACCESS_TOKEN_EXPIRE_DELTA.total_seconds() // 60)
+
+# Sliding renewal: once less than half of the access-token lifetime remains,
+# authenticated requests receive a freshly signed token (X-New-Access-Token).
+RENEW_TOKEN_THRESHOLD_DELTA = ACCESS_TOKEN_EXPIRE_DELTA / 2
+NEW_ACCESS_TOKEN_HEADER = "X-New-Access-Token"
 
 
 def hash_password(password: str) -> str:
@@ -138,7 +145,9 @@ def verify_access_token(token: str) -> Optional[dict]:
 
         return {
             "user_id": user_id,
-            "email": email
+            "email": email,
+            "exp": payload.get("exp"),
+            "iat": payload.get("iat"),
         }
     except jwt.ExpiredSignatureError:
         print("Token expired")
@@ -146,6 +155,25 @@ def verify_access_token(token: str) -> Optional[dict]:
     except (jwt.InvalidTokenError, TypeError, ValueError):
         print("Invalid token")
         return None
+
+
+def maybe_renew_access_token(user_data: dict) -> Optional[str]:
+    """
+    Sliding expiration: return a freshly signed access token when the current
+    one has less than half of its configured lifetime remaining, otherwise
+    return None. Authenticated requests therefore keep the session alive.
+    """
+    exp = user_data.get("exp")
+    try:
+        expires_at = datetime.utcfromtimestamp(float(exp))
+    except (TypeError, ValueError, OSError):
+        return None
+
+    remaining = expires_at - datetime.utcnow()
+    if remaining > RENEW_TOKEN_THRESHOLD_DELTA:
+        return None
+
+    return create_access_token(user_data["user_id"], user_data["email"])
 
 def extract_token_from_header(authorization: Optional[str]) -> Optional[str]:
     """

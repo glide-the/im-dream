@@ -42,6 +42,15 @@
 # [Sync] 2026-06-22: accept Settings SYSTEM_PROMPT from service Phase 1 and render
 #                    it as a lower-priority configurable block under the engine
 #                    _SYSTEM_PROMPT_TEMPLATE priority rules.
+# [Sync] 2026-08-12: inject the normative Run-isolated Project/Episode Artifact
+#                    layout only for server-resolved Dream turns. The layout is
+#                    guidance inside the existing trusted Dream context block;
+#                    it does not add a client field or Agent wire contract.
+# [Sync] 2026-08-13: Dream context now directs the Agent to canonical workbench
+#                    files and documents host-owned after-turn synchronization;
+#                    MCP stage writers are optional rather than a completion gate.
+# [Sync] 2026-08-13: append the host-materialized Dream workbench instruction
+#                    on every bound turn so natural-language edits stay file-backed.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -59,6 +68,7 @@ pet persona, Mem0 memories, and necklace sensor data), this builder:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -66,6 +76,20 @@ from typing import Any, Optional
 
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 from claude_agent.workspace_context import build_workspace_context_block
+from story_workspace.contracts import StoryWorkspaceDreamRunContext
+
+try:
+    from services.story_workspace.canonical_project_instruction import (
+        STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
+        STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX,
+        STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION,
+    )
+except ModuleNotFoundError:  # Support repository-root package imports.
+    from backend.services.story_workspace.canonical_project_instruction import (
+        STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
+        STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX,
+        STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +338,10 @@ class ClaudeAgentContextBuilder:
         cwd: Optional[str] = None,
         editor_session_id: Optional[str] = None,
         voice_system_prompt: Optional[str] = None,
+        story_workspace_dream_context: Optional[
+            StoryWorkspaceDreamRunContext
+        ] = None,
+        story_workspace_dream_workbench_instruction: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Build the content blocks for a user turn.
 
@@ -423,6 +451,46 @@ class ClaudeAgentContextBuilder:
                         "<voice_context>\n"
                         + voice_system_prompt.strip()
                         + "\n</voice_context>"
+                    ),
+                }
+            )
+
+        if story_workspace_dream_context is not None:
+            provenance = json.dumps(
+                story_workspace_dream_context.model_dump(mode="json"),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": (
+                        "<story_workspace_dream_context>\n"
+                        f"{provenance}\n"
+                        "This is server-trusted provenance for this Dream turn. "
+                        "Use only this workflow_run_id and never infer or replace it.\n"
+                        "Write canonical workspace files with built-in file tools; "
+                        "never use generic file or Bash tools to write .dream/.\n"
+                        "Canonical character cards belong under assets/characters/, "
+                        "scene cards under assets/scenes/, and Project/Episode files "
+                        "under stories/<project_slug>/.\n"
+                        "The host synchronizes completed canonical workbench files into "
+                        "the private Run after the root turn succeeds. The Story Workspace "
+                        "MCP writer tools are optional helpers for an immediate preview or "
+                        "explicit repair; correctness must not depend on calling them.\n"
+                        f"{STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION}\n"
+                        f"{STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX}\n"
+                        f"{STORY_WORKSPACE_RUN_ISOLATED_LAYOUT_INSTRUCTION}\n"
+                        + (
+                            story_workspace_dream_workbench_instruction.strip()
+                            + "\n"
+                            if story_workspace_dream_workbench_instruction
+                            and story_workspace_dream_workbench_instruction.strip()
+                            else ""
+                        )
+                        + "</story_workspace_dream_context>"
                     ),
                 }
             )

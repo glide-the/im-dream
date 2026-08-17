@@ -60,6 +60,14 @@
 #                    (5 tests): claude-agent-sdk 0.2.128 makes HookJSONOutput a
 #                    non-callable TypedDict Union, so hooks return plain dicts;
 #                    the old stub class had masked the production TypeError.
+# [Sync] 2026-08-04: cover fail-closed Dream Bash mutation classification for
+#                    find actions, env wrappers, shell globs, and normalized
+#                    relative/absolute workspace paths while preserving reads.
+# [Sync] 2026-08-04: when a workspace has a real .dream surface, cover
+#                    read-only-by-default Bash policy against dynamically
+#                    constructed paths and prewritten mutation scripts.
+# [Sync] 2026-08-14: cover server-owned CLAUDE_CODE_TMPDIR injection and
+#                    rejection of caller relocation outside sandbox Settings.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -75,6 +83,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import sys
 import tempfile
 import unittest
@@ -252,15 +261,37 @@ _SDK_USER = agent_runner_module.UserMessage
 
 
 def AssistantMessage(content=None):
-    return _SDK_ASSISTANT(content or [])
+    # claude-agent-sdk 0.2.128 requires ``model``; the in-repo stub does not.
+    try:
+        return _SDK_ASSISTANT(content or [], model="test-model")
+    except TypeError:
+        return _SDK_ASSISTANT(content or [])
 
 
 def ResultMessage(session_id=None, subtype="success", usage=None):
-    return _SDK_RESULT(subtype=subtype, session_id=session_id, usage=usage)
+    try:
+        return _SDK_RESULT(
+            subtype=subtype,
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id=session_id,
+            usage=usage,
+        )
+    except TypeError:
+        return _SDK_RESULT(subtype=subtype, session_id=session_id, usage=usage)
 
 
 def StreamEvent(event=None, session_id=None):
-    return _SDK_STREAM_EVENT(event=event or {}, session_id=session_id)
+    try:
+        return _SDK_STREAM_EVENT(
+            uuid="test-uuid",
+            session_id=session_id or "test-session",
+            event=event or {},
+        )
+    except TypeError:
+        return _SDK_STREAM_EVENT(event=event or {}, session_id=session_id)
 
 
 def UserMessage(content=None):
@@ -345,6 +376,20 @@ class _RunnerBase(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self._mock_client = _MockSDKClient()
+        # These tests exercise the SDK runner in isolation.  A developer's
+        # live backend configuration may enable the Admin Gateway while the
+        # synthetic AgentRunOptions below intentionally have no authenticated
+        # canonical user.  Keep that integration disabled for this base seam;
+        # its fail-closed and refresh-helper contracts have dedicated tests.
+        self._gateway_env_patch = patch.dict(
+            os.environ,
+            {
+                "INK_GATEWAY_ENABLED": "0",
+                "INK_GATEWAY_CLAUDE_AGENT_ENABLED": "0",
+            },
+            clear=False,
+        )
+        self._gateway_env_patch.start()
         # Bypass the real auth-key check: these tests exercise runner logic,
         # not env propagation (see TestClaudeAgentRunnerSdkEnvDiagnostics).
         self._verify_patch = patch.object(
@@ -355,6 +400,7 @@ class _RunnerBase(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         self._verify_patch.stop()
+        self._gateway_env_patch.stop()
 
     def make_runner(self, session_id: str = "test-session") -> ClaudeAgentRunner:
         return ClaudeAgentRunner(sdk_client=self._mock_client)
@@ -399,6 +445,59 @@ class TestClaudeAgentRunnerBasicText(_RunnerBase):
         self.assertTrue(result.success)
         self.assertEqual(result.full_text, "Hello World")
         self.assertEqual(received, ["Hello", " World"])
+
+    async def test_workspace_launch_manifest_plugins_are_forwarded_to_sdk(self):
+        """Plugins reach the CLI only via the workspace launch manifest.
+
+        deck-integration-delta: AgentRunOptions no longer carries plugin
+        paths.  A server-packed workspace (.ink/launch-manifest.json +
+        digest-pinned .ink/plugins/<immutable> dir) is read at the CLI
+        launcher boundary and forwarded as literal --plugin-dir argv via the
+        SDK's local-plugin channel.
+        """
+        import json as _json
+
+        from libs.claude_agent_kit.server.plugin_digest import compute_plugin_digest
+
+        self.set_query([])
+        runner = self.make_runner()
+        with tempfile.TemporaryDirectory() as workspace:
+            ws = Path(workspace)
+            packed = ws / ".ink" / "plugins" / "demo-plugin@demo-market@sha256-pending"
+            packed.mkdir(parents=True)
+            (packed / ".claude-plugin").mkdir()
+            (packed / ".claude-plugin" / "plugin.json").write_text(
+                _json.dumps({"name": "demo-plugin", "version": "1.0.0"})
+            )
+            digest = compute_plugin_digest(packed)
+            renamed = packed.with_name(f"demo-plugin@demo-market@{digest.replace(':', '-')}")
+            packed.rename(renamed)
+            manifest = {
+                "schema_version": "claude-launch/v1",
+                "plugins": [
+                    {
+                        "package_spec": "demo-plugin@demo-market",
+                        "resolved_version": "1.0.0",
+                        "relative_path": f".ink/plugins/{renamed.name}",
+                        "artifact_digest": digest,
+                    }
+                ],
+            }
+            (ws / ".ink" / "launch-manifest.json").write_text(_json.dumps(manifest))
+
+            await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="test-session-manifest-plugin",
+                    user_message="create a story proposal",
+                    tool_choice="none",
+                    cwd=str(ws),
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
+            )
+        self.assertEqual(
+            self._mock_client.last_options.plugins,
+            [{"type": "local", "path": str(renamed.resolve())}],
+        )
 
 
 class TestClaudeAgentRunnerOnTextDone(_RunnerBase):
@@ -643,6 +742,35 @@ class TestSandboxFailureHintHelper(unittest.TestCase):
 class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
     """Errors from the SDK are caught and reported via on_error."""
 
+    async def test_assistant_message_error_sets_success_false(self):
+        assistant_error = AssistantMessage(
+            [_text_block("API Error: 403 usage limit exceeded for this account")]
+        )
+        assistant_error.error = "authentication_failed"
+        self.set_query([assistant_error])
+        runner = self.make_runner()
+        errors: list[Exception] = []
+
+        with self.assertLogs(agent_runner_module.logger, level="ERROR"):
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="assistant-error-001",
+                    user_message="authenticate",
+                    tool_choice="none",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda _delta: None,
+                    on_error=lambda error: errors.append(error),
+                ),
+            )
+
+        self.assertFalse(result.success)
+        self.assertIsNotNone(result.error)
+        self.assertIn("authentication_failed", str(result.error))
+        self.assertIn("403 usage limit exceeded", str(result.error))
+        self.assertEqual(errors, [result.error])
+        self.assertEqual(result.full_text, "")
+
     async def test_sdk_error_sets_success_false(self):
         boom = RuntimeError("sdk exploded")
         runner = _runner_with_error_query(boom)
@@ -813,6 +941,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         im_full_access_enabled: bool = False,
         sandbox_network_mode: str = "allowlist",
         on_tool_confirmation_request=None,
+        mcp_env: Optional[dict[str, str]] = None,
     ):
         self.set_query([])
         runner = self.make_runner()
@@ -826,6 +955,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 allowed_tools=allowed_tools,
                 im_full_access_enabled=im_full_access_enabled,
                 sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
+                mcp_env=mcp_env or {},
             ),
             callbacks=AgentStreamingCallbacks(
                 on_text_delta=lambda d: None,
@@ -860,6 +990,499 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
         self.assertNotIn("updatedInput", specific)
+
+    async def test_full_access_forces_background_agent_into_foreground(self):
+        """A background subagent must finish before the parent SDK turn exits."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                im_full_access_enabled=True,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Agent",
+                    "tool_input": {
+                        "description": "Inspect the editor",
+                        "subagent_type": "Explore",
+                        "run_in_background": True,
+                    },
+                },
+                "call-agent-background",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+        self.assertEqual(
+            specific.get("updatedInput"),
+            {
+                "description": "Inspect the editor",
+                "subagent_type": "Explore",
+                "run_in_background": False,
+            },
+        )
+
+    async def test_confirmed_agent_is_also_forced_into_foreground(self):
+        async def confirm(_payload: dict):
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                on_tool_confirmation_request=confirm,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Agent",
+                    "tool_input": {
+                        "description": "Review the draft",
+                        "run_in_background": True,
+                    },
+                },
+                "call-agent-confirmed",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+        self.assertFalse(specific["updatedInput"]["run_in_background"])
+
+    async def test_story_workspace_tools_are_registered_and_auto_allowed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                mcp_env={"INK_AGENT_WORKFLOW_RUN_ID": "run_" + "1" * 32},
+            )
+            for tool_name in (
+                "mcp__story_workspace__write_dream_run",
+                "mcp__story_workspace__write_dream_stage",
+            ):
+                result = await hook(
+                    {
+                        "tool_name": tool_name,
+                        "tool_input": {
+                            "workflowRunId": "run_" + "1" * 32,
+                            "expectedRevision": 0,
+                        },
+                    },
+                    f"call-{tool_name}",
+                    _SDK_HOOK_CONTEXT(),
+                )
+                specific = _hook_specific(result, {})
+                self.assertEqual(specific.get("permissionDecision"), "allow")
+
+        self.assertIn(
+            "mcp__story_workspace__write_dream_run",
+            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
+        )
+        self.assertIn(
+            "mcp__story_workspace__write_dream_stage",
+            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
+        )
+    async def test_story_workspace_stdio_receives_only_trusted_run_identity_env(self):
+        self.set_query([])
+        runner = self.make_runner()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace_root = Path(temp_dir) / "workspaces"
+            workspace = workspace_root / "thread-7"
+            workspace.mkdir(parents=True)
+            with patch.object(
+                agent_runner_module,
+                "get_workspace_root",
+                return_value=workspace_root,
+            ):
+                await runner.run_streaming(
+                    opts=AgentRunOptions(
+                        thread_id="story-workspace-mcp",
+                        user_message="write Dream metadata",
+                        cwd=str(workspace),
+                        tool_choice="auto",
+                        mcp_env={
+                            "INK_AGENT_USER_ID": "7",
+                            "INK_AGENT_THREAD_ID": "thread-7",
+                            "INK_AGENT_WORKFLOW_RUN_ID": "run_" + "1" * 32,
+                            "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID": (
+                                "dream_agent_" + "a" * 64
+                            ),
+                            "ANTHROPIC_AUTH_TOKEN": "must-not-flow",
+                        },
+                    ),
+                    callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
+                )
+
+        config = self._mock_client.last_options.mcp_servers["story_workspace"]
+        args = config["args"] if isinstance(config, dict) else config.args
+        env = config["env"] if isinstance(config, dict) else config.env
+        self.assertEqual(args[-1], "libs.claude_agent_kit.server.story_workspace_mcp_stdio")
+        self.assertEqual(env["INK_AGENT_USER_ID"], "7")
+        self.assertEqual(env["INK_AGENT_THREAD_ID"], "thread-7")
+        self.assertEqual(env["INK_AGENT_WORKFLOW_RUN_ID"], "run_" + "1" * 32)
+        self.assertEqual(
+            env["INK_AGENT_STORY_WORKSPACE_MESSAGE_ID"],
+            "dream_agent_" + "a" * 64,
+        )
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
+
+    async def test_story_workspace_stdio_is_not_started_without_trusted_run(self):
+        self.set_query([])
+        runner = self.make_runner()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="ordinary-chat",
+                    user_message="ordinary chat",
+                    cwd=temp_dir,
+                    tool_choice="auto",
+                    mcp_env={
+                        "INK_AGENT_USER_ID": "7",
+                        "INK_AGENT_THREAD_ID": "ordinary-chat",
+                    },
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
+            )
+        self.assertNotIn("story_workspace", self._mock_client.last_options.mcp_servers)
+
+    async def test_dream_run_auto_allows_only_canonical_roots(self):
+        run_env = {"INK_AGENT_WORKFLOW_RUN_ID": "run_" + "1" * 32}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            for root in ("assets", "stories", ".dramaforge"):
+                target = workspace / root / "nested" / "output.md"
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=str(workspace), mcp_env=run_env
+                )
+                result = await hook(
+                    {"tool_name": "Write", "tool_input": {"file_path": str(target)}},
+                    f"call-{root}",
+                    _SDK_HOOK_CONTEXT(),
+                )
+                self.assertEqual(
+                    _hook_specific(result, {}).get("permissionDecision"), "allow"
+                )
+
+            for target in (
+                workspace / "other" / "output.md",
+                workspace / ".dream" / "runtime" / "run.json",
+            ):
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=str(workspace), mcp_env=run_env
+                )
+                result = await hook(
+                    {"tool_name": "Write", "tool_input": {"file_path": str(target)}},
+                    "call-denied",
+                    _SDK_HOOK_CONTEXT(),
+                )
+                self.assertNotEqual(
+                    _hook_specific(result, {}).get("permissionDecision"), "allow"
+                )
+
+    async def test_story_workspace_stdio_is_not_started_without_workspace(self):
+        self.set_query([])
+        runner = self.make_runner()
+        await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="story-workspace-no-cwd",
+                user_message="no workspace",
+                cwd=None,
+                tool_choice="auto",
+                mcp_env={
+                    "INK_AGENT_USER_ID": "7",
+                    "INK_AGENT_THREAD_ID": "thread-7",
+                },
+            ),
+            callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
+        )
+
+        self.assertNotIn(
+            "story_workspace",
+            self._mock_client.last_options.mcp_servers,
+        )
+
+    async def test_builtin_file_mutations_under_dream_are_hard_denied(self):
+        for full_access in (False, True):
+            for tool_name in ("Write", "Edit", "MultiEdit"):
+                with self.subTest(full_access=full_access, tool_name=tool_name):
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        workspace = Path(temp_dir)
+                        (workspace / ".dream").mkdir()
+                        hook = await self._capture_pre_tool_use_hook(
+                            cwd=str(workspace),
+                            im_full_access_enabled=full_access,
+                        )
+                        result = await hook(
+                            {
+                                "tool_name": tool_name,
+                                "tool_input": {
+                                    "file_path": str(workspace / "files" / ".." / ".dream" / "run.json")
+                                },
+                            },
+                            f"call-{tool_name}-{full_access}",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+
+                    specific = _hook_specific(result, {})
+                    self.assertEqual(specific.get("permissionDecision"), "deny")
+                    self.assertIn("controlled by Story Workspace", specific.get("permissionDecisionReason", ""))
+
+    async def test_bash_dream_mutations_are_hard_denied_but_reads_remain_allowed(self):
+        mutations = (
+            "echo '{}' > .dream/runtime/run.json",
+            "echo '{}' >> .dream/runtime/run.json",
+            "printf x | tee .dream/runtime/run.json",
+            "cp files/run.json .dream/runtime/run.json",
+            "mv files/run.json .dream/runtime/run.json",
+            "rm .dream/runtime/run.json",
+            "mkdir .dream/runtime/new",
+            'python -c "open(\'.dream/runtime/run.json\', \'w\').write(\'{}\')"',
+            'sh -c "rm .dream/runtime/run.json"',
+            'node -e "require(\'fs\').writeFileSync(\'.dream/runtime/run.json\', \'{}\')"',
+        )
+        for full_access in (False, True):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                (workspace / ".dream").mkdir()
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=str(workspace),
+                    im_full_access_enabled=full_access,
+                )
+                for command in mutations:
+                    with self.subTest(full_access=full_access, command=command):
+                        result = await hook(
+                            {"tool_name": "Bash", "tool_input": {"command": command}},
+                            "call-bash-dream",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+                        specific = _hook_specific(result, {})
+                        self.assertEqual(specific.get("permissionDecision"), "deny")
+
+                read_result = await hook(
+                    {"tool_name": "Bash", "tool_input": {"command": "cat .dream/workspace.json"}},
+                    "call-bash-dream-read",
+                    _SDK_HOOK_CONTEXT(),
+                )
+                self.assertEqual(
+                    _hook_specific(read_result, {}).get("permissionDecision"),
+                    "allow",
+                )
+
+    async def test_canonical_asset_single_file_delete_uses_visible_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            character = workspace / "assets" / "characters" / "qa-guide.md"
+            character.parent.mkdir(parents=True)
+            character.write_text("---\nchar_id: qa-guide\nchar_name: QA\n---\n")
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+            command = f"rm -- {shlex.quote(str(character))}"
+            result = await hook(
+                {"tool_name": "Bash", "tool_input": {"command": command}},
+                "call-canonical-asset-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(confirmation_requests[0]["tool_name"], "Bash")
+        self.assertEqual(
+            _hook_specific(result, {}).get("permissionDecision"),
+            "allow",
+        )
+
+    async def test_canonical_prop_single_file_delete_uses_visible_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            prop = workspace / "assets" / "props" / "PR-QA.md"
+            prop.parent.mkdir(parents=True)
+            prop.write_text("---\nprop_id: PR-QA\nname: QA\n---\n")
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": f"rm -- {shlex.quote(str(prop))}"},
+                },
+                "call-canonical-prop-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(
+            _hook_specific(result, {}).get("permissionDecision"),
+            "allow",
+        )
+
+    async def test_canonical_asset_delete_rejects_recursive_glob_and_symlink(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            characters = workspace / "assets" / "characters"
+            characters.mkdir(parents=True)
+            target = characters / "qa-guide.md"
+            target.write_text("qa")
+            link = characters / "qa-link.md"
+            link.symlink_to(target)
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            for command in (
+                f"rm -rf {characters}",
+                f"rm -- {characters}/*.md",
+                f"rm -- {link}",
+                f"rm -- {target} {characters / 'other.md'}",
+            ):
+                with self.subTest(command=command):
+                    result = await hook(
+                        {"tool_name": "Bash", "tool_input": {"command": command}},
+                        "call-invalid-asset-delete",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(
+                        _hook_specific(result, {}).get("permissionDecision"),
+                        "deny",
+                    )
+
+    async def test_bash_dream_guard_denies_find_env_glob_and_normalized_path_bypasses(self):
+        for full_access in (False, True):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                (workspace / ".dream" / "runtime").mkdir(parents=True)
+                absolute_run = workspace / ".dream" / "runtime" / "run.json"
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=str(workspace),
+                    im_full_access_enabled=full_access,
+                )
+                mutations = (
+                    "find .dream/runtime -type f -delete",
+                    "find .dream/runtime -type f -exec rm -f {} +",
+                    "env rm -f .dream/runtime/run.json",
+                    "rm -f .drea?/runtime/run.json",
+                    "rm -f .dr{eam,aft}/runtime/run.json",
+                    "find ./.dream/runtime -type f -delete",
+                    "rm -f files/../.dream/runtime/run.json",
+                    f"find {workspace / '.dream' / 'runtime'} -type f -delete",
+                    f"env rm -f {absolute_run}",
+                    f"rm -f {workspace / '.drea?' / 'runtime' / 'run.json'}",
+                )
+                for command in mutations:
+                    with self.subTest(full_access=full_access, command=command):
+                        result = await hook(
+                            {"tool_name": "Bash", "tool_input": {"command": command}},
+                            "call-bash-dream-bypass",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+                        specific = _hook_specific(result, {})
+                        self.assertEqual(specific.get("permissionDecision"), "deny")
+                        self.assertIn(
+                            "controlled by Story Workspace",
+                            specific.get("permissionDecisionReason", ""),
+                        )
+
+                reads = (
+                    "find .dream/runtime -type f -print",
+                    "env cat .dream/workspace.json",
+                    "cat .drea?/workspace.json",
+                    f"find {workspace / '.dream' / 'runtime'} -type f -print",
+                )
+                for command in reads:
+                    with self.subTest(full_access=full_access, command=command):
+                        result = await hook(
+                            {"tool_name": "Bash", "tool_input": {"command": command}},
+                            "call-bash-dream-read",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+                        self.assertEqual(
+                            _hook_specific(result, {}).get("permissionDecision"),
+                            "allow",
+                        )
+
+    async def test_existing_dream_surface_denies_dynamic_paths_and_prewritten_scripts(self):
+        dynamic_write = (
+            'python -c "from pathlib import Path; '
+            "Path(chr(46)+'dream/pwn').write_text('x')\""
+        )
+        for full_access in (False, True):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                (workspace / ".dream").mkdir()
+                (workspace / "files").mkdir()
+                (workspace / "files" / "mutate-dream.sh").write_text(
+                    "#!/bin/sh\nprintf x > .dream/pwn\n",
+                    encoding="utf-8",
+                )
+                (workspace / "files" / "cat").write_text(
+                    "#!/bin/sh\nprintf x > .dream/pwn\n",
+                    encoding="utf-8",
+                )
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=str(workspace),
+                    im_full_access_enabled=full_access,
+                )
+
+                for command in (
+                    dynamic_write,
+                    "bash files/mutate-dream.sh",
+                    "files/cat",
+                    "env PATH=files cat",
+                ):
+                    with self.subTest(full_access=full_access, command=command):
+                        result = await hook(
+                            {"tool_name": "Bash", "tool_input": {"command": command}},
+                            "call-bash-dream-indirect-write",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+                        specific = _hook_specific(result, {})
+                        self.assertEqual(specific.get("permissionDecision"), "deny")
+                        self.assertIn(
+                            "controlled by Story Workspace",
+                            specific.get("permissionDecisionReason", ""),
+                        )
+
+    async def test_workspace_without_dream_surface_keeps_normal_bash_policy(self):
+        dynamic_write = (
+            'python -c "from pathlib import Path; '
+            "Path(chr(46)+'dream/pwn').write_text('x')\""
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            (workspace / "files" / "mutate-dream.sh").write_text(
+                "#!/bin/sh\nprintf x > .dream/pwn\n",
+                encoding="utf-8",
+            )
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                im_full_access_enabled=True,
+            )
+
+            for command in (dynamic_write, "bash files/mutate-dream.sh"):
+                with self.subTest(command=command):
+                    result = await hook(
+                        {"tool_name": "Bash", "tool_input": {"command": command}},
+                        "call-bash-no-dream-surface",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(
+                        _hook_specific(result, {}).get("permissionDecision"),
+                        "allow",
+                    )
 
     async def test_auto_relative_write_under_workspace_files_gets_explicit_allow(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1783,6 +2406,29 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
         warning.assert_not_called()
 
+    def test_server_owned_gateway_api_key_helper_counts_as_auth(self):
+        from services.admin_gateway.sdk import apply_gateway_sdk_env_to_options
+
+        options = _SDK_OPTIONS(env={})
+        apply_gateway_sdk_env_to_options(
+            options,
+            "205",
+            environment={
+                "INK_GATEWAY_ENABLED": "1",
+                "INK_GATEWAY_BASE_URL": "https://admin.example.test",
+                "INK_GATEWAY_SERVICE_KEY": "gw_" + "k" * 43,
+                "INK_GATEWAY_SUBJECT_JWT_ISSUER": "https://dream.example.test",
+                "INK_GATEWAY_SUBJECT_JWT_AUDIENCE": "ink-memory-gateway",
+                "INK_GATEWAY_SERVICE_CLIENT_ID": "dream-bff",
+                "INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS": "240",
+            },
+        )
+
+        with patch.object(agent_runner_module.logger, "warning") as warning:
+            agent_runner_module._verify_claude_sdk_env_for_query_stream(options)
+
+        warning.assert_not_called()
+
     def test_missing_auth_warns_and_raises_for_anthropic_auth_token(self):
         options = _SDK_OPTIONS(env={})
 
@@ -1799,6 +2445,76 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
 class TestClaudeSdkEnvHelper(unittest.TestCase):
     """Project dotenv loading only forwards SDK-level keys."""
+
+    def test_project_runtime_options_set_claude_code_retry_default_to_three(self):
+        options = _SDK_OPTIONS()
+
+        sdk_env_module.apply_project_sdk_runtime_options(
+            options,
+            env_file=Path("/tmp/does-not-exist"),
+        )
+
+        self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "3")
+
+    def test_project_runtime_options_preserve_explicit_retry_override(self):
+        options = _SDK_OPTIONS(env={"CLAUDE_CODE_MAX_RETRIES": "2"})
+
+        sdk_env_module.apply_project_sdk_runtime_options(
+            options,
+            env_file=Path("/tmp/does-not-exist"),
+        )
+
+        self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "2")
+
+    def test_project_runtime_options_set_claude_code_tmpdir_default(self):
+        options = _SDK_OPTIONS()
+
+        with patch.dict(os.environ, {}, clear=True):
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env["CLAUDE_CODE_TMPDIR"],
+            str(Path("/tmp/claude").resolve(strict=False)),
+        )
+
+    def test_project_runtime_options_use_process_tmpdir_not_caller_value(self):
+        options = _SDK_OPTIONS(env={"CLAUDE_CODE_TMPDIR": "/caller/escape"})
+
+        with patch.dict(
+            os.environ,
+            {"CLAUDE_CODE_TMPDIR": "/var/tmp/ink-claude"},
+            clear=True,
+        ):
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env["CLAUDE_CODE_TMPDIR"],
+            str(Path("/var/tmp/ink-claude").resolve(strict=False)),
+        )
+
+    def test_project_runtime_options_reject_tmpdir_resolving_to_root(self):
+        options = _SDK_OPTIONS(env={"CLAUDE_CODE_TMPDIR": "/caller/escape"})
+
+        with patch.dict(
+            os.environ,
+            {"CLAUDE_CODE_TMPDIR": "/tmp/../.."},
+            clear=True,
+        ):
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env["CLAUDE_CODE_TMPDIR"],
+            str(Path("/tmp/claude").resolve(strict=False)),
+        )
 
     def test_project_dotenv_env_filters_non_sdk_keys(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1900,6 +2616,33 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             {
                 "ANTHROPIC_AUTH_TOKEN": "cloud-secret-token",
                 "ANTHROPIC_MODEL": "cloud-model",
+            },
+        )
+
+    def test_user_sdk_env_cannot_override_provider_credentials_or_routing(self):
+        options = _SDK_OPTIONS(
+            env={
+                "ANTHROPIC_AUTH_TOKEN": "server-token",
+                "ANTHROPIC_BASE_URL": "https://gateway.example",
+            }
+        )
+
+        sdk_env_module.apply_user_sdk_env_to_options(
+            options,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "user-token",
+                "ANTHROPIC_BASE_URL": "https://bypass.example",
+                "ANTHROPIC_MODEL": "provider-model",
+                "API_TIMEOUT_MS": "120000",
+            },
+        )
+
+        self.assertEqual(
+            options.env,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "server-token",
+                "ANTHROPIC_BASE_URL": "https://gateway.example",
+                "API_TIMEOUT_MS": "120000",
             },
         )
 

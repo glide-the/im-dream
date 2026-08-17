@@ -41,6 +41,22 @@
 #                    shutil.which("claude") → leave unset for SDK bundled
 #                    fallback) so Docker's apply-seccomp-patched npm CLI is not
 #                    shadowed by the SDK bundled CLI; explicit cli_path wins.
+# [Sync] 2026-08-03: scope correction — CLAUDE_CONFIG_DIR={cwd}/.claude-home
+#                    relocates the CLI's ENTIRE config home (plans/, tasks/,
+#                    projects/ transcripts, plugins/, agents/, caches), not
+#                    just Plan Mode.  Add resolve_claude_config_home() as the
+#                    single path-resolution source and
+#                    apply_claude_config_home_to_options() applied FIRST in the
+#                    env chain (renamed from apply_plan_mode_env_to_options,
+#                    kept as a wrapper; constant renamed
+#                    _PLAN_MODE_CONFIG_HOME_DIRNAME → _CLAUDE_CONFIG_HOME_DIRNAME
+#                    with alias).
+# [Sync] 2026-08-12: set Claude Code's native transient-request retry default
+#                    to three through CLAUDE_CODE_MAX_RETRIES. This is a
+#                    server-owned CLI default, not an Agent turn retry loop.
+# [Sync] 2026-08-14: pin Claude Code's native temp root through a canonicalized
+#                    CLAUDE_CODE_TMPDIR (configured default /tmp/claude) so its
+#                    per-uid cwd-* files stay under the exact allowWrite root.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -57,6 +73,10 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _PROJECT_ENV_FILE = _BACKEND_ROOT / ".env"
 _CLAUDE_SETTING_SOURCES_ARG = "setting-sources"
 _CLAUDE_PROJECT_SETTING_SOURCE = "project"
+_CLAUDE_CODE_MAX_RETRIES_ENV_NAME = "CLAUDE_CODE_MAX_RETRIES"
+CLAUDE_CODE_MAX_RETRIES_DEFAULT = "3"
+_CLAUDE_CODE_TMPDIR_ENV_NAME = "CLAUDE_CODE_TMPDIR"
+CLAUDE_CODE_TMPDIR_DEFAULT = "/tmp/claude"
 
 logger = logging.getLogger(__name__)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
@@ -78,12 +98,35 @@ _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
     }
 )
 _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES = frozenset({"ANTHROPIC_API_KEY"})
+_GATEWAY_COMPETING_CREDENTIAL_ENV_NAMES = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+)
+_USER_SDK_ENV_NAMES = frozenset(
+    {
+        "API_TIMEOUT_MS",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+        "DISABLE_INTERLEAVED_THINKING",
+    }
+)
 
-# Plan Mode config-home injection (claude-plan §5.1).  CLAUDE_CONFIG_DIR is
+# Plan Mode / config-home injection (claude-plan §5.1).  CLAUDE_CONFIG_DIR is
 # deliberately NOT in ``_PROJECT_DOTENV_SDK_ENV_NAMES`` so backend/.env cannot
 # relocate the global Claude config home.
+#
+# 2026-08-03 scope correction: ``.claude-home`` is NOT Plan-Mode-only.  Once
+# ``CLAUDE_CONFIG_DIR={cwd}/.claude-home`` is injected, the CLI moves its
+# entire config home into the per-thread workspace — plans/, tasks/,
+# projects/ (session transcripts), plugins/, agents/, skills/settings caches
+# and every other built-in feature stop reading the user's real ``~/.claude``.
+# Backend code that resolves config-home-relative paths must go through
+# :func:`resolve_claude_config_home` (single source of truth), never ``~``.
 _CLAUDE_CONFIG_DIR_ENV_NAME = "CLAUDE_CONFIG_DIR"
-_PLAN_MODE_CONFIG_HOME_DIRNAME = ".claude-home"
+_CLAUDE_CONFIG_HOME_DIRNAME = ".claude-home"
+# Backward-compatible alias (2026-08-03 rename — the redirect covers far more
+# than Plan Mode); prefer _CLAUDE_CONFIG_HOME_DIRNAME in new code.
+_PLAN_MODE_CONFIG_HOME_DIRNAME = _CLAUDE_CONFIG_HOME_DIRNAME
 
 # Task v2 (file tasks) injection (claude-todo §5.1).  Both keys stay out of
 # ``_PROJECT_DOTENV_SDK_ENV_NAMES`` so neither backend/.env nor user_sdk_env
@@ -96,6 +139,57 @@ _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME = "CLAUDE_CODE_TASK_LIST_ID"
 # workspace.get_tasks_dir() resolves the same constant — single source.
 CLAUDE_CODE_TASK_LIST_ID_VALUE = "main"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def resolve_claude_code_tmpdir(
+    process_env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Return the server-owned Claude Code temporary root.
+
+    Claude Code 2.1.220 derives its per-uid ``claude-UID/cwd-*`` shell files
+    beneath ``CLAUDE_CODE_TMPDIR``.  Keeping this root explicit makes the CLI
+    subprocess environment and workspace sandbox use one stable path instead
+    of trying to predict a generated ``cwd-*`` name.
+
+    Only an absolute process-level override is accepted. Browser/user env
+    settings cannot relocate this security boundary.
+    """
+
+    source = os.environ if process_env is None else process_env
+    configured = str(source.get(_CLAUDE_CODE_TMPDIR_ENV_NAME) or "").strip()
+    fallback = str(Path(CLAUDE_CODE_TMPDIR_DEFAULT).resolve(strict=False))
+    raw = Path(configured or CLAUDE_CODE_TMPDIR_DEFAULT).expanduser()
+    try:
+        resolved = raw.resolve(strict=False)
+    except (OSError, RuntimeError):
+        resolved = Path("/")
+    if raw.is_absolute() and resolved != Path("/"):
+        # macOS exposes /tmp as a symlink to /private/tmp. Claude's sandbox
+        # canonicalizes command paths before applying allowWrite, so both the
+        # subprocess and settings must receive the same canonical path.
+        return str(resolved)
+    if configured:
+        logger.warning(
+            "%s=%r is not a safe absolute directory; using %s.",
+            _CLAUDE_CODE_TMPDIR_ENV_NAME,
+            configured,
+            fallback,
+        )
+    return fallback
+
+
+def apply_gateway_credential_tombstones(environment: dict[str, str]) -> None:
+    """Override credentials inherited by the SDK subprocess when Gateway is on.
+
+    ``claude-agent-sdk`` overlays ``options.env`` onto the full parent process
+    environment. Removing a key from ``options.env`` therefore cannot remove a
+    credential already present in uvicorn's ``os.environ``. Empty values are
+    the subprocess transport's only deletion-equivalent and make Claude Code
+    select the server-owned ``apiKeyHelper`` instead.
+    """
+
+    for name in _GATEWAY_COMPETING_CREDENTIAL_ENV_NAMES:
+        environment[name] = ""
 
 
 def task_v2_enabled() -> bool:
@@ -171,6 +265,25 @@ def merge_project_dotenv_env(
         )
     for key in _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES:
         merged.pop(key, None)
+    # ``ClaudeAgentRunner`` applies the server-owned Gateway configuration
+    # after the first project/runtime merge. ``SimpleClaudeAgentSDKClient``
+    # deliberately reapplies these defaults for direct callers immediately
+    # before spawning Claude Code. That second merge must not resurrect a
+    # direct Provider bearer token from backend/.env or the parent process:
+    # Claude Code gives ANTHROPIC_AUTH_TOKEN precedence over apiKeyHelper, so
+    # the canonical Gateway subject JWT would otherwise be replaced and the
+    # request would correctly fail authentication at the Admin boundary. Keep
+    # empty tombstones instead of popping: the Python SDK inherits the entire
+    # parent environment before overlaying this map.
+    primary_gateway_flag = str(merged.get("INK_GATEWAY_ENABLED", "")).strip()
+    legacy_gateway_flag = str(
+        merged.get("INK_GATEWAY_CLAUDE_AGENT_ENABLED", "")
+    ).strip()
+    gateway_enabled = (
+        primary_gateway_flag or legacy_gateway_flag
+    ).lower() in _TRUE_ENV_VALUES
+    if gateway_enabled:
+        apply_gateway_credential_tombstones(merged)
     return merged
 
 
@@ -209,26 +322,73 @@ def apply_project_sdk_runtime_options(
 ) -> Any:
     """Apply all project-level Claude SDK runtime defaults."""
     apply_project_dotenv_to_options(options, env_file)
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    existing_env.setdefault(
+        _CLAUDE_CODE_MAX_RETRIES_ENV_NAME,
+        CLAUDE_CODE_MAX_RETRIES_DEFAULT,
+    )
+    # Server-owned and intentionally assigned rather than setdefault: the
+    # workspace sandbox is generated from the same resolver, so an arbitrary
+    # caller value must not move Claude's cwd-* files outside allowWrite.
+    existing_env[_CLAUDE_CODE_TMPDIR_ENV_NAME] = resolve_claude_code_tmpdir()
+    options.env = existing_env
     apply_project_setting_sources_to_options(options)
     return options
 
 
-def apply_plan_mode_env_to_options(
+def resolve_claude_config_home(
+    cwd: Optional[str | Path] = None,
+) -> Optional[str]:
+    """Resolve the effective Claude config home for a thread.
+
+    Single source of truth for every backend module that needs
+    config-home-relative paths (plans, tasks, session transcripts, plugins,
+    agents, skills caches).  Resolution order mirrors the SDK env chain:
+
+      1. ``CLAUDE_CONFIG_DIR`` process env (explicit override) — wins.
+      2. *cwd* provided (Workspace Mode) → ``{cwd}/.claude-home``, matching
+         the value injected into the SDK subprocess.
+      3. ``None`` — caller falls back to the official default ``~/.claude``.
+
+    Resolved in the service layer right after workspace/cwd resolution —
+    BEFORE any claude module (resume probe, plugin pack, plan/tasks readers,
+    agent run) touches the filesystem — and carried into the runner via
+    ``AgentRunOptions.claude_config_home`` so the decision is not buried in
+    the ``run_streaming`` lifecycle.
+    """
+    config_dir = os.environ.get(_CLAUDE_CONFIG_DIR_ENV_NAME)
+    if config_dir:
+        return config_dir
+    if cwd:
+        return str(Path(str(cwd)) / _CLAUDE_CONFIG_HOME_DIRNAME)
+    return None
+
+
+def apply_claude_config_home_to_options(
     options: Any,
+    config_home: Optional[str | Path] = None,
     cwd: Optional[str | Path] = None,
 ) -> Any:
     """Point the Claude Code config home at the per-thread workspace.
 
-    Sets ``CLAUDE_CONFIG_DIR={cwd}/.claude-home`` so Plan Mode plan files
-    land under ``{workspace}/.claude-home/plans/`` (claude-plan §5.1).
+    Sets ``CLAUDE_CONFIG_DIR=<config_home>`` (resolved via
+    :func:`resolve_claude_config_home` when only *cwd* is given) so ALL CLI
+    built-ins land under ``{workspace}/.claude-home/`` — plans/
+    (claude-plan §5.1), tasks/, projects/ session transcripts, plugins,
+    agents and caches — instead of the user's real ``~/.claude``.
 
-    Priority: lowest in the SDK env chain — call *after*
-    ``apply_project_sdk_runtime_options`` and *before*
-    ``apply_user_sdk_env_to_options``.  An explicitly provided
+    Priority: FIRST in the SDK env chain — call *before*
+    ``apply_project_sdk_runtime_options`` so the value is treated as
+    explicit ``options.env`` and no later merge (backend/.env, process env,
+    ``user_sdk_env``) can relocate it.  An explicitly provided
     ``CLAUDE_CONFIG_DIR`` already present in ``options.env`` is preserved.
-    No-op when *cwd* is falsy (Workspace Mode disabled).
+    No-op when neither *config_home* nor *cwd* resolves (Workspace Mode
+    disabled).
     """
-    if not cwd:
+    home = str(config_home) if config_home else resolve_claude_config_home(cwd)
+    if not home:
         return options
     existing_env = getattr(options, "env", None) or {}
     if not isinstance(existing_env, dict):
@@ -238,11 +398,21 @@ def apply_plan_mode_env_to_options(
         return options
     options.env = {
         **existing_env,
-        _CLAUDE_CONFIG_DIR_ENV_NAME: str(
-            Path(str(cwd)) / _PLAN_MODE_CONFIG_HOME_DIRNAME
-        ),
+        _CLAUDE_CONFIG_DIR_ENV_NAME: home,
     }
     return options
+
+
+def apply_plan_mode_env_to_options(
+    options: Any,
+    cwd: Optional[str | Path] = None,
+) -> Any:
+    """Backward-compatible wrapper (2026-08-03 rename).
+
+    The redirect covers far more than Plan Mode; prefer
+    :func:`apply_claude_config_home_to_options` in new code.
+    """
+    return apply_claude_config_home_to_options(options, cwd=cwd)
 
 
 def apply_task_v2_env_to_options(options: Any) -> Any:
@@ -251,7 +421,7 @@ def apply_task_v2_env_to_options(options: Any) -> Any:
     Always injects ``CLAUDE_CODE_TASK_LIST_ID=main`` (lowest priority) so v2
     task JSON lands under ``{CLAUDE_CONFIG_DIR}/tasks/main/`` — i.e.
     ``{workspace}/.claude-home/tasks/main/`` once
-    ``apply_plan_mode_env_to_options`` has redirected the config home.
+    ``apply_claude_config_home_to_options`` has redirected the config home.
     Fixing taskListId prevents the CLI's sessionId/teamName fallback from
     scattering one thread's tasks across per-session subdirectories that
     ``workspace.get_tasks_dir()`` never finds.
@@ -267,7 +437,7 @@ def apply_task_v2_env_to_options(options: Any) -> Any:
     ``CLAUDE_CODE_ENABLE_TASKS=0``).
 
     Priority: lowest in the SDK env chain — call *after*
-    ``apply_plan_mode_env_to_options`` and *before*
+    ``apply_claude_config_home_to_options`` and *before*
     ``apply_user_sdk_env_to_options``.  Explicit values already present in
     ``options.env`` are preserved.
     """
@@ -350,7 +520,7 @@ def apply_user_sdk_env_to_options(
     filtered = {
         str(k): str(v)
         for k, v in user_env.items()
-        if k and v is not None and _is_project_dotenv_sdk_env_key(str(k))
+        if k and v is not None and str(k) in _USER_SDK_ENV_NAMES
     }
     # Merge: filtered user env overlays existing (which already has backend/.env).
     merged = {**existing_env, **filtered}

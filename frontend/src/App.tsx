@@ -7,6 +7,12 @@
 // [Sync] 2026-05-29: keep ChatView mounted after first open so chat state survives app view switches.
 // [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
 // [Sync] 2026-06-14: replace 2s MCP write blind wait with Edit Session SSE event sync plus timeout fallback.
+// [Sync] 2026-08-13: persist the current Editor Session before Chat sends its
+//                    snapshot to an Agent that may invoke database-backed MCP writes.
+// [Sync] 2026-08-14: route Deck selection to canonical Story Workspace Chat
+//                    with stable Deck/Agent intent; mode is re-read from the server.
+// [Sync] 2026-08-15: notify the mounted Story Workspace router after Deck-to-Chat
+//                    pushState so the visible page and URL change in the same interaction.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
 // [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect inserts widget, stays in writing view; handleChatSend uses chatWithVoice with full context (allText, metaPrompt, statePrompt); "Chat →" button available when thread exists.
 // [Sync] 2026-06-01: pass state as editorState to chatWithVoiceSSE in handleChatSend so inline widget agent receives editor_state.
@@ -18,6 +24,13 @@
 // [Sync] 2026-07-07: route the connector entry into ChatView so the connector workbench lives under the chat shell instead of a standalone page.
 // [Sync] 2026-07-07: mount ChatView in a fixed flex viewport so embedded connector panels cannot force page-level overflow.
 // [Sync] 2026-07-08: route Connector navigation to Settings resource-link management and keep Chat on the lightweight landing panel only.
+// [Sync] 2026-08-14: replace the authenticated root entry with canonical Story Workspace Chat
+//                    while preserving explicit deep links and browser history semantics.
+// [Sync] 2026-08-14: defer authenticated Deck voice loading until registration/login completes.
+// [Sync] 2026-08-16: restore the pre-01a00576 Deck maintenance popup handoff to canonical Chat.
+// [Sync] 2026-08-16: route Deck settings through Settings / Work and provide the Work-owned management instance.
+// [Sync] 2026-08-16: make the Deck-home Settings action navigate directly to Settings / Work.
+// [Sync] 2026-08-17: carry Deck preview example copy into the new Chat draft without URL persistence or auto-send.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -63,6 +76,14 @@ import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
 import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
 import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDetailPage';
+import ClaudePluginAdminPage from './components/claude-plugin-admin/ClaudePluginAdminPage';
+import {
+  resolveStoryWorkspacePath,
+  STORY_WORKSPACE_PATHS,
+  StoryWorkspaceRouter,
+  type StoryWorkspaceRoute,
+} from './router/story-workspace';
+import { StoryWorkspaceSettingsPage } from './pages/story-workspace';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -92,6 +113,9 @@ const LANGUAGE_CODES: Array<'en' | 'zh'> = ['en', 'zh'];
 // configuration layout, so it gets its own max width instead of sharing SETTINGS_MAX_WIDTH_PX.
 const SETTINGS_MAX_WIDTH_PX = 800;
 const SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX = 1220;
+
+type AppView = 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector' | 'story-workspace';
+type GlobalAppView = AppView;
 
 // @@@ Color map with gradient colors for watercolor effect
 const colorMap: Record<string, { gradient: string; text: string; glow: string }> = {
@@ -157,9 +181,14 @@ export default function App() {
     }
   }, [currentLanguage, i18n]);
 
-  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector'>('writing');
+  const [currentView, setCurrentView] = useState<AppView>(() => (
+    resolveStoryWorkspacePath(window.location.pathname) ? 'story-workspace' : 'writing'
+  ));
+  const [storyWorkspaceLegacyView, setStoryWorkspaceLegacyView] = useState<'writing' | null>(() => (
+    resolveStoryWorkspacePath(window.location.pathname)?.route === 'writing' ? 'writing' : null
+  ));
   const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
-  const [chatLandingTab, setChatLandingTab] = useState<'history' | 'connector'>('history');
+  const [chatLandingTab, setChatLandingTab] = useState<'history' | 'dreams'>('history');
   const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
   const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
@@ -169,11 +198,28 @@ export default function App() {
   //                    resource-link card, matching the connector interaction design's page navigation.
   const [showNotionConnectorDetail, setShowNotionConnectorDetail] = useState(false);
 
+  useLayoutEffect(() => {
+    if (!isAuthenticated || isDeviceVerificationRoute || window.location.pathname !== '/') return;
+    window.history.replaceState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      STORY_WORKSPACE_PATHS.chat,
+    );
+    setStoryWorkspaceLegacyView(null);
+    setCurrentView('story-workspace');
+  }, [isAuthenticated, isDeviceVerificationRoute]);
+
   const openConnectorSettings = useCallback(() => {
-    setCurrentView('settings');
+    window.history.pushState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      `${STORY_WORKSPACE_PATHS['settings-work']}?tab=resources`,
+    );
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    setCurrentView('story-workspace');
     setShowNotionConnectorDetail(false);
     setConnectorSettingsFocusNonce((value) => value + 1);
-    setChatLandingTab('connector');
+    setChatLandingTab('history');
   }, []);
 
   const openNotionConnectorDetail = useCallback(() => {
@@ -185,13 +231,65 @@ export default function App() {
     setConnectorSettingsFocusNonce((value) => value + 1);
   }, []);
 
-  const handleAppViewChange = useCallback((view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector') => {
+  const handleStoryWorkspaceRouteChange = useCallback((route: StoryWorkspaceRoute) => {
+    setStoryWorkspaceLegacyView(route === 'writing' ? 'writing' : null);
+  }, []);
+
+  const handleAppViewChange = useCallback((view: GlobalAppView) => {
+    if (view === 'story-workspace') {
+      window.history.pushState(
+        { inkDreamView: 'story-workspace' },
+        '',
+        STORY_WORKSPACE_PATHS.dream,
+      );
+      setShowNotionConnectorDetail(false);
+      setCurrentView('story-workspace');
+      return;
+    }
+    if (view === 'settings') {
+      window.history.pushState(
+        { inkDreamView: 'story-workspace' },
+        '',
+        STORY_WORKSPACE_PATHS.settings,
+      );
+      setShowNotionConnectorDetail(false);
+      setCurrentView('story-workspace');
+      return;
+    }
     if (view === 'connector') {
       openConnectorSettings();
       return;
     }
+    if (resolveStoryWorkspacePath(window.location.pathname)) {
+      window.history.pushState({ inkDreamView: view }, '', '/');
+    }
     setCurrentView(view);
   }, [openConnectorSettings]);
+
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      if (resolveStoryWorkspacePath(window.location.pathname)) {
+        setCurrentView('story-workspace');
+        return;
+      }
+
+      if (event.state?.inkDreamView === 'settings') {
+        window.history.replaceState(
+          { inkDreamView: 'story-workspace' },
+          '',
+          STORY_WORKSPACE_PATHS.settings,
+        );
+        setShowNotionConnectorDetail(false);
+        setCurrentView('story-workspace');
+        return;
+      }
+
+      setCurrentView((view) => view === 'story-workspace' ? 'writing' : view);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const browserTimezone = useMemo(() => {
     try {
@@ -215,6 +313,7 @@ export default function App() {
     ensureStateForPersistence,
     getFirstLineFromState,
     saveSessionToDatabase,
+    ensureSessionPersistedForAgent,
     startDetachedBlankSession,
     handleNewSession,
     confirmStartFresh
@@ -234,6 +333,14 @@ export default function App() {
   const [chatStreaming, setChatStreaming] = useState<Map<string, { text: string; reasoning: string; reasoningDone: boolean }>>(new Map());
   /** @@@ Thread to open in ChatView (set when navigating from Deck or editor widget). */
   const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
+  /** Bump for repeated requests to reopen/reconnect the same Chat thread. */
+  const [requestedChatThreadNonce, setRequestedChatThreadNonce] = useState(0);
+  const [requestedChatDeck, setRequestedChatDeck] = useState<{
+    deckId: string;
+    agentId?: string;
+    input?: string;
+    nonce: number;
+  } | undefined>(undefined);
   /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
   const [activeChatVoice, setActiveChatVoice] = useState<ActiveChatVoice | undefined>(undefined);
 
@@ -488,10 +595,11 @@ export default function App() {
 
   // @@@ Fetch default voices from backend and load from deck system
   useEffect(() => {
+    let active = true;
     getDefaultVoices().then(async backendVoices => {
       const converted: Record<string, VoiceConfig> = {};
       for (const [name, data] of Object.entries(backendVoices)) {
-        const v = data as any;
+        const v = data as Omit<VoiceConfig, 'name' | 'enabled'>;
         converted[name] = {
           name,
           systemPrompt: v.systemPrompt,  // @@@ Fixed: was v.tagline (wrong field name)
@@ -502,7 +610,8 @@ export default function App() {
       }
 
       // @@@ Try loading from deck system first, then localStorage, then defaults
-      const deckVoices = await loadVoicesFromDecks();
+      const deckVoices = isAuthenticated ? await loadVoicesFromDecks() : {};
+      if (!active) return;
       const hasDecks = Object.keys(deckVoices).length > 0;
       const configs = hasDecks ? deckVoices : (getVoices() || converted);
       setVoiceConfigs(configs);
@@ -514,7 +623,10 @@ export default function App() {
         engineRef.current.setVoiceConfigs(configs);
       }
     });
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [engineRef, isAuthenticated]);
 
   // @@@ Update engine when voice configs change
   useEffect(() => {
@@ -802,7 +914,7 @@ export default function App() {
       setDropdownTriggerCellId(lastTextCell.id);
       setDropdownVisible(true);
     }, 0);
-  }, [state]);
+  }, [ensureSessionPersistedForAgent, state]);
 
   // @@@ Toggle comment alignment
   const handleToggleAlign = useCallback(() => {
@@ -904,19 +1016,20 @@ export default function App() {
 
       // Show success message
       alert(`Migration successful! Imported:\n- ${result.imported.sessions} sessions\n- ${result.imported.pictures} pictures\n- ${result.imported.preferences} preferences\n- ${result.imported.reports} reports`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Migration failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Provide helpful error message based on error type
       let errorMsg = 'Migration failed: ';
-      if (error.message?.includes('413') || error.message?.includes('too large')) {
+      if (errorMessage.includes('413') || errorMessage.includes('too large')) {
         errorMsg += 'Your data is too large to migrate in one request.\n\n';
         errorMsg += 'This is a known issue that will be fixed soon.\n';
         errorMsg += 'For now, you can:\n';
         errorMsg += '1. Skip migration and start fresh, or\n';
         errorMsg += '2. Wait for the fix and try again later';
       } else {
-        errorMsg += error.message + '\n\nYou can try again later from Settings.';
+        errorMsg += errorMessage + '\n\nYou can try again later from Settings.';
       }
 
       alert(errorMsg);
@@ -987,10 +1100,80 @@ export default function App() {
   // @@@ Navigate to Chat view with a specific thread (used by editor widgets and Deck manager).
   const handleOpenChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
     setRequestedChatThreadId(threadId);
+    setRequestedChatThreadNonce((value) => value + 1);
+    setRequestedChatDeck(undefined);
     setActiveChatVoice(voiceInfo);
     setCurrentView('chat');
     setHasOpenedChatView(true);
   }, []);
+
+  // Dream owns its presentation protocol, but its source thread remains a
+  // normal Chat thread. Selecting Chat reopens that thread so Chat can attach
+  // its own SSE adapter and continue with the ordinary POST interaction.
+  const handleStoryWorkspaceChatThreadRequest = useCallback((threadId: string) => {
+    setRequestedChatThreadId(threadId);
+    setRequestedChatThreadNonce((value) => value + 1);
+    setRequestedChatDeck(undefined);
+    setActiveChatVoice(undefined);
+  }, []);
+
+  // Every Deck maintenance handoff starts in canonical Story Workspace Chat.
+  // The URL carries only stable selection intent; Chat reloads server-derived facts.
+  const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice, input?: string) => {
+    setRequestedChatThreadId(undefined);
+    setRequestedChatDeck({ deckId, agentId: voiceInfo?.id, input, nonce: Date.now() });
+    setActiveChatVoice(voiceInfo);
+    const query = new URLSearchParams({ deck: deckId });
+    if (voiceInfo?.id) query.set('agent', voiceInfo.id);
+    window.history.pushState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      `${STORY_WORKSPACE_PATHS.chat}?${query.toString()}`,
+    );
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    setCurrentView('story-workspace');
+    setHasOpenedChatView(true);
+  }, []);
+
+  const handleOpenSettingsFromDeck = useCallback(() => {
+    window.history.pushState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      STORY_WORKSPACE_PATHS['settings-work'],
+    );
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    setCurrentView('story-workspace');
+  }, []);
+
+  const handleDeckManagerUpdate = async () => {
+    // @@@ Reload voice configs from deck system.
+    console.log('Deck system updated, reloading voices...');
+    const updatedVoices = await loadVoicesFromDecks();
+    setVoiceConfigs(updatedVoices);
+
+    if (engineRef.current) {
+      engineRef.current.setVoiceConfigs(updatedVoices);
+    }
+
+    console.log(`✅ Loaded ${Object.keys(updatedVoices).length} enabled voices`);
+  };
+
+  const storyWorkspaceDeckManager = (
+    <DeckManager
+      onUpdate={handleDeckManagerUpdate}
+      onChatWithDeck={handleChatWithDeck}
+      onOpenSettings={handleOpenSettingsFromDeck}
+      surface="launcher"
+    />
+  );
+
+  const storyWorkspaceDeckSettingsManager = (
+    <DeckManager
+      onUpdate={handleDeckManagerUpdate}
+      onChatWithDeck={handleChatWithDeck}
+      surface="settings"
+    />
+  );
 
   // @@@ Handle agent selection from dropdown — creates a Claude-agent thread and inserts an Agent Link widget.
   const handleAgentSelect = useCallback((voiceName: string, voiceConfig: VoiceConfig) => {
@@ -1116,6 +1299,9 @@ export default function App() {
 
     const systemPrompt = widgetData.voiceConfig.tagline || '';
 
+    if (state) {
+      await ensureSessionPersistedForAgent();
+    }
     await chatWithVoiceSSE({
       threadId,
       message,
@@ -1167,7 +1353,7 @@ export default function App() {
         setChatStreaming(prev => { const m = new Map(prev); m.delete(widgetId); return m; });
       },
     });
-  }, [state]);
+  }, [ensureSessionPersistedForAgent, state]);
 
   // @@@ Helper to get watercolor background
   const getWatercolorBg = (color: string) => {
@@ -1408,15 +1594,87 @@ export default function App() {
       )}
 
       {/* @@@ Hide top nav on mobile */}
-      {!isMobile && <TopNavBar currentView={currentView} onViewChange={handleAppViewChange} />}
+      {!isMobile && currentView !== 'story-workspace' && (
+        <TopNavBar currentView={currentView} onViewChange={handleAppViewChange} />
+      )}
 
-      {currentView === 'writing' && (
+      {currentView === 'story-workspace' && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          minWidth: 0,
+          minHeight: 0,
+          overflow: 'hidden',
+        }}>
+          <StoryWorkspaceRouter
+            decksContent={storyWorkspaceDeckManager}
+            onChatThreadRequest={handleStoryWorkspaceChatThreadRequest}
+            onRouteChange={handleStoryWorkspaceRouteChange}
+            legacyContent={{
+              timeline: (
+                <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+                  <CollectionsView isVisible voiceConfigs={voiceConfigs} timezone={userTimezone} />
+                </div>
+              ),
+              analysis: (
+                <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'auto' }}>
+                  <AnalysisView />
+                </div>
+              ),
+              chat: (
+                <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+                  <ChatView
+                    editorState={state ? (state as unknown as Record<string, unknown>) : null}
+                    ensureEditorSessionPersisted={ensureSessionPersistedForAgent}
+                    onEditorWriteConfirmed={handleEditorWriteConfirmed}
+                    requestedThreadId={requestedChatThreadId}
+                    requestedThreadNonce={requestedChatThreadNonce}
+                    requestedDeckId={requestedChatDeck?.deckId}
+                    requestedAgentId={requestedChatDeck?.agentId}
+                    requestedDeckInput={requestedChatDeck?.input}
+                    requestedDeckNonce={requestedChatDeck?.nonce}
+                    activeVoice={activeChatVoice}
+                    isMobile={isMobile}
+                    landingTab={chatLandingTab}
+                  />
+                </div>
+              ),
+            }}
+            renderSettings={(section, onNavigate) => (
+              <StoryWorkspaceSettingsPage
+                activeSection={section}
+                connectorSettingsFocusNonce={connectorSettingsFocusNonce}
+                currentLanguage={currentLanguage}
+                isMobile={isMobile}
+                languageCodes={LANGUAGE_CODES}
+                onCloseNotionDetail={closeNotionConnectorDetail}
+                onEnergyBarChange={() => setShowEnergyBar((value) => !value)}
+                onLanguageChange={handleUILanguageChange}
+                onNavigate={onNavigate}
+                onOpenNotionDetail={openNotionConnectorDetail}
+                showEnergyBar={showEnergyBar}
+                showNotionConnectorDetail={showNotionConnectorDetail}
+                workDeckContent={storyWorkspaceDeckSettingsManager}
+              />
+            )}
+          />
+        </div>
+      )}
+
+      {(currentView === 'writing' || storyWorkspaceLegacyView === 'writing') && (
         <div style={{
           display: 'flex',
-          height: '100vh',
-          paddingTop: mobileTopInset,
+          height: storyWorkspaceLegacyView === 'writing' ? '100%' : '100vh',
+          position: storyWorkspaceLegacyView === 'writing' ? 'fixed' : undefined,
+          top: storyWorkspaceLegacyView === 'writing' ? 0 : undefined,
+          left: storyWorkspaceLegacyView === 'writing' ? 'var(--story-workspace-sidebar-width, 240px)' : undefined,
+          right: storyWorkspaceLegacyView === 'writing' ? 0 : undefined,
+          bottom: storyWorkspaceLegacyView === 'writing' ? 0 : undefined,
+          zIndex: storyWorkspaceLegacyView === 'writing' ? 12 : undefined,
+          transform: storyWorkspaceLegacyView === 'writing' ? 'translateZ(0)' : undefined,
+          paddingTop: storyWorkspaceLegacyView === 'writing' ? 0 : mobileTopInset,
           paddingBottom: writingBottomPadding,  // @@@ Space for fixed stats bar + mobile nav
-          fontFamily: 'system-ui, -apple-system, sans-serif',
+          fontFamily: 'var(--font-family-ui)',
           boxSizing: 'border-box'
         }}>
           {/* New Session "+" button - top left (desktop only) */}
@@ -1903,21 +2161,7 @@ export default function App() {
           display: 'flex',
           overflow: 'hidden'
         }}>
-          <DeckManager
-            onUpdate={async () => {
-            // @@@ Reload voice configs from deck system
-            console.log('Deck system updated, reloading voices...');
-            const updatedVoices = await loadVoicesFromDecks();
-            setVoiceConfigs(updatedVoices);
-
-            if (engineRef.current) {
-              engineRef.current.setVoiceConfigs(updatedVoices);
-            }
-
-            console.log(`✅ Loaded ${Object.keys(updatedVoices).length} enabled voices`);
-          }}
-            onOpenChat={handleOpenChatThread}
-          />
+          {storyWorkspaceDeckManager}
         </div>
       )}
       {currentView === 'settings' && (
@@ -2087,6 +2331,11 @@ export default function App() {
               />
             </section>
 
+            {/* Claude Code Plugin Admin (shared install + digest artifacts) */}
+            <section style={{ marginBottom: 48 }}>
+              <ClaudePluginAdminPage />
+            </section>
+
             {/* AI Model Configuration */}
             <section style={{ marginBottom: 48 }}>
               <h2 style={{
@@ -2160,17 +2409,22 @@ export default function App() {
         }}>
           <ChatView
             editorState={state ? (state as unknown as Record<string, unknown>) : null}
+            ensureEditorSessionPersisted={ensureSessionPersistedForAgent}
             onEditorWriteConfirmed={handleEditorWriteConfirmed}
             requestedThreadId={requestedChatThreadId}
+            requestedThreadNonce={requestedChatThreadNonce}
+            requestedDeckId={requestedChatDeck?.deckId}
+            requestedAgentId={requestedChatDeck?.agentId}
+            requestedDeckInput={requestedChatDeck?.input}
+            requestedDeckNonce={requestedChatDeck?.nonce}
             activeVoice={activeChatVoice}
             isMobile={isMobile}
             landingTab={chatLandingTab}
-            onOpenConnectorSettings={openConnectorSettings}
           />
         </div>
       )}
 
-      {isMobile && (
+      {isMobile && currentView !== 'story-workspace' && (
         <nav style={{
           position: 'fixed',
           left: 0,

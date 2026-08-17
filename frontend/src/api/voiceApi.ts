@@ -9,6 +9,14 @@
 // [Sync] 2026-06-12: consume centralized runtime API_BASE for cross-origin deployments.
 // [Sync] 2026-06-25: Reflections analysis now uses backend Reflections-agent tasks:
 //         POST task(auto_start=false) → subscribe SSE → POST start → stream events → fetch results.
+// [Sync] 2026-08-14: add explicit default screenplay Deck plugin reconciliation.
+// [Sync] 2026-08-15: reconciliation may create a missing actor default for legacy accounts.
+// [Sync] 2026-08-14: consume server-derived Deck Agent type and binding revision
+//                    in list/detail DTOs; the browser does not infer Dream capability.
+// [Sync] 2026-08-16: centralize the lightweight Deck create/update metadata input used by the
+//                    settings-style management surface; remove active marketplace list/publish transports.
+// [Sync] 2026-08-16: consume capability-backed Deck content vN and draft state in list/detail DTOs.
+// [Sync] 2026-08-17: carry server sharing-policy facts only for system-initialized Deck display.
 /**
  * API client for voice analysis backend - FastAPI sync API version
  * [Sync] 2026-06-01: normalize user_sessions.labels in session API responses for frontend display.
@@ -18,6 +26,7 @@
 
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { API_BASE } from '../lib/apiBase';
+import type { Commentor, EditorState } from '../engine/EditorEngine';
 
 // ========== Inline Types (workaround for Vite bug) ==========
 export interface VoiceConfig {
@@ -46,11 +55,11 @@ export interface UserSession {
   id: string;
   name?: string | null;
   labels: SessionLabels;
-  editor_state?: any;
+  editor_state: EditorState | null;
   created_at: string;
   updated_at: string;
   date_key?: string | null;
-  first_line?: string;
+  first_line?: string | null;
 }
 
 export interface Voice {
@@ -92,9 +101,30 @@ export interface Deck {
   voices?: Voice[];
   created_at?: string;
   updated_at?: string;
-  published?: boolean;
-  author_name?: string;
-  install_count?: number;
+  /** Server-derived from the active published Deck Plugin capability. */
+  agent_type: 'chat' | 'dream';
+  /** Optimistic-lock token for Agent type changes. */
+  agent_type_revision: number;
+  /** Exact active runtime plugin identity; never an aggregate Deck version. */
+  deck_plugin_id?: string | null;
+  deck_plugin_version?: string | null;
+  /** Admin-capability-backed aggregate content version facts. */
+  deck_version_capability?: boolean;
+  deck_version?: number | null;
+  draft_revision?: number;
+  deck_version_dirty?: boolean;
+  deck_version_status?: 'unpublished' | 'draft' | 'published';
+  next_deck_version?: number;
+  /** Server-owned sharing policy facts; used only to distinguish system-initialized defaults. */
+  can_publish?: boolean;
+  publish_block_reason?: string | null;
+}
+
+export interface DeckDetailsInput {
+  name: string;
+  description?: string;
+  icon?: string;
+  color?: string;
 }
 
 export function normalizeSessionLabels(labels: unknown): SessionLabels {
@@ -105,10 +135,38 @@ export function normalizeSessionLabels(labels: unknown): SessionLabels {
     .filter(label => label.length > 0);
 }
 
-function normalizeUserSession(session: any): UserSession {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function optionalNullableString(value: unknown): string | null | undefined {
+  return value === null ? null : optionalString(value);
+}
+
+function isEditorState(value: unknown): value is EditorState {
+  if (!isRecord(value) || typeof value.id !== 'string' || !Array.isArray(value.cells)) return false;
+  return Array.isArray(value.commentors)
+    && Array.isArray(value.tasks)
+    && Array.isArray(value.weightPath)
+    && Array.isArray(value.overlappedPhrases)
+    && Array.isArray(value.notFoundPhrases);
+}
+
+function normalizeUserSession(session: unknown): UserSession {
+  const value = isRecord(session) ? session : {};
   return {
-    ...session,
-    labels: normalizeSessionLabels(session?.labels)
+    id: optionalString(value.id) ?? '',
+    name: optionalNullableString(value.name),
+    labels: normalizeSessionLabels(value.labels),
+    editor_state: isEditorState(value.editor_state) ? value.editor_state : null,
+    created_at: optionalString(value.created_at) ?? '',
+    updated_at: optionalString(value.updated_at) ?? '',
+    date_key: optionalNullableString(value.date_key),
+    first_line: optionalNullableString(value.first_line),
   };
 }
 
@@ -130,9 +188,9 @@ function getAuthHeaders(): HeadersInit {
 /**
  * Get default voices from backend
  */
-export async function getDefaultVoices(): Promise<any> {
+export async function getDefaultVoices(): Promise<Record<string, Omit<VoiceConfig, 'name' | 'enabled'>>> {
   const response = await fetch(`${API_BASE}/api/default-voices`);
-  return await response.json();
+  return await response.json() as Record<string, Omit<VoiceConfig, 'name' | 'enabled'>>;
 }
 
 interface SyncResponse {
@@ -150,12 +208,15 @@ interface SyncResponse {
     status?: string;
     response?: string;  // For chat responses
     voice_name?: string;  // For chat responses
-    echoes?: any[];  // For echoes analysis
-    traits?: any[];  // For traits analysis
-    patterns?: any[];  // For patterns analysis
+    echoes?: ReflectionResult[];  // For echoes analysis
+    traits?: ReflectionResult[];  // For traits analysis
+    patterns?: ReflectionResult[];  // For patterns analysis
     image_base64?: string;  // For image generation
     thumbnail_base64?: string;  // Thumbnail for image generation
     prompt?: string;  // Image generation prompt
+    date?: string;
+    error?: string;
+    reason?: string;
   };
   error?: string;
   exec_id?: string;  // Still included for debugging
@@ -168,7 +229,7 @@ interface SyncResponse {
 export async function analyzeText(
   text: string,
   sessionId: string,
-  appliedComments?: any[],
+  appliedComments?: Commentor[],
   metaPrompt?: string,
   statePrompt?: string,
   overlappedPhrases?: string[],
@@ -259,7 +320,6 @@ export async function chatWithVoiceSSE({
           role: 'user',
           parts: [{ type: 'text', text: message }],
         },
-        chatModel: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
         toolChoice: 'auto',
         allowedAppDefaultToolkit: [],
         allowedMcpServers: {},
@@ -497,10 +557,6 @@ function authHeaders(extra?: Record<string, string>): HeadersInit {
   const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
   if (!token) throw new Error('Not authenticated');
   return { ...(extra ?? {}), Authorization: `Bearer ${token}` };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 function normalizeReflectionResult(item: unknown): ReflectionResult {
@@ -774,7 +830,7 @@ export async function analyzePatterns(onDelta?: (d: string) => void): Promise<Re
  */
 export async function generateDailyPicture(targetDate?: string, timezone?: string): Promise<{ image_base64: string; thumbnail_base64?: string; prompt: string; date?: string }> {
   const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  const params: Record<string, any> = {};
+  const params: Record<string, string> = {};
   if (targetDate) params.target_date = targetDate;
   if (timezone) params.timezone = timezone;
 
@@ -797,7 +853,7 @@ export async function generateDailyPicture(targetDate?: string, timezone?: strin
     throw new Error(data.error || 'Image generation failed');
   }
 
-  const res: any = data.result || {};
+  const res = data.result || {};
   if (res.image_base64) {
     return {
       image_base64: res.image_base64,
@@ -815,6 +871,13 @@ export async function generateDailyPicture(targetDate?: string, timezone?: strin
 /**
  * Import localStorage data to database (one-time migration)
  */
+export interface ImportSummary {
+  sessions: number;
+  pictures: number;
+  preferences: number;
+  reports: number;
+}
+
 export async function importLocalData(data: {
   currentSession?: string;
   calendarEntries?: string;
@@ -825,7 +888,7 @@ export async function importLocalData(data: {
   selectedState?: string;
   analysisReports?: string;
   oldDocument?: string;
-}): Promise<{ success: boolean; imported: any }> {
+}): Promise<{ success: boolean; imported: ImportSummary }> {
   const response = await fetch(`${API_BASE}/api/import-local-data`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -854,7 +917,7 @@ export async function importLocalData(data: {
 /**
  * Save session to database
  */
-export async function saveSession(sessionId: string, editorState: any, name?: string): Promise<void> {
+export async function saveSession(sessionId: string, editorState: EditorState, name?: string): Promise<void> {
   const response = await fetch(`${API_BASE}/api/sessions`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -1000,7 +1063,14 @@ type PictureRangeOptions = {
   limit?: number;
 };
 
-export async function getDailyPictures(limit: number = 30, options: PictureRangeOptions = {}): Promise<any[]> {
+export interface DailyPicture {
+  date: string;
+  base64: string;
+  full_base64?: string;
+  prompt: string;
+}
+
+export async function getDailyPictures(limit: number = 30, options: PictureRangeOptions = {}): Promise<DailyPicture[]> {
   const params = new URLSearchParams();
   params.append('limit', String(options.limit ?? limit));
   if (options.startDate) params.append('start_date', options.startDate);
@@ -1017,8 +1087,8 @@ export async function getDailyPictures(limit: number = 30, options: PictureRange
     throw new Error(error.detail || 'Get pictures failed');
   }
 
-  const data = await response.json();
-  return data.pictures;
+  const data = await response.json() as { pictures?: DailyPicture[] };
+  return data.pictures ?? [];
 }
 
 /**
@@ -1041,13 +1111,17 @@ export async function getDailyPictureFull(date: string): Promise<string> {
 /**
  * Save user preferences
  */
-export async function savePreferences(preferences: {
-  voice_configs?: any;
+export interface UserPreferences {
+  voice_configs?: Record<string, VoiceConfig>;
   meta_prompt?: string;
-  state_config?: any;
+  state_config?: StateConfig;
   selected_state?: string;
   timezone?: string;
-}): Promise<void> {
+  first_login_completed?: boolean;
+  updated_at?: string;
+}
+
+export async function savePreferences(preferences: UserPreferences): Promise<void> {
   const response = await fetch(`${API_BASE}/api/preferences`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -1063,7 +1137,7 @@ export async function savePreferences(preferences: {
 /**
  * Get user preferences
  */
-export async function getPreferences(): Promise<any> {
+export async function getPreferences(): Promise<UserPreferences> {
   const response = await fetch(`${API_BASE}/api/preferences`, {
     headers: getAuthHeaders()
   });
@@ -1073,7 +1147,7 @@ export async function getPreferences(): Promise<any> {
     throw new Error(error.detail || 'Get preferences failed');
   }
 
-  return await response.json();
+  return await response.json() as UserPreferences;
 }
 
 /**
@@ -1131,7 +1205,7 @@ export async function getSuggestion(text: string, metaPrompt?: string, stateProm
 /**
  * Save analysis report
  */
-export async function saveAnalysisReport(reportType: string, reportData: any, allNotesText?: string): Promise<void> {
+export async function saveAnalysisReport(reportType: string, reportData: unknown, allNotesText?: string): Promise<void> {
   const response = await fetch(`${API_BASE}/api/reports`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -1151,7 +1225,18 @@ export async function saveAnalysisReport(reportType: string, reportData: any, al
 /**
  * Get analysis reports
  */
-export async function getAnalysisReports(limit: number = 10): Promise<any[]> {
+export interface SavedAnalysisReport {
+  id: number;
+  report_data?: {
+    echoes?: ReflectionResult[];
+    traits?: ReflectionResult[];
+    patterns?: ReflectionResult[];
+    stats?: { days: number; entries: number; words: number };
+  };
+  created_at: string;
+}
+
+export async function getAnalysisReports(limit: number = 10): Promise<SavedAnalysisReport[]> {
   const response = await fetch(`${API_BASE}/api/reports?limit=${limit}`, {
     headers: getAuthHeaders()
   });
@@ -1161,8 +1246,8 @@ export async function getAnalysisReports(limit: number = 10): Promise<any[]> {
     throw new Error(error.detail || 'Get reports failed');
   }
 
-  const data = await response.json();
-  return data.reports;
+  const data = await response.json() as { reports?: SavedAnalysisReport[] };
+  return data.reports ?? [];
 }
 
 /**
@@ -1185,12 +1270,8 @@ export async function markFirstLoginCompleted(): Promise<void> {
 /**
  * List all decks (includes system decks + user's own decks)
  */
-export async function listDecks(published?: boolean): Promise<Deck[]> {
-  const url = published
-    ? `${API_BASE}/api/decks?published=true`
-    : `${API_BASE}/api/decks`;
-
-  const response = await fetch(url, {
+export async function listDecks(): Promise<Deck[]> {
+  const response = await fetch(`${API_BASE}/api/decks`, {
     headers: getAuthHeaders()
   });
 
@@ -1201,6 +1282,30 @@ export async function listDecks(published?: boolean): Promise<Deck[]> {
 
   const data = await response.json();
   return data.decks;
+}
+
+/**
+ * Ensure the actor's screenplay default exists and reconcile empty plugin refs.
+ * Existing Decks and user selections are preserved by the backend.
+ */
+export async function reconcileDefaultDeckPlugin(): Promise<{
+  deck_id: string | null;
+  reconciled: boolean;
+  // `default_not_found` keeps the client compatible with an older backend
+  // during a rolling restart; current servers create the missing default.
+  reason: 'default_created' | 'missing_ref' | 'refs_preserved' | 'default_not_found';
+}> {
+  const response = await fetch(`${API_BASE}/api/decks/defaults/reconcile`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Reconcile default Deck plugin failed');
+  }
+
+  return await response.json();
 }
 
 /**
@@ -1222,16 +1327,7 @@ export async function getDeck(deckId: string): Promise<Deck> {
 /**
  * Create a new deck
  */
-export async function createDeck(data: {
-  name: string;
-  name_zh?: string;
-  name_en?: string;
-  description?: string;
-  description_zh?: string;
-  description_en?: string;
-  icon?: string;
-  color?: string;
-}): Promise<{ deck_id: string }> {
+export async function createDeck(data: DeckDetailsInput): Promise<{ deck_id: string }> {
   const response = await fetch(`${API_BASE}/api/decks`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -1317,24 +1413,6 @@ export async function syncDeck(deckId: string): Promise<{ success: boolean; sync
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.detail || 'Sync deck failed');
-  }
-
-  return await response.json();
-}
-
-/**
- * Publish/unpublish a deck to community store
- * @@@ Warning: Publishing breaks parent_id chain (deck becomes standalone)
- */
-export async function publishDeck(deckId: string): Promise<{ success: boolean; published: boolean }> {
-  const response = await fetch(`${API_BASE}/api/decks/${deckId}/publish`, {
-    method: 'POST',
-    headers: getAuthHeaders()
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Publish deck failed');
   }
 
   return await response.json();
@@ -1653,7 +1731,7 @@ export async function removeFriend(friendId: number): Promise<{ success: boolean
 /**
  * Get friend's timeline (pictures)
  */
-export async function getFriendTimeline(friendId: number, limit: number = 30): Promise<any[]> {
+export async function getFriendTimeline(friendId: number, limit: number = 30): Promise<DailyPicture[]> {
   const response = await fetch(`${API_BASE}/api/friends/${friendId}/timeline?limit=${limit}`, {
     headers: getAuthHeaders()
   });
@@ -1663,8 +1741,8 @@ export async function getFriendTimeline(friendId: number, limit: number = 30): P
     throw new Error(error.detail || 'Get friend timeline failed');
   }
 
-  const data = await response.json();
-  return data.pictures;
+  const data = await response.json() as { pictures?: DailyPicture[] };
+  return data.pictures ?? [];
 }
 
 /**

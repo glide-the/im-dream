@@ -8,8 +8,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { toggleTheme, getTheme, onThemeChange } from '../utils/theme';
 
 interface Props {
-  currentView: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector';
-  onViewChange: (view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector') => void;
+  currentView: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector' | 'story-workspace';
+  onViewChange: (view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector' | 'story-workspace') => void;
 }
 
 export default function LeftSidebar({ currentView, onViewChange }: Props) {
@@ -169,6 +169,24 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           }}
         >
           {t('nav.decks')}
+        </button>
+
+        <button
+          onClick={() => onViewChange('story-workspace')}
+          style={buttonStyle(currentView === 'story-workspace')}
+          title={t('nav.dream')}
+          onMouseEnter={e => {
+            if (currentView !== 'story-workspace') {
+              e.currentTarget.style.background = 'var(--color-bg-hover)';
+            }
+          }}
+          onMouseLeave={e => {
+            if (currentView !== 'story-workspace') {
+              e.currentTarget.style.background = 'transparent';
+            }
+          }}
+        >
+          {t('nav.dream')}
         </button>
 
         <button

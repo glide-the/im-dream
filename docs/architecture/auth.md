@@ -121,7 +121,8 @@ OAUTH_ALLOWED_DOMAINS=
 
 JWT_SECRET=
 # legacy fallback: JWT_SECRET_KEY=
-JWT_EXPIRES_IN=15m
+# 默认 1h；认证请求会滑动续期（剩余不足一半时通过 X-New-Access-Token 头发放新 token）
+JWT_EXPIRES_IN=1h
 REFRESH_TOKEN_EXPIRES_IN=30d
 SESSION_SECRET_KEY=
 COOKIE_SECURE=false

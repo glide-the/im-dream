@@ -24,6 +24,8 @@
 #                    denyWrite to config/runtime internals instead of .claude/.
 # [Sync] 2026-06-16: workspace_file_sync imports direct .claude/skills writes
 #                    into workspace/skills before rebuilding discovery symlinks.
+# [Sync] 2026-08-04: pre-create .claude/agents so sandboxed runs can write
+#                    project subagent definitions with the built-in Write tool.
 # [Sync] 2026-06-17: include standard Linux sbin directories in sandbox runtime
 #                    read allowlist so bubblewrap can build its rootfs in Docker.
 # [Sync] 2026-06-21: add Settings-backed sandbox network policy emission.
@@ -39,12 +41,9 @@
 #                    containment guard, and the read-time derivation of
 #                    TodoItem dicts (filter metadata._internal, drop blockers
 #                    already completed) (claude-todo §5.1/§5.2).
-# [Sync] 2026-07-26: sandbox filesystem write policy — (1) always allowWrite
-#                    Claude Code's own sandbox TMPDIR ($CLAUDE_TMPDIR or
-#                    /tmp/claude-$UID) when the sandbox is enabled, killing the
-#                    "zsh: operation not permitted: .../cwd-*" noise caused by
-#                    the CLI shell hook writing cwd-* files outside the
-#                    previously workspace-only allowWrite; (2) new Settings key
+# [Sync] 2026-07-26: sandbox filesystem write policy — (1) allowWrite the
+#                    server-owned Claude Code temp root when sandbox is enabled;
+#                    (2) new Settings key
 #                    sandbox_fs_allowed_write_paths — user extra writable
 #                    absolute paths appended to filesystem.allowWrite after the
 #                    workspace and claude-tmp entries; denyWrite still wins for
@@ -64,6 +63,12 @@
 #                    apply-seccomp passthrough patch instead; cli_path pinning
 #                    (sdk_env.apply_cli_path_to_options) keeps the SDK paired
 #                    with that patched npm CLI.
+# [Sync] 2026-08-14: deny .dream writes at the sandbox filesystem layer while
+#                    the thread workspace root keeps every canonical assets/
+#                    and stories/ family writable.
+# [Sync] 2026-08-14: align sandbox temp write access with the shared
+#                    CLAUDE_CODE_TMPDIR resolver; remove broad /tmp and dynamic
+#                    cwd-* allowances.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -106,6 +111,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Literal, Optional
+
+from .sdk_env import resolve_claude_code_tmpdir
 
 logger = logging.getLogger(__name__)
 
@@ -367,32 +374,15 @@ def get_workspace_root() -> Path:
 
 
 def _sandbox_claude_tmp_write_paths() -> list[str]:
-    """Return Claude Code's sandbox TMPDIR, which sandboxed Bash must write.
+    """Return the exact Claude Code temp root allowed for sandbox writes.
 
-    Claude Code's sandbox sets ``TMPDIR`` for sandboxed commands to
-    ``$CLAUDE_TMPDIR`` or a ``/tmp/claude*`` default, and its shell hook
-    writes ``cwd-*`` files there.  Without an ``allowWrite`` entry those
-    writes are denied and every sandboxed command prints
-    ``zsh: operation not permitted: /tmp/claude*/cwd-*`` noise.  This is
-    the CLI's own runtime scratch area, not user data, so it is always
-    allowed when the sandbox is enabled.
-
-    The default TMPDIR convention differs by CLI version: sandbox-runtime
-    uses ``$CLAUDE_TMPDIR || /tmp/claude`` (no uid — observed in production
-    on 2026-07-26), while other builds use ``/tmp/claude-{uid}`` (restored
-    ``filesystem.ts:331-346``).  Both are allowed defensively; the extra
-    entry is harmless because the path is CLI-owned scratch space either
-    way.  Evidence: bundled CLI strings (``CLAUDE_TMPDIR``, ``cwd-``) and
-    restored-source analysis (``claude-task-tools-source-analysis.md``).
+    ``sdk_env.apply_project_sdk_runtime_options`` injects the same
+    ``CLAUDE_CODE_TMPDIR`` value into every Claude subprocess. Claude Code may
+    create per-uid and ``cwd-*`` children beneath it; no generated child path
+    or broad ``/tmp`` permission belongs in persistent Settings.
     """
 
-    override = os.environ.get("CLAUDE_TMPDIR")
-    if override:
-        return [override]
-    # Literal /tmp — NOT tempfile.gettempdir(): the CLI hardcodes /tmp/claude*
-    # (sandbox-runtime: TMPDIR=$CLAUDE_TMPDIR || /tmp/claude), it does not
-    # follow the platform tempdir (/var/folders/... on macOS).
-    return ["/tmp/claude", f"/tmp/claude-{os.getuid()}"]
+    return [resolve_claude_code_tmpdir()]
 
 
 def _sandbox_fs_extra_write_paths(raw: object) -> list[str]:
@@ -472,6 +462,7 @@ def _workspace_sandbox_config(
             # extra write path overlaps them.
             "allowWrite": allow_write,
             "denyWrite": [
+                str(workspace_abs / ".dream"),
                 str(workspace_abs / ".claude" / "settings.json"),
                 str(workspace_abs / ".claude" / "settings.local.json"),
                 str(workspace_abs / ".claude" / "hooks"),
@@ -603,6 +594,11 @@ def init_workspace(
         network_allowed_domains=sandbox_network_allowed_domains,
         fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
     )
+
+    # Claude Code protects creation of new directories inside `.claude` from
+    # sandboxed Bash commands. Create the writable project-agent directory
+    # before the runner starts so built-in Write can manage its contents.
+    (workspace / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
 
     # Ensure .claude/skills/ exists so symlink sync has a target directory.
     (workspace / ".claude" / "skills").mkdir(parents=True, exist_ok=True)

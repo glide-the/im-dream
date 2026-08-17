@@ -61,7 +61,7 @@ class Quaternion {
   // @@@ Spherical linear interpolation for smooth animation
   slerp(target: Quaternion, t: number): Quaternion {
     let { w, x, y, z } = this;
-    let { w: tw, x: tx, y: ty, z: tz } = target;
+    const { w: tw, x: tx, y: ty, z: tz } = target;
 
     // Compute dot product
     let dot = w * tw + x * tx + y * ty + z * tz;
@@ -400,12 +400,11 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
   useEffect(() => {
     if (isDragging || isSnapping) return;
 
-    let idleTimeoutId: number;
     let idleAnimationId: number;
     const baseRotation = rotation; // Capture current rotation when idle starts
 
     // Wait 3 seconds before starting idle animation
-    idleTimeoutId = window.setTimeout(() => {
+    const idleTimeoutId = window.setTimeout(() => {
       const startTime = performance.now();
       const idleRotationSpeed = 0.0002; // Very slow rotation
 

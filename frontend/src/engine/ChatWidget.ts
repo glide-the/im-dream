@@ -31,16 +31,24 @@ export interface ChatWidgetData {
   collapsed?: boolean;
 }
 
+export interface ChatWidgetVoiceConfigInput {
+  name: string;
+  systemPrompt?: string;
+  tagline?: string;
+  icon: string;
+  color: string;
+}
+
 export class ChatWidget {
   private data: ChatWidgetData;
 
-  constructor(voiceName: string, voiceConfig: any, threadId?: string) {
+  constructor(voiceName: string, voiceConfig: ChatWidgetVoiceConfigInput, threadId?: string) {
     this.data = {
       id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
       voiceName,
       voiceConfig: {
         name: voiceConfig.name,
-        tagline: voiceConfig.systemPrompt || voiceConfig.tagline,
+        tagline: voiceConfig.systemPrompt || voiceConfig.tagline || '',
         icon: voiceConfig.icon,
         color: voiceConfig.color
       },

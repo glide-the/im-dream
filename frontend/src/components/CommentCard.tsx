@@ -1,6 +1,7 @@
 import React from 'react';
 import { FaStar, FaTrash, FaBrain, FaHeart, FaQuestion, FaCloud, FaTheaterMasks, FaEye, FaFistRaised, FaLightbulb, FaShieldAlt, FaWind, FaFire, FaCompass } from 'react-icons/fa';
 import type { Commentor } from '../engine/EditorEngine';
+import type { VoiceConfig } from '../api/voiceApi';
 
 const iconMap = {
   brain: FaBrain,
@@ -68,7 +69,7 @@ export function CommentGroupCard({
   onKill: () => void;
   onSendChatMessage: (message: string) => void;
   isChatProcessing: boolean;
-  voiceConfigs: Record<string, any>;
+  voiceConfigs: Record<string, VoiceConfig>;
 }) {
   const [isHovered, setIsHovered] = React.useState(false);
   const [inputValue, setInputValue] = React.useState('');

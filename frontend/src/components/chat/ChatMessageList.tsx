@@ -5,11 +5,15 @@
 // [Sync] 2026-05-27: add toolChoice prop; render non-completed tool parts in manual mode directly with isManualToolInvocation=true so Approve/Cancel UI is shown.
 // [Sync] 2026-05-29: import isEditorWriteTool; render editor write tool parts directly (not collapsed) with isManualToolInvocation=true so specialized approval UI shows immediately.
 // [Sync] 2026-05-29: render completed editor write tool parts as EditorWriteCompletedCard instead of Terminal card.
+// [Sync] 2026-08-13: preserve structured output-error details in the editor
+//                    completion card so failures never regain success actions.
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ToolMessagePart for editor write tools.
 // [Sync] 2026-05-29: let the message list fill the available chat page width.
 // [Sync] 2026-05-29: fix history-replay regression — history-loaded DynamicToolUIPart may lack toolName field causing getToolName() to return 'invocation'; add resolveToolName() with direct field fallback and hoist editor write completed check above Terminal block, decoupled from outputText.
 // [Sync] 2026-05-30: fix reasoning SSE display — auto-expand reasoning when state==='streaming'; show spin loader + blinking cursor during stream; border dims when done; hide manual expand toggle while streaming.
 // [Sync] 2026-05-30: reasoning blocks default to expanded (isExpandedActual ?? true) so thinking content stays visible after streaming ends; user can click to collapse; toggle flips isExpandedActual.
+// [Sync] 2026-08-13: allow long uninterrupted Chat text to wrap inside narrow Dream dialogs
+//                    without widening the shared message scroll region.
 // [Sync] 2026-06-02: delegate user text bubbles to UserMessagePart so user prompts render through the shared GFM Markdown path.
 // [Sync] 2026-06-06: render toolMetadata.approvalRequested tool parts directly with approval UI so auto-mode backend confirmations are visible.
 // [Sync] 2026-06-13: render built-in Write tool input-streaming/input-complete states
@@ -24,6 +28,8 @@
 //                    shared classifiers moved to toolConfirmation.ts (design §8).
 // [Sync] 2026-07-20: i18n — pending confirmation badge copy resolves through the
 //                    chat.toolConfirmation namespace (en + zh) via useTranslation.
+// [Sync] 2026-08-04: replace Agent/Task internal output envelopes with a task
+//                    button that opens the matching subagent sidebar item.
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -36,6 +42,8 @@ import { EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteA
 import { isEditorWriteTool } from './editorWriteTools';
 import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmation';
 import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
+import { useThreadSubagents } from '../../hooks/useThreadSubagents';
+import { SubagentToolButton } from './SubagentPanel';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -50,6 +58,10 @@ interface ChatMessageListProps {
   sendMessage?: UseChatHelpers<UIMessage>['sendMessage'];
   /** Forwarded to ToolMessagePart for editor write tools — triggers Writing view reload. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
+  settledToolCallIds?: ReadonlySet<string>;
+  onToolConfirmationSettled?: (toolCallId: string) => void;
+  /** Opens the right-side task panel for an Agent/Task tool invocation. */
+  onOpenSubagentTask?: (toolCallId: string) => void;
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';
@@ -71,7 +83,25 @@ function getToolStatus(part: ToolUIPart | DynamicToolUIPart, isLoading: boolean)
 function getToolOutputText(part: ToolUIPart | DynamicToolUIPart): string | null {
   if ('output' in part && part.output != null) return typeof part.output === 'string' ? part.output : JSON.stringify(part.output, null, 2);
   if ('error' in part && part.error != null) return typeof part.error === 'string' ? part.error : JSON.stringify(part.error, null, 2);
+  if ('errorText' in part && typeof part.errorText === 'string') return part.errorText;
   return null;
+}
+
+function getEditorWriteOutput(part: ToolUIPart | DynamicToolUIPart, isError: boolean): EditorWriteOutput {
+  if ('output' in part && part.output && typeof part.output === 'object') {
+    return part.output as EditorWriteOutput;
+  }
+  if (isError) {
+    const errorText = getToolOutputText(part) ?? '';
+    try {
+      const parsed = JSON.parse(errorText) as unknown;
+      if (parsed && typeof parsed === 'object') return parsed as EditorWriteOutput;
+    } catch {
+      // Transport errors may be plain text; retain them as a failed result.
+    }
+    return { ok: false, error: errorText || 'editor_write_failed' };
+  }
+  return {};
 }
 
 function parseTerminalOutput(raw: string): { command: string | null; output: string; exitCode: string | null } {
@@ -209,8 +239,9 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled }: ChatMessageListProps) {
   const { t } = useTranslation();
+  const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
 
@@ -225,11 +256,11 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   };
 
   return (
-    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <div style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowWrap: 'anywhere' }}>
       {messages.map((message, index) => {
         const isLastMessage = index === messages.length - 1;
         return (
-          <div key={message.id} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div key={message.id} style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {message.parts?.map((part, partIndex) => {
               const partKey = `${message.id}-${partIndex}`;
               const isExpanded = expandedParts[partKey] ?? false;
@@ -332,6 +363,8 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const toolName = resolveToolName(toolPart);
                 const displayTitle = title || toolName || getToolName(toolPart);
                 const isBuiltInWrite = isBuiltInWriteTool(toolName);
+                const normalizedToolName = toolName.toLowerCase();
+                const isSubagentTool = normalizedToolName === 'agent' || normalizedToolName === 'task';
 
                 // Editor write tools always render as EditorWriteCompletedCard when
                 // completed — this check is independent of outputText so that history-
@@ -339,13 +372,12 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 // the correct UI instead of falling through to the Terminal block.
                 if (isCompleted && isEditorWriteTool(toolName)) {
                   const rawInput = 'input' in toolPart ? (toolPart as { input?: unknown }).input : undefined;
-                  const rawOutput = 'output' in toolPart ? (toolPart as { output?: unknown }).output : undefined;
                   return (
                     <div key={partKey}>
                       <EditorWriteCompletedCard
                         toolName={toolName}
                         input={(rawInput ?? {}) as Record<string, unknown>}
-                        output={(rawOutput ?? {}) as EditorWriteOutput}
+                        output={getEditorWriteOutput(toolPart, isError)}
                       />
                     </div>
                   );
@@ -363,6 +395,29 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                         copiedPartId={copiedPartId}
                         isContentExpanded={isExpanded}
                         onToggleContent={toggleExpanded}
+                      />
+                    </div>
+                  );
+                }
+
+                // Agent output is an internal launch/result envelope. Replace it
+                // with a navigational task chip instead of exposing the raw
+                // "Async agent launched successfully" metadata in the chat.
+                if (isSubagentTool) {
+                  const rawInput = readToolInput(toolPart);
+                  const input = rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
+                    ? rawInput as Record<string, unknown>
+                    : {};
+                  const description = typeof input.description === 'string' && input.description.trim()
+                    ? input.description.trim()
+                    : t('chat.subagents.taskFallback');
+                  const task = subagents.tasks.find((candidate) => candidate.toolCallId === toolPart.toolCallId);
+                  return (
+                    <div key={partKey}>
+                      <SubagentToolButton
+                        task={task}
+                        description={task?.description || description}
+                        onClick={onOpenSubagentTask ? () => onOpenSubagentTask(toolPart.toolCallId) : undefined}
                       />
                     </div>
                   );
@@ -409,7 +464,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 if (needsEditorWriteApproval) {
                   return (
                     <div key={partKey}>
-                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} onEditorWriteConfirmed={onEditorWriteConfirmed} />
+                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} onEditorWriteConfirmed={onEditorWriteConfirmed} settledToolCallIds={settledToolCallIds} onConfirmationSettled={onToolConfirmationSettled} />
                     </div>
                   );
                 }
@@ -432,7 +487,11 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 }
 
                 const toolRowSummary = summarizeToolInvocation(toolName, readToolInput(toolPart));
-                const pendingConfirmationKind = resolvePendingToolConfirmation(toolPart, toolChoice);
+                const pendingConfirmationKind = resolvePendingToolConfirmation(
+                  toolPart,
+                  toolChoice,
+                  settledToolCallIds,
+                );
                 return (
                   <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: `2px solid ${pendingConfirmationKind ? '#f59e0b' : 'var(--color-action-link)'}` }}>
                     <button type="button" onClick={toggleExpanded} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.55rem', border: 'none', background: 'transparent', padding: 0, color: 'var(--color-text-secondary)', fontSize: '0.88rem', cursor: 'pointer' }}>
@@ -447,7 +506,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       ) : null}
                       <span style={{ color: 'var(--color-text-muted)' }}>{isExpanded ? '‹' : '›'}</span>
                     </button>
-                    {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} /></div> : null}
+                    {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} settledToolCallIds={settledToolCallIds} onConfirmationSettled={onToolConfirmationSettled} /></div> : null}
                   </div>
                 );
               }

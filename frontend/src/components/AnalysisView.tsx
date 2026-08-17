@@ -19,6 +19,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   saveAnalysisReport,
   getAnalysisReports,
@@ -160,7 +161,7 @@ interface SectionConfigModalProps {
 }
 
 function SectionConfigModal({
-  open, section: _section, displayName, files, loading, saving, isCustom, error,
+  open, displayName, files, loading, saving, isCustom, error,
   onClose, onSave, onReset, onFileChange,
 }: SectionConfigModalProps) {
   if (!open) return null;
@@ -562,7 +563,7 @@ export default function AnalysisView() {
     if (isAuthenticated) {
       try {
         const db = await getAnalysisReports(MAX_SAVED_REPORTS);
-        const individual: AnalysisReport[] = db.map((r: any) => ({
+        const individual: AnalysisReport[] = db.map((r) => ({
           id: r.id,
           echoes:   (r.report_data?.echoes   || []) as ReflectionResult[],
           traits:   (r.report_data?.traits   || []) as ReflectionResult[],
@@ -1426,36 +1427,6 @@ export default function AnalysisView() {
           </div>
         )}
 
-        {/* View report button if data exists */}
-        {hasAnyData && viewMode === 'dashboard' && (
-          <div style={{ textAlign: 'center', marginTop: '2rem' }}>
-            <button
-              onClick={() => openReflectionBlogReport({
-                echoes, traits, patterns,
-                stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
-              })}
-              style={{
-                padding: '12px 32px', borderRadius: '24px',
-                background: 'var(--color-bg-surface-solid)',
-                border: '1px solid var(--color-border-paper)',
-                color: 'var(--color-text-body)', fontSize: '14px', cursor: 'pointer',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                fontWeight: 500, transition: 'all 0.3s',
-                boxShadow: '0 4px 12px var(--color-shadow-soft)',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 8px 20px var(--color-shadow-medium)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 4px 12px var(--color-shadow-soft)';
-              }}
-            >
-              View Reflections →
-            </button>
-          </div>
-        )}
       </div>
 
       <ReanalysisConfirmModal
@@ -1504,7 +1475,7 @@ function SectionControlsRow({
   isMobile: boolean;
   onAnalyze: (s: SectionKey) => void;
   onConfig: (s: SectionKey) => void;
-  t: (k: string, opts?: any) => string;
+  t: TFunction;
 }) {
   const sections: { key: SectionKey; icon: string; titleKey: string }[] = [
     { key: 'echoes',   icon: '🔄', titleKey: 'analysis.papers.echoes.title' },
@@ -1651,7 +1622,7 @@ function PaperStack({
   currentPaper: number;
   onPaperChange: (i: number) => void;
   isMobile: boolean;
-  t: (k: string, opts?: any) => string;
+  t: TFunction;
   loading: Record<string, boolean>;
   streaming: Record<string, string>;
   isAuthenticated: boolean;
@@ -2071,7 +2042,7 @@ function ReflectionBlogPage({
   report: AnalysisReport;
   onBack: () => void;
   isMobile: boolean;
-  t: (k: string, opts?: any) => string;
+  t: TFunction;
   dateLocale: string;
   formatDaysLabel: (n: number) => string;
   formatEntriesLabel: (n: number) => string;

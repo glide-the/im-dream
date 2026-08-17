@@ -46,12 +46,14 @@ The system config is a freeform dict stored per user.  Known fields:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 import database
+from services.admin_gateway import GatewayInferenceError, GatewayModelCatalogClient
 from .deps import get_current_user
 
 router = APIRouter()
@@ -60,6 +62,28 @@ router = APIRouter()
 _ENV_VAR_KEY_MAX_LEN = 256
 _ENV_VAR_VALUE_MAX_LEN = 4096
 _ENV_VARS_MAX_ENTRIES = 64
+_SECRET_ENV_KEY_PATTERN = re.compile(
+    r"(?:^|_)(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|REFRESH_TOKEN|TOKEN|SECRET|"
+    r"PASSWORD|PASSPHRASE|PRIVATE_KEY|CREDENTIAL|AUTHORIZATION)(?:$|_)",
+    re.IGNORECASE,
+)
+_SERVER_CONTROLLED_ENV_KEYS = frozenset(
+    {
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "OPENAI_BASE_URL",
+        "INK_ADMIN_PRODUCT_API_BASE_URL",
+        "INK_ADMIN_PRODUCT_JWT_ISSUER",
+        "INK_ADMIN_PRODUCT_JWT_AUDIENCE",
+        "INK_ADMIN_PRODUCT_CLIENT_ID",
+        "INK_ADMIN_PRODUCT_ORIGIN",
+        "INK_GATEWAY_BASE_URL",
+        "INK_GATEWAY_SERVICE_CLIENT_ID",
+    }
+)
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
 _SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_ENTRIES = 64
 _SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_LEN = 253
@@ -69,6 +93,14 @@ _SANDBOX_DOMAIN_PATTERN = re.compile(
     r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
 )
+_MODEL_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
+
+
+def _gateway_error(exc: GatewayInferenceError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={"code": exc.code, "message": "The platform model catalog is unavailable."},
+    )
 
 
 def _sanitize_env_vars(raw: object) -> dict[str, str]:
@@ -85,11 +117,40 @@ def _sanitize_env_vars(raw: object) -> dict[str, str]:
     for key, value in raw.items():
         k = str(key).strip()[: _ENV_VAR_KEY_MAX_LEN]
         v = str(value).strip()[: _ENV_VAR_VALUE_MAX_LEN]
+        if _is_sensitive_or_server_controlled_env_key(k):
+            raise HTTPException(
+                status_code=400,
+                detail="Secret-like and provider-routing environment variables cannot be stored in user settings",
+            )
         if k:
             result[k] = v
         if len(result) >= _ENV_VARS_MAX_ENTRIES:
             break
     return result
+
+
+def _is_sensitive_or_server_controlled_env_key(key: str) -> bool:
+    normalized = key.strip().upper()
+    return bool(
+        normalized in _SERVER_CONTROLLED_ENV_KEYS
+        or _SECRET_ENV_KEY_PATTERN.search(normalized)
+    )
+
+
+def _public_system_config(raw: object) -> dict:
+    """Drop legacy secret-like values before a system config reaches a client."""
+
+    if not isinstance(raw, dict):
+        return {}
+    public = dict(raw)
+    env_vars = public.get("env_vars")
+    if isinstance(env_vars, dict):
+        public["env_vars"] = {
+            str(key): str(value)
+            for key, value in env_vars.items()
+            if not _is_sensitive_or_server_controlled_env_key(str(key))
+        }
+    return public
 
 
 def _domain_candidate(raw: object) -> str:
@@ -164,11 +225,11 @@ def _sanitize_sandbox_fs_allowed_write_paths(raw: object) -> list[str]:
 def get_system_config(current_user: dict = Depends(get_current_user)):
     """Return the caller's system configuration."""
     user_id = current_user["user_id"]
-    return database.get_system_config(user_id)
+    return _public_system_config(database.get_system_config(user_id))
 
 
 @router.put("/api/system-config")
-def put_system_config(
+async def put_system_config(
     request: dict,
     current_user: dict = Depends(get_current_user),
 ):
@@ -184,10 +245,46 @@ def put_system_config(
 
     patch: dict = {}
 
-    if "provider" in request:
-        patch["provider"] = str(request["provider"])[:64]
+    if "provider" in request and str(request["provider"]).strip() != "gateway":
+        raise HTTPException(
+            status_code=400,
+            detail="AI provider routing is controlled by the Admin Gateway",
+        )
     if "model" in request:
-        patch["model"] = str(request["model"])[:256]
+        model_alias = str(request["model"]).strip()
+        if not _MODEL_ALIAS_PATTERN.fullmatch(model_alias):
+            raise HTTPException(status_code=422, detail="Invalid platform model alias")
+        try:
+            catalog = await asyncio.to_thread(
+                GatewayModelCatalogClient(user_id).fetch_catalog
+            )
+        except GatewayInferenceError as exc:
+            raise _gateway_error(exc) from exc
+        selected = next(
+            (model for model in catalog.models if model.model_alias == model_alias),
+            None,
+        )
+        if selected is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "GATEWAY_MODEL_SELECTION_STALE",
+                    "message": "The selected model is no longer enabled. Refresh and choose another model.",
+                },
+            )
+        if not selected.callable:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "GATEWAY_MODEL_NOT_AVAILABLE",
+                    "message": "The selected model is visible but not callable for the current subscription.",
+                    "availability": selected.availability,
+                    "requiredPlanCode": selected.required_plan_code,
+                    "upgradeHint": selected.upgrade_hint,
+                },
+            )
+        patch["model"] = model_alias
+        patch["provider"] = "gateway"
     if "system_prompt" in request:
         patch["system_prompt"] = str(request["system_prompt"])[:16_384]
     if "workspace_enabled" in request:
@@ -220,4 +317,7 @@ def put_system_config(
     if patch:
         database.save_system_config(user_id, patch)
 
-    return {"success": True, "data": database.get_system_config(user_id)}
+    return {
+        "success": True,
+        "data": _public_system_config(database.get_system_config(user_id)),
+    }

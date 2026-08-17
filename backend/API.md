@@ -6,6 +6,14 @@
 [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public SEO endpoint notes.
 [Sync] 2026-06-21: document system-config sandbox network policy fields.
 [Sync] 2026-06-23: document Google OAuth, auth cookie aliases, and OAuth Device Flow endpoints.
+[Sync] 2026-08-14: document transactional default Free provisioning and Admin-default model resolution for email and Google registration.
+[Sync] 2026-08-14: document screenplay-only Deck visibility and atomic drama-forge v1.0.1 binding on Deck creation.
+[Sync] 2026-08-14: document explicit zero-ref default screenplay Deck reconciliation.
+[Sync] 2026-08-15: document missing default creation for legacy actors through the same reconciliation route.
+[Sync] 2026-08-16: document transactional Deck deletion and preserved-dependency conflicts.
+[Sync] 2026-08-16: document exact runtime binding history used by the folded Deck version panel.
+[Sync] 2026-08-16: document capability-gated Deck draft/preview/explicit content commit/history.
+[Sync] 2026-08-17: document Deck-filtered Chat history and corrected related-thread/binding deletion semantics.
 -->
 
 **Version:** 2.0.0
@@ -21,7 +29,7 @@ Browser clients may also authenticate with the backend-issued `access_token`
 HttpOnly cookie. Google `id_token` / `access_token` values are never accepted
 as business API credentials.
 
-JWT access token lifetime is configured by `JWT_EXPIRES_IN` and defaults to 7 days in this project.
+JWT access token lifetime is configured by `JWT_EXPIRES_IN` and defaults to 1 hour in this project. Expiration is sliding: any authenticated request made while less than half of the lifetime remains receives a freshly signed token in the `X-New-Access-Token` response header (and a refreshed `access_token` cookie for cookie-based clients), so active sessions stay signed in indefinitely.
 
 ---
 
@@ -49,6 +57,18 @@ Returns a structured AI-search summary describing Ink & Memory, primary public p
 
 Register a new user.
 
+The successful response is emitted only after the Admin-owned PostgreSQL
+registration triggers have created the canonical user's billing projection,
+active Free subscription, current-period Token allowance, and activation
+event in the same transaction. Dream does not write or reconstruct billing
+state. Google OAuth signup has the same postcondition because it uses the same
+canonical user creation path.
+
+The Free plan's Admin-owned default entitlement supplies the effective model
+when the user has not saved an explicit model preference. Dream does not copy
+that alias into a second registration-time default; Settings and Claude Agent
+resolve the live callable `defaultModelAlias` from the Gateway catalog.
+
 **Request:**
 ```json
 {
@@ -73,6 +93,8 @@ Register a new user.
 **Errors:**
 - `400` - Email/password missing or password < 6 chars
 - `400` - Email already exists
+- `503` - Canonical user/default Free provisioning transaction could not
+  commit; retry after the registration dependency is restored
 
 ---
 
@@ -164,7 +186,8 @@ Starts Google OAuth/OIDC login through the Python backend Authlib client.
 
 OAuth callback registered in Google Cloud Console. The backend validates OAuth
 state through the session cookie, exchanges the Google code, binds or creates
-the local user, then issues this system's own access/refresh tokens.
+the local user (including transactional default Free provisioning for a new
+canonical user), then issues this system's own access/refresh tokens.
 
 **Response:** `302` redirect to frontend with auth cookies set.
 
@@ -340,9 +363,11 @@ flat domain-pattern list; use `open` mode instead of sending a bare `*`.
 The sandbox network fields are consumed on the next Claude Agent workspace
 initialization and written to the thread-local `.claude/settings.json`
 `sandbox.network` block; `sandbox_fs_allowed_write_paths` is appended to the
-`sandbox.filesystem.allowWrite` list after the thread workspace and Claude
-Code's own sandbox TMPDIR (`$CLAUDE_TMPDIR` or `/tmp/claude-$UID`, always
-allowed when the sandbox is enabled).
+`sandbox.filesystem.allowWrite` list after the thread workspace and the exact
+server-owned Claude Code temp root (`CLAUDE_CODE_TMPDIR`, default
+`/tmp/claude`, canonicalized before subprocess/sandbox use and always allowed
+when the sandbox is enabled). The application
+does not broadly allow `/tmp` or guess per-UID/dynamic `cwd-*` paths.
 
 ---
 
@@ -468,11 +493,14 @@ Delete a session.
 List Chat threads for the current user. Without search params, returns newest
 threads first and supports `limit`/`offset` pagination for scroll-loaded
 history panes. With `query`, searches thread titles and persisted conversation
-text through the configured Chat history retriever.
+text through the configured Chat history retriever. `deck_id` constrains either
+path to conversations owned by the current actor and bound to that Deck; it is
+the authoritative source for Settings / Work related-conversation previews.
 
 **Headers:** `Authorization: Bearer <token>`
 
 **Query params:**
+- `deck_id` (optional) - return only owned conversations bound to this Deck
 - `query` (optional) - fuzzy title/message query
 - `search_scope` (optional, default `all`) - `all`, `title`, or `messages`
 - `retrieval_mode` (optional, default `fuzzy`) - `fuzzy`, `auto`, or `vector`
@@ -513,6 +541,60 @@ text through the configured Chat history retriever.
 
 `retrieval_mode=vector` currently returns `ok=false`,
 `error="vector_retrieval_unavailable"`, and does not access a vector database.
+
+---
+
+### GET `/api/claude-agent/threads/{thread_id}/subagents`
+
+Return the current user's projected Claude Code subagent tasks for one Chat
+thread. The server reads bounded transcript metadata from the server-owned
+workspace. Projection v2 includes the assigned task, assistant Markdown,
+credential-redacted tool summaries, lifecycle status, and final reply; thinking
+blocks are excluded and oversized records are explicitly marked as truncated.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
+  "thread_id": "thread-123",
+  "exists": true,
+  "tasks": [
+    {
+      "task_id": "a1b2c3",
+      "agent_id": "a1b2c3",
+      "agent_type": "quality-reviewer",
+      "description": "Task3 quality review",
+      "summary": "PASS. No new regressions.",
+      "status": "completed",
+      "tool_call_id": "toolu_123",
+      "spawn_depth": 1,
+      "started_at": "2026-08-04T09:00:00Z",
+      "finished_at": "2026-08-04T09:00:10Z",
+      "duration_ms": 10000,
+      "error": null,
+      "messages": [
+        {"id": "message-1", "sequence": 1, "kind": "task", "text": "Review the change", "timestamp": null, "status": null, "tool_name": null, "tool_call_id": null, "input": null, "output": null, "redacted": false, "truncated": false},
+        {"id": "message-2", "sequence": 2, "kind": "final", "text": "PASS. No new regressions.", "timestamp": "2026-08-04T09:00:10Z", "status": null, "tool_name": null, "tool_call_id": null, "input": null, "output": null, "redacted": false, "truncated": false},
+        {"id": "message-3", "sequence": 3, "kind": "status", "text": null, "timestamp": "2026-08-04T09:00:10Z", "status": "completed", "tool_name": null, "tool_call_id": null, "input": null, "output": null, "redacted": false, "truncated": false}
+      ],
+      "message_count": 3,
+      "messages_truncated": false,
+      "projection_version": 2
+    }
+  ],
+  "counts": {"running": 0, "completed": 1, "ended": 0, "total": 1},
+  "updated_at": "2026-08-04T09:00:10Z"
+}
+```
+
+`status` is one of `running`, `completed`, `failed`, or `cancelled`.
+`messages[].kind` is one of `task`, `assistant`, `tool_call`, `tool_result`,
+`status`, `final`, or `system`. Clients must use `sequence` then `timestamp` and
+`id` for stable ordering. `summary` and `activity` remain available for legacy
+clients; when v2 messages exist the final summary must not be rendered twice.
+`ended` counts failed and cancelled tasks; it does not inflate the completed count.
+The endpoint returns `404` when the thread does not belong to the current user.
 
 ---
 
@@ -889,6 +971,130 @@ Get default voice configurations (no auth required).
   ...
 }
 ```
+
+---
+
+## Deck Endpoints
+
+### GET `/api/decks`
+
+Returns the authenticated user's Decks and Voices. The active product default is
+the five-role screenplay-creation Deck. Untouched forks of the retired
+introspection, scholar, and philosophy system defaults are omitted; user-created
+Decks and retired forks with Deck- or Voice-level local changes remain visible.
+
+### POST `/api/decks`
+
+Creates a user Deck and binds the configured default Claude plugin in one
+PostgreSQL transaction. The browser submits only Deck display fields; the server
+resolves the exact configured package/version (default `drama-forge` `1.0.1`),
+requires a ready installation, and verifies artifact digest and Claude CLI
+compatibility before committing the Deck and plugin reference.
+
+**Response:**
+```json
+{
+  "deck_id": "c6654ae3-3de5-4ab9-b882-c9034a0d8fa6"
+}
+```
+
+**Errors:**
+- `409` - The configured default plugin is missing, not ready, digest-invalid,
+  incompatible, or changes before the transaction commits. No Deck is created.
+
+### POST `/api/decks/defaults/reconcile`
+
+Idempotently ensures the actor owns the configured screenplay default Deck. If
+it is missing, the route creates the complete five-role team and verified
+`drama-forge` `1.0.1` reference in one transaction under the actor row lock. If
+the Deck exists with no refs, only the verified ref is added. Any existing
+plugin ref preserves the user's selection and prevents repair.
+
+**Response:**
+```json
+{
+  "deck_id": "c1b3ecf1-5fca-4a51-8806-202f19bef348",
+  "reconciled": true,
+  "reason": "missing_ref"
+}
+```
+
+`reason` is one of `default_created`, `missing_ref`, or `refs_preserved`. During a
+rolling restart, an older server may still return the legacy `default_not_found`
+reason; clients should tolerate it and refresh after reconciliation.
+Returns `409` when the configured installation cannot be verified; Deck and
+existing refs remain unchanged.
+
+### DELETE `/api/decks/{deck_id}`
+
+Deletes an owned Deck in one PostgreSQL transaction. Mutable
+`deck_claude_plugin_refs` and plugin bindings that were never captured by an
+immutable runtime snapshot are removed before the Deck; owned Voices continue
+to follow the database cascade contract. The route returns `404` for a missing
+or non-owned Deck. Related Chat conversations return `409` with
+`Deck cannot be deleted while related Chat conversations still exist.` so the
+client can direct the user to the ordinary Chat deletion flow. Derived Decks or
+immutable runtime snapshots also return `409` without changing the Deck or its
+references. A plugin binding alone is version configuration, not proof of Chat
+history, and no longer permanently blocks deletion.
+
+### GET `/api/decks/{deck_id}/version-state`
+
+Returns the owned Deck's aggregate `draft_revision`, latest immutable content
+version, clean/dirty status, and next vN. Returns structured `503
+DECK_VERSION_CAPABILITY_MISSING` until Admin Drizzle publishes
+`dream.deck-content-versions.v1`; ordinary Deck editing remains available.
+
+### POST `/api/decks/{deck_id}/versions/preview`
+
+Accepts `expected_draft_revision` and `expected_base_version`. Revalidates
+ownership/CAS, normalizes the complete Deck/Agent/plugin/binding snapshot, and
+returns the target vN plus categorized changes. Preview never writes a version.
+
+### POST `/api/decks/{deck_id}/versions`
+
+Accepts the same expected values plus an optional 200-character description.
+Locks the Deck, repeats validation/diff/hash, appends an immutable `deck_versions`
+snapshot, and advances latest/published revision in one transaction. Stale facts
+or no changes return `409`; failures preserve the draft and previous vN.
+
+### GET `/api/decks/{deck_id}/versions`
+
+Returns owner-scoped immutable Deck content versions newest-first. Runtime plugin
+SemVer and binding revision are secondary snapshot/configuration facts and are
+not substituted for content vN.
+
+### GET `/api/voice-decks/{deck_id}/plugin-binding/history`
+
+Returns owner-checked append-only runtime-configuration revisions newest first.
+The optional `limit` query parameter defaults to `50` and is constrained to
+`1..100`. This history describes exact Deck Plugin bindings only; it is not a
+Deck content snapshot, draft, or publication history.
+
+**Response:**
+
+```json
+{
+  "deck_id": "c6654ae3-3de5-4ab9-b882-c9034a0d8fa6",
+  "current_binding_revision": 2,
+  "entries": [
+    {
+      "deck_plugin_binding_id": "dpb_33333333333333333333333333333333",
+      "deck_plugin_id": "ink.deck.drama-forge",
+      "deck_plugin_version": "1.1.0",
+      "binding_revision": 2,
+      "status": "active",
+      "applied_to": "next_run",
+      "created_at": "2026-08-16T10:10:00Z",
+      "updated_at": "2026-08-16T10:10:00Z"
+    }
+  ]
+}
+```
+
+`404` preserves the existing missing-or-not-owned boundary. Version changes
+continue through `PUT /api/voice-decks/{deck_id}/plugin-binding` with an exact
+SemVer, `expected_binding_revision`, and `apply_to: "next_run"`.
 
 ---
 

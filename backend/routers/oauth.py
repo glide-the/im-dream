@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-# [Input] Consume Authlib Google OIDC config, auth/database helpers, and HTTP requests.
-# [Output] Register Google OAuth login/callback routes and issue local system tokens.
+# [Input] Consume Authlib Google OIDC config, auth/database helpers, Deck-default
+#         provisioning, and HTTP requests.
+# [Output] Register Google OAuth login/callback routes, transactionally provision
+#          default Free for new canonical users, and issue local system tokens.
 # [Pos] google-oauth route node in backend/routers
+# [Sync] 2026-08-14: surface Admin-owned default-Free provisioning failures as
+#                    registration_unavailable during Google signup.
+# [Sync] 2026-08-14: provision new/empty OAuth accounts with the verified default Deck plugin.
 
 from datetime import datetime
 import os
@@ -15,6 +20,11 @@ from starlette.responses import RedirectResponse
 
 import auth
 import database
+
+try:
+    from services.deck.defaults import provision_default_screenplay_deck
+except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+    from backend.services.deck.defaults import provision_default_screenplay_deck
 
 router = APIRouter()
 
@@ -214,14 +224,20 @@ def _resolve_oauth_user(userinfo: dict, token: dict) -> dict:
     )
     avatar_url = str(userinfo.get("picture") or "").strip() or None
     password_hash = auth.hash_password(secrets.token_urlsafe(32))
-    user_id = database.create_user(
-        email=email,
-        password_hash=password_hash,
-        display_name=display_name,
-        avatar_url=avatar_url,
-        role="user",
-    )
-    database.auto_fork_system_decks(user_id)
+    try:
+        user_id = database.create_user(
+            email=email,
+            password_hash=password_hash,
+            display_name=display_name,
+            avatar_url=avatar_url,
+            role="user",
+        )
+    except database.UserRegistrationUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="registration_unavailable",
+        ) from None
+    provision_default_screenplay_deck(user_id)
     database.upsert_oauth_account(
         user_id,
         provider,
@@ -259,7 +275,7 @@ async def google_oauth_callback(request: Request):
 
         user_decks = database.get_user_decks(user["id"])
         if len(user_decks) == 0:
-            database.auto_fork_system_decks(user["id"])
+            provision_default_screenplay_deck(user["id"])
 
         access_token, refresh_token = issue_local_token_pair(user["id"], user["email"])
     except HTTPException as exc:

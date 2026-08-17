@@ -1,3 +1,20 @@
+// [Input] User locale and product-facing translation keys.
+// [Output] English and Simplified Chinese UI copy for Ink & Memory surfaces.
+// [Pos] Frontend i18next resource registry.
+// [Sync] 2026-08-14: add actor-owned publication and system-default sharing copy.
+// [Sync] 2026-08-15: add the localized More disclosure for restored legacy navigation.
+// [Sync] 2026-08-16: add the PDF-led Deck home, create menu, enabled strip, counted filters,
+//                    flat-list status, refresh, pagination, and lightweight-detail copy.
+// [Sync] 2026-08-16: remove obsolete Deck page-heading and use/create-mode copy.
+// [Sync] 2026-08-16: remove Deck market/workbench copy and add lightweight details,
+//                    pagination, and recoverable management feedback.
+// [Sync] 2026-08-16: restore full popup-maintenance confirmations and recoverable
+//                    Agent mutation feedback from the pre-01a00576 baseline.
+// [Sync] 2026-08-17: explain the published-clean Deck-home empty state.
+// [Sync] 2026-08-17: add Work-related Chat history cleanup and deletion guidance copy.
+// [Sync] 2026-08-17: localize the Story Workspace Settings shell and render Work/工作台 per locale.
+// [Sync] 2026-08-17: label Available/System Deck launcher groups and default-visible system Decks.
+
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
@@ -12,7 +29,9 @@ const resources = {
         analysis: 'Reflections',
         decks: 'Decks',
         connector: 'Connector',
+        dream: 'Dream',
         chat: 'Chat',
+        more: 'More',
         friends: 'Friends',
         settings: 'Settings'
       },
@@ -32,6 +51,67 @@ const resources = {
           options: {
             en: 'English',
             zh: '中文 (Chinese)'
+          }
+        },
+        workspace: {
+          aria: {
+            categories: 'Settings categories',
+            navigation: 'Settings categories navigation',
+            content: 'Settings content'
+          },
+          backToApp: 'Back to app',
+          personal: 'Personal',
+          search: {
+            label: 'Search settings',
+            placeholder: 'Search settings…',
+            noResults: 'No matching settings'
+          },
+          navigation: {
+            general: 'General',
+            subscription: 'Subscription',
+            work: 'Work',
+            model: 'AI models',
+            about: 'About'
+          },
+          general: {
+            description: 'Adjust the interface language and workspace display preferences.'
+          },
+          languageLabel: 'Language',
+          theme: {
+            label: 'Appearance',
+            description: 'Choose the appearance of the workspace.',
+            options: {
+              light: 'Light',
+              system: 'System',
+              dark: 'Dark'
+            }
+          },
+          energy: {
+            label: 'Energy Bar',
+            description: 'Show the energy progress bar in the bottom stats line.',
+            toggleLabel: 'Toggle energy bar'
+          },
+          work: {
+            title: 'Work',
+            description: 'Manage the Decks, resource links, and plugins available in your creative workspace.',
+            tabsLabel: 'Work management categories',
+            tabs: {
+              deck: 'Deck',
+              resources: 'Resource links',
+              plugins: 'Plugins'
+            }
+          },
+          resourceDetail: {
+            title: 'Resource connection',
+            description: 'Manage an individual resource connection.'
+          },
+          model: {
+            title: 'AI model configuration',
+            description: 'Configure the models and runtime policies used by the creative workspace.'
+          },
+          about: {
+            title: 'About',
+            description: 'Information about the Ink & Memory workspace.'
           }
         }
       },
@@ -80,47 +160,164 @@ const resources = {
         }
       },
       deck: {
-        heading: 'Voice Decks',
-        subheading: 'Organize your inner voices into thematic collections',
+        loading: 'Loading Decks…',
         actions: {
           retry: 'Retry',
-          create: '+ Create New Deck',
-          creating: 'Creating...',
-          addVoice: '+ Add Voice to this Deck',
-          addingVoice: 'Adding...',
-          install: 'Install',
+          create: 'Create Deck',
+          createMenu: 'Create',
+          creating: 'Creating Deck…',
           sync: 'Sync with Original',
-          publish: 'Publish to Community',
-          unpublish: 'Unpublish',
-          delete: 'Delete Deck'
+          delete: 'Delete Deck',
+          edit: 'Edit',
+          inspect: 'Inspect template',
+          fork: 'Fork',
+          enable: 'Enable',
+          disable: 'Disable',
+          refresh: 'Refresh',
+          refreshing: 'Refreshing…',
+          clearFilters: 'Clear filters',
+          more: 'More actions for {{deck}}',
+          relatedConversations: 'Related conversations',
+          enableDeck: 'Enable {{deck}}',
+          disableDeck: 'Disable {{deck}}'
         },
-        sections: {
-          myDecks: 'My Decks',
-          community: 'Community Decks ({{count}})'
+        defaults: {
+          newName: 'New Deck',
+          newDescription: 'Describe your deck here'
+        },
+        home: {
+          sectionLabel: 'Decks',
+          title: 'Decks',
+          description: 'Manage the Decks you use with Chat and Dream',
+          launchDescription: 'Open an available Deck; manage drafts and other Decks in Settings',
+          enabledTitle: 'Installed',
+          enabledEmpty: 'No Deck is available.',
+          availableEmpty: 'No Deck is available on this page.',
+          allTitle: 'All Decks',
+          launchCatalogTitle: 'Deck catalog',
+          availableTitle: 'Available Decks',
+          availableListTitle: 'Available Decks',
+          availableListLabel: 'User-created available Decks',
+          availableListEmpty: 'No user-created Deck is enabled with a published clean version.',
+          systemListTitle: 'System Decks',
+          systemListLabel: 'System built-in Decks',
+          systemListEmpty: 'No system Deck is available.',
+          launchSearchLabel: 'Search available Decks',
+          launchListLabel: 'Available Deck list',
+          openDeck: 'Open {{deck}}',
+          systemDeckLabel: 'System built-in Deck {{deck}}',
+          openSettings: 'Open Deck settings'
         },
         labels: {
           system: 'System',
+          systemBuiltIn: 'System built-in',
+          contentVersion: 'Content v{{version}}',
           noDescription: 'No description',
           voiceCount: '{{count}} voices',
-          anonymous: 'Anonymous'
+          agentCount: '{{count}} Agents',
+          anonymous: 'Anonymous',
+          enabled: 'Enabled',
+          disabled: 'Disabled',
+          updateUnknown: 'Not recorded',
+          agentType: {
+            chat: 'Chat Agent',
+            dream: 'Dream Agent'
+          }
         },
-        communityMeta: 'by {{author}} · {{voices}} voices · {{installs}} installs',
-        communityEmpty: 'No published decks yet. Be the first to share!',
+        preview: {
+          back: 'Back to Decks',
+          tryNow: 'Try now',
+          launchingDream: 'Starting Dream…',
+          launchDreamFailed: 'Dream could not be started. Your Deck selection is unchanged; try again.',
+          examples: 'Deck preview examples',
+          defaultDescription: '{{deck}} is ready for Chat and Dream work.',
+          agentsTitle: 'Agents {{count}}',
+          noAgents: 'No Agent is configured for this Deck.',
+          infoTitle: 'Information',
+          infoDeveloper: 'Developer',
+          systemDeveloper: 'Ink & Memory',
+          userDeveloper: 'You',
+          infoType: 'Category',
+          infoVersion: 'Version',
+          infoRuntime: 'Runtime',
+          infoUpdated: 'Updated',
+          editDeck: 'Edit Deck {{deck}}'
+        },
+        creator: {
+          searchLabel: 'Search managed Decks',
+          searchPlaceholder: 'Search name or description',
+          agentTypeFilter: 'Filter by Agent type',
+          agentTypeTabs: {
+            all: 'All',
+            chat: 'Chat',
+            dream: 'Dream'
+          },
+          statusFilter: 'Filter by enabled state',
+          statusAll: 'All states',
+          empty: 'No managed Decks yet. Create one to begin.',
+          noResults: 'No Deck matches these filters.',
+          listLabel: 'Deck settings'
+        },
+        pagination: {
+          ariaLabel: 'Deck list pages',
+          previous: 'Previous',
+          next: 'Next',
+          summary: 'Page {{page}} of {{pages}}'
+        },
+        related: {
+          title: 'Related conversations',
+          description: 'This Deck stays protected while Chat conversations still use it. Review the same history previews shown in Chat and delete only the conversations you no longer need.',
+          loading: 'Loading related conversations…',
+          loadFailed: 'Related conversations could not be loaded.',
+          deleteFailed: 'The conversation could not be deleted.',
+          emptyTitle: 'No related conversations',
+          emptyDescription: 'Chat history no longer blocks this Deck from being deleted.',
+          listLabel: 'Related Chat conversations',
+          confirmDelete: 'Delete “{{title}}”? This permanently removes its Chat history.',
+          deleteConversation: 'Delete conversation {{title}}',
+          delete: 'Delete',
+          deleting: 'Deleting…',
+          loadMore: 'Load more',
+          loadingMore: 'Loading…',
+          deleteHint: 'Delete every related conversation before deleting this Deck.',
+          unknownHint: 'Retry loading related conversations before deleting this Deck.',
+          readyHint: 'All related conversations are cleared. You can now retry Deck deletion.',
+          deleteDeck: 'Delete Deck',
+          close: 'Close'
+        },
+        details: {
+          createTitle: 'Create Deck',
+          editTitle: 'Edit Deck',
+          inspectTitle: 'Deck details',
+          name: 'Deck name',
+          description: 'Description',
+          icon: 'Icon',
+          color: 'Color',
+          defaultVisual: 'Use default',
+          enableHint: 'Enable or disable this Deck from the management list.',
+          nameRequired: 'Enter a Deck name.',
+          saveFailed: 'Deck could not be saved. Try again.',
+          cancel: 'Cancel',
+          close: 'Close',
+          save: 'Save',
+          saving: 'Saving…'
+        },
         confirm: {
           delete: 'Delete this deck and all its voices?',
+          deleteAgent: 'Delete this Agent?',
           sync: 'Sync with original template? This will overwrite any changes you made to this deck.'
         },
-        publishWarning: {
-          heading: '⚠️ Publish Deck Warning',
-          body: 'Publishing will <strong>break the parent link</strong>. This deck becomes a standalone deck in the community store.',
-          note: 'This action cannot be undone. Even if you unpublish later, the parent link stays broken.',
-          cancel: 'Cancel',
-          confirm: 'Publish Anyway'
-        },
         messages: {
-          publishSuccess: '✅ Deck published to community!',
-          unpublishSuccess: '✅ Deck unpublished',
-          installSuccess: '✅ Deck installed to your collection!'
+          loadFailed: 'Decks could not be loaded.',
+          createFailed: 'Deck could not be created.',
+          createAgentFailed: 'Agent could not be created.',
+          updateFailed: 'Deck could not be updated.',
+          updateAgentFailed: 'Agent could not be updated.',
+          toggleFailed: 'Deck status could not be changed.',
+          forkFailed: 'Deck copy could not be created.',
+          deleteFailed: 'Deck could not be deleted.',
+          deleteAgentFailed: 'Agent could not be deleted.',
+          syncFailed: 'Deck could not be synchronized.'
         }
       },
       timeline: {
@@ -205,6 +402,41 @@ const resources = {
         removeError: 'Failed to remove friend'
       },
       chat: {
+        deck: {
+          none: 'No Deck',
+          noneAgent: 'No Agent',
+          loading: 'Loading…',
+          loadingAgents: 'Loading Agents…',
+          loadFailed: 'Failed to load Decks.',
+          routeUnavailable: 'This Deck no longer exists, is disabled, or you do not have access.',
+          selectAria: 'Select one Deck for this conversation',
+          selectTitle: 'Optionally load a Deck and its configured plugin for this conversation.',
+          selectAgentAria: 'Select an Agent for this conversation',
+          selectAgentTitle: 'Select an Agent; its parent Deck provides plugins and runtime context.',
+          agentListAria: 'Agents grouped by Deck',
+          searchPlaceholder: 'Type a prefix to filter Decks…',
+          searchAgentPlaceholder: 'Filter Decks or Agents…',
+          noMatch: 'No Deck matches this prefix',
+          noAgentMatch: 'No Agent matches this prefix',
+          agentCount_one: '{{count}} agent',
+          agentCount_other: '{{count}} agents',
+          lockedAria: 'Conversation Deck: {{name}}',
+          lockedAgentAria: 'Conversation Agent: {{name}}',
+          lockedTitle: 'The Deck is fixed when the conversation starts.',
+          metadataTitle: 'Deck metadata',
+          metadataDeckName: 'Deck name',
+          metadataAgents: 'Agents',
+          metadataPlugins: 'Plugin manifest',
+          metadataNoDeck: 'No Deck bound to this conversation',
+          metadataFrozen: 'Workspace frozen for this conversation',
+          metadataCurrentAgent: 'current',
+          currentAgent: '{{agent}}, current Agent',
+          switchAgent: 'Switch to {{agent}}',
+          metadataPacking: 'Plugins will show resolved versions and digests after the first run packs the workspace.',
+          metadataNoPlugins: 'This Deck has no plugins configured.',
+          metadataCopyDigest: 'Copy digest',
+          metadataCopied: 'Copied'
+        },
         quickActions: {
           generateImage: {
             label: 'Generate image',
@@ -248,6 +480,33 @@ const resources = {
           deleteThread: 'Delete conversation',
           close: 'Close'
         },
+        share: {
+          title: 'Share conversation',
+          copyLink: 'Copy link',
+          comingSoon: 'Coming soon',
+          exportImage: 'Export as image',
+          exportImageHint: 'Save the whole conversation as a long image',
+          exporting: 'Exporting…',
+          exportFailed: 'Export failed. Please try again.',
+          you: 'You',
+          assistant: 'Ink & Memory',
+          footer: 'Write today. Remember forever.',
+          thinking: 'Thinking',
+          truncated: '… (truncated)',
+          terminal: 'Terminal',
+          write: 'Write',
+          writing: 'Writing',
+          written: 'Written',
+          writeFailed: 'Write failed',
+          previewTitle: 'Export preview',
+          download: 'Download image',
+          back: 'Back',
+          partsInfo: '{{count}} parts',
+          rendering: 'Rendering the rest of the image…',
+          merging: 'Merging…',
+          preparingPreview: 'Preparing preview…',
+          closeToBackground: 'Close (export continues in background)'
+        },
         search: {
           button: 'Search',
           placeholder: 'Search chats...',
@@ -259,7 +518,17 @@ const resources = {
         tabs: {
           switcherAria: 'Chat workspace switcher',
           history: 'Chat history',
-          connector: 'Resource connectors'
+          activeDreams: 'Dreams ({{count}})'
+        },
+        dream: {
+          selectAgent: 'Select an Agent in this Dream Deck first.',
+          attachmentsUnsupported: 'Start the Dream with a text goal; attachments are not supported by the current launch contract.',
+          launchFailed: 'Dream could not be started.',
+          refresh: 'Refresh',
+          listFailed: 'Dreams could not be loaded. Try again.',
+          empty: 'No Dreams are available to resume.',
+          listAria: 'Resumable Dreams',
+          open: 'Continue'
         },
         filters: {
           filterAll: 'Filter: All',
@@ -270,6 +539,9 @@ const resources = {
           userCancelledAnswer: 'User cancelled the question',
           askUserTitle: 'I&M needs your answer',
           confirmTitle: 'Allow I&M to call the {{tool}} tool',
+          rejectOnlyTitle: 'This request requires safe handling',
+          rejectOnlyDescription: 'The original request cannot be displayed safely. Reject it so the Dream Agent can continue.',
+          rejectAndContinue: 'Reject and continue',
           unknownTool: 'unknown',
           withSummary: ' — {{summary}}',
           pendingAnswer: 'Awaiting answer',
@@ -370,6 +642,8 @@ const resources = {
           stopping: 'Stopping',
           stopGenerating: 'Stop generating',
           generating: 'Generating',
+          subagentsRunning_one: '{{count}} subagent running',
+          subagentsRunning_other: '{{count}} subagents running',
           waitingUpload: 'Waiting for uploads…',
           send: 'Send',
           sendAria: 'Send message'
@@ -398,6 +672,71 @@ const resources = {
           tooltip: 'Plan & to-dos',
           planTitle: 'Plan',
           todosTitle: 'To-dos'
+        },
+        subagents: {
+          title: 'Subagents',
+          buttonAria: 'Subagent tasks: {{summary}}',
+          runningSummary: '{{running}} running · {{completed}} completed',
+          completedSummary: '{{count}} completed',
+          taskSummary: '{{count}} tasks',
+          activeTitle: 'Active',
+          noActive: 'No active subagents',
+          completedTitle: 'Completed · {{count}}',
+          endedTitle: 'Ended · {{count}}',
+          empty: 'This conversation has no subagent tasks yet.',
+          loading: 'Restoring subagent tasks…',
+          refresh: 'Refresh tasks',
+          resizeSidebar: 'Resize subagent sidebar. Use arrow keys to adjust; double-click to reset.',
+          retry: 'Retry',
+          unavailable: 'Could not refresh subagent tasks.',
+          noSummary: 'No task summary',
+          launched: 'Launched',
+          openTask: 'Open subagent task: {{task}}',
+          openTaskAria: 'Open subagent task {{task}}. Status: {{status}}. Duration: {{duration}}.',
+          taskFallback: 'Subagent task',
+          detailTitle: 'Execution details',
+          backToTasks: 'Back to subagent tasks',
+          agentType: 'Agent',
+          startedAt: 'Started',
+          duration: 'Duration',
+          spawnDepth: 'Delegation depth',
+          unknown: 'Unknown',
+          resultTitle: 'Latest result',
+          errorTitle: 'Execution error',
+          executionTitle: 'Execution activity',
+          messageActivity: 'Agent update',
+          toolActivity: 'Used {{tool}}',
+          toolFallback: 'tool',
+          noActivity: 'No execution activity was captured for this task.',
+          timeline: {
+            messageCount_one: '{{count}} message',
+            messageCount_other: '{{count}} messages',
+            taskDispatch: 'Assigned task',
+            agentUpdate: 'Agent update',
+            finalReply: 'Final reply',
+            toolUsed: 'Used {{tool}}',
+            toolInput: 'Input summary',
+            toolOutput: 'Result summary',
+            statusUpdate: 'Status update',
+            running: 'This task is still running. New records appear after refresh.',
+            empty: 'No conversation records are available for this task.',
+            legacy: 'This historical task only contains a partial summary and activity log.',
+            projectionTruncated: 'This timeline is bounded. Some older or oversized records are not shown.',
+            redacted: 'Sensitive fields were redacted by the server.',
+            truncated: 'This tool record was shortened for safe display.',
+            unknownEvent: 'Unsupported event: {{event}}'
+          },
+          activityStatus: {
+            started: 'Started',
+            completed: 'Completed',
+            failed: 'Failed'
+          },
+          status: {
+            running: 'Running',
+            completed: 'Completed',
+            failed: 'Failed',
+            cancelled: 'Cancelled'
+          }
         },
         mermaid: {
           renderFailed: 'Mermaid · render failed',
@@ -450,7 +789,7 @@ const resources = {
         },
         shellError: {
           history: 'Chat history',
-          connector: 'Connectors'
+          dreams: 'Active Dreams'
         },
         skeleton: {
           loading: 'Loading'
@@ -475,7 +814,9 @@ const resources = {
         analysis: '回顾',
         decks: '卡组',
         connector: '连接器',
+        dream: 'Dream',
         chat: '对话',
+        more: '更多',
         friends: '好友',
         settings: '设置'
       },
@@ -495,6 +836,67 @@ const resources = {
           options: {
             en: 'English (英语)',
             zh: '中文'
+          }
+        },
+        workspace: {
+          aria: {
+            categories: '设置分类',
+            navigation: '设置分类导航',
+            content: '设置内容'
+          },
+          backToApp: '返回应用',
+          personal: '个人',
+          search: {
+            label: '搜索设置',
+            placeholder: '搜索设置…',
+            noResults: '没有匹配的设置'
+          },
+          navigation: {
+            general: '常规',
+            subscription: '订阅',
+            work: '工作台',
+            model: 'AI 模型',
+            about: '关于'
+          },
+          general: {
+            description: '调整界面语言和工作区显示偏好。'
+          },
+          languageLabel: '语言',
+          theme: {
+            label: '外观主题',
+            description: '选择工作区的显示外观。',
+            options: {
+              light: '浅色',
+              system: '跟随系统',
+              dark: '深色'
+            }
+          },
+          energy: {
+            label: '能量条',
+            description: '在底部统计栏显示能量进度条。',
+            toggleLabel: '切换能量条'
+          },
+          work: {
+            title: '工作台',
+            description: '集中管理可在创作工作区使用的 Deck、资源链接与插件。',
+            tabsLabel: '工作台管理分类',
+            tabs: {
+              deck: 'Deck',
+              resources: '资源链接',
+              plugins: '插件'
+            }
+          },
+          resourceDetail: {
+            title: '资源连接',
+            description: '管理单个资源连接。'
+          },
+          model: {
+            title: 'AI 模型配置',
+            description: '配置创作工作区使用的模型和运行策略。'
+          },
+          about: {
+            title: '关于',
+            description: 'Ink & Memory 工作区信息。'
           }
         }
       },
@@ -543,47 +945,164 @@ const resources = {
         }
       },
       deck: {
-          heading: '声线卡组',
-          subheading: '以主题整理你的心灵声线',
+          loading: '正在加载 Deck…',
           actions: {
             retry: '重试',
-            create: '+ 新建卡组',
-            creating: '建立中...',
-            addVoice: '+ 向卡组添加声线',
-            addingVoice: '添加中...',
-            install: '安装',
+            create: '创建 Deck',
+            createMenu: '创建',
+            creating: '正在创建 Deck…',
             sync: '与原版同步',
-            publish: '发布到社区',
-            unpublish: '取消发布',
-            delete: '删除卡组'
-          },
-        sections: {
-          myDecks: '我的卡组',
-          community: '社区卡组（{{count}}）'
+            delete: '删除卡组',
+            edit: '编辑',
+            inspect: '查看模板',
+            fork: '创建副本',
+            enable: '启用',
+            disable: '停用',
+            refresh: '刷新',
+            refreshing: '刷新中…',
+          clearFilters: '清除筛选',
+          more: '{{deck}} 的更多操作',
+          relatedConversations: '相关对话',
+          enableDeck: '启用 {{deck}}',
+            disableDeck: '停用 {{deck}}'
+        },
+        defaults: {
+          newName: '新建 Deck',
+          newDescription: '请在这里描述你的 Deck'
+        },
+        home: {
+          sectionLabel: 'Deck',
+          title: 'Deck',
+          description: '管理在 Chat 和 Dream 中使用的 Deck',
+          launchDescription: '打开可用的 Deck；草稿及其他 Deck 请前往设置管理',
+          enabledTitle: '已安装',
+          enabledEmpty: '当前没有可用 Deck。',
+          availableEmpty: '当前页面没有可用 Deck。',
+          allTitle: '全部 Deck',
+          launchCatalogTitle: 'Deck 目录',
+          availableTitle: '正式可用 Deck',
+          availableListTitle: '可用 Deck',
+          availableListLabel: '用户创建的可用 Deck',
+          availableListEmpty: '没有符合条件的用户 Deck。',
+          systemListTitle: '系统 Deck',
+          systemListLabel: '系统内建 Deck',
+          systemListEmpty: '当前没有系统 Deck。',
+          launchSearchLabel: '搜索正式可用的 Deck',
+          launchListLabel: '正式可用 Deck 列表',
+          openDeck: '打开 {{deck}}',
+          systemDeckLabel: '系统内建 Deck {{deck}}',
+          openSettings: '打开 Deck 设置'
         },
         labels: {
           system: '系统',
+          systemBuiltIn: '系统内建',
+          contentVersion: '内容 v{{version}}',
           noDescription: '暂无简介',
           voiceCount: '{{count}} 条声线',
-          anonymous: '匿名'
+          agentCount: '{{count}} 个 Agent',
+          anonymous: '匿名',
+          enabled: '已启用',
+          disabled: '已停用',
+          updateUnknown: '未记录',
+          agentType: {
+            chat: 'Chat Agent',
+            dream: 'Dream Agent'
+          }
         },
-        communityMeta: '由 {{author}} 创作 · {{voices}} 条声线 · {{installs}} 次安装',
-        communityEmpty: '尚无公开卡组，来做第一位分享的人吧！',
+        preview: {
+          back: '返回 Deck',
+          tryNow: '立即试用',
+          launchingDream: '正在启动 Dream…',
+          launchDreamFailed: 'Dream 启动失败，Deck 选择未改变，请重试。',
+          examples: 'Deck 预览示例',
+          defaultDescription: '{{deck}} 已可用于 Chat 与 Dream 工作。',
+          agentsTitle: 'Agent {{count}}',
+          noAgents: '这个 Deck 暂未配置 Agent。',
+          infoTitle: '信息',
+          infoDeveloper: '开发者',
+          systemDeveloper: 'Ink & Memory',
+          userDeveloper: '你',
+          infoType: '类别',
+          infoVersion: '版本',
+          infoRuntime: '运行版本',
+          infoUpdated: '更新于',
+          editDeck: '编辑 Deck {{deck}}'
+        },
+        creator: {
+          searchLabel: '搜索可管理的 Deck',
+          searchPlaceholder: '搜索名称或说明',
+          agentTypeFilter: '按 Agent 类型筛选',
+          agentTypeTabs: {
+            all: '全部',
+            chat: 'Chat',
+            dream: 'Dream'
+          },
+          statusFilter: '按启用状态筛选',
+          statusAll: '全部状态',
+          empty: '还没有可管理的 Deck，可新建一个开始。',
+          noResults: '没有符合当前条件的 Deck。',
+          listLabel: 'Deck 设置列表'
+        },
+        pagination: {
+          ariaLabel: 'Deck 列表分页',
+          previous: '上一页',
+          next: '下一页',
+          summary: '第 {{page}} / {{pages}} 页'
+        },
+        related: {
+          title: '相关对话',
+          description: '仍有 Chat 对话使用这个 Deck 时，系统会保护它不被删除。这里沿用 Chat 历史预览，仅删除你确认不再需要的对话。',
+          loading: '正在加载相关对话…',
+          loadFailed: '相关对话加载失败。',
+          deleteFailed: '对话删除失败。',
+          emptyTitle: '没有相关对话',
+          emptyDescription: 'Chat 历史已不再阻止删除这个 Deck。',
+          listLabel: '相关 Chat 对话',
+          confirmDelete: '确定删除“{{title}}”吗？对应的 Chat 历史将被永久删除。',
+          deleteConversation: '删除对话 {{title}}',
+          delete: '删除',
+          deleting: '删除中…',
+          loadMore: '加载更多',
+          loadingMore: '加载中…',
+          deleteHint: '需要先删除全部相关对话，才能删除这个 Deck。',
+          unknownHint: '请先重试加载相关对话，未知结果不能视为已清空。',
+          readyHint: '相关对话已清空，现在可以重新删除 Deck。',
+          deleteDeck: '删除 Deck',
+          close: '关闭'
+        },
+        details: {
+          createTitle: '新建 Deck',
+          editTitle: '编辑 Deck',
+          inspectTitle: 'Deck 详情',
+          name: 'Deck 名称',
+          description: '说明',
+          icon: '图标',
+          color: '颜色',
+          defaultVisual: '使用默认值',
+          enableHint: '请在管理列表中启用或停用此 Deck。',
+          nameRequired: '请输入 Deck 名称。',
+          saveFailed: 'Deck 保存失败，请重试。',
+          cancel: '取消',
+          close: '关闭',
+          save: '保存',
+          saving: '保存中…'
+        },
         confirm: {
           delete: '确定删除这个卡组以及所有声线？',
+          deleteAgent: '确定删除这个 Agent？',
           sync: '与原模板同步？这会覆盖你在卡组里的修改。'
         },
-        publishWarning: {
-          heading: '⚠️ 发布提醒',
-          body: '发布后会<strong>断开与父卡组的链接</strong>，并在社区中以独立卡组存在。',
-          note: '此操作不可逆，就算之后取消发布，父子链接也无法恢复。',
-          cancel: '取消',
-          confirm: '仍要发布'
-        },
         messages: {
-          publishSuccess: '✅ 已发布到社区！',
-          unpublishSuccess: '✅ 已取消发布',
-          installSuccess: '✅ 已安装到你的卡组'
+          loadFailed: 'Deck 加载失败。',
+          createFailed: 'Deck 创建失败。',
+          createAgentFailed: 'Agent 创建失败。',
+          updateFailed: 'Deck 更新失败。',
+          updateAgentFailed: 'Agent 更新失败。',
+          toggleFailed: 'Deck 状态更新失败。',
+          forkFailed: 'Deck 副本创建失败。',
+          deleteFailed: 'Deck 删除失败。',
+          deleteAgentFailed: 'Agent 删除失败。',
+          syncFailed: 'Deck 同步失败。'
         }
       },
       timeline: {
@@ -668,6 +1187,40 @@ const resources = {
         removeError: '移除好友失败'
       },
       chat: {
+        deck: {
+          none: '不使用 Deck',
+          noneAgent: '不使用 Agent',
+          loading: '加载中…',
+          loadingAgents: '正在读取 Agent…',
+          loadFailed: 'Deck 加载失败。',
+          routeUnavailable: '该 Deck 不存在、已停用，或你没有访问权限。',
+          selectAria: '为本次对话单选一个 Deck',
+          selectTitle: '可选加载一个 Deck 及其已配置插件。',
+          selectAgentAria: '为本次对话选择一个 Agent',
+          selectAgentTitle: '选择 Agent；其所属 Deck 提供插件与运行上下文。',
+          agentListAria: '按 Deck 分组的 Agent',
+          searchPlaceholder: '输入前缀筛选 Deck…',
+          searchAgentPlaceholder: '筛选 Deck 或 Agent…',
+          noMatch: '没有匹配该前缀的 Deck',
+          noAgentMatch: '没有匹配该前缀的 Agent',
+          agentCount: '{{count}} 个 Agent',
+          lockedAria: '当前对话 Deck：{{name}}',
+          lockedAgentAria: '当前对话 Agent：{{name}}',
+          lockedTitle: '对话开始后 Deck 将固定，确保运行来源可追溯。',
+          metadataTitle: 'Deck 元信息',
+          metadataDeckName: 'Deck 名称',
+          metadataAgents: 'Agent',
+          metadataPlugins: '插件清单',
+          metadataNoDeck: '本次对话未绑定 Deck',
+          metadataFrozen: '本次对话工作区已锁定',
+          metadataCurrentAgent: '当前',
+          currentAgent: '{{agent}}，当前 Agent',
+          switchAgent: '切换到 {{agent}}',
+          metadataPacking: '插件将在首次运行打包工作区后显示版本与摘要。',
+          metadataNoPlugins: '此 Deck 未配置插件。',
+          metadataCopyDigest: '复制 digest',
+          metadataCopied: '已复制'
+        },
         quickActions: {
           generateImage: {
             label: '生成图片',
@@ -711,6 +1264,33 @@ const resources = {
           deleteThread: '删除对话',
           close: '关闭'
         },
+        share: {
+          title: '分享对话',
+          copyLink: '复制链接',
+          comingSoon: '即将上线',
+          exportImage: '导出图片',
+          exportImageHint: '将整段对话保存为渲染后的长图',
+          exporting: '导出中…',
+          exportFailed: '导出失败，请重试。',
+          you: '我',
+          assistant: 'Ink & Memory',
+          footer: 'Write today. Remember forever.',
+          thinking: '思考过程',
+          truncated: '…（已截断）',
+          terminal: '终端',
+          write: '写入文件',
+          writing: '写入中',
+          written: '已写入',
+          writeFailed: '写入失败',
+          previewTitle: '导出预览',
+          download: '下载图片',
+          back: '返回',
+          partsInfo: '共 {{count}} 张分图',
+          rendering: '正在生成剩余部分…',
+          merging: '合并中…',
+          preparingPreview: '正在生成预览…',
+          closeToBackground: '关闭（导出将在后台继续）'
+        },
         search: {
           button: '搜索',
           placeholder: '搜索聊天...',
@@ -722,7 +1302,17 @@ const resources = {
         tabs: {
           switcherAria: 'Chat 工作区切换',
           history: '聊天历史',
-          connector: '资源连接器'
+          activeDreams: 'Dream（{{count}}）'
+        },
+        dream: {
+          selectAgent: '请先在 Dream Deck 中选择一个 Agent。',
+          attachmentsUnsupported: '请先用文字目标发起 Dream；当前启动合同不接受附件。',
+          launchFailed: 'Dream 发起失败。',
+          refresh: '刷新',
+          listFailed: 'Dream 列表加载失败，请重试。',
+          empty: '当前没有可恢复的 Dream。',
+          listAria: '可恢复的 Dream',
+          open: '继续查看'
         },
         filters: {
           filterAll: '筛选：全部',
@@ -733,6 +1323,9 @@ const resources = {
           userCancelledAnswer: '用户取消了问题回答',
           askUserTitle: 'I&M 需要你的回答',
           confirmTitle: '是否允许 I&M 调用 {{tool}} 工具',
+          rejectOnlyTitle: '此请求需要安全处理',
+          rejectOnlyDescription: '原始请求无法安全展示。请拒绝本次操作，让 Dream Agent 回到可继续处理的状态。',
+          rejectAndContinue: '拒绝并继续',
           unknownTool: '未知',
           withSummary: '，{{summary}}',
           pendingAnswer: '待回答',
@@ -833,6 +1426,7 @@ const resources = {
           stopping: '正在停止',
           stopGenerating: '停止生成',
           generating: '生成中',
+          subagentsRunning: '{{count}} 个子智能体运行中',
           waitingUpload: '等待上传完成…',
           send: '发送',
           sendAria: '发送消息'
@@ -861,6 +1455,70 @@ const resources = {
           tooltip: '计划与待办',
           planTitle: '计划',
           todosTitle: '待办'
+        },
+        subagents: {
+          title: '子智能体',
+          buttonAria: '子智能体任务：{{summary}}',
+          runningSummary: '{{running}} 运行中 · {{completed}} 完成',
+          completedSummary: '{{count}} 完成',
+          taskSummary: '{{count}} 个任务',
+          activeTitle: '已开启',
+          noActive: '没有已开启的子智能体',
+          completedTitle: '完成 · {{count}}',
+          endedTitle: '已结束 · {{count}}',
+          empty: '此会话还没有子智能体任务。',
+          loading: '正在恢复子智能体任务…',
+          refresh: '刷新任务',
+          resizeSidebar: '调整子智能体侧栏宽度。可使用方向键调整，双击恢复默认宽度。',
+          retry: '重试',
+          unavailable: '无法刷新子智能体任务。',
+          noSummary: '暂无任务摘要',
+          launched: '已发起',
+          openTask: '打开子智能体任务：{{task}}',
+          openTaskAria: '打开子智能体任务 {{task}}。状态：{{status}}。耗时：{{duration}}。',
+          taskFallback: '子智能体任务',
+          detailTitle: '执行详情',
+          backToTasks: '返回子智能体任务列表',
+          agentType: '智能体',
+          startedAt: '开始时间',
+          duration: '执行耗时',
+          spawnDepth: '委派深度',
+          unknown: '未知',
+          resultTitle: '最新结果',
+          errorTitle: '执行错误',
+          executionTitle: '执行记录',
+          messageActivity: '智能体更新',
+          toolActivity: '调用 {{tool}}',
+          toolFallback: '工具',
+          noActivity: '此任务没有可展示的执行记录。',
+          timeline: {
+            messageCount: '{{count}} 条消息',
+            taskDispatch: '派发任务',
+            agentUpdate: '智能体更新',
+            finalReply: '最终回复',
+            toolUsed: '调用 {{tool}}',
+            toolInput: '输入摘要',
+            toolOutput: '结果摘要',
+            statusUpdate: '状态更新',
+            running: '任务仍在执行，刷新后可查看新记录。',
+            empty: '此任务没有可展示的对话记录。',
+            legacy: '该历史任务仅保留部分摘要与活动记录。',
+            projectionTruncated: '时间线采用有界投影，部分较早或过长记录未显示。',
+            redacted: '服务端已隐藏敏感字段。',
+            truncated: '该工具记录已缩短以便安全展示。',
+            unknownEvent: '暂不支持的事件：{{event}}'
+          },
+          activityStatus: {
+            started: '已开始',
+            completed: '已完成',
+            failed: '失败'
+          },
+          status: {
+            running: '运行中',
+            completed: '已完成',
+            failed: '失败',
+            cancelled: '已取消'
+          }
         },
         mermaid: {
           renderFailed: 'Mermaid · 渲染失败',
@@ -913,7 +1571,7 @@ const resources = {
         },
         shellError: {
           history: '历史对话',
-          connector: '连接器'
+          dreams: '进行中的 Dream'
         },
         skeleton: {
           loading: '加载中'

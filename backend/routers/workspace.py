@@ -42,7 +42,7 @@ from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -69,7 +69,7 @@ from libs.claude_agent_kit.server.workspace_file_sync import (
     save_buffer_to_workspace_files,
 )
 
-from .deps import http_bearer
+from .deps import apply_token_renewal, http_bearer
 
 router = APIRouter()
 
@@ -80,12 +80,15 @@ router = APIRouter()
 
 
 def _require_workspace_auth(
+    request: Request,
+    response: Response,
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
 ) -> dict:
     token = credentials.credentials if credentials else None
     user_data = auth.verify_access_token(token) if token else None
     if not user_data:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    apply_token_renewal(request, response, user_data)
     return user_data
 
 

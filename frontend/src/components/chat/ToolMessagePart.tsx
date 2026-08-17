@@ -15,7 +15,7 @@
 //        confirmToolCall moved to toolConfirmation.ts (design: claude-agent-tool-confirmation-flow.md §8).
 // [Sync] 2026-07-20: i18n — editor write status rows and the default reject reason resolve
 //        through the chat.editorWrite namespace (en + zh) via useTranslation.
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import EditorWriteApprovalUI from './EditorWriteApprovalUI';
@@ -52,12 +52,15 @@ interface ToolMessagePartProps {
   addToolResult?: (params: { tool: string; toolCallId: string; output: unknown }) => void;
   /** Called after an editor write tool is successfully confirmed so the Writing view can reload. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
+  settledToolCallIds?: ReadonlySet<string>;
+  onConfirmationSettled?: (toolCallId: string) => void;
 }
 
-export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResult, onEditorWriteConfirmed }: ToolMessagePartProps) {
+export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResult, onEditorWriteConfirmed, settledToolCallIds, onConfirmationSettled }: ToolMessagePartProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
+  const confirmationInFlightRef = useRef(false);
   const toolCallId = part.toolCallId;
   const toolName = getToolName(part);
   const input = 'input' in part ? part.input : undefined;
@@ -71,7 +74,7 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
   const isExecuting = useMemo(() => !isCompleted && Boolean(isLast && isLoading), [isCompleted, isLast, isLoading]);
   const isError = useMemo(() => state === 'output-error', [state]);
   const isEditorWrite = useMemo(() => isEditorWriteTool(toolName), [toolName]);
-  const shouldShowEditorWriteUI = useMemo(() => isEditorWrite && !isCompleted && (state === 'input-available' || state === 'approval-requested' || !state || state === 'input-streaming'), [isEditorWrite, isCompleted, state]);
+  const shouldShowEditorWriteUI = useMemo(() => isEditorWrite && !isCompleted && !settledToolCallIds?.has(toolCallId) && (state === 'input-available' || state === 'approval-requested' || !state || state === 'input-streaming'), [isEditorWrite, isCompleted, settledToolCallIds, state, toolCallId]);
   // One-line "what is this tool doing" summary for the card header: task
   // description when the model provides one, otherwise the command/target.
   const toolSummaryText = useMemo(() => summarizeToolInvocation(toolName, input), [toolName, input]);
@@ -86,37 +89,51 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
   }, [output]);
 
   const handleEditorWriteApprove = useCallback(async () => {
-    if (confirmationStatus !== 'idle') return;
+    if (confirmationInFlightRef.current) return;
+    confirmationInFlightRef.current = true;
     setConfirmationStatus('confirming');
     try {
       const result = await confirmToolCall(threadId, toolCallId, true);
-      if (result.ok ?? result.success) {
+      if (result.state === 'resolved') {
         addToolResult?.({ tool: toolName, toolCallId, output: { approved: true } });
         setConfirmationStatus('confirmed');
+        onConfirmationSettled?.(toolCallId);
         onEditorWriteConfirmed?.(toolCallId);
         return;
       }
-    } catch {
-      // fall through
-    }
-    setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, onEditorWriteConfirmed, threadId, toolCallId, toolName]);
-
-  const handleEditorWriteReject = useCallback(async (reason?: string) => {
-    if (confirmationStatus !== 'idle') return;
-    setConfirmationStatus('confirming');
-    try {
-      const result = await confirmToolCall(threadId, toolCallId, false, reason || t('chat.editorWrite.userRejected'));
-      if (result.ok ?? result.success) {
-        addToolResult?.({ tool: toolName, toolCallId, output: { approved: false } });
-        setConfirmationStatus('rejected');
+      if (result.state === 'not-pending') {
+        onConfirmationSettled?.(toolCallId);
         return;
       }
     } catch {
       // fall through
     }
+    confirmationInFlightRef.current = false;
     setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName, t]);
+  }, [addToolResult, onConfirmationSettled, onEditorWriteConfirmed, threadId, toolCallId, toolName]);
+
+  const handleEditorWriteReject = useCallback(async (reason?: string) => {
+    if (confirmationInFlightRef.current) return;
+    confirmationInFlightRef.current = true;
+    setConfirmationStatus('confirming');
+    try {
+      const result = await confirmToolCall(threadId, toolCallId, false, reason || t('chat.editorWrite.userRejected'));
+      if (result.state === 'resolved') {
+        addToolResult?.({ tool: toolName, toolCallId, output: { approved: false } });
+        setConfirmationStatus('rejected');
+        onConfirmationSettled?.(toolCallId);
+        return;
+      }
+      if (result.state === 'not-pending') {
+        onConfirmationSettled?.(toolCallId);
+        return;
+      }
+    } catch {
+      // fall through
+    }
+    confirmationInFlightRef.current = false;
+    setConfirmationStatus('idle');
+  }, [addToolResult, onConfirmationSettled, threadId, toolCallId, toolName, t]);
 
   // Editor write tools (write_segment, delete_segment, insert_widget, reply_to_comment)
   // are always-confirm tools; render the specialized approval UI directly.

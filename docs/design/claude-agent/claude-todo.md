@@ -88,7 +88,7 @@ flowchart LR
 - 启用条件（修订后）：无需任何开关。`sdk_env.py` 每次运行都注入：
   - `CLAUDE_CODE_TASK_LIST_ID=main` — **固定 taskListId 为常量**（无条件，最低优先级）；
   - `CLAUDE_CODE_ENABLE_TASKS=1` — 仅当遗留 `INK_AGENT_TASK_V2_ENABLED` 为真时追加注入（与 CLI 默认启用一致，属冗余保险）。
-- **taskListId 隔离决策**：`CLAUDE_CONFIG_DIR` 已是 per-thread（`{workspace}/.claude-home`），tasks 根目录天然按 thread 隔离；但若不固定 taskListId，官方兜底取 CLI `sessionId`，SDK resume / 新会话会产生新 sessionId，导致同一 thread 的任务清单散落在多个子目录、REST 无法定位。固定为 `main` 后路径稳定为 `{workspace}/.claude-home/tasks/main/`，随 workspace TTL 一并清理。注入点复用 `apply_plan_mode_env_to_options` 同处（`agent_runner.py` run_streaming 调用链），优先级同样最低、允许 `user_sdk_env` 覆盖。
+- **taskListId 隔离决策**：`CLAUDE_CONFIG_DIR` 已是 per-thread（`{workspace}/.claude-home`），tasks 根目录天然按 thread 隔离；但若不固定 taskListId，官方兜底取 CLI `sessionId`，SDK resume / 新会话会产生新 sessionId，导致同一 thread 的任务清单散落在多个子目录、REST 无法定位。固定为 `main` 后路径稳定为 `{workspace}/.claude-home/tasks/main/`，随 workspace TTL 一并清理。注入点与 config home 重定向同处 **[2026-08-03 更新]**：决策在 Phase 1（`assemble_context`）完成（`resolve_claude_config_home`），runner 侧 `apply_claude_config_home_to_options` 在 options 构建第一步注入，`apply_task_v2_env_to_options` 随后以最低优先级补齐 taskListId；显式值保留、`user_sdk_env` 白名单不含这两个键。
 - 捕获：PostToolUse hook 匹配 `TaskCreate/TaskUpdate`（写操作），防抖后读取 tasks 目录全量 JSON 组装清单（复刻官方"读时派生"语义：过滤 `metadata._internal`、`blockedBy` 剔除已 completed）；`TaskList/TaskGet` 为只读，不触发发射。
 
 **两路径互斥保证**：由 CLI 官方 `isTodoV2Enabled()` 保证同一进程只暴露一族工具；后端 `todo_state` 记录 `source: "todo_write" | "task_v2"`，后到的捕获覆盖先前的（同一会话内实际上只会出现一种）。

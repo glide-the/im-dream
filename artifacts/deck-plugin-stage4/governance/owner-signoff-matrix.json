@@ -1,0 +1,214 @@
+{
+  "schema": "deck-sc-owner-signoff-matrix/1",
+  "generated_at": "2026-08-02T08:07:31+08:00",
+  "evaluation_time": "2026-08-02T08:07:31+08:00",
+  "artifact_canonicalization": "UTF-8 JSON; recursively sorted object keys; compact separators; no trailing LF when computing a normalized digest",
+  "owner_signoff_contract_revision": "deck-sc-owner/v1",
+  "contract_sha256": "sha256:f5f46c75b55fe6ec253c7f1a2d991f22d1df57c5b03bf439561dddd9abe47269",
+  "contract_evidence": {
+    "issue_identifier": "SUO-286",
+    "immutable_comment_id": "567c22ae-6f81-4d24-9db9-4a74e24769d4",
+    "deep_link": "/SUO/issues/SUO-286#comment-567c22ae-6f81-4d24-9db9-4a74e24769d4",
+    "comment_body_sha256": "sha256:ab6edabfbfeb29078590560b98e7788e4e59b34852c19b309a0554937ca924f2",
+    "canonical_contract_sha256_recomputed": true
+  },
+  "appointment_window": {
+    "valid_from": "2026-08-01T18:25:08+08:00",
+    "valid_until": "2026-08-15T23:59:59+08:00",
+    "formal_replacement_due_at": "2026-08-12T23:59:59+08:00"
+  },
+  "quorum": {
+    "required": "3/3",
+    "present": 3,
+    "approved": 3,
+    "request_changes": 0,
+    "status": "owner_quorum_satisfied"
+  },
+  "owners": [
+    {
+      "role": "security",
+      "principal_id": "ba1cd181-97e7-4dba-80b3-fa38ad15f602",
+      "display_name": "DesignArchitect",
+      "appointment": "temporary",
+      "valid_from": "2026-08-01T18:25:08+08:00",
+      "valid_until": "2026-08-15T23:59:59+08:00",
+      "allowed_scopes": [
+        "trust_root_and_publisher_identity",
+        "signature_algorithm_matrix",
+        "key_rotation_revocation_expiry",
+        "offline_verification_and_fail_closed"
+      ],
+      "forbidden_scopes": [
+        "artifact_publication_or_retention_approval",
+        "runtime_materialization_or_rollout_approval",
+        "sign_for_other_owner",
+        "production_gate_override"
+      ],
+      "veto_scope": [
+        "unknown_or_revoked_publisher",
+        "unsupported_or_expired_signature",
+        "trust_chain_or_digest_mismatch",
+        "secret_or_private_key_in_evidence",
+        "security_evidence_missing_or_mutable"
+      ],
+      "delegation_rule": "approval and veto are non-delegable; emergency contact may only impose request_changes/fail-closed hold; any substitute requires a named principal, narrower or equal scope, and an earlier or equal expiry; no subdelegation",
+      "emergency_contact": {
+        "display_name": "CEO",
+        "principal_id": "a77605f2-8bbf-4eb9-9cda-7c036f5c5f75"
+      },
+      "formal_replacement": {
+        "action": "route and complete appointment of a permanent security owner; permanent principal must re-sign this exact revision/hash or its explicit successor before temporary expiry",
+        "action_owner_display_name": "CEOOrchestrator",
+        "action_owner_principal_id": "1e68c2e7-57cc-4e9e-88c8-3b4432fd6249",
+        "due_at": "2026-08-12T23:59:59+08:00"
+      },
+      "appointment_source": {
+        "issue_identifier": "SUO-286",
+        "immutable_comment_id": "567c22ae-6f81-4d24-9db9-4a74e24769d4",
+        "deep_link": "/SUO/issues/SUO-286#comment-567c22ae-6f81-4d24-9db9-4a74e24769d4"
+      },
+      "decision": "approve",
+      "signed_at": "2026-08-01T18:55:10+08:00",
+      "signature_method": "paperclip_append_only_issue_comment_principal_authorship",
+      "evidence_url": "/SUO/issues/SUO-291#comment-86cc8ce2-7c81-464a-a9af-496832721ec8",
+      "evidence_sha256": "sha256:ca75341219867312e360037bade12f2e1dfa4d96600e7bcc741e51e77f6bee09",
+      "evidence": {
+        "issue_identifier": "SUO-291",
+        "immutable_comment_id": "86cc8ce2-7c81-464a-a9af-496832721ec8",
+        "deep_link": "/SUO/issues/SUO-291#comment-86cc8ce2-7c81-464a-a9af-496832721ec8",
+        "author_agent_id": "ba1cd181-97e7-4dba-80b3-fa38ad15f602",
+        "comment_body_sha256": "sha256:ca75341219867312e360037bade12f2e1dfa4d96600e7bcc741e51e77f6bee09"
+      }
+    },
+    {
+      "role": "marketplace_artifact_platform",
+      "principal_id": "87a68471-07aa-40e1-8783-4c0f6dd7fd02",
+      "display_name": "TaskDesignAgent",
+      "appointment": "temporary",
+      "valid_from": "2026-08-01T18:25:08+08:00",
+      "valid_until": "2026-08-15T23:59:59+08:00",
+      "allowed_scopes": [
+        "signature_bundle_generation_and_retention",
+        "content_addressed_storage_and_immutable_versioning",
+        "reference_cleanup_and_quarantine",
+        "cold_storage_rto_rpo_and_restore_evidence"
+      ],
+      "forbidden_scopes": [
+        "trust_root_key_or_algorithm_approval",
+        "runtime_materialization_or_rollout_approval",
+        "sign_for_other_owner",
+        "production_gate_override"
+      ],
+      "veto_scope": [
+        "mutable_or_overwritable_artifact_pointer",
+        "artifact_or_bundle_digest_mismatch",
+        "retention_below_frozen_minimum_or_unsafe_purge",
+        "cold_restore_or_rto_rpo_evidence_missing",
+        "artifact_evidence_inaccessible_or_mutable"
+      ],
+      "delegation_rule": "approval and veto are non-delegable; emergency contact may only impose request_changes/fail-closed hold; any substitute requires a named principal, narrower or equal scope, and an earlier or equal expiry; no subdelegation",
+      "emergency_contact": {
+        "display_name": "CEO",
+        "principal_id": "a77605f2-8bbf-4eb9-9cda-7c036f5c5f75"
+      },
+      "formal_replacement": {
+        "action": "route and complete appointment of a permanent marketplace/artifact-platform owner; permanent principal must re-sign this exact revision/hash or its explicit successor before temporary expiry",
+        "action_owner_display_name": "CEOOrchestrator",
+        "action_owner_principal_id": "1e68c2e7-57cc-4e9e-88c8-3b4432fd6249",
+        "due_at": "2026-08-12T23:59:59+08:00"
+      },
+      "appointment_source": {
+        "issue_identifier": "SUO-286",
+        "immutable_comment_id": "567c22ae-6f81-4d24-9db9-4a74e24769d4",
+        "deep_link": "/SUO/issues/SUO-286#comment-567c22ae-6f81-4d24-9db9-4a74e24769d4"
+      },
+      "decision": "approve",
+      "signed_at": "2026-08-01T18:48:14+08:00",
+      "signature_method": "Paperclip append-only issue comment authored by the named principal",
+      "evidence_url": "/SUO/issues/SUO-291#comment-feb31ca0-60a4-4f7b-8a1f-6f52aa3f0c3f",
+      "evidence_sha256": "sha256:d4018f1a8465038b025c7f112582f296c0616fcd16a7ba3da800e8cadb80b84c",
+      "evidence": {
+        "issue_identifier": "SUO-291",
+        "immutable_comment_id": "feb31ca0-60a4-4f7b-8a1f-6f52aa3f0c3f",
+        "deep_link": "/SUO/issues/SUO-291#comment-feb31ca0-60a4-4f7b-8a1f-6f52aa3f0c3f",
+        "author_agent_id": "87a68471-07aa-40e1-8783-4c0f6dd7fd02",
+        "comment_body_sha256": "sha256:d4018f1a8465038b025c7f112582f296c0616fcd16a7ba3da800e8cadb80b84c"
+      }
+    },
+    {
+      "role": "runtime",
+      "principal_id": "2a7a15fe-2ebb-4dc5-91a8-48ae2bcc5471",
+      "display_name": "ExecTaskAgent",
+      "appointment": "temporary",
+      "valid_from": "2026-08-01T18:25:08+08:00",
+      "valid_until": "2026-08-15T23:59:59+08:00",
+      "allowed_scopes": [
+        "post_materialization_byte_sha256",
+        "untrusted_cache_reverification",
+        "atomic_runtime_load_receipt",
+        "reject_and_rollback_path"
+      ],
+      "forbidden_scopes": [
+        "trust_root_key_or_algorithm_approval",
+        "artifact_publication_retention_or_cold_storage_approval",
+        "sign_for_other_owner",
+        "production_gate_override"
+      ],
+      "veto_scope": [
+        "materialized_digest_mismatch",
+        "cache_trusted_without_rehash",
+        "missing_or_non_atomic_load_receipt",
+        "rollback_or_reject_path_unproven",
+        "runtime_evidence_missing_or_mutable"
+      ],
+      "delegation_rule": "approval and veto are non-delegable; emergency contact may only impose request_changes/fail-closed hold; any substitute requires a named principal, narrower or equal scope, and an earlier or equal expiry; no subdelegation",
+      "emergency_contact": {
+        "display_name": "CEO",
+        "principal_id": "a77605f2-8bbf-4eb9-9cda-7c036f5c5f75"
+      },
+      "formal_replacement": {
+        "action": "route and complete appointment of a permanent runtime owner; permanent principal must re-sign this exact revision/hash or its explicit successor before temporary expiry",
+        "action_owner_display_name": "CEOOrchestrator",
+        "action_owner_principal_id": "1e68c2e7-57cc-4e9e-88c8-3b4432fd6249",
+        "due_at": "2026-08-12T23:59:59+08:00"
+      },
+      "appointment_source": {
+        "issue_identifier": "SUO-286",
+        "immutable_comment_id": "567c22ae-6f81-4d24-9db9-4a74e24769d4",
+        "deep_link": "/SUO/issues/SUO-286#comment-567c22ae-6f81-4d24-9db9-4a74e24769d4"
+      },
+      "decision": "approve",
+      "signed_at": "2026-08-01T18:39:44+08:00",
+      "signature_method": "Paperclip append-only issue comment authored by the named principal",
+      "evidence_url": "/SUO/issues/SUO-291#comment-8c75006b-c373-43d9-9b56-9df855cc37a1",
+      "evidence_sha256": "sha256:0f014ba445f594112799c85ddd1387e6a1b5c2951e01e8c0ba30c94280b0dee5",
+      "evidence": {
+        "issue_identifier": "SUO-291",
+        "immutable_comment_id": "8c75006b-c373-43d9-9b56-9df855cc37a1",
+        "deep_link": "/SUO/issues/SUO-291#comment-8c75006b-c373-43d9-9b56-9df855cc37a1",
+        "author_agent_id": "2a7a15fe-2ebb-4dc5-91a8-48ae2bcc5471",
+        "comment_body_sha256": "sha256:0f014ba445f594112799c85ddd1387e6a1b5c2951e01e8c0ba30c94280b0dee5"
+      }
+    }
+  ],
+  "independent_acceptance": {
+    "required": true,
+    "status": "pending",
+    "required_checks": [
+      "exactly_one_valid_record_per_role",
+      "no_cross_scope_self_signing",
+      "no_group_or_blank_principal",
+      "no_missing_required_field",
+      "evidence_links_accessible_and_body_hashes_match",
+      "artifact_byte_hashes_match_review_target"
+    ],
+    "binding_rule": "The independent verdict must reference the immutable uploaded JSON and Markdown attachment SHA-256 values; local files must remain byte-identical to those reviewed attachments."
+  },
+  "gate_conclusion": {
+    "task_275a_governance_precondition": "pending_independent_acceptance",
+    "DECK-GATE-DEC-017": "blocked",
+    "production_gate": "blocked",
+    "later_tasks_started": false,
+    "reason": "Owner quorum is satisfied, but task_275a remains incomplete until an independent reviewer approves these exact artifact bytes. Production release additionally requires task_275b through task_275i and later evidence/review gates."
+  }
+}

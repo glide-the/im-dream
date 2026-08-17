@@ -1,14 +1,17 @@
-// [Input] Consume WorkspaceContext, AIInputDock, ChatPanel, ConnectorLandingPanel, auth token, and AI SDK message types.
+// [Input] Consume WorkspaceContext, AIInputDock, ChatPanel, Deck capability type,
+//         actor-scoped Dream re-entry/launch hooks, auth token, and AI SDK messages.
 //         /api/claude-agent/threads/{id}/status, reconnectStreamNonce to ChatPanel.
-// [Output] Render the chat workspace with lazy thread creation, a fully visible WorkspaceTabBar (聊天历史/资源连接器)
+// [Output] Render the chat workspace with lazy Chat/Dream dispatch and WorkspaceTabBar (聊天历史/进行中的 Dream)
 //          under the composer, history/file sidebars, a single pill quick-action strip, ChatPanel, and the
-//          ResourceConnectorTabPanel (ConnectorLandingPanel) that jumps to Settings resource links for management.
+//          actor-scoped active Dream list in the former visible Resource Connector position.
 //          When /status reports running, bump reconnectStreamNonce so ChatPanel attaches SSE stream.
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
 // [Sync] 2026-05-25: remove customer-context props from ChatView and ChatPanel composition.
 // [Sync] 2026-05-26: mark conversations started when loaded history contains messages.
 // [Sync] 2026-05-29: accept editorState prop and forward to ChatPanel for editor_state request injection.
+// [Sync] 2026-08-14: route Dream Deck sends through the existing launch hook, then open the
+//                    server-created canonical Dream workbench and show active outcomes.
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ChatPanel so Writing view reloads after agent writes.
 // [Sync] 2026-05-29: keep the original full-height workspace shell so VerticalNav stays flush-left.
 // [Sync] 2026-05-29: make status bar and collapsible sidebar-panel chrome theme-adaptive.
@@ -20,6 +23,8 @@
 // [Sync] 2026-06-09: stable onReconnectComplete callback so editorState re-renders do not abort SSE stream.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin thread APIs.
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
+// [Sync] 2026-08-13: forward the Editor Session persistence barrier so Chat
+//                    cannot expose an unpersisted snapshot to the Agent.
 // [Sync] 2026-06-22: hide the workspace file sidebar entry when Settings
 //                    Workspace Mode is disabled.
 // [Sync] 2026-06-27: add Chat history search over thread titles and persisted
@@ -65,76 +70,110 @@
 //                    search dialog, WorkspaceTabBar, aria labels) through the chat
 //                    namespace in i18n.ts (en + zh); date group/label helpers now take
 //                    t() and format via getDateLocale(i18n.language).
+// [Sync] 2026-08-03: share button now opens ChatShareDialog (复制链接 placeholder +
+//                    导出图片 long-image export via chat-export-registry + exportThreadImage).
+// [Sync] 2026-08-04: add thread subagent summary/right sidebar; Agent/Task chat buttons focus the matching task row.
+// [Sync] 2026-08-11: keep a lazy-created thread's first ChatPanel mounted while
+//                    it streams, and make ChatView own queued-turn consumption
+//                    so remounts cannot duplicate the /api/claude-agent request.
+// [Sync] 2026-08-14: dispatch server-resolved Dream Decks through the existing launch hook,
+//                    replace only the connector peer-tab/panel with actor-scoped active Dreams,
+//                    and restore stable deckId route intent after refresh.
+// [Sync] 2026-08-14: make each Active Dream card a canonical whole-card run.href link.
+// [Sync] 2026-08-14: show Dream's initial/in-progress rows in an adaptive horizontal scroller.
+// [Sync] 2026-08-15: historical threads hide the immutable composer selector;
+//                    Deck/Agent context remains visible in the top bar.
+// [Sync] 2026-08-17: share typed Chat history create/list/delete transport with
+//                    Deck related-conversation management.
+// [Sync] 2026-08-17: apply Deck preview example handoffs to the fresh Chat composer as unsent drafts.
+// [Sync] 2026-08-17: allow an active Thread to select the next-turn Agent within its bound Deck.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import '../../styles/markdown.css';
+import './ChatView.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
 import AIInputDock from './AIInputDock';
-import ChatPanel from './ChatPanel';
+import ChatPanel, { type ChatPanelRecoverySnapshot } from './ChatPanel';
 import {
   type Attachment,
   type UploadedFile,
   toAttachment,
 } from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
-import { getAuthToken } from '../../contexts/AuthContext';
 import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import PlanButton from './PlanPanel';
+import { SubagentButton, SubagentSidebar } from './SubagentPanel';
 import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
 import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
-import ConnectorLandingPanel from './ConnectorLandingPanel';
-import { IconClock, IconDatabase, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
+import ChatShareDialog from './ChatShareDialog';
+import { renderThreadImage, downloadThreadImage, releaseThreadImage, toExportChatMessage, buildExportPendingConfirmation, type ExportChatMessage, type RenderedThreadImage } from './exportThreadImage';
+import { getChatExportSnapshot } from '../../lib/chat-export-registry';
+import { IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconSparkles, IconX } from './Icons';
 import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
-import { API_BASE } from '../../lib/apiBase';
 import { getDateLocale } from '../../i18n';
+import { listDecks, getDeck, type Deck } from '../../api/voiceApi';
+import DeckChatSelector from '../deck/DeckChatSelector';
+import PluginReceiptBadge from './PluginReceiptBadge';
+import {
+  claudeThreadHydrationRetryDelayMs,
+  hydrateClaudeThreadSession,
+  type ClaudeThreadRecord,
+} from './threadSessionHydration';
+import { chatReconnectNonceForHydratedThread } from './chatRuntimeState';
+import {
+  storyWorkspaceDreamRunPath,
+  useStoryWorkspaceDreamLaunch,
+} from '../../hooks/story-workspace/useStoryWorkspaceDreamLaunch';
+import { useStoryWorkspaceDreamRuns } from '../../hooks/story-workspace/useStoryWorkspaceDreamRuns';
+import {
+  storyWorkspaceDreamReentryLifecycleCopy,
+  storyWorkspaceDreamReentryOutcomeCopy,
+} from '../../pages/story-workspace/dreamReentryViewModel';
+import {
+  readStoryWorkspaceAgentParam,
+  readStoryWorkspaceDeckParam,
+} from '../../router/storyWorkspacePath';
+import {
+  createChatThread,
+  deleteChatThread,
+  listChatThreads,
+  type ChatHistoryThread,
+} from '../../api/chatHistoryApi';
 
-interface ChatThread {
-  id: string;
-  title: string | null;
-  created_at: string;
-  updated_at: string;
-  match?: {
-    strategy: string;
-    retriever?: string;
-    score: number;
-    fields: string[];
-    excerpt?: string;
-  };
-}
-
-interface RawChatMessage {
-  id: string;
-  role: string;
-  /** Parsed UIMessage['parts'] array — returned by the API already deserialized. */
-  parts: UIMessage['parts'];
-  /** Parsed ChatMetadata — returned by the API already deserialized. */
-  metadata?: Record<string, unknown>;
-  created_at: string;
-}
+interface ChatThread extends ClaudeThreadRecord, ChatHistoryThread {}
 
 interface ChatViewProps {
   threadId?: string;
   /** When set, the view switches to this thread (used for external navigation from Deck / editor widgets). */
   requestedThreadId?: string;
+  /** Bump-only companion so reopening the same external thread refreshes status and reconnects SSE. */
+  requestedThreadNonce?: number;
+  /** When set (with requestedDeckNonce), preselect this Deck in the input dock and land on a fresh conversation (Deck editor "Chat →"). */
+  requestedDeckId?: string;
+  /** Agent selected under requestedDeckId. */
+  requestedAgentId?: string;
+  /** Optional user-visible example copied into the new Chat composer without sending. */
+  requestedDeckInput?: string;
+  /** Bump-only companion of requestedDeckId so repeated requests for the same Deck still re-apply. */
+  requestedDeckNonce?: number;
   onNewChat?: () => void;
   quickActions?: QuickActionStripItem[];
   /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
   editorState?: Record<string, unknown> | null;
+  ensureEditorSessionPersisted?: () => Promise<void>;
   /** Called when an editor write tool is confirmed so the Writing view can reload. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
   /** Active deck / voice info — displayed in the top-right badge and forwarded to the backend as voice context. */
   activeVoice?: ActiveChatVoice;
-  /** Mobile layout hint used by the connector landing panel and Settings-reused manager. */
+  /** Mobile layout hint for shell fallback/layout. */
   isMobile?: boolean;
   /** Controls the default landing tab when no thread is open. */
   landingTab?: ChatLandingTab;
-  /** Opens Settings and focuses the resource-link connector section. */
-  onOpenConnectorSettings?: () => void;
 }
 
 type ChatViewContentProps = Omit<ChatViewProps, 'landingTab' | 'isMobile'> & {
@@ -241,45 +280,9 @@ function getThreadDateGroup(value: string, t: TFunction): string {
   return t('chat.dateGroup.earlier');
 }
 
-async function createThread(): Promise<string | null> {
+async function fetchThreads(params: Parameters<typeof listChatThreads>[0] = {}): Promise<ChatThread[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads`, { method: 'POST', headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
-    if (!res.ok) return null;
-    const data = await res.json() as { thread_id: string };
-    return data.thread_id ?? null;
-  } catch {
-    return null;
-  }
-}
-
-interface ThreadSearchParams {
-  query?: string;
-  searchScope?: 'all' | 'title' | 'messages';
-  retrievalMode?: 'fuzzy' | 'auto' | 'vector';
-  limit?: number;
-  offset?: number;
-}
-
-async function fetchThreads(params: ThreadSearchParams = {}): Promise<ChatThread[]> {
-  try {
-    const search = new URLSearchParams();
-    const query = params.query?.trim() ?? '';
-    if (query) {
-      search.set('query', query);
-      search.set('search_scope', params.searchScope ?? 'all');
-      search.set('retrieval_mode', params.retrievalMode ?? 'fuzzy');
-    }
-    if (typeof params.limit === 'number') {
-      search.set('limit', String(params.limit));
-    }
-    if (typeof params.offset === 'number' && params.offset > 0) {
-      search.set('offset', String(params.offset));
-    }
-    const suffix = search.toString() ? `?${search.toString()}` : '';
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads${suffix}`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
-    if (!res.ok) return [];
-    const data = await res.json() as { threads: ChatThread[] };
-    return data.threads ?? [];
+    return await listChatThreads(params);
   } catch {
     return [];
   }
@@ -287,82 +290,49 @@ async function fetchThreads(params: ThreadSearchParams = {}): Promise<ChatThread
 
 async function deleteThread(threadId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${getAuthToken()}` },
-    });
-    return res.ok;
+    await deleteChatThread(threadId);
+    return true;
   } catch {
     return false;
-  }
-}
-
-interface ThreadStatusResult {
-  running: boolean;
-  lifecycle: 'idle' | 'running' | 'destroyed' | 'not_found';
-  turn_count: number;
-}
-
-async function fetchThreadStatus(threadId: string): Promise<ThreadStatusResult | null> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
-      { headers: { 'Authorization': `Bearer ${getAuthToken()}` } },
-    );
-    if (!res.ok) return null;
-    return (await res.json()) as ThreadStatusResult;
-  } catch {
-    return null;
-  }
-}
-
-async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
-  try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
-    if (!res.ok) return [];
-    const data = await res.json() as { messages?: RawChatMessage[] };
-    const msgs = data.messages ?? [];
-    return msgs.map((m) => {
-      // parts is already a parsed list — aligned with better-chatbot
-      // ChatRepository.selectMessagesByThreadId which returns parts directly.
-      const parts: UIMessage['parts'] = Array.isArray(m.parts) && m.parts.length > 0
-        ? m.parts
-        : [{ type: 'text', text: '' }];
-      const metadata = m.metadata && typeof m.metadata === 'object' ? m.metadata : undefined;
-      return {
-        id: m.id,
-        role: m.role as UIMessage['role'],
-        parts,
-        metadata,
-        createdAt: new Date(m.created_at),
-      };
-    });
-  } catch {
-    return [];
   }
 }
 
 function ChatViewContent({
   threadId: initialThreadId,
   requestedThreadId,
+  requestedThreadNonce,
+  requestedDeckId,
+  requestedAgentId,
+  requestedDeckInput,
+  requestedDeckNonce,
   onNewChat,
   quickActions,
   editorState,
+  ensureEditorSessionPersisted,
   onEditorWriteConfirmed,
   activeVoice,
   landingTab,
   onLandingTabChange,
-  onOpenConnectorSettings,
 }: ChatViewContentProps) {
   const { t, i18n } = useTranslation();
   const { workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
+  const [subagentSidebarOpen, setSubagentSidebarOpen] = useState(false);
+  const [focusedSubagentToolCallId, setFocusedSubagentToolCallId] = useState<string | null>(null);
   const [queuedPrompt, setQueuedPrompt] = useState('');
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
   const [queuedToolChoice, setQueuedToolChoice] = useState<ToolChoice>('auto');
   const [queuedPromptNonce, setQueuedPromptNonce] = useState(0);
+  // This ref belongs to ChatView, which remains mounted while the child ChatPanel
+  // is temporarily removed for active-thread history loading. A ChatPanel-local
+  // useRef resets during that remount and cannot provide request-level de-duplication.
+  const lastClaimedQueuedPromptNonceRef = useRef(0);
   const [hasConversationStarted, setHasConversationStarted] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
+  const [threadReloadNonce, setThreadReloadNonce] = useState(0);
+  // A thread created by this view is known to have no history yet. Skipping its
+  // first hydration keeps the ChatPanel (and its live fetch reader) mounted.
+  const freshQueuedThreadIdRef = useRef<string | null>(null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadSidebarOpen, setThreadSidebarOpen] = useState(false);
   const [isLoadingThreads, setIsLoadingThreads] = useState(false);
@@ -370,9 +340,26 @@ function ChatViewContent({
   const [hasMoreThreads, setHasMoreThreads] = useState(false);
   const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [threadMessages, setThreadMessages] = useState<UIMessage[] | null>(null);
+  const [initialSettledToolCallIds, setInitialSettledToolCallIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [initialRuntimePendingToolCallIds, setInitialRuntimePendingToolCallIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [initialRuntimeRunning, setInitialRuntimeRunning] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [draftInputError, setDraftInputError] = useState<string | null>(null);
-  const [shareCopied, setShareCopied] = useState(false);
+  const [availableDecks, setAvailableDecks] = useState<Deck[]>([]);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | undefined>();
+  const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>();
+  const [isLoadingDecks, setIsLoadingDecks] = useState(true);
+  const [deckLoadError, setDeckLoadError] = useState<string | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareExporting, setShareExporting] = useState(false);
+  const [shareExportFailed, setShareExportFailed] = useState(false);
+  const [sharePreview, setSharePreview] = useState<RenderedThreadImage | null>(null);
+  const [shareProgress, setShareProgress] = useState<{ done: number; total: number } | null>(null);
+  const [shareDownloading, setShareDownloading] = useState(false);
   const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadSearchQuery, setThreadSearchQuery] = useState('');
   const [threadSearchResults, setThreadSearchResults] = useState<ChatThread[]>([]);
@@ -386,6 +373,84 @@ function ChatViewContent({
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   // Bump to signal ChatPanel to attach GET /threads/{id}/stream when backend is still running.
   const [reconnectStreamNonce, setReconnectStreamNonce] = useState(0);
+  const dreamLaunch = useStoryWorkspaceDreamLaunch();
+  const dreamRuns = useStoryWorkspaceDreamRuns();
+  const dreamReentryRuns = useMemo(
+    () => dreamRuns.data?.runs ?? [],
+    [dreamRuns.data?.runs],
+  );
+  const openDreamRun = useCallback((href: string) => {
+    window.history.pushState({ inkDreamView: 'story-workspace' }, '', href);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, []);
+  const selectedDeck = useMemo(
+    () => availableDecks.find((deck) => deck.id === selectedDeckId),
+    [availableDecks, selectedDeckId],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingDecks(true);
+    setDeckLoadError(null);
+    void listDecks()
+      .then(async (decks) => {
+        // @@@ Hydrate each deck with its voices (same pattern as DeckManager) so the
+        // Dream Deck selector can preview the agents bundled with each deck.
+        const hydrated = await Promise.all(
+          decks.map(async (deck) => {
+            try {
+              return await getDeck(deck.id);
+            } catch {
+              return deck;
+            }
+          }),
+        );
+        if (cancelled) return;
+        const enabledDecks = hydrated.filter((deck) => deck.enabled);
+        setAvailableDecks(enabledDecks);
+        setSelectedDeckId((current) => (
+          current && enabledDecks.some((deck) => deck.id === current) ? current : undefined
+        ));
+        setSelectedAgentId((current) => (
+          current && enabledDecks.some((deck) => (deck.voices || []).some(
+            (agent) => agent.enabled && agent.id === current,
+          )) ? current : undefined
+        ));
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setAvailableDecks([]);
+        setDeckLoadError(error instanceof Error ? error.message : t('chat.deck.loadFailed'));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingDecks(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  // Stable route intent is re-applied only after the Deck is reloaded from the
+  // authenticated API. The route never supplies or authorizes Agent type.
+  useEffect(() => {
+    if (isLoadingDecks) return;
+    const query = new URLSearchParams(window.location.search);
+    const routeDeckId = readStoryWorkspaceDeckParam(query);
+    if (!routeDeckId) return;
+    const routeDeck = availableDecks.find((deck) => deck.id === routeDeckId);
+    if (!routeDeck) {
+      setDeckLoadError(t('chat.deck.routeUnavailable'));
+      setSelectedDeckId(undefined);
+      setSelectedAgentId(undefined);
+      return;
+    }
+    const requestedRouteAgent = readStoryWorkspaceAgentParam(query);
+    const routeAgent = routeDeck.voices?.find((voice) => (
+      voice.enabled && voice.id === requestedRouteAgent
+    )) ?? routeDeck.voices?.find((voice) => voice.enabled);
+    setSelectedDeckId(routeDeck.id);
+    setSelectedAgentId(routeAgent?.id);
+  }, [availableDecks, isLoadingDecks, t]);
 
   // Load thread list
   const reloadThreads = useCallback(async () => {
@@ -515,12 +580,26 @@ function ChatViewContent({
     }
   }, [workspaceEnabled]);
 
-  // @@@ External navigation: switch to a specific thread when requestedThreadId changes.
   useEffect(() => {
-    if (!requestedThreadId || requestedThreadId === activeThreadId) return;
+    setFileSidebarOpen(false);
+    setSubagentSidebarOpen(false);
+  }, [activeThreadId]);
+
+  // @@@ External navigation: switch threads, or rehydrate/reconnect when the
+  // same thread is explicitly reopened after another surface consumed it.
+  useEffect(() => {
+    if (!requestedThreadId) return;
+    if (requestedThreadId === activeThreadId && requestedThreadNonce === undefined) return;
     setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(true);
-    setActiveThreadId(requestedThreadId);
+    if (requestedThreadId === activeThreadId) {
+      setThreadReloadNonce((value) => value + 1);
+    } else {
+      setActiveThreadId(requestedThreadId);
+    }
     setHasConversationStarted(true);
     onLandingTabChange('history');
     setQueuedPrompt('');
@@ -528,27 +607,81 @@ function ChatViewContent({
     setQueuedToolChoice('auto');
     void reloadThreads();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedThreadId]);
+  }, [requestedThreadId, requestedThreadNonce]);
+
+  // @@@ External navigation (Deck editor "Chat →"): preselect the Agent under
+  // its Deck and land on a fresh conversation.
+  useEffect(() => {
+    if (requestedDeckNonce === undefined || !requestedDeckId) return;
+    const routeDeckId = readStoryWorkspaceDeckParam(new URLSearchParams(window.location.search));
+    if (routeDeckId && routeDeckId !== requestedDeckId) return;
+    const requestedDeck = availableDecks.find((deck) => deck.id === requestedDeckId);
+    if (!requestedDeck) return;
+    const requestedAgent = requestedDeck.voices?.find((voice) => (
+      voice.enabled && voice.id === requestedAgentId
+    )) ?? requestedDeck.voices?.find((voice) => voice.enabled);
+    setSelectedDeckId(requestedDeck.id);
+    setSelectedAgentId(requestedAgent?.id);
+    setActiveThreadId(null);
+    setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
+    setHasConversationStarted(false);
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
+  }, [availableDecks, requestedAgentId, requestedDeckId, requestedDeckNonce]);
 
   // Fetch messages for the active thread (following better-chatbot pattern:
   // parent fetches history and passes as initialMessages to the chat component).
   // Load history, then reconnect SSE when the backend turn is still running.
+  const hydratedMessagesThreadRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeThreadId) return;
+    if (freshQueuedThreadIdRef.current === activeThreadId) {
+      freshQueuedThreadIdRef.current = null;
+      return;
+    }
     let cancelled = false;
+    let retryTimer: number | null = null;
+    let hydrationAttempt = 0;
+    const threadChanged = hydratedMessagesThreadRef.current !== activeThreadId;
+    hydratedMessagesThreadRef.current = activeThreadId;
     setIsLoadingMessages(true);
-    setThreadMessages(null);
+    if (threadChanged) {
+      setThreadMessages(null);
+      setInitialSettledToolCallIds(new Set<string>());
+      setInitialRuntimePendingToolCallIds(new Set<string>());
+      setInitialRuntimeRunning(false);
+    }
 
-    void (async () => {
-      const msgs = await fetchThreadMessages(activeThreadId);
+    const hydrate = async () => {
+      let snapshot;
+      try {
+        snapshot = await hydrateClaudeThreadSession(activeThreadId);
+      } catch {
+        if (!cancelled) {
+          retryTimer = window.setTimeout(
+            () => void hydrate(),
+            claudeThreadHydrationRetryDelayMs(hydrationAttempt),
+          );
+          hydrationAttempt += 1;
+        }
+        return;
+      }
       if (cancelled) return;
+      const msgs = snapshot.messages;
+      setInitialSettledToolCallIds(snapshot.settledToolCallIds);
+      setInitialRuntimePendingToolCallIds(snapshot.runtimePendingToolCallIds);
+      setInitialRuntimeRunning(snapshot.running);
       setThreadMessages(msgs);
+      setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
+      setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
       if (msgs.length > 0) setHasConversationStarted(true);
       setIsLoadingMessages(false);
 
-      const status = await fetchThreadStatus(activeThreadId);
-      if (cancelled) return;
-      if (status?.running) {
+      if (snapshot.running) {
         setReconnectStreamNonce((value) => value + 1);
       }
 
@@ -556,21 +689,39 @@ function ChatViewContent({
       void hydrateThreadPlan(activeThreadId);
       // claude-todo §5.6: 并行水合 todos store，恢复弹层「待办」分区。
       void hydrateThreadTodos(activeThreadId);
-    })();
+    };
+    void hydrate();
 
     return () => {
       cancelled = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
+  }, [activeThreadId, threadReloadNonce]);
+
+  const activeThreadIdRef = useRef(activeThreadId);
+  activeThreadIdRef.current = activeThreadId;
+
+  const handleReconnectComplete = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
+    if (!activeThreadId) return undefined;
+    const requestedThreadId = activeThreadId;
+    const snapshot = await hydrateClaudeThreadSession(requestedThreadId);
+    if (activeThreadIdRef.current !== requestedThreadId) return undefined;
+    setInitialSettledToolCallIds(snapshot.settledToolCallIds);
+    setInitialRuntimePendingToolCallIds(snapshot.runtimePendingToolCallIds);
+    setInitialRuntimeRunning(snapshot.running);
+    setThreadMessages(snapshot.messages);
+    setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
+    setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
+    return {
+      messages: snapshot.messages,
+      settledToolCallIds: snapshot.settledToolCallIds,
+      runtimePendingToolCallIds: snapshot.runtimePendingToolCallIds,
+      running: snapshot.running,
     };
   }, [activeThreadId]);
 
-  const handleReconnectComplete = useCallback(async () => {
-    if (!activeThreadId) return;
-    const msgs = await fetchThreadMessages(activeThreadId);
-    setThreadMessages(msgs);
-  }, [activeThreadId]);
-
   const notifyReconnectComplete = useCallback(() => {
-    void handleReconnectComplete();
+    return handleReconnectComplete();
   }, [handleReconnectComplete]);
 
   const queuePromptForThread = useCallback((
@@ -579,7 +730,11 @@ function ChatViewContent({
     attachments: Attachment[] = [],
     toolChoice: ToolChoice = 'auto',
   ) => {
+    freshQueuedThreadIdRef.current = threadId;
     setThreadMessages([]);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(false);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
@@ -591,6 +746,20 @@ function ChatViewContent({
     void reloadThreads();
   }, [onLandingTabChange, reloadThreads]);
 
+  const claimQueuedPrompt = useCallback((nonce: number): boolean => {
+    if (nonce <= lastClaimedQueuedPromptNonceRef.current) {
+      return false;
+    }
+    lastClaimedQueuedPromptNonceRef.current = nonce;
+
+    // Clear the payload as soon as it has an owner. The nonce remains monotonic
+    // so delayed child effects can still be rejected by the gate above.
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
+    return true;
+  }, []);
+
   const startThreadWithQueuedSend = useCallback(async (
     message: string,
     uploadedFiles: UploadedFile[] = [],
@@ -600,7 +769,7 @@ function ChatViewContent({
 
     setDraftInputError(null);
     setIsCreatingThread(true);
-    const id = await createThread();
+    const id = await createChatThread(selectedDeckId, selectedAgentId);
     setIsCreatingThread(false);
     if (!id) {
       setDraftInputError(t('chat.history.createFailed'));
@@ -608,13 +777,52 @@ function ChatViewContent({
     }
 
     queuePromptForThread(id, message, uploadedFiles.map(toAttachment), toolChoice);
-  }, [isCreatingThread, queuePromptForThread, t]);
+  }, [isCreatingThread, queuePromptForThread, selectedAgentId, selectedDeckId, t]);
+
+  const startSelectedDeckInteraction = useCallback(async (
+    message: string,
+    uploadedFiles: UploadedFile[] = [],
+    toolChoice: ToolChoice = 'auto',
+  ) => {
+    if (selectedDeck?.agent_type !== 'dream') {
+      await startThreadWithQueuedSend(message, uploadedFiles, toolChoice);
+      return;
+    }
+    if (!selectedAgentId) {
+      setDraftInputError(t('chat.dream.selectAgent'));
+      return;
+    }
+    if (uploadedFiles.length > 0) {
+      setDraftInputError(t('chat.dream.attachmentsUnsupported'));
+      return;
+    }
+    setDraftInputError(null);
+    try {
+      const accepted = await dreamLaunch.start(selectedDeck.id, selectedAgentId, message);
+      setThreadMessages(null);
+      setInitialSettledToolCallIds(new Set<string>());
+      setInitialRuntimePendingToolCallIds(new Set<string>());
+      setInitialRuntimeRunning(true);
+      setIsLoadingMessages(true);
+      setActiveThreadId(accepted.threadId);
+      setHasConversationStarted(true);
+      onLandingTabChange('history');
+      dreamRuns.refetch();
+      void reloadThreads();
+      openDreamRun(storyWorkspaceDreamRunPath(accepted.workflowRunId));
+    } catch (error) {
+      setDraftInputError(error instanceof Error ? error.message : t('chat.dream.launchFailed'));
+    }
+  }, [dreamLaunch, dreamRuns, onLandingTabChange, openDreamRun, reloadThreads, selectedAgentId, selectedDeck, startThreadWithQueuedSend, t]);
 
   const handleNewChat = useCallback(() => {
     if (isCreatingThread) return;
 
     setDraftInputError(null);
     setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(false);
     setActiveThreadId(null);
     setHasConversationStarted(false);
@@ -633,6 +841,9 @@ function ChatViewContent({
     // key={activeThreadId}) starts with initialMessages=undefined and doesn't
     // pick up the previous thread's messages before the fetch completes.
     setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
+    setInitialRuntimeRunning(false);
     setIsLoadingMessages(true);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
@@ -647,10 +858,6 @@ function ChatViewContent({
     setQueuedToolChoice('auto');
   }, [onLandingTabChange]);
 
-  const handleOpenConnectorSettings = useCallback(() => {
-    onOpenConnectorSettings?.();
-  }, [onOpenConnectorSettings]);
-
   const handleSelectWorkspaceTab = useCallback((tab: ChatLandingTab) => {
     onLandingTabChange(tab);
     if (tab === 'history') {
@@ -658,14 +865,112 @@ function ChatViewContent({
     }
   }, [onLandingTabChange, reloadThreads]);
 
-  const handleShare = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href);
-      setShareCopied(true);
-      window.setTimeout(() => setShareCopied(false), 1600);
-    } catch {
-      setShareCopied(false);
+  const handleOpenShareDialog = useCallback(() => {
+    // 导出进行中（后台运行）或已有完成预览时，直接打开弹窗呈现当前状态，不重置。
+    if (shareExporting || (sharePreview && !sharePreview.partial)) {
+      setShareDialogOpen(true);
+      return;
     }
+    setShareExportFailed(false);
+    setShareProgress(null);
+    setSharePreview((previous) => {
+      releaseThreadImage(previous);
+      return null;
+    });
+    setShareDialogOpen(true);
+  }, [shareExporting, sharePreview]);
+
+  const handleCloseShareDialog = useCallback(() => {
+    setShareDialogOpen(false);
+    // 导出/下载进行中关闭 = 任务转后台运行：保留进度与预览状态，不打断、不释放。
+    if (shareExporting || shareDownloading) {
+      return;
+    }
+    setShareExportFailed(false);
+    setShareProgress(null);
+    setSharePreview((previous) => {
+      releaseThreadImage(previous);
+      return null;
+    });
+  }, [shareExporting, shareDownloading]);
+
+  const handleExportShareImage = useCallback(async () => {
+    if (!activeThreadId || shareExporting) {
+      return;
+    }
+    setShareExporting(true);
+    setShareExportFailed(false);
+    setShareProgress(null);
+    try {
+      const snapshot = getChatExportSnapshot(activeThreadId);
+      const exportMessages = snapshot.messages
+        .map((message) => toExportChatMessage(message, snapshot.toolChoice, t))
+        .filter((message): message is ExportChatMessage => message !== null);
+      if (exportMessages.length === 0) {
+        throw new Error('nothing to export');
+      }
+      const threadTitle = threads.find((thread) => thread.id === activeThreadId)?.title
+        ?? t('chat.history.fallbackTitle');
+      const rendered = await renderThreadImage({
+        threadId: activeThreadId,
+        title: threadTitle,
+        messages: exportMessages,
+        labels: {
+          you: t('chat.share.you'),
+          assistant: t('chat.share.assistant'),
+          footer: t('chat.share.footer'),
+          thinking: t('chat.share.thinking'),
+          truncated: t('chat.share.truncated'),
+        },
+        // 待确认窗口整图只有一个，渲染在长图最下方（镜像 ToolConfirmationDock）。
+        pendingConfirmation: buildExportPendingConfirmation(snapshot.pendingConfirmation, t),
+      }, {
+        // 首片截好立即上屏一段预览头，剩余部分后台继续拼接。
+        // 替换/完成时先回收旧预览的 blob URL，避免长图 Blob 常驻内存。
+        onPartialPreview: (partial) => setSharePreview((previous) => {
+          releaseThreadImage(previous);
+          return partial;
+        }),
+        onProgress: setShareProgress,
+      });
+      setSharePreview((previous) => {
+        releaseThreadImage(previous);
+        return rendered;
+      });
+      // 后台运行完成的信号 — 若弹窗被用户关闭过，完成时自动弹回结果。
+      setShareDialogOpen(true);
+    } catch {
+      setShareExportFailed(true);
+      // 后台运行失败同样弹回，避免静默失败。
+      setShareDialogOpen(true);
+    } finally {
+      setShareExporting(false);
+    }
+  }, [activeThreadId, shareExporting, threads, t]);
+
+  const handleDownloadSharePreview = useCallback(async () => {
+    if (!sharePreview || sharePreview.partial || shareDownloading) {
+      return;
+    }
+    setShareDownloading(true);
+    try {
+      // 先完成下载（png-stitch 需要 fetch 这些 blob URL），再回收并关弹窗。
+      await downloadThreadImage(sharePreview);
+      setShareDialogOpen(false);
+      setSharePreview((previous) => {
+        releaseThreadImage(previous);
+        return null;
+      });
+    } finally {
+      setShareDownloading(false);
+    }
+  }, [sharePreview, shareDownloading]);
+
+  const handleDiscardSharePreview = useCallback(() => {
+    setSharePreview((previous) => {
+      releaseThreadImage(previous);
+      return null;
+    });
   }, []);
 
   const handleDeleteThread = useCallback(async (e: React.MouseEvent, threadId: string) => {
@@ -679,6 +984,9 @@ function ChatViewContent({
     if (threadId === activeThreadId) {
       setActiveThreadId(null);
       setThreadMessages(null);
+      setInitialSettledToolCallIds(new Set<string>());
+      setInitialRuntimePendingToolCallIds(new Set<string>());
+      setInitialRuntimeRunning(false);
       setHasConversationStarted(false);
       setQueuedPrompt('');
       setQueuedAttachments([]);
@@ -708,23 +1016,57 @@ function ChatViewContent({
     return groups;
   }, [threads, t]);
 
+  const selectedVoiceEntry = availableDecks
+    .flatMap((deck) => (deck.voices || []).map((voice) => ({ deck, voice })))
+    .find(({ voice }) => voice.id === selectedAgentId);
+  // Legacy voice threads predate persisted Agent IDs; keep their association as
+  // a read-only fallback while all new conversations use selectedAgentId.
+  const legacyThreadVoiceEntry = !selectedVoiceEntry && activeThreadId
+    ? availableDecks.flatMap((deck) => (deck.voices || []).map((voice) => ({ deck, voice })))
+        .find(({ voice }) => voice.thread_id === activeThreadId)
+    : undefined;
+  const threadVoiceEntry = selectedVoiceEntry ?? legacyThreadVoiceEntry;
+  const isRequestedThreadActive = requestedThreadId !== undefined
+    && requestedThreadId === activeThreadId;
+  const badgeDeckId = selectedDeckId ?? threadVoiceEntry?.deck.id;
+  const activeVoiceDeck = activeVoice
+    ? availableDecks.find(
+        (deck) => (deck.voices || []).some((voice) => voice.name === activeVoice.name),
+      )
+    : undefined;
+  const showPropVoice = !threadVoiceEntry && activeVoice && (
+    isRequestedThreadActive
+    || (activeVoiceDeck !== undefined && badgeDeckId === activeVoiceDeck.id)
+  );
+  const displayVoice = threadVoiceEntry
+    ? {
+        name: threadVoiceEntry.voice.name,
+        icon: threadVoiceEntry.voice.icon,
+        color: threadVoiceEntry.voice.color,
+      }
+    : (showPropVoice ? activeVoice : undefined);
+  // The chosen Agent is the only voice prompt for this thread; its Deck remains
+  // the immutable plugin/runtime provenance.
+  const voiceSystemPrompt = threadVoiceEntry
+    ? threadVoiceEntry.voice.system_prompt
+    : (isRequestedThreadActive ? activeVoice?.systemPrompt : undefined);
+
   return (
-      <div style={{ position: 'relative', display: 'flex', width: '100%', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
-        <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      <div style={{ position: 'relative', display: 'flex', width: '100%', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>        <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           {/* 浮动操作按钮区 – 右上角：卡组信息 / 新建 / 更多（含下拉菜单） */}
           <div style={{ position: 'absolute', top: '0.65rem', right: '0.75rem', zIndex: 20, display: 'flex', alignItems: 'center', gap: '0.15rem' }}>
-            {/* 当前 Deck Voice 徽标 */}
-            {activeVoice && (() => {
+            {/* 当前 Deck Voice 徽标（按当前线程推导，切换对话不残留旧值） */}
+            {displayVoice && (() => {
               const colorHex: Record<string, string> = {
                 blue: '#4da3ff', pink: '#ff66b3', green: '#52c77e',
                 purple: '#9b7ff5', orange: '#f9a875', red: '#f86e6e',
                 yellow: '#f5d76e', teal: '#5ec0c0'
               };
-              const hex = colorHex[activeVoice.color] ?? '#4da3ff';
-              const VoiceIcon = iconMap[activeVoice.icon as keyof typeof iconMap] || iconMap.brain;
+              const hex = colorHex[displayVoice.color] ?? '#4da3ff';
+              const VoiceIcon = iconMap[displayVoice.icon as keyof typeof iconMap] || iconMap.brain;
               return (
                 <div
-                  title={activeVoice.name}
+                  title={displayVoice.name}
                   style={{
                     height: '2rem',
                     display: 'inline-flex',
@@ -743,11 +1085,19 @@ function ChatViewContent({
                 >
                   <VoiceIcon style={{ width: '0.85rem', height: '0.85rem', flexShrink: 0 }} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {activeVoice.name}
+                    {displayVoice.name}
                   </span>
                 </div>
               );
             })()}
+            {/* 插件加载 receipt 徽标（点击查看 Deck 元信息 / 插件清单） */}
+            <PluginReceiptBadge
+              activeVoiceId={threadVoiceEntry?.voice.id}
+              activeVoiceName={displayVoice?.name}
+              deck={availableDecks.find((deck) => deck.id === badgeDeckId)}
+              onSelectAgent={activeThreadId ? setSelectedAgentId : undefined}
+              threadId={activeThreadId ?? null}
+            />
             {/* 新建对话 */}
             <button
               type="button"
@@ -764,6 +1114,23 @@ function ChatViewContent({
 
             {/* claude-plan 计划按钮 – 仅当计划被触发或存在计划文件时渲染；点击切换锚定弹层 */}
             {activeThreadId ? <PlanButton threadId={activeThreadId} /> : null}
+
+            {activeThreadId ? (
+              <SubagentButton
+                threadId={activeThreadId}
+                open={subagentSidebarOpen}
+                onToggle={() => {
+                  setSubagentSidebarOpen((current) => {
+                    const next = !current;
+                    if (next) {
+                      setFileSidebarOpen(false);
+                      setFocusedSubagentToolCallId(null);
+                    }
+                    return next;
+                  });
+                }}
+              />
+            ) : null}
 
             {/* 更多 */}
             <div style={{ position: 'relative' }}>
@@ -802,7 +1169,14 @@ function ChatViewContent({
                     {workspaceEnabled ? (
                       <button
                         type="button"
-                        onClick={() => { setFileSidebarOpen((v) => !v); setMoreMenuOpen(false); }}
+                        onClick={() => {
+                          setFileSidebarOpen((current) => {
+                            const next = !current;
+                            if (next) setSubagentSidebarOpen(false);
+                            return next;
+                          });
+                          setMoreMenuOpen(false);
+                        }}
                         style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: fileSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                       >
                         <IconFolder style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
@@ -812,11 +1186,16 @@ function ChatViewContent({
                     <div style={{ height: '1px', background: 'var(--color-border-paper)', margin: '0.2rem 0.4rem' }} />
                     <button
                       type="button"
-                      onClick={() => { void handleShare(); setMoreMenuOpen(false); }}
+                      onClick={() => {
+                        // 点分享直接触发生成 — 弹窗立即进入预览流程（先出头部一段）。
+                        handleOpenShareDialog();
+                        void handleExportShareImage();
+                        setMoreMenuOpen(false);
+                      }}
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                     >
                       <IconShare style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
-                      <span>{shareCopied ? t('chat.history.linkCopied') : t('chat.history.share')}</span>
+                      <span>{t('chat.history.share')}</span>
                     </button>
                   </div>
                 </>
@@ -826,22 +1205,41 @@ function ChatViewContent({
 
           <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '3rem 0.75rem 0.75rem', gap: '0.75rem', overflow: 'hidden', boxSizing: 'border-box' }}>
             <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {activeThreadId && landingTab === 'history' ? (
+              {activeThreadId && landingTab === 'history' && threadMessages === null ? (
+                <div style={{ width: '100%', maxWidth: '52rem', margin: '1rem auto' }}>
+                  <SkeletonList rows={3} />
+                </div>
+              ) : activeThreadId && landingTab === 'history' ? (
                 <ChatPanel
                   key={activeThreadId}
                   threadId={activeThreadId}
                   initialMessages={threadMessages ?? undefined}
                   isLoading={isLoadingMessages}
-                  reconnectStreamNonce={reconnectStreamNonce}
+                  reconnectStreamNonce={chatReconnectNonceForHydratedThread(
+                    initialRuntimeRunning,
+                    reconnectStreamNonce,
+                  )}
+                  initialSettledToolCallIds={initialSettledToolCallIds}
+                  initialRuntimePendingToolCallIds={initialRuntimePendingToolCallIds}
+                  initialRuntimeRunning={initialRuntimeRunning}
                   onReconnectComplete={notifyReconnectComplete}
                   queuedPrompt={queuedPrompt}
                   queuedAttachments={queuedAttachments}
                   queuedToolChoice={queuedToolChoice}
                   queuedPromptNonce={queuedPromptNonce}
+                  claimQueuedPrompt={claimQueuedPrompt}
                   inputPlaceholder="Ask Ink & Memory…"
                   editorState={editorState}
+                  ensureEditorSessionPersisted={ensureEditorSessionPersisted}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
-                  voiceSystemPrompt={activeVoice?.systemPrompt}
+                  onOpenSubagentTask={(toolCallId) => {
+                    setFocusedSubagentToolCallId(toolCallId);
+                    setFileSidebarOpen(false);
+                    setSubagentSidebarOpen(true);
+                  }}
+                  voiceSystemPrompt={voiceSystemPrompt}
+                  deckId={selectedDeckId}
+                  voiceId={selectedAgentId}
                   onConversationStart={() => {
                     setHasConversationStarted(true);
                     void reloadThreads();
@@ -857,12 +1255,27 @@ function ChatViewContent({
                     ) : null}
                     <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, paddingBottom: '0.25rem' }}>
                       <AIInputDock
+                        deckId={selectedDeckId}
+                        prefill={requestedDeckInput}
+                        prefillNonce={requestedDeckNonce}
                         onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
-                          void startThreadWithQueuedSend(message, uploadedFiles, toolChoice);
+                          void startSelectedDeckInteraction(message, uploadedFiles, toolChoice);
                         }}
                         placeholder="Ask Ink & Memory…"
-                        disabled={isCreatingThread}
-                        loading={isCreatingThread}
+                        disabled={isCreatingThread || dreamLaunch.isLaunching}
+                        loading={isCreatingThread || dreamLaunch.isLaunching}
+                        contextControl={(
+                          <DeckChatSelector
+                            decks={availableDecks}
+                            selectedAgentId={selectedAgentId}
+                            onChange={(selection) => {
+                              setSelectedDeckId(selection?.deckId);
+                              setSelectedAgentId(selection?.agentId);
+                            }}
+                            loading={isLoadingDecks}
+                            error={deckLoadError}
+                          />
+                        )}
                         mode="full"
                       />
                     </div>
@@ -872,7 +1285,7 @@ function ChatViewContent({
                         <QuickActionStrip
                           items={landingQuickActions}
                           onSelect={(item) => {
-                            void startThreadWithQueuedSend(item.prompt);
+                            void startSelectedDeckInteraction(item.prompt);
                           }}
                         />
                       </div>
@@ -910,25 +1323,25 @@ function ChatViewContent({
                         <button
                           type="button"
                           role="tab"
-                          aria-selected={landingTab === 'connector'}
-                          onClick={() => handleSelectWorkspaceTab('connector')}
+                          aria-selected={landingTab === 'dreams'}
+                          onClick={() => handleSelectWorkspaceTab('dreams')}
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '0.4rem',
-                            border: `1px solid ${landingTab === 'connector' ? 'color-mix(in srgb, var(--color-border-paper) 72%, var(--color-text-muted))' : 'transparent'}`,
+                            border: `1px solid ${landingTab === 'dreams' ? 'color-mix(in srgb, var(--color-border-paper) 72%, var(--color-text-muted))' : 'transparent'}`,
                             borderRadius: '999px',
                             padding: '0.55rem 0.9rem',
-                            background: landingTab === 'connector' ? 'var(--color-bg-surface)' : 'color-mix(in srgb, var(--color-bg-surface) 32%, transparent)',
+                            background: landingTab === 'dreams' ? 'var(--color-bg-surface)' : 'color-mix(in srgb, var(--color-bg-surface) 32%, transparent)',
                             color: 'var(--color-text-primary)',
                             cursor: 'pointer',
                             fontSize: '0.82rem',
                             fontWeight: 700,
-                            boxShadow: landingTab === 'connector' ? '0 1px 4px var(--color-shadow-soft)' : 'none',
+                            boxShadow: landingTab === 'dreams' ? '0 1px 4px var(--color-shadow-soft)' : 'none',
                           }}
                         >
-                          <IconDatabase style={{ width: '0.85rem', height: '0.85rem' }} />
-                          {t('chat.tabs.connector')}
+                          <IconSparkles style={{ width: '0.85rem', height: '0.85rem' }} />
+                          {t('chat.tabs.activeDreams', { count: dreamReentryRuns.length })}
                         </button>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', minWidth: 0, marginLeft: 'auto' }}>
@@ -947,42 +1360,9 @@ function ChatViewContent({
                             {t('chat.search.button')}
                           </button>
                         ) : (
-                          <>
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.35rem',
-                                border: '1px solid var(--color-border-paper)',
-                                borderRadius: '999px',
-                                padding: '0.45rem 0.72rem',
-                                background: 'var(--color-bg-surface)',
-                                color: 'var(--color-text-secondary)',
-                                fontSize: '0.76rem',
-                                fontWeight: 600,
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {t('chat.filters.filterAll')}
-                            </span>
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.35rem',
-                                border: '1px solid var(--color-border-paper)',
-                                borderRadius: '999px',
-                                padding: '0.45rem 0.72rem',
-                                background: 'var(--color-bg-surface)',
-                                color: 'var(--color-text-secondary)',
-                                fontSize: '0.76rem',
-                                fontWeight: 600,
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {t('chat.filters.sortRecent')}
-                            </span>
-                          </>
+                          <button type="button" onClick={dreamRuns.refetch} style={{ border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.5rem 0.75rem', background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+                            {t('chat.dream.refresh')}
+                          </button>
                         )}
                       </div>
                     </div>
@@ -1062,8 +1442,63 @@ function ChatViewContent({
                             ) : null}
                           </div>
                         </div>
+                      ) : dreamRuns.isLoading ? (
+                        <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={3} /></div>
+                      ) : dreamRuns.error ? (
+                        <div role="alert" style={{ padding: '1rem', color: 'var(--color-state-error)', fontSize: '0.82rem' }}>
+                          {t('chat.dream.listFailed')}
+                        </div>
+                      ) : dreamReentryRuns.length === 0 ? (
+                        <div style={{ padding: '1rem', color: 'var(--color-text-muted)', fontSize: '0.82rem' }}>
+                          {t('chat.dream.empty')}
+                        </div>
                       ) : (
-                        <ConnectorLandingPanel onOpenConnector={handleOpenConnectorSettings} />
+                        <div
+                          aria-label={t('chat.dream.listAria')}
+                          className="chat-dream-reentry-scroller"
+                          role="list"
+                        >
+                          {dreamReentryRuns.map((run) => (
+                            <article
+                              className="chat-dream-reentry-card"
+                              key={run.storyWorkspaceRunId}
+                              role="listitem"
+                            >
+                              <a
+                                aria-label={`${run.displayTitle} · ${t('chat.dream.open')}`}
+                                className="chat-dream-reentry-card__link"
+                                href={run.href}
+                                onClick={(event) => {
+                                  if (
+                                    event.button !== 0
+                                    || event.metaKey
+                                    || event.ctrlKey
+                                    || event.shiftKey
+                                    || event.altKey
+                                  ) return;
+                                  event.preventDefault();
+                                  openDreamRun(run.href);
+                                }}
+                              >
+                                <span style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.8rem' }}>
+                                  <span style={{ minWidth: 0 }}>
+                                    <span style={{ display: 'block', color: 'var(--color-text-primary)', fontSize: '0.86rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{run.displayTitle}</span>
+                                    <span style={{ display: 'block', marginTop: '0.2rem', color: 'var(--color-text-secondary)', fontSize: '0.72rem' }}>{run.deckDisplayName} · {storyWorkspaceDreamReentryLifecycleCopy(run.lifecycle)}</span>
+                                  </span>
+                                  <span className="chat-dream-reentry-card__status">
+                                    {storyWorkspaceDreamReentryOutcomeCopy(run.outcome)}
+                                  </span>
+                                </span>
+                                <span className="chat-dream-reentry-card__footer">
+                                  <time dateTime={run.lastActivityAt}>
+                                    {new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(run.lastActivityAt))}
+                                  </time>
+                                  <span aria-hidden="true">{t('chat.dream.open')} →</span>
+                                </span>
+                              </a>
+                            </article>
+                          ))}
+                        </div>
                       )}
                     </section>
                   </div>
@@ -1268,6 +1703,30 @@ function ChatViewContent({
         {workspaceEnabled ? (
           <FileSidebar sessionId={activeThreadId ?? ''} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
         ) : null}
+
+        {activeThreadId ? (
+          <SubagentSidebar
+            threadId={activeThreadId}
+            open={subagentSidebarOpen}
+            focusToolCallId={focusedSubagentToolCallId}
+            onClose={() => setSubagentSidebarOpen(false)}
+          />
+        ) : null}
+
+        <ChatShareDialog
+          open={shareDialogOpen}
+          threadTitle={threads.find((thread) => thread.id === activeThreadId)?.title ?? null}
+          exporting={shareExporting}
+          exportFailed={shareExportFailed}
+          canExport={Boolean(activeThreadId)}
+          preview={sharePreview}
+          downloading={shareDownloading}
+          progress={shareProgress}
+          onClose={handleCloseShareDialog}
+          onExportImage={() => void handleExportShareImage()}
+          onDownloadPreview={() => void handleDownloadSharePreview()}
+          onDiscardPreview={handleDiscardSharePreview}
+        />
       </div>
   );
 }
