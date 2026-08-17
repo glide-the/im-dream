@@ -1,9 +1,9 @@
 // [Input] Dream workbench and Story Workspace router sources.
 // [Output] Regression coverage for the two-state three-section Dream home, re-entry, context ownership,
-//          and the workbench's default-open Dream Agent editor.
+//          deferred marketplace exclusion, and the popup-scoped Deck metadata boundary.
 // [Pos] Story Workspace Dream re-entry Node seam (U2 Red).
 // [Sync] 2026-08-14: cover natural-flow re-entry, canonical whole-row links, and pagination.
-// [Sync] 2026-08-14: cover initial/in-progress search copy without completed/failed groups.
+// [Sync] 2026-08-16: restore pre-01a00576 Deck maintenance and keep its handoff in canonical Chat.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -23,15 +23,13 @@ const ROUTER_SOURCE = readFileSync(new URL('../../../router/story-workspace.tsx'
 const LAYOUT_SOURCE = readFileSync(new URL('../../../components/story-workspace/layout/StoryWorkspaceLayout.tsx', import.meta.url), 'utf8');
 const LAYOUT_CSS = readFileSync(new URL('../../../components/story-workspace/layout/StoryWorkspaceLayout.css', import.meta.url), 'utf8');
 const DECK_SOURCE = readFileSync(new URL('../../../components/DeckEditorModal.tsx', import.meta.url), 'utf8');
-const APP_SOURCE = readFileSync(new URL('../../../App.tsx', import.meta.url), 'utf8');
 
-test('no-run Dream home promotes active runs, community Decks, and durable re-entry without a launch form', () => {
+test('no-run Dream home promotes active runs and durable re-entry without a marketplace or launch form', () => {
   expect(LAUNCH_SOURCE).toContain('useStoryWorkspaceDreamRuns');
   expect(LAUNCH_SOURCE).toContain('进行中的 Dream');
   expect(LAUNCH_SOURCE).toContain("run.outcome === 'in_progress'");
-  expect(LAUNCH_SOURCE).toContain('社区卡组（{communityDecks.length}）');
   expect(LAUNCH_SOURCE).toContain('我的 Dream');
-  expect(LAUNCH_SOURCE).toContain("deck.agent_type === 'dream'");
+  expect(LAUNCH_SOURCE).not.toMatch(/社区卡组|communityDecks|listDecks\(true\)|forkDeck/);
   expect(LAUNCH_SOURCE).toContain('story-workspace-dream-reentry');
   expect(LAUNCH_SOURCE).toContain('<strong>{run.displayTitle}</strong>');
   expect(LAUNCH_SOURCE).toContain('<small>{run.deckDisplayName}');
@@ -146,13 +144,13 @@ test('Dream route removes the top WorkflowContextBar while non-Dream route suppo
   expect(LAYOUT_SOURCE).toContain('<WorkflowContextBar {...workflowContext} />');
 });
 
-test('Deck editor exposes semantic Agent type and routes every Deck through Chat', () => {
-  expect(DECK_SOURCE).toContain('普通 Chat Agent');
-  expect(DECK_SOURCE).toContain('Dream Agent');
-  expect(DECK_SOURCE).toContain('type="radio"');
-  expect(DECK_SOURCE).not.toContain('onOpenDreamWithDeck');
-  expect(APP_SOURCE).toContain('`${STORY_WORKSPACE_PATHS.chat}?${query.toString()}`');
-  expect(DECK_SOURCE).not.toContain('ChatView');
+test('Deck popup restores Deck-owned maintenance without Workflow', () => {
+  expect(DECK_SOURCE).toContain('deck: Deck;');
+  expect(DECK_SOURCE).not.toContain('onCreateDeck');
+  expect(DECK_SOURCE).toContain('DeckClaudePluginSelector');
+  expect(DECK_SOURCE).toContain('Agent Prompt');
+  expect(DECK_SOURCE).toContain('onChatWithDeck');
+  expect(DECK_SOURCE).not.toMatch(/Workflow|工作流|memory_workspace_config|onOpenDreamWithDeck|ChatView/);
 });
 
 test('403/404 deep links resolve to no run so Dream renders the recovery workbench, never a raw run page', async () => {

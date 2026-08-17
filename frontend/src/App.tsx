@@ -11,6 +11,8 @@
 //                    snapshot to an Agent that may invoke database-backed MCP writes.
 // [Sync] 2026-08-14: route Deck selection to canonical Story Workspace Chat
 //                    with stable Deck/Agent intent; mode is re-read from the server.
+// [Sync] 2026-08-15: notify the mounted Story Workspace router after Deck-to-Chat
+//                    pushState so the visible page and URL change in the same interaction.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
 // [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect inserts widget, stays in writing view; handleChatSend uses chatWithVoice with full context (allText, metaPrompt, statePrompt); "Chat →" button available when thread exists.
 // [Sync] 2026-06-01: pass state as editorState to chatWithVoiceSSE in handleChatSend so inline widget agent receives editor_state.
@@ -25,6 +27,10 @@
 // [Sync] 2026-08-14: replace the authenticated root entry with canonical Story Workspace Chat
 //                    while preserving explicit deep links and browser history semantics.
 // [Sync] 2026-08-14: defer authenticated Deck voice loading until registration/login completes.
+// [Sync] 2026-08-16: restore the pre-01a00576 Deck maintenance popup handoff to canonical Chat.
+// [Sync] 2026-08-16: route Deck settings through Settings / Work and provide the Work-owned management instance.
+// [Sync] 2026-08-16: make the Deck-home Settings action navigate directly to Settings / Work.
+// [Sync] 2026-08-17: carry Deck preview example copy into the new Chat draft without URL persistence or auto-send.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -207,8 +213,9 @@ export default function App() {
     window.history.pushState(
       { inkDreamView: 'story-workspace' },
       '',
-      '/story-workspace/settings/resources',
+      `${STORY_WORKSPACE_PATHS['settings-work']}?tab=resources`,
     );
+    window.dispatchEvent(new PopStateEvent('popstate'));
     setCurrentView('story-workspace');
     setShowNotionConnectorDetail(false);
     setConnectorSettingsFocusNonce((value) => value + 1);
@@ -328,7 +335,12 @@ export default function App() {
   const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
   /** Bump for repeated requests to reopen/reconnect the same Chat thread. */
   const [requestedChatThreadNonce, setRequestedChatThreadNonce] = useState(0);
-  const [requestedChatDeck, setRequestedChatDeck] = useState<{ deckId: string; agentId?: string; nonce: number } | undefined>(undefined);
+  const [requestedChatDeck, setRequestedChatDeck] = useState<{
+    deckId: string;
+    agentId?: string;
+    input?: string;
+    nonce: number;
+  } | undefined>(undefined);
   /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
   const [activeChatVoice, setActiveChatVoice] = useState<ActiveChatVoice | undefined>(undefined);
 
@@ -1105,11 +1117,11 @@ export default function App() {
     setActiveChatVoice(undefined);
   }, []);
 
-  // @@@ Every Deck starts in canonical Story Workspace Chat. The URL carries
-  // only stable selection intent; Chat reloads the Deck's server-derived type.
-  const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice) => {
+  // Every Deck maintenance handoff starts in canonical Story Workspace Chat.
+  // The URL carries only stable selection intent; Chat reloads server-derived facts.
+  const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice, input?: string) => {
     setRequestedChatThreadId(undefined);
-    setRequestedChatDeck({ deckId, agentId: voiceInfo?.id, nonce: Date.now() });
+    setRequestedChatDeck({ deckId, agentId: voiceInfo?.id, input, nonce: Date.now() });
     setActiveChatVoice(voiceInfo);
     const query = new URLSearchParams({ deck: deckId });
     if (voiceInfo?.id) query.set('agent', voiceInfo.id);
@@ -1118,8 +1130,19 @@ export default function App() {
       '',
       `${STORY_WORKSPACE_PATHS.chat}?${query.toString()}`,
     );
+    window.dispatchEvent(new PopStateEvent('popstate'));
     setCurrentView('story-workspace');
     setHasOpenedChatView(true);
+  }, []);
+
+  const handleOpenSettingsFromDeck = useCallback(() => {
+    window.history.pushState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      STORY_WORKSPACE_PATHS['settings-work'],
+    );
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    setCurrentView('story-workspace');
   }, []);
 
   const handleDeckManagerUpdate = async () => {
@@ -1139,6 +1162,16 @@ export default function App() {
     <DeckManager
       onUpdate={handleDeckManagerUpdate}
       onChatWithDeck={handleChatWithDeck}
+      onOpenSettings={handleOpenSettingsFromDeck}
+      surface="launcher"
+    />
+  );
+
+  const storyWorkspaceDeckSettingsManager = (
+    <DeckManager
+      onUpdate={handleDeckManagerUpdate}
+      onChatWithDeck={handleChatWithDeck}
+      surface="settings"
     />
   );
 
@@ -1598,6 +1631,7 @@ export default function App() {
                     requestedThreadNonce={requestedChatThreadNonce}
                     requestedDeckId={requestedChatDeck?.deckId}
                     requestedAgentId={requestedChatDeck?.agentId}
+                    requestedDeckInput={requestedChatDeck?.input}
                     requestedDeckNonce={requestedChatDeck?.nonce}
                     activeVoice={activeChatVoice}
                     isMobile={isMobile}
@@ -1620,6 +1654,7 @@ export default function App() {
                 onOpenNotionDetail={openNotionConnectorDetail}
                 showEnergyBar={showEnergyBar}
                 showNotionConnectorDetail={showNotionConnectorDetail}
+                workDeckContent={storyWorkspaceDeckSettingsManager}
               />
             )}
           />
@@ -2380,6 +2415,7 @@ export default function App() {
             requestedThreadNonce={requestedChatThreadNonce}
             requestedDeckId={requestedChatDeck?.deckId}
             requestedAgentId={requestedChatDeck?.agentId}
+            requestedDeckInput={requestedChatDeck?.input}
             requestedDeckNonce={requestedChatDeck?.nonce}
             activeVoice={activeChatVoice}
             isMobile={isMobile}

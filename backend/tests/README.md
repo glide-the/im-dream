@@ -1,4 +1,10 @@
 # Test Suite
+<!--
+[Input] Backend test modules and their supported execution lanes.
+[Output] Human-readable test inventory, commands, and coverage summary.
+[Sync] 2026-08-16: document Deck deletion and exact runtime-binding history regression contracts.
+[Sync] 2026-08-17: document Deck-filtered Chat history and corrected deletion dependency classification.
+-->
 
 ## Overview
 
@@ -10,6 +16,8 @@ Organized test suite for the Ink & Memory backend deck system.
 tests/
 ├── __init__.py                          # Test package init
 ├── test_database.py                     # Database layer tests (CRUD operations)
+├── test_deck_deletion.py                 # Deck delete transaction and HTTP conflict contract
+├── test_deck_plugin_binding.py           # Exact SemVer binding, CAS, history, and route contract
 ├── test_api_endpoints.py                # API integration tests (HTTP endpoints)
 │
 │ # Claude Agent module tests (migrated from Pawkeyland scripts/)
@@ -229,13 +237,24 @@ python tests/test_seo_content.py -v
 - ✅ Delete voice (user-owned)
 - ✅ Delete deck with cascade (user-owned)
 
+### Deck Deletion Contract (`test_deck_deletion.py`)
+- ✅ Lock and ownership-check the Deck before mutation
+- ✅ Reject related Chat threads with a distinct recoverable conflict
+- ✅ Delete mutable refs and unused plugin bindings before deleting the Deck
+- ✅ Roll back child Deck or immutable runtime-snapshot dependencies
+- ✅ Map preserved-dependency conflicts to HTTP 409
+
+### Related Chat Contract (`test_chat_threads_by_deck.py`)
+- ✅ Filter thread rows by actor ownership and `deck_id`
+- ✅ Preserve `limit` / `offset` pagination through the public Thread API
+
 ### API Endpoints (`test_api_endpoints.py`)
 - ✅ Authentication (register/login)
 - ✅ GET /api/decks (list all)
 - ✅ GET /api/decks/{id} (get with voices)
 - ✅ POST /api/decks/{id}/fork (fork deck)
 - ✅ PUT /api/decks/{id} (update deck)
-- ✅ DELETE /api/decks/{id} (delete deck)
+- ✅ DELETE /api/decks/{id} (transactional delete with 404/409 boundaries)
 - ✅ POST /api/voices (create voice)
 - ✅ PUT /api/voices/{id} (update voice)
 - ✅ DELETE /api/voices/{id} (delete voice)

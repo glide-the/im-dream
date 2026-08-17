@@ -1,4 +1,7 @@
-"""Focused binding persistence, validation, concurrency, and API tests."""
+"""Focused binding persistence, history, validation, concurrency, and API tests.
+
+[Sync 2026-08-16] Cover the folded Deck panel's append-only history response.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +14,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -267,32 +271,43 @@ class BindingServiceTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self.fixture.close()
 
-    async def test_first_save_and_subsequent_revisions_are_monotonic_and_auditable(self) -> None:
-        first = await self.fixture.binding.save(
-            deck_id=DECK_ID,
-            actor_id="1",
-            request=BindingFixture.request(0),
-        )
-        second = await self.fixture.binding.save(
-            deck_id=DECK_ID,
-            actor_id="1",
-            request=BindingFixture.request(1),
-        )
-        self.assertEqual((first.binding_revision, second.binding_revision), (1, 2))
+    async def test_reselecting_the_same_runtime_version_is_an_audited_noop(self) -> None:
+        with patch("backend.services.deck.content_versioning.advance_deck_draft_revision") as advance:
+            first = await self.fixture.binding.save(
+                deck_id=DECK_ID,
+                actor_id="1",
+                request=BindingFixture.request(0),
+            )
+            second = await self.fixture.binding.save(
+                deck_id=DECK_ID,
+                actor_id="1",
+                request=BindingFixture.request(1),
+            )
+            advance.assert_called_once_with(self.fixture.db, DECK_ID)
+        self.assertEqual((first.binding_revision, second.binding_revision), (1, 1))
         rows = self.fixture.db.execute(
             "SELECT binding_revision, status FROM deck_plugin_bindings "
             "ORDER BY binding_revision"
         ).fetchall()
         self.assertEqual(
             [(row["binding_revision"], row["status"]) for row in rows],
-            [(1, "stale"), (2, "active")],
+            [(1, "active")],
         )
         state = await self.fixture.binding.get_current_state(
             deck_id=DECK_ID,
             actor_id="1",
         )
-        self.assertEqual(state.binding_revision, 2)
+        self.assertEqual(state.binding_revision, 1)
         self.assertEqual(state.binding.deck_plugin_binding_id, second.deck_plugin_binding_id)
+        history = self.fixture.binding.list_history(
+            deck_id=DECK_ID,
+            actor_id="1",
+        )
+        self.assertEqual(history.current_binding_revision, 1)
+        self.assertEqual(
+            [(entry.binding_revision, entry.status.value) for entry in history.entries],
+            [(1, "active")],
+        )
 
     async def test_stale_revision_returns_conflict_without_writing(self) -> None:
         await self.fixture.binding.save(
@@ -528,6 +543,7 @@ class BindingRouterTests(unittest.TestCase):
                 "/api/voice-decks/{deck_id}/agent-type": {"PUT"},
                 "/api/voice-decks/{deck_id}/plugin-options": {"GET"},
                 "/api/voice-decks/{deck_id}/plugin-binding": {"GET", "PUT"},
+                "/api/voice-decks/{deck_id}/plugin-binding/history": {"GET"},
                 "/api/voice-decks/{deck_id}/plugin-binding/validate": {"POST"},
             },
         )
@@ -609,6 +625,15 @@ class BindingRouterTests(unittest.TestCase):
         self.assertEqual(payload["binding_revision"], 1)
         self.assertNotIn("workspace_id", payload)
         self.assertNotIn("creator_id", payload)
+        history = self.client.get(
+            f"/api/voice-decks/{DECK_ID}/plugin-binding/history"
+        )
+        self.assertEqual(history.status_code, 200, history.text)
+        self.assertEqual(history.json()["current_binding_revision"], 1)
+        self.assertEqual(
+            history.json()["entries"][0]["deck_plugin_version"],
+            VERSION,
+        )
 
     def test_conflict_unselectable_auth_and_sanitized_error_shapes(self) -> None:
         request = {

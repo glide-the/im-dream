@@ -173,6 +173,87 @@
   margin: 0;
 }
 
+.story-workspace-work {
+  min-width: 0;
+}
+
+.story-workspace-work__header h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.story-workspace-work__header p {
+  max-width: 680px;
+  margin: 8px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.story-workspace-work__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 28px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-paper) 58%, transparent);
+}
+
+.story-workspace-work__tabs {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.story-workspace-work__tabs button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.story-workspace-work__tabs button svg {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+}
+
+.story-workspace-work__tabs button:hover {
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--color-bg-hover) 68%, transparent);
+}
+
+.story-workspace-work__tabs button.is-active {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  font-weight: 650;
+}
+
+.story-workspace-work__tabs button:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.story-workspace-work__panel {
+  min-width: 0;
+  margin-top: 18px;
+}
+
 .story-workspace-settings__section-header {
   margin-bottom: 20px;
 }
@@ -368,5 +449,25 @@
 
   .story-workspace-settings__content-inner {
     padding: 28px 16px 80px;
+  }
+
+  .story-workspace-work__header h2 {
+    font-size: 25px;
+  }
+
+  .story-workspace-work__toolbar {
+    display: block;
+    margin-top: 20px;
+    overflow: hidden;
+  }
+
+  .story-workspace-work__tabs {
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+  }
+
+  .story-workspace-work__tabs button {
+    flex: 0 0 auto;
   }
 }

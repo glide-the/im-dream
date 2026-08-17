@@ -1,0 +1,949 @@
+/* [Input] Ink & Memory theme tokens, Deck设计需求.pdf pages 1-2, and Deck home/detail markup. */
+/* [Output] Published-clean Deck home plus Work rows, menus, related-Chat previews, switches, and dialogs. */
+/* [Pos] Deck management presentation in frontend/src/components/deck. */
+/* [Sync] 2026-08-16: replace the table/dashboard presentation with the PDF-led plugin settings layout. */
+/* [Sync] 2026-08-17: identify system Decks on published-clean home shortcuts/cards while
+                      keeping draft and inventory controls on Settings / Work. */
+/* [Sync] 2026-08-17: add the Chat-history-derived related conversation cleanup dialog. */
+/* [Sync] 2026-08-17: render Available/System Deck launcher groups as typed static catalog sections. */
+/* [Sync] 2026-08-17: add the read-only Deck preview page used by user and system Decks. */
+/* [Sync] 2026-08-17: replace preview accent gradients with a neutral ink-and-paper composition. */
+
+@keyframes deck-manager-spin { to { transform: rotate(360deg); } }
+
+.deck-manager-shell {
+  background: var(--color-bg-app);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.deck-manager-shell__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 clamp(1rem, 4vw, 2.5rem) 4rem;
+}
+
+.deck-manager-shell__content {
+  margin: 0 auto;
+  max-width: 57.5rem;
+  width: 100%;
+}
+
+.deck-manager-shell--settings {
+  background: transparent;
+  overflow: visible;
+}
+
+.deck-manager-shell--settings .deck-manager-shell__scroll {
+  overflow: visible;
+  padding: 0;
+}
+
+.deck-manager-shell--settings .deck-manager-shell__content {
+  max-width: none;
+}
+
+.deck-manager-status {
+  align-items: center;
+  background: var(--color-bg-app);
+  color: var(--color-text-secondary);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.75rem;
+  justify-content: center;
+  min-height: 20rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.deck-manager-status__spinner {
+  animation: deck-manager-spin 0.9s linear infinite;
+  border: 2px solid var(--color-border-neutral);
+  border-radius: 50%;
+  border-top-color: var(--color-text-secondary);
+  height: 1.1rem;
+  width: 1.1rem;
+}
+
+.deck-manager-home { color: var(--color-text-secondary); margin: 0 auto; max-width: 52.5rem; position: relative; }
+.deck-manager-home--settings { max-width: none; }
+
+.deck-manager-home__topbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-height: 3.5rem;
+  padding-top: 0.35rem;
+}
+
+.deck-manager-home__section-label {
+  background: color-mix(in srgb, var(--color-bg-hover) 76%, transparent);
+  border-radius: 0.45rem;
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+  font-weight: 650;
+  padding: 0.3rem 0.55rem;
+}
+
+.deck-manager-home__top-actions { align-items: center; display: flex; gap: 0.35rem; }
+.deck-manager-home__header { padding: 2.65rem 0 1.2rem; }
+.deck-manager-home__header h1 {
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  margin: 0;
+}
+.deck-manager-home__header p {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  margin: 0.4rem 0 0;
+}
+
+.deck-manager-sr-only {
+  border: 0;
+  clip: rect(0 0 0 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.deck-manager-search {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-bg-paper) 66%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 68%, transparent);
+  border-radius: 0.6rem;
+  color: var(--color-text-muted);
+  display: flex;
+  gap: 0.55rem;
+  min-height: 44px;
+  padding: 0 0.8rem;
+}
+
+.deck-manager-search input {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-primary);
+  flex: 1;
+  font: inherit;
+  font-size: 0.82rem;
+  min-height: 42px;
+  min-width: 0;
+  outline: 0;
+}
+.deck-manager-search input::placeholder { color: var(--color-text-muted); }
+.deck-manager-search:focus-within { border-color: var(--color-border-focus); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-border-focus) 16%, transparent); }
+.deck-manager-search--launcher { margin-top: 0.7rem; }
+
+.deck-manager-icon-action,
+.deck-manager-create-action,
+.deck-manager-secondary-action,
+.deck-manager-switch,
+.deck-manager-menu button,
+.deck-manager-enabled__item,
+.deck-manager-list__identity {
+  font: inherit;
+}
+
+.deck-manager-icon-action {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+  width: 44px;
+}
+.deck-manager-icon-action:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.deck-manager-icon-action:disabled { cursor: wait; opacity: 0.55; }
+.deck-manager-icon-action .is-spinning { animation: deck-manager-spin 0.9s linear infinite; }
+
+.deck-manager-create-action {
+  align-items: center;
+  background: var(--color-text-primary);
+  border: 1px solid var(--color-text-primary);
+  border-radius: 0.55rem;
+  color: var(--color-bg-app);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.76rem;
+  font-weight: 650;
+  gap: 0.25rem;
+  min-height: 44px;
+  padding: 0.45rem 0.72rem;
+}
+
+.deck-manager-menu-anchor { position: relative; }
+.deck-manager-menu {
+  background: var(--color-bg-surface-solid);
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 72%, transparent);
+  border-radius: 0.65rem;
+  box-shadow: 0 10px 28px var(--color-shadow-medium);
+  display: grid;
+  min-width: 10.5rem;
+  padding: 0.35rem;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 20;
+}
+.deck-manager-menu--row { min-width: 9rem; }
+.deck-manager-menu button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0.42rem;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.78rem;
+  gap: 0.45rem;
+  min-height: 44px;
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+.deck-manager-menu button:hover,
+.deck-manager-menu button:focus-visible { background: var(--color-bg-hover); }
+.deck-manager-menu button.is-danger { color: var(--color-state-danger); }
+
+.deck-manager-inline-error {
+  background: color-mix(in srgb, var(--color-state-error) 8%, transparent);
+  border-radius: 0.65rem;
+  color: var(--color-state-error);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: 0.8rem 0 0;
+  padding: 0.75rem 0.9rem;
+}
+
+.deck-manager-enabled { padding: 2.1rem 0 1.65rem; }
+.deck-manager-section-heading { align-items: center; display: flex; justify-content: space-between; }
+.deck-manager-section-heading h2 {
+  color: var(--color-text-primary);
+  font-size: 0.84rem;
+  font-weight: 650;
+  margin: 0;
+}
+.deck-manager-enabled__settings {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  margin: -0.55rem -0.55rem -0.55rem 0;
+  padding: 0;
+  width: 44px;
+}
+.deck-manager-enabled__settings:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.deck-manager-enabled__strip {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, 44px);
+  margin-top: 0.85rem;
+  padding: 0.1rem 0 0.45rem;
+}
+.deck-manager-enabled__strip > [role='listitem'] {
+  display: block;
+  height: 44px;
+  width: 44px;
+}
+.deck-manager-enabled__item {
+  aspect-ratio: 1;
+  align-items: center;
+  background: color-mix(in srgb, var(--deck-accent) 10%, var(--color-bg-paper));
+  border: 1px solid color-mix(in srgb, var(--deck-accent) 24%, var(--color-border-paper));
+  border-radius: 0.65rem;
+  color: var(--deck-accent);
+  cursor: pointer;
+  display: flex;
+  height: 44px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: 44px;
+}
+.deck-manager-enabled__item svg { display: block; flex: 0 0 auto; height: 24px; width: 24px; }
+.deck-manager-enabled__item:hover { transform: translateY(-1px); }
+.deck-manager-enabled__item:disabled {
+  cursor: default;
+  opacity: 1;
+  transform: none;
+}
+.deck-manager-enabled__item--system {
+  background: color-mix(in srgb, var(--color-bg-hover) 72%, var(--color-bg-paper));
+  border-color: color-mix(in srgb, var(--color-text-secondary) 38%, var(--color-border-paper));
+}
+.deck-manager-enabled__system-marker {
+  align-items: center;
+  background: var(--color-text-primary);
+  border: 1px solid var(--color-bg-paper);
+  border-radius: 999px;
+  color: var(--color-bg-app);
+  display: flex;
+  height: 13px;
+  justify-content: center;
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 13px;
+}
+.deck-manager-enabled__system-marker svg { height: 7px; width: 7px; }
+.deck-manager-enabled__empty { color: var(--color-text-muted); font-size: 0.78rem; margin: 0.8rem 0 0; }
+
+.deck-manager-launch-catalog {
+  border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 48%, transparent);
+  padding: 1.2rem 0 0;
+}
+.deck-manager-launch-catalog__controls { align-items: center; display: flex; justify-content: space-between; }
+.deck-manager-launch-catalog > h2 {
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  font-weight: 650;
+  margin: 1.3rem 0 0;
+  padding-bottom: 0.85rem;
+}
+.deck-manager-launch-catalog__groups {
+  display: grid;
+  gap: 1.75rem;
+  padding-top: 1.25rem;
+}
+.deck-manager-launch-group { min-width: 0; }
+.deck-manager-launch-group h3 {
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  font-weight: 650;
+  margin: 0;
+  padding: 0.15rem 0 0.85rem;
+}
+.deck-manager-launch-catalog__grid {
+  border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 42%, transparent);
+  display: grid;
+  gap: 0 2.25rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.deck-manager-launch-catalog__grid > li { border-bottom: 1px solid color-mix(in srgb, var(--color-border-paper) 34%, transparent); min-width: 0; }
+.deck-manager-launch-group__empty {
+  border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 42%, transparent);
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  margin: 0;
+  padding: 0.9rem 0 1rem;
+}
+.deck-manager-launch-card {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 44px minmax(0, 1fr) 20px;
+  min-height: 96px;
+  padding: 0.9rem 0.25rem;
+  text-align: left;
+  width: 100%;
+}
+.deck-manager-launch-card:hover { background: color-mix(in srgb, var(--color-bg-hover) 34%, transparent); }
+.deck-manager-launch-card--system { background: color-mix(in srgb, var(--color-bg-hover) 18%, transparent); }
+.deck-manager-launch-card:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.deck-manager-launch-card:disabled:hover { background: color-mix(in srgb, var(--color-bg-hover) 24%, transparent); }
+.deck-manager-launch-card__icon {
+  align-items: center;
+  aspect-ratio: 1;
+  background: color-mix(in srgb, var(--deck-accent) 10%, var(--color-bg-paper));
+  border: 1px solid color-mix(in srgb, var(--deck-accent) 24%, var(--color-border-paper));
+  border-radius: 0.65rem;
+  color: var(--deck-accent);
+  display: flex;
+  height: 44px;
+  justify-content: center;
+  overflow: hidden;
+  width: 44px;
+}
+.deck-manager-launch-card__copy { display: grid; gap: 0.18rem; min-width: 0; }
+.deck-manager-launch-card__title { align-items: center; color: var(--color-text-primary); display: flex; font-size: 0.84rem; font-weight: 650; gap: 0.38rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-manager-launch-card__title .deck-manager-chip { flex: 0 0 auto; }
+.deck-manager-launch-card__description { color: var(--color-text-secondary); font-size: 0.76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-manager-launch-card__meta { align-items: center; color: var(--color-text-muted); display: flex; flex-wrap: wrap; font-size: 0.68rem; gap: 0.3rem; }
+.deck-manager-launch-card__arrow { color: var(--color-text-muted); font-size: 1.25rem; justify-self: end; }
+.deck-manager-empty--launcher { border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 42%, transparent); }
+
+.deck-manager-catalog { border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 48%, transparent); padding-top: 1rem; }
+.deck-manager-home--settings .deck-manager-catalog { margin-top: 1rem; }
+.deck-manager-catalog__controls { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }
+.deck-manager-filter-tabs { align-items: center; display: flex; gap: 0.2rem; }
+.deck-manager-filter-tabs button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0.45rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.76rem;
+  gap: 0.3rem;
+  min-height: 44px;
+  padding: 0.35rem 0.55rem;
+}
+.deck-manager-filter-tabs button[aria-selected='true'] { background: var(--color-bg-hover); color: var(--color-text-primary); font-weight: 650; }
+.deck-manager-filter-tabs button span { color: var(--color-text-muted); font-size: 0.68rem; }
+
+.deck-manager-status-filter select {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  min-height: 44px;
+  padding: 0 1.5rem 0 0.4rem;
+}
+
+.deck-manager-list { list-style: none; margin: 0.9rem 0 0; padding: 0; }
+.deck-manager-list__row {
+  align-items: center;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 42%, transparent);
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 82px;
+  padding: 0.8rem 0.15rem;
+}
+.deck-manager-list__row:first-child { border-top: 0; }
+.deck-manager-list__row:hover { background: color-mix(in srgb, var(--color-bg-hover) 34%, transparent); }
+
+.deck-manager-list__identity {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 40px minmax(0, 1fr);
+  min-height: 52px;
+  min-width: 0;
+  padding: 0.2rem 0.35rem;
+  text-align: left;
+}
+.deck-manager-list__identity:disabled { cursor: wait; opacity: 0.58; }
+.deck-manager-list__row--system .deck-manager-list__identity:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.deck-manager-list__icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--deck-accent) 10%, var(--color-bg-paper));
+  border: 1px solid color-mix(in srgb, var(--deck-accent) 22%, var(--color-border-paper));
+  border-radius: 0.55rem;
+  color: var(--deck-accent);
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+.deck-manager-list__copy { display: grid; gap: 0.18rem; min-width: 0; }
+.deck-manager-list__title { align-items: center; color: var(--color-text-primary); display: flex; font-size: 0.83rem; font-weight: 650; gap: 0.4rem; }
+.deck-manager-list__description { color: var(--color-text-muted); font-size: 0.73rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-manager-list__meta { align-items: center; color: var(--color-text-muted); display: flex; flex-wrap: wrap; font-size: 0.67rem; gap: 0.3rem; }
+.deck-manager-version-fact { color: var(--color-text-secondary); font-weight: 620; }
+.deck-manager-chip { background: var(--color-bg-hover); border-radius: 999px; color: var(--color-text-secondary); font-size: 0.64rem; padding: 0.15rem 0.4rem; }
+.deck-manager-list__actions { align-items: center; display: flex; gap: 0.4rem; padding-right: 0.35rem; }
+
+.deck-manager-switch {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  height: 44px;
+  padding: 0;
+  position: relative;
+  width: 50px;
+}
+.deck-manager-switch::before {
+  background: color-mix(in srgb, var(--color-text-muted) 30%, transparent);
+  border-radius: 999px;
+  content: '';
+  height: 24px;
+  left: 4px;
+  position: absolute;
+  top: 10px;
+  transition: background 140ms ease;
+  width: 42px;
+}
+.deck-manager-switch span {
+  background: var(--color-bg-surface-solid);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px var(--color-shadow-soft);
+  display: block;
+  height: 20px;
+  left: 6px;
+  position: absolute;
+  top: 12px;
+  transform: translateX(0);
+  transition: transform 140ms ease;
+  width: 20px;
+}
+.deck-manager-switch[aria-checked='true']::before { background: var(--color-state-success); }
+.deck-manager-switch[aria-checked='true'] span { transform: translateX(18px); }
+.deck-manager-switch:disabled { cursor: wait; opacity: 0.55; }
+
+.deck-manager-empty {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  margin: 1.1rem 0 0;
+  padding: 1.4rem 0;
+  text-align: center;
+}
+.deck-manager-empty p { margin: 0 0 0.75rem; }
+
+.deck-manager-preview {
+  color: var(--color-text-secondary);
+  margin: 0 auto;
+  max-width: 52.5rem;
+  padding: 0.5rem 0 4rem;
+}
+
+.deck-manager-preview__topbar {
+  align-items: center;
+  display: flex;
+  min-height: 3rem;
+}
+
+.deck-manager-preview__back {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  gap: 0.35rem;
+  min-height: 40px;
+  padding: 0.35rem 0.7rem;
+}
+
+.deck-manager-preview__back:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+
+.deck-manager-preview__header {
+  display: grid;
+  gap: 1.35rem;
+  padding: 1.25rem 0 1.9rem;
+}
+
+.deck-manager-preview__icon {
+  align-items: center;
+  aspect-ratio: 1;
+  background:
+    radial-gradient(circle at 32% 28%, color-mix(in srgb, var(--color-bg-paper) 38%, transparent) 0 22%, transparent 44%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-text-secondary) 78%, var(--color-bg-paper)), var(--color-text-primary));
+  border: 1px solid color-mix(in srgb, var(--color-text-primary) 28%, var(--color-border-paper));
+  border-radius: 1.1rem;
+  box-shadow: 0 14px 30px color-mix(in srgb, var(--color-shadow-medium) 42%, transparent);
+  color: var(--color-bg-app);
+  display: inline-flex;
+  justify-content: center;
+  width: 4.6rem;
+}
+
+.deck-manager-preview__title-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.deck-manager-preview__title-row h1 {
+  color: var(--color-text-primary);
+  font-size: clamp(1.55rem, 3vw, 2.1rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.deck-manager-preview__title-row p {
+  color: var(--color-text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.45;
+  margin: 0.65rem 0 0;
+  max-width: 44rem;
+}
+
+.deck-manager-preview__actions {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.55rem;
+  padding-top: 0.1rem;
+}
+
+.deck-manager-preview__try {
+  align-items: center;
+  background: var(--color-text-primary);
+  border: 1px solid var(--color-text-primary);
+  border-radius: 0.65rem;
+  color: var(--color-bg-app);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 760;
+  gap: 0.42rem;
+  min-height: 42px;
+  padding: 0.55rem 0.85rem;
+}
+
+.deck-manager-preview__try:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.deck-manager-preview__hero {
+  align-items: center;
+  background:
+    linear-gradient(color-mix(in srgb, var(--color-border-paper) 22%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-border-paper) 22%, transparent) 1px, transparent 1px),
+    radial-gradient(circle at 16% 18%, color-mix(in srgb, var(--color-text-secondary) 12%, transparent), transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-bg-paper) 94%, var(--color-text-primary)), var(--color-bg-paper));
+  background-size: 28px 28px, 28px 28px, auto, auto;
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 76%, transparent);
+  border-radius: 1.1rem;
+  box-sizing: border-box;
+  display: grid;
+  gap: 1rem;
+  justify-items: center;
+  min-height: 15.5rem;
+  overflow: hidden;
+  padding: clamp(1.6rem, 4vw, 3.2rem);
+  position: relative;
+}
+
+.deck-manager-preview__hero::before {
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-text-primary) 9%, transparent), transparent 62%);
+  content: '';
+  height: 19rem;
+  inset: -5rem auto auto -4rem;
+  opacity: 0.8;
+  position: absolute;
+  width: 19rem;
+}
+
+.deck-manager-preview__example {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-bg-surface-solid) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 72%, transparent);
+  border-radius: 1rem;
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--color-shadow-medium) 48%, transparent);
+  color: var(--color-text-primary);
+  display: grid;
+  font: inherit;
+  gap: 0.45rem;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  max-width: 36rem;
+  min-height: 3.15rem;
+  padding: 0.68rem 0.82rem;
+  position: relative;
+  text-align: left;
+  width: min(100%, 31rem);
+  z-index: 1;
+}
+
+button.deck-manager-preview__example {
+  cursor: pointer;
+}
+
+button.deck-manager-preview__example:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.deck-manager-preview__example--1 { justify-self: end; margin-right: 10%; }
+.deck-manager-preview__example--2 { justify-self: start; margin-left: 8%; width: min(100%, 36rem); }
+.deck-manager-preview__example--3 { justify-self: center; width: min(100%, 28rem); }
+.deck-manager-preview__example--empty { grid-template-columns: auto auto minmax(0, 1fr); width: min(100%, 36rem); }
+
+.deck-manager-preview__example strong {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.deck-manager-preview__example span:not(.deck-manager-preview__example-arrow) {
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-manager-preview__example-arrow {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-bg-hover) 92%, transparent);
+  border-radius: 999px;
+  color: var(--color-text-primary);
+  display: inline-flex;
+  font-size: 1.35rem;
+  height: 2rem;
+  justify-content: center;
+  width: 2rem;
+}
+
+.deck-manager-preview__description {
+  color: var(--color-text-secondary);
+  font-size: clamp(0.98rem, 2vw, 1.12rem);
+  line-height: 1.72;
+  margin: 2.2rem 0 2.35rem;
+  max-width: 48rem;
+}
+
+.deck-manager-preview__section {
+  border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 48%, transparent);
+  padding: 1.6rem 0 1.25rem;
+}
+
+.deck-manager-preview__section h2 {
+  color: var(--color-text-primary);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 1rem;
+}
+
+.deck-manager-preview__rows {
+  display: grid;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.deck-manager-preview__rows li {
+  align-items: center;
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 38px minmax(0, 1fr);
+  min-height: 3.4rem;
+}
+
+.deck-manager-preview__row-icon {
+  align-items: center;
+  aspect-ratio: 1;
+  background: color-mix(in srgb, var(--color-bg-paper) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 45%, transparent);
+  border-radius: 0.7rem;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  justify-content: center;
+}
+
+.deck-manager-preview__rows strong {
+  color: var(--color-text-primary);
+  display: block;
+  font-size: 0.9rem;
+}
+
+.deck-manager-preview__rows small,
+.deck-manager-preview__empty-row {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+.deck-manager-preview__info {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  max-width: 26rem;
+}
+
+.deck-manager-preview__info div {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+}
+
+.deck-manager-preview__info dt {
+  color: var(--color-text-muted);
+  font-size: 0.83rem;
+}
+
+.deck-manager-preview__info dd {
+  color: var(--color-text-primary);
+  font-size: 0.88rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.deck-manager-secondary-action {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 62%, transparent);
+  border-radius: 999px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 650;
+  min-height: 40px;
+  padding: 0.5rem 0.85rem;
+}
+.deck-manager-secondary-action:disabled { cursor: not-allowed; opacity: 0.5; }
+.deck-manager-pagination { align-items: center; color: var(--color-text-secondary); display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem; }
+.deck-manager-pagination span { font-size: 0.76rem; }
+
+.deck-manager-create-action:focus-visible,
+.deck-manager-icon-action:focus-visible,
+.deck-manager-enabled__settings:focus-visible,
+.deck-manager-enabled__item:focus-visible,
+.deck-manager-launch-card:focus-visible,
+.deck-manager-preview__back:focus-visible,
+.deck-manager-preview__try:focus-visible,
+.deck-manager-preview__example:focus-visible,
+.deck-manager-filter-tabs button:focus-visible,
+.deck-manager-status-filter select:focus-visible,
+.deck-manager-list__identity:focus-visible,
+.deck-manager-secondary-action:focus-visible,
+.deck-manager-switch:focus-visible,
+.deck-manager-menu button:focus-visible,
+.deck-manager-details-dialog input:focus-visible,
+.deck-manager-details-dialog textarea:focus-visible,
+.deck-manager-details-dialog select:focus-visible,
+.deck-manager-details-dialog__close:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.deck-manager-dialog-backdrop { align-items: center; background: var(--color-bg-overlay); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 9999; }
+.deck-manager-dialog { background: var(--color-bg-surface-solid); border: 1px solid color-mix(in srgb, var(--color-border-paper) 58%, transparent); border-radius: 0.9rem; box-shadow: 0 4px 12px var(--color-shadow-medium); color: var(--color-text-primary); max-width: 25rem; padding: 1.5rem; width: 100%; }
+.deck-manager-dialog h2 { font-size: 1.1rem; margin: 0; }
+.deck-manager-dialog__actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+.deck-manager-dialog__actions button { border-radius: 999px; cursor: pointer; font: inherit; font-size: 0.78rem; font-weight: 650; min-height: 44px; padding: 0.62rem 0.95rem; }
+.deck-manager-dialog__actions .deck-manager-primary-action { background: var(--color-text-primary); border: 1px solid var(--color-text-primary); color: var(--color-bg-app); }
+.deck-manager-related-dialog { box-sizing: border-box; max-height: min(42rem, calc(100vh - 2rem)); max-width: 38rem; overflow: hidden; padding: 0; }
+.deck-manager-related-dialog__header { align-items: flex-start; border-bottom: 1px solid color-mix(in srgb, var(--color-border-paper) 45%, transparent); display: flex; gap: 1rem; justify-content: space-between; padding: 1.15rem 1.25rem 0.95rem; }
+.deck-manager-related-dialog__header > div { display: grid; gap: 0.24rem; min-width: 0; }
+.deck-manager-related-dialog__eyebrow { color: var(--color-text-muted); font-size: 0.7rem; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-manager-related-dialog__description { color: var(--color-text-secondary); font-size: 0.78rem; line-height: 1.5; margin: 0; padding: 0.85rem 1.25rem 0.35rem; }
+.deck-manager-related-dialog__body { max-height: min(24rem, calc(100vh - 18rem)); min-height: 8rem; overflow-y: auto; padding: 0.55rem 0.85rem 0.85rem; }
+.deck-manager-related-dialog__loading { align-items: center; color: var(--color-text-muted); display: flex; font-size: 0.78rem; gap: 0.6rem; justify-content: center; min-height: 8rem; }
+.deck-manager-related-dialog__error { align-items: center; background: color-mix(in srgb, var(--color-state-error) 8%, transparent); border-radius: 0.7rem; color: var(--color-state-error); display: flex; font-size: 0.76rem; gap: 0.7rem; justify-content: space-between; margin: 0.35rem; padding: 0.75rem; }
+.deck-manager-related-dialog__error button { background: transparent; border: 0; color: inherit; cursor: pointer; font: inherit; font-weight: 700; min-height: 36px; }
+.deck-manager-related-dialog__empty { align-items: center; color: var(--color-text-muted); display: flex; flex-direction: column; font-size: 0.76rem; gap: 0.45rem; justify-content: center; min-height: 8rem; text-align: center; }
+.deck-manager-related-dialog__empty svg { font-size: 1.25rem; }
+.deck-manager-related-dialog__empty strong { color: var(--color-text-primary); font-size: 0.84rem; }
+.deck-manager-related-list { display: grid; gap: 0.25rem; list-style: none; margin: 0; padding: 0; }
+.deck-manager-related-list__item { align-items: center; border-radius: 0.72rem; display: grid; gap: 0.65rem; grid-template-columns: 32px minmax(0, 1fr) auto; min-height: 58px; padding: 0.42rem 0.5rem; }
+.deck-manager-related-list__item:hover { background: var(--color-bg-hover); }
+.deck-manager-related-list__icon { align-items: center; color: var(--color-text-secondary); display: flex; justify-content: center; }
+.deck-manager-related-list__copy { display: grid; gap: 0.14rem; min-width: 0; }
+.deck-manager-related-list__copy strong { color: var(--color-text-primary); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-manager-related-list__copy span { color: var(--color-text-muted); font-size: 0.68rem; }
+.deck-manager-related-list__delete { align-items: center; background: transparent; border: 0; border-radius: 0.45rem; color: var(--color-text-secondary); cursor: pointer; display: inline-flex; font: inherit; font-size: 0.7rem; gap: 0.35rem; min-height: 40px; padding: 0.4rem 0.55rem; }
+.deck-manager-related-list__delete:hover:not(:disabled) { background: color-mix(in srgb, var(--color-state-error) 10%, transparent); color: var(--color-state-error); }
+.deck-manager-related-list__delete:disabled { cursor: wait; opacity: 0.55; }
+.deck-manager-related-dialog__more { display: block; margin: 0.65rem auto 0; }
+.deck-manager-related-dialog__footer { align-items: center; border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 45%, transparent); display: flex; gap: 1rem; justify-content: space-between; padding: 0.9rem 1.25rem 1rem; }
+.deck-manager-related-dialog__footer p { color: var(--color-text-muted); font-size: 0.7rem; line-height: 1.4; margin: 0; max-width: 19rem; }
+.deck-manager-related-dialog__footer > div { align-items: center; display: flex; gap: 0.45rem; }
+.deck-manager-related-dialog__delete-deck { background: var(--color-state-error); border: 1px solid var(--color-state-error); border-radius: 999px; color: var(--color-bg-app); cursor: pointer; font: inherit; font-size: 0.76rem; font-weight: 700; min-height: 40px; padding: 0.5rem 0.8rem; }
+.deck-manager-related-dialog__delete-deck:disabled { cursor: not-allowed; opacity: 0.4; }
+.deck-manager-details-dialog { box-sizing: border-box; max-height: calc(100vh - 2rem); max-width: 34rem; overflow-y: auto; }
+.deck-manager-details-dialog__header { align-items: flex-start; display: flex; gap: 1rem; justify-content: space-between; }
+.deck-manager-details-dialog__header > div { display: grid; gap: 0.55rem; }
+.deck-manager-details-dialog__close { background: transparent; border: 0; border-radius: 999px; color: var(--color-text-secondary); cursor: pointer; font-size: 1.5rem; height: 44px; width: 44px; }
+.deck-manager-status-pill { align-items: center; border-radius: 999px; color: var(--color-text-secondary); display: inline-flex; font-size: 0.68rem; font-weight: 650; gap: 0.35rem; padding: 0.24rem 0.46rem; white-space: nowrap; }
+.deck-manager-status-pill > span { background: currentColor; border-radius: 999px; height: 0.42rem; width: 0.42rem; }
+.deck-manager-status-pill.is-enabled { background: color-mix(in srgb, var(--color-state-success) 11%, transparent); color: var(--color-state-success); }
+.deck-manager-status-pill.is-disabled { background: color-mix(in srgb, var(--color-text-muted) 10%, transparent); color: var(--color-text-muted); }
+.deck-manager-details-dialog__fields { display: grid; gap: 1rem; margin-top: 1.25rem; }
+.deck-manager-details-dialog label { color: var(--color-text-secondary); display: grid; font-size: 0.78rem; font-weight: 650; gap: 0.4rem; }
+.deck-manager-details-dialog input,
+.deck-manager-details-dialog textarea,
+.deck-manager-details-dialog select {
+  background: color-mix(in srgb, var(--color-bg-paper) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 72%, transparent);
+  border-radius: 0.65rem;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.8rem;
+  min-height: 44px;
+  padding: 0.62rem 0.75rem;
+  width: 100%;
+}
+.deck-manager-details-dialog textarea { line-height: 1.5; resize: vertical; }
+.deck-manager-details-dialog__row { display: grid; gap: 0.75rem; grid-template-columns: 1fr 1fr; }
+.deck-manager-details-dialog__hint { color: var(--color-text-muted); font-size: 0.78rem; line-height: 1.45; margin: 0; }
+
+@media (max-width: 640px) {
+  .deck-manager-shell__scroll { padding-inline: 0.9rem; }
+  .deck-manager-home__header { padding-top: 1.45rem; }
+  .deck-manager-home__topbar { min-height: 3.25rem; }
+  .deck-manager-enabled__strip { gap: 8px; }
+  .deck-manager-launch-catalog__grid { gap: 0; grid-template-columns: 1fr; }
+  .deck-manager-launch-card { min-height: 88px; }
+  .deck-manager-launch-card__meta { display: none; }
+  .deck-manager-catalog__controls { align-items: stretch; flex-direction: column; gap: 0.45rem; }
+  .deck-manager-status-filter select { width: 100%; }
+  .deck-manager-list__row { gap: 0.35rem; grid-template-columns: minmax(0, 1fr) auto; padding-block: 0.75rem; }
+  .deck-manager-list__identity { gap: 0.6rem; grid-template-columns: 38px minmax(0, 1fr); padding-left: 0; }
+  .deck-manager-list__icon { height: 36px; width: 36px; }
+  .deck-manager-list__meta { display: none; }
+  .deck-manager-list__description { max-width: 16rem; }
+  .deck-manager-list__actions { gap: 0.2rem; padding-right: 0; }
+  .deck-manager-pagination { justify-content: space-between; }
+  .deck-manager-details-dialog__row { grid-template-columns: 1fr; }
+  .deck-manager-dialog__actions { align-items: stretch; flex-direction: column-reverse; }
+  .deck-manager-dialog__actions button { width: 100%; }
+  .deck-manager-related-dialog__footer { align-items: stretch; flex-direction: column; }
+  .deck-manager-related-dialog__footer p { max-width: none; }
+  .deck-manager-related-dialog__footer > div { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .deck-manager-related-list__delete span { display: none; }
+  .deck-manager-preview { max-width: none; }
+  .deck-manager-preview__title-row { display: grid; }
+  .deck-manager-preview__actions { justify-content: space-between; }
+  .deck-manager-preview__hero { min-height: 13rem; padding: 1.1rem; }
+  .deck-manager-preview__example,
+  .deck-manager-preview__example--1,
+  .deck-manager-preview__example--2,
+  .deck-manager-preview__example--3 {
+    justify-self: stretch;
+    margin-left: 0;
+    margin-right: 0;
+    width: 100%;
+  }
+  .deck-manager-preview__example { grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto; }
+  .deck-manager-preview__info div { grid-template-columns: 6rem minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deck-manager-enabled__item,
+  .deck-manager-launch-card,
+  .deck-manager-switch,
+  .deck-manager-switch span { transition: none; }
+}

@@ -1,6 +1,7 @@
 // [Input] Real local actor, persisted Dream Run, and installed Deck plugin inventory.
 // [Output] Visible-browser evidence that shared Chat suggests installed Skills without sending or workflow controls.
 // [Pos] Opt-in non-cloning Story Workspace real-data QA.
+// [Sync] 2026-08-16: real-model continuity asserts the latest repeated query in a historical Thread.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -169,7 +170,7 @@ test('real deepseek-v4-pro resumes the Dream thread for a read-only drama query'
     const query = '/drama-query 请只读取当前工作台，简要告诉我已经有哪些 Project 和 Episode 产物；不要修改任何文件。';
     await composer.fill(query);
     await page.getByRole('button', { name: '发送消息' }).click();
-    await expect(page.getByText(query, { exact: true })).toBeVisible();
+    await expect(page.getByText(query, { exact: true }).last()).toBeVisible();
 
     let after = before;
     await expect.poll(() => {

@@ -1,14 +1,21 @@
 // [Input] Authenticated Story Workspace routes and production-shaped Deck/Dream API fixtures.
 // [Output] Provider-free browser evidence for Dream's two-state home, adaptive horizontal Chat list,
-//          whole-card Dream navigation, and launch handoff to the canonical workbench.
+//          whole-card Dream navigation, historical composer provenance, same-Deck Agent switching,
+//          and launch handoff.
 // [Pos] Dream/Chat Agent refactor business E2E in frontend/e2e.
 // [Sync] 2026-08-14: cover initial/in-progress states and adaptive horizontal Chat scrolling.
 // [Sync] 2026-08-14: prove Community Decks visibly includes the system default projection.
+// [Sync] 2026-08-16: Dream omits deferred community/market Deck discovery.
+// [Sync] 2026-08-15: prove historical Chat removes the immutable composer selector
+//                    while a fresh conversation keeps Deck -> Agent selection;
+//                    a packed plugin receipt cannot replace the visible Deck name.
+// [Sync] 2026-08-17: switch the next-turn Agent from the historical Thread Deck metadata popover.
 
 import { expect, test } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
 const RUN_ID = 'run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const HISTORICAL_THREAD_ID = 'thread-history-deck-context-e2e';
 const DREAM_IMPACT_SCOPE = {
   routeAndDefaultPanel: 'changes',
   projectAndEpisodes: 'out-of-scope',
@@ -28,7 +35,7 @@ const dreamDeck = {
   color: 'purple',
   is_system: false,
   enabled: true,
-  voice_count: 1,
+  voice_count: 2,
   agent_type: 'dream',
   agent_type_revision: 3,
   voices: [{
@@ -38,6 +45,15 @@ const dreamDeck = {
     system_prompt: '负责组织故事 Dream。',
     icon: 'moon',
     color: 'purple',
+    is_system: false,
+    enabled: true,
+  }, {
+    id: 'dream-agent-e2e-structure',
+    deck_id: 'dream-deck-e2e',
+    name: '结构顾问',
+    system_prompt: '负责检查故事结构。',
+    icon: 'book-open',
+    color: 'teal',
     is_system: false,
     enabled: true,
   }],
@@ -55,6 +71,15 @@ const actorSystemDefaultDeck = {
   agent_type: 'dream',
   agent_type_revision: 0,
   voices: [],
+};
+
+const historicalThread = {
+  id: HISTORICAL_THREAD_ID,
+  title: '历史版本工作台',
+  deck_id: dreamDeck.id,
+  voice_id: dreamDeck.voices[0].id,
+  created_at: '2026-08-14T07:00:00Z',
+  updated_at: '2026-08-14T07:30:00Z',
 };
 
 function dreamRun(
@@ -108,6 +133,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
   const diagnostics: string[] = [];
   const unexpectedApiRequests: string[] = [];
   let launchBody: Record<string, unknown> | null = null;
+  let historicalChatTurnBody: Record<string, unknown> | null = null;
   let releaseDeepLinkRead: (() => void) | null = null;
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().includes('react-grab.com')) {
@@ -141,6 +167,9 @@ test('Dream active Deck context → workbench → Chat active tab → production
     if (pathname === '/api/default-voices') return route.fulfill({ json: {} });
     if (pathname === '/api/storage') return route.fulfill({ json: { type: 'unknown', supportsDirectUpload: false, isConfigured: true } });
     if (pathname === '/api/system-config') return route.fulfill({ json: { data: { im_full_access_enabled: false, workspace_enabled: false } } });
+    if (pathname === '/api/decks/defaults/reconcile' && request.method() === 'POST') {
+      return route.fulfill({ json: { deck_id: actorSystemDefaultDeck.id, reconciled: false, reason: 'refs_preserved' } });
+    }
     if (pathname === '/api/decks' && request.method() === 'GET') {
       const decks = url.searchParams.get('published') === 'true'
         ? [dreamDeck]
@@ -153,7 +182,9 @@ test('Dream active Deck context → workbench → Chat active tab → production
     }
     if (pathname === '/api/claude-plugins/installations') return route.fulfill({ json: { installations: [] } });
     if (pathname === `/api/decks/${dreamDeck.id}/claude-plugins`) return route.fulfill({ json: { deck_id: dreamDeck.id, refs: [] } });
-    if (pathname === '/api/claude-agent/threads' && request.method() === 'GET') return route.fulfill({ json: { threads: [] } });
+    if (pathname === '/api/claude-agent/threads' && request.method() === 'GET') {
+      return route.fulfill({ json: { threads: [historicalThread] } });
+    }
     if (pathname === '/api/story-workspace/dream-runs' && request.method() === 'GET') return route.fulfill({ json: { runs } });
     if (pathname === '/api/story-workspace/dream-runs/start' && request.method() === 'POST') {
       launchBody = request.postDataJSON() as Record<string, unknown>;
@@ -234,6 +265,85 @@ test('Dream active Deck context → workbench → Chat active tab → production
         },
       });
     }
+    if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/messages`) {
+      return route.fulfill({ json: { thread: historicalThread, messages: [] } });
+    }
+    if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/plugin-load-receipt`) {
+      return route.fulfill({
+        json: {
+          thread_id: HISTORICAL_THREAD_ID,
+          deck_id: dreamDeck.id,
+          workspace_found: true,
+          receipt: {
+            schema_version: '1',
+            workspace: '/server-managed/redacted',
+            deck_id: dreamDeck.id,
+            packed_at: '2026-08-14T07:20:00Z',
+            frozen: true,
+            plugins: [{
+              package_spec: 'drama-forge@drama-studio',
+              resolved_version: '1.0.1',
+              artifact_digest: 'sha256:historical-drama-forge',
+              relative_path: '.claude/plugins/drama-forge',
+              file_count: 12,
+              verified: true,
+            }],
+          },
+          launch_manifest: null,
+        },
+      });
+    }
+    if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/status`) {
+      return route.fulfill({
+        json: {
+          running: false,
+          lifecycle: 'idle',
+          turn_count: 0,
+          pending_tool_call_ids: [],
+          tool_confirmation_observation: 'known',
+        },
+      });
+    }
+    if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/plan`) {
+      return route.fulfill({
+        json: {
+          exists: false,
+          plan_mode: 'none',
+          slug: null,
+          file_name: null,
+          content: null,
+          updated_at: null,
+        },
+      });
+    }
+    if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/todos`) {
+      return route.fulfill({
+        json: {
+          exists: false,
+          source: null,
+          todos: [],
+          truncated: false,
+          updated_at: null,
+        },
+      });
+    }
+    if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/subagents`) {
+      return route.fulfill({
+        json: {
+          exists: false,
+          tasks: [],
+          counts: { running: 0, completed: 0, ended: 0, total: 0 },
+          updated_at: null,
+        },
+      });
+    }
+    if (pathname === '/api/claude-agent' && request.method() === 'POST') {
+      historicalChatTurnBody = request.postDataJSON() as Record<string, unknown>;
+      return route.fulfill({
+        contentType: 'text/event-stream',
+        body: 'event: finish\ndata: {"finishReason":"stop"}\n\n',
+      });
+    }
     unexpectedApiRequests.push(`${request.method()} ${pathname}`);
     return route.fulfill({ status: 404, json: { detail: 'unexpected provider-free E2E request' } });
   });
@@ -242,10 +352,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await page.goto(`${WEB_BASE}/story-workspace/dream`);
   const activeSection = page.getByRole('region', { name: '进行中的 Dream' });
   await expect(activeSection.getByRole('heading', { name: '进行中的 Dream' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: '社区卡组（2）' })).toBeVisible();
-  await expect(page.getByText('System default Deck', { exact: true })).toBeVisible();
-  await expect(page.getByText('剧本创作团队', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '在 Chat 中使用' })).toBeVisible();
+  await expect(page.getByText(/社区卡组|System default Deck|安装并使用/)).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '我的 Dream' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '进行中', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '初始状态', exact: true })).toBeVisible();
@@ -280,6 +387,46 @@ test('Dream active Deck context → workbench → Chat active tab → production
 
   await page.goto(`${WEB_BASE}/story-workspace/chat?deck=${dreamDeck.id}`);
   await expect(page.getByRole('tab', { name: '聊天历史' })).toBeVisible();
+  const agentSelector = page.getByRole('button', { name: '为本次对话选择一个 Agent' });
+  await expect(agentSelector).toBeVisible();
+  await page.getByRole('button', { name: historicalThread.title }).click();
+  await expect(page.getByRole('textbox', { name: '聊天输入' })).toBeVisible();
+  await expect(agentSelector).toHaveCount(0);
+  const historicalDeckContext = page.getByRole('button', { name: 'Deck 元信息' });
+  await expect(historicalDeckContext).toBeVisible();
+  await expect(historicalDeckContext).toContainText(dreamDeck.name);
+  await expect(historicalDeckContext).not.toContainText('drama-forge');
+  await historicalDeckContext.click();
+  const deckMetadataDialog = page.getByRole('dialog', { name: 'Deck 元信息' });
+  await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');
+  await expect(deckMetadataDialog.getByRole('button', { name: '故事导演，当前 Agent' })).toBeDisabled();
+  await deckMetadataDialog.getByRole('button', { name: '切换到 结构顾问' }).click();
+  await expect(deckMetadataDialog).toHaveCount(0);
+  await expect(page.getByTitle('结构顾问')).toContainText('结构顾问');
+  await expect(historicalDeckContext).toContainText(dreamDeck.name);
+  await historicalDeckContext.click();
+  await expect(deckMetadataDialog.getByRole('button', { name: '结构顾问，当前 Agent' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');
+  await historicalDeckContext.click();
+  await page.getByRole('textbox', { name: '聊天输入' }).fill('请从结构角度继续分析。');
+  await page.getByRole('button', { name: '发送消息' }).click();
+  await expect.poll(() => historicalChatTurnBody).not.toBeNull();
+  expect(historicalChatTurnBody).toMatchObject({
+    id: HISTORICAL_THREAD_ID,
+    deckId: dreamDeck.id,
+    voiceId: 'dream-agent-e2e-structure',
+  });
+  await page.screenshot({ path: '../output/playwright/chat-history-context-wide.png' });
+  await page.setViewportSize({ width: 760, height: 780 });
+  await expect(agentSelector).toHaveCount(0);
+  await expect.poll(async () => (
+    (await page.getByRole('textbox', { name: '聊天输入' }).boundingBox())?.width ?? 0
+  )).toBeGreaterThan(360);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+  await page.screenshot({ path: '../output/playwright/chat-history-context-narrow.png' });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('button', { name: '新建' }).click();
+  await expect(agentSelector).toBeVisible();
   const activeDreamTab = page.getByRole('tab', { name: 'Dream（6）' });
   await expect(activeDreamTab).toBeVisible();
   await expect(page.getByText('资源连接器', { exact: true })).toHaveCount(0);
@@ -341,6 +488,9 @@ test('Dream home reaches the final run at a narrow low-height viewport', async (
     const pathname = new URL(route.request().url()).pathname;
     if (pathname === '/api/me') return route.fulfill({ json: { id: 314, email: 'dream-e2e@example.test', display_name: 'Dream E2E' } });
     if (pathname === '/api/preferences') return route.fulfill({ json: { first_login_completed: true } });
+    if (pathname === '/api/decks/defaults/reconcile') {
+      return route.fulfill({ json: { deck_id: dreamDeck.id, reconciled: false, reason: 'refs_preserved' } });
+    }
     if (pathname === '/api/decks') return route.fulfill({ json: { decks: [dreamDeck] } });
     if (pathname === '/api/story-workspace/dream-runs') return route.fulfill({ json: { runs } });
     if (pathname === '/api/sessions' || pathname === '/api/sessions/range') return route.fulfill({ json: { sessions: [] } });

@@ -11,6 +11,7 @@
 #                    Workspace Mode is disabled.
 # [Sync] 2026-06-25: cover thread-scoped stop endpoint registration and routing.
 # [Sync] 2026-07-04: cover Notion connector router registration and auth gating.
+# [Sync] 2026-08-17: cover same-Deck Agent switching, provenance metadata, and CAS conflicts.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -835,6 +836,201 @@ class TestClaudeAgentRouteWorkspaceMode(unittest.TestCase):
 
 @_skip_if_no_server
 class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
+    def test_empty_turn_cannot_change_the_thread_agent(self):
+        import routers.claude_agent as route_module
+
+        body = route_module.ClaudeAgentRequestBody(
+            thread_id="thread-agent-empty",
+            message="",
+            deck_id="deck-1",
+            voice_id="voice-2",
+        )
+
+        async def call_route():
+            return await route_module.claude_agent_stream(
+                body,
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={
+                    "id": "thread-agent-empty",
+                    "user_id": 7,
+                    "deck_id": "deck-1",
+                    "voice_id": "voice-1",
+                },
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "select_chat_thread_voice",
+            ) as select_voice,
+        ):
+            with self.assertRaises(route_module.HTTPException) as raised:
+                asyncio.run(call_route())
+
+        self.assertEqual(raised.exception.status_code, 400)
+        select_voice.assert_not_called()
+
+    def test_same_deck_agent_switch_updates_next_turn_with_cas(self):
+        import routers.claude_agent as route_module
+
+        body = route_module.ClaudeAgentRequestBody(
+            thread_id="thread-agent-switch",
+            message="continue with the structure agent",
+            deck_id="deck-1",
+            voice_id="voice-2",
+        )
+        captured_requests = []
+        deck_context_service = unittest.mock.Mock()
+        deck_context_service.resolve = unittest.mock.AsyncMock(
+            return_value=types.SimpleNamespace(system_prompt="structure agent prompt")
+        )
+
+        async def run_streaming(request):
+            captured_requests.append(request)
+            yield 'event: finish\ndata: {"finishReason":"stop"}\n\n'
+
+        async def call_and_consume():
+            response = await route_module.claude_agent_stream(
+                body,
+                current_user={"user_id": 7},
+            )
+            async for _frame in response.body_iterator:
+                pass
+            return response
+
+        deck_db = unittest.mock.Mock()
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={
+                    "id": "thread-agent-switch",
+                    "user_id": 7,
+                    "deck_id": "deck-1",
+                    "voice_id": "voice-1",
+                },
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_db",
+                return_value=deck_db,
+            ),
+            unittest.mock.patch.object(
+                route_module,
+                "DeckChatContextService",
+                return_value=deck_context_service,
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "select_chat_thread_voice",
+                return_value=True,
+            ) as select_voice,
+            unittest.mock.patch.object(
+                route_module,
+                "_resolve_platform_model_alias",
+                new=unittest.mock.AsyncMock(return_value="dream-balanced"),
+            ),
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "run_streaming",
+                side_effect=run_streaming,
+            ),
+        ):
+            response = asyncio.run(call_and_consume())
+
+        self.assertEqual(response.media_type, "text/event-stream")
+        deck_context_service.resolve.assert_awaited_once_with(
+            deck_id="deck-1",
+            actor_id="7",
+            voice_id="voice-2",
+        )
+        select_voice.assert_called_once_with(
+            "thread-agent-switch",
+            7,
+            "deck-1",
+            "voice-2",
+            "voice-1",
+        )
+        deck_db.close.assert_called_once_with()
+        self.assertEqual(len(captured_requests), 1)
+        self.assertEqual(captured_requests[0].system_prompt, "structure agent prompt")
+        self.assertEqual(
+            captured_requests[0].message_metadata,
+            {"deckId": "deck-1", "voiceId": "voice-2"},
+        )
+
+    def test_same_deck_agent_switch_cas_conflict_preserves_current_agent(self):
+        import routers.claude_agent as route_module
+
+        body = route_module.ClaudeAgentRequestBody(
+            thread_id="thread-agent-switch-conflict",
+            message="continue",
+            deck_id="deck-1",
+            voice_id="voice-2",
+        )
+        deck_context_service = unittest.mock.Mock()
+        deck_context_service.resolve = unittest.mock.AsyncMock(
+            return_value=types.SimpleNamespace(system_prompt="structure agent prompt")
+        )
+
+        async def call_route():
+            return await route_module.claude_agent_stream(
+                body,
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={
+                    "id": "thread-agent-switch-conflict",
+                    "user_id": 7,
+                    "deck_id": "deck-1",
+                    "voice_id": "voice-1",
+                },
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_db",
+                return_value=unittest.mock.Mock(),
+            ),
+            unittest.mock.patch.object(
+                route_module,
+                "DeckChatContextService",
+                return_value=deck_context_service,
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "select_chat_thread_voice",
+                return_value=False,
+            ) as select_voice,
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "run_streaming",
+            ) as run_streaming,
+        ):
+            with self.assertRaises(route_module.HTTPException) as raised:
+                asyncio.run(call_route())
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(
+            raised.exception.detail["error_code"],
+            "CHAT_AGENT_CONFLICT",
+        )
+        select_voice.assert_called_once_with(
+            "thread-agent-switch-conflict",
+            7,
+            "deck-1",
+            "voice-2",
+            "voice-1",
+        )
+        run_streaming.assert_not_called()
+
     def test_terminal_dream_leaf_continues_as_canonical_chat_without_authority(self):
         import routers.claude_agent as route_module
 

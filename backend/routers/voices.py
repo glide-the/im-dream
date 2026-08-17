@@ -12,6 +12,8 @@
 # [Sync] 2026-08-14: enforce system-default publication and self-collection policy at the API boundary.
 # [Sync] 2026-08-14: expose the active system default alongside other actors'
 #                    published Decks in the collectable community projection.
+# [Sync] 2026-08-15: reconcile missing legacy default teams as well as empty plugin refs.
+# [Sync] 2026-08-16: map preserved child/runtime Deck deletion dependencies to HTTP 409.
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -109,7 +111,7 @@ def list_decks(published: bool = False, current_user: dict = Depends(get_current
 
 @router.post("/api/decks/defaults/reconcile")
 def reconcile_deck_defaults(current_user: dict = Depends(get_current_user)):
-    """Repair an untouched screenplay default only when it has zero refs."""
+    """Create a missing actor default or repair its empty verified plugin ref."""
 
     try:
         return reconcile_default_screenplay_deck_plugin(current_user["user_id"])
@@ -190,9 +192,12 @@ def update_deck(
 
 @router.delete("/api/decks/{deck_id}")
 def delete_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a user deck (cascades to voices)"""
+    """Delete an unreferenced user Deck and its mutable refs/voices."""
     user_id = current_user["user_id"]
-    success = database.delete_deck(user_id, deck_id)
+    try:
+        success = database.delete_deck(user_id, deck_id)
+    except database.DeckDeletionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     if not success:
         raise HTTPException(
             status_code=404, detail="Deck not found or permission denied"

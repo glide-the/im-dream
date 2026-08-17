@@ -33,8 +33,17 @@
 # [Sync] 2026-08-14: keep PostgreSQL community Deck aggregation valid by grouping author display names.
 # [Sync] 2026-08-14: include the configured active system-default Deck in the
 #                    collectable community projection without reviving retired defaults.
+# [Sync] 2026-08-15: make default reconciliation provision a missing user-owned
+#                    screenplay Deck under the actor row lock for legacy accounts.
 # [Sync] 2026-08-14: decorate Deck list/detail reads with capability-derived
 #                    Chat/Dream Agent type and optimistic binding revision.
+# [Sync] 2026-08-16: delete mutable Deck plugin refs in the owned Deck transaction;
+#                    preserve child/runtime history behind an explicit conflict.
+# [Sync] 2026-08-16: lock the Deck aggregate for every effective form mutation
+#                    and advance its Admin-capability-backed draft revision.
+# [Sync] 2026-08-17: distinguish related Chat threads from immutable runtime snapshots;
+#                    allow unused plugin bindings to be cleaned before Deck deletion.
+# [Sync] 2026-08-17: CAS-update the current Agent inside an already bound Chat Deck.
 """
 PostgreSQL runtime persistence helpers for Ink & Memory.
 
@@ -49,10 +58,11 @@ import logging
 from collections.abc import Iterator, Mapping
 from datetime import datetime, timedelta, timezone
 from threading import RLock
-from typing import Optional, Union
+from typing import Any, Optional, Union
 import json
 from psycopg import Error as PostgresError
 from psycopg import IntegrityError as PostgresIntegrityError
+from psycopg.errors import ForeignKeyViolation
 from psycopg.pq import TransactionStatus
 
 try:
@@ -81,6 +91,23 @@ class UserRegistrationUnavailable(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__(self.code)
+
+
+class DeckDeletionConflict(RuntimeError):
+    """The owned Deck still has a business dependency that must be preserved."""
+
+    code = "DECK_DELETE_CONFLICT"
+
+    _MESSAGES = {
+        "child_decks": "Deck cannot be deleted while derived Decks still reference it.",
+        "related_threads": "Deck cannot be deleted while related Chat conversations still exist.",
+        "runtime_history": "Deck cannot be deleted because it has immutable runtime history.",
+        "referenced_records": "Deck cannot be deleted because it is still referenced.",
+    }
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(self._MESSAGES.get(reason, self._MESSAGES["referenced_records"]))
 
 
 class PostgresRow(Mapping[str, object]):
@@ -292,8 +319,49 @@ def replace_deck_claude_plugin_refs(
     verification, CLI compatibility) happens in the service layer before this
     write; this helper only persists the validated set.
     """
+    from services.deck.content_versioning import advance_deck_draft_revision
+
     now = datetime.now(timezone.utc).isoformat()
     with db:
+        deck = db.execute(
+            "SELECT id FROM decks WHERE id = %s FOR UPDATE", (deck_id,)
+        ).fetchone()
+        if deck is None:
+            raise ValueError("Deck not found")
+        existing = db.execute(
+            """
+            SELECT plugin_installation_id, package_spec, resolved_version,
+                   artifact_digest, enabled, order_index
+            FROM deck_claude_plugin_refs
+            WHERE deck_id = %s
+            ORDER BY order_index, plugin_installation_id
+            """,
+            (deck_id,),
+        ).fetchall()
+        current_projection = [
+            {
+                "plugin_installation_id": str(row["plugin_installation_id"]),
+                "package_spec": row["package_spec"],
+                "resolved_version": row["resolved_version"],
+                "artifact_digest": row["artifact_digest"],
+                "enabled": bool(row["enabled"]),
+                "order_index": int(row["order_index"]),
+            }
+            for row in existing
+        ]
+        requested_projection = [
+            {
+                "plugin_installation_id": str(ref["plugin_installation_id"]),
+                "package_spec": ref["package_spec"],
+                "resolved_version": ref["resolved_version"],
+                "artifact_digest": ref["artifact_digest"],
+                "enabled": bool(ref.get("enabled", True)),
+                "order_index": int(ref.get("order_index", position)),
+            }
+            for position, ref in enumerate(refs)
+        ]
+        if current_projection == requested_projection:
+            return
         db.execute("DELETE FROM deck_claude_plugin_refs WHERE deck_id = %s", (deck_id,))
         for position, ref in enumerate(refs):
             db.execute(
@@ -316,6 +384,7 @@ def replace_deck_claude_plugin_refs(
                     now,
                 ),
             )
+        advance_deck_draft_revision(db, deck_id)
 
 
 def list_deck_claude_plugin_refs(db, deck_id: str) -> list[dict]:
@@ -504,8 +573,10 @@ def get_user_decks(user_id: int):
         """, (user_id, *visibility_params)).fetchall()
         decks = [dict(row) for row in rows]
         from services.deck.agent_type import decorate_decks_with_agent_type
+        from services.deck.content_versioning import decorate_decks_with_content_version_state
         from services.deck.sharing import decorate_decks_with_sharing_policy
         decorate_decks_with_agent_type(db, decks)
+        decorate_decks_with_content_version_state(db, decks)
         decorate_decks_with_sharing_policy(decks)
         return decks
     finally:
@@ -539,8 +610,10 @@ def get_published_decks(exclude_owner_id: Optional[int] = None):
         )).fetchall()
         decks = [dict(row) for row in rows]
         from services.deck.agent_type import decorate_decks_with_agent_type
+        from services.deck.content_versioning import decorate_decks_with_content_version_state
         from services.deck.sharing import decorate_decks_with_sharing_policy
         decorate_decks_with_agent_type(db, decks)
+        decorate_decks_with_content_version_state(db, decks)
         decorate_decks_with_sharing_policy(decks)
         return decks
     finally:
@@ -645,8 +718,10 @@ def get_deck_with_voices(user_id: int, deck_id: str):
 
         deck = dict(deck_row)
         from services.deck.agent_type import decorate_decks_with_agent_type
+        from services.deck.content_versioning import decorate_decks_with_content_version_state
         from services.deck.sharing import decorate_decks_with_sharing_policy
         decorate_decks_with_agent_type(db, [deck])
+        decorate_decks_with_content_version_state(db, [deck])
 
         # Get voices in this deck
         voice_rows = db.execute("""
@@ -717,15 +792,67 @@ def _upsert_default_deck_plugin_ref(db, deck_id: str, default_plugin_ref: dict) 
     )
 
 
+def _insert_default_screenplay_deck(
+    db,
+    user_id: int,
+    default_plugin_ref: dict,
+) -> str:
+    """Insert the configured user-owned screenplay Deck in the caller transaction."""
+
+    import config
+    import uuid
+
+    template = config.SCREENPLAY_DECK_TEMPLATE
+    deck_id = str(uuid.uuid4())
+    memory_config_json = _default_memory_workspace_config_json()
+    max_order = db.execute(
+        "SELECT MAX(order_index) AS max_order FROM decks WHERE owner_id = %s",
+        (user_id,),
+    ).fetchone()["max_order"]
+    db.execute(
+        """
+        INSERT INTO decks (
+            id, name, name_zh, name_en, description, description_zh,
+            description_en, icon, color, is_system, owner_id, enabled,
+            has_local_changes, order_index
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s)
+        """,
+        (
+            deck_id, template["name"], template["name_zh"], template["name_en"],
+            template["description"], template["description_zh"],
+            template["description_en"], template["icon"], template["color"],
+            user_id, (max_order or 0) + 1,
+        ),
+    )
+    for order, voice in enumerate(template["voices"]):
+        db.execute(
+            """
+            INSERT INTO voices (
+                id, deck_id, name, name_zh, name_en, system_prompt, icon,
+                color, is_system, owner_id, enabled, has_local_changes,
+                order_index, memory_workspace_config
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s, %s)
+            """,
+            (
+                str(uuid.uuid4()), deck_id, voice["name"], voice["name_zh"],
+                voice["name_en"], voice["system_prompt"], voice["icon"],
+                voice["color"], user_id, order, memory_config_json,
+            ),
+        )
+    _upsert_default_deck_plugin_ref(db, deck_id, default_plugin_ref)
+    return deck_id
+
+
 def reconcile_default_screenplay_deck_plugin_ref(
     user_id: int,
     default_plugin_ref: dict,
 ) -> dict:
-    """Repair one untouched default screenplay Deck only when refs are empty.
+    """Ensure one untouched screenplay default and repair its empty refs.
 
     Existing refs, including a user's explicit deselection/replacement state,
     are never overwritten.  The fallback fingerprint is derived entirely from
     the configured template because fallback Decks have no shared parent row.
+    The actor row lock serializes missing-default creation across tabs.
     """
 
     import config
@@ -735,6 +862,13 @@ def reconcile_default_screenplay_deck_plugin_ref(
     role_placeholders = ",".join("%s" for _ in role_names)
     db = get_db()
     try:
+        actor = db.execute(
+            "SELECT id FROM users WHERE id = %s FOR UPDATE",
+            (user_id,),
+        ).fetchone()
+        if actor is None:
+            raise ValueError("DEFAULT_DECK_ACTOR_NOT_FOUND")
+
         deck = db.execute(
             f"""
             SELECT d.id
@@ -776,8 +910,9 @@ def reconcile_default_screenplay_deck_plugin_ref(
             ),
         ).fetchone()
         if deck is None:
-            db.rollback()
-            return {"deck_id": None, "reconciled": False, "reason": "default_not_found"}
+            deck_id = _insert_default_screenplay_deck(db, user_id, default_plugin_ref)
+            db.commit()
+            return {"deck_id": deck_id, "reconciled": True, "reason": "default_created"}
 
         existing_ref = db.execute(
             "SELECT 1 FROM deck_claude_plugin_refs WHERE deck_id = %s LIMIT 1",
@@ -792,6 +927,8 @@ def reconcile_default_screenplay_deck_plugin_ref(
             }
 
         _upsert_default_deck_plugin_ref(db, deck["id"], default_plugin_ref)
+        from services.deck.content_versioning import advance_deck_draft_revision
+        advance_deck_draft_revision(db, deck["id"])
         db.commit()
         return {"deck_id": deck["id"], "reconciled": True, "reason": "missing_ref"}
     except Exception:
@@ -855,18 +992,20 @@ def update_deck(user_id: int, deck_id: str, updates: dict) -> bool:
     """
     db = get_db()
     try:
-        # Check ownership
+        from services.deck.content_versioning import advance_deck_draft_revision
+
+        allowed_fields = ['name', 'name_zh', 'name_en', 'description', 'description_zh',
+                         'description_en', 'icon', 'color', 'enabled', 'order_index']
+        # Lock the aggregate before comparing or writing so a commit snapshot
+        # cannot race with a form mutation.
         deck = db.execute(
-            "SELECT owner_id FROM decks WHERE id = %s",
+            f"SELECT owner_id, {', '.join(allowed_fields)} FROM decks WHERE id = %s FOR UPDATE",
             (deck_id,)
         ).fetchone()
 
         if not deck or deck['owner_id'] != user_id:
             return False
 
-        # Build update query
-        allowed_fields = ['name', 'name_zh', 'name_en', 'description', 'description_zh',
-                         'description_en', 'icon', 'color', 'enabled', 'order_index']
         content_fields = ['name', 'name_zh', 'name_en', 'description', 'description_zh',
                          'description_en', 'icon', 'color']
 
@@ -875,14 +1014,19 @@ def update_deck(user_id: int, deck_id: str, updates: dict) -> bool:
         for field in allowed_fields:
             if field in updates:
                 value = bool(updates[field]) if field == "enabled" else updates[field]
+                current = bool(deck[field]) if field == "enabled" else deck[field]
+                if current == value:
+                    continue
                 update_fields.append(f"{field} = %s")
                 params.append(value)
 
         if not update_fields:
+            db.rollback()
             return True  # No updates
 
         # @@@ Mark as locally changed if content fields are modified
-        has_content_change = any(field in updates for field in content_fields)
+        changed_fields = {field.split(" =", 1)[0] for field in update_fields}
+        has_content_change = any(field in changed_fields for field in content_fields)
         if has_content_change:
             update_fields.append("has_local_changes = TRUE")
 
@@ -893,31 +1037,79 @@ def update_deck(user_id: int, deck_id: str, updates: dict) -> bool:
             f"UPDATE decks SET {', '.join(update_fields)} WHERE id = %s",
             params
         )
+        advance_deck_draft_revision(db, deck_id)
         db.commit()
         return True
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
 def delete_deck(user_id: int, deck_id: str) -> bool:
     """
     Delete a user's deck. Only works if user owns the deck.
-    Cascades to delete all voices in the deck.
+    Deletes mutable Claude plugin refs and unused plugin bindings explicitly,
+    then lets the database cascade voices. Related Chat threads, derived Decks,
+    and immutable runtime snapshots block deletion.
     Returns True if deleted, False if not found or permission denied.
     """
     db = get_db()
     try:
-        # Check ownership
+        # Lock the aggregate so a concurrent reference cannot be attached
+        # between the dependency check and the final DELETE.
         deck = db.execute(
-            "SELECT owner_id FROM decks WHERE id = %s",
+            "SELECT owner_id FROM decks WHERE id = %s FOR UPDATE",
             (deck_id,)
         ).fetchone()
 
         if not deck or deck['owner_id'] != user_id:
             return False
 
+        child_deck = db.execute(
+            "SELECT 1 FROM decks WHERE parent_id = %s LIMIT 1",
+            (deck_id,),
+        ).fetchone()
+        if child_deck is not None:
+            raise DeckDeletionConflict("child_decks")
+
+        related_thread = db.execute(
+            "SELECT 1 FROM chat_thread WHERE deck_id = %s LIMIT 1",
+            (deck_id,),
+        ).fetchone()
+        if related_thread is not None:
+            raise DeckDeletionConflict("related_threads")
+
+        runtime_history = db.execute(
+            """
+            SELECT 1 FROM deck_runtime_snapshots WHERE deck_id = %s
+            LIMIT 1
+            """,
+            (deck_id,),
+        ).fetchone()
+        if runtime_history is not None:
+            raise DeckDeletionConflict("runtime_history")
+
+        db.execute(
+            "DELETE FROM deck_claude_plugin_refs WHERE deck_id = %s",
+            (deck_id,),
+        )
+        db.execute(
+            "DELETE FROM deck_plugin_bindings WHERE deck_id = %s",
+            (deck_id,),
+        )
         db.execute("DELETE FROM decks WHERE id = %s", (deck_id,))
         db.commit()
         return True
+    except DeckDeletionConflict:
+        db.rollback()
+        raise
+    except ForeignKeyViolation as exc:
+        db.rollback()
+        raise DeckDeletionConflict("referenced_records") from exc
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -961,49 +1153,9 @@ def create_default_screenplay_deck(user_id: int, default_plugin_ref: dict) -> st
     it never creates shared schema or system rows at runtime.
     """
 
-    import config
-    import uuid
-
-    template = config.SCREENPLAY_DECK_TEMPLATE
-    deck_id = str(uuid.uuid4())
-    memory_config_json = _default_memory_workspace_config_json()
     db = get_db()
     try:
-        max_order = db.execute(
-            "SELECT MAX(order_index) AS max_order FROM decks WHERE owner_id = %s",
-            (user_id,),
-        ).fetchone()["max_order"]
-        db.execute(
-            """
-            INSERT INTO decks (
-                id, name, name_zh, name_en, description, description_zh,
-                description_en, icon, color, is_system, owner_id, enabled,
-                has_local_changes, order_index
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s)
-            """,
-            (
-                deck_id, template["name"], template["name_zh"], template["name_en"],
-                template["description"], template["description_zh"],
-                template["description_en"], template["icon"], template["color"],
-                user_id, (max_order or 0) + 1,
-            ),
-        )
-        for order, voice in enumerate(template["voices"]):
-            db.execute(
-                """
-                INSERT INTO voices (
-                    id, deck_id, name, name_zh, name_en, system_prompt, icon,
-                    color, is_system, owner_id, enabled, has_local_changes,
-                    order_index, memory_workspace_config
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s, TRUE, FALSE, %s, %s)
-                """,
-                (
-                    str(uuid.uuid4()), deck_id, voice["name"], voice["name_zh"],
-                    voice["name_en"], voice["system_prompt"], voice["icon"],
-                    voice["color"], user_id, order, memory_config_json,
-                ),
-            )
-        _upsert_default_deck_plugin_ref(db, deck_id, default_plugin_ref)
+        deck_id = _insert_default_screenplay_deck(db, user_id, default_plugin_ref)
         db.commit()
         return deck_id
     except Exception:
@@ -1129,7 +1281,7 @@ def sync_deck_with_parent(user_id: int, deck_id: str, force: bool = False) -> di
     try:
         # Get user's deck
         deck = db.execute(
-            "SELECT * FROM decks WHERE id = %s AND owner_id = %s",
+            "SELECT * FROM decks WHERE id = %s AND owner_id = %s FOR UPDATE",
             (deck_id, user_id)
         ).fetchone()
 
@@ -1193,6 +1345,8 @@ def sync_deck_with_parent(user_id: int, deck_id: str, force: bool = False) -> di
                   memory_config_json))
             synced_count += 1
 
+        from services.deck.content_versioning import advance_deck_draft_revision
+        advance_deck_draft_revision(db, deck_id)
         db.commit()
         return {"success": True, "synced_voices": synced_count}
     finally:
@@ -1261,7 +1415,7 @@ def create_voice(user_id: int, deck_id: str, name: str, system_prompt: str,
     try:
         # Check deck ownership
         deck = db.execute(
-            "SELECT owner_id FROM decks WHERE id = %s",
+            "SELECT owner_id FROM decks WHERE id = %s FOR UPDATE",
             (deck_id,)
         ).fetchone()
 
@@ -1288,8 +1442,13 @@ def create_voice(user_id: int, deck_id: str, name: str, system_prompt: str,
         """, (voice_id, deck_id, name, name_zh, name_en, system_prompt,
               icon, color, user_id, order_index, memory_config_json))
 
+        from services.deck.content_versioning import advance_deck_draft_revision
+        advance_deck_draft_revision(db, deck_id)
         db.commit()
         return voice_id
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -1306,19 +1465,31 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
     """
     db = get_db()
     try:
-        # Check ownership
+        voice_ref = db.execute(
+            "SELECT deck_id FROM voices WHERE id = %s", (voice_id,)
+        ).fetchone()
+        if voice_ref is None:
+            db.rollback()
+            return False
+        deck_id = str(voice_ref["deck_id"])
+        deck = db.execute(
+            "SELECT owner_id FROM decks WHERE id = %s FOR UPDATE", (deck_id,)
+        ).fetchone()
+        if deck is None or deck["owner_id"] != user_id:
+            db.rollback()
+            return False
+
+        allowed_fields = ['name', 'name_zh', 'name_en', 'system_prompt',
+                         'icon', 'color', 'enabled', 'order_index', 'thread_id',
+                         'memory_workspace_config']
         voice = db.execute(
-            "SELECT owner_id FROM voices WHERE id = %s",
+            f"SELECT owner_id, {', '.join(allowed_fields)} FROM voices WHERE id = %s FOR UPDATE",
             (voice_id,)
         ).fetchone()
 
         if not voice or voice['owner_id'] != user_id:
             return False
 
-        # Build update query
-        allowed_fields = ['name', 'name_zh', 'name_en', 'system_prompt',
-                         'icon', 'color', 'enabled', 'order_index', 'thread_id',
-                         'memory_workspace_config']
         content_fields = ['name', 'name_zh', 'name_en', 'system_prompt',
                          'icon', 'color']
 
@@ -1331,15 +1502,31 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
                     value = bool(value)
                 # Serialise memory_workspace_config dict to JSON string.
                 if field == 'memory_workspace_config' and isinstance(value, dict):
-                    value = json.dumps(value, ensure_ascii=False)
+                    value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+                current = voice[field]
+                if field == 'memory_workspace_config':
+                    try:
+                        current = json.dumps(
+                            json.loads(current) if isinstance(current, str) else current,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        pass
+                if field == "enabled":
+                    current = bool(current)
+                if current == value:
+                    continue
                 update_fields.append(f"{field} = %s")
                 params.append(value)
 
         if not update_fields:
+            db.rollback()
             return True  # No updates
 
         # @@@ Mark as locally changed if content fields are modified
-        has_content_change = any(field in updates for field in content_fields)
+        changed_fields = {field.split(" =", 1)[0] for field in update_fields}
+        has_content_change = any(field in changed_fields for field in content_fields)
         if has_content_change:
             update_fields.append("has_local_changes = TRUE")
 
@@ -1350,8 +1537,15 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
             f"UPDATE voices SET {', '.join(update_fields)} WHERE id = %s",
             params
         )
+        versioned_fields = set(allowed_fields) - {"thread_id"}
+        if changed_fields & versioned_fields:
+            from services.deck.content_versioning import advance_deck_draft_revision
+            advance_deck_draft_revision(db, deck_id)
         db.commit()
         return True
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -1362,18 +1556,32 @@ def delete_voice(user_id: int, voice_id: str) -> bool:
     """
     db = get_db()
     try:
-        # Check ownership
+        voice_ref = db.execute(
+            "SELECT deck_id FROM voices WHERE id = %s", (voice_id,)
+        ).fetchone()
+        if voice_ref is None:
+            db.rollback()
+            return False
+        deck_id = str(voice_ref["deck_id"])
+        deck = db.execute(
+            "SELECT owner_id FROM decks WHERE id = %s FOR UPDATE", (deck_id,)
+        ).fetchone()
         voice = db.execute(
-            "SELECT owner_id FROM voices WHERE id = %s",
-            (voice_id,)
+            "SELECT owner_id FROM voices WHERE id = %s FOR UPDATE", (voice_id,)
         ).fetchone()
 
-        if not voice or voice['owner_id'] != user_id:
+        if not deck or deck['owner_id'] != user_id or not voice or voice['owner_id'] != user_id:
+            db.rollback()
             return False
 
         db.execute("DELETE FROM voices WHERE id = %s", (voice_id,))
+        from services.deck.content_versioning import advance_deck_draft_revision
+        advance_deck_draft_revision(db, deck_id)
         db.commit()
         return True
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -1388,7 +1596,7 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
     try:
         # Check target deck ownership
         deck = db.execute(
-            "SELECT owner_id FROM decks WHERE id = %s",
+            "SELECT owner_id FROM decks WHERE id = %s FOR UPDATE",
             (target_deck_id,)
         ).fetchone()
 
@@ -1430,8 +1638,13 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
               order_index,
               memory_config_json))
 
+        from services.deck.content_versioning import advance_deck_draft_revision
+        advance_deck_draft_revision(db, target_deck_id)
         db.commit()
         return new_voice_id
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -2931,61 +3144,80 @@ def bind_chat_thread_deck(thread_id: str, user_id: int, deck_id: str) -> bool:
         db.close()
 
 
-def bind_chat_thread_voice(thread_id: str, user_id: int, voice_id: str) -> bool:
-    """Bind one Agent once; an existing conversation cannot switch persona."""
+def select_chat_thread_voice(
+    thread_id: str,
+    user_id: int,
+    deck_id: str,
+    voice_id: str,
+    expected_voice_id: Optional[str],
+) -> bool:
+    """Select the current Agent with CAS while preserving the Thread Deck."""
     db = get_db()
     try:
         cursor = db.execute(
             """
             UPDATE chat_thread
             SET voice_id = %s, updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s AND user_id = %s AND voice_id IS NULL
+            WHERE id = %s
+              AND user_id = %s
+              AND deck_id = %s
+              AND voice_id IS NOT DISTINCT FROM %s
             """,
-            (voice_id, thread_id, user_id),
+            (voice_id, thread_id, user_id, deck_id, expected_voice_id),
         )
         db.commit()
-        if cursor.rowcount == 1:
-            return True
-        row = db.execute(
-            "SELECT voice_id FROM chat_thread WHERE id = %s AND user_id = %s",
-            (thread_id, user_id),
-        ).fetchone()
-        return bool(row and row["voice_id"] == voice_id)
+        return cursor.rowcount == 1
     finally:
         db.close()
 
 
-def list_chat_threads(user_id: int, limit: Optional[int] = None, offset: int = 0) -> list[dict]:
-    """List chat threads for a user, newest first, optionally paged."""
+def list_chat_threads(
+    user_id: int,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    deck_id: Optional[str] = None,
+) -> list[dict]:
+    """List owned chat threads, optionally constrained to one Deck and paged."""
     db = get_db()
     try:
+        where = "WHERE user_id = %s"
+        parameters: list[Any] = [user_id]
+        if deck_id is not None:
+            where += " AND deck_id = %s"
+            parameters.append(deck_id)
         if limit is not None:
+            parameters.extend((limit, max(0, offset)))
             rows = db.execute(
-                """
+                f"""
                 SELECT id, title, deck_id, voice_id, created_at, updated_at
                 FROM chat_thread
-                WHERE user_id = %s
+                {where}
                 ORDER BY updated_at DESC
                 LIMIT %s OFFSET %s
                 """,
-                (user_id, limit, max(0, offset)),
+                tuple(parameters),
             ).fetchall()
         else:
             rows = db.execute(
-                "SELECT id, title, deck_id, voice_id, created_at, updated_at FROM chat_thread WHERE user_id = %s ORDER BY updated_at DESC",
-                (user_id,),
+                f"SELECT id, title, deck_id, voice_id, created_at, updated_at FROM chat_thread {where} ORDER BY updated_at DESC",
+                tuple(parameters),
             ).fetchall()
         return [dict(row) for row in rows]
     finally:
         db.close()
 
 
-def list_chat_threads_for_search(user_id: int) -> list[dict]:
-    """List chat thread search candidates with aggregated message text."""
+def list_chat_threads_for_search(
+    user_id: int,
+    deck_id: Optional[str] = None,
+) -> list[dict]:
+    """List owned chat search candidates, optionally constrained to one Deck."""
     db = get_db()
     try:
+        deck_filter = " AND t.deck_id = %s" if deck_id is not None else ""
+        parameters: tuple[object, ...] = (user_id, deck_id) if deck_id is not None else (user_id,)
         rows = db.execute(
-            """
+            f"""
             SELECT
               t.id,
               t.title,
@@ -2996,10 +3228,10 @@ def list_chat_threads_for_search(user_id: int) -> list[dict]:
               m.parts AS message_parts
             FROM chat_thread t
             LEFT JOIN chat_message m ON m.thread_id = t.id
-            WHERE t.user_id = %s
+            WHERE t.user_id = %s{deck_filter}
             ORDER BY t.updated_at DESC, m.created_at ASC
             """,
-            (user_id,),
+            parameters,
         ).fetchall()
 
         by_thread: dict[str, dict] = {}

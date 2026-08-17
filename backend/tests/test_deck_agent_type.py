@@ -1,4 +1,7 @@
-"""Deck Agent type capability derivation and binding-history tests."""
+"""Deck Agent type capability derivation and binding-history tests.
+
+[Sync 2026-08-16] Assert list DTO decoration includes exact active version facts.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +16,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from models.deck_plugin import DeckAgentType
-from services.deck.agent_type import agent_type_from_manifest
+from services.deck.agent_type import agent_type_from_manifest, decorate_decks_with_agent_type
 from tests.test_deck_plugin_binding import BindingFixture
 from tests.test_deck_plugin_manifest import valid_manifest_data
 
@@ -55,6 +58,26 @@ class DeckAgentTypeTests(unittest.TestCase):
                     request=fixture.request(1),
                 )
                 self.assertEqual(second.binding_revision, 2)
+            finally:
+                fixture.close()
+
+        asyncio.run(scenario())
+
+    def test_deck_list_decoration_exposes_exact_active_runtime_version(self) -> None:
+        async def scenario() -> None:
+            fixture = BindingFixture()
+            try:
+                await fixture.binding.save(
+                    deck_id="deck-binding-test",
+                    actor_id="1",
+                    requested_workspace_id="workspace-binding-test",
+                    request=fixture.request(0),
+                )
+                deck = {"id": "deck-binding-test", "name": "Binding Deck"}
+                decorate_decks_with_agent_type(fixture.db, [deck])
+                self.assertEqual(deck["agent_type_revision"], 1)
+                self.assertEqual(deck["deck_plugin_id"], "voice-decks.story-dramatize")
+                self.assertEqual(deck["deck_plugin_version"], "3.1.0")
             finally:
                 fixture.close()
 

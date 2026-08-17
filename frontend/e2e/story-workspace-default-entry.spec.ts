@@ -8,6 +8,8 @@
 // [Sync] 2026-08-15: restore Writing, Timeline, and Reflections in their original
 //                    positions while retaining Chat as the authenticated root entry.
 // [Sync] 2026-08-15: keep those entries collapsed under More until requested.
+// [Sync] 2026-08-15: accept the public default-Deck reconciliation request while
+//                    traversing Chat/Dream/Deck-aware routes; it is not an unexpected mutation.
 
 import { expect, test } from '@playwright/test';
 
@@ -107,6 +109,14 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
     }
     if (pathname === '/api/decks') {
       await route.fulfill({ json: { decks: [] } });
+      return;
+    }
+    if (pathname === '/api/decks/defaults/reconcile' && request.method() === 'POST') {
+      await route.fulfill({ json: {
+        deck_id: null,
+        reconciled: false,
+        reason: 'default_not_found',
+      } });
       return;
     }
     if (pathname === '/api/claude-agent/threads') {

@@ -31,6 +31,9 @@
 #                    current todo list per thread (claude-todo §5.5).
 # [Sync] 2026-08-04: add authenticated GET /threads/{thread_id}/subagents —
 #                    safe projection of Claude Code subagent transcript metadata.
+# [Sync] 2026-08-17: allow owned Chat history to be filtered by Deck for the
+#                    Settings / Work related-conversation deletion flow.
+# [Sync] 2026-08-17: allow same-Deck Agent selection per turn while Deck provenance stays immutable.
 
 import asyncio
 import base64
@@ -510,6 +513,10 @@ async def claude_agent_stream(
 
         return streaming_sse_response(generate_reconnect())
 
+    message_text = body.get_message_text()
+    if not message_text:
+        raise HTTPException(status_code=400, detail="message text is required")
+
     requested_deck_id = body.deck_id
     persisted_deck_id = thread.get("deck_id")
     requested_voice_id = body.voice_id
@@ -522,15 +529,6 @@ async def claude_agent_stream(
                 "message": "The Deck cannot be changed after the conversation starts.",
             },
         )
-    if requested_voice_id and persisted_voice_id and requested_voice_id != persisted_voice_id:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error_code": "CHAT_AGENT_IMMUTABLE",
-                "message": "The Agent cannot be changed after the conversation starts.",
-            },
-        )
-
     deck_context = None
     effective_deck_id = requested_deck_id or persisted_deck_id
     effective_voice_id = requested_voice_id or persisted_voice_id
@@ -563,22 +561,20 @@ async def claude_agent_stream(
                     "message": "The conversation Deck changed concurrently.",
                 },
             )
-        if effective_voice_id and not persisted_voice_id and not database.bind_chat_thread_voice(
+        if requested_voice_id and requested_voice_id != persisted_voice_id and not database.select_chat_thread_voice(
             thread_id,
             user_id,
-            str(effective_voice_id),
+            str(effective_deck_id),
+            str(requested_voice_id),
+            str(persisted_voice_id) if persisted_voice_id else None,
         ):
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "error_code": "CHAT_AGENT_IMMUTABLE",
-                    "message": "The conversation Agent changed concurrently.",
+                    "error_code": "CHAT_AGENT_CONFLICT",
+                    "message": "The conversation Agent changed concurrently. Reload and try again.",
                 },
             )
-
-    message_text = body.get_message_text()
-    if not message_text:
-        raise HTTPException(status_code=400, detail="message text is required")
 
     platform_model_alias = await _resolve_platform_model_alias(user_id, body.model)
 
@@ -678,7 +674,14 @@ async def claude_agent_stream(
                         exc,
                     )
 
-    message_metadata = None
+    message_metadata = (
+        {
+            "deckId": str(effective_deck_id) if effective_deck_id else None,
+            "voiceId": str(effective_voice_id) if effective_voice_id else None,
+        }
+        if effective_deck_id or effective_voice_id
+        else None
+    )
     if message_id is not None:
         # Reserve the immutable public message identity before returning an SSE
         # response or starting the Agent runtime.  The service repeats the same
@@ -860,6 +863,7 @@ async def claude_agent_thread_plugin_load_receipt(
 
 @router.get("/api/claude-agent/threads")
 async def claude_agent_list_threads(
+    deck_id: Optional[str] = Query(default=None),
     query: Optional[str] = Query(default=None),
     search_scope: str = Query(default="all"),
     retrieval_mode: Optional[str] = Query(default=None),
@@ -883,7 +887,12 @@ async def claude_agent_list_threads(
         retrieval_mode=retrieval_mode,
         vector_query=vector_query_obj,
     ):
-        threads = database.list_chat_threads(user_id, limit=limit, offset=offset)
+        threads = database.list_chat_threads(
+            user_id,
+            limit=limit,
+            offset=offset,
+            deck_id=deck_id,
+        )
         return {"threads": threads}
 
     config = build_chat_thread_search_config(
@@ -902,7 +911,7 @@ async def claude_agent_list_threads(
 
     candidates = []
     if config.retrieval_mode != "vector":
-        candidates = database.list_chat_threads_for_search(user_id)
+        candidates = database.list_chat_threads_for_search(user_id, deck_id=deck_id)
     outcome = search_chat_threads(candidates, config)
     payload: dict[str, Any] = {
         "threads": outcome.threads,

@@ -1,4 +1,7 @@
-"""Deck Plugin manifest, release, binding, and product Agent-type models."""
+"""Deck Plugin manifest, release, binding, and product Agent-type models.
+
+[Sync 2026-08-16] Expose sanitized append-only binding history for Deck version UI.
+"""
 
 from __future__ import annotations
 
@@ -407,6 +410,25 @@ class DeckPluginBindingState(_StrictModel):
         if self.binding is not None and self.binding.binding_revision != self.binding_revision:
             raise ValueError("binding state revision must match the current binding")
         return self
+
+
+class DeckPluginBindingHistoryEntry(_StrictModel):
+    """One immutable Deck runtime-configuration binding revision."""
+
+    deck_plugin_binding_id: str = Field(pattern=r"^dpb_[0-9a-f]{32}$")
+    deck_plugin_id: str = Field(min_length=3)
+    deck_plugin_version: str = Field(min_length=5)
+    binding_revision: int = Field(ge=1)
+    status: DeckPluginBindingStatus
+    applied_to: BindingApplyTo
+    created_at: datetime
+    updated_at: datetime
+
+
+class DeckPluginBindingHistoryResponse(_StrictModel):
+    deck_id: str = Field(min_length=1)
+    current_binding_revision: int = Field(ge=0)
+    entries: list[DeckPluginBindingHistoryEntry]
 
 
 class DeckAgentTypeUpdateRequest(_StrictModel):

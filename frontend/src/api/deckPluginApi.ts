@@ -2,6 +2,8 @@
 // [Output] Typed consumers for binding endpoints plus optimistic Chat/Dream Agent selection.
 // [Pos] Deck Editor binding API client in frontend/src/api.
 // [Sync] 2026-08-14: add `chat | dream` Agent type update without exposing plugin IDs to UI copy.
+// [Sync] 2026-08-16: restore the pre-01a00576 Agent-type and plugin-reference client
+//                    used by the full Deck maintenance popup.
 
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { apiUrl } from '../lib/apiBase';
@@ -47,6 +49,23 @@ export interface DeckPluginBindingState {
   binding_revision: number;
   applied_to: 'next_run';
   binding: DeckPluginBinding | null;
+}
+
+export interface DeckPluginBindingHistoryEntry {
+  deck_plugin_binding_id: string;
+  deck_plugin_id: string;
+  deck_plugin_version: string;
+  binding_revision: number;
+  status: 'active' | 'stale';
+  applied_to: 'next_run';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeckPluginBindingHistoryResponse {
+  deck_id: string;
+  current_binding_revision: number;
+  entries: DeckPluginBindingHistoryEntry[];
 }
 
 export interface DeckPluginOptionsResponse {
@@ -140,6 +159,12 @@ export function getDeckPluginOptions(deckId: string): Promise<DeckPluginOptionsR
 
 export function getDeckPluginBinding(deckId: string): Promise<DeckPluginBindingState> {
   return request(deckPath(deckId, '/plugin-binding'));
+}
+
+export function getDeckPluginBindingHistory(
+  deckId: string,
+): Promise<DeckPluginBindingHistoryResponse> {
+  return request(deckPath(deckId, '/plugin-binding/history'));
 }
 
 export function updateDeckAgentType(

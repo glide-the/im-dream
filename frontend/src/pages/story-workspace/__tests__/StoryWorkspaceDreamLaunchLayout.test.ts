@@ -1,9 +1,10 @@
 // [Input] Dream page/router/App source after Chat-unified Dream start integration.
-// [Output] Static regression checks for the quiet active preview, community discovery, and canonical navigation.
+// [Output] Static regression checks for the quiet active preview, marketplace exclusion, and canonical navigation.
 // [Pos] Story Workspace Dream launch layout seam test (Task 3 U4)
 // [Sync] 2026-08-14: lock the borderless three-item active preview and explicit reveal control.
 // [Sync] 2026-08-14: lock system-default inclusion and visible provenance in Community Decks.
 // [Sync] 2026-08-14: lock the actor-default fallback when no shared system row exists.
+// [Sync] 2026-08-16: require the deferred Deck marketplace to stay out of Dream.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -28,14 +29,13 @@ const LAYOUT_CSS = readFileSync(new URL(
   import.meta.url,
 ), 'utf8');
 
-test('no-run Dream mounts its discovery module instead of Chat children', () => {
+test('no-run Dream mounts its re-entry module instead of Chat children', () => {
   expect(PAGE_SOURCE).toContain('<StoryWorkspaceDreamLaunch onNavigate={onNavigate} />');
   expect(PAGE_SOURCE).not.toContain('children: ReactNode');
   expect(PAGE_SOURCE).not.toContain('story-workspace-dream-launch__chat');
   expect(LAUNCH_SOURCE).toContain('进行中的 Dream');
-  expect(LAUNCH_SOURCE).toContain('社区卡组');
   expect(LAUNCH_SOURCE).toContain('我的 Dream');
-  expect(LAUNCH_SOURCE).toContain('listDecks');
+  expect(LAUNCH_SOURCE).not.toMatch(/社区卡组|listDecks|reconcileDefaultDeckPlugin|forkDeck/);
   expect(LAUNCH_SOURCE).toContain("run.outcome === 'in_progress'");
   expect(LAUNCH_SOURCE).toContain('role="alert"');
 });
@@ -79,9 +79,8 @@ test('discovery page removes the duplicate launch form and invented workflow act
   expect(LAUNCH_SOURCE).not.toContain('归档');
 });
 
-test('community discovery sends stable Deck intent to Chat while active runs use canonical hrefs', () => {
-  expect(LAUNCH_SOURCE).toContain('/story-workspace/chat?deck=');
-  expect(LAUNCH_SOURCE).toContain("deck.agent_type === 'dream'");
+test('active runs keep canonical hrefs without a marketplace handoff', () => {
+  expect(LAUNCH_SOURCE).not.toContain('/story-workspace/chat?deck=');
   expect(LAUNCH_SOURCE).toContain('href={run.href}');
   expect(LAUNCH_SOURCE).toContain('onNavigate(run.href)');
   expect(LAUNCH_SOURCE).not.toContain('Creation flow');
@@ -91,11 +90,9 @@ test('community discovery sends stable Deck intent to Chat while active runs use
 
 test('Dream home uses the layout scroller and a natural-flow responsive card hierarchy', () => {
   expect(LAUNCH_SOURCE).toContain('story-workspace-dream-home__active-grid');
-  expect(LAUNCH_SOURCE).toContain('story-workspace-dream-home__deck-grid');
   expect(LAUNCH_SOURCE).toContain('<div className="story-workspace-dream-home"');
   expect(LAUNCH_SOURCE).not.toContain('story-workspace-dream-launch story-workspace-dream-home');
   expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home__active-grid\s*\{[^}]*grid-template-columns:/s);
-  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home__deck-grid\s*\{[^}]*grid-template-columns:/s);
   expect(DREAM_CSS).toMatch(/\.story-workspace-dream-home\s*\{[^}]*height: auto;[^}]*overflow: visible;/s);
   expect(LAYOUT_CSS).toMatch(/\.story-workspace-layout__main\s*\{[^}]*overflow-y: auto;/s);
   expect(DREAM_CSS).toContain('@media (max-width: 640px)');
@@ -121,13 +118,7 @@ test('Dream launch surface follows the shared dark theme canvas and action contr
   expect(DREAM_CSS).toContain('color: var(--color-state-error, #9b3d2e);');
 });
 
-test('Dream community count is real and installation preserves Dream type', () => {
-  expect(LAUNCH_SOURCE).toContain('社区卡组（{communityDecks.length}）');
-  expect(LAUNCH_SOURCE).toContain('Promise.all([listDecks(true), listDecks()])');
-  expect(LAUNCH_SOURCE).toContain("deck.publish_block_reason === 'default_initialized'");
-  expect(LAUNCH_SOURCE).toContain('const systemDefault = sharedSystemDefault ?? actorSystemDefault');
-  expect(LAUNCH_SOURCE).toContain('<small>System default Deck</small>');
-  expect(LAUNCH_SOURCE).toContain("? '在 Chat 中使用'");
-  expect(LAUNCH_SOURCE).toContain("await updateDeckAgentType(installed.deck_id, 'dream', 0)");
-  expect(LAUNCH_SOURCE).not.toContain('社区卡组（0）');
+test('Dream omits deferred Deck marketplace and installation behavior', () => {
+  expect(LAUNCH_SOURCE).not.toMatch(/communityDecks|社区卡组|公开 Deck|安装并使用/);
+  expect(LAUNCH_SOURCE).not.toMatch(/listDecks|forkDeck|updateDeckAgentType/);
 });

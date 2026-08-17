@@ -9,6 +9,7 @@
 // [Sync] 2026-08-04: initial coverage — resolution seams only; history
 //                    pushState/replaceState integration stays in the tsx
 //                    adapter (window-dependent, not node-testable).
+// [Sync] 2026-08-16: cover the Settings / Work route and its tab query.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -65,6 +66,11 @@ test('static routes resolve exactly as before (no regression)', () => {
     canonicalPath: STORY_WORKSPACE_PATHS.settings,
     route: 'settings',
   });
+  expect(resolveStoryWorkspacePath('/story-workspace/settings/work', '?tab=resources')).toMatchObject({
+    canonicalPath: STORY_WORKSPACE_PATHS['settings-work'],
+    route: 'settings-work',
+  });
+  expect(resolveStoryWorkspacePath('/story-workspace/settings/work', '?tab=resources')?.query.get('tab')).toBe('resources');
   expect(resolveStoryWorkspacePath('/story-workspace/writing')).toMatchObject({
     canonicalPath: STORY_WORKSPACE_PATHS.writing,
     route: 'writing',

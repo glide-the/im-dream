@@ -19,6 +19,7 @@
 // [Sync] 2026-08-11: accept a passive loading label so subagent-only activity is
 //                    announced accurately without exposing a non-functional Stop action.
 // [Sync] 2026-08-13: suggest installed Deck Skills when a Chat draft starts with slash.
+// [Sync] 2026-08-17: accept nonce-scoped Deck preview copy as an editable, unsent Chat draft.
 import {
   useCallback,
   useEffect,
@@ -81,6 +82,10 @@ interface AIInputDockProps {
   deckId?: string;
   /** Existing thread whose frozen plugin receipt narrows suggestions. */
   threadId?: string;
+  /** External draft text to apply only when prefillNonce changes. */
+  prefill?: string;
+  /** Request identity that prevents rerenders from overwriting user edits. */
+  prefillNonce?: number;
 }
 
 const MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024;
@@ -142,10 +147,12 @@ export default function AIInputDock({
   contextControl,
   deckId,
   threadId,
+  prefill,
+  prefillNonce,
 }: AIInputDockProps) {
   const { t } = useTranslation();
   const toolChoiceOptions = useMemo(() => buildToolChoiceOptions(t), [t]);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(() => prefill ?? '');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
@@ -158,7 +165,15 @@ export default function AIInputDock({
   const skillListboxId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastHandledOpenFileDialogSignalRef = useRef(0);
+  const lastAppliedPrefillNonceRef = useRef<number | undefined>(undefined);
   const { upload, error: uploadHookError } = useFileUpload();
+
+  useEffect(() => {
+    if (prefillNonce === undefined || lastAppliedPrefillNonceRef.current === prefillNonce) return;
+    lastAppliedPrefillNonceRef.current = prefillNonce;
+    setQuery(prefill ?? '');
+    setDismissedSlashDraft(null);
+  }, [prefill, prefillNonce]);
 
   useEffect(() => {
     let active = true;

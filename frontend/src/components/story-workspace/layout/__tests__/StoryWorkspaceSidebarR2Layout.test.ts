@@ -1,4 +1,4 @@
-// [Input] Story Workspace sidebar, router, App Decks handoff and subscription page sources.
+// [Input] Story Workspace sidebar, router, App Decks projection and subscription page sources.
 // [Output] Node seam for the three-entry primary navigation, accessible More
 //          disclosure, restored routes, and Product BFF subscription boundary.
 // [Pos] Story Workspace sidebar R2 Red/Green regression test.
@@ -8,6 +8,7 @@
 // [Sync] 2026-08-15: assert Writing, Timeline, and Analysis are restored in their
 //                    original positions and continue using the existing routes.
 // [Sync] 2026-08-15: assert those restored entries live under the More disclosure.
+// [Sync] 2026-08-16: allow the restored Deck maintenance popup to hand its selected Agent to Chat.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam reads source only; browser app omits Node types.
@@ -69,6 +70,7 @@ test('Decks stays inside the workspace and projects the existing DeckManager int
   expect(ROUTER).toContain('{decksContent}</div>');
   expect(ROUTER).toContain('story-workspace-decks-surface');
   expect(APP).toContain('<StoryWorkspaceRouter\n            decksContent={storyWorkspaceDeckManager}');
+  expect(APP).toContain('<DeckManager\n      onUpdate={handleDeckManagerUpdate}\n      onChatWithDeck={handleChatWithDeck}');
   expect(APP).toContain('onChatWithDeck={handleChatWithDeck}');
   expect(APP).not.toContain('onOpenDreamWithDeck');
   expect(APP).not.toContain('handleStoryWorkspaceOpenDecks');
