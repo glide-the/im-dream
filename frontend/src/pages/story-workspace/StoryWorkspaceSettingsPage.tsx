@@ -1,6 +1,10 @@
-/* eslint-disable react-refresh/only-export-components -- route metadata helper intentionally shares this page module. */
+// [Input] Settings route section, existing resource/plugin managers, and the Work-owned Deck management surface.
+// [Output] Existing Settings shell with one Work category whose content owns Deck, resource-link, and plugin tabs.
+// [Pos] Canonical Story Workspace Settings page and Work workbench route surface.
+// [Sync] 2026-08-17: localize the complete Settings shell and Work surface; render one locale at a time.
+/* eslint-disable react-refresh/only-export-components -- route metadata helpers intentionally share this page module. */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { FaArrowLeft, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
+import { FaArrowLeft, FaBriefcase, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import AboutView from '../../components/AboutView';
 import { IconMonitor, IconMoon, IconSun } from '../../components/chat/Icons';
@@ -17,6 +21,7 @@ import './StoryWorkspaceSettingsPage.css';
 
 export type StoryWorkspaceSettingsSection =
   | 'settings'
+  | 'settings-work'
   | 'settings-resources'
   | 'settings-plugins'
   | 'settings-model'
@@ -36,6 +41,19 @@ export interface StoryWorkspaceSettingsPageProps {
   onOpenNotionDetail?: () => void;
   onCloseNotionDetail?: () => void;
   onNavigate: (path: string) => void;
+  workDeckContent?: ReactNode;
+}
+
+export type StoryWorkspaceWorkTab = 'deck' | 'resources' | 'plugins';
+
+export function storyWorkspaceWorkTabForSection(
+  activeSection: StoryWorkspaceSettingsSection,
+  search = typeof window === 'undefined' ? '' : window.location.search,
+): StoryWorkspaceWorkTab {
+  if (activeSection === 'settings-resources') return 'resources';
+  if (activeSection === 'settings-plugins') return 'plugins';
+  const candidate = new URLSearchParams(search).get('tab');
+  return candidate === 'resources' || candidate === 'plugins' ? candidate : 'deck';
 }
 
 interface SettingsNavItem {
@@ -45,13 +63,14 @@ interface SettingsNavItem {
   path: string;
 }
 
-const THEME_OPTIONS: { mode: ThemeMode; label: string; Icon: typeof IconSun }[] = [
-  { mode: 'light', label: '浅色', Icon: IconSun },
-  { mode: 'system', label: '跟随系统', Icon: IconMonitor },
-  { mode: 'dark', label: '深色', Icon: IconMoon },
+const THEME_OPTIONS: { mode: ThemeMode; labelKey: string; Icon: typeof IconSun }[] = [
+  { mode: 'light', labelKey: 'settings.workspace.theme.options.light', Icon: IconSun },
+  { mode: 'system', labelKey: 'settings.workspace.theme.options.system', Icon: IconMonitor },
+  { mode: 'dark', labelKey: 'settings.workspace.theme.options.dark', Icon: IconMoon },
 ];
 
 function AppearanceThemeSetting() {
+  const { t } = useTranslation();
   const [theme, setTheme] = useState<ThemeMode>(() => getThemeMode());
 
   useEffect(() => {
@@ -70,10 +89,10 @@ function AppearanceThemeSetting() {
 
   return (
     <div className="story-workspace-settings__theme-field">
-      <strong id="story-workspace-theme-label">外观主题 / Theme</strong>
-      <p>选择工作区的显示外观。</p>
+      <strong id="story-workspace-theme-label">{t('settings.workspace.theme.label')}</strong>
+      <p>{t('settings.workspace.theme.description')}</p>
       <div aria-labelledby="story-workspace-theme-label" className="story-workspace-settings__theme-options" role="group">
-        {THEME_OPTIONS.map(({ mode, label, Icon }) => {
+        {THEME_OPTIONS.map(({ mode, labelKey, Icon }) => {
           const isActive = theme === mode;
           return (
             <button
@@ -84,7 +103,7 @@ function AppearanceThemeSetting() {
               type="button"
             >
               <Icon />
-              <span>{label}</span>
+              <span>{t(labelKey)}</span>
             </button>
           );
         })}
@@ -128,50 +147,108 @@ export function StoryWorkspaceSettingsPage({
   onOpenNotionDetail,
   onCloseNotionDetail,
   onNavigate,
+  workDeckContent = null,
 }: StoryWorkspaceSettingsPageProps) {
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const navItems = useMemo<SettingsNavItem[]>(() => [
-    { id: 'settings', label: '常规', icon: FaCog, path: '/story-workspace/settings' },
-    { id: 'settings-subscription', label: '订阅', icon: FaCoins, path: '/story-workspace/subscription' },
-    { id: 'settings-resources', label: '资源连接', icon: FaDatabase, path: '/story-workspace/settings/resources' },
-    { id: 'settings-plugins', label: '插件', icon: FaPuzzlePiece, path: '/story-workspace/settings/plugins' },
-    { id: 'settings-model', label: 'AI 模型', icon: FaRobot, path: '/story-workspace/settings/model' },
-    { id: 'settings-about', label: '关于', icon: FaInfoCircle, path: '/story-workspace/settings/about' },
-  ], []);
+    { id: 'settings', label: t('settings.workspace.navigation.general'), icon: FaCog, path: '/story-workspace/settings' },
+    { id: 'settings-subscription', label: t('settings.workspace.navigation.subscription'), icon: FaCoins, path: '/story-workspace/subscription' },
+    { id: 'settings-work', label: t('settings.workspace.navigation.work'), icon: FaBriefcase, path: '/story-workspace/settings/work' },
+    { id: 'settings-model', label: t('settings.workspace.navigation.model'), icon: FaRobot, path: '/story-workspace/settings/model' },
+    { id: 'settings-about', label: t('settings.workspace.navigation.about'), icon: FaInfoCircle, path: '/story-workspace/settings/about' },
+  ], [t]);
   const filteredNavItems = navItems.filter((item) => item.label.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
+  const isWorkSection = activeSection === 'settings-work'
+    || activeSection === 'settings-resources'
+    || activeSection === 'settings-plugins';
+  const workTab = storyWorkspaceWorkTabForSection(activeSection);
+  const workTabs = [
+    { id: 'deck' as const, label: t('settings.workspace.work.tabs.deck'), icon: FaBriefcase },
+    { id: 'resources' as const, label: t('settings.workspace.work.tabs.resources'), icon: FaDatabase },
+    { id: 'plugins' as const, label: t('settings.workspace.work.tabs.plugins'), icon: FaPuzzlePiece },
+  ];
+
+  const workPanel = workTab === 'resources' ? (
+    <ConnectorSettingsSection
+      focusNonce={connectorSettingsFocusNonce}
+      isMobile={isMobile}
+      onOpenNotionDetail={onOpenNotionDetail}
+    />
+  ) : workTab === 'plugins' ? (
+    <ClaudePluginAdminPage />
+  ) : workDeckContent;
 
   const content = showNotionConnectorDetail ? (
-    <SettingsSection id="settings-resource-detail" title="资源连接" description="管理单个资源连接。">
+    <SettingsSection
+      id="settings-resource-detail"
+      title={t('settings.workspace.resourceDetail.title')}
+      description={t('settings.workspace.resourceDetail.description')}
+    >
       <ConnectorNotionDetailPage onBack={onCloseNotionDetail ?? (() => undefined)} isMobile={isMobile} />
     </SettingsSection>
-  ) : activeSection === 'settings-resources' ? (
-    <SettingsSection id="settings-resources" title="资源连接" description="管理可供创作工作区使用的外部资源。">
-      <ConnectorSettingsSection
-        focusNonce={connectorSettingsFocusNonce}
-        isMobile={isMobile}
-        onOpenNotionDetail={onOpenNotionDetail}
-      />
-    </SettingsSection>
-  ) : activeSection === 'settings-plugins' ? (
-    <SettingsSection id="settings-plugins" title="插件" description="安装和管理工作区扩展能力。">
-      <ClaudePluginAdminPage />
-    </SettingsSection>
+  ) : isWorkSection ? (
+    <section aria-labelledby="story-workspace-work-title" className="story-workspace-work" id="settings-work">
+      <header className="story-workspace-work__header">
+        <h2 id="story-workspace-work-title">{t('settings.workspace.work.title')}</h2>
+        <p>{t('settings.workspace.work.description')}</p>
+      </header>
+      <div className="story-workspace-work__toolbar">
+        <div aria-label={t('settings.workspace.work.tabsLabel')} className="story-workspace-work__tabs" role="tablist">
+          {workTabs.map(({ id, label, icon: Icon }) => (
+            <button
+              aria-controls={`story-workspace-work-panel-${id}`}
+              aria-selected={workTab === id}
+              className={workTab === id ? 'is-active' : undefined}
+              id={`story-workspace-work-tab-${id}`}
+              key={id}
+              onClick={() => onNavigate(`/story-workspace/settings/work?tab=${id}`)}
+              role="tab"
+              tabIndex={workTab === id ? 0 : -1}
+              type="button"
+            >
+              <Icon aria-hidden="true" />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div
+        aria-labelledby={`story-workspace-work-tab-${workTab}`}
+        className="story-workspace-work__panel"
+        id={`story-workspace-work-panel-${workTab}`}
+        role="tabpanel"
+      >
+        {workPanel}
+      </div>
+    </section>
   ) : activeSection === 'settings-model' ? (
-    <SettingsSection id="settings-model" title="AI 模型配置" description="配置创作工作区使用的模型和运行策略。">
+    <SettingsSection
+      id="settings-model"
+      title={t('settings.workspace.model.title')}
+      description={t('settings.workspace.model.description')}
+    >
       <div className="story-workspace-settings__card"><ModelConfigSection /></div>
     </SettingsSection>
   ) : activeSection === 'settings-subscription' ? (
     <StoryWorkspaceSubscriptionPage />
   ) : activeSection === 'settings-about' ? (
-    <SettingsSection id="settings-about" title="关于" description="Ink & Memory 工作区信息。">
+    <SettingsSection
+      id="settings-about"
+      title={t('settings.workspace.about.title')}
+      description={t('settings.workspace.about.description')}
+    >
       <div className="story-workspace-settings__card"><AboutView /></div>
     </SettingsSection>
   ) : (
-    <SettingsSection id="settings-general" title={t('nav.settings')} description="调整语言和工作区显示偏好。">
+    <SettingsSection
+      id="settings-general"
+      title={t('nav.settings')}
+      description={t('settings.workspace.general.description')}
+    >
       <div className="story-workspace-settings__card">
         <div className="story-workspace-settings__field">
-          <label htmlFor="story-workspace-language">Language / 语言</label>
+          <label htmlFor="story-workspace-language">{t('settings.workspace.languageLabel')}</label>
           <p>{t('settings.language.description')}</p>
           <div className="story-workspace-settings__language-options" id="story-workspace-language">
             {languageCodes.map((code) => {
@@ -194,11 +271,11 @@ export function StoryWorkspaceSettingsPage({
         <AppearanceThemeSetting />
         <div className="story-workspace-settings__toggle-row">
           <div>
-            <strong>Energy Bar / 能量条</strong>
-            <p>Toggle the energy progress bar in the bottom stats line.</p>
+            <strong>{t('settings.workspace.energy.label')}</strong>
+            <p>{t('settings.workspace.energy.description')}</p>
           </div>
           <button
-            aria-label="切换能量条"
+            aria-label={t('settings.workspace.energy.toggleLabel')}
             aria-pressed={showEnergyBar}
             className={`story-workspace-settings__switch${showEnergyBar ? ' is-active' : ''}`}
             onClick={onEnergyBarChange}
@@ -211,36 +288,36 @@ export function StoryWorkspaceSettingsPage({
 
   return (
     <div className={`story-workspace-settings${isMobile ? ' story-workspace-settings--mobile' : ''}`}>
-      <aside aria-label="设置分类" className="story-workspace-settings__sidebar">
+      <aside aria-label={t('settings.workspace.aria.categories')} className="story-workspace-settings__sidebar">
         <div className="story-workspace-settings__sidebar-header">
           <button
-            aria-label="返回应用"
+            aria-label={t('settings.workspace.backToApp')}
             className="story-workspace-settings__back-button"
             onClick={() => onNavigate('/story-workspace/dream')}
             type="button"
           >
             <FaArrowLeft aria-hidden="true" />
-            <span>返回应用</span>
+            <span>{t('settings.workspace.backToApp')}</span>
           </button>
           <label className="story-workspace-settings__search-label" htmlFor="story-workspace-settings-search">
-            搜索设置
+            {t('settings.workspace.search.label')}
           </label>
           <div className="story-workspace-settings__search-wrap">
             <FaSearch aria-hidden="true" />
             <input
               id="story-workspace-settings-search"
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="搜索设置..."
+              placeholder={t('settings.workspace.search.placeholder')}
               type="search"
               value={searchQuery}
             />
           </div>
         </div>
-        <nav aria-label="设置分类导航" className="story-workspace-settings__nav">
-          <span className="story-workspace-settings__nav-group">个人</span>
+        <nav aria-label={t('settings.workspace.aria.navigation')} className="story-workspace-settings__nav">
+          <span className="story-workspace-settings__nav-group">{t('settings.workspace.personal')}</span>
           {filteredNavItems.map((item) => {
             const Icon = item.icon;
-            const selected = item.id === activeSection;
+            const selected = item.id === activeSection || (item.id === 'settings-work' && isWorkSection);
             return (
               <button
                 aria-current={selected ? 'page' : undefined}
@@ -255,11 +332,11 @@ export function StoryWorkspaceSettingsPage({
             );
           })}
           {filteredNavItems.length === 0 ? (
-            <span className="story-workspace-settings__no-results">没有匹配的设置</span>
+            <span className="story-workspace-settings__no-results">{t('settings.workspace.search.noResults')}</span>
           ) : null}
         </nav>
       </aside>
-      <div aria-label="设置内容" className="story-workspace-settings__content" role="region">
+      <div aria-label={t('settings.workspace.aria.content')} className="story-workspace-settings__content" role="region">
         <div className="story-workspace-settings__content-inner">{content}</div>
       </div>
     </div>
@@ -268,6 +345,7 @@ export function StoryWorkspaceSettingsPage({
 
 export function storyWorkspaceSettingsSectionForRoute(route: StoryWorkspaceStaticRoute): StoryWorkspaceSettingsSection {
   return route === 'settings'
+    || route === 'settings-work'
     || route === 'settings-resources'
     || route === 'settings-plugins'
     || route === 'settings-model'

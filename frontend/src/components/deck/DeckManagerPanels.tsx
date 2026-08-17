@@ -1,330 +1,876 @@
-// [Input] Persisted Deck/Agent DTOs, task-mode selection, and DeckManager action callbacks.
-// [Output] Accessible use/create Deck panels without owning persistence or version facts.
-// [Pos] Presentational Deck management panels in frontend/src/components/deck.
-// [Sync] 2026-08-15: split Deck use and Deck creation tasks; version labels stay absent until
-//                    the Admin-owned aggregate revision capability is available.
-import type { CSSProperties } from 'react';
+// [Input] Persisted Deck DTOs, PDF page-layout contract, pagination policy, and DeckManager callbacks.
+// [Output] Published-clean enabled Deck home plus the Work-owned full management list and related Chat cleanup dialog.
+// [Pos] Presentational Deck launch and Settings / Work management surfaces in frontend/src/components/deck.
+// [Sync] 2026-08-16: align the page with Deck设计需求.pdf pages 1-2; remove the table/dashboard layout,
+//                    keep marketplace options absent, and show only exact active runtime-version facts.
+// [Sync] 2026-08-17: limit both Deck-home projections to enabled published-clean versions,
+//                    mark system Decks visibly, and keep drafts/full inventory in Settings / Work.
+// [Sync] 2026-08-17: add More → related conversations using the Chat history preview pattern.
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
+import { FaCog, FaCommentAlt, FaShieldAlt, FaTrashAlt } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
-import type { Deck, Voice } from '../../api/voiceApi';
-import type { ActiveChatVoice } from '../../lib/chat-schema';
+import type { ChatHistoryThread } from '../../api/chatHistoryApi';
+import type { Deck } from '../../api/voiceApi';
+import { DECK_ENABLED_LAUNCH_LIMIT, DECK_MANAGEMENT_PAGE_SIZE } from '../../constants/deck';
 import { COLORS, iconMap } from '../deckVisuals';
 import './DeckManagerPanels.css';
 
-export type DeckManagerMode = 'use' | 'create';
-
-interface DeckManagerModeTabsProps {
-  mode: DeckManagerMode;
-  onChange: (mode: DeckManagerMode) => void;
-}
-
-export function DeckManagerModeTabs({ mode, onChange }: DeckManagerModeTabsProps) {
-  const { t } = useTranslation();
-
-  return (
-    <div className="deck-manager-mode">
-      <div className="deck-manager-mode__tabs" role="tablist" aria-label={t('deck.mode.ariaLabel')}>
-        {(['use', 'create'] as const).map((candidate) => (
-          <button
-            aria-controls={`deck-manager-panel-${candidate}`}
-            aria-selected={mode === candidate}
-            className="deck-manager-mode__tab"
-            id={`deck-manager-tab-${candidate}`}
-            key={candidate}
-            onClick={() => onChange(candidate)}
-            role="tab"
-            tabIndex={mode === candidate ? 0 : -1}
-            type="button"
-          >
-            {t(`deck.mode.${candidate}.label`)}
-          </button>
-        ))}
-      </div>
-      <p className="deck-manager-mode__description">
-        {t(`deck.mode.${mode}.description`)}
-      </p>
-    </div>
-  );
-}
-
-interface DeckUsePanelProps {
+interface DeckManagerPanelProps {
   decks: Deck[];
-  selectedVoiceByDeck: Record<string, string | null>;
-  onSelectVoice: (deckId: string, voiceId: string | null) => void;
-  onUseDeck?: (deckId: string, voice: ActiveChatVoice) => void;
-}
-
-function voiceToChatVoice(voice: Voice): ActiveChatVoice {
-  return {
-    id: voice.id,
-    name: voice.name,
-    systemPrompt: voice.system_prompt,
-    icon: voice.icon,
-    color: voice.color,
-  };
-}
-
-export function DeckUsePanel({
-  decks,
-  selectedVoiceByDeck,
-  onSelectVoice,
-  onUseDeck,
-}: DeckUsePanelProps) {
-  const { t } = useTranslation();
-  const enabledDecks = decks.filter((deck) => deck.enabled);
-
-  return (
-    <section
-      aria-labelledby="deck-manager-tab-use"
-      className="deck-manager-panel"
-      id="deck-manager-panel-use"
-      role="tabpanel"
-    >
-      <div className="deck-manager-panel__heading">
-        <h2>{t('deck.sections.availableDecks')}</h2>
-        <span>{t('deck.sections.availableDecksCount', { count: enabledDecks.length })}</span>
-      </div>
-
-      {enabledDecks.length === 0 ? (
-        <p className="deck-manager-empty">{t('deck.use.empty')}</p>
-      ) : (
-        <div className="deck-manager-grid">
-          {enabledDecks.map((deck) => {
-            const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
-            const accent = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
-            const enabledVoices = (deck.voices || []).filter((voice) => voice.enabled);
-            const selectedVoiceId = selectedVoiceByDeck[deck.id];
-            const selectedVoice = enabledVoices.find((voice) => voice.id === selectedVoiceId)
-              ?? enabledVoices[0]
-              ?? null;
-
-            return (
-              <article
-                className="deck-manager-card deck-manager-card--use"
-                data-deck-card-id={deck.id}
-                data-deck-card-kind="use"
-                key={deck.id}
-                style={{ '--deck-accent': accent } as CSSProperties}
-              >
-                <div className="deck-manager-card__identity">
-                  <span className="deck-manager-card__icon" aria-hidden="true"><Icon size={22} /></span>
-                  <div className="deck-manager-card__copy">
-                    <div className="deck-manager-card__title-row">
-                      <h3>{deck.name}</h3>
-                      <span className="deck-manager-card__type">
-                        {t(`deck.labels.agentType.${deck.agent_type === 'dream' ? 'dream' : 'chat'}`)}
-                      </span>
-                    </div>
-                    <p>{deck.description || t('deck.labels.noDescription')}</p>
-                  </div>
-                </div>
-
-                {enabledVoices.length > 0 ? (
-                  <label className="deck-manager-agent-field">
-                    <span>{t('deck.use.agentLabel')}</span>
-                    <select
-                      aria-label={t('deck.use.agentSelectAria', { deck: deck.name })}
-                      onChange={(event) => onSelectVoice(deck.id, event.target.value)}
-                      value={selectedVoice?.id ?? ''}
-                    >
-                      {enabledVoices.map((voice) => (
-                        <option key={voice.id} value={voice.id}>{voice.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                ) : (
-                  <p className="deck-manager-card__notice">{t('deck.use.noAgent')}</p>
-                )}
-
-                <button
-                  className="deck-manager-primary-action"
-                  disabled={!selectedVoice || !onUseDeck}
-                  onClick={() => selectedVoice && onUseDeck?.(deck.id, voiceToChatVoice(selectedVoice))}
-                  type="button"
-                >
-                  {t('deck.actions.useInChat')}
-                </button>
-              </article>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-interface DeckCreatorPanelProps {
-  decks: Deck[];
-  publishedDecks: Deck[];
+  busyDeckId: string | null;
   creatingDeck: boolean;
+  refreshingDecks: boolean;
+  refreshError: string | null;
+  operationError: string | null;
   onCreateDeck: () => void;
+  onRefreshDecks: () => void;
   onOpenDeck: (deckId: string) => void;
   onToggleDeck: (deckId: string, enabled: boolean) => void;
   onForkDeck: (deckId: string) => void;
   onSyncDeck: (deckId: string) => void;
-  onPublishDeck: (deck: Deck) => void;
-  onUnpublishDeck: (deckId: string) => void;
   onDeleteDeck: (deckId: string) => void;
+  onLoadRelatedThreads: (deckId: string, offset: number) => Promise<ChatHistoryThread[]>;
+  onDeleteRelatedThread: (threadId: string) => Promise<void>;
 }
 
-export function DeckCreatorPanel({
+interface DeckLaunchPanelProps {
+  decks: Deck[];
+  creatingDeck: boolean;
+  refreshingDecks: boolean;
+  refreshError: string | null;
+  operationError: string | null;
+  onCreateDeck: () => void;
+  onRefreshDecks: () => void;
+  onOpenDeck: (deckId: string) => void;
+  onOpenSettings: () => void;
+}
+
+type AgentTypeFilter = 'all' | 'chat' | 'dream';
+type StatusFilter = 'all' | 'enabled' | 'disabled';
+
+const RELATED_THREADS_PAGE_SIZE = 20;
+
+const isDeckHomeVisible = (deck: Deck): boolean => (
+  deck.enabled
+  && deck.deck_version_capability === true
+  && typeof deck.deck_version === 'number'
+  && deck.deck_version > 0
+  && deck.deck_version_dirty === false
+  && deck.deck_version_status === 'published'
+);
+
+export function DeckLaunchPanel({
   decks,
-  publishedDecks,
   creatingDeck,
+  refreshingDecks,
+  refreshError,
+  operationError,
   onCreateDeck,
+  onRefreshDecks,
+  onOpenDeck,
+  onOpenSettings,
+}: DeckLaunchPanelProps) {
+  const { t } = useTranslation();
+  const [query, setQuery] = useState('');
+  const [agentType, setAgentType] = useState<AgentTypeFilter>('all');
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const menuBoundaryRef = useRef<HTMLDivElement>(null);
+  const visibleHomeDecks = useMemo(
+    () => decks.filter(isDeckHomeVisible),
+    [decks],
+  );
+  const shortcutDecks = useMemo(
+    () => visibleHomeDecks.slice(0, DECK_ENABLED_LAUNCH_LIMIT),
+    [visibleHomeDecks],
+  );
+  const enabledAgentTypeCounts = useMemo(() => ({
+    all: visibleHomeDecks.length,
+    chat: visibleHomeDecks.filter((deck) => deck.agent_type === 'chat').length,
+    dream: visibleHomeDecks.filter((deck) => deck.agent_type === 'dream').length,
+  }), [visibleHomeDecks]);
+  const visibleDecks = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return visibleHomeDecks.filter((deck) => {
+      const matchesQuery = normalizedQuery.length === 0 || [
+        deck.name,
+        deck.name_zh,
+        deck.name_en,
+        deck.description,
+        deck.description_zh,
+        deck.description_en,
+      ].some((value) => value?.toLocaleLowerCase().includes(normalizedQuery));
+      const matchesAgentType = agentType === 'all' || deck.agent_type === agentType;
+      return matchesQuery && matchesAgentType;
+    });
+  }, [agentType, query, visibleHomeDecks]);
+
+  useEffect(() => {
+    const closeMenu = (event: PointerEvent) => {
+      if (!menuBoundaryRef.current?.contains(event.target as Node)) setCreateMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCreateMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeMenu);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeMenu);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  return (
+    <div className="deck-manager-home deck-manager-home--launcher" data-deck-manager-launcher ref={menuBoundaryRef}>
+      <div className="deck-manager-home__topbar">
+        <span className="deck-manager-home__section-label">{t('deck.home.sectionLabel')}</span>
+        <div className="deck-manager-home__top-actions">
+          <button
+            aria-label={t('deck.actions.refresh')}
+            className="deck-manager-icon-action"
+            disabled={refreshingDecks}
+            onClick={onRefreshDecks}
+            title={t('deck.actions.refresh')}
+            type="button"
+          >
+            <span aria-hidden="true" className={refreshingDecks ? 'is-spinning' : undefined}>↻</span>
+          </button>
+          <div className="deck-manager-menu-anchor">
+            <button
+              aria-expanded={createMenuOpen}
+              aria-haspopup="menu"
+              className="deck-manager-create-action"
+              onClick={() => setCreateMenuOpen((current) => !current)}
+              type="button"
+            >
+              {t('deck.actions.createMenu')}
+              <span aria-hidden="true">⌄</span>
+            </button>
+            {createMenuOpen && (
+              <div className="deck-manager-menu deck-manager-menu--create" role="menu">
+                <button
+                  disabled={creatingDeck}
+                  onClick={() => {
+                    setCreateMenuOpen(false);
+                    onCreateDeck();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span aria-hidden="true">＋</span>
+                  {creatingDeck ? t('deck.actions.creating') : t('deck.actions.create')}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <header className="deck-manager-home__header">
+        <h1>{t('deck.home.title')}</h1>
+        <p>{t('deck.home.launchDescription')}</p>
+      </header>
+
+      <label className="deck-manager-search deck-manager-search--launcher">
+        <span className="deck-manager-sr-only">{t('deck.home.launchSearchLabel')}</span>
+        <span aria-hidden="true">⌕</span>
+        <input
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={t('deck.creator.searchPlaceholder')}
+          type="search"
+          value={query}
+        />
+      </label>
+
+      {refreshError && <p className="deck-manager-inline-error" role="alert">{refreshError}</p>}
+      {operationError && <p className="deck-manager-inline-error" role="alert">{operationError}</p>}
+
+      <section aria-labelledby="deck-manager-enabled-title" className="deck-manager-enabled">
+        <div className="deck-manager-section-heading">
+          <h2 id="deck-manager-enabled-title">{t('deck.home.enabledTitle')}</h2>
+          <button
+            aria-label={t('deck.home.openSettings')}
+            className="deck-manager-enabled__settings"
+            onClick={onOpenSettings}
+            title={t('deck.home.openSettings')}
+            type="button"
+          >
+            <FaCog aria-hidden="true" size={18} />
+          </button>
+        </div>
+        <div className="deck-manager-enabled__strip" role="list">
+          {shortcutDecks.map((deck) => {
+            const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
+            const accent = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
+            return (
+              <span key={deck.id} role="listitem">
+                <button
+                  aria-label={`${t('deck.home.openDeck', { deck: deck.name })}${deck.is_system ? ` · ${t('deck.labels.system')}` : ''}`}
+                  className={`deck-manager-enabled__item${deck.is_system ? ' deck-manager-enabled__item--system' : ''}`}
+                  data-deck-home-id={deck.id}
+                  data-deck-home-kind={deck.is_system ? 'system' : 'user'}
+                  onClick={() => onOpenDeck(deck.id)}
+                  style={{ '--deck-accent': accent } as CSSProperties}
+                  title={`${deck.name}${deck.is_system ? ` · ${t('deck.labels.system')}` : ''}`}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" size={24} />
+                  {deck.is_system ? (
+                    <span aria-hidden="true" className="deck-manager-enabled__system-marker">
+                      <FaShieldAlt size={7} />
+                    </span>
+                  ) : null}
+                </button>
+              </span>
+            );
+          })}
+        </div>
+        {visibleHomeDecks.length === 0 ? (
+          <p className="deck-manager-enabled__empty">{t('deck.home.availableEmpty')}</p>
+        ) : null}
+      </section>
+
+      {visibleHomeDecks.length > 0 ? (
+        <section aria-labelledby="deck-manager-launch-catalog-title" className="deck-manager-launch-catalog">
+          <div className="deck-manager-launch-catalog__controls">
+            <div aria-label={t('deck.creator.agentTypeFilter')} className="deck-manager-filter-tabs" role="tablist">
+              {(['all', 'chat', 'dream'] as const).map((candidate) => (
+                <button
+                  aria-selected={agentType === candidate}
+                  key={candidate}
+                  onClick={() => setAgentType(candidate)}
+                  role="tab"
+                  type="button"
+                >
+                  {t(`deck.creator.agentTypeTabs.${candidate}`)}
+                  <span>{enabledAgentTypeCounts[candidate]}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <h2 id="deck-manager-launch-catalog-title">{t('deck.home.availableTitle')}</h2>
+
+          {visibleDecks.length === 0 ? (
+            <div className="deck-manager-empty deck-manager-empty--launcher">
+              <p>{t('deck.creator.noResults')}</p>
+              <button
+                className="deck-manager-secondary-action"
+                onClick={() => {
+                  setQuery('');
+                  setAgentType('all');
+                }}
+                type="button"
+              >
+                {t('deck.actions.clearFilters')}
+              </button>
+            </div>
+          ) : (
+            <ul aria-label={t('deck.home.launchListLabel')} className="deck-manager-launch-catalog__grid">
+              {visibleDecks.map((deck) => {
+                const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
+                const accent = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
+                return (
+                  <li key={deck.id}>
+                    <button
+                      aria-label={`${t('deck.actions.edit')} ${deck.name}`}
+                      className={`deck-manager-launch-card${deck.is_system ? ' deck-manager-launch-card--system' : ''}`}
+                      data-deck-home-id={deck.id}
+                      data-deck-home-kind={deck.is_system ? 'system' : 'user'}
+                      onClick={() => onOpenDeck(deck.id)}
+                      style={{ '--deck-accent': accent } as CSSProperties}
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="deck-manager-launch-card__icon">
+                        <Icon size={24} />
+                      </span>
+                      <span className="deck-manager-launch-card__copy">
+                        <span className="deck-manager-launch-card__title">
+                          {deck.name}
+                          {deck.is_system ? <span className="deck-manager-chip">{t('deck.labels.system')}</span> : null}
+                        </span>
+                        <span className="deck-manager-launch-card__description">
+                          {deck.description || t('deck.labels.noDescription')}
+                        </span>
+                        <span className="deck-manager-launch-card__meta">
+                          {t(`deck.labels.agentType.${deck.agent_type === 'dream' ? 'dream' : 'chat'}`)}
+                          <span aria-hidden="true">·</span>
+                          内容 v{deck.deck_version}
+                        </span>
+                      </span>
+                      <span aria-hidden="true" className="deck-manager-launch-card__arrow">›</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+export function DeckSettingsPanel({
+  decks,
+  busyDeckId,
+  creatingDeck,
+  refreshingDecks,
+  refreshError,
+  operationError,
+  onCreateDeck,
+  onRefreshDecks,
   onOpenDeck,
   onToggleDeck,
   onForkDeck,
   onSyncDeck,
-  onPublishDeck,
-  onUnpublishDeck,
   onDeleteDeck,
-}: DeckCreatorPanelProps) {
-  const { t } = useTranslation();
+  onLoadRelatedThreads,
+  onDeleteRelatedThread,
+}: DeckManagerPanelProps) {
+  const { i18n, t } = useTranslation();
+  const [query, setQuery] = useState('');
+  const [agentType, setAgentType] = useState<AgentTypeFilter>('all');
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [page, setPage] = useState(1);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [actionMenuDeckId, setActionMenuDeckId] = useState<string | null>(null);
+  const [relatedDeck, setRelatedDeck] = useState<Deck | null>(null);
+  const [relatedThreads, setRelatedThreads] = useState<ChatHistoryThread[]>([]);
+  const [relatedThreadsLoading, setRelatedThreadsLoading] = useState(false);
+  const [relatedThreadsLoadingMore, setRelatedThreadsLoadingMore] = useState(false);
+  const [relatedThreadsHasMore, setRelatedThreadsHasMore] = useState(false);
+  const [relatedThreadsError, setRelatedThreadsError] = useState<string | null>(null);
+  const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
+  const menuBoundaryRef = useRef<HTMLDivElement>(null);
+
+  const agentTypeCounts = useMemo(() => ({
+    all: decks.length,
+    chat: decks.filter((deck) => deck.agent_type === 'chat').length,
+    dream: decks.filter((deck) => deck.agent_type === 'dream').length,
+  }), [decks]);
+  const filteredDecks = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return decks.filter((deck) => {
+      const matchesQuery = normalizedQuery.length === 0 || [
+        deck.name,
+        deck.name_zh,
+        deck.name_en,
+        deck.description,
+        deck.description_zh,
+        deck.description_en,
+      ].some((value) => value?.toLocaleLowerCase().includes(normalizedQuery));
+      const matchesAgentType = agentType === 'all' || deck.agent_type === agentType;
+      const matchesStatus = status === 'all'
+        || (status === 'enabled' ? deck.enabled : !deck.enabled);
+      return matchesQuery && matchesAgentType && matchesStatus;
+    });
+  }, [agentType, decks, query, status]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredDecks.length / DECK_MANAGEMENT_PAGE_SIZE));
+  const visibleDecks = filteredDecks.slice(
+    (page - 1) * DECK_MANAGEMENT_PAGE_SIZE,
+    page * DECK_MANAGEMENT_PAGE_SIZE,
+  );
+  const hasFilters = query.trim().length > 0 || agentType !== 'all' || status !== 'all';
+  const locale = i18n.resolvedLanguage === 'zh' ? 'zh-CN' : 'en-US';
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
+
+  useEffect(() => {
+    const closeMenus = (event: PointerEvent) => {
+      if (!menuBoundaryRef.current?.contains(event.target as Node)) {
+        setCreateMenuOpen(false);
+        setActionMenuDeckId(null);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCreateMenuOpen(false);
+        setActionMenuDeckId(null);
+        setRelatedDeck(null);
+      }
+    };
+    document.addEventListener('pointerdown', closeMenus);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeMenus);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  const formatUpdatedAt = (value?: string): string => {
+    if (!value) return t('deck.labels.updateUnknown');
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return t('deck.labels.updateUnknown');
+    return new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  };
+
+  const clearFilters = () => {
+    setQuery('');
+    setAgentType('all');
+    setStatus('all');
+    setPage(1);
+  };
+
+  const selectAgentType = (next: AgentTypeFilter) => {
+    setAgentType(next);
+    setPage(1);
+  };
+
+  const openCreateDialog = () => {
+    setCreateMenuOpen(false);
+    onCreateDeck();
+  };
+
+  const closeRelatedThreads = () => {
+    setRelatedDeck(null);
+    setRelatedThreads([]);
+    setRelatedThreadsError(null);
+    setDeletingThreadId(null);
+  };
+
+  const loadRelatedThreads = async (deck: Deck, offset = 0) => {
+    const append = offset > 0;
+    if (append) setRelatedThreadsLoadingMore(true);
+    else setRelatedThreadsLoading(true);
+    setRelatedThreadsError(null);
+    try {
+      const rows = await onLoadRelatedThreads(deck.id, offset);
+      setRelatedThreads((current) => append ? [...current, ...rows] : rows);
+      setRelatedThreadsHasMore(rows.length === RELATED_THREADS_PAGE_SIZE);
+    } catch (loadError) {
+      setRelatedThreadsError(
+        loadError instanceof Error && loadError.message
+          ? loadError.message
+          : t('deck.related.loadFailed'),
+      );
+    } finally {
+      setRelatedThreadsLoading(false);
+      setRelatedThreadsLoadingMore(false);
+    }
+  };
+
+  const openRelatedThreads = (deck: Deck) => {
+    setActionMenuDeckId(null);
+    setRelatedDeck(deck);
+    setRelatedThreads([]);
+    setRelatedThreadsHasMore(false);
+    void loadRelatedThreads(deck);
+  };
+
+  const deleteRelatedThread = async (thread: ChatHistoryThread) => {
+    if (deletingThreadId) return;
+    const title = thread.title || t('chat.history.fallbackTitle');
+    if (!confirm(t('deck.related.confirmDelete', { title }))) return;
+    setDeletingThreadId(thread.id);
+    setRelatedThreadsError(null);
+    try {
+      await onDeleteRelatedThread(thread.id);
+      setRelatedThreads((current) => current.filter((candidate) => candidate.id !== thread.id));
+    } catch (deleteError) {
+      setRelatedThreadsError(
+        deleteError instanceof Error && deleteError.message
+          ? deleteError.message
+          : t('deck.related.deleteFailed'),
+      );
+    } finally {
+      setDeletingThreadId(null);
+    }
+  };
+
+  const deleteDeckAfterThreads = () => {
+    if (!relatedDeck) return;
+    const deckId = relatedDeck.id;
+    closeRelatedThreads();
+    onDeleteDeck(deckId);
+  };
 
   return (
-    <section
-      aria-labelledby="deck-manager-tab-create"
-      className="deck-manager-panel"
-      id="deck-manager-panel-create"
-      role="tabpanel"
-    >
-      <div className="deck-manager-panel__heading deck-manager-panel__heading--action">
-        <div>
-          <h2>{t('deck.sections.myDecks')}</h2>
-          <span>{t('deck.creator.scopeHint')}</span>
-        </div>
-        <button
-          className="deck-manager-primary-action deck-manager-primary-action--compact"
-          disabled={creatingDeck}
-          onClick={onCreateDeck}
-          type="button"
-        >
-          {creatingDeck ? t('deck.actions.creating') : t('deck.actions.create')}
-        </button>
-      </div>
-
-      <div className="deck-manager-grid">
-        {decks.map((deck) => {
-          const isSystem = Boolean(deck.is_system);
-          const publishDisabled = !deck.published && deck.can_publish === false;
-          const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
-          const accent = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
-          const voiceCount = deck.voice_count || deck.voices?.length || 0;
-
-          return (
-            <article
-              className="deck-manager-card deck-manager-card--creator"
-              data-deck-card-id={deck.id}
-              data-deck-card-kind="owned"
-              key={deck.id}
-              style={{ '--deck-accent': isSystem ? 'var(--color-border-paper)' : accent } as CSSProperties}
+    <div className="deck-manager-home deck-manager-home--settings" data-deck-manager-list ref={menuBoundaryRef}>
+      <div className="deck-manager-home__topbar">
+        <span className="deck-manager-home__section-label">{t('deck.home.sectionLabel')}</span>
+        <div className="deck-manager-home__top-actions">
+          <button
+            aria-label={t('deck.actions.refresh')}
+            className="deck-manager-icon-action"
+            disabled={refreshingDecks}
+            onClick={onRefreshDecks}
+            title={t('deck.actions.refresh')}
+            type="button"
+          >
+            <span aria-hidden="true" className={refreshingDecks ? 'is-spinning' : undefined}>↻</span>
+          </button>
+          <div className="deck-manager-menu-anchor">
+            <button
+              aria-expanded={createMenuOpen}
+              aria-haspopup="menu"
+              className="deck-manager-create-action"
+              onClick={() => {
+                setActionMenuDeckId(null);
+                setCreateMenuOpen((current) => !current);
+              }}
+              type="button"
             >
-              <div className="deck-manager-card__identity">
-                <span className="deck-manager-card__icon" aria-hidden="true"><Icon size={22} /></span>
-                <div className="deck-manager-card__copy">
-                  <div className="deck-manager-card__title-row">
-                    <h3>{deck.name}</h3>
-                    {isSystem && <span className="deck-manager-card__type">{t('deck.labels.system')}</span>}
-                  </div>
-                  <p>{deck.description || t('deck.labels.noDescription')}</p>
-                  <span className="deck-manager-card__meta">{t('deck.labels.voiceCount', { count: voiceCount })}</span>
-                </div>
-              </div>
-
-              <div className="deck-manager-card__actions">
-                <button
-                  className="deck-manager-secondary-action"
-                  onClick={() => onOpenDeck(deck.id)}
-                  type="button"
-                >
-                  {isSystem ? t('deck.actions.inspect') : t('deck.actions.edit')}
+              {t('deck.actions.createMenu')}
+              <span aria-hidden="true">⌄</span>
+            </button>
+            {createMenuOpen && (
+              <div className="deck-manager-menu deck-manager-menu--create" role="menu">
+                <button disabled={creatingDeck} onClick={openCreateDialog} role="menuitem" type="button">
+                  <span aria-hidden="true">＋</span>
+                  {creatingDeck ? t('deck.actions.creating') : t('deck.actions.create')}
                 </button>
-                {isSystem ? (
-                  <button className="deck-manager-secondary-action" onClick={() => onForkDeck(deck.id)} type="button">
-                    {t('deck.actions.fork')}
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      aria-checked={deck.enabled}
-                      className="deck-manager-switch"
-                      onClick={() => onToggleDeck(deck.id, deck.enabled)}
-                      role="switch"
-                      type="button"
-                    >
-                      <span aria-hidden="true" />
-                      {deck.enabled ? t('deck.actions.disable') : t('deck.actions.enable')}
-                    </button>
-                    {deck.parent_id && (
-                      <button className="deck-manager-secondary-action" onClick={() => onSyncDeck(deck.id)} type="button">
-                        {t('deck.actions.sync')}
-                      </button>
-                    )}
-                    <button
-                      className="deck-manager-secondary-action"
-                      disabled={publishDisabled}
-                      onClick={() => onPublishDeck(deck)}
-                      title={publishDisabled ? t('deck.messages.defaultDeckPublishForbidden') : undefined}
-                      type="button"
-                    >
-                      {deck.published
-                        ? t('deck.actions.unpublish')
-                        : publishDisabled
-                          ? t('deck.actions.publishUnavailable')
-                          : t('deck.actions.publish')}
-                    </button>
-                    <button className="deck-manager-danger-action" onClick={() => onDeleteDeck(deck.id)} type="button">
-                      {t('deck.actions.delete')}
-                    </button>
-                  </>
-                )}
               </div>
-            </article>
-          );
-        })}
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="deck-manager-publications">
-        <div className="deck-manager-panel__heading">
-          <h2>{t('deck.sections.publishedByMe', { count: publishedDecks.length })}</h2>
+      <label className="deck-manager-search">
+        <span className="deck-manager-sr-only">{t('deck.creator.searchLabel')}</span>
+        <span aria-hidden="true">⌕</span>
+        <input
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setPage(1);
+          }}
+          placeholder={t('deck.creator.searchPlaceholder')}
+          type="search"
+          value={query}
+        />
+      </label>
+
+      {refreshError && <p className="deck-manager-inline-error" role="alert">{refreshError}</p>}
+      {operationError && <p className="deck-manager-inline-error" role="alert">{operationError}</p>}
+
+      <section aria-labelledby="deck-manager-all-title" className="deck-manager-catalog">
+        <div className="deck-manager-catalog__controls">
+          <div aria-label={t('deck.creator.agentTypeFilter')} className="deck-manager-filter-tabs" role="tablist">
+            {(['all', 'chat', 'dream'] as const).map((candidate) => (
+              <button
+                aria-selected={agentType === candidate}
+                key={candidate}
+                onClick={() => selectAgentType(candidate)}
+                role="tab"
+                type="button"
+              >
+                {t(`deck.creator.agentTypeTabs.${candidate}`)}
+                <span>{agentTypeCounts[candidate]}</span>
+              </button>
+            ))}
+          </div>
+          <label className="deck-manager-status-filter">
+            <span className="deck-manager-sr-only">{t('deck.creator.statusFilter')}</span>
+            <select
+              aria-label={t('deck.creator.statusFilter')}
+              onChange={(event) => {
+                setStatus(event.target.value as StatusFilter);
+                setPage(1);
+              }}
+              value={status}
+            >
+              <option value="all">{t('deck.creator.statusAll')}</option>
+              <option value="enabled">{t('deck.labels.enabled')}</option>
+              <option value="disabled">{t('deck.labels.disabled')}</option>
+            </select>
+          </label>
         </div>
-        {publishedDecks.length === 0 ? (
-          <p className="deck-manager-empty">{t('deck.publishedByMeEmpty')}</p>
+        <h2 className="deck-manager-sr-only" id="deck-manager-all-title">{t('deck.home.allTitle')}</h2>
+
+        {filteredDecks.length === 0 ? (
+          <div className="deck-manager-empty">
+            <p>{decks.length === 0 ? t('deck.creator.empty') : t('deck.creator.noResults')}</p>
+            {hasFilters && (
+              <button className="deck-manager-secondary-action" onClick={clearFilters} type="button">
+                {t('deck.actions.clearFilters')}
+              </button>
+            )}
+          </div>
         ) : (
-          <div className="deck-manager-grid">
-            {publishedDecks.map((deck) => {
+          <ul aria-label={t('deck.creator.listLabel')} className="deck-manager-list">
+            {visibleDecks.map((deck) => {
+              const isSystem = Boolean(deck.is_system);
+              const disabled = busyDeckId === deck.id;
               const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
               const accent = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
+              const voiceCount = deck.voice_count || deck.voices?.length || 0;
+              const menuOpen = actionMenuDeckId === deck.id;
               return (
-                <article
-                  className="deck-manager-card"
+                <li
+                  className="deck-manager-list__row"
                   data-deck-card-id={deck.id}
-                  data-deck-card-kind="published-by-me"
+                  data-deck-card-kind="owned"
                   key={deck.id}
-                  style={{ '--deck-accent': accent } as CSSProperties}
+                  style={{ '--deck-accent': isSystem ? 'var(--color-border-paper)' : accent } as CSSProperties}
                 >
-                  <div className="deck-manager-card__identity">
-                    <span className="deck-manager-card__icon" aria-hidden="true"><Icon size={22} /></span>
-                    <div className="deck-manager-card__copy">
-                      <h3>{deck.name}</h3>
-                      <p>{deck.description || t('deck.labels.noDescription')}</p>
-                      <span className="deck-manager-card__meta">
-                        {t('deck.publishedByMeMeta', {
-                          voices: deck.voice_count || 0,
-                          installs: deck.install_count || 0,
-                        })}
+                  <button
+                    className="deck-manager-list__identity"
+                    disabled={disabled}
+                    onClick={() => onOpenDeck(deck.id)}
+                    type="button"
+                  >
+                    <span className="deck-manager-list__icon" aria-hidden="true"><Icon size={19} /></span>
+                    <span className="deck-manager-list__copy">
+                      <span className="deck-manager-list__title">
+                        {deck.name}
+                        {isSystem && <span className="deck-manager-chip">{t('deck.labels.system')}</span>}
                       </span>
-                    </div>
-                  </div>
-                  <button className="deck-manager-secondary-action" onClick={() => onUnpublishDeck(deck.id)} type="button">
-                    {t('deck.actions.unpublish')}
+                      <span className="deck-manager-list__description">
+                        {deck.description || t('deck.labels.noDescription')}
+                      </span>
+                      <span className="deck-manager-list__meta">
+                        {t(`deck.labels.agentType.${deck.agent_type === 'dream' ? 'dream' : 'chat'}`)}
+                        <span aria-hidden="true">·</span>
+                        {t('deck.labels.agentCount', { count: voiceCount })}
+                        {deck.deck_version_capability && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="deck-manager-version-fact">
+                              {deck.deck_version ? `内容 v${deck.deck_version}` : '未提交版本'}
+                              {deck.deck_version_dirty ? ` · 草稿 r${deck.draft_revision}` : ''}
+                            </span>
+                          </>
+                        )}
+                        {deck.deck_plugin_version && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="deck-manager-version-fact">运行插件 v{deck.deck_plugin_version}</span>
+                          </>
+                        )}
+                        <span aria-hidden="true">·</span>
+                        {formatUpdatedAt(deck.updated_at)}
+                      </span>
+                    </span>
                   </button>
-                </article>
+
+                  <div className="deck-manager-list__actions">
+                    <div className="deck-manager-menu-anchor">
+                      <button
+                        aria-expanded={menuOpen}
+                        aria-haspopup="menu"
+                        aria-label={t('deck.actions.more', { deck: deck.name })}
+                        className="deck-manager-icon-action"
+                        disabled={disabled}
+                        onClick={() => {
+                          setCreateMenuOpen(false);
+                          setActionMenuDeckId((current) => current === deck.id ? null : deck.id);
+                        }}
+                        type="button"
+                      >
+                        <span aria-hidden="true">•••</span>
+                      </button>
+                      {menuOpen && (
+                        <div className="deck-manager-menu deck-manager-menu--row" role="menu">
+                          <button onClick={() => { setActionMenuDeckId(null); onOpenDeck(deck.id); }} role="menuitem" type="button">
+                            {isSystem ? t('deck.actions.inspect') : t('deck.actions.edit')}
+                          </button>
+                          {isSystem ? (
+                            <button onClick={() => { setActionMenuDeckId(null); onForkDeck(deck.id); }} role="menuitem" type="button">
+                              {t('deck.actions.fork')}
+                            </button>
+                          ) : (
+                            <>
+                              {deck.parent_id && (
+                                <button onClick={() => { setActionMenuDeckId(null); onSyncDeck(deck.id); }} role="menuitem" type="button">
+                                  {t('deck.actions.sync')}
+                                </button>
+                              )}
+                              <button onClick={() => openRelatedThreads(deck)} role="menuitem" type="button">
+                                {t('deck.actions.relatedConversations')}
+                              </button>
+                              <button className="is-danger" onClick={() => { setActionMenuDeckId(null); onDeleteDeck(deck.id); }} role="menuitem" type="button">
+                                {t('deck.actions.delete')}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {!isSystem && (
+                      <button
+                        aria-checked={deck.enabled}
+                        aria-label={deck.enabled
+                          ? t('deck.actions.disableDeck', { deck: deck.name })
+                          : t('deck.actions.enableDeck', { deck: deck.name })}
+                        className="deck-manager-switch"
+                        disabled={disabled}
+                        onClick={() => onToggleDeck(deck.id, deck.enabled)}
+                        role="switch"
+                        type="button"
+                      >
+                        <span aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
-      </div>
-    </section>
+
+        {pageCount > 1 && (
+          <nav aria-label={t('deck.pagination.ariaLabel')} className="deck-manager-pagination">
+            <button
+              className="deck-manager-secondary-action"
+              disabled={page === 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              type="button"
+            >
+              {t('deck.pagination.previous')}
+            </button>
+            <span aria-live="polite">{t('deck.pagination.summary', { page, pages: pageCount })}</span>
+            <button
+              className="deck-manager-secondary-action"
+              disabled={page === pageCount}
+              onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+              type="button"
+            >
+              {t('deck.pagination.next')}
+            </button>
+          </nav>
+        )}
+      </section>
+
+      {relatedDeck && (
+        <div
+          className="deck-manager-dialog-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeRelatedThreads();
+          }}
+        >
+          <section
+            aria-labelledby="deck-related-conversations-title"
+            aria-modal="true"
+            className="deck-manager-dialog deck-manager-related-dialog"
+            role="dialog"
+          >
+            <header className="deck-manager-related-dialog__header">
+              <div>
+                <span className="deck-manager-related-dialog__eyebrow">{relatedDeck.name}</span>
+                <h2 id="deck-related-conversations-title">{t('deck.related.title')}</h2>
+              </div>
+              <button
+                aria-label={t('deck.related.close')}
+                className="deck-manager-details-dialog__close"
+                onClick={closeRelatedThreads}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+
+            <p className="deck-manager-related-dialog__description">
+              {t('deck.related.description')}
+            </p>
+
+            <div aria-live="polite" className="deck-manager-related-dialog__body">
+              {relatedThreadsLoading ? (
+                <div className="deck-manager-related-dialog__loading">
+                  <span className="deck-manager-status__spinner" aria-hidden="true" />
+                  {t('deck.related.loading')}
+                </div>
+              ) : null}
+
+              {relatedThreadsError ? (
+                <div className="deck-manager-related-dialog__error" role="alert">
+                  <span>{relatedThreadsError}</span>
+                  <button onClick={() => void loadRelatedThreads(relatedDeck)} type="button">
+                    {t('deck.actions.retry')}
+                  </button>
+                </div>
+              ) : null}
+
+              {!relatedThreadsLoading
+                && !relatedThreadsError
+                && relatedThreads.length === 0
+                && !relatedThreadsHasMore ? (
+                <div className="deck-manager-related-dialog__empty">
+                  <FaCommentAlt aria-hidden="true" />
+                  <strong>{t('deck.related.emptyTitle')}</strong>
+                  <span>{t('deck.related.emptyDescription')}</span>
+                </div>
+              ) : null}
+
+              {relatedThreads.length > 0 ? (
+                <ul aria-label={t('deck.related.listLabel')} className="deck-manager-related-list">
+                  {relatedThreads.map((thread) => {
+                    const title = thread.title || t('chat.history.fallbackTitle');
+                    const deleting = deletingThreadId === thread.id;
+                    return (
+                      <li className="deck-manager-related-list__item" key={thread.id}>
+                        <span className="deck-manager-related-list__icon" aria-hidden="true">
+                          <FaCommentAlt />
+                        </span>
+                        <span className="deck-manager-related-list__copy">
+                          <strong title={title}>{title}</strong>
+                          <span>{formatUpdatedAt(thread.updated_at)}</span>
+                        </span>
+                        <button
+                          aria-label={t('deck.related.deleteConversation', { title })}
+                          className="deck-manager-related-list__delete"
+                          disabled={Boolean(deletingThreadId)}
+                          onClick={() => void deleteRelatedThread(thread)}
+                          title={t('chat.history.deleteThread')}
+                          type="button"
+                        >
+                          <FaTrashAlt aria-hidden="true" />
+                          <span>{deleting ? t('deck.related.deleting') : t('deck.related.delete')}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+
+              {relatedThreadsHasMore ? (
+                <button
+                  className="deck-manager-secondary-action deck-manager-related-dialog__more"
+                  disabled={relatedThreadsLoadingMore}
+                  onClick={() => void loadRelatedThreads(relatedDeck, relatedThreads.length)}
+                  type="button"
+                >
+                  {relatedThreadsLoadingMore ? t('deck.related.loadingMore') : t('deck.related.loadMore')}
+                </button>
+              ) : null}
+            </div>
+
+            <footer className="deck-manager-related-dialog__footer">
+              <p>{relatedThreadsError
+                ? t('deck.related.unknownHint')
+                : relatedThreads.length > 0 || relatedThreadsHasMore
+                  ? t('deck.related.deleteHint')
+                  : t('deck.related.readyHint')}</p>
+              <div>
+                <button className="deck-manager-secondary-action" onClick={closeRelatedThreads} type="button">
+                  {t('deck.related.close')}
+                </button>
+                <button
+                  className="deck-manager-related-dialog__delete-deck"
+                  disabled={relatedThreadsLoading
+                    || Boolean(relatedThreadsError)
+                    || relatedThreads.length > 0
+                    || relatedThreadsHasMore}
+                  onClick={deleteDeckAfterThreads}
+                  type="button"
+                >
+                  {t('deck.related.deleteDeck')}
+                </button>
+              </div>
+            </footer>
+          </section>
+        </div>
+      )}
+    </div>
   );
 }

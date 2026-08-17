@@ -13,7 +13,9 @@
 // [Sync] 2026-08-15: reconciliation may create a missing actor default for legacy accounts.
 // [Sync] 2026-08-14: consume server-derived Deck Agent type and binding revision
 //                    in list/detail DTOs; the browser does not infer Dream capability.
-// [Sync] 2026-08-14: expose server-derived Deck publication eligibility to management UI.
+// [Sync] 2026-08-16: centralize the lightweight Deck create/update metadata input used by the
+//                    settings-style management surface; remove active marketplace list/publish transports.
+// [Sync] 2026-08-16: consume capability-backed Deck content vN and draft state in list/detail DTOs.
 /**
  * API client for voice analysis backend - FastAPI sync API version
  * [Sync] 2026-06-01: normalize user_sessions.labels in session API responses for frontend display.
@@ -98,16 +100,27 @@ export interface Deck {
   voices?: Voice[];
   created_at?: string;
   updated_at?: string;
-  published?: boolean;
-  author_name?: string;
-  install_count?: number;
-  /** Server-owned publication policy; false for system-initialized Decks. */
-  can_publish?: boolean;
-  publish_block_reason?: 'default_initialized' | null;
   /** Server-derived from the active published Deck Plugin capability. */
   agent_type: 'chat' | 'dream';
   /** Optimistic-lock token for Agent type changes. */
   agent_type_revision: number;
+  /** Exact active runtime plugin identity; never an aggregate Deck version. */
+  deck_plugin_id?: string | null;
+  deck_plugin_version?: string | null;
+  /** Admin-capability-backed aggregate content version facts. */
+  deck_version_capability?: boolean;
+  deck_version?: number | null;
+  draft_revision?: number;
+  deck_version_dirty?: boolean;
+  deck_version_status?: 'unpublished' | 'draft' | 'published';
+  next_deck_version?: number;
+}
+
+export interface DeckDetailsInput {
+  name: string;
+  description?: string;
+  icon?: string;
+  color?: string;
 }
 
 export function normalizeSessionLabels(labels: unknown): SessionLabels {
@@ -1253,12 +1266,8 @@ export async function markFirstLoginCompleted(): Promise<void> {
 /**
  * List all decks (includes system decks + user's own decks)
  */
-export async function listDecks(published?: boolean): Promise<Deck[]> {
-  const url = published
-    ? `${API_BASE}/api/decks?published=true`
-    : `${API_BASE}/api/decks`;
-
-  const response = await fetch(url, {
+export async function listDecks(): Promise<Deck[]> {
+  const response = await fetch(`${API_BASE}/api/decks`, {
     headers: getAuthHeaders()
   });
 
@@ -1314,16 +1323,7 @@ export async function getDeck(deckId: string): Promise<Deck> {
 /**
  * Create a new deck
  */
-export async function createDeck(data: {
-  name: string;
-  name_zh?: string;
-  name_en?: string;
-  description?: string;
-  description_zh?: string;
-  description_en?: string;
-  icon?: string;
-  color?: string;
-}): Promise<{ deck_id: string }> {
+export async function createDeck(data: DeckDetailsInput): Promise<{ deck_id: string }> {
   const response = await fetch(`${API_BASE}/api/decks`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -1409,24 +1409,6 @@ export async function syncDeck(deckId: string): Promise<{ success: boolean; sync
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.detail || 'Sync deck failed');
-  }
-
-  return await response.json();
-}
-
-/**
- * Publish/unpublish a deck to community store
- * @@@ Warning: Publishing breaks parent_id chain (deck becomes standalone)
- */
-export async function publishDeck(deckId: string): Promise<{ success: boolean; published: boolean }> {
-  const response = await fetch(`${API_BASE}/api/decks/${deckId}/publish`, {
-    method: 'POST',
-    headers: getAuthHeaders()
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Publish deck failed');
   }
 
   return await response.json();

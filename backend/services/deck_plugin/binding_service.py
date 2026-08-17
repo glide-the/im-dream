@@ -1,4 +1,7 @@
-"""Persistence, reversible deactivation, and optimistic locking for Deck bindings."""
+"""Persistence, reversible deactivation, and optimistic locking for Deck bindings.
+
+[Sync 2026-08-16] Include every effective binding form change in the Deck draft revision.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +13,8 @@ try:
         BindingApplyTo,
         DeckPluginBinding,
         DeckPluginBindingResponse,
+        DeckPluginBindingHistoryEntry,
+        DeckPluginBindingHistoryResponse,
         DeckPluginBindingState,
         DeckPluginBindingStatus,
         DeckPluginBindingUpdateRequest,
@@ -23,6 +28,8 @@ except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
         BindingApplyTo,
         DeckPluginBinding,
         DeckPluginBindingResponse,
+        DeckPluginBindingHistoryEntry,
+        DeckPluginBindingHistoryResponse,
         DeckPluginBindingState,
         DeckPluginBindingStatus,
         DeckPluginBindingUpdateRequest,
@@ -140,6 +147,50 @@ class BindingService:
             binding=response,
         )
 
+    def list_history(
+        self,
+        *,
+        deck_id: str,
+        actor_id: str,
+        requested_workspace_id: str | None = None,
+        limit: int = 50,
+    ) -> DeckPluginBindingHistoryResponse:
+        """Return persisted binding revisions without rewriting runtime history."""
+
+        self.resolve_workspace_access(
+            deck_id=deck_id,
+            actor_id=actor_id,
+            requested_workspace_id=requested_workspace_id,
+        )
+        rows = self.db.execute(
+            """
+            SELECT deck_plugin_binding_id, deck_plugin_id, deck_plugin_version,
+                   binding_revision, status, applied_to, created_at, updated_at
+            FROM deck_plugin_bindings
+            WHERE deck_id = %s
+            ORDER BY binding_revision DESC
+            LIMIT %s
+            """,
+            (deck_id, limit),
+        ).fetchall()
+        return DeckPluginBindingHistoryResponse(
+            deck_id=deck_id,
+            current_binding_revision=self.latest_revision(deck_id),
+            entries=[
+                DeckPluginBindingHistoryEntry(
+                    deck_plugin_binding_id=row["deck_plugin_binding_id"],
+                    deck_plugin_id=row["deck_plugin_id"],
+                    deck_plugin_version=row["deck_plugin_version"],
+                    binding_revision=row["binding_revision"],
+                    status=DeckPluginBindingStatus(row["status"]),
+                    applied_to=BindingApplyTo(row["applied_to"]),
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
+                for row in rows
+            ],
+        )
+
     async def save(
         self,
         *,
@@ -152,6 +203,7 @@ class BindingService:
             raise RuntimeError("binding save requires a clean transaction boundary")
         self.db.execute("BEGIN")
         try:
+            self._lock_owned_deck(deck_id=deck_id, actor_id=actor_id)
             workspace_id = self.resolve_workspace_access(
                 deck_id=deck_id,
                 actor_id=actor_id,
@@ -170,6 +222,14 @@ class BindingService:
             )
             if not validation.selectable:
                 raise BindingSelectionRejected(validation)
+
+            if (
+                current is not None
+                and current["deck_plugin_id"] == request.deck_plugin_id
+                and current["deck_plugin_version"] == request.deck_plugin_version
+            ):
+                self.db.commit()
+                return self._response(current, validation)
 
             next_revision = current_revision + 1
             if current is not None:
@@ -212,6 +272,11 @@ class BindingService:
                 """,
                 (binding_id,),
             ).fetchone()
+            try:
+                from backend.services.deck.content_versioning import advance_deck_draft_revision
+            except ModuleNotFoundError:  # pragma: no cover
+                from services.deck.content_versioning import advance_deck_draft_revision
+            advance_deck_draft_revision(self.db, deck_id)
             self.db.commit()
             assert created is not None
             return self._response(created, validation)
@@ -233,6 +298,7 @@ class BindingService:
             raise RuntimeError("binding clear requires a clean transaction boundary")
         self.db.execute("BEGIN")
         try:
+            self._lock_owned_deck(deck_id=deck_id, actor_id=actor_id)
             self.resolve_workspace_access(
                 deck_id=deck_id,
                 actor_id=actor_id,
@@ -255,6 +321,11 @@ class BindingService:
                 )
                 if cursor.rowcount != 1:
                     raise BindingRevisionConflict(self.latest_revision(deck_id))
+                try:
+                    from backend.services.deck.content_versioning import advance_deck_draft_revision
+                except ModuleNotFoundError:  # pragma: no cover
+                    from services.deck.content_versioning import advance_deck_draft_revision
+                advance_deck_draft_revision(self.db, deck_id)
             self.db.commit()
             return DeckPluginBindingState(
                 deck_id=deck_id,
@@ -263,6 +334,14 @@ class BindingService:
         except Exception:
             self.db.rollback()
             raise
+
+    def _lock_owned_deck(self, *, deck_id: str, actor_id: str) -> None:
+        row = self.db.execute(
+            "SELECT id FROM decks WHERE id = %s AND owner_id = %s FOR UPDATE",
+            (deck_id, actor_id),
+        ).fetchone()
+        if row is None:
+            raise BindingAccessError()
 
     def _current_row(self, deck_id: str) -> Any | None:
         return self.db.execute(

@@ -27,6 +27,9 @@
 // [Sync] 2026-08-14: replace the authenticated root entry with canonical Story Workspace Chat
 //                    while preserving explicit deep links and browser history semantics.
 // [Sync] 2026-08-14: defer authenticated Deck voice loading until registration/login completes.
+// [Sync] 2026-08-16: restore the pre-01a00576 Deck maintenance popup handoff to canonical Chat.
+// [Sync] 2026-08-16: route Deck settings through Settings / Work and provide the Work-owned management instance.
+// [Sync] 2026-08-16: make the Deck-home Settings action navigate directly to Settings / Work.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -209,8 +212,9 @@ export default function App() {
     window.history.pushState(
       { inkDreamView: 'story-workspace' },
       '',
-      '/story-workspace/settings/resources',
+      `${STORY_WORKSPACE_PATHS['settings-work']}?tab=resources`,
     );
+    window.dispatchEvent(new PopStateEvent('popstate'));
     setCurrentView('story-workspace');
     setShowNotionConnectorDetail(false);
     setConnectorSettingsFocusNonce((value) => value + 1);
@@ -1107,8 +1111,8 @@ export default function App() {
     setActiveChatVoice(undefined);
   }, []);
 
-  // @@@ Every Deck starts in canonical Story Workspace Chat. The URL carries
-  // only stable selection intent; Chat reloads the Deck's server-derived type.
+  // Every Deck maintenance handoff starts in canonical Story Workspace Chat.
+  // The URL carries only stable selection intent; Chat reloads server-derived facts.
   const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice) => {
     setRequestedChatThreadId(undefined);
     setRequestedChatDeck({ deckId, agentId: voiceInfo?.id, nonce: Date.now() });
@@ -1123,6 +1127,16 @@ export default function App() {
     window.dispatchEvent(new PopStateEvent('popstate'));
     setCurrentView('story-workspace');
     setHasOpenedChatView(true);
+  }, []);
+
+  const handleOpenSettingsFromDeck = useCallback(() => {
+    window.history.pushState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      STORY_WORKSPACE_PATHS['settings-work'],
+    );
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    setCurrentView('story-workspace');
   }, []);
 
   const handleDeckManagerUpdate = async () => {
@@ -1142,6 +1156,16 @@ export default function App() {
     <DeckManager
       onUpdate={handleDeckManagerUpdate}
       onChatWithDeck={handleChatWithDeck}
+      onOpenSettings={handleOpenSettingsFromDeck}
+      surface="launcher"
+    />
+  );
+
+  const storyWorkspaceDeckSettingsManager = (
+    <DeckManager
+      onUpdate={handleDeckManagerUpdate}
+      onChatWithDeck={handleChatWithDeck}
+      surface="settings"
     />
   );
 
@@ -1623,6 +1647,7 @@ export default function App() {
                 onOpenNotionDetail={openNotionConnectorDetail}
                 showEnergyBar={showEnergyBar}
                 showNotionConnectorDetail={showNotionConnectorDetail}
+                workDeckContent={storyWorkspaceDeckSettingsManager}
               />
             )}
           />

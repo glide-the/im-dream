@@ -1,8 +1,8 @@
-// [Input] Capability-derived public Decks, default reconciliation, and actor-scoped Dream re-entry rows.
-// [Output] Dream home: active Dream Deck context, real community count, and My Dream list.
+// [Input] Actor-scoped Dream re-entry rows from the production Story Workspace API.
+// [Output] Dream home: active Dream context and durable My Dream re-entry list.
 // [Pos] Story Workspace Dream no-run surface; all new interactions start in canonical Chat.
 // [Sync] 2026-08-14: remove the duplicate creation form and reorganize the no-run page into
-//                    quick start, community Dream Decks, and durable user Dream re-entry.
+//                    active Dream previews and durable user Dream re-entry.
 // [Sync] 2026-08-14: restore page-level scrolling, natural-flow run groups, and whole-row links.
 // [Sync] 2026-08-14: replace Quick Start with actor-scoped in-progress Dream cards.
 // [Sync] 2026-08-14: group My Dream by the real initial/in-progress phase only.
@@ -10,17 +10,9 @@
 // [Sync] 2026-08-14: include and label the server-projected system default in Community Decks.
 // [Sync] 2026-08-14: fall back to the actor's server-identified initialized default
 //                    when the shared system template row is not published locally.
-// [Sync] 2026-08-15: reconcile the actor default before community reads so legacy
-//                    accounts can see the System default Deck without relogging.
+// [Sync] 2026-08-16: remove the deferred Deck marketplace/community installation surface.
 
-import { useEffect, useMemo, useState } from 'react';
-import {
-  forkDeck,
-  listDecks,
-  reconcileDefaultDeckPlugin,
-  type Deck,
-} from '../../api/voiceApi';
-import { updateDeckAgentType } from '../../api/deckPluginApi';
+import { useMemo, useState } from 'react';
 import {
   useStoryWorkspaceDreamRuns,
   type StoryWorkspaceDreamReentryItem,
@@ -144,46 +136,6 @@ function StoryWorkspaceDreamReentryList({
   );
 }
 
-function deckDisplayName(deck: Deck): string {
-  return deck.name_zh?.trim() || deck.name?.trim() || deck.name_en?.trim() || deck.id;
-}
-
-function deckMonogram(deck: Deck): string {
-  const icon = deck.icon?.trim();
-  return icon && Array.from(icon).length <= 2 ? icon : Array.from(deckDisplayName(deck))[0] || '✦';
-}
-
-function isSystemDefaultDeck(deck: Deck): boolean {
-  return deck.is_system || deck.publish_block_reason === 'default_initialized';
-}
-
-function DreamDeckCard({
-  deck,
-  action,
-  actionLabel,
-  pending = false,
-}: {
-  deck: Deck;
-  action: () => void;
-  actionLabel: string;
-  pending?: boolean;
-}) {
-  return (
-    <article className="story-workspace-dream-home__deck-card">
-      <div className="story-workspace-dream-home__deck-icon" aria-hidden="true">{deckMonogram(deck)}</div>
-      <div className="story-workspace-dream-home__deck-copy">
-        <strong>{deckDisplayName(deck)}</strong>
-        <span>{deck.description_zh || deck.description || '使用这个 Deck 在 Chat 中开始 Dream。'}</span>
-        {isSystemDefaultDeck(deck) ? <small>System default Deck</small> : null}
-        {!isSystemDefaultDeck(deck) && deck.author_name ? <small>{deck.author_name}</small> : null}
-      </div>
-      <button disabled={pending} onClick={action} type="button">
-        {pending ? '处理中…' : actionLabel}
-      </button>
-    </article>
-  );
-}
-
 function ActiveDreamCard({
   run,
   onNavigate,
@@ -221,10 +173,6 @@ function ActiveDreamCard({
 export function StoryWorkspaceDreamLaunch({
   onNavigate,
 }: StoryWorkspaceDreamLaunchProps) {
-  const [communityDecks, setCommunityDecks] = useState<Deck[]>([]);
-  const [communityLoading, setCommunityLoading] = useState(true);
-  const [communityError, setCommunityError] = useState<string | null>(null);
-  const [installingDeckId, setInstallingDeckId] = useState<string | null>(null);
   const [showAllActiveDreams, setShowAllActiveDreams] = useState(false);
   const reentry = useStoryWorkspaceDreamRuns();
   const activeDreamRuns = useMemo(
@@ -235,55 +183,6 @@ export function StoryWorkspaceDreamLaunch({
     ? activeDreamRuns
     : activeDreamRuns.slice(0, STORY_WORKSPACE_ACTIVE_DREAM_PREVIEW_COUNT);
   const hiddenActiveDreamCount = Math.max(0, activeDreamRuns.length - visibleActiveDreamRuns.length);
-
-  const loadCommunityDecks = () => {
-    setCommunityLoading(true);
-    setCommunityError(null);
-    void reconcileDefaultDeckPlugin().catch((error) => {
-      console.warn(
-        'Default Deck reconciliation is temporarily unavailable; loading persisted community Decks.',
-        error,
-      );
-    }).then(() => Promise.all([listDecks(true), listDecks()])).then(([collectableDecks, actorDecks]) => {
-      const sharedSystemDefault = collectableDecks.find(
-        (deck) => deck.enabled && deck.is_system,
-      );
-      const actorSystemDefault = actorDecks.find(
-        (deck) => deck.enabled && deck.publish_block_reason === 'default_initialized',
-      );
-      const systemDefault = sharedSystemDefault ?? actorSystemDefault;
-      const publishedDreamDecks = collectableDecks.filter(
-        (deck) => deck.enabled && !deck.is_system && deck.agent_type === 'dream',
-      );
-      setCommunityDecks(systemDefault
-        ? [systemDefault, ...publishedDreamDecks]
-        : publishedDreamDecks);
-    }).catch(() => setCommunityError('社区卡组暂时无法加载，请重试。'))
-      .finally(() => setCommunityLoading(false));
-  };
-
-  useEffect(() => {
-    loadCommunityDecks();
-  }, []);
-
-  const openChat = (deckId: string) => {
-    onNavigate?.(`/story-workspace/chat?deck=${encodeURIComponent(deckId)}`);
-  };
-
-  const installCommunityDeck = async (deck: Deck) => {
-    if (installingDeckId) return;
-    setInstallingDeckId(deck.id);
-    setCommunityError(null);
-    try {
-      const installed = await forkDeck(deck.id);
-      await updateDeckAgentType(installed.deck_id, 'dream', 0);
-      openChat(installed.deck_id);
-    } catch (error) {
-      setCommunityError(error instanceof Error ? error.message : '社区 Deck 安装失败，请重试。');
-    } finally {
-      setInstallingDeckId(null);
-    }
-  };
 
   return (
     <div className="story-workspace-dream-home" aria-labelledby="dream-home-title">
@@ -316,34 +215,6 @@ export function StoryWorkspaceDreamLaunch({
               {showAllActiveDreams ? '收起' : `查看更多（${hiddenActiveDreamCount}）`}
             </button>
           ) : null}
-        </section>
-
-        <section className="story-workspace-dream-home__section story-workspace-dream-home__section--decks" aria-labelledby="dream-community-title">
-          <header><h2 id="dream-community-title">社区卡组（{communityDecks.length}）</h2></header>
-          {communityLoading ? <p role="status">正在读取公开 Deck…</p> : null}
-          {communityError ? <div className="story-workspace-dream-home__error" role="alert">{communityError}<button onClick={loadCommunityDecks} type="button">重试</button></div> : null}
-          {!communityLoading && !communityError && communityDecks.length === 0 ? <p className="story-workspace-dream-home__empty">目前没有公开的 Dream Deck。</p> : null}
-          <div className="story-workspace-dream-home__deck-grid">
-            {communityDecks.map((deck) => (
-              <DreamDeckCard
-                action={() => {
-                  if (!deck.is_system && deck.publish_block_reason === 'default_initialized') {
-                    openChat(deck.id);
-                    return;
-                  }
-                  void installCommunityDeck(deck);
-                }}
-                actionLabel={
-                  !deck.is_system && deck.publish_block_reason === 'default_initialized'
-                    ? '在 Chat 中使用'
-                    : '安装并使用'
-                }
-                deck={deck}
-                key={deck.id}
-                pending={installingDeckId === deck.id}
-              />
-            ))}
-          </div>
         </section>
 
         <section className="story-workspace-dream-home__section story-workspace-dream-home__section--runs" aria-labelledby="my-dream-title">

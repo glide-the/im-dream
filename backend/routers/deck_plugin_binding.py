@@ -1,11 +1,14 @@
-"""Authenticated Deck Plugin binding, options, and validation endpoints."""
+"""Authenticated Deck Plugin binding, options, history, and validation endpoints.
+
+[Sync 2026-08-16] Add the folded Deck panel's owner-checked history read.
+"""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 import database
@@ -16,6 +19,7 @@ from .deps import get_current_user
 try:
     from backend.models.deck_plugin import (
         DeckPluginBindingResponse,
+        DeckPluginBindingHistoryResponse,
         DeckPluginBindingState,
         DeckPluginBindingUpdateRequest,
         DeckAgentType,
@@ -38,6 +42,7 @@ try:
 except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
     from models.deck_plugin import (
         DeckPluginBindingResponse,
+        DeckPluginBindingHistoryResponse,
         DeckPluginBindingState,
         DeckPluginBindingUpdateRequest,
         DeckAgentType,
@@ -230,6 +235,27 @@ async def get_plugin_binding(
             deck_id=deck_id,
             actor_id=_actor_id(current_user),
             requested_workspace_id=_requested_workspace(current_user),
+        )
+    except BindingAccessError:
+        return _access_denied()
+
+
+@router.get(
+    "/{deck_id}/plugin-binding/history",
+    response_model=DeckPluginBindingHistoryResponse,
+)
+async def get_plugin_binding_history(
+    deck_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: dict[str, Any] = Depends(_deck_current_user),
+    binding: BindingService = Depends(_binding_service),
+):
+    try:
+        return binding.list_history(
+            deck_id=deck_id,
+            actor_id=_actor_id(current_user),
+            requested_workspace_id=_requested_workspace(current_user),
+            limit=limit,
         )
     except BindingAccessError:
         return _access_denied()

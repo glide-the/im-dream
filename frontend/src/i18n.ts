@@ -3,6 +3,16 @@
 // [Pos] Frontend i18next resource registry.
 // [Sync] 2026-08-14: add actor-owned publication and system-default sharing copy.
 // [Sync] 2026-08-15: add the localized More disclosure for restored legacy navigation.
+// [Sync] 2026-08-16: add the PDF-led Deck home, create menu, enabled strip, counted filters,
+//                    flat-list status, refresh, pagination, and lightweight-detail copy.
+// [Sync] 2026-08-16: remove obsolete Deck page-heading and use/create-mode copy.
+// [Sync] 2026-08-16: remove Deck market/workbench copy and add lightweight details,
+//                    pagination, and recoverable management feedback.
+// [Sync] 2026-08-16: restore full popup-maintenance confirmations and recoverable
+//                    Agent mutation feedback from the pre-01a00576 baseline.
+// [Sync] 2026-08-17: explain the published-clean Deck-home empty state.
+// [Sync] 2026-08-17: add Work-related Chat history cleanup and deletion guidance copy.
+// [Sync] 2026-08-17: localize the Story Workspace Settings shell and render Work/工作台 per locale.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -40,6 +50,67 @@ const resources = {
           options: {
             en: 'English',
             zh: '中文 (Chinese)'
+          }
+        },
+        workspace: {
+          aria: {
+            categories: 'Settings categories',
+            navigation: 'Settings categories navigation',
+            content: 'Settings content'
+          },
+          backToApp: 'Back to app',
+          personal: 'Personal',
+          search: {
+            label: 'Search settings',
+            placeholder: 'Search settings…',
+            noResults: 'No matching settings'
+          },
+          navigation: {
+            general: 'General',
+            subscription: 'Subscription',
+            work: 'Work',
+            model: 'AI models',
+            about: 'About'
+          },
+          general: {
+            description: 'Adjust the interface language and workspace display preferences.'
+          },
+          languageLabel: 'Language',
+          theme: {
+            label: 'Appearance',
+            description: 'Choose the appearance of the workspace.',
+            options: {
+              light: 'Light',
+              system: 'System',
+              dark: 'Dark'
+            }
+          },
+          energy: {
+            label: 'Energy Bar',
+            description: 'Show the energy progress bar in the bottom stats line.',
+            toggleLabel: 'Toggle energy bar'
+          },
+          work: {
+            title: 'Work',
+            description: 'Manage the Decks, resource links, and plugins available in your creative workspace.',
+            tabsLabel: 'Work management categories',
+            tabs: {
+              deck: 'Deck',
+              resources: 'Resource links',
+              plugins: 'Plugins'
+            }
+          },
+          resourceDetail: {
+            title: 'Resource connection',
+            description: 'Manage an individual resource connection.'
+          },
+          model: {
+            title: 'AI model configuration',
+            description: 'Configure the models and runtime policies used by the creative workspace.'
+          },
+          about: {
+            title: 'About',
+            description: 'Information about the Ink & Memory workspace.'
           }
         }
       },
@@ -88,86 +159,135 @@ const resources = {
         }
       },
       deck: {
-        heading: 'Voice Decks',
-        subheading: 'Organize your inner voices into thematic collections',
         loading: 'Loading Decks…',
-        mode: {
-          ariaLabel: 'Deck workspace mode',
-          use: {
-            label: 'Use Decks',
-            description: 'Choose an enabled Deck and Agent, then start a new conversation. Runtime settings are read-only here.'
-          },
-          create: {
-            label: 'Create Decks',
-            description: 'Create, edit, enable, sync, and publish Decks you manage.'
-          }
-        },
         actions: {
           retry: 'Retry',
-          create: '+ Create New Deck',
-          creating: 'Creating...',
-          addVoice: '+ Add Voice to this Deck',
-          addingVoice: 'Adding...',
-          install: 'Install',
+          create: 'Create Deck',
+          createMenu: 'Create',
+          creating: 'Creating Deck…',
           sync: 'Sync with Original',
-          publish: 'Publish to Community',
-          publishUnavailable: 'System default · Cannot publish',
-          unpublish: 'Unpublish',
           delete: 'Delete Deck',
           edit: 'Edit',
           inspect: 'Inspect template',
           fork: 'Fork',
           enable: 'Enable',
           disable: 'Disable',
-          useInChat: 'Use in Chat'
+          refresh: 'Refresh',
+          refreshing: 'Refreshing…',
+          clearFilters: 'Clear filters',
+          more: 'More actions for {{deck}}',
+          relatedConversations: 'Related conversations',
+          enableDeck: 'Enable {{deck}}',
+          disableDeck: 'Disable {{deck}}'
         },
-        sections: {
-          myDecks: 'My Decks',
-          availableDecks: 'Available Decks',
-          availableDecksCount: '{{count}} enabled',
-          community: 'Community Decks ({{count}})',
-          publishedByMe: 'My Published Decks ({{count}})'
+        defaults: {
+          newName: 'New Deck',
+          newDescription: 'Describe your deck here'
+        },
+        home: {
+          sectionLabel: 'Decks',
+          title: 'Decks',
+          description: 'Manage the Decks you use with Chat and Dream',
+          launchDescription: 'Open an enabled published Deck; manage drafts and other Decks in Settings',
+          enabledTitle: 'Enabled',
+          enabledEmpty: 'No Deck is enabled.',
+          availableEmpty: 'No enabled Deck has a published version without draft changes.',
+          allTitle: 'All Decks',
+          availableTitle: 'Available Decks',
+          launchSearchLabel: 'Search available Decks',
+          launchListLabel: 'Available Deck list',
+          openDeck: 'Open {{deck}}',
+          openSettings: 'Open Deck settings'
         },
         labels: {
           system: 'System',
           noDescription: 'No description',
           voiceCount: '{{count}} voices',
+          agentCount: '{{count}} Agents',
           anonymous: 'Anonymous',
+          enabled: 'Enabled',
+          disabled: 'Disabled',
+          updateUnknown: 'Not recorded',
           agentType: {
             chat: 'Chat Agent',
             dream: 'Dream Agent'
           }
         },
-        use: {
-          empty: 'No enabled Deck is available. Enable one in Create Decks.',
-          agentLabel: 'Agent',
-          agentSelectAria: 'Choose an Agent from {{deck}}',
-          noAgent: 'This Deck has no enabled Agent and cannot start a conversation.'
-        },
         creator: {
-          scopeHint: 'Runtime edits belong here; usage stays read-only.'
+          searchLabel: 'Search managed Decks',
+          searchPlaceholder: 'Search name or description',
+          agentTypeFilter: 'Filter by Agent type',
+          agentTypeTabs: {
+            all: 'All',
+            chat: 'Chat',
+            dream: 'Dream'
+          },
+          statusFilter: 'Filter by enabled state',
+          statusAll: 'All states',
+          empty: 'No managed Decks yet. Create one to begin.',
+          noResults: 'No Deck matches these filters.',
+          listLabel: 'Deck settings'
         },
-        communityMeta: 'by {{author}} · {{voices}} voices · {{installs}} installs',
-        communityEmpty: 'No published decks yet. Be the first to share!',
-        publishedByMeMeta: '{{voices}} voices · collected {{installs}} times',
-        publishedByMeEmpty: 'You have not published any Decks yet.',
+        pagination: {
+          ariaLabel: 'Deck list pages',
+          previous: 'Previous',
+          next: 'Next',
+          summary: 'Page {{page}} of {{pages}}'
+        },
+        related: {
+          title: 'Related conversations',
+          description: 'This Deck stays protected while Chat conversations still use it. Review the same history previews shown in Chat and delete only the conversations you no longer need.',
+          loading: 'Loading related conversations…',
+          loadFailed: 'Related conversations could not be loaded.',
+          deleteFailed: 'The conversation could not be deleted.',
+          emptyTitle: 'No related conversations',
+          emptyDescription: 'Chat history no longer blocks this Deck from being deleted.',
+          listLabel: 'Related Chat conversations',
+          confirmDelete: 'Delete “{{title}}”? This permanently removes its Chat history.',
+          deleteConversation: 'Delete conversation {{title}}',
+          delete: 'Delete',
+          deleting: 'Deleting…',
+          loadMore: 'Load more',
+          loadingMore: 'Loading…',
+          deleteHint: 'Delete every related conversation before deleting this Deck.',
+          unknownHint: 'Retry loading related conversations before deleting this Deck.',
+          readyHint: 'All related conversations are cleared. You can now retry Deck deletion.',
+          deleteDeck: 'Delete Deck',
+          close: 'Close'
+        },
+        details: {
+          createTitle: 'Create Deck',
+          editTitle: 'Edit Deck',
+          inspectTitle: 'Deck details',
+          name: 'Deck name',
+          description: 'Description',
+          icon: 'Icon',
+          color: 'Color',
+          defaultVisual: 'Use default',
+          enableHint: 'Enable or disable this Deck from the management list.',
+          nameRequired: 'Enter a Deck name.',
+          saveFailed: 'Deck could not be saved. Try again.',
+          cancel: 'Cancel',
+          close: 'Close',
+          save: 'Save',
+          saving: 'Saving…'
+        },
         confirm: {
           delete: 'Delete this deck and all its voices?',
           deleteAgent: 'Delete this Agent?',
           sync: 'Sync with original template? This will overwrite any changes you made to this deck.'
         },
-        publishWarning: {
-          heading: '⚠️ Publish Deck Warning',
-          body: 'Publishing will <strong>break the parent link</strong>. This deck becomes a standalone deck in the community store.',
-          note: 'This action cannot be undone. Even if you unpublish later, the parent link stays broken.',
-          cancel: 'Cancel',
-          confirm: 'Publish Anyway'
-        },
         messages: {
-          publishSuccess: '✅ Deck published to community!',
-          unpublishSuccess: '✅ Deck unpublished',
-          installSuccess: '✅ Deck installed to your collection!',
-          defaultDeckPublishForbidden: 'System-initialized Decks cannot be published.'
+          loadFailed: 'Decks could not be loaded.',
+          createFailed: 'Deck could not be created.',
+          createAgentFailed: 'Agent could not be created.',
+          updateFailed: 'Deck could not be updated.',
+          updateAgentFailed: 'Agent could not be updated.',
+          toggleFailed: 'Deck status could not be changed.',
+          forkFailed: 'Deck copy could not be created.',
+          deleteFailed: 'Deck could not be deleted.',
+          deleteAgentFailed: 'Agent could not be deleted.',
+          syncFailed: 'Deck could not be synchronized.'
         }
       },
       timeline: {
@@ -685,6 +805,67 @@ const resources = {
             en: 'English (英语)',
             zh: '中文'
           }
+        },
+        workspace: {
+          aria: {
+            categories: '设置分类',
+            navigation: '设置分类导航',
+            content: '设置内容'
+          },
+          backToApp: '返回应用',
+          personal: '个人',
+          search: {
+            label: '搜索设置',
+            placeholder: '搜索设置…',
+            noResults: '没有匹配的设置'
+          },
+          navigation: {
+            general: '常规',
+            subscription: '订阅',
+            work: '工作台',
+            model: 'AI 模型',
+            about: '关于'
+          },
+          general: {
+            description: '调整界面语言和工作区显示偏好。'
+          },
+          languageLabel: '语言',
+          theme: {
+            label: '外观主题',
+            description: '选择工作区的显示外观。',
+            options: {
+              light: '浅色',
+              system: '跟随系统',
+              dark: '深色'
+            }
+          },
+          energy: {
+            label: '能量条',
+            description: '在底部统计栏显示能量进度条。',
+            toggleLabel: '切换能量条'
+          },
+          work: {
+            title: '工作台',
+            description: '集中管理可在创作工作区使用的 Deck、资源链接与插件。',
+            tabsLabel: '工作台管理分类',
+            tabs: {
+              deck: 'Deck',
+              resources: '资源链接',
+              plugins: '插件'
+            }
+          },
+          resourceDetail: {
+            title: '资源连接',
+            description: '管理单个资源连接。'
+          },
+          model: {
+            title: 'AI 模型配置',
+            description: '配置创作工作区使用的模型和运行策略。'
+          },
+          about: {
+            title: '关于',
+            description: 'Ink & Memory 工作区信息。'
+          }
         }
       },
       analysis: {
@@ -732,86 +913,135 @@ const resources = {
         }
       },
       deck: {
-          heading: '声线卡组',
-          subheading: '以主题整理你的心灵声线',
           loading: '正在加载 Deck…',
-          mode: {
-            ariaLabel: 'Deck 工作台模式',
-            use: {
-              label: '使用 Deck',
-              description: '选择已启用的 Deck 和 Agent，然后开始新对话；这里不修改运行配置。'
-            },
-            create: {
-              label: '创作 Deck',
-              description: '创建、编辑、启停、同步和发布你管理的 Deck。'
-            }
-          },
           actions: {
             retry: '重试',
-            create: '+ 新建卡组',
-            creating: '建立中...',
-            addVoice: '+ 向卡组添加声线',
-            addingVoice: '添加中...',
-            install: '安装',
+            create: '创建 Deck',
+            createMenu: '创建',
+            creating: '正在创建 Deck…',
             sync: '与原版同步',
-            publish: '发布到社区',
-            publishUnavailable: '系统默认 · 不可发布',
-            unpublish: '取消发布',
             delete: '删除卡组',
             edit: '编辑',
             inspect: '查看模板',
             fork: '创建副本',
             enable: '启用',
             disable: '停用',
-            useInChat: '在 Chat 中使用'
-          },
-        sections: {
-          myDecks: '我的卡组',
-          availableDecks: '可使用的 Deck',
-          availableDecksCount: '{{count}} 个已启用',
-          community: '社区卡组（{{count}}）',
-          publishedByMe: '我发布的卡组（{{count}}）'
+            refresh: '刷新',
+            refreshing: '刷新中…',
+          clearFilters: '清除筛选',
+          more: '{{deck}} 的更多操作',
+          relatedConversations: '相关对话',
+          enableDeck: '启用 {{deck}}',
+            disableDeck: '停用 {{deck}}'
+        },
+        defaults: {
+          newName: '新建 Deck',
+          newDescription: '请在这里描述你的 Deck'
+        },
+        home: {
+          sectionLabel: 'Deck',
+          title: 'Deck',
+          description: '管理在 Chat 和 Dream 中使用的 Deck',
+          launchDescription: '打开已启用且已发布的 Deck；草稿及其他 Deck 请前往设置管理',
+          enabledTitle: '已启用',
+          enabledEmpty: '当前没有已启用的 Deck。',
+          availableEmpty: '当前没有已启用、已发布且无草稿变更的 Deck。',
+          allTitle: '全部 Deck',
+          availableTitle: '正式可用 Deck',
+          launchSearchLabel: '搜索正式可用的 Deck',
+          launchListLabel: '正式可用 Deck 列表',
+          openDeck: '打开 {{deck}}',
+          openSettings: '打开 Deck 设置'
         },
         labels: {
           system: '系统',
           noDescription: '暂无简介',
           voiceCount: '{{count}} 条声线',
+          agentCount: '{{count}} 个 Agent',
           anonymous: '匿名',
+          enabled: '已启用',
+          disabled: '已停用',
+          updateUnknown: '未记录',
           agentType: {
             chat: 'Chat Agent',
             dream: 'Dream Agent'
           }
         },
-        use: {
-          empty: '当前没有可使用的 Deck，可前往“创作 Deck”启用。',
-          agentLabel: 'Agent',
-          agentSelectAria: '选择 {{deck}} 中的 Agent',
-          noAgent: '此 Deck 没有已启用的 Agent，暂时不能开始对话。'
-        },
         creator: {
-          scopeHint: '运行配置在这里维护，使用入口保持只读。'
+          searchLabel: '搜索可管理的 Deck',
+          searchPlaceholder: '搜索名称或说明',
+          agentTypeFilter: '按 Agent 类型筛选',
+          agentTypeTabs: {
+            all: '全部',
+            chat: 'Chat',
+            dream: 'Dream'
+          },
+          statusFilter: '按启用状态筛选',
+          statusAll: '全部状态',
+          empty: '还没有可管理的 Deck，可新建一个开始。',
+          noResults: '没有符合当前条件的 Deck。',
+          listLabel: 'Deck 设置列表'
         },
-        communityMeta: '由 {{author}} 创作 · {{voices}} 条声线 · {{installs}} 次安装',
-        communityEmpty: '尚无公开卡组，来做第一位分享的人吧！',
-        publishedByMeMeta: '{{voices}} 条声线 · 被收藏 {{installs}} 次',
-        publishedByMeEmpty: '你还没有发布任何卡组。',
+        pagination: {
+          ariaLabel: 'Deck 列表分页',
+          previous: '上一页',
+          next: '下一页',
+          summary: '第 {{page}} / {{pages}} 页'
+        },
+        related: {
+          title: '相关对话',
+          description: '仍有 Chat 对话使用这个 Deck 时，系统会保护它不被删除。这里沿用 Chat 历史预览，仅删除你确认不再需要的对话。',
+          loading: '正在加载相关对话…',
+          loadFailed: '相关对话加载失败。',
+          deleteFailed: '对话删除失败。',
+          emptyTitle: '没有相关对话',
+          emptyDescription: 'Chat 历史已不再阻止删除这个 Deck。',
+          listLabel: '相关 Chat 对话',
+          confirmDelete: '确定删除“{{title}}”吗？对应的 Chat 历史将被永久删除。',
+          deleteConversation: '删除对话 {{title}}',
+          delete: '删除',
+          deleting: '删除中…',
+          loadMore: '加载更多',
+          loadingMore: '加载中…',
+          deleteHint: '需要先删除全部相关对话，才能删除这个 Deck。',
+          unknownHint: '请先重试加载相关对话，未知结果不能视为已清空。',
+          readyHint: '相关对话已清空，现在可以重新删除 Deck。',
+          deleteDeck: '删除 Deck',
+          close: '关闭'
+        },
+        details: {
+          createTitle: '新建 Deck',
+          editTitle: '编辑 Deck',
+          inspectTitle: 'Deck 详情',
+          name: 'Deck 名称',
+          description: '说明',
+          icon: '图标',
+          color: '颜色',
+          defaultVisual: '使用默认值',
+          enableHint: '请在管理列表中启用或停用此 Deck。',
+          nameRequired: '请输入 Deck 名称。',
+          saveFailed: 'Deck 保存失败，请重试。',
+          cancel: '取消',
+          close: '关闭',
+          save: '保存',
+          saving: '保存中…'
+        },
         confirm: {
           delete: '确定删除这个卡组以及所有声线？',
           deleteAgent: '确定删除这个 Agent？',
           sync: '与原模板同步？这会覆盖你在卡组里的修改。'
         },
-        publishWarning: {
-          heading: '⚠️ 发布提醒',
-          body: '发布后会<strong>断开与父卡组的链接</strong>，并在社区中以独立卡组存在。',
-          note: '此操作不可逆，就算之后取消发布，父子链接也无法恢复。',
-          cancel: '取消',
-          confirm: '仍要发布'
-        },
         messages: {
-          publishSuccess: '✅ 已发布到社区！',
-          unpublishSuccess: '✅ 已取消发布',
-          installSuccess: '✅ 已安装到你的卡组',
-          defaultDeckPublishForbidden: '系统默认初始化的 Deck 不能发布。'
+          loadFailed: 'Deck 加载失败。',
+          createFailed: 'Deck 创建失败。',
+          createAgentFailed: 'Agent 创建失败。',
+          updateFailed: 'Deck 更新失败。',
+          updateAgentFailed: 'Agent 更新失败。',
+          toggleFailed: 'Deck 状态更新失败。',
+          forkFailed: 'Deck 副本创建失败。',
+          deleteFailed: 'Deck 删除失败。',
+          deleteAgentFailed: 'Agent 删除失败。',
+          syncFailed: 'Deck 同步失败。'
         }
       },
       timeline: {

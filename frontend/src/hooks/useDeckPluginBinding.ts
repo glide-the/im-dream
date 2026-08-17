@@ -1,6 +1,7 @@
-// [Input] Deck id, a selected server option, and the frozen binding GET/PUT contracts.
-// [Output] Binding state plus next-run save, conflict refresh, and user reconfirmation state.
-// [Pos] Deck Editor Plugin binding data hook.
+// [Input] Deck id, exact server versions, and optimistic binding APIs.
+// [Output] Current runtime-version binding plus explicit save/conflict state.
+// [Pos] Deck version-management data hook.
+// [Sync] 2026-08-16: restore real binding-version management without Workflow UI semantics.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -18,27 +19,18 @@ export interface DeckPluginBindingConflict {
   selectionStillAvailable: boolean;
 }
 
-function bindingLoadMessage(error: unknown): string {
-  if (error instanceof DeckPluginApiError && error.status === 404) {
-    return '无法读取此 Deck 的工作流插件绑定。';
-  }
-  if (error instanceof Error && error.message === 'Not authenticated') {
-    return '登录状态已失效，请重新登录后重试。';
-  }
-  return '工作流插件绑定加载失败，请稍后重试。';
+function loadMessage(error: unknown): string {
+  if (error instanceof DeckPluginApiError && error.status === 404) return '此 Deck 的版本信息不可用。';
+  if (error instanceof Error && error.message === 'Not authenticated') return '登录状态已失效，请重新登录。';
+  return '版本信息加载失败，请稍后重试。';
 }
 
-function bindingSaveMessage(error: unknown): string {
+function saveMessage(error: unknown): string {
   if (error instanceof DeckPluginApiError) {
-    if (error.status === 422 && error.errorCode) {
-      return `该版本当前不可选择（${error.errorCode}）。请按恢复提示处理后重试。`;
-    }
+    if (error.status === 422 && error.errorCode) return `该版本当前不可选择（${error.errorCode}）。`;
     if (error.status === 404) return '无法保存：Deck 不存在或无编辑权限。';
   }
-  if (error instanceof Error && error.message === 'Not authenticated') {
-    return '登录状态已失效，请重新登录后重试。';
-  }
-  return '插件版本保存失败，请稍后重试。';
+  return '版本保存失败，请稍后重试。';
 }
 
 export function useDeckPluginBinding(deckId: string) {
@@ -52,26 +44,24 @@ export function useDeckPluginBinding(deckId: string) {
   const currentState = state?.deck_id === deckId ? state : null;
 
   const refresh = useCallback(async (): Promise<DeckPluginBindingState | null> => {
-    const currentRequest = ++requestId.current;
+    const id = ++requestId.current;
     setLoading(true);
     setError(null);
     try {
-      const nextState = await getDeckPluginBinding(deckId);
-      if (currentRequest === requestId.current) setState(nextState);
-      return nextState;
+      const next = await getDeckPluginBinding(deckId);
+      if (id === requestId.current) setState(next);
+      return next;
     } catch (nextError) {
-      if (currentRequest === requestId.current) setError(bindingLoadMessage(nextError));
+      if (id === requestId.current) setError(loadMessage(nextError));
       return null;
     } finally {
-      if (currentRequest === requestId.current) setLoading(false);
+      if (id === requestId.current) setLoading(false);
     }
   }, [deckId]);
 
   useEffect(() => {
     void refresh();
-    return () => {
-      requestId.current += 1;
-    };
+    return () => { requestId.current += 1; };
   }, [refresh]);
 
   const save = useCallback(async (
@@ -95,7 +85,7 @@ export function useDeckPluginBinding(deckId: string) {
         applied_to: 'next_run',
         binding: saved,
       });
-      setSuccessMessage('插件版本已更新，将在下一次运行时生效。');
+      setSuccessMessage(`已切换到 v${saved.deck_plugin_version}，下一次运行生效。`);
       return true;
     } catch (nextError) {
       if (
@@ -104,33 +94,24 @@ export function useDeckPluginBinding(deckId: string) {
         && nextError.errorCode === 'BINDING_REVISION_CONFLICT'
       ) {
         const [, refreshedOptions] = await Promise.all([refresh(), refreshOptions()]);
-        const selectionStillAvailable = Boolean(refreshedOptions?.options.some(candidate => (
+        const selectionStillAvailable = Boolean(refreshedOptions?.options.some((candidate) => (
           candidate.deck_plugin_id === option.deck_plugin_id
           && candidate.deck_plugin_version === option.deck_plugin_version
           && candidate.selectable
         )));
         setConflict({
-          message: '该 Deck 的插件选择已被其他会话修改。已刷新最新状态，请重新确认。',
+          message: '版本已被其他会话修改。已刷新最新状态，请重新确认。',
           currentRevision: nextError.currentRevision,
           selectionStillAvailable,
         });
         return false;
       }
-      setError(bindingSaveMessage(nextError));
+      setError(saveMessage(nextError));
       return false;
     } finally {
       setSaving(false);
     }
   }, [currentState?.binding_revision, deckId, refresh]);
 
-  return {
-    state: currentState,
-    loading,
-    saving,
-    error,
-    successMessage,
-    conflict,
-    refresh,
-    save,
-  };
+  return { state: currentState, loading, saving, error, successMessage, conflict, refresh, save };
 }

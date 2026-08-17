@@ -12,6 +12,7 @@
 //                    links (Task 4 handoff note).
 // [Sync] 2026-08-14: parse stable Deck/Agent Chat intent; neither parameter
 //                    declares or authorizes Dream mode.
+// [Sync] 2026-08-16: add the canonical Settings / Work route while retaining resource/plugin deep links.
 
 export type StoryWorkspaceStaticRoute =
   | 'dream'
@@ -25,6 +26,7 @@ export type StoryWorkspaceStaticRoute =
   | 'decks'
   | 'subscription'
   | 'settings'
+  | 'settings-work'
   | 'settings-resources'
   | 'settings-plugins'
   | 'settings-model'
@@ -46,6 +48,7 @@ export const STORY_WORKSPACE_PATHS: Record<StoryWorkspaceStaticRoute, string> = 
   decks: '/story-workspace/decks',
   subscription: '/story-workspace/subscription',
   settings: '/story-workspace/settings',
+  'settings-work': '/story-workspace/settings/work',
   'settings-resources': '/story-workspace/settings/resources',
   'settings-plugins': '/story-workspace/settings/plugins',
   'settings-model': '/story-workspace/settings/model',
@@ -298,6 +301,7 @@ export function storyWorkspaceAllowsLegacyReviewPanel(
     || match.route === 'chat'
     || match.route === 'subscription'
     || match.route === 'settings'
+    || match.route === 'settings-work'
     || match.route === 'settings-resources'
     || match.route === 'settings-plugins'
     || match.route === 'settings-model'

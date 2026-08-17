@@ -13,6 +13,7 @@
 // [Sync] 2026-08-04: Dream routes project every selected run to the fixed
 //                    story_workspace_dream context state; raw WorkflowRun
 //                    statuses never reach WorkflowContextBar.
+// [Sync] 2026-08-16: route Settings / Work as the parent surface for Deck, resource, and plugin management.
 // [Sync] 2026-08-13: explicit Dream/Execution Chat actions carry their bound
 //                    thread through the router before opening canonical Chat.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
@@ -170,6 +171,7 @@ function renderStoryWorkspaceRoute(
         ? renderSettings(storyWorkspaceSettingsSectionForRoute(match.route), onNavigate)
         : <StoryWorkspaceSubscriptionPage />;
     case 'settings':
+    case 'settings-work':
     case 'settings-resources':
     case 'settings-plugins':
     case 'settings-model':
@@ -365,6 +367,7 @@ export function StoryWorkspaceRouter({
     ? STORY_WORKSPACE_PATHS[activeRoute as keyof typeof STORY_WORKSPACE_PATHS]
     : STORY_WORKSPACE_PATHS.dream;
   const isSettingsRoute = activeRoute === 'settings'
+    || activeRoute === 'settings-work'
     || activeRoute === 'settings-resources'
     || activeRoute === 'settings-plugins'
     || activeRoute === 'settings-model'

@@ -83,6 +83,8 @@
 // [Sync] 2026-08-14: show Dream's initial/in-progress rows in an adaptive horizontal scroller.
 // [Sync] 2026-08-15: historical threads hide the immutable composer selector;
 //                    Deck/Agent context remains visible in the top bar.
+// [Sync] 2026-08-17: share typed Chat history create/list/delete transport with
+//                    Deck related-conversation management.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -98,7 +100,6 @@ import {
   toAttachment,
 } from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
-import { getAuthToken } from '../../contexts/AuthContext';
 import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import PlanButton from './PlanPanel';
 import { SubagentButton, SubagentSidebar } from './SubagentPanel';
@@ -112,7 +113,6 @@ import { IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus,
 import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
-import { API_BASE } from '../../lib/apiBase';
 import { getDateLocale } from '../../i18n';
 import { listDecks, getDeck, type Deck } from '../../api/voiceApi';
 import DeckChatSelector from '../deck/DeckChatSelector';
@@ -136,16 +136,14 @@ import {
   readStoryWorkspaceAgentParam,
   readStoryWorkspaceDeckParam,
 } from '../../router/storyWorkspacePath';
+import {
+  createChatThread,
+  deleteChatThread,
+  listChatThreads,
+  type ChatHistoryThread,
+} from '../../api/chatHistoryApi';
 
-interface ChatThread extends ClaudeThreadRecord {
-  match?: {
-    strategy: string;
-    retriever?: string;
-    score: number;
-    fields: string[];
-    excerpt?: string;
-  };
-}
+interface ChatThread extends ClaudeThreadRecord, ChatHistoryThread {}
 
 interface ChatViewProps {
   threadId?: string;
@@ -278,52 +276,9 @@ function getThreadDateGroup(value: string, t: TFunction): string {
   return t('chat.dateGroup.earlier');
 }
 
-async function createThread(deckId?: string, voiceId?: string): Promise<string | null> {
+async function fetchThreads(params: Parameters<typeof listChatThreads>[0] = {}): Promise<ChatThread[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${getAuthToken()}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(deckId ? { deckId, ...(voiceId ? { voiceId } : {}) } : {}),
-    });
-    if (!res.ok) return null;
-    const data = await res.json() as { thread_id: string };
-    return data.thread_id ?? null;
-  } catch {
-    return null;
-  }
-}
-
-interface ThreadSearchParams {
-  query?: string;
-  searchScope?: 'all' | 'title' | 'messages';
-  retrievalMode?: 'fuzzy' | 'auto' | 'vector';
-  limit?: number;
-  offset?: number;
-}
-
-async function fetchThreads(params: ThreadSearchParams = {}): Promise<ChatThread[]> {
-  try {
-    const search = new URLSearchParams();
-    const query = params.query?.trim() ?? '';
-    if (query) {
-      search.set('query', query);
-      search.set('search_scope', params.searchScope ?? 'all');
-      search.set('retrieval_mode', params.retrievalMode ?? 'fuzzy');
-    }
-    if (typeof params.limit === 'number') {
-      search.set('limit', String(params.limit));
-    }
-    if (typeof params.offset === 'number' && params.offset > 0) {
-      search.set('offset', String(params.offset));
-    }
-    const suffix = search.toString() ? `?${search.toString()}` : '';
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads${suffix}`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
-    if (!res.ok) return [];
-    const data = await res.json() as { threads: ChatThread[] };
-    return data.threads ?? [];
+    return await listChatThreads(params);
   } catch {
     return [];
   }
@@ -331,11 +286,8 @@ async function fetchThreads(params: ThreadSearchParams = {}): Promise<ChatThread
 
 async function deleteThread(threadId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${getAuthToken()}` },
-    });
-    return res.ok;
+    await deleteChatThread(threadId);
+    return true;
   } catch {
     return false;
   }
@@ -812,7 +764,7 @@ function ChatViewContent({
 
     setDraftInputError(null);
     setIsCreatingThread(true);
-    const id = await createThread(selectedDeckId, selectedAgentId);
+    const id = await createChatThread(selectedDeckId, selectedAgentId);
     setIsCreatingThread(false);
     if (!id) {
       setDraftInputError(t('chat.history.createFailed'));

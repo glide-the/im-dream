@@ -12,6 +12,7 @@ UNIFIED_DREAM_CAPABILITY: Final = "dream.schema.unified.v1"
 DREAM_WORKFLOW_NO_CONTINUING_CAPABILITY: Final = (
     "dream.workflow.no-continuing.v1"
 )
+DECK_CONTENT_VERSIONS_CAPABILITY: Final = "dream.deck-content-versions.v1"
 REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     UNIFIED_DREAM_CAPABILITY: 1,
     "dream.workflow.thread-lookup.v1": 1,
@@ -100,6 +101,7 @@ def inspect_schema_authority(
 
 
 __all__ = [
+    "DECK_CONTENT_VERSIONS_CAPABILITY",
     "DREAM_WORKFLOW_NO_CONTINUING_CAPABILITY",
     "REQUIRED_RUNTIME_CAPABILITIES",
     "SCHEMA_CAPABILITIES_RELATION",

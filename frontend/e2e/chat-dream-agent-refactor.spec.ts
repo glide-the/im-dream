@@ -4,7 +4,7 @@
 // [Pos] Dream/Chat Agent refactor business E2E in frontend/e2e.
 // [Sync] 2026-08-14: cover initial/in-progress states and adaptive horizontal Chat scrolling.
 // [Sync] 2026-08-14: prove Community Decks visibly includes the system default projection.
-// [Sync] 2026-08-15: Dream community reads reconcile the actor default first.
+// [Sync] 2026-08-16: Dream omits deferred community/market Deck discovery.
 // [Sync] 2026-08-15: prove historical Chat removes the immutable composer selector
 //                    while a fresh conversation keeps Deck -> Agent selection;
 //                    a packed plugin receipt cannot replace the visible Deck name.
@@ -333,10 +333,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await page.goto(`${WEB_BASE}/story-workspace/dream`);
   const activeSection = page.getByRole('region', { name: '进行中的 Dream' });
   await expect(activeSection.getByRole('heading', { name: '进行中的 Dream' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: '社区卡组（2）' })).toBeVisible();
-  await expect(page.getByText('System default Deck', { exact: true })).toBeVisible();
-  await expect(page.getByText('剧本创作团队', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '在 Chat 中使用' })).toBeVisible();
+  await expect(page.getByText(/社区卡组|System default Deck|安装并使用/)).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '我的 Dream' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '进行中', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '初始状态', exact: true })).toBeVisible();

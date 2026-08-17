@@ -13,6 +13,7 @@
 # [Sync] 2026-08-14: expose the active system default alongside other actors'
 #                    published Decks in the collectable community projection.
 # [Sync] 2026-08-15: reconcile missing legacy default teams as well as empty plugin refs.
+# [Sync] 2026-08-16: map preserved child/runtime Deck deletion dependencies to HTTP 409.
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -191,9 +192,12 @@ def update_deck(
 
 @router.delete("/api/decks/{deck_id}")
 def delete_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a user deck (cascades to voices)"""
+    """Delete an unreferenced user Deck and its mutable refs/voices."""
     user_id = current_user["user_id"]
-    success = database.delete_deck(user_id, deck_id)
+    try:
+        success = database.delete_deck(user_id, deck_id)
+    except database.DeckDeletionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     if not success:
         raise HTTPException(
             status_code=404, detail="Deck not found or permission denied"

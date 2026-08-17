@@ -31,6 +31,8 @@
 #                    current todo list per thread (claude-todo §5.5).
 # [Sync] 2026-08-04: add authenticated GET /threads/{thread_id}/subagents —
 #                    safe projection of Claude Code subagent transcript metadata.
+# [Sync] 2026-08-17: allow owned Chat history to be filtered by Deck for the
+#                    Settings / Work related-conversation deletion flow.
 
 import asyncio
 import base64
@@ -860,6 +862,7 @@ async def claude_agent_thread_plugin_load_receipt(
 
 @router.get("/api/claude-agent/threads")
 async def claude_agent_list_threads(
+    deck_id: Optional[str] = Query(default=None),
     query: Optional[str] = Query(default=None),
     search_scope: str = Query(default="all"),
     retrieval_mode: Optional[str] = Query(default=None),
@@ -883,7 +886,12 @@ async def claude_agent_list_threads(
         retrieval_mode=retrieval_mode,
         vector_query=vector_query_obj,
     ):
-        threads = database.list_chat_threads(user_id, limit=limit, offset=offset)
+        threads = database.list_chat_threads(
+            user_id,
+            limit=limit,
+            offset=offset,
+            deck_id=deck_id,
+        )
         return {"threads": threads}
 
     config = build_chat_thread_search_config(
@@ -902,7 +910,7 @@ async def claude_agent_list_threads(
 
     candidates = []
     if config.retrieval_mode != "vector":
-        candidates = database.list_chat_threads_for_search(user_id)
+        candidates = database.list_chat_threads_for_search(user_id, deck_id=deck_id)
     outcome = search_chat_threads(candidates, config)
     payload: dict[str, Any] = {
         "threads": outcome.threads,
