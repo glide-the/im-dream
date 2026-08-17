@@ -5,6 +5,7 @@
 // [Sync] 2026-08-15: keep the Deck name visible after a plugin receipt arrives;
 //                    plugin versions belong in the metadata popover, not in place
 //                    of the conversation's Deck identity.
+// [Sync] 2026-08-17: let an active Chat thread select another enabled Agent from its frozen Deck.
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +23,7 @@ interface PluginReceiptBadgeProps {
   activeVoiceId?: string;
   activeVoiceName?: string;
   deck?: Deck;
+  onSelectAgent?: (voiceId: string) => void;
   threadId: string | null;
 }
 
@@ -99,6 +101,7 @@ export default function PluginReceiptBadge({
   activeVoiceId,
   activeVoiceName,
   deck,
+  onSelectAgent,
   threadId,
 }: PluginReceiptBadgeProps) {
   const { t, i18n } = useTranslation();
@@ -319,9 +322,21 @@ export default function PluginReceiptBadge({
                     const isCurrent = activeVoiceId
                       ? voice.id === activeVoiceId
                       : activeVoiceName !== undefined && agentName === activeVoiceName;
+                    const canSelect = Boolean(threadId && onSelectAgent && !isCurrent);
                     return (
-                      <span
+                      <button
+                        aria-label={isCurrent
+                          ? t('chat.deck.currentAgent', { agent: agentName })
+                          : t('chat.deck.switchAgent', { agent: agentName })}
+                        aria-pressed={isCurrent}
+                        disabled={!canSelect}
                         key={voice.id}
+                        onClick={() => {
+                          if (!canSelect) return;
+                          onSelectAgent?.(voice.id);
+                          setOpen(false);
+                        }}
+                        type="button"
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
@@ -334,7 +349,10 @@ export default function PluginReceiptBadge({
                           color: isCurrent ? 'var(--color-text-primary)' : 'var(--color-text-body)',
                           fontSize: 11,
                           fontWeight: isCurrent ? 700 : 400,
+                          fontFamily: 'inherit',
                           whiteSpace: 'nowrap',
+                          cursor: canSelect ? 'pointer' : 'default',
+                          opacity: 1,
                         }}
                       >
                         <AgentIcon size={11} color={agentColor} />
@@ -353,7 +371,7 @@ export default function PluginReceiptBadge({
                             {t('chat.deck.metadataCurrentAgent')}
                           </span>
                         ) : null}
-                      </span>
+                      </button>
                     );
                   })}
                 </div>

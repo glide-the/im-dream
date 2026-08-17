@@ -1,12 +1,14 @@
 // [Input] Persisted Deck DTOs, PDF page-layout contract, pagination policy, and DeckManager callbacks.
-// [Output] Published-clean enabled Deck home plus the Work-owned full management list and related Chat cleanup dialog.
+// [Output] User published-clean Deck home, default-visible system Decks, preview page, Work inventory, and related Chat cleanup.
 // [Pos] Presentational Deck launch and Settings / Work management surfaces in frontend/src/components/deck.
 // [Sync] 2026-08-16: align the page with Deck设计需求.pdf pages 1-2; remove the table/dashboard layout,
 //                    keep marketplace options absent, and show only exact active runtime-version facts.
-// [Sync] 2026-08-17: limit both Deck-home projections to enabled published-clean versions,
-//                    mark system Decks visibly, and keep drafts/full inventory in Settings / Work.
+// [Sync] 2026-08-17: keep user Decks behind enabled/published-clean facts while system Decks default to visible.
 // [Sync] 2026-08-17: add More → related conversations using the Chat history preview pattern.
 // [Sync] 2026-08-17: split Available/System Deck launcher groups and keep system-default Decks static.
+// [Sync] 2026-08-17: add a read-only Deck preview page before maintenance editing.
+// [Sync] 2026-08-17: keep Deck preview visuals neutral instead of applying persisted accent colors.
+// [Sync] 2026-08-17: let orchestration dispatch typed preview examples to Chat or the dedicated Dream workbench.
 import {
   useEffect,
   useMemo,
@@ -14,7 +16,7 @@ import {
   useState,
   type CSSProperties,
 } from 'react';
-import { FaCog, FaCommentAlt, FaShieldAlt, FaTrashAlt } from 'react-icons/fa';
+import { FaCog, FaCommentAlt, FaPlay, FaShieldAlt, FaTrashAlt } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import type { ChatHistoryThread } from '../../api/chatHistoryApi';
 import type { Deck } from '../../api/voiceApi';
@@ -51,6 +53,17 @@ interface DeckLaunchPanelProps {
   onOpenSettings: () => void;
 }
 
+type DeckPreviewVoice = NonNullable<Deck['voices']>[number];
+
+interface DeckPreviewPanelProps {
+  deck: Deck;
+  launchError: string | null;
+  launchingDream: boolean;
+  onBack: () => void;
+  onEditDeck: (deckId: string) => void;
+  onTryDeck: (deckId: string, voice: DeckPreviewVoice, input?: string) => void | Promise<void>;
+}
+
 type AgentTypeFilter = 'all' | 'chat' | 'dream';
 type StatusFilter = 'all' | 'enabled' | 'disabled';
 
@@ -61,13 +74,17 @@ const isSystemDeckDisplay = (deck: Deck): boolean => (
   deck.is_system || deck.publish_block_reason === DEFAULT_INITIALIZED_DECK_REASON
 );
 
-const isDeckHomeVisible = (deck: Deck): boolean => (
+const isUserDeckHomeVisible = (deck: Deck): boolean => (
   deck.enabled
   && deck.deck_version_capability === true
   && typeof deck.deck_version === 'number'
   && deck.deck_version > 0
   && deck.deck_version_dirty === false
   && deck.deck_version_status === 'published'
+);
+
+const isDeckHomeVisible = (deck: Deck): boolean => (
+  isSystemDeckDisplay(deck) || isUserDeckHomeVisible(deck)
 );
 
 export function DeckLaunchPanel({
@@ -229,10 +246,7 @@ export function DeckLaunchPanel({
                   className={`deck-manager-enabled__item${isSystemDeckDisplay(deck) ? ' deck-manager-enabled__item--system' : ''}`}
                   data-deck-home-id={deck.id}
                   data-deck-home-kind={isSystemDeckDisplay(deck) ? 'system' : 'user'}
-                  disabled={isSystemDeckDisplay(deck)}
-                  onClick={() => {
-                    if (!isSystemDeckDisplay(deck)) onOpenDeck(deck.id);
-                  }}
+                  onClick={() => onOpenDeck(deck.id)}
                   style={{ '--deck-accent': accent } as CSSProperties}
                   title={`${deck.name}${isSystemDeckDisplay(deck) ? ` · ${t('deck.labels.system')}` : ''}`}
                   type="button"
@@ -291,24 +305,22 @@ export function DeckLaunchPanel({
             </div>
           ) : (
             <div className="deck-manager-launch-catalog__groups">
-              {userVisibleDecks.length > 0 ? (
-                <DeckLaunchGroup
-                  decks={userVisibleDecks}
-                  label={t('deck.home.availableListTitle')}
-                  listLabel={t('deck.home.availableListLabel')}
-                  onOpenDeck={onOpenDeck}
-                  t={t}
-                />
-              ) : null}
-              {systemVisibleDecks.length > 0 ? (
-                <DeckLaunchGroup
-                  decks={systemVisibleDecks}
-                  label={t('deck.home.systemListTitle')}
-                  listLabel={t('deck.home.systemListLabel')}
-                  onOpenDeck={onOpenDeck}
-                  t={t}
-                />
-              ) : null}
+              <DeckLaunchGroup
+                decks={userVisibleDecks}
+                emptyLabel={t('deck.home.availableListEmpty')}
+                label={t('deck.home.availableListTitle')}
+                listLabel={t('deck.home.availableListLabel')}
+                onOpenDeck={onOpenDeck}
+                t={t}
+              />
+              <DeckLaunchGroup
+                decks={systemVisibleDecks}
+                emptyLabel={t('deck.home.systemListEmpty')}
+                label={t('deck.home.systemListTitle')}
+                listLabel={t('deck.home.systemListLabel')}
+                onOpenDeck={onOpenDeck}
+                t={t}
+              />
             </div>
           )}
         </section>
@@ -319,12 +331,14 @@ export function DeckLaunchPanel({
 
 function DeckLaunchGroup({
   decks,
+  emptyLabel,
   label,
   listLabel,
   onOpenDeck,
   t,
 }: {
   decks: Deck[];
+  emptyLabel: string;
   label: string;
   listLabel: string;
   onOpenDeck: (deckId: string) => void;
@@ -346,10 +360,7 @@ function DeckLaunchGroup({
                 className={`deck-manager-launch-card${isSystemDeckDisplay(deck) ? ' deck-manager-launch-card--system' : ''}`}
                 data-deck-home-id={deck.id}
                 data-deck-home-kind={isSystemDeckDisplay(deck) ? 'system' : 'user'}
-                disabled={isSystemDeckDisplay(deck)}
-                onClick={() => {
-                  if (!isSystemDeckDisplay(deck)) onOpenDeck(deck.id);
-                }}
+                onClick={() => onOpenDeck(deck.id)}
                 style={{ '--deck-accent': accent } as CSSProperties}
                 type="button"
               >
@@ -367,7 +378,7 @@ function DeckLaunchGroup({
                   <span className="deck-manager-launch-card__meta">
                     {t(`deck.labels.agentType.${deck.agent_type === 'dream' ? 'dream' : 'chat'}`)}
                     <span aria-hidden="true">·</span>
-                    内容 v{deck.deck_version}
+                    {isSystemDeckDisplay(deck) ? t('deck.labels.systemBuiltIn') : t('deck.labels.contentVersion', { version: deck.deck_version })}
                   </span>
                 </span>
                 <span aria-hidden="true" className="deck-manager-launch-card__arrow">›</span>
@@ -376,7 +387,172 @@ function DeckLaunchGroup({
           );
         })}
       </ul>
+      {decks.length === 0 ? (
+        <p className="deck-manager-launch-group__empty">{emptyLabel}</p>
+      ) : null}
     </section>
+  );
+}
+
+export function DeckPreviewPanel({
+  deck,
+  launchError,
+  launchingDream,
+  onBack,
+  onEditDeck,
+  onTryDeck,
+}: DeckPreviewPanelProps) {
+  const { i18n, t } = useTranslation();
+  const isSystem = isSystemDeckDisplay(deck);
+  const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
+  const voices = deck.voices || [];
+  const enabledVoices = voices.filter((voice) => voice.enabled);
+  const trialVoice = enabledVoices[0] || voices[0] || null;
+  const examples = voices.slice(0, 3);
+  const fallbackPrompt = deck.description || t('deck.preview.defaultDescription', { deck: deck.name });
+  const locale = i18n.resolvedLanguage === 'zh' ? 'zh-CN' : 'en-US';
+  const updatedAt = deck.updated_at ? new Intl.DateTimeFormat(locale, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(deck.updated_at)) : t('deck.labels.updateUnknown');
+  const versionLabel = isSystem
+    ? t('deck.labels.systemBuiltIn')
+    : (deck.deck_version ? t('deck.labels.contentVersion', { version: deck.deck_version }) : t('deck.version.unpublished'));
+
+  return (
+    <article
+      className="deck-manager-preview"
+      data-deck-preview-id={deck.id}
+    >
+      <div className="deck-manager-preview__topbar">
+        <button className="deck-manager-preview__back" onClick={onBack} type="button">
+          <span aria-hidden="true">‹</span>
+          {t('deck.preview.back')}
+        </button>
+      </div>
+
+      <header className="deck-manager-preview__header">
+        <span className="deck-manager-preview__icon">
+          <Icon aria-hidden="true" size={40} />
+        </span>
+        <div className="deck-manager-preview__title-row">
+          <div>
+            <h1>{deck.name}</h1>
+            <p>{deck.description || t('deck.labels.noDescription')}</p>
+          </div>
+          <div className="deck-manager-preview__actions">
+            {!isSystem ? (
+              <button
+                aria-label={t('deck.preview.editDeck', { deck: deck.name })}
+                className="deck-manager-icon-action"
+                onClick={() => onEditDeck(deck.id)}
+                title={t('deck.actions.edit')}
+                type="button"
+              >
+                <span aria-hidden="true">•••</span>
+              </button>
+            ) : null}
+            <button
+              aria-busy={launchingDream}
+              className="deck-manager-preview__try"
+              disabled={!trialVoice || launchingDream}
+              onClick={() => {
+                if (trialVoice) onTryDeck(deck.id, trialVoice);
+              }}
+              type="button"
+            >
+              <FaPlay aria-hidden="true" size={13} />
+              {launchingDream ? t('deck.preview.launchingDream') : t('deck.preview.tryNow')}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {launchError ? (
+        <p className="deck-manager-inline-error" role="alert">{launchError}</p>
+      ) : null}
+
+      <section aria-label={t('deck.preview.examples')} className="deck-manager-preview__hero">
+        {examples.length > 0 ? examples.map((voice, index) => {
+          const VoiceIcon = iconMap[voice.icon as keyof typeof iconMap] || Icon;
+          const prompt = voice.system_prompt?.split('\n').find((line) => line.trim().length > 0)?.trim()
+            || deck.description
+            || t('deck.labels.noDescription');
+          return (
+            <button
+              aria-busy={launchingDream}
+              className={`deck-manager-preview__example deck-manager-preview__example--${index + 1}`}
+              disabled={!voice.enabled || launchingDream}
+              key={voice.id}
+              onClick={() => onTryDeck(deck.id, voice, prompt)}
+              type="button"
+            >
+              <VoiceIcon aria-hidden="true" size={17} />
+              <strong>{voice.name}</strong>
+              <span>{prompt}</span>
+              <span aria-hidden="true" className="deck-manager-preview__example-arrow">›</span>
+            </button>
+          );
+        }) : (
+          <div className="deck-manager-preview__example deck-manager-preview__example--empty">
+            <Icon aria-hidden="true" size={17} />
+            <strong>{deck.name}</strong>
+            <span>{fallbackPrompt}</span>
+          </div>
+        )}
+      </section>
+
+      <p className="deck-manager-preview__description">
+        {deck.description || t('deck.preview.defaultDescription', { deck: deck.name })}
+      </p>
+
+      <section className="deck-manager-preview__section" aria-labelledby="deck-preview-agents-title">
+        <h2 id="deck-preview-agents-title">{t('deck.preview.agentsTitle', { count: voices.length })}</h2>
+        <ul className="deck-manager-preview__rows">
+          {voices.length > 0 ? voices.map((voice) => {
+            const VoiceIcon = iconMap[voice.icon as keyof typeof iconMap] || iconMap.brain;
+            return (
+              <li key={voice.id}>
+                <span className="deck-manager-preview__row-icon"><VoiceIcon aria-hidden="true" size={18} /></span>
+                <span>
+                  <strong>{voice.name}</strong>
+                  <small>{voice.enabled ? t('deck.labels.enabled') : t('deck.labels.disabled')}</small>
+                </span>
+              </li>
+            );
+          }) : (
+            <li className="deck-manager-preview__empty-row">{t('deck.preview.noAgents')}</li>
+          )}
+        </ul>
+      </section>
+
+      <section className="deck-manager-preview__section" aria-labelledby="deck-preview-info-title">
+        <h2 id="deck-preview-info-title">{t('deck.preview.infoTitle')}</h2>
+        <dl className="deck-manager-preview__info">
+          <div>
+            <dt>{t('deck.preview.infoDeveloper')}</dt>
+            <dd>{isSystem ? t('deck.preview.systemDeveloper') : t('deck.preview.userDeveloper')}</dd>
+          </div>
+          <div>
+            <dt>{t('deck.preview.infoType')}</dt>
+            <dd>{t(`deck.labels.agentType.${deck.agent_type === 'dream' ? 'dream' : 'chat'}`)}</dd>
+          </div>
+          <div>
+            <dt>{t('deck.preview.infoVersion')}</dt>
+            <dd>{versionLabel}</dd>
+          </div>
+          <div>
+            <dt>{t('deck.preview.infoRuntime')}</dt>
+            <dd>{deck.deck_plugin_version || t('deck.labels.updateUnknown')}</dd>
+          </div>
+          <div>
+            <dt>{t('deck.preview.infoUpdated')}</dt>
+            <dd>{updatedAt}</dd>
+          </div>
+        </dl>
+      </section>
+    </article>
   );
 }
 

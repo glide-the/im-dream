@@ -4,6 +4,8 @@
 // [Sync] 2026-08-16: require enabled-only Deck launch plus Settings / Work tabs and Work-owned switches.
 // [Sync] 2026-08-17: require More → related Chat previews and locale-owned Work labels.
 // [Sync] 2026-08-17: require Available/System Deck launcher groups with static system-default behavior.
+// [Sync] 2026-08-17: require user/system Deck clicks to open the read-only preview page first.
+// [Sync] 2026-08-17: require preview Demo dispatch to preserve Chat drafts and open DreamAgent runs in Dream.
 
 // @ts-expect-error source-contract tests run in Node outside the frontend tsconfig.
 import { readFileSync } from 'node:fs';
@@ -25,6 +27,8 @@ const VERSION_HOOK = read('src/hooks/useDeckContentVersions.ts');
 const PLUGIN_API = read('src/api/deckPluginApi.ts');
 const API = read('src/api/voiceApi.ts');
 const CHAT_API = read('src/api/chatHistoryApi.ts');
+const CHAT_VIEW = read('src/components/chat/ChatView.tsx');
+const CHAT_INPUT = read('src/components/chat/AIInputDock.tsx');
 const I18N = read('src/i18n.ts');
 const STYLES = read('src/components/deck/DeckManagerPanels.css');
 const CONSTANTS = read('src/constants/deck.ts');
@@ -41,13 +45,20 @@ test('Deck home uses published-clean enabled shortcuts with system markers while
   );
   const settingsPanel = PANELS.slice(PANELS.indexOf('export function DeckSettingsPanel'));
   expect(COMPONENT).toContain('<DeckLaunchPanel');
+  expect(COMPONENT).toContain('<DeckPreviewPanel');
   expect(COMPONENT).toContain('<DeckSettingsPanel');
   expect(COMPONENT).toContain("surface === 'launcher'");
+  expect(COMPONENT).toContain('const [previewDeckId, setPreviewDeckId]');
+  expect(COMPONENT).toContain('const previewDeck = decks.find((deck) => deck.id === previewDeckId)');
+  expect(COMPONENT).toContain('onOpenDeck={openDeckPreview}');
+  expect(COMPONENT).toContain('onBack={() => setPreviewDeckId(null)}');
   expect(PDF_TRACE).toContain('5d440adc56e73b4269fcf7886933df021355399ed69854783460cf3e2d1c3671');
   expect(launcher).toContain('deck-manager-home__header');
   expect(launcher).toContain('deck-manager-search--launcher');
   expect(launcher).toContain('deck-manager-enabled__strip');
   expect(launcher).toContain('decks.filter(isDeckHomeVisible)');
+  expect(PANELS).toContain('const isUserDeckHomeVisible');
+  expect(PANELS).toContain('isSystemDeckDisplay(deck) || isUserDeckHomeVisible(deck)');
   expect(launcher).toContain('visibleHomeDecks.slice(0, DECK_ENABLED_LAUNCH_LIMIT)');
   expect(PANELS).toContain("deck.deck_version_status === 'published'");
   expect(PANELS).toContain('deck.deck_version_dirty === false');
@@ -67,9 +78,13 @@ test('Deck home uses published-clean enabled shortcuts with system markers while
   expect(launcher).toContain("t('deck.home.systemListTitle')");
   expect(launcher).toContain("t('deck.home.availableListLabel')");
   expect(launcher).toContain("t('deck.home.systemListLabel')");
-  expect(launcher).toContain('disabled={isSystemDeckDisplay(deck)}');
+  expect(launcher).toContain("t('deck.home.availableListEmpty')");
+  expect(launcher).toContain("t('deck.home.systemListEmpty')");
+  expect(launcher).not.toContain('disabled={isSystemDeckDisplay(deck)}');
   expect(launcher).toContain("t('deck.home.systemDeckLabel'");
   expect(launcher).toContain("t('deck.labels.system')");
+  expect(launcher).toContain("t('deck.labels.systemBuiltIn')");
+  expect(launcher).toContain("t('deck.labels.contentVersion'");
   expect(launcher).toContain('deck-manager-enabled__settings');
   expect(launcher).toContain('onClick={onOpenSettings}');
   expect(launcher).not.toContain('deck-manager-list');
@@ -96,8 +111,41 @@ test('Deck home uses published-clean enabled shortcuts with system markers while
   expect(STYLES).toContain('.deck-manager-launch-catalog__grid');
   expect(STYLES).toContain('.deck-manager-launch-catalog__groups');
   expect(STYLES).toContain('.deck-manager-launch-group h3');
+  expect(STYLES).toContain('.deck-manager-launch-group__empty');
   expect(STYLES).toContain('.deck-manager-enabled__item--system');
   expect(STYLES).toContain('.deck-manager-launch-card--system');
+  expect(PANELS).toContain('export function DeckPreviewPanel');
+  const previewPanel = PANELS.slice(
+    PANELS.indexOf('export function DeckPreviewPanel'),
+    PANELS.indexOf('export function DeckSettingsPanel'),
+  );
+  expect(PANELS).toContain('data-deck-preview-id={deck.id}');
+  expect(PANELS).toContain("t('deck.preview.tryNow')");
+  expect(PANELS).toContain("t('deck.preview.infoTitle')");
+  expect(PANELS).toContain('const examples = voices.slice(0, 3)');
+  expect(PANELS).toContain('onTryDeck(deck.id, voice, prompt)');
+  expect(COMPONENT).toContain('useStoryWorkspaceDreamLaunch');
+  expect(COMPONENT).toContain("deck?.agent_type === 'dream' && goal");
+  expect(COMPONENT).toContain('previewDreamLaunch.start(deckId, voice.id, goal)');
+  expect(COMPONENT).toContain('storyWorkspaceDreamRunPath(accepted.workflowRunId)');
+  expect(COMPONENT).toContain("t('deck.preview.launchDreamFailed')");
+  expect(PANELS).toContain('disabled={!voice.enabled || launchingDream}');
+  expect(COMPONENT).toContain('onChatWithDeck?.(deckId, {');
+  expect(COMPONENT).toContain('}, input);');
+  expect(APP).toContain('requestedDeckInput={requestedChatDeck?.input}');
+  expect(CHAT_VIEW).toContain('prefill={requestedDeckInput}');
+  expect(CHAT_VIEW).toContain('prefillNonce={requestedDeckNonce}');
+  expect(CHAT_INPUT).toContain("setQuery(prefill ?? '')");
+  expect(CHAT_INPUT).toContain("useState(() => prefill ?? '')");
+  expect(CHAT_INPUT).toContain('lastAppliedPrefillNonceRef.current === prefillNonce');
+  expect(PANELS).toContain('!isSystem ? (');
+  expect(STYLES).toContain('.deck-manager-preview');
+  expect(STYLES).toContain('.deck-manager-preview__hero');
+  expect(STYLES).toContain('.deck-manager-preview__example');
+  expect(STYLES).toContain('background-size: 28px 28px');
+  expect(STYLES).not.toContain('#d9c7ff');
+  expect(STYLES).not.toMatch(/\.deck-manager-preview__hero[\s\S]*?var\(--deck-accent/);
+  expect(previewPanel).not.toContain("'--deck-accent'");
   expect(STYLES).toContain('.deck-manager-list__row');
   expect(STYLES).toContain('@media (max-width: 640px)');
   expect(STYLES).not.toContain('.deck-manager-table');
@@ -115,9 +163,21 @@ test('Deck home uses published-clean enabled shortcuts with system markers while
   expect(I18N).toContain("title: 'Work'");
   expect(I18N).toContain("title: '工作台'");
   expect(I18N).toContain("availableListTitle: 'Available Decks'");
+  expect(I18N).toContain("enabledTitle: 'Installed'");
   expect(I18N).toContain("systemListTitle: 'System Decks'");
+  expect(I18N).toContain("systemBuiltIn: 'System built-in'");
+  expect(I18N).toContain("contentVersion: 'Content v{{version}}'");
+  expect(I18N).toContain("systemListEmpty: 'No system Deck is available.'");
+  expect(I18N).toContain("tryNow: 'Try now'");
+  expect(I18N).toContain("infoTitle: 'Information'");
   expect(I18N).toContain("availableListTitle: '可用 Deck'");
+  expect(I18N).toContain("enabledTitle: '已安装'");
   expect(I18N).toContain("systemListTitle: '系统 Deck'");
+  expect(I18N).toContain("systemBuiltIn: '系统内建'");
+  expect(I18N).toContain("contentVersion: '内容 v{{version}}'");
+  expect(I18N).toContain("systemListEmpty: '当前没有系统 Deck。'");
+  expect(I18N).toContain("tryNow: '立即试用'");
+  expect(I18N).toContain("infoTitle: '信息'");
   expect(PATHS).toContain("'settings-work': '/story-workspace/settings/work'");
   expect(APP).toContain('onOpenSettings={handleOpenSettingsFromDeck}');
   expect(APP).toContain("STORY_WORKSPACE_PATHS['settings-work']");

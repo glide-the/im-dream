@@ -1,7 +1,7 @@
 <!-- [Input] Deck设计需求.pdf visual pages, extracted text, and explicit task priority. -->
 <!-- [Output] Page-by-page authoritative requirement ledger and implementation mapping. -->
 <!-- [Pos] Primary-source trace for the Deck redesign. -->
-<!-- [Sync] 2026-08-17: map Settings to full inventory and the latest skeleton to the published-clean, system-marked Deck home. -->
+<!-- [Sync] 2026-08-17: map Settings to full inventory and the latest skeleton to user published-clean plus system-default Deck home. -->
 
 # `Deck设计需求.pdf` 逐页需求追踪
 
@@ -51,7 +51,7 @@ PDF 原文为“用户新增Deck逻辑，点击创建弹出Deck新建菜单，�
 PDF 中“添加 Deck 市场”菜单项与本期显式“市场分发暂缓、不得出现市场入口”冲突，因此按优先级
 排除。当前创建菜单只有真实可执行的“创建 Deck”；不得留下禁用市场项、灰色占位或空请求。
 注册用户默认拥有的系统内建 Deck 仍必须在 Deck 主页面展示，并与用户自建 Deck 分组区分；该展示
-不是社区发布、不是创建副本入口，也不能打开维护弹窗。
+不是社区发布、不是创建副本入口，可打开只读预览页，但不能打开维护弹窗。
 
 ## 第 3 页：市场尚未设计
 
@@ -64,7 +64,7 @@ PDF 明确说明：Deck 市场服务模块尚未设计；参考 `agent-skills-re
 | PDF 页 | 设计章节 | 代码 | 自动化验收 |
 |---:|---|---|---|
 | 1 | `deck-management-list.md` §4：Work 扁平设置行 | `StoryWorkspaceSettingsPage` + `DeckSettingsPanel` | 单一 Work 左栏项；内部三 tabs；图标/说明/行尾 switch |
-| 2 | `deck-management-list.md` §3：标题、搜索、14 个正方形正式可用图标、系统标识、创建与设置 | `DeckLaunchPanel` + `DeckManager` | 只显示 enabled/published/clean；系统双标识；主页面零 switch；设置直达 Work |
+| 2 | `deck-management-list.md` §3：标题、搜索、14 个正方形正式可用图标、系统标识、创建与设置 | `DeckLaunchPanel` + `DeckManager` | 用户 Deck 只显示 enabled/published/clean；系统 Deck 默认显示；主页面零 switch；设置直达 Work |
 | 2 | `deck-evaluator-interaction-draft.md`、`deck-detail-version-history.md`：整体功能延续 | 创建后完整维护 popup；所有表单进入草稿，显式提交内容 vN | 创建→更新→preview→v1→再修改→v2 回归 |
 | 3 | `deck-register/README.md` | 删除市场 UI/client；保留系统内建 Deck 展示 | 页面、文案、请求不存在 market/community/install/publishDeck |
 

@@ -1,6 +1,7 @@
 // [Input] Authenticated Story Workspace routes and production-shaped Deck/Dream API fixtures.
 // [Output] Provider-free browser evidence for Dream's two-state home, adaptive horizontal Chat list,
-//          whole-card Dream navigation, historical composer provenance, and launch handoff.
+//          whole-card Dream navigation, historical composer provenance, same-Deck Agent switching,
+//          and launch handoff.
 // [Pos] Dream/Chat Agent refactor business E2E in frontend/e2e.
 // [Sync] 2026-08-14: cover initial/in-progress states and adaptive horizontal Chat scrolling.
 // [Sync] 2026-08-14: prove Community Decks visibly includes the system default projection.
@@ -8,6 +9,7 @@
 // [Sync] 2026-08-15: prove historical Chat removes the immutable composer selector
 //                    while a fresh conversation keeps Deck -> Agent selection;
 //                    a packed plugin receipt cannot replace the visible Deck name.
+// [Sync] 2026-08-17: switch the next-turn Agent from the historical Thread Deck metadata popover.
 
 import { expect, test } from '@playwright/test';
 
@@ -33,7 +35,7 @@ const dreamDeck = {
   color: 'purple',
   is_system: false,
   enabled: true,
-  voice_count: 1,
+  voice_count: 2,
   agent_type: 'dream',
   agent_type_revision: 3,
   voices: [{
@@ -43,6 +45,15 @@ const dreamDeck = {
     system_prompt: '负责组织故事 Dream。',
     icon: 'moon',
     color: 'purple',
+    is_system: false,
+    enabled: true,
+  }, {
+    id: 'dream-agent-e2e-structure',
+    deck_id: 'dream-deck-e2e',
+    name: '结构顾问',
+    system_prompt: '负责检查故事结构。',
+    icon: 'book-open',
+    color: 'teal',
     is_system: false,
     enabled: true,
   }],
@@ -122,6 +133,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
   const diagnostics: string[] = [];
   const unexpectedApiRequests: string[] = [];
   let launchBody: Record<string, unknown> | null = null;
+  let historicalChatTurnBody: Record<string, unknown> | null = null;
   let releaseDeepLinkRead: (() => void) | null = null;
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().includes('react-grab.com')) {
@@ -325,6 +337,13 @@ test('Dream active Deck context → workbench → Chat active tab → production
         },
       });
     }
+    if (pathname === '/api/claude-agent' && request.method() === 'POST') {
+      historicalChatTurnBody = request.postDataJSON() as Record<string, unknown>;
+      return route.fulfill({
+        contentType: 'text/event-stream',
+        body: 'event: finish\ndata: {"finishReason":"stop"}\n\n',
+      });
+    }
     unexpectedApiRequests.push(`${request.method()} ${pathname}`);
     return route.fulfill({ status: 404, json: { detail: 'unexpected provider-free E2E request' } });
   });
@@ -378,8 +397,25 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(historicalDeckContext).toContainText(dreamDeck.name);
   await expect(historicalDeckContext).not.toContainText('drama-forge');
   await historicalDeckContext.click();
-  await expect(page.getByRole('dialog', { name: 'Deck 元信息' })).toContainText('drama-forge@drama-studio');
+  const deckMetadataDialog = page.getByRole('dialog', { name: 'Deck 元信息' });
+  await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');
+  await expect(deckMetadataDialog.getByRole('button', { name: '故事导演，当前 Agent' })).toBeDisabled();
+  await deckMetadataDialog.getByRole('button', { name: '切换到 结构顾问' }).click();
+  await expect(deckMetadataDialog).toHaveCount(0);
+  await expect(page.getByTitle('结构顾问')).toContainText('结构顾问');
+  await expect(historicalDeckContext).toContainText(dreamDeck.name);
   await historicalDeckContext.click();
+  await expect(deckMetadataDialog.getByRole('button', { name: '结构顾问，当前 Agent' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');
+  await historicalDeckContext.click();
+  await page.getByRole('textbox', { name: '聊天输入' }).fill('请从结构角度继续分析。');
+  await page.getByRole('button', { name: '发送消息' }).click();
+  await expect.poll(() => historicalChatTurnBody).not.toBeNull();
+  expect(historicalChatTurnBody).toMatchObject({
+    id: HISTORICAL_THREAD_ID,
+    deckId: dreamDeck.id,
+    voiceId: 'dream-agent-e2e-structure',
+  });
   await page.screenshot({ path: '../output/playwright/chat-history-context-wide.png' });
   await page.setViewportSize({ width: 760, height: 780 });
   await expect(agentSelector).toHaveCount(0);

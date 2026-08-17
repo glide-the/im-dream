@@ -9,12 +9,15 @@
 // [Sync] 2026-08-17: cover Work More → related Chat previews and production thread deletion.
 // [Sync] 2026-08-17: verify Settings and Work render one locale at a time and switch live.
 // [Sync] 2026-08-17: assert Available/System Deck typed launcher groups and static system defaults.
+// [Sync] 2026-08-17: prove typed preview examples keep Chat as an editable draft and launch Dream into its workbench.
 // [Sync] 2026-08-16: restore pre-01a00576 Agent/Prompt/plugin-ref maintenance and
 //                    CozeLoop-inspired durable draft/explicit content commits inside the popup.
 
 import { expect, test } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
+const PREVIEW_DREAM_RUN_ID = 'run_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+const PREVIEW_DREAM_THREAD_ID = 'thread-preview-dream-e2e';
 
 test.use({ channel: 'chromium' });
 
@@ -25,6 +28,7 @@ Business impact brief (provider-free technical lane, frozen before execution):
 | --- | --- |
 | Login -> Chat -> Decks | visible route/navigation only |
 | Consumer mode | enabled Deck/Agent selection and fresh-Chat handoff |
+| Typed preview Demo | Chat example remains an unsent draft; Dream example exercises production-shaped start, retry/idempotency, and dedicated workbench navigation |
 | Deck launch | stable-order enabled projection, fourteen-item cap, trailing Settings action |
 | Settings / Work | one Settings category; Deck/resource/plugin tabs; search/filter/refresh/pagination and enable controls |
 | Default user Deck + five screenplay roles | missing ref repaired to drama-forge 1.0.1 |
@@ -126,21 +130,35 @@ const createdDeck: DeckFixture = {
   voices: [],
 };
 
-const fillerDecks: DeckFixture[] = Array.from({ length: 16 }, (_, index) => ({
-  ...createdDeck,
-  id: `managed-deck-${index + 1}`,
-  name: `管理 Deck ${index + 1}`,
-  is_system: index === 0,
-  enabled: index !== 15,
-  description: `分页验证 ${index + 1}`,
-  icon: 'brain',
-  color: 'blue',
-  deck_version: index < 13 || index === 15 ? 1 : index === 14 ? 2 : null,
-  deck_version_dirty: index === 13 || index === 14,
-  deck_version_status: index < 13 || index === 15 ? 'published' : index === 14 ? 'draft' : 'unpublished',
-  next_deck_version: index < 13 || index === 15 ? 2 : index === 14 ? 3 : 1,
-  updated_at: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
-}));
+const fillerDecks: DeckFixture[] = Array.from({ length: 16 }, (_, index) => {
+  const voices = index === 0 ? [{
+    id: 'system-chat-agent-e2e',
+    deck_id: 'managed-deck-1',
+    name: '系统 Chat Agent',
+    system_prompt: '系统 Chat Agent 示例。',
+    icon: 'brain',
+    color: 'blue',
+    is_system: true,
+    enabled: true,
+  }] : [];
+  return {
+    ...createdDeck,
+    id: `managed-deck-${index + 1}`,
+    name: `管理 Deck ${index + 1}`,
+    is_system: index === 0,
+    enabled: index !== 15,
+    description: `分页验证 ${index + 1}`,
+    icon: 'brain',
+    color: 'blue',
+    deck_version: index < 13 || index === 15 ? 1 : index === 14 ? 2 : null,
+    deck_version_dirty: index === 13 || index === 14,
+    deck_version_status: index < 13 || index === 15 ? 'published' : index === 14 ? 'draft' : 'unpublished',
+    next_deck_version: index < 13 || index === 15 ? 2 : index === 14 ? 3 : 1,
+    voice_count: voices.length,
+    voices,
+    updated_at: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
+  };
+});
 
 const createdVoice = {
   id: 'created-screenplay-agent',
@@ -231,6 +249,9 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   let selectedInstallationIds = [dramaInstallation.id];
   const pluginWrites: string[][] = [];
   let defaultReconcileCalls = 0;
+  let chatThreadCreates = 0;
+  const previewDreamLaunchBodies: Array<Record<string, unknown>> = [];
+  let failNextPreviewDreamLaunch = true;
   const deckWrites: Array<Record<string, unknown>> = [];
   const createWrites: Array<Record<string, unknown>> = [];
   const voiceWrites: Array<Record<string, unknown>> = [];
@@ -360,6 +381,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
       return;
     }
     if (pathname === '/api/claude-agent/threads' && request.method() === 'POST') {
+      chatThreadCreates += 1;
       await route.fulfill({ json: { thread_id: 'thread-created-by-chat' } });
       return;
     }
@@ -368,6 +390,90 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
       relatedThreadDeletes.push(threadId);
       relatedThreads = relatedThreads.filter((thread) => thread.id !== threadId);
       await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    if (pathname === '/api/story-workspace/dream-runs/start' && request.method() === 'POST') {
+      previewDreamLaunchBodies.push(request.postDataJSON() as Record<string, unknown>);
+      if (failNextPreviewDreamLaunch) {
+        failNextPreviewDreamLaunch = false;
+        expectedHttpFailures.set(503, (expectedHttpFailures.get(503) ?? 0) + 1);
+        await route.fulfill({ status: 503, json: { detail: 'Dream preview temporarily unavailable' } });
+        return;
+      }
+      await route.fulfill({
+        status: 201,
+        json: { workflowRunId: PREVIEW_DREAM_RUN_ID, threadId: PREVIEW_DREAM_THREAD_ID },
+      });
+      return;
+    }
+    if (pathname === `/api/story-workspace/workflow-runs/${PREVIEW_DREAM_RUN_ID}`) {
+      await route.fulfill({ json: {
+        workflow_run_id: PREVIEW_DREAM_RUN_ID,
+        deck_plugin_id: screenplayDeck.id,
+        deck_plugin_display_name: screenplayDeck.name,
+        deck_plugin_version: screenplayDeck.deck_plugin_version,
+        workflow_definition_ref: 'dream',
+        workflow_summary: '编剧负责剧本创作。',
+        deck_runtime_snapshot_id: 'snapshot-preview-dream-e2e',
+        runtime_plugin_lock_id: 'lock-preview-dream-e2e',
+        runtime_load_receipt_id: null,
+        workflow_preflight_id: 'preflight-preview-dream-e2e',
+        status: 'running',
+        status_version: 1,
+        failed_step: null,
+        error_code: null,
+        retry_of_run_id: null,
+        source_voice_thread_id: PREVIEW_DREAM_THREAD_ID,
+        created_at: '2026-08-17T08:00:00Z',
+        started_at: '2026-08-17T08:00:01Z',
+        completed_at: null,
+      } });
+      return;
+    }
+    if (pathname === `/api/story-workspace/workflow-runs/${PREVIEW_DREAM_RUN_ID}/dream-files`) {
+      await route.fulfill({ json: {
+        storyWorkspaceRunId: PREVIEW_DREAM_RUN_ID,
+        threadId: PREVIEW_DREAM_THREAD_ID,
+        source: {
+          deckPluginBindingId: 'binding-preview-dream-e2e',
+          bindingRevision: 1,
+          deckPluginVersion: screenplayDeck.deck_plugin_version,
+          deckRuntimeSnapshotId: 'snapshot-preview-dream-e2e',
+          runtimePluginLockId: 'lock-preview-dream-e2e',
+        },
+        requiredStages: ['characters', 'scenes', 'storyboards'],
+        runRevision: 0,
+        stages: {},
+        confirmationAccepted: false,
+        confirmationDispatched: false,
+        canConfirm: false,
+        confirmationLabel: '确认并继续',
+        agentActivity: null,
+      } });
+      return;
+    }
+    if (pathname === `/api/claude-agent/threads/${PREVIEW_DREAM_THREAD_ID}/messages`) {
+      await route.fulfill({ json: { messages: [] } });
+      return;
+    }
+    if (pathname === `/api/claude-agent/threads/${PREVIEW_DREAM_THREAD_ID}/plugin-load-receipt`) {
+      await route.fulfill({ json: {
+        thread_id: PREVIEW_DREAM_THREAD_ID,
+        deck_id: screenplayDeck.id,
+        workspace_found: false,
+        receipt: null,
+        launch_manifest: null,
+      } });
+      return;
+    }
+    if (pathname === `/api/claude-agent/threads/${PREVIEW_DREAM_THREAD_ID}/status`) {
+      await route.fulfill({ json: {
+        running: false,
+        lifecycle: 'idle',
+        turn_count: 0,
+        pending_tool_call_ids: [],
+        tool_confirmation_observation: 'known',
+      } });
       return;
     }
     if (pathname === '/api/story-workspace/dream-runs') {
@@ -413,6 +519,13 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
     const fillerDeck = fillerDecks.find((deck) => pathname === `/api/decks/${deck.id}`);
     if (fillerDeck && request.method() === 'GET') {
       await route.fulfill({ json: fillerDeck });
+      return;
+    }
+    const fillerPluginDeck = fillerDecks.find(
+      (deck) => pathname === `/api/decks/${deck.id}/claude-plugins`,
+    );
+    if (fillerPluginDeck && request.method() === 'GET') {
+      await route.fulfill({ json: { deck_id: fillerPluginDeck.id, refs: [] } });
       return;
     }
     if (
@@ -759,7 +872,7 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(page.getByRole('heading', { name: /Voice Decks|声线卡组|My Decks|我的卡组/ })).toHaveCount(0);
   const deckLauncher = page.locator('[data-deck-manager-launcher]');
   await expect(deckLauncher.getByRole('heading', { name: /^Decks?$|^Deck$/ })).toBeVisible();
-  await expect(deckLauncher.getByText(/Open an enabled published Deck|打开已启用且已发布的 Deck/)).toBeVisible();
+  await expect(deckLauncher.getByText(/Open an available Deck|打开可用的 Deck/)).toBeVisible();
   await expect(deckLauncher.locator('.deck-manager-enabled__strip')).toBeVisible();
   const enabledShortcutList = deckLauncher.locator('.deck-manager-enabled__strip');
   await expect(enabledShortcutList.getByRole('listitem')).toHaveCount(14);
@@ -785,7 +898,70 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(deckLauncher.getByRole('list', { name: /System built-in Decks|系统内建 Deck/ })).toBeVisible();
   await expect(deckLauncher.locator('.deck-manager-launch-card')).toHaveCount(14);
   await expect(deckLauncher.locator('.deck-manager-launch-card--system .deck-manager-chip')).toHaveText(/System|系统/);
-  await expect(deckLauncher.locator('.deck-manager-launch-card--system')).toBeDisabled();
+  const systemLaunchCard = deckLauncher.locator('.deck-manager-launch-card--system').first();
+  await expect(systemLaunchCard).toBeEnabled();
+  await systemLaunchCard.click();
+  const preview = page.locator('[data-deck-preview-id]');
+  await expect(preview).toBeVisible();
+  await expect(preview.getByRole('button', { name: /Try now|立即试用/ })).toBeVisible();
+  await expect(preview.getByRole('heading', { name: /Information|信息/ })).toBeVisible();
+  await expect(preview.getByText(/System built-in|系统内建/)).toBeVisible();
+  await expect(preview.getByRole('button', { name: /Edit Deck|编辑 Deck/ })).toHaveCount(0);
+  await page.screenshot({
+    path: 'output/playwright/story-workspace-chat-first/deck-preview-system-wide.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 780 });
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+  )).toBe(true);
+  await page.screenshot({
+    path: 'output/playwright/story-workspace-chat-first/deck-preview-system-narrow.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1200, height: 760 });
+  const systemExample = preview.locator('button.deck-manager-preview__example').first();
+  await expect(systemExample).toContainText('系统 Chat Agent 示例。');
+  await systemExample.click();
+  await expect(page).toHaveURL(/\/story-workspace\/chat\?deck=managed-deck-1&agent=system-chat-agent-e2e/);
+  await expect(page.getByRole('textbox', { name: /Chat input|聊天输入/ })).toHaveText('系统 Chat Agent 示例。');
+  expect(chatThreadCreates, 'Chat preview examples must remain unsent drafts').toBe(0);
+  await navigation.getByRole('button', { name: 'Decks' }).click();
+  await expect(deckLauncher).toBeVisible();
+  await expect(deckLauncher).toBeVisible();
+  const screenplayLaunchCard = deckLauncher.locator(
+    `.deck-manager-launch-card[data-deck-home-id="${screenplayDeck.id}"]`,
+  );
+  await screenplayLaunchCard.click();
+  const screenplayPreview = page.locator(`[data-deck-preview-id="${screenplayDeck.id}"]`);
+  const screenplayExample = screenplayPreview.locator('.deck-manager-preview__example').first();
+  await expect(screenplayExample).toContainText('编剧负责剧本创作。');
+  await screenplayExample.click();
+  await expect(screenplayPreview.getByRole('alert')).toContainText(/Story Workspace.*503|Dream preview temporarily unavailable/);
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/decks`);
+  await page.screenshot({
+    path: 'output/playwright/story-workspace-chat-first/deck-preview-dream-error-wide.png',
+    fullPage: true,
+  });
+  await screenplayExample.click();
+  await expect.poll(() => previewDreamLaunchBodies).toHaveLength(2);
+  expect(previewDreamLaunchBodies[1]).toMatchObject({
+    deckId: screenplayDeck.id,
+    agentId: 'screenplay-role-0',
+    goal: '编剧负责剧本创作。',
+  });
+  expect(String(previewDreamLaunchBodies[1]?.idempotencyKey)).toMatch(/^dream_/);
+  expect(previewDreamLaunchBodies[1]?.idempotencyKey).toBe(previewDreamLaunchBodies[0]?.idempotencyKey);
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/dream?run=${PREVIEW_DREAM_RUN_ID}`);
+  await expect(page.getByRole('complementary', { name: 'Dream 内容编辑器' })).toBeVisible();
+  await page.screenshot({
+    path: 'output/playwright/story-workspace-chat-first/deck-preview-dream-workbench-wide.png',
+    fullPage: true,
+  });
+  expect(chatThreadCreates, 'Dream preview examples must not create an ordinary Chat thread').toBe(0);
+  await navigation.getByRole('button', { name: 'Decks' }).click();
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/decks`);
+  await expect(deckLauncher).toBeVisible();
   await expect(deckLauncher.getByText(/草稿\s*r/)).toHaveCount(0);
   await expect(deckLauncher.locator('.deck-manager-list')).toHaveCount(0);
   await expect(deckLauncher.locator('table')).toHaveCount(0);
@@ -1197,8 +1373,9 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await refreshedDetailsDialog.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect.poll(() => voiceDeletes).toEqual([createdVoice.id]);
   await expect(refreshedDetailsDialog.getByText('Select an agent from the list to edit')).toBeVisible();
+  expect(unexpectedApiRequests).toEqual([]);
   await expect.poll(() => diagnostics).toEqual([]);
-  expect(expectedHttpFailureDiagnostics).toHaveLength(3);
+  expect(expectedHttpFailureDiagnostics).toHaveLength(4);
   expect(expectedHttpFailures.get(503)).toBe(0);
   expect(expectedHttpFailures.get(409)).toBe(0);
   expect(createWrites).toEqual([expect.objectContaining({
@@ -1236,5 +1413,4 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   ]));
   expect(voiceDeletes).toEqual([createdVoice.id]);
   expect(pluginWrites).toEqual([[dramaInstallation.id, secondaryInstallation.id]]);
-  expect(unexpectedApiRequests).toEqual([]);
 });

@@ -54,6 +54,7 @@
 //                    Agent turn that carries an editor_state snapshot.
 // [Sync] 2026-08-15: historical composers no longer accept a duplicate locked
 //                    Deck/Agent context control from ChatView.
+// [Sync] 2026-08-17: read Deck/Agent turn context from a live ref so same-Thread selection reaches transport.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -329,6 +330,24 @@ export default function ChatPanel({
 
   const getPendingData = () => pendingDataRef.current;
   const imFullAccessEnabled = systemConfig?.im_full_access_enabled === true;
+  const requestContextRef = useRef({
+    deckId,
+    voiceId,
+    voiceSystemPrompt,
+    editorState,
+    currentToolChoice,
+    imFullAccessEnabled,
+    settingsSystemPrompt: systemConfig?.system_prompt,
+  });
+  requestContextRef.current = {
+    deckId,
+    voiceId,
+    voiceSystemPrompt,
+    editorState,
+    currentToolChoice,
+    imFullAccessEnabled,
+    settingsSystemPrompt: systemConfig?.system_prompt,
+  };
 
   const { messages, sendMessage, setMessages, status, error, addToolResult, stop } = useChat({
     id: threadId,
@@ -341,6 +360,7 @@ export default function ChatPanel({
         if (!lastMessage) {
           return { body: body ?? {} };
         }
+        const requestContext = requestContextRef.current;
 
         const attachments: ChatAttachment[] = (getPendingData()?.rawAttachments ?? [])
           .filter((file) => file.storageKey)
@@ -356,22 +376,22 @@ export default function ChatPanel({
             hash: file.hash,
           }));
 
-        const requestToolChoice: ToolChoice = imFullAccessEnabled
+        const requestToolChoice: ToolChoice = requestContext.imFullAccessEnabled
           ? 'auto'
-          : getPendingData()?.toolChoice ?? currentToolChoice;
+          : getPendingData()?.toolChoice ?? requestContext.currentToolChoice;
 
         const requestBody: ChatApiSchemaRequestBody = {
           id,
-          ...(deckId ? { deckId } : {}),
-          ...(voiceId ? { voiceId } : {}),
+          ...(requestContext.deckId ? { deckId: requestContext.deckId } : {}),
+          ...(requestContext.voiceId ? { voiceId: requestContext.voiceId } : {}),
           resume: true,
           message: lastMessage,
           toolChoice: requestToolChoice,
           allowedAppDefaultToolkit: [],
           allowedMcpServers: {},
           attachments,
-          systemPrompt: voiceSystemPrompt ?? systemConfig?.system_prompt,
-          ...(editorState != null ? { editor_state: editorState } : {}),
+          systemPrompt: requestContext.voiceSystemPrompt ?? requestContext.settingsSystemPrompt,
+          ...(requestContext.editorState != null ? { editor_state: requestContext.editorState } : {}),
         };
 
         setTimeout(() => {

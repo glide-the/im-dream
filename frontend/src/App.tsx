@@ -30,6 +30,7 @@
 // [Sync] 2026-08-16: restore the pre-01a00576 Deck maintenance popup handoff to canonical Chat.
 // [Sync] 2026-08-16: route Deck settings through Settings / Work and provide the Work-owned management instance.
 // [Sync] 2026-08-16: make the Deck-home Settings action navigate directly to Settings / Work.
+// [Sync] 2026-08-17: carry Deck preview example copy into the new Chat draft without URL persistence or auto-send.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -334,7 +335,12 @@ export default function App() {
   const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
   /** Bump for repeated requests to reopen/reconnect the same Chat thread. */
   const [requestedChatThreadNonce, setRequestedChatThreadNonce] = useState(0);
-  const [requestedChatDeck, setRequestedChatDeck] = useState<{ deckId: string; agentId?: string; nonce: number } | undefined>(undefined);
+  const [requestedChatDeck, setRequestedChatDeck] = useState<{
+    deckId: string;
+    agentId?: string;
+    input?: string;
+    nonce: number;
+  } | undefined>(undefined);
   /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
   const [activeChatVoice, setActiveChatVoice] = useState<ActiveChatVoice | undefined>(undefined);
 
@@ -1113,9 +1119,9 @@ export default function App() {
 
   // Every Deck maintenance handoff starts in canonical Story Workspace Chat.
   // The URL carries only stable selection intent; Chat reloads server-derived facts.
-  const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice) => {
+  const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice, input?: string) => {
     setRequestedChatThreadId(undefined);
-    setRequestedChatDeck({ deckId, agentId: voiceInfo?.id, nonce: Date.now() });
+    setRequestedChatDeck({ deckId, agentId: voiceInfo?.id, input, nonce: Date.now() });
     setActiveChatVoice(voiceInfo);
     const query = new URLSearchParams({ deck: deckId });
     if (voiceInfo?.id) query.set('agent', voiceInfo.id);
@@ -1625,6 +1631,7 @@ export default function App() {
                     requestedThreadNonce={requestedChatThreadNonce}
                     requestedDeckId={requestedChatDeck?.deckId}
                     requestedAgentId={requestedChatDeck?.agentId}
+                    requestedDeckInput={requestedChatDeck?.input}
                     requestedDeckNonce={requestedChatDeck?.nonce}
                     activeVoice={activeChatVoice}
                     isMobile={isMobile}
@@ -2408,6 +2415,7 @@ export default function App() {
             requestedThreadNonce={requestedChatThreadNonce}
             requestedDeckId={requestedChatDeck?.deckId}
             requestedAgentId={requestedChatDeck?.agentId}
+            requestedDeckInput={requestedChatDeck?.input}
             requestedDeckNonce={requestedChatDeck?.nonce}
             activeVoice={activeChatVoice}
             isMobile={isMobile}

@@ -43,6 +43,7 @@
 #                    and advance its Admin-capability-backed draft revision.
 # [Sync] 2026-08-17: distinguish related Chat threads from immutable runtime snapshots;
 #                    allow unused plugin bindings to be cleaned before Deck deletion.
+# [Sync] 2026-08-17: CAS-update the current Agent inside an already bound Chat Deck.
 """
 PostgreSQL runtime persistence helpers for Ink & Memory.
 
@@ -3143,26 +3144,29 @@ def bind_chat_thread_deck(thread_id: str, user_id: int, deck_id: str) -> bool:
         db.close()
 
 
-def bind_chat_thread_voice(thread_id: str, user_id: int, voice_id: str) -> bool:
-    """Bind one Agent once; an existing conversation cannot switch persona."""
+def select_chat_thread_voice(
+    thread_id: str,
+    user_id: int,
+    deck_id: str,
+    voice_id: str,
+    expected_voice_id: Optional[str],
+) -> bool:
+    """Select the current Agent with CAS while preserving the Thread Deck."""
     db = get_db()
     try:
         cursor = db.execute(
             """
             UPDATE chat_thread
             SET voice_id = %s, updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s AND user_id = %s AND voice_id IS NULL
+            WHERE id = %s
+              AND user_id = %s
+              AND deck_id = %s
+              AND voice_id IS NOT DISTINCT FROM %s
             """,
-            (voice_id, thread_id, user_id),
+            (voice_id, thread_id, user_id, deck_id, expected_voice_id),
         )
         db.commit()
-        if cursor.rowcount == 1:
-            return True
-        row = db.execute(
-            "SELECT voice_id FROM chat_thread WHERE id = %s AND user_id = %s",
-            (thread_id, user_id),
-        ).fetchone()
-        return bool(row and row["voice_id"] == voice_id)
+        return cursor.rowcount == 1
     finally:
         db.close()
 

@@ -85,6 +85,8 @@
 //                    Deck/Agent context remains visible in the top bar.
 // [Sync] 2026-08-17: share typed Chat history create/list/delete transport with
 //                    Deck related-conversation management.
+// [Sync] 2026-08-17: apply Deck preview example handoffs to the fresh Chat composer as unsent drafts.
+// [Sync] 2026-08-17: allow an active Thread to select the next-turn Agent within its bound Deck.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -155,6 +157,8 @@ interface ChatViewProps {
   requestedDeckId?: string;
   /** Agent selected under requestedDeckId. */
   requestedAgentId?: string;
+  /** Optional user-visible example copied into the new Chat composer without sending. */
+  requestedDeckInput?: string;
   /** Bump-only companion of requestedDeckId so repeated requests for the same Deck still re-apply. */
   requestedDeckNonce?: number;
   onNewChat?: () => void;
@@ -299,6 +303,7 @@ function ChatViewContent({
   requestedThreadNonce,
   requestedDeckId,
   requestedAgentId,
+  requestedDeckInput,
   requestedDeckNonce,
   onNewChat,
   quickActions,
@@ -1090,6 +1095,7 @@ function ChatViewContent({
               activeVoiceId={threadVoiceEntry?.voice.id}
               activeVoiceName={displayVoice?.name}
               deck={availableDecks.find((deck) => deck.id === badgeDeckId)}
+              onSelectAgent={activeThreadId ? setSelectedAgentId : undefined}
               threadId={activeThreadId ?? null}
             />
             {/* 新建对话 */}
@@ -1250,6 +1256,8 @@ function ChatViewContent({
                     <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, paddingBottom: '0.25rem' }}>
                       <AIInputDock
                         deckId={selectedDeckId}
+                        prefill={requestedDeckInput}
+                        prefillNonce={requestedDeckNonce}
                         onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
                           void startSelectedDeckInteraction(message, uploadedFiles, toolChoice);
                         }}

@@ -3,6 +3,7 @@
 <!-- [Pos] Deck product-design source of truth under docs/design/deck. -->
 <!-- [Sync] 2026-08-16: implement durable drafts, immutable Deck vN commits, and Settings / Work ownership. -->
 <!-- [Sync] 2026-08-17: add the related Chat cleanup and corrected Deck deletion boundary. -->
+<!-- [Sync] 2026-08-17: make preview Demo launch follow the server-owned Chat/Dream Agent type. -->
 
 # Deck 管理与内容版本设计索引
 
@@ -20,6 +21,7 @@ CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交�
 | 功能单元 | 结论 | 真实实现 |
 |---|---|---|
 | Deck 启用入口 | 简化/实现 | 主页面仅展示最多 14 个 enabled + published + clean 正方形快捷图标及同资格列表；系统内置有标识，完整集合留在 Work |
+| Deck 预览 Demo | 修正/实现 | Chat Agent 示例只预填未发送 Chat；DreamAgent 示例复用现有 Dream start 并进入独立 Dream 工作台 |
 | Settings / Work | 新增/实现 | Settings 左栏只新增 Work；Deck、资源链接、插件是 Work 内部页签 |
 | 完整 Deck 管理 | 移动/保留 | 搜索、筛选、分页、行级操作和启停迁入 Work / Deck |
 | 相关对话与删除 | 新增闭环 | Work 更多菜单按 Deck 展示真实 Chat 历史；先逐条确认删除，再重试 Deck 删除；普通 binding 不再误报为历史 Chat |

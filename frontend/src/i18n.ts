@@ -13,7 +13,7 @@
 // [Sync] 2026-08-17: explain the published-clean Deck-home empty state.
 // [Sync] 2026-08-17: add Work-related Chat history cleanup and deletion guidance copy.
 // [Sync] 2026-08-17: localize the Story Workspace Settings shell and render Work/工作台 per locale.
-// [Sync] 2026-08-17: label Available/System Deck launcher groups and static system defaults.
+// [Sync] 2026-08-17: label Available/System Deck launcher groups and default-visible system Decks.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -189,17 +189,19 @@ const resources = {
           sectionLabel: 'Decks',
           title: 'Decks',
           description: 'Manage the Decks you use with Chat and Dream',
-          launchDescription: 'Open an enabled published Deck; manage drafts and other Decks in Settings',
-          enabledTitle: 'Enabled',
-          enabledEmpty: 'No Deck is enabled.',
-          availableEmpty: 'No enabled Deck has a published version without draft changes.',
+          launchDescription: 'Open an available Deck; manage drafts and other Decks in Settings',
+          enabledTitle: 'Installed',
+          enabledEmpty: 'No Deck is available.',
+          availableEmpty: 'No Deck is available on this page.',
           allTitle: 'All Decks',
           launchCatalogTitle: 'Deck catalog',
           availableTitle: 'Available Decks',
           availableListTitle: 'Available Decks',
           availableListLabel: 'User-created available Decks',
+          availableListEmpty: 'No user-created Deck is enabled with a published clean version.',
           systemListTitle: 'System Decks',
           systemListLabel: 'System built-in Decks',
+          systemListEmpty: 'No system Deck is available.',
           launchSearchLabel: 'Search available Decks',
           launchListLabel: 'Available Deck list',
           openDeck: 'Open {{deck}}',
@@ -208,6 +210,8 @@ const resources = {
         },
         labels: {
           system: 'System',
+          systemBuiltIn: 'System built-in',
+          contentVersion: 'Content v{{version}}',
           noDescription: 'No description',
           voiceCount: '{{count}} voices',
           agentCount: '{{count}} Agents',
@@ -219,6 +223,25 @@ const resources = {
             chat: 'Chat Agent',
             dream: 'Dream Agent'
           }
+        },
+        preview: {
+          back: 'Back to Decks',
+          tryNow: 'Try now',
+          launchingDream: 'Starting Dream…',
+          launchDreamFailed: 'Dream could not be started. Your Deck selection is unchanged; try again.',
+          examples: 'Deck preview examples',
+          defaultDescription: '{{deck}} is ready for Chat and Dream work.',
+          agentsTitle: 'Agents {{count}}',
+          noAgents: 'No Agent is configured for this Deck.',
+          infoTitle: 'Information',
+          infoDeveloper: 'Developer',
+          systemDeveloper: 'Ink & Memory',
+          userDeveloper: 'You',
+          infoType: 'Category',
+          infoVersion: 'Version',
+          infoRuntime: 'Runtime',
+          infoUpdated: 'Updated',
+          editDeck: 'Edit Deck {{deck}}'
         },
         creator: {
           searchLabel: 'Search managed Decks',
@@ -407,6 +430,8 @@ const resources = {
           metadataNoDeck: 'No Deck bound to this conversation',
           metadataFrozen: 'Workspace frozen for this conversation',
           metadataCurrentAgent: 'current',
+          currentAgent: '{{agent}}, current Agent',
+          switchAgent: 'Switch to {{agent}}',
           metadataPacking: 'Plugins will show resolved versions and digests after the first run packs the workspace.',
           metadataNoPlugins: 'This Deck has no plugins configured.',
           metadataCopyDigest: 'Copy digest',
@@ -949,17 +974,19 @@ const resources = {
           sectionLabel: 'Deck',
           title: 'Deck',
           description: '管理在 Chat 和 Dream 中使用的 Deck',
-          launchDescription: '打开已启用且已发布的 Deck；草稿及其他 Deck 请前往设置管理',
-          enabledTitle: '已启用',
-          enabledEmpty: '当前没有已启用的 Deck。',
-          availableEmpty: '当前没有已启用、已发布且无草稿变更的 Deck。',
+          launchDescription: '打开可用的 Deck；草稿及其他 Deck 请前往设置管理',
+          enabledTitle: '已安装',
+          enabledEmpty: '当前没有可用 Deck。',
+          availableEmpty: '当前页面没有可用 Deck。',
           allTitle: '全部 Deck',
           launchCatalogTitle: 'Deck 目录',
           availableTitle: '正式可用 Deck',
           availableListTitle: '可用 Deck',
           availableListLabel: '用户创建的可用 Deck',
+          availableListEmpty: '没有符合条件的用户 Deck。',
           systemListTitle: '系统 Deck',
           systemListLabel: '系统内建 Deck',
+          systemListEmpty: '当前没有系统 Deck。',
           launchSearchLabel: '搜索正式可用的 Deck',
           launchListLabel: '正式可用 Deck 列表',
           openDeck: '打开 {{deck}}',
@@ -968,6 +995,8 @@ const resources = {
         },
         labels: {
           system: '系统',
+          systemBuiltIn: '系统内建',
+          contentVersion: '内容 v{{version}}',
           noDescription: '暂无简介',
           voiceCount: '{{count}} 条声线',
           agentCount: '{{count}} 个 Agent',
@@ -979,6 +1008,25 @@ const resources = {
             chat: 'Chat Agent',
             dream: 'Dream Agent'
           }
+        },
+        preview: {
+          back: '返回 Deck',
+          tryNow: '立即试用',
+          launchingDream: '正在启动 Dream…',
+          launchDreamFailed: 'Dream 启动失败，Deck 选择未改变，请重试。',
+          examples: 'Deck 预览示例',
+          defaultDescription: '{{deck}} 已可用于 Chat 与 Dream 工作。',
+          agentsTitle: 'Agent {{count}}',
+          noAgents: '这个 Deck 暂未配置 Agent。',
+          infoTitle: '信息',
+          infoDeveloper: '开发者',
+          systemDeveloper: 'Ink & Memory',
+          userDeveloper: '你',
+          infoType: '类别',
+          infoVersion: '版本',
+          infoRuntime: '运行版本',
+          infoUpdated: '更新于',
+          editDeck: '编辑 Deck {{deck}}'
         },
         creator: {
           searchLabel: '搜索可管理的 Deck',
@@ -1166,6 +1214,8 @@ const resources = {
           metadataNoDeck: '本次对话未绑定 Deck',
           metadataFrozen: '本次对话工作区已锁定',
           metadataCurrentAgent: '当前',
+          currentAgent: '{{agent}}，当前 Agent',
+          switchAgent: '切换到 {{agent}}',
           metadataPacking: '插件将在首次运行打包工作区后显示版本与摘要。',
           metadataNoPlugins: '此 Deck 未配置插件。',
           metadataCopyDigest: '复制 digest',

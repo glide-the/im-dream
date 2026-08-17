@@ -1,8 +1,9 @@
 <!-- [Input] Deck CRUD, content-version capability, binding CAS, and deferred Thread apply receipt. -->
-<!-- [Output] Nine end-to-end Mermaid business sequences. -->
+<!-- [Output] Eleven end-to-end Mermaid business sequences. -->
 <!-- [Pos] Deck management/version sequence source of truth. -->
 <!-- [Sync] 2026-08-16: implement durable draft/explicit commit and retain explicit-only Thread upgrades. -->
-<!-- [Sync] 2026-08-17: add related Chat cleanup before owned Deck deletion. -->
+<!-- [Sync] 2026-08-17: add typed Deck-preview Demo dispatch to Chat or the dedicated Dream workbench. -->
+<!-- [Sync] 2026-08-17: add same-Thread, same-Deck next-turn Agent selection with validation and CAS. -->
 
 # Deck 业务时序
 
@@ -210,5 +211,68 @@ sequenceDiagram
   else 可以删除
     V->>DB: BEGIN；删除 refs + 未使用 bindings + Deck；COMMIT
     D-->>UI: success；刷新 Work 列表
+  end
+```
+
+## 10. 同一 Chat 对话切换当前 Deck 内 Agent
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant UI as Chat / Deck 徽章
+  participant A as Claude Agent API
+  participant V as DeckChatContext 校验
+  participant DB as PostgreSQL
+  U->>UI: 展开 Deck 元信息
+  UI-->>U: 当前 Agent + 同 Deck 已启用 Agent
+  U->>UI: 点击另一 Agent
+  Note over UI: 仅更新下一轮选择；Thread/Deck/版本/receipt 不变
+  U->>UI: 发送下一条消息
+  UI->>A: threadId + fixed deckId + selected voiceId
+  A->>V: actor、Deck 可见性、Agent 归属与启用状态
+  alt 校验失败
+    V-->>UI: 403/404；不写入、不启动 Agent
+  else 校验通过
+    A->>DB: UPDATE chat_thread.voice_id WHERE actor+deck+old voice CAS
+    alt CAS 冲突
+      DB-->>UI: 409 CHAT_AGENT_CONFLICT
+      Note over DB: 原 Agent 保持；不启动 Agent
+    else CAS 成功
+      A->>DB: 消息 metadata 记录 deckId + voiceId
+      A-->>UI: 使用所选 Agent system prompt 开始本轮 SSE
+    end
+  end
+```
+
+## 11. Deck 预览 Demo 按 Agent 类型分流
+
+```mermaid
+sequenceDiagram
+  actor U as 用户
+  participant UI as Deck 预览
+  participant C as Chat 入口
+  participant D as Dream API
+  participant V as Deck/Agent/权限/版本校验
+  participant DB as PostgreSQL
+  participant W as Dream 工作台
+  U->>UI: 点击某 Agent 的示例 Demo
+  UI->>UI: 读取服务端 agent_type + 可见示例文字
+  alt Chat Agent
+    UI->>C: Deck + Agent + editable input
+    C-->>U: 新 Chat 输入框预填；不自动发送
+    Note over C,DB: Thread/消息零写入
+  else Dream Agent
+    UI->>D: POST Dream start(deckId, agentId, goal, idempotencyKey)
+    D->>V: actor、Deck 类型、Agent 归属/启用、版本与并发校验
+    alt 校验或创建失败
+      V-->>UI: 4xx/5xx
+      UI-->>U: 留在预览页；保留选择；错误可重试
+      Note over D,DB: 不打开伪工作台；不得创建 Chat Thread 替代
+    else 创建成功
+      V->>DB: 原子创建 Dream Run + source Thread
+      D-->>UI: workflowRunId + threadId
+      UI->>W: /story-workspace/dream?run=workflowRunId
+      W-->>U: 独立 Dream 工作台
+    end
   end
 ```

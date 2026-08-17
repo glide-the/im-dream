@@ -1,10 +1,13 @@
 // [Input] Existing Deck/Agent CRUD APIs, PDF-led home, original create defaults, and pre-refactor maintenance editor.
-// [Output] Resilient Deck home/Work manager with create-first editing and related Chat cleanup through production APIs.
+// [Output] Resilient Deck home/Work manager with Deck preview, create-first editing, and related Chat cleanup.
 // [Pos] Deck manager orchestration node in frontend/src/components.
 // [Sync] 2026-08-16: restore the pre-01a00576 Deck maintenance scope without restoring its superseded page modes.
 // [Sync] 2026-08-16: propagate form mutation failures so content-version state refreshes only after durable writes.
 // [Sync] 2026-08-17: keep published-clean home visibility separate from Settings / Work full inventory without duplicating APIs.
 // [Sync] 2026-08-17: orchestrate Deck-scoped Chat history reads/deletes for the Work More menu.
+// [Sync] 2026-08-17: route Deck home clicks through a read-only preview before maintenance editing.
+// [Sync] 2026-08-17: dispatch preview examples by server-owned Agent type: Chat drafts stay in Chat,
+//                    while Dream examples reuse the production Dream launcher and open its workbench.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -25,12 +28,16 @@ import { updateDeckAgentType, type DeckAgentType } from '../api/deckPluginApi';
 import { deleteChatThread, listChatThreads } from '../api/chatHistoryApi';
 import { DEFAULT_DECK_CREATE_VISUAL } from '../constants/deck';
 import type { ActiveChatVoice } from '../lib/chat-schema';
+import {
+  storyWorkspaceDreamRunPath,
+  useStoryWorkspaceDreamLaunch,
+} from '../hooks/story-workspace/useStoryWorkspaceDreamLaunch';
 import DeckEditorModal from './DeckEditorModal';
-import { DeckLaunchPanel, DeckSettingsPanel } from './deck/DeckManagerPanels';
+import { DeckLaunchPanel, DeckPreviewPanel, DeckSettingsPanel } from './deck/DeckManagerPanels';
 
 interface Props {
   onUpdate?: () => void;
-  onChatWithDeck?: (deckId: string, voiceInfo: ActiveChatVoice) => void;
+  onChatWithDeck?: (deckId: string, voiceInfo: ActiveChatVoice, input?: string) => void;
   onOpenSettings?: () => void;
   surface?: 'launcher' | 'settings';
 }
@@ -53,11 +60,14 @@ export default function DeckManager({
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [busyDeckId, setBusyDeckId] = useState<string | null>(null);
+  const [previewDeckId, setPreviewDeckId] = useState<string | null>(null);
+  const [previewLaunchError, setPreviewLaunchError] = useState<string | null>(null);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [creatingDeck, setCreatingDeck] = useState(false);
   const [creatingVoice, setCreatingVoice] = useState<string | null>(null);
   const [selectedVoiceByDeck, setSelectedVoiceByDeck] = useState<Record<string, string | null>>({});
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const previewDreamLaunch = useStoryWorkspaceDreamLaunch();
 
   const loadDecks = useCallback(async (
     options: { initial?: boolean; preserveScroll?: boolean } = {},
@@ -323,17 +333,62 @@ export default function DeckManager({
   }
 
   const activeDeck = decks.find((deck) => deck.id === activeDeckId) ?? null;
+  const previewDeck = decks.find((deck) => deck.id === previewDeckId) ?? null;
+
+  const openDeckPreview = (deckId: string) => {
+    setPreviewLaunchError(null);
+    setPreviewDeckId(deckId);
+    requestAnimationFrame(() => {
+      scrollContainerRef.current?.scrollTo({ top: 0 });
+    });
+  };
+
+  const tryDeckFromPreview = async (deckId: string, voice: Voice, input?: string) => {
+    const deck = decks.find((candidate) => candidate.id === deckId);
+    const goal = input?.trim();
+    if (deck?.agent_type === 'dream' && goal) {
+      setPreviewLaunchError(null);
+      try {
+        const accepted = await previewDreamLaunch.start(deckId, voice.id, goal);
+        window.history.pushState(
+          { inkDreamView: 'story-workspace' },
+          '',
+          storyWorkspaceDreamRunPath(accepted.workflowRunId),
+        );
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      } catch (launchError) {
+        setPreviewLaunchError(getErrorMessage(launchError, t('deck.preview.launchDreamFailed')));
+      }
+      return;
+    }
+    onChatWithDeck?.(deckId, {
+      id: voice.id,
+      name: voice.name,
+      icon: voice.icon,
+      color: voice.color,
+      systemPrompt: voice.system_prompt,
+    }, input);
+  };
 
   return (
     <div className={`deck-manager-shell deck-manager-shell--${surface}`}>
       <div className="deck-manager-shell__scroll" ref={scrollContainerRef}>
         <div className="deck-manager-shell__content">
-          {surface === 'launcher' ? (
+          {surface === 'launcher' && previewDeck ? (
+            <DeckPreviewPanel
+              deck={previewDeck}
+              launchError={previewLaunchError}
+              launchingDream={previewDreamLaunch.isLaunching}
+              onBack={() => setPreviewDeckId(null)}
+              onEditDeck={setActiveDeckId}
+              onTryDeck={tryDeckFromPreview}
+            />
+          ) : surface === 'launcher' ? (
             <DeckLaunchPanel
               creatingDeck={creatingDeck}
               decks={decks}
               onCreateDeck={() => void handleCreateDeck()}
-              onOpenDeck={setActiveDeckId}
+              onOpenDeck={openDeckPreview}
               onOpenSettings={onOpenSettings}
               onRefreshDecks={() => void handleRefreshDecks()}
               operationError={operationError}

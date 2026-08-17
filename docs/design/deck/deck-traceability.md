@@ -1,7 +1,7 @@
 <!-- [Input] Deck design units, Admin capability, Dream implementation, and QA lanes. -->
 <!-- [Output] Requirement-to-code/test/evidence traceability and test matrix. -->
 <!-- [Pos] Deck redesign acceptance ledger. -->
-<!-- [Sync] 2026-08-17: trace published-clean home, Work inventory, vN mutations, and related Chat deletion. -->
+<!-- [Sync] 2026-08-17: trace typed preview Demo dispatch to Chat or the dedicated Dream workbench. -->
 
 # Deck 需求追踪矩阵与测试计划
 
@@ -31,6 +31,8 @@
 | 排除 Workflow | `deck-impact-review.md` | 当前 Deck UI/transport 无 Workflow | negative source/browser | 入口/请求为零 |
 | 排除市场 | `deck-register/README.md` | 当前 UI/i18n 无 publish/install/market | negative source/browser | 入口/请求为零 |
 | 历史 Thread 不自动升级 | `thread-version-upgrade.md` | 当前行为保持；apply capability 后续 | negative current contract | 无自动/批量写 |
+| 同一 Chat 切换 Deck 内 Agent | `2026-08-03-deck-context-badge-design.md` §3–8；`deck-business-sequences.md` §10 | `PluginReceiptBadge.tsx`, `ChatView.tsx`, `claude_agent.py`, `database.select_chat_thread_voice` | source + route/CAS unit + provider-free browser | 当前 Agent pressed；同 Thread/Deck；发送时成员校验；CAS 冲突不启动；每轮 provenance metadata |
+| 预览 Demo 按 Agent 类型分流 | `deck-management-list.md` §3.1；`deck-business-sequences.md` §11 | `DeckManager.tsx`, `DeckManagerPanels.tsx`, `useStoryWorkspaceDreamLaunch.ts` | source + provider-free browser + real只读边界 | Chat 示例只预填；Dream 示例走 Dream start 并进入独立工作台；重复点击受控；失败留页可重试；不伪造 Chat Thread |
 
 ## Schema/事务映射
 
@@ -47,7 +49,7 @@
 |---|---|---|
 | 静态/类型/构建 | DTO、API、组件、无禁用入口、响应式 CSS | 技术验证 |
 | Admin schema | columns/table/FK/check/trigger/capability/migration inventory | 隔离技术验证 |
-| 后端单元 | preview 零写、v1/v2、history、hash/no-op、CAS preservation、binding no-op | provider-free 技术验证 |
+| 后端单元 | preview 零写、v1/v2、history、hash/no-op、content/binding CAS preservation、same-Deck Agent CAS 与 provenance metadata | provider-free 技术验证 |
 | API/组件合同 | content state/preview/commit/history，表单刷新，提交确认 | 技术验证 |
 | Playwright | enabled14→Settings→Work→相关对话→逐条删除→空状态；创建→修改→v1→修改→v2→历史；error/390px | mocked production-entry 技术验收 |
 | 真实业务 | 只在用户指定现有真实账户/Deck 且本机完整服务可用时执行 | 单独报告，不以 mock 冒充 |
@@ -61,5 +63,7 @@
 5. Deck 主页面不得包含完整列表、状态筛选或启停控件；这些仅属于 Work / Deck。
 6. 本期页面不出现 Workflow 或市场入口。
 7. 有相关 Chat 时不得直接删除 Deck；相关对话未知/失败不得当作空列表；普通未使用 binding 不得误报为历史 Chat。
+8. Chat 内只能选择当前 Deck 的已启用 Agent；Deck、内容版本、插件 receipt 与 Thread ID 不得随 Agent 选择改变。
+9. Deck 预览示例必须按服务端 `agent_type` 分流；DreamAgent 复用现有 Dream start 并进入独立 Dream 工作台，禁止降级为 Chat 预填。
 
 执行命令、退出码、通过数量和截图路径在本次最终交付中记录；未执行的真实业务车道必须说明原因。
