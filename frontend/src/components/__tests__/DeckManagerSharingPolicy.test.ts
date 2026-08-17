@@ -3,6 +3,7 @@
 // [Pos] Source-contract regression for Deck management scope.
 // [Sync] 2026-08-16: require enabled-only Deck launch plus Settings / Work tabs and Work-owned switches.
 // [Sync] 2026-08-17: require More → related Chat previews and locale-owned Work labels.
+// [Sync] 2026-08-17: require Available/System Deck launcher groups with static system-default behavior.
 
 // @ts-expect-error source-contract tests run in Node outside the frontend tsconfig.
 import { readFileSync } from 'node:fs';
@@ -54,6 +55,20 @@ test('Deck home uses published-clean enabled shortcuts with system markers while
   expect(launcher).toContain('deck-manager-enabled__item--system');
   expect(launcher).toContain('deck-manager-enabled__system-marker');
   expect(launcher).toContain('deck-manager-launch-card--system');
+  expect(launcher).toContain('userVisibleDecks');
+  expect(launcher).toContain('systemVisibleDecks');
+  expect(launcher).toContain('<DeckLaunchGroup');
+  expect(PANELS).toContain('function DeckLaunchGroup');
+  expect(PANELS).toContain('isSystemDeckDisplay');
+  expect(PANELS).toContain("deck.publish_block_reason === DEFAULT_INITIALIZED_DECK_REASON");
+  expect(launcher).toContain("visibleDecks.filter((deck) => !isSystemDeckDisplay(deck))");
+  expect(launcher).toContain('visibleDecks.filter(isSystemDeckDisplay)');
+  expect(launcher).toContain("t('deck.home.availableListTitle')");
+  expect(launcher).toContain("t('deck.home.systemListTitle')");
+  expect(launcher).toContain("t('deck.home.availableListLabel')");
+  expect(launcher).toContain("t('deck.home.systemListLabel')");
+  expect(launcher).toContain('disabled={isSystemDeckDisplay(deck)}');
+  expect(launcher).toContain("t('deck.home.systemDeckLabel'");
   expect(launcher).toContain("t('deck.labels.system')");
   expect(launcher).toContain('deck-manager-enabled__settings');
   expect(launcher).toContain('onClick={onOpenSettings}');
@@ -79,6 +94,8 @@ test('Deck home uses published-clean enabled shortcuts with system markers while
   expect(STYLES).toContain('aspect-ratio: 1');
   expect(STYLES).toContain('.deck-manager-enabled__settings');
   expect(STYLES).toContain('.deck-manager-launch-catalog__grid');
+  expect(STYLES).toContain('.deck-manager-launch-catalog__groups');
+  expect(STYLES).toContain('.deck-manager-launch-group h3');
   expect(STYLES).toContain('.deck-manager-enabled__item--system');
   expect(STYLES).toContain('.deck-manager-launch-card--system');
   expect(STYLES).toContain('.deck-manager-list__row');
@@ -97,6 +114,10 @@ test('Deck home uses published-clean enabled shortcuts with system markers while
   expect(I18N).toContain("work: '工作台'");
   expect(I18N).toContain("title: 'Work'");
   expect(I18N).toContain("title: '工作台'");
+  expect(I18N).toContain("availableListTitle: 'Available Decks'");
+  expect(I18N).toContain("systemListTitle: 'System Decks'");
+  expect(I18N).toContain("availableListTitle: '可用 Deck'");
+  expect(I18N).toContain("systemListTitle: '系统 Deck'");
   expect(PATHS).toContain("'settings-work': '/story-workspace/settings/work'");
   expect(APP).toContain('onOpenSettings={handleOpenSettingsFromDeck}');
   expect(APP).toContain("STORY_WORKSPACE_PATHS['settings-work']");
@@ -163,6 +184,9 @@ test('market distribution is absent from current Deck management UI and copy', (
   expect(currentSurface).not.toMatch(/Publish to Community|发布到社区|publishedByMe|communityMeta|publishWarning/);
   expect(COMPONENT).not.toMatch(/publishDeck|handlePublish|publishWarning/);
   expect(PANELS).not.toMatch(/publishedDecks|install_count|is-published|onPublish|onUnpublish|community/);
+  expect(COMPONENT).not.toContain('forkDeck');
+  expect(PANELS).not.toContain('onForkDeck');
+  expect(PANELS).not.toContain("t('deck.actions.fork')");
 });
 
 test('Deck content versions use draft preview and explicit immutable commits', () => {

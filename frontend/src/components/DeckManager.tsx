@@ -12,7 +12,6 @@ import {
   createVoice,
   deleteDeck,
   deleteVoice,
-  forkDeck,
   getDeck,
   listDecks,
   reconcileDefaultDeckPlugin,
@@ -250,19 +249,6 @@ export default function DeckManager({
     }
   }
 
-  async function handleForkDeck(deckId: string) {
-    setBusyDeckId(deckId);
-    setOperationError(null);
-    try {
-      await forkDeck(deckId);
-      await refreshAfterMutation();
-    } catch (forkError) {
-      setOperationError(getErrorMessage(forkError, t('deck.messages.forkFailed')));
-    } finally {
-      setBusyDeckId(null);
-    }
-  }
-
   async function handleDeleteDeck(deckId: string) {
     if (!confirm(t('deck.confirm.delete'))) return;
     setBusyDeckId(deckId);
@@ -361,7 +347,6 @@ export default function DeckManager({
               decks={decks}
               onCreateDeck={() => void handleCreateDeck()}
               onDeleteDeck={(deckId) => void handleDeleteDeck(deckId)}
-              onForkDeck={(deckId) => void handleForkDeck(deckId)}
               onOpenDeck={setActiveDeckId}
               onLoadRelatedThreads={handleLoadRelatedThreads}
               onDeleteRelatedThread={handleDeleteRelatedThread}

@@ -13,6 +13,7 @@
 // [Sync] 2026-08-17: explain the published-clean Deck-home empty state.
 // [Sync] 2026-08-17: add Work-related Chat history cleanup and deletion guidance copy.
 // [Sync] 2026-08-17: localize the Story Workspace Settings shell and render Work/工作台 per locale.
+// [Sync] 2026-08-17: label Available/System Deck launcher groups and static system defaults.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -193,10 +194,16 @@ const resources = {
           enabledEmpty: 'No Deck is enabled.',
           availableEmpty: 'No enabled Deck has a published version without draft changes.',
           allTitle: 'All Decks',
+          launchCatalogTitle: 'Deck catalog',
           availableTitle: 'Available Decks',
+          availableListTitle: 'Available Decks',
+          availableListLabel: 'User-created available Decks',
+          systemListTitle: 'System Decks',
+          systemListLabel: 'System built-in Decks',
           launchSearchLabel: 'Search available Decks',
           launchListLabel: 'Available Deck list',
           openDeck: 'Open {{deck}}',
+          systemDeckLabel: 'System built-in Deck {{deck}}',
           openSettings: 'Open Deck settings'
         },
         labels: {
@@ -947,10 +954,16 @@ const resources = {
           enabledEmpty: '当前没有已启用的 Deck。',
           availableEmpty: '当前没有已启用、已发布且无草稿变更的 Deck。',
           allTitle: '全部 Deck',
+          launchCatalogTitle: 'Deck 目录',
           availableTitle: '正式可用 Deck',
+          availableListTitle: '可用 Deck',
+          availableListLabel: '用户创建的可用 Deck',
+          systemListTitle: '系统 Deck',
+          systemListLabel: '系统内建 Deck',
           launchSearchLabel: '搜索正式可用的 Deck',
           launchListLabel: '正式可用 Deck 列表',
           openDeck: '打开 {{deck}}',
+          systemDeckLabel: '系统内建 Deck {{deck}}',
           openSettings: '打开 Deck 设置'
         },
         labels: {

@@ -6,6 +6,7 @@
 // [Sync] 2026-08-17: limit both Deck-home projections to enabled published-clean versions,
 //                    mark system Decks visibly, and keep drafts/full inventory in Settings / Work.
 // [Sync] 2026-08-17: add More → related conversations using the Chat history preview pattern.
+// [Sync] 2026-08-17: split Available/System Deck launcher groups and keep system-default Decks static.
 import {
   useEffect,
   useMemo,
@@ -32,7 +33,6 @@ interface DeckManagerPanelProps {
   onRefreshDecks: () => void;
   onOpenDeck: (deckId: string) => void;
   onToggleDeck: (deckId: string, enabled: boolean) => void;
-  onForkDeck: (deckId: string) => void;
   onSyncDeck: (deckId: string) => void;
   onDeleteDeck: (deckId: string) => void;
   onLoadRelatedThreads: (deckId: string, offset: number) => Promise<ChatHistoryThread[]>;
@@ -55,6 +55,11 @@ type AgentTypeFilter = 'all' | 'chat' | 'dream';
 type StatusFilter = 'all' | 'enabled' | 'disabled';
 
 const RELATED_THREADS_PAGE_SIZE = 20;
+const DEFAULT_INITIALIZED_DECK_REASON = 'default_initialized';
+
+const isSystemDeckDisplay = (deck: Deck): boolean => (
+  deck.is_system || deck.publish_block_reason === DEFAULT_INITIALIZED_DECK_REASON
+);
 
 const isDeckHomeVisible = (deck: Deck): boolean => (
   deck.enabled
@@ -109,6 +114,14 @@ export function DeckLaunchPanel({
       return matchesQuery && matchesAgentType;
     });
   }, [agentType, query, visibleHomeDecks]);
+  const userVisibleDecks = useMemo(
+    () => visibleDecks.filter((deck) => !isSystemDeckDisplay(deck)),
+    [visibleDecks],
+  );
+  const systemVisibleDecks = useMemo(
+    () => visibleDecks.filter(isSystemDeckDisplay),
+    [visibleDecks],
+  );
 
   useEffect(() => {
     const closeMenu = (event: PointerEvent) => {
@@ -210,17 +223,22 @@ export function DeckLaunchPanel({
             return (
               <span key={deck.id} role="listitem">
                 <button
-                  aria-label={`${t('deck.home.openDeck', { deck: deck.name })}${deck.is_system ? ` · ${t('deck.labels.system')}` : ''}`}
-                  className={`deck-manager-enabled__item${deck.is_system ? ' deck-manager-enabled__item--system' : ''}`}
+                  aria-label={isSystemDeckDisplay(deck)
+                    ? t('deck.home.systemDeckLabel', { deck: deck.name })
+                    : t('deck.home.openDeck', { deck: deck.name })}
+                  className={`deck-manager-enabled__item${isSystemDeckDisplay(deck) ? ' deck-manager-enabled__item--system' : ''}`}
                   data-deck-home-id={deck.id}
-                  data-deck-home-kind={deck.is_system ? 'system' : 'user'}
-                  onClick={() => onOpenDeck(deck.id)}
+                  data-deck-home-kind={isSystemDeckDisplay(deck) ? 'system' : 'user'}
+                  disabled={isSystemDeckDisplay(deck)}
+                  onClick={() => {
+                    if (!isSystemDeckDisplay(deck)) onOpenDeck(deck.id);
+                  }}
                   style={{ '--deck-accent': accent } as CSSProperties}
-                  title={`${deck.name}${deck.is_system ? ` · ${t('deck.labels.system')}` : ''}`}
+                  title={`${deck.name}${isSystemDeckDisplay(deck) ? ` · ${t('deck.labels.system')}` : ''}`}
                   type="button"
                 >
                   <Icon aria-hidden="true" size={24} />
-                  {deck.is_system ? (
+                  {isSystemDeckDisplay(deck) ? (
                     <span aria-hidden="true" className="deck-manager-enabled__system-marker">
                       <FaShieldAlt size={7} />
                     </span>
@@ -253,7 +271,9 @@ export function DeckLaunchPanel({
               ))}
             </div>
           </div>
-          <h2 id="deck-manager-launch-catalog-title">{t('deck.home.availableTitle')}</h2>
+          <h2 className="deck-manager-sr-only" id="deck-manager-launch-catalog-title">
+            {t('deck.home.launchCatalogTitle')}
+          </h2>
 
           {visibleDecks.length === 0 ? (
             <div className="deck-manager-empty deck-manager-empty--launcher">
@@ -270,48 +290,93 @@ export function DeckLaunchPanel({
               </button>
             </div>
           ) : (
-            <ul aria-label={t('deck.home.launchListLabel')} className="deck-manager-launch-catalog__grid">
-              {visibleDecks.map((deck) => {
-                const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
-                const accent = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
-                return (
-                  <li key={deck.id}>
-                    <button
-                      aria-label={`${t('deck.actions.edit')} ${deck.name}`}
-                      className={`deck-manager-launch-card${deck.is_system ? ' deck-manager-launch-card--system' : ''}`}
-                      data-deck-home-id={deck.id}
-                      data-deck-home-kind={deck.is_system ? 'system' : 'user'}
-                      onClick={() => onOpenDeck(deck.id)}
-                      style={{ '--deck-accent': accent } as CSSProperties}
-                      type="button"
-                    >
-                      <span aria-hidden="true" className="deck-manager-launch-card__icon">
-                        <Icon size={24} />
-                      </span>
-                      <span className="deck-manager-launch-card__copy">
-                        <span className="deck-manager-launch-card__title">
-                          {deck.name}
-                          {deck.is_system ? <span className="deck-manager-chip">{t('deck.labels.system')}</span> : null}
-                        </span>
-                        <span className="deck-manager-launch-card__description">
-                          {deck.description || t('deck.labels.noDescription')}
-                        </span>
-                        <span className="deck-manager-launch-card__meta">
-                          {t(`deck.labels.agentType.${deck.agent_type === 'dream' ? 'dream' : 'chat'}`)}
-                          <span aria-hidden="true">·</span>
-                          内容 v{deck.deck_version}
-                        </span>
-                      </span>
-                      <span aria-hidden="true" className="deck-manager-launch-card__arrow">›</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="deck-manager-launch-catalog__groups">
+              {userVisibleDecks.length > 0 ? (
+                <DeckLaunchGroup
+                  decks={userVisibleDecks}
+                  label={t('deck.home.availableListTitle')}
+                  listLabel={t('deck.home.availableListLabel')}
+                  onOpenDeck={onOpenDeck}
+                  t={t}
+                />
+              ) : null}
+              {systemVisibleDecks.length > 0 ? (
+                <DeckLaunchGroup
+                  decks={systemVisibleDecks}
+                  label={t('deck.home.systemListTitle')}
+                  listLabel={t('deck.home.systemListLabel')}
+                  onOpenDeck={onOpenDeck}
+                  t={t}
+                />
+              ) : null}
+            </div>
           )}
         </section>
       ) : null}
     </div>
+  );
+}
+
+function DeckLaunchGroup({
+  decks,
+  label,
+  listLabel,
+  onOpenDeck,
+  t,
+}: {
+  decks: Deck[];
+  label: string;
+  listLabel: string;
+  onOpenDeck: (deckId: string) => void;
+  t: ReturnType<typeof useTranslation>['t'];
+}) {
+  return (
+    <section className="deck-manager-launch-group" aria-label={label}>
+      <h3>{label}</h3>
+      <ul aria-label={listLabel} className="deck-manager-launch-catalog__grid">
+        {decks.map((deck) => {
+          const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
+          const accent = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
+          return (
+            <li key={deck.id}>
+              <button
+                aria-label={isSystemDeckDisplay(deck)
+                  ? t('deck.home.systemDeckLabel', { deck: deck.name })
+                  : `${t('deck.actions.edit')} ${deck.name}`}
+                className={`deck-manager-launch-card${isSystemDeckDisplay(deck) ? ' deck-manager-launch-card--system' : ''}`}
+                data-deck-home-id={deck.id}
+                data-deck-home-kind={isSystemDeckDisplay(deck) ? 'system' : 'user'}
+                disabled={isSystemDeckDisplay(deck)}
+                onClick={() => {
+                  if (!isSystemDeckDisplay(deck)) onOpenDeck(deck.id);
+                }}
+                style={{ '--deck-accent': accent } as CSSProperties}
+                type="button"
+              >
+                <span aria-hidden="true" className="deck-manager-launch-card__icon">
+                  <Icon size={24} />
+                </span>
+                <span className="deck-manager-launch-card__copy">
+                  <span className="deck-manager-launch-card__title">
+                    {deck.name}
+                    {isSystemDeckDisplay(deck) ? <span className="deck-manager-chip">{t('deck.labels.system')}</span> : null}
+                  </span>
+                  <span className="deck-manager-launch-card__description">
+                    {deck.description || t('deck.labels.noDescription')}
+                  </span>
+                  <span className="deck-manager-launch-card__meta">
+                    {t(`deck.labels.agentType.${deck.agent_type === 'dream' ? 'dream' : 'chat'}`)}
+                    <span aria-hidden="true">·</span>
+                    内容 v{deck.deck_version}
+                  </span>
+                </span>
+                <span aria-hidden="true" className="deck-manager-launch-card__arrow">›</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -326,7 +391,6 @@ export function DeckSettingsPanel({
   onRefreshDecks,
   onOpenDeck,
   onToggleDeck,
-  onForkDeck,
   onSyncDeck,
   onDeleteDeck,
   onLoadRelatedThreads,
@@ -600,7 +664,7 @@ export function DeckSettingsPanel({
         ) : (
           <ul aria-label={t('deck.creator.listLabel')} className="deck-manager-list">
             {visibleDecks.map((deck) => {
-              const isSystem = Boolean(deck.is_system);
+              const isSystem = isSystemDeckDisplay(deck);
               const disabled = busyDeckId === deck.id;
               const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
               const accent = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
@@ -608,7 +672,7 @@ export function DeckSettingsPanel({
               const menuOpen = actionMenuDeckId === deck.id;
               return (
                 <li
-                  className="deck-manager-list__row"
+                  className={`deck-manager-list__row${isSystem ? ' deck-manager-list__row--system' : ''}`}
                   data-deck-card-id={deck.id}
                   data-deck-card-kind="owned"
                   key={deck.id}
@@ -616,8 +680,10 @@ export function DeckSettingsPanel({
                 >
                   <button
                     className="deck-manager-list__identity"
-                    disabled={disabled}
-                    onClick={() => onOpenDeck(deck.id)}
+                    disabled={disabled || isSystem}
+                    onClick={() => {
+                      if (!isSystem) onOpenDeck(deck.id);
+                    }}
                     type="button"
                   >
                     <span className="deck-manager-list__icon" aria-hidden="true"><Icon size={19} /></span>
@@ -655,48 +721,42 @@ export function DeckSettingsPanel({
                   </button>
 
                   <div className="deck-manager-list__actions">
-                    <div className="deck-manager-menu-anchor">
-                      <button
-                        aria-expanded={menuOpen}
-                        aria-haspopup="menu"
-                        aria-label={t('deck.actions.more', { deck: deck.name })}
-                        className="deck-manager-icon-action"
-                        disabled={disabled}
-                        onClick={() => {
-                          setCreateMenuOpen(false);
-                          setActionMenuDeckId((current) => current === deck.id ? null : deck.id);
-                        }}
-                        type="button"
-                      >
-                        <span aria-hidden="true">•••</span>
-                      </button>
-                      {menuOpen && (
-                        <div className="deck-manager-menu deck-manager-menu--row" role="menu">
-                          <button onClick={() => { setActionMenuDeckId(null); onOpenDeck(deck.id); }} role="menuitem" type="button">
-                            {isSystem ? t('deck.actions.inspect') : t('deck.actions.edit')}
-                          </button>
-                          {isSystem ? (
-                            <button onClick={() => { setActionMenuDeckId(null); onForkDeck(deck.id); }} role="menuitem" type="button">
-                              {t('deck.actions.fork')}
+                    {!isSystem && (
+                      <div className="deck-manager-menu-anchor">
+                        <button
+                          aria-expanded={menuOpen}
+                          aria-haspopup="menu"
+                          aria-label={t('deck.actions.more', { deck: deck.name })}
+                          className="deck-manager-icon-action"
+                          disabled={disabled}
+                          onClick={() => {
+                            setCreateMenuOpen(false);
+                            setActionMenuDeckId((current) => current === deck.id ? null : deck.id);
+                          }}
+                          type="button"
+                        >
+                          <span aria-hidden="true">•••</span>
+                        </button>
+                        {menuOpen && (
+                          <div className="deck-manager-menu deck-manager-menu--row" role="menu">
+                            <button onClick={() => { setActionMenuDeckId(null); onOpenDeck(deck.id); }} role="menuitem" type="button">
+                              {t('deck.actions.edit')}
                             </button>
-                          ) : (
-                            <>
-                              {deck.parent_id && (
-                                <button onClick={() => { setActionMenuDeckId(null); onSyncDeck(deck.id); }} role="menuitem" type="button">
-                                  {t('deck.actions.sync')}
-                                </button>
-                              )}
-                              <button onClick={() => openRelatedThreads(deck)} role="menuitem" type="button">
-                                {t('deck.actions.relatedConversations')}
+                            {deck.parent_id && (
+                              <button onClick={() => { setActionMenuDeckId(null); onSyncDeck(deck.id); }} role="menuitem" type="button">
+                                {t('deck.actions.sync')}
                               </button>
-                              <button className="is-danger" onClick={() => { setActionMenuDeckId(null); onDeleteDeck(deck.id); }} role="menuitem" type="button">
-                                {t('deck.actions.delete')}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                            )}
+                            <button onClick={() => openRelatedThreads(deck)} role="menuitem" type="button">
+                              {t('deck.actions.relatedConversations')}
+                            </button>
+                            <button className="is-danger" onClick={() => { setActionMenuDeckId(null); onDeleteDeck(deck.id); }} role="menuitem" type="button">
+                              {t('deck.actions.delete')}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {!isSystem && (
                       <button
                         aria-checked={deck.enabled}

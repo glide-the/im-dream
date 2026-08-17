@@ -5,6 +5,7 @@
 /* [Sync] 2026-08-17: identify system Decks on published-clean home shortcuts/cards while
                       keeping draft and inventory controls on Settings / Work. */
 /* [Sync] 2026-08-17: add the Chat-history-derived related conversation cleanup dialog. */
+/* [Sync] 2026-08-17: render Available/System Deck launcher groups as typed static catalog sections. */
 
 @keyframes deck-manager-spin { to { transform: rotate(360deg); } }
 
@@ -279,6 +280,11 @@
 }
 .deck-manager-enabled__item svg { display: block; flex: 0 0 auto; height: 24px; width: 24px; }
 .deck-manager-enabled__item:hover { transform: translateY(-1px); }
+.deck-manager-enabled__item:disabled {
+  cursor: default;
+  opacity: 1;
+  transform: none;
+}
 .deck-manager-enabled__item--system {
   background: color-mix(in srgb, var(--color-bg-hover) 72%, var(--color-bg-paper));
   border-color: color-mix(in srgb, var(--color-text-secondary) 38%, var(--color-border-paper));
@@ -312,6 +318,19 @@
   margin: 1.3rem 0 0;
   padding-bottom: 0.85rem;
 }
+.deck-manager-launch-catalog__groups {
+  display: grid;
+  gap: 1.75rem;
+  padding-top: 1.25rem;
+}
+.deck-manager-launch-group { min-width: 0; }
+.deck-manager-launch-group h3 {
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  font-weight: 650;
+  margin: 0;
+  padding: 0.15rem 0 0.85rem;
+}
 .deck-manager-launch-catalog__grid {
   border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 42%, transparent);
   display: grid;
@@ -337,7 +356,12 @@
   width: 100%;
 }
 .deck-manager-launch-card:hover { background: color-mix(in srgb, var(--color-bg-hover) 34%, transparent); }
-.deck-manager-launch-card--system { background: color-mix(in srgb, var(--color-bg-hover) 24%, transparent); }
+.deck-manager-launch-card--system { background: color-mix(in srgb, var(--color-bg-hover) 18%, transparent); }
+.deck-manager-launch-card:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.deck-manager-launch-card:disabled:hover { background: color-mix(in srgb, var(--color-bg-hover) 24%, transparent); }
 .deck-manager-launch-card__icon {
   align-items: center;
   aspect-ratio: 1;
@@ -419,6 +443,10 @@
   text-align: left;
 }
 .deck-manager-list__identity:disabled { cursor: wait; opacity: 0.58; }
+.deck-manager-list__row--system .deck-manager-list__identity:disabled {
+  cursor: default;
+  opacity: 1;
+}
 .deck-manager-list__icon {
   align-items: center;
   background: color-mix(in srgb, var(--deck-accent) 10%, var(--color-bg-paper));

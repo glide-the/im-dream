@@ -16,6 +16,7 @@
 // [Sync] 2026-08-16: centralize the lightweight Deck create/update metadata input used by the
 //                    settings-style management surface; remove active marketplace list/publish transports.
 // [Sync] 2026-08-16: consume capability-backed Deck content vN and draft state in list/detail DTOs.
+// [Sync] 2026-08-17: carry server sharing-policy facts only for system-initialized Deck display.
 /**
  * API client for voice analysis backend - FastAPI sync API version
  * [Sync] 2026-06-01: normalize user_sessions.labels in session API responses for frontend display.
@@ -114,6 +115,9 @@ export interface Deck {
   deck_version_dirty?: boolean;
   deck_version_status?: 'unpublished' | 'draft' | 'published';
   next_deck_version?: number;
+  /** Server-owned sharing policy facts; used only to distinguish system-initialized defaults. */
+  can_publish?: boolean;
+  publish_block_reason?: string | null;
 }
 
 export interface DeckDetailsInput {

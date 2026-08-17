@@ -8,6 +8,7 @@
 //                    markers, and full draft/unpublished inventory only in Settings / Work.
 // [Sync] 2026-08-17: cover Work More → related Chat previews and production thread deletion.
 // [Sync] 2026-08-17: verify Settings and Work render one locale at a time and switch live.
+// [Sync] 2026-08-17: assert Available/System Deck typed launcher groups and static system defaults.
 // [Sync] 2026-08-16: restore pre-01a00576 Agent/Prompt/plugin-ref maintenance and
 //                    CozeLoop-inspired durable draft/explicit content commits inside the popup.
 
@@ -754,7 +755,6 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(navigation.getByRole('button', { name: 'Chat' })).toHaveAttribute('aria-current', 'page');
   await page.goForward();
   await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/decks`);
-  await expect(page.getByRole('button', { name: /Open 剧本创作团队|打开 剧本创作团队/ })).toBeVisible();
   await expect(page.getByRole('tab', { name: /Use Decks|Create Decks|使用 Deck|创作 Deck/ })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: /Voice Decks|声线卡组|My Decks|我的卡组/ })).toHaveCount(0);
   const deckLauncher = page.locator('[data-deck-manager-launcher]');
@@ -779,9 +779,13 @@ test('login → Deck list → create → Agent/Prompt/plugin maintenance → Cha
   await expect(deckLauncher.getByText(/14\s*\/\s*14/)).toHaveCount(0);
   await expect(deckLauncher.getByRole('switch')).toHaveCount(0);
   await expect(deckLauncher.getByRole('searchbox', { name: /Search available Decks|搜索正式可用的 Deck/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('list', { name: /Available Deck list|正式可用 Deck 列表/ })).toBeVisible();
-  await expect(deckLauncher.getByRole('list', { name: /Available Deck list|正式可用 Deck 列表/ }).locator(':scope > li')).toHaveCount(14);
+  await expect(deckLauncher.getByRole('heading', { name: /Available Decks|可用 Deck/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('heading', { name: /System Decks|系统 Deck/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('list', { name: /User-created available Decks|用户创建的可用 Deck/ })).toBeVisible();
+  await expect(deckLauncher.getByRole('list', { name: /System built-in Decks|系统内建 Deck/ })).toBeVisible();
+  await expect(deckLauncher.locator('.deck-manager-launch-card')).toHaveCount(14);
   await expect(deckLauncher.locator('.deck-manager-launch-card--system .deck-manager-chip')).toHaveText(/System|系统/);
+  await expect(deckLauncher.locator('.deck-manager-launch-card--system')).toBeDisabled();
   await expect(deckLauncher.getByText(/草稿\s*r/)).toHaveCount(0);
   await expect(deckLauncher.locator('.deck-manager-list')).toHaveCount(0);
   await expect(deckLauncher.locator('table')).toHaveCount(0);

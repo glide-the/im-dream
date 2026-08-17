@@ -4,6 +4,7 @@
 <!-- [Sync] 2026-08-17: restrict both home projections to published-clean enabled Decks,
                          identify system Decks, and keep full inventory in Settings / Work. -->
 <!-- [Sync] 2026-08-17: make the Settings/Work shell locale-specific; never combine Chinese and English labels. -->
+<!-- [Sync] 2026-08-17: split launcher list into user Available Decks and static System Decks. -->
 
 # Deck 启用入口与 Work 设置工作台
 
@@ -27,7 +28,8 @@
 └─ Deck 主页面
    ├─ published-clean enabled 搜索与 Agent 类型筛选
    ├─ 0–14 个正式可用 Deck 正方形快捷图标（系统内置有盾牌角标）
-   ├─ 正式可用 Deck 维护入口列表（系统内置有文字标识）
+   ├─ Available Decks：用户自建/可维护 Deck
+   ├─ System Decks：注册用户默认系统内建 Deck，只展示不可打开
    └─ 设置按钮 → /story-workspace/settings/work
 
 /story-workspace/settings
@@ -63,16 +65,22 @@ Decks
 
 [全部 16] [Chat 15] [Dream 1]
 
-正式可用 Deck
+Available Decks
 ─────────────────────────────────────────────────────────────
-[D1] Deck 名称 / 说明 / 内容 vN     [D2·系统] Deck 名称 / 说明 / 内容 vN
-[D3] Deck 名称 / 说明               [D4] Deck 名称 / 说明
+[D1] 用户 Deck 名称 / 说明 / 内容 vN     [D3] 用户 Deck 名称 / 说明
+
+System Decks
+─────────────────────────────────────────────────────────────
+[D2·系统] 系统内建 Deck 名称 / 说明 / 内容 vN
 ```
 
 - 两处使用同一 fail-closed 条件：`enabled=true`、`deck_version_capability=true`、`deck_version>0`、
   `deck_version_dirty=false`、`deck_version_status=published`；任一事实缺失都不进入主页面。
 - 快捷图标保持 API 顺序并截取前 14 个；下方列表显示满足条件的完整集合。
-- 系统内置 Deck 在快捷图标右上显示盾牌角标，在列表标题后显示“系统/System”标签；普通 Deck 不显示。
+- 系统内建 Deck 包括服务端 `is_system=true` 或 sharing policy 标记为 `default_initialized` 的注册默认 Deck。
+- 系统内建 Deck 在快捷图标右上显示盾牌角标，在 `System Decks` 分组中显示“系统/System”标签；普通 Deck
+  进入 `Available Decks` 分组。
+- 系统内建 Deck 只展示，不打开维护弹窗，不提供查看、编辑、启停、删除、同步或创建副本入口。
 - 每个快捷项是固定 `44×44px` 正方形按钮，内部图形为完整 `24×24px`；桌面间隔 12px，窄屏间隔 8px并按 Story Workspace 侧栏后的实际内容宽度自动换行。
 - 设置按钮位于“已启用”标题右上角，是标题行的兄弟动作，不属于图标 `role=list`，页面不显示 `14 / 14` 数字。
 - 设置按钮一次点击直达 `/story-workspace/settings/work`。
@@ -123,6 +131,7 @@ Decks
 
 - Deck 启停唯一入口是 Work / Deck 行尾 `role=switch`。
 - 成功后重新读取服务端列表；失败保持原状态并显示可恢复错误。
+- 系统内建 Deck 在 Work / Deck 中同样只展示，不提供行身份打开、更多菜单、开关或删除入口。
 - 点击行身份区仍打开完整 Deck 维护弹窗。
 - 弹窗内有效表单变更继续推进聚合草稿 revision；显式提交产生不可变内容 v1/v2/vN。
 - 内容版本 vN 是主要事实；运行插件 semver 是次级运行事实。
@@ -204,7 +213,7 @@ Settings 分类与 Work 页签是两个独立层级；不合并成一个导航�
 | 功能 | 代码 | 自动化验收 |
 |---|---|---|
 | 14 个正式可用正方形 Deck | `DeckLaunchPanel`、`isDeckHomeVisible` | 五项资格条件、44×44、设置不在 list 内 |
-| 正式可用搜索与列表 | `DeckLaunchPanel` | 排除未发布/有草稿/停用，0 switch；系统内置双重标识 |
+| 正式可用搜索与列表 | `DeckLaunchPanel` | 排除未发布/有草稿/停用，0 switch；Available Decks/System Decks 分组；系统内建不可打开 |
 | 设置直达 Work | `App.handleOpenSettingsFromDeck` | 一次点击 URL 为 `/story-workspace/settings/work` |
 | Settings 左栏单一 Work | `StoryWorkspaceSettingsPage` | 左栏有 Work，无独立资源/插件项 |
 | Settings/Work 多语言 | `StoryWorkspaceSettingsPage`、`i18n.ts` | zh 仅“工作台”、en 仅“Work”；导航/页签/ARIA 同步切换 |

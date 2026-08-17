@@ -5,6 +5,7 @@
 // [Sync] 2026-08-17: add real-content published/draft visibility and zero-write verification.
 // [Sync] 2026-08-17: verify More → related conversations against the normal Deck-filtered Thread API.
 // [Sync] 2026-08-17: verify the real Work route renders the Chinese locale without a bilingual title.
+// [Sync] 2026-08-17: verify registered system-default Decks are grouped and static.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -27,6 +28,7 @@ interface RealDeck {
   deck_version?: number | null;
   deck_version_dirty?: boolean;
   deck_version_status?: 'unpublished' | 'draft' | 'published';
+  publish_block_reason?: string | null;
 }
 
 /**
@@ -93,6 +95,10 @@ const isHomeVisible = (deck: RealDeck): boolean => (
   && deck.deck_version_status === 'published'
 );
 
+const isSystemDisplayDeck = (deck: RealDeck): boolean => (
+  deck.is_system || deck.publish_block_reason === 'default_initialized'
+);
+
 test('real Deck home hides drafts while Work preserves complete inventory without writes', async ({ page }) => {
   const token = createActorToken(ACTOR_EMAIL);
   const headers = { authorization: `Bearer ${token}` };
@@ -117,6 +123,8 @@ test('real Deck home hides drafts while Work preserves complete inventory withou
   expect(payload.decks.length, 'named actor must already own real Deck content').toBeGreaterThan(0);
   const eligible = payload.decks.filter(isHomeVisible);
   const ineligible = payload.decks.filter((deck) => !isHomeVisible(deck));
+  const eligibleSystem = eligible.filter(isSystemDisplayDeck);
+  const eligibleUser = eligible.filter((deck) => !isSystemDisplayDeck(deck));
 
   await page.addInitScript((value) => {
     localStorage.setItem('auth_token', value);
@@ -137,11 +145,23 @@ test('real Deck home hides drafts while Work preserves complete inventory withou
     await expect(launcher.locator(`[data-deck-home-id="${deck.id}"]`)).toHaveCount(0);
   }
   await expect(launcher.locator('.deck-manager-enabled__item--system')).toHaveCount(
-    eligible.filter((deck) => deck.is_system).slice(0, 14).length,
+    eligible.slice(0, 14).filter(isSystemDisplayDeck).length,
   );
   await expect(launcher.locator('.deck-manager-launch-card--system')).toHaveCount(
-    eligible.filter((deck) => deck.is_system).length,
+    eligibleSystem.length,
   );
+  if (eligibleUser.length > 0) {
+    await expect(launcher.getByRole('heading', { name: '可用 Deck', exact: true })).toBeVisible();
+    await expect(launcher.getByRole('list', { name: '用户创建的可用 Deck' }).locator(':scope > li')).toHaveCount(eligibleUser.length);
+  }
+  if (eligibleSystem.length > 0) {
+    await expect(launcher.getByRole('heading', { name: '系统 Deck', exact: true })).toBeVisible();
+    await expect(launcher.getByRole('list', { name: '系统内建 Deck' }).locator(':scope > li')).toHaveCount(eligibleSystem.length);
+    for (const deck of eligibleSystem) {
+      await expect(launcher.locator(`.deck-manager-launch-card[data-deck-home-id="${deck.id}"]`)).toBeDisabled();
+      await expect(launcher.locator(`.deck-manager-enabled__item[data-deck-home-id="${deck.id}"]`)).toBeDisabled();
+    }
+  }
   if (eligible.length === 0) {
     await expect(launcher.getByText('当前没有已启用、已发布且无草稿变更的 Deck。')).toBeVisible();
   }
@@ -160,7 +180,7 @@ test('real Deck home hides drafts while Work preserves complete inventory withou
     await expect(workList.locator(`[data-deck-card-id="${deck.id}"]`)).toBeVisible();
   }
 
-  const inspectedDeck = payload.decks.find((deck) => !deck.is_system);
+  const inspectedDeck = payload.decks.find((deck) => !isSystemDisplayDeck(deck));
   expect(inspectedDeck, 'named actor must own a manageable Deck').toBeTruthy();
   const relatedResponse = await page.request.get(
     `${WEB_BASE}/api/claude-agent/threads?deck_id=${encodeURIComponent(inspectedDeck!.id)}&limit=20`,
