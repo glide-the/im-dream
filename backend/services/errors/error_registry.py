@@ -1,4 +1,10 @@
-"""Canonical, client-safe Deck Plugin and workflow API errors."""
+"""Canonical, client-safe Deck Plugin, ClaudePlugin, and workflow API errors.
+
+[Input] Stable server error codes from plugin, Deck, and workflow boundaries.
+[Output] Sanitized phase/meaning/recovery payloads for API consumers.
+[Pos] Shared error vocabulary; raw provider, Git, path, and database details stay server-side.
+[Sync] 2026-08-19: add Remote Marketplace capability, entry, and drift recovery contracts.
+"""
 
 from __future__ import annotations
 
@@ -162,6 +168,26 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
         "phase": "install",
         "meaning": "The marketplace is not registered in the managed workspace.",
         "recovery": "Use a plugin from a server-registered marketplace.",
+    },
+    "CLAUDE_PLUGIN_MARKETPLACE_CAPABILITY_MISSING": {
+        "phase": "config",
+        "meaning": "The global ClaudePlugin Marketplace capability is not available.",
+        "recovery": "Wait for the Admin-owned schema capability to be published and retry.",
+    },
+    "CLAUDE_PLUGIN_MARKETPLACE_ENTRY_NOT_FOUND": {
+        "phase": "selection",
+        "meaning": "The selected Marketplace entry does not exist.",
+        "recovery": "Refresh the global Marketplace catalog and select another entry.",
+    },
+    "CLAUDE_PLUGIN_MARKETPLACE_ENTRY_UNAVAILABLE": {
+        "phase": "selection",
+        "meaning": "The selected Marketplace entry is no longer approved and active.",
+        "recovery": "Refresh the global Marketplace catalog before retrying.",
+    },
+    "CLAUDE_PLUGIN_MARKETPLACE_REMOTE_DRIFT": {
+        "phase": "verification",
+        "meaning": "The remote Marketplace checkout differs from the approved revision.",
+        "recovery": "Ask an operator to synchronize and approve the current remote revision.",
     },
     "CLAUDE_PLUGIN_CLI_UNAVAILABLE": {
         "phase": "install",

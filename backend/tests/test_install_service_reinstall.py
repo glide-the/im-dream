@@ -1,4 +1,9 @@
-"""Unit tests for PluginInstallService reinstall/revive semantics.
+"""Unit tests for PluginInstallService reinstall/revive and remote digest semantics.
+
+[Input] Production install service with explicit SQLite fixture, fake CLI registry, and canonical plugin trees.
+[Output] Replay/revive/error terminal evidence plus rejection of content outside an Admin-approved digest.
+[Pos] Provider-free install contract test; SQLite is a named fixture, never a runtime fallback.
+[Sync] 2026-08-19: add Remote Marketplace ref transport, full-content drift rejection, and lineage fixture columns.
 
 Covers the UNIQUE-constraint crash seen when reinstalling a plugin whose
 previous installation row was soft-deleted (status='uninstalled'): the
@@ -27,12 +32,32 @@ from backend.schema import legacy_main_sqlite
 from services.claude_plugin import cli as plugin_cli
 from services.claude_plugin import install_service
 from services.claude_plugin.install_service import (
+    MARKETPLACE_REMOTE_DRIFT,
     PLUGIN_INSTALL_FAILED,
     PluginInstallError,
     PluginInstallService,
 )
+from services.claude_plugin.digest import compute_plugin_digest
+from services.claude_plugin.marketplace_service import MarketplaceInstallSource
+from services.claude_plugin.package_spec import parse_package_spec
 
 PACKAGE_SPEC = "drama-forge@drama-studio"
+
+
+def _approved_remote_source() -> MarketplaceInstallSource:
+    return MarketplaceInstallSource(
+        entry_id="cpme_drama_forge",
+        package_spec=PACKAGE_SPEC,
+        package_name="drama-forge",
+        marketplace_name="drama-studio",
+        remote_url="https://github.com/example/drama-studio",
+        requested_ref="release/v1",
+        approved_commit_sha="a" * 40,
+        marketplace_manifest_sha256="b" * 64,
+        plugin_manifest_sha256=None,
+        approved_plugin_digest="sha256:" + "0" * 64,
+        compatibility={},
+    )
 
 
 def _fake_execution(argv: list[str]) -> plugin_cli.CliExecution:
@@ -73,11 +98,21 @@ class ReinstallReviveTests(unittest.TestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         legacy_main_sqlite.create_claude_plugin_tables(self.db)
+        self.db.execute(
+            "ALTER TABLE claude_plugin_operations ADD COLUMN marketplace_entry_id TEXT"
+        )
+        self.db.execute(
+            "ALTER TABLE claude_plugin_installations ADD COLUMN marketplace_entry_id TEXT"
+        )
         self.db.commit()
         # Stub the CLI boundary: marketplace ensure, registry lookup, run.
         self._patches = [
             mock.patch.object(
-                install_service, "_ensure_marketplace", lambda spec, evidence: None
+                install_service,
+                "_ensure_marketplace",
+                lambda spec, evidence, **_kwargs: evidence.setdefault(
+                    "marketplace_revision", {}
+                ),
             ),
             mock.patch.object(
                 install_service,
@@ -165,6 +200,73 @@ class ReinstallReviveTests(unittest.TestCase):
         self.assertEqual(row[1], "error")
         self.assertEqual(row[2], PLUGIN_INSTALL_FAILED)
         self.assertIsNotNone(row[3], "operation must have finished_at set")
+
+    def test_remote_entry_rejects_installed_content_outside_approved_digest(self) -> None:
+        approved = _approved_remote_source()
+
+        with self.assertRaises(PluginInstallError) as caught:
+            PluginInstallService(self.db).install(
+                PACKAGE_SPEC,
+                source_type="marketplace",
+                marketplace_entry=approved,
+            )
+
+        self.assertEqual(
+            caught.exception.code,
+            MARKETPLACE_REMOTE_DRIFT,
+            str(caught.exception),
+        )
+        self.assertNotEqual(
+            compute_plugin_digest(self.plugin_root),
+            approved.approved_plugin_digest,
+        )
+        row = self.db.execute(
+            "SELECT status, error_code FROM claude_plugin_operations "
+            "WHERE marketplace_entry_id = ?",
+            (approved.entry_id,),
+        ).fetchone()
+        self.assertEqual(tuple(row), ("error", MARKETPLACE_REMOTE_DRIFT))
+
+
+def test_remote_marketplace_registration_transports_the_approved_ref() -> None:
+    approved = _approved_remote_source()
+    observed: list[list[str]] = []
+
+    def run_claude(argv: list[str], *, cwd: Path):
+        observed.append(list(argv))
+        return _fake_execution(argv)
+
+    with (
+        mock.patch.object(install_service, "_known_marketplaces", return_value={}),
+        mock.patch.object(
+            install_service,
+            "resolve_local_marketplace",
+            side_effect=AssertionError("remote entry must not resolve a local marketplace"),
+        ),
+        mock.patch.object(plugin_cli, "run_claude", side_effect=run_claude),
+        mock.patch.object(
+            install_service.runtime,
+            "get_install_workspace",
+            return_value=Path("/managed/install-workspace"),
+        ),
+        mock.patch.object(
+            install_service,
+            "_verified_remote_marketplace_checkout",
+        ) as verify_checkout,
+    ):
+        install_service._ensure_marketplace(
+            parse_package_spec(PACKAGE_SPEC),
+            {},
+            marketplace_entry=approved,
+        )
+
+    assert observed == [[
+        "plugin",
+        "marketplace",
+        "add",
+        "https://github.com/example/drama-studio#release/v1",
+    ]]
+    verify_checkout.assert_called_once()
 
 
 if __name__ == "__main__":

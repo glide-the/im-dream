@@ -1,5 +1,10 @@
 """Real Claude plugin install orchestration.
 
+[Input] Manual package specs or immutable Admin-approved Remote Marketplace receipts.
+[Output] Terminal operations, verified ready installations, immutable artifacts, and entry lineage.
+[Pos] Single production ClaudePlugin install pipeline used by Settings and Deck consumers.
+[Sync] 2026-08-19: verify remote URL/ref/commit/manifests/full-plugin digest without using local-path catalog constants for entry installs.
+
 Every install flows through the same pipeline:
 
     validate spec → (marketplace installs only) ensure marketplace +
@@ -18,10 +23,13 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
+import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 from typing import Any, Iterator
+from urllib.parse import urlsplit, urlunsplit
 import uuid
 
 from . import artifact_store, cli, runtime
@@ -34,6 +42,10 @@ from .builtin_sources import (
 from .compatibility import cli_version_to_semver, version_satisfies
 from .digest import compute_plugin_digest
 from .package_spec import PackageSpec, PackageSpecError, parse_package_spec
+from .marketplace_service import (
+    MARKETPLACE_REMOTE_DRIFT,
+    MarketplaceInstallSource,
+)
 
 try:  # POSIX file lock for concurrent install de-duplication.
     import fcntl
@@ -268,8 +280,134 @@ def _known_marketplaces() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _ensure_marketplace(spec: PackageSpec, evidence: dict[str, Any]) -> None:
+def _normalized_remote_url(value: str) -> str:
+    parsed = urlsplit(value.strip())
+    path = parsed.path.rstrip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, "", ""))
+
+
+def _git_checkout_value(checkout: Path, *args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(checkout), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env={"PATH": os.environ.get("PATH", "")},
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PluginInstallError(
+            MARKETPLACE_REMOTE_DRIFT,
+            "approved marketplace checkout could not be verified",
+        ) from exc
+    if result.returncode != 0:
+        raise PluginInstallError(
+            MARKETPLACE_REMOTE_DRIFT,
+            "approved marketplace checkout has no verifiable git provenance",
+        )
+    return result.stdout.strip()
+
+
+def _verified_remote_marketplace_checkout(
+    spec: PackageSpec,
+    source: MarketplaceInstallSource,
+    evidence: dict[str, Any],
+) -> None:
+    known = _known_marketplaces().get(spec.marketplace)
+    if not isinstance(known, dict):
+        raise PluginInstallError(
+            MARKETPLACE_REMOTE_DRIFT,
+            "the Claude CLI did not register the approved marketplace",
+        )
+    install_location = Path(str(known.get("installLocation") or "")).resolve()
+    marketplace_root = (runtime.get_config_dir() / "plugins" / "marketplaces").resolve()
+    try:
+        install_location.relative_to(marketplace_root)
+    except ValueError as exc:
+        raise PluginInstallError(
+            MARKETPLACE_REMOTE_DRIFT,
+            "the registered marketplace checkout is outside the managed runtime",
+        ) from exc
+    if not install_location.is_dir():
+        raise PluginInstallError(
+            MARKETPLACE_REMOTE_DRIFT,
+            "the registered marketplace checkout is missing",
+        )
+    origin = _git_checkout_value(install_location, "remote", "get-url", "origin")
+    commit_sha = _git_checkout_value(install_location, "rev-parse", "HEAD")
+    manifest_path = install_location / ".claude-plugin" / "marketplace.json"
+    try:
+        observed_manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise PluginInstallError(
+            MARKETPLACE_REMOTE_DRIFT,
+            "the registered marketplace manifest is missing",
+        ) from exc
+    evidence["marketplace_revision"] = {
+        "entry_id": source.entry_id,
+        "remote_url": source.remote_url,
+        "requested_ref": source.requested_ref,
+        "approved_commit_sha": source.approved_commit_sha,
+        "observed_commit_sha": commit_sha,
+        "marketplace_manifest_sha256": source.marketplace_manifest_sha256,
+        "plugin_manifest_sha256": source.plugin_manifest_sha256,
+        "observed_marketplace_manifest_sha256": observed_manifest_sha,
+    }
+    if (
+        _normalized_remote_url(origin) != _normalized_remote_url(source.remote_url)
+        or commit_sha != source.approved_commit_sha
+        or observed_manifest_sha != source.marketplace_manifest_sha256
+    ):
+        raise PluginInstallError(
+            MARKETPLACE_REMOTE_DRIFT,
+            "the remote marketplace checkout no longer matches the approved revision",
+            detail={
+                "entry_id": source.entry_id,
+                "approved_commit_sha": source.approved_commit_sha,
+                "observed_commit_sha": commit_sha,
+            },
+        )
+
+
+def _ensure_marketplace(
+    spec: PackageSpec,
+    evidence: dict[str, Any],
+    *,
+    marketplace_entry: MarketplaceInstallSource | None = None,
+) -> None:
     """Register the marketplace via the real CLI when not yet known."""
+    if marketplace_entry is not None:
+        if marketplace_entry.package_spec != spec.canonical:
+            raise PluginInstallError(
+                PLUGIN_SPEC_INVALID,
+                "approved marketplace entry does not match the requested package",
+            )
+        if spec.marketplace not in _known_marketplaces():
+            remote_source = marketplace_entry.remote_url
+            if marketplace_entry.requested_ref:
+                remote_source = f"{remote_source}#{marketplace_entry.requested_ref}"
+            execution = cli.run_claude(
+                ["plugin", "marketplace", "add", remote_source],
+                cwd=runtime.get_install_workspace(),
+            )
+            evidence["marketplace_add"] = execution.to_json()
+        else:
+            execution = cli.run_claude(
+                ["plugin", "marketplace", "update", spec.marketplace],
+                cwd=runtime.get_install_workspace(),
+            )
+            evidence["marketplace_update"] = execution.to_json()
+        if not execution.ok:
+            raise PluginInstallError(
+                PLUGIN_INSTALL_FAILED,
+                f"claude plugin marketplace synchronization failed (exit {execution.exit_code})",
+                detail={"exit_code": execution.exit_code, "stderr": execution.stderr[-500:]},
+            )
+        _verified_remote_marketplace_checkout(spec, marketplace_entry, evidence)
+        return
     if spec.marketplace in _known_marketplaces():
         return
     repo = KNOWN_MARKETPLACE_REPOS.get(spec.marketplace)
@@ -303,6 +441,31 @@ def _ensure_marketplace(spec: PackageSpec, evidence: dict[str, Any]) -> None:
 
 
 def _insert_operation(db: Any, operation: dict[str, Any]) -> None:
+    marketplace_entry_id = operation.get("marketplace_entry_id")
+    if marketplace_entry_id is not None:
+        db.execute(
+            """
+            INSERT INTO claude_plugin_operations (
+                id, operation_kind, requested_package_spec, marketplace_entry_id,
+                status, phase, progress, message, executable, argv_json, cwd,
+                cli_version, exit_code, evidence_path, installation_id,
+                error_code, error_summary, created_at, updated_at, finished_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                operation["id"], operation["operation_kind"],
+                operation["requested_package_spec"], marketplace_entry_id,
+                operation["status"], operation["phase"], operation["progress"],
+                operation.get("message"), operation.get("executable"),
+                operation.get("argv_json"), operation.get("cwd"),
+                operation.get("cli_version"), operation.get("exit_code"),
+                operation.get("evidence_path"), operation.get("installation_id"),
+                operation.get("error_code"), operation.get("error_summary"),
+                operation["created_at"], operation["updated_at"],
+                operation.get("finished_at"),
+            ),
+        )
+        return
     db.execute(
         """
         INSERT INTO claude_plugin_operations (
@@ -362,6 +525,35 @@ def _find_installation_by_artifact(
 
 
 def _insert_installation(db: Any, record: dict[str, Any]) -> None:
+    marketplace_entry_id = record.get("marketplace_entry_id")
+    if marketplace_entry_id is not None:
+        db.execute(
+            """
+            INSERT INTO claude_plugin_installations (
+                id, requested_package_spec, marketplace_entry_id, package_name,
+                marketplace, requested_version, resolved_version, source_type,
+                artifact_digest, artifact_path, claude_cli_version,
+                cli_git_commit_sha, manifest_json, component_inventory_json,
+                compatibility_json, status, operation_id, error_code,
+                error_summary, file_count, created_at, updated_at, installed_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                record["id"], record["requested_package_spec"],
+                marketplace_entry_id, record["package_name"],
+                record["marketplace"], record.get("requested_version"),
+                record["resolved_version"], record["source_type"],
+                record["artifact_digest"], record["artifact_path"],
+                record["claude_cli_version"], record.get("cli_git_commit_sha"),
+                record.get("manifest_json"), record["component_inventory_json"],
+                record.get("compatibility_json", "{}"), record["status"],
+                record["operation_id"], record.get("error_code"),
+                record.get("error_summary"), record.get("file_count", 0),
+                record["created_at"], record["updated_at"],
+                record.get("installed_at"),
+            ),
+        )
+        return
     db.execute(
         """
         INSERT INTO claude_plugin_installations (
@@ -411,11 +603,37 @@ def _revive_installation(
     Updating in place respects the UNIQUE artifact identity and keeps Deck
     refs pointing at the same installation id.
     """
+    if record.get("marketplace_entry_id") is None:
+        db.execute(
+            """
+            UPDATE claude_plugin_installations SET
+                requested_package_spec = %s, requested_version = %s,
+                source_type = %s, artifact_path = %s, claude_cli_version = %s,
+                cli_git_commit_sha = %s, manifest_json = %s,
+                component_inventory_json = %s, compatibility_json = %s,
+                status = 'ready', operation_id = %s,
+                error_code = NULL, error_summary = NULL,
+                file_count = %s, updated_at = %s, installed_at = %s
+            WHERE id = %s
+            """,
+            (
+                record["requested_package_spec"], record.get("requested_version"),
+                record["source_type"], record["artifact_path"],
+                record["claude_cli_version"], record.get("cli_git_commit_sha"),
+                record.get("manifest_json"), record["component_inventory_json"],
+                record.get("compatibility_json", "{}"), record["operation_id"],
+                record.get("file_count", 0), record["updated_at"],
+                record.get("installed_at"), installation_id,
+            ),
+        )
+        return
     db.execute(
         """
         UPDATE claude_plugin_installations SET
             requested_package_spec = %s, requested_version = %s,
-            source_type = %s, artifact_path = %s, claude_cli_version = %s,
+            source_type = %s,
+            marketplace_entry_id = COALESCE(marketplace_entry_id, %s),
+            artifact_path = %s, claude_cli_version = %s,
             cli_git_commit_sha = %s, manifest_json = %s,
             component_inventory_json = %s, compatibility_json = %s,
             status = 'ready', operation_id = %s,
@@ -427,6 +645,7 @@ def _revive_installation(
             record["requested_package_spec"],
             record.get("requested_version"),
             record["source_type"],
+            record.get("marketplace_entry_id"),
             record["artifact_path"],
             record["claude_cli_version"],
             record.get("cli_git_commit_sha"),
@@ -439,6 +658,19 @@ def _revive_installation(
             record.get("installed_at"),
             installation_id,
         ),
+    )
+
+
+def _attach_installation_lineage(
+    db: Any, installation_id: str, marketplace_entry_id: str | None
+) -> None:
+    if marketplace_entry_id is None:
+        return
+    db.execute(
+        "UPDATE claude_plugin_installations "
+        "SET marketplace_entry_id = COALESCE(marketplace_entry_id, %s), "
+        "updated_at = %s WHERE id = %s",
+        (marketplace_entry_id, _now(), installation_id),
     )
 
 
@@ -459,6 +691,7 @@ class PluginInstallService:
         raw_spec: str,
         *,
         source_type: str | None = None,
+        marketplace_entry: MarketplaceInstallSource | None = None,
         timeout_seconds: int = 300,
         operation_id: str | None = None,
     ) -> dict[str, Any]:
@@ -467,6 +700,16 @@ class PluginInstallService:
             spec = parse_package_spec(raw_spec)
         except PackageSpecError as exc:
             raise PluginInstallError(PLUGIN_SPEC_INVALID, str(exc)) from exc
+
+        if marketplace_entry is not None and (
+            marketplace_entry.package_spec != spec.canonical
+            or marketplace_entry.package_name != spec.package_name
+            or marketplace_entry.marketplace_name != spec.marketplace
+        ):
+            raise PluginInstallError(
+                PLUGIN_SPEC_INVALID,
+                "approved marketplace entry does not match the requested package",
+            )
 
         builtin_decl = get_builtin_declaration(spec.canonical)
         if builtin_decl is not None and source_type in (None, "platform-builtin"):
@@ -480,13 +723,23 @@ class PluginInstallService:
             kind = "claude-official" if spec.marketplace == "claude-plugins-official" else "marketplace"
 
         with _install_lock(spec.canonical):
-            operation = self._begin_operation(spec, kind, operation_id=operation_id)
+            operation = self._begin_operation(
+                spec,
+                kind,
+                operation_id=operation_id,
+                marketplace_entry_id=(
+                    marketplace_entry.entry_id if marketplace_entry else None
+                ),
+            )
             try:
                 if kind == "platform-builtin":
                     result = self._install_platform_builtin(spec, operation)
                 else:
                     result = self._install_from_marketplace(
-                        spec, operation, timeout_seconds=timeout_seconds
+                        spec,
+                        operation,
+                        timeout_seconds=timeout_seconds,
+                        marketplace_entry=marketplace_entry,
                     )
             except PluginInstallError as exc:
                 self._fail_operation(operation, exc)
@@ -585,7 +838,12 @@ class PluginInstallService:
     # -- operation lifecycle -------------------------------------------------
 
     def _begin_operation(
-        self, spec: PackageSpec, kind: str, *, operation_id: str | None = None
+        self,
+        spec: PackageSpec,
+        kind: str,
+        *,
+        operation_id: str | None = None,
+        marketplace_entry_id: str | None = None,
     ) -> dict[str, Any]:
         operation = {
             "id": operation_id or f"cop_{uuid.uuid4().hex}",
@@ -597,6 +855,7 @@ class PluginInstallService:
             "progress": 5,
             "message": f"Install requested ({kind})",
             "source_type": kind,
+            "marketplace_entry_id": marketplace_entry_id,
             "created_at": _now(),
             "updated_at": _now(),
         }
@@ -614,6 +873,11 @@ class PluginInstallService:
                     phase="starting",
                     progress=5,
                     message=operation["message"],
+                    **(
+                        {"marketplace_entry_id": marketplace_entry_id}
+                        if marketplace_entry_id is not None
+                        else {}
+                    ),
                 )
             else:
                 _insert_operation(self.db, operation)
@@ -689,11 +953,23 @@ class PluginInstallService:
     # -- marketplace install path --------------------------------------------
 
     def _install_from_marketplace(
-        self, spec: PackageSpec, operation: dict[str, Any], *, timeout_seconds: int
+        self,
+        spec: PackageSpec,
+        operation: dict[str, Any],
+        *,
+        timeout_seconds: int,
+        marketplace_entry: MarketplaceInstallSource | None,
     ) -> dict[str, Any]:
         evidence: dict[str, Any] = {"source_type": operation["source_type"]}
         before = cli.snapshot_file_tree(runtime.get_config_dir())
-        _ensure_marketplace(spec, evidence)
+        if marketplace_entry is None:
+            _ensure_marketplace(spec, evidence)
+        else:
+            _ensure_marketplace(
+                spec,
+                evidence,
+                marketplace_entry=marketplace_entry,
+            )
         _update_operation(
             self.db, operation["id"], phase="cli-install", progress=20,
             message=f"Running claude plugin install {spec.install_argv_spec}",
@@ -719,6 +995,29 @@ class PluginInstallService:
             )
         registry_record = _registry_entry_for(spec)
         evidence["registry_record"] = registry_record
+        if marketplace_entry and marketplace_entry.plugin_manifest_sha256:
+            manifest_path = (
+                Path(registry_record["installPath"])
+                / ".claude-plugin"
+                / "plugin.json"
+            )
+            try:
+                observed_plugin_manifest_sha = hashlib.sha256(
+                    manifest_path.read_bytes()
+                ).hexdigest()
+            except OSError as exc:
+                raise PluginInstallError(
+                    MARKETPLACE_REMOTE_DRIFT,
+                    "installed plugin manifest is missing from the approved revision",
+                ) from exc
+            evidence["marketplace_revision"][
+                "observed_plugin_manifest_sha256"
+            ] = observed_plugin_manifest_sha
+            if observed_plugin_manifest_sha != marketplace_entry.plugin_manifest_sha256:
+                raise PluginInstallError(
+                    MARKETPLACE_REMOTE_DRIFT,
+                    "installed plugin manifest no longer matches the approved revision",
+                )
         return self._record_success(
             spec,
             operation,
@@ -728,6 +1027,17 @@ class PluginInstallService:
             cli_git_commit_sha=registry_record.get("gitCommitSha"),
             execution=execution,
             evidence=evidence,
+            marketplace_entry_id=(
+                marketplace_entry.entry_id if marketplace_entry else None
+            ),
+            compatibility=(
+                marketplace_entry.compatibility if marketplace_entry else None
+            ),
+            approved_plugin_digest=(
+                marketplace_entry.approved_plugin_digest
+                if marketplace_entry
+                else None
+            ),
         )
 
     # -- platform-builtin install path ---------------------------------------
@@ -779,6 +1089,7 @@ class PluginInstallService:
             execution=execution,
             evidence=evidence,
             compatibility=decl.get("compatibility") or {},
+            marketplace_entry_id=None,
         )
 
     # -- shared success path ---------------------------------------------------
@@ -794,7 +1105,9 @@ class PluginInstallService:
         cli_git_commit_sha: str | None,
         execution: cli.CliExecution | None,
         evidence: dict[str, Any],
-        compatibility: dict[str, str] | None = None,
+        compatibility: dict[str, Any] | None = None,
+        marketplace_entry_id: str | None = None,
+        approved_plugin_digest: str | None = None,
     ) -> dict[str, Any]:
         _update_operation(
             self.db, operation["id"], phase="verify", progress=55,
@@ -813,6 +1126,21 @@ class PluginInstallService:
         )
         inventory = enumerate_components(plugin_root)
         digest = compute_plugin_digest(plugin_root)
+        if approved_plugin_digest is not None:
+            evidence["marketplace_revision"]["approved_plugin_digest"] = (
+                approved_plugin_digest
+            )
+            evidence["marketplace_revision"]["observed_plugin_digest"] = digest
+            if digest != approved_plugin_digest:
+                raise PluginInstallError(
+                    MARKETPLACE_REMOTE_DRIFT,
+                    "installed plugin content no longer matches the approved revision",
+                    detail={
+                        "marketplace_entry_id": marketplace_entry_id,
+                        "approved_plugin_digest": approved_plugin_digest,
+                        "observed_plugin_digest": digest,
+                    },
+                )
         artifact = artifact_store.import_tree(
             plugin_root,
             package_name=spec.package_name,
@@ -832,6 +1160,11 @@ class PluginInstallService:
             self.db, spec, resolved_version, digest
         )
         if existing is not None and existing["status"] == "ready":
+            if marketplace_entry_id is not None:
+                with self.db:
+                    _attach_installation_lineage(
+                        self.db, existing["id"], marketplace_entry_id
+                    )
             return self._finish_operation(
                 operation,
                 installation_id=existing["id"],
@@ -846,6 +1179,7 @@ class PluginInstallService:
         record = {
             "id": f"cpi_{uuid.uuid4().hex}",
             "requested_package_spec": operation["requested_package_spec"],
+            "marketplace_entry_id": marketplace_entry_id,
             "package_name": spec.package_name,
             "marketplace": spec.marketplace,
             "requested_version": spec.requested_version,

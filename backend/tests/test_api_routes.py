@@ -1,4 +1,10 @@
-"""Contract tests for DECK-014 logical routes and client-safe errors."""
+"""Contract tests for DECK-014 logical routes and client-safe errors.
+
+[Input] Logical routers plus the canonical client-safe error registry.
+[Output] Route contracts and recovery metadata for every registered error code.
+[Pos] Backend API surface regression tests.
+[Sync] 2026-08-19: include four fail-closed Remote Marketplace error codes.
+"""
 
 from __future__ import annotations
 
@@ -333,12 +339,13 @@ class ApiRouteContractTests(unittest.TestCase):
 
 
 class ErrorRegistryTests(unittest.TestCase):
-    def test_registry_has_all_52_canonical_codes_with_recovery(self):
+    def test_registry_has_all_56_canonical_codes_with_recovery(self):
         # 27 legacy codes + 16 Claude Code plugin pipeline codes
         # (deck-integration-delta, 2026-08-02) + 1 guidance code
-        # (WORKFLOW_RUN_NOT_GUIDABLE, dream-surface Task 3, 2026-08-04).
+        # (WORKFLOW_RUN_NOT_GUIDABLE, dream-surface Task 3, 2026-08-04)
+        # + 4 Remote Marketplace fail-closed codes (2026-08-19).
         self.assertGreaterEqual(len(ERROR_REGISTRY), 25)
-        self.assertEqual(len(ERROR_REGISTRY), 52)
+        self.assertEqual(len(ERROR_REGISTRY), 56)
         story_index_codes = {
             "story_index_row_missing",
             "story_index_schema_unavailable",
