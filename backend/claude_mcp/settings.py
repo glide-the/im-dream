@@ -6,6 +6,7 @@
 [Sync] 2026-08-19: add bounded, deployment-name-independent OAuth process settings.
 [Sync] 2026-08-19: add the absolute server-owned user credential root and bounded JSON projection size.
 [Sync] 2026-08-19: add the bounded restricted HTTP server URL policy.
+[Sync] 2026-08-20: add bounded public-SDK tool inventory polling and payload limits.
 """
 
 from __future__ import annotations
@@ -53,6 +54,11 @@ class ClaudeMcpSettings:
     max_credential_file_bytes: int = 1048576
     minimum_cli_version: str = "2.1.186"
     headless_minimum_cli_version: str = "2.1.191"
+    inventory_timeout_seconds: int = 30
+    inventory_poll_interval_ms: int = 250
+    max_inventory_tools: int = 512
+    max_tool_name_length: int = 512
+    max_tool_description_length: int = 4096
 
     @classmethod
     def from_env(cls) -> "ClaudeMcpSettings":
@@ -88,5 +94,20 @@ class ClaudeMcpSettings:
                 "INK_CLAUDE_MCP_MAX_CREDENTIAL_FILE_BYTES",
                 1048576,
                 maximum=16777216,
+            ),
+            inventory_timeout_seconds=_positive_int(
+                "INK_CLAUDE_MCP_INVENTORY_TIMEOUT_SECONDS", 30, maximum=120
+            ),
+            inventory_poll_interval_ms=_positive_int(
+                "INK_CLAUDE_MCP_INVENTORY_POLL_INTERVAL_MS", 250, maximum=5000
+            ),
+            max_inventory_tools=_positive_int(
+                "INK_CLAUDE_MCP_MAX_INVENTORY_TOOLS", 512, maximum=4096
+            ),
+            max_tool_name_length=_positive_int(
+                "INK_CLAUDE_MCP_MAX_TOOL_NAME_LENGTH", 512, maximum=2048
+            ),
+            max_tool_description_length=_positive_int(
+                "INK_CLAUDE_MCP_MAX_TOOL_DESCRIPTION_LENGTH", 4096, maximum=16384
             ),
         )

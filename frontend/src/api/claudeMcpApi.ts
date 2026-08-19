@@ -1,8 +1,9 @@
-// [Input] Authenticated `/api/claude-mcp` capability, configuration, server, and OAuth operation contracts.
-// [Output] Strict frontend DTOs and restricted HTTPS add/remove helpers with no browser credential persistence.
+// [Input] Authenticated `/api/claude-mcp` capability, configuration, inventory, server, and OAuth operation contracts.
+// [Output] Strict frontend DTOs, prompt-free tool inventory, and restricted HTTPS add/remove helpers with no browser credential persistence.
 // [Pos] Transport boundary for the `claude-mcp` Resources feature.
 // [Sync] 2026-08-19: add official CLI-backed MCP discovery/login/redirect/cancel/logout API helpers.
 // [Sync] 2026-08-19: add restricted user-scope HTTPS configuration and removal helpers.
+// [Sync] 2026-08-20: add sanitized public-SDK server/tool inventory contracts.
 
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -46,6 +47,39 @@ export interface ClaudeMcpOperation {
   redirect_submitted: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export type ClaudeMcpInventoryStatus = 'connected' | 'failed' | 'needs_auth' | 'disabled';
+export type ClaudeMcpInventoryCapabilityStatus = 'available' | 'not_reported';
+
+export interface ClaudeMcpToolAnnotations {
+  read_only: boolean | null;
+  destructive: boolean | null;
+  open_world: boolean | null;
+}
+
+export interface ClaudeMcpTool {
+  name: string;
+  description: string | null;
+  annotations: ClaudeMcpToolAnnotations;
+}
+
+export interface ClaudeMcpServerInventory {
+  server_name: string;
+  status: ClaudeMcpInventoryStatus;
+  config_scope: string;
+  runtime_scope: string | null;
+  transport: string | null;
+  url: string | null;
+  server_info: { name: string; version: string } | null;
+  tools: ClaudeMcpTool[];
+  tool_count: number;
+  tools_truncated: boolean;
+  capabilities: Record<'tools' | 'resources' | 'prompts', {
+    status: ClaudeMcpInventoryCapabilityStatus;
+    count: number | null;
+  }>;
+  refreshed_at: string;
 }
 
 export class ClaudeMcpApiError extends Error {
@@ -96,6 +130,22 @@ export function getClaudeMcpCapability(): Promise<ClaudeMcpCapability> {
 export async function listClaudeMcpServers(): Promise<ClaudeMcpServer[]> {
   const payload = await request<{ servers: ClaudeMcpServer[] }>('/api/claude-mcp/servers');
   return payload.servers;
+}
+
+export async function getClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
+  const payload = await request<{ server: ClaudeMcpServer }>(
+    `/api/claude-mcp/servers/${encodeURIComponent(serverName)}`,
+  );
+  return payload.server;
+}
+
+export async function getClaudeMcpServerInventory(
+  serverName: string,
+): Promise<ClaudeMcpServerInventory> {
+  const payload = await request<{ inventory: ClaudeMcpServerInventory }>(
+    `/api/claude-mcp/server-inventories/${encodeURIComponent(serverName)}`,
+  );
+  return payload.inventory;
 }
 
 export async function configureClaudeMcpServer(

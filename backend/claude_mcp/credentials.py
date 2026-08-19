@@ -6,6 +6,7 @@
 [Sync] 2026-08-19: add Linux file-store identity, minimal JSON projection, revocation, and per-user/thread locks.
 [Sync] 2026-08-20: keep macOS secrets inside Claude Code Keychain; Agent reuses the user secure-storage identity.
 [Sync] 2026-08-20: return user MCP definitions to the Agent SDK directly because project-only setting sources ignore user-scope config files.
+[Sync] 2026-08-20: expose a bounded opaque-definition read for the public SDK inventory probe.
 """
 
 from __future__ import annotations
@@ -433,6 +434,34 @@ class ClaudeMcpCredentialSynchronizer:
 
     async def has_user_mcp_state(self, actor_id: str) -> bool:
         return await asyncio.to_thread(self._has_user_mcp_state_blocking, actor_id)
+
+    def _read_user_mcp_servers_blocking(
+        self,
+        actor_id: str,
+    ) -> dict[str, dict[str, object]]:
+        """Return a detached opaque snapshot of the user's MCP definitions."""
+
+        self.require_supported()
+        source = resolve_user_paths(actor_id, self.settings).config_dir
+        source_config = _read_private_json(
+            source / CLAUDE_USER_CONFIG_FILENAME,
+            max_bytes=self.settings.max_credential_file_bytes,
+        )
+        servers = _validated_mcp_server_mapping(
+            _managed_mapping(source_config, CLAUDE_MCP_SERVERS_KEY)
+        )
+        return copy.deepcopy(servers)
+
+    async def read_user_mcp_servers(
+        self,
+        actor_id: str,
+    ) -> Mapping[str, object]:
+        """Read user definitions without exposing their values in repr/logs."""
+
+        return await asyncio.to_thread(
+            self._read_user_mcp_servers_blocking,
+            actor_id,
+        )
 
     def _has_user_mcp_credentials_blocking(self, actor_id: str) -> bool:
         self.require_supported()

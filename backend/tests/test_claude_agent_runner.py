@@ -1,8 +1,9 @@
 # [Input] Consume ClaudeAgentRunner, AgentRunOptions, AgentStreamingCallbacks,
 #         AgentRunResult from backend/libs/claude_agent_kit/runner.py and types.py.
-# [Output] Verify streaming callbacks, session_id extraction, error handling,
-#          on_text_done, on_tool_event, tool confirmation flow, env aliases.
+# [Output] Verify streaming callbacks, session_id extraction, bounded SDK message
+#          buffer/error guidance, on_text_done, tool events, confirmation, and env aliases.
 # [Pos] test node in backend/tests
+# [Sync] 2026-08-20: cover the server-owned SDK stdout buffer option and safe overflow hint.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -450,6 +451,30 @@ class TestClaudeAgentRunnerBasicText(_RunnerBase):
         self.assertEqual(result.full_text, "Hello World")
         self.assertEqual(received, ["Hello", " World"])
 
+    async def test_sdk_options_receive_bounded_message_buffer_override(self):
+        self.set_query([])
+        runner = self.make_runner()
+        with patch.dict(
+            os.environ,
+            {"INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES": str(4 * 1024 * 1024)},
+            clear=False,
+        ):
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="buffer-policy-001",
+                    user_message="inspect image",
+                    tool_choice="none",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda _delta: None
+                ),
+            )
+        self.assertTrue(result.success)
+        self.assertEqual(
+            self._mock_client.last_options.max_buffer_size,
+            4 * 1024 * 1024,
+        )
+
     async def test_workspace_launch_manifest_plugins_are_forwarded_to_sdk(self):
         """Plugins reach the CLI only via the workspace launch manifest.
 
@@ -739,6 +764,24 @@ class TestSandboxFailureHintHelper(unittest.TestCase):
         hint = agent_runner_module._sandbox_runtime_failure_hint(
             "Command failed with exit code 1",
             "npm: command not found",
+        )
+        self.assertIsNone(hint)
+
+
+class TestSdkMessageBufferFailureHintHelper(unittest.TestCase):
+    def test_buffer_overflow_returns_safe_bounded_remediation(self):
+        hint = agent_runner_module._sdk_message_buffer_failure_hint(
+            "Failed to decode JSON: JSON message exceeded maximum buffer size",
+            8 * 1024 * 1024,
+        )
+        self.assertIsNotNone(hint)
+        self.assertIn("8388608", hint)
+        self.assertIn("INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES", hint)
+
+    def test_unrelated_sdk_error_returns_none(self):
+        hint = agent_runner_module._sdk_message_buffer_failure_hint(
+            "Command failed with exit code 1",
+            8 * 1024 * 1024,
         )
         self.assertIsNone(hint)
 
