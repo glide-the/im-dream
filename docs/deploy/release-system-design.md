@@ -173,7 +173,7 @@ http://localhost/
 
 ### 前置条件
 
-- Python 3.11+ 与 `uv` 可用。
+- Python 3.12+ 与 `uv` 可用。
 - Node.js 18+ 可用。
 - 已安装后端依赖并创建虚拟环境。
 - 已安装前端依赖。
@@ -237,7 +237,7 @@ npm run dev
 
 | 问题 | 处理 |
 |------|------|
-| Python 版本不匹配 | 按 README 使用 Python 3.11+，容器镜像版本不代表本地开发版本 |
+| Python 版本不匹配 | 按 README 与 `backend/pyproject.toml` 使用 Python 3.12+；Docker 与本地必须满足同一源码基线 |
 | 前端 API 跨域或路径异常 | 检查前端 API 基础路径和后端端口，避免混用云端固定公开域名 |
 | 数据库表不存在 | 先运行 `python database.py` |
 | 模型调用失败 | 检查 `backend/.env` 与 `backend/models.json` 的 endpoint、key、role 映射 |
