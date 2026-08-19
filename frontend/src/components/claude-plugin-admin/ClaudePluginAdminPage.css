@@ -1,7 +1,7 @@
 /* [Input] ClaudePluginAdminPage state/classes and shared Ink & Memory semantic color tokens. */
-/* [Output] Deck-aligned plugin toolbar, accessible menu/dialogs, responsive installation rows, and state feedback. */
+/* [Output] Deck-aligned toolbar plus accessible global Marketplace selection, revision confirmation, install, and result states. */
 /* [Pos] Presentation owner for Settings / Work / Plugins ClaudePlugin administration. */
-/* [Sync] 2026-08-19: add create-menu, modal, Marketplace unavailable, operation, and responsive styles. */
+/* [Sync] 2026-08-19: style the complete four-stage Remote Marketplace install flow and fail-closed states. */
 
 .claude-plugin-admin,
 .claude-plugin-admin * {
@@ -334,6 +334,10 @@
   width: 100%;
 }
 
+.claude-plugin-admin__dialog.is-marketplace {
+  max-width: 46rem;
+}
+
 .claude-plugin-admin__dialog-header {
   align-items: flex-start;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border-paper) 58%, transparent);
@@ -470,6 +474,260 @@
   max-width: 28rem;
 }
 
+.claude-plugin-admin__marketplace-unavailable button {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-paper);
+  border-radius: 999px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 650;
+  min-height: 44px;
+  padding: 0.55rem 0.9rem;
+}
+
+.claude-plugin-admin__marketplace-dialog {
+  display: grid;
+  gap: 1rem;
+}
+
+.claude-plugin-admin__marketplace-stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.claude-plugin-admin__marketplace-stages li {
+  align-items: center;
+  border-top: 2px solid var(--color-border-paper);
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: 0.66rem;
+  gap: 0.4rem;
+  line-height: 1.35;
+  padding: 0.65rem 0.25rem 0;
+}
+
+.claude-plugin-admin__marketplace-stages li.is-reached {
+  border-top-color: var(--color-text-primary);
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.claude-plugin-admin__marketplace-stages li > span {
+  align-items: center;
+  background: var(--color-bg-hover);
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 1.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  height: 1.25rem;
+  justify-content: center;
+}
+
+.claude-plugin-admin__marketplace-stages li.is-reached > span {
+  background: var(--color-text-primary);
+  color: var(--color-bg-app);
+}
+
+.claude-plugin-admin__marketplace-context {
+  align-items: center;
+  background: var(--color-bg-hover);
+  border-radius: 0.55rem;
+  color: var(--color-text-secondary);
+  display: flex;
+  font-size: 0.7rem;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.claude-plugin-admin__marketplace-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: min(22rem, calc(100vh - 22rem));
+  min-height: 8rem;
+  overflow-y: auto;
+  padding: 0.1rem;
+}
+
+.claude-plugin-admin__marketplace-card {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-paper);
+  border-radius: 0.65rem;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: grid;
+  gap: 0.55rem;
+  min-height: 44px;
+  padding: 0.85rem;
+  text-align: left;
+  transition: border-color 0.16s ease, background 0.16s ease;
+  width: 100%;
+}
+
+.claude-plugin-admin__marketplace-card:hover,
+.claude-plugin-admin__marketplace-card.is-selected {
+  background: color-mix(in srgb, var(--color-bg-hover) 72%, var(--color-bg-surface));
+  border-color: var(--color-text-secondary);
+}
+
+.claude-plugin-admin__marketplace-card.is-selected {
+  box-shadow: inset 3px 0 0 var(--color-text-primary);
+}
+
+.claude-plugin-admin__marketplace-card-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.claude-plugin-admin__marketplace-card-heading > span:first-child {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.claude-plugin-admin__marketplace-card-heading strong {
+  font-size: 0.84rem;
+}
+
+.claude-plugin-admin__marketplace-card-heading code {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+  overflow-wrap: anywhere;
+}
+
+.claude-plugin-admin__marketplace-card-version {
+  background: var(--color-bg-hover);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+}
+
+.claude-plugin-admin__marketplace-card-description {
+  color: var(--color-text-secondary);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.claude-plugin-admin__marketplace-card-meta {
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+}
+
+.claude-plugin-admin__marketplace-summary {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-paper);
+  border-radius: 0.7rem;
+  padding: 1rem;
+}
+
+.claude-plugin-admin__marketplace-summary h4,
+.claude-plugin-admin__marketplace-installing h4,
+.claude-plugin-admin__marketplace-result h4 {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1rem;
+  margin: 0.6rem 0 0;
+}
+
+.claude-plugin-admin__marketplace-summary > code {
+  color: var(--color-text-muted);
+  display: block;
+  font-size: 0.68rem;
+  margin-top: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.claude-plugin-admin__marketplace-summary > p,
+.claude-plugin-admin__marketplace-installing > p,
+.claude-plugin-admin__marketplace-result > p {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  margin: 0.75rem 0 0;
+}
+
+.claude-plugin-admin__marketplace-summary dl {
+  border-top: 1px solid var(--color-border-paper);
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.9rem 0 0;
+  padding-top: 0.75rem;
+}
+
+.claude-plugin-admin__marketplace-summary dl > div {
+  display: grid;
+  font-size: 0.72rem;
+  gap: 0.75rem;
+  grid-template-columns: 6rem minmax(0, 1fr);
+}
+
+.claude-plugin-admin__marketplace-summary dt {
+  color: var(--color-text-muted);
+}
+
+.claude-plugin-admin__marketplace-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.claude-plugin-admin__marketplace-caveat {
+  border-left: 3px solid var(--color-border-paper);
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  line-height: 1.55;
+  margin: 0.8rem 0 0;
+  padding: 0.15rem 0 0.15rem 0.75rem;
+}
+
+.claude-plugin-admin__marketplace-installing,
+.claude-plugin-admin__marketplace-result {
+  padding: 1rem 0 0.2rem;
+  text-align: center;
+}
+
+.claude-plugin-admin__marketplace-installing .claude-plugin-admin__operation-card,
+.claude-plugin-admin__marketplace-result .claude-plugin-admin__operation-card {
+  margin-top: 1rem;
+  text-align: left;
+}
+
+.claude-plugin-admin__marketplace-spinner {
+  animation: claude-plugin-spin 0.9s linear infinite;
+  border: 2px solid var(--color-border-paper);
+  border-radius: 999px;
+  border-top-color: var(--color-text-primary);
+  display: inline-block;
+  height: 2rem;
+  width: 2rem;
+}
+
+.claude-plugin-admin__marketplace-result-mark {
+  align-items: center;
+  background: color-mix(in srgb, #2e9d62 16%, var(--color-bg-surface));
+  border-radius: 999px;
+  color: #24784c;
+  display: inline-flex;
+  font-size: 1rem;
+  font-weight: 800;
+  height: 2.1rem;
+  justify-content: center;
+  width: 2.1rem;
+}
+
+.claude-plugin-admin__marketplace-result.is-error .claude-plugin-admin__marketplace-result-mark {
+  background: color-mix(in srgb, var(--color-state-error) 14%, var(--color-bg-surface));
+  color: var(--color-state-error);
+}
+
 .claude-plugin-admin__operations-dialog {
   padding-top: 0.8rem;
 }
@@ -534,6 +792,7 @@
 .claude-plugin-admin__row-actions button:focus-visible,
 .claude-plugin-admin__notice button:focus-visible,
 .claude-plugin-admin__dialog button:focus-visible,
+.claude-plugin-admin__marketplace-card:focus-visible,
 .claude-plugin-admin__spec-field input:focus-visible {
   outline: 2px solid var(--color-border-focus);
   outline-offset: 2px;
@@ -582,6 +841,22 @@
   .claude-plugin-admin__dialog-actions button {
     width: 100%;
   }
+
+  .claude-plugin-admin__marketplace-stages li {
+    align-items: flex-start;
+    display: grid;
+    font-size: 0.58rem;
+    gap: 0.3rem;
+  }
+
+  .claude-plugin-admin__marketplace-list {
+    max-height: calc(100vh - 24rem);
+  }
+
+  .claude-plugin-admin__marketplace-summary dl > div {
+    gap: 0.2rem;
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -590,6 +865,14 @@
   }
 
   .claude-plugin-admin__progress span {
+    transition: none;
+  }
+
+  .claude-plugin-admin__marketplace-spinner {
+    animation-duration: 1.8s;
+  }
+
+  .claude-plugin-admin__marketplace-card {
     transition: none;
   }
 }

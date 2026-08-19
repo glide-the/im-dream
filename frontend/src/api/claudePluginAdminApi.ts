@@ -1,7 +1,7 @@
 // [Input] Settings → Plugins (Claude Code) server API contracts.
-// [Output] Typed client for shared plugin installations, server-owned management permission, operations, and Deck plugin refs.
+// [Output] Typed client for the global Marketplace catalog, shared installations, operations, and Deck plugin refs.
 // [Pos] API layer for claude-plugin-admin components and the Deck editor plugin selector.
-// [Sync] 2026-08-19: expose can_manage_shared_plugins so write controls fail closed when the capability is absent.
+// [Sync] 2026-08-19: add capability-gated global Marketplace reads and entry-ID installs with immutable revision lineage.
 
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -13,6 +13,7 @@ export type ClaudePluginOperationStatus = 'queued' | 'running' | 'ready' | 'erro
 export interface ClaudePluginInstallation {
   id: string;
   requested_package_spec: string;
+  marketplace_entry_id?: string | null;
   package_name: string;
   marketplace: string;
   requested_version: string | null;
@@ -48,6 +49,7 @@ export interface ClaudePluginOperation {
   id: string;
   operation_kind: string;
   requested_package_spec: string;
+  marketplace_entry_id?: string | null;
   status: ClaudePluginOperationStatus;
   phase: string;
   progress: number;
@@ -64,6 +66,45 @@ export interface ClaudePluginOperation {
   created_at: string;
   updated_at: string;
   finished_at: string | null;
+}
+
+export interface ClaudePluginMarketplaceEntry {
+  id: string;
+  package_name: string;
+  marketplace_name: string;
+  package_spec: string;
+  display_name: string;
+  description: string | null;
+  version: string | null;
+  homepage: string | null;
+  component_inventory: Record<string, unknown>;
+  compatibility: Record<string, unknown>;
+  revision: {
+    id: string;
+    commit_sha: string;
+    marketplace_manifest_sha256: string;
+    plugin_manifest_sha256: string | null;
+    plugin_digest: string;
+    requested_ref: string | null;
+  };
+  marketplace: {
+    id: string;
+    display_name: string;
+    remote_url: string;
+  };
+  installation: {
+    id: string;
+    status: ClaudePluginInstallStatus;
+    resolved_version: string;
+  } | null;
+}
+
+export interface ClaudePluginMarketplaceResult {
+  entries: ClaudePluginMarketplaceEntry[];
+  scope: 'platform-global';
+  permissions: {
+    can_install_shared_plugins: boolean;
+  };
 }
 
 export interface DeckClaudePluginRef {
@@ -160,16 +201,27 @@ export async function listClaudePluginInstallations(): Promise<ClaudePluginInsta
 }
 
 export async function installClaudePlugin(input: {
-  packageSpec: string;
+  packageSpec?: string;
+  marketplaceEntryId?: string;
   sourceType?: ClaudePluginSourceType;
-}): Promise<{ accepted: boolean; operation_id: string; package_spec: string }> {
+}): Promise<{
+  accepted: boolean;
+  operation_id: string;
+  package_spec: string;
+  marketplace_entry_id: string | null;
+}> {
   return request('/api/claude-plugins/install', {
     method: 'POST',
     body: JSON.stringify({
-      package_spec: input.packageSpec,
+      ...(input.packageSpec ? { package_spec: input.packageSpec } : {}),
+      ...(input.marketplaceEntryId ? { marketplace_entry_id: input.marketplaceEntryId } : {}),
       ...(input.sourceType ? { source_type: input.sourceType } : {}),
     }),
   });
+}
+
+export async function listClaudePluginMarketplace(): Promise<ClaudePluginMarketplaceResult> {
+  return request('/api/claude-plugins/marketplace');
 }
 
 export async function getClaudePluginOperation(operationId: string): Promise<ClaudePluginOperation> {

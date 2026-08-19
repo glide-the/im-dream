@@ -1,4 +1,10 @@
-"""Read-only PostgreSQL schema capability checks shared by runtime and import tools."""
+"""Read-only PostgreSQL schema capability checks shared by runtime and import tools.
+
+[Input] Admin-owned ``drizzle.schema_capabilities`` rows.
+[Output] Validated schema authority receipts and exact feature capability constants.
+[Pos] No-DDL Dream boundary for shared PostgreSQL schema publication.
+[Sync] 2026-08-19: add the exact ClaudePlugin Remote Marketplace v1 contract hash.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +19,12 @@ DREAM_WORKFLOW_NO_CONTINUING_CAPABILITY: Final = (
     "dream.workflow.no-continuing.v1"
 )
 DECK_CONTENT_VERSIONS_CAPABILITY: Final = "dream.deck-content-versions.v1"
+CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CAPABILITY: Final = (
+    "dream.claude-plugin.remote-marketplace.v1"
+)
+CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CONTRACT_SHA256: Final = (
+    "d215cb2764f656ab32e364a4900b3aac73fca60c77ef4c9f3a914fd192a8c314"
+)
 REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     UNIFIED_DREAM_CAPABILITY: 1,
     "dream.workflow.thread-lookup.v1": 1,
@@ -101,6 +113,8 @@ def inspect_schema_authority(
 
 
 __all__ = [
+    "CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CAPABILITY",
+    "CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CONTRACT_SHA256",
     "DECK_CONTENT_VERSIONS_CAPABILITY",
     "DREAM_WORKFLOW_NO_CONTINUING_CAPABILITY",
     "REQUIRED_RUNTIME_CAPABILITIES",

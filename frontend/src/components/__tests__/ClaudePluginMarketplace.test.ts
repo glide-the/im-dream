@@ -1,7 +1,7 @@
 // [Input] ClaudePlugin admin source/styles/API, Story Workspace Work/Layout wiring, and Marketplace interaction design.
-// [Output] Lock the three-action menu, real install transport, no-catalog fail-closed state, focus behavior, and responsive presentation.
+// [Output] Lock the three-action menu, global Marketplace four-stage install, fail-closed capability, focus behavior, and responsive presentation.
 // [Pos] Source-contract regression for ClaudePlugin Marketplace add scope.
-// [Sync] 2026-08-19: add create-menu, accessibility, production-call, and no-fake-catalog assertions.
+// [Sync] 2026-08-19: assert the Admin-approved catalog DTO, entry-ID install, four-stage UX, and remote lineage copy.
 
 // @ts-expect-error source-contract tests run in Node outside the frontend tsconfig.
 import { readFileSync } from 'node:fs';
@@ -56,12 +56,24 @@ test('manual install preserves the existing production call and server-owned per
   expect(PAGE).not.toContain('forkDeck');
 });
 
-test('Marketplace remains a truthful no-catalog capability state', () => {
+test('Marketplace uses the global catalog and the existing production install operation', () => {
+  expect(API).toContain("'/api/claude-plugins/marketplace'");
+  expect(API).toContain('marketplace_entry_id');
+  expect(API).toContain("scope: 'platform-global'");
+  expect(PAGE).toContain("{ id: 'select', label: '选择插件' }");
+  expect(PAGE).toContain("{ id: 'confirm', label: '确认安装' }");
+  expect(PAGE).toContain("{ id: 'installing', label: '正在安装' }");
+  expect(PAGE).toContain("{ id: 'result', label: '可以使用' }");
+  expect(PAGE).toContain('installClaudePlugin({ marketplaceEntryId: entry.id })');
+  expect(PAGE).toContain('批准 commit');
+  expect(PAGE).toContain('固定 ref');
+  expect(PAGE).toContain('revision.requested_ref');
+  expect(PAGE).toContain('内容摘要');
+  expect(PAGE).toContain('revision.plugin_digest');
+  expect(PAGE).toContain('发生远端漂移时不会继续安装');
   expect(PAGE).toContain('Marketplace 目录暂不可用');
-  expect(PAGE).toContain('当前服务没有可浏览的 Marketplace 插件目录 API');
-  expect(PAGE).toContain('改用安装');
-  expect(API).not.toMatch(/marketplace-catalog|marketplace\/catalog|marketplaces\/plugins/i);
-  expect(DESIGN).toContain('没有 Marketplace catalog DTO/API');
+  expect(PAGE).toContain('暂无可添加插件');
+  expect(DESIGN).toContain('platform-global');
   expect(DESIGN).toContain('fail-closed');
 });
 
@@ -73,6 +85,7 @@ test('menu and dialogs expose keyboard, focus, ARIA, and narrow-screen contracts
   expect(PAGE).toContain("event.key === 'Escape'");
   expect(PAGE).toContain('aria-modal="true"');
   expect(PAGE).toContain('role="dialog"');
+  expect(PAGE).toContain('useLayoutEffect');
   expect(PAGE).toContain('menuTriggerRef.current?.focus()');
   expect(PAGE).toContain("event.key !== 'Tab'");
   expect(STYLES).toContain('min-height: 44px');
