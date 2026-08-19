@@ -1,6 +1,7 @@
-<!-- [Input] Current product capabilities, Admin Gateway contract, and local runtime requirements. -->
-<!-- [Output] Reader-oriented setup, usage, scope boundaries, and feature TODOs. -->
+<!-- [Input] Current develop/story-workspace/Deck delivery state, Admin Gateway contract, and local runtime requirements. -->
+<!-- [Output] Reader-oriented setup, usage, branch status, scope boundaries, and feature TODOs. -->
 <!-- [Pos] Repository entry guide for Ink & Memory contributors and local users. -->
+<!-- [Sync] 2026-08-17: replace the historical progress diary with a concise usage-first project guide. -->
 
 # Ink & Memory
 
@@ -25,13 +26,36 @@ Agent、插件引用和内容版本。
 Deck 市场分发、注册、安装和分发治理本期不实现，也不提供占位入口。延期范围统一记录在
 [`docs/design/deck-register/`](docs/design/deck-register/README.md)。
 
+## 分支与集成状态
+
+| 分支 | 用途 | 状态 |
+|---|---|---|
+| [`develop`](https://github.com/glide-the/im/tree/develop) | 开发主分支；PR #2 合并后的功能以它为基线 | 当前主开发基线，尚未包含 PR #2 |
+| [`platform`](https://github.com/glide-the/im/tree/platform) | Admin 服务接入和平台能力 | 已完成主要接入 |
+| [`story-workspace`](https://github.com/glide-the/im/tree/story-workspace) | Story Workspace、Dream、Chat、订阅与工作台集成 | PR #2 已创建，当前为 Draft，等待合入 `develop` |
+| [`decks-version-man`](https://github.com/glide-the/im/tree/decks-version-man) | Deck Work、内容版本与 DreamAgent Demo 分流 | PR #1 已合入 `story-workspace` |
+| [`notion-session`](docs/design/notion-session/)（规划名） | Notion Device / 资源连接器设计 | 暂停；当前未保留同名远端分支，设计资料仍在仓库内 |
+
+相关 Pull Request：
+
+- [PR #1：Deck management, versioning, and typed Dream launch](https://github.com/glide-the/im/pull/1)（已合并）
+- [PR #2：Merge Story Workspace into develop](https://github.com/glide-the/im/pull/2)（Draft，等待完整 CI 和评审）
+
 ## 本地运行
 
-### 0. 获取代码
+### 0. 选择代码基线
+
+PR #2 合并前，Deck Work 和完整 Story Workspace 以 `story-workspace` 为可运行基线：
 
 ```bash
 git clone https://github.com/glide-the/im.git ink-dream-memory
 cd ink-dream-memory
+git switch story-workspace
+```
+
+PR #2 合并后，新功能统一从最新 `develop` 创建分支：
+
+```bash
 git switch develop
 git pull --ff-only origin develop
 ```
@@ -154,7 +178,7 @@ ENABLE_OAUTH_SIGNUP=true
 ```
 
 OAuth Device Flow 使用服务端允许的客户端 ID，具体协议与验证页面参见
-[`账号与认证`](docs/design/account-auth/README.md) 和 `backend/routers/device_oauth.py`。
+[`docs/architecture/auth-device.md`](docs/architecture/auth-device.md) 和 `backend/routers/device_oauth.py`。
 
 ## 主要入口
 
@@ -186,21 +210,44 @@ Deck。若 Admin/Gateway、数据库 capability、默认产品或可调用模型
 3. 保存草稿后显式提交为内容 `v1`。
 4. 在 Work 中启用 Deck；已启用、已发布且无未提交草稿的 Deck 才会出现在 Decks 主页面。
 
+## 常用验证命令
+
+默认技术验证不写真实业务数据：前端 lint/build 不需要服务；下方 Deck Playwright 用例通过公开页面
+和拦截的 API 合同验证 UI，只要求 `npm run dev` 正在 `5173` 端口运行；后端测试会在缺少专用测试
+数据库或 Provider 凭据时跳过相应集成用例，不得通过业务代码 fallback 强行放行。
+
+```bash
+# 前端检查
+(cd frontend && npm run lint)
+(cd frontend && npm run build)
+
+# 首次使用 Playwright 时安装浏览器；运行 E2E 前保持 Vite 在 5173 端口运行
+(cd frontend && npx playwright install chromium)
+(cd frontend && npx playwright test e2e/chat-first-deck-defaults.spec.ts --reporter=line --workers=1)
+
+# 后端测试
+(cd backend && .venv/bin/python -m pytest -q)
+```
+
+真实业务测试必须使用正常运行的 Dream、Admin、Gateway、真实 PostgreSQL 和指定现有账号；
+所有步骤走页面或公开生产 API，保留正常 Admin 可查询的 Run、Thread、Gateway 和 Token 回执。
+隔离测试结果不能冒充真实业务验收，也不要用测试命令修改或清理无关真实数据。
+
 ## 相关文档
 
-- [业务文档总览](docs/README.md)
-- [Deck 当前设计](docs/design/deck/README.md)
+- [Deck 设计与需求追踪](docs/design/deck/README.md)
 - [延期的 Deck 市场分发需求](docs/design/deck-register/README.md)
 - [Story Workspace 设计](docs/design/story-workspace/)
-- [订阅与模型](docs/design/subscription-models/README.md)
-- [资源链接与插件](docs/design/resources-plugins/README.md)
+- [订阅业务设计](docs/design/subscription/06-subscription-business-design.md)
+- [模型服务接入设计](docs/design/model-service/07-model-service-integration-design.md)
 - [部署说明](docs/deploy/overview.md)
 - [Notion Developers](https://www.notion.so/developers)
 
 ## 功能 TODO
 
 - [ ] **P0**：完成支付系统设计、支付回调、订单状态与订阅结算闭环。
-- [ ] **P1**：继续完善 Notion 资源连接的导入、增量同步与异常恢复。
+- [ ] **P0**：完成 PR #2 的完整 CI、评审与合并；合并后统一以 `develop` 创建功能分支。
+- [ ] **P1**：基于新的 `develop` 功能分支恢复 `notion-session` 设计，完成 Notion Device 授权、资源选择、同步与异常恢复。
 - [ ] **P1**：继续完善工作区文件展示、存储服务和跨端同步能力。
 - [ ] **P1**：增加用户 Profile 定制，用于 Reflections 的回响、特质和模式深度分析。
 - [ ] **P2**：扩展 ASR 与语音输入/输出能力。

@@ -252,8 +252,8 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
   需要精确条目 `raw.githubusercontent.com`，或 wildcard
   `*.githubusercontent.com`，裸 `githubusercontent.com` 不覆盖子域名。
   Settings 保存后要新发一条 Agent Bash 命令验证，不要复用正在运行的命令。
-  当前工作区、网络和临时目录边界见
-  [`../design/workspace-storage/README.md`](../design/workspace-storage/README.md)。
+  完整分层判断见
+  [`../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md`](../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md)。
 - Agent Bash/curl 报 `curl exit code 56`、reset/502/timeout，且没有
   `blocked-by-allowlist`：再按 sandbox 子进程代理出口或上游代理失败处理。
   Linux sandbox 会通过 `bwrap --unshare-net` 创建无外网 network namespace，
@@ -281,8 +281,8 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
   ```
 
   只有看到 proxy `403` / `blocked-by-allowlist` 时，才回到上一条按域名策略或
-  allowlist 修正处理。当前安全边界见
-  [`../design/workspace-storage/README.md`](../design/workspace-storage/README.md)。
+  allowlist 修正处理。完整分层判断见
+  [`../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md`](../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md)。
 - `ANTHROPIC_AUTH_TOKEN` 没有进入 SDK 子进程：确认远端 `backend/.env` 或
   Settings 的用户级模型配置包含该 token。
 

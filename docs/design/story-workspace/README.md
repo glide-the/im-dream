@@ -1,41 +1,37 @@
-<!-- [Input] Story Workspace routes, pages, contracts, and services. -->
-<!-- [Output] Current project, story, episode, review, and navigation design. -->
-<!-- [Pos] Canonical Story Workspace business design. -->
+# Story Workspace 业务设计索引
 
-# Story Workspace
+本目录只保存当前有效的产品与交互设计，并按功能模块组织。执行日志、任务过程、测试清单、
+评审过程和变更流水不放在这里。
 
-## 业务目标
+## 模块
 
-Story Workspace 是登录后的主外壳，把 Writing、Chat、Dream、Deck、创作资产、订阅和设置放在同一
-导航体系中。业务数据按当前用户和工作区隔离。
+| 文档 | 业务范围 |
+|---|---|
+| [产品范围与导航](./product-scope-and-navigation.md) | 角色、信息架构、路由与响应式外壳 |
+| [Dream 工作空间与重入](./dream-workspace-and-reentry.md) | Run 发现、选择、同一 Thread 恢复与 Agent 工作台 |
+| [Project 与 Episode 工作台](./project-and-episode-workbench.md) | Episode、故事线、场景、镜头的阅读与编辑 |
+| [Artifact 阅读与降级](./artifact-reading-and-degradation.md) | 文件投影、revision、缺失、无效与降级显示 |
+| [Skill 指令与工作台自动同步](./skill-commands-and-workbench-sync.md) | 已安装 Skill 的自由调用、Chat Slash 菜单和主 Agent Hook 自动同步 |
+| [设置](./settings.md) | Story Workspace 设置导航与无障碍 |
 
-## 信息架构
+Agent 对话与 Project/Episode 跨系统合同由以下文档定义：
 
-| 页面 | 路径 | 当前职责 |
-|---|---|---|
-| Dream | `/story-workspace/dream` | 新建和重入 Dream Run |
-| Writing/Timeline/Analysis | `/story-workspace/writing` 等 | 写作、时间线与分析 |
-| Chat | `/story-workspace/chat` | 通用 Thread 对话 |
-| Stories/Characters/Scenes | 对应复数路径 | 当前创作数据列表、筛选和状态 |
-| Decks | `/story-workspace/decks` | 已可运行用户 Deck 与系统 Deck |
-| Execution | `/story-workspace/runs/{run_id}/execution` | 当前 Run 产物工作台 |
-| Episode Review | `/story-workspace/episodes/{episode_id}/review` | Episode 阅读、确认和驳回 |
-| Settings/Subscription | `/story-workspace/settings/**`、`/subscription` | Work、模型、关于和套餐额度 |
+- [Dream Agent 设计索引](../dream-agent/README.md)
+- [Deck 管理、创建弹窗与版本设计索引](../deck/README.md)
+- [Project / Episode Artifact 合同](../dream-agent/project-episode-artifact-contract.md)
+- [Dream 工具与自动同步边界](../dream-agent/dreamflow-tool-boundaries.md)
 
-## 当前需求与结果
+## 权威规则
 
-- Workspace、Story、Character 和 Scene 提供 actor-scoped 列表、详情与更新。
-- Story、Character、Scene 支持确认、驳回；Story 还支持归档，批量操作使用同一权限与 revision 校验。
-- Episode 页面从已同步 Artifact 投影读取剧本、镜头和辅助产物，不直接把工作区文件当数据库事实。
-- Story Index 缺失或漂移时显示可恢复状态；reconcile 是显式写操作，GET 不产生修复副作用。
-- 桌面使用侧栏与内容区；窄屏基于同一数据和路由重排，不创建第二套业务流程。
-- Settings / Work 内聚 Deck、资源链接和插件，不在主导航复制三个管理入口。
-- 页面加载、空、权限不足、冲突和依赖不可用均显示可恢复状态，不以假数据填充。
+1. Chat history、streaming、运行时工具确认、Stop 和重连使用标准 Thread runtime，
+   本目录不重新定义。
+2. Workflow Run 只保留启动、权限、审阅和取消等真实业务事实；不得再为 Skill 建立阶段
+   流转、推荐动作或 completion-fact 状态机。
+3. 每个业务写操作在服务端重新校验用户身份、Thread 所有权、Workflow 权限、expected
+   revision 和数据完整性。
+4. 同一设计事实只归属于一个模块；其它文档通过链接引用，不复制竞争性生命周期或协议。
 
-## 代码所有权
+## Sync
 
-- 路由：`frontend/src/router/storyWorkspacePath.ts`、`frontend/src/router/story-workspace.tsx`
-- 页面：`frontend/src/pages/story-workspace/`
-- 组件：`frontend/src/components/story-workspace/`
-- API：`backend/routers/story_workspace.py`
-- 合同与持久化：`backend/story_workspace/`、`backend/services/story_workspace/`
+- 2026-08-16: 所有以 Deck 为主语的设计文档已迁至 `docs/design/deck/`；本目录只通过 Deck 索引引用跨模块消费合同。
+- 2026-08-16: Dream 首页移除社区 Deck 安装入口，避免暂缓的市场分发继续形成第二套 Deck 流程。
