@@ -19,6 +19,7 @@
 // [Sync] 2026-08-11: accept a passive loading label so subagent-only activity is
 //                    announced accurately without exposing a non-functional Stop action.
 // [Sync] 2026-08-13: suggest installed Deck Skills when a Chat draft starts with slash.
+// [Sync] 2026-08-20: enumerate and label both Skills and namespaced plugin commands.
 // [Sync] 2026-08-17: accept nonce-scoped Deck preview copy as an editable, unsent Chat draft.
 import {
   useCallback,
@@ -51,10 +52,10 @@ import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
 import MarkdownInputEditor from './MarkdownInputEditor';
 import {
-  filterInstalledSkillCommands,
-  loadInstalledSkillCommands,
-  type InstalledSkillCommand,
-} from './slashSkillCommands';
+  filterInstalledSlashCommands,
+  loadInstalledSlashCommands,
+  type InstalledSlashCommand,
+} from './slashCommands';
 
 type AIInputDockMode = 'simple' | 'full';
 
@@ -159,10 +160,10 @@ export default function AIInputDock({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [toolChoice, setToolChoice] = useState<ToolChoice>(defaultToolChoice);
   const [resolvedFullAccessEnabled, setResolvedFullAccessEnabled] = useState(fullAccessEnabled ?? false);
-  const [installedSkillCommands, setInstalledSkillCommands] = useState<readonly InstalledSkillCommand[]>([]);
-  const [activeSkillIndex, setActiveSkillIndex] = useState(0);
+  const [installedSlashCommands, setInstalledSlashCommands] = useState<readonly InstalledSlashCommand[]>([]);
+  const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashDraft, setDismissedSlashDraft] = useState<string | null>(null);
-  const skillListboxId = useId();
+  const slashListboxId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastHandledOpenFileDialogSignalRef = useRef(0);
   const lastAppliedPrefillNonceRef = useRef<number | undefined>(undefined);
@@ -177,33 +178,33 @@ export default function AIInputDock({
 
   useEffect(() => {
     let active = true;
-    setInstalledSkillCommands([]);
+    setInstalledSlashCommands([]);
     if (!deckId && !threadId) return () => { active = false; };
-    void loadInstalledSkillCommands({ deckId, threadId })
+    void loadInstalledSlashCommands({ deckId, threadId })
       .then((commands) => {
-        if (active) setInstalledSkillCommands(commands);
+        if (active) setInstalledSlashCommands(commands);
       })
       .catch(() => {
-        if (active) setInstalledSkillCommands([]);
+        if (active) setInstalledSlashCommands([]);
       });
     return () => { active = false; };
   }, [deckId, threadId]);
 
-  const matchingSkillCommands = useMemo(
+  const matchingSlashCommands = useMemo(
     () => !isInputFocused || dismissedSlashDraft === query
       ? []
-      : filterInstalledSkillCommands(query, installedSkillCommands),
-    [dismissedSlashDraft, installedSkillCommands, isInputFocused, query],
+      : filterInstalledSlashCommands(query, installedSlashCommands),
+    [dismissedSlashDraft, installedSlashCommands, isInputFocused, query],
   );
 
   useEffect(() => {
-    setActiveSkillIndex(0);
+    setActiveSlashIndex(0);
     if (dismissedSlashDraft !== null && dismissedSlashDraft !== query) {
       setDismissedSlashDraft(null);
     }
   }, [dismissedSlashDraft, query]);
 
-  const selectSkillCommand = useCallback((command: InstalledSkillCommand) => {
+  const selectSlashCommand = useCallback((command: InstalledSlashCommand) => {
     setQuery(`${command.command} `);
     setDismissedSlashDraft(null);
   }, []);
@@ -607,10 +608,10 @@ export default function AIInputDock({
         id="chat-input"
         ariaLabel={t('chat.inputDock.inputAria')}
         ariaDescribedBy={showUploadHint ? 'chat-upload-hint' : undefined}
-        ariaAutocomplete={matchingSkillCommands.length > 0 ? 'list' : undefined}
-        ariaControls={matchingSkillCommands.length > 0 ? skillListboxId : undefined}
-        ariaActiveDescendant={matchingSkillCommands.length > 0
-          ? `${skillListboxId}-option-${activeSkillIndex}`
+        ariaAutocomplete={matchingSlashCommands.length > 0 ? 'list' : undefined}
+        ariaControls={matchingSlashCommands.length > 0 ? slashListboxId : undefined}
+        ariaActiveDescendant={matchingSlashCommands.length > 0
+          ? `${slashListboxId}-option-${activeSlashIndex}`
           : undefined}
         placeholder={placeholder}
         value={query}
@@ -619,22 +620,22 @@ export default function AIInputDock({
         onBlur={() => setIsInputFocused(false)}
         disabled={disabled}
         onKeyDown={(event) => {
-          if (matchingSkillCommands.length > 0) {
+          if (matchingSlashCommands.length > 0) {
             if (event.key === 'ArrowDown') {
               event.preventDefault();
-              setActiveSkillIndex((current) => (current + 1) % matchingSkillCommands.length);
+              setActiveSlashIndex((current) => (current + 1) % matchingSlashCommands.length);
               return;
             }
             if (event.key === 'ArrowUp') {
               event.preventDefault();
-              setActiveSkillIndex((current) => (
-                current - 1 + matchingSkillCommands.length
-              ) % matchingSkillCommands.length);
+              setActiveSlashIndex((current) => (
+                current - 1 + matchingSlashCommands.length
+              ) % matchingSlashCommands.length);
               return;
             }
             if (event.key === 'Enter' || event.key === 'Tab') {
               event.preventDefault();
-              selectSkillCommand(matchingSkillCommands[activeSkillIndex] ?? matchingSkillCommands[0]);
+              selectSlashCommand(matchingSlashCommands[activeSlashIndex] ?? matchingSlashCommands[0]);
               return;
             }
             if (event.key === 'Escape') {
@@ -651,10 +652,10 @@ export default function AIInputDock({
         }}
       />
 
-      {matchingSkillCommands.length > 0 ? (
+      {matchingSlashCommands.length > 0 ? (
         <div
-          aria-label="已安装的 Skill 指令"
-          id={skillListboxId}
+          aria-label="已安装的 Skill 与 Command 指令"
+          id={slashListboxId}
           role="listbox"
           style={{
             display: 'grid',
@@ -668,12 +669,12 @@ export default function AIInputDock({
             background: 'var(--color-bg-surface-solid)',
           }}
         >
-          {matchingSkillCommands.map((command, index) => (
+          {matchingSlashCommands.map((command, index) => (
             <button
-              aria-selected={index === activeSkillIndex}
-              id={`${skillListboxId}-option-${index}`}
+              aria-selected={index === activeSlashIndex}
+              id={`${slashListboxId}-option-${index}`}
               key={`${command.packageSpec}:${command.command}`}
-              onClick={() => selectSkillCommand(command)}
+              onClick={() => selectSlashCommand(command)}
               onMouseDown={(event) => event.preventDefault()}
               role="option"
               type="button"
@@ -686,7 +687,7 @@ export default function AIInputDock({
                 padding: '0.55rem 0.65rem',
                 border: 'none',
                 borderRadius: '0.55rem',
-                background: index === activeSkillIndex
+                background: index === activeSlashIndex
                   ? 'var(--color-bg-hover)'
                   : 'transparent',
                 color: 'var(--color-text-primary)',
@@ -695,7 +696,20 @@ export default function AIInputDock({
               }}
             >
               <strong>{command.command}</strong>
-              <small style={{ color: 'var(--color-text-muted)' }}>{command.packageSpec}</small>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
+                <small
+                  style={{
+                    border: '1px solid var(--color-border-paper)',
+                    borderRadius: '999px',
+                    padding: '0.08rem 0.4rem',
+                    color: 'var(--color-text-secondary)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {command.kind === 'skill' ? 'Skill' : 'Command'}
+                </small>
+                <small style={{ color: 'var(--color-text-muted)' }}>{command.packageSpec}</small>
+              </span>
             </button>
           ))}
         </div>

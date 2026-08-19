@@ -1,7 +1,8 @@
 // [Input] Real local actor, persisted Dream Run, and installed Deck plugin inventory.
-// [Output] Visible-browser evidence that shared Chat suggests installed Skills without sending or workflow controls.
+// [Output] Visible-browser evidence that shared Chat suggests typed installed slash capabilities without sending.
 // [Pos] Opt-in non-cloning Story Workspace real-data QA.
 // [Sync] 2026-08-16: real-model continuity asserts the latest repeated query in a historical Thread.
+// [Sync] 2026-08-20: target the typed Skill/Command slash listbox contract.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -124,10 +125,12 @@ test('real Dream thread lists installed slash Skills without a recommendation st
     await expect(composer).toBeEnabled();
     await composer.fill('/');
 
-    const listbox = page.getByRole('listbox', { name: '已安装的 Skill 指令' });
+    const listbox = page.getByRole('listbox', { name: '已安装的 Skill 与 Command 指令' });
     await expect(listbox).toBeVisible();
     for (const skill of DRAMA_SKILLS) {
-      await expect(listbox.getByRole('option', { name: new RegExp(`/${skill}\\b`) })).toBeVisible();
+      await expect(listbox.getByRole('option', {
+        name: new RegExp(`/${skill}\\b.*Skill\\b`),
+      })).toBeVisible();
     }
     await expect(listbox.getByRole('option')).toHaveCount(14);
 
