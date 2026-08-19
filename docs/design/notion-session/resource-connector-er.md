@@ -9,7 +9,6 @@ Scope: 设计 — 资源连接器 ER 关系模型与数据库设计
 >      `docs/design/claude-agent/notion-point/resource-connector-layer-design.md`
 > [Output] 资源连接器 ER 模型、关系说明、关键约束、设计决策
 > [Pos] resource-connector-er in `docs/design/notion-session`
-> [Sync] 2026-07-04: 从 resource-connector-prd.md 拆分，ER 设计独立管理；前端 PRD 移至 `docs/prd/notion-session/`
 
 ---
 

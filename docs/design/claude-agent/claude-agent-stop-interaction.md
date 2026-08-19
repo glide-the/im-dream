@@ -8,7 +8,7 @@
 > - `backend/claude_agent/thread_factory.py` — 当前 turn 取消与完成确认
 > - `backend/claude_agent/service.py` — 取消路径的部分消息持久化与 SSE 收尾
 
-> **[Sync 2026-08-11 / current deployment boundary]** Stop 仍是拥有 active turn 的
+> Stop 仍是拥有 active turn 的
 > `ClaudeAgentThreadFactory` 进程内控制操作。active-turn registry、`/status`、pending
 > confirmation Future 和 HTTP stream routing 都没有迁入 Redis。Redis EventBus 只为
 > 已知 `(session_id, turn_id)` 共享事件 replay/writer/单终态，不能定位或取消另一个
@@ -116,32 +116,6 @@ Authorization: Bearer <token>
 4. `_run_turn_task()` finally 清理 `turn_context/event_bus/bg_task` 并把 lifecycle 从 `running` 标为 `idle`。
 
 不发布 `error`，因为用户停止是预期操作，不应显示为失败。
-
-## 4. 方案审查
-
-结论：采用。
-
-设计符合目标，且没有过度设计：
-
-- 复用已有 `bg_task.cancel()`、`_persist_partial_assistant()`、EventBus 和 `/status` 语义。
-- 新增 API 是显式用户控制命令，不改变普通 SSE 断线重连行为。
-- 不新增数据库字段；停止结果由当前运行态和已持久化消息自然表达。
-- 不把“停止”扩展成跨进程任务控制平台；Redis 只共享已知 turn 的 stream/replay/
-  terminal arbitration，不共享 active-turn owner、status、Stop 或 confirmation。
-
-保留的设计点：
-
-- thread 所有权校验。
-- 幂等 stop API。
-- bounded wait，确保前端 reload 尽量读到部分持久化结果。
-- SSE sentinel，避免重连消费者挂住。
-
-明确不做的设计点：
-
-- 不实现 durable cancellation record。
-- 不新增前端全局 Agent store。
-- 不修改 Editor Write `/api/sessions/events` 同步机制。
-- 不把 `DELETE /api/claude-agent/session` 复用为停止按钮入口，因为它语义是销毁会话，且不是 thread-scoped UI 控制。
 
 ## 5. 验收标准
 

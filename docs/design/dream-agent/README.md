@@ -1,10 +1,46 @@
 # Dream Agent 当前设计
 
-> 状态：**已实现并通过本机真实业务验收（2026-08-13）**。
+> 状态：当前已实现业务设计。
 
 当前 Dream Agent 解决两个直接业务：Chat 输入 `/` 时建议当前 Deck/thread 实际安装的
 Skill；主 Agent 在当前 thread 工作区构建创作产物后，宿主在根 turn 成功边界把实际
 文件同步到当前 Run 的 `.dream` 私有目录，供 Dream 页面读取人物、场景和分镜。
+
+## 核心概念定义
+
+| 概念 | 定义 |
+|---|---|
+| Dream Run | 一次具备独立状态、产物与审阅结果的创作执行 |
+| DreamAgent Deck | 通过 Dream 启动入口消费的 Deck 类型，不跳转普通 Chat 页面 |
+| Shared Thread | Dream 与 Chat 共用的消息、SSE、Stop 和重连载体 |
+| Canonical workspace | Agent 实际读写的项目工作台文件集合 |
+| `.dream` projection | Hook 在成功 Turn 后发布的 Run 私有页面投影 |
+| Project / Episode | 可索引的故事项目及其分集业务对象 |
+| Artifact manifest | 当前 Run 可阅读产物及 revision 的权威清单 |
+| Review gate | 阻止未审阅产物继续进入受保护动作的业务门槛 |
+
+## 核心业务时序图
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as Dream 工作台
+    participant API as Dream / Thread API
+    participant Agent as Claude Agent
+    participant Hook as Artifact Turn Hook
+    participant Store as Workspace / PostgreSQL
+
+    User->>UI: 从 DreamAgent Deck 启动创作
+    UI->>API: 创建 Run 并绑定共享 Thread
+    API->>Agent: 发送目标和工作台上下文
+    Agent->>Store: 读写 canonical 工作台产物
+    Agent-->>API: 通过共享事件流返回进度
+    API-->>UI: 渲染运行状态与 Chat
+    Agent-->>Hook: 根 Turn 成功
+    Hook->>Store: 校验并发布 .dream projection 与 Project 索引
+    Store-->>UI: 返回人物、场景、分镜和 Episode 产物
+    User->>UI: 审阅或继续同一 Thread
+```
 
 ## 1. 当前架构
 
@@ -61,30 +97,6 @@ Observer 主动同步、MCP 作为同步前置条件，以及 Admin sealed Artif
 | [Agent 资产协作](./asset-collaboration-design.md) | 人物、场景、分镜自然语言 CRUD、引用完整性与 Hook 同步 |
 | [Project / Episode 合同](./project-episode-artifact-contract.md) | 当前 Run preview 与 Admin 权威 Artifact 的区别 |
 | [工具与自动同步边界](./dreamflow-tool-boundaries.md) | Agent、Hook、Observer、MCP 的职责 |
-| [设计审查](./design-review.md) | 当前架构接受结论与证据 |
-| [Prompt 轮次记录](./prompt-rounds.md) | 可追溯执行记录，不是业务规范 |
 
-目录中其他历史迁移文档只用于 Git/架构追溯；与上述当前文档冲突时，以上述当前文档
+目录中其他历史路径仅为兼容既有引用而保留；与上述当前文档冲突时，以上述当前文档
 和可执行代码为准。
-
-## 4. 真实验收
-
-真实账号使用 `deepseek-v4-pro` 完成 Run
-`run_604125a31ad9478990622b675a996863`：
-
-- canonical 工作台：2 个人物、1 个场景、`project.yaml`、`EP01/storyboard.yaml`；
-- `.dream`：3 个 stage、2 个 Artifact 文件副本和最终 manifest；
-- canonical 文件与私有副本 SHA-256 一致；
-- Dream 页面刷新、可见 Chat 按钮、同 thread 历史和返回 Dream 均通过；
-- `--headed --workers=1`：`1 passed (1.2m)`；
-- 后端聚焦回归：131 passed、2 skipped、59 subtests；
-- 共享 Chat/layout：24 passed；TypeScript、ESLint、生产构建和 diff gate 通过。
-
-该证据证明本机真实业务闭环，不代表 staging、生产发布或负载验收。
-
-工作台逐轮上下文及 Project 页面投影补充验收使用原始 Run
-`run_8956be79389b4bd3aa40b5107a5bb233`：真实 `deepseek-v4-pro` 完成两轮正常人类对话，
-保持同一 Claude session 并逐轮读取绝对 `.dream/WORKBENCH.md`。canonical、私有副本和
-manifest SHA 一致；PostgreSQL/API 为 `indexed`；Execution 页 Project 标题显示“隔壁的病友”，
-EP01 标题独立显示“凌晨五点的敲墙声”。最终有头 Playwright 为 `1 passed (32.4s)`；用户要求
-关闭后浏览器已退出，后续未再启动有头模式。

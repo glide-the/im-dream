@@ -1,10 +1,6 @@
 <!-- [Input] Deck设计需求.pdf reference images, IM tokens, Deck CRUD, and content-version capability. -->
 <!-- [Output] Implemented published-clean desktop/narrow visual hierarchy and low-fidelity state sketches. -->
 <!-- [Pos] Deck UI visual source of truth. -->
-<!-- [Sync] 2026-08-17: show only published-clean enabled Decks on the home and mark
-                         system shortcuts/cards without exposing drafts. -->
-<!-- [Sync] 2026-08-17: add Work related-Chat previews and guarded deletion states. -->
-
 # Deck UI 视觉与布局规范
 
 ## 1. 视觉结论

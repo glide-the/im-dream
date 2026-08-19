@@ -1,6 +1,4 @@
 > **关联文档**: [ClaudeSDKClient 项目 env 注入方案设计](./claude-sdk-env-design.md)
-> **[Sync] 2026-05-27**: 新增 — 按用户存储的 env 变量注入 Claude SDK 子进程方案。
-> **[Sync] 2026-06-22**: Settings 入口收束 — 用户环境变量控件只在 Workspace Mode 开启时显示，因为该配置面向 workspace runtime / Skills / MCP 工具上下文。
 
 # 按用户存储的 SDK Env 注入方案设计
 
@@ -242,51 +240,6 @@ sequenceDiagram
 - 同时有 `backend/.env` 和用户 `env_vars` 时，用户值覆盖全局值，符合"用户个性化覆盖默认配置"的直觉。
 - `_verify_claude_sdk_env_for_query_stream()` 不关心 auth token 来源，兼容两种路径。
 - Thread Session 享元命中（TTL 内续轮）时，`run_streaming()` 仍每次调用 `apply_user_sdk_env_to_options()`，保证用户更新 env_vars 后下一轮即生效，无需等待享元 TTL 超时。
-
----
-
-## 7. 测试与验证方案
-
-### 7.1 单元测试
-
-| 用例 | 预期 |
-|------|------|
-| `user_sdk_env` 含白名单 key | key 出现在 `sdk_options.env` 且值来自 user_sdk_env |
-| `user_sdk_env` 值覆盖 backend/.env | user 值 > backend/.env 值 |
-| `user_sdk_env` 含非白名单 key | key 被过滤，不出现在 `sdk_options.env` |
-| `user_sdk_env` 为空 | sdk_options.env 与纯 apply_project_sdk_runtime_options 结果一致 |
-| `user_sdk_env` 含 `ANTHROPIC_AUTH_TOKEN` | `_verify_claude_sdk_env_for_query_stream` 不抛异常 |
-| `user_sdk_env={}` 且 backend/.env 无 auth key | `_verify_claude_sdk_env_for_query_stream` 抛 RuntimeError |
-
-运行：
-
-```bash
-python -m pytest backend/tests/test_claude_agent_runner.py -k "user_sdk_env or user_env"
-```
-
-### 7.2 语法检查
-
-```bash
-python -m py_compile \
-  backend/libs/claude_agent_kit/server/sdk_env.py \
-  backend/libs/claude_agent_kit/types.py \
-  backend/libs/claude_agent_kit/server/agent_runner.py \
-  backend/claude_agent/service.py
-```
-
----
-
-## 8. 验收标准
-
-- [ ] `apply_user_sdk_env_to_options()` 已在 `sdk_env.py` 实现，只透传白名单 key。
-- [ ] `AgentRunOptions.user_sdk_env` 字段已添加，默认空 dict。
-- [ ] `ClaudeAgentRunner.run_streaming()` 在 `apply_project_sdk_runtime_options()` 后调用 `apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env)`。
-- [ ] `ClaudeAgentService` 在构造 `AgentRunOptions` 时同时填充 `mcp_env` 和 `user_sdk_env`。
-- [ ] 用户配置了 `ANTHROPIC_AUTH_TOKEN` 后，发起的 Agent 会话使用用户 token，不使用全局 token。
-- [ ] 用户未配置 `env_vars` 时，行为与原有全局 `.env` 注入完全一致。
-- [ ] 非白名单 key 不进入 Claude SDK 子进程。
-- [ ] 不在日志、SSE、错误信息中输出任何 token 或 secret 值。
-- [ ] 单元测试与语法检查通过。
 
 ---
 

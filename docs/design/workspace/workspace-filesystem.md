@@ -1,24 +1,50 @@
 # 工作空间文件系统 — 业务说明文档
 
-> **迁移来源**: `glide-the/claude-agent-next-kit → docs/design/workspace-filesystem.md`
-> **适配说明**: 从 Next.js / TypeScript 迁移到 Python / FastAPI 架构。
-> **[Sync] 2026-06-13**: Workspace Mode 现在会在每个 thread 的
 > `.claude/settings.json` 写入 Claude Code `sandbox` 配置；Bash 目录隔离由
 > Claude Code 原生 sandbox 执行，PreToolUse 不解析复杂 shell 语法。
-> **[Sync] 2026-06-14**: Docker 部署由后端自动检测 Linux 容器环境并写入
 > Claude Code `enableWeakerNestedSandbox`，解决容器内 bubblewrap nested
 > sandbox 启动问题；无需用户配置额外 env。
-> **[Sync] 2026-06-16**: Workspace sandbox 不再 deny 整个 `.claude/`；
 > `.claude/skills/` 保持可创建/替换 skill，denyWrite 仅保护 settings/hooks/editor index。
-> **[Sync] 2026-06-16**: Skills 同步在重建软链接前会导入
 > `.claude/skills/` 下的真实文件/目录，使 Agent 直接创建的 skill 回写到
 > `workspace/skills/`。
-> **[Sync] 2026-06-21**: `.claude/settings.json` sandbox block now also
 > carries Settings-backed `sandbox.network` policy for Bash subprocess egress.
 
 ## 1. 概述
 
 每一次 AI 对话（conversation）都拥有独立的工作空间目录，实现用户文件上传、Agent 文件读写、Skills 管理的完全隔离。工作空间由 `backend/libs/claude_agent_kit/server/workspace.py` 统一管理。
+
+### 核心概念定义
+
+| 概念 | 定义 |
+|---|---|
+| Thread workspace | 以 Thread 为边界的隔离目录，承载文件、Skill 与运行配置 |
+| `files/` | 用户上传和 Agent 生成的普通业务文件区 |
+| `.claude/` | Claude Code 的 settings、hooks 与 Skill 发现目录 |
+| `skills/` | 当前 Thread 可维护的 Skill 真正存储位置 |
+| `.editor/` | Edit Session 的受保护虚拟索引 |
+| `.notion/` | 资源连接器发布的只读 canonical snapshot 索引 |
+| Sandbox policy | 对 Bash 文件系统与网络能力施加的服务端配置 |
+
+### 业务交互时序图
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as Chat / File UI
+    participant API as Workspace API
+    participant Manager as Workspace Manager
+    participant Agent as Claude Agent
+    participant FS as Thread Workspace
+
+    User->>UI: 上传或选择文件
+    UI->>API: 以 Thread 路径提交操作
+    API->>API: 校验身份、Thread 所有权和安全路径
+    API->>Manager: 初始化或读取工作空间
+    Manager->>FS: 写入 files/ 并同步 Skill 索引
+    UI->>Agent: 在同一 Thread 发起任务
+    Agent->>FS: 按权限读取输入并写入允许的产物
+    FS-->>UI: 返回文件树、内容或下载入口
+```
 
 ---
 

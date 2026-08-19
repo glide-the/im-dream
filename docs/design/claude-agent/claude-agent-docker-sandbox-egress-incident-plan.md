@@ -8,64 +8,15 @@
 > Claude Agent Bash/curl sandbox failures where the request reaches the
 > sandbox host proxy and is rejected by `blocked-by-allowlist`.
 > [Pos] docker-sandbox-egress-incident-plan in `docs/design/claude-agent`
-> [Sync] 2026-06-24: initial incident handling judgment and interaction
 > design separated child proxy, bridge, parent proxy, TUN, policy deny, and
 > runtime startup failure layers.
-> [Sync] 2026-06-25: updated with verified `HTTP/1.1 403 Forbidden` and
 > `X-Proxy-Error: blocked-by-allowlist`; current incident is classified as
 > sandbox network allowlist policy deny, with child proxy path proven alive up
 > to the host proxy.
-> [Sync] 2026-06-25: open sandbox network mode now omits `sandbox.network`
 > instead of writing unsupported `allowedDomains:["*"]`; UI open mode hides
 > the HTTP method placeholder while keeping the high-risk warning visible.
 
 # 沙箱 Docker 网络问题处理判断与交互方案设计稿
-
-## 1. Optimized planning prompt used for this round
-
-```text
-You are an Expert Prompt Architect.
-Convert the current Docker sandbox egress incident into an implementation-ready
-engineering diagnosis and interaction design using the verified evidence:
-`HTTP/1.1 403 Forbidden` and `X-Proxy-Error: blocked-by-allowlist`.
-
-Goal:
-Determine how to handle a Docker-hosted Claude Code Bash sandbox where Bash/curl
-reaches the sandbox host proxy but is rejected by sandbox network allowlist
-policy when accessing targets such as raw.githubusercontent.com. Produce a
-Chinese design draft for product, backend, frontend, Agent, and deployment
-behavior.
-
-Tasks:
-1. Read the local incident report and separate the historical apply-seccomp
-   startup failure from the current runtime egress failure.
-2. Inspect restored Claude Code source and sandbox-runtime source to identify
-   the Linux network path, policy semantics, and runtime mutation boundaries.
-3. Inspect Ink & Memory workspace, service, runner, Settings, Docker Compose,
-   and Remote SSH deployment docs to see how sandbox.network is generated and
-   where Docker/TUN networking is configured.
-4. Treat sandbox network allowlist policy deny as the main hypothesis:
-   the proxy env / localhost listener / bridge path is alive enough for the
-   request to reach host proxy. Verify active `.claude/settings.json`, domain
-   pattern semantics, Settings-to-thread sync, and next-command reload.
-5. Draft an interaction plan covering Agent behavior, frontend copy, backend
-   events/API, logs, diagnostics, degradation, recovery, security, validation,
-   and acceptance criteria.
-
-Constraints:
-- Do not treat raw.githubusercontent.com as the only problem.
-- Do not fix by blind sleep, unlimited retry, or silent sandbox bypass.
-- Do not hard-code business domains, hosts, paths, or policy defaults.
-- Distinguish WebFetch permissions from Bash/curl sandbox egress.
-- Mark uncertain conclusions as inference or pending verification.
-- Keep Settings intent, active sandbox runtime policy, child proxy health, and
-  deployment limits visibly separate.
-
-Output:
-A technical judgment plus interaction/runbook design with a concrete evidence
-chain, short/mid/long-term handling, state machine, diagnostic commands, and
-acceptance criteria.
-```
 
 ## 2. 结论摘要
 
@@ -117,7 +68,7 @@ apply-seccomp write /proc/self/setgroups -> EACCES
 | 所有公网域名失败，sandbox 内 proxy env 缺失 | sandbox 子进程 proxy env 未注入 | 子进程没有代理入口，network namespace 本身无外网 |
 | 所有公网域名失败，proxy env 存在但 `127.0.0.1:3128` / `1080` 不通 | sandbox 内 listener 或 host bridge 未建立 | env 指向的本地代理端口不可用 |
 | proxy listener 可连，但 CONNECT reset / 502 / `exit code 56` | parent proxy 或上游 TUN 链路失败 | host proxy 收到请求，但连接上游失败或被中断 |
-| proxy 返回 `403` / `blocked-by-allowlist` | sandbox network policy deny | 当前已验证；host proxy 收到了请求并按策略拒绝 |
+| proxy 返回 `403` / `blocked-by-allowlist` | sandbox network policy deny | 该响应表示 host proxy 已收到请求并按策略拒绝 |
 | 仅 `raw.githubusercontent.com` 失败，其他允许域名成功 | 域名 allowlist 或上游单域名问题 | proxy 有响应，其他域名能通 |
 | backend 容器里不进 sandbox 的 `curl` 也失败 | 外层 Docker/TUN/Clash/DNS/宿主机出口 | 与 sandbox 子进程配置无关 |
 
@@ -641,80 +592,6 @@ GET /api/claude-agent/sandbox-diagnostics?thread_id={thread_id}
 4. 不允许通过固定 sleep 等待 DB/runtime 状态同步。
 5. 不允许在 Agent 失败后静默使用 `dangerouslyDisableSandbox`。
 6. 如果通过关闭 Workspace Mode 恢复任务，必须在 UI 和日志里记录这是高风险降级。
-
-## 8. 验证计划
-
-### 8.1 部署边界验证
-
-```bash
-docker compose -f docker-compose.yml config | sed -n '/ink-backend:/,/ink-frontend:/p'
-docker compose -f deploy/remote-ssh/docker-compose.yml config | sed -n '/ink-backend:/,/ink-frontend:/p'
-```
-
-检查：
-
-- backend 使用 `network_mode: service:tun-proxy`
-- backend 有 bubblewrap 所需 capabilities/security options
-- `AGENT_CWD` 指向持久化 workspace
-
-### 8.2 active allowlist 验证
-
-```bash
-docker exec ink-backend sh -lc '
-set -eux
-find "${AGENT_CWD:-/app/workspace}" -maxdepth 5 -path "*/.claude/settings.json" -type f -print
-'
-```
-
-检查当前 thread 对应 settings，而不是任意 thread：
-
-- `sandbox.network.allowedDomains` 是否包含 `raw.githubusercontent.com`。
-- 如果使用 wildcard，是否为 `*.githubusercontent.com`，而不是 `githubusercontent.com`。
-- 如果 UI 为 open，实际 settings 中不应存在 `sandbox.network`。
-
-### 8.3 policy deny 复现与修复验证
-
-通过新发 Agent Bash 命令执行：
-
-```bash
-curl -Iv --connect-timeout 10 https://raw.githubusercontent.com/ 2>&1 | tail -80
-```
-
-预期：
-
-- 修复前能看到 `HTTP/1.1 403 Forbidden` 和 `X-Proxy-Error: blocked-by-allowlist`。
-- 添加匹配 host 并新发命令后，不应再看到 `blocked-by-allowlist`。
-- 如果之后失败变成 502/reset/timeout，再进入 parent proxy / TUN / Docker 出口排障。
-
-### 8.4 上游出口验证
-
-仅在目标 host 已被 policy 放行但请求仍失败时执行：
-
-```bash
-docker exec ink-backend sh -lc '
-set -eux
-curl -Iv --connect-timeout 10 https://example.com/ 2>&1 | tail -80
-curl -Iv --connect-timeout 10 https://raw.githubusercontent.com/ 2>&1 | tail -80
-'
-```
-
-这里用于判断 Docker/TUN/Clash/DNS/宿主机出口，不用于解释已明确的 `blocked-by-allowlist`。
-
-### 8.5 回归测试建议
-
-| 测试 | 断言 |
-|---|---|
-| policy denied classifier | `HTTP 403` + `X-Proxy-Error: blocked-by-allowlist` 分类为 `sandbox_network_policy_denied` |
-| domain pattern matching | `raw.githubusercontent.com` 精确命中；`*.githubusercontent.com` 覆盖；`githubusercontent.com` 不覆盖 |
-| settings-to-thread sync | 保存 allowlist 后，对应 thread `.claude/settings.json` 写入目标 host |
-| next-command reload | 新发 Agent Bash 命令后使用新策略 |
-| open mode settings omission | UI open 后 active `.claude/settings.json` 不包含 `sandbox.network`，新命令不再因旧 allowlist 返回 403 |
-| child proxy env injection | 非 403 网络错误时，sandbox Bash 子进程可见 proxy env |
-| child proxy local listener | 非 403 网络错误时，显式 `--proxy http://127.0.0.1:3128` 访问 `example.com` 成功 |
-| parent proxy failure classifier | CONNECT reset/502/timeout 能分类为 parent proxy / TUN 问题 |
-| disabled mode | PreToolUse 硬拒绝 WebFetch/WebSearch/常见 Bash 网络命令 |
-| allowlist mode | 具体域名写入 `.claude/settings.json` |
-| failure classifier | curl 403/502/56/7 能映射到不同分类 |
 
 ## 9. 验收标准
 

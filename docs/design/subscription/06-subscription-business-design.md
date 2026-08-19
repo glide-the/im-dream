@@ -648,44 +648,6 @@ Query keys：
 - `['subscription-context', sessionVersion]`
 - `['subscription-usage', sessionVersion, period]`
 
-## 15. 测试与验收设计
-
-### 15.1 合同测试
-
-| 测试对象 | 必测场景 | 通过条件 |
-|---|---|---|
-| Product Plan Catalog | 恰好三项、唯一 code/order、null 商业字段 | Dream 不补静态数据；非法 DTO 返回 502/503 |
-| Subscription Context | active、paused、expired、null subscription | 状态、周期、allowedActions 与 Allowance 保真 |
-| Subscription Command | preview denied、execute applied/scheduled/payment_pending | 不允许的 preview 不写库；成功返回唯一 receipt |
-| 并发与幂等 | stale expectedVersion、相同/不同 payload 重放 | stale 或 payload 冲突为 409；相同命令不重复写 Event |
-| Free provision | 正常、Free 配置缺失、重复触发 | 成功时用户与 Free 同事务；失败全部回滚；重复不发 Token |
-| 历史 backfill | 免费缺失、已有付费、opt-out、重复执行 | 只补缺；不覆盖订阅、Allowance、Usage、Ledger、Event |
-| Plan publish | draft 校验失败、发布成功、发布后写入 | published 快照不可修改，变更只能新建 version |
-
-### 15.2 BFF 与前端测试
-
-- BFF 拒绝 user override、未知字段、未知枚举、超出 JS safe integer 的值和守恒冲突。
-- 401/402/403/409/429/502/503 均映射到本文定义的唯一文案与恢复动作。
-- 订阅页不出现静态套餐、假价格、假 Token、假余额或未经验证的支付成功。
-- 1440×1000 显示三列套餐；390×844 单列且无横向溢出。
-- keyboard、focus、tablist、aria-live、role=alert、dialog focus return 通过自动化和人工检查。
-- 命令成功后 plans/context/usage/model catalog query 全部失效并重新获取权威数据。
-
-### 15.3 验收标准
-
-- [ ] 三套餐完全来自 Admin Product API，Dream 无静态数组。
-- [ ] Plan/Version/Entitlement、Subscription、Allowance 只有一套权威事实。
-- [ ] 新用户 Free 与 canonical user 同事务，失败无半完成用户。
-- [ ] backfill 重复执行不重复订阅、不重复发 Token、不覆盖历史。
-- [ ] published Plan Version/Entitlement 不可变；Event/Ledger append-only。
-- [ ] 命令 preview/execute、expectedVersion、Idempotency-Key 可测。
-- [ ] 未发布商业字段为 null，不虚构价格、Token 或余额。
-- [ ] 未接真实支付时不显示支付成功。
-- [ ] Admin RBAC 不放宽，Browser 无 service Secret。
-- [ ] BFF strict schema、状态映射、超时和无 fallback 明确。
-- [ ] 1440×1000 与 390×844 页面及无障碍状态明确。
-- [ ] 与模型接入文档通过 Subscription/Entitlement/Allowance 权威事实一致衔接。
-
 ## 16. 架构约束与设计取舍
 
 | 领域 | 采用方案 | 禁止方案 | 原因 |

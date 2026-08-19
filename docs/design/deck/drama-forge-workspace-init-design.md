@@ -175,18 +175,6 @@ def ensure_plugin_venv(runtime_root: Path, digest: str, packed_dir: Path, spec: 
 
 ---
 
-## §8 测试矩阵
-
-| 层 | 用例 | 依据 |
-|----|------|------|
-| 单测 `test_workspace_init.py` | profile 解析/非法拒绝/路径越界拒绝；init 幂等（不覆盖已有 stories/）；venv receipt 复用与锁 | §4/§5 |
-| 单测 packer 扩展 | 有/无 profile 两路；冻结工作区不重复 init；venv 缺失重建 | §6 |
-| 打包脚本单测 | 白名单、C1 改写断言、settings 剔除、profile 生成 | §3 |
-| 真实 CLI 集成 `test_real_cli_drama_forge.py` | marketplace add → install → 制品 digest → pack → 工作区骨架/CLAUDE.md/venv → `claude plugin validate` 制品 | P0-8 |
-| e2e（顺延既有设施） | Deck 绑定 drama-forge → 发起 Dream 对话 → receipt 含 init_steps | P0-7 观察位 |
-
----
-
 ## §9 任务三实现顺序
 
 1. `scripts/pack_drama_forge.py` + marketplace 布局（§3）

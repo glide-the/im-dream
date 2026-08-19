@@ -8,9 +8,6 @@ Scope: 工程设计 — 资源连接器认证层、数据层、操作层、任�
 >      `docs/design/notion-session/connector-interaction.md`
 > [Output] 资源连接器四层架构的完整工程设计，含接口定义、数据结构、错误处理、扩展点
 > [Pos] resource-connector-layer-design in `docs/design/claude-agent/notion-point`
-> [Sync] 2026-06-22: 初始设计 — 四层架构工程设计稿
-> [Sync] 2026-06-22: 迁移至 claude-agent/notion-point — 工作空间映射相关设计独立管理
-> [Sync] 2026-06-28: 数据层收敛为 canonical snapshot 权威状态；Agent 初始化读取连接器数据层快照，`NotionCache` 不再作为跨 Agent source of truth。
 
 ---
 

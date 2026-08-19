@@ -3,8 +3,6 @@
 > Source of truth: `frontend/src/styles/tokens.css` `[data-theme='dark']` 块。  
 > 触发方式：`[data-theme='dark']`（用户手动切换）；系统偏好暗色时 `prefers-color-scheme: dark` 自动生效（`:root:not([data-theme='light'])`）。  
 > 切换入口：`TopNavBar` 右侧 🌙/☀️ 按钮 → 调用 `utils/theme.ts` `toggleTheme()`，持久化到 `localStorage`（键名 `ink-theme`）。
-> [Sync] 2026-07-09: Connector settings pages use a dashed deep-paper boundary plus flat low-contrast list rows; selected resources use a right-side checkmark, and ordinary resource rows do not use stacked dark cards or dark selected fills.
-> [Sync] 2026-07-09: Decks follows the same low-contrast dark paper rule: deck colors are small accents, not full-card borders, gradients, or hover shadows.
 
 ---
 

@@ -1,29 +1,16 @@
 > **迁移来源**: Pawkeyland docs/app/design/Claude Agent SDK 交互式工具时序图.md
 > SDK 工具确认交互模式的通用设计参考，与 Ink & Memory `backend/claude_agent/tool_confirmation_store.py` 对应实现。
-> **[Sync] 2026-05-24**: `_make_tool_confirm_cb` 新增 `turn_ctx` 参数，注册 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重；新增 `CancelledError` 处理（调 `store.cancel_pending` 后 re-raise）；`payload` 字段同时兼容 `tool_call_id`（runner）和 `toolCallId`（遗留）。
-> **[Sync] 2026-05-27**: `PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范；新增 `_ALWAYS_CONFIRM_TOOL_NAMES` 机制在当时的 auto 模式下对 `AskUserQuestion` 触发确认；新增前端 `isManualToolInvocation` / `toolChoice` prop 逻辑说明（§6、§7）。
-> **[Sync] 2026-06-06**: auto 模式新增 workspace `files/` 内置文件工具权限策略：`Read` / `Write` / `Edit` / `MultiEdit` 仅在路径解析后位于当前 `{cwd}/files/` 下时返回显式 `permissionDecision:"allow"`；当时其他工具即使在 auto 模式下也进入前端确认侧路。该全量确认策略已被 2026-06-07 敏感度分流取代。
-> **[Sync] 2026-06-07**: auto 模式改为敏感度分流：workspace `files/` 内置文件工具和低敏查询工具显式 allow；执行/写入/交互工具进入前端确认侧路。
-> **[Sync] 2026-06-07**: 新增低敏工具：`Bash`（命令首词属于只读/导航安全集合且无 shell 元字符）和 `mcp__editor__switch_editor`（无副作用的上下文切换声明）。安全集合：`ls` `cd` `pwd` `echo` `cat` `head` `tail` `wc` `find` `which` `type` `date` `whoami` `id` `groups` `env` `printenv` `uname` `hostname`。
-> **[Sync] 2026-06-09**: 新增低敏工具 `Skill`（Claude Code restored source 确认为 `SKILL_TOOL_NAME = "Skill"`）；完整策略抽取到 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)。
-> **[Sync] 2026-06-09**: Settings「应如何批准 IM」写入 `system_config.im_full_access_enabled`；开启后 Runner 在 `.editor/` 重定向之后对已暴露工具返回显式 PreToolUse allow。
-> **[Sync] 2026-06-13**: full-access 模式保留 `AskUserQuestion` /
 > `mcp__user__ask_user` 的前端确认窗口，因为这些工具必须收集 answers
 > 并通过 `updatedInput` 传回 Claude。
-> **[Sync] 2026-07-20**: 前端确认交互从消息列表内联渲染迁移为**确认面板**
 > （`ToolConfirmationDock`）：待确认期间**隐藏输入栏，面板直接占据输入栏位置**
 > （in-flow 替换渲染）；消息列表中的待确认工具调用退化为带「待确认」标记的
 > 折叠行。详见 §8。
-> **[Sync] 2026-07-23**: SandboxPermissionRequest —— `can_use_tool` 通道
 > （`SandboxNetworkAccess` 运行时沙箱代理询问）接入同一确认链路（§6.3）；
 > 确认面板渲染网络变体卡片（host + 策略模式 + 二元 拒绝/同意）。
-> **[Sync] 2026-07-26**: PreToolUse 步骤 ②.5 网络门禁拆除（错误层级重复，
 > §6.1 / §6.2 回退）；can_use_tool 成为唯一网络确认通道，
 > `networkRequest.source` 字段取消；`open` 模式"每次询问"语义回退。
-> **[Sync] 2026-07-26**: HOTFIX — `HookJSONOutput(...)` 构造调用全部改为纯字典
 > 字面量（0.2.128 中该类型为 TypedDict Union 不可调用；§5 头部注记两个生产
 > 症状与官方 dict 契约，§5.2 / §6.1 示例更新）。
-> **[Sync] 2026-08-06**: 修复 SSE 重连重放历史 `tool-approval-request` 后，已处理
 > 的工具确认重新占据输入区的问题。前端以精确 `tool_call_id` 保存本线程已处理
 > tombstone，并在 SSE EOF 后按 turn checkpoint 接纳持久化历史快照；后端先校验 thread 所有权，
 > 对“线程存在但确认已不再 pending”返回类型化 409。详见 §8.5。
@@ -199,11 +186,6 @@ const sdkOptions = {
 
 ## 事件循环 / 线程 / 子进程边界（manual 模式）
 
-> [Sync] 2026-05-10: 修复一次生产事故 —— `tool-approval-request` 发出后整个 FastAPI 进程挂起。补充三层泳道，明确每个 await 所属的边界。
-> [Sync] 2026-05-10: 经端到端真实 uvicorn 复现，**真正的根因是前后端字段名 mismatch**：SSE 下发 camelCase `toolCallId`，前端原样回传 `/api/claude-agent/tool-confirm`，但后端 `ToolConfirmRequest` schema 仅认 snake_case `tool_call_id` → 422 Unprocessable Entity → 前端表现为"无法响应"，5 分钟后 SSE 因超时被动结束，看起来像"全局阻塞"。已让 `ToolConfirmRequest` 同时接受 `tool_call_id` 与 `toolCallId`（`Field(alias="toolCallId")` + `populate_by_name=True`），契约同时兼容 Java/BFF snake_case 与 Web SSE-echo camelCase。
-> [Sync] 2026-05-10: 上一轮加固（去 BaseHTTPMiddleware、call_soon_threadsafe 桥、cancel_pending、BaseExceptionGroup 不掩盖 CancelledError）保留为防御性硬化：单 uvicorn worker 上 SSE 暂停时 `/health` 与 `/tool-confirm` 真实测得 5–9ms 内返回，与 Streaming generator 完全并发。
-> [Sync] 2026-05-10: "SSE 占用时整个服务无法访问"实测复现 — 服务端 manual-confirm 期间 4 条 SSE + 60 次并发 side-probe 全部 5–15ms 返回，**根因不在 worker**。真正堵点叠加：(1) 前端 `app.js` 在 SSE reader loop 内同步 `await postToolConfirmation(...)` → 浏览器 HTTP/1.1 同源 6 连接限制下 fetch 排队会反过来 stall SSE reader；(2) 反向代理/移动网关 idle timeout 切线 SSE 在等用户确认。修复：服务端 SSE generator 加 `: keepalive` 心跳（默认 15s，可改 `PAWKEYLAND_SSE_KEEPALIVE_S`）；`demo_ui/app.js` 把 tool-confirm 改 fire-and-forget；部署层强烈建议反向代理启用 HTTP/2 让浏览器在同条 TCP 上多路复用。`scripts/diag_sse_concurrency.py` 给出可重跑诊断。
-> [Sync] 2026-05-12: Thread Session 模式接入 — 生产 HTTP 入口现在是 `ClaudeAgentThreadFactory.run_streaming(request)`。`tool-approval-request` 帧由 Phase 1 内的 5 个 `AgentStreamingCallbacks` 闭包通过 `state.turn_context.queue` 推送；`/tool-confirm` 经 `factory.confirm_tool(session_id, tool_call_id, approved, reason, answers)` 委托到内部 `Service.confirm_tool` → `ToolConfirmationStore.resolve`，与 Phase 1 注册的 `state.turn_context.pending_confirmation_ids` 在 owner loop 上 `set_result`。Phase 4 finally / 客户端断开会调用 `_store.cancel_pending(...)` 释放残留 Future，与享元 State 的 "create in Phase 1 / destroy in Phase 4" 契约对齐。详见 [claude-agent-thread-session-patterns.md §6.4](./claude-agent-thread-session-patterns.md#64-工具确认manual-模式)。
 
 ```mermaid
 sequenceDiagram

@@ -4,7 +4,6 @@
 > [Output] Reflections-agent design patterns draft: lifecycle template, state machine,
 >          repository, runner/executor, workspace adapter, observer, and anti-overdesign rules.
 > [Pos] reflections-agent-patterns-design in `docs/design/memory`
-> [Sync] 2026-06-25: split design-pattern content out of the original all-in-one
 >         Reflections-agent draft.
 
 # Reflections-agent 设计模式设计稿

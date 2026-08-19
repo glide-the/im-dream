@@ -2,7 +2,6 @@
 
 > **迁移来源**: `glide-the/claude-agent-next-kit → docs/design/workspace-skills-flow.md`
 > **适配说明**: 从 Next.js / TypeScript 迁移到 Python / FastAPI 架构。
-> **[Sync] 2026-06-16**: 同步入口会先导入 `.claude/skills/` 下真实文件/目录，
 > 再重建从 `workspace/skills/` 到 `.claude/skills/` 的软链接。
 
 ## 概述

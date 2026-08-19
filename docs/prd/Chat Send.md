@@ -1,9 +1,6 @@
 # Chat Send PRD
 
 > 对话输入 Dock、发送行为、已发送消息与反馈状态的视觉和交互规范。本文引用 [Color System](<./color_system/README.md>)，并与当前产品实现保持同步。
-> **[Sync] 2026-06-09**: 当 Settings 中「应如何批准 IM」开启时，AIInputDock 隐藏「逐步确认」按钮，显示静态「完全访问」权限徽标，并按 auto 工具模式发送；Settings 切换通过同页事件实时同步到已打开的 Chat 输入区。
-> **[Sync] 2026-06-09**: 长对话上滑阅读历史时，AIInputDock 上方显示悬浮到底部箭头；按钮由 ChatPanel 根据消息滚动位置控制，不改变输入 Dock 内部布局。
-> **[Sync] 2026-06-13**: 完全访问模式下 AskUserQuestion 类工具仍显示前端问答表单；「完全访问」只隐藏全局逐步确认切换，不隐藏问题确认窗口。
 
 ## 1. 文档范围
 

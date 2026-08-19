@@ -1,9 +1,6 @@
 <!-- [Input] Deck设计需求.pdf, CozeLoop draft/commit source, repository CRUD, and Admin schema authority. -->
 <!-- [Output] Canonical Deck management/content-version design index and delivery boundary. -->
 <!-- [Pos] Deck product-design source of truth under docs/design/deck. -->
-<!-- [Sync] 2026-08-16: implement durable drafts, immutable Deck vN commits, and Settings / Work ownership. -->
-<!-- [Sync] 2026-08-17: add the related Chat cleanup and corrected Deck deletion boundary. -->
-<!-- [Sync] 2026-08-17: make preview Demo launch follow the server-owned Chat/Dream Agent type. -->
 
 # Deck 管理与内容版本设计索引
 
@@ -15,6 +12,45 @@ PDF 的市场/分发内容按更高优先级约束独立延期至 [`../deck-regi
 
 CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交前差异预览、不可变版本记录与 CAS 冲突。
 不复制 Workflow、Agent 编排、Prompt/Memory 工作台或多工作台信息架构。
+
+## 核心概念定义
+
+| 概念 | 定义 | 当前边界 |
+|---|---|---|
+| Deck | 一组可被 Chat 或 Dream 选用的 Agent 配置聚合 | 系统 Deck 与用户 Deck 使用同一预览入口 |
+| System Deck | 系统提供且默认可见的只读 Deck | 不提供启用/禁用操作 |
+| User Deck | 用户创建并维护的 Deck | 仅 enabled、已提交且无未提交草稿时出现在 Deck 首页 |
+| Draft | Deck 表单的可变工作副本 | 每次有效修改推进 `draft_revision` |
+| Deck Version | 用户显式提交后形成的不可变内容快照 | 使用 v1、v2、vN 展示，不自动覆盖历史 Thread |
+| Available Decks | Deck 首页中符合可用条件的用户 Deck 分组 | 最多展示 14 个快捷图标，并提供列表预览 |
+| Work / Deck | Settings 下的完整管理入口 | 管理创建、更新、启停、版本和相关对话 |
+| Thread Deck context | 某个历史 Thread 当前使用的 Deck 版本事实 | 升级必须由用户显式确认；本期不自动升级 |
+
+## 核心业务时序图
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as Deck 页面
+    participant API as Deck API
+    participant DB as PostgreSQL
+    participant Surface as Chat / Dream
+
+    User->>UI: 打开 Deck 页面
+    UI->>API: 查询可用用户 Deck 与系统 Deck
+    API->>DB: 读取系统定义、启用状态和已提交版本
+    DB-->>API: Deck 投影
+    API-->>UI: Available Decks / System Decks
+    User->>UI: 点击 Deck
+    UI->>API: 读取预览与当前版本
+    API-->>UI: 只读预览、Agent 类型和示例
+    User->>UI: 点击示例
+    alt Chat Agent
+        UI->>Surface: 打开 Chat，设置 Deck 并预填输入
+    else DreamAgent
+        UI->>Surface: 通过 Dream 启动入口创建 Run
+    end
+```
 
 ## 本期结论
 
@@ -47,7 +83,6 @@ CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交�
 ## 文档导航
 
 - [PDF 逐页需求追踪](./deck-pdf-requirement-trace.md)
-- [现状、影响与设计审查](./deck-impact-review.md)
 - [Deck 启用入口与 Work 设置工作台](./deck-management-list.md)
 - [Deck UI 视觉与布局规范](./deck-ui-visual-spec.md)
 - [Deck 评估器式交互草稿（有效）](./deck-evaluator-interaction-draft.md)
@@ -55,5 +90,4 @@ CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交�
 - [内容版本与 Thread 边界](./deck-versioned-chat-workspace.md)
 - [历史 Thread 显式升级（后续 capability）](./thread-version-upgrade.md)
 - [业务时序](./deck-business-sequences.md)
-- [需求追踪与测试矩阵](./deck-traceability.md)
 - [市场分发延期范围](../deck-register/README.md)

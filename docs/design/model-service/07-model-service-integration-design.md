@@ -719,46 +719,6 @@ sequenceDiagram
 
 禁止生产 fallback：静态 model array、`models.json`、Provider 型号 env、从 alias 猜 Provider、mock entitlement/allowance。
 
-## 15. 测试与验收设计
-
-### 15.1 合同与资格测试
-
-| 测试对象 | 必测场景 | 通过条件 |
-|---|---|---|
-| Public Model Catalog | included、upgrade、inactive、exhausted、deny、maintenance | 全部 enabled 模型可见；callable 仅对应 included |
-| DTO 安全 | 未知字段/enum、危险 route 字段、callable 不一致 | Admin 不输出危险字段；BFF strict 返回 502 |
-| Selection Validation | callable、402、403、409、503 | 仅 200 保存 alias；其他状态保留原值与用户意图 |
-| Gateway Eligibility | Entitlement 缺失、Allowance 不足、permission deny、rate limit | 分别映射 403/402/403/429，不绕过实时校验 |
-| Token 结算 | 成功、未 dispatch、流中断、unknown usage、进程崩溃 | 每个 reserve 到唯一终态，Ledger 不重复消费 |
-| 模型状态变化 | enabled→disabled→enabled | disabled 从 catalog 消失；保存值 stale；调用 409；恢复后重新评估 |
-| Provider 故障 | dispatch 前失败、上游错误、协议非法、SSE 首字节后失败 | 状态与安全 stream/error 合同一致，Secret 不泄漏 |
-
-### 15.2 BFF、前端与安全测试
-
-- BFF 拒绝 browser user override、未知 DTO 字段、非法 alias 和不安全错误明细。
-- Settings 显示全部 visible model，并区分升级、订阅、额度、权限、维护和 stale。
-- locked model 不发送保存请求；stale alias 不自动 fallback；保存与每次推理都实时复验。
-- 401/402/403/409/429/502/503 及 SSE error event 映射到本文定义的唯一 UI 动作。
-- 1440×1000 与 390×844 无横向溢出；keyboard、focus、label、screen reader 和错误恢复可操作。
-- Browser bundle、DOM、Storage、response、analytics 和普通日志不含 Provider Secret、Gateway Key、upstream model 或内部路由。
-- 并发请求、幂等重放和 watchdog reconciliation 通过 PostgreSQL integration test。
-
-### 15.3 验收标准
-
-- [ ] 所有 enabled 模型对已登录 canonical user 可见。
-- [ ] 无 Entitlement 模型为 upgrade_required/permission_denied，不消失、不误报维护。
-- [ ] maintenance 只表示模型/平台路由依赖不可用。
-- [ ] callable 与 availability 不变量严格验证。
-- [ ] 保存和每次推理均由 Admin 实时复验。
-- [ ] disabled 保存 alias 进入 stale，用户显式重选，无自动 fallback。
-- [ ] Dream 无静态模型、Provider 型号或 eligibility 规则。
-- [ ] Admin RBAC 不放宽；Browser 无 Gateway/Provider Secret 或 upstream route。
-- [ ] 402/403/409/429/502/503 语义与前端动作一致。
-- [ ] Provider I/O 不持有 DB transaction/lock。
-- [ ] 每个 reserve 最终 capture/release/保守强制终态，重试不重复消费。
-- [ ] 与订阅文档使用同一 Subscription/Entitlement/Allowance 事实。
-- [ ] 1440×1000、390×844、键盘、焦点、label、screen reader 和恢复路径明确。
-
 ## 16. 架构约束与设计取舍
 
 | 领域 | 采用方案 | 禁止方案 | 原因 |

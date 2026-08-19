@@ -35,6 +35,30 @@ Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中�
 - 揭示生命周期、协作关系、扩展点和已知限制
 - 为后续"元操作语义 / Edit Point"扩展提供设计基础
 
+### 1.3 核心业务时序图
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as Editor UI
+    participant Engine as EditorEngine
+    participant Voice as Voice Analysis API
+    participant Session as Session API
+    participant DB as PostgreSQL
+
+    User->>UI: 输入或粘贴文本
+    UI->>Engine: updateTextCell
+    Engine->>Engine: 合并 Cell、计算能量与快照
+    opt 满足分析条件
+        Engine->>Voice: 提交当前文本与 Voice 上下文
+        Voice-->>Engine: 返回候选 Commentor
+        Engine-->>UI: 按能量和快照规则应用评论
+    end
+    UI->>Session: 防抖保存 EditorState
+    Session->>DB: 校验用户并持久化 Session
+    DB-->>UI: 保存 revision
+```
+
 ---
 
 ## 2. 现有模块入口
@@ -54,7 +78,7 @@ Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中�
 
 ---
 
-## 3. 核心对象与职责
+## 3. 核心概念与对象定义
 
 ### 3.1 EditorState（状态快照）
 
@@ -461,20 +485,3 @@ flowchart LR
 - **Hooks 层是用户意图到引擎命令的适配器**：React Hooks 承担了 UI 事件的适配、IME 保护、防抖、认证判断等横切关注点，使 Engine 保持纯粹。
 
 - **当前架构对 Agent 操作不透明**：Engine 的命令接口已足够清晰，但没有对外暴露可供 Agent 程序化调用的抽象层（如命令队列、事件总线、工具函数），导致 Human 路径和 Agent 路径完全分离。
-
-### 9.2 证据索引
-
-| 设计结论 | 来源文件 | 关键位置 |
-|---------|---------|---------|
-| EditorEngine 单一订阅 | `engine/EditorEngine.ts` | L706 `subscribe(callback)` |
-| 能量模型 threshold=50 | `engine/EditorEngine.ts` | L122 `private threshold: number = 50` |
-| 评论应用三重守卫 | `engine/EditorEngine.ts` | L296–403 `checkCommentorApplication` |
-| 空白重置多订阅 | `engine/EditorEngine.ts` | L127 `blankResetSubscribers: Set<() => void>` |
-| 会话生命周期 | `hooks/useSessionLifecycle.ts` | L246–517 |
-| 自动保存 3s 防抖 | `hooks/useSessionLifecycle.ts` | L487–517 |
-| 竞态守卫 | `hooks/useSessionLifecycle.ts` | L494–499 |
-| 新一天检测 | `hooks/useSessionLifecycle.ts` | L339–368 |
-| 分析 API 入口 | `api/voiceApi.ts` | L128–172 `analyzeText` |
-| 会话持久化 API | `api/voiceApi.ts` | L389–467 `saveSession/listSessions/getSession` |
-| WidgetCell 类型 | `engine/EditorEngine.ts` | L24 `WidgetCell.widgetType` |
-| IME 保护 | `hooks/useTextCells.ts` | L105–126 `handleCompositionStart/End` |

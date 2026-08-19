@@ -3,14 +3,6 @@
 > 状态：Capability-only implemented；production environment inventory pending
 > 更新：2026-08-12
 
-## R37 提交轮次记录
-
-- 当前轮次目标：在两个存在其他未提交工作的仓库中，分别提交“Admin/Drizzle 单一 DDL 权威 + Dream 领域运行时所有权”实现，并强制把 Dream 根 `AGENTS.md` 纳入版本管理。
-- 优化后的执行提示词：审计两个工作树，只暂存数据库权威切换所需的 migration、catalog、capability、依赖清理、测试、运维文档与 Agent 协议；对同时包含 DreamAgent runtime 改动的文件执行分块暂存；分别验证 staged diff、敏感信息、测试证据和 `git diff --check` 后，按 Conventional Commits 在各仓库创建独立提交，不回退或暂存其他用户改动。
-- 本轮检查或修改范围：Dream 的 capability-only runtime、Alembic/DDL 删除、legacy importer、相关数据库测试和文档；Admin 的 0032、完整 Dream schema/catalog、migration runner、数据 migration registry、接管 E2E、文档与 `AGENTS.md`。
-- 本轮完成标准：两个提交仅包含上述边界；Dream `AGENTS.md` 被 Git 跟踪；`20260811_07` 的 live index/capability 和不可执行审计副本均位于 Admin；提交后其他 DreamAgent/UI 工作仍保持未暂存。
-- 本轮实际结果和未验证推断：提交前完整实现验证为 Dream 1,955 passed、22 skipped、655 subtests，Admin 378 tests、TypeScript、ESLint、schema cutover 与真实 43+5 数据 E2E 通过。生产环境的 06/07 分布、PITR、migrator ACL 仍是未验证的外部发布事实，不纳入本地提交完成声明。
-
 ## 决策
 
 Dream 不再是 PostgreSQL DDL 版本所有者。所有共享 Schema 变更只在 `/Users/dmeck/project/ink-admin-memory/drizzle` 以新的前向 migration 演进。Dream 保留领域运行时所有权：repository、transaction、用户身份、thread/workflow 绑定、业务权限和数据完整性仍由 Dream 代码负责。

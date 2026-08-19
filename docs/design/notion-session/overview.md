@@ -12,12 +12,6 @@ Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空
 >      `backend/libs/claude_agent_kit/server/workspace.py`,
 >      `backend/libs/claude_agent_kit/types.py`,
 >      `backend/claude_agent/context_builder.py`
-> [Sync] 2026-06-28: 收敛 Notion 远程数据源的交互快照生命周期 — Agent 初始化读取资源连接器数据层物化的 canonical snapshot，不以 Agent 本地 notion_cache 作为权威状态；补齐 MVP 前端交互设计稿。
-> [Sync] 2026-07-07: Chat 入口改为主落点，历史对话与连接器工作台下沉到输入框下方，输入框下方增加快捷功能 secondary action strip，并保留可恢复的 `shell_error` 态；连接器不再以独立主页面承载。
-> [Sync] 2026-07-08: 依据最新版 Chat 入口页与连接器详情草图复核主路径：主入口仍是 Chat `WorkspaceTabBar` 的轻量摘要，复杂配置进入 Settings「资源链接」里的 `ConnectorNotionDetailPage`，并再次确认连接器不是独立主导航页。
-> [Sync] 2026-07-08: 资源选择持久化收敛为 `connector_resources` / connector `sources`：Settings 已挂载来源、Chat 已链接资源和 Agent snapshot 入口读取同一份后端状态；Notion People 系统 data source 在 discovery 层过滤。
-> [Sync] 2026-07-09: Chat `ResourceConnectorTabPanel` 根内容区减少线框化，状态信息块使用虚线边界但无卡片底色 / 阴影，空态和已链接资源行用轻表面和留白承接摘要内容。
-> [Sync] 2026-07-09: Settings `ResourceOptionRow` 与 `MountedSourcesSection` 的页数元信息只在 `pageCount > 0` 时显示，避免 `0 pages` 占用资源行右侧状态区域。
 
 ---
 
@@ -60,6 +54,18 @@ ink-and-memory 的工作空间模型目前仅管理**本地 EditorState**（`.ed
 - **已选择资源必须落库**：用户在 Settings 保存的 data_source / page 写入 `connector_resources`，并通过 connector `sources` 暴露给 Settings、Chat 和后续 snapshot 物化
 - **只读优先**：先实现浏览能力；写入只设计 proposal/write pipeline 边界，不直接落地远程写回
 - **认证与数据分离**：认证层由前端用户配置驱动，数据层负责同步、版本化和快照发布
+
+### 1.4 核心概念定义
+
+| 概念 | 定义 | 当前边界 |
+|---|---|---|
+| Resource Connector | 把外部内容源接入工作空间的统一业务对象 | Notion 是当前连接器类型 |
+| Connector Auth | 用户授权 Notion 访问所形成的服务端认证状态 | 与资源选择、快照数据分离 |
+| Connector Resource | 用户显式选择并保存的 page 或 data source | 必须持久化，不能只存在前端 |
+| Canonical snapshot | 数据层从 Notion 物化的内部权威只读快照 | Agent 不直接读取临时 CLI 输出 |
+| Snapshot version | 一次完整快照发布的版本标识 | 同一 Turn 读取保持一致 |
+| `.notion/` index | Workspace 中供 Agent 浏览 snapshot 的虚拟索引 | 当前只读；写回不在本期 |
+| Write proposal | 未来远程写回前必须由用户确认的变更提案 | 仅保留边界，不实现写回 |
 
 ---
 

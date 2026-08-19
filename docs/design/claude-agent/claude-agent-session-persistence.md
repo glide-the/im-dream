@@ -1,8 +1,4 @@
 > **迁移来源**: Pawkeyland docs/app/design/claude-agent-session-persistence.md  
-> **[Sync] 2026-05-25 v1**: 全面对齐 Ink & Memory 实际实现（SQLite `chat_thread + chat_message`，`better-chatbot` 对齐存储模式）。  
-> **[Sync] 2026-05-25 v2**: 对齐 better-chatbot schema：`parts TEXT NOT NULL DEFAULT '[]'`（移除 `content` 列和 `parts_json` 列）；`save_chat_message(parts: list, metadata: dict)` 签名；`list_chat_messages` 返回已解析对象；前端读 `m.parts` 直接使用。  
-> **[Sync] 2026-05-25 v3**: 重大设计重构 — `collected_parts` 改为收集**原始 SSE 事件报文**；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做线性转换；`tool_inv_by_id` 等状态字段从 `_TurnContext` 移除。
-> **[Sync] 2026-05-29 v4**: Claude SDK session ID 持久化落地 — `chat_thread` 新增 `claude_session_id TEXT` 和 `agent_contract_version TEXT` 两列；`_persist_turn` 每次成功 turn 后调用 `update_chat_thread_claude_session` 写回 `result.session_id`；`assemble_context` Phase 1 据此决定是否 resume（详见 `claude-agent-context-assembly.md §4.7`）。
 
 # Claude Agent 会话持久化设计
 

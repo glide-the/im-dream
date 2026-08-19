@@ -4,37 +4,23 @@
 > sandbox network policy.
 > [Output] Design for Settings-controlled per-thread Claude Code Bash sandbox.
 > [Pos] workspace-sandbox-design-doc in `docs/design/claude-agent`
-> [Sync] 2026-06-13: initial design and implementation contract.
-> [Sync] 2026-06-14: add runtime dependency read allowlist and clarify that
 > built-in file/search tool `input-available` is not proof of execution.
-> [Sync] 2026-06-14: document Docker nested sandbox mode for Remote SSH
 > deployments.
-> [Sync] 2026-06-14: remove user-facing nested sandbox env switch; backend
 > auto-detects Linux containers.
-> [Sync] 2026-06-16: keep `.claude/skills/` writable; sandbox denyWrite
 > protects config/hook internals instead of the whole `.claude/` tree.
-> [Sync] 2026-06-17: document Docker Compose runtime privileges required by
 > bubblewrap mount namespace setup.
-> [Sync] 2026-06-17: include standard Linux `sbin` directories in the runtime
 > read allowlist to avoid bubblewrap `/newroot/sbin` tmpfs mount failures.
-> [Sync] 2026-06-16: direct real writes under `.claude/skills/` are imported
 > into `workspace/skills/` on the next workspace sync before symlinks rebuild.
-> [Sync] 2026-08-04: `init_workspace()` pre-creates and repairs
 > `.claude/agents/`. Claude Code's Bash sandbox rejects creating new
 > directories inside the protected `.claude` tree at runtime; pre-creation
 > lets the built-in `Write` tool manage project subagent definitions without
 > broadening access to settings or hooks.
-> [Sync] 2026-06-21: add Settings-backed `sandbox.network` policy.
-> [Sync] 2026-06-22: Workspace Mode is now the workspace lifecycle gate:
 > when `workspace_enabled=false`, Claude Agent chat does not initialize a
 > thread workspace, does not pass `cwd`, and the frontend hides workspace file
 > sidebars/entry points.
-> [Sync] 2026-06-22: Settings hides Sandbox Network and user environment
 > variable controls while Workspace Mode is disabled because both depend on the
 > workspace runtime path.
-> [Sync] 2026-06-25: `sandbox_network_mode="open"` omits `sandbox.network`
 > instead of writing unsupported `allowedDomains:["*"]`.
-> [Sync] 2026-08-14: filesystem write policy correction (§2.1) — the server
 > injects the supported `CLAUDE_CODE_TMPDIR` into every SDK subprocess and
 > sandbox `allowWrite` uses that same canonical root (configured default
 > `/tmp/claude`; `/private/tmp/claude` on macOS after resolving the system
@@ -44,11 +30,9 @@
 > broadening the business workspace boundary. The
 > `sandbox_fs_allowed_write_paths` Settings key for user extra writable
 > absolute paths; denyWrite precedence documented.
-> [Sync] 2026-07-26: apply-seccomp passthrough revision — bundled-CLI shadowing
 > recurrence story documented; `sandbox.seccomp.applyPath` settings override
 > (2.1.220 single-binary layout) emitted when
 > `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` names an existing shim.
-> [Sync] 2026-07-26: Route A — settings seccomp override proven DEAD in
 > production (2.1.220 embedded converter hardcodes `seccomp: jCu()`, 0
 > settings-reader string hits; shim never invoked); mechanism removed,
 > reverted to the 2.1.108 vendor passthrough patch + `claude --version`

@@ -177,27 +177,6 @@ sequenceDiagram
     App->>App: auto-save effect skips this state change
 ```
 
-## 5. 过度设计审查
-
-本次实现只做 P0 链路：
-
-- 增加一个轻量 in-process `SessionEventBus`。
-- 增加一个前端订阅 hook。
-- 修改 Agent 写工具成功回调发布事件。
-- 修改 App reload 逻辑。
-- 修改 Engine/source 标记、自动保存 skip、自动保存内容签名去重。
-
-暂不实现以下内容：
-
-| 排除项 | 排除理由 |
-|---|---|
-| 全局 SessionStore | 会影响 CalendarPopup、useSessionLifecycle 初始化、Analysis/Collections 等多个读路径；收益主要是列表缓存，不是 MCP 写同步 P0 |
-| Redis / durable event replay | 当前前端有 fallback，事件只承担实时加速；可靠持久化仍由 DB + GET 提供 |
-| 乐观合并 editor_state patch | 写工具已经在 DB 写入完整 editor_state；前端拉权威状态更简单 |
-| 跨 tab 广播 | 当前问题是当前 Chat/Writing 同屏同步；跨 tab 可后续扩展 |
-
-判断：方案符合目标，没有过度设计。它把盲等替换为完成事件，同时保留 REST fallback，不扩大到无关页面的状态重构。
-
 ## 6. 验收标准
 
 1. `frontend/src/App.tsx` 不再出现 MCP 写确认后的 `setTimeout(..., 2000)` 盲等待。

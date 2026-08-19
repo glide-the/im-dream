@@ -78,14 +78,6 @@ SubagentSidebar
 - 调试字段：`threadId/taskId/toolCallId/messageCount/truncated/status/durationMs/projectionVersion`；不得记录 prompt、工具输入输出或绝对路径正文。
 - 开发模式可记录丢弃的重复/未知事件数量与排序兜底原因，生产环境仅保留聚合指标。
 
-### 0.9 验收清单
-
-- 任务项明显比旧版紧凑，标题、状态与结果概况可快速扫描。
-- 两种参考 Agent（短 PRD 交付、长 e2e 执行）使用同一模板正确展示。
-- 真实任务派发、文本、工具、文件记录、状态与最终回复按稳定顺序出现，最终回复不重复。
-- running/completed/failed/cancelled、加载、空记录、旧记录和未知事件都有明确降级。
-- 主 Chat Markdown/工具表现不回归；详情没有输入框、重复订阅或嵌套纵向滚动。
-- 深浅主题、中英文、窄/宽侧栏、键盘与读屏验收通过，宽度调节能力保持有效。
 
 ## 1. 产品目标与范围
 

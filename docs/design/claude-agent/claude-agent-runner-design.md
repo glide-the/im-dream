@@ -1,22 +1,14 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentRunner 模块设计.md — 路径已适配 Ink & Memory 工程规范。
-> **[Sync] 2026-06-07**: 补充 auto 模式敏感度分流策略：workspace `files/` 内置文件工具和明确低敏查询工具显式 allow；当时状态切换类工具也归入高敏确认，该分类已被 2026-06-09 的 `switch_editor` 低敏策略取代。
-> **[Sync] 2026-06-09**: 权限策略独立为 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)；`Skill` 和 `switch_editor` 归入低敏 auto allow。
-> **[Sync] 2026-06-13**: Bash workspace confinement is delegated to Claude
 > Code's native `sandbox` settings in each thread `.claude/settings.json`;
 > Runner `PreToolUse` does not parse shell paths for sandboxing.
-> **[Sync] 2026-06-13**: Settings full-access mode keeps
 > `AskUserQuestion` / `mcp__user__ask_user` on the frontend confirmation path
 > so answer forms can populate `updatedInput`.
-> **[Sync] 2026-06-09**: Settings `im_full_access_enabled` 接入 Runner；开启后在 `.editor/` 虚拟索引重定向之后，对除问答表单外的已暴露工具返回显式 PreToolUse allow。
-> **[Sync] 2026-06-21**: Settings `sandbox_network_mode="disabled"` is
 > enforced before full-access and low-sensitivity allow decisions; network
 > tools receive explicit PreToolUse deny.
-> **[Sync] 2026-07-26**: SDK 迁移 `claude-code-sdk 0.0.25` → `claude-agent-sdk
 > 0.2.128`——`ClaudeAgentOptions` 改名与依赖版本更新（§依赖表）；
 > `debug_stderr` 废弃改为 `options.stderr` 回调捕获 CLI stderr；
 > 新 transport 默认优先 bundled CLI（`cli_path` 可覆盖）；hooks /
 > extra_args / resume / partial messages / ClaudeSDKClient API 不变。
-> **[Sync] 2026-07-26**: HOTFIX — hook 输出改为纯字典字面量：
 > `HookJSONOutput` 在 0.2.128 为 TypedDict Union 不可调用，构造调用曾导致
 > PostToolUse 观察器崩溃与 PreToolUse 决策静默丢失（§5 异常映射、
 > §类型映射表已更新为 dict 契约）。
@@ -225,7 +217,6 @@ sequenceDiagram
 
 ### 5.0 PreToolUse hook 线程安全契约
 
-> [Sync] 2026-05-10: 修复一次生产事故 ——`tool-approval-request` 之后 FastAPI 进程整体挂起。Runner 现在显式跨 loop 桥接确认回调。
 
 - 进入 `run_streaming` 时通过 `asyncio.get_running_loop()` 抓取 host loop（FastAPI worker loop），保存为 `host_loop`。
 - `_pre_tool_use_hook` 的 `await callbacks.on_tool_confirmation_request(...)` 走 `_await_confirmation` 网关：

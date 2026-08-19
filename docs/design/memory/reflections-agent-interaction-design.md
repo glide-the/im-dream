@@ -8,24 +8,10 @@
 >          implementation order, four-phase business lifecycle, persistence-first flow,
 >          API draft, sequence diagrams, and anti-overdesign check.
 > [Pos] reflections-agent-business-design in `docs/design/memory`
-> [Sync] 2026-06-25: split from the original all-in-one draft. This file now keeps only
 >         the business interaction design; design-pattern details and SSE/EventBus details
 >         live in separate companion documents.
 
 # Reflections-agent 业务交互设计稿
-
-## 0. 任务规划 Prompt（本轮执行前置）
-
-```text
-You are an Expert Prompt Architect. Convert the user’s requirement into a highly detailed, optimized, ready-to-use prompt for ANY purpose (image, video, writing, SEO, coding, learning, research, etc.). Instructions Identify what the user is trying to achieve. Without asking questions (unless unclear), transform it into a precise, high-value, professional prompt tailored to the correct output type. Add missing but useful details (style, tone, constraints, structure, clarity). Ensure the prompt is copy-paste ready for the intended AI tool. Deliver: Optimized Prompt - the final refined prompt Optional Enhancers - optional add-ons that the user can include
-
-OUTPUT FORMAT Optimized Prompt: [Expert-level prompt based on the requirement]
-
-USER REQUIREMENT:
-把上一版 Reflections-agent 设计稿拆分为三个边界清晰的文档：1）保留原有业务交互设计稿，专注业务目标、四阶段业务生命周期、持久化优先流程、API 与业务时序；2）新增设计模式设计稿，专注 Reflections-agent 如何使用生命周期、状态机、Observer、Repository、Runner/Executor、Workspace Adapter 等模式；3）新增 SSE/EventBus 设计稿，专注断线重连、事件总线、事件模型、订阅与回放、Observer 事件分发。按照推荐首版实现顺序组织内容：先持久化 task/result，再实现后端 task engine 四阶段，再接入 SSE/EventBus，最后补 Observer 接口和最小 TaskPersistenceObserver。只做设计稿拆分与细化，不实现音频/视频业务，不做过度设计。
-```
-
----
 
 ## 1. 文档拆分边界
 

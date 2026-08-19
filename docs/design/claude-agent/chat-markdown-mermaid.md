@@ -1,8 +1,6 @@
 > [Input] Chat 页面报错堆栈（`[<pre /> in Markdown (at react-markdown) in AssistMessagePart ...]`）、`frontend/src/components/chat/AssistMessagePart.tsx`、`frontend/src/components/chat/UserMessagePart.tsx`、`frontend/src/components/chat/PlanPanel.tsx`
 > [Output] 定义 Chat 会话 Markdown 中 Mermaid 代码块的 SVG 渲染方案，并消除 `<pre>` 内嵌块级元素导致的 React DOM 嵌套报错。
 > [Pos] interaction-design-doc in `docs/design/claude-agent`
-> [Sync] 2026-07-20: 初版 — Mermaid 按需加载渲染、共享 `ChatMarkdown` 渲染链、流式降级与 `<pre>` 嵌套修正。
-> [Sync] 2026-07-20: 新增 §2.6 图表工具栏 — 预览/源码模式切换、复制源码、导出 PNG 图片。
 
 # Chat Markdown Mermaid 渲染设计
 

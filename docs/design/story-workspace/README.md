@@ -3,6 +3,45 @@
 本目录只保存当前有效的产品与交互设计，并按功能模块组织。执行日志、任务过程、测试清单、
 评审过程和变更流水不放在这里。
 
+## 核心概念定义
+
+| 概念 | 定义 |
+|---|---|
+| Story Workspace | Chat、Dream、Project/Episode 与设置共享的产品外壳 |
+| Project | 一组可持续编辑和索引的故事资产容器 |
+| Episode | Project 下独立阅读、编辑和审阅的分集单元 |
+| Dream Run | 从 DreamAgent 入口启动、绑定一个共享 Thread 的创作执行 |
+| Artifact | Agent 在工作台生成、经投影后供页面读取的业务产物 |
+| Revision | Project、Episode 或 Artifact 投影的并发版本 |
+| Review gate | 未满足审阅要求时阻止受保护后续动作的服务端规则 |
+| Work settings | Deck、资源链接和插件的集中管理分类 |
+
+## 核心业务时序图
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as Story Workspace
+    participant Thread as Thread API
+    participant Dream as Dream API
+    participant Store as PostgreSQL / Workspace
+
+    User->>UI: 打开 Chat 或 Dream
+    UI->>Thread: 加载可访问 Thread 与消息
+    Thread->>Store: 校验所有权并读取历史
+    Store-->>UI: 当前 Thread 与 Deck 上下文
+    opt 启动 Dream
+        User->>UI: 选择 DreamAgent Deck 与目标
+        UI->>Dream: 创建 Run
+        Dream->>Store: 绑定 Thread、Run 与 Project 投影
+        Store-->>UI: Dream 工作台状态
+    end
+    User->>UI: 阅读或修改 Episode
+    UI->>Dream: 携带 expected revision 提交
+    Dream->>Store: 权限、revision 与 review gate 校验
+    Store-->>UI: 新投影或 409 冲突
+```
+
 ## 模块
 
 | 文档 | 业务范围 |
@@ -30,8 +69,3 @@ Agent 对话与 Project/Episode 跨系统合同由以下文档定义：
 3. 每个业务写操作在服务端重新校验用户身份、Thread 所有权、Workflow 权限、expected
    revision 和数据完整性。
 4. 同一设计事实只归属于一个模块；其它文档通过链接引用，不复制竞争性生命周期或协议。
-
-## Sync
-
-- 2026-08-16: 所有以 Deck 为主语的设计文档已迁至 `docs/design/deck/`；本目录只通过 Deck 索引引用跨模块消费合同。
-- 2026-08-16: Dream 首页移除社区 Deck 安装入口，避免暂缓的市场分发继续形成第二套 Deck 流程。

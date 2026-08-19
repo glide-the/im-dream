@@ -1,10 +1,6 @@
 
 # 1. Chat Dashboard 默认空状态结构草图
 
-> [Sync] 2026-07-08: 资源连接器 Tab 只承载轻量摘要、空态、列表和跳转入口；点击「选择连接器」或连接器状态面板中的「管理」进入 Settings「资源链接」，再由 Settings 内 `ConnectorNotionDetailPage` 完成 Notion 单账号认证、统一资源列表搜索 / 分页 / 保存和已挂载来源展示。
-> [Sync] 2026-07-08: Chat 入口比例以《链接器概念的交互设计稿》为准：输入框、`WorkspaceTabBar`、下方主内容区保持同宽居中；历史内容不显示额外窗体边框；资源连接器已连接态展示状态信息与已链接资源摘要，不再把整张连接器信息做成按钮。
-> [Sync] 2026-07-08: Chat 资源连接器已连接态必须读取 connector persisted `sources`，与 Settings「已挂载来源」共用同一份后端状态；刷新页面后仍显示已链接资源，Notion People 系统数据源不出现在 Chat 摘要中。
-> [Sync] 2026-07-09: `ConnectorLandingPanel` 根内容区减少线框，连接器状态信息块改为虚线边界但无卡片底色 / 阴影，空态、状态 chip 与已链接资源行改为轻表面。
 
 对应图片 1：默认没有聊天内容时的首屏。
 

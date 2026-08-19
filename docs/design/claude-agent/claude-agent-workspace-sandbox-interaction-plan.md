@@ -5,36 +5,10 @@
 > [Output] Interaction design for enabling per-thread workspace sandboxing from
 > Settings and diagnosing why the previous config still allowed other paths.
 > [Pos] workspace-sandbox-interaction-plan in `docs/design/claude-agent`
-> [Sync] 2026-06-13: initial design for strict per-thread Bash read/write scope.
-> [Sync] 2026-06-17: add seccomp-denied (`apply-seccomp`) failure handling and
 > local Docker verification checklist.
-> [Sync] 2026-06-21: note that sandbox network policy is covered by the
 > dedicated sandbox-network interaction plan.
 
 # Claude-Agent Workspace Sandbox Interaction Plan
-
-## 1. Optimized planning prompt used for this round
-
-```text
-You are an Expert Prompt Architect.
-Convert the requirement into an implementation-ready engineering plan.
-Goal: when Settings Workspace Mode is enabled, each Claude Agent thread must run
-Claude Code from the server-owned workspace {AGENT_CWD}/{thread_id}, and Bash
-subprocesses must only read/write that single thread workspace through the
-thread-local .claude/settings.json sandbox configuration.
-Tasks:
-1. Diagnose why the current sandbox still appears able to access other paths.
-2. Design the minimal interaction and backend integration path.
-3. Verify the design directly matches the goal and avoids over-engineering.
-4. Implement only the necessary code and regression tests.
-Constraints: use Claude Code's built-in sandbox settings for Bash, use
-PreToolUse for built-in file/search tools such as Read/Grep/Glob, do not parse
-shell commands in Python, do not add a custom sandbox-runtime wrapper, preserve
-existing workspace initialization behavior, and keep the Settings
-`workspace_enabled` switch as the product control.
-Output: concise diagnosis, design, non-goal boundaries, implementation points,
-and validation commands.
-```
 
 ## 2. Diagnosis
 

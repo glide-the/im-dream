@@ -2,13 +2,11 @@
 >         `backend/routers/reflections.py`, `backend/reflections_config.py`,
 >         `frontend/src/api/voiceApi.ts`,
 >         `frontend/src/components/AnalysisView.tsx`
-> [Output] 定义 procedural Memory Workspace 设计：Reflections 分析场景的分区配置、初始化边界、完整时序与验证清单。
+> [Output] 定义 procedural Memory Workspace 设计：Reflections 分析场景的分区配置、初始化边界与完整业务时序。
 > [Pos] memory-workspace-design-doc node in `docs/design/memory`
-> [Sync] 2026-06-06: 重写为 procedural-only Memory Workspace 设计，移除 `.claude/memory/` 运行时来源。
 >            新增两类使用场景（Voice 对话记忆 / Reflections 分析）、Reflections 三分区配置设计、
 >            分区初始化端点对比、Reflections 完整时序图、输出格式 Contract、
->            Polanyi 默会知识分区设计原则、前端 AnalysisView 交互变更、更新代码归属与验证清单。
-> [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题与 PaperStack 报告视图，补充仪表盘 / 报告双视图结构、一键按钮与分区独立按钮交互差异、ResultCard 统一类型说明、历史报告按日合并策略。
+>            Polanyi 默会知识分区设计原则、前端 AnalysisView 交互与代码归属。
 
 # Memory Workspace 设计
 
@@ -299,15 +297,3 @@ Tacit Boundary 示例（echoes 分区）：
 | Agent 消费 `<memory_context>`（引擎层，无改动） | `backend/claude_agent/context_builder.py` |
 
 ---
-
-## 13. 验证清单
-
-- [ ] `init_workspace()` 不创建 `/memory/`
-- [ ] `/api/claude-agent/threads` 不创建 `/memory/`
-- [ ] 引擎系统提示不包含记忆操作指令（`context_builder.py` 中已移除）
-- [ ] `/api/reflections/memory-init` 能从 `reflections_config.py` 按分区写入 5 个文件
-- [ ] 三个分区各自写入独立的 `WORKFLOW.md` 内容
-- [ ] Agent SSE 调用时 `tool_choice: "auto"`，允许读取 `WORKFLOW.md`
-- [ ] 前端 drain SSE → GET messages API → 过滤 text parts（跳过 reasoning）
-- [ ] `related_session_ids` 只引用 sessions_context 中真实存在的 session ID
-- [ ] 前端各分区独立 loading 状态，互不阻塞

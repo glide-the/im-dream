@@ -4,6 +4,18 @@
 支持多轮对话、写作上下文注入、工具确认，以及跨请求会话保活。  
 本模块与现有 PolyCLI agent 会话完全隔离，不存在任何共享状态或导入依赖。
 
+## 核心概念定义
+
+| 概念 | 定义 |
+|---|---|
+| Thread | 用户可恢复的对话容器，统一承载 Chat 与 Dream 消息 |
+| Turn | Thread 内一次用户输入到单一终态的执行单元 |
+| AgentRunState | Thread 的运行状态，区分跨轮复用状态与当轮临时状态 |
+| SDK Session | 服务端维护的 Claude SDK 会话映射，不等同于产品 Thread |
+| Workspace | 按 Thread 隔离的文件、Skill 和运行配置目录 |
+| Tool confirmation | 高敏工具执行前的显式授权过程，拒绝或取消不执行工具 |
+| Agent event | 经 EventBus 发布并由 Chat/Dream 共用 reducer 消费的标准运行事件 |
+
 ---
 
 ## 1. 功能边界

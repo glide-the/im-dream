@@ -318,33 +318,6 @@ sequenceDiagram
     P-->>U: 完整显示标题、段落和列表
 ```
 
-## 5. 设计审查
-
-结论：**修改后接受**。
-
-必须先做两项修改再实施：
-
-1. Dream turn 的 Deck context 必须在 `ClaudeAgentService.assemble_context` 已解析可信
-   Dream binding 后选择 `dream_mode`，不能让公共路由或浏览器声明 Dream 身份；
-2. 资产协作正文只维护在 `backend/story_workspace` 的一个 Markdown 源文件，工作区部署和
-   每轮路径注入复用现有 `DreamWorkbenchContext`，不能在 Python prompt 中复制第二份规则。
-3. Claude Code 临时根必须在共享 SDK env 层和 workspace sandbox 通过同一 resolver 定义；
-   删除 broad `/tmp` 与动态 `cwd-*`，不能形成 Dream 专用环境分支。
-
-通过审查的理由：
-
-- 不修改 Claude Agent runner 的公开 turn/SDK 执行入口、公开请求 DTO、SSE、session/resume
-  或消息可见性；只在既有 PreToolUse 权限分类器内增加单文件删除窄化规则；
-- 不新增 CRUD API、数据库表、队列、Watcher、Observer 控制或状态机；
-- Hook 继续只在成功根 turn 后读取文件事实，不解析 assistant JSON；
-- MCP 仍是可选辅助，不承担最终一致性；
-- 使用现有 Chat transport 和同一 thread，Dream↔Chat 行为一致。
-- 完整正文仍随现有 stage revision 发布，不新增详情 API、GET 副作用或页面直读 canonical
-  文件；`content` 是向后兼容的可选 DTO 字段，不形成第二套协议或生命周期。
-
-明确拒绝：通过正则识别用户意图、前端解析 JSON 后替 Agent 写文件、为三类资产复制三个
-同步器、把引用关系持久化成新的 workflow 状态，以及用模型输出内容判断 turn 是否完成。
-
 ## 6. 验收标准
 
 - 目标真实 Run 的同一 thread/session 中，Agent 每轮读取两份合同；

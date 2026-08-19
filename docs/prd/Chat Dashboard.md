@@ -1,16 +1,6 @@
 # Chat Dashboard PRD
 
 > 对话工作台首页的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，并与前端实现保持同步。
-> **[Sync] 2026-06-09**: Chat 输入区的权限切换受 Settings「应如何批准 IM」控制；完全访问开启时隐藏「逐步确认」并显示「完全访问」。
-> **[Sync] 2026-06-13**: 完全访问只隐藏全局逐步确认入口；`AskUserQuestion` / `mcp__user__ask_user` 仍显示问答确认窗口。
-> **[Sync] 2026-06-09**: ChatPanel 在用户上滑离开消息底部时，于 AIInputDock 上方显示悬浮「滚动到底部」箭头；点击后平滑回到底部并恢复自动贴底。
-> **[Sync] 2026-06-28**: 历史对话入口改为右侧历史面板；面板打开即加载默认历史，标题栏搜索按钮打开居中搜索弹窗。搜索弹窗只负责检索和切换会话，不显示「新聊天」入口。
-> **[Sync] 2026-07-08**: 依据《Chat 工作区入口页》与《连接器具体配置页面结构草图》重写 Chat 主工作区：以居中 `ChatInputDock` + `WorkspaceTabBar` 为准，历史与资源连接器都在主内容区切换，旧的侧边历史入口不再作为主路径。
-> **[Sync] 2026-07-08**: 修正资源连接器入口策略：Chat 只承载轻量 `ResourceConnectorTabPanel`，点击「选择连接器」或连接器状态面板中的「管理」必须进入 Settings 的「资源链接」区；Notion 具体配置页由 Settings 内的 `ConnectorNotionDetailPage` 承载。
-> **[Sync] 2026-07-08**: Notion 具体配置页最新交互归属 Settings：同一平台只认证一个账号；资源范围为统一 data_source / page 列表，搜索框与「保存资源」同一操作行，默认每页 10 条；保存后「已挂载来源」必须立即显示所选来源。
-> **[Sync] 2026-07-08**: 根据 Chat 入口比例反馈收紧实现边界：`MainContentArea` 与输入框 / `WorkspaceTabBar` 同宽居中；历史窗体移除外层冗余边框；Chat 连接器已连接态改为状态信息面板，展示授权 / 同步 / 已链接资源摘要，只有小型「管理」入口可跳转 Settings。
-> **[Sync] 2026-07-08**: Chat 连接器面板的已链接资源必须来自后端 persisted `connector.sources`；Settings 保存资源后刷新页面仍可恢复，且 Notion People 系统数据源不会出现在资源范围或 Chat 摘要中。
-> **[Sync] 2026-07-09**: Chat `ConnectorLandingPanel` 继续减少卡片感：根内容区无外框，`ConnectorStatusPanel` 使用虚线边界但无卡片底色 / 阴影，空态、状态 chip 和已链接资源行使用轻表面承载，只在明确操作控件上保留弱边界。
 
 ## 1. 文档范围
 

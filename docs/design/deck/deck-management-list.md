@@ -1,13 +1,6 @@
 <!-- [Input] Deck设计需求.pdf, user Work-settings reference image, and current Settings/Router/DeckManager code. -->
 <!-- [Output] Published-clean enabled Deck home plus Settings / Work management interaction contract. -->
 <!-- [Pos] Deck home and Work-management functional-unit design. -->
-<!-- [Sync] 2026-08-17: restrict both home projections to published-clean enabled Decks,
-                         identify system Decks, and keep full inventory in Settings / Work. -->
-<!-- [Sync] 2026-08-17: make the Settings/Work shell locale-specific; never combine Chinese and English labels. -->
-<!-- [Sync] 2026-08-17: split launcher list into persistent user Available Decks and static System Decks groups. -->
-<!-- [Sync] 2026-08-17: route typed preview examples through the same Chat/Dream launch boundary as the Chat page. -->
-<!-- [Sync] 2026-08-17: use a neutral ink-and-paper preview surface without Deck accent gradients. -->
-
 # Deck 启用入口与 Work 设置工作台
 
 ## 1. 现有代码基线

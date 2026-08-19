@@ -4,7 +4,7 @@
 > **关联文件**: `backend/claude_agent/thread_factory.py`, `backend/claude_agent/thread_pool.py`,  
 > `backend/claude_agent/event_bus.py`（新建），`frontend/src/components/chat/ChatView.tsx`
 
-> **[Sync 2026-08-11 / current contract]** 本文的“浏览器断线只取消 subscriber、
+> 本文的“浏览器断线只取消 subscriber、
 > producer 继续、replay 后再 live、sentinel 单次关闭”仍有效。EventBus 当前存储并广播
 > `NormalizedAgentEvent`，不是已经编码的 SSE 字符串；`ChatStreamAdapter` 只在 HTTP
 > 边界编码。Chat 与 Dream surface 都经同一 thread status/stream/ChatPanel 恢复，Dream

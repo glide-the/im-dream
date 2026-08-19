@@ -2,8 +2,6 @@
 
 > 面向 `docs/prd` 下聊天、文件、侧边栏、Dashboard、历史记录、发送区和暗色模式 PRD 的统一色彩系统。  
 > 本文是索引入口，具体设计稿见子文档。不修改源码、不引入新业务逻辑。
-> [Sync] 2026-07-09: Settings / connector detail pages may use one dashed paper boundary, while inner sections and resource rows must stay flat, whitespace-led, and non-card-like; selected resources use a right-side checkmark, not dark fills.
-> [Sync] 2026-07-09: Decks uses the same paper-boundary rule: one dashed page boundary, flat deck items, small accent marks, and no gradient / shadow-heavy ordinary cards.
 
 ---
 

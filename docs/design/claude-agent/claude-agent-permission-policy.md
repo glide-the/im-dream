@@ -1,28 +1,17 @@
 > [Input] `backend/libs/claude_agent_kit/server/agent_runner.py`, Claude Code restored source `tools/SkillTool/constants.ts`, `backend/claude_agent/context_builder.py`, frontend tool confirmation flow.
 > [Output] Claude-agent tool permission policy for `tool_choice` modes, sensitivity classes, and PreToolUse hook decisions.
 > [Pos] permission-policy-doc in `docs/design/claude-agent`
-> [Sync] 2026-06-09: initial standalone policy extracted from runner implementation and product rule: query-like tools are low-sensitivity; execution/write/interactive tools are high-sensitivity unless explicitly listed.
-> [Sync] 2026-06-09: implementation note added for hook payload normalization (`tool_name`/`toolName`, `tool_input`/`toolInput`) and auto-mode retention of `Skill` in effective `allowed_tools`.
-> [Sync] 2026-06-09: Settings-controlled `im_full_access_enabled` added; when enabled, exposed non-answer-form tools receive explicit PreToolUse allow after `.editor/` virtual-index redirects.
-> [Sync] 2026-06-13: clarify separation from Claude Code Bash sandbox; per-thread
 > workspace filesystem confinement is configured through `.claude/settings.json`,
 > not by parsing shell paths in `PreToolUse`.
-> [Sync] 2026-06-13: full-access mode now excludes AskUserQuestion-style tools;
 > they still use frontend confirmation so answers can be collected.
-> [Sync] 2026-06-14: built-in file/search tools are hard-denied outside the
 > current thread workspace before full-access allow is considered.
-> [Sync] 2026-06-21: Settings `sandbox_network_mode="disabled"` now hard-denies
 > network tools before full-access and low-sensitivity allow decisions.
-> [Sync] 2026-07-20: `EnterPlanMode` / `ExitPlanMode` added to the
 > low-sensitivity auto-allow class (claude-plan §5.7); official `ExitPlanMode`
 > ask-semantics deviation recorded in §3.
-> [Sync] 2026-07-20: `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` /
 > `TaskGet` added to the low-sensitivity auto-allow class (claude-todo §5.7);
 > `TaskUpdate` non-read-only deviation recorded in §3.
-> [Sync] 2026-07-23: SandboxPermissionRequest — decision-chain step ②.5 added
 > (network allowlist/open gate); `open` mode semantics changed to "ask every
 > time". Decision order in §6 re-aligned with code order.
-> [Sync] 2026-07-26: step ②.5 REMOVED — network policy is a system-level
 > control enforced by Claude Code's own sandbox (sandbox.network via
 > workspace.py); runtime asks arrive exclusively via the SDK can_use_tool
 > channel (see `claude-agent-sandbox-network-permission-tool.md`). The

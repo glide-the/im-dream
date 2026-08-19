@@ -10,9 +10,6 @@
 > [Output] 定义 `editor_state` 快照从前端采集到运行时激活、MCP写工具后DB刷新再到清理的完整生命周期，
 >          包括数据结构、六个阶段说明、业务时序图、AgentRunState软缓存决策、None 语义与双路径读取对比。
 > [Pos] lifecycle-design-doc in `docs/design/claude-agent/edit-point`
-> [Sync] 2026-05-29: initial design — editor_state snapshot lifecycle.
-> [Sync] 2026-08-13: add pre-send persistence, structured failure normalization, interaction sequence, and minimal-design review.
-> [Sync] 2026-05-29: editor_state 迁移至 AgentRunState 软缓存；新增阶段 3b（MCP写工具后DB刷新），
 >                    更新 §5 不持久化决策表（AgentRunState 改为软缓存 ✅），更新 §4 时序图。
 
 # `editor_state` 快照生命周期设计
@@ -638,7 +635,3 @@ sequenceDiagram
         SSE-->>Card: 保持 success / output-error / rejected 语义
     end
 ```
-
-### 10.4 过度设计审查
-
-该方案直接满足读写同源、业务失败不误判、状态可理解、重连不变形。它没有新增状态机、存储层、事件类型或平行协议：只增加一个发送前持久化 barrier、把既有签名补上 session identity，并在既有 service 事件边界合并业务错误。删除/否决的多余方案包括：失败时临时建 cell、MCP 写软缓存、仅改变卡片颜色、在 live 与 history 各复制一次错误 parser、增加环境或 test-only 分支。最终最小边界为前端持久化语义、后端统一事件规范化和现有完成卡失败数据保真三处。

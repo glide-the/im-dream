@@ -4,13 +4,8 @@
 > [Output] Define how workspace state (`.editor/` virtual index, workspace directory)
 >          enters the Agent context assembly pipeline as a `<workspace_context>` block.
 > [Pos] context-design-doc in `docs/design/claude-agent/edit-point`
-> [Sync] 2026-05-28: initial design — workspace context integration for edit-point.
-> [Sync] 2026-05-29: add Section 9 — editor_state role and loading path; clarify two-layer architecture (prompt layer vs runtime layer).
-> [Sync] 2026-05-29: §9.3 add reference to editor-state-lifecycle.md for complete lifecycle documentation.
-> [Sync] 2026-05-29: rename session_id → editor_session_id throughout; §9.3 updated to show
 >         service.py extracts editor_session_id from request.editor_state["id"] — not from
 >         cwd basename; three-ID comparison table added.
-> [Sync] 2026-06-28: 补充 Notion connector workspace_context 扩展，要求 Agent 读取连接器数据层 canonical snapshot，而非维护本地 Notion 权威状态。
 
 # 工作空间上下文接入设计
 
@@ -29,10 +24,9 @@ Scope: Design + 实现状态同步
 5. [提示词模板说明](#5-提示词模板说明)
 6. [失败处理](#6-失败处理)
 7. [时序图](#7-时序图)
-8. [实现清单](#8-实现清单)
-9. [`editor_state` 的角色与加载路径](#9-editor_state-的角色与加载路径)
-10. [系统提示词 Edit-Point Workflow 指导](#10-系统提示词-edit-point-workflow-指导)
-11. [Notion Connector Context 扩展](#11-notion-connector-context-扩展)
+8. [`editor_state` 的角色与加载路径](#9-editor_state-的角色与加载路径)
+9. [系统提示词 Edit-Point 指导](#10-系统提示词-edit-point-workflow-指导)
+10. [Notion Connector Context 扩展](#11-notion-connector-context-扩展)
 
 ---
 
@@ -262,20 +256,6 @@ sequenceDiagram
     Agent->>Agent: read_file(".editor/cells.json")
     Note over Agent: PreToolUse 拦截 → 实时 EditorState 数据
 ```
-
----
-
-## 8. 实现清单
-
-- [x] 在 `backend/claude_agent/workspace_context.py` 中定义 `WORKSPACE_CONTEXT_TEMPLATE` 常量和 `build_workspace_context_block(cwd: str) -> str` 函数
-- [x] 在 `ClaudeAgentContextBuilder.build_user_message` 中增加 `cwd: Optional[str] = None` 参数
-- [x] 在 `build_user_message` 中，当 `cwd` 非空时调用 `build_workspace_context_block(cwd)` 并将结果插入 `<runtime_context>` 块之后、用户文本之前
-- [x] 在 `ClaudeAgentService.assemble_context` 中，将已解析的 `cwd` 传入 `build_user_message` 调用
-- [x] 在 `WORKSPACE_CONTEXT_TEMPLATE` 中添加 `Document editing workflow` 节，给出文档读写调度步骤
-- [x] 在 `ClaudeAgentContextBuilder._SYSTEM_PROMPT_TEMPLATE` 中添加 `Edit-Point Workflow` 节，使 Agent 在系统提示词层感知 workflow 调度规则
-- [ ] 为 `build_workspace_context_block` 添加单元测试：验证 `{cwd}` 占位符替换、块边界标签存在性、`cwd=None` 不调用的守卫逻辑
-- [x] 更新 `docs/design/claude-agent/edit-point/.folder.md`，在文件表格中新增本文档行
-- [x] 在 `workspace-adapter.md` 末尾增加指向本文档的"上下文接入"参考章节
 
 ---
 

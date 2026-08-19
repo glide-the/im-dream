@@ -1,9 +1,6 @@
 <!-- [Input] Deck CRUD, content-version capability, binding CAS, and deferred Thread apply receipt. -->
 <!-- [Output] Eleven end-to-end Mermaid business sequences. -->
 <!-- [Pos] Deck management/version sequence source of truth. -->
-<!-- [Sync] 2026-08-16: implement durable draft/explicit commit and retain explicit-only Thread upgrades. -->
-<!-- [Sync] 2026-08-17: add typed Deck-preview Demo dispatch to Chat or the dedicated Dream workbench. -->
-<!-- [Sync] 2026-08-17: add same-Thread, same-Deck next-turn Agent selection with validation and CAS. -->
 
 # Deck 业务时序
 

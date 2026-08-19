@@ -1,9 +1,6 @@
 # File Storage — Design Document
 
 **Path**: `backend/libs/file_storage/` · `backend/server.py` (`/api/storage/*`)
-**Last updated**: 2026-06-15
-**Sync**: Client examples use root deployment API paths (`/api/...`).
-
 ---
 
 ## 📋 Overview
@@ -21,6 +18,42 @@ Supported storage backends:
 |---------|-------------------------------------------------------|
 | `s3`    | AWS S3 or any S3-compatible store (MinIO, DO Spaces…) |
 | `local` | Local filesystem (default — suitable for development) |
+
+## Core concepts
+
+| Concept | Definition |
+|---|---|
+| Storage key | Validated, backend-neutral identifier for one stored object |
+| File metadata | Filename, MIME type, byte size and upload time returned with the key |
+| Storage driver | `local` or S3-compatible implementation behind the same interface |
+| Server upload | Multipart upload proxied through the authenticated Dream API |
+| Direct upload | Time-limited S3 upload URL issued by the server when supported |
+| File proxy | API endpoint that decodes a storage key and streams the object |
+
+## Business interaction sequence
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Browser
+    participant API as Storage API
+    participant Auth
+    participant Driver as FileStorage driver
+
+    User->>Browser: Select file
+    Browser->>API: Request upload capability
+    API->>Auth: Validate current user
+    alt Direct upload supported
+        API->>Driver: Create presigned upload URL
+        Driver-->>Browser: URL, key and headers
+        Browser->>Driver: Upload bytes
+    else Server upload
+        Browser->>API: Multipart upload
+        API->>Driver: Store validated bytes
+    end
+    Driver-->>API: Metadata and storage key
+    API-->>Browser: Safe file URL and metadata
+```
 
 ---
 

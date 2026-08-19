@@ -11,19 +11,6 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 >      `docs/design/claude-agent/notion-point/resource-connector-layer-design.md`
 > [Output] 资源连接器前端 PRD：功能定义、页面交互设计、交互流程、状态定义
 > [Pos] resource-connector-prd in `docs/prd/notion-session`
-> [Sync] 2026-07-04: 从 `docs/design/notion-session/resource-connector-prd.md` 拆分，前端 PRD 独立管理
-> [Sync] 2026-07-07: Chat 入口页成为主落点，历史对话与连接器工作台下沉到输入框下方，嵌入式资源视图负责连接器管理。
-> [Sync] 2026-07-08: 入口描述曾短暂偏离 Chat 主工作区，本稿已回收为 Chat `WorkspaceTabBar` 主入口，并撤销仅摘要化的连接器路径表述。
-> [Sync] 2026-07-08: Notion 详情页统一采用 Settings 内 `ConnectorNotionDetailPage` 结构与 `资源连接器 > Notion Connector` 面包屑；详情层级、状态词汇、骨架屏说明与两份最新草图重新对齐。
-> [Sync] 2026-07-08: 根据最新反馈修正入口边界：Chat `ResourceConnectorTabPanel` 只做摘要和跳转，点击「选择连接器」或连接器状态面板中的「管理」进入 Settings 的「资源链接」区；Notion 详情页由 Settings 内 `ConnectorNotionDetailPage` 承载，保留现有认证 / 资源选择流程。
-> [Sync] 2026-07-08: 详情页业务模型收敛为“同一平台只能认证一个账号”；`ConnectorNotionDetailPage` 不再嵌入集合型 `ResourceConnectorPage`，也不展示新建 / 刷新 / 连接器列表等多实例入口。
-> [Sync] 2026-07-08: ResourceScopeSection 合并 Databases 与 Standalone Pages 为统一资源列表，搜索框与保存按钮同一工具行，默认每页 10 条；保存资源后“已挂载来源”必须立即显示所选来源；底部授权 / 同步状态卡移除。
-> [Sync] 2026-07-08: Chat `ResourceConnectorTabPanel` 已连接态收紧为非按钮状态面板：展示平台、授权状态、同步状态、已链接资源数量和来源摘要；仅小型「管理」入口跳转 Settings。landing 内容区与输入框同宽，历史 tab 移除冗余外框。
-> [Sync] 2026-07-08: 修复资源选择持久化契约：后端 connector 响应必须带 persisted `sources`，前端保存时提交完整资源元数据，刷新后 Settings 已挂载来源与 Chat 已链接资源从同一 DB 状态恢复；Notion People 系统数据源从 discovery 结果过滤。
-> [Sync] 2026-07-09: Notion 详情页上方信息栏收紧为无边框紧凑区，授权状态、同步状态、已链接资源数量、最近同步和受限提示统一放入该信息栏；信息栏下方保留轻量“策略设计”占位但暂不实现策略配置。
-> [Sync] 2026-07-09: Chat `ResourceConnectorTabPanel` 根内容区减少线框，连接器状态信息块使用虚线边界但无卡片底色 / 阴影；空态和已链接资源行由轻表面和留白承载，只有明确操作控件保留弱边界。
-> [Sync] 2026-07-09: Settings `ConnectorNotionDetailPage` 使用单一虚线纸边界；内部资源范围和已挂载来源都是无卡片列表行，不再使用按钮卡片、实线面板或投影表达层级。
-> [Sync] 2026-07-09: `ResourceOptionRow` 与 `MountedSourcesSection` 的页数元信息只在 `pageCount > 0` 时显示；`0 pages` 视为空统计，不占用资源行右侧状态区域。
 
 ---
 

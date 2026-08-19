@@ -1,7 +1,6 @@
 <!-- [Input] Historical Chat Thread binding and future Deck snapshot/apply capability. -->
 <!-- [Output] Explicit single-Thread Deck upgrade confirmation and recovery design. -->
 <!-- [Pos] Historical Thread version-upgrade functional-unit design. -->
-<!-- [Sync] 2026-08-16: define source-target confirmation, zero-write cancel, and fail-safe upgrade states. -->
 
 # 历史 Thread 显式升级
 
@@ -68,4 +67,3 @@
 3. 确认请求包含 expected source、expected current target、明确 target 与幂等键。
 4. 目标漂移、权限变化、运行中和并发更新均要求重新读取，不自动追随最新版。
 5. 新 Thread 固定创建时版本；历史 Thread 保持原版本，二者不共用“自动最新版”流程。
-

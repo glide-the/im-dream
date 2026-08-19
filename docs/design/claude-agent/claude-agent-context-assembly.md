@@ -1,11 +1,6 @@
 > [Input] `backend/routers/claude_agent.py`, `backend/claude_agent/service.py`, `backend/claude_agent/context_builder.py`, `backend/claude_agent/thread_factory.py`, `backend/claude_agent/thread_pool.py`, `backend/libs/claude_agent_kit/types.py`
 > [Output] Define the `assemble_context` lifecycle contract, context source order, filtering policy, failure handling, and test expectations for Claude Agent planning and execution turns.
 > [Pos] context-design-doc in `docs/design/claude-agent`
-> [Sync] 2026-05-28: cleaned duplicate migration headers and Pawkeyland-only context assumptions; aligned the design with Ink & Memory `thread_id`, `message_parts`, workspace-file attachments, and planning prompt optimization.
-> [Sync] 2026-05-29: add existing_session / resume resolution design — `assemble_context` now loads `chat_thread` from DB, gates resume on `_has_usable_claude_resume` (contract-version check) + local JSONL file probe, derives `thread_id_for_agent` / `should_resume`; `_TurnExecution` gains `resume_existing_session` field; `_persist_turn` writes back `claude_session_id` + `agent_contract_version` so the DB self-heals across deployments.
-> [Sync] 2026-06-09: `claude-agent-prompt-optimization.md` now exists as the planning prompt optimization contract; `context_builder.py` also carries the Expert Prompt Architect template for agent-side planning turns.
-> [Sync] 2026-06-16: Session Retrieval Workflow now tells the Agent to pass `query` / `labels` into `mcp__user__get_sessions_range`; default retrieval is character fuzzy matching, while vector mode is an interface boundary only.
-> [Sync] 2026-06-22: Phase 1 loads `system_config` before prompt/cwd assembly; Settings `system_prompt` is rendered as lower-priority configurable guidance under `_SYSTEM_PROMPT_TEMPLATE`, and `workspace_enabled=false` skips thread workspace initialization plus `cwd` / workspace context injection.
 
 # Claude Agent Context Assembly Design
 
@@ -246,48 +241,3 @@ State side effects:
 - `request.cwd` can cause context to run outside the default workspace only when Workspace Mode is enabled and a trusted internal/debug caller provides it. Keep it out of public UI flows unless a trusted admin/debug policy is in place.
 - **Cross-environment resume safety**: `chat_thread.claude_session_id` is durable in DB, but the SDK transcript JSONL lives in the local CLI runtime at `~/.claude/projects/<cwd-encoded>/<session_id>.jsonl`. After a fresh deployment or CLI retention reaping, the DB row still points at a stale `claude_session_id`; `assemble_context` probes the filesystem before committing to `--resume`. On a miss, the DB self-heals after `_persist_turn` writes the freshly captured `claude_session_id`.
 - **Contract version gating**: `_AGENT_RUNTIME_CONTRACT_VERSION` (env `INK_AGENT_CONTRACT_VERSION`) must be bumped whenever the system prompt, MCP tool set, or SDK interaction changes incompatibly with existing transcripts. The check prevents old transcripts from being resumed with a mismatched runtime.
-
-## 9. Testability Requirements
-
-Coverage should stay focused on the contracts above:
-
-- `ClaudeAgentContextBuilder.build_system_prompt` includes the writing assistant role, recent entries, session count cap, no-session fallback, and DB-error fallback.
-- `ClaudeAgentContextBuilder.build_system_prompt(..., configured_system_prompt=...)` renders non-empty Settings SYSTEM_PROMPT inside a lower-priority block and omits the block for empty config.
-- `build_user_message` preserves block order: image attachments, runtime context, final user text/metadata.
-- `assemble_context` builds `system_prompt` once per fresh state and reuses it on subsequent turns.
-- `assemble_context` passes Settings SYSTEM_PROMPT from `get_system_config` into `build_system_prompt`, and rebuilds the cached prompt when that config changes.
-- `assemble_context` initializes workspace and passes `cwd` only when `workspace_enabled=true`.
-- When `workspace_enabled=false`, `assemble_context` does not call `get_or_create_workspace`, clears `state.cwd`, and passes `AgentRunOptions.cwd=None`.
-- `assemble_context` copies `tool_choice`, `model`, `max_turns` into `AgentRunOptions`.
-- **Resume path**: when `request.resume=True` and `existing_session` has a matching contract version and the JSONL file exists locally, `run_options.thread_id` equals the stored `claude_session_id` and `run_options.resume=True`.
-- **No-resume path (first turn)**: `run_options.thread_id=None`, `run_options.resume=False` when `existing_session` is absent or `_has_usable_claude_resume` returns False.
-- **File-probe miss**: when `locate_session_file` returns None for a otherwise valid `existing_session`, the method falls back to `thread_id_for_agent=None` and logs a warning.
-- **Contract version mismatch**: when `existing_session.agent_contract_version` differs from `_AGENT_RUNTIME_CONTRACT_VERSION`, resume is skipped.
-- **DB load failure**: when `get_chat_thread` raises, `assemble_context` does not fail the turn; it proceeds as a first turn.
-- `_TurnContext` starts clean each turn and does not reuse confirmation or reasoning state.
-- `_TurnExecution.resume_existing_session` is the DB row when resuming, `None` otherwise.
-- Planning prompt optimization tests should assert that optimized prompt text enters through `message_parts`, while `assemble_context` remains optimizer-agnostic.
-- Failure tests should cover DB fallback, invalid session ID, workspace initialization failure, unsupported attachment media, and cleanup after cancellation.
-
-## 10. Implementation Checklist
-
-- [ ] Validate auth, thread ownership, and non-empty text before constructing `ClaudeAgentRunRequest`.
-- [ ] Run Expert Prompt Architect optimization before planning turns and store the result as UIMessage text.
-- [ ] Keep raw user task available upstream for audit or UI comparison.
-- [ ] Build `system_prompt` only through `ClaudeAgentContextBuilder`.
-- [x] Load Settings SYSTEM_PROMPT through `get_system_config` and render it as lower-priority configurable guidance. *(2026-06-22)*
-- [ ] Guard recent-session count through `INK_AGENT_CONTEXT_SESSIONS`.
-- [ ] Convert UIMessage parts with `extract_text_from_parts` semantics.
-- [ ] Sync attachments to workspace before context assembly and inject workspace-file parts.
-- [ ] Keep unsupported binary payloads out of prompt text.
-- [ ] Resolve `cwd` without hard-coded local paths.
-- [x] Skip workspace initialization and `cwd` injection when `workspace_enabled=false`. *(2026-06-22)*
-- [x] **Load `chat_thread` row from DB and call `_has_usable_claude_resume` before building `AgentRunOptions`.** *(2026-05-29)*
-- [x] **Probe local JSONL via `locate_session_file` before committing to `--resume`.** *(2026-05-29)*
-- [x] **Set `run_options.thread_id = thread_id_for_agent` (None on first turn) and `run_options.resume = should_resume`.** *(2026-05-29)*
-- [x] **Carry `resume_existing_session` in `_TurnExecution`.** *(2026-05-29)*
-- [ ] Create a fresh `_TurnContext` for every turn.
-- [ ] Copy tool mode into `AgentRunOptions` and start with no pending confirmations.
-- [ ] Keep SDK calls and SSE callbacks out of `assemble_context`.
-- [ ] Clear `turn_context` and pending confirmations on completion, error, or disconnect.
-- [ ] Add or update tests whenever a new context source, priority rule, or failure path is introduced.

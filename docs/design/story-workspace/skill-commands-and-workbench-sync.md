@@ -139,15 +139,3 @@ canonical 源文件删除后，Hook 必须生成明确空投影或移除对应�
 - 把 Artifact 同步放入 Observer 的设计。
 
 权限、身份、路径安全、Artifact schema、原子发布和 Project/Episode 关联不是状态机，必须继续保留。
-
-## 8. 设计审查
-
-结论：**修改后接受**，本文件已按审查意见完成修改。
-
-- 没有 Skill DAG、阶段前置条件或推荐排序；
-- Slash 菜单只插入普通文本；
-- Hook 是同步正确性的 owner，Observer 不是；
-- MCP 是可选辅助；
-- 不新增 API、DDL、SSE、事件存储或第二 runtime；
-- 不修改 Claude runner、报文、thread、session 或 `claude_session_id`；
-- 安全与业务授权继续保留。

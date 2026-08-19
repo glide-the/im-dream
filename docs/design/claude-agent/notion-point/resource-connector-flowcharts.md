@@ -9,10 +9,6 @@ Scope: 设计 — 资源连接器全链路业务流程图（含四层交互泳�
 >      `docs/design/claude-agent/notion-point/resource-connector-layer-design.md`
 > [Output] 资源连接器各核心业务流程的 Mermaid 流程图与泳道图
 > [Pos] resource-connector-flowcharts in `docs/design/claude-agent/notion-point`
-> [Sync] 2026-06-22: 初始设计 — 业务流程图集
-> [Sync] 2026-06-22: 迁移至 claude-agent/notion-point — 工作空间映射相关设计独立管理
-> [Sync] 2026-06-28: 业务流程图收敛到 canonical snapshot 模型；Agent 消费不再以本地缓存/lazy load 作为权威数据来源。
-> [Sync] 2026-07-07: 业务起点改为 Chat 入口页，下方 landing tabs 承载历史对话与连接器工作台。
 
 ---
 

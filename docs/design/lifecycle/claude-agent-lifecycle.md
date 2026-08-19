@@ -3,16 +3,53 @@
 >         `backend/claude_agent/context_builder.py`, `backend/claude_agent/observer.py`
 > [Output] Lifecycle design for `/api/claude-agent` context interaction and Thread Engine.
 > [Pos] lifecycle-design-doc in `docs/design/lifecycle`
-> [Sync] 2026-05-28: initial draft — captures Thread Engine 四阶段生命周期、状态机、
 >         上下文交互设计、TTL Sweeper、Observer 钩子，与 `docs/design/claude-agent/` 下
 >         相关设计稿同步。
-> [Sync] 2026-06-09: 工具确认侧路更新为敏感度策略：manual 全工具确认；auto
 >         仅高敏执行/写入/交互工具确认，workspace files/ 内置文件工具、低敏查询、`Skill` 与 `switch_editor` 显式 allow。
 
 # Claude Agent 上下文交互与线程引擎生命周期设计
 
 本文记录 `/api/claude-agent` 上下文交互设计与 Thread Engine 规定的生命周期，作为
 `docs/design/claude-agent/` 各模块文档的综合生命周期视图。
+
+## 核心概念定义
+
+| 概念 | 定义 |
+|---|---|
+| Thread Session | 以 `thread_id` 为键、跨多个 Turn 复用的运行容器 |
+| Turn | 一次请求从上下文组装到持久化终态的执行 |
+| IDLE | Session 存在但当前无 Turn 执行 |
+| RUNNING | 当前 Turn 正在执行，同 Thread 的后续请求排队 |
+| DESTROYED | Session 已释放；后续请求需要重新创建 |
+| Intrinsic state | system prompt、workspace、runner 等跨轮复用状态 |
+| Extrinsic state | 当前消息、queue、callbacks、confirmation 等当轮状态 |
+| TTL eviction | 空闲 Session 到期后的受控销毁 |
+
+## 业务交互时序图
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant API as Claude Agent API
+    participant Pool as Thread Pool
+    participant Factory as Thread Factory
+    participant Runner as Agent Runner
+    participant DB as PostgreSQL
+
+    User->>API: 提交 Thread 消息
+    API->>API: 校验身份与 Thread 所有权
+    API->>Pool: 获取或创建 Thread Session
+    Pool-->>Factory: IDLE AgentRunState
+    Factory->>Factory: 组装当轮上下文并标记 RUNNING
+    Factory->>Runner: 执行 Turn
+    Runner-->>Factory: 事件与单一终态
+    Factory->>DB: 持久化消息和 session 映射
+    Factory->>Pool: 清理当轮状态并返回 IDLE
+    opt 显式关闭或 TTL 到期
+        Pool->>Factory: 销毁 Session
+        Factory-->>Pool: DESTROYED
+    end
+```
 
 **关联设计稿**：
 - [`claude-agent-thread-session-patterns.md`](../claude-agent/claude-agent-thread-session-patterns.md) — Phase 1–4 模式层详述

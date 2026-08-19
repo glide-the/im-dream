@@ -1,14 +1,12 @@
-> **迁移来源**: Pawkeyland docs/app/design/claude-agent-thread-session-patterns.md — 路径和环境变量已适配 Ink & Memory 工程规范。
-
 # Claude Agent Thread Session — 设计模式重构方案
 
 > **来源**：基于现有 `backend/claude_agent/service.py` + `backend/libs/claude_agent_kit/server/agent_runner.py` 的会话管理重构设计
 > **目标**：引入 Thread 会话模型，通过 sessionId 在角色扮演状态加载前维护 Claude Runner 线程，实现工作空间初始化与宠物系统上下文一次性注入，后续轮次只传递用户消息
 > **关联设计**：
 > - [claude-agent-session-persistence.md §10](./claude-agent-session-persistence.md#10-thread-session--进程内-sessionid-享元层) — 与 DB 持久化层的接合
-> - [claude-agent上下文拼接设计.md §2.1](./claude-agent上下文拼接设计.md#21-享元短路thread-session-模式) — Phase 1 享元短路细节
-> - [ClaudeAgentRunner 模块设计.md §11](./ClaudeAgentRunner%20%E6%A8%A1%E5%9D%97%E8%AE%BE%E8%AE%A1.md#11-thread-session-模式下的-runner-交互) — Runner 在 4 阶段中的位置
-> - [AI Model 会话流程图.md](./AI%20Model%20会话流程图.md#thread-session--sessionid-享元生命周期pawkeyland-落地) — 4 阶段 stateDiagram + 时序图
+> - [上下文组装](./claude-agent-context-assembly.md) — Phase 1 上下文组装边界
+> - [Runner 设计](./claude-agent-runner-design.md) — Runner 在生命周期中的位置
+> - [AI Model 会话流程](./ai-model-session-flow.md) — 会话状态与时序
 
 ---
 

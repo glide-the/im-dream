@@ -1,7 +1,6 @@
 <!-- [Input] Deck/Agent/plugin form APIs, Admin content-version capability, and CozeLoop commit reference. -->
 <!-- [Output] Create/update/draft/explicit-commit and folded immutable history interaction contract. -->
 <!-- [Pos] Deck detail and content-version functional-unit design. -->
-<!-- [Sync] 2026-08-16: make every effective Deck form mutation part of one versioned draft. -->
 
 # Deck 创建、更新与折叠式内容版本记录
 
@@ -26,7 +25,7 @@
 | Deck 概览 | name/i18n description、icon、color、enabled、order |
 | Agent 类型 | Chat/Dream 与精确 active runtime binding |
 | Agents | 新增、删除、名称、Prompt、icon、color、enabled、order、memory config 数据 |
-| Claude 插件 | 已验证安装引用、resolved version、digest、enabled、order |
+| Claude 插件 | 有效安装引用、resolved version、digest、enabled、order |
 
 每次有效写入在同一事务先锁 Deck 行，比较旧值，成功后 `draft_revision + 1`。等价 blur/save 不推进修订；
 Voice 的运行时 `thread_id` 不是 Deck 表单配置，不进入内容版本。

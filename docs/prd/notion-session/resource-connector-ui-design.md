@@ -1,14 +1,5 @@
 ## ✨ 总体视觉风格（Aesthetic Style）
 
-> [Sync] 2026-07-08: 组件命名回收到 Chat `WorkspaceTabBar` + Settings `ConnectorNotionDetailPage` 体系；保留纸张审美、色板与微交互定义，Chat 不再承载完整配置下钻。
-> [Sync] 2026-07-08: Settings 详情页改为单平台单账号资源配置页，不再使用 `ResourceConnectorPage` 的集合型新建、刷新、列表布局。
-> [Sync] 2026-07-08: ResourceScopeSection 合并 data_source / page 为统一资源列表，操作行包含搜索、保存、刷新；每页显示 10 条；保存后 MountedSourcesSection 立即显示所选来源；底部授权状态卡移除。
-> [Sync] 2026-07-08: `MountedSourcesSection` 与 Chat `ConnectorStatusPanel` 均读取 persisted connector `sources`；刷新后状态不丢失，Notion People 系统 data source 在 discovery 层过滤，不进入统一资源列表。
-> [Sync] 2026-07-09: ConnectorNotionDetailPage 的上半部分改为紧凑无边框信息栏，授权 / 同步 / 已链接资源 / 最近同步 / 提示说明全部收敛其中；策略设计只保留轻量占位。
-> [Sync] 2026-07-09: ConnectorNotionDetailPage 全页减少线框设计；结构区块、资源行、已挂载来源、空态与状态标签改用轻纸面色块和留白，只有搜索、翻页等控件保留弱边界。
-> [Sync] 2026-07-09: Chat `ConnectorLandingPanel` 同步减少卡片化；根内容区无外框，`ConnectorStatusPanel` 使用虚线边界但无卡片底色 / 阴影，已链接资源行、chip 和空态改用轻表面，只有「管理」等明确控件保留弱边界。
-> [Sync] 2026-07-09: Settings `ConnectorNotionDetailPage` 使用单一虚线纸边界；内部 `ResourceOptionRow` 与已挂载来源改为无卡片列表行，用轻纸面列表容器和细分隔线表达层级，资源选中态只在右侧显示对勾。
-> [Sync] 2026-07-09: 资源行和已挂载来源只在 `pageCount > 0` 时显示页数；`0 pages` 属于空统计，不进入右侧元信息区。
 
 | 维度 | 设计定义 |
 | --- | --- |

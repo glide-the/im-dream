@@ -271,20 +271,6 @@ JWT payload：
 }
 ```
 
-## 13. 测试清单
-
-| 用例 | 预期 |
-| --- | --- |
-| 前端点击 Google 登录 | 跳转 `/oauth/google/login`，后端 redirect 到 Google |
-| Google callback 新用户且 signup 开启 | 创建 `users` + `oauth_accounts`，签发系统 token |
-| Google callback 新用户且 signup 禁用 | 返回 403 |
-| `OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true` | 同邮箱本地用户绑定 Google |
-| `OAUTH_MERGE_ACCOUNTS_BY_EMAIL=false` 且邮箱存在 | 返回 409 |
-| 登录成功后 `/auth/me` | 返回当前用户 |
-| 登录成功后业务 API | `get_current_user` 能解析 `user_id` |
-| logout | cookie 删除，refresh token 撤销 |
-| Google token 保存 | 当前不保存；如后续启用，数据库中必须为 encrypted，不出现明文 secret |
-
 ## 14. 业务 API 鉴权时序图
 
 ```mermaid

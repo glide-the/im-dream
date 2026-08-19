@@ -1,7 +1,6 @@
 <!-- [Input] Deck设计需求.pdf page 2-3 distribution notes and current release constraints. -->
 <!-- [Output] Deferred Deck marketplace/distribution scope and future dependency gate. -->
 <!-- [Pos] Non-active Deck register/market requirement record. -->
-<!-- [Sync] 2026-08-16: isolate all marketplace requirements from the current Deck refactor. -->
 
 # Deck 市场分发需求（暂缓 / 未进入本期实现）
 
@@ -14,6 +13,33 @@
 边界澄清：注册用户默认拥有的系统内建 Deck 需要在 Deck 主页面展示；用户自有 Deck 的“推送到社区/
 发布到社区”不进入本期 UI。系统内建 Deck 的展示不得变成创建副本、引用、市场安装、审核、治理、
 排名或插件 marketplace。
+
+## 概念定义
+
+| 概念 | 定义 | 本期状态 |
+|---|---|---|
+| Registry | 保存可分发 Deck 制品及来源的未来权威服务 | 暂缓 |
+| Market publication | 作者把确定 Deck 版本提交到 Registry 的未来动作 | 暂缓 |
+| Installation | 用户从 Registry 建立可追踪 Deck 来源绑定的未来动作 | 暂缓 |
+| System Deck | 注册用户默认可见的系统内建 Deck | 当前实现；不属于市场安装 |
+| Community publish | 用户把自有 Deck 推送给其他用户引用 | 本期删除入口 |
+
+## 本期边界时序图
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as Deck 页面
+    participant API as Deck API
+    participant Registry as 市场 Registry（暂缓）
+
+    User->>UI: 打开 Deck 页面
+    UI->>API: 加载用户可用 Deck 与 System Deck
+    API-->>UI: 返回当前本地/系统投影
+    Note over UI,Registry: 本期不显示市场入口，也不调用 Registry
+    User->>UI: 管理用户 Deck
+    UI->>API: 仅执行当前创建、更新、版本和启停能力
+```
 
 ## 本期不得出现
 
