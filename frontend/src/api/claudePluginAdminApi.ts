@@ -1,6 +1,7 @@
 // [Input] Settings → Plugins (Claude Code) server API contracts.
-// [Output] Typed client for shared plugin installations, operations, and Deck plugin refs.
+// [Output] Typed client for shared plugin installations, server-owned management permission, operations, and Deck plugin refs.
 // [Pos] API layer for claude-plugin-admin components and the Deck editor plugin selector.
+// [Sync] 2026-08-19: expose can_manage_shared_plugins so write controls fail closed when the capability is absent.
 
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -38,6 +39,9 @@ export interface ClaudePluginInstallation {
 
 export interface ClaudePluginInstallationsResult {
   installations: ClaudePluginInstallation[];
+  permissions?: {
+    can_manage_shared_plugins?: boolean;
+  };
 }
 
 export interface ClaudePluginOperation {
