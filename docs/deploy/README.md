@@ -15,11 +15,12 @@
 
 ## 现有文档
 
-| 文档 | 作用 | 当前状态 |
-|------|------|----------|
-| [`overview.md`](overview.md) | Cloud Run 部署主文档 | 云发布操作入口 |
-| [`data-sync.md`](data-sync.md) | 本地与 GCS 数据同步说明 | 备份、上传和下载操作 |
-| [`remote-ssh.md`](remote-ssh.md) | Remote SSH 部署文档 | 说明远程 Docker 服务器的 SSH/rsync/docker-compose 发布路径 |
+| 文档 | 作用 |
+|------|------|
+| [`overview.md`](overview.md) | Google Cloud Run 发布与配置入口 |
+| [`data-sync.md`](data-sync.md) | 本地与 GCS 数据同步、备份和恢复 |
+| [`remote-ssh.md`](remote-ssh.md) | SSH/rsync/docker-compose 远程发布路径 |
+| [`release-system-design.md`](release-system-design.md) | 历史路径兼容说明 |
 
 ## 发布路径分流
 

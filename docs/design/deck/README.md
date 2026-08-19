@@ -1,60 +1,93 @@
-<!-- [Input] Deck requirement PDF and current Deck frontend/backend implementation. -->
-<!-- [Output] Final current Deck requirements, implemented behavior, and deferred boundaries. -->
-<!-- [Pos] Canonical Deck business design. -->
+<!-- [Input] Deck设计需求.pdf, CozeLoop draft/commit source, repository CRUD, and Admin schema authority. -->
+<!-- [Output] Canonical Deck management/content-version design index and delivery boundary. -->
+<!-- [Pos] Deck product-design source of truth under docs/design/deck. -->
 
-# Deck
+# Deck 管理与内容版本设计索引
 
-原始需求参考：[Deck 设计需求 PDF](./Deck设计需求.pdf)。当 PDF、旧草稿与当前业务约束冲突时，
-本文件描述的生产行为为当前定稿。
+## 需求来源与优先级
 
-## 业务目标
+冲突依次按：本期明确约束 → 最新 [`Deck设计需求.pdf`](./Deck设计需求.pdf) → 已发布业务/数据能力 →
+旧设计 → 可复用交互。PDF 第 1–2 页的窄内容区、搜索、启用摘要、扁平列表和创建菜单进入本期；
+PDF 的市场/分发内容按更高优先级约束独立延期至 [`../deck-register/`](../deck-register/README.md)。
 
-Deck 是一组可供 Chat 或 Dream 使用的 Agent、Prompt 和 Claude Plugin 引用。用户在轻量启动页选择
-已可用 Deck，在 Settings / Work 中完成创建、维护、启停和内容版本提交。
+CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交前差异预览、不可变版本记录与 CAS 冲突。
+不复制 Workflow、Agent 编排、Prompt/Memory 工作台或多工作台信息架构。
 
-## 启动页
+## 核心概念定义
 
-- `/story-workspace/decks` 只展示可运行内容，并按 **Available Decks** 和 **System Decks** 分组。
-- 用户 Deck 必须同时满足：已启用、至少有一个内容版本、没有未提交草稿。
-- System Decks 分组包含平台 `is_system` Deck，也包含 `publish_block_reason=default_initialized` 的用户默认副本；两者在当前页面均按产品默认内容只读展示，不提供启停或维护。
-- 顶部最多展示 14 个等距正方形快捷图标；设置角标进入 `/story-workspace/settings/work`。
-- 点击任意用户或系统 Deck 打开预览；ChatAgent 示例进入 Chat 并预填内容，DreamAgent 示例进入独立 Dream 工作台。
-- 启动页顶栏保留“创建 Deck”；创建成功后直接打开同一维护弹窗。普通用户 Deck 的预览页也提供编辑快捷入口，系统/默认 Deck 不提供。
+| 概念 | 定义 | 当前边界 |
+|---|---|---|
+| Deck | 一组可被 Chat 或 Dream 选用的 Agent 配置聚合 | 系统 Deck 与用户 Deck 使用同一预览入口 |
+| System Deck | 系统提供且默认可见的只读 Deck | 不提供启用/禁用操作 |
+| User Deck | 用户创建并维护的 Deck | 仅 enabled、已提交且无未提交草稿时出现在 Deck 首页 |
+| Draft | Deck 表单的可变工作副本 | 每次有效修改推进 `draft_revision` |
+| Deck Version | 用户显式提交后形成的不可变内容快照 | 使用 v1、v2、vN 展示，不自动覆盖历史 Thread |
+| Available Decks | Deck 首页中符合可用条件的用户 Deck 分组 | 最多展示 14 个快捷图标，并提供列表预览 |
+| Work / Deck | Settings 下的完整管理入口 | 管理创建、更新、启停、版本和相关对话 |
+| Thread Deck context | 某个历史 Thread 当前使用的 Deck 版本事实 | 升级必须由用户显式确认；本期不自动升级 |
 
-## Work 管理
+## 核心业务时序图
 
-Settings 左侧只有一个“工作台 / Work”分类，内部使用 Deck、资源链接、插件三个页签。Deck 页签负责：
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant UI as Deck 页面
+    participant API as Deck API
+    participant DB as PostgreSQL
+    participant Surface as Chat / Dream
 
-- 搜索、筛选、刷新、分页和查看系统/用户来源；
-- 创建用户 Deck，并在同一维护弹窗持续编辑元数据、Agent、Prompt 与 Claude Plugin 引用；
-- 用户 Deck 启用、禁用、复制、修改、查看版本和删除；
-- 平台系统 Deck 和产品初始化默认副本只读，不出现启停、编辑和删除操作；
-- 删除被历史 Chat 引用的 Deck 时，在更多菜单展示相关对话，用户先逐条确认删除对话后再删除 Deck。
+    User->>UI: 打开 Deck 页面
+    UI->>API: 查询可用用户 Deck 与系统 Deck
+    API->>DB: 读取系统定义、启用状态和已提交版本
+    DB-->>API: Deck 投影
+    API-->>UI: Available Decks / System Decks
+    User->>UI: 点击 Deck
+    UI->>API: 读取预览与当前版本
+    API-->>UI: 只读预览、Agent 类型和示例
+    User->>UI: 点击示例
+    alt Chat Agent
+        UI->>Surface: 打开 Chat，设置 Deck 并预填输入
+    else DreamAgent
+        UI->>Surface: 通过 Dream 启动入口创建 Run
+    end
+```
 
-## 内容版本
+## 本期结论
 
-- 新建和每次表单修改先写入可恢复草稿，并推进 `draft_revision`。
-- 等价写入不产生新 revision；所有受管表单属于同一个 Deck 聚合草稿。
-- 用户显式提交时先读取差异预览，再确认追加不可变 `v1/v2/vN` 快照。
-- 提交使用 `expected_draft_revision` 与 `expected_base_version` 做并发校验；冲突保留当前草稿和已发布版本。
-- 版本记录默认折叠，通过顶部“版本记录”按钮展开，不建立独立版本工作台。
-- 历史 Thread 固定其创建时的 Deck 内容；当前代码不会自动升级，也没有批量升级入口。
+| 功能单元 | 结论 | 真实实现 |
+|---|---|---|
+| Deck 启用入口 | 简化/实现 | 主页面仅展示最多 14 个 enabled + published + clean 正方形快捷图标及同资格列表；系统内置有标识，完整集合留在 Work |
+| Deck 预览 Demo | 修正/实现 | Chat Agent 示例只预填未发送 Chat；DreamAgent 示例复用现有 Dream start 并进入独立 Dream 工作台 |
+| Settings / Work | 新增/实现 | Settings 左栏只新增 Work；Deck、资源链接、插件是 Work 内部页签 |
+| 完整 Deck 管理 | 移动/保留 | 搜索、筛选、分页、行级操作和启停迁入 Work / Deck |
+| 相关对话与删除 | 新增闭环 | Work 更多菜单按 Deck 展示真实 Chat 历史；先逐条确认删除，再重试 Deck 删除；普通 binding 不再误报为历史 Chat |
+| 原始创建逻辑 | 保留 | `POST /api/decks` 成功后按返回 `deck_id` 打开同一维护弹窗 |
+| 新建后的更新 | 新增闭环 | 新 Deck 即可持续保存；首次显式提交冻结为 `Deck v1` |
+| Deck 自有维护 | 恢复并保留 | 元数据、Agent 类型、Agent/Prompt CRUD、Claude 插件引用、Chat 交接 |
+| 表单变更纳入版本 | 实现 | 所有有效配置写入同一 Deck 草稿并递增 `draft_revision`；等价写不递增 |
+| Deck 内容版本 | 实现 | preview + confirm 追加不可变 `deck_versions`，版本为 v1/v2/vN |
+| 版本记录 | 实现 | 默认折叠；内容 vN 是主时间线，插件 semver/binding 是次级运行事实 |
+| 并发与失败 | 实现 | `expected_draft_revision + expected_base_version`；冲突/失败不破坏草稿和旧版本 |
+| Workflow / Coze 详细工作台 | 删除 | 当前 Deck 设计、DOM、状态和 API 均不存在 |
+| 市场注册/发布/安装/治理 | 延期 | 当前 UI 无入口、状态、占位或空实现 |
+| 历史 Thread 显式升级 | 后续 schema 增量 | 本期保证不自动升级；Thread snapshot/apply receipt 仍需 Admin expand |
 
-CozeLoop 只作为草稿、差异、显式提交、不可变版本和 CAS 冲突的交互参考。Deck 不包含 Workflow、
-Agent 编排、Prompt 工作台或 Memory 工作台。
+## 数据所有权
 
-## 数据与接口
+- `decks / voices / deck_claude_plugin_refs / active deck_plugin_binding` 是同一 `deck_id` 下的持久可变草稿。
+- `decks.draft_revision` 是所有受管表单写的聚合 CAS token。
+- `deck_versions` 仅存用户显式提交的不可变 JSONB snapshot/hash；数据库拒绝 UPDATE/DELETE。
+- `decks.latest_version` 与 `published_draft_revision` 只在 commit 事务成功后推进。
+- Schema 只由 Admin Drizzle migration `0036` 发布 capability `dream.deck-content-versions.v1`；Dream 不做 DDL。
 
-- CRUD：`/api/decks`、`/api/voices`
-- 版本：`/api/decks/{deck_id}/version-state`、`/versions/preview`、`/versions`
-- Claude Plugin 引用：`/api/decks/{deck_id}/claude-plugins`
-- 数据：`decks`、`voices`、`deck_claude_plugin_refs` 为草稿事实，`deck_versions` 为不可变快照。
-- Schema capability：`dream.deck-content-versions.v1`；缺失时关闭版本能力，不在 Dream 内建表。
+## 文档导航
 
-## 代码所有权
-
-- 前端：`frontend/src/components/DeckManager.tsx`、`frontend/src/components/DeckEditorModal.tsx`、`frontend/src/components/deck/`
-- 后端：`backend/routers/voices.py`、`backend/routers/deck_versions.py`、`backend/services/deck/`
-- Thread 上下文：`backend/services/deck/chat_context.py`、`backend/services/deck/runtime_context.py`
-
-市场分发边界见 [deck-register](../deck-register/README.md)。
+- [PDF 逐页需求追踪](./deck-pdf-requirement-trace.md)
+- [Deck 启用入口与 Work 设置工作台](./deck-management-list.md)
+- [Deck UI 视觉与布局规范](./deck-ui-visual-spec.md)
+- [Deck 评估器式交互草稿（有效）](./deck-evaluator-interaction-draft.md)
+- [创建、更新、提交与折叠版本记录](./deck-detail-version-history.md)
+- [内容版本与 Thread 边界](./deck-versioned-chat-workspace.md)
+- [历史 Thread 显式升级（后续 capability）](./thread-version-upgrade.md)
+- [业务时序](./deck-business-sequences.md)
+- [市场分发延期范围](../deck-register/README.md)
