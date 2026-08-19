@@ -4,8 +4,13 @@
 > [Output] Define how workspace state (`.editor/` virtual index, workspace directory)
 >          enters the Agent context assembly pipeline as a `<workspace_context>` block.
 > [Pos] context-design-doc in `docs/design/claude-agent/edit-point`
+> [Sync] 2026-05-28: initial design — workspace context integration for edit-point.
+> [Sync] 2026-05-29: add Section 9 — editor_state role and loading path; clarify two-layer architecture (prompt layer vs runtime layer).
+> [Sync] 2026-05-29: §9.3 add reference to editor-state-lifecycle.md for complete lifecycle documentation.
+> [Sync] 2026-05-29: rename session_id → editor_session_id throughout; §9.3 updated to show
 >         service.py extracts editor_session_id from request.editor_state["id"] — not from
 >         cwd basename; three-ID comparison table added.
+> [Sync] 2026-06-28: 补充 Notion connector workspace_context 扩展，要求 Agent 读取连接器数据层 canonical snapshot，而非维护本地 Notion 权威状态。
 
 # 工作空间上下文接入设计
 

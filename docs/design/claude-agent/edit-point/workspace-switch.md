@@ -3,6 +3,9 @@
 Status: Implemented  
 Updated: 2026-06-28
 Scope: 智能体在单次对话中切换 `.editor` 工作空间上下文的完整设计与实现
+> [Sync] 2026-06-07: 当时 Runner auto-mode 敏感度策略将 `switch_editor` 视为状态切换工具并要求确认；该策略已被 2026-06-09 低敏策略取代。
+> [Sync] 2026-06-09: 产品权限策略将 `switch_editor` 改为低敏感工具；它不修改文档内容，auto 模式下由 PreToolUse 显式 allow。
+> [Sync] 2026-06-28: 明确 Notion connector 不复用 `switch_editor`；外部资源切换由 workspace resource selection 和连接器数据层 canonical snapshot 管理。
 
 
 ---

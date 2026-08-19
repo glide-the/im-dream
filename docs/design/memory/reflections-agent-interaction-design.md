@@ -8,6 +8,7 @@
 >          implementation order, four-phase business lifecycle, persistence-first flow,
 >          API draft, sequence diagrams, and anti-overdesign check.
 > [Pos] reflections-agent-business-design in `docs/design/memory`
+> [Sync] 2026-06-25: split from the original all-in-one draft. This file now keeps only
 >         the business interaction design; design-pattern details and SSE/EventBus details
 >         live in separate companion documents.
 

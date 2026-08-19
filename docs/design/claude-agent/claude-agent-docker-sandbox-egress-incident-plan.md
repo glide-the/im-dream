@@ -8,11 +8,14 @@
 > Claude Agent Bash/curl sandbox failures where the request reaches the
 > sandbox host proxy and is rejected by `blocked-by-allowlist`.
 > [Pos] docker-sandbox-egress-incident-plan in `docs/design/claude-agent`
+> [Sync] 2026-06-24: initial incident handling judgment and interaction
 > design separated child proxy, bridge, parent proxy, TUN, policy deny, and
 > runtime startup failure layers.
+> [Sync] 2026-06-25: updated with verified `HTTP/1.1 403 Forbidden` and
 > `X-Proxy-Error: blocked-by-allowlist`; current incident is classified as
 > sandbox network allowlist policy deny, with child proxy path proven alive up
 > to the host proxy.
+> [Sync] 2026-06-25: open sandbox network mode now omits `sandbox.network`
 > instead of writing unsupported `allowedDomains:["*"]`; UI open mode hides
 > the HTTP method placeholder while keeping the high-risk warning visible.
 

@@ -1,6 +1,11 @@
 > [Input] `backend/routers/claude_agent.py`, `backend/claude_agent/service.py`, `backend/claude_agent/context_builder.py`, `backend/claude_agent/thread_factory.py`, `backend/claude_agent/thread_pool.py`, `backend/libs/claude_agent_kit/types.py`
 > [Output] Define the `assemble_context` lifecycle contract, context source order, filtering policy, failure handling, and test expectations for Claude Agent planning and execution turns.
 > [Pos] context-design-doc in `docs/design/claude-agent`
+> [Sync] 2026-05-28: cleaned duplicate migration headers and Pawkeyland-only context assumptions; aligned the design with Ink & Memory `thread_id`, `message_parts`, workspace-file attachments, and planning prompt optimization.
+> [Sync] 2026-05-29: add existing_session / resume resolution design — `assemble_context` now loads `chat_thread` from DB, gates resume on `_has_usable_claude_resume` (contract-version check) + local JSONL file probe, derives `thread_id_for_agent` / `should_resume`; `_TurnExecution` gains `resume_existing_session` field; `_persist_turn` writes back `claude_session_id` + `agent_contract_version` so the DB self-heals across deployments.
+> [Sync] 2026-06-09: `claude-agent-prompt-optimization.md` now exists as the planning prompt optimization contract; `context_builder.py` also carries the Expert Prompt Architect template for agent-side planning turns.
+> [Sync] 2026-06-16: Session Retrieval Workflow now tells the Agent to pass `query` / `labels` into `mcp__user__get_sessions_range`; default retrieval is character fuzzy matching, while vector mode is an interface boundary only.
+> [Sync] 2026-06-22: Phase 1 loads `system_config` before prompt/cwd assembly; Settings `system_prompt` is rendered as lower-priority configurable guidance under `_SYSTEM_PROMPT_TEMPLATE`, and `workspace_enabled=false` skips thread workspace initialization plus `cwd` / workspace context injection.
 
 # Claude Agent Context Assembly Design
 

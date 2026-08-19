@@ -12,6 +12,23 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 >      `docs/prd/notion-session/连接器具体配置页面结构草图.md`
 > [Output] 定义用户从创建资源连接器到 Agent 消费 `.notion/` 映射的完整业务交互流程
 > [Pos] connector-interaction-doc in `docs/design/notion-session`
+> [Sync] 2026-06-21: 初始设计 — 资源连接器交互方案
+> [Sync] 2026-06-22: 修正核心概念声明 — 依据 Notion API Reference 区分 Database/Row Page/Standalone Page/Block
+> [Sync] 2026-06-28: 修正 Agent 初始化一致性 — `.notion/` 映射由资源连接器数据层的 canonical snapshot 提供，不再以 Agent 本地 NotionCache 作为权威状态。
+> [Sync] 2026-07-05: 增补认证会话保持语义，避免 `ntn login poll` 单次会话消费后前端重复轮询导致状态回退。
+> [Sync] 2026-07-07: 交互入口迁移到 Chat 入口页，应用导航控制 `聊天历史` / `资源连接器` 视图，连接器工作台嵌入 Chat shell；同页新增输入框下方的快捷功能 strip，并定义 shell 级 `shell_error` 降级。
+> [Sync] 2026-07-07: 明确嵌入态状态隔离：`聊天历史` 使用会话与空态语义，`资源连接器` 只由真实 connector context 驱动空态 / 认证 / 资源选择；外层 shell 锁定 viewport，滚动只发生在内部区域。
+> [Sync] 2026-07-08: 纠正曾偏移的入口叙述，统一以 Chat `WorkspaceTabBar` 为资源连接器主入口，废弃仅摘要化的路径表述。
+> [Sync] 2026-07-08: 详情页组件树统一收敛为 Settings 内 `ConnectorNotionDetailPage` / `TopNavigation` / `ConnectorHeader` / `ResourceScopeSection` / `MountedSourcesSection`，并固定面包屑为 `资源连接器 > Notion Connector`。
+> [Sync] 2026-07-09: `ConnectorHeader` 改为无边框紧凑信息栏，授权 / 同步 / 已链接资源数量 / 最近同步 / 限制提示统一放入其中；其下仅保留 `StrategyDesignPlaceholder`，策略暂不实现。
+> [Sync] 2026-07-08: Notion 详情页按“同一平台只能认证一个账号”重构，不再嵌入集合型 `ResourceConnectorPage`，也不暴露新建 / 刷新 / 连接器列表入口。
+> [Sync] 2026-07-08: 资源范围选择合并为一个可搜索、每页 10 条的统一列表；保存资源后已挂载来源立即回显；底部授权 / 同步状态卡移除。
+> [Sync] 2026-07-08: 骨架屏规则重新对齐两份最新草图：Chat 历史加载、Chat 连接器加载、以及详情页 breadcrumb/header/overview/resource list 都改用结构化 skeleton，而非纯文字提示。
+> [Sync] 2026-07-08: 修正 Chat 资源连接器跳转错位：`ConnectorLandingPanel` 的「选择连接器」和连接器状态面板管理入口统一进入 Settings「资源链接」区；Chat 不再打开内部配置页。
+> [Sync] 2026-07-08: 修正 Chat 入口比例与连接器已连接态表达：landing 主内容区与输入框 / `WorkspaceTabBar` 同宽居中，历史 tab 移除外层冗余边框；连接器列表改为非按钮状态面板，展示授权、同步和已链接资源摘要，只有小型「管理」入口跳转 Settings。
+> [Sync] 2026-07-08: 修复已挂载资源持久化链路：资源选择保存到 `connector_resources` 后必须随 connector `sources` 返回，Settings 刷新和 Chat 已链接资源共用 persisted sources；Notion People 系统 data source 在 discovery 层过滤。
+> [Sync] 2026-07-09: Chat `ConnectorLandingPanel` 减少卡片设计；根内容区无外框，状态信息块使用虚线边界但无卡片底色 / 阴影，空态和已链接资源行改用轻表面层级，仅管理入口保留弱边界。
+> [Sync] 2026-07-09: Settings `ResourceOptionRow` 和 `MountedSourcesSection` 不展示 `0 pages`；页数只有在 `pageCount > 0` 时作为右侧元信息出现。
 
 ---
 

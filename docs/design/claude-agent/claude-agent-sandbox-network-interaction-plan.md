@@ -6,12 +6,17 @@
 > [Output] Interaction design for Settings-controlled Claude Agent sandbox
 > network policy.
 > [Pos] sandbox-network-interaction-plan in `docs/design/claude-agent`
+> [Sync] 2026-06-21: initial design for sandbox network settings.
+> [Sync] 2026-06-22: Settings shows Sandbox Network only when Workspace Mode is enabled.
+> [Sync] 2026-06-25: open mode omits `sandbox.network` instead of writing
 > unsupported `allowedDomains:["*"]`; HTTP method placeholder is hidden in
 > open mode while the high-risk warning remains visible.
+> [Sync] 2026-07-23: intentional product change — `open` mode redefined from
 > "unrestricted egress" to "ask every time" at the Ink & Memory PreToolUse
 > layer via the SandboxPermissionRequest permission tool (§3 table + note);
 > `allowlist` mode now auto-allows host-matched WebFetch/WebSearch and asks
 > on misses. See `claude-agent-sandbox-network-permission-tool.md`.
+> [Sync] 2026-07-26: semantic REVERT — the PreToolUse network gate was
 > wrong-layer duplication of the CLI sandbox's system-level control and was
 > removed; `open` mode returns to "unrestricted egress, no per-request ask"
 > (the ask-every-time behavior lived in the removed layer); runtime sandbox

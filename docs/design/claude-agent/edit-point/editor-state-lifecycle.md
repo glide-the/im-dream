@@ -10,6 +10,9 @@
 > [Output] 定义 `editor_state` 快照从前端采集到运行时激活、MCP写工具后DB刷新再到清理的完整生命周期，
 >          包括数据结构、六个阶段说明、业务时序图、AgentRunState软缓存决策、None 语义与双路径读取对比。
 > [Pos] lifecycle-design-doc in `docs/design/claude-agent/edit-point`
+> [Sync] 2026-05-29: initial design — editor_state snapshot lifecycle.
+> [Sync] 2026-08-13: add pre-send persistence, structured failure normalization, interaction sequence, and minimal-design review.
+> [Sync] 2026-05-29: editor_state 迁移至 AgentRunState 软缓存；新增阶段 3b（MCP写工具后DB刷新），
 >                    更新 §5 不持久化决策表（AgentRunState 改为软缓存 ✅），更新 §4 时序图。
 
 # `editor_state` 快照生命周期设计

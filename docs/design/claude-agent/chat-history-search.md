@@ -1,6 +1,9 @@
 # Claude Agent Chat 历史搜索设计
 
 Scope: Chat 页面右侧「历史对话」面板的搜索入口与居中搜索弹窗；搜索 `chat_thread.title` 与已持久化的 `chat_message.parts` 文本。默认字符模糊匹配；向量检索仅保留 `vector_query` 接口边界。
+> [Sync] 2026-06-27: 初版设计与实现对齐：前端历史面板搜索、后端 `/api/claude-agent/threads` 检索参数、插件式 retriever registry、vector placeholder。
+> [Sync] 2026-06-28: 前端搜索交互改为历史面板标题栏搜索按钮 + 居中搜索弹窗；默认弹窗显示按时间分组的历史，输入后显示搜索结果摘要。
+> [Sync] 2026-06-28: 搜索弹窗移除「新聊天」入口；历史面板打开时主动加载默认历史并显示加载态。
 
 
 ## 1. 目标

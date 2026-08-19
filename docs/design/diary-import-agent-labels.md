@@ -4,6 +4,7 @@ Status: Implemented
 Updated: 2026-07-19  
 Scope: `backend/script/import_diaries.py` — `--label-mode agent` 模式，通过 Claude Agent 服务动态计算导入 session 的 labels；进度条与多线程并发支持
 
+> **[Sync] 2026-07-19**：`_agent_infer_labels` 优先直接读取 `message-final` 帧
 > 自带的 `text` 字段（该字段在后端已按 `text-delta` 汇总，不含 thinking/reasoning
 > 内容），避免在 SSE 流已经给出最终文本时还要再发一次请求。仅当 `message-final.text`
 > 为空时，才回退调用 `GET /api/claude-agent/threads/{id}/messages`
@@ -15,6 +16,7 @@ Scope: `backend/script/import_diaries.py` — `--label-mode agent` 模式，通�
 > 读到尚未写入的 `parts`，重试几次可以避开这个竞态窗口。这个端点因此继续被脚本
 > 使用，不做废弃处理。第 8、9 节已按此更新。
 >
+> **[Sync] 2026-07-19（第二次）**：脚本顶部在 `import auth as _auth` 之前补了
 > `load_dotenv(BACKEND_DIR / ".env", override=False)`（与 `server.py` 完全一致）。
 > 此前脚本从未加载 `backend/.env`，若执行脚本的 shell 没有单独 `export
 > JWT_SECRET=...`，`auth.py` 的 `SECRET_KEY` 会落到硬编码的 dev-secret 默认值，
@@ -22,6 +24,7 @@ Scope: `backend/script/import_diaries.py` — `--label-mode agent` 模式，通�
 > 不一致，导致自动生成的 token 签名对不上，`POST /api/claude-agent/threads`
 > 100% 返回 `401 Unauthorized`。第 4 节已按此更新。
 >
+> **[Sync] 2026-07-19（第三次）**：`--label-mode agent` 的请求体改为
 > `"toolChoice": "none"`（标签推断纯粹是文本分类，不需要任何工具），并在
 > SSE 读取循环上加了一个 `AGENT_LABEL_STREAM_TIMEOUT_S`（120s）总耗时上限。此前用
 > `"auto"` 时模型可能在与本次调用无关的 `cwd` 上发起多轮工具调用，每个

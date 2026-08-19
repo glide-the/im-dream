@@ -1,6 +1,7 @@
 <!-- [Input] Chat Thread Deck/Agent binding, Deck receipt metadata, and enabled Agent projection. -->
 <!-- [Output] Deck context badge and same-Deck next-turn Agent-selection interaction contract. -->
 <!-- [Pos] Chat consumption interaction design under Deck. -->
+<!-- [Sync] 2026-08-17: make enabled Agents clickable while Thread, Deck, content version, and receipt stay fixed. -->
 
 # Deck 上下文徽章 · 交互方案设计稿
 

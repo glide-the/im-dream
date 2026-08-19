@@ -3,6 +3,7 @@
 Status: Updated  
 Updated: 2026-06-28
 Scope: Design + 实现状态同步
+> [Sync] 2026-06-28: 补充 Notion 资源连接器边界 — `.notion/` 读取来源为连接器数据层 canonical snapshot，不复用 `.editor/` 的 Agent 本地内存快照语义。
 
 
 ---

@@ -1,6 +1,7 @@
 <!-- [Input] Deck/Agent/plugin form APIs, Admin content-version capability, and CozeLoop commit reference. -->
 <!-- [Output] Create/update/draft/explicit-commit and folded immutable history interaction contract. -->
 <!-- [Pos] Deck detail and content-version functional-unit design. -->
+<!-- [Sync] 2026-08-16: make every effective Deck form mutation part of one versioned draft. -->
 
 # Deck 创建、更新与折叠式内容版本记录
 

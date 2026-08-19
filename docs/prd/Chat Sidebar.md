@@ -1,6 +1,7 @@
 # Chat Sidebar PRD
 
 > 聊天侧边栏、会话导航、文件入口和设置入口的产品与视觉规范。本文引用 [Color System](<./color_system/README.md>)，并与前端实现保持同步。
+> **[Sync] 2026-06-28**: 当前 ChatView 不再使用左侧 rail/展开侧栏；历史对话由右上角「更多」菜单打开右侧 HistorySidePanel，搜索由面板标题栏按钮打开居中 HistorySearchDialog。
 
 ## 1. 文档范围
 

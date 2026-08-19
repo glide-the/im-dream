@@ -1,6 +1,7 @@
 > [Input] `backend/claude_agent/context_builder.py`, `docs/design/claude-agent/claude-agent-context-assembly.md`.
 > [Output] Planning prompt optimization contract for Claude-agent turns.
 > [Pos] prompt-design-doc in `docs/design/claude-agent`
+> [Sync] 2026-06-09: define the Expert Prompt Architect template that must run before planning tasks; system prompt now carries the same template.
 
 # Claude-Agent Prompt Optimization
 

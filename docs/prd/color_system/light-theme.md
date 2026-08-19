@@ -2,6 +2,8 @@
 
 > Source of truth: `frontend/src/styles/tokens.css` `:root` 块。  
 > 触发方式：默认状态 / `[data-theme='light']` / `prefers-color-scheme` 无暗色偏好。
+> [Sync] 2026-07-09: Connector settings pages use a dashed paper page boundary plus flat light-list rows; selected resources use a right-side checkmark, and ordinary resource rows do not use card shadows or dark fills.
+> [Sync] 2026-07-09: Decks follows the same light paper rule: deck colors are small accents, not full-card borders, gradients, or hover shadows.
 
 ---
 

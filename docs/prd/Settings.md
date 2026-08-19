@@ -1,14 +1,22 @@
 # Settings PRD
 
 > Settings 页面的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，并与当前产品实现保持同步。
+> **[Sync] 2026-05-27**: 新增用户 API 配置区域（现 §4.3.7，`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 等按用户存储并注入 Claude SDK 子进程）；关联设计文档 [用户 SDK Env 注入方案设计](../design/claude-agent/user-env-injection-design.md)。
+> **[Sync] 2026-06-09**: AI 模型配置新增「应如何批准 IM」操作开关；打开后保存 `system_config.im_full_access_enabled=true`，Claude-agent 对除问答表单外的已暴露工具的 `PreToolUse` 返回显式 allow，Chat 输入区隐藏「逐步确认」并显示「完全访问」；同页切换通过前端事件实时同步，无需刷新。
+> **[Sync] 2026-06-13**: 「工作区模式」开启后同时启用每个 thread
 > workspace 的 Claude Code Bash sandbox；后端写入
 > `{AGENT_CWD}/{thread_id}/.claude/settings.json` 的 `sandbox` 配置。
+> **[Sync] 2026-06-13**: 「完全访问」不跳过 AskUserQuestion 类问答确认；
 > 该类工具仍显示前端确认窗口以收集用户答案。
+> **[Sync] 2026-06-14**: Workspace sandbox 的 Bash 读权限包含必要运行时依赖目录；
 > 项目源码目录不会因 runtime allowlist 被默认放行。
+> **[Sync] 2026-06-21**: AI 模型配置新增「沙箱网络」策略，用于区分
 > WebFetch 域名权限、Bash/curl 出站网络和本机工具缺失三类失败；配置写入
 > `system_config.sandbox_network_mode` 与
 > `system_config.sandbox_network_allowed_domains`，并同步到 thread-local
 > `.claude/settings.json` 的 `sandbox.network`。
+> **[Sync] 2026-07-08**: 新增资源链接设置区，Connector 入口改为进入 Settings 的资源链接管理；Chat 只保留轻量摘要面板和跳转按钮。
+> **[Sync] 2026-07-08**: 修复设置页问题——Notion「管理」不再原地展开，改为导航到独立的 `ConnectorNotionDetailPage`（带面包屑导航），并移除顶部/移动端导航栏里单独的 `Connector` 入口，统一由 Settings 资源链接区和 Chat 轻量摘要面板承载入口。
 
 ## 1. 文档范围
 

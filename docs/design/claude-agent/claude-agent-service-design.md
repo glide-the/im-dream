@@ -2,6 +2,12 @@
 > [Output] Define ClaudeAgentService phase-aware responsibilities, SSE event flow, `_TurnContext`, and persistence conversion.
 > [Pos] module-design-doc in `docs/design/claude-agent`
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentService 模块设计.md — 路径已适配 Ink & Memory 工程规范。
+> **[Sync] 2026-05-24**: 类图与 SSE 事件表对齐当前 service.py；reasoning-start/delta/end 已启用。  
+> **[Sync] 2026-05-25 v1**: 更新 `_TurnContext` 类图补充持久化字段；更新 `execute_session` 描述。  
+> **[Sync] 2026-05-25 v2**: 重大重构 — `collected_parts` 改为收集**原始 SSE 事件报文**（而非 UIMessage parts）；移除 `text_started` / `full_text_accumulator` / `tool_inv_by_id` 等状态字段；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做一次线性转换。
+> **[Sync] 2026-05-28**: 校准 `assemble_context` 边界：该阶段构建 `system_prompt` / `user_message` / `AgentRunOptions` / `_TurnContext`，但不发射 `message-metadata`、不创建 streaming callbacks；这些由 `execute_session` 执行。详细上下文接入规则见 [`claude-agent-context-assembly.md`](./claude-agent-context-assembly.md)。
+> **[Sync] 2026-06-13**: `_make_tool_event_cb()` 处理 runner 已有 `tool_input_delta`，发射 `tool-input-delta` SSE 供前端在内置 `Write` 工具写文件时做终端式增量预览；完整方案见 [`write-tool-terminal-preview.md`](./write-tool-terminal-preview.md)。
+> **[Sync] 2026-06-22**: `assemble_context` 先读 `system_config`；Settings SYSTEM_PROMPT 作为 lower-priority block 进入 `build_system_prompt`，`workspace_enabled=false` 时不初始化 workspace、不传 `cwd`、不注入 workspace context。
 
 # ClaudeAgentService 模块设计
 

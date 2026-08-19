@@ -1,5 +1,21 @@
 > **迁移来源**: Pawkeyland docs/app/design/Claude Code Runtime 服务入参与SSE响应报文整理.md
 > **Ink & Memory 适配**: API 端点路径一致（`POST /api/claude-agent`）；necklace/pet/Mem0 等 Pawkeyland 专属字段已移除。
+> **[Sync] 2026-05-24**: SSE 报文格式已与 Pawkeyland 完全对齐：`text-delta.delta`（原 `text`）、`text-start/end`（原 `text-done`）、分离 tool 事件、`error.errorText`（原 `message`）、`finish.finishReason`（原 `reason`）。  
+> **[Sync] 2026-05-25**: 新增 §4.5.4 说明 SSE 事件收集机制：`collected_parts` 按发出顺序收集原始事件 dict，`_sse_events_to_ui_parts()` 在持久化时做线性转换。
+> **[Sync] 2026-05-24**: backend `_make_tool_event_cb` 改为 `event.type` 分发（原 `payload.state`）；修复 `result` 事件导致 `toolCallId=null` 的错误 SSE 帧；新增 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合到 `_TurnContext`；`_make_tool_confirm_cb` 增加 `turn_ctx` 参数与 `CancelledError` 处理。
+> **[Sync] 2026-05-24**: frontend `claude-agent-transport.ts` 完全重写：移除旧 `text-delta.text` / `text-done` / `tool-event.state` / `finish.reason` / `error.message`；新增 `text-start` / `text-delta(delta)` / `text-end` / `tool-input-start` / `tool-input-available` / `tool-output-available` 独立事件处理；当时 `tool-approval-request` 不重复 emit chunks（backend 已单独发 tool-input-start/available）。
+> **[Sync] 2026-05-24**: 启用 thinking 模式 — 迁移 Pawkeyland `thinking_delta` / `thinking` / `content_block_stop` 分支到 `_make_tool_event_cb`；`_TurnContext` 新增 `current_reasoning_id` / `has_thinking_delta` / `completed_streamed_reasoning_texts`；SSE 新增 `reasoning-start/delta/end` 三类事件；前端 transport 新增对应处理；`DISABLE_INTERLEAVED_THINKING` 未设置时 thinking 默认启用。
+> **[Sync] 2026-05-27**: `tool_choice` 字段新增 `"manual"` 合法值；当时 `tool-approval-request` 触发条件扩展为"manual 模式全部工具 **或** auto 模式下工具名属于 `_ALWAYS_CONFIRM_TOOL_NAMES`（`AskUserQuestion`、`mcp__user__ask_user`）"；新增 §4.6.4 auto+AskUserQuestion SSE 顺序；`PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范（`hookEventName` + `permissionDecision` + `updatedInput`）；前端 `ChatMessageList` 新增 `toolChoice` prop 在 manual 模式下为非 AskUserQuestion 工具显示 Approve/Cancel UI。
+> **[Sync] 2026-06-07**: `tool-approval-request` 触发条件更新：auto 模式对当前 workspace `files/` 下的内置文件工具和低敏查询工具显式 allow；当时状态切换工具也进入前端确认侧路。该分类已被 2026-06-09 的 `switch_editor` 低敏策略取代。
+> **[Sync] 2026-06-09**: 权限策略抽取为 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)；`Skill` 与 `mcp__editor__switch_editor` 归入 auto 低敏显式 allow。
+> **[Sync] 2026-06-13**: Settings 完全访问模式仍会为 `AskUserQuestion` / `mcp__user__ask_user` 发送 `tool-approval-request`，以便前端显示问答表单并回传 answers。
+> **[Sync] 2026-06-13**: 新增 `tool-input-delta` SSE 事件，用于把 SDK `input_json_delta.partial_json` 转发给前端；前端对内置 `Write` 工具使用终端式写入预览，设计见 [`write-tool-terminal-preview.md`](./write-tool-terminal-preview.md)。
+> **[Sync] 2026-06-25**: 新增 `POST /api/claude-agent/threads/{thread_id}/stop`，作为前端主动停止当前运行 turn 的显式控制 API；普通 SSE 断线仍保持后台 turn 可重连。
+> **[Sync] 2026-07-20**: 登记 claude-plan 两个新 SSE 事件 `plan-mode-changed` / `plan-updated`（§4.5.2 事件表 + §4.5.4 收集表 + §4.7.8 报文示例），均为生命周期帧、不入 `collected_parts`、不映射 UIMessageChunk；配套 `GET /api/claude-agent/threads/{thread_id}/plan` REST 端点契约见 [`claude-plan.md`](./claude-plan.md) §5.5。
+> **[Sync] 2026-07-20**: 登记 claude-todo 新 SSE 事件 `todo-updated`（§4.5.2 事件表 + §4.5.4 收集表 + §4.7.9 报文示例），生命周期帧、不入 `collected_parts`、不映射 UIMessageChunk；配套 `GET /api/claude-agent/threads/{thread_id}/todos` REST 端点契约见 [`claude-todo.md`](./claude-todo.md) §5.5。
+> **[Sync] 2026-07-23**: SandboxPermissionRequest——`tool-approval-request` 新增可选字段 `confirmationKind:"sandbox_network"` 与 `networkRequest:{host, policyMode, matchedAllowedDomain}`（§4.5.2 事件表）；字段缺失时前端回退通用确认卡，向后兼容。设计见 `claude-agent-sandbox-network-permission-tool.md`。
+> **[Sync] 2026-07-26**: 触发条件④修订——PreToolUse 网络门禁拆除后，沙箱网络确认仅来自 SDK `can_use_tool` 通道的 `SandboxNetworkAccess` 运行时沙箱代理询问（§4.5.2 事件表）；曾短暂存在的 `networkRequest.source` 字段取消。
+> **[Sync] 2026-08-11**: 本文成为 Chat 与 Dream surface 的唯一 thread conversation
 > HTTP/SSE 合同。Dream 使用相同 history/status/stream/send/tool-confirm/stop；浏览器不传
 > workflow run/actor/turn selector，服务端以 authenticated actor + owned thread 解析可信
 > Dream retry leaf/context。`finish` 是唯一终态；失败必须为 `error` 后单个

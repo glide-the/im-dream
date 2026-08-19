@@ -1,6 +1,7 @@
 <!-- [Input] Deck设计需求.pdf page 2-3 distribution notes and current release constraints. -->
 <!-- [Output] Deferred Deck marketplace/distribution scope and future dependency gate. -->
 <!-- [Pos] Non-active Deck register/market requirement record. -->
+<!-- [Sync] 2026-08-16: isolate all marketplace requirements from the current Deck refactor. -->
 
 # Deck 市场分发需求（暂缓 / 未进入本期实现）
 

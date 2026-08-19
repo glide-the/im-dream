@@ -3,6 +3,7 @@
 Status: Updated  
 Updated: 2026-06-28
 Scope: Design + 实现对应前端组件
+> [Sync] 2026-06-28: 补充 Notion connector proposal 确认卡边界；Notion 写入必须携带 canonical snapshot identity 并等待事件驱动刷新。
 
 
 ---

@@ -1,16 +1,29 @@
 > **迁移来源**: Pawkeyland docs/app/design/Claude Agent SDK 交互式工具时序图.md
 > SDK 工具确认交互模式的通用设计参考，与 Ink & Memory `backend/claude_agent/tool_confirmation_store.py` 对应实现。
+> **[Sync] 2026-05-24**: `_make_tool_confirm_cb` 新增 `turn_ctx` 参数，注册 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重；新增 `CancelledError` 处理（调 `store.cancel_pending` 后 re-raise）；`payload` 字段同时兼容 `tool_call_id`（runner）和 `toolCallId`（遗留）。
+> **[Sync] 2026-05-27**: `PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范；新增 `_ALWAYS_CONFIRM_TOOL_NAMES` 机制在当时的 auto 模式下对 `AskUserQuestion` 触发确认；新增前端 `isManualToolInvocation` / `toolChoice` prop 逻辑说明（§6、§7）。
+> **[Sync] 2026-06-06**: auto 模式新增 workspace `files/` 内置文件工具权限策略：`Read` / `Write` / `Edit` / `MultiEdit` 仅在路径解析后位于当前 `{cwd}/files/` 下时返回显式 `permissionDecision:"allow"`；当时其他工具即使在 auto 模式下也进入前端确认侧路。该全量确认策略已被 2026-06-07 敏感度分流取代。
+> **[Sync] 2026-06-07**: auto 模式改为敏感度分流：workspace `files/` 内置文件工具和低敏查询工具显式 allow；执行/写入/交互工具进入前端确认侧路。
+> **[Sync] 2026-06-07**: 新增低敏工具：`Bash`（命令首词属于只读/导航安全集合且无 shell 元字符）和 `mcp__editor__switch_editor`（无副作用的上下文切换声明）。安全集合：`ls` `cd` `pwd` `echo` `cat` `head` `tail` `wc` `find` `which` `type` `date` `whoami` `id` `groups` `env` `printenv` `uname` `hostname`。
+> **[Sync] 2026-06-09**: 新增低敏工具 `Skill`（Claude Code restored source 确认为 `SKILL_TOOL_NAME = "Skill"`）；完整策略抽取到 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)。
+> **[Sync] 2026-06-09**: Settings「应如何批准 IM」写入 `system_config.im_full_access_enabled`；开启后 Runner 在 `.editor/` 重定向之后对已暴露工具返回显式 PreToolUse allow。
+> **[Sync] 2026-06-13**: full-access 模式保留 `AskUserQuestion` /
 > `mcp__user__ask_user` 的前端确认窗口，因为这些工具必须收集 answers
 > 并通过 `updatedInput` 传回 Claude。
+> **[Sync] 2026-07-20**: 前端确认交互从消息列表内联渲染迁移为**确认面板**
 > （`ToolConfirmationDock`）：待确认期间**隐藏输入栏，面板直接占据输入栏位置**
 > （in-flow 替换渲染）；消息列表中的待确认工具调用退化为带「待确认」标记的
 > 折叠行。详见 §8。
+> **[Sync] 2026-07-23**: SandboxPermissionRequest —— `can_use_tool` 通道
 > （`SandboxNetworkAccess` 运行时沙箱代理询问）接入同一确认链路（§6.3）；
 > 确认面板渲染网络变体卡片（host + 策略模式 + 二元 拒绝/同意）。
+> **[Sync] 2026-07-26**: PreToolUse 步骤 ②.5 网络门禁拆除（错误层级重复，
 > §6.1 / §6.2 回退）；can_use_tool 成为唯一网络确认通道，
 > `networkRequest.source` 字段取消；`open` 模式"每次询问"语义回退。
+> **[Sync] 2026-07-26**: HOTFIX — `HookJSONOutput(...)` 构造调用全部改为纯字典
 > 字面量（0.2.128 中该类型为 TypedDict Union 不可调用；§5 头部注记两个生产
 > 症状与官方 dict 契约，§5.2 / §6.1 示例更新）。
+> **[Sync] 2026-08-06**: 修复 SSE 重连重放历史 `tool-approval-request` 后，已处理
 > 的工具确认重新占据输入区的问题。前端以精确 `tool_call_id` 保存本线程已处理
 > tombstone，并在 SSE EOF 后按 turn checkpoint 接纳持久化历史快照；后端先校验 thread 所有权，
 > 对“线程存在但确认已不再 pending”返回类型化 409。详见 §8.5。

@@ -1,6 +1,7 @@
 <!-- [Input] Deck设计需求.pdf visual pages, extracted text, and explicit task priority. -->
 <!-- [Output] Page-by-page authoritative requirement ledger and implementation mapping. -->
 <!-- [Pos] Primary-source trace for the Deck redesign. -->
+<!-- [Sync] 2026-08-17: map Settings to full inventory and the latest skeleton to user published-clean plus system-default Deck home. -->
 
 # `Deck设计需求.pdf` 逐页需求追踪
 

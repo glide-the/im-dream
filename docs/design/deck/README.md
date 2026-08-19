@@ -1,6 +1,9 @@
 <!-- [Input] Deck设计需求.pdf, CozeLoop draft/commit source, repository CRUD, and Admin schema authority. -->
 <!-- [Output] Canonical Deck management/content-version design index and delivery boundary. -->
 <!-- [Pos] Deck product-design source of truth under docs/design/deck. -->
+<!-- [Sync] 2026-08-16: implement durable drafts, immutable Deck vN commits, and Settings / Work ownership. -->
+<!-- [Sync] 2026-08-17: add the related Chat cleanup and corrected Deck deletion boundary. -->
+<!-- [Sync] 2026-08-17: make preview Demo launch follow the server-owned Chat/Dream Agent type. -->
 
 # Deck 管理与内容版本设计索引
 

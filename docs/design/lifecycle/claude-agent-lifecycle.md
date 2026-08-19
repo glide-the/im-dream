@@ -3,8 +3,10 @@
 >         `backend/claude_agent/context_builder.py`, `backend/claude_agent/observer.py`
 > [Output] Lifecycle design for `/api/claude-agent` context interaction and Thread Engine.
 > [Pos] lifecycle-design-doc in `docs/design/lifecycle`
+> [Sync] 2026-05-28: initial draft — captures Thread Engine 四阶段生命周期、状态机、
 >         上下文交互设计、TTL Sweeper、Observer 钩子，与 `docs/design/claude-agent/` 下
 >         相关设计稿同步。
+> [Sync] 2026-06-09: 工具确认侧路更新为敏感度策略：manual 全工具确认；auto
 >         仅高敏执行/写入/交互工具确认，workspace files/ 内置文件工具、低敏查询、`Skill` 与 `switch_editor` 显式 allow。
 
 # Claude Agent 上下文交互与线程引擎生命周期设计

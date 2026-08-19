@@ -4,6 +4,7 @@
 > [Output] Reflections-agent SSE/EventBus design: event taxonomy, publish/subscribe
 >          semantics, reconnect behavior, event replay, Observer dispatch, and rollout order.
 > [Pos] reflections-agent-sse-eventbus-design in `docs/design/memory`
+> [Sync] 2026-06-25: split SSE/EventBus content out of the original all-in-one
 >         Reflections-agent draft.
 
 # Reflections-agent SSE/EventBus 设计稿

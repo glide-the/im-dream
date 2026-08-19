@@ -1,6 +1,8 @@
 <!-- [Input] Deck设计需求.pdf, pre-01a00576 maintenance, Admin content versions, and CozeLoop commit UX. -->
 <!-- [Output] Active Deck evaluator-style layout with draft/explicit commit and no Workflow. -->
 <!-- [Pos] Deck layout, maintenance, and version-management interaction source. -->
+<!-- [Sync] 2026-08-17: keep the active layout while limiting the Deck home to
+                         published-clean versions and identifying system Decks. -->
 # Deck 评估器式交互草稿
 
 > 状态：有效并持续维护。本稿不包含 Workflow。“评估器式”只借鉴 CozeLoop 的草稿、差异预览、

@@ -1,6 +1,7 @@
 <!-- [Input] Implemented Deck aggregate commits and missing Thread apply capability. -->
 <!-- [Output] Boundary between content vN and future immutable Thread binding. -->
 <!-- [Pos] Deck aggregate/Thread version architecture contract. -->
+<!-- [Sync] 2026-08-16: document implemented content versions and explicit-only Thread upgrades. -->
 
 # Deck 内容版本与历史 Thread 边界
 

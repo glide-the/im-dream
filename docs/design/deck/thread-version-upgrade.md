@@ -1,6 +1,7 @@
 <!-- [Input] Historical Chat Thread binding and future Deck snapshot/apply capability. -->
 <!-- [Output] Explicit single-Thread Deck upgrade confirmation and recovery design. -->
 <!-- [Pos] Historical Thread version-upgrade functional-unit design. -->
+<!-- [Sync] 2026-08-16: define source-target confirmation, zero-write cancel, and fail-safe upgrade states. -->
 
 # 历史 Thread 显式升级
 

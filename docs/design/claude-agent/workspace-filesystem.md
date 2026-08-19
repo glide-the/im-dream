@@ -2,7 +2,10 @@
 > **Ink & Memory 适配说明**: skills 同步已由 `workspace_file_sync.py` 引入；
 > `sync_skills_symlinks()` 会先导入 `.claude/skills/` 的真实写入，再维护
 > `workspace/skills/` 到 `.claude/skills/` 的发现软链接。
+> **[Sync] 2026-06-06**: Memory Workspace 不再由 `init_workspace()` 或 `ClaudeAgentService.assemble_context()` 初始化；`/memory/` 仅通过 `POST /api/workspace/memory-init` 文件接口从 `voices.memory_workspace_config` 写入。详见 [`../memory/memory-workspace-design.md`](../memory/memory-workspace-design.md)。
+> **[Sync] 2026-06-16**: `.claude/skills/` 真实文件/目录会在下次 workspace
 > 同步时导入 `workspace/skills/`，支持 Agent 直接创建或替换 skill。
+> **[Sync] 2026-06-22**: Workspace Mode 收束：`system_config.workspace_enabled=false`
 > 时，Claude Agent chat 不再初始化 thread workspace、不传 `cwd`、不注入
 > workspace/memory context；附件路径也不触发 workspace file sync。
 

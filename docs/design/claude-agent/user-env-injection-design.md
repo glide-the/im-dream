@@ -1,4 +1,6 @@
 > **关联文档**: [ClaudeSDKClient 项目 env 注入方案设计](./claude-sdk-env-design.md)
+> **[Sync] 2026-05-27**: 新增 — 按用户存储的 env 变量注入 Claude SDK 子进程方案。
+> **[Sync] 2026-06-22**: Settings 入口收束 — 用户环境变量控件只在 Workspace Mode 开启时显示，因为该配置面向 workspace runtime / Skills / MCP 工具上下文。
 
 # 按用户存储的 SDK Env 注入方案设计
 

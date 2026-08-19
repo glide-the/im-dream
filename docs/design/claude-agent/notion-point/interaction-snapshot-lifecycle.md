@@ -14,6 +14,7 @@ Scope: 设计 + 方案代码合同 — Claude Agent 使用 Notion 资源连接�
 >      `backend/libs/claude_agent_kit/server/notion_snapshot.py`
 > [Output] 定义 Notion 远程数据源 → 资源连接器数据层 → canonical snapshot → Agent 派生上下文的实际交互设计
 > [Pos] interaction-snapshot-lifecycle in `docs/design/claude-agent/notion-point`
+> [Sync] 2026-06-28: 初始设计 — 将 Notion 快照权威状态收敛到资源连接器数据层，避免 Agent 本地状态分叉。
 
 ---
 

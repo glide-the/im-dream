@@ -5,7 +5,10 @@
 > [Output] Interaction design for enabling per-thread workspace sandboxing from
 > Settings and diagnosing why the previous config still allowed other paths.
 > [Pos] workspace-sandbox-interaction-plan in `docs/design/claude-agent`
+> [Sync] 2026-06-13: initial design for strict per-thread Bash read/write scope.
+> [Sync] 2026-06-17: add seccomp-denied (`apply-seccomp`) failure handling and
 > local Docker verification checklist.
+> [Sync] 2026-06-21: note that sandbox network policy is covered by the
 > dedicated sandbox-network interaction plan.
 
 # Claude-Agent Workspace Sandbox Interaction Plan

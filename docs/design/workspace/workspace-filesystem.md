@@ -1,12 +1,17 @@
 # 工作空间文件系统 — 业务说明文档
 
+> **[Sync] 2026-06-13**: Workspace Mode 现在会在每个 thread 的
 > `.claude/settings.json` 写入 Claude Code `sandbox` 配置；Bash 目录隔离由
 > Claude Code 原生 sandbox 执行，PreToolUse 不解析复杂 shell 语法。
+> **[Sync] 2026-06-14**: Docker 部署由后端自动检测 Linux 容器环境并写入
 > Claude Code `enableWeakerNestedSandbox`，解决容器内 bubblewrap nested
 > sandbox 启动问题；无需用户配置额外 env。
+> **[Sync] 2026-06-16**: Workspace sandbox 不再 deny 整个 `.claude/`；
 > `.claude/skills/` 保持可创建/替换 skill，denyWrite 仅保护 settings/hooks/editor index。
+> **[Sync] 2026-06-16**: Skills 同步在重建软链接前会导入
 > `.claude/skills/` 下的真实文件/目录，使 Agent 直接创建的 skill 回写到
 > `workspace/skills/`。
+> **[Sync] 2026-06-21**: `.claude/settings.json` sandbox block now also
 > carries Settings-backed `sandbox.network` policy for Bash subprocess egress.
 
 ## 1. 概述

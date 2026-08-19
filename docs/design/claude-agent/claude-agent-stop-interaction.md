@@ -9,6 +9,7 @@
 > - `backend/claude_agent/service.py` — 取消路径的部分消息持久化与 SSE 收尾
 
 > Stop 仍是拥有 active turn 的
+> **[Sync 2026-08-11 / current deployment boundary]** Stop 仍是拥有 active turn 的
 > `ClaudeAgentThreadFactory` 进程内控制操作。active-turn registry、`/status`、pending
 > confirmation Future 和 HTTP stream routing 都没有迁入 Redis。Redis EventBus 只为
 > 已知 `(session_id, turn_id)` 共享事件 replay/writer/单终态，不能定位或取消另一个
