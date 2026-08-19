@@ -1,8 +1,9 @@
 // [Input] Claude MCP API capability/configuration/server/operation DTOs and shared design tokens/icons.
-// [Output] Restricted HTTPS configuration, discovery, browser OAuth handoff, recovery, logout, and removal UI.
+// [Output] Restricted HTTPS configuration, discovery, detail navigation, browser OAuth handoff, recovery, logout, and removal UI.
 // [Pos] `claude-mcp` feature surface embedded by the Settings Resources page.
 // [Sync] 2026-08-19: add the reviewed minimal MCP resource connector interaction.
 // [Sync] 2026-08-19: enable user-owned HTTPS add/remove and correct the cross-platform capability message.
+// [Sync] 2026-08-20: add the Notion-style server detail handoff for tool inventory and metadata.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -20,7 +21,7 @@ import {
   type ClaudeMcpServer,
   type ClaudeMcpState,
 } from '../../api/claudeMcpApi';
-import { IconCheck, IconDatabase, IconLoader, IconX } from '../chat/Icons';
+import { IconCheck, IconChevronRight, IconDatabase, IconLoader, IconX } from '../chat/Icons';
 
 const OPERATION_POLL_INTERVAL_MS = 1200;
 const ACTIVE_STATES: ClaudeMcpState[] = [
@@ -82,7 +83,11 @@ function operationFor(
     ?? null;
 }
 
-export default function ClaudeMcpResourceSection() {
+export default function ClaudeMcpResourceSection({
+  onOpenServerDetail,
+}: {
+  onOpenServerDetail?: (serverName: string) => void;
+}) {
   const [capability, setCapability] = useState<ClaudeMcpCapability | null>(null);
   const [servers, setServers] = useState<ClaudeMcpServer[]>([]);
   const [operations, setOperations] = useState<Record<string, ClaudeMcpOperation>>({});
@@ -347,18 +352,39 @@ export default function ClaudeMcpResourceSection() {
           return (
             <article key={server.name} aria-label={`MCP 服务 ${server.name}`} style={{ border: '1px solid var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', background: 'var(--color-bg-surface-solid)', display: 'grid', gap: '0.72rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.8rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', gap: '0.68rem', minWidth: 0 }}>
-                  <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.75rem', display: 'grid', placeItems: 'center', background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)' }}>
-                    <IconDatabase style={{ width: '1rem', height: '1rem' }} />
-                  </span>
-                  <div style={{ minWidth: 0 }}>
-                    <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.name}</strong>
-                    <div style={{ marginTop: '0.25rem', display: 'inline-flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : state === 'failed' ? 'var(--color-state-error)' : 'var(--color-text-muted)' }}>
-                      {state === 'connected' ? <IconCheck style={{ width: '0.78rem', height: '0.78rem' }} /> : state === 'failed' ? <IconX style={{ width: '0.78rem', height: '0.78rem' }} /> : null}
-                      {STATE_LABELS[state]}
+                {onOpenServerDetail ? (
+                  <button
+                    type="button"
+                    aria-label={`管理与工具 ${server.name}`}
+                    onClick={() => onOpenServerDetail(server.name)}
+                    style={{ flex: '1 1 18rem', display: 'flex', alignItems: 'center', gap: '0.68rem', minWidth: 0, border: 'none', background: 'transparent', color: 'inherit', padding: 0, textAlign: 'left', cursor: 'pointer' }}
+                  >
+                    <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.75rem', display: 'grid', placeItems: 'center', background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)', flexShrink: 0 }}>
+                      <IconDatabase style={{ width: '1rem', height: '1rem' }} />
+                    </span>
+                    <span style={{ minWidth: 0, flex: 1 }}>
+                      <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.name}</strong>
+                      <span style={{ marginTop: '0.25rem', display: 'flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : state === 'failed' ? 'var(--color-state-error)' : 'var(--color-text-muted)' }}>
+                        {state === 'connected' ? <IconCheck style={{ width: '0.78rem', height: '0.78rem' }} /> : state === 'failed' ? <IconX style={{ width: '0.78rem', height: '0.78rem' }} /> : null}
+                        {STATE_LABELS[state]}
+                      </span>
+                    </span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.28rem', color: 'var(--color-action-link)', fontSize: '0.74rem', fontWeight: 700, flexShrink: 0 }}>
+                      管理与工具
+                      <IconChevronRight style={{ width: '0.82rem', height: '0.82rem' }} />
+                    </span>
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', gap: '0.68rem', minWidth: 0 }}>
+                    <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.75rem', display: 'grid', placeItems: 'center', background: 'var(--color-bg-hover)', color: 'var(--color-text-primary)' }}>
+                      <IconDatabase style={{ width: '1rem', height: '1rem' }} />
+                    </span>
+                    <div style={{ minWidth: 0 }}>
+                      <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.name}</strong>
+                      <div style={{ marginTop: '0.25rem', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : 'var(--color-text-muted)' }}>{STATE_LABELS[state]}</div>
                     </div>
                   </div>
-                </div>
+                )}
                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                   {state === 'connected' ? (
                     <button type="button" onClick={() => void logout(server.name)} disabled={busyServer === server.name} style={actionButton()}>

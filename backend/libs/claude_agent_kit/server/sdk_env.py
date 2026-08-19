@@ -63,6 +63,9 @@
 #                    CLAUDE_CONFIG_DIR so platform users cannot collapse into one home.
 # [Sync] 2026-08-20: inject a distinct, server-owned macOS secure-storage home
 #                    so user MCP Keychain credentials can be reused per thread.
+# [Sync] 2026-08-20: bound the public SDK stdout message buffer through a
+#                    server-owned option so valid image tool results can exceed
+#                    the SDK's 1 MiB default without enabling unbounded reads.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -83,6 +86,10 @@ _CLAUDE_CODE_MAX_RETRIES_ENV_NAME = "CLAUDE_CODE_MAX_RETRIES"
 CLAUDE_CODE_MAX_RETRIES_DEFAULT = "3"
 _CLAUDE_CODE_TMPDIR_ENV_NAME = "CLAUDE_CODE_TMPDIR"
 CLAUDE_CODE_TMPDIR_DEFAULT = "/tmp/claude"
+CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME = "INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES"
+CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT = 8 * 1024 * 1024
+CLAUDE_AGENT_MAX_BUFFER_SIZE_MINIMUM = 1024 * 1024
+CLAUDE_AGENT_MAX_BUFFER_SIZE_MAXIMUM = 64 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
@@ -146,6 +153,43 @@ _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME = "CLAUDE_CODE_TASK_LIST_ID"
 # workspace.get_tasks_dir() resolves the same constant — single source.
 CLAUDE_CODE_TASK_LIST_ID_VALUE = "main"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def resolve_claude_agent_max_buffer_size(
+    process_env: Optional[Mapping[str, str]] = None,
+) -> int:
+    """Return the bounded SDK stdout limit for one CLI NDJSON message.
+
+    Claude Code duplicates image ``Read`` results in ``message`` and
+    ``toolUseResult`` fields on the wire. A normal image can therefore exceed
+    the Python SDK's 1 MiB default even though neither copy is independently
+    large. Browser/user Settings cannot change this server-owned policy, and
+    invalid deployment values fall back to the reviewed 8 MiB default.
+    """
+
+    source = os.environ if process_env is None else process_env
+    raw = str(source.get(CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME) or "").strip()
+    if not raw:
+        return CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if not (
+        CLAUDE_AGENT_MAX_BUFFER_SIZE_MINIMUM
+        <= value
+        <= CLAUDE_AGENT_MAX_BUFFER_SIZE_MAXIMUM
+    ):
+        logger.warning(
+            "%s=%r must be between %d and %d bytes; using %d.",
+            CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
+            raw,
+            CLAUDE_AGENT_MAX_BUFFER_SIZE_MINIMUM,
+            CLAUDE_AGENT_MAX_BUFFER_SIZE_MAXIMUM,
+            CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT,
+        )
+        return CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT
+    return value
 
 
 def resolve_claude_code_tmpdir(

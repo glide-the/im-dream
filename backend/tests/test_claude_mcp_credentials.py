@@ -5,6 +5,7 @@
 [Pos] Provider-free cross-platform credential-store tests; no real OAuth token or Claude CLI is used.
 [Sync] 2026-08-19: cover the production Linux file-backed user-to-thread synchronization boundary.
 [Sync] 2026-08-20: prove macOS never copies Keychain material and reuses a user secure-store selector.
+[Sync] 2026-08-20: cover detached user MCP definition reads for inventory and Agent injection.
 """
 
 from __future__ import annotations
@@ -85,6 +86,27 @@ def test_user_roots_are_stable_private_and_isolated(tmp_path: Path) -> None:
     assert len(first.root.name) == 64
     for path in (settings.runtime_root, first.root, first.config_dir, first.workspace):
         assert path.stat().st_mode & 0o777 == 0o700
+
+
+def test_user_mcp_definition_read_is_detached_and_actor_scoped(tmp_path: Path) -> None:
+    synchronizer = _synchronizer(tmp_path)
+    first = resolve_user_paths("7", synchronizer.settings)
+    second = resolve_user_paths("8", synchronizer.settings)
+    _write_private_json(
+        first.config_dir / CLAUDE_USER_CONFIG_FILENAME,
+        {"mcpServers": {"comfy": {"type": "http", "url": "https://example.test/mcp"}}},
+    )
+    _write_private_json(
+        second.config_dir / CLAUDE_USER_CONFIG_FILENAME,
+        {"mcpServers": {"other": {"type": "http", "url": "https://other.test/mcp"}}},
+    )
+
+    first_read = asyncio.run(synchronizer.read_user_mcp_servers("7"))
+    first_read["comfy"]["url"] = "mutated"  # type: ignore[index]
+    repeated = asyncio.run(synchronizer.read_user_mcp_servers("7"))
+    other = asyncio.run(synchronizer.read_user_mcp_servers("8"))
+    assert repeated["comfy"]["url"] == "https://example.test/mcp"  # type: ignore[index]
+    assert set(other) == {"other"}
 
 
 def test_identity_uses_shared_absolute_cli_and_user_config(

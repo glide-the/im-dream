@@ -9,6 +9,7 @@
 // [Sync] 2026-07-08: replace light-only Settings connector card/status fills with semantic theme
 //                    tokens and state color mixes so resource-link settings adapt to dark mode.
 // [Sync] 2026-08-19: embed the domain-owned Claude MCP resource connector under remote resources.
+// [Sync] 2026-08-20: hand MCP server cards to the dedicated Notion-aligned detail workbench.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
 import ClaudeMcpResourceSection from '../claude-mcp/ClaudeMcpResourceSection';
@@ -28,6 +29,8 @@ interface ConnectorSettingsSectionProps {
   isMobile?: boolean;
   /** Navigates to the dedicated Notion "具体配置页面" instead of expanding inline. */
   onOpenNotionDetail?: () => void;
+  /** Navigates to one actor-owned Claude MCP server detail page. */
+  onOpenClaudeMcpDetail?: (serverName: string) => void;
 }
 
 interface ConnectorOptionCardProps {
@@ -198,7 +201,12 @@ function ConnectorOptionCard({
   );
 }
 
-export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = false, onOpenNotionDetail }: ConnectorSettingsSectionProps) {
+export default function ConnectorSettingsSection({
+  focusNonce = 0,
+  isMobile = false,
+  onOpenNotionDetail,
+  onOpenClaudeMcpDetail,
+}: ConnectorSettingsSectionProps) {
   const sectionRef = useRef<HTMLElement>(null);
   const [connectors, setConnectors] = useState<ResourceConnector[]>([]);
   const [loading, setLoading] = useState(true);
@@ -321,7 +329,7 @@ export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = fa
             />
           </div>
 
-          <ClaudeMcpResourceSection />
+          <ClaudeMcpResourceSection onOpenServerDetail={onOpenClaudeMcpDetail} />
         </section>
 
         <div style={{ height: '1px', background: 'var(--color-border-paper)' }} />

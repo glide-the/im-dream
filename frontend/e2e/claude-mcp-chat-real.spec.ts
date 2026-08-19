@@ -1,7 +1,8 @@
 // [Input] A named existing platform actor, one already-connected user-scope Claude MCP server, and the normal Chat UI/API/runtime.
-// [Output] Real-business Resources → visible Chat turn → MCP tool result → refresh → same-thread follow-up evidence.
+// [Output] Real-business Resources → live tool inventory → visible Chat turn → MCP result → refresh → same-thread follow-up evidence.
 // [Pos] Opt-in read-only Claude MCP Chat acceptance; it preserves the server credential and the created Chat thread for review.
 // [Sync] 2026-08-20: prove an authenticated user-scope MCP server is available through the actual Chat composer and after refresh.
+// [Sync] 2026-08-20: verify the Resources detail reads live public-SDK tool metadata before Chat uses the same identity.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -188,6 +189,13 @@ test('connected MCP works in visible Chat and the same thread after refresh', as
 
   await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
   const card = page.getByRole('article', { name: `MCP 服务 ${SERVER_NAME}` });
+  await expect(card).toContainText('已连接', { timeout: 30_000 });
+
+  await card.getByRole('button', { name: '管理与工具' }).click();
+  await expect(page.getByRole('heading', { name: `${SERVER_NAME} MCP Server` })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('tab', { name: /^Tools \d+$/ })).toContainText('41', { timeout: 60_000 });
+  await expect(page.getByRole('article', { name: 'MCP 工具 get_job_status' })).toContainText('只读');
+  await page.getByRole('button', { name: '资源连接器' }).click();
   await expect(card).toContainText('已连接', { timeout: 30_000 });
 
   await page.getByRole('button', { name: '返回应用' }).click();

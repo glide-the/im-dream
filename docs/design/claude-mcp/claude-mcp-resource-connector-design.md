@@ -8,6 +8,8 @@
 <!-- [Sync] 2026-08-20: replace unsafe macOS Keychain reads/copies with per-user secure-storage reuse and update the reviewed cross-platform contract. -->
 <!-- [Sync] 2026-08-20: inject opaque user MCP definitions through the public SDK option, record the passing named-account journey, and complete the implementation review. -->
 <!-- [Sync] 2026-08-20: distinguish backend secret access from exact-CLI Keychain access, document first-access SecurityAgent behavior, and simplify Mermaid 13.6 for cross-renderer compatibility. -->
+<!-- [Sync] 2026-08-20: add the public Agent SDK tool-inventory protocol, Notion-aligned detail workbench, and reviewed Resources/Prompts limits. -->
+<!-- [Sync] 2026-08-20: bound the public SDK stdout buffer for image tool results and record the passing real Chat regression. -->
 
 # Claude MCP 资源链接器设计
 
@@ -45,6 +47,7 @@ claude mcp list
 
 - 在 `/story-workspace/settings/work?tab=resources` 发现已配置的 Claude Code MCP server。
 - 查看配置来源、连接/认证状态、CLI 兼容状态和安全错误摘要。
+- 从服务器卡片进入与 Notion 同构的详情页，搜索 Tools 并查看 MCP 明确声明的只读、破坏性和开放世界注解。
 - 启动 `--no-browser` OAuth，打开 authorization URL，提交完整 redirect URL，取消、超时、重试、logout/reconnect。
 - 刷新页面后恢复仍在同一后端进程中的 operation；后端重启后以 CLI 状态重新收敛。
 - Agent 会话仅在身份门通过时复用同一 CLI 配置和安全凭证。
@@ -144,6 +147,8 @@ App
 - `agent_runner.py` 通过 `mcp_servers` 注入 user/memory/editor/story-workspace 等内部 stdio MCP。
 - Plugin 可以贡献 MCP server，并使用 `plugin:<plugin-name>:<server-name>` 完整名称。
 - `docs/design/mcp-remote-interaction.md` 证明 `/mcp` 是 local-jsx，headless 发送文本无效。
+- `claude-agent-sdk==0.2.140` 的公共 `ClaudeSDKClient.get_mcp_status()` 返回 server `connected/failed/needs-auth/pending/disabled`、`serverInfo`、scope 和 connected 时的 Tools；Tool 包含 name、description 与 `readOnly/destructive/openWorld` 注解。
+- 真实 `dmeck@suoxya.com` / `comfy` 只读探针在约 5 秒内从 `pending` 收敛到 `connected`，返回 41 个 Tools，未发送 prompt、未调用 Tool。
 
 未在仓库中找到：
 
@@ -152,6 +157,8 @@ App
 - user-scoped Agent/MCP config identity provider。
 - `claude-mcp` 数据库 capability 或 operation 表。
 - production-safe Docker CLI `>=2.1.191` 与现有 seccomp 策略的配对证据。
+
+公共 SDK 当前未返回 Resources 或 Prompts 清单。因此本期只实现 Tools inventory；Resources/Prompts 在 UI 中显示 `not_reported`，禁止解析 `/mcp` TUI 或伪造数量。官方 Python SDK 的 [类型合同](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/types.py) 与 [client API](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/client.py) 是该能力的版本绑定依据。
 
 ### 3.6 CLI/SDK 版本矩阵
 
@@ -190,8 +197,10 @@ backend/claude_mcp/
 ├─ contracts.py        # states, DTO-facing domain values, error codes
 ├─ identity.py         # exact CLI/config/cwd/credential identity provider
 ├─ keychain.py         # macOS non-secret service-label derivation only
+├─ credentials.py      # actor-scoped opaque definition read and credential delivery
 ├─ parser.py           # ANSI stripping, URL/status/version parsing
 ├─ driver.py           # argv + PTY + process-group lifecycle
+├─ inventory.py        # public get_mcp_status polling and safe tool projection
 └─ service.py          # user ownership, locks, operation registry, orchestration
 
 backend/routers/claude_mcp.py
@@ -205,8 +214,7 @@ backend/tests/test_claude_mcp_*.py
 frontend/src/api/claudeMcpApi.ts
 frontend/src/components/claude-mcp/
 ├─ ClaudeMcpResourceSection.tsx
-├─ ClaudeMcpServerCard.tsx
-└─ ClaudeMcpAuthPanel.tsx
+└─ ClaudeMcpServerDetailPage.tsx
 ```
 
 `ConnectorSettingsSection` 只负责把 `ClaudeMcpResourceSection` 放入“远程资源链接”；MCP state/controller 不进入 Notion API、ClaudePlugin API 或 Chat runtime。
@@ -228,6 +236,9 @@ class ClaudeMcpDriver(Protocol):
     async def submit_redirect(self, handle, redirect_url): ...
     async def cancel(self, handle): ...
     async def logout(self, identity, server_name): ...
+
+class ClaudeMcpInventoryClient:
+    async def inspect(self, *, identity, server_name, server_config, secure_storage_home): ...
 ```
 
 Identity 至少包含：canonical user、resolved executable、parsed CLI version、用户级 `CLAUDE_CONFIG_DIR`/secure-storage selector、server-owned cwd、sanitized env policy、platform credential capability 和 identity fingerprint。fingerprint 只用于等值比较，不暴露 user ID、username、路径或 secret。
@@ -264,6 +275,8 @@ Resources CLI 的两个选择器都指向同一用户根。Agent 的普通配置
 
 - summary header：`Claude MCP`、CLI version、runtime capability（可用/受限）。
 - server cards：display name、完整 server name、scope/transport（若 CLI 输出可得）、状态、最近检查时间。
+- server detail：与 Notion 相同的 breadcrumb、hero、状态 pill、元数据 chips、单一虚线边界和扁平资源行。
+- capability strip：`Tools / Resources / Prompts`；Tools 显示真实数量、搜索和风险筛选，后两者在公共 SDK 未报告时显示 `—`。
 - operation panel：进度、authorization URL、redirect URL 输入、取消/重试。
 - capability disabled：说明“当前 Agent runtime 与 MCP 管理进程身份不一致”或“CLI 版本过低”，不展示假连接按钮。
 
@@ -286,6 +299,8 @@ Resources CLI 的两个选择器都指向同一用户根。Agent 的普通配置
 | `disabled` | 无 | 查看阻断原因 |
 
 v1 提供完成业务闭环所需的最小 user-scope HTTP 配置：用户输入 server name 与 `https://` MCP URL，后端以 argv 调用 `claude mcp add --transport http --scope user`；不接收 header、环境变量、command、client ID 或 client secret。只有该入口创建且 CLI 解析为 user scope 的普通 server 才显示 Remove；`plugin:*` server 仍由 Plugins 所有者处理，禁止跨域删除。Remove 使用正式 `claude mcp remove --scope user`，执行前必须与 active login/logout 互斥，执行后 `get/list` 验证并撤销 thread 投影。
+
+Tool inventory 使用一次 prompt-free streaming SDK session，仅注入所选 server 的 opaque definition、exact system CLI、同一 user config/secure-store identity 和 `tools=[]`。后端轮询公共 `get_mcp_status()` 直到稳定状态或有界超时；只投影 HTTPS URL、transport、safe scope、serverInfo、受限长度的 Tool name/description 和布尔注解。SDK config headers、provider error、OAuth URL、token 和 credential payload 永不进入 DTO。
 
 ## 7. 状态机
 
@@ -322,6 +337,7 @@ stateDiagram-v2
 | `GET` | `/api/claude-mcp/servers` | `mcp list` 并合并当前用户 active operations。 |
 | `POST` | `/api/claude-mcp/servers` | 添加受限 user-scope HTTPS server；body 只有 `name` / `url`。 |
 | `GET` | `/api/claude-mcp/servers/{server_name}` | `mcp get`；server name 作为一个 URL-encoded segment，不拆 `:`。 |
+| `GET` | `/api/claude-mcp/server-inventories/{server_name}` | 使用公共 SDK 读取 live Tools；不发送 prompt 或调用 Tool。 |
 | `POST` | `/api/claude-mcp/servers/{server_name}/auth-operations` | 幂等启动 login；冲突返回既有 operation 或 409。 |
 | `GET` | `/api/claude-mcp/auth-operations/{operation_id}` | user-owned operation snapshot。 |
 | `POST` | `/api/claude-mcp/auth-operations/{operation_id}/redirect` | 一次性写完整 redirect URL。 |
@@ -346,6 +362,31 @@ stateDiagram-v2
 
 `authorizationUrl` 只存在于 active in-memory response。redirect URL 从不出现在 response。error 只有 `{code, safeMessage, retryable}`。
 
+Inventory DTO 单独使用 snake_case，与既有 claude-mcp API 一致：
+
+```jsonc
+{
+  "server_name": "comfy",
+  "status": "connected",
+  "config_scope": "user",
+  "runtime_scope": "dynamic",
+  "transport": "http",
+  "url": "https://cloud.comfy.org/mcp",
+  "tools": [{
+    "name": "get_job_status",
+    "description": "Read job status",
+    "annotations": {"read_only": true, "destructive": null, "open_world": null}
+  }],
+  "tool_count": 41,
+  "tools_truncated": false,
+  "capabilities": {
+    "tools": {"status": "available", "count": 41},
+    "resources": {"status": "not_reported", "count": null},
+    "prompts": {"status": "not_reported", "count": null}
+  }
+}
+```
+
 ### 8.3 错误码
 
 | Code | HTTP | 含义 |
@@ -362,6 +403,9 @@ stateDiagram-v2
 | `CLAUDE_MCP_AUTH_CANCELLED` | 409 | 用户取消。 |
 | `CLAUDE_MCP_CLI_EXITED` | 502 | 非零退出/异常退出。 |
 | `CLAUDE_MCP_LOGOUT_FAILED` | 502 | logout 或验证失败。 |
+| `CLAUDE_MCP_INVENTORY_UNAVAILABLE` | 503 | public SDK session/用户定义不可安全读取。 |
+| `CLAUDE_MCP_INVENTORY_TIMEOUT` | 504 | server 持续 pending 或 status call 超时。 |
+| `CLAUDE_MCP_INVENTORY_MALFORMED` | 502 | public SDK 返回缺失 server/Tool 的非法结构。 |
 
 ## 9. CLI driver 与进程生命周期
 
@@ -517,7 +561,7 @@ sequenceDiagram
     SYNC->>SEC: verify mcpOAuth exists without returning content
   else macOS Keychain credentials
     SYNC->>SYNC: verify exact CLI secure-store selector capability
-    Note over CLI,SEC: exact CLI owns Keychain access; backend never reads payload
+    Note over CLI,SEC: exact CLI owns Keychain access and backend never reads payload
   end
   Note over SVC,SYNC: 不在登录成功时向全部历史 thread 批量复制
   SVC-->>FC: connected (without redirect/token)
@@ -640,6 +684,42 @@ sequenceDiagram
   Note over SVC,CLI: 不尝试 /mcp、私有 control 或 bundled CLI 逃生
 ```
 
+### 13.8 MCP Tools 只读发现
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant UI as Resources UI
+  participant FC as Frontend controller
+  participant API as Claude MCP API
+  participant SVC as Claude MCP service
+  participant INV as SDK inventory adapter
+  participant SDK as Claude Agent SDK
+  participant CLI as Claude Code CLI
+  participant SEC as User credential store
+  participant MCP as Remote MCP Server
+  User->>UI: 打开 MCP server 详情
+  UI->>FC: load server and inventory
+  FC->>API: GET server-inventories exactName
+  API->>SVC: resolve actor and exact identity
+  SVC->>SVC: verify CLI and server definition
+  SVC->>INV: inspect selected opaque definition
+  INV->>SDK: open streaming client without prompt
+  SDK->>CLI: start exact CLI with strict MCP config
+  CLI->>SEC: read same user credential identity
+  CLI->>MCP: initialize and list tools
+  MCP-->>CLI: tool metadata and annotations
+  loop status is pending within deadline
+    INV->>SDK: get_mcp_status
+    SDK-->>INV: pending or final status
+  end
+  INV-->>SVC: sanitized tools only
+  SVC-->>API: inventory DTO
+  API-->>FC: tools and capability status
+  FC-->>UI: searchable flat tool list
+  Note over UI,MCP: No prompt and no remote tool invocation
+```
+
 ## 14. 向后兼容与能力检测
 
 - `<2.1.186`：无 login/logout，全部 auth mutation disabled。
@@ -661,6 +741,7 @@ sequenceDiagram
 - identity/sync：不同 user ID 得到不同 opaque roots；相同 user 稳定；路径/符号链接/权限/malformed JSON/CLI marker 缺失 fail closed；所有平台通过公开 SDK option 交付 opaque `mcpServers` 并清理旧 config snapshot；Linux file 只投影 `mcpOAuth`，macOS复用 user secure store；不复制 `claudeAiOauth`；清理旧明文投影；no-op；源消失撤销；每-turn 同步；内部名称冲突 fail closed；不扩张 remote allowedTools；login 不向历史 thread fan-out。
 - sandbox：生成配置必须 deny-read/deny-write thread `.credentials.json`，并用新版真实容器证明 Bash 不能读取 token 文件、能正常读写 workspace 普通文件。
 - API：auth、URL encoding、404/409/422/503、page refresh operation GET。
+- inventory：pending→connected、timeout、SDK failure、malformed server/tool、payload truncation、description normalization、formal annotations、config/error/secret 不进入 DTO。
 - 全部使用 fake CLI/PTY，不调用真实 OAuth。
 
 ### 15.2 前端
@@ -670,6 +751,7 @@ sequenceDiagram
 - redirect 只在本地 input state 短暂存在，提交后清空。
 - cancel/retry/logout、refresh 恢复、colon name URL encoding。
 - keyboard/ARIA、narrow viewport、dark/light token。
+- detail：卡片进入/浏览器刷新/返回、41-tool count、搜索、只读/破坏性/开放世界/未声明筛选，以及 Resources/Prompts `not_reported`。
 
 ### 15.3 浏览器
 
@@ -693,15 +775,15 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 
 | 检查 | 结果 | 结论 |
 |---|---|---|
-| Resources 问题是否解决 | 通过 | user-level OAuth 不依赖 thread；每个 Agent thread 每 turn 收敛到用户凭证，并通过公开 SDK option取得 server 定义。 |
+| Resources 问题是否解决 | 通过 | user-level OAuth 不依赖 thread；每个 Agent thread 每 turn 收敛到用户凭证；详情页通过公开 SDK 展示同一身份实际可见的 Tools。 |
 | 是否把 `/mcp` 当远程协议 | 通过 | 明确禁止。 |
-| 是否依赖私有 subtype | 通过 | 明确禁止并删除旧设计推荐。 |
+| 是否依赖私有 subtype | 通过 | OAuth 明确禁止私有 subtype；Tools 使用 SDK 正式公开的 `get_mcp_status()` 方法。 |
 | 是否复用 Notion/Plugins | 通过 | 复用 UX/operation pattern，不复用错误生命周期/identity。 |
-| 是否新增任务系统/事件总线/表 | 通过 | operation 为 domain in-memory registry；无 schema。 |
+| 是否新增任务系统/事件总线/表 | 通过 | operation 为 domain in-memory registry；inventory 是单请求有界 session + per-user/server lock；无 schema/cache 表。 |
 | 是否有环境名双路径 | 通过 | 只看 CLI/identity/topology capability。 |
 | 是否泄露 OAuth 敏感信息 | 通过 | Linux 文件只存 server-owned 0700/0600 根；macOS token 只由 exact CLI 访问 user Keychain，不进入后端/thread；secret 不进 argv；禁日志/DB/error/telemetry。 |
-| 刷新/重复/并发/崩溃 | 通过 | CAS、用户锁、atomic replace、每-turn/restart 重新收敛。 |
-| SDK/CLI/sandbox 兼容 | 通过 | Python 3.12 + Node 22.18.0 + SDK 0.2.140 + system CLI 2.1.235 镜像可导入生产模块；project-only setting source 与 user config 的错位已由公开 SDK `mcp_servers` option 消除；真实容器 Bash 能写 workspace、不能读 MCP credential，token 未进入 transcript。 |
+| 刷新/重复/并发/崩溃 | 通过 | CAS、用户锁、atomic replace、每-turn/restart 重新收敛；详情 URL 保存 server name，刷新重新做 live probe。 |
+| SDK/CLI/sandbox 兼容 | 通过 | Python 3.12 + Node 22.18.0 + SDK 0.2.140 + system CLI 2.1.235 镜像可导入生产模块；公共 `get_mcp_status()` 实测 `comfy` pending→connected 并返回 41 Tools；project-only setting source 与 user config 的错位已由公开 SDK `mcp_servers` option 消除。 |
 | 是否可删减 | 通过 | 删除登录成功后全历史 thread fan-out、event/DB/general task system；保留完成真实业务旅程所需的最小受控配置入口。 |
 
 ### 17.2 保留、简化、删除、延期
@@ -714,6 +796,7 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 - thread sandbox 对 credential file 的 exact deny-read/deny-write。
 - Notion 风格 Resources 卡片和 Plugin 风格 operation feedback。
 - 完整安全状态机、API 合同、fake CLI tests。
+- prompt-free `get_mcp_status()` inventory、Notion 同构详情骨架与 MCP 原始安全注解。
 
 **简化**
 
@@ -722,6 +805,7 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 - server 只读发现自 CLI，不创建第二份 catalog。
 - credential delivery 不引入 vault/schema；Linux 保留 CLI 原生 JSON 的 opaque subtree，macOS 不接触 payload。
 - login 成功后不批量复制到大量历史 thread；每个 Agent turn 按需读取 server 定义/交付凭证，Logout 只删除已存在 credential/遗留 config 投影。
+- inventory 不做持久缓存、SSE 或后台任务；页面加载/显式刷新建立一次有界 SDK session，同 server 并发请求串行化。
 
 **删除**
 
@@ -731,10 +815,12 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 - authorization/redirect/raw stdout/stderr operation evidence。
 - production disabled identity 占位 provider；由真实 user-scoped file identity 替换。
 - “macOS 只能使用 Linux Docker 后端”的错误门禁与对应 UI 文案。
+- `/mcp` TUI Tools 解析、SDK session-only toggle 伪装成持久 Disable、Resources/Prompts 虚构计数。
 
 **延期**
 
-- add/edit arbitrary server、remove/disable、client secret、enterprise policy UI。
+- arbitrary header/client-secret 编辑、持久 disable、enterprise policy UI。
+- Resources/Prompts 清单；待正式 SDK 返回后接入，不用 TUI 补洞。
 - multi-node/ephemeral operation handoff和持久 PTY 恢复。
 - Windows Credential Manager 多用户投影；当前明确 fail closed。
 
@@ -755,16 +841,19 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 
 生产最小实现已完成：
 
-- `backend/claude_mcp/`：contract/settings/identity/credentials/parser/driver/service；默认 identity 按 canonical platform `user_id` 解析 opaque config/work root。Linux 文件不满足 private/regular/bounded JSON 合同时 fail closed；macOS exact CLI marker 缺失时 fail closed，业务代码没有 Keychain payload API。
-- `backend/routers/claude_mcp.py`：认证 capability、server、operation、redirect、cancel、logout API；`backend/server.py` 只负责挂载。
-- `frontend/src/api/claudeMcpApi.ts`：无 localStorage fallback 的严格后端 transport。
-- `frontend/src/components/claude-mcp/ClaudeMcpResourceSection.tsx`：Resources 内 discovery、授权链接、redirect、进度恢复、cancel/retry/logout；redirect 提交后清空组件输入。
+- `backend/claude_mcp/`：contract/settings/identity/credentials/parser/driver/service 加 `inventory.py`；默认 identity 按 canonical platform `user_id` 解析 opaque config/work root。Inventory 与 Chat 复用 exact CLI、用户定义和 secure-store selector，业务代码没有 Keychain payload API。
+- `backend/routers/claude_mcp.py`：认证 capability、server、prompt-free inventory、operation、redirect、cancel、logout API；`backend/server.py` 只负责挂载。
+- `frontend/src/api/claudeMcpApi.ts`：无 localStorage fallback 的严格后端 transport，包含 server/tool inventory DTO。
+- `frontend/src/components/claude-mcp/ClaudeMcpResourceSection.tsx`：Resources 内 discovery、详情 handoff、授权链接、redirect、进度恢复、cancel/retry/logout；redirect 提交后清空组件输入。
+- `frontend/src/components/claude-mcp/ClaudeMcpServerDetailPage.tsx`：Notion 同构 breadcrumb/hero/chips/单虚线骨架，Tools 搜索与安全筛选，Resources/Prompts 明确 not-reported。
 - `backend/tests/fixtures/claude_mcp_fake_cli.py` 与 `backend/tests/test_claude_mcp_*.py`：真实 argv/PTTY 进程交互但无真实 provider。
 - `backend/claude_agent/service.py`：每个 Workspace-enabled turn 在 resume/config probe 前执行最小 MCP 交付，把 opaque remote definitions 与 macOS user secure-storage home 独立带入 `AgentRunOptions`；Workspace Mode 关闭且该用户存在 MCP state 时 fail closed。
 - `backend/libs/claude_agent_kit/types.py` / `server/agent_runner.py`：repr-hidden `claude_mcp_servers` 通过官方 `ClaudeAgentOptions.mcp_servers` 与内部 stdio servers 合并；名称冲突 fail closed，不增加 remote wildcard `allowed_tools`。
 - `backend/libs/claude_agent_kit/server/sdk_env.py`：保留 thread `CLAUDE_CONFIG_DIR`，以服务端权威值注入 macOS `CLAUDE_SECURESTORAGE_CONFIG_DIR`；浏览器/user env 无权覆盖。
 - `backend/libs/claude_agent_kit/server/workspace.py`：deny sibling workspace/backend/home/custom MCP runtime root，当前 thread 再 allow-read；credential file 同时使用 exact deny-read/deny-write 和 `credentials.files(mode=deny)`。不再 deny `/`，因为 CLI 2.1.235 下该设置会移除 bwrap 内 `/bin/bash`。
 - `backend/Dockerfile` / `requirements.txt` / `pyproject.toml`：Python 3.12、官方 Node 22.18.0、Claude Code 2.1.235、Agent SDK 0.2.140 原子固定；build-time 验证 exact Node/CLI 与正式 MCP help capability。
-- `frontend/e2e/claude-mcp-resources.spec.ts`：拦截 API 的可见 Resources → Login → redirect → Connected → Logout 技术旅程。
+- `frontend/e2e/claude-mcp-resources.spec.ts`：拦截 API 的可见 Resources → Login → redirect → Connected → 41-tool detail/search/risk → refresh/back → Logout 技术旅程。
 
-验证结果：相关 backend contract `209 passed, 1 skipped, 104 subtests passed`；frontend lint 0 error（19 个既有 hook warnings）且 production build 通过；Playwright provider-free Resources → Login → redirect → Connected → Logout 为 `1 passed`；真实账户完整旅程为 `1 passed (1.3m)`；8 个 Mermaid blocks 全部由当前前端 Mermaid 浏览器运行时解析。最终 Docker image build 成功，运行时回执为 Claude Code `2.1.235`、Node `22.18.0`、Agent SDK `0.2.140`、production imports/MCP capability 均 OK。共享数据库 schema 与 ClaudePlugin operation 表均未改变。
+2026-08-20 本轮发布门通过：Claude MCP backend contract `37 passed`（包含 inventory 请求取消时原样传播并清理 SDK client）；frontend 聚焦 lint `0 errors`（`App.tsx` 16 个既有 Hook warnings）且 production build 成功；provider-free Resources → Login → redirect → Connected → 41-tool 详情/筛选 → 刷新/返回 → Logout → Remove 为 `1 passed (5.3s)`。具名账户 `dmeck@suoxya.com` 在正常本机 Dream/Gateway/PostgreSQL 上完成 Resources 实时 41-tool 详情 → Chat 两次只读 MCP 调用 → 刷新 → 同 thread 续问，结果 `1 passed (1.2m)`，证据 thread `c1292eb3-c550-45c0-b854-406c4b46a90e` 保留，既有 `comfy` 连接未 Logout/Remove。9 个 Mermaid blocks 已由当前 Chromium + 前端 Mermaid 运行时逐块解析。当前工作树 Docker image 构建成功；容器回执为 Claude Code `2.1.235`、Node `22.18.0`、Agent SDK `0.2.140`、production imports/MCP argv capability 均 OK；本机真实链路 exact CLI 为 `2.1.220`，仍满足 `>=2.1.191`。共享数据库 schema 与 ClaudePlugin operation 表均未改变。
+
+真实 Chat 图片回归另发现 Agent SDK transport 的独立限制：Claude CLI 的 `Read` 图片回执会同时携带 message 与 tool result，证据线程出现 1,346,958-byte JSONL 单行，超过 SDK 原 1 MiB stdout buffer 默认值。这不是 MCP tool inventory 或 OAuth 失败。生产路径现通过公开 `ClaudeAgentOptions.max_buffer_size` 使用服务端有界配置 `INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES`，默认 8 MiB、允许 1–64 MiB；非法配置回退默认值，不记录 payload。具名账户可见 UI 路径“上传图片 → Agent Read → assistant 回复”结果 `1 passed (36.4s)`，证据 thread `ecaad924-512d-4790-84d3-bd2fc8505ce6` 保留，未修改 MCP 认证或远程业务数据。

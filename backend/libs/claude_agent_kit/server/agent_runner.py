@@ -185,6 +185,8 @@
 #                    to, but independently from, the thread config home.
 # [Sync] 2026-08-20: merge per-turn user MCP definitions through the public SDK
 #                    mcp_servers option without auto-allowing remote tools.
+# [Sync] 2026-08-20: set a bounded public-SDK stdout message buffer so image
+#                    Read results do not fail at the SDK's 1 MiB framing default.
 # [Sync] 2026-08-04: harden the .dream Bash write guard against find mutation
 #                    actions, env/wrapper execution, glob paths, and normalized
 #                    relative/absolute paths with conservative read-only parsing.
@@ -252,12 +254,14 @@ from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, loa
 from .story_workspace_tool import story_workspace_allowed_tool_names
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
+    CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
     apply_claude_config_home_to_options,
     apply_claude_secure_storage_home_to_options,
     apply_cli_path_to_options,
     apply_project_sdk_runtime_options,
     apply_task_v2_env_to_options,
     apply_user_sdk_env_to_options,
+    resolve_claude_agent_max_buffer_size,
 )
 from .plugin_launcher import apply_plugin_launch_options
 from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
@@ -1221,6 +1225,22 @@ def _sandbox_runtime_failure_hint(
             "and `security_opt: [seccomp=unconfined, apparmor=unconfined]`."
         )
     return None
+
+
+def _sdk_message_buffer_failure_hint(
+    error_message: str,
+    configured_limit: int,
+) -> Optional[str]:
+    """Return safe remediation when one CLI NDJSON message exceeds policy."""
+
+    if "json message exceeded maximum buffer size" not in error_message.lower():
+        return None
+    return (
+        "Claude Code emitted one message larger than the configured Agent SDK "
+        f"limit ({configured_limit} bytes). Reduce the attachment/tool output, "
+        f"or raise {CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME} within the documented "
+        "server-owned policy bound."
+    )
 
 
 def _is_pure_cancellation(exc: BaseException) -> bool:
@@ -2747,6 +2767,7 @@ class ClaudeAgentRunner:
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = ClaudeAgentOptions(
             max_turns=max_turns,
+            max_buffer_size=resolve_claude_agent_max_buffer_size(),
             allowed_tools=effective_allowed_tools,
             include_partial_messages=include_partial_messages,
             hooks={
@@ -3008,6 +3029,14 @@ class ClaudeAgentRunner:
                 )
                 if sandbox_hint:
                     run_error.add_note(f"[claude_agent_kit] sandbox_hint: {sandbox_hint}")
+                buffer_hint = _sdk_message_buffer_failure_hint(
+                    _format_exception_message(exc),
+                    sdk_options.max_buffer_size,
+                )
+                if buffer_hint:
+                    run_error.add_note(
+                        f"[claude_agent_kit] message_size_hint: {buffer_hint}"
+                    )
             except AttributeError:
                 # PEP 678 add_note requires Python 3.11+; ignore on older runtimes.
                 pass

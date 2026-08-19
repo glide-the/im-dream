@@ -1,8 +1,9 @@
 // [Input] Running frontend entry point plus production-shaped intercepted Claude MCP and boot API fixtures.
-// [Output] Verify Resources → Configure → MCP Login → redirect → Connected → Logout → Remove with auth headers and zero secret persistence.
+// [Output] Verify Resources → Configure → Login → Connected → 41-tool detail/search/risk → Logout → Remove with zero secret persistence.
 // [Pos] Provider-free Claude MCP browser journey; it never calls a real OAuth provider, CLI, backend, or business database.
 // [Sync] 2026-08-19: cover the complete visible v1 connector journey and responsive layout.
 // [Sync] 2026-08-19: cover restricted HTTPS configuration and user-owned removal before real-provider QA.
+// [Sync] 2026-08-20: cover the Notion-aligned detail workbench and prompt-free tool inventory.
 
 import { expect, test, type Request as PlaywrightRequest } from '@playwright/test';
 
@@ -87,6 +88,57 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
             detail: null,
             active_operation_id: operationActive ? 'operation-1' : null,
           }] : [],
+        },
+      });
+      return;
+    }
+    if (method === 'GET' && path === `/api/claude-mcp/servers/${serverName}`) {
+      await route.fulfill({
+        json: {
+          server: {
+            name: serverName,
+            state: serverState,
+            transport: 'http',
+            detail: null,
+            active_operation_id: operationActive ? 'operation-1' : null,
+          },
+        },
+      });
+      return;
+    }
+    if (method === 'GET' && path === `/api/claude-mcp/server-inventories/${serverName}`) {
+      const tools = [
+        { name: 'submit_workflow', description: 'Submit a workflow', annotations: { read_only: null, destructive: true, open_world: null } },
+        { name: 'get_job_status', description: 'Read job status', annotations: { read_only: true, destructive: null, open_world: null } },
+        { name: 'wait_for_job', description: 'Wait for a job', annotations: { read_only: true, destructive: null, open_world: null } },
+        { name: 'get_output', description: 'Read an output', annotations: { read_only: true, destructive: null, open_world: null } },
+        { name: 'use_previous_output', description: null, annotations: { read_only: null, destructive: null, open_world: null } },
+        ...Array.from({ length: 36 }, (_, index) => ({
+          name: `comfy_tool_${String(index + 6).padStart(2, '0')}`,
+          description: `Technical tool ${index + 6}`,
+          annotations: { read_only: null, destructive: null, open_world: null },
+        })),
+      ];
+      await route.fulfill({
+        json: {
+          inventory: {
+            server_name: serverName,
+            status: 'connected',
+            config_scope: 'user',
+            runtime_scope: 'dynamic',
+            transport: 'http',
+            url: serverUrl,
+            server_info: { name: 'Technical MCP', version: '1.0.0' },
+            tools,
+            tool_count: 41,
+            tools_truncated: false,
+            capabilities: {
+              tools: { status: 'available', count: 41 },
+              resources: { status: 'not_reported', count: null },
+              prompts: { status: 'not_reported', count: null },
+            },
+            refreshed_at: '2026-08-20T00:00:00Z',
+          },
         },
       });
       return;
@@ -243,6 +295,30 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   expect(submittedRedirect).toBe(redirectUrl);
   await expect(serverCard).toContainText('已连接', { timeout: 5000 });
   expect(await page.evaluate((secret) => Object.values(localStorage).every((value) => !value.includes(secret)), 'private-code')).toBe(true);
+
+  await serverCard.getByRole('button', { name: '管理与工具' }).click();
+  await expect(page).toHaveURL(new RegExp(`mcp-server=${serverName}`));
+  await expect(page.getByRole('heading', { name: `${serverName} MCP Server` })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Tools 41' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText(serverUrl, { exact: true })).toBeVisible();
+  await page.getByRole('searchbox', { name: '搜索 MCP 工具' }).fill('submit_workflow');
+  const destructiveTool = page.getByRole('article', { name: 'MCP 工具 submit_workflow' });
+  await expect(destructiveTool).toContainText('破坏性');
+  await page.getByRole('searchbox', { name: '搜索 MCP 工具' }).fill('');
+  await page.getByRole('combobox', { name: '筛选 MCP 工具风险' }).selectOption('read_only');
+  await expect(page.getByRole('article', { name: 'MCP 工具 get_job_status' })).toContainText('只读');
+  await expect(page.getByRole('article', { name: 'MCP 工具 submit_workflow' })).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Resources —' }).click();
+  await expect(page.getByText(/公开的 get_mcp_status\(\) 契约不返回 Resources 清单/)).toBeVisible();
+  await page.getByRole('tab', { name: 'Tools 41' }).click();
+  await page.getByRole('combobox', { name: '筛选 MCP 工具风险' }).selectOption('all');
+  await page.setViewportSize({ width: 390, height: 760 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+  await page.screenshot({ fullPage: true, path: 'output/playwright/claude-mcp-detail-narrow.png' });
+  await page.reload();
+  await expect(page.getByRole('heading', { name: `${serverName} MCP Server` })).toBeVisible();
+  await page.getByRole('button', { name: '资源连接器' }).click();
+  await expect(serverCard).toBeVisible();
 
   await serverCard.getByRole('button', { name: 'Logout' }).click();
   await expect(serverCard).toContainText('已退出');

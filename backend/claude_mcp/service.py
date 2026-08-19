@@ -8,11 +8,13 @@
 [Sync] 2026-08-19: enable macOS platform identities, remove login-time historical fan-out, and add restricted add/remove.
 [Sync] 2026-08-20: accept browser-callback completion racing with redirect stdin submission as idempotent success.
 [Sync] 2026-08-20: verify Darwin login through formal `mcp get` without reading Keychain payloads.
+[Sync] 2026-08-20: expose prompt-free public-SDK tool inventory under the same user identity as Chat.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from datetime import datetime, timezone
 import uuid
 
@@ -23,6 +25,7 @@ from .contracts import (
     ClaudeMcpOperation,
     ClaudeMcpRuntimeIdentity,
     ClaudeMcpServer,
+    ClaudeMcpServerInventory,
     ClaudeMcpState,
 )
 from .driver import ClaudeMcpCliDriver, ClaudeMcpLoginHandle
@@ -35,6 +38,7 @@ from .identity import (
     ClaudeMcpIdentityProvider,
     PlatformClaudeMcpIdentityProvider,
 )
+from .inventory import ClaudeMcpInventoryClient
 from .parser import (
     parse_authorization_url,
     parse_server_names,
@@ -69,11 +73,15 @@ class ClaudeMcpService:
         identity_provider: ClaudeMcpIdentityProvider | None = None,
         credential_synchronizer: ClaudeMcpCredentialSynchronizer | None = None,
         driver: ClaudeMcpCliDriver | None = None,
+        inventory_client: ClaudeMcpInventoryClient | None = None,
         settings: ClaudeMcpSettings | None = None,
     ) -> None:
         using_default_settings = settings is None
         self.settings = settings or ClaudeMcpSettings.from_env()
         self.driver = driver or ClaudeMcpCliDriver(self.settings)
+        self.inventory_client = inventory_client or ClaudeMcpInventoryClient(
+            self.settings
+        )
         self.credential_synchronizer = (
             credential_synchronizer
             or (
@@ -89,6 +97,7 @@ class ClaudeMcpService:
         self._operations: dict[str, ClaudeMcpOperation] = {}
         self._active_by_server: dict[tuple[str, str], str] = {}
         self._credential_locks: dict[str, asyncio.Lock] = {}
+        self._inventory_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._registry_lock = asyncio.Lock()
 
     def _identity(self, actor_id: str) -> ClaudeMcpRuntimeIdentity:
@@ -269,6 +278,47 @@ class ClaudeMcpService:
         identity, _ = await self._checked_identity(actor_id)
         name = self._server_name(server_name)
         return await self._server(identity, name)
+
+    async def get_server_inventory(
+        self,
+        actor_id: str,
+        server_name: str,
+    ) -> ClaudeMcpServerInventory:
+        """Return one safe live inventory without sending a prompt or tool call."""
+
+        identity, _ = await self._checked_identity(actor_id)
+        name = self._server_name(server_name)
+        await self._server(identity, name)
+        try:
+            definitions = await self.credential_synchronizer.read_user_mcp_servers(
+                actor_id
+            )
+        except ClaudeMcpCredentialError as exc:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.INVENTORY_UNAVAILABLE,
+                "Claude MCP server definitions could not be read safely.",
+            ) from exc
+        server_config = definitions.get(name)
+        if not isinstance(server_config, Mapping):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.INVENTORY_UNAVAILABLE,
+                "Claude MCP server is not available to the Agent runtime.",
+            )
+        secure_storage_home = self.credential_synchronizer.secure_storage_home(
+            actor_id
+        )
+        lock = self._inventory_locks.setdefault(
+            (identity.fingerprint, name), asyncio.Lock()
+        )
+        async with lock:
+            return await self.inventory_client.inspect(
+                identity=identity,
+                server_name=name,
+                server_config=server_config,
+                secure_storage_home=(
+                    str(secure_storage_home) if secure_storage_home else None
+                ),
+            )
 
     async def _server(
         self,

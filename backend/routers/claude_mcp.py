@@ -6,6 +6,7 @@
 [Sync] 2026-08-19: expose the reviewed schema-free v1 connector contract.
 [Sync] 2026-08-19: expose safe user-to-thread credential projection failures.
 [Sync] 2026-08-19: expose HTTPS user-scope MCP configuration and removal.
+[Sync] 2026-08-20: expose sanitized prompt-free tool inventory from the public Agent SDK.
 """
 
 from __future__ import annotations
@@ -59,6 +60,9 @@ _ERROR_STATUS = {
     ClaudeMcpErrorCode.AUTH_TIMEOUT: 504,
     ClaudeMcpErrorCode.AUTH_CANCELLED: 409,
     ClaudeMcpErrorCode.CREDENTIAL_SYNC_FAILED: 500,
+    ClaudeMcpErrorCode.INVENTORY_UNAVAILABLE: 503,
+    ClaudeMcpErrorCode.INVENTORY_TIMEOUT: 504,
+    ClaudeMcpErrorCode.INVENTORY_MALFORMED: 502,
 }
 
 
@@ -135,6 +139,21 @@ async def configure_server(
     except ClaudeMcpError as exc:
         return _error(exc)
     return {"server": server.to_dict()}
+
+
+@router.get("/server-inventories/{server_name:path}")
+async def get_server_inventory(
+    server_name: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    service: ClaudeMcpService = Depends(get_claude_mcp_service),
+):
+    try:
+        inventory = await service.get_server_inventory(
+            _actor_id(current_user), server_name
+        )
+    except ClaudeMcpError as exc:
+        return _error(exc)
+    return {"inventory": inventory.to_dict()}
 
 
 @router.get("/servers/{server_name:path}")

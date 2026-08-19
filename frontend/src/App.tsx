@@ -31,6 +31,7 @@
 // [Sync] 2026-08-16: route Deck settings through Settings / Work and provide the Work-owned management instance.
 // [Sync] 2026-08-16: make the Deck-home Settings action navigate directly to Settings / Work.
 // [Sync] 2026-08-17: carry Deck preview example copy into the new Chat draft without URL persistence or auto-send.
+// [Sync] 2026-08-20: route actor-owned Claude MCP cards into a refresh-stable capability detail workbench.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -76,6 +77,7 @@ import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
 import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
 import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDetailPage';
+import ClaudeMcpServerDetailPage from './components/claude-mcp/ClaudeMcpServerDetailPage';
 import ClaudePluginAdminPage from './components/claude-plugin-admin/ClaudePluginAdminPage';
 import {
   resolveStoryWorkspacePath,
@@ -197,6 +199,10 @@ export default function App() {
   //                    replaces the whole Settings viewport instead of expanding inline within the
   //                    resource-link card, matching the connector interaction design's page navigation.
   const [showNotionConnectorDetail, setShowNotionConnectorDetail] = useState(false);
+  const [claudeMcpDetailServerName, setClaudeMcpDetailServerName] = useState<string | null>(() => {
+    const query = new URLSearchParams(window.location.search);
+    return query.get('tab') === 'resources' ? query.get('mcp-server') : null;
+  });
 
   useLayoutEffect(() => {
     if (!isAuthenticated || isDeviceVerificationRoute || window.location.pathname !== '/') return;
@@ -218,17 +224,51 @@ export default function App() {
     window.dispatchEvent(new PopStateEvent('popstate'));
     setCurrentView('story-workspace');
     setShowNotionConnectorDetail(false);
+    setClaudeMcpDetailServerName(null);
     setConnectorSettingsFocusNonce((value) => value + 1);
     setChatLandingTab('history');
   }, []);
 
   const openNotionConnectorDetail = useCallback(() => {
+    setClaudeMcpDetailServerName(null);
     setShowNotionConnectorDetail(true);
   }, []);
 
   const closeNotionConnectorDetail = useCallback(() => {
     setShowNotionConnectorDetail(false);
     setConnectorSettingsFocusNonce((value) => value + 1);
+  }, []);
+
+  const openClaudeMcpDetail = useCallback((serverName: string) => {
+    const search = new URLSearchParams({ tab: 'resources', 'mcp-server': serverName });
+    window.history.pushState(
+      { inkDreamView: 'story-workspace', claudeMcpServerName: serverName },
+      '',
+      `${STORY_WORKSPACE_PATHS['settings-work']}?${search.toString()}`,
+    );
+    setShowNotionConnectorDetail(false);
+    setClaudeMcpDetailServerName(serverName);
+  }, []);
+
+  const closeClaudeMcpDetail = useCallback(() => {
+    window.history.pushState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      `${STORY_WORKSPACE_PATHS['settings-work']}?tab=resources`,
+    );
+    setClaudeMcpDetailServerName(null);
+    setConnectorSettingsFocusNonce((value) => value + 1);
+  }, []);
+
+  useEffect(() => {
+    const syncClaudeMcpDetailFromLocation = () => {
+      const query = new URLSearchParams(window.location.search);
+      const serverName = query.get('tab') === 'resources' ? query.get('mcp-server') : null;
+      setClaudeMcpDetailServerName(serverName);
+      if (serverName) setShowNotionConnectorDetail(false);
+    };
+    window.addEventListener('popstate', syncClaudeMcpDetailFromLocation);
+    return () => window.removeEventListener('popstate', syncClaudeMcpDetailFromLocation);
   }, []);
 
   const handleStoryWorkspaceRouteChange = useCallback((route: StoryWorkspaceRoute) => {
@@ -243,6 +283,7 @@ export default function App() {
         STORY_WORKSPACE_PATHS.dream,
       );
       setShowNotionConnectorDetail(false);
+      setClaudeMcpDetailServerName(null);
       setCurrentView('story-workspace');
       return;
     }
@@ -253,6 +294,7 @@ export default function App() {
         STORY_WORKSPACE_PATHS.settings,
       );
       setShowNotionConnectorDetail(false);
+      setClaudeMcpDetailServerName(null);
       setCurrentView('story-workspace');
       return;
     }
@@ -280,6 +322,7 @@ export default function App() {
           STORY_WORKSPACE_PATHS.settings,
         );
         setShowNotionConnectorDetail(false);
+        setClaudeMcpDetailServerName(null);
         setCurrentView('story-workspace');
         return;
       }
@@ -1643,15 +1686,18 @@ export default function App() {
             renderSettings={(section, onNavigate) => (
               <StoryWorkspaceSettingsPage
                 activeSection={section}
+                claudeMcpDetailServerName={claudeMcpDetailServerName}
                 connectorSettingsFocusNonce={connectorSettingsFocusNonce}
                 currentLanguage={currentLanguage}
                 isMobile={isMobile}
                 languageCodes={LANGUAGE_CODES}
                 onCloseNotionDetail={closeNotionConnectorDetail}
+                onCloseClaudeMcpDetail={closeClaudeMcpDetail}
                 onEnergyBarChange={() => setShowEnergyBar((value) => !value)}
                 onLanguageChange={handleUILanguageChange}
                 onNavigate={onNavigate}
                 onOpenNotionDetail={openNotionConnectorDetail}
+                onOpenClaudeMcpDetail={openClaudeMcpDetail}
                 showEnergyBar={showEnergyBar}
                 showNotionConnectorDetail={showNotionConnectorDetail}
                 workDeckContent={storyWorkspaceDeckSettingsManager}
@@ -2178,7 +2224,11 @@ export default function App() {
           bottom: mobileBottomOffset,
           background: 'var(--color-bg-app)'
         }}>
-          {showNotionConnectorDetail ? (
+          {claudeMcpDetailServerName ? (
+            <div style={{ maxWidth: SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX, width: '100%' }}>
+              <ClaudeMcpServerDetailPage serverName={claudeMcpDetailServerName} onBack={closeClaudeMcpDetail} isMobile={isMobile} />
+            </div>
+          ) : showNotionConnectorDetail ? (
             <div style={{ maxWidth: SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX, width: '100%' }}>
               <ConnectorNotionDetailPage onBack={closeNotionConnectorDetail} isMobile={isMobile} />
             </div>
@@ -2328,6 +2378,7 @@ export default function App() {
                 focusNonce={connectorSettingsFocusNonce}
                 isMobile={isMobile}
                 onOpenNotionDetail={openNotionConnectorDetail}
+                onOpenClaudeMcpDetail={openClaudeMcpDetail}
               />
             </section>
 

@@ -1,10 +1,11 @@
 """Public Claude MCP Resources API contract tests.
 
 [Input] Authenticated FastAPI calls with an injected provider-free fake service.
-[Output] Capability, configuration/removal, colon-bearing server, operation, redirect, cancel, logout, and safe-error DTO evidence.
+[Output] Capability, inventory, configuration/removal, colon-bearing server, operation, redirect, cancel, logout, and safe-error DTO evidence.
 [Pos] Route boundary tests; no database, real CLI, or real OAuth activity.
 [Sync] 2026-08-19: cover the reviewed `/api/claude-mcp` v1 contract and ownership seam.
 [Sync] 2026-08-19: cover restricted HTTPS user-scope configuration and removal DTOs.
+[Sync] 2026-08-20: cover the actor-owned sanitized tool inventory route.
 """
 
 from __future__ import annotations
@@ -27,7 +28,12 @@ from claude_mcp.contracts import (
     ClaudeMcpErrorCode,
     ClaudeMcpOperation,
     ClaudeMcpServer,
+    ClaudeMcpServerInfo,
+    ClaudeMcpServerInventory,
     ClaudeMcpState,
+    ClaudeMcpInventoryStatus,
+    ClaudeMcpTool,
+    ClaudeMcpToolAnnotations,
 )
 from routers import claude_mcp
 from routers.deps import get_current_user
@@ -60,6 +66,28 @@ class _Service:
     async def get_server(self, actor_id: str, server_name: str) -> ClaudeMcpServer:
         assert actor_id == "7"
         return ClaudeMcpServer(server_name, ClaudeMcpState.NEEDS_AUTH)
+
+    async def get_server_inventory(self, actor_id: str, server_name: str) -> ClaudeMcpServerInventory:
+        assert actor_id == "7"
+        return ClaudeMcpServerInventory(
+            server_name=server_name,
+            status=ClaudeMcpInventoryStatus.CONNECTED,
+            config_scope="user",
+            runtime_scope="dynamic",
+            transport="http",
+            url="https://cloud.comfy.org/mcp",
+            server_info=ClaudeMcpServerInfo("Comfy Cloud", "1.0.0"),
+            tools=(
+                ClaudeMcpTool(
+                    "get_job_status",
+                    "Read job status",
+                    ClaudeMcpToolAnnotations(read_only=True),
+                ),
+            ),
+            tool_count=1,
+            tools_truncated=False,
+            refreshed_at="2026-08-20T00:00:00+00:00",
+        )
 
     async def configure_http_server(
         self, actor_id: str, server_name: str, server_url: str
@@ -122,6 +150,15 @@ def test_full_api_contract_preserves_colon_name_and_never_returns_redirect_submi
     assert capability.status_code == 200
     assert capability.json()["enabled"] is True
     assert client.get("/api/claude-mcp/servers").json()["servers"][0]["name"] == server_name
+
+    inventory = client.get(f"/api/claude-mcp/server-inventories/{server_name}")
+    assert inventory.status_code == 200
+    assert inventory.json()["inventory"]["tools"] == [{
+        "name": "get_job_status",
+        "description": "Read job status",
+        "annotations": {"read_only": True, "destructive": None, "open_world": None},
+    }]
+    assert inventory.json()["inventory"]["capabilities"]["resources"]["status"] == "not_reported"
 
     configured = client.post(
         "/api/claude-mcp/servers",

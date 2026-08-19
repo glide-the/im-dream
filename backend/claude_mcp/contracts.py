@@ -6,6 +6,7 @@
 [Sync] 2026-08-19: define the reviewed v1 state and error vocabulary.
 [Sync] 2026-08-19: add fail-closed credential projection errors for user-to-thread synchronization.
 [Sync] 2026-08-19: add restricted user-scope server configuration and ownership errors.
+[Sync] 2026-08-20: add safe public-SDK inventory contracts for MCP tools and annotations.
 """
 
 from __future__ import annotations
@@ -45,6 +46,9 @@ class ClaudeMcpErrorCode(str, Enum):
     AUTH_TIMEOUT = "CLAUDE_MCP_AUTH_TIMEOUT"
     AUTH_CANCELLED = "CLAUDE_MCP_AUTH_CANCELLED"
     CREDENTIAL_SYNC_FAILED = "CLAUDE_MCP_CREDENTIAL_SYNC_FAILED"
+    INVENTORY_UNAVAILABLE = "CLAUDE_MCP_INVENTORY_UNAVAILABLE"
+    INVENTORY_TIMEOUT = "CLAUDE_MCP_INVENTORY_TIMEOUT"
+    INVENTORY_MALFORMED = "CLAUDE_MCP_INVENTORY_MALFORMED"
 
 
 class ClaudeMcpError(RuntimeError):
@@ -109,6 +113,104 @@ class ClaudeMcpServer:
             "transport": self.transport,
             "detail": self.detail,
             "active_operation_id": self.active_operation_id,
+        }
+
+
+class ClaudeMcpInventoryStatus(str, Enum):
+    CONNECTED = "connected"
+    FAILED = "failed"
+    NEEDS_AUTH = "needs_auth"
+    DISABLED = "disabled"
+
+
+class ClaudeMcpCapabilityInventoryStatus(str, Enum):
+    AVAILABLE = "available"
+    NOT_REPORTED = "not_reported"
+
+
+@dataclass(frozen=True)
+class ClaudeMcpToolAnnotations:
+    read_only: bool | None = None
+    destructive: bool | None = None
+    open_world: bool | None = None
+
+    def to_dict(self) -> dict[str, bool | None]:
+        return {
+            "read_only": self.read_only,
+            "destructive": self.destructive,
+            "open_world": self.open_world,
+        }
+
+
+@dataclass(frozen=True)
+class ClaudeMcpTool:
+    name: str
+    description: str | None
+    annotations: ClaudeMcpToolAnnotations
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "annotations": self.annotations.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class ClaudeMcpServerInfo:
+    name: str
+    version: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"name": self.name, "version": self.version}
+
+
+@dataclass(frozen=True)
+class ClaudeMcpServerInventory:
+    server_name: str
+    status: ClaudeMcpInventoryStatus
+    config_scope: str
+    runtime_scope: str | None
+    transport: str | None
+    url: str | None
+    server_info: ClaudeMcpServerInfo | None
+    tools: tuple[ClaudeMcpTool, ...]
+    tool_count: int
+    tools_truncated: bool
+    refreshed_at: str
+
+    def to_dict(self) -> dict[str, object]:
+        tools_status = (
+            ClaudeMcpCapabilityInventoryStatus.AVAILABLE
+            if self.status is ClaudeMcpInventoryStatus.CONNECTED
+            else ClaudeMcpCapabilityInventoryStatus.NOT_REPORTED
+        )
+        return {
+            "server_name": self.server_name,
+            "status": self.status.value,
+            "config_scope": self.config_scope,
+            "runtime_scope": self.runtime_scope,
+            "transport": self.transport,
+            "url": self.url,
+            "server_info": self.server_info.to_dict() if self.server_info else None,
+            "tools": [tool.to_dict() for tool in self.tools],
+            "tool_count": self.tool_count,
+            "tools_truncated": self.tools_truncated,
+            "capabilities": {
+                "tools": {
+                    "status": tools_status.value,
+                    "count": self.tool_count if tools_status is ClaudeMcpCapabilityInventoryStatus.AVAILABLE else None,
+                },
+                "resources": {
+                    "status": ClaudeMcpCapabilityInventoryStatus.NOT_REPORTED.value,
+                    "count": None,
+                },
+                "prompts": {
+                    "status": ClaudeMcpCapabilityInventoryStatus.NOT_REPORTED.value,
+                    "count": None,
+                },
+            },
+            "refreshed_at": self.refreshed_at,
         }
 
 
