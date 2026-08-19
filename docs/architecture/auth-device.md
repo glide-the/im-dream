@@ -275,3 +275,18 @@ Authlib 的 RFC 8628 支持要求实现两个扩展点：
 | `DeviceCodeGrant` | 在 `/oauth/token` 处理 device_code grant，查询设备授权状态，执行 slow_down / pending / token 签发 |
 
 Authlib 当前没有直接可用的 FastAPI authorization-server 集成；本项目在现有 FastAPI 路由内显式继承 RFC8628 核心类，并以 SQLite helper 实现 Authlib 所需查询与保存方法。
+
+## 14. 测试清单
+
+| 用例 | 预期 |
+| --- | --- |
+| 设备请求 code | 返回 `device_code`、`user_code`、`verification_uri`、`interval`、`expires_in` |
+| 用户打开 verification_uri | 展示 user_code 和确认/拒绝按钮 |
+| 未登录用户确认 | 被要求先登录 |
+| 设备未授权轮询 | 返回 `authorization_pending` |
+| 设备过快轮询 | 返回 `slow_down` |
+| 用户确认后轮询 | 返回本系统 `access_token` / `refresh_token` |
+| 用户拒绝后轮询 | 返回 `access_denied` |
+| 过期后轮询 | 返回 `expired_token` |
+| 成功消费后再次轮询 | 返回 `invalid_grant` |
+| 设备 token 调业务 API | `get_current_user` 能识别 `user_id` |

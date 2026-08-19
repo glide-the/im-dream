@@ -15,12 +15,28 @@
 
 ## 现有文档
 
-| 文档 | 作用 |
-|------|------|
-| [`overview.md`](overview.md) | Google Cloud Run 发布与配置入口 |
-| [`data-sync.md`](data-sync.md) | 本地与 GCS 数据同步、备份和恢复 |
-| [`remote-ssh.md`](remote-ssh.md) | SSH/rsync/docker-compose 远程发布路径 |
-| [`release-system-design.md`](release-system-design.md) | 历史路径兼容说明 |
+| 文档 | 作用 | 当前状态 |
+|------|------|----------|
+| [`overview.md`](overview.md) | Cloud Run 部署主文档 | 仍可作为云发布操作入口，但包含本地 Docker Compose 说明，后续应拆分 |
+| [`data-sync.md`](data-sync.md) | 本地与 GCS 数据同步说明 | 覆盖手动 gsutil 操作；需要和 `deploy/google-cloud/sync-data.sh` 的实际行为对齐 |
+| [`remote-ssh.md`](remote-ssh.md) | Remote SSH 部署文档 | 说明远程 Docker 服务器的 SSH/rsync/docker-compose 发布路径 |
+| [`release-system-design.md`](release-system-design.md) | 本次发布体系梳理与方案设计 | 处理判断、发布方案、文档与脚本改造计划、验收清单 |
+
+## 推荐目录大纲
+
+后续拆分时建议保持轻量结构，不引入额外层级：
+
+```text
+docs/deploy/
+├── README.md                 # 发布文档入口与分流
+├── overview.md               # 发布总览；拆分完成后只保留入口和索引
+├── local.md                  # 本地直跑发布/维护
+├── docker.md                 # Docker Compose 容器发布
+├── remote-ssh.md             # Remote SSH + docker-compose 发布
+├── google-cloud.md           # Google Cloud Run 发布
+├── data-sync.md              # 数据同步、备份、恢复
+└── release-system-design.md  # 发布体系改造设计稿
+```
 
 ## 发布路径分流
 

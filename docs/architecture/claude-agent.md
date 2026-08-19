@@ -83,6 +83,33 @@ ThreadFactory (thread_factory.py)
 
 ---
 
+## 4. 迁移映射表（Pawkeyland → Ink & Memory）
+
+| Pawkeyland 源路径 | Ink & Memory 目标路径 | 迁移说明 |
+|-------------------|-----------------------|----------|
+| `application/claude_agent/observer.py` | `backend/claude_agent/observer.py` | 直接迁移，无变化 |
+| `application/claude_agent/tool_confirmation_store.py` | `backend/claude_agent/tool_confirmation_store.py` | 直接迁移，无变化 |
+| `application/claude_agent/thread_pool.py` | `backend/claude_agent/thread_pool.py` | 简化：移除 pet/persona/mem0/resolved_identity 字段 |
+| `application/claude_agent/thread_factory.py` | `backend/claude_agent/thread_factory.py` | 适配：session_id = user_id，移除宠物相关逻辑 |
+| `application/claude_agent/context_builder.py` | `backend/claude_agent/context_builder.py` | 重写：用写作会话上下文替换 pet/persona 上下文 |
+| `application/claude_agent/service.py` | `backend/claude_agent/service.py` | 大幅简化：移除 pet/persona/mem0/sticker_filter |
+| `libs/claude_agent_kit/types.py` | `backend/libs/claude_agent_kit/types.py` | 直接迁移，移除 Pawkeyland 特定注释 |
+| `libs/claude_agent_kit/server/agent_runner.py` | `backend/libs/claude_agent_kit/server/agent_runner.py` | 直接迁移，保留 streaming / tool confirmation / error handling |
+| `libs/claude_agent_kit/server/workspace.py` | `backend/libs/claude_agent_kit/server/workspace.py` | 适配：保留工作区骨架、项目模板同步、sandbox settings，并接入 skills 同步 |
+| `libs/claude_agent_kit/server/workspace_file_sync.py` | `backend/libs/claude_agent_kit/server/workspace_file_sync.py` | 适配：维护 `workspace/skills` ↔ `.claude/skills`，导入 `.claude/skills` 真实写入后重建发现软链接 |
+| `libs/claude_agent_kit/server/sdk_env.py` | `backend/libs/claude_agent_kit/server/sdk_env.py` | 改为直接读取 `backend/.env` 中 Claude Code / Anthropic SDK key |
+| `libs/volcresource/cfg.py` | _(不迁移)_ | Volcengine 图像/OSS 与专属 runtime 配置均不属于 Ink & Memory 当前范围 |
+| `application/claude_agent/state_builder.py` | _(内联至 thread_pool.py)_ | 代码量极小（111行），直接内联 |
+
+**未迁移内容**（见第 9 节）：
+
+- `libs/claude_agent_kit/server/mcp_server.py` — Pawkeyland 宠物专属 MCP
+- `libs/claude_agent_kit/server/necklace_*.py` — 项圈硬件 MCP
+- `libs/claude_agent_kit/server/memory_*.py` — Mem0 记忆 MCP
+- `libs/claude_agent_kit/server/touch_animation_tool.py` — 动画工具
+
+---
+
 ## 5. 配置与环境变量
 
 所有运行时配置通过环境变量解析，不硬编码业务值。  
@@ -180,6 +207,32 @@ POST /api/claude-agent
 | 工具确认超时 | `TimeoutError` → 默认拒绝 | `error` 事件 |
 | SSE 客户端断连 | `GeneratorExit` → cancel_pending | — |
 | TTL 过期 | Sweeper 驱逐，触发 Phase 4 Observer | — |
+
+---
+
+## 8. 测试与验证策略
+
+与现有 `backend/tests/` 保持一致，使用自定义 Python 脚本（无 pytest）。
+
+| 测试文件（建议路径） | 测试内容 |
+|----------------------|----------|
+| `backend/tests/test_claude_agent.py` | HTTP 端点集成测试（需要 server:8765 和有效 SDK 配置）|
+| `backend/tests/ci-smoke.sh` 扩展 | 新增 claude-agent register → stream → close 冒烟 |
+
+---
+
+## 9. 未迁移内容
+
+| 内容 | 不迁移原因 |
+|------|-----------|
+| Mem0 gateway 实现 | 当前仅保留 Claude Agent memory MCP/hook 配置入口；正式网关实现未迁入 |
+| 项圈 MCP (`necklace_*.py`) | IoT 硬件，Ink & Memory 无此设备 |
+| 触摸动画工具 (`touch_animation_tool.py`) | Pawkeyland UI 专属，Ink & Memory 无动画层 |
+| 宠物 MCP (`mcp_server.py`) | Pawkeyland 宠物领域专属，与 Ink & Memory 无关 |
+| `state_builder.py` | 代码极少（111行），内联至 thread_pool.py |
+| `session_files.py` | JSONL 会话文件解析，当前版本通过 DB 替代 |
+| `libs/volcresource/cfg.py` | Pawkeyland 专属资源和 runtime 配置，Ink & Memory 当前不迁移 |
+| `api/contracts.py` | Pawkeyland 路由契约，Ink & Memory 直接用 Pydantic 在 server.py |
 
 ---
 
