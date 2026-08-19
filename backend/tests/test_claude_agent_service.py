@@ -26,6 +26,10 @@
 #                    successful assistant persistence path.
 # [Sync] 2026-08-14: cover trusted Dream binding selecting the Deck
 #                    workspace-file prompt without changing Chat/session DTOs.
+# [Sync] 2026-08-19: assert user-level MCP credentials are projected into the
+#                    thread config home before the resume path is consumed.
+# [Sync] 2026-08-19: isolate unrelated context-assembly cases with an injected
+#                    no-op MCP projection harness instead of the host Keychain.
 # [Sync] 2026-08-13: cover editor MCP structured business failures as tool
 #                    errors with no editor refresh or session_updated event.
 
@@ -95,6 +99,15 @@ class _StaticDreamContextMapper:
     def resolve(self, *, actor_id: str, thread_id: str):
         self.calls.append((str(actor_id), thread_id))
         return self.context
+
+
+def _noop_mcp_synchronizer():
+    synchronizer = unittest.mock.Mock(supported=True)
+    synchronizer.sync_thread = unittest.mock.AsyncMock(
+        return_value=unittest.mock.Mock(mcp_configured=False, mcp_servers={})
+    )
+    synchronizer.secure_storage_home.return_value = None
+    return synchronizer
 
 
 class TestStoryWorkspaceOutputTransaction(unittest.TestCase):
@@ -185,6 +198,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             platform_model_resolver=resolve_model,
             dream_context_mapper=mapper,
             dream_runtime_init_activator=activator,
+            claude_mcp_credential_synchronizer=_noop_mcp_synchronizer(),
         )
         state = AgentRunState(session_id="thread_dream_turn")
         context = mapper.context
@@ -308,10 +322,26 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_shared_thread_resume_uses_persisted_claude_session(self):
+        mcp_synchronizer = unittest.mock.Mock(supported=True)
+        mcp_synchronizer.sync_thread = unittest.mock.AsyncMock(
+            return_value=unittest.mock.Mock(
+                mcp_configured=True,
+                mcp_servers={
+                    "remote-readonly": {
+                        "type": "http",
+                        "url": "https://mcp.example.test",
+                    }
+                },
+            )
+        )
+        mcp_synchronizer.secure_storage_home.return_value = Path(
+            "/runtime/users/actor-7/config"
+        )
         service = ClaudeAgentService(
             context_builder=_FakeContextBuilder(),
             platform_model_resolver=lambda _user_id, _alias: "dream-balanced",
             dream_context_mapper=_StaticDreamContextMapper(None),
+            claude_mcp_credential_synchronizer=mcp_synchronizer,
         )
         session_id = "11111111-1111-4111-8111-111111111111"
         request = ClaudeAgentRunRequest(
@@ -363,6 +393,23 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             execution.resume_existing_session["claude_session_id"],
             session_id,
+        )
+        mcp_synchronizer.sync_thread.assert_awaited_once_with(
+            "7",
+            str(workspace_path / ".claude-home"),
+        )
+        self.assertEqual(
+            execution.run_options.claude_secure_storage_home,
+            "/runtime/users/actor-7/config",
+        )
+        self.assertEqual(
+            execution.run_options.claude_mcp_servers,
+            {
+                "remote-readonly": {
+                    "type": "http",
+                    "url": "https://mcp.example.test",
+                }
+            },
         )
 
     def test_dream_runtime_has_no_stream_message_callback(self):
@@ -499,6 +546,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         service = ClaudeAgentService(
             context_builder=builder,
             dream_context_mapper=_StaticDreamContextMapper(None),
+            claude_mcp_credential_synchronizer=_noop_mcp_synchronizer(),
         )
         state = AgentRunState(session_id="thread_service_config")
         request = ClaudeAgentRunRequest(
@@ -603,7 +651,11 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_workspace_mode_disabled_skips_workspace_initialization(self):
         builder = _FakeContextBuilder()
-        service = ClaudeAgentService(context_builder=builder)
+        mcp_synchronizer = unittest.mock.Mock(supported=False)
+        service = ClaudeAgentService(
+            context_builder=builder,
+            claude_mcp_credential_synchronizer=mcp_synchronizer,
+        )
         state = AgentRunState(session_id="thread_workspace_disabled")
         state.with_cwd("/tmp/stale-workspace")
         request = ClaudeAgentRunRequest(
@@ -641,9 +693,44 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(execution.run_options.cwd)
         self.assertEqual(builder.user_message_calls[0]["cwd"], "")
 
+    async def test_workspace_mode_disabled_rejects_user_mcp_state(self):
+        builder = _FakeContextBuilder()
+        mcp_synchronizer = unittest.mock.Mock(supported=True)
+        mcp_synchronizer.has_user_mcp_state = unittest.mock.AsyncMock(
+            return_value=True
+        )
+        service = ClaudeAgentService(
+            context_builder=builder,
+            claude_mcp_credential_synchronizer=mcp_synchronizer,
+        )
+        state = AgentRunState(session_id="thread_workspace_disabled_mcp")
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_workspace_disabled_mcp",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with unittest.mock.patch.object(
+            service_module._db,
+            "get_system_config",
+            return_value={"workspace_enabled": False},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "requires Workspace Mode"):
+                await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        mcp_synchronizer.has_user_mcp_state.assert_awaited_once_with("7")
+
     async def test_settings_system_prompt_change_rebuilds_cached_system_prompt(self):
         builder = _FakeContextBuilder()
-        service = ClaudeAgentService(context_builder=builder)
+        service = ClaudeAgentService(
+            context_builder=builder,
+            claude_mcp_credential_synchronizer=_noop_mcp_synchronizer(),
+        )
         state = AgentRunState(session_id="thread_service_prompt_change")
         state.with_system_prompt(
             "cached-old-prompt",
@@ -691,7 +778,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_system_config_load_failure_builds_prompt_without_settings_prompt(self):
         builder = _FakeContextBuilder()
-        service = ClaudeAgentService(context_builder=builder)
+        service = ClaudeAgentService(
+            context_builder=builder,
+            claude_mcp_credential_synchronizer=_noop_mcp_synchronizer(),
+        )
         state = AgentRunState(session_id="thread_service_config_failure")
         request = ClaudeAgentRunRequest(
             user_id="7",
@@ -742,6 +832,7 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
         service = ClaudeAgentService(
             context_builder=builder,
             dream_context_mapper=_StaticDreamContextMapper(None),
+            claude_mcp_credential_synchronizer=_noop_mcp_synchronizer(),
         )
         state = AgentRunState(session_id="thread_notion_attach")
         request = ClaudeAgentRunRequest(

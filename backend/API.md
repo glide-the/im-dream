@@ -14,6 +14,7 @@
 [Sync] 2026-08-16: document exact runtime binding history used by the folded Deck version panel.
 [Sync] 2026-08-16: document capability-gated Deck draft/preview/explicit content commit/history.
 [Sync] 2026-08-17: document Deck-filtered Chat history and corrected related-thread/binding deletion semantics.
+[Sync] 2026-08-20: document cross-platform user credential identity, server configuration/removal, and macOS secure-store reuse.
 -->
 
 **Version:** 2.0.0
@@ -1095,6 +1096,38 @@ Deck content snapshot, draft, or publication history.
 `404` preserves the existing missing-or-not-owned boundary. Version changes
 continue through `PUT /api/voice-decks/{deck_id}/plugin-binding` with an exact
 SemVer, `expected_binding_revision`, and `apply_to: "next_run"`.
+
+---
+
+## Claude MCP Resources
+
+All routes require normal Dream authentication. The v1 resource connector uses one opaque user-scoped CLI identity for discovery, restricted HTTPS user-scope configuration/removal, and authentication; it never returns or persists tokens.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/claude-mcp/capability` | Report exact identity, CLI version, headless `--no-browser`, and public login/logout command readiness. |
+| `GET` | `/api/claude-mcp/servers` | Discover configured servers through `claude mcp list` and verified `get` status. |
+| `GET` | `/api/claude-mcp/servers/{server_name}` | Read one server; names are opaque and may contain `:`. |
+| `POST` | `/api/claude-mcp/servers` | Add one validated HTTPS HTTP MCP server at Claude user scope. |
+| `POST` | `/api/claude-mcp/servers/{server_name}/auth-operations` | Start or idempotently recover `claude mcp login <name> --no-browser`. |
+| `GET` | `/api/claude-mcp/auth-operations/{operation_id}` | Poll a user-owned in-process OAuth operation after page refresh. |
+| `POST` | `/api/claude-mcp/auth-operations/{operation_id}/redirect` | Write one complete HTTP(S) redirect URL to the original CLI process stdin. |
+| `POST` | `/api/claude-mcp/auth-operations/{operation_id}/cancel` | Cancel and reap the process group. |
+| `POST` | `/api/claude-mcp/servers/{server_name}/logout` | Run and verify `claude mcp logout <name>`. |
+| `DELETE` | `/api/claude-mcp/servers/{server_name}` | Remove one server owned by the authenticated platform user. |
+
+`--no-browser` still requires the user to open the returned authorization URL and submit the final redirect URL. Authorization URLs are held only for the active operation; redirect URLs, codes, tokens, client secrets, and raw terminal output are absent from database rows, logs, error details, and analytics. Production resolves the same exact system CLI for Resources and Agent. Every turn passes the user's opaque server definitions through the public Agent SDK `mcp_servers` option because the runner deliberately loads only project setting sources; the definitions are repr-hidden and never returned by this API. Linux projects only the user file store's `mcpOAuth` subtree into protected thread homes. macOS never reads Keychain payloads: Resources and Agent point Claude Code at the same user-level `CLAUDE_SECURESTORAGE_CONFIG_DIR`, while Agent history/config remains thread-scoped through `CLAUDE_CONFIG_DIR`. Unsupported platforms, insufficient CLI versions, missing public argv help, or a Darwin binary missing this selector fail closed. No database schema or runtime DDL is introduced.
+
+Claude MCP errors use a client-safe envelope:
+
+```json
+{
+  "error": {
+    "code": "CLAUDE_MCP_OPERATION_CONFLICT",
+    "message": "Another authentication operation is already active."
+  }
+}
+```
 
 ---
 

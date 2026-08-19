@@ -3,6 +3,7 @@
 > **[Sync] 2026-06-12**: SDK 子进程 env 来源扩展为 `backend/.env` + 当前进程环境；Cloud Run Secret Manager 注入的 `ANTHROPIC_AUTH_TOKEN` 会在启动子进程前显式写入 `ClaudeAgentOptions.env`。
 > **[Sync] 2026-07-26**: SDK 迁移 `claude-code-sdk 0.0.25` → `claude-agent-sdk 0.2.128`——全文档类型/包名更新（`ClaudeAgentOptions`）；env 注入链不变；新版 transport 优先使用内置（bundled）CLI，`cli_path` 可覆盖；`debug_stderr` 废弃，CLI stderr 改经 `options.stderr` 回调捕获（runner 侧已适配）。
 > **[Sync] 2026-07-26**: 新增 `apply_cli_path_to_options()` 与 `CLAUDE_CODE_CLI_PATH` 环境变量——CLI 二进制解析顺序：环境变量（存在才生效）→ `shutil.which("claude")`（系统/npm CLI）→ 不设置（SDK bundled 兜底）；`options.cli_path` 显式值永远优先。动机：0.2.128 transport `_find_cli` 内置优先，遮蔽了生产 Docker 打过 apply-seccomp passthrough 补丁的 npm CLI，导致嵌套 userns `setgroups` 失败复发（详见 §5.6）。
+> **[Sync] 2026-08-20**: production 配对升级为 `claude-agent-sdk` 0.2.140 + system Claude Code 2.1.235；`resolve_claude_cli_path()` 同时供 Agent 与 user-scoped MCP OAuth 使用。已删除 vendor seccomp patch，nested Docker 改用官方 `allowAllUnixSockets`。thread cwd 的 `.claude-home` 优先于进程 `CLAUDE_CONFIG_DIR`；每 turn 在 resume probe 前通过公开 SDK `mcp_servers` option 交付 server definitions，Linux 最小投影 `mcpOAuth`，macOS 则复用 user secure-store identity。
 
 # ClaudeSDKClient 项目 env 注入方案设计
 
@@ -204,7 +205,7 @@ options.extra_args["setting-sources"] = "project"
 | 2 | `shutil.which("claude")` | 系统/npm CLI——生产为 Docker 打过补丁的运行时，本地开发为开发者自己的 npm claude |
 | 3 | 不设置 | 文档化逃生舱：SDK 回退到内置 CLI（无系统 claude 的环境仍可用） |
 
-配套 Docker 侧（2026-07-26 Route A）：npm CLI 固定 **2.1.108** 并恢复 vendor apply-seccomp passthrough 补丁（覆盖为 `#!/bin/sh` + `exec "$@"`），新增构建期 `claude --version` 断言防平台二进制静默缺失（2.1.220 optional-deps 教训）。**settings 驱动路线已被生产证伪，勿再尝试**：曾升级 2.1.220 并改用 `sandbox.seccomp.applyPath` + shim（`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH`），但 2.1.220 的 seccomp 转换器硬编码 `seccomp: jCu()`、从不读取 `sandbox.seccomp`（Linux 二进制字符串：settings 键 0 命中、`/proc/self/fd/` 16 命中），shim 日志证实从未被调用；该机制已全部拆除。SDK 侧兼容性：`_check_claude_version` 最低版本为 `MINIMUM_CLAUDE_CODE_VERSION = "2.0.0"`（仅 warning 不阻断），2.1.108 远超下限；restored-src 证实 2.1.10x 时代 CLI 已具备 `permissionToolOutputSchema`（behavior/updatedInput）与 `createSandboxAskCallback`，can_use_tool 序列化保持兼容。
+配套 Docker 侧（2026-08-19 当前合同）：npm/system CLI 固定 **2.1.235**，SDK 固定 **0.2.140**，构建期同时断言 exact version、`mcp login --no-browser` 与 `mcp logout`。`sdk_env.resolve_claude_cli_path()` 为 Agent 和 Claude MCP 共用解析器，显式 system CLI 仍优先，SDK bundled 仅作无 system CLI 的开发逃生舱。容器不再修改 vendor 文件，也不使用已证伪的 `sandbox.seccomp.applyPath`；nested sandbox 通过公开 `enableWeakerNestedSandbox` + `allowAllUnixSockets` 跳过 optional Unix-socket seccomp，保留 bwrap 文件/网络隔离。
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 
@@ -212,7 +213,7 @@ options.extra_args["setting-sources"] = "project"
 
 **范围修正**：`CLAUDE_CONFIG_DIR={cwd}/.claude-home` 不只服务 Plan Mode。注入后 CLI 的**整个 config home** 搬入 per-thread workspace —— `plans/`、`tasks/`、`projects/`（session 转录 JSONL）、`plugins/`、`agents/`、skills/settings 缓存等所有内置功能都不再读取用户真实 `~/.claude`。因此所有需要解析 config-home 相对路径的后端模块（resume 转录探测、plan/tasks 读取、插件打包）必须走统一解析器，绝不直接碰 `~/.claude`。
 
-**统一解析器**：`sdk_env.resolve_claude_config_home(cwd)` 为单一真相源，优先级 `CLAUDE_CONFIG_DIR` 进程环境变量 → `{cwd}/.claude-home` → `None`（调用方回退官方默认 `~/.claude`）。`session_files.get_projects_root(cwd)` 等读取函数全部委托给它。
+**统一解析器**：`sdk_env.resolve_claude_config_home(cwd)` 为单一真相源，优先级 `{cwd}/.claude-home` → 无 cwd 时的进程 `CLAUDE_CONFIG_DIR` → `None`（调用方回退官方默认 `~/.claude`）。thread cwd 必须优先，否则一个进程级 home 会让多个平台用户串用身份。`session_files.get_projects_root(cwd)` 等读取函数全部委托给它。
 
 **注入时机**：决策**不埋在 `run_streaming` 生命周期里**，而是放在 **Phase 1: Context Assembly**（`ClaudeAgentService.assemble_context`）——cwd 在工作区分支建立（`state.with_cwd(cwd)`）时同步调用 `resolve_claude_config_home(cwd)`，Workspace Mode 关闭分支以 `resolve_claude_config_home(None)` 清除。该点早于 resume 转录探测、Deck 插件打包、plan/tasks 读取等所有 claude 模块触碰文件系统的时机，结果通过 `AgentRunOptions.claude_config_home` 传入 runner。
 

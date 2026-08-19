@@ -929,6 +929,59 @@ class TestClaudeAgentRunnerToolConfirmation(_RunnerBase):
         self.assertEqual(confirmation_requests, [])
 
 
+class TestClaudeAgentRunnerRemoteMcp(_RunnerBase):
+    async def test_remote_server_uses_public_sdk_option_without_auto_allow(self):
+        self.set_query([])
+        runner = self.make_runner()
+
+        await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="remote-mcp-001",
+                user_message="use the remote connector",
+                cwd=str(_FAKE_WORKSPACE),
+                allowed_tools=["Read"],
+                claude_mcp_servers={
+                    "remote-readonly": {
+                        "type": "http",
+                        "url": "https://mcp.example.test",
+                    }
+                },
+            ),
+            callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
+        )
+
+        self.assertEqual(
+            self._mock_client.last_options.mcp_servers["remote-readonly"],
+            {"type": "http", "url": "https://mcp.example.test"},
+        )
+        self.assertFalse(
+            any(
+                tool.startswith("mcp__remote-readonly__")
+                for tool in self._mock_client.last_options.allowed_tools
+            )
+        )
+
+    async def test_remote_server_cannot_shadow_internal_agent_mcp(self):
+        self.set_query([])
+        runner = self.make_runner()
+
+        with self.assertRaisesRegex(RuntimeError, "conflicts with an internal"):
+            await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="remote-mcp-conflict",
+                    user_message="do not shadow internal tools",
+                    cwd=str(_FAKE_WORKSPACE),
+                    claude_mcp_servers={
+                        "user": {
+                            "type": "http",
+                            "url": "https://mcp.example.test",
+                        }
+                    },
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
+            )
+
+
 class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
     """PreToolUse policy branches that can be exercised through SDK hooks."""
 
@@ -2455,6 +2508,37 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
         )
 
         self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "3")
+
+    def test_secure_storage_home_is_separate_and_server_authoritative(self):
+        options = _SDK_OPTIONS(
+            env={
+                "CLAUDE_CONFIG_DIR": "/threads/thread-1/.claude-home",
+                "CLAUDE_SECURESTORAGE_CONFIG_DIR": "/untrusted/override",
+            }
+        )
+
+        sdk_env_module.apply_claude_secure_storage_home_to_options(
+            options,
+            "/runtime/users/platform-user/config",
+        )
+
+        self.assertEqual(
+            options.env["CLAUDE_CONFIG_DIR"],
+            "/threads/thread-1/.claude-home",
+        )
+        self.assertEqual(
+            options.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"],
+            "/runtime/users/platform-user/config",
+        )
+
+    def test_secure_storage_home_rejects_relative_or_root_paths(self):
+        for value in ("relative/config", "/"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    sdk_env_module.apply_claude_secure_storage_home_to_options(
+                        _SDK_OPTIONS(),
+                        value,
+                    )
 
     def test_project_runtime_options_preserve_explicit_retry_override(self):
         options = _SDK_OPTIONS(env={"CLAUDE_CODE_MAX_RETRIES": "2"})

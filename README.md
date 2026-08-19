@@ -65,9 +65,9 @@ git pull --ff-only origin develop
 
 ### 1. 准备依赖
 
-- Python 3.10+
+- Python 3.12+
 - [uv](https://github.com/astral-sh/uv)
-- Node.js 20+
+- Node.js 22+
 - pnpm 9+ 与 npm
 - Docker Desktop 或兼容 Docker Engine
 - [Ink Admin Memory](https://github.com/glide-the/ink-admin-memory)：负责 PostgreSQL Drizzle Schema、Admin、Gateway、模型目录、订阅和计费能力

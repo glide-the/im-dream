@@ -31,6 +31,9 @@
 #                    ClaudeAgentOptions from claude_agent_sdk (renamed
 #                    package, 0.2.128); the old claude_code_sdk /
 #                    ClaudeCodeOptions names are gone.
+# [Sync] 2026-08-20: carry a server-owned user secure-storage home separately
+#                    from the thread-scoped Claude config home, and carry
+#                    opaque user MCP definitions for public SDK injection.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -197,6 +200,23 @@ class AgentRunOptions:
     # caches) into the per-thread workspace.  When None the runner falls
     # back to resolving from ``cwd`` itself.
     claude_config_home: Optional[str] = None
+    # macOS Claude Code stores OAuth credentials in a Keychain item selected
+    # independently from CLAUDE_CONFIG_DIR.  The service resolves this path
+    # from the authenticated platform user; the runner injects it as
+    # CLAUDE_SECURESTORAGE_CONFIG_DIR while retaining the thread config home.
+    # Linux leaves this unset and receives a minimal `.credentials.json`
+    # projection on every turn.
+    claude_secure_storage_home: Optional[str] = None
+    # Opaque remote MCP definitions resolved from the authenticated
+    # platform user's Claude config on every turn.  The runner injects these
+    # through the public Agent SDK `mcp_servers` option because its deliberate
+    # project-only setting source does not load user-scope `.claude.json`.
+    # Kept out of repr because an externally authored config may contain
+    # opaque headers even though the Resources UI never creates them.
+    claude_mcp_servers: dict[str, dict[str, Any]] = field(
+        default_factory=dict,
+        repr=False,
+    )
     # Maximum turns for the agent.
     max_turns: int = 100
     # Allowed tools for the agent.

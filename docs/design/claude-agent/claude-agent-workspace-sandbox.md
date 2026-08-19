@@ -53,6 +53,11 @@
 > settings-reader string hits; shim never invoked); mechanism removed,
 > reverted to the 2.1.108 vendor passthrough patch + `claude --version`
 > build assertion; seccomp section rewritten with the evidence chain.
+> [Sync] 2026-08-19: Route A retired. CLI 2.1.235 uses official nested
+> settings: `enableWeakerNestedSandbox=true` and
+> `sandbox.network.allowAllUnixSockets=true`; no vendor mutation or private
+> seccomp override remains. `.claude-home/.credentials.json` is exact
+> deny-read/deny-write and also registered in `credentials.files(mode=deny)`.
 
 # Claude-Agent Workspace Sandbox
 
@@ -109,7 +114,13 @@ When `system_config.workspace_enabled=true`, workspace initialization writes:
     "autoAllowBashIfSandboxed": true,
     "allowUnsandboxedCommands": false,
     "filesystem": {
-      "denyRead": ["/"],
+      "denyRead": [
+        "{AGENT_CWD}",
+        "<backend source/data root>",
+        "<service account home>",
+        "<custom INK_CLAUDE_MCP_RUNTIME_ROOT, when set>",
+        "{AGENT_CWD}/{thread_id}/.claude-home/.credentials.json"
+      ],
       "allowRead": [
         "{AGENT_CWD}/{thread_id}",
         "<runtime dependency read paths>"
@@ -126,8 +137,16 @@ When `system_config.workspace_enabled=true`, workspace initialization writes:
         "{AGENT_CWD}/{thread_id}/.claude/.clawhub",
         "{AGENT_CWD}/{thread_id}/.claude/worktrees",
         "{AGENT_CWD}/{thread_id}/.editor",
-        "{AGENT_CWD}/{thread_id}/.mcp.json"
+        "{AGENT_CWD}/{thread_id}/.mcp.json",
+        "{AGENT_CWD}/{thread_id}/.claude-home/.credentials.json",
+        "{AGENT_CWD}/{thread_id}/.claude-home/.claude.json"
       ]
+    },
+    "credentials": {
+      "files": [{
+        "path": "{AGENT_CWD}/{thread_id}/.claude-home/.credentials.json",
+        "mode": "deny"
+      }]
     },
     "network": {
       "allowedDomains": []
@@ -152,28 +171,12 @@ bubblewrap to mount a fresh `/proc`; the weaker nested mode is acceptable only
 because the outer Docker container is the primary isolation boundary. Local
 non-container deployments do not write this key.
 
-**apply-seccomp passthrough (Route A, 2026-07-26).** Docker images need the
-apply-seccomp passthrough to survive the nested-userns
-`/proc/self/setgroups` failure (inherent to bwrap nested userns without
-caps; `kernel.apparmor_restrict_unprivileged_userns=0` is NOT the blocker).
-The Dockerfile patches the npm CLI's `vendor/seccomp/apply-seccomp` file in
-place (2.1.108 layout) with `#!/bin/sh` + `exec "$@"`, and the backend pins
-`cli_path` to that patched npm CLI via
-`sdk_env.apply_cli_path_to_options()` (see `claude-sdk-env-design.md` §5.5A)
-so the SDK's bundled CLI cannot shadow it. A build-time `claude --version`
-assertion guards against silent platform-binary misses.
-
-History of the dead alternative (do not retry): after the 0.2.128 migration
-we bumped the npm CLI to 2.1.220 (bundled-line parity) and, because 2.1.220
-packages the CLI as a single binary with no on-disk vendor file, tried a
-settings-driven override (`sandbox.seccomp.applyPath` + a passthrough shim
-via `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH`). Production evidence proved the
-settings route dead: the Linux 2.1.220 binary contains **0** occurrences of
-the `sandbox?.seccomp` settings reader (vs **16** of `/proc/self/fd/` — the
-embedded executor), the macOS bundled converter hardcodes
-`seccomp: jCu()` instead of reading `e.sandbox?.*` like sibling fields, and
-shim logging confirmed the CLI never invoked the shim. Reverted to Route A;
-the settings-seccomp mechanism was removed entirely.
+**Current nested-container route (2026-08-19).** Docker pins CLI 2.1.235 and
+SDK 0.2.140, keeps `cli_path` explicit, and uses only public settings. The CLI
+2.1.235 native package has no patchable `vendor/seccomp` tree. In a nested
+container, `allowAllUnixSockets=true` disables the optional Unix-socket
+seccomp filter while bwrap filesystem and network isolation remain active.
+`sandbox.seccomp.applyPath` and the historical passthrough shim remain deleted.
 
 Docker-enabled settings therefore add this sibling key to the same `sandbox`
 object:
@@ -181,7 +184,10 @@ object:
 ```json
 {
   "sandbox": {
-    "enableWeakerNestedSandbox": true
+    "enableWeakerNestedSandbox": true,
+    "network": {
+      "allowAllUnixSockets": true
+    }
   }
 }
 ```
@@ -198,9 +204,11 @@ directories, including `/bin`, `/usr/bin`, `/sbin`, `/usr/sbin`,
 may be symlinks in container images, such as `/sbin -> /usr/sbin`, the backend
 keeps both the literal alias and the canonical target. These are not product
 data roots; they are required so bubblewrap can construct the sandbox root
-filesystem and so commands can resolve normal system binaries. If `/sbin` is
-hidden by the root deny policy, bubblewrap can fail during rootfs setup with
-`bwrap: Can't mount tmpfs on /newroot/sbin: No such file or directory`.
+filesystem and so commands can resolve normal system binaries. The former
+`denyRead:["/"]` policy was removed for CLI 2.1.235 because bwrap then could
+not execute `/bin/bash` even with runtime re-allows; explicit sensitive roots
+provide the intended sibling/backend/home isolation without hiding the Linux
+rootfs itself.
 
 Sandbox network settings are derived from `system_config.sandbox_network_mode`
 and `system_config.sandbox_network_allowed_domains`:
@@ -257,8 +265,13 @@ Because each Claude SDK process runs with `cwd={AGENT_CWD}/{thread_id}` and the
 SDK runtime is forced to project settings, the thread's
 `{cwd}/.claude/settings.json` is the project settings source for sandboxing.
 
-Read policy is deny-then-allow: deny the filesystem root, then re-allow the
-current thread workspace plus a minimal read-only runtime dependency allowlist.
+Read policy denies explicit sensitive regions: the workspace parent (all
+threads), backend source/data (including the default user MCP store), service
+account home, and a custom MCP runtime root. It then re-allows the current
+thread workspace plus required runtime roots. The exact projected credential
+file remains denied through both filesystem policy and `credentials.files`.
+The filesystem root itself is not denied because CLI 2.1.235 cannot construct
+a runnable `/bin/bash` rootfs under that configuration.
 Write policy is allow-only: write access is granted to the current thread
 workspace and common sandbox temp locations added by Claude Code itself. We
 additionally deny writes to workspace-local config, hook, and editor-index files
@@ -281,8 +294,8 @@ and worktree internals remain denied.
 
 The runtime dependency allowlist is generated by
 `workspace.py::_sandbox_runtime_read_allow_paths()` and contains only existing
-paths. It covers interpreter/tool roots, system libraries, OpenSSL config, and
-temp directories required for commands such as `python --version`,
+paths. It covers interpreter/tool roots, system libraries, and OpenSSL config
+required for commands such as `python --version`,
 `node --version`, `rg`, `git`, or compiler probes to start inside the OS
 sandbox. It deliberately does **not** include the project root or business data
 directories outside the thread workspace.
@@ -407,7 +420,8 @@ needed for the current goal.
 Required checks for this design:
 
 - Workspace tests confirm enabled/disabled sandbox settings are written,
-  non-sandbox settings are preserved, runtime dependency paths are read-allowed,
+  non-sandbox settings are preserved, sensitive workspace/backend/home/MCP
+  roots are denied without denying `/`, runtime dependency paths are read-allowed,
   standard Linux `sbin` runtime paths are read-allowed when present, Docker
   nested sandbox mode is auto-detected, the project root is not default
   read-allowed, disabled/allowlist network policies are emitted, and open mode

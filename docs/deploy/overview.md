@@ -22,7 +22,7 @@
 ┌─────────────────────────────────────┐
 │  Cloud Run: ink-backend             │
 │  Public: https://ink-backend.suoxya.com │
-│  python:3.10-slim-bookworm + uvicorn:8765 │
+│  python:3.12-slim-bookworm + uvicorn:8765 │
 │  · REST / SSE / WebSocket API       │
 │  · Secret Manager refs (API keys)   │
 └─────────────────────┬───────────────┘
@@ -263,7 +263,7 @@ docker build \
 
 ### 后端（`backend/Dockerfile`）
 
-基于 `python:3.10-slim-bookworm`，安装系统依赖（gcc、libffi、openssl、libjpeg、zlib、curl、jq、git、ripgrep、nodejs、npm、bubblewrap、socat），安装 Python 依赖与 `@anthropic-ai/claude-code` / `@anthropic-ai/sandbox-runtime`，暴露端口 8765。`bubblewrap` / `socat` 是 Claude Code Linux Bash sandbox 依赖；Docker Compose / Remote SSH Docker 部署会额外启用 nested sandbox 兼容模式，并给 backend 容器授予 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 以允许 bubblewrap 创建 mount namespace。镜像还显式确保 `/sbin`、`/usr/sbin`、`/usr/local/sbin` 存在，避免 bubblewrap 构造 rootfs 时在 `/newroot/sbin` 挂载 tmpfs 失败。构建阶段会先用 `DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 替换 apt 源，并通过 `PYPI_INDEX_URL`、`NPM_REGISTRY` 加速 Python/npm 依赖安装。
+基于 `python:3.12-slim-bookworm`，从官方 Node 镜像固定 Node 22.18.0（Claude Code 2.1.235 要求 Node >=22），并固定 `claude-agent-sdk==0.2.140` 与 `@anthropic-ai/claude-code@2.1.235`；构建期验证 exact Node/CLI version 及正式 `mcp login --no-browser` / `mcp logout` argv。镜像显式安装 `/bin/bash`、`bubblewrap`、`socat` 及常用系统工具；Docker Compose / Remote SSH Docker 部署启用公开的 nested sandbox 配置，并授予 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace。新版不安装或修改独立 `@anthropic-ai/sandbox-runtime` vendor 文件；nested container 通过 `allowAllUnixSockets` 仅跳过 optional Unix-socket seccomp 层，bwrap 文件/网络隔离仍保留。构建阶段继续使用可配置 Debian/PyPI/npm registry。
 
 ### 前端（`frontend/Dockerfile`）
 

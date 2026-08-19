@@ -1,31 +1,36 @@
 # Claude Agent SDK × npm CLI 兼容性报告
 
-> 状态：定稿（最终配对已生产验证，2026-07-29）
+> 状态：当前配对已完成构建/自动化验证，容器 sandbox 回执见 §6（2026-08-19）
 > 范围：`claude-code-sdk` / `claude-agent-sdk`（Python SDK）与 `@anthropic-ai/claude-code`（npm CLI）的版本配对兼容性
 > 关联文档：`claude-agent-sandbox-network-sdk-gap.md`、`claude-agent-workspace-sandbox.md`、`claude-sdk-env-design.md`、`claude-agent-env-allowlist-audit.md`
-> 日期：2026-07-29
+> 日期：2026-08-19
 
 ---
 
 ## 1. 最终结论（TL;DR）
 
-**当前生产验证配对**（2026-07-29 线上功能验证通过）：
+**当前发布配对**（取代 2026-07-29 Route A）：
 
 | 组件 | 版本 | 说明 |
 |---|---|---|
-| Python SDK | `claude-agent-sdk == 0.2.128` | `claude-code-sdk` 的更名后继包 |
-| npm CLI | `@anthropic-ai/claude-code == 2.1.108` | 带 vendor apply-seccomp passthrough 补丁 |
-| 配对锁定 | `cli_path` 解析（`sdk_env.apply_cli_path_to_options`） | 防止 SDK bundled CLI 抢占配对 |
-| 构建保障 | Dockerfile 构建期断言 `claude --version` | optional 依赖静默缺失在构建期失败 |
+| Python runtime | `3.12` | 与当前源码的 `datetime.UTC` 等语言能力一致 |
+| Python SDK | `claude-agent-sdk == 0.2.140` | wheel bundled CLI 为 2.1.235 |
+| npm/system CLI | `@anthropic-ai/claude-code == 2.1.235` | Agent 与 Claude MCP 均由共享 resolver 固定到该绝对路径 |
+| Node runtime | `22.18.0`（官方 Node 镜像） | 满足 Claude Code 2.1.235 声明的 Node >=22；不使用 bookworm Node 18 |
+| 正式 MCP 能力 | `mcp login --no-browser` / `mcp logout` | Docker 构建期 help capability probe，最低 2.1.191 门 |
+| sandbox | bwrap + `enableWeakerNestedSandbox` + `allowAllUnixSockets` | nested Docker 跳过 optional Unix-socket seccomp；filesystem/network sandbox 保留 |
+| 构建保障 | Dockerfile 版本与 MCP argv 断言 | optional platform 依赖或能力缺失均在构建期失败 |
 
 **核心教训：SDK 与 CLI 是两条独立演进的版本线，控制协议（control protocol）是它们的契约接合面——任何一侧版本漂移都可能静默破坏握手、hook 输出契约或权限应答序列化，且故障方向表现为"静默失败"而非显式报错。**
 
-## 2. 兼容性矩阵
+## 2. 历史兼容性矩阵（已被当前配对取代）
 
 | SDK \ CLI | 2.1.108（vendor 补丁） | 2.1.220 |
 |---|---|---|
 | `claude-code-sdk 0.0.25` | ⚠️ 基本可用但 **can_use_tool 应答方言过旧**（`{"allow":true}` 被 CLI schema 拒绝 → fail-closed，生产 403 bug） | ❌ 同左，且 CLI 内嵌 apply-seccomp 在 Docker 必败 |
-| `claude-agent-sdk 0.2.128` | ✅ **生产验证配对**（需 cli_path 锁定 + vendor 补丁） | ❌ 多重不兼容（见 §3.3/§3.4） |
+| `claude-agent-sdk 0.2.128` | ✅ 历史 Route A（需 cli_path 锁定 + vendor 补丁） | ❌ 历史验证不通过（见 §3.3/§3.4） |
+
+当前 `0.2.140 × 2.1.235` 不再依赖已经消失的 `vendor/seccomp` 文件，也不尝试已证伪的 `sandbox.seccomp.applyPath`。SDK bundled 与 system CLI 版本相同，但生产仍显式 pin system CLI，使 Agent 和 user-scoped MCP OAuth 使用同一可观测二进制。
 
 > 说明：SDK 的 `MINIMUM_CLAUDE_CODE_VERSION = "2.0.0"`（`subprocess_cli.py:31`），低于时仅 warning 不阻断；SDK 内无硬性版本门，因此**兼容性验证责任完全在使用方**。
 
@@ -72,11 +77,10 @@
 
 | 风险 | 状态 | 缓解 |
 |---|---|---|
-| SDK 0.2.128 initialize 握手携带新可选字段（`agents`/`skills`/`excludeDynamicSections`），2.1.108 不认识 | 生产冒烟通过（按协议惯例忽略未知字段） | 升级 CLI 前重新冒烟 |
 | `CanUseToolShadowedWarning`（`allowed_tools` 与 `can_use_tool` 并存，预期设计） | 每进程一次日志噪音 | 可选静默 |
-| CLI 2.1.108 相对陈旧，上游修复无法获得 | 已接受 | 已向上游提交 issue：[claude-agent-sdk-python#1151](https://github.com/anthropics/claude-agent-sdk-python/issues/1151)（`sandbox.seccomp.applyPath` 被内嵌转换器忽略），跟踪其解决后可评估再升级 |
-| Linux wheel 无 `_bundled`（实证），`cli_path` 兜底分支在该环境不可用 | 已知 | npm CLI 由 Dockerfile 构建断言保障 |
-| 升级 CLI 时 vendor 补丁需同步移植 | 流程风险 | 补丁逻辑在 Dockerfile 内，随版本号原子切换 |
+| optional Unix-socket seccomp 在 nested Docker 中关闭 | 显式接受 | Docker 外层 + bwrap filesystem/network 隔离仍在；容器验收必须证明普通 workspace 写入与 credential deny-read |
+| `sandbox.seccomp.applyPath` 上游 issue #1151 | 不再阻断当前路线 | 不使用该键；跟踪上游但不得恢复私有 shim |
+| 多实例共享 credential root | 未支持 | 当前 topology 必须是明确的 local-persistent single owner；否则 capability fail closed，不把 secret 写数据库 |
 
 ## 5. 版本管理规约（建议固化）
 
@@ -97,3 +101,5 @@
 | 2026-07-26 | 全量后端测试 | 453-458 passed, 0 failed（随机制增删波动） |
 | 2026-07-26 | 2.1.220 二进制 strings 取证（macOS + Linux） | settings seccomp 路线证伪 |
 | 2026-07-29 | **路线 A 配对生产验证**（沙箱命令 + 网络确认卡 + 文件写入） | ✅ 功能完善 |
+| 2026-08-19 | Docker build：Python 3.12 + Node 22.18.0 + SDK 0.2.140 + CLI 2.1.235 + MCP login/logout help probe | ✅ 构建通过 |
+| 2026-08-19 | fake-provider + real Docker CLI Bash probe：普通 workspace 写入、MCP credential deny-read、transcript secret scan | ✅ `workspace-write-ok` / `credential-denied` / `secret_leaked=False` |

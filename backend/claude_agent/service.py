@@ -76,6 +76,12 @@
 #                    claude_session_id semantics remain unchanged.
 # [Sync] 2026-08-14: trusted Dream bindings select the Deck workspace-file
 #                    prompt in assemble_context; ordinary Chat keeps proposal mode.
+# [Sync] 2026-08-19: deliver the authenticated platform user's MCP definition
+#                    and credential identity on every workspace Agent turn
+#                    before resume/config probes.
+# [Sync] 2026-08-20: keep thread config local while carrying the authenticated
+#                    user's macOS secure-storage home independently on every
+#                    turn; pass remote MCP definitions to the SDK directly.
 # [Sync] 2026-06-13: remove assemble_context local database import that shadowed
 #                    module-level _db before system_config lookup.
 # [Sync] 2026-06-09: P2 fix — split _persist_turn into _persist_user_message (called
@@ -1145,6 +1151,7 @@ class ClaudeAgentService:
         ) = None,
         dream_artifact_turn_hook: DreamArtifactTurnHook | None = None,
         dream_workbench_context: DreamWorkbenchContext | None = None,
+        claude_mcp_credential_synchronizer: Any | None = None,
     ) -> None:
         self._context_builder = context_builder or ClaudeAgentContextBuilder()
         self._platform_model_resolver = (
@@ -1160,6 +1167,17 @@ class ClaudeAgentService:
         )
         self._dream_workbench_context = (
             dream_workbench_context or DreamWorkbenchContext()
+        )
+        if claude_mcp_credential_synchronizer is None:
+            from claude_mcp.credentials import (  # noqa: PLC0415
+                get_default_credential_synchronizer,
+            )
+
+            claude_mcp_credential_synchronizer = (
+                get_default_credential_synchronizer()
+            )
+        self._claude_mcp_credential_synchronizer = (
+            claude_mcp_credential_synchronizer
         )
 
     # ------------------------------------------------------------------
@@ -1281,6 +1299,8 @@ class ClaudeAgentService:
                 state.session_id,
             )
 
+        claude_secure_storage_home: str | None = None
+        claude_mcp_servers: dict[str, dict[str, Any]] = {}
         if workspace_enabled:
             workspace_path = get_or_create_workspace(
                 state.session_id,
@@ -1307,6 +1327,36 @@ class ClaudeAgentService:
             # agents/ and caches, not just Plan Mode files).  Carried into
             # the runner via AgentRunOptions.claude_config_home below.
             claude_config_home = resolve_claude_config_home(cwd)
+
+            # Resources authentication is user-scoped and can happen before a
+            # thread exists. Resolve its opaque MCP definitions and credential
+            # identity on every turn so old threads converge after login,
+            # refresh, or logout before any CLI/session code can use stale state.
+            try:
+                from claude_mcp.credentials import ClaudeMcpCredentialError  # noqa: PLC0415
+
+                mcp_synchronizer = self._claude_mcp_credential_synchronizer
+                if mcp_synchronizer.supported and claude_config_home:
+                    mcp_sync_result = await mcp_synchronizer.sync_thread(
+                        str(request.user_id),
+                        claude_config_home,
+                    )
+                    claude_mcp_servers = {
+                        str(name): dict(config)
+                        for name, config in mcp_sync_result.mcp_servers.items()
+                        if isinstance(config, dict)
+                    }
+                    if mcp_sync_result.mcp_configured:
+                        secure_storage_home = mcp_synchronizer.secure_storage_home(
+                            str(request.user_id)
+                        )
+                        claude_secure_storage_home = (
+                            str(secure_storage_home) if secure_storage_home else None
+                        )
+            except ClaudeMcpCredentialError as exc:
+                raise RuntimeError(
+                    "Claude MCP credential synchronization failed safely."
+                ) from exc
 
             try:
                 from notion import build_notion_facade  # noqa: PLC0415
@@ -1342,6 +1392,22 @@ class ClaudeAgentService:
                         exc,
                     )
         else:
+            mcp_synchronizer = self._claude_mcp_credential_synchronizer
+            if mcp_synchronizer.supported:
+                try:
+                    if await mcp_synchronizer.has_user_mcp_state(
+                        str(request.user_id)
+                    ):
+                        raise RuntimeError(
+                            "Claude MCP requires Workspace Mode so thread "
+                            "credentials remain sandbox-protected."
+                        )
+                except RuntimeError:
+                    raise
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Claude MCP credential capability check failed safely."
+                    ) from exc
             cwd = ""
             if request.cwd:
                 logger.warning(
@@ -1357,7 +1423,10 @@ class ClaudeAgentService:
                 )
             state.with_cwd("")
 
-            # Phase 1: Workspace Mode disabled — no per-thread config home;
+            # Phase 1: Workspace Mode disabled — no per-thread config home and
+            # therefore no user MCP projection. If user-level MCP state exists,
+            # the guard above fails closed instead of exposing credentials to
+            # an unsandboxed Bash tool.
             # resolution falls back to an explicit CLAUDE_CONFIG_DIR process
             # env var or the CLI's official default (~/.claude).
             claude_config_home = resolve_claude_config_home(None)
@@ -1531,6 +1600,8 @@ class ClaudeAgentService:
             model=request.model,
             cwd=cwd or None,
             claude_config_home=claude_config_home,
+            claude_secure_storage_home=claude_secure_storage_home,
+            claude_mcp_servers=claude_mcp_servers,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             im_full_access_enabled=im_full_access_enabled,

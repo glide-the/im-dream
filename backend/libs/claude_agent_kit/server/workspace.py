@@ -72,6 +72,12 @@
 #                    cwd-* allowances.
 # [Sync] 2026-08-17: add safe directory ZIP downloads while preserving single-file
 #                    download behavior and workspace containment checks.
+# [Sync] 2026-08-19: deny sandboxed Bash read/write access to projected MCP
+#                    credentials and use the official optional-seccomp skip in
+#                    nested Linux containers for native CLI 2.1.235. Replace
+#                    the CLI-incompatible denyRead root with explicit backend,
+#                    user-home, workspace-root, and MCP-runtime deny regions;
+#                    re-allow only the current thread and required runtimes.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -129,6 +135,7 @@ ARCHIVE_EXTENSIONS: frozenset[str] = frozenset(
     {".zip", ".skill", ".tar.gz", ".tgz", ".tar"}
 )
 SANDBOX_EXTRA_ALLOW_READ_ENV = "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"
+CLAUDE_MCP_RUNTIME_ROOT_ENV = "INK_CLAUDE_MCP_RUNTIME_ROOT"
 SANDBOX_PRESERVE_ALIAS_READ_PATHS: frozenset[str] = frozenset(
     {"/bin", "/sbin", "/lib", "/lib64"}
 )
@@ -141,6 +148,7 @@ SANDBOX_NETWORK_ALLOW_ALL_DOMAIN = "*"
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROOT: Path = Path(__file__).resolve().parents[4]
+_BACKEND_ROOT: Path = Path(__file__).resolve().parents[3]
 
 
 def _project_root() -> Path:
@@ -219,8 +227,8 @@ def _sandbox_runtime_read_allow_paths() -> list[str]:
     """Return read-only runtime dependency paths for Bash sandbox execution.
 
     The thread workspace remains the only product data root. These paths are
-    deliberately limited to interpreters, system libraries, package-manager
-    runtime roots, and temp directories needed to start common developer tools.
+    deliberately limited to interpreters, system libraries, and package-manager
+    runtime roots needed to start common developer tools.
     Additional deployment-specific runtime paths can be supplied through
     ``INK_AGENT_SANDBOX_EXTRA_ALLOW_READ`` using ``os.pathsep`` separators.
     """
@@ -229,10 +237,6 @@ def _sandbox_runtime_read_allow_paths() -> list[str]:
     home = Path.home()
 
     for raw_path in (
-        tempfile.gettempdir(),
-        os.getenv("TMPDIR", ""),
-        "/tmp",
-        "/private/tmp",
         home / ".pyenv",
         home / ".nvm" / "versions" / "node",
         home / ".bun",
@@ -307,6 +311,41 @@ def _sandbox_runtime_read_allow_paths() -> list[str]:
         _append_existing_sandbox_read_path(paths, raw_path.strip())
 
     return [str(path) for path in paths]
+
+
+def _sandbox_sensitive_read_deny_paths() -> list[str]:
+    """Return private roots hidden from Bash before current-thread re-allow.
+
+    Claude Code 2.1.235 cannot construct a runnable Linux rootfs when `/` is
+    denied, even if `/bin` and `/usr/bin` are re-allowed. Official sandbox
+    semantics already default writes to cwd, so read isolation is expressed as
+    explicit sensitive regions: every Agent workspace, backend source/data
+    (including the default Claude MCP user store), the service account home,
+    and an absolute custom Claude MCP runtime root.
+    """
+
+    candidates: list[Path] = [
+        get_workspace_root(),
+        _BACKEND_ROOT,
+        Path.home(),
+    ]
+    configured_mcp_root = os.getenv(CLAUDE_MCP_RUNTIME_ROOT_ENV, "").strip()
+    if configured_mcp_root:
+        raw_mcp_root = Path(configured_mcp_root).expanduser()
+        if raw_mcp_root.is_absolute():
+            candidates.append(raw_mcp_root)
+
+    result: list[str] = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=False)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        value = str(resolved)
+        if resolved == Path("/") or value in result:
+            continue
+        result.append(value)
+    return result
 
 
 def _normalize_sandbox_network_mode(mode: object) -> SandboxNetworkMode:
@@ -431,6 +470,9 @@ def _workspace_sandbox_config(
     """
 
     workspace_abs = workspace.resolve(strict=False)
+    thread_config_home = workspace_abs / ".claude-home"
+    thread_credentials = thread_config_home / ".credentials.json"
+    thread_user_config = thread_config_home / ".claude.json"
     enabled = bool(enabled)
 
     allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
@@ -451,12 +493,14 @@ def _workspace_sandbox_config(
         "autoAllowBashIfSandboxed": enabled,
         "allowUnsandboxedCommands": not enabled,
         "filesystem": {
-            # sandbox-runtime read policy is deny-then-allow.  The product
-            # goal is stricter than Claude Code's default (which can read most
-            # of the host): deny the filesystem root and re-allow only this
-            # thread cwd.  This prevents sibling workspaces and unrelated host
-            # paths from being readable by Bash subprocesses.
-            "denyRead": ["/"],
+            # Claude Code 2.1.235 cannot launch /bin/bash when filesystem root
+            # itself is denied. Hide explicit sensitive regions instead, then
+            # re-allow only this thread plus runtime dependencies. The exact
+            # credential path is additionally enforced by credentials.files.
+            "denyRead": [
+                *_sandbox_sensitive_read_deny_paths(),
+                str(thread_credentials),
+            ],
             "allowRead": allow_read,
             # Keep .claude/skills writable so skill symlinks and
             # runtime-installed skills can be fully managed, but deny
@@ -474,6 +518,13 @@ def _workspace_sandbox_config(
                 str(workspace_abs / ".claude" / "worktrees"),
                 str(workspace_abs / ".editor"),
                 str(workspace_abs / ".mcp.json"),
+                str(thread_credentials),
+                str(thread_user_config),
+            ],
+        },
+        "credentials": {
+            "files": [
+                {"path": str(thread_credentials), "mode": "deny"},
             ],
         },
     }
@@ -481,13 +532,20 @@ def _workspace_sandbox_config(
         network_mode,
         network_allowed_domains,
     )
-    if network_config is not None:
-        sandbox_config["network"] = network_config
     if enabled and _running_in_linux_container():
         # Claude Code's Linux sandbox uses bubblewrap. Inside Docker, a fresh
         # /proc mount may be unavailable, so Claude Code supports this weaker
         # nested mode when the outer container is the primary isolation layer.
         sandbox_config["enableWeakerNestedSandbox"] = True
+        # Native Claude Code no longer exposes the old vendor apply-seccomp
+        # helper for patching. The official allowAllUnixSockets setting skips
+        # that optional Unix-socket seccomp filter while preserving bwrap
+        # filesystem/network isolation — the same boundary as our former
+        # passthrough patch, without mutating an upstream binary.
+        network_config = dict(network_config or {})
+        network_config["allowAllUnixSockets"] = True
+    if network_config is not None:
+        sandbox_config["network"] = network_config
     return sandbox_config
 
 

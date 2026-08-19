@@ -57,6 +57,12 @@
 # [Sync] 2026-08-14: pin Claude Code's native temp root through a canonicalized
 #                    CLAUDE_CODE_TMPDIR (configured default /tmp/claude) so its
 #                    per-uid cwd-* files stay under the exact allowWrite root.
+# [Sync] 2026-08-19: publish resolve_claude_cli_path() so Agent and user-scoped
+#                    Claude MCP operations select the exact same system CLI.
+# [Sync] 2026-08-19: make a resolved thread cwd authoritative over a process
+#                    CLAUDE_CONFIG_DIR so platform users cannot collapse into one home.
+# [Sync] 2026-08-20: inject a distinct, server-owned macOS secure-storage home
+#                    so user MCP Keychain credentials can be reused per thread.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -123,6 +129,7 @@ _USER_SDK_ENV_NAMES = frozenset(
 # Backend code that resolves config-home-relative paths must go through
 # :func:`resolve_claude_config_home` (single source of truth), never ``~``.
 _CLAUDE_CONFIG_DIR_ENV_NAME = "CLAUDE_CONFIG_DIR"
+CLAUDE_SECURE_STORAGE_CONFIG_DIR_ENV_NAME = "CLAUDE_SECURESTORAGE_CONFIG_DIR"
 _CLAUDE_CONFIG_HOME_DIRNAME = ".claude-home"
 # Backward-compatible alias (2026-08-03 rename — the redirect covers far more
 # than Plan Mode); prefer _CLAUDE_CONFIG_HOME_DIRNAME in new code.
@@ -347,9 +354,9 @@ def resolve_claude_config_home(
     config-home-relative paths (plans, tasks, session transcripts, plugins,
     agents, skills caches).  Resolution order mirrors the SDK env chain:
 
-      1. ``CLAUDE_CONFIG_DIR`` process env (explicit override) — wins.
-      2. *cwd* provided (Workspace Mode) → ``{cwd}/.claude-home``, matching
+      1. *cwd* provided (Workspace Mode) → ``{cwd}/.claude-home``, matching
          the value injected into the SDK subprocess.
+      2. ``CLAUDE_CONFIG_DIR`` process env only when no thread cwd exists.
       3. ``None`` — caller falls back to the official default ``~/.claude``.
 
     Resolved in the service layer right after workspace/cwd resolution —
@@ -358,11 +365,11 @@ def resolve_claude_config_home(
     ``AgentRunOptions.claude_config_home`` so the decision is not buried in
     the ``run_streaming`` lifecycle.
     """
+    if cwd:
+        return str(Path(str(cwd)) / _CLAUDE_CONFIG_HOME_DIRNAME)
     config_dir = os.environ.get(_CLAUDE_CONFIG_DIR_ENV_NAME)
     if config_dir:
         return config_dir
-    if cwd:
-        return str(Path(str(cwd)) / _CLAUDE_CONFIG_HOME_DIRNAME)
     return None
 
 
@@ -399,6 +406,40 @@ def apply_claude_config_home_to_options(
     options.env = {
         **existing_env,
         _CLAUDE_CONFIG_DIR_ENV_NAME: home,
+    }
+    return options
+
+
+def apply_claude_secure_storage_home_to_options(
+    options: Any,
+    secure_storage_home: Optional[str | Path] = None,
+) -> Any:
+    """Bind Claude Code's credential store to one authenticated platform user.
+
+    This selector is intentionally separate from ``CLAUDE_CONFIG_DIR``:
+    thread-local history/config remains inside ``.claude-home``, while macOS
+    OAuth secrets remain in the user-level Keychain item created by the exact
+    Resources CLI.  The value is server-owned and therefore overwrites any
+    inherited option value.  Browser settings and user SDK env cannot set it.
+    """
+
+    if secure_storage_home is None:
+        return options
+    raw = Path(str(secure_storage_home)).expanduser()
+    if not raw.is_absolute():
+        raise ValueError("Claude secure-storage home must be absolute.")
+    try:
+        resolved = raw.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("Claude secure-storage home is invalid.") from exc
+    if resolved == Path("/"):
+        raise ValueError("Claude secure-storage home is invalid.")
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    options.env = {
+        **existing_env,
+        CLAUDE_SECURE_STORAGE_CONFIG_DIR_ENV_NAME: str(resolved),
     }
     return options
 
@@ -455,12 +496,43 @@ def apply_task_v2_env_to_options(options: Any) -> Any:
     return options
 
 
-# CLI binary resolution (2026-07-26, Docker apply-seccomp fix).  The
-# claude-agent-sdk transport prefers its bundled CLI over any system install
-# (``_find_cli``: bundled first).  Production Docker patches the npm CLI's
-# vendor apply-seccomp into a passthrough to survive nested userns, so the
-# patched binary must win over the bundled one.
+# CLI binary resolution. The claude-agent-sdk transport may prefer its bundled
+# CLI over a system install (``_find_cli``: bundled first). Production keeps an
+# explicit system path so Agent and Resources MCP OAuth use the exact same
+# build-verified CLI 2.1.235; bundled fallback remains development-only.
 _CLAUDE_CODE_CLI_PATH_ENV_NAME = "CLAUDE_CODE_CLI_PATH"
+
+
+def resolve_claude_cli_path(
+    process_env: Optional[Mapping[str, str]] = None,
+) -> Optional[str]:
+    """Resolve the executable system CLI shared by Agent and Claude MCP.
+
+    The SDK bundled fallback is deliberately represented by ``None`` because
+    it has no stable external argv path for Resources operations. Production
+    deployments must provide either an executable ``CLAUDE_CODE_CLI_PATH`` or
+    a system ``claude`` on PATH; the Agent SDK may still use its bundled
+    fallback only when no Resources operation is requested.
+    """
+
+    source = os.environ if process_env is None else process_env
+    override = str(source.get(_CLAUDE_CODE_CLI_PATH_ENV_NAME) or "").strip()
+    if override:
+        candidate = Path(override).expanduser()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve())
+        logger.warning(
+            "%s is set but is not an executable file; falling back to PATH.",
+            _CLAUDE_CODE_CLI_PATH_ENV_NAME,
+        )
+    search_path = source.get("PATH") if process_env is not None else None
+    system_cli = shutil.which("claude", path=search_path)
+    if not system_cli:
+        return None
+    candidate = Path(system_cli)
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        return None
+    return str(candidate.resolve())
 
 
 def apply_cli_path_to_options(options: Any) -> Any:
@@ -471,12 +543,11 @@ def apply_cli_path_to_options(options: Any) -> Any:
     1. ``CLAUDE_CODE_CLI_PATH`` env var, when set and the path exists.
        A set-but-missing path logs a warning and falls through — a stale
        override must never shadow a working CLI.
-    2. ``shutil.which("claude")`` — the system/npm install.  Production
-       Docker ships the npm CLI with the vendor apply-seccomp passthrough
-       patch (nested-userns ``/proc/self/setgroups`` workaround); pinning it
-       prevents the SDK's bundled CLI from silently shadowing the patched
-       binary (2026-07-26 recurrence).  Local dev likewise stays on the
-       developer's own npm claude.
+    2. ``shutil.which("claude")`` — the system/npm install. Production pins
+       native CLI 2.1.235 and verifies its public MCP argv at image build time;
+       explicit resolution keeps Agent and Resources OAuth on one observable
+       binary even though SDK 0.2.140 currently bundles the same CLI version.
+       Local development likewise stays on the developer's own npm claude.
     3. Leave ``cli_path`` unset — documented escape hatch: the SDK then
        falls back to its bundled CLI (usable when no system claude exists).
 
@@ -485,18 +556,7 @@ def apply_cli_path_to_options(options: Any) -> Any:
 
     if getattr(options, "cli_path", None):
         return options
-    override = os.getenv(_CLAUDE_CODE_CLI_PATH_ENV_NAME, "").strip()
-    if override:
-        if os.path.isfile(override):
-            options.cli_path = override
-            return options
-        logger.warning(
-            "%s=%r is set but the file does not exist; falling back to "
-            "system/bundled CLI resolution.",
-            _CLAUDE_CODE_CLI_PATH_ENV_NAME,
-            override,
-        )
-    system_cli = shutil.which("claude")
+    system_cli = resolve_claude_cli_path()
     if system_cli:
         options.cli_path = system_cli
     return options

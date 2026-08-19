@@ -181,6 +181,10 @@
 #                    (before plan/task env injection) so the system/npm CLI —
 #                    Docker's apply-seccomp-patched runtime — is not shadowed
 #                    by the SDK bundled CLI (bundled-first _find_cli in 0.2.128).
+# [Sync] 2026-08-20: inject the server-owned user secure-storage selector next
+#                    to, but independently from, the thread config home.
+# [Sync] 2026-08-20: merge per-turn user MCP definitions through the public SDK
+#                    mcp_servers option without auto-allowing remote tools.
 # [Sync] 2026-08-04: harden the .dream Bash write guard against find mutation
 #                    actions, env/wrapper execution, glob paths, and normalized
 #                    relative/absolute paths with conservative read-only parsing.
@@ -249,6 +253,7 @@ from .story_workspace_tool import story_workspace_allowed_tool_names
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
     apply_claude_config_home_to_options,
+    apply_claude_secure_storage_home_to_options,
     apply_cli_path_to_options,
     apply_project_sdk_runtime_options,
     apply_task_v2_env_to_options,
@@ -318,6 +323,9 @@ _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
 _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 _STORY_WORKSPACE_MCP_TOOL_PREFIX = "mcp__story_workspace__"
+_INTERNAL_MCP_SERVER_NAMES: frozenset[str] = frozenset(
+    {"user", "memory", "necklace", "editor", "story_workspace"}
+)
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
 _STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     story_workspace_allowed_tool_names()
@@ -2721,6 +2729,21 @@ class ClaudeAgentRunner:
                 "Story Workspace MCP enabled with trusted actor/thread/run context."
             )
 
+        # Remote Resources connectors are user-scoped before a thread exists,
+        # but this runner intentionally loads only the project setting source.
+        # Inject the per-turn synchronized definitions through the Agent SDK's
+        # public `mcp_servers` option. Do not add wildcard allowed_tools here:
+        # remote tool calls must keep flowing through the existing permission
+        # policy instead of becoming silently auto-approved.
+        for server_name, server_config in (opts.claude_mcp_servers or {}).items():
+            if server_name in _INTERNAL_MCP_SERVER_NAMES or server_name in mcp_servers:
+                raise RuntimeError(
+                    "Claude MCP remote server conflicts with an internal Agent MCP name."
+                )
+            if not isinstance(server_config, dict):
+                raise RuntimeError("Claude MCP remote server configuration is invalid.")
+            mcp_servers[server_name] = dict(server_config)  # type: ignore[assignment]
+
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = ClaudeAgentOptions(
             max_turns=max_turns,
@@ -2768,6 +2791,13 @@ class ClaudeAgentRunner:
             sdk_options,
             config_home=opts.claude_config_home,
             cwd=cwd,
+        )
+        # Keep macOS OAuth material in Claude Code's user-level Keychain while
+        # preserving the thread-local config/history home above.  Linux leaves
+        # this unset and consumes the file projection materialized by service.
+        apply_claude_secure_storage_home_to_options(
+            sdk_options,
+            opts.claude_secure_storage_home,
         )
         sdk_options = apply_project_sdk_runtime_options(sdk_options)
         # Plugin launch boundary: read .ink/launch-manifest.json from the
