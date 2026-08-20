@@ -5,6 +5,7 @@
 [Pos] Central compatibility seam; services never parse human CLI text directly.
 [Sync] 2026-08-19: support colon-bearing server names and secret-safe OAuth parsing.
 [Sync] 2026-08-19: validate the restricted user-scope HTTPS MCP server URL contract.
+[Sync] 2026-08-21: accept absolute HTTP(S) MCP URLs and parse CLI config scope fail closed.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from .contracts import ClaudeMcpState
+from .contracts import ClaudeMcpConfigScope, ClaudeMcpState
 
 
 _OSC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
@@ -92,16 +93,40 @@ def validate_server_url(value: str, *, max_length: int) -> str:
     if (
         not candidate
         or len(candidate) > max_length
-        or parsed.scheme != "https"
+        or parsed.scheme not in {"http", "https"}
         or not parsed.netloc
         or parsed.username is not None
         or parsed.password is not None
         or bool(parsed.fragment)
     ):
-        raise ValueError("server URL must be an absolute HTTPS URL without credentials")
+        raise ValueError("server URL must be an absolute HTTP(S) URL without credentials")
     if any(ord(char) < 32 or ord(char) == 127 for char in candidate):
         raise ValueError("server URL contains control characters")
     return candidate
+
+
+def parse_server_scope(text: str) -> ClaudeMcpConfigScope:
+    """Return the config scope printed by ``claude mcp get``.
+
+    Unknown or changed CLI output is deliberately non-removable. Scope is an
+    authorization input for config mutation, not only display metadata.
+    """
+
+    for raw_line in strip_terminal_control(text).splitlines():
+        line = raw_line.strip().lower()
+        if not line.startswith("scope:"):
+            continue
+        value = line.removeprefix("scope:").strip()
+        if "user config" in value:
+            return ClaudeMcpConfigScope.USER
+        if "local config" in value:
+            return ClaudeMcpConfigScope.LOCAL
+        if "project config" in value:
+            return ClaudeMcpConfigScope.PROJECT
+        if "plugin" in value:
+            return ClaudeMcpConfigScope.PLUGIN
+        return ClaudeMcpConfigScope.UNKNOWN
+    return ClaudeMcpConfigScope.UNKNOWN
 
 
 def parse_authorization_url(text: str) -> str | None:

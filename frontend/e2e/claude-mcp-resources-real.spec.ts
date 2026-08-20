@@ -4,6 +4,7 @@
 // [Sync] 2026-08-19: add the complete real-account MCP OAuth and per-turn Agent credential reuse journey.
 // [Sync] 2026-08-20: assert Linux file projection versus macOS secure-storage reuse without reading Keychain.
 // [Sync] 2026-08-20: verify remote server definitions reach Agent through the public SDK option and tolerate a direct localhost OAuth callback.
+// [Sync] 2026-08-21: accept absolute HTTP(S) server input while preserving user-scope cleanup.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -24,7 +25,7 @@ const BACKEND_PYTHON = resolve(BACKEND_DIR, '.venv/bin/python');
 
 const IMPACT_SCOPE = {
   actor: 'one named existing platform user',
-  mcpConfiguration: 'one explicitly named user-scope HTTPS server, removed at journey end',
+  mcpConfiguration: 'one explicitly named user-scope HTTP(S) server, removed at journey end',
   oauthCredential: 'real provider token in the actor user store, logged out and revoked at journey end',
   agent: 'one normal persisted Chat thread and one read-only model turn',
   historicalThreads: 'no login fan-out; only the new turn target is projected',
@@ -248,7 +249,7 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
   requireInputs();
   expect(IMPACT_SCOPE).toEqual({
     actor: 'one named existing platform user',
-    mcpConfiguration: 'one explicitly named user-scope HTTPS server, removed at journey end',
+    mcpConfiguration: 'one explicitly named user-scope HTTP(S) server, removed at journey end',
     oauthCredential: 'real provider token in the actor user store, logged out and revoked at journey end',
     agent: 'one normal persisted Chat thread and one read-only model turn',
     historicalThreads: 'no login fan-out; only the new turn target is projected',
@@ -276,7 +277,7 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
     await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
     await expect(page.getByText('安全门禁已关闭此能力')).toHaveCount(0);
     await page.getByLabel('MCP 服务名称').fill(SERVER_NAME);
-    await page.getByLabel('MCP HTTPS URL').fill(SERVER_URL);
+    await page.getByLabel('MCP 服务 URL').fill(SERVER_URL);
     await page.getByRole('button', { name: '添加 MCP 服务' }).click();
 
     const card = page.getByRole('article', { name: `MCP 服务 ${SERVER_NAME}` });

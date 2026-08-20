@@ -7,6 +7,7 @@
 [Sync] 2026-08-19: add fail-closed credential projection errors for user-to-thread synchronization.
 [Sync] 2026-08-19: add restricted user-scope server configuration and ownership errors.
 [Sync] 2026-08-20: add safe public-SDK inventory contracts for MCP tools and annotations.
+[Sync] 2026-08-21: expose fail-closed CLI config scope and removability on server DTOs.
 """
 
 from __future__ import annotations
@@ -29,6 +30,14 @@ class ClaudeMcpState(str, Enum):
     CANCELLING = "cancelling"
     LOGGED_OUT = "logged_out"
     DISABLED = "disabled"
+
+
+class ClaudeMcpConfigScope(str, Enum):
+    USER = "user"
+    LOCAL = "local"
+    PROJECT = "project"
+    PLUGIN = "plugin"
+    UNKNOWN = "unknown"
 
 
 class ClaudeMcpErrorCode(str, Enum):
@@ -105,6 +114,8 @@ class ClaudeMcpServer:
     transport: str | None = None
     detail: str | None = None
     active_operation_id: str | None = None
+    config_scope: ClaudeMcpConfigScope = ClaudeMcpConfigScope.UNKNOWN
+    removable: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -113,6 +124,8 @@ class ClaudeMcpServer:
             "transport": self.transport,
             "detail": self.detail,
             "active_operation_id": self.active_operation_id,
+            "config_scope": self.config_scope.value,
+            "removable": self.removable,
         }
 
 

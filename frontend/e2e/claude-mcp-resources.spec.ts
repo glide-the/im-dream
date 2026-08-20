@@ -2,8 +2,9 @@
 // [Output] Verify Resources → Configure → Login → Connected → 41-tool detail/search/risk → Logout → Remove with zero secret persistence.
 // [Pos] Provider-free Claude MCP browser journey; it never calls a real OAuth provider, CLI, backend, or business database.
 // [Sync] 2026-08-19: cover the complete visible v1 connector journey and responsive layout.
-// [Sync] 2026-08-19: cover restricted HTTPS configuration and user-owned removal before real-provider QA.
+// [Sync] 2026-08-19: cover restricted HTTP(S) configuration and user-owned removal before real-provider QA.
 // [Sync] 2026-08-20: cover the Notion-aligned detail workbench and prompt-free tool inventory.
+// [Sync] 2026-08-21: cover remote HTTP plus project-scope read-only removal controls.
 
 import { expect, test, type Request as PlaywrightRequest } from '@playwright/test';
 
@@ -14,7 +15,8 @@ test.use({ channel: 'chromium' });
 test('Resources completes the provider-free Claude MCP login and logout journey', async ({ page }) => {
   const token = 'claude-mcp-resources-technical-token';
   const serverName = 'e2e-user-server';
-  const serverUrl = 'https://mcp.example.test/api';
+  const projectServerName = 'project-readonly-server';
+  const serverUrl = 'http://mcp.example.test/api';
   const redirectUrl = 'https://callback.example.test/done?code=private-code&state=private-state';
   const mcpRequests: PlaywrightRequest[] = [];
   const unexpectedApiRequests: string[] = [];
@@ -81,13 +83,23 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
     if (method === 'GET' && path === '/api/claude-mcp/servers') {
       await route.fulfill({
         json: {
-          servers: configured ? [{
+          servers: [{
+            name: projectServerName,
+            state: 'configured',
+            transport: 'http',
+            detail: null,
+            active_operation_id: null,
+            config_scope: 'project',
+            removable: false,
+          }, ...(configured ? [{
             name: serverName,
             state: serverState,
             transport: 'http',
             detail: null,
             active_operation_id: operationActive ? 'operation-1' : null,
-          }] : [],
+            config_scope: 'user',
+            removable: true,
+          }] : [])],
         },
       });
       return;
@@ -101,6 +113,8 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
             transport: 'http',
             detail: null,
             active_operation_id: operationActive ? 'operation-1' : null,
+            config_scope: 'user',
+            removable: true,
           },
         },
       });
@@ -156,6 +170,8 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
             transport: 'http',
             detail: null,
             active_operation_id: null,
+            config_scope: 'user',
+            removable: true,
           },
         },
       });
@@ -193,6 +209,8 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
             transport: null,
             detail: null,
             active_operation_id: null,
+            config_scope: 'user',
+            removable: true,
           },
         },
       });
@@ -208,6 +226,8 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
             transport: null,
             detail: null,
             active_operation_id: null,
+            config_scope: 'user',
+            removable: false,
           },
         },
       });
@@ -272,8 +292,12 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
 
   await expect(page.getByRole('heading', { name: '资源链接', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
+  const projectCard = page.getByRole('article', { name: `MCP 服务 ${projectServerName}` });
+  await expect(projectCard).toContainText('共享项目配置');
+  await expect(projectCard).toContainText('请从共享项目配置来源管理');
+  await expect(projectCard.getByRole('button', { name: '移除' })).toHaveCount(0);
   await page.getByLabel('MCP 服务名称').fill(serverName);
-  await page.getByLabel('MCP HTTPS URL').fill(serverUrl);
+  await page.getByLabel('MCP 服务 URL').fill(serverUrl);
   await page.getByRole('button', { name: '添加 MCP 服务' }).click();
   const serverCard = page.getByRole('article', { name: `MCP 服务 ${serverName}` });
   await expect(serverCard).toBeVisible();
@@ -331,7 +355,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
 
   await serverCard.getByRole('button', { name: '移除' }).click();
   await expect(serverCard).toHaveCount(0);
-  await expect(page.getByText('尚未配置 MCP 服务。')).toBeVisible();
+  await expect(projectCard).toBeVisible();
 
   const mcpHeaders = await Promise.all(mcpRequests.map((request) => request.allHeaders()));
   expect(mcpHeaders.length).toBeGreaterThanOrEqual(6);
