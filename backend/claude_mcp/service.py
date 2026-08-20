@@ -9,6 +9,7 @@
 [Sync] 2026-08-20: accept browser-callback completion racing with redirect stdin submission as idempotent success.
 [Sync] 2026-08-20: verify Darwin login through formal `mcp get` without reading Keychain payloads.
 [Sync] 2026-08-20: expose prompt-free public-SDK tool inventory under the same user identity as Chat.
+[Sync] 2026-08-21: accept absolute HTTP(S) servers and authorize removal from parsed user scope only.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import uuid
 
 from .contracts import (
     ClaudeMcpCapability,
+    ClaudeMcpConfigScope,
     ClaudeMcpError,
     ClaudeMcpErrorCode,
     ClaudeMcpOperation,
@@ -42,6 +44,7 @@ from .inventory import ClaudeMcpInventoryClient
 from .parser import (
     parse_authorization_url,
     parse_server_names,
+    parse_server_scope,
     parse_server_state,
     parse_version,
     validate_redirect_url,
@@ -218,7 +221,7 @@ class ClaudeMcpService:
         except ValueError as exc:
             raise ClaudeMcpError(
                 ClaudeMcpErrorCode.SERVER_CONFIGURATION_INVALID,
-                "Claude MCP server URL must be an absolute HTTPS URL.",
+                "Claude MCP server URL must be an absolute HTTP or HTTPS URL.",
             ) from exc
         self._ensure_identity_is_idle(identity)
         lock = self._credential_locks.setdefault(identity.fingerprint, asyncio.Lock())
@@ -242,6 +245,11 @@ class ClaudeMcpService:
         name = self._user_owned_server_name(server_name)
         self._ensure_identity_is_idle(identity)
         current = await self._server(identity, name)
+        if current.config_scope is not ClaudeMcpConfigScope.USER:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.SERVER_OWNERSHIP_CONFLICT,
+                "Only user-scoped Claude MCP servers can be removed from Resources.",
+            )
         lock = self._credential_locks.setdefault(identity.fingerprint, asyncio.Lock())
         async with lock:
             logout_result = await self.driver.logout(identity, name)
@@ -272,7 +280,12 @@ class ClaudeMcpService:
                 ClaudeMcpErrorCode.CREDENTIAL_SYNC_FAILED,
                 "Claude MCP server was removed, but stale Agent projections could not be revoked safely.",
             ) from exc
-        return ClaudeMcpServer(name=name, state=ClaudeMcpState.NOT_CONFIGURED)
+        return ClaudeMcpServer(
+            name=name,
+            state=ClaudeMcpState.NOT_CONFIGURED,
+            config_scope=ClaudeMcpConfigScope.USER,
+            removable=False,
+        )
 
     async def get_server(self, actor_id: str, server_name: str) -> ClaudeMcpServer:
         identity, _ = await self._checked_identity(actor_id)
@@ -346,7 +359,13 @@ class ClaudeMcpService:
                 ClaudeMcpErrorCode.CLI_FAILED,
                 "Claude MCP server status could not be verified.",
             )
-        return ClaudeMcpServer(name=name, state=state)
+        scope = parse_server_scope(result.output)
+        return ClaudeMcpServer(
+            name=name,
+            state=state,
+            config_scope=scope,
+            removable=scope is ClaudeMcpConfigScope.USER,
+        )
 
     async def start_auth(
         self,
@@ -637,6 +656,7 @@ class ClaudeMcpService:
     async def logout(self, actor_id: str, server_name: str) -> ClaudeMcpServer:
         identity, _ = await self._checked_identity(actor_id)
         name = self._server_name(server_name)
+        current = await self._server(identity, name)
         key = (identity.fingerprint, name)
         if key in self._active_by_server:
             raise ClaudeMcpError(
@@ -667,7 +687,12 @@ class ClaudeMcpService:
                 ClaudeMcpErrorCode.CREDENTIAL_SYNC_FAILED,
                 "Claude MCP logged out, but stale Agent credential projections could not be revoked safely.",
             ) from exc
-        return ClaudeMcpServer(name=name, state=ClaudeMcpState.LOGGED_OUT)
+        return ClaudeMcpServer(
+            name=name,
+            state=ClaudeMcpState.LOGGED_OUT,
+            config_scope=current.config_scope,
+            removable=current.removable,
+        )
 
     async def shutdown(self) -> None:
         active = [

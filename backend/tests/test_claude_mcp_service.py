@@ -7,6 +7,7 @@
 [Sync] 2026-08-19: inject a no-secret projection seam; file synchronization has dedicated tests.
 [Sync] 2026-08-19: verify login avoids historical fan-out and restricted user-scope add/remove.
 [Sync] 2026-08-20: cover localhost browser callback racing with redirect stdin submission.
+[Sync] 2026-08-21: accept remote HTTP and reject removal outside parsed user scope before CLI mutation.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from claude_mcp.contracts import (
+    ClaudeMcpConfigScope,
     ClaudeMcpError,
     ClaudeMcpErrorCode,
     ClaudeMcpRuntimeIdentity,
@@ -208,10 +210,12 @@ def test_restricted_http_configuration_and_removal_use_user_owned_names(
     async def scenario() -> None:
         service = _service(tmp_path)
         configured = await service.configure_http_server(
-            "7", "user-server", "https://mcp.example.test/api"
+            "7", "user-server", "http://mcp.example.test/api"
         )
         assert configured.name == "user-server"
         assert configured.state is ClaudeMcpState.NEEDS_AUTH
+        assert configured.config_scope is ClaudeMcpConfigScope.USER
+        assert configured.removable is True
         assert (tmp_path / "configured.json").read_text(encoding="utf-8")
 
         removed = await service.remove_server("7", "user-server")
@@ -220,7 +224,7 @@ def test_restricted_http_configuration_and_removal_use_user_owned_names(
 
         for name, url, expected in (
             ("plugin:owned:server", "https://mcp.example.test", ClaudeMcpErrorCode.SERVER_OWNERSHIP_CONFLICT),
-            ("user-server", "http://mcp.example.test", ClaudeMcpErrorCode.SERVER_CONFIGURATION_INVALID),
+            ("user-server", "ftp://mcp.example.test", ClaudeMcpErrorCode.SERVER_CONFIGURATION_INVALID),
         ):
             try:
                 await service.configure_http_server("7", name, url)
@@ -228,6 +232,21 @@ def test_restricted_http_configuration_and_removal_use_user_owned_names(
                 assert exc.code is expected
             else:  # pragma: no cover
                 raise AssertionError("unsafe configuration was accepted")
+
+    asyncio.run(scenario())
+
+
+def test_project_scope_removal_is_rejected_before_cli_mutation(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        service = _service(tmp_path, CLAUDE_MCP_FAKE_SCOPE="project")
+        try:
+            await service.remove_server("7", "project-server")
+        except ClaudeMcpError as exc:
+            assert exc.code is ClaudeMcpErrorCode.SERVER_OWNERSHIP_CONFLICT
+        else:  # pragma: no cover
+            raise AssertionError("project-scope server removal was accepted")
+        assert not (tmp_path / "removed").exists()
+        await service.shutdown()
 
     asyncio.run(scenario())
 

@@ -6,6 +6,7 @@
 [Sync] 2026-08-19: cover the production Linux file-backed user-to-thread synchronization boundary.
 [Sync] 2026-08-20: prove macOS never copies Keychain material and reuses a user secure-store selector.
 [Sync] 2026-08-20: cover detached user MCP definition reads for inventory and Agent injection.
+[Sync] 2026-08-21: prove pre-thread CLI cwd cannot inherit ancestor project MCP config.
 """
 
 from __future__ import annotations
@@ -124,7 +125,8 @@ def test_identity_uses_shared_absolute_cli_and_user_config(
     other = provider.resolve("8")
     assert first.command == ("/bin/sh",)
     assert first.config_dir == resolve_user_paths("7", settings).config_dir
-    assert first.cwd == resolve_user_paths("7", settings).workspace
+    assert first.cwd == Path(settings.runtime_root.anchor).resolve()
+    assert first.cwd != resolve_user_paths("7", settings).workspace
     assert first.fingerprint != other.fingerprint
 
 

@@ -6,6 +6,7 @@
 [Sync] 2026-08-19: cover the reviewed `/api/claude-mcp` v1 contract and ownership seam.
 [Sync] 2026-08-19: cover restricted HTTPS user-scope configuration and removal DTOs.
 [Sync] 2026-08-20: cover the actor-owned sanitized tool inventory route.
+[Sync] 2026-08-21: cover HTTP configuration plus scope/removability server DTOs.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from claude_mcp.contracts import (
     ClaudeMcpCapability,
+    ClaudeMcpConfigScope,
     ClaudeMcpError,
     ClaudeMcpErrorCode,
     ClaudeMcpOperation,
@@ -61,11 +63,21 @@ class _Service:
 
     async def list_servers(self, actor_id: str) -> list[ClaudeMcpServer]:
         assert actor_id == "7"
-        return [ClaudeMcpServer(self.operation.server_name, ClaudeMcpState.NEEDS_AUTH)]
+        return [ClaudeMcpServer(
+            self.operation.server_name,
+            ClaudeMcpState.NEEDS_AUTH,
+            config_scope=ClaudeMcpConfigScope.PLUGIN,
+            removable=False,
+        )]
 
     async def get_server(self, actor_id: str, server_name: str) -> ClaudeMcpServer:
         assert actor_id == "7"
-        return ClaudeMcpServer(server_name, ClaudeMcpState.NEEDS_AUTH)
+        return ClaudeMcpServer(
+            server_name,
+            ClaudeMcpState.NEEDS_AUTH,
+            config_scope=ClaudeMcpConfigScope.PLUGIN,
+            removable=False,
+        )
 
     async def get_server_inventory(self, actor_id: str, server_name: str) -> ClaudeMcpServerInventory:
         assert actor_id == "7"
@@ -94,11 +106,21 @@ class _Service:
     ) -> ClaudeMcpServer:
         assert actor_id == "7"
         self.configured = (server_name, server_url)
-        return ClaudeMcpServer(server_name, ClaudeMcpState.NEEDS_AUTH)
+        return ClaudeMcpServer(
+            server_name,
+            ClaudeMcpState.NEEDS_AUTH,
+            config_scope=ClaudeMcpConfigScope.USER,
+            removable=True,
+        )
 
     async def remove_server(self, actor_id: str, server_name: str) -> ClaudeMcpServer:
         assert actor_id == "7"
-        return ClaudeMcpServer(server_name, ClaudeMcpState.NOT_CONFIGURED)
+        return ClaudeMcpServer(
+            server_name,
+            ClaudeMcpState.NOT_CONFIGURED,
+            config_scope=ClaudeMcpConfigScope.USER,
+            removable=False,
+        )
 
     async def start_auth(self, actor_id: str, server_name: str) -> ClaudeMcpOperation:
         assert actor_id == "7"
@@ -131,7 +153,12 @@ class _Service:
 
     async def logout(self, actor_id: str, server_name: str) -> ClaudeMcpServer:
         assert actor_id == "7"
-        return ClaudeMcpServer(server_name, ClaudeMcpState.LOGGED_OUT)
+        return ClaudeMcpServer(
+            server_name,
+            ClaudeMcpState.LOGGED_OUT,
+            config_scope=ClaudeMcpConfigScope.PLUGIN,
+            removable=False,
+        )
 
 
 def _client(service: _Service, *, actor_id: int = 7) -> TestClient:
@@ -149,7 +176,10 @@ def test_full_api_contract_preserves_colon_name_and_never_returns_redirect_submi
     capability = client.get("/api/claude-mcp/capability")
     assert capability.status_code == 200
     assert capability.json()["enabled"] is True
-    assert client.get("/api/claude-mcp/servers").json()["servers"][0]["name"] == server_name
+    listed_server = client.get("/api/claude-mcp/servers").json()["servers"][0]
+    assert listed_server["name"] == server_name
+    assert listed_server["config_scope"] == "plugin"
+    assert listed_server["removable"] is False
 
     inventory = client.get(f"/api/claude-mcp/server-inventories/{server_name}")
     assert inventory.status_code == 200
@@ -162,11 +192,13 @@ def test_full_api_contract_preserves_colon_name_and_never_returns_redirect_submi
 
     configured = client.post(
         "/api/claude-mcp/servers",
-        json={"name": "user-server", "url": "https://mcp.example.test/api"},
+        json={"name": "user-server", "url": "http://mcp.example.test/api"},
     )
     assert configured.status_code == 201
-    assert service.configured == ("user-server", "https://mcp.example.test/api")
+    assert service.configured == ("user-server", "http://mcp.example.test/api")
     assert configured.json()["server"]["state"] == "needs_auth"
+    assert configured.json()["server"]["config_scope"] == "user"
+    assert configured.json()["server"]["removable"] is True
 
     started = client.post(f"/api/claude-mcp/servers/{server_name}/auth-operations")
     assert started.status_code == 202

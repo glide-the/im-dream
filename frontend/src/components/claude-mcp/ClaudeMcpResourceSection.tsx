@@ -1,9 +1,10 @@
 // [Input] Claude MCP API capability/configuration/server/operation DTOs and shared design tokens/icons.
-// [Output] Restricted HTTPS configuration, discovery, detail navigation, browser OAuth handoff, recovery, logout, and removal UI.
+// [Output] Restricted HTTP(S) configuration, scope-aware discovery, detail navigation, browser OAuth handoff, recovery, logout, and removal UI.
 // [Pos] `claude-mcp` feature surface embedded by the Settings Resources page.
 // [Sync] 2026-08-19: add the reviewed minimal MCP resource connector interaction.
 // [Sync] 2026-08-19: enable user-owned HTTPS add/remove and correct the cross-platform capability message.
 // [Sync] 2026-08-20: add the Notion-style server detail handoff for tool inventory and metadata.
+// [Sync] 2026-08-21: accept absolute HTTP(S) URLs and remove only backend-confirmed user-scope servers.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -17,6 +18,7 @@ import {
   startClaudeMcpAuth,
   submitClaudeMcpRedirect,
   type ClaudeMcpCapability,
+  type ClaudeMcpConfigScope,
   type ClaudeMcpOperation,
   type ClaudeMcpServer,
   type ClaudeMcpState,
@@ -43,6 +45,14 @@ const STATE_LABELS: Record<ClaudeMcpState, string> = {
   cancelling: '正在取消',
   logged_out: '已退出',
   disabled: '不可用',
+};
+
+const SCOPE_LABELS: Record<ClaudeMcpConfigScope, string> = {
+  user: '用户配置',
+  local: '本地项目配置',
+  project: '共享项目配置',
+  plugin: '插件配置',
+  unknown: '来源未知',
 };
 
 function actionButton(primary = false): React.CSSProperties {
@@ -174,7 +184,7 @@ export default function ClaudeMcpResourceSection({
     const name = serverName.trim();
     const url = serverUrl.trim();
     if (!name || !url) {
-      setError('请填写 MCP 服务名称和 HTTPS URL。');
+      setError('请填写 MCP 服务名称和完整 HTTP 或 HTTPS URL。');
       return;
     }
     setConfiguring(true);
@@ -297,7 +307,7 @@ export default function ClaudeMcpResourceSection({
           <div>
             <strong style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>添加远程 MCP 服务</strong>
             <p style={{ margin: '0.22rem 0 0', fontSize: '0.73rem', lineHeight: 1.5, color: 'var(--color-text-secondary)' }}>
-              仅接受 HTTPS 远程服务；认证凭证由 Claude Code 的用户级安全存储管理。
+              接受完整 HTTP 或 HTTPS 服务地址；认证凭证由 Claude Code 的用户级安全存储管理。
             </p>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 0.7fr) minmax(12rem, 1.3fr)', gap: '0.55rem' }}>
@@ -315,9 +325,9 @@ export default function ClaudeMcpResourceSection({
               />
             </label>
             <label style={{ display: 'grid', gap: '0.3rem', fontSize: '0.73rem', color: 'var(--color-text-secondary)' }}>
-              MCP HTTPS URL
+              MCP 服务 URL
               <input
-                aria-label="MCP HTTPS URL"
+                aria-label="MCP 服务 URL"
                 type="url"
                 value={serverUrl}
                 onChange={(event) => setServerUrl(event.target.value)}
@@ -325,7 +335,7 @@ export default function ClaudeMcpResourceSection({
                 spellCheck={false}
                 maxLength={2048}
                 required
-                placeholder="https://mcp.example.com/api"
+                placeholder="https://mcp.example.com/api 或 http://host/mcp"
                 style={{ border: '1px solid var(--color-border-paper)', borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem', minWidth: 0 }}
               />
             </label>
@@ -340,7 +350,7 @@ export default function ClaudeMcpResourceSection({
 
       {capability?.enabled && !loading && servers.length === 0 ? (
         <div style={{ border: '1px dashed var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-          尚未配置 MCP 服务。添加 HTTPS 服务后即可开始 Claude Code 正式 OAuth 认证。
+          尚未配置 MCP 服务。添加 HTTP(S) 服务后即可开始 Claude Code 正式 OAuth 认证。
         </div>
       ) : null}
 
@@ -366,7 +376,7 @@ export default function ClaudeMcpResourceSection({
                       <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.name}</strong>
                       <span style={{ marginTop: '0.25rem', display: 'flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : state === 'failed' ? 'var(--color-state-error)' : 'var(--color-text-muted)' }}>
                         {state === 'connected' ? <IconCheck style={{ width: '0.78rem', height: '0.78rem' }} /> : state === 'failed' ? <IconX style={{ width: '0.78rem', height: '0.78rem' }} /> : null}
-                        {STATE_LABELS[state]}
+                        {STATE_LABELS[state]} · {SCOPE_LABELS[server.config_scope || 'unknown']}
                       </span>
                     </span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.28rem', color: 'var(--color-action-link)', fontSize: '0.74rem', fontWeight: 700, flexShrink: 0 }}>
@@ -381,7 +391,7 @@ export default function ClaudeMcpResourceSection({
                     </span>
                     <div style={{ minWidth: 0 }}>
                       <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.name}</strong>
-                      <div style={{ marginTop: '0.25rem', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : 'var(--color-text-muted)' }}>{STATE_LABELS[state]}</div>
+                      <div style={{ marginTop: '0.25rem', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : 'var(--color-text-muted)' }}>{STATE_LABELS[state]} · {SCOPE_LABELS[server.config_scope || 'unknown']}</div>
                     </div>
                   </div>
                 )}
@@ -401,10 +411,15 @@ export default function ClaudeMcpResourceSection({
                       取消
                     </button>
                   ) : null}
-                  {!server.name.startsWith('plugin:') && !ACTIVE_STATES.includes(state) && state !== 'connected' ? (
+                  {server.removable && !ACTIVE_STATES.includes(state) && state !== 'connected' ? (
                     <button type="button" onClick={() => void remove(server.name)} disabled={busyServer === server.name} style={actionButton()}>
                       移除
                     </button>
+                  ) : null}
+                  {!server.removable && server.config_scope && server.config_scope !== 'unknown' ? (
+                    <span style={{ alignSelf: 'center', fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                      请从{SCOPE_LABELS[server.config_scope]}来源管理
+                    </span>
                   ) : null}
                 </div>
               </div>

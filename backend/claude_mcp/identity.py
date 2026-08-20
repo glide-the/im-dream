@@ -7,6 +7,7 @@
 [Sync] 2026-08-19: allowlist only OS/network/CLI runtime environment keys so backend secrets are not inherited.
 [Sync] 2026-08-19: allow the reviewed macOS config-dir-keyed Keychain capability.
 [Sync] 2026-08-20: fail closed when a Darwin CLI lacks the secure-storage selector used by Agent reuse.
+[Sync] 2026-08-21: use a neutral CLI cwd so ancestor project `.mcp.json` files cannot leak into a platform-user identity.
 """
 
 from __future__ import annotations
@@ -151,7 +152,13 @@ class PlatformClaudeMcpIdentityProvider:
         return ClaudeMcpRuntimeIdentity(
             command=(executable,),
             config_dir=paths.config_dir,
-            cwd=paths.workspace,
+            # Claude walks cwd ancestors for project `.mcp.json`. The managed
+            # runtime lives below the operator's home/repository, so using its
+            # workspace would merge unrelated project servers into every
+            # platform user and make user-scope removal target the wrong scope.
+            # The filesystem anchor is neutral; mutable state remains isolated
+            # in the actor-specific config directory above.
+            cwd=Path(paths.root.anchor).resolve(),
             env=_safe_runtime_env(),
             fingerprint=fingerprint,
         )

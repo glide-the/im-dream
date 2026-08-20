@@ -8,6 +8,7 @@
 [Sync] 2026-08-19: cover restricted user-scope HTTP add/remove argv.
 [Sync] 2026-08-20: emulate direct browser-callback completion before stdin submission.
 [Sync] 2026-08-20: capture non-secret config/secure-storage selectors for identity tests.
+[Sync] 2026-08-21: emit formal config scope for removal-authorization coverage.
 """
 
 from __future__ import annotations
@@ -108,6 +109,17 @@ def main() -> int:
             print(f"{server_name}\nStatus: ✓ Connected", flush=True)
         else:
             print(f"{server_name}\nStatus: Needs authentication", flush=True)
+        scope = os.environ.get(
+            "CLAUDE_MCP_FAKE_SCOPE",
+            "plugin" if server_name.startswith("plugin:") else "user",
+        )
+        labels = {
+            "user": "User config (available in all your projects)",
+            "local": "Local config (private to this project)",
+            "project": "Project config (shared via .mcp.json)",
+            "plugin": "Plugin server",
+        }
+        print(f"Scope: {labels.get(scope, scope)}", flush=True)
         return 0
     if command == "logout":
         _write_state("logged_out")

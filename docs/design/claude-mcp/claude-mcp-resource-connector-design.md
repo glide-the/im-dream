@@ -10,6 +10,7 @@
 <!-- [Sync] 2026-08-20: distinguish backend secret access from exact-CLI Keychain access, document first-access SecurityAgent behavior, and simplify Mermaid 13.6 for cross-renderer compatibility. -->
 <!-- [Sync] 2026-08-20: add the public Agent SDK tool-inventory protocol, Notion-aligned detail workbench, and reviewed Resources/Prompts limits. -->
 <!-- [Sync] 2026-08-20: bound the public SDK stdout buffer for image tool results and record the passing real Chat regression. -->
+<!-- [Sync] 2026-08-21: accept absolute HTTP(S), isolate Resources CLI from ancestor project configs, and authorize Remove from parsed user scope. -->
 
 # Claude MCP 资源链接器设计
 
@@ -241,7 +242,7 @@ class ClaudeMcpInventoryClient:
     async def inspect(self, *, identity, server_name, server_config, secure_storage_home): ...
 ```
 
-Identity 至少包含：canonical user、resolved executable、parsed CLI version、用户级 `CLAUDE_CONFIG_DIR`/secure-storage selector、server-owned cwd、sanitized env policy、platform credential capability 和 identity fingerprint。fingerprint 只用于等值比较，不暴露 user ID、username、路径或 secret。
+Identity 至少包含：canonical user、resolved executable、parsed CLI version、用户级 `CLAUDE_CONFIG_DIR`/secure-storage selector、neutral cwd、sanitized env policy、platform credential capability 和 identity fingerprint。Resources CLI 的 cwd 固定为当前 filesystem anchor，不位于 operator HOME、仓库或用户 runtime root 之下，防止 Claude 向上发现无关 Project `.mcp.json` 并把它误合并到平台用户资源。fingerprint 只用于等值比较，不暴露 user ID、username、路径或 secret。
 
 用户目录布局：
 
@@ -251,7 +252,7 @@ Identity 至少包含：canonical user、resolved executable、parsed CLI versio
    ├─ config/                 # 0700, user-level CLAUDE_CONFIG_DIR
    │  ├─ .claude.json        # 0600, CLI owns source; sync reads mcpServers
    │  └─ .credentials.json   # 0600, CLI owns source; sync reads mcpOAuth only
-   └─ workspace/              # 0700, mcp list/get/login/logout cwd
+   └─ workspace/              # 0700 reserved user runtime directory; not CLI cwd
 
 {AGENT_CWD}/{thread-id}/.claude-home/
 ├─ .claude.json              # thread-local CLI state; synchronizer removes obsolete managed mcpServers snapshots
@@ -298,9 +299,9 @@ Resources CLI 的两个选择器都指向同一用户根。Agent 的普通配置
 | `cancelling` | 正在取消 | — |
 | `disabled` | 无 | 查看阻断原因 |
 
-v1 提供完成业务闭环所需的最小 user-scope HTTP 配置：用户输入 server name 与 `https://` MCP URL，后端以 argv 调用 `claude mcp add --transport http --scope user`；不接收 header、环境变量、command、client ID 或 client secret。只有该入口创建且 CLI 解析为 user scope 的普通 server 才显示 Remove；`plugin:*` server 仍由 Plugins 所有者处理，禁止跨域删除。Remove 使用正式 `claude mcp remove --scope user`，执行前必须与 active login/logout 互斥，执行后 `get/list` 验证并撤销 thread 投影。
+v1 提供完成业务闭环所需的最小 user-scope HTTP 配置：用户输入 server name 与绝对 `http://` 或 `https://` MCP URL，后端以 argv 调用 `claude mcp add --transport http --scope user`；仍拒绝相对地址、URL credentials、fragment、控制字符，不接收 header、环境变量、command、client ID 或 client secret。CLI `get` 的 scope 由集中 parser 投影到 DTO，未知 scope 默认不可删除；只有解析为 user scope 的普通 server 才显示并执行 Remove。Project/local/plugin server 必须在各自来源管理，禁止用固定 `--scope user` 误删或返回通用 CLI failure。Remove 使用正式 `claude mcp remove --scope user`，执行前必须与 active login/logout 互斥，执行后 `get/list` 验证并撤销 thread 投影。
 
-Tool inventory 使用一次 prompt-free streaming SDK session，仅注入所选 server 的 opaque definition、exact system CLI、同一 user config/secure-store identity 和 `tools=[]`。后端轮询公共 `get_mcp_status()` 直到稳定状态或有界超时；只投影 HTTPS URL、transport、safe scope、serverInfo、受限长度的 Tool name/description 和布尔注解。SDK config headers、provider error、OAuth URL、token 和 credential payload 永不进入 DTO。
+Tool inventory 使用一次 prompt-free streaming SDK session，仅注入所选 server 的 opaque definition、exact system CLI、同一 user config/secure-store identity 和 `tools=[]`。后端轮询公共 `get_mcp_status()` 直到稳定状态或有界超时；只投影 HTTP(S) URL、transport、safe scope、serverInfo、受限长度的 Tool name/description 和布尔注解。SDK config headers、provider error、OAuth URL、token 和 credential payload 永不进入 DTO。
 
 ## 7. 状态机
 
@@ -335,7 +336,7 @@ stateDiagram-v2
 |---|---|---|
 | `GET` | `/api/claude-mcp/capability` | 返回 exact identity/CLI gate 的脱敏结果。 |
 | `GET` | `/api/claude-mcp/servers` | `mcp list` 并合并当前用户 active operations。 |
-| `POST` | `/api/claude-mcp/servers` | 添加受限 user-scope HTTPS server；body 只有 `name` / `url`。 |
+| `POST` | `/api/claude-mcp/servers` | 添加受限 user-scope absolute HTTP(S) server；body 只有 `name` / `url`。 |
 | `GET` | `/api/claude-mcp/servers/{server_name}` | `mcp get`；server name 作为一个 URL-encoded segment，不拆 `:`。 |
 | `GET` | `/api/claude-mcp/server-inventories/{server_name}` | 使用公共 SDK 读取 live Tools；不发送 prompt 或调用 Tool。 |
 | `POST` | `/api/claude-mcp/servers/{server_name}/auth-operations` | 幂等启动 login；冲突返回既有 operation 或 409。 |
@@ -841,10 +842,10 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 
 生产最小实现已完成：
 
-- `backend/claude_mcp/`：contract/settings/identity/credentials/parser/driver/service 加 `inventory.py`；默认 identity 按 canonical platform `user_id` 解析 opaque config/work root。Inventory 与 Chat 复用 exact CLI、用户定义和 secure-store selector，业务代码没有 Keychain payload API。
+- `backend/claude_mcp/`：contract/settings/identity/credentials/parser/driver/service 加 `inventory.py`；默认 identity 按 canonical platform `user_id` 解析 opaque config root，并以 filesystem anchor 作为 neutral CLI cwd，避免继承 operator HOME/仓库 Project 配置。Parser 接受 absolute HTTP(S)、输出 scope；Remove 仅授权 formal user scope。Inventory 与 Chat 复用 exact CLI、用户定义和 secure-store selector，业务代码没有 Keychain payload API。
 - `backend/routers/claude_mcp.py`：认证 capability、server、prompt-free inventory、operation、redirect、cancel、logout API；`backend/server.py` 只负责挂载。
-- `frontend/src/api/claudeMcpApi.ts`：无 localStorage fallback 的严格后端 transport，包含 server/tool inventory DTO。
-- `frontend/src/components/claude-mcp/ClaudeMcpResourceSection.tsx`：Resources 内 discovery、详情 handoff、授权链接、redirect、进度恢复、cancel/retry/logout；redirect 提交后清空组件输入。
+- `frontend/src/api/claudeMcpApi.ts`：无 localStorage fallback 的严格后端 transport，包含 server scope/removability 与 tool inventory DTO。
+- `frontend/src/components/claude-mcp/ClaudeMcpResourceSection.tsx`：Resources 内 absolute HTTP(S) 配置、scope-aware discovery/Remove、详情 handoff、授权链接、redirect、进度恢复、cancel/retry/logout；redirect 提交后清空组件输入。
 - `frontend/src/components/claude-mcp/ClaudeMcpServerDetailPage.tsx`：Notion 同构 breadcrumb/hero/chips/单虚线骨架，Tools 搜索与安全筛选，Resources/Prompts 明确 not-reported。
 - `backend/tests/fixtures/claude_mcp_fake_cli.py` 与 `backend/tests/test_claude_mcp_*.py`：真实 argv/PTTY 进程交互但无真实 provider。
 - `backend/claude_agent/service.py`：每个 Workspace-enabled turn 在 resume/config probe 前执行最小 MCP 交付，把 opaque remote definitions 与 macOS user secure-storage home 独立带入 `AgentRunOptions`；Workspace Mode 关闭且该用户存在 MCP state 时 fail closed。
@@ -857,3 +858,5 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 2026-08-20 本轮发布门通过：Claude MCP backend contract `37 passed`（包含 inventory 请求取消时原样传播并清理 SDK client）；frontend 聚焦 lint `0 errors`（`App.tsx` 16 个既有 Hook warnings）且 production build 成功；provider-free Resources → Login → redirect → Connected → 41-tool 详情/筛选 → 刷新/返回 → Logout → Remove 为 `1 passed (5.3s)`。具名账户 `dmeck@suoxya.com` 在正常本机 Dream/Gateway/PostgreSQL 上完成 Resources 实时 41-tool 详情 → Chat 两次只读 MCP 调用 → 刷新 → 同 thread 续问，结果 `1 passed (1.2m)`，证据 thread `c1292eb3-c550-45c0-b854-406c4b46a90e` 保留，既有 `comfy` 连接未 Logout/Remove。9 个 Mermaid blocks 已由当前 Chromium + 前端 Mermaid 运行时逐块解析。当前工作树 Docker image 构建成功；容器回执为 Claude Code `2.1.235`、Node `22.18.0`、Agent SDK `0.2.140`、production imports/MCP argv capability 均 OK；本机真实链路 exact CLI 为 `2.1.220`，仍满足 `>=2.1.191`。共享数据库 schema 与 ClaudePlugin operation 表均未改变。
 
 真实 Chat 图片回归另发现 Agent SDK transport 的独立限制：Claude CLI 的 `Read` 图片回执会同时携带 message 与 tool result，证据线程出现 1,346,958-byte JSONL 单行，超过 SDK 原 1 MiB stdout buffer 默认值。这不是 MCP tool inventory 或 OAuth 失败。生产路径现通过公开 `ClaudeAgentOptions.max_buffer_size` 使用服务端有界配置 `INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES`，默认 8 MiB、允许 1–64 MiB；非法配置回退默认值，不记录 payload。具名账户可见 UI 路径“上传图片 → Agent Read → assistant 回复”结果 `1 passed (36.4s)`，证据 thread `ecaad924-512d-4790-84d3-bd2fc8505ce6` 保留，未修改 MCP 认证或远程业务数据。
+
+2026-08-21 scope/URL 修订回归通过：真实本机 Claude CLI 从旧 cwd 会向上发现 operator HOME `.mcp.json` 的 Project-scope server，导致 Resources 错误展示 Remove、随后固定执行 `remove --scope user` 失败；neutral filesystem-anchor cwd 下只返回平台用户级 server，formal scope=`user`、removable=`true`。绝对公网/loopback HTTP 与 HTTPS 均可配置，仍拒绝 credentials/fragment/相对地址。隔离 real-CLI add → get → remove 回执为 `0/0/0` 且移除后 get 非零；Claude MCP backend `39 passed`，provider-free 可见旅程 `1 passed (5.2s)`，frontend lint/build、9 个 Mermaid blocks 均通过。真实用户 MCP 配置和 Keychain 未被本轮修订测试修改。
