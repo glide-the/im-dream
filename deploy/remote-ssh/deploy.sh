@@ -15,6 +15,8 @@
 #                    platform network for the Alibaba Cloud two-repository stack.
 # [Sync] 2026-08-21: make no-cache rebuild opt-in so small ECS disks can reuse
 #                    verified Docker build cache during routine releases.
+# [Sync] 2026-08-22: keep local virtualenvs, QA artifacts, and generated output
+#                    out of the Remote SSH release tree on small ECS disks.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -421,8 +423,16 @@ sync_files() {
     --exclude '/.cloud-env'
     --exclude '/.storage-env'
     --exclude '/logs/'
+    --exclude '/.artifacts/'
+    --exclude '/.codex-pet-runs/'
+    --exclude '/.venv/'
+    --exclude '/output/'
+    --exclude '/vendor/'
+    --exclude '/backend/.pytest_cache/'
+    --exclude '/backend/.venv/'
     --exclude '/frontend/node_modules/'
     --exclude '/frontend/dist/'
+    --exclude '/frontend/output/'
     --exclude '/node_modules/'
     --exclude '**/__pycache__/'
     --exclude '.DS_Store'

@@ -58,8 +58,10 @@ export REMOTE_APP_DIR=/srv/ink-admin-memory
 生成的 `deploy/remote-ssh/.env` 为 mode `0600`，保留 PostgreSQL、Session、
 Gateway、Provider encryption 和 Product API secrets；不包含 MinIO/S3/AWS 凭据。
 ECS 内嵌 PG 默认 `shared_buffers=96MB`、`max_connections=50`。
-低内存 ECS 的 Admin image build 固定为 1 个 Next worker、1024MB V8 heap；这些是
-build 配置，不改变运行时业务路径。
+低内存 ECS 的 Admin image build 固定为 1 个 Next worker、640MB V8 heap，并串行
+安排 Next build 与系统包安装；这些是 build 配置，不改变运行时业务路径。Dream
+Remote SSH 同步会排除本机 virtualenv、QA artifacts、generated output 与 vendor
+worktree，避免非构建输入挤占 ECS 发布盘。
 
 ### 首次导入现有 PostgreSQL
 

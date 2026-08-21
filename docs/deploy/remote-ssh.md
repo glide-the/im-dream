@@ -30,7 +30,8 @@ export REMOTE_APP_DIR=/srv/ink-and-memory  # 必须是远端绝对路径
 1. 检查本地 `ssh` / `rsync`、仓库必需文件、`deploy/clash/config.yaml`、远端 Docker、`docker-compose` 与 `/dev/net/tun`。
 2. 当 `REMOTE_SETUP_NGINX=auto` 且容器端口仅绑定 localhost 时，自动安装或刷新主机 nginx 配置。
 3. 自动创建/修复 `${REMOTE_APP_DIR}/backend/data`、`file-storage`、`agent-workspace`、`backups`。
-4. rsync 代码到 `${REMOTE_APP_DIR}`；默认不覆盖远端 `backend/data/`。
+4. rsync 代码到 `${REMOTE_APP_DIR}`；默认不覆盖远端 `backend/data/`，也不上传本机
+   `.venv`、QA artifacts、generated output、vendor worktree 等非镜像构建输入。
 5. 给当前远端镜像打 rollback tag。
 6. 执行 cache-aware `docker-compose build`；需要排查缓存时显式设置 `REMOTE_BUILD_NO_CACHE=1`。
 7. 执行 `docker-compose up -d --force-recreate`，每次用新镜像重建容器。
@@ -165,7 +166,7 @@ REMOTE_SETUP_NGINX=0 ./deploy/remote-ssh/deploy.sh deploy
 
 ## 重新打包策略
 
-`deploy` 每次都会先同步代码，然后在远端执行 cache-aware `docker-compose build`，再执行 `docker-compose up -d --force-recreate`。代码变化仍会生成新镜像并重建容器；未变化层默认复用缓存，减少小磁盘服务器的临时占用。
+`deploy` 每次都会先同步代码，然后在远端执行 cache-aware `docker-compose build`，再执行 `docker-compose up -d --force-recreate`。代码变化仍会生成新镜像并重建容器；未变化层默认复用缓存，减少小磁盘服务器的临时占用。同步阶段同样排除本机 virtualenv、测试/QA 产物、generated output 和 vendor worktree，避免它们占用远端发布盘；`backend/data/` 继续作为独立持久数据边界受保护。
 
 需要完全忽略缓存时：
 

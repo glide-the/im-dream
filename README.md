@@ -65,7 +65,7 @@ git pull --ff-only origin develop
 
 ### 1. 准备依赖
 
-- Python 3.10+
+- Python 3.11+
 - [uv](https://github.com/astral-sh/uv)
 - Node.js 20+
 - pnpm 9+ 与 npm
