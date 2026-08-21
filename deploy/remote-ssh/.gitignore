@@ -1,0 +1,4 @@
+# [Input] Local Alibaba Cloud runtime configuration.
+# [Output] Keeps generated deployment secrets out of Git.
+# [Pos] Secret boundary for deploy/aliyun/.
+.env

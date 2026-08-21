@@ -75,8 +75,8 @@ git pull --ff-only origin develop
 Dream 不会在启动时建表，也没有 SQLite 运行时回退。共享 PostgreSQL Schema 只能由 Admin
 仓库中的 Drizzle migration 管理。
 
-首次运行时，在 Dream 根目录执行以下命令获取 Admin、生成本机私有配置、启动 PostgreSQL/MinIO，
-并发布 Schema 和默认订阅数据：
+首次运行时，在 Dream 根目录执行以下命令获取 Admin、生成本机私有配置，并由 Admin
+package 初始化内嵌 PostgreSQL 与发布 Schema。MinIO 当前关闭：
 
 ```bash
 test -d ../ink-admin-memory || (cd .. && git clone https://github.com/glide-the/ink-admin-memory.git)
@@ -84,18 +84,23 @@ test -f backend/.env || cp backend/.env.example backend/.env
 (cd ../ink-admin-memory && pnpm install)
 (cd ../ink-admin-memory && pnpm env:setup)
 (cd ../ink-admin-memory && pnpm env:check)
-(cd ../ink-admin-memory && docker compose --env-file .env.local up -d postgres minio minio-init)
 (cd ../ink-admin-memory && pnpm db:migrate)
 (cd ../ink-admin-memory && pnpm db:migrate:check)
-(cd ../ink-admin-memory && pnpm db:data:subscriptions -- --apply)
-(cd ../ink-admin-memory && pnpm product:provision-local-dream)
 ```
 
-最后一条命令会把 Product API 的共享身份写入 Admin 和 Dream 的 gitignored、权限为 `0600` 的
-环境文件。在终端 A 启动 Admin / Gateway：
+在终端 A 启动 Admin / Gateway；同一个 `@ink-memory/db` supervisor 会管理持久化的
+PostgreSQL 进程，应用启动本身不会执行 migration：
 
 ```bash
 (cd ../ink-admin-memory && pnpm dev)
+```
+
+然后在终端 B 发布默认订阅数据并把 Product API 的共享身份写入 Admin 和 Dream 的
+gitignored、权限为 `0600` 的环境文件：
+
+```bash
+(cd ../ink-admin-memory && pnpm db:data:subscriptions -- --apply)
+(cd ../ink-admin-memory && pnpm product:provision-local-dream)
 ```
 
 打开 `http://localhost:3000/admin`。首次启动按 Admin 页面提示，使用
@@ -103,16 +108,16 @@ test -f backend/.env || cp backend/.env.example backend/.env
 Provider、可调用模型 alias 和定价。Admin 不会生成上游 Provider Key。
 
 需要本机 Dream 调用真实 Gateway 时，先确认至少有一个启用、已定价且已配置 Provider 凭据的模型，
-然后停止终端 A 中的 Admin，在 Dream 根目录执行：
+然后在 Dream 根目录执行：
 
 ```bash
 (cd ../ink-admin-memory && pnpm gateway:provision-local-dream)
 ```
 
 该命令只接受 localhost 上名为 `ink-memory` 的数据库，并把 Gateway 服务身份和可调用模型 alias
-写入两边的私有环境文件；不要对共享或生产数据库执行。完成后在终端 A 重新运行
-`(cd ../ink-admin-memory && pnpm dev)`，让 Admin 加载新的 Product/Gateway 身份。Admin Gateway
-默认由 `http://127.0.0.1:3000` 提供。Admin migration 至少需要发布以下 Dream 运行 capability：
+写入两边的私有环境文件；不要对共享或生产数据库执行。完成后重启终端 A 中的
+`pnpm dev`，让 Admin 加载新的 Gateway 身份。Admin Gateway 默认由
+`http://127.0.0.1:3000` 提供。Admin migration 至少需要发布以下 Dream 运行 capability：
 
 - `dream.schema.unified.v1`
 - `dream.workflow.thread-lookup.v1`
