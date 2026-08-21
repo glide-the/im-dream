@@ -4,6 +4,9 @@
 生产拓扑、首次数据引导和固定发布顺序见 [`aliyun.md`](aliyun.md)；其中 Admin
 仓库先通过自己的 `deploy/remote-ssh/` 发布单 Admin/Gateway/embedded-PostgreSQL
 容器与 migration，Dream 随后只发布 frontend/backend；MinIO 当前关闭。
+阿里云 overlay 将 Gateway 的公开 HTTPS origin 与 Admin Product API 的容器内 HTTP
+origin 分开；生成环境文件时必须显式提供 `DREAM_GATEWAY_ORIGIN`，避免 Gateway
+安全校验把内部 HTTP service alias 拒绝为不可用。
 
 Remote SSH 用于把 Ink & Memory 部署到一台已有 Docker 与 `docker-compose` 的远程服务器。主入口是：
 

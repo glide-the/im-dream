@@ -20,7 +20,8 @@ flowchart LR
   subgraph AdminContainer["ink-memory-admin container"]
     Admin --> PG["embedded PostgreSQL :5432"]
   end
-  Backend -->|"ink-memory-admin:3000"| Admin
+  Backend -->|"HTTPS Gateway"| Nginx
+  Backend -->|"Product API: ink-memory-admin:3000"| Admin
   Backend -->|"ink-memory-postgres:5432"| PG
 ```
 
@@ -91,6 +92,7 @@ embedded PG/Admin/nginx verify。`RUN_DB_MIGRATIONS=false`，应用启动不执�
 cd ../ink-dream-memory
 
 DREAM_ADMIN_ENV_FILE=../ink-admin-memory/deploy/remote-ssh/.env \
+DREAM_GATEWAY_ORIGIN=https://ink-admin.suoxya.com \
 DREAM_PRODUCT_ORIGIN=https://ink-frontend.suoxya.com \
 ./deploy/remote-ssh/prepare-env.sh
 
@@ -108,7 +110,9 @@ export REMOTE_COMPOSE_ENV_FILE=deploy/remote-ssh/.env
 
 Dream env generator 从 Admin 的 mode-0600 env 读取生产 PG 帐号，生成指向
 `ink-memory-postgres:5432` 的 DSN；该 alias 现在落在 Admin 容器内，而不是独立 PG
-container。Admin/Gateway 内部 origin 是 `http://ink-memory-admin:3000`。
+container。Gateway 必须使用独立的 HTTPS origin `https://ink-admin.suoxya.com`，满足
+Dream Gateway client 的传输安全合同；`http://ink-memory-admin:3000` 只用于共享
+Docker network 内的 Admin Product API，不得再作为 `INK_GATEWAY_BASE_URL`。
 
 ## 验证、备份与回滚
 
@@ -142,6 +146,8 @@ backfill/validate → contract。
 
 - 两仓库 `deploy/remote-ssh/.env` 均 gitignored、mode `0600`，不得写入 issue/日志；
 - Dream Product JWT secret 必须与 Admin 一致；
+- Dream Gateway service key、issuer/audience 必须与 Admin 数据和 Gateway JWT 配置一致，
+  且 `DREAM_GATEWAY_ORIGIN` 必须是 HTTPS；
 - PostgreSQL volume 只由 Admin Compose 管理；Dream 不执行 restore、migration、DROP、
   TRUNCATE 或 runtime DDL；
 - `bootstrap` 只用于首次空目标；后续使用物理备份与经过审核的恢复维护窗口；
