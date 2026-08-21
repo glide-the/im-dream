@@ -68,6 +68,10 @@
 #                    constructed paths and prewritten mutation scripts.
 # [Sync] 2026-08-14: cover server-owned CLAUDE_CODE_TMPDIR injection and
 #                    rejection of caller relocation outside sandbox Settings.
+# [Sync] 2026-08-22: cover per-thread .claude-tmp resolution and removal of
+#                    caller/process attempts to restore a global temp root.
+# [Sync] 2026-08-22: cover explicit thread-runtime temp binding independent
+#                    from the SDK cwd.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -2466,55 +2470,86 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
 
         self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "2")
 
-    def test_project_runtime_options_set_claude_code_tmpdir_default(self):
-        options = _SDK_OPTIONS()
-
-        with patch.dict(os.environ, {}, clear=True):
+    def test_project_runtime_options_set_thread_claude_code_tmpdir(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            options = _SDK_OPTIONS(cwd=workspace)
             sdk_env_module.apply_project_sdk_runtime_options(
                 options,
                 env_file=Path("/tmp/does-not-exist"),
             )
 
-        self.assertEqual(
-            options.env["CLAUDE_CODE_TMPDIR"],
-            str(Path("/tmp/claude").resolve(strict=False)),
-        )
+            self.assertEqual(
+                options.env["CLAUDE_CODE_TMPDIR"],
+                str(Path(workspace).resolve() / ".claude-tmp"),
+            )
 
-    def test_project_runtime_options_use_process_tmpdir_not_caller_value(self):
+    def test_project_runtime_options_ignore_process_and_caller_tmpdir(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            options = _SDK_OPTIONS(
+                cwd=workspace,
+                env={"CLAUDE_CODE_TMPDIR": "/caller/escape"},
+            )
+
+            with patch.dict(
+                os.environ,
+                {"CLAUDE_CODE_TMPDIR": "/var/tmp/ink-claude"},
+                clear=True,
+            ):
+                sdk_env_module.apply_project_sdk_runtime_options(
+                    options,
+                    env_file=Path("/tmp/does-not-exist"),
+                )
+
+            self.assertEqual(
+                options.env["CLAUDE_CODE_TMPDIR"],
+                str(Path(workspace).resolve() / ".claude-tmp"),
+            )
+
+    def test_project_runtime_options_without_cwd_remove_caller_tmpdir(self):
         options = _SDK_OPTIONS(env={"CLAUDE_CODE_TMPDIR": "/caller/escape"})
+        sdk_env_module.apply_project_sdk_runtime_options(
+            options,
+            env_file=Path("/tmp/does-not-exist"),
+        )
+        self.assertNotIn("CLAUDE_CODE_TMPDIR", options.env)
 
-        with patch.dict(
-            os.environ,
-            {"CLAUDE_CODE_TMPDIR": "/var/tmp/ink-claude"},
-            clear=True,
+    def test_project_runtime_options_use_explicit_thread_workspace_over_cwd(self):
+        with (
+            tempfile.TemporaryDirectory() as cwd,
+            tempfile.TemporaryDirectory() as thread_workspace,
         ):
+            options = _SDK_OPTIONS(
+                cwd=cwd,
+                env={"CLAUDE_CODE_TMPDIR": "/caller/escape"},
+            )
+            sdk_env_module.apply_project_sdk_runtime_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+                thread_workspace=thread_workspace,
+            )
+            # The final SDK adapter reapplies project defaults. The private
+            # server binding must survive that second pass.
             sdk_env_module.apply_project_sdk_runtime_options(
                 options,
                 env_file=Path("/tmp/does-not-exist"),
             )
 
-        self.assertEqual(
-            options.env["CLAUDE_CODE_TMPDIR"],
-            str(Path("/var/tmp/ink-claude").resolve(strict=False)),
-        )
-
-    def test_project_runtime_options_reject_tmpdir_resolving_to_root(self):
-        options = _SDK_OPTIONS(env={"CLAUDE_CODE_TMPDIR": "/caller/escape"})
-
-        with patch.dict(
-            os.environ,
-            {"CLAUDE_CODE_TMPDIR": "/tmp/../.."},
-            clear=True,
-        ):
-            sdk_env_module.apply_project_sdk_runtime_options(
-                options,
-                env_file=Path("/tmp/does-not-exist"),
+            self.assertEqual(
+                options.env["CLAUDE_CODE_TMPDIR"],
+                str(Path(thread_workspace).resolve() / ".claude-tmp"),
+            )
+            self.assertEqual(
+                sdk_env_module.get_options_claude_tmp_workspace(options),
+                str(Path(thread_workspace).resolve()),
             )
 
-        self.assertEqual(
-            options.env["CLAUDE_CODE_TMPDIR"],
-            str(Path("/tmp/claude").resolve(strict=False)),
-        )
+    def test_thread_tmpdir_rejects_relative_and_root_workspaces(self):
+        with self.assertRaises(ValueError):
+            sdk_env_module.resolve_claude_code_tmpdir("relative/thread")
+        with self.assertRaises(ValueError):
+            sdk_env_module.resolve_claude_code_tmpdir("~/thread")
+        with self.assertRaises(ValueError):
+            sdk_env_module.resolve_claude_code_tmpdir("/")
 
     def test_project_dotenv_env_filters_non_sdk_keys(self):
         with tempfile.TemporaryDirectory() as temp_dir:

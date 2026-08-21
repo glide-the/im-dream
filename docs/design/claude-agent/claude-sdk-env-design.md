@@ -3,6 +3,10 @@
 > **[Sync] 2026-06-12**: SDK 子进程 env 来源扩展为 `backend/.env` + 当前进程环境；Cloud Run Secret Manager 注入的 `ANTHROPIC_AUTH_TOKEN` 会在启动子进程前显式写入 `ClaudeAgentOptions.env`。
 > **[Sync] 2026-07-26**: SDK 迁移 `claude-code-sdk 0.0.25` → `claude-agent-sdk 0.2.128`——全文档类型/包名更新（`ClaudeAgentOptions`）；env 注入链不变；新版 transport 优先使用内置（bundled）CLI，`cli_path` 可覆盖；`debug_stderr` 废弃，CLI stderr 改经 `options.stderr` 回调捕获（runner 侧已适配）。
 > **[Sync] 2026-07-26**: 新增 `apply_cli_path_to_options()` 与 `CLAUDE_CODE_CLI_PATH` 环境变量——CLI 二进制解析顺序：环境变量（存在才生效）→ `shutil.which("claude")`（系统/npm CLI）→ 不设置（SDK bundled 兜底）；`options.cli_path` 显式值永远优先。动机：0.2.128 transport `_find_cli` 内置优先，遮蔽了生产 Docker 打过 apply-seccomp passthrough 补丁的 npm CLI，导致嵌套 userns `setgroups` 失败复发（详见 §5.6）。
+> **[Sync] 2026-08-22**: `CLAUDE_CODE_TMPDIR` 从共享 `/tmp/claude`
+> 迁移到 `{AGENT_CWD}/{thread_id}/.claude-tmp`。Phase 1 通过
+> `AgentRunOptions.claude_tmp_workspace` 传递 server-only 绑定，runner 与
+> final client adapter 重复合并时保持该绑定，spawn 前创建并校验 `0700`。
 
 # ClaudeSDKClient 项目 env 注入方案设计
 
@@ -116,7 +120,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 - `merge_project_dotenv_env(existing_env)`：以 `backend/.env` 为基础，叠加当前进程环境和调用方显式传入的 `existing_env`。
 - `apply_project_dotenv_to_options(options)`：读取 options 上已有的 `env`，合并后写回 `options.env`。
 - `apply_project_setting_sources_to_options(options)`：设置 `extra_args["setting-sources"] = "project"`。
-- `apply_project_sdk_runtime_options(options)`：同时应用 `backend/.env`、当前进程环境和 project-only settings source。
+- `apply_project_sdk_runtime_options(options, thread_workspace=...)`：同时应用 `backend/.env`、当前进程环境、project-only settings source，并将 server-only thread 绑定解析成 `CLAUDE_CODE_TMPDIR`；后续 adapter 二次调用会保留该绑定。
 
 合并策略：
 
@@ -142,7 +146,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 - `system_prompt`
 - `resume`
 
-构造完成后调用 `apply_project_sdk_runtime_options(...)`，让 runner 标准路径显式携带 `backend/.env` 与当前进程环境中的 SDK key，并强制 Claude Code 只加载项目 settings。
+构造完成后调用 `apply_project_sdk_runtime_options(..., thread_workspace=opts.claude_tmp_workspace)`，让 runner 标准路径显式携带 env、project-only settings source 与 thread-local temp 绑定。
 
 在传入 `_sdk_client.query_stream(...)` 前，`ClaudeAgentRunner` 还会执行一次调用链检查：
 
@@ -169,7 +173,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 ClaudeSDKClient(options=effective_options)
 ```
 
-之前，统一调用 `apply_project_sdk_runtime_options(options or ClaudeAgentOptions())`。
+之前，统一调用 `apply_project_sdk_runtime_options(options or ClaudeAgentOptions())`，再通过 options 上的 server-only 绑定调用 `ensure_claude_code_tmpdir(...)`。这一步是 CLI spawn 前的最终目录存在性、非 symlink 与 `0700` 权限闸门。
 
 这保证真实启动 Claude Code CLI 子进程前，最后一层 adapter 会做一次兜底合并。
 
@@ -218,6 +222,29 @@ options.extra_args["setting-sources"] = "project"
 
 **注入顺序**：`run_streaming` 中 `apply_claude_config_home_to_options`（2026-08-03 由 `apply_plan_mode_env_to_options` 更名，旧名保留为兼容包装；常量 `_PLAN_MODE_CONFIG_HOME_DIRNAME` → `_CLAUDE_CONFIG_HOME_DIRNAME`，旧名保留别名）在 `sdk_options` 构造后**第一步**执行 —— 早于 `apply_project_sdk_runtime_options` / plugin launch / cli_path / task_v2 / user_sdk_env。由于 `merge_project_dotenv_env` 中显式 `options.env` 优先级最高，先写入的 `CLAUDE_CONFIG_DIR` 不会被后续任何合并搬移（`CLAUDE_CONFIG_DIR` 仍不在 dotenv/user_sdk_env 白名单内）。runner 对直接调用方保留从 `cwd` 就地解析的兜底。
 
+### 5.5C Claude CLI 临时根（CLAUDE_CODE_TMPDIR）**[2026-08-22]**
+
+`CLAUDE_CODE_TMPDIR` 是服务端运行时身份的一部分，不是普通环境配置。
+唯一有效值为规范化后的
+`{AGENT_CWD}/{thread_id}/.claude-tmp`。`resolve_claude_code_tmpdir()` 不再读取
+process、dotenv、user SDK 或 browser 输入；`ensure_claude_code_tmpdir()`
+要求 thread workspace 已存在、拒绝 `.claude-tmp` 符号链接、创建目录并把
+权限修复为 `0700`。
+
+Workspace Mode 与临时根是两条独立生命周期：
+
+- 开启时，`claude_tmp_workspace == cwd`，完整 workspace initializer 同时创建
+  `.claude-tmp`，sandbox `allowWrite` 放行同一个精确路径。
+- 关闭时，`cwd=None` 且不注入 workspace/memory context；
+  `get_or_create_thread_runtime_workspace()` 只创建 thread 根和
+  `.claude-tmp`，通过 `AgentRunOptions.claude_tmp_workspace` 交给 runner。
+
+Runner 把这个字段记录成 SDK options 上的内部 server binding。最终
+`SimpleClaudeAgentSDKClient` 再次应用 env 默认值时沿用该 binding，而不是
+从 SDK `cwd` 或 caller `CLAUDE_CODE_TMPDIR` 重新推断。这避免关闭 Workspace
+Mode 时退回服务进程目录，也避免容器重建后共享 `/tmp/claude` 缺失导致
+inline `--settings` 文件写入 `ENOENT`。
+
 ### 5.6 时序图
 
 ```mermaid
@@ -230,21 +257,22 @@ sequenceDiagram
     participant SDK as ClaudeSDKClient
     participant CLI as Claude Code subprocess
 
-    Svc->>Workspace: get_or_create_workspace(workspace_key)
-    Workspace->>Workspace: sync project .claude template into cwd
-    Workspace-->>Svc: workspace_path
+    Svc->>Workspace: full workspace or runtime-only thread root
+    Workspace->>Workspace: ensure {thread}/.claude-tmp mode 0700
+    Workspace-->>Svc: cwd (optional) + claude_tmp_workspace (required)
     Note over Svc: Phase 1 Context Assembly：cwd 建立时同步解析 config home
     Svc->>Env: resolve_claude_config_home(cwd)（早于 resume 探测/插件打包）
     Env-->>Svc: claude_config_home
-    Svc->>Runner: run_streaming(AgentRunOptions.claude_config_home)
+    Svc->>Runner: run_streaming(config home + claude_tmp_workspace)
     Runner->>Runner: build ClaudeAgentOptions
     Runner->>Env: apply_claude_config_home_to_options（第一步）
-    Runner->>Env: apply_project_sdk_runtime_options(options)
-    Env-->>Runner: options.env plus extra_args["setting-sources"]="project"
+    Runner->>Env: apply_project_sdk_runtime_options(options, thread_workspace)
+    Env-->>Runner: env + project settings source + thread TMPDIR binding
     Runner->>Runner: verify env keys before query_stream
     Runner->>Client: query_stream(prompt, options)
     Client->>Env: apply_project_sdk_runtime_options(options)
     Env-->>Client: effective_options
+    Client->>Workspace: ensure thread .claude-tmp exists and is 0700
     Client->>SDK: ClaudeSDKClient(options=effective_options)
     SDK->>CLI: start subprocess with process env and --setting-sources project
     CLI-->>SDK: stream-json messages

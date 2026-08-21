@@ -8,12 +8,15 @@
 > **[Sync] 2026-06-22**: Workspace Mode 收束：`system_config.workspace_enabled=false`
 > 时，Claude Agent chat 不再初始化 thread workspace、不传 `cwd`、不注入
 > workspace/memory context；附件路径也不触发 workspace file sync。
+> **[Sync] 2026-08-22**: 上述“不初始化”专指产品工作区骨架和
+> context/file surface。服务仍为每个 thread 创建最小 runtime root 与
+> `0700 .claude-tmp`，通过独立 `claude_tmp_workspace` 绑定给 CLI。
 
 # 工作空间文件系统设计方案
 
 > **来源对比**：参考 `glide-the/claude-agent-next-kit → app/lib/workspace.ts`（TypeScript/Node.js）迁移适配为 Python 设计。
 > **当前状态**：核心工作空间管理、Skills 软链接、项目内置 Skills 种子复制、压缩包提取与 `ClaudeAgentRunRequest.cwd` 接入已实现；本文保留设计约束与后续扩展说明。
-> **Thread Session 集成**：`cwd` 在 Thread Session 模式下作为 `AgentRunState` 的 intrinsic 享元字段，按 `thread_id` 按需缓存。`Service.assemble_context` 先读取 `system_config.workspace_enabled`：开启时调用 `get_or_create_workspace(thread_id)` 后写回 `state.cwd`；关闭时跳过 workspace 初始化、清空 `state.cwd`，并以 `AgentRunOptions.cwd=None` 运行。该流程只维护 workspace 骨架和 `.claude/.editor` 文件，不初始化 `/memory/`。详见 [claude-agent-thread-session-patterns.md §4.3](./claude-agent-thread-session-patterns.md#43-享元体agentrunstate)。
+> **Thread Session 集成**：`cwd` 在 Thread Session 模式下作为 `AgentRunState` 的 intrinsic 享元字段。`Service.assemble_context` 先读取 `workspace_enabled`：开启时调用 `get_or_create_workspace(thread_id)` 并写回 `state.cwd`；关闭时清空 `state.cwd`，以 `AgentRunOptions.cwd=None` 运行，但调用 `get_or_create_thread_runtime_workspace(thread_id)` 并通过 `claude_tmp_workspace` 保留 CLI 临时目录隔离。该流程不初始化 `/memory/`。
 
 ---
 
@@ -57,6 +60,7 @@
       │   └── skills/                     ← Skills 软链接目标（Claude 自动发现）
       │       ├── my-skill.md             → symlink → skills/my-skill.md
       │       └── research-tools/         → symlink → skills/research-tools/
+      ├── .claude-tmp/                    ← server-owned CLI inline settings/scratch（0700）
       ├── .mcp.json                       ← 从项目根复制（MCP 服务配置）
       ├── files/                          ← 用户上传 + Agent 生成文件
       ├── logs/                           ← Agent 执行日志
@@ -84,6 +88,7 @@ backend/claude_agent/
 └── workspace.py                 ← 新增工作空间管理模块
     ├── WORKSPACE_DIRS            # 常量: files, logs, skills
     ├── get_workspace_root()      # 读取 AGENT_CWD 或 /tmp/claude-agent-workspaces
+    ├── get_or_create_thread_runtime_workspace(session_id)  # 仅 thread root + .claude-tmp
     ├── init_workspace(session_id) → str
     ├── get_or_create_workspace(session_id) → str
     ├── sync_skills_symlinks(workspace_path)
@@ -194,6 +199,7 @@ def _ensure_workspace_safe_path(workspace_path: str, file_path: str) -> str:
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `AGENT_CWD` | `/tmp/claude-agent-workspaces` | 工作空间根目录；生产环境建议设为持久化路径 |
+| `CLAUDE_CODE_TMPDIR` | `{AGENT_CWD}/{thread_id}/.claude-tmp` | 服务端派生并强制注入；dotenv/process/user 不能搬移 |
 
 ```bash
 # 生产环境示例
@@ -204,11 +210,14 @@ AGENT_CWD=/data/pawkeyland-workspaces
 
 ## 6. 与 ClaudeAgentService / ClaudeAgentThreadFactory 的集成边界
 
-工作空间骨架在 `ClaudeAgentService.assemble_context()` 内部按 Settings Workspace Mode 按需创建，并作为 Thread Session 享元的 intrinsic 字段被 `AgentRunState` 缓存。该阶段只解析 `cwd`，不初始化 `/memory/`：
+完整工作空间骨架在 `ClaudeAgentService.assemble_context()` 内部按 Settings Workspace Mode 创建；CLI runtime root 则每轮都按 thread 建立。`state.cwd` 仍只缓存产品工作区，不初始化 `/memory/`：
 
 ```python
 # backend/claude_agent/service.py — Phase 1 (Context Assembly)
-from libs.claude_agent_kit.server.workspace import get_or_create_workspace
+from libs.claude_agent_kit.server.workspace import (
+    get_or_create_thread_runtime_workspace,
+    get_or_create_workspace,
+)
 
 async def assemble_context(self, request, *, state, queue, runner=None):
     system_config = database.get_system_config(user_id)
@@ -222,20 +231,25 @@ async def assemble_context(self, request, *, state, queue, runner=None):
             sandbox_network_allowed_domains=sandbox_network_allowed_domains,
         ))
         state.with_cwd(cwd)
+        claude_tmp_workspace = cwd
     else:
         cwd = ""
         state.with_cwd("")
+        claude_tmp_workspace = str(
+            get_or_create_thread_runtime_workspace(state.session_id)
+        )
 
     opts = AgentRunOptions(
         thread_id=existing_claude_session_id,
         user_message=user_message_content,
         cwd=cwd or None,
+        claude_tmp_workspace=claude_tmp_workspace,
         system_prompt=state.system_prompt,
         # ...
     )
 ```
 
-> **生产 HTTP 路径**：通过 `ClaudeAgentThreadFactory.run_streaming(request)` 进入；Factory 持有 `AgentRunStatePool`。只有 `workspace_enabled=true` 时，`get_or_create_workspace` 才会被触发并写回 `state.cwd`；关闭时对话保持可用但没有 `<workspace_context>`、`<memory_context>` 或 thread workspace。
+> **生产 HTTP 路径**：通过 `ClaudeAgentThreadFactory.run_streaming(request)` 进入。只有 `workspace_enabled=true` 时，`get_or_create_workspace` 才写回 `state.cwd`；关闭时没有 `<workspace_context>`、`<memory_context>` 或产品 workspace 文件，磁盘上仅允许出现 runtime-only thread root 与 `.claude-tmp`。
 >
 > **Memory 路径**：调用方在发送首轮 Agent 消息前显式调用 `POST /api/workspace/memory-init`。该文件接口读取 `voices.memory_workspace_config` 并写入 `{cwd}/memory/`。`/api/claude-agent/threads` 和 `assemble_context()` 都不承担 Memory 初始化职责。
 
