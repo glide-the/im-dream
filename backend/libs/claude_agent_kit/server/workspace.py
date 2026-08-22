@@ -73,6 +73,8 @@
 #                    cwd-* allowances.
 # [Sync] 2026-08-17: add safe directory ZIP downloads while preserving single-file
 #                    download behavior and workspace containment checks.
+# [Sync] 2026-08-22: deny Bash read/write access to thread-projected Claude MCP
+#                    credential and user-config files without widening TMPDIR.
 # [Sync] 2026-08-22: create each thread's 0700 .claude-tmp directory and use
 #                    that exact workspace-contained path for sandbox allowWrite.
 # [Sync] 2026-08-22: add a minimal thread-runtime workspace initializer so
@@ -533,6 +535,7 @@ def _workspace_sandbox_config(
             "denyRead": [
                 *_sandbox_sensitive_read_deny_paths(),
                 str(thread_credentials),
+                str(thread_user_config),
             ],
             "allowRead": allow_read,
             # Keep .claude/skills writable so skill symlinks and

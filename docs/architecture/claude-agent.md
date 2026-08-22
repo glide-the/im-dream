@@ -1,4 +1,9 @@
 # Claude Agent 架构文档
+<!--
+[Input] Claude Agent application/kit runtime, SDK/CLI contracts, and deployment configuration.
+[Output] Document the current Claude Agent layers, lifecycle, configuration, data flow, and isolation boundaries.
+[Sync] 2026-08-22: add legacy-MCP default-off and process-local concurrency/memory admission contracts.
+-->
 
 **模块目标**：为 Ink & Memory 提供基于 Claude Code SDK 的流式 AI 写作助手后端能力，  
 支持多轮对话、会话保活（Flyweight 会话池）、工具确认、SSE 流式输出，  
@@ -26,6 +31,7 @@ backend/
 └── claude_agent/                       # 应用层 ← 迁移自 Pawkeyland application/claude_agent/
     ├── __init__.py                     # 公共导出（应用层 + kit 层 re-export）供 server.py 使用
     ├── observer.py                     # SessionLifecycleObserver、SessionObserverRegistry
+    ├── admission.py                    # 进程内并发 + host/cgroup 内存准入
     ├── tool_confirmation_store.py      # ToolConfirmationStore — asyncio.Future 工具确认
     ├── thread_pool.py                  # AgentRunState、AgentRunStatePool、Sweeper — TTL 会话池
     ├── context_builder.py              # ClaudeAgentContextBuilder — 写作会话 system_prompt
@@ -106,7 +112,7 @@ ThreadFactory (thread_factory.py)
 - `libs/claude_agent_kit/server/mcp_server.py` — Pawkeyland 宠物专属 MCP
 - `libs/claude_agent_kit/server/necklace_*.py` — 项圈硬件 MCP
 - `libs/claude_agent_kit/server/memory_*.py` — Mem0 记忆 MCP
-- `libs/claude_agent_kit/server/touch_animation_tool.py` — 动画工具
+- `libs/claude_agent_kit/server/touch_animation_tool.py` — Pawkeyland 动画参考实现，Ink user MCP 不导入/不注册
 
 ---
 
@@ -137,6 +143,9 @@ Ink & Memory 的 Claude Code SDK 鉴权和模型配置直接使用 `ANTHROPIC_*`
 | `INK_AGENT_TTL_S` | `600` | Thread Session 保活 TTL（秒） |
 | `INK_AGENT_SWEEP_INTERVAL_S` | `60` | 后台 Sweeper 清理周期（秒） |
 | `INK_AGENT_SSE_KEEPALIVE_S` | `15` | SSE keepalive 注释帧间隔（秒） |
+| `INK_AGENT_MAX_CONCURRENT_RUNS` | `1` | 单 backend 进程同时活跃 Claude turn 上限 |
+| `INK_AGENT_RUN_MEMORY_BUDGET_MIB` | `512` | 新建 CLI 进程树前要求的单 turn 增量预算 |
+| `INK_AGENT_MEMORY_RESERVE_MIB` | `128` | 为健康检查和非 Agent 请求保留的内存余量 |
 
 ### 5.3 功能配置
 
@@ -158,7 +167,7 @@ Ink & Memory 的 Claude Code SDK 鉴权和模型配置直接使用 `ANTHROPIC_*`
 | `INK_AGENT_MEM0_CONNECT_TIMEOUT_MS` | `1500` | Mem0 连接超时 |
 | `INK_AGENT_MEM0_READ_TIMEOUT_MS` | `8000` | Mem0 读取超时 |
 | `INK_AGENT_MEM0_TOP_K` | `10` | 记忆召回数量 |
-| `INK_AGENT_ENABLE_MEMORY_MCP` | `1` | 是否启用 memory stdio MCP |
+| `INK_AGENT_ENABLE_MEMORY_MCP` | `0` | 显式 opt-in memory stdio MCP；未设置时不启动遗留进程 |
 
 ---
 
@@ -173,6 +182,9 @@ POST /api/claude-agent
     │   └─ user_id, message, resume, max_turns, cwd, model
     │
     ├─ claude_agent_thread_factory.run_streaming(request)
+    │   │
+    │   ├─ Admission: active turn + host/cgroup memory headroom
+    │   │   └─ insufficient → retryable error + finish（不创建 CLI）
     │   │
     │   ├─ Phase 1: context_builder
     │   │   ├─ 查询 database.list_sessions(user_id) → 近期写作会话

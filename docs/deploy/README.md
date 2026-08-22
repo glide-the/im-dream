@@ -1,4 +1,12 @@
 # docs/deploy
+<!--
+[Input] Executable deployment entries and platform-specific release contracts.
+[Output] Index the supported deployment paths, ownership boundaries, and public service origins.
+[Sync] 2026-08-22: clarify that Alibaba embedded PG stays on the shared alias
+                    while Gateway/Product API use the Admin HTTPS origin.
+[Sync] 2026-08-22: record the Alibaba backend block-I/O resource budget used
+                    to keep Dream/Admin/SSH responsive during Claude turns.
+-->
 
 ## 定位
 
@@ -10,7 +18,7 @@
 |----------|----------|------|
 | 本地发布 | [`../../deploy/local/deploy.sh`](../../deploy/local/deploy.sh) | 包装本地 backend/frontend 启动、验证、停止和清理 |
 | Docker 发布 | [`../../deploy/docker/deploy.sh`](../../deploy/docker/deploy.sh) | 包装根目录 Compose 构建、启动、验证和清理；backend 出站默认通过 Mihomo TUN |
-| Remote SSH 发布（含阿里云 ECS） | [`../../deploy/remote-ssh/deploy.sh`](../../deploy/remote-ssh/deploy.sh) | Dream-only Compose；overlay 访问相邻 Admin 仓库发布的 Admin/embedded-PG aliases，MinIO 暂停 |
+| Remote SSH 发布（含阿里云 ECS） | [`../../deploy/remote-ssh/deploy.sh`](../../deploy/remote-ssh/deploy.sh) | Dream-only Compose；overlay 通过共享网络访问 embedded-PG alias，通过 Admin HTTPS origin 访问 Gateway/Product API，并从 mode-0600 topology 配置应用 backend block-device read budget，MinIO 暂停 |
 | Google Cloud 发布 | [`../../deploy/google-cloud/deploy.sh`](../../deploy/google-cloud/deploy.sh) | 完整 Cloud Run 发布入口，旧根路径仅保留兼容 |
 
 ## 现有文档

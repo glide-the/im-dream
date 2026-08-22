@@ -207,12 +207,13 @@ class AgentRunOptions:
     # caches) into the per-thread workspace.  When None the runner falls
     # back to resolving from ``cwd`` itself.
     claude_config_home: Optional[str] = None
-    # macOS Claude Code stores OAuth credentials in a Keychain item selected
-    # independently from CLAUDE_CONFIG_DIR. Linux leaves this unset and uses a
-    # minimal per-thread credentials projection.
+    # Server-owned credential selector, separate from thread-local
+    # CLAUDE_CONFIG_DIR. Linux normally leaves this unset and uses the
+    # credential projection materialized by claude_mcp.credentials.
     claude_secure_storage_home: Optional[str] = None
-    # Remote MCP definitions resolved for the authenticated user and injected
-    # through the public Agent SDK option. Keep opaque headers out of repr.
+    # User-scoped remote MCP definitions injected through the public SDK
+    # option. repr is disabled because externally authored definitions may
+    # contain opaque headers even though the Resources UI never creates them.
     claude_mcp_servers: dict[str, dict[str, Any]] = field(
         default_factory=dict,
         repr=False,

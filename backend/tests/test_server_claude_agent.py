@@ -13,6 +13,7 @@
 # [Sync] 2026-07-04: cover Notion connector router registration and auth gating.
 # [Sync] 2026-08-17: cover same-Deck Agent switching, provenance metadata, and CAS conflicts.
 # [Sync] 2026-08-22: cover restored Claude MCP Resources router registration.
+# [Sync] 2026-08-22: cover startup preservation of Claude Agent resource-admission keys.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -245,6 +246,19 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
             self.assertEqual(
                 os.environ["INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"],
                 "/app/claude_agent:/app/libs",
+            )
+
+    def test_cleanup_preserves_resource_admission_keys(self):
+        expected = {
+            "INK_AGENT_MAX_CONCURRENT_RUNS": "1",
+            "INK_AGENT_RUN_MEMORY_BUDGET_MIB": "512",
+            "INK_AGENT_MEMORY_RESERVE_MIB": "128",
+        }
+        with unittest.mock.patch.dict(os.environ, expected, clear=True):
+            _SERVER_MODULE._drop_unsupported_agent_env()
+            self.assertEqual(
+                {key: os.environ.get(key) for key in expected},
+                expected,
             )
 
 

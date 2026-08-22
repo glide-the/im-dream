@@ -1,5 +1,6 @@
 # [Input] Consume claude_agent/thread_pool.py, claude_agent/service.py,
-#         claude_agent/event_bus.py, libs/claude_agent_kit/runner.py, claude_agent/observer.py.
+#         claude_agent/event_bus.py, claude_agent/admission.py,
+#         libs/claude_agent_kit/runner.py, claude_agent/observer.py.
 # [Output] Provide ClaudeAgentThreadFactory, build_session_id
 #          to HTTP route handlers in server.py.
 # [Pos] factory-entry node in backend/claude_agent
@@ -15,6 +16,8 @@
 #                    workspace plugin pack) now emits an SSE error frame +
 #                    sentinel via the EventBus and resets lifecycle to IDLE,
 #                    instead of a bare SSE disconnect + stuck RUNNING session.
+# [Sync] 2026-08-22: acquire one process-local concurrency/memory admission
+#                    lease before context/SDK startup and release it in every terminal path.
 
 """Claude Agent Thread Factory — 四阶段会话编排入口."""
 from __future__ import annotations
@@ -26,6 +29,10 @@ import os
 from typing import Any, AsyncGenerator, AsyncIterator, Optional
 from uuid import uuid4
 
+from claude_agent.admission import (
+    AgentAdmissionLease,
+    ClaudeAgentAdmissionController,
+)
 from claude_agent.event_bus import IEventBus, create_event_bus
 from claude_agent.chat_stream_adapter import ChatStreamAdapter
 from claude_agent.observer import LoggingObserver, SessionObserverRegistry
@@ -62,6 +69,10 @@ _MAX_TOOL_CALL_ID_LENGTH = 255
 async def _publish_failure_terminal(
     bus: IEventBus,
     error_text: str,
+    *,
+    error_code: str | None = None,
+    retryable: bool | None = None,
+    retry_after_seconds: int | None = None,
 ) -> None:
     """Close one still-open turn with the existing Chat failure contract.
 
@@ -73,9 +84,14 @@ async def _publish_failure_terminal(
 
     if bus.is_done:
         return
-    await bus.publish(
-        NormalizedAgentEvent.create("error", {"errorText": error_text})
-    )
+    error_data: dict[str, Any] = {"errorText": error_text}
+    if error_code:
+        error_data["errorCode"] = error_code
+    if retryable is not None:
+        error_data["retryable"] = retryable
+    if retry_after_seconds is not None:
+        error_data["retryAfterSeconds"] = retry_after_seconds
+    await bus.publish(NormalizedAgentEvent.create("error", error_data))
     await bus.publish_terminal(
         NormalizedAgentEvent.create("finish", {"finishReason": "error"})
     )
@@ -203,6 +219,7 @@ class ClaudeAgentThreadFactory:
         self,
         *,
         dream_observer: DreamObserver | None = None,
+        admission_controller: ClaudeAgentAdmissionController | None = None,
     ) -> None:
         self._pool = AgentRunStatePool()
         self._observers = SessionObserverRegistry()
@@ -214,6 +231,7 @@ class ClaudeAgentThreadFactory:
         self._observers.register(LoggingObserver())
         self._dream_observer = dream_observer or DreamObserver()
         self._observers.register(self._dream_observer)
+        self._admission = admission_controller or ClaudeAgentAdmissionController()
         self._closing_turn_tasks: set[asyncio.Task[Any]] = set()
         self._phase4_tasks: set[asyncio.Task[Any]] = set()
         self._closing = False
@@ -223,7 +241,10 @@ class ClaudeAgentThreadFactory:
     def start(self) -> None:
         self._require_accepting_runs()
         self._sweeper.start()
-        logger.info("ClaudeAgentThreadFactory started")
+        logger.info(
+            "ClaudeAgentThreadFactory started; admission=%s",
+            self._admission.stats(),
+        )
 
     async def aclose(self) -> None:
         """Drain the factory once and reject new work before the first await."""
@@ -422,7 +443,9 @@ class ClaudeAgentThreadFactory:
         session_id = state.session_id
         turn_id = state.current_turn_id
         session_started = False
+        admission_lease: AgentAdmissionLease | None = None
         try:
+            admission_lease = self._admission.try_acquire(session_id)
             await self._observers.emit_before_context_assembly(
                 session_id,
                 {"resume": request.resume},
@@ -476,11 +499,30 @@ class ClaudeAgentThreadFactory:
             if not bus.is_done:
                 try:
                     error_text = _format_exception_for_sse(exc)
-                    error_code = getattr(exc, "code", None)
-                    if isinstance(error_code, str) and error_code:
+                    raw_error_code = getattr(exc, "code", None)
+                    error_code = (
+                        raw_error_code
+                        if isinstance(raw_error_code, str) and raw_error_code
+                        else None
+                    )
+                    if error_code:
                         error_text = f"[{error_code}] {error_text}"
+                    retryable = getattr(exc, "retryable", None)
+                    if not isinstance(retryable, bool):
+                        retryable = None
+                    retry_after_seconds = getattr(
+                        exc, "retry_after_seconds", None
+                    )
+                    if not isinstance(retry_after_seconds, int):
+                        retry_after_seconds = None
                     await _publish_terminal_resilient(
-                        _publish_failure_terminal(bus, error_text),
+                        _publish_failure_terminal(
+                            bus,
+                            error_text,
+                            error_code=error_code,
+                            retryable=retryable,
+                            retry_after_seconds=retry_after_seconds,
+                        ),
                         task_name=f"claude-agent-failure-terminal-{session_id}",
                     )
                 except Exception:
@@ -491,6 +533,8 @@ class ClaudeAgentThreadFactory:
                         session_id,
                     )
         finally:
+            if admission_lease is not None:
+                admission_lease.release()
             state.turn_context = None
             state.current_dream_context = None
             state.current_message_metadata = None
@@ -701,7 +745,9 @@ class ClaudeAgentThreadFactory:
         return self._pool.snapshot_all()
 
     def sweep_stats(self) -> dict[str, Any]:
-        return self._sweeper.sweep_stats()
+        stats = self._sweeper.sweep_stats()
+        stats["admission"] = self._admission.stats()
+        return stats
 
     def dream_lifecycle_diagnostics(self) -> dict[str, int]:
         """Return bounded process diagnostics, never workflow or Chat state."""
