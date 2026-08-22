@@ -2,8 +2,10 @@
 # [Output] Alibaba Cloud topology overrides for the Remote SSH Dream stack.
 # [Pos] Dream-only ECS Compose overlay in deploy/remote-ssh/.
 # [Sync] 2026-08-21: connect Dream to the Admin container's embedded-PG alias.
-# [Sync] 2026-08-22: keep the HTTPS Gateway origin separate from the internal
-#                    HTTP Product API origin required by the shared-container topology.
+# [Sync] 2026-08-22: route both Gateway and Product API through the validated
+#                    public HTTPS Admin origin; retain the shared network for embedded PG.
+# [Sync] 2026-08-22: cap backend block-device reads with deployment-owned
+#                    budgets so one Claude turn cannot saturate the ECS system disk.
 
 services:
   tun-proxy:
@@ -12,10 +14,17 @@ services:
       ink-memory-platform: {}
 
   ink-backend:
+    blkio_config:
+      device_read_bps:
+        - path: ${DREAM_BACKEND_BLOCK_DEVICE:?Set the ECS backend block device}
+          rate: ${DREAM_BACKEND_READ_BPS:?Set the ECS backend read bandwidth budget}
+      device_read_iops:
+        - path: ${DREAM_BACKEND_BLOCK_DEVICE:?Set the ECS backend block device}
+          rate: ${DREAM_BACKEND_READ_IOPS:?Set the ECS backend read IOPS budget}
     environment:
       DATABASE_URL: ${DREAM_DATABASE_URL:?Generate deploy/remote-ssh/.env first}
       INK_GATEWAY_BASE_URL: ${DREAM_GATEWAY_ORIGIN:?Set the public HTTPS Admin Gateway origin}
-      INK_ADMIN_PRODUCT_API_BASE_URL: ${DREAM_ADMIN_INTERNAL_ORIGIN:-http://ink-memory-admin:3000}
+      INK_ADMIN_PRODUCT_API_BASE_URL: ${DREAM_GATEWAY_ORIGIN:?Set the public HTTPS Admin Product/Gateway origin}
       INK_ADMIN_PRODUCT_ORIGIN: ${DREAM_PRODUCT_ORIGIN:?Set the public Dream frontend origin}
       FILE_STORAGE_TYPE: ${DREAM_FILE_STORAGE_TYPE:-local}
 

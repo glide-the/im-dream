@@ -13,6 +13,8 @@
 # [Sync] 2026-08-22: restore authenticated remote MCP injection and the
 #                    independent secure-storage selector; remote tools are not
 #                    added to the automatic allowlist.
+# [Sync] 2026-08-22: remove Pawkeyland touch/necklace/memory tools from Ink's
+#                    default surface; memory MCP now requires explicit capability opt-in.
 # [Sync] 2026-05-09: forward stdio MCP tool input and result events for frontend traces.
 # [Sync] 2026-05-09: merge project .env SDK injection, stderr capture, and PreToolUse confirmation hooks while keeping Pet Chat's narrow stdio MCP surface.
 # [Sync] 2026-05-09: expose zero-argument necklace intent tools while keeping server-owned upstream parameters.
@@ -307,10 +309,7 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     "Bash",
     "BashOutput",
     "Skill",
-    "mcp__user__touch_animation",
     f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
-    *allowed_memory_tool_names(),
-    *allowed_necklace_tool_names(),
     *allowed_editor_tool_names(),
     *story_workspace_allowed_tool_names(),
 ]
@@ -1281,10 +1280,19 @@ def _default_allowed_tools() -> list[str]:
     """Resolve the default chat tool allowlist from env.
 
     ``PAWKEYLAND_AGENT_ALLOWED_TOOLS`` may override this with a comma-separated
-    list. Leave the env var unset to use the default touch-animation tool.
+    list. Memory is appended only when its Ink capability is explicitly enabled;
+    Pawkeyland touch-animation and necklace tools never enter the Ink default.
     """
 
-    return _csv_env_values("PAWKEYLAND_AGENT_ALLOWED_TOOLS") or list(DEFAULT_ALLOWED_TOOLS)
+    override = _csv_env_values("PAWKEYLAND_AGENT_ALLOWED_TOOLS")
+    if override:
+        return override
+    tools = list(DEFAULT_ALLOWED_TOOLS)
+    if _memory_mcp_enabled():
+        tools.extend(
+            tool for tool in allowed_memory_tool_names() if tool not in tools
+        )
+    return tools
 
 
 def _user_mcp_enabled() -> bool:
@@ -1302,7 +1310,7 @@ def _necklace_mcp_enabled() -> bool:
         return False
     if raw in _TRUE_ENV_VALUES:
         return True
-    return True
+    return False
 
 
 def _memory_mcp_enabled() -> bool:
@@ -1314,7 +1322,7 @@ def _memory_mcp_enabled() -> bool:
         return False
     if raw in _TRUE_ENV_VALUES:
         return True
-    return True
+    return False
 
 
 def _pythonpath_with_repo_root() -> str:
@@ -2748,9 +2756,10 @@ class ClaudeAgentRunner:
                 "Story Workspace MCP enabled with trusted actor/thread/run context."
             )
 
-        # User-scoped remote connectors are synchronized before this turn and
-        # injected through the public SDK option. Deliberately do not append a
-        # wildcard to allowed_tools: existing permission policy remains in force.
+        # Resources connectors are actor-owned and synchronized by the
+        # application service on every turn. Inject them through the public
+        # SDK option, but never add wildcard allowed_tools: all remote tool
+        # calls remain governed by the existing confirmation/sandbox policy.
         for server_name, server_config in (opts.claude_mcp_servers or {}).items():
             if server_name in _INTERNAL_MCP_SERVER_NAMES or server_name in mcp_servers:
                 raise RuntimeError(
@@ -2816,6 +2825,10 @@ class ClaudeAgentRunner:
         sdk_options = apply_project_sdk_runtime_options(
             sdk_options,
             thread_workspace=opts.claude_tmp_workspace,
+        )
+        apply_claude_secure_storage_home_to_options(
+            sdk_options,
+            opts.claude_secure_storage_home,
         )
         # Plugin launch boundary: read .ink/launch-manifest.json from the
         # agent workspace (digest-verified, fail-closed) and attach each

@@ -1,4 +1,12 @@
 # 阿里云 ECS 部署
+<!--
+[Input] Admin/Dream Remote SSH topology, embedded PostgreSQL alias, and public HTTPS service origins.
+[Output] Define Alibaba ECS release order, secure cross-repository configuration, verification, and rollback.
+[Sync] 2026-08-22: route Dream Gateway and Product API through the public HTTPS
+                    Admin origin while retaining the shared network only for embedded PG.
+[Sync] 2026-08-22: add calibrated backend read BPS/IOPS limits after a real
+                    Claude resume turn saturated the ECS system disk and blocked SSH/health.
+-->
 
 ## 服务与仓库边界
 
@@ -20,8 +28,7 @@ flowchart LR
   subgraph AdminContainer["ink-memory-admin container"]
     Admin --> PG["embedded PostgreSQL :5432"]
   end
-  Backend -->|"HTTPS Gateway"| Nginx
-  Backend -->|"Product API: ink-memory-admin:3000"| Admin
+  Backend -->|"HTTPS Gateway + Product API"| Nginx
   Backend -->|"ink-memory-postgres:5432"| PG
 ```
 
@@ -94,6 +101,9 @@ cd ../ink-dream-memory
 DREAM_ADMIN_ENV_FILE=../ink-admin-memory/deploy/remote-ssh/.env \
 DREAM_GATEWAY_ORIGIN=https://ink-admin.suoxya.com \
 DREAM_PRODUCT_ORIGIN=https://ink-frontend.suoxya.com \
+DREAM_BACKEND_BLOCK_DEVICE=/dev/vda \
+DREAM_BACKEND_READ_BPS=32mb \
+DREAM_BACKEND_READ_IOPS=400 \
 ./deploy/remote-ssh/prepare-env.sh
 
 export REMOTE_APP_DIR=/srv/ink-and-memory
@@ -110,9 +120,18 @@ export REMOTE_COMPOSE_ENV_FILE=deploy/remote-ssh/.env
 
 Dream env generator 从 Admin 的 mode-0600 env 读取生产 PG 帐号，生成指向
 `ink-memory-postgres:5432` 的 DSN；该 alias 现在落在 Admin 容器内，而不是独立 PG
-container。Gateway 必须使用独立的 HTTPS origin `https://ink-admin.suoxya.com`，满足
-Dream Gateway client 的传输安全合同；`http://ink-memory-admin:3000` 只用于共享
-Docker network 内的 Admin Product API，不得再作为 `INK_GATEWAY_BASE_URL`。
+container。Gateway 与 Product API 都使用 HTTPS origin
+`https://ink-admin.suoxya.com`，分别访问同一 Admin 容器公开的对应路由，满足两个
+客户端的传输安全合同。共享 Docker network 只承载 embedded PostgreSQL alias。
+
+`DREAM_BACKEND_BLOCK_DEVICE` 必须由 ECS 实际根磁盘解析结果显式提供，不从部署
+环境名推断。当前 `39.97.252.88` 的根设备为 `/dev/vda`；真实 Claude resume 事故
+采样达到约 93.9 MiB/s、1360 read IOPS、157 ms await、214 平均队列深度与
+69.85% iowait，因此此 topology 先将 Dream backend 限制为 32 MB/s / 400 IOPS。
+限制只约束承载 Claude 子进程的 backend 容器读取，不修改 Admin、PostgreSQL、
+workspace、sandbox 或公开业务协议。调整值必须先保留 Admin/SSH 磁盘余量并重新测量
+首 Token；回滚时删除 overlay 的 `blkio_config` 或恢复上一版 Compose 后只重建
+Dream backend。
 
 ## 验证、备份与回滚
 
@@ -125,6 +144,8 @@ cd ../ink-admin-memory
 cd ../ink-dream-memory
 ./deploy/remote-ssh/deploy.sh ps
 ./deploy/remote-ssh/deploy.sh verify
+
+docker inspect -f '{{json .HostConfig.BlkioDeviceReadBps}} {{json .HostConfig.BlkioDeviceReadIOps}}' ink-backend
 
 curl -fsS https://ink-admin.suoxya.com/admin/login >/dev/null
 curl -fsS https://ink-backend.suoxya.com/api/health
@@ -146,8 +167,8 @@ backfill/validate → contract。
 
 - 两仓库 `deploy/remote-ssh/.env` 均 gitignored、mode `0600`，不得写入 issue/日志；
 - Dream Product JWT secret 必须与 Admin 一致；
-- Dream Gateway service key、issuer/audience 必须与 Admin 数据和 Gateway JWT 配置一致，
-  且 `DREAM_GATEWAY_ORIGIN` 必须是 HTTPS；
+- Dream Gateway service key、issuer/audience 必须与 Admin 数据和 Gateway JWT 配置一致；
+  `DREAM_GATEWAY_ORIGIN` 必须是 HTTPS，并同时作为 Dream Product API base origin；
 - PostgreSQL volume 只由 Admin Compose 管理；Dream 不执行 restore、migration、DROP、
   TRUNCATE 或 runtime DDL；
 - `bootstrap` 只用于首次空目标；后续使用物理备份与经过审核的恢复维护窗口；

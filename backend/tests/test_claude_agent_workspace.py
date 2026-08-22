@@ -22,6 +22,8 @@
 # [Sync] 2026-06-16: assert .claude/skills stays writable in sandbox denyWrite.
 # [Sync] 2026-06-16: cover direct .claude/skills writes imported back into
 #                    workspace/skills before discovery symlinks are rebuilt.
+# [Sync] 2026-08-22: cover exact read/write denial for projected Claude MCP
+#                    credential and user-config files inside the thread home.
 # [Sync] 2026-06-17: cover Linux sbin runtime allowlist needed by bubblewrap.
 # [Sync] 2026-06-17: cover preserving literal symlink aliases for rootfs mount
 #                    points such as /sbin.
@@ -171,6 +173,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertIn(str(ROOT.resolve()), deny_read)
         self.assertIn(str(Path.home().resolve()), deny_read)
         self.assertIn(thread_credentials, deny_read)
+        self.assertIn(thread_user_config, deny_read)
         self.assertEqual(
             sandbox["credentials"]["files"],
             [{"path": thread_credentials, "mode": "deny"}],
@@ -322,7 +325,8 @@ class TestInitWorkspace(unittest.TestCase):
                 "/var/cache",
             ],
         )
-        # denyWrite list is unchanged (deny always wins over allow).
+        # Projected MCP identity files are added to denyWrite; deny always wins
+        # over workspace/user allow paths.
         self.assertEqual(
             sandbox["filesystem"]["denyWrite"],
             [

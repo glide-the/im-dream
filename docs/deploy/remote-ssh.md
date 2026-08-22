@@ -1,12 +1,23 @@
 # Remote SSH 一键部署
+<!--
+[Input] Remote SSH deployment scripts, Docker Compose topology, backend runtime configuration, and production acceptance boundaries.
+[Output] Document deploy, rollback, diagnostics, and safe Claude Agent resource configuration for remote hosts.
+[Sync] 2026-08-22: add low-memory Claude Agent admission defaults and post-deploy RSS/cgroup verification.
+[Sync] 2026-08-22: document the measured 1.6 GiB ECS override separately from
+                    the generic admission default.
+[Sync] 2026-08-22: align Alibaba Product API transport with the existing
+                    public HTTPS Admin origin required by runtime validation.
+[Sync] 2026-08-22: document the ECS backend block-I/O budget and the production
+                    read-storm evidence that requires it.
+-->
 
 阿里云 ECS 直接使用本路径，不维护另一套发布脚本。跨 Dream/Admin 两仓库的
 生产拓扑、首次数据引导和固定发布顺序见 [`aliyun.md`](aliyun.md)；其中 Admin
 仓库先通过自己的 `deploy/remote-ssh/` 发布单 Admin/Gateway/embedded-PostgreSQL
 容器与 migration，Dream 随后只发布 frontend/backend；MinIO 当前关闭。
-阿里云 overlay 将 Gateway 的公开 HTTPS origin 与 Admin Product API 的容器内 HTTP
-origin 分开；生成环境文件时必须显式提供 `DREAM_GATEWAY_ORIGIN`，避免 Gateway
-安全校验把内部 HTTP service alias 拒绝为不可用。
+阿里云 overlay 让 Gateway 与 Admin Product API 共用公开 HTTPS Admin origin；生成
+环境文件时必须显式提供 `DREAM_GATEWAY_ORIGIN`。embedded PostgreSQL 仍使用共享网络
+alias，Product 客户端不得配置为会被传输安全合同拒绝的非 loopback HTTP origin。
 
 Remote SSH 用于把 Ink & Memory 部署到一台已有 Docker 与 `docker-compose` 的远程服务器。主入口是：
 
@@ -240,6 +251,67 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
 ./deploy/remote-ssh/deploy.sh sync
 ./deploy/remote-ssh/deploy.sh config
 ```
+
+## Claude Agent 低内存配置与验收
+
+低内存单 backend topology 在远端 `backend/.env` 中使用同一条生产路径，
+通过明确资源 capability 配置限制 CLI 进程树；不要按 deployment environment
+名称切换 runner，也不要用 Node heap cap 代替准入：
+
+```dotenv
+INK_AGENT_MAX_CONCURRENT_RUNS=1
+INK_AGENT_RUN_MEMORY_BUDGET_MIB=416
+INK_AGENT_MEMORY_RESERVE_MIB=128
+INK_AGENT_ENABLE_MEMORY_MCP=0
+```
+
+`run budget + reserve` 同时与宿主 `/proc/meminfo:MemAvailable`、backend cgroup v2
+headroom 比较。任一已知余量不足时，SSE 返回可重试 resource error 且不创建
+Claude CLI；memory MCP 只有明确提供该 capability 时才设为 `1`。这里的
+`416+128 MiB` 是 `39.97.252.88`（1.6 GiB RAM、1 GiB backend cgroup）根据事故
+进程树、部署后 574–651 MiB 静置 headroom 和首轮真实 turn 约 384.8 MiB cgroup
+增量峰值得出的显式覆盖；代码与 `.env.example` 的通用默认仍是
+`512+128 MiB`。该值不替代长上下文峰值测量，也不改变
+`CLAUDE_CODE_TMPDIR` 或 sandbox。
+
+阿里云 profile 还必须在 mode-0600 `deploy/remote-ssh/.env` 中集中配置磁盘读取
+预算。它不是 Claude Code 私有参数，而是 Docker Compose 官方 `blkio_config`
+资源合同：
+
+```dotenv
+DREAM_BACKEND_BLOCK_DEVICE=/dev/vda
+DREAM_BACKEND_READ_BPS=32mb
+DREAM_BACKEND_READ_IOPS=400
+```
+
+设备路径必须由目标主机的根磁盘拓扑确认；其他主机不得照抄 `/dev/vda`。当前值来自
+真实 resume turn：系统盘约 93.9 MiB/s、1360 read IOPS、157 ms await、队列深度
+214，宿主 iowait 69.85%、11 个任务阻塞，SSH、Dream health 和 Admin 同时超时，
+而 CPU 执行占比约 20%、backend 未触发本轮 cgroup OOM。因而本轮限制读取而不降低
+Node heap，也不新增 CPU wrapper。Compose 重建后必须用 `docker inspect` 核对
+`BlkioDeviceReadBps` / `BlkioDeviceReadIOps`，并在真实对话期间持续采样 health、
+`sar -u`、`sar -d` 和 `sar -q ALL`。
+
+发布前后用只读命令记录宿主、cgroup 和 backend 进程树；命令不得打印容器 env
+或完整 CLI argv：
+
+```bash
+free -m
+awk '/MemAvailable|SwapTotal|SwapFree/ {print}' /proc/meminfo
+docker stats --no-stream ink-backend
+docker exec ink-backend sh -lc '
+  printf "memory.current="; cat /sys/fs/cgroup/memory.current
+  printf "memory.max="; cat /sys/fs/cgroup/memory.max
+  ps -eo pid,ppid,rss,comm --sort=-rss | head -30
+'
+docker inspect -f '{{json .HostConfig.BlkioDeviceReadBps}} {{json .HostConfig.BlkioDeviceReadIOps}}' ink-backend
+curl -fsS http://127.0.0.1:8765/api/health
+```
+
+真实验收必须从公开 Dream 入口发起一次普通对话，并分别在启动前、CLI 启动、
+首 Token、结束后采样。合格条件是：默认进程树不出现 `memory_mcp_stdio` /
+`necklace_mcp_stdio`，第二个并发 turn 快速收到可重试 capacity error，结束/Stop
+后 CLI 与 MCP 子进程消失，health 全程可响应。CLI kill/OOM 只可在隔离环境注入。
 
 ## Claude-agent Docker Sandbox 排障
 

@@ -498,7 +498,12 @@ def apply_claude_secure_storage_home_to_options(
     options: Any,
     secure_storage_home: Optional[str | Path] = None,
 ) -> Any:
-    """Bind Claude Code's credential store to one authenticated platform user."""
+    """Bind Claude Code secure storage to the authenticated platform user.
+
+    The selector is server-owned and separate from the thread-local
+    ``CLAUDE_CONFIG_DIR``. It is primarily used by macOS Keychain; Linux keeps
+    it unset and consumes the file projection created by ``claude_mcp``.
+    """
 
     if secure_storage_home is None:
         return options

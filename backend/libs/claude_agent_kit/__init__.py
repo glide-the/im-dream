@@ -6,6 +6,8 @@
 #          to application layers.
 # [Pos] package root in libs/claude_agent_kit
 # [Sync] 2026-05-09: re-export necklace live-context MCP server factory.
+# [Sync] 2026-08-22: user MCP now exposes only Ink session retrieval; legacy
+#                    touch-animation remains unregistered.
 
 """Claude Agent Kit — Python port of the TypeScript ClaudeAgentRunner module.
 
@@ -41,8 +43,8 @@ IClaudeAgentSDKClient
     Abstract base class / interface that custom clients must implement.
 
 create_user_mcp_server
-    Factory for the 'user' MCP server that exposes the ``touch_animation``
-    tool (and any future user-interaction tools) to the Claude agent runtime.
+    Factory for the Ink ``user`` MCP server that exposes only
+    ``get_sessions_range`` to the Claude agent runtime.
 
 create_necklace_mcp_server
     Factory for the 'necklace' MCP server that exposes read-only live-context

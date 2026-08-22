@@ -76,6 +76,8 @@
 #                    claude_session_id semantics remain unchanged.
 # [Sync] 2026-08-14: trusted Dream bindings select the Deck workspace-file
 #                    prompt in assemble_context; ordinary Chat keeps proposal mode.
+# [Sync] 2026-08-22: restore actor-owned Claude MCP definition/credential projection
+#                    while retaining the current thread TMPDIR and workspace boundaries.
 # [Sync] 2026-08-22: always bind CLAUDE_CODE_TMPDIR to the server-owned thread
 #                    runtime workspace; Workspace Mode still exclusively gates
 #                    cwd, context injection, sandbox settings, and file surfaces.

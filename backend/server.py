@@ -21,6 +21,8 @@
 #                    process-injected deployment configuration.
 # [Sync] 2026-08-22: mount the fail-closed Claude MCP Resources router restored
 #                    onto the current develop application graph.
+# [Sync] 2026-08-22: preserve the centralized Claude Agent concurrency and
+#                    host/cgroup memory-admission configuration keys.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -47,6 +49,9 @@ def _drop_unsupported_agent_env() -> None:
 
     allowed_ink_names = {
         "INK_AGENT_ENABLE_MEMORY_MCP",
+        "INK_AGENT_MAX_CONCURRENT_RUNS",
+        "INK_AGENT_RUN_MEMORY_BUDGET_MIB",
+        "INK_AGENT_MEMORY_RESERVE_MIB",
         "INK_AGENT_TTL_S",
         "INK_AGENT_SWEEP_INTERVAL_S",
         "INK_AGENT_SSE_KEEPALIVE_S",

@@ -16,6 +16,7 @@
 [Sync] 2026-08-17: document Deck-filtered Chat history and corrected related-thread/binding deletion semantics.
 [Sync] 2026-08-22: document per-thread CLAUDE_CODE_TMPDIR and the Workspace Mode disabled runtime-only boundary.
 [Sync] 2026-08-22: restore authenticated Claude MCP Resources configuration, OAuth lifecycle, inventory, and removal contracts.
+[Sync] 2026-08-22: document retryable Claude Agent capacity and memory-pressure SSE errors.
 -->
 
 **Version:** 2.0.0
@@ -492,6 +493,29 @@ Delete a session.
 ---
 
 ## Claude Agent Chat Threads
+
+### POST `/api/claude-agent`
+
+Start or resume the current user's Claude Agent turn through the existing
+`text/event-stream` contract. Before creating a Claude Code CLI process tree,
+the backend enforces its configured active-turn cap and checks host/cgroup
+memory headroom.
+
+When capacity is unavailable the HTTP connection remains protocol-compatible:
+it receives one `error` event followed by the existing `finish` event. New
+fields are additive; clients that only read `errorText` remain compatible.
+
+```text
+data: {"type":"error","data":{"errorText":"[CLAUDE_AGENT_CAPACITY_EXHAUSTED] ...","errorCode":"CLAUDE_AGENT_CAPACITY_EXHAUSTED","retryable":true,"retryAfterSeconds":60}}
+data: {"type":"finish","data":{"finishReason":"error"}}
+```
+
+Retryable resource codes:
+
+- `CLAUDE_AGENT_CAPACITY_EXHAUSTED`: this backend already owns the configured
+  number of active Agent turns; no second CLI process tree was created.
+- `CLAUDE_AGENT_MEMORY_PRESSURE`: host `MemAvailable` or cgroup v2 headroom is
+  below the configured run budget plus reserve; no CLI process was created.
 
 ### GET `/api/claude-agent/threads`
 

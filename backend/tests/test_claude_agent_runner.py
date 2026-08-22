@@ -9,6 +9,8 @@
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
 #                    Adapted: module import path backend/libs/claude_agent_kit/runner.py.
 # [Sync] 2026-05-24: cover INK_AGENT_MEM0_* aliases for memory MCP/hook env.
+# [Sync] 2026-08-22: lock Ink defaults to user session retrieval only; legacy
+#                    touch/necklace/memory MCPs require explicit capability.
 # [Sync] 2026-05-24: cover direct ANTHROPIC_AUTH_TOKEN SDK auth diagnostics.
 # [Sync] 2026-05-24: assert SDK runner failures emit backend exception logs with traceback.
 # [Sync] 2026-05-29: add TestEditorIndexRedirectHelper — 15 tests for _apply_editor_index_redirect
@@ -266,11 +268,15 @@ _SDK_USER = agent_runner_module.UserMessage
 
 
 def AssistantMessage(content=None):
-    # claude-agent-sdk 0.2.128 requires ``model``; the in-repo stub does not.
+    # claude-agent-sdk 0.2.128 requires ``model``. Shared import-smoke stubs may
+    # accept keyword fields only, so keep this factory collection-order safe.
     try:
         return _SDK_ASSISTANT(content or [], model="test-model")
     except TypeError:
-        return _SDK_ASSISTANT(content or [])
+        try:
+            return _SDK_ASSISTANT(content=content or [], model="test-model")
+        except TypeError:
+            return _SDK_ASSISTANT(content or [])
 
 
 def ResultMessage(session_id=None, subtype="success", usage=None):
@@ -2454,8 +2460,74 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         self.assertEqual(specific.get("permissionDecisionReason"), "manual mode")
 
 
+class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
+    async def test_user_mcp_exposes_only_session_retrieval(self):
+        from mcp import types as mcp_types
+        from libs.claude_agent_kit.server.mcp_server import (
+            USER_MCP_TOOL_NAMES,
+            create_user_mcp_server,
+        )
+
+        server = create_user_mcp_server()
+        handler = server.request_handlers[mcp_types.ListToolsRequest]
+        result = await handler(mcp_types.ListToolsRequest())
+        tool_names = {tool.name for tool in result.root.tools}
+
+        self.assertEqual(tool_names, {"get_sessions_range"})
+        self.assertEqual(tool_names, set(USER_MCP_TOOL_NAMES))
+
+    async def test_default_run_only_configures_core_user_mcp(self):
+        self.set_query([])
+        runner = self.make_runner()
+        with patch.dict(os.environ, {}, clear=True):
+            await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="ordinary-ink-chat",
+                    user_message="hello",
+                    tool_choice="auto",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda _delta: None
+                ),
+            )
+
+        self.assertEqual(
+            set(self._mock_client.last_options.mcp_servers),
+            {"user"},
+        )
+
+
 class TestClaudeAgentRunnerMemoryEnvAliases(unittest.TestCase):
     """Memory MCP env uses Ink-owned names with Pawkeyland aliases as fallback."""
+
+    def test_legacy_mcp_tools_are_not_in_ink_defaults(self):
+        self.assertNotIn(
+            "mcp__user__touch_animation",
+            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
+        )
+        for tool_name in agent_runner_module.allowed_memory_tool_names():
+            self.assertNotIn(tool_name, agent_runner_module.DEFAULT_ALLOWED_TOOLS)
+        for tool_name in agent_runner_module.allowed_necklace_tool_names():
+            self.assertNotIn(tool_name, agent_runner_module.DEFAULT_ALLOWED_TOOLS)
+        self.assertIn(
+            "mcp__user__get_sessions_range",
+            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
+        )
+
+    def test_legacy_mcp_flags_default_off(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(agent_runner_module._memory_mcp_enabled())
+            self.assertFalse(agent_runner_module._necklace_mcp_enabled())
+
+    def test_memory_mcp_capability_opt_in_adds_tool(self):
+        with patch.dict(
+            os.environ,
+            {"INK_AGENT_ENABLE_MEMORY_MCP": "1"},
+            clear=True,
+        ):
+            tools = agent_runner_module._default_allowed_tools()
+        for tool_name in agent_runner_module.allowed_memory_tool_names():
+            self.assertIn(tool_name, tools)
 
     def test_ink_memory_mcp_disable_flag_takes_precedence(self):
         with patch.dict(
