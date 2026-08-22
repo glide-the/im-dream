@@ -1,4 +1,11 @@
-"""PostgreSQL configuration with fail-closed test-database validation."""
+"""PostgreSQL configuration with fail-closed test-database validation.
+
+[Input] Explicit process/database env and optional Admin-owned env file.
+[Output] Validated PostgreSQL targets without importing unrelated credentials.
+[Pos] Persistence configuration boundary for Dream runtime and test tooling.
+[Sync] 2026-08-22: allow the explicit Admin env file to replace only a
+                   dotenv-sourced runtime URL; process-injected URLs still win.
+"""
 
 from __future__ import annotations
 
@@ -139,12 +146,18 @@ def parse_postgres_target(value: str) -> PostgresTarget:
 def load_database_url_from_env_file(
     *,
     environ: MutableMapping[str, str] | None = None,
+    override: bool = False,
 ) -> bool:
-    """Load only DATABASE_URL from an explicitly configured local env file."""
+    """Load only ``DATABASE_URL`` from an explicitly configured env file.
+
+    Existing values remain authoritative unless the caller explicitly marks
+    them as replaceable.  Dream uses replacement only when the value came from
+    its own dotenv file; a URL injected by the parent process always wins.
+    """
 
     values = os.environ if environ is None else environ
     existing = values.get(DATABASE_URL_ENV)
-    if isinstance(existing, str) and existing.strip():
+    if isinstance(existing, str) and existing.strip() and not override:
         parse_postgres_target(existing)
         return False
     configured_path = values.get(DATABASE_ENV_FILE_ENV)

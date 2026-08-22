@@ -16,6 +16,9 @@
 #                    auth, discovery, selection, and canonical snapshot sync
 #                    endpoints are exposed alongside the rest of the backend API.
 # [Sync] 2026-08-14: the mounted Deck router includes explicit default-plugin reconciliation.
+# [Sync] 2026-08-22: prefer the explicitly configured Admin database env file
+#                    over a stale backend/.env DATABASE_URL while preserving
+#                    process-injected deployment configuration.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -25,6 +28,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 _BACKEND_ENV_FILE = Path(__file__).resolve().with_name(".env")
+_DATABASE_URL_WAS_INHERITED = bool(os.environ.get("DATABASE_URL", "").strip())
 load_dotenv(_BACKEND_ENV_FILE, override=False)
 
 try:
@@ -33,7 +37,7 @@ except ModuleNotFoundError:  # pragma: no cover - package import compatibility
     from backend.persistence.config import load_database_url_from_env_file
 
 if os.environ.get("INK_LOAD_DATABASE_URL_FROM_ENV_FILE") == "1":
-    load_database_url_from_env_file()
+    load_database_url_from_env_file(override=not _DATABASE_URL_WAS_INHERITED)
 
 
 def _drop_unsupported_agent_env() -> None:

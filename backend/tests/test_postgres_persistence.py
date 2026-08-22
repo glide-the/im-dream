@@ -68,6 +68,28 @@ class DatabaseEnvFileTest(unittest.TestCase):
         self.assertFalse(load_database_url_from_env_file(environ=environ))
         self.assertEqual(environ["DATABASE_URL"], "postgresql://localhost/current")
 
+    def test_explicit_override_replaces_stale_dotenv_database_url(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / "admin.env"
+            env_file.write_text(
+                "DATABASE_URL=postgresql://local:not-real@localhost:54329/ink-memory\n"
+                "ADMIN_SESSION_SECRET=must-not-be-imported\n",
+                encoding="utf-8",
+            )
+            environ = {
+                "DATABASE_URL": "postgresql://local:not-real@localhost:5433/ink-memory",
+                "INK_DATABASE_ENV_FILE": str(env_file),
+            }
+
+            self.assertTrue(
+                load_database_url_from_env_file(environ=environ, override=True)
+            )
+            self.assertEqual(
+                environ["DATABASE_URL"],
+                "postgresql://local:not-real@localhost:54329/ink-memory",
+            )
+            self.assertNotIn("ADMIN_SESSION_SECRET", environ)
+
     def test_relative_missing_and_symlink_env_files_fail_closed(self):
         with self.assertRaises(PersistenceConfigurationError):
             load_database_url_from_env_file(

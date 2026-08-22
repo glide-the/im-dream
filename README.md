@@ -2,6 +2,7 @@
 <!-- [Output] Reader-oriented setup, usage, branch status, scope boundaries, and feature TODOs. -->
 <!-- [Pos] Repository entry guide for Ink & Memory contributors and local users. -->
 <!-- [Sync] 2026-08-17: replace the historical progress diary with a concise usage-first project guide. -->
+<!-- [Sync] 2026-08-22: align local Dream startup with Admin-supervised embedded PostgreSQL. -->
 
 # Ink & Memory
 
@@ -134,10 +135,12 @@ Deck 内容版本还依赖 `dream.deck-content-versions.v1`；缺少时版本能
 test -f backend/.env || cp backend/.env.example backend/.env
 ```
 
-至少配置 PostgreSQL 和 Admin Gateway：
+本机 Dream 应直接读取 Admin 私有环境文件中的 `DATABASE_URL`，不要复制连接串：
 
 ```dotenv
-DATABASE_URL=postgresql://<user>:<password>@127.0.0.1:<port>/<database>
+DATABASE_URL=
+INK_LOAD_DATABASE_URL_FROM_ENV_FILE=1
+INK_DATABASE_ENV_FILE=/absolute/path/to/ink-admin-memory/.env.local
 
 INK_GATEWAY_ENABLED=1
 INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
@@ -147,9 +150,15 @@ INK_GATEWAY_IMAGE_DESCRIPTION_MODEL_ALIAS=dream-image-description
 INK_GATEWAY_IMAGE_GENERATION_MODEL_ALIAS=dream-image-generation
 ```
 
-本机 Admin 默认 PostgreSQL 地址是 `localhost:5433/ink-memory`；实际用户名、密码和连接串以
-`../ink-admin-memory/.env.local` 为准。若已运行上一步 Gateway provision，它会写入服务 Key、
-Subject JWT 和可调用模型 alias，请保留其结果，不要再用示例值覆盖。
+Admin 本机 embedded PostgreSQL 默认监听 `127.0.0.1:54329`，只在 Admin
+`pnpm dev` supervisor 或数据库维护命令运行期间可用；实际端口和连接串始终以
+`../ink-admin-memory/.env.local` 为准。Dream 只从该文件导入 `DATABASE_URL`，不会导入 Admin
+Session、Provider 或其他密钥。若已运行上一步 Gateway provision，它会写入服务 Key、Subject
+JWT 和可调用模型 alias，请保留其结果，不要再用示例值覆盖。
+
+`deploy/local/deploy.sh start` 默认解析同级 `../ink-admin-memory/.env.local`；Admin 位于其他目录时，
+通过 `LOCAL_ADMIN_ENV_FILE=/absolute/path/to/.env.local` 覆盖。显式注入到 Dream 进程的
+`DATABASE_URL` 仍具有最高优先级，适用于容器和生产部署。
 
 不要提交真实数据库密码、Gateway Service Key、Provider Key 或 OAuth Secret。Dream 只接收
 Admin 发布的平台模型 alias；浏览器不能直接传 Provider ID、上游模型名或密钥。
