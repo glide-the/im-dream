@@ -1,5 +1,6 @@
-# [Input] Consume get_workspace_root, init_workspace, get_or_create_workspace
-#         from libs/claude_agent_kit/server/workspace.py.
+# [Input] Consume get_workspace_root, get_or_create_thread_runtime_workspace,
+#         init_workspace, get_or_create_workspace from
+#         libs/claude_agent_kit/server/workspace.py.
 # [Output] Validate workspace root resolution, skeleton creation, idempotency,
 #          path traversal rejection, AGENT_CWD env var handling, and .editor/
 #          virtual index initialisation (Hook execution order & read path), and
@@ -34,6 +35,10 @@
 # [Sync] 2026-08-14: canonical assets remain covered by the thread root and
 #                    .dream is denied; CLAUDE_CODE_TMPDIR is the single exact
 #                    sandbox temp write root (no broad /tmp or dynamic cwd-*).
+# [Sync] 2026-08-22: assert each workspace owns a 0700 .claude-tmp directory;
+#                    global/process temp overrides no longer affect Settings.
+# [Sync] 2026-08-22: cover the minimal runtime-only thread root used when
+#                    user-facing Workspace Mode is disabled.
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -57,6 +62,7 @@ from libs.claude_agent_kit.server.workspace import (
     WORKSPACE_SUBDIRS,
     _append_existing_sandbox_read_path,
     _sandbox_claude_tmp_write_paths,
+    get_or_create_thread_runtime_workspace,
     get_or_create_workspace,
     get_workspace_root,
     init_workspace,
@@ -157,7 +163,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertEqual(sandbox["filesystem"]["allowRead"][0], str(ws.resolve()))
         self.assertEqual(
             sandbox["filesystem"]["allowWrite"],
-            [str(ws.resolve()), *_sandbox_claude_tmp_write_paths()],
+            [str(ws.resolve()), *_sandbox_claude_tmp_write_paths(ws)],
         )
         self.assertEqual(sandbox["network"]["allowedDomains"], [])
         self.assertNotIn(
@@ -258,22 +264,22 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertEqual(allow_write[0], str(ws.resolve()))
         self.assertEqual(
             allow_write[1:],
-            [str(Path("/tmp/claude").resolve(strict=False))],
+            [str(ws.resolve() / ".claude-tmp")],
         )
+        self.assertTrue((ws / ".claude-tmp").is_dir())
+        self.assertEqual((ws / ".claude-tmp").stat().st_mode & 0o777, 0o700)
         self.assertNotIn("/tmp", allow_write)
         self.assertFalse(any("cwd-" in path for path in allow_write))
 
-    def test_claude_tmpdir_env_override_is_honored(self):
+    def test_claude_tmpdir_env_override_is_ignored(self):
         with unittest.mock.patch.dict(
             os.environ, {"CLAUDE_CODE_TMPDIR": "/custom/claude-tmp"}
         ):
             ws = init_workspace("sandbox-claude-tmp-env")
         settings = json.loads((ws / ".claude" / "settings.json").read_text())
         allow_write = settings["sandbox"]["filesystem"]["allowWrite"]
-        self.assertIn(
-            str(Path("/custom/claude-tmp").resolve(strict=False)),
-            allow_write,
-        )
+        self.assertEqual(allow_write[1:], [str(ws.resolve() / ".claude-tmp")])
+        self.assertNotIn("/custom/claude-tmp", allow_write)
 
     def test_extra_fs_write_paths_appended_after_workspace_and_tmp(self):
         ws = init_workspace(
@@ -294,7 +300,7 @@ class TestInitWorkspace(unittest.TestCase):
             allow_write,
             [
                 str(ws.resolve()),
-                *_sandbox_claude_tmp_write_paths(),
+                *_sandbox_claude_tmp_write_paths(ws),
                 "/data/out",
                 "/var/cache",
             ],
@@ -427,6 +433,29 @@ class TestGetOrCreateWorkspace(unittest.TestCase):
         ws = get_or_create_workspace("sandbox-off-entry", sandbox_enabled=False)
         settings = json.loads((ws / ".claude" / "settings.json").read_text())
         self.assertFalse(settings["sandbox"]["enabled"])
+
+    def test_runtime_workspace_creates_only_thread_tmpdir(self):
+        ws = get_or_create_thread_runtime_workspace("runtime-only")
+
+        self.assertEqual(ws, Path(self._tmp.name).resolve() / "runtime-only")
+        self.assertEqual(
+            sorted(path.name for path in ws.iterdir()),
+            [".claude-tmp"],
+        )
+        self.assertEqual((ws / ".claude-tmp").stat().st_mode & 0o777, 0o700)
+
+    def test_runtime_workspace_rejects_path_traversal(self):
+        with self.assertRaises(ValueError):
+            get_or_create_thread_runtime_workspace("../sibling")
+
+    def test_runtime_workspace_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as outside:
+            (Path(self._tmp.name) / "linked-thread").symlink_to(
+                outside,
+                target_is_directory=True,
+            )
+            with self.assertRaises(ValueError):
+                get_or_create_thread_runtime_workspace("linked-thread")
 
 
 class TestSkillsSync(unittest.TestCase):

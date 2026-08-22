@@ -14,6 +14,7 @@
 [Sync] 2026-08-16: document exact runtime binding history used by the folded Deck version panel.
 [Sync] 2026-08-16: document capability-gated Deck draft/preview/explicit content commit/history.
 [Sync] 2026-08-17: document Deck-filtered Chat history and corrected related-thread/binding deletion semantics.
+[Sync] 2026-08-22: document per-thread CLAUDE_CODE_TMPDIR and the Workspace Mode disabled runtime-only boundary.
 -->
 
 **Version:** 2.0.0
@@ -365,9 +366,12 @@ initialization and written to the thread-local `.claude/settings.json`
 `sandbox.network` block; `sandbox_fs_allowed_write_paths` is appended to the
 `sandbox.filesystem.allowWrite` list after the thread workspace and the exact
 server-owned Claude Code temp root (`CLAUDE_CODE_TMPDIR`, default
-`/tmp/claude`, canonicalized before subprocess/sandbox use and always allowed
-when the sandbox is enabled). The application
-does not broadly allow `/tmp` or guess per-UID/dynamic `cwd-*` paths.
+`{AGENT_CWD}/{thread_id}/.claude-tmp`, canonicalized, created as `0700` before
+the subprocess starts, and always allowed when the sandbox is enabled). The
+application does not broadly allow `/tmp` or guess per-UID/dynamic `cwd-*` paths.
+This runtime-only directory is prepared even when Workspace Mode is disabled;
+that does not initialize the full workspace, pass `cwd`, inject workspace
+context, or expose file surfaces.
 
 ---
 

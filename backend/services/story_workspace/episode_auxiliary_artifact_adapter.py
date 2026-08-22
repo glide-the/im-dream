@@ -1,4 +1,6 @@
 """Safe read-only projection for Episode prompts, render guide, and review."""
+# [Sync] 2026-08-22: keep review target indexing valid on the declared
+# Python 3.11 runtime by moving the newline join outside the f-string.
 
 from __future__ import annotations
 
@@ -589,7 +591,8 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
             str,
         ] = {}
         for raw_section, section in zip(raw_sections, sections, strict=True):
-            searchable = f"{raw_section.title}\n{'\n'.join(raw_section.lines)}"
+            section_lines = "\n".join(raw_section.lines)
+            searchable = f"{raw_section.title}\n{section_lines}"
             target_specs = (
                 (
                     StoryWorkspaceEpisodeReviewTargetKind.NARRATIVE_BEAT,

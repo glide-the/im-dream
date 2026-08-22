@@ -1,5 +1,13 @@
 # Remote SSH 一键部署
 
+阿里云 ECS 直接使用本路径，不维护另一套发布脚本。跨 Dream/Admin 两仓库的
+生产拓扑、首次数据引导和固定发布顺序见 [`aliyun.md`](aliyun.md)；其中 Admin
+仓库先通过自己的 `deploy/remote-ssh/` 发布单 Admin/Gateway/embedded-PostgreSQL
+容器与 migration，Dream 随后只发布 frontend/backend；MinIO 当前关闭。
+阿里云 overlay 将 Gateway 的公开 HTTPS origin 与 Admin Product API 的容器内 HTTP
+origin 分开；生成环境文件时必须显式提供 `DREAM_GATEWAY_ORIGIN`，避免 Gateway
+安全校验把内部 HTTP service alias 拒绝为不可用。
+
 Remote SSH 用于把 Ink & Memory 部署到一台已有 Docker 与 `docker-compose` 的远程服务器。主入口是：
 
 ```bash
@@ -25,9 +33,10 @@ export REMOTE_APP_DIR=/srv/ink-and-memory  # 必须是远端绝对路径
 1. 检查本地 `ssh` / `rsync`、仓库必需文件、`deploy/clash/config.yaml`、远端 Docker、`docker-compose` 与 `/dev/net/tun`。
 2. 当 `REMOTE_SETUP_NGINX=auto` 且容器端口仅绑定 localhost 时，自动安装或刷新主机 nginx 配置。
 3. 自动创建/修复 `${REMOTE_APP_DIR}/backend/data`、`file-storage`、`agent-workspace`、`backups`。
-4. rsync 代码到 `${REMOTE_APP_DIR}`；默认不覆盖远端 `backend/data/`。
+4. rsync 代码到 `${REMOTE_APP_DIR}`；默认不覆盖远端 `backend/data/`，也不上传本机
+   `.venv`、QA artifacts、generated output、vendor worktree 等非镜像构建输入。
 5. 给当前远端镜像打 rollback tag。
-6. 显式执行 `docker-compose build --no-cache`，每次重新打包镜像。
+6. 执行 cache-aware `docker-compose build`；需要排查缓存时显式设置 `REMOTE_BUILD_NO_CACHE=1`。
 7. 执行 `docker-compose up -d --force-recreate`，每次用新镜像重建容器。
 8. 在远端执行后端 health 与前端 HTML 验证。
 
@@ -84,6 +93,10 @@ Internet :80/:443
 | `REMOTE_SWAP_SIZE_MB` | `2048` | `setup-swap` 确保的最小 swap 总量（MB）；前端 `vite build` 单独就需要 ~1G Node 堆（mermaid/tiptap/ai sdk 依赖图），1G 内存主机没有 swap 兜底会被 OOM Killer 杀掉 |
 | `REMOTE_SETUP_SSL` | `0` | 设为 `1` 时让 nginx setup 尝试执行 certbot |
 | `REMOTE_BUILD_PULL` | `0` | 设为 `1` 时构建前拉取更新的基础镜像；重新打包本身默认每次执行，无需开关 |
+| `REMOTE_BUILD_NO_CACHE` | `0` | 设为 `1` 时执行 clean rebuild；小磁盘服务器常规发布默认复用 build cache |
+| `REMOTE_COMPOSE_OVERRIDE_FILE` | 空 | 可选第二 Compose 文件；阿里云 Dream wrapper 用它接入 Admin 平台网络 |
+| `REMOTE_COMPOSE_ENV_FILE` | 空 | 可选远端 Compose `--env-file`；不得提交或打印其中 secret |
+| `REMOTE_PLATFORM_NETWORK` | 空 | 可选已存在 external network；设置后 preflight 要求该网络存在 |
 | `REMOTE_FRONTEND_PORT` | `8080` | 前端容器映射到远端 localhost 的端口 |
 | `REMOTE_FRONTEND_NGINX_HOST` | 空 | 可选 nginx 前端上游 host；为空时从 `REMOTE_FRONTEND_BIND_HOST` 推导 |
 | `REMOTE_FRONTEND_BIND_HOST` | `127.0.0.1` | 默认仅允许主机 nginx 访问前端容器 |
@@ -156,7 +169,13 @@ REMOTE_SETUP_NGINX=0 ./deploy/remote-ssh/deploy.sh deploy
 
 ## 重新打包策略
 
-`deploy` 每次都会先同步代码，然后在远端显式执行 `docker-compose build --no-cache`，再执行 `docker-compose up -d --force-recreate`。因此重复运行 `./deploy/remote-ssh/deploy.sh deploy` 也会重新打包后端和前端镜像，并用新镜像重建容器。
+`deploy` 每次都会先同步代码，然后在远端执行 cache-aware `docker-compose build`，再执行 `docker-compose up -d --force-recreate`。代码变化仍会生成新镜像并重建容器；未变化层默认复用缓存，减少小磁盘服务器的临时占用。同步阶段同样排除本机 virtualenv、测试/QA 产物、generated output 和 vendor worktree，避免它们占用远端发布盘；`backend/data/` 继续作为独立持久数据边界受保护。
+
+需要完全忽略缓存时：
+
+```bash
+REMOTE_BUILD_NO_CACHE=1 ./deploy/remote-ssh/deploy.sh deploy
+```
 
 需要同时拉取基础镜像更新时：
 

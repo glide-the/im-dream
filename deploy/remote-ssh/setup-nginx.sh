@@ -8,6 +8,8 @@
 # [Sync] 2026-06-12: render upstream ports from Remote SSH deploy env instead of static defaults.
 # [Sync] 2026-06-12: disable stale same-domain nginx configs before testing the deployed site.
 # [Sync] 2026-07-06: also render/upload/enable the apex suoxya.com site (nginx/suoxya-root.conf).
+# [Sync] 2026-08-21: remove the repository-embedded ECS IP from usage examples;
+#                    host selection remains an explicit deployment variable.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,8 +34,8 @@ DRY_RUN="${DRY_RUN:-0}"
 usage() {
   cat <<'EOF'
 Usage:
-  REMOTE_SSH_HOST=39.97.252.88 ./deploy/remote-ssh/setup-nginx.sh
-  REMOTE_SSH_HOST=39.97.252.88 WITH_SSL=1 ./deploy/remote-ssh/setup-nginx.sh
+  REMOTE_SSH_HOST=<server-host-or-ip> ./deploy/remote-ssh/setup-nginx.sh
+  REMOTE_SSH_HOST=<server-host-or-ip> WITH_SSL=1 ./deploy/remote-ssh/setup-nginx.sh
 
 Installs nginx on the remote server, deploys the Ink & Memory virtual host config,
 and enables the site.  Optionally provisions Let's Encrypt SSL certificates.
@@ -542,7 +544,7 @@ main() {
 Done. The main deploy script now runs nginx setup automatically in auto mode.
 For a complete install/deploy, run:
 
-    export REMOTE_SSH_HOST=39.97.252.88
+    export REMOTE_SSH_HOST=<server-host-or-ip>
     export REMOTE_APP_DIR=/srv/ink-and-memory
     ./deploy/remote-ssh/deploy.sh deploy
 

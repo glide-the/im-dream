@@ -31,7 +31,7 @@
 
 - 当前仓库可能同时包含用户和其他 Agent 的未提交改动；不得回退、覆盖或格式化无关文件。
 - migration、回填、破坏性测试和可重复执行的持久化自动化测试只允许使用明确命名、可删除的隔离数据库，并必须验证目标身份；真实业务测试按下方“本机真实业务测试协议”执行。
-- Claude Code 临时目录协议：SDK 子进程统一使用服务端 `CLAUDE_CODE_TMPDIR`（配置默认 `/tmp/claude`，注入前规范化为真实绝对路径），workspace sandbox 只放行同一个规范化根目录。禁止放行整个 `/tmp`、旧 `/tmp/claude-$UID`、动态 `cwd-*`，也禁止 Dream 功能通过短路径、符号链接或用户设置绕过该边界；修改此协议必须由用户单独批准并用真实 Bash 工具回执验证。
+- Claude Code 临时目录协议：SDK 子进程统一使用服务端绑定的 `CLAUDE_CODE_TMPDIR={AGENT_CWD}/{thread_id}/.claude-tmp`；目录必须位于规范化后的真实 thread workspace 内、禁止符号链接，并在 CLI 启动前创建且修复为 `0700`。Workspace Mode 关闭时只创建 thread runtime 根和 `.claude-tmp`，不得借此启用 `cwd`、workspace context、文件侧栏或 sandbox settings。启用 sandbox 时只放行同一个 `.claude-tmp` 精确路径。禁止放行整个 `/tmp`、旧 `/tmp/claude-$UID`、动态 `cwd-*`，也禁止进程环境、用户设置、Dream 功能或短路径绕过该边界；修改此协议必须由用户单独批准并用真实 Bash 工具回执验证。
 
 ## 单一运行路径与 Harness 协议
 

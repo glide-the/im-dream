@@ -1,5 +1,6 @@
 # [Input] None — reads AGENT_CWD env var and project root for template assets.
-# [Output] Provide get_workspace_root, init_workspace, get_or_create_workspace,
+# [Output] Provide get_workspace_root, get_or_create_thread_runtime_workspace,
+#          init_workspace, get_or_create_workspace,
 #          extract_archive_in_skills, list_workspace_files, list_workspace_file_tree,
 #          read_workspace_file_content, read_workspace_download_content,
 #          write_workspace_file, delete_workspace_file,
@@ -72,6 +73,11 @@
 #                    cwd-* allowances.
 # [Sync] 2026-08-17: add safe directory ZIP downloads while preserving single-file
 #                    download behavior and workspace containment checks.
+# [Sync] 2026-08-22: create each thread's 0700 .claude-tmp directory and use
+#                    that exact workspace-contained path for sandbox allowWrite.
+# [Sync] 2026-08-22: add a minimal thread-runtime workspace initializer so
+#                    CLAUDE_CODE_TMPDIR remains thread-scoped even when the
+#                    user-facing Workspace Mode is disabled.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -84,8 +90,9 @@ Each conversation gets an isolated working directory under the workspace root:
         skills/         – installable skill packages / files
         .editor/        – EditorState virtual index (placeholder files; see workspace-adapter.md)
         .claude/        – Claude project config (synced from repo template)
-        .claude/skills/ – symlinks → ../skills/*; direct writes are imported back
-                           into skills/ (managed by workspace_file_sync)
+        .claude/skills/ – symlinks → ../skills/*; direct writes are imported
+                           back into skills/ (managed by workspace_file_sync)
+        .claude-tmp/    – server-owned Claude CLI settings and shell scratch
 
 The ``memory/`` procedural memory subdirectory is **not** created by
 ``init_workspace``.  It is initialised explicitly through the workspace
@@ -116,7 +123,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Literal, Optional
 
-from .sdk_env import resolve_claude_code_tmpdir
+from .sdk_env import ensure_claude_code_tmpdir, resolve_claude_code_tmpdir
 
 logger = logging.getLogger(__name__)
 
@@ -377,7 +384,7 @@ def get_workspace_root() -> Path:
     return Path(tempfile.gettempdir()) / "ink-agent-workspaces"
 
 
-def _sandbox_claude_tmp_write_paths() -> list[str]:
+def _sandbox_claude_tmp_write_paths(workspace: Path) -> list[str]:
     """Return the exact Claude Code temp root allowed for sandbox writes.
 
     ``sdk_env.apply_project_sdk_runtime_options`` injects the same
@@ -386,7 +393,7 @@ def _sandbox_claude_tmp_write_paths() -> list[str]:
     or broad ``/tmp`` permission belongs in persistent Settings.
     """
 
-    return [resolve_claude_code_tmpdir()]
+    return [resolve_claude_code_tmpdir(workspace)]
 
 
 def _sandbox_fs_extra_write_paths(raw: object) -> list[str]:
@@ -413,6 +420,44 @@ def _sandbox_fs_extra_write_paths(raw: object) -> list[str]:
 # ---------------------------------------------------------------------------
 # Public API — workspace lifecycle
 # ---------------------------------------------------------------------------
+
+
+def _validate_workspace_session_id(session_id: str) -> None:
+    """Reject session IDs that could escape the configured workspace root."""
+
+    if (
+        not session_id
+        or "/" in session_id
+        or "\\" in session_id
+        or ".." in session_id
+    ):
+        raise ValueError(f"Invalid session_id: {session_id!r}")
+
+
+def get_or_create_thread_runtime_workspace(session_id: str) -> Path:
+    """Create the minimal server-owned runtime root for one thread.
+
+    This lifecycle is intentionally narrower than :func:`init_workspace`:
+    it creates only ``{AGENT_CWD}/{session_id}`` and its 0700
+    ``.claude-tmp`` child.  Chat therefore retains thread-local Claude CLI
+    scratch storage when the user-facing Workspace Mode is disabled, without
+    materialising files, skills, templates, sandbox settings, or sidebar
+    content.
+    """
+
+    _validate_workspace_session_id(session_id)
+    workspace_root = get_workspace_root()
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    workspace_root_abs = workspace_root.resolve(strict=True)
+    workspace = workspace_root_abs / session_id
+    if workspace.is_symlink():
+        raise ValueError("Claude Code thread workspace cannot be a symlink")
+    workspace.mkdir(parents=False, exist_ok=True)
+    workspace_abs = workspace.resolve(strict=True)
+    if not workspace_abs.is_dir() or workspace_abs.parent != workspace_root_abs:
+        raise ValueError("Claude Code thread workspace escaped its configured root")
+    ensure_claude_code_tmpdir(workspace_abs)
+    return workspace_abs
 
 
 def _workspace_sandbox_config(
@@ -442,7 +487,7 @@ def _workspace_sandbox_config(
     # enabled so a disabled config stays byte-identical to before.
     allow_write = [str(workspace_abs)]
     if enabled:
-        allow_write.extend(_sandbox_claude_tmp_write_paths())
+        allow_write.extend(_sandbox_claude_tmp_write_paths(workspace_abs))
         allow_write.extend(_sandbox_fs_extra_write_paths(fs_allowed_write_paths))
 
     sandbox_config: dict = {
@@ -578,8 +623,7 @@ def init_workspace(
 
     Returns the fully-qualified workspace path.
     """
-    workspace = get_workspace_root() / session_id
-    workspace.mkdir(parents=True, exist_ok=True)
+    workspace = get_or_create_thread_runtime_workspace(session_id)
 
     # Ensure standard subdirectories exist (idempotent).
     for subdir in WORKSPACE_SUBDIRS:
@@ -635,8 +679,7 @@ def get_or_create_workspace(
     Raises ``ValueError`` when *session_id* contains path-traversal characters
     (``/``, ``\\``, ``..``) to prevent workspace root escape.
     """
-    if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
-        raise ValueError(f"Invalid session_id: {session_id!r}")
+    _validate_workspace_session_id(session_id)
     return init_workspace(
         session_id,
         sandbox_enabled=sandbox_enabled,

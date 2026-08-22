@@ -11,6 +11,12 @@
 # [Sync] 2026-06-16: align data maintenance wrappers with sync-data backup/upload/download commands.
 # [Sync] 2026-06-23: add production OAuth/cookie defaults for split frontend/backend domains.
 # [Sync] 2026-06-23: require Mihomo TUN config for the default backend proxy namespace.
+# [Sync] 2026-08-21: support an optional Compose override/env file and shared
+#                    platform network for the Alibaba Cloud two-repository stack.
+# [Sync] 2026-08-21: make no-cache rebuild opt-in so small ECS disks can reuse
+#                    verified Docker build cache during routine releases.
+# [Sync] 2026-08-22: keep local virtualenvs, QA artifacts, and generated output
+#                    out of the Remote SSH release tree on small ECS disks.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +29,10 @@ REMOTE_SSH_KEY="${REMOTE_SSH_KEY:-}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-}"
 REMOTE_DOCKER_COMPOSE_BIN="${REMOTE_DOCKER_COMPOSE_BIN:-docker-compose}"
 REMOTE_COMPOSE_FILE="${REMOTE_COMPOSE_FILE:-deploy/remote-ssh/docker-compose.yml}"
+REMOTE_COMPOSE_OVERRIDE_FILE="${REMOTE_COMPOSE_OVERRIDE_FILE:-}"
+REMOTE_COMPOSE_ENV_FILE="${REMOTE_COMPOSE_ENV_FILE:-}"
 REMOTE_COMPOSE_PROJECT_NAME="${REMOTE_COMPOSE_PROJECT_NAME:-ink-and-memory}"
+REMOTE_PLATFORM_NETWORK="${REMOTE_PLATFORM_NETWORK:-}"
 
 REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST:-127.0.0.1}"
 REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT:-8080}"
@@ -72,6 +81,7 @@ REMOTE_SETUP_SSL="${REMOTE_SETUP_SSL:-0}"
 REMOTE_CLEAN_IMAGES="${REMOTE_CLEAN_IMAGES:-0}"
 REMOTE_CLEAN_VOLUMES="${REMOTE_CLEAN_VOLUMES:-0}"
 REMOTE_BUILD_PULL="${REMOTE_BUILD_PULL:-0}"
+REMOTE_BUILD_NO_CACHE="${REMOTE_BUILD_NO_CACHE:-0}"
 REMOTE_FRONTEND_SCHEME="${REMOTE_FRONTEND_SCHEME:-https}"
 REMOTE_FRONTEND_PATH="${REMOTE_FRONTEND_PATH:-/}"
 REMOTE_PUBLIC_HOST="${REMOTE_PUBLIC_HOST:-${REMOTE_SSH_HOST:-REMOTE_SSH_HOST}}"
@@ -93,7 +103,7 @@ Commands:
   plan      Print the remote deployment sequence and required env vars.
   sync      rsync repository files to REMOTE_APP_DIR without starting containers.
   config    Sync files, then run remote docker-compose config.
-  build     Sync files, snapshot current images, then run remote docker-compose build --no-cache.
+  build     Sync files, snapshot current images, then run remote docker-compose build.
   deploy    One-command path: ensure nginx/storage when needed, sync files, build, start, and verify.
   install   Alias for deploy; kept for first-time one-command setup.
   start     Alias for deploy.
@@ -119,6 +129,9 @@ Optional environment:
   REMOTE_SSH_PORT       default: 22
   REMOTE_SSH_KEY        optional private key path
   REMOTE_DOCKER_COMPOSE_BIN  default: docker-compose
+  REMOTE_COMPOSE_OVERRIDE_FILE optional second Compose file applied after the base file
+  REMOTE_COMPOSE_ENV_FILE optional Compose --env-file path on the remote host
+  REMOTE_PLATFORM_NETWORK optional pre-created cross-project Docker network
   REMOTE_FRONTEND_PORT  default: 8080, bound to localhost for host nginx
   REMOTE_FRONTEND_NGINX_HOST optional nginx upstream host override; defaults from REMOTE_FRONTEND_BIND_HOST
   REMOTE_BACKEND_PORT   default: 8765
@@ -144,6 +157,7 @@ Optional environment:
   REMOTE_SETUP_SSL      default: 0; set to 1 to let setup-nginx request certbot certificates
   REMOTE_SYNC_DATA      default: 0; when 1, sync backend/data to the remote server
   REMOTE_BUILD_PULL     default: 0; set to 1 to pull newer base images before build
+  REMOTE_BUILD_NO_CACHE default: 0; set to 1 only for a clean rebuild
 EOF
 }
 
@@ -268,8 +282,9 @@ remote_env_prefix() {
     REMOTE_CLASH_CONTAINER REMOTE_CLASH_CONTROLLER_BIND_HOST
     REMOTE_CLASH_CONTROLLER_PORT REMOTE_CLASH_DASHBOARD_BIND_HOST
     REMOTE_CLASH_DASHBOARD_PORT
+    REMOTE_PLATFORM_NETWORK
     REMOTE_SETUP_NGINX REMOTE_SETUP_STORAGE REMOTE_SETUP_SSL
-    REMOTE_BUILD_PULL
+    REMOTE_BUILD_PULL REMOTE_BUILD_NO_CACHE
   )
   local output="env" name
   for name in "${names[@]}"; do
@@ -282,7 +297,14 @@ remote_compose() {
   require_remote_config
   local app_dir compose_cmd
   app_dir="$(effective_remote_app_dir)"
-  compose_cmd="cd $(quote "${app_dir}") && $(remote_env_prefix) $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") -p $(quote "${REMOTE_COMPOSE_PROJECT_NAME}") -f $(quote "${REMOTE_COMPOSE_FILE}")"
+  compose_cmd="cd $(quote "${app_dir}") && $(remote_env_prefix) $(quote "${REMOTE_DOCKER_COMPOSE_BIN}")"
+  if [[ -n "${REMOTE_COMPOSE_ENV_FILE}" ]]; then
+    compose_cmd+=" --env-file $(quote "${REMOTE_COMPOSE_ENV_FILE}")"
+  fi
+  compose_cmd+=" -p $(quote "${REMOTE_COMPOSE_PROJECT_NAME}") -f $(quote "${REMOTE_COMPOSE_FILE}")"
+  if [[ -n "${REMOTE_COMPOSE_OVERRIDE_FILE}" ]]; then
+    compose_cmd+=" -f $(quote "${REMOTE_COMPOSE_OVERRIDE_FILE}")"
+  fi
   local arg
   for arg in "$@"; do
     compose_cmd+=" $(quote "${arg}")"
@@ -295,6 +317,12 @@ check_local_prereqs() {
   require_command ssh || { warn "ssh not found."; failed=1; }
   require_command rsync || { warn "rsync not found."; failed=1; }
   require_file "${REPO_ROOT}/deploy/remote-ssh/docker-compose.yml" || { warn "Missing remote compose file."; failed=1; }
+  if [[ -n "${REMOTE_COMPOSE_OVERRIDE_FILE}" ]]; then
+    require_file "${REPO_ROOT}/${REMOTE_COMPOSE_OVERRIDE_FILE}" || { warn "Missing Compose override: ${REMOTE_COMPOSE_OVERRIDE_FILE}."; failed=1; }
+  fi
+  if [[ -n "${REMOTE_COMPOSE_ENV_FILE}" ]]; then
+    require_file "${REPO_ROOT}/${REMOTE_COMPOSE_ENV_FILE}" || { warn "Missing Compose env file: ${REMOTE_COMPOSE_ENV_FILE}."; failed=1; }
+  fi
   case "${REMOTE_CLASH_CONFIG_FILE}" in
     ../../deploy/clash/config.yaml|./deploy/clash/config.yaml|deploy/clash/config.yaml)
       require_file "${REPO_ROOT}/deploy/clash/config.yaml" || { warn "Missing Clash config: deploy/clash/config.yaml. Copy your profile there and merge deploy/clash/config.tun-snippet.yaml."; failed=1; }
@@ -315,7 +343,12 @@ check_local_prereqs() {
 
 check_remote_prereqs() {
   require_remote_config
-  ssh_run "command -v $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") >/dev/null && $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") version >/dev/null && docker info >/dev/null && test -c /dev/net/tun"
+  local cmd
+  cmd="command -v $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") >/dev/null && $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") version >/dev/null && docker info >/dev/null && test -c /dev/net/tun"
+  if [[ -n "${REMOTE_PLATFORM_NETWORK}" ]]; then
+    cmd+=" && docker network inspect $(quote "${REMOTE_PLATFORM_NETWORK}") >/dev/null"
+  fi
+  ssh_run "${cmd}"
 }
 
 check_prereqs() {
@@ -363,7 +396,7 @@ API/nginx mode:
   Backend egress routes through the default Mihomo TUN sidecar; backend remains reachable on REMOTE_BACKEND_PORT through the proxy container.
 
 Rebuild controls:
-  deploy always runs remote docker-compose build --no-cache before up.
+  deploy reuses Docker build cache by default; set REMOTE_BUILD_NO_CACHE=1 for a clean rebuild.
   deploy always runs remote docker-compose up -d --force-recreate after build.
   Set REMOTE_BUILD_PULL=1 only when you also want to pull updated base images before build.
 EOF
@@ -390,8 +423,16 @@ sync_files() {
     --exclude '/.cloud-env'
     --exclude '/.storage-env'
     --exclude '/logs/'
+    --exclude '/.artifacts/'
+    --exclude '/.codex-pet-runs/'
+    --exclude '/.venv/'
+    --exclude '/output/'
+    --exclude '/vendor/'
+    --exclude '/backend/.pytest_cache/'
+    --exclude '/backend/.venv/'
     --exclude '/frontend/node_modules/'
     --exclude '/frontend/dist/'
+    --exclude '/frontend/output/'
     --exclude '/node_modules/'
     --exclude '**/__pycache__/'
     --exclude '.DS_Store'
@@ -414,10 +455,10 @@ snapshot_images() {
 }
 
 remote_build() {
-  # local args=(build --no-cache)
-  local args=(build )
+  local args=(build)
+  [[ "${REMOTE_BUILD_NO_CACHE}" == "1" ]] && args+=(--no-cache)
   [[ "${REMOTE_BUILD_PULL}" == "1" ]] && args+=(--pull)
-  log "Building remote Compose images with --no-cache. Pull base images: ${REMOTE_BUILD_PULL}."
+  log "Building remote Compose images. No cache: ${REMOTE_BUILD_NO_CACHE}; pull base images: ${REMOTE_BUILD_PULL}."
   remote_compose "${args[@]}"
 }
 
@@ -526,8 +567,8 @@ command_deploy() {
 command_verify() {
   require_remote_config
   local cmd
-  cmd="curl -fsS --max-time 10 $(quote "${REMOTE_VERIFY_BACKEND_URL}") >/dev/null"
-  cmd+=" && curl -fsS --max-time 10 $(quote "${REMOTE_VERIFY_FRONTEND_URL}") >/dev/null"
+  cmd="curl -fsS --retry 12 --retry-delay 5 --retry-connrefused --max-time 10 $(quote "${REMOTE_VERIFY_BACKEND_URL}") >/dev/null"
+  cmd+=" && curl -fsS --retry 6 --retry-delay 5 --retry-connrefused --max-time 10 $(quote "${REMOTE_VERIFY_FRONTEND_URL}") >/dev/null"
   ssh_run "${cmd}"
   log "Remote verification passed."
 }
@@ -612,7 +653,10 @@ case "${COMMAND:-help}" in
       REMOTE_APP_DIR="${REMOTE_APP_DIR}" \
       REMOTE_DOCKER_COMPOSE_BIN="${REMOTE_DOCKER_COMPOSE_BIN}" \
       REMOTE_COMPOSE_FILE="${REMOTE_COMPOSE_FILE}" \
+      REMOTE_COMPOSE_OVERRIDE_FILE="${REMOTE_COMPOSE_OVERRIDE_FILE}" \
+      REMOTE_COMPOSE_ENV_FILE="${REMOTE_COMPOSE_ENV_FILE}" \
       REMOTE_COMPOSE_PROJECT_NAME="${REMOTE_COMPOSE_PROJECT_NAME}" \
+      REMOTE_PLATFORM_NETWORK="${REMOTE_PLATFORM_NETWORK}" \
       REMOTE_CLASH_CONFIG_FILE="${REMOTE_CLASH_CONFIG_FILE}" \
       REMOTE_CLASH_IMAGE="${REMOTE_CLASH_IMAGE}" \
       REMOTE_CLASH_CONTAINER="${REMOTE_CLASH_CONTAINER}" \

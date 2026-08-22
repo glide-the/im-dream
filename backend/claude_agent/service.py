@@ -76,6 +76,9 @@
 #                    claude_session_id semantics remain unchanged.
 # [Sync] 2026-08-14: trusted Dream bindings select the Deck workspace-file
 #                    prompt in assemble_context; ordinary Chat keeps proposal mode.
+# [Sync] 2026-08-22: always bind CLAUDE_CODE_TMPDIR to the server-owned thread
+#                    runtime workspace; Workspace Mode still exclusively gates
+#                    cwd, context injection, sandbox settings, and file surfaces.
 # [Sync] 2026-06-13: remove assemble_context local database import that shadowed
 #                    module-level _db before system_config lookup.
 # [Sync] 2026-06-09: P2 fix — split _persist_turn into _persist_user_message (called
@@ -196,6 +199,7 @@ from libs.claude_agent_kit.server.sdk_env import resolve_claude_config_home
 from claude_agent.thread_pool import AgentRunState
 from libs.claude_agent_kit.server.workspace import (
     get_or_create_workspace,
+    get_or_create_thread_runtime_workspace,
     get_plans_dir,
     get_tasks_dir,
     get_workspace_root,
@@ -1307,6 +1311,7 @@ class ClaudeAgentService:
             # agents/ and caches, not just Plan Mode files).  Carried into
             # the runner via AgentRunOptions.claude_config_home below.
             claude_config_home = resolve_claude_config_home(cwd)
+            claude_tmp_workspace = cwd
 
             try:
                 from notion import build_notion_facade  # noqa: PLC0415
@@ -1361,6 +1366,9 @@ class ClaudeAgentService:
             # resolution falls back to an explicit CLAUDE_CONFIG_DIR process
             # env var or the CLI's official default (~/.claude).
             claude_config_home = resolve_claude_config_home(None)
+            claude_tmp_workspace = str(
+                get_or_create_thread_runtime_workspace(state.session_id)
+            )
 
         # ---------------------------------------------------------------
         # Resolve resume: load existing chat_thread to get claude_session_id.
@@ -1530,6 +1538,7 @@ class ClaudeAgentService:
             resume=should_resume,
             model=request.model,
             cwd=cwd or None,
+            claude_tmp_workspace=claude_tmp_workspace,
             claude_config_home=claude_config_home,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]

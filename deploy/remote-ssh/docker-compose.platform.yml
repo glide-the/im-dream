@@ -1,0 +1,25 @@
+# [Input] deploy/remote-ssh/.env and the Admin-owned external Docker network.
+# [Output] Alibaba Cloud topology overrides for the Remote SSH Dream stack.
+# [Pos] Dream-only ECS Compose overlay in deploy/remote-ssh/.
+# [Sync] 2026-08-21: connect Dream to the Admin container's embedded-PG alias.
+# [Sync] 2026-08-22: keep the HTTPS Gateway origin separate from the internal
+#                    HTTP Product API origin required by the shared-container topology.
+
+services:
+  tun-proxy:
+    networks:
+      default: {}
+      ink-memory-platform: {}
+
+  ink-backend:
+    environment:
+      DATABASE_URL: ${DREAM_DATABASE_URL:?Generate deploy/remote-ssh/.env first}
+      INK_GATEWAY_BASE_URL: ${DREAM_GATEWAY_ORIGIN:?Set the public HTTPS Admin Gateway origin}
+      INK_ADMIN_PRODUCT_API_BASE_URL: ${DREAM_ADMIN_INTERNAL_ORIGIN:-http://ink-memory-admin:3000}
+      INK_ADMIN_PRODUCT_ORIGIN: ${DREAM_PRODUCT_ORIGIN:?Set the public Dream frontend origin}
+      FILE_STORAGE_TYPE: ${DREAM_FILE_STORAGE_TYPE:-local}
+
+networks:
+  ink-memory-platform:
+    external: true
+    name: ${REMOTE_PLATFORM_NETWORK:-ink-memory-platform}

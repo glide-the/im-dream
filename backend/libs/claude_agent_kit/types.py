@@ -31,6 +31,9 @@
 #                    ClaudeAgentOptions from claude_agent_sdk (renamed
 #                    package, 0.2.128); the old claude_code_sdk /
 #                    ClaudeCodeOptions names are gone.
+# [Sync] 2026-08-22: carry the server-owned thread runtime workspace separately
+#                    from cwd so CLAUDE_CODE_TMPDIR stays thread-local when
+#                    user-facing Workspace Mode is disabled.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -186,6 +189,11 @@ class AgentRunOptions:
     model: Optional[str] = None
     # Working directory for the agent.
     cwd: Optional[str] = None
+    # Server-owned thread root used only to resolve CLAUDE_CODE_TMPDIR.  This
+    # remains populated even when Workspace Mode is disabled and ``cwd`` is
+    # intentionally None, keeping CLI settings/scratch isolated without
+    # enabling workspace context or file surfaces.
+    claude_tmp_workspace: Optional[str] = None
     # Server-resolved Claude config home for this thread (2026-08-03).
     # Resolved by the service layer via sdk_env.resolve_claude_config_home()
     # right after workspace/cwd resolution — BEFORE any claude module

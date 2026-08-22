@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "ink-and-memory-backend"
 version = "0.1.0"
 description = "Ink & Memory backend API"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "polyagent", # PolyCLI package on PyPI
   "fastapi>=0.110,<1",

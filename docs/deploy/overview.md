@@ -22,7 +22,7 @@
 ┌─────────────────────────────────────┐
 │  Cloud Run: ink-backend             │
 │  Public: https://ink-backend.suoxya.com │
-│  python:3.10-slim-bookworm + uvicorn:8765 │
+│  python:3.11-slim-bookworm + uvicorn:8765 │
 │  · REST / SSE / WebSocket API       │
 │  · Secret Manager refs (API keys)   │
 └─────────────────────┬───────────────┘
@@ -263,7 +263,7 @@ docker build \
 
 ### 后端（`backend/Dockerfile`）
 
-基于 `python:3.10-slim-bookworm`，安装系统依赖（gcc、libffi、openssl、libjpeg、zlib、curl、jq、git、ripgrep、nodejs、npm、bubblewrap、socat），安装 Python 依赖与 `@anthropic-ai/claude-code` / `@anthropic-ai/sandbox-runtime`，暴露端口 8765。`bubblewrap` / `socat` 是 Claude Code Linux Bash sandbox 依赖；Docker Compose / Remote SSH Docker 部署会额外启用 nested sandbox 兼容模式，并给 backend 容器授予 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 以允许 bubblewrap 创建 mount namespace。镜像还显式确保 `/sbin`、`/usr/sbin`、`/usr/local/sbin` 存在，避免 bubblewrap 构造 rootfs 时在 `/newroot/sbin` 挂载 tmpfs 失败。构建阶段会先用 `DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 替换 apt 源，并通过 `PYPI_INDEX_URL`、`NPM_REGISTRY` 加速 Python/npm 依赖安装。
+基于 `python:3.11-slim-bookworm`，安装系统依赖（gcc、libffi、openssl、libjpeg、zlib、curl、jq、git、ripgrep、nodejs、npm、bubblewrap、socat），安装 Python 依赖与 `@anthropic-ai/claude-code` / `@anthropic-ai/sandbox-runtime`，暴露端口 8765。Python 3.11 是与业务模块现有 `datetime.UTC` 用法一致的最低运行版本。`bubblewrap` / `socat` 是 Claude Code Linux Bash sandbox 依赖；Docker Compose / Remote SSH Docker 部署会额外启用 nested sandbox 兼容模式，并给 backend 容器授予 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 以允许 bubblewrap 创建 mount namespace。镜像还显式确保 `/sbin`、`/usr/sbin`、`/usr/local/sbin` 存在，避免 bubblewrap 构造 rootfs 时在 `/newroot/sbin` 挂载 tmpfs 失败。构建阶段会先用 `DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 替换 apt 源，并通过 `PYPI_INDEX_URL`、`NPM_REGISTRY` 加速 Python/npm 依赖安装。
 
 ### 前端（`frontend/Dockerfile`）
 

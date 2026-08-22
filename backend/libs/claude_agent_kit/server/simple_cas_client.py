@@ -6,6 +6,8 @@
 # [Sync] 2026-05-08: force Claude Code settings source to project via Python SDK extra_args.
 # [Sync] 2026-07-26: SDK migration claude-code-sdk → claude-agent-sdk 0.2.128;
 #                    ClaudeSDKClient query/receive_response semantics unchanged.
+# [Sync] 2026-08-22: prepare the per-thread .claude-tmp directory immediately
+#                    before spawning Claude Code.
 
 """Simple Claude Agent SDK Client.
 
@@ -27,7 +29,11 @@ from claude_agent_sdk import ClaudeSDKClient  # type: ignore[import-untyped]
 from claude_agent_sdk.types import ClaudeAgentOptions  # type: ignore[import-untyped]
 
 from ..types import IClaudeAgentSDKClient
-from .sdk_env import apply_project_sdk_runtime_options
+from .sdk_env import (
+    apply_project_sdk_runtime_options,
+    ensure_claude_code_tmpdir,
+    get_options_claude_tmp_workspace,
+)
 from .session_files import (
     get_projects_root,
     locate_session_file,
@@ -56,6 +62,9 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
         """Stream messages from the Claude agent subprocess."""
         effective_options = apply_project_sdk_runtime_options(
             options or ClaudeAgentOptions()
+        )
+        ensure_claude_code_tmpdir(
+            get_options_claude_tmp_workspace(effective_options)
         )
         async with ClaudeSDKClient(options=effective_options) as client:
             if isinstance(prompt, AsyncIterable) or isinstance(prompt, str):

@@ -26,9 +26,10 @@
 > broadening access to settings or hooks.
 > [Sync] 2026-06-21: add Settings-backed `sandbox.network` policy.
 > [Sync] 2026-06-22: Workspace Mode is now the workspace lifecycle gate:
-> when `workspace_enabled=false`, Claude Agent chat does not initialize a
-> thread workspace, does not pass `cwd`, and the frontend hides workspace file
-> sidebars/entry points.
+> when `workspace_enabled=false`, Claude Agent chat does not initialize the
+> full product workspace, does not pass `cwd`, and the frontend hides workspace
+> file sidebars/entry points. The 2026-08-22 runtime-only temp-root exception is
+> documented below.
 > [Sync] 2026-06-22: Settings hides Sandbox Network and user environment
 > variable controls while Workspace Mode is disabled because both depend on the
 > workspace runtime path.
@@ -53,6 +54,11 @@
 > settings-reader string hits; shim never invoked); mechanism removed,
 > reverted to the 2.1.108 vendor passthrough patch + `claude --version`
 > build assertion; seccomp section rewritten with the evidence chain.
+> [Sync] 2026-08-22: supersede the shared `/tmp/claude` temp-root contract.
+> Every turn now owns `{AGENT_CWD}/{thread_id}/.claude-tmp`, prepared as
+> `0700` before CLI spawn. Workspace Mode disabled creates only this minimal
+> runtime root; it still does not pass `cwd`, inject workspace context, expose
+> files, or write sandbox settings.
 
 # Claude-Agent Workspace Sandbox
 
@@ -85,15 +91,17 @@ resolved per-thread workspace path, not the parent root.
 Settings → AI 模型配置 → 工作区模式 controls:
 
 - whether workspace file/sidebar context is active for the conversation;
-- whether Claude Agent chat initializes a per-thread workspace and passes `cwd`
-  to Claude Code; and
+- whether Claude Agent chat initializes the full per-thread product workspace
+  and passes `cwd` to Claude Code; and
 - whether each initialized thread workspace writes an enabled Claude Code Bash
   sandbox block.
 
 When Workspace Mode is enabled, Settings → AI 模型配置 → 沙箱网络 controls the
 sandbox network policy written into the same thread-local `sandbox` block.
 When Workspace Mode is disabled, Settings hides Sandbox Network because no
-thread workspace or sandbox settings file is initialized for chat turns.
+full product workspace or sandbox settings file is initialized for chat turns.
+The service still creates the minimal thread runtime root containing only
+`.claude-tmp`; that security lifecycle is not a user-facing workspace feature.
 
 The user environment-variable controls are also shown only while Workspace Mode
 is enabled. They are part of the same workspace-runtime surface used by Skills,
@@ -116,7 +124,7 @@ When `system_config.workspace_enabled=true`, workspace initialization writes:
       ],
       "allowWrite": [
         "{AGENT_CWD}/{thread_id}",
-        "<server-owned canonical CLAUDE_CODE_TMPDIR; configured default /tmp/claude>",
+        "{AGENT_CWD}/{thread_id}/.claude-tmp",
         "<user extra paths: system_config.sandbox_fs_allowed_write_paths>"
       ],
       "denyWrite": [
@@ -136,13 +144,14 @@ When `system_config.workspace_enabled=true`, workspace initialization writes:
 }
 ```
 
-When `workspace_enabled=false`, Claude Agent chat does not initialize the
+When `workspace_enabled=false`, Claude Agent chat does not initialize the full
 thread workspace, does not write `.claude/settings.json`, does not pass
 `AgentRunOptions.cwd`, and does not inject `<workspace_context>` or
 `<memory_context>` into the user message. The route-level attachment path also
-skips workspace file sync so file uploads cannot create a workspace as a side
-effect. Existing workspaces on disk are left untouched; they are simply not used
-while the setting is off.
+skips workspace file sync. `get_or_create_thread_runtime_workspace()` creates
+only `{AGENT_CWD}/{thread_id}/.claude-tmp` so inline CLI settings and shell
+scratch never fall back to a shared process directory. The server carries this
+path through `AgentRunOptions.claude_tmp_workspace`, separately from `cwd`.
 
 `enableWeakerNestedSandbox` is emitted automatically when the backend detects
 that it is running inside a Linux container. Docker Compose and Remote SSH
@@ -216,7 +225,7 @@ package managers. In `disabled` mode, `agent_runner.py` also rejects
 `WebFetch`, `WebSearch`, and common Bash network commands before full-access or
 low-sensitivity allow decisions. It does not install missing binaries.
 
-### 2.1 Filesystem write policy **[2026-08-14]**
+### 2.1 Filesystem write policy **[2026-08-22]**
 
 `filesystem.allowWrite` is an ordered allow list; per sandbox-runtime
 semantics `denyWrite` always wins over `allowWrite`, so the workspace-internal
@@ -224,16 +233,16 @@ deny entries above still take precedence even when a configured extra write
 path overlaps them.
 
 1. **`{AGENT_CWD}/{thread_id}`** — the thread workspace (product data root).
-2. **Claude Code temp root (default-allowed)** — the application resolves a
-   server-process `CLAUDE_CODE_TMPDIR` (configured default `/tmp/claude`),
-   canonicalizes symlink aliases such as macOS `/tmp → /private/tmp`, injects it into
-   every Claude SDK subprocess, and appends that same exact root to
-   `allowWrite`. Claude Code creates its per-user `cwd-*` shell files beneath
-   that root. The sandbox must not allow `/tmp`, guess `/tmp/claude-{uid}`, or
-   persist one generated `cwd-*` directory: those alternatives either broaden
-   access or drift from the subprocess environment. Caller-provided SDK env
-   cannot override the server-owned value. When `sandbox_enabled=false`, the
-   `allowWrite` shape remains workspace-only.
+2. **Claude Code temp root (default-allowed)** — the application derives
+   `CLAUDE_CODE_TMPDIR={AGENT_CWD}/{thread_id}/.claude-tmp` from a server-only
+   thread binding, canonicalizes the workspace, rejects a symlink temp root,
+   creates it before CLI spawn, and repairs its mode to `0700`. The same exact
+   path is appended to `allowWrite`. The sandbox must not allow `/tmp`, guess
+   `/tmp/claude-{uid}`, or persist one generated `cwd-*` directory. Caller,
+   user, dotenv, and process env values cannot relocate it. When
+   `sandbox_enabled=false`, the sandbox `allowWrite` shape remains
+   workspace-only even though the unsandboxed CLI still uses its thread-local
+   `.claude-tmp`.
 3. **User extra writable paths** — `system_config.sandbox_fs_allowed_write_paths`
    (new Settings field 「沙箱文件写入」). Sanitized to absolute paths only
    (trailing slashes stripped, deduped, capped at 32 entries / 512 chars),
@@ -253,9 +262,11 @@ Claude Code sandbox filesystem paths use normal path semantics:
 | `~/path` | home-relative path |
 | `./path` or `path` | relative to the settings file's project root |
 
-Because each Claude SDK process runs with `cwd={AGENT_CWD}/{thread_id}` and the
-SDK runtime is forced to project settings, the thread's
-`{cwd}/.claude/settings.json` is the project settings source for sandboxing.
+When Workspace Mode is enabled, each Claude SDK process runs with
+`cwd={AGENT_CWD}/{thread_id}` and the SDK runtime is forced to project
+settings, so `{cwd}/.claude/settings.json` is the sandbox settings source.
+Disabled mode does not pass that `cwd` or create the settings file; only the
+separate temp binding remains thread-local.
 
 Read policy is deny-then-allow: deny the filesystem root, then re-allow the
 current thread workspace plus a minimal read-only runtime dependency allowlist.
@@ -413,10 +424,11 @@ Required checks for this design:
   read-allowed, disabled/allowlist network policies are emitted, and open mode
   omits `sandbox.network`.
 - Service tests confirm `workspace_enabled=false` does not call
-  `get_or_create_workspace`, clears cached `cwd`, and produces
-  `AgentRunOptions.cwd=None`.
+  full `get_or_create_workspace`, clears cached `cwd`, produces
+  `AgentRunOptions.cwd=None`, and binds a runtime-only thread root through
+  `claude_tmp_workspace`.
 - Route tests confirm attachment handling with `workspace_enabled=false` does
-  not initialize a workspace or call workspace file sync.
+  not initialize the full product workspace or call workspace file sync.
 - Frontend build/type checks confirm Workspace Mode-gated file sidebar UI
   compiles.
 - Python compile checks cover `workspace.py`, service and route integration.

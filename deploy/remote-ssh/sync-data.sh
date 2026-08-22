@@ -6,6 +6,8 @@
 # [Sync] 2026-06-16: restrict commands to backup/upload/download and force-recreate Compose services after upload.
 # [Sync] 2026-06-23: preserve production OAuth/cookie env vars during data-sync restarts.
 # [Sync] 2026-06-23: preserve Mihomo TUN env during data-sync restarts.
+# [Sync] 2026-08-21: preserve optional Compose override/env files and the shared
+#                    platform network during Alibaba Cloud data maintenance.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +21,10 @@ REMOTE_SSH_KEY="${REMOTE_SSH_KEY:-}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-}"
 REMOTE_DOCKER_COMPOSE_BIN="${REMOTE_DOCKER_COMPOSE_BIN:-docker-compose}"
 REMOTE_COMPOSE_FILE="${REMOTE_COMPOSE_FILE:-deploy/remote-ssh/docker-compose.yml}"
+REMOTE_COMPOSE_OVERRIDE_FILE="${REMOTE_COMPOSE_OVERRIDE_FILE:-}"
+REMOTE_COMPOSE_ENV_FILE="${REMOTE_COMPOSE_ENV_FILE:-}"
 REMOTE_COMPOSE_PROJECT_NAME="${REMOTE_COMPOSE_PROJECT_NAME:-ink-and-memory}"
+REMOTE_PLATFORM_NETWORK="${REMOTE_PLATFORM_NETWORK:-}"
 REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST:-127.0.0.1}"
 REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT:-8080}"
 REMOTE_BACKEND_BIND_HOST="${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}"
@@ -81,6 +86,8 @@ Optional environment:
   LOCAL_DATA_DIR        default: <repo>/backend/data
   REMOTE_DOCKER_COMPOSE_BIN default: docker-compose
   REMOTE_COMPOSE_FILE   default: deploy/remote-ssh/docker-compose.yml
+  REMOTE_COMPOSE_OVERRIDE_FILE optional second Compose file
+  REMOTE_COMPOSE_ENV_FILE optional Compose --env-file path
   REMOTE_COMPOSE_PROJECT_NAME default: ink-and-memory
   REMOTE_CLASH_CONFIG_FILE default: ../../deploy/clash/config.yaml, resolved from deploy/remote-ssh/docker-compose.yml
   REMOTE_SYNC_DELETE    default: 0; set to 1 to pass --delete during upload/download
@@ -135,6 +142,7 @@ remote_env_prefix() {
     REMOTE_CLASH_CONTAINER REMOTE_CLASH_CONTROLLER_BIND_HOST
     REMOTE_CLASH_CONTROLLER_PORT REMOTE_CLASH_DASHBOARD_BIND_HOST
     REMOTE_CLASH_DASHBOARD_PORT
+    REMOTE_PLATFORM_NETWORK
   )
   local output="env" name
   for name in "${names[@]}"; do
@@ -145,7 +153,14 @@ remote_env_prefix() {
 
 remote_compose() {
   local compose_cmd arg
-  compose_cmd="cd $(quote "${REMOTE_APP_DIR%/}") && $(remote_env_prefix) $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") -p $(quote "${REMOTE_COMPOSE_PROJECT_NAME}") -f $(quote "${REMOTE_COMPOSE_FILE}")"
+  compose_cmd="cd $(quote "${REMOTE_APP_DIR%/}") && $(remote_env_prefix) $(quote "${REMOTE_DOCKER_COMPOSE_BIN}")"
+  if [[ -n "${REMOTE_COMPOSE_ENV_FILE}" ]]; then
+    compose_cmd+=" --env-file $(quote "${REMOTE_COMPOSE_ENV_FILE}")"
+  fi
+  compose_cmd+=" -p $(quote "${REMOTE_COMPOSE_PROJECT_NAME}") -f $(quote "${REMOTE_COMPOSE_FILE}")"
+  if [[ -n "${REMOTE_COMPOSE_OVERRIDE_FILE}" ]]; then
+    compose_cmd+=" -f $(quote "${REMOTE_COMPOSE_OVERRIDE_FILE}")"
+  fi
   for arg in "$@"; do
     compose_cmd+=" $(quote "${arg}")"
   done

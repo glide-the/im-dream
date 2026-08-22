@@ -16,8 +16,10 @@
 #        (sdk_env.apply_cli_path_to_options) now pairs the SDK with this
 #        patched npm CLI; a build-time `claude --version` assertion guards
 #        against silent platform-binary misses (2.1.220 optional-deps lesson).
+# [Sync] 2026-08-22: align the production image with the codebase's
+#        datetime.UTC dependency by making Python 3.11 the minimum runtime.
 
-FROM python:3.10-slim-bookworm
+FROM python:3.11-slim-bookworm
 
 ARG DEBIAN_MIRROR=https://mirrors.aliyun.com/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security

@@ -4,6 +4,8 @@
 # [Pos] platform release entry in deploy/local/
 # [Sync] 2026-06-12: add platform-scoped local release helper with help, dry-run, and check modes.
 # [Sync] 2026-08-07: expose the frontend dev server on all network interfaces by default.
+# [Sync] 2026-08-22: source Dream's local database URL from the Admin-owned
+#                    embedded PostgreSQL env file instead of a stale local DSN.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +21,7 @@ LOCAL_BACKEND_URL="${LOCAL_BACKEND_URL:-http://127.0.0.1:8765}"
 LOCAL_FRONTEND_HOST="${LOCAL_FRONTEND_HOST:-0.0.0.0}"
 LOCAL_FRONTEND_PORT="${LOCAL_FRONTEND_PORT:-5173}"
 LOCAL_FRONTEND_URL="${LOCAL_FRONTEND_URL:-http://127.0.0.1:${LOCAL_FRONTEND_PORT}}"
+LOCAL_ADMIN_ENV_FILE="${LOCAL_ADMIN_ENV_FILE:-${REPO_ROOT}/../ink-admin-memory/.env.local}"
 
 DRY_RUN=0
 COMMAND=""
@@ -46,6 +49,7 @@ Environment overrides:
   LOCAL_FRONTEND_PORT     default: 5173
   LOCAL_FRONTEND_URL      default: http://127.0.0.1:${LOCAL_FRONTEND_PORT} (local verification URL)
   LOCAL_RELEASE_LOG_DIR   default: logs/deploy-local
+  LOCAL_ADMIN_ENV_FILE    default: sibling ink-admin-memory/.env.local
   PYTHON_BIN              default: backend/.venv/bin/python, python3, then python
 EOF
 }
@@ -124,6 +128,7 @@ check_prereqs() {
   require_file "${BACKEND_DIR}/database.py" || { warn "Missing backend/database.py."; failed=1; }
   require_file "${BACKEND_DIR}/.env" || { warn "Missing backend/.env. Copy backend/.env.example first."; failed=1; }
   require_file "${BACKEND_DIR}/models.json" || { warn "Missing backend/models.json. Copy backend/models.json.example first."; failed=1; }
+  require_file "${LOCAL_ADMIN_ENV_FILE}" || { warn "Missing Admin env file at ${LOCAL_ADMIN_ENV_FILE}. Set LOCAL_ADMIN_ENV_FILE or run Admin env:setup."; failed=1; }
   require_file "${FRONTEND_DIR}/package.json" || { warn "Missing frontend/package.json."; failed=1; }
   require_file "${FRONTEND_DIR}/node_modules/.package-lock.json" || warn "frontend/node_modules is not installed; run npm install before start/build."
   if [[ "${failed}" == "1" ]]; then
@@ -200,7 +205,15 @@ command_start() {
   else
     python_bin="$(select_python)"
   fi
-  start_process "backend" "${BACKEND_DIR}" "${BACKEND_PID}" "${BACKEND_LOG}" "${python_bin}" server.py
+  start_process \
+    "backend" \
+    "${BACKEND_DIR}" \
+    "${BACKEND_PID}" \
+    "${BACKEND_LOG}" \
+    env -u DATABASE_URL \
+    INK_LOAD_DATABASE_URL_FROM_ENV_FILE=1 \
+    INK_DATABASE_ENV_FILE="${LOCAL_ADMIN_ENV_FILE}" \
+    "${python_bin}" server.py
   start_process "frontend" "${FRONTEND_DIR}" "${FRONTEND_PID}" "${FRONTEND_LOG}" npm run dev -- --host "${LOCAL_FRONTEND_HOST}" --port "${LOCAL_FRONTEND_PORT}"
   log "Frontend: ${LOCAL_FRONTEND_URL}"
   log "Backend : ${LOCAL_BACKEND_URL}"

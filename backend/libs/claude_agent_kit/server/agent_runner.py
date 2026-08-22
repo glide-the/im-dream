@@ -8,6 +8,8 @@
 #                    boundary so the parent turn consumes child completion.
 # [Sync] 2026-08-14: allow only confirmation-gated, single-file canonical
 #                    character/scene/prop deletion; keep .dream and broad Bash mutation denied.
+# [Sync] 2026-08-22: pass the server-owned thread runtime workspace separately
+#                    from cwd when applying CLAUDE_CODE_TMPDIR defaults.
 # [Sync] 2026-05-09: forward stdio MCP tool input and result events for frontend traces.
 # [Sync] 2026-05-09: merge project .env SDK injection, stderr capture, and PreToolUse confirmation hooks while keeping Pet Chat's narrow stdio MCP surface.
 # [Sync] 2026-05-09: expose zero-argument necklace intent tools while keeping server-owned upstream parameters.
@@ -2769,7 +2771,10 @@ class ClaudeAgentRunner:
             config_home=opts.claude_config_home,
             cwd=cwd,
         )
-        sdk_options = apply_project_sdk_runtime_options(sdk_options)
+        sdk_options = apply_project_sdk_runtime_options(
+            sdk_options,
+            thread_workspace=opts.claude_tmp_workspace,
+        )
         # Plugin launch boundary: read .ink/launch-manifest.json from the
         # agent workspace (digest-verified, fail-closed) and attach each
         # plugin as a literal `--plugin-dir <path>` argv element via the SDK's

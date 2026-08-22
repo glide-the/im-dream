@@ -57,6 +57,9 @@
 # [Sync] 2026-08-14: pin Claude Code's native temp root through a canonicalized
 #                    CLAUDE_CODE_TMPDIR (configured default /tmp/claude) so its
 #                    per-uid cwd-* files stay under the exact allowWrite root.
+# [Sync] 2026-08-22: relocate CLAUDE_CODE_TMPDIR into each canonical thread
+#                    workspace at .claude-tmp; reject missing/relative/root cwd
+#                    and prepare the 0700 directory at the CLI spawn boundary.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -76,7 +79,8 @@ _CLAUDE_PROJECT_SETTING_SOURCE = "project"
 _CLAUDE_CODE_MAX_RETRIES_ENV_NAME = "CLAUDE_CODE_MAX_RETRIES"
 CLAUDE_CODE_MAX_RETRIES_DEFAULT = "3"
 _CLAUDE_CODE_TMPDIR_ENV_NAME = "CLAUDE_CODE_TMPDIR"
-CLAUDE_CODE_TMPDIR_DEFAULT = "/tmp/claude"
+CLAUDE_CODE_TMPDIR_DIRNAME = ".claude-tmp"
+_CLAUDE_TMP_WORKSPACE_OPTION_ATTR = "_ink_claude_tmp_workspace"
 
 logger = logging.getLogger(__name__)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
@@ -142,40 +146,47 @@ _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 def resolve_claude_code_tmpdir(
-    process_env: Optional[Mapping[str, str]] = None,
+    workspace: Optional[Path | str],
 ) -> str:
-    """Return the server-owned Claude Code temporary root.
+    """Return the canonical per-thread Claude Code temporary root.
 
-    Claude Code 2.1.220 derives its per-uid ``claude-UID/cwd-*`` shell files
-    beneath ``CLAUDE_CODE_TMPDIR``.  Keeping this root explicit makes the CLI
-    subprocess environment and workspace sandbox use one stable path instead
-    of trying to predict a generated ``cwd-*`` name.
+    Claude Code derives its per-uid ``claude-UID/cwd-*`` shell files
+    beneath ``CLAUDE_CODE_TMPDIR``.  The root is always the hidden
+    ``.claude-tmp`` directory inside the canonical thread workspace so a
+    container restart cannot remove a global parent directory and sibling
+    threads never share CLI settings or shell scratch files.
 
-    Only an absolute process-level override is accepted. Browser/user env
-    settings cannot relocate this security boundary.
+    Browser/user/process env settings cannot relocate this security boundary.
     """
 
-    source = os.environ if process_env is None else process_env
-    configured = str(source.get(_CLAUDE_CODE_TMPDIR_ENV_NAME) or "").strip()
-    fallback = str(Path(CLAUDE_CODE_TMPDIR_DEFAULT).resolve(strict=False))
-    raw = Path(configured or CLAUDE_CODE_TMPDIR_DEFAULT).expanduser()
+    raw_value = str(workspace or "").strip()
+    raw = Path(raw_value)
+    if not raw_value or not raw.is_absolute():
+        raise ValueError("Claude Code requires an absolute thread workspace")
     try:
-        resolved = raw.resolve(strict=False)
+        workspace_abs = raw.resolve(strict=False)
     except (OSError, RuntimeError):
-        resolved = Path("/")
-    if raw.is_absolute() and resolved != Path("/"):
-        # macOS exposes /tmp as a symlink to /private/tmp. Claude's sandbox
-        # canonicalizes command paths before applying allowWrite, so both the
-        # subprocess and settings must receive the same canonical path.
-        return str(resolved)
-    if configured:
-        logger.warning(
-            "%s=%r is not a safe absolute directory; using %s.",
-            _CLAUDE_CODE_TMPDIR_ENV_NAME,
-            configured,
-            fallback,
-        )
-    return fallback
+        raise ValueError("Claude Code thread workspace cannot be resolved") from None
+    if workspace_abs == Path("/"):
+        raise ValueError("Claude Code thread workspace cannot be the filesystem root")
+    return str(workspace_abs / CLAUDE_CODE_TMPDIR_DIRNAME)
+
+
+def ensure_claude_code_tmpdir(workspace: Optional[Path | str]) -> str:
+    """Create and validate the canonical per-thread CLI temp directory."""
+
+    candidate = Path(resolve_claude_code_tmpdir(workspace))
+    workspace_abs = candidate.parent.resolve(strict=True)
+    if not workspace_abs.is_dir():
+        raise ValueError("Claude Code thread workspace must be a directory")
+    if candidate.is_symlink():
+        raise ValueError("Claude Code thread temp directory cannot be a symlink")
+    candidate.mkdir(mode=0o700, parents=False, exist_ok=True)
+    resolved = candidate.resolve(strict=True)
+    if not resolved.is_dir() or resolved.parent != workspace_abs:
+        raise ValueError("Claude Code thread temp directory escaped its workspace")
+    resolved.chmod(0o700)
+    return str(resolved)
 
 
 def apply_gateway_credential_tombstones(environment: dict[str, str]) -> None:
@@ -319,8 +330,17 @@ def apply_project_setting_sources_to_options(options: Any) -> Any:
 def apply_project_sdk_runtime_options(
     options: Any,
     env_file: Optional[Path | str] = None,
+    *,
+    thread_workspace: Optional[Path | str] = None,
 ) -> Any:
-    """Apply all project-level Claude SDK runtime defaults."""
+    """Apply all project-level Claude SDK runtime defaults.
+
+    ``thread_workspace`` is a server-owned launch binding, distinct from the
+    SDK ``cwd``.  The runner records it on the options object so the final
+    client adapter can safely reapply project defaults without losing the
+    binding.  Browser, dotenv, process, and user SDK env values cannot set or
+    relocate it.
+    """
     apply_project_dotenv_to_options(options, env_file)
     existing_env = getattr(options, "env", None) or {}
     if not isinstance(existing_env, dict):
@@ -331,11 +351,42 @@ def apply_project_sdk_runtime_options(
     )
     # Server-owned and intentionally assigned rather than setdefault: the
     # workspace sandbox is generated from the same resolver, so an arbitrary
-    # caller value must not move Claude's cwd-* files outside allowWrite.
-    existing_env[_CLAUDE_CODE_TMPDIR_ENV_NAME] = resolve_claude_code_tmpdir()
+    # caller/process value cannot move Claude's files outside this thread.
+    if thread_workspace is not None:
+        canonical_tmpdir = Path(resolve_claude_code_tmpdir(thread_workspace))
+        setattr(
+            options,
+            _CLAUDE_TMP_WORKSPACE_OPTION_ATTR,
+            str(canonical_tmpdir.parent),
+        )
+    authoritative_workspace = getattr(
+        options,
+        _CLAUDE_TMP_WORKSPACE_OPTION_ATTR,
+        None,
+    ) or getattr(options, "cwd", None)
+    if authoritative_workspace:
+        existing_env[_CLAUDE_CODE_TMPDIR_ENV_NAME] = resolve_claude_code_tmpdir(
+            authoritative_workspace
+        )
+    else:
+        # Helper-only callers may merge project env before a run has a cwd.
+        # Never retain a caller/process relocation; the spawn boundary below
+        # requires a canonical thread workspace before launching the CLI.
+        existing_env.pop(_CLAUDE_CODE_TMPDIR_ENV_NAME, None)
     options.env = existing_env
     apply_project_setting_sources_to_options(options)
     return options
+
+
+def get_options_claude_tmp_workspace(options: Any) -> Optional[str]:
+    """Return the server-bound workspace used for Claude CLI temp storage."""
+
+    value = getattr(options, _CLAUDE_TMP_WORKSPACE_OPTION_ATTR, None) or getattr(
+        options,
+        "cwd",
+        None,
+    )
+    return str(value) if value else None
 
 
 def resolve_claude_config_home(

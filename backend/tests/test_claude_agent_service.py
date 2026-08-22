@@ -26,6 +26,8 @@
 #                    successful assistant persistence path.
 # [Sync] 2026-08-14: cover trusted Dream binding selecting the Deck
 #                    workspace-file prompt without changing Chat/session DTOs.
+# [Sync] 2026-08-22: cover thread-local Claude CLI temp binding while
+#                    Workspace Mode remains disabled for context and files.
 # [Sync] 2026-08-13: cover editor MCP structured business failures as tool
 #                    errors with no editor refresh or session_updated event.
 
@@ -580,6 +582,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(str(workspace_path), execution.run_options.cwd)
         self.assertEqual(
+            str(workspace_path),
+            execution.run_options.claude_tmp_workspace,
+        )
+        self.assertEqual(
             execution.run_options.mcp_env,
             {
                 "ANTHROPIC_AUTH_TOKEN": "user-token",
@@ -628,6 +634,11 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 service_module,
                 "get_or_create_workspace",
             ) as get_or_create_workspace,
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_thread_runtime_workspace",
+                return_value=Path("/tmp/thread-runtime/thread_workspace_disabled"),
+            ) as get_or_create_thread_runtime_workspace,
         ):
             execution = await service.assemble_context(
                 request,
@@ -637,8 +648,15 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             )
 
         get_or_create_workspace.assert_not_called()
+        get_or_create_thread_runtime_workspace.assert_called_once_with(
+            "thread_workspace_disabled"
+        )
         self.assertEqual(state.cwd, "")
         self.assertIsNone(execution.run_options.cwd)
+        self.assertEqual(
+            execution.run_options.claude_tmp_workspace,
+            "/tmp/thread-runtime/thread_workspace_disabled",
+        )
         self.assertEqual(builder.user_message_calls[0]["cwd"], "")
 
     async def test_settings_system_prompt_change_rebuilds_cached_system_prompt(self):

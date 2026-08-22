@@ -6,6 +6,9 @@
 > [Sync] 2026-06-09: `claude-agent-prompt-optimization.md` now exists as the planning prompt optimization contract; `context_builder.py` also carries the Expert Prompt Architect template for agent-side planning turns.
 > [Sync] 2026-06-16: Session Retrieval Workflow now tells the Agent to pass `query` / `labels` into `mcp__user__get_sessions_range`; default retrieval is character fuzzy matching, while vector mode is an interface boundary only.
 > [Sync] 2026-06-22: Phase 1 loads `system_config` before prompt/cwd assembly; Settings `system_prompt` is rendered as lower-priority configurable guidance under `_SYSTEM_PROMPT_TEMPLATE`, and `workspace_enabled=false` skips thread workspace initialization plus `cwd` / workspace context injection.
+> [Sync] 2026-08-22: `workspace_enabled=false` still skips the full product
+> workspace, `cwd`, and context, but creates a minimal thread runtime root and
+> carries it as `AgentRunOptions.claude_tmp_workspace` for CLI temp isolation.
 
 # Claude Agent Context Assembly Design
 
@@ -151,7 +154,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 6. **File memory and attachment context**
    When `system_config.workspace_enabled=true`, the API route may sync uploaded files into the thread workspace before `assemble_context`. Metadata is injected into `message_parts` as file/source/workspace-file parts, and inline-safe image attachments are passed through `request.attachments`. `build_user_message` converts these into Claude content blocks and readable file metadata.
 
-   When `workspace_enabled=false`, the route must not initialize or sync a thread workspace for attachments. The turn remains chat-only; no workspace-file parts are injected.
+   When `workspace_enabled=false`, the route must not initialize or sync the full product workspace for attachments. The turn remains chat-only; no workspace-file parts are injected. The runtime-only `.claude-tmp` lifecycle is separate.
 
 7. **Runtime context**
    `build_user_message` inserts a lightweight `<runtime_context>` block before the user text. It may include date, local time, timezone, model, max turns, session ID, and resume status when those values are supplied by upstream code.
@@ -175,7 +178,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
    | Mode | Required behavior |
    |---|---|
    | `workspace_enabled=true` | `assemble_context` calls `get_or_create_workspace(state.session_id, sandbox_enabled=True, sandbox_network_*)`, writes `state.cwd`, passes `cwd` into `build_user_message`, and sets `AgentRunOptions.cwd` to the thread workspace. |
-   | `workspace_enabled=false` | `assemble_context` does **not** call `get_or_create_workspace`, ignores client `request.cwd`, clears cached `state.cwd`, passes `cwd=""` into `build_user_message`, and sets `AgentRunOptions.cwd=None`. |
+   | `workspace_enabled=false` | `assemble_context` does **not** call full `get_or_create_workspace`; it calls `get_or_create_thread_runtime_workspace`, ignores client `request.cwd`, clears cached `state.cwd`, passes `cwd=""` into `build_user_message`, sets `AgentRunOptions.cwd=None`, and sets `claude_tmp_workspace` to the minimal thread root. |
 
    With `cwd=""`, `build_user_message` does not inject `<workspace_context>` or `<memory_context>`.
 
@@ -193,7 +196,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | External facts | Do not prefetch arbitrary live data during assembly. Realtime facts must enter through explicit tools during Phase 3. |
 | Historical context | If DB context cannot be loaded, degrade to a valid system prompt with the no-session fallback. Do not fail the turn for missing optional history. |
 | Settings SYSTEM_PROMPT | Load only through `database.get_system_config(user_id)`. Treat as lower priority than `_SYSTEM_PROMPT_TEMPLATE`; omit when empty or unavailable. |
-| Workspace override | Treat `request.cwd` as trusted/internal only when Workspace Mode is enabled. When `workspace_enabled=false`, ignore it and do not initialize a workspace. |
+| Workspace override | Treat `request.cwd` as trusted/internal only when Workspace Mode is enabled. When disabled, ignore it and do not initialize the full product workspace; only the server-owned runtime temp root is allowed. |
 | Tool policy | Support `auto`, `manual`, and `none`; invalid values should be rejected before SDK execution. |
 | Prompt optimization | Preserve the raw user task for audit upstream, but pass only the optimized planning prompt into `message_parts` when the turn is a planning task. |
 
@@ -206,7 +209,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | `request` | Original validated `ClaudeAgentRunRequest`. |
 | `state` | The active `AgentRunState` after any `system_prompt`, `cwd`, and `turn_context` writes. |
 | `runner` | Opaque runner reference supplied by the factory. |
-| `run_options` | `AgentRunOptions(thread_id=thread_id_for_agent, user_message, resume=should_resume, model, cwd, max_turns, tool_choice, system_prompt)`. `thread_id` is `None` on the first turn; the Claude SDK session ID on resume turns. `cwd=None` when Workspace Mode is disabled. |
+| `run_options` | `AgentRunOptions(thread_id=thread_id_for_agent, user_message, resume=should_resume, model, cwd, claude_tmp_workspace, max_turns, tool_choice, system_prompt)`. `cwd=None` when Workspace Mode is disabled, while `claude_tmp_workspace` always names the canonical thread runtime root. |
 | `turn_context` | New `_TurnContext(queue, confirmation_store, pending sets, reasoning state, collected_parts)`. |
 | `resume_existing_session` | The `chat_thread` DB row when the session is being resumed; `None` on the first turn. Carried to Phase 3 for diagnostic / persistence use. |
 
@@ -232,7 +235,7 @@ State side effects:
 | Workspace initialization failure | Fail the turn before SDK execution; cleanup must leave the state idle and without stale `turn_context`. |
 | Unsupported attachment media | Log and continue with available metadata; do not inject unreadable binary data as text. |
 | `get_system_config` failure | Log warning, use default agent settings, build system prompt without Settings SYSTEM_PROMPT, and keep Workspace Mode enabled by default for backward compatibility. |
-| Workspace Mode disabled | Skip workspace initialization and attachment workspace sync; continue the chat turn with `cwd=None`. |
+| Workspace Mode disabled | Skip full workspace initialization and attachment sync; create only the thread runtime `.claude-tmp`, then continue with `cwd=None` and no workspace context. |
 | Prompt optimizer unavailable | Planning layer should fall back to the raw task or a policy-defined retry path before calling `assemble_context`; this method should not block waiting for optimizer recovery. |
 | Tool confirmation leak | Factory cleanup must cancel pending confirmations and clear `state.turn_context` when the stream ends or disconnects. |
 
@@ -257,7 +260,7 @@ Coverage should stay focused on the contracts above:
 - `assemble_context` builds `system_prompt` once per fresh state and reuses it on subsequent turns.
 - `assemble_context` passes Settings SYSTEM_PROMPT from `get_system_config` into `build_system_prompt`, and rebuilds the cached prompt when that config changes.
 - `assemble_context` initializes workspace and passes `cwd` only when `workspace_enabled=true`.
-- When `workspace_enabled=false`, `assemble_context` does not call `get_or_create_workspace`, clears `state.cwd`, and passes `AgentRunOptions.cwd=None`.
+- When `workspace_enabled=false`, `assemble_context` does not call the full `get_or_create_workspace`, clears `state.cwd`, passes `AgentRunOptions.cwd=None`, and binds `claude_tmp_workspace` to the minimal runtime root.
 - `assemble_context` copies `tool_choice`, `model`, `max_turns` into `AgentRunOptions`.
 - **Resume path**: when `request.resume=True` and `existing_session` has a matching contract version and the JSONL file exists locally, `run_options.thread_id` equals the stored `claude_session_id` and `run_options.resume=True`.
 - **No-resume path (first turn)**: `run_options.thread_id=None`, `run_options.resume=False` when `existing_session` is absent or `_has_usable_claude_resume` returns False.
@@ -281,7 +284,7 @@ Coverage should stay focused on the contracts above:
 - [ ] Sync attachments to workspace before context assembly and inject workspace-file parts.
 - [ ] Keep unsupported binary payloads out of prompt text.
 - [ ] Resolve `cwd` without hard-coded local paths.
-- [x] Skip workspace initialization and `cwd` injection when `workspace_enabled=false`. *(2026-06-22)*
+- [x] Skip full product workspace initialization and `cwd` injection when `workspace_enabled=false`; retain only thread-local CLI temp ownership. *(2026-08-22)*
 - [x] **Load `chat_thread` row from DB and call `_has_usable_claude_resume` before building `AgentRunOptions`.** *(2026-05-29)*
 - [x] **Probe local JSONL via `locate_session_file` before committing to `--resume`.** *(2026-05-29)*
 - [x] **Set `run_options.thread_id = thread_id_for_agent` (None on first turn) and `run_options.resume = should_resume`.** *(2026-05-29)*
