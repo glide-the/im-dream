@@ -12,6 +12,7 @@
 # [Sync] 2026-06-25: cover thread-scoped stop endpoint registration and routing.
 # [Sync] 2026-07-04: cover Notion connector router registration and auth gating.
 # [Sync] 2026-08-17: cover same-Deck Agent switching, provenance metadata, and CAS conflicts.
+# [Sync] 2026-08-22: cover restored Claude MCP Resources router registration.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -351,6 +352,37 @@ class TestNotionRouteRegistration(unittest.TestCase):
 
     def test_delete_resource(self):
         self.assertTrue(self._has_route("DELETE", "/api/connectors/{connector_id}/resources/{resource_id}"))
+
+
+@_skip_if_no_server
+class TestClaudeMcpRouteRegistration(unittest.TestCase):
+    """Verify the Claude MCP Resources router is mounted in server.py."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.routes = {
+            (frozenset(route.methods or set()), route.path)
+            for route in _SERVER_MODULE.app.routes
+            if hasattr(route, "path") and route.path.startswith("/api/claude-mcp")
+        }
+
+    def _has_route(self, method: str, path: str) -> bool:
+        return any(method in methods and value == path for methods, value in self.routes)
+
+    def test_capability_route(self):
+        self.assertTrue(self._has_route("GET", "/api/claude-mcp/capability"))
+
+    def test_servers_routes(self):
+        self.assertTrue(self._has_route("GET", "/api/claude-mcp/servers"))
+        self.assertTrue(self._has_route("POST", "/api/claude-mcp/servers"))
+
+    def test_auth_operation_route(self):
+        self.assertTrue(
+            self._has_route(
+                "POST",
+                "/api/claude-mcp/servers/{server_name:path}/auth-operations",
+            )
+        )
 
 
 # ---------------------------------------------------------------------------

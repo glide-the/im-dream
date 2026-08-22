@@ -1,7 +1,6 @@
 // [Input] Resource connector API client, shared dashboard icons, and App-level focus nonce.
-// [Output] Settings resource-link index section with remote/local connector choices; the Notion
-//          "管理" action now navigates to the dedicated ConnectorNotionDetailPage instead of
-//          toggling an inline embedded panel.
+// [Output] Settings resource-link index with Notion handoff, Claude MCP discovery/OAuth management,
+//          and explicit placeholders for unavailable connectors.
 // [Pos] settings resource-link section in frontend/src/components/dashboard
 // [Sync] 2026-07-08: initial Settings resource-link section for the connector migration.
 // [Sync] 2026-07-08: remove the inline Notion detail toggle; 管理 now calls onOpenNotionDetail so
@@ -9,8 +8,11 @@
 //                    interaction design's page-navigation requirement.
 // [Sync] 2026-07-08: replace light-only Settings connector card/status fills with semantic theme
 //                    tokens and state color mixes so resource-link settings adapt to dark mode.
+// [Sync] 2026-08-19: embed the domain-owned Claude MCP resource connector under remote resources.
+// [Sync] 2026-08-20: hand MCP server cards to the dedicated Notion-aligned detail workbench.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
+import ClaudeMcpResourceSection from '../claude-mcp/ClaudeMcpResourceSection';
 import {
   IconChevronRight,
   IconClock,
@@ -27,6 +29,8 @@ interface ConnectorSettingsSectionProps {
   isMobile?: boolean;
   /** Navigates to the dedicated Notion "具体配置页面" instead of expanding inline. */
   onOpenNotionDetail?: () => void;
+  /** Navigates to one actor-owned Claude MCP server detail page. */
+  onOpenClaudeMcpDetail?: (serverName: string) => void;
 }
 
 interface ConnectorOptionCardProps {
@@ -197,7 +201,12 @@ function ConnectorOptionCard({
   );
 }
 
-export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = false, onOpenNotionDetail }: ConnectorSettingsSectionProps) {
+export default function ConnectorSettingsSection({
+  focusNonce = 0,
+  isMobile = false,
+  onOpenNotionDetail,
+  onOpenClaudeMcpDetail,
+}: ConnectorSettingsSectionProps) {
   const sectionRef = useRef<HTMLElement>(null);
   const [connectors, setConnectors] = useState<ResourceConnector[]>([]);
   const [loading, setLoading] = useState(true);
@@ -319,6 +328,8 @@ export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = fa
               disabled
             />
           </div>
+
+          <ClaudeMcpResourceSection onOpenServerDetail={onOpenClaudeMcpDetail} />
         </section>
 
         <div style={{ height: '1px', background: 'var(--color-border-paper)' }} />

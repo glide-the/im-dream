@@ -60,6 +60,9 @@
 # [Sync] 2026-08-22: relocate CLAUDE_CODE_TMPDIR into each canonical thread
 #                    workspace at .claude-tmp; reject missing/relative/root cwd
 #                    and prepare the 0700 directory at the CLI spawn boundary.
+# [Sync] 2026-08-22: restore strict system-CLI discovery for MCP management and
+#                    the server-owned secure-storage selector without changing
+#                    the thread-scoped TMPDIR contract.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -81,6 +84,10 @@ CLAUDE_CODE_MAX_RETRIES_DEFAULT = "3"
 _CLAUDE_CODE_TMPDIR_ENV_NAME = "CLAUDE_CODE_TMPDIR"
 CLAUDE_CODE_TMPDIR_DIRNAME = ".claude-tmp"
 _CLAUDE_TMP_WORKSPACE_OPTION_ATTR = "_ink_claude_tmp_workspace"
+CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME = "INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES"
+CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT = 8 * 1024 * 1024
+CLAUDE_AGENT_MAX_BUFFER_SIZE_MINIMUM = 1024 * 1024
+CLAUDE_AGENT_MAX_BUFFER_SIZE_MAXIMUM = 64 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
@@ -128,6 +135,9 @@ _USER_SDK_ENV_NAMES = frozenset(
 # :func:`resolve_claude_config_home` (single source of truth), never ``~``.
 _CLAUDE_CONFIG_DIR_ENV_NAME = "CLAUDE_CONFIG_DIR"
 _CLAUDE_CONFIG_HOME_DIRNAME = ".claude-home"
+CLAUDE_SECURE_STORAGE_CONFIG_DIR_ENV_NAME = (
+    "CLAUDE_SECURESTORAGE_CONFIG_DIR"
+)
 # Backward-compatible alias (2026-08-03 rename — the redirect covers far more
 # than Plan Mode); prefer _CLAUDE_CONFIG_HOME_DIRNAME in new code.
 _PLAN_MODE_CONFIG_HOME_DIRNAME = _CLAUDE_CONFIG_HOME_DIRNAME
@@ -143,6 +153,36 @@ _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME = "CLAUDE_CODE_TASK_LIST_ID"
 # workspace.get_tasks_dir() resolves the same constant — single source.
 CLAUDE_CODE_TASK_LIST_ID_VALUE = "main"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def resolve_claude_agent_max_buffer_size(
+    process_env: Optional[Mapping[str, str]] = None,
+) -> int:
+    """Return the bounded SDK stdout limit for one CLI NDJSON message."""
+
+    source = os.environ if process_env is None else process_env
+    raw = str(source.get(CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME) or "").strip()
+    if not raw:
+        return CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if not (
+        CLAUDE_AGENT_MAX_BUFFER_SIZE_MINIMUM
+        <= value
+        <= CLAUDE_AGENT_MAX_BUFFER_SIZE_MAXIMUM
+    ):
+        logger.warning(
+            "%s=%r must be between %d and %d bytes; using %d.",
+            CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
+            raw,
+            CLAUDE_AGENT_MAX_BUFFER_SIZE_MINIMUM,
+            CLAUDE_AGENT_MAX_BUFFER_SIZE_MAXIMUM,
+            CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT,
+        )
+        return CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT
+    return value
 
 
 def resolve_claude_code_tmpdir(
@@ -454,6 +494,33 @@ def apply_claude_config_home_to_options(
     return options
 
 
+def apply_claude_secure_storage_home_to_options(
+    options: Any,
+    secure_storage_home: Optional[str | Path] = None,
+) -> Any:
+    """Bind Claude Code's credential store to one authenticated platform user."""
+
+    if secure_storage_home is None:
+        return options
+    raw = Path(str(secure_storage_home)).expanduser()
+    if not raw.is_absolute():
+        raise ValueError("Claude secure-storage home must be absolute.")
+    try:
+        resolved = raw.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("Claude secure-storage home is invalid.") from exc
+    if resolved == Path("/"):
+        raise ValueError("Claude secure-storage home is invalid.")
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    options.env = {
+        **existing_env,
+        CLAUDE_SECURE_STORAGE_CONFIG_DIR_ENV_NAME: str(resolved),
+    }
+    return options
+
+
 def apply_plan_mode_env_to_options(
     options: Any,
     cwd: Optional[str | Path] = None,
@@ -514,6 +581,31 @@ def apply_task_v2_env_to_options(options: Any) -> Any:
 _CLAUDE_CODE_CLI_PATH_ENV_NAME = "CLAUDE_CODE_CLI_PATH"
 
 
+def resolve_claude_cli_path(
+    process_env: Optional[Mapping[str, str]] = None,
+) -> Optional[str]:
+    """Resolve an executable system CLI for Agent and MCP management calls."""
+
+    source = os.environ if process_env is None else process_env
+    override = str(source.get(_CLAUDE_CODE_CLI_PATH_ENV_NAME) or "").strip()
+    if override:
+        candidate = Path(override).expanduser()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve())
+        logger.warning(
+            "%s is set but is not executable; falling back to PATH.",
+            _CLAUDE_CODE_CLI_PATH_ENV_NAME,
+        )
+    search_path = source.get("PATH") if process_env is not None else None
+    system_cli = shutil.which("claude", path=search_path)
+    if not system_cli:
+        return None
+    candidate = Path(system_cli)
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        return None
+    return str(candidate.resolve())
+
+
 def apply_cli_path_to_options(options: Any) -> Any:
     """Pin ``options.cli_path`` to the system/npm CLI when available.
 
@@ -536,18 +628,7 @@ def apply_cli_path_to_options(options: Any) -> Any:
 
     if getattr(options, "cli_path", None):
         return options
-    override = os.getenv(_CLAUDE_CODE_CLI_PATH_ENV_NAME, "").strip()
-    if override:
-        if os.path.isfile(override):
-            options.cli_path = override
-            return options
-        logger.warning(
-            "%s=%r is set but the file does not exist; falling back to "
-            "system/bundled CLI resolution.",
-            _CLAUDE_CODE_CLI_PATH_ENV_NAME,
-            override,
-        )
-    system_cli = shutil.which("claude")
+    system_cli = resolve_claude_cli_path()
     if system_cli:
         options.cli_path = system_cli
     return options

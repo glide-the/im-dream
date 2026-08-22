@@ -1,8 +1,9 @@
 # [Input] Consume ClaudeAgentRunner, AgentRunOptions, AgentStreamingCallbacks,
 #         AgentRunResult from backend/libs/claude_agent_kit/runner.py and types.py.
-# [Output] Verify streaming callbacks, session_id extraction, error handling,
-#          on_text_done, on_tool_event, tool confirmation flow, env aliases.
+# [Output] Verify streaming callbacks, session_id extraction, bounded SDK message
+#          buffer/error guidance, on_text_done, tool events, confirmation, and env aliases.
 # [Pos] test node in backend/tests
+# [Sync] 2026-08-20: cover the server-owned SDK stdout buffer option and safe overflow hint.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -450,6 +451,30 @@ class TestClaudeAgentRunnerBasicText(_RunnerBase):
         self.assertEqual(result.full_text, "Hello World")
         self.assertEqual(received, ["Hello", " World"])
 
+    async def test_sdk_options_receive_bounded_message_buffer_override(self):
+        self.set_query([])
+        runner = self.make_runner()
+        with patch.dict(
+            os.environ,
+            {"INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES": str(4 * 1024 * 1024)},
+            clear=False,
+        ):
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="buffer-policy-001",
+                    user_message="inspect image",
+                    tool_choice="none",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda _delta: None
+                ),
+            )
+        self.assertTrue(result.success)
+        self.assertEqual(
+            self._mock_client.last_options.max_buffer_size,
+            4 * 1024 * 1024,
+        )
+
     async def test_workspace_launch_manifest_plugins_are_forwarded_to_sdk(self):
         """Plugins reach the CLI only via the workspace launch manifest.
 
@@ -743,6 +768,24 @@ class TestSandboxFailureHintHelper(unittest.TestCase):
         self.assertIsNone(hint)
 
 
+class TestSdkMessageBufferFailureHintHelper(unittest.TestCase):
+    def test_buffer_overflow_returns_safe_bounded_remediation(self):
+        hint = agent_runner_module._sdk_message_buffer_failure_hint(
+            "Failed to decode JSON: JSON message exceeded maximum buffer size",
+            8 * 1024 * 1024,
+        )
+        self.assertIsNotNone(hint)
+        self.assertIn("8388608", hint)
+        self.assertIn("INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES", hint)
+
+    def test_unrelated_sdk_error_returns_none(self):
+        hint = agent_runner_module._sdk_message_buffer_failure_hint(
+            "Command failed with exit code 1",
+            8 * 1024 * 1024,
+        )
+        self.assertIsNone(hint)
+
+
 class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
     """Errors from the SDK are caught and reported via on_error."""
 
@@ -931,6 +974,59 @@ class TestClaudeAgentRunnerToolConfirmation(_RunnerBase):
 
         self.assertTrue(result.success)
         self.assertEqual(confirmation_requests, [])
+
+
+class TestClaudeAgentRunnerRemoteMcp(_RunnerBase):
+    async def test_remote_server_uses_public_sdk_option_without_auto_allow(self):
+        self.set_query([])
+        runner = self.make_runner()
+
+        await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="remote-mcp-001",
+                user_message="use the remote connector",
+                cwd=str(_FAKE_WORKSPACE),
+                allowed_tools=["Read"],
+                claude_mcp_servers={
+                    "remote-readonly": {
+                        "type": "http",
+                        "url": "https://mcp.example.test",
+                    }
+                },
+            ),
+            callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
+        )
+
+        self.assertEqual(
+            self._mock_client.last_options.mcp_servers["remote-readonly"],
+            {"type": "http", "url": "https://mcp.example.test"},
+        )
+        self.assertFalse(
+            any(
+                tool.startswith("mcp__remote-readonly__")
+                for tool in self._mock_client.last_options.allowed_tools
+            )
+        )
+
+    async def test_remote_server_cannot_shadow_internal_agent_mcp(self):
+        self.set_query([])
+        runner = self.make_runner()
+
+        with self.assertRaisesRegex(RuntimeError, "conflicts with an internal"):
+            await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="remote-mcp-conflict",
+                    user_message="do not shadow internal tools",
+                    cwd=str(_FAKE_WORKSPACE),
+                    claude_mcp_servers={
+                        "user": {
+                            "type": "http",
+                            "url": "https://mcp.example.test",
+                        }
+                    },
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
+            )
 
 
 class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
@@ -2459,6 +2555,37 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
         )
 
         self.assertEqual(options.env["CLAUDE_CODE_MAX_RETRIES"], "3")
+
+    def test_secure_storage_home_is_separate_and_server_authoritative(self):
+        options = _SDK_OPTIONS(
+            env={
+                "CLAUDE_CONFIG_DIR": "/threads/thread-1/.claude-home",
+                "CLAUDE_SECURESTORAGE_CONFIG_DIR": "/untrusted/override",
+            }
+        )
+
+        sdk_env_module.apply_claude_secure_storage_home_to_options(
+            options,
+            "/runtime/users/platform-user/config",
+        )
+
+        self.assertEqual(
+            options.env["CLAUDE_CONFIG_DIR"],
+            "/threads/thread-1/.claude-home",
+        )
+        self.assertEqual(
+            options.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"],
+            "/runtime/users/platform-user/config",
+        )
+
+    def test_secure_storage_home_rejects_relative_or_root_paths(self):
+        for value in ("relative/config", "/"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    sdk_env_module.apply_claude_secure_storage_home_to_options(
+                        _SDK_OPTIONS(),
+                        value,
+                    )
 
     def test_project_runtime_options_preserve_explicit_retry_override(self):
         options = _SDK_OPTIONS(env={"CLAUDE_CODE_MAX_RETRIES": "2"})

@@ -6,20 +6,23 @@
 # [Sync] 2026-06-12: add configurable Debian/PyPI/npm mirror build args for faster China builds.
 # [Sync] 2026-06-14: install Claude Code Linux sandbox dependencies for Docker deployments.
 # [Sync] 2026-06-17: ensure standard sbin directories exist for bubblewrap rootfs mounts.
-# [Sync] 2026-07-26: Route A — revert npm Claude Code to 2.1.108 and restore
-#        the vendor apply-seccomp passthrough patch.  The settings-driven
-#        override (sandbox.seccomp.applyPath + shim) tried for 2.1.220 was
-#        proven dead in production: the 2.1.220 embedded converter hardcodes
-#        its seccomp config and never reads sandbox.seccomp (Linux binary
-#        strings: 0 hits for the settings key, 16 for /proc/self/fd), and the
-#        shim was never invoked.  cli_path pinning
-#        (sdk_env.apply_cli_path_to_options) now pairs the SDK with this
-#        patched npm CLI; a build-time `claude --version` assertion guards
-#        against silent platform-binary misses (2.1.220 optional-deps lesson).
-# [Sync] 2026-08-22: align the production image with the codebase's
-#        datetime.UTC dependency by making Python 3.11 the minimum runtime.
+# [Sync] 2026-08-19: atomically pair Claude Code 2.1.235 with Agent SDK
+#        0.2.140, assert public MCP login/logout/no-browser argv at build time,
+#        and remove the obsolete vendor apply-seccomp mutation. Native CLI
+#        sandboxing uses bubblewrap/socat; workspace settings explicitly skip
+#        the optional Unix-socket seccomp filter in nested containers.
+# [Sync] 2026-08-19: align the image with the backend's Python 3.12 source
+#        contract (including datetime.UTC) so the production module graph is
+#        importable before Claude MCP/sandbox acceptance runs.
+# [Sync] 2026-08-19: source Node 22.18.0 from the official Node image because
+#        Claude Code 2.1.235 declares Node >=22; Debian bookworm's Node 18 is
+#        not an accepted production pairing.
 
-FROM python:3.11-slim-bookworm
+ARG NODE_VERSION=22.18.0
+FROM node:${NODE_VERSION}-bookworm-slim AS node_runtime
+FROM python:3.12-slim-bookworm
+
+ARG NODE_VERSION
 
 ARG DEBIAN_MIRROR=https://mirrors.aliyun.com/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
@@ -39,15 +42,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # System deps:
 #   - gcc / libffi / libssl / libjpeg / zlib: cryptography + Pillow
-#   - curl jq git ripgrep: runtime utilities used by agent/tooling
-#   - nodejs npm: required by @anthropic-ai/claude-code (Claude agent SDK)
+#   - bash curl jq git ripgrep: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
-ARG CLAUDE_CODE_VERSION=2.1.108
-# System deps:
-#   - gcc / libffi / libssl / libjpeg / zlib: cryptography + Pillow
-#   - curl jq git ripgrep: runtime utilities used by agent/tooling
-#   - nodejs npm: required by @anthropic-ai/claude-code
-#   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
+ARG CLAUDE_CODE_VERSION=2.1.235
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i \
@@ -63,34 +60,36 @@ RUN set -eux; \
         libssl-dev \
         libjpeg62-turbo-dev \
         zlib1g-dev \
+        bash \
         curl \
         jq \
         git \
         ripgrep \
         ca-certificates \
-        nodejs \
-        npm \
         bubblewrap \
         socat; \
     mkdir -p /sbin /usr/sbin /usr/local/sbin; \
     rm -rf /var/lib/apt/lists/*
 
-# Claude Code + sandbox-runtime.
-# Patch apply-seccomp to passthrough to avoid nested userns / setgroups failure in Docker.
-# `claude --version` must succeed after install — 2.1.220 taught us the
-# platform binary can silently miss (optional deps), so fail the build loudly.
+# Claude Code 2.1.235 requires Node >=22. Copy the pinned runtime and npm from
+# the official Node image instead of accepting bookworm's unsupported Node 18.
+COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node_runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN set -eux; \
+    ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
+    ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
+    test "$(node --version)" = "v${NODE_VERSION}"
+
+# Claude Code native binary. bubblewrap/socat above provide the required Linux
+# sandbox; the optional @anthropic-ai/sandbox-runtime seccomp filter is not
+# installed because nested containers intentionally skip only its AF_UNIX
+# layer through sandbox.network.allowAllUnixSockets.
 RUN set -eux; \
     npm config set registry "${NPM_REGISTRY}"; \
-    npm install -g \
-        "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-        "@anthropic-ai/sandbox-runtime"; \
-    claude --version; \
-    APPLY_SECCOMP_ROOT="$(npm root -g)/@anthropic-ai/claude-code/vendor/seccomp"; \
-    test -d "$APPLY_SECCOMP_ROOT"; \
-    find "$APPLY_SECCOMP_ROOT" -type f -name apply-seccomp -print \
-        -exec sh -c 'printf "%s\n" "#!/bin/sh" "exec \"\$@\"" > "$1"; chmod +x "$1"' sh {} \; ; \
-    echo "Patched Claude Code apply-seccomp passthrough:"; \
-    find "$APPLY_SECCOMP_ROOT" -type f -name apply-seccomp -print -exec head -n 2 {} \; ; \
+    npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
+    test "$(claude --version | awk '{print $1}')" = "${CLAUDE_CODE_VERSION}"; \
+    claude mcp login --help | grep -F -- "--no-browser"; \
+    claude mcp logout --help >/dev/null; \
     npm cache clean --force
 
 WORKDIR /app

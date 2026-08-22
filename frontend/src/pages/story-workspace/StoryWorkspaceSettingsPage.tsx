@@ -2,12 +2,14 @@
 // [Output] Existing Settings shell with one Work category whose content owns Deck, resource-link, and plugin tabs.
 // [Pos] Canonical Story Workspace Settings page and Work workbench route surface.
 // [Sync] 2026-08-17: localize the complete Settings shell and Work surface; render one locale at a time.
+// [Sync] 2026-08-20: host the actor-owned Claude MCP detail projection beside the Notion detail page.
 /* eslint-disable react-refresh/only-export-components -- route metadata helpers intentionally share this page module. */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FaArrowLeft, FaBriefcase, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import AboutView from '../../components/AboutView';
 import { IconMonitor, IconMoon, IconSun } from '../../components/chat/Icons';
+import ClaudeMcpServerDetailPage from '../../components/claude-mcp/ClaudeMcpServerDetailPage';
 import ClaudePluginAdminPage from '../../components/claude-plugin-admin/ClaudePluginAdminPage';
 import ConnectorNotionDetailPage from '../../components/dashboard/ConnectorNotionDetailPage';
 import ConnectorSettingsSection from '../../components/dashboard/ConnectorSettingsSection';
@@ -38,8 +40,11 @@ export interface StoryWorkspaceSettingsPageProps {
   onEnergyBarChange: () => void;
   connectorSettingsFocusNonce?: number;
   showNotionConnectorDetail?: boolean;
+  claudeMcpDetailServerName?: string | null;
   onOpenNotionDetail?: () => void;
   onCloseNotionDetail?: () => void;
+  onOpenClaudeMcpDetail?: (serverName: string) => void;
+  onCloseClaudeMcpDetail?: () => void;
   onNavigate: (path: string) => void;
   workDeckContent?: ReactNode;
 }
@@ -144,8 +149,11 @@ export function StoryWorkspaceSettingsPage({
   onEnergyBarChange,
   connectorSettingsFocusNonce = 0,
   showNotionConnectorDetail = false,
+  claudeMcpDetailServerName = null,
   onOpenNotionDetail,
   onCloseNotionDetail,
+  onOpenClaudeMcpDetail,
+  onCloseClaudeMcpDetail,
   onNavigate,
   workDeckContent = null,
 }: StoryWorkspaceSettingsPageProps) {
@@ -174,12 +182,25 @@ export function StoryWorkspaceSettingsPage({
       focusNonce={connectorSettingsFocusNonce}
       isMobile={isMobile}
       onOpenNotionDetail={onOpenNotionDetail}
+      onOpenClaudeMcpDetail={onOpenClaudeMcpDetail}
     />
   ) : workTab === 'plugins' ? (
     <ClaudePluginAdminPage />
   ) : workDeckContent;
 
-  const content = showNotionConnectorDetail ? (
+  const content = claudeMcpDetailServerName ? (
+    <SettingsSection
+      id="settings-claude-mcp-detail"
+      title="Claude MCP"
+      description="查看连接身份、可用能力和 Chat 可访问的工具。"
+    >
+      <ClaudeMcpServerDetailPage
+        serverName={claudeMcpDetailServerName}
+        onBack={onCloseClaudeMcpDetail ?? (() => undefined)}
+        isMobile={isMobile}
+      />
+    </SettingsSection>
+  ) : showNotionConnectorDetail ? (
     <SettingsSection
       id="settings-resource-detail"
       title={t('settings.workspace.resourceDetail.title')}

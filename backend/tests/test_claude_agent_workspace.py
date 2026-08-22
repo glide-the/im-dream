@@ -28,6 +28,9 @@
 # [Sync] 2026-06-21: cover Settings-backed sandbox network policy emission.
 # [Sync] 2026-06-25: cover open sandbox network mode omitting sandbox.network
 #                    instead of writing unsupported allowedDomains ["*"].
+# [Sync] 2026-08-19: cover explicit sensitive-root read isolation, exact MCP
+#                    credential deny-read/write, and the native CLI nested-
+#                    container optional-seccomp skip without denyRead `/`.
 # [Sync] 2026-07-26: cover sandbox fs write policy — default Claude TMPDIR
 #                    allowWrite (cwd-* zsh noise fix), temp-root override,
 #                    sandbox_fs_allowed_write_paths append + denyWrite
@@ -58,6 +61,7 @@ if str(ROOT) not in sys.path:
 import tests._sdk_stubs  # noqa: F401
 from libs.claude_agent_kit.server.editor_index import EDITOR_RESOURCES
 from libs.claude_agent_kit.server.workspace import (
+    CLAUDE_MCP_RUNTIME_ROOT_ENV,
     SANDBOX_EXTRA_ALLOW_READ_ENV,
     WORKSPACE_SUBDIRS,
     _append_existing_sandbox_read_path,
@@ -159,7 +163,18 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertTrue(sandbox["autoAllowBashIfSandboxed"])
         self.assertFalse(sandbox["allowUnsandboxedCommands"])
         self.assertNotIn("enableWeakerNestedSandbox", sandbox)
-        self.assertEqual(sandbox["filesystem"]["denyRead"], ["/"])
+        thread_credentials = str((ws / ".claude-home" / ".credentials.json").resolve())
+        thread_user_config = str((ws / ".claude-home" / ".claude.json").resolve())
+        deny_read = sandbox["filesystem"]["denyRead"]
+        self.assertNotIn("/", deny_read)
+        self.assertIn(str(Path(self._tmp.name).resolve()), deny_read)
+        self.assertIn(str(ROOT.resolve()), deny_read)
+        self.assertIn(str(Path.home().resolve()), deny_read)
+        self.assertIn(thread_credentials, deny_read)
+        self.assertEqual(
+            sandbox["credentials"]["files"],
+            [{"path": thread_credentials, "mode": "deny"}],
+        )
         self.assertEqual(sandbox["filesystem"]["allowRead"][0], str(ws.resolve()))
         self.assertEqual(
             sandbox["filesystem"]["allowWrite"],
@@ -206,6 +221,8 @@ class TestInitWorkspace(unittest.TestCase):
             str((ws / ".editor").resolve()),
             sandbox["filesystem"]["denyWrite"],
         )
+        self.assertIn(thread_credentials, sandbox["filesystem"]["denyWrite"])
+        self.assertIn(thread_user_config, sandbox["filesystem"]["denyWrite"])
 
     def test_can_disable_sandbox_settings_for_workspace_mode_off(self):
         ws = init_workspace("sandbox-disabled", sandbox_enabled=False)
@@ -317,6 +334,8 @@ class TestInitWorkspace(unittest.TestCase):
                 str(ws.resolve() / ".claude" / "worktrees"),
                 str(ws.resolve() / ".editor"),
                 str(ws.resolve() / ".mcp.json"),
+                str(ws.resolve() / ".claude-home" / ".credentials.json"),
+                str(ws.resolve() / ".claude-home" / ".claude.json"),
             ],
         )
 
@@ -342,6 +361,7 @@ class TestInitWorkspace(unittest.TestCase):
         sandbox = settings["sandbox"]
         self.assertTrue(sandbox["enabled"])
         self.assertTrue(sandbox["enableWeakerNestedSandbox"])
+        self.assertTrue(sandbox["network"]["allowAllUnixSockets"])
 
     def test_sandbox_allow_read_includes_runtime_deps_but_not_project_root(self):
         ws = init_workspace("sandbox-runtime-read")
@@ -350,12 +370,28 @@ class TestInitWorkspace(unittest.TestCase):
         project_root = Path(__file__).resolve().parents[2].resolve()
 
         self.assertEqual(allow_read[0], str(ws.resolve()))
-        self.assertIn(str(Path(tempfile.gettempdir()).resolve(strict=False)), allow_read)
+        self.assertNotIn(str(Path(tempfile.gettempdir()).resolve(strict=False)), allow_read)
         for raw_path in ("/sbin", "/usr/sbin", "/usr/local/sbin"):
             system_path = Path(raw_path)
             if system_path.exists():
                 self.assertIn(str(system_path.resolve(strict=False)), allow_read)
         self.assertNotIn(str(project_root), allow_read)
+
+    def test_sandbox_denies_custom_claude_mcp_runtime_root(self):
+        runtime_root = Path(self._tmp.name).parent / "claude-mcp-private"
+        with unittest.mock.patch.dict(
+            os.environ,
+            {
+                "AGENT_CWD": self._tmp.name,
+                CLAUDE_MCP_RUNTIME_ROOT_ENV: str(runtime_root),
+            },
+            clear=False,
+        ):
+            ws = init_workspace("sandbox-mcp-runtime-root")
+
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        deny_read = settings["sandbox"]["filesystem"]["denyRead"]
+        self.assertIn(str(runtime_root.resolve(strict=False)), deny_read)
 
     def test_sandbox_allow_read_accepts_explicit_extra_runtime_paths(self):
         extra_dir = Path(self._tmp.name) / "runtime-extra"
