@@ -11,6 +11,7 @@
 <!-- [Sync] 2026-08-20: add the public Agent SDK tool-inventory protocol, Notion-aligned detail workbench, and reviewed Resources/Prompts limits. -->
 <!-- [Sync] 2026-08-20: bound the public SDK stdout buffer for image tool results and record the passing real Chat regression. -->
 <!-- [Sync] 2026-08-21: accept absolute HTTP(S), isolate Resources CLI from ancestor project configs, and authorize Remove from parsed user scope. -->
+<!-- [Sync] 2026-08-22: restore the reviewed connector onto current develop while preserving its per-thread TMPDIR and current Chat/Dream runtime contracts. -->
 
 # Claude MCP 资源链接器设计
 

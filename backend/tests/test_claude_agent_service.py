@@ -28,6 +28,8 @@
 #                    workspace-file prompt without changing Chat/session DTOs.
 # [Sync] 2026-08-22: cover thread-local Claude CLI temp binding while
 #                    Workspace Mode remains disabled for context and files.
+# [Sync] 2026-08-22: cover per-turn user MCP definition/secure-store delivery
+#                    and Workspace Mode disabled fail-closed behavior.
 # [Sync] 2026-08-13: cover editor MCP structured business failures as tool
 #                    errors with no editor refresh or session_updated event.
 
@@ -310,10 +312,26 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_shared_thread_resume_uses_persisted_claude_session(self):
+        mcp_synchronizer = unittest.mock.Mock(supported=True)
+        mcp_synchronizer.sync_thread = unittest.mock.AsyncMock(
+            return_value=unittest.mock.Mock(
+                mcp_configured=True,
+                mcp_servers={
+                    "remote-readonly": {
+                        "type": "http",
+                        "url": "https://mcp.example.test",
+                    }
+                },
+            )
+        )
+        mcp_synchronizer.secure_storage_home.return_value = Path(
+            "/runtime/users/actor-7/config"
+        )
         service = ClaudeAgentService(
             context_builder=_FakeContextBuilder(),
             platform_model_resolver=lambda _user_id, _alias: "dream-balanced",
             dream_context_mapper=_StaticDreamContextMapper(None),
+            claude_mcp_credential_synchronizer=mcp_synchronizer,
         )
         session_id = "11111111-1111-4111-8111-111111111111"
         request = ClaudeAgentRunRequest(
@@ -365,6 +383,23 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             execution.resume_existing_session["claude_session_id"],
             session_id,
+        )
+        mcp_synchronizer.sync_thread.assert_awaited_once_with(
+            "7",
+            str(workspace_path / ".claude-home"),
+        )
+        self.assertEqual(
+            execution.run_options.claude_secure_storage_home,
+            "/runtime/users/actor-7/config",
+        )
+        self.assertEqual(
+            execution.run_options.claude_mcp_servers,
+            {
+                "remote-readonly": {
+                    "type": "http",
+                    "url": "https://mcp.example.test",
+                }
+            },
         )
 
     def test_dream_runtime_has_no_stream_message_callback(self):
@@ -609,7 +644,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_workspace_mode_disabled_skips_workspace_initialization(self):
         builder = _FakeContextBuilder()
-        service = ClaudeAgentService(context_builder=builder)
+        service = ClaudeAgentService(
+            context_builder=builder,
+            claude_mcp_credential_synchronizer=unittest.mock.Mock(supported=False),
+        )
         state = AgentRunState(session_id="thread_workspace_disabled")
         state.with_cwd("/tmp/stale-workspace")
         request = ClaudeAgentRunRequest(
@@ -658,6 +696,36 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             "/tmp/thread-runtime/thread_workspace_disabled",
         )
         self.assertEqual(builder.user_message_calls[0]["cwd"], "")
+
+    async def test_workspace_mode_disabled_rejects_user_mcp_state(self):
+        mcp_synchronizer = unittest.mock.Mock(supported=True)
+        mcp_synchronizer.has_user_mcp_state = unittest.mock.AsyncMock(
+            return_value=True
+        )
+        service = ClaudeAgentService(
+            context_builder=_FakeContextBuilder(),
+            claude_mcp_credential_synchronizer=mcp_synchronizer,
+        )
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_workspace_disabled_mcp",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with unittest.mock.patch.object(
+            service_module._db,
+            "get_system_config",
+            return_value={"workspace_enabled": False},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "requires Workspace Mode"):
+                await service.assemble_context(
+                    request,
+                    state=AgentRunState(session_id=request.thread_id),
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        mcp_synchronizer.has_user_mcp_state.assert_awaited_once_with("7")
 
     async def test_settings_system_prompt_change_rebuilds_cached_system_prompt(self):
         builder = _FakeContextBuilder()

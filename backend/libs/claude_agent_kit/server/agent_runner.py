@@ -10,6 +10,9 @@
 #                    character/scene/prop deletion; keep .dream and broad Bash mutation denied.
 # [Sync] 2026-08-22: pass the server-owned thread runtime workspace separately
 #                    from cwd when applying CLAUDE_CODE_TMPDIR defaults.
+# [Sync] 2026-08-22: restore authenticated remote MCP injection and the
+#                    independent secure-storage selector; remote tools are not
+#                    added to the automatic allowlist.
 # [Sync] 2026-05-09: forward stdio MCP tool input and result events for frontend traces.
 # [Sync] 2026-05-09: merge project .env SDK injection, stderr capture, and PreToolUse confirmation hooks while keeping Pet Chat's narrow stdio MCP surface.
 # [Sync] 2026-05-09: expose zero-argument necklace intent tools while keeping server-owned upstream parameters.
@@ -250,11 +253,14 @@ from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, loa
 from .story_workspace_tool import story_workspace_allowed_tool_names
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
+    CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
     apply_claude_config_home_to_options,
+    apply_claude_secure_storage_home_to_options,
     apply_cli_path_to_options,
     apply_project_sdk_runtime_options,
     apply_task_v2_env_to_options,
     apply_user_sdk_env_to_options,
+    resolve_claude_agent_max_buffer_size,
 )
 from .plugin_launcher import apply_plugin_launch_options
 from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
@@ -320,6 +326,9 @@ _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
 _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 _STORY_WORKSPACE_MCP_TOOL_PREFIX = "mcp__story_workspace__"
+_INTERNAL_MCP_SERVER_NAMES: frozenset[str] = frozenset(
+    {"user", "memory", "necklace", "editor", "story_workspace"}
+)
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
 _STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     story_workspace_allowed_tool_names()
@@ -1215,6 +1224,22 @@ def _sandbox_runtime_failure_hint(
             "and `security_opt: [seccomp=unconfined, apparmor=unconfined]`."
         )
     return None
+
+
+def _sdk_message_buffer_failure_hint(
+    error_message: str,
+    configured_limit: int,
+) -> Optional[str]:
+    """Return safe remediation when one CLI NDJSON message exceeds policy."""
+
+    if "json message exceeded maximum buffer size" not in error_message.lower():
+        return None
+    return (
+        "Claude Code emitted one message larger than the configured Agent SDK "
+        f"limit ({configured_limit} bytes). Reduce the attachment/tool output, "
+        f"or raise {CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME} within the documented "
+        "server-owned policy bound."
+    )
 
 
 def _is_pure_cancellation(exc: BaseException) -> bool:
@@ -2723,9 +2748,22 @@ class ClaudeAgentRunner:
                 "Story Workspace MCP enabled with trusted actor/thread/run context."
             )
 
+        # User-scoped remote connectors are synchronized before this turn and
+        # injected through the public SDK option. Deliberately do not append a
+        # wildcard to allowed_tools: existing permission policy remains in force.
+        for server_name, server_config in (opts.claude_mcp_servers or {}).items():
+            if server_name in _INTERNAL_MCP_SERVER_NAMES or server_name in mcp_servers:
+                raise RuntimeError(
+                    "Claude MCP remote server conflicts with an internal Agent MCP name."
+                )
+            if not isinstance(server_config, dict):
+                raise RuntimeError("Claude MCP remote server configuration is invalid.")
+            mcp_servers[server_name] = dict(server_config)  # type: ignore[assignment]
+
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = ClaudeAgentOptions(
             max_turns=max_turns,
+            max_buffer_size=resolve_claude_agent_max_buffer_size(),
             allowed_tools=effective_allowed_tools,
             include_partial_messages=include_partial_messages,
             hooks={
@@ -2770,6 +2808,10 @@ class ClaudeAgentRunner:
             sdk_options,
             config_home=opts.claude_config_home,
             cwd=cwd,
+        )
+        apply_claude_secure_storage_home_to_options(
+            sdk_options,
+            opts.claude_secure_storage_home,
         )
         sdk_options = apply_project_sdk_runtime_options(
             sdk_options,
@@ -2983,6 +3025,14 @@ class ClaudeAgentRunner:
                 )
                 if sandbox_hint:
                     run_error.add_note(f"[claude_agent_kit] sandbox_hint: {sandbox_hint}")
+                buffer_hint = _sdk_message_buffer_failure_hint(
+                    _format_exception_message(exc),
+                    sdk_options.max_buffer_size,
+                )
+                if buffer_hint:
+                    run_error.add_note(
+                        f"[claude_agent_kit] message_size_hint: {buffer_hint}"
+                    )
             except AttributeError:
                 # PEP 678 add_note requires Python 3.11+; ignore on older runtimes.
                 pass

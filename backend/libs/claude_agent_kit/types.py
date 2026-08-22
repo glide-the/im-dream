@@ -34,6 +34,8 @@
 # [Sync] 2026-08-22: carry the server-owned thread runtime workspace separately
 #                    from cwd so CLAUDE_CODE_TMPDIR stays thread-local when
 #                    user-facing Workspace Mode is disabled.
+# [Sync] 2026-08-22: carry the authenticated user's secure-storage selector and
+#                    opaque MCP definitions without weakening thread TMPDIR.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -205,6 +207,16 @@ class AgentRunOptions:
     # caches) into the per-thread workspace.  When None the runner falls
     # back to resolving from ``cwd`` itself.
     claude_config_home: Optional[str] = None
+    # macOS Claude Code stores OAuth credentials in a Keychain item selected
+    # independently from CLAUDE_CONFIG_DIR. Linux leaves this unset and uses a
+    # minimal per-thread credentials projection.
+    claude_secure_storage_home: Optional[str] = None
+    # Remote MCP definitions resolved for the authenticated user and injected
+    # through the public Agent SDK option. Keep opaque headers out of repr.
+    claude_mcp_servers: dict[str, dict[str, Any]] = field(
+        default_factory=dict,
+        repr=False,
+    )
     # Maximum turns for the agent.
     max_turns: int = 100
     # Allowed tools for the agent.

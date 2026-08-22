@@ -15,6 +15,7 @@
 [Sync] 2026-08-16: document capability-gated Deck draft/preview/explicit content commit/history.
 [Sync] 2026-08-17: document Deck-filtered Chat history and corrected related-thread/binding deletion semantics.
 [Sync] 2026-08-22: document per-thread CLAUDE_CODE_TMPDIR and the Workspace Mode disabled runtime-only boundary.
+[Sync] 2026-08-22: restore authenticated Claude MCP Resources configuration, OAuth lifecycle, inventory, and removal contracts.
 -->
 
 **Version:** 2.0.0
@@ -1099,6 +1100,33 @@ Deck content snapshot, draft, or publication history.
 `404` preserves the existing missing-or-not-owned boundary. Version changes
 continue through `PUT /api/voice-decks/{deck_id}/plugin-binding` with an exact
 SemVer, `expected_binding_revision`, and `apply_to: "next_run"`.
+
+---
+
+## Claude MCP Resources
+
+All routes require normal Dream authentication. The connector uses an opaque,
+user-scoped Claude CLI identity and never returns or persists OAuth tokens.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/claude-mcp/capability` | Report exact CLI/SDK and headless OAuth readiness. |
+| `GET` | `/api/claude-mcp/servers` | Discover configured servers and verified connection state. |
+| `GET` | `/api/claude-mcp/servers/{server_name}` | Read one opaque server name and its safe tool inventory. |
+| `POST` | `/api/claude-mcp/servers` | Add one validated absolute HTTP(S) MCP URL at user scope. |
+| `DELETE` | `/api/claude-mcp/servers/{server_name}` | Remove only a backend-verified user-scope server. |
+| `POST` | `/api/claude-mcp/servers/{server_name}/auth-operations` | Start/recover `claude mcp login <name> --no-browser`. |
+| `GET` | `/api/claude-mcp/auth-operations/{operation_id}` | Poll an actor-owned in-process OAuth operation. |
+| `POST` | `/api/claude-mcp/auth-operations/{operation_id}/redirect` | Submit one complete HTTP(S) redirect URL to the same CLI process. |
+| `POST` | `/api/claude-mcp/auth-operations/{operation_id}/cancel` | Cancel and reap the OAuth process group. |
+| `POST` | `/api/claude-mcp/servers/{server_name}/logout` | Logout through the official CLI and verify state. |
+
+The Agent receives the authenticated user's opaque definitions through the
+public SDK `mcp_servers` option without automatic tool approval. Linux projects
+only the protected credential subset into the thread config home; macOS reuses
+the exact CLI secure-storage identity without application reads of Keychain
+payloads. Workspace Mode disabled with existing MCP state fails closed. No
+database schema or runtime DDL is introduced.
 
 ---
 

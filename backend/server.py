@@ -19,6 +19,8 @@
 # [Sync] 2026-08-22: prefer the explicitly configured Admin database env file
 #                    over a stale backend/.env DATABASE_URL while preserving
 #                    process-injected deployment configuration.
+# [Sync] 2026-08-22: mount the fail-closed Claude MCP Resources router restored
+#                    onto the current develop application graph.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -838,6 +840,7 @@ from routers.sessions import SessionBatchRequest, router as sessions_router
 from routers.storage import UploadUrlRequest, router as storage_router
 from routers.deck_plugins import router as deck_plugins_router
 from routers.claude_plugins import router as claude_plugins_router
+from routers.claude_mcp import router as claude_mcp_router
 from routers.deck_plugin_binding import router as deck_plugin_binding_router
 from routers.deck_versions import router as deck_versions_router
 from routers.story_workspace import router as story_workspace_router
@@ -1082,6 +1085,7 @@ app.include_router(claude_agent_router)
 app.include_router(storage_router)
 app.include_router(deck_plugins_router)
 app.include_router(claude_plugins_router)
+app.include_router(claude_mcp_router)
 app.include_router(deck_plugin_binding_router)
 app.include_router(deck_versions_router)
 app.include_router(story_workspace_router)
