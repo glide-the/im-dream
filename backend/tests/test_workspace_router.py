@@ -1,5 +1,5 @@
 # [Input] Consume backend/routers/workspace.py and workspace file manager APIs.
-# [Output] Validate workspace file/download contracts, including safe directory ZIPs.
+# [Output] Validate workspace file/content/download contracts, including Thread ownership and safe directory ZIPs.
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-13: initial coverage for RFC 8187 download Content-Disposition.
 # [Sync] 2026-06-21: cover workspace file APIs preserving Settings-backed
@@ -9,6 +9,8 @@
 # [Sync] 2026-07-26: cover refresh preserving sandbox_fs_allowed_write_paths
 #                    from Settings during workspace file API init.
 # [Sync] 2026-08-17: cover directory ZIP layout, Unicode names, and symlink escape denial.
+# [Sync] 2026-08-22: cover the no-create workspace:// content boundary: owned Thread,
+#                    Workspace Mode, strict public paths, regular files, and no symlinks.
 
 """Regression tests for the workspace file router."""
 from __future__ import annotations
@@ -47,6 +49,18 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
             return_value={"user_id": 1, "email": "test@example.com"},
         )
         self._auth_patch.start()
+        self._thread_patch = unittest.mock.patch.object(
+            workspace_router.database,
+            "get_chat_thread",
+            return_value={"id": "owned-thread", "user_id": 1},
+        )
+        self._thread_patch.start()
+        self._config_patch = unittest.mock.patch.object(
+            workspace_router.database,
+            "get_system_config",
+            return_value={"workspace_enabled": True},
+        )
+        self._config_patch.start()
 
         app = FastAPI()
         app.include_router(workspace_router.router)
@@ -54,6 +68,8 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
+        self._config_patch.stop()
+        self._thread_patch.stop()
         self._auth_patch.stop()
         os.environ.pop("AGENT_CWD", None)
         self._tmp.cleanup()
@@ -135,6 +151,147 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400, response.text)
         self.assertEqual(response.json()["detail"]["code"], "PATH_TRAVERSAL")
+
+    def test_content_reads_owned_unicode_regular_file_without_exposing_disk_path(self):
+        session_id = "content-owned"
+        filename = "分镜 preview.png"
+        workspace = get_or_create_workspace(session_id)
+        payload = b"not-a-real-png-but-route-bytes"
+        (workspace / "files" / filename).write_bytes(payload)
+
+        response = self.client.get(
+            "/api/workspace/files/content",
+            params={"sessionId": session_id, "path": f"files/{filename}"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.content, payload)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertNotIn(str(workspace), response.text)
+
+    def test_content_foreign_thread_is_hidden_before_workspace_probe(self):
+        with (
+            unittest.mock.patch.object(
+                workspace_router.database,
+                "get_chat_thread",
+                return_value=None,
+            ),
+            unittest.mock.patch.object(
+                workspace_router,
+                "get_existing_workspace",
+            ) as existing_workspace,
+        ):
+            response = self.client.get(
+                "/api/workspace/files/content",
+                params={"sessionId": "foreign-thread", "path": "files/image.png"},
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_NOT_FOUND")
+        existing_workspace.assert_not_called()
+
+    def test_content_workspace_disabled_is_rejected_before_workspace_probe(self):
+        with (
+            unittest.mock.patch.object(
+                workspace_router.database,
+                "get_system_config",
+                return_value={"workspace_enabled": False},
+            ),
+            unittest.mock.patch.object(
+                workspace_router,
+                "get_existing_workspace",
+            ) as existing_workspace,
+        ):
+            response = self.client.get(
+                "/api/workspace/files/content",
+                params={"sessionId": "disabled-thread", "path": "files/image.png"},
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_DISABLED")
+        existing_workspace.assert_not_called()
+
+    def test_content_rejects_ambiguous_and_non_public_paths_without_workspace_probe(self):
+        invalid_paths = (
+            "../secret.png",
+            "files/../secret.png",
+            "/files/secret.png",
+            "files\\secret.png",
+            "files//secret.png",
+            "files/./secret.png",
+            "files/",
+            "files/%2e%2e/secret.png",
+            "files/image.png?download=1",
+            "files/image.png#fragment",
+            "logs/secret.png",
+            "C:/secret.png",
+        )
+        with unittest.mock.patch.object(
+            workspace_router,
+            "get_existing_workspace",
+        ) as existing_workspace:
+            for path in invalid_paths:
+                with self.subTest(path=path):
+                    response = self.client.get(
+                        "/api/workspace/files/content",
+                        params={"sessionId": "content-paths", "path": path},
+                        headers={"Authorization": "Bearer test-token"},
+                    )
+                    self.assertEqual(response.status_code, 400, response.text)
+                    self.assertEqual(response.json()["detail"]["code"], "INVALID_WORKSPACE_URI")
+        existing_workspace.assert_not_called()
+
+    def test_content_rejects_in_workspace_symlink_and_directory(self):
+        session_id = "content-symlink"
+        workspace = get_or_create_workspace(session_id)
+        target = workspace / "files" / "target.png"
+        target.write_bytes(b"image")
+        (workspace / "files" / "alias.png").symlink_to(target)
+        (workspace / "files" / "folder").mkdir()
+        outside = Path(self._tmp.name) / "outside"
+        outside.mkdir()
+        (outside / "secret.png").write_bytes(b"outside")
+        (workspace / "files" / "linked-folder").symlink_to(outside, target_is_directory=True)
+
+        symlink_response = self.client.get(
+            "/api/workspace/files/content",
+            params={"sessionId": session_id, "path": "files/alias.png"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        directory_response = self.client.get(
+            "/api/workspace/files/content",
+            params={"sessionId": session_id, "path": "files/folder"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        parent_symlink_response = self.client.get(
+            "/api/workspace/files/content",
+            params={"sessionId": session_id, "path": "files/linked-folder/secret.png"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(symlink_response.status_code, 400, symlink_response.text)
+        self.assertEqual(symlink_response.json()["detail"]["code"], "SYMLINK_NOT_ALLOWED")
+        self.assertEqual(directory_response.status_code, 400, directory_response.text)
+        self.assertEqual(directory_response.json()["detail"]["code"], "IS_DIRECTORY")
+        self.assertEqual(parent_symlink_response.status_code, 400, parent_symlink_response.text)
+        self.assertEqual(parent_symlink_response.json()["detail"]["code"], "SYMLINK_NOT_ALLOWED")
+
+    def test_content_missing_workspace_does_not_create_one(self):
+        session_id = "content-missing-workspace"
+        response = self.client.get(
+            "/api/workspace/files/content",
+            params={"sessionId": session_id, "path": "files/image.png"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_NOT_FOUND")
+        self.assertFalse((Path(self._tmp.name) / session_id).exists())
 
     def test_list_refresh_preserves_disabled_sandbox_network_policy(self):
         session_id = "network-disabled"

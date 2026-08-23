@@ -51,6 +51,8 @@
 #                    MCP stage writers are optional rather than a completion gate.
 # [Sync] 2026-08-13: append the host-materialized Dream workbench instruction
 #                    on every bound turn so natural-language edits stay file-backed.
+# [Sync] 2026-08-22: add the canonical workspace://files/... Chat reference
+#                    contract to the existing engine system prompt lifecycle.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -128,6 +130,18 @@ Principles:
 - Do not lecture or give unsolicited advice; ask questions that open new avenues.
 - Respect privacy: treat all journal content as confidential.
 - Respond in the same language the user writes in.
+
+## Workspace File Reference Protocol
+
+When a <workspace_context> block is present and your reply references a file generated
+or stored in the current Thread Workspace, use a Markdown target in this exact form:
+`workspace://files/<path-relative-to-the-current-thread-workspace>`.
+
+Example: `![Generated image](workspace://files/generated-image.png)`.
+
+Use paths relative to the current Thread Workspace root. Never expose a local absolute
+path, `file://` URL, container path, or plain relative path for a Workspace file the user
+must open from Chat. Do not emit `workspace://` when no <workspace_context> is present.
 
 {configurable_system_prompt_block}\
 ## Planning Prompt Optimization Workflow

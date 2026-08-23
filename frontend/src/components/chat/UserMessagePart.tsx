@@ -6,6 +6,7 @@
 //                    render ```mermaid blocks through the same chain as assistant messages.
 // [Sync] 2026-07-26: add bottom-right copy button under the bubble via shared useCopy hook
 //                    and shared IconCopy/IconCheck, matching the assistant action style.
+// [Sync] 2026-08-22: accept the owning Chat Thread for explicit workspace:// rendering.
 import { memo } from 'react';
 import { useCopy } from '../../hooks/useCopy';
 import { IconCheck, IconCopy } from './Icons';
@@ -13,9 +14,10 @@ import ChatMarkdown from './ChatMarkdown';
 
 interface UserMessagePartProps {
   text: string;
+  workspaceSessionId?: string;
 }
 
-export default memo(function UserMessagePart({ text }: UserMessagePartProps) {
+export default memo(function UserMessagePart({ text, workspaceSessionId }: UserMessagePartProps) {
   const { copied, copy } = useCopy();
 
   return (
@@ -32,7 +34,7 @@ export default memo(function UserMessagePart({ text }: UserMessagePartProps) {
         }}
       >
         <div className="prose prose-chat" style={{ color: 'var(--color-text-primary)', fontSize: '0.92rem', lineHeight: 1.7 }}>
-          <ChatMarkdown text={text} />
+          <ChatMarkdown text={text} workspaceSessionId={workspaceSessionId} />
         </div>
       </div>
       <button

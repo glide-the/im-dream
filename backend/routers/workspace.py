@@ -3,6 +3,7 @@
 #         shared bearer auth, and FastAPI form/file helpers.
 # [Output] Register workspace file management endpoints:
 #          GET/POST/DELETE/PATCH /api/workspace/files
+#          GET /api/workspace/files/content
 #          GET /api/workspace/files/download
 # [Pos] workspace route node in backend/routers
 # [Sync] 2026-05-25: initial implementation — ported from claude-agent-next-kit
@@ -19,6 +20,8 @@
 #                    init kwargs so file-API refreshes do not drop user fs
 #                    write paths from settings.json.
 # [Sync] 2026-08-17: download endpoint packages selected directories as ZIP files.
+# [Sync] 2026-08-22: add a no-create, Thread-owner-bound, Workspace Mode-gated
+#                    regular-file content endpoint for workspace:// Chat rendering.
 
 """Workspace file management API.
 
@@ -28,6 +31,7 @@ GET    /api/workspace/files          — list files in a workspace directory
 POST   /api/workspace/files          — upload file(s) to a workspace
 DELETE /api/workspace/files          — delete a file or directory
 PATCH  /api/workspace/files          — move / rename a file
+GET    /api/workspace/files/content  — read a Thread-owned public files/ file
 GET    /api/workspace/files/download — download a workspace file or directory ZIP
 """
 
@@ -53,11 +57,13 @@ import database
 from libs.claude_agent_kit.server.workspace import (
     WorkspaceFileAccessError,
     delete_workspace_file,
+    get_existing_workspace,
     get_or_create_workspace,
     get_workspace_root,
     list_workspace_file_tree,
     list_workspace_files,
     move_workspace_file,
+    read_workspace_file_content,
     read_workspace_download_content,
     write_workspace_file,
     WorkspaceFileInfo,
@@ -107,6 +113,9 @@ def _debug_headers() -> dict[str, str]:
 
 
 _SESSION_ID_RE = _re.compile(r'^[A-Za-z0-9_-]{1,128}$')
+_PERCENT_ESCAPE_RE = _re.compile(r"%[0-9A-Fa-f]{2}")
+_WINDOWS_DRIVE_RE = _re.compile(r"^[A-Za-z]:$")
+_CONTROL_CHAR_RE = _re.compile(r"[\x00-\x1f\x7f]")
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
 
 
@@ -171,6 +180,75 @@ def _get_or_create_workspace_for_user(session_id: str, current_user: dict):
     )
 
 
+def _require_owned_workspace_thread(session_id: str, current_user: dict) -> None:
+    """Fail closed unless *session_id* is an authenticated user's Chat Thread."""
+
+    try:
+        user_id = int(current_user.get("user_id"))
+        thread = database.get_chat_thread(session_id, user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Workspace Thread ownership check failed safely")
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Workspace access is temporarily unavailable", "code": "WORKSPACE_AUTH_UNAVAILABLE"},
+        ) from exc
+    if thread is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "Workspace file not found", "code": "WORKSPACE_NOT_FOUND"},
+        )
+
+
+def _require_workspace_mode_enabled(current_user: dict) -> None:
+    """Require the actor's server-owned Workspace Mode configuration."""
+
+    try:
+        user_id = int(current_user.get("user_id"))
+        system_config = database.get_system_config(user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Workspace Mode check failed safely")
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Workspace access is temporarily unavailable", "code": "WORKSPACE_CONFIG_UNAVAILABLE"},
+        ) from exc
+    if not bool(system_config.get("workspace_enabled", True)):
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "Workspace Mode is disabled", "code": "WORKSPACE_DISABLED"},
+        )
+
+
+def _validate_workspace_content_path(raw_path: str) -> str:
+    """Validate the already transport-decoded workspace:// public file path."""
+
+    if (
+        not raw_path
+        or raw_path.startswith("/")
+        or "\\" in raw_path
+        or "?" in raw_path
+        or "#" in raw_path
+        or _CONTROL_CHAR_RE.search(raw_path)
+        or _PERCENT_ESCAPE_RE.search(raw_path)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid Workspace file path", "code": "INVALID_WORKSPACE_URI"},
+        )
+
+    segments = raw_path.split("/")
+    if (
+        len(segments) < 2
+        or segments[0] != WORKSPACE_SUBDIRS[0]
+        or any(segment in {"", ".", ".."} for segment in segments)
+        or _WINDOWS_DRIVE_RE.match(segments[0])
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid Workspace file path", "code": "INVALID_WORKSPACE_URI"},
+        )
+    return "/".join(segments)
+
+
 def _normalize_incoming_relative_path(raw_path: str) -> str:
     """Sanitise an untrusted relative path from a request.
 
@@ -219,6 +297,64 @@ def _download_content_disposition(filename: str) -> str:
         fallback = "download"
     utf8_name = quote(filename, safe="")
     return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{utf8_name}'
+
+
+# ---------------------------------------------------------------------------
+# GET /api/workspace/files/content
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/workspace/files/content")
+async def read_workspace_file_content_endpoint(
+    session_id: Annotated[str, Query(alias="sessionId")],
+    path: Annotated[str, Query()],
+    current_user: dict = Depends(_require_workspace_auth),
+) -> Response:
+    """Read an existing Thread-owned regular file for workspace:// rendering."""
+
+    if not session_id or not path:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "sessionId and path are required", "code": "INVALID_WORKSPACE_URI"},
+        )
+    _validate_session_id(session_id)
+    _require_owned_workspace_thread(session_id, current_user)
+    _require_workspace_mode_enabled(current_user)
+    safe_path = _validate_workspace_content_path(path)
+
+    try:
+        workspace_path = get_existing_workspace(session_id)
+        if workspace_path is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "Workspace file not found", "code": "WORKSPACE_NOT_FOUND"},
+            )
+        file_obj = read_workspace_file_content(
+            workspace_path,
+            safe_path,
+            reject_symlinks=True,
+            require_regular_file=True,
+        )
+    except WorkspaceFileAccessError as exc:
+        raise HTTPException(
+            status_code=exc.status,
+            detail={"error": exc.args[0], "code": exc.code},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid Workspace file path", "code": "INVALID_WORKSPACE_URI"},
+        ) from exc
+
+    return Response(
+        content=file_obj.content,
+        media_type=_get_content_type(file_obj.file_name),
+        headers={
+            "Content-Length": str(file_obj.size),
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

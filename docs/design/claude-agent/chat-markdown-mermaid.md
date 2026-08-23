@@ -3,6 +3,10 @@
 > [Pos] interaction-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-07-20: 初版 — Mermaid 按需加载渲染、共享 `ChatMarkdown` 渲染链、流式降级与 `<pre>` 嵌套修正。
 > [Sync] 2026-07-20: 新增 §2.6 图表工具栏 — 预览/源码模式切换、复制源码、导出 PNG 图片。
+> [Sync] 2026-08-22: 共享 `ChatMarkdown` 增加 exact `workspace://` URI 组件路由；GFM/Mermaid 与 ReactMarkdown 默认 URL 策略保持不变。
+> [Sync] 2026-08-23: Mermaid 与 Workspace 图片共用同一 Markdown media frame 和沉浸式预览骨架；复制按钮旁增加放大入口。
+> [Sync] 2026-08-23: 共享媒体查看区域增加非 passive 滚轮缩放，复用底部 50%–200% 状态并阻止背景滚动。
+> [Sync] 2026-08-23: 缩放目标收敛为实际图片或 Mermaid 图形，中央 Paper 画布保持适配视口后的固定尺寸。
 
 # Chat Markdown Mermaid 渲染设计
 
@@ -59,13 +63,20 @@ Claude Agent 的回答经常包含 ```` ```mermaid ```` 围栏代码块（流程
 |---|---|---|
 | 预览 / 源码切换 | 分段按钮（segmented），与 `AIInputDock` 的「自动 / 逐步确认」切换同风格 | 默认预览；预览模式显示 SVG，源码模式显示原始 Mermaid 文本；渲染失败且无可用 SVG 时强制停留源码视图 |
 | 复制源码 | 图标按钮，复用 `useCopy` hook | 任意模式下复制**完整 Markdown 围栏文本**（` ```mermaid ```` 开头、` ``` ` 收尾，含图表源码），成功后图标变为对勾（2s 复位） |
+| 放大预览 | 图标按钮，紧邻复制源码 | 打开共享沉浸式预览：全屏暗色遮罩、中央 Paper 画布、右上导出/关闭、底部缩放；打开时 100%，范围 50%–200%，按钮或查看区滚轮每次 10% |
 | 导出图片 | 图标按钮，仅预览可用时启用 | 将当前 SVG 栅格化为 PNG 下载，文件名 `mermaid-diagram-{timestamp}.png` |
+
+工具栏与 Workspace 图片必须使用 `MarkdownMedia.css` 的同一外框、标题栏、按钮尺寸、hover/focus 状态；不得复制近似 CSS。放大层复用 `Modal` 的 `media-preview` 变体，保留 Escape、焦点约束与关闭后的焦点恢复。宽屏为参考图的左侧大 Paper 画布、右上圆形下载/关闭、底部居中缩放；窄屏铺满视口且不产生页面横向滚动。100% 表示媒体按视口适配后的基准尺寸；50%–200% 只变换实际 `<img>` 或 Mermaid 图形节点，Paper 画布的宽高不得随百分比改变，外层尺寸节点只可提供放大后的滚动空间。指针位于中央查看区时，滚轮向上放大、向下缩小；原生 `{ passive: false }` listener 必须取消默认滚动，工具栏和底部控制区不拦截滚轮。
 
 PNG 导出实现要点：
 
 - 从 SVG 的 `viewBox` 解析逻辑尺寸（缺失时回退 800×600），序列化时写入显式 `width`/`height`。
 - 按 2 倍 scale 绘制到 `<canvas>`，先以 `--color-bg-paper` 填充背景（SVG 本身是透明的），再 `drawImage`。
 - `canvas.toBlob('image/png')` → 临时 `<a download>` 触发下载；全程不离开当前页面，失败时仅控制台告警并复位按钮状态。
+
+### 2.7 Workspace 文件引用兼容边界
+
+共享渲染链只保留并拦截小写 exact `workspace://`：`img` 和 `a` override 将其交给当前 Thread/Workspace 上下文的专用组件；其余 URL 继续调用 ReactMarkdown `defaultUrlTransform`。Workspace 成功图片与 Mermaid 复用同一 inline media frame 和 `Modal media-preview`，但仍通过合法的 phrasing-content 标签嵌入 Markdown `<p>`，避免重新引入块级元素嵌套错误。该扩展不把普通相对路径解释为 Workspace 文件，也不改变 Mermaid 的 `code`/`pre` 路由。完整语法、安全校验、认证读取和降级状态见 [`workspace-uri-preview-protocol.md`](./workspace-uri-preview-protocol.md)。
 
 ## 3. 错误处理
 
@@ -79,6 +90,6 @@ PNG 导出实现要点：
 
 ## 4. 影响面与验证
 
-- 改动文件：新增 `ChatMarkdown.tsx` / `MermaidBlock.tsx`；修改 `AssistMessagePart.tsx` / `UserMessagePart.tsx` / `PlanPanel.tsx`；`frontend/package.json` 新增 `mermaid` 依赖。
+- 当前共享链由 `ChatMarkdown.tsx` 统一承载 Mermaid 与 exact Workspace URI component routing；Workspace 解析组件不复制 `ReactMarkdown`。
 - 不影响后端与 SSE 事件契约。
-- 验证：`npm run build`（tsc + vite）与 `npm run lint` 通过；手工确认含 ```` ```mermaid ```` 的回答渲染为 SVG，普通代码块不受影响，控制台不再出现 `<pre>` 嵌套报错。
+- 验证：`npm run build`（tsc + vite）与 `npm run lint` 通过；真实 Chromium 确认含 ```` ```mermaid ```` 的回答渲染为 SVG，放大按钮位于复制按钮之后，Mermaid/Workspace 外框计算样式一致；在 50%/100%/110%/200% 对比边界框，Paper 画布宽高稳定且实际图片/图形按比例变化；两者的媒体弹层均有下载/关闭/缩放且无 React 嵌套报错，普通代码块不受影响。

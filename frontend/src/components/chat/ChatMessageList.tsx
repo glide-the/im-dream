@@ -30,6 +30,8 @@
 //                    chat.toolConfirmation namespace (en + zh) via useTranslation.
 // [Sync] 2026-08-04: replace Agent/Task internal output envelopes with a task
 //                    button that opens the matching subagent sidebar item.
+// [Sync] 2026-08-22: bind assistant/user Markdown workspace:// references to this
+//                    list's already-owned Thread ID.
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -331,7 +333,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
               if (part.type === 'text' && part.text) {
                 const isUser = message.role === 'user';
                 if (isUser) {
-                  return <UserMessagePart key={partKey} text={part.text} />;
+                  return <UserMessagePart key={partKey} text={part.text} workspaceSessionId={threadId} />;
                 }
 
                 const isLastPart = partIndex === (message.parts?.length ?? 0) - 1;
@@ -348,6 +350,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       readonly={readonly}
                       setMessages={setMessages}
                       sendMessage={sendMessage}
+                      workspaceSessionId={threadId}
                     />
                   </div>
                 );

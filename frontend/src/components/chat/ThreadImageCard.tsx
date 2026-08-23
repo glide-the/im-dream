@@ -1,5 +1,5 @@
-// [Input] ExportChatMessage blocks (text/reasoning/tool) + thread title + i18n labels +
-//         optional ExportPendingConfirmation (from exportThreadImage / ChatView).
+// [Input] ExportChatMessage blocks (text/reasoning/tool), resolved Workspace image data,
+//         thread title, i18n labels, and optional ExportPendingConfirmation.
 // [Output] The warm-paper long-image card (Ink & Memory UI Design v2.1 tokens: Warm Canvas bg,
 //          dashed Border Paper dividers, Action Brown user bubbles, Memory Yellow accents).
 //          Mirrors ChatMessageList visuals: italic left-border reasoning blocks, collapsed
@@ -9,8 +9,10 @@
 // [Sync] 2026-08-03: created for the share dialog export-image option (split from
 //                    exportThreadImage to satisfy react-refresh single-export rule).
 // [Sync] 2026-08-03: render reasoning/tool blocks and the bottom pending-confirmation card.
-import ReactMarkdown, { type Components } from 'react-markdown';
+// [Sync] 2026-08-23: preserve explicit workspace:// images for authenticated export prefetch and render failures as inert placeholders.
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { isWorkspaceUri } from './workspaceUri';
 
 export interface ExportToolBlock {
   kind: 'tool';
@@ -74,6 +76,7 @@ export interface ExportImageLabels {
   footer: string;
   thinking: string;
   truncated: string;
+  workspaceImageUnavailable: string;
 }
 
 const EXPORT_MARKDOWN_COMPONENTS: Components = {
@@ -131,6 +134,58 @@ const EXPORT_MARKDOWN_COMPONENTS: Components = {
     <td style={{ border: '1px solid var(--color-border-paper)', padding: '0.35em 0.6em' }}>{children}</td>
   ),
 };
+
+function exportUrlTransform(value: string): string {
+  return isWorkspaceUri(value) ? value : defaultUrlTransform(value);
+}
+
+const workspaceImageFrameStyle = {
+  display: 'block',
+  width: 'min(100%, 420px)',
+  boxSizing: 'border-box',
+  margin: '0.35rem 0 0.8rem',
+  padding: '0.375rem',
+  border: '1px dashed var(--color-border-paper)',
+  borderRadius: '12px',
+  background: 'var(--color-bg-paper)',
+} as const;
+
+function createExportMarkdownComponents(
+  workspaceImageSources: ReadonlyMap<string, string>,
+  workspaceImageUnavailable: string,
+): Components {
+  return {
+    ...EXPORT_MARKDOWN_COMPONENTS,
+    a({ children, href }) {
+      if (isWorkspaceUri(href)) {
+        return <span style={{ color: 'var(--color-action-link)', textDecoration: 'underline' }}>{children}</span>;
+      }
+      return <a href={href} style={{ color: 'var(--color-action-link)', textDecoration: 'underline' }}>{children}</a>;
+    },
+    img({ src, alt }) {
+      if (!isWorkspaceUri(src)) {
+        return <img src={src} alt={alt ?? ''} style={{ display: 'block', maxWidth: '100%', height: 'auto', borderRadius: '8px' }} />;
+      }
+      const resolvedSource = workspaceImageSources.get(src);
+      if (!resolvedSource) {
+        return (
+          <span data-export-workspace-uri={src} style={{ ...workspaceImageFrameStyle, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+            {alt ? `${alt} — ${workspaceImageUnavailable}` : workspaceImageUnavailable}
+          </span>
+        );
+      }
+      return (
+        <span data-export-workspace-image={src} style={workspaceImageFrameStyle}>
+          <img
+            src={resolvedSource}
+            alt={alt ?? ''}
+            style={{ display: 'block', width: '100%', aspectRatio: '4 / 3', objectFit: 'contain', borderRadius: '8px', background: 'var(--color-bg-surface)' }}
+          />
+        </span>
+      );
+    },
+  };
+}
 
 function ReasoningBlock({ text, label }: { text: string; label: string }) {
   return (
@@ -337,13 +392,18 @@ function PendingConfirmationCard({ confirmation }: { confirmation: ExportPending
   );
 }
 
-export default function ThreadImageCard({ title, messages, labels, dateText, pendingConfirmation }: {
+export default function ThreadImageCard({ title, messages, labels, dateText, pendingConfirmation, workspaceImageSources = new Map() }: {
   title: string;
   messages: ExportChatMessage[];
   labels: ExportImageLabels;
   dateText: string;
   pendingConfirmation?: ExportPendingConfirmation | null;
+  workspaceImageSources?: ReadonlyMap<string, string>;
 }) {
+  const markdownComponents = createExportMarkdownComponents(
+    workspaceImageSources,
+    labels.workspaceImageUnavailable,
+  );
   return (
     <div style={{
       width: '720px',
@@ -434,7 +494,7 @@ export default function ThreadImageCard({ title, messages, labels, dateText, pen
               }
               return (
                 <div key={blockIndex} style={{ lineHeight: 1.75, wordBreak: 'break-word' }}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={EXPORT_MARKDOWN_COMPONENTS}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} urlTransform={exportUrlTransform}>
                     {block.text}
                   </ReactMarkdown>
                 </div>

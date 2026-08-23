@@ -3,6 +3,9 @@
 [Input] Claude Agent application/kit runtime, SDK/CLI contracts, and deployment configuration.
 [Output] Document the current Claude Agent layers, lifecycle, configuration, data flow, and isolation boundaries.
 [Sync] 2026-08-22: add legacy-MCP default-off and process-local concurrency/memory admission contracts.
+[Sync] 2026-08-22: document the engine-prompt workspace:// output contract and owner-bound Workspace content bridge used by Chat Markdown.
+[Sync] 2026-08-22: document the v2.1-scoped Workspace thumbnail and shared accessible full-size modal presentation.
+[Sync] 2026-08-23: document authenticated in-memory Workspace image resolution for the existing Chat long-image exporter.
 -->
 
 **模块目标**：为 Ink & Memory 提供基于 Claude Code SDK 的流式 AI 写作助手后端能力，  
@@ -59,6 +62,8 @@ backend/
 | `DELETE` | `/api/claude-agent/session`         | `claude_agent_session_close`  | JWT  | 主动销毁会话                     |
 | `POST`   | `/api/claude-agent/threads/{thread_id}/stop` | `claude_agent_stop_thread` | JWT  | 主动停止当前运行 turn，不删除 thread |
 | `POST`   | `/api/claude-agent/tool-confirm`    | `claude_agent_tool_confirm`   | JWT  | 工具人工确认/拒绝                |
+
+Agent 输出的 Workspace 文件不经 SSE 改写。`ClaudeAgentContextBuilder` 在既有 engine system prompt 中要求：仅当 `<workspace_context>` 存在时使用 `workspace://files/<relative-path>`。前端保留该文本，并通过 Workspace Router 的 `GET /api/workspace/files/content` 读取；该补充端点再次绑定 bearer 用户、Chat Thread 所有权和 Workspace Mode，且只读取现有 `files/` 普通文件。支持的图片先以 UI v2.1 轻纸面规则约束为 420px 上限缩略图，用户激活后由共享可访问 Modal 以同一临时 blob 显示原比例大图；现有 Chat 长图导出在离屏渲染前通过同一鉴权访问将图片暂存为内存 data URL，失败资源只生成静态占位。普通 Markdown 图片不受影响。协议详见 [`workspace-uri-preview-protocol.md`](../design/claude-agent/workspace-uri-preview-protocol.md)。
 
 ---
 

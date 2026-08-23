@@ -15,6 +15,7 @@
 # [Sync] 2026-06-16: cover fuzzy query guidance in Session Retrieval Workflow.
 # [Sync] 2026-06-22: cover Settings SYSTEM_PROMPT rendering as a lower-priority
 #                    configurable prompt block and empty-config fallback.
+# [Sync] 2026-08-22: cover the canonical workspace:// file reference contract.
 
 """Unit tests for ClaudeAgentContextBuilder (Ink & Memory writing context)."""
 from __future__ import annotations
@@ -136,6 +137,15 @@ class TestBuildSystemPrompt(unittest.TestCase):
         with self._mock_db([]):
             prompt = _run(self._builder().build_system_prompt("1"))
         self.assertIn("writing assistant", prompt.lower())
+
+    def test_prompt_contains_workspace_uri_reference_contract(self):
+        with self._mock_db([]):
+            prompt = _run(self._builder().build_system_prompt("1"))
+
+        self.assertIn("## Workspace File Reference Protocol", prompt)
+        self.assertIn("workspace://files/<path-relative-to-the-current-thread-workspace>", prompt)
+        self.assertIn("![Generated image](workspace://files/generated-image.png)", prompt)
+        self.assertIn("Do not emit `workspace://` when no <workspace_context> is present", prompt)
 
     def test_empty_sessions_uses_fallback(self):
         with self._mock_db([]):

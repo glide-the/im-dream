@@ -14,6 +14,9 @@
 // [Sync] 2026-08-17: add Work-related Chat history cleanup and deletion guidance copy.
 // [Sync] 2026-08-17: localize the Story Workspace Settings shell and render Work/工作台 per locale.
 // [Sync] 2026-08-17: label Available/System Deck launcher groups and default-visible system Decks.
+// [Sync] 2026-08-22: add localized Workspace URI preview/download and full-size image dialog states under the existing Chat namespace.
+// [Sync] 2026-08-23: add the inert Workspace-image fallback used when a protected asset cannot be embedded in Chat export.
+// [Sync] 2026-08-23: localize the shared Mermaid/Workspace enlarge, download, close, and zoom controls.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -488,6 +491,7 @@ const resources = {
           exportImageHint: 'Save the whole conversation as a long image',
           exporting: 'Exporting…',
           exportFailed: 'Export failed. Please try again.',
+          workspaceImageUnavailable: 'Workspace image unavailable',
           you: 'You',
           assistant: 'Ink & Memory',
           footer: 'Write today. Remember forever.',
@@ -744,7 +748,34 @@ const resources = {
           preview: 'Preview',
           source: 'Source',
           copySource: 'Copy Markdown source',
+          enlarge: 'Enlarge diagram',
+          previewTitle: 'Mermaid diagram preview',
           exportPng: 'Export PNG'
+        },
+        mediaPreview: {
+          close: 'Close preview',
+          zoomOut: 'Zoom out',
+          zoomIn: 'Zoom in'
+        },
+        workspaceFile: {
+          checking: 'Checking Workspace…',
+          loadingImage: 'Loading Workspace image…',
+          imageAlt: 'Workspace image',
+          previewAction: 'Preview {{name}} at full size',
+          previewBadge: 'View full size',
+          previewTitle: 'Full-size preview · {{name}}',
+          closePreview: 'Close image preview',
+          downloadImage: 'Download image',
+          loading: 'Loading…',
+          downloading: 'Downloading…',
+          downloadStarted: 'Download started.',
+          retry: 'Retry',
+          access: 'You do not have access to this Workspace file.',
+          disabled: 'Workspace is disabled.',
+          invalid: 'Invalid Workspace file reference.',
+          missing: 'Workspace file not found or unavailable.',
+          unsupported: 'This file type cannot be previewed inline.',
+          retryable: 'Workspace file could not be loaded.'
         },
         connector: {
           noInteraction: 'No interactions yet',
@@ -1272,6 +1303,7 @@ const resources = {
           exportImageHint: '将整段对话保存为渲染后的长图',
           exporting: '导出中…',
           exportFailed: '导出失败，请重试。',
+          workspaceImageUnavailable: '工作空间图片不可用',
           you: '我',
           assistant: 'Ink & Memory',
           footer: 'Write today. Remember forever.',
@@ -1526,7 +1558,34 @@ const resources = {
           preview: '预览',
           source: '源码',
           copySource: '复制 Markdown 源码',
+          enlarge: '放大图表',
+          previewTitle: 'Mermaid 图表预览',
           exportPng: '导出 PNG'
+        },
+        mediaPreview: {
+          close: '关闭预览',
+          zoomOut: '缩小',
+          zoomIn: '放大'
+        },
+        workspaceFile: {
+          checking: '正在检查工作空间…',
+          loadingImage: '正在加载工作空间图片…',
+          imageAlt: '工作空间图片',
+          previewAction: '查看 {{name}} 大图',
+          previewBadge: '查看大图',
+          previewTitle: '大图预览 · {{name}}',
+          closePreview: '关闭图片预览',
+          downloadImage: '下载图片',
+          loading: '正在加载…',
+          downloading: '正在下载…',
+          downloadStarted: '已开始下载。',
+          retry: '重试',
+          access: '你无权访问此工作空间文件。',
+          disabled: '工作空间已关闭。',
+          invalid: '工作空间文件引用无效。',
+          missing: '工作空间文件不存在或不可用。',
+          unsupported: '此文件类型不支持内联预览。',
+          retryable: '工作空间文件加载失败。'
         },
         connector: {
           noInteraction: '暂无交互',
