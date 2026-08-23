@@ -1,15 +1,21 @@
-# [Input] Consume libs/claude_agent_kit/server/sdk_env.py CLI path and SDK buffer policy helpers.
-# [Output] Verify CLI binary resolution: CLAUDE_CODE_CLI_PATH override (existing path),
-#          missing-path warning + fallthrough, shutil.which hit, bundled fallback
-#          (unset), explicit cli_path preserved; verify bounded message-buffer defaults/overrides.
+# [Input] Consume libs/claude_agent_kit/server/sdk_env.py SDK metadata, CLI path,
+#         and SDK buffer policy helpers.
+# [Output] Verify the custom distribution/import owner, Dream CLI default,
+#          explicit official rollback, fail-closed resolution, and buffers.
 # [Pos] test node in backend/tests
 # [Sync] 2026-07-26: initial — cli_path resolution coverage for the Docker
 #                    apply-seccomp-patched npm CLI pinning (claude-sdk-env-design).
 # [Sync] 2026-08-20: cover the server-owned 1–64 MiB SDK stdout message buffer policy.
+# [Sync] 2026-08-23: require ink-claude-dream-agent-sdk 0.2.143 and default
+#                    ink-claude-code-dream; official CLI is an absolute
+#                    CLAUDE_CODE_CLI_PATH-only rollback and missing runtime fails closed.
+# [Sync] 2026-08-23: reject manifests without a pruned core, production
+#                    eligibility, or required MCP management identity capability.
 
 """Tests for sdk_env.apply_cli_path_to_options (2026-07-26)."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -22,13 +28,22 @@ ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import tests._sdk_stubs  # noqa: F401
 import libs.claude_agent_kit.server.sdk_env as sdk_env_module
+import tests._sdk_stubs  # noqa: F401
 from libs.claude_agent_kit.server.sdk_env import (
     CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT,
     CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
+    DREAM_CLAUDE_CLI_EXECUTABLE,
+    DREAM_CLAUDE_CLI_VERSION,
+    DREAM_CLAUDE_REQUIRED_CAPABILITIES,
+    DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA,
+    DREAM_CLAUDE_SDK_DISTRIBUTION,
+    DREAM_CLAUDE_SDK_IMPORT,
+    DREAM_CLAUDE_SDK_VERSION,
     apply_cli_path_to_options,
+    require_dream_claude_sdk_distribution,
     resolve_claude_agent_max_buffer_size,
+    resolve_claude_cli_path,
 )
 
 
@@ -42,6 +57,48 @@ class TestApplyCliPathToOptions(unittest.TestCase):
         env.update(vars)
         return unittest.mock.patch.dict(os.environ, env, clear=True)
 
+    @staticmethod
+    def _qualified_runtime(root: Path, **core_overrides: bool) -> Path:
+        executable = root / "bin" / DREAM_CLAUDE_CLI_EXECUTABLE
+        executable.parent.mkdir(parents=True)
+        executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        executable.chmod(0o700)
+        core = {
+            "corePruned": True,
+            "productionEligible": True,
+            **core_overrides,
+        }
+        manifest = {
+            "schemaVersion": DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA,
+            "runtime": {
+                "name": DREAM_CLAUDE_CLI_EXECUTABLE,
+                "version": DREAM_CLAUDE_CLI_VERSION,
+                "entrypoint": f"bin/{DREAM_CLAUDE_CLI_EXECUTABLE}",
+                "integration": {
+                    "environment": "CLAUDE_CODE_CLI_PATH",
+                    "sdkVersion": DREAM_CLAUDE_SDK_VERSION,
+                    "sdkOption": "ClaudeAgentOptions.cli_path",
+                },
+            },
+            "core": core,
+            "protocol": {"name": "claude-code-stream-json", "version": 1},
+            "capabilityEvidence": "manifest/capabilities.json",
+        }
+        capability_evidence = {
+            "runtime": core,
+            "capabilities": [
+                {"id": capability_id}
+                for capability_id in sorted(DREAM_CLAUDE_REQUIRED_CAPABILITIES)
+            ],
+        }
+        (root / "release-manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        evidence_path = root / "manifest" / "capabilities.json"
+        evidence_path.parent.mkdir()
+        evidence_path.write_text(json.dumps(capability_evidence), encoding="utf-8")
+        return executable
+
     def test_env_override_honored_when_path_exists(self):
         with tempfile.NamedTemporaryFile() as cli:
             os.chmod(cli.name, 0o700)
@@ -52,41 +109,41 @@ class TestApplyCliPathToOptions(unittest.TestCase):
         self.assertEqual(options.cli_path, str(Path(cli.name).resolve()))
 
     def test_missing_env_path_falls_through_to_which_with_warning(self):
-        with tempfile.NamedTemporaryFile() as cli:
-            os.chmod(cli.name, 0o700)
+        with tempfile.TemporaryDirectory() as runtime_root:
+            cli = self._qualified_runtime(Path(runtime_root))
             options = _make_options()
             with (
                 self._env(CLAUDE_CODE_CLI_PATH="/nonexistent/claude"),
                 unittest.mock.patch.object(
-                    sdk_env_module.shutil, "which", return_value=cli.name
+                    sdk_env_module.shutil, "which", return_value=str(cli)
                 ),
                 self.assertLogs(sdk_env_module.logger, level="WARNING") as logs,
             ):
                 apply_cli_path_to_options(options)
-            self.assertEqual(options.cli_path, str(Path(cli.name).resolve()))
+            self.assertEqual(options.cli_path, str(cli.resolve()))
         self.assertTrue(any("CLAUDE_CODE_CLI_PATH" in m for m in logs.output))
 
-    def test_which_hit_sets_cli_path_when_env_unset(self):
-        with tempfile.NamedTemporaryFile() as cli:
-            os.chmod(cli.name, 0o700)
+    def test_dream_cli_on_path_is_default_when_env_unset(self):
+        with tempfile.TemporaryDirectory() as runtime_root:
+            cli = self._qualified_runtime(Path(runtime_root))
             options = _make_options()
             with (
                 self._env(),
                 unittest.mock.patch.object(
-                    sdk_env_module.shutil, "which", return_value=cli.name
+                    sdk_env_module.shutil, "which", return_value=str(cli)
                 ),
             ):
                 apply_cli_path_to_options(options)
-            self.assertEqual(options.cli_path, str(Path(cli.name).resolve()))
+            self.assertEqual(options.cli_path, str(cli.resolve()))
 
-    def test_no_system_claude_leaves_cli_path_unset(self):
-        """Bundled fallback: no env, no which() hit → cli_path stays None."""
+    def test_missing_dream_runtime_fails_closed_without_bundled_fallback(self):
         options = _make_options()
         with (
             self._env(),
             unittest.mock.patch.object(
                 sdk_env_module.shutil, "which", return_value=None
             ),
+            self.assertRaisesRegex(RuntimeError, DREAM_CLAUDE_CLI_EXECUTABLE),
         ):
             apply_cli_path_to_options(options)
         self.assertIsNone(options.cli_path)
@@ -109,16 +166,219 @@ class TestApplyCliPathToOptions(unittest.TestCase):
             apply_cli_path_to_options(options)
         self.assertEqual(options.cli_path, "/explicit/claude")
 
-    def test_which_checked_with_claude_name(self):
+    def test_which_checked_with_dream_runtime_name(self):
         options = _make_options()
         with (
             self._env(),
             unittest.mock.patch.object(
                 sdk_env_module.shutil, "which", return_value=None
             ) as which_mock,
+            self.assertRaises(RuntimeError),
         ):
             apply_cli_path_to_options(options)
-        which_mock.assert_called_once_with("claude", path=None)
+        which_mock.assert_called_once_with(DREAM_CLAUDE_CLI_EXECUTABLE, path=None)
+
+    def test_absolute_override_is_explicit_official_cli_rollback(self):
+        with tempfile.NamedTemporaryFile(prefix="official-claude-") as cli:
+            os.chmod(cli.name, 0o700)
+            selected = resolve_claude_cli_path(
+                {"CLAUDE_CODE_CLI_PATH": cli.name, "PATH": ""}
+            )
+        self.assertEqual(selected, str(Path(cli.name).resolve()))
+
+    def test_relative_override_cannot_select_official_cli(self):
+        with (
+            unittest.mock.patch.object(
+                sdk_env_module.shutil, "which", return_value=None
+            ),
+            self.assertLogs(sdk_env_module.logger, level="WARNING"),
+        ):
+            selected = resolve_claude_cli_path(
+                {"CLAUDE_CODE_CLI_PATH": "./claude", "PATH": ""}
+            )
+        self.assertIsNone(selected)
+
+    def test_unpruned_compatibility_envelope_is_rejected(self):
+        with tempfile.TemporaryDirectory() as runtime_root:
+            cli = self._qualified_runtime(
+                Path(runtime_root),
+                corePruned=False,
+            )
+            with (
+                self._env(),
+                unittest.mock.patch.object(
+                    sdk_env_module.shutil, "which", return_value=str(cli)
+                ),
+                self.assertRaisesRegex(RuntimeError, "production-qualified"),
+            ):
+                resolve_claude_cli_path()
+
+    def test_non_production_runtime_is_rejected(self):
+        with tempfile.TemporaryDirectory() as runtime_root:
+            cli = self._qualified_runtime(
+                Path(runtime_root),
+                productionEligible=False,
+            )
+            with (
+                self._env(),
+                unittest.mock.patch.object(
+                    sdk_env_module.shutil, "which", return_value=str(cli)
+                ),
+                self.assertRaisesRegex(RuntimeError, "production-qualified"),
+            ):
+                resolve_claude_cli_path()
+
+    def test_runtime_missing_mcp_identity_capability_is_rejected(self):
+        with tempfile.TemporaryDirectory() as runtime_root:
+            root = Path(runtime_root)
+            cli = self._qualified_runtime(root)
+            evidence_path = root / "manifest" / "capabilities.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            evidence["capabilities"] = [
+                value
+                for value in evidence["capabilities"]
+                if value["id"] != "mcp.management.identity"
+            ]
+            evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+            with (
+                self._env(),
+                unittest.mock.patch.object(
+                    sdk_env_module.shutil, "which", return_value=str(cli)
+                ),
+                self.assertRaisesRegex(RuntimeError, "mcp.management.identity"),
+            ):
+                resolve_claude_cli_path()
+
+
+class TestDreamSdkDistribution(unittest.TestCase):
+    @staticmethod
+    def _distribution(*, name: str, version: str):
+        return types.SimpleNamespace(metadata={"Name": name}, version=version)
+
+    @staticmethod
+    def _modules(*, version: str = DREAM_CLAUDE_SDK_VERSION):
+        sdk = types.SimpleNamespace(
+            __version__=version,
+            ClaudeAgentOptions=object(),
+            ClaudeSDKClient=object(),
+            query=object(),
+        )
+        sdk_types = types.SimpleNamespace(
+            AssistantMessage=object(),
+            ResultMessage=object(),
+            StreamEvent=object(),
+            SystemMessage=object(),
+            UserMessage=object(),
+        )
+        return sdk, sdk_types
+
+    def _importer(self, *, version: str = DREAM_CLAUDE_SDK_VERSION):
+        sdk, sdk_types = self._modules(version=version)
+        return unittest.mock.Mock(
+            side_effect=lambda name: (
+                sdk if name == "claude_agent_sdk" else sdk_types
+            )
+        )
+
+    def test_exact_custom_distribution_owns_preserved_import(self):
+        distribution = self._distribution(
+            name=DREAM_CLAUDE_SDK_DISTRIBUTION,
+            version=DREAM_CLAUDE_SDK_VERSION,
+        )
+        importer = self._importer()
+        with (
+            unittest.mock.patch.object(
+                sdk_env_module.importlib_metadata,
+                "distribution",
+                return_value=distribution,
+            ) as distribution_lookup,
+            unittest.mock.patch.object(
+                sdk_env_module.importlib_metadata,
+                "packages_distributions",
+                return_value={
+                    "claude_agent_sdk": [DREAM_CLAUDE_SDK_DISTRIBUTION]
+                },
+            ),
+            unittest.mock.patch.object(
+                sdk_env_module.importlib,
+                "import_module",
+                new=importer,
+            ),
+        ):
+            result = require_dream_claude_sdk_distribution()
+        self.assertIs(result, distribution)
+        distribution_lookup.assert_called_once_with(DREAM_CLAUDE_SDK_DISTRIBUTION)
+
+    def test_official_distribution_competing_for_import_fails_closed(self):
+        distribution = self._distribution(
+            name=DREAM_CLAUDE_SDK_DISTRIBUTION,
+            version=DREAM_CLAUDE_SDK_VERSION,
+        )
+        with (
+            unittest.mock.patch.object(
+                sdk_env_module.importlib_metadata,
+                "distribution",
+                return_value=distribution,
+            ),
+            unittest.mock.patch.object(
+                sdk_env_module.importlib_metadata,
+                "packages_distributions",
+                return_value={
+                    "claude_agent_sdk": [
+                        DREAM_CLAUDE_SDK_DISTRIBUTION,
+                        "claude-agent-sdk",
+                    ]
+                },
+            ),
+            self.assertRaisesRegex(RuntimeError, "provided only"),
+        ):
+            require_dream_claude_sdk_distribution()
+
+    def test_distribution_version_drift_fails_closed(self):
+        distribution = self._distribution(
+            name=DREAM_CLAUDE_SDK_DISTRIBUTION,
+            version="0.2.144",
+        )
+        with (
+            unittest.mock.patch.object(
+                sdk_env_module.importlib_metadata,
+                "distribution",
+                return_value=distribution,
+            ),
+            self.assertRaisesRegex(RuntimeError, DREAM_CLAUDE_SDK_VERSION),
+        ):
+            require_dream_claude_sdk_distribution()
+
+    def test_stream_protocol_symbol_drift_fails_closed(self):
+        distribution = self._distribution(
+            name=DREAM_CLAUDE_SDK_DISTRIBUTION,
+            version=DREAM_CLAUDE_SDK_VERSION,
+        )
+        sdk, sdk_types = self._modules()
+        del sdk_types.StreamEvent
+        with (
+            unittest.mock.patch.object(
+                sdk_env_module.importlib_metadata,
+                "distribution",
+                return_value=distribution,
+            ),
+            unittest.mock.patch.object(
+                sdk_env_module.importlib_metadata,
+                "packages_distributions",
+                return_value={
+                    "claude_agent_sdk": [DREAM_CLAUDE_SDK_DISTRIBUTION]
+                },
+            ),
+            unittest.mock.patch.object(
+                sdk_env_module.importlib,
+                "import_module",
+                side_effect=lambda name: (
+                    sdk if name == "claude_agent_sdk" else sdk_types
+                ),
+            ),
+            self.assertRaisesRegex(RuntimeError, "StreamEvent"),
+        ):
+            require_dream_claude_sdk_distribution()
 
 
 class TestResolveClaudeAgentMaxBufferSize(unittest.TestCase):

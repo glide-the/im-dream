@@ -75,6 +75,9 @@
 #                    caller/process attempts to restore a global temp root.
 # [Sync] 2026-08-22: cover explicit thread-runtime temp binding independent
 #                    from the SDK cwd.
+# [Sync] 2026-08-23: inject a synthetic explicit cli_path at the runner unit
+#                    seam; production-qualified Runtime resolution/fail-closed
+#                    and official rollback are covered in test_sdk_env.py.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -408,8 +411,18 @@ class _RunnerBase(unittest.IsolatedAsyncioTestCase):
             "_verify_claude_sdk_env_for_query_stream",
         )
         self._verify_patch.start()
+        self._cli_path_patch = patch.object(
+            agent_runner_module,
+            "apply_cli_path_to_options",
+            side_effect=lambda options: (
+                setattr(options, "cli_path", "/synthetic/ink-claude-code-dream")
+                or options
+            ),
+        )
+        self._cli_path_patch.start()
 
     def tearDown(self):
+        self._cli_path_patch.stop()
         self._verify_patch.stop()
         self._gateway_env_patch.stop()
 

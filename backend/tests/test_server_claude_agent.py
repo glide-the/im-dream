@@ -14,6 +14,8 @@
 # [Sync] 2026-08-17: cover same-Deck Agent switching, provenance metadata, and CAS conflicts.
 # [Sync] 2026-08-22: cover restored Claude MCP Resources router registration.
 # [Sync] 2026-08-22: cover startup preservation of Claude Agent resource-admission keys.
+# [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
+#                    the Claude Agent factory starts.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -1750,6 +1752,28 @@ class TestFactoryLifecycle(unittest.TestCase):
             for h in self.srv.app.router.on_startup
         ]
         self.assertIn("startup_claude_agent", handler_names)
+
+    def test_startup_validates_custom_sdk_before_factory(self):
+        calls: list[str] = []
+        with (
+            unittest.mock.patch.object(
+                self.srv,
+                "require_dream_claude_sdk_distribution",
+                side_effect=lambda: calls.append("sdk"),
+            ),
+            unittest.mock.patch.object(
+                self.srv,
+                "resolve_claude_cli_path",
+                side_effect=lambda: calls.append("runtime") or "/runtime/bin",
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_thread_factory,
+                "start",
+                side_effect=lambda: calls.append("factory"),
+            ),
+        ):
+            asyncio.run(self.srv.startup_claude_agent())
+        self.assertEqual(calls, ["sdk", "runtime", "factory"])
 
     def test_shutdown_handler_registered(self):
         handler_names = [

@@ -1,9 +1,9 @@
 # Claude Agent SDK × npm CLI 兼容性报告
 
-> 状态：当前配对已完成构建/自动化验证，容器 sandbox 回执见 §6（2026-08-19）
+> 状态：自有 SDK / official rollback CLI 当前配对已完成静态与 clean-install 验证；历史容器 sandbox 回执见 §6
 > 范围：`claude-code-sdk` / `claude-agent-sdk`（Python SDK）与 `@anthropic-ai/claude-code`（npm CLI）的版本配对兼容性
 > 关联文档：`claude-agent-sandbox-network-sdk-gap.md`、`claude-agent-workspace-sandbox.md`、`claude-sdk-env-design.md`、`claude-agent-env-allowlist-audit.md`
-> 日期：2026-08-19
+> 日期：2026-08-24
 
 ---
 
@@ -14,9 +14,9 @@
 | 组件 | 版本 | 说明 |
 |---|---|---|
 | Python runtime | `3.12` | 与当前源码的 `datetime.UTC` 等语言能力一致 |
-| Python SDK | `claude-agent-sdk == 0.2.140` | wheel bundled CLI 为 2.1.235 |
-| npm/system CLI | `@anthropic-ai/claude-code == 2.1.235` | Agent 与 Claude MCP 均由共享 resolver 固定到该绝对路径 |
-| Node runtime | `22.18.0`（官方 Node 镜像） | 满足 Claude Code 2.1.235 声明的 Node >=22；不使用 bookworm Node 18 |
+| Python SDK | `ink-claude-dream-agent-sdk == 0.2.143` at Git commit `bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4` | 唯一提供 `claude_agent_sdk`；内部 CLI pin 为 2.1.241 |
+| npm official rollback CLI | `@anthropic-ai/claude-code == 2.1.241` | 仅由 absolute `CLAUDE_CODE_CLI_PATH` 显式选择；默认自有 Runtime 仍需 manifest 资格门 |
+| Node runtime | `22.18.0`（官方 Node 镜像） | 满足 Claude Code 2.1.241 声明的 Node >=22；不使用 bookworm Node 18 |
 | 正式 MCP 能力 | `mcp login --no-browser` / `mcp logout` | Docker 构建期 help capability probe，最低 2.1.191 门 |
 | sandbox | bwrap + `enableWeakerNestedSandbox` + `allowAllUnixSockets` | nested Docker 跳过 optional Unix-socket seccomp；filesystem/network sandbox 保留 |
 | 构建保障 | Dockerfile 版本与 MCP argv 断言 | optional platform 依赖或能力缺失均在构建期失败 |
@@ -30,7 +30,7 @@
 | `claude-code-sdk 0.0.25` | ⚠️ 基本可用但 **can_use_tool 应答方言过旧**（`{"allow":true}` 被 CLI schema 拒绝 → fail-closed，生产 403 bug） | ❌ 同左，且 CLI 内嵌 apply-seccomp 在 Docker 必败 |
 | `claude-agent-sdk 0.2.128` | ✅ 历史 Route A（需 cli_path 锁定 + vendor 补丁） | ❌ 历史验证不通过（见 §3.3/§3.4） |
 
-当前 `0.2.140 × 2.1.235` 不再依赖已经消失的 `vendor/seccomp` 文件，也不尝试已证伪的 `sandbox.seccomp.applyPath`。SDK bundled 与 system CLI 版本相同，但生产仍显式 pin system CLI，使 Agent 和 user-scoped MCP OAuth 使用同一可观测二进制。
+当前自有 SDK `0.2.143` 的 CLI pin 与 Docker official rollback CLI 均为 `2.1.241`，不再依赖已经消失的 `vendor/seccomp` 文件，也不尝试已证伪的 `sandbox.seccomp.applyPath`。该 official CLI 只作为显式回滚物；正常启动仍解析 production-qualified 自有 Runtime，缺失或不合格时 fail closed。
 
 > 说明：SDK 的 `MINIMUM_CLAUDE_CODE_VERSION = "2.0.0"`（`subprocess_cli.py:31`），低于时仅 warning 不阻断；SDK 内无硬性版本门，因此**兼容性验证责任完全在使用方**。
 
@@ -84,7 +84,7 @@
 
 ## 5. 版本管理规约（建议固化）
 
-1. **配对即原子**：SDK 与 CLI 版本必须成对变更、成对验证、成对记录（Dockerfile `CLAUDE_CODE_VERSION` + requirements `claude-agent-sdk` 同一 commit 内修改）；
+1. **配对即原子**：SDK 与 CLI 版本必须成对变更、成对验证、成对记录（Dockerfile `CLAUDE_CODE_VERSION` + requirements `ink-claude-dream-agent-sdk` 同一 commit 内修改）；
 2. **升级检查清单**（每次动任一版本）：
    - can_use_tool 序列化核对（对照 CLI `permissionToolOutputSchema`）；
    - hook 输出契约核对（真实 SDK 类型的形状断言测试）；

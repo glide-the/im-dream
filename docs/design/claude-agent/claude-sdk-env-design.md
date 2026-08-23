@@ -7,6 +7,15 @@
 > 迁移到 `{AGENT_CWD}/{thread_id}/.claude-tmp`。Phase 1 通过
 > `AgentRunOptions.claude_tmp_workspace` 传递 server-only 绑定，runner 与
 > final client adapter 重复合并时保持该绑定，spawn 前创建并校验 `0700`。
+> **[Sync] 2026-08-23**: 生产入口要求 `ink-claude-dream-agent-sdk==0.2.143`
+> 唯一提供 `claude_agent_sdk`，并把默认 CLI 收敛为经 production manifest
+> 门禁的 `ink-claude-code-dream==0.1.0`。`CLAUDE_CODE_CLI_PATH` 是唯一显式
+> 绝对覆盖与官方 CLI 回滚入口；不再回退 ambient `claude` 或 SDK bundled CLI。
+> **[Sync] 2026-08-24**: Python dependency files now lock
+> `ink-claude-dream-agent-sdk==0.2.143` to Git commit
+> `bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4`; official `claude-agent-sdk`
+> is absent. Docker validates metadata/import ownership while retaining the
+> official CLI only for explicit rollback. No ineligible Runtime is installed.
 
 # ClaudeSDKClient 项目 env 注入方案设计
 
@@ -197,18 +206,32 @@ options.extra_args["setting-sources"] = "project"
 
 由于 Runner 的 `cwd` 是 workspace 路径，项目级 settings 实际读取路径是 `{workspace}/.claude/settings.json`。因此 `backend/libs/claude_agent_kit/server/workspace.py` 需要在每次 `init_workspace()` 时刷新项目根 `.claude` 模板文件到 workspace，但继续排除 `.claude/skills/`，因为该目录由 workspace skills 软链接机制运行时维护。
 
-### 5.5A CLI 二进制解析（cli_path）**[2026-07-26]**
+### 5.5A CLI 二进制解析（cli_path）**[2026-08-23 当前合同]**
 
-`claude-agent-sdk 0.2.128` 的 transport `_find_cli` **优先使用 wheel 内置 CLI**（`_bundled/claude`），其次才是 PATH 上的系统安装。生产 Dockerfile 对 npm CLI 打过 apply-seccomp passthrough 补丁（规避 Docker 嵌套 userns 的 `/proc/self/setgroups` 失败），内置 CLI 遮蔽补丁二进制后该故障复发。因此新增 `sdk_env.apply_cli_path_to_options()`，在 `agent_runner.run_streaming` 组装 options 时（plan/task env 注入之前）固定 `options.cli_path`：
+Dream 只保留一条 Agent 业务路径：`server.py` 在 Agent factory 启动前验证
+`ink-claude-dream-agent-sdk==0.2.143` distribution metadata、唯一
+`claude_agent_sdk` import provider、公共 `ClaudeAgentOptions` / client / query API
+和五类 stream message type。Runner 随后通过既有
+`sdk_env.apply_cli_path_to_options()` 固定同一 CLI；MCP 管理身份复用同一个
+`resolve_claude_cli_path()`，不存在按部署环境分叉的 resolver。
 
 | 优先级 | 来源 | 语义 |
 |---|---|---|
 | 0 | `options.cli_path` 已显式设置 | 代码显式值永远优先，helper 直接返回 |
-| 1 | `CLAUDE_CODE_CLI_PATH` 环境变量 | 仅当路径存在时采用；设置了但文件不存在 → 记 warning 并继续下探（过期覆盖不得遮蔽可用 CLI） |
-| 2 | `shutil.which("claude")` | 系统/npm CLI——生产为 Docker 打过补丁的运行时，本地开发为开发者自己的 npm claude |
-| 3 | 不设置 | 文档化逃生舱：SDK 回退到内置 CLI（无系统 claude 的环境仍可用） |
+| 1 | `CLAUDE_CODE_CLI_PATH` 环境变量 | 仅接受存在且可执行的绝对路径；这是唯一配置覆盖，也是切回经验证官方 CLI 的 rollback 边界 |
+| 2 | `shutil.which("ink-claude-code-dream")` | 默认自有 Runtime；其 release-relative manifest 必须通过生产资格门禁 |
+| 3 | 无匹配 | fail closed；禁止 SDK bundled CLI 或 ambient `claude` 静默形成第二条路径 |
 
-配套 Docker 侧（2026-07-26 Route A）：npm CLI 固定 **2.1.108** 并恢复 vendor apply-seccomp passthrough 补丁（覆盖为 `#!/bin/sh` + `exec "$@"`），新增构建期 `claude --version` 断言防平台二进制静默缺失（2.1.220 optional-deps 教训）。**settings 驱动路线已被生产证伪，勿再尝试**：曾升级 2.1.220 并改用 `sandbox.seccomp.applyPath` + shim（`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH`），但 2.1.220 的 seccomp 转换器硬编码 `seccomp: jCu()`、从不读取 `sandbox.seccomp`（Linux 二进制字符串：settings 键 0 命中、`/proc/self/fd/` 16 命中），shim 日志证实从未被调用；该机制已全部拆除。SDK 侧兼容性：`_check_claude_version` 最低版本为 `MINIMUM_CLAUDE_CODE_VERSION = "2.0.0"`（仅 warning 不阻断），2.1.108 远超下限；restored-src 证实 2.1.10x 时代 CLI 已具备 `permissionToolOutputSchema`（behavior/updatedInput）与 `createSandboxAskCallback`，can_use_tool 序列化保持兼容。
+默认 Runtime manifest 必须明确 `corePruned=true`、
+`productionEligible=true`、`claude-code-stream-json/1`，并声明 stream/control、
+MCP management identity/stdio/http/OAuth、plugin、workspace/sandbox/thread TMPDIR、
+transcript/resume/cancel 能力。当前只透明委托官方 core 且声明
+`productionEligible=false` 的 compatibility envelope 不满足该门禁，不能作为默认
+生产 artifact。Python SDK 已使用不可变 Git commit
+`bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4` 原子切换到自有 distribution；
+Runtime 仍须等待不可变、可安装且通过此门禁的 artifact。当前镜像继续保留
+official CLI 2.1.241 作为显式绝对路径回滚，并在 Docker build 中与自有 SDK 的
+`_cli_version == 2.1.241` 原子断言，但不会被默认 resolver 选中。
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 

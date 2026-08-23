@@ -12,6 +12,7 @@
 <!-- [Sync] 2026-08-20: bound the public SDK stdout buffer for image tool results and record the passing real Chat regression. -->
 <!-- [Sync] 2026-08-21: accept absolute HTTP(S), isolate Resources CLI from ancestor project configs, and authorize Remove from parsed user scope. -->
 <!-- [Sync] 2026-08-22: restore the reviewed connector onto current develop while preserving its per-thread TMPDIR and current Chat/Dream runtime contracts. -->
+<!-- [Sync] 2026-08-23: share Dream's custom Runtime resolver and production manifest gate; explicit absolute CLAUDE_CODE_CLI_PATH remains the official rollback boundary. -->
 
 # Claude MCP 资源链接器设计
 
@@ -39,7 +40,7 @@ claude mcp list
 
 1. Linux/Windows Claude Code 将 OAuth 凭证放在 secure-storage config dir 的 `.credentials.json`；user-scope MCP server 配置位于 `CLAUDE_CONFIG_DIR/.claude.json` 的 `mcpServers`。macOS 忽略 `.credentials.json` OAuth 并使用 config-dir-keyed Keychain。当前固定 CLI 包含 `CLAUDE_SECURESTORAGE_CONFIG_DIR` 选择器，因此 Resources 与 Agent 可在保持不同 `CLAUDE_CONFIG_DIR` 的同时指向同一平台用户安全存储；capability 会检查 exact CLI 的选择器 marker，缺失即 fail closed。
 2. Agent 已将整个 config home 定位为 `{thread-workspace}/.claude-home`，并携带 `canonical_user_id`。runner 为安全只加载 `setting-sources=project`，因此 thread `.claude-home/.claude.json` 中的 user-scope `mcpServers` 会被正式 CLI 忽略。现有 runner 已通过公开 `mcp_servers` option 注入内部 MCP；远端 opaque 定义复用同一入口，不新增 `.mcp.json` approval、表或第二套 Agent runtime。
-3. 历史 Docker 基线曾固定 CLI `2.1.108`、Python SDK `0.2.128`；本次代码已原子更新为 SDK `0.2.140`（bundled CLI `2.1.235`）+ system CLI `2.1.235`。新版 npm 包没有旧 `vendor/seccomp`，必须用当前 nested sandbox/optional seccomp 配置并以容器 Bash 回执为发布门。
+3. 历史 Docker 基线曾固定 CLI `2.1.108`、Python SDK `0.2.128`，随后使用 official SDK `0.2.140` + CLI `2.1.235`；当前依赖已原子更新为自有 SDK `0.2.143`（CLI pin `2.1.241`）+ 显式 official rollback CLI `2.1.241`。新版 npm 包没有旧 `vendor/seccomp`，必须用当前 nested sandbox/optional seccomp 配置并以容器 Bash 回执为发布门；该 rollback artifact 不会替代 manifest-gated 默认自有 Runtime。
 
 本设计据此取消“production provider 永久 disabled”的旧结论，改为平台凭证 capability：Linux 使用 private file store，macOS 由 exact Claude CLI 直接复用 config-dir-keyed Keychain；未知存储后端仍 fail closed。CLI 是 token exchange/refresh/logout 和 macOS Keychain item 的唯一 owner。业务代码把 opaque `mcpServers` 作为每-turn SDK option 交付，且仅在 Linux 复制/撤销 opaque `mcpOAuth`；macOS token 从不进入后端内存或 thread 文件。
 
@@ -113,7 +114,7 @@ App
 | 能力 | 证据 | 复用结论 |
 |---|---|---|
 | argv 数组 | `backend/services/claude_plugin/cli.py.run_claude` | 复用执行纪律，不直接复用同步 runner。 |
-| CLI 解析 | `cli.resolve_claude_binary/get_cli_version` | 统一到 Agent 的 `CLAUDE_CODE_CLI_PATH → which → bundled` 语义，禁止继续使用 Plugin 的 `INK_CLAUDE_CLI_PATH` 分叉。 |
+| CLI 解析 | `cli.resolve_claude_binary/get_cli_version` | 统一到 Agent 的绝对 `CLAUDE_CODE_CLI_PATH` 回滚覆盖 → production-qualified `ink-claude-code-dream` 默认 → fail closed 语义，禁止 bundled/ambient official 隐式回退或 Plugin 的 `INK_CLAUDE_CLI_PATH` 分叉。 |
 | timeout/exit | `CliExecution` | 复用字段和 fail-closed 判定。 |
 | operation 反馈 | `ClaudePluginAdminPage`、`PluginOperationProgress` | 复用 polling、progress、safe error 的 UI 模式。 |
 | DB operation | `claude_plugin_operations` | 不复用：表与字段属于 ClaudePlugin，混入 OAuth 违反业务域和 schema 协议。 |
@@ -124,7 +125,7 @@ App
 
 - `sdk_env.resolve_claude_config_home(cwd)`：process `CLAUDE_CONFIG_DIR` 优先，否则 `{cwd}/.claude-home`。
 - `agent_runner.py:2767-2771`：在 SDK env 链最前注入 exact config home。
-- `sdk_env.apply_cli_path_to_options`：`CLAUDE_CODE_CLI_PATH` → `shutil.which("claude")` → SDK bundled fallback；Resources capability 要求前两者能解析到明确绝对 binary。
+- `sdk_env.apply_cli_path_to_options`：绝对 `CLAUDE_CODE_CLI_PATH` 显式回滚覆盖 → `shutil.which("ink-claude-code-dream")` + production manifest → fail closed；Resources/MCP management identity 与 Agent 使用同一 exact binary resolver。
 - `sdk_env.apply_claude_secure_storage_home_to_options`：macOS Agent 额外注入 server-owned `CLAUDE_SECURESTORAGE_CONFIG_DIR={user-config-dir}`，但保留 `CLAUDE_CONFIG_DIR={thread}/.claude-home`。
 - `agent_runner.py:2747`：Agent cwd 是 thread workspace。
 - `AgentRunOptions.canonical_user_id` 已存在；`claude_agent/service.py` 在 workspace/config-home 建立后、resume transcript 探针前是唯一正确的用户凭证同步点。
@@ -167,10 +168,10 @@ App
 | 位置 | 版本/证据 | 结论 |
 |---|---|---|
 | 本机 CLI | `claude --version` → `2.1.220`；help 含 login/logout/no-browser | 本地满足目标命令，但不作为 Docker 发布证据。 |
-| Docker system CLI | `backend/Dockerfile` → `2.1.235`，build 时检查 version/login/logout/no-browser | 已满足正式 argv 门禁。 |
-| 当前 Python SDK | `claude-agent-sdk==0.2.140`，bundled CLI 2.1.235 | 与 Docker 目标配对一致；`uv.lock`、exported requirements 与 venv 必须同步验证。 |
-| 目标 Python SDK | PyPI wheel `0.2.140` 的 `_cli_version.py` → `2.1.235` | 与目标 system CLI 原子锁定并执行回归。 |
-| 目标 npm CLI | npm registry `2.1.235` | 满足 headless MCP；没有旧 vendor patch 面。 |
+| Docker official rollback CLI | `backend/Dockerfile` → `2.1.241`，build 时检查 exact version/login/logout/no-browser，并与 SDK `_cli_version` 交叉断言 | 仅能通过 absolute `CLAUDE_CODE_CLI_PATH` 显式选择；默认自有 Runtime 仍需独立资格门。 |
+| 当前 Python SDK | `ink-claude-dream-agent-sdk==0.2.143`，Git commit `bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4` | `uv.lock`、exported requirements、clean venv 与 Docker metadata/import-provider 门同步验证；official distribution 不得并存。 |
+| SDK import / API | distribution 改名，import 保留 `claude_agent_sdk` | 公共 client/options/query、stream types 与 MCP inventory API 保持原协议。 |
+| 目标 npm CLI | npm registry `2.1.241` | 与自有 SDK CLI pin 一致，满足 headless MCP；没有旧 vendor patch 面。 |
 | 新版 sandbox | 官方配置支持 `enableWeakerNestedSandbox`、`network.allowAllUnixSockets`；seccomp 为 optional | Docker 中保留 bwrap filesystem/network 隔离；跳过 optional Unix-socket seccomp 等价于当前 passthrough 的安全边界，仍须真实容器回执。 |
 | npm 2.1.108 | `npm pack --dry-run` 含 `vendor/seccomp/*/apply-seccomp` | 解释当前生产固定版本，但缺少 MCP login。 |
 
@@ -184,7 +185,7 @@ App
 | 历史 thread | 账户已有大量 DB 记录，部分有 workspace | 登录时不得批量创建/改写所有 thread 凭证 | 删除 login-success fan-out；每次 Agent turn 按需投影。Logout 只清理已存在 Linux/错误遗留文件投影。 |
 | 本轮 Agent thread | 使用公开 API/UI 创建一个账户自有 thread | turn 前以 SDK option 注入 `mcpServers`；Linux 写 `mcpOAuth` 文件，macOS 注入用户 secure-storage selector | 断言 thread/session identity、无 Keychain 弹窗、MCP 只读工具回执。 |
 | 数据库/Admin/Gateway | 正常本机服务与真实 PostgreSQL | 只产生正常可见的 thread/run/Gateway 回执；无 schema 变化 | 禁止 clone/影子账户/SQL 写；保留正常业务回执。 |
-| CLI/SDK | 本机 system CLI 2.1.220；SDK bundled 与 Docker 为 2.1.235 | 本机验收显式解析 exact 2.1.220，不修改用户全局 CLI；Docker 发布物固定 2.1.235 | 每个 topology 内 capability DTO、Resources process argv 与 Agent runtime 解析到同一绝对 binary，且均满足 `>=2.1.191`。 |
+| CLI/SDK | 本机 system CLI 2.1.220；自有 SDK 0.2.143 的 CLI pin 与 Docker official rollback artifact 均为 2.1.241 | 本机旧验收证据仍记录 exact 2.1.220，不修改用户全局 CLI；当前 Docker 回滚物固定 2.1.241，默认自有 Runtime 另走 manifest gate | 每个 topology 内 capability DTO、Resources process argv 与 Agent runtime 解析到同一绝对 binary，且均满足 `>=2.1.191`。 |
 | OAuth provider | 尚无本轮用户源授权 | 新增一次真实授权并在旅程末 Logout | URL/code/token/client secret 不进日志、截图、trace 或测试输出。 |
 
 资料：Claude Code [MCP 文档](https://code.claude.com/docs/en/mcp) 明确 2.1.186 增加 `mcp login/logout`，2.1.191 完善无浏览器环境，并要求粘贴完整 redirect URL；官方 [认证文档](https://code.claude.com/docs/en/team) 说明 macOS Keychain 与 Linux/Windows file store；官方 [CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md) 记录 argv 能力。`CLAUDE_SECURESTORAGE_CONFIG_DIR` 当前依据 exact binary marker 与 [Anthropic issue #79223](https://github.com/anthropics/claude-code/issues/79223) 验证，属于版本绑定 capability，而非可长期假定的公开合同。
@@ -853,7 +854,7 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 - `backend/libs/claude_agent_kit/types.py` / `server/agent_runner.py`：repr-hidden `claude_mcp_servers` 通过官方 `ClaudeAgentOptions.mcp_servers` 与内部 stdio servers 合并；名称冲突 fail closed，不增加 remote wildcard `allowed_tools`。
 - `backend/libs/claude_agent_kit/server/sdk_env.py`：保留 thread `CLAUDE_CONFIG_DIR`，以服务端权威值注入 macOS `CLAUDE_SECURESTORAGE_CONFIG_DIR`；浏览器/user env 无权覆盖。
 - `backend/libs/claude_agent_kit/server/workspace.py`：deny sibling workspace/backend/home/custom MCP runtime root，当前 thread 再 allow-read；credential file 同时使用 exact deny-read/deny-write 和 `credentials.files(mode=deny)`。不再 deny `/`，因为 CLI 2.1.235 下该设置会移除 bwrap 内 `/bin/bash`。
-- `backend/Dockerfile` / `requirements.txt` / `pyproject.toml`：Python 3.12、官方 Node 22.18.0、Claude Code 2.1.235、Agent SDK 0.2.140 原子固定；build-time 验证 exact Node/CLI 与正式 MCP help capability。
+- `backend/Dockerfile` / `requirements.txt` / `pyproject.toml` / `uv.lock`：Python 3.12、官方 Node 22.18.0、显式回滚 CLI 2.1.241，以及 Git commit 锁定的自有 SDK 0.2.143；build-time 验证 exact Node/CLI、SDK `_cli_version == 2.1.241`、正式 MCP help、SDK metadata/API/import-provider，并拒绝 official SDK distribution 并存。默认自有 Runtime 未达资格时继续 fail closed。
 - `frontend/e2e/claude-mcp-resources.spec.ts`：拦截 API 的可见 Resources → Login → redirect → Connected → 41-tool detail/search/risk → refresh/back → Logout 技术旅程。
 
 2026-08-20 本轮发布门通过：Claude MCP backend contract `37 passed`（包含 inventory 请求取消时原样传播并清理 SDK client）；frontend 聚焦 lint `0 errors`（`App.tsx` 16 个既有 Hook warnings）且 production build 成功；provider-free Resources → Login → redirect → Connected → 41-tool 详情/筛选 → 刷新/返回 → Logout → Remove 为 `1 passed (5.3s)`。具名账户 `dmeck@suoxya.com` 在正常本机 Dream/Gateway/PostgreSQL 上完成 Resources 实时 41-tool 详情 → Chat 两次只读 MCP 调用 → 刷新 → 同 thread 续问，结果 `1 passed (1.2m)`，证据 thread `c1292eb3-c550-45c0-b854-406c4b46a90e` 保留，既有 `comfy` 连接未 Logout/Remove。9 个 Mermaid blocks 已由当前 Chromium + 前端 Mermaid 运行时逐块解析。当前工作树 Docker image 构建成功；容器回执为 Claude Code `2.1.235`、Node `22.18.0`、Agent SDK `0.2.140`、production imports/MCP argv capability 均 OK；本机真实链路 exact CLI 为 `2.1.220`，仍满足 `>=2.1.191`。共享数据库 schema 与 ClaudePlugin operation 表均未改变。

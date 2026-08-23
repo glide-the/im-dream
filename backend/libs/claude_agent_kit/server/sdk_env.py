@@ -1,6 +1,6 @@
 # [Input] Consume backend/.env, process env, and ClaudeAgentOptions-like objects.
-# [Output] Provide helpers that merge project/runtime env vars into ClaudeAgentOptions.env
-#          and force Claude Code to read project settings only.
+# [Output] Provide helpers that validate Dream's SDK distribution, resolve its
+#          CLI runtime, merge subprocess env, and force project-only settings.
 # [Pos] SDK environment helper node in libs/claude_agent_kit/server
 # [Sync] 2026-05-08: centralize .env injection for ClaudeSDKClient subprocess options.
 # [Sync] 2026-05-08: map TypeScript settingSources=["project"] to Python SDK extra_args.
@@ -63,13 +63,21 @@
 # [Sync] 2026-08-22: restore strict system-CLI discovery for MCP management and
 #                    the server-owned secure-storage selector without changing
 #                    the thread-scoped TMPDIR contract.
+# [Sync] 2026-08-23: require ink-claude-dream-agent-sdk 0.2.143 metadata while
+#                    retaining the claude_agent_sdk import; default CLI
+#                    discovery now selects ink-claude-code-dream and fails
+#                    closed. CLAUDE_CODE_CLI_PATH remains the sole explicit,
+#                    absolute override and official-CLI rollback boundary.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
 
+import importlib
+import json
 import logging
 import os
 import shutil
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -88,6 +96,44 @@ CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME = "INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES"
 CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT = 8 * 1024 * 1024
 CLAUDE_AGENT_MAX_BUFFER_SIZE_MINIMUM = 1024 * 1024
 CLAUDE_AGENT_MAX_BUFFER_SIZE_MAXIMUM = 64 * 1024 * 1024
+DREAM_CLAUDE_SDK_DISTRIBUTION = "ink-claude-dream-agent-sdk"
+DREAM_CLAUDE_SDK_VERSION = "0.2.143"
+DREAM_CLAUDE_SDK_IMPORT = "claude_agent_sdk"
+DREAM_CLAUDE_CLI_EXECUTABLE = "ink-claude-code-dream"
+DREAM_CLAUDE_CLI_VERSION = "0.1.0"
+DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA = "ink-claude-cli-envelope/v1"
+DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME = "release-manifest.json"
+DREAM_CLAUDE_STREAM_PROTOCOL_NAME = "claude-code-stream-json"
+DREAM_CLAUDE_STREAM_PROTOCOL_VERSION = 1
+DREAM_CLAUDE_REQUIRED_CAPABILITIES = frozenset(
+    {
+        "extensions.plugins",
+        "lifecycle.cancel",
+        "mcp.http",
+        "mcp.management.identity",
+        "mcp.oauth",
+        "mcp.stdio",
+        "protocol.control.bidirectional",
+        "protocol.streaming",
+        "sandbox",
+        "session.resume",
+        "tmpdir.thread-local",
+        "transcript.jsonl",
+        "workspace.cwd",
+    }
+)
+_DREAM_CLAUDE_SDK_PUBLIC_API = (
+    "ClaudeAgentOptions",
+    "ClaudeSDKClient",
+    "query",
+)
+_DREAM_CLAUDE_SDK_STREAM_TYPES = (
+    "AssistantMessage",
+    "ResultMessage",
+    "StreamEvent",
+    "SystemMessage",
+    "UserMessage",
+)
 
 logger = logging.getLogger(__name__)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
@@ -153,6 +199,186 @@ _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME = "CLAUDE_CODE_TASK_LIST_ID"
 # workspace.get_tasks_dir() resolves the same constant — single source.
 CLAUDE_CODE_TASK_LIST_ID_VALUE = "main"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _normalized_distribution_name(value: str) -> str:
+    """Return the PEP 503 comparison form without adding a packaging dependency."""
+
+    return "-".join(filter(None, value.lower().replace("_", "-").split("-")))
+
+
+def require_dream_claude_sdk_distribution() -> importlib_metadata.Distribution:
+    """Validate the installed Dream SDK distribution and import ownership.
+
+    The custom distribution intentionally preserves the public
+    ``claude_agent_sdk`` module.  Checking both its exact version and the
+    module-provider projection prevents a stale official ``claude-agent-sdk``
+    install from silently winning Python import resolution.
+    """
+
+    try:
+        distribution = importlib_metadata.distribution(
+            DREAM_CLAUDE_SDK_DISTRIBUTION
+        )
+    except importlib_metadata.PackageNotFoundError as exc:
+        raise RuntimeError(
+            f"Required Python distribution {DREAM_CLAUDE_SDK_DISTRIBUTION}=="
+            f"{DREAM_CLAUDE_SDK_VERSION} is not installed."
+        ) from exc
+
+    installed_name = str(
+        distribution.metadata.get("Name") or DREAM_CLAUDE_SDK_DISTRIBUTION
+    )
+    if _normalized_distribution_name(installed_name) != _normalized_distribution_name(
+        DREAM_CLAUDE_SDK_DISTRIBUTION
+    ):
+        raise RuntimeError(
+            "Claude Agent SDK distribution metadata has an unexpected Name: "
+            f"{installed_name!r}."
+        )
+    if distribution.version != DREAM_CLAUDE_SDK_VERSION:
+        raise RuntimeError(
+            f"{DREAM_CLAUDE_SDK_DISTRIBUTION} must be exactly "
+            f"{DREAM_CLAUDE_SDK_VERSION}; found {distribution.version}."
+        )
+
+    providers = {
+        _normalized_distribution_name(name)
+        for name in importlib_metadata.packages_distributions().get(
+            DREAM_CLAUDE_SDK_IMPORT, []
+        )
+    }
+    expected_provider = _normalized_distribution_name(
+        DREAM_CLAUDE_SDK_DISTRIBUTION
+    )
+    if providers != {expected_provider}:
+        rendered = ", ".join(sorted(providers)) or "none"
+        raise RuntimeError(
+            f"{DREAM_CLAUDE_SDK_IMPORT} must be provided only by "
+            f"{DREAM_CLAUDE_SDK_DISTRIBUTION}; found: {rendered}."
+        )
+
+    sdk_module = importlib.import_module(DREAM_CLAUDE_SDK_IMPORT)
+    sdk_types = importlib.import_module(f"{DREAM_CLAUDE_SDK_IMPORT}.types")
+    missing_api = [
+        name for name in _DREAM_CLAUDE_SDK_PUBLIC_API if not hasattr(sdk_module, name)
+    ]
+    missing_stream_types = [
+        name for name in _DREAM_CLAUDE_SDK_STREAM_TYPES if not hasattr(sdk_types, name)
+    ]
+    if missing_api or missing_stream_types:
+        raise RuntimeError(
+            "Dream Claude SDK public API/stream protocol is incomplete; "
+            f"missing_api={missing_api!r} missing_stream_types={missing_stream_types!r}."
+        )
+    if str(getattr(sdk_module, "__version__", "")) != DREAM_CLAUDE_SDK_VERSION:
+        raise RuntimeError(
+            f"{DREAM_CLAUDE_SDK_IMPORT}.__version__ must be "
+            f"{DREAM_CLAUDE_SDK_VERSION}."
+        )
+    return distribution
+
+
+def require_dream_claude_runtime_manifest(executable: Path | str) -> Path:
+    """Require a production-qualified manifest for the default Dream Runtime.
+
+    The immutable release layout owns ``release-manifest.json`` beside its
+    ``bin/`` directory. This gate intentionally rejects compatibility
+    envelopes: Dream's default requires a pruned core and an explicit
+    production eligibility receipt, not delegation to the official CLI.
+    """
+
+    executable_path = Path(executable).resolve(strict=True)
+    manifest_path = (
+        executable_path.parent.parent / DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME
+    )
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"{DREAM_CLAUDE_CLI_EXECUTABLE} has no readable release manifest."
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise RuntimeError("Dream Claude Runtime manifest must be a JSON object.")
+
+    runtime = manifest.get("runtime")
+    integration = runtime.get("integration") if isinstance(runtime, dict) else None
+    core = manifest.get("core")
+    protocol = manifest.get("protocol")
+    capability_reference = manifest.get("capabilityEvidence")
+    release_root = manifest_path.parent.resolve()
+    if not isinstance(capability_reference, str) or not capability_reference.strip():
+        raise RuntimeError("Dream Claude Runtime has no capability evidence reference.")
+    capability_path = (release_root / capability_reference).resolve()
+    if not capability_path.is_relative_to(release_root):
+        raise RuntimeError("Dream Claude Runtime capability evidence escaped its release.")
+    try:
+        capability_evidence = json.loads(capability_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "Dream Claude Runtime capability evidence is unreadable."
+        ) from exc
+    capability_runtime = (
+        capability_evidence.get("runtime")
+        if isinstance(capability_evidence, dict)
+        else None
+    )
+    capabilities = (
+        capability_evidence.get("capabilities")
+        if isinstance(capability_evidence, dict)
+        else None
+    )
+    capability_ids: set[str] = set()
+    if isinstance(capabilities, list):
+        for value in capabilities:
+            capability_id = value if isinstance(value, str) else None
+            if isinstance(value, dict) and isinstance(value.get("id"), str):
+                capability_id = value["id"]
+            if capability_id:
+                capability_ids.add(capability_id)
+    missing_capabilities = sorted(
+        DREAM_CLAUDE_REQUIRED_CAPABILITIES - capability_ids
+    )
+    core_pruned = isinstance(core, dict) and core.get("corePruned") is True
+    production_eligible = (
+        isinstance(core, dict) and core.get("productionEligible") is True
+    )
+    capability_core_pruned = (
+        isinstance(capability_runtime, dict)
+        and capability_runtime.get("corePruned") is True
+    )
+    capability_production_eligible = (
+        isinstance(capability_runtime, dict)
+        and capability_runtime.get("productionEligible") is True
+    )
+    if (
+        manifest.get("schemaVersion") != DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA
+        or not isinstance(runtime, dict)
+        or runtime.get("name") != DREAM_CLAUDE_CLI_EXECUTABLE
+        or runtime.get("version") != DREAM_CLAUDE_CLI_VERSION
+        or runtime.get("entrypoint") != f"bin/{DREAM_CLAUDE_CLI_EXECUTABLE}"
+        or not isinstance(integration, dict)
+        or integration.get("environment") != "CLAUDE_CODE_CLI_PATH"
+        or integration.get("sdkVersion") != DREAM_CLAUDE_SDK_VERSION
+        or integration.get("sdkOption") != "ClaudeAgentOptions.cli_path"
+        or not core_pruned
+        or not production_eligible
+        or not capability_core_pruned
+        or not capability_production_eligible
+        or not isinstance(protocol, dict)
+        or protocol.get("name") != DREAM_CLAUDE_STREAM_PROTOCOL_NAME
+        or protocol.get("version") != DREAM_CLAUDE_STREAM_PROTOCOL_VERSION
+        or missing_capabilities
+    ):
+        raise RuntimeError(
+            "Dream Claude Runtime is not production-qualified; "
+            f"core_pruned={core_pruned!r} "
+            f"production_eligible={production_eligible!r} "
+            f"capability_core_pruned={capability_core_pruned!r} "
+            f"capability_production_eligible={capability_production_eligible!r} "
+            f"missing_capabilities={missing_capabilities!r}."
+        )
+    return manifest_path.resolve()
 
 
 def resolve_claude_agent_max_buffer_size(
@@ -578,55 +804,59 @@ def apply_task_v2_env_to_options(options: Any) -> Any:
     return options
 
 
-# CLI binary resolution (2026-07-26, Docker apply-seccomp fix).  The
-# claude-agent-sdk transport prefers its bundled CLI over any system install
-# (``_find_cli``: bundled first).  Production Docker patches the npm CLI's
-# vendor apply-seccomp into a passthrough to survive nested userns, so the
-# patched binary must win over the bundled one.
+# CLI binary resolution. Dream owns the default executable; the upstream SDK's
+# bundled CLI and an ambient ``claude`` binary are intentionally not fallbacks.
 _CLAUDE_CODE_CLI_PATH_ENV_NAME = "CLAUDE_CODE_CLI_PATH"
 
 
 def resolve_claude_cli_path(
     process_env: Optional[Mapping[str, str]] = None,
 ) -> Optional[str]:
-    """Resolve an executable system CLI for Agent and MCP management calls."""
+    """Resolve Dream's executable CLI for Agent and MCP management calls.
+
+    ``CLAUDE_CODE_CLI_PATH`` is the sole explicit override. It must be an
+    absolute executable path and may point to a verified official Claude Code
+    binary for configuration-only rollback. Without that override, only the
+    Dream-owned console name is searched on ``PATH``.
+    """
 
     source = os.environ if process_env is None else process_env
     override = str(source.get(_CLAUDE_CODE_CLI_PATH_ENV_NAME) or "").strip()
     if override:
-        candidate = Path(override).expanduser()
-        if candidate.is_file() and os.access(candidate, os.X_OK):
+        candidate = Path(override)
+        if (
+            candidate.is_absolute()
+            and candidate.is_file()
+            and os.access(candidate, os.X_OK)
+        ):
             return str(candidate.resolve())
         logger.warning(
-            "%s is set but is not executable; falling back to PATH.",
+            "%s must be an absolute executable path; falling back to %s on PATH.",
             _CLAUDE_CODE_CLI_PATH_ENV_NAME,
+            DREAM_CLAUDE_CLI_EXECUTABLE,
         )
     search_path = source.get("PATH") if process_env is not None else None
-    system_cli = shutil.which("claude", path=search_path)
+    system_cli = shutil.which(DREAM_CLAUDE_CLI_EXECUTABLE, path=search_path)
     if not system_cli:
         return None
     candidate = Path(system_cli)
     if not candidate.is_file() or not os.access(candidate, os.X_OK):
         return None
-    return str(candidate.resolve())
+    resolved = candidate.resolve()
+    require_dream_claude_runtime_manifest(resolved)
+    return str(resolved)
 
 
 def apply_cli_path_to_options(options: Any) -> Any:
-    """Pin ``options.cli_path`` to the system/npm CLI when available.
+    """Pin ``options.cli_path`` to Dream's CLI or fail closed.
 
     Resolution order (first hit wins):
 
-    1. ``CLAUDE_CODE_CLI_PATH`` env var, when set and the path exists.
-       A set-but-missing path logs a warning and falls through — a stale
-       override must never shadow a working CLI.
-    2. ``shutil.which("claude")`` — the system/npm install.  Production
-       Docker ships the npm CLI with the vendor apply-seccomp passthrough
-       patch (nested-userns ``/proc/self/setgroups`` workaround); pinning it
-       prevents the SDK's bundled CLI from silently shadowing the patched
-       binary (2026-07-26 recurrence).  Local dev likewise stays on the
-       developer's own npm claude.
-    3. Leave ``cli_path`` unset — documented escape hatch: the SDK then
-       falls back to its bundled CLI (usable when no system claude exists).
+    1. Absolute executable ``CLAUDE_CODE_CLI_PATH`` override. This is also the
+       reviewed official-CLI rollback path.
+    2. ``shutil.which("ink-claude-code-dream")``.
+    3. Raise instead of allowing the SDK's bundled or ambient official CLI to
+       create a second production behavior.
 
     An explicitly pre-set ``options.cli_path`` always wins over this helper.
     """
@@ -634,8 +864,13 @@ def apply_cli_path_to_options(options: Any) -> Any:
     if getattr(options, "cli_path", None):
         return options
     system_cli = resolve_claude_cli_path()
-    if system_cli:
-        options.cli_path = system_cli
+    if not system_cli:
+        raise RuntimeError(
+            f"{DREAM_CLAUDE_CLI_EXECUTABLE} is unavailable; install the Dream "
+            "runtime or set CLAUDE_CODE_CLI_PATH to an absolute executable "
+            "for explicit rollback."
+        )
+    options.cli_path = system_cli
     return options
 
 
