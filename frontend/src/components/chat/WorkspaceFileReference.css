@@ -1,0 +1,80 @@
+/* [Input] Blob-backed Workspace image state and Ink & Memory v2.1 semantic tokens. */
+/* [Output] 420×315 maximum image content inside the exact Mermaid media frame plus shared immersive original-ratio preview. */
+/* [Pos] workspace file reference style node in frontend/src/components/chat */
+/* [Sync] 2026-08-22: add responsive thumbnail and full-size preview styling without affecting ordinary Markdown images. */
+/* [Sync] 2026-08-23: remove divergent card/badge/modal chrome; retain only image sizing inside the shared Markdown media UI. */
+/* [Sync] 2026-08-23: only the full-size image scales; its shared preview sheet remains fitted and stable. */
+
+.workspace-image-reference__trigger {
+  display: grid;
+  width: min(100%, 26.25rem);
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  cursor: zoom-in;
+  font: inherit;
+  line-height: 1;
+  text-align: left;
+  transition: box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.workspace-image-reference__trigger:hover {
+  box-shadow: 0 10px 24px var(--color-shadow-soft);
+}
+
+.workspace-image-reference__trigger:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 3px;
+}
+
+.prose .workspace-image-reference__thumbnail,
+.workspace-image-reference__thumbnail {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--color-bg-surface);
+}
+
+.workspace-image-reference__fullsize-frame {
+  min-width: min(110rem, calc(100dvw - 12.5rem));
+}
+
+.prose .workspace-image-reference__fullsize,
+.workspace-image-reference__fullsize {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: calc(100dvh - 11rem);
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+@media (max-width: 40rem) {
+  .workspace-image-reference__trigger {
+    width: 100%;
+  }
+
+  .workspace-image-reference__fullsize-frame {
+    min-width: 0;
+  }
+
+  .prose .workspace-image-reference__fullsize,
+  .workspace-image-reference__fullsize {
+    max-height: calc(100dvh - 10rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-image-reference__trigger {
+    transition: none;
+  }
+}

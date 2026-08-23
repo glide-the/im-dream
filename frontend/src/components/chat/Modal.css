@@ -1,0 +1,320 @@
+/* [Input] Shared semantic theme tokens, Modal variants, optional media toolbar, and controlled zoom state. */
+/* [Output] Responsive paper dialogs plus the full-viewport Mermaid/Workspace viewer with a fixed sheet and content-only zoom target. */
+/* [Pos] shared modal style node in frontend/src/components/chat */
+/* [Sync] 2026-08-22: extract the existing modal styling and add the large-image preview variant. */
+/* [Sync] 2026-08-23: unify Mermaid and Workspace previews under a black immersive canvas with top-right actions and bottom zoom controls. */
+/* [Sync] 2026-08-23: separate scroll-space sizing from visual zoom so the fitted paper sheet never scales with its image or diagram. */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 1rem;
+  background: var(--color-bg-overlay);
+}
+
+.modal-backdrop--media-preview {
+  padding: 0;
+  background: rgb(0 0 0 / 88%);
+  backdrop-filter: blur(2px);
+}
+
+.modal-surface {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: calc(100dvh - 2rem);
+  box-sizing: border-box;
+  border: 1px solid var(--color-border-paper);
+  background: var(--color-bg-paper);
+  box-shadow: 0 20px 45px var(--color-shadow-medium);
+  color: var(--color-text-body);
+  overflow: hidden;
+}
+
+.modal-surface--default {
+  max-width: 40rem;
+  padding: 1.25rem;
+  border-radius: 24px;
+}
+
+.modal-surface--media-preview {
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.modal-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.modal-header--media-preview {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2;
+}
+
+.modal-title {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 1.125rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-title--media-preview {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.modal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.modal-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--color-border-paper);
+  border-radius: 999px;
+  background: var(--color-bg-surface-solid);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.modal-close:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.modal-close svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.modal-toolbar-button,
+.modal-close--media-preview {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(48 48 48 / 92%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 28%);
+  color: #fff;
+  cursor: pointer;
+  transition: background 140ms ease, transform 140ms ease, opacity 140ms ease;
+}
+
+.modal-toolbar-button:hover,
+.modal-close--media-preview:hover {
+  background: rgb(66 66 66 / 96%);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.modal-toolbar-button:focus-visible,
+.modal-close--media-preview:focus-visible,
+.modal-zoom-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+.modal-toolbar-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
+}
+
+.modal-toolbar-button svg,
+.modal-close--media-preview svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.modal-content {
+  min-height: 0;
+  margin-top: 1rem;
+}
+
+.modal-content--default {
+  overflow: auto;
+}
+
+.modal-content--media-preview {
+  display: flex;
+  flex: 1 1 auto;
+  margin: 0;
+  overflow: hidden;
+}
+
+.modal-media-stage {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 4.75rem 9rem 6rem 3.5rem;
+  overflow: auto;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
+}
+
+.modal-media-sizer {
+  display: grid;
+  place-self: center;
+  place-items: center;
+  min-width: 0;
+}
+
+.modal-media-transform {
+  display: grid;
+  place-items: center;
+}
+
+.modal-zoom-controls {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 3.5rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: rgb(48 48 48 / 94%);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 32%);
+  color: #fff;
+  transform: translateX(-50%);
+}
+
+.modal-zoom-button {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
+  cursor: pointer;
+}
+
+.modal-zoom-button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 16%);
+}
+
+.modal-zoom-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.modal-zoom-button svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.modal-zoom-value {
+  width: 3.5rem;
+  color: #fff;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+}
+
+@media (max-width: 40rem) {
+  .modal-backdrop {
+    padding: 0.5rem;
+  }
+
+  .modal-backdrop--media-preview {
+    padding: 0;
+  }
+
+  .modal-surface {
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .modal-surface--media-preview {
+    max-height: none;
+  }
+
+  .modal-header--media-preview {
+    top: 0.75rem;
+    right: 0.75rem;
+  }
+
+  .modal-title {
+    font-size: 1rem;
+  }
+
+  .modal-toolbar {
+    gap: 0.5rem;
+  }
+
+  .modal-toolbar-button,
+  .modal-close--media-preview {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .modal-media-stage {
+    padding: 4.25rem 0.75rem 5.5rem;
+  }
+
+  .modal-zoom-controls {
+    bottom: 1rem;
+    height: 3.25rem;
+  }
+
+  .modal-zoom-button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-toolbar-button,
+  .modal-close--media-preview {
+    transition: none;
+  }
+}

@@ -72,6 +72,7 @@
 //                    t() and format via getDateLocale(i18n.language).
 // [Sync] 2026-08-03: share button now opens ChatShareDialog (复制链接 placeholder +
 //                    导出图片 long-image export via chat-export-registry + exportThreadImage).
+// [Sync] 2026-08-23: pass the localized unavailable-Workspace-image fallback into the authenticated export renderer.
 // [Sync] 2026-08-04: add thread subagent summary/right sidebar; Agent/Task chat buttons focus the matching task row.
 // [Sync] 2026-08-11: keep a lazy-created thread's first ChatPanel mounted while
 //                    it streams, and make ChatView own queued-turn consumption
@@ -921,6 +922,7 @@ function ChatViewContent({
           footer: t('chat.share.footer'),
           thinking: t('chat.share.thinking'),
           truncated: t('chat.share.truncated'),
+          workspaceImageUnavailable: t('chat.share.workspaceImageUnavailable'),
         },
         // 待确认窗口整图只有一个，渲染在长图最下方（镜像 ToolConfirmationDock）。
         pendingConfirmation: buildExportPendingConfirmation(snapshot.pendingConfirmation, t),

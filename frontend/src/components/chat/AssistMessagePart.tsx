@@ -6,6 +6,8 @@
 //                    "[<pre /> in Markdown ...]" invalid-nesting error).
 // [Sync] 2026-07-26: local IconCopy replaced by the shared Icons.tsx export so user and
 //                    assistant bubbles reuse one copy affordance.
+// [Sync] 2026-08-22: pass the owning Chat Thread into shared Markdown so historical
+//                    workspace:// references resolve without persisted credentials.
 import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import type { UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -25,6 +27,7 @@ interface AssistMessagePartProps {
   readonly?: boolean;
   setMessages?: UseChatHelpers<UIMessage>['setMessages'];
   sendMessage?: UseChatHelpers<UIMessage>['sendMessage'];
+  workspaceSessionId?: string;
 }
 
 function IconRefresh() {
@@ -58,6 +61,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
   readonly,
   sendMessage,
   isLoading: isStreamLoading,
+  workspaceSessionId,
 }: AssistMessagePartProps) {
   const { copied, copy } = useCopy();
   const [isRetrying, setIsRetrying] = useState(false);
@@ -123,7 +127,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', opacity: isError ? 0.6 : 1, minHeight: isLast && isStreamLoading ? '2rem' : undefined }}>
       <div style={{ color: 'var(--color-text-primary)', fontSize: '0.95rem', lineHeight: 1.75 }}>
         <div className="prose prose-chat">
-          <ChatMarkdown text={part.text} />
+          <ChatMarkdown text={part.text} workspaceSessionId={workspaceSessionId} />
         </div>
       </div>
 
@@ -149,7 +153,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
       ) : null}
     </div>
   );
-}, (prev, next) => prev.part.text === next.part.text && prev.isError === next.isError && prev.isLast === next.isLast && prev.showActions === next.showActions && prev.isLoading === next.isLoading && prev.message.id === next.message.id && prev.readonly === next.readonly);
+}, (prev, next) => prev.part.text === next.part.text && prev.isError === next.isError && prev.isLast === next.isLast && prev.showActions === next.showActions && prev.isLoading === next.isLoading && prev.message.id === next.message.id && prev.readonly === next.readonly && prev.workspaceSessionId === next.workspaceSessionId);
 
 function ActionButton({ title, onClick, disabled, children }: { title: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (

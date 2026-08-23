@@ -11,6 +11,7 @@
 // [Sync] 2026-07-26: add shared IconCopy (lifted from AssistMessagePart) so user and
 //                    assistant message bubbles reuse the same copy affordance.
 // [Sync] 2026-08-04: add IconSubagents for thread subagent task summaries/details.
+// [Sync] 2026-08-23: add shared maximize/minus controls for the unified Markdown media preview.
 import type { CSSProperties, ReactNode } from 'react';
 
 type IconProps = { className?: string; style?: CSSProperties };
@@ -67,6 +68,8 @@ export const IconSend = createIcon('0 0 24 24', <><path d="M22 2L11 13" /><path 
 export const IconSettings = createIcon('0 0 24 24', <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2.1-1.6-2-3.4-2.5 1a7.8 7.8 0 0 0-1.6-.9l-.4-2.7h-4l-.4 2.7a7.8 7.8 0 0 0-1.6.9l-2.5-1-2 3.4 2.1 1.6a7.9 7.9 0 0 0 .1 2L2.5 16.6l2 3.4 2.5-1a7.8 7.8 0 0 0 1.6.9l.4 2.7h4l.4-2.7a7.8 7.8 0 0 0 1.6-.9l2.5 1 2-3.4z" /></>);
 export const IconCircle = createIcon('0 0 24 24', <circle cx="12" cy="12" r="8" />);
 export const IconPlus = createIcon('0 0 24 24', <><path d="M12 5v14" /><path d="M5 12h14" /></>);
+export const IconMinus = createIcon('0 0 24 24', <path d="M5 12h14" />);
+export const IconMaximize = createIcon('0 0 24 24', <><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></>);
 export const IconTrash = createIcon('0 0 24 24', <><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /></>);
 export const IconEdit = createIcon('0 0 24 24', <><path d="M12 20h9" /><path d="M16.5 3.5l4 4L7 21H3v-4L16.5 3.5z" /></>);
 export const IconX = createIcon('0 0 24 24', <><path d="M18 6L6 18" /><path d="M6 6l12 12" /></>);

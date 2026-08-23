@@ -1,6 +1,6 @@
 # [Input] None — reads AGENT_CWD env var and project root for template assets.
 # [Output] Provide get_workspace_root, get_or_create_thread_runtime_workspace,
-#          init_workspace, get_or_create_workspace,
+#          init_workspace, get_or_create_workspace, get_existing_workspace,
 #          extract_archive_in_skills, list_workspace_files, list_workspace_file_tree,
 #          read_workspace_file_content, read_workspace_download_content,
 #          write_workspace_file, delete_workspace_file,
@@ -68,6 +68,9 @@
 # [Sync] 2026-08-14: deny .dream writes at the sandbox filesystem layer while
 #                    the thread workspace root keeps every canonical assets/
 #                    and stories/ family writable.
+# [Sync] 2026-08-22: add a no-create existing-workspace resolver and strict
+#                    regular-file reads that reject every symlink component for
+#                    authenticated workspace:// Chat previews.
 # [Sync] 2026-08-14: align sandbox temp write access with the shared
 #                    CLAUDE_CODE_TMPDIR resolver; remove broad /tmp and dynamic
 #                    cwd-* allowances.
@@ -115,10 +118,12 @@ from __future__ import annotations
 
 import hashlib
 import io
+import errno
 import json
 import logging
 import os
 import shutil
+import stat as stat_module
 import sys
 import tarfile
 import tempfile
@@ -731,6 +736,34 @@ def get_or_create_workspace(
         sandbox_network_allowed_domains=sandbox_network_allowed_domains,
         sandbox_fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
     )
+
+
+def get_existing_workspace(session_id: str) -> Optional[Path]:
+    """Return an existing full Thread workspace without creating or repairing it.
+
+    The workspace entry itself must be a real directory directly below the
+    configured workspace root.  A runtime-only root (Workspace Mode disabled)
+    is not a product workspace and therefore returns ``None``.
+    """
+
+    _validate_workspace_session_id(session_id)
+    workspace_root = get_workspace_root()
+    if not workspace_root.is_dir():
+        return None
+
+    workspace_root_abs = workspace_root.resolve(strict=True)
+    workspace_entry = workspace_root_abs / session_id
+    if workspace_entry.is_symlink():
+        raise ValueError("Claude Code thread workspace cannot be a symlink")
+    if not workspace_entry.exists():
+        return None
+
+    workspace_abs = workspace_entry.resolve(strict=True)
+    if not workspace_abs.is_dir() or workspace_abs.parent != workspace_root_abs:
+        raise ValueError("Claude Code thread workspace escaped its configured root")
+    if not (workspace_abs / WORKSPACE_SUBDIRS[0]).is_dir():
+        return None
+    return workspace_abs
 
 
 def get_plans_dir(session_id: str) -> Optional[Path]:
@@ -1371,7 +1404,13 @@ def _extract_tar_safe(archive_path: Path, extract_root: Path) -> None:
 # ---------------------------------------------------------------------------
 
 # Error codes mirroring the TypeScript WorkspaceFileAccessErrorCode union type.
-WorkspaceFileAccessErrorCode = Literal["PATH_TRAVERSAL", "NOT_FOUND", "IS_DIRECTORY"]
+WorkspaceFileAccessErrorCode = Literal[
+    "PATH_TRAVERSAL",
+    "SYMLINK_NOT_ALLOWED",
+    "NOT_FOUND",
+    "IS_DIRECTORY",
+    "NOT_REGULAR_FILE",
+]
 
 
 class WorkspaceFileAccessError(Exception):
@@ -1434,6 +1473,8 @@ def _normalize_sub_path(sub_path: str) -> str:
 def _resolve_workspace_safe_path(
     workspace_path: Path,
     rel_path: str,
+    *,
+    reject_symlinks: bool = False,
 ) -> Path:
     """Resolve *rel_path* inside *workspace_path* with path-traversal protection.
 
@@ -1445,7 +1486,18 @@ def _resolve_workspace_safe_path(
     resolved path would escape the workspace root.
     """
     workspace_root = workspace_path.resolve()
-    resolved = (workspace_path / rel_path).resolve()
+    unresolved = workspace_root / rel_path
+    if reject_symlinks:
+        current = workspace_root
+        for component in Path(rel_path).parts:
+            current = current / component
+            if current.is_symlink():
+                raise WorkspaceFileAccessError(
+                    "SYMLINK_NOT_ALLOWED",
+                    "Symbolic links are not allowed",
+                    400,
+                )
+    resolved = unresolved.resolve()
     try:
         relative_part = resolved.relative_to(workspace_root)
     except ValueError:
@@ -1540,13 +1592,27 @@ def list_workspace_file_tree(
 def read_workspace_file_content(
     workspace_path: Path,
     file_path: str,
+    *,
+    reject_symlinks: bool = False,
+    require_regular_file: bool = False,
 ) -> WorkspaceFileContent:
     """Read a file from the workspace and return its content and metadata.
 
     Raises :class:`WorkspaceFileAccessError` when the file is not found, the
     path traverses outside the workspace, or the path points to a directory.
     """
-    full_path = _resolve_workspace_safe_path(workspace_path, file_path)
+    full_path = _resolve_workspace_safe_path(
+        workspace_path,
+        file_path,
+        reject_symlinks=reject_symlinks,
+    )
+
+    if reject_symlinks:
+        return _read_workspace_file_content_without_symlinks(
+            workspace_path.resolve(),
+            full_path.relative_to(workspace_path.resolve()).parts,
+            require_regular_file=require_regular_file,
+        )
 
     if not full_path.exists():
         raise WorkspaceFileAccessError("NOT_FOUND", "File not found", 404)
@@ -1558,6 +1624,13 @@ def read_workspace_file_content(
             400,
         )
 
+    if require_regular_file and not stat_module.S_ISREG(full_path.stat().st_mode):
+        raise WorkspaceFileAccessError(
+            "NOT_REGULAR_FILE",
+            "Only regular files can be read",
+            400,
+        )
+
     stat = full_path.stat()
     return WorkspaceFileContent(
         content=full_path.read_bytes(),
@@ -1565,6 +1638,73 @@ def read_workspace_file_content(
         size=stat.st_size,
         modified_at=_mtime_iso(stat),
     )
+
+
+def _read_workspace_file_content_without_symlinks(
+    workspace_root: Path,
+    path_parts: Tuple[str, ...],
+    *,
+    require_regular_file: bool,
+) -> WorkspaceFileContent:
+    """Read through directory descriptors so symlink swaps cannot escape root."""
+
+    if not path_parts or not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise WorkspaceFileAccessError(
+            "SYMLINK_NOT_ALLOWED",
+            "Strict symbolic-link protection is unavailable",
+            400,
+        )
+
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+    directory_fd = -1
+    file_fd = -1
+    try:
+        directory_fd = os.open(workspace_root, directory_flags)
+        for component in path_parts[:-1]:
+            next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        file_fd = os.open(path_parts[-1], file_flags, dir_fd=directory_fd)
+        file_stat = os.fstat(file_fd)
+        if stat_module.S_ISDIR(file_stat.st_mode):
+            raise WorkspaceFileAccessError(
+                "IS_DIRECTORY",
+                "Directory download is not supported",
+                400,
+            )
+        if require_regular_file and not stat_module.S_ISREG(file_stat.st_mode):
+            raise WorkspaceFileAccessError(
+                "NOT_REGULAR_FILE",
+                "Only regular files can be read",
+                400,
+            )
+        with os.fdopen(file_fd, "rb", closefd=True) as file_handle:
+            file_fd = -1
+            content = file_handle.read()
+        return WorkspaceFileContent(
+            content=content,
+            file_name=path_parts[-1],
+            size=file_stat.st_size,
+            modified_at=_mtime_iso(file_stat),
+        )
+    except WorkspaceFileAccessError:
+        raise
+    except OSError as exc:
+        if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+            raise WorkspaceFileAccessError(
+                "SYMLINK_NOT_ALLOWED",
+                "Symbolic links are not allowed",
+                400,
+            ) from None
+        if exc.errno == errno.ENOENT:
+            raise WorkspaceFileAccessError("NOT_FOUND", "File not found", 404) from None
+        raise WorkspaceFileAccessError("NOT_FOUND", "File is unavailable", 404) from None
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if directory_fd >= 0:
+            os.close(directory_fd)
 
 
 def read_workspace_download_content(

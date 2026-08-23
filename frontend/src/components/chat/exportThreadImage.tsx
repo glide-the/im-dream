@@ -8,6 +8,7 @@
 // [Sync] 2026-08-03: export reasoning + tool invocation/output blocks (mirroring
 //                    ChatMessageList collapsed rows and Terminal cards) and the single
 //                    pending ToolConfirmationDock card pinned at the bottom of the image.
+// [Sync] 2026-08-23: resolve workspace:// image references through the existing authenticated Thread endpoint before capture.
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -33,6 +34,8 @@ import {
 } from './toolInputSummary';
 import type { AskUserQuestionInput, QuestionField } from './AskUserQuestionUI';
 import { EXPORT_FONT_UNCOVERED_RANGES } from './exportFontSubset';
+import { fetchWorkspaceImageBlob } from './workspaceFileAccess';
+import { parseWorkspaceUri } from './workspaceUri';
 
 export type { ExportChatMessage, ExportImageLabels, ExportPendingConfirmation };
 
@@ -856,7 +859,7 @@ export async function renderThreadImage({ threadId, title, messages, labels, pen
   document.body.appendChild(host);
   const root = createRoot(host);
   try {
-    flushSync(() => {
+    const renderCard = (workspaceImageSources: ReadonlyMap<string, string>) => flushSync(() => {
       root.render(
         <ThreadImageCard
           title={title}
@@ -864,12 +867,55 @@ export async function renderThreadImage({ threadId, title, messages, labels, pen
           labels={labels}
           pendingConfirmation={pendingConfirmation}
           dateText={new Date().toLocaleDateString()}
+          workspaceImageSources={workspaceImageSources}
         />,
       );
     });
-    const node = host.firstElementChild as HTMLElement | null;
+    renderCard(new Map());
+    let node = host.firstElementChild as HTMLElement | null;
     if (!node) {
       throw new Error('export render produced no node');
+    }
+    const workspaceUris = Array.from(node.querySelectorAll<HTMLElement>('[data-export-workspace-uri]'))
+      .map((element) => element.dataset.exportWorkspaceUri)
+      .filter((uri): uri is string => Boolean(uri));
+    if (workspaceUris.length > 0) {
+      const workspaceImageSources = new Map<string, string>();
+      await Promise.all([...new Set(workspaceUris)].map(async (uri) => {
+        const parsed = parseWorkspaceUri(uri);
+        if (!parsed.ok || !parsed.canPreviewImage) return;
+        try {
+          const blob = await fetchWorkspaceImageBlob(parsed, threadId);
+          workspaceImageSources.set(uri, `data:${blob.type};base64,${await blobToBase64(blob)}`);
+        } catch {
+          // A missing/disabled/foreign file becomes an inert export placeholder; one
+          // unavailable asset must not fail the entire conversation export.
+        }
+      }));
+      renderCard(workspaceImageSources);
+      node = host.firstElementChild as HTMLElement | null;
+      if (!node) {
+        throw new Error('export render produced no node after Workspace image resolution');
+      }
+      const failedImageUris = new Set<string>();
+      await Promise.all(Array.from(node.querySelectorAll<HTMLElement>('[data-export-workspace-image]'))
+        .map(async (container) => {
+          const image = container.querySelector('img');
+          try {
+            await image?.decode();
+          } catch {
+            const uri = container.dataset.exportWorkspaceImage;
+            if (uri) failedImageUris.add(uri);
+          }
+        }));
+      if (failedImageUris.size > 0) {
+        failedImageUris.forEach((uri) => workspaceImageSources.delete(uri));
+        renderCard(workspaceImageSources);
+        node = host.firstElementChild as HTMLElement | null;
+        if (!node) {
+          throw new Error('export render produced no node after invalid Workspace image fallback');
+        }
+      }
     }
     await document.fonts.ready;
     // Give the off-screen tree two frames to settle layout before capture.

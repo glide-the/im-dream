@@ -1,8 +1,14 @@
+<!--
+[Input] Workspace Router, authenticated Chat Thread identity, Workspace Mode, and workspace file-core contracts.
+[Output] Document management/download endpoints plus the fail-closed workspace:// content read boundary.
+[Pos] Workspace storage API design document in docs/design/workspace
+[Sync] 2026-08-22: add no-create, Thread-owner-bound public files/ content reads with strict path and symlink rejection.
+-->
 # Workspace File Management API — 设计文档
 
 > **参考来源**: `glide-the/claude-agent-next-kit → docs/design/storage-api.md`
 > **路径**: `backend/routers/workspace.py`
-> **最后更新**: 2026-08-17
+> **最后更新**: 2026-08-22
 
 ---
 
@@ -217,7 +223,28 @@ Content-Type: application/json
 
 ---
 
-### 5. 下载文件或文件夹
+### 5. 读取 Chat Workspace 引用
+
+```http
+GET /api/workspace/files/content?sessionId=<thread-id>&path=files/<relative-path>
+Authorization: Bearer <JWT>
+```
+
+该端点是 `workspace://files/...` 的只读内容边界，不是第二套文件服务：
+
+- bearer 用户必须拥有 `sessionId` 对应的 Chat Thread；不存在或其他用户的 Thread 均返回同一 404；
+- 必须启用该用户的 Workspace Mode；关闭时返回 409，且不探测文件系统；
+- 只接受 `files/` 下至少一个路径段，只读取现有普通文件；
+- 不创建、不修复 workspace，不列目录、不打 ZIP，也不改变既有文件区状态；
+- 拒绝绝对路径、反斜杠、空/`.`/`..` 段、查询、fragment、剩余 `%HH`（重复编码）和所有符号链接组件；
+- strict read 逐级使用目录描述符和 `O_NOFOLLOW`，避免检查与读取之间的符号链接替换竞态；
+- 响应包含推断 MIME、`Cache-Control: private, no-store` 与 `X-Content-Type-Options: nosniff`，不返回真实磁盘路径。
+
+浏览器不能在普通 `<img>` 请求上附加 bearer header，因此前端用认证 `fetch` 获取内容、校验图片 MIME，再创建短生命周期 blob URL；token、Thread ID 和磁盘路径都不会进入持久化 Markdown。
+
+完整 URI 语法、前端解析和错误状态见 [Workspace URI Preview Protocol](../claude-agent/workspace-uri-preview-protocol.md)。
+
+### 6. 下载文件或文件夹
 
 ```
 GET /api/workspace/files/download
@@ -264,6 +291,10 @@ candidate.relative_to(workspace_path.resolve())  # 逃逸时抛出异常
 ### sessionId 校验
 
 `get_or_create_workspace(session_id)` 会拒绝包含 `/`、`\`、`..` 的 sessionId，防止工作空间根目录逃逸。
+
+### Chat 内容读取安全
+
+`/api/workspace/files/content` 在任何 workspace/path probe 前先验证 JWT、Thread 所有权和 Workspace Mode；随后用 `get_existing_workspace()` 解析现有真实目录，并通过 strict regular-file read 拒绝目录、设备、FIFO 和所有符号链接组件。普通管理/下载端点保持原生命周期，本安全边界不会暗中扩大它们的权限。
 
 ### 上传安全
 
@@ -350,10 +381,19 @@ file_obj = read_workspace_file_content(workspace_path, "files/output.xlsx")
 # 返回 WorkspaceFileContent(content=bytes, file_name=str, size=int, modified_at=str)
 ```
 
+### 场景 4: Chat 预览 Agent 生成图片
+
+```markdown
+![Generated image](workspace://files/generated-image.png)
+```
+
+`ChatMarkdown` 从当前消息面取得 Thread ID，以 bearer header 调用 content endpoint，并仅将允许的图片 MIME 转成临时 blob URL。页面刷新或历史恢复时，使用恢复出的同一 Thread ID 重新解析，不持久化签名 URL 或 token。
+
 ---
 
 ## 🔗 相关文档
 
 - [workspace-filesystem.md](./workspace-filesystem.md) — 工作空间目录结构与角色
 - [workspace-skills-flow.md](./workspace-skills-flow.md) — Skills 同步完整流程
+- [../claude-agent/workspace-uri-preview-protocol.md](../claude-agent/workspace-uri-preview-protocol.md) — `workspace://` 协议、调用链与验收矩阵
 - [../file-storage/README.md](../file-storage/README.md) — 对象存储（S3/Local）API 设计

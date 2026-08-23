@@ -34,6 +34,7 @@
 //                    React warning investigation): TodoListItem tolerates
 //                    missing content/active_form/blocked_by fields and the list
 //                    key falls back to the index when todo.id is absent.
+// [Sync] 2026-08-22: bind plan Markdown workspace:// references to the panel Thread.
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -137,7 +138,7 @@ function PlanPopoverContent({ threadId, plan }: { threadId: string; plan: Thread
       ) : null}
       <div style={{ maxHeight: '16rem', overflowY: 'auto', color: 'var(--color-text-primary)', fontSize: '0.9rem', lineHeight: 1.7 }}>
         <div className="prose prose-chat">
-          <ChatMarkdown text={plan.content ?? ''} />
+          <ChatMarkdown text={plan.content ?? ''} workspaceSessionId={threadId} />
         </div>
       </div>
       {plan.truncated ? (

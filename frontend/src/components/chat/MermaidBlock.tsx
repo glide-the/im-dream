@@ -1,6 +1,6 @@
 // [Input] Mermaid chart source text extracted from a ```mermaid fenced code block in chat Markdown.
 // [Output] Lazily loaded mermaid SVG render with debounced streaming retries and raw-code fallback;
-//          toolbar offers preview/source mode toggle, source copy, and PNG export.
+//          shared media toolbar offers preview/source, copy, enlarge, and PNG export, with the unified immersive zoom viewer.
 // [Pos] mermaid-block component node in frontend/src/components/chat
 // [Sync] 2026-07-20: created per docs/design/claude-agent/chat-markdown-mermaid.md — dynamic import
 //                    singleton, strict securityLevel, base theme mapped from CSS design tokens,
@@ -10,10 +10,14 @@
 //                    渲染失败时强制源码视图。
 // [Sync] 2026-07-20: i18n — toolbar labels/titles and render status copy resolve through the
 //                    chat.mermaid namespace (en + zh) via useTranslation.
+// [Sync] 2026-08-23: reuse the exact Markdown media frame and immersive Modal skeleton shared with Workspace images; add enlarge beside copy.
+// [Sync] 2026-08-23: scope immersive zoom to the rendered diagram node so the shared paper sheet keeps its fitted geometry.
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useCopy } from '../../hooks/useCopy';
-import { IconCheck, IconDownload, IconLoader } from './Icons';
+import { IconCheck, IconCopy, IconDownload, IconLoader, IconMaximize } from './Icons';
+import Modal from './Modal';
+import './MarkdownMedia.css';
 
 type MermaidApi = typeof import('mermaid')['default'];
 type ViewMode = 'preview' | 'source';
@@ -127,15 +131,6 @@ async function exportSvgAsPng(svgMarkup: string): Promise<void> {
   }
 }
 
-function IconCopy() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ width: '0.95rem', height: '0.95rem' }}>
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  );
-}
-
 function ToolbarButton({ title, onClick, disabled, children }: { title: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
     <button
@@ -143,7 +138,7 @@ function ToolbarButton({ title, onClick, disabled, children }: { title: string; 
       title={title}
       onClick={onClick}
       disabled={disabled}
-      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '1.7rem', height: '1.7rem', borderRadius: '0.5rem', border: 'none', background: 'transparent', color: 'var(--color-text-muted)', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.45 : 1 }}
+      className="markdown-media-block__action"
     >
       {children}
     </button>
@@ -161,6 +156,8 @@ export default memo(function MermaidBlock({ chart }: MermaidBlockProps) {
   const [failed, setFailed] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [isExporting, setIsExporting] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState(100);
   const instanceIdRef = useRef(`mermaid-${crypto.randomUUID()}`);
   const seqRef = useRef(0);
 
@@ -205,64 +202,94 @@ export default memo(function MermaidBlock({ chart }: MermaidBlockProps) {
   const fencedMarkdown = `\`\`\`mermaid\n${chart.replace(/\n+$/, '')}\n\`\`\``;
 
   return (
-    <div
-      style={{
-        margin: '0.75rem 0',
-        borderRadius: '0.75rem',
-        border: '1px solid var(--color-border-paper)',
-        background: 'var(--color-bg-paper)',
-        overflow: 'hidden',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.35rem 0.5rem', borderBottom: '1px solid var(--color-border-paper)' }}>
-        <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginRight: 'auto' }}>
-          {failed ? t('chat.mermaid.renderFailed') : svg ? 'Mermaid' : t('chat.mermaid.rendering')}
-        </span>
-        <div style={{ display: 'flex', borderRadius: '0.5rem', border: '1px solid var(--color-border-paper)', overflow: 'hidden' }}>
-          {(['preview', 'source'] as const).map((mode) => {
-            const active = showPreview === (mode === 'preview');
-            const disabled = mode === 'preview' && svg === null;
-            return (
-              <button
-                key={mode}
-                type="button"
-                disabled={disabled}
-                onClick={() => setViewMode(mode)}
-                style={{
-                  padding: '0.15rem 0.6rem',
-                  fontSize: '0.72rem',
-                  border: 'none',
-                  background: active ? 'var(--color-bg-surface)' : 'transparent',
-                  color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  opacity: disabled ? 0.45 : 1,
-                }}
-              >
-                {mode === 'preview' ? t('chat.mermaid.preview') : t('chat.mermaid.source')}
-              </button>
-            );
-          })}
+    <>
+      <div className="markdown-media-block" data-markdown-media-kind="mermaid">
+        <div className="markdown-media-block__toolbar">
+          <span className="markdown-media-block__label">
+            {failed ? t('chat.mermaid.renderFailed') : svg ? 'Mermaid' : t('chat.mermaid.rendering')}
+          </span>
+          <div className="markdown-media-block__segmented">
+            {(['preview', 'source'] as const).map((mode) => {
+              const active = showPreview === (mode === 'preview');
+              const disabled = mode === 'preview' && svg === null;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setViewMode(mode)}
+                  className="markdown-media-block__segment"
+                  aria-pressed={active}
+                >
+                  {mode === 'preview' ? t('chat.mermaid.preview') : t('chat.mermaid.source')}
+                </button>
+              );
+            })}
+          </div>
+          <ToolbarButton title={t('chat.mermaid.copySource')} onClick={() => copy(fencedMarkdown)}>
+            {copied ? <IconCheck /> : <IconCopy />}
+          </ToolbarButton>
+          <ToolbarButton
+            title={t('chat.mermaid.enlarge')}
+            onClick={() => {
+              setPreviewZoom(100);
+              setPreviewOpen(true);
+            }}
+            disabled={!svg}
+          >
+            <IconMaximize />
+          </ToolbarButton>
+          <ToolbarButton title={t('chat.mermaid.exportPng')} onClick={handleExport} disabled={!svg || isExporting}>
+            {isExporting ? <IconLoader /> : <IconDownload />}
+          </ToolbarButton>
         </div>
-        <ToolbarButton title={t('chat.mermaid.copySource')} onClick={() => copy(fencedMarkdown)}>
-          {copied ? <IconCheck style={{ width: '0.95rem', height: '0.95rem' }} /> : <IconCopy />}
-        </ToolbarButton>
-        <ToolbarButton title={t('chat.mermaid.exportPng')} onClick={handleExport} disabled={!svg || isExporting}>
-          {isExporting ? <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} /> : <IconDownload style={{ width: '0.95rem', height: '0.95rem' }} />}
-        </ToolbarButton>
+        <div className="markdown-media-block__content">
+          {showPreview ? (
+            <div
+              className="markdown-media-block__preview"
+              // mermaid with securityLevel 'strict' emits sanitized SVG markup.
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          ) : (
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+              <code>{chart}</code>
+            </pre>
+          )}
+        </div>
       </div>
-      <div style={{ padding: '0.75rem', overflowX: 'auto' }}>
-        {showPreview ? (
-          <div
-            style={{ display: 'flex', justifyContent: 'center', minWidth: 0 }}
-            // mermaid with securityLevel 'strict' emits sanitized SVG markup.
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
-        ) : (
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-            <code>{chart}</code>
-          </pre>
+      <Modal
+        open={previewOpen && svg !== null}
+        title={t('chat.mermaid.previewTitle')}
+        closeLabel={t('chat.mediaPreview.close')}
+        variant="media-preview"
+        onClose={() => setPreviewOpen(false)}
+        toolbarActions={(
+          <button
+            type="button"
+            className="modal-toolbar-button"
+            title={t('chat.mermaid.exportPng')}
+            aria-label={t('chat.mermaid.exportPng')}
+            disabled={isExporting}
+            onClick={handleExport}
+          >
+            {isExporting ? <IconLoader /> : <IconDownload />}
+          </button>
         )}
-      </div>
-    </div>
+        zoom={{
+          value: previewZoom,
+          onChange: setPreviewZoom,
+          zoomOutLabel: t('chat.mediaPreview.zoomOut'),
+          zoomInLabel: t('chat.mediaPreview.zoomIn'),
+        }}
+      >
+        <figure className="markdown-media-preview__sheet markdown-media-preview__sheet--diagram">
+          <div
+            className="markdown-media-preview__diagram markdown-media-preview__zoom-target"
+            // The same strict Mermaid SVG is reused; the preview never reparses source or accepts HTML.
+            dangerouslySetInnerHTML={{ __html: svg ?? '' }}
+          />
+        </figure>
+      </Modal>
+    </>
   );
 });

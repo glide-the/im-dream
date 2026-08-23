@@ -9,6 +9,8 @@
 > [Sync] 2026-08-22: `workspace_enabled=false` still skips the full product
 > workspace, `cwd`, and context, but creates a minimal thread runtime root and
 > carries it as `AgentRunOptions.claude_tmp_workspace` for CLI temp isolation.
+> [Sync] 2026-08-22: the existing engine system prompt now defines exact
+> `workspace://files/...` Chat references, gated by presence of `<workspace_context>`.
 
 # Claude Agent Context Assembly Design
 
@@ -151,6 +153,8 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 5. **Rules and assistant behavior**
    Current behavior rules live in `ClaudeAgentContextBuilder`'s system prompt template. Future prompt assets must be loaded through the project's prompt/config pattern rather than embedded in route handlers.
 
+   The same template owns the Workspace file output contract: when and only when the turn receives `<workspace_context>`, Agent replies that expose a generated/current Workspace file use `workspace://files/<path-relative-to-current-thread-workspace>`. Local absolute paths, `file://`, container paths, and plain relative Chat targets are forbidden. This changes only output guidance; it does not add a prompt entry point, SSE frame, or persisted field.
+
 6. **File memory and attachment context**
    When `system_config.workspace_enabled=true`, the API route may sync uploaded files into the thread workspace before `assemble_context`. Metadata is injected into `message_parts` as file/source/workspace-file parts, and inline-safe image attachments are passed through `request.attachments`. `build_user_message` converts these into Claude content blocks and readable file metadata.
 
@@ -181,6 +185,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
    | `workspace_enabled=false` | `assemble_context` does **not** call full `get_or_create_workspace`; it calls `get_or_create_thread_runtime_workspace`, ignores client `request.cwd`, clears cached `state.cwd`, passes `cwd=""` into `build_user_message`, sets `AgentRunOptions.cwd=None`, and sets `claude_tmp_workspace` to the minimal thread root. |
 
    With `cwd=""`, `build_user_message` does not inject `<workspace_context>` or `<memory_context>`.
+   Therefore the system prompt's `workspace://` clause remains inactive and tells the Agent not to emit the scheme. With Workspace Mode enabled, the path still names a file relative to the current Thread workspace; no real `cwd` is exposed to Markdown.
 
 10. **Tool state**
    `tool_choice` is copied into `AgentRunOptions`. `_TurnContext` starts with empty confirmation/dedup/reasoning state for the turn. Existing pending tool confirmations must not leak into a new turn.
@@ -256,6 +261,7 @@ Coverage should stay focused on the contracts above:
 
 - `ClaudeAgentContextBuilder.build_system_prompt` includes the writing assistant role, recent entries, session count cap, no-session fallback, and DB-error fallback.
 - `ClaudeAgentContextBuilder.build_system_prompt(..., configured_system_prompt=...)` renders non-empty Settings SYSTEM_PROMPT inside a lower-priority block and omits the block for empty config.
+- `ClaudeAgentContextBuilder.build_system_prompt` contains the exact `workspace://files/...` example, relative-root rule, forbidden-path list, and no-`<workspace_context>` gate.
 - `build_user_message` preserves block order: image attachments, runtime context, final user text/metadata.
 - `assemble_context` builds `system_prompt` once per fresh state and reuses it on subsequent turns.
 - `assemble_context` passes Settings SYSTEM_PROMPT from `get_system_config` into `build_system_prompt`, and rebuilds the cached prompt when that config changes.
@@ -278,6 +284,7 @@ Coverage should stay focused on the contracts above:
 - [ ] Run Expert Prompt Architect optimization before planning turns and store the result as UIMessage text.
 - [ ] Keep raw user task available upstream for audit or UI comparison.
 - [ ] Build `system_prompt` only through `ClaudeAgentContextBuilder`.
+- [x] Define Workspace Chat file references in that existing system prompt and gate them on `<workspace_context>`. *(2026-08-22)*
 - [x] Load Settings SYSTEM_PROMPT through `get_system_config` and render it as lower-priority configurable guidance. *(2026-06-22)*
 - [ ] Guard recent-session count through `INK_AGENT_CONTEXT_SESSIONS`.
 - [ ] Convert UIMessage parts with `extract_text_from_parts` semantics.
