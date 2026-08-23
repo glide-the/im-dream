@@ -3,6 +3,8 @@
 //          transport, confirmation, subagent, Stop, failure, reconnect, and reload contracts.
 // [Pos] R10 convergence acceptance lane; uses the production ChatView, ChatPanel, and
 //       StoryWorkspaceDreamThreadChat against a strict in-process fake API (never a model).
+// [Sync] 2026-08-24: serve the shell's read-only Dream Run collection alongside
+//                    canonical Thread fixtures while retaining strict API rejection.
 
 import { expect, test, type Page } from '@playwright/test';
 import {
@@ -222,6 +224,10 @@ function handleCommonChatApi(
   }
   if (api.path === '/api/claude-agent/threads') {
     if (get()) respondJson(response, 200, { threads: [] });
+    return true;
+  }
+  if (api.path === '/api/story-workspace/dream-runs') {
+    if (get()) respondJson(response, 200, { runs: [] });
     return true;
   }
   if (api.path === `/api/claude-agent/threads/${threadId}/plan`) {
