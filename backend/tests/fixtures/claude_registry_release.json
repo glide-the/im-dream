@@ -1,0 +1,20 @@
+{
+  "sdk": {
+    "name": "ink-claude-dream-agent-sdk",
+    "version": "9.8.7",
+    "wheel": "ink_claude_dream_agent_sdk-9.8.7-py3-none-any.whl",
+    "sdist": "ink_claude_dream_agent_sdk-9.8.7.tar.gz"
+  },
+  "runtime": {
+    "version": "1.2.3",
+    "target": "darwin-arm64",
+    "selector": "@glide-the/ink-claude-code-dream",
+    "platforms": [
+      "@glide-the/ink-claude-code-dream-darwin-arm64",
+      "@glide-the/ink-claude-code-dream-darwin-x64",
+      "@glide-the/ink-claude-code-dream-linux-arm64",
+      "@glide-the/ink-claude-code-dream-linux-x64"
+    ]
+  },
+  "cliVersion": "2.1.241 (Claude Code)"
+}
