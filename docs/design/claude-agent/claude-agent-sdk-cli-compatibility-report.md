@@ -1,11 +1,13 @@
 <!-- [输入] Dream SDK/Runtime resolver、Docker 回滚物、自有 SDK provenance、自有 Runtime manifest 与协议差分回执。 -->
 <!-- [输出] 记录当前 SDK × Runtime 配对、历史兼容问题、发布门、验证结果和回滚合同。 -->
 <!-- [定位] Claude Agent SDK 与 Claude Runtime 兼容性的当前报告；历史 Route A 仅保留为问题证据。 -->
-<!-- [同步] 2026-08-24：更新为自有 SDK 0.2.143 + production-qualified 自有 Runtime 0.1.0，并记录本机内容寻址安装。 -->
+<!-- [同步] 2026-08-24：更新为统一 main、SDK PyPI 与 Runtime npm 五包发布链、零 source map 合同和当前未发布边界。 -->
 
 # Claude Agent SDK × Claude Runtime 兼容性报告
 
 > 状态：当前本机配对已完成构建、安装、启动、SDK 协议差分和同 core hash 业务回执验证；最新 stdio/HTTP MCP comparator 重跑存在下述参考环境阻断。
+>
+> Registry 状态：SDK/Runtime 发布流程已分别合并到 `main`，但 PyPI/npm 包尚未上传；Dream 仍使用现有 Git pin 与本机 qualified Runtime，不提前改依赖锁。
 >
 > 范围：`ink-claude-dream-agent-sdk`、`ink-claude-code-dream` 与显式官方回滚 CLI。
 >
@@ -19,7 +21,9 @@ Dream 正常路径已经从“官方 SDK + npm CLI”切换为“自有 SDK dist
 | --- | --- | --- |
 | Python | 本机 `3.12.9`；容器 Python 3.12 | 当前 SDK 和后端基线 |
 | 自有 SDK | `ink-claude-dream-agent-sdk==0.2.143`，Dream 固定 commit `bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4` | 唯一提供 `claude_agent_sdk`；`packaging/upstream.json` 与 `scripts/verify_upstream.py` 证明 `src/` 对上游 `542fefb3...` 基线空差异 |
+| SDK 发布流程 | `main@a7ea536` | 可复现 wheel/sdist、隔离 smoke、TestPyPI 字节校验后才能进入 PyPI；不包含 CLI 或 `*.map`；当前未上传 |
 | 自有 Runtime | `ink-claude-code-dream==0.1.0`，Runtime commit `cb91a9901303dccb98c5b41cbfa6d56ab88ce97a` | 默认 PATH 入口；manifest `corePruned=true`、`productionEligible=true` |
+| Runtime npm 流程 | `main@b927f01` | 一个 selector + 四个 native 平台包，Bun `1.4.0`，glibc-only Linux，精确五包/摘要/无 `.map` 门；法律门关闭，当前未上传 |
 | Runtime 核心 | 恢复源码证据 `2.1.88`；Dream-facing 兼容标识 `2.1.241` | 只声明 Dream 保留合同通过，不声明与 official `2.1.241` 全产品行为或源码等价 |
 | Runtime bundle | SHA-256 `a300fe7fb3da453e45b2f2cd7721bef1963aa991498c26a2826fef8b381161f5` | 1,989 inputs、48 outputs、0 gaps、88 个非必要 feature gate 关闭 |
 | Runtime Bun | 独立 `1.4.0`，命令 `ink-claude-code-bun-1.4.0` | 内容寻址安装；不覆盖 ambient Bun `1.2.20` |
@@ -137,10 +141,14 @@ SDK `0.2.128` 将 `HookJSONOutput` 变为 TypedDict Union；把它当构造器�
 ## 7. 发布与许可证边界
 
 - 自有 SDK 源码基线为 MIT；portable wheel/sdist 排除官方 bundled CLI。
+- SDK workflow 固定 build → 隔离 smoke → TestPyPI 精确文件名/SHA-256/下载字节验证 → PyPI，并在输入、wheel、sdist、CI artifact 和 registry 下载层拒绝 `*.map`。
 - Runtime 仓库只提交自有脚本、patch、manifest、测试和文档。
 - 恢复源码和派生 Runtime bundle 不进入公开 Git。
+- Runtime npm 设计为 `@glide-the/ink-claude-code-dream` selector 加四个 darwin/linux arm64/x64 平台包；只允许 native runner，Windows/musl/交叉打包 fail closed。
+- legacy release、minimal core、npm stage、prepack、dry-run inventory 和最终 tgz 都拒绝 `*.map`；最终 meta attestation 精确绑定四个平台 tarball 与 qualification/core/payload 摘要。
 - 当前 Runtime manifest：`productionEligible=true`、`publicationAllowed=false`、`redistributionAllowed=false`。
 - 技术资格不能解释为 Anthropic 再分发授权。
+- 首次 npm 发布还需要账户 2FA 手工 bootstrap 五个包，之后才能配置 Trusted Publisher；当前未执行 package publish、tag、release 或部署。
 
 ## 8. 升级规约
 
