@@ -18,10 +18,10 @@
 # [Sync] 2026-08-19: source Node 22.18.0 from the official Node image because
 #        Claude Code 2.1.241 declares Node >=22; Debian bookworm's Node 18 is
 #        not an accepted production pairing.
-# [Sync] 2026-08-24: install ink-claude-dream-agent-sdk 0.2.143 from immutable
-#        main commit 6164bd91e43bbf610ec40b4500edec18a97ce665 through the uv-
-#        exported requirements lock; verify distribution/import ownership at
-#        build time. Install the exact public ink-claude-code-dream 0.1.0
+# [Sync] 2026-08-24: install ink-claude-dream-agent-sdk 0.2.143 from PyPI
+#        through the uv-exported version/hash lock; verify distribution/import
+#        ownership at build time. Install the exact public
+#        ink-claude-code-dream 0.1.0
 #        selector as the default production-qualified Runtime, then install
 #        official Claude Code 2.1.241 after safely removing only the selector's
 #        conflicting `claude` alias, so /usr/local/bin/claude remains the
@@ -125,10 +125,12 @@ RUN set -eux; \
 WORKDIR /app
 
 COPY requirements.txt ./
-# Registry dependencies use the configured mirrors. The Dream SDK itself is a
-# PEP 508 Git requirement pinned to one immutable commit in requirements.txt.
+# Registry dependencies use the configured mirror with official PyPI as the
+# fallback for the downstream SDK. Every selected archive must match the
+# hashes exported from uv.lock; a mirror cannot substitute different bytes.
 RUN python -m pip install --no-cache-dir --timeout 180 --retries 10 \
-    --extra-index-url http://mirrors.cloud.aliyuncs.com \
+    --require-hashes \
+    --extra-index-url https://pypi.org/simple \
     -r requirements.txt; \
     python -c "from importlib import metadata as m; import claude_agent_sdk as sdk; from claude_agent_sdk._cli_version import __cli_version__; dist=m.distribution('ink-claude-dream-agent-sdk'); providers={name.lower().replace('_','-') for name in m.packages_distributions().get('claude_agent_sdk', [])}; installed={str(item.metadata.get('Name') or '').lower().replace('_','-') for item in m.distributions()}; assert dist.version == '0.2.143'; assert sdk.__version__ == '0.2.143'; assert __cli_version__ == '2.1.241'; assert providers == {'ink-claude-dream-agent-sdk'}; assert 'claude-agent-sdk' not in installed; assert all(hasattr(sdk, name) for name in ('ClaudeAgentOptions', 'ClaudeSDKClient', 'query'))"
 

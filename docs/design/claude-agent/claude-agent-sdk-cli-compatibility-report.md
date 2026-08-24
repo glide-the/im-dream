@@ -1,7 +1,7 @@
 <!-- [输入] Dream 当前 SDK/Runtime resolver、SDK main、clean-room Runtime manifest、五包制品和真实业务回执。 -->
 <!-- [输出] 记录自有 Python SDK 与 clean-room Claude Runtime 的接口配对、问题修复、发布门和回滚合同。 -->
 <!-- [定位] Dream 当前 SDK × Runtime 兼容性真相源；历史官方/恢复源码组合只作回归背景。 -->
-<!-- [同步] 2026-08-24：更新为 SDK main@6164bd91、Runtime main@7c34e6cd、公开 npm 五包、无 source map 和真实 Comfy MCP 两轮 resume。 -->
+<!-- [同步] 2026-08-24：更新为 SDK 0.2.143 正式 PyPI 版本/哈希锁、Runtime main@7c34e6cd、公开 npm 五包、无 source map 和真实 Comfy MCP 两轮 resume。 -->
 
 # Claude Agent SDK 与 clean-room Runtime 兼容性报告
 
@@ -12,7 +12,8 @@
 | 层 | 当前身份 | 兼容合同 |
 | --- | --- | --- |
 | Python distribution | `ink-claude-dream-agent-sdk==0.2.143` | 唯一提供 `claude_agent_sdk` import |
-| SDK Git 固定 | `main@6164bd91e43bbf610ec40b4500edec18a97ce665` | Dream 三份依赖文件和安装环境一致 |
+| SDK PyPI 固定 | `ink-claude-dream-agent-sdk==0.2.143` | Dream 精确版本；`uv.lock`/`requirements.txt` 固定 wheel/sdist SHA-256，Docker 强制 `--require-hashes` |
+| SDK 源码/发布身份 | `v0.2.143@6164bd91e43bbf610ec40b4500edec18a97ce665`；仓库 `main@d18e8a9f…` | 不可变 `source_ref`；发布执行 tag `v0.2.143-publish.1`；发布 run `32732974329` 成功 |
 | SDK 上游源码 | commit `542fefb3b94be87760b2513fff889b91bb5b6672` | `src/` 与 MIT 上游 tree `1c86f3a…` 空差异 |
 | SDK → CLI 注入 | `ClaudeAgentOptions.cli_path` | 复用上游 transport/process launcher |
 | Runtime npm selector | `@glide-the/ink-claude-code-dream@0.1.0` | 选择 darwin/linux × arm64/x64 平台包 |
@@ -121,6 +122,7 @@ selector 的 Node 支持范围是 `>=22 <25`。平台包包含 standalone binary
 | 验证层 | 结果 |
 | --- | --- |
 | SDK 完整测试 | 1500 passed，5 skipped；CI 0 fail |
+| SDK registry 安装 | 正式 PyPI wheel SHA `e64ea7bf…a27bcd1`；全新 Python 3.12 安装/import 通过；Dream `.venv` 无 Git `direct_url.json` |
 | Dream SDK/Runtime 接入 | 592 passed，1 skipped，181 subtests passed；唯一 distribution provider 正确 |
 | Runtime 完整测试 | 94 total，92 passed，2 explicit official OAuth fixture skips，0 fail |
 | Runtime lint | exit 0 |
@@ -135,7 +137,7 @@ clean-room Runtime 不是恢复源码改名包。公共构建输入只含仓库�
 
 恢复源码和旧派生 bundle仍只可作为本地历史研究/black-box 对比，不得进入公共包。删除 LICENSE、NOTICE 或 source map 不能改变一段受限实现的来源；本轮采用的是替换核心实现，而不是删除一个文件。
 
-SDK PyPI 和 Runtime npm 分开授权、分开发布。SDK 当前仅完成可复现 wheel/sdist 与 `main`；PyPI 仍未发布。Runtime npm 首发已经由 Runtime 项目按平台包先于 selector 完成，并通过公开 registry fresh download/install 回验。
+SDK PyPI 和 Runtime npm 分开授权、分开发布。SDK `0.2.143` 已由 SDK 项目通过 Trusted Publisher 先发 TestPyPI、后发正式 PyPI，并逐字节复验 wheel/sdist；Runtime npm 首发由 Runtime 项目按平台包先于 selector 完成，并通过公开 registry fresh download/install 回验。Dream 的 Python 依赖只指向 PyPI SDK，npm 只承载独立 CLI/Runtime。
 
 ## 9. 回滚与升级
 
