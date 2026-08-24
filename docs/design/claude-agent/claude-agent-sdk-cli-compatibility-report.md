@@ -139,6 +139,9 @@ clean-room Runtime 不是恢复源码改名包。公共构建输入只含仓库�
 
 SDK PyPI 和 Runtime npm 分开授权、分开发布。SDK `0.2.143` 已由 SDK 项目通过 Trusted Publisher 先发 TestPyPI、后发正式 PyPI，并逐字节复验 wheel/sdist；Runtime npm 首发由 Runtime 项目按平台包先于 selector 完成，并通过公开 registry fresh download/install 回验。Dream 的 Python 依赖只指向 PyPI SDK，npm 只承载独立 CLI/Runtime。
 
+完整的版本准备、可复现构建、OIDC 发布、registry smoke、Dream 锁文件更新和回滚命令见
+[`docs/deploy/claude-sdk-runtime-packaging-and-integration.md`](../../deploy/claude-sdk-runtime-packaging-and-integration.md)。
+
 ## 9. 回滚与升级
 
 回滚使用预检过的绝对 `CLAUDE_CODE_CLI_PATH`，不改变 Dream 业务代码、SDK API、Schema、Thread ID、Workspace 或 transcript 格式。

@@ -6,6 +6,8 @@
                     while Gateway/Product API use the Admin HTTPS origin.
 [Sync] 2026-08-22: record the Alibaba backend block-I/O resource budget used
                     to keep Dream/Admin/SSH responsive during Claude turns.
+[Sync] 2026-08-24: add the Chinese SDK/Runtime packaging, PyPI/npm publishing,
+                    Dream exact-version/hash integration, validation, and rollback guide.
 -->
 
 ## 定位
@@ -30,6 +32,8 @@
 | [`remote-ssh.md`](remote-ssh.md) | Remote SSH 部署文档 | 说明远程 Docker 服务器的 SSH/rsync/docker-compose 发布路径 |
 | [`aliyun.md`](aliyun.md) | 阿里云 ECS 部署文档 | 说明 Admin-owned 数据平台栈、Dream-only 应用栈、首次数据引导、发布顺序、验证与回滚 |
 | [`release-system-design.md`](release-system-design.md) | 本次发布体系梳理与方案设计 | 处理判断、发布方案、文档与脚本改造计划、验收清单 |
+| [`claude-sdk-runtime-packaging-and-integration.md`](claude-sdk-runtime-packaging-and-integration.md) | Claude SDK/Runtime 打包发布与 Dream 集成 | PyPI SDK、npm 五包、OIDC、精确版本/哈希、验证和回滚的中文执行手册 |
+| [`claude-registry-release-acceptance.md`](claude-registry-release-acceptance.md) | Claude registry 发布后验收 | provider-free 校验 PyPI/npm 制品身份、安装和 fail-closed 条件 |
 
 ## 推荐目录大纲
 
@@ -45,6 +49,8 @@ docs/deploy/
 ├── aliyun.md                 # 阿里云 ECS 双仓库发布
 ├── google-cloud.md           # Google Cloud Run 发布
 ├── data-sync.md              # 数据同步、备份、恢复
+├── claude-sdk-runtime-packaging-and-integration.md # SDK/Runtime 打包发布与 Dream 接入
+├── claude-registry-release-acceptance.md           # registry 发布后验收
 └── release-system-design.md  # 发布体系改造设计稿
 ```
 
