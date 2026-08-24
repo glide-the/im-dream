@@ -5,6 +5,8 @@
 // [Sync] 2026-08-19: cover restricted HTTP(S) configuration and user-owned removal before real-provider QA.
 // [Sync] 2026-08-20: cover the Notion-aligned detail workbench and prompt-free tool inventory.
 // [Sync] 2026-08-21: cover remote HTTP plus project-scope read-only removal controls.
+// [Sync] 2026-08-24: accept the production shell's authenticated session autosave
+//                    without weakening the strict unexpected-request audit.
 
 import { expect, test, type Request as PlaywrightRequest } from '@playwright/test';
 
@@ -239,6 +241,16 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
     }
     if (method === 'GET' && path === '/api/sessions') {
       await route.fulfill({ json: { sessions: [] } });
+      return;
+    }
+    if (method === 'POST' && path === '/api/sessions') {
+      const payload = request.postDataJSON() as {
+        session_id?: unknown;
+        editor_state?: unknown;
+      };
+      expect(payload.session_id).toEqual(expect.any(String));
+      expect(payload.editor_state).toEqual(expect.any(Object));
+      await route.fulfill({ json: { ok: true } });
       return;
     }
     if (method === 'GET' && path === '/api/sessions/range') {

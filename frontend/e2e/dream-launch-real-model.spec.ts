@@ -1,6 +1,8 @@
 // [Input] The normal or explicitly technical-isolation Dream launch endpoint and an exact real Gateway model.
 // [Output] Headed-browser business proof plus a private content-free lifecycle receipt for failure diagnosis.
 // [Pos] Release harness only; it calls public production routes and never installs a test-only business branch.
+// [Sync] 2026-08-24: let the Story Index semantic status settle before choosing
+//                    an enabled visible recovery action.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -461,13 +463,10 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
   const storyIndexStatus = page.getByRole('region', { name: '故事文件与索引状态' });
   await expect(storyIndexStatus).toContainText('文件可读');
   const retryStoryIndexButton = storyIndexStatus.getByRole('button', { name: '重试索引同步' });
-  if (await retryStoryIndexButton.isVisible()) {
-    await expect(retryStoryIndexButton).toBeEnabled();
-    await expect(retryStoryIndexButton).toBeInViewport();
-    await retryStoryIndexButton.click();
-  }
   let storyIndexRecoveryActions = 0;
   await expect.poll(async () => {
+    // A completed index render can briefly retain a visible disabled retry
+    // button. Let the semantic status win before considering recovery actions.
     if (await storyIndexStatus.getAttribute('data-index-status') === 'indexed') return true;
     if (storyIndexRecoveryActions >= 3) return false;
     const recheckButton = storyIndexStatus.getByRole('button', { name: '重新检查' });

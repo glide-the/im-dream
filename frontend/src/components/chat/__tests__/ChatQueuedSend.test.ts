@@ -1,6 +1,8 @@
 // [Input] ChatView lazy-thread first-send flow under the application's React StrictMode runtime.
 // [Output] Browser regression proving one user submission owns exactly one /api/claude-agent POST.
 // [Pos] Chat-only queued-send lifecycle regression seam; Dream adapters are intentionally out of scope.
+// [Sync] 2026-08-24: serve the shell's read-only Dream Run collection, classify
+//                    its StrictMode cleanup abort, and retain strict failure.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -134,6 +136,13 @@ test('a lazy-created Chat thread sends its queued first turn exactly once', asyn
   });
   page.on('pageerror', (error) => diagnostics.push(error.message));
   page.on('requestfailed', (request) => {
+    const url = new URL(request.url());
+    const isExpectedDreamRunsStrictModeAbort = (
+      request.method() === 'GET'
+      && url.pathname === '/api/story-workspace/dream-runs'
+      && request.failure()?.errorText === 'net::ERR_ABORTED'
+    );
+    if (isExpectedDreamRunsStrictModeAbort) return;
     diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
   });
 
@@ -198,6 +207,10 @@ test('a lazy-created Chat thread sends its queued first turn exactly once', asyn
     }
     if (path === '/api/claude-agent/threads') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{"threads":[]}' });
+      return;
+    }
+    if (path === '/api/story-workspace/dream-runs' && method === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"runs":[]}' });
       return;
     }
     if (path === '/api/decks') {

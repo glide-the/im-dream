@@ -6,8 +6,9 @@
 # [Sync] 2026-06-12: add configurable Debian/PyPI/npm mirror build args for faster China builds.
 # [Sync] 2026-06-14: install Claude Code Linux sandbox dependencies for Docker deployments.
 # [Sync] 2026-06-17: ensure standard sbin directories exist for bubblewrap rootfs mounts.
-# [Sync] 2026-08-19: atomically pair Claude Code 2.1.235 with Agent SDK
-#        0.2.140, assert public MCP login/logout/no-browser argv at build time,
+# [Sync] 2026-08-24: atomically pair the custom Agent SDK 0.2.143 with its
+#        Claude Code 2.1.241 CLI line, assert public MCP login/logout/no-browser
+#        argv at build time,
 #        and remove the obsolete vendor apply-seccomp mutation. Native CLI
 #        sandboxing uses bubblewrap/socat; workspace settings explicitly skip
 #        the optional Unix-socket seccomp filter in nested containers.
@@ -15,8 +16,13 @@
 #        contract (including datetime.UTC) so the production module graph is
 #        importable before Claude MCP/sandbox acceptance runs.
 # [Sync] 2026-08-19: source Node 22.18.0 from the official Node image because
-#        Claude Code 2.1.235 declares Node >=22; Debian bookworm's Node 18 is
+#        Claude Code 2.1.241 declares Node >=22; Debian bookworm's Node 18 is
 #        not an accepted production pairing.
+# [Sync] 2026-08-24: install ink-claude-dream-agent-sdk 0.2.143 from immutable
+#        Git commit bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4 through the uv-
+#        exported requirements lock; verify distribution/import ownership at
+#        build time. Keep official Claude Code 2.1.241 only as the explicit
+#        CLAUDE_CODE_CLI_PATH rollback artifact; it is not the default Runtime.
 
 ARG NODE_VERSION=22.18.0
 FROM node:${NODE_VERSION}-bookworm-slim AS node_runtime
@@ -44,7 +50,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - gcc / libffi / libssl / libjpeg / zlib: cryptography + Pillow
 #   - bash curl jq git ripgrep: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
-ARG CLAUDE_CODE_VERSION=2.1.235
+ARG CLAUDE_CODE_VERSION=2.1.241
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i \
@@ -71,7 +77,7 @@ RUN set -eux; \
     mkdir -p /sbin /usr/sbin /usr/local/sbin; \
     rm -rf /var/lib/apt/lists/*
 
-# Claude Code 2.1.235 requires Node >=22. Copy the pinned runtime and npm from
+# Claude Code 2.1.241 requires Node >=22. Copy the pinned runtime and npm from
 # the official Node image instead of accepting bookworm's unsupported Node 18.
 COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node_runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
@@ -80,11 +86,12 @@ RUN set -eux; \
     ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
     test "$(node --version)" = "v${NODE_VERSION}"
 
-# Claude Code native binary. bubblewrap/socat above provide the required Linux
-# sandbox; the optional @anthropic-ai/sandbox-runtime seccomp filter is not
-# installed because nested containers intentionally skip only its AF_UNIX
-# layer through sandbox.network.allowAllUnixSockets.
+# Explicit official-CLI rollback artifact. Dream's default resolver does not
+# select the ambient `claude` name; an operator must deliberately set the
+# absolute CLAUDE_CODE_CLI_PATH=/usr/local/bin/claude to use this rollback.
+# bubblewrap/socat above provide its required Linux sandbox dependencies.
 RUN set -eux; \
+    test "${CLAUDE_CODE_VERSION}" = "2.1.241"; \
     npm config set registry "${NPM_REGISTRY}"; \
     npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
     test "$(claude --version | awk '{print $1}')" = "${CLAUDE_CODE_VERSION}"; \
@@ -95,11 +102,12 @@ RUN set -eux; \
 WORKDIR /app
 
 COPY requirements.txt ./
-# Use aliyun mirror as primary, PyPI as fallback for packages not yet mirrored
-# (e.g. claude-agent-sdk, the renamed claude-code-sdk successor package).
+# Registry dependencies use the configured mirrors. The Dream SDK itself is a
+# PEP 508 Git requirement pinned to one immutable commit in requirements.txt.
 RUN python -m pip install --no-cache-dir --timeout 180 --retries 10 \
     --extra-index-url http://mirrors.cloud.aliyuncs.com \
-    -r requirements.txt
+    -r requirements.txt; \
+    python -c "from importlib import metadata as m; import claude_agent_sdk as sdk; from claude_agent_sdk._cli_version import __cli_version__; dist=m.distribution('ink-claude-dream-agent-sdk'); providers={name.lower().replace('_','-') for name in m.packages_distributions().get('claude_agent_sdk', [])}; installed={str(item.metadata.get('Name') or '').lower().replace('_','-') for item in m.distributions()}; assert dist.version == '0.2.143'; assert sdk.__version__ == '0.2.143'; assert __cli_version__ == '2.1.241'; assert providers == {'ink-claude-dream-agent-sdk'}; assert 'claude-agent-sdk' not in installed; assert all(hasattr(sdk, name) for name in ('ClaudeAgentOptions', 'ClaudeSDKClient', 'query'))"
 
 COPY . .
 

@@ -23,6 +23,11 @@
 #                    onto the current develop application graph.
 # [Sync] 2026-08-22: preserve the centralized Claude Agent concurrency and
 #                    host/cgroup memory-admission configuration keys.
+# [Sync] 2026-08-23: fail startup closed unless the installed SDK metadata is
+#                    ink-claude-dream-agent-sdk 0.2.143 and its preserved
+#                    claude_agent_sdk import has no competing provider.
+# [Sync] 2026-08-23: resolve the qualified Dream Runtime (or explicit absolute
+#                    official rollback) before starting the Agent factory.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -808,6 +813,10 @@ async def shutdown_scheduler():
 
 from agent_factory import claude_agent_thread_factory
 from claude_agent.event_bus_redis import RedisStreamEventBus
+from libs.claude_agent_kit.server.sdk_env import (
+    require_dream_claude_sdk_distribution,
+    resolve_claude_cli_path,
+)
 from services.deck.story_workflow_application import (
     story_workspace_get_dream_confirmation_coordinator,
 )
@@ -897,6 +906,13 @@ async def startup_validate_claude_agent_event_bus():
 @app.on_event("startup")
 async def startup_claude_agent():
     """Start the Claude Agent session pool sweeper."""
+    require_dream_claude_sdk_distribution()
+    if not resolve_claude_cli_path():
+        raise RuntimeError(
+            "Claude Agent Runtime is unavailable; install a production-qualified "
+            "ink-claude-code-dream release or configure an explicit absolute "
+            "CLAUDE_CODE_CLI_PATH rollback."
+        )
     claude_agent_thread_factory.start()
     print("✅ Claude Agent factory started\n")
 
