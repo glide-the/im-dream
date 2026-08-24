@@ -4,6 +4,7 @@
 // [Sync] 2026-08-20: prove an authenticated user-scope MCP server is available through the actual Chat composer and after refresh.
 // [Sync] 2026-08-20: verify the Resources detail reads live public-SDK tool metadata before Chat uses the same identity.
 // [Sync] 2026-08-24: bind visible approval to the exact thread and require a successful canonical confirmation response.
+// [Sync] 2026-08-25: consume the authoritative authenticated label, explicit safe-tool input, and Admin-owned database environment.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -15,7 +16,7 @@ const ENABLED = process.env.INK_REAL_CLAUDE_MCP_CHAT_QA === '1';
 const WEB_BASE = process.env.INK_REAL_CLAUDE_MCP_WEB_BASE ?? 'http://127.0.0.1:5173';
 const ACTOR_EMAIL = process.env.INK_REAL_CLAUDE_MCP_ACTOR_EMAIL ?? '';
 const SERVER_NAME = process.env.INK_REAL_CLAUDE_MCP_SERVER_NAME ?? '';
-const SAFE_INSPECTION_TOOL = 'get_server_info';
+const SAFE_INSPECTION_TOOL = process.env.INK_REAL_CLAUDE_MCP_SAFE_TOOL ?? 'get_server_info';
 const BACKEND_DIR = resolve(process.cwd(), '../backend');
 const BACKEND_PYTHON = resolve(BACKEND_DIR, '.venv/bin/python');
 
@@ -65,6 +66,9 @@ function createActorToken(email: string): string {
   const source = [
     'from dotenv import load_dotenv',
     "load_dotenv('.env')",
+    'import os',
+    "from persistence.config import load_database_url_from_env_file",
+    "load_database_url_from_env_file(override=True) if os.environ.get('INK_LOAD_DATABASE_URL_FROM_ENV_FILE') == '1' else None",
     'import auth,database,sys',
     'db=database.get_db()',
     "user=db.execute(\"select id,email from users where email=%s and status='active'\",(sys.argv[1],)).fetchone()",
@@ -213,16 +217,16 @@ test('connected MCP works in visible Chat and the same thread after refresh', as
 
   await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
   const card = page.getByRole('article', { name: `MCP 服务 ${SERVER_NAME}` });
-  await expect(card).toContainText('已连接', { timeout: 30_000 });
+  await expect(card).toContainText('已认证', { timeout: 30_000 });
 
   await card.getByRole('button', { name: '管理与工具' }).click();
   await expect(page.getByRole('heading', { name: `${SERVER_NAME} MCP Server` })).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole('tab', { name: /^Tools \d+$/ })).toContainText('41', { timeout: 60_000 });
+  await expect(page.getByRole('tab', { name: 'Tools 41' })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole('article', {
     name: `MCP 工具 ${SAFE_INSPECTION_TOOL}`,
   })).toBeVisible();
   await page.getByRole('button', { name: '资源连接器' }).click();
-  await expect(card).toContainText('已连接', { timeout: 30_000 });
+  await expect(card).toContainText('已认证', { timeout: 30_000 });
 
   await page.getByRole('button', { name: '返回应用' }).click();
   const navigation = page.getByRole('navigation', { name: 'Story Workspace 导航' });
@@ -231,7 +235,7 @@ test('connected MCP works in visible Chat and the same thread after refresh', as
   const newChat = page.getByTitle(/^(New chat|新建对话)$/);
   if (await newChat.isVisible().catch(() => false)) await newChat.click();
 
-  const firstPrompt = `请使用已连接的 ${SERVER_NAME} MCP 调用一个只读工具查看服务信息，简要告诉我连接是否可用。不要创建、修改或删除任何远端内容。`;
+  const firstPrompt = `请准确使用已连接的 ${SERVER_NAME} MCP 调用只读工具 ${SAFE_INSPECTION_TOOL}，简要告诉我调用是否成功。不要创建、修改或删除任何远端内容。`;
   const firstInput = page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ });
   await expect(firstInput).toBeVisible();
   await firstInput.fill(firstPrompt);
@@ -283,7 +287,7 @@ test('connected MCP works in visible Chat and the same thread after refresh', as
       unexpectedThreadCreations += 1;
     }
   });
-  const followUp = `继续刚才的连接检查，必须再使用同一个 ${SERVER_NAME} MCP 做一次只读确认，并简短回答。`;
+  const followUp = `继续刚才的连接检查，必须再调用同一个 ${SERVER_NAME} MCP 的只读工具 ${SAFE_INSPECTION_TOOL}，并简短回答。`;
   const followUpInput = page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ });
   await followUpInput.fill(followUp);
   const followUpRequestPromise = page.waitForRequest((request) => (

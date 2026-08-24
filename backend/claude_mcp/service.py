@@ -1,7 +1,7 @@
 """User-scoped Claude MCP discovery and OAuth operation orchestration.
 
-[Input] Actor-owned API actions, exact runtime identities, and public CLI driver results.
-[Output] Recoverable in-process operations, restricted user HTTP configuration, verified states, cancellation, and logout.
+[Input] Actor-owned actions, exact runtime identities, and public CLI status/auth/failure results.
+[Output] Safe server/auth projections, recoverable login operations, configuration, cancellation, logout, and removal.
 [Pos] Domain orchestration layer; owns concurrency and never persists or logs OAuth material.
 [Sync] 2026-08-19: implement the reviewed schema-free v1 lifecycle with fail-closed gates.
 [Sync] 2026-08-19: use production user identities and project verified login/logout state into existing Agent threads.
@@ -10,6 +10,7 @@
 [Sync] 2026-08-20: verify Darwin login through formal `mcp get` without reading Keychain payloads.
 [Sync] 2026-08-20: expose prompt-free public-SDK tool inventory under the same user identity as Chat.
 [Sync] 2026-08-21: accept absolute HTTP(S) servers and authorize removal from parsed user scope only.
+[Sync] 2026-08-25: consume Runtime auth/failure semantics, gate explicit login, and trust post-logout connection truth.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from datetime import datetime, timezone
 import uuid
 
 from .contracts import (
+    ClaudeMcpAuthState,
     ClaudeMcpCapability,
     ClaudeMcpConfigScope,
     ClaudeMcpError,
@@ -43,9 +45,12 @@ from .identity import (
 from .inventory import ClaudeMcpInventoryClient
 from .parser import (
     parse_authorization_url,
+    parse_runtime_failure_code,
+    parse_server_auth_state,
     parse_server_names,
     parse_server_scope,
     parse_server_state,
+    parse_server_transport,
     parse_version,
     validate_redirect_url,
     validate_server_url,
@@ -60,6 +65,29 @@ _ACTIVE_STATES = {
     ClaudeMcpState.WAITING_FOR_USER,
     ClaudeMcpState.EXCHANGING_CODE,
     ClaudeMcpState.CANCELLING,
+}
+_EXPLICIT_LOGIN_STATES = {
+    ClaudeMcpState.CONFIGURED,
+    ClaudeMcpState.NEEDS_AUTH,
+    ClaudeMcpState.CONNECTED,
+    ClaudeMcpState.FAILED,
+    ClaudeMcpState.LOGGED_OUT,
+}
+_SEMANTIC_ERROR_MESSAGES = {
+    ClaudeMcpErrorCode.AUTH_NOT_REQUIRED: (
+        "Claude MCP authentication is not required for this server."
+    ),
+    ClaudeMcpErrorCode.AUTH_NOT_ADVERTISED: (
+        "Claude MCP server did not advertise a supported authentication flow."
+    ),
+    ClaudeMcpErrorCode.AUTH_METADATA_INVALID: "Claude MCP authentication metadata is invalid.",
+    ClaudeMcpErrorCode.NETWORK_UNREACHABLE: "Claude MCP server is unreachable.",
+    ClaudeMcpErrorCode.SERVER_REJECTED: "Claude MCP server rejected the connection.",
+    ClaudeMcpErrorCode.PROCESS_EXITED: (
+        "Claude MCP Runtime process exited before the operation completed."
+    ),
+    ClaudeMcpErrorCode.AUTH_TIMEOUT: "Claude MCP authentication timed out.",
+    ClaudeMcpErrorCode.AUTH_CANCELLED: "Claude MCP authentication was cancelled.",
 }
 
 
@@ -253,10 +281,17 @@ class ClaudeMcpService:
         lock = self._credential_locks.setdefault(identity.fingerprint, asyncio.Lock())
         async with lock:
             logout_result = await self.driver.logout(identity, name)
-            if current.state is ClaudeMcpState.CONNECTED and not logout_result.ok:
+            if (
+                current.auth_state is ClaudeMcpAuthState.AUTHENTICATED
+                and not logout_result.ok
+            ):
+                code = (
+                    parse_runtime_failure_code(logout_result.output)
+                    or ClaudeMcpErrorCode.PROCESS_EXITED
+                )
                 raise ClaudeMcpError(
-                    ClaudeMcpErrorCode.CLI_FAILED,
-                    "Claude MCP credentials could not be revoked before removal.",
+                    code,
+                    self._semantic_error_message(code),
                 )
             result = await self.driver.remove_user_server(identity, name)
             if not result.ok:
@@ -349,20 +384,30 @@ class ClaudeMcpService:
                 )
         result = await self.driver.get_server(identity, name)
         state = parse_server_state(result.output)
+        auth_state = parse_server_auth_state(result.output)
+        failure_code = parse_runtime_failure_code(result.output)
         if not result.ok and state is ClaudeMcpState.NOT_CONFIGURED:
             raise ClaudeMcpError(
                 ClaudeMcpErrorCode.SERVER_NOT_FOUND,
                 "Claude MCP server was not found.",
             )
         if not result.ok:
+            code = failure_code or ClaudeMcpErrorCode.PROCESS_EXITED
             raise ClaudeMcpError(
-                ClaudeMcpErrorCode.CLI_FAILED,
-                "Claude MCP server status could not be verified.",
+                code,
+                self._semantic_error_message(code),
             )
         scope = parse_server_scope(result.output)
         return ClaudeMcpServer(
             name=name,
             state=state,
+            auth_state=auth_state,
+            transport=parse_server_transport(result.output),
+            detail=(
+                self._semantic_error_message(failure_code)
+                if failure_code is not None
+                else None
+            ),
             config_scope=scope,
             removable=scope is ClaudeMcpConfigScope.USER,
         )
@@ -374,7 +419,16 @@ class ClaudeMcpService:
     ) -> ClaudeMcpOperation:
         identity, _ = await self._checked_identity(actor_id)
         name = self._server_name(server_name)
-        await self._server(identity, name)
+        current = await self._server(identity, name)
+        if (
+            current.state not in _EXPLICIT_LOGIN_STATES
+            and current.state not in _ACTIVE_STATES
+            and current.auth_state is not ClaudeMcpAuthState.REQUIRED
+        ):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.OPERATION_CONFLICT,
+                "Claude MCP server is not in a state that accepts an explicit login operation.",
+            )
         key = (identity.fingerprint, name)
         async with self._registry_lock:
             for (active_fingerprint, _), active_operation_id in self._active_by_server.items():
@@ -423,8 +477,8 @@ class ClaudeMcpService:
                 await self.cancel_auth(actor_id, operation.id)
                 self._fail(
                     operation,
-                    ClaudeMcpErrorCode.MALFORMED_CLI_OUTPUT,
-                    "Claude MCP login did not provide an authorization URL.",
+                    ClaudeMcpErrorCode.AUTH_TIMEOUT,
+                    self._semantic_error_message(ClaudeMcpErrorCode.AUTH_TIMEOUT),
                 )
                 break
             await asyncio.sleep(0.02)
@@ -467,54 +521,44 @@ class ClaudeMcpService:
                     )
                     return
                 if exit_code != 0:
+                    code = (
+                        parse_runtime_failure_code(buffer)
+                        or ClaudeMcpErrorCode.PROCESS_EXITED
+                    )
                     self._fail(
                         operation,
-                        ClaudeMcpErrorCode.CLI_FAILED,
-                        "Claude MCP login exited before authentication completed.",
+                        code,
+                        self._semantic_error_message(code),
                     )
                     return
                 if operation.authorization_url is None:
+                    if await self._complete_verified_login(
+                        operation,
+                        identity,
+                        require_authenticated=True,
+                    ):
+                        return
+                    if operation.state is ClaudeMcpState.FAILED:
+                        return
                     self._fail(
                         operation,
                         ClaudeMcpErrorCode.MALFORMED_CLI_OUTPUT,
                         "Claude MCP login output did not contain an authorization URL.",
                     )
                     return
-                verified = await self.driver.get_server(identity, operation.server_name)
-                if not verified.ok or parse_server_state(verified.output) is not ClaudeMcpState.CONNECTED:
+                if not await self._complete_verified_login(
+                    operation,
+                    identity,
+                    require_authenticated=False,
+                ):
+                    if operation.state is ClaudeMcpState.FAILED:
+                        return
                     self._fail(
                         operation,
                         ClaudeMcpErrorCode.CLI_FAILED,
                         "Claude MCP authentication could not be verified.",
                     )
                     return
-                # Linux credentials are an official file-backed store and can
-                # be verified without exposing their values.  On macOS Claude
-                # Code owns the config-dir-keyed Keychain item: reading it from
-                # Python would trigger SecurityAgent and copy secrets into the
-                # backend process.  There the formal `mcp get` result above is
-                # the verification boundary; Agent reuses the same secure-store
-                # selector rather than decrypting or projecting the item.
-                if self.credential_synchronizer.requires_file_credential_verification:
-                    try:
-                        if not await self.credential_synchronizer.has_user_mcp_credentials(
-                            operation.actor_id
-                        ):
-                            raise ClaudeMcpCredentialError(
-                                "The verified login did not produce user-scoped MCP credentials."
-                            )
-                    except ClaudeMcpCredentialError:
-                        self._fail(
-                            operation,
-                            ClaudeMcpErrorCode.CREDENTIAL_SYNC_FAILED,
-                            "Claude MCP connected, but its user credential store could not be verified safely.",
-                        )
-                        return
-                operation.authorization_url = None
-                operation.state = ClaudeMcpState.CONNECTED
-                operation.error_code = None
-                operation.error_message = None
-                operation.updated_at = _now()
                 return
         except asyncio.TimeoutError:
             self._fail(
@@ -539,11 +583,15 @@ class ClaudeMcpService:
             else:
                 self._fail(
                     operation,
-                    ClaudeMcpErrorCode.CLI_FAILED,
-                    "Claude MCP authentication process failed.",
+                    ClaudeMcpErrorCode.PROCESS_EXITED,
+                    self._semantic_error_message(ClaudeMcpErrorCode.PROCESS_EXITED),
                 )
         finally:
-            operation.authorization_url = None if operation.state not in _ACTIVE_STATES else operation.authorization_url
+            operation.authorization_url = (
+                None
+                if operation.state not in _ACTIVE_STATES
+                else operation.authorization_url
+            )
             if handle is not None:
                 if handle.process.returncode is None:
                     await handle.terminate()
@@ -635,7 +683,10 @@ class ClaudeMcpService:
         task = operation.task
         if isinstance(task, asyncio.Task) and not task.done():
             try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=self.settings.terminate_grace_seconds + 1)
+                await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=self.settings.terminate_grace_seconds + 1,
+                )
             except asyncio.TimeoutError:
                 task.cancel()
         if operation.state is ClaudeMcpState.CANCELLING:
@@ -666,17 +717,22 @@ class ClaudeMcpService:
         lock = self._credential_locks.setdefault(identity.fingerprint, asyncio.Lock())
         async with lock:
             result = await self.driver.logout(identity, name)
-            if not result.ok:
+            failure_code = parse_runtime_failure_code(result.output)
+            if not result.ok and failure_code is not ClaudeMcpErrorCode.AUTH_NOT_REQUIRED:
+                code = failure_code or ClaudeMcpErrorCode.PROCESS_EXITED
                 raise ClaudeMcpError(
-                    ClaudeMcpErrorCode.CLI_FAILED,
-                    "Claude MCP logout failed.",
+                    code,
+                    self._semantic_error_message(code),
                 )
             verified = await self.driver.get_server(identity, name)
-        state = parse_server_state(verified.output)
-        if verified.ok and state is ClaudeMcpState.CONNECTED:
+        if not verified.ok:
+            code = (
+                parse_runtime_failure_code(verified.output)
+                or ClaudeMcpErrorCode.PROCESS_EXITED
+            )
             raise ClaudeMcpError(
-                ClaudeMcpErrorCode.CLI_FAILED,
-                "Claude MCP logout could not be verified.",
+                code,
+                self._semantic_error_message(code),
             )
         try:
             await self.credential_synchronizer.revoke_existing_thread_credentials(
@@ -687,12 +743,81 @@ class ClaudeMcpService:
                 ClaudeMcpErrorCode.CREDENTIAL_SYNC_FAILED,
                 "Claude MCP logged out, but stale Agent credential projections could not be revoked safely.",
             ) from exc
+        verified_failure_code = parse_runtime_failure_code(verified.output)
+        verified_scope = parse_server_scope(verified.output)
         return ClaudeMcpServer(
             name=name,
-            state=ClaudeMcpState.LOGGED_OUT,
-            config_scope=current.config_scope,
+            state=parse_server_state(verified.output),
+            auth_state=parse_server_auth_state(verified.output),
+            transport=parse_server_transport(verified.output),
+            detail=(
+                self._semantic_error_message(verified_failure_code)
+                if verified_failure_code is not None
+                else None
+            ),
+            config_scope=(
+                verified_scope
+                if verified_scope is not ClaudeMcpConfigScope.UNKNOWN
+                else current.config_scope
+            ),
             removable=current.removable,
         )
+
+    async def _complete_verified_login(
+        self,
+        operation: ClaudeMcpOperation,
+        identity: ClaudeMcpRuntimeIdentity,
+        *,
+        require_authenticated: bool,
+    ) -> bool:
+        """Verify formal Runtime truth and complete one login without reading secrets."""
+
+        verified = await self.driver.get_server(identity, operation.server_name)
+        if not verified.ok:
+            code = (
+                parse_runtime_failure_code(verified.output)
+                or ClaudeMcpErrorCode.PROCESS_EXITED
+            )
+            self._fail(operation, code, self._semantic_error_message(code))
+            return False
+        state = parse_server_state(verified.output)
+        auth_state = parse_server_auth_state(verified.output)
+        if state is not ClaudeMcpState.CONNECTED or (
+            require_authenticated
+            and auth_state is not ClaudeMcpAuthState.AUTHENTICATED
+        ) or (
+            not require_authenticated
+            and auth_state
+            not in {
+                ClaudeMcpAuthState.AUTHENTICATED,
+                ClaudeMcpAuthState.UNKNOWN,
+            }
+        ):
+            return False
+        # Linux credentials are an official file-backed store and can be
+        # verified without exposing values. macOS uses formal Runtime status
+        # plus the same secure-storage selector rather than Keychain reads.
+        if self.credential_synchronizer.requires_file_credential_verification:
+            try:
+                if not await self.credential_synchronizer.has_user_mcp_credentials(
+                    operation.actor_id
+                ):
+                    raise ClaudeMcpCredentialError(
+                        "The verified login did not produce user-scoped MCP credentials."
+                    )
+            except ClaudeMcpCredentialError:
+                self._fail(
+                    operation,
+                    ClaudeMcpErrorCode.CREDENTIAL_SYNC_FAILED,
+                    "Claude MCP connected, but its user credential store could not be verified safely.",
+                )
+                return False
+        operation.authorization_url = None
+        operation.state = ClaudeMcpState.CONNECTED
+        operation.error_code = None
+        operation.error_message = None
+        operation.updated_at = _now()
+        return True
 
     async def shutdown(self) -> None:
         active = [
@@ -749,6 +874,13 @@ class ClaudeMcpService:
                 "Claude MCP authentication operation was not found.",
             )
         return operation
+
+    @staticmethod
+    def _semantic_error_message(code: ClaudeMcpErrorCode) -> str:
+        return _SEMANTIC_ERROR_MESSAGES.get(
+            code,
+            "Claude MCP Runtime operation failed.",
+        )
 
     @staticmethod
     def _fail(

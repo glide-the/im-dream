@@ -1,13 +1,14 @@
 """Stable contracts for the Claude MCP resource connector.
 
 [Input] Claude CLI capability/status evidence and user-owned OAuth operation transitions.
-[Output] Domain enums, safe DTO projections, runtime identity, and structured errors.
+[Output] Connection/auth enums, safe DTO projections, runtime identity, and structured semantic errors.
 [Pos] Dependency-light contract layer shared by the router, driver, service, and tests.
 [Sync] 2026-08-19: define the reviewed v1 state and error vocabulary.
 [Sync] 2026-08-19: add fail-closed credential projection errors for user-to-thread synchronization.
 [Sync] 2026-08-19: add restricted user-scope server configuration and ownership errors.
 [Sync] 2026-08-20: add safe public-SDK inventory contracts for MCP tools and annotations.
 [Sync] 2026-08-21: expose fail-closed CLI config scope and removability on server DTOs.
+[Sync] 2026-08-25: project stable Runtime authentication identity and semantic MCP failures without exposing raw output.
 """
 
 from __future__ import annotations
@@ -40,6 +41,15 @@ class ClaudeMcpConfigScope(str, Enum):
     UNKNOWN = "unknown"
 
 
+class ClaudeMcpAuthState(str, Enum):
+    """Transport authentication identity reported by the exact Runtime."""
+
+    ANONYMOUS = "anonymous"
+    REQUIRED = "required"
+    AUTHENTICATED = "authenticated"
+    UNKNOWN = "unknown"
+
+
 class ClaudeMcpErrorCode(str, Enum):
     IDENTITY_UNAVAILABLE = "CLAUDE_MCP_IDENTITY_UNAVAILABLE"
     CLI_UNAVAILABLE = "CLAUDE_MCP_CLI_UNAVAILABLE"
@@ -52,6 +62,12 @@ class ClaudeMcpErrorCode(str, Enum):
     INVALID_REDIRECT_URL = "CLAUDE_MCP_INVALID_REDIRECT_URL"
     MALFORMED_CLI_OUTPUT = "CLAUDE_MCP_MALFORMED_CLI_OUTPUT"
     CLI_FAILED = "CLAUDE_MCP_CLI_FAILED"
+    AUTH_NOT_REQUIRED = "CLAUDE_MCP_AUTH_NOT_REQUIRED"
+    AUTH_NOT_ADVERTISED = "CLAUDE_MCP_AUTH_NOT_ADVERTISED"
+    AUTH_METADATA_INVALID = "CLAUDE_MCP_AUTH_METADATA_INVALID"
+    NETWORK_UNREACHABLE = "CLAUDE_MCP_NETWORK_UNREACHABLE"
+    SERVER_REJECTED = "CLAUDE_MCP_SERVER_REJECTED"
+    PROCESS_EXITED = "CLAUDE_MCP_PROCESS_EXITED"
     AUTH_TIMEOUT = "CLAUDE_MCP_AUTH_TIMEOUT"
     AUTH_CANCELLED = "CLAUDE_MCP_AUTH_CANCELLED"
     CREDENTIAL_SYNC_FAILED = "CLAUDE_MCP_CREDENTIAL_SYNC_FAILED"
@@ -116,11 +132,13 @@ class ClaudeMcpServer:
     active_operation_id: str | None = None
     config_scope: ClaudeMcpConfigScope = ClaudeMcpConfigScope.UNKNOWN
     removable: bool = False
+    auth_state: ClaudeMcpAuthState = ClaudeMcpAuthState.UNKNOWN
 
     def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
             "state": self.state.value,
+            "auth_state": self.auth_state.value,
             "transport": self.transport,
             "detail": self.detail,
             "active_operation_id": self.active_operation_id,

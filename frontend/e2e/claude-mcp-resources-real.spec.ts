@@ -1,5 +1,5 @@
-// [Input] Named existing actor, normal Dream/PostgreSQL, official Claude CLI, a real OAuth MCP URL, and live Agent runtime.
-// [Output] Real-business Resources configure → OAuth → Connected → visible Chat MCP results → refresh/resume → Logout → Remove evidence.
+// [Input] Named existing actor/Deck, normal Dream/PostgreSQL, candidate Claude Runtime, a real anonymous or OAuth MCP URL, and live Agent runtime.
+// [Output] Real-business Resources configure → auth routing → inventory → visible Chat SSE/MCP results → refresh/resume → auth-specific cleanup evidence.
 // [Pos] Opt-in macOS/Linux Claude MCP acceptance; no API interception, shadow account, cloned database, or fake CLI.
 // [Sync] 2026-08-19: add the complete real-account MCP OAuth and per-turn Agent credential reuse journey.
 // [Sync] 2026-08-20: assert Linux file projection versus macOS secure-storage reuse without reading Keychain.
@@ -8,6 +8,8 @@
 // [Sync] 2026-08-24: move both Agent turns onto visible Chat, approve only the named MCP tool in UI,
 //                    and require persisted output-available results across refresh/resume before logout/removal.
 // [Sync] 2026-08-24: accept both explicit post-logout unauthenticated labels before strict credential deletion checks.
+// [Sync] 2026-08-25: accept explicit anonymous/OAuth modes, prove anonymous add never auto-starts login,
+//                    preserve user-initiated login semantics, bind the Chat to an existing Deck, and assert both SSE responses.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -20,17 +22,23 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 const ENABLED = process.env.INK_REAL_CLAUDE_MCP_QA === '1';
 const WEB_BASE = process.env.INK_REAL_CLAUDE_MCP_WEB_BASE ?? 'http://127.0.0.1:5173';
 const ACTOR_EMAIL = process.env.INK_REAL_CLAUDE_MCP_ACTOR_EMAIL ?? '';
+const DECK_ID = process.env.INK_REAL_CLAUDE_MCP_DECK_ID ?? '';
 const SERVER_NAME = process.env.INK_REAL_CLAUDE_MCP_SERVER_NAME ?? '';
 const SERVER_URL = process.env.INK_REAL_CLAUDE_MCP_SERVER_URL ?? '';
 const BROWSER_HANDOFF_DIR = process.env.INK_REAL_CLAUDE_MCP_BROWSER_HANDOFF_DIR ?? '';
-const SAFE_INSPECTION_TOOL = 'get_server_info';
+const AUTH_MODE = process.env.INK_REAL_CLAUDE_MCP_AUTH_MODE ?? 'oauth';
+const SAFE_INSPECTION_TOOL = process.env.INK_REAL_CLAUDE_MCP_SAFE_TOOL
+  ?? (AUTH_MODE === 'anonymous' ? 'server_info' : 'get_server_info');
+const EXPECTED_TOOL_COUNT = Number(process.env.INK_REAL_CLAUDE_MCP_TOOL_COUNT ?? (AUTH_MODE === 'anonymous' ? '40' : '41'));
 const BACKEND_DIR = resolve(process.cwd(), '../backend');
 const BACKEND_PYTHON = resolve(BACKEND_DIR, '.venv/bin/python');
 
 const IMPACT_SCOPE = {
   actor: 'one named existing platform user',
   mcpConfiguration: 'one explicitly named user-scope HTTP(S) server, removed at journey end',
-  oauthCredential: 'real provider token in the actor user store, logged out and revoked at journey end',
+  oauthCredential: AUTH_MODE === 'oauth'
+    ? 'real provider token in the actor user store, logged out and revoked at journey end'
+    : 'no OAuth credential is created or projected',
   agent: 'one normal persisted Chat thread with two read-only model turns across refresh/resume',
   historicalThreads: 'no login fan-out; only the new turn target is projected',
   subscriptionAndOtherUsers: 'unchanged',
@@ -63,10 +71,16 @@ test.describe.configure({ mode: 'serial' });
 test.skip(!ENABLED, 'Set INK_REAL_CLAUDE_MCP_QA=1 with the named actor/server inputs.');
 
 function requireInputs(): void {
-  if (!ACTOR_EMAIL || !SERVER_NAME || !SERVER_URL) {
+  if (!ACTOR_EMAIL || !DECK_ID || !SERVER_NAME || !SERVER_URL) {
     throw new Error(
-      'INK_REAL_CLAUDE_MCP_ACTOR_EMAIL, INK_REAL_CLAUDE_MCP_SERVER_NAME, and INK_REAL_CLAUDE_MCP_SERVER_URL are required.',
+      'INK_REAL_CLAUDE_MCP_ACTOR_EMAIL, INK_REAL_CLAUDE_MCP_DECK_ID, INK_REAL_CLAUDE_MCP_SERVER_NAME, and INK_REAL_CLAUDE_MCP_SERVER_URL are required.',
     );
+  }
+  if (!['anonymous', 'oauth'].includes(AUTH_MODE)) {
+    throw new Error('INK_REAL_CLAUDE_MCP_AUTH_MODE must be anonymous or oauth.');
+  }
+  if (!Number.isInteger(EXPECTED_TOOL_COUNT) || EXPECTED_TOOL_COUNT < 1) {
+    throw new Error('INK_REAL_CLAUDE_MCP_TOOL_COUNT must be a positive integer.');
   }
   if (!SERVER_URL.startsWith('https://')) {
     throw new Error('The real MCP acceptance URL must use HTTPS.');
@@ -77,6 +91,9 @@ function createActorToken(email: string): string {
   const source = [
     'from dotenv import load_dotenv',
     "load_dotenv('.env')",
+    'import os',
+    "from persistence.config import load_database_url_from_env_file",
+    "load_database_url_from_env_file(override=True) if os.environ.get('INK_LOAD_DATABASE_URL_FROM_ENV_FILE') == '1' else None",
     'import auth,database,sys',
     'db=database.get_db()',
     "user=db.execute(\"select id,email from users where email=%s and status='active'\",(sys.argv[1],)).fetchone()",
@@ -320,6 +337,9 @@ function credentialProjectionFacts(threadId: string): {
   const source = [
     'from dotenv import load_dotenv',
     "load_dotenv('.env')",
+    'import os',
+    "from persistence.config import load_database_url_from_env_file",
+    "load_database_url_from_env_file(override=True) if os.environ.get('INK_LOAD_DATABASE_URL_FROM_ENV_FILE') == '1' else None",
     'import database,json,sys',
     'from pathlib import Path',
     'from claude_mcp.credentials import ClaudeMcpCredentialSynchronizer,resolve_user_paths',
@@ -355,13 +375,15 @@ function credentialProjectionFacts(threadId: string): {
   };
 }
 
-test('real actor completes MCP OAuth, Agent credential reuse, logout, and removal', async ({ page }) => {
+test('real actor completes MCP auth routing, inventory, Agent resume, and cleanup', async ({ page }) => {
   test.setTimeout(600_000);
   requireInputs();
   expect(IMPACT_SCOPE).toEqual({
     actor: 'one named existing platform user',
     mcpConfiguration: 'one explicitly named user-scope HTTP(S) server, removed at journey end',
-    oauthCredential: 'real provider token in the actor user store, logged out and revoked at journey end',
+    oauthCredential: AUTH_MODE === 'oauth'
+      ? 'real provider token in the actor user store, logged out and revoked at journey end'
+      : 'no OAuth credential is created or projected',
     agent: 'one normal persisted Chat thread with two read-only model turns across refresh/resume',
     historicalThreads: 'no login fan-out; only the new turn target is projected',
     subscriptionAndOtherUsers: 'unchanged',
@@ -371,6 +393,16 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
   const diagnostics = diagnosticsFor(page);
   let operationId: string | null = null;
   let removed = false;
+  let authOperationRequests = 0;
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST'
+      && decodeURIComponent(new URL(request.url()).pathname)
+        === `/api/claude-mcp/servers/${SERVER_NAME}/auth-operations`
+    ) {
+      authOperationRequests += 1;
+    }
+  });
 
   await page.addInitScript((value) => {
     localStorage.setItem('auth_token', value);
@@ -383,6 +415,13 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
     expect(before.status()).toBe(200);
     const beforeServers = await before.json() as { servers: Array<{ name: string }> };
     expect(beforeServers.servers.some((server) => server.name === SERVER_NAME)).toBe(false);
+    const decks = await getJson<{ decks: Array<{ id: string; enabled?: boolean; agent_type?: string }> }>(
+      page.request,
+      '/api/decks',
+      token,
+    );
+    expect(decks.decks.some((deck) => deck.id === DECK_ID && deck.enabled !== false),
+      'the selected existing Deck must be enabled').toBe(true);
 
     await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
     await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
@@ -392,81 +431,122 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
     await page.getByRole('button', { name: '添加 MCP 服务' }).click();
 
     const card = page.getByRole('article', { name: `MCP 服务 ${SERVER_NAME}` });
-    await expect(card).toContainText('需要认证');
-    const operationResponse = page.waitForResponse((response) => (
-      response.request().method() === 'POST'
-      && decodeURIComponent(new URL(response.url()).pathname)
-        === `/api/claude-mcp/servers/${SERVER_NAME}/auth-operations`
-    ));
-    await card.getByRole('button', { name: '开始认证' }).click();
-    const operationPayload = await (await operationResponse).json() as {
-      operation: { id: string };
-    };
-    operationId = operationPayload.operation.id;
-    await expect(card).toContainText('等待授权');
+    if (AUTH_MODE === 'anonymous') {
+      await expect(card).toContainText('匿名连接，无需 OAuth', { timeout: 30_000 });
+      expect(authOperationRequests, 'anonymous add must not auto-start login').toBe(0);
+      await expect(card.getByRole('button', { name: '退出认证' })).toHaveCount(0);
 
-    const authorizationLink = card.getByRole('link', { name: '打开授权页面' });
-    let redirectUrl: string;
-    if (BROWSER_HANDOFF_DIR) {
-      const authorizationUrl = await authorizationLink.getAttribute('href');
-      if (!authorizationUrl) throw new Error('Authorization URL is not available.');
-      redirectUrl = await authorizationRedirectFromChrome(page, authorizationUrl);
+      const explicitLoginResponse = page.waitForResponse((response) => (
+        response.request().method() === 'POST'
+        && decodeURIComponent(new URL(response.url()).pathname)
+          === `/api/claude-mcp/servers/${SERVER_NAME}/auth-operations`
+      ));
+      await card.getByRole('button', { name: '尝试认证' }).click();
+      const explicitLoginPayload = await (await explicitLoginResponse).json() as {
+        operation: { id: string; state: string; error?: { code?: string } | null };
+      };
+      operationId = explicitLoginPayload.operation.id;
+      expect(explicitLoginPayload.operation.state).toBe('failed');
+      expect(explicitLoginPayload.operation.error?.code).toBe('CLAUDE_MCP_AUTH_NOT_REQUIRED');
+      expect(authOperationRequests).toBe(1);
+      await expect(card).toContainText('CLAUDE_MCP_AUTH_NOT_REQUIRED');
+      await expect(card.getByRole('link', { name: '打开授权页面' })).toHaveCount(0);
+      await expect(card).toContainText('匿名连接，无需 OAuth', { timeout: 30_000 });
+      operationId = null;
     } else {
-      const popupPromise = page.waitForEvent('popup');
-      await authorizationLink.click();
-      const popup = await popupPromise;
-      redirectUrl = await authorizationRedirect(popup);
-      await popup.close().catch(() => undefined);
-    }
-    const redirectInput = card.getByLabel(`${SERVER_NAME} redirect URL`);
-    const connectedStatus = card.getByText('已连接', { exact: true });
-    await expect.poll(async () => {
-      if (await connectedStatus.isVisible().catch(() => false)) return 'connected';
-      if (await redirectInput.isVisible().catch(() => false)) return 'redirect';
-      return 'pending';
-    }, { timeout: 60_000 }).not.toBe('pending');
+      await expect(card).toContainText('需要认证');
+      const operationResponse = page.waitForResponse((response) => (
+        response.request().method() === 'POST'
+        && decodeURIComponent(new URL(response.url()).pathname)
+          === `/api/claude-mcp/servers/${SERVER_NAME}/auth-operations`
+      ));
+      await card.getByRole('button', { name: '开始认证' }).click();
+      const operationPayload = await (await operationResponse).json() as {
+        operation: { id: string };
+      };
+      operationId = operationPayload.operation.id;
+      await expect(card).toContainText('等待授权');
 
-    // Recent Claude Code builds host a localhost callback even with
-    // `--no-browser`. If the browser reaches that listener, the original CLI
-    // can finish before the UI submits the same redirect. Preserve the manual
-    // stdin path for headless/SSH while treating direct callback completion as
-    // the same idempotent operation result.
-    if (await redirectInput.isVisible().catch(() => false)) {
-      try {
-        await redirectInput.fill(redirectUrl, { timeout: 5_000 });
-        await card.getByRole('button', { name: '提交并连接' }).click({ timeout: 5_000 });
-      } catch (error) {
-        if (!await connectedStatus.isVisible().catch(() => false)) throw error;
+      const authorizationLink = card.getByRole('link', { name: '打开授权页面' });
+      let redirectUrl: string;
+      if (BROWSER_HANDOFF_DIR) {
+        const authorizationUrl = await authorizationLink.getAttribute('href');
+        if (!authorizationUrl) throw new Error('Authorization URL is not available.');
+        redirectUrl = await authorizationRedirectFromChrome(page, authorizationUrl);
+      } else {
+        const popupPromise = page.waitForEvent('popup');
+        await authorizationLink.click();
+        const popup = await popupPromise;
+        redirectUrl = await authorizationRedirect(popup);
+        await popup.close().catch(() => undefined);
       }
+      const redirectInput = card.getByLabel(`${SERVER_NAME} redirect URL`);
+      const connectedStatus = card.getByText('已认证', { exact: true });
+      await expect.poll(async () => {
+        if (await connectedStatus.isVisible().catch(() => false)) return 'connected';
+        if (await redirectInput.isVisible().catch(() => false)) return 'redirect';
+        return 'pending';
+      }, { timeout: 60_000 }).not.toBe('pending');
+
+      // Recent Claude Code builds host a localhost callback even with
+      // `--no-browser`. If the browser reaches that listener, the original CLI
+      // can finish before the UI submits the same redirect. Preserve the manual
+      // stdin path for headless/SSH while treating direct callback completion as
+      // the same idempotent operation result.
+      if (await redirectInput.isVisible().catch(() => false)) {
+        try {
+          await redirectInput.fill(redirectUrl, { timeout: 5_000 });
+          await card.getByRole('button', { name: '提交并连接' }).click({ timeout: 5_000 });
+        } catch (error) {
+          if (!await connectedStatus.isVisible().catch(() => false)) throw error;
+        }
+      }
+      redirectUrl = '';
+      await expect(card).toContainText('已认证', { timeout: 60_000 });
     }
-    redirectUrl = '';
-    await expect(card).toContainText('已连接', { timeout: 60_000 });
+
+    await card.getByRole('button', { name: '管理与工具' }).click();
+    await expect(page.getByRole('tab', { name: `Tools ${EXPECTED_TOOL_COUNT}` })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('article', { name: `MCP 工具 ${SAFE_INSPECTION_TOOL}` })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Resources —' })).toBeVisible();
+    await page.getByRole('button', { name: '资源连接器' }).click();
 
     await page.getByRole('button', { name: '返回应用' }).click();
-    const navigation = page.getByRole('navigation', { name: 'Story Workspace 导航' });
-    await navigation.getByRole('button', { name: /^(Chat|对话)$/ }).click();
-    await page.waitForURL(`${WEB_BASE}/story-workspace/chat`);
-    const newChat = page.getByTitle(/^(New chat|新建对话)$/);
-    if (await newChat.isVisible().catch(() => false)) await newChat.click();
+    const seededThreadTitle = `MCP auth routing QA ${Date.now()}`;
+    const seededThreadResponse = await page.request.post(`${WEB_BASE}/api/claude-agent/threads`, {
+      headers,
+      data: { deckId: DECK_ID, title: seededThreadTitle },
+    });
+    expect(seededThreadResponse.status(), await seededThreadResponse.text()).toBe(200);
+    const seededThread = await seededThreadResponse.json() as {
+      thread_id: string;
+      deck_id: string | null;
+    };
+    expect(seededThread.deck_id).toBe(DECK_ID);
+    const threadId = seededThread.thread_id;
+    await page.goto(`${WEB_BASE}/story-workspace/chat`);
+    const seededHistoryEntry = page.getByTitle(seededThreadTitle).first();
+    await expect(seededHistoryEntry).toBeVisible({ timeout: 30_000 });
+    await seededHistoryEntry.click();
 
-    const prompt = `请使用已连接的 ${SERVER_NAME} MCP 调用一个只读工具查看服务信息，简要告诉我连接是否可用。不要创建、修改或删除任何远端内容。`;
+    const prompt = `请准确使用已连接的 ${SERVER_NAME} MCP 调用只读工具 ${SAFE_INSPECTION_TOOL}，简要告诉我调用是否成功。不要创建、修改或删除任何远端内容。`;
     const input = page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ });
     await expect(input).toBeVisible();
     await input.fill(prompt);
-    const createResponsePromise = page.waitForResponse((response) => (
-      response.request().method() === 'POST'
-      && new URL(response.url()).pathname === '/api/claude-agent/threads'
-    ));
     const agentRequestPromise = page.waitForRequest((request) => (
       request.method() === 'POST'
       && new URL(request.url()).pathname === '/api/claude-agent'
     ));
+    const agentResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/claude-agent'
+    ));
     await page.getByRole('button', { name: /^(Send message|发送消息)$/ }).click();
-    const createResponse = await createResponsePromise;
-    expect(createResponse.status(), await createResponse.text()).toBe(200);
-    const threadId = (await createResponse.json() as { thread_id: string }).thread_id;
     const agentRequest = await agentRequestPromise;
     expect(agentRequest.postDataJSON()).toMatchObject({ id: threadId, resume: true });
+    const agentResponse = await agentResponsePromise;
+    expect(agentResponse.status()).toBe(200);
+    expect(agentResponse.headers()['content-type']).toContain('text/event-stream');
 
     await waitForTurn(page, token, threadId, 1);
     const firstHistory = await getJson<ThreadMessages>(
@@ -498,16 +578,23 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
         unexpectedThreadCreations += 1;
       }
     });
-    const followUp = `继续刚才的连接检查，必须再使用同一个 ${SERVER_NAME} MCP 做一次只读确认，并简短回答。`;
+    const followUp = `继续刚才的连接检查，必须再调用同一个 ${SERVER_NAME} MCP 的只读工具 ${SAFE_INSPECTION_TOOL}，并简短回答。`;
     const followUpInput = page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ });
     await followUpInput.fill(followUp);
     const followUpRequestPromise = page.waitForRequest((request) => (
       request.method() === 'POST'
       && new URL(request.url()).pathname === '/api/claude-agent'
     ));
+    const followUpResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/claude-agent'
+    ));
     await page.getByRole('button', { name: /^(Send message|发送消息)$/ }).click();
     const followUpRequest = await followUpRequestPromise;
     expect(followUpRequest.postDataJSON()).toMatchObject({ id: threadId, resume: true });
+    const followUpResponse = await followUpResponsePromise;
+    expect(followUpResponse.status()).toBe(200);
+    expect(followUpResponse.headers()['content-type']).toContain('text/event-stream');
 
     await waitForTurn(page, token, threadId, 2);
     const finalHistory = await getJson<ThreadMessages>(
@@ -525,11 +612,25 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
     await expect(page.getByText(followUp, { exact: true })).toBeVisible();
     expect(unexpectedThreadCreations).toBe(0);
 
+    const workspaceResponse = await page.request.get(`${WEB_BASE}/api/workspace/files`, {
+      headers,
+      params: { sessionId: threadId, recursive: '1' },
+    });
+    expect(workspaceResponse.status(), await workspaceResponse.text()).toBe(200);
+    const workspace = await workspaceResponse.json() as { tree?: unknown[]; workspaceCreated?: boolean };
+    expect(Array.isArray(workspace.tree)).toBe(true);
+    expect(workspace.workspaceCreated).toBe(false);
+
     const projection = credentialProjectionFacts(threadId);
     expect(projection.sourceHasMcpServer).toBe(true);
     expect(projection.targetHasObsoleteMcpServer).toBe(false);
     expect(projection.targetHasMainClaudeOauth).toBe(false);
-    if (process.platform === 'darwin') {
+    if (AUTH_MODE === 'anonymous') {
+      expect(projection).toMatchObject({
+        sourceHasMcpOAuth: false,
+        targetHasMcpOAuth: false,
+      });
+    } else if (process.platform === 'darwin') {
       expect(projection).toMatchObject({
         credentialDelivery: 'secure_storage_reference',
         sourceHasMcpOAuth: false,
@@ -547,9 +648,14 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
 
     await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
     const connectedCard = page.getByRole('article', { name: `MCP 服务 ${SERVER_NAME}` });
-    await expect(connectedCard).toContainText('已连接', { timeout: 30_000 });
-    await connectedCard.getByRole('button', { name: 'Logout' }).click();
-    await expect(connectedCard).toContainText(/已退出|需要认证/);
+    if (AUTH_MODE === 'anonymous') {
+      await expect(connectedCard).toContainText('匿名连接，无需 OAuth', { timeout: 30_000 });
+      await expect(connectedCard.getByRole('button', { name: '退出认证' })).toHaveCount(0);
+    } else {
+      await expect(connectedCard).toContainText('已认证', { timeout: 30_000 });
+      await connectedCard.getByRole('button', { name: '退出认证' }).click();
+      await expect(connectedCard).toContainText(/已退出|需要认证/);
+    }
     await connectedCard.getByRole('button', { name: '移除' }).click();
     await expect(connectedCard).toHaveCount(0);
     removed = true;

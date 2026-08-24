@@ -1,10 +1,11 @@
 // [Input] Authenticated `/api/claude-mcp` capability, configuration, inventory, server, and OAuth operation contracts.
-// [Output] Strict frontend DTOs, prompt-free tool inventory, and scope-aware HTTP(S) add/remove helpers with no browser credential persistence.
+// [Output] Strict frontend DTOs, authoritative authentication state, prompt-free tool inventory, and scope-aware HTTP(S) helpers with no browser credential persistence.
 // [Pos] Transport boundary for the `claude-mcp` Resources feature.
 // [Sync] 2026-08-19: add official CLI-backed MCP discovery/login/redirect/cancel/logout API helpers.
 // [Sync] 2026-08-19: add restricted user-scope HTTPS configuration and removal helpers.
 // [Sync] 2026-08-20: add sanitized public-SDK server/tool inventory contracts.
 // [Sync] 2026-08-21: expose server config scope/removability and allow absolute HTTP(S) configuration.
+// [Sync] 2026-08-25: carry Runtime-classified anonymous, required, authenticated, or unknown authentication state.
 
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -23,6 +24,7 @@ export type ClaudeMcpState =
   | 'disabled';
 
 export type ClaudeMcpConfigScope = 'user' | 'local' | 'project' | 'plugin' | 'unknown';
+export type ClaudeMcpAuthState = 'anonymous' | 'required' | 'authenticated' | 'unknown';
 
 export interface ClaudeMcpCapability {
   enabled: boolean;
@@ -36,6 +38,7 @@ export interface ClaudeMcpCapability {
 export interface ClaudeMcpServer {
   name: string;
   state: ClaudeMcpState;
+  auth_state: ClaudeMcpAuthState;
   transport: string | null;
   detail: string | null;
   active_operation_id: string | null;

@@ -7,6 +7,7 @@
 <!-- [同步] 2026-08-22：在保留 per-thread TMPDIR 和 Chat/Dream 合同的前提下恢复到当前基线。 -->
 <!-- [同步] 2026-08-23：Agent 与 MCP 共用自有 Runtime resolver/manifest gate，绝对 CLAUDE_CODE_CLI_PATH 只用于官方回滚。 -->
 <!-- [同步] 2026-08-24：更新为 SDK 0.2.143 正式 PyPI 版本/哈希锁、MIT clean-room Runtime、跨进程 OAuth rotation 修复和真实 Comfy 两轮 tool/resume 回执。 -->
+<!-- [同步] 2026-08-25：认证路由改为 HTTP 匿名优先；连接与认证状态正交，主动 login、OAuth、logout/cancel 与官方回滚继续保留。 -->
 
 # Claude MCP 资源链接器设计
 
@@ -18,6 +19,8 @@
 术语约定：`production-qualified` 表示通过 Dream 技术和真实业务门；`Dream 接口资格标识` 只覆盖本文列出的 IM 合同，不等于 official 全产品实现；`clean-room` 表示公共 Runtime 只使用仓库自有 MIT 源码和兼容许可证依赖；`opaque` 表示业务代码只转交、不解释 payload；`filesystem anchor` 是不会向上发现用户/项目配置的中立 cwd；`repr-hidden` 表示内部字段禁止进入对象 repr、日志和 DTO。
 
 ## 1. 结论先行
+
+2026-08-25 的认证路由修订以 [`mcp-authentication-routing-refactor.md`](../claude-agent/mcp-authentication-routing-refactor.md) 为准：HTTP(S) MCP 添加后先执行无 Authorization 的真实连接；匿名握手和 inventory 成功即 `connected + anonymous`，不得仅按 transport、`oauth:true` 或凭证缺失进入 login。规范挑战或用户主动动作才允许 OAuth discovery；主动对未声明 OAuth 的匿名 Server 登录会得到结构化 `AUTH_NOT_REQUIRED`/`AUTH_NOT_ADVERTISED`，不破坏已有匿名连接。
 
 Resources 页已实现独立的“Claude MCP”模块，并复用 Notion 的卡片/详情布局与 ClaudePlugin 的 operation 进度反馈；认证协议使用 Claude Code 公开支持的 CLI 参数接口：
 
@@ -291,11 +294,13 @@ Resources CLI 的两个选择器都指向同一用户根。Agent 的普通配置
 | 状态 | 主动作 | 次动作 |
 |---|---|---|
 | `configured` | 检查连接 | 查看配置摘要 |
-| `needs_auth` / `logged_out` | 连接 | — |
+| `needs_auth + required` | 开始认证 | 检查状态 |
+| `connected + anonymous` | 使用已发现能力 | 可选“尝试认证”/Remove |
+| `connected + authenticated` | 使用已发现能力 | 重新认证/Logout/Remove |
+| `logged_out` | 检查连接 | 若重新挑战则开始认证 |
 | `auth_starting` | 等待 URL | 取消 |
 | `waiting_for_user` | 打开授权页 | 提交 redirect / 取消 |
 | `exchanging_code` | 等待验证 | 取消 |
-| `connected` | 重新检查 | Logout |
 | `failed` | 重试 | 查看安全错误码 |
 | `cancelling` | 正在取消 | — |
 | `disabled` | 无 | 查看阻断原因 |
@@ -311,9 +316,10 @@ stateDiagram-v2
   [*] --> disabled: identity/version gate fails
   [*] --> not_configured: server absent
   [*] --> configured: server present, status unknown
-  configured --> needs_auth: get reports auth required
-  configured --> connected: get reports connected
+  configured --> connected: anonymous handshake succeeds
+  configured --> needs_auth: verified auth challenge
   needs_auth --> auth_starting: start login
+  connected --> auth_starting: explicit optional login/reauth
   auth_starting --> waiting_for_user: authorization URL parsed
   waiting_for_user --> exchanging_code: redirect submitted once
   exchanging_code --> connected: CLI exit 0 + get verified
@@ -321,13 +327,14 @@ stateDiagram-v2
   auth_starting --> failed: malformed output/process exit/timeout
   waiting_for_user --> cancelling: cancel/timeout
   exchanging_code --> cancelling: cancel/timeout
-  cancelling --> needs_auth: process reaped
-  connected --> logged_out: logout exit 0 + get verified
-  logged_out --> auth_starting: reconnect
-  failed --> auth_starting: retry with new operation
+  cancelling --> configured: process reaped, then re-probe
+  connected --> connected: logout then anonymous re-probe succeeds
+  connected --> needs_auth: logout then protected re-probe challenges
+  logged_out --> configured: reconnect probe
+  failed --> configured: retry connection probe
 ```
 
-约束：`connected` 只能由 `mcp get` 验证产生；login exit 0 不是充分条件。`logged_out` 只能由 logout exit 0 且 get 不再为 connected 产生。
+约束：`connected` 只能由 `mcp get` 验证产生；login exit 0 不是充分条件。`connected` 的 `auth_state` 必须区分 `anonymous`、`authenticated` 与 official rollback 的 `unknown`。logout 后必须重新探测：公开 Server 可继续 `connected + anonymous`，受保护 Server 才回到 `needs_auth + required`。
 
 ## 8. API、DTO 与错误模型
 
@@ -619,12 +626,12 @@ sequenceDiagram
   CLI-->>DRV: exit 0
   SVC->>DRV: get(exactName)
   DRV->>CLI: claude mcp get exactName
-  CLI-->>SVC: Needs authentication/configured
+  CLI-->>SVC: Connected+anonymous 或 Needs authentication+required
   SVC->>SYNC: sync existing user threads
   SYNC->>SEC: mcpOAuth entry absent
   SYNC->>SYNC: remove only existing thread mcpOAuth snapshots
-  SVC-->>API: logged_out
-  API-->>UI: 可重新连接
+  SVC-->>API: 当前真实连接/auth 状态
+  API-->>UI: 匿名可用或需要重新认证
 ```
 
 ### 13.6 Agent 复用凭证协议目标

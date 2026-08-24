@@ -1,5 +1,5 @@
 // [Input] Running frontend entry point plus production-shaped intercepted Claude MCP and boot API fixtures.
-// [Output] Verify Resources → Configure → Login → Connected → 41-tool detail/search/risk → Logout → Remove with zero secret persistence.
+// [Output] Verify Resources → Configure → required OAuth → Authenticated → 41-tool detail/search/risk → Logout → Remove with zero secret persistence.
 // [Pos] Provider-free Claude MCP browser journey; it never calls a real OAuth provider, CLI, backend, or business database.
 // [Sync] 2026-08-19: cover the complete visible v1 connector journey and responsive layout.
 // [Sync] 2026-08-19: cover restricted HTTP(S) configuration and user-owned removal before real-provider QA.
@@ -7,6 +7,7 @@
 // [Sync] 2026-08-21: cover remote HTTP plus project-scope read-only removal controls.
 // [Sync] 2026-08-24: accept the production shell's authenticated session autosave
 //                    without weakening the strict unexpected-request audit.
+// [Sync] 2026-08-25: model Runtime-authored anonymous/required/authenticated states and the renamed Chinese logout action.
 
 import { expect, test, type Request as PlaywrightRequest } from '@playwright/test';
 
@@ -88,6 +89,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
           servers: [{
             name: projectServerName,
             state: 'configured',
+            auth_state: 'unknown',
             transport: 'http',
             detail: null,
             active_operation_id: null,
@@ -96,6 +98,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
           }, ...(configured ? [{
             name: serverName,
             state: serverState,
+            auth_state: serverState === 'connected' ? 'authenticated' : 'required',
             transport: 'http',
             detail: null,
             active_operation_id: operationActive ? 'operation-1' : null,
@@ -112,6 +115,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
           server: {
             name: serverName,
             state: serverState,
+            auth_state: serverState === 'connected' ? 'authenticated' : 'required',
             transport: 'http',
             detail: null,
             active_operation_id: operationActive ? 'operation-1' : null,
@@ -169,6 +173,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
           server: {
             name: serverName,
             state: 'needs_auth',
+            auth_state: 'required',
             transport: 'http',
             detail: null,
             active_operation_id: null,
@@ -208,6 +213,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
           server: {
             name: serverName,
             state: 'logged_out',
+            auth_state: 'required',
             transport: null,
             detail: null,
             active_operation_id: null,
@@ -225,6 +231,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
           server: {
             name: serverName,
             state: 'not_configured',
+            auth_state: 'unknown',
             transport: null,
             detail: null,
             active_operation_id: null,
@@ -329,7 +336,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await redirectInput.fill(redirectUrl);
   await serverCard.getByRole('button', { name: '提交并连接' }).click();
   expect(submittedRedirect).toBe(redirectUrl);
-  await expect(serverCard).toContainText('已连接', { timeout: 5000 });
+  await expect(serverCard).toContainText('已认证', { timeout: 5000 });
   expect(await page.evaluate((secret) => Object.values(localStorage).every((value) => !value.includes(secret)), 'private-code')).toBe(true);
 
   await serverCard.getByRole('button', { name: '管理与工具' }).click();
@@ -356,9 +363,9 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await page.getByRole('button', { name: '资源连接器' }).click();
   await expect(serverCard).toBeVisible();
 
-  await serverCard.getByRole('button', { name: 'Logout' }).click();
+  await serverCard.getByRole('button', { name: '退出认证' }).click();
   await expect(serverCard).toContainText('已退出');
-  await expect(serverCard.getByRole('button', { name: '重新连接' })).toBeVisible();
+  await expect(serverCard.getByRole('button', { name: '检测连接' })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 760 });
   await expect(serverCard).toBeVisible();

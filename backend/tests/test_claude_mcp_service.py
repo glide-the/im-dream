@@ -1,13 +1,14 @@
 """Claude MCP operation-service lifecycle and concurrency contracts.
 
 [Input] Static test identities plus the fake CLI/PTTY fixture across success and failure modes.
-[Output] Verified configuration, redirect exchange, cancel, timeout, errors, logout/removal, version gates, idempotency, and conflicts.
+[Output] Verified auth projection, semantic errors, redirect/cancel/timeout, logout/removal, gates, and concurrency.
 [Pos] Provider-free domain integration coverage; no real OAuth or business credential writes.
 [Sync] 2026-08-19: cover the reviewed minimal operation state machine and security boundaries.
 [Sync] 2026-08-19: inject a no-secret projection seam; file synchronization has dedicated tests.
 [Sync] 2026-08-19: verify login avoids historical fan-out and restricted user-scope add/remove.
 [Sync] 2026-08-20: cover localhost browser callback racing with redirect stdin submission.
 [Sync] 2026-08-21: accept remote HTTP and reject removal outside parsed user scope before CLI mutation.
+[Sync] 2026-08-25: cover auth identity projection, semantic login errors, authless removal/logout, and exit-zero verification.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from claude_mcp.contracts import (
+    ClaudeMcpAuthState,
     ClaudeMcpConfigScope,
     ClaudeMcpError,
     ClaudeMcpErrorCode,
@@ -156,6 +158,7 @@ def test_success_writes_redirect_once_clears_secrets_and_verifies_connected(tmp_
         assert (tmp_path / "redirect").read_text(encoding="utf-8") == redirect
         server = await service.get_server("7", "plugin:comfy-cloud:comfy-cloud")
         assert server.state is ClaudeMcpState.CONNECTED
+        assert server.auth_state is ClaudeMcpAuthState.AUTHENTICATED
         try:
             await service.submit_redirect("7", operation.id, redirect)
         except ClaudeMcpError as exc:
@@ -214,6 +217,8 @@ def test_restricted_http_configuration_and_removal_use_user_owned_names(
         )
         assert configured.name == "user-server"
         assert configured.state is ClaudeMcpState.NEEDS_AUTH
+        assert configured.auth_state is ClaudeMcpAuthState.REQUIRED
+        assert configured.transport == "http"
         assert configured.config_scope is ClaudeMcpConfigScope.USER
         assert configured.removable is True
         assert (tmp_path / "configured.json").read_text(encoding="utf-8")
@@ -305,7 +310,7 @@ def test_timeout_nonzero_and_malformed_output_are_distinct_failures(tmp_path: Pa
         await run_case(
             tmp_path / "nonzero",
             "nonzero",
-            ClaudeMcpErrorCode.CLI_FAILED,
+            ClaudeMcpErrorCode.PROCESS_EXITED,
         )
         await run_case(
             tmp_path / "malformed",
@@ -321,8 +326,9 @@ def test_logout_is_verified_and_version_gate_is_fail_closed(tmp_path: Path) -> N
         service = _service(tmp_path / "supported")
         (tmp_path / "supported" / "state").write_text("connected", encoding="utf-8")
         result = await service.logout("7", "server:logout")
-        assert result.state is ClaudeMcpState.LOGGED_OUT
-        assert (tmp_path / "supported" / "state").read_text(encoding="utf-8") == "logged_out"
+        assert result.state is ClaudeMcpState.NEEDS_AUTH
+        assert result.auth_state is ClaudeMcpAuthState.REQUIRED
+        assert (tmp_path / "supported" / "state").read_text(encoding="utf-8") == "needs_auth"
 
         unsupported = _service(
             tmp_path / "unsupported",
@@ -401,5 +407,229 @@ def test_connected_and_logout_fail_closed_when_thread_projection_fails(
             assert exc.code is ClaudeMcpErrorCode.CREDENTIAL_SYNC_FAILED
         else:  # pragma: no cover
             raise AssertionError("logout projection failure was hidden")
+
+    asyncio.run(scenario())
+
+
+def test_server_projection_expands_auth_transport_and_legacy_unknown(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        anonymous_root = tmp_path / "anonymous"
+        anonymous_root.mkdir()
+        anonymous = _service(
+            anonymous_root,
+            CLAUDE_MCP_FAKE_AUTH_STATE="anonymous",
+        )
+        (anonymous_root / "state").write_text("connected", encoding="utf-8")
+        server = await anonymous.get_server("7", "server:anonymous:colon")
+        assert server.state is ClaudeMcpState.CONNECTED
+        assert server.auth_state is ClaudeMcpAuthState.ANONYMOUS
+        assert server.transport == "http"
+        assert server.to_dict()["auth_state"] == "anonymous"
+
+        legacy_root = tmp_path / "legacy"
+        legacy_root.mkdir()
+        legacy = _service(
+            legacy_root,
+            CLAUDE_MCP_FAKE_LEGACY_OUTPUT="1",
+        )
+        (legacy_root / "state").write_text("connected", encoding="utf-8")
+        old_server = await legacy.get_server("7", "official-old")
+        assert old_server.state is ClaudeMcpState.CONNECTED
+        assert old_server.auth_state is ClaudeMcpAuthState.UNKNOWN
+        assert old_server.transport == "http"
+
+        failed_root = tmp_path / "failed"
+        failed_root.mkdir()
+        failed = _service(
+            failed_root,
+            CLAUDE_MCP_FAKE_FAILURE_CODE="network_unreachable",
+        )
+        (failed_root / "state").write_text("unavailable", encoding="utf-8")
+        failed_server = await failed.get_server("7", "server:failed")
+        assert failed_server.state is ClaudeMcpState.FAILED
+        assert failed_server.auth_state is ClaudeMcpAuthState.UNKNOWN
+        assert failed_server.detail == "Claude MCP server is unreachable."
+
+    asyncio.run(scenario())
+
+
+def test_explicit_login_consumes_runtime_semantic_failures_without_secret_leakage(
+    tmp_path: Path,
+) -> None:
+    expected = {
+        "auth_not_required": ClaudeMcpErrorCode.AUTH_NOT_REQUIRED,
+        "auth_not_advertised": ClaudeMcpErrorCode.AUTH_NOT_ADVERTISED,
+        "metadata_invalid": ClaudeMcpErrorCode.AUTH_METADATA_INVALID,
+        "network_unreachable": ClaudeMcpErrorCode.NETWORK_UNREACHABLE,
+        "server_rejected": ClaudeMcpErrorCode.SERVER_REJECTED,
+        "semantic_timeout": ClaudeMcpErrorCode.AUTH_TIMEOUT,
+        "process_exited": ClaudeMcpErrorCode.PROCESS_EXITED,
+    }
+
+    async def scenario() -> None:
+        for behavior, error_code in expected.items():
+            root = tmp_path / behavior
+            root.mkdir()
+            overrides = {"CLAUDE_MCP_FAKE_BEHAVIOR": behavior}
+            if behavior == "auth_not_required":
+                overrides["CLAUDE_MCP_FAKE_AUTH_STATE"] = "anonymous"
+                overrides["CLAUDE_MCP_FAKE_DEFAULT_STATE"] = "connected"
+            elif behavior == "auth_not_advertised":
+                overrides["CLAUDE_MCP_FAKE_DEFAULT_STATE"] = "configured"
+            elif behavior == "network_unreachable":
+                overrides["CLAUDE_MCP_FAKE_DEFAULT_STATE"] = "unavailable"
+            service = _service(root, **overrides)
+            operation = await service.start_auth("7", f"server:{behavior}")
+            await _wait_terminal(operation)
+            assert operation.state is ClaudeMcpState.FAILED
+            assert operation.error_code == error_code.value
+            serialized = repr(operation.to_dict())
+            assert "fixture-secret" not in serialized
+            assert "refresh_token" not in serialized
+            await service.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_exit_zero_without_authorization_url_accepts_only_authenticated_truth(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        authenticated_root = tmp_path / "authenticated"
+        authenticated_root.mkdir()
+        service = _service(
+            authenticated_root,
+            CLAUDE_MCP_FAKE_BEHAVIOR="exit0_authenticated",
+        )
+        operation = await service.start_auth("7", "server:already-authenticated")
+        await _wait_terminal(operation)
+        assert operation.state is ClaudeMcpState.CONNECTED
+        assert operation.error_code is None
+        await service.shutdown()
+
+        anonymous_root = tmp_path / "anonymous"
+        anonymous_root.mkdir()
+        anonymous = _service(
+            anonymous_root,
+            CLAUDE_MCP_FAKE_BEHAVIOR="exit0_authenticated",
+            CLAUDE_MCP_FAKE_AUTH_STATE="anonymous",
+        )
+        anonymous_operation = await anonymous.start_auth("7", "server:anonymous")
+        await _wait_terminal(anonymous_operation)
+        assert anonymous_operation.state is ClaudeMcpState.FAILED
+        assert (
+            anonymous_operation.error_code
+            == ClaudeMcpErrorCode.MALFORMED_CLI_OUTPUT.value
+        )
+        await anonymous.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_callback_verification_rejects_explicit_anonymous_truth_but_keeps_legacy_rollback(
+    tmp_path: Path,
+) -> None:
+    async def complete(root: Path, **overrides: str):
+        root.mkdir()
+        service = _service(root, **overrides)
+        operation = await service.start_auth("7", "server:callback-verification")
+        assert operation.state is ClaudeMcpState.WAITING_FOR_USER
+        await service.submit_redirect(
+            "7",
+            operation.id,
+            "https://callback.example.test/done?code=private&state=private",
+        )
+        await _wait_terminal(operation)
+        await service.shutdown()
+        return operation
+
+    async def scenario() -> None:
+        anonymous = await complete(
+            tmp_path / "anonymous",
+            CLAUDE_MCP_FAKE_AUTH_STATE="anonymous",
+        )
+        assert anonymous.state is ClaudeMcpState.FAILED
+        assert anonymous.error_code == ClaudeMcpErrorCode.CLI_FAILED.value
+
+        legacy = await complete(
+            tmp_path / "legacy",
+            CLAUDE_MCP_FAKE_LEGACY_OUTPUT="1",
+        )
+        assert legacy.state is ClaudeMcpState.CONNECTED
+        assert legacy.error_code is None
+
+    asyncio.run(scenario())
+
+
+def test_logout_and_remove_trust_authless_or_protected_runtime_truth(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        protected_root = tmp_path / "protected"
+        protected_root.mkdir()
+        protected = _service(protected_root)
+        (protected_root / "state").write_text("connected", encoding="utf-8")
+        logged_out = await protected.logout("7", "server:protected")
+        assert logged_out.state is ClaudeMcpState.NEEDS_AUTH
+        assert logged_out.auth_state is ClaudeMcpAuthState.REQUIRED
+
+        anonymous_root = tmp_path / "anonymous"
+        anonymous_root.mkdir()
+        anonymous = _service(
+            anonymous_root,
+            CLAUDE_MCP_FAKE_AUTH_STATE="anonymous",
+            CLAUDE_MCP_FAKE_LOGOUT_FAILURE_CODE="auth_not_required",
+        )
+        (anonymous_root / "state").write_text("connected", encoding="utf-8")
+        still_connected = await anonymous.logout("7", "server:anonymous")
+        assert still_connected.state is ClaudeMcpState.CONNECTED
+        assert still_connected.auth_state is ClaudeMcpAuthState.ANONYMOUS
+
+        removable_root = tmp_path / "removable"
+        removable_root.mkdir()
+        removable = _service(
+            removable_root,
+            CLAUDE_MCP_FAKE_AUTH_STATE="anonymous",
+            CLAUDE_MCP_FAKE_LOGOUT_FAILURE_CODE="auth_not_required",
+        )
+        (removable_root / "state").write_text("connected", encoding="utf-8")
+        removed = await removable.remove_server("7", "server:anonymous:colon")
+        assert removed.state is ClaudeMcpState.NOT_CONFIGURED
+        assert (removable_root / "removed").read_text(encoding="utf-8") == "server:anonymous:colon"
+
+        authenticated_root = tmp_path / "authenticated"
+        authenticated_root.mkdir()
+        authenticated = _service(
+            authenticated_root,
+            CLAUDE_MCP_FAKE_LOGOUT_FAILURE_CODE="server_rejected",
+        )
+        (authenticated_root / "state").write_text("connected", encoding="utf-8")
+        try:
+            await authenticated.remove_server("7", "server:authenticated")
+        except ClaudeMcpError as exc:
+            assert exc.code is ClaudeMcpErrorCode.SERVER_REJECTED
+        else:  # pragma: no cover
+            raise AssertionError("authenticated removal ignored logout failure")
+        assert not (authenticated_root / "removed").exists()
+
+    asyncio.run(scenario())
+
+
+def test_explicit_login_rejects_disabled_state_but_allows_user_discovery(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        disabled = _service(
+            tmp_path,
+            CLAUDE_MCP_FAKE_DEFAULT_STATE="disabled",
+        )
+        try:
+            await disabled.start_auth("7", "server:disabled")
+        except ClaudeMcpError as exc:
+            assert exc.code is ClaudeMcpErrorCode.OPERATION_CONFLICT
+        else:  # pragma: no cover
+            raise AssertionError("disabled server accepted login")
 
     asyncio.run(scenario())

@@ -1,10 +1,11 @@
 // [Input] Claude MCP API capability/configuration/server/operation DTOs and shared design tokens/icons.
-// [Output] Restricted HTTP(S) configuration, scope-aware discovery, detail navigation, browser OAuth handoff, recovery, logout, and removal UI.
+// [Output] Runtime-gated HTTP(S) discovery, anonymous/authenticated feedback, detail navigation, browser OAuth handoff, recovery, logout, and removal UI.
 // [Pos] `claude-mcp` feature surface embedded by the Settings Resources page.
 // [Sync] 2026-08-19: add the reviewed minimal MCP resource connector interaction.
 // [Sync] 2026-08-19: enable user-owned HTTPS add/remove and correct the cross-platform capability message.
 // [Sync] 2026-08-20: add the Notion-style server detail handoff for tool inventory and metadata.
 // [Sync] 2026-08-21: accept absolute HTTP(S) URLs and remove only backend-confirmed user-scope servers.
+// [Sync] 2026-08-25: gate authentication actions on authoritative connection/auth state, expose anonymous connectivity, and let backend removability govern every non-active server.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -17,7 +18,9 @@ import {
   removeClaudeMcpServer,
   startClaudeMcpAuth,
   submitClaudeMcpRedirect,
+  ClaudeMcpApiError,
   type ClaudeMcpCapability,
+  type ClaudeMcpAuthState,
   type ClaudeMcpConfigScope,
   type ClaudeMcpOperation,
   type ClaudeMcpServer,
@@ -54,6 +57,53 @@ const SCOPE_LABELS: Record<ClaudeMcpConfigScope, string> = {
   plugin: '插件配置',
   unknown: '来源未知',
 };
+
+const AUTH_STATE_LABELS: Record<ClaudeMcpAuthState, string> = {
+  anonymous: '匿名连接，无需 OAuth',
+  required: '需要认证',
+  authenticated: '已认证',
+  unknown: '认证状态未知',
+};
+
+function authStateOf(server: ClaudeMcpServer): ClaudeMcpAuthState {
+  return server.auth_state ?? 'unknown';
+}
+
+function serverStatusLabel(server: ClaudeMcpServer, state: ClaudeMcpState): string {
+  if (state === 'connected') return AUTH_STATE_LABELS[authStateOf(server)];
+  if (state === 'configured' && authStateOf(server) === 'unknown') return '已配置，等待检测连接';
+  return STATE_LABELS[state];
+}
+
+function canStartAuth(server: ClaudeMcpServer, state: ClaudeMcpState): boolean {
+  const authState = authStateOf(server);
+  return (state === 'needs_auth' && authState === 'required')
+    || (state === 'connected' && (authState === 'anonymous' || authState === 'authenticated'));
+}
+
+function canLogout(server: ClaudeMcpServer, state: ClaudeMcpState): boolean {
+  const authState = authStateOf(server);
+  return state === 'connected' && (authState === 'authenticated' || authState === 'unknown');
+}
+
+function canDetectConnection(server: ClaudeMcpServer, state: ClaudeMcpState): boolean {
+  return state === 'configured'
+    || state === 'failed'
+    || state === 'logged_out'
+    || (state === 'needs_auth' && authStateOf(server) === 'unknown');
+}
+
+function safeApiErrorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof ClaudeMcpApiError
+    ? `${cause.message}（${cause.code}）`
+    : fallback;
+}
+
+function safeOperationError(operation: ClaudeMcpOperation): string | null {
+  return operation.error
+    ? `${operation.error.message}（${operation.error.code}）`
+    : null;
+}
 
 function actionButton(primary = false): React.CSSProperties {
   return {
@@ -130,7 +180,7 @@ export default function ClaudeMcpResourceSection({
         ...Object.fromEntries(recovered.map((operation) => [operation.id, operation])),
       }));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Claude MCP 状态读取失败');
+      setError(safeApiErrorMessage(cause, 'Claude MCP 状态读取失败'));
     } finally {
       setLoading(false);
     }
@@ -161,20 +211,21 @@ export default function ClaudeMcpResourceSection({
           }
         })
         .catch((cause: unknown) => {
-          setError(cause instanceof Error ? cause.message : '认证状态刷新失败');
+          setError(safeApiErrorMessage(cause, '认证状态刷新失败'));
         });
     }, OPERATION_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [activeOperationIds, load]);
 
-  const start = async (serverName: string) => {
-    setBusyServer(serverName);
+  const start = async (server: ClaudeMcpServer, state: ClaudeMcpState) => {
+    if (!canStartAuth(server, state)) return;
+    setBusyServer(server.name);
     setError(null);
     try {
-      const operation = await startClaudeMcpAuth(serverName);
+      const operation = await startClaudeMcpAuth(server.name);
       setOperations((current) => ({ ...current, [operation.id]: operation }));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '认证启动失败');
+      setError(safeApiErrorMessage(cause, '认证启动失败'));
     } finally {
       setBusyServer(null);
     }
@@ -198,7 +249,7 @@ export default function ClaudeMcpResourceSection({
       setServerName('');
       setServerUrl('');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'MCP 服务配置失败');
+      setError(safeApiErrorMessage(cause, 'MCP 服务配置失败'));
     } finally {
       setConfiguring(false);
     }
@@ -217,7 +268,7 @@ export default function ClaudeMcpResourceSection({
       setOperations((current) => ({ ...current, [next.id]: next }));
       setRedirects((current) => ({ ...current, [operation.id]: '' }));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'redirect URL 提交失败');
+      setError(safeApiErrorMessage(cause, 'redirect URL 提交失败'));
     } finally {
       setBusyServer(null);
     }
@@ -232,7 +283,7 @@ export default function ClaudeMcpResourceSection({
       setRedirects((current) => ({ ...current, [operation.id]: '' }));
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '认证取消失败');
+      setError(safeApiErrorMessage(cause, '认证取消失败'));
     } finally {
       setBusyServer(null);
     }
@@ -248,7 +299,7 @@ export default function ClaudeMcpResourceSection({
         Object.entries(current).filter(([, operation]) => operation.server_name !== serverName),
       ));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '退出认证失败');
+      setError(safeApiErrorMessage(cause, '退出认证失败'));
     } finally {
       setBusyServer(null);
     }
@@ -264,7 +315,7 @@ export default function ClaudeMcpResourceSection({
         Object.entries(current).filter(([, operation]) => operation.server_name !== name),
       ));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'MCP 服务移除失败');
+      setError(safeApiErrorMessage(cause, 'MCP 服务移除失败'));
     } finally {
       setBusyServer(null);
     }
@@ -277,7 +328,7 @@ export default function ClaudeMcpResourceSection({
           Claude MCP 资源
         </h3>
         <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-          发现 Claude Code 已配置的 MCP 服务；浏览器授权完成后，将地址栏中的完整 redirect URL 粘贴回来。
+          发现 Claude Code 已配置的 MCP 服务；Runtime 会先检测连接，仅在服务明确要求或你主动尝试时进入浏览器授权。
         </p>
       </div>
 
@@ -307,7 +358,7 @@ export default function ClaudeMcpResourceSection({
           <div>
             <strong style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>添加远程 MCP 服务</strong>
             <p style={{ margin: '0.22rem 0 0', fontSize: '0.73rem', lineHeight: 1.5, color: 'var(--color-text-secondary)' }}>
-              接受完整 HTTP 或 HTTPS 服务地址；认证凭证由 Claude Code 的用户级安全存储管理。
+              接受完整 HTTP 或 HTTPS 服务地址；添加后会检测匿名连接，需要 OAuth 时再由 Claude Code 的用户级安全存储管理凭证。
             </p>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 0.7fr) minmax(12rem, 1.3fr)', gap: '0.55rem' }}>
@@ -350,14 +401,16 @@ export default function ClaudeMcpResourceSection({
 
       {capability?.enabled && !loading && servers.length === 0 ? (
         <div style={{ border: '1px dashed var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-          尚未配置 MCP 服务。添加 HTTP(S) 服务后即可开始 Claude Code 正式 OAuth 认证。
+          尚未配置 MCP 服务。添加 HTTP(S) 服务后将先检测连接；只有服务明确要求时才会提供 OAuth 认证。
         </div>
       ) : null}
 
       <div style={{ display: 'grid', gap: '0.72rem' }}>
         {servers.map((server) => {
           const operation = operationFor(operations, server);
-          const state = operation?.state ?? server.state;
+          const state = operation && ACTIVE_STATES.includes(operation.state)
+            ? operation.state
+            : server.state;
           const isBusy = busyServer === server.name || ACTIVE_STATES.includes(state);
           return (
             <article key={server.name} aria-label={`MCP 服务 ${server.name}`} style={{ border: '1px solid var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', background: 'var(--color-bg-surface-solid)', display: 'grid', gap: '0.72rem' }}>
@@ -376,7 +429,7 @@ export default function ClaudeMcpResourceSection({
                       <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.name}</strong>
                       <span style={{ marginTop: '0.25rem', display: 'flex', gap: '0.3rem', alignItems: 'center', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : state === 'failed' ? 'var(--color-state-error)' : 'var(--color-text-muted)' }}>
                         {state === 'connected' ? <IconCheck style={{ width: '0.78rem', height: '0.78rem' }} /> : state === 'failed' ? <IconX style={{ width: '0.78rem', height: '0.78rem' }} /> : null}
-                        {STATE_LABELS[state]} · {SCOPE_LABELS[server.config_scope || 'unknown']}
+                        {serverStatusLabel(server, state)} · {SCOPE_LABELS[server.config_scope || 'unknown']}
                       </span>
                     </span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.28rem', color: 'var(--color-action-link)', fontSize: '0.74rem', fontWeight: 700, flexShrink: 0 }}>
@@ -391,19 +444,26 @@ export default function ClaudeMcpResourceSection({
                     </span>
                     <div style={{ minWidth: 0 }}>
                       <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{server.name}</strong>
-                      <div style={{ marginTop: '0.25rem', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : 'var(--color-text-muted)' }}>{STATE_LABELS[state]} · {SCOPE_LABELS[server.config_scope || 'unknown']}</div>
+                      <div style={{ marginTop: '0.25rem', fontSize: '0.73rem', color: state === 'connected' ? 'var(--color-state-success)' : 'var(--color-text-muted)' }}>{serverStatusLabel(server, state)} · {SCOPE_LABELS[server.config_scope || 'unknown']}</div>
                     </div>
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                  {state === 'connected' ? (
+                  {canLogout(server, state) ? (
                     <button type="button" onClick={() => void logout(server.name)} disabled={busyServer === server.name} style={actionButton()}>
-                      Logout
+                      退出认证
                     </button>
                   ) : null}
-                  {!ACTIVE_STATES.includes(state) && state !== 'connected' ? (
-                    <button type="button" onClick={() => void start(server.name)} disabled={busyServer === server.name} style={actionButton(true)}>
-                      {state === 'failed' || state === 'logged_out' ? '重新连接' : '开始认证'}
+                  {canStartAuth(server, state) && !ACTIVE_STATES.includes(state) ? (
+                    <button type="button" onClick={() => void start(server, state)} disabled={busyServer === server.name} style={actionButton(true)}>
+                      {state === 'connected' && authStateOf(server) === 'anonymous'
+                        ? '尝试认证'
+                        : state === 'connected' ? '重新认证' : '开始认证'}
+                    </button>
+                  ) : null}
+                  {canDetectConnection(server, state) && !ACTIVE_STATES.includes(state) ? (
+                    <button type="button" onClick={() => void load()} disabled={loading || busyServer === server.name} style={actionButton(state === 'failed')}>
+                      {state === 'failed' ? '重试状态探测' : '检测连接'}
                     </button>
                   ) : null}
                   {operation && ACTIVE_STATES.includes(operation.state) ? (
@@ -411,7 +471,7 @@ export default function ClaudeMcpResourceSection({
                       取消
                     </button>
                   ) : null}
-                  {server.removable && !ACTIVE_STATES.includes(state) && state !== 'connected' ? (
+                  {server.removable && !ACTIVE_STATES.includes(state) ? (
                     <button type="button" onClick={() => void remove(server.name)} disabled={busyServer === server.name} style={actionButton()}>
                       移除
                     </button>
@@ -455,9 +515,9 @@ export default function ClaudeMcpResourceSection({
                 </div>
               ) : null}
 
-              {operation?.error ? (
+              {operation && safeOperationError(operation) ? (
                 <div role="alert" style={{ fontSize: '0.75rem', color: 'var(--color-state-error)' }}>
-                  {operation.error.message}
+                  {safeOperationError(operation)}
                 </div>
               ) : null}
             </article>

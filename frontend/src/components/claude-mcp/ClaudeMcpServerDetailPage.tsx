@@ -1,7 +1,8 @@
 // [Input] One actor-owned Claude MCP server name, typed claude-mcp APIs, and Settings navigation callbacks.
-// [Output] Notion-aligned MCP detail workbench with live status, OAuth actions, and searchable read-only tool inventory.
+// [Output] Notion-aligned MCP detail workbench with Runtime-gated auth actions, anonymous feedback, and searchable read-only tool inventory.
 // [Pos] Server detail surface in the frontend claude-mcp business domain.
 // [Sync] 2026-08-20: add public-SDK tool discovery without `/mcp` TUI parsing or remote tool execution.
+// [Sync] 2026-08-25: separate anonymous, required, authenticated, and rollback-compatible unknown auth actions.
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
@@ -14,7 +15,9 @@ import {
   removeClaudeMcpServer,
   startClaudeMcpAuth,
   submitClaudeMcpRedirect,
+  ClaudeMcpApiError,
   type ClaudeMcpCapability,
+  type ClaudeMcpAuthState,
   type ClaudeMcpOperation,
   type ClaudeMcpServer,
   type ClaudeMcpServerInventory,
@@ -71,8 +74,75 @@ const STATE_LABELS: Record<ClaudeMcpState, string> = {
   disabled: '已禁用',
 };
 
+const AUTH_STATE_LABELS: Record<ClaudeMcpAuthState, string> = {
+  anonymous: '匿名连接，无需 OAuth',
+  required: '需要认证',
+  authenticated: '已认证',
+  unknown: '认证状态未知',
+};
+
+function authStateOf(server: ClaudeMcpServer | null): ClaudeMcpAuthState {
+  return server?.auth_state ?? 'unknown';
+}
+
+function canStartAuth(server: ClaudeMcpServer | null, state: ClaudeMcpState | undefined): boolean {
+  const authState = authStateOf(server);
+  return (state === 'needs_auth' && authState === 'required')
+    || (state === 'connected' && (authState === 'anonymous' || authState === 'authenticated'));
+}
+
+function canLogout(server: ClaudeMcpServer | null, state: ClaudeMcpState | undefined): boolean {
+  const authState = authStateOf(server);
+  return state === 'connected' && (authState === 'authenticated' || authState === 'unknown');
+}
+
+function canDetectConnection(server: ClaudeMcpServer | null, state: ClaudeMcpState | undefined): boolean {
+  return state === 'configured'
+    || state === 'failed'
+    || state === 'logged_out'
+    || (state === 'needs_auth' && authStateOf(server) === 'unknown');
+}
+
+function connectionStateLabel(server: ClaudeMcpServer | null, state: ClaudeMcpState | undefined): string {
+  if (state === 'connected' && authStateOf(server) === 'anonymous') return '已匿名连接';
+  if (state === 'connected' && authStateOf(server) === 'authenticated') return '已认证连接';
+  return state ? STATE_LABELS[state] : '状态未知';
+}
+
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+  return error instanceof ClaudeMcpApiError
+    ? `${error.message}（${error.code}）`
+    : fallback;
+}
+
+function operationErrorMessage(operation: ClaudeMcpOperation): string | null {
+  return operation.error
+    ? `${operation.error.message}（${operation.error.code}）`
+    : null;
+}
+
+function connectionSummary(
+  server: ClaudeMcpServer | null,
+  state: ClaudeMcpState | undefined,
+  toolCount: number | undefined,
+): string {
+  const count = toolCount ?? '—';
+  if (state === 'connected' && authStateOf(server) === 'anonymous') {
+    return `已匿名连接，无需 OAuth；已发现 ${count} 个工具，可供 Chat 会话使用。`;
+  }
+  if (state === 'connected' && authStateOf(server) === 'authenticated') {
+    return `已通过认证连接；已发现 ${count} 个工具，可供 Chat 会话使用。`;
+  }
+  if (state === 'connected') {
+    return `连接可用；已发现 ${count} 个工具。认证状态由 Runtime 回报为未知。`;
+  }
+  if (state === 'needs_auth' && authStateOf(server) === 'required') {
+    return '服务已明确要求认证，完成 OAuth 后可继续检测工具能力。';
+  }
+  if (state === 'failed') {
+    return '连接探测失败。请先重试状态探测；此状态不会自动启动 OAuth。';
+  }
+  return '先检测 MCP 连接；只有 Runtime 明确报告需要认证时才会启动 OAuth。';
 }
 
 function formatDateTime(value?: string): string {
@@ -352,7 +422,7 @@ export default function ClaudeMcpServerDetailPage({
   }, [load, operation]);
 
   const startAuth = useCallback(async () => {
-    if (busyAction) return;
+    if (busyAction || !canStartAuth(server, effectiveState)) return;
     setBusyAction('auth');
     setPageError(null);
     try {
@@ -362,7 +432,7 @@ export default function ClaudeMcpServerDetailPage({
     } finally {
       setBusyAction(null);
     }
-  }, [busyAction, serverName]);
+  }, [busyAction, effectiveState, server, serverName]);
 
   const submitRedirect = useCallback(async () => {
     if (!operation || !redirectUrl.trim() || busyAction) return;
@@ -398,19 +468,24 @@ export default function ClaudeMcpServerDetailPage({
     setBusyAction('logout');
     setPageError(null);
     try {
-      setServer(await logoutClaudeMcpServer(serverName));
+      const nextServer = await logoutClaudeMcpServer(serverName);
+      setServer(nextServer);
       setOperation(null);
-      setInventory(null);
+      if (nextServer.state === 'connected') {
+        await loadInventory();
+      } else {
+        setInventory(null);
+      }
     } catch (error) {
       setPageError(errorMessage(error, '退出认证失败'));
     } finally {
       setBusyAction(null);
     }
-  }, [busyAction, serverName]);
+  }, [busyAction, loadInventory, serverName]);
 
   const remove = useCallback(async () => {
-    if (busyAction || serverName.startsWith('plugin:')) return;
-    if (!window.confirm(`移除 MCP 服务“${serverName}”？此操作会同时撤销该服务的认证。`)) return;
+    if (busyAction || !server?.removable) return;
+    if (!window.confirm(`移除 MCP 服务“${serverName}”？此操作会移除服务配置和已保存的认证信息（如有）。`)) return;
     setBusyAction('remove');
     setPageError(null);
     try {
@@ -421,7 +496,7 @@ export default function ClaudeMcpServerDetailPage({
     } finally {
       setBusyAction(null);
     }
-  }, [busyAction, onBack, serverName]);
+  }, [busyAction, onBack, server, serverName]);
 
   const tabCounts = {
     tools: inventory?.capabilities.tools.count,
@@ -476,13 +551,11 @@ export default function ClaudeMcpServerDetailPage({
                     </h1>
                     <Pill tone={stateTone(effectiveState)}>
                       <span aria-hidden="true" style={{ width: '0.4rem', height: '0.4rem', borderRadius: '999px', background: statusPalette.color }} />
-                      {effectiveState ? STATE_LABELS[effectiveState] : '状态未知'}
+                      {connectionStateLabel(server, effectiveState)}
                     </Pill>
                   </div>
                   <p style={{ margin: '0.28rem 0 0', maxWidth: '48rem', color: 'var(--color-text-secondary)', fontSize: '0.78rem', lineHeight: 1.5 }}>
-                    {effectiveState === 'connected'
-                      ? `${inventory?.tool_count ?? '—'} 个工具已由同一用户凭证身份发现，可供 Chat 会话使用。`
-                      : '完成 Claude Code 正式 OAuth 后，工具会通过同一用户身份交付给 Chat。'}
+                    {connectionSummary(server, effectiveState, inventory?.tool_count)}
                   </p>
                 </>
               )}
@@ -491,19 +564,27 @@ export default function ClaudeMcpServerDetailPage({
 
           {!loading ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: isMobile ? 'flex-start' : 'flex-end' }}>
-              {!effectiveState || !ACTIVE_STATES.includes(effectiveState) ? (
+              {canStartAuth(server, effectiveState) && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
                 <button type="button" onClick={() => void startAuth()} disabled={Boolean(busyAction)} style={{ ...actionStyle(true), opacity: busyAction ? 0.62 : 1 }}>
                   {busyAction === 'auth' ? <IconLoader style={{ width: '0.88rem', height: '0.88rem' }} /> : <IconShare style={{ width: '0.88rem', height: '0.88rem' }} />}
-                  {effectiveState === 'connected' ? '重新认证' : '开始认证'}
+                  {effectiveState === 'connected' && authStateOf(server) === 'anonymous'
+                    ? '尝试认证'
+                    : effectiveState === 'connected' ? '重新认证' : '开始认证'}
                 </button>
               ) : null}
-              {effectiveState === 'connected' ? (
+              {canLogout(server, effectiveState) ? (
                 <button type="button" onClick={() => void logout()} disabled={Boolean(busyAction)} style={{ ...actionStyle(false, true), opacity: busyAction ? 0.62 : 1 }}>
                   {busyAction === 'logout' ? <IconLoader style={{ width: '0.88rem', height: '0.88rem' }} /> : <IconX style={{ width: '0.88rem', height: '0.88rem' }} />}
-                  Logout
+                  退出认证
                 </button>
               ) : null}
-              {!serverName.startsWith('plugin:') && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
+              {canDetectConnection(server, effectiveState) && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
+                <button type="button" onClick={() => void load()} disabled={Boolean(busyAction) || loading} style={{ ...actionStyle(effectiveState === 'failed'), opacity: busyAction || loading ? 0.62 : 1 }}>
+                  {loading ? <IconLoader style={{ width: '0.88rem', height: '0.88rem' }} /> : <IconShare style={{ width: '0.88rem', height: '0.88rem' }} />}
+                  {effectiveState === 'failed' ? '重试状态探测' : '检测连接'}
+                </button>
+              ) : null}
+              {server?.removable && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
                 <button type="button" onClick={() => void remove()} disabled={Boolean(busyAction)} style={{ ...actionStyle(false, true), opacity: busyAction ? 0.62 : 1 }}>
                   <IconTrash style={{ width: '0.88rem', height: '0.88rem' }} />
                   移除
@@ -515,7 +596,8 @@ export default function ClaudeMcpServerDetailPage({
 
         {!loading ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
-            <InfoChip label="授权" value={effectiveState ? STATE_LABELS[effectiveState] : '未知'} />
+            <InfoChip label="认证" value={AUTH_STATE_LABELS[authStateOf(server)]} />
+            <InfoChip label="连接" value={effectiveState ? STATE_LABELS[effectiveState] : '未知'} />
             <InfoChip label="CLI" value={capability?.cli_version ?? '未验证'} />
             <InfoChip label="配置" value={`${inventory?.config_scope ?? 'user'} · ${inventory?.runtime_scope ?? '等待探测'}`} />
             <InfoChip label="传输" value={inventory?.transport ?? server?.transport ?? '未报告'} />
@@ -640,7 +722,7 @@ export default function ClaudeMcpServerDetailPage({
               </div>
             ) : null}
             {!inventoryLoading && !inventoryError && effectiveState !== 'connected' ? (
-              <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>连接并认证此 MCP server 后才能读取工具清单。</div>
+              <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>MCP 连接成功后即可读取工具清单；是否需要认证由 Runtime 探测结果决定。</div>
             ) : null}
             {!inventoryLoading && inventory && visibleTools.length === 0 ? (
               <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
@@ -659,7 +741,7 @@ export default function ClaudeMcpServerDetailPage({
         )}
       </DetailSection>
 
-      {operation?.error ? <div role="alert" style={{ color: 'var(--color-state-error)', fontSize: '0.78rem' }}>{operation.error.message}</div> : null}
+      {operation && operationErrorMessage(operation) ? <div role="alert" style={{ color: 'var(--color-state-error)', fontSize: '0.78rem' }}>{operationErrorMessage(operation)}</div> : null}
       {inventory?.server_info ? (
         <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
           <span>Server info</span>
