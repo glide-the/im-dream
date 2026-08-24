@@ -1,7 +1,7 @@
 <!-- [输入] Dream SDK options、Runtime resolver、thread Workspace/TMPDIR、用户 SDK 环境和启动资格门。 -->
 <!-- [输出] 定义 Claude SDK 子进程环境、config home、临时根、Runtime 选择与回滚合同。 -->
 <!-- [定位] Claude Agent SDK 环境与进程启动设计真相源。 -->
-<!-- [同步] 2026-08-24：记录 SDK main@6164bd91、Runtime main@7c34e6cd 与公开 npm 多平台 Runtime；standalone 不依赖 ambient Bun。 -->
+<!-- [同步] 2026-08-24：记录 SDK 0.2.143 正式 PyPI 版本/哈希锁、Runtime main@7c34e6cd 与公开 npm 多平台 Runtime；standalone 不依赖 ambient Bun。 -->
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
 > **[同步] 2026-05-24**：迁移请求级模型覆盖开关：`PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` → `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`；新 key 加入 `sdk_env.py` 白名单；旧 key 同时保留作为 fallback。
@@ -16,9 +16,10 @@
 > 门禁的 `ink-claude-code-dream==0.1.0`。`CLAUDE_CODE_CLI_PATH` 是唯一显式
 > 绝对覆盖与官方 CLI 回滚入口；不再回退 ambient `claude` 或 SDK bundled CLI。
 > **[同步] 2026-08-24**：Python 依赖文件把
-> `ink-claude-dream-agent-sdk==0.2.143` 固定到 Git commit
-> `6164bd91e43bbf610ec40b4500edec18a97ce665`，并排除 official
-> `claude-agent-sdk`。Docker 验证 metadata/import 所有权，只保留显式官方
+> `ink-claude-dream-agent-sdk==0.2.143` 固定到正式 PyPI 精确版本，
+> `uv.lock`/`requirements.txt` 记录 wheel 与 sdist SHA-256，Docker 使用
+> `--require-hashes`，并排除 official `claude-agent-sdk`。源码身份仍由不可变
+> `v0.2.143@6164bd91e43bbf610ec40b4500edec18a97ce665` 绑定。Docker 验证 metadata/import 所有权，只保留显式官方
 > CLI 回滚物。Runtime PR #5/#6 已合并到 `main@7c34e6cd` 并公开发布五个 npm 包；本机已从 registry 全新安装通过生产资格门的 clean-room
 > `@glide-the/ink-claude-code-dream@0.1.0` selector 与 darwin-arm64 平台包，
 > 默认 PATH 解析、FastAPI 启动和真实 Comfy MCP 两轮 resume 均通过。
@@ -232,8 +233,9 @@ Dream 只保留一条 Agent 业务路径：`server.py` 在 Agent factory 启动�
 `claude-code-stream-json/v1`，并声明以下 13 项能力：streaming、双向 control、
 session resume、JSONL transcript、workspace cwd、thread-local TMPDIR、sandbox、
 MCP stdio/HTTP/OAuth/management identity、plugins 和 cancel。只透明委托官方 core
-或缺少任一能力的 envelope 不满足门禁。Python SDK 已使用不可变 Git commit
-`6164bd91e43bbf610ec40b4500edec18a97ce665` 原子切换到自有 distribution。
+或缺少任一能力的 envelope 不满足门禁。Python SDK 已从正式 PyPI 按精确版本与
+SHA-256 锁原子切换到自有 distribution；源码发布身份为不可变
+`v0.2.143@6164bd91e43bbf610ec40b4500edec18a97ce665`，安装环境不再带 Git `direct_url.json`。
 
 当前本机默认 Runtime 是 clean-room `@glide-the/ink-claude-code-dream@0.1.0`：
 源码只来自 Runtime 仓库自有 MIT `src/cleanroom/` 和兼容许可证依赖，

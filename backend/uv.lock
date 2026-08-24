@@ -759,7 +759,7 @@ requires-dist = [
     { name = "eval-type-backport", specifier = ">=0.2,<1" },
     { name = "fastapi", specifier = ">=0.110,<1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28,<0.29" },
-    { name = "ink-claude-dream-agent-sdk", git = "https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git?rev=6164bd91e43bbf610ec40b4500edec18a97ce665" },
+    { name = "ink-claude-dream-agent-sdk", specifier = "==0.2.143" },
     { name = "itsdangerous", specifier = ">=2.2,<3" },
     { name = "json-repair", specifier = ">=0.35,<1" },
     { name = "mcp", specifier = ">=1.27.0" },
@@ -781,12 +781,16 @@ requires-dist = [
 [[package]]
 name = "ink-claude-dream-agent-sdk"
 version = "0.2.143"
-source = { git = "https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git?rev=6164bd91e43bbf610ec40b4500edec18a97ce665#6164bd91e43bbf610ec40b4500edec18a97ce665" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "sniffio" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d0/d4/e546e8f8f4467d77677e440b7691074a89c46a2793879a56e7e3b5340b90/ink_claude_dream_agent_sdk-0.2.143.tar.gz", hash = "sha256:e2b62792d70b02fd7da92988f73356a92eb544ec1570401a76f8ac0b056e2946", size = 372447, upload-time = "2026-08-24T13:32:16.31Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/83/7e/4b532a7b04800e06ff26e225a6519fb743a77c3a04609e3a505d6189761d/ink_claude_dream_agent_sdk-0.2.143-py3-none-any.whl", hash = "sha256:e64ea7bf468a6911dfc3ab40f09e42245e203fc78712bd2919c70cc77a27bcd1", size = 151684, upload-time = "2026-08-24T13:32:14.828Z" },
 ]
 
 [[package]]

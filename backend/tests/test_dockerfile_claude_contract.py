@@ -3,24 +3,21 @@
 #          Dream Runtime and explicit official rollback CLI remain atomically
 #          pinned without SDK overlap.
 # [Pos] Docker/dependency release contract tests.
-# [Sync] 2026-08-24: lock custom SDK 0.2.143 at SDK main commit 6164bd91,
-#        install public Runtime selector 0.1.0 by default, and retain the
-#        Docker-only explicit official rollback artifact 2.1.241.
+# [Sync] 2026-08-24: install custom SDK 0.2.143 from PyPI with an exact
+#        hash-locked export, install public Runtime selector 0.1.0 by default,
+#        and retain the Docker-only official rollback artifact 2.1.241.
 
 from __future__ import annotations
 
 import tomllib
 from pathlib import Path
 
+from packaging.requirements import Requirement
+
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-SDK_COMMIT = "6164bd91e43bbf610ec40b4500edec18a97ce665"
-SDK_REQUIREMENT = (
-    "ink-claude-dream-agent-sdk @ "
-    "git+https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git@"
-    f"{SDK_COMMIT}"
-)
 SDK_VERSION = "0.2.143"
+SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
 RUNTIME_VERSION = "0.1.0"
 
@@ -33,7 +30,7 @@ def test_dependency_manifests_lock_only_custom_sdk() -> None:
     pyproject = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text())
     dependencies = pyproject["project"]["dependencies"]
     normalized_dependencies = {
-        _normalized_distribution_name(dependency.split(maxsplit=1)[0])
+        _normalized_distribution_name(Requirement(dependency).name)
         for dependency in dependencies
     }
     assert SDK_REQUIREMENT in dependencies
@@ -42,6 +39,8 @@ def test_dependency_manifests_lock_only_custom_sdk() -> None:
 
     requirements = (BACKEND_ROOT / "requirements.txt").read_text()
     assert SDK_REQUIREMENT in requirements
+    assert "git+https://github.com/glide-the/ink-claude-dream-agent-sdk-python" not in requirements
+    assert "--hash=sha256:" in requirements
     assert "\nclaude-agent-sdk" not in requirements
 
     lock = tomllib.loads((BACKEND_ROOT / "uv.lock").read_text())
@@ -52,7 +51,9 @@ def test_dependency_manifests_lock_only_custom_sdk() -> None:
     ]
     assert len(sdk_packages) == 1
     assert sdk_packages[0]["version"] == SDK_VERSION
-    assert SDK_COMMIT in sdk_packages[0]["source"]["git"]
+    assert sdk_packages[0]["source"] == {"registry": "https://pypi.org/simple"}
+    assert sdk_packages[0]["wheels"]
+    assert all("hash" in artifact for artifact in sdk_packages[0]["wheels"])
     assert all(package["name"] != "claude-agent-sdk" for package in lock["package"])
 
 
@@ -91,6 +92,8 @@ def test_dockerfile_cross_asserts_sdk_runtime_and_rollback_cli_pair() -> None:
     assert "CLAUDE_CODE_CLI_PATH" in dockerfile
     assert "/usr/local/bin/claude" in dockerfile
     assert "resolve_claude_cli_path" in dockerfile
+    assert "--require-hashes" in dockerfile
+    assert "https://pypi.org/simple" in dockerfile
     assert "from claude_agent_sdk._cli_version import __cli_version__" in dockerfile
     assert f"assert __cli_version__ == '{CLI_VERSION}'" in dockerfile
     assert f"assert dist.version == '{SDK_VERSION}'" in dockerfile

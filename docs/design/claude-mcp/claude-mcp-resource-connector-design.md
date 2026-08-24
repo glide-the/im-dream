@@ -6,7 +6,7 @@
 <!-- [同步] 2026-08-21：支持绝对 HTTP(S)、neutral cwd 与 formal user-scope Remove。 -->
 <!-- [同步] 2026-08-22：在保留 per-thread TMPDIR 和 Chat/Dream 合同的前提下恢复到当前基线。 -->
 <!-- [同步] 2026-08-23：Agent 与 MCP 共用自有 Runtime resolver/manifest gate，绝对 CLAUDE_CODE_CLI_PATH 只用于官方回滚。 -->
-<!-- [同步] 2026-08-24：更新为 SDK main@6164bd91、MIT clean-room Runtime、跨进程 OAuth rotation 修复和真实 Comfy 两轮 tool/resume 回执。 -->
+<!-- [同步] 2026-08-24：更新为 SDK 0.2.143 正式 PyPI 版本/哈希锁、MIT clean-room Runtime、跨进程 OAuth rotation 修复和真实 Comfy 两轮 tool/resume 回执。 -->
 
 # Claude MCP 资源链接器设计
 
@@ -36,7 +36,7 @@ claude mcp list
 
 1. 官方 Runtime 的历史行为是 Linux/Windows 使用 `.credentials.json`、macOS 使用 config-dir-keyed Keychain。当前自有 Runtime 已通过独立、source-bound secure-storage 修复收敛：只要显式 selector 有效，所有平台都只使用 `CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json`，目录/文件必须为 `0700/0600`，且不访问用户 Keychain；selector 未设置时才保留 official macOS Keychain 行为。Resources 与 Agent 因此可在保持不同 `CLAUDE_CONFIG_DIR` 的同时指向同一 actor-owned 凭据真相；capability 会检查 exact Runtime marker、文件和真实回执，任一缺失即 fail closed。
 2. Agent 已将整个 config home 定位为 `{thread-workspace}/.claude-home`，并携带 `canonical_user_id`。runner 为安全只加载 `setting-sources=project`，因此 thread `.claude-home/.claude.json` 中的 user-scope `mcpServers` 会被正式 CLI 忽略。现有 runner 已通过公开 `mcp_servers` option 注入内部 MCP；远端 opaque 定义复用同一入口，不新增 `.mcp.json` approval、表或第二套 Agent runtime。
-3. 历史 Docker 基线曾使用 official SDK/CLI 和本地恢复源码候选；当前依赖已原子更新为自有 SDK `0.2.143`（Dream 固定 `main@6164bd91…`）与 clean-room Runtime `0.1.0`，Docker 另保留显式 official rollback CLI `2.1.241`。公共 Runtime 不读取、编译或打包恢复源码；MCP OAuth/refresh/management 由 `src/cleanroom/` 独立实现并通过进程合同和真实业务验证。`2.1.241` 仍只是 Dream 接口兼容输出，不能声称 official 全产品等价。
+3. 历史 Docker 基线曾使用 official SDK/CLI 和本地恢复源码候选；当前依赖已原子更新为正式 PyPI 自有 SDK `0.2.143`（精确版本与 SHA-256 锁，源码 `v0.2.143@6164bd91…`）与 clean-room Runtime `0.1.0`，Docker 另保留显式 official rollback CLI `2.1.241`。公共 Runtime 不读取、编译或打包恢复源码；MCP OAuth/refresh/management 由 `src/cleanroom/` 独立实现并通过进程合同和真实业务验证。`2.1.241` 仍只是 Dream 接口兼容输出，不能声称 official 全产品等价。
 
 本设计据此取消“production provider 永久 disabled”的旧结论，改为 actor-owned file capability：自有 Runtime 是 token exchange/refresh/logout 和 selector-backed `.credentials.json` 的唯一 owner；业务代码不读取 token。业务代码把 opaque `mcpServers` 作为每-turn SDK option 交付，且仅在 Linux 复制/撤销 opaque `mcpOAuth`；macOS token 保留在用户 secure-storage 根，不进入后端内存或 thread 文件。未知存储后端和未验证 official rollback 行为仍 fail closed。
 
@@ -168,7 +168,7 @@ clean-room selector 与匹配 Linux 平台包现已由 Dockerfile 从 npm regist
 | Runtime clean-room 核心 | `src/cleanroom/` 47 个文件、250,859 bytes；tree SHA `2e5f2059…a66ec`；darwin-arm64 executable SHA `04372c5b…9d0d22be` | 仓库自有 MIT 实现；restored/vendor/restricted-source scan 零命中。 |
 | 本机 ambient official CLI | `/Users/dmeck/.local/bin/claude` → `2.1.220` | 不是 Dream 默认路径，也不作为 Docker 发布证据。 |
 | Docker 默认/回滚 Runtime | npm selector `0.1.0` + 匹配 Linux 平台包；official `2.1.241` 后装 | build 时检查自有 CLI/manifest/Dream resolver；official 仅通过 absolute `CLAUDE_CODE_CLI_PATH` 显式选择。 |
-| 当前 Python SDK | `ink-claude-dream-agent-sdk==0.2.143`，Git commit `6164bd91e43bbf610ec40b4500edec18a97ce665` | `uv.lock`、exported requirements、clean venv 与 Docker metadata/import-provider 门同步验证；official distribution 不得并存。 |
+| 当前 Python SDK | 正式 PyPI `ink-claude-dream-agent-sdk==0.2.143`；源码 `v0.2.143@6164bd91e43bbf610ec40b4500edec18a97ce665` | `uv.lock`/exported requirements 固定 archive SHA-256；clean venv、Dream `.venv` 与 Docker metadata/import-provider 门同步验证；official distribution 不得并存。 |
 | SDK import / API | distribution 改名，import 保留 `claude_agent_sdk` | 公共 client/options/query、stream types 与 MCP inventory API 保持原协议。 |
 | Runtime Bun | 构建器 Bun `1.4.0`；四平台 standalone | selector 启动平台 binary；运行时不依赖 ambient Bun。 |
 | 新版 sandbox | 官方配置支持 `enableWeakerNestedSandbox`、`network.allowAllUnixSockets`；seccomp 为 optional | Docker 安装自有 Runtime 并保留 bwrap filesystem/network 隔离；目标 glibc/bubblewrap 宿主仍需独立部署验收。 |
@@ -770,7 +770,7 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 ## 16. 当前发布状态与回滚
 
 1. user identity/synchronizer、driver/API/UI 与 fake CLI contract 已落地。
-2. SDK `0.2.143@6164bd91…`、clean-room Runtime `main@7c34e6cd`/npm `0.1.0`、Dream 接口资格标识 `2.1.241`、Bun 构建器 `1.4.0` 与 Docker official rollback `2.1.241` 已原子记录；绝对 `cli_path` 回滚和 build-time version/help assertions 保留。
+2. 正式 PyPI SDK `0.2.143`（archive SHA-256 锁、源码 `v0.2.143@6164bd91…`）、clean-room Runtime `main@7c34e6cd`/npm `0.1.0`、Dream 接口资格标识 `2.1.241`、Bun 构建器 `1.4.0` 与 Docker official rollback `2.1.241` 已原子记录；绝对 `cli_path` 回滚和 build-time version/help assertions 保留。
 3. unit/API/frontend/build/Playwright、真实 macOS OAuth/两轮 Tool/resume、Runtime package gate、五包发布与 registry fresh install 已通过。Dockerfile 已安装 selector/匹配 Linux 包；真实 glibc/bubblewrap 宿主的 sandbox/credential deny-read 仍需目标拓扑验收，本机回执不能替代该项。
 4. 当前只允许具名 `local_persistent` 单节点 topology capability；不得用 deployment environment 名称改变业务路径。
 5. rollback 可关闭 Resources capability，但不得恢复 2.1.108 双 CLI 路径；已有用户源凭证保留，thread 在下一次同步撤销或更新。
@@ -857,7 +857,7 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 - `backend/libs/claude_agent_kit/types.py` / `server/agent_runner.py`：repr-hidden `claude_mcp_servers` 通过官方 `ClaudeAgentOptions.mcp_servers` 与内部 stdio servers 合并；名称冲突 fail closed，不增加 remote wildcard `allowed_tools`。
 - `backend/libs/claude_agent_kit/server/sdk_env.py`：保留 thread `CLAUDE_CONFIG_DIR`，以服务端权威值注入 macOS `CLAUDE_SECURESTORAGE_CONFIG_DIR`，让 exact Runtime 直接使用 actor-owned 文件；浏览器/user env 无权覆盖。
 - `backend/libs/claude_agent_kit/server/workspace.py`：deny sibling workspace/backend/home/custom MCP runtime root，当前 thread 再 allow-read；credential file 同时使用 exact deny-read/deny-write 和 `credentials.files(mode=deny)`。不再 deny `/`，因为 CLI 2.1.235 下该设置会移除 bwrap 内 `/bin/bash`。
-- `backend/Dockerfile` / `requirements.txt` / `pyproject.toml` / `uv.lock`：Python 3.12、官方 Node 22.18.0、npm 自有 Runtime selector 0.1.0、显式回滚 CLI 2.1.241，以及 Git commit 锁定的自有 SDK 0.2.143；build-time 验证 exact Node/CLI、自有 manifest/Dream resolver、SDK `_cli_version == 2.1.241`、公开 MCP help、SDK metadata/API/import-provider，并拒绝 official SDK distribution 并存。
+- `backend/Dockerfile` / `requirements.txt` / `pyproject.toml` / `uv.lock`：Python 3.12、官方 Node 22.18.0、npm 自有 Runtime selector 0.1.0、显式回滚 CLI 2.1.241，以及正式 PyPI 精确版本/哈希锁定的自有 SDK 0.2.143；build-time 通过 `--require-hashes` 验证 archive，并检查 exact Node/CLI、自有 manifest/Dream resolver、SDK `_cli_version == 2.1.241`、公开 MCP help、SDK metadata/API/import-provider，拒绝 official SDK distribution 并存。
 - `frontend/e2e/claude-mcp-resources.spec.ts`：拦截 API 的可见 Resources → Login → redirect → Connected → 41-tool detail/search/risk → refresh/back → Logout 技术旅程。
 
 2026-08-20 历史发布门通过：Claude MCP backend contract `37 passed`；frontend 聚焦 lint/build 与 provider-free Resources 旅程通过；旧具名账户和旧 CLI/SDK 回执保留为历史比较，不作为当前自有 Runtime 资格证据。共享数据库 Schema 与 ClaudePlugin operation 表未改变。
