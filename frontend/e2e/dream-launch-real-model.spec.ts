@@ -1,8 +1,10 @@
-// [Input] The normal or explicitly technical-isolation Dream launch endpoint and an exact real Gateway model.
+// [Input] The normal Chat-selected Dream Deck launch endpoint and an exact real Gateway model.
 // [Output] Headed-browser business proof plus a private content-free lifecycle receipt for failure diagnosis.
 // [Pos] Release harness only; it calls public production routes and never installs a test-only business branch.
 // [Sync] 2026-08-24: let the Story Index semantic status settle before choosing
 //                    an enabled visible recovery action.
+// [Sync] 2026-08-25: launch a Dream from the canonical Chat composer instead of
+//                    the read-only Dream inventory route.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -132,6 +134,13 @@ async function expectPageFitsViewport(page: Page): Promise<void> {
 
 async function showDreamContent(page: Page): Promise<void> {
   const backToContent = page.getByRole('button', { name: '← 返回 Dream 内容' });
+  const confirmAndContinue = page.getByRole('button', { name: '确认并继续' });
+  await expect.poll(async () => (
+    await backToContent.isVisible() || await confirmAndContinue.isVisible()
+  ), {
+    message: 'The Dream surface must settle into its content or Agent-message view.',
+    timeout: 30_000,
+  }).toBe(true);
   if (await backToContent.isVisible()) {
     await expect(backToContent).toBeInViewport();
     await backToContent.click();
@@ -204,23 +213,22 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
   await page.addInitScript((accessToken) => {
     localStorage.setItem('auth_token', accessToken);
     localStorage.setItem('migration_completed', 'true');
+    localStorage.setItem('ink-language', 'zh');
   }, token);
 
   const deckQuery = TEST_DECK_ID
     ? `?deck=${encodeURIComponent(TEST_DECK_ID)}`
     : '';
-  await page.goto(`${WEB_BASE}/story-workspace/dream${deckQuery}`);
+  await page.goto(`${WEB_BASE}/story-workspace/chat${deckQuery}`);
   await expectPageFitsViewport(page);
-  await expect(page.getByRole('heading', { name: '发起一次 Dream' })).toBeInViewport();
-  await expect(page.getByText('当前 Agent', { exact: true })).toBeVisible();
-  await expect(
-    page.locator('.story-workspace-dream-launch__selection strong'),
-  ).toContainText('·');
+  const chatInput = page.getByRole('textbox', { name: '聊天输入' });
+  await expect(chatInput).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Deck 元信息' })).toBeVisible();
   const humanProjectName = `雨夜末班车·${new Date().toLocaleString('zh-CN', {
     timeZone: 'Asia/Shanghai',
     hour12: false,
   }).replace(/[/:\s]/g, '-')}`;
-  await page.getByRole('textbox', { name: '创作目标' }).fill(
+  await chatInput.fill(
     `创作短篇《${humanProjectName}》：两位旧友在终点站重逢，人物关系克制，结尾保留悬念。请完成人物、场景和分镜草稿。`,
   );
 
@@ -228,7 +236,7 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
     response.url().endsWith('/api/story-workspace/dream-runs/start')
     && response.request().method() === 'POST'
   ), { timeout: 30_000 });
-  const launchButton = page.getByRole('button', { name: '发起 Dream' });
+  const launchButton = page.getByRole('button', { name: '发送消息' });
   await expect(launchButton).toBeEnabled();
   await expect(launchButton).toBeInViewport();
   await launchButton.click();
@@ -373,6 +381,7 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
   expect(dreamHistory.messages.length).toBeGreaterThan(0);
 
   await page.reload();
+  await showDreamContent(page);
   await expect(page.getByRole('button', { name: '确认并继续' })).toBeEnabled();
   await page.getByRole('button', { name: /^(对话|Chat)$/ }).click({ noWaitAfter: true });
   await page.waitForURL(`${WEB_BASE}/story-workspace/chat`);
@@ -454,6 +463,19 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
     intervals: [500, 1_000, 2_000, 5_000],
   }).toBe(true);
 
+  const draftWorkspace = page.getByRole('region', { name: 'Dream 初稿工作台' });
+  await expect(draftWorkspace).toBeVisible();
+  await expect(draftWorkspace.getByRole('tab', { name: /^Outline/ })).toBeVisible();
+  await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
+  const agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+  await expect(agentDialog).toBeVisible();
+  await expect(agentDialog).toContainText('story-workspace-dream-confirmation');
+  await expect(agentDialog).toContainText('episode-outline.md');
+  const syncViewButton = agentDialog.getByRole('button', { name: '同步', exact: true });
+  await syncViewButton.click();
+  await expect(syncViewButton).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: '收起 Dream Agent' }).click();
+  await expect(page.getByRole('region', { name: 'Episode 产物工作台' })).toBeVisible();
   await expect(
     page.getByText('EP01 · Episode execution', { exact: true }),
   ).toBeVisible({ timeout: 30_000 });
@@ -488,12 +510,6 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
     intervals: [500, 1_000, 2_000, 5_000],
   }).toBe(true);
   await expect(storyIndexStatus).toContainText(/PostgreSQL 索引\s*已就绪/);
-  await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
-  const agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
-  await expect(agentDialog).toBeVisible();
-  await expect(agentDialog).toContainText('story-workspace-dream-confirmation');
-  await expect(agentDialog).toContainText('episode-outline.md');
-  await page.getByRole('button', { name: '收起 Dream Agent' }).click();
 
   const settledHistory = await getJson<{
     messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>;
@@ -510,10 +526,10 @@ test('real Dream launch reaches editable files and reopens one thread in Chat', 
   expect(confirmationRows).toHaveLength(1);
 
   await page.goto(`${WEB_BASE}/story-workspace/dream`);
-  await expect(page.getByRole('heading', { name: '发起一次 Dream' })).toBeVisible();
-  const reentry = page.locator('.story-workspace-dream-reentry__item').filter({
-    hasText: `…${accepted.workflowRunId.slice(-6)}`,
-  });
+  await expect(page.getByRole('heading', { name: 'Dream', exact: true })).toBeVisible();
+  const reentry = page.locator(
+    `a[href="/story-workspace/runs/${accepted.workflowRunId}/execution"]`,
+  ).first();
   await expect(reentry).toBeVisible();
   await reentry.click();
   await page.waitForURL(

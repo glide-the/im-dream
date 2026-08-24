@@ -1,11 +1,11 @@
 <!-- [输入] 2026-08-25 目标 MCP 动态握手、官方 CLI 2.1.220、自有 Runtime 0.1.0/兼容标识 2.1.241，以及 Dream Frontend/API/SDK/Runtime/Workspace/Transcript 静态调用链证据。 -->
 <!-- [输出] 定义匿名优先的 MCP 连接与 OAuth 路由、Runtime/SDK/Dream 分层、结构化错误、兼容与回滚合同、测试矩阵和真实 IM 验收标准。 -->
 <!-- [定位] Claude Agent 与远端 MCP 资源连接器的认证路由重构设计稿；实现仍分别由 clean-room Runtime 与 Dream 既有模块承载。 -->
-<!-- [同步] 2026-08-25：匿名优先路由已在 Runtime 与 Dream 最小边界实现，并完成自动化、官方 CLI 差分、匿名/OAuth 真实 Chat 验收；Workflow Run 与 Admin UI 目视复核仍明确保留为验收边界。 -->
+<!-- [同步] 2026-08-25：匿名优先路由已在 Runtime 与 Dream 最小边界实现，并完成自动化、官方 CLI 差分、匿名/OAuth Chat、Dream Workflow、Workspace/sandbox、Runtime 故障恢复和 Admin UI 真实验收。 -->
 
 # Dream MCP 认证路由重构设计
 
-> 状态：实现与自动化/真实 Chat 验收完成；Workflow Run 与 Admin UI 目视复核未执行
+> 状态：实现、自动化、官方差分与本机完整真实业务验收完成
 >
 > 证据日期：2026-08-25
 >
@@ -558,7 +558,7 @@ Runtime 未发布前，不应只改 Dream parser 把 `Needs authentication` 强�
 
 ## 12. 真实 IM 验收标准
 
-真实验收必须遵守本仓库“本机真实业务测试协议”。本轮已按下列边界执行：使用正常 Dream、Gateway 与当前真实 PostgreSQL，经公开 Resources/Chat API 产生并保留真实 Thread、Message、Gateway request、Token ledger 与 transcript；没有创建影子账户、替代 Gateway、随机端口 Admin 或数据库 clone。由于 MCP 连接与工具消费属于 Chat 链路，本轮没有启动 Dream Workflow，故 `workflow_runs` 新增数为 0；未提供 Admin 后台登录凭据，因此仅证明回执位于 Admin 使用的同一表与查询路由，未把它表述为 Admin UI 目视通过。
+真实验收必须遵守本仓库“本机真实业务测试协议”。本轮使用正常 Dream、Admin、Gateway 与当前真实 PostgreSQL，经公开 Resources/Chat、Story Workspace、Dream Workflow 和 Admin 只读入口产生并保留真实 Workflow Run、Thread、Message、Gateway request、Token ledger、Workspace 文件与 transcript；没有创建影子账户、替代 Gateway、随机端口 Admin 或数据库 clone。故障验收只向已核验为本轮 Thread、父进程为正常 Dream backend 的单一 Runtime leaf 发送信号，随后从同一 Thread 公开入口恢复；没有停止共享服务或修改其他业务记录。
 
 ### 12.1 前置条件
 
@@ -575,10 +575,14 @@ Runtime 未发布前，不应只改 Dream parser 把 `Needs authentication` 强�
 3. 详情 inventory 显示 `comfy-mcp 0.10.0`、40 tools；Resources/Prompts 只展示 Runtime/SDK 正式报告值。
 4. 以现有 Dream Deck 绑定新 Chat Thread，执行一轮有界真实模型 turn，只允许精确调用 `auth_status` 一次。
 5. `auth_status` 只读取业务登录状态；禁止调用生成、上传、删除、停止或任何远端修改工具。另以 `server_info` 的真实超时记录验证错误反馈，不将该记录算作成功 tool result。
-6. 核对 SSE tool-use/tool-result/assistant/唯一 terminal event，以及 PostgreSQL message/session ID、Admin 可见 Run/Gateway request/Token 结算、Runtime JSONL transcript。
+6. 核对 SSE tool-use/tool-result/assistant/唯一 terminal event，以及 PostgreSQL message/session ID、Admin 可见 Gateway request/Token 结算、Runtime JSONL transcript。
 7. 刷新同一 Thread，执行第二轮有界 resume，确认同一 Claude session 持续追加且 MCP 仍匿名连接。
 8. 验收 Cancel；authless server 不显示 Logout，但可由用户主动点“尝试认证”验证 `AUTH_NOT_REQUIRED`，且不得出现 authorization URL 或凭证写入。Remove 只修改 actor-owned server definition，不修改远端 MCP 内容。
-9. 默认保留本轮 Thread、Gateway、账本、transcript 与错误记录供 Admin 复核；本轮未产生 Workflow Run。除非用户明确要求，不清理真实业务记录。
+9. 从现有 Dream Deck 的公开 Story Workspace 入口启动新 Workflow，完成两轮 Agent 对话、首 Token/SSE、Draft → Sync、Canonical/EP01/Story Index 回读与同 Thread resume；确认 Run 进入 `confirmed`。
+10. 核对该 Thread 的真实 Workspace 文件工具与 `.claude/settings.json`：Read/Write 均由生产工具执行，sandbox 为 fail-closed、写入只允许 thread workspace 与精确 `.claude-tmp`，敏感配置路径保持 deny。
+11. 对本轮唯一 Runtime leaf 做受控异常退出：前端收到不泄漏路径/凭据的错误，同一 Thread 以 `resume:true` 恢复并产生正常 Gateway request。
+12. 使用正常 Admin 登录和只读页面查询本轮四个 Gateway request 的 `settled/succeeded/200` 终态，以及恢复请求的 `reserve/capture/release` 三条账本；正常 logout 返回登录页。
+13. 默认保留本轮 Workflow Run、Thread、Gateway、账本、transcript 与错误记录供复核。除非用户明确要求，不清理真实业务记录。
 
 ### 12.3 验收通过条件
 
@@ -587,7 +591,9 @@ Runtime 未发布前，不应只改 Dream parser 把 `Needs authentication` 强�
 - inventory 与实际 tool call 都成功；
 - 页面刷新后 Dream resume 成功；
 - 错误/日志/DTO/SSE 不含凭证、headers、redirect、metadata body 或用户路径；
-- 正常 Admin 使用的 PostgreSQL 表与 `/admin/gateway/requests` 查询路由可查询本轮业务回执；Admin UI 目视需另有有效后台登录会话；
+- Dream Workflow 完成两轮对话、Workspace/Sync 产物和同 Thread resume，最终 Run 为 `confirmed`；
+- 真实 Workspace Read/Write 与 sandbox fail-closed 配置可核对；Runtime 异常有安全反馈且同 Thread 可恢复；
+- 正常 Admin UI 可查询本轮 Gateway request 与三阶段 Token ledger，并完成正常 logout；
 - 无数据库 migration、无隔离账户、无替代 Gateway、无随机端口冒充真实链路。
 
 ## 13. 风险与缓解
@@ -659,12 +665,17 @@ Runtime 未发布前，不应只改 Dream parser 把 `Needs authentication` 强�
 | 持久化 | 匿名 Thread `6fd6e286-a885-44f0-8509-4c114b4c4943`、OAuth Thread `55bb62d3-f78c-40c5-bb3d-56ad3b5c8c8b` 与 timeout Thread `4d8e75de-fb6d-41bd-9ad5-afc8e083b1c3` 保留在正常业务库；对应 Gateway request 均为 HTTP 200/settled/succeeded，包含首 Token、response events 与每请求 3 条 ledger |
 | 安全 | 回执未打印 token、Authorization header、完整 callback、cookie、环境变量或敏感 metadata；远端只调用只读工具 |
 
-### 16.3 未冒充通过的边界
+### 16.3 Dream Workflow、Workspace、故障恢复与 Admin
 
-- 本轮 MCP 业务验收走 Chat 生产入口，没有启动 Dream Workflow，因此没有新增 `workflow_runs`；这不影响 MCP/SDK/Runtime/Chat 合同结论，但不满足“新增 Workflow Run”这一额外验收项。
-- Admin 与 Dream 共用正常 PostgreSQL，Gateway request/ledger 已按 Admin 查询 schema 核实；因为没有后台凭据，本轮没有登录 Admin UI 目视截图。
-- 真实 Chat 核验了 Workspace API/既有 workspace 与 Runtime transcript，但没有让模型执行 Workspace Read/Bash，因此真实 sandbox tool 执行不作通过声明；sandbox 仅有 Runtime 全量生产合同自动化回执。Runtime 进程崩溃也仅由 fixture 覆盖，真实链路只形成了慢工具 timeout/output-error 反馈。
-- 本地 candidate 仅构建并用于验收，未发布 npm/PyPI、未部署服务器；回滚仍是切回已预检的绝对 Runtime/official CLI 路径。
+| 链路 | 真实业务证据 |
+|---|---|
+| Dream Workflow | 现有 Deck `363234a2-48d1-4102-b3a1-8ab7bde66101` 启动 Run `run_9375b494d4744897a1e18cddc875b981`，Thread `1624db18-8bf4-5215-a01c-aba1b9fc194f` 完成两轮对话、SSE/首 Token、Draft → Sync、Canonical/EP01/Story Index 和页面重入；数据库终态 `confirmed`，无失败 step |
+| Workspace / sandbox | 同一 Thread 持久化 Read 2 次、Write 9 次且均为 `output-available`；`.claude/settings.json` 为 `sandbox.enabled=true`、`failIfUnavailable=true`、`allowUnsandboxedCommands=false`，只允许 thread workspace 与精确 `.claude-tmp` 写入，并拒绝 `.dream`、settings、hooks、`.mcp.json` 与 credential 文件 |
+| Runtime 异常恢复 | Thread `34221a5d-8afd-47f0-bf6d-191e7da307cc` 只终止已核验的本轮 Runtime leaf；首轮得到安全业务错误，未回显 candidate 路径、Authorization/Bearer/token/credential；同一 Thread `resume:true` 后返回“Runtime 恢复成功”并产生正常 Gateway request |
+| Admin UI | 正常 Admin 登录后在 `/admin/gateway/requests` 查询本轮四个精确 request，均为 `settled/succeeded/200`；在 `/admin/subscriptions/token-ledger` 查询恢复 request，精确显示 `reserve/capture/release` 三行；只读验收后正常 logout |
+| 自动化回执 | Workflow `1 passed (2.0m)`；Runtime failure `1 passed (9.3s)`；Admin visibility `1 passed (5.4s)`，均 exit 0 |
+
+前序三次真实 Workflow 调试 Run 因验收脚本跟随旧 UI 产生，已按真实业务协议保留供复核，不做伪清理；最终通过结论只引用上述 `run_9375…`。本地 candidate 仅构建并用于验收，未发布 npm/PyPI、未部署服务器；回滚仍是切回已预检的绝对 Runtime/official CLI 路径。
 
 本稿定义并记录用户已授权的 Runtime 与 Dream 最小修改和真实业务验收；它不授权数据库 Schema、migration、发布或部署。
 
