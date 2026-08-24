@@ -1,10 +1,13 @@
 // [Input] Named existing actor, normal Dream/PostgreSQL, official Claude CLI, a real OAuth MCP URL, and live Agent runtime.
-// [Output] Real-business Resources configure → OAuth → Connected → Agent user-credential reuse → Logout → Remove evidence.
+// [Output] Real-business Resources configure → OAuth → Connected → visible Chat MCP results → refresh/resume → Logout → Remove evidence.
 // [Pos] Opt-in macOS/Linux Claude MCP acceptance; no API interception, shadow account, cloned database, or fake CLI.
 // [Sync] 2026-08-19: add the complete real-account MCP OAuth and per-turn Agent credential reuse journey.
 // [Sync] 2026-08-20: assert Linux file projection versus macOS secure-storage reuse without reading Keychain.
 // [Sync] 2026-08-20: verify remote server definitions reach Agent through the public SDK option and tolerate a direct localhost OAuth callback.
 // [Sync] 2026-08-21: accept absolute HTTP(S) server input while preserving user-scope cleanup.
+// [Sync] 2026-08-24: move both Agent turns onto visible Chat, approve only the named MCP tool in UI,
+//                    and require persisted output-available results across refresh/resume before logout/removal.
+// [Sync] 2026-08-24: accept both explicit post-logout unauthenticated labels before strict credential deletion checks.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -20,6 +23,7 @@ const ACTOR_EMAIL = process.env.INK_REAL_CLAUDE_MCP_ACTOR_EMAIL ?? '';
 const SERVER_NAME = process.env.INK_REAL_CLAUDE_MCP_SERVER_NAME ?? '';
 const SERVER_URL = process.env.INK_REAL_CLAUDE_MCP_SERVER_URL ?? '';
 const BROWSER_HANDOFF_DIR = process.env.INK_REAL_CLAUDE_MCP_BROWSER_HANDOFF_DIR ?? '';
+const SAFE_INSPECTION_TOOL = 'get_server_info';
 const BACKEND_DIR = resolve(process.cwd(), '../backend');
 const BACKEND_PYTHON = resolve(BACKEND_DIR, '.venv/bin/python');
 
@@ -27,10 +31,28 @@ const IMPACT_SCOPE = {
   actor: 'one named existing platform user',
   mcpConfiguration: 'one explicitly named user-scope HTTP(S) server, removed at journey end',
   oauthCredential: 'real provider token in the actor user store, logged out and revoked at journey end',
-  agent: 'one normal persisted Chat thread and one read-only model turn',
+  agent: 'one normal persisted Chat thread with two read-only model turns across refresh/resume',
   historicalThreads: 'no login fan-out; only the new turn target is projected',
   subscriptionAndOtherUsers: 'unchanged',
 } as const;
+
+type ThreadStatus = {
+  running: boolean;
+  lifecycle: 'idle' | 'running' | 'destroyed' | 'not_found';
+  turn_count: number;
+};
+
+type PersistedPart = {
+  type?: string;
+  toolName?: string;
+  state?: string;
+  text?: string;
+};
+
+type ThreadMessages = {
+  thread: { id: string; title?: string | null };
+  messages: Array<{ role: string; parts: PersistedPart[] }>;
+};
 
 test.use({
   channel: 'chromium',
@@ -91,6 +113,95 @@ function diagnosticsFor(page: Page): string[] {
     }
   });
   return diagnostics;
+}
+
+async function getJson<T>(
+  request: APIRequestContext,
+  path: string,
+  token: string,
+): Promise<T> {
+  const response = await request.get(`${WEB_BASE}${path}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  expect(response.status(), await response.text()).toBe(200);
+  return response.json() as Promise<T>;
+}
+
+async function approveExpectedMcpConfirmation(
+  page: Page,
+  threadId: string,
+): Promise<boolean> {
+  const dialogs = page.locator('[role="alertdialog"]:visible');
+  const count = await dialogs.count();
+  if (count === 0) return false;
+  if (count !== 1) {
+    throw new Error('Multiple tool confirmations are visible in the MCP OAuth journey.');
+  }
+  const dialog = dialogs.first();
+  const accessibleName = await dialog.getAttribute('aria-label');
+  if (!accessibleName?.includes(`mcp__${SERVER_NAME}__${SAFE_INSPECTION_TOOL}`)) {
+    throw new Error('An unexpected tool confirmation blocked the MCP OAuth journey.');
+  }
+  const approve = dialog.getByRole('button', { name: /^(同意|Approve)/ });
+  await expect(approve).toBeVisible();
+  const confirmationResponsePromise = page.waitForResponse((response) => (
+    response.request().method() === 'POST'
+    && new URL(response.url()).pathname === '/api/claude-agent/tool-confirm'
+  ), { timeout: 20_000 });
+  await approve.click();
+  const confirmationResponse = await confirmationResponsePromise;
+  const confirmationPayload = await confirmationResponse.json().catch(() => null) as {
+    detail?: { code?: string } | string;
+  } | null;
+  const confirmationCode = typeof confirmationPayload?.detail === 'object'
+    ? confirmationPayload.detail.code
+    : confirmationPayload?.detail;
+  expect(
+    confirmationResponse.status(),
+    `Tool confirmation failed with code ${confirmationCode ?? 'unknown'}.`,
+  ).toBe(200);
+  expect(confirmationResponse.request().postDataJSON()).toMatchObject({
+    thread_id: threadId,
+    approved: true,
+  });
+  await expect(dialog).toBeHidden({ timeout: 15_000 });
+  return true;
+}
+
+async function waitForTurn(
+  page: Page,
+  token: string,
+  threadId: string,
+  expectedTurnCount: number,
+): Promise<void> {
+  await expect.poll(async () => {
+    if (await approveExpectedMcpConfirmation(page, threadId)) return false;
+    const status = await getJson<ThreadStatus>(
+      page.request,
+      `/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
+      token,
+    );
+    return status.running === false && status.turn_count >= expectedTurnCount;
+  }, {
+    timeout: 360_000,
+    intervals: [500, 1_000, 2_000, 5_000],
+  }).toBe(true);
+}
+
+function mcpToolParts(payload: ThreadMessages): PersistedPart[] {
+  return payload.messages.flatMap((message) => message.parts).filter((part) => (
+    part.toolName?.startsWith(`mcp__${SERVER_NAME}__`)
+  ));
+}
+
+function assistantText(payload: ThreadMessages): string {
+  return payload.messages
+    .filter((message) => message.role === 'assistant')
+    .flatMap((message) => message.parts)
+    .filter((part) => part.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text?.trim() ?? '')
+    .filter(Boolean)
+    .join('\n');
 }
 
 async function authorizationRedirect(popup: Page): Promise<string> {
@@ -251,7 +362,7 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
     actor: 'one named existing platform user',
     mcpConfiguration: 'one explicitly named user-scope HTTP(S) server, removed at journey end',
     oauthCredential: 'real provider token in the actor user store, logged out and revoked at journey end',
-    agent: 'one normal persisted Chat thread and one read-only model turn',
+    agent: 'one normal persisted Chat thread with two read-only model turns across refresh/resume',
     historicalThreads: 'no login fan-out; only the new turn target is projected',
     subscriptionAndOtherUsers: 'unchanged',
   });
@@ -331,35 +442,88 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
     redirectUrl = '';
     await expect(card).toContainText('已连接', { timeout: 60_000 });
 
-    const threadResponse = await page.request.post(`${WEB_BASE}/api/claude-agent/threads`, {
-      headers,
-      data: { title: `Claude MCP real QA ${new Date().toISOString()}` },
+    await page.getByRole('button', { name: '返回应用' }).click();
+    const navigation = page.getByRole('navigation', { name: 'Story Workspace 导航' });
+    await navigation.getByRole('button', { name: /^(Chat|对话)$/ }).click();
+    await page.waitForURL(`${WEB_BASE}/story-workspace/chat`);
+    const newChat = page.getByTitle(/^(New chat|新建对话)$/);
+    if (await newChat.isVisible().catch(() => false)) await newChat.click();
+
+    const prompt = `请使用已连接的 ${SERVER_NAME} MCP 调用一个只读工具查看服务信息，简要告诉我连接是否可用。不要创建、修改或删除任何远端内容。`;
+    const input = page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ });
+    await expect(input).toBeVisible();
+    await input.fill(prompt);
+    const createResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/claude-agent/threads'
+    ));
+    const agentRequestPromise = page.waitForRequest((request) => (
+      request.method() === 'POST'
+      && new URL(request.url()).pathname === '/api/claude-agent'
+    ));
+    await page.getByRole('button', { name: /^(Send message|发送消息)$/ }).click();
+    const createResponse = await createResponsePromise;
+    expect(createResponse.status(), await createResponse.text()).toBe(200);
+    const threadId = (await createResponse.json() as { thread_id: string }).thread_id;
+    const agentRequest = await agentRequestPromise;
+    expect(agentRequest.postDataJSON()).toMatchObject({ id: threadId, resume: true });
+
+    await waitForTurn(page, token, threadId, 1);
+    const firstHistory = await getJson<ThreadMessages>(
+      page.request,
+      `/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`,
+      token,
+    );
+    const firstMcpParts = mcpToolParts(firstHistory);
+    expect(firstMcpParts.length).toBeGreaterThanOrEqual(1);
+    expect(firstMcpParts.every((part) => (
+      part.toolName === `mcp__${SERVER_NAME}__${SAFE_INSPECTION_TOOL}`
+    ))).toBe(true);
+    expect(firstMcpParts.every((part) => part.state === 'output-available')).toBe(true);
+    expect(assistantText(firstHistory).length).toBeGreaterThan(0);
+    await expect(page.getByText(prompt, { exact: true })).toBeVisible();
+
+    const threadTitle = firstHistory.thread.title?.trim();
+    expect(threadTitle).toBeTruthy();
+    await page.reload();
+    const historyEntry = page.getByTitle(threadTitle!).first();
+    await expect(historyEntry).toBeVisible({ timeout: 30_000 });
+    await historyEntry.click();
+    await expect(page.getByText(prompt, { exact: true })).toBeVisible({ timeout: 30_000 });
+
+    let unexpectedThreadCreations = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST'
+        && new URL(request.url()).pathname === '/api/claude-agent/threads') {
+        unexpectedThreadCreations += 1;
+      }
     });
-    expect(threadResponse.status()).toBe(200);
-    const threadId = (await threadResponse.json() as { thread_id: string }).thread_id;
-    const agentResponse = await page.request.post(`${WEB_BASE}/api/claude-agent`, {
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      data: {
-        thread_id: threadId,
-        message: {
-          id: `claude-mcp-real-qa-${Date.now()}`,
-          role: 'user',
-          parts: [{
-            type: 'text',
-            text: `必须使用名为 ${SERVER_NAME} 的 MCP server 调用一个只读工具，简要确认连接可用。不要创建、更新或删除任何远端资源。`,
-          }],
-        },
-        resume: false,
-        toolChoice: 'auto',
-        max_turns: 5,
-      },
-      timeout: 360_000,
-    });
-    expect(agentResponse.status()).toBe(200);
-    expect(agentResponse.headers()['content-type'] ?? '').toContain('text/event-stream');
-    const agentFrames = await agentResponse.text();
-    expect(agentFrames.includes(`mcp__${SERVER_NAME}`)).toBe(true);
-    expect(/"type"\s*:\s*"error"/.test(agentFrames)).toBe(false);
+    const followUp = `继续刚才的连接检查，必须再使用同一个 ${SERVER_NAME} MCP 做一次只读确认，并简短回答。`;
+    const followUpInput = page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ });
+    await followUpInput.fill(followUp);
+    const followUpRequestPromise = page.waitForRequest((request) => (
+      request.method() === 'POST'
+      && new URL(request.url()).pathname === '/api/claude-agent'
+    ));
+    await page.getByRole('button', { name: /^(Send message|发送消息)$/ }).click();
+    const followUpRequest = await followUpRequestPromise;
+    expect(followUpRequest.postDataJSON()).toMatchObject({ id: threadId, resume: true });
+
+    await waitForTurn(page, token, threadId, 2);
+    const finalHistory = await getJson<ThreadMessages>(
+      page.request,
+      `/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`,
+      token,
+    );
+    const finalMcpParts = mcpToolParts(finalHistory);
+    expect(finalMcpParts.length).toBeGreaterThan(firstMcpParts.length);
+    expect(finalMcpParts.every((part) => (
+      part.toolName === `mcp__${SERVER_NAME}__${SAFE_INSPECTION_TOOL}`
+    ))).toBe(true);
+    expect(finalMcpParts.every((part) => part.state === 'output-available')).toBe(true);
+    expect(assistantText(finalHistory).length).toBeGreaterThan(assistantText(firstHistory).length);
+    await expect(page.getByText(followUp, { exact: true })).toBeVisible();
+    expect(unexpectedThreadCreations).toBe(0);
 
     const projection = credentialProjectionFacts(threadId);
     expect(projection.sourceHasMcpServer).toBe(true);
@@ -381,10 +545,13 @@ test('real actor completes MCP OAuth, Agent credential reuse, logout, and remova
       });
     }
 
-    await card.getByRole('button', { name: 'Logout' }).click();
-    await expect(card).toContainText('已退出');
-    await card.getByRole('button', { name: '移除' }).click();
-    await expect(card).toHaveCount(0);
+    await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
+    const connectedCard = page.getByRole('article', { name: `MCP 服务 ${SERVER_NAME}` });
+    await expect(connectedCard).toContainText('已连接', { timeout: 30_000 });
+    await connectedCard.getByRole('button', { name: 'Logout' }).click();
+    await expect(connectedCard).toContainText(/已退出|需要认证/);
+    await connectedCard.getByRole('button', { name: '移除' }).click();
+    await expect(connectedCard).toHaveCount(0);
     removed = true;
     operationId = null;
 

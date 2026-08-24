@@ -6,16 +6,16 @@
 <!-- [同步] 2026-08-21：支持绝对 HTTP(S)、neutral cwd 与 formal user-scope Remove。 -->
 <!-- [同步] 2026-08-22：在保留 per-thread TMPDIR 和 Chat/Dream 合同的前提下恢复到当前基线。 -->
 <!-- [同步] 2026-08-23：Agent 与 MCP 共用自有 Runtime resolver/manifest gate，绝对 CLAUDE_CODE_CLI_PATH 只用于官方回滚。 -->
-<!-- [同步] 2026-08-24：更新为自有 SDK 0.2.143、production-qualified Runtime 0.1.0、MCP 2.1.238/2.1.239 补丁与真实 Comfy OAuth 最终回执。 -->
+<!-- [同步] 2026-08-24：更新为 SDK main@6164bd91、MIT clean-room Runtime、跨进程 OAuth rotation 修复和真实 Comfy 两轮 tool/resume 回执。 -->
 
 # Claude MCP 资源链接器设计
 
 > 日期：2026-08-24
-> 状态：实现完成；macOS 真实 OAuth/inventory 验收通过，Linux 合同/技术验证通过，Windows fail closed；当前自有 Runtime 未执行收费不明的远端 Tool
+> 状态：实现完成；macOS 真实 OAuth、inventory、两轮只读 Tool 与 resume 验收通过，Linux 合同/技术验证通过，Windows fail closed
 > 业务域：`claude-mcp`  
 > 规范词：必须、禁止、应、可以分别表示强制、禁止、推荐和可选。
 
-术语约定：`production-qualified` 只表示通过 Dream 本地技术门，不等于获得公开再分发许可；`Dream 接口资格标识` 只覆盖本文列出的 IM 合同，不等于 official 全产品实现；`opaque` 表示业务代码只转交、不解释 payload；`filesystem anchor` 是不会向上发现用户/项目配置的中立 cwd；`repr-hidden` 表示内部字段禁止进入对象 repr、日志和 DTO。
+术语约定：`production-qualified` 表示通过 Dream 技术和真实业务门；`Dream 接口资格标识` 只覆盖本文列出的 IM 合同，不等于 official 全产品实现；`clean-room` 表示公共 Runtime 只使用仓库自有 MIT 源码和兼容许可证依赖；`opaque` 表示业务代码只转交、不解释 payload；`filesystem anchor` 是不会向上发现用户/项目配置的中立 cwd；`repr-hidden` 表示内部字段禁止进入对象 repr、日志和 DTO。
 
 ## 1. 结论先行
 
@@ -36,7 +36,7 @@ claude mcp list
 
 1. 官方 Runtime 的历史行为是 Linux/Windows 使用 `.credentials.json`、macOS 使用 config-dir-keyed Keychain。当前自有 Runtime 已通过独立、source-bound secure-storage 修复收敛：只要显式 selector 有效，所有平台都只使用 `CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json`，目录/文件必须为 `0700/0600`，且不访问用户 Keychain；selector 未设置时才保留 official macOS Keychain 行为。Resources 与 Agent 因此可在保持不同 `CLAUDE_CONFIG_DIR` 的同时指向同一 actor-owned 凭据真相；capability 会检查 exact Runtime marker、文件和真实回执，任一缺失即 fail closed。
 2. Agent 已将整个 config home 定位为 `{thread-workspace}/.claude-home`，并携带 `canonical_user_id`。runner 为安全只加载 `setting-sources=project`，因此 thread `.claude-home/.claude.json` 中的 user-scope `mcpServers` 会被正式 CLI 忽略。现有 runner 已通过公开 `mcp_servers` option 注入内部 MCP；远端 opaque 定义复用同一入口，不新增 `.mcp.json` approval、表或第二套 Agent runtime。
-3. 历史 Docker 基线曾固定 CLI `2.1.108`、Python SDK `0.2.128`，随后使用 official SDK `0.2.140` + CLI `2.1.235`；当前依赖已原子更新为自有 SDK `0.2.143`（CLI pin `2.1.241`）+ production-qualified 自有 Runtime `0.1.0`，Docker 另保留显式 official rollback CLI `2.1.241`。自有 Runtime 的恢复源码证据版本仍为 `2.1.88`，通过独立 `2.1.238`/`2.1.239` MCP compatibility transforms 和 OAuth 修复对齐当前 Dream 所需行为；不能把兼容标识误写成恢复源码版本，也不能声称与 official `2.1.241` 全产品等价。
+3. 历史 Docker 基线曾使用 official SDK/CLI 和本地恢复源码候选；当前依赖已原子更新为自有 SDK `0.2.143`（Dream 固定 `main@6164bd91…`）与 clean-room Runtime `0.1.0`，Docker 另保留显式 official rollback CLI `2.1.241`。公共 Runtime 不读取、编译或打包恢复源码；MCP OAuth/refresh/management 由 `src/cleanroom/` 独立实现并通过进程合同和真实业务验证。`2.1.241` 仍只是 Dream 接口兼容输出，不能声称 official 全产品等价。
 
 本设计据此取消“production provider 永久 disabled”的旧结论，改为 actor-owned file capability：自有 Runtime 是 token exchange/refresh/logout 和 selector-backed `.credentials.json` 的唯一 owner；业务代码不读取 token。业务代码把 opaque `mcpServers` 作为每-turn SDK option 交付，且仅在 Linux 复制/撤销 opaque `mcpOAuth`；macOS token 保留在用户 secure-storage 根，不进入后端内存或 thread 文件。未知存储后端和未验证 official rollback 行为仍 fail closed。
 
@@ -147,7 +147,7 @@ App
 - Plugin 可以贡献 MCP server，并使用 `plugin:<plugin-name>:<server-name>` 完整名称。
 - `docs/design/mcp-remote-interaction.md` 证明 `/mcp` 是 local-jsx，headless 发送文本无效。
 - `ink-claude-dream-agent-sdk==0.2.143` 保留公共 `ClaudeSDKClient.get_mcp_status()`，返回 server `connected/failed/needs-auth/pending/disabled`、`serverInfo`、scope 和 connected 时的 Tools；Tool 包含 name、description 与 `readOnly/destructive/openWorld` 注解。
-- 最终真实 `dmeck123@suoxya.com` / `comfy-secstore-qa-0824-02` 探针从公开 Resources/OAuth 路径收敛到 `connected`，fresh SDK/Runtime inventory 返回 `comfyui-cloud 0.40.1` 和 41 个 Tools，未发送 prompt。因 Tools DTO 没有零费用保证且普通 Agent turn 会消费模型 Token，最终验收按三重收费门禁未调用 Tool；这是财务安全结果，不是 MCP 功能失败。
+- 最终真实 `dmeck123@suoxya.com` 探针从公开 Resources/OAuth 路径收敛到 `connected`。随后通过可见 Chat 发起两轮只读请求，每轮都只允许精确 `get_server_info`，完成工具确认、`output-available` 持久化、页面刷新和同一 Thread resume；最后从 Resources 执行 Logout/Remove。未创建、修改或删除任何远端 Comfy 内容。
 
 初始调研时未找到以下能力，当前前四项已由 §19 所列实现补齐：
 
@@ -156,7 +156,7 @@ App
 - user-scoped Agent/MCP config identity provider。
 - `claude-mcp` 数据库 capability 或 operation 表。
 
-仍未完成的是把受限自有 Runtime artifact 以合规方式安装到 Docker 拓扑并验证容器内 sandbox/credential deny-read；当前 Docker 仅提供显式 official `2.1.241` 回滚物。
+clean-room selector 与匹配 Linux 平台包现已由 Dockerfile 从 npm registry 精确安装，official `2.1.241` 继续作为显式回滚。仍未完成的是在真实 glibc/bubblewrap 部署宿主验证 sandbox/credential deny-read；这属于目标拓扑验收，不再是制品或 Docker 源码缺口。
 
 公共 SDK 当前未返回 Resources 或 Prompts 清单。因此本期只实现 Tools inventory；Resources/Prompts 在 UI 中显示 `not_reported`，禁止解析 `/mcp` TUI 或伪造数量。版本绑定依据是固定上游提交中的 [类型合同](https://github.com/anthropics/claude-agent-sdk-python/blob/542fefb3b94be87760b2513fff889b91bb5b6672/src/claude_agent_sdk/types.py) 与 [client API](https://github.com/anthropics/claude-agent-sdk-python/blob/542fefb3b94be87760b2513fff889b91bb5b6672/src/claude_agent_sdk/client.py)。
 
@@ -164,14 +164,14 @@ App
 
 | 位置 | 版本/证据 | 结论 |
 |---|---|---|
-| 本机默认自有 Runtime | `ink-claude-code-dream==0.1.0`；`--version` → `2.1.241`；commit `cb91a9901303dccb98c5b41cbfa6d56ab88ce97a` | PATH 默认入口；release manifest `corePruned=true`、`productionEligible=true`；`2.1.241` 仅为 Dream 所需接口资格标识，不表示 official 全产品等价。 |
-| Runtime 恢复源码/核心 | source `2.1.88`，digest `470ca57d...c228e`；core SHA `a300fe7f...161f5` | 1,989 inputs、48 outputs、0 gaps；MCP `2.1.238`/`2.1.239` 增量单独应用。 |
+| 本机默认自有 Runtime | `@glide-the/ink-claude-code-dream@0.1.0`；`--version` → `2.1.241`；registry meta tgz SHA `3c7c357e…57f4d4f` | PATH selector 默认入口；13 项 Dream capability 全部声明；`2.1.241` 仅为接口资格标识。 |
+| Runtime clean-room 核心 | `src/cleanroom/` 47 个文件、250,859 bytes；tree SHA `2e5f2059…a66ec`；darwin-arm64 executable SHA `04372c5b…9d0d22be` | 仓库自有 MIT 实现；restored/vendor/restricted-source scan 零命中。 |
 | 本机 ambient official CLI | `/Users/dmeck/.local/bin/claude` → `2.1.220` | 不是 Dream 默认路径，也不作为 Docker 发布证据。 |
-| Docker official rollback CLI | `backend/Dockerfile` → `2.1.241`，build 时检查 exact version/login/logout/no-browser，并与 SDK `_cli_version` 交叉断言 | 仅能通过 absolute `CLAUDE_CODE_CLI_PATH` 显式选择；默认自有 Runtime 仍需独立资格门。 |
-| 当前 Python SDK | `ink-claude-dream-agent-sdk==0.2.143`，Git commit `bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4` | `uv.lock`、exported requirements、clean venv 与 Docker metadata/import-provider 门同步验证；official distribution 不得并存。 |
+| Docker 默认/回滚 Runtime | npm selector `0.1.0` + 匹配 Linux 平台包；official `2.1.241` 后装 | build 时检查自有 CLI/manifest/Dream resolver；official 仅通过 absolute `CLAUDE_CODE_CLI_PATH` 显式选择。 |
+| 当前 Python SDK | `ink-claude-dream-agent-sdk==0.2.143`，Git commit `6164bd91e43bbf610ec40b4500edec18a97ce665` | `uv.lock`、exported requirements、clean venv 与 Docker metadata/import-provider 门同步验证；official distribution 不得并存。 |
 | SDK import / API | distribution 改名，import 保留 `claude_agent_sdk` | 公共 client/options/query、stream types 与 MCP inventory API 保持原协议。 |
-| Runtime Bun | 内容寻址安装的 Bun `1.4.0`；命令 `ink-claude-code-bun-1.4.0` | 与 ambient Bun `1.2.20` 隔离；launcher 启动前精确校验版本。 |
-| 新版 sandbox | 官方配置支持 `enableWeakerNestedSandbox`、`network.allowAllUnixSockets`；seccomp 为 optional | Docker 中保留 bwrap filesystem/network 隔离；当前自有 Runtime artifact 尚未进入 Docker 源码镜像，容器自有 Runtime + sandbox 仍是独立部署验收项。 |
+| Runtime Bun | 构建器 Bun `1.4.0`；四平台 standalone | selector 启动平台 binary；运行时不依赖 ambient Bun。 |
+| 新版 sandbox | 官方配置支持 `enableWeakerNestedSandbox`、`network.allowAllUnixSockets`；seccomp 为 optional | Docker 安装自有 Runtime 并保留 bwrap filesystem/network 隔离；目标 glibc/bubblewrap 宿主仍需独立部署验收。 |
 | 历史 npm 2.1.108 | `npm pack --dry-run` 含 `vendor/seccomp/*/apply-seccomp` | 仅解释旧生产问题；不是当前固定版本，且缺少 MCP login。 |
 
 ### 3.7 本轮影响范围与真实业务测试边界
@@ -761,17 +761,17 @@ sequenceDiagram
 
 mocked/isolated lane 覆盖：Resources → Start login → authorization URL → redirect submit → Connected → Logout。网络、console、page error 和 request failure listener 在导航前注册；不调用真实 provider。
 
-显式真实业务验收使用 `dmeck123@suoxya.com`、正常本机 Dream/Admin/Gateway/PostgreSQL 与公开 UI/API：Resources 配置/发现 → 正式 `login --no-browser` → 浏览器真实授权 → redirect 提交 → Connected → fresh SDK/Runtime inventory → Resources Logout/Remove → fresh post-logout/final-list 验证。只有同时满足“语义明确、零成本、只读”的 Tool 才允许执行；最终 Comfy inventory 未提供零费用保证，因此不调用 Tool。macOS 断言测试 harness 与业务后端不读取或复制 credential payload、thread 无 `mcpOAuth` 文件；exact Runtime 只访问 actor-owned `0600 .credentials.json`，fake `security` sentinel 证明没有 Keychain 调用。只允许本轮 user-scoped config 文件和正常业务回执变化，默认 Claude 身份和其他用户/thread 不变。
+显式真实业务验收使用 `dmeck123@suoxya.com`、正常本机 Dream/Admin/Gateway/PostgreSQL 与公开 UI/API：Resources 配置/发现 → Chrome 真实授权 → redirect 提交 → Connected → 可见 Chat 第一轮精确 `get_server_info` → 工具确认 → `output-available` → 页面刷新 → 同一 Thread 第二轮精确 `get_server_info` → 工具确认 → `output-available` → Resources Logout/Remove → 最终列表验证。只允许语义明确且只读的 `get_server_info`，禁止任何远端创建、修改或删除。macOS harness 与业务后端不输出 credential payload；exact Runtime 只访问 actor-owned `0600 .credentials.json`。只允许本轮 user-scoped config 和正常 Thread/Run/Gateway/账本回执变化，默认 Claude 身份和其他用户/thread 不变。
 
 2026-08-20 历史验收通过：`dmeck@suoxya.com` 的公开业务旅程得到 `1 passed (1.6m)`；Resources 添加、正式 OAuth、Connected、正常 Agent thread `304f386f-0022-42be-a66d-b0f20b7870eb` 调用只读工具 `mcp__ink-real-qa-comfy-cloud-20260820__get_server_info`、Logout 与 Remove 均成功，macOS thread 未出现 `mcpOAuth` 文件。该回执保留为旧 Runtime 路径的历史证据，不能替代当前自有 Runtime 验收。
 
-2026-08-24 当前自有 Runtime 最终验收通过：账号 `dmeck123@suoxya.com` 配置 alias `comfy-secstore-qa-0824-02`，configure 201、auth 202、Chrome 中 Personal Workspace consent、callback 200、operation `connected`。安全 receipt 共 16 个固定 stage，以 `credentials_present` → `flow_resolved` → `success_stdout_flushed` 结束且没有 `flow_failed`。fresh inventory 为 HTTP 200、`connected`、`comfyui-cloud 0.40.1`、41 Tools，Resources/Prompts 为 `not_reported`。收费三重门禁拒绝 Tool 调用；cancel/logout/post-logout inventory/remove/final-list 全部通过，alias 最终不存在。
+2026-08-24 clean-room Runtime 最终验收通过：账号 `dmeck123@suoxya.com` 使用 `https://cloud.comfy.org/mcp` 完成 Chrome Personal Workspace consent、callback、`connected`。业务验收对象是本地 qualification meta SHA `fd4dcbf2…a6d3ca7b`、darwin-arm64 SHA `8e0cdc03…ebbc2a73`、executable SHA `04372c5b…9d0d22be`；后续 registry fresh install 复验同一 manifest/executable，公共 tarball SHA 分别为 `3c7c357e…57f4d4f`、`85906499…07c7ea63`。可见 Chat 两轮均精确调用 `get_server_info`，confirmation API 返回 200，两轮工具 parts 均持久化为 `output-available`；中间刷新页面后继续使用同一 Thread。Logout/Remove 后 alias 不存在，凭据投影清除。Playwright exit 0，`1 passed (2.3m)`。
 
 ## 16. 当前发布状态与回滚
 
 1. user identity/synchronizer、driver/API/UI 与 fake CLI contract 已落地。
-2. SDK `0.2.143`、自有 Runtime `0.1.0`、Dream 接口资格标识 `2.1.241`、Bun `1.4.0` 与 Docker official rollback `2.1.241` 已原子记录；绝对 `cli_path` 回滚和 build-time version/help assertions 保留。
-3. 本机 fake CLI、unit/API/frontend/build/Playwright、真实 macOS OAuth/inventory 和 Runtime package gate 已通过。当前 Dockerfile 未包含受限自有 Runtime artifact，因此“容器内自有 Runtime + Bash sandbox/credential deny-read”仍是部署拓扑的独立未完成验收项，不能由本机回执替代。
+2. SDK `0.2.143@6164bd91…`、clean-room Runtime `main@7c34e6cd`/npm `0.1.0`、Dream 接口资格标识 `2.1.241`、Bun 构建器 `1.4.0` 与 Docker official rollback `2.1.241` 已原子记录；绝对 `cli_path` 回滚和 build-time version/help assertions 保留。
+3. unit/API/frontend/build/Playwright、真实 macOS OAuth/两轮 Tool/resume、Runtime package gate、五包发布与 registry fresh install 已通过。Dockerfile 已安装 selector/匹配 Linux 包；真实 glibc/bubblewrap 宿主的 sandbox/credential deny-read 仍需目标拓扑验收，本机回执不能替代该项。
 4. 当前只允许具名 `local_persistent` 单节点 topology capability；不得用 deployment environment 名称改变业务路径。
 5. rollback 可关闭 Resources capability，但不得恢复 2.1.108 双 CLI 路径；已有用户源凭证保留，thread 在下一次同步撤销或更新。
 
@@ -857,12 +857,12 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 - `backend/libs/claude_agent_kit/types.py` / `server/agent_runner.py`：repr-hidden `claude_mcp_servers` 通过官方 `ClaudeAgentOptions.mcp_servers` 与内部 stdio servers 合并；名称冲突 fail closed，不增加 remote wildcard `allowed_tools`。
 - `backend/libs/claude_agent_kit/server/sdk_env.py`：保留 thread `CLAUDE_CONFIG_DIR`，以服务端权威值注入 macOS `CLAUDE_SECURESTORAGE_CONFIG_DIR`，让 exact Runtime 直接使用 actor-owned 文件；浏览器/user env 无权覆盖。
 - `backend/libs/claude_agent_kit/server/workspace.py`：deny sibling workspace/backend/home/custom MCP runtime root，当前 thread 再 allow-read；credential file 同时使用 exact deny-read/deny-write 和 `credentials.files(mode=deny)`。不再 deny `/`，因为 CLI 2.1.235 下该设置会移除 bwrap 内 `/bin/bash`。
-- `backend/Dockerfile` / `requirements.txt` / `pyproject.toml` / `uv.lock`：Python 3.12、官方 Node 22.18.0、显式回滚 CLI 2.1.241，以及 Git commit 锁定的自有 SDK 0.2.143；build-time 验证 exact Node/CLI、SDK `_cli_version == 2.1.241`、公开 MCP help、SDK metadata/API/import-provider，并拒绝 official SDK distribution 并存。本机默认自有 Runtime 0.1.0 已通过 manifest 资格门；容器只有在安装同等资格 artifact 后才可走默认路径，否则必须显式配置 `CLAUDE_CODE_CLI_PATH=/usr/local/bin/claude`。
+- `backend/Dockerfile` / `requirements.txt` / `pyproject.toml` / `uv.lock`：Python 3.12、官方 Node 22.18.0、npm 自有 Runtime selector 0.1.0、显式回滚 CLI 2.1.241，以及 Git commit 锁定的自有 SDK 0.2.143；build-time 验证 exact Node/CLI、自有 manifest/Dream resolver、SDK `_cli_version == 2.1.241`、公开 MCP help、SDK metadata/API/import-provider，并拒绝 official SDK distribution 并存。
 - `frontend/e2e/claude-mcp-resources.spec.ts`：拦截 API 的可见 Resources → Login → redirect → Connected → 41-tool detail/search/risk → refresh/back → Logout 技术旅程。
 
 2026-08-20 历史发布门通过：Claude MCP backend contract `37 passed`；frontend 聚焦 lint/build 与 provider-free Resources 旅程通过；旧具名账户和旧 CLI/SDK 回执保留为历史比较，不作为当前自有 Runtime 资格证据。共享数据库 Schema 与 ClaudePlugin operation 表未改变。
 
-2026-08-24 当前发布门：自有 Runtime core hash `a300fe7f...161f5` 的 SDK 真实进程差分、MCP management、official MCP SDK `2.0.0` OAuth CLI 3/3、同 core hash Dream 业务主链和最终 Comfy OAuth/inventory 均通过。Runtime 本地包 62 files/61 checksums，`productionEligible=true`；公开发布与再分发仍为 false。安装器修复后，Dream 在未设置 `CLAUDE_CODE_CLI_PATH`/`INK_CLAUDE_CODE_BUN_PATH` 时完成 FastAPI startup。最新 stdio/HTTP comparator 校准在候选执行前因参考 official `2.1.220` 与 MCP Python `1.27.1` fixture 不兼容而停止；本轮不宣称重跑通过，只沿用绑定同一 source/core hash 的既有完整差分回执。
+2026-08-24 当前发布门：clean-room Runtime 完整测试 94 total / 92 passed / 2 个显式 official OAuth fixture skips / 0 fail；OAuth 6/6，management + OAuth 9/9。四个平台 executable 与五个 tgz 完成两轮 clean build并逐字节一致，SBOM 为 CycloneDX 1.5/22 components，`.map` 与 restricted-source 扫描零命中。Runtime PR #5/#6 已合并到 `main@7c34e6cd`，最终 main CI `32729044627` 成功，五个 `0.1.0` npm 包均公开；Node 24 registry fresh install、Dream resolver、真实 Comfy OAuth、两轮 Tool、刷新 resume 和 cleanup 全部通过。
 
 真实 Chat 图片回归另发现 Agent SDK transport 的独立限制：Claude CLI 的 `Read` 图片回执会同时携带 message 与 tool result，证据线程出现 1,346,958-byte JSONL 单行，超过 SDK 原 1 MiB stdout buffer 默认值。这不是 MCP tool inventory 或 OAuth 失败。生产路径现通过公开 `ClaudeAgentOptions.max_buffer_size` 使用服务端有界配置 `INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES`，默认 8 MiB、允许 1–64 MiB；非法配置回退默认值，不记录 payload。具名账户可见 UI 路径“上传图片 → Agent Read → assistant 回复”结果 `1 passed (36.4s)`，证据 thread `ecaad924-512d-4790-84d3-bd2fc8505ce6` 保留，未修改 MCP 认证或远程业务数据。
 

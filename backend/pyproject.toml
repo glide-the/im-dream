@@ -27,7 +27,7 @@ dependencies = [
   "eval-type-backport>=0.2,<1",
   "websockets>=12,<14",
   "pillow>=10,<11",
-  "ink-claude-dream-agent-sdk @ git+https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git@bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4",
+  "ink-claude-dream-agent-sdk @ git+https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git@6164bd91e43bbf610ec40b4500edec18a97ce665",
   "mcp>=1.27.0",
   "boto3>=1.34,<2",
   "python-multipart>=0.0.9,<1",

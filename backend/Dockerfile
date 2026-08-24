@@ -19,10 +19,13 @@
 #        Claude Code 2.1.241 declares Node >=22; Debian bookworm's Node 18 is
 #        not an accepted production pairing.
 # [Sync] 2026-08-24: install ink-claude-dream-agent-sdk 0.2.143 from immutable
-#        Git commit bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4 through the uv-
+#        main commit 6164bd91e43bbf610ec40b4500edec18a97ce665 through the uv-
 #        exported requirements lock; verify distribution/import ownership at
-#        build time. Keep official Claude Code 2.1.241 only as the explicit
-#        CLAUDE_CODE_CLI_PATH rollback artifact; it is not the default Runtime.
+#        build time. Install the exact public ink-claude-code-dream 0.1.0
+#        selector as the default production-qualified Runtime, then install
+#        official Claude Code 2.1.241 after safely removing only the selector's
+#        conflicting `claude` alias, so /usr/local/bin/claude remains the
+#        explicit CLAUDE_CODE_CLI_PATH rollback artifact.
 
 ARG NODE_VERSION=22.18.0
 FROM node:${NODE_VERSION}-bookworm-slim AS node_runtime
@@ -33,6 +36,7 @@ ARG NODE_VERSION
 ARG DEBIAN_MIRROR=https://mirrors.aliyun.com/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
 ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG INK_CLAUDE_NPM_REGISTRY=https://registry.npmjs.org
 ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 ARG PYPI_TRUSTED_HOST=mirrors.aliyun.com
 
@@ -51,6 +55,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - bash curl jq git ripgrep: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 ARG CLAUDE_CODE_VERSION=2.1.241
+ARG INK_CLAUDE_CODE_VERSION=0.1.0
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i \
@@ -86,15 +91,33 @@ RUN set -eux; \
     ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
     test "$(node --version)" = "v${NODE_VERSION}"
 
-# Explicit official-CLI rollback artifact. Dream's default resolver does not
-# select the ambient `claude` name; an operator must deliberately set the
-# absolute CLAUDE_CODE_CLI_PATH=/usr/local/bin/claude to use this rollback.
-# bubblewrap/socat above provide its required Linux sandbox dependencies.
+# Install Dream's exact public selector first. Its optional dependency selects
+# only the matching linux architecture package. The selector exposes both
+# names, so the official package is intentionally installed second: the Dream
+# default remains `ink-claude-code-dream`, while `/usr/local/bin/claude` is the
+# explicit official rollback selected only through CLAUDE_CODE_CLI_PATH.
 RUN set -eux; \
+    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.0"; \
     test "${CLAUDE_CODE_VERSION}" = "2.1.241"; \
+    npm install -g \
+        --registry="${INK_CLAUDE_NPM_REGISTRY}" \
+        "@glide-the/ink-claude-code-dream@${INK_CLAUDE_CODE_VERSION}"; \
+    test "$(ink-claude-code-dream --version)" = "${CLAUDE_CODE_VERSION} (Claude Code)"; \
+    DREAM_RUNTIME_ENTRYPOINT="$(realpath "$(command -v ink-claude-code-dream)")"; \
+    DREAM_RUNTIME_ROOT="$(dirname "$(dirname "${DREAM_RUNTIME_ENTRYPOINT}")")"; \
+    jq -e \
+        --arg runtime_version "${INK_CLAUDE_CODE_VERSION}" \
+        --arg sdk_version "0.2.143" \
+        '.runtime.name == "ink-claude-code-dream" and .runtime.version == $runtime_version and .runtime.integration.sdkVersion == $sdk_version and .core.corePruned == true and .core.productionEligible == true' \
+        "${DREAM_RUNTIME_ROOT}/release-manifest.json" >/dev/null; \
+    test -L /usr/local/bin/claude; \
+    test "$(realpath /usr/local/bin/claude)" = "${DREAM_RUNTIME_ENTRYPOINT}"; \
+    unlink /usr/local/bin/claude; \
     npm config set registry "${NPM_REGISTRY}"; \
     npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
     test "$(claude --version | awk '{print $1}')" = "${CLAUDE_CODE_VERSION}"; \
+    test "$(realpath "$(command -v claude)")" != "${DREAM_RUNTIME_ENTRYPOINT}"; \
+    test "$(ink-claude-code-dream --version)" = "${CLAUDE_CODE_VERSION} (Claude Code)"; \
     claude mcp login --help | grep -F -- "--no-browser"; \
     claude mcp logout --help >/dev/null; \
     npm cache clean --force
@@ -110,6 +133,11 @@ RUN python -m pip install --no-cache-dir --timeout 180 --retries 10 \
     python -c "from importlib import metadata as m; import claude_agent_sdk as sdk; from claude_agent_sdk._cli_version import __cli_version__; dist=m.distribution('ink-claude-dream-agent-sdk'); providers={name.lower().replace('_','-') for name in m.packages_distributions().get('claude_agent_sdk', [])}; installed={str(item.metadata.get('Name') or '').lower().replace('_','-') for item in m.distributions()}; assert dist.version == '0.2.143'; assert sdk.__version__ == '0.2.143'; assert __cli_version__ == '2.1.241'; assert providers == {'ink-claude-dream-agent-sdk'}; assert 'claude-agent-sdk' not in installed; assert all(hasattr(sdk, name) for name in ('ClaudeAgentOptions', 'ClaudeSDKClient', 'query'))"
 
 COPY . .
+
+# Exercise the same fail-closed resolver used by Agent turns and MCP
+# management. This proves the installed selector, release manifest and
+# capability evidence are mutually compatible before the image is emitted.
+RUN python -c "from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; path=resolve_claude_cli_path({'PATH':'/usr/local/bin:/usr/bin:/bin'}); assert path and path.endswith('/ink-claude-code-dream'), path"
 
 EXPOSE 8765
 

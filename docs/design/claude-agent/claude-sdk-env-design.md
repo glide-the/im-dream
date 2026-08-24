@@ -1,7 +1,7 @@
 <!-- [输入] Dream SDK options、Runtime resolver、thread Workspace/TMPDIR、用户 SDK 环境和启动资格门。 -->
 <!-- [输出] 定义 Claude SDK 子进程环境、config home、临时根、Runtime 选择与回滚合同。 -->
 <!-- [定位] Claude Agent SDK 环境与进程启动设计真相源。 -->
-<!-- [同步] 2026-08-24：记录已安装的 production-qualified 自有 Runtime 与独立 Bun 1.4.0。 -->
+<!-- [同步] 2026-08-24：记录 SDK main@6164bd91、Runtime main@7c34e6cd 与公开 npm 多平台 Runtime；standalone 不依赖 ambient Bun。 -->
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
 > **[同步] 2026-05-24**：迁移请求级模型覆盖开关：`PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` → `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`；新 key 加入 `sdk_env.py` 白名单；旧 key 同时保留作为 fallback。
@@ -17,10 +17,11 @@
 > 绝对覆盖与官方 CLI 回滚入口；不再回退 ambient `claude` 或 SDK bundled CLI。
 > **[同步] 2026-08-24**：Python 依赖文件把
 > `ink-claude-dream-agent-sdk==0.2.143` 固定到 Git commit
-> `bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4`，并排除 official
+> `6164bd91e43bbf610ec40b4500edec18a97ce665`，并排除 official
 > `claude-agent-sdk`。Docker 验证 metadata/import 所有权，只保留显式官方
-> CLI 回滚物。本机已安装通过生产资格门的 `ink-claude-code-dream==0.1.0`
-> 和独立版本化 Bun `1.4.0`，默认 PATH 解析与 FastAPI 启动均通过。
+> CLI 回滚物。Runtime PR #5/#6 已合并到 `main@7c34e6cd` 并公开发布五个 npm 包；本机已从 registry 全新安装通过生产资格门的 clean-room
+> `@glide-the/ink-claude-code-dream@0.1.0` selector 与 darwin-arm64 平台包，
+> 默认 PATH 解析、FastAPI 启动和真实 Comfy MCP 两轮 resume 均通过。
 
 # Claude SDK 子进程环境与 Runtime 解析设计
 
@@ -227,28 +228,24 @@ Dream 只保留一条 Agent 业务路径：`server.py` 在 Agent factory 启动�
 | 2 | `shutil.which("ink-claude-code-dream")` | 默认自有 Runtime；其 release-relative manifest/capabilities 必须通过生产资格门禁 |
 | 3 | 无匹配 | fail closed；禁止 SDK bundled CLI 或 ambient `claude` 静默形成第二条路径 |
 
-默认 Runtime manifest 必须明确 `corePruned=true`、
-`productionEligible=true`、`claude-code-stream-json/1`，并声明 stream/control、
-MCP management identity/stdio/http/OAuth、plugin、workspace/sandbox/thread TMPDIR、
-transcript/resume/cancel 能力。只透明委托官方 core 且声明
-`productionEligible=false` 的 compatibility envelope 不满足该门禁，不能作为默认
-生产 artifact。Python SDK 已使用不可变 Git commit
-`bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4` 原子切换到自有 distribution。
+默认 Runtime manifest 必须明确 `productionEligible=true`、
+`claude-code-stream-json/v1`，并声明以下 13 项能力：streaming、双向 control、
+session resume、JSONL transcript、workspace cwd、thread-local TMPDIR、sandbox、
+MCP stdio/HTTP/OAuth/management identity、plugins 和 cancel。只透明委托官方 core
+或缺少任一能力的 envelope 不满足门禁。Python SDK 已使用不可变 Git commit
+`6164bd91e43bbf610ec40b4500edec18a97ce665` 原子切换到自有 distribution。
 
-当前本机默认 Runtime 是 `ink-claude-code-dream==0.1.0`：恢复源码证据版本为
-`2.1.88`，Dream-facing CLI 兼容版本为 `2.1.241`，core bundle SHA-256 为
-`a300fe7fb3da453e45b2f2cd7721bef1963aa991498c26a2826fef8b381161f5`。
-这里的 `2.1.241` 只表示 Dream 所需接口资格和对外标识，不代表自有 Runtime
-包含 official `2.1.89–2.1.241` 的全部源码或产品功能。
-安装器把 Runtime 与精确 Bun `1.4.0` 分别复制到
-`~/.local/share/ink-claude-code-dream/` 下的内容寻址目录，并建立
-`ink-claude-code-dream` / `ink-claude-code-bun-1.4.0` PATH 软链接；不修改
-ambient Bun。launcher 会跟随自身软链接定位真实 release root，并在启动前校验
-Bun 版本。当前镜像继续保留 official CLI `2.1.241` 作为显式绝对路径回滚，
-Docker build 会把它与自有 SDK 的 `_cli_version == 2.1.241` 原子断言，但默认
-resolver 不会选中它。当前 Dockerfile 不把受限自有 Runtime artifact 打入源码镜像：
-容器拓扑必须额外安装 qualified artifact 到 PATH，或显式设置
-`CLAUDE_CODE_CLI_PATH=/usr/local/bin/claude` 使用 official rollback；否则启动按设计失败。
+当前本机默认 Runtime 是 clean-room `@glide-the/ink-claude-code-dream@0.1.0`：
+源码只来自 Runtime 仓库自有 MIT `src/cleanroom/` 和兼容许可证依赖，
+Dream-facing CLI 兼容输出为 `2.1.241 (Claude Code)`。该字符串只表示 Dream 所需
+接口资格，不声明官方全产品等价。Bun `1.4.0` 在构建阶段生成四个平台 standalone，
+运行时 selector 不依赖独立 Bun 或 ambient Bun。真实业务验收使用的本地 qualification
+meta/darwin-arm64 tgz SHA 分别为 `fd4dcbf2…a6d3ca7b`、`8e0cdc03…ebbc2a73`，
+executable SHA 为 `04372c5b…9d0d22be`；随后公共 registry fresh install 证明同一
+manifest/executable 合同，registry tgz SHA 分别为 `3c7c357e…57f4d4f`、
+`85906499…07c7ea63`，两棵安装树都无 `.map`。
+
+当前镜像从 npm 官方 registry 精确安装 clean-room selector `0.1.0`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中执行 CLI version、manifest 与 Dream resolver 门。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 
@@ -404,7 +401,7 @@ backend/.venv/bin/python -m pytest -q \
   tests/test_dockerfile_claude_contract.py
 ```
 
-2026-08-24 本轮结果：exit 0，`21 passed, 3 subtests passed`。该聚焦回归验证 Runtime resolver、manifest gate、绝对 override 结构检查、SDK option `cli_path` 注入和 Docker 版本/回滚合同。更广的 env、runner、Workspace 与 Gateway 行为由各自既有测试模块维护；文档修改不把未在本轮重跑的测试写成新回执。
+2026-08-24 本轮结果：Docker/registry/resolver 聚焦 `43 passed, 3 subtests passed`；Claude/Dream 相关后端回归 `592 passed, 1 skipped, 181 subtests passed`。覆盖 Runtime resolver、manifest gate、绝对 override、SDK `cli_path`、registry artifact 与 Docker 默认/回滚合同。
 
 持续回归必须覆盖：
 
@@ -436,9 +433,10 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 - [x] `options.env` 显式值优先；Gateway 启用时再由 server-owned adapter 强制覆盖 Provider 路由与凭据。
 - [x] SDK options 携带 `--setting-sources project`，Workspace 初始化刷新项目 `.claude` 模板且保留 runtime skills。
 - [x] 默认 resolver 只选 qualified `ink-claude-code-dream`；bundled/ambient CLI 不形成第二路径。
-- [x] 本机无 override FastAPI 启动通过；Runtime 使用独立 Bun `1.4.0`，ambient `1.2.20` 未改变。
-- [x] 聚焦 resolver/Docker 回归 `21 passed, 3 subtests passed`。
-- [ ] 当前 Docker 镜像源码未内置受限自有 Runtime artifact；部署拓扑仍需受控安装 artifact 或显式 official rollback。
+- [x] 本机无 override FastAPI 启动通过；Runtime 使用 Bun 1.4.0 standalone，不依赖 ambient Bun。
+- [x] SDK/Docker/env/registry 聚焦回归 `43 passed + 3 subtests`，相关后端回归 `592 passed + 181 subtests`。
+- [x] 真实账号通过 Chrome Comfy OAuth、两轮 tool call、刷新后同 Thread resume、Logout/Remove，Playwright `1 passed (2.3m)`。
+- [x] Docker 默认拓扑从 npm 安装 selector 与匹配 Linux 平台包；official `/usr/local/bin/claude` 仅作显式回滚。
 
 ## 10. 风险与回滚方式
 

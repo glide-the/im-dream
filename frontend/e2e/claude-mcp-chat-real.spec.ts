@@ -3,6 +3,7 @@
 // [Pos] Opt-in read-only Claude MCP Chat acceptance; it preserves the server credential and the created Chat thread for review.
 // [Sync] 2026-08-20: prove an authenticated user-scope MCP server is available through the actual Chat composer and after refresh.
 // [Sync] 2026-08-20: verify the Resources detail reads live public-SDK tool metadata before Chat uses the same identity.
+// [Sync] 2026-08-24: bind visible approval to the exact thread and require a successful canonical confirmation response.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -14,6 +15,7 @@ const ENABLED = process.env.INK_REAL_CLAUDE_MCP_CHAT_QA === '1';
 const WEB_BASE = process.env.INK_REAL_CLAUDE_MCP_WEB_BASE ?? 'http://127.0.0.1:5173';
 const ACTOR_EMAIL = process.env.INK_REAL_CLAUDE_MCP_ACTOR_EMAIL ?? '';
 const SERVER_NAME = process.env.INK_REAL_CLAUDE_MCP_SERVER_NAME ?? '';
+const SAFE_INSPECTION_TOOL = 'get_server_info';
 const BACKEND_DIR = resolve(process.cwd(), '../backend');
 const BACKEND_PYTHON = resolve(BACKEND_DIR, '.venv/bin/python');
 
@@ -113,7 +115,10 @@ async function getJson<T>(
   return response.json() as Promise<T>;
 }
 
-async function approveExpectedMcpConfirmation(page: Page): Promise<boolean> {
+async function approveExpectedMcpConfirmation(
+  page: Page,
+  threadId: string,
+): Promise<boolean> {
   const dialogs = page.locator('[role="alertdialog"]:visible');
   const count = await dialogs.count();
   if (count === 0) return false;
@@ -122,12 +127,31 @@ async function approveExpectedMcpConfirmation(page: Page): Promise<boolean> {
   }
   const dialog = dialogs.first();
   const accessibleName = await dialog.getAttribute('aria-label');
-  if (!accessibleName?.includes(`mcp__${SERVER_NAME}__`)) {
+  if (!accessibleName?.includes(`mcp__${SERVER_NAME}__${SAFE_INSPECTION_TOOL}`)) {
     throw new Error('An unexpected tool confirmation blocked the MCP Chat journey.');
   }
   const approve = dialog.getByRole('button', { name: /^(同意|Approve)/ });
   await expect(approve).toBeVisible();
+  const confirmationResponsePromise = page.waitForResponse((response) => (
+    response.request().method() === 'POST'
+    && new URL(response.url()).pathname === '/api/claude-agent/tool-confirm'
+  ), { timeout: 20_000 });
   await approve.click();
+  const confirmationResponse = await confirmationResponsePromise;
+  const confirmationPayload = await confirmationResponse.json().catch(() => null) as {
+    detail?: { code?: string } | string;
+  } | null;
+  const confirmationCode = typeof confirmationPayload?.detail === 'object'
+    ? confirmationPayload.detail.code
+    : confirmationPayload?.detail;
+  expect(
+    confirmationResponse.status(),
+    `Tool confirmation failed with code ${confirmationCode ?? 'unknown'}.`,
+  ).toBe(200);
+  expect(confirmationResponse.request().postDataJSON()).toMatchObject({
+    thread_id: threadId,
+    approved: true,
+  });
   await expect(dialog).toBeHidden({ timeout: 15_000 });
   return true;
 }
@@ -139,7 +163,7 @@ async function waitForTurn(
   expectedTurnCount: number,
 ): Promise<void> {
   await expect.poll(async () => {
-    if (await approveExpectedMcpConfirmation(page)) return false;
+    if (await approveExpectedMcpConfirmation(page, threadId)) return false;
     const status = await getJson<ThreadStatus>(
       page.request,
       `/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
@@ -194,7 +218,9 @@ test('connected MCP works in visible Chat and the same thread after refresh', as
   await card.getByRole('button', { name: '管理与工具' }).click();
   await expect(page.getByRole('heading', { name: `${SERVER_NAME} MCP Server` })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole('tab', { name: /^Tools \d+$/ })).toContainText('41', { timeout: 60_000 });
-  await expect(page.getByRole('article', { name: 'MCP 工具 get_job_status' })).toContainText('只读');
+  await expect(page.getByRole('article', {
+    name: `MCP 工具 ${SAFE_INSPECTION_TOOL}`,
+  })).toBeVisible();
   await page.getByRole('button', { name: '资源连接器' }).click();
   await expect(card).toContainText('已连接', { timeout: 30_000 });
 
@@ -235,6 +261,9 @@ test('connected MCP works in visible Chat and the same thread after refresh', as
   );
   const firstMcpParts = mcpToolParts(firstHistory);
   expect(firstMcpParts.length).toBeGreaterThanOrEqual(1);
+  expect(firstMcpParts.every((part) => (
+    part.toolName === `mcp__${SERVER_NAME}__${SAFE_INSPECTION_TOOL}`
+  ))).toBe(true);
   expect(firstMcpParts.every((part) => part.state === 'output-available')).toBe(true);
   expect(assistantText(firstHistory).length).toBeGreaterThan(0);
   await expect(page.getByText(firstPrompt, { exact: true })).toBeVisible();
@@ -274,7 +303,12 @@ test('connected MCP works in visible Chat and the same thread after refresh', as
     `/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`,
     token,
   );
-  expect(mcpToolParts(finalHistory).length).toBeGreaterThan(firstMcpParts.length);
+  const finalMcpParts = mcpToolParts(finalHistory);
+  expect(finalMcpParts.length).toBeGreaterThan(firstMcpParts.length);
+  expect(finalMcpParts.every((part) => (
+    part.toolName === `mcp__${SERVER_NAME}__${SAFE_INSPECTION_TOOL}`
+  ))).toBe(true);
+  expect(finalMcpParts.every((part) => part.state === 'output-available')).toBe(true);
   expect(assistantText(finalHistory).length).toBeGreaterThan(assistantText(firstHistory).length);
   await expect(page.getByText(followUp, { exact: true })).toBeVisible();
   expect(unexpectedThreadCreations).toBe(0);
