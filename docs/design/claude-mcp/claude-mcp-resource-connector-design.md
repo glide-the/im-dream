@@ -1,29 +1,25 @@
-<!-- [Input] Resources/Notion/ClaudePlugin production code, Claude Agent SDK env ownership, official Claude Code MCP CLI docs, and repository governance contracts. -->
-<!-- [Output] Canonical claude-mcp resource connector architecture, API/state/process/security contracts, sequences, review decision, and implementation gate. -->
-<!-- [Pos] claude-mcp canonical design in docs/design/claude-mcp. -->
-<!-- [Sync] 2026-08-19: establish the public CLI argv OAuth design and fail-closed runtime identity/version gates. -->
-<!-- [Sync] 2026-08-19: revise the production contract to user-scoped auth homes, minimal Linux credential projection into every thread config home, and atomic SDK/CLI/sandbox pairing. -->
-<!-- [Sync] 2026-08-19: remove ASCII semicolons from sequence messages so every Mermaid diagram parses with the repository Mermaid 11 renderer. -->
-<!-- [Sync] 2026-08-19: add macOS config-dir-keyed secure-storage reuse, remove login-time fan-out to historical threads, and repair Mermaid 13.6 with parser-safe quoted labels. -->
-<!-- [Sync] 2026-08-20: replace unsafe macOS Keychain reads/copies with per-user secure-storage reuse and update the reviewed cross-platform contract. -->
-<!-- [Sync] 2026-08-20: inject opaque user MCP definitions through the public SDK option, record the passing named-account journey, and complete the implementation review. -->
-<!-- [Sync] 2026-08-20: distinguish backend secret access from exact-CLI Keychain access, document first-access SecurityAgent behavior, and simplify Mermaid 13.6 for cross-renderer compatibility. -->
-<!-- [Sync] 2026-08-20: add the public Agent SDK tool-inventory protocol, Notion-aligned detail workbench, and reviewed Resources/Prompts limits. -->
-<!-- [Sync] 2026-08-20: bound the public SDK stdout buffer for image tool results and record the passing real Chat regression. -->
-<!-- [Sync] 2026-08-21: accept absolute HTTP(S), isolate Resources CLI from ancestor project configs, and authorize Remove from parsed user scope. -->
-<!-- [Sync] 2026-08-22: restore the reviewed connector onto current develop while preserving its per-thread TMPDIR and current Chat/Dream runtime contracts. -->
-<!-- [Sync] 2026-08-23: share Dream's custom Runtime resolver and production manifest gate; explicit absolute CLAUDE_CODE_CLI_PATH remains the official rollback boundary. -->
+<!-- [输入] Resources/Notion/ClaudePlugin 生产代码、自有 Agent SDK/Runtime 身份、官方 MCP CLI 文档和仓库治理合同。 -->
+<!-- [输出] Claude MCP 资源链接器的架构、API、状态机、进程、安全、时序、评审与实现门。 -->
+<!-- [定位] docs/design/claude-mcp 下的 Claude MCP 规范设计真相源。 -->
+<!-- [同步] 2026-08-19：建立公开 CLI argv OAuth 和 fail-closed Runtime 身份/版本门。 -->
+<!-- [同步] 2026-08-20：完成 user-scoped secure storage、公开 SDK definitions/inventory 与真实账户验收。 -->
+<!-- [同步] 2026-08-21：支持绝对 HTTP(S)、neutral cwd 与 formal user-scope Remove。 -->
+<!-- [同步] 2026-08-22：在保留 per-thread TMPDIR 和 Chat/Dream 合同的前提下恢复到当前基线。 -->
+<!-- [同步] 2026-08-23：Agent 与 MCP 共用自有 Runtime resolver/manifest gate，绝对 CLAUDE_CODE_CLI_PATH 只用于官方回滚。 -->
+<!-- [同步] 2026-08-24：更新为自有 SDK 0.2.143、production-qualified Runtime 0.1.0、MCP 2.1.238/2.1.239 补丁与真实 Comfy OAuth 最终回执。 -->
 
 # Claude MCP 资源链接器设计
 
-> 日期：2026-08-19  
-> 状态：实现完成，跨平台评审与真实业务验收通过  
+> 日期：2026-08-24
+> 状态：实现完成；macOS 真实 OAuth/inventory 验收通过，Linux 合同/技术验证通过，Windows fail closed；当前自有 Runtime 未执行收费不明的远端 Tool
 > 业务域：`claude-mcp`  
 > 规范词：必须、禁止、应、可以分别表示强制、禁止、推荐和可选。
 
+术语约定：`production-qualified` 只表示通过 Dream 本地技术门，不等于获得公开再分发许可；`Dream 接口资格标识` 只覆盖本文列出的 IM 合同，不等于 official 全产品实现；`opaque` 表示业务代码只转交、不解释 payload；`filesystem anchor` 是不会向上发现用户/项目配置的中立 cwd；`repr-hidden` 表示内部字段禁止进入对象 repr、日志和 DTO。
+
 ## 1. 结论先行
 
-Resources 页可以增加一个独立的“Claude MCP”模块，并复用 Notion 的卡片/详情布局与 ClaudePlugin 的 operation 进度反馈；认证协议必须改用 Claude Code 正式 argv：
+Resources 页已实现独立的“Claude MCP”模块，并复用 Notion 的卡片/详情布局与 ClaudePlugin 的 operation 进度反馈；认证协议使用 Claude Code 公开支持的 CLI 参数接口：
 
 ```text
 claude mcp login <server-name> --no-browser
@@ -34,15 +30,15 @@ claude mcp list
 
 后端必须保持同一个 login 进程，解析 authorization URL，接收用户提交的完整 redirect URL，将其写回该进程 stdin，再以 `mcp get` 验证。SDK 会话不得发送 `/mcp`，也不得调用 `mcp_authenticate`、`mcp_clear_auth` 或其他私有 control subtype。
 
-认证身份不能是 thread 级：用户打开 Resources 时 thread 尚未存在。生产路径必须先用 canonical `user_id` 解析 server-owned 用户级 `CLAUDE_CONFIG_DIR`，让 CLI 在该目录完成认证。每个 Agent turn 从该 truth 读取 opaque `mcpServers`，通过 Agent SDK 正式 `mcp_servers` option 直接注入；Linux 同时向 `{workspace}/.claude-home/.credentials.json` 投影官方 file-backed `mcpOAuth`，macOS 则让 Agent CLI 直接复用同一用户级 Keychain 身份，禁止后端解密或复制 token。同步发生在每次 Agent turn 启动、任何 resume/config 探针之前；logout 后清除已有 Linux 投影和错误遗留文件。
+认证身份不能是 thread 级：用户打开 Resources 时 thread 尚未存在。生产路径必须先用 canonical `user_id` 解析 server-owned 用户级 `CLAUDE_CONFIG_DIR` 和 `CLAUDE_SECURESTORAGE_CONFIG_DIR`，让自有 Runtime 在该目录完成认证。每个 Agent turn 从该 truth 读取 opaque `mcpServers`，通过 Agent SDK 正式 `mcp_servers` option 直接注入；Linux 同时向 `{workspace}/.claude-home/.credentials.json` 投影 file-backed `mcpOAuth`，macOS 则让 Agent Runtime 通过同一 secure-storage selector 直接读取用户根的 `.credentials.json`，禁止后端解密或复制 token。同步发生在每次 Agent turn 启动、任何 resume/config 探针之前；logout 后清除已有 Linux 投影和错误遗留文件。
 
 仓库调查与本机取证确认：
 
-1. Linux/Windows Claude Code 将 OAuth 凭证放在 secure-storage config dir 的 `.credentials.json`；user-scope MCP server 配置位于 `CLAUDE_CONFIG_DIR/.claude.json` 的 `mcpServers`。macOS 忽略 `.credentials.json` OAuth 并使用 config-dir-keyed Keychain。当前固定 CLI 包含 `CLAUDE_SECURESTORAGE_CONFIG_DIR` 选择器，因此 Resources 与 Agent 可在保持不同 `CLAUDE_CONFIG_DIR` 的同时指向同一平台用户安全存储；capability 会检查 exact CLI 的选择器 marker，缺失即 fail closed。
+1. 官方 Runtime 的历史行为是 Linux/Windows 使用 `.credentials.json`、macOS 使用 config-dir-keyed Keychain。当前自有 Runtime 已通过独立、source-bound secure-storage 修复收敛：只要显式 selector 有效，所有平台都只使用 `CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json`，目录/文件必须为 `0700/0600`，且不访问用户 Keychain；selector 未设置时才保留 official macOS Keychain 行为。Resources 与 Agent 因此可在保持不同 `CLAUDE_CONFIG_DIR` 的同时指向同一 actor-owned 凭据真相；capability 会检查 exact Runtime marker、文件和真实回执，任一缺失即 fail closed。
 2. Agent 已将整个 config home 定位为 `{thread-workspace}/.claude-home`，并携带 `canonical_user_id`。runner 为安全只加载 `setting-sources=project`，因此 thread `.claude-home/.claude.json` 中的 user-scope `mcpServers` 会被正式 CLI 忽略。现有 runner 已通过公开 `mcp_servers` option 注入内部 MCP；远端 opaque 定义复用同一入口，不新增 `.mcp.json` approval、表或第二套 Agent runtime。
-3. 历史 Docker 基线曾固定 CLI `2.1.108`、Python SDK `0.2.128`，随后使用 official SDK `0.2.140` + CLI `2.1.235`；当前依赖已原子更新为自有 SDK `0.2.143`（CLI pin `2.1.241`）+ 显式 official rollback CLI `2.1.241`。新版 npm 包没有旧 `vendor/seccomp`，必须用当前 nested sandbox/optional seccomp 配置并以容器 Bash 回执为发布门；该 rollback artifact 不会替代 manifest-gated 默认自有 Runtime。
+3. 历史 Docker 基线曾固定 CLI `2.1.108`、Python SDK `0.2.128`，随后使用 official SDK `0.2.140` + CLI `2.1.235`；当前依赖已原子更新为自有 SDK `0.2.143`（CLI pin `2.1.241`）+ production-qualified 自有 Runtime `0.1.0`，Docker 另保留显式 official rollback CLI `2.1.241`。自有 Runtime 的恢复源码证据版本仍为 `2.1.88`，通过独立 `2.1.238`/`2.1.239` MCP compatibility transforms 和 OAuth 修复对齐当前 Dream 所需行为；不能把兼容标识误写成恢复源码版本，也不能声称与 official `2.1.241` 全产品等价。
 
-本设计据此取消“production provider 永久 disabled”的旧结论，改为平台凭证 capability：Linux 使用 private file store，macOS 由 exact Claude CLI 直接复用 config-dir-keyed Keychain；未知存储后端仍 fail closed。CLI 是 token exchange/refresh/logout 和 macOS Keychain item 的唯一 owner。业务代码把 opaque `mcpServers` 作为每-turn SDK option 交付，且仅在 Linux 复制/撤销 opaque `mcpOAuth`；macOS token 从不进入后端内存或 thread 文件。
+本设计据此取消“production provider 永久 disabled”的旧结论，改为 actor-owned file capability：自有 Runtime 是 token exchange/refresh/logout 和 selector-backed `.credentials.json` 的唯一 owner；业务代码不读取 token。业务代码把 opaque `mcpServers` 作为每-turn SDK option 交付，且仅在 Linux 复制/撤销 opaque `mcpOAuth`；macOS token 保留在用户 secure-storage 根，不进入后端内存或 thread 文件。未知存储后端和未验证 official rollback 行为仍 fail closed。
 
 ## 2. 背景、目标与非目标
 
@@ -64,10 +60,10 @@ claude mcp list
 - 不使用 SDK 私有 MCP control subtype。
 - 不实现通用 MCP marketplace、任意 header/client-secret 编辑器或企业策略中心。
 - 不写默认 `~/.claude`、`~/.claude.json` 或默认 `Claude Code-credentials`；Resources/Agent 的安全存储选择器只指向 server-owned 用户根。
-- 不复制整个 Claude home；`mcpServers` 仅通过公开 SDK option 交付，Linux 只投影 `.credentials.json#mcpOAuth`；macOS 禁止读取或复制 Keychain payload。
+- 不复制整个 Claude home；`mcpServers` 仅通过公开 SDK option 交付，Linux 只投影 `.credentials.json#mcpOAuth`；macOS 禁止业务代码读取或复制 selector-backed credential payload。
 - 不新增数据库表、migration、runtime DDL、SQLite fallback、事件总线或通用任务系统。
 - v1 不把 ClaudePlugin 安装/卸载与 MCP server remove 合并为一个生命周期。
-- 不在共享 HOME、默认 Keychain service 或无法证明 config-dir 隔离的存储后端上启用多用户 OAuth。
+- 不在共享 HOME、默认 Keychain service、缺少 selector 或无法证明 config-dir 隔离的存储后端上启用多用户 OAuth。
 
 ## 3. 现状调研与代码证据
 
@@ -126,22 +122,22 @@ App
 - `sdk_env.resolve_claude_config_home(cwd)`：process `CLAUDE_CONFIG_DIR` 优先，否则 `{cwd}/.claude-home`。
 - `agent_runner.py:2767-2771`：在 SDK env 链最前注入 exact config home。
 - `sdk_env.apply_cli_path_to_options`：绝对 `CLAUDE_CODE_CLI_PATH` 显式回滚覆盖 → `shutil.which("ink-claude-code-dream")` + production manifest → fail closed；Resources/MCP management identity 与 Agent 使用同一 exact binary resolver。
-- `sdk_env.apply_claude_secure_storage_home_to_options`：macOS Agent 额外注入 server-owned `CLAUDE_SECURESTORAGE_CONFIG_DIR={user-config-dir}`，但保留 `CLAUDE_CONFIG_DIR={thread}/.claude-home`。
+- `sdk_env.apply_claude_secure_storage_home_to_options`：macOS Agent 额外注入 server-owned `CLAUDE_SECURESTORAGE_CONFIG_DIR={user-config-dir}`，使当前自有 Runtime 直接读取 actor-owned `.credentials.json`，同时保留 `CLAUDE_CONFIG_DIR={thread}/.claude-home`。
 - `agent_runner.py:2747`：Agent cwd 是 thread workspace。
 - `AgentRunOptions.canonical_user_id` 已存在；`claude_agent/service.py` 在 workspace/config-home 建立后、resume transcript 探针前是唯一正确的用户凭证同步点。
 - `workspace.get_workspace_root()` 与 `get_or_create_workspace()` 已集中约束 `{AGENT_CWD}/{thread_id}`，拒绝 `/`、`\\` 与 `..`，无需新增 thread 目录解析器。
 - `database.list_chat_threads(user_id)` 已提供用户所有 thread ID；logout/remove 只收敛已存在的 thread 投影，不需要新表。
 
-结论：MCP operation 不能使用 thread config home，也不能仅凭默认 HOME 猜测身份。`ClaudeMcpRuntimeIdentityProvider` 必须共享 Agent 的 system CLI resolver，并按 canonical user ID 解析独立用户根；Agent 通过同步器投影配置，Linux投影文件凭证，macOS 则把同一用户安全存储根作为独立运行参数传入 exact CLI。
+结论：MCP operation 不能使用 thread config home，也不能仅凭默认 HOME 猜测身份。`ClaudeMcpRuntimeIdentityProvider` 必须共享 Agent 的 Runtime resolver，并按 canonical user ID 解析独立用户根；Agent 通过同步器投影配置，Linux 投影文件凭证，macOS 则把同一用户安全存储根作为独立运行参数传入 exact Runtime。
 
 ### 3.4A Claude Code 凭证实证
 
-- 官方认证文档说明 Linux/Windows 使用 `.credentials.json`，macOS 使用加密 Keychain；macOS 即使存在有效 `.credentials.json` 也不会把它作为 OAuth 凭证真相。
-- 本机 exact CLI `2.1.220` 二进制包含 `CLAUDE_SECURESTORAGE_CONFIG_DIR` marker。Anthropic issue #79223 记录该选择器将 credential store 与普通 `CLAUDE_CONFIG_DIR` 解耦；由于它尚未进入公开环境变量文档，本实现同时做 `>=2.1.191` version/help gate、exact binary marker gate 和真实旅程验证，任一缺失即 fail closed。
-- 使用独立用户 `CLAUDE_CONFIG_DIR` 与相同 `CLAUDE_SECURESTORAGE_CONFIG_DIR` 执行 `claude mcp add/login/get/logout` 后，opaque server 配置位于用户根 0600 `.claude.json#mcpServers`；OAuth payload 只由 Claude CLI 访问对应 Keychain item。
-- 尝试从 Python 或 `/usr/bin/security -w` 读取 Claude 创建的 item 会触发 `SecurityAgent` 交互授权，且 Claude refresh 可能重置 ACL。该路径不具备无头可靠性，也会让 token 进入业务进程，因此已从设计和代码删除。
+- 官方认证文档说明 Linux/Windows 使用 `.credentials.json`，macOS 默认使用加密 Keychain；这是 official rollback 的历史/比较基线。
+- 当前自有 Runtime `0.1.0`（Dream 接口资格标识 `2.1.241`）和历史本机 official CLI `2.1.220` 都包含 `CLAUDE_SECURESTORAGE_CONFIG_DIR` marker。Anthropic issue #79223 记录该选择器将 credential store 与普通 `CLAUDE_CONFIG_DIR` 解耦；由于它尚未进入公开环境变量文档，本实现同时做 `>=2.1.191` version/help gate、exact binary marker gate 和真实旅程验证，任一缺失即 fail closed。
+- 自有 Runtime 的 source-bound 修复把有效 selector 设为权威：只使用 actor-owned `0700` 目录中的普通 `0600 .credentials.json`，不访问用户 Keychain；selector 未设置时保留 official macOS 行为。
+- 最终 Comfy OAuth receipt 在 macOS 证明 `credentials_present`，selector credential 是普通 `0600` 文件；fake `security` sentinel 证明该路径没有调用 `/usr/bin/security`。
 
-因此生产合同是同一业务状态机下的两个凭证适配器：Linux 源 `.credentials.json` 必须是普通 0600 文件且只投影 `mcpOAuth`；macOS 后端不读取、不写入、不删除 Keychain payload，只让 Resources 与 Agent exact CLI 共享同一个 user-scoped secure-storage selector。两者都在每个 turn 将 opaque `mcpServers` 通过公开 SDK option 交付，绝不复制 `claudeAiOauth`。任何符号链接、权限放宽、malformed Linux JSON、CLI marker 缺失或未知平台都 fail closed。
+因此当前生产合同是同一业务状态机下的 selector-backed file truth：用户根 `.credentials.json` 由 exact Runtime 独占 token 读写。Linux synchronizer 只投影 opaque `mcpOAuth`；macOS 后端不读取、不写入、不删除 payload，只让 Resources 与 Agent exact Runtime 共享同一个 user-scoped selector。两者都在每个 turn 将 opaque `mcpServers` 通过公开 SDK option 交付，绝不复制 `claudeAiOauth`。任何符号链接、权限放宽、malformed JSON、marker 缺失、selector 无效或未知平台都 fail closed。
 
 ### 3.5 既有 MCP 能力
 
@@ -150,42 +146,45 @@ App
 - `agent_runner.py` 通过 `mcp_servers` 注入 user/memory/editor/story-workspace 等内部 stdio MCP。
 - Plugin 可以贡献 MCP server，并使用 `plugin:<plugin-name>:<server-name>` 完整名称。
 - `docs/design/mcp-remote-interaction.md` 证明 `/mcp` 是 local-jsx，headless 发送文本无效。
-- `claude-agent-sdk==0.2.140` 的公共 `ClaudeSDKClient.get_mcp_status()` 返回 server `connected/failed/needs-auth/pending/disabled`、`serverInfo`、scope 和 connected 时的 Tools；Tool 包含 name、description 与 `readOnly/destructive/openWorld` 注解。
-- 真实 `dmeck@suoxya.com` / `comfy` 只读探针在约 5 秒内从 `pending` 收敛到 `connected`，返回 41 个 Tools，未发送 prompt、未调用 Tool。
+- `ink-claude-dream-agent-sdk==0.2.143` 保留公共 `ClaudeSDKClient.get_mcp_status()`，返回 server `connected/failed/needs-auth/pending/disabled`、`serverInfo`、scope 和 connected 时的 Tools；Tool 包含 name、description 与 `readOnly/destructive/openWorld` 注解。
+- 最终真实 `dmeck123@suoxya.com` / `comfy-secstore-qa-0824-02` 探针从公开 Resources/OAuth 路径收敛到 `connected`，fresh SDK/Runtime inventory 返回 `comfyui-cloud 0.40.1` 和 41 个 Tools，未发送 prompt。因 Tools DTO 没有零费用保证且普通 Agent turn 会消费模型 Token，最终验收按三重收费门禁未调用 Tool；这是财务安全结果，不是 MCP 功能失败。
 
-未在仓库中找到：
+初始调研时未找到以下能力，当前前四项已由 §19 所列实现补齐：
 
 - 公开 `claude mcp login/logout` 的后端 wrapper。
 - 持久 login process/PTY registry、redirect stdin API、cancel/logout API。
 - user-scoped Agent/MCP config identity provider。
 - `claude-mcp` 数据库 capability 或 operation 表。
-- production-safe Docker CLI `>=2.1.191` 与现有 seccomp 策略的配对证据。
 
-公共 SDK 当前未返回 Resources 或 Prompts 清单。因此本期只实现 Tools inventory；Resources/Prompts 在 UI 中显示 `not_reported`，禁止解析 `/mcp` TUI 或伪造数量。官方 Python SDK 的 [类型合同](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/types.py) 与 [client API](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/client.py) 是该能力的版本绑定依据。
+仍未完成的是把受限自有 Runtime artifact 以合规方式安装到 Docker 拓扑并验证容器内 sandbox/credential deny-read；当前 Docker 仅提供显式 official `2.1.241` 回滚物。
 
-### 3.6 CLI/SDK 版本矩阵
+公共 SDK 当前未返回 Resources 或 Prompts 清单。因此本期只实现 Tools inventory；Resources/Prompts 在 UI 中显示 `not_reported`，禁止解析 `/mcp` TUI 或伪造数量。版本绑定依据是固定上游提交中的 [类型合同](https://github.com/anthropics/claude-agent-sdk-python/blob/542fefb3b94be87760b2513fff889b91bb5b6672/src/claude_agent_sdk/types.py) 与 [client API](https://github.com/anthropics/claude-agent-sdk-python/blob/542fefb3b94be87760b2513fff889b91bb5b6672/src/claude_agent_sdk/client.py)。
+
+### 3.6 当前 Runtime/SDK 版本矩阵
 
 | 位置 | 版本/证据 | 结论 |
 |---|---|---|
-| 本机 CLI | `claude --version` → `2.1.220`；help 含 login/logout/no-browser | 本地满足目标命令，但不作为 Docker 发布证据。 |
+| 本机默认自有 Runtime | `ink-claude-code-dream==0.1.0`；`--version` → `2.1.241`；commit `cb91a9901303dccb98c5b41cbfa6d56ab88ce97a` | PATH 默认入口；release manifest `corePruned=true`、`productionEligible=true`；`2.1.241` 仅为 Dream 所需接口资格标识，不表示 official 全产品等价。 |
+| Runtime 恢复源码/核心 | source `2.1.88`，digest `470ca57d...c228e`；core SHA `a300fe7f...161f5` | 1,989 inputs、48 outputs、0 gaps；MCP `2.1.238`/`2.1.239` 增量单独应用。 |
+| 本机 ambient official CLI | `/Users/dmeck/.local/bin/claude` → `2.1.220` | 不是 Dream 默认路径，也不作为 Docker 发布证据。 |
 | Docker official rollback CLI | `backend/Dockerfile` → `2.1.241`，build 时检查 exact version/login/logout/no-browser，并与 SDK `_cli_version` 交叉断言 | 仅能通过 absolute `CLAUDE_CODE_CLI_PATH` 显式选择；默认自有 Runtime 仍需独立资格门。 |
 | 当前 Python SDK | `ink-claude-dream-agent-sdk==0.2.143`，Git commit `bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4` | `uv.lock`、exported requirements、clean venv 与 Docker metadata/import-provider 门同步验证；official distribution 不得并存。 |
 | SDK import / API | distribution 改名，import 保留 `claude_agent_sdk` | 公共 client/options/query、stream types 与 MCP inventory API 保持原协议。 |
-| 目标 npm CLI | npm registry `2.1.241` | 与自有 SDK CLI pin 一致，满足 headless MCP；没有旧 vendor patch 面。 |
-| 新版 sandbox | 官方配置支持 `enableWeakerNestedSandbox`、`network.allowAllUnixSockets`；seccomp 为 optional | Docker 中保留 bwrap filesystem/network 隔离；跳过 optional Unix-socket seccomp 等价于当前 passthrough 的安全边界，仍须真实容器回执。 |
-| npm 2.1.108 | `npm pack --dry-run` 含 `vendor/seccomp/*/apply-seccomp` | 解释当前生产固定版本，但缺少 MCP login。 |
+| Runtime Bun | 内容寻址安装的 Bun `1.4.0`；命令 `ink-claude-code-bun-1.4.0` | 与 ambient Bun `1.2.20` 隔离；launcher 启动前精确校验版本。 |
+| 新版 sandbox | 官方配置支持 `enableWeakerNestedSandbox`、`network.allowAllUnixSockets`；seccomp 为 optional | Docker 中保留 bwrap filesystem/network 隔离；当前自有 Runtime artifact 尚未进入 Docker 源码镜像，容器自有 Runtime + sandbox 仍是独立部署验收项。 |
+| 历史 npm 2.1.108 | `npm pack --dry-run` 含 `vendor/seccomp/*/apply-seccomp` | 仅解释旧生产问题；不是当前固定版本，且缺少 MCP login。 |
 
 ### 3.7 本轮影响范围与真实业务测试边界
 
 | 表面/事实 | 基线 | 预期变化 | 风险控制与证据 |
 |---|---|---|---|
-| `dmeck@suoxya.com` 平台身份 | active `user_id=1` | 创建该 user ID 的 opaque MCP config/work root | user ID 不进入路径、日志或 DTO；其他用户根不变。 |
-| macOS 默认 Claude 身份 | 默认 `~/.claude` / `Claude Code-credentials` 已存在 | 必须保持内容与 metadata 不变 | 所有业务 CLI 都注入 server-owned config 与 secure-storage selector；禁止 fallback 到默认 service，禁止后端 Keychain 读取。 |
-| 用户级 MCP 源 | 当前 source `.claude.json` 与 service `Claude Code-credentials-be990eb6` 均不存在 | 通过 Resources 正常配置、认证并在 Logout 后清除本轮 OAuth | 只管理新 user service 的 `mcpOAuth`；不复制 `claudeAiOauth`。 |
+| `dmeck123@suoxya.com` 平台身份 | 现有真实账号 | 创建/使用该 user ID 的 opaque MCP config/work root | user ID 不进入路径、日志或 DTO；其他用户根不变。 |
+| macOS 默认 Claude 身份 | 默认 `~/.claude` / `Claude Code-credentials` 已存在 | 必须保持内容与 metadata 不变 | 所有业务 CLI 都注入 server-owned config 与 secure-storage selector；自有 Runtime 不访问默认 Keychain service。 |
+| 用户级 MCP 源 | actor-owned `.claude.json` 与 `.credentials.json` | 通过 Resources 正常配置、认证并在 Logout 后清除本轮 OAuth | exact Runtime 独占用户根文件；业务代码不读取 token，也不复制 `claudeAiOauth`。 |
 | 历史 thread | 账户已有大量 DB 记录，部分有 workspace | 登录时不得批量创建/改写所有 thread 凭证 | 删除 login-success fan-out；每次 Agent turn 按需投影。Logout 只清理已存在 Linux/错误遗留文件投影。 |
-| 本轮 Agent thread | 使用公开 API/UI 创建一个账户自有 thread | turn 前以 SDK option 注入 `mcpServers`；Linux 写 `mcpOAuth` 文件，macOS 注入用户 secure-storage selector | 断言 thread/session identity、无 Keychain 弹窗、MCP 只读工具回执。 |
+| 本轮 Agent thread | 使用公开 API/UI 创建一个账户自有 thread | turn 前以 SDK option 注入 `mcpServers`；Linux 写 `mcpOAuth` 投影，macOS 注入用户 secure-storage selector | 断言 thread/session identity、无 Keychain 访问、MCP inventory 回执。 |
 | 数据库/Admin/Gateway | 正常本机服务与真实 PostgreSQL | 只产生正常可见的 thread/run/Gateway 回执；无 schema 变化 | 禁止 clone/影子账户/SQL 写；保留正常业务回执。 |
-| CLI/SDK | 本机 system CLI 2.1.220；自有 SDK 0.2.143 的 CLI pin 与 Docker official rollback artifact 均为 2.1.241 | 本机旧验收证据仍记录 exact 2.1.220，不修改用户全局 CLI；当前 Docker 回滚物固定 2.1.241，默认自有 Runtime 另走 manifest gate | 每个 topology 内 capability DTO、Resources process argv 与 Agent runtime 解析到同一绝对 binary，且均满足 `>=2.1.191`。 |
+| Runtime/SDK | 默认自有 Runtime 0.1.0（Dream 接口资格标识 2.1.241）+ 自有 SDK 0.2.143；Docker official rollback 为 2.1.241；ambient official 为 2.1.220 | 不修改用户全局 CLI；Resources process argv 与 Agent turn 解析到同一自有 Runtime | 每个 topology 内 capability DTO、Resources process argv 与 Agent runtime 解析到同一绝对 binary，且均满足 `>=2.1.191`。 |
 | OAuth provider | 尚无本轮用户源授权 | 新增一次真实授权并在旅程末 Logout | URL/code/token/client secret 不进日志、截图、trace 或测试输出。 |
 
 资料：Claude Code [MCP 文档](https://code.claude.com/docs/en/mcp) 明确 2.1.186 增加 `mcp login/logout`，2.1.191 完善无浏览器环境，并要求粘贴完整 redirect URL；官方 [认证文档](https://code.claude.com/docs/en/team) 说明 macOS Keychain 与 Linux/Windows file store；官方 [CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md) 记录 argv 能力。`CLAUDE_SECURESTORAGE_CONFIG_DIR` 当前依据 exact binary marker 与 [Anthropic issue #79223](https://github.com/anthropics/claude-code/issues/79223) 验证，属于版本绑定 capability，而非可长期假定的公开合同。
@@ -199,7 +198,7 @@ backend/claude_mcp/
 ├─ .folder.md
 ├─ contracts.py        # states, DTO-facing domain values, error codes
 ├─ identity.py         # exact CLI/config/cwd/credential identity provider
-├─ keychain.py         # macOS non-secret service-label derivation only
+├─ keychain.py         # official rollback 的非敏感 service-label 诊断；自有 Runtime 默认路径不访问 Keychain
 ├─ credentials.py      # actor-scoped opaque definition read and credential delivery
 ├─ parser.py           # ANSI stripping, URL/status/version parsing
 ├─ driver.py           # argv + PTY + process-group lifecycle
@@ -253,7 +252,7 @@ Identity 至少包含：canonical user、resolved executable、parsed CLI versio
 └─ users/{sha256-domain-separated-user-id}/
    ├─ config/                 # 0700, user-level CLAUDE_CONFIG_DIR
    │  ├─ .claude.json        # 0600, CLI owns source; sync reads mcpServers
-   │  └─ .credentials.json   # 0600, CLI owns source; sync reads mcpOAuth only
+   │  └─ .credentials.json   # 0600, exact Runtime owns; Linux sync reads mcpOAuth, macOS Runtime reads directly
    └─ workspace/              # 0700 reserved user runtime directory; not CLI cwd
 
 {AGENT_CWD}/{thread-id}/.claude-home/
@@ -263,14 +262,14 @@ Identity 至少包含：canonical user、resolved executable、parsed CLI versio
 
 `mcpServers` 不再写入 thread 文件：runner 固定 `setting-sources=project`，user-scope `.claude.json` 即使复制到 `.claude-home` 也不会被 CLI 加载。同步器读取并验证源定义后，以 repr-hidden `AgentRunOptions.claude_mcp_servers` 传给 runner，再与内部 stdio MCP 合并到官方 `ClaudeAgentOptions.mcp_servers`；内部名称冲突 fail closed，远端工具不加入 wildcard `allowed_tools`。
 
-macOS 不创建 thread credential item，也不把 Keychain payload转换为文件。Agent 每次运行使用两个独立选择器：
+macOS 不创建 thread credential item，也不把用户根凭据复制到 thread。Agent 每次运行使用两个独立选择器：
 
 ```text
 CLAUDE_CONFIG_DIR={AGENT_CWD}/{thread-id}/.claude-home
 CLAUDE_SECURESTORAGE_CONFIG_DIR={INK_CLAUDE_MCP_RUNTIME_ROOT}/users/{opaque-user}/config
 ```
 
-Resources CLI 的两个选择器都指向同一用户根。Agent 的普通配置保持 thread-local，但 secure-storage selector 指向该用户根。`keychain.py` 只允许派生非敏感 service label 供诊断；不存在 Keychain payload read/write/delete API。若 exact CLI marker 或真实取证与该行为不一致，capability 必须关闭，禁止猜测或退回默认 service。
+Resources CLI 的两个选择器都指向同一用户根。Agent 的普通配置保持 thread-local，但 secure-storage selector 指向该用户根。当前自有 Runtime 只读写该根中的 `.credentials.json`，不调用 Keychain；`keychain.py` 仅保留 official rollback 的非敏感 service-label 诊断，不存在 payload read/write/delete API。若 exact CLI marker 或真实取证与该行为不一致，capability 必须关闭，禁止猜测或退回默认 service。
 
 ## 5. Resources 页布局
 
@@ -432,8 +431,8 @@ parser 只集中识别：ANSI、URL、官方稳定 status token/symbol（Connect
 - MCP 服务不解释、刷新或生成 token；同步器在所有平台读取并验证 opaque `mcpServers`，通过 repr-hidden 内部字段交给公开 SDK option，仅在 Linux 从 CLI 文件投影 opaque `mcpOAuth`。定义和凭证都不进入日志、公开 DTO、异常或持久 operation；macOS token 永不进入业务进程。
 - `CLAUDE_CONFIG_DIR` 不是可由前端提交的参数。
 - Plugin runtime 的 `INK_CLAUDE_PLUGIN_RUNTIME_ROOT/config` 明确不是 Agent identity。
-- Resources CLI 永远使用用户级 config root；Agent CLI 永远使用 thread config home。Linux 通过受控文件投影形成单一 credential truth；macOS 通过独立 secure-storage selector 让 exact CLI 直接读取同一个 user Keychain truth。
-- Linux private file store 与 macOS exact-CLI secure-storage reference 是当前启用适配器；Windows、默认 HOME、默认 Keychain service、相对 runtime root、符号链接身份或缺少 CLI marker 一律 capability disabled。
+- Resources CLI 永远使用用户级 config root；Agent CLI 永远使用 thread config home。Linux 通过受控文件投影消费用户凭据真相；macOS 通过独立 secure-storage selector 让 exact CLI 直接读取同一个 actor-owned 文件真相。
+- Linux thread 文件投影与 macOS exact-Runtime selector-backed user file 是当前启用适配器；Windows、默认 HOME、默认 Keychain service、相对 runtime root、符号链接身份或缺少 CLI marker 一律 capability disabled。
 - SDK/CLI 版本原子锁定：`requirements.txt` / `pyproject.toml` 与 Docker `CLAUDE_CODE_VERSION` 同一变更，system CLI 由 `cli_path` 明确覆盖 bundled CLI。
 
 ### 10.1 同步算法
@@ -442,7 +441,7 @@ parser 只集中识别：ANSI、URL、官方稳定 status token/symbol（Connect
 2. 用户根、config、workspace 和 thread config home 都必须是 server 解析出的绝对目录，拒绝 symlink component；目录模式收敛为 0700。
 3. 读取源 `.claude.json` 普通文件并仅提取 object `mcpServers`；源缺失等价于空映射。每个 server name/config 必须是非空字符串/对象，值作 opaque 深复制并保持 repr-hidden。
 4. Linux 读取源 `.credentials.json` 普通 0600 文件并只提取 `mcpOAuth`；其他顶层 key 不进入 thread。源缺失或无 `mcpOAuth` 等价于撤销目标 key。
-5. macOS 不读取源 Keychain payload。同步器只删除 thread `.credentials.json` 中可能由旧错误实现遗留的 `mcpOAuth`；真实凭证由 Agent 的 `CLAUDE_SECURESTORAGE_CONFIG_DIR=user-config-dir` 选择。
+5. macOS 业务同步器不读取用户根 credential payload，只删除 thread `.credentials.json` 中可能由旧错误实现遗留的 `mcpOAuth`；真实凭证由 Agent 的 `CLAUDE_SECURESTORAGE_CONFIG_DIR=user-config-dir` 选择，并由 exact Runtime 直接读取用户根文件。
 6. 所有平台从目标 `.claude.json` 删除旧实现遗留的受管 `mcpServers` snapshot，同时保留其他顶层 key；Linux 对目标 credential JSON 只替换/删除 `mcpOAuth`。文件变更使用同目录 0600 临时文件、flush + fsync + `os.replace`、parent fsync 原子提交。
 7. 同步结果返回状态位和进程内 `mcp_servers`；后者不进入 repr、公开 DTO、日志或持久 operation。service 将其放入 `AgentRunOptions`，runner 与内部 MCP 合并到公开 `ClaudeAgentOptions.mcp_servers`；内部名称冲突 fail closed，且不自动增加远端 tool allowlist。
 8. Agent 每次 turn 在 resume probe 前执行。login exit 0 + `mcp get` connected 后不向全部历史 thread fan-out；当前/后续 thread 在 turn 前按需收敛。logout 验证后只删除已存在的 Linux/遗留文件投影，绝不创建空 credential target；Agent 启动仍会再次收敛。
@@ -452,7 +451,7 @@ parser 只集中识别：ANSI、URL、官方稳定 status token/symbol（Connect
 - API 全部要求 `get_current_user`，operation ownership 比较 canonical `user_id`。
 - server name 允许 `:`，但限制控制字符、NUL、换行和长度；不做 colon split。
 - authorization/redirect URL、code、state、token、client secret 不进入 logger、exception detail、DB、metrics、analytics 或 operation evidence。
-- Linux thread sandbox 的 `filesystem.denyRead`、`filesystem.denyWrite` 与 `credentials.files(mode=deny)` 必须精确保护 `.claude-home/.credentials.json`；macOS token 不进入 workspace 或业务进程，只由同一 system user 的 exact Claude CLI 通过用户 secure-store identity 访问。宽 `allowRead(workspace)` 不得重新暴露 Linux exact secret path。
+- Linux thread sandbox 的 `filesystem.denyRead`、`filesystem.denyWrite` 与 `credentials.files(mode=deny)` 必须精确保护 `.claude-home/.credentials.json`；macOS token 不进入 workspace 或业务进程，只由同一 system user 的 exact Runtime 通过 selector-backed 用户文件访问。宽 `allowRead(workspace)` 不得重新暴露 Linux exact secret path。
 - Resources CLI subprocess 只继承 PATH/HOME/locale/CA/proxy/temp 等运行时 allowlist；数据库、JWT、Admin/Gateway 与 Provider bearer secret 不得传播给 Claude CLI 或配置的 MCP server。
 - 目标 `.claude.json` 同样禁止 sandboxed Bash 写入；旧 managed `mcpServers` snapshot 会被同步器删除，remote definitions 只经 SDK option 进入该 turn。
 - 日志只允许：operation id、server name 的不可逆 hash/安全显示名、state、duration bucket、exit category、error code、CLI major/minor/patch。
@@ -473,7 +472,7 @@ parser 只集中识别：ANSI、URL、官方稳定 status token/symbol（Connect
 - backend restart：lifespan 清理已启动进程；重启后 active operation 不恢复，UI 通过 list/get 收敛为 connected/needs_auth/failed。v1 不伪造“可恢复同一 PTY”。
 - 用户级 CLI 根/原生 credential store 是持久状态，operation 仍是短暂控制状态；后端重启不会丢 token。旧 thread 在下次 Agent turn 自动同步。
 - 同步以每个 `(user identity, thread config home)` lock 和原子 replace 幂等执行；相同 JSON 不重写，避免每 turn 无意义 mtime 变化。
-- login/logout 与同一用户的 Linux 文件同步共享 credential mutation lock；macOS 没有业务层 Keychain read-modify-write。多进程/多节点未提供锁服务时只允许具名 `local_persistent` capability，不能用环境名偷偷降级。
+- login/logout 与同一用户的 Linux 文件同步共享 credential mutation lock；macOS 没有业务层 credential read-modify-write，用户根文件由 exact Runtime 独占。多进程/多节点未提供锁服务时只允许具名 `local_persistent` capability，不能用环境名偷偷降级。
 - 默认 timeout、grace、capture、并发上限来自 `backend/config.py`/env，不写在业务 handler。
 
 ## 13. 时序流程
@@ -562,9 +561,9 @@ sequenceDiagram
   SVC->>SYNC: confirm source credential capability
   alt Linux file-backed credentials
     SYNC->>SEC: verify mcpOAuth exists without returning content
-  else macOS Keychain credentials
-    SYNC->>SYNC: verify exact CLI secure-store selector capability
-    Note over CLI,SEC: exact CLI owns Keychain access and backend never reads payload
+  else macOS selector-backed credentials
+    SYNC->>SEC: verify actor-owned file postcondition without reading content
+    Note over CLI,SEC: exact Runtime owns the user-root file and never accesses Keychain
   end
   Note over SVC,SYNC: 不在登录成功时向全部历史 thread 批量复制
   SVC-->>FC: connected (without redirect/token)
@@ -628,7 +627,9 @@ sequenceDiagram
   API-->>UI: 可重新连接
 ```
 
-### 13.6 Agent 复用凭证
+### 13.6 Agent 复用凭证协议目标
+
+下图定义接口合同，不单独充当当前自有 Runtime 的远端 Tool 业务回执。2026-08-24 当前真实验收到 authenticated inventory；Tool 因费用语义不明确未执行，见 §15.3。
 
 ```mermaid
 sequenceDiagram
@@ -652,10 +653,10 @@ sequenceDiagram
     SYNC->>TCFG: atomically project mcpOAuth
     AR->>CLI: SDK query with mcp_servers and thread config home
     CLI->>TCFG: load file credential
-  else macOS Keychain credentials
+  else macOS selector-backed credentials
     SYNC->>TCFG: remove stale plaintext mcpOAuth if present
     AR->>CLI: SDK query with mcp_servers and user secure-store home
-    CLI->>SEC: read user Keychain item directly
+    CLI->>SEC: read actor-owned .credentials.json directly
   end
   alt Identity and delivery succeed
     CLI->>MCP: authenticated read-only tool call
@@ -727,10 +728,10 @@ sequenceDiagram
 
 - `<2.1.186`：无 login/logout，全部 auth mutation disabled。
 - `2.1.186–2.1.190`：argv 存在但 headless 行为不足，本产品仍 fail closed，最低运行线取 `2.1.191`。
-- `>=2.1.191`：还必须通过 help capability probe、exact identity、PTY smoke 和 sandbox compatibility；macOS 额外要求 exact binary 包含 secure-storage selector marker。
+- `>=2.1.191`：还必须通过 help capability probe、exact identity、PTY smoke 和 sandbox compatibility；macOS 额外要求 exact binary 包含 secure-storage selector marker，并验证 selector 文件权限与“无 Keychain 访问”回执。
 - parser 未识别输出时返回 unknown/failed，不猜 connected。
 - Agent SDK 版本不直接决定 MCP login 能力；最终执行的 exact CLI 才是权威。
-- Docker/SDK 本轮原子升级至 `2.1.235` / `0.2.140`；必须验证 native binary、help、SDK handshake、Bash bwrap、credential deny-read 和 optional seccomp 路径，任何一项失败即不发布。
+- 当前配对为自有 Runtime `0.1.0`（Dream 接口资格标识 `2.1.241`）/ 自有 SDK `0.2.143`；Docker official rollback 同为 `2.1.241`。该标识不代表 official 全量源码等价。升级时必须验证 manifest、native entrypoint、help、SDK handshake、Bash sandbox、credential deny-read、MCP compatibility 和内容寻址安装，任何一项失败即不更新默认 release。
 
 ## 15. 测试策略
 
@@ -741,7 +742,7 @@ sequenceDiagram
 - security：authorization/redirect/code/token/client secret 不出日志/DTO/evidence；safe error mapping。
 - version：2.1.185/186/190/191/220、非 SemVer、help 缺命令。
 - service：重复 start、并发 start/logout、redirect double submit、wrong user operation、shutdown cleanup。
-- identity/sync：不同 user ID 得到不同 opaque roots；相同 user 稳定；路径/符号链接/权限/malformed JSON/CLI marker 缺失 fail closed；所有平台通过公开 SDK option 交付 opaque `mcpServers` 并清理旧 config snapshot；Linux file 只投影 `mcpOAuth`，macOS复用 user secure store；不复制 `claudeAiOauth`；清理旧明文投影；no-op；源消失撤销；每-turn 同步；内部名称冲突 fail closed；不扩张 remote allowedTools；login 不向历史 thread fan-out。
+- identity/sync：不同 user ID 得到不同 opaque roots；相同 user 稳定；路径/符号链接/权限/malformed JSON/CLI marker 缺失 fail closed；所有平台通过公开 SDK option 交付 opaque `mcpServers` 并清理旧 config snapshot；Linux file 只投影 `mcpOAuth`，macOS 复用 selector-backed 用户文件且不访问 Keychain；不复制 `claudeAiOauth`；清理旧明文投影；no-op；源消失撤销；每-turn 同步；内部名称冲突 fail closed；不扩张 remote allowedTools；login 不向历史 thread fan-out。
 - sandbox：生成配置必须 deny-read/deny-write thread `.credentials.json`，并用新版真实容器证明 Bash 不能读取 token 文件、能正常读写 workspace 普通文件。
 - API：auth、URL encoding、404/409/422/503、page refresh operation GET。
 - inventory：pending→connected、timeout、SDK failure、malformed server/tool、payload truncation、description normalization、formal annotations、config/error/secret 不进入 DTO。
@@ -760,16 +761,18 @@ sequenceDiagram
 
 mocked/isolated lane 覆盖：Resources → Start login → authorization URL → redirect submit → Connected → Logout。网络、console、page error 和 request failure listener 在导航前注册；不调用真实 provider。
 
-显式真实业务验收使用 `dmeck@suoxya.com`、正常本机 Dream/Admin/Gateway/PostgreSQL 与公开 UI/API：Resources 配置/发现 → 正式 `login --no-browser` → 浏览器真实授权 → redirect 提交 → Connected → 同一用户正常 Agent thread 在 turn 前完成平台交付并执行一个无副作用 MCP 只读动作 → Resources Logout → 配置与已有文件投影撤销。macOS 断言测试 harness 与业务后端不读取或复制 Keychain payload、thread 无 `mcpOAuth` 文件；exact Claude CLI 仍会访问 Keychain，首次或 ACL 变化后可能出现 `SecurityAgent`，由当前登录用户在系统 UI 完成授权后继续。只允许本轮 user-scoped config/Keychain、正常 thread/run/Gateway 回执变化，默认 Claude 身份和其他用户/thread 不变。
+显式真实业务验收使用 `dmeck123@suoxya.com`、正常本机 Dream/Admin/Gateway/PostgreSQL 与公开 UI/API：Resources 配置/发现 → 正式 `login --no-browser` → 浏览器真实授权 → redirect 提交 → Connected → fresh SDK/Runtime inventory → Resources Logout/Remove → fresh post-logout/final-list 验证。只有同时满足“语义明确、零成本、只读”的 Tool 才允许执行；最终 Comfy inventory 未提供零费用保证，因此不调用 Tool。macOS 断言测试 harness 与业务后端不读取或复制 credential payload、thread 无 `mcpOAuth` 文件；exact Runtime 只访问 actor-owned `0600 .credentials.json`，fake `security` sentinel 证明没有 Keychain 调用。只允许本轮 user-scoped config 文件和正常业务回执变化，默认 Claude 身份和其他用户/thread 不变。
 
-2026-08-20 真实验收通过：`dmeck@suoxya.com` 的公开业务旅程再次得到 `1 passed (1.6m)`；Resources 添加、正式 OAuth、Connected、正常 Agent thread `304f386f-0022-42be-a66d-b0f20b7870eb` 调用只读工具 `mcp__ink-real-qa-comfy-cloud-20260820__get_server_info`、Logout 与 Remove 均成功，macOS thread 未出现 `mcpOAuth` 文件。系统日志确认 exact CLI 通过 `/usr/bin/security` 访问用户专属 Keychain；本轮没有活动中的 `SecurityAgent` 进程，但较早验收已观察到首次访问弹窗，因此不得把“永不出现系统授权”作为发布承诺。
+2026-08-20 历史验收通过：`dmeck@suoxya.com` 的公开业务旅程得到 `1 passed (1.6m)`；Resources 添加、正式 OAuth、Connected、正常 Agent thread `304f386f-0022-42be-a66d-b0f20b7870eb` 调用只读工具 `mcp__ink-real-qa-comfy-cloud-20260820__get_server_info`、Logout 与 Remove 均成功，macOS thread 未出现 `mcpOAuth` 文件。该回执保留为旧 Runtime 路径的历史证据，不能替代当前自有 Runtime 验收。
 
-## 16. 发布与回滚
+2026-08-24 当前自有 Runtime 最终验收通过：账号 `dmeck123@suoxya.com` 配置 alias `comfy-secstore-qa-0824-02`，configure 201、auth 202、Chrome 中 Personal Workspace consent、callback 200、operation `connected`。安全 receipt 共 16 个固定 stage，以 `credentials_present` → `flow_resolved` → `success_stdout_flushed` 结束且没有 `flow_failed`。fresh inventory 为 HTTP 200、`connected`、`comfyui-cloud 0.40.1`、41 Tools，Resources/Prompts 为 `not_reported`。收费三重门禁拒绝 Tool 调用；cancel/logout/post-logout inventory/remove/final-list 全部通过，alias 最终不存在。
 
-1. 合入 user identity/synchronizer、driver/API/UI 与 fake CLI contract。
-2. 同一变更原子升级 SDK `0.2.140` + Docker/system CLI `2.1.235`，保留 system `cli_path` pin 与 build-time version/help assertions。
-3. fake CLI、unit/API/frontend/build/Playwright 全绿；真实容器验证 MCP argv 和 Bash sandbox/credential deny-read。
-4. 仅在具名 `local_persistent` 单节点 topology capability canary；不得用 deployment environment 名称改变业务路径。
+## 16. 当前发布状态与回滚
+
+1. user identity/synchronizer、driver/API/UI 与 fake CLI contract 已落地。
+2. SDK `0.2.143`、自有 Runtime `0.1.0`、Dream 接口资格标识 `2.1.241`、Bun `1.4.0` 与 Docker official rollback `2.1.241` 已原子记录；绝对 `cli_path` 回滚和 build-time version/help assertions 保留。
+3. 本机 fake CLI、unit/API/frontend/build/Playwright、真实 macOS OAuth/inventory 和 Runtime package gate 已通过。当前 Dockerfile 未包含受限自有 Runtime artifact，因此“容器内自有 Runtime + Bash sandbox/credential deny-read”仍是部署拓扑的独立未完成验收项，不能由本机回执替代。
+4. 当前只允许具名 `local_persistent` 单节点 topology capability；不得用 deployment environment 名称改变业务路径。
 5. rollback 可关闭 Resources capability，但不得恢复 2.1.108 双 CLI 路径；已有用户源凭证保留，thread 在下一次同步撤销或更新。
 
 ## 17. 正式设计评审
@@ -784,18 +787,18 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 | 是否复用 Notion/Plugins | 通过 | 复用 UX/operation pattern，不复用错误生命周期/identity。 |
 | 是否新增任务系统/事件总线/表 | 通过 | operation 为 domain in-memory registry；inventory 是单请求有界 session + per-user/server lock；无 schema/cache 表。 |
 | 是否有环境名双路径 | 通过 | 只看 CLI/identity/topology capability。 |
-| 是否泄露 OAuth 敏感信息 | 通过 | Linux 文件只存 server-owned 0700/0600 根；macOS token 只由 exact CLI 访问 user Keychain，不进入后端/thread；secret 不进 argv；禁日志/DB/error/telemetry。 |
+| 是否泄露 OAuth 敏感信息 | 通过 | Linux 文件只存 server-owned 0700/0600 根；macOS token 只由 exact Runtime 访问 selector-backed 用户文件，不进入后端/thread，也不访问 Keychain；secret 不进 argv；禁日志/DB/error/telemetry。 |
 | 刷新/重复/并发/崩溃 | 通过 | CAS、用户锁、atomic replace、每-turn/restart 重新收敛；详情 URL 保存 server name，刷新重新做 live probe。 |
-| SDK/CLI/sandbox 兼容 | 通过 | Python 3.12 + Node 22.18.0 + SDK 0.2.140 + system CLI 2.1.235 镜像可导入生产模块；公共 `get_mcp_status()` 实测 `comfy` pending→connected 并返回 41 Tools；project-only setting source 与 user config 的错位已由公开 SDK `mcp_servers` option 消除。 |
+| SDK/Runtime/sandbox 兼容 | 通过 | Python 3.12 + 自有 SDK 0.2.143 + production-qualified Runtime 0.1.0 已通过 startup、SDK 差分、MCP management 和真实 Comfy OAuth/inventory；公共 `get_mcp_status()` 返回 41 Tools；project-only setting source 与 user config 的错位由公开 SDK `mcp_servers` option 消除。 |
 | 是否可删减 | 通过 | 删除登录成功后全历史 thread fan-out、event/DB/general task system；保留完成真实业务旅程所需的最小受控配置入口。 |
 
 ### 17.2 保留、简化、删除、延期
 
 **保留**
 
-- 正式 argv login/logout/get/list。
+- 公开支持的 CLI 参数接口 login/logout/get/list。
 - PTY + 同进程 stdin、timeout/cancel/reap、version/identity gates。
-- user-level Linux file/macOS secure-store identity、最小 thread delivery、每-turn 同步与 logout 撤销。
+- user-level Linux file/macOS selector-backed file identity、最小 thread delivery、每-turn 同步与 logout 撤销。
 - thread sandbox 对 credential file 的 exact deny-read/deny-write。
 - Notion 风格 Resources 卡片和 Plugin 风格 operation feedback。
 - 完整安全状态机、API 合同、fake CLI tests。
@@ -806,7 +809,7 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 - operation v1 只在内存保存 active session；页面刷新可恢复，服务重启以 CLI truth 重新收敛。
 - 状态传输先用 polling，不新增 SSE/event bus。
 - server 只读发现自 CLI，不创建第二份 catalog。
-- credential delivery 不引入 vault/schema；Linux 保留 CLI 原生 JSON 的 opaque subtree，macOS 不接触 payload。
+- credential delivery 不引入 vault/schema；Linux 保留 CLI 原生 JSON 的 opaque subtree，macOS 业务层不接触 payload，由 exact Runtime 直接使用用户根文件。
 - login 成功后不批量复制到大量历史 thread；每个 Agent turn 按需读取 server 定义/交付凭证，Logout 只删除已存在 credential/遗留 config 投影。
 - inventory 不做持久缓存、SSE 或后台任务；页面加载/显式刷新建立一次有界 SDK session，同 server 并发请求串行化。
 
@@ -829,7 +832,7 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 
 ### 17.3 实现门结论
 
-跨平台修订评审通过：不新增数据库或通用 vault，以用户级 CLI config + 平台原生 credential store 为唯一认证真相，并在既有 Agent config-home 建立点进行最小交付。不得恢复 Plugin config、默认 HOME、私有 control、Keychain 读取/复制、伪 credential 文件或 localStorage fallback；system CLI 仍显式 pin，即使当前 SDK bundled CLI 版本相同也不允许形成第二条生产路径。实现门只允许 Linux file adapter、macOS exact-CLI secure-store reference、按需 per-turn 同步、最小配置/移除动作和对应测试。
+跨平台合同评审通过，验证范围是“macOS 真实旅程 + Linux 合同/技术测试 + Windows fail closed”：不新增数据库或通用 vault，以用户级 Runtime config + actor-owned credential file 为唯一认证真相，并在既有 Agent config-home 建立点进行最小交付。不得恢复 Plugin config、默认 HOME、私有 control、Keychain 读取/复制、伪 credential 文件或 localStorage fallback；默认只允许 production-qualified 自有 Runtime，官方 CLI 仅能由绝对路径显式回滚，即使 SDK bundled CLI 版本相同也不允许形成第二条生产路径。实现门只允许 Linux file projection、macOS exact-Runtime selector-backed file reference、按需 per-turn 同步、最小配置/移除动作和对应测试。
 
 ## 18. 明确不做，防止过度设计
 
@@ -844,20 +847,22 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 
 生产最小实现已完成：
 
-- `backend/claude_mcp/`：contract/settings/identity/credentials/parser/driver/service 加 `inventory.py`；默认 identity 按 canonical platform `user_id` 解析 opaque config root，并以 filesystem anchor 作为 neutral CLI cwd，避免继承 operator HOME/仓库 Project 配置。Parser 接受 absolute HTTP(S)、输出 scope；Remove 仅授权 formal user scope。Inventory 与 Chat 复用 exact CLI、用户定义和 secure-store selector，业务代码没有 Keychain payload API。
+- `backend/claude_mcp/`：contract/settings/identity/credentials/parser/driver/service 加 `inventory.py`；默认 identity 按 canonical platform `user_id` 解析 opaque config root，并以 filesystem anchor 作为 neutral CLI cwd，避免继承 operator HOME/仓库 Project 配置。Parser 接受 absolute HTTP(S)、输出 scope；Remove 仅授权 formal user scope。Inventory 与 Chat 复用 exact CLI、用户定义和 secure-store selector，业务代码没有 credential payload API。
 - `backend/routers/claude_mcp.py`：认证 capability、server、prompt-free inventory、operation、redirect、cancel、logout API；`backend/server.py` 只负责挂载。
 - `frontend/src/api/claudeMcpApi.ts`：无 localStorage fallback 的严格后端 transport，包含 server scope/removability 与 tool inventory DTO。
 - `frontend/src/components/claude-mcp/ClaudeMcpResourceSection.tsx`：Resources 内 absolute HTTP(S) 配置、scope-aware discovery/Remove、详情 handoff、授权链接、redirect、进度恢复、cancel/retry/logout；redirect 提交后清空组件输入。
 - `frontend/src/components/claude-mcp/ClaudeMcpServerDetailPage.tsx`：Notion 同构 breadcrumb/hero/chips/单虚线骨架，Tools 搜索与安全筛选，Resources/Prompts 明确 not-reported。
 - `backend/tests/fixtures/claude_mcp_fake_cli.py` 与 `backend/tests/test_claude_mcp_*.py`：真实 argv/PTTY 进程交互但无真实 provider。
-- `backend/claude_agent/service.py`：每个 Workspace-enabled turn 在 resume/config probe 前执行最小 MCP 交付，把 opaque remote definitions 与 macOS user secure-storage home 独立带入 `AgentRunOptions`；Workspace Mode 关闭且该用户存在 MCP state 时 fail closed。
+- `backend/claude_agent/service.py`：每个 Workspace-enabled turn 在 resume/config probe 前执行最小 MCP 交付，把 opaque remote definitions 与 macOS selector-backed user credential home 独立带入 `AgentRunOptions`；Workspace Mode 关闭且该用户存在 MCP state 时 fail closed。
 - `backend/libs/claude_agent_kit/types.py` / `server/agent_runner.py`：repr-hidden `claude_mcp_servers` 通过官方 `ClaudeAgentOptions.mcp_servers` 与内部 stdio servers 合并；名称冲突 fail closed，不增加 remote wildcard `allowed_tools`。
-- `backend/libs/claude_agent_kit/server/sdk_env.py`：保留 thread `CLAUDE_CONFIG_DIR`，以服务端权威值注入 macOS `CLAUDE_SECURESTORAGE_CONFIG_DIR`；浏览器/user env 无权覆盖。
+- `backend/libs/claude_agent_kit/server/sdk_env.py`：保留 thread `CLAUDE_CONFIG_DIR`，以服务端权威值注入 macOS `CLAUDE_SECURESTORAGE_CONFIG_DIR`，让 exact Runtime 直接使用 actor-owned 文件；浏览器/user env 无权覆盖。
 - `backend/libs/claude_agent_kit/server/workspace.py`：deny sibling workspace/backend/home/custom MCP runtime root，当前 thread 再 allow-read；credential file 同时使用 exact deny-read/deny-write 和 `credentials.files(mode=deny)`。不再 deny `/`，因为 CLI 2.1.235 下该设置会移除 bwrap 内 `/bin/bash`。
-- `backend/Dockerfile` / `requirements.txt` / `pyproject.toml` / `uv.lock`：Python 3.12、官方 Node 22.18.0、显式回滚 CLI 2.1.241，以及 Git commit 锁定的自有 SDK 0.2.143；build-time 验证 exact Node/CLI、SDK `_cli_version == 2.1.241`、正式 MCP help、SDK metadata/API/import-provider，并拒绝 official SDK distribution 并存。默认自有 Runtime 未达资格时继续 fail closed。
+- `backend/Dockerfile` / `requirements.txt` / `pyproject.toml` / `uv.lock`：Python 3.12、官方 Node 22.18.0、显式回滚 CLI 2.1.241，以及 Git commit 锁定的自有 SDK 0.2.143；build-time 验证 exact Node/CLI、SDK `_cli_version == 2.1.241`、公开 MCP help、SDK metadata/API/import-provider，并拒绝 official SDK distribution 并存。本机默认自有 Runtime 0.1.0 已通过 manifest 资格门；容器只有在安装同等资格 artifact 后才可走默认路径，否则必须显式配置 `CLAUDE_CODE_CLI_PATH=/usr/local/bin/claude`。
 - `frontend/e2e/claude-mcp-resources.spec.ts`：拦截 API 的可见 Resources → Login → redirect → Connected → 41-tool detail/search/risk → refresh/back → Logout 技术旅程。
 
-2026-08-20 本轮发布门通过：Claude MCP backend contract `37 passed`（包含 inventory 请求取消时原样传播并清理 SDK client）；frontend 聚焦 lint `0 errors`（`App.tsx` 16 个既有 Hook warnings）且 production build 成功；provider-free Resources → Login → redirect → Connected → 41-tool 详情/筛选 → 刷新/返回 → Logout → Remove 为 `1 passed (5.3s)`。具名账户 `dmeck@suoxya.com` 在正常本机 Dream/Gateway/PostgreSQL 上完成 Resources 实时 41-tool 详情 → Chat 两次只读 MCP 调用 → 刷新 → 同 thread 续问，结果 `1 passed (1.2m)`，证据 thread `c1292eb3-c550-45c0-b854-406c4b46a90e` 保留，既有 `comfy` 连接未 Logout/Remove。9 个 Mermaid blocks 已由当前 Chromium + 前端 Mermaid 运行时逐块解析。当前工作树 Docker image 构建成功；容器回执为 Claude Code `2.1.235`、Node `22.18.0`、Agent SDK `0.2.140`、production imports/MCP argv capability 均 OK；本机真实链路 exact CLI 为 `2.1.220`，仍满足 `>=2.1.191`。共享数据库 schema 与 ClaudePlugin operation 表均未改变。
+2026-08-20 历史发布门通过：Claude MCP backend contract `37 passed`；frontend 聚焦 lint/build 与 provider-free Resources 旅程通过；旧具名账户和旧 CLI/SDK 回执保留为历史比较，不作为当前自有 Runtime 资格证据。共享数据库 Schema 与 ClaudePlugin operation 表未改变。
+
+2026-08-24 当前发布门：自有 Runtime core hash `a300fe7f...161f5` 的 SDK 真实进程差分、MCP management、official MCP SDK `2.0.0` OAuth CLI 3/3、同 core hash Dream 业务主链和最终 Comfy OAuth/inventory 均通过。Runtime 本地包 62 files/61 checksums，`productionEligible=true`；公开发布与再分发仍为 false。安装器修复后，Dream 在未设置 `CLAUDE_CODE_CLI_PATH`/`INK_CLAUDE_CODE_BUN_PATH` 时完成 FastAPI startup。最新 stdio/HTTP comparator 校准在候选执行前因参考 official `2.1.220` 与 MCP Python `1.27.1` fixture 不兼容而停止；本轮不宣称重跑通过，只沿用绑定同一 source/core hash 的既有完整差分回执。
 
 真实 Chat 图片回归另发现 Agent SDK transport 的独立限制：Claude CLI 的 `Read` 图片回执会同时携带 message 与 tool result，证据线程出现 1,346,958-byte JSONL 单行，超过 SDK 原 1 MiB stdout buffer 默认值。这不是 MCP tool inventory 或 OAuth 失败。生产路径现通过公开 `ClaudeAgentOptions.max_buffer_size` 使用服务端有界配置 `INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES`，默认 8 MiB、允许 1–64 MiB；非法配置回退默认值，不记录 payload。具名账户可见 UI 路径“上传图片 → Agent Read → assistant 回复”结果 `1 passed (36.4s)`，证据 thread `ecaad924-512d-4790-84d3-bd2fc8505ce6` 保留，未修改 MCP 认证或远程业务数据。
 
