@@ -16,6 +16,7 @@
 # [Sync] 2026-08-22: cover startup preservation of Claude Agent resource-admission keys.
 # [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
 #                    the Claude Agent factory starts.
+# [Sync] 2026-08-24: cover credential-free SDK/CLI startup identity logging.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -1755,25 +1756,81 @@ class TestFactoryLifecycle(unittest.TestCase):
 
     def test_startup_validates_custom_sdk_before_factory(self):
         calls: list[str] = []
+        distribution = types.SimpleNamespace(
+            metadata={"Name": "ink-claude-dream-agent-sdk"},
+            version="0.2.143",
+        )
         with (
             unittest.mock.patch.object(
                 self.srv,
                 "require_dream_claude_sdk_distribution",
-                side_effect=lambda: calls.append("sdk"),
+                side_effect=lambda: calls.append("sdk") or distribution,
             ),
             unittest.mock.patch.object(
                 self.srv,
                 "resolve_claude_cli_path",
-                side_effect=lambda: calls.append("runtime") or "/runtime/bin",
+                side_effect=lambda: calls.append("runtime")
+                or "/runtime/bin/ink-claude-code-dream",
+            ),
+            unittest.mock.patch.object(
+                self.srv,
+                "_claude_sdk_cli_compatibility_version",
+                return_value="2.1.241",
             ),
             unittest.mock.patch.object(
                 self.srv.claude_agent_thread_factory,
                 "start",
                 side_effect=lambda: calls.append("factory"),
             ),
+            unittest.mock.patch("builtins.print") as print_mock,
         ):
             asyncio.run(self.srv.startup_claude_agent())
         self.assertEqual(calls, ["sdk", "runtime", "factory"])
+        runtime_line = next(
+            call.args[0]
+            for call in print_mock.call_args_list
+            if call.args and str(call.args[0]).startswith("🤖 Claude Agent runtime: ")
+        )
+        identity = json.loads(runtime_line.split(": ", 1)[1])
+        self.assertEqual(
+            identity,
+            {
+                "cli_mode": "dream_runtime",
+                "cli_path": "/runtime/bin/ink-claude-code-dream",
+                "cli_runtime_release": "0.1.0",
+                "sdk_cli_compatibility_version": "2.1.241",
+                "sdk_distribution": "ink-claude-dream-agent-sdk",
+                "sdk_import": "claude_agent_sdk",
+                "sdk_version": "0.2.143",
+            },
+        )
+
+    def test_startup_identity_marks_explicit_cli_override(self):
+        distribution = types.SimpleNamespace(
+            metadata={"Name": "ink-claude-dream-agent-sdk"},
+            version="0.2.143",
+        )
+        with (
+            unittest.mock.patch.dict(
+                os.environ,
+                {"CLAUDE_CODE_CLI_PATH": "/usr/local/bin/claude"},
+            ),
+            unittest.mock.patch.object(
+                self.srv,
+                "_claude_sdk_cli_compatibility_version",
+                return_value="2.1.241",
+            ),
+            unittest.mock.patch("builtins.print") as print_mock,
+        ):
+            self.srv._print_claude_runtime_identity(
+                distribution,
+                "/usr/local/bin/claude",
+            )
+        runtime_line = print_mock.call_args.args[0]
+        identity = json.loads(runtime_line.split(": ", 1)[1])
+        self.assertEqual(identity["cli_mode"], "explicit_override")
+        self.assertEqual(identity["cli_runtime_release"], "external")
+        self.assertEqual(identity["cli_path"], "/usr/local/bin/claude")
 
     def test_shutdown_handler_registered(self):
         handler_names = [

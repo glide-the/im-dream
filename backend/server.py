@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # [Input] Consume backend/.env, HTTP requests, database/auth/config modules.
-# [Output] Publish FastAPI application and REST/SSE routes.
+# [Output] Publish FastAPI application and REST/SSE routes, including a
+#          credential-free Claude SDK/CLI identity line during startup.
 # [Pos] backend API entrypoint
 # [Sync] 2026-05-24: load backend/.env before importing config and route modules.
 # [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.
@@ -28,6 +29,8 @@
 #                    claude_agent_sdk import has no competing provider.
 # [Sync] 2026-08-23: resolve the qualified Dream Runtime (or explicit absolute
 #                    official rollback) before starting the Agent factory.
+# [Sync] 2026-08-24: print validated SDK distribution and resolved CLI identity
+#                    before the Claude Agent factory starts.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -89,6 +92,7 @@ if hasattr(time, "tzset"):
     time.tzset()
 
 import asyncio
+import json
 import logging
 from datetime import datetime
 import httpx
@@ -814,6 +818,9 @@ async def shutdown_scheduler():
 from agent_factory import claude_agent_thread_factory
 from claude_agent.event_bus_redis import RedisStreamEventBus
 from libs.claude_agent_kit.server.sdk_env import (
+    DREAM_CLAUDE_CLI_EXECUTABLE,
+    DREAM_CLAUDE_CLI_VERSION,
+    DREAM_CLAUDE_SDK_IMPORT,
     require_dream_claude_sdk_distribution,
     resolve_claude_cli_path,
 )
@@ -903,16 +910,63 @@ async def startup_validate_claude_agent_event_bus():
         await RedisStreamEventBus.validate_connection()
 
 
+def _claude_sdk_cli_compatibility_version() -> str:
+    """Return the SDK-pinned Claude CLI version for startup diagnostics."""
+
+    try:
+        from claude_agent_sdk._cli_version import __cli_version__
+    except (ImportError, AttributeError):
+        return "unknown"
+    return str(__cli_version__).strip() or "unknown"
+
+
+def _print_claude_runtime_identity(distribution: Any, cli_path: str) -> None:
+    """Print validated, non-secret SDK and CLI identity as one JSON log line."""
+
+    installed_name = str(
+        distribution.metadata.get("Name") or "unknown"
+    ).strip() or "unknown"
+    resolved_cli = Path(cli_path).resolve()
+    override = str(os.environ.get("CLAUDE_CODE_CLI_PATH") or "").strip()
+    override_active = False
+    if override:
+        try:
+            override_active = Path(override).resolve() == resolved_cli
+        except (OSError, RuntimeError):
+            override_active = False
+    is_dream_runtime = resolved_cli.name == DREAM_CLAUDE_CLI_EXECUTABLE
+    identity = {
+        "sdk_distribution": installed_name,
+        "sdk_version": str(distribution.version),
+        "sdk_import": DREAM_CLAUDE_SDK_IMPORT,
+        "sdk_cli_compatibility_version": (
+            _claude_sdk_cli_compatibility_version()
+        ),
+        "cli_path": str(resolved_cli),
+        "cli_mode": "explicit_override" if override_active else "dream_runtime",
+        "cli_runtime_release": (
+            DREAM_CLAUDE_CLI_VERSION if is_dream_runtime else "external"
+        ),
+    }
+    print(
+        "🤖 Claude Agent runtime: "
+        + json.dumps(identity, ensure_ascii=False, sort_keys=True),
+        flush=True,
+    )
+
+
 @app.on_event("startup")
 async def startup_claude_agent():
     """Start the Claude Agent session pool sweeper."""
-    require_dream_claude_sdk_distribution()
-    if not resolve_claude_cli_path():
+    distribution = require_dream_claude_sdk_distribution()
+    cli_path = resolve_claude_cli_path()
+    if not cli_path:
         raise RuntimeError(
             "Claude Agent Runtime is unavailable; install a production-qualified "
             "ink-claude-code-dream release or configure an explicit absolute "
             "CLAUDE_CODE_CLI_PATH rollback."
         )
+    _print_claude_runtime_identity(distribution, cli_path)
     claude_agent_thread_factory.start()
     print("✅ Claude Agent factory started\n")
 
