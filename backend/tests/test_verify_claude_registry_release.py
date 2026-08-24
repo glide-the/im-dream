@@ -4,6 +4,8 @@
 # [Pos] Unit contract for scripts/verify_claude_registry_release.py; no registry,
 #       model, credential, database, Docker, or production service is accessed.
 # [Sync] 2026-08-24: initial provider-free registry release acceptance coverage.
+# [Sync] 2026-08-24: replace minimal npm archives with full publication evidence,
+#                    add tamper cases, and require source-only sdist install failure.
 
 from __future__ import annotations
 
@@ -62,6 +64,18 @@ def _wheel_bytes(*, with_map: bool = False) -> bytes:
     return output.getvalue()
 
 
+def _sdist_bytes(*, installable: bool = True) -> bytes:
+    root = "ink_claude_dream_agent_sdk-9.8.7"
+    files = {
+        f"{root}/PKG-INFO": (
+            b"Metadata-Version: 2.1\nName: ink-claude-dream-agent-sdk\nVersion: 9.8.7\n"
+        ),
+    }
+    if installable:
+        files[f"{root}/pyproject.toml"] = b"[build-system]\nrequires=[]\nbuild-backend='missing.fixture'\n"
+    return _tar_bytes(files)
+
+
 def _pypi_fixture(wheel: bytes, sdist: bytes) -> tuple[dict[str, object], dict[str, bytes]]:
     sdk = FIXTURE["sdk"]
     wheel_url = f"https://files.pythonhosted.org/packages/test/{sdk['wheel']}"
@@ -95,7 +109,7 @@ def _pypi_fixture(wheel: bytes, sdist: bytes) -> tuple[dict[str, object], dict[s
 
 def test_pypi_exact_wheel_sdist_hash_and_zero_map(tmp_path: Path) -> None:
     wheel = _wheel_bytes()
-    sdist = _tar_bytes({"ink-sdk-9.8.7/pyproject.toml": b"[project]\n"})
+    sdist = _sdist_bytes()
     _, responses = _pypi_fixture(wheel, sdist)
 
     receipt = acceptance.acquire_pypi_release(
@@ -110,7 +124,7 @@ def test_pypi_exact_wheel_sdist_hash_and_zero_map(tmp_path: Path) -> None:
 
 def test_pypi_nested_source_map_fails_closed(tmp_path: Path) -> None:
     wheel = _wheel_bytes(with_map=True)
-    sdist = _tar_bytes({"ink-sdk-9.8.7/pyproject.toml": b"[project]\n"})
+    sdist = _sdist_bytes()
     _, responses = _pypi_fixture(wheel, sdist)
 
     with pytest.raises(acceptance.AcceptanceError) as caught:
@@ -122,7 +136,57 @@ def test_pypi_nested_source_map_fails_closed(tmp_path: Path) -> None:
     assert caught.value.receipt()["safe"] is True
 
 
-def _npm_tarball(package: str, version: str) -> bytes:
+def test_sdist_missing_pyproject_fails_before_install(tmp_path: Path) -> None:
+    wheel = _wheel_bytes()
+    sdist = _sdist_bytes(installable=False)
+    _, responses = _pypi_fixture(wheel, sdist)
+
+    with pytest.raises(acceptance.AcceptanceError) as caught:
+        acceptance.acquire_pypi_release(
+            FIXTURE["sdk"]["version"], tmp_path, fetch=responses.__getitem__
+        )
+    assert caught.value.code == "SDIST_STRUCTURE_MISMATCH"
+
+
+def test_uninstallable_sdist_fails_source_only_without_fallback(tmp_path: Path) -> None:
+    sdist = tmp_path / FIXTURE["sdk"]["sdist"]
+    sdist.write_bytes(_sdist_bytes())
+    calls = 0
+
+    def runner(argv, *, cwd, env, timeout=180.0):
+        nonlocal calls
+        del cwd, env, timeout
+        calls += 1
+        if calls == 1:
+            python = tmp_path / "sdk-sdist-venv" / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        assert calls == 2
+        assert "--force-reinstall" not in argv
+        assert "--no-deps" not in argv
+        assert not any(item.startswith("--no-binary") for item in argv)
+        assert argv[-1] == str(sdist)
+        return subprocess.CompletedProcess(argv, 1, "", "fixture cannot build")
+
+    with pytest.raises(acceptance.AcceptanceError) as caught:
+        acceptance.create_sdk_venv(
+            sdist,
+            tmp_path,
+            source_only=True,
+            env={},
+            runner=runner,
+        )
+    assert caught.value.code == "INSTALL_FAILED"
+
+
+def _npm_tarball(
+    package: str,
+    version: str,
+    *,
+    attestation: dict[str, object],
+    evidence: dict[str, bytes] | None = None,
+) -> bytes:
     manifest: dict[str, object] = {
         "name": package,
         "version": version,
@@ -157,8 +221,8 @@ def _npm_tarball(package: str, version: str) -> bytes:
                 "inkRuntime": {
                     "target": target,
                     "entrypoint": "runtime/bin/ink-claude-code-dream",
-                    "ripgrepPath": "runtime/lib/core/vendor/rg",
-                    "ripgrepSha256": "a" * 64,
+                    "ripgrepPath": acceptance.NPM_RIPGREP_PATHS[target],
+                    "ripgrepSha256": hashlib.sha256(f"rg-{target}".encode()).hexdigest(),
                     "bunVersion": acceptance.BUN_VERSION,
                     "sourceMapsIncluded": False,
                 },
@@ -168,7 +232,9 @@ def _npm_tarball(package: str, version: str) -> bytes:
     return _tar_bytes(
         {
             "package/package.json": package_json,
+            "package/npm-publication-attestation.json": json.dumps(attestation).encode(),
             "package/bin/ink-claude-code-dream": b"#!/bin/sh\nexit 0\n",
+            **(evidence or {}),
         }
     )
 
@@ -177,12 +243,97 @@ def _integrity(body: bytes) -> str:
     return "sha512-" + base64.b64encode(hashlib.sha512(body).digest()).decode()
 
 
+def _npm_release_bodies() -> dict[str, bytes]:
+    runtime = FIXTURE["runtime"]
+    version = runtime["version"]
+    policy_sha = "9" * 64
+    common = {
+        "repository": acceptance.NPM_REPOSITORY,
+        "version": version,
+        "productionEligible": True,
+        "publicationAllowed": True,
+        "redistributionAllowed": True,
+        "npmReleasePolicySha256": policy_sha,
+        "sourceMapsIncluded": False,
+    }
+    bodies: dict[str, bytes] = {}
+    bindings: list[dict[str, str]] = []
+    for target, package in acceptance.NPM_PLATFORMS.items():
+        qualification = json.dumps({"target": target}).encode()
+        qualification_sha = hashlib.sha256(qualification).hexdigest()
+        rg = f"rg-{target}".encode()
+        core_sha = hashlib.sha256(f"core-{target}".encode()).hexdigest()
+        payload_sha = hashlib.sha256(f"payload-{target}".encode()).hexdigest()
+        attestation = {
+            **common,
+            "schemaVersion": "ink-npm-platform-publication-attestation/v1",
+            "runtimeTarget": target,
+            "qualificationSummarySha256": qualification_sha,
+            "coreBundleSha256": core_sha,
+            "payloadTreeSha256": payload_sha,
+        }
+        evidence = {
+            "package/runtime/release-manifest.json": json.dumps(
+                {
+                    "core": {"runtimeTarget": target},
+                    "status": {
+                        "productionEligible": True,
+                        "publicationAllowed": True,
+                        "redistributionAllowed": True,
+                    },
+                }
+            ).encode(),
+            "package/runtime/manifest/artifact-manifest.json": json.dumps(
+                {
+                    "artifact": {
+                        "runtimeTarget": target,
+                        "productionEligible": True,
+                        "publicationAllowed": True,
+                        "redistributionAllowed": True,
+                    },
+                    "coreBundleSha256": core_sha,
+                    "payloadTreeSha256": payload_sha,
+                }
+            ).encode(),
+            "package/runtime/manifest/core-build-receipt.json": json.dumps(
+                {"runtimeTarget": target}
+            ).encode(),
+            "package/runtime/manifest/qualification-summary.json": qualification,
+            f"package/{acceptance.NPM_RIPGREP_PATHS[target]}": rg,
+        }
+        body = _npm_tarball(
+            package, version, attestation=attestation, evidence=evidence
+        )
+        bodies[package] = body
+        bindings.append(
+            {
+                "target": target,
+                "package": package,
+                "version": version,
+                "tarballSha256": hashlib.sha256(body).hexdigest(),
+                "qualificationSummarySha256": qualification_sha,
+                "coreBundleSha256": core_sha,
+                "payloadTreeSha256": payload_sha,
+            }
+        )
+    bodies[acceptance.NPM_SELECTOR] = _npm_tarball(
+        acceptance.NPM_SELECTOR,
+        version,
+        attestation={
+            **common,
+            "schemaVersion": "ink-npm-meta-publication-attestation/v1",
+            "platforms": bindings,
+        },
+    )
+    return bodies
+
+
 class FakeNpmRunner:
     def __init__(self, destination: Path) -> None:
         runtime = FIXTURE["runtime"]
         self.version = runtime["version"]
         self.packages = [runtime["selector"], *runtime["platforms"]]
-        self.bodies = {package: _npm_tarball(package, self.version) for package in self.packages}
+        self.bodies = _npm_release_bodies()
         self.destination = destination
         self.metadata: dict[str, dict[str, object]] = {}
         for package in self.packages:
@@ -245,7 +396,88 @@ def test_npm_exact_five_package_integrity_and_zero_map(tmp_path: Path) -> None:
         *FIXTURE["runtime"]["platforms"],
     }
     assert receipt["currentPlatformPackage"].endswith("darwin-arm64")
-    assert all(item["files"] == 2 for item in receipt["packages"].values())
+    assert all(item["files"] >= 3 for item in receipt["packages"].values())
+    assert all(len(item["sha256"]) == 64 for item in receipt["packages"].values())
+
+
+def _untar_files(body: bytes) -> dict[str, bytes]:
+    with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as archive:
+        return {
+            member.name: archive.extractfile(member).read()
+            for member in archive.getmembers()
+            if member.isfile()
+        }
+
+
+def _write_npm_release(tmp_path: Path, bodies: dict[str, bytes]) -> dict[str, Path]:
+    paths = {}
+    for package, body in bodies.items():
+        path = tmp_path / (package.removeprefix("@").replace("/", "-") + ".tgz")
+        path.write_bytes(body)
+        paths[package] = path
+    return paths
+
+
+def test_npm_evidence_rejects_missing_manifest(tmp_path: Path) -> None:
+    bodies = _npm_release_bodies()
+    package = FIXTURE["runtime"]["platforms"][0]
+    files = _untar_files(bodies[package])
+    files.pop("package/runtime/manifest/artifact-manifest.json")
+    bodies[package] = _tar_bytes(files)
+
+    with pytest.raises(acceptance.AcceptanceError) as caught:
+        acceptance.verify_npm_release_tarballs(
+            _write_npm_release(tmp_path, bodies), FIXTURE["runtime"]["version"]
+        )
+    assert caught.value.code == "RUNTIME_EVIDENCE_MISSING"
+
+
+def test_npm_evidence_rejects_tampered_ripgrep(tmp_path: Path) -> None:
+    bodies = _npm_release_bodies()
+    package = FIXTURE["runtime"]["platforms"][0]
+    files = _untar_files(bodies[package])
+    rg_name = next(name for name in files if name.endswith("/rg"))
+    files[rg_name] = b"tampered-ripgrep"
+    bodies[package] = _tar_bytes(files)
+
+    with pytest.raises(acceptance.AcceptanceError) as caught:
+        acceptance.verify_npm_release_tarballs(
+            _write_npm_release(tmp_path, bodies), FIXTURE["runtime"]["version"]
+        )
+    assert caught.value.code == "RUNTIME_EVIDENCE_MISMATCH"
+
+
+def test_npm_manifest_rejects_noncanonical_ripgrep_path() -> None:
+    package = FIXTURE["runtime"]["platforms"][0]
+    attestation = {
+        "schemaVersion": "ink-npm-platform-publication-attestation/v1",
+    }
+    files = _untar_files(
+        _npm_tarball(package, FIXTURE["runtime"]["version"], attestation=attestation)
+    )
+    manifest = json.loads(files["package/package.json"])
+    manifest["inkRuntime"]["ripgrepPath"] = "runtime/lib/core/vendor/self-consistent/rg"
+
+    with pytest.raises(acceptance.AcceptanceError) as caught:
+        acceptance.validate_npm_tarball_manifest(
+            manifest, package, FIXTURE["runtime"]["version"]
+        )
+    assert caught.value.code == "RUNTIME_BINDING_MISMATCH"
+
+
+def test_npm_evidence_rejects_wrong_meta_binding(tmp_path: Path) -> None:
+    bodies = _npm_release_bodies()
+    files = _untar_files(bodies[acceptance.NPM_SELECTOR])
+    attestation = json.loads(files["package/npm-publication-attestation.json"])
+    attestation["platforms"][0]["tarballSha256"] = "0" * 64
+    files["package/npm-publication-attestation.json"] = json.dumps(attestation).encode()
+    bodies[acceptance.NPM_SELECTOR] = _tar_bytes(files)
+
+    with pytest.raises(acceptance.AcceptanceError) as caught:
+        acceptance.verify_npm_release_tarballs(
+            _write_npm_release(tmp_path, bodies), FIXTURE["runtime"]["version"]
+        )
+    assert caught.value.code == "META_BINDING_MISMATCH"
 
 
 def test_npm_selector_contract_rejects_inexact_platform_version() -> None:
@@ -290,6 +522,15 @@ def test_npm_tarball_manifest_rejects_bun_and_runtime_drift() -> None:
     [
         ({"license": "UNLICENSED"}, "PUBLICATION_CONTRACT_MISMATCH"),
         ({"dependencies": {"unexpected": "1.0.0"}}, "PACKAGE_SET_MISMATCH"),
+        (
+            {
+                "scripts": {
+                    "prepack": "node scripts/prepack.mjs",
+                    "postinstall": "node unexpected.mjs",
+                }
+            },
+            "PUBLICATION_CONTRACT_MISMATCH",
+        ),
     ],
 )
 def test_selector_tarball_rejects_publication_or_dependency_drift(

@@ -3,6 +3,8 @@
 # [Pos] Post-publication acceptance harness for the custom Claude SDK and Runtime.
 # [Sync] 2026-08-24: verify exact wheel/sdist and five npm packages, source-map
 #        absence, isolated install ownership, SDK cli_path, and CLI version.
+# [Sync] 2026-08-24: require source-only sdist installation plus full npm
+#        publication/Runtime evidence and selector-to-four-tarball bindings.
 
 """Accept an already-published Dream Claude SDK/Runtime registry release.
 
@@ -15,7 +17,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import email.parser
+import email.policy
 import hashlib
+import io
 import json
 import os
 import platform
@@ -43,12 +48,17 @@ NPM_PLATFORMS = {
     "linux-arm64": f"{NPM_SELECTOR}-linux-arm64",
     "linux-x64": f"{NPM_SELECTOR}-linux-x64",
 }
+NPM_RIPGREP_PATHS = {
+    target: f"runtime/lib/core/chunks/vendor/ripgrep/{target.split('-', 1)[1]}-{target.split('-', 1)[0]}/rg"
+    for target in NPM_PLATFORMS
+}
 PUBLIC_API = ("ClaudeAgentOptions", "ClaudeSDKClient", "query")
 PYPI_JSON_TEMPLATE = "https://pypi.org/pypi/{name}/{version}/json"
 PYPI_FILE_HOST = "files.pythonhosted.org"
 PYPI_SIMPLE = "https://pypi.org/simple"
 NPM_REGISTRY = "https://registry.npmjs.org"
 BUN_VERSION = "1.4.0"
+NPM_REPOSITORY = "glide-the/ink-claude-code-dream"
 SAFE_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._+-]*$")
 
 
@@ -225,6 +235,56 @@ def inspect_archive_without_source_maps(path: Path, *, phase: str) -> int:
     return len(names)
 
 
+def validate_sdk_sdist(path: Path, version: str) -> None:
+    """Validate canonical source-distribution identity before installation."""
+
+    expected_root = f"ink_claude_dream_agent_sdk-{version}"
+    try:
+        with tarfile.open(path, "r:*") as archive:
+            regular = {
+                member.name: member
+                for member in archive.getmembers()
+                if member.isfile()
+            }
+            roots = {PurePosixPath(name).parts[0] for name in regular}
+            if roots != {expected_root}:
+                raise AcceptanceError(
+                    "SDIST_STRUCTURE_MISMATCH",
+                    "pypi-artifact",
+                    "SDK sdist must have one canonical release root",
+                )
+            pkg_info_name = f"{expected_root}/PKG-INFO"
+            pyproject_name = f"{expected_root}/pyproject.toml"
+            if pkg_info_name not in regular or pyproject_name not in regular:
+                raise AcceptanceError(
+                    "SDIST_STRUCTURE_MISMATCH",
+                    "pypi-artifact",
+                    "SDK sdist is missing PKG-INFO or pyproject.toml",
+                )
+            pkg_stream = archive.extractfile(regular[pkg_info_name])
+            if pkg_stream is None:
+                raise AcceptanceError(
+                    "SDIST_STRUCTURE_MISMATCH", "pypi-artifact", "SDK PKG-INFO is unreadable"
+                )
+            metadata = email.parser.BytesParser(policy=email.policy.default).parsebytes(
+                pkg_stream.read()
+            )
+            if (
+                _normalise_distribution(str(metadata.get("Name", "")))
+                != _normalise_distribution(PYPI_DISTRIBUTION)
+                or metadata.get("Version") != version
+            ):
+                raise AcceptanceError(
+                    "VERSION_MISMATCH",
+                    "pypi-artifact",
+                    "SDK sdist PKG-INFO identity does not match the requested release",
+                )
+    except (OSError, tarfile.TarError) as exc:
+        raise AcceptanceError(
+            "INVALID_ARCHIVE", "pypi-artifact", "SDK sdist is unreadable"
+        ) from exc
+
+
 def acquire_pypi_release(
     version: str,
     destination: Path,
@@ -313,6 +373,8 @@ def acquire_pypi_release(
         output = destination / filename
         output.write_bytes(body)
         file_count = inspect_archive_without_source_maps(output, phase="pypi-artifact")
+        if kind == "sdist":
+            validate_sdk_sdist(output, version)
         receipt[kind] = {
             "filename": filename,
             "sha256": actual,
@@ -512,6 +574,166 @@ def read_npm_package_manifest(tarball: Path) -> dict[str, Any]:
         ) from exc
 
 
+def _npm_tarball_files(tarball: Path) -> tuple[dict[str, bytes], str]:
+    body = tarball.read_bytes()
+    files: dict[str, bytes] = {}
+    try:
+        with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as archive:
+            for member in archive.getmembers():
+                if not member.isfile():
+                    continue
+                if member.name in files:
+                    raise AcceptanceError(
+                        "UNSAFE_ARCHIVE_MEMBER", "npm-artifact", "npm tarball has a duplicate file"
+                    )
+                stream = archive.extractfile(member)
+                if stream is None:
+                    raise AcceptanceError(
+                        "INVALID_ARCHIVE", "npm-artifact", "npm tarball file is unreadable"
+                    )
+                files[member.name] = stream.read()
+    except (OSError, tarfile.TarError) as exc:
+        raise AcceptanceError(
+            "INVALID_ARCHIVE", "npm-artifact", "npm release archive is unreadable"
+        ) from exc
+    return files, hashlib.sha256(body).hexdigest()
+
+
+def _npm_json_file(files: Mapping[str, bytes], name: str) -> dict[str, Any]:
+    body = files.get(f"package/{name}")
+    if body is None:
+        raise AcceptanceError(
+            "RUNTIME_EVIDENCE_MISSING", "npm-artifact", f"npm tarball is missing {name}"
+        )
+    return _json_object(body, phase="npm-artifact")
+
+
+def verify_npm_release_tarballs(
+    paths: Mapping[str, Path], version: str
+) -> dict[str, dict[str, Any]]:
+    """Verify platform evidence and the selector's exact four-tarball binding."""
+
+    summaries: dict[str, dict[str, Any]] = {}
+    meta_attestation: dict[str, Any] | None = None
+    common_policy_digest: str | None = None
+    for package, tarball in paths.items():
+        files, tarball_sha256 = _npm_tarball_files(tarball)
+        manifest = _npm_json_file(files, "package.json")
+        attestation = _npm_json_file(files, "npm-publication-attestation.json")
+        validate_npm_tarball_manifest(manifest, package, version)
+        policy_digest = attestation.get("npmReleasePolicySha256")
+        if (
+            attestation.get("repository") != NPM_REPOSITORY
+            or attestation.get("version") != version
+            or attestation.get("productionEligible") is not True
+            or attestation.get("publicationAllowed") is not True
+            or attestation.get("redistributionAllowed") is not True
+            or attestation.get("sourceMapsIncluded") is not False
+            or not isinstance(policy_digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", policy_digest)
+        ):
+            raise AcceptanceError(
+                "PUBLICATION_ATTESTATION_MISMATCH",
+                "npm-artifact",
+                "npm publication attestation common contract is invalid",
+            )
+        if common_policy_digest is None:
+            common_policy_digest = policy_digest
+        elif policy_digest != common_policy_digest:
+            raise AcceptanceError(
+                "PUBLICATION_ATTESTATION_MISMATCH",
+                "npm-artifact",
+                "npm packages do not share one release policy digest",
+            )
+        if package == NPM_SELECTOR:
+            if (
+                attestation.get("schemaVersion")
+                != "ink-npm-meta-publication-attestation/v1"
+                or "runtimeTarget" in attestation
+            ):
+                raise AcceptanceError(
+                    "PUBLICATION_ATTESTATION_MISMATCH",
+                    "npm-artifact",
+                    "selector publication attestation is invalid",
+                )
+            meta_attestation = attestation
+            summaries[package] = {"tarballSha256": tarball_sha256}
+            continue
+
+        target = next(key for key, value in NPM_PLATFORMS.items() if value == package)
+        ink_runtime = manifest["inkRuntime"]
+        release = _npm_json_file(files, "runtime/release-manifest.json")
+        artifact = _npm_json_file(files, "runtime/manifest/artifact-manifest.json")
+        core = _npm_json_file(files, "runtime/manifest/core-build-receipt.json")
+        qualification = files.get("package/runtime/manifest/qualification-summary.json")
+        ripgrep = files.get(f"package/{ink_runtime['ripgrepPath']}")
+        if qualification is None or ripgrep is None:
+            raise AcceptanceError(
+                "RUNTIME_EVIDENCE_MISSING",
+                "npm-artifact",
+                "platform tarball is missing qualification summary or ripgrep",
+            )
+        qualification_sha = hashlib.sha256(qualification).hexdigest()
+        ripgrep_sha = hashlib.sha256(ripgrep).hexdigest()
+        artifact_record = artifact.get("artifact", {})
+        if (
+            attestation.get("schemaVersion")
+            != "ink-npm-platform-publication-attestation/v1"
+            or attestation.get("runtimeTarget") != target
+            or release.get("core", {}).get("runtimeTarget") != target
+            or artifact_record.get("runtimeTarget") != target
+            or core.get("runtimeTarget") != target
+            or release.get("status", {}).get("productionEligible") is not True
+            or release.get("status", {}).get("publicationAllowed") is not True
+            or release.get("status", {}).get("redistributionAllowed") is not True
+            or artifact_record.get("productionEligible") is not True
+            or artifact_record.get("publicationAllowed") is not True
+            or artifact_record.get("redistributionAllowed") is not True
+            or attestation.get("coreBundleSha256") != artifact.get("coreBundleSha256")
+            or attestation.get("payloadTreeSha256") != artifact.get("payloadTreeSha256")
+            or attestation.get("qualificationSummarySha256") != qualification_sha
+            or ink_runtime.get("ripgrepSha256") != ripgrep_sha
+        ):
+            raise AcceptanceError(
+                "RUNTIME_EVIDENCE_MISMATCH",
+                "npm-artifact",
+                "platform Runtime evidence is not bound to the publication attestation",
+            )
+        summaries[package] = {
+            "target": target,
+            "package": package,
+            "version": version,
+            "tarballSha256": tarball_sha256,
+            "qualificationSummarySha256": qualification_sha,
+            "coreBundleSha256": attestation["coreBundleSha256"],
+            "payloadTreeSha256": attestation["payloadTreeSha256"],
+        }
+
+    if meta_attestation is None:
+        raise AcceptanceError(
+            "RUNTIME_EVIDENCE_MISSING", "npm-artifact", "selector attestation is missing"
+        )
+    expected_bindings = [
+        {
+            "target": target,
+            "package": package,
+            "version": version,
+            "tarballSha256": summaries[package]["tarballSha256"],
+            "qualificationSummarySha256": summaries[package]["qualificationSummarySha256"],
+            "coreBundleSha256": summaries[package]["coreBundleSha256"],
+            "payloadTreeSha256": summaries[package]["payloadTreeSha256"],
+        }
+        for target, package in NPM_PLATFORMS.items()
+    ]
+    if meta_attestation.get("platforms") != expected_bindings:
+        raise AcceptanceError(
+            "META_BINDING_MISMATCH",
+            "npm-artifact",
+            "selector attestation does not bind the exact four platform tarballs",
+        )
+    return summaries
+
+
 def validate_npm_tarball_manifest(
     manifest: Mapping[str, Any], package: str, version: str
 ) -> None:
@@ -534,7 +756,7 @@ def validate_npm_tarball_manifest(
         or license_name.upper() == "UNLICENSED"
         or manifest.get("publishConfig")
         != {"access": "public", "provenance": True}
-        or manifest.get("scripts", {}).get("prepack") != "node scripts/prepack.mjs"
+        or manifest.get("scripts") != {"prepack": "node scripts/prepack.mjs"}
     ):
         raise AcceptanceError(
             "PUBLICATION_CONTRACT_MISMATCH",
@@ -592,9 +814,9 @@ def validate_npm_tarball_manifest(
     if not isinstance(ink_runtime, dict) or (
         ink_runtime.get("target") != target
         or ink_runtime.get("entrypoint") != "runtime/bin/ink-claude-code-dream"
+        or ink_runtime.get("ripgrepPath") != NPM_RIPGREP_PATHS[target]
         or ink_runtime.get("bunVersion") != BUN_VERSION
         or ink_runtime.get("sourceMapsIncluded") is not False
-        or not isinstance(ink_runtime.get("ripgrepPath"), str)
         or not re.fullmatch(r"[0-9a-f]{64}", str(ink_runtime.get("ripgrepSha256", "")))
     ):
         raise AcceptanceError(
@@ -666,15 +888,18 @@ def acquire_npm_release(
         receipts[package] = {
             "filename": filename,
             "integrity": actual_integrity,
+            "sha256": hashlib.sha256(body).hexdigest(),
             "bytes": len(body),
             "files": file_count,
             "path": str(tarball),
         }
+    evidence = verify_npm_release_tarballs(paths, version)
     return {
         "target": target,
         "currentPlatformPackage": NPM_PLATFORMS[target],
         "packages": receipts,
         "paths": paths,
+        "evidence": evidence,
     }
 
 
@@ -726,20 +951,27 @@ def install_npm_runtime(
 
 
 def create_sdk_venv(
-    wheel: Path,
+    artifact: Path,
     root: Path,
     *,
+    source_only: bool = False,
     env: Mapping[str, str],
     runner: Callable[..., subprocess.CompletedProcess[str]] = run_command,
 ) -> Path:
-    venv = root / "sdk-venv"
+    venv = root / ("sdk-sdist-venv" if source_only else "sdk-wheel-venv")
     created = runner([sys.executable, "-m", "venv", str(venv)], cwd=root, env=env)
     if created.returncode != 0:
         raise AcceptanceError("INSTALL_FAILED", "venv-create", "isolated Python environment creation failed")
     python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    installed = runner([str(python), "-m", "pip", "install", str(wheel)], cwd=root, env=env)
+    install_argv = [str(python), "-m", "pip", "install"]
+    # For the sdist lane the explicit local .tar.gz is the only top-level SDK
+    # candidate.  Let pip resolve its declared build and runtime dependencies
+    # normally so divergent Requires-Dist metadata cannot be hidden by wheel
+    # dependencies installed in advance.
+    install_argv.append(str(artifact))
+    installed = runner(install_argv, cwd=root, env=env)
     if installed.returncode != 0:
-        raise AcceptanceError("INSTALL_FAILED", "sdk-install", "isolated SDK wheel installation failed")
+        raise AcceptanceError("INSTALL_FAILED", "sdk-install", "isolated SDK artifact installation failed")
     return python
 
 
@@ -830,9 +1062,18 @@ def run_acceptance(sdk_version: str, runtime_version: str, expected_cli_version:
         pypi = acquire_pypi_release(sdk_version, root / "pypi")
         npm = acquire_npm_release(runtime_version, root / "npm", env=env)
         cli = install_npm_runtime(npm, root, env=env)
-        python = create_sdk_venv(Path(pypi["bdist_wheel"]["path"]), root, env=env)
-        probe = probe_installed_contract(
-            python, sdk_version, cli, expected_cli_version, root=root, env=env
+        wheel_python = create_sdk_venv(Path(pypi["bdist_wheel"]["path"]), root, env=env)
+        wheel_probe = probe_installed_contract(
+            wheel_python, sdk_version, cli, expected_cli_version, root=root, env=env
+        )
+        sdist_python = create_sdk_venv(
+            Path(pypi["sdist"]["path"]),
+            root,
+            source_only=True,
+            env=env,
+        )
+        sdist_probe = probe_installed_contract(
+            sdist_python, sdk_version, cli, expected_cli_version, root=root, env=env
         )
         return {
             "schemaVersion": "ink-claude-registry-acceptance/v1",
@@ -858,7 +1099,8 @@ def run_acceptance(sdk_version: str, runtime_version: str, expected_cli_version:
                     for package, receipt in npm["packages"].items()
                 },
             },
-            "isolatedInstall": probe,
+            "isolatedWheelInstall": wheel_probe,
+            "isolatedSdistInstall": sdist_probe,
         }
 
 
