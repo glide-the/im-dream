@@ -107,7 +107,7 @@ idna==3.11
     #   httpx
     #   requests
     #   yarl
-ink-claude-dream-agent-sdk @ git+https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git@bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4
+ink-claude-dream-agent-sdk @ git+https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git@6164bd91e43bbf610ec40b4500edec18a97ce665
     # via ink-and-memory-backend
 instructor==1.13.0
     # via polyagent

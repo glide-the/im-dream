@@ -759,7 +759,7 @@ requires-dist = [
     { name = "eval-type-backport", specifier = ">=0.2,<1" },
     { name = "fastapi", specifier = ">=0.110,<1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28,<0.29" },
-    { name = "ink-claude-dream-agent-sdk", git = "https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git?rev=bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4" },
+    { name = "ink-claude-dream-agent-sdk", git = "https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git?rev=6164bd91e43bbf610ec40b4500edec18a97ce665" },
     { name = "itsdangerous", specifier = ">=2.2,<3" },
     { name = "json-repair", specifier = ">=0.35,<1" },
     { name = "mcp", specifier = ">=1.27.0" },
@@ -781,7 +781,7 @@ requires-dist = [
 [[package]]
 name = "ink-claude-dream-agent-sdk"
 version = "0.2.143"
-source = { git = "https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git?rev=bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4#bcdfbcf9f72bc34865d0efeb5f971d6df005f5b4" }
+source = { git = "https://github.com/glide-the/ink-claude-dream-agent-sdk-python.git?rev=6164bd91e43bbf610ec40b4500edec18a97ce665#6164bd91e43bbf610ec40b4500edec18a97ce665" }
 dependencies = [
     { name = "anyio" },
     { name = "jsonschema" },
