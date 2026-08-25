@@ -11,7 +11,8 @@
 // [Sync] 2026-05-29: let the message list fill the available chat page width.
 // [Sync] 2026-05-29: fix history-replay regression — history-loaded DynamicToolUIPart may lack toolName field causing getToolName() to return 'invocation'; add resolveToolName() with direct field fallback and hoist editor write completed check above Terminal block, decoupled from outputText.
 // [Sync] 2026-05-30: fix reasoning SSE display — auto-expand reasoning when state==='streaming'; show spin loader + blinking cursor during stream; border dims when done; hide manual expand toggle while streaming.
-// [Sync] 2026-05-30: reasoning blocks default to expanded (isExpandedActual ?? true) so thinking content stays visible after streaming ends; user can click to collapse; toggle flips isExpandedActual.
+// [Sync] 2026-08-26: completed reasoning blocks default to collapsed; streaming reasoning
+//                    remains visible, and users can expand or collapse completed content.
 // [Sync] 2026-08-13: allow long uninterrupted Chat text to wrap inside narrow Dream dialogs
 //                    without widening the shared message scroll region.
 // [Sync] 2026-06-02: delegate user text bubbles to UserMessagePart so user prompts render through the shared GFM Markdown path.
@@ -266,17 +267,14 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
             {message.parts?.map((part, partIndex) => {
               const partKey = `${message.id}-${partIndex}`;
               const isExpanded = expandedParts[partKey] ?? false;
-              // For reasoning parts: default expanded (see isExpandedActual below).
-              // toggleExpanded flips from the *actual* state that was used to render.
               const toggleExpanded = () => setExpandedParts((current) => ({ ...current, [partKey]: !isExpanded }));
 
               if (part.type === 'reasoning') {
                 const reasoningPart = part as { text?: string; state?: 'streaming' | 'done' };
                 const reasoningText = reasoningPart.text ?? '';
                 const isStreaming = reasoningPart.state === 'streaming';
-                // Reasoning defaults to expanded so users always see thinking content.
-                // Use ?? true so first render is expanded; user can click to collapse.
-                const isExpandedActual = expandedParts[partKey] ?? true;
+                // Keep live reasoning visible, then collapse it once streaming completes.
+                const isExpandedActual = expandedParts[partKey] ?? false;
                 const showContent = isExpandedActual || isStreaming;
                 const toggleReasoningExpanded = () =>
                   setExpandedParts((current) => ({ ...current, [partKey]: !isExpandedActual }));
@@ -285,6 +283,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                     <button
                       type="button"
                       onClick={isStreaming ? undefined : toggleReasoningExpanded}
+                      aria-expanded={showContent}
                       style={{
                         width: '100%',
                         display: 'flex',
