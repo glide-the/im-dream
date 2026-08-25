@@ -3,8 +3,8 @@
 # [Pos] Post-publication acceptance harness for the custom Claude SDK and Runtime.
 # [Sync] 2026-08-24: verify exact wheel/sdist and five npm packages, source-map
 #        absence, isolated install ownership, SDK cli_path, and CLI version.
-# [Sync] 2026-08-24: require source-only sdist installation plus full npm
-#        publication/Runtime evidence and selector-to-four-tarball bindings.
+# [Sync] 2026-08-26: require source-only sdist installation, full npm evidence,
+#        selector-to-four-tarball bindings, and both supported CLI aliases.
 
 """Accept an already-published Dream Claude SDK/Runtime registry release.
 
@@ -42,6 +42,7 @@ PYPI_DISTRIBUTION = "ink-claude-dream-agent-sdk"
 PYTHON_IMPORT = "claude_agent_sdk"
 NPM_SELECTOR = "@glide-the/ink-claude-code-dream"
 CLI_COMMAND = "ink-claude-code-dream"
+CLI_ALIASES = (CLI_COMMAND, "claude")
 NPM_PLATFORMS = {
     "darwin-arm64": f"{NPM_SELECTOR}-darwin-arm64",
     "darwin-x64": f"{NPM_SELECTOR}-darwin-x64",
@@ -51,6 +52,21 @@ NPM_PLATFORMS = {
 NPM_RIPGREP_PATHS = {
     target: f"runtime/lib/core/chunks/vendor/ripgrep/{target.split('-', 1)[1]}-{target.split('-', 1)[0]}/rg"
     for target in NPM_PLATFORMS
+}
+REQUIRED_RUNTIME_CAPABILITIES = {
+    "extensions.plugins",
+    "lifecycle.cancel",
+    "mcp.http",
+    "mcp.management.identity",
+    "mcp.oauth",
+    "mcp.stdio",
+    "protocol.control.bidirectional",
+    "protocol.streaming",
+    "sandbox",
+    "session.resume",
+    "tmpdir.thread-local",
+    "transcript.jsonl",
+    "workspace.cwd",
 }
 PUBLIC_API = ("ClaudeAgentOptions", "ClaudeSDKClient", "query")
 PYPI_JSON_TEMPLATE = "https://pypi.org/pypi/{name}/{version}/json"
@@ -608,10 +624,200 @@ def _npm_json_file(files: Mapping[str, bytes], name: str) -> dict[str, Any]:
     return _json_object(body, phase="npm-artifact")
 
 
+def _verify_cleanroom_npm_release_tarballs(
+    paths: Mapping[str, Path], version: str
+) -> dict[str, dict[str, Any]]:
+    """Verify the current standalone clean-room selector/platform contract."""
+
+    summaries: dict[str, dict[str, Any]] = {}
+    expected_platforms: dict[str, Any] | None = None
+    business_receipt: str | None = None
+    for package, tarball in paths.items():
+        files, tarball_sha256 = _npm_tarball_files(tarball)
+        manifest = _npm_json_file(files, "package.json")
+        attestation = _npm_json_file(files, "npm-publication-attestation.json")
+        validate_npm_tarball_manifest(manifest, package, version)
+        receipt = attestation.get("businessAcceptanceReceiptSha256")
+        entrypoint_sha = attestation.get("entrypointSha256")
+        if (
+            attestation.get("repository") != NPM_REPOSITORY
+            or attestation.get("version") != version
+            or attestation.get("productionEligible") is not True
+            or attestation.get("publicationAllowed") is not True
+            or attestation.get("redistributionAllowed") is not True
+            or attestation.get("sourceMapsIncluded") is not False
+            or not isinstance(receipt, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", receipt)
+            or not isinstance(entrypoint_sha, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", entrypoint_sha)
+        ):
+            raise AcceptanceError(
+                "PUBLICATION_ATTESTATION_MISMATCH",
+                "npm-artifact",
+                "clean-room npm publication attestation is invalid",
+            )
+        if business_receipt is None:
+            business_receipt = receipt
+        elif business_receipt != receipt:
+            raise AcceptanceError(
+                "PUBLICATION_ATTESTATION_MISMATCH",
+                "npm-artifact",
+                "clean-room npm packages do not share one business receipt",
+            )
+
+        if package == NPM_SELECTOR:
+            prefix = "package/"
+            runtime_meta = _npm_json_file(files, "runtime-manifest.json")
+            release = _npm_json_file(files, "release-manifest.json")
+            artifact = _npm_json_file(files, "manifest/artifact-manifest.json")
+            capabilities = _npm_json_file(files, "manifest/capabilities.json")
+            entrypoint = "bin/ink-claude-code-dream"
+            expected_schema = "ink-cleanroom-npm-meta-publication-attestation/v1"
+            expected_platforms = artifact.get("platforms")
+            expected_optional = {
+                platform_package: version
+                for platform_package in NPM_PLATFORMS.values()
+            }
+            if (
+                runtime_meta.get("schemaVersion") != "ink-cleanroom-npm-meta/v1"
+                or runtime_meta.get("selector") != entrypoint
+                or runtime_meta.get("sourcemap") != "none"
+                or runtime_meta.get("commands") != ["claude", CLI_COMMAND]
+                or runtime_meta.get("optionalDependencies") != expected_optional
+                or runtime_meta.get("supportedTargets") != list(NPM_PLATFORMS)
+                or not isinstance(expected_platforms, dict)
+            ):
+                raise AcceptanceError(
+                    "RUNTIME_BINDING_MISMATCH",
+                    "npm-artifact",
+                    "selector Runtime manifest is incomplete or inconsistent",
+                )
+        else:
+            prefix = "package/runtime/"
+            runtime_meta = _npm_json_file(files, "runtime-manifest.json")
+            release = _npm_json_file(files, "runtime/release-manifest.json")
+            artifact = _npm_json_file(files, "runtime/manifest/artifact-manifest.json")
+            capabilities = _npm_json_file(files, "runtime/manifest/capabilities.json")
+            entrypoint = "runtime/bin/ink-claude-code-dream"
+            expected_schema = "ink-cleanroom-npm-platform-publication-attestation/v1"
+
+        entrypoint_body = files.get(f"package/{entrypoint}")
+        checksums = files.get("package/SHA256SUMS")
+        capabilities_body = files.get(f"{prefix}manifest/capabilities.json")
+        if entrypoint_body is None or checksums is None or capabilities_body is None:
+            raise AcceptanceError(
+                "RUNTIME_EVIDENCE_MISSING",
+                "npm-artifact",
+                "clean-room npm tarball is missing executable or checksum evidence",
+            )
+        actual_entrypoint_sha = hashlib.sha256(entrypoint_body).hexdigest()
+        actual_capabilities_sha = hashlib.sha256(capabilities_body).hexdigest()
+        capability_ids = {
+            item.get("id")
+            for item in capabilities.get("capabilities", [])
+            if isinstance(item, dict)
+        }
+        release_runtime = release.get("runtime", {})
+        release_status = release.get("status", {})
+        artifact_record = artifact.get("artifact", {})
+        if (
+            attestation.get("schemaVersion") != expected_schema
+            or attestation.get("entrypointSha256") != actual_entrypoint_sha
+            or checksums.decode("utf-8", errors="strict").strip()
+            != f"{actual_entrypoint_sha}  {entrypoint}"
+            or artifact.get("schemaVersion") != "ink-cleanroom-artifact-manifest/v1"
+            or artifact.get("capabilitiesSha256") != actual_capabilities_sha
+            or artifact_record.get("entrypointSha256") != actual_entrypoint_sha
+            or artifact_record.get("productionEligible") is not True
+            or artifact_record.get("publicationAllowed") is not True
+            or artifact_record.get("redistributionAllowed") is not True
+            or release.get("schemaVersion") != "ink-claude-cli-envelope/v1"
+            or release.get("core", {}).get("entrypointSha256") != actual_entrypoint_sha
+            or release.get("core", {}).get("productionEligible") is not True
+            or release_runtime.get("version") != version
+            or release_runtime.get("integration", {}).get("sdkVersion") is None
+            or release_status
+            != {
+                "productionEligible": True,
+                "publicationAllowed": True,
+                "redistributionAllowed": True,
+            }
+            or capability_ids != REQUIRED_RUNTIME_CAPABILITIES
+        ):
+            raise AcceptanceError(
+                "RUNTIME_EVIDENCE_MISMATCH",
+                "npm-artifact",
+                "clean-room Runtime evidence is not bound to its executable",
+            )
+
+        summary: dict[str, Any] = {
+            "package": package,
+            "version": version,
+            "tarballSha256": tarball_sha256,
+            "entrypointSha256": actual_entrypoint_sha,
+        }
+        if package != NPM_SELECTOR:
+            target = next(key for key, value in NPM_PLATFORMS.items() if value == package)
+            os_name, cpu = target.split("-", 1)
+            runtime_record = runtime_meta.get("runtime", {})
+            if (
+                runtime_meta.get("schemaVersion") != "ink-cleanroom-npm-platform/v1"
+                or runtime_meta.get("package")
+                != {"license": "MIT", "name": package, "version": version}
+                or runtime_record.get("target") != target
+                or runtime_record.get("os") != os_name
+                or runtime_record.get("cpu") != cpu
+                or runtime_record.get("bunVersion") != BUN_VERSION
+                or runtime_record.get("executable") != entrypoint
+                or runtime_record.get("sha256") != actual_entrypoint_sha
+                or runtime_record.get("sourcemap") != "none"
+                or release.get("core", {}).get("runtimeTarget") != target
+                or artifact_record.get("runtimeTarget") != target
+                or capabilities.get("runtime", {}).get("runtimeTarget") != target
+                or attestation.get("runtimeTarget") != target
+            ):
+                raise AcceptanceError(
+                    "RUNTIME_BINDING_MISMATCH",
+                    "npm-artifact",
+                    "platform Runtime target binding is incomplete or inconsistent",
+                )
+            summary["target"] = target
+        summaries[package] = summary
+
+    if expected_platforms is None or set(expected_platforms) != set(NPM_PLATFORMS):
+        raise AcceptanceError(
+            "META_BINDING_MISMATCH",
+            "npm-artifact",
+            "selector artifact manifest does not bind all Runtime targets",
+        )
+    for target, platform_package in NPM_PLATFORMS.items():
+        if expected_platforms.get(target) != {
+            "executableSha256": summaries[platform_package]["entrypointSha256"],
+            "package": platform_package,
+        }:
+            raise AcceptanceError(
+                "META_BINDING_MISMATCH",
+                "npm-artifact",
+                "selector artifact manifest does not bind the platform executable",
+            )
+    return summaries
+
+
 def verify_npm_release_tarballs(
     paths: Mapping[str, Path], version: str
 ) -> dict[str, dict[str, Any]]:
     """Verify platform evidence and the selector's exact four-tarball binding."""
+
+    attestation_schemas = {
+        _npm_json_file(_npm_tarball_files(tarball)[0], "npm-publication-attestation.json").get("schemaVersion")
+        for tarball in paths.values()
+    }
+    cleanroom_schemas = {
+        "ink-cleanroom-npm-meta-publication-attestation/v1",
+        "ink-cleanroom-npm-platform-publication-attestation/v1",
+    }
+    if attestation_schemas == cleanroom_schemas:
+        return _verify_cleanroom_npm_release_tarballs(paths, version)
 
     summaries: dict[str, dict[str, Any]] = {}
     meta_attestation: dict[str, Any] | None = None
@@ -774,11 +980,12 @@ def validate_npm_tarball_manifest(
                 "npm-artifact",
                 "selector tarball does not bind the exact four-platform package set",
             )
-        if manifest.get("bin") != {CLI_COMMAND: f"bin/{CLI_COMMAND}"}:
+        expected_bins = {alias: f"bin/{CLI_COMMAND}" for alias in CLI_ALIASES}
+        if manifest.get("bin") != expected_bins:
             raise AcceptanceError(
                 "CLI_CONTRACT_FAILED",
                 "npm-artifact",
-                "selector tarball does not expose the canonical Runtime command",
+                "selector tarball does not expose the exact Runtime command aliases",
             )
         if manifest.get("dependencies") not in (None, {}):
             raise AcceptanceError(
@@ -805,6 +1012,8 @@ def validate_npm_tarball_manifest(
             "npm-artifact",
             "platform tarball os/cpu does not match its package name",
         )
+    if ink_runtime is None and dependencies in (None, {}):
+        return
     if dependencies != {"bun": BUN_VERSION}:
         raise AcceptanceError(
             "BUN_VERSION_MISMATCH",
@@ -944,9 +1153,15 @@ def install_npm_runtime(
     )
     if result.returncode != 0:
         raise AcceptanceError("INSTALL_FAILED", "npm-install", "isolated npm installation failed")
-    executable = install_root / "node_modules" / ".bin" / CLI_COMMAND
-    if not executable.is_file():
-        raise AcceptanceError("CLI_MISSING", "npm-install", "installed selector did not expose the Runtime command")
+    executables = [
+        install_root / "node_modules" / ".bin" / alias for alias in CLI_ALIASES
+    ]
+    if any(not executable.is_file() for executable in executables):
+        raise AcceptanceError("CLI_MISSING", "npm-install", "installed selector did not expose both Runtime command aliases")
+    resolved = {executable.resolve() for executable in executables}
+    if len(resolved) != 1:
+        raise AcceptanceError("CLI_CONTRACT_FAILED", "npm-install", "installed Runtime command aliases resolve to different executables")
+    executable = executables[0]
     return executable.resolve()
 
 

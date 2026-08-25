@@ -761,7 +761,7 @@ requires-dist = [
     { name = "eval-type-backport", specifier = ">=0.2,<1" },
     { name = "fastapi", specifier = ">=0.110,<1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28,<0.29" },
-    { name = "ink-claude-dream-agent-sdk", specifier = "==0.2.143" },
+    { name = "ink-claude-dream-agent-sdk", specifier = "==0.2.144" },
     { name = "itsdangerous", specifier = ">=2.2,<3" },
     { name = "json-repair", specifier = ">=0.35,<1" },
     { name = "mcp", specifier = ">=1.27.0" },
@@ -782,7 +782,7 @@ requires-dist = [
 
 [[package]]
 name = "ink-claude-dream-agent-sdk"
-version = "0.2.143"
+version = "0.2.144"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -790,9 +790,9 @@ dependencies = [
     { name = "mcp" },
     { name = "sniffio" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d0/d4/e546e8f8f4467d77677e440b7691074a89c46a2793879a56e7e3b5340b90/ink_claude_dream_agent_sdk-0.2.143.tar.gz", hash = "sha256:e2b62792d70b02fd7da92988f73356a92eb544ec1570401a76f8ac0b056e2946", size = 372447, upload-time = "2026-08-24T13:32:16.31Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/ed/8dec4fc0dd8ef5527006e67ef76bc729f715fe12e57a3d0ce9e57a344f83/ink_claude_dream_agent_sdk-0.2.144.tar.gz", hash = "sha256:1b2b6dfad5bfa766de24682d7b26ef1f1394097b92a5d32be1eae40530fbd517", size = 373286, upload-time = "2026-08-25T16:54:42.475Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/83/7e/4b532a7b04800e06ff26e225a6519fb743a77c3a04609e3a505d6189761d/ink_claude_dream_agent_sdk-0.2.143-py3-none-any.whl", hash = "sha256:e64ea7bf468a6911dfc3ab40f09e42245e203fc78712bd2919c70cc77a27bcd1", size = 151684, upload-time = "2026-08-24T13:32:14.828Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/25/4182adad95326fc0f9f6138d3bed0c7cd12383c9ce2e5a6bed671415bd24/ink_claude_dream_agent_sdk-0.2.144-py3-none-any.whl", hash = "sha256:50801104b1dcf8c0eb64555eb62f27f6238b37635c2ccbcb391bd562ee85ca56", size = 151704, upload-time = "2026-08-25T16:54:41.071Z" },
 ]
 
 [[package]]

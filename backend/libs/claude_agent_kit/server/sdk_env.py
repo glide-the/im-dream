@@ -63,7 +63,7 @@
 # [Sync] 2026-08-22: restore strict system-CLI discovery for MCP management and
 #                    the server-owned secure-storage selector without changing
 #                    the thread-scoped TMPDIR contract.
-# [Sync] 2026-08-23: require ink-claude-dream-agent-sdk 0.2.143 metadata while
+# [Sync] 2026-08-26: require ink-claude-dream-agent-sdk 0.2.144 metadata while
 #                    retaining the claude_agent_sdk import; default CLI
 #                    discovery now selects ink-claude-code-dream and fails
 #                    closed. CLAUDE_CODE_CLI_PATH remains the sole explicit,
@@ -100,10 +100,10 @@ CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT = 8 * 1024 * 1024
 CLAUDE_AGENT_MAX_BUFFER_SIZE_MINIMUM = 1024 * 1024
 CLAUDE_AGENT_MAX_BUFFER_SIZE_MAXIMUM = 64 * 1024 * 1024
 DREAM_CLAUDE_SDK_DISTRIBUTION = "ink-claude-dream-agent-sdk"
-DREAM_CLAUDE_SDK_VERSION = "0.2.143"
+DREAM_CLAUDE_SDK_VERSION = "0.2.144"
 DREAM_CLAUDE_SDK_IMPORT = "claude_agent_sdk"
 DREAM_CLAUDE_CLI_EXECUTABLE = "ink-claude-code-dream"
-DREAM_CLAUDE_CLI_VERSION = "0.1.0"
+DREAM_CLAUDE_CLI_VERSION = "0.1.1"
 DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA = "ink-claude-cli-envelope/v1"
 DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME = "release-manifest.json"
 DREAM_CLAUDE_STREAM_PROTOCOL_NAME = "claude-code-stream-json"

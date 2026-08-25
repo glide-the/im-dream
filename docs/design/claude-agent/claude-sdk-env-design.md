@@ -1,7 +1,7 @@
 <!-- [输入] Dream SDK options、Runtime resolver、thread Workspace/TMPDIR、用户 SDK 环境和启动资格门。 -->
 <!-- [输出] 定义 Claude SDK 子进程环境、config home、临时根、Runtime 选择与回滚合同。 -->
 <!-- [定位] Claude Agent SDK 环境与进程启动设计真相源。 -->
-<!-- [同步] 2026-08-24：记录 SDK 0.2.143 正式 PyPI 版本/哈希锁、Runtime main@7c34e6cd 与公开 npm 多平台 Runtime；standalone 不依赖 ambient Bun。 -->
+<!-- [同步] 2026-08-26：记录 SDK 0.2.144、Runtime 0.1.1 正式 registry 配对；standalone 不依赖 ambient Bun。 -->
 <!-- [同步] 2026-08-25：CLI resolver 仅服务 Agent turn；MCP Resources 管理面改为 Dream PostgreSQL 与标准 MCP SDK。 -->
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
@@ -12,17 +12,17 @@
 > 迁移到 `{AGENT_CWD}/{thread_id}/.claude-tmp`。Phase 1 通过
 > `AgentRunOptions.claude_tmp_workspace` 传递 server-only 绑定，runner 与
 > final client adapter 重复合并时保持该绑定，spawn 前创建并校验 `0700`。
-> **[同步] 2026-08-23**：生产入口要求 `ink-claude-dream-agent-sdk==0.2.143`
+> **[同步] 2026-08-26**：生产入口要求 `ink-claude-dream-agent-sdk==0.2.144`
 > 唯一提供 `claude_agent_sdk`，并把默认 CLI 收敛为经 production manifest
-> 门禁的 `ink-claude-code-dream==0.1.0`。`CLAUDE_CODE_CLI_PATH` 是唯一显式
+> 门禁的 `ink-claude-code-dream==0.1.1`。`CLAUDE_CODE_CLI_PATH` 是唯一显式
 > 绝对覆盖与官方 CLI 回滚入口；不再回退 ambient `claude` 或 SDK bundled CLI。
 > **[同步] 2026-08-24**：Python 依赖文件把
-> `ink-claude-dream-agent-sdk==0.2.143` 固定到正式 PyPI 精确版本，
+> `ink-claude-dream-agent-sdk==0.2.144` 固定到正式 PyPI 精确版本，
 > `uv.lock`/`requirements.txt` 记录 wheel 与 sdist SHA-256，Docker 使用
 > `--require-hashes`，并排除 official `claude-agent-sdk`。源码身份仍由不可变
-> `v0.2.143@6164bd91e43bbf610ec40b4500edec18a97ce665` 绑定。Docker 验证 metadata/import 所有权，只保留显式官方
-> CLI 回滚物。Runtime PR #5/#6 已合并到 `main@7c34e6cd` 并公开发布五个 npm 包；本机已从 registry 全新安装通过生产资格门的 clean-room
-> `@glide-the/ink-claude-code-dream@0.1.0` selector 与 darwin-arm64 平台包，
+> `v0.2.144@fa10c9ef04ec006d9dcf0a88b1b35dab4ef4723b` 绑定。Docker 验证 metadata/import 所有权，只保留显式官方
+> CLI 回滚物。Runtime `main@eb0b503` 已公开发布五个 `0.1.1` npm 包；registry 空目录安装通过生产资格门的 clean-room
+> `@glide-the/ink-claude-code-dream@0.1.1` selector 与 darwin-arm64 平台包，
 > 默认 PATH 解析、FastAPI 启动和真实 Comfy MCP 两轮 resume 均通过。
 
 # Claude SDK 子进程环境与 Runtime 解析设计
@@ -217,7 +217,7 @@ options.extra_args["setting-sources"] = "project"
 ### 5.5A Claude Runtime 解析（cli_path）**[2026-08-24 当前合同]**
 
 Dream 只保留一条 Agent 业务路径：`server.py` 在 Agent factory 启动前验证
-`ink-claude-dream-agent-sdk==0.2.143` distribution metadata、唯一
+`ink-claude-dream-agent-sdk==0.2.144` distribution metadata、唯一
 `claude_agent_sdk` import provider、公共 `ClaudeAgentOptions` / client / query API
 和五类 stream message type。Runner 随后通过既有
 `sdk_env.apply_cli_path_to_options()` 只固定 Agent 执行面 CLI。MCP Resources 管理面
@@ -237,19 +237,18 @@ session resume、JSONL transcript、workspace cwd、thread-local TMPDIR、sandbo
 MCP stdio/HTTP/OAuth/management identity、plugins 和 cancel。只透明委托官方 core
 或缺少任一能力的 envelope 不满足门禁。Python SDK 已从正式 PyPI 按精确版本与
 SHA-256 锁原子切换到自有 distribution；源码发布身份为不可变
-`v0.2.143@6164bd91e43bbf610ec40b4500edec18a97ce665`，安装环境不再带 Git `direct_url.json`。
+`v0.2.144@fa10c9ef04ec006d9dcf0a88b1b35dab4ef4723b`，安装环境不再带 Git `direct_url.json`。
 
-当前本机默认 Runtime 是 clean-room `@glide-the/ink-claude-code-dream@0.1.0`：
+当前 Dream 固定的 Runtime 是 clean-room `@glide-the/ink-claude-code-dream@0.1.1`：
 源码只来自 Runtime 仓库自有 MIT `src/cleanroom/` 和兼容许可证依赖，
 Dream-facing CLI 兼容输出为 `2.1.241 (Claude Code)`。该字符串只表示 Dream 所需
 接口资格，不声明官方全产品等价。Bun `1.4.0` 在构建阶段生成四个平台 standalone，
 运行时 selector 不依赖独立 Bun 或 ambient Bun。真实业务验收使用的本地 qualification
-meta/darwin-arm64 tgz SHA 分别为 `fd4dcbf2…a6d3ca7b`、`8e0cdc03…ebbc2a73`，
-executable SHA 为 `04372c5b…9d0d22be`；随后公共 registry fresh install 证明同一
-manifest/executable 合同，registry tgz SHA 分别为 `3c7c357e…57f4d4f`、
-`85906499…07c7ea63`，两棵安装树都无 `.map`。
+selector/darwin-arm64 registry tgz SHA 分别为 `1153970f…6746bff`、
+`622db6e0…37de8`，executable SHA 为 `a4da19cf…55ad3e2d`；public registry fresh
+install 的两个 CLI alias、manifest SDK `0.2.144`/Runtime `0.1.1` 配对和零 `.map` 均通过。
 
-当前镜像从 npm 官方 registry 精确安装 clean-room selector `0.1.0`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中执行 CLI version、manifest 与 Dream resolver 门。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。
+当前镜像从 npm 官方 registry 精确安装 clean-room selector `0.1.1`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中执行 CLI version、manifest 与 Dream resolver 门。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 

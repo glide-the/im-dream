@@ -1,7 +1,7 @@
 <!-- [输入] SDK/Runtime 仓库当前构建脚本、Trusted Publisher 工作流、Dream 依赖锁与 Runtime resolver 合同。 -->
 <!-- [输出] 自有 Python SDK 与多平台 clean-room Runtime 的打包、发布、Dream 集成、验证和回滚操作手册。 -->
 <!-- [定位] Claude SDK/Runtime 发布与 IM Dream 接入的中文执行真相源；不负责服务器部署。 -->
-<!-- [同步] 2026-08-24：记录 PyPI SDK 0.2.143、npm Runtime 0.1.0 和 Dream 精确版本/哈希接入流程。 -->
+<!-- [同步] 2026-08-26：记录 PyPI SDK 0.2.144、npm Runtime 0.1.1、access-token 回退及 Dream 精确版本/哈希接入。 -->
 
 # Claude SDK/Runtime 打包、发布与 IM Dream 集成
 
@@ -22,11 +22,12 @@ MCP 状态机或 Runtime 实现。
 
 | 对象 | 当前身份 |
 | --- | --- |
-| SDK | PyPI `ink-claude-dream-agent-sdk==0.2.143` |
-| SDK 源码 | `v0.2.143@6164bd91e43bbf610ec40b4500edec18a97ce665` |
-| SDK 发布仓库 | `main@d18e8a9fcf61f5a3ead292c3ef9bd6853d150144` |
-| Runtime selector | npm `@glide-the/ink-claude-code-dream@0.1.0` |
-| Runtime 仓库 | `main@7c34e6cd93a35cc35d84e365382db1227db3e861` |
+| SDK | PyPI `ink-claude-dream-agent-sdk==0.2.144` |
+| SDK 源码/发布仓库 | `v0.2.144@fa10c9ef04ec006d9dcf0a88b1b35dab4ef4723b` |
+| SDK 发布 workflow | `32874352449`；TestPyPI、PyPI 与远端字节复验成功 |
+| Runtime selector | npm `@glide-the/ink-claude-code-dream@0.1.1` |
+| Runtime 仓库 | `main@eb0b503661449f3eec8c69eddca367d19c2d4e33` |
+| Runtime 发布 workflow | qualification `32877673733`；publish `32877869672` |
 | Dream Runtime 接口标识 | `2.1.241 (Claude Code)` |
 
 ## 2. 仓库职责
@@ -494,20 +495,22 @@ Thread ID、Workspace、transcript 或数据库 Schema。
 
 ## 13. 当前发布回执示例
 
-SDK `0.2.143`：
+SDK `0.2.144`：
 
 ```text
-wheel: ink_claude_dream_agent_sdk-0.2.143-py3-none-any.whl
-size: 151684
-sha256: e64ea7bf468a6911dfc3ab40f09e42245e203fc78712bd2919c70cc77a27bcd1
+wheel: ink_claude_dream_agent_sdk-0.2.144-py3-none-any.whl
+size: 151704
+sha256: 50801104b1dcf8c0eb64555eb62f27f6238b37635c2ccbcb391bd562ee85ca56
 
-sdist: ink_claude_dream_agent_sdk-0.2.143.tar.gz
-size: 372447
-sha256: e2b62792d70b02fd7da92988f73356a92eb544ec1570401a76f8ac0b056e2946
+sdist: ink_claude_dream_agent_sdk-0.2.144.tar.gz
+size: 373286
+sha256: 1b2b6dfad5bfa766de24682d7b26ef1f1394097b92a5d32be1eae40530fbd517
 ```
 
-Runtime `0.1.0`：五个 npm 包均已公开；selector 输出
-`2.1.241 (Claude Code)`，四个平台包均为 standalone，安装树无 `.map`。
+Runtime `0.1.1`：五个 npm 包均已公开；selector 与 `claude` alias 均输出
+`2.1.241 (Claude Code)`，release manifest 配对 SDK `0.2.144`，四个平台包均为 standalone，
+registry fresh install 只选择当前平台包且安装树无 `.map`。qualification `32877673733` 与 publish
+`32877869672` 均成功；临时 npm access token 和 GitHub Environment Secret 已在验收后撤销。
 
 这些值只是当前版本示例。发布新版本时必须从新 workflow/registry 回执重新取得，不得
 复制旧摘要。

@@ -6,7 +6,7 @@
 # [Sync] 2026-07-26: initial — cli_path resolution coverage for the Docker
 #                    apply-seccomp-patched npm CLI pinning (claude-sdk-env-design).
 # [Sync] 2026-08-20: cover the server-owned 1–64 MiB SDK stdout message buffer policy.
-# [Sync] 2026-08-23: require ink-claude-dream-agent-sdk 0.2.143 and default
+# [Sync] 2026-08-26: require ink-claude-dream-agent-sdk 0.2.144 and default
 #                    ink-claude-code-dream; official CLI is an absolute
 #                    CLAUDE_CODE_CLI_PATH-only rollback and missing runtime fails closed.
 # [Sync] 2026-08-23: reject manifests without a pruned core, production
@@ -337,7 +337,7 @@ class TestDreamSdkDistribution(unittest.TestCase):
     def test_distribution_version_drift_fails_closed(self):
         distribution = self._distribution(
             name=DREAM_CLAUDE_SDK_DISTRIBUTION,
-            version="0.2.144",
+            version="0.2.145",
         )
         with (
             unittest.mock.patch.object(
