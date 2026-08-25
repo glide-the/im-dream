@@ -2,6 +2,7 @@
 <!-- [输出] 定义 Dream MCP 管理链路去 CLI 化的数据库合同、Service/API/UI、发现并发、运行时投影、迁移回滚、测试与性能预算，并完成 16 项实现前自审。 -->
 <!-- [定位] Dream Resources MCP 管理面迁移设计稿；只约束 MCP 配置、凭据、发现与 Chat 投影，不改写 OAuth/Chat/Deck/Gateway 的无关职责。 -->
 <!-- [同步] 2026-08-25：正常 PostgreSQL 已应用 0038；真实账户三 transport、Chat/resume、cancel、页面 P50/P95 与 Admin 可见页已验证；MCP 认证类型由后端 discovery 判定；真实 Comfy OAuth 已完成 logout/login、同源自动 callback、41/24/10 inventory、两次自然到期 `/oauth/token` refresh、只读工具调用与同 Thread 续聊终验。 -->
+<!-- [同步] 2026-08-25：新增独立中文业务交互时序图集，并将详情页合同校准为自动 `force=false` inventory、无刷新按钮。 -->
 
 # Dream 托管 MCP Resources：管理链路去 CLI 化设计
 
@@ -9,6 +10,7 @@
 > 证据日期：2026-08-25
 > 目标 capability：`dream.managed-mcp-resources.v1`，version `1`，`contract_sha256=746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a`
 > 核心结论：Resources 管理面以 PostgreSQL 为唯一配置源，以标准 Python MCP SDK 直接完成发现；Chat 新建和 resume 每个 turn 注入一次数据库一致性快照。Claude Agent SDK 公共接口无需修改；clean-room Runtime 已仅补齐 legacy SSE config/transport 兼容，不接管管理职责。本文不承诺 MCP 协议 session 跨进程恢复。
+> 配套图集：[Dream 托管 MCP 业务交互时序图](./dream-managed-mcp-business-sequences.md)
 
 ## 证据标记
 
@@ -25,7 +27,7 @@
 2. Admin Drizzle 发布专用表和精确 capability，Dream 只消费已发布合同，缺失时 fail closed。
 3. 标准 `mcp==1.27.1` 客户端承担 stdio、SSE、Streamable HTTP 的协议连接和 `list_tools/list_resources/list_prompts`；Claude Agent SDK 继续只承担 Agent run。
 4. 配置、凭据引用、发现快照、旧 CLI 导入回执均 actor-owned、可审计、可脱敏。
-5. `list` 只读数据库快照；显式 discovery 并发、可超时/取消并允许部分成功。
+5. `list` 只读数据库快照；详情页自动执行缓存优先 discovery，批量 discovery 有界并发、可超时/取消并允许部分成功。
 
 非目标：
 
@@ -41,7 +43,7 @@
 |---|---|---|---|
 | Settings/Resources | `frontend/src/components/dashboard/ConnectorSettingsSection.tsx:332` | 挂载 Resources 区块 | 保持入口；只换 DTO/交互语义 |
 | Resources 列表 | `frontend/src/components/claude-mcp/ClaudeMcpResourceSection.tsx:162-181` | 先 capability、再 list、再恢复 active operation | capability 与 list 可并行；list 不触发 discovery |
-| Server 详情 | `frontend/src/components/claude-mcp/ClaudeMcpServerDetailPage.tsx:365-402` | capability/get 并行，connected 后自动 inventory | get 返回缓存摘要；实时刷新必须显式触发 |
+| Server 详情 | `frontend/src/components/claude-mcp/ClaudeMcpServerDetailPage.tsx` | capability/get 并行，随后自动以 `force=false` 加载 inventory | 配置先展示，inventory 独立加载；不提供刷新/重试按钮 |
 | Frontend API | `frontend/src/api/claudeMcpApi.ts:104-218` | 统一 auth/fetch/error 和现有 Resources API | 复用 request 边界，扩展严格 DTO |
 | FastAPI Router | `backend/server.py:1163`；`backend/routers/claude_mcp.py:82-250` | 鉴权 actor、DTO、Service 编排 | 路由保持薄；禁止直接 SQL/MCP client |
 | Service | `backend/claude_mcp/service.py:137-232` | 每次请求校验 CLI 版本/四组 help，list 后逐 server get | 改为 capability repository + actor-scoped repository + discovery coordinator |
@@ -139,6 +141,8 @@ sequenceDiagram
     API-->>UI: 本次发现结果或安全错误
 ```
 
+面向产品、前端、后端、QA 和运维的连续业务流程见独立[业务交互时序图集](./dream-managed-mcp-business-sequences.md)；本文后续时序继续承担数据、安全、transport、并发和迁移合同的技术细节。
+
 ## 5. Admin Drizzle 专用 Schema 与精确 capability
 
 **代码证据**：Admin 的 `packages/db/src/schema/capabilities.ts:20-42` 定义 `drizzle.schema_capabilities`；`app/lib/admin/claude-plugin-marketplaces.ts:225-244` 同时校验 capability、version 与固定 hash。当前 `packages/db/src/schema/index.ts:365-390` 的 `system_settings.value` 是普通 JSONB，`is_secret` 只是布尔标记；不能存 MCP secret。当前 schema 没有 MCP Server 表或通用 `credential_ref`。
@@ -191,7 +195,7 @@ sequenceDiagram
     UI->>API: POST server {transport,url,scope}
     API->>API: actor + URL/SSRF policy + DTO 校验
     API->>DB: INSERT/幂等返回，revision=1
-    API->>D: 显式 discovery
+    API->>D: 详情页自动 discovery（force=false）
     D->>M: SDK initialize
     D->>M: list_tools/resources/prompts
     M-->>D: capabilities + inventory
@@ -235,7 +239,7 @@ Chat 执行面的 legacy SSE 兼容已最小补齐：custom Runtime 严格解析
 - `streamable_http`：只允许策略批准的 `http/https`，默认生产策略应为 HTTPS；执行 DNS/IP/redirect/port/host allow/deny 的 SSRF 检查，重定向后重新检查。
 - `sse`：使用 SDK legacy SSE client，遵守同一 URL/auth/timeout/取消合同；不得偷换为 Streamable HTTP。
 - `stdio`：profile 由服务端配置映射到 argv 数组；禁 shell、禁浏览器输入 env/cwd、精确限制 executable、args、环境键和值来源。每次 discovery 最多一个 SDK-owned child，退出时回收进程组。
-- 未探测/匿名：不附加 Authorization；显式 discovery 成功即在当前详情响应中标记匿名，401/403 则安全映射为 `AUTH_REQUIRED` 并由后端 CAS 持久化内部 `auth_kind=oauth`。前端不能预选或强制 OAuth。
+- 未探测/匿名：不附加 Authorization；详情自动或批量 discovery 成功即在响应中标记匿名，401/403 则安全映射为 `AUTH_REQUIRED` 并由后端 CAS 持久化内部 `auth_kind=oauth`。前端不能预选或强制 OAuth。
 - `oauth`：credential service 解密/刷新后只在请求内传给 adapter；刷新成功递增 credential revision 并使缓存失效。
 
 ### 时序 5：stdio profile 发现与子进程回收
@@ -428,7 +432,7 @@ type ClaudeMcpDiscoveryDto = {
 | `POST /servers` | 严格 create DTO + idempotency key；可用 `discover=true` 显式验证 |
 | `PATCH /servers/{id}` | CAS update/enable/disable |
 | `DELETE /servers/{id}` | CAS delete |
-| `POST /servers/{id}/discoveries` | 单 Server 显式 discovery |
+| `POST /servers/{id}/discoveries` | 单 Server 缓存优先 discovery；详情页自动以 `force=false` 调用 |
 | `POST /discoveries` | 有界 bulk discovery，返回 per-item 结果 |
 | `DELETE /discovery-operations/{id}` | 取消进程内 operation |
 | `POST /servers/{id}/auth-operations` | 仅在后端 discovery 已判定 credential-required 后 OAuth start；未判定或匿名 Server fail closed 为 not required |
@@ -439,9 +443,11 @@ type ClaudeMcpDiscoveryDto = {
 
 ## 12. Frontend 页面请求与交互
 
-Resources 初始加载并行请求 capability/list；未启用时只展示 capability 错误。list card 展示 DB 状态和缓存时间，不把 stale 等同 disconnected。详情页 get 不自动 live discovery；用户点击“刷新能力”才调用 discovery，并可取消。
+Resources 初始加载并行请求 capability/list；未启用时只展示 capability 错误。list card 展示数据库状态，不把 stale 等同 disconnected，也不触发远端 discovery。
 
-Create 表单根据 transport 显示互斥字段：HTTP/SSE 只收 URL；stdio 只允许选择服务端返回的 profile，不出现命令/args/env 输入；新增和编辑表单都不显示认证方式。详情显式 discovery 后，OAuth 按钮只在后端返回 `state=needs_auth` 且 `auth_state=required` 时出现。凭据只显示“已配置/过期/需授权”，无复制或查看入口。
+进入详情页后，配置读取与 inventory 使用独立 loading state：配置先从数据库展示，随后前端自动调用单 Server discovery，固定发送 `force=false`。后端优先返回 revision 匹配且未过期的 snapshot；没有有效 snapshot 才通过标准 MCP Client 连接远端。页面不显示“刷新 inventory”“重试 inventory”或“重试探测”按钮。配置 revision 或 credential revision 变化后自动重新加载，并用请求序号丢弃旧 revision 的迟到响应。
+
+Create 表单根据 transport 显示互斥字段：HTTP/SSE 只收 URL；stdio 只允许选择服务端返回的 profile，不出现命令/args/env 输入；新增和编辑表单都不显示认证方式。自动 discovery 后，OAuth 按钮只在后端返回 `state=needs_auth` 且 `auth_state=required` 时出现；匿名成功不显示 OAuth。凭据只显示“已配置/过期/需授权”，无复制或查看入口。OAuth Provider 授权完成后由同源 SPA 自动提交 callback，用户不复制 URL、code 或 state。
 
 列表的 active operation 恢复仅覆盖当前进程；operation expired 时刷新 Server DB 状态，不循环轮询不存在的任务。现有 1200 ms poll（`ClaudeMcpResourceSection.tsx:200-210`）改为 policy/后端 `retryAfterMs` 驱动，避免固定频率。
 
