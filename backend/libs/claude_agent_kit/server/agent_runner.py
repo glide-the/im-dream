@@ -15,6 +15,9 @@
 #                    added to the automatic allowlist.
 # [Sync] 2026-08-22: remove Pawkeyland touch/necklace/memory tools from Ink's
 #                    default surface; memory MCP now requires explicit capability opt-in.
+# [Sync] 2026-08-25: project merged MCP definitions through a thread-local
+#                    0600 file Path so credentials never enter CLI argv; force
+#                    strict_mcp_config and remove the projection in finally.
 # [Sync] 2026-05-09: forward stdio MCP tool input and result events for frontend traces.
 # [Sync] 2026-05-09: merge project .env SDK injection, stderr capture, and PreToolUse confirmation hooks while keeping Pet Chat's narrow stdio MCP surface.
 # [Sync] 2026-05-09: expose zero-argument necklace intent tools while keeping server-owned upstream parameters.
@@ -219,7 +222,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 from uuid import uuid4
 
 from claude_agent_sdk.types import (  # type: ignore[import-untyped]
@@ -256,12 +259,14 @@ from .story_workspace_tool import story_workspace_allowed_tool_names
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
     CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
+    CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME,
     apply_claude_config_home_to_options,
     apply_claude_secure_storage_home_to_options,
     apply_cli_path_to_options,
     apply_project_sdk_runtime_options,
     apply_task_v2_env_to_options,
     apply_user_sdk_env_to_options,
+    ensure_claude_code_tmpdir,
     resolve_claude_agent_max_buffer_size,
 )
 from .plugin_launcher import apply_plugin_launch_options
@@ -328,6 +333,100 @@ _STORY_WORKSPACE_MCP_TOOL_PREFIX = "mcp__story_workspace__"
 _INTERNAL_MCP_SERVER_NAMES: frozenset[str] = frozenset(
     {"user", "memory", "necklace", "editor", "story_workspace"}
 )
+_MCP_CONFIG_OBJECT_FIELDS: tuple[str, ...] = (
+    "type",
+    "command",
+    "args",
+    "env",
+    "cwd",
+    "url",
+    "headers",
+    "oauth",
+    "enabled",
+)
+
+
+def _mcp_config_json_value(value: object) -> object:
+    """Normalize only the documented MCP config surface to JSON values."""
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _mcp_config_json_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_mcp_config_json_value(item) for item in value]
+    projected = {
+        field: _mcp_config_json_value(getattr(value, field))
+        for field in _MCP_CONFIG_OBJECT_FIELDS
+        if hasattr(value, field)
+    }
+    if projected:
+        return projected
+    raise TypeError("Claude MCP configuration contains an unsupported value")
+
+
+def _write_mcp_config_projection(
+    mcp_servers: Mapping[str, object],
+    *,
+    thread_workspace: str,
+) -> Path:
+    """Write one private, thread-owned SDK MCP config and return its Path.
+
+    The Agent SDK serializes mapping-valued ``mcp_servers`` into process argv.
+    A file-backed option keeps remote headers, OAuth tokens and stdio env out
+    of process listings while retaining the SDK's public config interface.
+    """
+
+    tmp_root = Path(ensure_claude_code_tmpdir(thread_workspace))
+    projection_dir = tmp_root / CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME
+    if projection_dir.is_symlink():
+        raise ValueError("Claude MCP config directory cannot be a symlink")
+    projection_dir.mkdir(mode=0o700, parents=False, exist_ok=True)
+    resolved_dir = projection_dir.resolve(strict=True)
+    if not resolved_dir.is_dir() or resolved_dir.parent != tmp_root.resolve(strict=True):
+        raise ValueError("Claude MCP config directory escaped the thread temp root")
+    resolved_dir.chmod(0o700)
+
+    file_descriptor, raw_path = tempfile.mkstemp(
+        prefix="mcp_",
+        suffix=".json",
+        dir=resolved_dir,
+    )
+    path = Path(raw_path)
+    try:
+        os.fchmod(file_descriptor, 0o600)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "mcpServers": {
+                        str(name): _mcp_config_json_value(config)
+                        for name, config in mcp_servers.items()
+                    }
+                },
+                handle,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.is_symlink() or path.resolve(strict=True).parent != resolved_dir:
+            raise ValueError("Claude MCP config file escaped the projection directory")
+        if path.stat().st_mode & 0o077:
+            raise ValueError("Claude MCP config file permissions are not private")
+        return path
+    except BaseException:
+        try:
+            os.close(file_descriptor)
+        except OSError:
+            pass
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
 _STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     story_workspace_allowed_tool_names()
@@ -2795,6 +2894,7 @@ class ClaudeAgentRunner:
             can_use_tool=_can_use_tool,
             cwd=cwd or os.getcwd(),
             mcp_servers=mcp_servers,
+            strict_mcp_config=True,
             # NOTE (2026-08-02, deck-integration-delta): no ``settings=``
             # and no request-driven ``plugins=`` here.  Settings belong to
             # the per-thread workspace (.claude-home via
@@ -2882,7 +2982,19 @@ class ClaudeAgentRunner:
         def _accumulate(delta: str) -> None:
             text_parts.append(delta)
 
+        _mcp_config_projection: Optional[Path] = None
         try:
+            if mcp_servers:
+                projection_workspace = str(opts.claude_tmp_workspace or cwd or "").strip()
+                if not projection_workspace:
+                    raise ValueError(
+                        "Claude MCP configuration requires a thread runtime workspace"
+                    )
+                _mcp_config_projection = _write_mcp_config_projection(
+                    mcp_servers,
+                    thread_workspace=projection_workspace,
+                )
+                sdk_options.mcp_servers = _mcp_config_projection
             _inject_mem0_session_hook_env(sdk_options, mcp_env)
             _verify_claude_sdk_env_for_query_stream(sdk_options)
             async for message in self._sdk_client.query_stream(
@@ -3063,6 +3175,15 @@ class ClaudeAgentRunner:
             await _call(callbacks.on_error, run_error)
             full_text = "".join(text_parts)
         finally:
+            if _mcp_config_projection is not None:
+                try:
+                    _mcp_config_projection.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.warning(
+                        "Failed to remove the thread-local MCP config projection."
+                    )
             try:
                 _stderr_buf.close()
             except Exception:  # noqa: BLE001

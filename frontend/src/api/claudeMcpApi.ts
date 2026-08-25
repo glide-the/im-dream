@@ -1,10 +1,15 @@
-// [Input] Authenticated `/api/claude-mcp` capability, configuration, inventory, server, and OAuth operation contracts.
-// [Output] Strict frontend DTOs, prompt-free tool inventory, and scope-aware HTTP(S) add/remove helpers with no browser credential persistence.
+// [Input] Authenticated database-managed `/api/claude-mcp` CRUD, discovery, inventory, and OAuth operation contracts.
+// [Output] Strict frontend DTOs plus explicit tools/resources/prompts discovery helpers with no CLI or browser credential persistence.
 // [Pos] Transport boundary for the `claude-mcp` Resources feature.
-// [Sync] 2026-08-19: add official CLI-backed MCP discovery/login/redirect/cancel/logout API helpers.
+// [Sync] 2026-08-19: historical CLI-backed discovery/login helpers; superseded by the 2026-08-25 managed-DB/standard-SDK contract below.
 // [Sync] 2026-08-19: add restricted user-scope HTTPS configuration and removal helpers.
 // [Sync] 2026-08-20: add sanitized public-SDK server/tool inventory contracts.
 // [Sync] 2026-08-21: expose server config scope/removability and allow absolute HTTP(S) configuration.
+// [Sync] 2026-08-25: carry Runtime-classified anonymous, required, authenticated, or unknown authentication state.
+// [Sync] 2026-08-25: switch Resources to managed-DB capability/CRUD and explicit standard-MCP discovery.
+// [Sync] 2026-08-25: add revision-aware PATCH for detail-page configuration edits.
+// [Sync] 2026-08-25: keep authentication classification backend-owned; CRUD callers never choose OAuth versus anonymous.
+// [Sync] 2026-08-25: make detail inventory cache-first so automatic loading never forces redundant remote discovery.
 
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -22,25 +27,42 @@ export type ClaudeMcpState =
   | 'logged_out'
   | 'disabled';
 
-export type ClaudeMcpConfigScope = 'user' | 'local' | 'project' | 'plugin' | 'unknown';
+export type ClaudeMcpConfigScope = 'user' | 'workspace' | 'local' | 'project' | 'plugin' | 'unknown';
+export type ClaudeMcpAuthState = 'anonymous' | 'required' | 'authenticated' | 'unknown';
 
 export interface ClaudeMcpCapability {
   enabled: boolean;
   reason_code: string | null;
   cli_version: string | null;
-  minimum_cli_version: string;
-  headless_minimum_cli_version: string;
+  minimum_cli_version: string | null;
+  headless_minimum_cli_version: string | null;
   credential_identity: string | null;
+  management_mode: 'managed_db';
+  schema_capability: 'dream.managed-mcp-resources.v1';
+  schema_version: number;
+  transports: Array<'streamable_http' | 'sse' | 'stdio'>;
 }
 
 export interface ClaudeMcpServer {
   name: string;
   state: ClaudeMcpState;
+  auth_state: ClaudeMcpAuthState;
   transport: string | null;
   detail: string | null;
   active_operation_id: string | null;
   config_scope: ClaudeMcpConfigScope;
   removable: boolean;
+  id: string | null;
+  display_name: string;
+  auth_kind: 'none' | 'oauth' | null;
+  enabled: boolean;
+  revision: number | null;
+  credential_revision: number;
+  credential_ref: string | null;
+  credential_configured: boolean;
+  workspace_id: string | null;
+  url: string | null;
+  stdio_profile_key: string | null;
 }
 
 export interface ClaudeMcpOperation {
@@ -69,8 +91,24 @@ export interface ClaudeMcpTool {
   annotations: ClaudeMcpToolAnnotations;
 }
 
+export interface ClaudeMcpResource {
+  uri: string;
+  name: string;
+  description: string | null;
+  mime_type?: string | null;
+}
+
+export interface ClaudeMcpPrompt {
+  name: string;
+  description: string | null;
+  argument_count?: number;
+  arguments?: Array<{ name: string; description?: string | null; required?: boolean }>;
+}
+
 export interface ClaudeMcpServerInventory {
   server_name: string;
+  config_revision: number;
+  credential_revision: number;
   status: ClaudeMcpInventoryStatus;
   config_scope: string;
   runtime_scope: string | null;
@@ -78,6 +116,8 @@ export interface ClaudeMcpServerInventory {
   url: string | null;
   server_info: { name: string; version: string } | null;
   tools: ClaudeMcpTool[];
+  resources: ClaudeMcpResource[];
+  prompts: ClaudeMcpPrompt[];
   tool_count: number;
   tools_truncated: boolean;
   capabilities: Record<'tools' | 'resources' | 'prompts', {
@@ -85,6 +125,23 @@ export interface ClaudeMcpServerInventory {
     count: number | null;
   }>;
   refreshed_at: string;
+  error?: { code: string; retryable: boolean; trace_id?: string | null } | null;
+  cached?: boolean;
+}
+
+interface ManagedDiscoveryResult {
+  server_id: string;
+  status: 'complete' | 'failed' | 'cancelled';
+  config_revision: number;
+  credential_revision: number;
+  tools: ClaudeMcpTool[];
+  resources: ClaudeMcpResource[];
+  prompts: ClaudeMcpPrompt[];
+  server_info: { name: string; version: string } | null;
+  error: { code: string; retryable: boolean; trace_id?: string | null } | null;
+  discovered_at: string;
+  cached: boolean;
+  truncated: boolean;
 }
 
 export class ClaudeMcpApiError extends Error {
@@ -145,28 +202,102 @@ export async function getClaudeMcpServer(serverName: string): Promise<ClaudeMcpS
 }
 
 export async function getClaudeMcpServerInventory(
-  serverName: string,
+  serverIdentifier: string,
 ): Promise<ClaudeMcpServerInventory> {
-  const payload = await request<{ inventory: ClaudeMcpServerInventory }>(
-    `/api/claude-mcp/server-inventories/${encodeURIComponent(serverName)}`,
+  const payload = await request<{ discovery: ManagedDiscoveryResult }>(
+    `/api/claude-mcp/servers/${encodeURIComponent(serverIdentifier)}/discoveries`,
+    { method: 'POST', body: JSON.stringify({ force: false }) },
   );
-  return payload.inventory;
+  const result = payload.discovery;
+  const needsAuth = result.error?.code === 'CLAUDE_MCP_CREDENTIAL_REQUIRED';
+  return {
+    server_name: serverIdentifier,
+    config_revision: result.config_revision,
+    credential_revision: result.credential_revision,
+    status: result.status === 'complete' ? 'connected' : needsAuth ? 'needs_auth' : 'failed',
+    config_scope: 'managed_db',
+    runtime_scope: null,
+    transport: null,
+    url: null,
+    server_info: result.server_info,
+    tools: result.tools,
+    resources: result.resources,
+    prompts: result.prompts,
+    tool_count: result.tools.length,
+    tools_truncated: result.truncated,
+    capabilities: {
+      tools: { status: 'available', count: result.tools.length },
+      resources: { status: 'available', count: result.resources.length },
+      prompts: { status: 'available', count: result.prompts.length },
+    },
+    refreshed_at: result.discovered_at,
+    error: result.error,
+    cached: result.cached,
+  };
 }
 
 export async function configureClaudeMcpServer(
   name: string,
-  url: string,
+  url: string | null,
+  options: {
+    transport?: 'streamable_http' | 'sse' | 'stdio';
+    stdioProfileKey?: string | null;
+  } = {},
 ): Promise<ClaudeMcpServer> {
   const payload = await request<{ server: ClaudeMcpServer }>('/api/claude-mcp/servers', {
     method: 'POST',
-    body: JSON.stringify({ name, url }),
+    body: JSON.stringify({
+      name,
+      display_name: name,
+      transport: options.transport ?? 'streamable_http',
+      scope: 'user',
+      url,
+      stdio_profile_key: options.stdioProfileKey ?? null,
+    }),
   });
   return payload.server;
 }
 
-export async function removeClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
+export async function updateClaudeMcpServer(
+  server: ClaudeMcpServer,
+  changes: {
+    displayName: string;
+    transport: 'streamable_http' | 'sse' | 'stdio';
+    url: string | null;
+    stdioProfileKey: string | null;
+    enabled: boolean;
+  },
+): Promise<ClaudeMcpServer> {
+  if (!server.id || !server.revision) {
+    throw new ClaudeMcpApiError(
+      'CLAUDE_MCP_SERVER_CONFIGURATION_INVALID',
+      'MCP Server 缺少可更新的数据库标识或 revision。',
+      409,
+    );
+  }
   const payload = await request<{ server: ClaudeMcpServer }>(
-    `/api/claude-mcp/servers/${encodeURIComponent(serverName)}`,
+    `/api/claude-mcp/servers/${encodeURIComponent(server.id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        expected_revision: server.revision,
+        display_name: changes.displayName,
+        transport: changes.transport,
+        workspace_id: server.workspace_id,
+        url: changes.url,
+        stdio_profile_key: changes.stdioProfileKey,
+        enabled: changes.enabled,
+      }),
+    },
+  );
+  return payload.server;
+}
+
+export async function removeClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
+  const server = await getClaudeMcpServer(serverName);
+  const revision = server.revision;
+  const payload = await request<{ server: ClaudeMcpServer }>(
+    `/api/claude-mcp/servers/${encodeURIComponent(server.id ?? serverName)}${revision ? `?expected_revision=${revision}` : ''}`,
     { method: 'DELETE' },
   );
   return payload.server;
@@ -208,8 +339,8 @@ export async function cancelClaudeMcpAuth(operationId: string): Promise<ClaudeMc
 
 export async function logoutClaudeMcpServer(serverName: string): Promise<ClaudeMcpServer> {
   const payload = await request<{ server: ClaudeMcpServer }>(
-    `/api/claude-mcp/servers/${encodeURIComponent(serverName)}/logout`,
-    { method: 'POST', body: '{}' },
+    `/api/claude-mcp/servers/${encodeURIComponent(serverName)}/credential`,
+    { method: 'DELETE' },
   );
   return payload.server;
 }

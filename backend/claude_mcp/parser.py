@@ -1,11 +1,12 @@
 """Bounded parsers and redaction for official Claude MCP CLI output.
 
 [Input] Incremental terminal output from `claude mcp` argv commands.
-[Output] Safe version, authorization URL, server status, and redacted diagnostic signals.
+[Output] Safe version/URL, server/auth/transport state, semantic failure codes, and redacted diagnostics.
 [Pos] Central compatibility seam; services never parse human CLI text directly.
 [Sync] 2026-08-19: support colon-bearing server names and secret-safe OAuth parsing.
 [Sync] 2026-08-19: validate the restricted user-scope HTTPS MCP server URL contract.
 [Sync] 2026-08-21: accept absolute HTTP(S) MCP URLs and parse CLI config scope fail closed.
+[Sync] 2026-08-25: consume stable Authentication/Failure-Code lines and fail closed on unknown status text.
 """
 
 from __future__ import annotations
@@ -13,7 +14,12 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from .contracts import ClaudeMcpConfigScope, ClaudeMcpState
+from .contracts import (
+    ClaudeMcpAuthState,
+    ClaudeMcpConfigScope,
+    ClaudeMcpErrorCode,
+    ClaudeMcpState,
+)
 
 
 _OSC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
@@ -27,6 +33,17 @@ _SECRET_PATTERNS = (
     re.compile(r"(?i)(client_secret[=:\s]+)[^\s&]+"),
     re.compile(r"(?i)([?&](?:code|state)=)[^&#\s]+"),
 )
+_TRANSPORT_VALUES = frozenset({"http", "sse", "stdio"})
+_RUNTIME_FAILURE_CODES = {
+    "auth_not_required": ClaudeMcpErrorCode.AUTH_NOT_REQUIRED,
+    "auth_not_advertised": ClaudeMcpErrorCode.AUTH_NOT_ADVERTISED,
+    "metadata_invalid": ClaudeMcpErrorCode.AUTH_METADATA_INVALID,
+    "network_unreachable": ClaudeMcpErrorCode.NETWORK_UNREACHABLE,
+    "server_rejected": ClaudeMcpErrorCode.SERVER_REJECTED,
+    "timeout": ClaudeMcpErrorCode.AUTH_TIMEOUT,
+    "process_exited": ClaudeMcpErrorCode.PROCESS_EXITED,
+    "cancelled": ClaudeMcpErrorCode.AUTH_CANCELLED,
+}
 
 
 def strip_terminal_control(text: str) -> str:
@@ -129,6 +146,47 @@ def parse_server_scope(text: str) -> ClaudeMcpConfigScope:
     return ClaudeMcpConfigScope.UNKNOWN
 
 
+def _single_field_value(text: str, field: str) -> str | None:
+    """Return one unambiguous stable field value, otherwise fail closed."""
+
+    prefix = f"{field.lower()}:"
+    values = []
+    for raw_line in strip_terminal_control(text).splitlines():
+        line = raw_line.strip()
+        if line.lower().startswith(prefix):
+            values.append(line[len(prefix) :].strip())
+    if len(values) != 1:
+        return None
+    return values[0]
+
+
+def parse_server_auth_state(text: str) -> ClaudeMcpAuthState:
+    value = _single_field_value(text, "Authentication")
+    if value is None:
+        return ClaudeMcpAuthState.UNKNOWN
+    try:
+        return ClaudeMcpAuthState(value.lower())
+    except ValueError:
+        return ClaudeMcpAuthState.UNKNOWN
+
+
+def parse_server_transport(text: str) -> str | None:
+    """Accept only stable non-secret transport labels from Runtime/official CLI."""
+
+    value = _single_field_value(text, "Transport")
+    if value is None:
+        value = _single_field_value(text, "Type")
+    normalized = value.lower() if value else None
+    return normalized if normalized in _TRANSPORT_VALUES else None
+
+
+def parse_runtime_failure_code(text: str) -> ClaudeMcpErrorCode | None:
+    """Map one exact Runtime semantic code to Dream's safe public vocabulary."""
+
+    value = _single_field_value(text, "Failure-Code")
+    return _RUNTIME_FAILURE_CODES.get(value.lower()) if value else None
+
+
 def parse_authorization_url(text: str) -> str | None:
     """Return the first plausible OAuth URL from bounded incremental output."""
     for raw in _URL_RE.findall(strip_terminal_control(text)):
@@ -154,23 +212,30 @@ def parse_server_state(text: str) -> ClaudeMcpState:
         )
     ):
         return ClaudeMcpState.NOT_CONFIGURED
+    status = _single_field_value(text, "Status")
+    if status is None:
+        return ClaudeMcpState.FAILED
+    value = status.lower()
     if any(
-        marker in normalized
+        marker in value
         for marker in (
             "needs authentication",
             "needs auth",
             "not authenticated",
             "authentication required",
-            "unauthorized",
         )
     ):
         return ClaudeMcpState.NEEDS_AUTH
-    if any(marker in normalized for marker in ("connected", "✓", "✔")):
+    if any(marker in value for marker in ("connected", "✓", "✔")):
         return ClaudeMcpState.CONNECTED
-    if any(marker in normalized for marker in ("disabled", "not enabled")):
-        return ClaudeMcpState.DISABLED
-    if text.strip():
+    if value == "configured":
         return ClaudeMcpState.CONFIGURED
+    if value in {"logged out", "logged_out"}:
+        return ClaudeMcpState.LOGGED_OUT
+    if any(marker in value for marker in ("disabled", "not enabled")):
+        return ClaudeMcpState.DISABLED
+    if any(marker in value for marker in ("failed", "unavailable", "forbidden")):
+        return ClaudeMcpState.FAILED
     return ClaudeMcpState.FAILED
 
 

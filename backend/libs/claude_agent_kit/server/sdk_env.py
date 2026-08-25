@@ -68,6 +68,8 @@
 #                    discovery now selects ink-claude-code-dream and fails
 #                    closed. CLAUDE_CODE_CLI_PATH remains the sole explicit,
 #                    absolute override and official-CLI rollback boundary.
+# [Sync] 2026-08-25: name the thread-local MCP config projection directory so
+#                    Runner and sandbox policy share one exact security path.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -91,6 +93,7 @@ _CLAUDE_CODE_MAX_RETRIES_ENV_NAME = "CLAUDE_CODE_MAX_RETRIES"
 CLAUDE_CODE_MAX_RETRIES_DEFAULT = "3"
 _CLAUDE_CODE_TMPDIR_ENV_NAME = "CLAUDE_CODE_TMPDIR"
 CLAUDE_CODE_TMPDIR_DIRNAME = ".claude-tmp"
+CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME = "mcp-config"
 _CLAUDE_TMP_WORKSPACE_OPTION_ATTR = "_ink_claude_tmp_workspace"
 CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME = "INK_CLAUDE_AGENT_MAX_BUFFER_SIZE_BYTES"
 CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT = 8 * 1024 * 1024

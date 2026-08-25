@@ -1,12 +1,14 @@
-"""Central policy settings for Claude MCP subprocess and credential projection.
+"""Central policy settings for managed MCP plus legacy importer adapters.
 
 [Input] Optional process-level policy environment variables and backend data root.
-[Output] Validated runtime root, timeouts, capture/file bounds, and CLI version gates.
-[Pos] Sole configuration source for Claude MCP operational policy; route handlers contain no policy literals.
+[Output] Validated discovery/cache/concurrency/OAuth/stdio policy plus retained legacy-import bounds.
+[Pos] Sole configuration source for Claude MCP policy; route/service handlers contain no thresholds.
 [Sync] 2026-08-19: add bounded, deployment-name-independent OAuth process settings.
 [Sync] 2026-08-19: add the absolute server-owned user credential root and bounded JSON projection size.
 [Sync] 2026-08-19: add the bounded restricted HTTP server URL policy.
 [Sync] 2026-08-20: add bounded public-SDK tool inventory polling and payload limits.
+[Sync] 2026-08-25: add database-managed discovery, cache, concurrency, OAuth, and stdio-profile policy.
+[Sync] 2026-08-25: add an explicit standard-MCP inventory pagination page bound.
 """
 
 from __future__ import annotations
@@ -40,6 +42,17 @@ def _positive_int(name: str, default: int, *, maximum: int) -> int:
     return value if 0 < value <= maximum else default
 
 
+def _positive_float(name: str, default: float, *, maximum: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if 0 < value <= maximum else default
+
+
 @dataclass(frozen=True)
 class ClaudeMcpSettings:
     auth_timeout_seconds: int
@@ -59,6 +72,17 @@ class ClaudeMcpSettings:
     max_inventory_tools: int = 512
     max_tool_name_length: int = 512
     max_tool_description_length: int = 4096
+    discovery_max_parallel_servers: int = 5
+    discovery_server_timeout_seconds: float = 30.0
+    discovery_item_timeout_seconds: float = 15.0
+    discovery_cache_ttl_seconds: float = 300.0
+    max_inventory_items: int = 512
+    max_inventory_text_length: int = 4096
+    max_servers_per_actor: int = 64
+    max_inventory_pages: int = 64
+    oauth_redirect_uri: str | None = None
+    oauth_client_name: str = "Ink & Memory Dream"
+    stdio_profiles_json: str = "{}"
 
     @classmethod
     def from_env(cls) -> "ClaudeMcpSettings":
@@ -110,4 +134,31 @@ class ClaudeMcpSettings:
             max_tool_description_length=_positive_int(
                 "INK_CLAUDE_MCP_MAX_TOOL_DESCRIPTION_LENGTH", 4096, maximum=16384
             ),
+            discovery_max_parallel_servers=_positive_int(
+                "INK_CLAUDE_MCP_DISCOVERY_MAX_PARALLEL_SERVERS", 5, maximum=64
+            ),
+            discovery_server_timeout_seconds=_positive_float(
+                "INK_CLAUDE_MCP_DISCOVERY_SERVER_TIMEOUT_SECONDS", 30.0, maximum=300.0
+            ),
+            discovery_item_timeout_seconds=_positive_float(
+                "INK_CLAUDE_MCP_DISCOVERY_ITEM_TIMEOUT_SECONDS", 15.0, maximum=120.0
+            ),
+            discovery_cache_ttl_seconds=_positive_float(
+                "INK_CLAUDE_MCP_DISCOVERY_CACHE_TTL_SECONDS", 300.0, maximum=86400.0
+            ),
+            max_inventory_items=_positive_int(
+                "INK_CLAUDE_MCP_MAX_INVENTORY_ITEMS", 512, maximum=4096
+            ),
+            max_inventory_text_length=_positive_int(
+                "INK_CLAUDE_MCP_MAX_INVENTORY_TEXT_LENGTH", 4096, maximum=16384
+            ),
+            max_servers_per_actor=_positive_int(
+                "INK_CLAUDE_MCP_MAX_SERVERS_PER_ACTOR", 64, maximum=1024
+            ),
+            max_inventory_pages=_positive_int(
+                "INK_CLAUDE_MCP_MAX_INVENTORY_PAGES", 64, maximum=1024
+            ),
+            oauth_redirect_uri=os.environ.get("INK_CLAUDE_MCP_OAUTH_REDIRECT_URI", "").strip() or None,
+            oauth_client_name=os.environ.get("INK_CLAUDE_MCP_OAUTH_CLIENT_NAME", "").strip() or "Ink & Memory Dream",
+            stdio_profiles_json=os.environ.get("INK_CLAUDE_MCP_STDIO_PROFILES_JSON", "{}").strip() or "{}",
         )

@@ -2,6 +2,7 @@
 <!-- [输出] 记录自有 Python SDK 与 clean-room Claude Runtime 的接口配对、问题修复、发布门和回滚合同。 -->
 <!-- [定位] Dream 当前 SDK × Runtime 兼容性真相源；历史官方/恢复源码组合只作回归背景。 -->
 <!-- [同步] 2026-08-24：更新为 SDK 0.2.143 正式 PyPI 版本/哈希锁、Runtime main@7c34e6cd、公开 npm 五包、无 source map 和真实 Comfy MCP 两轮 resume。 -->
+<!-- [同步] 2026-08-25：兼容合同限定为 Agent 执行面；MCP Resources 管理面不再解析或启动 CLI。 -->
 
 # Claude Agent SDK 与 clean-room Runtime 兼容性报告
 
@@ -35,7 +36,7 @@ Dream 启动门验证：
 4. 默认 Runtime 的 manifest、capabilities、checksum 和 executable 可用；
 5. 不合格时抛出 Runtime unavailable，不回退 bundled/ambient CLI。
 
-Runtime 解析顺序：调用方 `cli_path` → 绝对 `CLAUDE_CODE_CLI_PATH` → PATH 自有 selector → fail closed。这个顺序同时用于 Agent turn 与 MCP Resources management，避免同一用户由两套 CLI 管理凭据。
+Runtime 解析顺序：调用方 `cli_path` → 绝对 `CLAUDE_CODE_CLI_PATH` → PATH 自有 selector → fail closed。该顺序仅适用于 Agent turn；MCP Resources management 已迁移到 Dream PostgreSQL 与标准 MCP SDK，不解析或启动 CLI。Agent turn 的 `mcp_servers` 由同一数据库事实来源生成，避免出现第二份配置。
 
 ## 3. 必须保持的接口
 

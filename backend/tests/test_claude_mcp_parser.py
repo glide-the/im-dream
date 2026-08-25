@@ -1,10 +1,11 @@
 """Claude MCP parser and secret-redaction contracts.
 
 [Input] Representative bounded Claude MCP version/list/login/status output.
-[Output] Colon-safe names, OAuth URL extraction, state mapping, and redacted secrets.
+[Output] Colon-safe names, OAuth URL extraction, state/auth/failure mapping, and redacted secrets.
 [Pos] Provider-free parser unit coverage for the `claude-mcp` compatibility seam.
 [Sync] 2026-08-19: cover URL, malformed output, version gates, status, and redaction.
 [Sync] 2026-08-21: cover absolute HTTP(S) URLs and fail-closed CLI config scope parsing.
+[Sync] 2026-08-25: cover stable auth identity, semantic failure whitelist, and unknown-output fail-closed behavior.
 """
 
 from __future__ import annotations
@@ -17,12 +18,20 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from claude_mcp.contracts import ClaudeMcpConfigScope, ClaudeMcpState
+from claude_mcp.contracts import (
+    ClaudeMcpAuthState,
+    ClaudeMcpConfigScope,
+    ClaudeMcpErrorCode,
+    ClaudeMcpState,
+)
 from claude_mcp.parser import (
     parse_authorization_url,
+    parse_runtime_failure_code,
+    parse_server_auth_state,
     parse_server_names,
     parse_server_scope,
     parse_server_state,
+    parse_server_transport,
     redact_sensitive,
     validate_redirect_url,
     validate_server_url,
@@ -65,6 +74,12 @@ def test_state_version_and_redirect_validation_fail_closed() -> None:
         parse_server_state('No MCP server named "demo". Run `claude mcp add` to add one.')
         is ClaudeMcpState.NOT_CONFIGURED
     )
+    for status in ("Failed", "Unavailable", "Forbidden", "✗ Failed"):
+        assert parse_server_state(f"Status: {status}") is ClaudeMcpState.FAILED
+    assert parse_server_state("Status: Configured") is ClaudeMcpState.CONFIGURED
+    assert parse_server_state("Status: Logged out") is ClaudeMcpState.LOGGED_OUT
+    assert parse_server_state("Status: Future state") is ClaudeMcpState.FAILED
+    assert parse_server_state("provider says connected in raw text") is ClaudeMcpState.FAILED
     assert version_at_least("2.1.191 (Claude Code)", "2.1.191")
     assert not version_at_least("2.1.186", "2.1.191")
     assert not version_at_least("unknown", "2.1.191")
@@ -115,6 +130,52 @@ def test_server_scope_parsing_is_explicit_and_unknown_is_fail_closed() -> None:
     assert parse_server_scope("Scope: Plugin server") is ClaudeMcpConfigScope.PLUGIN
     assert parse_server_scope("Scope: Future config") is ClaudeMcpConfigScope.UNKNOWN
     assert parse_server_scope("Status: Connected") is ClaudeMcpConfigScope.UNKNOWN
+
+
+def test_authentication_and_transport_projection_are_strict_and_backward_compatible() -> None:
+    for value, expected in (
+        ("anonymous", ClaudeMcpAuthState.ANONYMOUS),
+        ("required", ClaudeMcpAuthState.REQUIRED),
+        ("authenticated", ClaudeMcpAuthState.AUTHENTICATED),
+        ("unknown", ClaudeMcpAuthState.UNKNOWN),
+    ):
+        assert (
+            parse_server_auth_state(f"Authentication: {value}") is expected
+        )
+    assert parse_server_auth_state("Status: Connected") is ClaudeMcpAuthState.UNKNOWN
+    assert (
+        parse_server_auth_state("Authentication: future")
+        is ClaudeMcpAuthState.UNKNOWN
+    )
+    assert parse_server_transport("Transport: http") == "http"
+    assert parse_server_transport("Type: stdio") == "stdio"
+    assert parse_server_transport("Transport: private-provider") is None
+    assert parse_server_transport("Transport: http\nTransport: sse") is None
+
+
+def test_runtime_failure_code_uses_only_the_fixed_safe_whitelist() -> None:
+    expected = {
+        "auth_not_required": ClaudeMcpErrorCode.AUTH_NOT_REQUIRED,
+        "auth_not_advertised": ClaudeMcpErrorCode.AUTH_NOT_ADVERTISED,
+        "metadata_invalid": ClaudeMcpErrorCode.AUTH_METADATA_INVALID,
+        "network_unreachable": ClaudeMcpErrorCode.NETWORK_UNREACHABLE,
+        "server_rejected": ClaudeMcpErrorCode.SERVER_REJECTED,
+        "timeout": ClaudeMcpErrorCode.AUTH_TIMEOUT,
+        "process_exited": ClaudeMcpErrorCode.PROCESS_EXITED,
+        "cancelled": ClaudeMcpErrorCode.AUTH_CANCELLED,
+    }
+    for runtime_code, dream_code in expected.items():
+        assert (
+            parse_runtime_failure_code(f"Failure-Code: {runtime_code}")
+            is dream_code
+        )
+    assert parse_runtime_failure_code("Failure-Code: provider_secret_error") is None
+    assert (
+        parse_runtime_failure_code(
+            "Failure-Code: network_unreachable\nFailure-Code: server_rejected"
+        )
+        is None
+    )
 
 
 def test_sensitive_diagnostics_redact_oauth_and_bearer_material() -> None:

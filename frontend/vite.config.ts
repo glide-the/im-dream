@@ -8,6 +8,8 @@
 //                    Flow verification route.
 // [Sync] 2026-08-07: expose the dev server on all interfaces and allow the
 //                    public dev hostname; API traffic remains locally proxied.
+// [Sync] 2026-08-25: keep the browser-only MCP OAuth callback on the SPA so
+//                    authorization code/state queries never enter FastAPI access logs.
 // [Sync] 2026-07-20: upgrade to Vite 8 (rolldown/Rust bundler) so production
 //                    builds fit 1G Docker build hosts — measured ~605MB peak RSS
 //                    with a 512MB heap vs ~1.25GB RSS / 1024MB heap minimum on
@@ -133,6 +135,16 @@ export default defineConfig(({ mode }) => {
         '/oauth': {
           target: devApiProxyTarget,
           changeOrigin: true,
+          bypass(req) {
+            const callbackPath = req.url?.split('?', 1)[0] ?? ''
+            if (
+              req.method === 'GET'
+              && callbackPath === '/oauth/callback'
+              && req.headers.accept?.includes('text/html')
+            ) {
+              return '/index.html'
+            }
+          },
         },
         '/polycli': {
           target: devApiProxyTarget,

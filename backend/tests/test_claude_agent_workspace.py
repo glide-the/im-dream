@@ -44,6 +44,8 @@
 #                    global/process temp overrides no longer affect Settings.
 # [Sync] 2026-08-22: cover the minimal runtime-only thread root used when
 #                    user-facing Workspace Mode is disabled.
+# [Sync] 2026-08-25: deny Agent read/write access to the short-lived MCP config
+#                    projection directory beneath the exact thread tmp root.
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -167,6 +169,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertNotIn("enableWeakerNestedSandbox", sandbox)
         thread_credentials = str((ws / ".claude-home" / ".credentials.json").resolve())
         thread_user_config = str((ws / ".claude-home" / ".claude.json").resolve())
+        thread_mcp_projection = str((ws / ".claude-tmp" / "mcp-config").resolve())
         deny_read = sandbox["filesystem"]["denyRead"]
         self.assertNotIn("/", deny_read)
         self.assertIn(str(Path(self._tmp.name).resolve()), deny_read)
@@ -174,6 +177,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertIn(str(Path.home().resolve()), deny_read)
         self.assertIn(thread_credentials, deny_read)
         self.assertIn(thread_user_config, deny_read)
+        self.assertIn(thread_mcp_projection, deny_read)
         self.assertEqual(
             sandbox["credentials"]["files"],
             [{"path": thread_credentials, "mode": "deny"}],
@@ -226,6 +230,7 @@ class TestInitWorkspace(unittest.TestCase):
         )
         self.assertIn(thread_credentials, sandbox["filesystem"]["denyWrite"])
         self.assertIn(thread_user_config, sandbox["filesystem"]["denyWrite"])
+        self.assertIn(thread_mcp_projection, sandbox["filesystem"]["denyWrite"])
 
     def test_can_disable_sandbox_settings_for_workspace_mode_off(self):
         ws = init_workspace("sandbox-disabled", sandbox_enabled=False)
@@ -340,6 +345,7 @@ class TestInitWorkspace(unittest.TestCase):
                 str(ws.resolve() / ".mcp.json"),
                 str(ws.resolve() / ".claude-home" / ".credentials.json"),
                 str(ws.resolve() / ".claude-home" / ".claude.json"),
+                str(ws.resolve() / ".claude-tmp" / "mcp-config"),
             ],
         )
 

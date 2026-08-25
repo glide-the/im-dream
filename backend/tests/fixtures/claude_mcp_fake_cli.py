@@ -2,13 +2,14 @@
 """Deterministic fake Claude MCP CLI for isolated argv/PTTY contract tests.
 
 [Input] Claude-compatible argv plus test-only environment paths and behavior flags.
-[Output] Bounded list/get/add/remove/login/logout terminal behavior without a real OAuth provider.
+[Output] Bounded status/auth/failure and management/login terminal behavior without a real OAuth provider.
 [Pos] Explicit test fixture; never imported or selected by production code.
 [Sync] 2026-08-19: cover official headless OAuth stdin and lifecycle branches.
 [Sync] 2026-08-19: cover restricted user-scope HTTP add/remove argv.
 [Sync] 2026-08-20: emulate direct browser-callback completion before stdin submission.
 [Sync] 2026-08-20: capture non-secret config/secure-storage selectors for identity tests.
 [Sync] 2026-08-21: emit formal config scope for removal-authorization coverage.
+[Sync] 2026-08-25: emulate stable Authentication/Failure-Code output and authless post-logout truth.
 """
 
 from __future__ import annotations
@@ -26,7 +27,11 @@ def _state_path() -> Path:
 
 def _read_state() -> str:
     path = _state_path()
-    return path.read_text(encoding="utf-8").strip() if path.exists() else "needs_auth"
+    return (
+        path.read_text(encoding="utf-8").strip()
+        if path.exists()
+        else os.environ.get("CLAUDE_MCP_FAKE_DEFAULT_STATE", "needs_auth")
+    )
 
 
 def _write_state(value: str) -> None:
@@ -60,6 +65,47 @@ def _named_path(env_name: str) -> Path | None:
     return Path(value) if value else None
 
 
+def _authentication_for_state(state: str) -> str:
+    explicit = os.environ.get("CLAUDE_MCP_FAKE_AUTH_STATE")
+    if explicit:
+        return explicit
+    return {
+        "connected": "authenticated",
+        "needs_auth": "required",
+        "logged_out": "required",
+    }.get(state, "unknown")
+
+
+def _status_label(state: str) -> str:
+    return {
+        "connected": "✓ Connected",
+        "needs_auth": "Needs authentication",
+        "failed": "Failed",
+        "unavailable": "Unavailable",
+        "forbidden": "Forbidden",
+        "configured": "Configured",
+        "logged_out": "Logged out",
+        "disabled": "Disabled",
+    }.get(state, "Unknown future state")
+
+
+def _emit_server_status(server_name: str) -> None:
+    state = _read_state()
+    print(f"{server_name}\nStatus: {_status_label(state)}", flush=True)
+    if os.environ.get("CLAUDE_MCP_FAKE_LEGACY_OUTPUT") != "1":
+        print(f"Authentication: {_authentication_for_state(state)}", flush=True)
+        failure_code = os.environ.get("CLAUDE_MCP_FAKE_FAILURE_CODE")
+        if failure_code:
+            print(f"Failure-Code: {failure_code}", flush=True)
+    transport_label = (
+        "Type" if os.environ.get("CLAUDE_MCP_FAKE_LEGACY_OUTPUT") == "1" else "Transport"
+    )
+    print(
+        f"{transport_label}: {os.environ.get('CLAUDE_MCP_FAKE_TRANSPORT', 'http')}",
+        flush=True,
+    )
+
+
 def main() -> int:
     _record_argv()
     _record_identity_env()
@@ -90,7 +136,7 @@ def main() -> int:
         print("Usage: claude mcp remove --scope user <name>", flush=True)
         return 0
     if command == "list":
-        status = "✓ Connected" if _read_state() == "connected" else "Needs authentication"
+        status = _status_label(_read_state())
         print(f"plugin:comfy-cloud:comfy-cloud: https://mcp.example.test - {status}", flush=True)
         configured = _named_path("CLAUDE_MCP_FAKE_CONFIGURED_PATH")
         if configured and configured.exists():
@@ -105,10 +151,7 @@ def main() -> int:
         ):
             print(f"No server found: {server_name}", flush=True)
             return 1
-        if _read_state() == "connected":
-            print(f"{server_name}\nStatus: ✓ Connected", flush=True)
-        else:
-            print(f"{server_name}\nStatus: Needs authentication", flush=True)
+        _emit_server_status(server_name)
         scope = os.environ.get(
             "CLAUDE_MCP_FAKE_SCOPE",
             "plugin" if server_name.startswith("plugin:") else "user",
@@ -122,7 +165,12 @@ def main() -> int:
         print(f"Scope: {labels.get(scope, scope)}", flush=True)
         return 0
     if command == "logout":
-        _write_state("logged_out")
+        failure_code = os.environ.get("CLAUDE_MCP_FAKE_LOGOUT_FAILURE_CODE")
+        if failure_code:
+            print(f"Failure-Code: {failure_code}", flush=True)
+            print("provider detail access_token=fixture-secret", flush=True)
+            return 9
+        _write_state(os.environ.get("CLAUDE_MCP_FAKE_LOGOUT_STATE", "needs_auth"))
         print(f"Logged out of {server_name}", flush=True)
         return 0
     if command == "add":
@@ -155,11 +203,28 @@ def main() -> int:
         return 64
 
     behavior = os.environ.get("CLAUDE_MCP_FAKE_BEHAVIOR", "success")
+    semantic_failures = {
+        "auth_not_required": "auth_not_required",
+        "auth_not_advertised": "auth_not_advertised",
+        "metadata_invalid": "metadata_invalid",
+        "network_unreachable": "network_unreachable",
+        "server_rejected": "server_rejected",
+        "semantic_timeout": "timeout",
+        "process_exited": "process_exited",
+    }
+    if behavior in semantic_failures:
+        print(f"Failure-Code: {semantic_failures[behavior]}", flush=True)
+        print("provider detail refresh_token=fixture-secret", flush=True)
+        return 9
     if behavior == "nonzero":
         print("provider failed with token=<redacted>", flush=True)
         return 9
     if behavior == "malformed":
         print("Waiting for browser authorization", flush=True)
+        return 0
+    if behavior == "exit0_authenticated":
+        _write_state("connected")
+        print("Already authenticated", flush=True)
         return 0
 
     print(

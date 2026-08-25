@@ -1,9 +1,15 @@
-// [Input] One actor-owned Claude MCP server name, typed claude-mcp APIs, and Settings navigation callbacks.
-// [Output] Notion-aligned MCP detail workbench with live status, OAuth actions, and searchable read-only tool inventory.
+// [Input] One actor-owned database MCP server identifier, typed claude-mcp APIs, and Settings navigation callbacks.
+// [Output] MCP detail workbench with automatic cache-first standard-SDK discovery, OAuth actions, and searchable tools/resources/prompts inventory.
 // [Pos] Server detail surface in the frontend claude-mcp business domain.
 // [Sync] 2026-08-20: add public-SDK tool discovery without `/mcp` TUI parsing or remote tool execution.
+// [Sync] 2026-08-25: separate anonymous, required, authenticated, and rollback-compatible unknown auth actions.
+// [Sync] 2026-08-25: automatically load all three MCP inventory families without a user-facing refresh control.
+// [Sync] 2026-08-25: add revision-aware managed configuration editing followed by automatic cache-first discovery.
+// [Sync] 2026-08-25: remove editable authentication policy; backend discovery owns anonymous/OAuth classification.
+// [Sync] 2026-08-25: replace redirect URL copy/paste with same-origin automatic SPA callback submission.
+// [Sync] 2026-08-25: ignore stale inventory responses when config or credential revisions change mid-discovery.
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   cancelClaudeMcpAuth,
   getClaudeMcpCapability,
@@ -13,14 +19,20 @@ import {
   logoutClaudeMcpServer,
   removeClaudeMcpServer,
   startClaudeMcpAuth,
-  submitClaudeMcpRedirect,
+  updateClaudeMcpServer,
+  ClaudeMcpApiError,
   type ClaudeMcpCapability,
+  type ClaudeMcpAuthState,
   type ClaudeMcpOperation,
   type ClaudeMcpServer,
   type ClaudeMcpServerInventory,
   type ClaudeMcpState,
   type ClaudeMcpTool,
 } from '../../api/claudeMcpApi';
+import {
+  forgetClaudeMcpOAuthOperation,
+  rememberClaudeMcpOAuthOperation,
+} from './oauthHandoff';
 import {
   IconCheck,
   IconChevronLeft,
@@ -43,6 +55,7 @@ interface ClaudeMcpServerDetailPageProps {
 
 type CapabilityTab = 'tools' | 'resources' | 'prompts';
 type ToolFilter = 'all' | 'read_only' | 'destructive' | 'open_world' | 'unspecified';
+type EditTransport = 'streamable_http' | 'sse' | 'stdio';
 type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 
 const OPERATION_POLL_INTERVAL_MS = 1200;
@@ -71,8 +84,67 @@ const STATE_LABELS: Record<ClaudeMcpState, string> = {
   disabled: '已禁用',
 };
 
+const AUTH_STATE_LABELS: Record<ClaudeMcpAuthState, string> = {
+  anonymous: '匿名连接，无需 OAuth',
+  required: '需要认证',
+  authenticated: '已认证',
+  unknown: '认证状态未知',
+};
+
+function authStateOf(server: ClaudeMcpServer | null): ClaudeMcpAuthState {
+  return server?.auth_state ?? 'unknown';
+}
+
+function canStartAuth(server: ClaudeMcpServer | null, state: ClaudeMcpState | undefined): boolean {
+  return state === 'needs_auth' && authStateOf(server) === 'required';
+}
+
+function canLogout(server: ClaudeMcpServer | null, state: ClaudeMcpState | undefined): boolean {
+  const authState = authStateOf(server);
+  if (server?.credential_configured) return true;
+  return state === 'connected' && (authState === 'authenticated' || authState === 'unknown');
+}
+
+function connectionStateLabel(server: ClaudeMcpServer | null, state: ClaudeMcpState | undefined): string {
+  if (state === 'connected' && authStateOf(server) === 'anonymous') return '已匿名连接';
+  if (state === 'connected' && authStateOf(server) === 'authenticated') return '已认证连接';
+  return state ? STATE_LABELS[state] : '状态未知';
+}
+
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+  return error instanceof ClaudeMcpApiError
+    ? `${error.message}（${error.code}）`
+    : fallback;
+}
+
+function operationErrorMessage(operation: ClaudeMcpOperation): string | null {
+  return operation.error
+    ? `${operation.error.message}（${operation.error.code}）`
+    : null;
+}
+
+function connectionSummary(
+  server: ClaudeMcpServer | null,
+  state: ClaudeMcpState | undefined,
+  toolCount: number | undefined,
+): string {
+  const count = toolCount ?? '—';
+  if (state === 'connected' && authStateOf(server) === 'anonymous') {
+    return `已匿名连接，无需 OAuth；已发现 ${count} 个工具，可供 Chat 会话使用。`;
+  }
+  if (state === 'connected' && authStateOf(server) === 'authenticated') {
+    return `已通过认证连接；已发现 ${count} 个工具，可供 Chat 会话使用。`;
+  }
+  if (state === 'connected') {
+    return `连接可用；已发现 ${count} 个工具。认证状态由 Runtime 回报为未知。`;
+  }
+  if (state === 'needs_auth' && authStateOf(server) === 'required') {
+    return '服务已明确要求认证，完成 OAuth 后可继续检测工具能力。';
+  }
+  if (state === 'failed') {
+    return '最近一次 inventory discovery 失败；单 Server 失败不会阻塞其他 Server。';
+  }
+  return 'Server 配置已从 Dream 数据库加载；正在自动读取远端能力清单。';
 }
 
 function formatDateTime(value?: string): string {
@@ -270,7 +342,6 @@ export default function ClaudeMcpServerDetailPage({
   const [server, setServer] = useState<ClaudeMcpServer | null>(null);
   const [inventory, setInventory] = useState<ClaudeMcpServerInventory | null>(null);
   const [operation, setOperation] = useState<ClaudeMcpOperation | null>(null);
-  const [redirectUrl, setRedirectUrl] = useState('');
   const [activeTab, setActiveTab] = useState<CapabilityTab>('tools');
   const [searchQuery, setSearchQuery] = useState('');
   const [toolFilter, setToolFilter] = useState<ToolFilter>('all');
@@ -279,6 +350,14 @@ export default function ClaudeMcpServerDetailPage({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [editTransport, setEditTransport] = useState<EditTransport>('streamable_http');
+  const [editUrl, setEditUrl] = useState('');
+  const [editStdioProfile, setEditStdioProfile] = useState('');
+  const [editEnabled, setEditEnabled] = useState(true);
+  const automaticInventoryKeyRef = useRef<string | null>(null);
+  const inventoryRequestSequenceRef = useRef(0);
 
   const effectiveState = operation && ACTIVE_STATES.includes(operation.state)
     ? operation.state
@@ -293,43 +372,88 @@ export default function ClaudeMcpServerDetailPage({
   }, [inventory?.tools, searchQuery, toolFilter]);
 
   const loadInventory = useCallback(async () => {
+    const requestSequence = inventoryRequestSequenceRef.current + 1;
+    inventoryRequestSequenceRef.current = requestSequence;
     setInventoryLoading(true);
     setInventoryError(null);
     try {
       const next = await getClaudeMcpServerInventory(serverName);
+      if (requestSequence !== inventoryRequestSequenceRef.current) return;
+      automaticInventoryKeyRef.current = `${serverName}:${next.config_revision}:${next.credential_revision}:enabled`;
       setInventory(next);
+      setServer((current) => current ? {
+        ...current,
+        revision: next.config_revision,
+        credential_revision: next.credential_revision,
+        state: next.status === 'connected'
+          ? 'connected'
+          : next.status === 'needs_auth' ? 'needs_auth' : 'failed',
+        auth_state: next.status === 'needs_auth'
+          ? 'required'
+          : next.status === 'connected'
+            ? (current.credential_configured ? 'authenticated' : 'anonymous')
+            : current.auth_state,
+      } : current);
     } catch (error) {
+      if (requestSequence !== inventoryRequestSequenceRef.current) return;
       setInventory(null);
       setInventoryError(errorMessage(error, 'MCP 工具清单读取失败'));
     } finally {
-      setInventoryLoading(false);
+      if (requestSequence === inventoryRequestSequenceRef.current) setInventoryLoading(false);
     }
   }, [serverName]);
+
+  const loadInventoryForServer = useCallback((nextServer: ClaudeMcpServer) => {
+    const key = `${serverName}:${nextServer.revision ?? 'unknown'}:${nextServer.credential_revision}:`;
+    const inventoryKey = `${key}${nextServer.enabled ? 'enabled' : 'disabled'}`;
+    if (automaticInventoryKeyRef.current === inventoryKey) return;
+    automaticInventoryKeyRef.current = inventoryKey;
+    setInventory(null);
+    setInventoryError(null);
+    if (nextServer.enabled) {
+      void loadInventory();
+    } else {
+      inventoryRequestSequenceRef.current += 1;
+      setInventoryLoading(false);
+    }
+  }, [loadInventory, serverName]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setPageError(null);
     try {
-      const [nextCapability, nextServer] = await Promise.all([
+      const [capabilityResult, serverResult] = await Promise.allSettled([
         getClaudeMcpCapability(),
         getClaudeMcpServer(serverName),
       ]);
+      if (capabilityResult.status === 'rejected') throw capabilityResult.reason;
+      const nextCapability = capabilityResult.value;
       setCapability(nextCapability);
+      if (!nextCapability.enabled) {
+        inventoryRequestSequenceRef.current += 1;
+        setServer(null);
+        setInventory(null);
+        setInventoryLoading(false);
+        return;
+      }
+      if (serverResult.status === 'rejected') throw serverResult.reason;
+      const nextServer = serverResult.value;
       setServer(nextServer);
+      setEditDisplayName(nextServer.display_name);
+      setEditTransport((nextServer.transport ?? 'streamable_http') as EditTransport);
+      setEditUrl(nextServer.url ?? '');
+      setEditStdioProfile(nextServer.stdio_profile_key ?? '');
+      setEditEnabled(nextServer.enabled);
       if (nextServer.active_operation_id) {
         setOperation(await getClaudeMcpOperation(nextServer.active_operation_id));
       }
-      if (nextServer.state === 'connected') {
-        await loadInventory();
-      } else {
-        setInventory(null);
-      }
+      loadInventoryForServer(nextServer);
     } catch (error) {
       setPageError(errorMessage(error, 'Claude MCP 服务详情读取失败'));
     } finally {
       setLoading(false);
     }
-  }, [loadInventory, serverName]);
+  }, [loadInventoryForServer, serverName]);
 
   useEffect(() => {
     void load();
@@ -342,7 +466,7 @@ export default function ClaudeMcpServerDetailPage({
         .then((next) => {
           setOperation(next);
           if (next.state === 'connected') {
-            setRedirectUrl('');
+            forgetClaudeMcpOAuthOperation(next.id);
             void load();
           }
         })
@@ -352,31 +476,22 @@ export default function ClaudeMcpServerDetailPage({
   }, [load, operation]);
 
   const startAuth = useCallback(async () => {
-    if (busyAction) return;
+    if (busyAction || !canStartAuth(server, effectiveState)) return;
     setBusyAction('auth');
     setPageError(null);
     try {
-      setOperation(await startClaudeMcpAuth(serverName));
+      const next = await startClaudeMcpAuth(serverName);
+      if (!rememberClaudeMcpOAuthOperation(next.id)) {
+        await cancelClaudeMcpAuth(next.id);
+        throw new Error('browser operation handoff unavailable');
+      }
+      setOperation(next);
     } catch (error) {
       setPageError(errorMessage(error, '认证启动失败'));
     } finally {
       setBusyAction(null);
     }
-  }, [busyAction, serverName]);
-
-  const submitRedirect = useCallback(async () => {
-    if (!operation || !redirectUrl.trim() || busyAction) return;
-    setBusyAction('redirect');
-    setPageError(null);
-    try {
-      setOperation(await submitClaudeMcpRedirect(operation.id, redirectUrl.trim()));
-      setRedirectUrl('');
-    } catch (error) {
-      setPageError(errorMessage(error, 'redirect URL 提交失败'));
-    } finally {
-      setBusyAction(null);
-    }
-  }, [busyAction, operation, redirectUrl]);
+  }, [busyAction, effectiveState, server, serverName]);
 
   const cancelAuth = useCallback(async () => {
     if (!operation || busyAction) return;
@@ -384,7 +499,7 @@ export default function ClaudeMcpServerDetailPage({
     setPageError(null);
     try {
       setOperation(await cancelClaudeMcpAuth(operation.id));
-      setRedirectUrl('');
+      forgetClaudeMcpOAuthOperation(operation.id);
       await load();
     } catch (error) {
       setPageError(errorMessage(error, '认证取消失败'));
@@ -398,19 +513,68 @@ export default function ClaudeMcpServerDetailPage({
     setBusyAction('logout');
     setPageError(null);
     try {
-      setServer(await logoutClaudeMcpServer(serverName));
+      await logoutClaudeMcpServer(serverName);
       setOperation(null);
-      setInventory(null);
+      automaticInventoryKeyRef.current = null;
+      await load();
     } catch (error) {
       setPageError(errorMessage(error, '退出认证失败'));
     } finally {
       setBusyAction(null);
     }
-  }, [busyAction, serverName]);
+  }, [busyAction, load, serverName]);
+
+  const saveConfiguration = useCallback(async () => {
+    if (!server || busyAction) return;
+    const displayName = editDisplayName.trim();
+    const url = editUrl.trim();
+    const stdioProfile = editStdioProfile.trim();
+    if (!displayName) {
+      setPageError('显示名称不能为空。');
+      return;
+    }
+    if (editTransport === 'stdio' ? !stdioProfile : !url) {
+      setPageError(editTransport === 'stdio' ? 'stdio 需要服务端 profile key。' : 'HTTP/SSE 需要绝对 URL。');
+      return;
+    }
+    setBusyAction('update');
+    setPageError(null);
+    try {
+      const nextServer = await updateClaudeMcpServer(server, {
+        displayName,
+        transport: editTransport,
+        url: editTransport === 'stdio' ? null : url,
+        stdioProfileKey: editTransport === 'stdio' ? stdioProfile : null,
+        enabled: editEnabled,
+      });
+      setServer(nextServer);
+      loadInventoryForServer(nextServer);
+      setOperation(null);
+      setEditing(false);
+      setEditDisplayName(nextServer.display_name);
+      setEditTransport((nextServer.transport ?? 'streamable_http') as EditTransport);
+      setEditUrl(nextServer.url ?? '');
+      setEditStdioProfile(nextServer.stdio_profile_key ?? '');
+      setEditEnabled(nextServer.enabled);
+    } catch (error) {
+      setPageError(errorMessage(error, 'MCP Server 配置更新失败'));
+    } finally {
+      setBusyAction(null);
+    }
+  }, [
+    busyAction,
+    editDisplayName,
+    editEnabled,
+    editStdioProfile,
+    editTransport,
+    editUrl,
+    loadInventoryForServer,
+    server,
+  ]);
 
   const remove = useCallback(async () => {
-    if (busyAction || serverName.startsWith('plugin:')) return;
-    if (!window.confirm(`移除 MCP 服务“${serverName}”？此操作会同时撤销该服务的认证。`)) return;
+    if (busyAction || !server?.removable) return;
+    if (!window.confirm(`移除 MCP 服务“${serverName}”？此操作会移除服务配置和已保存的认证信息（如有）。`)) return;
     setBusyAction('remove');
     setPageError(null);
     try {
@@ -421,7 +585,7 @@ export default function ClaudeMcpServerDetailPage({
     } finally {
       setBusyAction(null);
     }
-  }, [busyAction, onBack, serverName]);
+  }, [busyAction, onBack, server, serverName]);
 
   const tabCounts = {
     tools: inventory?.capabilities.tools.count,
@@ -476,13 +640,11 @@ export default function ClaudeMcpServerDetailPage({
                     </h1>
                     <Pill tone={stateTone(effectiveState)}>
                       <span aria-hidden="true" style={{ width: '0.4rem', height: '0.4rem', borderRadius: '999px', background: statusPalette.color }} />
-                      {effectiveState ? STATE_LABELS[effectiveState] : '状态未知'}
+                      {connectionStateLabel(server, effectiveState)}
                     </Pill>
                   </div>
                   <p style={{ margin: '0.28rem 0 0', maxWidth: '48rem', color: 'var(--color-text-secondary)', fontSize: '0.78rem', lineHeight: 1.5 }}>
-                    {effectiveState === 'connected'
-                      ? `${inventory?.tool_count ?? '—'} 个工具已由同一用户凭证身份发现，可供 Chat 会话使用。`
-                      : '完成 Claude Code 正式 OAuth 后，工具会通过同一用户身份交付给 Chat。'}
+                    {connectionSummary(server, effectiveState, inventory?.tool_count)}
                   </p>
                 </>
               )}
@@ -491,19 +653,26 @@ export default function ClaudeMcpServerDetailPage({
 
           {!loading ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: isMobile ? 'flex-start' : 'flex-end' }}>
-              {!effectiveState || !ACTIVE_STATES.includes(effectiveState) ? (
+              {server && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
+                <button type="button" onClick={() => setEditing((value) => !value)} disabled={Boolean(busyAction)} style={{ ...actionStyle(), opacity: busyAction ? 0.62 : 1 }}>
+                  {editing ? '取消编辑' : '编辑配置'}
+                </button>
+              ) : null}
+              {canStartAuth(server, effectiveState) && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
                 <button type="button" onClick={() => void startAuth()} disabled={Boolean(busyAction)} style={{ ...actionStyle(true), opacity: busyAction ? 0.62 : 1 }}>
                   {busyAction === 'auth' ? <IconLoader style={{ width: '0.88rem', height: '0.88rem' }} /> : <IconShare style={{ width: '0.88rem', height: '0.88rem' }} />}
-                  {effectiveState === 'connected' ? '重新认证' : '开始认证'}
+                  {effectiveState === 'connected' && authStateOf(server) === 'anonymous'
+                    ? '尝试认证'
+                    : effectiveState === 'connected' ? '重新认证' : '开始认证'}
                 </button>
               ) : null}
-              {effectiveState === 'connected' ? (
+              {canLogout(server, effectiveState) ? (
                 <button type="button" onClick={() => void logout()} disabled={Boolean(busyAction)} style={{ ...actionStyle(false, true), opacity: busyAction ? 0.62 : 1 }}>
                   {busyAction === 'logout' ? <IconLoader style={{ width: '0.88rem', height: '0.88rem' }} /> : <IconX style={{ width: '0.88rem', height: '0.88rem' }} />}
-                  Logout
+                  退出认证
                 </button>
               ) : null}
-              {!serverName.startsWith('plugin:') && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
+              {server?.removable && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
                 <button type="button" onClick={() => void remove()} disabled={Boolean(busyAction)} style={{ ...actionStyle(false, true), opacity: busyAction ? 0.62 : 1 }}>
                   <IconTrash style={{ width: '0.88rem', height: '0.88rem' }} />
                   移除
@@ -515,13 +684,67 @@ export default function ClaudeMcpServerDetailPage({
 
         {!loading ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
-            <InfoChip label="授权" value={effectiveState ? STATE_LABELS[effectiveState] : '未知'} />
-            <InfoChip label="CLI" value={capability?.cli_version ?? '未验证'} />
-            <InfoChip label="配置" value={`${inventory?.config_scope ?? 'user'} · ${inventory?.runtime_scope ?? '等待探测'}`} />
+            <InfoChip label="认证" value={AUTH_STATE_LABELS[authStateOf(server)]} />
+            <InfoChip label="连接" value={effectiveState ? STATE_LABELS[effectiveState] : '未知'} />
+            <InfoChip label="管理" value={capability?.management_mode === 'managed_db' ? 'Dream 数据库' : '不可用'} />
+            <InfoChip label="配置" value={`${server?.config_scope ?? 'user'} · revision ${server?.revision ?? '—'}`} />
             <InfoChip label="传输" value={inventory?.transport ?? server?.transport ?? '未报告'} />
-            <InfoChip label="URL" value={inventory?.url ?? '未报告'} />
+            <InfoChip label="URL" value={inventory?.url ?? server?.url ?? '未报告'} />
             <InfoChip label="最近探测" value={formatDateTime(inventory?.refreshed_at)} />
           </div>
+        ) : null}
+
+        {editing && server ? (
+          <form
+            aria-label="编辑 MCP Server 配置"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveConfiguration();
+            }}
+            style={{ display: 'grid', gap: '0.7rem', padding: '0.8rem', border: SOFT_CONTROL_BORDER, borderRadius: '0.9rem', background: SOFT_ROW_SURFACE }}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: '0.65rem' }}>
+              <label style={{ display: 'grid', gap: '0.3rem', color: 'var(--color-text-secondary)', fontSize: '0.75rem' }}>
+                显示名称
+                <input value={editDisplayName} onChange={(event) => setEditDisplayName(event.target.value)} maxLength={200} style={{ border: SOFT_CONTROL_BORDER, borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem' }} />
+              </label>
+              <label style={{ display: 'grid', gap: '0.3rem', color: 'var(--color-text-secondary)', fontSize: '0.75rem' }}>
+                传输
+                <select value={editTransport} onChange={(event) => {
+                  const next = event.target.value as EditTransport;
+                  setEditTransport(next);
+                }} style={{ border: SOFT_CONTROL_BORDER, borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem' }}>
+                  <option value="streamable_http">Streamable HTTP</option>
+                  <option value="sse">SSE</option>
+                  <option value="stdio">stdio profile</option>
+                </select>
+              </label>
+              {editTransport === 'stdio' ? (
+                <label style={{ display: 'grid', gap: '0.3rem', color: 'var(--color-text-secondary)', fontSize: '0.75rem' }}>
+                  服务端 profile key
+                  <input value={editStdioProfile} onChange={(event) => setEditStdioProfile(event.target.value)} maxLength={128} autoComplete="off" spellCheck={false} style={{ border: SOFT_CONTROL_BORDER, borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem' }} />
+                </label>
+              ) : (
+                <label style={{ display: 'grid', gap: '0.3rem', color: 'var(--color-text-secondary)', fontSize: '0.75rem' }}>
+                  MCP URL
+                  <input type="url" value={editUrl} onChange={(event) => setEditUrl(event.target.value)} autoComplete="off" spellCheck={false} style={{ border: SOFT_CONTROL_BORDER, borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem' }} />
+                </label>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.7rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--color-text-secondary)', fontSize: '0.76rem' }}>
+                <input type="checkbox" checked={editEnabled} onChange={(event) => setEditEnabled(event.target.checked)} />
+                启用此 Server
+              </label>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>修改 endpoint 或 transport 会清除旧凭据与 inventory，并由后端重新判断认证要求。</span>
+                <button type="submit" disabled={Boolean(busyAction)} style={{ ...actionStyle(true), opacity: busyAction ? 0.62 : 1 }}>
+                  {busyAction === 'update' ? <IconLoader style={{ width: '0.82rem', height: '0.82rem' }} /> : <IconCheck style={{ width: '0.82rem', height: '0.82rem' }} />}
+                  保存配置
+                </button>
+              </div>
+            </div>
+          </form>
         ) : null}
 
         {operation && ACTIVE_STATES.includes(operation.state) ? (
@@ -529,7 +752,7 @@ export default function ClaudeMcpServerDetailPage({
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.8rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem', lineHeight: 1.55 }}>
                 {operation.state === 'waiting_for_user'
-                  ? '在浏览器完成授权后，粘贴最终跳转的完整 redirect URL。该值只写入当前 CLI 进程。'
+                  ? '在浏览器完成授权后会自动回到 Dream；无需复制或粘贴 redirect URL。'
                   : `认证状态：${STATE_LABELS[operation.state]}`}
               </div>
               <button type="button" onClick={() => void cancelAuth()} disabled={Boolean(busyAction)} style={actionStyle()}>
@@ -542,21 +765,6 @@ export default function ClaudeMcpServerDetailPage({
                   <IconShare style={{ width: '0.82rem', height: '0.82rem' }} />
                   打开授权页面
                 </a>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <input
-                    aria-label={`${serverName} redirect URL`}
-                    type="url"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={redirectUrl}
-                    onChange={(event) => setRedirectUrl(event.target.value)}
-                    placeholder="完整 redirect URL"
-                    style={{ flex: '1 1 20rem', minWidth: 0, border: SOFT_CONTROL_BORDER, borderRadius: '999px', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.82rem' }}
-                  />
-                  <button type="button" onClick={() => void submitRedirect()} disabled={!redirectUrl.trim() || Boolean(busyAction)} style={{ ...actionStyle(true), opacity: !redirectUrl.trim() || busyAction ? 0.62 : 1 }}>
-                    提交并连接
-                  </button>
-                </div>
               </>
             ) : null}
           </div>
@@ -574,7 +782,7 @@ export default function ClaudeMcpServerDetailPage({
 
       <DetailSection
         title="能力与工具"
-        subtitle="工具清单来自公开 Agent SDK 状态接口；安全标签只展示 MCP server 明确声明的注解。"
+        subtitle="进入详情页后，Dream 会通过标准 MCP SDK 自动发现 Tools、Resources 与 Prompts；列表页不会触发远端连接。"
         action={activeTab === 'tools' ? (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <label style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
@@ -595,10 +803,6 @@ export default function ClaudeMcpServerDetailPage({
               <option value="open_world">开放世界</option>
               <option value="unspecified">未声明</option>
             </select>
-            <button type="button" onClick={() => void loadInventory()} disabled={inventoryLoading || effectiveState !== 'connected'} style={{ ...actionStyle(), opacity: inventoryLoading || effectiveState !== 'connected' ? 0.62 : 1 }}>
-              {inventoryLoading ? <IconLoader style={{ width: '0.82rem', height: '0.82rem' }} /> : <IconShare style={{ width: '0.82rem', height: '0.82rem' }} />}
-              重新探测
-            </button>
           </div>
         ) : null}
       >
@@ -634,17 +838,20 @@ export default function ClaudeMcpServerDetailPage({
           <div aria-label="MCP 工具列表" style={{ background: 'color-mix(in srgb, var(--color-bg-paper) 34%, transparent)', borderRadius: '0.8rem', padding: '0 0.15rem' }}>
             {inventoryLoading && !inventory ? <SkeletonList rows={5} /> : null}
             {inventoryError ? (
-              <div role="alert" style={{ display: 'grid', gap: '0.55rem', padding: '0.9rem', color: 'var(--color-state-error)', fontSize: '0.8rem' }}>
-                <span>{inventoryError}</span>
-                <button type="button" onClick={() => void loadInventory()} style={{ ...actionStyle(), width: 'fit-content' }}>重试探测</button>
-              </div>
+              <div role="alert" style={{ padding: '0.9rem', color: 'var(--color-state-error)', fontSize: '0.8rem' }}>{inventoryError}</div>
             ) : null}
-            {!inventoryLoading && !inventoryError && effectiveState !== 'connected' ? (
-              <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>连接并认证此 MCP server 后才能读取工具清单。</div>
+            {!inventoryLoading && !inventoryError && !inventory ? (
+              <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>{server?.enabled ? '正在自动读取工具清单。' : '该 Server 已禁用。'}</div>
             ) : null}
             {!inventoryLoading && inventory && visibleTools.length === 0 ? (
               <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-                {inventory.tool_count === 0 ? '该服务没有报告工具。' : '没有匹配当前搜索和风险筛选的工具。'}
+                {inventory.status === 'needs_auth'
+                  ? '完成 OAuth 后将自动加载工具。'
+                  : inventory.status === 'failed'
+                    ? '连接失败，未能读取工具清单。'
+                    : inventory.tool_count === 0
+                      ? '该服务没有报告工具。'
+                      : '没有匹配当前搜索和风险筛选的工具。'}
               </div>
             ) : null}
             {visibleTools.map((tool) => <ToolRow key={tool.name} tool={tool} />)}
@@ -652,14 +859,33 @@ export default function ClaudeMcpServerDetailPage({
               <div style={{ padding: '0.72rem', color: 'var(--color-state-warning)', fontSize: '0.76rem' }}>工具数量超过安全展示上限，当前仅显示前 {inventory.tools.length} 项。</div>
             ) : null}
           </div>
+        ) : activeTab === 'resources' ? (
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            {(inventory?.resources ?? []).map((resource) => (
+              <article key={resource.uri} style={{ padding: '0.72rem', borderBottom: SOFT_ROW_DIVIDER }}>
+                <strong style={{ color: 'var(--color-text-primary)', overflowWrap: 'anywhere' }}>{resource.name}</strong>
+                <div style={{ marginTop: '0.2rem', color: 'var(--color-text-muted)', fontSize: '0.74rem', overflowWrap: 'anywhere' }}>{resource.uri}</div>
+                {resource.description ? <p style={{ margin: '0.28rem 0 0', color: 'var(--color-text-secondary)', fontSize: '0.76rem' }}>{resource.description}</p> : null}
+              </article>
+            ))}
+            {!inventory ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>正在自动读取 Resources。</div> : null}
+            {inventory && inventory.resources.length === 0 ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>该 Server 没有报告 Resources。</div> : null}
+          </div>
         ) : (
-          <div style={{ borderLeft: '2px solid color-mix(in srgb, var(--color-border-paper) 70%, transparent)', padding: '0.25rem 0 0.25rem 0.75rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem', lineHeight: 1.6 }}>
-            目前公开的 <code>get_mcp_status()</code> 契约不返回 {activeTab === 'resources' ? 'Resources' : 'Prompts'} 清单。这里不会解析 <code>/mcp</code> TUI 或伪造数量；待正式 SDK 提供后再接入。
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            {(inventory?.prompts ?? []).map((prompt) => (
+              <article key={prompt.name} style={{ padding: '0.72rem', borderBottom: SOFT_ROW_DIVIDER }}>
+                <strong style={{ color: 'var(--color-text-primary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>{prompt.name}</strong>
+                {prompt.description ? <p style={{ margin: '0.28rem 0 0', color: 'var(--color-text-secondary)', fontSize: '0.76rem' }}>{prompt.description}</p> : null}
+              </article>
+            ))}
+            {!inventory ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>正在自动读取 Prompts。</div> : null}
+            {inventory && inventory.prompts.length === 0 ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>该 Server 没有报告 Prompts。</div> : null}
           </div>
         )}
       </DetailSection>
 
-      {operation?.error ? <div role="alert" style={{ color: 'var(--color-state-error)', fontSize: '0.78rem' }}>{operation.error.message}</div> : null}
+      {operation && operationErrorMessage(operation) ? <div role="alert" style={{ color: 'var(--color-state-error)', fontSize: '0.78rem' }}>{operationErrorMessage(operation)}</div> : null}
       {inventory?.server_info ? (
         <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
           <span>Server info</span>

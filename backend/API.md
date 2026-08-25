@@ -16,6 +16,7 @@
 [Sync] 2026-08-17: document Deck-filtered Chat history and corrected related-thread/binding deletion semantics.
 [Sync] 2026-08-22: document per-thread CLAUDE_CODE_TMPDIR and the Workspace Mode disabled runtime-only boundary.
 [Sync] 2026-08-22: restore authenticated Claude MCP Resources configuration, OAuth lifecycle, inventory, and removal contracts.
+[Sync] 2026-08-25: replace the stale Claude CLI MCP contract with managed-PostgreSQL CRUD, standard-SDK discovery, encrypted OAuth, and automatic browser callback semantics.
 [Sync] 2026-08-22: document retryable Claude Agent capacity and memory-pressure SSE errors.
 -->
 
@@ -1129,28 +1130,34 @@ SemVer, `expected_binding_revision`, and `apply_to: "next_run"`.
 
 ## Claude MCP Resources
 
-All routes require normal Dream authentication. The connector uses an opaque,
-user-scoped Claude CLI identity and never returns or persists OAuth tokens.
+所有路由都要求正常 Dream 登录。PostgreSQL `dream_mcp_*` 是 Server 配置、
+作用域、启用状态、credential ref 与 discovery snapshot 的唯一事实来源；
+正常请求链不会执行 `claude --version`、`claude mcp help/list/get/login/logout`
+或其他 MCP 管理 CLI。Token、Authorization Header、callback code/state 不会
+出现在公开 DTO、普通配置字段或 access log；OAuth 文档只以 actor/server AAD
+绑定的 AES-GCM envelope 保存。
 
 | Method | Route | Purpose |
 |---|---|---|
-| `GET` | `/api/claude-mcp/capability` | Report exact CLI/SDK and headless OAuth readiness. |
-| `GET` | `/api/claude-mcp/servers` | Discover configured servers and verified connection state. |
-| `GET` | `/api/claude-mcp/servers/{server_name}` | Read one opaque server name and its safe tool inventory. |
-| `POST` | `/api/claude-mcp/servers` | Add one validated absolute HTTP(S) MCP URL at user scope. |
-| `DELETE` | `/api/claude-mcp/servers/{server_name}` | Remove only a backend-verified user-scope server. |
-| `POST` | `/api/claude-mcp/servers/{server_name}/auth-operations` | Start/recover `claude mcp login <name> --no-browser`. |
+| `GET` | `/api/claude-mcp/capability` | 返回精确 schema capability、支持的 transport 与 DB 管理模式；不探测 CLI。 |
+| `GET` | `/api/claude-mcp/servers` | 只查询 actor/workspace 范围内的数据库 Server；不连接远端 MCP。 |
+| `GET` | `/api/claude-mcp/servers/{identifier}` | 读取一个 actor-owned Server 的安全配置摘要；不自动 discovery。 |
+| `POST` | `/api/claude-mcp/servers` | 新增经过 URL/transport/profile 策略校验的 Server；认证类型由后端 discovery 判断。 |
+| `PATCH` | `/api/claude-mcp/servers/{identifier}` | 用 `expected_revision` CAS 修改配置；endpoint/transport 变化会清除旧 credential/snapshot。 |
+| `DELETE` | `/api/claude-mcp/servers/{identifier}` | 用可选 `expected_revision` 删除 actor-owned Server。 |
+| `POST` | `/api/claude-mcp/servers/{identifier}/discoveries` | 通过标准 Python MCP SDK 显式发现 tools/resources/prompts。 |
+| `DELETE` | `/api/claude-mcp/servers/{identifier}/discoveries` | 取消该 Server 当前 actor-owned discovery。 |
+| `POST` | `/api/claude-mcp/discoveries` | 在配置化并发上限内批量发现，单 Server 失败不阻塞其他结果。 |
+| `POST` | `/api/claude-mcp/servers/{identifier}/auth-operations` | 启动/恢复进程内标准 SDK OAuth operation；前端只在后端判定 `needs_auth` 后展示。 |
 | `GET` | `/api/claude-mcp/auth-operations/{operation_id}` | Poll an actor-owned in-process OAuth operation. |
-| `POST` | `/api/claude-mcp/auth-operations/{operation_id}/redirect` | Submit one complete HTTP(S) redirect URL to the same CLI process. |
-| `POST` | `/api/claude-mcp/auth-operations/{operation_id}/cancel` | Cancel and reap the OAuth process group. |
-| `POST` | `/api/claude-mcp/servers/{server_name}/logout` | Logout through the official CLI and verify state. |
+| `POST` | `/api/claude-mcp/auth-operations/{operation_id}/redirect` | 同源 SPA 自动提交完整 callback URL 给该 operation；不需要用户复制。 |
+| `POST` | `/api/claude-mcp/auth-operations/{operation_id}/cancel` | 取消并关闭该 SDK session/transport。 |
+| `DELETE` | `/api/claude-mcp/servers/{identifier}/credential` | 删除 encrypted credential 并精准失效相关 snapshot。 |
 
-The Agent receives the authenticated user's opaque definitions through the
-public SDK `mcp_servers` option without automatic tool approval. Linux projects
-only the protected credential subset into the thread config home; macOS reuses
-the exact CLI secure-storage identity without application reads of Keychain
-payloads. Workspace Mode disabled with existing MCP state fails closed. No
-database schema or runtime DDL is introduced.
+Chat 的 new/resume 每一轮从同一数据库事实源生成 detached `mcp_servers`
+snapshot，通过公开 Agent SDK `Path` 接口和 `strict_mcp_config=true` 注入；
+不会自动批准工具。Dream 不创建 migration/runtime DDL，缺少 Admin 发布的
+`dream.managed-mcp-resources.v1` capability 时 fail closed。
 
 ---
 

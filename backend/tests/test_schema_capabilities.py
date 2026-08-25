@@ -5,10 +5,14 @@ from dataclasses import dataclass
 import pytest
 
 from schema.capabilities import (
+    MANAGED_MCP_RESOURCES_CAPABILITY,
+    MANAGED_MCP_RESOURCES_CONTRACT_SHA256,
+    MANAGED_MCP_RESOURCES_VERSION,
     REQUIRED_RUNTIME_CAPABILITIES,
     SchemaCapabilityError,
     UNIFIED_DREAM_CAPABILITY,
     inspect_schema_authority,
+    managed_mcp_resources_capability_available,
 )
 
 
@@ -39,10 +43,16 @@ class _Connection:
             if relation == "drizzle.schema_capabilities":
                 return _Cursor([(relation if self.capabilities is not None else None,)])
         if "FROM drizzle.schema_capabilities" in query:
-            requested = set(parameters[0])
+            requested_raw = parameters[0]
+            requested = (
+                {requested_raw}
+                if isinstance(requested_raw, str)
+                else set(requested_raw)
+            )
+            exact_mcp_query = "SELECT version, contract_sha256" in query
             return _Cursor(
                 [
-                    (name, version, contract_hash)
+                    ((version, contract_hash) if exact_mcp_query else (name, version, contract_hash))
                     for name, (version, contract_hash) in sorted(
                         (self.capabilities or {}).items()
                     )
@@ -95,3 +105,37 @@ def test_missing_or_inconsistent_authority_fails_closed(connection: _Connection)
             required_capabilities=REQUIRED_RUNTIME_CAPABILITIES,
         )
     assert all("alembic" not in query.casefold() for query in connection.queries)
+
+
+def test_managed_mcp_capability_requires_the_exact_admin_hash() -> None:
+    exact = _Connection(
+        capabilities={
+            MANAGED_MCP_RESOURCES_CAPABILITY: (
+                MANAGED_MCP_RESOURCES_VERSION,
+                MANAGED_MCP_RESOURCES_CONTRACT_SHA256,
+            )
+        }
+    )
+    drifted = _Connection(
+        capabilities={
+            MANAGED_MCP_RESOURCES_CAPABILITY: (
+                MANAGED_MCP_RESOURCES_VERSION,
+                "b" * 64,
+            )
+        }
+    )
+    newer_version = _Connection(
+        capabilities={
+            MANAGED_MCP_RESOURCES_CAPABILITY: (
+                MANAGED_MCP_RESOURCES_VERSION + 1,
+                MANAGED_MCP_RESOURCES_CONTRACT_SHA256,
+            )
+        }
+    )
+
+    assert managed_mcp_resources_capability_available(exact) is True
+    assert managed_mcp_resources_capability_available(drifted) is False
+    assert managed_mcp_resources_capability_available(newer_version) is False
+    assert MANAGED_MCP_RESOURCES_CONTRACT_SHA256 == (
+        "746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a"
+    )

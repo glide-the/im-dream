@@ -2,6 +2,7 @@
 <!-- [输出] 定义 Claude SDK 子进程环境、config home、临时根、Runtime 选择与回滚合同。 -->
 <!-- [定位] Claude Agent SDK 环境与进程启动设计真相源。 -->
 <!-- [同步] 2026-08-24：记录 SDK 0.2.143 正式 PyPI 版本/哈希锁、Runtime main@7c34e6cd 与公开 npm 多平台 Runtime；standalone 不依赖 ambient Bun。 -->
+<!-- [同步] 2026-08-25：CLI resolver 仅服务 Agent turn；MCP Resources 管理面改为 Dream PostgreSQL 与标准 MCP SDK。 -->
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
 > **[同步] 2026-05-24**：迁移请求级模型覆盖开关：`PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` → `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`；新 key 加入 `sdk_env.py` 白名单；旧 key 同时保留作为 fallback。
@@ -219,8 +220,9 @@ Dream 只保留一条 Agent 业务路径：`server.py` 在 Agent factory 启动�
 `ink-claude-dream-agent-sdk==0.2.143` distribution metadata、唯一
 `claude_agent_sdk` import provider、公共 `ClaudeAgentOptions` / client / query API
 和五类 stream message type。Runner 随后通过既有
-`sdk_env.apply_cli_path_to_options()` 固定同一 CLI；MCP 管理身份复用同一个
-`resolve_claude_cli_path()`，不存在按部署环境分叉的 resolver。
+`sdk_env.apply_cli_path_to_options()` 只固定 Agent 执行面 CLI。MCP Resources 管理面
+不再解析 CLI 身份：Server CRUD/list 从 Dream PostgreSQL 读取，inventory/OAuth 由
+标准 MCP SDK 处理，Chat 再把数据库快照投影到 Agent SDK `mcp_servers`。
 
 | 优先级 | 来源 | 语义 |
 |---|---|---|
