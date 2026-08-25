@@ -84,6 +84,10 @@
 # [Sync] 2026-08-22: synchronize authenticated user MCP definitions before each
 #                    workspace turn and fail closed when Workspace Mode cannot
 #                    protect an existing user MCP credential projection.
+# [Sync] 2026-08-25: replace per-turn Claude CLI credential/config synchronization
+#                    with the managed PostgreSQL MCP snapshot for both new and
+#                    resumed turns; Workspace Mode off still uses only the exact
+#                    thread runtime root for the runner's ephemeral 0600 projection.
 # [Sync] 2026-06-13: remove assemble_context local database import that shadowed
 #                    module-level _db before system_config lookup.
 # [Sync] 2026-06-09: P2 fix — split _persist_turn into _persist_user_message (called
@@ -303,6 +307,31 @@ async def _resolve_story_workspace_dream_deck_prompt(
             dream_mode=True,
         )
         return resolved.system_prompt
+    finally:
+        db.close()
+
+
+def _resolve_managed_mcp_workspace_scope_sync(
+    *,
+    actor_id: str,
+    context: StoryWorkspaceDreamRunContext | None,
+) -> str | None:
+    """Resolve the actor-owned Dream workspace scope for one managed snapshot."""
+
+    if context is None:
+        return None
+    db = _db.get_db()
+    try:
+        row = db.execute(
+            "SELECT workspace_id FROM workflow_runs "
+            "WHERE id = %s AND created_by = %s",
+            (context.workflow_run_id, actor_id),
+        ).fetchone()
+        if db.in_transaction:
+            db.rollback()
+        if row is None or not row["workspace_id"]:
+            raise PermissionError("Dream managed MCP workspace scope is unavailable")
+        return str(row["workspace_id"])
     finally:
         db.close()
 
@@ -1154,7 +1183,7 @@ class ClaudeAgentService:
         ) = None,
         dream_artifact_turn_hook: DreamArtifactTurnHook | None = None,
         dream_workbench_context: DreamWorkbenchContext | None = None,
-        claude_mcp_credential_synchronizer: Any | None = None,
+        managed_mcp_runtime_snapshot_loader: Any | None = None,
     ) -> None:
         self._context_builder = context_builder or ClaudeAgentContextBuilder()
         self._platform_model_resolver = (
@@ -1171,16 +1200,8 @@ class ClaudeAgentService:
         self._dream_workbench_context = (
             dream_workbench_context or DreamWorkbenchContext()
         )
-        if claude_mcp_credential_synchronizer is None:
-            from claude_mcp.credentials import (  # noqa: PLC0415
-                get_default_credential_synchronizer,
-            )
-
-            claude_mcp_credential_synchronizer = (
-                get_default_credential_synchronizer()
-            )
-        self._claude_mcp_credential_synchronizer = (
-            claude_mcp_credential_synchronizer
+        self._managed_mcp_runtime_snapshot_loader = (
+            managed_mcp_runtime_snapshot_loader
         )
 
     # ------------------------------------------------------------------
@@ -1333,32 +1354,6 @@ class ClaudeAgentService:
             claude_tmp_workspace = cwd
 
             try:
-                from claude_mcp.credentials import ClaudeMcpCredentialError  # noqa: PLC0415
-
-                mcp_synchronizer = self._claude_mcp_credential_synchronizer
-                if mcp_synchronizer.supported and claude_config_home:
-                    mcp_sync_result = await mcp_synchronizer.sync_thread(
-                        str(request.user_id),
-                        claude_config_home,
-                    )
-                    claude_mcp_servers = {
-                        str(name): dict(config)
-                        for name, config in mcp_sync_result.mcp_servers.items()
-                        if isinstance(config, dict)
-                    }
-                    if mcp_sync_result.mcp_configured:
-                        secure_storage_home = mcp_synchronizer.secure_storage_home(
-                            str(request.user_id)
-                        )
-                        claude_secure_storage_home = (
-                            str(secure_storage_home) if secure_storage_home else None
-                        )
-            except ClaudeMcpCredentialError as exc:
-                raise RuntimeError(
-                    "Claude MCP credential synchronization failed safely."
-                ) from exc
-
-            try:
                 from notion import build_notion_facade  # noqa: PLC0415
                 from notion.errors import NotionConnectorNotFoundError  # noqa: PLC0415
             except Exception as exc:  # noqa: BLE001
@@ -1392,22 +1387,6 @@ class ClaudeAgentService:
                         exc,
                     )
         else:
-            mcp_synchronizer = self._claude_mcp_credential_synchronizer
-            if mcp_synchronizer.supported:
-                try:
-                    if await mcp_synchronizer.has_user_mcp_state(
-                        str(request.user_id)
-                    ):
-                        raise RuntimeError(
-                            "Claude MCP requires Workspace Mode so thread "
-                            "credentials remain sandbox-protected."
-                        )
-                except RuntimeError:
-                    raise
-                except Exception as exc:
-                    raise RuntimeError(
-                        "Claude MCP credential capability check failed safely."
-                    ) from exc
             cwd = ""
             if request.cwd:
                 logger.warning(
@@ -1430,6 +1409,33 @@ class ClaudeAgentService:
             claude_tmp_workspace = str(
                 get_or_create_thread_runtime_workspace(state.session_id)
             )
+
+        try:
+            loader = self._managed_mcp_runtime_snapshot_loader
+            if loader is None:
+                from claude_mcp.service import (  # noqa: PLC0415
+                    get_default_managed_mcp_runtime_snapshot_loader,
+                )
+
+                loader = get_default_managed_mcp_runtime_snapshot_loader()
+            managed_workspace_id = await asyncio.to_thread(
+                _resolve_managed_mcp_workspace_scope_sync,
+                actor_id=str(request.user_id),
+                context=dream_context,
+            )
+            snapshot = await loader.load(
+                str(request.user_id),
+                managed_workspace_id,
+            )
+            claude_mcp_servers = {
+                str(name): dict(config)
+                for name, config in snapshot.items()
+                if isinstance(name, str) and isinstance(config, dict)
+            }
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "Managed Claude MCP snapshot loading failed safely."
+            ) from exc
 
         # ---------------------------------------------------------------
         # Resolve resume: load existing chat_thread to get claude_session_id.

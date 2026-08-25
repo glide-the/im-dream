@@ -1,240 +1,154 @@
-"""Public Claude MCP Resources API contract tests.
+"""Managed MCP Resources thin-router contracts.
 
 [Input] Authenticated FastAPI calls with an injected provider-free fake service.
-[Output] Capability, inventory, configuration/removal, colon-bearing server, operation, redirect, cancel, logout, and safe-error DTO evidence.
-[Pos] Route boundary tests; no database, real CLI, or real OAuth activity.
-[Sync] 2026-08-19: cover the reviewed `/api/claude-mcp` v1 contract and ownership seam.
-[Sync] 2026-08-19: cover restricted HTTPS user-scope configuration and removal DTOs.
-[Sync] 2026-08-20: cover the actor-owned sanitized tool inventory route.
-[Sync] 2026-08-21: cover HTTP configuration plus scope/removability server DTOs.
+[Output] Strict CRUD/discovery/bulk/OAuth/logout DTO forwarding and safe error status evidence.
+[Pos] Public route boundary tests; no database, CLI, subprocess, MCP server, or OAuth provider.
+[Sync] 2026-08-25: replace CLI-shaped routes with managed database API coverage.
+[Sync] 2026-08-25: prove public CRUD rejects user-selected auth_kind and defaults detection state internally.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
-import sys
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
-
 from claude_mcp.contracts import (
     ClaudeMcpCapability,
-    ClaudeMcpConfigScope,
     ClaudeMcpError,
     ClaudeMcpErrorCode,
     ClaudeMcpOperation,
     ClaudeMcpServer,
-    ClaudeMcpServerInfo,
-    ClaudeMcpServerInventory,
     ClaudeMcpState,
-    ClaudeMcpInventoryStatus,
-    ClaudeMcpTool,
-    ClaudeMcpToolAnnotations,
+    McpAuthKind,
 )
+from claude_mcp.inventory import McpDiscoveryError, McpDiscoveryResult, McpDiscoveryStatus
 from routers import claude_mcp
 from routers.deps import get_current_user
 
 
 class _Service:
-    def __init__(self) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+    def __init__(self):
+        self.calls = []
+        self.server = ClaudeMcpServer.managed(
+            id="server-1", name="alpha", display_name="Alpha",
+            transport="streamable_http", config_scope="user",
+            auth_kind="none", enabled=True, revision=1,
+            remote_url="https://mcp.example.test/mcp",
+        )
         self.operation = ClaudeMcpOperation(
-            id="operation-1",
-            actor_id="7",
-            identity_fingerprint="identity-1",
-            server_name="plugin:comfy-cloud:comfy-cloud",
-            state=ClaudeMcpState.WAITING_FOR_USER,
-            authorization_url="https://oauth.example.test/authorize?state=opaque",
-            created_at=now,
-            updated_at=now,
-        )
-        self.redirect_received: str | None = None
-        self.configured: tuple[str, str] | None = None
-
-    async def capability(self, actor_id: str) -> ClaudeMcpCapability:
-        assert actor_id == "7"
-        return ClaudeMcpCapability(True, None, "2.1.220", "2.1.186", "2.1.191", "identity-1")
-
-    async def list_servers(self, actor_id: str) -> list[ClaudeMcpServer]:
-        assert actor_id == "7"
-        return [ClaudeMcpServer(
-            self.operation.server_name,
-            ClaudeMcpState.NEEDS_AUTH,
-            config_scope=ClaudeMcpConfigScope.PLUGIN,
-            removable=False,
-        )]
-
-    async def get_server(self, actor_id: str, server_name: str) -> ClaudeMcpServer:
-        assert actor_id == "7"
-        return ClaudeMcpServer(
-            server_name,
-            ClaudeMcpState.NEEDS_AUTH,
-            config_scope=ClaudeMcpConfigScope.PLUGIN,
-            removable=False,
+            id="operation-1", actor_id="7", identity_fingerprint="managed-db",
+            server_name="server-1", state=ClaudeMcpState.WAITING_FOR_USER,
+            created_at="2026-08-25T00:00:00+00:00", updated_at="2026-08-25T00:00:00+00:00",
+            authorization_url="https://auth.example.test/authorize?state=opaque",
         )
 
-    async def get_server_inventory(self, actor_id: str, server_name: str) -> ClaudeMcpServerInventory:
-        assert actor_id == "7"
-        return ClaudeMcpServerInventory(
-            server_name=server_name,
-            status=ClaudeMcpInventoryStatus.CONNECTED,
-            config_scope="user",
-            runtime_scope="dynamic",
-            transport="http",
-            url="https://cloud.comfy.org/mcp",
-            server_info=ClaudeMcpServerInfo("Comfy Cloud", "1.0.0"),
-            tools=(
-                ClaudeMcpTool(
-                    "get_job_status",
-                    "Read job status",
-                    ClaudeMcpToolAnnotations(read_only=True),
-                ),
-            ),
-            tool_count=1,
-            tools_truncated=False,
-            refreshed_at="2026-08-20T00:00:00+00:00",
-        )
-
-    async def configure_http_server(
-        self, actor_id: str, server_name: str, server_url: str
-    ) -> ClaudeMcpServer:
-        assert actor_id == "7"
-        self.configured = (server_name, server_url)
-        return ClaudeMcpServer(
-            server_name,
-            ClaudeMcpState.NEEDS_AUTH,
-            config_scope=ClaudeMcpConfigScope.USER,
-            removable=True,
-        )
-
-    async def remove_server(self, actor_id: str, server_name: str) -> ClaudeMcpServer:
-        assert actor_id == "7"
-        return ClaudeMcpServer(
-            server_name,
-            ClaudeMcpState.NOT_CONFIGURED,
-            config_scope=ClaudeMcpConfigScope.USER,
-            removable=False,
-        )
-
-    async def start_auth(self, actor_id: str, server_name: str) -> ClaudeMcpOperation:
-        assert actor_id == "7"
-        assert server_name == self.operation.server_name
+    async def shutdown(self): pass
+    async def capability(self, actor):
+        return ClaudeMcpCapability.managed(enabled=True)
+    async def list_servers(self, actor, workspace_id=None):
+        self.calls.append(("list", actor, workspace_id))
+        if workspace_id:
+            return [ClaudeMcpServer.managed(
+                id="server-workspace", name="workspace", display_name="Workspace",
+                transport="stdio", config_scope="workspace", auth_kind="none",
+                enabled=True, revision=1, workspace_id=workspace_id,
+            )]
+        return [self.server]
+    async def get_server(self, actor, identifier, workspace_id=None):
+        self.calls.append(("get", actor, identifier, workspace_id)); return self.server
+    async def create_server(self, actor, create):
+        self.calls.append(("create", actor, create)); return self.server
+    async def update_server(self, actor, identifier, patch):
+        self.calls.append(("update", actor, identifier, patch)); return self.server
+    async def remove_server(self, actor, identifier, expected_revision=None, workspace_id=None):
+        self.calls.append(("delete", actor, identifier, expected_revision));
+        return ClaudeMcpServer.managed(id="server-1", name="alpha", display_name="Alpha", transport="streamable_http", config_scope="user", auth_kind="none", enabled=False, revision=1, state=ClaudeMcpState.NOT_CONFIGURED)
+    async def discover_server(self, actor, identifier, workspace_id=None, force=False):
+        self.calls.append(("discover", actor, identifier, force)); return _discovery(identifier)
+    async def discover_servers(self, actor, ids, workspace_id=None, force=False):
+        self.calls.append(("bulk", actor, tuple(ids), force));
+        return [_discovery(ids[0]), _discovery(ids[1], failed=True)]
+    async def cancel_discovery(self, actor, identifier, workspace_id=None):
+        self.calls.append(("cancel-discovery", actor, identifier)); return True
+    async def start_auth(self, actor, identifier, workspace_id=None): self.calls.append(("auth", actor, identifier, workspace_id)); return self.operation
+    async def get_operation(self, actor, operation_id):
+        if actor != "7": raise ClaudeMcpError(ClaudeMcpErrorCode.OPERATION_NOT_FOUND, "Operation not found.")
         return self.operation
-
-    async def get_operation(self, actor_id: str, operation_id: str) -> ClaudeMcpOperation:
-        if actor_id != "7" or operation_id != self.operation.id:
-            raise ClaudeMcpError(
-                ClaudeMcpErrorCode.OPERATION_NOT_FOUND,
-                "Claude MCP authentication operation was not found.",
-            )
-        return self.operation
-
-    async def submit_redirect(self, actor_id: str, operation_id: str, redirect_url: str) -> ClaudeMcpOperation:
-        assert actor_id == "7" and operation_id == self.operation.id
-        self.redirect_received = redirect_url
-        self.operation.authorization_url = None
-        self.operation.redirect_submitted = True
-        self.operation.state = ClaudeMcpState.EXCHANGING_CODE
-        return self.operation
-
-    async def cancel_auth(self, actor_id: str, operation_id: str) -> ClaudeMcpOperation:
-        assert actor_id == "7" and operation_id == self.operation.id
-        self.operation.state = ClaudeMcpState.FAILED
-        self.operation.authorization_url = None
-        self.operation.error_code = ClaudeMcpErrorCode.AUTH_CANCELLED.value
-        self.operation.error_message = "Claude MCP authentication was cancelled."
-        return self.operation
-
-    async def logout(self, actor_id: str, server_name: str) -> ClaudeMcpServer:
-        assert actor_id == "7"
-        return ClaudeMcpServer(
-            server_name,
-            ClaudeMcpState.LOGGED_OUT,
-            config_scope=ClaudeMcpConfigScope.PLUGIN,
-            removable=False,
-        )
+    async def submit_redirect(self, actor, operation_id, redirect):
+        self.calls.append(("redirect", actor, operation_id)); self.operation.authorization_url = None; return self.operation
+    async def cancel_auth(self, actor, operation_id): self.calls.append(("cancel", actor, operation_id)); return self.operation
+    async def logout(self, actor, identifier, workspace_id=None): self.calls.append(("logout", actor, identifier, workspace_id)); return self.server
 
 
-def _client(service: _Service, *, actor_id: int = 7) -> TestClient:
+def _discovery(server_id: str, failed: bool = False):
+    return McpDiscoveryResult(
+        server_id=server_id,
+        status=McpDiscoveryStatus.FAILED if failed else McpDiscoveryStatus.COMPLETE,
+        config_revision=1, credential_revision=0,
+        tools=(), resources=(), prompts=(), server_info=None,
+        error=McpDiscoveryError("CLAUDE_MCP_PROTOCOL_ERROR", True) if failed else None,
+        discovered_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def _client(service=None, actor_id=7):
+    service = service or _Service()
     app = FastAPI()
     app.include_router(claude_mcp.router)
     app.dependency_overrides[get_current_user] = lambda: {"user_id": actor_id}
     app.dependency_overrides[claude_mcp.get_claude_mcp_service] = lambda: service
-    return TestClient(app)
+    return TestClient(app), service
 
 
-def test_full_api_contract_preserves_colon_name_and_never_returns_redirect_submission() -> None:
-    service = _Service()
-    client = _client(service)
-    server_name = "plugin:comfy-cloud:comfy-cloud"
-    capability = client.get("/api/claude-mcp/capability")
-    assert capability.status_code == 200
-    assert capability.json()["enabled"] is True
-    listed_server = client.get("/api/claude-mcp/servers").json()["servers"][0]
-    assert listed_server["name"] == server_name
-    assert listed_server["config_scope"] == "plugin"
-    assert listed_server["removable"] is False
-
-    inventory = client.get(f"/api/claude-mcp/server-inventories/{server_name}")
-    assert inventory.status_code == 200
-    assert inventory.json()["inventory"]["tools"] == [{
-        "name": "get_job_status",
-        "description": "Read job status",
-        "annotations": {"read_only": True, "destructive": None, "open_world": None},
-    }]
-    assert inventory.json()["inventory"]["capabilities"]["resources"]["status"] == "not_reported"
-
-    configured = client.post(
-        "/api/claude-mcp/servers",
-        json={"name": "user-server", "url": "http://mcp.example.test/api"},
-    )
-    assert configured.status_code == 201
-    assert service.configured == ("user-server", "http://mcp.example.test/api")
-    assert configured.json()["server"]["state"] == "needs_auth"
-    assert configured.json()["server"]["config_scope"] == "user"
-    assert configured.json()["server"]["removable"] is True
-
-    started = client.post(f"/api/claude-mcp/servers/{server_name}/auth-operations")
-    assert started.status_code == 202
-    assert started.json()["operation"]["authorization_url"].startswith("https://oauth.example.test/")
-
-    redirect = "https://callback.example.test/done?code=private&state=private"
-    submitted = client.post(
-        "/api/claude-mcp/auth-operations/operation-1/redirect",
-        json={"redirect_url": redirect},
-    )
-    assert submitted.status_code == 200
-    assert service.redirect_received == redirect
-    assert submitted.json()["operation"]["authorization_url"] is None
-    assert redirect not in submitted.text
-
-    cancelled = client.post("/api/claude-mcp/auth-operations/operation-1/cancel")
-    assert cancelled.status_code == 200
-    assert cancelled.json()["operation"]["error"]["code"] == "CLAUDE_MCP_AUTH_CANCELLED"
-
-    logged_out = client.post(f"/api/claude-mcp/servers/{server_name}/logout")
-    assert logged_out.status_code == 200
-    assert logged_out.json()["server"]["state"] == "logged_out"
-
-    removed = client.delete("/api/claude-mcp/servers/user-server")
-    assert removed.status_code == 200
-    assert removed.json()["server"]["state"] == "not_configured"
+def test_crud_discovery_bulk_and_logout_are_thin_forwarders():
+    client, service = _client()
+    assert client.get("/api/claude-mcp/capability").json()["management_mode"] == "managed_db"
+    assert client.get("/api/claude-mcp/servers").json()["servers"][0]["id"] == "server-1"
+    scoped = client.get("/api/claude-mcp/servers?workspace_id=workspace-1").json()
+    assert scoped["servers"][0]["config_scope"] == "workspace"
+    assert scoped["servers"][0]["state"] == "configured"
+    created = client.post("/api/claude-mcp/servers", json={
+        "name": "alpha", "display_name": "Alpha", "transport": "streamable_http",
+        "url": "https://mcp.example.test/mcp", "scope": "user",
+    })
+    assert created.status_code == 201
+    assert service.calls[-1][2].auth_kind is McpAuthKind.NONE
+    patched = client.patch("/api/claude-mcp/servers/server-1", json={"expected_revision": 1, "enabled": False})
+    assert patched.status_code == 200
+    discovered = client.post("/api/claude-mcp/servers/server-1/discoveries", json={"force": True})
+    assert discovered.status_code == 200
+    assert client.delete("/api/claude-mcp/servers/server-1/discoveries").json()["status"] == "cancelled"
+    bulk = client.post("/api/claude-mcp/discoveries", json={"server_ids": ["server-1", "server-2"], "force": True})
+    assert bulk.json()["status"] == "partial"
+    assert client.delete("/api/claude-mcp/servers/server-1/credential").status_code == 200
+    assert client.delete("/api/claude-mcp/servers/server-1?expected_revision=1").status_code == 200
+    assert {call[0] for call in service.calls} >= {"create", "update", "discover", "cancel-discovery", "bulk", "logout", "delete"}
 
 
-def test_operation_not_found_is_client_safe_and_owner_scoped() -> None:
-    response = _client(_Service(), actor_id=8).get(
-        "/api/claude-mcp/auth-operations/operation-1"
-    )
-    assert response.status_code == 404
-    assert response.json() == {
-        "error": {
-            "code": "CLAUDE_MCP_OPERATION_NOT_FOUND",
-            "message": "Claude MCP authentication operation was not found.",
-        }
-    }
+def test_legacy_create_shape_is_safe_and_stdio_command_is_forbidden():
+    client, service = _client()
+    legacy = client.post("/api/claude-mcp/servers", json={"name": "legacy", "url": "https://mcp.example.test/mcp"})
+    assert legacy.status_code == 201
+    assert service.calls[-1][2].transport.value == "streamable_http"
+    user_selected_auth = client.post("/api/claude-mcp/servers", json={
+        "name": "auth-policy", "url": "https://mcp.example.test/mcp",
+        "auth_kind": "oauth",
+    })
+    assert user_selected_auth.status_code == 422
+    denied = client.post("/api/claude-mcp/servers", json={
+        "name": "unsafe", "transport": "stdio", "stdio_profile_key": "safe", "command": "sh",
+    })
+    assert denied.status_code == 422
+
+
+def test_oauth_redirect_and_owner_error_never_echo_secret():
+    client, _ = _client()
+    assert client.post("/api/claude-mcp/servers/server-1/auth-operations").status_code == 202
+    secret = "https://callback.example.test/?code=private-code&state=private-state"
+    redirected = client.post("/api/claude-mcp/auth-operations/operation-1/redirect", json={"redirect_url": secret})
+    assert redirected.status_code == 200 and secret not in redirected.text and "private-code" not in redirected.text
+    foreign, _ = _client(actor_id=8)
+    missing = foreign.get("/api/claude-mcp/auth-operations/operation-1")
+    assert missing.status_code == 404 and "Operation not found" in missing.text

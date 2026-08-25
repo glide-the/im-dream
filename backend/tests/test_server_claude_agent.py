@@ -17,6 +17,7 @@
 # [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
 #                    the Claude Agent factory starts.
 # [Sync] 2026-08-24: cover credential-free SDK/CLI startup identity logging.
+# [Sync] 2026-08-25: align MCP auth route registration with database server identifiers.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -397,7 +398,7 @@ class TestClaudeMcpRouteRegistration(unittest.TestCase):
         self.assertTrue(
             self._has_route(
                 "POST",
-                "/api/claude-mcp/servers/{server_name:path}/auth-operations",
+                "/api/claude-mcp/servers/{identifier}/auth-operations",
             )
         )
 

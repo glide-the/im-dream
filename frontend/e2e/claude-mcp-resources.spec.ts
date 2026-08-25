@@ -1,5 +1,5 @@
 // [Input] Running frontend entry point plus production-shaped intercepted Claude MCP and boot API fixtures.
-// [Output] Verify Resources → Configure → required OAuth → Authenticated → 41-tool detail/search/risk → Logout → Remove with zero secret persistence.
+// [Output] Verify managed-DB Resources → Configure → OAuth → explicit inventory → revision-aware Update → Logout → Remove with zero secret persistence.
 // [Pos] Provider-free Claude MCP browser journey; it never calls a real OAuth provider, CLI, backend, or business database.
 // [Sync] 2026-08-19: cover the complete visible v1 connector journey and responsive layout.
 // [Sync] 2026-08-19: cover restricted HTTP(S) configuration and user-owned removal before real-provider QA.
@@ -8,27 +8,85 @@
 // [Sync] 2026-08-24: accept the production shell's authenticated session autosave
 //                    without weakening the strict unexpected-request audit.
 // [Sync] 2026-08-25: model Runtime-authored anonymous/required/authenticated states and the renamed Chinese logout action.
+// [Sync] 2026-08-25: use managed-DB DTOs and explicit POST discovery; no CLI-shaped list/get/inventory fixture remains.
+// [Sync] 2026-08-25: cover detail-page PATCH and CAS revision propagation before delete.
+// [Sync] 2026-08-25: prove auth_kind is absent from forms and CRUD payloads; backend fixtures own classification.
+// [Sync] 2026-08-25: require discovery evidence before OAuth appears and carry its CAS revision into later edits.
+// [Sync] 2026-08-25: prove the MCP OAuth callback stays on the SPA, submits automatically, and never renders or stores its code/state.
 
-import { expect, test, type Request as PlaywrightRequest } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
 
 test.use({ channel: 'chromium' });
 
+test('MCP OAuth callback submits automatically and keeps secrets out of page content and storage', async ({ page }) => {
+  const backendCallbackRequests: string[] = [];
+  let submittedRedirect: string | null = null;
+  await page.context().route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (!path.startsWith('/api/')) {
+      await route.continue();
+      return;
+    }
+    if (route.request().method() === 'POST'
+      && path === '/api/claude-mcp/auth-operations/operation-auto/redirect') {
+      submittedRedirect = (route.request().postDataJSON() as { redirect_url: string }).redirect_url;
+      await route.fulfill({
+        json: {
+          operation: {
+            id: 'operation-auto',
+            server_name: 'automatic-oauth',
+            state: 'exchanging_code',
+            authorization_url: null,
+            error: null,
+            redirect_submitted: true,
+            created_at: '2026-08-25T00:00:00Z',
+            updated_at: '2026-08-25T00:00:01Z',
+          },
+        },
+      });
+      return;
+    }
+    await route.fulfill({ status: 401, json: { detail: 'Not authenticated' } });
+  });
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === '/oauth/callback' && request.resourceType() !== 'document') {
+      backendCallbackRequests.push(request.url());
+    }
+  });
+
+  await page.addInitScript(() => {
+    localStorage.setItem('auth_token', 'callback-technical-token');
+    localStorage.setItem('ink-memory:claude-mcp:pending-oauth-operation', 'operation-auto');
+  });
+
+  await page.goto(`${WEB_BASE}/oauth/callback?code=private-code&state=private-state`);
+
+  await expect(page.getByRole('heading', { name: 'MCP 授权已自动提交' })).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('private-code');
+  await expect(page.locator('body')).not.toContainText('private-state');
+  expect(submittedRedirect).toContain('code=private-code');
+  expect(await page.evaluate(() => Object.values(localStorage).every((value) => !value.includes('private-code')))).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem('ink-memory:claude-mcp:pending-oauth-operation'))).toBeNull();
+  expect(backendCallbackRequests).toEqual([]);
+});
+
 test('Resources completes the provider-free Claude MCP login and logout journey', async ({ page }) => {
   const token = 'claude-mcp-resources-technical-token';
   const serverName = 'e2e-user-server';
-  const projectServerName = 'project-readonly-server';
   const serverUrl = 'http://mcp.example.test/api';
-  const redirectUrl = 'https://callback.example.test/done?code=private-code&state=private-state';
-  const mcpRequests: PlaywrightRequest[] = [];
+  const mcpRequests: Array<{ method: string; headers: Record<string, string> }> = [];
   const unexpectedApiRequests: string[] = [];
   const diagnostics: string[] = [];
-  let serverState: 'needs_auth' | 'connected' | 'logged_out' = 'needs_auth';
+  let serverState: 'configured' | 'needs_auth' | 'connected' | 'logged_out' = 'configured';
   let operationState: 'waiting_for_user' | 'exchanging_code' | 'connected' = 'waiting_for_user';
   let operationActive = false;
   let submittedRedirect: string | null = null;
   let configured = false;
+  let serverRevision = 1;
+  let serverDisplayName = serverName;
 
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().includes('react-grab.com')) {
@@ -42,17 +100,20 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
       diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${url}`);
     }
   });
-  page.on('request', (request) => {
-    if (request.url().includes('/api/claude-mcp/')) mcpRequests.push(request);
+  page.context().on('request', (request) => {
+    if (request.url().includes('/api/claude-mcp/')) {
+      mcpRequests.push({ method: request.method(), headers: request.headers() });
+    }
   });
 
   await page.context().route('https://oauth.example.test/**', async (route) => {
+    const automaticCallback = `${WEB_BASE}/oauth/callback?code=private-code&state=private-state`;
     await route.fulfill({
       contentType: 'text/html',
-      body: '<!doctype html><title>Fake OAuth Provider</title><h1>Authorization complete</h1>',
+      body: `<!doctype html><title>Fake OAuth Provider</title><h1>Authorization complete</h1><script>location.replace(${JSON.stringify(automaticCallback)})</script>`,
     });
   });
-  await page.route('**/api/**', async (route) => {
+  await page.context().route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = decodeURIComponent(url.pathname);
@@ -75,10 +136,14 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
         json: {
           enabled: true,
           reason_code: null,
-          cli_version: '2.1.235',
-          minimum_cli_version: '2.1.186',
-          headless_minimum_cli_version: '2.1.191',
-          credential_identity: 'technical-agent-identity',
+          cli_version: null,
+          minimum_cli_version: null,
+          headless_minimum_cli_version: null,
+          credential_identity: null,
+          management_mode: 'managed_db',
+          schema_capability: 'dream.managed-mcp-resources.v1',
+          schema_version: 1,
+          transports: ['streamable_http', 'sse', 'stdio'],
         },
       });
       return;
@@ -86,24 +151,26 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
     if (method === 'GET' && path === '/api/claude-mcp/servers') {
       await route.fulfill({
         json: {
-          servers: [{
-            name: projectServerName,
-            state: 'configured',
-            auth_state: 'unknown',
-            transport: 'http',
-            detail: null,
-            active_operation_id: null,
-            config_scope: 'project',
-            removable: false,
-          }, ...(configured ? [{
+          servers: [...(configured ? [{
             name: serverName,
             state: serverState,
-            auth_state: serverState === 'connected' ? 'authenticated' : 'required',
-            transport: 'http',
+            auth_state: serverState === 'connected' ? 'authenticated' : serverState === 'configured' ? 'unknown' : 'required',
+            transport: 'streamable_http',
             detail: null,
             active_operation_id: operationActive ? 'operation-1' : null,
             config_scope: 'user',
             removable: true,
+            id: 'server-1',
+            display_name: serverDisplayName,
+            auth_kind: serverState === 'configured' ? 'none' : 'oauth',
+            enabled: true,
+            revision: serverRevision,
+            credential_revision: serverState === 'connected' ? 1 : 0,
+            credential_ref: serverState === 'connected' ? 'credential-1' : null,
+            credential_configured: serverState === 'connected',
+            workspace_id: null,
+            url: serverUrl,
+            stdio_profile_key: null,
           }] : [])],
         },
       });
@@ -115,18 +182,53 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
           server: {
             name: serverName,
             state: serverState,
-            auth_state: serverState === 'connected' ? 'authenticated' : 'required',
-            transport: 'http',
+            auth_state: serverState === 'connected' ? 'authenticated' : serverState === 'configured' ? 'unknown' : 'required',
+            transport: 'streamable_http',
             detail: null,
             active_operation_id: operationActive ? 'operation-1' : null,
             config_scope: 'user',
             removable: true,
+            id: 'server-1',
+            display_name: serverDisplayName,
+            auth_kind: serverState === 'configured' ? 'none' : 'oauth',
+            enabled: true,
+            revision: serverRevision,
+            credential_revision: serverState === 'connected' ? 1 : 0,
+            credential_ref: serverState === 'connected' ? 'credential-1' : null,
+            credential_configured: serverState === 'connected',
+            workspace_id: null,
+            url: serverUrl,
+            stdio_profile_key: null,
           },
         },
       });
       return;
     }
-    if (method === 'GET' && path === `/api/claude-mcp/server-inventories/${serverName}`) {
+    if (method === 'POST' && path === `/api/claude-mcp/servers/${serverName}/discoveries`) {
+      expect(request.postDataJSON()).toEqual({ force: true });
+      if (serverState === 'configured') {
+        serverState = 'needs_auth';
+        serverRevision = 2;
+        await route.fulfill({
+          json: {
+            discovery: {
+              server_id: 'server-1',
+              status: 'failed',
+              config_revision: serverRevision,
+              credential_revision: 0,
+              server_info: null,
+              tools: [],
+              resources: [],
+              prompts: [],
+              error: { code: 'CLAUDE_MCP_CREDENTIAL_REQUIRED', retryable: false, trace_id: 'trace-auth-required' },
+              discovered_at: '2026-08-25T00:00:00Z',
+              cached: false,
+              truncated: false,
+            },
+          },
+        });
+        return;
+      }
       const tools = [
         { name: 'submit_workflow', description: 'Submit a workflow', annotations: { read_only: null, destructive: true, open_world: null } },
         { name: 'get_job_status', description: 'Read job status', annotations: { read_only: true, destructive: null, open_world: null } },
@@ -141,44 +243,91 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
       ];
       await route.fulfill({
         json: {
-          inventory: {
-            server_name: serverName,
-            status: 'connected',
-            config_scope: 'user',
-            runtime_scope: 'dynamic',
-            transport: 'http',
-            url: serverUrl,
+          discovery: {
+            server_id: 'server-1',
+            status: 'complete',
+            config_revision: serverRevision,
+            credential_revision: 1,
             server_info: { name: 'Technical MCP', version: '1.0.0' },
             tools,
-            tool_count: 41,
-            tools_truncated: false,
-            capabilities: {
-              tools: { status: 'available', count: 41 },
-              resources: { status: 'not_reported', count: null },
-              prompts: { status: 'not_reported', count: null },
-            },
-            refreshed_at: '2026-08-20T00:00:00Z',
+            resources: [{ uri: 'https://mcp.example.test/resources/readme', name: 'README', description: 'Read-only resource', mime_type: 'text/markdown' }],
+            prompts: [{ name: 'inspect_workflow', description: 'Inspect without mutation', argument_count: 1 }],
+            error: null,
+            discovered_at: '2026-08-25T00:00:00Z',
+            cached: false,
+            truncated: false,
           },
         },
       });
       return;
     }
     if (method === 'POST' && path === '/api/claude-mcp/servers') {
-      const payload = request.postDataJSON() as { name: string; url: string };
-      expect(payload).toEqual({ name: serverName, url: serverUrl });
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      expect(payload).toEqual({
+        name: serverName,
+        display_name: serverName,
+        transport: 'streamable_http',
+        scope: 'user',
+        url: serverUrl,
+        stdio_profile_key: null,
+      });
       configured = true;
       await route.fulfill({
         status: 201,
         json: {
           server: {
             name: serverName,
-            state: 'needs_auth',
-            auth_state: 'required',
-            transport: 'http',
+            state: 'configured',
+            auth_state: 'unknown',
+            transport: 'streamable_http',
             detail: null,
             active_operation_id: null,
             config_scope: 'user',
             removable: true,
+            id: 'server-1', display_name: serverName, auth_kind: 'none', enabled: true,
+            revision: 1, credential_revision: 0, credential_ref: null,
+            credential_configured: false, workspace_id: null, url: serverUrl,
+            stdio_profile_key: null,
+          },
+        },
+      });
+      return;
+    }
+    if (method === 'PATCH' && path === '/api/claude-mcp/servers/server-1') {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      expect(payload).toEqual({
+        expected_revision: 2,
+        display_name: 'Edited MCP Server',
+        transport: 'streamable_http',
+        workspace_id: null,
+        url: serverUrl,
+        stdio_profile_key: null,
+        enabled: true,
+      });
+      serverRevision = 3;
+      serverDisplayName = 'Edited MCP Server';
+      await route.fulfill({
+        json: {
+          server: {
+            name: serverName,
+            state: serverState,
+            auth_state: 'authenticated',
+            transport: 'streamable_http',
+            detail: null,
+            active_operation_id: null,
+            config_scope: 'user',
+            removable: true,
+            id: 'server-1',
+            display_name: serverDisplayName,
+            auth_kind: 'oauth',
+            enabled: true,
+            revision: serverRevision,
+            credential_revision: 1,
+            credential_ref: 'credential-1',
+            credential_configured: true,
+            workspace_id: null,
+            url: serverUrl,
+            stdio_profile_key: null,
           },
         },
       });
@@ -206,7 +355,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
       await route.fulfill({ json: { operation: operationPayload(operationState) } });
       return;
     }
-    if (method === 'POST' && path === `/api/claude-mcp/servers/${serverName}/logout`) {
+    if (method === 'DELETE' && path === `/api/claude-mcp/servers/${serverName}/credential`) {
       serverState = 'logged_out';
       await route.fulfill({
         json: {
@@ -224,7 +373,8 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
       });
       return;
     }
-    if (method === 'DELETE' && path === `/api/claude-mcp/servers/${serverName}`) {
+    if (method === 'DELETE' && path === '/api/claude-mcp/servers/server-1') {
+      expect(url.searchParams.get('expected_revision')).toBe('3');
       configured = false;
       await route.fulfill({
         json: {
@@ -311,37 +461,36 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
 
   await expect(page.getByRole('heading', { name: '资源链接', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
-  const projectCard = page.getByRole('article', { name: `MCP 服务 ${projectServerName}` });
-  await expect(projectCard).toContainText('共享项目配置');
-  await expect(projectCard).toContainText('请从共享项目配置来源管理');
-  await expect(projectCard.getByRole('button', { name: '移除' })).toHaveCount(0);
+  await expect(page.getByLabel('MCP 认证方式')).toHaveCount(0);
+  await expect(page.getByText('认证要求由 Dream 连接 Server 后自动判断')).toBeVisible();
   await page.getByLabel('MCP 服务名称').fill(serverName);
   await page.getByLabel('MCP 服务 URL').fill(serverUrl);
   await page.getByRole('button', { name: '添加 MCP 服务' }).click();
   const serverCard = page.getByRole('article', { name: `MCP 服务 ${serverName}` });
   await expect(serverCard).toBeVisible();
-  await expect(serverCard).toContainText('需要认证');
+  await expect(serverCard).toContainText('已配置');
+  await expect(serverCard.getByRole('button', { name: '开始认证' })).toHaveCount(0);
+  await serverCard.getByRole('button', { name: '管理与工具' }).click();
+  await expect(page).toHaveURL(new RegExp(`mcp-server=${serverName}`));
+  await page.getByRole('button', { name: '刷新 inventory' }).first().click();
+  await expect(page.getByText('需要认证', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('user · revision 2', { exact: true })).toBeVisible();
 
-  await serverCard.getByRole('button', { name: '开始认证' }).click();
-  await expect(serverCard).toContainText('等待授权');
-  const authorizationLink = serverCard.getByRole('link', { name: '打开授权页面' });
+  await page.getByRole('button', { name: '开始认证' }).click();
+  await expect(page.getByText('等待授权', { exact: true }).first()).toBeVisible();
+  const authorizationLink = page.getByRole('link', { name: '打开授权页面' });
   await expect(authorizationLink).toHaveAttribute('href', /oauth\.example\.test\/authorize/);
   const popupPromise = page.waitForEvent('popup');
   await authorizationLink.click();
   const popup = await popupPromise;
-  await expect(popup.getByRole('heading', { name: 'Authorization complete' })).toBeVisible();
-  await popup.close();
-
-  const redirectInput = serverCard.getByLabel(`${serverName} redirect URL`);
-  await redirectInput.fill(redirectUrl);
-  await serverCard.getByRole('button', { name: '提交并连接' }).click();
-  expect(submittedRedirect).toBe(redirectUrl);
-  await expect(serverCard).toContainText('已认证', { timeout: 5000 });
+  await popup.waitForEvent('close');
+  expect(submittedRedirect).toContain('code=private-code');
+  await expect(page.getByText('已认证连接', { exact: true }).first()).toBeVisible({ timeout: 5000 });
   expect(await page.evaluate((secret) => Object.values(localStorage).every((value) => !value.includes(secret)), 'private-code')).toBe(true);
 
-  await serverCard.getByRole('button', { name: '管理与工具' }).click();
-  await expect(page).toHaveURL(new RegExp(`mcp-server=${serverName}`));
   await expect(page.getByRole('heading', { name: `${serverName} MCP Server` })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Tools —' })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('button', { name: '刷新 inventory' }).first().click();
   await expect(page.getByRole('tab', { name: 'Tools 41' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText(serverUrl, { exact: true })).toBeVisible();
   await page.getByRole('searchbox', { name: '搜索 MCP 工具' }).fill('submit_workflow');
@@ -351,10 +500,17 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await page.getByRole('combobox', { name: '筛选 MCP 工具风险' }).selectOption('read_only');
   await expect(page.getByRole('article', { name: 'MCP 工具 get_job_status' })).toContainText('只读');
   await expect(page.getByRole('article', { name: 'MCP 工具 submit_workflow' })).toHaveCount(0);
-  await page.getByRole('tab', { name: 'Resources —' }).click();
-  await expect(page.getByText(/公开的 get_mcp_status\(\) 契约不返回 Resources 清单/)).toBeVisible();
+  await page.getByRole('tab', { name: 'Resources 1' }).click();
+  await expect(page.getByText('README', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Prompts 1' }).click();
+  await expect(page.getByText('inspect_workflow', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Tools 41' }).click();
   await page.getByRole('combobox', { name: '筛选 MCP 工具风险' }).selectOption('all');
+  await page.getByRole('button', { name: '编辑配置' }).click();
+  const editForm = page.getByRole('form', { name: '编辑 MCP Server 配置' });
+  await editForm.getByLabel('显示名称').fill('Edited MCP Server');
+  await editForm.getByRole('button', { name: '保存配置' }).click();
+  await expect(page.getByText('user · revision 3', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 760 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
   await page.screenshot({ fullPage: true, path: 'output/playwright/claude-mcp-detail-narrow.png' });
@@ -365,7 +521,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
 
   await serverCard.getByRole('button', { name: '退出认证' }).click();
   await expect(serverCard).toContainText('已退出');
-  await expect(serverCard.getByRole('button', { name: '检测连接' })).toBeVisible();
+  await expect(serverCard.getByRole('button', { name: '刷新数据库状态' })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 760 });
   await expect(serverCard).toBeVisible();
@@ -374,12 +530,11 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
 
   await serverCard.getByRole('button', { name: '移除' }).click();
   await expect(serverCard).toHaveCount(0);
-  await expect(projectCard).toBeVisible();
 
-  const mcpHeaders = await Promise.all(mcpRequests.map((request) => request.allHeaders()));
+  const mcpHeaders = mcpRequests.map((request) => request.headers);
   expect(mcpHeaders.length).toBeGreaterThanOrEqual(6);
   expect(mcpHeaders.every((headers) => headers.authorization === `Bearer ${token}`)).toBe(true);
-  expect(mcpRequests.filter((request) => request.method() !== 'GET')).toHaveLength(5);
+  expect(mcpRequests.filter((request) => request.method !== 'GET')).toHaveLength(8);
   expect(unexpectedApiRequests).toEqual([]);
   expect(diagnostics).toEqual([]);
 

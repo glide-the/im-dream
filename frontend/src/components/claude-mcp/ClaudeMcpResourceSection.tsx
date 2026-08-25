@@ -1,11 +1,14 @@
-// [Input] Claude MCP API capability/configuration/server/operation DTOs and shared design tokens/icons.
-// [Output] Runtime-gated HTTP(S) discovery, anonymous/authenticated feedback, detail navigation, browser OAuth handoff, recovery, logout, and removal UI.
+// [Input] Database-managed Claude MCP capability/CRUD/server/operation DTOs and shared design tokens/icons.
+// [Output] Fast DB-backed server list, transport-safe create form, detail navigation, OAuth handoff, logout, and removal UI.
 // [Pos] `claude-mcp` feature surface embedded by the Settings Resources page.
 // [Sync] 2026-08-19: add the reviewed minimal MCP resource connector interaction.
 // [Sync] 2026-08-19: enable user-owned HTTPS add/remove and correct the cross-platform capability message.
 // [Sync] 2026-08-20: add the Notion-style server detail handoff for tool inventory and metadata.
 // [Sync] 2026-08-21: accept absolute HTTP(S) URLs and remove only backend-confirmed user-scope servers.
 // [Sync] 2026-08-25: gate authentication actions on authoritative connection/auth state, expose anonymous connectivity, and let backend removability govern every non-active server.
+// [Sync] 2026-08-25: decouple list from discovery and expose managed HTTP/SSE/stdio-profile creation.
+// [Sync] 2026-08-25: remove user-selected authentication; backend discovery alone classifies anonymous versus OAuth-required Servers.
+// [Sync] 2026-08-25: replace redirect URL copy/paste with same-origin automatic SPA callback submission.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -17,7 +20,6 @@ import {
   logoutClaudeMcpServer,
   removeClaudeMcpServer,
   startClaudeMcpAuth,
-  submitClaudeMcpRedirect,
   ClaudeMcpApiError,
   type ClaudeMcpCapability,
   type ClaudeMcpAuthState,
@@ -26,6 +28,10 @@ import {
   type ClaudeMcpServer,
   type ClaudeMcpState,
 } from '../../api/claudeMcpApi';
+import {
+  forgetClaudeMcpOAuthOperation,
+  rememberClaudeMcpOAuthOperation,
+} from './oauthHandoff';
 import { IconCheck, IconChevronRight, IconDatabase, IconLoader, IconX } from '../chat/Icons';
 
 const OPERATION_POLL_INTERVAL_MS = 1200;
@@ -52,6 +58,7 @@ const STATE_LABELS: Record<ClaudeMcpState, string> = {
 
 const SCOPE_LABELS: Record<ClaudeMcpConfigScope, string> = {
   user: '用户配置',
+  workspace: '工作空间配置',
   local: '本地项目配置',
   project: '共享项目配置',
   plugin: '插件配置',
@@ -76,13 +83,12 @@ function serverStatusLabel(server: ClaudeMcpServer, state: ClaudeMcpState): stri
 }
 
 function canStartAuth(server: ClaudeMcpServer, state: ClaudeMcpState): boolean {
-  const authState = authStateOf(server);
-  return (state === 'needs_auth' && authState === 'required')
-    || (state === 'connected' && (authState === 'anonymous' || authState === 'authenticated'));
+  return state === 'needs_auth' && authStateOf(server) === 'required';
 }
 
 function canLogout(server: ClaudeMcpServer, state: ClaudeMcpState): boolean {
   const authState = authStateOf(server);
+  if (server.credential_configured) return true;
   return state === 'connected' && (authState === 'authenticated' || authState === 'unknown');
 }
 
@@ -119,13 +125,10 @@ function actionButton(primary = false): React.CSSProperties {
 }
 
 function messageForCapability(capability: ClaudeMcpCapability): string {
-  if (capability.reason_code === 'CLAUDE_MCP_CLI_VERSION_UNSUPPORTED') {
-    return `Claude Code 版本不满足 headless OAuth 要求（最低 ${capability.headless_minimum_cli_version}）。`;
+  if (capability.reason_code === 'CLAUDE_MCP_SCHEMA_CAPABILITY_MISSING') {
+    return '当前 PostgreSQL 尚未发布 Dream MCP 管理 capability；请先应用 Admin Drizzle 0038 前向迁移。';
   }
-  if (capability.reason_code === 'CLAUDE_MCP_IDENTITY_UNAVAILABLE') {
-    return '当前后端进程无法访问与 Claude Agent 相同的用户级凭证存储；请检查 CLI 路径、系统用户与 macOS Keychain / Linux 文件权限。';
-  }
-  return 'Claude MCP 能力暂不可用，请检查 CLI 与运行身份配置。';
+  return 'Dream MCP 管理能力暂不可用，请检查数据库 capability 与服务策略。';
 }
 
 function operationFor(
@@ -151,11 +154,12 @@ export default function ClaudeMcpResourceSection({
   const [capability, setCapability] = useState<ClaudeMcpCapability | null>(null);
   const [servers, setServers] = useState<ClaudeMcpServer[]>([]);
   const [operations, setOperations] = useState<Record<string, ClaudeMcpOperation>>({});
-  const [redirects, setRedirects] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [busyServer, setBusyServer] = useState<string | null>(null);
   const [serverName, setServerName] = useState('');
   const [serverUrl, setServerUrl] = useState('');
+  const [serverTransport, setServerTransport] = useState<'streamable_http' | 'sse' | 'stdio'>('streamable_http');
+  const [stdioProfileKey, setStdioProfileKey] = useState('');
   const [configuring, setConfiguring] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -163,13 +167,19 @@ export default function ClaudeMcpResourceSection({
     setLoading(true);
     setError(null);
     try {
-      const nextCapability = await getClaudeMcpCapability();
+      const [capabilityResult, serversResult] = await Promise.allSettled([
+        getClaudeMcpCapability(),
+        listClaudeMcpServers(),
+      ]);
+      if (capabilityResult.status === 'rejected') throw capabilityResult.reason;
+      const nextCapability = capabilityResult.value;
       setCapability(nextCapability);
       if (!nextCapability.enabled) {
         setServers([]);
         return;
       }
-      const nextServers = await listClaudeMcpServers();
+      if (serversResult.status === 'rejected') throw serversResult.reason;
+      const nextServers = serversResult.value;
       setServers(nextServers);
       const activeIds = nextServers
         .map((server) => server.active_operation_id)
@@ -207,6 +217,9 @@ export default function ClaudeMcpResourceSection({
             ...Object.fromEntries(items.map((operation) => [operation.id, operation])),
           }));
           if (items.some((item) => !ACTIVE_STATES.includes(item.state))) {
+            items
+              .filter((item) => !ACTIVE_STATES.includes(item.state))
+              .forEach((item) => forgetClaudeMcpOAuthOperation(item.id));
             void load();
           }
         })
@@ -223,6 +236,10 @@ export default function ClaudeMcpResourceSection({
     setError(null);
     try {
       const operation = await startClaudeMcpAuth(server.name);
+      if (!rememberClaudeMcpOAuthOperation(operation.id)) {
+        await cancelClaudeMcpAuth(operation.id);
+        throw new Error('browser operation handoff unavailable');
+      }
       setOperations((current) => ({ ...current, [operation.id]: operation }));
     } catch (cause) {
       setError(safeApiErrorMessage(cause, '认证启动失败'));
@@ -234,43 +251,35 @@ export default function ClaudeMcpResourceSection({
   const configure = async () => {
     const name = serverName.trim();
     const url = serverUrl.trim();
-    if (!name || !url) {
-      setError('请填写 MCP 服务名称和完整 HTTP 或 HTTPS URL。');
+    const profileKey = stdioProfileKey.trim();
+    if (!name || (serverTransport === 'stdio' ? !profileKey : !url)) {
+      setError(serverTransport === 'stdio'
+        ? '请填写 MCP 服务名称并选择服务端 stdio profile。'
+        : '请填写 MCP 服务名称和完整 HTTP 或 HTTPS URL。');
       return;
     }
     setConfiguring(true);
     setError(null);
     try {
-      const next = await configureClaudeMcpServer(name, url);
+      const next = await configureClaudeMcpServer(
+        name,
+        serverTransport === 'stdio' ? null : url,
+        {
+          transport: serverTransport,
+          stdioProfileKey: serverTransport === 'stdio' ? profileKey : null,
+        },
+      );
       setServers((current) => [
         ...current.filter((server) => server.name !== next.name),
         next,
       ]);
       setServerName('');
       setServerUrl('');
+      setStdioProfileKey('');
     } catch (cause) {
       setError(safeApiErrorMessage(cause, 'MCP 服务配置失败'));
     } finally {
       setConfiguring(false);
-    }
-  };
-
-  const submit = async (operation: ClaudeMcpOperation) => {
-    const redirectUrl = redirects[operation.id]?.trim();
-    if (!redirectUrl) {
-      setError('请粘贴浏览器授权完成后的完整 redirect URL。');
-      return;
-    }
-    setBusyServer(operation.server_name);
-    setError(null);
-    try {
-      const next = await submitClaudeMcpRedirect(operation.id, redirectUrl);
-      setOperations((current) => ({ ...current, [next.id]: next }));
-      setRedirects((current) => ({ ...current, [operation.id]: '' }));
-    } catch (cause) {
-      setError(safeApiErrorMessage(cause, 'redirect URL 提交失败'));
-    } finally {
-      setBusyServer(null);
     }
   };
 
@@ -280,7 +289,7 @@ export default function ClaudeMcpResourceSection({
     try {
       const next = await cancelClaudeMcpAuth(operation.id);
       setOperations((current) => ({ ...current, [next.id]: next }));
-      setRedirects((current) => ({ ...current, [operation.id]: '' }));
+      forgetClaudeMcpOAuthOperation(operation.id);
       await load();
     } catch (cause) {
       setError(safeApiErrorMessage(cause, '认证取消失败'));
@@ -328,7 +337,7 @@ export default function ClaudeMcpResourceSection({
           Claude MCP 资源
         </h3>
         <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-          发现 Claude Code 已配置的 MCP 服务；Runtime 会先检测连接，仅在服务明确要求或你主动尝试时进入浏览器授权。
+          Server 列表直接读取 Dream 数据库，不等待远端连接；进入详情后可显式并行刷新 Tools、Resources 与 Prompts。
         </p>
       </div>
 
@@ -356,12 +365,12 @@ export default function ClaudeMcpResourceSection({
           style={{ border: '1px solid var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', background: 'var(--color-bg-surface)', display: 'grid', gap: '0.68rem' }}
         >
           <div>
-            <strong style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>添加远程 MCP 服务</strong>
+            <strong style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>添加 MCP 服务</strong>
             <p style={{ margin: '0.22rem 0 0', fontSize: '0.73rem', lineHeight: 1.5, color: 'var(--color-text-secondary)' }}>
-              接受完整 HTTP 或 HTTPS 服务地址；添加后会检测匿名连接，需要 OAuth 时再由 Claude Code 的用户级安全存储管理凭证。
+              HTTP/SSE 只保存安全 URL；stdio 只能引用服务端批准的 profile，不接受浏览器命令、参数或环境变量。
             </p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 0.7fr) minmax(12rem, 1.3fr)', gap: '0.55rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 0.8fr) minmax(8rem, 0.65fr) minmax(12rem, 1.3fr)', gap: '0.55rem' }}>
             <label style={{ display: 'grid', gap: '0.3rem', fontSize: '0.73rem', color: 'var(--color-text-secondary)' }}>
               MCP 服务名称
               <input
@@ -369,28 +378,46 @@ export default function ClaudeMcpResourceSection({
                 value={serverName}
                 onChange={(event) => setServerName(event.target.value)}
                 autoComplete="off"
-                maxLength={512}
+                maxLength={128}
                 required
                 placeholder="例如 comfy-cloud"
                 style={{ border: '1px solid var(--color-border-paper)', borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem', minWidth: 0 }}
               />
             </label>
             <label style={{ display: 'grid', gap: '0.3rem', fontSize: '0.73rem', color: 'var(--color-text-secondary)' }}>
-              MCP 服务 URL
+              传输方式
+              <select
+                aria-label="MCP 传输方式"
+                value={serverTransport}
+                onChange={(event) => setServerTransport(event.target.value as typeof serverTransport)}
+                style={{ border: '1px solid var(--color-border-paper)', borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem', minWidth: 0 }}
+              >
+                <option value="streamable_http">Streamable HTTP</option>
+                <option value="sse">Legacy SSE</option>
+                <option value="stdio">stdio profile</option>
+              </select>
+            </label>
+            <label style={{ display: 'grid', gap: '0.3rem', fontSize: '0.73rem', color: 'var(--color-text-secondary)' }}>
+              {serverTransport === 'stdio' ? '服务端 profile key' : 'MCP 服务 URL'}
               <input
-                aria-label="MCP 服务 URL"
-                type="url"
-                value={serverUrl}
-                onChange={(event) => setServerUrl(event.target.value)}
+                aria-label={serverTransport === 'stdio' ? 'MCP stdio profile key' : 'MCP 服务 URL'}
+                type={serverTransport === 'stdio' ? 'text' : 'url'}
+                value={serverTransport === 'stdio' ? stdioProfileKey : serverUrl}
+                onChange={(event) => serverTransport === 'stdio'
+                  ? setStdioProfileKey(event.target.value)
+                  : setServerUrl(event.target.value)}
                 autoComplete="off"
                 spellCheck={false}
-                maxLength={2048}
+                maxLength={serverTransport === 'stdio' ? 128 : 2048}
                 required
-                placeholder="https://mcp.example.com/api 或 http://host/mcp"
+                placeholder={serverTransport === 'stdio' ? '例如 local-files-readonly' : 'https://mcp.example.com/mcp'}
                 style={{ border: '1px solid var(--color-border-paper)', borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem', minWidth: 0 }}
               />
             </label>
           </div>
+          <p style={{ margin: 0, fontSize: '0.72rem', lineHeight: 1.5, color: 'var(--color-text-muted)' }}>
+            认证要求由 Dream 连接 Server 后自动判断；无需选择无认证或 OAuth。
+          </p>
           <div>
             <button type="submit" disabled={configuring} style={actionButton(true)}>
               {configuring ? '正在添加…' : '添加 MCP 服务'}
@@ -401,7 +428,7 @@ export default function ClaudeMcpResourceSection({
 
       {capability?.enabled && !loading && servers.length === 0 ? (
         <div style={{ border: '1px dashed var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-          尚未配置 MCP 服务。添加 HTTP(S) 服务后将先检测连接；只有服务明确要求时才会提供 OAuth 认证。
+          尚未配置 MCP 服务。添加后列表会立即从数据库返回；远端 inventory 仅在详情页显式刷新。
         </div>
       ) : null}
 
@@ -411,7 +438,6 @@ export default function ClaudeMcpResourceSection({
           const state = operation && ACTIVE_STATES.includes(operation.state)
             ? operation.state
             : server.state;
-          const isBusy = busyServer === server.name || ACTIVE_STATES.includes(state);
           return (
             <article key={server.name} aria-label={`MCP 服务 ${server.name}`} style={{ border: '1px solid var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', background: 'var(--color-bg-surface-solid)', display: 'grid', gap: '0.72rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.8rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -463,7 +489,7 @@ export default function ClaudeMcpResourceSection({
                   ) : null}
                   {canDetectConnection(server, state) && !ACTIVE_STATES.includes(state) ? (
                     <button type="button" onClick={() => void load()} disabled={loading || busyServer === server.name} style={actionButton(state === 'failed')}>
-                      {state === 'failed' ? '重试状态探测' : '检测连接'}
+                      刷新数据库状态
                     </button>
                   ) : null}
                   {operation && ACTIVE_STATES.includes(operation.state) ? (
@@ -487,30 +513,12 @@ export default function ClaudeMcpResourceSection({
               {operation?.state === 'waiting_for_user' ? (
                 <div style={{ display: 'grid', gap: '0.55rem', paddingTop: '0.68rem', borderTop: '1px solid var(--color-border-paper)' }}>
                   <p style={{ margin: 0, fontSize: '0.76rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-                    先在浏览器完成授权，再粘贴最终跳转后的完整 URL。URL 只写入当前 CLI 进程，不会保存到浏览器或数据库。
+                    在浏览器完成授权后会自动回到 Dream；无需复制或粘贴 redirect URL。Token 仅加密存入专用凭据表。
                   </p>
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <a href={operation.authorization_url ?? undefined} target="_blank" rel="noreferrer" style={{ ...actionButton(true), textDecoration: 'none' }}>
                       打开授权页面
                     </a>
-                  </div>
-                  <label style={{ display: 'grid', gap: '0.32rem', fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
-                    完整 redirect URL
-                    <input
-                      aria-label={`${server.name} redirect URL`}
-                      type="url"
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={redirects[operation.id] ?? ''}
-                      onChange={(event) => setRedirects((current) => ({ ...current, [operation.id]: event.target.value }))}
-                      placeholder="https://callback.example/path?code=…&state=…"
-                      style={{ border: '1px solid var(--color-border-paper)', borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem', minWidth: 0 }}
-                    />
-                  </label>
-                  <div>
-                    <button type="button" onClick={() => void submit(operation)} disabled={isBusy && busyServer === server.name} style={actionButton(true)}>
-                      提交并连接
-                    </button>
                   </div>
                 </div>
               ) : null}

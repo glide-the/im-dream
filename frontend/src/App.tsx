@@ -32,6 +32,9 @@
 // [Sync] 2026-08-16: make the Deck-home Settings action navigate directly to Settings / Work.
 // [Sync] 2026-08-17: carry Deck preview example copy into the new Chat draft without URL persistence or auto-send.
 // [Sync] 2026-08-20: route actor-owned Claude MCP cards into a refresh-stable capability detail workbench.
+// [Sync] 2026-08-25: render the MCP OAuth callback entirely in the SPA so its
+//                    one-time code/state never reaches Dream backend access logs.
+// [Sync] 2026-08-25: submit the same-origin MCP OAuth callback automatically by non-secret operation ID; users never copy authorization URLs.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -78,6 +81,11 @@ import ModelConfigSection from './components/dashboard/ModelConfigSection';
 import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
 import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDetailPage';
 import ClaudeMcpServerDetailPage from './components/claude-mcp/ClaudeMcpServerDetailPage';
+import { submitClaudeMcpRedirect } from './api/claudeMcpApi';
+import {
+  forgetClaudeMcpOAuthOperation,
+  readClaudeMcpOAuthOperation,
+} from './components/claude-mcp/oauthHandoff';
 import ClaudePluginAdminPage from './components/claude-plugin-admin/ClaudePluginAdminPage';
 import {
   resolveStoryWorkspacePath,
@@ -109,6 +117,79 @@ const iconMap = {
 };
 
 const LANGUAGE_CODES: Array<'en' | 'zh'> = ['en', 'zh'];
+const MCP_OAUTH_CALLBACK_PATH = '/oauth/callback';
+let mcpOAuthCallbackSubmission: Promise<void> | null = null;
+
+function submitMcpOAuthCallbackOnce(operationId: string, callbackUrl: string): Promise<void> {
+  if (!mcpOAuthCallbackSubmission) {
+    mcpOAuthCallbackSubmission = submitClaudeMcpRedirect(operationId, callbackUrl)
+      .then(() => {
+        forgetClaudeMcpOAuthOperation(operationId);
+      });
+  }
+  return mcpOAuthCallbackSubmission;
+}
+
+function McpOAuthCallbackPage() {
+  const callbackUrl = useRef(window.location.href);
+  const [callbackState, setCallbackState] = useState<'submitting' | 'submitted' | 'invalid' | 'failed'>('submitting');
+  const query = new URL(callbackUrl.current).searchParams;
+  const callbackReady = Boolean(query.get('code') && query.get('state'));
+
+  useEffect(() => {
+    document.title = 'MCP authorization callback · Ink & Memory';
+    const operationId = readClaudeMcpOAuthOperation();
+    if (!callbackReady || !operationId) {
+      setCallbackState('invalid');
+      return;
+    }
+    void submitMcpOAuthCallbackOnce(operationId, callbackUrl.current)
+      .then(() => {
+        setCallbackState('submitted');
+        window.setTimeout(() => window.close(), 600);
+      })
+      .catch(() => setCallbackState('failed'));
+  }, [callbackReady]);
+
+  const title = callbackState === 'submitted'
+    ? 'MCP 授权已自动提交'
+    : callbackState === 'submitting'
+      ? '正在完成 MCP 授权'
+      : 'MCP 授权回调失败';
+
+  return (
+    <main style={{
+      minHeight: '100vh',
+      display: 'grid',
+      placeItems: 'center',
+      padding: '24px',
+      background: 'var(--color-bg-app)',
+      color: 'var(--color-text-primary)',
+    }}>
+      <section aria-labelledby="mcp-oauth-callback-title" style={{
+        width: 'min(100%, 520px)',
+        padding: '28px',
+        border: '1px solid var(--color-border-paper)',
+        borderRadius: '20px',
+        background: 'var(--color-bg-paper)',
+        boxShadow: '0 18px 50px rgba(0, 0, 0, 0.12)',
+      }}>
+        <h1 id="mcp-oauth-callback-title" style={{ marginTop: 0 }}>
+          {title}
+        </h1>
+        <p>
+          {callbackState === 'submitted'
+            ? '授权结果已安全交给 Dream，本页会自动关闭。'
+            : callbackState === 'submitting'
+              ? 'Dream 正在安全交换凭证；无需复制或粘贴任何地址。'
+              : callbackState === 'invalid'
+                ? '未找到匹配的 Dream OAuth operation，请关闭本页并重新开始认证。'
+                : '授权结果自动提交失败，请关闭本页并在 Dream 重新开始认证。'}
+        </p>
+      </section>
+    </main>
+  );
+}
 
 // [Sync] 2026-07-08: Settings default sections use a narrower reading-width column;
 // the Notion ConnectorNotionDetailPage owns a wider single-account resource
@@ -153,6 +234,7 @@ export default function App() {
   const isMobile = useMobile();
   const { isAuthenticated, isLoading } = useAuth();
   const isDeviceVerificationRoute = window.location.pathname === '/oauth/device/verify';
+  const isMcpOAuthCallbackRoute = window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
   const { t, i18n } = useTranslation();
   const mobileNavHeight = 64;
   const mobileBottomOffset = isMobile
@@ -205,7 +287,7 @@ export default function App() {
   });
 
   useLayoutEffect(() => {
-    if (!isAuthenticated || isDeviceVerificationRoute || window.location.pathname !== '/') return;
+    if (!isAuthenticated || isDeviceVerificationRoute || isMcpOAuthCallbackRoute || window.location.pathname !== '/') return;
     window.history.replaceState(
       { inkDreamView: 'story-workspace' },
       '',
@@ -213,7 +295,7 @@ export default function App() {
     );
     setStoryWorkspaceLegacyView(null);
     setCurrentView('story-workspace');
-  }, [isAuthenticated, isDeviceVerificationRoute]);
+  }, [isAuthenticated, isDeviceVerificationRoute, isMcpOAuthCallbackRoute]);
 
   const openConnectorSettings = useCallback(() => {
     window.history.pushState(
@@ -1476,6 +1558,10 @@ export default function App() {
 
     return <div style={{ whiteSpace: 'pre-wrap' }}>{elements}</div>;
   };
+
+  if (isMcpOAuthCallbackRoute) {
+    return <McpOAuthCallbackPage />;
+  }
 
   // @@@ Show loading state while checking auth
   if (isLoading) {

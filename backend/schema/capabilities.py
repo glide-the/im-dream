@@ -4,6 +4,7 @@
 [Output] Validated schema authority receipts and exact feature capability constants.
 [Pos] No-DDL Dream boundary for shared PostgreSQL schema publication.
 [Sync] 2026-08-19: add the exact ClaudePlugin Remote Marketplace v1 contract hash.
+[Sync] 2026-08-25: add the exact Admin-published managed MCP Resources v1 capability check.
 """
 
 from __future__ import annotations
@@ -24,6 +25,11 @@ CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CAPABILITY: Final = (
 )
 CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CONTRACT_SHA256: Final = (
     "d215cb2764f656ab32e364a4900b3aac73fca60c77ef4c9f3a914fd192a8c314"
+)
+MANAGED_MCP_RESOURCES_CAPABILITY: Final = "dream.managed-mcp-resources.v1"
+MANAGED_MCP_RESOURCES_VERSION: Final = 1
+MANAGED_MCP_RESOURCES_CONTRACT_SHA256: Final = (
+    "746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a"
 )
 REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     UNIFIED_DREAM_CAPABILITY: 1,
@@ -112,15 +118,52 @@ def inspect_schema_authority(
     )
 
 
+def managed_mcp_resources_capability_available(connection: Any) -> bool:
+    """Return whether the exact Admin-published managed MCP contract exists.
+
+    This helper issues one read-only query and deliberately treats every
+    database/catalog failure as unavailable. Callers never migrate or infer
+    compatibility from the global Drizzle journal head.
+    """
+
+    try:
+        row = connection.execute(
+            "SELECT version, contract_sha256 "
+            "FROM drizzle.schema_capabilities WHERE capability = %s",
+            (MANAGED_MCP_RESOURCES_CAPABILITY,),
+        ).fetchone()
+    except Exception:
+        return False
+    if row is None:
+        return False
+    if isinstance(row, Mapping):
+        version = row.get("version")
+        contract_sha256 = row.get("contract_sha256")
+    else:
+        try:
+            version, contract_sha256 = row[0], row[1]
+        except (IndexError, KeyError, TypeError):
+            return False
+    return (
+        isinstance(version, int)
+        and version == MANAGED_MCP_RESOURCES_VERSION
+        and contract_sha256 == MANAGED_MCP_RESOURCES_CONTRACT_SHA256
+    )
+
+
 __all__ = [
     "CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CAPABILITY",
     "CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CONTRACT_SHA256",
     "DECK_CONTENT_VERSIONS_CAPABILITY",
     "DREAM_WORKFLOW_NO_CONTINUING_CAPABILITY",
+    "MANAGED_MCP_RESOURCES_CAPABILITY",
+    "MANAGED_MCP_RESOURCES_CONTRACT_SHA256",
+    "MANAGED_MCP_RESOURCES_VERSION",
     "REQUIRED_RUNTIME_CAPABILITIES",
     "SCHEMA_CAPABILITIES_RELATION",
     "SchemaAuthorityReceipt",
     "SchemaCapabilityError",
     "UNIFIED_DREAM_CAPABILITY",
     "inspect_schema_authority",
+    "managed_mcp_resources_capability_available",
 ]

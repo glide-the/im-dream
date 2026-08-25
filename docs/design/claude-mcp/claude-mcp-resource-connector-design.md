@@ -1,6 +1,6 @@
 <!-- [输入] Resources/Notion/ClaudePlugin 生产代码、自有 Agent SDK/Runtime 身份、官方 MCP CLI 文档和仓库治理合同。 -->
 <!-- [输出] Claude MCP 资源链接器的架构、API、状态机、进程、安全、时序、评审与实现门。 -->
-<!-- [定位] docs/design/claude-mcp 下的 Claude MCP 规范设计真相源。 -->
+<!-- [定位] docs/design/claude-mcp 下的 Claude MCP CLI 历史基线；不再是当前管理链路真相源。 -->
 <!-- [同步] 2026-08-19：建立公开 CLI argv OAuth 和 fail-closed Runtime 身份/版本门。 -->
 <!-- [同步] 2026-08-20：完成 user-scoped secure storage、公开 SDK definitions/inventory 与真实账户验收。 -->
 <!-- [同步] 2026-08-21：支持绝对 HTTP(S)、neutral cwd 与 formal user-scope Remove。 -->
@@ -8,11 +8,20 @@
 <!-- [同步] 2026-08-23：Agent 与 MCP 共用自有 Runtime resolver/manifest gate，绝对 CLAUDE_CODE_CLI_PATH 只用于官方回滚。 -->
 <!-- [同步] 2026-08-24：更新为 SDK 0.2.143 正式 PyPI 版本/哈希锁、MIT clean-room Runtime、跨进程 OAuth rotation 修复和真实 Comfy 两轮 tool/resume 回执。 -->
 <!-- [同步] 2026-08-25：认证路由改为 HTTP 匿名优先；连接与认证状态正交，主动 login、OAuth、logout/cancel 与官方回滚继续保留。 -->
+<!-- [同步] 2026-08-25：本设计由数据库驱动方案取代；以下 CLI 流程只用于迁移前取证和独立回滚说明，禁止作为正常业务实现。 -->
 
 # Claude MCP 资源链接器设计
 
+> **已废止的历史设计。** 当前规范和实现以
+> [`dream-managed-mcp-resources.md`](../claude-agent/dream-managed-mcp-resources.md)
+> 为唯一真相源：Dream PostgreSQL 保存 Server 定义，Dream 使用标准 MCP SDK
+> discovery，OAuth callback 自动回传，Chat 每轮从数据库生成 `mcp_servers`；正常
+> Resources、inventory、workspace 和 Chat 配置投影不得调用本文件记录的
+> `claude mcp list/get/login/logout`。本文件保留的 CLI 内容仅解释迁移前行为与显式
+> 一次性导入/独立回滚背景。
+
 > 日期：2026-08-24
-> 状态：实现完成；macOS 真实 OAuth、inventory、两轮只读 Tool 与 resume 验收通过，Linux 合同/技术验证通过，Windows fail closed
+> 状态：历史基线，已由 Dream-managed MCP 数据库方案取代
 > 业务域：`claude-mcp`  
 > 规范词：必须、禁止、应、可以分别表示强制、禁止、推荐和可选。
 

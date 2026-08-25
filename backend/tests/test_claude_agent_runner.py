@@ -78,6 +78,8 @@
 # [Sync] 2026-08-23: inject a synthetic explicit cli_path at the runner unit
 #                    seam; production-qualified Runtime resolution/fail-closed
 #                    and official rollback are covered in test_sdk_env.py.
+# [Sync] 2026-08-25: cover private file-backed MCP config projection,
+#                    strict config, argv-safe Path injection and cleanup.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -92,6 +94,7 @@ Key differences from Pawkeyland:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shlex
 import sys
@@ -368,17 +371,31 @@ class _MockSDKClient:
     def __init__(self):
         self._messages: list = []
         self.last_options = None
+        self.last_mcp_config_path: Optional[Path] = None
+        self.last_mcp_config_text: Optional[str] = None
+        self.last_mcp_config_mode: Optional[int] = None
 
     def set_messages(self, messages: list) -> None:
         self._messages = list(messages)
 
     async def query_stream(self, prompt, options=None):
         self.last_options = options
+        configured = getattr(options, "mcp_servers", None)
+        if isinstance(configured, Path):
+            self.last_mcp_config_path = configured
+            self.last_mcp_config_text = configured.read_text(encoding="utf-8")
+            self.last_mcp_config_mode = configured.stat().st_mode & 0o777
         for msg in self._messages:
             yield msg
 
     async def load_messages(self, session_id=None):
         return {"messages": []}
+
+    def captured_mcp_servers(self) -> dict[str, Any]:
+        if self.last_mcp_config_text is not None:
+            return dict(json.loads(self.last_mcp_config_text)["mcpServers"])
+        configured = getattr(self.last_options, "mcp_servers", {})
+        return dict(configured) if isinstance(configured, dict) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -606,17 +623,19 @@ class TestClaudeAgentRunnerOnToolEvent(_RunnerBase):
         runner = self.make_runner()
         tool_events: list[ToolEventPayload] = []
 
-        result = await runner.run_streaming(
-            opts=AgentRunOptions(
-                thread_id="te-001",
-                user_message="list files",
-                tool_choice="auto",
-            ),
-            callbacks=AgentStreamingCallbacks(
-                on_text_delta=lambda d: None,
-                on_tool_event=lambda e: tool_events.append(e),
-            ),
-        )
+        with tempfile.TemporaryDirectory() as thread_workspace:
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="te-001",
+                    user_message="list files",
+                    tool_choice="auto",
+                    claude_tmp_workspace=thread_workspace,
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda d: None,
+                    on_tool_event=lambda e: tool_events.append(e),
+                ),
+            )
 
         self.assertTrue(result.success)
         tool_use_events = [e for e in tool_events if e.type == "tool_use"]
@@ -637,17 +656,19 @@ class TestClaudeAgentRunnerOnToolEvent(_RunnerBase):
         runner = self.make_runner()
         tool_events: list[ToolEventPayload] = []
 
-        result = await runner.run_streaming(
-            opts=AgentRunOptions(
-                thread_id="te-multi-001",
-                user_message="list and read",
-                tool_choice="auto",
-            ),
-            callbacks=AgentStreamingCallbacks(
-                on_text_delta=lambda d: None,
-                on_tool_event=lambda e: tool_events.append(e),
-            ),
-        )
+        with tempfile.TemporaryDirectory() as thread_workspace:
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="te-multi-001",
+                    user_message="list and read",
+                    tool_choice="auto",
+                    claude_tmp_workspace=thread_workspace,
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda d: None,
+                    on_tool_event=lambda e: tool_events.append(e),
+                ),
+            )
 
         self.assertTrue(result.success)
         tool_use_events = [e for e in tool_events if e.type == "tool_use"]
@@ -979,17 +1000,19 @@ class TestClaudeAgentRunnerToolConfirmation(_RunnerBase):
         runner = self.make_runner()
         confirmation_requests: list[dict] = []
 
-        result = await runner.run_streaming(
-            opts=AgentRunOptions(
-                thread_id="tc-auto-001",
-                user_message="list",
-                tool_choice="auto",
-            ),
-            callbacks=AgentStreamingCallbacks(
-                on_text_delta=lambda d: None,
-                on_tool_confirmation_request=lambda p: confirmation_requests.append(p),
-            ),
-        )
+        with tempfile.TemporaryDirectory() as thread_workspace:
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="tc-auto-001",
+                    user_message="list",
+                    tool_choice="auto",
+                    claude_tmp_workspace=thread_workspace,
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda d: None,
+                    on_tool_confirmation_request=lambda p: confirmation_requests.append(p),
+                ),
+            )
 
         self.assertTrue(result.success)
         self.assertEqual(confirmation_requests, [])
@@ -1000,26 +1023,43 @@ class TestClaudeAgentRunnerRemoteMcp(_RunnerBase):
         self.set_query([])
         runner = self.make_runner()
 
-        await runner.run_streaming(
-            opts=AgentRunOptions(
-                thread_id="remote-mcp-001",
-                user_message="use the remote connector",
-                cwd=str(_FAKE_WORKSPACE),
-                allowed_tools=["Read"],
-                claude_mcp_servers={
-                    "remote-readonly": {
-                        "type": "http",
-                        "url": "https://mcp.example.test",
-                    }
-                },
-            ),
-            callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
-        )
+        with tempfile.TemporaryDirectory() as thread_workspace:
+            await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="remote-mcp-001",
+                    user_message="use the remote connector",
+                    cwd=thread_workspace,
+                    claude_tmp_workspace=thread_workspace,
+                    allowed_tools=["Read"],
+                    claude_mcp_servers={
+                        "remote-readonly": {
+                            "type": "http",
+                            "url": "https://mcp.example.test",
+                            "headers": {"Authorization": "Bearer must-not-enter-argv"},
+                        }
+                    },
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
+            )
 
+        projected = json.loads(self._mock_client.last_mcp_config_text or "{}")
         self.assertEqual(
-            self._mock_client.last_options.mcp_servers["remote-readonly"],
-            {"type": "http", "url": "https://mcp.example.test"},
+            projected["mcpServers"]["remote-readonly"],
+            {
+                "type": "http",
+                "url": "https://mcp.example.test",
+                "headers": {"Authorization": "Bearer must-not-enter-argv"},
+            },
         )
+        self.assertIsInstance(self._mock_client.last_options.mcp_servers, Path)
+        self.assertTrue(self._mock_client.last_options.strict_mcp_config)
+        self.assertEqual(self._mock_client.last_mcp_config_mode, 0o600)
+        self.assertNotIn(
+            "must-not-enter-argv",
+            str(self._mock_client.last_options.mcp_servers),
+        )
+        self.assertIsNotNone(self._mock_client.last_mcp_config_path)
+        self.assertFalse(self._mock_client.last_mcp_config_path.exists())
         self.assertFalse(
             any(
                 tool.startswith("mcp__remote-readonly__")
@@ -1216,6 +1256,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                         thread_id="story-workspace-mcp",
                         user_message="write Dream metadata",
                         cwd=str(workspace),
+                        claude_tmp_workspace=str(workspace),
                         tool_choice="auto",
                         mcp_env={
                             "INK_AGENT_USER_ID": "7",
@@ -1230,7 +1271,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                     callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
                 )
 
-        config = self._mock_client.last_options.mcp_servers["story_workspace"]
+        config = self._mock_client.captured_mcp_servers()["story_workspace"]
         args = config["args"] if isinstance(config, dict) else config.args
         env = config["env"] if isinstance(config, dict) else config.env
         self.assertEqual(args[-1], "libs.claude_agent_kit.server.story_workspace_mcp_stdio")
@@ -1252,6 +1293,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                     thread_id="ordinary-chat",
                     user_message="ordinary chat",
                     cwd=temp_dir,
+                    claude_tmp_workspace=temp_dir,
                     tool_choice="auto",
                     mcp_env={
                         "INK_AGENT_USER_ID": "7",
@@ -1260,7 +1302,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 ),
                 callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
             )
-        self.assertNotIn("story_workspace", self._mock_client.last_options.mcp_servers)
+        self.assertNotIn("story_workspace", self._mock_client.captured_mcp_servers())
 
     async def test_dream_run_auto_allows_only_canonical_roots(self):
         run_env = {"INK_AGENT_WORKFLOW_RUN_ID": "run_" + "1" * 32}
@@ -1300,23 +1342,25 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
     async def test_story_workspace_stdio_is_not_started_without_workspace(self):
         self.set_query([])
         runner = self.make_runner()
-        await runner.run_streaming(
-            opts=AgentRunOptions(
-                thread_id="story-workspace-no-cwd",
-                user_message="no workspace",
-                cwd=None,
-                tool_choice="auto",
-                mcp_env={
-                    "INK_AGENT_USER_ID": "7",
-                    "INK_AGENT_THREAD_ID": "thread-7",
-                },
-            ),
-            callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
-        )
+        with tempfile.TemporaryDirectory() as thread_workspace:
+            await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="story-workspace-no-cwd",
+                    user_message="no workspace",
+                    cwd=None,
+                    claude_tmp_workspace=thread_workspace,
+                    tool_choice="auto",
+                    mcp_env={
+                        "INK_AGENT_USER_ID": "7",
+                        "INK_AGENT_THREAD_ID": "thread-7",
+                    },
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
+            )
 
         self.assertNotIn(
             "story_workspace",
-            self._mock_client.last_options.mcp_servers,
+            self._mock_client.captured_mcp_servers(),
         )
 
     async def test_builtin_file_mutations_under_dream_are_hard_denied(self):
@@ -2492,12 +2536,16 @@ class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
     async def test_default_run_only_configures_core_user_mcp(self):
         self.set_query([])
         runner = self.make_runner()
-        with patch.dict(os.environ, {}, clear=True):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            tempfile.TemporaryDirectory() as thread_workspace,
+        ):
             await runner.run_streaming(
                 opts=AgentRunOptions(
                     thread_id="ordinary-ink-chat",
                     user_message="hello",
                     tool_choice="auto",
+                    claude_tmp_workspace=thread_workspace,
                 ),
                 callbacks=AgentStreamingCallbacks(
                     on_text_delta=lambda _delta: None
@@ -2505,7 +2553,7 @@ class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
             )
 
         self.assertEqual(
-            set(self._mock_client.last_options.mcp_servers),
+            set(self._mock_client.captured_mcp_servers()),
             {"user"},
         )
 

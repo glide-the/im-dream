@@ -86,6 +86,8 @@
 # [Sync] 2026-08-22: restore MCP credential-file sandbox denies and the native
 #                    CLI nested-container Unix-socket setting while preserving
 #                    the exact per-thread .claude-tmp allowWrite path.
+# [Sync] 2026-08-25: deny Agent tool access to the short-lived 0600 MCP config
+#                    projection while allowing the Runtime to read its Path.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -133,7 +135,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Literal, Optional
 
-from .sdk_env import ensure_claude_code_tmpdir, resolve_claude_code_tmpdir
+from .sdk_env import (
+    CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME,
+    ensure_claude_code_tmpdir,
+    resolve_claude_code_tmpdir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -514,6 +520,11 @@ def _workspace_sandbox_config(
     thread_config_home = workspace_abs / ".claude-home"
     thread_credentials = thread_config_home / ".credentials.json"
     thread_user_config = thread_config_home / ".claude.json"
+    thread_mcp_projection = (
+        workspace_abs
+        / ".claude-tmp"
+        / CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME
+    )
     enabled = bool(enabled)
 
     allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
@@ -541,6 +552,7 @@ def _workspace_sandbox_config(
                 *_sandbox_sensitive_read_deny_paths(),
                 str(thread_credentials),
                 str(thread_user_config),
+                str(thread_mcp_projection),
             ],
             "allowRead": allow_read,
             # Keep .claude/skills writable so skill symlinks and
@@ -561,6 +573,7 @@ def _workspace_sandbox_config(
                 str(workspace_abs / ".mcp.json"),
                 str(thread_credentials),
                 str(thread_user_config),
+                str(thread_mcp_projection),
             ],
         },
         "credentials": {

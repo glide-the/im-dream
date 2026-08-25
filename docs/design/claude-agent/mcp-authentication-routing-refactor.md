@@ -1,11 +1,18 @@
 <!-- [输入] 2026-08-25 目标 MCP 动态握手、官方 CLI 2.1.220、自有 Runtime 0.1.0/兼容标识 2.1.241，以及 Dream Frontend/API/SDK/Runtime/Workspace/Transcript 静态调用链证据。 -->
 <!-- [输出] 定义匿名优先的 MCP 连接与 OAuth 路由、Runtime/SDK/Dream 分层、结构化错误、兼容与回滚合同、测试矩阵和真实 IM 验收标准。 -->
-<!-- [定位] Claude Agent 与远端 MCP 资源连接器的认证路由重构设计稿；实现仍分别由 clean-room Runtime 与 Dream 既有模块承载。 -->
+<!-- [定位] 迁移前 Claude Agent/CLI MCP 认证路由历史基线；当前 Dream 管理链路真相源为 dream-managed-mcp-resources.md。 -->
 <!-- [同步] 2026-08-25：匿名优先路由已在 Runtime 与 Dream 最小边界实现，并完成自动化、官方 CLI 差分、匿名/OAuth Chat、Dream Workflow、Workspace/sandbox、Runtime 故障恢复和 Admin UI 真实验收。 -->
+<!-- [同步] 2026-08-25：Dream MCP 管理面迁移到 PostgreSQL 与标准 MCP SDK；本文 CLI/PTTY/手工 redirect 内容降级为历史取证，不再是可执行合同。 -->
 
 # Dream MCP 认证路由重构设计
 
-> 状态：实现、自动化、官方差分与本机完整真实业务验收完成
+> **已废止的历史设计。** 当前规范以
+> [`dream-managed-mcp-resources.md`](dream-managed-mcp-resources.md) 为唯一真相源：
+> Dream PostgreSQL 保存 Server/credential ref，标准 Python MCP SDK 负责匿名握手、
+> OAuth discovery/exchange/refresh，浏览器同源 callback 自动提交；正常管理路径不得
+> 调用本文记录的 Runtime `mcp list/get/login/logout`、PTY 或手工 redirect 输入。
+
+> 状态：历史基线，已由 Dream-managed MCP 数据库方案取代
 >
 > 证据日期：2026-08-25
 >

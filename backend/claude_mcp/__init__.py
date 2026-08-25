@@ -1,11 +1,19 @@
-"""Claude MCP resource-connector domain package.
+"""Database-managed Claude MCP resource package.
 
-[Input] Authenticated actor identity, user-scoped CLI roots, and Agent thread config homes.
-[Output] MCP discovery/OAuth services plus minimal user-to-thread credential projection.
-[Pos] Domain boundary between Resources APIs and the official Claude Code MCP argv protocol.
-[Sync] 2026-08-19: add the schema-free user credential identity and thread projection boundary.
+[Input] Actor/workspace identities, Admin schema capability, and injected protocol/secret policy.
+[Output] Managed service plus shared Runtime snapshot-loader lifecycle accessors.
+[Pos] Package boundary for PostgreSQL-managed MCP; online paths contain no CLI dependency.
+[Sync] 2026-08-25: export managed service and process-singleton integration seams.
 """
 
-from .service import ClaudeMcpService
+from .service import (
+    ClaudeMcpService,
+    get_default_claude_mcp_service,
+    get_default_managed_mcp_runtime_snapshot_loader,
+)
 
-__all__ = ["ClaudeMcpService"]
+__all__ = [
+    "ClaudeMcpService",
+    "get_default_claude_mcp_service",
+    "get_default_managed_mcp_runtime_snapshot_loader",
+]
