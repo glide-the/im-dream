@@ -9,6 +9,7 @@
 // [Sync] 2026-08-25: switch Resources to managed-DB capability/CRUD and explicit standard-MCP discovery.
 // [Sync] 2026-08-25: add revision-aware PATCH for detail-page configuration edits.
 // [Sync] 2026-08-25: keep authentication classification backend-owned; CRUD callers never choose OAuth versus anonymous.
+// [Sync] 2026-08-25: make detail inventory cache-first so automatic loading never forces redundant remote discovery.
 
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -205,7 +206,7 @@ export async function getClaudeMcpServerInventory(
 ): Promise<ClaudeMcpServerInventory> {
   const payload = await request<{ discovery: ManagedDiscoveryResult }>(
     `/api/claude-mcp/servers/${encodeURIComponent(serverIdentifier)}/discoveries`,
-    { method: 'POST', body: JSON.stringify({ force: true }) },
+    { method: 'POST', body: JSON.stringify({ force: false }) },
   );
   const result = payload.discovery;
   const needsAuth = result.error?.code === 'CLAUDE_MCP_CREDENTIAL_REQUIRED';

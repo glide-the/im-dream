@@ -3,6 +3,7 @@
 // [Pos] Opt-in real-account cancel acceptance; no provider login, credential creation, remote mutation, shadow account, or fault injection.
 // [Sync] 2026-08-25: add explicit Resources OAuth cancel plus Chat stop over the managed-DB MCP path.
 // [Sync] 2026-08-25: detect OAuth through detail discovery; the create form no longer accepts an auth policy.
+// [Sync] 2026-08-25: rely on automatic cache-first detail discovery and expose no inventory refresh control.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -155,7 +156,7 @@ test('real actor visibly cancels an OAuth operation without creating a credentia
     const card = page.getByRole('article', { name: `MCP 服务 ${OAUTH_SERVER_NAME}` });
     await expect(card).toContainText('已配置');
     await card.getByRole('button', { name: '管理与工具' }).click();
-    await page.getByRole('button', { name: '刷新 inventory' }).first().click();
+    await expect(page.getByRole('button', { name: /刷新 inventory|重试 inventory|重试探测/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '开始认证' })).toBeVisible({ timeout: 30_000 });
 
     const startResponsePromise = page.waitForResponse((response) => (

@@ -1,5 +1,5 @@
 // [Input] Named existing actor/Deck, normal Dream/PostgreSQL, candidate Claude Runtime, an explicit remote MCP URL or server-owned stdio profile, and live Agent runtime.
-// [Output] Real-business managed-DB configure → auth routing → explicit inventory → visible Chat SSE/MCP results → refresh/resume → cleanup evidence.
+// [Output] Real-business managed-DB configure → auth routing → automatic inventory → visible Chat SSE/MCP results → refresh/resume → cleanup evidence.
 // [Pos] Opt-in macOS/Linux Claude MCP acceptance; no API interception, shadow account, cloned database, or fake CLI.
 // [Sync] 2026-08-19: add the complete real-account MCP OAuth and per-turn Agent credential reuse journey.
 // [Sync] 2026-08-20: assert Linux file projection versus macOS secure-storage reuse without reading Keychain.
@@ -19,6 +19,7 @@
 // [Sync] 2026-08-25: cover streamable HTTP, legacy SSE, and server-owned stdio through one visible managed-DB inventory/Chat journey.
 // [Sync] 2026-08-25: permit only the exact read-only WaitForMcpServers pending-server handshake before the named MCP tool appears.
 // [Sync] 2026-08-25: remove the obsolete redirect-file/manual-submit fallback; real OAuth must complete through the same-origin automatic callback popup.
+// [Sync] 2026-08-25: wait for automatic detail inventory; no refresh inventory control is part of the business journey.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -467,7 +468,6 @@ test('real actor completes MCP auth routing, inventory, Agent resume, and cleanu
     if (AUTH_MODE === 'oauth') {
       await expect(card).toContainText('已配置', { timeout: 30_000 });
       await card.getByRole('button', { name: '管理与工具' }).click();
-      await page.getByRole('button', { name: '刷新 inventory' }).first().click();
       await expect(page.getByRole('button', { name: '开始认证' })).toBeVisible({ timeout: 60_000 });
       await page.getByRole('button', { name: '资源连接器' }).click();
     }
@@ -506,7 +506,7 @@ test('real actor completes MCP auth routing, inventory, Agent resume, and cleanu
     }
 
     await card.getByRole('button', { name: '管理与工具' }).click();
-    await page.getByRole('button', { name: '刷新 inventory' }).first().click();
+    await expect(page.getByRole('button', { name: /刷新 inventory|重试 inventory|重试探测/ })).toHaveCount(0);
     await expect(page.getByRole('tab', { name: `Tools ${EXPECTED_TOOL_COUNT}` })).toBeVisible({ timeout: 60_000 });
     await expect(page.getByRole('article', { name: `MCP 工具 ${SAFE_INSPECTION_TOOL}` })).toBeVisible();
     await expect(page.getByRole('tab', { name: `Resources ${EXPECTED_RESOURCE_COUNT}` })).toBeVisible();

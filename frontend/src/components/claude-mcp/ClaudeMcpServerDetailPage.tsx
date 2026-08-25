@@ -1,14 +1,15 @@
 // [Input] One actor-owned database MCP server identifier, typed claude-mcp APIs, and Settings navigation callbacks.
-// [Output] MCP detail workbench with explicit standard-SDK discovery, OAuth actions, and searchable tools/resources/prompts inventory.
+// [Output] MCP detail workbench with automatic cache-first standard-SDK discovery, OAuth actions, and searchable tools/resources/prompts inventory.
 // [Pos] Server detail surface in the frontend claude-mcp business domain.
 // [Sync] 2026-08-20: add public-SDK tool discovery without `/mcp` TUI parsing or remote tool execution.
 // [Sync] 2026-08-25: separate anonymous, required, authenticated, and rollback-compatible unknown auth actions.
-// [Sync] 2026-08-25: stop automatic discovery on detail load and render all three MCP inventory families.
-// [Sync] 2026-08-25: add revision-aware managed configuration editing without remote discovery.
+// [Sync] 2026-08-25: automatically load all three MCP inventory families without a user-facing refresh control.
+// [Sync] 2026-08-25: add revision-aware managed configuration editing followed by automatic cache-first discovery.
 // [Sync] 2026-08-25: remove editable authentication policy; backend discovery owns anonymous/OAuth classification.
 // [Sync] 2026-08-25: replace redirect URL copy/paste with same-origin automatic SPA callback submission.
+// [Sync] 2026-08-25: ignore stale inventory responses when config or credential revisions change mid-discovery.
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   cancelClaudeMcpAuth,
   getClaudeMcpCapability,
@@ -143,7 +144,7 @@ function connectionSummary(
   if (state === 'failed') {
     return '最近一次 inventory discovery 失败；单 Server 失败不会阻塞其他 Server。';
   }
-  return 'Server 配置已从 Dream 数据库加载；远端 discovery 只在用户显式刷新时执行。';
+  return 'Server 配置已从 Dream 数据库加载；正在自动读取远端能力清单。';
 }
 
 function formatDateTime(value?: string): string {
@@ -355,6 +356,8 @@ export default function ClaudeMcpServerDetailPage({
   const [editUrl, setEditUrl] = useState('');
   const [editStdioProfile, setEditStdioProfile] = useState('');
   const [editEnabled, setEditEnabled] = useState(true);
+  const automaticInventoryKeyRef = useRef<string | null>(null);
+  const inventoryRequestSequenceRef = useRef(0);
 
   const effectiveState = operation && ACTIVE_STATES.includes(operation.state)
     ? operation.state
@@ -369,10 +372,14 @@ export default function ClaudeMcpServerDetailPage({
   }, [inventory?.tools, searchQuery, toolFilter]);
 
   const loadInventory = useCallback(async () => {
+    const requestSequence = inventoryRequestSequenceRef.current + 1;
+    inventoryRequestSequenceRef.current = requestSequence;
     setInventoryLoading(true);
     setInventoryError(null);
     try {
       const next = await getClaudeMcpServerInventory(serverName);
+      if (requestSequence !== inventoryRequestSequenceRef.current) return;
+      automaticInventoryKeyRef.current = `${serverName}:${next.config_revision}:${next.credential_revision}:enabled`;
       setInventory(next);
       setServer((current) => current ? {
         ...current,
@@ -388,12 +395,28 @@ export default function ClaudeMcpServerDetailPage({
             : current.auth_state,
       } : current);
     } catch (error) {
+      if (requestSequence !== inventoryRequestSequenceRef.current) return;
       setInventory(null);
       setInventoryError(errorMessage(error, 'MCP 工具清单读取失败'));
     } finally {
-      setInventoryLoading(false);
+      if (requestSequence === inventoryRequestSequenceRef.current) setInventoryLoading(false);
     }
   }, [serverName]);
+
+  const loadInventoryForServer = useCallback((nextServer: ClaudeMcpServer) => {
+    const key = `${serverName}:${nextServer.revision ?? 'unknown'}:${nextServer.credential_revision}:`;
+    const inventoryKey = `${key}${nextServer.enabled ? 'enabled' : 'disabled'}`;
+    if (automaticInventoryKeyRef.current === inventoryKey) return;
+    automaticInventoryKeyRef.current = inventoryKey;
+    setInventory(null);
+    setInventoryError(null);
+    if (nextServer.enabled) {
+      void loadInventory();
+    } else {
+      inventoryRequestSequenceRef.current += 1;
+      setInventoryLoading(false);
+    }
+  }, [loadInventory, serverName]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -407,8 +430,10 @@ export default function ClaudeMcpServerDetailPage({
       const nextCapability = capabilityResult.value;
       setCapability(nextCapability);
       if (!nextCapability.enabled) {
+        inventoryRequestSequenceRef.current += 1;
         setServer(null);
         setInventory(null);
+        setInventoryLoading(false);
         return;
       }
       if (serverResult.status === 'rejected') throw serverResult.reason;
@@ -422,13 +447,13 @@ export default function ClaudeMcpServerDetailPage({
       if (nextServer.active_operation_id) {
         setOperation(await getClaudeMcpOperation(nextServer.active_operation_id));
       }
-      setInventory(null);
+      loadInventoryForServer(nextServer);
     } catch (error) {
       setPageError(errorMessage(error, 'Claude MCP 服务详情读取失败'));
     } finally {
       setLoading(false);
     }
-  }, [serverName]);
+  }, [loadInventoryForServer, serverName]);
 
   useEffect(() => {
     void load();
@@ -488,16 +513,16 @@ export default function ClaudeMcpServerDetailPage({
     setBusyAction('logout');
     setPageError(null);
     try {
-      const nextServer = await logoutClaudeMcpServer(serverName);
-      setServer(nextServer);
+      await logoutClaudeMcpServer(serverName);
       setOperation(null);
-      setInventory(null);
+      automaticInventoryKeyRef.current = null;
+      await load();
     } catch (error) {
       setPageError(errorMessage(error, '退出认证失败'));
     } finally {
       setBusyAction(null);
     }
-  }, [busyAction, serverName]);
+  }, [busyAction, load, serverName]);
 
   const saveConfiguration = useCallback(async () => {
     if (!server || busyAction) return;
@@ -523,7 +548,7 @@ export default function ClaudeMcpServerDetailPage({
         enabled: editEnabled,
       });
       setServer(nextServer);
-      setInventory(null);
+      loadInventoryForServer(nextServer);
       setOperation(null);
       setEditing(false);
       setEditDisplayName(nextServer.display_name);
@@ -543,6 +568,7 @@ export default function ClaudeMcpServerDetailPage({
     editStdioProfile,
     editTransport,
     editUrl,
+    loadInventoryForServer,
     server,
   ]);
 
@@ -644,12 +670,6 @@ export default function ClaudeMcpServerDetailPage({
                 <button type="button" onClick={() => void logout()} disabled={Boolean(busyAction)} style={{ ...actionStyle(false, true), opacity: busyAction ? 0.62 : 1 }}>
                   {busyAction === 'logout' ? <IconLoader style={{ width: '0.88rem', height: '0.88rem' }} /> : <IconX style={{ width: '0.88rem', height: '0.88rem' }} />}
                   退出认证
-                </button>
-              ) : null}
-              {server?.enabled && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
-                <button type="button" onClick={() => void loadInventory()} disabled={Boolean(busyAction) || inventoryLoading} style={{ ...actionStyle(effectiveState === 'failed'), opacity: busyAction || inventoryLoading ? 0.62 : 1 }}>
-                  {inventoryLoading ? <IconLoader style={{ width: '0.88rem', height: '0.88rem' }} /> : <IconShare style={{ width: '0.88rem', height: '0.88rem' }} />}
-                  {effectiveState === 'failed' ? '重试 inventory' : '刷新 inventory'}
                 </button>
               ) : null}
               {server?.removable && (!effectiveState || !ACTIVE_STATES.includes(effectiveState)) ? (
@@ -762,7 +782,7 @@ export default function ClaudeMcpServerDetailPage({
 
       <DetailSection
         title="能力与工具"
-        subtitle="Tools、Resources 与 Prompts 由 Dream 通过标准 MCP SDK 在一次请求内发现；列表页不会触发远端连接。"
+        subtitle="进入详情页后，Dream 会通过标准 MCP SDK 自动发现 Tools、Resources 与 Prompts；列表页不会触发远端连接。"
         action={activeTab === 'tools' ? (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <label style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
@@ -783,10 +803,6 @@ export default function ClaudeMcpServerDetailPage({
               <option value="open_world">开放世界</option>
               <option value="unspecified">未声明</option>
             </select>
-            <button type="button" onClick={() => void loadInventory()} disabled={inventoryLoading || !server?.enabled} style={{ ...actionStyle(), opacity: inventoryLoading || !server?.enabled ? 0.62 : 1 }}>
-              {inventoryLoading ? <IconLoader style={{ width: '0.82rem', height: '0.82rem' }} /> : <IconShare style={{ width: '0.82rem', height: '0.82rem' }} />}
-              刷新 inventory
-            </button>
           </div>
         ) : null}
       >
@@ -822,17 +838,20 @@ export default function ClaudeMcpServerDetailPage({
           <div aria-label="MCP 工具列表" style={{ background: 'color-mix(in srgb, var(--color-bg-paper) 34%, transparent)', borderRadius: '0.8rem', padding: '0 0.15rem' }}>
             {inventoryLoading && !inventory ? <SkeletonList rows={5} /> : null}
             {inventoryError ? (
-              <div role="alert" style={{ display: 'grid', gap: '0.55rem', padding: '0.9rem', color: 'var(--color-state-error)', fontSize: '0.8rem' }}>
-                <span>{inventoryError}</span>
-                <button type="button" onClick={() => void loadInventory()} style={{ ...actionStyle(), width: 'fit-content' }}>重试探测</button>
-              </div>
+              <div role="alert" style={{ padding: '0.9rem', color: 'var(--color-state-error)', fontSize: '0.8rem' }}>{inventoryError}</div>
             ) : null}
             {!inventoryLoading && !inventoryError && !inventory ? (
-              <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>尚未连接远端 Server。点击“刷新 inventory”后才会执行本次 MCP discovery。</div>
+              <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>{server?.enabled ? '正在自动读取工具清单。' : '该 Server 已禁用。'}</div>
             ) : null}
             {!inventoryLoading && inventory && visibleTools.length === 0 ? (
               <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-                {inventory.tool_count === 0 ? '该服务没有报告工具。' : '没有匹配当前搜索和风险筛选的工具。'}
+                {inventory.status === 'needs_auth'
+                  ? '完成 OAuth 后将自动加载工具。'
+                  : inventory.status === 'failed'
+                    ? '连接失败，未能读取工具清单。'
+                    : inventory.tool_count === 0
+                      ? '该服务没有报告工具。'
+                      : '没有匹配当前搜索和风险筛选的工具。'}
               </div>
             ) : null}
             {visibleTools.map((tool) => <ToolRow key={tool.name} tool={tool} />)}
@@ -849,7 +868,7 @@ export default function ClaudeMcpServerDetailPage({
                 {resource.description ? <p style={{ margin: '0.28rem 0 0', color: 'var(--color-text-secondary)', fontSize: '0.76rem' }}>{resource.description}</p> : null}
               </article>
             ))}
-            {!inventory ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>刷新 inventory 后展示 Resources。</div> : null}
+            {!inventory ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>正在自动读取 Resources。</div> : null}
             {inventory && inventory.resources.length === 0 ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>该 Server 没有报告 Resources。</div> : null}
           </div>
         ) : (
@@ -860,7 +879,7 @@ export default function ClaudeMcpServerDetailPage({
                 {prompt.description ? <p style={{ margin: '0.28rem 0 0', color: 'var(--color-text-secondary)', fontSize: '0.76rem' }}>{prompt.description}</p> : null}
               </article>
             ))}
-            {!inventory ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>刷新 inventory 后展示 Prompts。</div> : null}
+            {!inventory ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>正在自动读取 Prompts。</div> : null}
             {inventory && inventory.prompts.length === 0 ? <div style={{ padding: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>该 Server 没有报告 Prompts。</div> : null}
           </div>
         )}

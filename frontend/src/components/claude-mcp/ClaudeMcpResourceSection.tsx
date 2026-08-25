@@ -9,6 +9,7 @@
 // [Sync] 2026-08-25: decouple list from discovery and expose managed HTTP/SSE/stdio-profile creation.
 // [Sync] 2026-08-25: remove user-selected authentication; backend discovery alone classifies anonymous versus OAuth-required Servers.
 // [Sync] 2026-08-25: replace redirect URL copy/paste with same-origin automatic SPA callback submission.
+// [Sync] 2026-08-25: describe detail inventory as automatic; the list remains database-only and never discovers remotely.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -337,7 +338,7 @@ export default function ClaudeMcpResourceSection({
           Claude MCP 资源
         </h3>
         <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-          Server 列表直接读取 Dream 数据库，不等待远端连接；进入详情后可显式并行刷新 Tools、Resources 与 Prompts。
+          Server 列表直接读取 Dream 数据库，不等待远端连接；进入详情后会自动加载 Tools、Resources 与 Prompts。
         </p>
       </div>
 
@@ -428,7 +429,7 @@ export default function ClaudeMcpResourceSection({
 
       {capability?.enabled && !loading && servers.length === 0 ? (
         <div style={{ border: '1px dashed var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-          尚未配置 MCP 服务。添加后列表会立即从数据库返回；远端 inventory 仅在详情页显式刷新。
+          尚未配置 MCP 服务。添加后列表会立即从数据库返回；进入详情页后自动加载远端能力清单。
         </div>
       ) : null}
 

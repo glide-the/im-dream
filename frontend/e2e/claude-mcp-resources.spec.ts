@@ -1,5 +1,5 @@
 // [Input] Running frontend entry point plus production-shaped intercepted Claude MCP and boot API fixtures.
-// [Output] Verify managed-DB Resources → Configure → OAuth → explicit inventory → revision-aware Update → Logout → Remove with zero secret persistence.
+// [Output] Verify managed-DB Resources → Configure → automatic inventory → OAuth → revision-aware Update → Logout → Remove with zero secret persistence.
 // [Pos] Provider-free Claude MCP browser journey; it never calls a real OAuth provider, CLI, backend, or business database.
 // [Sync] 2026-08-19: cover the complete visible v1 connector journey and responsive layout.
 // [Sync] 2026-08-19: cover restricted HTTP(S) configuration and user-owned removal before real-provider QA.
@@ -13,6 +13,7 @@
 // [Sync] 2026-08-25: prove auth_kind is absent from forms and CRUD payloads; backend fixtures own classification.
 // [Sync] 2026-08-25: require discovery evidence before OAuth appears and carry its CAS revision into later edits.
 // [Sync] 2026-08-25: prove the MCP OAuth callback stays on the SPA, submits automatically, and never renders or stores its code/state.
+// [Sync] 2026-08-25: require cache-first automatic detail inventory and no refresh/retry inventory controls.
 
 import { expect, test } from '@playwright/test';
 
@@ -77,7 +78,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   const token = 'claude-mcp-resources-technical-token';
   const serverName = 'e2e-user-server';
   const serverUrl = 'http://mcp.example.test/api';
-  const mcpRequests: Array<{ method: string; headers: Record<string, string> }> = [];
+  const mcpRequests: Array<{ method: string; path: string; headers: Record<string, string> }> = [];
   const unexpectedApiRequests: string[] = [];
   const diagnostics: string[] = [];
   let serverState: 'configured' | 'needs_auth' | 'connected' | 'logged_out' = 'configured';
@@ -102,7 +103,11 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   });
   page.context().on('request', (request) => {
     if (request.url().includes('/api/claude-mcp/')) {
-      mcpRequests.push({ method: request.method(), headers: request.headers() });
+      mcpRequests.push({
+        method: request.method(),
+        path: decodeURIComponent(new URL(request.url()).pathname),
+        headers: request.headers(),
+      });
     }
   });
 
@@ -205,7 +210,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
       return;
     }
     if (method === 'POST' && path === `/api/claude-mcp/servers/${serverName}/discoveries`) {
-      expect(request.postDataJSON()).toEqual({ force: true });
+      expect(request.postDataJSON()).toEqual({ force: false });
       if (serverState === 'configured') {
         serverState = 'needs_auth';
         serverRevision = 2;
@@ -472,7 +477,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await expect(serverCard.getByRole('button', { name: '开始认证' })).toHaveCount(0);
   await serverCard.getByRole('button', { name: '管理与工具' }).click();
   await expect(page).toHaveURL(new RegExp(`mcp-server=${serverName}`));
-  await page.getByRole('button', { name: '刷新 inventory' }).first().click();
+  await expect(page.getByRole('button', { name: /刷新 inventory|重试 inventory|重试探测/ })).toHaveCount(0);
   await expect(page.getByText('需要认证', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('user · revision 2', { exact: true })).toBeVisible();
 
@@ -489,8 +494,6 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   expect(await page.evaluate((secret) => Object.values(localStorage).every((value) => !value.includes(secret)), 'private-code')).toBe(true);
 
   await expect(page.getByRole('heading', { name: `${serverName} MCP Server` })).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Tools —' })).toHaveAttribute('aria-selected', 'true');
-  await page.getByRole('button', { name: '刷新 inventory' }).first().click();
   await expect(page.getByRole('tab', { name: 'Tools 41' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText(serverUrl, { exact: true })).toBeVisible();
   await page.getByRole('searchbox', { name: '搜索 MCP 工具' }).fill('submit_workflow');
@@ -534,7 +537,14 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   const mcpHeaders = mcpRequests.map((request) => request.headers);
   expect(mcpHeaders.length).toBeGreaterThanOrEqual(6);
   expect(mcpHeaders.every((headers) => headers.authorization === `Bearer ${token}`)).toBe(true);
-  expect(mcpRequests.filter((request) => request.method !== 'GET')).toHaveLength(8);
+  const discoveryRequests = mcpRequests.filter((request) => (
+    request.method === 'POST'
+    && request.path === `/api/claude-mcp/servers/${serverName}/discoveries`
+  ));
+  expect(discoveryRequests).toHaveLength(4);
+  expect(mcpRequests.filter((request) => (
+    request.method !== 'GET' && !discoveryRequests.includes(request)
+  ))).toHaveLength(6);
   expect(unexpectedApiRequests).toEqual([]);
   expect(diagnostics).toEqual([]);
 
