@@ -4,8 +4,8 @@
 # [Pos] Unit contract for scripts/verify_claude_registry_release.py; no registry,
 #       model, credential, database, Docker, or production service is accessed.
 # [Sync] 2026-08-24: initial provider-free registry release acceptance coverage.
-# [Sync] 2026-08-24: replace minimal npm archives with full publication evidence,
-#                    add tamper cases, and require source-only sdist install failure.
+# [Sync] 2026-08-26: require full npm evidence, source-only sdist failure, and
+#                    the exact ink-claude-code-dream/claude alias pair.
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -198,7 +199,8 @@ def _npm_tarball(
         manifest.update(
             {
                 "bin": {
-                    acceptance.CLI_COMMAND: f"bin/{acceptance.CLI_COMMAND}"
+                    alias: f"bin/{acceptance.CLI_COMMAND}"
+                    for alias in acceptance.CLI_ALIASES
                 },
                 "optionalDependencies": {
                     platform_package: version
@@ -328,6 +330,194 @@ def _npm_release_bodies() -> dict[str, bytes]:
     return bodies
 
 
+def _cleanroom_npm_release_bodies() -> dict[str, bytes]:
+    runtime = FIXTURE["runtime"]
+    version = runtime["version"]
+    receipt_sha = "8" * 64
+    bodies: dict[str, bytes] = {}
+    platform_bindings: dict[str, dict[str, str]] = {}
+    capability_ids = sorted(acceptance.REQUIRED_RUNTIME_CAPABILITIES)
+    for target, package in acceptance.NPM_PLATFORMS.items():
+        os_name, cpu = target.split("-", 1)
+        executable = f"standalone-{target}".encode()
+        executable_sha = hashlib.sha256(executable).hexdigest()
+        capabilities = {
+            "schemaVersion": "ink-cleanroom-capability-evidence/v1",
+            "artifact": {"entrypointSha256": executable_sha},
+            "capabilities": [{"id": item} for item in capability_ids],
+            "runtime": {
+                "corePruned": True,
+                "productionEligible": True,
+                "provenance": "repository-authored-clean-room",
+                "runtimeTarget": target,
+            },
+        }
+        capabilities_body = json.dumps(capabilities).encode()
+        manifest = {
+            "name": package,
+            "version": version,
+            "license": "MIT",
+            "publishConfig": {"access": "public", "provenance": True},
+            "scripts": {"prepack": "node scripts/prepack.mjs"},
+            "os": [os_name],
+            "cpu": [cpu],
+        }
+        runtime_manifest = {
+            "schemaVersion": "ink-cleanroom-npm-platform/v1",
+            "package": {"license": "MIT", "name": package, "version": version},
+            "runtime": {
+                "bunVersion": acceptance.BUN_VERSION,
+                "cpu": cpu,
+                "executable": "runtime/bin/ink-claude-code-dream",
+                "os": os_name,
+                "sha256": executable_sha,
+                "sourcemap": "none",
+                "target": target,
+            },
+        }
+        release = {
+            "schemaVersion": "ink-claude-cli-envelope/v1",
+            "core": {
+                "entrypointSha256": executable_sha,
+                "productionEligible": True,
+                "runtimeTarget": target,
+            },
+            "runtime": {
+                "version": version,
+                "integration": {"sdkVersion": FIXTURE["sdk"]["version"]},
+            },
+            "status": {
+                "productionEligible": True,
+                "publicationAllowed": True,
+                "redistributionAllowed": True,
+            },
+        }
+        artifact = {
+            "schemaVersion": "ink-cleanroom-artifact-manifest/v1",
+            "capabilitiesSha256": hashlib.sha256(capabilities_body).hexdigest(),
+            "artifact": {
+                "entrypointSha256": executable_sha,
+                "productionEligible": True,
+                "publicationAllowed": True,
+                "redistributionAllowed": True,
+                "runtimeTarget": target,
+            },
+        }
+        attestation = {
+            "schemaVersion": "ink-cleanroom-npm-platform-publication-attestation/v1",
+            "businessAcceptanceReceiptSha256": receipt_sha,
+            "entrypointSha256": executable_sha,
+            "productionEligible": True,
+            "publicationAllowed": True,
+            "redistributionAllowed": True,
+            "repository": acceptance.NPM_REPOSITORY,
+            "runtimeTarget": target,
+            "sourceMapsIncluded": False,
+            "version": version,
+        }
+        bodies[package] = _tar_bytes(
+            {
+                "package/package.json": json.dumps(manifest).encode(),
+                "package/runtime-manifest.json": json.dumps(runtime_manifest).encode(),
+                "package/npm-publication-attestation.json": json.dumps(attestation).encode(),
+                "package/SHA256SUMS": f"{executable_sha}  runtime/bin/ink-claude-code-dream\n".encode(),
+                "package/runtime/bin/ink-claude-code-dream": executable,
+                "package/runtime/release-manifest.json": json.dumps(release).encode(),
+                "package/runtime/manifest/artifact-manifest.json": json.dumps(artifact).encode(),
+                "package/runtime/manifest/capabilities.json": capabilities_body,
+            }
+        )
+        platform_bindings[target] = {
+            "executableSha256": executable_sha,
+            "package": package,
+        }
+
+    launcher = b"#!/bin/sh\nexec runtime-selector\n"
+    launcher_sha = hashlib.sha256(launcher).hexdigest()
+    capabilities = {
+        "schemaVersion": "ink-cleanroom-capability-evidence/v1",
+        "artifact": {"entrypointSha256": launcher_sha},
+        "capabilities": [{"id": item} for item in capability_ids],
+        "runtime": {
+            "corePruned": True,
+            "productionEligible": True,
+            "provenance": "repository-authored-clean-room",
+        },
+    }
+    capabilities_body = json.dumps(capabilities).encode()
+    optional = {
+        package: version for package in acceptance.NPM_PLATFORMS.values()
+    }
+    selector_manifest = {
+        "name": acceptance.NPM_SELECTOR,
+        "version": version,
+        "license": "MIT",
+        "publishConfig": {"access": "public", "provenance": True},
+        "scripts": {"prepack": "node scripts/prepack.mjs"},
+        "bin": {
+            alias: f"bin/{acceptance.CLI_COMMAND}"
+            for alias in acceptance.CLI_ALIASES
+        },
+        "optionalDependencies": optional,
+    }
+    runtime_manifest = {
+        "schemaVersion": "ink-cleanroom-npm-meta/v1",
+        "commands": ["claude", acceptance.CLI_COMMAND],
+        "optionalDependencies": optional,
+        "selector": "bin/ink-claude-code-dream",
+        "sourcemap": "none",
+        "supportedTargets": list(acceptance.NPM_PLATFORMS),
+    }
+    release = {
+        "schemaVersion": "ink-claude-cli-envelope/v1",
+        "core": {"entrypointSha256": launcher_sha, "productionEligible": True},
+        "runtime": {
+            "version": version,
+            "integration": {"sdkVersion": FIXTURE["sdk"]["version"]},
+        },
+        "status": {
+            "productionEligible": True,
+            "publicationAllowed": True,
+            "redistributionAllowed": True,
+        },
+    }
+    artifact = {
+        "schemaVersion": "ink-cleanroom-artifact-manifest/v1",
+        "capabilitiesSha256": hashlib.sha256(capabilities_body).hexdigest(),
+        "artifact": {
+            "entrypointSha256": launcher_sha,
+            "productionEligible": True,
+            "publicationAllowed": True,
+            "redistributionAllowed": True,
+        },
+        "platforms": platform_bindings,
+    }
+    attestation = {
+        "schemaVersion": "ink-cleanroom-npm-meta-publication-attestation/v1",
+        "businessAcceptanceReceiptSha256": receipt_sha,
+        "entrypointSha256": launcher_sha,
+        "productionEligible": True,
+        "publicationAllowed": True,
+        "redistributionAllowed": True,
+        "repository": acceptance.NPM_REPOSITORY,
+        "sourceMapsIncluded": False,
+        "version": version,
+    }
+    bodies[acceptance.NPM_SELECTOR] = _tar_bytes(
+        {
+            "package/package.json": json.dumps(selector_manifest).encode(),
+            "package/runtime-manifest.json": json.dumps(runtime_manifest).encode(),
+            "package/npm-publication-attestation.json": json.dumps(attestation).encode(),
+            "package/SHA256SUMS": f"{launcher_sha}  bin/ink-claude-code-dream\n".encode(),
+            "package/bin/ink-claude-code-dream": launcher,
+            "package/release-manifest.json": json.dumps(release).encode(),
+            "package/manifest/artifact-manifest.json": json.dumps(artifact).encode(),
+            "package/manifest/capabilities.json": capabilities_body,
+        }
+    )
+    return bodies
+
+
 class FakeNpmRunner:
     def __init__(self, destination: Path) -> None:
         runtime = FIXTURE["runtime"]
@@ -447,6 +637,39 @@ def test_npm_evidence_rejects_tampered_ripgrep(tmp_path: Path) -> None:
     assert caught.value.code == "RUNTIME_EVIDENCE_MISMATCH"
 
 
+def test_current_cleanroom_release_binds_selector_and_platform_executables(
+    tmp_path: Path,
+) -> None:
+    bodies = _cleanroom_npm_release_bodies()
+    summaries = acceptance.verify_npm_release_tarballs(
+        _write_npm_release(tmp_path, bodies), FIXTURE["runtime"]["version"]
+    )
+    assert set(summaries) == {
+        acceptance.NPM_SELECTOR,
+        *acceptance.NPM_PLATFORMS.values(),
+    }
+    assert all(
+        re.fullmatch(r"[0-9a-f]{64}", item["entrypointSha256"])
+        for item in summaries.values()
+    )
+
+
+def test_current_cleanroom_release_rejects_tampered_platform_executable(
+    tmp_path: Path,
+) -> None:
+    bodies = _cleanroom_npm_release_bodies()
+    package = FIXTURE["runtime"]["platforms"][0]
+    files = _untar_files(bodies[package])
+    files["package/runtime/bin/ink-claude-code-dream"] = b"tampered"
+    bodies[package] = _tar_bytes(files)
+
+    with pytest.raises(acceptance.AcceptanceError) as caught:
+        acceptance.verify_npm_release_tarballs(
+            _write_npm_release(tmp_path, bodies), FIXTURE["runtime"]["version"]
+        )
+    assert caught.value.code == "RUNTIME_EVIDENCE_MISMATCH"
+
+
 def test_npm_manifest_rejects_noncanonical_ripgrep_path() -> None:
     package = FIXTURE["runtime"]["platforms"][0]
     attestation = {
@@ -543,7 +766,10 @@ def test_selector_tarball_rejects_publication_or_dependency_drift(
         "license": "MIT",
         "publishConfig": {"access": "public", "provenance": True},
         "scripts": {"prepack": "node scripts/prepack.mjs"},
-        "bin": {acceptance.CLI_COMMAND: f"bin/{acceptance.CLI_COMMAND}"},
+        "bin": {
+            alias: f"bin/{acceptance.CLI_COMMAND}"
+            for alias in acceptance.CLI_ALIASES
+        },
         "optionalDependencies": {
             package: runtime["version"] for package in runtime["platforms"]
         },
@@ -556,6 +782,61 @@ def test_selector_tarball_rejects_publication_or_dependency_drift(
         )
 
     assert caught.value.code == code
+
+
+def test_current_cleanroom_manifests_accept_exact_aliases_and_standalone_platform() -> None:
+    runtime = FIXTURE["runtime"]
+    selector_manifest = {
+        "name": runtime["selector"],
+        "version": runtime["version"],
+        "license": "MIT",
+        "publishConfig": {"access": "public", "provenance": True},
+        "scripts": {"prepack": "node scripts/prepack.mjs"},
+        "bin": {
+            alias: f"bin/{acceptance.CLI_COMMAND}"
+            for alias in acceptance.CLI_ALIASES
+        },
+        "optionalDependencies": {
+            package: runtime["version"] for package in runtime["platforms"]
+        },
+    }
+    acceptance.validate_npm_tarball_manifest(
+        selector_manifest, runtime["selector"], runtime["version"]
+    )
+
+    platform_package = runtime["platforms"][0]
+    platform_manifest = {
+        "name": platform_package,
+        "version": runtime["version"],
+        "license": "MIT",
+        "publishConfig": {"access": "public", "provenance": True},
+        "scripts": {"prepack": "node scripts/prepack.mjs"},
+        "os": ["darwin"],
+        "cpu": ["arm64"],
+    }
+    acceptance.validate_npm_tarball_manifest(
+        platform_manifest, platform_package, runtime["version"]
+    )
+
+
+def test_current_cleanroom_selector_rejects_missing_claude_alias() -> None:
+    runtime = FIXTURE["runtime"]
+    manifest = {
+        "name": runtime["selector"],
+        "version": runtime["version"],
+        "license": "MIT",
+        "publishConfig": {"access": "public", "provenance": True},
+        "scripts": {"prepack": "node scripts/prepack.mjs"},
+        "bin": {acceptance.CLI_COMMAND: f"bin/{acceptance.CLI_COMMAND}"},
+        "optionalDependencies": {
+            package: runtime["version"] for package in runtime["platforms"]
+        },
+    }
+    with pytest.raises(acceptance.AcceptanceError) as caught:
+        acceptance.validate_npm_tarball_manifest(
+            manifest, runtime["selector"], runtime["version"]
+        )
+    assert caught.value.code == "CLI_CONTRACT_FAILED"
 
 
 def test_npm_404_is_structured_and_redacts_tool_output(tmp_path: Path) -> None:
@@ -783,10 +1064,13 @@ def test_npm_install_allows_real_postinstall_before_cli_probe(tmp_path: Path) ->
         assert argv[:2] == ["npm", "install"]
         assert "--ignore-scripts" not in argv
         assert "--omit=optional" in argv
-        executable = cwd / "node_modules" / ".bin" / acceptance.CLI_COMMAND
-        executable.parent.mkdir(parents=True)
-        executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        executable.chmod(0o700)
+        executable_root = cwd / "node_modules" / ".bin"
+        executable_root.mkdir(parents=True)
+        target = executable_root / "runtime-target"
+        target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        target.chmod(0o700)
+        for alias in acceptance.CLI_ALIASES:
+            (executable_root / alias).symlink_to(target)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     executable = acceptance.install_npm_runtime(
@@ -801,4 +1085,4 @@ def test_npm_install_allows_real_postinstall_before_cli_probe(tmp_path: Path) ->
         env={},
         runner=install,
     )
-    assert executable.name == acceptance.CLI_COMMAND
+    assert executable.name == "runtime-target"

@@ -24,8 +24,8 @@
 #                    onto the current develop application graph.
 # [Sync] 2026-08-22: preserve the centralized Claude Agent concurrency and
 #                    host/cgroup memory-admission configuration keys.
-# [Sync] 2026-08-23: fail startup closed unless the installed SDK metadata is
-#                    ink-claude-dream-agent-sdk 0.2.143 and its preserved
+# [Sync] 2026-08-26: fail startup closed unless the installed SDK metadata is
+#                    ink-claude-dream-agent-sdk 0.2.144 and its preserved
 #                    claude_agent_sdk import has no competing provider.
 # [Sync] 2026-08-23: resolve the qualified Dream Runtime (or explicit absolute
 #                    official rollback) before starting the Agent factory.

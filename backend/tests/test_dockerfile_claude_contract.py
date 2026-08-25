@@ -3,8 +3,8 @@
 #          Dream Runtime and explicit official rollback CLI remain atomically
 #          pinned without SDK overlap.
 # [Pos] Docker/dependency release contract tests.
-# [Sync] 2026-08-24: install custom SDK 0.2.143 from PyPI with an exact
-#        hash-locked export, install public Runtime selector 0.1.0 by default,
+# [Sync] 2026-08-26: install custom SDK 0.2.144 from PyPI with an exact
+#        hash-locked export, install public Runtime selector 0.1.1 by default,
 #        and retain the Docker-only official rollback artifact 2.1.241.
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from packaging.requirements import Requirement
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-SDK_VERSION = "0.2.143"
+SDK_VERSION = "0.2.144"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
-RUNTIME_VERSION = "0.1.0"
+RUNTIME_VERSION = "0.1.1"
 
 
 def _normalized_distribution_name(value: str) -> str:

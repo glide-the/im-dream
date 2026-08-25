@@ -16,6 +16,7 @@
 # [Sync] 2026-08-22: cover startup preservation of Claude Agent resource-admission keys.
 # [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
 #                    the Claude Agent factory starts.
+# [Sync] 2026-08-26: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.1.
 # [Sync] 2026-08-24: cover credential-free SDK/CLI startup identity logging.
 # [Sync] 2026-08-25: align MCP auth route registration with database server identifiers.
 
@@ -1759,7 +1760,7 @@ class TestFactoryLifecycle(unittest.TestCase):
         calls: list[str] = []
         distribution = types.SimpleNamespace(
             metadata={"Name": "ink-claude-dream-agent-sdk"},
-            version="0.2.143",
+            version="0.2.144",
         )
         with (
             unittest.mock.patch.object(
@@ -1798,18 +1799,18 @@ class TestFactoryLifecycle(unittest.TestCase):
             {
                 "cli_mode": "dream_runtime",
                 "cli_path": "/runtime/bin/ink-claude-code-dream",
-                "cli_runtime_release": "0.1.0",
+                "cli_runtime_release": "0.1.1",
                 "sdk_cli_compatibility_version": "2.1.241",
                 "sdk_distribution": "ink-claude-dream-agent-sdk",
                 "sdk_import": "claude_agent_sdk",
-                "sdk_version": "0.2.143",
+                "sdk_version": "0.2.144",
             },
         )
 
     def test_startup_identity_marks_explicit_cli_override(self):
         distribution = types.SimpleNamespace(
             metadata={"Name": "ink-claude-dream-agent-sdk"},
-            version="0.2.143",
+            version="0.2.144",
         )
         with (
             unittest.mock.patch.dict(
