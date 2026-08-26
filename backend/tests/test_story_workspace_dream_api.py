@@ -584,6 +584,61 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
+    def test_reentry_loader_classifies_only_a_missing_thread_workspace(self) -> None:
+        from services.story_workspace.dream_reentry_service import (
+            StoryWorkspaceDreamReentryWorkspaceMissing,
+        )
+
+        row = self.run.model_dump()
+        row["run_id"] = row.pop("workflow_run_id")
+        missing = ApiRouteError("AGENT_EXECUTION_FAILED", status_code=404)
+        with patch.object(
+            self.gateway,
+            "_read_dream_files_for_authorized_run",
+            side_effect=missing,
+        ), self.assertRaises(StoryWorkspaceDreamReentryWorkspaceMissing):
+            self.gateway._load_dream_reentry_stage_projection(
+                row,
+                {"actor_id": ACTOR_ID},
+                Mock(),
+            )
+
+        projection = Mock()
+        with patch.object(
+            self.gateway,
+            "_read_dream_files_for_authorized_run",
+            return_value=projection,
+        ), patch.object(
+            self.gateway,
+            "_dream_reentry_stage_activity_at",
+            side_effect=missing,
+        ), self.assertRaises(StoryWorkspaceDreamReentryWorkspaceMissing):
+            self.gateway._load_dream_reentry_stage_projection(
+                row,
+                {"actor_id": ACTOR_ID},
+                Mock(),
+            )
+
+        for error in (
+            ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403),
+            ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503),
+            ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422),
+        ):
+            with self.subTest(error=error.code), patch.object(
+                self.gateway,
+                "_read_dream_files_for_authorized_run",
+                side_effect=error,
+            ), self.assertRaises(ApiRouteError) as raised:
+                self.gateway._load_dream_reentry_stage_projection(
+                    row,
+                    {"actor_id": ACTOR_ID},
+                    Mock(),
+                )
+            self.assertEqual(
+                (raised.exception.code, raised.exception.status_code),
+                (error.code, error.status_code),
+            )
+
     @staticmethod
     def tree_snapshot(root: Path) -> list[tuple[str, str, bytes | None]]:
         snapshot: list[tuple[str, str, bytes | None]] = []

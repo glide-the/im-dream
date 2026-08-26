@@ -2,13 +2,16 @@
 # [Input] Existing AutoDL Admin/Dream releases, secure env files, Node/Python runtimes, and screen.
 # [Output] Idempotently preserve or start Admin first, then the Dream frontend/backend stack.
 # [Pos] Standalone AutoDL launch script; performs no build, migration, restore, GPU probe, or deployment.
-# [Sync] 2026-08-26: add one-command startup for an already deployed Ink & Memory stack.
+# [Sync] 2026-08-26: initialize Dream/Admin persistent roots before starting either service.
 set -euo pipefail
 
 ADMIN_ROOT="${INK_AUTODL_ADMIN_ROOT:-/root/ink-autodl/admin}"
 DREAM_ROOT="${INK_AUTODL_DREAM_ROOT:-/root/ink-autodl/dream}"
 DATA_ROOT="${INK_AUTODL_DATA_ROOT:-/root/autodl-tmp/ink-memory}"
+ADMIN_HOME="${INK_AUTODL_ADMIN_HOME:-/var/lib/ink-memory}"
 SERVICE_USER="${INK_AUTODL_SERVICE_USER:-ink-memory}"
+DATA_INIT_SCRIPT="${INK_AUTODL_DREAM_DATA_INIT_SCRIPT:-/root/ink-autodl/init-dream-data.sh}"
+ADMIN_DATA_INIT_SCRIPT="${INK_AUTODL_ADMIN_DATA_INIT_SCRIPT:-${ADMIN_ROOT}/source/deploy/autodl-ssh/runtime/init-admin-data.sh}"
 NODE_BIN="${INK_AUTODL_NODE_BIN:-/root/ink-autodl/runtime/node/bin}"
 NPM_BIN="${INK_AUTODL_NPM_BIN:-/root/ink-autodl/runtime/npm/bin}"
 ADMIN_PORT="${INK_AUTODL_ADMIN_PORT:-6008}"
@@ -35,6 +38,12 @@ install -d -m 0750 "$(dirname "${START_LOG}")"
 exec > >(tee -a "${START_LOG}") 2>&1
 exec 9>"${LOCK_FILE}"
 flock -n 9 || fail "Another Ink & Memory startup is already running."
+
+[[ -x "${DATA_INIT_SCRIPT}" ]] || fail "Dream data initializer is missing: ${DATA_INIT_SCRIPT}"
+INK_AUTODL_DATA_ROOT="${DATA_ROOT}" INK_AUTODL_SERVICE_USER="${SERVICE_USER}" "${DATA_INIT_SCRIPT}"
+[[ -x "${ADMIN_DATA_INIT_SCRIPT}" ]] || fail "Admin data initializer is missing: ${ADMIN_DATA_INIT_SCRIPT}"
+INK_AUTODL_ADMIN_HOME="${ADMIN_HOME}" INK_AUTODL_DATA_ROOT="${DATA_ROOT}" \
+  INK_AUTODL_SERVICE_USER="${SERVICE_USER}" "${ADMIN_DATA_INIT_SCRIPT}"
 
 port_is_listening() {
   local requested_port="$1"
@@ -89,7 +98,7 @@ start_admin() {
   screen -S "${ADMIN_SCREEN}" -X quit >/dev/null 2>&1 || true
   rm -f "${pid_file}"
   screen -dmS "${ADMIN_SCREEN}" -L -Logfile "${ADMIN_ROOT}/logs/admin.log" bash -lc \
-    "exec setpriv --reuid=${uid} --regid=${gid} --init-groups env AUTODL_ADMIN_ENV_FILE=$(quote "${env_file}") AUTODL_ADMIN_PID_FILE=$(quote "${pid_file}") AUTODL_NODE_BIN=$(quote "${NODE_BIN}") $(quote "${launcher}")"
+    "exec setpriv --reuid=${uid} --regid=${gid} --init-groups env HOME=$(quote "${ADMIN_HOME}") AUTODL_ADMIN_ENV_FILE=$(quote "${env_file}") AUTODL_ADMIN_PID_FILE=$(quote "${pid_file}") AUTODL_NODE_BIN=$(quote "${NODE_BIN}") $(quote "${launcher}")"
 
   wait_until admin_is_healthy 90 || fail "Admin did not become healthy; inspect ${ADMIN_ROOT}/logs/admin.log"
   log "Admin is ready on 127.0.0.1:${ADMIN_PORT}."

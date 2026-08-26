@@ -3,6 +3,7 @@
 <!-- [Pos] Repository entry guide for Ink & Memory contributors and local users. -->
 <!-- [Sync] 2026-08-17: replace the historical progress diary with a concise usage-first project guide. -->
 <!-- [Sync] 2026-08-22: align local Dream startup with Admin-supervised embedded PostgreSQL. -->
+<!-- [Sync] 2026-08-26: document AutoDL persistent-resource ownership boundaries. -->
 
 # Ink & Memory
 
@@ -75,6 +76,10 @@ git pull --ff-only origin develop
 
 Dream 不会在启动时建表，也没有 SQLite 运行时回退。共享 PostgreSQL Schema 只能由 Admin
 仓库中的 Drizzle migration 管理。
+
+AutoDL 直接部署中，Dream 的 Thread workspace、Artifact、本地文件、服务 home 与 Claude
+plugin runtime 统一位于 `/root/autodl-tmp/ink-memory`；Admin 的 PostgreSQL 位于其服务用户
+home/data 体系。两个仓库的 initializer 都拒绝符号链接，且不会自动迁移或删除数据库数据。
 
 首次运行时，在 Dream 根目录执行以下命令获取 Admin、生成本机私有配置，并由 Admin
 package 初始化内嵌 PostgreSQL 与发布 Schema。MinIO 当前关闭：
