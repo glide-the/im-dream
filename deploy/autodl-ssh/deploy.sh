@@ -2,7 +2,7 @@
 # [Input] AutoDL SSH settings, generated Dream env, frontend/backend source, and optional npm token.
 # [Output] Versioned direct-host Vite Preview + FastAPI/Claude release managed by screen.
 # [Pos] Dream AutoDL release entry; deliberately excludes Docker and nginx.
-# [Sync] 2026-08-26: persist and verify immutable Claude plugin artifacts across releases.
+# [Sync] 2026-08-26: install the standalone stack launcher during every source sync.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +19,7 @@ AUTODL_SSH_KEY="${AUTODL_SSH_KEY:-}"
 AUTODL_SSH_CONTROL_PATH="${AUTODL_SSH_CONTROL_PATH:-}"
 AUTODL_APP_ROOT="${AUTODL_APP_ROOT:-/root/ink-autodl/dream}"
 AUTODL_DATA_ROOT="${AUTODL_DATA_ROOT:-/root/autodl-tmp/ink-memory}"
+AUTODL_STACK_START_SCRIPT="${AUTODL_STACK_START_SCRIPT:-/root/ink-autodl/start-ink-memory.sh}"
 AUTODL_PLUGIN_RUNTIME_ROOT="${AUTODL_DATA_ROOT}/claude-plugin-runtime"
 AUTODL_PLUGIN_ARTIFACTS_SOURCE="${AUTODL_PLUGIN_ARTIFACTS_SOURCE:-${REPO_ROOT}/backend/data/claude-plugin-runtime/artifacts}"
 AUTODL_ENV_FILE="${AUTODL_ENV_FILE:-${SCRIPT_DIR}/.env}"
@@ -97,13 +98,14 @@ require_config() {
   [[ "${AUTODL_DREAM_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN must be an exact HTTPS origin."
   [[ "${AUTODL_SSH_USER}" == "root" ]] || err "AutoDL setup currently requires the root SSH account."
   [[ "${AUTODL_APP_ROOT}" == /root/* && "${AUTODL_DATA_ROOT}" == /root/* ]] || err "AutoDL paths must stay under /root."
+  [[ "${AUTODL_STACK_START_SCRIPT}" == /root/ink-autodl/* ]] || err "AutoDL stack start script must stay under /root/ink-autodl."
   [[ "${AUTODL_DREAM_FRONTEND_PORT}" == "6006" && "${AUTODL_DREAM_BACKEND_PORT}" == "8765" && "${AUTODL_ADMIN_PORT}" == "6008" ]] || err "AutoDL must use Dream frontend 6006, backend 8765, and Admin 6008."
 }
 
 check_local() {
   local failed=0 mode
   for name in ssh scp rsync git; do command -v "${name}" >/dev/null 2>&1 || { warn "Missing local command: ${name}"; failed=1; }; done
-  for file in "${AUTODL_ENV_FILE}" "${SCRIPT_DIR}/runtime/start-dream.sh" "${REPO_ROOT}/backend/requirements.txt" "${REPO_ROOT}/frontend/package.json" "${REPO_ROOT}/frontend/package-lock.json" "${REPO_ROOT}/frontend/vite.config.ts"; do
+  for file in "${AUTODL_ENV_FILE}" "${SCRIPT_DIR}/runtime/start-dream.sh" "${SCRIPT_DIR}/runtime/start-ink-memory.sh" "${REPO_ROOT}/backend/requirements.txt" "${REPO_ROOT}/frontend/package.json" "${REPO_ROOT}/frontend/package-lock.json" "${REPO_ROOT}/frontend/vite.config.ts"; do
     [[ -f "${file}" ]] || { warn "Missing file: ${file}"; failed=1; }
   done
   if [[ -f "${AUTODL_ENV_FILE}" ]]; then
@@ -226,6 +228,7 @@ sync_files() {
   log "Syncing Dream source without runtime secrets or mutable local data."
   if [[ "${DRY_RUN}" == "1" ]]; then printf '[dry-run] rsync'; printf ' %q' "${args[@]}" "${REPO_ROOT}/" "$(ssh_target):${AUTODL_APP_ROOT}/source/"; printf '\n';
   else rsync "${args[@]}" "${REPO_ROOT}/" "$(ssh_target):${AUTODL_APP_ROOT}/source/"; fi
+  remote "install -o root -g root -m 0755 $(quote "${AUTODL_APP_ROOT}/source/deploy/autodl-ssh/runtime/start-ink-memory.sh") $(quote "${AUTODL_STACK_START_SCRIPT}")"
   sync_plugin_artifacts
   scp_file "${AUTODL_ENV_FILE}" "${AUTODL_APP_ROOT}/config/dream.env.next"
   remote "set -e; group=\$(id -gn $(quote "${AUTODL_SERVICE_USER}")); chown root:\"\${group}\" $(quote "${AUTODL_APP_ROOT}/config/dream.env.next"); chmod 0640 $(quote "${AUTODL_APP_ROOT}/config/dream.env.next"); mv -f $(quote "${AUTODL_APP_ROOT}/config/dream.env.next") $(quote "${AUTODL_APP_ROOT}/config/dream.env")"
