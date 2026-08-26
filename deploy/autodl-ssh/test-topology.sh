@@ -2,7 +2,7 @@
 # [Input] Dream AutoDL env projector and persistent-directory initializer.
 # [Output] Automated topology, idempotency, ownership, mode, and symlink checks.
 # [Pos] Provider-free AutoDL deployment contract test.
-# [Sync] 2026-08-26: cover Dream data-root projection and initialization.
+# [Sync] 2026-08-26: cover Dream data-root projection and absence of Agent admission overrides.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +23,9 @@ INK_GATEWAY_SERVICE_KEY=test-gateway-key
 INK_ADMIN_PRODUCT_JWT_SECRET=test-product-secret
 AGENT_CWD=/tmp/stale
 ARTIFACT_WORKSPACE_ROOT=/tmp/stale-artifacts
+INK_AGENT_MAX_CONCURRENT_RUNS=9
+INK_AGENT_RUN_MEMORY_BUDGET_MIB=8192
+INK_AGENT_MEMORY_RESERVE_MIB=2048
 EOF
 cat >"${ADMIN_ENV}" <<'EOF'
 POSTGRES_USER=ink_test
@@ -42,6 +45,10 @@ grep -Fx "AGENT_CWD=${PROJECTED_DATA_ROOT}/agent-workspaces" "${OUTPUT_ENV}"
 grep -Fx "ARTIFACT_WORKSPACE_ROOT=${PROJECTED_DATA_ROOT}/artifacts" "${OUTPUT_ENV}"
 grep -Fx "FILE_STORAGE_LOCAL_DIR=${PROJECTED_DATA_ROOT}/file-storage" "${OUTPUT_ENV}"
 grep -Fx "INK_CLAUDE_PLUGIN_RUNTIME_ROOT=${PROJECTED_DATA_ROOT}/claude-plugin-runtime" "${OUTPUT_ENV}"
+if grep -Eq '^INK_AGENT_(MAX_CONCURRENT_RUNS|RUN_MEMORY_BUDGET_MIB|MEMORY_RESERVE_MIB)=' "${OUTPUT_ENV}"; then
+  printf 'AutoDL projected an explicit Agent admission override\n' >&2
+  exit 1
+fi
 
 for _ in 1 2; do
   INK_AUTODL_DATA_ROOT="${DATA_ROOT}" \
