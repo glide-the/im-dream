@@ -2,7 +2,7 @@
 <!--
 [Input] AutoDL direct-host platform scripts and SeetaCloud service mappings.
 [Output] Define Dream/Admin ordering, frontend/API topology, secure environment projection, verification, and rollback.
-[Sync] 2026-08-26: persist and verify Claude plugin artifacts on the AutoDL data disk.
+[Sync] 2026-08-26: document the standalone no-GPU AutoDL stack startup script.
 -->
 
 ## 拓扑与发布顺序
@@ -55,6 +55,20 @@ AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin-tunnel.example.com:8443 \
 ```
 
 私有 npm 包需要认证时，通过进程环境传入 `AUTODL_NPM_TOKEN`。脚本只生成临时 mode-0600 npmrc，完成 `ink-claude-code-dream` 与官方回滚 CLI 安装后立即删除；token 不进入 Dream runtime env、Git 或日志。
+
+## 已发布服务的一键启动
+
+发布完成后，可将独立启动脚本复制到 AutoDL 的 `LaunchTool311` 目录：
+
+```bash
+install -m 0755 \
+  /root/ink-autodl/dream/source/deploy/autodl-ssh/runtime/start-ink-memory.sh \
+  /root/LaunchTool311/start_ink_memory.sh
+
+bash /root/LaunchTool311/start_ink_memory.sh
+```
+
+该脚本无需 GPU，不执行构建、migration 或 restore。它会幂等检查现有端口，先恢复 Admin/内嵌 PostgreSQL，再恢复 Dream 前端与后端；健康服务不会被重复启动，未知进程占用端口时 fail closed。完整说明见 [`deploy/autodl-ssh/README.md`](../../deploy/autodl-ssh/README.md)。
 
 ## 验证与回滚
 
