@@ -2,7 +2,7 @@
 # [Input] Existing Dream/Admin secure env files and explicit AutoDL service mappings.
 # [Output] Mode-0600 Dream backend/frontend runtime env using the Admin-owned PostgreSQL identity.
 # [Pos] AutoDL Dream configuration projector; no CLI/transport state is persisted here.
-# [Sync] 2026-08-26: persist the verified Claude plugin runtime on the AutoDL data disk.
+# [Sync] 2026-08-26: project every Dream persistent resource onto the AutoDL data disk.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,7 +48,7 @@ trap 'rm -f "${temp_file}"' EXIT
 umask 077
 awk -F= '
   BEGIN {
-    split("DATABASE_URL PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN AGENT_CWD FILE_STORAGE_LOCAL_DIR INK_CLAUDE_PLUGIN_RUNTIME_ROOT INK_LOAD_DATABASE_URL_FROM_ENV_FILE CLAUDE_CODE_CLI_PATH VITE_ALLOWED_HOSTS VITE_DEV_API_PROXY_TARGET", keys, " ")
+    split("DATABASE_URL PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN AGENT_CWD ARTIFACT_WORKSPACE_ROOT FILE_STORAGE_LOCAL_DIR INK_CLAUDE_PLUGIN_RUNTIME_ROOT INK_LOAD_DATABASE_URL_FROM_ENV_FILE CLAUDE_CODE_CLI_PATH VITE_ALLOWED_HOSTS VITE_DEV_API_PROXY_TARGET", keys, " ")
     for (i in keys) excluded[keys[i]] = 1
   }
   /^[A-Za-z_][A-Za-z0-9_]*=/ {
@@ -72,6 +72,7 @@ awk -F= '
   printf 'INK_ADMIN_PRODUCT_API_BASE_URL=http://127.0.0.1:%s\n' "${AUTODL_ADMIN_PORT}"
   printf 'INK_ADMIN_PRODUCT_ORIGIN=%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
   printf 'AGENT_CWD=%s/agent-workspaces\n' "${AUTODL_DATA_ROOT}"
+  printf 'ARTIFACT_WORKSPACE_ROOT=%s/artifacts\n' "${AUTODL_DATA_ROOT}"
   printf 'FILE_STORAGE_LOCAL_DIR=%s/file-storage\n' "${AUTODL_DATA_ROOT}"
   printf 'INK_CLAUDE_PLUGIN_RUNTIME_ROOT=%s/claude-plugin-runtime\n' "${AUTODL_DATA_ROOT}"
   printf 'INK_LOAD_DATABASE_URL_FROM_ENV_FILE=0\n'

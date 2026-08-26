@@ -1,3 +1,8 @@
+# [Input] Authorized Story Workflow rows, Dream thread workspaces, and application commands.
+# [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
+# [Pos] Deck-domain Story Workflow application orchestration.
+# [Sync] 2026-08-26: classify only an absent re-entry Thread workspace as stale history.
+
 """Focused application services for Dream workflow business APIs."""
 
 from __future__ import annotations
@@ -59,6 +64,7 @@ try:
     )
     from services.story_workspace.dream_reentry_service import (
         StoryWorkspaceDreamReentryService,
+        StoryWorkspaceDreamReentryWorkspaceMissing,
     )
     from services.story_workspace.episode_artifact_service import (
         StoryWorkspaceEpisodeArtifactContractError,
@@ -134,6 +140,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     )
     from backend.services.story_workspace.dream_reentry_service import (
         StoryWorkspaceDreamReentryService,
+        StoryWorkspaceDreamReentryWorkspaceMissing,
     )
     from backend.services.story_workspace.episode_artifact_service import (
         StoryWorkspaceEpisodeArtifactContractError,
@@ -885,9 +892,13 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
                 workflow_run,
                 thread_id=thread_id,
             )
+            stage_activity_at = self._dream_reentry_stage_activity_at(projection)
+        except ApiRouteError as exc:
+            if exc.code == "AGENT_EXECUTION_FAILED" and exc.status_code == 404:
+                raise StoryWorkspaceDreamReentryWorkspaceMissing(thread_id) from exc
+            raise
         except StoryWorkspaceDreamFileError as exc:
             self._raise_dream_file_error(exc)
-        stage_activity_at = self._dream_reentry_stage_activity_at(projection)
         return StoryWorkspaceDreamReentryStageProjection(
             stages=projection.stages,
             stage_activity_at=stage_activity_at,

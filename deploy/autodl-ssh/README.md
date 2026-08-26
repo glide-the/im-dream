@@ -3,7 +3,7 @@
 [Input] Existing AutoDL Admin/Dream releases and the standalone stack launcher.
 [Output] Explain the application and provide a minimal one-command startup workflow.
 [Pos] User-facing README for an already deployed AutoDL Ink & Memory stack.
-[Sync] 2026-08-26: standardize the installed launcher at /root/ink-autodl/start-ink-memory.sh.
+[Sync] 2026-08-26: document persistent Dream data and separated Admin home roots.
 -->
 
 ## 应用介绍
@@ -22,6 +22,8 @@ Ink & Memory 是一款面向长篇故事、剧本和创意写作的 AI 创作工
 
 AutoDL 版本不依赖 Docker 或 Nginx：Admin 与内嵌 PostgreSQL 监听 `127.0.0.1:6008`，Dream 前端监听 `127.0.0.1:6006`，Dream 后端监听 `127.0.0.1:8765`。公网服务映射只需要暴露前端 `6006` 和 Admin `6008`。
 
+Dream 的 Thread workspace、共享 Artifact、本地文件、运行用户 home 与 Claude plugin runtime 默认统一位于 `/root/autodl-tmp/ink-memory`。Admin 的 PostgreSQL 数据独立位于服务用户 home 的 `/var/lib/ink-memory/data/postgres`；启动器不会迁移、恢复或删除数据库。
+
 ## 快速开始
 
 本脚本只启动已经发布完成的 release，不下载代码、不构建、不执行数据库 migration、不恢复数据库，也不检测 GPU。
@@ -32,6 +34,9 @@ Dream 的 `sync`、`build` 和 `deploy` 命令会自动将脚本安装到 `/root
 install -m 0755 \
   /root/ink-autodl/dream/source/deploy/autodl-ssh/runtime/start-ink-memory.sh \
   /root/ink-autodl/start-ink-memory.sh
+install -m 0755 \
+  /root/ink-autodl/dream/source/deploy/autodl-ssh/runtime/init-dream-data.sh \
+  /root/ink-autodl/init-dream-data.sh
 ```
 
 之后启动 Ink & Memory：

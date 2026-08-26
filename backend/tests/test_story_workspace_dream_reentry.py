@@ -1,4 +1,4 @@
-"""Durable, actor-scoped initial/in-progress Dream re-entry projection tests."""
+"""Durable Dream re-entry projection and stale-workspace isolation tests."""
 
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from routers import story_workspace
 from services.errors.error_registry import ApiRouteError
+from services.story_workspace.dream_reentry_service import (
+    StoryWorkspaceDreamReentryWorkspaceMissing,
+)
 from story_workspace.contracts import StoryWorkspaceDreamStage
 
 
@@ -370,6 +373,36 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             close_connections=False,
         )
 
+    def _authorized_row(self, number: int) -> dict[str, object]:
+        metadata = self.db.execute(
+            "SELECT metadata FROM chat_message WHERE id = ?",
+            (f"source-{number}",),
+        ).fetchone()["metadata"]
+        return {
+            "run_id": run_id(number),
+            "thread_id": f"thread-{number}",
+            "deck_id": "deck-1",
+            "deck_name": "甲板一",
+            "workspace_id": WORKSPACE_ID,
+            "deck_plugin_id": f"plugin-{number}",
+            "deck_plugin_version": "1.0.0",
+            "binding_id": f"binding-{number}",
+            "binding_revision": 1,
+            "deck_runtime_snapshot_id": f"snapshot-{number}",
+            "runtime_plugin_lock_id": f"lock-{number}",
+            "thread_voice_id": None,
+            "source_metadata": metadata,
+            "run_created_at": "2026-08-05T10:00:00+00:00",
+            "thread_updated_at": "2026-08-05T10:00:00+00:00",
+        }
+
+    def _isolated_service(self, rows, *, loader=None):
+        service = self._service(loader=loader)
+        service._query_authorized_rows = lambda _db, _actor_id: rows
+        service._project_titles = lambda _db, _rows: {}
+        service._confirmation_facts = lambda _db, _rows, _actor_id: {}
+        return service
+
     def test_projects_exact_lifecycle_groups_and_stable_order(self) -> None:
         generating_new = self._add_run(1, complete=False, updated_at="2026-08-05T14:00:00+00:00")
         generating_old = self._add_run(2, complete=True, updated_at="2026-08-05T13:00:00+00:00")
@@ -397,6 +430,71 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             ["initial", "initial", "initial", "in_progress", "in_progress"],
         )
         self.assertTrue(all(item.sort_key for item in response.runs))
+
+    def test_zero_runs_returns_an_empty_collection_without_loading_files(self) -> None:
+        loader_calls = 0
+
+        def loader(*_args):
+            nonlocal loader_calls
+            loader_calls += 1
+            raise AssertionError("zero Runs must not resolve a workspace")
+
+        response = self._isolated_service([], loader=loader).list_dream_runs(
+            actor={"actor_id": ACTOR_ID}
+        )
+
+        self.assertEqual(response.runs, [])
+        self.assertEqual(loader_calls, 0)
+
+    def test_single_valid_run_is_projected(self) -> None:
+        valid = self._add_run(200, complete=True)
+
+        response = self._isolated_service(
+            [self._authorized_row(200)]
+        ).list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(
+            [item.story_workspace_run_id for item in response.runs],
+            [valid],
+        )
+
+    def test_missing_historical_workspace_does_not_hide_a_valid_run(self) -> None:
+        missing = self._add_run(201, complete=True)
+        valid = self._add_run(202, complete=True)
+
+        def loader(row, *_args):
+            value = str(row["run_id"])
+            if value == missing:
+                raise StoryWorkspaceDreamReentryWorkspaceMissing("thread-201")
+            return self.projections[value]
+
+        response = self._isolated_service(
+            [self._authorized_row(201), self._authorized_row(202)],
+            loader=loader,
+        ).list_dream_runs(
+            actor={"actor_id": ACTOR_ID}
+        )
+
+        self.assertEqual(
+            [item.story_workspace_run_id for item in response.runs],
+            [valid],
+        )
+
+    def test_all_missing_historical_workspaces_return_an_empty_collection(self) -> None:
+        self._add_run(203, complete=False)
+        self._add_run(204, complete=True)
+
+        def loader(*_args):
+            raise StoryWorkspaceDreamReentryWorkspaceMissing("stale-thread")
+
+        response = self._isolated_service(
+            [self._authorized_row(203), self._authorized_row(204)],
+            loader=loader,
+        ).list_dream_runs(
+            actor={"actor_id": ACTOR_ID}
+        )
+
+        self.assertEqual(response.runs, [])
 
     def test_workflow_failure_does_not_invent_a_dream_failure_state(self) -> None:
         failed = self._add_run(30, complete=False, status="failed")
@@ -679,6 +777,21 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
                     actor={"actor_id": ACTOR_ID}
                 )
         self.assertIn(value, self.projections)
+
+    def test_workspace_security_and_io_errors_remain_fail_closed(self) -> None:
+        self._add_run(205, complete=False)
+        errors = (
+            ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403),
+            ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503),
+            ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422),
+            OSError("workspace permission denied"),
+        )
+        for error in errors:
+            with self.subTest(error=repr(error)), self.assertRaises(type(error)):
+                self._isolated_service(
+                    [self._authorized_row(205)],
+                    loader=lambda *_args, error=error: (_ for _ in ()).throw(error)
+                ).list_dream_runs(actor={"actor_id": ACTOR_ID})
 
     def test_stage_activity_time_participates_in_stable_recent_sort(self) -> None:
         older_thread_newer_stage = self._add_run(

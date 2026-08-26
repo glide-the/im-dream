@@ -3,7 +3,7 @@
 # [Output] Ordered re-entry rows with canonical titles and Dream's two-state
 #          initial/in-progress projection derived from confirmation facts.
 # [Pos] Story Workspace Dream list query; it does not author Project titles.
-# [Sync] 2026-08-14: align re-entry outcome with Dream's initial/in-progress lifecycle.
+# [Sync] 2026-08-26: isolate a historical Run whose Thread workspace is absent.
 
 """Actor-scoped durable projection for the Dream workbench re-entry list."""
 
@@ -73,6 +73,10 @@ _STORY_WORKSPACE_DREAM_LAUNCH_ALLOWED_KEYS = frozenset({
     "story_workspace_episode_identity",
 })
 _STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED = object()
+
+
+class StoryWorkspaceDreamReentryWorkspaceMissing(Exception):
+    """One authorized historical Run no longer has its Thread workspace."""
 
 
 class StoryWorkspaceDreamReentryService:
@@ -288,7 +292,12 @@ class StoryWorkspaceDreamReentryService:
             return None
 
         confirmation_accepted, confirmation_dispatched = confirmation_facts
-        stage_revisions, stage_activity_at = self._stage_snapshot(db, row, actor_id)
+        try:
+            stage_revisions, stage_activity_at = self._stage_snapshot(db, row, actor_id)
+        except StoryWorkspaceDreamReentryWorkspaceMissing:
+            # Files are the only artifact truth for this projection. A stale
+            # database Run must not invent artifacts or block other Runs.
+            return None
         live_turn = self._safe_live_turn_lookup(thread_id)
         lifecycle = self._lifecycle(
             stage_revisions=stage_revisions,
@@ -719,4 +728,7 @@ class StoryWorkspaceDreamReentryService:
             return False
 
 
-__all__ = ["StoryWorkspaceDreamReentryService"]
+__all__ = [
+    "StoryWorkspaceDreamReentryService",
+    "StoryWorkspaceDreamReentryWorkspaceMissing",
+]
