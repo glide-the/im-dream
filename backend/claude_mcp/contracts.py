@@ -12,6 +12,7 @@
 [Sync] 2026-08-25: add database-managed scope/transport/auth/CRUD contracts while retaining safe legacy fields.
 [Sync] 2026-08-25: distinguish missing OAuth callback configuration from missing credential encryption.
 [Sync] 2026-08-25: treat unprobed remote authentication as unknown until standard-MCP discovery supplies evidence.
+[Sync] 2026-08-27: distinguish transient PostgreSQL capability verification failures from a missing schema contract.
 """
 
 from __future__ import annotations
@@ -101,6 +102,7 @@ class ClaudeMcpErrorCode(str, Enum):
     INVENTORY_TIMEOUT = "CLAUDE_MCP_INVENTORY_TIMEOUT"
     INVENTORY_MALFORMED = "CLAUDE_MCP_INVENTORY_MALFORMED"
     SCHEMA_CAPABILITY_MISSING = "CLAUDE_MCP_SCHEMA_CAPABILITY_MISSING"
+    SCHEMA_CAPABILITY_UNAVAILABLE = "CLAUDE_MCP_SCHEMA_CAPABILITY_UNAVAILABLE"
     SERVER_ALREADY_EXISTS = "CLAUDE_MCP_SERVER_ALREADY_EXISTS"
     SERVER_REVISION_CONFLICT = "CLAUDE_MCP_SERVER_REVISION_CONFLICT"
     TRANSPORT_UNSUPPORTED = "CLAUDE_MCP_TRANSPORT_UNSUPPORTED"

@@ -6,6 +6,7 @@
 [Sync] 2026-08-25: replace online CLI management with exact-capability managed PostgreSQL flow.
 [Sync] 2026-08-25: report OAuth callback and credential-cipher configuration gates separately.
 [Sync] 2026-08-25: derive anonymous/OAuth requirements from standard-MCP discovery instead of public CRUD inputs.
+[Sync] 2026-08-27: report transient capability verification separately while allowing repository retries.
 """
 
 from __future__ import annotations
@@ -79,7 +80,15 @@ class ClaudeMcpService:
 
     async def capability(self, actor_id: str) -> ClaudeMcpCapability:
         del actor_id
-        available = await self.repository.capability_available()
+        try:
+            available = await self.repository.capability_available()
+        except ClaudeMcpError as exc:
+            if exc.code is not ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE:
+                raise
+            return ClaudeMcpCapability.managed(
+                enabled=False,
+                reason_code=exc.code.value,
+            )
         return ClaudeMcpCapability.managed(
             enabled=available,
             reason_code=(

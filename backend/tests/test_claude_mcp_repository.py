@@ -4,6 +4,7 @@
 [Output] Exact capability gating, scoped SQL, CRUD, uniqueness, and revision failure evidence.
 [Pos] Provider-free persistence tests; no database connection or runtime DDL.
 [Sync] 2026-08-25: define the Admin-owned managed MCP table consumption contract.
+[Sync] 2026-08-27: prove only successful capability checks are cached and transient failures recover.
 """
 
 from __future__ import annotations
@@ -115,14 +116,42 @@ def test_capability_requires_exact_hash_and_never_issues_ddl() -> None:
         for call in connection.calls
     )
 
+    capability_rows = [
+        {"version": 1, "contract_sha256": "b" * 64},
+        {"version": 1, "contract_sha256": "a" * 64},
+    ]
     drifted = _Connection(
         lambda query, _params: (
-            [{"version": 1, "contract_sha256": "b" * 64}]
-            if "mcp:capability" in query
-            else []
+            [capability_rows.pop(0)] if "mcp:capability" in query else []
         )
     )
-    assert _repository(drifted).capability_available_sync() is False
+    recovering_repository = _repository(drifted)
+    assert recovering_repository.capability_available_sync() is False
+    assert recovering_repository.capability_available_sync() is True
+    assert recovering_repository.capability_available_sync() is True
+    assert sum("mcp:capability" in query for query, _ in drifted.calls) == 2
+
+
+def test_transient_capability_query_failure_is_distinct_and_not_cached() -> None:
+    attempts = 0
+
+    def handler(query: str, _params: tuple[Any, ...]):
+        nonlocal attempts
+        if "mcp:capability" not in query:
+            return []
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("database restarting")
+        return [{"version": 1, "contract_sha256": "a" * 64}]
+
+    repository = _repository(_Connection(handler))
+    with pytest.raises(ClaudeMcpError) as raised:
+        repository.capability_available_sync()
+    assert raised.value.code is ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE
+    assert "database restarting" not in str(raised.value)
+    assert repository.capability_available_sync() is True
+    assert repository.capability_available_sync() is True
+    assert attempts == 2
 
 
 def test_list_and_get_are_actor_and_workspace_scoped_reads() -> None:

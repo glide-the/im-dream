@@ -6,6 +6,7 @@
 [Sync] 2026-08-25: expose managed CRUD, bulk discovery, OAuth callback/cancel, and logout.
 [Sync] 2026-08-25: map the explicit missing OAuth callback configuration gate to HTTP 503.
 [Sync] 2026-08-25: remove public auth_kind inputs; standard MCP discovery owns authentication classification.
+[Sync] 2026-08-27: map transient PostgreSQL capability verification failures to a safe retryable 503.
 """
 
 from __future__ import annotations
@@ -74,6 +75,7 @@ router = APIRouter(
 
 _ERROR_STATUS = {
     ClaudeMcpErrorCode.SCHEMA_CAPABILITY_MISSING: 503,
+    ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE: 503,
     ClaudeMcpErrorCode.SERVER_NOT_FOUND: 404,
     ClaudeMcpErrorCode.OPERATION_NOT_FOUND: 404,
     ClaudeMcpErrorCode.AUTH_OPERATION_EXPIRED: 404,
