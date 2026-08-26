@@ -2,8 +2,8 @@
 # [Output] Provide ClaudeAgentAdmissionController, ClaudeAgentAdmissionError,
 #          AgentAdmissionConfig, AgentResourceSnapshot, and AgentAdmissionLease.
 # [Pos] resource-admission node in backend/claude_agent; guards the existing turn runtime.
-# [Sync] 2026-08-22: add bounded active-turn admission and host/cgroup memory
-#                    preflight before Claude Agent SDK creates a CLI process tree.
+# [Sync] 2026-08-26: include conservative cgroup inactive-file and reclaimable-slab
+#                    capacity so cache pressure does not reject safe Agent starts.
 
 """Bounded, process-local resource admission for Claude Agent turns."""
 from __future__ import annotations
@@ -83,12 +83,21 @@ class AgentResourceSnapshot:
     host_available_bytes: int | None = None
     cgroup_current_bytes: int | None = None
     cgroup_max_bytes: int | None = None
+    cgroup_reclaimable_bytes: int | None = None
 
     @property
-    def cgroup_headroom_bytes(self) -> int | None:
+    def cgroup_raw_headroom_bytes(self) -> int | None:
         if self.cgroup_current_bytes is None or self.cgroup_max_bytes is None:
             return None
         return max(0, self.cgroup_max_bytes - self.cgroup_current_bytes)
+
+    @property
+    def cgroup_headroom_bytes(self) -> int | None:
+        raw_headroom = self.cgroup_raw_headroom_bytes
+        if raw_headroom is None or self.cgroup_max_bytes is None:
+            return None
+        reclaimable = max(0, self.cgroup_reclaimable_bytes or 0)
+        return min(self.cgroup_max_bytes, raw_headroom + reclaimable)
 
     @property
     def metrics_available(self) -> bool:
@@ -125,6 +134,29 @@ def _read_host_available_bytes() -> int | None:
     return None
 
 
+def _read_cgroup_reclaimable_bytes(cgroup_dir: Path) -> int | None:
+    """Read cache classes the kernel can reclaim under cgroup pressure."""
+
+    try:
+        lines = (cgroup_dir / "memory.stat").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    values: dict[str, int] = {}
+    for line in lines:
+        fields = line.split()
+        if len(fields) != 2 or fields[0] not in {"inactive_file", "slab_reclaimable"}:
+            continue
+        try:
+            value = int(fields[1])
+        except ValueError:
+            continue
+        if value >= 0:
+            values[fields[0]] = value
+    if not values:
+        return None
+    return values.get("inactive_file", 0) + values.get("slab_reclaimable", 0)
+
+
 def _cgroup_v2_directory() -> Path | None:
     root = Path("/sys/fs/cgroup")
     if (root / "memory.current").is_file():
@@ -148,9 +180,11 @@ def read_agent_resource_snapshot() -> AgentResourceSnapshot:
 
     current: int | None = None
     maximum: int | None = None
+    reclaimable: int | None = None
     cgroup_dir = _cgroup_v2_directory()
     if cgroup_dir is not None:
         current = _read_nonnegative_int(cgroup_dir / "memory.current")
+        reclaimable = _read_cgroup_reclaimable_bytes(cgroup_dir)
         try:
             raw_max = (cgroup_dir / "memory.max").read_text(encoding="utf-8").strip()
         except OSError:
@@ -166,6 +200,7 @@ def read_agent_resource_snapshot() -> AgentResourceSnapshot:
         host_available_bytes=_read_host_available_bytes(),
         cgroup_current_bytes=current,
         cgroup_max_bytes=maximum,
+        cgroup_reclaimable_bytes=reclaimable,
     )
 
 
@@ -250,10 +285,13 @@ class ClaudeAgentAdmissionController:
             self._memory_denials += 1
             logger.warning(
                 "Claude Agent admission denied: code=%s required_bytes=%d "
-                "host_available_bytes=%s cgroup_headroom_bytes=%s",
+                "host_available_bytes=%s cgroup_raw_headroom_bytes=%s "
+                "cgroup_reclaimable_bytes=%s cgroup_headroom_bytes=%s",
                 "CLAUDE_AGENT_MEMORY_PRESSURE",
                 required,
                 snapshot.host_available_bytes,
+                snapshot.cgroup_raw_headroom_bytes,
+                snapshot.cgroup_reclaimable_bytes,
                 cgroup_headroom,
             )
             raise ClaudeAgentAdmissionError(
@@ -300,6 +338,16 @@ class ClaudeAgentAdmissionController:
             ),
             "cgroup_headroom_mib": (
                 cgroup_headroom // _MIB if cgroup_headroom is not None else None
+            ),
+            "cgroup_raw_headroom_mib": (
+                snapshot.cgroup_raw_headroom_bytes // _MIB
+                if snapshot.cgroup_raw_headroom_bytes is not None
+                else None
+            ),
+            "cgroup_reclaimable_mib": (
+                snapshot.cgroup_reclaimable_bytes // _MIB
+                if snapshot.cgroup_reclaimable_bytes is not None
+                else None
             ),
             "capacity_denials": self._capacity_denials,
             "memory_denials": self._memory_denials,

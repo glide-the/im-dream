@@ -3,7 +3,7 @@
 [Input] Existing AutoDL Admin/Dream releases and the standalone stack launcher.
 [Output] Explain the application and provide a minimal one-command startup workflow.
 [Pos] User-facing README for an already deployed AutoDL Ink & Memory stack.
-[Sync] 2026-08-26: document persistent Dream data and separated Admin home roots.
+[Sync] 2026-08-26: document persistent Dream data and /root/ink-autodl/data PostgreSQL root.
 -->
 
 ## 应用介绍
@@ -22,7 +22,7 @@ Ink & Memory 是一款面向长篇故事、剧本和创意写作的 AI 创作工
 
 AutoDL 版本不依赖 Docker 或 Nginx：Admin 与内嵌 PostgreSQL 监听 `127.0.0.1:6008`，Dream 前端监听 `127.0.0.1:6006`，Dream 后端监听 `127.0.0.1:8765`。公网服务映射只需要暴露前端 `6006` 和 Admin `6008`。
 
-Dream 的 Thread workspace、共享 Artifact、本地文件、运行用户 home 与 Claude plugin runtime 默认统一位于 `/root/autodl-tmp/ink-memory`。Admin 的 PostgreSQL 数据独立位于服务用户 home 的 `/var/lib/ink-memory/data/postgres`；启动器不会迁移、恢复或删除数据库。
+Dream 的 Thread workspace、共享 Artifact、本地文件、运行用户 home 与 Claude plugin runtime 默认统一位于 `/root/autodl-tmp/ink-memory`。Admin 的 PostgreSQL 数据独立位于服务用户拥有的 `/root/ink-autodl/data/postgres`；启动器不会迁移、恢复或删除数据库。
 
 ## 快速开始
 

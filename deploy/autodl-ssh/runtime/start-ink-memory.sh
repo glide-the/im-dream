@@ -2,13 +2,13 @@
 # [Input] Existing AutoDL Admin/Dream releases, secure env files, Node/Python runtimes, and screen.
 # [Output] Idempotently preserve or start Admin first, then the Dream frontend/backend stack.
 # [Pos] Standalone AutoDL launch script; performs no build, migration, restore, GPU probe, or deployment.
-# [Sync] 2026-08-26: initialize Dream/Admin persistent roots before starting either service.
+# [Sync] 2026-08-26: use /root/ink-autodl/data as the Admin/PostgreSQL home.
 set -euo pipefail
 
 ADMIN_ROOT="${INK_AUTODL_ADMIN_ROOT:-/root/ink-autodl/admin}"
 DREAM_ROOT="${INK_AUTODL_DREAM_ROOT:-/root/ink-autodl/dream}"
 DATA_ROOT="${INK_AUTODL_DATA_ROOT:-/root/autodl-tmp/ink-memory}"
-ADMIN_HOME="${INK_AUTODL_ADMIN_HOME:-/var/lib/ink-memory}"
+ADMIN_HOME="${INK_AUTODL_ADMIN_HOME:-/root/ink-autodl/data}"
 SERVICE_USER="${INK_AUTODL_SERVICE_USER:-ink-memory}"
 DATA_INIT_SCRIPT="${INK_AUTODL_DREAM_DATA_INIT_SCRIPT:-/root/ink-autodl/init-dream-data.sh}"
 ADMIN_DATA_INIT_SCRIPT="${INK_AUTODL_ADMIN_DATA_INIT_SCRIPT:-${ADMIN_ROOT}/source/deploy/autodl-ssh/runtime/init-admin-data.sh}"
