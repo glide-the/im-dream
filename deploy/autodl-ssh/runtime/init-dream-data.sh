@@ -2,11 +2,11 @@
 # [Input] AutoDL Dream data root and service account identity.
 # [Output] Idempotent, non-symlink persistent Dream directories with mode 0750.
 # [Pos] Root-only AutoDL Dream persistent-resource initializer.
-# [Sync] 2026-08-26: centralize Dream data-disk ownership and modes.
+# [Sync] 2026-08-26: default Dream data ownership to the root runtime identity.
 set -euo pipefail
 
 DATA_ROOT="${INK_AUTODL_DATA_ROOT:-/root/autodl-tmp/ink-memory}"
-SERVICE_USER="${INK_AUTODL_SERVICE_USER:-ink-memory}"
+SERVICE_USER="${INK_AUTODL_SERVICE_USER:-root}"
 SERVICE_GROUP="${INK_AUTODL_SERVICE_GROUP:-$(id -gn "${SERVICE_USER}")}"
 
 fail() { printf '[dream-data-init:error] %s\n' "$*" >&2; exit 1; }

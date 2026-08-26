@@ -2,7 +2,7 @@
 <!--
 [Input] AutoDL direct-host platform scripts and SeetaCloud service mappings.
 [Output] Define Dream/Admin ordering, frontend/API topology, secure environment projection, verification, and rollback.
-[Sync] 2026-08-26: install the standalone stack launcher under /root/ink-autodl.
+[Sync] 2026-08-26: run Dream as root while retaining isolated Admin/PostgreSQL ownership.
 -->
 
 ## 拓扑与发布顺序
@@ -19,7 +19,7 @@ flowchart LR
   Admin --> PG
 ```
 
-不安装 Docker/nginx。Dream 公网 8443 只映射前端 6006，FastAPI 8765 保持本机私有并由 Vite Preview 同源代理。`screen` 保持 SSH 断开后的服务进程；业务进程和 PostgreSQL 使用专用非 root 用户。代码、配置和版本化 release 位于 `/root/ink-autodl`，持久数据位于 `/root/autodl-tmp/ink-memory`。
+不安装 Docker/nginx。Dream 公网 8443 只映射前端 6006，FastAPI 8765 保持本机私有并由 Vite Preview 同源代理。`screen` 保持 SSH 断开后的服务进程；Dream 前后端和 Claude Runtime 以 `root` 运行，以便 `.dream/runtime` 安全目录协议逐级打开 `/root` 下的 workspace。Admin 与 PostgreSQL 仍使用专用非 root 用户。代码、配置和版本化 release 位于 `/root/ink-autodl`，持久数据位于 `/root/autodl-tmp/ink-memory`。
 
 Claude 插件的不可变 artifacts 位于 `/root/autodl-tmp/ink-memory/claude-plugin-runtime`，不放入版本化 release。发布时可通过 `AUTODL_PLUGIN_ARTIFACTS_SOURCE` 从受信任的本机 artifact store 幂等补充；未提供本机 seed 时保留远端已有内容。远端 store 为空则发布失败，`verify` 还会解析并校验默认 Deck 插件，避免数据库 `ready` 记录与磁盘 artifact 脱节后产生注册 500。
 
