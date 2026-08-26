@@ -10,6 +10,7 @@
 // [Sync] 2026-08-25: remove user-selected authentication; backend discovery alone classifies anonymous versus OAuth-required Servers.
 // [Sync] 2026-08-25: replace redirect URL copy/paste with same-origin automatic SPA callback submission.
 // [Sync] 2026-08-25: describe detail inventory as automatic; the list remains database-only and never discovers remotely.
+// [Sync] 2026-08-27: automatically retry transient capability verification without misreporting a missing migration.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -36,6 +37,8 @@ import {
 import { IconCheck, IconChevronRight, IconDatabase, IconLoader, IconX } from '../chat/Icons';
 
 const OPERATION_POLL_INTERVAL_MS = 1200;
+const CAPABILITY_RETRY_INTERVAL_MS = 2000;
+const CAPABILITY_UNAVAILABLE = 'CLAUDE_MCP_SCHEMA_CAPABILITY_UNAVAILABLE';
 const ACTIVE_STATES: ClaudeMcpState[] = [
   'auth_starting',
   'waiting_for_user',
@@ -127,7 +130,10 @@ function actionButton(primary = false): React.CSSProperties {
 
 function messageForCapability(capability: ClaudeMcpCapability): string {
   if (capability.reason_code === 'CLAUDE_MCP_SCHEMA_CAPABILITY_MISSING') {
-    return '当前 PostgreSQL 尚未发布 Dream MCP 管理 capability；请先应用 Admin Drizzle 0038 前向迁移。';
+    return '当前 PostgreSQL 未发布或不匹配 Dream MCP 管理 capability；请核对 Admin Drizzle 0038 迁移状态。';
+  }
+  if (capability.reason_code === CAPABILITY_UNAVAILABLE) {
+    return 'Dream 暂时无法核验 PostgreSQL capability，数据库恢复后页面会自动重试。';
   }
   return 'Dream MCP 管理能力暂不可用，请检查数据库 capability 与服务策略。';
 }
@@ -200,6 +206,14 @@ export default function ClaudeMcpResourceSection({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (capability?.reason_code !== CAPABILITY_UNAVAILABLE) return undefined;
+    const timer = window.setTimeout(() => {
+      void load();
+    }, CAPABILITY_RETRY_INTERVAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [capability, load]);
 
   const activeOperationIds = useMemo(
     () => Object.values(operations)

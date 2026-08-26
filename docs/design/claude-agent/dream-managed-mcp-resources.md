@@ -3,6 +3,7 @@
 <!-- [定位] Dream Resources MCP 管理面迁移设计稿；只约束 MCP 配置、凭据、发现与 Chat 投影，不改写 OAuth/Chat/Deck/Gateway 的无关职责。 -->
 <!-- [同步] 2026-08-25：正常 PostgreSQL 已应用 0038；真实账户三 transport、Chat/resume、cancel、页面 P50/P95 与 Admin 可见页已验证；MCP 认证类型由后端 discovery 判定；真实 Comfy OAuth 已完成 logout/login、同源自动 callback、41/24/10 inventory、两次自然到期 `/oauth/token` refresh、只读工具调用与同 Thread 续聊终验。 -->
 <!-- [同步] 2026-08-25：新增独立中文业务交互时序图集，并将详情页合同校准为自动 `force=false` inventory、无刷新按钮。 -->
+<!-- [同步] 2026-08-27：capability 仅缓存精确验证成功结果；PostgreSQL 瞬时查询失败与真实 schema 缺失使用不同安全错误，Resources 无按钮自动重试。 -->
 
 # Dream 托管 MCP Resources：管理链路去 CLI 化设计
 
@@ -133,7 +134,7 @@ sequenceDiagram
     participant DB as PostgreSQL
     UI->>API: GET capability 与 GET servers（并行）
     API->>S: actor-scoped reads
-    S->>DB: 进程首次校验精确 capability（随后缓存）
+    S->>DB: 校验精确 capability（仅成功后按进程缓存）
     S->>DB: 单次读取 Server + credential 状态
     DB-->>S: 一致性快照
     S-->>UI: 0 subprocess / 0 MCP 网络请求
@@ -703,7 +704,7 @@ PID sampler 在整个正常 API 性能轮次观测到 backend 直接子进程集
 |---:|---|---|---|
 | 1 | 配置持久真相源是否唯一？ | 是（已实现并真实验收） | PostgreSQL 专用四表；CLI 仅保留显式文件 importer/回滚代码，不在 DB-only 请求路径 dual-read。 |
 | 2 | 是否遵守 Admin Drizzle 唯一 DDL 所有权？ | 是 | Dream 不建表、不迁移；依赖 `dream.managed-mcp-resources.v1` 精确 capability。 |
-| 3 | capability 是否精确且 fail closed？ | 是 | Admin/Dream 同值校验 version 1 与 `746dfc…614a`；repository 每进程只查一次，缺失/异常缓存 false 直至重启。 |
+| 3 | capability 是否精确且 fail closed？ | 是 | Admin/Dream 同值校验 version 1 与 `746dfc…614a`；仅精确成功按进程缓存，缺失/漂移与瞬时查询失败 fail closed 但保持可重试，且返回不同安全错误。 |
 | 4 | 在线 capability/list/get/CRUD 是否真正去 CLI？ | 是（正常服务实测） | 正常 Router/Service 只依赖 repository/coordinator；旧 driver 无生产 import；30 轮 list/capability 与 1/5 Server 性能 sampler 均观测 0 backend child。 |
 | 5 | 是否复用公开接口并限制 SDK/Runtime 修改？ | 是 | Python MCP SDK 做 discovery；现有 Agent SDK Path 接口做 Chat 投影；Runtime 只补官方 `SSEClientTransport` 兼容。 |
 | 6 | 是否误写 MCP session 跨进程恢复？ | 否 | 文中明确 session 请求内、operation 进程内；new/resume 只重新注入配置快照。 |

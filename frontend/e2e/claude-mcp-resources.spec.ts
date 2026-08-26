@@ -14,12 +14,110 @@
 // [Sync] 2026-08-25: require discovery evidence before OAuth appears and carry its CAS revision into later edits.
 // [Sync] 2026-08-25: prove the MCP OAuth callback stays on the SPA, submits automatically, and never renders or stores its code/state.
 // [Sync] 2026-08-25: require cache-first automatic detail inventory and no refresh/retry inventory controls.
+// [Sync] 2026-08-27: prove transient PostgreSQL capability failures recover automatically without a user-facing retry button.
 
 import { expect, test } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
 
 test.use({ channel: 'chromium' });
+
+test('Resources automatically recovers after a transient capability verification failure', async ({ page }) => {
+  let capabilityRequests = 0;
+  let capabilityAvailable = false;
+  await page.context().route('**/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (!path.startsWith('/api/')) {
+      await route.continue();
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/me') {
+      await route.fulfill({ json: { user_id: 'mcp-recovery-user', email: 'mcp-recovery@example.test', display_name: 'MCP Recovery', role: 'user' } });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/connectors') {
+      await route.fulfill({ json: { connectors: [] } });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/claude-mcp/capability') {
+      capabilityRequests += 1;
+      await route.fulfill({
+        json: {
+          enabled: capabilityAvailable,
+          reason_code: capabilityAvailable ? null : 'CLAUDE_MCP_SCHEMA_CAPABILITY_UNAVAILABLE',
+          cli_version: null,
+          minimum_cli_version: null,
+          headless_minimum_cli_version: null,
+          credential_identity: null,
+          management_mode: 'managed_db',
+          schema_capability: 'dream.managed-mcp-resources.v1',
+          schema_version: 1,
+          transports: ['streamable_http', 'sse', 'stdio'],
+        },
+      });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/claude-mcp/servers') {
+      if (!capabilityAvailable) {
+        await route.fulfill({ status: 503, json: { error: { code: 'CLAUDE_MCP_SCHEMA_CAPABILITY_UNAVAILABLE', message: 'temporarily unavailable' } } });
+      } else {
+        await route.fulfill({ json: { servers: [] } });
+      }
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/default-voices') {
+      await route.fulfill({ json: {} });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/sessions') {
+      await route.fulfill({ json: { sessions: [] } });
+      return;
+    }
+    if (request.method() === 'POST' && path === '/api/sessions') {
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/sessions/range') {
+      await route.fulfill({ json: { sessions: [] } });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/sessions/events') {
+      await route.fulfill({ body: ': connected\n\n', contentType: 'text/event-stream' });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/pictures/range') {
+      await route.fulfill({ json: { pictures: [] } });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/preferences') {
+      await route.fulfill({ json: { first_login_completed: true, timezone: 'Asia/Shanghai' } });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/decks') {
+      await route.fulfill({ json: { decks: [] } });
+      return;
+    }
+    if (request.method() === 'GET' && path === '/api/version') {
+      await route.fulfill({ json: { version: 'technical-e2e' } });
+      return;
+    }
+    await route.fulfill({ status: 404, json: { detail: 'unexpected request' } });
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem('auth_token', 'mcp-recovery-technical-token');
+    localStorage.setItem('migration_completed', 'true');
+  });
+
+  await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
+  await expect(page.getByText('Dream 暂时无法核验 PostgreSQL capability')).toBeVisible();
+  const requestsAtGate = capabilityRequests;
+  await expect.poll(() => capabilityRequests, { timeout: 10_000 }).toBeGreaterThan(requestsAtGate);
+  capabilityAvailable = true;
+  await expect(page.getByText('尚未配置 MCP 服务。')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('button', { name: /retry|重试|刷新 inventory/i })).toHaveCount(0);
+  expect(capabilityRequests).toBeGreaterThanOrEqual(2);
+});
 
 test('MCP OAuth callback submits automatically and keeps secrets out of page content and storage', async ({ page }) => {
   const backendCallbackRequests: string[] = [];

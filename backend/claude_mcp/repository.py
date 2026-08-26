@@ -4,7 +4,7 @@
 [Output] Read-only list/get plus transactional CRUD, credential, discovery snapshot, and import receipt operations.
 [Pos] Sole Dream persistence boundary for `dream_mcp_*`; contains no DDL, SQLite, CLI, network, or runtime fallback.
 [Sync] 2026-08-25: implement dream.managed-mcp-resources.v1 consumption with actor scope and CAS.
-[Sync] 2026-08-25: cache the immutable process-lifetime schema capability after one exact fail-closed check.
+[Sync] 2026-08-27: cache only a verified capability; transient query failures and missing contracts remain retryable.
 """
 
 from __future__ import annotations
@@ -210,11 +210,11 @@ class PostgresMcpRepository:
         return await asyncio.to_thread(self.capability_available_sync)
 
     def capability_available_sync(self) -> bool:
-        if self._capability_cache is not None:
-            return self._capability_cache
+        if self._capability_cache is True:
+            return True
         with self._capability_lock:
-            if self._capability_cache is not None:
-                return self._capability_cache
+            if self._capability_cache is True:
+                return True
             try:
                 with self._uow(read_only=True) as uow:
                     row = uow.execute(
@@ -225,19 +225,22 @@ class PostgresMcpRepository:
                         """,
                         (MANAGED_MCP_RESOURCES_CAPABILITY,),
                     ).fetchone()
-            except Exception:
-                available = False
-            else:
-                available = bool(
-                    row
-                    and int(row["version"]) == MANAGED_MCP_RESOURCES_VERSION
-                    and row["contract_sha256"] == self._expected_contract_sha256
-                )
-            # Schema capabilities are deployment contracts, not mutable
-            # business data.  A process that starts before migration remains
-            # fail-closed until restart; normal list/Chat paths then pay no
-            # repeated capability query.
-            self._capability_cache = available
+            except Exception as exc:
+                raise ClaudeMcpError(
+                    ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE,
+                    "Managed MCP database capability could not be verified.",
+                ) from exc
+            available = bool(
+                row
+                and int(row["version"]) == MANAGED_MCP_RESOURCES_VERSION
+                and row["contract_sha256"] == self._expected_contract_sha256
+            )
+            # A verified schema contract is immutable for this deployment and
+            # can be cached for the process lifetime. Missing/mismatched rows
+            # and transient database failures must be retried: Admin may apply
+            # a forward migration or restart PostgreSQL after Dream starts.
+            if available:
+                self._capability_cache = True
             return available
 
     async def list_servers(self, actor_id: str, workspace_id: str | None = None) -> list[McpServerRecord]:

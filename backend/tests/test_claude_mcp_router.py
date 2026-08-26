@@ -5,6 +5,7 @@
 [Pos] Public route boundary tests; no database, CLI, subprocess, MCP server, or OAuth provider.
 [Sync] 2026-08-25: replace CLI-shaped routes with managed database API coverage.
 [Sync] 2026-08-25: prove public CRUD rejects user-selected auth_kind and defaults detection state internally.
+[Sync] 2026-08-27: prove transient capability verification remains a safe disabled DTO and retryable 503.
 """
 
 from __future__ import annotations
@@ -125,6 +126,29 @@ def test_crud_discovery_bulk_and_logout_are_thin_forwarders():
     assert client.delete("/api/claude-mcp/servers/server-1/credential").status_code == 200
     assert client.delete("/api/claude-mcp/servers/server-1?expected_revision=1").status_code == 200
     assert {call[0] for call in service.calls} >= {"create", "update", "discover", "cancel-discovery", "bulk", "logout", "delete"}
+
+
+def test_transient_capability_verification_is_safe_and_retryable() -> None:
+    class _UnavailableService(_Service):
+        async def capability(self, actor):
+            return ClaudeMcpCapability.managed(
+                enabled=False,
+                reason_code=ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE.value,
+            )
+
+        async def list_servers(self, actor, workspace_id=None):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE,
+                "Managed MCP database capability could not be verified.",
+            )
+
+    client, _ = _client(_UnavailableService())
+    capability = client.get("/api/claude-mcp/capability")
+    assert capability.status_code == 200
+    assert capability.json()["reason_code"] == "CLAUDE_MCP_SCHEMA_CAPABILITY_UNAVAILABLE"
+    servers = client.get("/api/claude-mcp/servers")
+    assert servers.status_code == 503
+    assert servers.json()["error"]["code"] == "CLAUDE_MCP_SCHEMA_CAPABILITY_UNAVAILABLE"
 
 
 def test_legacy_create_shape_is_safe_and_stdio_command_is_forbidden():

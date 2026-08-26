@@ -6,6 +6,7 @@
 [Sync] 2026-08-25: replace online CLI lifecycle tests with managed PostgreSQL service contracts.
 [Sync] 2026-08-25: prove bulk discovery delegates identifiers once without serial duplicate repository reads.
 [Sync] 2026-08-25: prove 401/403 discovery, not public input, promotes a remote Server to OAuth-required.
+[Sync] 2026-08-27: distinguish retryable capability verification failure from a missing Admin contract.
 """
 
 from __future__ import annotations
@@ -70,6 +71,8 @@ class _Repository:
 
     async def capability_available(self):
         self.calls.append(("capability",))
+        if isinstance(self.capability, Exception):
+            raise self.capability
         return self.capability
 
     async def list_servers(self, actor_id, workspace_id=None):
@@ -241,6 +244,23 @@ def test_capability_missing_fails_closed_and_legacy_cli_fields_are_null() -> Non
         with pytest.raises(ClaudeMcpError) as raised:
             await service.list_servers("7")
         assert raised.value.code is ClaudeMcpErrorCode.SCHEMA_CAPABILITY_MISSING
+
+    asyncio.run(scenario())
+
+
+def test_transient_capability_verification_has_distinct_safe_reason() -> None:
+    async def scenario():
+        unavailable = ClaudeMcpError(
+            ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE,
+            "Managed MCP database capability could not be verified.",
+        )
+        service, _, _ = _service(capability=unavailable)
+        capability = await service.capability("7")
+        assert capability.enabled is False
+        assert capability.reason_code == "CLAUDE_MCP_SCHEMA_CAPABILITY_UNAVAILABLE"
+        with pytest.raises(ClaudeMcpError) as raised:
+            await service.list_servers("7")
+        assert raised.value.code is ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE
 
     asyncio.run(scenario())
 
