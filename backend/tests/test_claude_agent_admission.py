@@ -2,7 +2,7 @@
 # [Output] Verify bounded concurrency, host/cgroup memory preflight, retryable
 #          SSE errors, missing-metric fallback, and idempotent lease release.
 # [Pos] resource-admission test node in backend/tests.
-# [Sync] 2026-08-22: add provider-free admission and factory integration coverage.
+# [Sync] 2026-08-26: cover reclaimable cgroup cache without weakening low-memory rejection.
 
 """Tests for Claude Agent process-local resource admission."""
 from __future__ import annotations
@@ -25,6 +25,7 @@ from claude_agent.admission import (
     AgentResourceSnapshot,
     ClaudeAgentAdmissionController,
     ClaudeAgentAdmissionError,
+    read_agent_resource_snapshot,
 )
 from claude_agent.service import ClaudeAgentRunRequest
 from claude_agent.stream_events import NormalizedAgentEvent
@@ -120,6 +121,51 @@ class TestClaudeAgentAdmissionController(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, "CLAUDE_AGENT_MEMORY_PRESSURE")
         self.assertEqual(controller.stats()["cgroup_headroom_mib"], 524)
+
+    def test_reclaimable_cgroup_cache_admits_one_turn(self):
+        controller = ClaudeAgentAdmissionController(
+            _config(),
+            snapshot_provider=lambda: AgentResourceSnapshot(
+                host_available_bytes=2 * 1024 * _MIB,
+                cgroup_current_bytes=1940 * _MIB,
+                cgroup_max_bytes=2048 * _MIB,
+                cgroup_reclaimable_bytes=700 * _MIB,
+            ),
+        )
+
+        lease = controller.try_acquire("thread-cache-pressure")
+
+        stats = controller.stats()
+        self.assertEqual(stats["cgroup_raw_headroom_mib"], 108)
+        self.assertEqual(stats["cgroup_reclaimable_mib"], 700)
+        self.assertEqual(stats["cgroup_headroom_mib"], 808)
+        lease.release()
+
+    def test_resource_snapshot_reads_only_reclaimable_cgroup_classes(self):
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            (cgroup / "memory.current").write_text(str(1900 * _MIB))
+            (cgroup / "memory.max").write_text(str(2048 * _MIB))
+            (cgroup / "memory.stat").write_text(
+                "inactive_file 314572800\n"
+                "active_file 734003200\n"
+                "slab_reclaimable 209715200\n"
+                "slab_unreclaimable 104857600\n"
+            )
+            with unittest.mock.patch(
+                "claude_agent.admission._cgroup_v2_directory",
+                return_value=cgroup,
+            ), unittest.mock.patch(
+                "claude_agent.admission._read_host_available_bytes",
+                return_value=3 * 1024 * _MIB,
+            ):
+                snapshot = read_agent_resource_snapshot()
+
+        self.assertEqual(snapshot.cgroup_raw_headroom_bytes, 148 * _MIB)
+        self.assertEqual(snapshot.cgroup_reclaimable_bytes, 500 * _MIB)
+        self.assertEqual(snapshot.cgroup_headroom_bytes, 648 * _MIB)
 
     def test_observed_remote_idle_headroom_admits_one_turn(self):
         controller = ClaudeAgentAdmissionController(
