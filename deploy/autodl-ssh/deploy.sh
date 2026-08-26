@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# [Input] AutoDL SSH settings, generated Dream env, backend source, and optional npm token.
-# [Output] Versioned direct-host FastAPI/Claude release managed by screen.
-# [Pos] Dream AutoDL release entry; deliberately excludes Docker, nginx, and frontend.
-# [Sync] 2026-08-26: add direct-host build/deploy/verify/rollback with SDK/Runtime receipts.
+# [Input] AutoDL SSH settings, generated Dream env, frontend/backend source, and optional npm token.
+# [Output] Versioned direct-host Vite Preview + FastAPI/Claude release managed by screen.
+# [Pos] Dream AutoDL release entry; deliberately excludes Docker and nginx.
+# [Sync] 2026-08-26: serve frontend on 6006 and same-origin proxy to private backend 8765.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +23,8 @@ AUTODL_ENV_FILE="${AUTODL_ENV_FILE:-${SCRIPT_DIR}/.env}"
 AUTODL_SERVICE_USER="${AUTODL_SERVICE_USER:-ink-memory}"
 AUTODL_NODE_VERSION="${AUTODL_NODE_VERSION:-22.18.0}"
 AUTODL_PYTHON="${AUTODL_PYTHON:-/root/miniconda3/bin/python}"
-AUTODL_DREAM_PORT="${AUTODL_DREAM_PORT:-6006}"
+AUTODL_DREAM_FRONTEND_PORT="${AUTODL_DREAM_FRONTEND_PORT:-${AUTODL_DREAM_PORT:-6006}}"
+AUTODL_DREAM_BACKEND_PORT="${AUTODL_DREAM_BACKEND_PORT:-8765}"
 AUTODL_ADMIN_PORT="${AUTODL_ADMIN_PORT:-6008}"
 AUTODL_DREAM_PUBLIC_ORIGIN="${AUTODL_DREAM_PUBLIC_ORIGIN:-}"
 AUTODL_SCREEN_NAME="${AUTODL_DREAM_SCREEN_NAME:-ink-dream}"
@@ -37,6 +38,10 @@ log() { printf '[dream-autodl] %s\n' "$*"; }
 warn() { printf '[warn] %s\n' "$*" >&2; }
 err() { printf '[error] %s\n' "$*" >&2; exit 1; }
 quote() { printf '%q' "$1"; }
+dream_public_host() {
+  local host="${AUTODL_DREAM_PUBLIC_ORIGIN#https://}"
+  printf '%s\n' "${host%%:*}"
+}
 
 usage() {
   cat <<'EOF'
@@ -45,9 +50,9 @@ Usage: ./deploy/autodl-ssh/deploy.sh [--dry-run] <command>
 Commands:
   check      Validate local files, SSH, Admin availability, and target identity.
   plan       Print the direct-host Dream release sequence and URL mappings.
-  sync       Rsync backend source and generated runtime env.
-  build      Install host/runtime prerequisites and build a versioned release.
-  deploy     Build, restart only Dream, and verify local/public health.
+  sync       Rsync frontend/backend source and generated runtime env.
+  build      Install prerequisites and build a versioned frontend/backend release.
+  deploy     Build, restart only the Dream stack, and verify local/public health.
   start|stop|status|logs|verify|rollback
 
 AUTODL_NPM_TOKEN is optional. When present it is transferred only through a
@@ -87,15 +92,16 @@ scp_file() {
 
 require_config() {
   [[ -n "${AUTODL_SSH_HOST}" ]] || err "AUTODL_SSH_HOST is required."
+  [[ "${AUTODL_DREAM_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN must be an exact HTTPS origin."
   [[ "${AUTODL_SSH_USER}" == "root" ]] || err "AutoDL setup currently requires the root SSH account."
   [[ "${AUTODL_APP_ROOT}" == /root/* && "${AUTODL_DATA_ROOT}" == /root/* ]] || err "AutoDL paths must stay under /root."
-  [[ "${AUTODL_DREAM_PORT}" == "6006" && "${AUTODL_ADMIN_PORT}" == "6008" ]] || err "AutoDL mappings must use Dream 6006 and Admin 6008."
+  [[ "${AUTODL_DREAM_FRONTEND_PORT}" == "6006" && "${AUTODL_DREAM_BACKEND_PORT}" == "8765" && "${AUTODL_ADMIN_PORT}" == "6008" ]] || err "AutoDL must use Dream frontend 6006, backend 8765, and Admin 6008."
 }
 
 check_local() {
   local failed=0 mode
   for name in ssh scp rsync git; do command -v "${name}" >/dev/null 2>&1 || { warn "Missing local command: ${name}"; failed=1; }; done
-  for file in "${AUTODL_ENV_FILE}" "${SCRIPT_DIR}/runtime/start-dream.sh" "${REPO_ROOT}/backend/requirements.txt"; do
+  for file in "${AUTODL_ENV_FILE}" "${SCRIPT_DIR}/runtime/start-dream.sh" "${REPO_ROOT}/backend/requirements.txt" "${REPO_ROOT}/frontend/package.json" "${REPO_ROOT}/frontend/package-lock.json" "${REPO_ROOT}/frontend/vite.config.ts"; do
     [[ -f "${file}" ]] || { warn "Missing file: ${file}"; failed=1; }
   done
   if [[ -f "${AUTODL_ENV_FILE}" ]]; then
@@ -115,12 +121,13 @@ command_plan() {
   cat <<EOF
 AutoDL Dream direct-host release:
   SSH target:      $(ssh_target):${AUTODL_APP_ROOT}
-  Dream mapping:   http://127.0.0.1:${AUTODL_DREAM_PORT} -> ${AUTODL_DREAM_PUBLIC_ORIGIN:-<required>}
+  Dream mapping:   http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT} (Vite Preview) -> ${AUTODL_DREAM_PUBLIC_ORIGIN:-<required>}
+  API upstream:    http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT} (FastAPI, private)
   Admin upstream:  http://127.0.0.1:${AUTODL_ADMIN_PORT}
   data:            ${AUTODL_DATA_ROOT}
   runtime:         Miniconda Python 3.12 + Node ${AUTODL_NODE_VERSION} + screen
   Claude pair:     ink-claude-dream-agent-sdk 0.2.144 + ink-claude-code-dream 0.1.1
-  excluded:        Docker, nginx, Dream frontend, database migration
+  excluded:        Docker, nginx, database migration
 EOF
 }
 
@@ -210,13 +217,19 @@ build_release() {
 staging=$(quote "${AUTODL_APP_ROOT}/releases/${release_id}.staging")
 release=$(quote "${AUTODL_APP_ROOT}/releases/${release_id}")
 rm -rf \"\${staging}\"
-install -d \"\${staging}/app\"
+install -d \"\${staging}/app\" \"\${staging}/frontend\"
 $(quote "${AUTODL_PYTHON}") -m venv \"\${staging}/venv\"
 \"\${staging}/venv/bin/python\" -m pip install --upgrade pip >/dev/null
 PIP_INDEX_URL=$(quote "${AUTODL_PYPI_INDEX_URL}") PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10 \"\${staging}/venv/bin/python\" -m pip install --require-hashes --extra-index-url https://pypi.org/simple -r $(quote "${AUTODL_APP_ROOT}/source/backend/requirements.txt")
 rsync -a --exclude '.env' --exclude '.venv*' --exclude 'data/' $(quote "${AUTODL_APP_ROOT}/source/backend/") \"\${staging}/app/\"
+rsync -a --exclude '.env*' --exclude 'node_modules/' --exclude 'dist/' $(quote "${AUTODL_APP_ROOT}/source/frontend/") \"\${staging}/frontend/\"
 cp $(quote "${AUTODL_APP_ROOT}/source/deploy/autodl-ssh/runtime/start-dream.sh") \"\${staging}/start-dream.sh\"
 chmod 0755 \"\${staging}/start-dream.sh\"
+export PATH=/root/ink-autodl/runtime/node/bin:\$PATH
+cd \"\${staging}/frontend\"
+npm ci --no-audit --no-fund --registry $(quote "${AUTODL_NPM_REGISTRY}")
+NODE_OPTIONS=--max-old-space-size=4096 VITE_PUBLIC_SITE_URL=$(quote "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/") VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT} VITE_ALLOWED_HOSTS=$(quote "$(dream_public_host)") npm run build
+test -s \"\${staging}/frontend/dist/index.html\"
 cd \"\${staging}/app\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from importlib import metadata as m; import claude_agent_sdk as sdk; assert m.version('ink-claude-dream-agent-sdk') == '0.2.144'; assert sdk.__version__ == '0.2.144'\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; assert resolve_claude_cli_path().endswith('/ink-claude-code-dream')\"
@@ -234,20 +247,39 @@ stop_dream() {
 start_dream() {
   remote "set -euo pipefail
 test -L $(quote "${AUTODL_APP_ROOT}/current")
+current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current"))
+env_file=$(quote "${AUTODL_APP_ROOT}/config/dream.env")
+if [ ! -s \"\${current}/frontend/dist/index.html\" ]; then
+  env_file=$(quote "${AUTODL_APP_ROOT}/config/dream.env.legacy")
+  sed 's/^PORT=.*/PORT=${AUTODL_DREAM_FRONTEND_PORT}/' $(quote "${AUTODL_APP_ROOT}/config/dream.env") > \"\${env_file}.next\"
+  group=\$(id -gn $(quote "${AUTODL_SERVICE_USER}"))
+  chown root:\"\${group}\" \"\${env_file}.next\"
+  chmod 0640 \"\${env_file}.next\"
+  mv -f \"\${env_file}.next\" \"\${env_file}\"
+fi
 uid=\$(id -u $(quote "${AUTODL_SERVICE_USER}")); gid=\$(id -g $(quote "${AUTODL_SERVICE_USER}"))
 rm -f $(quote "${AUTODL_APP_ROOT}/run/dream.pid")
 screen -S $(quote "${AUTODL_SCREEN_NAME}") -X quit >/dev/null 2>&1 || true
-screen -dmS $(quote "${AUTODL_SCREEN_NAME}") -L -Logfile $(quote "${AUTODL_APP_ROOT}/logs/dream.log") bash -lc \"exec setpriv --reuid=\${uid} --regid=\${gid} --init-groups env HOME=$(quote "${AUTODL_DATA_ROOT}/service-home") AUTODL_DREAM_ENV_FILE=$(quote "${AUTODL_APP_ROOT}/config/dream.env") AUTODL_DREAM_PID_FILE=$(quote "${AUTODL_APP_ROOT}/run/dream.pid") AUTODL_NODE_BIN=/root/ink-autodl/runtime/node/bin AUTODL_NPM_BIN=/root/ink-autodl/runtime/npm/bin $(quote "${AUTODL_APP_ROOT}/current/start-dream.sh")\"
-for _ in \$(seq 1 120); do curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_PORT}/api/health >/dev/null 2>&1 && exit 0; sleep 1; done
+screen -dmS $(quote "${AUTODL_SCREEN_NAME}") -L -Logfile $(quote "${AUTODL_APP_ROOT}/logs/dream.log") bash -lc \"exec setpriv --reuid=\${uid} --regid=\${gid} --init-groups env HOME=$(quote "${AUTODL_DATA_ROOT}/service-home") AUTODL_DREAM_ENV_FILE=\${env_file} AUTODL_DREAM_PID_FILE=$(quote "${AUTODL_APP_ROOT}/run/dream.pid") AUTODL_DREAM_FRONTEND_PORT=${AUTODL_DREAM_FRONTEND_PORT} AUTODL_DREAM_BACKEND_PORT=${AUTODL_DREAM_BACKEND_PORT} AUTODL_NODE_BIN=/root/ink-autodl/runtime/node/bin AUTODL_NPM_BIN=/root/ink-autodl/runtime/npm/bin $(quote "${AUTODL_APP_ROOT}/current/start-dream.sh")\"
+if [ -s \"\${current}/frontend/dist/index.html\" ]; then
+  for _ in \$(seq 1 120); do
+    curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null 2>&1 && curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null 2>&1 && curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null 2>&1 && exit 0
+    sleep 1
+  done
+else
+  for _ in \$(seq 1 120); do curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null 2>&1 && exit 0; sleep 1; done
+fi
 tail -n 160 $(quote "${AUTODL_APP_ROOT}/logs/dream.log") >&2 || true
 exit 1"
 }
 
 verify() {
-  remote "set -e; curl -fsS --retry 20 --retry-delay 2 --retry-connrefused --max-time 10 http://127.0.0.1:${AUTODL_DREAM_PORT}/api/health >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_ADMIN_PORT}/admin/login >/dev/null; screen -ls | grep -q '[.]${AUTODL_SCREEN_NAME}[[:space:]]'; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_PORT}$'"
+  local topology
+  topology="$(remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_ADMIN_PORT}/admin/login >/dev/null; screen -ls | grep -q '[.]${AUTODL_SCREEN_NAME}[[:space:]]'; if [ -s \"\${current}/frontend/dist/index.html\" ]; then curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_FRONTEND_PORT}$'; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_BACKEND_PORT}$'; printf stack; else curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; printf legacy; fi")"
   [[ -n "${AUTODL_DREAM_PUBLIC_ORIGIN}" ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN is required for public verification."
   curl -fsS --retry 15 --retry-delay 3 --retry-connrefused --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/api/health" >/dev/null
-  log "Dream local health, Admin dependency, screen supervisor, and public mapping passed."
+  if [[ "${topology}" == "stack" ]]; then curl -fsS --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/" >/dev/null; fi
+  log "Dream ${topology} topology, Admin dependency, screen supervisor, and public mapping passed."
 }
 
 deploy() { command_check; setup_host; sync_files; build_release; stop_dream; start_dream; verify; }
@@ -277,7 +309,7 @@ case "${COMMAND:-help}" in
   deploy) deploy ;;
   start) require_config; start_dream; verify ;;
   stop) require_config; stop_dream ;;
-  status) require_config; remote "screen -ls 2>/dev/null | grep '[.]${AUTODL_SCREEN_NAME}[[:space:]]' || true; if [ -f $(quote "${AUTODL_APP_ROOT}/run/dream.pid") ]; then pid=\$(cat $(quote "${AUTODL_APP_ROOT}/run/dream.pid")); ps -o pid,ppid,user,stat,etimes,cmd -p \"\${pid}\"; fi; ss -ltnp 2>/dev/null | grep -E ':${AUTODL_DREAM_PORT}[[:space:]]' || true" ;;
+  status) require_config; remote "screen -ls 2>/dev/null | grep '[.]${AUTODL_SCREEN_NAME}[[:space:]]' || true; if [ -f $(quote "${AUTODL_APP_ROOT}/run/dream.pid") ]; then pid=\$(cat $(quote "${AUTODL_APP_ROOT}/run/dream.pid")); ps -o pid,ppid,user,stat,etimes,cmd -p \"\${pid}\"; ps -o pid,ppid,user,stat,etimes,cmd --ppid \"\${pid}\"; fi; ss -ltnp 2>/dev/null | grep -E ':(${AUTODL_DREAM_FRONTEND_PORT}|${AUTODL_DREAM_BACKEND_PORT})[[:space:]]' || true" ;;
   logs) require_config; remote "tail -n 200 $(quote "${AUTODL_APP_ROOT}/logs/dream.log")" ;;
   verify) require_config; verify ;;
   rollback) require_config; rollback ;;

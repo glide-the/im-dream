@@ -1,8 +1,8 @@
 # AutoDL SSH 部署
 <!--
 [Input] AutoDL direct-host platform scripts and SeetaCloud service mappings.
-[Output] Define Dream/Admin ordering, secure environment projection, verification, and rollback.
-[Sync] 2026-08-26: add the non-Docker, non-nginx AutoDL release path.
+[Output] Define Dream/Admin ordering, frontend/API topology, secure environment projection, verification, and rollback.
+[Sync] 2026-08-26: publish Vite Preview on 6006 with same-origin FastAPI proxy to 8765.
 -->
 
 ## 拓扑与发布顺序
@@ -11,16 +11,17 @@ AutoDL 由两个仓库各自的 `deploy/autodl-ssh` 平台发布，先 Admin、�
 
 ```mermaid
 flowchart LR
-  DreamPublic["Dream HTTPS mapping"] --> Dream["FastAPI 127.0.0.1:6006"]
+  DreamPublic["Dream HTTPS mapping"] --> Frontend["Vite Preview 127.0.0.1:6006"]
+  Frontend -->|"/api /auth /oauth /polycli"| Dream["FastAPI 127.0.0.1:8765"]
   AdminPublic["Admin HTTPS mapping"] --> Admin["Next.js 127.0.0.1:6008"]
   Dream --> Admin
   Dream --> PG["Admin-owned embedded PostgreSQL 127.0.0.1:54329"]
   Admin --> PG
 ```
 
-不安装 Docker/nginx。`screen` 保持 SSH 断开后的服务进程；业务进程和 PostgreSQL 使用专用非 root 用户。代码、配置和版本化 release 位于 `/root/ink-autodl`，持久数据位于 `/root/autodl-tmp/ink-memory`。
+不安装 Docker/nginx。Dream 公网 8443 只映射前端 6006，FastAPI 8765 保持本机私有并由 Vite Preview 同源代理。`screen` 保持 SSH 断开后的服务进程；业务进程和 PostgreSQL 使用专用非 root 用户。代码、配置和版本化 release 位于 `/root/ink-autodl`，持久数据位于 `/root/autodl-tmp/ink-memory`。
 
-两个仓库均先将 `platform.env.example` 复制为 gitignored 的 `platform.env`，填写 SSH endpoint、`/root` 路径和 SeetaCloud HTTPS 映射。`deploy.sh` 会自动读取该文件；npm token 等秘密仍只通过进程环境传入。
+两个仓库均先将 `platform.env.example` 复制为 gitignored 的 `platform.env`，填写 SSH endpoint、`/root` 路径和 SeetaCloud HTTPS 映射。Dream 的 `prepare-env.sh` 与两个仓库的 `deploy.sh` 会自动读取该文件；npm token 等秘密仍只通过进程环境传入。
 
 ## Admin 首次发布
 
@@ -39,7 +40,7 @@ AUTODL_DREAM_PUBLIC_ORIGIN=https://dream-tunnel.example.com:8443 \
 
 ## Dream 发布
 
-Dream env 从自身安全配置和上一步 Admin env 投影。浏览器-facing URL 使用 HTTPS mapping；同机 Gateway/Product API 使用 `127.0.0.1:6008`：
+Dream env 从自身安全配置和上一步 Admin env 投影。浏览器-facing URL 使用 HTTPS mapping；前端 6006 同源代理后端 8765，同机 Gateway/Product API 使用 `127.0.0.1:6008`：
 
 ```bash
 AUTODL_ADMIN_ENV_FILE=../ink-admin-memory/deploy/autodl-ssh/.env \
@@ -55,4 +56,4 @@ AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin-tunnel.example.com:8443 \
 
 ## 验证与回滚
 
-`verify` 同时检查本机 Dream/Admin、screen、监听端口和 Dream 公网 `/api/health`；Admin 平台另行验证公网 `/admin/login`。回滚只切换相应仓库的 `current`/`previous` release，不回滚 PostgreSQL migration、用户数据或 workspace。
+`verify` 同时检查本机 frontend 根页面、FastAPI 8765、6006 代理 `/api/health`、Admin、screen 和 Dream 公网根页面/API；Admin 平台另行验证公网 `/admin/login`。回滚只切换相应仓库的 `current`/`previous` release；首次拓扑回滚能识别旧 backend-only release 并恢复 6006 旧路径，不回滚 PostgreSQL migration、用户数据或 workspace。

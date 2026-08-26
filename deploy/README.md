@@ -11,7 +11,7 @@
 | 本地发布 | [`local/deploy.sh`](local/deploy.sh) | 检查、构建、启动、验证、停止本地 backend/frontend 进程 |
 | Docker 发布 | [`docker/deploy.sh`](docker/deploy.sh) | 包装根目录 [`../docker-compose.yml`](../docker-compose.yml) 的构建、启动、验证、清理；默认通过 Mihomo TUN `tun-proxy` 路由 backend 出站；backend 容器包含 Claude Code bubblewrap Bash sandbox 所需 runtime 权限 |
 | Remote SSH 发布（含阿里云 ECS） | [`remote-ssh/deploy.sh`](remote-ssh/deploy.sh) | SSH/rsync、nginx、Dream Compose 构建与验证；阿里云 overlay 通过共享网络访问 Admin 容器内嵌 PostgreSQL/Admin aliases |
-| AutoDL SSH 发布 | [`autodl-ssh/deploy.sh`](autodl-ssh/deploy.sh) | SSH/rsync、直接本机 Python/Node 与 screen；Dream backend 监听 `127.0.0.1:6006`，Admin upstream 为 `127.0.0.1:6008`，不使用 Docker/nginx |
+| AutoDL SSH 发布 | [`autodl-ssh/deploy.sh`](autodl-ssh/deploy.sh) | SSH/rsync、直接本机 Python/Node 与 screen；Vite Preview 监听 `127.0.0.1:6006` 并代理 FastAPI `127.0.0.1:8765`，Admin upstream 为 `127.0.0.1:6008`，不使用 Docker/nginx |
 | Google Cloud 发布 | [`google-cloud/deploy.sh`](google-cloud/deploy.sh) | 完整 Cloud Run 发布入口，默认使用 `ink-backend.suoxya.com` / `ink-frontend.suoxya.com`，提供构建、推送、部署、OAuth/CORS/cookie 回写、dry-run/check/verify/rollback |
 
 ## 兼容入口
