@@ -2,7 +2,7 @@
 # [Input] AutoDL SSH settings, generated Dream env, frontend/backend source, and optional npm token.
 # [Output] Versioned direct-host Vite Preview + FastAPI/Claude release managed by screen.
 # [Pos] Dream AutoDL release entry; deliberately excludes Docker and nginx.
-# [Sync] 2026-08-26: initialize every persistent Dream directory through one idempotent helper.
+# [Sync] 2026-08-26: initialize persistent directories centrally and exclude local build/runtime caches from release sync.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -225,7 +225,7 @@ sync_files() {
   local transport="ssh -p $(quote "${AUTODL_SSH_PORT}") -o BatchMode=yes"
   [[ -n "${AUTODL_SSH_KEY}" ]] && transport+=" -i $(quote "${AUTODL_SSH_KEY}")"
   [[ -n "${AUTODL_SSH_CONTROL_PATH}" ]] && transport+=" -o ControlPath=$(quote "${AUTODL_SSH_CONTROL_PATH}")"
-  local args=(-az --delete --exclude '/.git/' --exclude '/.env*' --exclude '/backend/.env' --exclude '/backend/.venv*/' --exclude '/backend/data/' --exclude '/frontend/node_modules/' --exclude '/frontend/dist/' --exclude '/node_modules/' --exclude '/test-results/' --exclude '/playwright-report/' --exclude '/deploy/remote-ssh/.env' --exclude '/deploy/autodl-ssh/.env' -e "${transport}")
+  local args=(-az --delete --exclude '/.git/' --exclude '/.env*' --exclude '/.venv*/' --exclude '/.artifacts/' --exclude '/.codex-pet-runs/' --exclude '/output/' --exclude '/backend/.env' --exclude '/backend/.venv*/' --exclude '/backend/data/' --exclude '/frontend/node_modules/' --exclude '/frontend/dist/' --exclude '/node_modules/' --exclude '/test-results/' --exclude '/playwright-report/' --exclude '/deploy/remote-ssh/.env' --exclude '/deploy/autodl-ssh/.env' -e "${transport}")
   log "Syncing Dream source without runtime secrets or mutable local data."
   if [[ "${DRY_RUN}" == "1" ]]; then printf '[dry-run] rsync'; printf ' %q' "${args[@]}" "${REPO_ROOT}/" "$(ssh_target):${AUTODL_APP_ROOT}/source/"; printf '\n';
   else rsync "${args[@]}" "${REPO_ROOT}/" "$(ssh_target):${AUTODL_APP_ROOT}/source/"; fi
