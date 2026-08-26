@@ -2,14 +2,15 @@
 # [Input] Existing AutoDL Admin/Dream releases, secure env files, Node/Python runtimes, and screen.
 # [Output] Idempotently preserve or start Admin first, then the Dream frontend/backend stack.
 # [Pos] Standalone AutoDL launch script; performs no build, migration, restore, GPU probe, or deployment.
-# [Sync] 2026-08-26: use /root/ink-autodl/data as the Admin/PostgreSQL home.
+# [Sync] 2026-08-26: keep Admin isolated while running the /root-hosted Dream runtime as root.
 set -euo pipefail
 
 ADMIN_ROOT="${INK_AUTODL_ADMIN_ROOT:-/root/ink-autodl/admin}"
 DREAM_ROOT="${INK_AUTODL_DREAM_ROOT:-/root/ink-autodl/dream}"
 DATA_ROOT="${INK_AUTODL_DATA_ROOT:-/root/autodl-tmp/ink-memory}"
 ADMIN_HOME="${INK_AUTODL_ADMIN_HOME:-/root/ink-autodl/data}"
-SERVICE_USER="${INK_AUTODL_SERVICE_USER:-ink-memory}"
+DREAM_SERVICE_USER="${INK_AUTODL_DREAM_SERVICE_USER:-root}"
+ADMIN_SERVICE_USER="${INK_AUTODL_ADMIN_SERVICE_USER:-ink-memory}"
 DATA_INIT_SCRIPT="${INK_AUTODL_DREAM_DATA_INIT_SCRIPT:-/root/ink-autodl/init-dream-data.sh}"
 ADMIN_DATA_INIT_SCRIPT="${INK_AUTODL_ADMIN_DATA_INIT_SCRIPT:-${ADMIN_ROOT}/source/deploy/autodl-ssh/runtime/init-admin-data.sh}"
 NODE_BIN="${INK_AUTODL_NODE_BIN:-/root/ink-autodl/runtime/node/bin}"
@@ -40,10 +41,11 @@ exec 9>"${LOCK_FILE}"
 flock -n 9 || fail "Another Ink & Memory startup is already running."
 
 [[ -x "${DATA_INIT_SCRIPT}" ]] || fail "Dream data initializer is missing: ${DATA_INIT_SCRIPT}"
-INK_AUTODL_DATA_ROOT="${DATA_ROOT}" INK_AUTODL_SERVICE_USER="${SERVICE_USER}" "${DATA_INIT_SCRIPT}"
+[[ "${DREAM_SERVICE_USER}" == "root" ]] || fail "Dream must run as root when its runtime and workspace live under /root."
+INK_AUTODL_DATA_ROOT="${DATA_ROOT}" INK_AUTODL_SERVICE_USER="${DREAM_SERVICE_USER}" "${DATA_INIT_SCRIPT}"
 [[ -x "${ADMIN_DATA_INIT_SCRIPT}" ]] || fail "Admin data initializer is missing: ${ADMIN_DATA_INIT_SCRIPT}"
 INK_AUTODL_ADMIN_HOME="${ADMIN_HOME}" INK_AUTODL_DATA_ROOT="${DATA_ROOT}" \
-  INK_AUTODL_SERVICE_USER="${SERVICE_USER}" "${ADMIN_DATA_INIT_SCRIPT}"
+  INK_AUTODL_SERVICE_USER="${ADMIN_SERVICE_USER}" "${ADMIN_DATA_INIT_SCRIPT}"
 
 port_is_listening() {
   local requested_port="$1"
@@ -90,11 +92,11 @@ start_admin() {
   [[ -x "${launcher}" ]] || fail "Admin launcher is missing or not executable: ${launcher}"
   [[ -r "${env_file}" ]] || fail "Admin runtime env is missing or unreadable: ${env_file}"
   [[ -x "${NODE_BIN}/node" ]] || fail "Node runtime is missing: ${NODE_BIN}/node"
-  id -u "${SERVICE_USER}" >/dev/null 2>&1 || fail "Service user does not exist: ${SERVICE_USER}"
+  id -u "${ADMIN_SERVICE_USER}" >/dev/null 2>&1 || fail "Admin service user does not exist: ${ADMIN_SERVICE_USER}"
 
   local uid gid
-  uid="$(id -u "${SERVICE_USER}")"
-  gid="$(id -g "${SERVICE_USER}")"
+  uid="$(id -u "${ADMIN_SERVICE_USER}")"
+  gid="$(id -g "${ADMIN_SERVICE_USER}")"
   screen -S "${ADMIN_SCREEN}" -X quit >/dev/null 2>&1 || true
   rm -f "${pid_file}"
   screen -dmS "${ADMIN_SCREEN}" -L -Logfile "${ADMIN_ROOT}/logs/admin.log" bash -lc \
@@ -123,15 +125,10 @@ start_dream() {
   [[ -s "${current_release}/frontend/dist/index.html" ]] || fail "Dream frontend build is missing from the current release."
   [[ -x "${current_release}/venv/bin/python" ]] || fail "Dream Python runtime is missing from the current release."
   [[ -x "${NODE_BIN}/node" ]] || fail "Node runtime is missing: ${NODE_BIN}/node"
-  id -u "${SERVICE_USER}" >/dev/null 2>&1 || fail "Service user does not exist: ${SERVICE_USER}"
-
-  local uid gid
-  uid="$(id -u "${SERVICE_USER}")"
-  gid="$(id -g "${SERVICE_USER}")"
   screen -S "${DREAM_SCREEN}" -X quit >/dev/null 2>&1 || true
   rm -f "${pid_file}"
   screen -dmS "${DREAM_SCREEN}" -L -Logfile "${DREAM_ROOT}/logs/dream.log" bash -lc \
-    "exec setpriv --reuid=${uid} --regid=${gid} --init-groups env HOME=$(quote "${DATA_ROOT}/service-home") AUTODL_DREAM_ENV_FILE=$(quote "${env_file}") AUTODL_DREAM_PID_FILE=$(quote "${pid_file}") AUTODL_DREAM_FRONTEND_PORT=${FRONTEND_PORT} AUTODL_DREAM_BACKEND_PORT=${BACKEND_PORT} AUTODL_NODE_BIN=$(quote "${NODE_BIN}") AUTODL_NPM_BIN=$(quote "${NPM_BIN}") $(quote "${launcher}")"
+    "exec env HOME=$(quote "${DATA_ROOT}/service-home") AUTODL_DREAM_ENV_FILE=$(quote "${env_file}") AUTODL_DREAM_PID_FILE=$(quote "${pid_file}") AUTODL_DREAM_FRONTEND_PORT=${FRONTEND_PORT} AUTODL_DREAM_BACKEND_PORT=${BACKEND_PORT} AUTODL_NODE_BIN=$(quote "${NODE_BIN}") AUTODL_NPM_BIN=$(quote "${NPM_BIN}") $(quote "${launcher}")"
 
   wait_until dream_is_healthy 120 || fail "Dream did not become healthy; inspect ${DREAM_ROOT}/logs/dream.log"
   log "Dream is ready on frontend 127.0.0.1:${FRONTEND_PORT} and backend 127.0.0.1:${BACKEND_PORT}."

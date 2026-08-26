@@ -2,7 +2,7 @@
 # [Input] Dream AutoDL env projector and persistent-directory initializer.
 # [Output] Automated topology, idempotency, ownership, mode, and symlink checks.
 # [Pos] Provider-free AutoDL deployment contract test.
-# [Sync] 2026-08-26: cover Dream data-root projection and absence of Agent admission overrides.
+# [Sync] 2026-08-26: cover root Dream runtime, data projection, and default Agent admission.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,6 +16,13 @@ DATA_ROOT="${TEMP_ROOT}/data"
 PROJECTED_DATA_ROOT="/root/autodl-tmp/ink-memory"
 CURRENT_USER="$(id -un)"
 CURRENT_GROUP="$(id -gn)"
+
+grep -Fq 'AUTODL_SERVICE_USER="${AUTODL_SERVICE_USER:-root}"' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'DREAM_SERVICE_USER="${INK_AUTODL_DREAM_SERVICE_USER:-root}"' "${SCRIPT_DIR}/runtime/start-ink-memory.sh"
+if grep -F 'screen -dmS "${DREAM_SCREEN}"' -A2 "${SCRIPT_DIR}/runtime/start-ink-memory.sh" | grep -q 'setpriv'; then
+  printf 'standalone Dream launcher still drops to a separate service user\n' >&2
+  exit 1
+fi
 
 cat >"${SOURCE_ENV}" <<'EOF'
 SESSION_SECRET_KEY=test-session-secret

@@ -2,7 +2,7 @@
 # [Input] AutoDL SSH settings, generated Dream env, frontend/backend source, and optional npm token.
 # [Output] Versioned direct-host Vite Preview + FastAPI/Claude release managed by screen.
 # [Pos] Dream AutoDL release entry; deliberately excludes Docker and nginx.
-# [Sync] 2026-08-26: initialize persistent directories centrally and exclude local build/runtime caches from release sync.
+# [Sync] 2026-08-26: run Dream as root so /root-hosted workspace protocol paths remain fully traversable.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,7 +24,7 @@ AUTODL_DATA_INIT_SCRIPT="${AUTODL_DATA_INIT_SCRIPT:-/root/ink-autodl/init-dream-
 AUTODL_PLUGIN_RUNTIME_ROOT="${AUTODL_DATA_ROOT}/claude-plugin-runtime"
 AUTODL_PLUGIN_ARTIFACTS_SOURCE="${AUTODL_PLUGIN_ARTIFACTS_SOURCE:-${REPO_ROOT}/backend/data/claude-plugin-runtime/artifacts}"
 AUTODL_ENV_FILE="${AUTODL_ENV_FILE:-${SCRIPT_DIR}/.env}"
-AUTODL_SERVICE_USER="${AUTODL_SERVICE_USER:-ink-memory}"
+AUTODL_SERVICE_USER="${AUTODL_SERVICE_USER:-root}"
 AUTODL_NODE_VERSION="${AUTODL_NODE_VERSION:-22.18.0}"
 AUTODL_PYTHON="${AUTODL_PYTHON:-/root/miniconda3/bin/python}"
 AUTODL_DREAM_FRONTEND_PORT="${AUTODL_DREAM_FRONTEND_PORT:-${AUTODL_DREAM_PORT:-6006}}"
@@ -98,6 +98,7 @@ require_config() {
   [[ -n "${AUTODL_SSH_HOST}" ]] || err "AUTODL_SSH_HOST is required."
   [[ "${AUTODL_DREAM_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN must be an exact HTTPS origin."
   [[ "${AUTODL_SSH_USER}" == "root" ]] || err "AutoDL setup currently requires the root SSH account."
+  [[ "${AUTODL_SERVICE_USER}" == "root" ]] || err "AutoDL Dream must run as root when its runtime and workspace live under /root."
   [[ "${AUTODL_APP_ROOT}" == /root/* && "${AUTODL_DATA_ROOT}" == /root/* ]] || err "AutoDL paths must stay under /root."
   [[ "${AUTODL_STACK_START_SCRIPT}" == /root/ink-autodl/* ]] || err "AutoDL stack start script must stay under /root/ink-autodl."
   [[ "${AUTODL_DREAM_FRONTEND_PORT}" == "6006" && "${AUTODL_DREAM_BACKEND_PORT}" == "8765" && "${AUTODL_ADMIN_PORT}" == "6008" ]] || err "AutoDL must use Dream frontend 6006, backend 8765, and Admin 6008."
@@ -142,12 +143,9 @@ setup_host() {
 export DEBIAN_FRONTEND=noninteractive
 apt-get update >/dev/null
 apt-get install -y --no-install-recommends ca-certificates curl xz-utils acl passwd screen jq iproute2 ripgrep bubblewrap socat gcc libffi-dev libssl-dev libjpeg-dev zlib1g-dev >/dev/null
-id -u $(quote "${AUTODL_SERVICE_USER}") >/dev/null 2>&1 || adduser --system --group --no-create-home --home /nonexistent --shell /usr/sbin/nologin $(quote "${AUTODL_SERVICE_USER}") >/dev/null
-setfacl -m u:$(quote "${AUTODL_SERVICE_USER}"):--x /root
 install -d -m 0750 $(quote "${AUTODL_APP_ROOT}") $(quote "${AUTODL_APP_ROOT}/source") $(quote "${AUTODL_APP_ROOT}/releases") $(quote "${AUTODL_APP_ROOT}/config")
-install -d -o $(quote "${AUTODL_SERVICE_USER}") -g $(quote "${AUTODL_SERVICE_USER}") -m 0750 $(quote "${AUTODL_APP_ROOT}/run") $(quote "${AUTODL_APP_ROOT}/logs")
-setfacl -m u:$(quote "${AUTODL_SERVICE_USER}"):--x /root/ink-autodl $(quote "${AUTODL_APP_ROOT}") $(quote "${AUTODL_APP_ROOT}/releases")
-chgrp $(quote "${AUTODL_SERVICE_USER}") $(quote "${AUTODL_APP_ROOT}/config")
+install -d -o root -g root -m 0750 $(quote "${AUTODL_APP_ROOT}/run") $(quote "${AUTODL_APP_ROOT}/logs")
+chgrp root $(quote "${AUTODL_APP_ROOT}/config")
 chmod 0750 $(quote "${AUTODL_APP_ROOT}/config")
 node_root=/root/ink-autodl/runtime/node-v${AUTODL_NODE_VERSION}-linux-x64
 if [ ! -x \"\${node_root}/bin/node\" ]; then
@@ -159,8 +157,6 @@ if [ ! -x \"\${node_root}/bin/node\" ]; then
 fi
 ln -sfn \"\${node_root}\" /root/ink-autodl/runtime/node
 install -d /root/ink-autodl/runtime/npm
-setfacl -m u:$(quote "${AUTODL_SERVICE_USER}"):--x /root/ink-autodl /root/ink-autodl/runtime
-setfacl -R -m u:$(quote "${AUTODL_SERVICE_USER}"):rX /root/ink-autodl/runtime/node /root/ink-autodl/runtime/npm
 /root/ink-autodl/runtime/node/bin/node --version"
 }
 
@@ -214,7 +210,6 @@ npm install -g \"\${npm_args[@]}\" @anthropic-ai/claude-code@2.1.241
 test \"\$(\"\${prefix}/bin/claude\" --version | awk '{print \$1}')\" = '2.1.241'
 manifest=\$(dirname \"\$(dirname \"\$(realpath \"\${prefix}/bin/ink-claude-code-dream\")\")\")/release-manifest.json
 jq -e '.runtime.version == \"0.1.1\" and .runtime.integration.sdkVersion == \"0.2.144\" and .core.corePruned == true and .core.productionEligible == true' \"\${manifest}\" >/dev/null
-setfacl -R -m u:$(quote "${AUTODL_SERVICE_USER}"):rX \"\${prefix}\"
 cleanup
 trap - EXIT"
 }
@@ -285,10 +280,9 @@ if [ ! -s \"\${current}/frontend/dist/index.html\" ]; then
   chmod 0640 \"\${env_file}.next\"
   mv -f \"\${env_file}.next\" \"\${env_file}\"
 fi
-uid=\$(id -u $(quote "${AUTODL_SERVICE_USER}")); gid=\$(id -g $(quote "${AUTODL_SERVICE_USER}"))
 rm -f $(quote "${AUTODL_APP_ROOT}/run/dream.pid")
 screen -S $(quote "${AUTODL_SCREEN_NAME}") -X quit >/dev/null 2>&1 || true
-screen -dmS $(quote "${AUTODL_SCREEN_NAME}") -L -Logfile $(quote "${AUTODL_APP_ROOT}/logs/dream.log") bash -lc \"exec setpriv --reuid=\${uid} --regid=\${gid} --init-groups env HOME=$(quote "${AUTODL_DATA_ROOT}/service-home") AUTODL_DREAM_ENV_FILE=\${env_file} AUTODL_DREAM_PID_FILE=$(quote "${AUTODL_APP_ROOT}/run/dream.pid") AUTODL_DREAM_FRONTEND_PORT=${AUTODL_DREAM_FRONTEND_PORT} AUTODL_DREAM_BACKEND_PORT=${AUTODL_DREAM_BACKEND_PORT} AUTODL_NODE_BIN=/root/ink-autodl/runtime/node/bin AUTODL_NPM_BIN=/root/ink-autodl/runtime/npm/bin $(quote "${AUTODL_APP_ROOT}/current/start-dream.sh")\"
+screen -dmS $(quote "${AUTODL_SCREEN_NAME}") -L -Logfile $(quote "${AUTODL_APP_ROOT}/logs/dream.log") bash -lc \"exec env HOME=$(quote "${AUTODL_DATA_ROOT}/service-home") AUTODL_DREAM_ENV_FILE=\${env_file} AUTODL_DREAM_PID_FILE=$(quote "${AUTODL_APP_ROOT}/run/dream.pid") AUTODL_DREAM_FRONTEND_PORT=${AUTODL_DREAM_FRONTEND_PORT} AUTODL_DREAM_BACKEND_PORT=${AUTODL_DREAM_BACKEND_PORT} AUTODL_NODE_BIN=/root/ink-autodl/runtime/node/bin AUTODL_NPM_BIN=/root/ink-autodl/runtime/npm/bin $(quote "${AUTODL_APP_ROOT}/current/start-dream.sh")\"
 if [ -s \"\${current}/frontend/dist/index.html\" ]; then
   for _ in \$(seq 1 120); do
     curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null 2>&1 && curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null 2>&1 && curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null 2>&1 && exit 0
