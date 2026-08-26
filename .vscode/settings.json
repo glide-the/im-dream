@@ -1,0 +1,5 @@
+{
+  // Keep editor analysis, terminals, and Python commands on the backend environment.
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+  "python.terminal.activateEnvironment": true
+}
