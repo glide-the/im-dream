@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
 # [Input] Existing Dream/Admin secure env files and explicit AutoDL service mappings.
-# [Output] Mode-0600 local Dream runtime env using the Admin-owned PostgreSQL identity.
+# [Output] Mode-0600 Dream backend/frontend runtime env using the Admin-owned PostgreSQL identity.
 # [Pos] AutoDL Dream configuration projector; no CLI/transport state is persisted here.
-# [Sync] 2026-08-26: add local/public URL projection for ports 6006 and 6008.
+# [Sync] 2026-08-26: project Vite Preview 6006, FastAPI 8765, public host, and Admin 6008.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+AUTODL_PLATFORM_ENV_FILE="${AUTODL_PLATFORM_ENV_FILE:-${SCRIPT_DIR}/platform.env}"
+if [[ -f "${AUTODL_PLATFORM_ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090 -- the operator explicitly selects this local platform file.
+  source "${AUTODL_PLATFORM_ENV_FILE}"
+fi
 SOURCE_ENV_FILE="${AUTODL_DREAM_SOURCE_ENV_FILE:-${REPO_ROOT}/backend/.env}"
 ADMIN_ENV_FILE="${AUTODL_ADMIN_ENV_FILE:-}"
 OUTPUT_ENV_FILE="${AUTODL_ENV_FILE:-${SCRIPT_DIR}/.env}"
 AUTODL_DATA_ROOT="${AUTODL_DATA_ROOT:-/root/autodl-tmp/ink-memory}"
-AUTODL_DREAM_BIND_HOST="${AUTODL_DREAM_BIND_HOST:-127.0.0.1}"
-AUTODL_DREAM_PORT="${AUTODL_DREAM_PORT:-6006}"
+AUTODL_DREAM_BACKEND_BIND_HOST="${AUTODL_DREAM_BACKEND_BIND_HOST:-${AUTODL_DREAM_BIND_HOST:-127.0.0.1}}"
+AUTODL_DREAM_FRONTEND_PORT="${AUTODL_DREAM_FRONTEND_PORT:-${AUTODL_DREAM_PORT:-6006}}"
+AUTODL_DREAM_BACKEND_PORT="${AUTODL_DREAM_BACKEND_PORT:-8765}"
 AUTODL_ADMIN_PORT="${AUTODL_ADMIN_PORT:-6008}"
 AUTODL_DREAM_PUBLIC_ORIGIN="${AUTODL_DREAM_PUBLIC_ORIGIN:-}"
 AUTODL_ADMIN_PUBLIC_ORIGIN="${AUTODL_ADMIN_PUBLIC_ORIGIN:-}"
@@ -23,14 +29,16 @@ env_value() { awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") +
 [[ -f "${SOURCE_ENV_FILE}" ]] || err "Missing Dream source env: ${SOURCE_ENV_FILE}"
 [[ -n "${ADMIN_ENV_FILE}" && -f "${ADMIN_ENV_FILE}" ]] || err "AUTODL_ADMIN_ENV_FILE must select the generated Admin AutoDL env."
 [[ "${AUTODL_DATA_ROOT}" == /root/* ]] || err "AUTODL_DATA_ROOT must stay under /root."
-[[ "${AUTODL_DREAM_BIND_HOST}" == "127.0.0.1" ]] || err "Dream must bind to 127.0.0.1 on AutoDL."
-[[ "${AUTODL_DREAM_PORT}" == "6006" && "${AUTODL_ADMIN_PORT}" == "6008" ]] || err "AutoDL mappings must use Dream 6006 and Admin 6008."
+[[ "${AUTODL_DREAM_BACKEND_BIND_HOST}" == "127.0.0.1" ]] || err "Dream backend must bind to 127.0.0.1 on AutoDL."
+[[ "${AUTODL_DREAM_FRONTEND_PORT}" == "6006" && "${AUTODL_DREAM_BACKEND_PORT}" == "8765" && "${AUTODL_ADMIN_PORT}" == "6008" ]] || err "AutoDL must use frontend 6006, backend 8765, and Admin 6008."
 [[ "${AUTODL_DREAM_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN must be an exact HTTPS origin."
 [[ "${AUTODL_ADMIN_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_ADMIN_PUBLIC_ORIGIN must be an exact HTTPS origin."
 
 database_user="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_USER)"
 database_password="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_PASSWORD)"
 database_name="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_DB)"
+dream_public_host="${AUTODL_DREAM_PUBLIC_ORIGIN#https://}"
+dream_public_host="${dream_public_host%%:*}"
 [[ "${database_user}" =~ ^[A-Za-z0-9_]+$ ]] || err "Admin POSTGRES_USER is missing or unsupported."
 [[ "${database_password}" =~ ^[A-Za-z0-9._~-]+$ ]] || err "Admin POSTGRES_PASSWORD must be URL-safe."
 [[ "${database_name}" =~ ^[A-Za-z0-9_-]+$ ]] || err "Admin POSTGRES_DB is missing or unsupported."
@@ -40,7 +48,7 @@ trap 'rm -f "${temp_file}"' EXIT
 umask 077
 awk -F= '
   BEGIN {
-    split("DATABASE_URL PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN AGENT_CWD FILE_STORAGE_LOCAL_DIR INK_LOAD_DATABASE_URL_FROM_ENV_FILE CLAUDE_CODE_CLI_PATH", keys, " ")
+    split("DATABASE_URL PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN AGENT_CWD FILE_STORAGE_LOCAL_DIR INK_LOAD_DATABASE_URL_FROM_ENV_FILE CLAUDE_CODE_CLI_PATH VITE_ALLOWED_HOSTS VITE_DEV_API_PROXY_TARGET", keys, " ")
     for (i in keys) excluded[keys[i]] = 1
   }
   /^[A-Za-z_][A-Za-z0-9_]*=/ {
@@ -50,8 +58,8 @@ awk -F= '
 ' "${SOURCE_ENV_FILE}" >"${temp_file}"
 {
   printf 'DATABASE_URL=postgresql://%s:%s@127.0.0.1:54329/%s\n' "${database_user}" "${database_password}" "${database_name}"
-  printf 'PORT=%s\n' "${AUTODL_DREAM_PORT}"
-  printf 'HOST=%s\n' "${AUTODL_DREAM_BIND_HOST}"
+  printf 'PORT=%s\n' "${AUTODL_DREAM_BACKEND_PORT}"
+  printf 'HOST=%s\n' "${AUTODL_DREAM_BACKEND_BIND_HOST}"
   printf 'API_BASE_URL=%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
   printf 'WEBUI_URL=%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
   printf 'INK_PUBLIC_BASE_URL=%s\n' "${AUTODL_DREAM_PUBLIC_ORIGIN}"
@@ -66,6 +74,8 @@ awk -F= '
   printf 'AGENT_CWD=%s/agent-workspaces\n' "${AUTODL_DATA_ROOT}"
   printf 'FILE_STORAGE_LOCAL_DIR=%s/file-storage\n' "${AUTODL_DATA_ROOT}"
   printf 'INK_LOAD_DATABASE_URL_FROM_ENV_FILE=0\n'
+  printf 'VITE_ALLOWED_HOSTS=%s\n' "${dream_public_host}"
+  printf 'VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:%s\n' "${AUTODL_DREAM_BACKEND_PORT}"
 } >>"${temp_file}"
 
 for required_key in DATABASE_URL SESSION_SECRET_KEY INK_GATEWAY_SERVICE_KEY INK_ADMIN_PRODUCT_JWT_SECRET; do

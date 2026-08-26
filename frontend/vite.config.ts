@@ -1,5 +1,5 @@
 // [Input] Vite mode env, React plugin, and public site URL build configuration.
-// [Output] Build the SPA at the frontend origin root with SEO HTML placeholders resolved.
+// [Output] Build/preview the SPA at the frontend origin root with SEO metadata and same-origin API proxying.
 // [Pos] frontend build configuration
 // [Sync] 2026-06-14: add Codex SEO public URL replacement for canonical, OG, and JSON-LD metadata.
 // [Sync] 2026-06-15: remove /ink-and-memory/ deployment prefix; serve app at root.
@@ -10,6 +10,8 @@
 //                    public dev hostname; API traffic remains locally proxied.
 // [Sync] 2026-08-25: keep the browser-only MCP OAuth callback on the SPA so
 //                    authorization code/state queries never enter FastAPI access logs.
+// [Sync] 2026-08-26: share API/OAuth proxy and configurable host allowlist with
+//                    Vite Preview for the direct-host AutoDL 6006 frontend.
 // [Sync] 2026-07-20: upgrade to Vite 8 (rolldown/Rust bundler) so production
 //                    builds fit 1G Docker build hosts — measured ~605MB peak RSS
 //                    with a 512MB heap vs ~1.25GB RSS / 1024MB heap minimum on
@@ -17,7 +19,7 @@
 //                    and split heavy static vendor chunks (react/tiptap/markdown/
 //                    ai-sdk) while keeping mermaid and its d3/dagre/katex graph
 //                    out of static chunks so MermaidBlock stays lazily loaded.
-import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const BASE_PATH = '/'
@@ -67,6 +69,47 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   const publicSiteUrl = env.VITE_PUBLIC_SITE_URL || DEFAULT_PUBLIC_SITE_URL
   const devApiProxyTarget = env.VITE_DEV_API_PROXY_TARGET || 'http://localhost:8765'
+  const allowedHosts = (env.VITE_ALLOWED_HOSTS || 'dream.suoxya.com')
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean)
+  const proxy: Record<string, ProxyOptions> = {
+    '/api': {
+      target: devApiProxyTarget,
+      changeOrigin: true,
+    },
+    '/auth': {
+      target: devApiProxyTarget,
+      changeOrigin: true,
+    },
+    '/oauth/device/verify': {
+      target: devApiProxyTarget,
+      changeOrigin: true,
+      bypass(req) {
+        if (req.method === 'GET' && req.headers.accept?.includes('text/html')) {
+          return '/index.html'
+        }
+      },
+    },
+    '/oauth': {
+      target: devApiProxyTarget,
+      changeOrigin: true,
+      bypass(req) {
+        const callbackPath = req.url?.split('?', 1)[0] ?? ''
+        if (
+          req.method === 'GET'
+          && callbackPath === '/oauth/callback'
+          && req.headers.accept?.includes('text/html')
+        ) {
+          return '/index.html'
+        }
+      },
+    },
+    '/polycli': {
+      target: devApiProxyTarget,
+      changeOrigin: true,
+    },
+  }
 
   return {
     plugins: [react(), seoHtmlReplacementPlugin(publicSiteUrl)],
@@ -113,44 +156,13 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: '0.0.0.0',
-      allowedHosts: ['dream.suoxya.com'],
-      proxy: {
-        '/api': {
-          target: devApiProxyTarget,
-          changeOrigin: true,
-        },
-        '/auth': {
-          target: devApiProxyTarget,
-          changeOrigin: true,
-        },
-        '/oauth/device/verify': {
-          target: devApiProxyTarget,
-          changeOrigin: true,
-          bypass(req) {
-            if (req.method === 'GET' && req.headers.accept?.includes('text/html')) {
-              return '/index.html'
-            }
-          },
-        },
-        '/oauth': {
-          target: devApiProxyTarget,
-          changeOrigin: true,
-          bypass(req) {
-            const callbackPath = req.url?.split('?', 1)[0] ?? ''
-            if (
-              req.method === 'GET'
-              && callbackPath === '/oauth/callback'
-              && req.headers.accept?.includes('text/html')
-            ) {
-              return '/index.html'
-            }
-          },
-        },
-        '/polycli': {
-          target: devApiProxyTarget,
-          changeOrigin: true,
-        }
-      }
-    }
+      allowedHosts,
+      proxy,
+    },
+    preview: {
+      host: '127.0.0.1',
+      allowedHosts,
+      proxy,
+    },
   }
 })
