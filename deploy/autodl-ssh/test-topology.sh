@@ -2,7 +2,7 @@
 # [Input] Dream AutoDL env projector and persistent-directory initializer.
 # [Output] Automated topology, idempotency, ownership, mode, and symlink checks.
 # [Pos] Provider-free AutoDL deployment contract test.
-# [Sync] 2026-08-26: cover root Dream runtime, data projection, and default Agent admission.
+# [Sync] 2026-08-26: keep root-runtime topology assertions portable across GNU and BSD stat.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,8 +64,20 @@ for _ in 1 2; do
     "${SCRIPT_DIR}/runtime/init-dream-data.sh"
 done
 
-mode_of() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"; }
-owner_of() { stat -f '%Su:%Sg' "$1" 2>/dev/null || stat -c '%U:%G' "$1"; }
+mode_of() {
+  if stat -c '%a' "$1" >/dev/null 2>&1; then
+    stat -c '%a' "$1"
+  else
+    stat -f '%Lp' "$1"
+  fi
+}
+owner_of() {
+  if stat -c '%U:%G' "$1" >/dev/null 2>&1; then
+    stat -c '%U:%G' "$1"
+  else
+    stat -f '%Su:%Sg' "$1"
+  fi
+}
 for relative_path in agent-workspaces artifacts file-storage service-home claude-plugin-runtime/config; do
   target="${DATA_ROOT}/${relative_path}"
   [[ "$(mode_of "${target}")" == "750" ]]
