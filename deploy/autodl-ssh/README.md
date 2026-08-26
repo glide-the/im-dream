@@ -3,7 +3,7 @@
 [Input] Existing AutoDL Admin/Dream releases and the standalone stack launcher.
 [Output] Explain the application and provide a minimal one-command startup workflow.
 [Pos] User-facing README for an already deployed AutoDL Ink & Memory stack.
-[Sync] 2026-08-26: document the standalone no-GPU startup script.
+[Sync] 2026-08-26: standardize the installed launcher at /root/ink-autodl/start-ink-memory.sh.
 -->
 
 ## 应用介绍
@@ -26,18 +26,18 @@ AutoDL 版本不依赖 Docker 或 Nginx：Admin 与内嵌 PostgreSQL 监听 `127
 
 本脚本只启动已经发布完成的 release，不下载代码、不构建、不执行数据库 migration、不恢复数据库，也不检测 GPU。
 
-首次准备脚本：
+Dream 的 `sync`、`build` 和 `deploy` 命令会自动将脚本安装到 `/root/ink-autodl/start-ink-memory.sh`。若只同步脚本，可手动执行：
 
 ```bash
 install -m 0755 \
   /root/ink-autodl/dream/source/deploy/autodl-ssh/runtime/start-ink-memory.sh \
-  /root/LaunchTool311/start_ink_memory.sh
+  /root/ink-autodl/start-ink-memory.sh
 ```
 
 之后启动 Ink & Memory：
 
 ```bash
-bash /root/LaunchTool311/start_ink_memory.sh
+bash /root/ink-autodl/start-ink-memory.sh
 ```
 
 脚本按以下顺序工作：

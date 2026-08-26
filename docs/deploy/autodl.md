@@ -2,7 +2,7 @@
 <!--
 [Input] AutoDL direct-host platform scripts and SeetaCloud service mappings.
 [Output] Define Dream/Admin ordering, frontend/API topology, secure environment projection, verification, and rollback.
-[Sync] 2026-08-26: document the standalone no-GPU AutoDL stack startup script.
+[Sync] 2026-08-26: install the standalone stack launcher under /root/ink-autodl.
 -->
 
 ## 拓扑与发布顺序
@@ -58,14 +58,14 @@ AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin-tunnel.example.com:8443 \
 
 ## 已发布服务的一键启动
 
-发布完成后，可将独立启动脚本复制到 AutoDL 的 `LaunchTool311` 目录：
+Dream 的 `sync`、`build` 和 `deploy` 会自动将独立启动脚本安装到 `/root/ink-autodl/start-ink-memory.sh`。已有 source 但尚未重新发布时，也可手动安装：
 
 ```bash
 install -m 0755 \
   /root/ink-autodl/dream/source/deploy/autodl-ssh/runtime/start-ink-memory.sh \
-  /root/LaunchTool311/start_ink_memory.sh
+  /root/ink-autodl/start-ink-memory.sh
 
-bash /root/LaunchTool311/start_ink_memory.sh
+bash /root/ink-autodl/start-ink-memory.sh
 ```
 
 该脚本无需 GPU，不执行构建、migration 或 restore。它会幂等检查现有端口，先恢复 Admin/内嵌 PostgreSQL，再恢复 Dream 前端与后端；健康服务不会被重复启动，未知进程占用端口时 fail closed。完整说明见 [`deploy/autodl-ssh/README.md`](../../deploy/autodl-ssh/README.md)。
