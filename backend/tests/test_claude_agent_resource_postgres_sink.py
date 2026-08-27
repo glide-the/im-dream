@@ -1,7 +1,7 @@
 # [Input] Consume the capacity-one publisher/sink with strict DTO and injected PostgreSQL fakes.
-# [Output] Verify latest replacement, timeout isolation/serialization, DB-clock upsert/TTL, and snapshot privacy.
+# [Output] Verify latest replacement, timeout isolation/serialization, typed-null DB-clock upsert/TTL, and privacy.
 # [Pos] Provider-free PostgreSQL resource synchronization tests in backend/tests.
-# [Sync] 2026-08-27: prove timed-out writes remain single-file and database time owns freshness columns.
+# [Sync] 2026-08-27: prove the null first sample is typed and timed-out writes remain single-file.
 
 from __future__ import annotations
 
@@ -181,13 +181,17 @@ def test_upsert_and_ttl_use_exact_capability_and_closed_json() -> None:
     assert any("set_config('statement_timeout'" in query for query in statements)
     assert any("ON CONFLICT (instance_id) DO UPDATE" in query for query in statements)
     assert any("heartbeat_at = CURRENT_TIMESTAMP" in query for query in statements)
-    assert any("CASE WHEN %s IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END" in query for query in statements)
+    assert any(
+        "CASE WHEN %s::timestamptz IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END" in query
+        for query in statements
+    )
     assert any("make_interval(days => %s)" in query for query in statements)
     upsert_parameters = next(
         parameters
         for query, parameters in connection.calls
         if query.startswith("INSERT INTO claude_agent_resource_snapshots")
     )
+    assert upsert_parameters[2] is None
     stored = json.loads(upsert_parameters[3])
     assert stored == snapshot.model_dump(mode="json")
     serialized = json.dumps(stored).lower()

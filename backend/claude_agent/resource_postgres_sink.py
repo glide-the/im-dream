@@ -1,8 +1,8 @@
 # [Input] Consume strict resource DTO snapshots, the exact Admin capability, and an injected database.get_db lease factory.
 # [Output] Provide a capacity-one latest publisher and isolated single-worker PostgreSQL upsert/TTL sink.
 # [Pos] Off-path PostgreSQL synchronization boundary for Claude Agent resource observation; owns no schema.
-# [Sync] 2026-08-27: use DB-clock heartbeat/sample columns and serialize timed-out
-#                    driver work so an older write cannot overtake a newer snapshot.
+# [Sync] 2026-08-27: type the nullable first sample explicitly, use DB-clock freshness,
+#                    and serialize timed-out driver work so old writes cannot overtake.
 
 """Publish the latest content-free Claude Agent resource snapshot to PostgreSQL."""
 from __future__ import annotations
@@ -213,7 +213,7 @@ class ClaudeAgentResourcePostgresSink:
                     "INSERT INTO claude_agent_resource_snapshots "
                     "(instance_id, process_started_at, heartbeat_at, sampled_at, snapshot) "
                     "VALUES (%s, LEAST(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, "
-                    "CASE WHEN %s IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END, %s::jsonb) "
+                    "CASE WHEN %s::timestamptz IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END, %s::jsonb) "
                     "ON CONFLICT (instance_id) DO UPDATE SET "
                     "heartbeat_at = CURRENT_TIMESTAMP, "
                     "sampled_at = EXCLUDED.sampled_at, "
