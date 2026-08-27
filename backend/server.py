@@ -31,8 +31,8 @@
 #                    official rollback) before starting the Agent factory.
 # [Sync] 2026-08-24: print validated SDK distribution and resolved CLI identity
 #                    before the Claude Agent factory starts.
-# [Sync] 2026-08-27: mount token-protected Claude Agent resource diagnostics and
-#                    own its timeout-isolated sampler lifecycle.
+# [Sync] 2026-08-27: own the isolated Claude resource sampler, PostgreSQL sink,
+#                    and publisher lifecycle after database startup and before shutdown.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -62,7 +62,6 @@ def _drop_unsupported_agent_env() -> None:
         "INK_AGENT_MAX_CONCURRENT_RUNS",
         "INK_AGENT_RUN_MEMORY_BUDGET_MIB",
         "INK_AGENT_MEMORY_RESERVE_MIB",
-        "INK_AGENT_DIAGNOSTICS_TOKEN",
         "INK_AGENT_TTL_S",
         "INK_AGENT_SWEEP_INTERVAL_S",
         "INK_AGENT_SSE_KEEPALIVE_S",
@@ -818,7 +817,12 @@ async def shutdown_scheduler():
 
 # ========== Claude Agent Factory ==========
 
-from agent_factory import claude_agent_resource_sampler, claude_agent_thread_factory
+from agent_factory import (
+    claude_agent_resource_postgres_sink,
+    claude_agent_resource_publisher,
+    claude_agent_resource_sampler,
+    claude_agent_thread_factory,
+)
 from claude_agent.event_bus_redis import RedisStreamEventBus
 from libs.claude_agent_kit.server.sdk_env import (
     DREAM_CLAUDE_CLI_EXECUTABLE,
@@ -848,7 +852,6 @@ from routers.claude_agent import (
     ToolConfirmRequestBody,
     router as claude_agent_router,
 )
-from routers.claude_agent_resources import router as claude_agent_resources_router
 from routers.device_oauth import OAuthProtocolError, router as device_oauth_router
 from routers.friends import (
     FriendRequestActionRequest,
@@ -972,7 +975,17 @@ async def startup_claude_agent():
         )
     _print_claude_runtime_identity(distribution, cli_path)
     claude_agent_thread_factory.start()
-    claude_agent_resource_sampler.start()
+    for resource_owner in (
+        claude_agent_resource_sampler,
+        claude_agent_resource_postgres_sink,
+        claude_agent_resource_publisher,
+    ):
+        try:
+            resource_owner.start()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Claude Agent resource observer owner failed to start"
+            )
     print("✅ Claude Agent factory started\n")
 
 
@@ -1076,12 +1089,17 @@ async def story_workspace_shutdown_dream_launch_dispatches():
 @app.on_event("shutdown")
 async def shutdown_claude_agent():
     """Gracefully close all Claude Agent sessions."""
-    try:
-        await claude_agent_resource_sampler.stop()
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "Claude Agent resource sampler close failed"
-        )
+    for resource_owner in (
+        claude_agent_resource_publisher,
+        claude_agent_resource_postgres_sink,
+        claude_agent_resource_sampler,
+    ):
+        try:
+            await resource_owner.stop()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Claude Agent resource observer owner failed to close"
+            )
     try:
         await claude_agent_thread_factory.aclose()
     except Exception:
@@ -1168,7 +1186,6 @@ app.include_router(admin_router)
 app.include_router(voices_router)
 app.include_router(friends_router)
 app.include_router(claude_agent_router)
-app.include_router(claude_agent_resources_router)
 app.include_router(storage_router)
 app.include_router(deck_plugins_router)
 app.include_router(claude_plugins_router)

@@ -2,7 +2,6 @@
 <!--
 [Input] Backend FastAPI routes and deployment public URL configuration.
 [Output] Human-readable API reference for authenticated app APIs and public utility endpoints.
-[Pos] Backend HTTP contract reference for frontend, Admin, operators, and tests.
 [Sync] 2026-06-14: document public SEO endpoints generated from INK_PUBLIC_BASE_URL and INK_BACKEND_PUBLIC_BASE_URL.
 [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public SEO endpoint notes.
 [Sync] 2026-06-21: document system-config sandbox network policy fields.
@@ -19,8 +18,6 @@
 [Sync] 2026-08-22: restore authenticated Claude MCP Resources configuration, OAuth lifecycle, inventory, and removal contracts.
 [Sync] 2026-08-25: replace the stale Claude CLI MCP contract with managed-PostgreSQL CRUD, standard-SDK discovery, encrypted OAuth, and automatic browser callback semantics.
 [Sync] 2026-08-22: document retryable Claude Agent capacity and memory-pressure SSE errors.
-[Sync] 2026-08-27: document dedicated-token, read-only Claude Agent resource diagnostics.
-[Sync] 2026-08-27: document tri-state admission projection and controlled-restart policy application.
 -->
 
 **Version:** 2.0.0
@@ -35,10 +32,6 @@ All endpoints except `/api/register`, `/api/login`, Google OAuth entry/callback,
 Browser clients may also authenticate with the backend-issued `access_token`
 HttpOnly cookie. Google `id_token` / `access_token` values are never accepted
 as business API credentials.
-
-The internal Claude resource diagnostics endpoint is the sole exception to user
-authentication: it uses its own dedicated server-to-server Bearer token documented
-with that endpoint and never accepts a user JWT or cookie.
 
 JWT access token lifetime is configured by `JWT_EXPIRES_IN` and defaults to 1 hour in this project. Expiration is sliding: any authenticated request made while less than half of the lifetime remains receives a freshly signed token in the `X-New-Access-Token` response header (and a refreshed `access_token` cookie for cookie-based clients), so active sessions stay signed in indefinitely.
 
@@ -524,54 +517,6 @@ Retryable resource codes:
   number of active Agent turns; no second CLI process tree was created.
 - `CLAUDE_AGENT_MEMORY_PRESSURE`: host `MemAvailable` or cgroup v2 headroom is
   below the configured run budget plus reserve; no CLI process was created.
-
-### GET `/api/internal/claude-agent/resources`
-
-Internal Admin-to-Dream, read-only process resource diagnostics. This endpoint
-does not use user JWT/cookie auth and never queries PostgreSQL. It requires a
-dedicated deployment secret shared only between the two server processes:
-
-```text
-Authorization: Bearer ${DREAM_DIAGNOSTICS_TOKEN}
-```
-
-Dream reads the matching value from `INK_AGENT_DIAGNOSTICS_TOKEN`. An unset or
-shorter-than-32-byte Dream token fails closed with 503; missing or incorrect
-Bearer credentials return 401. The endpoint has no Shell, kill, restart,
-configuration-write, or admission bypass operation.
-
-The response is an explicit schema-versioned DTO with these top-level fields:
-
-- `scope`: `active_runs=process`, `counters=process_lifetime`, and
-  `reset_on_restart=true`; values are not cluster-global or database history.
-- `config`: defaults, the four safe numeric environment overrides, effective
-  admission config, effective hash/version, process load time, and restart flag.
-- `turns`: started/completed/failed/cancelled process-lifetime totals observed
-  through the existing normalized EventBus.
-- `admission`: active/max runs, grant and two denial totals, latest denial type/time,
-  and the current sampled `can_start_new_agent` projection. This field is `null`
-  for starting, timeout, error, or stale samples; a fresh `unavailable` sample
-  retains the existing concurrency-only boolean semantics.
-- `claude_processes`: `/proc` descendant count and total RSS for validated Claude
-  executable names; no command line is read.
-- `memory`: host available bytes; cgroup current/max/raw headroom;
-  `inactive_file`, `slab_reclaimable`, effective headroom, required headroom; and
-  `memory.events` `low/high/max/oom/oom_kill` counters.
-- `sample`: `starting|ok|unavailable|timeout|error`, sample time, age, stale flag,
-  and a closed error code.
-
-Nullable resource fields mean the host interface is unavailable or unreadable.
-The DTO never includes messages, prompt/transcript, Thread/Session/actor IDs, file
-content, full environment inventories, process command lines, authorization data,
-cookies, tokens, or Provider credentials.
-
-Dream does not read Admin desired policy or PostgreSQL. The v1 application path is
-operator-controlled: copy all four Admin desired values into the bounded
-`AUTODL_AGENT_*` platform variables, run the existing deployment env projection,
-and perform the existing controlled Dream restart. `prepare-env.sh` accepts either
-zero values (application defaults) or all four values, rejects partial/empty/zero/
-non-integer/out-of-bound inputs, and maps them to the four existing
-`INK_AGENT_*` inputs. Diagnostics after restart is the only effective-state proof.
 
 ### GET `/api/claude-agent/threads`
 

@@ -1,7 +1,7 @@
 # [Input] Consume Linux resource sampler, public admission snapshots, Observer counters, and DTO projector.
 # [Output] Verify cgroup/proc reads, tri-state admission projection, staleness, errors, and DTO privacy.
 # [Pos] Focused resource diagnostics tests in backend/tests.
-# [Sync] 2026-08-27: cover provider-free Linux sampling and unknown-vs-denied projection.
+# [Sync] 2026-08-27: cover admission-independent cgroup details and the PostgreSQL snapshot DTO.
 
 from __future__ import annotations
 
@@ -14,13 +14,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import tests._sdk_stubs  # noqa: F401
-
 from claude_agent.admission import (
     AgentAdmissionConfig,
     AgentResourceSnapshot,
@@ -28,17 +26,22 @@ from claude_agent.admission import (
     read_agent_resource_snapshot,
 )
 from claude_agent.resource_diagnostics import (
+    CgroupDetailSnapshot,
     ClaudeAgentResourceDiagnostics,
     ClaudeAgentResourceSampler,
     ClaudeProcessSnapshot,
     ResourceSample,
+    read_cgroup_detail_snapshot,
     read_claude_process_snapshot,
 )
 from claude_agent.resource_observer import (
     ClaudeAgentResourceObserver,
     ObservedClaudeAgentAdmissionController,
 )
-
+from claude_agent.resource_policy import (
+    RESOURCE_POLICY_DEFAULTS,
+    ResourcePolicyLoadResult,
+)
 
 _MIB = 1024 * 1024
 
@@ -70,7 +73,6 @@ class TestLinuxResourceReads(unittest.TestCase):
             snapshot = read_agent_resource_snapshot()
         self.assertFalse(snapshot.metrics_available)
         self.assertIsNone(snapshot.cgroup_current_bytes)
-        self.assertIsNone(snapshot.cgroup_event_oom_kill)
 
     def test_cgroup_fields_and_memory_events_are_read(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -90,21 +92,22 @@ class TestLinuxResourceReads(unittest.TestCase):
                 return_value=2048 * _MIB,
             ):
                 snapshot = read_agent_resource_snapshot()
+            details = read_cgroup_detail_snapshot(cgroup)
 
         self.assertEqual(snapshot.cgroup_raw_headroom_bytes, 124 * _MIB)
-        self.assertEqual(snapshot.cgroup_inactive_file_bytes, 200 * _MIB)
-        self.assertEqual(snapshot.cgroup_slab_reclaimable_bytes, 50 * _MIB)
         self.assertEqual(snapshot.cgroup_reclaimable_bytes, 250 * _MIB)
         self.assertEqual(snapshot.cgroup_headroom_bytes, 374 * _MIB)
         self.assertEqual(
             (
-                snapshot.cgroup_event_low,
-                snapshot.cgroup_event_high,
-                snapshot.cgroup_event_max,
-                snapshot.cgroup_event_oom,
-                snapshot.cgroup_event_oom_kill,
+                details.inactive_file_bytes,
+                details.slab_reclaimable_bytes,
+                details.event_low,
+                details.event_high,
+                details.event_max,
+                details.event_oom,
+                details.event_oom_kill,
             ),
-            (1, 2, 3, 4, 5),
+            (200 * _MIB, 50 * _MIB, 1, 2, 3, 4, 5),
         )
 
     def test_proc_absent_is_unavailable(self) -> None:
@@ -190,10 +193,21 @@ class TestResourceSampler(unittest.IsolatedAsyncioTestCase):
 
 class TestDiagnosticsDTO(unittest.TestCase):
     @staticmethod
+    def _policy(config: AgentAdmissionConfig) -> ResourcePolicyLoadResult:
+        return ResourcePolicyLoadResult(
+            config=config,
+            defaults=RESOURCE_POLICY_DEFAULTS,
+            status="not_configured",
+            revision=None,
+            updated_at=None,
+            loaded_at="2026-08-27T00:00:00Z",
+        )
+
+    @staticmethod
     def _diagnostics(
         sampler: ClaudeAgentResourceSampler,
     ) -> ClaudeAgentResourceDiagnostics:
-        config = AgentAdmissionConfig.defaults()
+        config = RESOURCE_POLICY_DEFAULTS
         observer = ClaudeAgentResourceObserver()
         admission = ObservedClaudeAgentAdmissionController(
             ClaudeAgentAdmissionController(
@@ -206,6 +220,7 @@ class TestDiagnosticsDTO(unittest.TestCase):
             admission=admission,
             observer=observer,
             sampler=sampler,
+            policy=TestDiagnosticsDTO._policy(config),
         )
 
     def test_unknown_sample_states_project_null_admission_decision(self) -> None:
@@ -286,6 +301,7 @@ class TestDiagnosticsDTO(unittest.TestCase):
             admission=admission,
             observer=observer,
             sampler=sampler,
+            policy=self._policy(config),
         )
         with mock.patch.dict(os.environ, {}, clear=True):
             payload = diagnostics.snapshot().model_dump()
@@ -302,6 +318,7 @@ class TestDiagnosticsDTO(unittest.TestCase):
                 "claude_processes",
                 "memory",
                 "sample",
+                "pipeline",
             },
         )
         serialized = repr(payload).lower()
@@ -320,8 +337,8 @@ class TestDiagnosticsDTO(unittest.TestCase):
         self.assertTrue(payload["scope"]["reset_on_restart"])
         self.assertTrue(payload["admission"]["can_start_new_agent"])
 
-    def test_invalid_post_start_env_is_redacted_and_requires_restart(self) -> None:
-        config = AgentAdmissionConfig.defaults()
+    def test_policy_provenance_is_closed_and_explicit(self) -> None:
+        config = RESOURCE_POLICY_DEFAULTS
         observer = ClaudeAgentResourceObserver()
         admission = ObservedClaudeAgentAdmissionController(
             ClaudeAgentAdmissionController(
@@ -335,12 +352,17 @@ class TestDiagnosticsDTO(unittest.TestCase):
             admission=admission,
             observer=observer,
             sampler=sampler,
+            policy=ResourcePolicyLoadResult(
+                config=config,
+                defaults=RESOURCE_POLICY_DEFAULTS,
+                status="invalid",
+                revision=None,
+                updated_at=None,
+                loaded_at="2026-08-27T00:00:00Z",
+            ),
         )
-        with mock.patch.dict(
-            os.environ,
-            {"INK_AGENT_MAX_CONCURRENT_RUNS": "not-an-integer"},
-            clear=True,
-        ):
-            payload = diagnostics.snapshot().model_dump()
-        self.assertIsNone(payload["config"]["environment"]["max_concurrent_runs"])
-        self.assertTrue(payload["config"]["restart_required"])
+        payload = diagnostics.snapshot().model_dump()
+        self.assertEqual(payload["config"]["policy_status"], "invalid")
+        self.assertIsNone(payload["config"]["policy_revision"])
+        self.assertNotIn("environment", payload["config"])
+        self.assertEqual(payload["pipeline"]["write_errors_total"], 0)

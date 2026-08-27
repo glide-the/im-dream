@@ -2,21 +2,21 @@
 #         and normalized per-turn EventBus exposed after context assembly.
 # [Output] Provide an admission decorator and content-free, process-lifetime resource counters.
 # [Pos] Off-path resource Observer in backend/claude_agent; never controls Agent execution.
-# [Sync] 2026-08-27: add non-blocking admission/lifecycle observation without retaining turn identities.
+# [Sync] 2026-08-27: expose closed reader-error counts while preserving no-I/O hooks and identity-free state.
 
 """Content-free resource observations for canonical Claude Agent turns."""
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import logging
 from threading import Lock
 from typing import Any
 
 from claude_agent.admission import (
-    AgentAdmissionLease,
     AgentAdmissionConfig,
+    AgentAdmissionLease,
     ClaudeAgentAdmissionController,
     ClaudeAgentAdmissionError,
 )
@@ -24,7 +24,6 @@ from services.story_workspace.dream_lifecycle_observer import (
     NormalizedAgentTurnClassifier,
     NormalizedTurnOutcome,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +45,7 @@ class ClaudeAgentResourceCounters:
     turn_cancelled_total: int
     last_denial_type: str | None
     last_denial_at: str | None
+    reader_errors_total: int
 
 
 class ClaudeAgentResourceObserver:
@@ -181,6 +181,7 @@ class ClaudeAgentResourceObserver:
                 turn_cancelled_total=self._turn_cancelled_total,
                 last_denial_type=self._last_denial_type,
                 last_denial_at=self._last_denial_at,
+                reader_errors_total=self._reader_errors,
             )
 
 

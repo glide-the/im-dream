@@ -2,7 +2,7 @@
 #         normalized EventBus, and existing turn classifier semantics.
 # [Output] Verify registration, terminal counts, denial observation, exception isolation, and lease safety.
 # [Pos] Focused resource Observer contract tests in backend/tests.
-# [Sync] 2026-08-27: add provider-free coverage for process-local Claude resource observations.
+# [Sync] 2026-08-27: cover process-local observation and the public closed reader-error counter.
 
 from __future__ import annotations
 
@@ -13,13 +13,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import tests._sdk_stubs  # noqa: F401
-
 from claude_agent.admission import (
     AgentAdmissionConfig,
     AgentResourceSnapshot,
@@ -35,7 +33,6 @@ from claude_agent.resource_observer import (
 from claude_agent.service import ClaudeAgentRunRequest
 from claude_agent.stream_events import NormalizedAgentEvent
 from claude_agent.thread_factory import ClaudeAgentThreadFactory
-
 
 _MIB = 1024 * 1024
 
@@ -153,6 +150,7 @@ class TestClaudeAgentResourceObserver(unittest.IsolatedAsyncioTestCase):
         observer.on_after_context_assembly("discarded", {"event_bus": BrokenBus()})
         await _settle(observer)
         self.assertEqual(observer.snapshot().turn_started_total, 1)
+        self.assertEqual(observer.snapshot().reader_errors_total, 1)
         await observer.aclose()
 
 

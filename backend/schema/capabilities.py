@@ -5,6 +5,7 @@
 [Pos] No-DDL Dream boundary for shared PostgreSQL schema publication.
 [Sync] 2026-08-19: add the exact ClaudePlugin Remote Marketplace v1 contract hash.
 [Sync] 2026-08-25: add the exact Admin-published managed MCP Resources v1 capability check.
+[Sync] 2026-08-27: require and expose the exact Claude Agent resource Observer v1 contract.
 """
 
 from __future__ import annotations
@@ -31,11 +32,26 @@ MANAGED_MCP_RESOURCES_VERSION: Final = 1
 MANAGED_MCP_RESOURCES_CONTRACT_SHA256: Final = (
     "746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a"
 )
+CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: Final = (
+    "dream.claude-agent-resource-observer.v1"
+)
+CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION: Final = 1
+CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256: Final = (
+    "db2ba80eb61a9515ba23000f8a615fb41f6ed5824bd306e8d0ca5fb8f1cc044e"
+)
 REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     UNIFIED_DREAM_CAPABILITY: 1,
     "dream.workflow.thread-lookup.v1": 1,
     "dream.story-artifact-contract.v2": 2,
     DREAM_WORKFLOW_NO_CONTINUING_CAPABILITY: 1,
+    CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: (
+        CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION
+    ),
+}
+_EXACT_RUNTIME_CONTRACTS: Final[Mapping[str, str]] = {
+    CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: (
+        CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256
+    ),
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -108,13 +124,28 @@ def inspect_schema_authority(
         for name, minimum in required.items()
     ):
         raise SchemaCapabilityError()
-    hashes = {contract_sha256 for _, contract_sha256 in observed.values()}
-    if len(hashes) != 1:
+    if any(
+        observed[name][1] != expected_hash
+        for name, expected_hash in _EXACT_RUNTIME_CONTRACTS.items()
+        if name in required
+    ):
         raise SchemaCapabilityError()
+    hashes = {
+        contract_sha256
+        for name, (_, contract_sha256) in observed.items()
+        if name not in _EXACT_RUNTIME_CONTRACTS
+    }
+    if len(hashes) > 1:
+        raise SchemaCapabilityError()
+    authority_hash = (
+        next(iter(hashes))
+        if hashes
+        else next(iter(observed.values()))[1]
+    )
     return SchemaAuthorityReceipt(
         authority="admin-drizzle",
         capabilities=tuple((name, observed[name][0]) for name in sorted(observed)),
-        contract_sha256=next(iter(hashes)),
+        contract_sha256=authority_hash,
     )
 
 
@@ -151,7 +182,38 @@ def managed_mcp_resources_capability_available(connection: Any) -> bool:
     )
 
 
+def claude_agent_resource_observer_capability_available(connection: Any) -> bool:
+    """Return whether the exact Admin-published resource Observer contract exists."""
+
+    try:
+        row = connection.execute(
+            "SELECT version, contract_sha256 "
+            "FROM drizzle.schema_capabilities WHERE capability = %s",
+            (CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY,),
+        ).fetchone()
+    except Exception:
+        return False
+    if row is None:
+        return False
+    if isinstance(row, Mapping):
+        version = row.get("version")
+        contract_sha256 = row.get("contract_sha256")
+    else:
+        try:
+            version, contract_sha256 = row[0], row[1]
+        except (IndexError, KeyError, TypeError):
+            return False
+    return (
+        isinstance(version, int)
+        and version == CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION
+        and contract_sha256 == CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256
+    )
+
+
 __all__ = [
+    "CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY",
+    "CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256",
+    "CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION",
     "CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CAPABILITY",
     "CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CONTRACT_SHA256",
     "DECK_CONTENT_VERSIONS_CAPABILITY",
@@ -165,5 +227,6 @@ __all__ = [
     "SchemaCapabilityError",
     "UNIFIED_DREAM_CAPABILITY",
     "inspect_schema_authority",
+    "claude_agent_resource_observer_capability_available",
     "managed_mcp_resources_capability_available",
 ]

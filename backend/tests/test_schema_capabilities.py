@@ -1,16 +1,24 @@
+# [Input] Consume read-only Admin schema capability inspectors with injected PostgreSQL rows.
+# [Output] Verify runtime authority and exact managed-MCP/resource-Observer capability contracts.
+# [Pos] Provider-free schema capability consumer tests in backend/tests.
+# [Sync] 2026-08-27: require the exact Claude Agent resource Observer v1 hash at runtime.
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import pytest
-
 from schema.capabilities import (
+    CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY,
+    CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
+    CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION,
     MANAGED_MCP_RESOURCES_CAPABILITY,
     MANAGED_MCP_RESOURCES_CONTRACT_SHA256,
     MANAGED_MCP_RESOURCES_VERSION,
     REQUIRED_RUNTIME_CAPABILITIES,
-    SchemaCapabilityError,
     UNIFIED_DREAM_CAPABILITY,
+    SchemaCapabilityError,
+    claude_agent_resource_observer_capability_available,
     inspect_schema_authority,
     managed_mcp_resources_capability_available,
 )
@@ -65,10 +73,22 @@ class _Connection:
 _HASH = "a" * 64
 
 
+def _required_capabilities() -> dict[str, tuple[int, str]]:
+    return {
+        name: (
+            version,
+            CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256
+            if name == CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY
+            else _HASH,
+        )
+        for name, version in REQUIRED_RUNTIME_CAPABILITIES.items()
+    }
+
+
 def test_capability_authority_allows_higher_unrelated_global_head() -> None:
     connection = _Connection(
         capabilities={
-            **{name: (version, _HASH) for name, version in REQUIRED_RUNTIME_CAPABILITIES.items()},
+            **_required_capabilities(),
             "billing.unrelated.v99": (99, "b" * 64),
         }
     )
@@ -139,3 +159,25 @@ def test_managed_mcp_capability_requires_the_exact_admin_hash() -> None:
     assert MANAGED_MCP_RESOURCES_CONTRACT_SHA256 == (
         "746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a"
     )
+
+
+def test_resource_observer_capability_requires_exact_version_and_hash() -> None:
+    exact = _Connection(
+        capabilities={
+            CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: (
+                CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION,
+                CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
+            )
+        }
+    )
+    drifted = _Connection(
+        capabilities={
+            CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: (
+                CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION,
+                "b" * 64,
+            )
+        }
+    )
+
+    assert claude_agent_resource_observer_capability_available(exact) is True
+    assert claude_agent_resource_observer_capability_available(drifted) is False

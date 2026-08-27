@@ -19,7 +19,7 @@
 # [Sync] 2026-08-26: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.1.
 # [Sync] 2026-08-24: cover credential-free SDK/CLI startup identity logging.
 # [Sync] 2026-08-25: align MCP auth route registration with database server identifiers.
-# [Sync] 2026-08-27: preserve the dedicated Agent diagnostics token during startup cleanup.
+# [Sync] 2026-08-27: cover PostgreSQL resource sampler/sink/publisher lifecycle ordering.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -259,7 +259,6 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
             "INK_AGENT_MAX_CONCURRENT_RUNS": "1",
             "INK_AGENT_RUN_MEMORY_BUDGET_MIB": "512",
             "INK_AGENT_MEMORY_RESERVE_MIB": "128",
-            "INK_AGENT_DIAGNOSTICS_TOKEN": "dedicated-diagnostics-secret",
         }
         with unittest.mock.patch.dict(os.environ, expected, clear=True):
             _SERVER_MODULE._drop_unsupported_agent_env()
@@ -1786,10 +1785,28 @@ class TestFactoryLifecycle(unittest.TestCase):
                 "start",
                 side_effect=lambda: calls.append("factory"),
             ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_sampler,
+                "start",
+                side_effect=lambda: calls.append("sampler"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_postgres_sink,
+                "start",
+                side_effect=lambda: calls.append("sink"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_publisher,
+                "start",
+                side_effect=lambda: calls.append("publisher"),
+            ),
             unittest.mock.patch("builtins.print") as print_mock,
         ):
             asyncio.run(self.srv.startup_claude_agent())
-        self.assertEqual(calls, ["sdk", "runtime", "factory"])
+        self.assertEqual(
+            calls,
+            ["sdk", "runtime", "factory", "sampler", "sink", "publisher"],
+        )
         runtime_line = next(
             call.args[0]
             for call in print_mock.call_args_list
@@ -1901,6 +1918,9 @@ class TestFactoryLifecycle(unittest.TestCase):
         async def close_redis():
             calls.append("redis")
 
+        def resource_stop(name):
+            return unittest.mock.AsyncMock(side_effect=lambda: calls.append(name))
+
         with (
             unittest.mock.patch.object(
                 self.srv,
@@ -1911,6 +1931,21 @@ class TestFactoryLifecycle(unittest.TestCase):
                 self.srv.claude_agent_thread_factory,
                 "aclose",
                 side_effect=close_factory,
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_publisher,
+                "stop",
+                new=resource_stop("publisher"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_postgres_sink,
+                "stop",
+                new=resource_stop("sink"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_sampler,
+                "stop",
+                new=resource_stop("sampler"),
             ),
             unittest.mock.patch.object(
                 self.srv.RedisStreamEventBus,
@@ -1932,7 +1967,15 @@ class TestFactoryLifecycle(unittest.TestCase):
 
         self.assertEqual(
             calls,
-            ["confirmation", "factory", "redis", "database"],
+            [
+                "confirmation",
+                "publisher",
+                "sink",
+                "sampler",
+                "factory",
+                "redis",
+                "database",
+            ],
         )
         close_event_bus.assert_awaited_once_with()
 
