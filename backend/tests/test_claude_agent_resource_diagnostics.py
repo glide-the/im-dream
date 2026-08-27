@@ -1,7 +1,7 @@
 # [Input] Consume Linux resource sampler, public admission snapshots, Observer counters, and DTO projector.
-# [Output] Verify cgroup/proc absence, Claude RSS aggregation, staleness, errors, and DTO privacy/shape.
+# [Output] Verify cgroup/proc reads, tri-state admission projection, staleness, errors, and DTO privacy.
 # [Pos] Focused resource diagnostics tests in backend/tests.
-# [Sync] 2026-08-27: add provider-free Linux sampler and closed diagnostics DTO coverage.
+# [Sync] 2026-08-27: cover provider-free Linux sampling and unknown-vs-denied projection.
 
 from __future__ import annotations
 
@@ -189,6 +189,67 @@ class TestResourceSampler(unittest.IsolatedAsyncioTestCase):
 
 
 class TestDiagnosticsDTO(unittest.TestCase):
+    @staticmethod
+    def _diagnostics(
+        sampler: ClaudeAgentResourceSampler,
+    ) -> ClaudeAgentResourceDiagnostics:
+        config = AgentAdmissionConfig.defaults()
+        observer = ClaudeAgentResourceObserver()
+        admission = ObservedClaudeAgentAdmissionController(
+            ClaudeAgentAdmissionController(
+                config,
+                snapshot_provider=AgentResourceSnapshot,
+            ),
+            observer,
+        )
+        return ClaudeAgentResourceDiagnostics(
+            admission=admission,
+            observer=observer,
+            sampler=sampler,
+        )
+
+    def test_unknown_sample_states_project_null_admission_decision(self) -> None:
+        for sample_status in ("starting", "timeout", "error"):
+            with self.subTest(sample_status=sample_status):
+                sampler = ClaudeAgentResourceSampler()
+                sampler._status = sample_status
+                sampler._sampled_at = "2026-08-27T00:00:00Z"
+                sampler._sampled_monotonic = time.monotonic()
+                sampler._sample = ResourceSample(
+                    memory=AgentResourceSnapshot(host_available_bytes=2048 * _MIB),
+                    claude_processes=ClaudeProcessSnapshot(available=False),
+                )
+                payload = self._diagnostics(sampler).snapshot().model_dump()
+                self.assertIsNone(payload["admission"]["can_start_new_agent"])
+
+        stale_sampler = ClaudeAgentResourceSampler(
+            interval_seconds=0.01,
+            stale_after_seconds=0.01,
+        )
+        stale_sampler._status = "ok"
+        stale_sampler._sampled_at = "2026-08-27T00:00:00Z"
+        stale_sampler._sampled_monotonic = time.monotonic() - 1
+        stale_sampler._sample = ResourceSample(
+            memory=AgentResourceSnapshot(host_available_bytes=2048 * _MIB),
+            claude_processes=ClaudeProcessSnapshot(available=False),
+        )
+        stale_payload = self._diagnostics(stale_sampler).snapshot().model_dump()
+        self.assertIsNone(stale_payload["admission"]["can_start_new_agent"])
+
+    def test_fresh_unavailable_sample_uses_concurrency_only_projection(self) -> None:
+        sampler = ClaudeAgentResourceSampler()
+        sampler._status = "unavailable"
+        sampler._sampled_at = "2026-08-27T00:00:00Z"
+        sampler._sampled_monotonic = time.monotonic()
+        sampler._sample = ResourceSample(
+            memory=AgentResourceSnapshot(),
+            claude_processes=ClaudeProcessSnapshot(available=False),
+        )
+
+        payload = self._diagnostics(sampler).snapshot().model_dump()
+
+        self.assertTrue(payload["admission"]["can_start_new_agent"])
+
     def test_closed_dto_contains_no_business_or_credential_fields(self) -> None:
         config = AgentAdmissionConfig(
             max_concurrent_runs=1,

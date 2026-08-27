@@ -3,8 +3,7 @@
 [Input] Existing AutoDL Admin/Dream releases and the standalone stack launcher.
 [Output] Explain the application and provide a minimal one-command startup workflow.
 [Pos] User-facing README for an already deployed AutoDL Ink & Memory stack.
-[Sync] 2026-08-27: document root Dream runtime, isolated Admin/PostgreSQL ownership,
-                    and dedicated Admin-to-Dream diagnostics token projection.
+[Sync] 2026-08-27: document diagnostics auth and controlled-restart Agent policy projection.
 -->
 
 ## 应用介绍
@@ -26,6 +25,8 @@ AutoDL 版本不依赖 Docker 或 Nginx：Admin 与内嵌 PostgreSQL 监听 `127
 Dream 的 Thread workspace、共享 Artifact、本地文件、运行用户 home 与 Claude plugin runtime 默认统一位于 `/root/autodl-tmp/ink-memory`。Admin 的 PostgreSQL 数据独立位于服务用户拥有的 `/root/ink-autodl/data/postgres`；启动器不会迁移、恢复或删除数据库。
 
 Admin 生成的安全 env 必须包含至少 32 字符的 `DREAM_DIAGNOSTICS_TOKEN`。Dream `prepare-env.sh` 从该唯一事实来源读取，并只在 mode-0600 Dream runtime env 中映射为 `INK_AGENT_DIAGNOSTICS_TOKEN`；不会接受 Dream source env 的同名覆盖，也不会把 token 输出到日志。
+
+Admin 保存 Claude Agent desired 策略不会动态改变 Dream。v1 唯一应用路径是：部署人员从 Admin 控制台复制四个 desired 整数到 `platform.env` 的四个 `AUTODL_AGENT_*` 项，执行既有 deploy/env 投影，再通过既有发布流程受控重启 Dream。四项必须全部设置或全部省略；省略时使用应用默认值。`prepare-env.sh` 按 Admin 同一边界拒绝 partial、显式空值、0、非整数、无限和越界值，不输出配置值。重启后以 diagnostics effective 与 desired 四项完全相等作为已生效证据；Admin 页面和 API 均不提供 Shell 或重启按钮。
 
 Dream 前后端及 Claude Runtime 由 `root` 启动，使 `.dream/runtime` 的安全目录协议能够逐级打开 `/root` 下的 workspace；Admin 与内嵌 PostgreSQL 继续使用独立非 root 用户。启动脚本不会用 `setpriv` 将 Dream 降权为其他账户。
 

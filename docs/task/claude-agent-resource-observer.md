@@ -2,7 +2,7 @@
 [Input] 用户本轮 Claude Agent 资源限制诊断、Observer 观测和 Admin 控制台需求，以及 Dream 仓库 2026-08-27 只读诊断证据。
 [Output] 固化 Dream 子任务的 Optimized Prompt、责任边界、阶段状态、未来文件所有权、验证结果、阻断项与设计自审。
 [Pos] docs/task 下 Claude Agent 资源 Observer 工作记录；不作为运行时配置或 Agent 状态机事实来源。
-[Sync] 2026-08-27: 完成任务一至五的 Dream 诊断、设计、自审、最小实现和 provider-free 回归；AutoDL 实机验收仍阻断。
+[Sync] 2026-08-27: 完成 Dream 实现、三态 diagnostics 与受控重启配置投影；AutoDL 实机验收仍阻断。
 -->
 
 # Claude Agent 资源 Observer：Dream 子任务记录
@@ -106,12 +106,12 @@ required = (run_memory_budget_mib + memory_reserve_mib) * 1024 * 1024
 
 | 配置 | 环境变量 | 代码默认 | 本地 `backend/.env` | AutoDL 投影合同 |
 |---|---|---:|---:|---:|
-| 最大并发 turn | `INK_AGENT_MAX_CONCURRENT_RUNS` | 1 | 1 | 不投影覆盖，使用默认 1 |
-| 单 turn 内存预算 | `INK_AGENT_RUN_MEMORY_BUDGET_MIB` | 512 MiB | 416 MiB | 不投影覆盖，使用默认 512 MiB |
-| 系统保留内存 | `INK_AGENT_MEMORY_RESERVE_MIB` | 128 MiB | 128 MiB | 不投影覆盖，使用默认 128 MiB |
-| retry 等待 | `INK_AGENT_SWEEP_INTERVAL_S` | 60 s | 60 s | 继续从 source env 投影为 60 s |
+| 最大并发 turn | `INK_AGENT_MAX_CONCURRENT_RUNS` | 1 | 1 | `AUTODL_AGENT_MAX_CONCURRENT_RUNS` 可选投影；未设置用默认 1 |
+| 单 turn 内存预算 | `INK_AGENT_RUN_MEMORY_BUDGET_MIB` | 512 MiB | 416 MiB | `AUTODL_AGENT_RUN_MEMORY_BUDGET_MIB` 可选投影；未设置用默认 512 MiB |
+| 系统保留内存 | `INK_AGENT_MEMORY_RESERVE_MIB` | 128 MiB | 128 MiB | `AUTODL_AGENT_MEMORY_RESERVE_MIB` 可选投影；未设置用默认 128 MiB |
+| retry 等待 | `INK_AGENT_SWEEP_INTERVAL_S` | 60 s | 60 s | `AUTODL_AGENT_RETRY_AFTER_SECONDS` 可选投影；未设置用默认 60 s |
 
-`INK_AGENT_SWEEP_INTERVAL_S` 同时控制 Session sweeper 和 admission retry hint；当前没有独立 retry 配置。进程继承环境优先于 `backend/.env`，因此只有读取目标 PID 的实际环境或启动日志后才能把投影值称为“实时生效值”。
+四项平台值必须同时设置或同时省略，并按 Admin 同一边界校验：并发 1–16、run memory 128–8192 MiB、reserve 64–4096 MiB、retry 5–3600 秒。partial、显式空值、0、非整数、无限和越界值 fail closed。`INK_AGENT_SWEEP_INTERVAL_S` 同时控制 Session sweeper 和 admission retry hint；当前没有独立 retry 配置。进程继承环境优先于 `backend/.env`，因此只有 Dream 重启后的 diagnostics effective 才能证明实际生效。
 
 用户提供的 AutoDL 诊断：
 
@@ -180,8 +180,17 @@ flowchart LR
 - sampling 运行在独立后台任务，有超时、错误隔离和最后成功时间；EventBus reader 数量受既有 admission 并发上限约束。Observer/sampler/diagnostics 失败不得回传 Agent 主路径。
 - `read_agent_resource_snapshot()` 是内存准入事实的公共复用点。若目标 DTO 需要独立 stat/events 字段，只允许向后兼容扩展资源 snapshot/reader；不得改 `try_acquire` 判定顺序、比较条件或 lease。
 - Claude 子进程只通过 `/proc` PPid 后代关系与已验证 CLI executable identity 聚合 count/RSS；不读取或返回完整命令行。无法可靠识别时返回 unavailable/error，不猜测。
-- diagnostics 是单实例实时/进程累计快照，并带 `scope.active_runs=process`、sampled_at、age、stale。它不是数据库历史，也不宣称集群全局。
+- diagnostics 是单实例实时/进程累计快照，并带 `scope.active_runs=process`、sampled_at、age、stale。`can_start_new_agent` 在 stale/starting/timeout/error 时为 null，避免把未知误报为拒绝；新鲜 unavailable 保留既有 concurrency-only 布尔语义。它不是数据库历史，也不宣称集群全局。
 - Dream 只返回 effective/default/env-source-safe projection；不得枚举环境变量。Admin desired 配置通过部署配置投影和受控重启生效。
+
+### 5.1.1 desired → effective v1 闭环
+
+1. Admin 只在受 RBAC、Origin、事务和审计保护的 `system_settings` 中保存四项 desired；保存本身不改变 Dream。
+2. 部署人员把四项 desired 原样复制到 `platform.env` 的四个 `AUTODL_AGENT_*` 变量；不允许 partial 或动态数据库读取。
+3. 既有 `prepare-env.sh` 按 Admin 相同边界校验并投影为 `INK_AGENT_MAX_CONCURRENT_RUNS`、`INK_AGENT_RUN_MEMORY_BUDGET_MIB`、`INK_AGENT_MEMORY_RESERVE_MIB`、`INK_AGENT_SWEEP_INTERVAL_S`。
+4. 通过既有 deploy 流程生成 mode-0600 runtime env 并执行受控 Dream 重启；没有 Admin Shell、kill、restart 或远程执行接口。
+5. composition root 仅在进程启动时调用既有 `AgentAdmissionConfig.from_env()`；diagnostics 返回新的 effective/version/load time。Admin 仅在 desired 与 effective 四值完全相等时显示 applied，否则显示 pending。
+6. 四项平台变量全部省略时 projector 会剔除 Dream source env 的旧覆盖并使用代码默认；Dream/数据库不可达时 applied 为 unknown，不把 desired 冒充 effective。
 
 ### 5.2 实现文件所有权
 
@@ -338,11 +347,27 @@ Command: cd /Users/dmeck/project/ink-dream-memory && \
   ./deploy/autodl-ssh/test-topology.sh
 Exit code: 0
 Result: topology contract passed; projected diagnostics token value was not printed
+
+Follow-up command: cd /Users/dmeck/project/ink-dream-memory/backend && \
+  ../.venv/bin/python -m pytest -q \
+  tests/test_claude_agent_resource_observer.py \
+  tests/test_claude_agent_resource_diagnostics.py \
+  tests/test_claude_agent_resource_router.py \
+  tests/test_claude_agent_admission.py \
+  tests/test_claude_agent_thread_factory.py
+Exit code: 0
+Result: 95 passed, 3 subtests passed in 1.23s; covers nullable unknown state and fresh-unavailable concurrency-only projection
+
+Follow-up command: cd /Users/dmeck/project/ink-dream-memory && \
+  bash -n deploy/autodl-ssh/prepare-env.sh deploy/autodl-ssh/test-topology.sh && \
+  ./deploy/autodl-ssh/test-topology.sh && git diff --check
+Exit code: 0
+Result: unset policy omitted; complete policy projected; partial, explicit empty, zero, non-integer/infinite and out-of-bound values rejected without logging values; diff check clean
 ```
 
 解释器偏差：仓库约定的 `backend/.venv/bin/python` 当前没有安装 pytest，直接运行得到 `No module named pytest`；只读诊断改用仓库根 `.venv`，未安装依赖或修改环境。
 
-现有及新增测试已经覆盖准入 grant/deny、host/cgroup、reclaimable cache、缺失指标、幂等 release、setup failure、stop cancel、Observer attach/close exception 隔离、注册/注销、normalized 三类终态、cgroup events、`/proc` RSS、timeout/stale、鉴权和 DTO 隐私闭集。仍待实机补充：
+现有及新增测试已经覆盖准入 grant/deny、host/cgroup、reclaimable cache、缺失指标、幂等 release、setup failure、stop cancel、Observer attach/close exception 隔离、注册/注销、normalized 三类终态、cgroup events、`/proc` RSS、timeout/stale/null 三态、鉴权、DTO 隐私闭集，以及 AutoDL desired 四值的 omit/complete/invalid 投影。仍待实机补充：
 
 - 当前 AutoDL `/proc/<pid>/exe` 对 standalone Runtime 的识别和 RSS 聚合；
 - 当前 AutoDL `memory.current/max/stat/events` 与 diagnostics DTO 的逐字段对照；
@@ -360,7 +385,7 @@ Result: topology contract passed; projected diagnostics token value was not prin
 
 ### 已知风险
 
-- `INK_AGENT_SWEEP_INTERVAL_S` 同时承担 sweeper interval 与 retry hint；Admin 若将它当独立 retry 配置会产生误导。当前实现不得拆分语义，UI 必须披露有效来源，未来拆分需单独兼容设计。
+- `AUTODL_AGENT_RETRY_AFTER_SECONDS` 映射到既有 `INK_AGENT_SWEEP_INTERVAL_S`，因此同时改变 sweeper interval 与 admission retry hint；UI 和操作文档必须披露该有效语义。未来拆分需单独兼容设计。
 - process-local 指标在重启时归零，多 worker 时不能代表全局；DTO 和页面必须明确 scope。
 - capacity denial 路径当前不采样内存，页面不得把旧 memory snapshot 描述为拒绝发生时的实时值。
 - 通过 `/proc/<pid>/exe` 与 PPid 识别 CLI 仍需 AutoDL 实证；识别失败应显示 unavailable，不能读取完整命令行补猜。

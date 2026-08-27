@@ -2,7 +2,7 @@
 #         and `/proc` status/executable metadata without reading process command lines.
 # [Output] Provide an isolated sampler and an explicit, credential-free diagnostics DTO.
 # [Pos] Read-only resource diagnostics node in backend/claude_agent.
-# [Sync] 2026-08-27: add bounded Linux sampling, staleness, and process-scoped DTO projection.
+# [Sync] 2026-08-27: add bounded Linux sampling and tri-state, process-scoped DTO projection.
 
 """Safe process-local diagnostics for Claude Agent resource admission."""
 from __future__ import annotations
@@ -308,7 +308,7 @@ class ResourceAdmissionDTO(BaseModel):
     memory_pressure_denials_total: int
     last_denial_type: Literal["capacity", "memory_pressure"] | None
     last_denial_at: str | None
-    can_start_new_agent: bool
+    can_start_new_agent: bool | None
 
 
 class ClaudeProcessesDTO(BaseModel):
@@ -434,12 +434,14 @@ class ClaudeAgentResourceDiagnostics:
             memory.cgroup_headroom_bytes is None
             or memory.cgroup_headroom_bytes >= required
         )
-        can_start = (
-            capacity_available
-            and host_sufficient
-            and cgroup_sufficient
-            and not sampler_snapshot.stale
-        )
+        if sampler_snapshot.stale or sampler_snapshot.status in {
+            "starting",
+            "timeout",
+            "error",
+        }:
+            can_start: bool | None = None
+        else:
+            can_start = capacity_available and host_sufficient and cgroup_sufficient
         environment = _environment_values()
         try:
             restart_required = AgentAdmissionConfig.from_env() != self._admission.config

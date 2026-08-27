@@ -20,6 +20,7 @@
 [Sync] 2026-08-25: replace the stale Claude CLI MCP contract with managed-PostgreSQL CRUD, standard-SDK discovery, encrypted OAuth, and automatic browser callback semantics.
 [Sync] 2026-08-22: document retryable Claude Agent capacity and memory-pressure SSE errors.
 [Sync] 2026-08-27: document dedicated-token, read-only Claude Agent resource diagnostics.
+[Sync] 2026-08-27: document tri-state admission projection and controlled-restart policy application.
 -->
 
 **Version:** 2.0.0
@@ -534,10 +535,10 @@ dedicated deployment secret shared only between the two server processes:
 Authorization: Bearer ${DREAM_DIAGNOSTICS_TOKEN}
 ```
 
-Dream reads the matching value from `INK_AGENT_DIAGNOSTICS_TOKEN`. An unset
-Dream token fails closed with 503; missing or incorrect Bearer credentials return
-401. The endpoint has no Shell, kill, restart, configuration-write, or admission
-bypass operation.
+Dream reads the matching value from `INK_AGENT_DIAGNOSTICS_TOKEN`. An unset or
+shorter-than-32-byte Dream token fails closed with 503; missing or incorrect
+Bearer credentials return 401. The endpoint has no Shell, kill, restart,
+configuration-write, or admission bypass operation.
 
 The response is an explicit schema-versioned DTO with these top-level fields:
 
@@ -548,7 +549,9 @@ The response is an explicit schema-versioned DTO with these top-level fields:
 - `turns`: started/completed/failed/cancelled process-lifetime totals observed
   through the existing normalized EventBus.
 - `admission`: active/max runs, grant and two denial totals, latest denial type/time,
-  and the current sampled `can_start_new_agent` projection.
+  and the current sampled `can_start_new_agent` projection. This field is `null`
+  for starting, timeout, error, or stale samples; a fresh `unavailable` sample
+  retains the existing concurrency-only boolean semantics.
 - `claude_processes`: `/proc` descendant count and total RSS for validated Claude
   executable names; no command line is read.
 - `memory`: host available bytes; cgroup current/max/raw headroom;
@@ -561,6 +564,14 @@ Nullable resource fields mean the host interface is unavailable or unreadable.
 The DTO never includes messages, prompt/transcript, Thread/Session/actor IDs, file
 content, full environment inventories, process command lines, authorization data,
 cookies, tokens, or Provider credentials.
+
+Dream does not read Admin desired policy or PostgreSQL. The v1 application path is
+operator-controlled: copy all four Admin desired values into the bounded
+`AUTODL_AGENT_*` platform variables, run the existing deployment env projection,
+and perform the existing controlled Dream restart. `prepare-env.sh` accepts either
+zero values (application defaults) or all four values, rejects partial/empty/zero/
+non-integer/out-of-bound inputs, and maps them to the four existing
+`INK_AGENT_*` inputs. Diagnostics after restart is the only effective-state proof.
 
 ### GET `/api/claude-agent/threads`
 
