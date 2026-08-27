@@ -1,7 +1,7 @@
 # [Input] Consume Linux resource sampler, public admission snapshots, Observer counters, and DTO projector.
 # [Output] Verify cgroup/proc reads, tri-state admission projection, staleness, errors, and DTO privacy.
 # [Pos] Focused resource diagnostics tests in backend/tests.
-# [Sync] 2026-08-27: cover read-only coherent/LKG snapshots and uncapped positive int4 concurrency projection.
+# [Sync] 2026-08-27: cover read-only coherent/LKG snapshots and uncapped positive concurrency projection.
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from claude_agent.admission import (
     AgentAdmissionConfig,
     AgentResourceSnapshot,
     ClaudeAgentAdmissionController,
-    POSTGRES_INT4_MAX,
     read_agent_resource_snapshot,
 )
 from claude_agent.resource_diagnostics import (
@@ -266,9 +265,10 @@ class TestDiagnosticsDTO(unittest.TestCase):
 
         self.assertTrue(payload["admission"]["can_start_new_agent"])
 
-    def test_int4_max_concurrency_projects_without_diagnostics_cap(self) -> None:
+    def test_large_concurrency_projects_without_diagnostics_cap(self) -> None:
+        large_value = 10**30
         config = AgentAdmissionConfig(
-            max_concurrent_runs=POSTGRES_INT4_MAX,
+            max_concurrent_runs=large_value,
             run_memory_budget_mib=512,
             memory_reserve_mib=128,
             retry_after_seconds=60,
@@ -292,11 +292,11 @@ class TestDiagnosticsDTO(unittest.TestCase):
 
         self.assertEqual(
             payload["config"]["effective"]["max_concurrent_runs"],
-            POSTGRES_INT4_MAX,
+            large_value,
         )
         self.assertEqual(
             payload["admission"]["max_concurrent_runs"],
-            POSTGRES_INT4_MAX,
+            large_value,
         )
 
     def test_closed_dto_contains_no_business_or_credential_fields(self) -> None:

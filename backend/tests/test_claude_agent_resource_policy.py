@@ -2,7 +2,7 @@
 # [Output] Verify capability gating, strict bounds/schema, bounded refresh timing,
 #          and monotonic last-known-good refresh behavior.
 # [Pos] Provider-free Claude Agent resource policy tests in backend/tests.
-# [Sync] 2026-08-27: prove positive int4 concurrency has no product ceiling and invalid refreshes preserve LKG.
+# [Sync] 2026-08-27: prove positive concurrency has no product ceiling and invalid refreshes preserve LKG.
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import tests._sdk_stubs  # noqa: F401
-from claude_agent.admission import AgentAdmissionConfig, POSTGRES_INT4_MAX
+from claude_agent.admission import AgentAdmissionConfig
 from claude_agent.resource_policy import (
     RESOURCE_POLICY_DEFAULTS,
     RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS,
@@ -102,8 +102,9 @@ def test_valid_policy_applies_exact_values_and_provenance() -> None:
     assert all(query.lstrip().upper().startswith("SELECT") for query in connection.queries)
 
 
-def test_int4_max_concurrency_policy_is_valid_without_product_cap() -> None:
-    policy = {**_POLICY, "maxConcurrentRuns": POSTGRES_INT4_MAX}
+def test_arbitrarily_large_concurrency_policy_is_valid_without_product_cap() -> None:
+    large_value = 10**30
+    policy = {**_POLICY, "maxConcurrentRuns": large_value}
     connection = _Connection(
         (policy, datetime(2026, 8, 27, tzinfo=timezone.utc)),
         capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
@@ -112,7 +113,7 @@ def test_int4_max_concurrency_policy_is_valid_without_product_cap() -> None:
     loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(_FALLBACK)
 
     assert loaded.status == "applied"
-    assert loaded.config.max_concurrent_runs == POSTGRES_INT4_MAX
+    assert loaded.config.max_concurrent_runs == large_value
 
 
 def test_missing_policy_retains_finite_fallback() -> None:
@@ -137,7 +138,6 @@ def test_invalid_policy_never_partially_applies() -> None:
         {**_POLICY, "maxConcurrentRuns": "2"},
         {**_POLICY, "maxConcurrentRuns": True},
         {**_POLICY, "maxConcurrentRuns": None},
-        {**_POLICY, "maxConcurrentRuns": POSTGRES_INT4_MAX + 1},
         {**_POLICY, "runMemoryBudgetMib": 8193},
         {**_POLICY, "revision": True},
         {**_POLICY, "schemaVersion": 2},
@@ -207,7 +207,7 @@ def test_large_bounded_environment_fallback_is_not_product_capped() -> None:
 def test_invalid_dynamic_concurrency_refresh_retains_last_known_good() -> None:
     valid_connection = _Connection(
         (
-            {**_POLICY, "maxConcurrentRuns": POSTGRES_INT4_MAX},
+            {**_POLICY, "maxConcurrentRuns": 10**30},
             "2026-08-27T00:00:00Z",
         ),
         capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
@@ -220,7 +220,7 @@ def test_invalid_dynamic_concurrency_refresh_retains_last_known_good() -> None:
             {
                 **_POLICY,
                 "revision": 8,
-                "maxConcurrentRuns": POSTGRES_INT4_MAX + 1,
+                "maxConcurrentRuns": 0,
             },
             "2026-08-27T00:01:00Z",
         ),

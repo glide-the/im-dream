@@ -2,7 +2,7 @@
 # [Output] Verify bounded concurrency, host/cgroup memory preflight, retryable
 #          SSE errors, missing-metric fallback, and idempotent lease release.
 # [Pos] resource-admission test node in backend/tests.
-# [Sync] 2026-08-27: cover positive int4 concurrency without a product ceiling or lease cancellation.
+# [Sync] 2026-08-27: cover uncapped positive concurrency without changing lease cancellation.
 
 """Tests for Claude Agent process-local resource admission."""
 from __future__ import annotations
@@ -25,7 +25,6 @@ from claude_agent.admission import (
     AgentResourceSnapshot,
     ClaudeAgentAdmissionController,
     ClaudeAgentAdmissionError,
-    POSTGRES_INT4_MAX,
     read_agent_resource_snapshot,
 )
 from claude_agent.service import ClaudeAgentRunRequest
@@ -206,15 +205,16 @@ class TestClaudeAgentAdmissionController(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must be >= 1"):
                 AgentAdmissionConfig.from_env()
 
-    def test_concurrency_env_accepts_int4_max_without_product_cap(self):
+    def test_concurrency_env_accepts_arbitrarily_large_positive_integer(self):
+        large_value = 10**30
         with unittest.mock.patch.dict(
             "os.environ",
-            {"INK_AGENT_MAX_CONCURRENT_RUNS": str(POSTGRES_INT4_MAX)},
+            {"INK_AGENT_MAX_CONCURRENT_RUNS": str(large_value)},
             clear=True,
         ):
             config = AgentAdmissionConfig.from_env()
 
-        self.assertEqual(config.max_concurrent_runs, POSTGRES_INT4_MAX)
+        self.assertEqual(config.max_concurrent_runs, large_value)
 
     def test_invalid_concurrency_env_fails_closed(self):
         invalid_values = (
@@ -222,7 +222,6 @@ class TestClaudeAgentAdmissionController(unittest.TestCase):
             "-1",
             "1.5",
             "not-an-integer",
-            str(POSTGRES_INT4_MAX + 1),
         )
         for raw in invalid_values:
             with self.subTest(raw=raw), unittest.mock.patch.dict(
@@ -265,8 +264,8 @@ class TestClaudeAgentAdmissionController(unittest.TestCase):
 
         self.assertEqual(controller.config, _config())
 
-    def test_public_config_boundary_rejects_nonpositive_noninteger_and_overflow(self):
-        invalid_values = (0, -1, 1.5, True, None, POSTGRES_INT4_MAX + 1)
+    def test_public_config_boundary_rejects_nonpositive_and_noninteger(self):
+        invalid_values = (0, -1, 1.5, True, None)
         for value in invalid_values:
             invalid = AgentAdmissionConfig(
                 max_concurrent_runs=value,  # type: ignore[arg-type]
@@ -282,11 +281,11 @@ class TestClaudeAgentAdmissionController(unittest.TestCase):
                     controller.replace_config(invalid)
                 self.assertEqual(controller.config, _config())
 
-    def test_public_config_boundary_accepts_int4_max(self):
-        maximum = _config(max_runs=POSTGRES_INT4_MAX)
-        controller = ClaudeAgentAdmissionController(maximum)
+    def test_public_config_boundary_accepts_arbitrarily_large_positive_integer(self):
+        large = _config(max_runs=10**30)
+        controller = ClaudeAgentAdmissionController(large)
 
-        self.assertEqual(controller.config.max_concurrent_runs, POSTGRES_INT4_MAX)
+        self.assertEqual(controller.config.max_concurrent_runs, 10**30)
 
 
 class TestClaudeAgentAdmissionFactoryIntegration(unittest.IsolatedAsyncioTestCase):

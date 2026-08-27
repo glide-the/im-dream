@@ -6,8 +6,8 @@
 #                    capacity so cache pressure does not reject safe Agent starts.
 # [Sync] 2026-08-27: add atomic public config replacement for future acquisitions;
 #                    active leases and the admission decision algorithm are unchanged.
-# [Sync] 2026-08-27: remove the product concurrency ceiling while retaining the
-#                    positive PostgreSQL int4 boundary for config construction/replacement.
+# [Sync] 2026-08-27: remove the product concurrency ceiling; configuration only
+#                    requires a positive integer and keeps every admission decision finite.
 
 """Bounded, process-local resource admission for Claude Agent turns."""
 from __future__ import annotations
@@ -26,7 +26,6 @@ _DEFAULT_MAX_CONCURRENT_RUNS = 1
 _DEFAULT_RUN_MEMORY_BUDGET_MIB = 512
 _DEFAULT_MEMORY_RESERVE_MIB = 128
 _DEFAULT_RETRY_AFTER_SECONDS = 60
-POSTGRES_INT4_MAX = 2_147_483_647
 
 
 def _read_int_env(
@@ -66,7 +65,6 @@ class AgentAdmissionConfig:
                 "INK_AGENT_MAX_CONCURRENT_RUNS",
                 _DEFAULT_MAX_CONCURRENT_RUNS,
                 minimum=1,
-                maximum=POSTGRES_INT4_MAX,
             ),
             run_memory_budget_mib=_read_int_env(
                 "INK_AGENT_RUN_MEMORY_BUDGET_MIB",
@@ -301,7 +299,6 @@ class ClaudeAgentAdmissionController:
             raise ValueError("config values must be integers")
         if (
             config.max_concurrent_runs < 1
-            or config.max_concurrent_runs > POSTGRES_INT4_MAX
             or config.run_memory_budget_mib < 1
             or config.memory_reserve_mib < 0
             or config.retry_after_seconds < 1
@@ -413,6 +410,5 @@ __all__ = [
     "AgentResourceSnapshot",
     "ClaudeAgentAdmissionController",
     "ClaudeAgentAdmissionError",
-    "POSTGRES_INT4_MAX",
     "read_agent_resource_snapshot",
 ]

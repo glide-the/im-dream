@@ -3,7 +3,7 @@
 # [Output] Provide a public desired-policy provider and isolated periodic refresher with
 #          applied/not-configured/invalid/unavailable status.
 # [Pos] PostgreSQL-only Claude Agent resource-policy boundary composed by agent_factory.
-# [Sync] 2026-08-27: accept positive int4 concurrency without a product ceiling;
+# [Sync] 2026-08-27: accept any positive integer concurrency without a product ceiling;
 #                    dynamic failures retain last-known-good effective config.
 
 """Load and periodically refresh one bounded Claude Agent admission policy."""
@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from claude_agent.admission import AgentAdmissionConfig, POSTGRES_INT4_MAX
+from claude_agent.admission import AgentAdmissionConfig
 from schema.capabilities import (
     claude_agent_resource_observer_capability_available,
 )
@@ -41,7 +41,7 @@ RESOURCE_POLICY_REFRESH_INTERVAL_ENV = "INK_AGENT_RESOURCE_POLICY_REFRESH_INTERV
 _RESOURCE_POLICY_REFRESH_INTERVAL_MIN_SECONDS = 1.0
 _RESOURCE_POLICY_REFRESH_INTERVAL_MAX_SECONDS = 300.0
 RESOURCE_POLICY_BOUNDS = {
-    "maxConcurrentRuns": (1, POSTGRES_INT4_MAX),
+    "maxConcurrentRuns": (1, None),
     "runMemoryBudgetMib": (128, 8_192),
     "memoryReserveMib": (64, 4_096),
     "retryAfterSeconds": (5, 3_600),
@@ -130,7 +130,7 @@ def _parse_policy(value: Any) -> tuple[AgentAdmissionConfig, int] | None:
             isinstance(raw, bool)
             or not isinstance(raw, int)
             or raw < minimum
-            or raw > maximum
+            or (maximum is not None and raw > maximum)
         ):
             return None
         parsed[key] = raw
@@ -153,7 +153,7 @@ def _bounded_fallback(config: AgentAdmissionConfig) -> AgentAdmissionConfig:
         "retryAfterSeconds": config.retry_after_seconds,
     }
     if all(
-        minimum <= values[key] <= maximum
+        values[key] >= minimum and (maximum is None or values[key] <= maximum)
         for key, (minimum, maximum) in RESOURCE_POLICY_BOUNDS.items()
     ):
         return config

@@ -2,7 +2,7 @@
 [Input] Existing Claude Agent admission/Observer/EventBus contracts and Admin-owned PostgreSQL capability `dream.claude-agent-resource-observer.v1`.
 [Output] Record the implemented Dream-side PostgreSQL-only resource observation and desired/effective synchronization boundary.
 [Pos] Local implementation task record; Admin owns schema/UI and Dream owns content-free observation/publication.
-[Sync] 2026-08-27: accept positive int4 concurrency without a product ceiling and retain LKG on invalid refresh.
+[Sync] 2026-08-27: accept positive integer concurrency without a product ceiling and retain LKG on invalid refresh.
 -->
 
 # Claude Agent Resource Observer — Dream PostgreSQL 实现记录
@@ -60,7 +60,7 @@ composition root 构造时通过公开 provider 首次读取，随后由独立 t
 }
 ```
 
-边界与 Admin 一致：并发必须是正整数且不设产品上限，只受 PostgreSQL int4 安全范围 `1..2147483647` 约束；run memory `128..8192 MiB`，reserve `64..4096 MiB`，retry `5..3600 s`。null、0、负数、非整数或 int4 overflow 均为 `invalid`。缺行或数据库/capability 不可用分别记录 `not_configured`、`unavailable`。首次启动无 valid desired 时使用落在相同边界内的 env/default fallback；运行期失败保留 last-known-good effective config、revision 与 `updated_at`，只推进 status 与本次 `loaded_at`。
+边界与 Admin 一致：并发必须是正整数且不设产品上限；run memory `128..8192 MiB`，reserve `64..4096 MiB`，retry `5..3600 s`。null、0、负数或非整数均为 `invalid`。缺行或数据库/capability 不可用分别记录 `not_configured`、`unavailable`。首次启动无 valid desired 时使用落在相同边界内的 env/default fallback；运行期失败保留 last-known-good effective config、revision 与 `updated_at`，只推进 status 与本次 `loaded_at`。
 
 refresher 默认每 5 秒执行一次，`INK_AGENT_RESOURCE_POLICY_REFRESH_INTERVAL_S` 只控制本进程的 `1..300` 秒轮询间隔，不是 Admin setting。revision 必须递增；回滚或同 revision 异值均记录 `invalid` 并保留 last-known-good。同 revision 同值允许从失败状态恢复为 `applied`。有效降并发不取消现有 lease，只约束后续 acquire。
 
