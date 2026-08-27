@@ -1,7 +1,7 @@
 # [Input] Consume Linux resource sampler, public admission snapshots, Observer counters, and DTO projector.
 # [Output] Verify cgroup/proc reads, tri-state admission projection, staleness, errors, and DTO privacy.
 # [Pos] Focused resource diagnostics tests in backend/tests.
-# [Sync] 2026-08-27: cover read-only coherent policy snapshots, old-state handoff, and last-known-good provenance.
+# [Sync] 2026-08-27: cover read-only coherent/LKG snapshots and uncapped positive int4 concurrency projection.
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from claude_agent.admission import (
     AgentAdmissionConfig,
     AgentResourceSnapshot,
     ClaudeAgentAdmissionController,
+    POSTGRES_INT4_MAX,
     read_agent_resource_snapshot,
 )
 from claude_agent.resource_diagnostics import (
@@ -264,6 +265,39 @@ class TestDiagnosticsDTO(unittest.TestCase):
         payload = self._diagnostics(sampler).snapshot().model_dump()
 
         self.assertTrue(payload["admission"]["can_start_new_agent"])
+
+    def test_int4_max_concurrency_projects_without_diagnostics_cap(self) -> None:
+        config = AgentAdmissionConfig(
+            max_concurrent_runs=POSTGRES_INT4_MAX,
+            run_memory_budget_mib=512,
+            memory_reserve_mib=128,
+            retry_after_seconds=60,
+        )
+        observer = ClaudeAgentResourceObserver()
+        admission = ObservedClaudeAgentAdmissionController(
+            ClaudeAgentAdmissionController(
+                config,
+                snapshot_provider=AgentResourceSnapshot,
+            ),
+            observer,
+        )
+        diagnostics = ClaudeAgentResourceDiagnostics(
+            admission=admission,
+            observer=observer,
+            sampler=ClaudeAgentResourceSampler(),
+            policy=self._policy(config),
+        )
+
+        payload = diagnostics.snapshot().model_dump()
+
+        self.assertEqual(
+            payload["config"]["effective"]["max_concurrent_runs"],
+            POSTGRES_INT4_MAX,
+        )
+        self.assertEqual(
+            payload["admission"]["max_concurrent_runs"],
+            POSTGRES_INT4_MAX,
+        )
 
     def test_closed_dto_contains_no_business_or_credential_fields(self) -> None:
         config = AgentAdmissionConfig(

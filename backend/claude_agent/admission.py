@@ -6,6 +6,8 @@
 #                    capacity so cache pressure does not reject safe Agent starts.
 # [Sync] 2026-08-27: add atomic public config replacement for future acquisitions;
 #                    active leases and the admission decision algorithm are unchanged.
+# [Sync] 2026-08-27: remove the product concurrency ceiling while retaining the
+#                    positive PostgreSQL int4 boundary for config construction/replacement.
 
 """Bounded, process-local resource admission for Claude Agent turns."""
 from __future__ import annotations
@@ -24,9 +26,16 @@ _DEFAULT_MAX_CONCURRENT_RUNS = 1
 _DEFAULT_RUN_MEMORY_BUDGET_MIB = 512
 _DEFAULT_MEMORY_RESERVE_MIB = 128
 _DEFAULT_RETRY_AFTER_SECONDS = 60
+POSTGRES_INT4_MAX = 2_147_483_647
 
 
-def _read_int_env(name: str, default: int, *, minimum: int) -> int:
+def _read_int_env(
+    name: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
         return default
@@ -36,6 +45,8 @@ def _read_int_env(name: str, default: int, *, minimum: int) -> int:
         raise ValueError(f"{name} must be an integer") from exc
     if value < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} must be <= {maximum}")
     return value
 
 
@@ -55,6 +66,7 @@ class AgentAdmissionConfig:
                 "INK_AGENT_MAX_CONCURRENT_RUNS",
                 _DEFAULT_MAX_CONCURRENT_RUNS,
                 minimum=1,
+                maximum=POSTGRES_INT4_MAX,
             ),
             run_memory_budget_mib=_read_int_env(
                 "INK_AGENT_RUN_MEMORY_BUDGET_MIB",
@@ -250,7 +262,9 @@ class ClaudeAgentAdmissionController:
         *,
         snapshot_provider: Callable[[], AgentResourceSnapshot] | None = None,
     ) -> None:
-        self.config = config or AgentAdmissionConfig.from_env()
+        resolved_config = config or AgentAdmissionConfig.from_env()
+        self._validate_config(resolved_config)
+        self.config = resolved_config
         self._snapshot_provider = snapshot_provider or read_agent_resource_snapshot
         self._active_session_ids: set[str] = set()
         self._last_snapshot = AgentResourceSnapshot()
@@ -262,9 +276,18 @@ class ClaudeAgentAdmissionController:
         """Atomically replace immutable limits used by subsequent acquisitions.
 
         Existing leases are deliberately untouched. The resource-policy provider
-        owns the narrower Admin bounds; this public runtime boundary preserves the
-        original AgentAdmissionConfig minima for backwards-compatible callers.
+        owns stricter memory/retry policy bounds; this public runtime boundary has
+        no product concurrency ceiling and preserves the original minima.
         """
+
+        self._validate_config(config)
+        previous = self.config
+        self.config = config
+        return previous
+
+    @staticmethod
+    def _validate_config(config: AgentAdmissionConfig) -> None:
+        """Validate public config shape without imposing a product concurrency cap."""
 
         if not isinstance(config, AgentAdmissionConfig):
             raise TypeError("config must be an AgentAdmissionConfig")
@@ -278,14 +301,12 @@ class ClaudeAgentAdmissionController:
             raise ValueError("config values must be integers")
         if (
             config.max_concurrent_runs < 1
+            or config.max_concurrent_runs > POSTGRES_INT4_MAX
             or config.run_memory_budget_mib < 1
             or config.memory_reserve_mib < 0
             or config.retry_after_seconds < 1
         ):
             raise ValueError("config values are outside Agent admission bounds")
-        previous = self.config
-        self.config = config
-        return previous
 
     def try_acquire(self, session_id: str) -> AgentAdmissionLease:
         active = len(self._active_session_ids)
@@ -392,5 +413,6 @@ __all__ = [
     "AgentResourceSnapshot",
     "ClaudeAgentAdmissionController",
     "ClaudeAgentAdmissionError",
+    "POSTGRES_INT4_MAX",
     "read_agent_resource_snapshot",
 ]

@@ -6,6 +6,7 @@
 [Sync] 2026-08-22: document the engine-prompt workspace:// output contract and owner-bound Workspace content bridge used by Chat Markdown.
 [Sync] 2026-08-22: document the v2.1-scoped Workspace thumbnail and shared accessible full-size modal presentation.
 [Sync] 2026-08-23: document authenticated in-memory Workspace image resolution for the existing Chat long-image exporter.
+[Sync] 2026-08-27: remove the product concurrency ceiling while retaining the positive PostgreSQL int4 config boundary.
 -->
 
 **模块目标**：为 Ink & Memory 提供基于 Claude Code SDK 的流式 AI 写作助手后端能力，  
@@ -148,7 +149,7 @@ Ink & Memory 的 Claude Code SDK 鉴权和模型配置直接使用 `ANTHROPIC_*`
 | `INK_AGENT_TTL_S` | `600` | Thread Session 保活 TTL（秒） |
 | `INK_AGENT_SWEEP_INTERVAL_S` | `60` | 后台 Sweeper 清理周期（秒） |
 | `INK_AGENT_SSE_KEEPALIVE_S` | `15` | SSE keepalive 注释帧间隔（秒） |
-| `INK_AGENT_MAX_CONCURRENT_RUNS` | `1` | 单 backend 进程同时活跃 Claude turn 上限 |
+| `INK_AGENT_MAX_CONCURRENT_RUNS` | `1` | 单 backend 进程同时活跃 Claude turn 的正整数配置；无产品上限，仅接受 PostgreSQL int4-safe `1..2147483647` |
 | `INK_AGENT_RUN_MEMORY_BUDGET_MIB` | `512` | 新建 CLI 进程树前要求的单 turn 增量预算 |
 | `INK_AGENT_MEMORY_RESERVE_MIB` | `128` | 为健康检查和非 Agent 请求保留的内存余量 |
 

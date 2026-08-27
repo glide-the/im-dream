@@ -2,7 +2,7 @@
 # [Output] Verify capability gating, strict bounds/schema, bounded refresh timing,
 #          and monotonic last-known-good refresh behavior.
 # [Pos] Provider-free Claude Agent resource policy tests in backend/tests.
-# [Sync] 2026-08-27: prove periodic refresh preserves last-known-good provenance across failures and rollback.
+# [Sync] 2026-08-27: prove positive int4 concurrency has no product ceiling and invalid refreshes preserve LKG.
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import tests._sdk_stubs  # noqa: F401
-from claude_agent.admission import AgentAdmissionConfig
+from claude_agent.admission import AgentAdmissionConfig, POSTGRES_INT4_MAX
 from claude_agent.resource_policy import (
     RESOURCE_POLICY_DEFAULTS,
     RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS,
@@ -102,6 +102,19 @@ def test_valid_policy_applies_exact_values_and_provenance() -> None:
     assert all(query.lstrip().upper().startswith("SELECT") for query in connection.queries)
 
 
+def test_int4_max_concurrency_policy_is_valid_without_product_cap() -> None:
+    policy = {**_POLICY, "maxConcurrentRuns": POSTGRES_INT4_MAX}
+    connection = _Connection(
+        (policy, datetime(2026, 8, 27, tzinfo=timezone.utc)),
+        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
+    )
+
+    loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(_FALLBACK)
+
+    assert loaded.status == "applied"
+    assert loaded.config.max_concurrent_runs == POSTGRES_INT4_MAX
+
+
 def test_missing_policy_retains_finite_fallback() -> None:
     connection = _Connection(
         None,
@@ -119,6 +132,12 @@ def test_invalid_policy_never_partially_applies() -> None:
     invalid_values = (
         {**_POLICY, "unknown": 1},
         {**_POLICY, "maxConcurrentRuns": 0},
+        {**_POLICY, "maxConcurrentRuns": -1},
+        {**_POLICY, "maxConcurrentRuns": 1.5},
+        {**_POLICY, "maxConcurrentRuns": "2"},
+        {**_POLICY, "maxConcurrentRuns": True},
+        {**_POLICY, "maxConcurrentRuns": None},
+        {**_POLICY, "maxConcurrentRuns": POSTGRES_INT4_MAX + 1},
         {**_POLICY, "runMemoryBudgetMib": 8193},
         {**_POLICY, "revision": True},
         {**_POLICY, "schemaVersion": 2},
@@ -163,6 +182,67 @@ def test_out_of_contract_environment_fallback_uses_safe_defaults() -> None:
 
     assert loaded.status == "not_configured"
     assert loaded.config == AgentAdmissionConfig(1, 512, 128, 60)
+
+
+def test_large_bounded_environment_fallback_is_not_product_capped() -> None:
+    high_concurrency = AgentAdmissionConfig(
+        max_concurrent_runs=1_000_000,
+        run_memory_budget_mib=640,
+        memory_reserve_mib=192,
+        retry_after_seconds=90,
+    )
+    connection = _Connection(
+        None,
+        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
+    )
+
+    loaded = ClaudeAgentResourcePolicyProvider(lambda: connection).load(
+        high_concurrency
+    )
+
+    assert loaded.status == "not_configured"
+    assert loaded.config is high_concurrency
+
+
+def test_invalid_dynamic_concurrency_refresh_retains_last_known_good() -> None:
+    valid_connection = _Connection(
+        (
+            {**_POLICY, "maxConcurrentRuns": POSTGRES_INT4_MAX},
+            "2026-08-27T00:00:00Z",
+        ),
+        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
+    )
+    initial = ClaudeAgentResourcePolicyProvider(lambda: valid_connection).load(
+        _FALLBACK
+    )
+    invalid_connection = _Connection(
+        (
+            {
+                **_POLICY,
+                "revision": 8,
+                "maxConcurrentRuns": POSTGRES_INT4_MAX + 1,
+            },
+            "2026-08-27T00:01:00Z",
+        ),
+        capability_hash=CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
+    )
+    provider = ClaudeAgentResourcePolicyProvider(lambda: invalid_connection)
+    observed: list[ResourcePolicyLoadResult] = []
+    refresher = ClaudeAgentResourcePolicyRefresher(
+        provider=provider,
+        current_config=lambda: initial.config,
+        apply_result=observed.append,
+        initial_result=initial,
+        interval_seconds=1,
+    )
+
+    resolved = asyncio.run(refresher.refresh_once())
+
+    assert resolved.status == "invalid"
+    assert resolved.config == initial.config
+    assert resolved.revision == initial.revision == 7
+    assert resolved.updated_at == initial.updated_at == "2026-08-27T00:00:00Z"
+    assert observed == [resolved]
 
 
 def test_refresh_interval_is_bounded_and_invalid_values_use_safe_default() -> None:
