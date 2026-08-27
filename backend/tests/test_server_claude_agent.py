@@ -14,6 +14,7 @@
 # [Sync] 2026-08-17: cover same-Deck Agent switching, provenance metadata, and CAS conflicts.
 # [Sync] 2026-08-22: cover restored Claude MCP Resources router registration.
 # [Sync] 2026-08-22: cover startup preservation of Claude Agent resource-admission keys.
+# [Sync] 2026-08-27: cover composition-owned policy application, refresh env, and lifecycle ordering.
 # [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
 #                    the Claude Agent factory starts.
 # [Sync] 2026-08-26: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.1.
@@ -259,6 +260,7 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
             "INK_AGENT_MAX_CONCURRENT_RUNS": "1",
             "INK_AGENT_RUN_MEMORY_BUDGET_MIB": "512",
             "INK_AGENT_MEMORY_RESERVE_MIB": "128",
+            "INK_AGENT_RESOURCE_POLICY_REFRESH_INTERVAL_S": "7",
         }
         with unittest.mock.patch.dict(os.environ, expected, clear=True):
             _SERVER_MODULE._drop_unsupported_agent_env()
@@ -1757,6 +1759,43 @@ class TestFactoryLifecycle(unittest.TestCase):
         ]
         self.assertIn("startup_claude_agent", handler_names)
 
+    def test_composition_applies_config_before_recording_diagnostics(self):
+        import agent_factory
+        from claude_agent.admission import AgentAdmissionConfig
+        from claude_agent.resource_policy import (
+            RESOURCE_POLICY_DEFAULTS,
+            ResourcePolicyLoadResult,
+        )
+
+        config = AgentAdmissionConfig(2, 640, 192, 90)
+        result = ResourcePolicyLoadResult(
+            config=config,
+            defaults=RESOURCE_POLICY_DEFAULTS,
+            status="applied",
+            revision=11,
+            updated_at="2026-08-27T03:00:00Z",
+            loaded_at="2026-08-27T03:00:01Z",
+        )
+        calls: list[str] = []
+
+        with (
+            unittest.mock.patch.object(
+                agent_factory.claude_agent_admission_controller,
+                "replace_config",
+                side_effect=lambda applied: calls.append("replace"),
+            ) as replace_config,
+            unittest.mock.patch.object(
+                agent_factory.claude_agent_resource_diagnostics,
+                "update_policy",
+                side_effect=lambda *_args, **_kwargs: calls.append("record"),
+            ) as update_policy,
+        ):
+            agent_factory._apply_claude_agent_resource_policy(result)
+
+        self.assertEqual(calls, ["replace", "record"])
+        replace_config.assert_called_once_with(config)
+        update_policy.assert_called_once_with(result, effective_config=config)
+
     def test_startup_validates_custom_sdk_before_factory(self):
         calls: list[str] = []
         distribution = types.SimpleNamespace(
@@ -1791,6 +1830,11 @@ class TestFactoryLifecycle(unittest.TestCase):
                 side_effect=lambda: calls.append("sampler"),
             ),
             unittest.mock.patch.object(
+                self.srv.claude_agent_resource_policy_refresher,
+                "start",
+                side_effect=lambda: calls.append("refresher"),
+            ),
+            unittest.mock.patch.object(
                 self.srv.claude_agent_resource_postgres_sink,
                 "start",
                 side_effect=lambda: calls.append("sink"),
@@ -1805,7 +1849,15 @@ class TestFactoryLifecycle(unittest.TestCase):
             asyncio.run(self.srv.startup_claude_agent())
         self.assertEqual(
             calls,
-            ["sdk", "runtime", "factory", "sampler", "sink", "publisher"],
+            [
+                "sdk",
+                "runtime",
+                "factory",
+                "sampler",
+                "refresher",
+                "sink",
+                "publisher",
+            ],
         )
         runtime_line = next(
             call.args[0]
@@ -1938,6 +1990,11 @@ class TestFactoryLifecycle(unittest.TestCase):
                 new=resource_stop("publisher"),
             ),
             unittest.mock.patch.object(
+                self.srv.claude_agent_resource_policy_refresher,
+                "stop",
+                new=resource_stop("refresher"),
+            ),
+            unittest.mock.patch.object(
                 self.srv.claude_agent_resource_postgres_sink,
                 "stop",
                 new=resource_stop("sink"),
@@ -1970,6 +2027,7 @@ class TestFactoryLifecycle(unittest.TestCase):
             [
                 "confirmation",
                 "publisher",
+                "refresher",
                 "sink",
                 "sampler",
                 "factory",

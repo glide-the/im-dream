@@ -1,7 +1,7 @@
 # [Input] Consume Linux resource sampler, public admission snapshots, Observer counters, and DTO projector.
 # [Output] Verify cgroup/proc reads, tri-state admission projection, staleness, errors, and DTO privacy.
 # [Pos] Focused resource diagnostics tests in backend/tests.
-# [Sync] 2026-08-27: cover admission-independent cgroup details and the PostgreSQL snapshot DTO.
+# [Sync] 2026-08-27: cover read-only coherent policy snapshots, old-state handoff, and last-known-good provenance.
 
 from __future__ import annotations
 
@@ -366,3 +366,106 @@ class TestDiagnosticsDTO(unittest.TestCase):
         self.assertIsNone(payload["config"]["policy_revision"])
         self.assertNotIn("environment", payload["config"])
         self.assertEqual(payload["pipeline"]["write_errors_total"], 0)
+
+    def test_dynamic_policy_snapshot_retains_last_applied_on_failure(self) -> None:
+        initial = RESOURCE_POLICY_DEFAULTS
+        observer = ClaudeAgentResourceObserver()
+        admission = ObservedClaudeAgentAdmissionController(
+            ClaudeAgentAdmissionController(
+                initial,
+                snapshot_provider=AgentResourceSnapshot,
+            ),
+            observer,
+        )
+        diagnostics = ClaudeAgentResourceDiagnostics(
+            admission=admission,
+            observer=observer,
+            sampler=ClaudeAgentResourceSampler(),
+            policy=self._policy(initial),
+        )
+        applied = AgentAdmissionConfig(2, 640, 192, 90)
+        admission.replace_config(applied)
+        diagnostics.update_policy(
+            ResourcePolicyLoadResult(
+                config=applied,
+                defaults=RESOURCE_POLICY_DEFAULTS,
+                status="applied",
+                revision=9,
+                updated_at="2026-08-27T01:00:00Z",
+                loaded_at="2026-08-27T01:00:01Z",
+            ),
+            effective_config=applied,
+        )
+        applied_payload = diagnostics.snapshot().model_dump()["config"]
+
+        diagnostics.update_policy(
+            ResourcePolicyLoadResult(
+                config=initial,
+                defaults=RESOURCE_POLICY_DEFAULTS,
+                status="unavailable",
+                revision=None,
+                updated_at=None,
+                loaded_at="2026-08-27T01:00:06Z",
+            ),
+            effective_config=admission.config,
+        )
+        failed_payload = diagnostics.snapshot().model_dump()["config"]
+
+        self.assertEqual(applied_payload["effective"]["max_concurrent_runs"], 2)
+        self.assertEqual(failed_payload["effective"], applied_payload["effective"])
+        self.assertEqual(
+            failed_payload["effective_version"],
+            applied_payload["effective_version"],
+        )
+        self.assertEqual(failed_payload["policy_status"], "unavailable")
+        self.assertEqual(failed_payload["policy_revision"], 9)
+        self.assertEqual(
+            str(failed_payload["policy_updated_at"]),
+            "2026-08-27 01:00:00+00:00",
+        )
+
+    def test_snapshot_stays_old_until_external_policy_state_is_recorded(self) -> None:
+        initial = RESOURCE_POLICY_DEFAULTS
+        observer = ClaudeAgentResourceObserver()
+        admission = ObservedClaudeAgentAdmissionController(
+            ClaudeAgentAdmissionController(
+                initial,
+                snapshot_provider=AgentResourceSnapshot,
+            ),
+            observer,
+        )
+        diagnostics = ClaudeAgentResourceDiagnostics(
+            admission=admission,
+            observer=observer,
+            sampler=ClaudeAgentResourceSampler(),
+            policy=self._policy(initial),
+        )
+        applied = ResourcePolicyLoadResult(
+            config=AgentAdmissionConfig(2, 640, 192, 90),
+            defaults=RESOURCE_POLICY_DEFAULTS,
+            status="applied",
+            revision=10,
+            updated_at="2026-08-27T02:00:00Z",
+            loaded_at="2026-08-27T02:00:01Z",
+        )
+        admission.replace_config(applied.config)
+        old_payload = diagnostics.snapshot().model_dump()
+        self.assertIsNone(old_payload["config"]["policy_revision"])
+        self.assertEqual(
+            old_payload["config"]["effective"]["max_concurrent_runs"],
+            initial.max_concurrent_runs,
+        )
+
+        with mock.patch.object(admission, "replace_config") as replace_config:
+            diagnostics.update_policy(
+                applied,
+                effective_config=applied.config,
+            )
+
+        replace_config.assert_not_called()
+        new_payload = diagnostics.snapshot().model_dump()
+        self.assertEqual(new_payload["config"]["policy_revision"], 10)
+        self.assertEqual(
+            new_payload["config"]["effective"]["max_concurrent_runs"],
+            2,
+        )

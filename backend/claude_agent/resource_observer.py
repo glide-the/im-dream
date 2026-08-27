@@ -1,8 +1,9 @@
 # [Input] Consume the public Claude Agent admission controller contract, Session lifecycle hooks,
 #         and normalized per-turn EventBus exposed after context assembly.
-# [Output] Provide an admission decorator and content-free, process-lifetime resource counters.
+# [Output] Provide an admission decorator, public config replacement pass-through,
+#          and content-free process-lifetime resource counters.
 # [Pos] Off-path resource Observer in backend/claude_agent; never controls Agent execution.
-# [Sync] 2026-08-27: expose closed reader-error counts while preserving no-I/O hooks and identity-free state.
+# [Sync] 2026-08-27: pass through public config replacement while preserving no-I/O hooks and identity-free state.
 
 """Content-free resource observations for canonical Claude Agent turns."""
 from __future__ import annotations
@@ -214,6 +215,11 @@ class ObservedClaudeAgentAdmissionController:
         except Exception:
             logger.exception("Claude Agent admission grant observation failed")
         return lease
+
+    def replace_config(self, config: AgentAdmissionConfig) -> AgentAdmissionConfig:
+        """Delegate public config replacement without changing lease ownership."""
+
+        return self._delegate.replace_config(config)
 
     def stats(self) -> dict[str, Any]:
         return self._delegate.stats()

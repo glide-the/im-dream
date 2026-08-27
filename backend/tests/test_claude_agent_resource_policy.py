@@ -1,14 +1,32 @@
 # [Input] Consume the public startup resource-policy provider with injected PostgreSQL fakes.
-# [Output] Verify exact capability gating, strict bounds/schema, provenance, and Admin-bounded fallback states.
+# [Output] Verify capability gating, strict bounds/schema, bounded refresh timing,
+#          and monotonic last-known-good refresh behavior.
 # [Pos] Provider-free Claude Agent resource policy tests in backend/tests.
-# [Sync] 2026-08-27: prove invalid environment fallbacks collapse to finite policy defaults.
+# [Sync] 2026-08-27: prove periodic refresh preserves last-known-good provenance across failures and rollback.
 
 from __future__ import annotations
 
+import asyncio
+import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+from unittest import mock
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import tests._sdk_stubs  # noqa: F401
 from claude_agent.admission import AgentAdmissionConfig
-from claude_agent.resource_policy import ClaudeAgentResourcePolicyProvider
+from claude_agent.resource_policy import (
+    RESOURCE_POLICY_DEFAULTS,
+    RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS,
+    ClaudeAgentResourcePolicyProvider,
+    ClaudeAgentResourcePolicyRefresher,
+    ResourcePolicyLoadResult,
+    resource_policy_refresh_interval_from_env,
+)
 from schema.capabilities import (
     CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY,
     CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
@@ -145,3 +163,168 @@ def test_out_of_contract_environment_fallback_uses_safe_defaults() -> None:
 
     assert loaded.status == "not_configured"
     assert loaded.config == AgentAdmissionConfig(1, 512, 128, 60)
+
+
+def test_refresh_interval_is_bounded_and_invalid_values_use_safe_default() -> None:
+    for raw in (None, "", "0", "301", "nan", "inf", "invalid"):
+        environment = {} if raw is None else {
+            "INK_AGENT_RESOURCE_POLICY_REFRESH_INTERVAL_S": raw
+        }
+        with mock.patch.dict(os.environ, environment, clear=True):
+            assert (
+                resource_policy_refresh_interval_from_env()
+                == RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS
+            )
+    with mock.patch.dict(
+        os.environ,
+        {"INK_AGENT_RESOURCE_POLICY_REFRESH_INTERVAL_S": "12.5"},
+        clear=True,
+    ):
+        assert resource_policy_refresh_interval_from_env() == 12.5
+
+
+def _load_result(
+    *,
+    config: AgentAdmissionConfig,
+    status: str,
+    revision: int | None,
+    updated_at: str | None,
+    loaded_at: str,
+) -> ResourcePolicyLoadResult:
+    return ResourcePolicyLoadResult(
+        config=config,
+        defaults=RESOURCE_POLICY_DEFAULTS,
+        status=status,  # type: ignore[arg-type]
+        revision=revision,
+        updated_at=updated_at,
+        loaded_at=loaded_at,
+    )
+
+
+def test_refresher_rejects_rollback_and_retains_last_applied_provenance() -> None:
+    initial = _load_result(
+        config=_FALLBACK,
+        status="applied",
+        revision=7,
+        updated_at="2026-08-27T00:00:00Z",
+        loaded_at="2026-08-27T00:00:01Z",
+    )
+    changed = AgentAdmissionConfig(1, 512, 128, 60)
+    pending = [
+        _load_result(
+            config=changed,
+            status="applied",
+            revision=6,
+            updated_at="2026-08-27T00:01:00Z",
+            loaded_at="2026-08-27T00:01:01Z",
+        ),
+        _load_result(
+            config=changed,
+            status="applied",
+            revision=7,
+            updated_at="2026-08-27T00:02:00Z",
+            loaded_at="2026-08-27T00:02:01Z",
+        ),
+        _load_result(
+            config=_FALLBACK,
+            status="unavailable",
+            revision=None,
+            updated_at=None,
+            loaded_at="2026-08-27T00:03:01Z",
+        ),
+        _load_result(
+            config=_FALLBACK,
+            status="applied",
+            revision=7,
+            updated_at="2026-08-27T00:04:00Z",
+            loaded_at="2026-08-27T00:04:01Z",
+        ),
+        _load_result(
+            config=changed,
+            status="applied",
+            revision=8,
+            updated_at="2026-08-27T00:05:00Z",
+            loaded_at="2026-08-27T00:05:01Z",
+        ),
+    ]
+
+    class _Provider:
+        def load(self, _fallback):
+            return pending.pop(0)
+
+    current = initial.config
+    observed: list[ResourcePolicyLoadResult] = []
+
+    def apply_result(result: ResourcePolicyLoadResult) -> None:
+        nonlocal current
+        observed.append(result)
+        if result.status == "applied":
+            current = result.config
+
+    refresher = ClaudeAgentResourcePolicyRefresher(
+        provider=_Provider(),  # type: ignore[arg-type]
+        current_config=lambda: current,
+        apply_result=apply_result,
+        initial_result=initial,
+        interval_seconds=1,
+    )
+
+    async def exercise() -> None:
+        for _ in range(5):
+            await refresher.refresh_once()
+
+    asyncio.run(exercise())
+
+    assert [result.status for result in observed] == [
+        "invalid",
+        "invalid",
+        "unavailable",
+        "applied",
+        "applied",
+    ]
+    assert [result.revision for result in observed] == [7, 7, 7, 7, 8]
+    assert [result.updated_at for result in observed[:3]] == [
+        "2026-08-27T00:00:00Z",
+        "2026-08-27T00:00:00Z",
+        "2026-08-27T00:00:00Z",
+    ]
+    assert all(result.config == _FALLBACK for result in observed[:4])
+    assert observed[-1].config == changed
+
+
+def test_refresher_start_repeats_until_stop() -> None:
+    initial = _load_result(
+        config=_FALLBACK,
+        status="applied",
+        revision=7,
+        updated_at="2026-08-27T00:00:00Z",
+        loaded_at="2026-08-27T00:00:01Z",
+    )
+
+    class _Provider:
+        def load(self, _fallback):
+            return initial
+
+    async def exercise() -> int:
+        applied_count = 0
+        repeated = asyncio.Event()
+
+        def apply_result(_result: ResourcePolicyLoadResult) -> None:
+            nonlocal applied_count
+            applied_count += 1
+            if applied_count >= 2:
+                repeated.set()
+
+        refresher = ClaudeAgentResourcePolicyRefresher(
+            provider=_Provider(),  # type: ignore[arg-type]
+            current_config=lambda: _FALLBACK,
+            apply_result=apply_result,
+            initial_result=initial,
+            interval_seconds=0.01,
+        )
+        refresher.start()
+        await asyncio.wait_for(repeated.wait(), timeout=0.5)
+        await refresher.stop()
+        return applied_count
+
+    assert asyncio.run(exercise()) >= 2

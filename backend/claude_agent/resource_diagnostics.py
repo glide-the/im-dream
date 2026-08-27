@@ -1,8 +1,8 @@
-# [Input] Consume public admission snapshots/stats, resource Observer counters, startup policy provenance,
+# [Input] Consume public admission snapshots/stats, resource Observer counters, refreshed immutable policy/effective state,
 #         Linux cgroup v2 `/proc` data, and safe publisher health counters.
 # [Output] Provide an isolated sampler and the strict PostgreSQL resource snapshot JSON DTO.
 # [Pos] Read-only Claude Agent resource diagnostics node; it never affects admission or Agent execution.
-# [Sync] 2026-08-27: align producer-side timestamp, range, and literal validation with the Admin consumer contract.
+# [Sync] 2026-08-27: atomically record externally applied effective policy while failures retain last-known-good limits.
 
 """Safe process-local diagnostics for Claude Agent resource admission."""
 from __future__ import annotations
@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Literal
 
 from claude_agent.admission import (
@@ -77,6 +78,15 @@ class ResourcePipelineSnapshot:
     queue_dropped_total: int = 0
     write_errors_total: int = 0
     last_write_error_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ResourcePolicyState:
+    """One coherent policy/effective-config view for diagnostics readers."""
+
+    policy: ResourcePolicyLoadResult
+    effective_config: AgentAdmissionConfig
+    effective_version: str
 
 
 class ResourceSamplerSnapshot(BaseModel):
@@ -443,6 +453,15 @@ def _config_values(config: AgentAdmissionConfig) -> AdmissionConfigValues:
     )
 
 
+def _effective_config_version(config: AgentAdmissionConfig) -> str:
+    encoded = json.dumps(
+        _config_values(config).model_dump(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class ClaudeAgentResourceDiagnostics:
     """Project public Observer/admission/sampler state into one strict DTO."""
 
@@ -458,16 +477,48 @@ class ClaudeAgentResourceDiagnostics:
         self._admission = admission
         self._observer = observer
         self._sampler = sampler
-        self._policy = policy
+        self._policy_lock = Lock()
+        effective_config = admission.config
+        self._policy_state = _ResourcePolicyState(
+            policy=policy,
+            effective_config=effective_config,
+            effective_version=_effective_config_version(effective_config),
+        )
         self._pipeline_snapshot = pipeline_snapshot
-        encoded = json.dumps(
-            _config_values(admission.config).model_dump(),
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        self._effective_version = hashlib.sha256(encoded).hexdigest()
+
+    def update_policy(
+        self,
+        policy: ResourcePolicyLoadResult,
+        *,
+        effective_config: AgentAdmissionConfig,
+    ) -> None:
+        """Record one externally resolved immutable policy/effective snapshot."""
+
+        if policy.status == "applied" and effective_config != policy.config:
+            raise ValueError("applied policy and effective config must match")
+        with self._policy_lock:
+            previous_policy = self._policy_state.policy
+            if policy.status != "applied" and previous_policy.revision is not None:
+                policy = ResourcePolicyLoadResult(
+                    config=self._policy_state.effective_config,
+                    defaults=policy.defaults,
+                    status=policy.status,
+                    revision=previous_policy.revision,
+                    updated_at=previous_policy.updated_at,
+                    loaded_at=policy.loaded_at,
+                )
+                effective_config = self._policy_state.effective_config
+            self._policy_state = _ResourcePolicyState(
+                policy=policy,
+                effective_config=effective_config,
+                effective_version=_effective_config_version(effective_config),
+            )
 
     def snapshot(self) -> ClaudeAgentResourceDiagnosticsDTO:
+        with self._policy_lock:
+            policy_state = self._policy_state
+        policy = policy_state.policy
+        effective_config = policy_state.effective_config
         counters = self._observer.snapshot()
         admission_stats = self._admission.stats()
         sampler_snapshot = self._sampler.snapshot()
@@ -475,8 +526,8 @@ class ClaudeAgentResourceDiagnostics:
         memory = sampled.memory if sampled is not None else AgentResourceSnapshot()
         details = sampled.cgroup_details if sampled is not None else CgroupDetailSnapshot()
         processes = sampled.claude_processes if sampled is not None else ClaudeProcessSnapshot(False)
-        required = self._admission.config.required_headroom_bytes
-        capacity_available = int(admission_stats.get("active_runs", 0)) < self._admission.config.max_concurrent_runs
+        required = effective_config.required_headroom_bytes
+        capacity_available = int(admission_stats.get("active_runs", 0)) < effective_config.max_concurrent_runs
         host_sufficient = memory.host_available_bytes is None or memory.host_available_bytes >= required
         cgroup_sufficient = memory.cgroup_headroom_bytes is None or memory.cgroup_headroom_bytes >= required
         if sampler_snapshot.stale or sampler_snapshot.status in {"starting", "timeout", "error"}:
@@ -487,13 +538,13 @@ class ClaudeAgentResourceDiagnostics:
         return ClaudeAgentResourceDiagnosticsDTO(
             scope=ResourceScopeDTO(),
             config=ResourceConfigDTO(
-                defaults=_config_values(self._policy.defaults),
-                effective=_config_values(self._admission.config),
-                effective_version=self._effective_version,
-                loaded_at=self._policy.loaded_at,
-                policy_status=self._policy.status,
-                policy_revision=self._policy.revision,
-                policy_updated_at=self._policy.updated_at,
+                defaults=_config_values(policy.defaults),
+                effective=_config_values(effective_config),
+                effective_version=policy_state.effective_version,
+                loaded_at=policy.loaded_at,
+                policy_status=policy.status,
+                policy_revision=policy.revision,
+                policy_updated_at=policy.updated_at,
             ),
             turns=ResourceTurnsDTO(
                 started_total=counters.turn_started_total,
@@ -503,7 +554,7 @@ class ClaudeAgentResourceDiagnostics:
             ),
             admission=ResourceAdmissionDTO(
                 active_runs=int(admission_stats.get("active_runs", 0)),
-                max_concurrent_runs=self._admission.config.max_concurrent_runs,
+                max_concurrent_runs=effective_config.max_concurrent_runs,
                 granted_total=counters.admission_granted_total,
                 capacity_denials_total=counters.capacity_denials_total,
                 memory_pressure_denials_total=counters.memory_pressure_denials_total,

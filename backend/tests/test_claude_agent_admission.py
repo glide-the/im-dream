@@ -2,7 +2,7 @@
 # [Output] Verify bounded concurrency, host/cgroup memory preflight, retryable
 #          SSE errors, missing-metric fallback, and idempotent lease release.
 # [Pos] resource-admission test node in backend/tests.
-# [Sync] 2026-08-26: cover reclaimable cgroup cache without weakening low-memory rejection.
+# [Sync] 2026-08-27: cover public live config replacement without cancelling active leases.
 
 """Tests for Claude Agent process-local resource admission."""
 from __future__ import annotations
@@ -204,6 +204,38 @@ class TestClaudeAgentAdmissionController(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "must be >= 1"):
                 AgentAdmissionConfig.from_env()
+
+    def test_lower_live_concurrency_only_changes_future_acquisitions(self):
+        controller = ClaudeAgentAdmissionController(
+            _config(max_runs=2),
+            snapshot_provider=AgentResourceSnapshot,
+        )
+        existing = controller.try_acquire("thread-existing")
+        replacement = AgentAdmissionConfig(
+            max_concurrent_runs=1,
+            run_memory_budget_mib=640,
+            memory_reserve_mib=192,
+            retry_after_seconds=90,
+        )
+
+        previous = controller.replace_config(replacement)
+
+        self.assertEqual(previous, _config(max_runs=2))
+        self.assertEqual(controller.stats()["active_runs"], 1)
+        with self.assertRaises(ClaudeAgentAdmissionError) as caught:
+            controller.try_acquire("thread-future")
+        self.assertEqual(caught.exception.retry_after_seconds, 90)
+        existing.release()
+        future = controller.try_acquire("thread-future")
+        future.release()
+
+    def test_invalid_live_config_replacement_preserves_current_config(self):
+        controller = ClaudeAgentAdmissionController(_config())
+
+        with self.assertRaises(TypeError):
+            controller.replace_config(object())  # type: ignore[arg-type]
+
+        self.assertEqual(controller.config, _config())
 
 
 class TestClaudeAgentAdmissionFactoryIntegration(unittest.IsolatedAsyncioTestCase):

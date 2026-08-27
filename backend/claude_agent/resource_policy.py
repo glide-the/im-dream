@@ -1,13 +1,18 @@
 # [Input] Consume the exact Admin resource-observer capability, one fixed system_settings row,
 #         a bounded environment/default AgentAdmissionConfig, and an injected PostgreSQL lease factory.
-# [Output] Provide a public, one-shot desired-policy provider with applied/not-configured/invalid/unavailable status.
-# [Pos] PostgreSQL-only Claude Agent resource-policy boundary used solely by the composition root.
-# [Sync] 2026-08-27: clamp unavailable/invalid startup fallbacks to the same finite Admin safety contract.
+# [Output] Provide a public desired-policy provider and isolated periodic refresher with
+#          applied/not-configured/invalid/unavailable status.
+# [Pos] PostgreSQL-only Claude Agent resource-policy boundary composed by agent_factory.
+# [Sync] 2026-08-27: refresh desired policy without restart; failures retain last-known-good effective config.
 
-"""Load one bounded Claude Agent admission policy at process construction time."""
+"""Load and periodically refresh one bounded Claude Agent admission policy."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import math
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,6 +22,8 @@ from claude_agent.admission import AgentAdmissionConfig
 from schema.capabilities import (
     claude_agent_resource_observer_capability_available,
 )
+
+logger = logging.getLogger(__name__)
 
 ResourcePolicyStatus = Literal[
     "applied",
@@ -28,6 +35,10 @@ ResourcePolicyStatus = Literal[
 RESOURCE_POLICY_CATEGORY = "claude_agent"
 RESOURCE_POLICY_KEY = "resource_policy"
 RESOURCE_POLICY_SCHEMA_VERSION = 1
+RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS = 5.0
+RESOURCE_POLICY_REFRESH_INTERVAL_ENV = "INK_AGENT_RESOURCE_POLICY_REFRESH_INTERVAL_S"
+_RESOURCE_POLICY_REFRESH_INTERVAL_MIN_SECONDS = 1.0
+_RESOURCE_POLICY_REFRESH_INTERVAL_MAX_SECONDS = 300.0
 RESOURCE_POLICY_BOUNDS = {
     "maxConcurrentRuns": (1, 16),
     "runMemoryBudgetMib": (128, 8_192),
@@ -51,6 +62,25 @@ _POLICY_FIELDS = frozenset(
 
 def _utc_now_text() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def resource_policy_refresh_interval_from_env() -> float:
+    """Resolve the bounded process-local poll interval; invalid input uses 5s."""
+
+    raw = os.getenv(RESOURCE_POLICY_REFRESH_INTERVAL_ENV)
+    if raw is None or not raw.strip():
+        return RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS
+    if (
+        not math.isfinite(parsed)
+        or parsed < _RESOURCE_POLICY_REFRESH_INTERVAL_MIN_SECONDS
+        or parsed > _RESOURCE_POLICY_REFRESH_INTERVAL_MAX_SECONDS
+    ):
+        return RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS
+    return parsed
 
 
 def _row_value(row: Any, key: str, index: int) -> Any:
@@ -199,13 +229,131 @@ class ClaudeAgentResourcePolicyProvider:
         )
 
 
+class ClaudeAgentResourcePolicyRefresher:
+    """Periodically load desired policy off-path and hand off an immutable result."""
+
+    def __init__(
+        self,
+        *,
+        provider: ClaudeAgentResourcePolicyProvider,
+        current_config: Callable[[], AgentAdmissionConfig],
+        apply_result: Callable[[ResourcePolicyLoadResult], None],
+        initial_result: ResourcePolicyLoadResult,
+        interval_seconds: float = RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS,
+    ) -> None:
+        self._provider = provider
+        self._current_config = current_config
+        self._apply_result = apply_result
+        self._interval_seconds = max(0.01, float(interval_seconds))
+        self._last_applied = (
+            initial_result if initial_result.status == "applied" else None
+        )
+        self._task: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(
+                self._run(),
+                name="claude-agent-resource-policy-refresher",
+            )
+
+    async def stop(self) -> None:
+        task = self._task
+        self._task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def refresh_once(self) -> ResourcePolicyLoadResult:
+        """Load off the Agent path; cancellation drains the database operation."""
+
+        fallback = self._current_config()
+        operation = asyncio.create_task(
+            asyncio.to_thread(self._provider.load, fallback)
+        )
+        try:
+            result = await asyncio.shield(operation)
+        except asyncio.CancelledError:
+            try:
+                await operation
+            except Exception:
+                pass
+            raise
+        resolved = self._resolve_monotonic(result, fallback)
+        self._apply_result(resolved)
+        return resolved
+
+    def _resolve_monotonic(
+        self,
+        result: ResourcePolicyLoadResult,
+        fallback: AgentAdmissionConfig,
+    ) -> ResourcePolicyLoadResult:
+        previous = self._last_applied
+        if result.status != "applied":
+            return self._retain_last_applied(result, previous)
+        if previous is None:
+            self._last_applied = result
+            return result
+        assert result.revision is not None
+        assert previous.revision is not None
+        if result.revision > previous.revision:
+            self._last_applied = result
+            return result
+        if result.revision == previous.revision and result.config == previous.config:
+            self._last_applied = result
+            return result
+        return self._retain_last_applied(
+            ResourcePolicyLoadResult(
+                config=_bounded_fallback(fallback),
+                defaults=result.defaults,
+                status="invalid",
+                revision=None,
+                updated_at=None,
+                loaded_at=result.loaded_at,
+            ),
+            previous,
+        )
+
+    @staticmethod
+    def _retain_last_applied(
+        result: ResourcePolicyLoadResult,
+        previous: ResourcePolicyLoadResult | None,
+    ) -> ResourcePolicyLoadResult:
+        if previous is None:
+            return result
+        return ResourcePolicyLoadResult(
+            config=previous.config,
+            defaults=result.defaults,
+            status=result.status,
+            revision=previous.revision,
+            updated_at=previous.updated_at,
+            loaded_at=result.loaded_at,
+        )
+
+    async def _run(self) -> None:
+        while True:
+            try:
+                await self.refresh_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning(
+                    "Claude Agent resource policy refresh failed: code=refresh_error"
+                )
+            await asyncio.sleep(self._interval_seconds)
+
 __all__ = [
     "ClaudeAgentResourcePolicyProvider",
+    "ClaudeAgentResourcePolicyRefresher",
     "RESOURCE_POLICY_BOUNDS",
     "RESOURCE_POLICY_CATEGORY",
     "RESOURCE_POLICY_DEFAULTS",
     "RESOURCE_POLICY_KEY",
+    "RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS",
+    "RESOURCE_POLICY_REFRESH_INTERVAL_ENV",
     "RESOURCE_POLICY_SCHEMA_VERSION",
     "ResourcePolicyLoadResult",
     "ResourcePolicyStatus",
+    "resource_policy_refresh_interval_from_env",
 ]

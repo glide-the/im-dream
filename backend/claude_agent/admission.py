@@ -4,6 +4,8 @@
 # [Pos] resource-admission node in backend/claude_agent; guards the existing turn runtime.
 # [Sync] 2026-08-26: include conservative cgroup inactive-file and reclaimable-slab
 #                    capacity so cache pressure does not reject safe Agent starts.
+# [Sync] 2026-08-27: add atomic public config replacement for future acquisitions;
+#                    active leases and the admission decision algorithm are unchanged.
 
 """Bounded, process-local resource admission for Claude Agent turns."""
 from __future__ import annotations
@@ -255,6 +257,35 @@ class ClaudeAgentAdmissionController:
         self._capacity_denials = 0
         self._memory_denials = 0
         self._missing_metrics_logged = False
+
+    def replace_config(self, config: AgentAdmissionConfig) -> AgentAdmissionConfig:
+        """Atomically replace immutable limits used by subsequent acquisitions.
+
+        Existing leases are deliberately untouched. The resource-policy provider
+        owns the narrower Admin bounds; this public runtime boundary preserves the
+        original AgentAdmissionConfig minima for backwards-compatible callers.
+        """
+
+        if not isinstance(config, AgentAdmissionConfig):
+            raise TypeError("config must be an AgentAdmissionConfig")
+        values = (
+            config.max_concurrent_runs,
+            config.run_memory_budget_mib,
+            config.memory_reserve_mib,
+            config.retry_after_seconds,
+        )
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+            raise ValueError("config values must be integers")
+        if (
+            config.max_concurrent_runs < 1
+            or config.run_memory_budget_mib < 1
+            or config.memory_reserve_mib < 0
+            or config.retry_after_seconds < 1
+        ):
+            raise ValueError("config values are outside Agent admission bounds")
+        previous = self.config
+        self.config = config
+        return previous
 
     def try_acquire(self, session_id: str) -> AgentAdmissionLease:
         active = len(self._active_session_ids)

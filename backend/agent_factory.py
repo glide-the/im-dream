@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# [Input] Consume Claude Agent factory/controller, the one-shot PostgreSQL policy provider,
+# [Input] Consume Claude Agent factory/controller, PostgreSQL policy provider/refresher,
 #         resource Observer/sampler/diagnostics, and the PostgreSQL latest-snapshot sink.
 # [Output] Provide shared Agent factory plus isolated resource observation/synchronization singletons.
-# [Pos] backend Claude Agent composition root; the only caller that resolves desired resource policy.
-# [Sync] 2026-08-27: compose capability-gated startup policy and PostgreSQL-only resource publication.
+# [Pos] backend Claude Agent composition root; the only owner that resolves and refreshes desired resource policy.
+# [Sync] 2026-08-27: compose capability-gated dynamic policy refresh and PostgreSQL-only resource publication.
 
 import database
 from claude_agent import ClaudeAgentThreadFactory
@@ -16,7 +16,12 @@ from claude_agent.resource_observer import (
     ClaudeAgentResourceObserver,
     ObservedClaudeAgentAdmissionController,
 )
-from claude_agent.resource_policy import ClaudeAgentResourcePolicyProvider
+from claude_agent.resource_policy import (
+    ClaudeAgentResourcePolicyProvider,
+    ClaudeAgentResourcePolicyRefresher,
+    ResourcePolicyLoadResult,
+    resource_policy_refresh_interval_from_env,
+)
 from claude_agent.resource_postgres_sink import (
     ClaudeAgentResourcePostgresSink,
     ClaudeAgentResourcePublisher,
@@ -45,6 +50,28 @@ claude_agent_resource_diagnostics = ClaudeAgentResourceDiagnostics(
     sampler=claude_agent_resource_sampler,
     policy=claude_agent_resource_policy,
     pipeline_snapshot=claude_agent_resource_pipeline_metrics.snapshot,
+)
+
+
+def _apply_claude_agent_resource_policy(result: ResourcePolicyLoadResult) -> None:
+    """Apply valid limits, then publish one coherent immutable diagnostics state."""
+
+    effective_config = claude_agent_admission_controller.config
+    if result.status == "applied":
+        claude_agent_admission_controller.replace_config(result.config)
+        effective_config = result.config
+    claude_agent_resource_diagnostics.update_policy(
+        result,
+        effective_config=effective_config,
+    )
+
+
+claude_agent_resource_policy_refresher = ClaudeAgentResourcePolicyRefresher(
+    provider=claude_agent_resource_policy_provider,
+    current_config=lambda: claude_agent_admission_controller.config,
+    apply_result=_apply_claude_agent_resource_policy,
+    initial_result=claude_agent_resource_policy,
+    interval_seconds=resource_policy_refresh_interval_from_env(),
 )
 claude_agent_resource_postgres_sink = ClaudeAgentResourcePostgresSink(
     db_factory=database.get_db,
