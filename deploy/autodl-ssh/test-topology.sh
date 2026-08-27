@@ -2,7 +2,8 @@
 # [Input] Dream AutoDL env projector and persistent-directory initializer.
 # [Output] Automated topology, idempotency, ownership, mode, and symlink checks.
 # [Pos] Provider-free AutoDL deployment contract test.
-# [Sync] 2026-08-26: keep root-runtime topology assertions portable across GNU and BSD stat.
+# [Sync] 2026-08-27: verify the dedicated diagnostics token is projected without
+#                    weakening the admission-budget exclusion contract.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +29,7 @@ cat >"${SOURCE_ENV}" <<'EOF'
 SESSION_SECRET_KEY=test-session-secret
 INK_GATEWAY_SERVICE_KEY=test-gateway-key
 INK_ADMIN_PRODUCT_JWT_SECRET=test-product-secret
+INK_AGENT_DIAGNOSTICS_TOKEN=stale-source-diagnostics-secret-value
 AGENT_CWD=/tmp/stale
 ARTIFACT_WORKSPACE_ROOT=/tmp/stale-artifacts
 INK_AGENT_MAX_CONCURRENT_RUNS=9
@@ -38,6 +40,7 @@ cat >"${ADMIN_ENV}" <<'EOF'
 POSTGRES_USER=ink_test
 POSTGRES_PASSWORD=test-password
 POSTGRES_DB=ink_test
+DREAM_DIAGNOSTICS_TOKEN=test-dedicated-diagnostics-secret-value
 EOF
 
 AUTODL_DREAM_SOURCE_ENV_FILE="${SOURCE_ENV}" \
@@ -52,6 +55,7 @@ grep -Fx "AGENT_CWD=${PROJECTED_DATA_ROOT}/agent-workspaces" "${OUTPUT_ENV}"
 grep -Fx "ARTIFACT_WORKSPACE_ROOT=${PROJECTED_DATA_ROOT}/artifacts" "${OUTPUT_ENV}"
 grep -Fx "FILE_STORAGE_LOCAL_DIR=${PROJECTED_DATA_ROOT}/file-storage" "${OUTPUT_ENV}"
 grep -Fx "INK_CLAUDE_PLUGIN_RUNTIME_ROOT=${PROJECTED_DATA_ROOT}/claude-plugin-runtime" "${OUTPUT_ENV}"
+grep -Fqx "INK_AGENT_DIAGNOSTICS_TOKEN=test-dedicated-diagnostics-secret-value" "${OUTPUT_ENV}"
 if grep -Eq '^INK_AGENT_(MAX_CONCURRENT_RUNS|RUN_MEMORY_BUDGET_MIB|MEMORY_RESERVE_MIB)=' "${OUTPUT_ENV}"; then
   printf 'AutoDL projected an explicit Agent admission override\n' >&2
   exit 1

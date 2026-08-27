@@ -2,8 +2,8 @@
 # [Output] Provide ClaudeAgentAdmissionController, ClaudeAgentAdmissionError,
 #          AgentAdmissionConfig, AgentResourceSnapshot, and AgentAdmissionLease.
 # [Pos] resource-admission node in backend/claude_agent; guards the existing turn runtime.
-# [Sync] 2026-08-26: include conservative cgroup inactive-file and reclaimable-slab
-#                    capacity so cache pressure does not reject safe Agent starts.
+# [Sync] 2026-08-27: expose additive cgroup stat/event fields and public defaults for
+#                    read-only diagnostics; admission decisions and leases are unchanged.
 
 """Bounded, process-local resource admission for Claude Agent turns."""
 from __future__ import annotations
@@ -47,6 +47,15 @@ class AgentAdmissionConfig:
     retry_after_seconds: int
 
     @classmethod
+    def defaults(cls) -> AgentAdmissionConfig:
+        return cls(
+            max_concurrent_runs=_DEFAULT_MAX_CONCURRENT_RUNS,
+            run_memory_budget_mib=_DEFAULT_RUN_MEMORY_BUDGET_MIB,
+            memory_reserve_mib=_DEFAULT_MEMORY_RESERVE_MIB,
+            retry_after_seconds=_DEFAULT_RETRY_AFTER_SECONDS,
+        )
+
+    @classmethod
     def from_env(cls) -> AgentAdmissionConfig:
         return cls(
             max_concurrent_runs=_read_int_env(
@@ -84,6 +93,13 @@ class AgentResourceSnapshot:
     cgroup_current_bytes: int | None = None
     cgroup_max_bytes: int | None = None
     cgroup_reclaimable_bytes: int | None = None
+    cgroup_inactive_file_bytes: int | None = None
+    cgroup_slab_reclaimable_bytes: int | None = None
+    cgroup_event_low: int | None = None
+    cgroup_event_high: int | None = None
+    cgroup_event_max: int | None = None
+    cgroup_event_oom: int | None = None
+    cgroup_event_oom_kill: int | None = None
 
     @property
     def cgroup_raw_headroom_bytes(self) -> int | None:
@@ -134,13 +150,15 @@ def _read_host_available_bytes() -> int | None:
     return None
 
 
-def _read_cgroup_reclaimable_bytes(cgroup_dir: Path) -> int | None:
+def _read_cgroup_reclaimable_bytes(
+    cgroup_dir: Path,
+) -> tuple[int | None, int | None, int | None]:
     """Read cache classes the kernel can reclaim under cgroup pressure."""
 
     try:
         lines = (cgroup_dir / "memory.stat").read_text(encoding="utf-8").splitlines()
     except OSError:
-        return None
+        return None, None, None
     values: dict[str, int] = {}
     for line in lines:
         fields = line.split()
@@ -153,8 +171,39 @@ def _read_cgroup_reclaimable_bytes(cgroup_dir: Path) -> int | None:
         if value >= 0:
             values[fields[0]] = value
     if not values:
-        return None
-    return values.get("inactive_file", 0) + values.get("slab_reclaimable", 0)
+        return None, None, None
+    inactive_file = values.get("inactive_file")
+    slab_reclaimable = values.get("slab_reclaimable")
+    return (
+        inactive_file,
+        slab_reclaimable,
+        (inactive_file or 0) + (slab_reclaimable or 0),
+    )
+
+
+def _read_cgroup_memory_events(cgroup_dir: Path) -> dict[str, int | None]:
+    values: dict[str, int | None] = {
+        "low": None,
+        "high": None,
+        "max": None,
+        "oom": None,
+        "oom_kill": None,
+    }
+    try:
+        lines = (cgroup_dir / "memory.events").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        fields = line.split()
+        if len(fields) != 2 or fields[0] not in values:
+            continue
+        try:
+            parsed = int(fields[1])
+        except ValueError:
+            continue
+        if parsed >= 0:
+            values[fields[0]] = parsed
+    return values
 
 
 def _cgroup_v2_directory() -> Path | None:
@@ -181,10 +230,16 @@ def read_agent_resource_snapshot() -> AgentResourceSnapshot:
     current: int | None = None
     maximum: int | None = None
     reclaimable: int | None = None
+    inactive_file: int | None = None
+    slab_reclaimable: int | None = None
+    memory_events: dict[str, int | None] = {}
     cgroup_dir = _cgroup_v2_directory()
     if cgroup_dir is not None:
         current = _read_nonnegative_int(cgroup_dir / "memory.current")
-        reclaimable = _read_cgroup_reclaimable_bytes(cgroup_dir)
+        inactive_file, slab_reclaimable, reclaimable = (
+            _read_cgroup_reclaimable_bytes(cgroup_dir)
+        )
+        memory_events = _read_cgroup_memory_events(cgroup_dir)
         try:
             raw_max = (cgroup_dir / "memory.max").read_text(encoding="utf-8").strip()
         except OSError:
@@ -201,6 +256,13 @@ def read_agent_resource_snapshot() -> AgentResourceSnapshot:
         cgroup_current_bytes=current,
         cgroup_max_bytes=maximum,
         cgroup_reclaimable_bytes=reclaimable,
+        cgroup_inactive_file_bytes=inactive_file,
+        cgroup_slab_reclaimable_bytes=slab_reclaimable,
+        cgroup_event_low=memory_events.get("low"),
+        cgroup_event_high=memory_events.get("high"),
+        cgroup_event_max=memory_events.get("max"),
+        cgroup_event_oom=memory_events.get("oom"),
+        cgroup_event_oom_kill=memory_events.get("oom_kill"),
     )
 
 

@@ -2,7 +2,8 @@
 # [Input] Existing Dream/Admin secure env files and explicit AutoDL service mappings.
 # [Output] Mode-0600 Dream backend/frontend runtime env using the Admin-owned PostgreSQL identity.
 # [Pos] AutoDL Dream configuration projector; no CLI/transport state is persisted here.
-# [Sync] 2026-08-26: leave Agent admission budgets unset so runtime auto-detects host/cgroup capacity.
+# [Sync] 2026-08-27: require and safely project the dedicated Dream diagnostics token
+#                    while leaving Agent admission budgets unset.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,18 +38,20 @@ env_value() { awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") +
 database_user="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_USER)"
 database_password="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_PASSWORD)"
 database_name="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_DB)"
+diagnostics_token="$(env_value "${ADMIN_ENV_FILE}" DREAM_DIAGNOSTICS_TOKEN)"
 dream_public_host="${AUTODL_DREAM_PUBLIC_ORIGIN#https://}"
 dream_public_host="${dream_public_host%%:*}"
 [[ "${database_user}" =~ ^[A-Za-z0-9_]+$ ]] || err "Admin POSTGRES_USER is missing or unsupported."
 [[ "${database_password}" =~ ^[A-Za-z0-9._~-]+$ ]] || err "Admin POSTGRES_PASSWORD must be URL-safe."
 [[ "${database_name}" =~ ^[A-Za-z0-9_-]+$ ]] || err "Admin POSTGRES_DB is missing or unsupported."
+[[ ${#diagnostics_token} -ge 32 ]] || err "Admin DREAM_DIAGNOSTICS_TOKEN must contain at least 32 characters."
 
 temp_file="$(mktemp "${SCRIPT_DIR}/.env.XXXXXX")"
 trap 'rm -f "${temp_file}"' EXIT
 umask 077
 awk -F= '
   BEGIN {
-    split("DATABASE_URL PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN AGENT_CWD ARTIFACT_WORKSPACE_ROOT FILE_STORAGE_LOCAL_DIR INK_CLAUDE_PLUGIN_RUNTIME_ROOT INK_LOAD_DATABASE_URL_FROM_ENV_FILE CLAUDE_CODE_CLI_PATH VITE_ALLOWED_HOSTS VITE_DEV_API_PROXY_TARGET INK_AGENT_MAX_CONCURRENT_RUNS INK_AGENT_RUN_MEMORY_BUDGET_MIB INK_AGENT_MEMORY_RESERVE_MIB", keys, " ")
+    split("DATABASE_URL PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN AGENT_CWD ARTIFACT_WORKSPACE_ROOT FILE_STORAGE_LOCAL_DIR INK_CLAUDE_PLUGIN_RUNTIME_ROOT INK_LOAD_DATABASE_URL_FROM_ENV_FILE CLAUDE_CODE_CLI_PATH VITE_ALLOWED_HOSTS VITE_DEV_API_PROXY_TARGET INK_AGENT_MAX_CONCURRENT_RUNS INK_AGENT_RUN_MEMORY_BUDGET_MIB INK_AGENT_MEMORY_RESERVE_MIB INK_AGENT_DIAGNOSTICS_TOKEN", keys, " ")
     for (i in keys) excluded[keys[i]] = 1
   }
   /^[A-Za-z_][A-Za-z0-9_]*=/ {
@@ -75,12 +78,13 @@ awk -F= '
   printf 'ARTIFACT_WORKSPACE_ROOT=%s/artifacts\n' "${AUTODL_DATA_ROOT}"
   printf 'FILE_STORAGE_LOCAL_DIR=%s/file-storage\n' "${AUTODL_DATA_ROOT}"
   printf 'INK_CLAUDE_PLUGIN_RUNTIME_ROOT=%s/claude-plugin-runtime\n' "${AUTODL_DATA_ROOT}"
+  printf 'INK_AGENT_DIAGNOSTICS_TOKEN=%s\n' "${diagnostics_token}"
   printf 'INK_LOAD_DATABASE_URL_FROM_ENV_FILE=0\n'
   printf 'VITE_ALLOWED_HOSTS=%s\n' "${dream_public_host}"
   printf 'VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:%s\n' "${AUTODL_DREAM_BACKEND_PORT}"
 } >>"${temp_file}"
 
-for required_key in DATABASE_URL SESSION_SECRET_KEY INK_GATEWAY_SERVICE_KEY INK_ADMIN_PRODUCT_JWT_SECRET; do
+for required_key in DATABASE_URL SESSION_SECRET_KEY INK_GATEWAY_SERVICE_KEY INK_ADMIN_PRODUCT_JWT_SECRET INK_AGENT_DIAGNOSTICS_TOKEN; do
   grep -q "^${required_key}=" "${temp_file}" || err "${required_key} is missing from the projected env."
 done
 chmod 600 "${temp_file}"

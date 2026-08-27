@@ -19,6 +19,7 @@
 # [Sync] 2026-08-26: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.1.
 # [Sync] 2026-08-24: cover credential-free SDK/CLI startup identity logging.
 # [Sync] 2026-08-25: align MCP auth route registration with database server identifiers.
+# [Sync] 2026-08-27: preserve the dedicated Agent diagnostics token during startup cleanup.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -258,6 +259,7 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
             "INK_AGENT_MAX_CONCURRENT_RUNS": "1",
             "INK_AGENT_RUN_MEMORY_BUDGET_MIB": "512",
             "INK_AGENT_MEMORY_RESERVE_MIB": "128",
+            "INK_AGENT_DIAGNOSTICS_TOKEN": "dedicated-diagnostics-secret",
         }
         with unittest.mock.patch.dict(os.environ, expected, clear=True):
             _SERVER_MODULE._drop_unsupported_agent_env()
