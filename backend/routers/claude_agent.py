@@ -34,6 +34,8 @@
 # [Sync] 2026-08-17: allow owned Chat history to be filtered by Deck for the
 #                    Settings / Work related-conversation deletion flow.
 # [Sync] 2026-08-17: allow same-Deck Agent selection per turn while Deck provenance stays immutable.
+# [Sync] 2026-08-28: resolve the full server-owned model selection so Claude Code Runtime
+#                    windows reach the turn without exposing them to the browser request.
 
 import asyncio
 import base64
@@ -76,8 +78,9 @@ from libs.file_storage import server_file_storage
 from services.deck.chat_context import DeckChatContextError, DeckChatContextService
 from services.admin_gateway import (
     GatewayInferenceError,
+    GatewayModel,
     GatewayModelCatalogClient,
-    resolve_platform_model_alias,
+    resolve_platform_model,
 )
 
 from .deps import get_current_user
@@ -282,9 +285,16 @@ async def _resolve_platform_model_alias(
     user_id: int,
     client_model_alias: str | None,
 ) -> str:
+    return (await _resolve_platform_model_selection(user_id, client_model_alias)).model_alias
+
+
+async def _resolve_platform_model_selection(
+    user_id: int,
+    client_model_alias: str | None,
+) -> GatewayModel | str:
     try:
         return await asyncio.to_thread(
-            resolve_platform_model_alias,
+            resolve_platform_model,
             user_id,
             client_model_alias,
             catalog_client_factory=GatewayModelCatalogClient,
@@ -576,7 +586,15 @@ async def claude_agent_stream(
                 },
             )
 
-    platform_model_alias = await _resolve_platform_model_alias(user_id, body.model)
+    platform_model = await _resolve_platform_model_selection(user_id, body.model)
+    if isinstance(platform_model, GatewayModel):
+        platform_model_alias = platform_model.model_alias
+        model_runtime_env = platform_model.claude_code_runtime_env()
+    else:
+        # Compatibility for isolated route tests/custom injection points that
+        # intentionally resolve only an alias.
+        platform_model_alias = platform_model
+        model_runtime_env = {}
 
     message_parts = list(_msg_dict.get("parts") or []) if _msg_dict else None
 
@@ -716,6 +734,7 @@ async def claude_agent_stream(
         resume=body.resume,
         tool_choice=body.tool_choice,
         model=platform_model_alias,
+        model_runtime_env=model_runtime_env,
         max_turns=body.max_turns,
         cwd=body.cwd,
         message_id=message_id,

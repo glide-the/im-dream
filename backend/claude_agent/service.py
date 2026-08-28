@@ -3,6 +3,8 @@
 #         Reads database module for session persistence.
 # [Output] Provide ClaudeAgentRunRequest, ClaudeAgentService to thread_factory.py.
 # [Pos] core-business node in backend/claude_agent
+# [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
+#                    without reading PostgreSQL from the turn path or changing SSE semantics.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -241,7 +243,7 @@ from story_workspace.contracts import (
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
 from services.claude_plugin.workspace_packer import pack_workspace_plugins
 from services.deck.chat_context import DeckChatContextService
-from services.admin_gateway import resolve_platform_model_alias
+from services.admin_gateway import GatewayModel, resolve_platform_model
 from session_events import EditSessionEvent, session_event_bus
 from claude_agent.chat_stream_adapter import ChatStreamAdapter
 from claude_agent.stream_events import NormalizedAgentEvent
@@ -1083,6 +1085,9 @@ class ClaudeAgentRunRequest:
     resume: bool = False
     tool_choice: str = "auto"
     model: Optional[str] = None
+    # Server-owned model Runtime projection. Public request DTOs never expose
+    # this field; the authenticated Gateway catalog populates it.
+    model_runtime_env: dict[str, str] = field(default_factory=dict)
     max_turns: int = int(os.getenv("INK_AGENT_MAX_TURNS", "100") or "100")
     cwd: Optional[str] = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -1176,7 +1181,12 @@ class ClaudeAgentService:
     def __init__(
         self,
         context_builder: Optional[ClaudeAgentContextBuilder] = None,
-        platform_model_resolver: Callable[[int | str, str | None], str] | None = None,
+        platform_model_resolver: (
+            Callable[[int | str, str | None], GatewayModel | str] | None
+        ) = None,
+        claude_code_runtime_env_provider: (
+            Callable[[], Mapping[str, str]] | None
+        ) = None,
         dream_context_mapper: DreamThreadContextMapper | None = None,
         dream_runtime_init_activator: (
             Callable[..., Awaitable[None]] | None
@@ -1187,7 +1197,10 @@ class ClaudeAgentService:
     ) -> None:
         self._context_builder = context_builder or ClaudeAgentContextBuilder()
         self._platform_model_resolver = (
-            platform_model_resolver or resolve_platform_model_alias
+            platform_model_resolver or resolve_platform_model
+        )
+        self._claude_code_runtime_env_provider = (
+            claude_code_runtime_env_provider or (lambda: {})
         )
         self._dream_context_mapper = dream_context_mapper or DreamThreadContextMapper()
         self._dream_runtime_init_activator = (
@@ -1285,11 +1298,18 @@ class ClaudeAgentService:
             # the live server-owned alias here so every Dream turn is subject
             # to the same catalog/entitlement boundary immediately before the
             # runner is assembled. Errors intentionally propagate fail-closed.
-            request.model = await asyncio.to_thread(
+            selected_model = await asyncio.to_thread(
                 self._platform_model_resolver,
                 request.user_id,
                 request.model,
             )
+            if isinstance(selected_model, GatewayModel):
+                request.model = selected_model.model_alias
+                request.model_runtime_env = selected_model.claude_code_runtime_env()
+            else:
+                # Compatibility for injected test/custom resolvers that return
+                # only an alias. They cannot supply Runtime configuration.
+                request.model = selected_model
 
         settings_prompt_changed = (
             system_config_loaded
@@ -1587,6 +1607,10 @@ class ClaudeAgentService:
             ),
         )
 
+        server_runtime_env = {
+            **request.model_runtime_env,
+            **dict(self._claude_code_runtime_env_provider()),
+        }
         run_options = AgentRunOptions(
             thread_id=thread_id_for_agent,
             user_message=user_message_content,
@@ -1639,6 +1663,7 @@ class ClaudeAgentService:
                 ),
             },
             user_sdk_env=user_env_vars,
+            server_runtime_env=server_runtime_env,
             editor_state=active_editor_state,
             # Live getter: agent_runner._pre_tool_use_hook calls this instead of
             # reading opts.editor_state so it always sees the AgentRunState

@@ -11,6 +11,8 @@
 #                    CLAUDE_CODE_CLI_PATH-only rollback and missing runtime fails closed.
 # [Sync] 2026-08-23: reject manifests without a pruned core, production
 #                    eligibility, or required MCP management identity capability.
+# [Sync] 2026-08-28: verify exact server-owned Runtime env validation, precedence,
+#                    parent scrubbing, and omit-when-unset behavior.
 
 """Tests for sdk_env.apply_cli_path_to_options (2026-07-26)."""
 from __future__ import annotations
@@ -403,6 +405,61 @@ class TestResolveClaudeAgentMaxBufferSize(unittest.TestCase):
                     {CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME: raw}
                 )
             self.assertEqual(value, CLAUDE_AGENT_MAX_BUFFER_SIZE_DEFAULT)
+
+
+class TestClaudeCodeRuntimeEnv(unittest.TestCase):
+    def test_configured_values_override_user_overlay(self):
+        options = types.SimpleNamespace(env={
+            "CLAUDE_CODE_EFFORT_LEVEL": "low",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "10",
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "20",
+            "KEEP": "yes",
+        })
+        sdk_env_module.apply_server_claude_code_runtime_env_to_options(
+            options,
+            {
+                "CLAUDE_CODE_EFFORT_LEVEL": "high",
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
+                "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+            },
+        )
+        self.assertEqual(options.env, {
+            "CLAUDE_CODE_EFFORT_LEVEL": "high",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+            "KEEP": "yes",
+        })
+
+    def test_unset_values_are_removed_from_parent_and_options(self):
+        parent = {
+            "CLAUDE_CODE_EFFORT_LEVEL": "max",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1",
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1",
+            "KEEP": "yes",
+        }
+        sdk_env_module.clear_server_claude_code_runtime_parent_env(parent)
+        self.assertEqual(parent, {"KEEP": "yes"})
+
+        options = types.SimpleNamespace(env={**parent, "CLAUDE_CODE_EFFORT_LEVEL": "low"})
+        sdk_env_module.apply_server_claude_code_runtime_env_to_options(options, {})
+        self.assertEqual(options.env, {"KEEP": "yes"})
+
+    def test_invalid_or_unknown_runtime_values_fail_closed(self):
+        invalid = (
+            {"CLAUDE_CODE_EFFORT_LEVEL": "ultra"},
+            {"CLAUDE_CODE_EFFORT_LEVEL": 1},
+            {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "0"},
+            {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": 262144},
+            {"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "2147483648"},
+            {"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144.0"},
+            {"CLAUDE_CODE_UNKNOWN": "1"},
+        )
+        for runtime_env in invalid:
+            with self.subTest(runtime_env=runtime_env), self.assertRaises(ValueError):
+                sdk_env_module.apply_server_claude_code_runtime_env_to_options(
+                    types.SimpleNamespace(env={}),
+                    runtime_env,
+                )
 
 
 if __name__ == "__main__":

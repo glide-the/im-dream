@@ -1,7 +1,7 @@
 # [Input] Consume read-only Admin schema capability inspectors with injected PostgreSQL rows.
-# [Output] Verify runtime authority and exact managed-MCP/resource-Observer capability contracts.
+# [Output] Verify runtime authority and exact managed-MCP/resource-Observer/Runtime contracts.
 # [Pos] Provider-free schema capability consumer tests in backend/tests.
-# [Sync] 2026-08-27: require the exact Claude Agent resource Observer v1 hash at runtime.
+# [Sync] 2026-08-28: require the exact Claude Agent resource and Claude Code Runtime hashes.
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from schema.capabilities import (
     CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY,
     CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
     CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION,
+    CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY,
+    CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256,
     MANAGED_MCP_RESOURCES_CAPABILITY,
     MANAGED_MCP_RESOURCES_CONTRACT_SHA256,
     MANAGED_MCP_RESOURCES_VERSION,
@@ -79,6 +81,8 @@ def _required_capabilities() -> dict[str, tuple[int, str]]:
             version,
             CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256
             if name == CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY
+            else CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256
+            if name == CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY
             else _HASH,
         )
         for name, version in REQUIRED_RUNTIME_CAPABILITIES.items()

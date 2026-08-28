@@ -34,8 +34,8 @@
 # [Sync] 2026-08-22: carry the server-owned thread runtime workspace separately
 #                    from cwd so CLAUDE_CODE_TMPDIR stays thread-local when
 #                    user-facing Workspace Mode is disabled.
-# [Sync] 2026-08-22: carry the authenticated user's secure-storage selector and
-#                    opaque MCP definitions without weakening thread TMPDIR.
+# [Sync] 2026-08-28: carry a server-owned, exact Claude Code Runtime env projection
+#                    separately from user SDK env so model/global policy wins.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -257,6 +257,10 @@ class AgentRunOptions:
     # Allowlist-filtered before injection into ClaudeAgentOptions.env.
     # Priority: higher than backend/.env, lower than explicit options.env.
     user_sdk_env: dict[str, str] = field(default_factory=dict)
+    # Exact server-owned Claude Code Runtime keys derived from Admin's selected
+    # model and last-known-good global policy. The runner validates and applies
+    # these after user_sdk_env; browser/user/Deck/plugin data never populate it.
+    server_runtime_env: dict[str, str] = field(default_factory=dict)
     # Deprecated: attachments should be passed to build_user_message instead.
     # Kept for backward compatibility; ignored by runner when user_message is a list.
     attachments: Optional[list[AttachmentPayload]] = None

@@ -4,6 +4,8 @@
 #          buffer/error guidance, on_text_done, tool events, confirmation, and env aliases.
 # [Pos] test node in backend/tests
 # [Sync] 2026-08-20: cover the server-owned SDK stdout buffer option and safe overflow hint.
+# [Sync] 2026-08-28: cover terminal max_tokens classification so truncated
+#                    thinking-only turns cannot be reported as successful.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -767,6 +769,100 @@ class TestClaudeAgentRunnerStreamEvent(_RunnerBase):
         # thinking_delta StreamEvents are dispatched as tool events by the original runner
         thinking_events = [e for e in tool_events if e.type == "thinking_delta"]
         self.assertGreater(len(thinking_events), 0, "Expected thinking_delta tool events")
+
+    async def test_terminal_max_tokens_is_an_explicit_recoverable_error(self):
+        self.set_query([
+            StreamEvent(event={
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "thinking",
+                    "thinking": "",
+                    "signature": "",
+                },
+            }),
+            StreamEvent(event={
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "thinking_delta",
+                    "thinking": "unfinished reasoning",
+                },
+            }),
+            StreamEvent(event={"type": "content_block_stop", "index": 0}),
+            StreamEvent(event={
+                "type": "message_delta",
+                "delta": {"stop_reason": "max_tokens"},
+                "usage": {"output_tokens": 4096},
+            }),
+            StreamEvent(event={"type": "message_stop"}),
+            ResultMessage(session_id="stream-max-tokens-session"),
+        ])
+        runner = self.make_runner()
+        errors: list[Exception] = []
+        completed_text: list[str] = []
+
+        result = await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="se-max-tokens-001",
+                user_message="continue the story",
+                tool_choice="none",
+            ),
+            callbacks=AgentStreamingCallbacks(
+                on_text_delta=lambda _delta: None,
+                on_text_done=lambda text: completed_text.append(text),
+                on_error=lambda error: errors.append(error),
+            ),
+        )
+
+        self.assertFalse(result.success)
+        self.assertIs(result.error, errors[0])
+        self.assertIn("达到输出长度上限", str(result.error))
+        self.assertIn("继续", str(result.error))
+        self.assertNotIn("sdk_call_context", str(result.error))
+        self.assertEqual(completed_text, [])
+        self.assertEqual(result.usage, {"output_tokens": 4096})
+        self.assertEqual(result.session_id, "stream-max-tokens-session")
+
+    async def test_later_end_turn_preserves_sdk_max_tokens_recovery(self):
+        self.set_query([
+            StreamEvent(event={
+                "type": "message_delta",
+                "delta": {"stop_reason": "max_tokens"},
+                "usage": {"output_tokens": 4096},
+            }),
+            StreamEvent(event={"type": "message_stop"}),
+            StreamEvent(event={
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "completed"},
+            }),
+            StreamEvent(event={
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 12},
+            }),
+            StreamEvent(event={"type": "message_stop"}),
+            ResultMessage(session_id="stream-recovered-session"),
+        ])
+        runner = self.make_runner()
+        errors: list[Exception] = []
+
+        result = await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="se-max-tokens-recovered-001",
+                user_message="continue the story",
+                tool_choice="none",
+            ),
+            callbacks=AgentStreamingCallbacks(
+                on_text_delta=lambda _delta: None,
+                on_error=lambda error: errors.append(error),
+            ),
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.full_text, "completed")
+        self.assertEqual(errors, [])
 
 
 def _runner_with_error_query(exc):

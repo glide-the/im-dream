@@ -1,7 +1,7 @@
 # [Input] Consume the capacity-one publisher/sink with strict DTO and injected PostgreSQL fakes.
 # [Output] Verify latest replacement, timeout isolation/serialization, typed-null DB-clock upsert/TTL, and privacy.
 # [Pos] Provider-free PostgreSQL resource synchronization tests in backend/tests.
-# [Sync] 2026-08-27: prove the null first sample is typed and timed-out writes remain single-file.
+# [Sync] 2026-08-28: keep the strict global-effort snapshot field in sink/privacy fixtures.
 
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ def _snapshot(*, started: int = 0) -> ClaudeAgentResourceDiagnosticsDTO:
             "config": {
                 "defaults": values,
                 "effective": values,
+                "claude_code": {"effort_level": None},
                 "effective_version": "a" * 64,
                 "loaded_at": "2026-08-27T00:00:00Z",
                 "policy_status": "not_configured",

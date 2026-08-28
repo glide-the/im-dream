@@ -1,7 +1,9 @@
-# [Input] Consume Linux resource sampler, public admission snapshots, Observer counters, and DTO projector.
-# [Output] Verify cgroup/proc reads, tri-state admission projection, staleness, errors, and DTO privacy.
+# [Input] Consume Linux resource sampler, public admission snapshots, Observer counters,
+#         and the strict DTO projector.
+# [Output] Verify cgroup/proc reads, strict safe config projection, tri-state admission,
+#          staleness, errors, coherent policy snapshots, and DTO privacy.
 # [Pos] Focused resource diagnostics tests in backend/tests.
-# [Sync] 2026-08-27: cover read-only coherent/LKG snapshots and uncapped positive concurrency projection.
+# [Sync] 2026-08-28: cover JSON-safe resources plus coherent Runtime effort/LKG snapshots.
 
 from __future__ import annotations
 
@@ -20,12 +22,15 @@ if str(ROOT) not in sys.path:
 
 import tests._sdk_stubs  # noqa: F401
 from claude_agent.admission import (
+    AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
+    AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB,
     AgentAdmissionConfig,
     AgentResourceSnapshot,
     ClaudeAgentAdmissionController,
     read_agent_resource_snapshot,
 )
 from claude_agent.resource_diagnostics import (
+    AdmissionConfigValues,
     CgroupDetailSnapshot,
     ClaudeAgentResourceDiagnostics,
     ClaudeAgentResourceSampler,
@@ -34,6 +39,7 @@ from claude_agent.resource_diagnostics import (
     read_cgroup_detail_snapshot,
     read_claude_process_snapshot,
 )
+from pydantic import ValidationError
 from claude_agent.resource_observer import (
     ClaudeAgentResourceObserver,
     ObservedClaudeAgentAdmissionController,
@@ -265,13 +271,13 @@ class TestDiagnosticsDTO(unittest.TestCase):
 
         self.assertTrue(payload["admission"]["can_start_new_agent"])
 
-    def test_large_concurrency_projects_without_diagnostics_cap(self) -> None:
-        large_value = 10**30
+    def test_safe_integer_and_combined_memory_maxima_project_exactly(self) -> None:
+        large_value = AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX
         config = AgentAdmissionConfig(
             max_concurrent_runs=large_value,
-            run_memory_budget_mib=512,
-            memory_reserve_mib=128,
-            retry_after_seconds=60,
+            run_memory_budget_mib=AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB - 1,
+            memory_reserve_mib=1,
+            retry_after_seconds=large_value,
         )
         observer = ClaudeAgentResourceObserver()
         admission = ObservedClaudeAgentAdmissionController(
@@ -298,6 +304,38 @@ class TestDiagnosticsDTO(unittest.TestCase):
             payload["admission"]["max_concurrent_runs"],
             large_value,
         )
+        self.assertLessEqual(
+            payload["config"]["effective"]["required_headroom_bytes"],
+            AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
+        )
+
+    def test_config_dto_rejects_non_safe_and_incoherent_values(self) -> None:
+        valid = {
+            "max_concurrent_runs": 1,
+            "run_memory_budget_mib": 512,
+            "memory_reserve_mib": 128,
+            "retry_after_seconds": 60,
+            "required_headroom_bytes": 640 * _MIB,
+        }
+        invalid_values = (
+            {**valid, "max_concurrent_runs": True},
+            {**valid, "run_memory_budget_mib": "512"},
+            {**valid, "memory_reserve_mib": 0},
+            {
+                **valid,
+                "retry_after_seconds": AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX + 1,
+            },
+            {**valid, "required_headroom_bytes": 1},
+            {
+                **valid,
+                "run_memory_budget_mib": AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB,
+                "memory_reserve_mib": 1,
+                "required_headroom_bytes": AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
+            },
+        )
+        for values in invalid_values:
+            with self.subTest(values=values), self.assertRaises(ValidationError):
+                AdmissionConfigValues(**values)
 
     def test_closed_dto_contains_no_business_or_credential_fields(self) -> None:
         config = AgentAdmissionConfig(
@@ -427,6 +465,7 @@ class TestDiagnosticsDTO(unittest.TestCase):
                 revision=9,
                 updated_at="2026-08-27T01:00:00Z",
                 loaded_at="2026-08-27T01:00:01Z",
+                claude_code_effort_level="high",
             ),
             effective_config=applied,
         )
@@ -446,7 +485,9 @@ class TestDiagnosticsDTO(unittest.TestCase):
         failed_payload = diagnostics.snapshot().model_dump()["config"]
 
         self.assertEqual(applied_payload["effective"]["max_concurrent_runs"], 2)
+        self.assertEqual(applied_payload["claude_code"], {"effort_level": "high"})
         self.assertEqual(failed_payload["effective"], applied_payload["effective"])
+        self.assertEqual(failed_payload["claude_code"], {"effort_level": "high"})
         self.assertEqual(
             failed_payload["effective_version"],
             applied_payload["effective_version"],

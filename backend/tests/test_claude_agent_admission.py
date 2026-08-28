@@ -1,8 +1,9 @@
 # [Input] Consume claude_agent/admission.py and the existing thread factory/EventBus path.
-# [Output] Verify bounded concurrency, host/cgroup memory preflight, retryable
+# [Output] Verify safe resource config, concurrency, host/cgroup memory preflight, retryable
 #          SSE errors, missing-metric fallback, and idempotent lease release.
 # [Pos] resource-admission test node in backend/tests.
-# [Sync] 2026-08-27: cover uncapped positive concurrency without changing lease cancellation.
+# [Sync] 2026-08-28: cover shared safe-integer/combined-memory replacement boundaries
+#                    without changing admission ordering, live leases, cancellation, or SSE.
 
 """Tests for Claude Agent process-local resource admission."""
 from __future__ import annotations
@@ -21,6 +22,8 @@ if str(ROOT) not in sys.path:
 import tests._sdk_stubs  # noqa: F401
 
 from claude_agent.admission import (
+    AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
+    AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB,
     AgentAdmissionConfig,
     AgentResourceSnapshot,
     ClaudeAgentAdmissionController,
@@ -205,16 +208,68 @@ class TestClaudeAgentAdmissionController(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must be >= 1"):
                 AgentAdmissionConfig.from_env()
 
-    def test_concurrency_env_accepts_arbitrarily_large_positive_integer(self):
-        large_value = 10**30
+    def test_env_accepts_values_above_historical_product_caps(self):
         with unittest.mock.patch.dict(
             "os.environ",
-            {"INK_AGENT_MAX_CONCURRENT_RUNS": str(large_value)},
+            {
+                "INK_AGENT_MAX_CONCURRENT_RUNS": "17",
+                "INK_AGENT_RUN_MEMORY_BUDGET_MIB": "8193",
+                "INK_AGENT_MEMORY_RESERVE_MIB": "4097",
+                "INK_AGENT_SWEEP_INTERVAL_S": "3601",
+            },
             clear=True,
         ):
             config = AgentAdmissionConfig.from_env()
 
-        self.assertEqual(config.max_concurrent_runs, large_value)
+        self.assertEqual(config, AgentAdmissionConfig(17, 8_193, 4_097, 3_601))
+
+    def test_env_accepts_safe_and_combined_memory_exact_boundaries(self):
+        with unittest.mock.patch.dict(
+            "os.environ",
+            {
+                "INK_AGENT_MAX_CONCURRENT_RUNS": str(
+                    AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX
+                ),
+                "INK_AGENT_RUN_MEMORY_BUDGET_MIB": str(
+                    AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB - 1
+                ),
+                "INK_AGENT_MEMORY_RESERVE_MIB": "1",
+                "INK_AGENT_SWEEP_INTERVAL_S": str(
+                    AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX
+                ),
+            },
+            clear=True,
+        ):
+            config = AgentAdmissionConfig.from_env()
+
+        self.assertEqual(
+            config.required_headroom_bytes,
+            AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB * _MIB,
+        )
+
+    def test_env_rejects_safe_integer_and_combined_memory_overflow(self):
+        invalid_environments = (
+            {
+                "INK_AGENT_MAX_CONCURRENT_RUNS": str(
+                    AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX + 1
+                )
+            },
+            {"INK_AGENT_MEMORY_RESERVE_MIB": "0"},
+            {
+                "INK_AGENT_RUN_MEMORY_BUDGET_MIB": str(
+                    AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB
+                ),
+                "INK_AGENT_MEMORY_RESERVE_MIB": "1",
+            },
+        )
+        for environment in invalid_environments:
+            with self.subTest(environment=environment), unittest.mock.patch.dict(
+                "os.environ",
+                environment,
+                clear=True,
+            ):
+                with self.assertRaises(ValueError):
+                    AgentAdmissionConfig.from_env()
 
     def test_invalid_concurrency_env_fails_closed(self):
         invalid_values = (
@@ -264,28 +319,68 @@ class TestClaudeAgentAdmissionController(unittest.TestCase):
 
         self.assertEqual(controller.config, _config())
 
-    def test_public_config_boundary_rejects_nonpositive_and_noninteger(self):
-        invalid_values = (0, -1, 1.5, True, None)
-        for value in invalid_values:
-            invalid = AgentAdmissionConfig(
-                max_concurrent_runs=value,  # type: ignore[arg-type]
-                run_memory_budget_mib=512,
-                memory_reserve_mib=128,
-                retry_after_seconds=60,
-            )
-            with self.subTest(value=value):
-                with self.assertRaises(ValueError):
-                    ClaudeAgentAdmissionController(invalid)
-                controller = ClaudeAgentAdmissionController(_config())
-                with self.assertRaises(ValueError):
-                    controller.replace_config(invalid)
-                self.assertEqual(controller.config, _config())
+    def test_public_config_boundary_rejects_invalid_values_for_every_field(self):
+        fields = (
+            "max_concurrent_runs",
+            "run_memory_budget_mib",
+            "memory_reserve_mib",
+            "retry_after_seconds",
+        )
+        invalid_values = (
+            0,
+            -1,
+            1.5,
+            True,
+            None,
+            "1",
+            AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX + 1,
+        )
+        valid = {
+            "max_concurrent_runs": 1,
+            "run_memory_budget_mib": 512,
+            "memory_reserve_mib": 128,
+            "retry_after_seconds": 60,
+        }
+        for field in fields:
+            for value in invalid_values:
+                values = {**valid, field: value}
+                invalid = AgentAdmissionConfig(**values)  # type: ignore[arg-type]
+                with self.subTest(field=field, value=value):
+                    with self.assertRaises(ValueError):
+                        ClaudeAgentAdmissionController(invalid)
+                    controller = ClaudeAgentAdmissionController(_config())
+                    with self.assertRaises(ValueError):
+                        controller.replace_config(invalid)
+                    self.assertEqual(controller.config, _config())
 
-    def test_public_config_boundary_accepts_arbitrarily_large_positive_integer(self):
-        large = _config(max_runs=10**30)
-        controller = ClaudeAgentAdmissionController(large)
+    def test_public_config_boundary_accepts_technical_maxima(self):
+        maximum = AgentAdmissionConfig(
+            max_concurrent_runs=AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
+            run_memory_budget_mib=AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB - 1,
+            memory_reserve_mib=1,
+            retry_after_seconds=AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
+        )
+        controller = ClaudeAgentAdmissionController(maximum)
 
-        self.assertEqual(controller.config.max_concurrent_runs, 10**30)
+        self.assertEqual(controller.config, maximum)
+        self.assertLessEqual(
+            controller.config.required_headroom_bytes,
+            AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
+        )
+
+    def test_public_config_boundary_rejects_combined_memory_plus_one(self):
+        invalid = AgentAdmissionConfig(
+            max_concurrent_runs=1,
+            run_memory_budget_mib=AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB,
+            memory_reserve_mib=1,
+            retry_after_seconds=1,
+        )
+        with self.assertRaises(ValueError):
+            ClaudeAgentAdmissionController(invalid)
+        controller = ClaudeAgentAdmissionController(_config())
+        with self.assertRaises(ValueError):
+            controller.replace_config(invalid)
+        self.assertEqual(controller.config, _config())
 
 
 class TestClaudeAgentAdmissionFactoryIntegration(unittest.IsolatedAsyncioTestCase):

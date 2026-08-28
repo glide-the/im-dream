@@ -1,3 +1,8 @@
+# [Input] Consume the authenticated Admin Gateway model catalog.
+# [Output] Provide strict server-only model capabilities and Claude Code Runtime settings.
+# [Pos] Admin Gateway model contract boundary; runtime-only fields never enter public Dream DTOs.
+# [Sync] 2026-08-28: parse nullable positive Claude Code compact/context windows and omit unset env.
+
 """Strict server-only client for the Admin public Gateway model catalog."""
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ _AVAILABILITY = frozenset({
     "permission_denied",
     "maintenance",
 })
+_CLAUDE_CODE_RUNTIME_INTEGER_MAX = 2_147_483_647
 
 
 class CatalogTransport(Protocol):
@@ -49,6 +55,22 @@ class GatewayModel:
     availability: str
     required_plan_code: str | None
     upgrade_hint: str | None
+    claude_code_auto_compact_window: int | None = None
+    claude_code_max_context_tokens: int | None = None
+
+    def claude_code_runtime_env(self) -> dict[str, str]:
+        """Project configured model fields to the exact server-owned env keys."""
+
+        env: dict[str, str] = {}
+        if self.claude_code_auto_compact_window is not None:
+            env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(
+                self.claude_code_auto_compact_window
+            )
+        if self.claude_code_max_context_tokens is not None:
+            env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(
+                self.claude_code_max_context_tokens
+            )
+        return env
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -80,12 +102,26 @@ def _optional_non_negative_int(value: Any) -> int | None:
     return value
 
 
+def _optional_positive_runtime_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 1
+        or value > _CLAUDE_CODE_RUNTIME_INTEGER_MAX
+    ):
+        raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
+    return value
+
+
 def _parse_model(raw: Any) -> GatewayModel:
     if not isinstance(raw, dict):
         raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
     if set(raw) != {
         "id", "display_name", "protocol", "capabilities",
         "context_window", "max_output_tokens", "enabled", "callable",
+        "claude_code_auto_compact_window", "claude_code_max_context_tokens",
         "availability", "required_plan_code", "upgrade_hint",
     }:
         raise GatewayInferenceError("GATEWAY_MODEL_CATALOG_INVALID", 502)
@@ -130,6 +166,12 @@ def _parse_model(raw: Any) -> GatewayModel:
         capabilities=dict(capabilities),
         context_window=_optional_non_negative_int(raw.get("context_window")),
         max_output_tokens=_optional_non_negative_int(raw.get("max_output_tokens")),
+        claude_code_auto_compact_window=_optional_positive_runtime_int(
+            raw.get("claude_code_auto_compact_window")
+        ),
+        claude_code_max_context_tokens=_optional_positive_runtime_int(
+            raw.get("claude_code_max_context_tokens")
+        ),
         enabled=True,
         callable=callable_value,
         availability=availability,

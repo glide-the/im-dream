@@ -6,7 +6,7 @@
 [Sync] 2026-08-22: document the engine-prompt workspace:// output contract and owner-bound Workspace content bridge used by Chat Markdown.
 [Sync] 2026-08-22: document the v2.1-scoped Workspace thumbnail and shared accessible full-size modal presentation.
 [Sync] 2026-08-23: document authenticated in-memory Workspace image resolution for the existing Chat long-image exporter.
-[Sync] 2026-08-27: remove the product concurrency ceiling while retaining positive finite-integer configuration.
+[Sync] 2026-08-28: align env/desired/public replacement/effective snapshots to positive JSON-safe integers, exact combined-memory bytes, and monotonic no-restart LKG refresh.
 -->
 
 **模块目标**：为 Ink & Memory 提供基于 Claude Code SDK 的流式 AI 写作助手后端能力，  
@@ -142,6 +142,18 @@ Ink & Memory 的 Claude Code SDK 鉴权和模型配置直接使用 `ANTHROPIC_*`
 | `API_TIMEOUT_MS` | `3000000` | SDK API 超时 |
 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `1` | 禁用非必要 Claude Code 流量 |
 
+#### Admin-owned Claude Code Runtime 配置
+
+以下三项不是 `.env` 或用户 Settings 配置。Dream composition 启动时清除父进程同名值，只把 Admin 已配置的 server-owned snapshot 注入 Claude Code 子进程；未设置字段在最终环境中不存在：
+
+| Runtime env | Admin 来源 | 合法值 |
+|---|---|---|
+| `CLAUDE_CODE_EFFORT_LEVEL` | Claude Agent resource policy 的 LKG global effort | `low/medium/high/xhigh/max` 或未设置 |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | 最终选中 `GatewayModel` | PostgreSQL int4 正整数或未设置 |
+| `CLAUDE_CODE_MAX_CONTEXT_TOKENS` | 最终选中 `GatewayModel` | PostgreSQL int4 正整数或未设置 |
+
+全局 effort 由独立 PostgreSQL provider/refresher 动态替换并写入 effective snapshot；模型两项随 authenticated Admin Gateway catalog 解析，不在 admission、Runner、ThreadFactory、Agent 状态机或 turn 主路径查询数据库。service 只合并 immutable snapshots，runner 最后验证精确白名单并覆盖 user env，既有 Gateway 鉴权、resume/cancel/SSE 与工具语义不变。
+
 ### 5.2 会话保活配置
 
 | 环境变量 | 默认值 | 用途 |
@@ -149,9 +161,13 @@ Ink & Memory 的 Claude Code SDK 鉴权和模型配置直接使用 `ANTHROPIC_*`
 | `INK_AGENT_TTL_S` | `600` | Thread Session 保活 TTL（秒） |
 | `INK_AGENT_SWEEP_INTERVAL_S` | `60` | 后台 Sweeper 清理周期（秒） |
 | `INK_AGENT_SSE_KEEPALIVE_S` | `15` | SSE keepalive 注释帧间隔（秒） |
-| `INK_AGENT_MAX_CONCURRENT_RUNS` | `1` | 单 backend 进程同时活跃 Claude turn 的正整数配置；无产品上限 |
-| `INK_AGENT_RUN_MEMORY_BUDGET_MIB` | `512` | 新建 CLI 进程树前要求的单 turn 增量预算 |
-| `INK_AGENT_MEMORY_RESERVE_MIB` | `128` | 为健康检查和非 Agent 请求保留的内存余量 |
+| `INK_AGENT_MAX_CONCURRENT_RUNS` | `1` | 单 backend 进程同时活跃 Claude turn；正安全整数，无任意产品上限 |
+| `INK_AGENT_RUN_MEMORY_BUDGET_MIB` | `512` | 新建 CLI 进程树前要求的单 turn 增量预算；正安全整数 |
+| `INK_AGENT_MEMORY_RESERVE_MIB` | `128` | 为健康检查和非 Agent 请求保留的正安全整数内存余量；0 无效 |
+
+`INK_AGENT_SWEEP_INTERVAL_S` 同时提供 admission 的 `retryAfterSeconds` hint。上述四项都必须位于 `1..9_007_199_254_740_991`，且 run budget 与 reserve 的 MiB 合计不得超过 `8_589_934_591`，从而确保 required-headroom bytes 不越过 JSON/TypeScript 安全整数。这是跨系统精确序列化技术边界，不是产品配额；env、PostgreSQL desired parser、公开 `replace_config` 与 diagnostics/effective 投影采用同一规则。
+
+PostgreSQL desired 仅由独立 provider/refresher 在 composition root 周期读取，不进入 turn 主路径。合法更高 revision 无需重启即可通过公开 replacement 应用于后续 acquire；same revision/same config 不重复 replace，只刷新 diagnostics 状态与加载时间。invalid、capability/PG unavailable、revision 回滚、same revision/different config 或后台异常均保留 LKG effective/revision，且不改变现有 lease、admission 判断顺序、Runner、ThreadFactory、service、EventBus、SSE 或 turn/resume/cancel 状态机。
 
 ### 5.3 功能配置
 

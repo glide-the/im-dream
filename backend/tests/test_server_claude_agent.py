@@ -14,7 +14,8 @@
 # [Sync] 2026-08-17: cover same-Deck Agent switching, provenance metadata, and CAS conflicts.
 # [Sync] 2026-08-22: cover restored Claude MCP Resources router registration.
 # [Sync] 2026-08-22: cover startup preservation of Claude Agent resource-admission keys.
-# [Sync] 2026-08-27: cover composition-owned policy application, refresh env, and lifecycle ordering.
+# [Sync] 2026-08-28: cover composition-owned higher-revision replacement,
+#                    same-revision diagnostics-only refresh, and lifecycle ordering.
 # [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
 #                    the Claude Agent factory starts.
 # [Sync] 2026-08-26: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.1.
@@ -865,7 +866,7 @@ class TestClaudeAgentRouteWorkspaceMode(unittest.TestCase):
             ) as sync_attachments_to_workspace_files,
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
         ):
@@ -985,7 +986,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ) as select_voice,
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
             unittest.mock.patch.object(
@@ -1120,7 +1121,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="hy3-preview"),
             ),
             unittest.mock.patch.object(
@@ -1162,7 +1163,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
             unittest.mock.patch.object(
@@ -1245,7 +1246,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
             unittest.mock.patch.object(
@@ -1325,7 +1326,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
             unittest.mock.patch.object(
@@ -1790,10 +1791,42 @@ class TestFactoryLifecycle(unittest.TestCase):
                 side_effect=lambda *_args, **_kwargs: calls.append("record"),
             ) as update_policy,
         ):
-            agent_factory._apply_claude_agent_resource_policy(result)
+            agent_factory._apply_claude_agent_resource_policy(result, True)
 
         self.assertEqual(calls, ["replace", "record"])
         replace_config.assert_called_once_with(config)
+        update_policy.assert_called_once_with(result, effective_config=config)
+
+    def test_composition_same_revision_refresh_does_not_replace_config(self):
+        import agent_factory
+        from claude_agent.resource_policy import (
+            RESOURCE_POLICY_DEFAULTS,
+            ResourcePolicyLoadResult,
+        )
+
+        config = agent_factory.claude_agent_admission_controller.config
+        result = ResourcePolicyLoadResult(
+            config=config,
+            defaults=RESOURCE_POLICY_DEFAULTS,
+            status="applied",
+            revision=12,
+            updated_at="2026-08-28T03:00:00Z",
+            loaded_at="2026-08-28T03:00:01Z",
+        )
+
+        with (
+            unittest.mock.patch.object(
+                agent_factory.claude_agent_admission_controller,
+                "replace_config",
+            ) as replace_config,
+            unittest.mock.patch.object(
+                agent_factory.claude_agent_resource_diagnostics,
+                "update_policy",
+            ) as update_policy,
+        ):
+            agent_factory._apply_claude_agent_resource_policy(result, False)
+
+        replace_config.assert_not_called()
         update_policy.assert_called_once_with(result, effective_config=config)
 
     def test_startup_validates_custom_sdk_before_factory(self):

@@ -68,8 +68,8 @@
 #                    discovery now selects ink-claude-code-dream and fails
 #                    closed. CLAUDE_CODE_CLI_PATH remains the sole explicit,
 #                    absolute override and official-CLI rollback boundary.
-# [Sync] 2026-08-25: name the thread-local MCP config projection directory so
-#                    Runner and sandbox policy share one exact security path.
+# [Sync] 2026-08-28: add exact server-owned effort/compact/context Runtime env
+#                    validation; unset keys are scrubbed from parent/options env.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -168,6 +168,18 @@ _USER_SDK_ENV_NAMES = frozenset(
         "API_TIMEOUT_MS",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
         "DISABLE_INTERLEAVED_THINKING",
+    }
+)
+CLAUDE_CODE_EFFORT_LEVEL_ENV_NAME = "CLAUDE_CODE_EFFORT_LEVEL"
+CLAUDE_CODE_AUTO_COMPACT_WINDOW_ENV_NAME = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+CLAUDE_CODE_MAX_CONTEXT_TOKENS_ENV_NAME = "CLAUDE_CODE_MAX_CONTEXT_TOKENS"
+CLAUDE_CODE_EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
+CLAUDE_CODE_RUNTIME_INTEGER_MAX = 2_147_483_647
+_SERVER_CLAUDE_CODE_RUNTIME_ENV_NAMES = frozenset(
+    {
+        CLAUDE_CODE_EFFORT_LEVEL_ENV_NAME,
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW_ENV_NAME,
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS_ENV_NAME,
     }
 )
 
@@ -902,5 +914,65 @@ def apply_user_sdk_env_to_options(
     # Remove any deprecated keys.
     for key in _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES:
         merged.pop(key, None)
+    options.env = merged
+    return options
+
+
+def clear_server_claude_code_runtime_parent_env(
+    process_env: dict[str, str] | None = None,
+) -> None:
+    """Remove ambient Runtime tuning so only Admin-owned projections can flow.
+
+    The Python SDK inherits its parent process environment before overlaying
+    ``options.env``. Dream calls this once at composition startup; otherwise an
+    unset Admin field could still leak an ambient process value into Claude Code.
+    """
+
+    target = os.environ if process_env is None else process_env
+    for name in _SERVER_CLAUDE_CODE_RUNTIME_ENV_NAMES:
+        target.pop(name, None)
+
+
+def apply_server_claude_code_runtime_env_to_options(
+    options: Any,
+    runtime_env: Optional[Mapping[str, str]] = None,
+) -> Any:
+    """Apply the exact Admin-owned Runtime env after every user-controlled overlay."""
+
+    supplied = dict(runtime_env or {})
+    if not set(supplied).issubset(_SERVER_CLAUDE_CODE_RUNTIME_ENV_NAMES):
+        raise ValueError("Claude Code Runtime env contains an unsupported key")
+    effort_level = supplied.get(CLAUDE_CODE_EFFORT_LEVEL_ENV_NAME)
+    if (
+        effort_level is not None
+        and (
+            not isinstance(effort_level, str)
+            or effort_level not in CLAUDE_CODE_EFFORT_LEVELS
+        )
+    ):
+        raise ValueError("Claude Code effort level is invalid")
+    for name in (
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW_ENV_NAME,
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS_ENV_NAME,
+    ):
+        value = supplied.get(name)
+        if value is None:
+            continue
+        if (
+            not isinstance(value, str)
+            or not value.isascii()
+            or not value.isdecimal()
+        ):
+            raise ValueError("Claude Code Runtime token value is invalid")
+        numeric = int(value)
+        if numeric < 1 or numeric > CLAUDE_CODE_RUNTIME_INTEGER_MAX:
+            raise ValueError("Claude Code Runtime token value is invalid")
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    merged = dict(existing_env)
+    for name in _SERVER_CLAUDE_CODE_RUNTIME_ENV_NAMES:
+        merged.pop(name, None)
+    merged.update(supplied)
     options.env = merged
     return options

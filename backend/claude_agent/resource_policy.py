@@ -1,12 +1,12 @@
-# [Input] Consume the exact Admin resource-observer capability, one fixed system_settings row,
-#         a bounded environment/default AgentAdmissionConfig, and an injected PostgreSQL lease factory.
-# [Output] Provide a public desired-policy provider and isolated periodic refresher with
-#          applied/not-configured/invalid/unavailable status.
+# [Input] Consume exact Admin resource/Runtime capabilities, one fixed system_settings
+#         row, JSON-safe admission defaults, and an injected PostgreSQL lease factory.
+# [Output] Provide a public admission/global-effort provider and isolated periodic
+#          refresher with applied/not-configured/invalid/unavailable LKG status.
 # [Pos] PostgreSQL-only Claude Agent resource-policy boundary composed by agent_factory.
-# [Sync] 2026-08-27: accept any positive integer concurrency without a product ceiling;
-#                    dynamic failures retain last-known-good effective config.
+# [Sync] 2026-08-28: add optional SDK-backed global effort; a higher revision atomically
+#                    replaces admission and Runtime policy while failures retain both LKGs.
 
-"""Load and periodically refresh one bounded Claude Agent admission policy."""
+"""Load and periodically refresh one validated Claude Agent admission policy."""
 from __future__ import annotations
 
 import asyncio
@@ -19,9 +19,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from claude_agent.admission import AgentAdmissionConfig
+from claude_agent.admission import (
+    AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
+    AgentAdmissionConfig,
+    validate_agent_admission_config,
+)
 from schema.capabilities import (
     claude_agent_resource_observer_capability_available,
+    claude_code_runtime_config_capability_available,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,10 +46,10 @@ RESOURCE_POLICY_REFRESH_INTERVAL_ENV = "INK_AGENT_RESOURCE_POLICY_REFRESH_INTERV
 _RESOURCE_POLICY_REFRESH_INTERVAL_MIN_SECONDS = 1.0
 _RESOURCE_POLICY_REFRESH_INTERVAL_MAX_SECONDS = 300.0
 RESOURCE_POLICY_BOUNDS = {
-    "maxConcurrentRuns": (1, None),
-    "runMemoryBudgetMib": (128, 8_192),
-    "memoryReserveMib": (64, 4_096),
-    "retryAfterSeconds": (5, 3_600),
+    "maxConcurrentRuns": (1, AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX),
+    "runMemoryBudgetMib": (1, AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX),
+    "memoryReserveMib": (1, AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX),
+    "retryAfterSeconds": (1, AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX),
 }
 RESOURCE_POLICY_DEFAULTS = AgentAdmissionConfig(
     max_concurrent_runs=1,
@@ -52,13 +57,15 @@ RESOURCE_POLICY_DEFAULTS = AgentAdmissionConfig(
     memory_reserve_mib=128,
     retry_after_seconds=60,
 )
-_POLICY_FIELDS = frozenset(
+CLAUDE_CODE_EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
+_LEGACY_POLICY_FIELDS = frozenset(
     {
         "schemaVersion",
         "revision",
         *RESOURCE_POLICY_BOUNDS,
     }
 )
+_POLICY_FIELDS = _LEGACY_POLICY_FIELDS | {"claudeCodeEffortLevel"}
 
 
 def _utc_now_text() -> str:
@@ -105,13 +112,18 @@ def _updated_at_text(value: Any) -> str | None:
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _parse_policy(value: Any) -> tuple[AgentAdmissionConfig, int] | None:
+def _parse_policy(
+    value: Any,
+) -> tuple[AgentAdmissionConfig, int, str | None] | None:
     if isinstance(value, str):
         try:
             value = json.loads(value)
         except json.JSONDecodeError:
             return None
-    if not isinstance(value, Mapping) or set(value) != _POLICY_FIELDS:
+    if not isinstance(value, Mapping):
+        return None
+    observed_fields = frozenset(value)
+    if observed_fields not in {_LEGACY_POLICY_FIELDS, _POLICY_FIELDS}:
         return None
     schema_version = value.get("schemaVersion")
     revision = value.get("revision")
@@ -121,6 +133,7 @@ def _parse_policy(value: Any) -> tuple[AgentAdmissionConfig, int] | None:
         or isinstance(revision, bool)
         or not isinstance(revision, int)
         or revision < 1
+        or revision > AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX
     ):
         return None
     parsed: dict[str, int] = {}
@@ -134,30 +147,28 @@ def _parse_policy(value: Any) -> tuple[AgentAdmissionConfig, int] | None:
         ):
             return None
         parsed[key] = raw
-    return (
-        AgentAdmissionConfig(
-            max_concurrent_runs=parsed["maxConcurrentRuns"],
-            run_memory_budget_mib=parsed["runMemoryBudgetMib"],
-            memory_reserve_mib=parsed["memoryReserveMib"],
-            retry_after_seconds=parsed["retryAfterSeconds"],
-        ),
-        revision,
-    )
+    effort_level = value.get("claudeCodeEffortLevel")
+    if effort_level is not None and effort_level not in CLAUDE_CODE_EFFORT_LEVELS:
+        return None
+    try:
+        config = validate_agent_admission_config(
+            AgentAdmissionConfig(
+                max_concurrent_runs=parsed["maxConcurrentRuns"],
+                run_memory_budget_mib=parsed["runMemoryBudgetMib"],
+                memory_reserve_mib=parsed["memoryReserveMib"],
+                retry_after_seconds=parsed["retryAfterSeconds"],
+            )
+        )
+    except (TypeError, ValueError):
+        return None
+    return config, revision, effort_level
 
 
 def _bounded_fallback(config: AgentAdmissionConfig) -> AgentAdmissionConfig:
-    values = {
-        "maxConcurrentRuns": config.max_concurrent_runs,
-        "runMemoryBudgetMib": config.run_memory_budget_mib,
-        "memoryReserveMib": config.memory_reserve_mib,
-        "retryAfterSeconds": config.retry_after_seconds,
-    }
-    if all(
-        values[key] >= minimum and (maximum is None or values[key] <= maximum)
-        for key, (minimum, maximum) in RESOURCE_POLICY_BOUNDS.items()
-    ):
-        return config
-    return RESOURCE_POLICY_DEFAULTS
+    try:
+        return validate_agent_admission_config(config)
+    except (TypeError, ValueError):
+        return RESOURCE_POLICY_DEFAULTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +181,31 @@ class ResourcePolicyLoadResult:
     revision: int | None
     updated_at: str | None
     loaded_at: str
+    claude_code_effort_level: str | None = None
+
+
+class ClaudeCodeRuntimePolicyStore:
+    """Public immutable replacement boundary for the effective global Runtime policy."""
+
+    def __init__(self, initial_result: ResourcePolicyLoadResult) -> None:
+        self._effort_level = (
+            initial_result.claude_code_effort_level
+            if initial_result.status == "applied"
+            else None
+        )
+
+    def replace(self, result: ResourcePolicyLoadResult) -> None:
+        if result.status != "applied":
+            raise ValueError("only an applied policy may replace Runtime config")
+        self._effort_level = result.claude_code_effort_level
+
+    def snapshot_env(self) -> dict[str, str]:
+        effort_level = self._effort_level
+        return (
+            {"CLAUDE_CODE_EFFORT_LEVEL": effort_level}
+            if effort_level is not None
+            else {}
+        )
 
 
 class ClaudeAgentResourcePolicyProvider:
@@ -183,7 +219,10 @@ class ClaudeAgentResourcePolicyProvider:
         connection: Any | None = None
         try:
             connection = self._db_factory()
-            if not claude_agent_resource_observer_capability_available(connection):
+            if (
+                not claude_agent_resource_observer_capability_available(connection)
+                or not claude_code_runtime_config_capability_available(connection)
+            ):
                 return self._fallback(fallback, "unavailable", loaded_at)
             row = connection.execute(
                 "SELECT value, updated_at FROM system_settings "
@@ -204,7 +243,7 @@ class ClaudeAgentResourcePolicyProvider:
         parsed = _parse_policy(_row_value(row, "value", 0))
         if parsed is None or updated_at is None:
             return self._fallback(fallback, "invalid", loaded_at)
-        config, revision = parsed
+        config, revision, effort_level = parsed
         return ResourcePolicyLoadResult(
             config=config,
             defaults=RESOURCE_POLICY_DEFAULTS,
@@ -212,6 +251,7 @@ class ClaudeAgentResourcePolicyProvider:
             revision=revision,
             updated_at=updated_at,
             loaded_at=loaded_at,
+            claude_code_effort_level=effort_level,
         )
 
     @staticmethod
@@ -238,7 +278,7 @@ class ClaudeAgentResourcePolicyRefresher:
         *,
         provider: ClaudeAgentResourcePolicyProvider,
         current_config: Callable[[], AgentAdmissionConfig],
-        apply_result: Callable[[ResourcePolicyLoadResult], None],
+        apply_result: Callable[[ResourcePolicyLoadResult, bool], None],
         initial_result: ResourcePolicyLoadResult,
         interval_seconds: float = RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS,
     ) -> None:
@@ -281,39 +321,46 @@ class ClaudeAgentResourcePolicyRefresher:
             except Exception:
                 pass
             raise
-        resolved = self._resolve_monotonic(result, fallback)
-        self._apply_result(resolved)
+        resolved, replace_required = self._resolve_monotonic(result, fallback)
+        self._apply_result(resolved, replace_required)
+        if resolved.status == "applied":
+            self._last_applied = resolved
         return resolved
 
     def _resolve_monotonic(
         self,
         result: ResourcePolicyLoadResult,
         fallback: AgentAdmissionConfig,
-    ) -> ResourcePolicyLoadResult:
+    ) -> tuple[ResourcePolicyLoadResult, bool]:
         previous = self._last_applied
         if result.status != "applied":
-            return self._retain_last_applied(result, previous)
+            return self._retain_last_applied(result, previous), False
         if previous is None:
-            self._last_applied = result
-            return result
+            return result, True
         assert result.revision is not None
         assert previous.revision is not None
         if result.revision > previous.revision:
-            self._last_applied = result
-            return result
-        if result.revision == previous.revision and result.config == previous.config:
-            self._last_applied = result
-            return result
-        return self._retain_last_applied(
-            ResourcePolicyLoadResult(
-                config=_bounded_fallback(fallback),
-                defaults=result.defaults,
-                status="invalid",
-                revision=None,
-                updated_at=None,
-                loaded_at=result.loaded_at,
+            return result, True
+        if (
+            result.revision == previous.revision
+            and result.config == previous.config
+            and result.claude_code_effort_level
+            == previous.claude_code_effort_level
+        ):
+            return result, False
+        return (
+            self._retain_last_applied(
+                ResourcePolicyLoadResult(
+                    config=_bounded_fallback(fallback),
+                    defaults=result.defaults,
+                    status="invalid",
+                    revision=None,
+                    updated_at=None,
+                    loaded_at=result.loaded_at,
+                ),
+                previous,
             ),
-            previous,
+            False,
         )
 
     @staticmethod
@@ -330,6 +377,7 @@ class ClaudeAgentResourcePolicyRefresher:
             revision=previous.revision,
             updated_at=previous.updated_at,
             loaded_at=result.loaded_at,
+            claude_code_effort_level=previous.claude_code_effort_level,
         )
 
     async def _run(self) -> None:
@@ -354,6 +402,8 @@ __all__ = [
     "RESOURCE_POLICY_REFRESH_INTERVAL_SECONDS",
     "RESOURCE_POLICY_REFRESH_INTERVAL_ENV",
     "RESOURCE_POLICY_SCHEMA_VERSION",
+    "CLAUDE_CODE_EFFORT_LEVELS",
+    "ClaudeCodeRuntimePolicyStore",
     "ResourcePolicyLoadResult",
     "ResourcePolicyStatus",
     "resource_policy_refresh_interval_from_env",

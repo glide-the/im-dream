@@ -5,7 +5,7 @@
 [Pos] No-DDL Dream boundary for shared PostgreSQL schema publication.
 [Sync] 2026-08-19: add the exact ClaudePlugin Remote Marketplace v1 contract hash.
 [Sync] 2026-08-25: add the exact Admin-published managed MCP Resources v1 capability check.
-[Sync] 2026-08-27: require and expose the exact Claude Agent resource Observer v1 contract.
+[Sync] 2026-08-28: require the Admin-owned Claude Code Runtime model/policy capability before consuming optional env projections.
 """
 
 from __future__ import annotations
@@ -39,6 +39,13 @@ CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION: Final = 1
 CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256: Final = (
     "db2ba80eb61a9515ba23000f8a615fb41f6ed5824bd306e8d0ca5fb8f1cc044e"
 )
+CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY: Final = (
+    "dream.claude-code-runtime-config.v1"
+)
+CLAUDE_CODE_RUNTIME_CONFIG_VERSION: Final = 1
+CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256: Final = (
+    "7b4d46bad9cfb340336a05aa9c9a2b70f5518622e5e2e94d47aac2ca76d63c1d"
+)
 REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     UNIFIED_DREAM_CAPABILITY: 1,
     "dream.workflow.thread-lookup.v1": 1,
@@ -47,10 +54,14 @@ REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: (
         CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION
     ),
+    CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY: CLAUDE_CODE_RUNTIME_CONFIG_VERSION,
 }
 _EXACT_RUNTIME_CONTRACTS: Final[Mapping[str, str]] = {
     CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: (
         CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256
+    ),
+    CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY: (
+        CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256
     ),
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -210,10 +221,41 @@ def claude_agent_resource_observer_capability_available(connection: Any) -> bool
     )
 
 
+def claude_code_runtime_config_capability_available(connection: Any) -> bool:
+    """Return whether the exact Admin-published Claude Code Runtime contract exists."""
+
+    try:
+        row = connection.execute(
+            "SELECT version, contract_sha256 "
+            "FROM drizzle.schema_capabilities WHERE capability = %s",
+            (CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY,),
+        ).fetchone()
+    except Exception:
+        return False
+    if row is None:
+        return False
+    if isinstance(row, Mapping):
+        version = row.get("version")
+        contract_sha256 = row.get("contract_sha256")
+    else:
+        try:
+            version, contract_sha256 = row[0], row[1]
+        except (IndexError, KeyError, TypeError):
+            return False
+    return (
+        isinstance(version, int)
+        and version == CLAUDE_CODE_RUNTIME_CONFIG_VERSION
+        and contract_sha256 == CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256
+    )
+
+
 __all__ = [
     "CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY",
     "CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256",
     "CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION",
+    "CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY",
+    "CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256",
+    "CLAUDE_CODE_RUNTIME_CONFIG_VERSION",
     "CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CAPABILITY",
     "CLAUDE_PLUGIN_REMOTE_MARKETPLACE_CONTRACT_SHA256",
     "DECK_CONTENT_VERSIONS_CAPABILITY",
@@ -228,5 +270,6 @@ __all__ = [
     "UNIFIED_DREAM_CAPABILITY",
     "inspect_schema_authority",
     "claude_agent_resource_observer_capability_available",
+    "claude_code_runtime_config_capability_available",
     "managed_mcp_resources_capability_available",
 ]

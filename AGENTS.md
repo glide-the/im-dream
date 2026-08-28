@@ -33,6 +33,25 @@
 - SQLite 代码只允许存在于明确命名的数据导入或测试 fixture 中，且不得成为运行时依赖。
 - 跨版本发布必须遵循 expand → Dream 双版本兼容 → backfill/validate → contract。
 
+## 通用产品设计原则
+
+1. 产品设计稿必须以“背景与问题、目标与边界、概念与规则”为基础结构。
+2. 产品规则必须对应真实业务约束，不得把任意技术常量包装成产品限制。
+3. 页面不得展示对用户决策没有帮助的技术说明、重复确认或实现细节。
+4. 除非操作不可逆或具有明显风险，否则不得增加确认弹窗。
+5. 配置型业务必须明确 default、desired、effective、revision 和状态转换。
+6. 实现和测试必须聚焦当前业务目标，不得增加 Chromium revision、重复环境初始化、远程环境、部署状态或其他与验收无关的检查。
+
+## Claude Agent 资源策略领域执行规则
+
+1. `default`、Admin `desired` 与 Dream `effective` 必须保持独立；只有 fresh snapshot 的 revision 与四项值全部匹配 desired，才能声明 applied。
+2. 四项资源值统一为 `1..9_007_199_254_740_991` 的正安全整数，且组合内存字节必须精确；这些是 JSON/TypeScript 技术边界，不是产品配额，不得使用 0 或其他 sentinel 关闭保护。
+3. Admin 只向 PostgreSQL 写 desired；Dream 只由独立 provider/composition root 读取并应用，不新增 Dream HTTP、消息队列、restart、kill 或 shell 控制通道。
+4. desired invalid、PostgreSQL/capability unavailable 或后台异常时保留 last-known-good effective 与 revision；后台同步失败不得传播到 Agent turn。
+5. 只有更高且合法的 revision 才替换配置并推进 LKG；同 revision/同值只刷新 diagnostics，同 revision/异值或 revision 回滚均为 invalid。
+6. 资源策略不得改变 admission 判断顺序、比较、资源算法或既有 lease，也不得改变 Runner、ThreadFactory、service、EventBus、SSE、turn/resume/cancel 语义；公开 replace 只影响后续 acquire。受控 Runtime 配置只能以 immutable server-owned snapshot 透传，不得在 turn 主路径查询 PostgreSQL。
+7. Claude Code Runtime 配置必须保持明确所有权：全局 effort 来自 resource-policy LKG，compact/context 来自最终选中模型；未设置即不注入。浏览器、用户 env、Deck、Plugin、workspace 与 ambient parent env 均不得覆盖这三个键。
+
 ## 工作区安全
 
 - 当前仓库可能同时包含用户和其他 Agent 的未提交改动；不得回退、覆盖或格式化无关文件。

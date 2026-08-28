@@ -2,7 +2,10 @@
 #         Linux cgroup v2 `/proc` data, and safe publisher health counters.
 # [Output] Provide an isolated sampler and the strict PostgreSQL resource snapshot JSON DTO.
 # [Pos] Read-only Claude Agent resource diagnostics node; it never affects admission or Agent execution.
-# [Sync] 2026-08-27: atomically record externally applied effective policy while failures retain last-known-good limits.
+# [Sync] 2026-08-28: enforce positive JSON-safe config/revision values and the exact
+#                    combined-memory byte boundary in every effective snapshot projection.
+# [Sync] 2026-08-28: project the last-known-good global Claude Code effort level
+#                    into effective snapshots and version hashes.
 
 """Safe process-local diagnostics for Claude Agent resource admission."""
 from __future__ import annotations
@@ -17,19 +20,31 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Literal
+from typing import Annotated, Literal
 
 from claude_agent.admission import (
+    AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
+    AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB,
+    AGENT_RESOURCE_MIB_IN_BYTES,
     AgentAdmissionConfig,
     AgentResourceSnapshot,
     read_agent_resource_snapshot,
+    validate_agent_admission_config,
 )
 from claude_agent.resource_observer import (
     ClaudeAgentResourceObserver,
     ObservedClaudeAgentAdmissionController,
 )
 from claude_agent.resource_policy import ResourcePolicyLoadResult, ResourcePolicyStatus
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, NonNegativeInt, PositiveInt
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeInt,
+    StrictInt,
+    model_validator,
+)
 
 _SAMPLE_INTERVAL_SECONDS = 5.0
 _SAMPLE_TIMEOUT_SECONDS = 1.0
@@ -337,23 +352,44 @@ class ClaudeAgentResourceSampler:
         )
 
 
+SafePositiveInt = Annotated[
+    StrictInt,
+    Field(ge=1, le=AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX),
+]
+
+
 class AdmissionConfigValues(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    max_concurrent_runs: PositiveInt
-    run_memory_budget_mib: NonNegativeInt
-    memory_reserve_mib: NonNegativeInt
-    retry_after_seconds: NonNegativeInt
-    required_headroom_bytes: NonNegativeInt
+    max_concurrent_runs: SafePositiveInt
+    run_memory_budget_mib: SafePositiveInt
+    memory_reserve_mib: SafePositiveInt
+    retry_after_seconds: SafePositiveInt
+    required_headroom_bytes: SafePositiveInt
+
+    @model_validator(mode="after")
+    def validate_memory_boundary(self) -> AdmissionConfigValues:
+        combined_mib = self.run_memory_budget_mib + self.memory_reserve_mib
+        if combined_mib > AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB:
+            raise ValueError("combined memory budget exceeds the exact byte boundary")
+        if self.required_headroom_bytes != combined_mib * AGENT_RESOURCE_MIB_IN_BYTES:
+            raise ValueError("required headroom bytes do not match memory policy")
+        return self
+
+
+class ClaudeCodeRuntimeConfigDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    effort_level: Literal["low", "medium", "high", "xhigh", "max"] | None
 
 
 class ResourceConfigDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
     defaults: AdmissionConfigValues
     effective: AdmissionConfigValues
+    claude_code: ClaudeCodeRuntimeConfigDTO
     effective_version: str = Field(min_length=1, max_length=128)
     loaded_at: AwareDatetime
     policy_status: ResourcePolicyStatus
-    policy_revision: PositiveInt | None
+    policy_revision: SafePositiveInt | None
     policy_updated_at: AwareDatetime | None
 
 
@@ -375,7 +411,7 @@ class ResourceTurnsDTO(BaseModel):
 class ResourceAdmissionDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
     active_runs: NonNegativeInt
-    max_concurrent_runs: PositiveInt
+    max_concurrent_runs: SafePositiveInt
     granted_total: NonNegativeInt
     capacity_denials_total: NonNegativeInt
     memory_pressure_denials_total: NonNegativeInt
@@ -410,7 +446,7 @@ class ResourceMemoryDTO(BaseModel):
     slab_reclaimable_bytes: NonNegativeInt | None
     cgroup_reclaimable_bytes: NonNegativeInt | None
     cgroup_effective_headroom_bytes: NonNegativeInt | None
-    required_headroom_bytes: NonNegativeInt
+    required_headroom_bytes: SafePositiveInt
     events: CgroupMemoryEventsDTO
 
 
@@ -444,6 +480,7 @@ class ClaudeAgentResourceDiagnosticsDTO(BaseModel):
 
 
 def _config_values(config: AgentAdmissionConfig) -> AdmissionConfigValues:
+    validate_agent_admission_config(config)
     return AdmissionConfigValues(
         max_concurrent_runs=config.max_concurrent_runs,
         run_memory_budget_mib=config.run_memory_budget_mib,
@@ -453,9 +490,15 @@ def _config_values(config: AgentAdmissionConfig) -> AdmissionConfigValues:
     )
 
 
-def _effective_config_version(config: AgentAdmissionConfig) -> str:
+def _effective_config_version(
+    config: AgentAdmissionConfig,
+    claude_code_effort_level: str | None,
+) -> str:
     encoded = json.dumps(
-        _config_values(config).model_dump(),
+        {
+            "admission": _config_values(config).model_dump(),
+            "claude_code": {"effort_level": claude_code_effort_level},
+        },
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -482,7 +525,10 @@ class ClaudeAgentResourceDiagnostics:
         self._policy_state = _ResourcePolicyState(
             policy=policy,
             effective_config=effective_config,
-            effective_version=_effective_config_version(effective_config),
+            effective_version=_effective_config_version(
+                effective_config,
+                policy.claude_code_effort_level,
+            ),
         )
         self._pipeline_snapshot = pipeline_snapshot
 
@@ -506,12 +552,18 @@ class ClaudeAgentResourceDiagnostics:
                     revision=previous_policy.revision,
                     updated_at=previous_policy.updated_at,
                     loaded_at=policy.loaded_at,
+                    claude_code_effort_level=(
+                        previous_policy.claude_code_effort_level
+                    ),
                 )
                 effective_config = self._policy_state.effective_config
             self._policy_state = _ResourcePolicyState(
                 policy=policy,
                 effective_config=effective_config,
-                effective_version=_effective_config_version(effective_config),
+                effective_version=_effective_config_version(
+                    effective_config,
+                    policy.claude_code_effort_level,
+                ),
             )
 
     def snapshot(self) -> ClaudeAgentResourceDiagnosticsDTO:
@@ -540,6 +592,9 @@ class ClaudeAgentResourceDiagnostics:
             config=ResourceConfigDTO(
                 defaults=_config_values(policy.defaults),
                 effective=_config_values(effective_config),
+                claude_code=ClaudeCodeRuntimeConfigDTO(
+                    effort_level=policy.claude_code_effort_level,
+                ),
                 effective_version=policy_state.effective_version,
                 loaded_at=policy.loaded_at,
                 policy_status=policy.status,

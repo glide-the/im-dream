@@ -1,7 +1,7 @@
 # [Input] Admin Gateway catalog responses and saved Dream system config.
 # [Output] Verify server-owned explicit/default model selection and stale-state denial.
 # [Pos] Admin Gateway model-selection contract test in backend/tests
-# [Sync] 2026-08-14: prove users without a saved alias use Admin's callable default.
+# [Sync] 2026-08-28: prove selection retains server-only Claude Code Runtime metadata.
 
 from __future__ import annotations
 
@@ -9,10 +9,19 @@ import pytest
 
 from backend.services.admin_gateway.inference import GatewayInferenceError
 from backend.services.admin_gateway.models import GatewayModel, GatewayModelCatalog
-from backend.services.admin_gateway.selection import resolve_platform_model_alias
+from backend.services.admin_gateway.selection import (
+    resolve_platform_model,
+    resolve_platform_model_alias,
+)
 
 
-def _model(alias: str, *, callable: bool = True) -> GatewayModel:
+def _model(
+    alias: str,
+    *,
+    callable: bool = True,
+    auto_compact_window: int | None = None,
+    max_context_tokens: int | None = None,
+) -> GatewayModel:
     return GatewayModel(
         model_alias=alias,
         display_name=alias,
@@ -25,6 +34,8 @@ def _model(alias: str, *, callable: bool = True) -> GatewayModel:
         availability="included" if callable else "maintenance",
         required_plan_code="free" if callable else None,
         upgrade_hint=None,
+        claude_code_auto_compact_window=auto_compact_window,
+        claude_code_max_context_tokens=max_context_tokens,
     )
 
 
@@ -46,6 +57,28 @@ def test_saved_callable_alias_is_the_server_selected_model() -> None:
         system_config_reader=lambda _user_id: {"model": "dream-balanced"},
     )
     assert result == "dream-balanced"
+
+
+def test_full_selection_retains_runtime_settings_without_public_alias_changes() -> None:
+    selected = resolve_platform_model(
+        7,
+        None,
+        catalog_client_factory=lambda _user_id: _CatalogClient(
+            GatewayModelCatalog((
+                _model(
+                    "dream-balanced",
+                    auto_compact_window=262_144,
+                    max_context_tokens=262_144,
+                ),
+            ), "dream-balanced")
+        ),
+        system_config_reader=lambda _user_id: {},
+    )
+    assert selected.model_alias == "dream-balanced"
+    assert selected.claude_code_runtime_env() == {
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+    }
 
 
 def test_no_saved_alias_uses_admin_callable_default() -> None:
