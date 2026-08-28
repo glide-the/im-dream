@@ -252,6 +252,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 5. **Thread-local Runtime files.** Claude temporary files belong under the validated Thread workspace `.claude-tmp`; do not widen access to `/tmp` or the user's real Claude home.
 6. **No service-wide cleanup.** Tests may stop only processes and temporary resources created by that test run.
 7. **Published versions are immutable.** Fix a bad Runtime with a forward release or an explicit reviewed rollback; do not overwrite or unpublish an accepted version as normal rollback.
+8. **Model output capability is server-owned.** Admin's selected model `maxOutputTokens` is projected to the Runtime; browser settings, user env, workspace files, and Gateway body rewriting must not replace it.
 
 ## Troubleshooting
 
@@ -278,6 +279,10 @@ Start the Admin supervisor, verify `../ink-admin-memory/.env.local`, and run Adm
 ### No callable model
 
 Configure an enabled, priced model alias and Provider credential in Admin, then run the local Gateway provisioning command. Dream accepts platform aliases, not browser-supplied Provider IDs or keys.
+
+### A configured model still sends `max_tokens: 32000`
+
+First confirm the running Runtime version and inspect the Admin catalog's `maxOutputTokens`. An opaque Gateway alias cannot be safely classified from its name, so Dream must project the authenticated catalog value as `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`. The CLI uses that value as the model default/upper limit and keeps `CLAUDE_CODE_MAX_OUTPUT_TOKENS` only as a bounded standalone override. If the catalog value is absent, unknown aliases intentionally retain the upstream-compatible 32,000/64,000 fallback; do not fix this by hard-coding a model ID or rewriting the Gateway request body.
 
 ## Documentation and contribution rules
 

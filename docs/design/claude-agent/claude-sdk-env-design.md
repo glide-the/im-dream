@@ -1,7 +1,7 @@
 <!-- [输入] Dream SDK options、Runtime resolver、thread Workspace/TMPDIR、用户 SDK 环境和启动资格门。 -->
 <!-- [输出] 定义 Claude SDK 子进程环境、config home、临时根、Runtime 选择与回滚合同。 -->
 <!-- [定位] Claude Agent SDK 环境与进程启动设计真相源。 -->
-<!-- [同步] 2026-08-28：记录 SDK 0.2.144、Runtime 0.1.2 正式 registry 配对、请求参数修复与 provider-free fresh install；standalone 不依赖 ambient Bun。 -->
+<!-- [同步] 2026-08-28：补充认证模型 max-output capability 到 opaque Runtime alias 的投影、所有权与失败规则。 -->
 <!-- [同步] 2026-08-25：CLI resolver 仅服务 Agent turn；MCP Resources 管理面改为 Dream PostgreSQL 与标准 MCP SDK。 -->
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
@@ -485,3 +485,21 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 3. 进程级强制刷新可调 `factory.aclose()` → 重新建 Factory，配合滚动重启策略生效。
 
 > Runner 实例本身不缓存 SDK env 解析结果；`apply_project_sdk_runtime_options` 在每次 `runner.run_streaming` 调用时重读 `backend/.env` 并读取当前进程环境，因此享元复用 `state.runner` 不会冻结 helper 结果。若当前进程环境中已有同名 key，则仍按进程环境优先；平台 env / Secret Manager 变更需要服务重启。`init_workspace` 模板刷新仍受享元 `state.cwd` 影响，需要按上面三种方式之一兜底。
+
+## 13. 最终模型 max-output capability
+
+### 13.1 背景与边界
+
+Admin 的 `ai_models.max_output_tokens` 已经是 Gateway 公开模型能力，但 Claude Code 对无法识别的第三方 alias 会使用 unknown 32,000/64,000。Dream 不新增 schema，也不让 Gateway 改写 body；它在认证目录选出最终 `GatewayModel` 后，把非空正整数投影成 vendor-scoped `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`。
+
+### 13.2 所有权与失败规则
+
+- 浏览器、用户 env、Deck、Plugin、workspace 和 ambient parent env 不能提供或覆盖该 capability。
+- composition 启动与 runner 最终 overlay 都清除 vendor capability 及官方 `CLAUDE_CODE_MAX_OUTPUT_TOKENS`；随后只注入认证目录值。
+- null 表示未配置并完全省略；0、负数、非整数和 int32 越界由目录合同或 SDK env 合同 fail closed。
+- Runtime 将 capability 作为 opaque alias 的 default/upper limit；standalone caller 的官方 output override 可以调低但不能超过 capability。
+- 首轮、Tool Use、resume、retry/外层重提和 compaction 后继续请求仍复用 CLI 唯一 Messages builder；不改变 stream、SSE 或 Agent 状态机。
+
+### 13.3 验收与回滚
+
+Provider-free focused tests 必须同时证明目录投影、parent/user scrub、非法值零请求失败、服务 snapshot 合并，以及 compiled CLI 最终 HTTP JSON。回滚只通过 Runtime/Dream 前向版本恢复上一策略；不修改模型记录、不覆盖 npm 版本、不重写 Gateway 请求。

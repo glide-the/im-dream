@@ -252,6 +252,7 @@ python3 scripts/verify_claude_registry_release.py \
 5. **Thread 自有 Runtime 文件。** Claude 临时文件必须位于经过校验的 Thread workspace `.claude-tmp`，禁止放宽到 `/tmp` 或用户真实 Claude home。
 6. **禁止全局清理服务。** 测试只能停止和清理由本轮测试创建的进程与临时资源。
 7. **已发布版本不可覆盖。** 错误 Runtime 必须通过前向版本修复或显式评审回滚，正常回滚不得覆盖或 unpublish 已验收版本。
+8. **模型输出能力由服务端所有。** Admin 最终选中模型的 `maxOutputTokens` 必须投影到 Runtime；浏览器设置、用户环境、workspace 文件和 Gateway body 改写均不得替代它。
 
 ## 故障排查
 
@@ -278,6 +279,10 @@ ink-claude-code-dream --version
 ### 没有可调用模型
 
 在 Admin 中配置已启用、有定价的模型 alias 和 Provider 凭据，然后执行本机 Gateway provision。Dream 只接受平台 alias，不接受浏览器传入的 Provider ID 或 Key。
+
+### 模型已配置但仍发送 `max_tokens: 32000`
+
+先确认实际运行的 Runtime 版本，并检查 Admin 模型目录中的 `maxOutputTokens`。opaque Gateway alias 无法通过名称安全识别，因此 Dream 必须把认证目录值投影为 `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`。CLI 使用它作为模型 default/upper limit，`CLAUDE_CODE_MAX_OUTPUT_TOKENS` 只保留为受 capability 裁剪的 standalone override。目录值未设置时，unknown alias 会有意保留上游兼容的 32,000/64,000 fallback；禁止通过硬编码模型 ID 或改写 Gateway 请求体修复。
 
 ## 文档与贡献规则
 

@@ -3,6 +3,7 @@
 # [Output] Register /api/claude-agent* endpoints.
 # [Pos] claude-agent route node in backend/routers
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
+# [Sync] 2026-08-28: preserve validated model metadata across backend/services dual import identities.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
 # [Sync] 2026-05-27: ClaudeAgentRequestBody.tool_choice uses AliasChoices("tool_choice","toolChoice") so frontend camelCase is accepted.
 # [Sync] 2026-05-28: remove planning_mode field and prompt_optimizer integration (unrelated code).
@@ -587,14 +588,18 @@ async def claude_agent_stream(
             )
 
     platform_model = await _resolve_platform_model_selection(user_id, body.model)
-    if isinstance(platform_model, GatewayModel):
-        platform_model_alias = platform_model.model_alias
-        model_runtime_env = platform_model.claude_code_runtime_env()
-    else:
+    if isinstance(platform_model, str):
         # Compatibility for isolated route tests/custom injection points that
         # intentionally resolve only an alias.
         platform_model_alias = platform_model
         model_runtime_env = {}
+    else:
+        # The repository supports both ``services`` and ``backend.services``
+        # import roots. The same validated frozen dataclass can therefore have
+        # two Python class identities in tests; narrow by the only compatibility
+        # variant (str) instead of dropping authenticated Runtime metadata.
+        platform_model_alias = platform_model.model_alias
+        model_runtime_env = platform_model.claude_code_runtime_env()
 
     message_parts = list(_msg_dict.get("parts") or []) if _msg_dict else None
 

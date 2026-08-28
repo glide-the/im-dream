@@ -5,6 +5,7 @@
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-14: combine system_config assembly coverage with tool_input_delta
 #                    -> tool-input-delta SSE forwarding coverage.
+# [Sync] 2026-08-28: carry selected model max-output capability into the immutable Runtime env snapshot.
 # [Sync] 2026-06-14: cover Edit Session event publication after successful
 #                    editor MCP write tool results.
 # [Sync] 2026-06-17: cover SSE error formatting that includes exception notes
@@ -338,6 +339,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(execution.run_options.model, "dream-balanced")
         self.assertEqual(execution.run_options.server_runtime_env, {
+            "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "8192",
             "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
             "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
             "CLAUDE_CODE_EFFORT_LEVEL": "high",

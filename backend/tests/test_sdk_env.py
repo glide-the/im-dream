@@ -6,6 +6,7 @@
 # [Sync] 2026-07-26: initial — cli_path resolution coverage for the Docker
 #                    apply-seccomp-patched npm CLI pinning (claude-sdk-env-design).
 # [Sync] 2026-08-20: cover the server-owned 1–64 MiB SDK stdout message buffer policy.
+# [Sync] 2026-08-28: cover authenticated model max-output projection and ambient output override scrubbing.
 # [Sync] 2026-08-26: require ink-claude-dream-agent-sdk 0.2.144 and default
 #                    ink-claude-code-dream; official CLI is an absolute
 #                    CLAUDE_CODE_CLI_PATH-only rollback and missing runtime fails closed.
@@ -413,6 +414,8 @@ class TestClaudeCodeRuntimeEnv(unittest.TestCase):
             "CLAUDE_CODE_EFFORT_LEVEL": "low",
             "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "10",
             "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "20",
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "777",
+            "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "30",
             "KEEP": "yes",
         })
         sdk_env_module.apply_server_claude_code_runtime_env_to_options(
@@ -421,12 +424,14 @@ class TestClaudeCodeRuntimeEnv(unittest.TestCase):
                 "CLAUDE_CODE_EFFORT_LEVEL": "high",
                 "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
                 "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+                "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "384000",
             },
         )
         self.assertEqual(options.env, {
             "CLAUDE_CODE_EFFORT_LEVEL": "high",
             "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
             "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+            "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "384000",
             "KEEP": "yes",
         })
 
@@ -435,6 +440,8 @@ class TestClaudeCodeRuntimeEnv(unittest.TestCase):
             "CLAUDE_CODE_EFFORT_LEVEL": "max",
             "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1",
             "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1",
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "2",
+            "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "3",
             "KEEP": "yes",
         }
         sdk_env_module.clear_server_claude_code_runtime_parent_env(parent)
@@ -452,6 +459,9 @@ class TestClaudeCodeRuntimeEnv(unittest.TestCase):
             {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": 262144},
             {"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "2147483648"},
             {"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144.0"},
+            {"INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "0"},
+            {"INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "384000.0"},
+            {"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "384000"},
             {"CLAUDE_CODE_UNKNOWN": "1"},
         )
         for runtime_env in invalid:
