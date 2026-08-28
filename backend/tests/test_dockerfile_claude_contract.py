@@ -4,7 +4,7 @@
 #          pinned without SDK overlap.
 # [Pos] Docker/dependency release contract tests.
 # [Sync] 2026-08-26: install custom SDK 0.2.144 from PyPI with an exact
-#        hash-locked export, install public Runtime selector 0.1.1 by default,
+#        hash-locked export, install public Runtime selector 0.1.2 by default,
 #        and retain the Docker-only official rollback artifact 2.1.241.
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SDK_VERSION = "0.2.144"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
-RUNTIME_VERSION = "0.1.1"
+RUNTIME_VERSION = "0.1.2"
 
 
 def _normalized_distribution_name(value: str) -> str:
