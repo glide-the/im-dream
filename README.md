@@ -59,10 +59,10 @@ Dream treats the Python SDK and npm Runtime as one compatibility pair even thoug
 | Python | `>=3.12` |
 | Node.js | `>=22 <25` for the Runtime selector |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.2` |
+| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.3` |
 | Runtime CLI compatibility output | `2.1.241 (Claude Code)` |
 
-Important: `uv sync` manages the Python environment only. It installs the Python SDK but does **not** install or upgrade the npm Runtime. A source checkout that expects Runtime `0.1.2` will reject a `0.1.1` executable even when all capability flags are otherwise valid.
+Important: `uv sync` manages the Python environment only. It installs the Python SDK but does **not** install or upgrade the npm Runtime. A source checkout that expects Runtime `0.1.3` will reject a `0.1.2` executable even when all capability flags are otherwise valid.
 
 ## Requirements
 
@@ -144,7 +144,7 @@ uv run --with pytest==9.1.1 pytest -q
 Install the public selector package separately because it is an npm/native artifact:
 
 ```bash
-npm install --global @glide-the/ink-claude-code-dream@0.1.2
+npm install --global @glide-the/ink-claude-code-dream@0.1.3
 export PATH="$(npm prefix --global)/bin:$PATH"
 command -v ink-claude-code-dream
 ink-claude-code-dream --version
@@ -163,7 +163,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-This command must exit 0 and print the resolved `0.1.2` executable path. If `command -v` still points to an older `~/.local/bin/ink-claude-code-dream`, reorder `PATH` or replace that stale installation before starting Dream. A running process keeps the `PATH` it inherited; restart only the process you own after changing it.
+This command must exit 0 and print the resolved `0.1.3` executable path. If `command -v` still points to an older `~/.local/bin/ink-claude-code-dream`, reorder `PATH` or replace that stale installation before starting Dream. A running process keeps the `PATH` it inherited; restart only the process you own after changing it.
 
 Do not use `CLAUDE_CODE_CLI_PATH` to bypass the normal manifest-qualified Runtime path. That variable is reserved for an explicit, reviewed absolute-path rollback.
 
@@ -237,7 +237,7 @@ npm run build
 cd ..
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.144 \
-  --runtime-version 0.1.2 \
+  --runtime-version 0.1.3 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -266,7 +266,7 @@ readlink "$(command -v ink-claude-code-dream)"
 ink-claude-code-dream --version
 ```
 
-For the current `develop` branch, the manifest must contain Runtime `0.1.2`. Capability flags may all be `true` while the request still fails because the actual Runtime version is stale.
+For the current `develop` branch, the manifest must contain Runtime `0.1.3`. Capability flags may all be `true` while the request still fails because the actual Runtime version is stale.
 
 ### `uv sync` removed pytest
 

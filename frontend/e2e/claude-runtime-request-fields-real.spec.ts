@@ -1,7 +1,7 @@
 // [Input] A named existing actor, the normal Dream/Admin/Gateway/PostgreSQL topology, and the exact Runtime candidate or release under acceptance.
 // [Output] Visible two-turn same-Thread Chat/resume proof plus content-free Gateway evidence for max_tokens, output_config.effort, stream, and header redaction.
 // [Pos] Opt-in real-business Runtime request-contract acceptance; it preserves the created Thread and never prints request content or credentials.
-// [Sync] 2026-08-28: verify Runtime 0.1.2 projects bounded output controls at the final Gateway capture boundary.
+// [Sync] 2026-08-28: require the authenticated model capability to survive through Runtime 0.1.3 at the final Gateway capture boundary.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -16,6 +16,10 @@ const API_BASE = process.env.INK_REAL_CLAUDE_REQUEST_FIELDS_API_BASE
   ?? 'http://127.0.0.1:8765';
 const ACTOR_EMAIL = process.env.INK_REAL_CLAUDE_REQUEST_FIELDS_EMAIL ?? '';
 const EXPECTED_EFFORT = process.env.INK_REAL_CLAUDE_REQUEST_FIELDS_EFFORT ?? '';
+const EXPECTED_MAX_TOKENS = Number.parseInt(
+  process.env.INK_REAL_CLAUDE_REQUEST_FIELDS_MAX_TOKENS ?? '',
+  10,
+);
 const BACKEND_DIR = resolve(process.cwd(), '../backend');
 const BACKEND_PYTHON = resolve(BACKEND_DIR, '.venv/bin/python');
 
@@ -50,8 +54,9 @@ type GatewayEvidence = {
 };
 
 function requireInputs(): void {
-  if (!ACTOR_EMAIL || !EXPECTED_EFFORT) {
-    throw new Error('Actor email and expected Runtime effort are required.');
+  if (!ACTOR_EMAIL || !EXPECTED_EFFORT || !Number.isSafeInteger(EXPECTED_MAX_TOKENS)
+    || EXPECTED_MAX_TOKENS <= 0) {
+    throw new Error('Actor email, expected Runtime effort, and expected model max tokens are required.');
   }
   if (!['low', 'medium', 'high', 'xhigh', 'max'].includes(EXPECTED_EFFORT)) {
     throw new Error('Expected Runtime effort is invalid.');
@@ -252,8 +257,7 @@ test('Runtime under acceptance emits bounded output controls in first and resume
     timeout: 30_000,
     intervals: [250, 500, 1_000, 2_000],
   }).toBeGreaterThanOrEqual(2);
-  expect(evidence.every((request) => Number.isSafeInteger(request.maxTokens)
-    && request.maxTokens > 4_096)).toBe(true);
+  expect(evidence.every((request) => request.maxTokens === EXPECTED_MAX_TOKENS)).toBe(true);
   expect(evidence.every((request) => request.effort === EXPECTED_EFFORT)).toBe(true);
   expect(evidence.every((request) => request.stream === true)).toBe(true);
   expect(evidence.every((request) => request.authorization === '[REDACTED]')).toBe(true);

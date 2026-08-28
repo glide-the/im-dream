@@ -21,7 +21,7 @@
 # [Sync] 2026-08-26: install ink-claude-dream-agent-sdk 0.2.144 from PyPI
 #        through the uv-exported version/hash lock; verify distribution/import
 #        ownership at build time. Install the exact public
-#        ink-claude-code-dream 0.1.2
+#        ink-claude-code-dream 0.1.3
 #        selector as the default production-qualified Runtime, then install
 #        official Claude Code 2.1.241 after safely removing only the selector's
 #        conflicting `claude` alias, so /usr/local/bin/claude remains the
@@ -55,7 +55,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - bash curl jq git ripgrep: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 ARG CLAUDE_CODE_VERSION=2.1.241
-ARG INK_CLAUDE_CODE_VERSION=0.1.2
+ARG INK_CLAUDE_CODE_VERSION=0.1.3
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i \
@@ -97,7 +97,7 @@ RUN set -eux; \
 # default remains `ink-claude-code-dream`, while `/usr/local/bin/claude` is the
 # explicit official rollback selected only through CLAUDE_CODE_CLI_PATH.
 RUN set -eux; \
-    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.2"; \
+    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.3"; \
     test "${CLAUDE_CODE_VERSION}" = "2.1.241"; \
     npm install -g \
         --registry="${INK_CLAUDE_NPM_REGISTRY}" \

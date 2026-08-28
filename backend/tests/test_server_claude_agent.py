@@ -18,7 +18,7 @@
 #                    same-revision diagnostics-only refresh, and lifecycle ordering.
 # [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
 #                    the Claude Agent factory starts.
-# [Sync] 2026-08-28: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.2.
+# [Sync] 2026-08-28: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.3.
 # [Sync] 2026-08-24: cover credential-free SDK/CLI startup identity logging.
 # [Sync] 2026-08-25: align MCP auth route registration with database server identifiers.
 # [Sync] 2026-08-27: cover PostgreSQL resource sampler/sink/publisher lifecycle ordering.
@@ -1903,7 +1903,7 @@ class TestFactoryLifecycle(unittest.TestCase):
             {
                 "cli_mode": "dream_runtime",
                 "cli_path": "/runtime/bin/ink-claude-code-dream",
-                "cli_runtime_release": "0.1.2",
+                "cli_runtime_release": "0.1.3",
                 "sdk_cli_compatibility_version": "2.1.241",
                 "sdk_distribution": "ink-claude-dream-agent-sdk",
                 "sdk_import": "claude_agent_sdk",
