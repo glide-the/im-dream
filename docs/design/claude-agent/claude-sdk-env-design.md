@@ -1,7 +1,7 @@
 <!-- [输入] Dream SDK options、Runtime resolver、thread Workspace/TMPDIR、用户 SDK 环境和启动资格门。 -->
 <!-- [输出] 定义 Claude SDK 子进程环境、config home、临时根、Runtime 选择与回滚合同。 -->
 <!-- [定位] Claude Agent SDK 环境与进程启动设计真相源。 -->
-<!-- [同步] 2026-08-28：记录 SDK 0.2.144、Runtime 0.1.2 正式 registry 配对、请求参数修复与 provider-free fresh install；standalone 不依赖 ambient Bun。 -->
+<!-- [同步] 2026-08-28：补充认证模型 max-output capability 到 opaque Runtime alias 的投影、所有权与失败规则。 -->
 <!-- [同步] 2026-08-25：CLI resolver 仅服务 Agent turn；MCP Resources 管理面改为 Dream PostgreSQL 与标准 MCP SDK。 -->
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
@@ -14,16 +14,16 @@
 > final client adapter 重复合并时保持该绑定，spawn 前创建并校验 `0700`。
 > **[同步] 2026-08-26**：生产入口要求 `ink-claude-dream-agent-sdk==0.2.144`
 > 唯一提供 `claude_agent_sdk`，并把默认 CLI 收敛为经 production manifest
-> 门禁的 `ink-claude-code-dream==0.1.2`。`CLAUDE_CODE_CLI_PATH` 是唯一显式
+> 门禁的 `ink-claude-code-dream==0.1.3`。`CLAUDE_CODE_CLI_PATH` 是唯一显式
 > 绝对覆盖与官方 CLI 回滚入口；不再回退 ambient `claude` 或 SDK bundled CLI。
 > **[同步] 2026-08-24**：Python 依赖文件把
 > `ink-claude-dream-agent-sdk==0.2.144` 固定到正式 PyPI 精确版本，
 > `uv.lock`/`requirements.txt` 记录 wheel 与 sdist SHA-256，Docker 使用
 > `--require-hashes`，并排除 official `claude-agent-sdk`。源码身份仍由不可变
 > `v0.2.144@fa10c9ef04ec006d9dcf0a88b1b35dab4ef4723b` 绑定。Docker 验证 metadata/import 所有权，只保留显式官方
-> CLI 回滚物。Runtime release `main@c3e4d4e` 已公开发布五个 `0.1.2` npm 包；registry 空目录安装通过生产资格门的 clean-room
-> `@glide-the/ink-claude-code-dream@0.1.2` selector 与 darwin-arm64 平台包，
-> 默认 PATH 解析、FastAPI 启动和真实 Comfy MCP 两轮 resume 均通过。
+> CLI 回滚物。Runtime release `main@9339c9a` 已公开发布五个 `0.1.3` npm 包；registry 空目录安装通过生产资格门的 clean-room
+> `@glide-the/ink-claude-code-dream@0.1.3` selector 与 darwin-arm64 平台包，
+> 默认 PATH 解析、FastAPI 启动和真实 opaque alias 两轮 resume 均通过。
 
 # Claude SDK 子进程环境与 Runtime 解析设计
 
@@ -239,16 +239,15 @@ MCP stdio/HTTP/OAuth/management identity、plugins 和 cancel。只透明委托�
 SHA-256 锁原子切换到自有 distribution；源码发布身份为不可变
 `v0.2.144@fa10c9ef04ec006d9dcf0a88b1b35dab4ef4723b`，安装环境不再带 Git `direct_url.json`。
 
-当前 Dream 源码固定的 Runtime 是 clean-room `@glide-the/ink-claude-code-dream@0.1.2`：
+当前 Dream 源码固定的 Runtime 是 clean-room `@glide-the/ink-claude-code-dream@0.1.3`：
 源码只来自 Runtime 仓库自有 MIT `src/cleanroom/` 和兼容许可证依赖，
 Dream-facing CLI 兼容输出为 `2.1.241 (Claude Code)`。该字符串只表示 Dream 所需
 接口资格，不声明官方全产品等价。Bun `1.4.0` 在构建阶段生成四个平台 standalone，
-运行时 selector 不依赖独立 Bun 或 ambient Bun。真实业务验收使用的本地 qualification
-selector/darwin-arm64 registry tgz SHA 分别为 `0d6ed537…e24ddc3`、
-`2c39bf81…aa8eeb2`，executable SHA 为 `44eb30d4…d3fef54`；public registry fresh
-install 的两个 CLI alias、manifest SDK `0.2.144`/Runtime `0.1.2` 配对和零 `.map` 均通过。
+运行时 selector 不依赖独立 Bun 或 ambient Bun。真实业务 v2 回执绑定 source tree
+`c8d0a7ec…c87cb9` 与 darwin-arm64 executable `9b109064…9d1d4`；public registry fresh
+install 的两个 CLI alias、manifest SDK `0.2.144`/Runtime `0.1.3` 配对和零 `.map` 均通过。
 
-当前镜像从 npm 官方 registry 精确安装 clean-room selector `0.1.2`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中执行 CLI version、manifest 与 Dream resolver 门。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。本机现有用户服务仍执行 `0.1.1` 软链接，本轮不重启或热切换；下次正常构建/启动使用源码固定的 `0.1.2`。
+当前镜像从 npm 官方 registry 精确安装 clean-room selector `0.1.3`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中执行 CLI version、manifest 与 Dream resolver 门。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。本机用户服务已按默认 resolver 重启到公开 `0.1.3`，启动日志和 `/api/health` 均通过。
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 
@@ -485,3 +484,21 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 3. 进程级强制刷新可调 `factory.aclose()` → 重新建 Factory，配合滚动重启策略生效。
 
 > Runner 实例本身不缓存 SDK env 解析结果；`apply_project_sdk_runtime_options` 在每次 `runner.run_streaming` 调用时重读 `backend/.env` 并读取当前进程环境，因此享元复用 `state.runner` 不会冻结 helper 结果。若当前进程环境中已有同名 key，则仍按进程环境优先；平台 env / Secret Manager 变更需要服务重启。`init_workspace` 模板刷新仍受享元 `state.cwd` 影响，需要按上面三种方式之一兜底。
+
+## 13. 最终模型 max-output capability
+
+### 13.1 背景与边界
+
+Admin 的 `ai_models.max_output_tokens` 已经是 Gateway 公开模型能力，但 Claude Code 对无法识别的第三方 alias 会使用 unknown 32,000/64,000。Dream 不新增 schema，也不让 Gateway 改写 body；它在认证目录选出最终 `GatewayModel` 后，把非空正整数投影成 vendor-scoped `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`。
+
+### 13.2 所有权与失败规则
+
+- 浏览器、用户 env、Deck、Plugin、workspace 和 ambient parent env 不能提供或覆盖该 capability。
+- composition 启动与 runner 最终 overlay 都清除 vendor capability 及官方 `CLAUDE_CODE_MAX_OUTPUT_TOKENS`；随后只注入认证目录值。
+- null 表示未配置并完全省略；0、负数、非整数和 int32 越界由目录合同或 SDK env 合同 fail closed。
+- Runtime 将 capability 作为 opaque alias 的 default/upper limit；standalone caller 的官方 output override 可以调低但不能超过 capability。
+- 首轮、Tool Use、resume、retry/外层重提和 compaction 后继续请求仍复用 CLI 唯一 Messages builder；不改变 stream、SSE 或 Agent 状态机。
+
+### 13.3 验收与回滚
+
+Provider-free focused tests 必须同时证明目录投影、parent/user scrub、非法值零请求失败、服务 snapshot 合并，以及 compiled CLI 最终 HTTP JSON。回滚只通过 Runtime/Dream 前向版本恢复上一策略；不修改模型记录、不覆盖 npm 版本、不重写 Gateway 请求。

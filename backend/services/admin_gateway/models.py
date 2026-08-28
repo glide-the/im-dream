@@ -1,7 +1,7 @@
 # [Input] Consume the authenticated Admin Gateway model catalog.
 # [Output] Provide strict server-only model capabilities and Claude Code Runtime settings.
 # [Pos] Admin Gateway model contract boundary; runtime-only fields never enter public Dream DTOs.
-# [Sync] 2026-08-28: parse nullable positive Claude Code compact/context windows and omit unset env.
+# [Sync] 2026-08-28: project positive model max-output capability with compact/context into the server-owned Runtime env.
 
 """Strict server-only client for the Admin public Gateway model catalog."""
 
@@ -62,6 +62,10 @@ class GatewayModel:
         """Project configured model fields to the exact server-owned env keys."""
 
         env: dict[str, str] = {}
+        if self.max_output_tokens is not None:
+            env["INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS"] = str(
+                self.max_output_tokens
+            )
         if self.claude_code_auto_compact_window is not None:
             env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(
                 self.claude_code_auto_compact_window
@@ -165,7 +169,7 @@ def _parse_model(raw: Any) -> GatewayModel:
         protocol=protocol,
         capabilities=dict(capabilities),
         context_window=_optional_non_negative_int(raw.get("context_window")),
-        max_output_tokens=_optional_non_negative_int(raw.get("max_output_tokens")),
+        max_output_tokens=_optional_positive_runtime_int(raw.get("max_output_tokens")),
         claude_code_auto_compact_window=_optional_positive_runtime_int(
             raw.get("claude_code_auto_compact_window")
         ),

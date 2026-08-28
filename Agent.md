@@ -1,7 +1,7 @@
 <!-- [Input] Repository governance, README contract, package-manager boundaries, and the Dream SDK/Runtime compatibility model. -->
 <!-- [Output] Mandatory maintenance rules for humans and coding agents working in this repository. -->
 <!-- [Pos] Root operational rulebook; product-level Agent interaction behavior remains in docs/Agent.md. -->
-<!-- [Sync] 2026-08-28: define README language parity, usage-document requirements, and atomic SDK/Runtime version-management rules. -->
+<!-- [Sync] 2026-08-28: define README parity, atomic Runtime versions, and authenticated model-capability ownership. -->
 
 # Repository Agent Rules
 
@@ -89,3 +89,9 @@ Before completing a relevant change:
 4. For SDK/Runtime changes, run manifest resolver tests and provider-free registry acceptance.
 5. Update affected file headers and `.folder.md` inventories.
 6. Report exact commands, exit codes, skipped tests, live-service state, Git branch/commit/PR state, and any remaining manual operator action.
+
+## 7. Claude Runtime model-capability ownership
+
+Runtime request tuning must preserve explicit ownership. Global effort comes from the resource-policy last-known-good snapshot. Auto-compact, max context, and model max output come from the final authenticated Admin model-catalog selection. Missing values are omitted; browser input, user env, Deck, Plugin, workspace settings, and ambient parent env must not override these server-owned values.
+
+`ai_models.max_output_tokens` is the existing model capability and must reach the CLI through the vendor-scoped `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS` projection. Do not infer third-party capability by matching model IDs, and do not rewrite `max_tokens` in Gateway. The official `CLAUDE_CODE_MAX_OUTPUT_TOKENS` remains a standalone CLI override, but Dream must scrub ambient/user copies before launching its managed Runtime.

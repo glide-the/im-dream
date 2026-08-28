@@ -3,6 +3,7 @@
 #          CLI runtime, merge subprocess env, and force project-only settings.
 # [Pos] SDK environment helper node in libs/claude_agent_kit/server
 # [Sync] 2026-05-08: centralize .env injection for ClaudeSDKClient subprocess options.
+# [Sync] 2026-08-28: reserve authenticated model max-output capability and scrub ambient output overrides.
 # [Sync] 2026-05-08: map TypeScript settingSources=["project"] to Python SDK extra_args.
 # [Sync] 2026-05-24: load SDK subprocess env from backend/.env by default.
 # [Sync] 2026-05-24: keep SDK env injection direct; no app runtime alias mapping.
@@ -70,7 +71,7 @@
 #                    absolute override and official-CLI rollback boundary.
 # [Sync] 2026-08-28: add exact server-owned effort/compact/context Runtime env
 #                    validation; unset keys are scrubbed from parent/options env.
-# [Sync] 2026-08-28: adopt the manifest-qualified clean-room Runtime 0.1.2
+# [Sync] 2026-08-28: adopt the manifest-qualified clean-room Runtime 0.1.3
 #                    request-parameter release; the official CLI rollback is unchanged.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
@@ -105,7 +106,7 @@ DREAM_CLAUDE_SDK_DISTRIBUTION = "ink-claude-dream-agent-sdk"
 DREAM_CLAUDE_SDK_VERSION = "0.2.144"
 DREAM_CLAUDE_SDK_IMPORT = "claude_agent_sdk"
 DREAM_CLAUDE_CLI_EXECUTABLE = "ink-claude-code-dream"
-DREAM_CLAUDE_CLI_VERSION = "0.1.2"
+DREAM_CLAUDE_CLI_VERSION = "0.1.3"
 DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA = "ink-claude-cli-envelope/v1"
 DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME = "release-manifest.json"
 DREAM_CLAUDE_STREAM_PROTOCOL_NAME = "claude-code-stream-json"
@@ -175,6 +176,10 @@ _USER_SDK_ENV_NAMES = frozenset(
 CLAUDE_CODE_EFFORT_LEVEL_ENV_NAME = "CLAUDE_CODE_EFFORT_LEVEL"
 CLAUDE_CODE_AUTO_COMPACT_WINDOW_ENV_NAME = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
 CLAUDE_CODE_MAX_CONTEXT_TOKENS_ENV_NAME = "CLAUDE_CODE_MAX_CONTEXT_TOKENS"
+CLAUDE_CODE_MAX_OUTPUT_TOKENS_ENV_NAME = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
+INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS_ENV_NAME = (
+    "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS"
+)
 CLAUDE_CODE_EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
 CLAUDE_CODE_RUNTIME_INTEGER_MAX = 2_147_483_647
 _SERVER_CLAUDE_CODE_RUNTIME_ENV_NAMES = frozenset(
@@ -182,6 +187,13 @@ _SERVER_CLAUDE_CODE_RUNTIME_ENV_NAMES = frozenset(
         CLAUDE_CODE_EFFORT_LEVEL_ENV_NAME,
         CLAUDE_CODE_AUTO_COMPACT_WINDOW_ENV_NAME,
         CLAUDE_CODE_MAX_CONTEXT_TOKENS_ENV_NAME,
+        INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS_ENV_NAME,
+    }
+)
+_CLAUDE_CODE_RUNTIME_AMBIENT_SCRUB_ENV_NAMES = frozenset(
+    {
+        *_SERVER_CLAUDE_CODE_RUNTIME_ENV_NAMES,
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS_ENV_NAME,
     }
 )
 
@@ -931,7 +943,7 @@ def clear_server_claude_code_runtime_parent_env(
     """
 
     target = os.environ if process_env is None else process_env
-    for name in _SERVER_CLAUDE_CODE_RUNTIME_ENV_NAMES:
+    for name in _CLAUDE_CODE_RUNTIME_AMBIENT_SCRUB_ENV_NAMES:
         target.pop(name, None)
 
 
@@ -956,6 +968,7 @@ def apply_server_claude_code_runtime_env_to_options(
     for name in (
         CLAUDE_CODE_AUTO_COMPACT_WINDOW_ENV_NAME,
         CLAUDE_CODE_MAX_CONTEXT_TOKENS_ENV_NAME,
+        INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS_ENV_NAME,
     ):
         value = supplied.get(name)
         if value is None:
@@ -973,7 +986,7 @@ def apply_server_claude_code_runtime_env_to_options(
     if not isinstance(existing_env, dict):
         existing_env = dict(existing_env)
     merged = dict(existing_env)
-    for name in _SERVER_CLAUDE_CODE_RUNTIME_ENV_NAMES:
+    for name in _CLAUDE_CODE_RUNTIME_AMBIENT_SCRUB_ENV_NAMES:
         merged.pop(name, None)
     merged.update(supplied)
     options.env = merged

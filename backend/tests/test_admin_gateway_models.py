@@ -86,6 +86,7 @@ def test_catalog_uses_models_scope_and_strict_public_projection() -> None:
         "upgradeHint": None,
     }
     assert catalog.models[0].claude_code_runtime_env() == {
+        "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "8192",
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
         "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
     }
@@ -137,6 +138,34 @@ def test_catalog_rejects_capabilities_outside_the_public_allowlist() -> None:
         "default_model_alias": "dream-balanced",
     }))
 
+    with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
+        GatewayModelCatalogClient(
+            7,
+            configuration=configuration(),
+            transport=transport,
+        ).list_models()
+
+
+def test_catalog_rejects_non_positive_model_max_output_capability() -> None:
+    transport = RecordingTransport(FakeResponse(200, {
+        "object": "list",
+        "data": [{
+            "id": "dream-balanced",
+            "display_name": "Dream Balanced",
+            "protocol": "anthropic",
+            "context_window": 200000,
+            "max_output_tokens": 0,
+            "claude_code_auto_compact_window": None,
+            "claude_code_max_context_tokens": None,
+            "capabilities": {"tools": True},
+            "enabled": True,
+            "callable": True,
+            "availability": "included",
+            "required_plan_code": None,
+            "upgrade_hint": None,
+        }],
+        "default_model_alias": "dream-balanced",
+    }))
     with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
         GatewayModelCatalogClient(
             7,

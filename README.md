@@ -59,10 +59,10 @@ Dream treats the Python SDK and npm Runtime as one compatibility pair even thoug
 | Python | `>=3.12` |
 | Node.js | `>=22 <25` for the Runtime selector |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.2` |
+| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.3` |
 | Runtime CLI compatibility output | `2.1.241 (Claude Code)` |
 
-Important: `uv sync` manages the Python environment only. It installs the Python SDK but does **not** install or upgrade the npm Runtime. A source checkout that expects Runtime `0.1.2` will reject a `0.1.1` executable even when all capability flags are otherwise valid.
+Important: `uv sync` manages the Python environment only. It installs the Python SDK but does **not** install or upgrade the npm Runtime. A source checkout that expects Runtime `0.1.3` will reject a `0.1.2` executable even when all capability flags are otherwise valid.
 
 ## Requirements
 
@@ -144,7 +144,7 @@ uv run --with pytest==9.1.1 pytest -q
 Install the public selector package separately because it is an npm/native artifact:
 
 ```bash
-npm install --global @glide-the/ink-claude-code-dream@0.1.2
+npm install --global @glide-the/ink-claude-code-dream@0.1.3
 export PATH="$(npm prefix --global)/bin:$PATH"
 command -v ink-claude-code-dream
 ink-claude-code-dream --version
@@ -163,7 +163,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-This command must exit 0 and print the resolved `0.1.2` executable path. If `command -v` still points to an older `~/.local/bin/ink-claude-code-dream`, reorder `PATH` or replace that stale installation before starting Dream. A running process keeps the `PATH` it inherited; restart only the process you own after changing it.
+This command must exit 0 and print the resolved `0.1.3` executable path. If `command -v` still points to an older `~/.local/bin/ink-claude-code-dream`, reorder `PATH` or replace that stale installation before starting Dream. A running process keeps the `PATH` it inherited; restart only the process you own after changing it.
 
 Do not use `CLAUDE_CODE_CLI_PATH` to bypass the normal manifest-qualified Runtime path. That variable is reserved for an explicit, reviewed absolute-path rollback.
 
@@ -237,7 +237,7 @@ npm run build
 cd ..
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.144 \
-  --runtime-version 0.1.2 \
+  --runtime-version 0.1.3 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -252,6 +252,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 5. **Thread-local Runtime files.** Claude temporary files belong under the validated Thread workspace `.claude-tmp`; do not widen access to `/tmp` or the user's real Claude home.
 6. **No service-wide cleanup.** Tests may stop only processes and temporary resources created by that test run.
 7. **Published versions are immutable.** Fix a bad Runtime with a forward release or an explicit reviewed rollback; do not overwrite or unpublish an accepted version as normal rollback.
+8. **Model output capability is server-owned.** Admin's selected model `maxOutputTokens` is projected to the Runtime; browser settings, user env, workspace files, and Gateway body rewriting must not replace it.
 
 ## Troubleshooting
 
@@ -265,7 +266,7 @@ readlink "$(command -v ink-claude-code-dream)"
 ink-claude-code-dream --version
 ```
 
-For the current `develop` branch, the manifest must contain Runtime `0.1.2`. Capability flags may all be `true` while the request still fails because the actual Runtime version is stale.
+For the current `develop` branch, the manifest must contain Runtime `0.1.3`. Capability flags may all be `true` while the request still fails because the actual Runtime version is stale.
 
 ### `uv sync` removed pytest
 
@@ -278,6 +279,10 @@ Start the Admin supervisor, verify `../ink-admin-memory/.env.local`, and run Adm
 ### No callable model
 
 Configure an enabled, priced model alias and Provider credential in Admin, then run the local Gateway provisioning command. Dream accepts platform aliases, not browser-supplied Provider IDs or keys.
+
+### A configured model still sends `max_tokens: 32000`
+
+First confirm the running Runtime version and inspect the Admin catalog's `maxOutputTokens`. An opaque Gateway alias cannot be safely classified from its name, so Dream must project the authenticated catalog value as `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`. The CLI uses that value as the model default/upper limit and keeps `CLAUDE_CODE_MAX_OUTPUT_TOKENS` only as a bounded standalone override. If the catalog value is absent, unknown aliases intentionally retain the upstream-compatible 32,000/64,000 fallback; do not fix this by hard-coding a model ID or rewriting the Gateway request body.
 
 ## Documentation and contribution rules
 

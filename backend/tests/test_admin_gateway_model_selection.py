@@ -76,6 +76,7 @@ def test_full_selection_retains_runtime_settings_without_public_alias_changes() 
     )
     assert selected.model_alias == "dream-balanced"
     assert selected.claude_code_runtime_env() == {
+        "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "8192",
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
         "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
     }

@@ -50,7 +50,7 @@
 4. desired invalid、PostgreSQL/capability unavailable 或后台异常时保留 last-known-good effective 与 revision；后台同步失败不得传播到 Agent turn。
 5. 只有更高且合法的 revision 才替换配置并推进 LKG；同 revision/同值只刷新 diagnostics，同 revision/异值或 revision 回滚均为 invalid。
 6. 资源策略不得改变 admission 判断顺序、比较、资源算法或既有 lease，也不得改变 Runner、ThreadFactory、service、EventBus、SSE、turn/resume/cancel 语义；公开 replace 只影响后续 acquire。受控 Runtime 配置只能以 immutable server-owned snapshot 透传，不得在 turn 主路径查询 PostgreSQL。
-7. Claude Code Runtime 配置必须保持明确所有权：全局 effort 来自 resource-policy LKG，compact/context 来自最终选中模型；未设置即不注入。浏览器、用户 env、Deck、Plugin、workspace 与 ambient parent env 均不得覆盖这三个键。
+7. Claude Code Runtime 配置必须保持明确所有权：全局 effort 来自 resource-policy LKG，compact/context/model max output 来自最终选中模型；未设置即不注入。`ai_models.max_output_tokens` 只能投影为 vendor-scoped CLI capability，禁止按模型 ID 猜测或在 Gateway 改写请求。浏览器、用户 env、Deck、Plugin、workspace 与 ambient parent env 均不得覆盖这些键或官方 output override。
 
 ## 工作区安全
 

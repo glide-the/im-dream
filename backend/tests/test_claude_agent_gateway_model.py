@@ -71,6 +71,9 @@ def test_complete_http_turn_passes_saved_platform_alias_to_agent_runner(monkeypa
 
     asyncio.run(exercise())
     assert captured_requests[0].model == "dream-balanced"
+    assert captured_requests[0].model_runtime_env == {
+        "INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS": "8192",
+    }
     assert captured_requests[0].user_id == "7"
 
 

@@ -59,10 +59,10 @@ Python SDK 和 npm Runtime 虽然通过不同包生态发布，但 Dream 必须�
 | Python | `>=3.12` |
 | Node.js | Runtime selector 要求 `>=22 <25` |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.2` |
+| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.3` |
 | Runtime CLI 兼容输出 | `2.1.241 (Claude Code)` |
 
-重要：`uv sync` 只管理 Python 环境。它会安装 Python SDK，但不会安装或升级 npm Runtime。源码要求 Runtime `0.1.2` 时，即使其他 capability 全部合法，也会拒绝 `0.1.1` 可执行文件。
+重要：`uv sync` 只管理 Python 环境。它会安装 Python SDK，但不会安装或升级 npm Runtime。源码要求 Runtime `0.1.3` 时，即使其他 capability 全部合法，也会拒绝 `0.1.2` 可执行文件。
 
 ## 环境要求
 
@@ -144,7 +144,7 @@ uv run --with pytest==9.1.1 pytest -q
 Runtime 是 npm/native 制品，必须单独安装公开 selector 包：
 
 ```bash
-npm install --global @glide-the/ink-claude-code-dream@0.1.2
+npm install --global @glide-the/ink-claude-code-dream@0.1.3
 export PATH="$(npm prefix --global)/bin:$PATH"
 command -v ink-claude-code-dream
 ink-claude-code-dream --version
@@ -163,7 +163,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-该命令必须 exit 0 并输出解析到的 `0.1.2` 可执行路径。如果 `command -v` 仍指向旧的 `~/.local/bin/ink-claude-code-dream`，必须在启动 Dream 前调整 `PATH` 顺序或替换旧安装。运行中的进程会保留启动时继承的 `PATH`；修改后只重启自己拥有的进程。
+该命令必须 exit 0 并输出解析到的 `0.1.3` 可执行路径。如果 `command -v` 仍指向旧的 `~/.local/bin/ink-claude-code-dream`，必须在启动 Dream 前调整 `PATH` 顺序或替换旧安装。运行中的进程会保留启动时继承的 `PATH`；修改后只重启自己拥有的进程。
 
 正常生产资格路径禁止使用 `CLAUDE_CODE_CLI_PATH` 绕过 manifest 校验。该变量只保留给经过评审的显式绝对路径回滚。
 
@@ -237,7 +237,7 @@ npm run build
 cd ..
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.144 \
-  --runtime-version 0.1.2 \
+  --runtime-version 0.1.3 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -252,6 +252,7 @@ python3 scripts/verify_claude_registry_release.py \
 5. **Thread 自有 Runtime 文件。** Claude 临时文件必须位于经过校验的 Thread workspace `.claude-tmp`，禁止放宽到 `/tmp` 或用户真实 Claude home。
 6. **禁止全局清理服务。** 测试只能停止和清理由本轮测试创建的进程与临时资源。
 7. **已发布版本不可覆盖。** 错误 Runtime 必须通过前向版本修复或显式评审回滚，正常回滚不得覆盖或 unpublish 已验收版本。
+8. **模型输出能力由服务端所有。** Admin 最终选中模型的 `maxOutputTokens` 必须投影到 Runtime；浏览器设置、用户环境、workspace 文件和 Gateway body 改写均不得替代它。
 
 ## 故障排查
 
@@ -265,7 +266,7 @@ readlink "$(command -v ink-claude-code-dream)"
 ink-claude-code-dream --version
 ```
 
-当前 `develop` 要求 manifest 中的 Runtime 为 `0.1.2`。即使 capability flag 全部为 `true`，实际 Runtime 版本过旧仍会失败。
+当前 `develop` 要求 manifest 中的 Runtime 为 `0.1.3`。即使 capability flag 全部为 `true`，实际 Runtime 版本过旧仍会失败。
 
 ### `uv sync` 删除了 pytest
 
@@ -278,6 +279,10 @@ ink-claude-code-dream --version
 ### 没有可调用模型
 
 在 Admin 中配置已启用、有定价的模型 alias 和 Provider 凭据，然后执行本机 Gateway provision。Dream 只接受平台 alias，不接受浏览器传入的 Provider ID 或 Key。
+
+### 模型已配置但仍发送 `max_tokens: 32000`
+
+先确认实际运行的 Runtime 版本，并检查 Admin 模型目录中的 `maxOutputTokens`。opaque Gateway alias 无法通过名称安全识别，因此 Dream 必须把认证目录值投影为 `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`。CLI 使用它作为模型 default/upper limit，`CLAUDE_CODE_MAX_OUTPUT_TOKENS` 只保留为受 capability 裁剪的 standalone override。目录值未设置时，unknown alias 会有意保留上游兼容的 32,000/64,000 fallback；禁止通过硬编码模型 ID 或改写 Gateway 请求体修复。
 
 ## 文档与贡献规则
 
