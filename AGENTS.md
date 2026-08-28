@@ -7,7 +7,7 @@
 - Avoid hard-coded business IDs, thresholds, hosts, paths, or policy values; resolve to env/config/policy first.
 
 ## Source Of Truth
-- Root pointer: `CLAUDE.md`
+- Root repository maintenance and README/version-management contract: `Agent.md`
 - Folder contracts: `**/.folder.md`
 - Rules index: `docs/rules/README.md`
 - Cursor rules: `.cursor/rules/*.mdc`
