@@ -1,7 +1,7 @@
 <!-- [输入] 已公开的 SDK PyPI 精确版本、Runtime npm 精确版本和期望 CLI 版本文本。 -->
 <!-- [输出] 发布后 provider-free registry 验收步骤与 fail-closed 判定。 -->
 <!-- [定位] SDK/Runtime 发布后的最小验收；完整打包、发布和 Dream 集成见相邻操作手册。 -->
-<!-- [同步] 2026-08-28：更新为已发布 SDK 0.2.144、Runtime 0.1.2、same-SHA workflow 回执和 provider-free registry fresh install。 -->
+<!-- [同步] 2026-08-28：更新为已发布 SDK 0.2.144、Runtime 0.1.3、same-SHA workflow 回执和 provider-free registry fresh install。 -->
 
 # Claude SDK/Runtime Registry 发布验收
 
@@ -13,8 +13,8 @@
 | 制品 | 状态 | 当前版本 |
 | --- | --- | --- |
 | PyPI SDK | 已公开 | `ink-claude-dream-agent-sdk==0.2.144` |
-| npm Runtime selector | 已公开 | `@glide-the/ink-claude-code-dream@0.1.2` |
-| npm 平台包 | 四包均已公开 | darwin/linux × arm64/x64 `0.1.2` |
+| npm Runtime selector | 已公开 | `@glide-the/ink-claude-code-dream@0.1.3` |
+| npm 平台包 | 四包均已公开 | darwin/linux × arm64/x64 `0.1.3` |
 
 SDK wheel/sdist 当前正式 PyPI 摘要：
 
@@ -23,18 +23,20 @@ SDK wheel/sdist 当前正式 PyPI 摘要：
 | `ink_claude_dream_agent_sdk-0.2.144-py3-none-any.whl` | 151,704 B | `50801104b1dcf8c0eb64555eb62f27f6238b37635c2ccbcb391bd562ee85ca56` |
 | `ink_claude_dream_agent_sdk-0.2.144.tar.gz` | 373,286 B | `1b2b6dfad5bfa766de24682d7b26ef1f1394097b92a5d32be1eae40530fbd517` |
 
-Runtime registry tarball 当前 SHA-256：
+Runtime 公共 registry 匿名 `npm pack` 验收输出 SHA-256：
 
-| npm 包 | 大小 | SHA-256 |
-| --- | ---: | --- |
-| selector | 18,405 B | `0d6ed5371614b478b57fe192ff5555537279d790ae552818cd4b0b307e24ddc3` |
-| darwin-arm64 | 27,006,615 B | `2c39bf8146ebcc65f3f1ecb55d969b722ad9779473398d41c784cb88caa8eeb2` |
-| darwin-x64 | 29,157,799 B | `7050576a5b809e6662bc791138efb28a04fa56d053d220cfb892034b4b36f8e9` |
-| linux-arm64 | 37,968,588 B | `abc209eccd9ace4ad20050db9f04d587959560e48fc3373f5b478288c5f80da2` |
-| linux-x64 | 37,472,361 B | `0af763146bf0f5656baa552445e8953de18cec7650938a5060d1d6cd62bdd53b` |
+| npm 包 | 验收文件 SHA-256 |
+| --- | --- |
+| selector | `9ea7253f8630aeaf16b48c67cd1ce11c7f92c999db4dd5d85989c84a973ba8b1` |
+| darwin-arm64 | `97921d5866fd65318d7c3043a93795b4fb598fb5f5847e9754a4c82701311a38` |
+| darwin-x64 | `a1e699bacd79ac3f67862166149bc23104af9be15a6ea737211be4312d586e61` |
+| linux-arm64 | `1a244be2e217f46c28df3c72ea84b0301434b1c5f2ef5028d55cd09415ec469e` |
+| linux-x64 | `ac2bc70e5e8276df60e878cf45c5c73039de21a3fd286c3452948ff9426bcfec` |
 
-发布回执：SDK workflow `32874352449`；Runtime release `main@c3e4d4e2f74960c75b42b1cd48adedf90345a10b`，
-qualification workflow `33149053281`，publish workflow `33151128000`。Runtime token fallback 只允许
+这些摘要标识 registry 下载后由 `npm pack` 生成的验收文件，不冒充 qualification artifact
+中的原始 tgz 字节。发布回执：SDK workflow `32874352449`；Runtime release
+`main@9339c9a0ff60e1b2cd6d5a23c8e795aeffff91f9`，qualification workflow
+`33157330350`，publish workflow `33157476036`。Runtime token fallback 只允许
 五个 Runtime 包读写、无 organization 权限；GitHub `npm` Environment 的 `NPM_TOKEN` 与 npm token
 按用户要求保留，当前到期日为 2026-11-26，本地明文中转副本已清除。
 
@@ -63,7 +65,7 @@ qualification workflow `33149053281`，publish workflow `33151128000`。Runtime 
 7. 在当前支持平台全新安装 selector，验证：
    - `ink-claude-code-dream --version` 与 `claude --version` 都输出 `2.1.241 (Claude Code)`；
    - selector 只解析当前平台包；
-   - release manifest 配对 SDK `0.2.144` 与 Runtime `0.1.2`；
+   - release manifest 配对 SDK `0.2.144` 与 Runtime `0.1.3`；
    - Dream Runtime resolver 通过。
 
 ## 失败语义
@@ -88,6 +90,7 @@ PyPI Token。若发布的是此前已经通过业务验收的同一字节，只�
 smoke；实现字节或接口合同发生变化时，必须再执行完整 Claude/MCP 和真实 IM 业务验收。
 
 本次命令为 `python3 scripts/verify_claude_registry_release.py --sdk-version 0.2.144
---runtime-version 0.1.2 --expected-cli-version '2.1.241 (Claude Code)'`，exit 0。回执为
+--runtime-version 0.1.3 --expected-cli-version '2.1.241 (Claude Code)'`，exit 0。回执为
 `status=passed`、`providerFree=true`、`modelInvoked=false`；当前平台 selector 安装、SDK wheel 和
-sdist 两条隔离路径均通过，未透传模型 Provider 或 package registry 凭证。
+sdist 两条隔离路径均通过，未透传模型 Provider 或 package registry 凭证。当前 Dream 默认
+resolver 解析同一公开 `0.1.3`，production manifest 通过且 `/api/health` 正常。
