@@ -31,6 +31,8 @@
 #                    official rollback) before starting the Agent factory.
 # [Sync] 2026-08-24: print validated SDK distribution and resolved CLI identity
 #                    before the Claude Agent factory starts.
+# [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
+#                    PostgreSQL sink, and publisher lifecycle around the database.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -60,6 +62,7 @@ def _drop_unsupported_agent_env() -> None:
         "INK_AGENT_MAX_CONCURRENT_RUNS",
         "INK_AGENT_RUN_MEMORY_BUDGET_MIB",
         "INK_AGENT_MEMORY_RESERVE_MIB",
+        "INK_AGENT_RESOURCE_POLICY_REFRESH_INTERVAL_S",
         "INK_AGENT_TTL_S",
         "INK_AGENT_SWEEP_INTERVAL_S",
         "INK_AGENT_SSE_KEEPALIVE_S",
@@ -815,7 +818,13 @@ async def shutdown_scheduler():
 
 # ========== Claude Agent Factory ==========
 
-from agent_factory import claude_agent_thread_factory
+from agent_factory import (
+    claude_agent_resource_postgres_sink,
+    claude_agent_resource_policy_refresher,
+    claude_agent_resource_publisher,
+    claude_agent_resource_sampler,
+    claude_agent_thread_factory,
+)
 from claude_agent.event_bus_redis import RedisStreamEventBus
 from libs.claude_agent_kit.server.sdk_env import (
     DREAM_CLAUDE_CLI_EXECUTABLE,
@@ -968,6 +977,18 @@ async def startup_claude_agent():
         )
     _print_claude_runtime_identity(distribution, cli_path)
     claude_agent_thread_factory.start()
+    for resource_owner in (
+        claude_agent_resource_sampler,
+        claude_agent_resource_policy_refresher,
+        claude_agent_resource_postgres_sink,
+        claude_agent_resource_publisher,
+    ):
+        try:
+            resource_owner.start()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Claude Agent resource observer owner failed to start"
+            )
     print("✅ Claude Agent factory started\n")
 
 
@@ -1071,6 +1092,18 @@ async def story_workspace_shutdown_dream_launch_dispatches():
 @app.on_event("shutdown")
 async def shutdown_claude_agent():
     """Gracefully close all Claude Agent sessions."""
+    for resource_owner in (
+        claude_agent_resource_publisher,
+        claude_agent_resource_policy_refresher,
+        claude_agent_resource_postgres_sink,
+        claude_agent_resource_sampler,
+    ):
+        try:
+            await resource_owner.stop()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Claude Agent resource observer owner failed to close"
+            )
     try:
         await claude_agent_thread_factory.aclose()
     except Exception:

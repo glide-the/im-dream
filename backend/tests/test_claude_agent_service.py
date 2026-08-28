@@ -34,6 +34,7 @@
 #                    and the same ephemeral projection path with Workspace Mode off.
 # [Sync] 2026-08-13: cover editor MCP structured business failures as tool
 #                    errors with no editor refresh or session_updated event.
+# [Sync] 2026-08-28: cover model plus global server-owned Claude Code Runtime env assembly.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -68,6 +69,7 @@ from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from claude_agent.stream_events import NormalizedAgentEvent
 from libs.claude_agent_kit.types import AgentRunResult, ToolEventPayload
+from services.admin_gateway.models import GatewayModel
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 class _FakeContextBuilder:
     def __init__(self) -> None:
@@ -199,9 +201,23 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         builder = _FakeContextBuilder()
         selected_models: list[tuple[str, str | None]] = []
 
-        def resolve_model(user_id: str, client_alias: str | None) -> str:
+        def resolve_model(user_id: str, client_alias: str | None) -> GatewayModel:
             selected_models.append((user_id, client_alias))
-            return "dream-balanced"
+            return GatewayModel(
+                model_alias="dream-balanced",
+                display_name="Dream Balanced",
+                protocol="anthropic",
+                capabilities={"tools": True},
+                context_window=200_000,
+                max_output_tokens=8_192,
+                enabled=True,
+                callable=True,
+                availability="included",
+                required_plan_code="free",
+                upgrade_hint=None,
+                claude_code_auto_compact_window=262_144,
+                claude_code_max_context_tokens=262_144,
+            )
 
         activator = unittest.mock.AsyncMock()
         mapper = _StaticDreamContextMapper(self._dream_context())
@@ -210,6 +226,9 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             platform_model_resolver=resolve_model,
             dream_context_mapper=mapper,
             dream_runtime_init_activator=activator,
+            claude_code_runtime_env_provider=lambda: {
+                "CLAUDE_CODE_EFFORT_LEVEL": "high",
+            },
         )
         state = AgentRunState(session_id="thread_dream_turn")
         context = mapper.context
@@ -318,6 +337,11 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             remote_session_ref="thread_dream_turn",
         )
         self.assertEqual(execution.run_options.model, "dream-balanced")
+        self.assertEqual(execution.run_options.server_runtime_env, {
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+            "CLAUDE_CODE_EFFORT_LEVEL": "high",
+        })
         expected_gateway_key = "dream-turn-" + hashlib.sha256(
             f"7\nthread_dream_turn\n{request.message_id}".encode("utf-8")
         ).hexdigest()

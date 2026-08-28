@@ -18,6 +18,8 @@
 #                    instead of a bare SSE disconnect + stuck RUNNING session.
 # [Sync] 2026-08-22: acquire one process-local concurrency/memory admission
 #                    lease before context/SDK startup and release it in every terminal path.
+# [Sync] 2026-08-28: inject the last-known-good global Claude Code Runtime snapshot
+#                    into every service-built turn without querying PostgreSQL on-path.
 
 """Claude Agent Thread Factory — 四阶段会话编排入口."""
 from __future__ import annotations
@@ -26,7 +28,7 @@ import asyncio
 from dataclasses import dataclass
 import logging
 import os
-from typing import Any, AsyncGenerator, AsyncIterator, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Callable, Mapping, Optional
 from uuid import uuid4
 
 from claude_agent.admission import (
@@ -220,10 +222,15 @@ class ClaudeAgentThreadFactory:
         *,
         dream_observer: DreamObserver | None = None,
         admission_controller: ClaudeAgentAdmissionController | None = None,
+        claude_code_runtime_env_provider: (
+            Callable[[], Mapping[str, str]] | None
+        ) = None,
     ) -> None:
         self._pool = AgentRunStatePool()
         self._observers = SessionObserverRegistry()
-        self._service = ClaudeAgentService()
+        self._service = ClaudeAgentService(
+            claude_code_runtime_env_provider=claude_code_runtime_env_provider,
+        )
         self._sweeper = AgentRunStateSweeper(
             self._pool,
             on_evicted=self._on_sessions_evicted,

@@ -14,11 +14,14 @@
 # [Sync] 2026-08-17: cover same-Deck Agent switching, provenance metadata, and CAS conflicts.
 # [Sync] 2026-08-22: cover restored Claude MCP Resources router registration.
 # [Sync] 2026-08-22: cover startup preservation of Claude Agent resource-admission keys.
+# [Sync] 2026-08-28: cover composition-owned higher-revision replacement,
+#                    same-revision diagnostics-only refresh, and lifecycle ordering.
 # [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
 #                    the Claude Agent factory starts.
 # [Sync] 2026-08-26: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.1.
 # [Sync] 2026-08-24: cover credential-free SDK/CLI startup identity logging.
 # [Sync] 2026-08-25: align MCP auth route registration with database server identifiers.
+# [Sync] 2026-08-27: cover PostgreSQL resource sampler/sink/publisher lifecycle ordering.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -258,6 +261,7 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
             "INK_AGENT_MAX_CONCURRENT_RUNS": "1",
             "INK_AGENT_RUN_MEMORY_BUDGET_MIB": "512",
             "INK_AGENT_MEMORY_RESERVE_MIB": "128",
+            "INK_AGENT_RESOURCE_POLICY_REFRESH_INTERVAL_S": "7",
         }
         with unittest.mock.patch.dict(os.environ, expected, clear=True):
             _SERVER_MODULE._drop_unsupported_agent_env()
@@ -862,7 +866,7 @@ class TestClaudeAgentRouteWorkspaceMode(unittest.TestCase):
             ) as sync_attachments_to_workspace_files,
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
         ):
@@ -982,7 +986,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ) as select_voice,
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
             unittest.mock.patch.object(
@@ -1117,7 +1121,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="hy3-preview"),
             ),
             unittest.mock.patch.object(
@@ -1159,7 +1163,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
             unittest.mock.patch.object(
@@ -1242,7 +1246,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
             unittest.mock.patch.object(
@@ -1322,7 +1326,7 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
             ),
             unittest.mock.patch.object(
                 route_module,
-                "_resolve_platform_model_alias",
+                "_resolve_platform_model_selection",
                 new=unittest.mock.AsyncMock(return_value="dream-balanced"),
             ),
             unittest.mock.patch.object(
@@ -1756,6 +1760,75 @@ class TestFactoryLifecycle(unittest.TestCase):
         ]
         self.assertIn("startup_claude_agent", handler_names)
 
+    def test_composition_applies_config_before_recording_diagnostics(self):
+        import agent_factory
+        from claude_agent.admission import AgentAdmissionConfig
+        from claude_agent.resource_policy import (
+            RESOURCE_POLICY_DEFAULTS,
+            ResourcePolicyLoadResult,
+        )
+
+        config = AgentAdmissionConfig(2, 640, 192, 90)
+        result = ResourcePolicyLoadResult(
+            config=config,
+            defaults=RESOURCE_POLICY_DEFAULTS,
+            status="applied",
+            revision=11,
+            updated_at="2026-08-27T03:00:00Z",
+            loaded_at="2026-08-27T03:00:01Z",
+        )
+        calls: list[str] = []
+
+        with (
+            unittest.mock.patch.object(
+                agent_factory.claude_agent_admission_controller,
+                "replace_config",
+                side_effect=lambda applied: calls.append("replace"),
+            ) as replace_config,
+            unittest.mock.patch.object(
+                agent_factory.claude_agent_resource_diagnostics,
+                "update_policy",
+                side_effect=lambda *_args, **_kwargs: calls.append("record"),
+            ) as update_policy,
+        ):
+            agent_factory._apply_claude_agent_resource_policy(result, True)
+
+        self.assertEqual(calls, ["replace", "record"])
+        replace_config.assert_called_once_with(config)
+        update_policy.assert_called_once_with(result, effective_config=config)
+
+    def test_composition_same_revision_refresh_does_not_replace_config(self):
+        import agent_factory
+        from claude_agent.resource_policy import (
+            RESOURCE_POLICY_DEFAULTS,
+            ResourcePolicyLoadResult,
+        )
+
+        config = agent_factory.claude_agent_admission_controller.config
+        result = ResourcePolicyLoadResult(
+            config=config,
+            defaults=RESOURCE_POLICY_DEFAULTS,
+            status="applied",
+            revision=12,
+            updated_at="2026-08-28T03:00:00Z",
+            loaded_at="2026-08-28T03:00:01Z",
+        )
+
+        with (
+            unittest.mock.patch.object(
+                agent_factory.claude_agent_admission_controller,
+                "replace_config",
+            ) as replace_config,
+            unittest.mock.patch.object(
+                agent_factory.claude_agent_resource_diagnostics,
+                "update_policy",
+            ) as update_policy,
+        ):
+            agent_factory._apply_claude_agent_resource_policy(result, False)
+
+        replace_config.assert_not_called()
+        update_policy.assert_called_once_with(result, effective_config=config)
+
     def test_startup_validates_custom_sdk_before_factory(self):
         calls: list[str] = []
         distribution = types.SimpleNamespace(
@@ -1784,10 +1857,41 @@ class TestFactoryLifecycle(unittest.TestCase):
                 "start",
                 side_effect=lambda: calls.append("factory"),
             ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_sampler,
+                "start",
+                side_effect=lambda: calls.append("sampler"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_policy_refresher,
+                "start",
+                side_effect=lambda: calls.append("refresher"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_postgres_sink,
+                "start",
+                side_effect=lambda: calls.append("sink"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_publisher,
+                "start",
+                side_effect=lambda: calls.append("publisher"),
+            ),
             unittest.mock.patch("builtins.print") as print_mock,
         ):
             asyncio.run(self.srv.startup_claude_agent())
-        self.assertEqual(calls, ["sdk", "runtime", "factory"])
+        self.assertEqual(
+            calls,
+            [
+                "sdk",
+                "runtime",
+                "factory",
+                "sampler",
+                "refresher",
+                "sink",
+                "publisher",
+            ],
+        )
         runtime_line = next(
             call.args[0]
             for call in print_mock.call_args_list
@@ -1899,6 +2003,9 @@ class TestFactoryLifecycle(unittest.TestCase):
         async def close_redis():
             calls.append("redis")
 
+        def resource_stop(name):
+            return unittest.mock.AsyncMock(side_effect=lambda: calls.append(name))
+
         with (
             unittest.mock.patch.object(
                 self.srv,
@@ -1909,6 +2016,26 @@ class TestFactoryLifecycle(unittest.TestCase):
                 self.srv.claude_agent_thread_factory,
                 "aclose",
                 side_effect=close_factory,
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_publisher,
+                "stop",
+                new=resource_stop("publisher"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_policy_refresher,
+                "stop",
+                new=resource_stop("refresher"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_postgres_sink,
+                "stop",
+                new=resource_stop("sink"),
+            ),
+            unittest.mock.patch.object(
+                self.srv.claude_agent_resource_sampler,
+                "stop",
+                new=resource_stop("sampler"),
             ),
             unittest.mock.patch.object(
                 self.srv.RedisStreamEventBus,
@@ -1930,7 +2057,16 @@ class TestFactoryLifecycle(unittest.TestCase):
 
         self.assertEqual(
             calls,
-            ["confirmation", "factory", "redis", "database"],
+            [
+                "confirmation",
+                "publisher",
+                "refresher",
+                "sink",
+                "sampler",
+                "factory",
+                "redis",
+                "database",
+            ],
         )
         close_event_bus.assert_awaited_once_with()
 

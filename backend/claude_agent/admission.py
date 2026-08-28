@@ -4,6 +4,10 @@
 # [Pos] resource-admission node in backend/claude_agent; guards the existing turn runtime.
 # [Sync] 2026-08-26: include conservative cgroup inactive-file and reclaimable-slab
 #                    capacity so cache pressure does not reject safe Agent starts.
+# [Sync] 2026-08-27: add atomic public config replacement for future acquisitions;
+#                    active leases and the admission decision algorithm are unchanged.
+# [Sync] 2026-08-28: align env/public replacement with the JSON-safe positive-integer
+#                    and exact combined-memory boundary; admission logic is unchanged.
 
 """Bounded, process-local resource admission for Claude Agent turns."""
 from __future__ import annotations
@@ -17,14 +21,25 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_MIB = 1024 * 1024
+AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX = 9_007_199_254_740_991
+AGENT_RESOURCE_MIB_IN_BYTES = 1_048_576
+AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB = (
+    AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX // AGENT_RESOURCE_MIB_IN_BYTES
+)
+_MIB = AGENT_RESOURCE_MIB_IN_BYTES
 _DEFAULT_MAX_CONCURRENT_RUNS = 1
 _DEFAULT_RUN_MEMORY_BUDGET_MIB = 512
 _DEFAULT_MEMORY_RESERVE_MIB = 128
 _DEFAULT_RETRY_AFTER_SECONDS = 60
 
 
-def _read_int_env(name: str, default: int, *, minimum: int) -> int:
+def _read_int_env(
+    name: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
         return default
@@ -34,6 +49,8 @@ def _read_int_env(name: str, default: int, *, minimum: int) -> int:
         raise ValueError(f"{name} must be an integer") from exc
     if value < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} must be <= {maximum}")
     return value
 
 
@@ -48,32 +65,65 @@ class AgentAdmissionConfig:
 
     @classmethod
     def from_env(cls) -> AgentAdmissionConfig:
-        return cls(
+        config = cls(
             max_concurrent_runs=_read_int_env(
                 "INK_AGENT_MAX_CONCURRENT_RUNS",
                 _DEFAULT_MAX_CONCURRENT_RUNS,
                 minimum=1,
+                maximum=AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
             ),
             run_memory_budget_mib=_read_int_env(
                 "INK_AGENT_RUN_MEMORY_BUDGET_MIB",
                 _DEFAULT_RUN_MEMORY_BUDGET_MIB,
                 minimum=1,
+                maximum=AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
             ),
             memory_reserve_mib=_read_int_env(
                 "INK_AGENT_MEMORY_RESERVE_MIB",
                 _DEFAULT_MEMORY_RESERVE_MIB,
-                minimum=0,
+                minimum=1,
+                maximum=AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
             ),
             retry_after_seconds=_read_int_env(
                 "INK_AGENT_SWEEP_INTERVAL_S",
                 _DEFAULT_RETRY_AFTER_SECONDS,
                 minimum=1,
+                maximum=AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX,
             ),
         )
+        return validate_agent_admission_config(config)
 
     @property
     def required_headroom_bytes(self) -> int:
         return (self.run_memory_budget_mib + self.memory_reserve_mib) * _MIB
+
+
+def validate_agent_admission_config(
+    config: AgentAdmissionConfig,
+) -> AgentAdmissionConfig:
+    """Validate the shared JSON/TypeScript-safe resource-policy boundary."""
+
+    if not isinstance(config, AgentAdmissionConfig):
+        raise TypeError("config must be an AgentAdmissionConfig")
+    values = (
+        config.max_concurrent_runs,
+        config.run_memory_budget_mib,
+        config.memory_reserve_mib,
+        config.retry_after_seconds,
+    )
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+        raise ValueError("config values must be integers")
+    if any(
+        value < 1 or value > AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX
+        for value in values
+    ):
+        raise ValueError("config values must be positive JSON-safe integers")
+    if (
+        config.run_memory_budget_mib + config.memory_reserve_mib
+        > AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB
+    ):
+        raise ValueError("combined memory budget exceeds the exact byte boundary")
+    return config
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,13 +298,34 @@ class ClaudeAgentAdmissionController:
         *,
         snapshot_provider: Callable[[], AgentResourceSnapshot] | None = None,
     ) -> None:
-        self.config = config or AgentAdmissionConfig.from_env()
+        resolved_config = config or AgentAdmissionConfig.from_env()
+        self._validate_config(resolved_config)
+        self.config = resolved_config
         self._snapshot_provider = snapshot_provider or read_agent_resource_snapshot
         self._active_session_ids: set[str] = set()
         self._last_snapshot = AgentResourceSnapshot()
         self._capacity_denials = 0
         self._memory_denials = 0
         self._missing_metrics_logged = False
+
+    def replace_config(self, config: AgentAdmissionConfig) -> AgentAdmissionConfig:
+        """Atomically replace immutable limits used by subsequent acquisitions.
+
+        Existing leases are deliberately untouched. The same JSON-safe positive-
+        integer and combined-memory boundary is used by env, desired policy,
+        replacement, and diagnostics projection.
+        """
+
+        self._validate_config(config)
+        previous = self.config
+        self.config = config
+        return previous
+
+    @staticmethod
+    def _validate_config(config: AgentAdmissionConfig) -> None:
+        """Validate public config without imposing arbitrary product limits."""
+
+        validate_agent_admission_config(config)
 
     def try_acquire(self, session_id: str) -> AgentAdmissionLease:
         active = len(self._active_session_ids)
@@ -356,10 +427,14 @@ class ClaudeAgentAdmissionController:
 
 
 __all__ = [
+    "AGENT_RESOURCE_JSON_SAFE_INTEGER_MAX",
+    "AGENT_RESOURCE_MAX_COMBINED_MEMORY_MIB",
+    "AGENT_RESOURCE_MIB_IN_BYTES",
     "AgentAdmissionConfig",
     "AgentAdmissionLease",
     "AgentResourceSnapshot",
     "ClaudeAgentAdmissionController",
     "ClaudeAgentAdmissionError",
     "read_agent_resource_snapshot",
+    "validate_agent_admission_config",
 ]

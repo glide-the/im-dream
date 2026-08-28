@@ -4,6 +4,8 @@
 #         SimpleClaudeAgentSDKClient from simple_cas_client.py;
 # [Output] Provide ClaudeAgentRunner and create_agent_runner to application layers.
 # [Pos] core runner node in libs/claude_agent_kit/server
+# [Sync] 2026-08-28: apply the exact server-owned Claude Code Runtime env whitelist
+#                    after user overlays and before Gateway enforcement.
 # [Sync] 2026-08-04: force Agent/Task run_in_background=false at the PreToolUse
 #                    boundary so the parent turn consumes child completion.
 # [Sync] 2026-08-14: allow only confirmation-gated, single-file canonical
@@ -37,6 +39,9 @@
 # [Sync] 2026-05-24: keep run_streaming's BaseException diagnostic log on logger.exception so backend logs include the caught traceback while on_error still receives the enriched run_error.
 # [Sync] 2026-05-24: rename _REQUEST_MODEL_OVERRIDE_ENV_KEY from PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE to INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE; keep legacy key as fallback in _apply_request_model_override_if_allowed for zero-downtime migration.
 # [Sync] 2026-05-24: move _inject_mem0_session_hook_env and _verify_claude_sdk_env_for_query_stream calls inside run_streaming's try/except BaseException block so any raised exception is caught and routed to callbacks.on_error → SSE error frame; raise RuntimeError in _verify_claude_sdk_env_for_query_stream when no auth key is present instead of silently returning.
+# [Sync] 2026-08-28: classify a terminal message_delta stop_reason=max_tokens as
+#                    an incomplete run after the full SDK stream ends; later
+#                    end_turn/tool_use events still preserve SDK-owned recovery.
 # [Sync] 2026-05-27: migrate _pre_tool_use_hook hookSpecificOutput from old {"tool_input":...} format to CLI ≥2.1 format: hookEventName + permissionDecision:"allow" + updatedInput for input override; permissionDecision:"deny" + permissionDecisionReason for all block paths. The old "tool_input" key is silently ignored by the CLI, leaving AskUserQuestion without answers and returning isError:true / output:null.
 # [Sync] 2026-05-27: add _ALWAYS_CONFIRM_TOOL_NAMES constant; original auto mode
 #                    only confirmed AskUserQuestion/mcp__user__ask_user. Superseded
@@ -266,6 +271,7 @@ from .sdk_env import (
     apply_project_sdk_runtime_options,
     apply_task_v2_env_to_options,
     apply_user_sdk_env_to_options,
+    apply_server_claude_code_runtime_env_to_options,
     ensure_claude_code_tmpdir,
     resolve_claude_agent_max_buffer_size,
 )
@@ -2253,6 +2259,7 @@ class ClaudeAgentRunner:
         success = True
         run_error: Optional[Exception] = None
         usage: dict[str, Optional[int]] = {}
+        terminal_stop_reason: Optional[str] = None
 
         # Pending tool-call tracker (tool_call_id → {tool_name, input})
         pending_tool_calls: dict[str, dict[str, Any]] = {}
@@ -2950,6 +2957,13 @@ class ClaudeAgentRunner:
         apply_task_v2_env_to_options(sdk_options)
         # Overlay user-scoped SDK env vars (higher priority than backend/.env).
         apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
+        # Admin-owned Runtime tuning is the final authority for these exact
+        # keys. Unset fields remove any non-authoritative options overlay;
+        # composition startup also scrubs inherited parent-process values.
+        apply_server_claude_code_runtime_env_to_options(
+            sdk_options,
+            opts.server_runtime_env,
+        )
         # Gateway enforcement runs after every project/user overlay. When the
         # canary is enabled, missing service configuration or canonical user
         # identity fails closed before the Claude subprocess starts.
@@ -3046,9 +3060,33 @@ class ClaudeAgentRunner:
                     usage_accumulator=usage,
                 )
 
+                # A Claude Runtime may recover from one provider-level
+                # ``max_tokens`` stop inside the same SDK query.  Keep only
+                # the latest terminal reason and decide after the whole SDK
+                # stream ends; raising here would abort that runtime-owned
+                # recovery before a later ``end_turn`` can arrive.
+                if isinstance(message, StreamEvent):
+                    stream_event = message.event or {}
+                    if stream_event.get("type") == "message_delta":
+                        stream_delta = stream_event.get("delta") or {}
+                        stop_reason = stream_delta.get("stop_reason")
+                        if isinstance(stop_reason, str) and stop_reason:
+                            terminal_stop_reason = stop_reason
+                elif isinstance(message, AssistantMessage):
+                    stop_reason = getattr(message, "stop_reason", None)
+                    if isinstance(stop_reason, str) and stop_reason:
+                        terminal_stop_reason = stop_reason
+
             full_text = "".join(text_parts)
 
-            if full_text and callbacks.on_text_done:
+            if terminal_stop_reason == "max_tokens":
+                success = False
+                run_error = RuntimeError(
+                    "模型达到输出长度上限，本轮尚未完成。"
+                    "请发送“继续”从当前会话恢复。"
+                )
+                await _call(callbacks.on_error, run_error)
+            elif full_text and callbacks.on_text_done:
                 await _call(callbacks.on_text_done, full_text)
 
         except BaseException as exc:  # noqa: BLE001

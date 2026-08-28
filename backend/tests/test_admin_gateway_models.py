@@ -54,6 +54,8 @@ def test_catalog_uses_models_scope_and_strict_public_projection() -> None:
             "protocol": "anthropic",
             "context_window": 200000,
             "max_output_tokens": 8192,
+            "claude_code_auto_compact_window": 262144,
+            "claude_code_max_context_tokens": 262144,
             "capabilities": {"tools": True},
             "enabled": True,
             "callable": True,
@@ -82,6 +84,10 @@ def test_catalog_uses_models_scope_and_strict_public_projection() -> None:
         "availability": "included",
         "requiredPlanCode": "free",
         "upgradeHint": None,
+    }
+    assert catalog.models[0].claude_code_runtime_env() == {
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
     }
     call = transport.calls[0]
     assert call["url"] == "http://127.0.0.1:3000/v1/models"
@@ -119,6 +125,8 @@ def test_catalog_rejects_capabilities_outside_the_public_allowlist() -> None:
             "protocol": "anthropic",
             "context_window": 200000,
             "max_output_tokens": 8192,
+            "claude_code_auto_compact_window": None,
+            "claude_code_max_context_tokens": None,
             "capabilities": {"tools": True, "provider_debug": True},
             "enabled": True,
             "callable": True,
@@ -129,6 +137,35 @@ def test_catalog_rejects_capabilities_outside_the_public_allowlist() -> None:
         "default_model_alias": "dream-balanced",
     }))
 
+    with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
+        GatewayModelCatalogClient(
+            7,
+            configuration=configuration(),
+            transport=transport,
+        ).list_models()
+
+
+@pytest.mark.parametrize("runtime_value", [0, -1, 2_147_483_648, True, "262144"])
+def test_catalog_rejects_invalid_claude_code_runtime_windows(runtime_value: Any) -> None:
+    transport = RecordingTransport(FakeResponse(200, {
+        "object": "list",
+        "data": [{
+            "id": "dream-balanced",
+            "display_name": "Dream Balanced",
+            "protocol": "anthropic",
+            "context_window": 200000,
+            "max_output_tokens": 8192,
+            "claude_code_auto_compact_window": runtime_value,
+            "claude_code_max_context_tokens": None,
+            "capabilities": {"tools": True},
+            "enabled": True,
+            "callable": True,
+            "availability": "included",
+            "required_plan_code": None,
+            "upgrade_hint": None,
+        }],
+        "default_model_alias": "dream-balanced",
+    }))
     with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
         GatewayModelCatalogClient(
             7,
