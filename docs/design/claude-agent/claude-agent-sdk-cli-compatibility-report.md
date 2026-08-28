@@ -1,7 +1,7 @@
 <!-- [输入] Dream 当前 SDK/Runtime resolver、SDK main、clean-room Runtime manifest、五包制品和真实业务回执。 -->
 <!-- [输出] 记录自有 Python SDK 与 clean-room Claude Runtime 的接口配对、问题修复、发布门和回滚合同。 -->
 <!-- [定位] Dream 当前 SDK × Runtime 兼容性真相源；历史官方/恢复源码组合只作回归背景。 -->
-<!-- [同步] 2026-08-26：更新为 SDK 0.2.144 × Runtime 0.1.1 正式 registry 配对、workflow 回执和 fresh install。 -->
+<!-- [同步] 2026-08-28：更新为 SDK 0.2.144 × Runtime 0.1.2 正式 registry 配对、请求参数合同、workflow 回执和 fresh install。 -->
 <!-- [同步] 2026-08-25：兼容合同限定为 Agent 执行面；MCP Resources 管理面不再解析或启动 CLI。 -->
 
 # Claude Agent SDK 与 clean-room Runtime 兼容性报告
@@ -17,8 +17,8 @@
 | SDK 源码/发布身份 | `v0.2.144@fa10c9ef04ec006d9dcf0a88b1b35dab4ef4723b` | 不可变 tag；发布 run `32874352449` 成功 |
 | SDK 上游源码 | commit `542fefb3b94be87760b2513fff889b91bb5b6672` | `src/` 与 MIT 上游 tree `1c86f3a…` 空差异 |
 | SDK → CLI 注入 | `ClaudeAgentOptions.cli_path` | 复用上游 transport/process launcher |
-| Runtime npm selector | `@glide-the/ink-claude-code-dream@0.1.1` | 选择 darwin/linux × arm64/x64 平台包；manifest 配对 SDK `0.2.144` |
-| Runtime Git 固定 | `main@eb0b503661449f3eec8c69eddca367d19c2d4e33` | qualification `32877673733`、publish `32877869672` 成功 |
+| Runtime npm selector | `@glide-the/ink-claude-code-dream@0.1.2` | 选择 darwin/linux × arm64/x64 平台包；manifest 配对 SDK `0.2.144` |
+| Runtime Git 固定 | release `main@c3e4d4e2f74960c75b42b1cd48adedf90345a10b` | qualification `33149053281`、publish `33151128000` 成功 |
 | Runtime 对外版本 | `2.1.241 (Claude Code)` | Dream 所需 argv/JSONL/management 兼容标识，不是官方全产品声明 |
 | Runtime 实现 | 仓库自有 `src/cleanroom/`，MIT | 不读取、编译或打包恢复源码和旧派生 bundle |
 | Runtime 编译器 | Bun `1.4.0` | 生成四个 native standalone；运行时不依赖 ambient Bun |
@@ -106,17 +106,17 @@ Runtime 复用 SDK `--settings` inline JSON/文件合同，安全执行 Dream se
 
 | 包 | npm registry tgz SHA-256 |
 | --- | --- |
-| selector | `1153970fe79fdaf46e541efa9b5947125db7e9d624e3ad59a2f7bb0706746bff` |
-| darwin-arm64 | `622db6e04089939f1c514923357f9b4dfbb4210fa1504176802bd07e5d737de8` |
-| darwin-x64 | `300aced61da86a4c3a880bcccd1eb3c9464387efea49ed5f8bdc8e3167812a18` |
-| linux-arm64 | `515d2cb533ce4a1e33532f206a49538ce4f0f37a81ed43a97161927b4b6fef83` |
-| linux-x64 | `d4b230f3447c999875955c3dfce34cc49e4904c09c0db1626c96dc5218f6c1d2` |
+| selector | `0d6ed5371614b478b57fe192ff5555537279d790ae552818cd4b0b307e24ddc3` |
+| darwin-arm64 | `2c39bf8146ebcc65f3f1ecb55d969b722ad9779473398d41c784cb88caa8eeb2` |
+| darwin-x64 | `7050576a5b809e6662bc791138efb28a04fa56d053d220cfb892034b4b36f8e9` |
+| linux-arm64 | `abc209eccd9ace4ad20050db9f04d587959560e48fc3373f5b478288c5f80da2` |
+| linux-x64 | `0af763146bf0f5656baa552445e8953de18cec7650938a5060d1d6cd62bdd53b` |
 
 selector 的 Node 支持范围是 `>=22 <25`。平台包包含 standalone binary，运行时不要求用户安装 Bun。Windows、musl、未知 arch 和交叉选择 fail closed。
 
 所有 tarball 包含 CycloneDX 1.5 SBOM、22 个依赖组件、MIT 根许可证、依赖许可证摘要、notices、manifest 与 checksum；源、stage、tgz 和 fresh install 均拒绝 `.map`。
 
-五包已经按四个平台包优先、selector 最后的顺序公开发布。公共 registry metadata 均为 `0.1.1`/MIT；全新安装只选择当前 Darwin ARM64 平台包，并通过两个 CLI alias、SDK/Runtime manifest 配对与零 `.map` 验证。表中公共 tarball 摘要与 same-SHA qualification 制品一致。
+五包已经按四个平台包优先、selector 最后的顺序公开发布。公共 registry metadata 均为 `0.1.2`/MIT；全新安装只选择当前 Darwin ARM64 平台包，并通过两个 CLI alias、SDK/Runtime manifest 配对与零 `.map` 验证。publish job 下载并复验 same-SHA qualification 制品后直接发布，没有重新构建。
 
 ## 7. 验证结果
 
@@ -125,11 +125,12 @@ selector 的 Node 支持范围是 `>=22 <25`。平台包包含 standalone binary
 | SDK 完整测试 | 1500 passed，5 skipped；CI 0 fail |
 | SDK registry 安装 | 正式 PyPI wheel SHA `50801104…85ca56`；全新 Python 3.12 安装/import 版本 `0.2.144`；Dream `.venv` 无 Git `direct_url.json` |
 | Dream SDK/Runtime 接入 | 本次版本接入聚焦 `96 passed, 6 subtests passed`；唯一 distribution provider 正确 |
-| Runtime 完整测试 | release CI `111 total, 104 passed, 7 skipped, 0 fail` |
+| Runtime 完整测试 | release CI `117 total, 113 passed, 4 conditional external-fixture skips, 0 fail` |
 | Runtime lint | exit 0 |
 | 四平台可复现 | 两轮 clean build，4 executables + 5 tgz + aggregate SHA256SUMS `cmp` 相同 |
 | package verifier | SBOM/license/checksum/native magic/Dream manifest/no-map 全通过 |
 | registry fresh install | selector + darwin-arm64；两个 alias `--version`、manifest 配对、no-map 全通过 |
+| Messages 请求参数 | 最终 transport fixture 与 Dream 真实 Gateway 均证明 model-bounded `max_tokens`、显式 effort 的 `output_config.effort`、未配置时省略和 `stream:true`；真实首轮/resume 为 2 次 `max_tokens=32000`/effort `low` |
 | 真实 IM | 真实账号、Admin/Gateway/PostgreSQL、Chrome Comfy OAuth、两轮 tool call、刷新 resume、Logout/Remove：`1 passed (2.3m)` |
 
 ## 8. 许可证与发布边界
@@ -138,7 +139,7 @@ clean-room Runtime 不是恢复源码改名包。公共构建输入只含仓库�
 
 恢复源码和旧派生 bundle仍只可作为本地历史研究/black-box 对比，不得进入公共包。删除 LICENSE、NOTICE 或 source map 不能改变一段受限实现的来源；本轮采用的是替换核心实现，而不是删除一个文件。
 
-SDK PyPI 和 Runtime npm 分开授权、分开发布。SDK `0.2.144` 已由 SDK 项目通过 Trusted Publisher 先发 TestPyPI、后发正式 PyPI，并逐字节复验 wheel/sdist；Runtime `0.1.1` 由 Runtime 项目按平台包先于 selector 完成，并通过公开 registry fresh download/install 回验。本次 npm 使用短期最小包范围 token 回退，发布与验收后已同时删除 GitHub Environment Secret 和 npm token。Dream 的 Python 依赖只指向 PyPI SDK，npm 只承载独立 CLI/Runtime。
+SDK PyPI 和 Runtime npm 分开授权、分开发布。SDK `0.2.144` 已由 SDK 项目通过 Trusted Publisher 先发 TestPyPI、后发正式 PyPI，并逐字节复验 wheel/sdist；Runtime `0.1.2` 由 Runtime 项目按平台包先于 selector 完成，并通过公开 registry fresh download/install 回验。本次 npm 使用仅包含五个 Runtime 包读写权、无 organization 权限的 granular token fallback；GitHub `npm` Environment 的 `NPM_TOKEN` 与 npm token 按用户要求保留，本地明文副本已清除。Dream 的 Python 依赖只指向 PyPI SDK，npm 只承载独立 CLI/Runtime。
 
 完整的版本准备、可复现构建、OIDC 发布、registry smoke、Dream 锁文件更新和回滚命令见
 [`docs/deploy/claude-sdk-runtime-packaging-and-integration.md`](../../deploy/claude-sdk-runtime-packaging-and-integration.md)。

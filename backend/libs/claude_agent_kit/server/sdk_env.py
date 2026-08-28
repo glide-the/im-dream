@@ -70,6 +70,8 @@
 #                    absolute override and official-CLI rollback boundary.
 # [Sync] 2026-08-28: add exact server-owned effort/compact/context Runtime env
 #                    validation; unset keys are scrubbed from parent/options env.
+# [Sync] 2026-08-28: adopt the manifest-qualified clean-room Runtime 0.1.2
+#                    request-parameter release; the official CLI rollback is unchanged.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -103,7 +105,7 @@ DREAM_CLAUDE_SDK_DISTRIBUTION = "ink-claude-dream-agent-sdk"
 DREAM_CLAUDE_SDK_VERSION = "0.2.144"
 DREAM_CLAUDE_SDK_IMPORT = "claude_agent_sdk"
 DREAM_CLAUDE_CLI_EXECUTABLE = "ink-claude-code-dream"
-DREAM_CLAUDE_CLI_VERSION = "0.1.1"
+DREAM_CLAUDE_CLI_VERSION = "0.1.2"
 DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA = "ink-claude-cli-envelope/v1"
 DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME = "release-manifest.json"
 DREAM_CLAUDE_STREAM_PROTOCOL_NAME = "claude-code-stream-json"
