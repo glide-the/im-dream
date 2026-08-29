@@ -1,5 +1,5 @@
-# [Input] Notion connector auth env and read-only ntn API endpoints.
-# [Output] Provide searchable resource discovery and page/database read helpers.
+# [Input] Server-owned Notion credential home and read-only ntn API endpoints.
+# [Output] Provide searchable resource discovery plus lightweight index and on-demand page read helpers.
 # [Pos] operations node in backend/notion
 # [Sync] 2026-07-04: initial Notion CLI read-only operation layer for discovery,
 #                    page retrieval, and database query support.
@@ -7,6 +7,12 @@
 #                    Notion API schema while preserving high-level `database` input.
 # [Sync] 2026-07-08: filter Notion workspace People system data sources from user-selectable
 #                    resource discovery results.
+# [Sync] 2026-08-28: accept only an explicit server credential home, isolate CLI env,
+#                    and map stderr/stdout to safe auth/permission/operation errors.
+# [Sync] 2026-08-28: align selected database IDs with Notion data source query endpoints,
+#                    add search sorting, and return page Markdown with compatible metadata/blocks.
+# [Sync] 2026-08-28: expose a Markdown-only page read for the Runtime Read hook;
+#                    background index synchronization never calls page-content endpoints.
 
 """Notion read-only operations via the `ntn` CLI."""
 from __future__ import annotations
@@ -14,21 +20,30 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from pathlib import Path
+from typing import Any
 
-from .auth import build_notion_env
-from .errors import NotionCLIUnavailableError, NotionOperationError
+from .auth import build_notion_env, resolve_ntn_executable
+from .errors import (
+    NotionAuthRequiredError,
+    NotionCLIUnavailableError,
+    NotionOperationError,
+    NotionPermissionError,
+)
 
 
 @dataclass(frozen=True)
 class SearchFilter:
     """Search filter for Notion resource discovery."""
 
-    object_type: Optional[str] = None
-    query: Optional[str] = None
+    object_type: str | None = None
+    query: str | None = None
+    sort: dict[str, Any] | None = None
     page_size: int = 100
-    start_cursor: Optional[str] = None
+    start_cursor: str | None = None
 
 
 _SEARCH_FILTER_OBJECT_MAP = {
@@ -42,7 +57,7 @@ class SearchResult:
 
     results: list[dict[str, Any]]
     has_more: bool
-    next_cursor: Optional[str]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)
@@ -50,10 +65,10 @@ class DatabaseQuery:
     """Database query payload."""
 
     database_id: str
-    filter: Optional[dict[str, Any]] = None
-    sorts: Optional[list[dict[str, Any]]] = None
+    filter: dict[str, Any] | None = None
+    sorts: list[dict[str, Any]] | None = None
     page_size: int = 100
-    start_cursor: Optional[str] = None
+    start_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,9 +76,9 @@ class OperationResult:
     """Generic operation response."""
 
     success: bool
-    data: Optional[dict[str, Any]] = None
-    error: Optional[str] = None
-    request_id: Optional[str] = None
+    data: dict[str, Any] | None = None
+    error: str | None = None
+    request_id: str | None = None
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -166,7 +181,7 @@ def _is_people_system_database(item: Mapping[str, Any]) -> bool:
         prop_id = str(prop.get("id") or "").lower()
         prop_name = str(prop.get("name") or "").strip().lower()
         prop_type = str(prop.get("type") or "").strip().lower()
-        if prop_id.startswith("people") or prop_id.startswith("people%3a"):
+        if prop_id.startswith(("people", "people%3a")):
             people_property_ids += 1
         if prop_name == "person" and prop_type == "people":
             person_field = True
@@ -202,8 +217,8 @@ def normalize_page_item(item: Mapping[str, Any]) -> dict[str, Any]:
 class NotionOperationClient:
     """Read-only Notion CLI client."""
 
-    def __init__(self, config: Any = None) -> None:
-        self._config = config
+    def __init__(self, notion_home: str | Path) -> None:
+        self._notion_home = Path(notion_home)
 
     async def search(self, search_filter: SearchFilter) -> SearchResult:
         payload: dict[str, Any] = {
@@ -218,6 +233,8 @@ class NotionOperationClient:
             }
         if search_filter.query:
             payload["query"] = search_filter.query
+        if search_filter.sort is not None:
+            payload["sort"] = search_filter.sort
         if search_filter.start_cursor:
             payload["start_cursor"] = search_filter.start_cursor
         response = await self._run_endpoint("v1/search", payload)
@@ -227,7 +244,11 @@ class NotionOperationClient:
             next_cursor=response.get("next_cursor"),
         )
 
-    async def discover_databases(self, query: Optional[str] = None, page_size: int = 100) -> list[dict[str, Any]]:
+    async def discover_databases(
+        self,
+        query: str | None = None,
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
         result = await self.search(
             SearchFilter(object_type="database", query=query, page_size=page_size)
         )
@@ -237,7 +258,11 @@ class NotionOperationClient:
             if not _is_people_system_database(item)
         ]
 
-    async def discover_pages(self, query: Optional[str] = None, page_size: int = 100) -> list[dict[str, Any]]:
+    async def discover_pages(
+        self,
+        query: str | None = None,
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
         result = await self.search(
             SearchFilter(object_type="page", query=query, page_size=page_size)
         )
@@ -253,8 +278,11 @@ class NotionOperationClient:
             payload["sorts"] = query.sorts
         if query.start_cursor:
             payload["start_cursor"] = query.start_cursor
+        # Public DTOs retain the historical ``database_id`` name, but discovery
+        # returns Notion ``data_source`` objects. The selected ID must use the
+        # data source query endpoint exposed by the pinned CLI/API contract.
         response = await self._run_endpoint(
-            f"v1/databases/{query.database_id}/query",
+            f"v1/data_sources/{query.database_id}/query",
             payload,
         )
         return SearchResult(
@@ -265,22 +293,37 @@ class NotionOperationClient:
 
     async def get_page(self, page_id: str) -> OperationResult:
         page = await self._run_endpoint(f"v1/pages/{page_id}")
+        markdown = await self._run_endpoint(f"v1/pages/{page_id}/markdown")
         blocks = await self._run_endpoint(f"v1/blocks/{page_id}/children")
         return OperationResult(
             success=True,
             data={
                 "page": page,
+                "markdown": str(markdown.get("markdown") or ""),
                 "blocks": list(blocks.get("results") or blocks.get("children") or []),
             },
+        )
+
+    async def get_page_markdown(self, page_id: str) -> OperationResult:
+        """Fetch only the page body needed by the lazy Runtime Read hook."""
+
+        markdown = await self._run_endpoint(f"v1/pages/{page_id}/markdown")
+        return OperationResult(
+            success=True,
+            data={"markdown": str(markdown.get("markdown") or "")},
         )
 
     async def get_blocks(self, block_id: str) -> OperationResult:
         blocks = await self._run_endpoint(f"v1/blocks/{block_id}/children")
         return OperationResult(success=True, data={"blocks": list(blocks.get("results") or [])})
 
-    async def _run_endpoint(self, endpoint: str, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        env = build_notion_env(self._config)
-        args = ["ntn", "api", endpoint]
+    async def _run_endpoint(
+        self,
+        endpoint: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        env = build_notion_env(self._notion_home)
+        args = [resolve_ntn_executable(), "api", endpoint]
         if payload is not None:
             args.extend(["--data", json.dumps(payload, ensure_ascii=False)])
 
@@ -291,8 +334,8 @@ class NotionOperationClient:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-        except FileNotFoundError as exc:  # pragma: no cover - depends on host env
-            raise NotionCLIUnavailableError("`ntn` CLI is not installed or not on PATH.") from exc
+        except (FileNotFoundError, PermissionError, OSError) as exc:  # pragma: no cover - host dependent
+            raise NotionCLIUnavailableError("Notion service is temporarily unavailable.") from exc
 
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self._timeout_seconds())
@@ -300,42 +343,53 @@ class NotionOperationClient:
             proc.kill()
             with contextlib.suppress(Exception):
                 await proc.wait()
-            raise NotionOperationError(f"ntn api {endpoint} timed out.") from exc
+            raise NotionOperationError("Notion did not respond in time. Please retry.") from exc
 
         stdout_text = stdout.decode("utf-8", "replace").strip()
         stderr_text = stderr.decode("utf-8", "replace").strip()
         if proc.returncode != 0:
-            raise NotionOperationError(stderr_text or stdout_text or f"ntn api {endpoint} failed.")
+            combined = f"{stdout_text}\n{stderr_text}".lower()
+            if any(token in combined for token in ("unauthorized", "invalid token", "expired", "status 401", "http 401")):
+                raise NotionAuthRequiredError(
+                    "Notion authorization is missing or expired. Reconnect Notion and retry."
+                )
+            if any(token in combined for token in ("forbidden", "status 403", "http 403", "permission")):
+                raise NotionPermissionError(
+                    "Notion denied access to this resource. Update its permissions or reconnect Notion."
+                )
+            raise NotionOperationError("Notion could not complete the request. Please retry.")
         if not stdout_text:
             return {}
         try:
             parsed = json.loads(stdout_text)
             return parsed if isinstance(parsed, dict) else {"results": parsed}
         except json.JSONDecodeError as exc:
-            raise NotionOperationError(
-                f"ntn api {endpoint} returned invalid JSON: {stdout_text[:200]}"
-            ) from exc
+            raise NotionOperationError("Notion returned an invalid response. Please retry.") from exc
 
     def _timeout_seconds(self) -> float:
-        config = _mapping(self._config)
-        timeout = config.get("operation_timeout_seconds")
-        if timeout is None:
-            nested = config.get("config")
-            if isinstance(nested, Mapping):
-                timeout = nested.get("operation_timeout_seconds")
+        timeout = os.environ.get("INK_NOTION_OPERATION_TIMEOUT_SECONDS", "").strip()
         try:
-            return max(1.0, float(timeout)) if timeout is not None else 30.0
+            value = float(timeout) if timeout else 30.0
+            return value if 0 < value <= 300.0 else 30.0
         except (TypeError, ValueError):
             return 30.0
 
 
-async def discover_databases(config: Any = None, query: Optional[str] = None, page_size: int = 100) -> list[dict[str, Any]]:
+async def discover_databases(
+    notion_home: str | Path,
+    query: str | None = None,
+    page_size: int = 100,
+) -> list[dict[str, Any]]:
     """Discover accessible databases with normalized records."""
 
-    return await NotionOperationClient(config).discover_databases(query=query, page_size=page_size)
+    return await NotionOperationClient(notion_home).discover_databases(query=query, page_size=page_size)
 
 
-async def discover_pages(config: Any = None, query: Optional[str] = None, page_size: int = 100) -> list[dict[str, Any]]:
+async def discover_pages(
+    notion_home: str | Path,
+    query: str | None = None,
+    page_size: int = 100,
+) -> list[dict[str, Any]]:
     """Discover accessible standalone pages with normalized records."""
 
-    return await NotionOperationClient(config).discover_pages(query=query, page_size=page_size)
+    return await NotionOperationClient(notion_home).discover_pages(query=query, page_size=page_size)

@@ -1,6 +1,9 @@
 # [Input] Unified PostgreSQL pool/UoW and canonical Notion snapshot payloads.
-# [Output] Domain-scoped connector, resource, snapshot, page, and thread storage.
+# [Output] Domain-scoped connector, resource, snapshot, page, thread, and scheduled-sync candidate storage.
 # [Pos] PostgreSQL-only runtime store for backend/notion.
+# [Sync] 2026-08-28: expose authenticated connector candidates and project the versioned snapshot-sync policy from existing config JSON without schema changes.
+# [Sync] 2026-08-28: keep new resource selections pending until their exact IDs
+#                    are committed in a successful lightweight snapshot.
 
 """PostgreSQL persistence for Notion resource connectors.
 
@@ -36,6 +39,7 @@ from .errors import (
     NotionConnectorNotFoundError,
     NotionSnapshotNotReadyError,
 )
+from .sync_policy import SYNC_POLICY_CONFIG_KEY, resolve_sync_policy
 
 
 class _Cursor(Protocol):
@@ -176,6 +180,18 @@ class NotionConnectorRepository:
         ).fetchall()
         return [_row_mapping(row) or {} for row in rows]
 
+    def list_sync_candidates(self) -> list[dict[str, Any]]:
+        rows = self._execute(
+            """
+            /* notion.connector.sync_candidates */
+            SELECT *
+            FROM resource_connectors
+            WHERE platform = 'notion' AND auth_status = 'authenticated'
+            ORDER BY updated_at ASC NULLS FIRST, created_at ASC NULLS FIRST
+            """
+        ).fetchall()
+        return [_row_mapping(row) or {} for row in rows]
+
     def get_connector(
         self,
         connector_id: str,
@@ -313,7 +329,7 @@ class NotionConnectorRepository:
               id, connector_id, resource_type, external_id, title,
               metadata_json, sync_status, created_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, 'synced', %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s, %s)
             """,
             (
                 resource_id,
@@ -325,6 +341,26 @@ class NotionConnectorRepository:
                 now,
                 now,
             ),
+        )
+
+    def mark_resource_synced(
+        self,
+        *,
+        connector_id: str,
+        resource_type: str,
+        external_id: str,
+        now: datetime,
+    ) -> None:
+        self._execute(
+            """
+            /* notion.resource.mark_synced */
+            UPDATE connector_resources
+            SET sync_status = 'synced', updated_at = %s
+            WHERE connector_id = %s
+              AND resource_type = %s
+              AND external_id = %s
+            """,
+            (now, connector_id, resource_type, external_id),
         )
 
     def list_resources(self, connector_id: str) -> list[dict[str, Any]]:
@@ -580,6 +616,10 @@ class NotionConnectorStore:
         data.pop("config_json", None)
         for field in ("last_synced_at", "created_at", "updated_at"):
             data[field] = _iso_timestamp(data.get(field))
+        data["sync_policy"] = resolve_sync_policy(
+            config.get(SYNC_POLICY_CONFIG_KEY),
+            last_synced_at=data.get("last_synced_at"),
+        )
         return data
 
     @staticmethod
@@ -663,6 +703,20 @@ class NotionConnectorStore:
             repository = NotionConnectorRepository(unit_of_work.connection)
             connectors: list[dict[str, Any]] = []
             for row in repository.list_connectors(user_id):
+                connector = self._attach_connector_resources(
+                    repository, self._connector_from_row(row)
+                )
+                if connector is not None:
+                    connectors.append(connector)
+            return connectors
+
+    def list_sync_candidates(self) -> list[dict[str, Any]]:
+        """Return server-owned scheduled-sync candidates across actors."""
+
+        with self._unit_of_work(read_only=True) as unit_of_work:
+            repository = NotionConnectorRepository(unit_of_work.connection)
+            connectors: list[dict[str, Any]] = []
+            for row in repository.list_sync_candidates():
                 connector = self._attach_connector_resources(
                     repository, self._connector_from_row(row)
                 )
@@ -887,6 +941,7 @@ class NotionConnectorStore:
         user_id: int,
         workspace_id: str,
         snapshot: CanonicalWorkspaceSnapshot | dict[str, Any],
+        synced_resources: Iterable[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
         del workspace_id  # The canonical payload already carries workspace identity.
         payload = _snapshot_payload(snapshot)
@@ -951,6 +1006,23 @@ class NotionConnectorStore:
                     resource_id,
                     [item for item in pages if isinstance(item, Mapping)],
                     fetched_at=fetched_at,
+                    now=now,
+                )
+            exact_resources = {
+                (
+                    str(item.get("resource_type") or "").strip(),
+                    str(item.get("external_id") or "").strip(),
+                )
+                for item in synced_resources
+                if isinstance(item, Mapping)
+            }
+            for resource_type, external_id in sorted(exact_resources):
+                if resource_type not in {"notion_database", "notion_page"} or not external_id:
+                    continue
+                repository.mark_resource_synced(
+                    connector_id=connector_id,
+                    resource_type=resource_type,
+                    external_id=external_id,
                     now=now,
                 )
             unit_of_work.commit()
@@ -1102,6 +1174,10 @@ def list_connectors(user_id: int) -> list[dict[str, Any]]:
     return _default_runtime.get().list_connectors(user_id)
 
 
+def list_sync_candidates() -> list[dict[str, Any]]:
+    return _default_runtime.get().list_sync_candidates()
+
+
 def get_connector(
     connector_id: str, user_id: Optional[int] = None
 ) -> Optional[dict[str, Any]]:
@@ -1173,9 +1249,14 @@ def save_snapshot(
     user_id: int,
     workspace_id: str,
     snapshot: CanonicalWorkspaceSnapshot | dict[str, Any],
+    synced_resources: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     return _default_runtime.get().save_snapshot(
-        connector_id, user_id, workspace_id, snapshot
+        connector_id,
+        user_id,
+        workspace_id,
+        snapshot,
+        synced_resources,
     )
 
 
@@ -1228,6 +1309,7 @@ __all__ = [
     "get_snapshot",
     "list_connector_resources",
     "list_connectors",
+    "list_sync_candidates",
     "list_snapshots",
     "open_default_store",
     "replace_connector_resources",

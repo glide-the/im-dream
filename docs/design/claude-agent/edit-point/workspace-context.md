@@ -491,10 +491,11 @@ Notion connector (.notion/):
   .notion/index.json              — page listing in the attached snapshot
   .notion/databases.json          — selected database metadata
   .notion/databases/<db_id>.json  — database row pages in the attached snapshot
-  .notion/pages/<page_id>.json    — page content materialized in the attached snapshot
+  .notion/pages/<page_id>.json    — virtual selected-page Read; current Markdown is fetched on demand
 
-  Read these files with read_file(). They resolve from the resource connector
-  data layer's canonical snapshot. Do not call switch_editor to change Notion
+  Read index/database files to locate selected IDs. Page paths are validated
+  against the attached index before the Runtime hook calls Notion; page bodies
+  are not stored in the snapshot. Do not call switch_editor to change Notion
   connectors; switch_editor only changes .editor/ sessions.
 </workspace_context>
 ```
@@ -502,8 +503,8 @@ Notion connector (.notion/):
 Agent 调度规则：
 
 1. 先读 `.notion/snapshot.json`，确认当前快照版本。
-2. 再读 `.notion/index.json` 或具体 page/database 文件。
+2. 再读 `.notion/index.json` 或具体 database 文件定位 page ID；只有需要正文时才读虚拟 page 路径。
 3. 只把读取结果作为 `AgentDerivedContext` 使用；不要把摘要、排序或裁剪结果作为 canonical state。
-4. 如果返回 `stale`、`permission_denied`、`connector_unavailable` 或 `not_materialized_in_snapshot`，向用户解释状态并让前端刷新/重新授权，不在 Read 路径直接远程拉取。
+4. 如果返回 `NOTION_RESOURCE_NOT_SELECTED`、`NOTION_AUTH_REQUIRED`、`NOTION_PERMISSION_DENIED` 或 `NOTION_REQUEST_FAILED`，按 `nextAction` 说明刷新选择、重新授权或重试；不得绕过 index membership。
 
-不过度设计边界：本节不新增 MCP 工具、不改现有 `switch_editor` schema、不要求当前 `workspace_context.py` 立即注入 Notion 段落；实现接线需等待资源连接器数据层落地。
+不过度设计边界：本节不新增 Notion MCP 工具、不改现有 `switch_editor` schema、不缓存页面正文；当前实现只接入 index projection 与 selected-page Read hook。

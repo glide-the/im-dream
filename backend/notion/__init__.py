@@ -1,24 +1,46 @@
 # [Input] Notion connector backend package modules.
-# [Output] Expose the Notion connector facade and helper APIs.
+# [Output] Expose the Notion connector facade, actor agentdata providers, policy, and helper APIs.
 # [Pos] package init in backend/notion
 # [Sync] 2026-07-04: initial Notion connector backend package export surface.
+# [Sync] 2026-08-28: export actor-scoped credential provider and safe Runtime errors;
+#                    remove public process-home resolution from the auth surface.
+# [Sync] 2026-08-28: export actor snapshot projection and scheduled-sync policy contracts.
 
 """Notion resource connector backend package."""
 from __future__ import annotations
 
-from .auth import AuthStatusResult, LoginInitResult, build_notion_env, ensure_notion_home, poll_login, resolve_notion_home, start_login, verify_status
+from .auth import AuthStatusResult, LoginInitResult, build_notion_env, ensure_notion_home, poll_login, resolve_ntn_executable, start_login, verify_status
+from .credentials import (
+    NOTION_AUTH_FILENAME,
+    NOTION_PROJECTED_FILENAMES,
+    NOTION_THREAD_HOME_NAME,
+    NotionCredentialProjection,
+    NotionCredentialSettings,
+    NotionCredentialStore,
+    NotionUserPaths,
+)
 from .errors import (
     NotionAuthError,
+    NotionAuthRequiredError,
     NotionAuthTimeoutError,
     NotionCLIUnavailableError,
     NotionConfigError,
     NotionConnectorError,
     NotionConnectorNotFoundError,
+    NotionCredentialError,
     NotionOperationError,
+    NotionPermissionError,
     NotionSnapshotError,
     NotionSnapshotNotReadyError,
 )
 from .factory import NotionConnectorFacade, build_notion_facade
+from .snapshot_store import NotionSnapshotProjection, NotionSnapshotStore
+from .sync_policy import (
+    SYNC_POLICY_ALLOWED_INTERVAL_MINUTES,
+    SYNC_POLICY_CONFIG_KEY,
+    resolve_sync_policy,
+    sync_policy_is_due,
+)
 from .operations import (
     DatabaseQuery,
     NotionOperationClient,
@@ -45,6 +67,7 @@ from .store import (
     get_snapshot,
     list_connector_resources,
     list_connectors,
+    list_sync_candidates,
     list_snapshots,
     open_default_store,
     replace_connector_resources,
@@ -60,18 +83,34 @@ __all__ = [
     "build_notion_env",
     "ensure_notion_home",
     "poll_login",
-    "resolve_notion_home",
+    "resolve_ntn_executable",
     "start_login",
     "verify_status",
     "NotionAuthError",
+    "NotionAuthRequiredError",
     "NotionAuthTimeoutError",
     "NotionCLIUnavailableError",
     "NotionConfigError",
     "NotionConnectorError",
     "NotionConnectorNotFoundError",
+    "NotionCredentialError",
     "NotionOperationError",
+    "NotionPermissionError",
     "NotionSnapshotError",
     "NotionSnapshotNotReadyError",
+    "NOTION_AUTH_FILENAME",
+    "NOTION_PROJECTED_FILENAMES",
+    "NOTION_THREAD_HOME_NAME",
+    "NotionCredentialProjection",
+    "NotionCredentialSettings",
+    "NotionCredentialStore",
+    "NotionUserPaths",
+    "NotionSnapshotProjection",
+    "NotionSnapshotStore",
+    "SYNC_POLICY_ALLOWED_INTERVAL_MINUTES",
+    "SYNC_POLICY_CONFIG_KEY",
+    "resolve_sync_policy",
+    "sync_policy_is_due",
     "NotionConnectorFacade",
     "build_notion_facade",
     "DatabaseQuery",
@@ -98,6 +137,7 @@ __all__ = [
     "get_snapshot",
     "list_connector_resources",
     "list_connectors",
+    "list_sync_candidates",
     "list_snapshots",
     "open_default_store",
     "replace_connector_resources",

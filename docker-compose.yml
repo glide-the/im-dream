@@ -9,6 +9,8 @@
 # [Sync] 2026-06-23: route backend container egress through a Mihomo TUN proxy namespace.
 # [Sync] 2026-06-24: remove backend extra_hosts because Docker forbids custom
 #                    host mappings with network_mode: service:tun-proxy.
+# [Sync] 2026-08-28: bind the server-owned Notion user credential root to the
+#                    persisted agentdata volume beside AGENT_CWD.
 
 services:
   # ── Mihomo TUN proxy (backend network namespace) ───────────────────────────
@@ -59,6 +61,7 @@ services:
     environment:
       TZ: UTC
       AGENT_CWD: /app/data/agent-workspace
+      INK_NOTION_RUNTIME_ROOT: /app/data/notion-runtime
       INK_PUBLIC_BASE_URL: ${FRONTEND_PUBLIC_SITE_URL:-http://localhost}
       INK_BACKEND_PUBLIC_BASE_URL: ${BACKEND_PUBLIC_SITE_URL:-http://127.0.0.1:8765/}
     healthcheck:

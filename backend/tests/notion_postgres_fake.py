@@ -1,3 +1,9 @@
+# [Input] Notion repository SQL markers and synthetic actor-owned connector rows.
+# [Output] In-memory transactional PostgreSQL fake for connector, resource, snapshot, thread, and scheduled-candidate tests.
+# [Pos] Notion persistence test harness in backend/tests
+# [Sync] 2026-08-28: model authenticated scheduled-sync candidate queries without adding a runtime database fallback.
+# [Sync] 2026-08-28: model pending resource selections and exact successful-index status publication.
+
 """Pure fake PostgreSQL transaction boundary for Notion store tests."""
 
 from __future__ import annotations
@@ -125,6 +131,23 @@ class FakeNotionConnection:
                 _timestamp(row.get("created_at")),
             ),
             reverse=True,
+        )
+        return FakeCursor(rows=rows)
+
+    def _notion_connector_sync_candidates(self, params: tuple[Any, ...]) -> FakeCursor:
+        if params:
+            raise AssertionError("sync candidate query must not accept actor input")
+        rows = [
+            row
+            for row in self.tables["resource_connectors"]
+            if row.get("platform") == "notion"
+            and row.get("auth_status") == "authenticated"
+        ]
+        rows.sort(
+            key=lambda row: (
+                _timestamp(row.get("updated_at")),
+                _timestamp(row.get("created_at")),
+            )
         )
         return FakeCursor(rows=rows)
 
@@ -287,12 +310,26 @@ class FakeNotionConnection:
             "external_id": external_id,
             "title": title,
             "metadata_json": metadata_json,
-            "sync_status": "synced",
+            "sync_status": "pending",
             "created_at": created_at,
             "updated_at": updated_at,
         }
         self.tables["connector_resources"].append(row)
         return FakeCursor(rowcount=1)
+
+    def _notion_resource_mark_synced(self, params: tuple[Any, ...]) -> FakeCursor:
+        updated_at, connector_id, resource_type, external_id = params
+        matched = 0
+        for row in self.tables["connector_resources"]:
+            if (
+                row["connector_id"] == connector_id
+                and row["resource_type"] == resource_type
+                and row["external_id"] == external_id
+            ):
+                row["sync_status"] = "synced"
+                row["updated_at"] = updated_at
+                matched += 1
+        return FakeCursor(rowcount=matched)
 
     def _notion_resource_list(self, params: tuple[Any, ...]) -> FakeCursor:
         (connector_id,) = params

@@ -254,6 +254,7 @@ sequenceDiagram
     participant Service as ClaudeAgentService
     participant Hook as PreToolUse Hook
     participant Data as Data Layer
+    participant Notion as Notion API
 
     User->>Agent: "帮我查看 Notion 阅读笔记"
     Service->>Data: get_current_snapshot(workspaceId, connectorId)
@@ -276,9 +277,16 @@ sequenceDiagram
     Hook-->>Agent: db-002.json 内容
 
     Agent->>Hook: Read(".notion/pages/page-xyz.json")
-    Hook->>Data: resolve from same snapshotVersion
-    Data-->>Hook: page content or snapshot-scoped miss
-    Hook-->>Agent: page-xyz.json 内容
+    Hook->>Data: validate page ID in same snapshotVersion index
+    alt selected page
+        Data-->>Hook: selected metadata + snapshot identity
+        Hook->>Notion: GET page-xyz/markdown with projected credential
+        Notion-->>Hook: current Markdown
+        Hook-->>Agent: private page-xyz JSON temp file
+    else unselected page
+        Data-->>Hook: NOTION_RESOURCE_NOT_SELECTED
+        Hook-->>Agent: safe actionable error; no remote call
+    end
 
     Agent-->>User: "阅读笔记中有 15 条记录，最近的是《xxx》..."
 ```
@@ -393,14 +401,14 @@ sequenceDiagram
     participant Service as ClaudeAgentService
     participant Hook as PreToolUse
     participant Data as Data Layer
-    participant Bus as Event Bus
+    participant Notion as Notion API
 
-    Note over Agent,Bus: === Workspace Init ===
+    Note over Agent,Notion: === Workspace Init ===
     Service->>Data: get_current_snapshot(workspaceId, connectorId)
     Data-->>Service: CanonicalWorkspaceSnapshot{snapshotVersion}
     Service-->>Agent: workspace_context + attached snapshot
 
-    Note over Agent,Bus: === Agent 读取 ===
+    Note over Agent,Notion: === Agent 读取 ===
     Agent->>Hook: Read(".notion/snapshot.json")
     Hook->>Data: resolve from attached snapshot
     Data-->>Hook: snapshot identity
@@ -411,12 +419,13 @@ sequenceDiagram
     Data-->>Hook: index + snapshot identity
     Hook-->>Agent: index.json 内容
 
-    Note over Agent,Bus: === Page Read ===
+    Note over Agent,Notion: === Page Read ===
     Agent->>Hook: Read(".notion/pages/page-001.json")
-    Hook->>Data: resolve from same snapshotVersion
-    Data->>Bus: publish(PAGE_ACCESSED)
-    Data-->>Hook: page content or snapshot-scoped miss
-    Hook-->>Agent: page-001.json 内容
+    Hook->>Data: validate selected ID in same snapshotVersion
+    Data-->>Hook: selected metadata + snapshot identity
+    Hook->>Notion: GET page-001/markdown
+    Notion-->>Hook: current Markdown
+    Hook-->>Agent: private one-shot JSON
 ```
 
 ---

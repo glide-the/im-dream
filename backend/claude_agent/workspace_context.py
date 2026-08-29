@@ -21,6 +21,8 @@
 #                    derived from workspace-local canonical snapshot files.
 # [Sync] 2026-07-05: expose connector_id and sync cursor in the Notion block so
 #                    the workspace summary mirrors the attached snapshot identity.
+# [Sync] 2026-08-28: describe `.notion` as a lightweight index and route page
+#                    body reads through the Runtime Read hook on demand.
 
 """Workspace context prompt for the Ink & Memory Claude Agent.
 
@@ -145,6 +147,8 @@ def _render_notion_context_block(cwd: str) -> str:
 
     connector = _safe_read_json(notion_dir / "connector.json")
     snapshot = _safe_read_json(notion_dir / "snapshot.json")
+    page_index = _safe_read_json(notion_dir / "index.json")
+    database_index = _safe_read_json(notion_dir / "databases.json")
     if not connector and not snapshot:
         return ""
 
@@ -160,15 +164,15 @@ def _render_notion_context_block(cwd: str) -> str:
     snapshot_state = str(snapshot_meta.get("state") or connector.get("auth_status") or "unknown")
     selected_databases = connector.get("selected_databases") or []
     selected_pages = connector.get("selected_pages") or []
-    database_count = len(snapshot.get("databases") or selected_databases or [])
-    page_count = len(snapshot.get("index") or selected_pages or [])
+    database_count = len(database_index.get("databases") or selected_databases or [])
+    page_count = len(page_index.get("pages") or selected_pages or [])
     snapshot_version = str(snapshot_meta.get("snapshot_version") or "(not synced)")
     source_revision = str(snapshot_meta.get("source_revision") or "")
     sync_cursor = str(snapshot_meta.get("sync_cursor") or "")
     fetched_at = str(snapshot_meta.get("fetched_at") or connector.get("last_synced_at") or "")
 
     lines = [
-        "Notion device index (.notion/):",
+        "Notion lightweight index (.notion/):",
         f"  Status: {snapshot_state} | {database_count} databases | {page_count} pages | snapshot {snapshot_version}",
         f"  Connector ID: {connector_id}",
     ]
@@ -185,7 +189,8 @@ def _render_notion_context_block(cwd: str) -> str:
             "  Read .notion/index.json for the page listing.",
             "  Read .notion/databases.json for database summaries.",
             "  Read .notion/databases/<db_id>.json for database-specific pages.",
-            "  Read .notion/pages/<page_id>.json for individual page content.",
+            "  Read .notion/pages/<page_id>.json to fetch that page's current Markdown on demand.",
+            "  Page bodies are not stored in the snapshot; the Runtime Read hook resolves only IDs present in this index.",
         ]
     )
     return "\n".join(lines) + "\n"

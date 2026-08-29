@@ -36,6 +36,8 @@
 # [Sync] 2026-08-13: cover editor MCP structured business failures as tool
 #                    errors with no editor refresh or session_updated event.
 # [Sync] 2026-08-28: cover model plus global server-owned Claude Code Runtime env assembly.
+# [Sync] 2026-08-28: cover per-turn Notion credential projection handoff without
+#                    exposing credential bytes to AgentRunOptions or workspace context.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -691,7 +693,6 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             cwd="/tmp/client-workspace",
             message_parts=[{"type": "text", "text": "hello"}],
         )
-
         with (
             unittest.mock.patch.object(
                 service_module._db,
@@ -730,6 +731,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             execution.run_options.claude_tmp_workspace,
             "/tmp/thread-runtime/thread_workspace_disabled",
         )
+        self.assertIsNone(execution.run_options.notion_credential_home)
         self.assertEqual(builder.user_message_calls[0]["cwd"], "")
         managed_loader.load.assert_awaited_once_with("7", None)
 
@@ -924,16 +926,7 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
             "database_pages": {
                 "db-attach": [{"page_id": "page-attach", "title": "Attach Page"}],
             },
-            "pages": {
-                "page-attach": {
-                    "page_id": "page-attach",
-                    "title": "Attach Page",
-                    "url": "https://www.notion.so/page-attach",
-                    "last_edited": "2026-07-04T00:00:00Z",
-                    "properties": {"Name": {"title": [{"plain_text": "Attach Page"}]}},
-                    "blocks": [{"type": "paragraph", "text": "Canonical snapshot"}],
-                }
-            },
+            "pages": {},
         }
 
         class _FakeFacade:
@@ -980,6 +973,16 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                     encoding="utf-8",
                 )
 
+            def project_runtime_credentials(self, workspace_path: Path, connector_id=None):
+                del connector_id
+                notion_home = workspace_path / ".notion-home"
+                notion_home.mkdir(mode=0o700, parents=True, exist_ok=True)
+                notion_home.chmod(0o700)
+                auth_path = notion_home / "auth.json"
+                auth_path.write_text('{"access_token":"test-only-secret"}\n', encoding="utf-8")
+                auth_path.chmod(0o600)
+                return SimpleNamespace(available=True, thread_home=notion_home)
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace_path = Path(tmp_dir) / "thread_notion_attach"
             with (
@@ -1012,17 +1015,88 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
 
             build_notion_facade.assert_called_once_with(7)
             self.assertEqual(execution.run_options.cwd, str(workspace_path))
+            self.assertEqual(
+                execution.run_options.notion_credential_home,
+                str(workspace_path / ".notion-home"),
+            )
+            self.assertNotIn(
+                "test-only-secret",
+                repr(execution.run_options),
+            )
             self.assertEqual(builder.user_message_calls[0]["cwd"], str(workspace_path))
             notion_block = workspace_context_module.build_workspace_context_block(
                 str(workspace_path),
                 editor_session_id="session-attach",
             )
-            self.assertIn("Notion device index (.notion/):", notion_block)
+            self.assertIn("Notion lightweight index (.notion/):", notion_block)
+            self.assertIn(
+                "Read .notion/pages/<page_id>.json to fetch that page's current Markdown on demand.",
+                notion_block,
+            )
             self.assertIn("Connector ID: connector-attach", notion_block)
             self.assertIn("snapshot snap-attach-001", notion_block)
             self.assertIn("Source Revision: rev-attach-001", notion_block)
             self.assertIn("Sync Cursor: cursor-attach-001", notion_block)
             self.assertIn("Last Synced: 2026-07-04T00:00:00Z", notion_block)
+
+    async def test_notion_initialization_failure_is_redacted_and_turn_context_survives(self):
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(
+            context_builder=builder,
+            dream_context_mapper=_StaticDreamContextMapper(None),
+        )
+        state = AgentRunState(session_id="thread_notion_degraded")
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_notion_degraded",
+            message_parts=[{"type": "text", "text": "continue without Notion"}],
+        )
+        secret = "credential-text-must-not-enter-log"
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace_path = Path(tmp_dir) / "thread_notion_degraded"
+            workspace_path.mkdir()
+            stale_snapshot = workspace_path / ".notion"
+            stale_snapshot.mkdir()
+            (stale_snapshot / "index.json").write_text(
+                '{"pages":[{"title":"stale"}]}',
+                encoding="utf-8",
+            )
+            with (
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_system_config",
+                    return_value={"workspace_enabled": True},
+                ),
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_chat_thread",
+                    return_value=None,
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "get_or_create_workspace",
+                    return_value=workspace_path,
+                ),
+                unittest.mock.patch(
+                    "notion.build_notion_facade",
+                    side_effect=RuntimeError(secret),
+                ),
+                self.assertLogs(service_module.logger, level="WARNING") as logs,
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+            stale_snapshot_removed = not stale_snapshot.exists()
+
+        self.assertEqual(execution.run_options.cwd, str(workspace_path))
+        self.assertIsNone(execution.run_options.notion_credential_home)
+        self.assertTrue(stale_snapshot_removed)
+        self.assertNotIn(secret, "\n".join(logs.output))
+        self.assertIn("Notion Runtime projection failed safely", "\n".join(logs.output))
 
 
 def _run(coro):

@@ -1,20 +1,20 @@
-# [Input] Notion connector config and CLI runtime environment.
-# [Output] Provide ntn login/poll/status helpers for Notion authentication.
-# [Pos] auth node in backend/notion
-# [Sync] 2026-07-04: initial Notion CLI auth flow — `ntn login --no-browser`,
-#                    `ntn login poll`, and `ntn auth status` wrappers.
-# [Sync] 2026-07-05: classify `no pending login session` and `authorization session already consumed`
-#                    as terminal-pending signals for idempotent poll behavior.
+# [Input] Server-owned Notion credential home and centralized CLI policy.
+# [Output] Safe ntn login/poll/doctor helpers with minimal environment and redacted failures.
+# [Pos] auth driver node in backend/notion; paths are resolved only by credentials.py.
+# [Sync] 2026-08-28: remove request/process-home resolution, ambient token inheritance,
+#                    public path output, and obsolete `ntn auth status` usage.
+# [Sync] 2026-08-28: normalize imports during the final agentdata credential audit.
 
-"""Notion authentication helpers backed by the `ntn` CLI."""
+"""Notion authentication helpers backed by the server-owned ``ntn`` CLI."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional
 
 from .errors import (
     NotionAuthError,
@@ -23,7 +23,6 @@ from .errors import (
     NotionConfigError,
 )
 
-_DEFAULT_NOTION_HOME = Path.home() / ".config" / "notion"
 _DEFAULT_LOGIN_TIMEOUT_S = 20.0
 _DEFAULT_POLL_TIMEOUT_S = 15.0
 _DEFAULT_STATUS_TIMEOUT_S = 10.0
@@ -33,113 +32,121 @@ _NO_PENDING_SESSION_TOKENS = (
     "no pending login session found",
     "authorization session already consumed",
 )
+_PARENT_ENV_ALLOWLIST = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+)
 
 
 @dataclass(frozen=True)
 class LoginInitResult:
-    """Parsed response from `ntn login --no-browser`."""
+    """Parsed response from ``ntn login --no-browser``."""
 
     verification_url: str
     verification_code: str
     poll_interval_seconds: int = 5
-    notion_home: str = ""
 
 
 @dataclass(frozen=True)
 class AuthStatusResult:
-    """Authentication status returned by the CLI wrapper."""
+    """Safe authentication state; raw CLI output never crosses this boundary."""
 
     status: str
-    notion_home: str
     detail: str = ""
-    verification_url: str = ""
-    verification_code: str = ""
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
+def _positive_timeout(name: str, default: float, *, maximum: float = 300.0) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if 0 < value <= maximum else default
 
 
-def resolve_notion_home(config: Any = None) -> Path:
-    """Return the configured Notion home directory.
+def resolve_ntn_executable() -> str:
+    """Resolve one server-controlled executable; connector/user data cannot override it."""
 
-    The connector config may expose ``notion_home`` directly or inside a nested
-    ``config`` object.  Empty values fall back to the standard user-local path.
-    """
-
-    config_map = _mapping(config)
-    notion_home = config_map.get("notion_home")
-    if not notion_home:
-        nested = config_map.get("config")
-        if isinstance(nested, Mapping):
-            notion_home = nested.get("notion_home")
-    if not notion_home:
-        notion_home = os.environ.get("NOTION_HOME") or _DEFAULT_NOTION_HOME
-    return Path(str(notion_home)).expanduser()
+    configured = os.environ.get("INK_NOTION_CLI_PATH", "").strip()
+    if configured:
+        candidate = Path(configured).expanduser()
+        if not candidate.is_absolute() or not candidate.is_file() or not os.access(candidate, os.X_OK):
+            raise NotionCLIUnavailableError("Notion service is temporarily unavailable.")
+        return str(candidate.resolve(strict=True))
+    discovered = shutil.which("ntn")
+    if not discovered:
+        raise NotionCLIUnavailableError("Notion service is temporarily unavailable.")
+    return str(Path(discovered).resolve(strict=True))
 
 
-def build_notion_env(config: Any = None, extra_env: Optional[Mapping[str, str]] = None) -> dict[str, str]:
-    """Return a subprocess environment with ``NOTION_HOME`` set."""
+def ensure_notion_home(notion_home: str | Path) -> Path:
+    """Create one explicit server-owned home without consulting HOME/config/env."""
 
-    notion_home = resolve_notion_home(config)
-    notion_home.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    env["NOTION_HOME"] = str(notion_home)
-    if extra_env:
-        for key, value in extra_env.items():
-            if value is not None:
-                env[str(key)] = str(value)
+    path = Path(notion_home)
+    if not path.is_absolute():
+        raise NotionConfigError("Notion credential home must be an absolute server path.")
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.is_symlink() or not path.is_dir():
+        raise NotionConfigError("Notion credential home is not a safe directory.")
+    os.chmod(path, 0o700, follow_symlinks=False)
+    return path.resolve(strict=True)
+
+
+def build_notion_env(notion_home: str | Path) -> dict[str, str]:
+    """Build a minimal ntn environment with a non-overridable file store."""
+
+    home = ensure_notion_home(notion_home)
+    env = {
+        key: os.environ[key]
+        for key in _PARENT_ENV_ALLOWLIST
+        if os.environ.get(key)
+    }
+    env["NOTION_HOME"] = str(home)
+    env["NOTION_KEYRING"] = "0"
+    # Deliberately omit NOTION_API_TOKEN and HOME. The user identity is the
+    # server-owned file snapshot, never an ambient process or user env value.
     return env
 
 
-def _timeout_seconds(config: Any, key: str, default: float) -> float:
-    config_map = _mapping(config)
-    raw = config_map.get(key)
-    if raw is None:
-        nested = config_map.get("config")
-        if isinstance(nested, Mapping):
-            raw = nested.get(key)
-    try:
-        if raw is None:
-            return default
-        return max(1.0, float(raw))
-    except (TypeError, ValueError):
-        return default
-
-
-def _parse_login_output(stdout: str, notion_home: Path) -> LoginInitResult:
+def _parse_login_output(stdout: str) -> LoginInitResult:
     url_match = _URL_RE.search(stdout or "")
     code_match = _VERIFICATION_CODE_RE.search(stdout or "")
     if not url_match or not code_match:
-        raise NotionAuthError(
-            "Failed to parse verification URL/code from `ntn login` output."
-        )
+        raise NotionAuthError("Notion authorization could not be started. Please retry.")
     return LoginInitResult(
         verification_url=url_match.group(0).rstrip(").,"),
         verification_code=code_match.group(0).strip(),
         poll_interval_seconds=5,
-        notion_home=str(notion_home),
     )
 
 
 async def _run_ntn_command(
     *args: str,
-    config: Any = None,
+    notion_home: str | Path,
     timeout_seconds: float,
 ) -> tuple[int, str, str]:
-    env = build_notion_env(config)
+    executable = resolve_ntn_executable()
     try:
         proc = await asyncio.create_subprocess_exec(
-            "ntn",
+            executable,
             *args,
-            env=env,
+            env=build_notion_env(notion_home),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-    except FileNotFoundError as exc:  # pragma: no cover - depends on host env
-        raise NotionCLIUnavailableError("`ntn` CLI is not installed or not on PATH.") from exc
+    except (FileNotFoundError, PermissionError, OSError) as exc:
+        raise NotionCLIUnavailableError("Notion service is temporarily unavailable.") from exc
 
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
@@ -147,101 +154,105 @@ async def _run_ntn_command(
         proc.kill()
         with contextlib.suppress(Exception):
             await proc.wait()
-        raise NotionAuthTimeoutError("Notion CLI command timed out.") from exc
+        raise NotionAuthTimeoutError("Notion authorization timed out. Please retry.") from exc
 
     return proc.returncode or 0, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
 
 
-async def start_login(config: Any = None) -> LoginInitResult:
-    """Run `ntn login --no-browser` and parse the verification payload."""
+async def start_login(notion_home: str | Path) -> LoginInitResult:
+    """Start device authorization inside an isolated pending user home."""
 
-    notion_home = resolve_notion_home(config)
     code, stdout, stderr = await _run_ntn_command(
         "login",
         "--no-browser",
-        config=config,
-        timeout_seconds=_timeout_seconds(config, "auth_login_timeout_seconds", _DEFAULT_LOGIN_TIMEOUT_S),
+        notion_home=notion_home,
+        timeout_seconds=_positive_timeout(
+            "INK_NOTION_AUTH_LOGIN_TIMEOUT_SECONDS", _DEFAULT_LOGIN_TIMEOUT_S
+        ),
     )
     if code != 0:
-        raise NotionAuthError(stderr.strip() or stdout.strip() or "Notion login failed.")
-    return _parse_login_output(stdout or stderr, notion_home)
+        raise NotionAuthError("Notion authorization could not be started. Please retry.")
+    return _parse_login_output(stdout or stderr)
 
 
-async def poll_login(config: Any = None) -> AuthStatusResult:
-    """Run `ntn login poll` and classify the authentication state."""
+async def poll_login(notion_home: str | Path) -> AuthStatusResult:
+    """Poll device authorization and map CLI output to a safe product state."""
 
-    notion_home = resolve_notion_home(config)
     code, stdout, stderr = await _run_ntn_command(
         "login",
         "poll",
-        config=config,
-        timeout_seconds=_timeout_seconds(config, "auth_poll_timeout_seconds", _DEFAULT_POLL_TIMEOUT_S),
+        notion_home=notion_home,
+        timeout_seconds=_positive_timeout(
+            "INK_NOTION_AUTH_POLL_TIMEOUT_SECONDS", _DEFAULT_POLL_TIMEOUT_S
+        ),
     )
     combined = f"{stdout}\n{stderr}".lower()
     if code == 0:
-        return AuthStatusResult(status="authenticated", notion_home=str(notion_home))
+        return AuthStatusResult(status="authenticated", detail="Notion is connected.")
     if any(token in combined for token in _NO_PENDING_SESSION_TOKENS):
         return AuthStatusResult(
-            status="pending",
-            notion_home=str(notion_home),
-            detail=stdout.strip() or stderr.strip() or "No pending login session found.",
+            status="consumed",
+            detail="Notion authorization is no longer active. Start authorization again.",
         )
     if "slow_down" in combined or "authorization_pending" in combined or "pending" in combined:
-        return AuthStatusResult(status="pending", notion_home=str(notion_home), detail=stdout.strip() or stderr.strip())
+        return AuthStatusResult(
+            status="pending",
+            detail="Waiting for confirmation in Notion.",
+        )
     if "expired" in combined or "timeout" in combined:
-        return AuthStatusResult(status="expired", notion_home=str(notion_home), detail=stdout.strip() or stderr.strip())
-    return AuthStatusResult(status="expired", notion_home=str(notion_home), detail=stdout.strip() or stderr.strip() or "Notion login poll failed.")
+        return AuthStatusResult(
+            status="expired",
+            detail="Notion authorization expired. Start authorization again.",
+        )
+    raise NotionAuthError("Notion authorization could not be completed. Please retry.")
 
 
-async def verify_status(config: Any = None) -> AuthStatusResult:
-    """Run `ntn auth status` to verify the current token."""
+async def verify_status(notion_home: str | Path) -> AuthStatusResult:
+    """Use the supported ``ntn doctor`` command to check the effective session."""
 
-    notion_home = resolve_notion_home(config)
     code, stdout, stderr = await _run_ntn_command(
-        "auth",
-        "status",
-        config=config,
-        timeout_seconds=_timeout_seconds(config, "auth_status_timeout_seconds", _DEFAULT_STATUS_TIMEOUT_S),
+        "doctor",
+        notion_home=notion_home,
+        timeout_seconds=_positive_timeout(
+            "INK_NOTION_AUTH_STATUS_TIMEOUT_SECONDS", _DEFAULT_STATUS_TIMEOUT_S
+        ),
     )
-    detail = stdout.strip() or stderr.strip()
     if code == 0:
-        return AuthStatusResult(status="authenticated", notion_home=str(notion_home), detail=detail)
-    if "expired" in detail.lower() or "unauthorized" in detail.lower() or "invalid" in detail.lower():
-        return AuthStatusResult(status="expired", notion_home=str(notion_home), detail=detail)
-    return AuthStatusResult(status="expired", notion_home=str(notion_home), detail=detail or "Notion auth status check failed.")
+        return AuthStatusResult(status="authenticated", detail="Notion is connected.")
+    combined = f"{stdout}\n{stderr}".lower()
+    if any(token in combined for token in ("unauthorized", "expired", "invalid", "not logged")):
+        return AuthStatusResult(
+            status="expired",
+            detail="Notion authorization expired. Reconnect Notion and retry.",
+        )
+    return AuthStatusResult(
+        status="error",
+        detail="Notion connection could not be verified. Reconnect Notion and retry.",
+    )
 
 
-def ensure_notion_home(config: Any = None) -> Path:
-    """Create the configured Notion home directory and return it."""
-
-    notion_home = resolve_notion_home(config)
-    notion_home.mkdir(parents=True, exist_ok=True)
-    return notion_home
-
-
-def normalize_login_result(result: Any) -> dict[str, Any]:
-    """Return a serialisable dict for a login or poll result."""
+def normalize_login_result(result: object) -> dict[str, object]:
+    """Return a path-free public response."""
 
     if isinstance(result, LoginInitResult):
         return {
             "verificationUrl": result.verification_url,
             "verificationCode": result.verification_code,
             "pollIntervalSeconds": result.poll_interval_seconds,
-            "notionHome": result.notion_home,
         }
     if isinstance(result, AuthStatusResult):
-        payload = {
-            "status": result.status,
-            "notionHome": result.notion_home,
-        }
-        if result.detail:
-            payload["detail"] = result.detail
-        if result.verification_url:
-            payload["verificationUrl"] = result.verification_url
-        if result.verification_code:
-            payload["verificationCode"] = result.verification_code
-        return payload
-    raise NotionConfigError(f"Unsupported auth result type: {type(result)!r}")
+        return {"status": result.status, "detail": result.detail}
+    raise NotionConfigError("Unsupported Notion auth result.")
 
 
-import contextlib  # noqa: E402  # imported late for the timeout cleanup path
+__all__ = [
+    "AuthStatusResult",
+    "LoginInitResult",
+    "build_notion_env",
+    "ensure_notion_home",
+    "normalize_login_result",
+    "poll_login",
+    "resolve_ntn_executable",
+    "start_login",
+    "verify_status",
+]

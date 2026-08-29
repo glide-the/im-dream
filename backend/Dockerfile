@@ -26,6 +26,8 @@
 #        official Claude Code 2.1.241 after safely removing only the selector's
 #        conflicting `claude` alias, so /usr/local/bin/claude remains the
 #        explicit CLAUDE_CODE_CLI_PATH rollback artifact.
+# [Sync] 2026-08-28: install and verify ntn 0.15.1 so the backend-owned Notion
+#        Skill/MCP path exists in the same backend-only image as its built-in Skill.
 
 ARG NODE_VERSION=22.18.0
 FROM node:${NODE_VERSION}-bookworm-slim AS node_runtime
@@ -56,6 +58,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 ARG CLAUDE_CODE_VERSION=2.1.241
 ARG INK_CLAUDE_CODE_VERSION=0.1.3
+ARG NOTION_CLI_VERSION=0.15.1
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i \
@@ -120,6 +123,10 @@ RUN set -eux; \
     test "$(ink-claude-code-dream --version)" = "${CLAUDE_CODE_VERSION} (Claude Code)"; \
     claude mcp login --help | grep -F -- "--no-browser"; \
     claude mcp logout --help >/dev/null; \
+    npm install -g --registry="${NPM_REGISTRY}" "ntn@${NOTION_CLI_VERSION}"; \
+    test "$(ntn --version)" = "ntn ${NOTION_CLI_VERSION}"; \
+    ntn login --help | grep -F -- "--no-browser"; \
+    ntn doctor --help >/dev/null; \
     npm cache clean --force
 
 WORKDIR /app

@@ -36,6 +36,8 @@
 #                    user-facing Workspace Mode is disabled.
 # [Sync] 2026-08-28: carry a server-owned, exact Claude Code Runtime env projection
 #                    separately from user SDK env so model/global policy wins.
+# [Sync] 2026-08-28: carry the repr-hidden thread Notion credential projection
+#                    path to the lazy Read hook, separately from Agent/browser env.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -218,6 +220,9 @@ class AgentRunOptions:
         default_factory=dict,
         repr=False,
     )
+    # Exact server-owned {thread}/.notion-home projection. It is consumed only
+    # by the Runtime's lazy Notion Read hook and never merged into Agent/Bash env.
+    notion_credential_home: Optional[str] = field(default=None, repr=False)
     # Maximum turns for the agent.
     max_turns: int = 100
     # Allowed tools for the agent.

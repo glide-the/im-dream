@@ -3,12 +3,15 @@
 # [Output] One supervised Vite Preview process on 6006 and FastAPI process on 8765.
 # [Pos] AutoDL screen-session entrypoint for the complete direct-host Dream stack.
 # [Sync] 2026-08-26: supervise same-origin frontend 6006 and private backend 8765 without nginx.
+# [Sync] 2026-08-28: bind Agent workspaces and Notion user credentials to the
+#                    explicit persistent AutoDL agentdata root.
 set -euo pipefail
 
 : "${AUTODL_DREAM_ENV_FILE:?AUTODL_DREAM_ENV_FILE is required}"
 : "${AUTODL_DREAM_PID_FILE:?AUTODL_DREAM_PID_FILE is required}"
 : "${AUTODL_NODE_BIN:?AUTODL_NODE_BIN is required}"
 : "${AUTODL_NPM_BIN:?AUTODL_NPM_BIN is required}"
+: "${INK_AUTODL_DATA_ROOT:?INK_AUTODL_DATA_ROOT is required}"
 : "${AUTODL_DREAM_FRONTEND_PORT:=6006}"
 : "${AUTODL_DREAM_BACKEND_PORT:=8765}"
 
@@ -41,6 +44,9 @@ env["HOST"] = "127.0.0.1"
 env["PORT"] = backend_port
 env.setdefault("VITE_DEV_API_PROXY_TARGET", f"http://127.0.0.1:{backend_port}")
 env.setdefault("NO_COLOR", "1")
+agentdata_root = Path(env["INK_AUTODL_DATA_ROOT"]).resolve(strict=True)
+env.setdefault("AGENT_CWD", str(agentdata_root / "agent-workspaces"))
+env.setdefault("INK_NOTION_RUNTIME_ROOT", str(agentdata_root / "notion-runtime"))
 
 python = str(release_root / "venv/bin/python")
 node = str(Path(env["AUTODL_NODE_BIN"]) / "node")
