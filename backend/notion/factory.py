@@ -11,6 +11,8 @@
 #                    apply versioned sync-policy state, and make Chat materialization remote-I/O free.
 # [Sync] 2026-08-28: publish index-only snapshots, mark only exact included
 #                    resources synced, and persist cancellation as a retryable local failure.
+# [Sync] 2026-08-29: preserve effective credentials after failed reauthorization
+#                    and make an empty source selection a successful fail-closed clear.
 
 """Connector facade for the Notion resource connector backend."""
 from __future__ import annotations
@@ -196,6 +198,15 @@ class NotionConnectorFacade:
             return False
         return (datetime.now(timezone.utc) - last_polled).total_seconds() < _SESSION_POLL_IN_FLIGHT_SECONDS
 
+    def _session_has_effective_auth(self, session: Mapping[str, Any]) -> bool:
+        """Preserve only an authorization known effective before reauth began."""
+
+        return (
+            str(session.get("auth_session_previous_status") or "")
+            == "authenticated"
+            and self.credential_store.has_credentials(self.user_id)
+        )
+
     def _persist_auth_state(
         self,
         connector_id: str,
@@ -286,6 +297,9 @@ class NotionConnectorFacade:
     async def start_auth(self, connector_id: Optional[str] = None) -> dict[str, Any]:
         connector = self._resolve_connector(connector_id)
         session = _build_auth_session()
+        session["auth_session_previous_status"] = str(
+            connector.get("auth_status") or ""
+        )
         auth_session_id = str(session["auth_session_id"])
         pending_home = self.credential_store.begin_auth(self.user_id, auth_session_id)
         try:
@@ -338,15 +352,20 @@ class NotionConnectorFacade:
                     self.credential_store.abort_auth(self.user_id, auth_session_id)
                 except NotionCredentialError:
                     pass
+            preserved_status = (
+                "authenticated"
+                if self._session_has_effective_auth(session)
+                else "expired"
+            )
             updated = self._persist_auth_state(
                 str(connector["id"]),
-                auth_status="expired",
+                auth_status=preserved_status,
                 session=session,
                 detail="Auth session expired.",
             )
             return {
                 "connector": updated,
-                "auth_status": "expired",
+                "auth_status": preserved_status,
                 "status": "expired",
                 "detail": "Auth session expired.",
             }
@@ -401,7 +420,7 @@ class NotionConnectorFacade:
                 session["auth_session_status"] = "failed"
                 preserved_status = (
                     "authenticated"
-                    if self.credential_store.has_credentials(self.user_id)
+                    if self._session_has_effective_auth(session)
                     else "error"
                 )
                 self._persist_auth_state(
@@ -436,6 +455,8 @@ class NotionConnectorFacade:
             if str(session.get("auth_session_status")) == "authenticated":
                 auth_status = "authenticated"
             elif str(saved.get("auth_status") or "") == "authenticated":
+                auth_status = "authenticated"
+            elif self._session_has_effective_auth(session):
                 auth_status = "authenticated"
             else:
                 session["auth_session_status"] = "consumed"
@@ -479,7 +500,11 @@ class NotionConnectorFacade:
                 )
             except NotionCredentialError:
                 pass
-            auth_status = "expired"
+            auth_status = (
+                "authenticated"
+                if self._session_has_effective_auth(session)
+                else "expired"
+            )
             saved = self._persist_auth_state(
                 str(connector["id"]),
                 auth_status=auth_status,
@@ -495,7 +520,11 @@ class NotionConnectorFacade:
 
         # Unknown auth states fail closed for Notion while the Agent turn stays isolated.
         session["auth_session_status"] = "failed"
-        auth_status = "error"
+        auth_status = (
+            "authenticated"
+            if self._session_has_effective_auth(session)
+            else "error"
+        )
         saved = self._persist_auth_state(
             str(connector["id"]),
             auth_status=auth_status,
@@ -567,7 +596,42 @@ class NotionConnectorFacade:
         workspace_id: Optional[str] = None,
     ) -> dict[str, Any]:
         connector = self._resolve_connector(connector_id)
-        store.replace_connector_resources(str(connector["id"]), self.user_id, databases, pages)
+        selected_databases = [dict(item) for item in databases]
+        selected_pages = [dict(item) for item in pages]
+        selection = store.replace_connector_resources(
+            str(connector["id"]),
+            self.user_id,
+            selected_databases,
+            selected_pages,
+        )
+        if not selected_databases and not selected_pages:
+            connector_key = str(connector["id"])
+            assert self.snapshot_store is not None
+            self.snapshot_store.clear_connector(self.user_id, connector_key)
+            config = _mapping(_mapping(selection.get("connector")).get("config"))
+            cleared_policy = transition_sync_policy(
+                config.get(SYNC_POLICY_CONFIG_KEY),
+                "cleared",
+            )
+            cleared_connector = store.update_connector(
+                connector_key,
+                self.user_id,
+                {
+                    "current_snapshot_version": None,
+                    "current_source_revision": None,
+                    "current_sync_cursor": None,
+                    "last_synced_at": None,
+                    "config": {SYNC_POLICY_CONFIG_KEY: cleared_policy},
+                },
+            )
+            return {
+                "connector": cleared_connector,
+                "snapshot": None,
+                "snapshotIdentity": None,
+                "databaseCount": 0,
+                "pageCount": 0,
+                "synced": False,
+            }
         return await self.sync(connector_id=str(connector["id"]), workspace_id=workspace_id)
 
     async def sync(

@@ -3,6 +3,8 @@
 # [Pos] Notion agentdata snapshot provider contract test in backend/tests
 # [Sync] 2026-08-28: prove background-owned lightweight indexes are independent
 #                    of Chat and copied only into the requesting thread.
+# [Sync] 2026-08-29: prove every turn intersects LKG content with current actor
+#                    selection and excludes private connector configuration.
 
 from __future__ import annotations
 
@@ -103,7 +105,16 @@ class TestNotionSnapshotStore(unittest.TestCase):
             self.store.publish_current(7, "connector-a", snapshot)
 
     def test_thread_projection_uses_lkg_and_refreshes_only_on_next_turn(self) -> None:
-        connector = {"id": "connector-a", "platform": "notion"}
+        connector = {
+            "id": "connector-a",
+            "platform": "notion",
+            "sources": [
+                {
+                    "resource_type": "notion_database",
+                    "external_id": "database-1",
+                }
+            ],
+        }
         self.store.publish_current(7, "connector-a", _snapshot("connector-a", "v1", "first"))
         first = self.store.project_thread(7, connector, self.thread_a)
         index_path = self.thread_a / ".notion" / "index.json"
@@ -118,6 +129,33 @@ class TestNotionSnapshotStore(unittest.TestCase):
         self.assertEqual(second.snapshot_version, "v2")
         self.assertEqual(json.loads(index_path.read_text())["pages"][0]["title"], "second")
         self.assertFalse((self.thread_b / ".notion").exists())
+
+    def test_projection_removes_deselected_pages_and_private_config(self) -> None:
+        self.store.publish_current(
+            7,
+            "connector-a",
+            _snapshot("connector-a", "v1", "private page"),
+        )
+        connector = {
+            "id": "connector-a",
+            "platform": "notion",
+            "auth_status": "authenticated",
+            "user_id": 7,
+            "config": {"verification_code": "must-not-project"},
+            "sources": [],
+        }
+
+        projection = self.store.project_thread(7, connector, self.thread_a)
+
+        self.assertFalse(projection.available)
+        index = json.loads((self.thread_a / ".notion" / "index.json").read_text())
+        public_connector = json.loads(
+            (self.thread_a / ".notion" / "connector.json").read_text()
+        )
+        self.assertEqual(index["pages"], [])
+        self.assertNotIn("user_id", public_connector)
+        self.assertNotIn("config", public_connector)
+        self.assertNotIn("must-not-project", json.dumps(public_connector))
 
     def test_missing_snapshot_projects_truthful_empty_state(self) -> None:
         projection = self.store.project_thread(

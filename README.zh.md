@@ -3,6 +3,7 @@
 <!-- [定位] README.md 英文真相源的中文镜像；事实、结构和命令必须与 README.md 保持一致。 -->
 <!-- [同步] 2026-08-28：以当前 develop 流程、精确 SDK/Runtime 配对、本机 Runtime 安装、故障排查和注意事项替换旧说明。 -->
 <!-- [同步] 2026-08-28：记录固定 ntn 安装、agentdata 内按用户隔离的凭证与当前快照、后台策略同步及 per-Thread 投影合同。 -->
+<!-- [同步] 2026-08-29：记录当前选择范围过滤、thread 最小元数据、空范围撤销和重新授权 LKG 行为。 -->
 
 # Ink & Memory
 
@@ -25,7 +26,7 @@ Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 
 - **Dream** —— 启动 Dream Run，审阅剧本、分镜、提示词和生成产物。
 - **Decks** —— 创建并版本化 Deck、Agent、Prompt、资源和 Claude Plugin 引用。
 - **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、MCP Server、Skill 和插件。
-- **Notion 资源** —— 在 Settings 中授权一次并选择可访问资源，通过内置只读 Notion Skill 使用，不向 Agent 暴露 token 或 CLI 路径。
+- **Notion 资源** —— 在 Settings 中连接并选择精确允许范围，在 Chat 外刷新轻量索引，通过内置只读 Notion Skill 使用，不向 Agent 暴露凭证或 CLI 路径。
 - **平台集成** —— 从 Admin/Gateway 获取已认证的模型 alias、订阅资格、用量和计费能力。
 
 Deck 市场分发当前明确延期，参见 [docs/design/deck-register/README.md](docs/design/deck-register/README.md)。
@@ -209,7 +210,7 @@ Admin provision 命令会把其余本机服务身份和模型 alias 写入 gitig
 
 `INK_NOTION_RUNTIME_ROOT` 必须是与 `AGENT_CWD` 位于同一持久 agentdata 区域的服务端绝对路径。Dream 将每个用户的不透明凭证源保存到 `users/<actor-hash>/home`，并将每个连接器最近一次成功的轻量索引保存到 `users/<actor-hash>/snapshots/<connector-id>/current.json`。保存资源选择时立即执行首次索引同步；之后由连接器的服务端策略在后台刷新到期索引，不要求用户先发起 Chat 或初始化 workspace。索引只含已选 ID 与紧凑元数据，不保存页面 Markdown、blocks 或附件。
 
-启用可信 thread workspace 的 Chat turn 只会在 Runtime 初始化时把当前用户最近一次成功凭证和索引复制到 `{AGENT_CWD}/{thread_id}/.notion-home` 与 `.notion`，不会调用 Notion 或执行索引同步。当 Agent 读取已在索引中的 `.notion/pages/<page-id>.json` 虚拟路径时，Runtime 会先校验 ID，再只获取该页当前 Markdown。Workspace Mode 关闭时两种投影都不可用，page hook 保持 fail closed，因为该模式按设计不启用 workspace 文件系统 sandbox。禁止把应用 `NOTION_HOME` 指向 `~/.config/notion`、浏览器提交的路径或共享进程用户目录；Agent 无法读取或写入投影文件。
+启用可信 thread workspace 的 Chat turn 只会在 Runtime 初始化时把当前用户有效凭证和最近一次成功索引复制到 `{AGENT_CWD}/{thread_id}/.notion-home` 与 `.notion`；投影前先与用户当前选择范围求交，并最小化连接器元数据。该过程不会调用 Notion 或执行索引同步，因此即使新索引刷新失败，清空或缩小选择范围也会在下一 turn 生效。当 Agent 读取已在索引中的 `.notion/pages/<page-id>.json` 虚拟路径时，Runtime 会先校验 ID，再只获取该页当前 Markdown。Workspace Mode 关闭时两种投影都不可用，page hook 保持 fail closed，因为该模式按设计不启用 workspace 文件系统 sandbox。禁止把应用 `NOTION_HOME` 指向 `~/.config/notion`、浏览器提交的路径或共享进程用户目录；Agent 无法读取或写入投影文件。
 
 ### 6. 启动 Dream
 
@@ -276,7 +277,7 @@ python3 scripts/verify_claude_registry_release.py \
 6. **禁止全局清理服务。** 测试只能停止和清理由本轮测试创建的进程与临时资源。
 7. **已发布版本不可覆盖。** 错误 Runtime 必须通过前向版本修复或显式评审回滚，正常回滚不得覆盖或 unpublish 已验收版本。
 8. **模型输出能力由服务端所有。** Admin 最终选中模型的 `maxOutputTokens` 必须投影到 Runtime；浏览器设置、用户环境、workspace 文件和 Gateway body 改写均不得替代它。
-9. **Notion 凭证与轻量索引均按用户所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，Runtime 只接收 per-Thread 投影，页面正文按需读取；进程 `HOME`、ambient `NOTION_API_TOKEN`、浏览器配置和 workspace 文件都不能覆盖任一来源。
+9. **Notion 凭证与轻量索引均按用户所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，Runtime 只接收当前选择范围内的 per-Thread 投影，重新授权失败时保留仍有效的凭证，页面正文按需读取；进程 `HOME`、ambient `NOTION_API_TOKEN`、浏览器配置和 workspace 文件都不能覆盖任一来源。
 
 ## 故障排查
 

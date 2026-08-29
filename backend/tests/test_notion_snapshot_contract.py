@@ -8,6 +8,8 @@
 #                    symlink without deleting its external target.
 # [Sync] 2026-08-28: prove legacy embedded page bodies are never projected into
 #                    a thread; virtual page Reads remain hook-only during migration.
+# [Sync] 2026-08-29: prove each materialized `.notion/README.md` indexes the
+#                    installed notion-session Skill and its index-first workflow.
 
 from __future__ import annotations
 
@@ -244,6 +246,16 @@ class NotionSnapshotCleanupTest(unittest.TestCase):
                 connector=snapshot["connector"],
                 snapshot=snapshot,
             )
+
+            readme = (workspace / ".notion" / "README.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("## Skill index", readme)
+            self.assertIn("`notion-session`", readme)
+            self.assertIn("`skills/notion-session/SKILL.md`", readme)
+            self.assertIn("`.claude/skills/notion-session`", readme)
+            self.assertIn("index-first workflow", readme)
+            self.assertIn("continue any answer that does not depend on Notion", readme)
 
             self.assertEqual(
                 json.loads((workspace / ".notion" / "index.json").read_text())[

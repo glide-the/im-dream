@@ -29,6 +29,8 @@
 //                    boundary but removes card fill/shadow while inner rows use soft hierarchy.
 // [Sync] 2026-07-20: i18n — status/auth/sync labels, stat chips, empty state, and pagination
 //                    hints resolve through the chat.connector namespace (en + zh) via useTranslation.
+// [Sync] 2026-08-29: distinguish degraded index/reauthorization state from healthy access
+//                    and never label an authenticated connector without an index as synced.
 import { useCallback, useEffect, useState, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -77,6 +79,9 @@ function formatLastInteraction(connector: ResourceConnector | null, t: TFunction
 
 function getConnectorStatusLabel(connector: ResourceConnector | null, t: TFunction): string {
   if (!connector) return t('chat.connector.status.notConnected');
+  if (connector.syncPolicy?.status === 'error' || connector.auth.warning) {
+    return t('chat.connector.status.degraded');
+  }
   if (connector.status === 'authenticated' || connector.status === 'synced' || connector.auth.status === 'authenticated') {
     return t('chat.connector.status.healthy');
   }
@@ -112,12 +117,18 @@ function getAuthorizationStatusLabel(connector: ResourceConnector, t: TFunction)
 }
 
 function getSyncStatusLabel(connector: ResourceConnector, t: TFunction): string {
+  if (connector.syncPolicy?.status === 'error') {
+    return t('chat.connector.sync.error');
+  }
   switch (connector.status) {
     case 'syncing':
       return t('chat.connector.sync.syncing');
     case 'synced':
-    case 'authenticated':
       return t('chat.connector.sync.synced');
+    case 'authenticated':
+      return connector.lastSyncedAt
+        ? t('chat.connector.sync.synced')
+        : t('chat.connector.sync.notSynced');
     case 'authenticating':
       return t('chat.connector.sync.waitingAuth');
     case 'expired':
@@ -152,6 +163,7 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
   const healthy = connector.status === 'authenticated'
     || connector.status === 'synced'
     || connector.auth.status === 'authenticated';
+  const degraded = connector.syncPolicy?.status === 'error' || Boolean(connector.auth.warning);
   const statusLabel = getConnectorStatusLabel(connector, t);
   const lastInteraction = formatLastInteraction(connector, t);
   const metaItems = [
@@ -220,8 +232,14 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
                 padding: '0.22rem 0.48rem',
                 borderRadius: '999px',
                 border: 'none',
-                background: healthy ? 'color-mix(in srgb, var(--color-state-success) 16%, var(--color-bg-paper))' : 'var(--color-bg-hover)',
-                color: healthy ? 'var(--color-state-success)' : 'var(--color-text-secondary)',
+                background: degraded
+                  ? 'color-mix(in srgb, var(--color-state-warning) 16%, var(--color-bg-paper))'
+                  : healthy
+                    ? 'color-mix(in srgb, var(--color-state-success) 16%, var(--color-bg-paper))'
+                    : 'var(--color-bg-hover)',
+                color: degraded
+                  ? 'var(--color-state-warning)'
+                  : healthy ? 'var(--color-state-success)' : 'var(--color-text-secondary)',
                 fontSize: '0.68rem',
                 fontWeight: 700,
               }}
@@ -232,7 +250,9 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
                   width: '0.4rem',
                   height: '0.4rem',
                   borderRadius: '999px',
-                  background: healthy ? 'var(--color-state-success)' : 'var(--color-text-muted)',
+                  background: degraded
+                    ? 'var(--color-state-warning)'
+                    : healthy ? 'var(--color-state-success)' : 'var(--color-text-muted)',
                 }}
               />
               {statusLabel}

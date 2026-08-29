@@ -3,6 +3,7 @@
 // [Pos] Notion resource connector browser API contract test in frontend/src/api/__tests__
 // [Sync] 2026-08-28: prevent backend failures from becoming browser-local authenticated/synced state.
 // [Sync] 2026-08-28: keep pending index resources and active policy refreshes visibly syncing.
+// [Sync] 2026-08-29: cover recoverable failed-reauth warnings and compact selection payloads without raw upstream data.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -120,6 +121,18 @@ test('active sync policy takes precedence over an older successful index', () =>
   expect(connector.status).toBe('syncing');
 });
 
+test('failed reauthorization warning does not mask the effective credential', () => {
+  const connector = normalizeResourceConnectorFallback(connectorPayload({
+    config: {
+      auth_error: 'The new authorization attempt expired.',
+      auth_session: { auth_session_status: 'expired' },
+    },
+  }));
+
+  expect(connector.auth.status).toBe('authenticated');
+  expect(connector.auth.warning).toBe('The new authorization attempt expired.');
+});
+
 test('backend failure remains actionable and never writes connector state to localStorage', async () => {
   globalThis.fetch = (async () => jsonResponse({
     detail: 'Notion could not complete the request. Retry later.',
@@ -148,13 +161,18 @@ test('resource selection returns only server-confirmed snapshot status', async (
   const connector = await selectConnectorResources('connector-1', {
     databaseIds: ['database-1'],
     pageIds: [],
-    databaseOptions: [{ id: 'database-1', title: 'Database' }],
+    databaseOptions: [{
+      id: 'database-1',
+      title: 'Database',
+      propertiesSchema: { Name: { type: 'title' } },
+    }],
   });
   expect(calls[0]?.url).toContain('/api/connectors/connector-1/resources/select');
   expect(calls[0]?.body).toEqual({
     selected_databases: [{
       database_id: 'database-1',
       title: 'Database',
+      properties_schema: { Name: { type: 'title' } },
     }],
     selected_pages: [],
   });

@@ -2,6 +2,7 @@
 # [Output] Validated default/desired/effective policy snapshots, monotonic revisions, due decisions, and safe status transitions.
 # [Pos] Notion snapshot synchronization policy model in backend/notion
 # [Sync] 2026-08-28: define the Settings strategy contract without adding a database table or environment-specific path.
+# [Sync] 2026-08-29: add a cleared transition for a connected actor with an explicit empty resource scope.
 
 """Notion canonical snapshot synchronization policy."""
 from __future__ import annotations
@@ -185,6 +186,13 @@ def transition_sync_policy(
         current["status"] = "error"
         current["last_attempt_at"] = _time_text(current_time)
         current["last_error_code"] = str(error_code or "SYNC_FAILED")
+    elif transition == "cleared":
+        current["status"] = (
+            "applied" if current["effective"]["enabled"] else "disabled"
+        )
+        current["last_attempt_at"] = None
+        current["last_success_at"] = None
+        current["last_error_code"] = None
     else:
         raise NotionConnectorError("Sync policy transition is invalid.")
     for key in ("default", "allowed_interval_minutes", "next_sync_at"):

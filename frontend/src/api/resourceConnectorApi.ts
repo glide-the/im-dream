@@ -21,6 +21,8 @@
 //                    Chat connector status panels without adding another backend endpoint.
 // [Sync] 2026-08-28: remove the obsolete localStorage connector authority, preserve backend
 //                    synchronization failures, and consume the versioned scheduled-sync policy.
+// [Sync] 2026-08-29: drop opaque Notion response blobs from selection payloads and expose
+//                    recoverable reauthorization warnings without masking effective access.
 /**
  * Resource connector API helpers.
  *
@@ -68,6 +70,7 @@ export interface ConnectorAuthSession {
   pollAttempts?: number;
   expiresAt?: string;
   message?: string;
+  warning?: string;
 }
 
 export interface ConnectorSource {
@@ -123,7 +126,6 @@ export interface NotionResourceOption {
   url?: string;
   lastEdited?: string;
   propertiesSchema?: Record<string, unknown>;
-  raw?: unknown;
 }
 
 export interface ConnectorResourceSelection {
@@ -367,8 +369,17 @@ function normalizeConnectorAuth(raw: unknown): ConnectorAuthSession {
     ?? asString(record.auth_status)
     ?? asString(record.status)
     ?? asString(session.auth_session_status);
+  const effectiveStatus = localizeAuthStatus(resolvedStatus, hasBackendAuthSession(raw));
+  const sessionStatus = asString(session.auth_session_status)?.toLowerCase();
+  const message =
+    asString(auth.message)
+    ?? asString(auth.detail)
+    ?? asString(record.message)
+    ?? asString(record.detail)
+    ?? asString(config.auth_error)
+    ?? asString(session.auth_error);
   return {
-    status: localizeAuthStatus(resolvedStatus, hasBackendAuthSession(raw)),
+    status: effectiveStatus,
     verificationCode:
       asString(auth.verificationCode)
       ?? asString(auth.verification_code)
@@ -392,13 +403,11 @@ function normalizeConnectorAuth(raw: unknown): ConnectorAuthSession {
       ?? asString(auth.expires_at)
       ?? asString(session.auth_session_expires_at)
       ?? asString(record.expires_at),
-    message:
-      asString(auth.message)
-      ?? asString(auth.detail)
-      ?? asString(record.message)
-      ?? asString(record.detail)
-      ?? asString(config.auth_error)
-      ?? asString(session.auth_error),
+    message,
+    warning: effectiveStatus === 'authenticated'
+      && ['consumed', 'expired', 'failed'].includes(sessionStatus ?? '')
+      ? message
+      : undefined,
   };
 }
 
@@ -606,7 +615,6 @@ export async function listConnectorDatabases(connectorId: string): Promise<Notio
           ? record.lastEdited
           : undefined,
       propertiesSchema,
-      raw: record.raw,
     };
   });
 }
@@ -644,7 +652,6 @@ export async function listConnectorPages(connectorId: string): Promise<NotionRes
         : typeof record.lastEdited === 'string'
           ? record.lastEdited
           : undefined,
-      raw: record.raw,
     };
   });
 }
@@ -668,7 +675,6 @@ export async function selectConnectorResources(
       url: option.url,
       last_edited: option.lastEdited,
       properties_schema: option.propertiesSchema,
-      raw: option.raw,
     };
   });
   const selectedPagePayload = selection.pageIds.map((id) => {
@@ -680,7 +686,6 @@ export async function selectConnectorResources(
       subtitle: option.subtitle,
       url: option.url,
       last_edited: option.lastEdited,
-      raw: option.raw,
     };
   });
 

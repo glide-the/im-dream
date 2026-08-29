@@ -13,6 +13,8 @@
 #                    add search sorting, and return page Markdown with compatible metadata/blocks.
 # [Sync] 2026-08-28: expose a Markdown-only page read for the Runtime Read hook;
 #                    background index synchronization never calls page-content endpoints.
+# [Sync] 2026-08-29: paginate resource discovery to completion and keep only the
+#                    compact metadata required for selection and index sync.
 
 """Notion read-only operations via the `ntn` CLI."""
 from __future__ import annotations
@@ -159,7 +161,6 @@ def normalize_database_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "page_count": int(raw.get("page_count") or len(raw.get("pages") or []) or 0),
         "properties_schema": properties_schema or {},
         "last_edited": _extract_last_edited(raw),
-        "raw": raw,
     }
 
 
@@ -210,7 +211,6 @@ def normalize_page_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "url": raw.get("url") or "",
         "last_edited": _extract_last_edited(raw),
         "parent": dict(parent) if isinstance(parent, Mapping) else {},
-        "raw": raw,
     }
 
 
@@ -249,12 +249,12 @@ class NotionOperationClient:
         query: str | None = None,
         page_size: int = 100,
     ) -> list[dict[str, Any]]:
-        result = await self.search(
-            SearchFilter(object_type="database", query=query, page_size=page_size)
+        results = await self._discover_all(
+            object_type="database", query=query, page_size=page_size
         )
         return [
             normalize_database_item(item)
-            for item in result.results
+            for item in results
             if not _is_people_system_database(item)
         ]
 
@@ -263,10 +263,42 @@ class NotionOperationClient:
         query: str | None = None,
         page_size: int = 100,
     ) -> list[dict[str, Any]]:
-        result = await self.search(
-            SearchFilter(object_type="page", query=query, page_size=page_size)
+        results = await self._discover_all(
+            object_type="page", query=query, page_size=page_size
         )
-        return [normalize_page_item(item) for item in result.results]
+        return [normalize_page_item(item) for item in results]
+
+    async def _discover_all(
+        self,
+        *,
+        object_type: str,
+        query: str | None,
+        page_size: int,
+    ) -> list[dict[str, Any]]:
+        """Read every search page while rejecting a non-advancing cursor."""
+
+        records: list[dict[str, Any]] = []
+        start_cursor: str | None = None
+        observed_cursors: set[str] = set()
+        while True:
+            result = await self.search(
+                SearchFilter(
+                    object_type=object_type,
+                    query=query,
+                    page_size=page_size,
+                    start_cursor=start_cursor,
+                )
+            )
+            records.extend(result.results)
+            if not result.has_more:
+                return records
+            next_cursor = str(result.next_cursor or "").strip()
+            if not next_cursor or next_cursor in observed_cursors:
+                raise NotionOperationError(
+                    "Notion resource discovery pagination did not advance. Please retry."
+                )
+            observed_cursors.add(next_cursor)
+            start_cursor = next_cursor
 
     async def query_database(self, query: DatabaseQuery) -> SearchResult:
         payload: dict[str, Any] = {

@@ -2,6 +2,7 @@
 # [Output] Verify actor isolation, private permissions, atomic per-thread projection, rotation, revocation, and path safety.
 # [Pos] Notion credential provider contract test node in backend/tests.
 # [Sync] 2026-08-28: add coverage for the agentdata user source → thread projection architecture.
+# [Sync] 2026-08-29: prove disconnect revokes both credential and public index projections from known threads.
 
 from __future__ import annotations
 
@@ -120,8 +121,11 @@ class TestNotionCredentialStore(unittest.TestCase):
         self._authorize(7, "e" * 32, "stale-secret")
         projection = self.store.project_thread(7, self.thread_a)
         self.assertTrue(projection.thread_home.exists())
+        (self.thread_a / ".notion").mkdir()
+        (self.thread_a / ".notion" / "index.json").write_text("{}")
         self.store.clear_user(7)
         self.assertFalse((self.thread_a / ".notion-home").exists())
+        self.assertFalse((self.thread_a / ".notion").exists())
         self.assertFalse(self.store.has_credentials(7))
         with self.assertRaises(NotionCredentialError):
             self.store.project_thread(7, self.thread_a)

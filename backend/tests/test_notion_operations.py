@@ -6,6 +6,8 @@
 # [Sync] 2026-08-28: lock ntn 0.15.1 data source query paths, search sort payloads,
 #                    and Markdown page reads so upstream endpoint drift cannot recur.
 # [Sync] 2026-08-28: cover the Markdown-only endpoint used by the Runtime Read hook.
+# [Sync] 2026-08-29: prove discovery consumes every search page, rejects cursor
+#                    loops, and never returns opaque upstream response blobs.
 
 from __future__ import annotations
 
@@ -74,6 +76,50 @@ class TestNotionOperations(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([item["database_id"] for item in databases], ["project-db"])
         self.assertEqual(databases[0]["title"], "Projects")
+        self.assertNotIn("raw", databases[0])
+
+    async def test_discovery_paginates_all_results(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        client = operations.NotionOperationClient(Path(temporary.name))
+        client.search = AsyncMock(
+            side_effect=[
+                operations.SearchResult(
+                    results=[{"id": "page-1", "title": "First"}],
+                    has_more=True,
+                    next_cursor="cursor-2",
+                ),
+                operations.SearchResult(
+                    results=[{"id": "page-2", "title": "Second"}],
+                    has_more=False,
+                    next_cursor=None,
+                ),
+            ]
+        )
+
+        pages = await client.discover_pages(page_size=25)
+
+        self.assertEqual([item["page_id"] for item in pages], ["page-1", "page-2"])
+        self.assertIsNone(client.search.await_args_list[0].args[0].start_cursor)
+        self.assertEqual(client.search.await_args_list[1].args[0].start_cursor, "cursor-2")
+        self.assertNotIn("raw", pages[0])
+
+    async def test_discovery_rejects_non_advancing_cursor(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        client = operations.NotionOperationClient(Path(temporary.name))
+        client.search = AsyncMock(
+            side_effect=[
+                operations.SearchResult([], True, "same-cursor"),
+                operations.SearchResult([], True, "same-cursor"),
+            ]
+        )
+
+        with self.assertRaisesRegex(
+            operations.NotionOperationError,
+            "pagination did not advance",
+        ):
+            await client.discover_databases()
 
     async def test_query_database_uses_selected_data_source_endpoint(self):
         temporary = tempfile.TemporaryDirectory()

@@ -12,6 +12,7 @@
 //                    Agent mutation feedback from the pre-01a00576 baseline.
 // [Sync] 2026-08-17: explain the published-clean Deck-home empty state.
 // [Sync] 2026-08-17: add Work-related Chat history cleanup and deletion guidance copy.
+// [Sync] 2026-08-29: add connector partial-availability labels and remove unavailable platform claims from empty states.
 // [Sync] 2026-08-17: localize the Story Workspace Settings shell and render Work/工作台 per locale.
 // [Sync] 2026-08-17: label Available/System Deck launcher groups and default-visible system Decks.
 // [Sync] 2026-08-22: add localized Workspace URI preview/download and full-size image dialog states under the existing Chat namespace.
@@ -782,6 +783,7 @@ const resources = {
           status: {
             notConnected: 'Not connected',
             healthy: 'Healthy',
+            degraded: 'Needs attention',
             authenticating: 'Authenticating',
             expired: 'Expired',
             error: 'Error'
@@ -814,7 +816,7 @@ const resources = {
           showingProgress: 'Showing {{shown}} of {{total}} — scroll down to load more',
           showingAll: 'Showing all {{count}} resources',
           emptyTitle: 'No resource connectors yet',
-          emptyDescription: 'Connect Notion / Feishu / CLI to use resources in conversations',
+          emptyDescription: 'Connect Notion to use selected resources in conversations',
           selectConnector: 'Choose a connector',
           loadFailed: 'Failed to load connector status'
         },
@@ -1592,6 +1594,7 @@ const resources = {
           status: {
             notConnected: '未连接',
             healthy: '健康',
+            degraded: '部分可用',
             authenticating: '认证中',
             expired: '已过期',
             error: '异常'
@@ -1624,7 +1627,7 @@ const resources = {
           showingProgress: '已显示 {{shown}} / {{total}}，继续向下滚动加载更多',
           showingAll: '已显示全部 {{count}} 个资源',
           emptyTitle: '暂无资源连接器',
-          emptyDescription: '连接 Notion / 飞书 / CLI 后可在对话中使用资源',
+          emptyDescription: '连接 Notion 后可在对话中使用已选择的资源',
           selectConnector: '选择连接器',
           loadFailed: '连接器状态读取失败'
         },

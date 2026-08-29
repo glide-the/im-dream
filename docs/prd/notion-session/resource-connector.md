@@ -1,479 +1,381 @@
-# 资源连接器 — 前端 PRD
+<!-- [Input] Current Notion connector implementation, tests, Settings/Chat interaction, and repository product rules. -->
+<!-- [Output] Evidence-based product requirements, state model, interaction rules, gap decisions, migration, observability, and acceptance criteria. -->
+<!-- [Pos] Current Notion Resource Connector product source of truth in docs/prd/notion-session. -->
+<!-- [Sync] 2026-08-29: replace the stale frontend-only proposal with the reviewed end-to-end PRD and PRD-code-test decision matrix. -->
 
-Status: Draft  
-Updated: 2026-07-09
-Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
+# Notion 资源连接器整体 PRD
 
-> [Input] `docs/prd/Chat 工作区入口页.md`,
->      `docs/prd/notion-session/连接器具体配置页面结构草图.md`,
->      `docs/design/notion-session/connector-interaction.md`,
->      `docs/design/notion-session/overview.md`,
->      `docs/design/claude-agent/notion-point/resource-connector-layer-design.md`
-> [Output] 资源连接器前端 PRD：功能定义、页面交互设计、交互流程、状态定义
-> [Pos] resource-connector-prd in `docs/prd/notion-session`
-> [Sync] 2026-07-04: 从 `docs/design/notion-session/resource-connector-prd.md` 拆分，前端 PRD 独立管理
-> [Sync] 2026-07-07: Chat 入口页成为主落点，历史对话与连接器工作台下沉到输入框下方，嵌入式资源视图负责连接器管理。
-> [Sync] 2026-07-08: 入口描述曾短暂偏离 Chat 主工作区，本稿已回收为 Chat `WorkspaceTabBar` 主入口，并撤销仅摘要化的连接器路径表述。
-> [Sync] 2026-07-08: Notion 详情页统一采用 Settings 内 `ConnectorNotionDetailPage` 结构与 `资源连接器 > Notion Connector` 面包屑；详情层级、状态词汇、骨架屏说明与两份最新草图重新对齐。
-> [Sync] 2026-07-08: 根据最新反馈修正入口边界：Chat `ResourceConnectorTabPanel` 只做摘要和跳转，点击「选择连接器」或连接器状态面板中的「管理」进入 Settings 的「资源链接」区；Notion 详情页由 Settings 内 `ConnectorNotionDetailPage` 承载，保留现有认证 / 资源选择流程。
-> [Sync] 2026-07-08: 详情页业务模型收敛为“同一平台只能认证一个账号”；`ConnectorNotionDetailPage` 不再嵌入集合型 `ResourceConnectorPage`，也不展示新建 / 刷新 / 连接器列表等多实例入口。
-> [Sync] 2026-07-08: ResourceScopeSection 合并 Databases 与 Standalone Pages 为统一资源列表，搜索框与保存按钮同一工具行，默认每页 10 条；保存资源后“已挂载来源”必须立即显示所选来源；底部授权 / 同步状态卡移除。
-> [Sync] 2026-07-08: Chat `ResourceConnectorTabPanel` 已连接态收紧为非按钮状态面板：展示平台、授权状态、同步状态、已链接资源数量和来源摘要；仅小型「管理」入口跳转 Settings。landing 内容区与输入框同宽，历史 tab 移除冗余外框。
-> [Sync] 2026-07-08: 修复资源选择持久化契约：后端 connector 响应必须带 persisted `sources`，前端保存时提交完整资源元数据，刷新后 Settings 已挂载来源与 Chat 已链接资源从同一 DB 状态恢复；Notion People 系统数据源从 discovery 结果过滤。
-> [Sync] 2026-07-09: Notion 详情页上方信息栏收紧为无边框紧凑区，授权状态、同步状态、已链接资源数量、最近同步和受限提示统一放入该信息栏；信息栏下方保留轻量“策略设计”占位但暂不实现策略配置。
-> [Sync] 2026-07-09: Chat `ResourceConnectorTabPanel` 根内容区减少线框，连接器状态信息块使用虚线边界但无卡片底色 / 阴影；空态和已链接资源行由轻表面和留白承载，只有明确操作控件保留弱边界。
-> [Sync] 2026-07-09: Settings `ConnectorNotionDetailPage` 使用单一虚线纸边界；内部资源范围和已挂载来源都是无卡片列表行，不再使用按钮卡片、实线面板或投影表达层级。
-> [Sync] 2026-07-09: `ResourceOptionRow` 与 `MountedSourcesSection` 的页数元信息只在 `pageCount > 0` 时显示；`0 pages` 视为空统计，不占用资源行右侧状态区域。
+- Status: Reviewed and implemented
+- Scope: Settings、Chat、服务器连接生命周期、轻量索引与 Agent 按需读取
+- Technical source: [`../../design/notion-session/runtime-credential-and-skill-design.md`](../../design/notion-session/runtime-credential-and-skill-design.md)
+- Business sequences: [`../../design/notion-session/runtime-credential-and-skill-sequence.md`](../../design/notion-session/runtime-credential-and-skill-sequence.md)
 
----
+## 1. 背景与问题
 
-## 目录
+用户希望授权 Dream 使用其 Notion 知识，但授权、资源范围、索引刷新和 Agent 正文读取是四个不同的业务动作。旧文档把它们混成“连接后同步内容”，同时保留了已经废弃的工作台、浏览器兜底状态和内部 Runtime 说明，造成以下问题：
 
-1. [产品定位](#1-产品定位)
-2. [功能定义](#2-功能定义)
-3. [页面结构设计](#3-页面结构设计)
-4. [交互流程设计](#4-交互流程设计)
-5. [状态定义](#5-状态定义)
-6. [任务解决方案设计稿](#6-任务解决方案设计稿2026-07-08)
-7. [不实现清单](#7-不实现清单)
-8. [API 端点汇总](#8-api-端点汇总)
+- 产品状态无法说明“账号仍可用，但最近一次索引刷新失败”；
+- “已连接”被前端误显示成“已同步”；
+- 资源取消选择后，旧成功索引可能继续进入新 thread；
+- 文档把内部目录、命令行参数和凭证投影写成用户概念；
+- 旧文档描述的资源树、同步按钮语义和断开确认与当前页面不一致。
 
----
+本 PRD 以可运行代码和测试为证据，保留安全且已验证的单一路径，修复范围撤销和状态真实性缺口，并删除不再承担业务职责的历史方案。
 
-## 1. 产品定位
+## 2. 产品目标
 
-### 1.1 是什么
+1. 用户能在 Settings 完成连接、授权、重新授权、资源选择、策略设置、立即同步和断开。
+2. 所有连接、同步和资源状态来自服务器，不由浏览器推测或持久化伪造。
+3. 后台只同步用于定位资源的轻量索引；正文仅在 Agent 实际读取已选择页面时获取。
+4. 凭证、选择范围、索引、thread 能力和正文读取按 actor 严格隔离。
+5. Notion 局部失败给出状态、影响和下一步，但不无理由中断普通 Agent 对话。
+6. 同一能力只有一条正式业务路径，不恢复 Agent 可见 CLI、Notion MCP 或 Chat 内同步分支。
 
-**资源连接器**（Resource Connector）在 Chat 工作区中是一级摘要视图，在 Settings 中是完整管理视图。用户进入 Chat Dashboard 后，先看到居中的 `ChatInputDock`，其下方通过 `WorkspaceTabBar` 在 `聊天历史` 与 `资源连接器` 之间切换；点击「选择连接器」或连接器状态面板中的「管理」后进入 Settings 的「资源链接」区，再通过 Notion「管理」进入 `ConnectorNotionDetailPage` 完成认证、来源选择与同步管理。
+## 3. 非目标
 
-> 本期只落地 Notion Connector 的完整详情页；飞书与本地 CLI 执行器仍保留为入口级占位，不展开完整配置流。
-> 同一平台只允许认证一个账号；Notion 详情页是单账号资源配置页，不是连接器集合管理台。
+- Notion 写入、评论、附件下载、全文镜像或离线正文仓库；
+- 多个 Notion 账号同时生效、连接共享或跨用户授权；
+- webhook、增量变更流、跨副本租约或新消息队列；
+- 新增数据库表、字段、migration 或运行时 DDL；
+- 在产品页面展示内部目录、凭证文件、Runtime hook、CLI 或环境变量；
+- 替代现有普通 turn、resume、cancel、EventBus 或 SSE 协议。
 
-### 1.2 核心价值
+## 4. 用户角色与核心场景
 
-- 在 Chat 中让用户感知“可供对话使用的资源”，但把认证、资源选择和同步集中到 Settings，避免 Chat 工作台承担复杂设置。
-- 让用户先在 Chat 内看到资源连接器入口，再按需跳转到 Settings 的 `ConnectorNotionDetailPage` 进行细配置。
-- 为 Agent 提供结构化外部背景信息，并将其同步为统一的 `.notion/` canonical snapshot 读取入口。
+| 角色 | 场景 | 目标 |
+|---|---|---|
+| 未连接用户 | 首次进入资源链接 | 理解用途并开始授权 |
+| 已连接用户 | 选择数据库或页面 | 明确允许 Agent 使用的范围 |
+| 已配置用户 | 查看状态或立即同步 | 判断索引是否可用、是否需要行动 |
+| 授权变化用户 | 重新授权 | 更新权限且不破坏仍有效的旧授权 |
+| 停止使用用户 | 断开连接 | 撤销 Dream 侧连接、凭证与索引 |
+| Chat 用户 | 在对话中引用 Notion | 从已选范围定位并按需读取正文 |
 
-### 1.3 类比理解
+## 5. 核心概念与业务规则
 
-| 类比对象 | 对应关系 |
-|---------|---------|
-| ChatGPT Projects 聊天主页面 | `ChatInputDock` + `WorkspaceTabBar` + `MainContentArea` |
-| ChatGPT Projects 来源入口 | Chat 内 `ResourceConnectorTabPanel` |
-| Slack / Google Drive 连接器详情 | Settings 内的 `ConnectorNotionDetailPage` |
-| 数据源选择 / 索引配置 | `ResourceScopeSection` |
+### 5.1 连接
 
----
+连接表示当前 actor 在 Dream 中拥有一个可管理的 Notion 连接记录。前端只管理一个当前有效连接；历史重复记录的数据库级唯一约束不在本次变更中新增。
 
-## 2. 功能定义
+### 5.2 授权
 
-### 2.1 核心功能
+授权表示服务器持有当前 actor 的有效 Notion 凭证。浏览器只接收验证链接、验证码和状态，不接收凭证明文。
 
-| 功能 | 说明 | 优先级 |
-|------|------|--------|
-| 连接器主入口 | 用户在 Chat 页面通过 `WorkspaceTabBar` 进入 `资源连接器` 视图 | P0 |
-| 连接外部平台 | 在 Notion Connector 详情页发起 OAuth / CLI 认证 | P0 |
-| 选择资源 | 用户勾选可访问的 Database 与 Standalone Page | P0 |
-| 查看来源状态 | 在 Chat 的连接器 Tab 查看摘要；在 Settings Notion 详情页查看当前账号来源 | P0 |
-| 发起对话 | 在 Chat 中继续提问，Agent 自动感知已连接资源 | P0 |
-| 刷新同步 | 在详情页或后续行内操作中触发同步 | P1 |
-| 上传工作空间文件 | 后续迭代，不在本轮详情页实现 | 后续迭代 |
-| 选择 Decks | 后续迭代，不在本轮详情页实现 | 后续迭代 |
+重新授权使用独立的待确认授权。只有新授权成功保存后才替换当前有效授权；失败或超时保留旧授权，并显示“部分可用”。
 
-### 2.2 组件与页面范围
+### 5.3 资源范围
 
-```txt
-ChatDashboardPage
-  ├── ChatTopHeader
-  ├── ChatInputDock
-  ├── WorkspaceTabBar
-  │     ├── HistoryTab
-  │     └── ResourceConnectorTab
-  └── MainContentArea
-        ├── HistoryTabPanel
-        └── ResourceConnectorTabPanel
-              ├── ConnectorToolbar
-              ├── ConnectorEmptyState / ConnectorList
-              └── ConnectorStatusPanel / SelectConnectorButton → Settings ConnectorSettingsSection
+- 可选择的资源类型为数据库和独立页面。
+- 保存时以完整选择集合替换旧集合，不做隐式并集。
+- 空集合是有效配置，含义是“保持连接，但禁止 Notion 资源进入新对话”。系统立即清除当前索引身份。
+- 用户只能读取当前选择集合中的独立页面，以及当前选择数据库索引出的页面。
+- 从选择中移除的资源在下一次 thread 投影时立即不可读，即使最近一次新索引构建失败。
 
-SettingsView
-  ├── ConnectorSettingsSection
-  └── ConnectorNotionDetailPage
-        ├── TopNavigation
-        ├── ConnectorHeader
-        ├── StrategyDesignPlaceholder
-        ├── ResourceScopeSection
-        └── MountedSourcesSection
+### 5.4 轻量索引
+
+轻量索引只保存定位页面所需的 ID、标题、链接和更新时间等紧凑元数据，不保存页面正文。成功索引是 last-known-good（LKG）；后台失败时可以保留它，但每次使用必须与当前选择范围求交。
+
+### 5.5 按需正文
+
+Agent 先读取索引定位页面，只在回答确实需要正文时请求一个已允许页面。未选择的页面必须在远程请求前拒绝。
+
+### 5.6 同步策略
+
+| 概念 | 定义 |
+|---|---|
+| `default` | 服务器提供的默认开关与频率，仅用于初始化和非法配置回退 |
+| `desired` | 用户最近保存的目标策略 |
+| `effective` | 服务器校验后实际执行的策略 |
+| `revision` | 每次成功保存策略时单调递增的版本 |
+| `status` | `applied`、`syncing`、`error` 或 `disabled` |
+
+当前策略保存是同步校验：合法时 `desired` 与 `effective` 在同一 revision 生效。频率选项由后端返回，它们是受支持的策略选项，不是用户配额。
+
+## 6. 数据对象及关系
+
+```mermaid
+flowchart LR
+    Actor["Actor"] --> Connector["Notion 连接"]
+    Connector --> Auth["当前有效授权"]
+    Connector --> Scope["当前资源范围"]
+    Connector --> Policy["同步策略"]
+    Scope --> Index["轻量 LKG 索引"]
+    Index --> Thread["新 turn 的范围内投影"]
+    Thread --> Read["已选页面按需正文"]
 ```
 
----
+产品层只关心上述关系。持久化表、目录和 Runtime 交付方式在架构文档中定义。
 
-## 3. 页面结构设计
+## 7. 状态定义
 
-### 3.1 Chat 主入口布局
+### 7.1 用户可见状态
 
-`资源连接器` 的主入口直接位于 Chat 页面，而不是独立设置页。
+| 维度 | 状态 | 含义 |
+|---|---|---|
+| 连接 | 未连接 | 无可用连接记录 |
+| 连接 | 认证中 | 等待用户在 Notion 完成授权 |
+| 连接 | 已连接 | 授权有效，但可能尚未选择或索引资源 |
+| 连接 | 部分可用 | 旧授权或旧索引仍可用，但最近一次重新授权或同步失败 |
+| 连接 | 已过期 | 无有效授权，需要重新授权 |
+| 连接 | 异常 | 无可用授权且连接操作失败 |
+| 同步 | 未同步 | 没有当前索引，通常因为尚未选择资源或已清空范围 |
+| 同步 | 同步中 | 正在构建轻量索引 |
+| 同步 | 已同步 | 存在最近一次成功索引 |
+| 同步 | 同步失败 | 最近一次尝试失败；若有 LKG 则为部分可用 |
+| 同步 | 已关闭 | 自动同步关闭；仍可立即同步 |
+| 资源 | 未选择 | 不进入新 thread，不允许按需读取 |
+| 资源 | 待同步 | 已选择但尚未进入成功索引 |
+| 资源 | 已索引 | 已包含在最近一次成功索引中 |
+| 资源 | 失败 | 最近一次针对该范围的同步未成功 |
 
-```txt
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ ChatTopHeader                                                                │
-│ [Icon] Chat Dashboard                                           [分享] [更多] │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│                    ┌──────────────────────────────────────┐                  │
-│                    │ ChatInputDock                        │                  │
-│                    │ [+] Ask anything...        [附件][模型][头像] │                  │
-│                    └──────────────────────────────────────┘                  │
-│                                                                              │
-│                    ┌──────────────┐ ┌──────────────┐                         │
-│                    │ 聊天历史      │ │ 资源连接器    │                         │
-│                    └──────────────┘ └──────────────┘                         │
-│                                                                              │
-│                    MainContentArea                                           │
-│                    ├─ HistoryTabPanel（默认）                                │
-│                    └─ ResourceConnectorTabPanel（切换后）                    │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+### 7.2 内部诊断状态
+
+授权会话 ID、轮询标记、安全错误码、索引 identity 和调度时间用于诊断与并发控制。页面只将它们转换为业务状态、影响和下一步，不展示内部值。
+
+### 7.3 错误分类
+
+| 分类 | 示例 | 是否影响普通对话 |
+|---|---|---|
+| 可恢复错误 | API 暂时不可用、索引刷新失败 | 否；Notion 局部能力降级 |
+| 需要重新授权 | 当前有效凭证缺失或过期 | 否；Notion 不可用 |
+| 范围错误 | 资源未选择、权限不足 | 否；该页面不可读 |
+| 局部能力错误 | Skill 或按需读取初始化失败 | 否；继续普通回答 |
+| 完全失败 | 无连接且授权无法启动 | Notion 不可用，普通对话仍可继续 |
+
+## 8. 状态转换规则
+
+```mermaid
+stateDiagram-v2
+    [*] --> 未连接
+    未连接 --> 认证中: 开始连接
+    认证中 --> 已连接: 授权成功
+    认证中 --> 未连接: 首次授权失败或超时
+    已连接 --> 部分可用: 重授权失败且旧授权有效
+    部分可用 --> 已连接: 重授权成功
+    已连接 --> 已过期: 当前有效授权失效
+    已过期 --> 认证中: 重新授权
+    已连接 --> 未连接: 断开
+    部分可用 --> 未连接: 断开
 ```
 
-### 3.2 Chat 内 `ResourceConnectorTabPanel`
-
-当用户切换到 `资源连接器` Tab：
-
-```txt
-ResourceConnectorTabPanel
-├── ConnectorToolbar
-│   ├── FilterDropdown
-│   └── SortDropdown
-├── ConnectorContentArea
-│   ├── ConnectorEmptyState
-│   │   ├── ConnectorTypeIcons（远程资源 / 本地资源 / 更多）
-│   │   ├── EmptyTitle：暂无资源连接器
-│   │   ├── EmptyDescription：连接 Notion / 飞书 / CLI 后可在对话中使用资源
-│   │   └── SelectConnectorButton
-│   └── ConnectorList
-│       └── ConnectorStatusPanel（平台 / 授权 / 同步 / 已链接资源 / 最近同步 / 来源摘要）
-└── ConnectorStatusPanel 管理入口 / SelectConnectorButton click
-    └── Navigate → Settings / ConnectorSettingsSection
-```
-
-> `ConnectorToolbar` 即使在空状态下也保留位置；加载时显示骨架占位，空态时显示真实筛选 / 排序控件。
-> 已连接态中，连接器信息面板不是整卡按钮。面板正文必须优先表达平台状态和已链接资源；跳转 Settings 只能由明确的「管理」小按钮承担。
-
-### 3.3 Settings 内 `ConnectorNotionDetailPage` 详情页
-
-用户从 Chat 进入 Settings 的「资源链接」区，或在 Settings 里点击 Notion「管理」后进入独立详情页：
-
-```txt
-页面外层：1px 虚线纸边界，无卡片底色 / 阴影
-  ← 资源连接器 > Notion Connector
-
-  ConnectorHeader
-│ [Notion图标] Notion Resource Connector              [连接/重新连接 Notion] [关闭连接] │
-              授权 / 同步 / 已链接资源 / 最近同步 / 当前限制说明
-              无外框，紧凑信息栏
-
-  StrategyDesignPlaceholder
-    策略设计暂不实现，只保留位置说明
-
-  ResourceScopeSection
-    资源范围                              [搜索资源] [保存资源] [刷新同步]
-    未认证：禁用态 + 轻表面说明
-    已认证：统一轻列表行（Data source / Page），每页 10 条
-
-  MountedSourcesSection
-    当前 Notion 账号已挂载来源和同步状态，轻列表行展示
-```
-
-### 3.4 组件表
-
-| 区域 | 组件 | 说明 |
-|------|------|------|
-| Chat 主切换条 | `WorkspaceTabBar` | Chat 级唯一主切换，固定只有 `HistoryTab` / `ResourceConnectorTab` 两项 |
-| Chat 历史内容 | `HistoryTabPanel` | 默认承载空聊天态、历史列表、会话切换后的消息流 |
-| Chat 连接器内容 | `ResourceConnectorTabPanel` | 承载筛选排序、空态、连接器列表与错误提示 |
-| 连接器详情页 | `ConnectorNotionDetailPage` | Settings 内点击 Notion「管理」后进入的独立配置页 |
-| 顶部导航 | `TopNavigation` | 固定使用 `← 资源连接器 > Notion Connector` |
-| 连接器头部 | `ConnectorHeader` | 紧凑无边框信息栏：图标 / 名称 / 状态 badge / 连接或关闭动作 / 授权状态 / 同步状态 / 来源数量 / 最近同步 / 受限提示 |
-| 策略占位 | `StrategyDesignPlaceholder` | 保留“策略设计”信息位置，但暂不实现表单、开关或策略配置 |
-| 资源范围 | `ResourceScopeSection` | 未认证时禁用说明；已认证时展示统一资源列表，支持搜索、每页 10 条分页和选择；页数只在 `pageCount > 0` 时显示 |
-| 来源列表 | `MountedSourcesSection` | 只展示当前 Notion 账号已挂载来源，使用无卡片列表行，不提供连接器列表或多实例切换；空页数不显示 |
-
----
-
-## 4. 交互流程设计
-
-### 4.1 进入资源连接器
-
-```txt
-用户进入 Chat Dashboard
-    │
-    ├─ 默认选中 HistoryTab
-    │   └─ MainContentArea 显示 EmptyChatState 或历史 / 当前会话
-    │
-    └─ 点击 ResourceConnectorTab
-        ├─ 先显示 ConnectorToolbar
-        ├─ 无连接器 → ConnectorEmptyState
-        └─ 有连接器 → ConnectorList
-```
-
-### 4.2 创建 / 进入 Notion Connector
-
-```txt
-用户位于 ResourceConnectorTabPanel
-    │
-    ├─ 点击「选择连接器」
-    │   └─ 打开 Settings，并滚动 / 聚焦到 ConnectorSettingsSection
-    │
-    ├─ 点击 Notion Connector 状态面板中的「管理」
-    │   └─ 同样打开 Settings 的 ConnectorSettingsSection
-    │
-    └─ 在 Settings 点击 Notion「管理」
-        └─ 页面级导航到 ConnectorNotionDetailPage，顶部显示：← 资源连接器 > Notion Connector
-```
-
-### 4.3 认证与资源选择
-
-```txt
-用户进入 ConnectorNotionDetailPage
-    │
-    ├─ 未认证
-    │   ├─ ConnectorHeader 信息栏可查看
-    │   ├─ ResourceScopeSection 禁用并显示「请先完成 Notion 授权」
-    │   └─ ConnectorHeader 信息栏解释当前限制原因
-    │
-    ├─ 点击认证入口
-    │   ├─ POST /api/connectors/:id/auth/login
-    │   ├─ 展示验证码 / 打开浏览器确认
-    │   └─ POST /api/connectors/:id/auth/poll
-    │
-    └─ 已认证
-        ├─ 展示 database 列表
-        ├─ 点击数据库 → 展开 page tree
-        ├─ 勾选页面 / 数据库
-        └─ POST /api/connectors/:id/resources/select → POST /api/connectors/:id/sync
-```
-
-### 4.4 关闭连接
-
-```txt
-用户点击 ConnectorHeader 中的「关闭连接」
-    │
-    ├─ 弹出二次确认
-    │   ├─ 说明关闭后将停止对话中调用该连接器
-    │   └─ 说明已选来源保留但不可继续同步
-    │
-    ├─ 确认关闭
-    │   ├─ 状态改为「已关闭」
-    │   ├─ ResourceScopeSection 改为禁用态
-    │   └─ ConnectorHeader 信息栏显示关闭原因与恢复入口
-    │
-    └─ 取消关闭 → 保持原状态
-```
-
-### 4.5 发起对话
-
-```txt
-用户回到 ChatInputDock 输入消息
-    │
-    ├─ 前端创建 / 继续 chat_thread
-    ├─ Agent attach 当前 connector 的 canonical snapshot
-    └─ 对话可读取 `.notion/` 内对应资源
-```
-
----
-
-## 5. 状态定义
-
-### 5.1 Chat 工作区状态
-
-| 状态 | 说明 | 前端展示 |
-|------|------|---------|
-| `empty_chat` | 默认历史视图且没有任何对话内容 | `HistoryTabPanel` 显示空聊天态；输入框保持主视觉 |
-| `active_chat` | 已有当前会话消息 | `ChatMessageList` 放大，输入区保留在底部 |
-| `connector_empty` | 切到 `ResourceConnectorTab` 且无连接器 | 轻表面空态 + 远程资源 / 本地资源 / 更多图标 + CTA |
-| `connector_connected` | 至少已有一个连接器 | 虚线边界、无卡片化状态信息块列表 + 筛选 / 排序工具栏 |
-| `connector_error` | 连接器读取失败或状态异常 | 在 `ResourceConnectorTabPanel` 内显示错误卡和重试入口 |
-
-### 5.2 连接器详情状态词汇
-
-| 状态词 | 触发条件 | 详情页表现 |
-|--------|----------|------------|
-| `未认证` | 尚未完成认证 | `ResourceScopeSection` 禁用；`ConnectorHeader` 信息栏解释需先授权 |
-| `认证中` | 已发起认证，等待用户确认或轮询 | 显示验证码、浏览器确认提示与轮询反馈 |
-| `已连接` | 认证成功且可读取当前连接器配置 | `ConnectorHeader` 信息栏显示正常态 |
-| `同步中` | 已选择资源并触发同步 | 状态 badge 与资源列表行显示 loading |
-| `同步失败` | 同步任务失败 | 保留已有资源展示并提供重试 |
-| `已关闭` | 用户确认关闭连接 | 保留历史资源记录但禁用操作，提示不可在对话中调用 |
-
-### 5.3 资源同步状态
-
-| 状态 | 说明 | 前端展示 |
-|------|------|---------|
-| `pending` | 已选择资源，等待 sync 开始 | 列表行显示 `待同步` |
-| `syncing` | 正在同步中 | skeleton / spinner + 状态文案 |
-| `synced` | 同步完成 | 显示最近同步时间、页面数 |
-| `stale` | 当前快照过旧 | 提示 `刷新同步` |
-| `error` | 同步失败 | 显示错误提示 + 重试按钮 |
-| `missing` | 当前 snapshot 未包含该资源 | 显示 `暂不可用` + 重新同步入口 |
-
----
-
-## 6. 任务解决方案设计稿（2026-07-08）
-
-### 6.1 入口与路由
-
-| 项 | 方案 |
-|---|---|
-| 问题 | Chat 的「选择连接器」和连接器状态面板不应进入 Chat 内配置页。 |
-| 处理 | Chat 只触发 App 层 Settings 导航，并通过 `focusNonce` 聚焦 `ConnectorSettingsSection`。 |
-| 判断 | 符合目标：Chat 入口页保持轻量，复杂连接器配置回到 Settings。 |
-| 避免过度设计 | 不新增路由库、不新增 URL query/anchor 体系；沿用现有 App 视图状态。 |
-
-### 6.2 Notion 具体配置页
-
-| 项 | 方案 |
-|---|---|
-| 问题 | `ConnectorNotionDetailPage` 只有简单面包屑和嵌入页，缺少草图里的头部、概览、策略占位、资源区和状态解释。 |
-| 处理 | 在 Settings 内重建单账号页面骨架：`TopNavigation`、紧凑 `ConnectorHeader` 信息栏、`StrategyDesignPlaceholder`、`ResourceScopeSection`、`MountedSourcesSection`；页面外层使用单一虚线纸边界，内部保留无卡片列表行；直接复用现有 connector API helpers 承载认证、资源选择、同步和删除流程。 |
-| 判断 | 符合目标：保留认证整体流程，同时移除多连接器集合心智。 |
-| 避免过度设计 | 不新增后端模型、不新增路由系统、不做多平台抽象，只在 Notion 详情页收敛单平台单账号交互。 |
-
-### 6.2.1 信息栏压缩与策略占位
-
-| 项 | 方案 |
-|---|---|
-| 问题 | 独立账号状态卡和提示卡占用过多页面比例，授权、同步、已链接资源数量分散，资源范围配置被推到更低位置。 |
-| 处理 | `ConnectorHeader` 改为无边框紧凑信息栏，集中展示授权状态、同步状态、已链接资源数量、最近同步和当前限制提示；原账号状态大卡片移除。 |
-| 判断 | 符合目标：状态信息仍可见，但不再压缩资源范围配置的首屏空间。 |
-| 避免过度设计 | “策略设计”只保留轻量占位，不新增策略表单、开关、存储字段或后端接口。 |
-
-### 6.3 单平台单账号约束
-
-| 项 | 方案 |
-|---|---|
-| 问题 | Notion 详情页嵌入集合型 `ResourceConnectorPage` 后，会暴露「新建连接器」「刷新列表」「连接器列表」和多个 connector 选择，违背“同一平台只能认证一个账号”。 |
-| 处理 | `ConnectorNotionDetailPage` 自己加载当前用户最新的 Notion connector；无 connector 时点击「连接 Notion」隐式创建唯一 connector 并立即进入认证；有 connector 时只允许重新连接、保存资源、刷新同步或关闭连接。 |
-| 判断 | 符合目标：页面任务从“管理连接器集合”变成“管理 Notion 这个平台账号的资源范围”。 |
-| 避免过度设计 | 不批量迁移历史重复 connector，不引入账号切换器；前端只展示最新 Notion connector，本地 fallback 创建时替换同平台旧记录。 |
-
-### 6.4 资源范围搜索与分页
-
-| 项 | 方案 |
-|---|---|
-| 问题 | Databases 与 Standalone Pages 分成两个区块，和 `ntn api v1/search` 的统一搜索结果心智不一致；资源多时列表过长。 |
-| 处理 | `ResourceScopeSection` 合并为统一资源列表，资源行用 `Data source` / `Page` 标签区分；操作行放置搜索框、保存资源、刷新同步；默认每页展示 10 条，提供上一页 / 下一页。 |
-| 判断 | 符合目标：用户按标题搜索资源，不需要先判断资源属于 database 还是 page。 |
-| 避免过度设计 | 本轮只做前端合并与本地分页，不新增后端游标接口；后端后续仍可按 `v1/search` 的 `query` / `page_size` / `start_cursor` 扩展。 |
-
-### 6.4.1 资源行页数元信息
-
-| 项 | 方案 |
-|---|---|
-| 问题 | Notion discovery 可能返回 `pageCount: 0`；如果直接渲染为 `0 pages`，会在资源行右侧形成低价值噪音，并挤压资源类型标签和右侧对勾。 |
-| 处理 | `ResourceOptionRow` 与 `MountedSourcesSection` 只在 `pageCount > 0` 时显示页数；`0`、缺失或不可用 page count 都不渲染。 |
-| 判断 | 符合目标：资源行右侧只展示有意义的类型、页数和选择状态，空统计不误导用户。 |
-| 避免过度设计 | 不新增“无页面”标签，不改后端模型，不把 page count 作为筛选 / 排序条件。 |
-
-### 6.5 保存后已挂载来源即时更新
-
-| 项 | 方案 |
-|---|---|
-| 问题 | 点击「保存资源」后，资源选择已经提交，但 `MountedSourcesSection` 仍显示空态，用户无法确认当前 Notion 账号到底挂载了哪些来源。 |
-| 处理 | 保存成功后优先使用后端返回的 connector sources；若后端返回为空或同步阶段失败，则基于当前选中的 data_source / page 选项生成本地 optimistic sources，同步更新 `MountedSourcesSection`。 |
-| 判断 | 符合目标：保存动作有明确结果反馈，“已挂载来源”不再空白。 |
-| 避免过度设计 | 不新增复杂 toast / job timeline / 后端轮询状态；只修复当前页面的数据回显闭环。 |
-
-### 6.6 暗色模式
-
-| 项 | 方案 |
-|---|---|
-| 问题 | Chat、Settings、Decks 局部存在硬编码浅色背景或白色文字，在暗色模式下破坏主题。 |
-| 处理 | 将确定影响的浅色面替换为 `var(--color-*)` 语义 token 或 `color-mix()`；保留现有色彩系统。 |
-| 判断 | 符合目标：修复主题错误，不重做视觉体系。 |
-| 避免过度设计 | 不新增 token 命名空间，不重构全部 inline style。 |
-
-### 6.7 Chat 入口比例、历史边框与连接器状态面板
-
-| 项 | 方案 |
-|---|---|
-| 问题 | Chat landing 主内容区曾比输入框 / tab 更宽；历史 tab 有额外外层边框；连接器已连接态用整卡按钮或多层线框面板表达，弱化了平台状态和已链接资源。 |
-| 处理 | landing 主内容区同输入框 `max-width` 居中；历史 tab 移除外层 border / header divider；连接器根内容区减少线框，状态信息块使用虚线边界但不做卡片底色 / 阴影，展示授权、同步、来源数量、最近同步和来源预览。 |
-| 判断 | 符合目标：只修正 Chat 入口比例和信息表达，Settings 仍是唯一详细配置入口。 |
-| 避免过度设计 | 不新增 API，不实现真实筛选排序，不在 Chat 内做认证 / 资源选择 / 同步刷新，不恢复多连接器实例入口。 |
-
-### 6.8 已挂载资源持久化与 Chat 回显
-
-| 项 | 方案 |
-|---|---|
-| 问题 | 保存后的 `MountedSourcesSection` 依赖前端 optimistic sources；刷新页面后 connector 列表响应未带 persisted sources，导致勾选项和 Chat 已链接资源消失。 |
-| 处理 | 后端 `store.get_connector/list_connectors` 为 connector 附加 `connector_resources` 作为 `sources`；前端归一化时使用 Notion `external_id/database_id/page_id` 作为 source id；保存时提交完整资源对象而非 id-only payload。 |
-| 判断 | 符合目标：Settings 与 Chat 都从同一个数据库持久化状态读取资源。 |
-| 避免过度设计 | 不新增独立缓存表，不新增轮询任务，不改变 Settings 详情页和 Chat 摘要的职责边界。 |
-
-### 6.9 Notion People 系统数据过滤
-
-| 项 | 方案 |
-|---|---|
-| 问题 | Notion `v1/search` 可能返回 Workspace People 系统 data source，不应该作为用户可挂载资源。 |
-| 处理 | 在后端 `operations.discover_databases` 过滤具有 People 系统库特征的结果：标题为 People 且包含 `people:*` 属性、Person people 字段或 Membership Type 成员角色字段。 |
-| 判断 | 符合目标：污染数据在 discovery 边界被排除，前端无需重复过滤。 |
-| 避免过度设计 | 不维护可配置黑名单，不按标题 alone 过滤，避免误伤普通用户数据库。 |
-
----
-
-## 7. 不实现清单
-
-防止过度设计，以下内容**明确排除**：
-
-| 排除项 | 原因 |
-|--------|------|
-| 多人协作同一连接器 | 连接器绑定单用户，后续再扩展 |
-| 连接器间数据共享 | 每个连接器独立，不做跨连接器引用 |
-| 来源内容预览 | 本轮只做标题、状态、层级选择 |
-| 来源拖拽排序 | 先做筛选 / 排序即可 |
-| 资源版本对比 | 先做覆盖式同步 |
-| 连接器模板 / 克隆 | 无需求支撑 |
-| Notion 写回 | 本期只读 |
-| 多平台完整详情页 | 本期只做 Notion |
-
----
-
-## 8. API 端点汇总
-
-| 端点 | 方法 | 用途 |
-|------|------|------|
-| `/api/connectors` | GET | 获取用户的连接器列表 |
-| `/api/connectors` | POST | 创建资源连接器 |
-| `/api/connectors/:id` | GET | 获取连接器详情 |
-| `/api/connectors/:id` | PATCH | 更新连接器名称 / 配置 |
-| `/api/connectors/:id` | DELETE | 删除或关闭连接器 |
-| `/api/connectors/:id/auth/login` | POST | 启动平台认证 |
-| `/api/connectors/:id/auth/poll` | POST | 轮询认证状态 |
-| `/api/connectors/:id/databases` | GET | 获取可访问的 Database 列表 |
-| `/api/connectors/:id/pages` | GET | 获取可访问的 Standalone Page 列表 |
-| `/api/connectors/:id/resources` | GET | 获取已连接资源列表 |
-| `/api/connectors/:id/resources/select` | POST | 选择要同步的资源，并把完整资源元数据持久化为 connector `sources` |
-| `/api/connectors/:id/resources/:rid` | DELETE | 移除某个资源 |
-| `/api/connectors/:id/sync` | POST | 触发同步 |
-| `/api/connectors/:id/threads` | GET | 获取连接器关联的对话列表 |
-
----
-
-## 附录：设计决策记录
-
-| 决策 | 选项 | 选择 | 理由 |
-|------|------|------|------|
-| 主入口位置 | Chat / 独立设置页 | Chat `WorkspaceTabBar` | 让资源选择保持在对话工作区心智内 |
-| 详情页导航 | Chat 内下钻 / Settings 内管理页 | `ConnectorNotionDetailPage` | 复杂配置与 Chat 入口解耦，Settings 保持配置归属 |
-| 详情页组件树 | 自定义散装模块 / 草图组件树 | 复用 `TopNavigation` / `ConnectorHeader` 信息栏 / 策略占位 / 资源范围 / 已挂载来源命名 | 与草图和后续实现保持一一对应 |
-| 文件上传 | 连接器内 / 全局文件系统 | 后续迭代再定 | 本轮只聚焦远程资源连接 |
-
----
-
-## 相关文档
-
-- 交互方案设计：[`docs/design/notion-session/connector-interaction.md`](../../design/notion-session/connector-interaction.md)
-- 总览设计：[`docs/design/notion-session/overview.md`](../../design/notion-session/overview.md)
-- UI 设计稿：[`docs/prd/notion-session/resource-connector-ui-design.md`](./resource-connector-ui-design.md)
+- 保存非空资源范围后立即启动首次轻量索引。
+- 保存空范围后保持“已连接”，同步变为“未同步”，已选来源为 0。
+- 同步成功更新 LKG、最近成功时间和精确资源状态。
+- 同步失败不推进成功 identity；有 LKG 时显示“部分可用”，无 LKG 时显示“同步失败”。
+- 策略关闭只停止定时触发，不删除 LKG，也不禁用立即同步。
+
+## 9. 连接与 OAuth 授权流程
+
+1. 用户在 Settings 进入 Notion 详情页，点击“连接 Notion”。
+2. 系统创建或复用当前连接并启动服务器授权会话。
+3. 页面展示验证链接、验证码和等待状态。
+4. 用户在 Notion 确认授权；页面轮询服务器状态。
+5. 成功后显示“已连接”，加载可访问资源。
+6. 失败时显示当前状态、Notion 能力影响和“重试授权”操作。
+
+页面不得要求用户粘贴 token、内部路径或重复输入已经安全保存的信息。
+
+## 10. 资源发现与选择
+
+1. 授权成功后，服务器分页读取全部可访问数据库和页面，并过滤系统资源。
+2. 页面提供搜索、类型区分、分页和当前选择标记。
+3. 用户保存后，服务器原子替换当前选择集合。
+4. 非空选择立即构建轻量索引；空选择立即撤销当前索引。
+5. 成功后刷新已挂载来源、同步时间和 Chat 摘要。
+
+资源发现 DTO 不携带不可解释的上游原始响应；只传递选择和展示需要的紧凑元数据。
+
+## 11. 同步策略与生效规则
+
+- 页面展示自动同步开关、后端允许的频率、最近成功、下次计划和当前状态。
+- 保存合法策略后，`desired` 与 `effective` 进入同一新 revision。
+- 非法选项由后端拒绝，前端保留上一次服务器状态并显示错误。
+- 后台定时同步独立于 Chat；用户不需要先创建或继续对话。
+- 每个连接的失败隔离，不得传播到其他连接或 Agent turn。
+
+## 12. 定时同步与手动刷新
+
+定时同步适合持续更新已选资源的 ID 和元数据。手动“立即同步”适用于：
+
+- 刚在 Notion 修改了页面范围或权限；
+- 页面提示最近一次同步失败；
+- 用户希望在下一轮自动同步前使用最新索引。
+
+立即同步不下载正文，不改变自动同步策略，也不需要确认弹窗。
+
+## 13. Chat 启动与能力挂载
+
+新 Agent turn 启动时：
+
+1. 服务器读取当前 actor 的有效授权和最近成功索引；
+2. 将索引与当前选择范围求交；
+3. 只把当前 actor、当前 thread 可用的连接快照交付给 Runtime；
+4. 安装或刷新标准 Notion Skill；
+5. 不访问 Notion，不执行全量同步，不加载正文。
+
+已运行 turn 不热替换凭证或索引；重新授权和新同步从下一 turn 生效。
+
+## 14. Agent 索引定位与按需正文
+
+1. Skill 读取轻量连接摘要和索引。
+2. Agent 根据标题或数据库范围定位允许的页面 ID。
+3. Agent 请求该页面正文。
+4. Runtime 再次验证 actor、thread、路径和当前索引成员关系。
+5. 验证通过后只获取该页当前 Markdown；失败返回安全错误和下一步。
+
+Skill 不可用或 Notion 读取失败时，普通对话继续；Agent 应说明未使用到 Notion 信息，不得把失败伪装成成功读取。
+
+## 15. 重新授权与断开
+
+### 15.1 重新授权
+
+- 新授权成功前，当前有效授权继续服务新 turn。
+- 新授权失败或超时：状态为“部分可用”，说明旧授权仍有效以及何时需要重试。
+- 新授权成功：原子替换有效授权；下一 Runtime 使用新凭证。
+
+### 15.2 断开
+
+断开会删除 Dream 侧连接记录、当前 actor 凭证、索引和已知 thread 投影，但不会删除 Notion 中的数据。该操作可通过重新连接恢复，因此不增加确认弹窗；按钮必须显示进行中和失败状态，防止重复提交。
+
+## 16. 页面状态与反馈
+
+| 页面状态 | 展示 | 主要操作 |
+|---|---|---|
+| 首次加载 | 骨架或加载提示，不显示旧浏览器状态 | 无 |
+| 空状态 | Notion 用途和“连接 Notion” | 连接 |
+| 认证中 | 验证链接、验证码、等待说明 | 打开 Notion、取消页面等待 |
+| 已连接无资源 | “尚无来源索引” | 选择资源 |
+| 同步中 | “正在更新轻量索引” | 等待，不重复提交 |
+| 成功 | 来源数、最近成功、下次计划 | 管理资源、立即同步 |
+| 部分失败 | 仍可用内容、失败影响、下一步 | 重试、检查权限或重新授权 |
+| 完全失败 | Notion 不可用的原因 | 重新授权或稍后重试 |
+
+Chat 只显示状态摘要、来源列表和“管理”入口，不复制授权、策略或资源选择表单。
+
+## 17. 错误反馈合同
+
+| 条件 | 当前状态 | 影响 | 用户下一步 |
+|---|---|---|---|
+| 凭证缺失 | 未连接/已过期 | Notion 不可用 | 连接或重新授权 |
+| 重授权失败但旧凭证有效 | 部分可用 | 旧权限继续，新权限未生效 | 需要权限变化时重试 |
+| 权限不足 | 已连接，页面读取失败 | 仅该资源不可读 | 在 Notion 授权后立即同步 |
+| 未选择资源 | 已连接、未同步 | Agent 不读取任何 Notion 页面 | 选择资源并保存 |
+| 索引过期或刷新失败 | 部分可用/同步失败 | 可能使用旧元数据 | 立即同步或等待自动同步 |
+| Notion API 异常 | 局部失败 | 本次发现、同步或读取失败 | 稍后重试 |
+| Skill 加载失败 | 局部能力不可用 | 本轮不能使用 Notion | 继续普通对话，稍后新 turn 重试 |
+
+错误响应、日志和遥测不得包含凭证明文、授权文件、正文、原始远程输出或用户内部路径。
+
+## 18. 多用户隔离、安全与隐私
+
+- 连接、凭证、选择、索引和 thread 投影均以 canonical actor 身份解析。
+- actor A 的任何请求不得返回或使用 actor B 的连接、索引、凭证或正文。
+- 浏览器、用户环境、workspace 文件和父进程环境不得覆盖服务器拥有的授权来源。
+- thread 投影只包含当前选择范围和紧凑连接摘要，不包含用户 ID、内部配置、验证码或授权会话。
+- 正文不进入持久索引、错误响应、日志或测试快照。
+- 断开后，后续 Notion 读取 fail closed；普通对话继续。
+
+## 19. 兼容、迁移与回滚
+
+- 保持现有 connector API 和 Admin 管理的 PostgreSQL schema，不新增 migration。
+- 旧成功索引可以作为 LKG 读取，但投影时强制移除正文、私有连接配置和已取消选择的资源。
+- 新同步会自然替换旧索引；不做运行时 DDL 或批量正文回填。
+- 删除未被路由引用的旧前端工作台，不继续双路径兼容。
+- 回滚应用版本不要求 schema 回滚；不得恢复浏览器伪状态、共享凭证目录或 Agent CLI/MCP fallback。
+
+## 20. 数据指标与可观测性
+
+至少记录不含敏感值的：
+
+- 授权开始、成功、失败和重新授权保留旧授权的计数；
+- 资源发现耗时、分页数和结果数；
+- 索引成功/失败、耗时、数据库数、页面 ID 数和安全错误码；
+- 策略 revision、状态转换、计划触发与手动触发来源；
+- 按需读取成功/拒绝/权限/API 失败计数；
+- Skill 发现和加载失败计数。
+
+产品指标关注连接完成率、选择完成率、索引成功率、部分失败恢复率和 Notion 读取成功率。正文、标题以外的内容、凭证和原始 API 响应不进入遥测。
+
+## 21. 验收标准
+
+1. A 无法读取 B 的凭证、索引或正文。
+2. 未授权用户无法发现、同步或读取 Notion。
+3. 资源发现完整分页，返回紧凑元数据且不含原始响应。
+4. 授权后保存非空范围可生成轻量索引；索引不含正文。
+5. 清空或缩小范围后，新 thread 立即不能读取已移除页面。
+6. thread 只获得当前 actor、当前选择范围的索引摘要。
+7. 只有索引允许的页面 ID 能触发按需正文获取。
+8. 凭证不出现在日志、错误响应、环境回显、thread 索引或测试快照。
+9. 重授权失败保留有效旧凭证；成功后新 Runtime 使用新凭证。
+10. 定时同步不依赖 Chat；Chat 初始化不访问 Notion。
+11. Skill 可由标准 Runtime 发现；Skill 失败不影响普通对话。
+12. 前端区分已连接、已同步和部分可用，全部状态来自后端。
+13. 既有 MCP、其他 Skill、turn/resume/cancel/EventBus/SSE 行为不变。
+14. 相关后端测试、前端类型检查与构建通过。
+
+## 22. 本次明确不实现
+
+- 数据库级“每 actor 仅一条 Notion connector”唯一约束及历史重复记录清理；
+- 多账号切换、团队共享、细粒度成员权限；
+- webhook、增量 cursor、跨副本协调和失败通知中心；
+- 全文搜索、附件、写回、批量正文缓存；
+- Feishu、本地 CLI 等不可用连接器占位 UI。
+
+## 23. PRD—代码—测试—业务判断矩阵
+
+| 产品主题 | 调查前文档描述 | 调查时代码行为 | 测试证据 | 差异类型 | 正确处理 |
+|---|---|---|---|---|---|
+| 用户级凭证 | 混有用户目录和 Runtime 参数 | actor 私有保存、待授权原子提升、thread 隔离 | `test_notion_credentials` | 不应产品化的技术细节 | 产品只写隔离规则；细节迁架构 |
+| 授权状态 | 认证成功/失败二元描述 | 有独立授权会话和有效凭证 | `test_notion_auth`、router flow | 规则缺失 | 增加连接与授权会话分层 |
+| 重新授权 | 未定义失败时旧授权 | 部分分支会把连接误标过期 | 新增失败重授权测试 | 代码缺陷 | 保留旧授权并显示部分可用 |
+| 资源发现 | 只描述本地分页，远端 cursor 延期 | 仅取远端第一页 | 新增 pagination/loop tests | 代码缺陷 | 完整分页并拒绝 cursor 循环 |
+| 资源 DTO | 保存上游 `raw` | 原始响应进入选择 metadata | normalization tests | 不应产品化的技术细节 | 删除 raw，仅保留紧凑字段 |
+| 选择保存 | 选择后另点同步 | 保存接口立即同步 | router happy path | 文档过期 | PRD 改为保存即首同步 |
+| 空选择 | 未明确 | 先写空集合再报同步错误，旧 LKG 残留 | 新增 empty-selection test | 代码缺陷/规则缺失 | 定义为保持连接、清除索引 |
+| 范围缩小 | 未明确 | 新 turn 直接投影旧 LKG | 新增 projection scope test | 代码缺陷 | 每次投影与当前选择求交 |
+| connector 快照 | PRD 展示内部文件字段 | 过宽 connector/config 进入 thread | projection redaction test | 代码缺陷/技术细节 | 最小化公开投影，架构记录格式 |
+| 索引内容 | 历史文档存在正文 snapshot | 已为 ID/元数据轻索引、`pages={}` | snapshot contract/runtime tests | 历史设计残留 | 删除正文同步描述，不恢复兼容 |
+| 定时同步 | 旧 PRD 称策略占位 | 后端有真实策略和 scheduler | scheduler tests | 文档过期 | 写明 default/desired/effective/revision |
+| Chat 初始化 | 文档存在 workspace 同步暗示 | 只投影 LKG，不访问远程 | snapshot store/service tests | 命名或状态语义不一致 | 统一称“能力挂载/投影” |
+| Agent 读取 | 历史 CLI/MCP/静态正文并存 | 标准 Skill + 受控按需 Read | runtime integration tests | 历史设计残留 | 只保留文件导航 + 单页按需读取 |
+| 前端健康状态 | authenticated 即 healthy/synced | 同步失败被健康状态遮蔽 | 前端构建；后端 policy tests | 代码缺陷 | 增加部分可用，未有时间不称已同步 |
+| 断开 | 一次确认并保留来源 | 删除连接、凭证和快照；可重新连接 | router/store/credential tests | 文档过期 | 无确认，清理已知 thread 投影 |
+| Settings 占位 | 展示 Feishu 和 CLI 不可用卡片 | 无对应业务能力 | 路由引用搜索、前端构建 | 历史设计残留 | 删除占位，不制造第二路径 |
+| 普通对话降级 | 局部错误边界零散 | Notion hook/Skill 失败不改变 turn | runtime integration tests | 无需处理的一致实现 | 保留并写入正式 PRD |
+| 多用户隔离 | 有原则但状态范围不完整 | DB owner guard + actor provider + hook membership | router/credential/runtime tests | 无需处理的一致实现 | 保留并扩展验收 |
+| 单账号 | 文档称强约束 | UI 管理一个当前连接，DB 无唯一约束 | 前端选择逻辑、store tests | 命名或状态语义不一致 | 本次定义 UI 单有效连接；硬约束延期 |
+
+## 24. 反过度设计评审
+
+### 保留
+
+- 现有 connector、actor 凭证 Provider、轻量索引、调度器、thread 投影、按需 Read 和标准 Skill；
+- 现有 Admin-owned schema、公开 API、EventBus/SSE 与普通 Agent 生命周期；
+- 同步失败保留 LKG、局部失败不打断普通对话的边界。
+
+### 修改
+
+- 资源发现完整分页；
+- 空选择和范围缩小 fail closed；
+- connector/thread 投影最小化；
+- 重新授权失败保留有效授权；
+- 前端区分已连接、已同步、部分可用；
+- 断开清理已知 thread 的凭证与索引投影。
+
+### 删除
+
+- 未引用的旧 Resource Connector 工作台；
+- Feishu/CLI 不可用占位卡；
+- 浏览器或文档中的伪成功、静态正文、Agent CLI/MCP 正式路径；
+- 可逆断开操作的确认弹窗。
+
+### 迁移到技术文档
+
+- 持久化对象、内部目录、权限模式、CLI/API driver、Runtime hook、虚拟读取路径和安全错误码。
+
+### 延期
+
+- 数据库级单账号约束、历史重复清理；
+- webhook/增量、跨副本调度、全文搜索、附件、写回和通用 connector 框架。
+
+结论：本次只保留一个后台轻索引路径和一个 Runtime 单页按需读取路径；两者职责互补，不新增服务、队列、表、控制通道或环境分支。

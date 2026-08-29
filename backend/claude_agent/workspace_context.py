@@ -23,6 +23,8 @@
 #                    the workspace summary mirrors the attached snapshot identity.
 # [Sync] 2026-08-28: describe `.notion` as a lightweight index and route page
 #                    body reads through the Runtime Read hook on demand.
+# [Sync] 2026-08-29: point every attached Notion context at the installed
+#                    notion-session Skill and its index-first read workflow.
 
 """Workspace context prompt for the Ink & Memory Claude Agent.
 
@@ -184,6 +186,16 @@ def _render_notion_context_block(cwd: str) -> str:
         lines.append(f"  Last Synced: {fetched_at}")
     lines.extend(
         [
+            "Notion Skill index:",
+            "  Skill: notion-session",
+            "  Instructions: skills/notion-session/SKILL.md",
+            "  Runtime discovery: .claude/skills/notion-session",
+            "  Use this Skill whenever a request requires searching or reading the connected Notion.",
+            "  Follow the Skill's index-first workflow and fetch only the selected page needed for the answer.",
+            (
+                "  If the Skill or Read is unavailable, report the Notion limitation "
+                "and continue any answer that does not depend on Notion."
+            ),
             "  Read .notion/snapshot.json first for the attached snapshot identity.",
             "  Read .notion/connector.json for connector details and selection state.",
             "  Read .notion/index.json for the page listing.",

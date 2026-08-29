@@ -8,6 +8,8 @@
 #                    thinking-only turns cannot be reported as successful.
 # [Sync] 2026-08-28: Notion page content uses the `.notion/pages/<id>.json`
 #                    lazy Read hook; no Notion MCP namespace is exposed.
+# [Sync] 2026-08-29: Editor virtual-Read redirects stay inside the canonical
+#                    thread .claude-tmp with private directory/file modes.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -1201,6 +1203,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         on_tool_confirmation_request=None,
         mcp_env: Optional[dict[str, str]] = None,
         notion_credential_home: Optional[str] = None,
+        editor_state: Optional[dict[str, Any]] = None,
     ):
         self.set_query([])
         runner = self.make_runner()
@@ -1217,6 +1220,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 mcp_env=mcp_env or {},
                 claude_tmp_workspace=cwd,
                 notion_credential_home=notion_credential_home,
+                editor_state=editor_state,
             ),
             callbacks=AgentStreamingCallbacks(
                 on_text_delta=lambda d: None,
@@ -1227,6 +1231,32 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         options = self._mock_client.last_options
         matcher = options.hooks["PreToolUse"][0]
         return matcher.hooks[0]
+
+    async def test_editor_read_redirect_uses_runtime_thread_tmpdir(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                editor_state={"cells": [{"id": "cell-1", "content": "hello"}]},
+            )
+            result = await hook(
+                {
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": ".editor/cells.json"},
+                },
+                "call-editor-read",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+            specific = _hook_specific(result, {})
+            redirected = Path(specific["updatedInput"]["file_path"]).resolve(
+                strict=True
+            )
+            self.assertEqual(
+                redirected.parent,
+                (workspace / ".claude-tmp").resolve(strict=True),
+            )
+            self.assertEqual(redirected.stat().st_mode & 0o777, 0o600)
 
     async def test_notion_page_read_is_redirected_before_generic_permissions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3115,6 +3145,14 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
         "tasks": [],
     }
 
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._thread_workspace = Path(self._tmp_dir.name) / "thread"
+        self._thread_workspace.mkdir()
+
+    def tearDown(self):
+        self._tmp_dir.cleanup()
+
     def _call_redirect(
         self,
         tool_name: str,
@@ -3129,6 +3167,7 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
             {"file_path": file_path},
             editor_state,
             tmp_paths,
+            tmp_workspace=str(self._thread_workspace),
         )
 
     # ------------------------------------------------------------------
@@ -3164,6 +3203,22 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
         finally:
             if os.path.isfile(tmp_path):
                 os.unlink(tmp_path)
+
+    def test_redirect_tempfile_is_private_and_inside_thread_tmpdir(self):
+        """Runtime must accept updatedInput without a canonical-cwd escape."""
+        tmp_paths: list[str] = []
+        result = self._call_redirect(
+            "Read", ".editor/cells.json", self._SAMPLE_STATE, tmp_paths
+        )
+        specific = _hook_specific(result, {})
+        redirect_path = Path(
+            (specific.get("updatedInput") or {}).get("file_path", "")
+        ).resolve(strict=True)
+        expected_root = (self._thread_workspace / ".claude-tmp").resolve(strict=True)
+
+        self.assertEqual(redirect_path.parent, expected_root)
+        self.assertEqual(expected_root.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(redirect_path.stat().st_mode & 0o777, 0o600)
 
     def test_redirect_tempfile_contains_correct_cells_json(self):
         """The tempfile must contain the cells slice serialised as JSON."""
@@ -3271,6 +3326,22 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
         tmp_paths: list[str] = []
         self._call_redirect("Read", "files/other.txt", self._SAMPLE_STATE, tmp_paths)
         self.assertEqual(tmp_paths, [])
+
+    def test_incomplete_redirect_is_removed_when_serialization_fails(self):
+        """A failed projection must not leave an untracked one-shot file."""
+        tmp_paths: list[str] = []
+        with (
+            patch.object(agent_runner_module.json, "dump", side_effect=OSError("full")),
+            self.assertLogs(agent_runner_module.logger, level="WARNING"),
+        ):
+            result = self._call_redirect(
+                "Read", ".editor/cells.json", self._SAMPLE_STATE, tmp_paths
+            )
+
+        self.assertIsNone(result)
+        self.assertEqual(tmp_paths, [])
+        tmp_root = self._thread_workspace / ".claude-tmp"
+        self.assertEqual(list(tmp_root.glob("editor_*.json")), [])
 
     # ------------------------------------------------------------------
     # Tempfile cleanup contract

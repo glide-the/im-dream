@@ -1,9 +1,10 @@
 # EditorState 虚拟索引适配器
 
 Status: Updated  
-Updated: 2026-06-28
+Updated: 2026-08-29
 Scope: Design + 实现状态同步
 
+> [Sync] 2026-08-29: Editor 虚拟 Read 重定向文件迁入 server-owned `{thread_workspace}/.claude-tmp`，锁定 canonical cwd containment、目录 `0700`、文件 `0600` 与 finally 清理合同。
 > [Sync] 2026-06-28: 补充 Notion 资源连接器边界 — `.notion/` 读取来源为连接器数据层 canonical snapshot，不复用 `.editor/` 的 Agent 本地内存快照语义。
 
 ---
@@ -52,9 +53,9 @@ PreToolUse hook（agent_runner.py）
 运行时实际路径（拦截后）：
 
 ```
-.editor/cells.json  ──PreToolUse──▶  /tmp/ink_editor_cells_XXXX.json（动态填充）
-                                           ↑
-                                    editor_state["cells"] 序列化
+.editor/cells.json  ──PreToolUse──▶  {thread_workspace}/.claude-tmp/editor_XXXX.json
+                                                   ↑
+                                            editor_state["cells"] 序列化
 ```
 
 ---
@@ -165,14 +166,18 @@ _pre_tool_use_hook 检测到 is_editor_index_path(path) == True
   ↓
 get_editor_resource_data(path, editor_state)  →  data = [...]
   ↓
-写入临时文件（tempfile.NamedTemporaryFile, delete=False）
-  /tmp/editor_XXXX.json  ←  json.dump(data, ensure_ascii=False)
+校验并复用 server-owned thread 临时根（ensure_claude_code_tmpdir）
+  {thread_workspace}/.claude-tmp/（0700）
+  ↓
+写入私有临时文件（tempfile.NamedTemporaryFile, delete=False）
+  {thread_workspace}/.claude-tmp/editor_XXXX.json（0600）
+  ← json.dump(data, ensure_ascii=False)
   路径追加至 _editor_redirect_tmp_paths 列表
   ↓
 return {"hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "allow",
-    "updatedInput": {"file_path": "/tmp/editor_XXXX.json"}
+    "updatedInput": {"file_path": "{thread_workspace}/.claude-tmp/editor_XXXX.json"}
 }}
   ↓
 Claude SDK 使用重定向后的路径执行 Read
@@ -197,17 +202,17 @@ sequenceDiagram
     participant Agent as Claude Agent
     participant Hook as _pre_tool_use_hook<br/>(agent_runner.py)
     participant EdState as editor_state<br/>(内存快照)
-    participant Tmp as 临时文件<br/>(/tmp/editor_*)
+    participant Tmp as thread 临时文件<br/>(.claude-tmp/editor_*)
     participant FS as 工作空间文件系统<br/>(.editor/cells.json = {})
 
     Agent->>Hook: Read { file_path: ".editor/cells.json" }
     Hook->>Hook: is_editor_index_path(".editor/cells.json") → True
     Hook->>EdState: get_editor_resource_data(path, state)
     EdState-->>Hook: cells 数组
-    Hook->>Tmp: 写入 /tmp/editor_XXXX.json
-    Hook-->>Agent: HookJSONOutput { permissionDecision:"allow", updatedInput:{file_path:"/tmp/editor_XXXX.json"} }
+    Hook->>Tmp: ensure .claude-tmp 0700<br/>写入 editor_XXXX.json 0600
+    Hook-->>Agent: HookJSONOutput { permissionDecision:"allow", updatedInput:{file_path:"{thread}/.claude-tmp/editor_XXXX.json"} }
     Note over FS: 占位符 {} 从未被读取
-    Agent->>Tmp: Read /tmp/editor_XXXX.json
+    Agent->>Tmp: Read {thread}/.claude-tmp/editor_XXXX.json
     Tmp-->>Agent: 实时 cells 数组
     Note over Tmp: finally 块：os.unlink 清理临时文件
 ```
@@ -387,7 +392,7 @@ Agent 发出 Read { file_path: ".editor/cells.json" }
 
 ### 9.4 工具权限管理分工
 
-Editor MCP 只读工具（`mcp__editor__list_segments` 等）的授权**在 Python 层**管理，而非通过 `settings.json`：
+Editor MCP 写工具（`mcp__editor__write_segment` 等）的暴露与确认策略**在 Python 层**管理，而非通过 `settings.json`；读取不使用 Editor MCP，统一走 `.editor/` 虚拟索引：
 
 | 机制 | 管理层 | 特点 |
 |------|--------|------|
@@ -478,7 +483,7 @@ Agent 运行后（finally 块）
 
 - [x] `test_is_editor_index_path`：覆盖绝对路径、相对路径、子路径、未知 stem、README
 - [x] `test_get_editor_resource_data`：cells / session / full_state / 缺字段降级
-- [x] `TestEditorIndexRedirectHelper`（`test_claude_agent_runner.py`）：15 个 redirect / fallthrough / cleanup 用例
+- [x] `TestEditorIndexRedirectHelper`（`test_claude_agent_runner.py`）：17 个 redirect / fallthrough / containment / permission / cleanup 用例
 - [ ] `test_workspace_context_block`：验证 `{cwd}` 替换、块边界标签、cwd=None 守卫
 
 ### 10.7 文档同步

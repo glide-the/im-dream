@@ -4,6 +4,8 @@
 # [Sync] 2026-08-28: expose authenticated connector candidates and project the versioned snapshot-sync policy from existing config JSON without schema changes.
 # [Sync] 2026-08-28: keep new resource selections pending until their exact IDs
 #                    are committed in a successful lightweight snapshot.
+# [Sync] 2026-08-29: hydrate active connector resources for scope-safe Runtime
+#                    projection and stop persisting opaque discovery response blobs.
 
 """PostgreSQL persistence for Notion resource connectors.
 
@@ -737,7 +739,10 @@ class NotionConnectorStore:
     def get_active_connector_for_user(self, user_id: int) -> Optional[dict[str, Any]]:
         with self._unit_of_work(read_only=True) as unit_of_work:
             repository = NotionConnectorRepository(unit_of_work.connection)
-            return self._connector_from_row(repository.get_active_connector(user_id))
+            connector = self._connector_from_row(
+                repository.get_active_connector(user_id)
+            )
+            return self._attach_connector_resources(repository, connector)
 
     def update_connector(
         self,
@@ -855,7 +860,6 @@ class NotionConnectorStore:
                             "properties_schema": item.get("properties_schema") or {},
                             "url": item.get("url") or "",
                             "last_edited": item.get("last_edited") or "",
-                            "raw": item.get("raw") or {},
                         }
                     ),
                     now=now,
@@ -875,7 +879,6 @@ class NotionConnectorStore:
                             "url": item.get("url") or "",
                             "last_edited": item.get("last_edited") or "",
                             "parent": item.get("parent") or {},
-                            "raw": item.get("raw") or {},
                         }
                     ),
                     now=now,
