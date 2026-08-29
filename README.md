@@ -5,7 +5,7 @@
 <!-- [Sync] 2026-08-28: document pinned ntn installation plus actor-scoped credentials/current snapshots in agentdata, policy-driven background refresh, and per-Thread projection. -->
 <!-- [Sync] 2026-08-29: document current-selection filtering, minimal thread metadata, empty-scope revocation, and reauthorization LKG behavior. -->
 <!-- [Sync] 2026-08-29: document the Settings Notion capability/Skill inspection surface and truthful Hosted MCP read/write boundary. -->
-<!-- [Sync] 2026-08-30: document the synchronized notion-session/notion-cli built-in packages without relaxing actor credential isolation. -->
+<!-- [Sync] 2026-08-30: document actor/thread-bound Notion CLI environment injection and the pre-auth ntn installation check. -->
 
 # Ink & Memory
 
@@ -28,7 +28,7 @@ This repository contains the Dream application. It does not own the shared datab
 - **Dream** — launch a Dream Run and review scripts, storyboards, prompts, and generated artifacts.
 - **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
 - **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
-- **Notion resources** — connect in Settings, select the exact allowed scope, inspect the installed `notion-session` and `notion-cli` packages with safe reference files, and keep lightweight indexes refreshed outside Chat. The Read-hook path remains usable without exposing credentials; the synchronized CLI package does not receive actor-owned `NOTION_HOME`, and Hosted Notion MCP read/write remains explicitly unavailable.
+- **Notion resources** — connect in Settings, select the exact allowed scope, inspect the installed `notion-session` and `notion-cli` packages, and keep lightweight indexes refreshed outside Chat. Dream checks that pinned `ntn` is installed before authentication and injects the current actor/thread projection as `NOTION_HOME`, `NOTION_API_TOKEN`, `NOTION_KEYRING`, and `NOTION_WORKERS_CONFIG_FILE` into Agent Runtime Bash. Hosted Notion MCP remains separate from this CLI path.
 - **Platform integration** — consume authenticated model aliases, subscription eligibility, usage, and billing from Admin/Gateway.
 
 Deck marketplace distribution is intentionally deferred. See [docs/design/deck-register/README.md](docs/design/deck-register/README.md).
@@ -212,7 +212,7 @@ Admin provisioning writes the remaining local service identity and model aliases
 
 `INK_NOTION_RUNTIME_ROOT` must be an absolute server-owned path in the same persistent agentdata area as `AGENT_CWD`. Dream stores each user's opaque credential source under `users/<actor-hash>/home` and each connector's latest successful lightweight index under `users/<actor-hash>/snapshots/<connector-id>/current.json`. Saving a resource selection performs the first index sync immediately; the connector's server-owned strategy then refreshes due indexes in the background, without requiring a Chat or workspace initialization. These snapshots contain selected IDs and compact metadata only, never page Markdown, blocks, or attachments.
 
-For a Chat turn with the trusted thread workspace enabled, Runtime initialization only copies the current user's effective credential and latest successful index into `{AGENT_CWD}/{thread_id}/.notion-home` and `.notion`; before projection, the index is intersected with the user's current selected scope and connector metadata is minimized. It does not call Notion or run an index sync. Clearing or shrinking the selected scope therefore takes effect for the next turn even when a newer index refresh fails. When the Agent reads an indexed `.notion/pages/<page-id>.json` virtual path, the Runtime validates that ID and fetches only that page's current Markdown. Workspace Mode disabled keeps both projections unavailable and the page hook fails closed because that mode intentionally has no workspace filesystem sandbox. Do not set application `NOTION_HOME` to `~/.config/notion`, a browser-supplied path, or a shared process-user directory; the Agent cannot read or write the projected credential files.
+For a Chat turn with the trusted thread workspace enabled, Runtime initialization copies the current user's effective credential and latest successful index into `{AGENT_CWD}/{thread_id}/.notion-home` and `.notion`; before projection, the index is intersected with the user's current selected scope and connector metadata is minimized. `sdk_env.py` then binds that exact thread projection to Agent Runtime Bash through `NOTION_HOME`, `NOTION_API_TOKEN`, `NOTION_KEYRING`, and `NOTION_WORKERS_CONFIG_FILE`; ambient values are cleared and cannot select another user or home. Projection does not call Notion or run an index sync. Clearing or shrinking the selected scope therefore takes effect for the next turn even when a newer index refresh fails. The existing indexed-page Read hook remains available alongside direct `ntn` CLI use. Workspace Mode disabled keeps both projections and the four runtime variables unavailable.
 
 ### 6. Start Dream
 
@@ -279,7 +279,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 6. **No service-wide cleanup.** Tests may stop only processes and temporary resources created by that test run.
 7. **Published versions are immutable.** Fix a bad Runtime with a forward release or an explicit reviewed rollback; do not overwrite or unpublish an accepted version as normal rollback.
 8. **Model output capability is server-owned.** Admin's selected model `maxOutputTokens` is projected to the Runtime; browser settings, user env, workspace files, and Gateway body rewriting must not replace it.
-9. **Notion credentials and lightweight indexes are actor-owned.** Canonical durable state belongs under server agentdata; policy-driven index refresh is independent of Chat, Runtime receives only current-scope per-Thread projections, failed reauthorization preserves a still-valid effective credential, page bodies are read on demand, and process `HOME`, ambient `NOTION_API_TOKEN`, browser config, and workspace files cannot override either source.
+9. **Notion Runtime binding is actor/thread-owned.** Canonical durable state belongs under server agentdata; policy-driven index refresh is independent of Chat, and every Runtime turn receives only the current actor's current-scope per-Thread projection. Dream replaces ambient `NOTION_*` values with that projection before exposing the four supported variables to Agent Bash.
 10. **Editor writes bind actor, live session, and durable state.** The runner rejects writes for a stale session, the Editor MCP child receives only the server-owned actor and effective PostgreSQL capability, every query/update is actor-scoped, and business failures refresh the single in-memory EditorState cache without publishing a success event. Notion indexes and on-demand page bodies never enter EditorState.
 
 ## Troubleshooting

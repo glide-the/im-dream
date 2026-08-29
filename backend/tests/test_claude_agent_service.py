@@ -41,6 +41,8 @@
 #                    exposing credential bytes to AgentRunOptions or workspace context.
 # [Sync] 2026-08-29: require attached workspace context to index the installed
 #                    notion-session Skill and its canonical instruction path.
+# [Sync] 2026-08-30: require workspace context to consume the dynamic README
+#                    Skill section instead of a hard-coded notion-session row.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -937,6 +939,26 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                 del connector_id, workspace_id
                 notion_dir = workspace_path / ".notion"
                 notion_dir.mkdir(parents=True, exist_ok=True)
+                (notion_dir / "README.md").write_text(
+                    """# Notion connector index
+
+## Skill index
+
+- Catalog revision: `catalog-attach-001`
+- Skill: `notion-session` — Notion 工作空间助手
+  - Availability: `available`
+  - Instructions: workspace-root `skills/notion-session/SKILL.md`
+  - Runtime discovery: `.claude/skills/notion-session`
+- Skill: `notion-cli` — Notion CLI 工作空间数据助手
+  - Availability: `available`
+  - Instructions: workspace-root `skills/notion-cli/SKILL.md`
+  - Runtime discovery: `.claude/skills/notion-cli`
+- Use an available Skill whenever a request requires the connected Notion.
+- Follow the selected Skill's index-first workflow before reading or changing remote content.
+- If the selected Skill is unavailable, report the Notion limitation and continue any answer that does not depend on Notion.
+""",
+                    encoding="utf-8",
+                )
                 (notion_dir / "connector.json").write_text(
                     json.dumps(
                         {
@@ -1032,14 +1054,26 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                 editor_session_id="session-attach",
             )
             self.assertIn("Notion lightweight index (.notion/):", notion_block)
-            self.assertIn("Notion Skill index:", notion_block)
-            self.assertIn("Skill: notion-session", notion_block)
             self.assertIn(
-                "Instructions: skills/notion-session/SKILL.md",
+                "Notion Skill index (from .notion/README.md):",
+                notion_block,
+            )
+            self.assertIn("Skill: `notion-session`", notion_block)
+            self.assertIn(
+                "Instructions: workspace-root `skills/notion-session/SKILL.md`",
                 notion_block,
             )
             self.assertIn(
-                "Runtime discovery: .claude/skills/notion-session",
+                "Runtime discovery: `.claude/skills/notion-session`",
+                notion_block,
+            )
+            self.assertIn("Skill: `notion-cli`", notion_block)
+            self.assertIn(
+                "Instructions: workspace-root `skills/notion-cli/SKILL.md`",
+                notion_block,
+            )
+            self.assertIn(
+                "Runtime discovery: `.claude/skills/notion-cli`",
                 notion_block,
             )
             self.assertIn(

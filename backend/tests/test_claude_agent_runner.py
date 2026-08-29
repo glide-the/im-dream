@@ -12,6 +12,7 @@
 #                    thread .claude-tmp with private directory/file modes.
 # [Sync] 2026-08-29: Editor MCP config carries only trusted actor/DB capability,
 #                    and write calls fail closed when their session differs from live state.
+# [Sync] 2026-08-30: verify runner composition injects all current actor/thread Notion CLI variables into SDK options.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -518,6 +519,57 @@ class TestClaudeAgentRunnerBasicText(_RunnerBase):
         self.assertEqual(
             self._mock_client.last_options.max_buffer_size,
             4 * 1024 * 1024,
+        )
+
+    async def test_sdk_options_receive_current_thread_notion_cli_environment(self):
+        self.set_query([])
+        runner = self.make_runner()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            notion_home = workspace / ".notion-home"
+            notion_home.mkdir(mode=0o700)
+            (notion_home / "auth.json").write_text(
+                json.dumps({"workspace-current": "synthetic-current-token"}),
+                encoding="utf-8",
+            )
+            (notion_home / "config.json").write_text(
+                json.dumps(
+                    {"defaultWorkspaceIds": {"prod": "workspace-current"}}
+                ),
+                encoding="utf-8",
+            )
+            (notion_home / "workers.json").write_text("{}\n", encoding="utf-8")
+
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="notion-env-001",
+                    user_message="inspect Notion",
+                    cwd=str(workspace),
+                    claude_tmp_workspace=str(workspace),
+                    notion_credential_home=str(notion_home),
+                    tool_choice="none",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda _delta: None
+                ),
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(
+            self._mock_client.last_options.env["NOTION_HOME"],
+            str(notion_home.resolve()),
+        )
+        self.assertEqual(
+            self._mock_client.last_options.env["NOTION_API_TOKEN"],
+            "synthetic-current-token",
+        )
+        self.assertEqual(
+            self._mock_client.last_options.env["NOTION_KEYRING"],
+            "0",
+        )
+        self.assertEqual(
+            self._mock_client.last_options.env["NOTION_WORKERS_CONFIG_FILE"],
+            str((notion_home / "workers.json").resolve()),
         )
 
     async def test_workspace_launch_manifest_plugins_are_forwarded_to_sdk(self):
@@ -3403,7 +3455,7 @@ class TestEditorMcpBinding(unittest.TestCase):
             "UNTRUSTED_VALUE": "must-not-cross",
         })
 
-        env = config.env
+        env = config["env"] if isinstance(config, dict) else config.env
         self.assertEqual(env["INK_AGENT_USER_ID"], "7")
         self.assertEqual(
             env["DATABASE_URL"],

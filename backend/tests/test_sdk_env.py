@@ -1,5 +1,5 @@
 # [Input] Consume libs/claude_agent_kit/server/sdk_env.py SDK metadata, CLI path,
-#         and SDK buffer policy helpers.
+#         SDK buffer policy helpers, and synthetic thread-projected ntn credentials.
 # [Output] Verify the custom distribution/import owner, Dream CLI default,
 #          explicit official rollback, fail-closed resolution, and buffers.
 # [Pos] test node in backend/tests
@@ -14,6 +14,7 @@
 #                    eligibility, or required MCP management identity capability.
 # [Sync] 2026-08-28: verify exact server-owned Runtime env validation, precedence,
 #                    parent scrubbing, and omit-when-unset behavior.
+# [Sync] 2026-08-30: verify actor/thread-bound NOTION_* Runtime injection, token selection, tombstones, and path isolation.
 
 """Tests for sdk_env.apply_cli_path_to_options (2026-07-26)."""
 from __future__ import annotations
@@ -43,10 +44,16 @@ from libs.claude_agent_kit.server.sdk_env import (
     DREAM_CLAUDE_SDK_DISTRIBUTION,
     DREAM_CLAUDE_SDK_IMPORT,
     DREAM_CLAUDE_SDK_VERSION,
+    NOTION_API_TOKEN_ENV_NAME,
+    NOTION_HOME_ENV_NAME,
+    NOTION_KEYRING_ENV_NAME,
+    NOTION_WORKERS_CONFIG_FILE_ENV_NAME,
+    apply_notion_cli_env_to_options,
     apply_cli_path_to_options,
     require_dream_claude_sdk_distribution,
     resolve_claude_agent_max_buffer_size,
     resolve_claude_cli_path,
+    resolve_notion_cli_runtime_env,
 )
 
 
@@ -470,6 +477,91 @@ class TestClaudeCodeRuntimeEnv(unittest.TestCase):
                     types.SimpleNamespace(env={}),
                     runtime_env,
                 )
+
+
+class TestNotionCliRuntimeEnv(unittest.TestCase):
+    def _projection(self, root: Path, token: str = "token-current") -> tuple[Path, Path]:
+        workspace = root / "thread-current"
+        home = workspace / ".notion-home"
+        home.mkdir(parents=True)
+        (home / "auth.json").write_text(
+            json.dumps({"workspace-current": token}),
+            encoding="utf-8",
+        )
+        (home / "config.json").write_text(
+            json.dumps({"defaultWorkspaceIds": {"prod": "workspace-current"}}),
+            encoding="utf-8",
+        )
+        return workspace, home
+
+    def test_exact_projection_injects_all_existing_ntn_variables(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace, home = self._projection(Path(temp_dir))
+            workers = home / "workers.json"
+            workers.write_text("{}", encoding="utf-8")
+            resolved = resolve_notion_cli_runtime_env(
+                home,
+                thread_workspace=workspace,
+            )
+        self.assertEqual(
+            resolved,
+            {
+                NOTION_HOME_ENV_NAME: str(home.resolve()),
+                NOTION_API_TOKEN_ENV_NAME: "token-current",
+                NOTION_KEYRING_ENV_NAME: "0",
+                NOTION_WORKERS_CONFIG_FILE_ENV_NAME: str(workers.resolve()),
+            },
+        )
+
+    def test_legacy_access_token_shape_is_supported_without_workers_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace, home = self._projection(Path(temp_dir))
+            (home / "auth.json").write_text(
+                json.dumps({"access_token": "legacy-token"}),
+                encoding="utf-8",
+            )
+            resolved = resolve_notion_cli_runtime_env(
+                home,
+                thread_workspace=workspace,
+            )
+        self.assertEqual(resolved[NOTION_API_TOKEN_ENV_NAME], "legacy-token")
+        self.assertNotIn(NOTION_WORKERS_CONFIG_FILE_ENV_NAME, resolved)
+
+    def test_foreign_thread_projection_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace, _home = self._projection(root)
+            _foreign_workspace, foreign_home = self._projection(
+                root / "foreign-root",
+                token="token-foreign",
+            )
+            with self.assertRaisesRegex(ValueError, "escaped"):
+                resolve_notion_cli_runtime_env(
+                    foreign_home,
+                    thread_workspace=workspace,
+                )
+
+    def test_missing_projection_scrubs_ambient_notion_values(self):
+        options = types.SimpleNamespace(env={
+            NOTION_HOME_ENV_NAME: "/ambient/home",
+            NOTION_API_TOKEN_ENV_NAME: "ambient-token",
+            NOTION_KEYRING_ENV_NAME: "1",
+            NOTION_WORKERS_CONFIG_FILE_ENV_NAME: "/ambient/workers.json",
+            "KEEP": "yes",
+        })
+        apply_notion_cli_env_to_options(
+            options,
+            None,
+            thread_workspace=None,
+        )
+        self.assertEqual(options.env["KEEP"], "yes")
+        for name in (
+            NOTION_HOME_ENV_NAME,
+            NOTION_API_TOKEN_ENV_NAME,
+            NOTION_KEYRING_ENV_NAME,
+            NOTION_WORKERS_CONFIG_FILE_ENV_NAME,
+        ):
+            self.assertEqual(options.env[name], "")
 
 
 if __name__ == "__main__":

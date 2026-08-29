@@ -28,6 +28,7 @@
 // [Sync] 2026-08-29: accept only real Notion Read-hook and workspace-materializer operation
 //                    sources with explicit backend entrypoints.
 // [Sync] 2026-08-30: accept the installed notion-session Read and notion-cli Bash tool boundaries without treating either as an operation source.
+// [Sync] 2026-08-30: parse the server ntn installation prerequisite and requires_installation state before connector auth.
 /**
  * Resource connector API helpers.
  *
@@ -157,6 +158,7 @@ export interface UpdateConnectorSyncPolicyInput {
 
 export type NotionCapabilityAvailability =
   | 'available'
+  | 'requires_installation'
   | 'requires_connection'
   | 'requires_scope'
   | 'unavailable';
@@ -189,6 +191,11 @@ export interface NotionMcpInventory {
 export interface NotionCapabilityCatalog {
   schemaVersion: number;
   packageRevision: string;
+  cliInstallation: {
+    status: 'installed' | 'missing';
+    requiredVersion: string;
+    installCommand: string;
+  };
   mcpInventory: NotionMcpInventory;
   skills: NotionCapabilitySkillSummary[];
   operations: NotionCapabilityOperation[];
@@ -569,7 +576,7 @@ export function normalizeResourceConnectorFallback(raw: unknown): ResourceConnec
 }
 
 function normalizeCapabilityAvailability(value: unknown): NotionCapabilityAvailability {
-  if (value === 'available' || value === 'requires_connection' || value === 'requires_scope' || value === 'unavailable') {
+  if (value === 'available' || value === 'requires_installation' || value === 'requires_connection' || value === 'requires_scope' || value === 'unavailable') {
     return value;
   }
   throw new ResourceConnectorApiError(502, 'Notion capability availability is invalid. Please retry.');
@@ -616,6 +623,7 @@ function normalizeInventoryStatus(value: unknown): NotionMcpInventory['status'] 
 function normalizeNotionCapabilityCatalog(raw: unknown): NotionCapabilityCatalog {
   const record = asRecord(raw);
   const inventory = asRecord(record.mcp_inventory ?? record.mcpInventory);
+  const cliInstallation = asRecord(record.cli_installation ?? record.cliInstallation);
   const skills = record.skills;
   const operations = record.operations;
   if (!Array.isArray(skills) || !Array.isArray(operations)) {
@@ -624,9 +632,18 @@ function normalizeNotionCapabilityCatalog(raw: unknown): NotionCapabilityCatalog
   const status = normalizeInventoryStatus(inventory.status);
   const readStatus = normalizeInventoryStatus(inventory.read_status ?? inventory.readStatus);
   const writeStatus = normalizeInventoryStatus(inventory.write_status ?? inventory.writeStatus);
+  const cliStatus = cliInstallation.status;
+  if (cliStatus !== 'installed' && cliStatus !== 'missing') {
+    throw new ResourceConnectorApiError(502, 'Notion CLI installation response is invalid. Please retry.');
+  }
   return {
     schemaVersion: requirePositiveSafeInteger(record.schema_version ?? record.schemaVersion, 'capability schema'),
     packageRevision: requireNonEmptyString(record.package_revision ?? record.packageRevision, 'package revision'),
+    cliInstallation: {
+      status: cliStatus,
+      requiredVersion: requireNonEmptyString(cliInstallation.required_version ?? cliInstallation.requiredVersion, 'CLI required version'),
+      installCommand: requireNonEmptyString(cliInstallation.install_command ?? cliInstallation.installCommand, 'CLI install command'),
+    },
     mcpInventory: {
       status,
       revision: asString(inventory.revision),

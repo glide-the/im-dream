@@ -7,6 +7,7 @@
 #                    Notion failures to stable, credential-free HTTP responses.
 # [Sync] 2026-08-28: expose versioned snapshot-sync strategy and run scheduled synchronization outside Chat turns.
 # [Sync] 2026-08-29: expose actor-scoped capability, Skill body, and stable-ID Skill file reads without adding MCP execution or filesystem path input.
+# [Sync] 2026-08-30: expose ntn installation-required state before auth and return an actionable missing-CLI response.
 
 """Notion resource connector HTTP routes."""
 from __future__ import annotations
@@ -128,7 +129,10 @@ def _http_error(exc: Exception) -> HTTPException:
             detail="Notion denied access to this resource. Update its permissions or reconnect Notion.",
         )
     if isinstance(exc, NotionCLIUnavailableError):
-        return HTTPException(status_code=503, detail="Notion service is temporarily unavailable.")
+        return HTTPException(
+            status_code=503,
+            detail="Notion CLI is not installed. Install ntn on the Dream host and retry.",
+        )
     if isinstance(exc, NotionSnapshotNotReadyError):
         return HTTPException(
             status_code=409,

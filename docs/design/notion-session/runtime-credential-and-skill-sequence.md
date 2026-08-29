@@ -1,10 +1,12 @@
-<!-- [Input] Actor credential source, lightweight index scheduler, thread projection, and lazy Runtime Read hook design. -->
-<!-- [Output] Business sequence diagrams for authorization, index publication, thread Read, failures, reauthorization, and disconnect. -->
+<!-- [Input] Actor credential source, lightweight index scheduler, thread projection, sdk_env CLI binding, and lazy Runtime Read hook design. -->
+<!-- [Output] Business sequence diagrams for installation, authorization, index publication, Agent CLI/Read, failures, reauthorization, and disconnect. -->
 <!-- [Pos] Current Notion credential/index/Runtime business-sequence source of truth in docs/design/notion-session. -->
 <!-- [Sync] 2026-08-28: separate lightweight ID synchronization from on-demand page Markdown reads. -->
 <!-- [Sync] 2026-08-29: add full discovery pagination, empty-scope revocation, current-scope projection filtering, and LKG reauthorization semantics. -->
+<!-- [Sync] 2026-08-30: add the ntn prerequisite and direct four-variable Agent Runtime injection. -->
+<!-- [Sync] 2026-08-30: add dynamic capability-catalog rendering into workspace README and reuse that generated Skill section in per-turn context. -->
 
-# Notion 凭证、轻量索引与按需 Read 业务时序
+# Notion 凭证、轻量索引与 Agent CLI/Read 业务时序
 
 ## 1. 连接、选择与首次轻索引
 
@@ -21,6 +23,10 @@ sequenceDiagram
 
     User->>UI: 连接 Notion
     UI->>Backend: POST auth/login
+    Backend->>Backend: 检查固定版本 ntn 可执行文件
+    alt ntn 未安装
+        Backend-->>UI: 需要安装 + 固定安装命令
+    else ntn 已安装
     Backend->>Provider: 创建该 actor 的 pending credential home
     Backend->>CLI: device login（显式 pending home）
     CLI-->>UI: 验证链接与验证码
@@ -31,6 +37,7 @@ sequenceDiagram
     Notion-->>CLI: credential
     Backend->>Provider: 原子提升 actor credential source
     Backend-->>UI: authenticated
+    end
 
     Backend->>CLI: 分页发现全部 database/page
     CLI-->>UI: 紧凑资源元数据（无 raw）
@@ -69,6 +76,8 @@ sequenceDiagram
     participant UI as Dream UI
     participant Service as Agent Service
     participant Runtime as Agent Runtime
+    participant Catalog as Capability Catalog
+    participant CLI as ntn CLI
     participant Hook as Notion Read Hook
 
     loop policy sweep
@@ -92,9 +101,18 @@ sequenceDiagram
     UI->>Service: Agent turn(thread_id, actor)
     Service->>Provider: 读取 actor credential + current index
     Provider->>Provider: LKG 与当前 selection 求交<br/>移除私有 connector 配置
-    Provider->>Runtime: 原子投影 {thread}/.notion-home 与 {thread}/.notion
+    Provider->>Catalog: materializer 调用 build_notion_capability_catalog(connector)
+    Catalog-->>Provider: Skill rows + availability + catalog revision
+    Provider->>Runtime: 原子投影 {thread}/.notion-home 与 {thread}/.notion<br/>README 含动态 Skill index
+    Service->>Runtime: workspace context 读取同一 README Skill 段
+    Service->>Runtime: sdk_env 注入 NOTION_HOME/API_TOKEN/KEYRING/WORKERS_CONFIG_FILE
     Note over Service,Runtime: 不请求 Notion，不构建 index
-    Runtime->>Runtime: 发现 backend-owned notion-session Skill
+    Runtime->>Runtime: 发现 catalog 返回且当前可用的 backend-owned Skills
+    alt 使用 notion-cli
+        Runtime->>CLI: Bash 调用 ntn
+        CLI->>Notion: 使用当前 actor/thread environment
+        Notion-->>Runtime: CLI 结果
+    else 使用 notion-session
     Runtime->>Runtime: Read .notion/index.json 定位 page_id
     Runtime->>Hook: Read .notion/pages/<page_id>.json
     Hook->>Hook: 校验 workspace/path/symlink/index membership
@@ -109,6 +127,7 @@ sequenceDiagram
     else credential/permission/API 失败
         Hook-->>Runtime: 安全错误码 + nextAction
         Runtime-->>UI: Notion 局部失败；普通对话继续
+    end
     end
 ```
 

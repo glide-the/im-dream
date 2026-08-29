@@ -22,6 +22,7 @@
 #                    Settings allowlist consumed by the PreToolUse
 #                    SandboxPermissionRequest step (claude-agent-sandbox-network-
 #                    permission-tool.md §6).
+# [Sync] 2026-08-30: clarify notion_credential_home as the actor/thread source for Read hook and sdk_env Runtime injection.
 # [Sync] 2026-07-26: remove sandbox_network_allowed_domains again — the
 #                    PreToolUse network gate was wrong-layer duplication;
 #                    allowlists are enforced by the CLI sandbox
@@ -220,8 +221,8 @@ class AgentRunOptions:
         default_factory=dict,
         repr=False,
     )
-    # Exact server-owned {thread}/.notion-home projection. It is consumed only
-    # by the Runtime's lazy Notion Read hook and never merged into Agent/Bash env.
+    # Exact server-owned {thread}/.notion-home projection. The Read hook consumes
+    # it directly and sdk_env derives the same turn's NOTION_* Runtime binding.
     notion_credential_home: Optional[str] = field(default=None, repr=False)
     # Maximum turns for the agent.
     max_turns: int = 100

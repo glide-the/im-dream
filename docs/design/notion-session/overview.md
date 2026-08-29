@@ -18,10 +18,10 @@ Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空
 > [Sync] 2026-07-08: 资源选择持久化收敛为 `connector_resources` / connector `sources`：Settings 已挂载来源、Chat 已链接资源和 Agent snapshot 入口读取同一份后端状态；Notion People 系统 data source 在 discovery 层过滤。
 > [Sync] 2026-07-09: Chat `ResourceConnectorTabPanel` 根内容区减少线框化，状态信息块使用虚线边界但无卡片底色 / 阴影，空态和已链接资源行用轻表面和留白承接摘要内容。
 > [Sync] 2026-07-09: Settings `ResourceOptionRow` 与 `MountedSourcesSection` 的页数元信息只在 `pageCount > 0` 时显示，避免 `0 pages` 占用资源行右侧状态区域。
-> [Sync] 2026-08-28: 当前凭证、Runtime 与内置 Skill 合同改由 [`runtime-credential-and-skill-design.md`](./runtime-credential-and-skill-design.md) 与 [`runtime-credential-and-skill-sequence.md`](./runtime-credential-and-skill-sequence.md) 定义；同步删除共享 `~/.config/notion`、browser-configured `NOTION_HOME` 和 Agent Bash/CLI 的旧指导。
+> [Sync] 2026-08-30: 当前凭证、Runtime 与内置 Skill 合同改由 [`runtime-credential-and-skill-design.md`](./runtime-credential-and-skill-design.md) 与 [`runtime-credential-and-skill-sequence.md`](./runtime-credential-and-skill-sequence.md) 定义；Agent CLI 通过 `sdk_env` 获得当前 actor/thread 的四个 `NOTION_*` 变量。
 > [Sync] 2026-08-28: canonical current snapshot 与凭证统一进入 actor `notion-runtime`；保存资源和策略 worker 负责远程同步，Chat 初始化只投影到 thread `.notion/`。
 
-> **当前安全结论：** durable Notion 凭证与 index-only canonical current snapshot 位于 server-owned agentdata actor root；启用可信 thread workspace 的 Chat Runtime 每 turn 分别刷新 `{thread}/.notion-home` 与 `{thread}/.notion`，但不触发远程 snapshot 构建。Workspace Mode 关闭时不投影并 fail closed。Agent 通过内置 `notion-session` Skill 先读索引；只有读取已选中的 `.notion/pages/<id>.json` 时，Runtime hook 才按需获取该页当前 Markdown。Agent 与浏览器都不能选择或读取凭证/agentdata 路径。
+> **当前运行结论：** durable Notion 凭证与 index-only canonical current snapshot 位于 server-owned agentdata actor root；启用可信 thread workspace 的 Chat Runtime 每 turn 分别刷新 `{thread}/.notion-home` 与 `{thread}/.notion`，但不触发远程 snapshot 构建。`sdk_env` 把当前 thread 的 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与可选 `NOTION_WORKERS_CONFIG_FILE` 注入 Agent Bash；`notion-session` 的 Read hook 与 `notion-cli` 的 `ntn` 命令共用该投影。
 
 ---
 
@@ -59,7 +59,7 @@ ink-and-memory 的工作空间模型目前仅管理**本地 EditorState**（`.ed
 ### 1.3 核心原则
 
 - **复用现有模式**：`.notion/` 镜像 `.editor/` 的虚拟索引 + PreToolUse 拦截模式
-- **ntn CLI 是 Dream 内部驱动**：不引入 Notion SDK 依赖；Agent 不得直接执行 CLI，也不暴露 Notion MCP 工具
+- **ntn CLI 是共用 driver**：不引入 Notion SDK 依赖；Dream 后端和 Agent `notion-cli` Skill 共用 `ntn`，不暴露另一套 Hosted Notion MCP 工具
 - **actor agentdata current snapshot 是索引权威状态**：Notion 是正文 source of truth；保存资源/后台策略只物化轻量 index，Agent 初始化只读取该 actor 最近成功版本
 - **已选择资源必须落库**：用户在 Settings 保存的 data_source / page 写入 `connector_resources`，并通过 connector `sources` 暴露给 Settings、Chat 和后续 snapshot 物化
 - **只读优先**：先实现浏览能力；写入只设计 proposal/write pipeline 边界，不直接落地远程写回
@@ -212,7 +212,7 @@ NOTION_RESOURCES: dict[str, str] = {
 | ------------- | ------------------------------------------------- | ---------------------------- |
 | actor credential root | 后端按 actor 哈希解析的 durable credential home；客户端不可指定 | server-owned `AGENT_DATA_DIR/notion/actors/<actor_hash>` |
 | auth staging root | 单次授权会话的隔离目录，成功后才原子提升 | server-owned agentdata staging |
-| Runtime `NOTION_HOME` | 当前 thread 的私有运行时投影；仅传给 Dream 管理的 `ntn` 子进程 | `{AGENT_CWD}/{thread_id}/.notion-home` |
+| Runtime `NOTION_HOME` | 当前 thread 的运行时投影；传给 Dream 管理的子进程与 Agent Bash 中的 `ntn` | `{AGENT_CWD}/{thread_id}/.notion-home` |
 | 认证状态 | actor credential provider 是否返回有效凭证 | 后端受控 status/poll 边界 |
 
 ### 4.2 认证流程
@@ -249,15 +249,15 @@ NOTION_RESOURCES: dict[str, str] = {
 
 `NOTION_HOME` 不是用户配置项，也没有进程用户 home fallback。后端使用认证 actor
 解析 agentdata 权威目录；Agent 启动或继续 turn 时，把最新凭证快照复制到规范化后的
-thread workspace 私有目录并设置 `0700/0600` 权限。只有 Dream 管理的 `ntn` 子进程
-收到该路径和最小环境；浏览器请求、workspace 文件、Agent tool 参数、父进程
-`NOTION_HOME` 或 token 环境变量均不能覆盖它。
+thread workspace 目录并设置 `0700/0600` 权限。`sdk_env` 清空 ambient Notion 值后，
+把该投影解析出的 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与可选
+`NOTION_WORKERS_CONFIG_FILE` 直接注入 Agent Runtime。
 
 ### 4.4 Sandbox 适配
 
-`ntn` CLI 需要访问 Notion API，但它只由 Dream 后台同步或 Runtime page Read hook 的受控子进程执行，不授予
-Agent Bash/工具凭证目录访问权。thread 投影必须位于真实 thread workspace 内、拒绝
-符号链接并使用私有权限；Skill 初始化失败只禁用 Notion 局部能力，不改变 turn、
+`ntn` CLI 需要访问 Notion API；Runtime 仅为当前 actor/thread 开放 Notion 官方域名，并把
+同一 thread projection 提供给后台 Read hook 与 Agent Bash。thread 投影必须位于真实 thread workspace 内、拒绝
+符号链接；Skill 初始化失败只禁用 Notion 局部能力，不改变 turn、
 resume、cancel、EventBus 或 SSE 语义。
 
 ---
@@ -413,9 +413,9 @@ Notion device index (.notion/):
   calling Notion. The page body is never stored in the snapshot.
 
 Notion live operations:
-  Use only the built-in notion-session Read workflow. Credential paths, login
-  commands, environment variables, direct ntn CLI access, and Notion MCP tools
-  are not exposed to the Agent.
+  Use the built-in notion-session Read workflow or the notion-cli Skill. The
+  latter invokes ntn with the current thread's injected NOTION_* environment;
+  a separate Hosted Notion MCP namespace is not exposed.
 ```
 
 ### 7.2 系统提示词 Workflow 变更

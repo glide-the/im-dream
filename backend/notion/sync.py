@@ -14,6 +14,8 @@
 #                    `.notion/README.md` so virtual resources remain discoverable.
 # [Sync] 2026-08-29: export the Settings capability descriptor beside the real
 #                    workspace materializer; this write is local projection only.
+# [Sync] 2026-08-30: render the materialized Skill index from the authoritative
+#                    dynamic capability catalog instead of a static Skill name.
 
 """Canonical Notion snapshot assembly and workspace file materialization."""
 from __future__ import annotations
@@ -300,6 +302,66 @@ def clear_workspace_snapshot(workspace_path: Path) -> None:
         notion_dir.unlink()
 
 
+def _build_workspace_readme(connector: Mapping[str, Any]) -> str:
+    """Render the workspace guide from the authoritative dynamic Skill catalog."""
+
+    # Local import avoids the module cycle: capabilities owns the catalog while
+    # importing this module's real workspace-materializer operation descriptor.
+    from .capabilities import (  # noqa: PLC0415
+        NotionCapabilityError,
+        build_notion_capability_catalog,
+    )
+
+    try:
+        catalog = build_notion_capability_catalog(connector)
+    except NotionCapabilityError:
+        catalog = {}
+
+    lines = [
+        "# Notion connector index",
+        "",
+        "This read-only directory contains selected resource IDs and compact metadata.",
+        "Page bodies are fetched on demand when Runtime intercepts Read(.notion/pages/<id>.json).",
+        "",
+        "## Skill index",
+        "",
+    ]
+    revision = str(catalog.get("package_revision") or "").strip()
+    if revision:
+        lines.append(f"- Catalog revision: `{revision}`")
+    skills = catalog.get("skills")
+    rendered_skills = 0
+    if isinstance(skills, list):
+        for skill in skills:
+            if not isinstance(skill, Mapping):
+                continue
+            skill_id = str(skill.get("id") or "").strip()
+            if not skill_id:
+                continue
+            title = str(skill.get("title") or skill_id).strip()
+            availability = str(skill.get("availability") or "unavailable").strip()
+            lines.extend(
+                [
+                    f"- Skill: `{skill_id}` — {title}",
+                    f"  - Availability: `{availability}`",
+                    f"  - Instructions: workspace-root `skills/{skill_id}/SKILL.md`",
+                    f"  - Runtime discovery: `.claude/skills/{skill_id}`",
+                ]
+            )
+            rendered_skills += 1
+    if rendered_skills == 0:
+        lines.append("- Skill catalog unavailable; the connector index remains readable.")
+    lines.extend(
+        [
+            "- Use an available Skill whenever a request requires the connected Notion.",
+            "- Follow the selected Skill's index-first workflow before reading or changing remote content.",
+            "- If the selected Skill is unavailable, report the Notion limitation and continue any answer that does not depend on Notion.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def materialize_workspace_snapshot(
     workspace_path: Path,
     *,
@@ -315,26 +377,12 @@ def materialize_workspace_snapshot(
     pages_dir.mkdir(parents=True, exist_ok=True)
     databases_dir.mkdir(parents=True, exist_ok=True)
 
-    readme = (
-        "# Notion connector index\n\n"
-        "This read-only directory contains selected resource IDs and compact metadata.\n"
-        "Page bodies are fetched on demand when Runtime intercepts Read(.notion/pages/<id>.json).\n"
-        "\n"
-        "## Skill index\n\n"
-        "- Skill: `notion-session`\n"
-        "- Instructions: workspace-root `skills/notion-session/SKILL.md`\n"
-        "- Runtime discovery: `.claude/skills/notion-session`\n"
-        "- Use it whenever a request requires searching or reading the connected Notion.\n"
-        "- Follow its index-first workflow: inspect connector/index/database metadata, "
-        "then Read one selected page on demand.\n"
-        "- If Skill/Read is unavailable, report the Notion limitation and continue "
-        "any answer that does not depend on Notion.\n"
-    )
-    (notion_dir / "README.md").write_text(readme, encoding="utf-8")
-
     snapshot_payload = _mapping(snapshot)
     snapshot_meta = _mapping(snapshot_payload.get("metadata"))
     connector_payload = dict(connector or snapshot_payload.get("connector") or {})
+
+    readme = _build_workspace_readme(connector_payload)
+    (notion_dir / "README.md").write_text(readme, encoding="utf-8")
 
     if snapshot_payload:
         _json_write(notion_dir / "snapshot.json", get_notion_snapshot_resource_data(".notion/snapshot.json", snapshot_payload))

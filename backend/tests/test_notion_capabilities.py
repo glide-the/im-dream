@@ -4,6 +4,7 @@
 # [Sync] 2026-08-29: add coverage for the Settings capability and safe Skill Markdown projection contract.
 # [Sync] 2026-08-29: require catalog operations to identify the real Read hook/workspace materializer and derive Skill title/files from disk.
 # [Sync] 2026-08-30: require both built-in Notion packages, their distinct tool boundaries, and truthful CLI execution availability.
+# [Sync] 2026-08-30: gate notion-cli on the explicit installed/missing ntn prerequisite and expose the install command before auth.
 
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from notion.capabilities import (  # noqa: E402
     get_notion_skill_detail,
     get_notion_skill_file,
 )
+from notion.auth import NotionCliInstallation  # noqa: E402
 from libs.claude_agent_kit.server.notion_read_hook import (  # noqa: E402
     apply_notion_page_read_redirect,
 )
@@ -38,9 +40,17 @@ from notion.sync import materialize_workspace_snapshot  # noqa: E402
 
 class TestNotionCapabilities(unittest.TestCase):
     def test_unconnected_catalog_is_inspectable_and_never_claims_mcp(self):
-        catalog = build_notion_capability_catalog(None)
+        catalog = build_notion_capability_catalog(
+            None,
+            cli_installation=NotionCliInstallation(status="installed"),
+        )
 
-        self.assertEqual(catalog["schema_version"], 3)
+        self.assertEqual(catalog["schema_version"], 4)
+        self.assertEqual(catalog["cli_installation"]["status"], "installed")
+        self.assertEqual(
+            catalog["cli_installation"]["install_command"],
+            "npm install -g ntn@0.15.1",
+        )
         self.assertEqual(catalog["mcp_inventory"]["status"], "not_integrated")
         self.assertEqual(catalog["mcp_inventory"]["read_status"], "not_integrated")
         self.assertEqual(catalog["mcp_inventory"]["write_status"], "not_integrated")
@@ -84,14 +94,15 @@ class TestNotionCapabilities(unittest.TestCase):
                     {"resource_type": "notion_database", "external_id": "db-safe"},
                     {"resource_type": "notion_page", "external_id": "page-safe"},
                 ],
-            }
+            },
+            cli_installation=NotionCliInstallation(status="installed"),
         )
 
         self.assertEqual(
             {skill["id"]: skill["availability"] for skill in catalog["skills"]},
             {
                 NOTION_SESSION_SKILL_ID: "available",
-                NOTION_CLI_SKILL_ID: "unavailable",
+                NOTION_CLI_SKILL_ID: "available",
             },
         )
         self.assertEqual(
@@ -134,11 +145,12 @@ class TestNotionCapabilities(unittest.TestCase):
         detail = get_notion_skill_detail(
             NOTION_CLI_SKILL_ID,
             {"auth_status": "authenticated"},
+            cli_installation=NotionCliInstallation(status="installed"),
         )
 
         self.assertEqual(detail["skill"]["id"], "notion-cli")
         self.assertEqual(detail["skill"]["tools"], ["Bash"])
-        self.assertEqual(detail["skill"]["availability"], "unavailable")
+        self.assertEqual(detail["skill"]["availability"], "available")
         self.assertIn("Notion CLI 工作空间数据助手", detail["skill"]["body"])
         self.assertIn("ntn api v1/search", detail["skill"]["body"])
         self.assertEqual(
@@ -151,6 +163,17 @@ class TestNotionCapabilities(unittest.TestCase):
             expected_revision=detail["package_revision"],
         )
         self.assertIn("ntn api v1/search", response["file"]["content"])
+
+    def test_missing_ntn_is_actionable_before_connection(self):
+        catalog = build_notion_capability_catalog(
+            None,
+            cli_installation=NotionCliInstallation(status="missing"),
+        )
+        availability = {
+            skill["id"]: skill["availability"] for skill in catalog["skills"]
+        }
+        self.assertEqual(availability[NOTION_SESSION_SKILL_ID], "requires_connection")
+        self.assertEqual(availability[NOTION_CLI_SKILL_ID], "requires_installation")
 
     def test_symlinked_public_file_is_rejected(self):
         source_root = ROOT / "builtin_skills"

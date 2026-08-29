@@ -17,7 +17,7 @@
 #                    that preserves only a previously effective actor credential.
 # [Sync] 2026-08-29: verify capability/Skill/file routes stay inspectable before connection,
 #                    expose only stable IDs, and reject stale package revisions.
-# [Sync] 2026-08-30: expose notion-session and renamed notion-cli through the same read-only package routes.
+# [Sync] 2026-08-30: expose ntn installation metadata and connected Agent CLI availability.
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ if str(TEST_ROOT) not in sys.path:
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from notion import auth as notion_auth
+from notion import capabilities as notion_capabilities
 from notion import operations as notion_operations
 from notion import store as notion_store
 from notion import sync as notion_sync
@@ -90,6 +91,11 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
                 notion_sync,
                 "build_canonical_snapshot",
                 new=AsyncMock(side_effect=self._mock_build_snapshot),
+            ),
+            patch.object(
+                notion_capabilities,
+                "get_notion_cli_installation",
+                return_value=notion_auth.NotionCliInstallation(status="installed"),
             ),
         ]
         for patcher in self._patches:
@@ -397,7 +403,9 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         )
         self.assertEqual(catalog_response.status_code, 200, catalog_response.text)
         catalog = catalog_response.json()["catalog"]
-        self.assertEqual(catalog["schema_version"], 3)
+        self.assertEqual(catalog["schema_version"], 4)
+        self.assertEqual(catalog["cli_installation"]["status"], "installed")
+        self.assertEqual(catalog["cli_installation"]["required_version"], "0.15.1")
         self.assertEqual(catalog["mcp_inventory"]["status"], "not_integrated")
         self.assertEqual(
             [skill["id"] for skill in catalog["skills"]],

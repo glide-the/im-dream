@@ -1,6 +1,6 @@
-# [Input] Consume backend/.env, process env, and ClaudeAgentOptions-like objects.
+# [Input] Consume backend/.env, process env, thread-projected Notion CLI credentials, and ClaudeAgentOptions-like objects.
 # [Output] Provide helpers that validate Dream's SDK distribution, resolve its
-#          CLI runtime, merge subprocess env, and force project-only settings.
+#          CLI runtime, merge subprocess env, bind Notion CLI env, and force project-only settings.
 # [Pos] SDK environment helper node in libs/claude_agent_kit/server
 # [Sync] 2026-05-08: centralize .env injection for ClaudeSDKClient subprocess options.
 # [Sync] 2026-08-28: reserve authenticated model max-output capability and scrub ambient output overrides.
@@ -73,6 +73,7 @@
 #                    validation; unset keys are scrubbed from parent/options env.
 # [Sync] 2026-08-28: adopt the manifest-qualified clean-room Runtime 0.1.3
 #                    request-parameter release; the official CLI rollback is unchanged.
+# [Sync] 2026-08-30: bind the current thread's NOTION_HOME/API token/keyring/workers file into the Agent Runtime after all user overlays.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -82,6 +83,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -228,6 +230,22 @@ _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME = "CLAUDE_CODE_TASK_LIST_ID"
 # workspace.get_tasks_dir() resolves the same constant — single source.
 CLAUDE_CODE_TASK_LIST_ID_VALUE = "main"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+NOTION_HOME_ENV_NAME = "NOTION_HOME"
+NOTION_API_TOKEN_ENV_NAME = "NOTION_API_TOKEN"
+NOTION_KEYRING_ENV_NAME = "NOTION_KEYRING"
+NOTION_WORKERS_CONFIG_FILE_ENV_NAME = "NOTION_WORKERS_CONFIG_FILE"
+NOTION_THREAD_HOME_DIRNAME = ".notion-home"
+NOTION_AUTH_FILENAME = "auth.json"
+NOTION_CONFIG_FILENAME = "config.json"
+NOTION_WORKERS_CONFIG_FILENAME = "workers.json"
+_NOTION_RUNTIME_ENV_NAMES = (
+    NOTION_HOME_ENV_NAME,
+    NOTION_API_TOKEN_ENV_NAME,
+    NOTION_KEYRING_ENV_NAME,
+    NOTION_WORKERS_CONFIG_FILE_ENV_NAME,
+)
+_NOTION_RUNTIME_FILE_MAX_BYTES = 1024 * 1024
 
 
 def _normalized_distribution_name(value: str) -> str:
@@ -928,6 +946,133 @@ def apply_user_sdk_env_to_options(
     # Remove any deprecated keys.
     for key in _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES:
         merged.pop(key, None)
+    options.env = merged
+    return options
+
+
+def _read_notion_runtime_json(path: Path) -> object | None:
+    """Read one bounded regular projection file without following symlinks."""
+
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_size > _NOTION_RUNTIME_FILE_MAX_BYTES
+    ):
+        raise ValueError("Notion Runtime projection is invalid")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Notion Runtime projection is invalid") from exc
+
+
+def _notion_api_token(home: Path) -> str | None:
+    """Resolve ntn's active token from its projected file-backed auth format."""
+
+    auth = _read_notion_runtime_json(home / NOTION_AUTH_FILENAME)
+    if not isinstance(auth, dict):
+        return None
+    legacy_token = auth.get("access_token")
+    if isinstance(legacy_token, str) and legacy_token.strip():
+        return legacy_token.strip()
+
+    config = _read_notion_runtime_json(home / NOTION_CONFIG_FILENAME)
+    configured_workspace_id: str | None = None
+    if isinstance(config, dict):
+        defaults = config.get("defaultWorkspaceIds")
+        if isinstance(defaults, dict):
+            candidate = defaults.get("prod")
+            if isinstance(candidate, str) and candidate.strip():
+                configured_workspace_id = candidate.strip()
+    if configured_workspace_id is not None:
+        configured_token = auth.get(configured_workspace_id)
+        if isinstance(configured_token, str) and configured_token.strip():
+            return configured_token.strip()
+
+    token_values = [
+        value.strip()
+        for value in auth.values()
+        if isinstance(value, str) and value.strip()
+    ]
+    return token_values[0] if len(token_values) == 1 else None
+
+
+def resolve_notion_cli_runtime_env(
+    credential_home: Optional[Path | str],
+    *,
+    thread_workspace: Optional[Path | str],
+) -> dict[str, str]:
+    """Return the actor/thread-bound ntn environment for one Runtime launch."""
+
+    if credential_home is None or thread_workspace is None:
+        return {}
+    workspace = Path(str(thread_workspace))
+    home = Path(str(credential_home))
+    if not workspace.is_absolute() or not home.is_absolute():
+        raise ValueError("Notion Runtime projection must be absolute")
+    try:
+        workspace_info = workspace.lstat()
+        home_info = home.lstat()
+        workspace_resolved = workspace.resolve(strict=True)
+        home_resolved = home.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("Notion Runtime projection is unavailable") from exc
+    if (
+        stat.S_ISLNK(workspace_info.st_mode)
+        or not stat.S_ISDIR(workspace_info.st_mode)
+        or stat.S_ISLNK(home_info.st_mode)
+        or not stat.S_ISDIR(home_info.st_mode)
+        or home_resolved != workspace_resolved / NOTION_THREAD_HOME_DIRNAME
+    ):
+        raise ValueError("Notion Runtime projection escaped its thread workspace")
+
+    environment = {
+        NOTION_HOME_ENV_NAME: str(home_resolved),
+        NOTION_KEYRING_ENV_NAME: "0",
+    }
+    token = _notion_api_token(home_resolved)
+    if token:
+        environment[NOTION_API_TOKEN_ENV_NAME] = token
+
+    workers_file = home_resolved / NOTION_WORKERS_CONFIG_FILENAME
+    try:
+        workers_info = workers_file.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        if stat.S_ISLNK(workers_info.st_mode) or not stat.S_ISREG(workers_info.st_mode):
+            raise ValueError("Notion workers configuration is invalid")
+        environment[NOTION_WORKERS_CONFIG_FILE_ENV_NAME] = str(
+            workers_file.resolve(strict=True)
+        )
+    return environment
+
+
+def apply_notion_cli_env_to_options(
+    options: Any,
+    credential_home: Optional[Path | str],
+    *,
+    thread_workspace: Optional[Path | str],
+) -> Any:
+    """Apply the current actor/thread Notion CLI binding as server authority."""
+
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    merged = dict(existing_env)
+    # Empty values prevent the Python SDK's parent-environment inheritance
+    # from binding an ambient process-user Notion account to an unrelated turn.
+    for name in _NOTION_RUNTIME_ENV_NAMES:
+        merged[name] = ""
+    merged.update(
+        resolve_notion_cli_runtime_env(
+            credential_home,
+            thread_workspace=thread_workspace,
+        )
+    )
     options.env = merged
     return options
 

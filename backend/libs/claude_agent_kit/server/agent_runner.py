@@ -6,6 +6,7 @@
 # [Pos] core runner node in libs/claude_agent_kit/server
 # [Sync] 2026-08-28: apply the exact server-owned Claude Code Runtime env whitelist
 #                    after user overlays and before Gateway enforcement.
+# [Sync] 2026-08-30: apply actor/thread-bound NOTION_* values at the final Runtime environment boundary for Bash ntn commands.
 # [Sync] 2026-08-29: keep Editor virtual-Read redirect files inside the
 #                    server-owned thread .claude-tmp boundary with 0600 mode.
 # [Sync] 2026-08-29: project only the trusted actor and effective PostgreSQL
@@ -277,6 +278,7 @@ from .sdk_env import (
     apply_claude_secure_storage_home_to_options,
     apply_cli_path_to_options,
     apply_project_sdk_runtime_options,
+    apply_notion_cli_env_to_options,
     apply_task_v2_env_to_options,
     apply_user_sdk_env_to_options,
     apply_server_claude_code_runtime_env_to_options,
@@ -3068,6 +3070,11 @@ class ClaudeAgentRunner:
             sdk_options,
             opts.canonical_user_id,
             gateway_idempotency_key=opts.gateway_idempotency_key,
+        )
+        apply_notion_cli_env_to_options(
+            sdk_options,
+            opts.notion_credential_home,
+            thread_workspace=opts.claude_tmp_workspace,
         )
         existing_extra_args = getattr(sdk_options, "extra_args", None)
         sdk_options.extra_args = dict(existing_extra_args or {})
