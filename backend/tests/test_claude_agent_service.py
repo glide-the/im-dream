@@ -38,6 +38,8 @@
 # [Sync] 2026-08-28: cover model plus global server-owned Claude Code Runtime env assembly.
 # [Sync] 2026-08-28: cover per-turn Notion credential projection handoff without
 #                    exposing credential bytes to AgentRunOptions or workspace context.
+# [Sync] 2026-08-29: require attached workspace context to index the installed
+#                    notion-session Skill and its canonical instruction path.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -1029,6 +1031,20 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                 editor_session_id="session-attach",
             )
             self.assertIn("Notion lightweight index (.notion/):", notion_block)
+            self.assertIn("Notion Skill index:", notion_block)
+            self.assertIn("Skill: notion-session", notion_block)
+            self.assertIn(
+                "Instructions: skills/notion-session/SKILL.md",
+                notion_block,
+            )
+            self.assertIn(
+                "Runtime discovery: .claude/skills/notion-session",
+                notion_block,
+            )
+            self.assertIn(
+                "continue any answer that does not depend on Notion",
+                notion_block,
+            )
             self.assertIn(
                 "Read .notion/pages/<page_id>.json to fetch that page's current Markdown on demand.",
                 notion_block,

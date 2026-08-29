@@ -1,6 +1,5 @@
 // [Input] Resource connector API client, shared dashboard icons, and App-level focus nonce.
-// [Output] Settings resource-link index with Notion handoff, Claude MCP discovery/OAuth management,
-//          and explicit placeholders for unavailable connectors.
+// [Output] Settings resource-link index with Notion handoff and Claude MCP discovery/OAuth management.
 // [Pos] settings resource-link section in frontend/src/components/dashboard
 // [Sync] 2026-07-08: initial Settings resource-link section for the connector migration.
 // [Sync] 2026-07-08: remove the inline Notion detail toggle; 管理 now calls onOpenNotionDetail so
@@ -10,6 +9,8 @@
 //                    tokens and state color mixes so resource-link settings adapt to dark mode.
 // [Sync] 2026-08-19: embed the domain-owned Claude MCP resource connector under remote resources.
 // [Sync] 2026-08-20: hand MCP server cards to the dedicated Notion-aligned detail workbench.
+// [Sync] 2026-08-29: remove unavailable Feishu/CLI placeholders and surface
+//                    server-reported degraded Notion synchronization state.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
 import ClaudeMcpResourceSection from '../claude-mcp/ClaudeMcpResourceSection';
@@ -17,7 +18,6 @@ import {
   IconChevronRight,
   IconClock,
   IconDatabase,
-  IconFile,
   IconLoader,
   IconSettings,
 } from '../chat/Icons';
@@ -62,6 +62,9 @@ function formatLastInteraction(connector: ResourceConnector | null): string {
 
 function getResourceHealthTone(connector: ResourceConnector | null): ConnectorTone {
   if (!connector) return 'neutral';
+  if (connector.syncPolicy?.status === 'error' || connector.auth.warning) {
+    return 'warning';
+  }
   if (connector.status === 'authenticated' || connector.status === 'synced' || connector.auth.status === 'authenticated') {
     return 'success';
   }
@@ -242,6 +245,9 @@ export default function ConnectorSettingsSection({
   const notionStatusLabel = useMemo(
     () => {
       if (!notionConnector) return '未连接';
+      if (notionConnector.syncPolicy?.status === 'error' || notionConnector.auth.warning) {
+        return '部分可用';
+      }
       if (notionConnector.status === 'authenticated' || notionConnector.status === 'synced' || notionConnector.auth.status === 'authenticated') {
         return '健康';
       }
@@ -290,7 +296,7 @@ export default function ConnectorSettingsSection({
             资源链接
           </h2>
           <p style={{ margin: '0.35rem 0 0', maxWidth: '42rem', fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}>
-            远程资源链接集中管理 Notion / 飞书，本地资源链接预留给 CLI 执行器。Chat 入口只保留状态摘要和跳转按钮。
+            在这里管理 Notion 和 MCP 资源连接；Chat 只展示真实状态摘要和管理入口。
           </p>
         </div>
       </header>
@@ -302,7 +308,7 @@ export default function ConnectorSettingsSection({
               远程资源链接
             </h3>
             <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-              连接后可读取外部知识源。Notion 可继续管理资源，飞书先保留占位。
+              连接后可在对话中读取已授权、已选择的外部知识源。
             </p>
           </div>
 
@@ -310,50 +316,16 @@ export default function ConnectorSettingsSection({
             <ConnectorOptionCard
               icon={<IconDatabase style={{ width: '1rem', height: '1rem' }} />}
               title="Notion"
-              subtitle="可访问的数据库和页面会在这里管理，认证与同步仍复用现有 Notion connector 页面。"
+              subtitle="在 Notion 详情页管理账号授权、数据库、页面和索引同步。"
               detail={`${notionConnector ? `最近交互 ${notionLastInteraction}` : '暂无交互'} · ${notionConnector?.sources.length ?? 0} 个来源`}
               statusLabel={notionStatusLabel}
               tone={notionStatusTone}
               actionLabel="管理"
               onAction={onOpenNotionDetail}
             />
-            <ConnectorOptionCard
-              icon={<IconSettings style={{ width: '1rem', height: '1rem' }} />}
-              title="飞书"
-              subtitle="远程资源链接预留位，不调用不存在的 API。"
-              detail="暂不实现"
-              statusLabel="禁用"
-              tone="neutral"
-              actionLabel="暂不可用"
-              disabled
-            />
           </div>
 
           <ClaudeMcpResourceSection onOpenServerDetail={onOpenClaudeMcpDetail} />
-        </section>
-
-        <div style={{ height: '1px', background: 'var(--color-border-paper)' }} />
-
-        <section style={{ display: 'grid', gap: '0.7rem' }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-              本地资源链接
-            </h3>
-            <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-              本地资源由当前系统 CLI 执行器接入，当前版本只放占位，不在前端设计完整流程。
-            </p>
-          </div>
-
-          <ConnectorOptionCard
-            icon={<IconFile style={{ width: '1rem', height: '1rem' }} />}
-            title="CLI 执行器"
-            subtitle="用户下载后，这里显示本地可用资源入口。"
-            detail="暂不设计"
-            statusLabel="占位"
-            tone="neutral"
-            actionLabel="暂不可用"
-            disabled
-          />
         </section>
 
         {loading ? (

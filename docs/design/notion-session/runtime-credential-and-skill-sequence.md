@@ -2,6 +2,7 @@
 <!-- [Output] Business sequence diagrams for authorization, index publication, thread Read, failures, reauthorization, and disconnect. -->
 <!-- [Pos] Current Notion credential/index/Runtime business-sequence source of truth in docs/design/notion-session. -->
 <!-- [Sync] 2026-08-28: separate lightweight ID synchronization from on-demand page Markdown reads. -->
+<!-- [Sync] 2026-08-29: add full discovery pagination, empty-scope revocation, current-scope projection filtering, and LKG reauthorization semantics. -->
 
 # Notion 凭证、轻量索引与按需 Read 业务时序
 
@@ -31,19 +32,27 @@ sequenceDiagram
     Backend->>Provider: 原子提升 actor credential source
     Backend-->>UI: authenticated
 
+    Backend->>CLI: 分页发现全部 database/page
+    CLI-->>UI: 紧凑资源元数据（无 raw）
     User->>UI: 选择 database/page 并保存
     UI->>Backend: POST resources/select
-    Backend->>Store: 保存精确 selection，resource=pending
-    Backend->>Store: policy=syncing
-    loop 每个已选 data source（含 cursor 分页）
-        Backend->>CLI: query rows（只取 ID/元数据）
-        CLI->>Notion: data_sources/{id}/query
-        Notion-->>CLI: page IDs/title/url/last_edited
+    Backend->>Store: 原子替换精确 selection
+    alt selection 非空
+        Backend->>Store: resource=pending，policy=syncing
+        loop 每个已选 data source（含 cursor 分页）
+            Backend->>CLI: query rows（只取 ID/元数据）
+            CLI->>Notion: data_sources/{id}/query
+            Notion-->>CLI: page IDs/title/url/last_edited
+        end
+        Note over Backend,Notion: 不调用 page/markdown/blocks 正文端点
+        Backend->>Provider: 原子发布轻量 current.json（pages={}）
+        Backend->>Store: 保存 identity/last_synced_at<br/>精确 included resources=synced<br/>policy=applied
+        Backend-->>UI: 索引已同步 + counts/identity
+    else selection 为空
+        Backend->>Provider: 清除 actor current index
+        Backend->>Store: 清除 current identity/last success
+        Backend-->>UI: 已连接、0 来源、未同步
     end
-    Note over Backend,Notion: 不调用 page/markdown/blocks 正文端点
-    Backend->>Provider: 原子发布轻量 current.json（pages={}）
-    Backend->>Store: 保存 identity/last_synced_at<br/>精确 included resources=synced<br/>policy=applied
-    Backend-->>UI: 索引已同步 + counts/identity
     Note over User,Provider: 不需要先创建 Chat/workspace
 ```
 
@@ -82,6 +91,7 @@ sequenceDiagram
     User->>UI: 创建/继续对话
     UI->>Service: Agent turn(thread_id, actor)
     Service->>Provider: 读取 actor credential + current index
+    Provider->>Provider: LKG 与当前 selection 求交<br/>移除私有 connector 配置
     Provider->>Runtime: 原子投影 {thread}/.notion-home 与 {thread}/.notion
     Note over Service,Runtime: 不请求 Notion，不构建 index
     Runtime->>Runtime: 发现 backend-owned notion-session Skill
@@ -121,17 +131,23 @@ sequenceDiagram
 
     User->>UI: 重新连接 Notion
     UI->>Backend: auth/login + auth/poll
-    Backend->>Provider: pending 成功后原子替换 credential source
+    alt 新授权成功
+        Backend->>Provider: 原子替换 credential source
+        Backend-->>UI: 已连接
+    else 新授权失败且旧 credential 有效
+        Backend->>Provider: 保留旧 credential source
+        Backend-->>UI: 部分可用 + 重试建议
+    else 无有效 credential
+        Backend-->>UI: 已过期/异常 + 重新授权
+    end
     Note over Provider: index LKG 保留，后续同步刷新
     User->>Runtime: 下一 turn
-    Provider->>Runtime: 投影新 credential + 最近成功 index
+    Provider->>Runtime: 投影当前有效 credential + 范围内 LKG
 
-    opt 用户确认断开
-        User->>UI: 断开 Notion
-        UI->>Backend: DELETE connector
-        Backend->>Store: 删除 actor connector 数据
-        Backend->>Provider: 删除 credential/index source 与已有 credential projection
-        Backend-->>UI: 未连接
-        Runtime-->>UI: 后续 Notion Read fail closed，普通对话继续
-    end
+    User->>UI: 断开 Notion（无确认弹窗）
+    UI->>Backend: DELETE connector
+    Backend->>Store: 删除 actor connector 数据
+    Backend->>Provider: 删除 credential/index source 与已有 thread 投影
+    Backend-->>UI: 未连接
+    Runtime-->>UI: 后续 Notion Read fail closed，普通对话继续
 ```

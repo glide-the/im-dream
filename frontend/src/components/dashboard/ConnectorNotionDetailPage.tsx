@@ -29,6 +29,8 @@
 // [Sync] 2026-08-28: replace the strategy placeholder with server-owned scheduled-sync controls;
 //                    saving resources performs a real first index sync, page bodies stay on demand,
 //                    and the UI never fabricates synced timestamps.
+// [Sync] 2026-08-29: expose partial-failure/re-auth warnings, localize business copy,
+//                    and disconnect directly because the operation is reversible.
 import { useCallback, useEffect, useMemo, useState, type ReactNode, type UIEvent } from 'react';
 import {
   createConnector,
@@ -144,7 +146,7 @@ function getDetailStatus(connector: ResourceConnector | null, loading: boolean):
       label: '读取中',
       tone: 'info',
       title: '正在读取 Notion 账号状态',
-      description: '页面结构已就绪，正在同步 Notion connector 的认证、资源和同步摘要。',
+      description: '正在读取 Notion 连接、资源和同步状态。',
       enabled: false,
     };
   }
@@ -154,7 +156,7 @@ function getDetailStatus(connector: ResourceConnector | null, loading: boolean):
       label: '未认证',
       tone: 'warning',
       title: '尚未连接 Notion 账号',
-      description: '同一平台只允许认证一个账号。连接后可选择这个账号下允许 Chat 使用的数据库和页面。',
+      description: '连接后可选择当前账号下允许 Chat 使用的数据库和页面。',
       enabled: false,
     };
   }
@@ -175,6 +177,16 @@ function getDetailStatus(connector: ResourceConnector | null, loading: boolean):
       tone: 'warning',
       title: 'Notion 已连接，上次索引同步失败',
       description: '最近一次成功索引仍可用于对话；请检查资源权限后立即重试，或等待下一次自动同步。',
+      enabled: true,
+    };
+  }
+
+  if (connector.auth.warning) {
+    return {
+      label: '部分可用',
+      tone: 'warning',
+      title: 'Notion 仍已连接，上次重新授权未完成',
+      description: `${connector.auth.warning} 当前已生效的授权仍可使用；需要更新权限时请重新授权。`,
       enabled: true,
     };
   }
@@ -279,7 +291,7 @@ function resolveSingleNotionConnector(connectors: ResourceConnector[]): Resource
 }
 
 function sourceKindLabel(type: ConnectorSource['type']): string {
-  return type === 'notion_database' ? 'Database' : 'Page';
+  return type === 'notion_database' ? '数据库' : '页面';
 }
 
 function shouldShowPageCount(pageCount?: number): pageCount is number {
@@ -484,10 +496,10 @@ function ResourceOptionRow({
             {option.title}
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
-            <InlineStatusPill label={type === 'database' ? 'Data source' : 'Page'} tone="neutral" />
+            <InlineStatusPill label={type === 'database' ? '数据库' : '页面'} tone="neutral" />
             {shouldShowPageCount(option.pageCount) ? (
               <span style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
-                {option.pageCount} pages
+                {option.pageCount} 页
               </span>
             ) : null}
             <span
@@ -571,7 +583,7 @@ function SourceCard({ source }: { source: ConnectorSource }) {
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
         {shouldShowPageCount(source.pageCount) ? (
-          <div style={{ color: 'var(--color-text-primary)', fontSize: '0.78rem', fontWeight: 700 }}>{source.pageCount} pages</div>
+          <div style={{ color: 'var(--color-text-primary)', fontSize: '0.78rem', fontWeight: 700 }}>{source.pageCount} 页</div>
         ) : null}
         <div style={{ marginTop: '0.3rem', color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
           {formatDateTime(source.syncedAt || source.updatedAt)}
@@ -912,9 +924,6 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
 
   const handleDisconnect = useCallback(async () => {
     if (!connectorId || disconnecting) return;
-    const ok = window.confirm('关闭 Notion 账号连接后，Chat 将无法继续使用该平台资源。是否继续？');
-    if (!ok) return;
-
     setDisconnecting(true);
     setPageError(null);
     setResourceError(null);
@@ -1098,7 +1107,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
             <HeaderInfoChip label="授权" value={formatStatusLabel(connectorAuthStatus)} />
             <HeaderInfoChip label="同步" value={connectorStatusLabel} helper={syncLoading ? '刷新中' : undefined} />
-            <HeaderInfoChip label="已链接资源" value={sourceStats.total} helper={`${sourceStats.databases} data sources · ${sourceStats.pages} pages`} />
+            <HeaderInfoChip label="已链接资源" value={sourceStats.total} helper={`${sourceStats.databases} 个数据库 · ${sourceStats.pages} 个页面`} />
             <HeaderInfoChip label="最近同步" value={syncTimeLabel} />
           </div>
         ) : null}
@@ -1114,7 +1123,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
               lineHeight: 1.55,
             }}
           >
-            连接 Notion 账号后才能选择资源。页面会自动创建或复用当前用户唯一的 Notion connector，然后进入认证流程。
+            连接 Notion 账号后才能选择资源。页面会创建或复用当前 Notion 连接，然后进入认证流程。
           </div>
         ) : null}
 
@@ -1131,7 +1140,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
           >
             <div>
               <div style={{ color: 'var(--color-text-muted)', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                Verification code
+                验证码
               </div>
               <div style={{ marginTop: '0.35rem', color: 'var(--color-text-primary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '1rem', fontWeight: 800, letterSpacing: '0.08em' }}>
                 {connector.auth.verificationCode || '等待生成'}
@@ -1342,7 +1351,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
               </button>
             }
           >
-            完成 Notion 授权后，这里会列出可访问的 databases 和 standalone pages；当前只管理 Notion 这一个平台账号。
+            完成 Notion 授权后，这里会列出可访问的数据库和独立页面；当前页面管理一个 Notion 连接。
           </EmptyPanel>
         ) : resourceLoading ? (
           <SkeletonList rows={4} />
@@ -1383,7 +1392,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
 
             {unifiedResourceOptions.length === 0 ? (
               <EmptyPanel title="没有可访问的资源">
-                当前 Notion 授权没有返回可选择的 data_source 或 page。
+                当前 Notion 授权没有返回可选择的数据库或页面。
               </EmptyPanel>
             ) : visibleResourceOptions.length === 0 ? (
               <EmptyPanel title="没有匹配的资源">

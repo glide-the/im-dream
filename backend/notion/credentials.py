@@ -5,6 +5,8 @@
 [Pos] Notion credential identity boundary shared by connector auth and every Agent turn.
 [Sync] 2026-08-28: replace process-user ~/.config and request-controlled homes with actor-scoped agentdata state and per-thread delivery.
 [Sync] 2026-08-28: reserve the same actor root for connector-owned canonical snapshots while keeping them out of the CLI credential projection.
+[Sync] 2026-08-29: revoke both private credentials and the public Notion index
+                    projection from every known actor thread on disconnect.
 """
 
 from __future__ import annotations
@@ -408,6 +410,7 @@ class NotionCredentialStore:
                 continue
             try:
                 self.clear_thread_projection(workspace)
+                _remove_private_tree(workspace / ".notion", parent=workspace)
             except NotionCredentialError:
                 continue
 

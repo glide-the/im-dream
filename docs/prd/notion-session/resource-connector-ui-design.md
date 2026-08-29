@@ -1,105 +1,164 @@
-## ✨ 总体视觉风格（Aesthetic Style）
+<!-- [Input] Reviewed Notion connector PRD and current Settings/Chat components. -->
+<!-- [Output] User-visible information architecture, interaction states, copy, responsive, and accessibility rules. -->
+<!-- [Pos] Current Notion Resource Connector interaction specification in docs/prd/notion-session. -->
+<!-- [Sync] 2026-08-29: replace obsolete workbench styling notes with the implemented Settings-owned interaction contract. -->
 
-> [Sync] 2026-07-08: 组件命名回收到 Chat `WorkspaceTabBar` + Settings `ConnectorNotionDetailPage` 体系；保留纸张审美、色板与微交互定义，Chat 不再承载完整配置下钻。
-> [Sync] 2026-07-08: Settings 详情页改为单平台单账号资源配置页，不再使用 `ResourceConnectorPage` 的集合型新建、刷新、列表布局。
-> [Sync] 2026-07-08: ResourceScopeSection 合并 data_source / page 为统一资源列表，操作行包含搜索、保存、刷新；每页显示 10 条；保存后 MountedSourcesSection 立即显示所选来源；底部授权状态卡移除。
-> [Sync] 2026-07-08: `MountedSourcesSection` 与 Chat `ConnectorStatusPanel` 均读取 persisted connector `sources`；刷新后状态不丢失，Notion People 系统 data source 在 discovery 层过滤，不进入统一资源列表。
-> [Sync] 2026-07-09: ConnectorNotionDetailPage 的上半部分改为紧凑无边框信息栏，授权 / 同步 / 已链接资源 / 最近同步 / 提示说明全部收敛其中；策略设计只保留轻量占位。
-> [Sync] 2026-07-09: ConnectorNotionDetailPage 全页减少线框设计；结构区块、资源行、已挂载来源、空态与状态标签改用轻纸面色块和留白，只有搜索、翻页等控件保留弱边界。
-> [Sync] 2026-07-09: Chat `ConnectorLandingPanel` 同步减少卡片化；根内容区无外框，`ConnectorStatusPanel` 使用虚线边界但无卡片底色 / 阴影，已链接资源行、chip 和空态改用轻表面，只有「管理」等明确控件保留弱边界。
-> [Sync] 2026-07-09: Settings `ConnectorNotionDetailPage` 使用单一虚线纸边界；内部 `ResourceOptionRow` 与已挂载来源改为无卡片列表行，用轻纸面列表容器和细分隔线表达层级，资源选中态只在右侧显示对勾。
-> [Sync] 2026-07-09: 资源行和已挂载来源只在 `pageCount > 0` 时显示页数；`0 pages` 属于空统计，不进入右侧元信息区。
+# Notion 资源连接器交互方案
 
-| 维度 | 设计定义 |
-| --- | --- |
-| 风格关键词 | 暖纸张、手写感、安静工具台、资料贴签、低饱和编辑台 |
-| 视觉气质 | 像一本被轻轻摊开的研究手账：留白充足、边界柔和、信息层级克制，强调“整理资源后再开始思考”的安静秩序。 |
-| 光影策略 | Settings 详情页只保留页面级虚线纸边界；内部使用留白、轻纸面列表、细分隔线和必要控件边界，资源选中不加深色背景，避免卡片阴影和重描边打断阅读节奏。 |
-| 排版策略 | 标题采用 **Noto Serif SC** 增加书卷感，正文与操作采用 **Noto Sans SC**，形成“文档感 + 工具感”的双重语气。 |
-| 色彩策略 | Light 模式以米白、奶油、暖灰、墨棕为主；Dark 模式保留暖感，转为深炭褐、烟灰、柔米白，避免冰冷蓝黑。 |
-| 交互策略 | 所有反馈都控制在轻量级：悬停上浮 1~2px、纸面层次增强、按钮产生柔和墨色涟漪，强调“可操作但不喧哗”。 |
+本稿只定义用户可见界面。业务规则以 [`resource-connector.md`](./resource-connector.md) 为准；内部目录、凭证、Runtime 和 API driver 见架构文档。
 
----
+## 1. 信息架构
 
-## 🧩 UI 组件结构（Component Structure）
-
-| 模块 | 名称 | 作用 | 关键视觉表现 |
-| --- | --- | --- | --- |
-| RC-A | `WorkspaceTabBar` | Chat 工作区主切换，固定承载 `HistoryTab` / `ResourceConnectorTab` | 胶囊 tab、位于居中 Input Dock 下方、切换时不改变头部结构 |
-| RC-B | `ResourceConnectorTabPanel` | Chat 内连接器内容区，承载 `ConnectorToolbar`、空态和列表 | 轻表面空态、筛选 / 排序工具栏、虚线边界但无卡片化的状态信息块 |
-| RC-C | `ConnectorNotionDetailPage` | Settings 内连接器详情 / 配置页的整体页面壳 | 顶部面包屑 `← 资源连接器 > Notion Connector`、单一虚线纸边界、内部无卡片分区 |
-| RC-D | `TopNavigation` + `ConnectorHeader` + `StrategyDesignPlaceholder` | 详情页上半部分：导航、无边框紧凑信息栏、策略占位 | Notion 图标、状态胶囊、连接 / 关闭真实操作、授权 / 同步 / 已链接资源 / 最近同步 chip |
-| RC-E | `ResourceScopeSection` + `MountedSourcesSection` | 详情页下半部分：资源范围与已挂载来源 | 轻纸面列表容器、统一资源行、弱边界搜索框、分页、来源行无卡片 |
-
-> Chat 中的 `ResourceConnectorTabPanel` 负责“看见连接器、筛选连接器、跳转设置”；复杂配置全部进入 Settings 内的 `ConnectorNotionDetailPage`。
-> Chat 已连接态的 `ConnectorStatusPanel` 只展示 persisted `sources` 的数量和最多数条来源摘要；它不读取 Settings 详情页的临时选择态，也不承担保存 / 删除来源。
-> Notion 详情页不出现集合级的创建按钮、刷新列表按钮或连接器列表；无账号时「连接 Notion」隐式创建唯一 connector。
-> 授权 / 同步解释不再放到底部独立卡片，也不再单独占用账号状态大卡；统一收敛到顶部 `ConnectorHeader` 信息栏。
-> 「保存资源」不是静默动作：保存完成后，`MountedSourcesSection` 必须立刻从空态切换为来源列表行，展示标题、类型、同步状态和最近更新时间。
-> 页面刷新后的 `MountedSourcesSection` 必须由 connector `sources` 恢复，而不是依赖 optimistic sources；如果 discovery 返回 Notion People 系统 data source，后端过滤后前端不渲染该行。
-
----
-
-## 🎨 CSS Variables 色彩系统
-
-```css
-:root {
-  --paper-bg: #f6f0e6;
-  --paper-panel: rgba(255, 250, 242, 0.9);
-  --paper-card: #fffaf2;
-  --paper-card-strong: #f2e8d8;
-  --paper-border: rgba(114, 92, 72, 0.18);
-  --paper-border-strong: rgba(114, 92, 72, 0.32);
-  --paper-text: #3f3429;
-  --paper-text-soft: #7a6a59;
-  --paper-accent: #5f4a36;
-  --paper-accent-soft: #d9c6ad;
-  --paper-success: #7e9468;
-  --paper-warning: #c78855;
-  --paper-danger: #a86652;
-  --paper-shadow: 0 18px 40px rgba(106, 83, 58, 0.08);
-}
-
-html[data-theme='dark'] {
-  --paper-bg: #1d1916;
-  --paper-panel: rgba(43, 37, 33, 0.92);
-  --paper-card: #2a241f;
-  --paper-card-strong: #342d27;
-  --paper-border: rgba(222, 206, 186, 0.12);
-  --paper-border-strong: rgba(222, 206, 186, 0.26);
-  --paper-text: #f3e8d8;
-  --paper-text-soft: #b7a894;
-  --paper-accent: #ead8bd;
-  --paper-accent-soft: #544739;
-  --paper-success: #9db487;
-  --paper-warning: #e2a674;
-  --paper-danger: #cd8b78;
-  --paper-shadow: 0 20px 48px rgba(0, 0, 0, 0.28);
-}
+```mermaid
+flowchart LR
+    Chat["Chat · 资源连接"] -->|管理| Settings["Settings · 资源链接"]
+    Settings --> Detail["Notion 详情"]
+    Detail --> Auth["账号授权"]
+    Detail --> Policy["自动同步策略"]
+    Detail --> Scope["资源范围"]
+    Detail --> Mounted["已挂载来源"]
 ```
 
----
+- Chat 是只读摘要入口，不承载授权、策略和选择表单。
+- Settings 列表只展示真实可用的 Notion 与 MCP 能力，不展示 Feishu 或本地 CLI 占位。
+- Notion 详情页是唯一配置入口。
 
-## 🎞 微交互定义（Micro-interactions）
+## 2. Chat 资源连接页
 
-| 交互对象 | 触发方式 | 反馈定义 |
-| --- | --- | --- |
-| 顶栏按钮 | Hover / Focus | 背景由透明过渡为纸卡底色，阴影或纸面层次略增强，整体上浮 1px。 |
-| 输入框容器 | Focus within | 外圈出现暖棕色柔和 ring，阴影略加深，强化“可以开始提问”的入口感。 |
-| `WorkspaceTabBar` | Switch | 活跃 tab 背景加深并切换 `MainContentArea`；输入区与头部不抖动。 |
-| 空状态按钮 | Hover | 轻微上浮并出现更深纸影，箭头图标向右移动 2px。 |
-| 连接器状态面板 | Hover | 仅小型「管理」入口强化可点击反馈；面板正文保持信息展示属性，不做整卡按钮。 |
-| 统一资源行 | Select | 勾选切换只改变右侧对勾和已选择数量；People 系统 data source 不生成资源行，资源行不做深色背景或卡片按钮；页数只在大于 0 时显示。 |
-| 警告状态卡 | Toggle | 开关切换时保持文案区稳定，仅切换状态色与开关位置。 |
-| 深色模式 | Toggle | 页面变量切换并带 220ms 颜色过渡，不闪屏。 |
+### 2.1 空状态
 
----
+- 标题：尚未连接资源。
+- 描述：连接 Notion 后可在对话中使用已选择的资源。
+- 主操作：选择连接器，跳转 Settings。
+- 不展示不可用平台或技术接入方式。
 
-## ✅ 说明
-- 页面支持 **Light / Dark** 模式切换，并统一服务于 Chat 内 `WorkspaceTabBar` 与 Settings 内 `ConnectorNotionDetailPage`。
-- `ResourceConnectorTabPanel` 要求默认保留筛选 / 排序工具栏位置；空态与加载态都不能挤掉该布局锚点。
-- 已连接态使用非按钮状态面板，正文展示平台、授权 / 同步状态、已链接资源数量和来源摘要；只有明确的「管理」入口跳转 Settings。
-- `ConnectorNotionDetailPage` 必须复用同一纸面视觉语言，外层为单一虚线纸边界，组件层级固定为 `TopNavigation` → `ConnectorHeader` → `StrategyDesignPlaceholder` → `ResourceScopeSection` → `MountedSourcesSection`。
-- 资源连接器入口在 Chat 工作区呈现为轻量摘要；完整配置归属于 Settings「资源链接」，详情页是 Settings 内管理层。
-- 统一资源列表只展示用户可挂载的 data_source / page；Workspace People 等系统用户数据源属于不可挂载系统资源，应在进入 UI 前过滤。
-- 已挂载来源和 Chat 已链接资源是同一份 persisted connector `sources` 的两种视图：Settings 展示完整列表，Chat 展示摘要。
+### 2.2 已连接摘要
+
+每个 Notion 摘要包含：
+
+- 平台名和连接名称；
+- 总体状态：健康、部分可用、认证中、已过期、异常；
+- 授权状态、同步状态、来源数；
+- 最近成功或最近交互时间；
+- 已选择来源的紧凑列表；
+- 唯一操作“管理”。
+
+状态优先级：授权完全失败 > 认证中 > 部分可用 > 健康 > 未连接。`syncPolicy=error` 或失败重授权保留旧授权时必须显示“部分可用”，不得显示“健康”。没有最近成功索引时，授权成功只能显示“未同步”，不能显示“已同步”。
+
+## 3. Settings 资源链接页
+
+页面描述聚焦用户目标：“管理 Notion 和 MCP 资源连接；Chat 只展示真实状态摘要和管理入口。”
+
+Notion 卡片显示：
+
+- 连接状态；
+- 最近交互时间；
+- 来源数；
+- “管理”入口。
+
+后端读取失败时保留错误提示，不用浏览器缓存伪造旧成功状态。
+
+## 4. Notion 详情页
+
+页面从上到下为：
+
+1. 返回、标题、总体状态；
+2. 状态说明与下一步；
+3. 授权区；
+4. 同步策略区；
+5. 资源范围区；
+6. 已挂载来源区；
+7. 断开连接。
+
+### 4.1 授权区
+
+| 状态 | 内容 | 操作 |
+|---|---|---|
+| 未连接 | 说明连接用途 | 连接 Notion |
+| 认证中 | 验证链接、验证码、等待说明 | 打开 Notion |
+| 已连接 | 授权有效 | 重新授权 |
+| 部分可用 | 旧授权仍有效，新授权未完成 | 重新授权 |
+| 已过期/异常 | Notion 当前不可用和原因 | 重新授权 |
+
+不展示 token、凭证文件、内部路径、命令或环境变量。
+
+### 4.2 同步策略区
+
+- 自动同步开关；
+- 后端返回的频率选项；
+- 最近成功时间；
+- 下次计划时间；
+- 当前状态；
+- “保存策略”和“立即同步”。
+
+保存中禁用重复提交。失败保留服务器最近状态，提示“未生效”和可执行的重试操作。
+
+### 4.3 资源范围区
+
+- 已授权后才加载资源；
+- 支持标题搜索、数据库/页面类型标记、客户端分页；
+- 行尾复选标记表示当前选择；
+- 保存按钮显示选择数；
+- 保存非空范围时文案说明“将更新轻量索引”；
+- 保存空范围允许执行，结果是“保持连接，但不允许 Notion 资源进入新对话”。
+
+资源发现为空时显示：“当前 Notion 授权没有返回可选择的数据库或页面。”
+
+### 4.4 已挂载来源
+
+显示来源标题、类型、索引状态、最近成功和页面数（仅在大于 0 时）。来源很多时在列表内部渐进展示，不让整个应用壳失去滚动控制。
+
+### 4.5 断开连接
+
+- 文案：关闭连接；
+- 点击后直接执行，按钮进入“关闭中”；
+- 不弹确认框，因为操作不删除 Notion 数据且可重新连接恢复；
+- 成功回到未连接状态；失败保留现状并显示原因。
+
+## 5. 统一状态文案
+
+| 状态 | 标题 | 说明模板 |
+|---|---|---|
+| 已连接无索引 | Notion 账号已连接，尚无来源索引 | 选择资源并保存后生成轻量索引 |
+| 已同步 | Notion 索引已同步 | 已挂载 N 个来源；正文按需读取 |
+| 同步中 | 正在更新 Notion 索引 | 正在更新页面 ID 与元数据，不下载正文 |
+| 部分可用：同步 | Notion 已连接，上次索引同步失败 | 最近成功索引仍可用；检查权限后重试 |
+| 部分可用：重授权 | Notion 仍已连接，上次重新授权未完成 | 当前授权仍可用；需要新权限时重试 |
+| 已过期 | Notion 授权已过期 | 重新授权后恢复 Notion 能力 |
+| 未选择 | 尚无来源索引 | 选择允许 Agent 使用的资源 |
+
+任何错误说明必须包含当前状态、影响和下一步，不能只显示内部错误码。
+
+## 6. 加载与失败
+
+- 首次加载：骨架或明确加载状态；不闪现“未连接”。
+- 资源加载：只禁用资源区，不阻断授权和策略摘要。
+- 保存资源：按钮 loading；成功后以服务器响应刷新全部来源和状态。
+- 同步失败：有旧索引时显示部分可用；无旧索引时显示同步失败。
+- Skill 或按需读取失败：在 Chat 回答中说明 Notion 局部不可用，普通输入和对话仍可继续。
+
+## 7. 交互约束
+
+- 除真正不可逆或高风险操作外不增加确认弹窗；本流程无此类操作。
+- 不复制 Settings 配置到 Chat。
+- 不用浏览器 local state 生成认证、同步成功、来源或时间。
+- 页面状态更新以后端完整响应为准；失败时不得乐观保留未经服务器确认的选择。
+- 正在认证、保存、同步或断开时防止同动作重复提交。
+
+## 8. 响应式与可访问性
+
+- 窄屏下标题、状态和操作可换行，主要操作保持可见；
+- 列表保留键盘焦点、可读标签和足够触控面积；
+- 状态不只依赖颜色，必须同时有文字；
+- 验证码可选择和复制，验证链接可用键盘打开；
+- loading、error 和 disabled 状态有可读文案；
+- 页面滚动由应用内容区承担，长来源列表可在内部滚动。
+
+## 9. 本次删除的旧交互
+
+- Chat 内完整连接器工作台；
+- 数据库树形展开后再单独同步的双步骤；
+- Feishu 和本地 CLI 禁用占位；
+- “已连接即已同步”的状态；
+- 断开确认弹窗；
+- 用户可见的 Runtime、CLI、路径和凭证说明。

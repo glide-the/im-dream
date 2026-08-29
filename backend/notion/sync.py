@@ -8,6 +8,10 @@
 #                    so stale `.notion` content cannot survive a fail-closed turn.
 # [Sync] 2026-08-28: discard legacy embedded page bodies during every thread
 #                    projection so the virtual Read hook remains the only body path.
+# [Sync] 2026-08-29: minimize connector metadata and filter every thread projection
+#                    against the actor's current selected-resource scope.
+# [Sync] 2026-08-29: index the installed notion-session Skill in each materialized
+#                    `.notion/README.md` so virtual resources remain discoverable.
 
 """Canonical Notion snapshot assembly and workspace file materialization."""
 from __future__ import annotations
@@ -74,6 +78,84 @@ def _build_database_summary(resource: Mapping[str, Any], pages: list[dict[str, A
         "last_edited": _mapping(resource.get("metadata")).get("last_edited") or "",
         "url": _mapping(resource.get("metadata")).get("url") or "",
     }
+
+
+def public_connector_projection(
+    connector: Mapping[str, Any],
+    selected_resources: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Return only connector state useful to the Runtime's read-only skill."""
+
+    selected = [dict(item) for item in selected_resources]
+    return {
+        "id": str(connector.get("id") or ""),
+        "name": str(connector.get("name") or "Notion"),
+        "platform": "notion",
+        "auth_status": str(connector.get("auth_status") or ""),
+        "last_synced_at": connector.get("last_synced_at"),
+        "selected_databases": [
+            str(item.get("external_id") or "")
+            for item in selected
+            if item.get("resource_type") == "notion_database"
+            and str(item.get("external_id") or "").strip()
+        ],
+        "selected_pages": [
+            str(item.get("external_id") or "")
+            for item in selected
+            if item.get("resource_type") == "notion_page"
+            and str(item.get("external_id") or "").strip()
+        ],
+    }
+
+
+def filter_snapshot_for_connector(
+    snapshot: Mapping[str, Any],
+    connector: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Intersect an LKG snapshot with the actor's current selected scope."""
+
+    resources = [
+        dict(item)
+        for item in connector.get("sources") or []
+        if isinstance(item, Mapping)
+    ]
+    selected_database_ids = {
+        str(item.get("external_id") or "").strip()
+        for item in resources
+        if item.get("resource_type") == "notion_database"
+    }
+    selected_page_ids = {
+        str(item.get("external_id") or "").strip()
+        for item in resources
+        if item.get("resource_type") == "notion_page"
+    }
+    database_pages = {
+        str(database_id): [dict(page) for page in pages if isinstance(page, Mapping)]
+        for database_id, pages in _mapping(snapshot.get("database_pages")).items()
+        if str(database_id) in selected_database_ids and isinstance(pages, list)
+    }
+    allowed_page_ids = set(selected_page_ids)
+    for pages in database_pages.values():
+        allowed_page_ids.update(
+            str(page.get("page_id") or "").strip() for page in pages
+        )
+    payload = dict(snapshot)
+    payload["connector"] = public_connector_projection(connector, resources)
+    payload["index"] = [
+        dict(item)
+        for item in snapshot.get("index") or []
+        if isinstance(item, Mapping)
+        and str(item.get("page_id") or "").strip() in allowed_page_ids
+    ]
+    payload["databases"] = [
+        dict(item)
+        for item in snapshot.get("databases") or []
+        if isinstance(item, Mapping)
+        and str(item.get("database_id") or "").strip() in selected_database_ids
+    ]
+    payload["database_pages"] = database_pages
+    payload["pages"] = {}
+    return payload
 
 
 async def build_canonical_snapshot(
@@ -172,9 +254,10 @@ async def build_canonical_snapshot(
         fetched_at=fetched_at,
         state=SnapshotLifecycleState.SNAPSHOT_READY,
     )
+    public_connector = public_connector_projection(connector, selected)
     CanonicalWorkspaceSnapshot(
         metadata=metadata,
-        connector=dict(connector),
+        connector=public_connector,
         index=list(index_entries.values()),
         databases=databases_payload,
         database_pages=database_pages_payload,
@@ -185,7 +268,7 @@ async def build_canonical_snapshot(
             **metadata.__dict__,
             "state": metadata.state.value,
         },
-        "connector": dict(connector),
+        "connector": public_connector,
         "index": list(index_entries.values()),
         "databases": databases_payload,
         "database_pages": database_pages_payload,
@@ -234,6 +317,16 @@ def materialize_workspace_snapshot(
         "# Notion connector index\n\n"
         "This read-only directory contains selected resource IDs and compact metadata.\n"
         "Page bodies are fetched on demand when Runtime intercepts Read(.notion/pages/<id>.json).\n"
+        "\n"
+        "## Skill index\n\n"
+        "- Skill: `notion-session`\n"
+        "- Instructions: workspace-root `skills/notion-session/SKILL.md`\n"
+        "- Runtime discovery: `.claude/skills/notion-session`\n"
+        "- Use it whenever a request requires searching or reading the connected Notion.\n"
+        "- Follow its index-first workflow: inspect connector/index/database metadata, "
+        "then Read one selected page on demand.\n"
+        "- If Skill/Read is unavailable, report the Notion limitation and continue "
+        "any answer that does not depend on Notion.\n"
     )
     (notion_dir / "README.md").write_text(readme, encoding="utf-8")
 

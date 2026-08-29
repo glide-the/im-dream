@@ -3,22 +3,23 @@
 >         `backend/libs/claude_agent_kit/types.py` (AgentRunOptions),
 >         `backend/libs/claude_agent_kit/server/agent_runner.py` (run_streaming, _pre_tool_use_hook),
 >         `backend/libs/claude_agent_kit/server/editor_index.py` (get_editor_resource_data),
->         `backend/libs/claude_agent_kit/server/editor_tool.py` (handle_editor_read_tool),
+>         `backend/libs/claude_agent_kit/server/editor_tool.py` (write-only Editor MCP tools),
 >         `backend/claude_agent/thread_pool.py` (AgentRunState, editor_state, editor_user_id),
 >         `docs/design/claude-agent/edit-point/workspace-adapter.md`,
 >         `docs/design/claude-agent/edit-point/workspace-context.md`
 > [Output] 定义 `editor_state` 快照从前端采集到运行时激活、MCP写工具后DB刷新再到清理的完整生命周期，
->          包括数据结构、六个阶段说明、业务时序图、AgentRunState软缓存决策、None 语义与双路径读取对比。
+>          包括数据结构、六个阶段说明、业务时序图、AgentRunState软缓存决策、None 语义与读写路径边界。
 > [Pos] lifecycle-design-doc in `docs/design/claude-agent/edit-point`
 > [Sync] 2026-05-29: initial design — editor_state snapshot lifecycle.
 > [Sync] 2026-08-13: add pre-send persistence, structured failure normalization, interaction sequence, and minimal-design review.
+> [Sync] 2026-08-29: remove the retired Editor MCP state-file/read path; virtual Read redirects now use the canonical thread `.claude-tmp` with `0700/0600` permissions.
 > [Sync] 2026-05-29: editor_state 迁移至 AgentRunState 软缓存；新增阶段 3b（MCP写工具后DB刷新），
 >                    更新 §5 不持久化决策表（AgentRunState 改为软缓存 ✅），更新 §4 时序图。
 
 # `editor_state` 快照生命周期设计
 
 Status: Updated  
-Updated: 2026-08-13
+Updated: 2026-08-29
 Scope: Design + 实现对应代码
 
 ---
@@ -31,13 +32,13 @@ Scope: Design + 实现对应代码
    - 3.1 [阶段 0：前端采集](#31-阶段-0前端采集)
    - 3.2 [阶段 1：HTTP 序列化传输](#32-阶段-1http-序列化传输)
    - 3.3 [阶段 2：后端接收与透传](#33-阶段-2后端接收与透传)
-   - 3.4 [阶段 3：运行时双激活](#34-阶段-3运行时双激活)
+   - 3.4 [阶段 3：运行时读写激活](#34-阶段-3运行时读写激活)
    - 3.5 [阶段 3b：MCP 写工具后 DB 刷新](#35-阶段-3bmcp-写工具后-db-刷新)
    - 3.6 [阶段 4：临时文件清理](#36-阶段-4临时文件清理)
 4. [完整业务时序图](#4-完整业务时序图)
 5. [AgentRunState 软缓存设计](#5-agentrunstate-软缓存设计)
 6. [`None` 语义](#6-none-语义)
-7. [双路径读取对比](#7-双路径读取对比)
+7. [读写路径对比](#7-读写路径对比)
 8. [与双层上下文架构的关系](#8-与双层上下文架构的关系)
 9. [故障处理汇总](#9-故障处理汇总)
 
@@ -205,34 +206,29 @@ run_options = AgentRunOptions(
 
 ---
 
-### 3.4 阶段 3：运行时双激活
+### 3.4 阶段 3：运行时读写激活
 
-`run_streaming` 方法在构建 SDK 选项时，基于 `opts.editor_state is not None` 触发两个独立机制：
+`run_streaming` 方法基于 `opts.editor_state is not None` 触发两条职责分离的路径：
 
-#### 激活 A：Editor MCP 子进程（per-run，全局一份）
+#### 激活 A：Editor MCP 写工具（per-run）
 
 **条件**：`opts.editor_state is not None AND "mcp__editor__*" in effective_allowed_tools`
 
 ```
 run_streaming 入口
   ↓
-tempfile.NamedTemporaryFile(prefix="editor_state_", suffix=".json")
-  → json.dump(opts.editor_state, tmp_file)
-  → tmp_path = /tmp/editor_state_XXXX.json
-  ↓
-McpStdioServerConfig(
-    command=sys.executable,
-    args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"],
-    env={"INK_EDITOR_STATE_FILE": tmp_path}
-)
+McpStdioServerConfig(command=sys.executable,
+                    args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"])
   ↓
 Claude Code CLI 子进程启动 editor_mcp_stdio 进程
   ↓
-Agent 可调用：mcp__editor__list_segments / read_segment /
-              read_session_meta / list_comments / read_comment
+Agent 从 <workspace_context> 获得 session_id，并在经用户确认的写工具调用中显式传入
+  ↓
+Editor MCP 从数据库读取/写回当前会话
+Agent 可调用：write_segment / delete_segment / insert_widget / reply_to_comment
 ```
 
-Editor MCP 子进程在**整个 Agent 执行期间**持续运行，共享同一份状态文件（静态快照，不随 Agent 执行中的文档变化而更新）。
+Editor MCP 不再通过 `INK_EDITOR_STATE_FILE`、`INK_EDITOR_STATE_JSON` 或临时状态文件提供读取能力；读取统一走 `.editor/` 虚拟索引，写入统一走数据库边界。
 
 #### 激活 B：PreToolUse 虚拟索引重定向（per-Read，每次读取一份）
 
@@ -248,7 +244,8 @@ get_editor_resource_data(".editor/cells.json", editor_state)
   ↓
 tempfile.NamedTemporaryFile(prefix="editor_", suffix=".json")
   → json.dump(resource_data, tmp_file)
-  → tmp_path = /tmp/editor_XXXX.json
+  → tmp_path = {thread_workspace}/.claude-tmp/editor_XXXX.json
+  → .claude-tmp 权限 0700，文件权限 0600
   → 追加到 _editor_redirect_tmp_paths
   ↓
 {"hookSpecificOutput": {
@@ -261,7 +258,7 @@ Claude Code CLI 使用重定向路径执行 Read
 Agent 读到实时 cells 数组
 ```
 
-每次 Agent 调用 `read_file(".editor/xxx")` 都创建一个**一次性临时文件**，执行完毕后在 `finally` 块清理。
+每次 Agent 调用 `read_file(".editor/xxx")` 都在 server-owned thread `.claude-tmp` 中创建一个**一次性私有文件**。该路径位于 Runtime canonical cwd 内，可通过 CLI 对 hook `updatedInput` 的二次边界校验，并在本轮 `finally` 块清理。
 
 ---
 
@@ -310,13 +307,9 @@ sequenceDiagram
 
 ```python
 finally:
-    # 清理 Editor MCP 状态文件（全局一份）
-    if _editor_state_file_path:
-        os.unlink(_editor_state_file_path)      # /tmp/editor_state_XXXX.json
-
     # 清理 PreToolUse 重定向临时文件（每次 Read 一份）
     for _rpath in _editor_redirect_tmp_paths:
-        os.unlink(_rpath)                        # /tmp/editor_XXXX.json × N
+        os.unlink(_rpath)  # {thread}/.claude-tmp/editor_XXXX.json × N
 ```
 
 清理发生在：
@@ -367,12 +360,10 @@ sequenceDiagram
     end
 
     rect rgb(255, 240, 240)
-        Note over Run,Tmp: 阶段 3：运行时双激活
-        Note over Run: ⬇ 激活 A：Editor MCP 子进程（全局一份）
-        Run->>Tmp: tempfile editor_state_XXXX.json<br/>json.dump(opts.editor_state)
-        Tmp-->>Run: /tmp/editor_state_XXXX.json
-        Run->>EMCP: 启动子进程<br/>env: INK_EDITOR_STATE_FILE=/tmp/editor_state_XXXX.json
-        Note over EMCP: 就绪，等待 MCP 工具调用
+        Note over Run,Tmp: 阶段 3：运行时读写激活
+        Note over Run: ⬇ 激活 A：Editor MCP 写工具
+        Run->>EMCP: 启动 write-only 子进程<br/>不投影 editor_state 临时文件
+        Note over EMCP: session_id 由工具参数显式传入<br/>读写当前用户数据库会话
 
         Note over Run,Agt: Agent 执行开始
         Run->>Agt: system_prompt + user_message<br/>（含 <workspace_context> 块）
@@ -381,11 +372,11 @@ sequenceDiagram
         alt 读取路径 A：read_file(".editor/cells.json")
             Agt->>Hook: Read { file_path: ".editor/cells.json" }
             Hook->>Hook: is_editor_index_path → True<br/>opts.editor_state_getter() ≠ None → True<br/>（getter 读取 AgentRunState.editor_state 最新值）
-            Note over Hook: ⬇ 激活 B：per-Read 临时文件（每次一份）
-            Hook->>Tmp: tempfile editor_XXXX.json<br/>json.dump(cells数组)
-            Tmp-->>Hook: /tmp/editor_XXXX.json
-            Hook-->>Agt: HookJSONOutput {<br/>  permissionDecision: "allow",<br/>  updatedInput: { file_path: "/tmp/editor_XXXX.json" }<br/>}
-            Agt->>Tmp: Read /tmp/editor_XXXX.json
+            Note over Hook: ⬇ 激活 B：per-Read 私有文件（每次一份）
+            Hook->>Tmp: ensure {thread}/.claude-tmp 0700<br/>写入 editor_XXXX.json 0600
+            Tmp-->>Hook: {thread}/.claude-tmp/editor_XXXX.json
+            Hook-->>Agt: HookJSONOutput {<br/>  permissionDecision: "allow",<br/>  updatedInput: { file_path: "{thread}/.claude-tmp/editor_XXXX.json" }<br/>}
+            Agt->>Tmp: Read {thread}/.claude-tmp/editor_XXXX.json
             Tmp-->>Agt: 实时 cells 数组
         end
 
@@ -409,9 +400,8 @@ sequenceDiagram
 
     rect rgb(248, 240, 255)
         Note over Run,Tmp: 阶段 4：finally 块清理
-        Run->>Tmp: os.unlink(editor_state_XXXX.json)
         Run->>Tmp: os.unlink(editor_XXXX.json × N 个)
-        Note over Tmp: 所有本轮临时文件已删除<br/>AgentRunState.editor_state 保留（下一轮可复用）
+        Note over Tmp: 本轮 Editor Read 文件已删除<br/>AgentRunState.editor_state 保留（下一轮可复用）
     end
 
     Run-->>Svc: AgentRunResult { full_text, success }
@@ -430,8 +420,7 @@ sequenceDiagram
 | SQLite `chat_thread` | ❌ | 只存线程元信息 |
 | SQLite `chat_message` | ❌ | 只存 `parts` 和 `metadata`（model/usage/toolCount） |
 | `AgentRunState`（内存会话缓存） | ✅ **软缓存** | 缓存 `editor_state` 和 `editor_user_id`；TTL 600 s；前端快照优先覆盖，写工具后从 DB 更新 |
-| `/tmp/editor_state_*.json` | ✅ 临时 | 仅限本次 run_streaming，finally 清理 |
-| `/tmp/editor_*.json` | ✅ 临时 | 仅限本次 Read 调用，finally 清理 |
+| `{thread_workspace}/.claude-tmp/editor_*.json` | ✅ 临时 | 仅限本次 Read 调用；目录 `0700`、文件 `0600`，finally 清理 |
 
 ### 5.2 为何改为软缓存（vs 原始无缓存设计）
 
@@ -453,10 +442,10 @@ assemble_context() 每轮执行:
 
 tool_result 回调（写工具成功）:
   ├─ state.editor_state = DB 最新快照（下一轮可用）
-  └─ run_options.editor_state = DB 最新快照（当轮 PreToolUse 立即生效）
+  └─ opts.editor_state_getter() 绑定 state（当轮后续 PreToolUse 立即读取最新值）
 ```
 
-> **⚠️ 注意**：Editor MCP 子进程的状态文件（`/tmp/editor_state_XXXX.json`）在 `run_streaming` 启动时写入一次，写工具后不会重写该文件。因此同轮内通过 `mcp__editor__list_segments` 等 MCP 读工具仍会看到写前快照。PreToolUse 路径（`read_file(".editor/cells.json")`）因为直接读 `run_options.editor_state` 内存，所以可以看到刷新后的数据。
+> Editor MCP 已收敛为 write-only，不存在静态状态文件或 MCP 读工具。同轮写后读取通过 `.editor/` PreToolUse 路径调用 `opts.editor_state_getter()`，直接读取刷新后的 `AgentRunState.editor_state`。
 
 ### 5.4 `editor_state` 从不持久化到 SQLite
 
@@ -480,20 +469,19 @@ tool_result 回调（写工具成功）:
 
 ---
 
-## 7. 双路径读取对比
+## 7. 读写路径对比
 
-Agent 有两条等价路径读取文档内容，均基于同一份 `editor_state` 快照：
+Agent 的读取与写入不是两条等价读取路径，而是职责分离的正式路径：
 
-| 维度 | 路径 A：`read_file(".editor/cells.json")` | 路径 B：`mcp__editor__list_segments` |
-|------|------------------------------------------|--------------------------------------|
-| **协议** | Claude 原生 `Read` 工具 + PreToolUse 重定向 | MCP stdio 协议 |
-| **数据源** | `opts.editor_state`（内存，由 hook 写入临时文件）| `INK_EDITOR_STATE_FILE`（磁盘临时文件）|
-| **粒度** | 完整资源切片（如整个 `cells` 数组） | 结构化摘要（`list_segments` 仅返回 preview + length） |
-| **临时文件** | 每次 Read 一份（per-Read） | 全局一份（per-run） |
-| **适用场景** | Agent 需要完整原始数据（如全文分析） | Agent 需要快速浏览文档结构后再定向读取 |
-| **`editor_state=None` 降级** | 返回占位符 `{}` | MCP 工具不存在，调用报错 |
+| 维度 | 读取：`Read(".editor/cells.json")` | 写入：`mcp__editor__*` |
+|------|-------------------------------------|-------------------------|
+| **协议** | Claude 原生 `Read` + PreToolUse 重定向 | MCP stdio 写工具 + 用户确认 |
+| **数据源** | `opts.editor_state_getter()` 返回的当前软缓存 | 当前用户的数据库会话 |
+| **临时文件** | `{thread}/.claude-tmp/editor_*.json`，per-Read、`0600` | 不投影 EditorState 临时文件 |
+| **适用场景** | 分析当前完整资源切片 | 修改、删除或插入受控文档对象 |
+| **失败边界** | 无有效状态时读占位符 `{}`；临时投影失败时 warning + fall-through | 工具不可用或确认/数据库失败时返回结构化局部错误 |
 
-**推荐策略**：`<workspace_context>` 块描述两条路径均可用。对于"先浏览结构再精读"的任务模式，Agent 通常先调用 `mcp__editor__list_segments` 获取 `cellId` 列表，再用 `mcp__editor__read_segment(cellId)` 读取具体内容，效率高于直接读取完整 `cells.json`。
+**正式策略**：读取只使用 `.editor/` 虚拟索引；写入只使用受控 Editor MCP 工具。不得恢复基于状态文件的 MCP 读取兼容路径。
 
 ---
 
@@ -515,8 +503,8 @@ Edit-point 上下文由两个互补但独立的层组成：
 │  运行时层（实时数据注入）← 本文档描述                                          │
 │  editor_state 快照                                                           │
 │  • 依赖前端采集的 EditorState JSON                                           │
-│  • 驱动 PreToolUse 重定向 + Editor MCP 子进程                                │
-│  • 每轮请求新鲜注入，不缓存，不持久化                                          │
+│  • 软缓存于 AgentRunState，并驱动 PreToolUse Read 重定向                      │
+│  • Editor MCP 仅提供写工具，成功后从 DB 刷新软缓存                              │
 │  → 详见本文档                                                                │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```

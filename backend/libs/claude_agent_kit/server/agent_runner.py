@@ -6,6 +6,8 @@
 # [Pos] core runner node in libs/claude_agent_kit/server
 # [Sync] 2026-08-28: apply the exact server-owned Claude Code Runtime env whitelist
 #                    after user overlays and before Gateway enforcement.
+# [Sync] 2026-08-29: keep Editor virtual-Read redirect files inside the
+#                    server-owned thread .claude-tmp boundary with 0600 mode.
 # [Sync] 2026-08-04: force Agent/Task run_in_background=false at the PreToolUse
 #                    boundary so the parent turn consumes child completion.
 # [Sync] 2026-08-14: allow only confirmation-gated, single-file canonical
@@ -1588,6 +1590,8 @@ def _apply_editor_index_redirect(
     tool_input: dict[str, Any],
     editor_state: Optional[dict[str, Any]],
     tmp_paths: list[str],
+    *,
+    tmp_workspace: Optional[str],
 ) -> Optional[HookJSONOutput]:
     """Apply `.editor/` virtual-index redirect for a PreToolUse Read call.
 
@@ -1601,8 +1605,9 @@ def _apply_editor_index_redirect(
     Returns ``None`` when any condition is not met (fall-through).
 
     Side effects:
-    - On success, appends the tempfile path to *tmp_paths* so the caller can
-      clean it up in a ``finally`` block.
+    - On success, writes a private ``0600`` tempfile beneath the canonical
+      thread ``.claude-tmp`` directory and appends its path to *tmp_paths* so
+      the caller can clean it up in a ``finally`` block.
 
     On any exception the error is logged at WARNING level and ``None`` is
     returned so the caller falls through to the unmodified read path (the
@@ -1618,6 +1623,7 @@ def _apply_editor_index_redirect(
         return None
 
     raw_path: str = tool_input.get("file_path", "")
+    tmp_path: Optional[str] = None
 
     try:
         from .editor_index import is_editor_index_path, get_editor_resource_data  # noqa: PLC0415
@@ -1626,16 +1632,19 @@ def _apply_editor_index_redirect(
             return None
 
         resource_data = get_editor_resource_data(raw_path, editor_state)
+        tmp_root = Path(ensure_claude_code_tmpdir(tmp_workspace))
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".json",
             delete=False,
             prefix="editor_",
+            dir=tmp_root,
             encoding="utf-8",
         ) as tmp:
-            json.dump(resource_data, tmp, ensure_ascii=False)
             tmp_path = tmp.name
+            json.dump(resource_data, tmp, ensure_ascii=False)
 
+        os.chmod(tmp_path, 0o600, follow_symlinks=False)
         tmp_paths.append(tmp_path)
         logger.debug(
             "PreToolUse: redirected .editor read %r → %r",
@@ -1650,6 +1659,17 @@ def _apply_editor_index_redirect(
             }
         }
     except Exception:  # noqa: BLE001
+        if tmp_path is not None and tmp_path not in tmp_paths:
+            try:
+                os.unlink(tmp_path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.warning(
+                    "Failed to clean incomplete .editor redirect %r.",
+                    tmp_path,
+                    exc_info=True,
+                )
         logger.warning(
             "Failed to intercept .editor/ read for %r; falling through.",
             raw_path,
@@ -2381,7 +2401,11 @@ class ClaudeAgentRunner:
                 else opts.editor_state
             )
             redirect_result = _apply_editor_index_redirect(
-                tool_name, tool_input, live_editor_state, _editor_redirect_tmp_paths
+                tool_name,
+                tool_input,
+                live_editor_state,
+                _editor_redirect_tmp_paths,
+                tmp_workspace=opts.claude_tmp_workspace or cwd,
             )
             if redirect_result is not None:
                 return redirect_result

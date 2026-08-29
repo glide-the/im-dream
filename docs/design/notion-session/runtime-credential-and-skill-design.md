@@ -2,11 +2,13 @@
 <!-- [Output] Product/architecture contract for actor credentials, lightweight indexes, thread projection, lazy Read, failures, migration, and acceptance. -->
 <!-- [Pos] Current Notion credential/index/Runtime/Skill source of truth in docs/design/notion-session. -->
 <!-- [Sync] 2026-08-28: replace full-content snapshots and Agent-visible MCP calls with actor index snapshots plus `.notion/pages/<id>.json` lazy Read. -->
+<!-- [Sync] 2026-08-29: minimize connector projections, filter LKG by current selection, paginate discovery, clear empty scope, and preserve effective credentials on failed reauthorization. -->
+<!-- [Sync] 2026-08-29: make the installed notion-session Skill discoverable from both `.notion/README.md` and the per-turn workspace context. -->
 
 # Notion 用户凭证、轻量索引与 Runtime Read Hook 设计
 
 Status: Implemented and verified  
-Updated: 2026-08-28  
+Updated: 2026-08-29
 Scope: Notion 连接、用户凭证、策略同步、thread 投影、Skill 与按需正文读取
 
 ## 1. 背景与问题
@@ -97,11 +99,14 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 
 - “连接 Notion”启动服务器 device flow；页面只展示验证链接、验证码和认证状态。
 - 重新授权在用户独立 pending home 完成，成功后原子替换 credential source；正在运行的 turn 不热替换。
-- 断开属于明显影响操作，保留一次确认；删除 connector、actor credential/index source 和已有 credential projection。
+- 重新授权失败或过期时，若旧 credential 仍有效则保留旧 source；前端显示“部分可用”，而不是把连接误报为过期。
+- 断开不删除 Notion 侧数据且可重新连接恢复，因此不增加确认弹窗；删除 connector、actor credential/index source 和已有 thread credential/index projection。
 
 ### 5.2 选择与索引同步
 
 - 用户保存选中资源后立即触发首次轻索引；无需先发起 Chat。
+- 资源发现消费全部 search cursor，只保留 ID、标题、URL、更新时间和选择所需 schema，不保存上游原始响应。
+- 空 selection 是显式 fail-closed 配置：保持授权连接，清除 current identity/index 和最近成功时间。
 - 页面在构建中显示“正在更新 Notion 索引”，不能显示“内容已同步”。
 - 成功后显示“索引已同步”、来源数、最近成功与下次计划；正文在对话实际读取时获取。
 - “立即同步”只是主动刷新 index，不下载页面正文。
@@ -114,10 +119,13 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 
 ### 5.4 Agent 使用
 
-1. Skill 读取 `.notion/connector.json` 和 `.notion/index.json` 定位范围/页面 ID。
-2. 只看一个数据库时读取 `.notion/databases/<database_id>.json`。
-3. 只有需要正文时读取 `.notion/pages/<page_id>.json`。
-4. hook 校验当前 index 后实时读取 Markdown；Agent 不感知 CLI、凭证路径或内部参数。
+1. `.notion/README.md` 和每轮 workspace context 都索引已安装的 `notion-session` Skill、`skills/notion-session/SKILL.md` 指令入口与 `.claude/skills/notion-session` Runtime 发现别名。
+2. 请求需要搜索或读取已连接 Notion 时，Agent 使用该 Skill，先读取 `.notion/connector.json` 和 `.notion/index.json` 定位范围/页面 ID。
+3. 只看一个数据库时读取 `.notion/databases/<database_id>.json`。
+4. 只有需要正文时读取 `.notion/pages/<page_id>.json`。
+5. hook 校验当前 index 后实时读取 Markdown；Agent 不感知 CLI、凭证路径或内部参数。
+
+每个新 turn 投影前，provider 必须把 actor LKG 与当前 connector resources 求交。数据库仅保留当前选择的数据源及其页面，独立页面仅保留当前选择 ID；connector projection 只含公开连接摘要，不得包含 `user_id`、config、授权会话或验证码。范围缩小优先于 LKG 保留。
 
 ## 6. 失败状态与反馈
 
@@ -158,9 +166,7 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 7. 正文只进入 thread `.claude-tmp` 0600 临时文件并在 turn 结束清理。
 8. auth/permission/API 错误脱敏且只影响该次 Read；普通 turn/resume/cancel/SSE 不变。
 9. 定时同步与保存 selection 不依赖 Chat；Chat 初始化不运行 index builder。
-10. 后端、Runtime、前端、Skill、文档自动化测试和指定真实账户链路均通过。
-
-真实账户 `dmeck@suoxya.com` 的验证结果：同一 5 来源/255 页面索引由新路径在 8.4 秒完成，actor `current.json` 为 111,408 bytes、`pages={}`、0600，且不包含 token/Markdown/blocks/children 键；已有真实 thread 投影 255 条索引且静态 page 文件为 0，单页 Read hook 成功返回 4,379 字符当前 Markdown 到 0600 thread 临时文件并完成清理。
+10. 后端、Runtime、前端、Skill 和文档自动化测试通过；真实账户链路只有在按本机真实业务测试协议执行后才能作为当次验收证据。
 
 ## 10. 反过度设计评审
 

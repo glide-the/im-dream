@@ -13,6 +13,8 @@
 # [Sync] 2026-08-28: assert selection publishes an actor agentdata snapshot, ignores
 #                    thread workspace identity, and exposes a versioned scheduled-sync policy.
 # [Sync] 2026-08-28: model index-only snapshots and exact pending-to-synced resource publication.
+# [Sync] 2026-08-29: cover fail-closed source clearing and failed reauthorization
+#                    that preserves only a previously effective actor credential.
 
 from __future__ import annotations
 
@@ -496,6 +498,152 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
             .get("auth_session", {})
             .get("auth_session_status"),
             "consumed",
+        )
+
+    def test_failed_reauthorization_preserves_effective_credentials(self):
+        create_response = self.client.post(
+            "/api/connectors",
+            json={"name": "Notion", "platform": "notion"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        connector_id = create_response.json()["connector"]["id"]
+        self.client.post(
+            f"/api/connectors/{connector_id}/auth/login",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        first_poll = self.client.post(
+            f"/api/connectors/{connector_id}/auth/poll",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(first_poll.json()["auth_status"], "authenticated")
+
+        self.client.post(
+            f"/api/connectors/{connector_id}/auth/login",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        with patch.object(
+            notion_auth,
+            "poll_login",
+            new=AsyncMock(
+                return_value=notion_auth.AuthStatusResult(
+                    status="expired",
+                    detail="The new authorization attempt expired.",
+                )
+            ),
+        ):
+            failed_poll = self.client.post(
+                f"/api/connectors/{connector_id}/auth/poll",
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertEqual(failed_poll.status_code, 200, failed_poll.text)
+        self.assertEqual(failed_poll.json()["status"], "expired")
+        self.assertEqual(failed_poll.json()["auth_status"], "authenticated")
+        final_connector = self.client.get(
+            f"/api/connectors/{connector_id}",
+            headers={"Authorization": "Bearer test-token"},
+        ).json()["connector"]
+        self.assertEqual(final_connector["auth_status"], "authenticated")
+        self.assertEqual(
+            final_connector["config"]["auth_session"]["auth_session_status"],
+            "expired",
+        )
+        self.assertTrue(NotionCredentialStore().has_credentials(7))
+
+    def test_failed_reauthorization_does_not_revive_expired_credentials(self):
+        create_response = self.client.post(
+            "/api/connectors",
+            json={"name": "Notion", "platform": "notion"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        connector_id = create_response.json()["connector"]["id"]
+        self.client.post(
+            f"/api/connectors/{connector_id}/auth/login",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        first_poll = self.client.post(
+            f"/api/connectors/{connector_id}/auth/poll",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(first_poll.json()["auth_status"], "authenticated")
+
+        notion_store.update_connector(
+            connector_id,
+            7,
+            {"auth_status": "expired"},
+        )
+        self.client.post(
+            f"/api/connectors/{connector_id}/auth/login",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        with patch.object(
+            notion_auth,
+            "poll_login",
+            new=AsyncMock(
+                return_value=notion_auth.AuthStatusResult(
+                    status="expired",
+                    detail="The replacement authorization attempt expired.",
+                )
+            ),
+        ):
+            failed_poll = self.client.post(
+                f"/api/connectors/{connector_id}/auth/poll",
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertEqual(failed_poll.status_code, 200, failed_poll.text)
+        self.assertEqual(failed_poll.json()["status"], "expired")
+        self.assertEqual(failed_poll.json()["auth_status"], "expired")
+        self.assertTrue(NotionCredentialStore().has_credentials(7))
+
+    def test_empty_selection_clears_current_index_without_disconnect(self):
+        create_response = self.client.post(
+            "/api/connectors",
+            json={"name": "Notion", "platform": "notion"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        connector_id = create_response.json()["connector"]["id"]
+        self.client.post(
+            f"/api/connectors/{connector_id}/auth/login",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.client.post(
+            f"/api/connectors/{connector_id}/auth/poll",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        selected = self.client.post(
+            f"/api/connectors/{connector_id}/resources/select",
+            json={
+                "selected_databases": [
+                    {"database_id": "db-team", "title": "Team Knowledge"}
+                ],
+                "selected_pages": [],
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(selected.status_code, 200, selected.text)
+        self.assertTrue(selected.json()["synced"])
+
+        cleared = self.client.post(
+            f"/api/connectors/{connector_id}/resources/select",
+            json={"selected_databases": [], "selected_pages": []},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        payload = cleared.json()
+        self.assertFalse(payload["synced"])
+        self.assertIsNone(payload["snapshotIdentity"])
+        self.assertEqual(payload["connector"]["auth_status"], "authenticated")
+        self.assertEqual(payload["connector"]["sources"], [])
+        self.assertIsNone(payload["connector"]["current_snapshot_version"])
+        self.assertIsNone(payload["connector"]["last_synced_at"])
+        self.assertFalse(
+            (
+                NotionCredentialStore().user_paths(7).snapshot_root
+                / connector_id
+                / "current.json"
+            ).exists()
         )
 
     def test_unauthorized_connector_cannot_discover_notion(self):

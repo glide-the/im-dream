@@ -4,6 +4,8 @@
 # [Sync] 2026-08-28: move the Runtime snapshot source to actor agentdata and keep Chat turns projection-only.
 # [Sync] 2026-08-28: reject new snapshots that contain page bodies; live text
 #                    is owned exclusively by the Runtime Read hook.
+# [Sync] 2026-08-29: intersect LKG projections with current source selection and
+#                    exclude private connector configuration from thread files.
 
 """Actor-scoped canonical Notion snapshot storage.
 
@@ -30,7 +32,7 @@ from .credentials import (
     _write_private_file,
 )
 from .errors import NotionCredentialError, NotionSnapshotNotReadyError
-from .sync import materialize_workspace_snapshot
+from .sync import filter_snapshot_for_connector, materialize_workspace_snapshot
 
 NOTION_CURRENT_SNAPSHOT_FILENAME = "current.json"
 NOTION_THREAD_SNAPSHOT_DIRNAME = ".notion"
@@ -183,6 +185,9 @@ class NotionSnapshotStore:
         resolved = self.credential_store.validate_thread_workspace(workspace)
         connector_id = _connector_key(str(connector.get("id") or ""))
         snapshot = self.load_current(actor_id, connector_id)
+        projected_snapshot = (
+            filter_snapshot_for_connector(snapshot, connector) if snapshot else None
+        )
         target = resolved / NOTION_THREAD_SNAPSHOT_DIRNAME
         staging_parent = Path(
             tempfile.mkdtemp(prefix=".notion-snapshot.", dir=str(resolved))
@@ -192,17 +197,32 @@ class NotionSnapshotStore:
             materialize_workspace_snapshot(
                 staging_parent,
                 connector=connector,
-                snapshot=snapshot,
+                snapshot=projected_snapshot,
             )
             staging = staging_parent / NOTION_THREAD_SNAPSHOT_DIRNAME
             _harden_public_projection(staging)
             _remove_private_tree(target, parent=resolved)
             os.replace(staging, target)
-            metadata = dict(snapshot.get("metadata") or {}) if snapshot else {}
+            metadata = (
+                dict(projected_snapshot.get("metadata") or {})
+                if projected_snapshot
+                else {}
+            )
+            available = bool(
+                projected_snapshot
+                and (
+                    projected_snapshot.get("index")
+                    or projected_snapshot.get("databases")
+                )
+            )
             return NotionSnapshotProjection(
-                available=snapshot is not None,
+                available=available,
                 thread_snapshot_root=target,
-                snapshot_version=str(metadata.get("snapshot_version") or "") or None,
+                snapshot_version=(
+                    (str(metadata.get("snapshot_version") or "") or None)
+                    if available
+                    else None
+                ),
             )
         finally:
             if staging_parent.exists():
