@@ -108,6 +108,9 @@
 #                    without a fixed 2000ms wait.
 # [Sync] 2026-08-13: normalize structured editor MCP {ok:false} results to
 #                    tool errors before live SSE, history persistence, and side effects.
+# [Sync] 2026-08-29: unwrap stdio MCP text envelopes, retain tool input identity,
+#                    refresh the single AgentRunState cache after every actor/session-
+#                    matched Editor result, and publish edit events only on success.
 # [Sync] 2026-06-17: include runner exception notes in SSE errorText so sandbox
 #                    startup diagnostics (e.g. seccomp-denied hints) reach UI.
 # [Sync] 2026-06-21: pass Settings sandbox network policy to workspace init
@@ -961,12 +964,34 @@ def _coerce_string_list(value: object) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _tool_result_ok(output: Any) -> bool:
-    """Return False when an MCP tool returned a structured ``{"ok": false}``."""
+def _extract_editor_tool_result(output: Any) -> Optional[dict[str, Any]]:
+    """Return an Editor MCP business result from direct or stdio envelopes."""
 
-    if isinstance(output, dict) and output.get("ok") is False:
-        return False
-    return True
+    candidates: list[Any] = [output]
+    if isinstance(output, dict):
+        content = output.get("content")
+        if isinstance(content, list):
+            candidates.extend(content)
+    for candidate in candidates:
+        if isinstance(candidate, dict) and isinstance(candidate.get("ok"), bool):
+            return candidate
+        text = candidate.get("text") if isinstance(candidate, dict) else candidate
+        if not isinstance(text, str):
+            continue
+        try:
+            decoded = json.loads(text)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(decoded, dict) and isinstance(decoded.get("ok"), bool):
+            return decoded
+    return None
+
+
+def _tool_result_ok(output: Any) -> bool:
+    """Return False only for a decoded Editor MCP ``{"ok": false}`` result."""
+
+    result = _extract_editor_tool_result(output)
+    return result is None or result.get("ok") is not False
 
 
 def _is_editor_tool_result_error(tool_name: str, output: Any) -> bool:
@@ -1162,6 +1187,9 @@ class _TurnContext:
     # Used by the tool_result branch to identify editor write tools when the
     # result event itself does not carry tool_name.
     tool_name_by_id: dict = field(default_factory=dict)
+    # tool_call_id → complete tool input. Editor result handling uses this
+    # immutable identity to refresh only the actor's live Editor session.
+    tool_input_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Thinking / reasoning tracking (for SSE reasoning-start/end emission).
     current_reasoning_id: Optional[str] = None
     has_thinking_delta: bool = False
@@ -2332,6 +2360,8 @@ class ClaudeAgentService:
             if event_type in ("tool_use", "tool_use_start") and tool_call_id and tool_name:
                 # Track name so tool_result can identify editor write tools.
                 turn_ctx.tool_name_by_id[tool_call_id] = tool_name
+                if isinstance(payload.input, dict):
+                    turn_ctx.tool_input_by_id[tool_call_id] = dict(payload.input)
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
                     await queue.put(_event("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
@@ -2359,6 +2389,8 @@ class ClaudeAgentService:
             if event_type == "tool_input_available" and tool_call_id and tool_name:
                 # Track name so tool_result can identify editor write tools.
                 turn_ctx.tool_name_by_id[tool_call_id] = tool_name
+                if isinstance(payload.input, dict):
+                    turn_ctx.tool_input_by_id[tool_call_id] = dict(payload.input)
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
                     await queue.put(_event("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
@@ -2386,6 +2418,11 @@ class ClaudeAgentService:
                     await queue.put(_event("tool-input-available", {"toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}))
                     turn_ctx.collected_parts.append(fallback_evt)
                 resolved_tool_name = tool_name or turn_ctx.tool_name_by_id.get(tool_call_id, "")
+                editor_result = (
+                    _extract_editor_tool_result(payload.output)
+                    if resolved_tool_name in _EDITOR_WRITE_TOOL_NAMES
+                    else None
+                )
                 is_error = bool(payload.is_error) or _is_editor_tool_result_error(
                     resolved_tool_name, payload.output
                 )
@@ -2393,19 +2430,29 @@ class ClaudeAgentService:
                 await queue.put(_event("tool-output-available", {"toolCallId": tool_call_id, "output": payload.output, "isError": is_error}))
                 turn_ctx.collected_parts.append(evt)
 
-                # After a confirmed editor write-tool result, reload editor_state from
-                # DB so that same-turn PreToolUse reads and subsequent turns see the
-                # updated document content.
+                # Every actor/session-matched Editor result refreshes the single
+                # AgentRunState cache from the DB. Success then publishes the existing
+                # session event; business failures only replace stale read context so
+                # same-turn retries cannot keep targeting a removed cell.
                 if (
-                    not is_error
-                    and _tool_result_ok(payload.output)
-                    and resolved_tool_name in _EDITOR_WRITE_TOOL_NAMES
+                    resolved_tool_name in _EDITOR_WRITE_TOOL_NAMES
                     and state is not None
                     and state.editor_state is not None
                 ):
-                    editor_session_id: str = (state.editor_state or {}).get("id") or ""
+                    tool_input = turn_ctx.tool_input_by_id.get(tool_call_id) or {}
+                    editor_session_id = str(
+                        tool_input.get("editor_session_id") or ""
+                    ).strip()
+                    live_editor_session_id = str(
+                        (state.editor_state or {}).get("id") or ""
+                    ).strip()
                     user_id: int = state.editor_user_id
-                    if editor_session_id and user_id:
+                    cache_refreshed = False
+                    if (
+                        editor_session_id
+                        and editor_session_id == live_editor_session_id
+                        and user_id
+                    ):
                         try:
                             import database as _db_mod
                             fresh_row = await asyncio.to_thread(
@@ -2414,6 +2461,7 @@ class ClaudeAgentService:
                             if fresh_row and fresh_row.get("editor_state"):
                                 fresh_editor_state = fresh_row["editor_state"]
                                 state.editor_state = fresh_editor_state
+                                cache_refreshed = True
                                 logger.debug(
                                     "editor_state refreshed from DB after %s "
                                     "(editor_session_id=%s user_id=%s)",
@@ -2425,6 +2473,12 @@ class ClaudeAgentService:
                                 "editor_session_id=%s user_id=%s",
                                 resolved_tool_name, editor_session_id, user_id,
                             )
+                    write_succeeded = bool(
+                        not is_error
+                        and editor_result is not None
+                        and editor_result.get("ok") is True
+                    )
+                    if write_succeeded and cache_refreshed:
                         await session_event_bus.publish(
                             EditSessionEvent(
                                 type="session_updated",

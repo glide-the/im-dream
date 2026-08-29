@@ -33,8 +33,9 @@
 #                    and Workspace Mode disabled fail-closed behavior.
 # [Sync] 2026-08-25: cover managed PostgreSQL MCP snapshots on new/resume turns
 #                    and the same ephemeral projection path with Workspace Mode off.
-# [Sync] 2026-08-13: cover editor MCP structured business failures as tool
-#                    errors with no editor refresh or session_updated event.
+# [Sync] 2026-08-13: cover editor MCP structured business failures as tool errors.
+# [Sync] 2026-08-29: cover stdio result-envelope normalization, actor/session-
+#                    matched cache refresh on success/failure, and success-only events.
 # [Sync] 2026-08-28: cover model plus global server-owned Claude Code Runtime env assembly.
 # [Sync] 2026-08-28: cover per-turn Notion credential projection handoff without
 #                    exposing credential bytes to AgentRunOptions or workspace context.
@@ -1139,6 +1140,10 @@ class TestClaudeAgentServiceToolInputDelta(unittest.TestCase):
                 queue=queue,
                 confirmation_store=ToolConfirmationStore(),
             )
+            turn_ctx.tool_input_by_id["tool-call-1"] = {
+                "editor_session_id": "session-editor-write",
+                "cellId": "cell-1",
+            }
             callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx)
 
             await callback(
@@ -1175,6 +1180,12 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
                 queue=queue,
                 confirmation_store=ToolConfirmationStore(),
             )
+            turn_ctx.tool_name_by_id["tool-call-1"] = "mcp__editor__write_segment"
+            turn_ctx.tool_input_by_id["tool-call-1"] = {
+                "editor_session_id": "session-editor-write",
+                "cellId": "cell-1",
+            }
+            turn_ctx.registered_tool_call_ids.add("tool-call-1")
             state = AgentRunState(session_id="thread-editor-write")
             state.with_editor_state({"id": "session-editor-write"}, 7)
             callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx, state)
@@ -1221,6 +1232,10 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             queue: asyncio.Queue = asyncio.Queue()
             turn_ctx = _TurnContext(queue=queue, confirmation_store=ToolConfirmationStore())
             turn_ctx.tool_name_by_id["tool-call-failed"] = "mcp__editor__write_segment"
+            turn_ctx.tool_input_by_id["tool-call-failed"] = {
+                "editor_session_id": "session-editor-write",
+                "cellId": "cell-1",
+            }
             turn_ctx.registered_tool_call_ids.add("tool-call-failed")
             state = AgentRunState(session_id="thread-editor-write-failed")
             original_state = {
@@ -1232,7 +1247,15 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             subscription = await service_module.session_event_bus.subscribe("7")
 
             try:
-                with unittest.mock.patch.object(service_module._db, "get_session") as get_session:
+                refreshed_state = {
+                    "id": "session-editor-write",
+                    "cells": [],
+                }
+                with unittest.mock.patch.object(
+                    service_module._db,
+                    "get_session",
+                    return_value={"editor_state": refreshed_state},
+                ) as get_session:
                     output = {"ok": False, "error": error, "cellId": "cell-1"}
                     await callback(ToolEventPayload(
                         type="tool_result",
@@ -1251,12 +1274,30 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             self.assertTrue(frame.data["isError"])
             self.assertEqual(frame.data["output"], output)
             self.assertEqual(turn_ctx.collected_parts[-1]["isError"], True)
-            self.assertIs(state.editor_state, original_state)
-            get_session.assert_not_called()
+            self.assertIs(state.editor_state, refreshed_state)
+            get_session.assert_called_once_with(7, "session-editor-write")
 
         for error in ("cell_not_found", "save_failed"):
             with self.subTest(error=error):
                 _run(scenario(error))
+
+    def test_stdio_editor_business_failure_is_unwrapped_and_reclassified(self):
+        output = {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({
+                    "ok": False,
+                    "error": "cell_not_found",
+                    "cellId": "cell-1",
+                }),
+            }],
+            "isError": False,
+        }
+        self.assertFalse(service_module._tool_result_ok(output))
+        self.assertTrue(service_module._is_editor_tool_result_error(
+            "mcp__editor__write_segment",
+            output,
+        ))
 
     def test_non_editor_structured_output_is_not_reclassified(self):
         self.assertFalse(service_module._is_editor_tool_result_error(

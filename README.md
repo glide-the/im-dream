@@ -278,6 +278,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 7. **Published versions are immutable.** Fix a bad Runtime with a forward release or an explicit reviewed rollback; do not overwrite or unpublish an accepted version as normal rollback.
 8. **Model output capability is server-owned.** Admin's selected model `maxOutputTokens` is projected to the Runtime; browser settings, user env, workspace files, and Gateway body rewriting must not replace it.
 9. **Notion credentials and lightweight indexes are actor-owned.** Canonical durable state belongs under server agentdata; policy-driven index refresh is independent of Chat, Runtime receives only current-scope per-Thread projections, failed reauthorization preserves a still-valid effective credential, page bodies are read on demand, and process `HOME`, ambient `NOTION_API_TOKEN`, browser config, and workspace files cannot override either source.
+10. **Editor writes bind actor, live session, and durable state.** The runner rejects writes for a stale session, the Editor MCP child receives only the server-owned actor and effective PostgreSQL capability, every query/update is actor-scoped, and business failures refresh the single in-memory EditorState cache without publishing a success event. Notion indexes and on-demand page bodies never enter EditorState.
 
 ## Troubleshooting
 

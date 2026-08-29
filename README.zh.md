@@ -278,6 +278,7 @@ python3 scripts/verify_claude_registry_release.py \
 7. **已发布版本不可覆盖。** 错误 Runtime 必须通过前向版本修复或显式评审回滚，正常回滚不得覆盖或 unpublish 已验收版本。
 8. **模型输出能力由服务端所有。** Admin 最终选中模型的 `maxOutputTokens` 必须投影到 Runtime；浏览器设置、用户环境、workspace 文件和 Gateway body 改写均不得替代它。
 9. **Notion 凭证与轻量索引均按用户所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，Runtime 只接收当前选择范围内的 per-Thread 投影，重新授权失败时保留仍有效的凭证，页面正文按需读取；进程 `HOME`、ambient `NOTION_API_TOKEN`、浏览器配置和 workspace 文件都不能覆盖任一来源。
+10. **Editor 写入同时绑定 actor、当前 session 和持久状态。** runner 拒绝面向过期 session 的写入；Editor MCP 子进程只接收服务端所有的 actor 与有效 PostgreSQL capability；每次查询/更新均按 actor 限定；业务失败只刷新唯一内存 EditorState 软缓存，不发布成功事件。Notion 索引和按需页面正文不得进入 EditorState。
 
 ## 故障排查
 

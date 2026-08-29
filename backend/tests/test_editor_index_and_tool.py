@@ -12,6 +12,8 @@
 #                    mock database.get_session / database.save_session for isolation.
 # [Sync] 2026-05-29: session_id flows via MCP tool arguments from agent prompt context;
 #                    remove all os.environ patching; mock database.get_db for SQL path.
+# [Sync] 2026-08-29: cover trusted actor/session SQL scoping, bounded stale reload,
+#                    unavailable persistence classification, and dispatch actor binding.
 
 """Unit tests for the .editor/ virtual index and EditorEngine MCP write tools."""
 from __future__ import annotations
@@ -190,6 +192,7 @@ _SAMPLE_STATE = {
 
 _EDITOR_SESSION_ID = "sess-api-abc"   # user_sessions.id from /api/sessions
 _WORKSPACE_ID = "workspace-thread-xyz"  # cwd basename — intentionally different
+_EDITOR_USER_ID = 7
 
 
 class TestAllowedEditorToolNames(unittest.TestCase):
@@ -232,6 +235,7 @@ def _make_db_mock(state: dict) -> MagicMock:
 
     # Mock the get_db() → connection → execute/commit/close flow.
     mock_conn = MagicMock()
+    mock_conn.execute.return_value.rowcount = 1
     mock_row = MagicMock()
     mock_row.__getitem__ = lambda self, key: json.dumps(copy.deepcopy(state)) if key == "editor_state_json" else None
     mock_conn.execute.return_value.fetchone.return_value = mock_row
@@ -246,7 +250,7 @@ class TestWriteSegment(unittest.TestCase):
     def test_replaces_text_cell_content(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "c1", "New text", "test"))
+            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "c1", "New text", "test", user_id=_EDITOR_USER_ID))
         self.assertTrue(result["ok"])
         self.assertEqual(result["cellId"], "c1")
         # Verify save was called (UPDATE executed)
@@ -255,14 +259,14 @@ class TestWriteSegment(unittest.TestCase):
     def test_missing_cell_id_returns_error(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "", "text", "reason"))
+            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "", "text", "reason", user_id=_EDITOR_USER_ID))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "cellId_required")
 
     def test_cell_not_found_returns_error(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "nonexistent", "x", "r"))
+            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "nonexistent", "x", "r", user_id=_EDITOR_USER_ID))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "cell_not_found")
 
@@ -270,7 +274,7 @@ class TestWriteSegment(unittest.TestCase):
         """write_segment must reject widget cells."""
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "c2", "text", "reason"))
+            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "c2", "text", "reason", user_id=_EDITOR_USER_ID))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "cell_not_text_type")
 
@@ -278,29 +282,125 @@ class TestWriteSegment(unittest.TestCase):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         mock_db.get_db.return_value.commit.side_effect = RuntimeError("db error")
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "c1", "text", "r"))
+            result = json.loads(_write_segment(_EDITOR_SESSION_ID, "c1", "text", "r", user_id=_EDITOR_USER_ID))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "save_failed")
+
+    def test_actor_and_session_scope_every_read_and_write(self):
+        mock_db = _make_db_mock(_SAMPLE_STATE)
+        with patch.dict("sys.modules", {"database": mock_db}):
+            result = json.loads(_write_segment(
+                _EDITOR_SESSION_ID,
+                "c1",
+                "Scoped text",
+                "test",
+                user_id=_EDITOR_USER_ID,
+            ))
+        self.assertTrue(result["ok"])
+        calls = mock_db.get_db.return_value.execute.call_args_list
+        self.assertIn("WHERE user_id = %s AND id = %s", calls[0].args[0])
+        self.assertEqual(calls[0].args[1], (_EDITOR_USER_ID, _EDITOR_SESSION_ID))
+        self.assertIn("WHERE user_id = %s AND id = %s", calls[-1].args[0])
+        self.assertEqual(calls[-1].args[1][-2:], (_EDITOR_USER_ID, _EDITOR_SESSION_ID))
+
+    def test_stale_target_recovers_after_one_fresh_reload(self):
+        import copy
+
+        mock_db = _make_db_mock(_SAMPLE_STATE)
+        missing_row = {"editor_state_json": json.dumps({**_SAMPLE_STATE, "cells": []})}
+        fresh_row = {"editor_state_json": json.dumps(copy.deepcopy(_SAMPLE_STATE))}
+        mock_db.get_db.return_value.execute.return_value.fetchone.side_effect = [
+            missing_row,
+            fresh_row,
+        ]
+        with patch.dict("sys.modules", {"database": mock_db}):
+            result = json.loads(_write_segment(
+                _EDITOR_SESSION_ID,
+                "c1",
+                "Recovered text",
+                "test",
+                user_id=_EDITOR_USER_ID,
+            ))
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["recovered"])
+        select_calls = [
+            call for call in mock_db.get_db.return_value.execute.call_args_list
+            if str(call.args[0]).lstrip().startswith("SELECT")
+        ]
+        self.assertEqual(len(select_calls), 2)
+
+    def test_unavailable_state_is_not_reported_as_missing_cell(self):
+        mock_db = MagicMock()
+        mock_db.get_db.side_effect = RuntimeError("unavailable")
+        with patch.dict("sys.modules", {"database": mock_db}):
+            result = json.loads(_write_segment(
+                _EDITOR_SESSION_ID,
+                "c1",
+                "text",
+                "test",
+                user_id=_EDITOR_USER_ID,
+            ))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "editor_state_unavailable")
+
+    def test_unavailable_state_log_omits_exception_content_and_credentials(self):
+        mock_db = MagicMock()
+        mock_db.get_db.side_effect = RuntimeError(
+            "postgresql://actor:credential@example/ink note-body-marker"
+        )
+        with (
+            patch.dict("sys.modules", {"database": mock_db}),
+            self.assertLogs(
+                "libs.claude_agent_kit.server.editor_tool",
+                level="WARNING",
+            ) as captured,
+        ):
+            result = json.loads(_write_segment(
+                _EDITOR_SESSION_ID,
+                "c1",
+                "note-body-marker",
+                "test",
+                user_id=_EDITOR_USER_ID,
+            ))
+
+        self.assertEqual(result, {"ok": False, "error": "editor_state_unavailable"})
+        joined = "\n".join(captured.output)
+        self.assertNotIn("credential", joined)
+        self.assertNotIn("note-body-marker", joined)
+
+    def test_foreign_or_missing_session_fails_closed(self):
+        mock_db = _make_db_mock(_SAMPLE_STATE)
+        mock_db.get_db.return_value.execute.return_value.fetchone.return_value = None
+        with patch.dict("sys.modules", {"database": mock_db}):
+            result = json.loads(_write_segment(
+                _EDITOR_SESSION_ID,
+                "c1",
+                "text",
+                "test",
+                user_id=_EDITOR_USER_ID,
+            ))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "editor_session_not_found")
 
 
 class TestDeleteSegment(unittest.TestCase):
     def test_removes_cell_by_id(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_delete_segment(_EDITOR_SESSION_ID, "c1", "reason"))
+            result = json.loads(_delete_segment(_EDITOR_SESSION_ID, "c1", "reason", user_id=_EDITOR_USER_ID))
         self.assertTrue(result["ok"])
 
     def test_missing_cell_id_returns_error(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_delete_segment(_EDITOR_SESSION_ID, "", "reason"))
+            result = json.loads(_delete_segment(_EDITOR_SESSION_ID, "", "reason", user_id=_EDITOR_USER_ID))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "cellId_required")
 
     def test_cell_not_found_returns_error(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_delete_segment(_EDITOR_SESSION_ID, "no-such", "r"))
+            result = json.loads(_delete_segment(_EDITOR_SESSION_ID, "no-such", "r", user_id=_EDITOR_USER_ID))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "cell_not_found")
 
@@ -310,7 +410,7 @@ class TestInsertWidget(unittest.TestCase):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
             result = json.loads(_insert_widget(
-                _EDITOR_SESSION_ID, "chat", {"voiceId": "v2"}, "", "add chat"
+                _EDITOR_SESSION_ID, "chat", {"voiceId": "v2"}, "", "add chat", user_id=_EDITOR_USER_ID
             ))
         self.assertTrue(result["ok"])
         self.assertEqual(result["widgetType"], "chat")
@@ -319,14 +419,14 @@ class TestInsertWidget(unittest.TestCase):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
             result = json.loads(_insert_widget(
-                _EDITOR_SESSION_ID, "image", {}, "c1", "add image"
+                _EDITOR_SESSION_ID, "image", {}, "c1", "add image", user_id=_EDITOR_USER_ID
             ))
         self.assertTrue(result["ok"])
 
     def test_missing_widget_type_returns_error(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_insert_widget(_EDITOR_SESSION_ID, "", {}, "", "r"))
+            result = json.loads(_insert_widget(_EDITOR_SESSION_ID, "", {}, "", "r", user_id=_EDITOR_USER_ID))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "widgetType_required")
 
@@ -334,7 +434,7 @@ class TestInsertWidget(unittest.TestCase):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
             result = json.loads(_insert_widget(
-                _EDITOR_SESSION_ID, "chat", {}, "nonexistent", "r"
+                _EDITOR_SESSION_ID, "chat", {}, "nonexistent", "r", user_id=_EDITOR_USER_ID
             ))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "after_cell_not_found")
@@ -342,7 +442,7 @@ class TestInsertWidget(unittest.TestCase):
     def test_new_cell_has_uuid_id(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_insert_widget(_EDITOR_SESSION_ID, "chat", {}, "", "r"))
+            result = json.loads(_insert_widget(_EDITOR_SESSION_ID, "chat", {}, "", "r", user_id=_EDITOR_USER_ID))
         self.assertTrue(result["ok"])
         cell_id = result["cellId"]
         self.assertEqual(len(cell_id.replace("-", "")), 32)
@@ -353,21 +453,21 @@ class TestReplyToComment(unittest.TestCase):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
             result = json.loads(_reply_to_comment(
-                _EDITOR_SESSION_ID, "cm1", "Interesting point!", "reply"
+                _EDITOR_SESSION_ID, "cm1", "Interesting point!", "reply", user_id=_EDITOR_USER_ID
             ))
         self.assertTrue(result["ok"])
 
     def test_missing_comment_id_returns_error(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_reply_to_comment(_EDITOR_SESSION_ID, "", "text", "r"))
+            result = json.loads(_reply_to_comment(_EDITOR_SESSION_ID, "", "text", "r", user_id=_EDITOR_USER_ID))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "commentId_required")
 
     def test_missing_content_returns_error(self):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
-            result = json.loads(_reply_to_comment(_EDITOR_SESSION_ID, "cm1", "", "r"))
+            result = json.loads(_reply_to_comment(_EDITOR_SESSION_ID, "cm1", "", "r", user_id=_EDITOR_USER_ID))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "content_required")
 
@@ -375,18 +475,19 @@ class TestReplyToComment(unittest.TestCase):
         mock_db = _make_db_mock(_SAMPLE_STATE)
         with patch.dict("sys.modules", {"database": mock_db}):
             result = json.loads(_reply_to_comment(
-                _EDITOR_SESSION_ID, "no-such-comment", "text", "r"
+                _EDITOR_SESSION_ID, "no-such-comment", "text", "r", user_id=_EDITOR_USER_ID
             ))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "comment_not_found")
 
 
+@patch.dict("os.environ", {"INK_AGENT_USER_ID": str(_EDITOR_USER_ID)})
 class TestHandleEditorWriteToolDispatch(unittest.TestCase):
     """Integration tests for handle_editor_write_tool.
 
     editor_session_id (user_sessions.id from /api/sessions) is passed via tool
     arguments — distinct from the workspace directory name and Claude thread ID.
-    No os.environ patching required.
+    The visible session remains a tool argument; the actor is server-owned env.
     """
 
     def test_write_segment_dispatches_correctly(self):
@@ -453,6 +554,28 @@ class TestHandleEditorWriteToolDispatch(unittest.TestCase):
             result = json.loads(handle_editor_write_tool("write_segment", {}))
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "editor_session_id_required")
+
+
+class TestHandleEditorWriteToolActorBoundary(unittest.TestCase):
+    def test_missing_trusted_actor_fails_closed_before_database_access(self):
+        mock_db = _make_db_mock(_SAMPLE_STATE)
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.dict("sys.modules", {"database": mock_db}),
+        ):
+            result = json.loads(handle_editor_write_tool(
+                "write_segment",
+                {
+                    "editor_session_id": _EDITOR_SESSION_ID,
+                    "cellId": "c1",
+                    "text": "must not write",
+                    "reason": "test",
+                },
+            ))
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "editor_context_unavailable")
+        mock_db.get_db.assert_not_called()
 
 
 if __name__ == "__main__":

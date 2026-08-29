@@ -24,6 +24,7 @@ import {
   runtimePendingToolCallIdsFromStatus,
 } from '../toolConfirmation';
 import { getEditorStatePersistenceSignature } from '../../../hooks/useSessionLifecycle';
+import { parseEditorWriteResult } from '../editorWriteTools';
 
 const stalePart: DynamicToolUIPart = {
   type: 'dynamic-tool',
@@ -102,6 +103,19 @@ test('editor write business failure replays as output-error with structured deta
     state: 'output-error',
   });
   expect((messages[0].parts[0] as DynamicToolUIPart).errorText).toContain('cell_not_found');
+});
+
+test('editor write result parser unwraps the stdio business result envelope', () => {
+  expect(parseEditorWriteResult({
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ ok: false, error: 'editor_state_unavailable' }),
+    }],
+  })).toEqual({ ok: false, error: 'editor_state_unavailable' });
+  expect(parseEditorWriteResult({ ok: true, cellId: 'cell-a', recovered: true }))
+    .toEqual({ ok: true, cellId: 'cell-a', recovered: true });
+  expect(parseEditorWriteResult({ content: [{ type: 'image', data: 'ignored' }] }))
+    .toBeNull();
 });
 
 test('editor persistence signature includes session identity', () => {

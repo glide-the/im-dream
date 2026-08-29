@@ -8,6 +8,9 @@
 #                    after user overlays and before Gateway enforcement.
 # [Sync] 2026-08-29: keep Editor virtual-Read redirect files inside the
 #                    server-owned thread .claude-tmp boundary with 0600 mode.
+# [Sync] 2026-08-29: project only the trusted actor and effective PostgreSQL
+#                    capability to Editor MCP, validate every write against the
+#                    live Editor session, and scope switch_editor loads by actor.
 # [Sync] 2026-08-04: force Agent/Task run_in_background=false at the PreToolUse
 #                    boundary so the parent turn consumes child completion.
 # [Sync] 2026-08-14: allow only confirmation-gated, single-file canonical
@@ -1511,20 +1514,58 @@ def _memory_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpS
     )
 
 
-def _editor_mcp_stdio_config() -> McpStdioServerConfig:
+def _editor_mcp_stdio_config(
+    mcp_env: Optional[dict[str, str]] = None,
+) -> McpStdioServerConfig:
     """Build the external stdio MCP config for the EditorState write-only server.
 
-    Session context (session_id) is supplied by the Claude agent at tool-call
-    time — the agent reads it from the ``<workspace_context>`` prompt block and
-    includes it as a required argument in every write tool call.  No session
-    data needs to be injected into the subprocess environment here.
+    The Agent still supplies the visible Editor session ID in each tool call,
+    while the trusted actor and effective PostgreSQL capability come only from
+    the server process. Neither value is exposed through prompts or tool input.
     """
+    trusted_env: dict[str, str] = {}
+    actor_id = str((mcp_env or {}).get("INK_AGENT_USER_ID") or "").strip()
+    database_url = str(os.getenv("DATABASE_URL") or "").strip()
+    if actor_id:
+        trusted_env["INK_AGENT_USER_ID"] = actor_id
+    if database_url:
+        trusted_env["DATABASE_URL"] = database_url
     return McpStdioServerConfig(
         type="stdio",
         command=sys.executable,
         args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"],
-        env=_stdio_env(),
+        env=_stdio_env(extra_env=trusted_env),
     )
+
+
+def _apply_editor_session_binding(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    live_editor_state: Any,
+) -> Optional[HookJSONOutput]:
+    """Deny Editor writes that do not target the live thread-bound session."""
+
+    if not tool_name.startswith(_EDITOR_MCP_TOOL_PREFIX):
+        return None
+    if tool_name == _SWITCH_EDITOR_MCP_TOOL_NAME:
+        return None
+    expected_session_id = (
+        str(live_editor_state.get("id") or "").strip()
+        if isinstance(live_editor_state, dict)
+        else ""
+    )
+    requested_session_id = str(tool_input.get("editor_session_id") or "").strip()
+    if expected_session_id and requested_session_id == expected_session_id:
+        return None
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "当前笔记已切换，本次未执行。请重新读取当前笔记后再试。"
+            ),
+        }
+    }
 
 
 def _story_workspace_mcp_stdio_config(
@@ -2400,6 +2441,13 @@ class ClaudeAgentRunner:
                 if opts.editor_state_getter is not None
                 else opts.editor_state
             )
+            editor_session_binding = _apply_editor_session_binding(
+                tool_name,
+                tool_input,
+                live_editor_state,
+            )
+            if editor_session_binding is not None:
+                return editor_session_binding
             redirect_result = _apply_editor_index_redirect(
                 tool_name,
                 tool_input,
@@ -2745,7 +2793,12 @@ class ClaudeAgentRunner:
                 return {}
 
             try:
-                new_state = await asyncio.to_thread(load_editor_state_from_db, new_session_id)
+                actor_id = int(str(opts.canonical_user_id or "").strip())
+                new_state = await asyncio.to_thread(
+                    load_editor_state_from_db,
+                    new_session_id,
+                    actor_id,
+                )
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "PostToolUse: switch_editor DB load failed for session %r",
@@ -2884,8 +2937,10 @@ class ClaudeAgentRunner:
                 tool.startswith(_EDITOR_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
             )
         ):
-            mcp_servers["editor"] = _editor_mcp_stdio_config()
-            logger.debug("Editor MCP enabled; session context flows via tool arguments.")
+            mcp_servers["editor"] = _editor_mcp_stdio_config(mcp_env)
+            logger.debug(
+                "Editor MCP enabled with server-owned actor and persistence capability."
+            )
 
         if (
             _is_trusted_story_workspace_mcp_context(cwd, mcp_env)
