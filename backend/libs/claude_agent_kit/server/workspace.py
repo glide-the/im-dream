@@ -88,6 +88,10 @@
 #                    the exact per-thread .claude-tmp allowWrite path.
 # [Sync] 2026-08-25: deny Agent tool access to the short-lived 0600 MCP config
 #                    projection while allowing the Runtime to read its Path.
+# [Sync] 2026-08-28: refresh backend-owned built-in Skills in every full workspace
+#                    and deny Agent tools access to thread-projected Notion credentials.
+# [Sync] 2026-08-28: make the projected `.notion` index read-only so the lazy
+#                    page hook cannot be widened by Agent-authored IDs.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -166,6 +170,7 @@ SANDBOX_NETWORK_ALLOW_ALL_DOMAIN = "*"
 
 _PROJECT_ROOT: Path = Path(__file__).resolve().parents[4]
 _BACKEND_ROOT: Path = Path(__file__).resolve().parents[3]
+_BUILTIN_SKILLS_ROOT: Path = _BACKEND_ROOT / "builtin_skills"
 
 
 def _project_root() -> Path:
@@ -525,6 +530,8 @@ def _workspace_sandbox_config(
         / ".claude-tmp"
         / CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME
     )
+    thread_notion_home = workspace_abs / ".notion-home"
+    thread_notion_credentials = thread_notion_home / "auth.json"
     enabled = bool(enabled)
 
     allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
@@ -553,6 +560,7 @@ def _workspace_sandbox_config(
                 str(thread_credentials),
                 str(thread_user_config),
                 str(thread_mcp_projection),
+                str(thread_notion_home),
             ],
             "allowRead": allow_read,
             # Keep .claude/skills writable so skill symlinks and
@@ -570,15 +578,18 @@ def _workspace_sandbox_config(
                 str(workspace_abs / ".claude" / ".clawhub"),
                 str(workspace_abs / ".claude" / "worktrees"),
                 str(workspace_abs / ".editor"),
+                str(workspace_abs / ".notion"),
                 str(workspace_abs / ".mcp.json"),
                 str(thread_credentials),
                 str(thread_user_config),
                 str(thread_mcp_projection),
+                str(thread_notion_home),
             ],
         },
         "credentials": {
             "files": [
                 {"path": str(thread_credentials), "mode": "deny"},
+                {"path": str(thread_notion_credentials), "mode": "deny"},
             ],
         },
     }
@@ -1070,6 +1081,37 @@ def _seed_workspace_skills(project_root: Path, workspace: Path) -> None:
             )
 
 
+def _sync_builtin_workspace_skills(workspace: Path) -> None:
+    """Refresh server-owned Skills shipped inside the backend build context.
+
+    A backend-only Docker build cannot see the repository-root ``.claude``
+    directory. Built-in names are therefore authoritative and repaired on each
+    full workspace init; unrelated user/runtime-installed Skills are untouched.
+    """
+
+    if not _BUILTIN_SKILLS_ROOT.is_dir():
+        return
+    destination_root = workspace / "skills"
+    destination_root.mkdir(parents=True, exist_ok=True)
+    for source in sorted(_BUILTIN_SKILLS_ROOT.iterdir()):
+        if source.name.startswith(".") or not source.is_dir() or source.is_symlink():
+            continue
+        destination = destination_root / source.name
+        try:
+            if destination.is_symlink() or destination.is_file():
+                destination.unlink()
+            elif destination.is_dir():
+                shutil.rmtree(destination)
+            shutil.copytree(source, destination)
+            logger.debug("Refreshed built-in skill %s → %s", source.name, destination)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to refresh built-in skill %s; capability remains local to that skill.",
+                source.name,
+                exc_info=True,
+            )
+
+
 _EDITOR_INDEX_README = """\
 # .editor/ — EditorState 虚拟索引目录
 
@@ -1183,6 +1225,11 @@ def _copy_template_assets(workspace: Path) -> None:
 
     # Seed workspace/skills/ from project .claude/skills/ (skip existing entries).
     _seed_workspace_skills(project_root, workspace)
+
+    # Backend-owned Skills are part of the deployable image and repair stale
+    # workspace copies on every full init. This runs after the dev-only root
+    # seed so one canonical built-in wins in both local and container topology.
+    _sync_builtin_workspace_skills(workspace)
 
     # Copy .mcp.json (optional — silently skipped when absent).
     src_mcp = project_root / ".mcp.json"
@@ -1655,7 +1702,7 @@ def read_workspace_file_content(
 
 def _read_workspace_file_content_without_symlinks(
     workspace_root: Path,
-    path_parts: Tuple[str, ...],
+    path_parts: tuple[str, ...],
     *,
     require_regular_file: bool,
 ) -> WorkspaceFileContent:

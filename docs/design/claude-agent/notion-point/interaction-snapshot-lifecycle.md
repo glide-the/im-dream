@@ -1,7 +1,7 @@
 # Notion 交互快照生命周期设计
 
-Status: Draft  
-Updated: 2026-06-28  
+Status: Historical lifecycle baseline; current read path superseded by `docs/design/notion-session/runtime-credential-and-skill-design.md`
+Updated: 2026-08-28
 Scope: 设计 + 方案代码合同 — Claude Agent 使用 Notion 资源连接器时的 canonical snapshot 生命周期
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -15,6 +15,7 @@ Scope: 设计 + 方案代码合同 — Claude Agent 使用 Notion 资源连接�
 > [Output] 定义 Notion 远程数据源 → 资源连接器数据层 → canonical snapshot → Agent 派生上下文的实际交互设计
 > [Pos] interaction-snapshot-lifecycle in `docs/design/claude-agent/notion-point`
 > [Sync] 2026-06-28: 初始设计 — 将 Notion 快照权威状态收敛到资源连接器数据层，避免 Agent 本地状态分叉。
+> [Sync] 2026-08-28: canonical snapshot 收敛为 actor-scoped 轻量 index；`.notion/pages/<id>.json` 是按需 Read hook 路径，不再属于 snapshot object，也不缓存正文。
 
 ---
 
@@ -122,7 +123,7 @@ sequenceDiagram
 
 约束：
 
-- 同一 `snapshotVersion` 内的 `.notion/connector.json`、`.notion/index.json`、`.notion/databases/*.json`、`.notion/pages/*.json` 必须来自同一个 snapshot object。
+- 同一 `snapshotVersion` 内的 `.notion/connector.json`、`.notion/index.json`、`.notion/databases/*.json` 必须来自同一个 index snapshot object；虚拟 `.notion/pages/*.json` 响应只复用该 identity 与 selected-ID 边界，正文由 Read hook 实时获取且不写回 snapshot。
 - Agent 可以缓存 derived context，但下一轮初始化必须重新向连接器数据层请求当前 canonical snapshot。
 - 不允许在 Agent 本地以 `notion_cache` 作为跨 Agent 权威缓存。
 

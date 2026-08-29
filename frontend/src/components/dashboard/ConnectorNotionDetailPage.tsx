@@ -1,5 +1,5 @@
 // [Input] Notion resource connector API helpers, Settings navigation callback, and shared chat icons.
-// [Output] Settings-owned single-account Notion resource configuration page.
+// [Output] Settings-owned Notion auth, scheduled lightweight-index strategy, resource selection, and truthful sync-status page.
 // [Pos] connector-notion-detail-page node in frontend/src/components/dashboard
 // [Sync] 2026-07-08: initial dedicated navigation page for the Notion "具体配置页面", fixing the
 //                    Settings 管理 action so it navigates to a new page instead of an inline toggle.
@@ -26,6 +26,9 @@
 //                    switch to a dark fill or left-side selected block.
 // [Sync] 2026-07-09: hide zero-count Notion page totals in resource rows and mounted sources so
 //                    empty metadata does not crowd the right-side status area.
+// [Sync] 2026-08-28: replace the strategy placeholder with server-owned scheduled-sync controls;
+//                    saving resources performs a real first index sync, page bodies stay on demand,
+//                    and the UI never fabricates synced timestamps.
 import { useCallback, useEffect, useMemo, useState, type ReactNode, type UIEvent } from 'react';
 import {
   createConnector,
@@ -38,6 +41,7 @@ import {
   refreshConnectorSources,
   selectConnectorResources,
   startConnectorAuth,
+  updateConnectorSyncPolicy,
   type ConnectorAuthStatus,
   type ConnectorResourceSelection,
   type ConnectorSource,
@@ -105,6 +109,12 @@ function formatDateTime(value?: string): string {
   }).format(date);
 }
 
+function formatSyncInterval(minutes: number): string {
+  if (minutes < 60) return `每 ${minutes} 分钟`;
+  if (minutes % 1440 === 0) return `每 ${minutes / 1440} 天`;
+  return `每 ${minutes / 60} 小时`;
+}
+
 function formatStatusLabel(
   status?: ConnectorStatus | ConnectorSource['status'] | ConnectorAuthStatus | 'idle',
 ): string {
@@ -159,6 +169,16 @@ function getDetailStatus(connector: ResourceConnector | null, loading: boolean):
     };
   }
 
+  if (connector.syncPolicy?.status === 'error') {
+    return {
+      label: '同步失败',
+      tone: 'warning',
+      title: 'Notion 已连接，上次索引同步失败',
+      description: '最近一次成功索引仍可用于对话；请检查资源权限后立即重试，或等待下一次自动同步。',
+      enabled: true,
+    };
+  }
+
   if (connector.auth.status === 'expired') {
     return {
       label: '已过期',
@@ -183,18 +203,21 @@ function getDetailStatus(connector: ResourceConnector | null, loading: boolean):
     return {
       label: '同步中',
       tone: 'info',
-      title: '正在同步 Notion 来源',
-      description: '资源列表会在同步完成后更新，当前已选来源暂时保持可读。',
+      title: '正在更新 Notion 索引',
+      description: '正在更新已选来源的页面 ID 与元数据；页面正文会在对话实际读取时获取。',
       enabled: true,
     };
   }
 
   if (connector.auth.status === 'authenticated' || connector.status === 'authenticated' || connector.status === 'synced') {
+    const hasSnapshot = Boolean(connector.lastSyncedAt);
     return {
-      label: '已连接',
-      tone: 'success',
-      title: 'Notion 账号已连接',
-      description: `${connector.sources.length} 个来源已挂载，可在对话中作为资源上下文使用。`,
+      label: hasSnapshot ? '已同步' : '已连接',
+      tone: hasSnapshot ? 'success' : 'info',
+      title: hasSnapshot ? 'Notion 索引已同步' : 'Notion 账号已连接，尚无来源索引',
+      description: hasSnapshot
+        ? `${connector.sources.length} 个来源的索引已挂载；Chat 会按需读取具体页面正文。`
+        : '请选择资源并保存，Dream 会立即生成轻量索引；无需先发起 Chat。',
       enabled: true,
     };
   }
@@ -243,52 +266,6 @@ function buildSelectionFromSources(sources: ConnectorSource[]): ConnectorResourc
     databaseIds: sources.filter((source) => source.type === 'notion_database').map((source) => source.id),
     pageIds: sources.filter((source) => source.type === 'notion_page').map((source) => source.id),
   };
-}
-
-function buildSelectedSources(
-  databaseOptions: NotionResourceOption[],
-  pageOptions: NotionResourceOption[],
-  databaseIds: string[],
-  pageIds: string[],
-  existingSources: ConnectorSource[] = [],
-): ConnectorSource[] {
-  const now = new Date().toISOString();
-  const existingById = new Map(existingSources.map((source) => [source.id, source]));
-  const databaseById = new Map(databaseOptions.map((option) => [option.id, option]));
-  const pageById = new Map(pageOptions.map((option) => [option.id, option]));
-
-  const databases = databaseIds.map((id): ConnectorSource => {
-    const option = databaseById.get(id);
-    const existing = existingById.get(id);
-    return {
-      id,
-      title: option?.title || existing?.title || 'Untitled database',
-      type: 'notion_database',
-      status: existing?.status === 'error' ? 'error' : 'synced',
-      updatedAt: existing?.updatedAt || now,
-      syncedAt: existing?.syncedAt || now,
-      pageCount: option?.pageCount ?? existing?.pageCount,
-      description: option?.subtitle || existing?.description || 'Notion data source',
-      url: existing?.url,
-    };
-  });
-
-  const pages = pageIds.map((id): ConnectorSource => {
-    const option = pageById.get(id);
-    const existing = existingById.get(id);
-    return {
-      id,
-      title: option?.title || existing?.title || 'Untitled page',
-      type: 'notion_page',
-      status: existing?.status === 'error' ? 'error' : 'synced',
-      updatedAt: existing?.updatedAt || now,
-      syncedAt: existing?.syncedAt || now,
-      description: option?.subtitle || existing?.description || 'Standalone page',
-      url: existing?.url,
-    };
-  });
-
-  return [...databases, ...pages];
 }
 
 function resolveSingleNotionConnector(connectors: ResourceConnector[]): ResourceConnector | null {
@@ -642,6 +619,9 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   const [syncLoading, setSyncLoading] = useState(false);
   const [resourceLoading, setResourceLoading] = useState(false);
   const [resourceSaving, setResourceSaving] = useState(false);
+  const [policySaving, setPolicySaving] = useState(false);
+  const [policyEnabled, setPolicyEnabled] = useState(false);
+  const [policyIntervalMinutes, setPolicyIntervalMinutes] = useState<number | null>(null);
   const [databaseOptions, setDatabaseOptions] = useState<NotionResourceOption[]>([]);
   const [pageOptions, setPageOptions] = useState<NotionResourceOption[]>([]);
   const [selectedDatabaseIds, setSelectedDatabaseIds] = useState<string[]>([]);
@@ -659,6 +639,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
     () => buildSelectionFromSources(connector?.sources ?? []),
     [connector?.sources],
   );
+  const syncPolicy = connector?.syncPolicy;
   const sourceStats = useMemo(() => {
     const sources = connector?.sources ?? [];
     const databases = sources.filter((source) => source.type === 'notion_database').length;
@@ -729,6 +710,12 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   useEffect(() => {
     void loadConnector();
   }, [loadConnector]);
+
+  useEffect(() => {
+    if (!syncPolicy) return;
+    setPolicyEnabled(syncPolicy.desired.enabled);
+    setPolicyIntervalMinutes(syncPolicy.desired.intervalMinutes);
+  }, [syncPolicy]);
 
   useEffect(() => {
     if (!connectorId || connectorAuthStatus !== 'authenticated') {
@@ -877,32 +864,8 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
         databaseOptions,
         pageOptions,
       });
-      const selectedSources = buildSelectedSources(
-        databaseOptions,
-        pageOptions,
-        selectedDatabaseIds,
-        selectedPageIds,
-        connector?.sources ?? [],
-      );
-      const now = new Date().toISOString();
       if (nextConnector) {
-        upsertConnector({
-          ...nextConnector,
-          status: selectedSources.length > 0 ? 'synced' : nextConnector.status,
-          updatedAt: now,
-          lastSyncedAt: selectedSources.length > 0 ? now : nextConnector.lastSyncedAt,
-          sources: nextConnector.sources.length > 0 || selectedSources.length === 0
-            ? nextConnector.sources
-            : selectedSources,
-        });
-      } else if (connector) {
-        upsertConnector({
-          ...connector,
-          status: selectedSources.length > 0 ? 'synced' : connector.status,
-          updatedAt: now,
-          lastSyncedAt: selectedSources.length > 0 ? now : connector.lastSyncedAt,
-          sources: selectedSources,
-        });
+        upsertConnector(nextConnector);
       }
       notifyResourceConnectorsChanged({ connectorId, reason: 'resources-selected' });
     } catch (error) {
@@ -910,7 +873,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
     } finally {
       setResourceSaving(false);
     }
-  }, [canEditResources, connector, connectorId, databaseOptions, pageOptions, resourceSaving, selectedDatabaseIds, selectedPageIds, upsertConnector]);
+  }, [canEditResources, connectorId, databaseOptions, pageOptions, resourceSaving, selectedDatabaseIds, selectedPageIds, upsertConnector]);
 
   const handleSyncSources = useCallback(async () => {
     if (!connectorId || !canEditResources || syncLoading) return;
@@ -921,12 +884,31 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
       if (nextConnector) {
         upsertConnector(nextConnector);
       }
+      notifyResourceConnectorsChanged({ connectorId, reason: 'sources-refreshed' });
     } catch (error) {
       setResourceError(getErrorMessage(error, '刷新同步失败'));
     } finally {
       setSyncLoading(false);
     }
   }, [canEditResources, connectorId, syncLoading, upsertConnector]);
+
+  const handleSaveSyncPolicy = useCallback(async () => {
+    if (!connectorId || !syncPolicy || policyIntervalMinutes === null || policySaving) return;
+    setPolicySaving(true);
+    setResourceError(null);
+    try {
+      const nextConnector = await updateConnectorSyncPolicy(connectorId, {
+        enabled: policyEnabled,
+        intervalMinutes: policyIntervalMinutes,
+      });
+      upsertConnector(nextConnector);
+      notifyResourceConnectorsChanged({ connectorId, reason: 'connector-updated' });
+    } catch (error) {
+      setResourceError(getErrorMessage(error, '保存同步策略失败'));
+    } finally {
+      setPolicySaving(false);
+    }
+  }, [connectorId, policyEnabled, policyIntervalMinutes, policySaving, syncPolicy, upsertConnector]);
 
   const handleDisconnect = useCallback(async () => {
     if (!connectorId || disconnecting) return;
@@ -954,8 +936,12 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
     : connectorAuthStatus === 'authenticating'
       ? '认证进行中'
       : '连接 Notion';
-  const connectorStatusLabel = formatStatusLabel(connector?.status ?? 'idle');
-  const syncTimeLabel = formatDateTime(connector?.lastSyncedAt || connector?.updatedAt);
+  const connectorStatusLabel = syncPolicy?.status === 'error'
+    ? '同步失败'
+    : syncPolicy?.status === 'syncing'
+      ? '同步中'
+      : formatStatusLabel(connector?.status ?? 'idle');
+  const syncTimeLabel = formatDateTime(connector?.lastSyncedAt);
   const showConnectPrompt = !connector || connectorAuthStatus === 'idle' || connectorAuthStatus === 'expired' || connectorAuthStatus === 'error';
 
   const actionButtonStyle = {
@@ -1188,16 +1174,90 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
         aria-label="策略设计"
         style={{
           display: 'grid',
-          gap: '0.28rem',
-          padding: '0.1rem 0 0.25rem',
+          gap: '0.7rem',
+          padding: '0.1rem 0 0.45rem',
         }}
       >
-        <h2 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '0.9rem', lineHeight: 1.35, fontWeight: 700 }}>
-          策略设计
-        </h2>
-        <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: '0.78rem', lineHeight: 1.5 }}>
-          策略配置暂不实现；当前只管理 Notion 授权、资源范围和已挂载来源。
-        </p>
+        <div>
+          <h2 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '0.9rem', lineHeight: 1.35, fontWeight: 700 }}>
+            索引同步策略
+          </h2>
+          <p style={{ margin: '0.22rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.78rem', lineHeight: 1.5 }}>
+            保存资源时会立即建立首个轻量索引；之后 Dream 在后台更新页面 ID 和元数据，无需先发起 Chat。新对话和后续对话轮次都会读取最近一次成功索引，页面正文仅在实际读取时获取。
+          </p>
+        </div>
+        {syncPolicy ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.7rem',
+              flexWrap: 'wrap',
+              padding: '0.72rem 0.78rem',
+              borderRadius: '0.8rem',
+              background: SOFT_LIST_SURFACE,
+            }}
+          >
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--color-text-primary)', fontSize: '0.8rem', fontWeight: 700 }}>
+              <input
+                type="checkbox"
+                checked={policyEnabled}
+                onChange={(event) => setPolicyEnabled(event.target.checked)}
+                disabled={policySaving}
+              />
+              自动同步
+            </label>
+            <select
+              aria-label="Notion 自动同步频率"
+              value={policyIntervalMinutes ?? ''}
+              onChange={(event) => setPolicyIntervalMinutes(Number(event.target.value))}
+              disabled={!policyEnabled || policyIntervalMinutes === null || policySaving}
+              style={{
+                border: SOFT_CONTROL_BORDER,
+                borderRadius: '999px',
+                background: 'var(--color-bg-paper)',
+                color: 'var(--color-text-primary)',
+                padding: '0.5rem 0.72rem',
+                fontSize: '0.78rem',
+              }}
+            >
+              {syncPolicy.allowedIntervalMinutes.map((minutes) => (
+                <option key={minutes} value={minutes}>{formatSyncInterval(minutes)}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => void handleSaveSyncPolicy()}
+              disabled={policySaving || policyIntervalMinutes === null}
+              style={{
+                border: 'none',
+                borderRadius: '999px',
+                padding: '0.52rem 0.76rem',
+                background: 'var(--color-text-primary)',
+                color: 'var(--color-bg-app)',
+                cursor: policySaving ? 'not-allowed' : 'pointer',
+                opacity: policySaving ? 0.62 : 1,
+                fontSize: '0.78rem',
+                fontWeight: 700,
+              }}
+            >
+              {policySaving ? '保存中' : '保存策略'}
+            </button>
+            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.74rem' }}>
+              {syncPolicy.status === 'error'
+                ? '上次同步失败，可立即重试'
+                : syncPolicy.status === 'syncing'
+                  ? '正在后台同步'
+                  : !policyEnabled
+                    ? '自动同步已关闭'
+                    : `下次同步 ${formatDateTime(syncPolicy.nextSyncAt)}`}
+            </span>
+          </div>
+        ) : (
+          <p style={{ margin: 0, color: 'var(--color-state-error)', fontSize: '0.78rem' }}>
+            同步策略暂不可用，请刷新页面后重试。
+          </p>
+        )}
       </section>
 
       <DetailSection
@@ -1240,7 +1300,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
                 fontWeight: 700,
               }}
             >
-              {resourceSaving ? '保存中' : '保存资源'}
+              {resourceSaving ? '保存并同步中' : '保存并同步'}
             </button>
             <button
               type="button"
@@ -1262,7 +1322,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
               }}
             >
               {syncLoading ? <IconLoader style={{ width: '0.86rem', height: '0.86rem' }} /> : <IconArrowUp style={{ width: '0.86rem', height: '0.86rem' }} />}
-              {syncLoading ? '同步中' : '刷新同步'}
+              {syncLoading ? '同步中' : syncPolicy?.status === 'error' ? '立即重试' : '立即同步'}
             </button>
           </div>
         }

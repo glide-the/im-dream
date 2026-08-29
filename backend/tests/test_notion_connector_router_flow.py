@@ -6,9 +6,17 @@
 #                    create/auth/discovery/selection/sync.
 # [Sync] 2026-07-08: assert selected sources hydrate through connector responses so
 #                    Settings refresh and Chat linked-resource summaries stay in sync.
+# [Sync] 2026-08-28: drive auth through actor-owned agentdata homes and prove
+#                    browser notion_home input is ignored rather than persisted.
+# [Sync] 2026-08-28: assert successful selection advances last_synced_at instead
+#                    of leaving the connector in an authenticated empty-snapshot state.
+# [Sync] 2026-08-28: assert selection publishes an actor agentdata snapshot, ignores
+#                    thread workspace identity, and exposes a versioned scheduled-sync policy.
+# [Sync] 2026-08-28: model index-only snapshots and exact pending-to-synced resource publication.
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -24,11 +32,12 @@ if str(TEST_ROOT) not in sys.path:
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from notion import auth as notion_auth
 from notion import operations as notion_operations
 from notion import store as notion_store
 from notion import sync as notion_sync
+from notion.errors import NotionPermissionError
+from notion.credentials import NotionCredentialStore
 from notion_postgres_fake import build_fake_notion_store
 from routers import notion as notion_router
 
@@ -39,7 +48,14 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self._store, self._database, self._pool = build_fake_notion_store(users={7})
         notion_store.close_default_store()
         notion_store.open_default_store(store=self._store)
-        self._notion_home = str(Path(self._tmp.name) / "notion-home")
+        self._credential_runtime_root = Path(self._tmp.name) / "agentdata" / "notion-runtime"
+        self._env_patcher = patch.dict(
+            os.environ,
+            {"INK_NOTION_RUNTIME_ROOT": str(self._credential_runtime_root)},
+            clear=False,
+        )
+        self._env_patcher.start()
+        self._notion_home = str(Path(self._tmp.name) / "browser-controlled-home")
         self._workspace_id = "workspace-business"
         self._snapshot_version = "snap-business-001"
         self._source_revision = "rev-business-001"
@@ -87,27 +103,42 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         for patcher in reversed(self._patches):
             patcher.stop()
         notion_store.close_default_store()
+        self._env_patcher.stop()
         self._tmp.cleanup()
 
-    def _mock_start_login(self, config=None):
-        del config
+    def _mock_start_login(self, notion_home):
+        notion_home = Path(notion_home)
+        self.assertTrue(
+            notion_home.is_relative_to(self._credential_runtime_root.resolve(strict=False))
+        )
+        (notion_home / "auth.json").write_text(
+            '{"access_token":"router-flow-secret"}\n',
+            encoding="utf-8",
+        )
         return notion_auth.LoginInitResult(
             verification_url="https://www.notion.so/workers/cli-login?verificationCode=VAF-HWY",
             verification_code="VAF-HWY",
             poll_interval_seconds=5,
-            notion_home=self._notion_home,
         )
 
-    def _mock_poll_login(self, config=None):
-        del config
+    def _mock_poll_login(self, notion_home):
+        self.assertTrue(
+            Path(notion_home).is_relative_to(
+                self._credential_runtime_root.resolve(strict=False)
+            )
+        )
         return notion_auth.AuthStatusResult(
             status="authenticated",
-            notion_home=self._notion_home,
-            detail="authenticated",
+            detail="Notion is connected.",
         )
 
-    def _mock_discover_databases(self, config=None, query=None, page_size=100):
-        del config, query, page_size
+    def _mock_discover_databases(self, notion_home, query=None, page_size=100):
+        self.assertTrue(
+            Path(notion_home).is_relative_to(
+                self._credential_runtime_root.resolve(strict=False)
+            )
+        )
+        del query, page_size
         return [
             {
                 "database_id": "db-team",
@@ -119,8 +150,13 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
             }
         ]
 
-    def _mock_discover_pages(self, config=None, query=None, page_size=100):
-        del config, query, page_size
+    def _mock_discover_pages(self, notion_home, query=None, page_size=100):
+        self.assertTrue(
+            Path(notion_home).is_relative_to(
+                self._credential_runtime_root.resolve(strict=False)
+            )
+        )
+        del query, page_size
         return [
             {
                 "page_id": "page-team",
@@ -194,15 +230,7 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
                     }
                 ]
             },
-            "pages": {
-                "page-team": {
-                    "page_id": "page-team",
-                    "title": "Team Notes",
-                    "url": "https://www.notion.so/page-team",
-                    "last_edited": "2026-07-04T13:30:00Z",
-                    "blocks": [{"type": "paragraph", "text": "Ship the connector"}],
-                }
-            },
+            "pages": {},
             "identity": {
                 "workspace_id": workspace_id,
                 "resource_connector_id": str(connector["id"]),
@@ -226,7 +254,7 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         connector = create_response.json()["connector"]
         connector_id = connector["id"]
         self.assertEqual(connector["auth_status"], "pending")
-        self.assertEqual(connector["config"]["notion_home"], self._notion_home)
+        self.assertNotIn("notion_home", connector["config"])
 
         login_response = self.client.post(
             f"/api/connectors/{connector_id}/auth/login",
@@ -278,8 +306,15 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self.assertTrue(select_payload["synced"])
         self.assertEqual(select_payload["databaseCount"], 1)
         self.assertEqual(select_payload["pageCount"], 1)
-        self.assertEqual(select_payload["snapshotIdentity"]["workspace_id"], self._workspace_id)
+        self.assertEqual(select_payload["snapshotIdentity"]["workspace_id"], connector_id)
         self.assertEqual(select_payload["snapshotIdentity"]["snapshot_version"], self._snapshot_version)
+        actor_snapshot = (
+            NotionCredentialStore().user_paths(7).snapshot_root
+            / connector_id
+            / "current.json"
+        )
+        self.assertTrue(actor_snapshot.is_file())
+        self.assertNotIn(self._workspace_id, str(actor_snapshot))
 
         selected_resources_response = self.client.get(
             f"/api/connectors/{connector_id}/resources",
@@ -291,6 +326,9 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self.assertEqual(
             {resource["resource_type"] for resource in selected_resources},
             {"notion_database", "notion_page"},
+        )
+        self.assertTrue(
+            all(resource["sync_status"] == "synced" for resource in selected_resources)
         )
 
         databases_again_response = self.client.get(
@@ -326,12 +364,25 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         final_connector = final_connector_response.json()["connector"]
         self.assertEqual(final_connector["current_snapshot_version"], self._snapshot_version)
         self.assertEqual(final_connector["current_source_revision"], self._source_revision)
+        self.assertIsNotNone(final_connector["last_synced_at"])
         self.assertEqual(final_connector["selected_databases"], ["db-team"])
         self.assertEqual(final_connector["selected_pages"], ["page-team"])
         self.assertEqual(
             {source["external_id"] for source in final_connector["sources"]},
             {"db-team", "page-team"},
         )
+        self.assertEqual(final_connector["sync_policy"]["status"], "applied")
+        self.assertTrue(final_connector["sync_policy"]["effective"]["enabled"])
+        policy_response = self.client.put(
+            f"/api/connectors/{connector_id}/sync-policy",
+            json={"enabled": False, "interval_minutes": 60},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(policy_response.status_code, 200, policy_response.text)
+        updated_policy = policy_response.json()["connector"]["sync_policy"]
+        self.assertFalse(updated_policy["effective"]["enabled"])
+        self.assertEqual(updated_policy["desired"], updated_policy["effective"])
+        self.assertEqual(updated_policy["status"], "disabled")
         self.assertEqual(len(self.snapshot_calls), 2)
 
     def test_connector_auth_poll_no_pending_session_does_not_regress_auth(self):
@@ -356,13 +407,11 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         polling_sequence = [
             notion_auth.AuthStatusResult(
                 status="authenticated",
-                notion_home=self._notion_home,
-                detail="authenticated",
+                detail="Notion is connected.",
             ),
             notion_auth.AuthStatusResult(
-                status="pending",
-                notion_home=self._notion_home,
-                detail="No pending login session found.",
+                status="consumed",
+                detail="Notion authorization is no longer active. Start authorization again.",
             ),
         ]
         with patch.object(
@@ -421,9 +470,8 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
             "poll_login",
             new=AsyncMock(
                 return_value=notion_auth.AuthStatusResult(
-                    status="pending",
-                    notion_home=self._notion_home,
-                    detail="No pending login session found.",
+                    status="consumed",
+                    detail="Notion authorization is no longer active. Start authorization again.",
                 )
             ),
         ):
@@ -449,6 +497,71 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
             .get("auth_session_status"),
             "consumed",
         )
+
+    def test_unauthorized_connector_cannot_discover_notion(self):
+        create_response = self.client.post(
+            "/api/connectors",
+            json={"name": "Notion", "platform": "notion"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        connector_id = create_response.json()["connector"]["id"]
+
+        response = self.client.get(
+            f"/api/connectors/{connector_id}/databases",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(response.status_code, 401, response.text)
+        self.assertIn("Reconnect Notion", response.json()["detail"])
+        self.assertNotIn(str(self._credential_runtime_root), response.text)
+
+    def test_other_user_cannot_read_connector(self):
+        create_response = self.client.post(
+            "/api/connectors",
+            json={"name": "Private Notion", "platform": "notion"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        connector_id = create_response.json()["connector"]["id"]
+        self.client.app.dependency_overrides[notion_router.get_current_user] = (
+            lambda: {"user_id": 8, "email": "other@example.com"}
+        )
+
+        response = self.client.get(
+            f"/api/connectors/{connector_id}",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["detail"], "Notion connector not found.")
+        self.assertNotIn(connector_id, response.text)
+
+    def test_permission_error_response_redacts_raw_cli_text(self):
+        create_response = self.client.post(
+            "/api/connectors",
+            json={"name": "Notion", "platform": "notion"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        connector_id = create_response.json()["connector"]["id"]
+        self.client.post(
+            f"/api/connectors/{connector_id}/auth/login",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.client.post(
+            f"/api/connectors/{connector_id}/auth/poll",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        secret = "raw-notion-token-in-cli-output"
+
+        with patch.object(
+            notion_operations,
+            "discover_databases",
+            new=AsyncMock(side_effect=NotionPermissionError(secret)),
+        ):
+            response = self.client.get(
+                f"/api/connectors/{connector_id}/databases",
+                headers={"Authorization": "Bearer test-token"},
+            )
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertNotIn(secret, response.text)
+        self.assertIn("permissions", response.json()["detail"])
 
 
 if __name__ == "__main__":

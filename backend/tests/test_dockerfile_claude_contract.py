@@ -6,20 +6,24 @@
 # [Sync] 2026-08-26: install custom SDK 0.2.144 from PyPI with an exact
 #        hash-locked export, install public Runtime selector 0.1.3 by default,
 #        and retain the Docker-only official rollback artifact 2.1.241.
+# [Sync] 2026-08-28: lock the supported Notion CLI and backend-bundled Skill
+#                    into the same standard Agent startup image.
+# [Sync] 2026-08-28: require the complete Notion Skill reference package in the
+#                    backend build context.
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 
+import tomllib
 from packaging.requirements import Requirement
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SDK_VERSION = "0.2.144"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
 RUNTIME_VERSION = "0.1.3"
+NOTION_CLI_VERSION = "0.15.1"
 
 
 def _normalized_distribution_name(value: str) -> str:
@@ -99,3 +103,25 @@ def test_dockerfile_cross_asserts_sdk_runtime_and_rollback_cli_pair() -> None:
     assert f"assert dist.version == '{SDK_VERSION}'" in dockerfile
     assert "assert providers == {'ink-claude-dream-agent-sdk'}" in dockerfile
     assert "assert 'claude-agent-sdk' not in installed" in dockerfile
+
+
+def test_dockerfile_installs_supported_notion_cli_and_bundled_skill() -> None:
+    dockerfile = (BACKEND_ROOT / "Dockerfile").read_text()
+    assert f"ARG NOTION_CLI_VERSION={NOTION_CLI_VERSION}" in dockerfile
+    assert '"ntn@${NOTION_CLI_VERSION}"' in dockerfile
+    assert 'test "$(ntn --version)" = "ntn ${NOTION_CLI_VERSION}"' in dockerfile
+    assert "ntn login --help" in dockerfile
+    assert "ntn doctor --help" in dockerfile
+    skill = BACKEND_ROOT / "builtin_skills" / "notion-session" / "SKILL.md"
+    assert skill.is_file()
+    content = skill.read_text(encoding="utf-8")
+    assert ".notion/pages/<page_id>.json" in content
+    assert 'tools: ["Read"]' in content
+    assert "mcp__notion__" not in content
+    assert "ntn api" not in content
+    references = skill.parent / "references"
+    assert {path.name for path in references.glob("*.md")} == {
+        "notion-search.md",
+        "notion-page-read.md",
+        "notion-db-query.md",
+    }

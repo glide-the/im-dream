@@ -1,7 +1,7 @@
 # Resource Connector — 四层架构工程设计稿
 
-Status: Draft  
-Updated: 2026-06-28
+Status: Historical baseline; current Runtime/security contract is maintained in `docs/design/notion-session/runtime-credential-and-skill-design.md`
+Updated: 2026-08-28
 Scope: 工程设计 — 资源连接器认证层、数据层、操作层、任务层详细设计
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -11,6 +11,7 @@ Scope: 工程设计 — 资源连接器认证层、数据层、操作层、任�
 > [Sync] 2026-06-22: 初始设计 — 四层架构工程设计稿
 > [Sync] 2026-06-22: 迁移至 claude-agent/notion-point — 工作空间映射相关设计独立管理
 > [Sync] 2026-06-28: 数据层收敛为 canonical snapshot 权威状态；Agent 初始化读取连接器数据层快照，`NotionCache` 不再作为跨 Agent source of truth。
+> [Sync] 2026-08-28: current implementation uses actor agentdata + per-thread lightweight index; page Markdown is obtained only by an exact selected-page Runtime Read hook. Direct Agent CLI/env ownership and Agent-visible Notion MCP are historical only.
 
 ---
 
@@ -298,10 +299,10 @@ class AuthRevokedError(AuthError):
 
 数据层负责：
 
-- 从 Operation Layer 的 Notion 远程读取结果中物化 `CanonicalWorkspaceSnapshot`
+- 从 Operation Layer 的 Notion data-source query 结果中物化 index-only `CanonicalWorkspaceSnapshot`
 - 维护 current snapshot 指针、历史版本和审计字段
 - 为任意 Agent 初始化提供同一 `workspaceId + connectorId + snapshotVersion` 下的一致快照
-- 通过 `.notion/` 虚拟索引解析 snapshot 内容
+- 通过 `.notion/` 投影 snapshot 的资源 ID 与紧凑元数据
 - 记录 `sourceRevision` / `syncCursor`，为写入 proposal 做乐观并发校验
 
 数据层**不**负责：
@@ -310,7 +311,7 @@ class AuthRevokedError(AuthError):
 - Notion 业务 API 细节（属于 Operation Layer）
 - 调度触发（由 Task Layer 驱动）
 - Agent 本地摘要、排序或 prompt 裁剪
-- 在 Agent Read 时直接调用远程 Notion
+- 页面正文、blocks、附件和全文索引；单页 Markdown 由独立 Runtime Read hook 按需读取
 
 ### 3.2 数据架构
 
@@ -326,7 +327,7 @@ class AuthRevokedError(AuthError):
 │  │ snapshot history      │     │ connector.json           │  │
 │  │ sourceRevision        │     │ index.json               │  │
 │  │ syncCursor            │     │ databases/<id>.json      │  │
-│  │ audit metadata        │     │ pages/<id>.json          │  │
+│  │ audit metadata        │     │ pages/<id>.json (virtual)│  │
 │  └──────────┬────────────┘     └──────────┬───────────────┘  │
 │             │                             │                  │
 │             │ Agent init / attach          │ PreToolUse Read  │
@@ -419,9 +420,9 @@ class DataLayerProtocol(ABC):
 | `.notion/index.json` | `snapshot.index + metadata` | Agent Read |
 | `.notion/databases.json` | `snapshot.databases + metadata` | Agent Read |
 | `.notion/databases/<db_id>.json` | `snapshot.database_pages[db_id] + metadata` | Agent Read |
-| `.notion/pages/<page_id>.json` | `snapshot.pages[page_id] + metadata` | Agent Read |
+| `.notion/pages/<page_id>.json` | current Markdown after index-membership validation + snapshot identity | exact selected-page Agent Read |
 
-如果页面未被物化在当前 snapshot 中，返回 snapshot-scoped miss，不在 Read hook 中远程 lazy load。
+新 snapshot 的 `pages` 必须为空。Page Read 先验证 ID 存在于当前 thread index，再使用 server-projected credential home 调用单页 Markdown endpoint；未选 ID 返回 `NOTION_RESOURCE_NOT_SELECTED` 且不发远程请求。
 
 ### 3.6 快照版本策略
 
@@ -575,8 +576,8 @@ class OperationLayerProtocol(ABC):
         ...
 
     @abstractmethod
-    async def get_page(self, page_id: str) -> OperationResult:
-        """获取页面完整内容（属性 + Blocks）。"""
+    async def get_page_markdown(self, page_id: str) -> OperationResult:
+        """供 Runtime selected-page Read hook 获取单页当前 Markdown。"""
         ...
 
     @abstractmethod
@@ -585,10 +586,6 @@ class OperationLayerProtocol(ABC):
         ...
 
     @abstractmethod
-    async def get_blocks(self, block_id: str) -> OperationResult:
-        """获取指定 Block 的子 Block 列表。"""
-        ...
-
     # --- Write Operations (Future) ---
 
     @abstractmethod
@@ -633,28 +630,23 @@ class NotionOperationLayer(OperationLayerProtocol):
         result = await self._exec_ntn_api("v1/search", payload, env)
         return self._parse_search_result(result)
 
-    async def get_page(self, page_id: str) -> OperationResult:
-        """
-        组合调用：
-        1. ntn api v1/pages/<page_id>  → 获取属性
-        2. ntn api v1/blocks/<page_id>/children → 获取内容
-        """
+    async def get_page_markdown(self, page_id: str) -> OperationResult:
+        """仅供 Runtime Read hook 调用单页 Markdown endpoint。"""
         env = self._auth.get_env(self._user_id)
-        page_data = await self._exec_ntn_api(f"v1/pages/{page_id}", None, env)
-        blocks_data = await self._exec_ntn_api(
-            f"v1/blocks/{page_id}/children", None, env
+        markdown_data = await self._exec_ntn_api(
+            f"v1/pages/{page_id}/markdown", None, env
         )
         return OperationResult(
             success=True,
-            data={"page": page_data, "blocks": blocks_data},
+            data={"page_id": page_id, "markdown": markdown_data},
         )
 
     async def query_database(self, query: DatabaseQuery) -> SearchResult:
-        """通过 ntn api v1/databases/<id>/query 查询。"""
+        """使用兼容 database_id 通过当前 data source endpoint 查询。"""
         env = self._auth.get_env(self._user_id)
         payload = self._build_query_payload(query)
         result = await self._exec_ntn_api(
-            f"v1/databases/{query.database_id}/query", payload, env
+            f"v1/data_sources/{query.database_id}/query", payload, env
         )
         return self._parse_search_result(result)
 

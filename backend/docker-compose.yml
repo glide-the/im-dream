@@ -4,6 +4,8 @@
 # [Sync] 2026-06-17: grant Claude Code bubblewrap Bash sandbox runtime privileges
 #                    and persist AGENT_CWD under /app/data.
 # [Sync] 2026-06-17: remove obsolete Compose version field for Docker Compose v2.
+# [Sync] 2026-08-28: persist actor-scoped Notion credentials beside AGENT_CWD
+#                    instead of using the container process user's home.
 
 services:
   ink-backend:
@@ -32,6 +34,7 @@ services:
     environment:
       BACKEND_VERSION: ghcr.io/shuxueshuxue/ink-backend:latest
       AGENT_CWD: /app/data/agent-workspace
+      INK_NOTION_RUNTIME_ROOT: /app/data/notion-runtime
       HTTP_PROXY: http://host.docker.internal:7890
       HTTPS_PROXY: http://host.docker.internal:7890
       NO_PROXY: localhost,127.0.0.1,::1

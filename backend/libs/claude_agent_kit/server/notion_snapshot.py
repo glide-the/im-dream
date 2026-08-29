@@ -2,6 +2,8 @@
 # [Output] Provide snapshot contract types and .notion/ virtual path resolution helpers.
 # [Pos] notion-snapshot-contract node in libs/claude_agent_kit/server
 # [Sync] 2026-06-28: initial scheme code for connector-owned canonical Notion snapshots.
+# [Sync] 2026-08-28: define the canonical payload as a lightweight page-ID
+#                    index; `pages` remains a legacy-compatible empty field.
 
 """Canonical Notion snapshot contract helpers.
 
@@ -61,7 +63,11 @@ class SnapshotMetadata:
 
 @dataclass(frozen=True)
 class CanonicalWorkspaceSnapshot:
-    """Read-only snapshot returned to any agent attaching to the same version."""
+    """Read-only lightweight index attached to one Agent thread.
+
+    ``pages`` is retained for shape compatibility with older snapshots but new
+    producers leave it empty. Page bodies are resolved by the Runtime Read hook.
+    """
 
     metadata: SnapshotMetadata
     connector: dict[str, Any] = field(default_factory=dict)

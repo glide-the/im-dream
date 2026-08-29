@@ -160,6 +160,10 @@
 # [Sync] 2026-08-13: refresh the host-owned Dream workbench context and inject
 #                    its validated actual path plus current run/project facts
 #                    on every Dream turn.
+# [Sync] 2026-08-28: project actor-owned Notion credentials into the current
+#                    thread and pass only that private path to the lazy Read hook.
+# [Sync] 2026-08-28: consume only actor-agentdata current index snapshots during
+#                    Chat assembly and clear stale thread content when projection fails.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -1345,6 +1349,7 @@ class ClaudeAgentService:
 
         claude_secure_storage_home: str | None = None
         claude_mcp_servers: dict[str, dict[str, Any]] = {}
+        notion_credential_home: str | None = None
         if workspace_enabled:
             workspace_path = get_or_create_workspace(
                 state.session_id,
@@ -1374,37 +1379,68 @@ class ClaudeAgentService:
             claude_tmp_workspace = cwd
 
             try:
-                from notion import build_notion_facade  # noqa: PLC0415
-                from notion.errors import NotionConnectorNotFoundError  # noqa: PLC0415
-            except Exception as exc:  # noqa: BLE001
-                # Keep the turn alive even when Notion is not configured or the
-                # package is temporarily unavailable.
-                logger.debug(
-                    "Notion workspace materialization skipped for session_id=%s: %s",
+                from notion import (  # noqa: PLC0415
+                    NotionCredentialStore,
+                    build_notion_facade,
+                    clear_workspace_snapshot,
+                )
+                from notion.errors import (  # noqa: PLC0415
+                    NotionConnectorNotFoundError,
+                    NotionCredentialError,
+                )
+            except Exception:  # noqa: BLE001
+                # A connector package failure is local to the capability and
+                # must not change the Agent conversation state machine.
+                logger.warning(
+                    "Notion capability initialization failed safely for session_id=%s.",
                     state.session_id,
-                    exc,
                 )
             else:
                 try:
                     notion_facade = build_notion_facade(int(request.user_id))
-                    notion_facade.materialize_workspace(
-                        workspace_path,
-                        workspace_id=state.session_id,
-                    )
+                    try:
+                        notion_facade.materialize_workspace(
+                            workspace_path,
+                            workspace_id=state.session_id,
+                        )
+                    except Exception:  # noqa: BLE001
+                        try:
+                            clear_workspace_snapshot(workspace_path)
+                        except Exception:
+                            pass
+                        logger.debug(
+                            "Notion snapshot materialization skipped safely for session_id=%s.",
+                            state.session_id,
+                        )
+
+                    try:
+                        projection = notion_facade.project_runtime_credentials(
+                            workspace_path,
+                        )
+                        if projection.available and projection.thread_home is not None:
+                            notion_credential_home = str(projection.thread_home)
+                    except NotionCredentialError:
+                        # Missing/invalid credentials fail closed for Notion only.
+                        try:
+                            NotionCredentialStore().clear_thread_projection(workspace_path)
+                        except Exception:
+                            pass
                 except NotionConnectorNotFoundError:
                     try:
-                        from notion import clear_workspace_snapshot  # noqa: PLC0415
-
                         clear_workspace_snapshot(workspace_path)
+                        NotionCredentialStore().clear_thread_projection(workspace_path)
                     except Exception:
                         pass
-                except Exception as exc:  # noqa: BLE001
-                    # Keep the turn alive even when Notion is not configured or the
-                    # snapshot layer is temporarily unavailable.
-                    logger.debug(
-                        "Notion workspace materialization skipped for session_id=%s: %s",
+                except Exception:  # noqa: BLE001
+                    try:
+                        clear_workspace_snapshot(workspace_path)
+                        NotionCredentialStore().clear_thread_projection(workspace_path)
+                    except Exception:
+                        pass
+                    # Raw filesystem/CLI exception text is intentionally omitted.
+                    logger.warning(
+                        "Notion Runtime projection failed safely for session_id=%s.",
                         state.session_id,
-                        exc,
                     )
         else:
             cwd = ""
@@ -1633,6 +1669,7 @@ class ClaudeAgentService:
             claude_config_home=claude_config_home,
             claude_secure_storage_home=claude_secure_storage_home,
             claude_mcp_servers=claude_mcp_servers,
+            notion_credential_home=notion_credential_home,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             im_full_access_enabled=im_full_access_enabled,

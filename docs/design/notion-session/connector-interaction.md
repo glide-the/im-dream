@@ -1,7 +1,7 @@
 # Notion Device 资源连接器 — 交互方案设计
 
-Status: Draft  
-Updated: 2026-07-09
+Status: Historical interaction baseline; credential/Runtime sections superseded
+Updated: 2026-08-28
 Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的完整交互流程
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -21,6 +21,9 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-07-08: 纠正曾偏移的入口叙述，统一以 Chat `WorkspaceTabBar` 为资源连接器主入口，废弃仅摘要化的路径表述。
 > [Sync] 2026-07-08: 详情页组件树统一收敛为 Settings 内 `ConnectorNotionDetailPage` / `TopNavigation` / `ConnectorHeader` / `ResourceScopeSection` / `MountedSourcesSection`，并固定面包屑为 `资源连接器 > Notion Connector`。
 > [Sync] 2026-07-09: `ConnectorHeader` 改为无边框紧凑信息栏，授权 / 同步 / 已链接资源数量 / 最近同步 / 限制提示统一放入其中；其下仅保留 `StrategyDesignPlaceholder`，策略暂不实现。
+> [Sync] 2026-08-28: 凭证所有权、Runtime 注入、内置 Skill 与失败降级以 [`runtime-credential-and-skill-design.md`](./runtime-credential-and-skill-design.md) 和 [`runtime-credential-and-skill-sequence.md`](./runtime-credential-and-skill-sequence.md) 为当前合同；本文仅保留既有页面/资源选择交互背景。
+> [Sync] 2026-08-28: 固定 CLI 的后台索引合同统一为 paginated data source query；页面 Markdown 只允许 Runtime selected-page Read hook 调用，外部 `database_id` 名称保持兼容。
+> [Sync] 2026-08-28: `StrategyDesignPlaceholder` 已由真实后台同步策略替换；保存资源立即首同步，定时同步写入 actor agentdata，Chat 只投影最近成功 snapshot。
 > [Sync] 2026-07-08: Notion 详情页按“同一平台只能认证一个账号”重构，不再嵌入集合型 `ResourceConnectorPage`，也不暴露新建 / 刷新 / 连接器列表入口。
 > [Sync] 2026-07-08: 资源范围选择合并为一个可搜索、每页 10 条的统一列表；保存资源后已挂载来源立即回显；底部授权 / 同步状态卡移除。
 > [Sync] 2026-07-08: 骨架屏规则重新对齐两份最新草图：Chat 历史加载、Chat 连接器加载、以及详情页 breadcrumb/header/overview/resource list 都改用结构化 skeleton，而非纯文字提示。
@@ -88,8 +91,8 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 | **Page（页面）** | Notion 中的内容单元。分为两类：① **Database Row Page** — parent 为 database，属性值遵循所属 Database 的 schema；② **Standalone Page** — parent 为 workspace 或另一个 page，与 Database 无关联 | 一个 Database 下可包含多个 Row Page；Standalone Page 独立存在 |
 | **PageID** | Page 的唯一标识（UUID）。无论是 Database Row Page 还是 Standalone Page，均拥有独立的 PageID | — |
 | **Block** | Notion 中的最小内容单元（段落、标题、列表等）。Page 由 Block 组成；Database 不直接包含 Block | Page 的 children |
-| **`.notion/` 映射文件** | 工作空间内的虚拟索引目录，呈现连接器数据层物化的 canonical snapshot | 与连接器数据层强关联 |
-| **ntn api** | Notion 官方 CLI 提供的 API 直调命令 | 自动处理 Auth/Version 头 |
+| **`.notion/` 映射文件** | 工作空间内的只读轻量索引目录；正文路径由 Runtime Read hook 按需解析 | 与 actor index LKG 强关联 |
+| **ntn api** | Dream 后端拥有的认证/API driver | 不向 Agent 暴露命令、home 或凭证 |
 
 ### 2.1 Notion 对象层次（API 视角）
 
@@ -144,10 +147,10 @@ Resource Connector (资源连接器)
     │   └─ ResourceScopeSection 在已认证后展示统一资源列表，支持搜索、每页 10 条分页和勾选；页数只在 pageCount > 0 时显示
     │
     └─ 返回 Chat 并继续提问
-          ├─ Agent 初始化时 attach 当前 canonical snapshot
-          ├─ `.notion/` 虚拟索引从同一 snapshotVersion 读取
+          ├─ Agent 初始化时从 actor agentdata attach 当前轻量 index LKG（不远程同步）
+          ├─ `.notion/` 提供同一 snapshotVersion 的 ID/元数据索引
           ├─ Chat `ResourceConnectorTabPanel` 从 connector `sources` 展示已链接资源
-          └─ notion-cli skill 可按需同步到工作空间
+          └─ backend 内置 notion-session Skill 通过 Read；页面正文由 Runtime hook 按需获取
 ```
 
 ### 3.2 流程阶段定义
@@ -157,10 +160,10 @@ Resource Connector (资源连接器)
 | 1. 进入连接器摘要面板 | 用户（Chat `ResourceConnectorTab`） | 当前连接器列表或空态 | 前端工作区状态 |
 | 2. 进入资源链接设置区 | 用户（点击 `ConnectorStatusPanel` 管理入口 / `选择连接器`） | `ConnectorSettingsSection` | App 视图状态 |
 | 3. 进入 Notion 详情页 | 用户（Settings 点击 Notion「管理」） | `ConnectorNotionDetailPage` | App 视图状态 |
-| 3. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
+| 3. 认证 | 用户（浏览器确认） | server-owned ntn file credential | agentdata actor root；不使用进程 `~/.config` |
 | 4. 资源选择 | 用户（`ResourceScopeSection`） | 选定的 data_source_id 与 page_id 及资源元数据 | `connector_resources`，并随 connector `sources` 返回 |
-| 5. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
-| 6. 对话消费 | Agent（PreToolUse） | 同一 snapshotVersion 下的页面内容 | `.notion/pages/<id>.json` 虚拟读取 |
+| 5. 首次/定时索引同步 | 后端（保存资源 + 策略 worker） | Database/Standalone Page 的 ID 与紧凑元数据，`pages={}` | actor `notion-runtime/users/{hash}/snapshots/{connector}/current.json`；PostgreSQL 保留兼容 identity/历史 |
+| 6. 对话消费 | Agent（PreToolUse） | 已选 ID 对应的当前 Markdown | `Read(.notion/pages/<id>.json)` 触发 Runtime hook；正文只进 thread 临时文件 |
 
 ### 3.3 认证会话保持（避免 `poll` 回退）
 
@@ -231,7 +234,8 @@ Step 0: 进入 Chat Dashboard，并在 WorkspaceTabBar 中切换到「资源连�
 │     ↓                                                       │
 │ Step 2: 搜索并选择资源                                       │
 │                                                             │
-│   [搜索资源: roadmap] [保存资源] [刷新同步]                  │
+│   自动同步 [开启] [每 15 分钟 ▼] [保存策略]                 │
+│   [搜索资源: roadmap] [保存并同步] [立即同步]                │
 │   Data source · ink-and-memory 代办清单                   ✓   │
 │   Data source · 阅读笔记 · 7 pages                        ✓   │
 │   Page · 产品设计文档                                          │
@@ -257,6 +261,7 @@ Step 0: 进入 Chat Dashboard，并在 WorkspaceTabBar 中切换到「资源连�
 | `/api/connectors/:id/pages` | GET | 获取可访问的 standalone page 列表 |
 | `/api/connectors/:id/resources/select` | POST | 用户选择要同步的 database 和 standalone page，并持久化完整资源元数据到 `connector_resources` |
 | `/api/connectors/:id/sync` | POST | 触发数据同步 |
+| `/api/connectors/:id/sync-policy` | PUT | 校验并保存 default/desired/effective/revision/status 同步策略 |
 
 ### 4.3 数据模型
 
@@ -267,7 +272,7 @@ resource_connectors
 ├── platform: "notion"
 ├── auth_status: "pending" | "authenticated" | "expired"
 ├── config: JSON
-│     └── notion_home: string
+│     └── 仅非敏感展示配置（禁止 token、notion_home 与 Runtime 路径）
 ├── last_synced_at: timestamp
 ├── current_snapshot_version: string | null
 ├── current_source_revision: string | null
@@ -297,14 +302,14 @@ connector_resources
 
 | 时机 | 触发方式 | 同步范围 |
 |------|---------|---------|
-| 连接器创建完成 | 自动 | 全量同步并物化首个 canonical snapshot |
-| 用户进入对话 | Agent init / workspace attach | 读取当前 canonical snapshot，不直接远程拉取 |
-| 用户点击刷新 | 前端触发连接器 sync | 生成新 snapshotVersion |
-| Agent 提出写入 | proposal/write pipeline | 远程确认后同步并生成新 snapshotVersion |
+| 用户保存资源 | `resources/select` | 立即全量同步所选资源，原子发布 actor current snapshot；成功后才声明已同步 |
+| 策略到期 | Dream snapshot worker | 按 effective 策略全量更新；失败保留上一成功 snapshot |
+| 用户点击立即同步/重试 | 前端触发 connector sync | 立即生成新 snapshotVersion，不改变自动策略 |
+| 用户进入/继续对话 | Agent init / workspace attach | 只从 actor agentdata 读取 current snapshot 并投影，不直接远程拉取 |
 
 ### 5.2 `.notion/` 虚拟映射结构（扩展）
 
-`.notion/` 目录中的 JSON 是占位读入口。实际内容来自连接器数据层当前 attach 的 canonical snapshot。
+`.notion/` 是 thread 的只读投影。正式 current 内容来自同一 actor agentdata 下的 canonical snapshot；Chat 不以 PostgreSQL 或远程 API 作为隐式 fallback。
 
 ```
 .notion/
@@ -328,7 +333,7 @@ connector_resources
   "platform": "notion",
   "auth_status": "authenticated",
   "snapshot": {
-    "workspace_id": "workspace-001",
+    "workspace_id": "conn-abc123",
     "resource_connector_id": "conn-abc123",
     "snapshot_version": "snap-20260628-001",
     "source_revision": "notion-rev-789",
@@ -417,21 +422,9 @@ Notion Device Connector:
   Read .notion/databases/<db_id>.json for database-specific pages.
 ```
 
-### 6.2 Notion CLI Skill 同步
+### 6.2 内置 Notion Skill
 
-资源连接器创建成功后，自动同步常用 notion-cli skill 到工作空间 `skills/` 目录：
-
-| Skill 文件 | 用途 |
-|------------|------|
-| `skills/notion-search.md` | 通过 ntn api 搜索 Notion 内容 |
-| `skills/notion-page-read.md` | 读取指定页面完整内容 |
-| `skills/notion-db-query.md` | 查询指定 Database 下的页面 |
-
-各 Skill 文件的完整设计详见：[`skills/`](./skills/) 目录
-
-- [`skills/notion-search.md`](./skills/notion-search.md) — 搜索 Notion 内容
-- [`skills/notion-page-read.md`](./skills/notion-page-read.md) — 读取页面完整内容
-- [`skills/notion-db-query.md`](./skills/notion-db-query.md) — 查询 Database 下的页面
+`backend/builtin_skills/notion-session/SKILL.md` 是部署镜像内的唯一内置真相源。完整 workspace 初始化会把它刷新到 `workspace/skills/notion-session/`，再由既有 `.claude/skills/` 软链接发现。Skill 只使用 `Read`：先读 index/database 清单定位 ID，再读 `.notion/pages/<id>.json` 触发 Runtime hook；禁止 Bash/`ntn`、显式 Notion MCP、读取 `.notion-home` 或请求用户粘贴 token。
 
 ---
 
@@ -445,6 +438,9 @@ Notion Device Connector:
 | 获取 Page 列表 | `ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100` | 连接器创建 Step 2（统一资源选择） |
 | 关键词搜索资源 | `ntn api v1/search --data '{"query":"roadmap","page_size":10}'` | 资源范围搜索 |
 | 获取 Data source 下的 Row Page | `ntn api v1/data_sources/<data_source_id>/query` | 数据同步阶段 |
+| 获取页面可读正文 | `ntn api v1/pages/<page_id>/markdown` | 仅 Runtime Read hook；Snapshot 构建不得调用 |
+
+产品/HTTP 继续使用兼容名称 `database_id`，其值来自 discovery 返回的 data source ID，operations 层不得再拼接旧 databases/query endpoint。Agent 正式协议不暴露远程 search/query 工具，而是读取策略同步后的 index；需要正文时才触发单页 Markdown。
 
 Discovery 过滤规则：
 
@@ -498,7 +494,7 @@ sequenceDiagram
     CLI->>Notion: 等待用户确认
     Notion-->>CLI: token
     CLI-->>Back: exit 0
-    Back->>CLI: ntn auth status
+    Back->>CLI: ntn doctor
     CLI-->>Back: authenticated
     Back-->>Front: { authenticated: true }
 ```
@@ -550,12 +546,14 @@ sequenceDiagram
 | ------------------------------------------------------------ | ------------------------------------------------------------ | -------- |
 | `backend/libs/claude_agent_kit/server/notion_snapshot.py` | canonical snapshot 合同、状态枚举、`.notion/` 路径解析、write proposal stale 判断 | ✅ 已实现 |
 | `backend/tests/test_notion_snapshot_contract.py` | 验证快照路径解析、数据提取、缺页语义、proposal 版本判断 | ✅ 已实现 |
-| `backend/notion/auth.py` | `ntn login` 流程编排、NOTION_HOME 管理、auth status 检测 | 待实现 |
-| `backend/notion/sync.py` | 同步远程数据并物化 canonical snapshot | 待实现 |
-| `backend/notion/snapshot_store.py` | 持久化 current snapshot、历史版本和审计字段 | 待实现 |
-| `backend/libs/claude_agent_kit/server/agent_runner.py` | 未来接线：PreToolUse `.notion/` 读取从 attached snapshot 重定向 | 待实现 |
-| `backend/claude_agent/workspace_context.py` | 未来接线：`WORKSPACE_CONTEXT_TEMPLATE` 注入 snapshot identity 和 `.notion/` 读法 | 待实现 |
-| `backend/claude_agent/service.py` | 未来接线：Agent init 时从连接器数据层 attach current snapshot | 待实现 |
+| `backend/notion/auth.py` | explicit-home `ntn login` / poll / doctor 安全驱动 | ✅ 已实现 |
+| `backend/notion/credentials.py` | actor agentdata 凭证源、staging/promotion 与 per-thread 投影 | ✅ 已实现 |
+| `backend/notion/sync.py` | 分页同步 ID/元数据轻索引并物化 thread 文件 | ✅ 已实现 |
+| `backend/notion/store.py` | Admin-owned PostgreSQL connector/snapshot metadata repository | ✅ 已实现 |
+| `backend/libs/claude_agent_kit/server/agent_runner.py` | 在 PreToolUse 中优先执行 Notion lazy Read redirect | ✅ 已实现 |
+| `backend/libs/claude_agent_kit/server/notion_read_hook.py` | 校验 thread index/credential 并按需读取 Markdown、写入 0600 临时文件 | ✅ 已实现 |
+| `backend/claude_agent/workspace_context.py` | 注入 attached snapshot identity 和 `.notion/` 导航 | ✅ 已实现 |
+| `backend/claude_agent/service.py` | 每 turn attach snapshot、刷新用户凭证投影并隔离失败 | ✅ 已实现 |
 
 ### 9.1 相关现有文件（需阅读，不需修改）
 
@@ -633,8 +631,8 @@ Notion connector 不复用 `switch_editor`。`switch_editor` 只切换 `.editor/
 |---|---|---|
 | `.notion/snapshot.json` | 返回当前 snapshot identity | 失败：在前端提示 `snapshot missing` 并建议 `Refresh snapshot` |
 | `.notion/index.json` | 返回最近页面清单 | 失败：展示空态骨架 + `刷新来源` |
-| `.notion/databases/<id>.json` | 返回 db 与 page 列表 | 缺页：`reason=not_materialized_in_snapshot`（不触发远端拉取） |
-| `.notion/pages/<page_id>.json` | 返回 page JSON | 缺页：`reason=not_materialized_in_snapshot` + 同步入口 |
+| `.notion/databases/<id>.json` | 返回 db 与 page ID/元数据列表 | 缺库：提示刷新/重新选择；不抓正文 |
+| `.notion/pages/<page_id>.json` | hook 返回当前 Markdown + index/snapshot identity | 未选：`NOTION_RESOURCE_NOT_SELECTED`；认证/权限/API 错误均安全失败 |
 
 ### 11.4 状态流转最小事件图
 

@@ -20,6 +20,9 @@
 # [Sync] 2026-08-25: project merged MCP definitions through a thread-local
 #                    0600 file Path so credentials never enter CLI argv; force
 #                    strict_mcp_config and remove the projection in finally.
+# [Sync] 2026-08-28: redirect authorized `.notion/pages/<id>.json` Read calls
+#                    to lazy live Markdown payloads; Notion is not exposed as
+#                    an Agent-visible MCP namespace or background content sync.
 # [Sync] 2026-05-09: forward stdio MCP tool input and result events for frontend traces.
 # [Sync] 2026-05-09: merge project .env SDK injection, stderr capture, and PreToolUse confirmation hooks while keeping Pet Chat's narrow stdio MCP surface.
 # [Sync] 2026-05-09: expose zero-argument necklace intent tools while keeping server-owned upstream parameters.
@@ -202,7 +205,6 @@
 # [Sync] 2026-08-04: make Bash read-only-by-default whenever cwd contains a
 #                    real .dream surface, closing dynamic-path and prewritten-
 #                    script write bypasses that lexical inspection cannot solve.
-
 """Claude Agent Runner.
 
 Python translation of TypeScript:
@@ -261,6 +263,7 @@ from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
 from .story_workspace_tool import story_workspace_allowed_tool_names
+from .notion_read_hook import apply_notion_page_read_redirect
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
     CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
@@ -2321,9 +2324,10 @@ class ClaudeAgentRunner:
         except RuntimeError:  # pragma: no cover — run_streaming is async
             host_loop = None
 
-        # Collects paths of per-read tempfiles created by the .editor/ redirect
-        # logic inside _pre_tool_use_hook. Cleaned up in the finally block.
+        # Collect paths created by virtual Read redirects. Notion body files
+        # live only in the exact thread temp root and are removed after turn.
         _editor_redirect_tmp_paths: list[str] = []
+        _notion_redirect_tmp_paths: list[str] = []
 
         async def _pre_tool_use_hook(
             hook_input: dict[str, Any],
@@ -2342,6 +2346,17 @@ class ClaudeAgentRunner:
                 "tool_name": tool_name,
                 "input": tool_input,
             }
+
+            notion_redirect_result = await apply_notion_page_read_redirect(
+                tool_name,
+                tool_input,
+                workspace_path=cwd,
+                credential_home=opts.notion_credential_home,
+                tmp_workspace=opts.claude_tmp_workspace,
+                tmp_paths=_notion_redirect_tmp_paths,
+            )
+            if notion_redirect_result is not None:
+                return notion_redirect_result
 
             # ----------------------------------------------------------
             # .editor/ virtual index interception (Read tool only)
@@ -3226,8 +3241,8 @@ class ClaudeAgentRunner:
                 _stderr_buf.close()
             except Exception:  # noqa: BLE001
                 pass
-            # Clean up per-read .editor/ redirect tempfiles.
-            for _rpath in _editor_redirect_tmp_paths:
+            # Clean up per-read virtual redirect tempfiles.
+            for _rpath in [*_editor_redirect_tmp_paths, *_notion_redirect_tmp_paths]:
                 try:
                     os.unlink(_rpath)
                 except Exception:  # noqa: BLE001

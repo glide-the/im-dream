@@ -6,6 +6,8 @@
 # [Sync] 2026-08-20: cover the server-owned SDK stdout buffer option and safe overflow hint.
 # [Sync] 2026-08-28: cover terminal max_tokens classification so truncated
 #                    thinking-only turns cannot be reported as successful.
+# [Sync] 2026-08-28: Notion page content uses the `.notion/pages/<id>.json`
+#                    lazy Read hook; no Notion MCP namespace is exposed.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -104,7 +106,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
@@ -255,6 +257,7 @@ def _hook_specific(result, default=None):
 import libs.claude_agent_kit.server.agent_runner as agent_runner_module  # noqa: E402
 import libs.claude_agent_kit.server.sdk_env as sdk_env_module  # noqa: E402
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner  # noqa: E402
+from notion.operations import OperationResult  # noqa: E402
 from libs.claude_agent_kit.types import (  # noqa: E402
     AgentRunOptions,
     AgentStreamingCallbacks,
@@ -1197,6 +1200,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         sandbox_network_mode: str = "allowlist",
         on_tool_confirmation_request=None,
         mcp_env: Optional[dict[str, str]] = None,
+        notion_credential_home: Optional[str] = None,
     ):
         self.set_query([])
         runner = self.make_runner()
@@ -1211,6 +1215,8 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 im_full_access_enabled=im_full_access_enabled,
                 sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
                 mcp_env=mcp_env or {},
+                claude_tmp_workspace=cwd,
+                notion_credential_home=notion_credential_home,
             ),
             callbacks=AgentStreamingCallbacks(
                 on_text_delta=lambda d: None,
@@ -1221,6 +1227,53 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         options = self._mock_client.last_options
         matcher = options.hooks["PreToolUse"][0]
         return matcher.hooks[0]
+
+    async def test_notion_page_read_is_redirected_before_generic_permissions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            notion_dir = workspace / ".notion"
+            (notion_dir / "pages").mkdir(parents=True)
+            (notion_dir / "index.json").write_text(
+                json.dumps({"pages": [{"page_id": "page-1", "title": "Roadmap"}]}),
+                encoding="utf-8",
+            )
+            (notion_dir / "snapshot.json").write_text(
+                json.dumps({"snapshot_version": "snap-1"}),
+                encoding="utf-8",
+            )
+            notion_home = workspace / ".notion-home"
+            notion_home.mkdir(mode=0o700)
+            notion_home.chmod(0o700)
+            auth = notion_home / "auth.json"
+            auth.write_text('{"access_token":"fixture-secret"}', encoding="utf-8")
+            auth.chmod(0o600)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                notion_credential_home=str(notion_home),
+            )
+            with patch(
+                "libs.claude_agent_kit.server.notion_read_hook.NotionOperationClient.get_page_markdown",
+                new=AsyncMock(
+                    return_value=OperationResult(
+                        success=True,
+                        data={"markdown": "# Roadmap"},
+                    )
+                ),
+            ):
+                result = await hook(
+                    {
+                        "tool_name": "Read",
+                        "tool_input": {"file_path": ".notion/pages/page-1.json"},
+                    },
+                    "call-notion-read",
+                    _SDK_HOOK_CONTEXT(),
+                )
+
+            specific = _hook_specific(result, {})
+            redirected = Path(specific["updatedInput"]["file_path"])
+            payload = json.loads(redirected.read_text(encoding="utf-8"))
+            self.assertEqual(specific["permissionDecision"], "allow")
+            self.assertEqual(payload["markdown"], "# Roadmap")
 
     async def test_auto_write_under_workspace_files_gets_explicit_allow(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2629,7 +2682,7 @@ class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
         self.assertEqual(tool_names, {"get_sessions_range"})
         self.assertEqual(tool_names, set(USER_MCP_TOOL_NAMES))
 
-    async def test_default_run_only_configures_core_user_mcp(self):
+    async def test_default_run_does_not_register_notion_mcp(self):
         self.set_query([])
         runner = self.make_runner()
         with (
@@ -2648,11 +2701,11 @@ class TestClaudeAgentRunnerMcpDefaults(_RunnerBase):
                 ),
             )
 
-        self.assertEqual(
-            set(self._mock_client.captured_mcp_servers()),
-            {"user"},
+        configured = self._mock_client.captured_mcp_servers()
+        self.assertEqual(set(configured), {"user"})
+        self.assertFalse(
+            any(tool.startswith("mcp__notion__") for tool in agent_runner_module.DEFAULT_ALLOWED_TOOLS)
         )
-
 
 class TestClaudeAgentRunnerMemoryEnvAliases(unittest.TestCase):
     """Memory MCP env uses Ink-owned names with Pawkeyland aliases as fallback."""

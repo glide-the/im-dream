@@ -4,6 +4,10 @@
 # [Sync] 2026-07-04: initial store coverage for Notion connector persistence.
 # [Sync] 2026-07-08: cover connector list/detail sources hydration for refresh-safe
 #                    resource selections.
+# [Sync] 2026-08-28: keep repository metadata tests free of credential-home paths;
+#                    credential bytes are owned by notion.credentials instead.
+# [Sync] 2026-08-28: assert selected resources remain pending until their exact
+#                    IDs are committed with a successful lightweight snapshot.
 
 from __future__ import annotations
 
@@ -79,28 +83,11 @@ class TestNotionStore(unittest.TestCase):
                     }
                 ]
             },
-            pages={
-                "page-db-1": {
-                    "page_id": "page-db-1",
-                    "title": "Database Page",
-                    "url": "https://www.notion.so/page-db-1",
-                    "last_edited": "2026-07-03T10:00:00Z",
-                    "properties": {"Name": {"title": [{"plain_text": "Database Page"}]}},
-                    "blocks": [{"type": "paragraph", "text": "Ship it"}],
-                },
-                "page-standalone": {
-                    "page_id": "page-standalone",
-                    "title": "Standalone Page",
-                    "url": "https://www.notion.so/page-standalone",
-                    "last_edited": "2026-07-02T10:00:00Z",
-                    "properties": {"Name": {"title": [{"plain_text": "Standalone Page"}]}},
-                    "blocks": [{"type": "paragraph", "text": "Read me"}],
-                },
-            },
+            pages={},
         )
 
     def test_connector_resource_selection_and_snapshot_roundtrip(self):
-        connector = store.create_connector(7, name="Notion", config={"notion_home": "/tmp/notion-home"})
+        connector = store.create_connector(7, name="Notion", config={"sync_label": "primary"})
         self.assertEqual(connector["auth_status"], "pending")
         self.assertEqual(store.list_connectors(7)[0]["id"], connector["id"])
 
@@ -108,7 +95,7 @@ class TestNotionStore(unittest.TestCase):
             connector["id"],
             7,
             auth_status="authenticated",
-            config_patch={"notion_home": "/tmp/notion-home"},
+            config_patch={"connection_label": "primary"},
             verification_url="https://www.notion.so/workers/cli-login",
             verification_code="VAF-HWY",
             poll_interval_seconds=5,
@@ -142,20 +129,35 @@ class TestNotionStore(unittest.TestCase):
         self.assertEqual(selected["connector"]["selected_pages"], ["page-standalone"])
         self.assertEqual(len(selected["connector"]["sources"]), 2)
         self.assertEqual(selected["connector"]["sources"][0]["external_id"], "db-1")
+        self.assertTrue(
+            all(resource["sync_status"] == "pending" for resource in selected["resources"])
+        )
         self.assertEqual(store.list_connectors(7)[0]["sources"][0]["external_id"], "db-1")
         self.assertEqual(store.get_connector(connector["id"], 7)["sources"][1]["external_id"], "page-standalone")
 
         snapshot = self._sample_snapshot(connector["id"])
-        saved = store.save_snapshot(connector["id"], 7, "workspace-1", snapshot)
+        saved = store.save_snapshot(
+            connector["id"],
+            7,
+            "workspace-1",
+            snapshot,
+            synced_resources=selected["resources"],
+        )
         self.assertEqual(saved["metadata"]["snapshot_version"], "snap-001")
         self.assertEqual(snapshot_identity(saved)["resource_connector_id"], connector["id"])
 
         current = store.get_current_snapshot("workspace-1", connector["id"], 7)
         self.assertIsNotNone(current)
         self.assertEqual(current["metadata"]["snapshot_version"], "snap-001")
-        self.assertEqual(current["pages"]["page-standalone"]["title"], "Standalone Page")
+        self.assertEqual(current["index"][1]["title"], "Standalone Page")
         self.assertEqual(store.list_snapshots(connector["id"], 7)[0]["snapshot"]["metadata"]["snapshot_version"], "snap-001")
         self.assertEqual(len(store.list_connector_resources(connector["id"], 7)), 2)
+        self.assertTrue(
+            all(
+                resource["sync_status"] == "synced"
+                for resource in store.list_connector_resources(connector["id"], 7)
+            )
+        )
         self.assertEqual(len(self._database.tables["resource_connectors"]), 1)
         self.assertEqual(len(self._database.tables["connector_resources"]), 2)
         self.assertEqual(len(self._database.tables["connector_resource_pages"]), 1)

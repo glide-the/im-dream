@@ -1,7 +1,7 @@
 # 资源连接器 — ER 关系模型设计
 
 Status: Draft  
-Updated: 2026-07-04  
+Updated: 2026-08-28
 Scope: 设计 — 资源连接器 ER 关系模型与数据库设计
 
 > [Input] `docs/design/notion-session/connector-interaction.md`,
@@ -10,6 +10,8 @@ Scope: 设计 — 资源连接器 ER 关系模型与数据库设计
 > [Output] 资源连接器 ER 模型、关系说明、关键约束、设计决策
 > [Pos] resource-connector-er in `docs/design/notion-session`
 > [Sync] 2026-07-04: 从 resource-connector-prd.md 拆分，ER 设计独立管理；前端 PRD 移至 `docs/prd/notion-session/`
+> [Sync] 2026-08-28: `resource_connectors.config` 仅保留非敏感展示配置；Notion 凭证和路径由用户级 agentdata Provider 持有，不进入 connector JSON 或数据库 schema。
+> [Sync] 2026-08-28: `config_json` 复用为小型 snapshot sync policy；Runtime current snapshot 存在 actor agentdata，PostgreSQL snapshot 表继续保留兼容历史，无 Schema 变更。
 
 ---
 
@@ -41,7 +43,7 @@ resource_connectors
      name            TEXT NOT NULL          ← 连接器显示名称
      platform        TEXT NOT NULL          ← "notion" | "github" | ...
      auth_status     TEXT DEFAULT 'pending' ← "pending" | "authenticated" | "expired"
-     config          JSON                   ← 平台配置（notion_home 等）
+     config          JSON                   ← 非敏感展示配置 + versioned snapshot_sync_policy；禁止凭证与 notion_home
      last_synced_at  DATETIME NULL
      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
      updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -114,6 +116,9 @@ users (1) ──→ (N) resource_connectors
 | 约束 | 说明 |
 |------|------|
 | 连接器绑定单用户 | `resource_connectors.user_id` 不可共享 |
+| 凭证不入 connector JSON | Notion 凭证由用户级 agentdata Provider 持有，并在 Runtime 初始化时投影到 thread；`config` 不保存 token、home 或 Runtime 路径 |
+| current snapshot 不绑定 thread | 远程同步写入 `notion-runtime/users/{user-hash}/snapshots/{connector-id}/current.json`；Chat 只投影到当前 thread，不能触发远程刷新 |
+| policy 不新增 Schema | `snapshot_sync_policy` 使用现有 `config_json`，包含 default/desired/effective/revision/status；不得新增 Dream migration/runtime DDL |
 | 资源去重 | `(connector_id, resource_type, external_id)` UNIQUE |
 | 级联删除 | 删除连接器 → 级联删除所有关联资源和页面索引 |
 | chat_thread 复用 | 连接器内的对话复用已有的 `chat_thread` 模型，通过中间表关联 |
@@ -136,3 +141,4 @@ users (1) ──→ (N) resource_connectors
 - 前端 PRD：[`docs/prd/notion-session/resource-connector.md`](../../prd/notion-session/resource-connector.md)
 - 交互方案设计：[`docs/design/notion-session/connector-interaction.md`](./connector-interaction.md)
 - 总览设计：[`docs/design/notion-session/overview.md`](./overview.md)
+- 当前凭证与 Runtime 设计：[`docs/design/notion-session/runtime-credential-and-skill-design.md`](./runtime-credential-and-skill-design.md)

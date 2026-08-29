@@ -46,6 +46,10 @@
 #                    user-facing Workspace Mode is disabled.
 # [Sync] 2026-08-25: deny Agent read/write access to the short-lived MCP config
 #                    projection directory beneath the exact thread tmp root.
+# [Sync] 2026-08-28: prove backend-bundled Notion Skill repair and deny Agent
+#                    read/write access to the thread credential projection.
+# [Sync] 2026-08-28: prove the index-only/lazy-Read Notion reference set is
+#                    refreshed with the built-in Skill.
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -170,6 +174,8 @@ class TestInitWorkspace(unittest.TestCase):
         thread_credentials = str((ws / ".claude-home" / ".credentials.json").resolve())
         thread_user_config = str((ws / ".claude-home" / ".claude.json").resolve())
         thread_mcp_projection = str((ws / ".claude-tmp" / "mcp-config").resolve())
+        thread_notion_home = str((ws / ".notion-home").resolve())
+        thread_notion_credentials = str((ws / ".notion-home" / "auth.json").resolve())
         deny_read = sandbox["filesystem"]["denyRead"]
         self.assertNotIn("/", deny_read)
         self.assertIn(str(Path(self._tmp.name).resolve()), deny_read)
@@ -178,9 +184,13 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertIn(thread_credentials, deny_read)
         self.assertIn(thread_user_config, deny_read)
         self.assertIn(thread_mcp_projection, deny_read)
+        self.assertIn(thread_notion_home, deny_read)
         self.assertEqual(
             sandbox["credentials"]["files"],
-            [{"path": thread_credentials, "mode": "deny"}],
+            [
+                {"path": thread_credentials, "mode": "deny"},
+                {"path": thread_notion_credentials, "mode": "deny"},
+            ],
         )
         self.assertEqual(sandbox["filesystem"]["allowRead"][0], str(ws.resolve()))
         self.assertEqual(
@@ -228,9 +238,14 @@ class TestInitWorkspace(unittest.TestCase):
             str((ws / ".editor").resolve()),
             sandbox["filesystem"]["denyWrite"],
         )
+        self.assertIn(
+            str((ws / ".notion").resolve()),
+            sandbox["filesystem"]["denyWrite"],
+        )
         self.assertIn(thread_credentials, sandbox["filesystem"]["denyWrite"])
         self.assertIn(thread_user_config, sandbox["filesystem"]["denyWrite"])
         self.assertIn(thread_mcp_projection, sandbox["filesystem"]["denyWrite"])
+        self.assertIn(thread_notion_home, sandbox["filesystem"]["denyWrite"])
 
     def test_can_disable_sandbox_settings_for_workspace_mode_off(self):
         ws = init_workspace("sandbox-disabled", sandbox_enabled=False)
@@ -342,10 +357,12 @@ class TestInitWorkspace(unittest.TestCase):
                 str(ws.resolve() / ".claude" / ".clawhub"),
                 str(ws.resolve() / ".claude" / "worktrees"),
                 str(ws.resolve() / ".editor"),
+                str(ws.resolve() / ".notion"),
                 str(ws.resolve() / ".mcp.json"),
                 str(ws.resolve() / ".claude-home" / ".credentials.json"),
                 str(ws.resolve() / ".claude-home" / ".claude.json"),
                 str(ws.resolve() / ".claude-tmp" / "mcp-config"),
+                str(ws.resolve() / ".notion-home"),
             ],
         )
 
@@ -549,6 +566,41 @@ class TestSkillsSync(unittest.TestCase):
         self.assertEqual(workspace_skill.read_text(encoding="utf-8"), "new")
         self.assertTrue(claude_skill.is_symlink())
         self.assertEqual(claude_skill.resolve(), workspace_skill.resolve())
+
+    def test_bundled_notion_skill_is_discovered_and_repairs_stale_copy(self):
+        ws = init_workspace("skills-builtin-notion")
+        skill = ws / "skills" / "notion-session" / "SKILL.md"
+        discovery = ws / ".claude" / "skills" / "notion-session"
+
+        content = skill.read_text(encoding="utf-8")
+        self.assertIn(".notion/pages/<page_id>.json", content)
+        self.assertIn('tools: ["Read"]', content)
+        self.assertNotIn("ntn api", content)
+        self.assertNotIn("mcp__notion__", content)
+        references = skill.parent / "references"
+        expected_references = {
+            "notion-search.md",
+            "notion-page-read.md",
+            "notion-db-query.md",
+        }
+        self.assertEqual(
+            {path.name for path in references.glob("*.md")},
+            expected_references,
+        )
+        for reference in references.glob("*.md"):
+            reference_content = reference.read_text(encoding="utf-8")
+            self.assertIn(".notion/", reference_content)
+            self.assertNotIn("mcp__notion__", reference_content)
+            self.assertNotIn("ntn api", reference_content)
+            self.assertNotIn("NOTION_HOME", reference_content)
+        self.assertTrue(discovery.is_symlink())
+        self.assertEqual(discovery.resolve(), skill.parent.resolve())
+
+        skill.write_text("stale runtime copy", encoding="utf-8")
+        init_workspace("skills-builtin-notion")
+        repaired = skill.read_text(encoding="utf-8")
+        self.assertIn("Runtime Read hook", repaired)
+        self.assertNotIn("stale runtime copy", repaired)
 
 
 class TestSessionIdValidation(unittest.TestCase):

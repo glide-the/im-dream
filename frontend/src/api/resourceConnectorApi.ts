@@ -1,5 +1,5 @@
 // [Input] Connector REST endpoints, auth token storage, and Notion resource selection payloads.
-// [Output] Frontend client helpers for resource connector CRUD, auth polling, resource listing, and sync.
+// [Output] Fail-closed frontend client helpers for connector CRUD, auth, resource selection, snapshot policy, and sync.
 // [Pos] resource connector API client node in frontend/src/api
 // [Sync] 2026-07-04: add Notion resource connector API helpers with local fallback storage for the frontend task.
 // [Sync] 2026-07-04: preserve backend connector UUIDs from singular create responses so auth/discovery
@@ -19,17 +19,17 @@
 //                    normalize backend connector_resources with external Notion ids for refresh-safe selection.
 // [Sync] 2026-07-09: expose a browser-local connector change event so Settings saves can refresh
 //                    Chat connector status panels without adding another backend endpoint.
+// [Sync] 2026-08-28: remove the obsolete localStorage connector authority, preserve backend
+//                    synchronization failures, and consume the versioned scheduled-sync policy.
 /**
  * Resource connector API helpers.
  *
- * The frontend prefers the real backend connector endpoints when they exist,
- * but falls back to localStorage-backed state when the backend request itself
- * fails so the UI remains usable while the backend implementation is still
- * landing.
+ * Connector, authentication, selection, and snapshot state are server-owned.
+ * Transport or backend failures are surfaced to the user and never converted
+ * into browser-local authenticated/synced state.
  */
 
 import { getAuthToken } from '../contexts/AuthContext';
-import { STORAGE_KEYS } from '../constants/storageKeys';
 import { apiUrl } from '../lib/apiBase';
 
 export type ConnectorPlatform = 'notion';
@@ -92,6 +92,26 @@ export interface ResourceConnector {
   lastSyncedAt?: string;
   auth: ConnectorAuthSession;
   sources: ConnectorSource[];
+  syncPolicy?: ConnectorSyncPolicy;
+}
+
+export interface ConnectorSyncRule {
+  enabled: boolean;
+  intervalMinutes: number;
+  revision: number;
+}
+
+export interface ConnectorSyncPolicy {
+  schemaVersion: number;
+  default: ConnectorSyncRule;
+  desired: ConnectorSyncRule;
+  effective: ConnectorSyncRule;
+  status: 'applied' | 'syncing' | 'error' | 'disabled';
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  nextSyncAt?: string;
+  lastErrorCode?: string;
+  allowedIntervalMinutes: number[];
 }
 
 export interface NotionResourceOption {
@@ -123,48 +143,13 @@ export interface UpdateConnectorInput {
   status?: ConnectorStatus;
 }
 
-const LOCAL_CONNECTOR_STORAGE_KEY = STORAGE_KEYS.RESOURCE_CONNECTORS;
+export interface UpdateConnectorSyncPolicyInput {
+  enabled: boolean;
+  intervalMinutes: number;
+}
+
 const DEFAULT_CONNECTOR_NAME = 'Resource Connector';
 const DEFAULT_NOTION_VERIFICATION_URL = 'https://www.notion.so/my-integrations';
-
-const FALLBACK_DATABASES: NotionResourceOption[] = [
-  {
-    id: 'db-product-notes',
-    title: '产品资料库',
-    subtitle: 'Briefs, specs, and launch notes',
-    pageCount: 18,
-  },
-  {
-    id: 'db-research-log',
-    title: '调研记录',
-    subtitle: 'Interviews and research captures',
-    pageCount: 12,
-  },
-  {
-    id: 'db-roadmap',
-    title: '路线图',
-    subtitle: 'Milestones and release planning',
-    pageCount: 9,
-  },
-];
-
-const FALLBACK_PAGES: NotionResourceOption[] = [
-  {
-    id: 'page-brand-guide',
-    title: '品牌规范',
-    subtitle: 'Standalone page',
-  },
-  {
-    id: 'page-quarterly-goals',
-    title: '季度目标',
-    subtitle: 'Standalone page',
-  },
-  {
-    id: 'page-meeting-notes',
-    title: '会议纪要',
-    subtitle: 'Standalone page',
-  },
-];
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -178,48 +163,14 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function createId(prefix: string): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `${prefix}_${crypto.randomUUID()}`;
+export class ResourceConnectorApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ResourceConnectorApiError';
+    this.status = status;
   }
-
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function safeJsonParse<T>(value: string | null, fallback: T): T {
-  if (!value) return fallback;
-
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function readLocalConnectors(): ResourceConnector[] {
-  if (typeof window === 'undefined') return [];
-  return safeJsonParse<ResourceConnector[]>(localStorage.getItem(LOCAL_CONNECTOR_STORAGE_KEY), []);
-}
-
-function writeLocalConnectors(connectors: ResourceConnector[]): ResourceConnector[] {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(LOCAL_CONNECTOR_STORAGE_KEY, JSON.stringify(connectors));
-  }
-  return connectors;
-}
-
-function mutateLocalConnector(
-  connectorId: string,
-  mutator: (connector: ResourceConnector) => ResourceConnector,
-): ResourceConnector | null {
-  const connectors = readLocalConnectors();
-  const index = connectors.findIndex((connector) => connector.id === connectorId);
-  if (index === -1) return null;
-
-  const nextConnector = mutator({ ...connectors[index], sources: connectors[index].sources.map((source) => ({ ...source })), auth: { ...connectors[index].auth } });
-  connectors[index] = nextConnector;
-  writeLocalConnectors(connectors);
-  return nextConnector;
 }
 
 function hasBackendAuthSession(raw: unknown): boolean {
@@ -277,11 +228,16 @@ function localizeAuthStatus(status?: string | null, hasSession = false): Connect
   }
 }
 
-function localizeConnectorStatus(status?: string | null, sourceCount = 0, hasSession = false): ConnectorStatus {
+function localizeConnectorStatus(
+  status?: string | null,
+  hasSession = false,
+  hasSnapshot = false,
+): ConnectorStatus {
   switch ((status || '').toLowerCase()) {
     case 'authenticated':
+      return hasSnapshot ? 'synced' : 'authenticated';
     case 'synced':
-      return 'synced';
+      return hasSnapshot ? 'synced' : 'authenticated';
     case 'syncing':
       return 'syncing';
     case 'authenticating':
@@ -295,7 +251,7 @@ function localizeConnectorStatus(status?: string | null, sourceCount = 0, hasSes
     case 'error':
       return 'error';
     default:
-      return sourceCount > 0 ? 'synced' : 'draft';
+      return hasSnapshot ? 'synced' : 'draft';
   }
 }
 
@@ -305,6 +261,7 @@ function normalizeSourceType(value?: string | null): ConnectorSourceType {
 
 function normalizeSourceStatus(value?: string | null): ConnectorSourceStatus {
   switch (value) {
+    case 'pending':
     case 'syncing':
       return 'syncing';
     case 'synced':
@@ -327,7 +284,7 @@ function normalizeConnectorSource(raw: unknown): ConnectorSource {
         ? metadata.last_edited
       : nowIso();
   return {
-    id: String(record.external_id ?? record.database_id ?? record.page_id ?? record.source_id ?? record.resource_id ?? record.id ?? createId('source')),
+    id: String(record.external_id ?? record.database_id ?? record.page_id ?? record.source_id ?? record.resource_id ?? record.id ?? ''),
     title: String(record.title ?? record.name ?? record.label ?? 'Untitled source'),
     type: normalizeSourceType(asString(record.type ?? record.resource_type ?? record.kind)),
     status: normalizeSourceStatus(asString(record.status ?? record.sync_status)),
@@ -345,6 +302,59 @@ function normalizeConnectorSource(raw: unknown): ConnectorSource {
           : undefined,
     description: asString(record.description) ?? asString(record.subtitle) ?? asString(record.summary),
     url: asString(record.url) ?? asString(record.source_url) ?? asString(record.sourceUrl) ?? asString(metadata.url),
+  };
+}
+
+function normalizeSyncRule(raw: unknown): ConnectorSyncRule | null {
+  const record = asRecord(raw);
+  const enabled = record.enabled;
+  const intervalMinutes = record.interval_minutes ?? record.intervalMinutes;
+  const revision = record.revision;
+  if (
+    typeof enabled !== 'boolean'
+    || typeof intervalMinutes !== 'number'
+    || !Number.isSafeInteger(intervalMinutes)
+    || intervalMinutes <= 0
+    || typeof revision !== 'number'
+    || !Number.isSafeInteger(revision)
+    || revision <= 0
+  ) {
+    return null;
+  }
+  return { enabled, intervalMinutes, revision };
+}
+
+function normalizeSyncPolicy(raw: unknown): ConnectorSyncPolicy | undefined {
+  const record = asRecord(raw);
+  const defaultRule = normalizeSyncRule(record.default);
+  const desired = normalizeSyncRule(record.desired);
+  const effective = normalizeSyncRule(record.effective);
+  const schemaVersion = record.schema_version ?? record.schemaVersion;
+  const status = asString(record.status);
+  const allowed = record.allowed_interval_minutes ?? record.allowedIntervalMinutes;
+  if (
+    !defaultRule
+    || !desired
+    || !effective
+    || typeof schemaVersion !== 'number'
+    || !Number.isSafeInteger(schemaVersion)
+    || !['applied', 'syncing', 'error', 'disabled'].includes(status ?? '')
+    || !Array.isArray(allowed)
+    || !allowed.every((value) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+  ) {
+    return undefined;
+  }
+  return {
+    schemaVersion,
+    default: defaultRule,
+    desired,
+    effective,
+    status: status as ConnectorSyncPolicy['status'],
+    lastAttemptAt: asString(record.last_attempt_at ?? record.lastAttemptAt),
+    lastSuccessAt: asString(record.last_success_at ?? record.lastSuccessAt),
+    nextSyncAt: asString(record.next_sync_at ?? record.nextSyncAt),
+    lastErrorCode: asString(record.last_error_code ?? record.lastErrorCode),
+    allowedIntervalMinutes: allowed,
   };
 }
 
@@ -403,46 +413,60 @@ function normalizeConnector(raw: unknown): ResourceConnector {
   const auth = normalizeConnectorAuth(raw);
   const config = asRecord(record.config);
   const authSession = asRecord(config.auth_session);
-  const sourceCount = sources.length;
   const hasSession = hasBackendAuthSession(raw);
+  const lastSyncedAt = asString(record.last_synced_at)
+    ?? asString(record.lastSyncedAt)
+    ?? asString(record.synced_at)
+    ?? asString(record.syncedAt);
   const connectorStatus =
     asString(record.auth_status)
     ?? auth.status
     ?? asString(record.status)
     ?? asString(record.sync_status)
     ?? asString(authSession.auth_session_status);
+  const syncPolicy = normalizeSyncPolicy(record.sync_policy ?? config.snapshot_sync_policy);
+  const indexIsRefreshing = syncPolicy?.status === 'syncing'
+    || sources.some((source) => source.status === 'syncing');
 
   return {
-    id: String(record.id ?? record.connector_id ?? record.resource_connector_id ?? createId('connector')),
+    id: String(record.id ?? record.connector_id ?? record.resource_connector_id ?? ''),
     name: String(record.name ?? record.title ?? DEFAULT_CONNECTOR_NAME),
     platform: 'notion',
-    status: localizeConnectorStatus(connectorStatus, sourceCount, hasSession),
+    status: indexIsRefreshing
+      ? 'syncing'
+      : localizeConnectorStatus(connectorStatus, hasSession, Boolean(lastSyncedAt)),
     createdAt: asString(record.created_at) ?? asString(record.createdAt) ?? now,
     updatedAt: asString(record.updated_at) ?? asString(record.updatedAt) ?? now,
-    lastSyncedAt: asString(record.last_synced_at)
-      ?? asString(record.lastSyncedAt)
-      ?? asString(record.synced_at)
-      ?? asString(record.syncedAt),
+    lastSyncedAt,
     auth,
     sources,
+    syncPolicy,
   };
+}
+
+function requireConnector(raw: unknown): ResourceConnector {
+  const connector = normalizeConnector(raw);
+  if (!connector.id) {
+    throw new ResourceConnectorApiError(502, 'Notion connector response is invalid. Please retry.');
+  }
+  return connector;
 }
 
 function normalizeConnectorListResponse(response: unknown): ResourceConnector[] {
   if (Array.isArray(response)) {
-    return response.map(normalizeConnector);
+    return response.map(requireConnector);
   }
 
   const payload = response as { connectors?: unknown[]; connector?: unknown; data?: unknown[]; items?: unknown[] };
-  if (payload?.connector) return [normalizeConnector(payload.connector)];
-  if (Array.isArray(payload?.connectors)) return payload.connectors.map(normalizeConnector);
-  if (Array.isArray(payload?.data)) return payload.data.map(normalizeConnector);
-  if (Array.isArray(payload?.items)) return payload.items.map(normalizeConnector);
+  if (payload?.connector) return [requireConnector(payload.connector)];
+  if (Array.isArray(payload?.connectors)) return payload.connectors.map(requireConnector);
+  if (Array.isArray(payload?.data)) return payload.data.map(requireConnector);
+  if (Array.isArray(payload?.items)) return payload.items.map(requireConnector);
   return [];
 }
 
 function normalizeConnectorResponse(response: unknown): ResourceConnector {
-  return normalizeConnector(
+  return requireConnector(
     response && typeof response === 'object' && 'connector' in response
       ? (response as { connector?: unknown }).connector
       : response,
@@ -473,7 +497,17 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`);
+    let detail = '';
+    try {
+      const payload = await response.json() as { detail?: unknown };
+      detail = typeof payload.detail === 'string' ? payload.detail.trim() : '';
+    } catch {
+      detail = '';
+    }
+    throw new ResourceConnectorApiError(
+      response.status,
+      detail || `Notion request failed (${response.status}). Please retry.`,
+    );
   }
 
   if (response.status === 204) {
@@ -483,322 +517,144 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function remoteOrLocal<T>(remote: () => Promise<T>, local: () => Promise<T> | T): Promise<T> {
-  try {
-    return await remote();
-  } catch {
-    return await local();
-  }
-}
-
-function buildLocalAuthSession(auth?: Partial<ConnectorAuthSession>): ConnectorAuthSession {
-  const verificationCode = auth?.verificationCode ?? `NTN-${Math.floor(1000 + Math.random() * 9000)}`;
-  const expiresAt = auth?.expiresAt ?? new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  return {
-    status: auth?.status ?? 'authenticating',
-    verificationCode,
-    verificationUrl: auth?.verificationUrl ?? DEFAULT_NOTION_VERIFICATION_URL,
-    pollAttempts: auth?.pollAttempts ?? 0,
-    expiresAt,
-    message: auth?.message ?? 'Open Notion in your browser and confirm the integration.',
-  };
-}
-
-function buildLocalConnector(input: CreateConnectorInput): ResourceConnector {
-  const now = nowIso();
-  return {
-    id: createId('connector'),
-    name: input.name.trim() || DEFAULT_CONNECTOR_NAME,
-    platform: input.platform ?? 'notion',
-    status: 'draft',
-    createdAt: now,
-    updatedAt: now,
-    auth: buildLocalAuthSession({ status: 'idle', message: 'Connector created. Start Notion auth to continue.' }),
-    sources: [],
-  };
-}
-
-function mergeSelectedSources(
-  connector: ResourceConnector,
-  databaseOptions: NotionResourceOption[],
-  pageOptions: NotionResourceOption[],
-  selection: ConnectorResourceSelection,
-): ResourceConnector {
-  const now = nowIso();
-  const selectedDatabaseIds = new Set(selection.databaseIds);
-  const selectedPageIds = new Set(selection.pageIds);
-
-  const sources: ConnectorSource[] = [
-    ...databaseOptions
-      .filter((option) => selectedDatabaseIds.has(option.id))
-      .map((option) => ({
-        id: option.id,
-        title: option.title,
-        type: 'notion_database' as const,
-        status: 'synced' as const,
-        updatedAt: now,
-        syncedAt: now,
-        pageCount: option.pageCount,
-        description: option.subtitle,
-      })),
-    ...pageOptions
-      .filter((option) => selectedPageIds.has(option.id))
-      .map((option) => ({
-        id: option.id,
-        title: option.title,
-        type: 'notion_page' as const,
-        status: 'synced' as const,
-        updatedAt: now,
-        syncedAt: now,
-        description: option.subtitle,
-      })),
-  ];
-
-  return {
-    ...connector,
-    status: sources.length > 0 ? 'synced' : connector.status,
-    updatedAt: now,
-    lastSyncedAt: sources.length > 0 ? now : connector.lastSyncedAt,
-    sources,
-    auth: {
-      ...connector.auth,
-      status: connector.auth.status === 'authenticated' ? 'authenticated' : connector.auth.status,
-    },
-  };
-}
-
 export async function listConnectors(): Promise<ResourceConnector[]> {
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>('/api/connectors');
-      return normalizeConnectorListResponse(response);
-    },
-    () => readLocalConnectors(),
-  );
+  const response = await fetchJson<unknown>('/api/connectors');
+  return normalizeConnectorListResponse(response);
 }
 
 export async function createConnector(input: CreateConnectorInput): Promise<ResourceConnector> {
-  const localFallback = () => {
-    const connector = buildLocalConnector(input);
-    const platform = input.platform ?? 'notion';
-    const connectors = readLocalConnectors().filter((item) => item.platform !== platform);
-    writeLocalConnectors([connector, ...connectors]);
-    return connector;
-  };
-
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>('/api/connectors', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: input.name,
-          platform: input.platform ?? 'notion',
-        }),
-      });
-      const [connector] = normalizeConnectorListResponse(response);
-      return connector ?? localFallback();
-    },
-    localFallback,
-  );
+  const response = await fetchJson<unknown>('/api/connectors', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: input.name,
+      platform: input.platform ?? 'notion',
+    }),
+  });
+  const [connector] = normalizeConnectorListResponse(response);
+  if (!connector) {
+    throw new ResourceConnectorApiError(502, 'Notion connector response is invalid. Please retry.');
+  }
+  return connector;
 }
 
 export async function updateConnector(
   connectorId: string,
   input: UpdateConnectorInput,
 ): Promise<ResourceConnector | null> {
-  const localFallback = () => mutateLocalConnector(connectorId, (connector) => ({
-    ...connector,
-    ...input,
-    name: input.name?.trim() || connector.name,
-    updatedAt: nowIso(),
-  }));
-
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}`, {
-        method: 'PATCH',
-        body: JSON.stringify(input),
-      });
-
-      const normalized = normalizeConnectorResponse(response);
-      return normalized.id ? normalized : localFallback();
-    },
-    localFallback,
-  );
+  const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  return normalizeConnectorResponse(response);
 }
 
 export async function deleteConnector(connectorId: string): Promise<boolean> {
-  return remoteOrLocal(
-    async () => {
-      await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}`, {
-        method: 'DELETE',
-      });
-      return true;
-    },
-    () => {
-      const connectors = readLocalConnectors().filter((connector) => connector.id !== connectorId);
-      writeLocalConnectors(connectors);
-      return true;
-    },
-  );
+  await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}`, {
+    method: 'DELETE',
+  });
+  return true;
 }
 
 export async function startConnectorAuth(connectorId: string): Promise<ResourceConnector | null> {
-  const localFallback = () => mutateLocalConnector(connectorId, (connector) => {
-    const auth = buildLocalAuthSession({
-      status: 'authenticating',
-      verificationCode: connector.auth.verificationCode,
-      verificationUrl: connector.auth.verificationUrl,
-      pollAttempts: 0,
-      message: 'Open Notion and confirm access. Polling will continue automatically.',
-    });
-
-    return {
-      ...connector,
-      status: 'authenticating',
-      updatedAt: nowIso(),
-      auth,
-    };
+  const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/auth/login`, {
+    method: 'POST',
   });
-
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/auth/login`, {
-        method: 'POST',
-      });
-      const normalized = normalizeConnectorResponse(response);
-      return normalized.id ? normalized : localFallback();
-    },
-    localFallback,
-  );
+  return normalizeConnectorResponse(response);
 }
 
 export async function pollConnectorAuth(connectorId: string): Promise<ResourceConnector | null> {
-  const localFallback = () => mutateLocalConnector(connectorId, (connector) => {
-    const nextAttempts = (connector.auth.pollAttempts ?? 0) + 1;
-    const expired = connector.auth.expiresAt ? Date.now() >= new Date(connector.auth.expiresAt).getTime() : false;
-    const authStatus: ConnectorAuthStatus = expired ? 'expired' : nextAttempts >= 2 ? 'authenticated' : 'authenticating';
-
-    return {
-      ...connector,
-      status: authStatus === 'authenticated' ? 'authenticated' : authStatus === 'expired' ? 'expired' : 'authenticating',
-      updatedAt: nowIso(),
-      auth: {
-        ...connector.auth,
-        status: authStatus,
-        pollAttempts: nextAttempts,
-        message: authStatus === 'authenticated'
-          ? 'Notion authentication completed.'
-          : authStatus === 'expired'
-            ? 'Notion authentication expired. Please start a new session.'
-            : 'Waiting for the browser confirmation in Notion.',
-      },
-    };
+  const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/auth/poll`, {
+    method: 'POST',
   });
-
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/auth/poll`, {
-        method: 'POST',
-      });
-      const normalized = normalizeConnectorResponse(response);
-      return normalized.id ? normalized : localFallback();
-    },
-    localFallback,
-  );
+  return normalizeConnectorResponse(response);
 }
 
 export async function listConnectorDatabases(connectorId: string): Promise<NotionResourceOption[]> {
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/databases`);
-      const databaseItems = (response as { databases?: unknown[] }).databases;
-      const responseItems = (response as { items?: unknown[] }).items;
-      const items: unknown[] = Array.isArray(response)
-        ? response
-        : Array.isArray(databaseItems)
-          ? databaseItems
-          : Array.isArray(responseItems)
-            ? responseItems
-            : [];
+  const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/databases`);
+  const databaseItems = (response as { databases?: unknown[] }).databases;
+  const responseItems = (response as { items?: unknown[] }).items;
+  const items: unknown[] = Array.isArray(response)
+    ? response
+    : Array.isArray(databaseItems)
+      ? databaseItems
+      : Array.isArray(responseItems)
+        ? responseItems
+        : [];
 
-      return items.map((raw): NotionResourceOption => {
-        const record = raw as Record<string, unknown>;
-        const pageCountValue = record.page_count ?? record.pageCount;
-        const propertiesSchema = asRecord(record.properties_schema ?? record.propertiesSchema);
-
-        return {
-          id: String(record.id ?? record.database_id ?? createId('database')),
-          title: String(record.title ?? record.name ?? 'Untitled database'),
-          subtitle: typeof record.subtitle === 'string'
-            ? record.subtitle
-            : typeof record.description === 'string'
-              ? record.description
-              : 'Notion database',
-          pageCount: typeof pageCountValue === 'number' ? pageCountValue : undefined,
-          selected: Boolean(record.selected),
-          url: typeof record.url === 'string' ? record.url : undefined,
-          lastEdited: typeof record.last_edited === 'string'
-            ? record.last_edited
-            : typeof record.lastEdited === 'string'
-              ? record.lastEdited
-              : undefined,
-          propertiesSchema,
-          raw: record.raw,
-        };
-      });
-    },
-    () => FALLBACK_DATABASES.map((item) => ({ ...item })),
-  );
+  return items.map((raw): NotionResourceOption => {
+    const record = raw as Record<string, unknown>;
+    const id = String(record.id ?? record.database_id ?? '').trim();
+    if (!id) {
+      throw new ResourceConnectorApiError(502, 'Notion database response is invalid. Please retry.');
+    }
+    const pageCountValue = record.page_count ?? record.pageCount;
+    const propertiesSchema = asRecord(record.properties_schema ?? record.propertiesSchema);
+    return {
+      id,
+      title: String(record.title ?? record.name ?? 'Untitled database'),
+      subtitle: typeof record.subtitle === 'string'
+        ? record.subtitle
+        : typeof record.description === 'string'
+          ? record.description
+          : 'Notion database',
+      pageCount: typeof pageCountValue === 'number' ? pageCountValue : undefined,
+      selected: Boolean(record.selected),
+      url: typeof record.url === 'string' ? record.url : undefined,
+      lastEdited: typeof record.last_edited === 'string'
+        ? record.last_edited
+        : typeof record.lastEdited === 'string'
+          ? record.lastEdited
+          : undefined,
+      propertiesSchema,
+      raw: record.raw,
+    };
+  });
 }
 
 export async function listConnectorPages(connectorId: string): Promise<NotionResourceOption[]> {
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/pages`);
-      const pageItems = (response as { pages?: unknown[] }).pages;
-      const responseItems = (response as { items?: unknown[] }).items;
-      const items: unknown[] = Array.isArray(response)
-        ? response
-        : Array.isArray(pageItems)
-          ? pageItems
-          : Array.isArray(responseItems)
-            ? responseItems
-            : [];
+  const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/pages`);
+  const pageItems = (response as { pages?: unknown[] }).pages;
+  const responseItems = (response as { items?: unknown[] }).items;
+  const items: unknown[] = Array.isArray(response)
+    ? response
+    : Array.isArray(pageItems)
+      ? pageItems
+      : Array.isArray(responseItems)
+        ? responseItems
+        : [];
 
-      return items.map((raw): NotionResourceOption => {
-        const record = raw as Record<string, unknown>;
-        return {
-          id: String(record.id ?? record.page_id ?? createId('page')),
-          title: String(record.title ?? record.name ?? 'Untitled page'),
-          subtitle: typeof record.subtitle === 'string'
-            ? record.subtitle
-            : typeof record.description === 'string'
-              ? record.description
-              : 'Standalone page',
-          selected: Boolean(record.selected),
-          url: typeof record.url === 'string' ? record.url : undefined,
-          lastEdited: typeof record.last_edited === 'string'
-            ? record.last_edited
-            : typeof record.lastEdited === 'string'
-              ? record.lastEdited
-              : undefined,
-          raw: record.raw,
-        };
-      });
-    },
-    () => FALLBACK_PAGES.map((item) => ({ ...item })),
-  );
+  return items.map((raw): NotionResourceOption => {
+    const record = raw as Record<string, unknown>;
+    const id = String(record.id ?? record.page_id ?? '').trim();
+    if (!id) {
+      throw new ResourceConnectorApiError(502, 'Notion page response is invalid. Please retry.');
+    }
+    return {
+      id,
+      title: String(record.title ?? record.name ?? 'Untitled page'),
+      subtitle: typeof record.subtitle === 'string'
+        ? record.subtitle
+        : typeof record.description === 'string'
+          ? record.description
+          : 'Standalone page',
+      selected: Boolean(record.selected),
+      url: typeof record.url === 'string' ? record.url : undefined,
+      lastEdited: typeof record.last_edited === 'string'
+        ? record.last_edited
+        : typeof record.lastEdited === 'string'
+          ? record.lastEdited
+          : undefined,
+      raw: record.raw,
+    };
+  });
 }
 
 export async function selectConnectorResources(
   connectorId: string,
   selection: ConnectorResourceSelection,
 ): Promise<ResourceConnector | null> {
-  const selectedDatabaseIdSet = new Set(selection.databaseIds);
-  const selectedPageIdSet = new Set(selection.pageIds);
-  const databaseOptions = selection.databaseOptions ?? FALLBACK_DATABASES;
-  const pageOptions = selection.pageOptions ?? FALLBACK_PAGES;
+  const databaseOptions = selection.databaseOptions ?? [];
+  const pageOptions = selection.pageOptions ?? [];
   const databaseOptionById = new Map(databaseOptions.map((item) => [item.id, item]));
   const pageOptionById = new Map(pageOptions.map((item) => [item.id, item]));
   const selectedDatabasePayload = selection.databaseIds.map((id) => {
@@ -828,78 +684,38 @@ export async function selectConnectorResources(
     };
   });
 
-  const localFallback = () => {
-    const connectors = readLocalConnectors();
-    const connector = connectors.find((item) => item.id === connectorId);
-    if (!connector) return null;
-
-    const databases = databaseOptions.filter((item) => selectedDatabaseIdSet.has(item.id));
-    const pages = pageOptions.filter((item) => selectedPageIdSet.has(item.id));
-    const nextConnector = {
-      ...connector,
-      ...mergeSelectedSources(connector, databases, pages, selection),
-      status: selection.databaseIds.length + selection.pageIds.length > 0 ? 'synced' as const : connector.status,
-    };
-
-    writeLocalConnectors(connectors.map((item) => (item.id === connectorId ? nextConnector : item)));
-    return nextConnector;
-  };
-
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/resources/select`, {
-        method: 'POST',
-        body: JSON.stringify({
-          selected_databases: selectedDatabasePayload,
-          selected_pages: selectedPagePayload,
-        }),
-      });
-      const normalized = normalizeConnectorResponse(response);
-      return normalized.id ? normalized : localFallback();
-    },
-    localFallback,
-  );
+  const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/resources/select`, {
+    method: 'POST',
+    body: JSON.stringify({
+      selected_databases: selectedDatabasePayload,
+      selected_pages: selectedPagePayload,
+    }),
+  });
+  return normalizeConnectorResponse(response);
 }
 
 export async function refreshConnectorSources(connectorId: string): Promise<ResourceConnector | null> {
-  const localFallback = () => mutateLocalConnector(connectorId, (connector) => {
-    const now = nowIso();
-    return {
-      ...connector,
-      status: connector.sources.length > 0 ? 'synced' : connector.status,
-      updatedAt: now,
-      lastSyncedAt: connector.sources.length > 0 ? now : connector.lastSyncedAt,
-      sources: connector.sources.map((source) => ({
-        ...source,
-        status: source.status === 'error' ? 'error' : 'synced',
-        updatedAt: now,
-        syncedAt: now,
-      })),
-      auth: {
-        ...connector.auth,
-        status: connector.auth.status === 'authenticated' ? 'authenticated' : connector.auth.status,
-      },
-    };
+  const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/sync`, {
+    method: 'POST',
   });
-
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/sync`, {
-        method: 'POST',
-      });
-      const normalized = normalizeConnectorResponse(response);
-      return normalized.id ? normalized : localFallback();
-    },
-    localFallback,
-  );
+  return normalizeConnectorResponse(response);
 }
 
 export async function getConnector(connectorId: string): Promise<ResourceConnector | null> {
-  return remoteOrLocal(
-    async () => {
-      const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}`);
-      return normalizeConnectorResponse(response);
-    },
-    () => readLocalConnectors().find((connector) => connector.id === connectorId) ?? null,
-  );
+  const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}`);
+  return normalizeConnectorResponse(response);
+}
+
+export async function updateConnectorSyncPolicy(
+  connectorId: string,
+  input: UpdateConnectorSyncPolicyInput,
+): Promise<ResourceConnector> {
+  const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/sync-policy`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      enabled: input.enabled,
+      interval_minutes: input.intervalMinutes,
+    }),
+  });
+  return normalizeConnectorResponse(response);
 }

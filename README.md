@@ -2,6 +2,7 @@
 <!-- [Output] Explain what Ink & Memory is, how to install and run it, how versions are paired, and which operational boundaries must be respected. -->
 <!-- [Pos] Canonical English repository entry guide; README.zh.md must remain a faithful Chinese mirror. -->
 <!-- [Sync] 2026-08-28: replace stale branch/setup notes with the current develop workflow, exact SDK/Runtime pairing, local Runtime installation, troubleshooting, and operator notices. -->
+<!-- [Sync] 2026-08-28: document pinned ntn installation plus actor-scoped credentials/current snapshots in agentdata, policy-driven background refresh, and per-Thread projection. -->
 
 # Ink & Memory
 
@@ -24,6 +25,7 @@ This repository contains the Dream application. It does not own the shared datab
 - **Dream** — launch a Dream Run and review scripts, storyboards, prompts, and generated artifacts.
 - **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
 - **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
+- **Notion resources** — connect once in Settings, select accessible resources, and use the built-in read-only Notion Skill without exposing a token or CLI path to the Agent.
 - **Platform integration** — consume authenticated model aliases, subscription eligibility, usage, and billing from Admin/Gateway.
 
 Deck marketplace distribution is intentionally deferred. See [docs/design/deck-register/README.md](docs/design/deck-register/README.md).
@@ -61,6 +63,7 @@ Dream treats the Python SDK and npm Runtime as one compatibility pair even thoug
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
 | npm Runtime | `@glide-the/ink-claude-code-dream@0.1.3` |
 | Runtime CLI compatibility output | `2.1.241 (Claude Code)` |
+| Notion CLI | `ntn@0.15.1` |
 
 Important: `uv sync` manages the Python environment only. It installs the Python SDK but does **not** install or upgrade the npm Runtime. A source checkout that expects Runtime `0.1.3` will reject a `0.1.2` executable even when all capability flags are otherwise valid.
 
@@ -139,7 +142,7 @@ cd backend
 uv run --with pytest==9.1.1 pytest -q
 ```
 
-### 4. Install the exact Claude Runtime
+### 4. Install the exact Claude Runtime and Notion CLI
 
 Install the public selector package separately because it is an npm/native artifact:
 
@@ -167,6 +170,17 @@ This command must exit 0 and print the resolved `0.1.3` executable path. If `com
 
 Do not use `CLAUDE_CODE_CLI_PATH` to bypass the normal manifest-qualified Runtime path. That variable is reserved for an explicit, reviewed absolute-path rollback.
 
+Install the Notion CLI used by Dream's backend-owned connector path:
+
+```bash
+npm install --global ntn@0.15.1
+ntn --version
+ntn login --help
+ntn doctor --help
+```
+
+`ntn --version` must print `ntn 0.15.1`. Docker and AutoDL releases install and verify the same version automatically. Users authorize through Dream's Settings UI; do not run `ntn login` in the service account's default home as application setup.
+
 ### 5. Configure Dream
 
 Create the private Dream environment file if needed:
@@ -184,9 +198,18 @@ INK_DATABASE_ENV_FILE=/absolute/path/to/ink-admin-memory/.env.local
 
 INK_GATEWAY_ENABLED=1
 INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
+
+AGENT_CWD=/absolute/path/to/agentdata/agent-workspace
+INK_NOTION_RUNTIME_ROOT=/absolute/path/to/agentdata/notion-runtime
+INK_NOTION_MAX_SNAPSHOT_BYTES=134217728
+INK_NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS=60
 ```
 
 Admin provisioning writes the remaining local service identity and model aliases to gitignored environment files. Do not copy Provider keys into Dream and never expose service credentials to the browser.
+
+`INK_NOTION_RUNTIME_ROOT` must be an absolute server-owned path in the same persistent agentdata area as `AGENT_CWD`. Dream stores each user's opaque credential source under `users/<actor-hash>/home` and each connector's latest successful lightweight index under `users/<actor-hash>/snapshots/<connector-id>/current.json`. Saving a resource selection performs the first index sync immediately; the connector's server-owned strategy then refreshes due indexes in the background, without requiring a Chat or workspace initialization. These snapshots contain selected IDs and compact metadata only, never page Markdown, blocks, or attachments.
+
+For a Chat turn with the trusted thread workspace enabled, Runtime initialization only copies the current user's latest successful credential and index into `{AGENT_CWD}/{thread_id}/.notion-home` and `.notion`; it does not call Notion or run an index sync. When the Agent reads an indexed `.notion/pages/<page-id>.json` virtual path, the Runtime validates that ID and fetches only that page's current Markdown. Workspace Mode disabled keeps both projections unavailable and the page hook fails closed because that mode intentionally has no workspace filesystem sandbox. Do not set application `NOTION_HOME` to `~/.config/notion`, a browser-supplied path, or a shared process-user directory; the Agent cannot read or write the projected credential files.
 
 ### 6. Start Dream
 
@@ -253,6 +276,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 6. **No service-wide cleanup.** Tests may stop only processes and temporary resources created by that test run.
 7. **Published versions are immutable.** Fix a bad Runtime with a forward release or an explicit reviewed rollback; do not overwrite or unpublish an accepted version as normal rollback.
 8. **Model output capability is server-owned.** Admin's selected model `maxOutputTokens` is projected to the Runtime; browser settings, user env, workspace files, and Gateway body rewriting must not replace it.
+9. **Notion credentials and lightweight indexes are actor-owned.** Canonical durable state belongs under server agentdata; policy-driven index refresh is independent of Chat, Runtime receives only per-Thread projections, page bodies are read on demand, and process `HOME`, ambient `NOTION_API_TOKEN`, browser config, and workspace files cannot override either source.
 
 ## Troubleshooting
 
