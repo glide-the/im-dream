@@ -1,9 +1,10 @@
-# [Input] Server-owned Notion credential home and centralized CLI policy.
-# [Output] Safe ntn login/poll/doctor helpers with minimal environment and redacted failures.
+# [Input] Server-owned Notion credential home and centralized CLI installation/auth policy.
+# [Output] Safe ntn installation status plus login/poll/doctor helpers with a minimal environment and stable failures.
 # [Pos] auth driver node in backend/notion; paths are resolved only by credentials.py.
 # [Sync] 2026-08-28: remove request/process-home resolution, ambient token inheritance,
 #                    public path output, and obsolete `ntn auth status` usage.
 # [Sync] 2026-08-28: normalize imports during the final agentdata credential audit.
+# [Sync] 2026-08-30: expose the pinned ntn installation prerequisite before connector authentication.
 
 """Notion authentication helpers backed by the server-owned ``ntn`` CLI."""
 from __future__ import annotations
@@ -26,6 +27,8 @@ from .errors import (
 _DEFAULT_LOGIN_TIMEOUT_S = 20.0
 _DEFAULT_POLL_TIMEOUT_S = 15.0
 _DEFAULT_STATUS_TIMEOUT_S = 10.0
+NOTION_CLI_VERSION = "0.15.1"
+NOTION_CLI_INSTALL_COMMAND = f"npm install -g ntn@{NOTION_CLI_VERSION}"
 _URL_RE = re.compile(r"https?://\S+")
 _VERIFICATION_CODE_RE = re.compile(r"\b[A-Z0-9]{3,5}(?:-[A-Z0-9]{2,5})+\b")
 _NO_PENDING_SESSION_TOKENS = (
@@ -62,6 +65,25 @@ class AuthStatusResult:
 
     status: str
     detail: str = ""
+
+
+@dataclass(frozen=True)
+class NotionCliInstallation:
+    """Path-free server installation state for Settings and capability gating."""
+
+    status: str
+    required_version: str = NOTION_CLI_VERSION
+    install_command: str = NOTION_CLI_INSTALL_COMMAND
+
+
+def get_notion_cli_installation() -> NotionCliInstallation:
+    """Return whether the Dream host can resolve its server-controlled ntn."""
+
+    try:
+        resolve_ntn_executable()
+    except NotionCLIUnavailableError:
+        return NotionCliInstallation(status="missing")
+    return NotionCliInstallation(status="installed")
 
 
 def _positive_timeout(name: str, default: float, *, maximum: float = 300.0) -> float:
@@ -248,8 +270,12 @@ def normalize_login_result(result: object) -> dict[str, object]:
 __all__ = [
     "AuthStatusResult",
     "LoginInitResult",
+    "NOTION_CLI_INSTALL_COMMAND",
+    "NOTION_CLI_VERSION",
+    "NotionCliInstallation",
     "build_notion_env",
     "ensure_notion_home",
+    "get_notion_cli_installation",
     "normalize_login_result",
     "poll_login",
     "resolve_ntn_executable",

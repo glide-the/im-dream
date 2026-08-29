@@ -90,6 +90,7 @@
 #                    projection while allowing the Runtime to read its Path.
 # [Sync] 2026-08-28: refresh backend-owned built-in Skills in every full workspace
 #                    and deny Agent tools access to thread-projected Notion credentials.
+# [Sync] 2026-08-30: remove the superseded Notion projection read/write deny because sdk_env now binds that exact thread home for ntn Bash execution.
 # [Sync] 2026-08-28: make the projected `.notion` index read-only so the lazy
 #                    page hook cannot be widened by Agent-authored IDs.
 
@@ -530,8 +531,6 @@ def _workspace_sandbox_config(
         / ".claude-tmp"
         / CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME
     )
-    thread_notion_home = workspace_abs / ".notion-home"
-    thread_notion_credentials = thread_notion_home / "auth.json"
     enabled = bool(enabled)
 
     allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
@@ -560,7 +559,6 @@ def _workspace_sandbox_config(
                 str(thread_credentials),
                 str(thread_user_config),
                 str(thread_mcp_projection),
-                str(thread_notion_home),
             ],
             "allowRead": allow_read,
             # Keep .claude/skills writable so skill symlinks and
@@ -583,13 +581,11 @@ def _workspace_sandbox_config(
                 str(thread_credentials),
                 str(thread_user_config),
                 str(thread_mcp_projection),
-                str(thread_notion_home),
             ],
         },
         "credentials": {
             "files": [
                 {"path": str(thread_credentials), "mode": "deny"},
-                {"path": str(thread_notion_credentials), "mode": "deny"},
             ],
         },
     }

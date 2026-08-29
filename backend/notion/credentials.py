@@ -1,12 +1,13 @@
 """Server-owned Notion credential homes and per-thread projections.
 
 [Input] Canonical Dream actor IDs, server process policy, ntn file credentials, and validated Agent workspaces.
-[Output] Private agentdata user homes, isolated auth-session/snapshot roots, atomic credential promotion, and thread-local Runtime projections.
+[Output] Private agentdata user homes, isolated auth-session/snapshot roots, atomic credential promotion, and thread-local Runtime/ntn projections.
 [Pos] Notion credential identity boundary shared by connector auth and every Agent turn.
 [Sync] 2026-08-28: replace process-user ~/.config and request-controlled homes with actor-scoped agentdata state and per-thread delivery.
 [Sync] 2026-08-28: reserve the same actor root for connector-owned canonical snapshots while keeping them out of the CLI credential projection.
 [Sync] 2026-08-29: revoke both private credentials and the public Notion index
                     projection from every known actor thread on disconnect.
+[Sync] 2026-08-30: project an existing workers.json beside auth/config/workspaces for the bound ntn Bash runtime.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ NOTION_PROJECTED_FILENAMES: tuple[str, ...] = (
     NOTION_AUTH_FILENAME,
     "config.json",
     "workspaces.json",
+    "workers.json",
 )
 _AUTH_SESSION_RE = re.compile(r"^[a-f0-9]{32}$")
 _DEFAULT_MAX_CREDENTIAL_FILE_BYTES = 1024 * 1024

@@ -34,6 +34,7 @@
 # [Sync] 2026-08-19: cover explicit sensitive-root read isolation, exact MCP
 #                    credential deny-read/write, and the native CLI nested-
 #                    container optional-seccomp skip without denyRead `/`.
+# [Sync] 2026-08-30: allow the current thread Notion projection for Agent ntn CLI use.
 # [Sync] 2026-07-26: cover sandbox fs write policy — default Claude TMPDIR
 #                    allowWrite (cwd-* zsh noise fix), temp-root override,
 #                    sandbox_fs_allowed_write_paths append + denyWrite
@@ -176,7 +177,6 @@ class TestInitWorkspace(unittest.TestCase):
         thread_user_config = str((ws / ".claude-home" / ".claude.json").resolve())
         thread_mcp_projection = str((ws / ".claude-tmp" / "mcp-config").resolve())
         thread_notion_home = str((ws / ".notion-home").resolve())
-        thread_notion_credentials = str((ws / ".notion-home" / "auth.json").resolve())
         deny_read = sandbox["filesystem"]["denyRead"]
         self.assertNotIn("/", deny_read)
         self.assertIn(str(Path(self._tmp.name).resolve()), deny_read)
@@ -185,12 +185,11 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertIn(thread_credentials, deny_read)
         self.assertIn(thread_user_config, deny_read)
         self.assertIn(thread_mcp_projection, deny_read)
-        self.assertIn(thread_notion_home, deny_read)
+        self.assertNotIn(thread_notion_home, deny_read)
         self.assertEqual(
             sandbox["credentials"]["files"],
             [
                 {"path": thread_credentials, "mode": "deny"},
-                {"path": thread_notion_credentials, "mode": "deny"},
             ],
         )
         self.assertEqual(sandbox["filesystem"]["allowRead"][0], str(ws.resolve()))
@@ -246,7 +245,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertIn(thread_credentials, sandbox["filesystem"]["denyWrite"])
         self.assertIn(thread_user_config, sandbox["filesystem"]["denyWrite"])
         self.assertIn(thread_mcp_projection, sandbox["filesystem"]["denyWrite"])
-        self.assertIn(thread_notion_home, sandbox["filesystem"]["denyWrite"])
+        self.assertNotIn(thread_notion_home, sandbox["filesystem"]["denyWrite"])
 
     def test_can_disable_sandbox_settings_for_workspace_mode_off(self):
         ws = init_workspace("sandbox-disabled", sandbox_enabled=False)
@@ -346,8 +345,8 @@ class TestInitWorkspace(unittest.TestCase):
                 "/var/cache",
             ],
         )
-        # Projected MCP identity files are added to denyWrite; deny always wins
-        # over workspace/user allow paths.
+        # Projected MCP identity files remain denyWrite; the thread Notion home
+        # is intentionally available to the Agent CLI binding.
         self.assertEqual(
             sandbox["filesystem"]["denyWrite"],
             [
@@ -363,7 +362,6 @@ class TestInitWorkspace(unittest.TestCase):
                 str(ws.resolve() / ".claude-home" / ".credentials.json"),
                 str(ws.resolve() / ".claude-home" / ".claude.json"),
                 str(ws.resolve() / ".claude-tmp" / "mcp-config"),
-                str(ws.resolve() / ".notion-home"),
             ],
         )
 

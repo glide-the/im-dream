@@ -10,6 +10,8 @@
 #                    a thread; virtual page Reads remain hook-only during migration.
 # [Sync] 2026-08-29: prove each materialized `.notion/README.md` indexes the
 #                    installed notion-session Skill and its index-first workflow.
+# [Sync] 2026-08-30: prove README Skill rows and availability are rendered from
+#                    build_notion_capability_catalog instead of a static list.
 
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import json
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -241,19 +244,45 @@ class NotionSnapshotCleanupTest(unittest.TestCase):
                 },
             }
 
-            notion_sync.materialize_workspace_snapshot(
-                workspace,
-                connector=snapshot["connector"],
-                snapshot=snapshot,
-            )
+            catalog = {
+                "package_revision": "catalog-revision-1",
+                "skills": [
+                    {
+                        "id": "notion-session",
+                        "title": "Notion 工作空间助手",
+                        "availability": "available",
+                    },
+                    {
+                        "id": "notion-cli",
+                        "title": "Notion CLI 工作空间数据助手",
+                        "availability": "requires_installation",
+                    },
+                ],
+            }
+            with unittest.mock.patch(
+                "notion.capabilities.build_notion_capability_catalog",
+                return_value=catalog,
+            ) as build_catalog:
+                notion_sync.materialize_workspace_snapshot(
+                    workspace,
+                    connector=snapshot["connector"],
+                    snapshot=snapshot,
+                )
+            build_catalog.assert_called_once_with(snapshot["connector"])
 
             readme = (workspace / ".notion" / "README.md").read_text(
                 encoding="utf-8"
             )
             self.assertIn("## Skill index", readme)
+            self.assertIn("`catalog-revision-1`", readme)
             self.assertIn("`notion-session`", readme)
             self.assertIn("`skills/notion-session/SKILL.md`", readme)
             self.assertIn("`.claude/skills/notion-session`", readme)
+            self.assertIn("`notion-cli`", readme)
+            self.assertIn("Notion CLI 工作空间数据助手", readme)
+            self.assertIn("`requires_installation`", readme)
+            self.assertIn("`skills/notion-cli/SKILL.md`", readme)
+            self.assertIn("`.claude/skills/notion-cli`", readme)
             self.assertIn("index-first workflow", readme)
             self.assertIn("continue any answer that does not depend on Notion", readme)
 

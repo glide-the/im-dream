@@ -5,8 +5,9 @@
 // [Sync] 2026-08-29: keep decorative section indices, redundant normal-state notices, and the four-item status summary absent from the overview.
 // [Sync] 2026-08-29: require the compact overview to expose the real Read-hook and workspace-materializer operations.
 // [Sync] 2026-08-29: lock the skeleton-proportioned overview without section subtitles, Skill summaries, resource counts, or recent-sync copy.
-// [Sync] 2026-08-30: require both installed Notion Skills and verify notion-cli opens its real Bash/ntn package detail.
+// [Sync] 2026-08-30: require ntn installation metadata and verify connected notion-cli is available through Agent Bash.
 // [Sync] 2026-08-30: require the overview heading to identify the connector as Notion CLI.
+// [Sync] 2026-08-30: classify Vite 8 HMR transport-send failures as harness diagnostics during isolated-port QA.
 
 import { expect, test } from '@playwright/test';
 
@@ -17,13 +18,18 @@ test.use({ channel: 'chrome', locale: 'zh-CN', viewport: { width: 1180, height: 
 test('Notion Settings exposes the seven-section overview and focused child views', async ({ page }) => {
   const applicationDiagnostics: string[] = [];
   const harnessDiagnostics: string[] = [];
+  const isViteHarnessDiagnostic = (text: string) => (
+    text.includes('WebSocket connection to')
+    || text.includes('[vite] failed to connect')
+    || text.includes('Failed to send error to Vite server')
+  );
   let deleteRequests = 0;
   let discoveryRequests = 0;
   let disconnected = false;
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     const text = message.text();
-    if (text.includes('WebSocket connection to') || text.includes('[vite] failed to connect')) {
+    if (isViteHarnessDiagnostic(text)) {
       harnessDiagnostics.push(text);
     } else {
       applicationDiagnostics.push(text);
@@ -93,12 +99,13 @@ test('Notion Settings exposes the seven-section overview and focused child views
     if (request.method() === 'GET' && path === '/api/connectors/notion/capabilities') {
       const availability = disconnected ? 'requires_connection' : 'available';
       await route.fulfill({ json: { catalog: {
-        schema_version: 3,
+        schema_version: 4,
         package_revision: 'revision-1',
+        cli_installation: { status: 'installed', required_version: '0.15.1', install_command: 'npm install -g ntn@0.15.1' },
         mcp_inventory: { status: 'not_integrated', revision: null, read_status: 'not_integrated', write_status: 'not_integrated' },
         skills: [
           { id: 'notion-session', title: 'Notion 工作空间助手', description: '只读搜索和读取当前用户已挂载的 Notion 内容', source: 'builtin', availability },
-          { id: 'notion-cli', title: 'Notion CLI 工作空间数据助手', description: '通过 ntn CLI 访问 Notion', source: 'builtin', availability: disconnected ? 'requires_connection' : 'unavailable' },
+          { id: 'notion-cli', title: 'Notion CLI 工作空间数据助手', description: '通过 ntn CLI 访问 Notion', source: 'builtin', availability },
         ],
         operations: [
           { id: 'notion-page-read-hook', title: '按需读取页面正文', description: '只在回答需要时校验已选范围，并读取一个页面的最新 Markdown。', kind: 'read', source: 'runtime_hook', entrypoint: 'apply_notion_page_read_redirect', availability },
@@ -122,7 +129,7 @@ test('Notion Settings exposes the seven-section overview and focused child views
     if (request.method() === 'GET' && path === '/api/connectors/notion/skills/notion-cli') {
       await route.fulfill({ json: {
         package_revision: 'cli-revision-1',
-        skill: { id: 'notion-cli', title: 'Notion CLI 工作空间数据助手', description: '通过 ntn CLI 访问 Notion', source: 'builtin', availability: disconnected ? 'requires_connection' : 'unavailable', tools: ['Bash'], body: '# Notion CLI 工作空间数据助手\n\n## 核心命令速查\n\n```bash\nntn api v1/search --data \'{"query":"关键词"}\'\n```' },
+        skill: { id: 'notion-cli', title: 'Notion CLI 工作空间数据助手', description: '通过 ntn CLI 访问 Notion', source: 'builtin', availability: disconnected ? 'requires_connection' : 'available', tools: ['Bash'], body: '# Notion CLI 工作空间数据助手\n\n## 核心命令速查\n\n```bash\nntn api v1/search --data \'{"query":"关键词"}\'\n```' },
         files: [
           { id: 'notion-search', relative_path: 'references/notion-search.md', media_type: 'text/markdown', size_bytes: 1536 },
           { id: 'notion-page-read', relative_path: 'references/notion-page-read.md', media_type: 'text/markdown', size_bytes: 2048 },
@@ -210,7 +217,7 @@ test('Notion Settings exposes the seven-section overview and focused child views
   const skillTrigger = page.getByRole('button', { name: /Notion 工作空间助手/ });
   const cliSkillTrigger = page.getByRole('button', { name: /Notion CLI 工作空间数据助手/ });
   await expect(cliSkillTrigger).toBeVisible();
-  await expect(cliSkillTrigger).toContainText('暂不可用');
+  await expect(cliSkillTrigger).toContainText('可用');
   await skillTrigger.click();
   await expect(page.getByRole('heading', { name: 'Skill 说明' })).toBeVisible();
   await expect(page.getByText('不读取凭证。')).toBeVisible();
@@ -262,5 +269,5 @@ test('Notion Settings exposes the seven-section overview and focused child views
   await expect(page.getByRole('button', { name: '连接 Notion' })).toBeVisible();
   await expect(page.getByText('未连接', { exact: true })).toBeVisible();
   expect(applicationDiagnostics).toEqual([]);
-  expect(harnessDiagnostics.every((item) => item.includes('WebSocket') || item.includes('[vite]'))).toBe(true);
+  expect(harnessDiagnostics.every(isViteHarnessDiagnostic)).toBe(true);
 });

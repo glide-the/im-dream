@@ -8,6 +8,8 @@
 // [Sync] 2026-08-29: render operations from the real Read-hook/workspace-materializer catalog instead of synthetic Skill/MCP operation rows.
 // [Sync] 2026-08-29: restore skeleton-proportioned section rhythm and remove overview-only helper copy and resource statistics.
 // [Sync] 2026-08-30: identify the connector as Notion CLI in the overview heading while retaining Notion as the provider name elsewhere.
+// [Sync] 2026-08-30: block auth on a missing server ntn installation and show the backend-owned pinned install command.
+// [Sync] 2026-08-30: remove the overview title subtitle and replace ambiguous CLI availability with installation/connection-aware states.
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { FaExternalLinkAlt, FaPuzzlePiece } from 'react-icons/fa';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
@@ -136,15 +138,17 @@ function formatStatusLabel(
 function availabilityLabel(availability: NotionCapabilityAvailability): string {
   switch (availability) {
     case 'available': return '可用';
+    case 'requires_installation': return '需安装 ntn';
     case 'requires_connection': return '连接后可用';
     case 'requires_scope': return '选择资源后可用';
-    default: return '暂不可用';
+    default: return '不可用';
   }
 }
 
 function availabilityTone(availability: NotionCapabilityAvailability): DetailTone {
   switch (availability) {
     case 'available': return 'success';
+    case 'requires_installation': return 'warning';
     case 'requires_connection': return 'warning';
     case 'requires_scope': return 'info';
     default: return 'neutral';
@@ -378,6 +382,8 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
 
   const connectorId = connector?.id ?? null;
   const connectorAuthStatus = connector?.auth.status ?? 'idle';
+  const cliInstallation = catalog?.cliInstallation ?? null;
+  const cliMissing = cliInstallation?.status === 'missing';
   const canEditResources = connectorAuthStatus === 'authenticated';
   const syncPolicy = connector?.syncPolicy;
   const detailStatus = getDetailStatus(connector, loading);
@@ -522,7 +528,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   }, [connector]);
 
   const handleStartAuth = useCallback(async () => {
-    if (connecting) return;
+    if (connecting || cliMissing) return;
     setConnecting(true);
     setPageError(null);
     try {
@@ -536,7 +542,7 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
     } finally {
       setConnecting(false);
     }
-  }, [connecting, ensureSingleConnector, reloadCatalog]);
+  }, [cliMissing, connecting, ensureSingleConnector, reloadCatalog]);
 
   const handleDisconnect = useCallback(async () => {
     if (!connectorId || disconnecting) return;
@@ -822,12 +828,11 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
           <NotionMark />
           <div>
             <div className="notion-detail__title-row"><h1>Notion CLI</h1><Badge label={detailStatus.label} tone={detailStatus.tone} /></div>
-            <p>在对话中安全查找和按需读取你选择的 Notion 内容。</p>
           </div>
         </div>
         <div className="notion-detail__hero-actions">
-          <button className="notion-detail__button notion-detail__button--primary" disabled={connecting || connectorAuthStatus === 'authenticating'} onClick={() => void handleStartAuth()} type="button">
-            {connecting ? <IconLoader className="notion-detail__spinner" /> : <IconShare />}{connecting ? '连接中' : authActionLabel}
+          <button className="notion-detail__button notion-detail__button--primary" disabled={catalogLoading || cliMissing || connecting || connectorAuthStatus === 'authenticating'} onClick={() => void handleStartAuth()} type="button">
+            {connecting ? <IconLoader className="notion-detail__spinner" /> : <IconShare />}{connecting ? '连接中' : cliMissing ? '先安装 ntn' : authActionLabel}
           </button>
           <details className="notion-detail__more">
             <summary aria-label="更多 Notion 操作"><IconMoreHorizontal /></summary>
@@ -841,6 +846,12 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
           </div>
         ) : null}
       </header>
+
+      {cliMissing && cliInstallation ? (
+        <Notice tone="warning" title="连接前需要安装 Notion CLI">
+          在 Dream 服务所在机器运行 <code>{cliInstallation.installCommand}</code>，安装完成后刷新本页继续认证。
+        </Notice>
+      ) : null}
 
       {pageError ? <Notice tone="danger" title="Notion 状态未更新">{pageError}</Notice> : null}
 

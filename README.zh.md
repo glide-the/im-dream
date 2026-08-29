@@ -5,7 +5,7 @@
 <!-- [同步] 2026-08-28：记录固定 ntn 安装、agentdata 内按用户隔离的凭证与当前快照、后台策略同步及 per-Thread 投影合同。 -->
 <!-- [同步] 2026-08-29：记录当前选择范围过滤、thread 最小元数据、空范围撤销和重新授权 LKG 行为。 -->
 <!-- [同步] 2026-08-29：记录 Settings Notion 能力/Skill 审阅界面和 Hosted MCP 读写的真实边界。 -->
-<!-- [同步] 2026-08-30：记录同步安装的 notion-session/notion-cli 包，并保持 actor 凭证隔离不变。 -->
+<!-- [同步] 2026-08-30：记录按 actor/thread 绑定的 Notion CLI 环境注入与认证前 ntn 安装检查。 -->
 
 # Ink & Memory
 
@@ -28,7 +28,7 @@ Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 
 - **Dream** —— 启动 Dream Run，审阅剧本、分镜、提示词和生成产物。
 - **Decks** —— 创建并版本化 Deck、Agent、Prompt、资源和 Claude Plugin 引用。
 - **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、MCP Server、Skill 和插件。
-- **Notion 资源** —— 在 Settings 中连接并选择精确允许范围，审阅已安装的 `notion-session`、`notion-cli` 与安全 reference 文件，并在 Chat 外刷新轻量索引。Read Hook 可在不暴露凭证的情况下使用；同步安装的 CLI 包不会获得 actor-owned `NOTION_HOME`，Hosted Notion MCP 读写仍明确不可用。
+- **Notion 资源** —— 在 Settings 中连接并选择精确允许范围，审阅已安装的 `notion-session` 与 `notion-cli`，并在 Chat 外刷新轻量索引。Dream 在认证前检查固定版本 `ntn` 是否已安装，并把当前 actor/thread 投影作为 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与 `NOTION_WORKERS_CONFIG_FILE` 注入 Agent Runtime Bash。Hosted Notion MCP 与这条 CLI 路径相互独立。
 - **平台集成** —— 从 Admin/Gateway 获取已认证的模型 alias、订阅资格、用量和计费能力。
 
 Deck 市场分发当前明确延期，参见 [docs/design/deck-register/README.md](docs/design/deck-register/README.md)。
@@ -212,7 +212,7 @@ Admin provision 命令会把其余本机服务身份和模型 alias 写入 gitig
 
 `INK_NOTION_RUNTIME_ROOT` 必须是与 `AGENT_CWD` 位于同一持久 agentdata 区域的服务端绝对路径。Dream 将每个用户的不透明凭证源保存到 `users/<actor-hash>/home`，并将每个连接器最近一次成功的轻量索引保存到 `users/<actor-hash>/snapshots/<connector-id>/current.json`。保存资源选择时立即执行首次索引同步；之后由连接器的服务端策略在后台刷新到期索引，不要求用户先发起 Chat 或初始化 workspace。索引只含已选 ID 与紧凑元数据，不保存页面 Markdown、blocks 或附件。
 
-启用可信 thread workspace 的 Chat turn 只会在 Runtime 初始化时把当前用户有效凭证和最近一次成功索引复制到 `{AGENT_CWD}/{thread_id}/.notion-home` 与 `.notion`；投影前先与用户当前选择范围求交，并最小化连接器元数据。该过程不会调用 Notion 或执行索引同步，因此即使新索引刷新失败，清空或缩小选择范围也会在下一 turn 生效。当 Agent 读取已在索引中的 `.notion/pages/<page-id>.json` 虚拟路径时，Runtime 会先校验 ID，再只获取该页当前 Markdown。Workspace Mode 关闭时两种投影都不可用，page hook 保持 fail closed，因为该模式按设计不启用 workspace 文件系统 sandbox。禁止把应用 `NOTION_HOME` 指向 `~/.config/notion`、浏览器提交的路径或共享进程用户目录；Agent 无法读取或写入投影文件。
+启用可信 thread workspace 的 Chat turn 会在 Runtime 初始化时把当前用户有效凭证和最近一次成功索引复制到 `{AGENT_CWD}/{thread_id}/.notion-home` 与 `.notion`；投影前先与用户当前选择范围求交，并最小化连接器元数据。随后 `sdk_env.py` 将该精确 thread 投影通过 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与 `NOTION_WORKERS_CONFIG_FILE` 绑定到 Agent Runtime Bash；ambient 值会被清空，不能选择其他用户或 home。投影过程不会调用 Notion 或执行索引同步，因此即使新索引刷新失败，清空或缩小选择范围也会在下一 turn 生效。既有页面 Read hook 与 Agent 直接使用 `ntn` CLI 并存。Workspace Mode 关闭时不提供两种投影和四个 Runtime 环境变量。
 
 ### 6. 启动 Dream
 
@@ -279,7 +279,7 @@ python3 scripts/verify_claude_registry_release.py \
 6. **禁止全局清理服务。** 测试只能停止和清理由本轮测试创建的进程与临时资源。
 7. **已发布版本不可覆盖。** 错误 Runtime 必须通过前向版本修复或显式评审回滚，正常回滚不得覆盖或 unpublish 已验收版本。
 8. **模型输出能力由服务端所有。** Admin 最终选中模型的 `maxOutputTokens` 必须投影到 Runtime；浏览器设置、用户环境、workspace 文件和 Gateway body 改写均不得替代它。
-9. **Notion 凭证与轻量索引均按用户所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，Runtime 只接收当前选择范围内的 per-Thread 投影，重新授权失败时保留仍有效的凭证，页面正文按需读取；进程 `HOME`、ambient `NOTION_API_TOKEN`、浏览器配置和 workspace 文件都不能覆盖任一来源。
+9. **Notion Runtime 绑定归当前 actor/thread 所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，每个 Runtime turn 只接收当前 actor、当前选择范围内的 per-Thread 投影；Dream 在向 Agent Bash 暴露四个受支持变量前替换所有 ambient `NOTION_*` 值。
 10. **Editor 写入同时绑定 actor、当前 session 和持久状态。** runner 拒绝面向过期 session 的写入；Editor MCP 子进程只接收服务端所有的 actor 与有效 PostgreSQL capability；每次查询/更新均按 actor 限定；业务失败只刷新唯一内存 EditorState 软缓存，不发布成功事件。Notion 索引和按需页面正文不得进入 EditorState。
 
 ## 故障排查

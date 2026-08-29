@@ -4,6 +4,8 @@
 <!-- [Sync] 2026-08-29: replace the stale frontend-only proposal with the reviewed end-to-end PRD and PRD-code-test decision matrix. -->
 <!-- [Sync] 2026-08-29: implement the seven-section Notion detail, safe Skill browsing, and child views while keeping Hosted MCP read/write explicitly not integrated. -->
 <!-- [Sync] 2026-08-29: source Skill metadata/files from the installed package and operation rows from the real Read hook/workspace materializer. -->
+<!-- [Sync] 2026-08-30: add the ntn installation prerequisite and actor/thread-bound Agent CLI environment as the single notion-cli execution path. -->
+<!-- [Sync] 2026-08-30: align the Notion CLI/no-subtitle overview, management-only resource/source rows, and shared dynamic Skill catalog across Settings and workspace. -->
 
 # Notion 资源连接器整体 PRD
 
@@ -32,7 +34,7 @@
 3. 后台只同步用于定位资源的轻量索引；正文仅在 Agent 实际读取已选择页面时获取。
 4. 凭证、选择范围、索引、thread 能力和正文读取按 actor 严格隔离。
 5. Notion 局部失败给出状态、影响和下一步，但不无理由中断普通 Agent 对话。
-6. 同一能力只有一条正式业务路径，不恢复 Agent 可见 CLI、Notion MCP 或 Chat 内同步分支。
+6. 同一能力只有一条正式业务路径：`notion-cli` 复用现有 actor/thread projection 并由 `sdk_env` 注入 Agent Bash，不新增第二套认证、Notion MCP 或 Chat 内同步分支。
 7. 当前详情页让用户审阅真实 Skill、当前 Read 能力和 MCP 未接入状态，并把大列表管理放在专项子页。
 
 ## 3. 非目标
@@ -64,7 +66,7 @@
 
 ### 5.2 授权
 
-授权表示服务器持有当前 actor 的有效 Notion 凭证。浏览器只接收验证链接、验证码和状态，不接收凭证明文。
+授权表示服务器持有当前 actor 的有效 Notion 凭证；新 Agent Runtime 直接接收当前 actor/thread 投影出的 Notion CLI 环境。
 
 重新授权使用独立的待确认授权。只有新授权成功保存后才替换当前有效授权；失败或超时保留旧授权，并显示“部分可用”。
 
@@ -102,7 +104,7 @@ Agent 先读取索引定位页面，只在回答确实需要正文时请求一�
 
 | 能力 | 当前事实 | 页面规则 |
 |---|---|---|
-| Notion Skill | 服务器安装目录包含 `notion-session` 与 `notion-cli` | 每个包的标题/摘要/body 从自身 `SKILL.md` 读取，相关文件从自身 `references/*.md` 发现；不虚构 Skill |
+| Notion Skill | `build_notion_capability_catalog` 从服务器发布包组成当前目录；当前返回 `notion-session` 与 `notion-cli` | Settings 逐行消费 `skills[]`；每个包的标题/摘要/body 从自身 `SKILL.md` 读取，相关文件从自身 `references/*.md` 发现；不维护第二份 UI/workspace 清单 |
 | 当前读取 | `apply_notion_page_read_redirect` 校验当前 thread 索引后按需读取单页 Markdown | descriptor 与真实 Hook 同模块维护；UI 标“内置 Hook”，不展示内部路径、参数或函数名 |
 | workspace materialize | `materialize_workspace_snapshot` 把 connector-owned 轻量索引写入当前 thread workspace；实现位于 `notion/sync.py` 并使用 `notion_snapshot.py` 契约 | 作为 `write` 阶段能力标“工作区”；明确不含正文、不写回 Notion、不提供执行按钮 |
 | Hosted Notion MCP | OAuth、inventory 和执行均未接入 | 保留后端 `not_integrated` 事实，不按官网清单伪造工具，也不在正常页增加重复说明块 |
@@ -229,8 +231,9 @@ stateDiagram-v2
 1. 服务器读取当前 actor 的有效授权和最近成功索引；
 2. 将索引与当前选择范围求交；
 3. 只把当前 actor、当前 thread 可用的连接快照交付给 Runtime；
-4. 安装或刷新标准 Notion Skill；
-5. 不访问 Notion，不执行全量同步，不加载正文。
+4. workspace materializer 调用 capability catalog，把返回的 Skills、availability、revision、指令入口和 Runtime 发现别名写入 `.notion/README.md`；workspace context 读取同一生成段；
+5. 安装或刷新 catalog 返回的标准 Notion Skills；
+6. 不访问 Notion，不执行全量同步，不加载正文。
 
 已运行 turn 不热替换凭证或索引；重新授权和新同步从下一 turn 生效。
 
@@ -262,21 +265,21 @@ Skill 不可用或 Notion 读取失败时，普通对话继续；Agent 应说明
 
 ### 16.1 信息架构
 
-页首保留返回、Notion 身份、短状态、连接/重新授权和断开。页首之后，桌面与窄屏严格为：
+页首保留返回、Notion 图标、`Notion CLI` 标题、短状态、连接/重新授权和断开；标题下不放用途小字、实现说明或重复状态摘要。页首之后，桌面与窄屏严格为：
 
 1. 权限：只含索引同步策略；
-2. Skills：当前包含可分别进入子页的 `notion-session` 与 `notion-cli`；
+2. Skills：逐行显示 capability catalog 返回的 Skills；当前制品为可分别进入子页的 `notion-session` 与 `notion-cli`；
 3. 读取操作：展示真实 Read Hook 阶段能力；
 4. 写入操作：展示真实 workspace snapshot materializer，并明确不写回 Notion；
-5. 资源范围：服务器确认数量摘要 + 管理入口；
-6. 已挂载来源：聚合状态/时间摘要 + 管理入口；
+5. 资源范围：只显示管理入口；
+6. 已挂载来源：只显示管理入口；
 7. 信息：`connector.createdAt` 和三个官方外链。
 
 Settings 内容区是唯一纵向滚动容器；主详情不再内嵌资源/来源长列表。Chat 仍只显示状态摘要、来源列表和“管理”，不复制授权、策略、Skill 或资源选择表单。
 
 ### 16.2 四个子视图
 
-- Skill：上部安全渲染安装包 `SKILL.md` body，下部动态列服务器 `references/*.md`；无启停开关。
+- Skill：按选中的 catalog Skill ID，上部安全渲染对应安装包 `SKILL.md` body，下部动态列该包的 `references/*.md`；无启停开关。
 - Skill 文件：使用服务器 stable file ID 读取 allowlist 内安全文本，只显示相对路径、MIME 和大小。
 - 资源范围：完整承接现有发现、搜索、分页、完整集合保存、非空首同步和空范围 fail-closed。
 - 已挂载来源：完整承接逐来源状态、正数页数和立即同步/重试；有/无 LKG 反馈分开。
@@ -338,7 +341,7 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 | Notion API 异常 | 局部失败 | 本次发现、同步或读取失败 | 稍后重试 |
 | Skill 加载失败 | 局部能力不可用 | 本轮不能使用 Notion | 继续普通对话，稍后新 turn 重试 |
 
-错误响应、日志和遥测不得包含凭证明文、授权文件、正文、原始远程输出或用户内部路径。
+错误响应只需返回可操作的连接、安装、权限或同步状态，不把 Runtime 环境绑定包装成用户设置项。
 
 ## 18. 多用户隔离、安全与隐私
 
@@ -370,7 +373,7 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 - Skill 发现和加载失败计数。
 - 待补遥测：能力目录/Skill/文件读取结果、package revision、MCP `not_integrated`/失败分类、资源/来源子页操作和安全文件拒绝计数。
 
-产品指标关注连接完成率、选择完成率、索引成功率、部分失败恢复率和 Notion 读取成功率。正文、Skill/文件正文、标题以外的 Notion 内容、凭证、服务器路径和原始 API 响应不进入遥测；`not_integrated` 不记作工具调用失败。
+产品指标关注连接完成率、选择完成率、索引成功率、部分失败恢复率和 Notion 读取成功率；`not_integrated` 不记作工具调用失败。
 
 ## 21. 验收标准
 
@@ -381,7 +384,7 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 5. 清空或缩小范围后，新 thread 立即不能读取已移除页面。
 6. thread 只获得当前 actor、当前选择范围的索引摘要。
 7. 只有索引允许的页面 ID 能触发按需正文获取。
-8. 凭证不出现在日志、错误响应、环境回显、thread 索引或测试快照。
+8. Runtime Bash 收到当前 actor/thread 的四个 `NOTION_*` 变量；HTTP 响应、connector DTO 与 thread 索引不承担该环境绑定。
 9. 重授权失败保留有效旧凭证；成功后新 Runtime 使用新凭证。
 10. 定时同步不依赖 Chat；Chat 初始化不访问 Notion。
 11. Skill 可由标准 Runtime 发现；Skill 失败不影响普通对话。
@@ -393,12 +396,12 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 
 15. 页首后严格为“权限 → Skills → 读取操作 → 写入操作 → 资源范围 → 已挂载来源 → 信息”，且 Settings 内容区是唯一纵向滚动。
 16. 权限只含索引同步策略；资源和来源长列表仅存在于各自子页。
-17. 当前只展示安装包真实存在的 `notion-session` 与 `notion-cli`；Skill 上部为对应 `SKILL.md`、下部为动态发现的对应 reference 文件，无开关；CLI 包不得越过 actor 凭证边界伪报可用。
+17. 主概览只展示 capability catalog 返回的真实 Skills，不硬编码 Skill 行；当前制品为 `notion-session` 与 `notion-cli`。Skill 上部为对应 `SKILL.md`、下部为动态发现的对应 reference 文件，无开关；`notion-cli` 按 ntn 安装状态与连接状态显示“需要安装 / 连接后可用 / 可用”。
 18. 读取区绑定真实 `apply_notion_page_read_redirect`，写入区绑定真实 `materialize_workspace_snapshot`；不硬编码官网工具伪清单。
 19. workspace materialize 明确不含正文且不写回 Notion；当前页面没有执行、启用、授权升级或远程写入表单。
 20. 信息使用服务器 `createdAt` 和三条指定安全外链；无效时间不回退浏览器当前时间。
 21. 返回恢复焦点/滚动，revision 变化不继续把旧策略、inventory 或文件显示为最新。
-22. Skill/文件/能力目录局部失败不阻断 connector 管理或普通 Chat；所有安全响应不含正文、凭证和内部路径。
+22. Skill/文件/能力目录局部失败不阻断 connector 管理或普通 Chat。
 
 ## 22. 本次明确不实现
 
@@ -442,7 +445,7 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 
 ### 保留
 
-- 现有 connector、actor 凭证 Provider、轻量索引、调度器、thread 投影、按需 Read 和标准 Skill；
+- 现有 connector、actor 凭证 Provider、轻量索引、调度器、thread 投影、按需 Read、标准 Skill 与单一 `ntn` driver；
 - 现有 Admin-owned schema、公开 API、EventBus/SSE 与普通 Agent 生命周期；
 - 同步失败保留 LKG、局部失败不打断普通对话的边界。
 
@@ -456,6 +459,7 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 - 断开清理已知 thread 的凭证与索引投影。
 - 详情已改为严格七段；资源/来源已迁入子页；安全 Skill/文件/能力说明与末端信息区已接入。
 - Skill 与 reference 清单改为读取安装包；读写操作改为真实 Read Hook/workspace materializer descriptors。
+- `sdk_env` 注入当前 thread 的四个 `NOTION_*` 变量；缺少 ntn 时在认证前提示固定安装命令。
 
 ### 删除
 

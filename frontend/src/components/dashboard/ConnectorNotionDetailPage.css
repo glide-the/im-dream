@@ -6,6 +6,7 @@
 /* [Sync] 2026-08-29: compact the desktop overview into aligned label/content columns with a tighter control and row rhythm. */
 /* [Sync] 2026-08-29: group real Hook/workspace operation source and availability badges without expanding row height. */
 /* [Sync] 2026-08-29: restore skeleton-proportioned spacing and remove the obsolete section-description tier from the overview. */
+/* [Sync] 2026-08-30: remove the overview-title subtitle style while retaining child-page descriptions. */
 
 .notion-detail,
 .notion-detail * {
@@ -122,7 +123,6 @@
   line-height: 1.1;
 }
 
-.notion-detail__identity p,
 .notion-detail__child-header p {
   max-width: 650px;
   margin: 4px 0 0;

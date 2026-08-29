@@ -25,6 +25,8 @@
 #                    body reads through the Runtime Read hook on demand.
 # [Sync] 2026-08-29: point every attached Notion context at the installed
 #                    notion-session Skill and its index-first read workflow.
+# [Sync] 2026-08-30: consume the generated `.notion/README.md` Skill section so
+#                    workspace context follows the dynamic capability catalog.
 
 """Workspace context prompt for the Ink & Memory Claude Agent.
 
@@ -137,6 +139,26 @@ def _safe_read_json(path: Path) -> dict:
         return {}
 
 
+def _safe_read_markdown_section(path: Path, heading: str) -> list[str]:
+    """Read one generated Markdown section without inventing a second catalog."""
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return []
+    try:
+        start = lines.index(heading) + 1
+    except ValueError:
+        return []
+    section: list[str] = []
+    for line in lines[start:]:
+        if line.startswith("## "):
+            break
+        if line.strip():
+            section.append(line.strip())
+    return section
+
+
 def _render_notion_context_block(cwd: str) -> str:
     """Render the Notion connector summary block from workspace-local files."""
 
@@ -172,6 +194,10 @@ def _render_notion_context_block(cwd: str) -> str:
     source_revision = str(snapshot_meta.get("source_revision") or "")
     sync_cursor = str(snapshot_meta.get("sync_cursor") or "")
     fetched_at = str(snapshot_meta.get("fetched_at") or connector.get("last_synced_at") or "")
+    skill_index = _safe_read_markdown_section(
+        notion_dir / "README.md",
+        "## Skill index",
+    )
 
     lines = [
         "Notion lightweight index (.notion/):",
@@ -186,15 +212,11 @@ def _render_notion_context_block(cwd: str) -> str:
         lines.append(f"  Last Synced: {fetched_at}")
     lines.extend(
         [
-            "Notion Skill index:",
-            "  Skill: notion-session",
-            "  Instructions: skills/notion-session/SKILL.md",
-            "  Runtime discovery: .claude/skills/notion-session",
-            "  Use this Skill whenever a request requires searching or reading the connected Notion.",
-            "  Follow the Skill's index-first workflow and fetch only the selected page needed for the answer.",
-            (
-                "  If the Skill or Read is unavailable, report the Notion limitation "
-                "and continue any answer that does not depend on Notion."
+            "Notion Skill index (from .notion/README.md):",
+            *(
+                [f"  {line}" for line in skill_index]
+                if skill_index
+                else ["  Read .notion/README.md for the current capability catalog."]
             ),
             "  Read .notion/snapshot.json first for the attached snapshot identity.",
             "  Read .notion/connector.json for connector details and selection state.",

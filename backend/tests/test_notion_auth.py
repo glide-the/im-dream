@@ -1,8 +1,9 @@
 # [Input] Explicit server-owned Notion auth homes and mocked ntn command results.
-# [Output] Verify minimal env, device login parsing, safe poll mapping, doctor verification, and redaction.
+# [Output] Verify ntn installation state, minimal env, device login parsing, safe poll mapping, doctor verification, and redaction.
 # [Pos] auth boundary test node in backend/tests.
 # [Sync] 2026-08-28: replace request-controlled home tests with server-owned file-store and no-ambient-token contracts.
 # [Sync] 2026-08-28: normalize context-manager style during the agentdata audit.
+# [Sync] 2026-08-30: cover installed/missing ntn prerequisite projection without exposing an executable path.
 
 from __future__ import annotations
 
@@ -22,6 +23,26 @@ from notion.errors import NotionAuthError
 
 
 class TestNotionAuthHelpers(unittest.IsolatedAsyncioTestCase):
+    def test_cli_installation_status_is_path_free_and_actionable(self):
+        with unittest.mock.patch.object(
+            notion_auth,
+            "resolve_ntn_executable",
+            return_value="/private/server/bin/ntn",
+        ):
+            installed = notion_auth.get_notion_cli_installation()
+        self.assertEqual(installed.status, "installed")
+        self.assertEqual(installed.required_version, "0.15.1")
+        self.assertEqual(installed.install_command, "npm install -g ntn@0.15.1")
+        self.assertNotIn("/private", repr(installed))
+
+        with unittest.mock.patch.object(
+            notion_auth,
+            "resolve_ntn_executable",
+            side_effect=notion_auth.NotionCLIUnavailableError("missing"),
+        ):
+            missing = notion_auth.get_notion_cli_installation()
+        self.assertEqual(missing.status, "missing")
+
     def test_build_notion_env_uses_explicit_home_and_drops_ambient_credentials(self):
         with tempfile.TemporaryDirectory() as tmp_dir, unittest.mock.patch.dict(
             os.environ,

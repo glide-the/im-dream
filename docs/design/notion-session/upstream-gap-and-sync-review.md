@@ -1,7 +1,7 @@
 <!-- [Input] Upstream develop@e3523db9, current connector/Runtime code, real-account timing evidence, and lightweight-index requirement. -->
 <!-- [Output] Evidence-based upstream/version/requirement gap, chosen synchronization scope, and anti-over-design decision. -->
 <!-- [Pos] Notion upstream reconciliation decision record in docs/design/notion-session. -->
-<!-- [Sync] 2026-08-28: retain upstream file navigation while replacing full-content sync and Agent CLI/MCP with lazy Runtime Read. -->
+<!-- [Sync] 2026-08-30: retain upstream file navigation and restore Agent ntn CLI with exact actor/thread sdk_env binding. -->
 
 # Notion 上游差异与需求同步评审
 
@@ -23,13 +23,13 @@ Upstream baseline: `glide-the/ink-and-memory develop@e3523db9f07400736123d236111
 
 | 对象 | 上游 `e3523db9` | 本仓库改造前 | 当前需求/实现 |
 |---|---|---|---|
-| Skill 制品 | 根 `.claude/skills`，Bash + `ntn api` | backend-owned Skill，显式 `mcp__notion__*` | backend-owned Skill，只允许 `Read`。 |
-| 凭证 | `NOTION_HOME` 前置条件 | actor source + thread projection | 保留 actor 模式；Agent 不读 home/env。 |
+| Skill 制品 | 根 `.claude/skills`，Bash + `ntn api` | backend-owned Skill，显式 `mcp__notion__*` | backend-owned `notion-session` + `notion-cli`；支持 Read 与 Bash。 |
+| 凭证 | `NOTION_HOME` 前置条件 | actor source + thread projection | 保留 actor 模式；`sdk_env` 向 Agent Runtime 注入四个 thread-bound `NOTION_*` 变量。 |
 | Snapshot | index 用于定位 | builder 逐 row 抓 page + Markdown + blocks | 定时同步只发布 ID/紧凑元数据，`pages={}`。 |
 | 页面读取 | CLI Markdown endpoint | Agent 显式 MCP `read_page` | `Read(.notion/pages/<id>.json)` 触发 Runtime hook。 |
 | 数据库 ID | 文档仍称 database | 已适配 data source query | public 名称保留，内部走 `data_sources/{id}/query`。 |
 | 状态 | 未规定 selection 过渡 | insert 即 `synced` | `pending`，成功 index 精确提交后 `synced`。 |
-| Runtime | CLI 可见 | MCP namespace 可见 | 单一文件协议；hook 内部调用 Dream-owned driver。 |
+| Runtime | CLI 可见 | MCP namespace 可见 | 文件 Read hook 与 Agent `ntn` CLI 共用同一 actor/thread projection。 |
 
 ## 3. 真实故障证据
 
@@ -42,13 +42,13 @@ Upstream baseline: `glide-the/ink-and-memory develop@e3523db9f07400736123d236111
 
 ## 4. 方案决策
 
-采用“保留 Dream-owned CLI driver + actor provider + Runtime Read hook”：
+采用“保留 Dream-owned CLI driver + actor provider + Runtime Read hook + Agent CLI binding”：
 
 - `ntn` 继续负责 device login、file credential 格式和只读 API；
 - Dream 负责 actor 归属、索引策略、原子 current、thread 投影与 hook；
-- Agent 只认 `.notion` 文件协议，不认 CLI/MCP 参数。
+- `notion-session` 使用 `.notion` 文件协议，`notion-cli` 使用由 Runtime 注入的 CLI 环境；二者不接受用户自定义 home/MCP 参数。
 
-未采用独立 CLI 产品路径，因为会恢复 home/权限/双状态问题；未采用 Dream 重写 OAuth/API，因为没有业务证据支持扩大实现面。
+未新增独立 CLI 状态或认证产品路径；Agent CLI 复用现有 actor credential source 与 thread projection。未采用 Dream 重写 OAuth/API，因为没有业务证据支持扩大实现面。
 
 ## 5. 同步到当前仓库的最小范围
 
@@ -61,7 +61,7 @@ Upstream baseline: `glide-the/ink-and-memory develop@e3523db9f07400736123d236111
 ### 删除
 
 - 后台 `get_page`、Markdown、blocks 全量抓取和 snapshot 正文；
-- Agent Bash/CLI、显式 `mcp__notion__*` 工具说明及 Runtime namespace；
+- 显式 `mcp__notion__*` 工具说明、Runtime namespace 与未绑定 actor/thread 的 CLI fallback；
 - selection 即 synced、静态 `.notion/pages/*.json` 正文文件和 Chat 远程同步。
 
 ### 新增/收敛

@@ -6,7 +6,8 @@
 <!-- [Sync] 2026-08-29: mark the seven-section page and four child views implemented after backend/frontend contract tests, production build, provider-free Chrome E2E, and wide/narrow visual QA. -->
 <!-- [Sync] 2026-08-29: tighten the overview into aligned desktop label/content columns, remove redundant normal-state summaries, and preserve a single-column mobile flow. -->
 <!-- [Sync] 2026-08-29: bind Skill display to the installed notion-session package and operation rows to the real Read hook/workspace materializer, not a synthetic MCP list. -->
-<!-- [Sync] 2026-08-30: list both installed notion-session/notion-cli packages while keeping CLI execution unavailable under the existing credential boundary. -->
+<!-- [Sync] 2026-08-30: make notion-cli available through the current actor/thread Runtime environment and require ntn installation before authentication. -->
+<!-- [Sync] 2026-08-30: align the implemented Notion CLI title/no-subtitle hero, management-only resource/source rows, and catalog-driven Skill rows. -->
 
 # Notion 资源连接器交互方案
 
@@ -15,7 +16,7 @@
 - Business source: [`resource-connector.md`](./resource-connector.md)
 - Structure source: [`连接器具体配置页面结构草图.md`](./连接器具体配置页面结构草图.md)
 
-本稿定义当前用户可见界面。已实现业务路径是 `notion-session` Skill、轻量索引和 Runtime 受控按需 `Read`；`notion-cli` 作为第二个真实安装包同步并可审阅，但现有凭证边界下不声明可执行。Hosted Notion MCP 的认证、动态工具 inventory、读写执行均未接入。页面不得把官网能力写成当前可用能力。
+本稿定义当前用户可见界面。已实现业务路径包括 `notion-session` Skill、轻量索引、Runtime 受控按需 `Read`，以及使用当前 actor/thread `NOTION_*` 环境的 `notion-cli` Skill。Hosted Notion MCP 的认证与动态工具 inventory 仍未接入；页面只展示代码和安装状态能够证明的能力。
 
 ## 1. 产品结构
 
@@ -66,9 +67,9 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 页首不计入七段顺序，包含：
 
 - 返回“资源链接”的文字按钮或链接；
-- Notion 图标、`h1`“Notion”和一句用途；
+- Notion 图标与 `h1`“Notion CLI”；标题下不放用途副文案、实现说明或重复状态摘要；
 - 标题旁用短文字徽标显示未连接、认证中、已连接、同步中、部分可用、已过期或异常等服务器状态；
-- “连接 Notion”或“重新连接 Notion”；认证中防重复提交；
+- “连接 Notion”或“重新连接 Notion”；若后端确认本机未安装固定版本 `ntn`，按钮改为不可提交的“先安装 ntn”并显示安装命令；认证中防重复提交；
 - “更多”中的“关闭连接”，或同等级次操作；断开可恢复，不增加确认弹窗；
 - 认证中的验证码和下一步；正常态不重复展示授权、索引、范围或最近成功摘要。
 
@@ -100,17 +101,17 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 
 #### 2. Skills
 
-当前显示服务器安装目录真实存在的 `notion-session` 和 `notion-cli`；每个条目的标题、摘要、正文和 reference 文件清单均从自己的发布包读取：
+主概览逐行渲染后端 `build_notion_capability_catalog` 返回的 `skills[]`；当前发布包返回 `notion-session` 和 `notion-cli`，但前端不维护另一份 Skill ID 或标题清单。每个条目的标题、摘要、正文和 reference 文件均来自对应发布包：
 
 | 字段 | 展示 |
 |---|---|
-| 名称 | 当前 `SKILL.md` 首个 `h1`（当前为“Notion 工作空间助手”） |
+| 名称 | catalog 中由对应 `SKILL.md` 首个 `h1` 解析出的 `title` |
 | 摘要 | 主概览不显示；进入 Skill 子页后读取当前 `SKILL.md` frontmatter `description` |
 | 来源 | 内置 |
 | 状态 | 可用 / 连接后可用 / 信息暂不可用 |
 | 行为 | 整行进入 Skill 子页 |
 
-未连接时仍可审阅 Skill 说明。不得虚构参考图中的其他 Skill，不显示安装、卸载、启停、更新或更多菜单；`notion-session` 按连接状态显示可用性，`notion-cli` 在 Dream 不向 Bash 注入 actor `NOTION_HOME` 时显示“暂不可用”。
+未连接时仍可审阅 Skill 说明。不得虚构参考图中的其他 Skill，不显示卸载、启停、更新或更多菜单；`notion-session` 按连接状态显示可用性，`notion-cli` 在缺少 `ntn` 时显示“需要安装”、未连接时显示“连接后可用”、安装且连接后显示“可用”，不再使用含义不明的“暂不可用”。
 
 #### 3. 读取操作
 
@@ -136,22 +137,13 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 
 #### 5. 资源范围
 
-主详情只显示：
-
-- 已选总数、数据库数、独立页面数；
-- 空范围：“当前没有 Notion 资源可以进入新对话”；
-- 一个“管理资源范围”入口。
+主详情只显示一个“管理资源范围”入口，不显示数量、类型拆分、空态说明或最近状态。
 
 搜索、远端资源列表、选择、分页、保存和未保存草稿全部在资源范围子页。
 
 #### 6. 已挂载来源
 
-主详情只显示：
-
-- 来源总数；
-- 待同步、同步中、已同步、部分可用、同步失败或自动同步关闭；
-- 最近成功和有值时的下次计划；
-- 一个“管理已挂载来源”入口。
+主详情只显示一个“管理已挂载来源”入口，不显示来源数、同步状态、最近成功或下次计划。
 
 逐来源列表、立即同步和立即重试全部在已挂载来源子页。
 
@@ -175,17 +167,17 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 同一页面自上而下：
 
 1. 返回 Notion 详情；
-2. “Notion 工作空间助手”、摘要、“内置”和真实可用性；无开关；
+2. 当前选中 Skill 的 catalog 标题、发布包摘要、“内置”和真实可用性；无开关；
 3. “Skill 说明”：服务器解析 frontmatter 后安全渲染 `SKILL.md` body；
 4. “包含的文件”：列相对文件名、MIME、格式化大小和可预览状态。
 
-当前安装包的 `references/*.md` 文件清单为：
+当前两个安装包均提供以下 `references/*.md`，仅作为当前制品示例：
 
 - `references/notion-search.md`；
 - `references/notion-page-read.md`；
 - `references/notion-db-query.md`。
 
-文件清单从服务器安装包动态发现并分配 stable ID；`SKILL.md` 不重复列出，`.folder.md`、点文件、缓存、评测、构建产物和符号链接不展示。正文和文件清单独立失败，一侧失败时保留另一侧成功内容。
+页面不得硬编码上述示例。文件清单从当前选中 Skill 的服务器安装包动态发现并分配 stable ID；`SKILL.md` 不重复列出，`.folder.md`、点文件、缓存、评测、构建产物和符号链接不展示。正文和文件清单独立失败，一侧失败时保留另一侧成功内容。
 
 ### 4.2 Skill 文件子页
 
@@ -229,7 +221,7 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 | Error | 只影响所属边界，提供安全重试或下一步 |
 | Revision changed | 不继续呈现旧策略、inventory 或文件为最新 |
 
-任何错误依次说明：发生了什么；用户内容、授权或 LKG 是否安全；系统是否自动恢复；用户下一步。错误响应、埋点和页面日志不得包含 Notion 正文、Skill/文件正文、token、服务器路径、thread 标识或上游原始响应。
+任何错误依次说明：发生了什么；系统是否自动恢复；用户下一步。页面不展示 Runtime 环境变量、thread 路径或内部实现状态。
 
 能力目录失败只降级 Skills/操作，不阻断连接、策略、资源和来源管理。Hosted MCP 状态未知时不能回退成可用。
 
@@ -237,7 +229,7 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 
 - 进入任一子视图后把焦点移动到新视图 `h1`。
 - 从 Skill 返回，恢复 Skill 行焦点与详情滚动位置；从文件返回，恢复原文件行。文件已移除时聚焦“包含的文件”。
-- 从资源范围/来源返回，恢复各自管理入口；保存/同步后只刷新受影响的服务器摘要。
+- 从资源范围/来源返回，恢复各自管理入口；保存/同步后只刷新受影响的服务器状态。
 - 详情返回资源链接列表时，焦点恢复 Notion 卡片的“管理”。
 - 滚动位置和触发元素只属于瞬时视图状态，不进入数据库、localStorage 或 connector DTO。
 - 主详情不使用 sticky；资源子页保存动作和来源子页同步动作可在不创建新滚动容器、不遮挡末项的前提下使用紧凑 sticky 动作区。
@@ -257,31 +249,27 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 
 ## 8. 数据合同缺口与实现分期
 
-当前 connector API 已能提供连接状态、`createdAt`、策略、范围、来源和同步；尚不能提供：
+当前 connector API 已提供连接状态、`createdAt`、策略、范围、来源、同步、CLI 安装前置、catalog revision、动态 Skill 清单、解析后的 Markdown、reference 文件清单/安全内容，以及真实 Read Hook/workspace materializer 描述。Settings 和 workspace 均消费这份服务器目录；浏览器不从 thread workspace 或本地缓存补造能力。
 
-- Skill 清单、解析后的 Markdown、文件清单和安全文件内容；
-- 当前 Read 能力的服务器描述；
-- Hosted MCP inventory、读写安全分类、可用性、不接入原因和 revision。
-
-后续只能在现有 connector service 内增加只读能力投影，或复用经过相同 owner guard、allowlist、路径/MIME/大小/revision 安全验证的通用读取能力；不得新增数据库表、队列、独立服务、第二 connector store 或第二 Runtime 路径。
+仍未提供 Hosted MCP 动态 inventory、认证来源、read/write/unknown 分类、远端可用性和 inventory revision；当前只返回 `not_integrated`。后续只能在现有 connector service 内增加只读能力投影，或复用经过相同 owner guard、allowlist、路径/MIME/大小/revision 验证的通用读取能力；不得新增数据库表、队列、独立服务、第二 connector store 或第二 Runtime 路径。
 
 分期：
 
-1. 能力合同：从安装包返回 `notion-session` 与 `notion-cli`，从真实模块返回 Read Hook 和 workspace materializer，并保留 MCP `not_integrated` 事实；
-2. 视图重组：资源与来源完整交互迁入子页，主详情移除长列表和嵌套滚动；
-3. 接入 Skill/文件/读写说明/信息、焦点与滚动恢复；
-4. 完成组件、API 安全、响应式、键盘、屏幕阅读器和 E2E，再删除无引用旧内嵌视图。
+1. 已完成能力合同：catalog 从安装包返回当前 Skills，从真实模块返回 Read Hook 和 workspace materializer，并保留 MCP `not_integrated` 事实；
+2. 已完成视图重组：资源与来源完整交互迁入子页，主详情移除长列表和嵌套滚动；
+3. 已完成 Skill/文件/读写说明/信息、焦点与滚动恢复；
+4. 已完成组件、API、响应式、键盘和 E2E 验证；屏幕阅读器人工验收仍需单独执行。
 
 Hosted Notion MCP OAuth、inventory 执行、写入授权/确认/审计/幂等不属于上述实现，必须另行设计和验证。
 
 ## 9. 验收标准
 
-1. 页首后严格为“权限 → Skills → 读取操作 → 写入操作 → 资源范围 → 已挂载来源 → 信息”。
+1. 页首标题为“Notion CLI”且标题下无副文案；其后严格为“权限 → Skills → 读取操作 → 写入操作 → 资源范围 → 已挂载来源 → 信息”。
 2. 权限只含索引同步策略；立即同步只在来源子页。
-3. 只展示安装包真实存在的 `notion-session` 与 `notion-cli`；每个 Skill 页上部读取自身 `SKILL.md`、下部动态列自身 `references/*.md`，无启停开关。
+3. 主概览逐行渲染 catalog 返回的 Skills，不维护静态前端清单；当前制品为 `notion-session` 与 `notion-cli`。每个 Skill 页上部读取自身 `SKILL.md`、下部动态列自身 `references/*.md`，无启停开关。
 4. 读取区只有真实 Read Hook descriptor，写入区只有真实 workspace materializer descriptor；页面不硬编码官网工具伪清单。
 5. workspace write 明确不含正文且不写回 Notion；没有执行、启用、授权升级或远程写入表单。
-6. 资源范围和逐来源列表只在各自子页；主详情只有摘要与管理入口。
+6. 资源范围和逐来源列表只在各自子页；主详情分别只有一个管理入口，不显示摘要统计。
 7. 信息在页面末端，`createdAt` 不回退当前时间，三条 URL 精确且安全打开。
 8. Settings 内容区是唯一纵向滚动；桌面/窄屏顺序一致且无页面横向溢出。
 9. 返回恢复正确焦点/滚动；revision 变化不继续把旧内容显示为最新。

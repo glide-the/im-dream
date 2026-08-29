@@ -5,7 +5,7 @@
 // [Sync] 2026-08-28: keep pending index resources and active policy refreshes visibly syncing.
 // [Sync] 2026-08-29: cover recoverable failed-reauth warnings and compact selection payloads without raw upstream data.
 // [Sync] 2026-08-29: validate server-owned Notion Skill plus real Hook/workspace operation, stable file ID, and revision transport contracts.
-// [Sync] 2026-08-30: preserve the two installed notion-session/notion-cli Skill entries and their distinct availability states.
+// [Sync] 2026-08-30: require the ntn installation contract and connected notion-cli availability.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -217,8 +217,13 @@ test('policy updates preserve backend desired/effective revision', async () => {
 test('capability catalog preserves real Hook and workspace entrypoints', async () => {
   globalThis.fetch = (async () => jsonResponse({
     catalog: {
-      schema_version: 3,
+      schema_version: 4,
       package_revision: 'revision-1',
+      cli_installation: {
+        status: 'installed',
+        required_version: '0.15.1',
+        install_command: 'npm install -g ntn@0.15.1',
+      },
       mcp_inventory: {
         status: 'not_integrated',
         revision: null,
@@ -238,7 +243,7 @@ test('capability catalog preserves real Hook and workspace entrypoints', async (
           title: 'Notion CLI 工作空间数据助手',
           description: '通过 ntn CLI 访问 Notion',
           source: 'builtin',
-          availability: 'unavailable',
+          availability: 'available',
         },
       ],
       operations: [
@@ -266,9 +271,14 @@ test('capability catalog preserves real Hook and workspace entrypoints', async (
 
   const catalog = await getNotionCapabilityCatalog();
   expect(catalog.packageRevision).toBe('revision-1');
+  expect(catalog.cliInstallation).toEqual({
+    status: 'installed',
+    requiredVersion: '0.15.1',
+    installCommand: 'npm install -g ntn@0.15.1',
+  });
   expect(catalog.mcpInventory.writeStatus).toBe('not_integrated');
   expect(catalog.skills.map((skill) => skill.id)).toEqual(['notion-session', 'notion-cli']);
-  expect(catalog.skills[1]?.availability).toBe('unavailable');
+  expect(catalog.skills[1]?.availability).toBe('available');
   expect(catalog.operations).toEqual(expect.arrayContaining([
     expect.objectContaining({ kind: 'read', source: 'runtime_hook', entrypoint: 'apply_notion_page_read_redirect' }),
     expect.objectContaining({ kind: 'write', source: 'workspace_materializer', entrypoint: 'materialize_workspace_snapshot' }),
@@ -278,8 +288,13 @@ test('capability catalog preserves real Hook and workspace entrypoints', async (
 test('capability catalog rejects synthetic Skill operation sources', async () => {
   globalThis.fetch = (async () => jsonResponse({
     catalog: {
-      schema_version: 2,
+      schema_version: 4,
       package_revision: 'revision-1',
+      cli_installation: {
+        status: 'installed',
+        required_version: '0.15.1',
+        install_command: 'npm install -g ntn@0.15.1',
+      },
       mcp_inventory: {
         status: 'not_integrated',
         revision: null,
@@ -359,7 +374,7 @@ test('renamed notion-cli detail preserves its Bash tool boundary', async () => {
       title: 'Notion CLI 工作空间数据助手',
       description: '通过 ntn CLI 访问 Notion',
       source: 'builtin',
-      availability: 'unavailable',
+      availability: 'available',
       tools: ['Bash'],
       body: '# Notion CLI 工作空间数据助手\n\n`ntn api v1/search`',
     },
@@ -373,7 +388,7 @@ test('renamed notion-cli detail preserves its Bash tool boundary', async () => {
 
   const detail = await getNotionSkillDetail('notion-cli');
   expect(detail.skill.tools).toEqual(['Bash']);
-  expect(detail.skill.availability).toBe('unavailable');
+  expect(detail.skill.availability).toBe('available');
   expect(detail.skill.body).toContain('ntn api v1/search');
 });
 

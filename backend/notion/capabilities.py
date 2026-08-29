@@ -1,9 +1,9 @@
-# [Input] Server-installed notion-session/notion-cli Skill packages, real Read-hook/workspace-materializer descriptors, and the current actor's optional Notion connector projection.
-# [Output] Bounded, credential-free multi-Skill and system-operation catalog plus safe Markdown/file projections for Settings.
+# [Input] Server-installed ntn and notion-session/notion-cli Skill packages, real Read-hook/workspace-materializer descriptors, and the current actor's optional Notion connector projection.
+# [Output] Bounded multi-Skill/system-operation catalog, ntn installation prerequisite, and safe Markdown/file projections for Settings.
 # [Pos] Read-only Notion capability metadata node in backend/notion; it never executes MCP, CLI, Read, or connector writes.
 # [Sync] 2026-08-29: add the server-owned notion-session catalog, parsed SKILL.md body, stable file IDs, package revision, and fail-closed file reads.
 # [Sync] 2026-08-29: derive the Skill title/files from its installed package and operations from the real Read hook/workspace materializer descriptors.
-# [Sync] 2026-08-30: expose notion-session and notion-cli from their installed packages with per-package revisions while keeping CLI credential execution unavailable.
+# [Sync] 2026-08-30: make notion-cli available after ntn installation and connection, with an explicit pre-auth installation prerequisite.
 
 """Read-only product metadata for the installed Notion Skill package."""
 from __future__ import annotations
@@ -18,6 +18,7 @@ import yaml
 
 from libs.claude_agent_kit.server.notion_read_hook import NOTION_READ_HOOK_OPERATION
 
+from .auth import NotionCliInstallation, get_notion_cli_installation
 from .sync import NOTION_WORKSPACE_MATERIALIZE_OPERATION
 
 
@@ -247,13 +248,15 @@ def _availability(requirement: str, state: Mapping[str, Any]) -> str:
     return "available"
 
 
-def _skill_availability(skill_id: str, state: Mapping[str, Any]) -> str:
+def _skill_availability(
+    skill_id: str,
+    state: Mapping[str, Any],
+    cli_installation: NotionCliInstallation,
+) -> str:
+    if skill_id == NOTION_CLI_SKILL_ID and cli_installation.status != "installed":
+        return "requires_installation"
     if not state["connected"]:
         return "requires_connection"
-    if skill_id == NOTION_CLI_SKILL_ID:
-        # The package is synchronized for discovery and inspection, but Dream
-        # intentionally does not merge actor-owned NOTION_HOME into Bash.
-        return "unavailable"
     return "available"
 
 
@@ -261,6 +264,7 @@ def build_notion_capability_catalog(
     connector: Mapping[str, Any] | None,
     *,
     skills_root: Path | None = None,
+    cli_installation: NotionCliInstallation | None = None,
 ) -> dict[str, Any]:
     """Project current product capabilities without executing any provider tool."""
 
@@ -269,9 +273,15 @@ def build_notion_capability_catalog(
         for skill_id in NOTION_SKILL_IDS
     }
     state = _connector_state(connector)
+    installation = cli_installation or get_notion_cli_installation()
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "package_revision": _catalog_revision(skills_root),
+        "cli_installation": {
+            "status": installation.status,
+            "required_version": installation.required_version,
+            "install_command": installation.install_command,
+        },
         "mcp_inventory": {
             "status": "not_integrated",
             "revision": None,
@@ -284,7 +294,7 @@ def build_notion_capability_catalog(
                 "title": skill_metadata[skill_id]["title"],
                 "description": skill_metadata[skill_id]["description"],
                 "source": "builtin",
-                "availability": _skill_availability(skill_id, state),
+                "availability": _skill_availability(skill_id, state, installation),
             }
             for skill_id in NOTION_SKILL_IDS
         ],
@@ -308,10 +318,12 @@ def get_notion_skill_detail(
     connector: Mapping[str, Any] | None,
     *,
     skills_root: Path | None = None,
+    cli_installation: NotionCliInstallation | None = None,
 ) -> dict[str, Any]:
     _require_skill_id(skill_id)
     metadata, body = _skill_document(skill_id, skills_root)
     state = _connector_state(connector)
+    installation = cli_installation or get_notion_cli_installation()
     return {
         "package_revision": _package_revision(skill_id, skills_root),
         "skill": {
@@ -319,7 +331,7 @@ def get_notion_skill_detail(
             "title": metadata["title"],
             "description": metadata["description"],
             "source": "builtin",
-            "availability": _skill_availability(skill_id, state),
+            "availability": _skill_availability(skill_id, state, installation),
             "tools": metadata["tools"],
             "body": body,
         },
