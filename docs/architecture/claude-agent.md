@@ -229,6 +229,17 @@ POST /api/claude-agent
     └─ StreamingResponse (text/event-stream)
 ```
 
+### 6.1 Editor 读写一致性边界
+
+Editor 持久化仍只由 Admin-owned PostgreSQL `user_sessions` 提供权威状态，`AgentRunState.editor_state` 只是当前 Thread 的唯一软缓存。写入路径同时执行两层绑定：
+
+1. Runner 的 `PreToolUse` 将工具参数中的 Editor session 与当前 live state 校验，不一致则在执行前拒绝。
+2. Editor MCP 子进程只获得服务端投影的 actor 和有效 PostgreSQL capability，每次 `SELECT` / `UPDATE` 都必须同时匹配 actor 与 session。
+
+工具首次读取未找到目标 cell/comment 时只允许一次 fresh reload；仍未找到就 fail closed，不创建同名伪 cell。持久化能力不可用时返回 `editor_state_unavailable`，不得降级成 `cell_not_found`。Service 在唯一 SSE/历史边界解析 stdio `content[].text` 业务结果；actor/session 匹配的成功或失败都重载权威 EditorState，仅 `ok=true` 才发布既有 `session_updated`。
+
+Notion 只将轻量索引和 Skill 导航投影到 Thread workspace；页面正文只能经选中 ID 按需读取，不得进入 EditorState。Notion 局部失败不会修改或中断普通日记。
+
 ---
 
 ## 7. 错误处理

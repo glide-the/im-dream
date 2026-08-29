@@ -7,8 +7,11 @@
 // [Sync] 2026-07-08: move editor write tool name detection into editorWriteTools.ts so this file exports components only.
 // [Sync] 2026-07-20: i18n — all approval card copy (titles, labels, buttons, completed
 //        states) resolves through the chat.editorWrite namespace (en + zh) via useTranslation.
+// [Sync] 2026-08-29: render truthful Editor failure guidance and retain the
+//        approved-but-unwritten input preview without exposing backend internals.
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { EditorWriteResult } from './editorWriteTools';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -452,12 +455,7 @@ export function ReplyToCommentApprovalUI({ toolCallId, isProcessing, onApprove, 
 
 // ── EditorWriteCompletedCard ──────────────────────────────────────────────────
 
-export interface EditorWriteOutput {
-  ok?: boolean;
-  cellId?: string;
-  reason?: string;
-  error?: string;
-}
+export type EditorWriteOutput = EditorWriteResult;
 
 interface EditorWriteCompletedCardProps {
   toolName: string;
@@ -479,6 +477,19 @@ function resolveTargetCellId(toolName: string, input: Record<string, unknown>, o
   return null;
 }
 
+function failureMessageKey(error: string | undefined): string {
+  if (error === 'cell_not_found' || error === 'comment_not_found' || error === 'after_cell_not_found') {
+    return 'chat.editorWrite.failureTargetMissing';
+  }
+  if (error === 'editor_session_not_found' || error === 'editor_session_mismatch') {
+    return 'chat.editorWrite.failureSessionChanged';
+  }
+  if (error === 'editor_state_unavailable' || error === 'editor_context_unavailable' || error === 'save_failed') {
+    return 'chat.editorWrite.failureUnavailable';
+  }
+  return 'chat.editorWrite.failureGeneric';
+}
+
 export function EditorWriteCompletedCard({ toolName, input, output }: EditorWriteCompletedCardProps) {
   const { t } = useTranslation();
   const name = toolName.toLowerCase();
@@ -487,6 +498,11 @@ export function EditorWriteCompletedCard({ toolName, input, output }: EditorWrit
   const isSuccess = output.ok !== false;
   const targetCellId = resolveTargetCellId(name, input, output);
   const reason = output.reason ?? (typeof input.reason === 'string' ? input.reason : undefined);
+  const retainedInput = typeof input.text === 'string'
+    ? input.text
+    : typeof input.content === 'string'
+      ? input.content
+      : null;
 
   const handleJumpToCell = () => {
     if (!targetCellId) return;
@@ -507,7 +523,9 @@ export function EditorWriteCompletedCard({ toolName, input, output }: EditorWrit
         alignItems: 'center',
         gap: '0.55rem',
       }}>
-        <span style={{ fontSize: '0.9rem', fontWeight: 600, color: isSuccess ? '#166534' : '#c0392b', flex: 1 }}>{label}</span>
+        <span style={{ fontSize: '0.9rem', fontWeight: 600, color: isSuccess ? '#166534' : '#c0392b', flex: 1 }}>
+          {isSuccess ? label : t('chat.editorWrite.failureTitle')}
+        </span>
         <span style={{
           fontSize: '0.72rem',
           fontWeight: 600,
@@ -520,7 +538,7 @@ export function EditorWriteCompletedCard({ toolName, input, output }: EditorWrit
         </span>
       </div>
       <div style={{ padding: '0.65rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-        {targetCellId ? (
+        {targetCellId && isSuccess ? (
           <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
             {t('chat.editorWrite.segmentIdPrefix')}<code style={{ fontSize: '0.78rem', background: 'var(--color-bg-surface)', padding: '0.1rem 0.4rem', borderRadius: '4px', color: 'var(--color-text-secondary)' }}>{targetCellId}</code>
           </div>
@@ -530,8 +548,20 @@ export function EditorWriteCompletedCard({ toolName, input, output }: EditorWrit
             {reason}
           </div>
         ) : null}
-        {!isSuccess && output.error ? (
-          <div style={{ fontSize: '0.82rem', color: '#c0392b' }}>{output.error}</div>
+        {!isSuccess ? (
+          <div style={{ fontSize: '0.82rem', color: '#c0392b', lineHeight: 1.55 }}>
+            {t(failureMessageKey(output.error))}
+          </div>
+        ) : null}
+        {!isSuccess && retainedInput ? (
+          <details>
+            <summary style={{ cursor: 'pointer', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
+              {t('chat.editorWrite.retainedInput')}
+            </summary>
+            <div style={{ marginTop: '0.45rem' }}>
+              <PreviewBox text={retainedInput} />
+            </div>
+          </details>
         ) : null}
       </div>
       {targetCellId && isSuccess ? (

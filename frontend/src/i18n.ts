@@ -18,6 +18,7 @@
 // [Sync] 2026-08-22: add localized Workspace URI preview/download and full-size image dialog states under the existing Chat namespace.
 // [Sync] 2026-08-23: add the inert Workspace-image fallback used when a protected asset cannot be embedded in Chat export.
 // [Sync] 2026-08-23: localize the shared Mermaid/Workspace enlarge, download, close, and zoom controls.
+// [Sync] 2026-08-29: add truthful Editor write failure and retained-input recovery copy.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -621,6 +622,12 @@ const resources = {
           },
           success: 'Success',
           failure: 'Failed',
+          failureTitle: 'The note was not changed',
+          failureTargetMissing: 'The note was refreshed, but the target segment no longer exists. Nothing was written; the proposed content is preserved below. Start the edit again from the current note.',
+          failureSessionChanged: 'The current note changed before this edit ran. Nothing was written; the proposed content is preserved below. Start the edit again in the current note.',
+          failureUnavailable: 'The note could not be saved right now. Nothing was written; the proposed content is preserved below. Please retry later.',
+          failureGeneric: 'The edit did not complete. Nothing was written; the proposed content is preserved below. Please retry from the current note.',
+          retainedInput: 'Proposed content kept for retry',
           segmentIdPrefix: 'Segment ID: ',
           jumpToNote: 'Jump to note',
           fallbackTitle: 'Agent requests an editor operation: ',
@@ -1434,6 +1441,12 @@ const resources = {
           },
           success: '成功',
           failure: '失败',
+          failureTitle: '笔记未发生更改',
+          failureTargetMissing: '笔记已刷新，但目标片段已不存在。本次未写入，拟写内容已保留在下方；请基于当前笔记重新发起操作。',
+          failureSessionChanged: '执行前当前笔记已切换。本次未写入，拟写内容已保留在下方；请在当前笔记中重新发起操作。',
+          failureUnavailable: '目前暂时无法保存笔记。本次未写入，拟写内容已保留在下方；请稍后重试。',
+          failureGeneric: '本次编辑未完成，笔记没有发生更改；拟写内容已保留在下方，请基于当前笔记重试。',
+          retainedInput: '已保留的拟写内容',
           segmentIdPrefix: '片段 ID：',
           jumpToNote: '跳转到笔记',
           fallbackTitle: 'Agent 请求执行编辑器操作：',

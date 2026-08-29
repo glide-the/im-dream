@@ -2,6 +2,7 @@
 # [Output] Redirect authorized `.notion/pages/<id>.json` reads to a private temporary live Markdown payload.
 # [Pos] lazy Notion page-read hook in libs/claude_agent_kit/server.
 # [Sync] 2026-08-28: establish index-only snapshot plus on-demand page body reads without exposing CLI/MCP credentials to the Agent.
+# [Sync] 2026-08-29: export the Settings capability descriptor beside the real Read hook entrypoint so UI metadata cannot drift into a synthetic MCP inventory.
 
 """Lazy Notion page-content redirect for Claude Code's built-in Read tool."""
 from __future__ import annotations
@@ -242,4 +243,15 @@ async def apply_notion_page_read_redirect(
         }
 
 
-__all__ = ["apply_notion_page_read_redirect"]
+NOTION_READ_HOOK_OPERATION: Mapping[str, str] = {
+    "id": "notion-page-read-hook",
+    "title": "按需读取页面正文",
+    "description": "只在回答需要时校验已选范围，并读取一个页面的最新 Markdown。",
+    "kind": "read",
+    "source": "runtime_hook",
+    "requirement": "index",
+    "entrypoint": apply_notion_page_read_redirect.__name__,
+}
+
+
+__all__ = ["NOTION_READ_HOOK_OPERATION", "apply_notion_page_read_redirect"]

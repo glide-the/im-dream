@@ -4,6 +4,8 @@
 <!-- [同步] 2026-08-28：以当前 develop 流程、精确 SDK/Runtime 配对、本机 Runtime 安装、故障排查和注意事项替换旧说明。 -->
 <!-- [同步] 2026-08-28：记录固定 ntn 安装、agentdata 内按用户隔离的凭证与当前快照、后台策略同步及 per-Thread 投影合同。 -->
 <!-- [同步] 2026-08-29：记录当前选择范围过滤、thread 最小元数据、空范围撤销和重新授权 LKG 行为。 -->
+<!-- [同步] 2026-08-29：记录 Settings Notion 能力/Skill 审阅界面和 Hosted MCP 读写的真实边界。 -->
+<!-- [同步] 2026-08-30：记录同步安装的 notion-session/notion-cli 包，并保持 actor 凭证隔离不变。 -->
 
 # Ink & Memory
 
@@ -26,7 +28,7 @@ Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 
 - **Dream** —— 启动 Dream Run，审阅剧本、分镜、提示词和生成产物。
 - **Decks** —— 创建并版本化 Deck、Agent、Prompt、资源和 Claude Plugin 引用。
 - **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、MCP Server、Skill 和插件。
-- **Notion 资源** —— 在 Settings 中连接并选择精确允许范围，在 Chat 外刷新轻量索引，通过内置只读 Notion Skill 使用，不向 Agent 暴露凭证或 CLI 路径。
+- **Notion 资源** —— 在 Settings 中连接并选择精确允许范围，审阅已安装的 `notion-session`、`notion-cli` 与安全 reference 文件，并在 Chat 外刷新轻量索引。Read Hook 可在不暴露凭证的情况下使用；同步安装的 CLI 包不会获得 actor-owned `NOTION_HOME`，Hosted Notion MCP 读写仍明确不可用。
 - **平台集成** —— 从 Admin/Gateway 获取已认证的模型 alias、订阅资格、用量和计费能力。
 
 Deck 市场分发当前明确延期，参见 [docs/design/deck-register/README.md](docs/design/deck-register/README.md)。
@@ -278,6 +280,7 @@ python3 scripts/verify_claude_registry_release.py \
 7. **已发布版本不可覆盖。** 错误 Runtime 必须通过前向版本修复或显式评审回滚，正常回滚不得覆盖或 unpublish 已验收版本。
 8. **模型输出能力由服务端所有。** Admin 最终选中模型的 `maxOutputTokens` 必须投影到 Runtime；浏览器设置、用户环境、workspace 文件和 Gateway body 改写均不得替代它。
 9. **Notion 凭证与轻量索引均按用户所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，Runtime 只接收当前选择范围内的 per-Thread 投影，重新授权失败时保留仍有效的凭证，页面正文按需读取；进程 `HOME`、ambient `NOTION_API_TOKEN`、浏览器配置和 workspace 文件都不能覆盖任一来源。
+10. **Editor 写入同时绑定 actor、当前 session 和持久状态。** runner 拒绝面向过期 session 的写入；Editor MCP 子进程只接收服务端所有的 actor 与有效 PostgreSQL capability；每次查询/更新均按 actor 限定；业务失败只刷新唯一内存 EditorState 软缓存，不发布成功事件。Notion 索引和按需页面正文不得进入 EditorState。
 
 ## 故障排查
 

@@ -10,6 +10,8 @@
 #                    lazy Read hook; no Notion MCP namespace is exposed.
 # [Sync] 2026-08-29: Editor virtual-Read redirects stay inside the canonical
 #                    thread .claude-tmp with private directory/file modes.
+# [Sync] 2026-08-29: Editor MCP config carries only trusted actor/DB capability,
+#                    and write calls fail closed when their session differs from live state.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -3376,6 +3378,78 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
         for p in tmp_paths:
             if os.path.isfile(p):
                 os.unlink(p)
+
+
+# ---------------------------------------------------------------------------
+# Editor MCP actor/capability and live-session binding
+# ---------------------------------------------------------------------------
+
+
+class TestEditorMcpBinding(unittest.TestCase):
+    _LIVE_STATE = {
+        "id": "session-current",
+        "cells": [{"id": "cell-current", "type": "text", "content": ""}],
+    }
+
+    @patch.dict(
+        os.environ,
+        {"DATABASE_URL": "postgresql://unit:secret@127.0.0.1:5432/ink_unit"},
+        clear=False,
+    )
+    def test_stdio_config_projects_only_trusted_actor_and_database_capability(self):
+        config = agent_runner_module._editor_mcp_stdio_config({
+            "INK_AGENT_USER_ID": "7",
+            "INK_AGENT_THREAD_ID": "thread-must-not-cross",
+            "UNTRUSTED_VALUE": "must-not-cross",
+        })
+
+        env = config.env
+        self.assertEqual(env["INK_AGENT_USER_ID"], "7")
+        self.assertEqual(
+            env["DATABASE_URL"],
+            "postgresql://unit:secret@127.0.0.1:5432/ink_unit",
+        )
+        self.assertNotIn("INK_AGENT_THREAD_ID", env)
+        self.assertNotIn("UNTRUSTED_VALUE", env)
+
+    def test_current_session_write_continues_through_permission_chain(self):
+        result = agent_runner_module._apply_editor_session_binding(
+            "mcp__editor__write_segment",
+            {"editor_session_id": "session-current", "cellId": "cell-current"},
+            self._LIVE_STATE,
+        )
+        self.assertIsNone(result)
+
+    def test_wrong_session_write_is_denied_without_identity_disclosure(self):
+        result = agent_runner_module._apply_editor_session_binding(
+            "mcp__editor__write_segment",
+            {"editor_session_id": "session-stale", "cellId": "cell-current"},
+            self._LIVE_STATE,
+        )
+
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        reason = str(specific.get("permissionDecisionReason") or "")
+        self.assertIn("当前笔记已切换", reason)
+        self.assertNotIn("session-stale", reason)
+        self.assertNotIn("session-current", reason)
+
+    def test_missing_live_state_fails_closed(self):
+        result = agent_runner_module._apply_editor_session_binding(
+            "mcp__editor__delete_segment",
+            {"editor_session_id": "session-current", "cellId": "cell-current"},
+            None,
+        )
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+
+    def test_switch_editor_remains_available_to_change_the_live_session(self):
+        result = agent_runner_module._apply_editor_session_binding(
+            "mcp__editor__switch_editor",
+            {"editor_session_id": "session-next"},
+            self._LIVE_STATE,
+        )
+        self.assertIsNone(result)
 
 
 # ---------------------------------------------------------------------------

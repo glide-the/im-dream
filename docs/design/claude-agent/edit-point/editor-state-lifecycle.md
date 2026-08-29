@@ -13,6 +13,7 @@
 > [Sync] 2026-05-29: initial design — editor_state snapshot lifecycle.
 > [Sync] 2026-08-13: add pre-send persistence, structured failure normalization, interaction sequence, and minimal-design review.
 > [Sync] 2026-08-29: remove the retired Editor MCP state-file/read path; virtual Read redirects now use the canonical thread `.claude-tmp` with `0700/0600` permissions.
+> [Sync] 2026-08-29: document the real `wav4tgnccf` incident, actor/session-bound Editor MCP access, one bounded stale reload, truthful failure recovery, and the Notion/Editor isolation decision.
 > [Sync] 2026-05-29: editor_state 迁移至 AgentRunState 软缓存；新增阶段 3b（MCP写工具后DB刷新），
 >                    更新 §5 不持久化决策表（AgentRunState 改为软缓存 ✅），更新 §4 时序图。
 
@@ -41,6 +42,13 @@ Scope: Design + 实现对应代码
 7. [读写路径对比](#7-读写路径对比)
 8. [与双层上下文架构的关系](#8-与双层上下文架构的关系)
 9. [故障处理汇总](#9-故障处理汇总)
+10. [Editor write 读写一致性与结果协议](#10-editor-write-读写一致性与结果协议2026-08-13)
+11. [`wav4tgnccf` 真实故障与 Notion 分层判断](#11-wav4tgnccf-真实故障与-notion-分层判断2026-08-29)
+12. [目标、边界与概念规则](#12-目标边界与概念规则)
+13. [交互状态与恢复规则](#13-交互状态与恢复规则)
+14. [业务流程](#14-业务流程)
+15. [兼容、回滚、可观测性与验收](#15-兼容回滚可观测性与验收)
+16. [反过度设计：保留、修改、删除、延期](#16-反过度设计保留修改删除延期)
 
 ---
 
@@ -523,7 +531,7 @@ Edit-point 上下文由两个互补但独立的层组成：
 | `editor_state = None`（前端未传，缓存也为空） | 两个运行时机制均不激活；`.editor/` 读取返回占位符 `{}`；`<workspace_context>` 块不受影响 |
 | `editor_state = None`（前端未传，但缓存有值） | 使用缓存值激活运行时机制（软缓存兜底），保证上下文连续性 |
 | `editor_state` 格式非 dict（前端 Bug） | Pydantic 解析失败，HTTP 422 错误，请求被拒绝 |
-| 写入 MCP 状态临时文件失败（磁盘满等） | `except Exception` 捕获，记录 warning，跳过 Editor MCP；Agent 仍可通过路径 A（PreToolUse）读取 |
+| Editor MCP 缺少 actor 或 PostgreSQL capability | 工具 fail closed 为 `editor_context_unavailable` / `editor_state_unavailable`；不将能力故障误报为 cell 不存在 |
 | 写入 PreToolUse 重定向临时文件失败 | `except Exception` fall-through，记录 warning；Agent 读到占位符 `{}` |
 | `get_editor_resource_data` 异常（如字段缺失） | 同上 fall-through；返回 `{}` |
 | Agent 执行被取消（`CancelledError`） | `finally` 块仍执行，临时文件正常清理；`AgentRunState.editor_state` 保留写工具执行前值 |
@@ -548,7 +556,7 @@ Edit-point 上下文由两个互补但独立的层组成：
 - Chat 的 queued send、composer send 和 inline editor widget send 在调用生产 Agent API 前，共用 `ensureSessionPersistedForAgent()`。它比较包含 `editorState.id` 的签名；不同 session 即使内容完全相同也必须单独落库。保存失败会拒绝本次发送，而不是暴露不可写快照。
 - 输入流式预览、`PreToolUse` 确认 Store、`EditorWriteApprovalUI` 以及批准/拒绝协议保持不变。
 - service 只对已登记的 Editor write 工具检查结构化 `ok:false`，并在写入 live EventBus 和 `collected_parts` 前把它合并为 `isError:true`。普通工具的领域 JSON 不受影响。
-- 成功结果才允许 DB reload、刷新 `AgentRunState.editor_state` 和发布 `session_updated(source=agent)`；失败保留完整 JSON，进入 `output-error`，不 reload、不跳转。
+- actor/session 匹配的 Editor 结果都从 DB reload 唯一 `AgentRunState.editor_state` 软缓存；只有成功结果发布 `session_updated(source=agent)`。失败保留完整 JSON，进入 `output-error`，不发布成功事件、不跳转。
 - live transport 与 reconnect reducer继续消费同一个后端 `isError` 字段；历史持久化也消费同一个已规范化 collected event，不另建 parser 或状态机。
 
 用户可见状态沿用现有组件：输入预览 → 等待确认 → 已拒绝，或成功完成卡（可跳转）；`cell_not_found`、`session_not_found`、`save_failed` 显示失败详情且无跳转按钮。失败后用户可保留草稿、重试保存或重新发送请求。
@@ -603,8 +611,11 @@ sequenceDiagram
             API->>API: Editor write 业务失败 => isError:true
             API-->>SSE: tool-output-available(isError=true)
             SSE->>SSE: output-error（live 与 replay 同规则）
+            API->>DB: reload actor/session 权威状态
+            DB-->>API: 最新 EditorState
+            API->>Run: 替换 stale 软缓存
             SSE-->>Card: 失败详情，无跳转按钮
-            Note over API,Reload: 不刷新 Run，不发布 session_updated
+            Note over API,Reload: 不发布 session_updated 成功事件
         else 写入成功
             DB-->>MCP: persisted
             MCP-->>API: {ok:true,...}
@@ -630,3 +641,169 @@ sequenceDiagram
 ### 10.4 过度设计审查
 
 该方案直接满足读写同源、业务失败不误判、状态可理解、重连不变形。它没有新增状态机、存储层、事件类型或平行协议：只增加一个发送前持久化 barrier、把既有签名补上 session identity，并在既有 service 事件边界合并业务错误。删除/否决的多余方案包括：失败时临时建 cell、MCP 写软缓存、仅改变卡片颜色、在 live 与 history 各复制一次错误 parser、增加环境或 test-only 分支。最终最小边界为前端持久化语义、后端统一事件规范化和现有完成卡失败数据保真三处。
+
+---
+
+## 11. `wav4tgnccf` 真实故障与 Notion 分层判断（2026-08-29）
+
+### 11.1 背景与问题
+
+本机真实链路中，用户在同一 Chat turn 内五次调用 `write_segment` 写入今日笔记 cell `wav4tgnccf`，每次均返回 `cell_not_found`。只读证据同时证明：
+
+- `user_sessions` 中今日只有一个 Editor session；其 `editor_state_json` 包含该 cell，session state ID 与行 ID 一致；
+- `.editor/cells.json` 在相同 turn 内也返回该 cell；
+- 五次调用携带相同的当前 Editor session ID 与 cell ID，不存在截断、归一化或模型参数漂移；
+- Editor MCP stdio 配置只投影 `PYTHONPATH` 与 `PYTHONUNBUFFERED`。按照 stdio MCP 的受控继承规则，PostgreSQL 配置不会进入子进程；数据库加载异常被旧 helper 吞并转换成 `{}`，最终被误报为 `cell_not_found`；
+- SDK transport 把 MCP handler 的 JSON 文本视为成功返回，旧 service 只检查顶层 `output.ok`，未解包 `content[].text`，因此 history 仍把业务失败保存成 `output-available`。
+
+“大量无关笔记”不在今日 EditorState。当前真实 session 只有一个空文本 cell；对应 Chat 曾按用户请求读取 Notion 轻量 page/database 索引和少量按需页面，正文只存在于 Chat 工具输出和 Runtime transcript。thread `.notion/pages/` 为空，Notion snapshot 不含 page body，也没有 Editor 写成功记录。故本轮不删除任何真实笔记。
+
+### 11.2 判断矩阵
+
+| 问题 | 可验证现象 | 数据/代码证据 | 根因 | 影响范围 | 正确处理 |
+|---|---|---|---|---|---|
+| 当前 cell 被报告不存在 | DB 与 `.editor` 均存在 `wav4tgnccf`，五次相同参数均失败 | `editor_tool._load_editor_state_from_db` 吞异常；`_editor_mcp_stdio_config` 未投影 DB 配置 | Editor MCP 子进程缺少持久化能力配置，加载失败被错误降级为空 state | 所有启用 Editor MCP 的真实写工具 | 修复受控子进程配置；加载失败返回 `editor_state_unavailable`，不得伪装成 cell 缺失 |
+| actor/session 隔离不足 | tool SQL 只按 session ID 查询和更新；`switch_editor` 也只按 session ID 加载 | `editor_tool.py` 与 `agent_runner.py` | 依赖模型参数和 runner 信任，没有在 DB 与 hook 双边绑定 actor/current session | 错 session、跨用户恶意或异常调用 | DB 查询/更新必须含 actor；PreToolUse 必须校验当前 live Editor session；switch 只加载同 actor session |
+| stale state 连续重试不收敛 | 失败后 Agent 重读 `.editor` 仍看到旧软缓存并重复写 | service 只在成功结果后刷新 state | 业务失败未触发权威 DB refresh；工具结果又被错误保存成成功 | 同 turn 后续读取和重试 | cell/session 相关失败后刷新唯一 `AgentRunState.editor_state`；handler 内只允许一次 fresh reload/retry，仍不存在则 fail closed |
+| 业务错误显示为成功 | persisted output 内含 `ok:false`，外层 SDK `isError=false` | MCP text envelope + `_tool_result_ok` 顶层检查 | 结果 envelope 未统一解析 | live SSE、history replay、完成卡 | 后端在单一事件边界解析；前端只做显示兼容解包，不复制业务判断 |
+| 今日笔记疑似被 Notion 污染 | 今日 EditorState 0 个非空 cell；Chat 有 Notion Read 输出；`.notion/pages` 0 个静态文件 | PostgreSQL、Chat message metadata、thread projection | 内容位于 Chat/Runtime 层；Notion 是该对话的按需来源，不是 EditorState 写入者 | 当前 thread 的上下文与历史体积 | 不清理 Editor 数据；保留 Notion 轻索引/按需读取；只修复 Editor 写链路和错误呈现 |
+| Notion 初始化或读取局部失败 | 普通 turn 仍可继续；投影不触发远程同步 | actor snapshot provider、Read hook、现有测试 | 与 Editor MCP 故障独立 | 单次 Notion 能力 | 保持局部 fail closed，不把 Notion 正文或索引混入 EditorState |
+
+## 12. 目标、边界与概念规则
+
+### 12.1 产品目标
+
+1. 已保存于当前用户当前 Editor session 的 cell 能被写工具可靠识别。
+2. stale snapshot 可恢复时，系统自动读取权威状态并只重试一次；无法恢复时停止写入。
+3. 失败卡说明发生了什么、内容是否安全、系统是否已恢复、用户下一步是什么。
+4. Notion 索引/正文、Chat history、thread workspace 和 EditorState 保持可证明的层级隔离。
+
+### 12.2 非目标
+
+- 不新增 EditorState store、数据库表、队列、内部 HTTP 控制口或 durable event 类型。
+- 不把 Notion 页面导入 EditorState，不做 Notion 写回、全文同步或自动摘要写日记。
+- 不改变普通 Agent turn、resume、cancel、EventBus、SSE、confirmation 或模型语义。
+- 不自动删除历史 Chat 工具输出、Runtime transcript 或任何无法证明由 Bug 写入的真实内容。
+
+### 12.3 概念边界
+
+| 概念 | 权威与规则 |
+|---|---|
+| Editor session | `user_sessions(user_id, id)`；写工具必须同时匹配 actor 与当前 live session |
+| Thread | Chat/Runtime 生命周期与 transcript 所有者；不得代替 Editor session ID |
+| Cell | EditorState 内有序对象；不存在时不创建同名 cell |
+| AgentRunState | 当前 thread 的唯一软缓存；每轮请求或权威 DB reload 更新，不是持久化源 |
+| Notion index | actor snapshot 的轻量 page/database metadata；只投影到当前 thread `.notion` |
+| Notion page body | 选中 ID 的按需 Read 结果；仅进入 turn 临时文件/工具输出，不进入 EditorState |
+
+## 13. 交互状态与恢复规则
+
+| 状态 | 系统行为 | 用户反馈 |
+|---|---|---|
+| 首次加载 | 发送前完成当前 session 持久化；写工具未就绪前不暴露虚假可写状态 | 正常显示内容预览与确认卡 |
+| 同步中 | 用户确认后保持拟写内容在 tool input；执行一次权威加载 | “正在写入” |
+| stale 可恢复 | 第一次查找失败后重新加载一次；找到后继续同一次已确认操作 | 无额外确认；成功后显示已写入 |
+| stale 不可恢复 | 第二次仍找不到 cell；刷新 AgentRunState，停止写入 | “笔记已刷新，但目标片段已不存在；本次未写入，拟写内容已保留，请重新发起” |
+| 持久化不可用 | 不把能力错误改写为 cell 缺失，不写缓存，不发布成功事件 | “暂时无法保存；本次未写入，拟写内容已保留，请稍后重试” |
+| 错 session/actor | hook 或 DB owner check 拒绝；不执行写 SQL | “当前笔记已切换；本次未写入，请在当前笔记重新发起” |
+| 成功恢复 | 从 DB 刷新 AgentRunState，发布现有 `session_updated`，前端 reload | “已写入”；可跳转目标 cell |
+| Notion 局部失败 | 只让本次 Notion Read 失败；Editor 状态不变 | 仅说明 Notion 暂不可用，普通日记继续可用 |
+
+失败完成卡保留原 tool input 作为“未写入内容”预览，不显示 Runtime、缓存、目录、凭证或数据库字段。
+
+## 14. 业务流程
+
+### 14.1 正常路径
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant UI as Chat/Editor UI
+    participant S as Dream Service
+    participant R as Agent Runner
+    participant M as Editor MCP
+    participant DB as Editor Session Store
+    participant C as AgentRunState
+
+    U->>UI: 确认拟写内容
+    UI->>S: tool-confirm
+    R->>R: 校验 actor 与当前 Editor session
+    R->>M: 执行已确认写工具
+    M->>DB: 读取 actor + session 最新状态
+    DB-->>M: 返回目标 cell
+    M->>DB: 保存更新
+    M-->>S: ok=true
+    S->>DB: 按 actor + session 重载
+    DB-->>S: 最新 EditorState
+    S->>C: 替换唯一软缓存
+    S-->>UI: 成功结果 + session_updated
+```
+
+### 14.2 stale-state 恢复路径
+
+```mermaid
+sequenceDiagram
+    participant M as Editor MCP
+    participant DB as Editor Session Store
+    participant S as Dream Service
+    participant C as AgentRunState
+
+    M->>DB: 第一次读取 actor + session
+    DB-->>M: 目标 cell 未命中
+    M->>DB: 一次有界 fresh reload
+    alt 第二次找到目标 cell
+        DB-->>M: 最新 EditorState
+        M->>DB: 保存已确认写入
+        M-->>S: ok=true, recovered=true
+        S->>C: 刷新唯一软缓存
+    else 第二次仍不存在
+        DB-->>M: 目标确实不存在
+        M-->>S: ok=false, cell_not_found
+        S->>DB: 按 actor + session 刷新读取
+        S->>C: 替换 stale 软缓存
+    end
+```
+
+### 14.3 失败与输入保留路径
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant Card as 写入结果卡
+    participant S as Dream Service
+    participant DB as Editor Session Store
+
+    U->>Card: 已确认拟写内容
+    Card->>S: 执行写工具
+    S->>DB: actor/session scoped 读写
+    alt session/actor 不匹配
+        DB-->>S: 拒绝或未找到
+        S-->>Card: 未写入 + 当前笔记已切换
+    else 持久化不可用
+        DB-->>S: capability unavailable
+        S-->>Card: 未写入 + 稍后重试
+    else cell 确实不存在
+        DB-->>S: bounded reload 后仍未找到
+        S-->>Card: 未写入 + 笔记已刷新
+    end
+    Note over Card: 拟写内容保留在原 tool input<br/>不提供成功跳转，不丢失用户输入
+```
+
+## 15. 兼容、回滚、可观测性与验收
+
+- 保持公开 API、Editor 工具名称/schema、confirmation、SSE event type 和 session event bus 不变。
+- `switch_editor` 仍只切换 `.editor`，但只可加载当前 actor 的 session；Notion connector 不使用该工具。
+- 回滚仅回退 Dream 代码；没有 schema、数据 migration 或 snapshot 格式变化。
+- 日志只记录 tool 名、非正文 error code、actor/session 的既有非敏感标识；不得记录拟写正文、DB URL、Notion token 或 page body。
+- 验收覆盖当前 session 命中、错 session、跨用户、bounded stale recovery、真实缺失、成功后同轮 read、结构化失败、Notion/Editor 隔离和 secret-free 日志。
+
+## 16. 反过度设计：保留、修改、删除、延期
+
+| 决策 | 内容 |
+|---|---|
+| 保留 | 前端 persistence barrier、`AgentRunState.editor_state` 单一软缓存、DB 权威、现有 confirmation/EventBus/SSE/session event、Notion actor index + lazy Read |
+| 修改 | Editor MCP 投影最小 DB/actor 能力；SQL 加 actor 条件；runner 校验 live session；加载错误分类；一次 stale reload；service 统一解包结果并在失败后刷新软缓存；失败卡保留输入并给出业务反馈 |
+| 删除 | session-id-only 读写、加载异常返回 `{}`、业务 `ok:false` 被保存成成功、失败后继续暴露 stale `.editor` 的行为 |
+| 延期 | 通用 connector hook 框架、跨进程事件总线、新 revision/CAS schema、自动数据清理、Notion 写回/全文同步、历史 transcript 压缩 |
+
+最小方案只扩展现有边界。数据库凭证只进入受控 Editor MCP 子进程，不进入 Agent prompt、workspace、工具输入、日志或 HTTP；不新增第二套 EditorState 同步机制。

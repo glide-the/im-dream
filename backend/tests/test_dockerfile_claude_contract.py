@@ -10,6 +10,7 @@
 #                    into the same standard Agent startup image.
 # [Sync] 2026-08-28: require the complete Notion Skill reference package in the
 #                    backend build context.
+# [Sync] 2026-08-30: require the renamed upstream notion-cli package beside notion-session.
 
 from __future__ import annotations
 
@@ -121,6 +122,17 @@ def test_dockerfile_installs_supported_notion_cli_and_bundled_skill() -> None:
     assert "ntn api" not in content
     references = skill.parent / "references"
     assert {path.name for path in references.glob("*.md")} == {
+        "notion-search.md",
+        "notion-page-read.md",
+        "notion-db-query.md",
+    }
+    cli_skill = BACKEND_ROOT / "builtin_skills" / "notion-cli" / "SKILL.md"
+    assert cli_skill.is_file()
+    cli_content = cli_skill.read_text(encoding="utf-8")
+    assert "name: notion-cli" in cli_content
+    assert 'tools: ["Bash"]' in cli_content
+    assert "ntn api v1/search" in cli_content
+    assert {path.name for path in (cli_skill.parent / "references").glob("*.md")} == {
         "notion-search.md",
         "notion-page-read.md",
         "notion-db-query.md",

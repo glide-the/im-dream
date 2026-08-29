@@ -1,5 +1,5 @@
 // [Input] Connector REST endpoints, auth token storage, and Notion resource selection payloads.
-// [Output] Fail-closed frontend client helpers for connector CRUD, auth, resource selection, snapshot policy, and sync.
+// [Output] Fail-closed frontend client helpers for connector CRUD/auth/sync plus the read-only Notion capability, Skill, and safe-file catalog.
 // [Pos] resource connector API client node in frontend/src/api
 // [Sync] 2026-07-04: add Notion resource connector API helpers with local fallback storage for the frontend task.
 // [Sync] 2026-07-04: preserve backend connector UUIDs from singular create responses so auth/discovery
@@ -23,6 +23,11 @@
 //                    synchronization failures, and consume the versioned scheduled-sync policy.
 // [Sync] 2026-08-29: drop opaque Notion response blobs from selection payloads and expose
 //                    recoverable reauthorization warnings without masking effective access.
+// [Sync] 2026-08-29: consume the server-owned Notion capability/Skill/file DTOs with strict
+//                    availability, inventory, revision, MIME, size, and stable-ID validation.
+// [Sync] 2026-08-29: accept only real Notion Read-hook and workspace-materializer operation
+//                    sources with explicit backend entrypoints.
+// [Sync] 2026-08-30: accept the installed notion-session Read and notion-cli Bash tool boundaries without treating either as an operation source.
 /**
  * Resource connector API helpers.
  *
@@ -150,6 +155,68 @@ export interface UpdateConnectorSyncPolicyInput {
   intervalMinutes: number;
 }
 
+export type NotionCapabilityAvailability =
+  | 'available'
+  | 'requires_connection'
+  | 'requires_scope'
+  | 'unavailable';
+
+export interface NotionCapabilitySkillSummary {
+  id: string;
+  title: string;
+  description: string;
+  source: 'builtin';
+  availability: NotionCapabilityAvailability;
+}
+
+export interface NotionCapabilityOperation {
+  id: string;
+  title: string;
+  description: string;
+  kind: 'read' | 'write';
+  source: 'runtime_hook' | 'workspace_materializer';
+  entrypoint: string;
+  availability: NotionCapabilityAvailability;
+}
+
+export interface NotionMcpInventory {
+  status: 'not_integrated' | 'available' | 'unavailable';
+  revision?: string;
+  readStatus: 'not_integrated' | 'available' | 'unavailable';
+  writeStatus: 'not_integrated' | 'available' | 'unavailable';
+}
+
+export interface NotionCapabilityCatalog {
+  schemaVersion: number;
+  packageRevision: string;
+  mcpInventory: NotionMcpInventory;
+  skills: NotionCapabilitySkillSummary[];
+  operations: NotionCapabilityOperation[];
+}
+
+export interface NotionSkillFileDescriptor {
+  id: string;
+  relativePath: string;
+  mediaType: 'text/markdown';
+  sizeBytes: number;
+}
+
+export interface NotionSkillDetail {
+  packageRevision: string;
+  skill: NotionCapabilitySkillSummary & {
+    tools: ['Read'] | ['Bash'];
+    body: string;
+  };
+  files: NotionSkillFileDescriptor[];
+}
+
+export interface NotionSkillFileContent {
+  packageRevision: string;
+  file: NotionSkillFileDescriptor & {
+    content: string;
+  };
+}
+
 const DEFAULT_CONNECTOR_NAME = 'Resource Connector';
 const DEFAULT_NOTION_VERIFICATION_URL = 'https://www.notion.so/my-integrations';
 
@@ -163,6 +230,21 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function requireNonEmptyString(value: unknown, field: string): string {
+  const normalized = asString(value)?.trim();
+  if (!normalized) {
+    throw new ResourceConnectorApiError(502, `Notion ${field} response is invalid. Please retry.`);
+  }
+  return normalized;
+}
+
+function requirePositiveSafeInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new ResourceConnectorApiError(502, `Notion ${field} response is invalid. Please retry.`);
+  }
+  return value;
 }
 
 export class ResourceConnectorApiError extends Error {
@@ -444,7 +526,7 @@ function normalizeConnector(raw: unknown): ResourceConnector {
     status: indexIsRefreshing
       ? 'syncing'
       : localizeConnectorStatus(connectorStatus, hasSession, Boolean(lastSyncedAt)),
-    createdAt: asString(record.created_at) ?? asString(record.createdAt) ?? now,
+    createdAt: asString(record.created_at) ?? asString(record.createdAt) ?? '',
     updatedAt: asString(record.updated_at) ?? asString(record.updatedAt) ?? now,
     lastSyncedAt,
     auth,
@@ -484,6 +566,130 @@ function normalizeConnectorResponse(response: unknown): ResourceConnector {
 
 export function normalizeResourceConnectorFallback(raw: unknown): ResourceConnector {
   return normalizeConnector(raw);
+}
+
+function normalizeCapabilityAvailability(value: unknown): NotionCapabilityAvailability {
+  if (value === 'available' || value === 'requires_connection' || value === 'requires_scope' || value === 'unavailable') {
+    return value;
+  }
+  throw new ResourceConnectorApiError(502, 'Notion capability availability is invalid. Please retry.');
+}
+
+function normalizeCapabilitySkill(raw: unknown): NotionCapabilitySkillSummary {
+  const record = asRecord(raw);
+  if (record.source !== 'builtin') {
+    throw new ResourceConnectorApiError(502, 'Notion Skill source is invalid. Please retry.');
+  }
+  return {
+    id: requireNonEmptyString(record.id, 'Skill id'),
+    title: requireNonEmptyString(record.title, 'Skill title'),
+    description: requireNonEmptyString(record.description, 'Skill description'),
+    source: 'builtin',
+    availability: normalizeCapabilityAvailability(record.availability),
+  };
+}
+
+function normalizeCapabilityOperation(raw: unknown): NotionCapabilityOperation {
+  const record = asRecord(raw);
+  if (record.kind !== 'read' && record.kind !== 'write') {
+    throw new ResourceConnectorApiError(502, 'Notion operation kind is invalid. Please retry.');
+  }
+  if (record.source !== 'runtime_hook' && record.source !== 'workspace_materializer') {
+    throw new ResourceConnectorApiError(502, 'Notion operation source is invalid. Please retry.');
+  }
+  return {
+    id: requireNonEmptyString(record.id, 'operation id'),
+    title: requireNonEmptyString(record.title, 'operation title'),
+    description: requireNonEmptyString(record.description, 'operation description'),
+    kind: record.kind,
+    source: record.source,
+    entrypoint: requireNonEmptyString(record.entrypoint, 'operation entrypoint'),
+    availability: normalizeCapabilityAvailability(record.availability),
+  };
+}
+
+function normalizeInventoryStatus(value: unknown): NotionMcpInventory['status'] {
+  if (value === 'not_integrated' || value === 'available' || value === 'unavailable') return value;
+  throw new ResourceConnectorApiError(502, 'Notion MCP inventory status is invalid. Please retry.');
+}
+
+function normalizeNotionCapabilityCatalog(raw: unknown): NotionCapabilityCatalog {
+  const record = asRecord(raw);
+  const inventory = asRecord(record.mcp_inventory ?? record.mcpInventory);
+  const skills = record.skills;
+  const operations = record.operations;
+  if (!Array.isArray(skills) || !Array.isArray(operations)) {
+    throw new ResourceConnectorApiError(502, 'Notion capability catalog is invalid. Please retry.');
+  }
+  const status = normalizeInventoryStatus(inventory.status);
+  const readStatus = normalizeInventoryStatus(inventory.read_status ?? inventory.readStatus);
+  const writeStatus = normalizeInventoryStatus(inventory.write_status ?? inventory.writeStatus);
+  return {
+    schemaVersion: requirePositiveSafeInteger(record.schema_version ?? record.schemaVersion, 'capability schema'),
+    packageRevision: requireNonEmptyString(record.package_revision ?? record.packageRevision, 'package revision'),
+    mcpInventory: {
+      status,
+      revision: asString(inventory.revision),
+      readStatus,
+      writeStatus,
+    },
+    skills: skills.map(normalizeCapabilitySkill),
+    operations: operations.map(normalizeCapabilityOperation),
+  };
+}
+
+function normalizeSkillFileDescriptor(raw: unknown): NotionSkillFileDescriptor {
+  const record = asRecord(raw);
+  const mediaType = record.media_type ?? record.mediaType;
+  if (mediaType !== 'text/markdown') {
+    throw new ResourceConnectorApiError(502, 'Notion Skill file type is invalid. Please retry.');
+  }
+  const relativePath = requireNonEmptyString(record.relative_path ?? record.relativePath, 'Skill file path');
+  if (relativePath.startsWith('/') || relativePath.includes('..') || relativePath.includes('\\')) {
+    throw new ResourceConnectorApiError(502, 'Notion Skill file path is invalid. Please retry.');
+  }
+  return {
+    id: requireNonEmptyString(record.id, 'Skill file id'),
+    relativePath,
+    mediaType,
+    sizeBytes: requirePositiveSafeInteger(record.size_bytes ?? record.sizeBytes, 'Skill file size'),
+  };
+}
+
+function normalizeNotionSkillDetail(raw: unknown): NotionSkillDetail {
+  const record = asRecord(raw);
+  const skillRecord = asRecord(record.skill);
+  const tools = skillRecord.tools;
+  const files = record.files;
+  if (
+    !Array.isArray(tools)
+    || tools.length !== 1
+    || (tools[0] !== 'Read' && tools[0] !== 'Bash')
+    || !Array.isArray(files)
+  ) {
+    throw new ResourceConnectorApiError(502, 'Notion Skill detail is invalid. Please retry.');
+  }
+  return {
+    packageRevision: requireNonEmptyString(record.package_revision ?? record.packageRevision, 'package revision'),
+    skill: {
+      ...normalizeCapabilitySkill(skillRecord),
+      tools: tools[0] === 'Read' ? ['Read'] : ['Bash'],
+      body: requireNonEmptyString(skillRecord.body, 'Skill body'),
+    },
+    files: files.map(normalizeSkillFileDescriptor),
+  };
+}
+
+function normalizeNotionSkillFileContent(raw: unknown): NotionSkillFileContent {
+  const record = asRecord(raw);
+  const fileRecord = asRecord(record.file);
+  return {
+    packageRevision: requireNonEmptyString(record.package_revision ?? record.packageRevision, 'package revision'),
+    file: {
+      ...normalizeSkillFileDescriptor(fileRecord),
+      content: requireNonEmptyString(fileRecord.content, 'Skill file content'),
+    },
+  };
 }
 
 async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -723,4 +929,29 @@ export async function updateConnectorSyncPolicy(
     }),
   });
   return normalizeConnectorResponse(response);
+}
+
+export async function getNotionCapabilityCatalog(): Promise<NotionCapabilityCatalog> {
+  const response = await fetchJson<unknown>('/api/connectors/notion/capabilities');
+  const payload = asRecord(response);
+  return normalizeNotionCapabilityCatalog(payload.catalog ?? response);
+}
+
+export async function getNotionSkillDetail(skillId: string): Promise<NotionSkillDetail> {
+  const response = await fetchJson<unknown>(
+    `/api/connectors/notion/skills/${encodeURIComponent(skillId)}`,
+  );
+  return normalizeNotionSkillDetail(response);
+}
+
+export async function getNotionSkillFile(
+  skillId: string,
+  fileId: string,
+  packageRevision: string,
+): Promise<NotionSkillFileContent> {
+  const query = new URLSearchParams({ package_revision: packageRevision });
+  const response = await fetchJson<unknown>(
+    `/api/connectors/notion/skills/${encodeURIComponent(skillId)}/files/${encodeURIComponent(fileId)}?${query.toString()}`,
+  );
+  return normalizeNotionSkillFileContent(response);
 }

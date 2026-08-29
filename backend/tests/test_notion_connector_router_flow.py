@@ -15,6 +15,9 @@
 # [Sync] 2026-08-28: model index-only snapshots and exact pending-to-synced resource publication.
 # [Sync] 2026-08-29: cover fail-closed source clearing and failed reauthorization
 #                    that preserves only a previously effective actor credential.
+# [Sync] 2026-08-29: verify capability/Skill/file routes stay inspectable before connection,
+#                    expose only stable IDs, and reject stale package revisions.
+# [Sync] 2026-08-30: expose notion-session and renamed notion-cli through the same read-only package routes.
 
 from __future__ import annotations
 
@@ -386,6 +389,67 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self.assertEqual(updated_policy["desired"], updated_policy["effective"])
         self.assertEqual(updated_policy["status"], "disabled")
         self.assertEqual(len(self.snapshot_calls), 2)
+
+    def test_capability_routes_are_read_only_and_available_before_connection(self):
+        catalog_response = self.client.get(
+            "/api/connectors/notion/capabilities",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(catalog_response.status_code, 200, catalog_response.text)
+        catalog = catalog_response.json()["catalog"]
+        self.assertEqual(catalog["schema_version"], 3)
+        self.assertEqual(catalog["mcp_inventory"]["status"], "not_integrated")
+        self.assertEqual(
+            [skill["id"] for skill in catalog["skills"]],
+            ["notion-session", "notion-cli"],
+        )
+        self.assertTrue(
+            all(skill["availability"] == "requires_connection" for skill in catalog["skills"])
+        )
+        self.assertEqual(len(catalog["operations"]), 2)
+        self.assertEqual(
+            {operation["entrypoint"] for operation in catalog["operations"]},
+            {"apply_notion_page_read_redirect", "materialize_workspace_snapshot"},
+        )
+
+        detail_response = self.client.get(
+            "/api/connectors/notion/skills/notion-session",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(detail_response.status_code, 200, detail_response.text)
+        detail = detail_response.json()
+        self.assertIn("Notion 工作空间助手", detail["skill"]["body"])
+        self.assertEqual(len(detail["files"]), 3)
+        self.assertTrue(
+            all("/Users/" not in item["relative_path"] for item in detail["files"])
+        )
+
+        revision = detail["package_revision"]
+        file_response = self.client.get(
+            "/api/connectors/notion/skills/notion-session/files/notion-search",
+            params={"package_revision": revision},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(file_response.status_code, 200, file_response.text)
+        self.assertIn("Notion 搜索参考", file_response.json()["file"]["content"])
+
+        stale_response = self.client.get(
+            "/api/connectors/notion/skills/notion-session/files/notion-search",
+            params={"package_revision": "stale"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(stale_response.status_code, 409, stale_response.text)
+        self.assertNotIn(str(ROOT), stale_response.text)
+
+        cli_detail_response = self.client.get(
+            "/api/connectors/notion/skills/notion-cli",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(cli_detail_response.status_code, 200, cli_detail_response.text)
+        cli_detail = cli_detail_response.json()
+        self.assertEqual(cli_detail["skill"]["tools"], ["Bash"])
+        self.assertIn("Notion CLI 工作空间数据助手", cli_detail["skill"]["body"])
+        self.assertEqual(len(cli_detail["files"]), 3)
 
     def test_connector_auth_poll_no_pending_session_does_not_regress_auth(self):
         create_response = self.client.post(

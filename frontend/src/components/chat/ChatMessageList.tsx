@@ -7,6 +7,8 @@
 // [Sync] 2026-05-29: render completed editor write tool parts as EditorWriteCompletedCard instead of Terminal card.
 // [Sync] 2026-08-13: preserve structured output-error details in the editor
 //                    completion card so failures never regain success actions.
+// [Sync] 2026-08-29: unwrap persisted stdio Editor result envelopes before
+//                    rendering success/failure and retained-input guidance.
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ToolMessagePart for editor write tools.
 // [Sync] 2026-05-29: let the message list fill the available chat page width.
 // [Sync] 2026-05-29: fix history-replay regression — history-loaded DynamicToolUIPart may lack toolName field causing getToolName() to return 'invocation'; add resolveToolName() with direct field fallback and hoist editor write completed check above Terminal block, decoupled from outputText.
@@ -42,7 +44,7 @@ import AssistMessagePart from './AssistMessagePart';
 import UserMessagePart from './UserMessagePart';
 import ToolMessagePart from './ToolMessagePart';
 import { EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
-import { isEditorWriteTool } from './editorWriteTools';
+import { isEditorWriteTool, parseEditorWriteResult } from './editorWriteTools';
 import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmation';
 import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 import { useThreadSubagents } from '../../hooks/useThreadSubagents';
@@ -91,17 +93,14 @@ function getToolOutputText(part: ToolUIPart | DynamicToolUIPart): string | null 
 }
 
 function getEditorWriteOutput(part: ToolUIPart | DynamicToolUIPart, isError: boolean): EditorWriteOutput {
-  if ('output' in part && part.output && typeof part.output === 'object') {
-    return part.output as EditorWriteOutput;
+  if ('output' in part) {
+    const parsed = parseEditorWriteResult(part.output);
+    if (parsed) return parsed;
   }
   if (isError) {
     const errorText = getToolOutputText(part) ?? '';
-    try {
-      const parsed = JSON.parse(errorText) as unknown;
-      if (parsed && typeof parsed === 'object') return parsed as EditorWriteOutput;
-    } catch {
-      // Transport errors may be plain text; retain them as a failed result.
-    }
+    const parsed = parseEditorWriteResult(errorText);
+    if (parsed) return parsed;
     return { ok: false, error: errorText || 'editor_write_failed' };
   }
   return {};

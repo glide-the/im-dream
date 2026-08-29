@@ -1,11 +1,12 @@
 # [Input] Notion connector facade, auth, discovery, and snapshot materialization.
-# [Output] Register /api/connectors* endpoints and own the strategy-driven Notion snapshot worker lifecycle.
+# [Output] Register /api/connectors* endpoints, read-only Notion capability/Skill projections, and own the strategy-driven snapshot worker lifecycle.
 # [Pos] notion route node in backend/routers
 # [Sync] 2026-07-04: initial Notion connector routes for create/auth/discover/
 #                    select/sync/resource listing and connector CRUD.
 # [Sync] 2026-08-28: remove browser credential-path/config authority and map
 #                    Notion failures to stable, credential-free HTTP responses.
 # [Sync] 2026-08-28: expose versioned snapshot-sync strategy and run scheduled synchronization outside Chat turns.
+# [Sync] 2026-08-29: expose actor-scoped capability, Skill body, and stable-ID Skill file reads without adding MCP execution or filesystem path input.
 
 """Notion resource connector HTTP routes."""
 from __future__ import annotations
@@ -29,6 +30,14 @@ from notion import (
     build_notion_facade,
     close_default_store,
     open_default_store,
+)
+from notion.capabilities import (
+    NotionCapabilityNotFoundError,
+    NotionCapabilityRevisionError,
+    NotionCapabilityUnavailableError,
+    build_notion_capability_catalog,
+    get_notion_skill_detail,
+    get_notion_skill_file,
 )
 
 from .deps import get_current_user
@@ -100,6 +109,12 @@ def _coerce_resource_list(items: Iterable[Any], kind: str) -> list[dict[str, Any
 
 
 def _http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, NotionCapabilityNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, NotionCapabilityRevisionError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, NotionCapabilityUnavailableError):
+        return HTTPException(status_code=503, detail=str(exc))
     if isinstance(exc, NotionConnectorNotFoundError):
         return HTTPException(status_code=404, detail="Notion connector not found.")
     if isinstance(exc, (NotionAuthRequiredError, NotionCredentialError)):
@@ -134,6 +149,23 @@ def _http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="Notion request failed safely.")
 
 
+def _current_notion_connector(current_user: dict) -> dict[str, Any] | None:
+    facade = _connector_facade(current_user)
+    connectors = [
+        connector
+        for connector in facade.list_connectors()
+        if str(connector.get("platform") or "").lower() == "notion"
+    ]
+    if not connectors:
+        return None
+    return max(
+        connectors,
+        key=lambda connector: str(
+            connector.get("updated_at") or connector.get("created_at") or ""
+        ),
+    )
+
+
 @router.get("/api/connectors")
 def list_connectors(current_user: dict = Depends(get_current_user)):
     facade = _connector_facade(current_user)
@@ -156,6 +188,49 @@ def create_connector(
             config={},
         )
         return {"connector": connector}
+    except Exception as exc:  # noqa: BLE001
+        raise _http_error(exc) from exc
+
+
+@router.get("/api/connectors/notion/capabilities")
+def get_notion_capabilities(current_user: dict = Depends(get_current_user)):
+    try:
+        return {
+            "catalog": build_notion_capability_catalog(
+                _current_notion_connector(current_user)
+            )
+        }
+    except Exception as exc:  # noqa: BLE001
+        raise _http_error(exc) from exc
+
+
+@router.get("/api/connectors/notion/skills/{skill_id}")
+def read_notion_skill(
+    skill_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        return get_notion_skill_detail(
+            skill_id,
+            _current_notion_connector(current_user),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _http_error(exc) from exc
+
+
+@router.get("/api/connectors/notion/skills/{skill_id}/files/{file_id}")
+def read_notion_skill_file(
+    skill_id: str,
+    file_id: str,
+    package_revision: str | None = None,
+    _current_user: dict = Depends(get_current_user),
+):
+    try:
+        return get_notion_skill_file(
+            skill_id,
+            file_id,
+            expected_revision=package_revision,
+        )
     except Exception as exc:  # noqa: BLE001
         raise _http_error(exc) from exc
 

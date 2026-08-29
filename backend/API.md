@@ -18,6 +18,8 @@
 [Sync] 2026-08-22: restore authenticated Claude MCP Resources configuration, OAuth lifecycle, inventory, and removal contracts.
 [Sync] 2026-08-25: replace the stale Claude CLI MCP contract with managed-PostgreSQL CRUD, standard-SDK discovery, encrypted OAuth, and automatic browser callback semantics.
 [Sync] 2026-08-22: document retryable Claude Agent capacity and memory-pressure SSE errors.
+[Sync] 2026-08-29: document the authenticated Notion connector capability catalog, parsed Skill detail, and revision-aware stable-ID Markdown file reads.
+[Sync] 2026-08-29: capability schema v2 derives Skill metadata/files from the installed package and operations from the real Read hook/workspace materializer entrypoints.
 -->
 
 **Version:** 2.0.0
@@ -1125,6 +1127,28 @@ Deck content snapshot, draft, or publication history.
 `404` preserves the existing missing-or-not-owned boundary. Version changes
 continue through `PUT /api/voice-decks/{deck_id}/plugin-binding` with an exact
 SemVer, `expected_binding_revision`, and `apply_to: "next_run"`.
+
+---
+
+## Notion Resource Connector
+
+所有 `/api/connectors*` 路由都要求正常 Dream 登录。连接、资源范围、轻量
+索引与策略继续由现有 actor-scoped Notion facade 管理；以下三个 Settings 读取
+路由只投影服务器发布包，不执行 `ntn`、Notion API、Runtime `Read` 或 MCP：
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/connectors/notion/capabilities` | 返回当前 actor 的 `notion-session` / `notion-cli` 安装包、真实 `apply_notion_page_read_redirect` / `materialize_workspace_snapshot` 阶段能力、聚合 package revision 和 Hosted MCP `not_integrated` 事实；没有连接时仍可审阅。 |
+| `GET` | `/api/connectors/notion/skills/{skill_id}` | 从安装包返回解析掉 frontmatter 的 `SKILL.md` 标题/摘要/body，以及服务器 `references/*.md` 的 stable ID、相对路径、`text/markdown` MIME 和大小。 |
+| `GET` | `/api/connectors/notion/skills/{skill_id}/files/{file_id}` | 按 stable file ID 返回一个服务器发布的 reference Markdown；可传 `package_revision`，陈旧 revision 返回 `409`。 |
+
+Skill 文件读取不接受相对/绝对路径输入，拒绝未知 ID、越界、符号链接、不支持
+MIME 和超限文件；公开响应不包含服务器路径、凭证或 Notion 正文。`write`
+operation 仅表示把 connector-owned 轻量索引 materialize 到当前 thread workspace，
+不写回远程 Notion。详情与文件响应使用对应 Skill 自己的 package revision；目录响应使用
+两个包的聚合 revision。`notion-cli` 随内置 Skill 同步并可审阅，但 Dream 不把 actor-owned
+`NOTION_HOME` 合并进 Agent/Bash 环境，因此 Settings 将其执行可用性标为 `unavailable`。
+当前 Hosted Notion MCP OAuth/inventory/执行仍未接入，也没有工具执行端点。
 
 ---
 

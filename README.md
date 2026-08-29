@@ -4,6 +4,8 @@
 <!-- [Sync] 2026-08-28: replace stale branch/setup notes with the current develop workflow, exact SDK/Runtime pairing, local Runtime installation, troubleshooting, and operator notices. -->
 <!-- [Sync] 2026-08-28: document pinned ntn installation plus actor-scoped credentials/current snapshots in agentdata, policy-driven background refresh, and per-Thread projection. -->
 <!-- [Sync] 2026-08-29: document current-selection filtering, minimal thread metadata, empty-scope revocation, and reauthorization LKG behavior. -->
+<!-- [Sync] 2026-08-29: document the Settings Notion capability/Skill inspection surface and truthful Hosted MCP read/write boundary. -->
+<!-- [Sync] 2026-08-30: document the synchronized notion-session/notion-cli built-in packages without relaxing actor credential isolation. -->
 
 # Ink & Memory
 
@@ -26,7 +28,7 @@ This repository contains the Dream application. It does not own the shared datab
 - **Dream** — launch a Dream Run and review scripts, storyboards, prompts, and generated artifacts.
 - **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
 - **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
-- **Notion resources** — connect in Settings, select the exact allowed scope, keep lightweight indexes refreshed outside Chat, and use the built-in read-only Notion Skill without exposing credentials or a CLI path to the Agent.
+- **Notion resources** — connect in Settings, select the exact allowed scope, inspect the installed `notion-session` and `notion-cli` packages with safe reference files, and keep lightweight indexes refreshed outside Chat. The Read-hook path remains usable without exposing credentials; the synchronized CLI package does not receive actor-owned `NOTION_HOME`, and Hosted Notion MCP read/write remains explicitly unavailable.
 - **Platform integration** — consume authenticated model aliases, subscription eligibility, usage, and billing from Admin/Gateway.
 
 Deck marketplace distribution is intentionally deferred. See [docs/design/deck-register/README.md](docs/design/deck-register/README.md).
@@ -278,6 +280,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 7. **Published versions are immutable.** Fix a bad Runtime with a forward release or an explicit reviewed rollback; do not overwrite or unpublish an accepted version as normal rollback.
 8. **Model output capability is server-owned.** Admin's selected model `maxOutputTokens` is projected to the Runtime; browser settings, user env, workspace files, and Gateway body rewriting must not replace it.
 9. **Notion credentials and lightweight indexes are actor-owned.** Canonical durable state belongs under server agentdata; policy-driven index refresh is independent of Chat, Runtime receives only current-scope per-Thread projections, failed reauthorization preserves a still-valid effective credential, page bodies are read on demand, and process `HOME`, ambient `NOTION_API_TOKEN`, browser config, and workspace files cannot override either source.
+10. **Editor writes bind actor, live session, and durable state.** The runner rejects writes for a stale session, the Editor MCP child receives only the server-owned actor and effective PostgreSQL capability, every query/update is actor-scoped, and business failures refresh the single in-memory EditorState cache without publishing a success event. Notion indexes and on-demand page bodies never enter EditorState.
 
 ## Troubleshooting
 

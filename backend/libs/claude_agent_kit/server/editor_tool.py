@@ -1,8 +1,7 @@
-# [Input] Session context comes from MCP tool call arguments passed by the Claude agent.
-#         The agent reads session_id from the <workspace_context> prompt block and includes
-#         it in every write tool call.  No env-var injection or file IPC required.
-#         Calls database.get_db() directly for session-id-only state access (trusted
-#         subprocess context — user authentication is enforced at the runner layer).
+# [Input] Session context comes from MCP tool call arguments passed by the Claude agent;
+#         the trusted actor comes from the server-owned INK_AGENT_USER_ID projection.
+#         The runner verifies the live Editor session before execution, while every DB
+#         read/write also scopes by actor and session.
 # [Output] Provide EDITOR_WRITE_TOOL_SPECS, allowed_editor_tool_names,
 #          handle_editor_write_tool to the editor MCP server.
 # [Pos] tool-definition node in libs/claude_agent_kit/server
@@ -27,6 +26,9 @@
 # [Sync] 2026-06-09: switch_editor remains a no-op MCP handler; product
 #                    permission policy treats context switching as low-sensitivity
 #                    because it does not modify document content.
+# [Sync] 2026-08-29: bind DB access to the server-owned actor, distinguish
+#                    unavailable persistence from missing sessions/cells, and perform
+#                    at most one fresh reload before a target-not-found failure.
 
 """EditorEngine write MCP tool handlers.
 
@@ -54,11 +56,19 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+_EDITOR_ACTOR_ENV = "INK_AGENT_USER_ID"
+_EDITOR_TARGET_LOAD_ATTEMPTS = 2
+
+
+class EditorStateUnavailable(RuntimeError):
+    """The trusted Editor persistence boundary could not be read safely."""
 
 # ---------------------------------------------------------------------------
 # Tool spec registry
@@ -226,87 +236,137 @@ def allowed_editor_tool_names() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Database helpers (session-id-only, trusted subprocess context)
+# Database helpers (trusted actor + session scope)
 # ---------------------------------------------------------------------------
 
 
-def _load_editor_state_from_db(editor_session_id: str) -> dict[str, Any]:
-    """Load ``editor_state`` from the database for *editor_session_id*.
+def _trusted_editor_user_id() -> int | None:
+    """Return the server-projected actor ID, or ``None`` when unavailable."""
+
+    raw = str(os.getenv(_EDITOR_ACTOR_ENV) or "").strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _decode_editor_state(raw: Any) -> dict[str, Any]:
+    """Decode one persisted EditorState without accepting non-object payloads."""
+
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError) as exc:
+        raise EditorStateUnavailable() from exc
+    if not isinstance(data, dict):
+        raise EditorStateUnavailable()
+    return data
+
+
+def _load_editor_state_from_db(
+    editor_session_id: str,
+    user_id: int,
+) -> dict[str, Any] | None:
+    """Load actor-owned ``editor_state`` for *editor_session_id*.
 
     *editor_session_id* is the ``user_sessions.id`` from ``/api/sessions`` —
     NOT the workspace directory name or the Claude thread ID.
 
-    Queries ``user_sessions`` by ``id`` only — user authentication is enforced
-    upstream by the runner; this subprocess is a trusted execution context.
-
-    Returns an empty dict on error; errors are logged at WARNING level.
+    ``None`` means no row exists for this actor/session pair. Persistence or
+    decoding failures raise :class:`EditorStateUnavailable` so callers never
+    misreport capability failures as ``cell_not_found``.
     """
-    if not editor_session_id:
-        return {}
+    if not editor_session_id or user_id <= 0:
+        return None
     try:
         import database  # noqa: PLC0415 — runtime import, backend only
 
         db = database.get_db()
         try:
             row = db.execute(
-                "SELECT editor_state_json FROM user_sessions WHERE id = %s",
-                (editor_session_id,),
+                """SELECT editor_state_json FROM user_sessions
+                   WHERE user_id = %s AND id = %s""",
+                (user_id, editor_session_id),
             ).fetchone()
-            if row and row["editor_state_json"]:
-                data = json.loads(row["editor_state_json"])
-                return data if isinstance(data, dict) else {}
+            if row is None:
+                return None
+            return _decode_editor_state(row["editor_state_json"])
         finally:
             db.close()
     except Exception:  # noqa: BLE001
         logger.warning(
-            "Failed to load editor state from database; editor_session_id=%r",
+            "Editor state load failed safely; editor_session_id=%r",
             editor_session_id,
-            exc_info=True,
         )
-    return {}
+        raise EditorStateUnavailable() from None
 
 
 def _save_editor_state_to_db(
-    editor_session_id: str, editor_state: dict[str, Any]
+    editor_session_id: str,
+    user_id: int,
+    editor_state: dict[str, Any],
 ) -> bool:
     """Persist the mutated ``editor_state`` back to the database.
 
     Returns ``True`` on success, ``False`` on failure.
     """
-    if not editor_session_id:
+    if not editor_session_id or user_id <= 0:
         return False
     try:
         import database  # noqa: PLC0415
 
         db = database.get_db()
         try:
-            db.execute(
+            cursor = db.execute(
                 """UPDATE user_sessions
                    SET editor_state_json = %s, updated_at = CURRENT_TIMESTAMP
-                   WHERE id = %s""",
-                (json.dumps(editor_state, ensure_ascii=False), editor_session_id),
+                   WHERE user_id = %s AND id = %s""",
+                (
+                    json.dumps(editor_state, ensure_ascii=False),
+                    user_id,
+                    editor_session_id,
+                ),
             )
+            if cursor.rowcount != 1:
+                db.rollback()
+                return False
             db.commit()
             return True
         finally:
             db.close()
     except Exception:  # noqa: BLE001
         logger.warning(
-            "Failed to save editor state to database; editor_session_id=%r",
+            "Editor state save failed safely; editor_session_id=%r",
             editor_session_id,
-            exc_info=True,
         )
         return False
 
 
-def load_editor_state_from_db(editor_session_id: str) -> dict[str, Any]:
-    """Public alias for loading editor_state by session ID.
+def load_editor_state_from_db(
+    editor_session_id: str,
+    user_id: int,
+) -> dict[str, Any] | None:
+    """Public actor-scoped loader used by the ``switch_editor`` hook.
 
     Used by :mod:`agent_runner` PostToolUse hook to load the new context
-    after a ``switch_editor`` tool call completes.  Delegates to the private
-    ``_load_editor_state_from_db`` helper.
+    after a ``switch_editor`` tool call completes.
     """
-    return _load_editor_state_from_db(editor_session_id)
+    return _load_editor_state_from_db(editor_session_id, user_id)
+
+
+def _load_target_state(
+    editor_session_id: str,
+    user_id: int,
+    target_exists: Any,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Load state and perform exactly one fresh reload when a target is absent."""
+
+    state: dict[str, Any] | None = None
+    for attempt in range(_EDITOR_TARGET_LOAD_ATTEMPTS):
+        state = _load_editor_state_from_db(editor_session_id, user_id)
+        if state is None or target_exists(state):
+            return state, attempt > 0
+    return state, True
 
 
 # ---------------------------------------------------------------------------
@@ -335,17 +395,14 @@ def handle_editor_write_tool(
     if tool_name == SWITCH_EDITOR_TOOL_NAME:
         return _switch_editor(str(args.get("editor_session_id") or "").strip())
 
+    user_id = _trusted_editor_user_id()
+    if user_id is None:
+        return json.dumps({"ok": False, "error": "editor_context_unavailable"})
+
     # editor_session_id comes from the agent context (prompt), not from env vars.
     editor_session_id: str = str(args.get("editor_session_id") or "").strip()
     if not editor_session_id:
-        return json.dumps({
-            "ok": False,
-            "error": "editor_session_id_required",
-            "detail": (
-                "editor_session_id must be provided from the <workspace_context> block "
-                "(user_sessions.id from /api/sessions — not the workspace directory name)."
-            ),
-        })
+        return json.dumps({"ok": False, "error": "editor_session_id_required"})
 
     if tool_name == "write_segment":
         return _write_segment(
@@ -353,12 +410,14 @@ def handle_editor_write_tool(
             args.get("cellId", ""),
             args.get("text", ""),
             args.get("reason", ""),
+            user_id=user_id,
         )
     if tool_name == "delete_segment":
         return _delete_segment(
             editor_session_id,
             args.get("cellId", ""),
             args.get("reason", ""),
+            user_id=user_id,
         )
     if tool_name == "insert_widget":
         return _insert_widget(
@@ -367,6 +426,7 @@ def handle_editor_write_tool(
             args.get("data") or {},
             args.get("afterCellId", ""),
             args.get("reason", ""),
+            user_id=user_id,
         )
     if tool_name == "reply_to_comment":
         return _reply_to_comment(
@@ -374,6 +434,7 @@ def handle_editor_write_tool(
             args.get("commentId", ""),
             args.get("content", ""),
             args.get("reason", ""),
+            user_id=user_id,
         )
 
     return json.dumps({"ok": False, "error": f"unknown_tool:{tool_name}"})
@@ -389,6 +450,8 @@ def _write_segment(
     cell_id: str,
     text: str,
     reason: str,
+    *,
+    user_id: int,
 ) -> str:
     """Replace a text cell's content in the database."""
     if not cell_id:
@@ -396,7 +459,18 @@ def _write_segment(
     if text is None:
         return json.dumps({"ok": False, "error": "text_required"})
 
-    state = _load_editor_state_from_db(editor_session_id)
+    try:
+        state, recovered = _load_target_state(
+            editor_session_id,
+            user_id,
+            lambda value: any(
+                cell.get("id") == cell_id for cell in (value.get("cells") or [])
+            ),
+        )
+    except EditorStateUnavailable:
+        return json.dumps({"ok": False, "error": "editor_state_unavailable"})
+    if state is None:
+        return json.dumps({"ok": False, "error": "editor_session_not_found"})
     cells: list[dict[str, Any]] = state.get("cells") or []
 
     found = False
@@ -416,22 +490,40 @@ def _write_segment(
     if not found:
         return json.dumps({"ok": False, "error": "cell_not_found", "cellId": cell_id})
 
-    if not _save_editor_state_to_db(editor_session_id, state):
+    if not _save_editor_state_to_db(editor_session_id, user_id, state):
         return json.dumps({"ok": False, "error": "save_failed"})
 
-    return json.dumps({"ok": True, "cellId": cell_id, "reason": reason}, ensure_ascii=False)
+    return json.dumps({
+        "ok": True,
+        "cellId": cell_id,
+        "reason": reason,
+        "recovered": recovered,
+    }, ensure_ascii=False)
 
 
 def _delete_segment(
     editor_session_id: str,
     cell_id: str,
     reason: str,
+    *,
+    user_id: int,
 ) -> str:
     """Remove a cell from the document."""
     if not cell_id:
         return json.dumps({"ok": False, "error": "cellId_required"})
 
-    state = _load_editor_state_from_db(editor_session_id)
+    try:
+        state, recovered = _load_target_state(
+            editor_session_id,
+            user_id,
+            lambda value: any(
+                cell.get("id") == cell_id for cell in (value.get("cells") or [])
+            ),
+        )
+    except EditorStateUnavailable:
+        return json.dumps({"ok": False, "error": "editor_state_unavailable"})
+    if state is None:
+        return json.dumps({"ok": False, "error": "editor_session_not_found"})
     cells: list[dict[str, Any]] = state.get("cells") or []
 
     original_len = len(cells)
@@ -440,10 +532,15 @@ def _delete_segment(
     if len(state["cells"]) == original_len:
         return json.dumps({"ok": False, "error": "cell_not_found", "cellId": cell_id})
 
-    if not _save_editor_state_to_db(editor_session_id, state):
+    if not _save_editor_state_to_db(editor_session_id, user_id, state):
         return json.dumps({"ok": False, "error": "save_failed"})
 
-    return json.dumps({"ok": True, "cellId": cell_id, "reason": reason}, ensure_ascii=False)
+    return json.dumps({
+        "ok": True,
+        "cellId": cell_id,
+        "reason": reason,
+        "recovered": recovered,
+    }, ensure_ascii=False)
 
 
 def _insert_widget(
@@ -452,12 +549,29 @@ def _insert_widget(
     data: dict[str, Any],
     after_cell_id: str,
     reason: str,
+    *,
+    user_id: int,
 ) -> str:
     """Insert a new widget cell after the specified cell (or at the end)."""
     if not widget_type:
         return json.dumps({"ok": False, "error": "widgetType_required"})
 
-    state = _load_editor_state_from_db(editor_session_id)
+    try:
+        state, recovered = _load_target_state(
+            editor_session_id,
+            user_id,
+            lambda value: (
+                not after_cell_id
+                or any(
+                    cell.get("id") == after_cell_id
+                    for cell in (value.get("cells") or [])
+                )
+            ),
+        )
+    except EditorStateUnavailable:
+        return json.dumps({"ok": False, "error": "editor_state_unavailable"})
+    if state is None:
+        return json.dumps({"ok": False, "error": "editor_session_not_found"})
     cells: list[dict[str, Any]] = state.get("cells") or []
 
     new_cell: dict[str, Any] = {
@@ -484,7 +598,7 @@ def _insert_widget(
 
     state["cells"] = cells
 
-    if not _save_editor_state_to_db(editor_session_id, state):
+    if not _save_editor_state_to_db(editor_session_id, user_id, state):
         return json.dumps({"ok": False, "error": "save_failed"})
 
     return json.dumps({
@@ -492,6 +606,7 @@ def _insert_widget(
         "cellId": new_cell["id"],
         "widgetType": widget_type,
         "reason": reason,
+        "recovered": recovered,
     }, ensure_ascii=False)
 
 
@@ -500,6 +615,8 @@ def _reply_to_comment(
     comment_id: str,
     content: str,
     reason: str,
+    *,
+    user_id: int,
 ) -> str:
     """Append an agent reply to a comment's conversation history."""
     if not comment_id:
@@ -507,7 +624,19 @@ def _reply_to_comment(
     if not content:
         return json.dumps({"ok": False, "error": "content_required"})
 
-    state = _load_editor_state_from_db(editor_session_id)
+    try:
+        state, recovered = _load_target_state(
+            editor_session_id,
+            user_id,
+            lambda value: any(
+                item.get("id") == comment_id
+                for item in (value.get("commentors") or [])
+            ),
+        )
+    except EditorStateUnavailable:
+        return json.dumps({"ok": False, "error": "editor_state_unavailable"})
+    if state is None:
+        return json.dumps({"ok": False, "error": "editor_session_not_found"})
     commentors: list[dict[str, Any]] = state.get("commentors") or []
 
     found = False
@@ -525,13 +654,14 @@ def _reply_to_comment(
             "commentId": comment_id,
         })
 
-    if not _save_editor_state_to_db(editor_session_id, state):
+    if not _save_editor_state_to_db(editor_session_id, user_id, state):
         return json.dumps({"ok": False, "error": "save_failed"})
 
     return json.dumps({
         "ok": True,
         "commentId": comment_id,
         "reason": reason,
+        "recovered": recovered,
     }, ensure_ascii=False)
 
 

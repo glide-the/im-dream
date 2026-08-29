@@ -1,8 +1,9 @@
 // [Input] Settings route section, existing resource/plugin managers, and the Work-owned Deck management surface.
-// [Output] Existing Settings shell with one Work category whose content owns Deck, resource-link, and plugin tabs.
+// [Output] Existing Settings shell with one Work category plus single-heading Notion and Claude MCP detail surfaces.
 // [Pos] Canonical Story Workspace Settings page and Work workbench route surface.
 // [Sync] 2026-08-17: localize the complete Settings shell and Work surface; render one locale at a time.
 // [Sync] 2026-08-20: host the actor-owned Claude MCP detail projection beside the Notion detail page.
+// [Sync] 2026-08-29: let the Notion detail own its sole h1 and long-page hierarchy instead of wrapping it in a duplicate SettingsSection header.
 /* eslint-disable react-refresh/only-export-components -- route metadata helpers intentionally share this page module. */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FaArrowLeft, FaBriefcase, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
@@ -201,13 +202,9 @@ export function StoryWorkspaceSettingsPage({
       />
     </SettingsSection>
   ) : showNotionConnectorDetail ? (
-    <SettingsSection
-      id="settings-resource-detail"
-      title={t('settings.workspace.resourceDetail.title')}
-      description={t('settings.workspace.resourceDetail.description')}
-    >
+    <div id="settings-resource-detail">
       <ConnectorNotionDetailPage onBack={onCloseNotionDetail ?? (() => undefined)} isMobile={isMobile} />
-    </SettingsSection>
+    </div>
   ) : isWorkSection ? (
     <section aria-labelledby="story-workspace-work-title" className="story-workspace-work" id="settings-work">
       <header className="story-workspace-work__header">

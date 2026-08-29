@@ -1,5 +1,6 @@
 // [Input] Resource connector API client, shared dashboard icons, and App-level focus nonce.
-// [Output] Settings resource-link index with Notion handoff and Claude MCP discovery/OAuth management.
+// [Output] Settings resource-link index with Notion handoff, Claude MCP discovery/OAuth management,
+//          and disabled Feishu/local CLI discovery placeholders.
 // [Pos] settings resource-link section in frontend/src/components/dashboard
 // [Sync] 2026-07-08: initial Settings resource-link section for the connector migration.
 // [Sync] 2026-07-08: remove the inline Notion detail toggle; 管理 now calls onOpenNotionDetail so
@@ -9,8 +10,8 @@
 //                    tokens and state color mixes so resource-link settings adapt to dark mode.
 // [Sync] 2026-08-19: embed the domain-owned Claude MCP resource connector under remote resources.
 // [Sync] 2026-08-20: hand MCP server cards to the dedicated Notion-aligned detail workbench.
-// [Sync] 2026-08-29: remove unavailable Feishu/CLI placeholders and surface
-//                    server-reported degraded Notion synchronization state.
+// [Sync] 2026-08-29: restore the Feishu/local CLI discovery placeholders while keeping
+//                    them disabled, and surface server-reported degraded Notion state.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
 import ClaudeMcpResourceSection from '../claude-mcp/ClaudeMcpResourceSection';
@@ -18,6 +19,7 @@ import {
   IconChevronRight,
   IconClock,
   IconDatabase,
+  IconFile,
   IconLoader,
   IconSettings,
 } from '../chat/Icons';
@@ -296,7 +298,7 @@ export default function ConnectorSettingsSection({
             资源链接
           </h2>
           <p style={{ margin: '0.35rem 0 0', maxWidth: '42rem', fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}>
-            在这里管理 Notion 和 MCP 资源连接；Chat 只展示真实状态摘要和管理入口。
+            在这里管理 Notion 和 MCP 资源连接，并查看尚未开放的飞书与本地 CLI 接入位置；Chat 只展示真实状态摘要和管理入口。
           </p>
         </div>
       </header>
@@ -323,9 +325,43 @@ export default function ConnectorSettingsSection({
               actionLabel="管理"
               onAction={onOpenNotionDetail}
             />
+            <ConnectorOptionCard
+              icon={<IconSettings style={{ width: '1rem', height: '1rem' }} />}
+              title="飞书"
+              subtitle="飞书资源连接开放后，可从这里查看和管理已授权知识源。"
+              detail="尚未开放"
+              statusLabel="占位"
+              tone="neutral"
+              actionLabel="暂不可用"
+              disabled
+            />
           </div>
 
           <ClaudeMcpResourceSection onOpenServerDetail={onOpenClaudeMcpDetail} />
+        </section>
+
+        <div style={{ height: '1px', background: 'var(--color-border-paper)' }} />
+
+        <section style={{ display: 'grid', gap: '0.7rem' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+              本地资源链接
+            </h3>
+            <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+              本地资源由 CLI 执行器接入；当前版本保留发现入口，暂不提供配置操作。
+            </p>
+          </div>
+
+          <ConnectorOptionCard
+            icon={<IconFile style={{ width: '1rem', height: '1rem' }} />}
+            title="CLI 执行器"
+            subtitle="本地 CLI 能力开放后，可从这里查看和管理可用资源。"
+            detail="尚未开放"
+            statusLabel="占位"
+            tone="neutral"
+            actionLabel="暂不可用"
+            disabled
+          />
         </section>
 
         {loading ? (

@@ -1,13 +1,18 @@
 // [Input] Injected fetch/localStorage boundaries and server-owned Notion connector responses.
-// [Output] Verify fail-closed transport, truthful snapshot status, selection sync, and policy DTO projection.
+// [Output] Verify fail-closed transport, truthful snapshot status, selection sync, policy DTOs, and read-only capability/Skill/file projections.
 // [Pos] Notion resource connector browser API contract test in frontend/src/api/__tests__
 // [Sync] 2026-08-28: prevent backend failures from becoming browser-local authenticated/synced state.
 // [Sync] 2026-08-28: keep pending index resources and active policy refreshes visibly syncing.
 // [Sync] 2026-08-29: cover recoverable failed-reauth warnings and compact selection payloads without raw upstream data.
+// [Sync] 2026-08-29: validate server-owned Notion Skill plus real Hook/workspace operation, stable file ID, and revision transport contracts.
+// [Sync] 2026-08-30: preserve the two installed notion-session/notion-cli Skill entries and their distinct availability states.
 
 import { expect, test } from '@playwright/test';
 import {
   ResourceConnectorApiError,
+  getNotionCapabilityCatalog,
+  getNotionSkillDetail,
+  getNotionSkillFile,
   listConnectors,
   normalizeResourceConnectorFallback,
   selectConnectorResources,
@@ -207,4 +212,184 @@ test('policy updates preserve backend desired/effective revision', async () => {
   });
   expect(connector.syncPolicy?.desired).toEqual(connector.syncPolicy?.effective);
   expect(connector.syncPolicy?.status).toBe('disabled');
+});
+
+test('capability catalog preserves real Hook and workspace entrypoints', async () => {
+  globalThis.fetch = (async () => jsonResponse({
+    catalog: {
+      schema_version: 3,
+      package_revision: 'revision-1',
+      mcp_inventory: {
+        status: 'not_integrated',
+        revision: null,
+        read_status: 'not_integrated',
+        write_status: 'not_integrated',
+      },
+      skills: [
+        {
+          id: 'notion-session',
+          title: 'Notion 工作空间助手',
+          description: '只读访问已挂载内容',
+          source: 'builtin',
+          availability: 'available',
+        },
+        {
+          id: 'notion-cli',
+          title: 'Notion CLI 工作空间数据助手',
+          description: '通过 ntn CLI 访问 Notion',
+          source: 'builtin',
+          availability: 'unavailable',
+        },
+      ],
+      operations: [
+        {
+          id: 'notion-page-read-hook',
+          title: '按需读取页面正文',
+          description: '按需读取一个页面',
+          kind: 'read',
+          source: 'runtime_hook',
+          entrypoint: 'apply_notion_page_read_redirect',
+          availability: 'available',
+        },
+        {
+          id: 'notion-workspace-snapshot-materialize',
+          title: '挂载工作区轻量索引',
+          description: '挂载轻量索引',
+          kind: 'write',
+          source: 'workspace_materializer',
+          entrypoint: 'materialize_workspace_snapshot',
+          availability: 'available',
+        },
+      ],
+    },
+  })) as typeof fetch;
+
+  const catalog = await getNotionCapabilityCatalog();
+  expect(catalog.packageRevision).toBe('revision-1');
+  expect(catalog.mcpInventory.writeStatus).toBe('not_integrated');
+  expect(catalog.skills.map((skill) => skill.id)).toEqual(['notion-session', 'notion-cli']);
+  expect(catalog.skills[1]?.availability).toBe('unavailable');
+  expect(catalog.operations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: 'read', source: 'runtime_hook', entrypoint: 'apply_notion_page_read_redirect' }),
+    expect.objectContaining({ kind: 'write', source: 'workspace_materializer', entrypoint: 'materialize_workspace_snapshot' }),
+  ]));
+});
+
+test('capability catalog rejects synthetic Skill operation sources', async () => {
+  globalThis.fetch = (async () => jsonResponse({
+    catalog: {
+      schema_version: 2,
+      package_revision: 'revision-1',
+      mcp_inventory: {
+        status: 'not_integrated',
+        revision: null,
+        read_status: 'not_integrated',
+        write_status: 'not_integrated',
+      },
+      skills: [{
+        id: 'notion-session',
+        title: 'Notion 工作空间助手',
+        description: '只读访问已挂载内容',
+        source: 'builtin',
+        availability: 'available',
+      }],
+      operations: [{
+        id: 'synthetic-read',
+        title: 'Synthetic read',
+        description: 'Not a real backend stage',
+        kind: 'read',
+        source: 'builtin_skill',
+        entrypoint: 'invented_operation',
+        availability: 'available',
+      }],
+    },
+  })) as typeof fetch;
+
+  await expect(getNotionCapabilityCatalog()).rejects.toMatchObject({ status: 502 });
+});
+
+test('Skill detail and stable file reads keep package revision in the request', async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (url.includes('/files/')) {
+      return jsonResponse({
+        package_revision: 'revision-1',
+        file: {
+          id: 'notion-search',
+          relative_path: 'references/notion-search.md',
+          media_type: 'text/markdown',
+          size_bytes: 128,
+          content: '# Search',
+        },
+      });
+    }
+    return jsonResponse({
+      package_revision: 'revision-1',
+      skill: {
+        id: 'notion-session',
+        title: 'Notion 工作空间助手',
+        description: '只读访问已挂载内容',
+        source: 'builtin',
+        availability: 'available',
+        tools: ['Read'],
+        body: '# Notion 工作空间助手',
+      },
+      files: [{
+        id: 'notion-search',
+        relative_path: 'references/notion-search.md',
+        media_type: 'text/markdown',
+        size_bytes: 128,
+      }],
+    });
+  }) as typeof fetch;
+
+  const detail = await getNotionSkillDetail('notion-session');
+  const file = await getNotionSkillFile('notion-session', detail.files[0]!.id, detail.packageRevision);
+  expect(file.file.content).toBe('# Search');
+  expect(urls[1]).toContain('/files/notion-search?package_revision=revision-1');
+});
+
+test('renamed notion-cli detail preserves its Bash tool boundary', async () => {
+  globalThis.fetch = (async () => jsonResponse({
+    package_revision: 'cli-revision-1',
+    skill: {
+      id: 'notion-cli',
+      title: 'Notion CLI 工作空间数据助手',
+      description: '通过 ntn CLI 访问 Notion',
+      source: 'builtin',
+      availability: 'unavailable',
+      tools: ['Bash'],
+      body: '# Notion CLI 工作空间数据助手\n\n`ntn api v1/search`',
+    },
+    files: [{
+      id: 'notion-search',
+      relative_path: 'references/notion-search.md',
+      media_type: 'text/markdown',
+      size_bytes: 1024,
+    }],
+  })) as typeof fetch;
+
+  const detail = await getNotionSkillDetail('notion-cli');
+  expect(detail.skill.tools).toEqual(['Bash']);
+  expect(detail.skill.availability).toBe('unavailable');
+  expect(detail.skill.body).toContain('ntn api v1/search');
+});
+
+test('Skill file DTO rejects traversal-like relative paths', async () => {
+  globalThis.fetch = (async () => jsonResponse({
+    package_revision: 'revision-1',
+    file: {
+      id: 'notion-search',
+      relative_path: '../private.md',
+      media_type: 'text/markdown',
+      size_bytes: 128,
+      content: '# no',
+    },
+  })) as typeof fetch;
+
+  await expect(getNotionSkillFile('notion-session', 'notion-search', 'revision-1')).rejects.toMatchObject({
+    status: 502,
+  });
 });

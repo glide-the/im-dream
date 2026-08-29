@@ -1,46 +1,30 @@
-// [Input] Notion resource connector API helpers, Settings navigation callback, and shared chat icons.
-// [Output] Settings-owned Notion auth, scheduled lightweight-index strategy, resource selection, and truthful sync-status page.
-// [Pos] connector-notion-detail-page node in frontend/src/components/dashboard
-// [Sync] 2026-07-08: initial dedicated navigation page for the Notion "具体配置页面", fixing the
-//                    Settings 管理 action so it navigates to a new page instead of an inline toggle.
-// [Sync] 2026-07-08: rebuild the page shell around the latest connector config sketch.
-// [Sync] 2026-07-08: refactor Settings detail into a single-platform/single-account page with
-//                    local auth/resource/sync UI and no collection workbench chrome.
-// [Sync] 2026-07-08: save full selected resource metadata and restore selected ids from persisted
-//                    backend sources or discovery selected flags after refresh.
-// [Sync] 2026-07-09: notify Chat connector status panels after saving resources so linked-resource
-//                    summaries refresh without a page reload.
-// [Sync] 2026-07-09: tune primary action buttons to use theme-inverted paper/ink colors so light
-//                    and dark modes keep consistent contrast.
-// [Sync] 2026-07-09: render mounted Notion sources with an internal scroll pager so saved
-//                    selections do not all mount at once.
-// [Sync] 2026-07-09: collapse account/auth/sync/source-count guidance into a compact
-//                    unframed info column and leave Strategy Design as a placeholder before Resource Scope.
-// [Sync] 2026-07-09: reduce page-wide line frames by replacing structural borders with
-//                    soft paper surfaces, tonal rows, and only necessary control boundaries.
-// [Sync] 2026-07-09: soften the Settings detail page into whitespace-led sections; resource rows
-//                    now read as light paper list items instead of protruding button cards.
-// [Sync] 2026-07-09: give the detail page a single dashed paper boundary while keeping inner
-//                    sections and resource rows unframed, flat, and non-card-like.
-// [Sync] 2026-07-09: keep resource selection as a right-side checkmark; selected rows do not
-//                    switch to a dark fill or left-side selected block.
-// [Sync] 2026-07-09: hide zero-count Notion page totals in resource rows and mounted sources so
-//                    empty metadata does not crowd the right-side status area.
-// [Sync] 2026-08-28: replace the strategy placeholder with server-owned scheduled-sync controls;
-//                    saving resources performs a real first index sync, page bodies stay on demand,
-//                    and the UI never fabricates synced timestamps.
-// [Sync] 2026-08-29: expose partial-failure/re-auth warnings, localize business copy,
-//                    and disconnect directly because the operation is reversible.
-import { useCallback, useEffect, useMemo, useState, type ReactNode, type UIEvent } from 'react';
+// [Input] Server-owned Notion connector/capability/Skill DTOs, Settings back callback, and existing resource/auth/sync mutations.
+// [Output] One seven-section Notion overview plus Skill/file/resource/source child views on the Settings-owned scroll surface.
+// [Pos] Canonical Settings Notion connector detail and child-view composition node in frontend/src/components/dashboard.
+// [Sync] 2026-08-29: implement the approved seven-section warm-paper overview, safe Skill Markdown/files, and focused resource/source child views; Hosted MCP remains visibly unavailable and non-executable.
+// [Sync] 2026-08-29: move provider discovery and long source lists off the overview, remove nested vertical scrolling, preserve resource drafts on save failure, and render createdAt without a current-time fallback.
+// [Sync] 2026-08-29: remove decorative section indices, redundant normal-state notices, and the four-item status summary while retaining the compact status badge and actionable errors.
+// [Sync] 2026-08-29: compact the overview into a desktop settings ledger with aligned section labels/content, denser controls, and a single-column mobile fallback.
+// [Sync] 2026-08-29: render operations from the real Read-hook/workspace-materializer catalog instead of synthetic Skill/MCP operation rows.
+// [Sync] 2026-08-29: restore skeleton-proportioned section rhythm and remove overview-only helper copy and resource statistics.
+// [Sync] 2026-08-30: identify the connector as Notion CLI in the overview heading while retaining Notion as the provider name elsewhere.
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { FaExternalLinkAlt, FaPuzzlePiece } from 'react-icons/fa';
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   createConnector,
   deleteConnector,
+  getNotionCapabilityCatalog,
+  getNotionSkillDetail,
+  getNotionSkillFile,
   listConnectorDatabases,
   listConnectorPages,
   listConnectors,
   notifyResourceConnectorsChanged,
   pollConnectorAuth,
   refreshConnectorSources,
+  ResourceConnectorApiError,
   selectConnectorResources,
   startConnectorAuth,
   updateConnectorSyncPolicy,
@@ -48,7 +32,12 @@ import {
   type ConnectorResourceSelection,
   type ConnectorSource,
   type ConnectorStatus,
+  type NotionCapabilityAvailability,
+  type NotionCapabilityCatalog,
   type NotionResourceOption,
+  type NotionSkillDetail,
+  type NotionSkillFileContent,
+  type NotionSkillFileDescriptor,
   type ResourceConnector,
 } from '../../api/resourceConnectorApi';
 import {
@@ -59,41 +48,36 @@ import {
   IconDatabase,
   IconFile,
   IconLoader,
+  IconMoreHorizontal,
   IconShare,
   IconTrash,
 } from '../chat/Icons';
-import { SkeletonBar, SkeletonCircle, SkeletonList } from '../chat/Skeleton';
+import { SkeletonList } from '../chat/Skeleton';
+import './ConnectorNotionDetailPage.css';
 
 interface ConnectorNotionDetailPageProps {
   onBack: () => void;
   isMobile?: boolean;
 }
 
-const RESOURCE_PAGE_SIZE = 10;
-const MOUNTED_SOURCE_PAGE_SIZE = 10;
-const DASHED_PAGE_BORDER = '1px dashed color-mix(in srgb, var(--color-border-paper) 62%, transparent)';
-const SOFT_CONTROL_BORDER = '1px solid color-mix(in srgb, var(--color-border-paper) 58%, transparent)';
-const SOFT_LIST_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 34%, transparent)';
-const SOFT_ROW_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 28%, transparent)';
-const SOFT_ROW_DIVIDER = '1px solid color-mix(in srgb, var(--color-border-paper) 34%, transparent)';
-
+type DetailView = 'overview' | 'skill' | 'file' | 'resources' | 'sources';
 type DetailTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
-
-interface DetailStatus {
-  label: string;
-  tone: DetailTone;
-  title: string;
-  description: string;
-  enabled: boolean;
-}
-
-const DEFAULT_NOTION_CONNECTOR_NAME = 'Notion Resource Connector';
-
 type UnifiedResourceKind = 'database' | 'page';
 
 interface UnifiedResourceOption extends NotionResourceOption {
   kind: UnifiedResourceKind;
 }
+
+interface DetailStatus {
+  label: string;
+  tone: DetailTone;
+}
+
+const DEFAULT_NOTION_CONNECTOR_NAME = 'Notion Resource Connector';
+const RESOURCE_PAGE_SIZE = 10;
+const NOTION_WEBSITE = 'https://developers.notion.com/cli/get-started/overview';
+const NOTION_PRIVACY = 'https://privacycenter.notion.so/policies';
+const NOTION_TERMS = 'https://notion.notion.site/Terms-and-Privacy-28ffdd083dc3473e9c2da6ec011b58ac';
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -102,13 +86,30 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function formatDateTime(value?: string): string {
   if (!value) return '未更新';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  if (Number.isNaN(date.getTime())) return '暂时无法读取';
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function formatConnectionDate(connector: ResourceConnector | null): string {
+  if (!connector) return '尚未连接';
+  if (!connector.createdAt) return '暂时无法读取';
+  const date = new Date(connector.createdAt);
+  if (Number.isNaN(date.getTime())) return '暂时无法读取';
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(date);
+}
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  return `${(sizeBytes / 1024).toFixed(sizeBytes < 10 * 1024 ? 1 : 0)} KB`;
 }
 
 function formatSyncInterval(minutes: number): string {
@@ -121,156 +122,70 @@ function formatStatusLabel(
   status?: ConnectorStatus | ConnectorSource['status'] | ConnectorAuthStatus | 'idle',
 ): string {
   switch (status) {
-    case 'authenticating':
-      return '认证中';
-    case 'authenticated':
-      return '已认证';
-    case 'syncing':
-      return '同步中';
-    case 'synced':
-      return '已同步';
-    case 'expired':
-      return '已过期';
-    case 'error':
-      return '错误';
-    case 'draft':
-      return '待连接';
-    default:
-      return '待处理';
+    case 'authenticating': return '认证中';
+    case 'authenticated': return '已认证';
+    case 'syncing': return '同步中';
+    case 'synced': return '已同步';
+    case 'expired': return '已过期';
+    case 'error': return '错误';
+    case 'draft': return '待连接';
+    default: return '待处理';
   }
+}
+
+function availabilityLabel(availability: NotionCapabilityAvailability): string {
+  switch (availability) {
+    case 'available': return '可用';
+    case 'requires_connection': return '连接后可用';
+    case 'requires_scope': return '选择资源后可用';
+    default: return '暂不可用';
+  }
+}
+
+function availabilityTone(availability: NotionCapabilityAvailability): DetailTone {
+  switch (availability) {
+    case 'available': return 'success';
+    case 'requires_connection': return 'warning';
+    case 'requires_scope': return 'info';
+    default: return 'neutral';
+  }
+}
+
+function operationSourceLabel(source: 'runtime_hook' | 'workspace_materializer'): string {
+  return source === 'runtime_hook' ? '内置 Hook' : '工作区';
 }
 
 function getDetailStatus(connector: ResourceConnector | null, loading: boolean): DetailStatus {
   if (loading) {
-    return {
-      label: '读取中',
-      tone: 'info',
-      title: '正在读取 Notion 账号状态',
-      description: '正在读取 Notion 连接、资源和同步状态。',
-      enabled: false,
-    };
+    return { label: '读取中', tone: 'info' };
   }
-
   if (!connector) {
-    return {
-      label: '未认证',
-      tone: 'warning',
-      title: '尚未连接 Notion 账号',
-      description: '连接后可选择当前账号下允许 Chat 使用的数据库和页面。',
-      enabled: false,
-    };
+    return { label: '未连接', tone: 'warning' };
   }
-
-  if (connector.status === 'error' || connector.auth.status === 'error') {
-    return {
-      label: '同步失败',
-      tone: 'danger',
-      title: 'Notion 连接器状态异常',
-      description: connector.auth.message || '认证或同步失败，请重新连接 Notion 或刷新同步。',
-      enabled: false,
-    };
-  }
-
   if (connector.syncPolicy?.status === 'error') {
-    return {
-      label: '同步失败',
-      tone: 'warning',
-      title: 'Notion 已连接，上次索引同步失败',
-      description: '最近一次成功索引仍可用于对话；请检查资源权限后立即重试，或等待下一次自动同步。',
-      enabled: true,
-    };
+    return { label: '部分可用', tone: 'warning' };
   }
-
   if (connector.auth.warning) {
-    return {
-      label: '部分可用',
-      tone: 'warning',
-      title: 'Notion 仍已连接，上次重新授权未完成',
-      description: `${connector.auth.warning} 当前已生效的授权仍可使用；需要更新权限时请重新授权。`,
-      enabled: true,
-    };
+    return { label: '部分可用', tone: 'warning' };
   }
-
+  if (connector.status === 'error' || connector.auth.status === 'error') {
+    return { label: '异常', tone: 'danger' };
+  }
   if (connector.auth.status === 'expired') {
-    return {
-      label: '已过期',
-      tone: 'warning',
-      title: 'Notion 授权已过期',
-      description: '当前账号授权不可继续使用，请重新连接 Notion。',
-      enabled: false,
-    };
+    return { label: '已过期', tone: 'warning' };
   }
-
-  if (connector.status === 'authenticating' || connector.auth.status === 'authenticating') {
-    return {
-      label: '认证中',
-      tone: 'info',
-      title: '正在等待 Notion 授权确认',
-      description: connector.auth.message || '打开 Notion 验证页完成确认后，页面会自动轮询认证结果。',
-      enabled: false,
-    };
+  if (connector.auth.status === 'authenticating' || connector.status === 'authenticating') {
+    return { label: '认证中', tone: 'info' };
   }
-
   if (connector.status === 'syncing') {
-    return {
-      label: '同步中',
-      tone: 'info',
-      title: '正在更新 Notion 索引',
-      description: '正在更新已选来源的页面 ID 与元数据；页面正文会在对话实际读取时获取。',
-      enabled: true,
-    };
+    return { label: '同步中', tone: 'info' };
   }
-
-  if (connector.auth.status === 'authenticated' || connector.status === 'authenticated' || connector.status === 'synced') {
-    const hasSnapshot = Boolean(connector.lastSyncedAt);
-    return {
-      label: hasSnapshot ? '已同步' : '已连接',
-      tone: hasSnapshot ? 'success' : 'info',
-      title: hasSnapshot ? 'Notion 索引已同步' : 'Notion 账号已连接，尚无来源索引',
-      description: hasSnapshot
-        ? `${connector.sources.length} 个来源的索引已挂载；Chat 会按需读取具体页面正文。`
-        : '请选择资源并保存，Dream 会立即生成轻量索引；无需先发起 Chat。',
-      enabled: true,
-    };
+  if (connector.auth.status === 'authenticated') {
+    return connector.lastSyncedAt
+      ? { label: '已连接', tone: 'success' }
+      : { label: '已连接', tone: 'info' };
   }
-
-  return {
-    label: '未认证',
-    tone: 'warning',
-    title: '尚未完成 Notion 授权',
-    description: '完成授权后，资源选择和来源同步才会启用。',
-    enabled: false,
-  };
-}
-
-function toneStyles(tone: DetailTone) {
-  switch (tone) {
-    case 'success':
-      return {
-        background: 'color-mix(in srgb, var(--color-state-success) 14%, var(--color-bg-surface))',
-        color: 'var(--color-state-success)',
-      };
-    case 'warning':
-      return {
-        background: 'color-mix(in srgb, var(--color-state-warning) 14%, var(--color-bg-surface))',
-        color: 'var(--color-state-warning)',
-      };
-    case 'danger':
-      return {
-        background: 'color-mix(in srgb, var(--color-state-error) 12%, var(--color-bg-surface))',
-        color: 'var(--color-state-error)',
-      };
-    case 'info':
-      return {
-        background: 'color-mix(in srgb, var(--color-action-link) 10%, var(--color-bg-surface))',
-        color: 'var(--color-action-link)',
-      };
-    default:
-      return {
-        background: 'var(--color-bg-surface)',
-        color: 'var(--color-text-secondary)',
-      };
-  }
+  return { label: '待连接', tone: 'warning' };
 }
 
 function buildSelectionFromSources(sources: ConnectorSource[]): ConnectorResourceSelection {
@@ -284,383 +199,201 @@ function resolveSingleNotionConnector(connectors: ResourceConnector[]): Resource
   const notionConnectors = connectors.filter((connector) => connector.platform === 'notion');
   if (notionConnectors.length === 0) return null;
   return notionConnectors.slice().sort((a, b) => {
-    const aTime = new Date(a.updatedAt || a.createdAt).getTime();
-    const bTime = new Date(b.updatedAt || b.createdAt).getTime();
+    const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+    const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
     return bTime - aTime;
-  })[0];
-}
-
-function sourceKindLabel(type: ConnectorSource['type']): string {
-  return type === 'notion_database' ? '数据库' : '页面';
+  })[0] ?? null;
 }
 
 function shouldShowPageCount(pageCount?: number): pageCount is number {
   return typeof pageCount === 'number' && pageCount > 0;
 }
 
-function StatusPill({ status }: { status: DetailStatus }) {
-  const palette = toneStyles(status.tone);
+function sourceKindLabel(type: ConnectorSource['type']): string {
+  return type === 'notion_database' ? '数据库' : '页面';
+}
+
+function Badge({ label, tone = 'neutral' }: { label: string; tone?: DetailTone }) {
+  return <span className={`notion-detail__badge notion-detail__badge--${tone}`}>{label}</span>;
+}
+
+function Notice({ tone = 'neutral', title, children }: { tone?: DetailTone; title?: string; children: ReactNode }) {
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '0.35rem',
-        border: 'none',
-        borderRadius: '999px',
-        background: palette.background,
-        color: palette.color,
-        padding: '0.32rem 0.68rem',
-        fontSize: '0.74rem',
-        fontWeight: 700,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          width: '0.4rem',
-          height: '0.4rem',
-          borderRadius: '999px',
-          background: palette.color,
-        }}
-      />
-      {status.label}
-    </span>
+    <div className={`notion-detail__notice notion-detail__notice--${tone}`} role={tone === 'danger' ? 'alert' : undefined}>
+      {title ? <strong>{title}</strong> : null}
+      <div>{children}</div>
+    </div>
   );
 }
 
-function HeaderInfoChip({
-  label,
-  value,
-  helper,
-}: {
-  label: string;
-  value: ReactNode;
-  helper?: ReactNode;
-}) {
+function IndexSection({ sectionId, title, children }: { sectionId: string; title: string; children: ReactNode }) {
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '0.38rem',
-        borderRadius: '999px',
-        background: 'color-mix(in srgb, var(--color-bg-surface) 74%, transparent)',
-        color: 'var(--color-text-secondary)',
-        padding: '0.34rem 0.62rem',
-        fontSize: '0.72rem',
-        lineHeight: 1.2,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      <span style={{ color: 'var(--color-text-muted)', fontWeight: 700 }}>{label}</span>
-      <span style={{ color: 'var(--color-text-primary)', fontWeight: 800 }}>{value}</span>
-      {helper ? <span style={{ color: 'var(--color-text-muted)' }}>{helper}</span> : null}
-    </span>
-  );
-}
-
-function InlineStatusPill({
-  label,
-  tone,
-}: {
-  label: string;
-  tone: DetailTone;
-}) {
-  const palette = toneStyles(tone);
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        border: 'none',
-        borderRadius: '999px',
-        background: palette.background,
-        color: palette.color,
-        padding: '0.24rem 0.58rem',
-        fontSize: '0.72rem',
-        fontWeight: 700,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-function DetailSection({
-  title,
-  subtitle,
-  action,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section
-      style={{
-        border: 'none',
-        borderRadius: '0.75rem',
-        background: 'transparent',
-        boxShadow: 'none',
-        overflow: 'visible',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: '1rem',
-          padding: '0 0 0.55rem',
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-            {title}
-          </h2>
-          {subtitle ? (
-            <p style={{ margin: '0.32rem 0 0', color: 'var(--color-text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
-              {subtitle}
-            </p>
-          ) : null}
-        </div>
-        {action}
+    <section aria-labelledby={`notion-section-${sectionId}`} className="notion-detail__section">
+      <div className="notion-detail__section-body">
+        <header className="notion-detail__section-header">
+          <h2 id={`notion-section-${sectionId}`}>{title}</h2>
+        </header>
+        <div className="notion-detail__section-content">{children}</div>
       </div>
-      <div style={{ padding: '0.2rem 0 0' }}>{children}</div>
     </section>
   );
 }
 
-function ResourceOptionRow({
-  option,
-  checked,
-  onToggle,
-  disabled,
-  type,
-}: {
-  option: NotionResourceOption;
+function NotionMark() {
+  return <span aria-hidden="true" className="notion-detail__mark"><span>N</span></span>;
+}
+
+const MARKDOWN_COMPONENTS: Components = {
+  a({ children, href }) {
+    if (!href || (!href.startsWith('https://') && !href.startsWith('http://') && !href.startsWith('mailto:'))) {
+      return <span className="notion-detail__markdown-inert-link">{children}</span>;
+    }
+    return <a href={href} rel="noopener noreferrer" target="_blank">{children}</a>;
+  },
+  img({ alt }) {
+    return <span className="notion-detail__markdown-image-placeholder">{alt || '图片未在设置页加载'}</span>;
+  },
+};
+
+function safeMarkdownUrlTransform(value: string): string {
+  if (value.startsWith('https://') || value.startsWith('http://') || value.startsWith('mailto:')) {
+    return defaultUrlTransform(value);
+  }
+  return '';
+}
+
+function MarkdownView({ content }: { content: string }) {
+  return (
+    <div className="notion-detail__markdown">
+      <ReactMarkdown components={MARKDOWN_COMPONENTS} remarkPlugins={[remarkGfm]} urlTransform={safeMarkdownUrlTransform}>
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function ChildHeader({ backLabel, title, description, onBack, headingRef }: {
+  backLabel: string;
+  title: string;
+  description: string;
+  onBack: () => void;
+  headingRef: React.RefObject<HTMLHeadingElement | null>;
+}) {
+  return (
+    <header className="notion-detail__child-header">
+      <button className="notion-detail__back" onClick={onBack} type="button">
+        <IconChevronLeft />
+        {backLabel}
+      </button>
+      <h1 ref={headingRef} tabIndex={-1}>{title}</h1>
+      <p>{description}</p>
+    </header>
+  );
+}
+
+function ResourceOptionRow({ option, checked, onToggle, disabled }: {
+  option: UnifiedResourceOption;
   checked: boolean;
   onToggle: () => void;
   disabled?: boolean;
-  type: 'database' | 'page';
 }) {
-  const Icon = type === 'database' ? IconDatabase : IconFile;
+  const Icon = option.kind === 'database' ? IconDatabase : IconFile;
   return (
     <button
-      type="button"
       aria-pressed={checked}
-      onClick={onToggle}
+      className="notion-detail__resource-row"
       disabled={disabled}
-      style={{
-        width: '100%',
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '0.72rem',
-        border: 'none',
-        borderBottom: SOFT_ROW_DIVIDER,
-        borderRadius: '0.58rem',
-        background: 'transparent',
-        color: 'var(--color-text-primary)',
-        padding: '0.62rem 0.6rem 0.62rem 0.72rem',
-        textAlign: 'left',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.62 : 1,
-      }}
+      onClick={onToggle}
+      type="button"
     >
-      <span
-        aria-hidden="true"
-        style={{
-          width: '1.25rem',
-          height: '1.25rem',
-          marginTop: '0.12rem',
-          borderRadius: '0.42rem',
-          border: 'none',
-          background: 'transparent',
-          color: 'var(--color-text-muted)',
-          display: 'grid',
-          placeItems: 'center',
-          flexShrink: 0,
-        }}
-      >
-        <Icon style={{ width: '0.75rem', height: '0.75rem' }} />
+      <span className="notion-detail__row-icon"><Icon /></span>
+      <span className="notion-detail__row-copy">
+        <strong>{option.title}</strong>
+        <small>{option.subtitle || (option.kind === 'database' ? 'Notion 数据库' : '独立页面')}</small>
       </span>
-      <span style={{ minWidth: 0, flex: 1 }}>
-        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.8rem' }}>
-          <span style={{ minWidth: 0, flex: '1 1 auto', fontSize: '0.86rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {option.title}
-          </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
-            <InlineStatusPill label={type === 'database' ? '数据库' : '页面'} tone="neutral" />
-            {shouldShowPageCount(option.pageCount) ? (
-              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
-                {option.pageCount} 页
-              </span>
-            ) : null}
-            <span
-              aria-hidden="true"
-              style={{
-                width: '1.1rem',
-                height: '1.1rem',
-                borderRadius: '999px',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--color-text-primary)',
-                opacity: checked ? 1 : 0,
-                flexShrink: 0,
-              }}
-            >
-              <IconCheck style={{ width: '0.76rem', height: '0.76rem' }} />
-            </span>
-          </span>
-        </span>
-        <span style={{ display: 'block', marginTop: '0.22rem', color: 'var(--color-text-secondary)', fontSize: '0.74rem', lineHeight: 1.45 }}>
-          {option.subtitle || (type === 'database' ? 'Notion database' : 'Standalone page')}
-        </span>
+      <span className="notion-detail__row-meta">
+        <Badge label={option.kind === 'database' ? '数据库' : '页面'} />
+        {shouldShowPageCount(option.pageCount) ? <small>{option.pageCount} 页</small> : null}
+        <span aria-hidden="true" className={`notion-detail__check${checked ? ' is-checked' : ''}`}><IconCheck /></span>
       </span>
     </button>
   );
 }
 
-function SourceCard({ source }: { source: ConnectorSource }) {
+function SourceRow({ source }: { source: ConnectorSource }) {
   const Icon = source.type === 'notion_database' ? IconDatabase : IconFile;
-  const tone: DetailTone = source.status === 'synced'
-    ? 'success'
-    : source.status === 'syncing'
-      ? 'info'
-      : source.status === 'error'
-        ? 'danger'
-        : 'neutral';
-
+  const tone: DetailTone = source.status === 'synced' ? 'success' : source.status === 'syncing' ? 'info' : source.status === 'error' ? 'danger' : 'neutral';
   return (
-    <article
-      style={{
-        border: 'none',
-        borderBottom: SOFT_ROW_DIVIDER,
-        borderRadius: '0.58rem',
-        background: 'transparent',
-        padding: '0.66rem 0.58rem',
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: '0.8rem',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', minWidth: 0 }}>
-        <span
-          aria-hidden="true"
-          style={{
-            width: '2.2rem',
-            height: '2.2rem',
-            borderRadius: '0.75rem',
-            border: 'none',
-            background: 'color-mix(in srgb, var(--color-bg-surface) 62%, transparent)',
-            color: 'var(--color-text-primary)',
-            display: 'grid',
-            placeItems: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <Icon style={{ width: '0.95rem', height: '0.95rem' }} />
-        </span>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <h3 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '0.9rem', lineHeight: 1.35, fontWeight: 700 }}>
-              {source.title}
-            </h3>
-            <InlineStatusPill label={formatStatusLabel(source.status)} tone={tone} />
-          </div>
-          <p style={{ margin: '0.32rem 0 0', color: 'var(--color-text-secondary)', fontSize: '0.76rem', lineHeight: 1.5 }}>
-            {sourceKindLabel(source.type)}
-            {source.description ? ` · ${source.description}` : ''}
-          </p>
-        </div>
+    <article className="notion-detail__source-row">
+      <span className="notion-detail__row-icon"><Icon /></span>
+      <div className="notion-detail__row-copy">
+        <div className="notion-detail__source-title"><strong>{source.title}</strong><Badge label={formatStatusLabel(source.status)} tone={tone} /></div>
+        <small>{sourceKindLabel(source.type)}{source.description ? ` · ${source.description}` : ''}</small>
       </div>
-      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        {shouldShowPageCount(source.pageCount) ? (
-          <div style={{ color: 'var(--color-text-primary)', fontSize: '0.78rem', fontWeight: 700 }}>{source.pageCount} 页</div>
-        ) : null}
-        <div style={{ marginTop: '0.3rem', color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
-          {formatDateTime(source.syncedAt || source.updatedAt)}
-        </div>
+      <div className="notion-detail__source-meta">
+        {shouldShowPageCount(source.pageCount) ? <strong>{source.pageCount} 页</strong> : null}
+        <small>{formatDateTime(source.syncedAt || source.updatedAt)}</small>
       </div>
     </article>
   );
 }
 
-function EmptyPanel({
-  title,
-  children,
-  action,
-}: {
-  title: string;
-  children: ReactNode;
-  action?: ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        border: 'none',
-        borderRadius: '0.95rem',
-        background: 'color-mix(in srgb, var(--color-bg-paper) 74%, var(--color-bg-surface))',
-        color: 'var(--color-text-secondary)',
-        padding: '1rem',
-        textAlign: 'center',
-        lineHeight: 1.65,
-      }}
-    >
-      <div style={{ color: 'var(--color-text-primary)', fontWeight: 700, fontSize: '0.92rem' }}>{title}</div>
-      <div style={{ margin: '0.38rem auto 0', maxWidth: '38rem', fontSize: '0.84rem' }}>{children}</div>
-      {action ? <div style={{ marginTop: '0.9rem' }}>{action}</div> : null}
-    </div>
-  );
-}
-
 export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: ConnectorNotionDetailPageProps) {
+  const [view, setView] = useState<DetailView>('overview');
   const [connector, setConnector] = useState<ResourceConnector | null>(null);
+  const [catalog, setCatalog] = useState<NotionCapabilityCatalog | null>(null);
   const [loading, setLoading] = useState(true);
+  const [catalogLoading, setCatalogLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
-  const [resourceError, setResourceError] = useState<string | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [policyError, setPolicyError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
-  const [resourceLoading, setResourceLoading] = useState(false);
-  const [resourceSaving, setResourceSaving] = useState(false);
   const [policySaving, setPolicySaving] = useState(false);
   const [policyEnabled, setPolicyEnabled] = useState(false);
   const [policyIntervalMinutes, setPolicyIntervalMinutes] = useState<number | null>(null);
+  const [resourceLoading, setResourceLoading] = useState(false);
+  const [resourceSaving, setResourceSaving] = useState(false);
+  const [resourceError, setResourceError] = useState<string | null>(null);
   const [databaseOptions, setDatabaseOptions] = useState<NotionResourceOption[]>([]);
   const [pageOptions, setPageOptions] = useState<NotionResourceOption[]>([]);
   const [selectedDatabaseIds, setSelectedDatabaseIds] = useState<string[]>([]);
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
   const [resourceSearchQuery, setResourceSearchQuery] = useState('');
   const [resourcePage, setResourcePage] = useState(1);
-  const [mountedSourceVisibleCount, setMountedSourceVisibleCount] = useState(MOUNTED_SOURCE_PAGE_SIZE);
+  const [skillDetail, setSkillDetail] = useState<NotionSkillDetail | null>(null);
+  const [skillLoading, setSkillLoading] = useState(false);
+  const [skillError, setSkillError] = useState<string | null>(null);
+  const [selectedSkillFile, setSelectedSkillFile] = useState<NotionSkillFileDescriptor | null>(null);
+  const [skillFileContent, setSkillFileContent] = useState<NotionSkillFileContent | null>(null);
+  const [skillFileLoading, setSkillFileLoading] = useState(false);
+  const [skillFileError, setSkillFileError] = useState<string | null>(null);
 
-  const detailStatus = getDetailStatus(connector, loading);
-  const statusPalette = toneStyles(detailStatus.tone);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const childHeadingRef = useRef<HTMLHeadingElement>(null);
+  const overviewReturnFocusKeyRef = useRef<string | null>(null);
+  const fileReturnFocusIdRef = useRef<string | null>(null);
+  const pendingFocusRestoreRef = useRef<'overview' | 'skill' | null>(null);
+
   const connectorId = connector?.id ?? null;
   const connectorAuthStatus = connector?.auth.status ?? 'idle';
   const canEditResources = connectorAuthStatus === 'authenticated';
-  const sourceSelection = useMemo(
-    () => buildSelectionFromSources(connector?.sources ?? []),
-    [connector?.sources],
-  );
   const syncPolicy = connector?.syncPolicy;
+  const detailStatus = getDetailStatus(connector, loading);
   const sourceStats = useMemo(() => {
     const sources = connector?.sources ?? [];
     const databases = sources.filter((source) => source.type === 'notion_database').length;
-    return {
-      total: sources.length,
-      databases,
-      pages: sources.length - databases,
-    };
+    return { total: sources.length, databases, pages: sources.length - databases };
   }, [connector?.sources]);
+  const readOperations = useMemo(
+    () => catalog?.operations.filter((operation) => operation.kind === 'read') ?? [],
+    [catalog?.operations],
+  );
+  const writeOperations = useMemo(
+    () => catalog?.operations.filter((operation) => operation.kind === 'write') ?? [],
+    [catalog?.operations],
+  );
   const unifiedResourceOptions = useMemo<UnifiedResourceOption[]>(
     () => [
       ...databaseOptions.map((option) => ({ ...option, kind: 'database' as const })),
@@ -669,12 +402,9 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
     [databaseOptions, pageOptions],
   );
   const filteredResourceOptions = useMemo(() => {
-    const query = resourceSearchQuery.trim().toLowerCase();
+    const query = resourceSearchQuery.trim().toLocaleLowerCase();
     if (!query) return unifiedResourceOptions;
-    return unifiedResourceOptions.filter((option) => {
-      const haystack = `${option.title} ${option.subtitle ?? ''} ${option.kind}`.toLowerCase();
-      return haystack.includes(query);
-    });
+    return unifiedResourceOptions.filter((option) => `${option.title} ${option.subtitle ?? ''} ${option.kind}`.toLocaleLowerCase().includes(query));
   }, [resourceSearchQuery, unifiedResourceOptions]);
   const totalResourcePages = Math.max(1, Math.ceil(filteredResourceOptions.length / RESOURCE_PAGE_SIZE));
   const visibleResourceOptions = useMemo(() => {
@@ -682,38 +412,26 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
     return filteredResourceOptions.slice(start, start + RESOURCE_PAGE_SIZE);
   }, [filteredResourceOptions, resourcePage]);
   const selectedResourceCount = selectedDatabaseIds.length + selectedPageIds.length;
-  const mountedSources = useMemo(() => connector?.sources ?? [], [connector?.sources]);
-  const visibleMountedSources = useMemo(
-    () => mountedSources.slice(0, mountedSourceVisibleCount),
-    [mountedSourceVisibleCount, mountedSources],
-  );
-  const hasMoreMountedSources = mountedSourceVisibleCount < mountedSources.length;
 
-  const upsertConnector = useCallback((nextConnector: ResourceConnector) => {
-    setConnector(nextConnector);
-    setPageError(null);
-  }, []);
-
-  const resetResourceState = useCallback(() => {
-    setDatabaseOptions([]);
-    setPageOptions([]);
-    setSelectedDatabaseIds([]);
-    setSelectedPageIds([]);
-    setResourceSearchQuery('');
-    setResourcePage(1);
-    setResourceError(null);
-    setResourceLoading(false);
+  const reloadCatalog = useCallback(async () => {
+    setCatalogLoading(true);
+    setCatalogError(null);
+    try {
+      setCatalog(await getNotionCapabilityCatalog());
+    } catch (error) {
+      setCatalogError(getErrorMessage(error, 'Notion 能力信息暂时无法读取'));
+    } finally {
+      setCatalogLoading(false);
+    }
   }, []);
 
   const loadConnector = useCallback(async () => {
     setLoading(true);
     setPageError(null);
     try {
-      const items = await listConnectors();
-      const nextConnector = resolveSingleNotionConnector(items);
-      setConnector(nextConnector);
+      setConnector(resolveSingleNotionConnector(await listConnectors()));
     } catch (error) {
-      setPageError(getErrorMessage(error, 'Notion 连接器状态读取失败'));
+      setPageError(getErrorMessage(error, 'Notion 连接状态读取失败'));
     } finally {
       setLoading(false);
     }
@@ -721,60 +439,14 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
 
   useEffect(() => {
     void loadConnector();
-  }, [loadConnector]);
+    void reloadCatalog();
+  }, [loadConnector, reloadCatalog]);
 
   useEffect(() => {
     if (!syncPolicy) return;
     setPolicyEnabled(syncPolicy.desired.enabled);
     setPolicyIntervalMinutes(syncPolicy.desired.intervalMinutes);
   }, [syncPolicy]);
-
-  useEffect(() => {
-    if (!connectorId || connectorAuthStatus !== 'authenticated') {
-      resetResourceState();
-      return undefined;
-    }
-
-    let active = true;
-    setResourceLoading(true);
-    setResourceError(null);
-
-    void (async () => {
-      try {
-        const [databases, pages] = await Promise.all([
-          listConnectorDatabases(connectorId),
-          listConnectorPages(connectorId),
-        ]);
-        if (!active) return;
-
-        setDatabaseOptions(databases);
-        setPageOptions(pages);
-        setSelectedDatabaseIds(
-          sourceSelection.databaseIds.length > 0
-            ? sourceSelection.databaseIds
-            : databases.filter((option) => option.selected).map((option) => option.id),
-        );
-        setSelectedPageIds(
-          sourceSelection.pageIds.length > 0
-            ? sourceSelection.pageIds
-            : pages.filter((option) => option.selected).map((option) => option.id),
-        );
-      } catch (error) {
-        if (!active) return;
-        setResourceError(getErrorMessage(error, '资源列表加载失败'));
-        setDatabaseOptions([]);
-        setPageOptions([]);
-      } finally {
-        if (active) {
-          setResourceLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [connectorAuthStatus, connectorId, resetResourceState, sourceSelection]);
 
   useEffect(() => {
     setResourcePage(1);
@@ -785,751 +457,464 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   }, [totalResourcePages]);
 
   useEffect(() => {
-    setMountedSourceVisibleCount(MOUNTED_SOURCE_PAGE_SIZE);
-  }, [mountedSources]);
-
-  const handleMountedSourcesScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
-    if (!hasMoreMountedSources) return;
-
-    const target = event.currentTarget;
-    const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-    if (remaining <= 48) {
-      setMountedSourceVisibleCount((current) => Math.min(current + MOUNTED_SOURCE_PAGE_SIZE, mountedSources.length));
+    if (view === 'overview' && pendingFocusRestoreRef.current === 'overview') {
+      pendingFocusRestoreRef.current = null;
+      const focusTarget = [...(rootRef.current?.querySelectorAll<HTMLButtonElement>('button[data-focus-key]') ?? [])]
+        .find((button) => button.dataset.focusKey === overviewReturnFocusKeyRef.current);
+      focusTarget?.scrollIntoView({ block: 'center' });
+      focusTarget?.focus();
+      return;
     }
-  }, [hasMoreMountedSources, mountedSources.length]);
+    if (view === 'skill' && pendingFocusRestoreRef.current === 'skill') {
+      pendingFocusRestoreRef.current = null;
+      const focusTarget = [...(rootRef.current?.querySelectorAll<HTMLButtonElement>('button[data-file-focus-id]') ?? [])]
+        .find((button) => button.dataset.fileFocusId === fileReturnFocusIdRef.current);
+      focusTarget?.scrollIntoView({ block: 'center' });
+      focusTarget?.focus();
+      return;
+    }
+    if (view !== 'overview') {
+      childHeadingRef.current?.focus();
+      rootRef.current?.scrollIntoView({ block: 'start' });
+    }
+  }, [view]);
 
   useEffect(() => {
-    if (!connectorId || connectorAuthStatus !== 'authenticating') {
-      return undefined;
-    }
-
+    if (!connectorId || connectorAuthStatus !== 'authenticating') return undefined;
     let active = true;
     const poll = async () => {
-      if (!active) return;
       try {
         const next = await pollConnectorAuth(connectorId);
-        if (active && next) {
-          upsertConnector(next);
-        }
+        if (!active || !next) return;
+        setConnector(next);
+        if (next.auth.status !== 'authenticating') void reloadCatalog();
       } catch (error) {
-        if (active) {
-          setResourceError(getErrorMessage(error, '认证轮询失败'));
-        }
+        if (active) setPageError(getErrorMessage(error, '认证状态读取失败；你的输入和已有索引未被修改'));
       }
     };
-
     void poll();
-    const intervalId = window.setInterval(() => {
-      void poll();
-    }, 3500);
+    const intervalId = window.setInterval(() => { void poll(); }, 3500);
+    return () => { active = false; window.clearInterval(intervalId); };
+  }, [connectorAuthStatus, connectorId, reloadCatalog]);
 
-    return () => {
-      active = false;
-      window.clearInterval(intervalId);
-    };
-  }, [connectorAuthStatus, connectorId, upsertConnector]);
+  const enterView = useCallback((nextView: DetailView, event: MouseEvent<HTMLButtonElement>) => {
+    overviewReturnFocusKeyRef.current = event.currentTarget.dataset.focusKey ?? null;
+    setView(nextView);
+  }, []);
+
+  const returnToOverview = useCallback(() => {
+    pendingFocusRestoreRef.current = 'overview';
+    setView('overview');
+  }, []);
+
+  const returnToSkill = useCallback(() => {
+    pendingFocusRestoreRef.current = 'skill';
+    setView('skill');
+  }, []);
 
   const ensureSingleConnector = useCallback(async () => {
     if (connector) return connector;
-
-    const items = await listConnectors();
-    const existingConnector = resolveSingleNotionConnector(items);
-    if (existingConnector) {
-      upsertConnector(existingConnector);
-      return existingConnector;
-    }
-
-    const nextConnector = await createConnector({
-      name: DEFAULT_NOTION_CONNECTOR_NAME,
-      platform: 'notion',
-    });
-    upsertConnector(nextConnector);
-    return nextConnector;
-  }, [connector, upsertConnector]);
+    const existing = resolveSingleNotionConnector(await listConnectors());
+    if (existing) { setConnector(existing); return existing; }
+    const created = await createConnector({ name: DEFAULT_NOTION_CONNECTOR_NAME, platform: 'notion' });
+    setConnector(created);
+    return created;
+  }, [connector]);
 
   const handleStartAuth = useCallback(async () => {
     if (connecting) return;
     setConnecting(true);
     setPageError(null);
-    setResourceError(null);
     try {
-      const targetConnector = await ensureSingleConnector();
-      const nextConnector = await startConnectorAuth(targetConnector.id);
-      if (nextConnector) {
-        upsertConnector(nextConnector);
-      }
+      const target = await ensureSingleConnector();
+      const next = await startConnectorAuth(target.id);
+      if (next) setConnector(next);
+      notifyResourceConnectorsChanged({ connectorId: target.id, reason: 'auth-updated' });
+      await reloadCatalog();
     } catch (error) {
-      setPageError(getErrorMessage(error, '启动 Notion 认证失败'));
+      setPageError(getErrorMessage(error, '无法启动 Notion 连接；已有内容未被修改，请重试'));
     } finally {
       setConnecting(false);
     }
-  }, [connecting, ensureSingleConnector, upsertConnector]);
+  }, [connecting, ensureSingleConnector, reloadCatalog]);
+
+  const handleDisconnect = useCallback(async () => {
+    if (!connectorId || disconnecting) return;
+    setDisconnecting(true);
+    setPageError(null);
+    try {
+      if (await deleteConnector(connectorId)) {
+        setConnector(null);
+        setDatabaseOptions([]);
+        setPageOptions([]);
+        setSelectedDatabaseIds([]);
+        setSelectedPageIds([]);
+        notifyResourceConnectorsChanged({ connectorId, reason: 'connector-updated' });
+        await reloadCatalog();
+      }
+    } catch (error) {
+      setPageError(getErrorMessage(error, '无法关闭 Notion 连接；当前连接保持不变，请重试'));
+    } finally {
+      setDisconnecting(false);
+    }
+  }, [connectorId, disconnecting, reloadCatalog]);
+
+  const handleSaveSyncPolicy = useCallback(async () => {
+    if (!connectorId || !syncPolicy || policyIntervalMinutes === null || policySaving) return;
+    setPolicySaving(true);
+    setPolicyError(null);
+    try {
+      const next = await updateConnectorSyncPolicy(connectorId, { enabled: policyEnabled, intervalMinutes: policyIntervalMinutes });
+      setConnector(next);
+      notifyResourceConnectorsChanged({ connectorId, reason: 'connector-updated' });
+    } catch (error) {
+      setPolicyError(getErrorMessage(error, '策略未保存；服务器原策略仍然生效，请重试'));
+    } finally {
+      setPolicySaving(false);
+    }
+  }, [connectorId, policyEnabled, policyIntervalMinutes, policySaving, syncPolicy]);
+
+  const handleOpenSkill = useCallback(async (event: MouseEvent<HTMLButtonElement>, skillId: string) => {
+    enterView('skill', event);
+    setSkillLoading(true);
+    setSkillError(null);
+    setSkillDetail(null);
+    try {
+      setSkillDetail(await getNotionSkillDetail(skillId));
+    } catch (error) {
+      setSkillError(getErrorMessage(error, 'Skill 说明暂时无法读取；Notion 连接和索引不受影响'));
+    } finally {
+      setSkillLoading(false);
+    }
+  }, [enterView]);
+
+  const handleOpenSkillFile = useCallback(async (file: NotionSkillFileDescriptor) => {
+    if (!skillDetail) return;
+    fileReturnFocusIdRef.current = file.id;
+    setSelectedSkillFile(file);
+    setSkillFileContent(null);
+    setSkillFileError(null);
+    setSkillFileLoading(true);
+    setView('file');
+    try {
+      setSkillFileContent(await getNotionSkillFile(skillDetail.skill.id, file.id, skillDetail.packageRevision));
+    } catch (error) {
+      if (error instanceof ResourceConnectorApiError && error.status === 409) {
+        try {
+          setSkillDetail(await getNotionSkillDetail(skillDetail.skill.id));
+        } catch {
+          // Keep the safe file error as the visible boundary; connector state remains usable.
+        }
+        setSkillFileError('Skill 包已更新，旧文件内容没有继续显示。请返回文件清单后重新打开。');
+      } else {
+        setSkillFileError(getErrorMessage(error, '文件暂时无法读取；请返回 Skill 刷新后重试'));
+      }
+    } finally {
+      setSkillFileLoading(false);
+    }
+  }, [skillDetail]);
+
+  const loadResourceOptions = useCallback(async () => {
+    const selection = buildSelectionFromSources(connector?.sources ?? []);
+    setSelectedDatabaseIds(selection.databaseIds);
+    setSelectedPageIds(selection.pageIds);
+    setResourceSearchQuery('');
+    setResourcePage(1);
+    setResourceError(null);
+    if (!connectorId || !canEditResources) {
+      setDatabaseOptions([]);
+      setPageOptions([]);
+      return;
+    }
+    setResourceLoading(true);
+    try {
+      const [databases, pages] = await Promise.all([
+        listConnectorDatabases(connectorId),
+        listConnectorPages(connectorId),
+      ]);
+      setDatabaseOptions(databases);
+      setPageOptions(pages);
+      setSelectedDatabaseIds(selection.databaseIds.length > 0 ? selection.databaseIds : databases.filter((option) => option.selected).map((option) => option.id));
+      setSelectedPageIds(selection.pageIds.length > 0 ? selection.pageIds : pages.filter((option) => option.selected).map((option) => option.id));
+    } catch (error) {
+      setResourceError(getErrorMessage(error, '资源列表加载失败；服务器当前范围没有改变，请重试'));
+      setDatabaseOptions([]);
+      setPageOptions([]);
+    } finally {
+      setResourceLoading(false);
+    }
+  }, [canEditResources, connector?.sources, connectorId]);
+
+  const handleOpenResources = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    enterView('resources', event);
+    void loadResourceOptions();
+  }, [enterView, loadResourceOptions]);
 
   const handleSaveResources = useCallback(async () => {
     if (!connectorId || !canEditResources || resourceSaving) return;
     setResourceSaving(true);
     setResourceError(null);
     try {
-      const nextConnector = await selectConnectorResources(connectorId, {
+      const next = await selectConnectorResources(connectorId, {
         databaseIds: selectedDatabaseIds,
         pageIds: selectedPageIds,
         databaseOptions,
         pageOptions,
       });
-      if (nextConnector) {
-        upsertConnector(nextConnector);
-      }
+      if (next) setConnector(next);
       notifyResourceConnectorsChanged({ connectorId, reason: 'resources-selected' });
+      await reloadCatalog();
     } catch (error) {
-      setResourceError(getErrorMessage(error, '保存资源选择失败'));
+      setResourceError(getErrorMessage(error, '资源范围未保存；你的本页选择仍保留，服务器范围没有改变'));
     } finally {
       setResourceSaving(false);
     }
-  }, [canEditResources, connectorId, databaseOptions, pageOptions, resourceSaving, selectedDatabaseIds, selectedPageIds, upsertConnector]);
+  }, [canEditResources, connectorId, databaseOptions, pageOptions, reloadCatalog, resourceSaving, selectedDatabaseIds, selectedPageIds]);
 
   const handleSyncSources = useCallback(async () => {
     if (!connectorId || !canEditResources || syncLoading) return;
     setSyncLoading(true);
     setResourceError(null);
     try {
-      const nextConnector = await refreshConnectorSources(connectorId);
-      if (nextConnector) {
-        upsertConnector(nextConnector);
-      }
+      const next = await refreshConnectorSources(connectorId);
+      if (next) setConnector(next);
       notifyResourceConnectorsChanged({ connectorId, reason: 'sources-refreshed' });
+      await reloadCatalog();
     } catch (error) {
-      setResourceError(getErrorMessage(error, '刷新同步失败'));
+      setResourceError(getErrorMessage(error, '索引更新失败；最近一次成功索引仍保留，请稍后重试'));
     } finally {
       setSyncLoading(false);
     }
-  }, [canEditResources, connectorId, syncLoading, upsertConnector]);
+  }, [canEditResources, connectorId, reloadCatalog, syncLoading]);
 
-  const handleSaveSyncPolicy = useCallback(async () => {
-    if (!connectorId || !syncPolicy || policyIntervalMinutes === null || policySaving) return;
-    setPolicySaving(true);
-    setResourceError(null);
-    try {
-      const nextConnector = await updateConnectorSyncPolicy(connectorId, {
-        enabled: policyEnabled,
-        intervalMinutes: policyIntervalMinutes,
-      });
-      upsertConnector(nextConnector);
-      notifyResourceConnectorsChanged({ connectorId, reason: 'connector-updated' });
-    } catch (error) {
-      setResourceError(getErrorMessage(error, '保存同步策略失败'));
-    } finally {
-      setPolicySaving(false);
-    }
-  }, [connectorId, policyEnabled, policyIntervalMinutes, policySaving, syncPolicy, upsertConnector]);
+  const authActionLabel = connectorAuthStatus === 'authenticated' ? '重新连接 Notion' : connectorAuthStatus === 'authenticating' ? '认证进行中' : '连接 Notion';
 
-  const handleDisconnect = useCallback(async () => {
-    if (!connectorId || disconnecting) return;
-    setDisconnecting(true);
-    setPageError(null);
-    setResourceError(null);
-    try {
-      const deleted = await deleteConnector(connectorId);
-      if (deleted) {
-        setConnector(null);
-        resetResourceState();
-      }
-    } catch (error) {
-      setPageError(getErrorMessage(error, '关闭 Notion 连接失败'));
-    } finally {
-      setDisconnecting(false);
-    }
-  }, [connectorId, disconnecting, resetResourceState]);
-
-  const authActionLabel = connectorAuthStatus === 'authenticated'
-    ? '重新连接 Notion'
-    : connectorAuthStatus === 'authenticating'
-      ? '认证进行中'
-      : '连接 Notion';
-  const connectorStatusLabel = syncPolicy?.status === 'error'
-    ? '同步失败'
-    : syncPolicy?.status === 'syncing'
-      ? '同步中'
-      : formatStatusLabel(connector?.status ?? 'idle');
-  const syncTimeLabel = formatDateTime(connector?.lastSyncedAt);
-  const showConnectPrompt = !connector || connectorAuthStatus === 'idle' || connectorAuthStatus === 'expired' || connectorAuthStatus === 'error';
-
-  const actionButtonStyle = {
-    border: 'none',
-    borderRadius: '999px',
-    padding: '0.68rem 0.95rem',
-    background: 'var(--color-text-primary)',
-    color: 'var(--color-bg-app)',
-    cursor: connecting || connectorAuthStatus === 'authenticating' ? 'not-allowed' : 'pointer',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '0.48rem',
-    fontSize: '0.84rem',
-    fontWeight: 700,
-    boxShadow: '0 12px 26px var(--color-shadow-medium)',
-    opacity: connecting || connectorAuthStatus === 'authenticating' ? 0.66 : 1,
-  } as const;
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: isMobile ? '1rem' : '1.2rem',
-        width: '100%',
-        border: DASHED_PAGE_BORDER,
-        borderRadius: '1.05rem',
-        background: 'transparent',
-        boxShadow: 'none',
-        padding: isMobile ? '0.85rem' : '1rem 1.08rem 1.12rem',
-      }}
-    >
-      <nav
-        aria-label="链接器具体配置页面导航"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.42rem',
-          flexWrap: 'wrap',
-          color: 'var(--color-text-secondary)',
-          fontSize: '0.84rem',
-        }}
-      >
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.35rem',
-            border: 'none',
-            borderRadius: '999px',
-            padding: '0.48rem 0.82rem',
-            background: SOFT_ROW_SURFACE,
-            color: 'var(--color-text-primary)',
-            cursor: 'pointer',
-            fontSize: '0.82rem',
-            fontWeight: 700,
-          }}
-        >
-          <IconChevronLeft style={{ width: '0.88rem', height: '0.88rem' }} />
-          资源连接器
-        </button>
-        <IconChevronRight style={{ width: '0.78rem', height: '0.78rem', color: 'var(--color-text-muted)' }} />
-        <span style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>Notion Connector</span>
-      </nav>
-
-      <section
-        style={{
-          display: 'grid',
-          gap: '0.72rem',
-          background: 'transparent',
-          padding: isMobile ? '0.15rem 0 0.25rem' : '0.2rem 0 0.35rem',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.9rem', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.72rem', minWidth: 0, flex: '1 1 26rem' }}>
-            {loading ? (
-              <SkeletonCircle size="2.2rem" />
-            ) : (
-              <span
-                style={{
-                  width: '2.2rem',
-                  height: '2.2rem',
-                  flexShrink: 0,
-                  borderRadius: '0.72rem',
-                  background: 'color-mix(in srgb, var(--color-text-primary) 8%, var(--color-bg-surface))',
-                  display: 'grid',
-                  placeItems: 'center',
-                  color: 'var(--color-text-primary)',
-                }}
-              >
-                <IconDatabase style={{ width: '1rem', height: '1rem' }} />
-              </span>
-            )}
-            <div style={{ minWidth: 0 }}>
-              {loading ? (
-                <div style={{ display: 'grid', gap: '0.4rem', minWidth: '16rem' }}>
-                  <SkeletonBar width="15rem" height="0.95rem" />
-                  <SkeletonBar width="22rem" height="0.72rem" />
+  if (view === 'skill') {
+    return (
+      <div className={`notion-detail${isMobile ? ' notion-detail--mobile' : ''}`} ref={rootRef}>
+        <ChildHeader backLabel="Notion" description="查看服务器安装的只读 Skill 说明与公开文件。" headingRef={childHeadingRef} onBack={returnToOverview} title={skillDetail?.skill.title || 'Notion Skill'} />
+        {skillLoading ? <SkeletonList rows={5} /> : skillError ? <Notice tone="danger" title="Skill 信息暂不可用">{skillError}</Notice> : skillDetail ? (
+          <>
+            <div className="notion-detail__skill-meta">
+              <div><FaPuzzlePiece aria-hidden="true" /><span>{skillDetail.skill.description}</span></div>
+              <div><Badge label="内置" /><Badge label={availabilityLabel(skillDetail.skill.availability)} tone={availabilityTone(skillDetail.skill.availability)} /></div>
+            </div>
+            <section aria-labelledby="notion-skill-body-title" className="notion-detail__child-section">
+              <h2 id="notion-skill-body-title">Skill 说明</h2>
+              <MarkdownView content={skillDetail.skill.body} />
+            </section>
+            <section aria-labelledby="notion-skill-files-title" className="notion-detail__child-section">
+              <h2 id="notion-skill-files-title">包含的文件</h2>
+              {skillDetail.files.length === 0 ? <Notice>当前 Skill 没有可公开查看的相关文件。</Notice> : (
+                <div className="notion-detail__file-list">
+                  {skillDetail.files.map((file) => (
+                    <button data-file-focus-id={file.id} key={file.id} onClick={() => void handleOpenSkillFile(file)} type="button">
+                      <span><IconFile /><span><strong>{file.relativePath}</strong><small>{file.mediaType}</small></span></span>
+                      <span><small>{formatFileSize(file.sizeBytes)}</small><IconChevronRight /></span>
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                <>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
-                    <h1 style={{ margin: 0, fontSize: isMobile ? '1.08rem' : '1.22rem', lineHeight: 1.18, fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                      Notion Resource Connector
-                    </h1>
-                    <StatusPill status={detailStatus} />
-                  </div>
-                  <p style={{ margin: '0.28rem 0 0', maxWidth: '48rem', color: 'var(--color-text-secondary)', fontSize: '0.78rem', lineHeight: 1.5 }}>
-                    {detailStatus.description}
-                  </p>
-                </>
               )}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: isMobile ? 'flex-start' : 'flex-end' }}>
-            <button
-              type="button"
-              onClick={() => void handleStartAuth()}
-              disabled={connecting || connectorAuthStatus === 'authenticating'}
-              style={actionButtonStyle}
-            >
-              {connecting ? <IconLoader style={{ width: '0.9rem', height: '0.9rem' }} /> : <IconShare style={{ width: '0.9rem', height: '0.9rem' }} />}
-              {connecting ? '连接中' : authActionLabel}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleDisconnect()}
-              disabled={!connectorId || disconnecting}
-              style={{
-                border: 'none',
-                borderRadius: '999px',
-                padding: '0.66rem 0.92rem',
-                background: statusPalette.background,
-                color: statusPalette.color,
-                cursor: !connectorId || disconnecting ? 'not-allowed' : 'pointer',
-                opacity: !connectorId ? 0.62 : 1,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.45rem',
-                fontSize: '0.84rem',
-                fontWeight: 700,
-              }}
-            >
-              {disconnecting ? <IconLoader style={{ width: '0.9rem', height: '0.9rem' }} /> : <IconTrash style={{ width: '0.9rem', height: '0.9rem' }} />}
-              {disconnecting ? '关闭中' : '关闭连接'}
-            </button>
-          </div>
-        </div>
-
-        {!loading ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
-            <HeaderInfoChip label="授权" value={formatStatusLabel(connectorAuthStatus)} />
-            <HeaderInfoChip label="同步" value={connectorStatusLabel} helper={syncLoading ? '刷新中' : undefined} />
-            <HeaderInfoChip label="已链接资源" value={sourceStats.total} helper={`${sourceStats.databases} 个数据库 · ${sourceStats.pages} 个页面`} />
-            <HeaderInfoChip label="最近同步" value={syncTimeLabel} />
-          </div>
+            </section>
+          </>
         ) : null}
+      </div>
+    );
+  }
 
-        {!loading && showConnectPrompt ? (
-          <div
-            style={{
-              borderLeft: '2px solid color-mix(in srgb, var(--color-border-paper) 70%, transparent)',
-              background: 'transparent',
-              color: 'var(--color-text-secondary)',
-              padding: '0.14rem 0 0.16rem 0.72rem',
-              fontSize: '0.8rem',
-              lineHeight: 1.55,
-            }}
-          >
-            连接 Notion 账号后才能选择资源。页面会创建或复用当前 Notion 连接，然后进入认证流程。
-          </div>
+  if (view === 'file') {
+    return (
+      <div className={`notion-detail${isMobile ? ' notion-detail--mobile' : ''}`} ref={rootRef}>
+        <ChildHeader backLabel="包含的文件" description={`${selectedSkillFile?.mediaType || 'text/markdown'} · ${selectedSkillFile ? formatFileSize(selectedSkillFile.sizeBytes) : '只读'}`} headingRef={childHeadingRef} onBack={returnToSkill} title={selectedSkillFile?.relativePath || 'Skill 文件'} />
+        {skillFileLoading ? <SkeletonList rows={6} /> : skillFileError ? <Notice tone="danger" title="文件暂不可用">{skillFileError}</Notice> : skillFileContent ? (
+          <section aria-label="Skill 文件内容" className="notion-detail__child-section notion-detail__file-reader">
+            <MarkdownView content={skillFileContent.file.content} />
+          </section>
         ) : null}
+      </div>
+    );
+  }
 
-        {!loading && connector && connectorAuthStatus === 'authenticating' ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 0.75fr) minmax(0, 1.25fr)',
-              gap: '0.7rem',
-              borderLeft: '2px solid color-mix(in srgb, var(--color-border-paper) 70%, transparent)',
-              background: 'transparent',
-              padding: '0.12rem 0 0.16rem 0.72rem',
-            }}
-          >
-            <div>
-              <div style={{ color: 'var(--color-text-muted)', fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                验证码
-              </div>
-              <div style={{ marginTop: '0.35rem', color: 'var(--color-text-primary)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '1rem', fontWeight: 800, letterSpacing: '0.08em' }}>
-                {connector.auth.verificationCode || '等待生成'}
-              </div>
-            </div>
-            <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem', lineHeight: 1.55 }}>
-              {connector.auth.message || '在 Notion 中确认访问权限，页面会自动轮询结果。'}
-              {connector.auth.verificationUrl ? (
-                <a
-                  href={connector.auth.verificationUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.55rem', color: 'var(--color-text-primary)', fontWeight: 700, textDecoration: 'none' }}
-                >
-                  <IconShare style={{ width: '0.8rem', height: '0.8rem' }} />
-                  打开验证页
-                </a>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-      {pageError ? (
-        <div
-          style={{
-            border: 'none',
-            borderRadius: '0.9rem',
-            background: 'color-mix(in srgb, var(--color-state-error) 10%, var(--color-bg-paper))',
-            color: 'var(--color-state-error)',
-            padding: '0.75rem 0.9rem',
-            fontSize: '0.84rem',
-          }}
-        >
-          {pageError}
-        </div>
-      ) : null}
-
-      <section
-        aria-label="策略设计"
-        style={{
-          display: 'grid',
-          gap: '0.7rem',
-          padding: '0.1rem 0 0.45rem',
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '0.9rem', lineHeight: 1.35, fontWeight: 700 }}>
-            索引同步策略
-          </h2>
-          <p style={{ margin: '0.22rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.78rem', lineHeight: 1.5 }}>
-            保存资源时会立即建立首个轻量索引；之后 Dream 在后台更新页面 ID 和元数据，无需先发起 Chat。新对话和后续对话轮次都会读取最近一次成功索引，页面正文仅在实际读取时获取。
-          </p>
-        </div>
-        {syncPolicy ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              flexWrap: 'wrap',
-              padding: '0.72rem 0.78rem',
-              borderRadius: '0.8rem',
-              background: SOFT_LIST_SURFACE,
-            }}
-          >
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--color-text-primary)', fontSize: '0.8rem', fontWeight: 700 }}>
-              <input
-                type="checkbox"
-                checked={policyEnabled}
-                onChange={(event) => setPolicyEnabled(event.target.checked)}
-                disabled={policySaving}
-              />
-              自动同步
-            </label>
-            <select
-              aria-label="Notion 自动同步频率"
-              value={policyIntervalMinutes ?? ''}
-              onChange={(event) => setPolicyIntervalMinutes(Number(event.target.value))}
-              disabled={!policyEnabled || policyIntervalMinutes === null || policySaving}
-              style={{
-                border: SOFT_CONTROL_BORDER,
-                borderRadius: '999px',
-                background: 'var(--color-bg-paper)',
-                color: 'var(--color-text-primary)',
-                padding: '0.5rem 0.72rem',
-                fontSize: '0.78rem',
-              }}
-            >
-              {syncPolicy.allowedIntervalMinutes.map((minutes) => (
-                <option key={minutes} value={minutes}>{formatSyncInterval(minutes)}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => void handleSaveSyncPolicy()}
-              disabled={policySaving || policyIntervalMinutes === null}
-              style={{
-                border: 'none',
-                borderRadius: '999px',
-                padding: '0.52rem 0.76rem',
-                background: 'var(--color-text-primary)',
-                color: 'var(--color-bg-app)',
-                cursor: policySaving ? 'not-allowed' : 'pointer',
-                opacity: policySaving ? 0.62 : 1,
-                fontSize: '0.78rem',
-                fontWeight: 700,
-              }}
-            >
-              {policySaving ? '保存中' : '保存策略'}
-            </button>
-            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.74rem' }}>
-              {syncPolicy.status === 'error'
-                ? '上次同步失败，可立即重试'
-                : syncPolicy.status === 'syncing'
-                  ? '正在后台同步'
-                  : !policyEnabled
-                    ? '自动同步已关闭'
-                    : `下次同步 ${formatDateTime(syncPolicy.nextSyncAt)}`}
-            </span>
-          </div>
-        ) : (
-          <p style={{ margin: 0, color: 'var(--color-state-error)', fontSize: '0.78rem' }}>
-            同步策略暂不可用，请刷新页面后重试。
-          </p>
-        )}
-      </section>
-
-      <DetailSection
-        title="资源范围"
-        subtitle="选择这个 Notion 账号授权给 Chat 使用的数据库和页面。"
-        action={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <input
-              type="search"
-              value={resourceSearchQuery}
-              onChange={(event) => setResourceSearchQuery(event.target.value)}
-              placeholder="搜索资源"
-              aria-label="搜索 Notion 资源"
-              disabled={!canEditResources}
-              style={{
-                width: isMobile ? '100%' : '13.5rem',
-                border: SOFT_CONTROL_BORDER,
-                borderRadius: '999px',
-                background: 'var(--color-bg-paper)',
-                color: 'var(--color-text-primary)',
-                padding: '0.58rem 0.82rem',
-                outline: 'none',
-                fontSize: '0.8rem',
-                opacity: canEditResources ? 1 : 0.62,
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => void handleSaveResources()}
-              disabled={!canEditResources || resourceSaving}
-              style={{
-                border: 'none',
-                borderRadius: '999px',
-                padding: '0.58rem 0.82rem',
-                background: 'var(--color-text-primary)',
-                color: 'var(--color-bg-app)',
-                cursor: !canEditResources || resourceSaving ? 'not-allowed' : 'pointer',
-                opacity: !canEditResources || resourceSaving ? 0.62 : 1,
-                fontSize: '0.8rem',
-                fontWeight: 700,
-              }}
-            >
-              {resourceSaving ? '保存并同步中' : '保存并同步'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleSyncSources()}
-              disabled={!canEditResources || syncLoading}
-              style={{
-                border: SOFT_CONTROL_BORDER,
-                borderRadius: '999px',
-                padding: '0.56rem 0.78rem',
-                background: 'var(--color-bg-paper)',
-                color: 'var(--color-text-primary)',
-                cursor: !canEditResources || syncLoading ? 'not-allowed' : 'pointer',
-                opacity: !canEditResources || syncLoading ? 0.62 : 1,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.42rem',
-                fontSize: '0.8rem',
-                fontWeight: 700,
-              }}
-            >
-              {syncLoading ? <IconLoader style={{ width: '0.86rem', height: '0.86rem' }} /> : <IconArrowUp style={{ width: '0.86rem', height: '0.86rem' }} />}
-              {syncLoading ? '同步中' : syncPolicy?.status === 'error' ? '立即重试' : '立即同步'}
-            </button>
-          </div>
-        }
-      >
+  if (view === 'resources') {
+    return (
+      <div className={`notion-detail${isMobile ? ' notion-detail--mobile' : ''}`} ref={rootRef}>
+        <ChildHeader backLabel="Notion" description="选择允许进入轻量索引的数据库和独立页面；正文不会在此批量下载。" headingRef={childHeadingRef} onBack={returnToOverview} title="资源范围" />
         {!canEditResources ? (
-          <EmptyPanel
-            title="资源选择暂不可用"
-            action={
-              <button
-                type="button"
-                onClick={() => void handleStartAuth()}
-                disabled={connecting || connectorAuthStatus === 'authenticating'}
-                style={actionButtonStyle}
-              >
-                {connecting ? <IconLoader style={{ width: '0.9rem', height: '0.9rem' }} /> : <IconShare style={{ width: '0.9rem', height: '0.9rem' }} />}
-                {connecting ? '连接中' : authActionLabel}
-              </button>
-            }
-          >
-            完成 Notion 授权后，这里会列出可访问的数据库和独立页面；当前页面管理一个 Notion 连接。
-          </EmptyPanel>
-        ) : resourceLoading ? (
-          <SkeletonList rows={4} />
-        ) : resourceError ? (
-          <div
-            style={{
-              border: 'none',
-              borderRadius: '0.9rem',
-              background: 'color-mix(in srgb, var(--color-state-error) 12%, var(--color-bg-paper))',
-              padding: '0.9rem 1rem',
-              color: 'var(--color-state-error)',
-              fontSize: '0.84rem',
-              lineHeight: 1.6,
-            }}
-          >
-            {resourceError}
-          </div>
+          <Notice tone="warning" title="连接后才能管理资源">当前服务器范围保持不变。返回 Notion 详情完成连接后再试。</Notice>
         ) : (
-          <div style={{ display: 'grid', gap: '0.85rem' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '0.75rem',
-                flexWrap: 'wrap',
-                color: 'var(--color-text-secondary)',
-                fontSize: '0.78rem',
-              }}
-            >
-              <span>
-                共 {filteredResourceOptions.length} 个资源，已选择 {selectedResourceCount} 个
-              </span>
-              <span>
-                第 {resourcePage} / {totalResourcePages} 页，每页 {RESOURCE_PAGE_SIZE} 个
-              </span>
+          <>
+            <div className="notion-detail__resource-toolbar">
+              <label><span className="notion-detail__sr-only">搜索 Notion 资源</span><input disabled={resourceLoading} onChange={(event) => setResourceSearchQuery(event.target.value)} placeholder="搜索资源" type="search" value={resourceSearchQuery} /></label>
+              <span>已选择 {selectedResourceCount} 个{selectedResourceCount !== sourceStats.total ? ' · 有未保存更改' : ''}</span>
             </div>
-
-            {unifiedResourceOptions.length === 0 ? (
-              <EmptyPanel title="没有可访问的资源">
-                当前 Notion 授权没有返回可选择的数据库或页面。
-              </EmptyPanel>
+            {resourceError ? <Notice tone="danger" title="资源操作未完成">{resourceError}</Notice> : null}
+            {resourceLoading ? <SkeletonList rows={6} /> : unifiedResourceOptions.length === 0 ? (
+              <Notice title="没有可访问的资源">当前 Notion 授权没有返回可选择的数据库或页面。</Notice>
             ) : visibleResourceOptions.length === 0 ? (
-              <EmptyPanel title="没有匹配的资源">
-                调整搜索关键词后再选择资源。
-              </EmptyPanel>
+              <Notice title="没有匹配的资源">调整搜索关键词后再试。</Notice>
             ) : (
-              <div
-                style={{
-                  display: 'grid',
-                  gap: 0,
-                  borderRadius: '0.75rem',
-                  background: SOFT_LIST_SURFACE,
-                  padding: '0.18rem 0.16rem',
-                }}
-              >
+              <div className="notion-detail__resource-list">
                 {visibleResourceOptions.map((option) => {
                   const isDatabase = option.kind === 'database';
-                  const checked = isDatabase
-                    ? selectedDatabaseIds.includes(option.id)
-                    : selectedPageIds.includes(option.id);
+                  const checked = isDatabase ? selectedDatabaseIds.includes(option.id) : selectedPageIds.includes(option.id);
                   return (
                     <ResourceOptionRow
-                      key={`${option.kind}-${option.id}`}
-                      option={option}
-                      type={option.kind}
                       checked={checked}
+                      key={`${option.kind}-${option.id}`}
                       onToggle={() => {
                         if (isDatabase) {
-                          setSelectedDatabaseIds((current) =>
-                            current.includes(option.id)
-                              ? current.filter((id) => id !== option.id)
-                              : [...current, option.id],
-                          );
-                          return;
+                          setSelectedDatabaseIds((current) => current.includes(option.id) ? current.filter((id) => id !== option.id) : [...current, option.id]);
+                        } else {
+                          setSelectedPageIds((current) => current.includes(option.id) ? current.filter((id) => id !== option.id) : [...current, option.id]);
                         }
-                        setSelectedPageIds((current) =>
-                          current.includes(option.id)
-                            ? current.filter((id) => id !== option.id)
-                            : [...current, option.id],
-                        );
                       }}
+                      option={option}
                     />
                   );
                 })}
               </div>
             )}
-
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                gap: '0.5rem',
-                flexWrap: 'wrap',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setResourcePage((current) => Math.max(1, current - 1))}
-                disabled={resourcePage <= 1}
-                style={{
-                  border: SOFT_CONTROL_BORDER,
-                  borderRadius: '999px',
-                  background: 'var(--color-bg-paper)',
-                  color: 'var(--color-text-primary)',
-                  padding: '0.5rem 0.78rem',
-                  cursor: resourcePage <= 1 ? 'not-allowed' : 'pointer',
-                  opacity: resourcePage <= 1 ? 0.55 : 1,
-                  fontSize: '0.78rem',
-                  fontWeight: 700,
-                }}
-              >
-                上一页
-              </button>
-              <button
-                type="button"
-                onClick={() => setResourcePage((current) => Math.min(totalResourcePages, current + 1))}
-                disabled={resourcePage >= totalResourcePages}
-                style={{
-                  border: SOFT_CONTROL_BORDER,
-                  borderRadius: '999px',
-                  background: 'var(--color-bg-paper)',
-                  color: 'var(--color-text-primary)',
-                  padding: '0.5rem 0.78rem',
-                  cursor: resourcePage >= totalResourcePages ? 'not-allowed' : 'pointer',
-                  opacity: resourcePage >= totalResourcePages ? 0.55 : 1,
-                  fontSize: '0.78rem',
-                  fontWeight: 700,
-                }}
-              >
-                下一页
+            <div className="notion-detail__pagination">
+              <span>共 {filteredResourceOptions.length} 个 · 第 {resourcePage} / {totalResourcePages} 页</span>
+              <div>
+                <button disabled={resourcePage <= 1} onClick={() => setResourcePage((current) => Math.max(1, current - 1))} type="button">上一页</button>
+                <button disabled={resourcePage >= totalResourcePages} onClick={() => setResourcePage((current) => Math.min(totalResourcePages, current + 1))} type="button">下一页</button>
+              </div>
+            </div>
+            <div className="notion-detail__sticky-action">
+              <span>服务器当前范围 {sourceStats.total} 个</span>
+              <button className="notion-detail__button notion-detail__button--primary" disabled={resourceSaving || resourceLoading} onClick={() => void handleSaveResources()} type="button">
+                {resourceSaving ? <IconLoader className="notion-detail__spinner" /> : <IconCheck />}{resourceSaving ? '保存并同步中' : '保存并首次同步'}
               </button>
             </div>
-          </div>
+          </>
         )}
-      </DetailSection>
+      </div>
+    );
+  }
 
-      <DetailSection
-        title="已挂载来源"
-        subtitle="这里显示当前 Notion 账号已经授权给 Chat 使用的资源和同步状态。"
-      >
-        {loading ? (
-          <SkeletonList rows={2} />
-        ) : !connector || mountedSources.length === 0 ? (
-          <EmptyPanel title="还没有挂载来源">
-            认证并保存资源选择后，数据库和页面会出现在这里。这里集中展示当前 Notion 账号的来源。
-          </EmptyPanel>
-        ) : (
-          <div
-            onScroll={handleMountedSourcesScroll}
-            style={{
-              maxHeight: isMobile ? '22rem' : '24rem',
-              overflowY: 'auto',
-              overscrollBehavior: 'contain',
-              scrollbarGutter: 'stable',
-              padding: '0.18rem 0.28rem 0.18rem 0.16rem',
-              display: 'grid',
-              gap: 0,
-              borderRadius: '0.75rem',
-              background: SOFT_LIST_SURFACE,
-            }}
-          >
-            {visibleMountedSources.map((source) => (
-              <SourceCard key={source.id} source={source} />
-            ))}
-            {hasMoreMountedSources ? (
-              <div style={{ padding: '0.35rem 0 0.1rem', color: 'var(--color-text-muted)', fontSize: '0.72rem', textAlign: 'center' }}>
-                向下滚动加载更多来源
-              </div>
-            ) : (
-              <div style={{ padding: '0.35rem 0 0.1rem', color: 'var(--color-text-muted)', fontSize: '0.72rem', textAlign: 'center' }}>
-                已显示全部 {mountedSources.length} 个来源
-              </div>
-            )}
-          </div>
+  if (view === 'sources') {
+    return (
+      <div className={`notion-detail${isMobile ? ' notion-detail--mobile' : ''}`} ref={rootRef}>
+        <ChildHeader backLabel="Notion" description="查看当前已挂载来源的轻量索引状态；立即同步不会批量下载正文。" headingRef={childHeadingRef} onBack={returnToOverview} title="已挂载来源" />
+        <div className="notion-detail__source-summary">
+          <div><strong>{sourceStats.total} 个来源</strong><span>最近成功 {formatDateTime(connector?.lastSyncedAt)}</span></div>
+          <button className="notion-detail__button" disabled={!canEditResources || syncLoading || sourceStats.total === 0} onClick={() => void handleSyncSources()} type="button">
+            {syncLoading ? <IconLoader className="notion-detail__spinner" /> : <IconArrowUp />}{syncLoading ? '同步中' : syncPolicy?.status === 'error' ? '立即重试' : '立即同步'}
+          </button>
+        </div>
+        {resourceError ? <Notice tone="danger" title="索引没有更新">{resourceError}</Notice> : null}
+        {sourceStats.total === 0 ? <Notice title="还没有挂载来源">前往“资源范围”选择数据库或页面并保存。</Notice> : (
+          <div className="notion-detail__source-list">{connector?.sources.map((source) => <SourceRow key={`${source.type}-${source.id}`} source={source} />)}</div>
         )}
-      </DetailSection>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`notion-detail${isMobile ? ' notion-detail--mobile' : ''}`} ref={rootRef}>
+      <nav aria-label="Notion 详情导航">
+        <button className="notion-detail__back" onClick={onBack} type="button"><IconChevronLeft />资源链接</button>
+      </nav>
+
+      <header className="notion-detail__hero">
+        <div className="notion-detail__identity">
+          <NotionMark />
+          <div>
+            <div className="notion-detail__title-row"><h1>Notion CLI</h1><Badge label={detailStatus.label} tone={detailStatus.tone} /></div>
+            <p>在对话中安全查找和按需读取你选择的 Notion 内容。</p>
+          </div>
+        </div>
+        <div className="notion-detail__hero-actions">
+          <button className="notion-detail__button notion-detail__button--primary" disabled={connecting || connectorAuthStatus === 'authenticating'} onClick={() => void handleStartAuth()} type="button">
+            {connecting ? <IconLoader className="notion-detail__spinner" /> : <IconShare />}{connecting ? '连接中' : authActionLabel}
+          </button>
+          <details className="notion-detail__more">
+            <summary aria-label="更多 Notion 操作"><IconMoreHorizontal /></summary>
+            <div><button disabled={!connectorId || disconnecting} onClick={() => void handleDisconnect()} type="button">{disconnecting ? <IconLoader className="notion-detail__spinner" /> : <IconTrash />}{disconnecting ? '关闭中' : '关闭连接'}</button></div>
+          </details>
+        </div>
+        {connector?.auth.status === 'authenticating' ? (
+          <div className="notion-detail__verification">
+            <div><span>验证码</span><strong>{connector.auth.verificationCode || '等待生成'}</strong></div>
+            <div><span>{connector.auth.message || '在 Notion 中完成确认后，本页会自动刷新。'}</span>{connector.auth.verificationUrl ? <a href={connector.auth.verificationUrl} rel="noopener noreferrer" target="_blank">打开验证页 <FaExternalLinkAlt /></a> : null}</div>
+          </div>
+        ) : null}
+      </header>
+
+      {pageError ? <Notice tone="danger" title="Notion 状态未更新">{pageError}</Notice> : null}
+
+      <div className="notion-detail__sections">
+        <IndexSection sectionId="permissions" title="权限">
+          <div className="notion-detail__policy">
+            <div>
+              <label><input checked={policyEnabled} disabled={!syncPolicy || policySaving} onChange={(event) => setPolicyEnabled(event.target.checked)} type="checkbox" /><span><strong>自动同步</strong><small>{syncPolicy ? `当前生效：${syncPolicy.effective.enabled ? formatSyncInterval(syncPolicy.effective.intervalMinutes) : '已关闭'}` : '连接后可设置'}</small></span></label>
+              <select aria-label="Notion 自动同步频率" disabled={!syncPolicy || !policyEnabled || policySaving} onChange={(event) => setPolicyIntervalMinutes(Number(event.target.value))} value={policyIntervalMinutes ?? ''}>
+                {syncPolicy?.allowedIntervalMinutes.map((minutes) => <option key={minutes} value={minutes}>{formatSyncInterval(minutes)}</option>)}
+              </select>
+              <button className="notion-detail__button" disabled={!syncPolicy || policyIntervalMinutes === null || policySaving} onClick={() => void handleSaveSyncPolicy()} type="button">{policySaving ? '保存中' : '保存策略'}</button>
+            </div>
+            <p>{syncPolicy?.status === 'error' ? '上次同步失败；最近成功索引仍保留。' : syncPolicy?.status === 'syncing' ? '正在后台同步。' : policyEnabled && syncPolicy ? `下次计划 ${formatDateTime(syncPolicy.nextSyncAt)}` : '自动同步已关闭。'}</p>
+          </div>
+          {policyError ? <Notice tone="danger">{policyError}</Notice> : null}
+        </IndexSection>
+
+        <IndexSection sectionId="skills" title="Skills">
+          {catalogLoading ? <SkeletonList rows={1} /> : catalogError ? <Notice tone="danger" title="Skill 信息暂不可用">{catalogError}；连接和索引不受影响。</Notice> : catalog?.skills.length ? (
+            <div className="notion-detail__action-list">
+              {catalog.skills.map((skill) => (
+                <button data-focus-key={`skill-${skill.id}`} key={skill.id} onClick={(event) => void handleOpenSkill(event, skill.id)} type="button">
+                  <span className="notion-detail__skill-icon"><FaPuzzlePiece aria-hidden="true" /></span>
+                  <span><strong>{skill.title}</strong></span>
+                  <span><Badge label="内置" /><Badge label={availabilityLabel(skill.availability)} tone={availabilityTone(skill.availability)} /><IconChevronRight /></span>
+                </button>
+              ))}
+            </div>
+          ) : <Notice>当前服务器没有可查看的 Notion Skill。</Notice>}
+        </IndexSection>
+
+        <IndexSection sectionId="read-operations" title="读取操作">
+          {catalogLoading ? <SkeletonList rows={3} /> : catalogError ? <Notice tone="danger">读取能力说明暂时无法读取；资源管理仍可继续。</Notice> : (
+            <div className="notion-detail__capabilities">
+              {readOperations.map((operation) => (
+                <div className="notion-detail__capability-row" key={operation.id}>
+                  <span><strong>{operation.title}</strong><small>{operation.description}</small></span>
+                  <span className="notion-detail__operation-badges"><Badge label={operationSourceLabel(operation.source)} /><Badge label={availabilityLabel(operation.availability)} tone={availabilityTone(operation.availability)} /></span>
+                </div>
+              ))}
+            </div>
+          )}
+        </IndexSection>
+
+        <IndexSection sectionId="write-operations" title="写入操作">
+          {writeOperations.length > 0 ? writeOperations.map((operation) => <div className="notion-detail__capability-row" key={operation.id}><span><strong>{operation.title}</strong><small>{operation.description}</small></span><span className="notion-detail__operation-badges"><Badge label={operationSourceLabel(operation.source)} /><Badge label={availabilityLabel(operation.availability)} tone={availabilityTone(operation.availability)} /></span></div>) : <div className="notion-detail__compact-state"><span>暂无可用操作</span><Badge label="只读" /></div>}
+        </IndexSection>
+
+        <IndexSection sectionId="resource-scope" title="资源范围">
+          <button className="notion-detail__management-row" data-focus-key="resources" onClick={handleOpenResources} type="button">
+            <span><strong>管理资源范围</strong></span>
+            <span><IconChevronRight /></span>
+          </button>
+        </IndexSection>
+
+        <IndexSection sectionId="mounted-sources" title="已挂载来源">
+          <button className="notion-detail__management-row" data-focus-key="sources" onClick={(event) => enterView('sources', event)} type="button">
+            <span><strong>管理已挂载来源</strong></span>
+            <span><IconChevronRight /></span>
+          </button>
+        </IndexSection>
+
+        <IndexSection sectionId="information" title="信息">
+          <dl className="notion-detail__information">
+            <div><dt>连接时间</dt><dd>{formatConnectionDate(connector)}</dd></div>
+            {[
+              ['网站', NOTION_WEBSITE],
+              ['隐私政策', NOTION_PRIVACY],
+              ['服务条款', NOTION_TERMS],
+            ].map(([label, href]) => <div key={label}><dt>{label}</dt><dd><a aria-label={`${label}（在新窗口打开）`} href={href} rel="noopener noreferrer" target="_blank"><FaExternalLinkAlt aria-hidden="true" /></a></dd></div>)}
+          </dl>
+        </IndexSection>
+      </div>
     </div>
   );
 }
