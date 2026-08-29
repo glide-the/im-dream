@@ -1,7 +1,7 @@
 // [Input] Production Notion Settings components and provider-free intercepted connector DTOs.
-// [Output] Minimal browser harness for Settings summary/detail navigation and disconnect interaction.
+// [Output] Minimal browser harness for Settings summary, redesigned detail/child navigation, and disconnect interaction.
 // [Pos] Notion connector technical browser fixture in frontend/e2e/fixtures.
-// [Sync] 2026-08-29: initial focused harness for truthful partial availability and placeholder-free Settings UI.
+// [Sync] 2026-08-29: host the seven-section Notion detail and focused child views beside the restored disabled discovery placeholders.
 
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';

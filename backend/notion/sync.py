@@ -12,6 +12,8 @@
 #                    against the actor's current selected-resource scope.
 # [Sync] 2026-08-29: index the installed notion-session Skill in each materialized
 #                    `.notion/README.md` so virtual resources remain discoverable.
+# [Sync] 2026-08-29: export the Settings capability descriptor beside the real
+#                    workspace materializer; this write is local projection only.
 
 """Canonical Notion snapshot assembly and workspace file materialization."""
 from __future__ import annotations
@@ -382,3 +384,14 @@ def materialize_workspace_snapshot(
         stale_path.unlink(missing_ok=True)
     for stale_path in pages_dir.glob("*.json"):
         stale_path.unlink(missing_ok=True)
+
+
+NOTION_WORKSPACE_MATERIALIZE_OPERATION: Mapping[str, str] = {
+    "id": "notion-workspace-snapshot-materialize",
+    "title": "挂载工作区轻量索引",
+    "description": "为当前对话挂载已选页面和数据库的标识与紧凑元数据；不包含页面正文，也不会写回 Notion。",
+    "kind": "write",
+    "source": "workspace_materializer",
+    "requirement": "connection",
+    "entrypoint": materialize_workspace_snapshot.__name__,
+}

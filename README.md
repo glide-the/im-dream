@@ -4,6 +4,8 @@
 <!-- [Sync] 2026-08-28: replace stale branch/setup notes with the current develop workflow, exact SDK/Runtime pairing, local Runtime installation, troubleshooting, and operator notices. -->
 <!-- [Sync] 2026-08-28: document pinned ntn installation plus actor-scoped credentials/current snapshots in agentdata, policy-driven background refresh, and per-Thread projection. -->
 <!-- [Sync] 2026-08-29: document current-selection filtering, minimal thread metadata, empty-scope revocation, and reauthorization LKG behavior. -->
+<!-- [Sync] 2026-08-29: document the Settings Notion capability/Skill inspection surface and truthful Hosted MCP read/write boundary. -->
+<!-- [Sync] 2026-08-30: document the synchronized notion-session/notion-cli built-in packages without relaxing actor credential isolation. -->
 
 # Ink & Memory
 
@@ -26,7 +28,7 @@ This repository contains the Dream application. It does not own the shared datab
 - **Dream** — launch a Dream Run and review scripts, storyboards, prompts, and generated artifacts.
 - **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
 - **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
-- **Notion resources** — connect in Settings, select the exact allowed scope, keep lightweight indexes refreshed outside Chat, and use the built-in read-only Notion Skill without exposing credentials or a CLI path to the Agent.
+- **Notion resources** — connect in Settings, select the exact allowed scope, inspect the installed `notion-session` and `notion-cli` packages with safe reference files, and keep lightweight indexes refreshed outside Chat. The Read-hook path remains usable without exposing credentials; the synchronized CLI package does not receive actor-owned `NOTION_HOME`, and Hosted Notion MCP read/write remains explicitly unavailable.
 - **Platform integration** — consume authenticated model aliases, subscription eligibility, usage, and billing from Admin/Gateway.
 
 Deck marketplace distribution is intentionally deferred. See [docs/design/deck-register/README.md](docs/design/deck-register/README.md).

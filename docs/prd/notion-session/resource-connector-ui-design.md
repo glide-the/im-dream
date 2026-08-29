@@ -1,17 +1,21 @@
 <!-- [Input] Current Notion connector PRD/runtime facts, ConnectorNotionDetailPage, Settings shell, and the reviewed four-stage detail-page redesign. -->
-<!-- [Output] Proposed user-visible information architecture, page/subpage interactions, state feedback, responsive, focus, scroll, and accessibility contract. -->
-<!-- [Pos] Proposed Notion Resource Connector UI specification in docs/prd/notion-session; runtime behavior remains owned by resource-connector.md and design docs. -->
-<!-- [Sync] 2026-08-29: redesign the Notion detail as one warm-paper long page with seven ordered sections and four focused subviews; keep current Read and unimplemented Hosted MCP capabilities truthfully separated. -->
+<!-- [Output] Implemented user-visible information architecture, page/subpage interactions, state feedback, responsive, focus, scroll, and accessibility contract. -->
+<!-- [Pos] Current Notion Resource Connector UI specification in docs/prd/notion-session; runtime behavior remains owned by resource-connector.md and design docs. -->
+<!-- [Sync] 2026-08-29: redesign the Notion detail as one compact warm-paper settings ledger with seven ordered sections and four focused subviews; keep current Read and unimplemented Hosted MCP capabilities truthfully separated. -->
 <!-- [Sync] 2026-08-29: retain disabled Feishu/local CLI discovery placeholders without adding configuration, authorization, or runtime paths. -->
+<!-- [Sync] 2026-08-29: mark the seven-section page and four child views implemented after backend/frontend contract tests, production build, provider-free Chrome E2E, and wide/narrow visual QA. -->
+<!-- [Sync] 2026-08-29: tighten the overview into aligned desktop label/content columns, remove redundant normal-state summaries, and preserve a single-column mobile flow. -->
+<!-- [Sync] 2026-08-29: bind Skill display to the installed notion-session package and operation rows to the real Read hook/workspace materializer, not a synthetic MCP list. -->
+<!-- [Sync] 2026-08-30: list both installed notion-session/notion-cli packages while keeping CLI execution unavailable under the existing credential boundary. -->
 
 # Notion 资源连接器交互方案
 
-- Status: Proposed；本稿尚未实现
+- Status: Implemented and verified；Hosted Notion MCP 读写仍未接入
 - Entry: Settings → 资源链接 → Notion
 - Business source: [`resource-connector.md`](./resource-connector.md)
 - Structure source: [`连接器具体配置页面结构草图.md`](./连接器具体配置页面结构草图.md)
 
-本稿只定义用户可见界面。当前已实现的业务路径仍是 `notion-session` Skill、轻量索引和 Runtime 受控按需 `Read`；Hosted Notion MCP 的认证、动态工具 inventory、读写执行均未接入。页面不得把 Proposed 设计或官网能力写成当前可用能力。
+本稿定义当前用户可见界面。已实现业务路径是 `notion-session` Skill、轻量索引和 Runtime 受控按需 `Read`；`notion-cli` 作为第二个真实安装包同步并可审阅，但现有凭证边界下不声明可执行。Hosted Notion MCP 的认证、动态工具 inventory、读写执行均未接入。页面不得把官网能力写成当前可用能力。
 
 ## 1. 产品结构
 
@@ -54,7 +58,8 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 - `.story-workspace-settings__content` 是唯一纵向滚动容器；详情区、来源区和 Skill 正文不再建立第二条纵向滚动条。
 - 允许 Markdown 代码块或不可换行结构局部横向滚动，但页面不得横向溢出。
 - 页面使用一个 `h1`；七个主段使用连续 `h2`，区内分组使用 `h3`。
-- 视觉沿用暖纸令牌：排版、留白、轻纸面和细分隔线优先，不复制参考图的固定黑色面板、蓝色开关或卡片海。
+- 视觉沿用暖纸令牌：桌面使用左侧标签/右侧内容设置清单，以参考骨架的中等留白和清晰行高分隔信息；窄屏恢复单列，不复制固定黑色面板或卡片海。
+- 主概览的七个分区标题下不放辅助说明；操作解释留在对应操作行，完整摘要和统计留在子页。
 
 ### 3.2 页首
 
@@ -62,11 +67,10 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 
 - 返回“资源链接”的文字按钮或链接；
 - Notion 图标、`h1`“Notion”和一句用途；
-- 未连接、认证中、已连接、同步中、部分可用、已过期、异常等服务器状态；
-- 状态说明：发生了什么、现有能力是否安全、系统是否自动恢复、用户下一步；
+- 标题旁用短文字徽标显示未连接、认证中、已连接、同步中、部分可用、已过期或异常等服务器状态；
 - “连接 Notion”或“重新连接 Notion”；认证中防重复提交；
 - “更多”中的“关闭连接”，或同等级次操作；断开可恢复，不增加确认弹窗；
-- 授权、索引、已选范围和最近成功的紧凑服务器摘要。
+- 认证中的验证码和下一步；正常态不重复展示授权、索引、范围或最近成功摘要。
 
 授权有效但没有成功索引时只能显示“已连接，尚无来源索引”，不得显示“已同步”。
 
@@ -96,45 +100,37 @@ Notion 卡片展示连接状态、最近交互、来源数和“管理”入口�
 
 #### 2. Skills
 
-当前只显示服务器真实存在的 `notion-session`：
+当前显示服务器安装目录真实存在的 `notion-session` 和 `notion-cli`；每个条目的标题、摘要、正文和 reference 文件清单均从自己的发布包读取：
 
 | 字段 | 展示 |
 |---|---|
-| 名称 | Notion 工作空间助手 |
-| 摘要 | 只读搜索和读取当前用户已挂载的 Notion 内容 |
+| 名称 | 当前 `SKILL.md` 首个 `h1`（当前为“Notion 工作空间助手”） |
+| 摘要 | 主概览不显示；进入 Skill 子页后读取当前 `SKILL.md` frontmatter `description` |
 | 来源 | 内置 |
 | 状态 | 可用 / 连接后可用 / 信息暂不可用 |
 | 行为 | 整行进入 Skill 子页 |
 
-未连接时仍可审阅 Skill 说明。不得虚构参考图中的其他 Skill，不显示安装、卸载、启停、更新或更多菜单；“内置 / 可用”是只读状态。
+未连接时仍可审阅 Skill 说明。不得虚构参考图中的其他 Skill，不显示安装、卸载、启停、更新或更多菜单；`notion-session` 按连接状态显示可用性，`notion-cli` 在 Dream 不向 Bash 注入 actor `NOTION_HOME` 时显示“暂不可用”。
 
 #### 3. 读取操作
 
-当前真实能力优先于未来能力。
+读取区只展示真实 `apply_notion_page_read_redirect` 阶段能力的用户可读投影：
 
-“当前可用读取能力 · 内置 Skill”展示三条产品说明：
+| 能力 | 来源标记 | 说明 | 可用性 |
+|---|---|---|---|
+| 按需读取页面正文 | 内置 Hook | 校验页面属于当前已选索引后，读取一个页面的最新 Markdown | 已连接且有索引时可用；否则提示连接或选择资源 |
 
-| 能力 | 说明 | 可用性 |
-|---|---|---|
-| 搜索已挂载页面 | 按标题、页面标识或链接在当前轻量索引定位 | 有索引时可用；否则“选择资源后可用” |
-| 浏览数据库记录 | 查看已挂载数据库中的页面标识清单 | 至少挂载一个数据库时可用 |
-| 读取单个页面 | 回答需要时按需读取已选择页面的当前 Markdown | 授权有效且目标属于当前索引时可用 |
-
-三项来自 `notion-session + Read hook`，不是三个新工具，也不是 MCP；界面不得展示内部调用名、虚拟路径、参数、凭证或执行按钮。
-
-Hosted Notion MCP 当前显示低权重 neutral 说明：
-
-> Notion MCP 读取操作尚未接入。当前轻量索引和内置只读能力不受影响；系统不会在后台自动启用 MCP。你可以查看 Skills 了解当前可用能力。
-
-未来只有服务器基于当前 actor、当前认证和 inventory revision 返回 descriptors 后，才能显示 MCP 行。前端不得内置官网全量工具清单或把远端存在等同于本产品可用。
+该行的 descriptor 与真实 Hook 同模块维护，由后端 catalog 组合；它不是新工具，也不是 MCP inventory。页面显示“内置 Hook”，但不显示函数名、虚拟路径、参数、凭证或执行按钮。
 
 #### 4. 写入操作
 
-当前只显示：
+写入区展示真实 `materialize_workspace_snapshot` 阶段能力的用户可读投影：
 
-> 当前连接器为只读，不会修改你的 Notion 页面。Notion MCP 写入操作尚未接入，系统不会自动启用写入。
+| 能力 | 来源标记 | 说明 | 可用性 |
+|---|---|---|---|
+| 挂载工作区轻量索引 | 工作区 | 把已选页面/数据库 ID 与紧凑元数据投影到当前对话工作区；不包含正文、不写回 Notion | 连接后可用 |
 
-不得展示工具行、启用开关、授权升级、主按钮、参数、表单或“试一试”。未来即使 inventory 返回写入 descriptor，在执行、actor 授权、确认、审计和幂等经过独立评审前也不能标记为可用。
+`materialize_workspace_snapshot` 的真实定义位于 `backend/notion/sync.py`，并消费 `notion_snapshot.py` 的快照契约。这里的 `write` 只表示 workspace 文件 materialization，不代表远程 Notion 写入。不得展示执行按钮、参数、内部目录或伪造远程写入能力。
 
 读取/写入两段都是只读能力清单，不是设置页内的工具执行台。
 
@@ -183,13 +179,13 @@ Hosted Notion MCP 当前显示低权重 neutral 说明：
 3. “Skill 说明”：服务器解析 frontmatter 后安全渲染 `SKILL.md` body；
 4. “包含的文件”：列相对文件名、MIME、格式化大小和可预览状态。
 
-当前文件清单仅有：
+当前安装包的 `references/*.md` 文件清单为：
 
 - `references/notion-search.md`；
 - `references/notion-page-read.md`；
 - `references/notion-db-query.md`。
 
-`SKILL.md` 不重复列出；`.folder.md`、点文件、缓存、评测、构建产物和符号链接不展示。正文和文件清单独立失败，一侧失败时保留另一侧成功内容。
+文件清单从服务器安装包动态发现并分配 stable ID；`SKILL.md` 不重复列出，`.folder.md`、点文件、缓存、评测、构建产物和符号链接不展示。正文和文件清单独立失败，一侧失败时保留另一侧成功内容。
 
 ### 4.2 Skill 文件子页
 
@@ -249,8 +245,8 @@ Hosted Notion MCP 当前显示低权重 neutral 说明：
 ## 7. 响应式与无障碍
 
 - 复用 Settings 现有响应上下文，不新增 Notion 专属业务断点。
-- 桌面页首可左右排列，正文始终单列；窄屏七段顺序不变，摘要/操作纵向排列。
-- 所有触控目标至少 44px；按钮文字不得退化为纯图标。
+- 桌面页首左右排列，正文按左侧标签/右侧内容双栏对齐；窄屏七段顺序不变并恢复单列。
+- 窄屏触控目标至少 44px；按钮文字不得退化为纯图标。
 - Skill 正文和文件列表串行；长文件名可换行，可访问名称保留完整相对路径。
 - 可点击行使用真实 link/button；右箭头和外链图标不单独聚焦。
 - `:focus-visible` 使用现有 `--color-border-focus`；不得移除 outline。
@@ -271,7 +267,7 @@ Hosted Notion MCP 当前显示低权重 neutral 说明：
 
 分期：
 
-1. 只读能力合同：返回一个 `notion-session`、三个 `builtin_read` 和 MCP `not_integrated`；
+1. 能力合同：从安装包返回 `notion-session` 与 `notion-cli`，从真实模块返回 Read Hook 和 workspace materializer，并保留 MCP `not_integrated` 事实；
 2. 视图重组：资源与来源完整交互迁入子页，主详情移除长列表和嵌套滚动；
 3. 接入 Skill/文件/读写说明/信息、焦点与滚动恢复；
 4. 完成组件、API 安全、响应式、键盘、屏幕阅读器和 E2E，再删除无引用旧内嵌视图。
@@ -282,9 +278,9 @@ Hosted Notion MCP OAuth、inventory 执行、写入授权/确认/审计/幂等�
 
 1. 页首后严格为“权限 → Skills → 读取操作 → 写入操作 → 资源范围 → 已挂载来源 → 信息”。
 2. 权限只含索引同步策略；立即同步只在来源子页。
-3. 只有真实 `notion-session`；Skill 页上部 `SKILL.md`、下部三个 reference 文件，无启停开关。
-4. 三个当前 Read 能力明确为“内置 Skill / 非 MCP”；Hosted MCP 读写均 truthful unavailable，页面不硬编码官网工具伪清单。
-5. 写入区没有执行、启用、授权升级或写入表单。
+3. 只展示安装包真实存在的 `notion-session` 与 `notion-cli`；每个 Skill 页上部读取自身 `SKILL.md`、下部动态列自身 `references/*.md`，无启停开关。
+4. 读取区只有真实 Read Hook descriptor，写入区只有真实 workspace materializer descriptor；页面不硬编码官网工具伪清单。
+5. workspace write 明确不含正文且不写回 Notion；没有执行、启用、授权升级或远程写入表单。
 6. 资源范围和逐来源列表只在各自子页；主详情只有摘要与管理入口。
 7. 信息在页面末端，`createdAt` 不回退当前时间，三条 URL 精确且安全打开。
 8. Settings 内容区是唯一纵向滚动；桌面/窄屏顺序一致且无页面横向溢出。

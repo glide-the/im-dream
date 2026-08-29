@@ -22,6 +22,7 @@
 # [Sync] 2026-06-16: assert .claude/skills stays writable in sandbox denyWrite.
 # [Sync] 2026-06-16: cover direct .claude/skills writes imported back into
 #                    workspace/skills before discovery symlinks are rebuilt.
+# [Sync] 2026-08-30: require notion-cli to refresh and discover beside notion-session without weakening the latter's Read-only contract.
 # [Sync] 2026-08-22: cover exact read/write denial for projected Claude MCP
 #                    credential and user-config files inside the thread home.
 # [Sync] 2026-06-17: cover Linux sbin runtime allowlist needed by bubblewrap.
@@ -567,10 +568,12 @@ class TestSkillsSync(unittest.TestCase):
         self.assertTrue(claude_skill.is_symlink())
         self.assertEqual(claude_skill.resolve(), workspace_skill.resolve())
 
-    def test_bundled_notion_skill_is_discovered_and_repairs_stale_copy(self):
+    def test_bundled_notion_skills_are_discovered_and_repair_stale_copies(self):
         ws = init_workspace("skills-builtin-notion")
         skill = ws / "skills" / "notion-session" / "SKILL.md"
         discovery = ws / ".claude" / "skills" / "notion-session"
+        cli_skill = ws / "skills" / "notion-cli" / "SKILL.md"
+        cli_discovery = ws / ".claude" / "skills" / "notion-cli"
 
         content = skill.read_text(encoding="utf-8")
         self.assertIn(".notion/pages/<page_id>.json", content)
@@ -595,12 +598,26 @@ class TestSkillsSync(unittest.TestCase):
             self.assertNotIn("NOTION_HOME", reference_content)
         self.assertTrue(discovery.is_symlink())
         self.assertEqual(discovery.resolve(), skill.parent.resolve())
+        cli_content = cli_skill.read_text(encoding="utf-8")
+        self.assertIn("name: notion-cli", cli_content)
+        self.assertIn('tools: ["Bash"]', cli_content)
+        self.assertIn("ntn api v1/search", cli_content)
+        self.assertTrue(cli_discovery.is_symlink())
+        self.assertEqual(cli_discovery.resolve(), cli_skill.parent.resolve())
+        self.assertEqual(
+            {path.name for path in (cli_skill.parent / "references").glob("*.md")},
+            expected_references,
+        )
 
         skill.write_text("stale runtime copy", encoding="utf-8")
+        cli_skill.write_text("stale CLI runtime copy", encoding="utf-8")
         init_workspace("skills-builtin-notion")
         repaired = skill.read_text(encoding="utf-8")
+        repaired_cli = cli_skill.read_text(encoding="utf-8")
         self.assertIn("Runtime Read hook", repaired)
         self.assertNotIn("stale runtime copy", repaired)
+        self.assertIn("Notion CLI 工作空间数据助手", repaired_cli)
+        self.assertNotIn("stale CLI runtime copy", repaired_cli)
 
 
 class TestSessionIdValidation(unittest.TestCase):

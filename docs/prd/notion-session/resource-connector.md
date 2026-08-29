@@ -1,14 +1,15 @@
 <!-- [Input] Current Notion connector implementation/tests, Settings/Chat interaction, repository product rules, and the reviewed proposed detail-page redesign. -->
-<!-- [Output] Evidence-based runtime/data requirements plus explicitly proposed UI information architecture, capability gaps, migration, observability, and acceptance criteria. -->
+<!-- [Output] Evidence-based runtime/data requirements plus implemented UI information architecture, remaining capability gaps, migration, observability, and acceptance criteria. -->
 <!-- [Pos] Current Notion Resource Connector product source of truth in docs/prd/notion-session. -->
 <!-- [Sync] 2026-08-29: replace the stale frontend-only proposal with the reviewed end-to-end PRD and PRD-code-test decision matrix. -->
-<!-- [Sync] 2026-08-29: add the Proposed seven-section Notion detail and child views without misreporting Hosted MCP read/write or Skill browsing as implemented. -->
+<!-- [Sync] 2026-08-29: implement the seven-section Notion detail, safe Skill browsing, and child views while keeping Hosted MCP read/write explicitly not integrated. -->
+<!-- [Sync] 2026-08-29: source Skill metadata/files from the installed package and operation rows from the real Read hook/workspace materializer. -->
 
 # Notion 资源连接器整体 PRD
 
 - Runtime/data status: Reviewed and implemented
-- Detail UI redesign status: Proposed；尚未实现
-- Scope: Settings、Chat、服务器连接生命周期、轻量索引、Agent 按需读取和 Proposed 详情页信息架构
+- Detail UI redesign status: Implemented and verified
+- Scope: Settings、Chat、服务器连接生命周期、轻量索引、Agent 按需读取和当前详情页信息架构
 - Technical source: [`../../design/notion-session/runtime-credential-and-skill-design.md`](../../design/notion-session/runtime-credential-and-skill-design.md)
 - Business sequences: [`../../design/notion-session/runtime-credential-and-skill-sequence.md`](../../design/notion-session/runtime-credential-and-skill-sequence.md)
 
@@ -22,7 +23,7 @@
 - 文档把内部目录、命令行参数和凭证投影写成用户概念；
 - 旧文档描述的资源树、同步按钮语义和断开确认与当前页面不一致。
 
-本 PRD 以可运行代码和测试为证据，保留安全且已验证的单一路径，修复范围撤销和状态真实性缺口，并删除不再承担业务职责的历史方案。本轮新增的详情页重设计只标记为 Proposed；除非后续代码、合同和测试完成，不得把 Skill 浏览、Hosted MCP inventory、写入操作或子页组织宣称为已上线。
+本 PRD 以可运行代码和测试为证据，保留安全且已验证的单一路径，修复范围撤销和状态真实性缺口，并删除不再承担业务职责的历史方案。本轮详情页、Skill 安全浏览和子页组织已经实现；Hosted MCP inventory/执行与 Notion 写入仍未接入，不得宣称为可用。
 
 ## 2. 产品目标
 
@@ -32,7 +33,7 @@
 4. 凭证、选择范围、索引、thread 能力和正文读取按 actor 严格隔离。
 5. Notion 局部失败给出状态、影响和下一步，但不无理由中断普通 Agent 对话。
 6. 同一能力只有一条正式业务路径，不恢复 Agent 可见 CLI、Notion MCP 或 Chat 内同步分支。
-7. Proposed 详情页让用户审阅真实 Skill、当前 Read 能力和 MCP 未接入状态，并把大列表管理迁到专项子页。
+7. 当前详情页让用户审阅真实 Skill、当前 Read 能力和 MCP 未接入状态，并把大列表管理放在专项子页。
 
 ## 3. 非目标
 
@@ -95,17 +96,17 @@ Agent 先读取索引定位页面，只在回答确实需要正文时请求一�
 
 当前策略保存是同步校验：合法时 `desired` 与 `effective` 在同一 revision 生效。频率选项由后端返回，它们是受支持的策略选项，不是用户配额。
 
-### 5.7 Skill、Read 与 MCP 能力真相
+### 5.7 Skill、Hook、workspace materializer 与 MCP 能力真相
 
-当前已实现能力必须与 Proposed 展示目标分开：
+当前已实现能力必须与延期能力分开：
 
 | 能力 | 当前事实 | 页面规则 |
 |---|---|---|
-| Notion Skill | 只有服务器内置 `notion-session` | 只展示这一项；不虚构参考图示例 Skill |
-| 当前读取 | `notion-session` 通过轻量索引和受控 Runtime `Read` 完成搜索定位、数据库记录浏览和单页按需正文 | 标为“内置 Skill / 非 MCP”；不展示内部路径或调用名 |
-| Hosted Notion MCP 读取 | 尚未接入本连接器的 OAuth、inventory 或 Runtime | Proposed 读取区显示 truthful `not_integrated`，不得按官网清单伪造可用工具 |
-| Hosted Notion MCP 写入 | 尚未接入；当前代码没有 Notion 写入路径 | Proposed 写入区明确只读，不提供执行、启用、授权升级或表单 |
-| Skill 浏览 | 当前 connector API 没有 Skill 目录、正文或文件 DTO | 仅为 Proposed UI；实现前必须补安全只读合同 |
+| Notion Skill | 服务器安装目录包含 `notion-session` 与 `notion-cli` | 每个包的标题/摘要/body 从自身 `SKILL.md` 读取，相关文件从自身 `references/*.md` 发现；不虚构 Skill |
+| 当前读取 | `apply_notion_page_read_redirect` 校验当前 thread 索引后按需读取单页 Markdown | descriptor 与真实 Hook 同模块维护；UI 标“内置 Hook”，不展示内部路径、参数或函数名 |
+| workspace materialize | `materialize_workspace_snapshot` 把 connector-owned 轻量索引写入当前 thread workspace；实现位于 `notion/sync.py` 并使用 `notion_snapshot.py` 契约 | 作为 `write` 阶段能力标“工作区”；明确不含正文、不写回 Notion、不提供执行按钮 |
+| Hosted Notion MCP | OAuth、inventory 和执行均未接入 | 保留后端 `not_integrated` 事实，不按官网清单伪造工具，也不在正常页增加重复说明块 |
+| Skill 浏览 | connector API 提供服务器发布包的解析正文、stable file ID、revision 和安全 reference 文件 DTO | UI 上部展示 `SKILL.md` body、下部展示动态 reference 文件；不从 thread/browser 读取 |
 
 未来 MCP 工具只可从当前 actor、当前认证的服务器 inventory 动态返回，并携带 revision、read/write/unknown 安全分类和可用性。远端官网存在某工具或 descriptor 本身都不足以证明本产品可执行；`unknown` 不得推断为写入。
 
@@ -257,16 +258,16 @@ Skill 不可用或 Notion 读取失败时，普通对话继续；Agent 应说明
 
 ## 16. 页面状态与反馈
 
-本节的详情页组织为 Proposed，未改变前述已实现运行时和数据规则。完整交互见 [`resource-connector-ui-design.md`](./resource-connector-ui-design.md)。
+本节的详情页组织已经实现，且未改变前述运行时和数据规则。完整交互见 [`resource-connector-ui-design.md`](./resource-connector-ui-design.md)。
 
 ### 16.1 信息架构
 
-页首保留返回、Notion 身份、真实连接状态、四段式恢复说明、连接/重新授权和断开。页首之后，桌面与窄屏严格为：
+页首保留返回、Notion 身份、短状态、连接/重新授权和断开。页首之后，桌面与窄屏严格为：
 
 1. 权限：只含索引同步策略；
-2. Skills：当前只含可进入子页的 `notion-session`；
-3. 读取操作：当前非 MCP Read 优先，Hosted MCP 未接入状态次之；
-4. 写入操作：明确当前只读、Hosted MCP 写入未接入；
+2. Skills：当前包含可分别进入子页的 `notion-session` 与 `notion-cli`；
+3. 读取操作：展示真实 Read Hook 阶段能力；
+4. 写入操作：展示真实 workspace snapshot materializer，并明确不写回 Notion；
 5. 资源范围：服务器确认数量摘要 + 管理入口；
 6. 已挂载来源：聚合状态/时间摘要 + 管理入口；
 7. 信息：`connector.createdAt` 和三个官方外链。
@@ -275,7 +276,7 @@ Settings 内容区是唯一纵向滚动容器；主详情不再内嵌资源/来�
 
 ### 16.2 四个子视图
 
-- Skill：上部安全渲染 `SKILL.md` body，下部列三个 `references/*.md`；无启停开关。
+- Skill：上部安全渲染安装包 `SKILL.md` body，下部动态列服务器 `references/*.md`；无启停开关。
 - Skill 文件：使用服务器 stable file ID 读取 allowlist 内安全文本，只显示相对路径、MIME 和大小。
 - 资源范围：完整承接现有发现、搜索、分页、完整集合保存、非空首同步和空范围 fail-closed。
 - 已挂载来源：完整承接逐来源状态、正数页数和立即同步/重试；有/无 LKG 反馈分开。
@@ -293,22 +294,20 @@ Settings 内容区是唯一纵向滚动容器；主详情不再内嵌资源/来�
 
 外链使用明确标签、外链图标、键盘可达的真实链接和 `target="_blank" rel="noopener noreferrer"`；不接受用户输入重定向。
 
-### 16.4 数据合同缺口
+### 16.4 数据合同状态与缺口
 
-现有 connector API 已提供连接、`createdAt`、策略、范围、来源和同步，但尚未提供：
+现有 connector API 已提供连接、`createdAt`、策略、范围、来源、同步、从安装包读取的 Skill 标题/摘要/Markdown/reference 文件、stable file ID、MIME、大小、package revision，以及真实 Read Hook/workspace materializer descriptor。
 
-- Skill 清单、解析后的 Markdown、文件 stable ID/相对路径/MIME/大小/可预览状态和安全文件正文；
-- 当前 Read 能力的服务器产品描述；
-- Hosted MCP inventory、认证来源、read/write/unknown 分类、可用性、不接入原因和 revision。
+仍未提供 Hosted MCP 动态 inventory、认证来源、read/write/unknown 分类、远端可用性和 inventory revision；当前只返回 `not_integrated` 事实，且不存在执行入口。
 
 后续只可在现有 connector service 内增加只读能力投影，或复用经过相同 owner guard、allowlist、路径越界、符号链接、MIME、大小、revision 和脱敏验证的通用读取能力。不新增 schema、队列、独立服务、第二 connector API 或执行路径。Skill 内容来自服务器发布包，不从 thread workspace 或浏览器缓存读取。
 
-### 16.5 Proposed 分期
+### 16.5 实现分期
 
-1. 只读能力合同：返回一个 `notion-session`、三个当前 Read 描述和 MCP `not_integrated`；
-2. 视图重组：资源与来源完整交互迁入子页，主详情移除长列表和嵌套滚动；
-3. 接入 Skill/文件/读写说明/信息、焦点与滚动恢复；
-4. 完成 API 安全、组件、响应式、键盘、屏幕阅读器和 E2E，再删除确认无引用的旧内嵌视图。
+1. 已完成能力合同：返回安装包 `notion-session` / `notion-cli`、真实 Read Hook/workspace materializer descriptor 和 MCP `not_integrated`；
+2. 已完成视图重组：资源与来源完整交互迁入子页，主详情移除长列表和嵌套滚动；
+3. 已完成 Skill/文件/读写说明/信息、焦点与滚动恢复；
+4. 已完成 API 安全测试、组件、响应式、键盘语义、provider-free E2E 和宽窄屏视觉复核。
 
 Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不在上述分期，必须独立设计和验证。
 
@@ -356,7 +355,7 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 - 旧成功索引可以作为 LKG 读取，但投影时强制移除正文、私有连接配置和已取消选择的资源。
 - 新同步会自然替换旧索引；不做运行时 DDL 或批量正文回填。
 - 删除未被路由引用的旧前端工作台，不继续双路径兼容。
-- Proposed UI 分期先补只读能力合同，再移动现有视图；回滚只恢复页面组织，不恢复浏览器伪状态、MCP/CLI 或正文同步。
+- 当前 UI 已先补只读能力合同再移动视图；回滚只恢复页面组织，不恢复浏览器伪状态、MCP/CLI 或正文同步。
 - 回滚应用版本不要求 schema 回滚；不得恢复浏览器伪状态、共享凭证目录或 Agent CLI/MCP fallback。
 
 ## 20. 数据指标与可观测性
@@ -369,7 +368,7 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 - 策略 revision、状态转换、计划触发与手动触发来源；
 - 按需读取成功/拒绝/权限/API 失败计数；
 - Skill 发现和加载失败计数。
-- Proposed：能力目录/Skill/文件读取结果、package/inventory revision、MCP `not_integrated`/失败分类、资源/来源子页操作和安全文件拒绝计数。
+- 待补遥测：能力目录/Skill/文件读取结果、package revision、MCP `not_integrated`/失败分类、资源/来源子页操作和安全文件拒绝计数。
 
 产品指标关注连接完成率、选择完成率、索引成功率、部分失败恢复率和 Notion 读取成功率。正文、Skill/文件正文、标题以外的 Notion 内容、凭证、服务器路径和原始 API 响应不进入遥测；`not_integrated` 不记作工具调用失败。
 
@@ -390,13 +389,13 @@ Hosted Notion MCP OAuth/inventory 执行、写入授权/确认/审计/幂等不�
 13. 既有 MCP、其他 Skill、turn/resume/cancel/EventBus/SSE 行为不变。
 14. 相关后端测试、前端类型检查与构建通过。
 
-Proposed UI 在实现后还必须满足：
+当前 UI 还必须持续满足：
 
 15. 页首后严格为“权限 → Skills → 读取操作 → 写入操作 → 资源范围 → 已挂载来源 → 信息”，且 Settings 内容区是唯一纵向滚动。
 16. 权限只含索引同步策略；资源和来源长列表仅存在于各自子页。
-17. 当前只展示真实 `notion-session`；Skill 上部为安全 `SKILL.md`、下部为三个安全 reference 文件，无开关。
-18. 当前三个 Read 能力明确为“内置 Skill / 非 MCP”；Hosted MCP 读写未接入时 truthful unavailable，不硬编码官网工具伪清单。
-19. 当前写入区没有执行、启用、授权升级或写入表单。
+17. 当前只展示安装包真实存在的 `notion-session` 与 `notion-cli`；Skill 上部为对应 `SKILL.md`、下部为动态发现的对应 reference 文件，无开关；CLI 包不得越过 actor 凭证边界伪报可用。
+18. 读取区绑定真实 `apply_notion_page_read_redirect`，写入区绑定真实 `materialize_workspace_snapshot`；不硬编码官网工具伪清单。
+19. workspace materialize 明确不含正文且不写回 Notion；当前页面没有执行、启用、授权升级或远程写入表单。
 20. 信息使用服务器 `createdAt` 和三条指定安全外链；无效时间不回退浏览器当前时间。
 21. 返回恢复焦点/滚动，revision 变化不继续把旧策略、inventory 或文件显示为最新。
 22. Skill/文件/能力目录局部失败不阻断 connector 管理或普通 Chat；所有安全响应不含正文、凭证和内部路径。
@@ -428,10 +427,10 @@ Proposed UI 在实现后还必须满足：
 | 定时同步 | 旧 PRD 称策略占位 | 后端有真实策略和 scheduler | scheduler tests | 文档过期 | 写明 default/desired/effective/revision |
 | Chat 初始化 | 文档存在 workspace 同步暗示 | 只投影 LKG，不访问远程 | snapshot store/service tests | 命名或状态语义不一致 | 统一称“能力挂载/投影” |
 | Agent 读取 | 历史 CLI/MCP/静态正文并存 | 标准 Skill + 受控按需 Read | runtime integration tests | 历史设计残留 | 只保留文件导航 + 单页按需读取 |
-| Skill 详情 | 参考图支持 Skill/文件审阅 | 当前仅有服务器内置 `notion-session` 包，connector API 无浏览 DTO | `SKILL.md`、references、API 搜索 | Proposed 合同缺口 | 增加安全只读投影后再实现，不从 thread/browser 读取 |
-| 读写操作 | 用户要求展示内置 MCP 读写 | 当前只有非 MCP Read；Hosted MCP OAuth/inventory/执行和写入均未接入 | Runtime/Skill/API 搜索 | 能力真相需分层 | 当前 Read 明示非 MCP；MCP 读写显示 not_integrated，动态 inventory 延期 |
-| 详情层级 | 策略、资源、来源平铺同页 | 当前组件内含资源和来源长列表及内部来源滚动 | 组件结构和 UI 设计审阅 | Proposed 交互重组 | 页首 + 七段；资源/来源迁专项子页；单一 Settings 滚动 |
-| 连接信息 | 用户要求底部连接时间和官方链接 | `ResourceConnector.createdAt` 已存在，未有专用 `connectedAt` | 前端 DTO | 可复用字段 | Proposed 信息区使用 createdAt，不伪造更精确 OAuth 时间 |
+| Skill 详情 | 参考图支持 Skill/文件审阅 | 服务器内置 `notion-session` / `notion-cli` 包和 connector 安全只读 DTO 已接入 | unit/router/API/E2E | 已实现 | stable ID + per-package revision + allowlist；不从 thread/browser 读取 |
+| 读写操作 | 用户要求展示系统实际使用的读写阶段 | Read Hook 与 workspace materializer 均已存在；后者只写本地轻量投影 | Runtime/Skill/API/调用链搜索 | 旧 UI 用三条手写 Read 文案且误把 write 等同远程 Notion 写入 | descriptor 与真实入口同模块维护；页面区分 Hook、工作区投影和远程 Notion 写入 |
+| 详情层级 | 策略、资源、来源曾平铺同页 | 当前为页首 + 七段，资源/来源在专项子页 | component/E2E/visual QA | 已实现 | 保持单一 Settings 纵向滚动 |
+| 连接信息 | 用户要求底部连接时间和官方链接 | 当前信息区使用 `createdAt` 和三条安全外链 | API/E2E | 已实现 | 不伪造更精确 OAuth 时间；无效值不回退当前时间 |
 | 前端健康状态 | authenticated 即 healthy/synced | 同步失败被健康状态遮蔽 | 前端构建；后端 policy tests | 代码缺陷 | 增加部分可用，未有时间不称已同步 |
 | 断开 | 一次确认并保留来源 | 删除连接、凭证和快照；可重新连接 | router/store/credential tests | 文档过期 | 无确认，清理已知 thread 投影 |
 | Settings 占位 | 历史同时展示 Feishu 和 CLI 不可用卡片 | 两者都是用户需要保留的未来能力发现位置，当前均无可调用业务能力 | Settings UI、前端 E2E、路由引用搜索、前端构建 | 产品边界需区分 | 保留两张禁用占位；不新增配置 API、授权流程或第二路径 |
@@ -455,7 +454,8 @@ Proposed UI 在实现后还必须满足：
 - 重新授权失败保留有效授权；
 - 前端区分已连接、已同步、部分可用；
 - 断开清理已知 thread 的凭证与索引投影。
-- Proposed：详情改为严格七段；资源/来源迁入子页；增加安全 Skill/文件/能力说明与末端信息区。
+- 详情已改为严格七段；资源/来源已迁入子页；安全 Skill/文件/能力说明与末端信息区已接入。
+- Skill 与 reference 清单改为读取安装包；读写操作改为真实 Read Hook/workspace materializer descriptors。
 
 ### 删除
 
