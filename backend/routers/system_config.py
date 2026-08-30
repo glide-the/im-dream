@@ -13,6 +13,8 @@
 # [Sync] 2026-07-26: accept sandbox_fs_allowed_write_paths — extra absolute
 #                    writable paths for the per-thread Bash sandbox
 #                    (absolute-only, trailing-slash stripped, deduped, capped).
+# [Sync] 2026-08-30: reserve INK_AGENT_SANDBOX_ENABLED for deployment-owned
+#                    process configuration; user env_vars cannot override it.
 
 """System configuration API.
 
@@ -27,7 +29,8 @@ The system config is a freeform dict stored per user.  Known fields:
   model            : str  — model name
   system_prompt    : str  — custom system prompt for the AI agent
   workspace_enabled: bool — whether the workspace file sidebar and per-thread
-                            Bash sandbox are active
+                            cwd/context are active; sandbox enablement is a
+                            separate deployment-owned environment capability
   sandbox_network_mode: str — per-thread Bash sandbox network policy
                             ("disabled" | "allowlist" | "open")
   sandbox_network_allowed_domains: list[str] — domains pre-allowed when the
@@ -82,6 +85,7 @@ _SERVER_CONTROLLED_ENV_KEYS = frozenset(
         "INK_ADMIN_PRODUCT_ORIGIN",
         "INK_GATEWAY_BASE_URL",
         "INK_GATEWAY_SERVICE_CLIENT_ID",
+        "INK_AGENT_SANDBOX_ENABLED",
     }
 )
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}

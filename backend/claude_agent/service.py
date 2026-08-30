@@ -5,6 +5,9 @@
 # [Pos] core-business node in backend/claude_agent
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
+# [Sync] 2026-08-30: resolve the server-owned INK_AGENT_SANDBOX_ENABLED
+#                    capability for every full Chat/Dream workspace without
+#                    coupling sandbox enablement to Workspace Mode.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -222,6 +225,7 @@ from libs.claude_agent_kit.server.workspace import (
     get_tasks_dir,
     get_workspace_root,
     read_task_items,
+    resolve_sandbox_enabled,
 )
 from claude_agent.tool_confirmation_store import (
     ToolConfirmationNotPending,
@@ -1381,7 +1385,7 @@ class ClaudeAgentService:
         if workspace_enabled:
             workspace_path = get_or_create_workspace(
                 state.session_id,
-                sandbox_enabled=True,
+                sandbox_enabled=resolve_sandbox_enabled(),
                 sandbox_network_mode=sandbox_network_mode,
                 sandbox_network_allowed_domains=sandbox_network_allowed_domains,
                 sandbox_fs_allowed_write_paths=sandbox_fs_allowed_write_paths,

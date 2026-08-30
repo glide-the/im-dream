@@ -1,5 +1,10 @@
 # `sandbox.seccomp.applyPath` 在 settings.json 中被忽略 —— 内嵌 apply-seccomp 始终被使用（CLI 2.1.220）
 
+<!-- [Sync] 2026-08-30：记录 Runtime 0.1.4 恢复授权 2.1.88 的磁盘
+vendor/seccomp 路径，并区分 helper 成功与外层容器 namespace 拒绝。 -->
+<!-- [Sync] 2026-08-30：记录 AutoDL 由部署所有的 sandbox 关闭配置，以及保留的
+真实业务 Bash 验收回执。 -->
+
 > 本文是 GitHub issue [anthropics/claude-agent-sdk-python#1151](https://github.com/anthropics/claude-agent-sdk-python/issues/1151) 的中文版本，与英文版内容对应。
 > 英文版：同目录 `claude-agent-issue-1151-sandbox-seccomp-en.md`
 
@@ -110,3 +115,32 @@ security_opt:
 - 沙箱的网络/文件系统隔离由 **bwrap**（`--unshare-net`、bind mount）加宿主机侧过滤代理执行——**不依赖 seccomp**。apply-seccomp 只是在其上叠加 unix socket 封锁。
 - 将 apply-seccomp 替换为 `#!/bin/sh` + `exec "$@"` 使 seccomp 步骤变为空操作，同时 bwrap 隔离完全保留（CLI 对 seccomp 辅助程序缺失本来就按警告处理而非错误——"seccomp not available - unix socket access not restricted"）。
 - **该 workaround 在 2.1.220 上不可行**：CLI 是单一自包含二进制，磁盘上不再有 `vendor/seccomp/`，辅助程序经 `/proc/self/fd/` 执行，而 settings 驱动覆盖（`sandbox.seccomp.applyPath`）被静默忽略——这正是本 issue 报告的 bug。
+
+## 当前恢复后的 Runtime 状态（2026-08-30）
+
+Runtime `0.1.4` 现在打包授权的 2.1.88 local core，而不是重新实现这段行为。
+Linux target 恢复磁盘上的 `chunks/vendor/seccomp/<arch>/apply-seccomp` 与
+`unix-block.bpf` 资产。2.1.88 调用时会把 BPF 路径作为 helper 第一个参数，
+因此摘要绑定的 passthrough 只移除该参数，再执行余下命令。这是一条通用 Linux
+Runtime 资产路径；AutoDL 没有单独的 passthrough 模式。
+
+资格化的 Linux x64 包已在具备外层 `SYS_ADMIN`、unconfined seccomp/AppArmor
+的 Docker 中通过真实 SDK/Bash 验收。当前 AutoDL 实例上，直接执行 helper 同样
+成功，但正常 Dream Bash 更早停止在 `bwrap: Creating new namespace failed:
+Operation not permitted`。AutoDL 外层容器受强制 `docker-default` 约束、缺少
+`CAP_SYS_ADMIN`，user/mount namespace 探针也均被拒绝。这个外层 namespace
+拒绝无法通过修改后续 apply-seccomp helper 修复。
+
+因此当前 AutoDL 发布做了另一项独立且显式的 capability 决策：生成的 Dream env
+固定 `INK_AGENT_SANDBOX_ENABLED=false`，但 Workspace Mode 保持启用。每个 Thread
+settings 一致写入 `enabled=false`、`failIfUnavailable=false`、
+`autoAllowBashIfSandboxed=false` 与 `allowUnsandboxedCommands=true`，完整的
+`files`、`logs`、`skills`、`.claude-tmp` workspace 目录仍存在。真实业务 Thread
+`7c366ee3-8e2b-46df-b01d-189375e06688` 保留了一条 `output-available` Bash part：
+精确命令为 `echo AUTODL_SANDBOX_DISABLED_OK`，精确输出为
+`AUTODL_SANDBOX_DISABLED_OK`，`isError=false`，且没有 bwrap/apply-seccomp 标记。
+
+这份回执不表示 namespace 问题或 sandbox 已被修复，而是 disabled profile 完全
+绕过 bubblewrap 与恢复后的 helper。已批准 Bash 会直接以 Dream 服务账号运行；
+当前 AutoDL 拓扑中该账号是外层容器内的 `root`。若 AutoDL 发布必须保留 Bash OS
+隔离，仍需由平台提供上文记录的 bubblewrap capability/profile。

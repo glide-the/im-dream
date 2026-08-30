@@ -33,6 +33,8 @@
 #                    before the Claude Agent factory starts.
 # [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
 #                    PostgreSQL sink, and publisher lifecycle around the database.
+# [Sync] 2026-08-30: preserve the deployment-owned Claude Bash sandbox
+#                    capability through startup Agent-env cleanup.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -75,6 +77,7 @@ def _drop_unsupported_agent_env() -> None:
         # here at startup, which silently disabled the extra sandbox read
         # paths (the apply-seccomp settings override listed here briefly was
         # removed 2026-07-26 — proven dead in production; see workspace.py).
+        "INK_AGENT_SANDBOX_ENABLED",
         "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ",
     }
     os.environ.pop("ANTHROPIC_API_KEY", None)

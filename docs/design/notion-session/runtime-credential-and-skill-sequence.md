@@ -5,6 +5,7 @@
 <!-- [Sync] 2026-08-29: add full discovery pagination, empty-scope revocation, current-scope projection filtering, and LKG reauthorization semantics. -->
 <!-- [Sync] 2026-08-30: add the ntn prerequisite and direct four-variable Agent Runtime injection. -->
 <!-- [Sync] 2026-08-30: add dynamic capability-catalog rendering into workspace README and reuse that generated Skill section in per-turn context. -->
+<!-- [Sync] 2026-08-30: add explicit new-turn, resume, missing-install/config, Runtime-filter failure, and repaired real-Chat acceptance sequences. -->
 
 # Notion 凭证、轻量索引与 Agent CLI/Read 业务时序
 
@@ -169,4 +170,195 @@ sequenceDiagram
     Backend->>Provider: 删除 credential/index source 与已有 thread 投影
     Backend-->>UI: 未连接
     Runtime-->>UI: 后续 Notion Read fail closed，普通对话继续
+```
+
+## 4. 正常新 turn 注入流程
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Chat as Dream Chat
+    participant Service as Dream Agent Service
+    participant Cred as Credential Provider
+    participant WS as Thread Workspace
+    participant SDKEnv as sdk_env
+    participant SDK as Claude Agent SDK
+    participant Native as Native Runtime
+    participant Bash as Agent Bash
+    participant CLI as ntn
+    participant Notion as Notion API
+
+    User->>Chat: 发送需要 Notion 的消息
+    Chat->>Service: POST turn(actor, thread)
+    Service->>Cred: 读取当前 actor effective credential
+    Cred->>WS: 原子刷新 .notion-home 与 .notion
+    Service->>SDKEnv: 解析精确 thread projection
+    SDKEnv->>SDK: options.env = server-owned binding
+    SDK->>Native: spawn(cwd=thread, env=options 覆盖 inherited)
+    Native->>Bash: production sandbox 传递校验后的 binding
+    Bash->>CLI: 只读 ntn 命令
+    CLI->>Notion: 当前 actor 认证请求
+    Notion-->>CLI: 只读结果
+    CLI-->>Bash: exit 0（不打印凭证）
+    Bash-->>Chat: CLI 可用结论（SSE）
+```
+
+## 5. resume 环境刷新流程
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Chat as Dream Chat
+    participant Service as Dream Agent Service
+    participant Cred as Credential Provider
+    participant WS as Same Thread Workspace
+    participant SDK as Claude Agent SDK
+    participant Native as New Runtime Process
+    participant Session as Existing Session/Transcript
+    participant Bash as Agent Bash
+
+    User->>Chat: 在同一 thread 继续
+    Chat->>Service: POST turn(same thread)
+    Service->>Cred: 重新读取当前 actor effective credential
+    Cred->>WS: 替换为本轮最新 .notion-home
+    Service->>SDK: 新建 options.env + resume=session_id
+    SDK->>Native: 为本轮重新 spawn Runtime
+    Native->>Session: 读取既有 transcript/session identity
+    Note over Native,Session: session 可复用，进程环境不缓存
+    Native->>Bash: 传递本轮校验后的 binding
+    Bash-->>Chat: 与新 turn 一致的 set/unset 与只读结果
+```
+
+## 6. CLI 未安装流程
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Settings as Dream Settings
+    participant Backend as Dream Backend
+    participant Resolver as ntn Installation Resolver
+    participant Cred as Credential Provider
+    participant Chat as Dream Chat
+
+    User->>Settings: 打开 Notion 资源链接
+    Settings->>Backend: GET capabilities
+    Backend->>Resolver: 检查固定 ntn 安装
+    Resolver-->>Backend: missing/incompatible
+    Backend-->>Settings: 需要安装 + 固定说明
+    User->>Settings: 点击连接
+    Settings->>Backend: POST auth/login
+    Backend->>Resolver: 再次 fail closed
+    Backend-->>Settings: 不启动 device flow；提示安装后重试
+    Note over Cred: 不创建 pending credential home
+    User->>Chat: 发送普通消息
+    Chat-->>User: 普通 Chat 继续；Notion CLI 局部不可用
+```
+
+## 7. 凭证或配置缺失流程
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Chat as Dream Chat
+    participant Service as Dream Agent Service
+    participant Cred as Credential Provider
+    participant WS as Thread Workspace
+    participant SDKEnv as sdk_env
+    participant Native as Native Runtime
+    participant Bash as Agent Bash
+
+    User->>Chat: 创建或继续 turn
+    Service->>Cred: 请求当前 actor projection
+    alt 未连接、认证无效或 Workspace Mode 关闭
+        Cred-->>Service: unavailable
+        Service->>WS: 清除旧 .notion-home（若存在）
+        Service->>SDKEnv: credential_home=None
+        SDKEnv->>Native: 四项 binding 显式 empty/fail closed
+        Native->>Bash: 不提供 Notion capability
+        Bash-->>Chat: 提示连接/重试；普通回答继续
+    else 有效认证但没有 workers.json
+        Cred->>WS: 投影 auth/config/workspaces
+        SDKEnv->>Native: home/token/keyring set；workers unset
+        Native->>Bash: 普通 API/doctor 可用
+        Bash-->>Chat: CLI 可用；workers 能力按需提示配置
+    else foreign/symlink/越界 projection
+        Cred-->>Service: safe projection error
+        Service->>WS: 清除本 thread 无效 projection
+        Service-->>Chat: Notion 局部失败；不影响 turn/SSE
+    end
+```
+
+## 8. Runtime/Bash 环境被过滤时的失败链路
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cred as Current Actor Credential
+    participant WS as Current Thread .notion-home
+    participant SDKEnv as Dream sdk_env
+    participant SDK as SDK 0.2.144
+    participant Native as Runtime 0.1.3
+    participant Filter as production cleanEnvironment
+    participant Bash as Agent Bash
+    participant CLI as ntn
+
+    Cred->>WS: auth/config/workspaces 投影成功
+    WS->>SDKEnv: 精确 current-thread path
+    SDKEnv->>SDK: home/token/keyring set；workers unset
+    SDK->>Native: options.env 覆盖 inherited
+    Native->>Filter: 创建 production Bash
+    Filter->>Filter: 仅保留 LANG/LC_*/PATH/TERM
+    Filter-->>Bash: Notion binding 被删除
+    Bash->>CLI: doctor/identity
+    CLI-->>Bash: 未认证或默认 home 不可用
+    Bash-->>Native: 目标变量 unset
+    Native-->>SDK: Bash tool result（可正常退出但业务失败）
+    Note over SDKEnv,Filter: 根因位于最后的 Runtime Bash env filter，非 projection/SDK/resume
+```
+
+## 9. 修复后的真实 Chat → Agent Bash → ntn 验收链路
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant UI as Normal Dream Chat UI
+    participant API as Public Chat API/SSE
+    participant Service as Dream Agent Service
+    participant Cred as Current Actor Provider
+    participant WS as Persisted Thread Workspace
+    participant SDK as Claude Agent SDK
+    participant Runtime as Qualified Native Runtime
+    participant Bash as Production Agent Bash
+    participant CLI as ntn 0.15.1
+    participant Notion as Notion API
+    participant Store as Normal PostgreSQL/Admin Evidence
+
+    User->>UI: 新建 Chat，要求安全检查 Notion CLI
+    UI->>API: 创建 thread + 首轮消息
+    API->>Service: 正常生产入口
+    Service->>Cred: 当前 actor credential
+    Cred->>WS: 当前 thread projection
+    Service->>SDK: server-owned options.env
+    SDK->>Runtime: exact version/manifest/capability
+    Runtime->>Bash: exact workspace binding
+    Bash->>Bash: 仅输出三个目标的 set/unset
+    Bash->>CLI: --version + doctor/只读身份
+    CLI->>Notion: 只读认证请求
+    Notion-->>CLI: success
+    CLI-->>Bash: exit 0；不输出 body/token
+    Bash-->>API: persisted output-available
+    API->>Store: 正常 thread/Gateway/turn 记录
+    API-->>UI: 安全成功结论
+
+    User->>UI: 同一 thread 继续验证
+    UI->>API: resume turn
+    API->>Service: 重复 projection/options/Runtime launch
+    Runtime->>Bash: 本轮最新 binding
+    Bash->>CLI: 只读复核成功
+    API-->>UI: resume 与新 turn 一致；普通 Chat 正常
 ```

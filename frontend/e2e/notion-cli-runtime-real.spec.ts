@@ -1,7 +1,7 @@
 // [Input] A named existing authenticated actor, installed ntn, connected Notion connector, and normal Dream Settings/Chat services.
-// [Output] Real-business proof that visible Notion CLI capability reaches one persisted Chat turn and a successful read-only Bash invocation.
-// [Pos] Opt-in Notion CLI Runtime acceptance; it preserves the connector and created Chat thread for review.
-// [Sync] 2026-08-30: verify Settings capability, current actor/thread sdk_env binding, and read-only ntn execution through visible Chat.
+// [Output] Real-business proof that visible Notion CLI capability reaches new/resumed Agent Bash, preserves optional-workers semantics, and leaves ordinary Chat healthy.
+// [Pos] Opt-in Notion CLI Runtime acceptance; it preserves the connector and three-turn Chat thread for review.
+// [Sync] 2026-08-30: verify Settings capability, current actor/thread Bash binding, read-only ntn execution, same-thread resume, and ordinary Chat regression safety.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -25,6 +25,8 @@ type PersistedPart = {
   toolName?: string;
   state?: string;
   text?: string;
+  input?: unknown;
+  output?: unknown;
 };
 
 type ThreadMessages = {
@@ -39,6 +41,14 @@ type NotionCapabilities = {
     skills: Array<{ id: string; availability: string }>;
   };
 };
+
+const IMPACT_SCOPE = {
+  actorConnector: 'one named existing authenticated actor and connector; unchanged',
+  threadProjection: 'one normal thread projection refreshed on every turn',
+  remoteOperation: 'doctor and current-user identity reads only; no Notion mutation or response body retention',
+  chat: 'one normal persisted thread with new, resumed, and ordinary turns; retained for review',
+  subscriptionOtherUsersAndContent: 'unchanged',
+} as const;
 
 test.use({
   channel: 'chrome',
@@ -109,6 +119,10 @@ async function approveExpectedBash(page: Page, threadId: string): Promise<boolea
   const dialog = dialogs.first();
   const label = `${await dialog.getAttribute('aria-label') ?? ''} ${await dialog.textContent() ?? ''}`;
   if (!/(?:Bash|ntn)/i.test(label)) throw new Error('An unexpected tool confirmation blocked Notion CLI QA.');
+  if (!/(?:NOTION_(?:API_TOKEN|KEYRING|WORKERS_CONFIG_FILE)|ntn)/.test(label)
+    || /(?:\brm\b|\bmv\b|\bcp\b|\bcurl\b|\bwget\b|\bPOST\b|\bPATCH\b|\bDELETE\b|\s>[>|]?\s*[^&/])/.test(label)) {
+    throw new Error('The visible Bash confirmation is outside the read-only Notion CLI QA allowlist.');
+  }
   const responsePromise = page.waitForResponse((response) => (
     response.request().method() === 'POST'
     && new URL(response.url()).pathname === '/api/claude-agent/tool-confirm'
@@ -120,23 +134,77 @@ async function approveExpectedBash(page: Page, threadId: string): Promise<boolea
   return true;
 }
 
-async function waitForTurn(page: Page, token: string, threadId: string): Promise<void> {
+async function waitForTurn(
+  page: Page,
+  token: string,
+  threadId: string,
+  expectedTurnCount: number,
+  allowBash: boolean,
+): Promise<void> {
   await expect.poll(async () => {
-    if (await approveExpectedBash(page, threadId)) return false;
+    const dialogs = page.locator('[role="alertdialog"]:visible');
+    if (!allowBash && await dialogs.count()) {
+      throw new Error('The ordinary Chat regression turn unexpectedly requested tool confirmation.');
+    }
+    if (allowBash && await approveExpectedBash(page, threadId)) return false;
     const status = await getJson<ThreadStatus>(
       page.request,
       `/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
       token,
     );
-    return status.running === false && status.turn_count >= 1;
+    return status.running === false && status.turn_count >= expectedTurnCount;
   }, {
     timeout: 360_000,
     intervals: [500, 1_000, 2_000, 5_000],
   }).toBe(true);
 }
 
+function bashParts(payload: ThreadMessages): PersistedPart[] {
+  return payload.messages.flatMap((message) => message.parts).filter((part) => (
+    part.toolName === 'Bash'
+  ));
+}
+
+function bashOutput(parts: PersistedPart[]): string {
+  return parts.map((part) => (
+    typeof part.output === 'string' ? part.output : JSON.stringify(part.output ?? '')
+  )).join('\n');
+}
+
+function assertSafeNotionBashReceipt(parts: PersistedPart[]): void {
+  expect(parts.length).toBeGreaterThanOrEqual(1);
+  expect(parts.every((part) => part.state === 'output-available')).toBe(true);
+  const output = bashOutput(parts);
+  expect(output).toMatch(/NOTION_API_TOKEN=set/);
+  expect(output).toMatch(/NOTION_KEYRING=set/);
+  expect(output).toMatch(/NOTION_WORKERS_CONFIG_FILE=unset/);
+  expect(output).toMatch(/ntn_version=ntn 0\.15\.1/);
+  expect(output).toMatch(/ntn_doctor=ok/);
+  expect(output).toMatch(/ntn_identity=ok/);
+  expect(output).not.toMatch(/NOTION_API_TOKEN=(?!set\b|unset\b)\S+/);
+  expect(output).not.toMatch(/NOTION_KEYRING=(?!set\b|unset\b)\S+/);
+  expect(output).not.toMatch(/NOTION_WORKERS_CONFIG_FILE=(?!set\b|unset\b)\S+/);
+}
+
+function assistantText(payload: ThreadMessages): string {
+  return payload.messages
+    .filter((message) => message.role === 'assistant')
+    .flatMap((message) => message.parts)
+    .filter((part) => part.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text?.trim() ?? '')
+    .filter(Boolean)
+    .join('\n');
+}
+
 test('visible Notion CLI capability executes a read-only ntn check in Chat', async ({ page }) => {
-  test.setTimeout(480_000);
+  test.setTimeout(900_000);
+  expect(IMPACT_SCOPE).toEqual({
+    actorConnector: 'one named existing authenticated actor and connector; unchanged',
+    threadProjection: 'one normal thread projection refreshed on every turn',
+    remoteOperation: 'doctor and current-user identity reads only; no Notion mutation or response body retention',
+    chat: 'one normal persisted thread with new, resumed, and ordinary turns; retained for review',
+    subscriptionOtherUsersAndContent: 'unchanged',
+  });
   const token = createActorToken(ACTOR_EMAIL);
   const diagnostics = diagnosticsFor(page);
   await page.addInitScript((value) => {
@@ -171,7 +239,7 @@ test('visible Notion CLI capability executes a read-only ntn check in Chat', asy
   const newChat = page.getByTitle(/^(New chat|新建对话)$/);
   if (await newChat.isVisible().catch(() => false)) await newChat.click();
 
-  const prompt = '请使用 notion-cli Skill，在 Bash 中只执行 ntn --version 和 ntn api v1/users/me。只告诉我 CLI 是否可运行、当前用户接口是否读取成功；不要输出返回对象、环境变量、凭证或 Notion 页面内容，也不要创建、修改或删除任何 Notion 数据。';
+  const prompt = '请使用 notion-cli Skill 做一次只读连接验收。在 Bash 中对 NOTION_API_TOKEN、NOTION_KEYRING、NOTION_WORKERS_CONFIG_FILE 分别只输出“变量名=set”或“变量名=unset”，不得输出变量值；再只读执行 ntn --version、ntn doctor 和 ntn api v1/users/me，把后两项响应正文丢弃，只输出 ntn_version=<版本>、ntn_doctor=ok|failed、ntn_identity=ok|failed。不要输出完整环境、内部路径、凭证、API 返回对象或 Notion 页面内容，也不要创建、修改或删除任何 Notion 数据。最终回答不要复述环境变量名或内部实现，只说 Notion CLI 是否可用、系统是否会自动恢复和用户是否需要操作。';
   const input = page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ });
   await expect(input).toBeVisible();
   await input.fill(prompt);
@@ -184,25 +252,72 @@ test('visible Notion CLI capability executes a read-only ntn check in Chat', asy
   expect(createResponse.status(), await createResponse.text()).toBe(200);
   const threadId = (await createResponse.json() as { thread_id: string }).thread_id;
 
-  await waitForTurn(page, token, threadId);
-  const history = await getJson<ThreadMessages>(
+  await waitForTurn(page, token, threadId, 1, true);
+  const firstHistory = await getJson<ThreadMessages>(
     page.request,
     `/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`,
     token,
   );
-  const parts = history.messages.flatMap((message) => message.parts);
-  const bashParts = parts.filter((part) => part.toolName === 'Bash');
-  expect(bashParts.length).toBeGreaterThanOrEqual(1);
-  expect(bashParts.every((part) => part.state === 'output-available')).toBe(true);
-  const answer = history.messages
-    .filter((message) => message.role === 'assistant')
-    .flatMap((message) => message.parts)
-    .filter((part) => part.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text?.trim() ?? '')
-    .filter(Boolean)
-    .join('\n');
-  expect(answer.length).toBeGreaterThan(0);
-  expect(answer).not.toMatch(/NOTION_(?:API_TOKEN|HOME|KEYRING|WORKERS_CONFIG_FILE)/);
-  expect(history.thread.title?.trim()).toBeTruthy();
+  const firstBashParts = bashParts(firstHistory);
+  assertSafeNotionBashReceipt(firstBashParts);
+  const firstAnswer = assistantText(firstHistory);
+  expect(firstAnswer.length).toBeGreaterThan(0);
+  expect(firstAnswer).not.toMatch(/NOTION_(?:API_TOKEN|HOME|KEYRING|WORKERS_CONFIG_FILE)|\.notion-home/);
+  const threadTitle = firstHistory.thread.title?.trim();
+  expect(threadTitle).toBeTruthy();
+
+  await page.reload();
+  const historyEntry = page.getByTitle(threadTitle!).first();
+  await expect(historyEntry).toBeVisible({ timeout: 30_000 });
+  await historyEntry.click();
+  await expect(page.getByText(prompt, { exact: true })).toBeVisible({ timeout: 30_000 });
+
+  let unexpectedThreadCreations = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST'
+      && new URL(request.url()).pathname === '/api/claude-agent/threads') {
+      unexpectedThreadCreations += 1;
+    }
+  });
+  const resumePrompt = '请在同一对话中重新执行刚才完全相同的只读 Notion CLI 验收，以确认恢复后的 Agent Bash 使用本轮最新连接；Bash 仍然只输出 set/unset、版本和 ok|failed，不输出任何值、路径或 API 正文。最终回答只表达 Notion CLI 是否可用和用户是否需要操作，不复述环境变量名或内部实现。';
+  const resumeInput = page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ });
+  await resumeInput.fill(resumePrompt);
+  const resumeRequestPromise = page.waitForRequest((request) => (
+    request.method() === 'POST'
+    && new URL(request.url()).pathname === '/api/claude-agent'
+  ));
+  await page.getByRole('button', { name: /^(Send message|发送消息)$/ }).click();
+  const resumeRequest = await resumeRequestPromise;
+  expect(resumeRequest.postDataJSON()).toMatchObject({ id: threadId, resume: true });
+  await waitForTurn(page, token, threadId, 2, true);
+  const resumedHistory = await getJson<ThreadMessages>(
+    page.request,
+    `/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`,
+    token,
+  );
+  const resumedBashParts = bashParts(resumedHistory);
+  expect(resumedBashParts.length).toBeGreaterThan(firstBashParts.length);
+  assertSafeNotionBashReceipt(resumedBashParts.slice(firstBashParts.length));
+  expect(assistantText(resumedHistory)).not.toMatch(/NOTION_(?:API_TOKEN|HOME|KEYRING|WORKERS_CONFIG_FILE)|\.notion-home/);
+
+  const ordinaryPrompt = '连接检查已完成。现在不要调用任何工具或访问网络，只回复：普通对话正常。';
+  const ordinaryInput = page.getByRole('textbox', { name: /^(Chat input|聊天输入)$/ });
+  await ordinaryInput.fill(ordinaryPrompt);
+  const ordinaryRequestPromise = page.waitForRequest((request) => (
+    request.method() === 'POST'
+    && new URL(request.url()).pathname === '/api/claude-agent'
+  ));
+  await page.getByRole('button', { name: /^(Send message|发送消息)$/ }).click();
+  const ordinaryRequest = await ordinaryRequestPromise;
+  expect(ordinaryRequest.postDataJSON()).toMatchObject({ id: threadId, resume: true });
+  await waitForTurn(page, token, threadId, 3, false);
+  const finalHistory = await getJson<ThreadMessages>(
+    page.request,
+    `/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`,
+    token,
+  );
+  expect(bashParts(finalHistory)).toHaveLength(resumedBashParts.length);
+  expect(assistantText(finalHistory)).toContain('普通对话正常');
+  expect(unexpectedThreadCreations).toBe(0);
   expect(diagnostics).toEqual([]);
 });

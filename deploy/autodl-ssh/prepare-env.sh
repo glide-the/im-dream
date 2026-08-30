@@ -3,6 +3,11 @@
 # [Output] Mode-0600 Dream backend/frontend runtime env using the Admin-owned PostgreSQL identity.
 # [Pos] AutoDL Dream configuration projector; no CLI/transport state is persisted here.
 # [Sync] 2026-08-26: leave Agent admission budgets unset so runtime auto-detects host/cgroup capacity.
+# [Sync] 2026-08-30: pin Dream to the generic qualified Linux x64 Runtime
+#                    0.1.4 built from authorized 2.1.88 source; AutoDL only
+#                    selects its installed absolute CLI path.
+# [Sync] 2026-08-30: force deployment-owned Claude Bash sandbox enablement to
+#                    false because the outer AutoDL container rejects userns.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,6 +27,7 @@ AUTODL_DREAM_BACKEND_PORT="${AUTODL_DREAM_BACKEND_PORT:-8765}"
 AUTODL_ADMIN_PORT="${AUTODL_ADMIN_PORT:-6008}"
 AUTODL_DREAM_PUBLIC_ORIGIN="${AUTODL_DREAM_PUBLIC_ORIGIN:-}"
 AUTODL_ADMIN_PUBLIC_ORIGIN="${AUTODL_ADMIN_PUBLIC_ORIGIN:-}"
+AUTODL_CLAUDE_CODE_CLI_PATH="${AUTODL_CLAUDE_CODE_CLI_PATH:-/root/ink-autodl/runtime/npm/bin/ink-claude-code-dream}"
 
 err() { printf '[error] %s\n' "$*" >&2; exit 1; }
 env_value() { awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$1"; }
@@ -31,6 +37,7 @@ env_value() { awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") +
 [[ "${AUTODL_DATA_ROOT}" == /root/* ]] || err "AUTODL_DATA_ROOT must stay under /root."
 [[ "${AUTODL_DREAM_BACKEND_BIND_HOST}" == "127.0.0.1" ]] || err "Dream backend must bind to 127.0.0.1 on AutoDL."
 [[ "${AUTODL_DREAM_FRONTEND_PORT}" == "6006" && "${AUTODL_DREAM_BACKEND_PORT}" == "8765" && "${AUTODL_ADMIN_PORT}" == "6008" ]] || err "AutoDL must use frontend 6006, backend 8765, and Admin 6008."
+[[ "${AUTODL_CLAUDE_CODE_CLI_PATH}" == /root/ink-autodl/runtime/* ]] || err "AUTODL_CLAUDE_CODE_CLI_PATH must stay under /root/ink-autodl/runtime."
 [[ "${AUTODL_DREAM_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN must be an exact HTTPS origin."
 [[ "${AUTODL_ADMIN_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_ADMIN_PUBLIC_ORIGIN must be an exact HTTPS origin."
 
@@ -48,7 +55,7 @@ trap 'rm -f "${temp_file}"' EXIT
 umask 077
 awk -F= '
   BEGIN {
-    split("DATABASE_URL PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN AGENT_CWD ARTIFACT_WORKSPACE_ROOT FILE_STORAGE_LOCAL_DIR INK_CLAUDE_PLUGIN_RUNTIME_ROOT INK_LOAD_DATABASE_URL_FROM_ENV_FILE CLAUDE_CODE_CLI_PATH VITE_ALLOWED_HOSTS VITE_DEV_API_PROXY_TARGET INK_AGENT_MAX_CONCURRENT_RUNS INK_AGENT_RUN_MEMORY_BUDGET_MIB INK_AGENT_MEMORY_RESERVE_MIB", keys, " ")
+    split("DATABASE_URL PORT HOST API_BASE_URL WEBUI_URL INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS COOKIE_SECURE COOKIE_SAMESITE INK_GATEWAY_BASE_URL INK_ADMIN_PRODUCT_API_BASE_URL INK_ADMIN_PRODUCT_ORIGIN AGENT_CWD ARTIFACT_WORKSPACE_ROOT FILE_STORAGE_LOCAL_DIR INK_CLAUDE_PLUGIN_RUNTIME_ROOT INK_LOAD_DATABASE_URL_FROM_ENV_FILE CLAUDE_CODE_CLI_PATH VITE_ALLOWED_HOSTS VITE_DEV_API_PROXY_TARGET INK_AGENT_SANDBOX_ENABLED INK_AGENT_MAX_CONCURRENT_RUNS INK_AGENT_RUN_MEMORY_BUDGET_MIB INK_AGENT_MEMORY_RESERVE_MIB", keys, " ")
     for (i in keys) excluded[keys[i]] = 1
   }
   /^[A-Za-z_][A-Za-z0-9_]*=/ {
@@ -75,6 +82,8 @@ awk -F= '
   printf 'ARTIFACT_WORKSPACE_ROOT=%s/artifacts\n' "${AUTODL_DATA_ROOT}"
   printf 'FILE_STORAGE_LOCAL_DIR=%s/file-storage\n' "${AUTODL_DATA_ROOT}"
   printf 'INK_CLAUDE_PLUGIN_RUNTIME_ROOT=%s/claude-plugin-runtime\n' "${AUTODL_DATA_ROOT}"
+  printf 'CLAUDE_CODE_CLI_PATH=%s\n' "${AUTODL_CLAUDE_CODE_CLI_PATH}"
+  printf 'INK_AGENT_SANDBOX_ENABLED=false\n'
   printf 'INK_LOAD_DATABASE_URL_FROM_ENV_FILE=0\n'
   printf 'VITE_ALLOWED_HOSTS=%s\n' "${dream_public_host}"
   printf 'VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:%s\n' "${AUTODL_DREAM_BACKEND_PORT}"

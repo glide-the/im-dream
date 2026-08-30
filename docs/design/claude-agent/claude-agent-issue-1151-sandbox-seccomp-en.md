@@ -1,5 +1,11 @@
 # `sandbox.seccomp.applyPath` in settings.json is ignored — embedded apply-seccomp is always used (CLI 2.1.220)
 
+<!-- [Sync] 2026-08-30: record the Runtime 0.1.4 restoration of the authorized
+2.1.88 on-disk vendor/seccomp path and separate helper success from an outer
+container namespace denial. -->
+<!-- [Sync] 2026-08-30: record the AutoDL deployment-owned sandbox disablement
+and the retained real-business Bash acceptance receipt. -->
+
 ## Summary
 
 The `sandbox.seccomp.applyPath` / `sandbox.seccomp.bpfPath` settings keys — which the CLI itself advertises as the override mechanism for the seccomp helper ("copy vendor/seccomp/* from sandbox-runtime and set `sandbox.seccomp.bpfPath` and `applyPath` in settings.json") — are **silently ignored** by the CLI's embedded Linux sandbox path in 2.1.220. The settings→runtime converter hardcodes the seccomp config to the embedded executor (`/proc/self/fd/*`), so there is no supported way to replace or disable apply-seccomp. In Docker / nested-userns environments this makes sandboxed Bash commands fail hard with:
@@ -107,3 +113,41 @@ What the patch does and why it is safe for our threat model:
 - The sandbox's network/filesystem isolation is enforced by **bwrap** (`--unshare-net`, bind mounts) plus the host-side filtering proxy — **not** by seccomp. apply-seccomp only adds unix-socket blocking on top.
 - Replacing apply-seccomp with `#!/bin/sh` + `exec "$@"` makes the seccomp step a no-op while leaving bwrap isolation fully intact (the CLI even treats a missing seccomp helper as a warning, not an error — "seccomp not available - unix socket access not restricted").
 - **This workaround is impossible with 2.1.220**: the CLI is a single self-contained binary, `vendor/seccomp/` no longer exists on disk, the helper is executed from `/proc/self/fd/`, and the settings-driven override (`sandbox.seccomp.applyPath`) is silently ignored — which is exactly the bug reported above.
+
+## Current restored Runtime status (2026-08-30)
+
+Runtime `0.1.4` now packages the authorized 2.1.88 local core instead of
+reimplementing this behavior. Its Linux target restores the on-disk
+`chunks/vendor/seccomp/<arch>/apply-seccomp` and `unix-block.bpf` assets. The
+2.1.88 invocation supplies the BPF path as the helper's first argument, so the
+checksum-bound passthrough removes exactly that argument and executes the
+remaining command. This is one generic Linux Runtime asset path; AutoDL does
+not own a separate passthrough mode.
+
+The qualified Linux x64 package passed real SDK/Bash qualification in Docker
+with the required outer `SYS_ADMIN` capability and unconfined seccomp/AppArmor.
+On the current AutoDL instance, direct helper execution also succeeds, while a
+normal Dream Bash turn stops earlier at `bwrap: Creating new namespace failed:
+Operation not permitted`. The outer AutoDL container runs under enforced
+`docker-default`, lacks `CAP_SYS_ADMIN`, and denies both user-namespace and
+mount-namespace probes. That outer namespace denial cannot be repaired by changing
+the later apply-seccomp helper.
+
+The current AutoDL deployment therefore makes a separate, explicit capability
+decision: generated Dream env fixes `INK_AGENT_SANDBOX_ENABLED=false`, while
+Workspace Mode remains enabled. Per-thread settings coherently contain
+`enabled=false`, `failIfUnavailable=false`,
+`autoAllowBashIfSandboxed=false`, and `allowUnsandboxedCommands=true`; the full
+`files`, `logs`, `skills`, and `.claude-tmp` workspace tree is still present.
+Real-business Thread `7c366ee3-8e2b-46df-b01d-189375e06688` retained a Bash
+part in `output-available` state for the exact command
+`echo AUTODL_SANDBOX_DISABLED_OK`, with exact output
+`AUTODL_SANDBOX_DISABLED_OK`, `isError=false`, and no bwrap/apply-seccomp
+marker.
+
+This receipt does not mean the namespace problem or sandbox was repaired. It
+means the disabled profile bypasses bubblewrap and the restored helper entirely.
+Approved Bash runs directly as the Dream service account, currently `root`
+inside the outer AutoDL container. An AutoDL deployment that requires Bash OS
+isolation must instead obtain the bubblewrap capabilities/profile documented
+above from the platform.

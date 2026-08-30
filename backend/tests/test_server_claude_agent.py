@@ -19,6 +19,10 @@
 # [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
 #                    the Claude Agent factory starts.
 # [Sync] 2026-08-28: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.3.
+# [Sync] 2026-08-30: advance the production identity receipt to qualified
+#                    Runtime 0.1.4 without changing CLI compatibility 2.1.241.
+# [Sync] 2026-08-30: preserve deployment-owned disabled Bash sandbox
+#                    capability through server startup env cleanup.
 # [Sync] 2026-08-24: cover credential-free SDK/CLI startup identity logging.
 # [Sync] 2026-08-25: align MCP auth route registration with database server identifiers.
 # [Sync] 2026-08-27: cover PostgreSQL resource sampler/sink/publisher lifecycle ordering.
@@ -245,12 +249,14 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
         with unittest.mock.patch.dict(
             os.environ,
             {
+                "INK_AGENT_SANDBOX_ENABLED": "false",
                 "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ": "/app/claude_agent:/app/libs",
             },
             clear=True,
         ):
             _SERVER_MODULE._drop_unsupported_agent_env()
 
+            self.assertEqual(os.environ["INK_AGENT_SANDBOX_ENABLED"], "false")
             self.assertEqual(
                 os.environ["INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"],
                 "/app/claude_agent:/app/libs",
@@ -1903,7 +1909,7 @@ class TestFactoryLifecycle(unittest.TestCase):
             {
                 "cli_mode": "dream_runtime",
                 "cli_path": "/runtime/bin/ink-claude-code-dream",
-                "cli_runtime_release": "0.1.3",
+                "cli_runtime_release": "0.1.4",
                 "sdk_cli_compatibility_version": "2.1.241",
                 "sdk_distribution": "ink-claude-dream-agent-sdk",
                 "sdk_import": "claude_agent_sdk",

@@ -73,6 +73,9 @@
 #                    validation; unset keys are scrubbed from parent/options env.
 # [Sync] 2026-08-28: adopt the manifest-qualified clean-room Runtime 0.1.3
 #                    request-parameter release; the official CLI rollback is unchanged.
+# [Sync] 2026-08-30: adopt qualified Runtime 0.1.4, whose local core restores
+#                    the authorized 2.1.88 Linux vendor/seccomp assets while
+#                    preserving the 2.1.241 CLI compatibility identity.
 # [Sync] 2026-08-30: bind the current thread's NOTION_HOME/API token/keyring/workers file into the Agent Runtime after all user overlays.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
@@ -108,7 +111,7 @@ DREAM_CLAUDE_SDK_DISTRIBUTION = "ink-claude-dream-agent-sdk"
 DREAM_CLAUDE_SDK_VERSION = "0.2.144"
 DREAM_CLAUDE_SDK_IMPORT = "claude_agent_sdk"
 DREAM_CLAUDE_CLI_EXECUTABLE = "ink-claude-code-dream"
-DREAM_CLAUDE_CLI_VERSION = "0.1.3"
+DREAM_CLAUDE_CLI_VERSION = "0.1.4"
 DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA = "ink-claude-cli-envelope/v1"
 DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME = "release-manifest.json"
 DREAM_CLAUDE_STREAM_PROTOCOL_NAME = "claude-code-stream-json"

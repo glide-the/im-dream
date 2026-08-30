@@ -5,6 +5,8 @@
 #        absence, isolated install ownership, SDK cli_path, and CLI version.
 # [Sync] 2026-08-26: require source-only sdist installation, full npm evidence,
 #        selector-to-four-tarball bindings, and both supported CLI aliases.
+# [Sync] 2026-08-30: distinguish Dream's portable Runtime baseline from the
+#        clean-room npm 0.1.4 sandbox.notion-cli publication capability.
 
 """Accept an already-published Dream Claude SDK/Runtime registry release.
 
@@ -67,6 +69,9 @@ REQUIRED_RUNTIME_CAPABILITIES = {
     "tmpdir.thread-local",
     "transcript.jsonl",
     "workspace.cwd",
+}
+REQUIRED_PUBLIC_NPM_CAPABILITIES = REQUIRED_RUNTIME_CAPABILITIES | {
+    "sandbox.notion-cli"
 }
 PUBLIC_API = ("ClaudeAgentOptions", "ClaudeSDKClient", "query")
 PYPI_JSON_TEMPLATE = "https://pypi.org/pypi/{name}/{version}/json"
@@ -742,7 +747,7 @@ def _verify_cleanroom_npm_release_tarballs(
                 "publicationAllowed": True,
                 "redistributionAllowed": True,
             }
-            or capability_ids != REQUIRED_RUNTIME_CAPABILITIES
+            or capability_ids != REQUIRED_PUBLIC_NPM_CAPABILITIES
         ):
             raise AcceptanceError(
                 "RUNTIME_EVIDENCE_MISMATCH",

@@ -4,13 +4,14 @@
 #          pinned without SDK overlap.
 # [Pos] Docker/dependency release contract tests.
 # [Sync] 2026-08-26: install custom SDK 0.2.144 from PyPI with an exact
-#        hash-locked export, install public Runtime selector 0.1.3 by default,
+#        hash-locked export, install public Runtime selector 0.1.4 by default,
 #        and retain the Docker-only official rollback artifact 2.1.241.
 # [Sync] 2026-08-28: lock the supported Notion CLI and backend-bundled Skill
 #                    into the same standard Agent startup image.
 # [Sync] 2026-08-28: require the complete Notion Skill reference package in the
 #                    backend build context.
 # [Sync] 2026-08-30: require the renamed upstream notion-cli package beside notion-session.
+# [Sync] 2026-08-30: require the published clean-room Runtime 0.1.4 selector.
 
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SDK_VERSION = "0.2.144"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
-RUNTIME_VERSION = "0.1.3"
+RUNTIME_VERSION = "0.1.4"
 NOTION_CLI_VERSION = "0.15.1"
 
 
