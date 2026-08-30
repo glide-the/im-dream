@@ -6,6 +6,8 @@
 <!-- [Sync] 2026-08-29: document current-selection filtering, minimal thread metadata, empty-scope revocation, and reauthorization LKG behavior. -->
 <!-- [Sync] 2026-08-29: document the Settings Notion capability/Skill inspection surface and truthful Hosted MCP read/write boundary. -->
 <!-- [Sync] 2026-08-30: document actor/thread-bound Notion CLI environment injection and the pre-auth ntn installation check. -->
+<!-- [Sync] 2026-08-30: document deployment-owned Claude Bash sandbox enablement and the explicit AutoDL disabled profile. -->
+<!-- [Sync] 2026-08-30: adopt the publicly released clean-room Runtime 0.1.4 across install, verification, registry acceptance, and troubleshooting. -->
 
 # Ink & Memory
 
@@ -64,11 +66,11 @@ Dream treats the Python SDK and npm Runtime as one compatibility pair even thoug
 | Python | `>=3.12` |
 | Node.js | `>=22 <25` for the Runtime selector |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.3` |
+| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
 | Runtime CLI compatibility output | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 
-Important: `uv sync` manages the Python environment only. It installs the Python SDK but does **not** install or upgrade the npm Runtime. A source checkout that expects Runtime `0.1.3` will reject a `0.1.2` executable even when all capability flags are otherwise valid.
+Important: `uv sync` manages the Python environment only. It installs the Python SDK but does **not** install or upgrade the npm Runtime. A source checkout that expects Runtime `0.1.4` will reject a `0.1.3` executable even when all capability flags are otherwise valid.
 
 ## Requirements
 
@@ -150,7 +152,7 @@ uv run --with pytest==9.1.1 pytest -q
 Install the public selector package separately because it is an npm/native artifact:
 
 ```bash
-npm install --global @glide-the/ink-claude-code-dream@0.1.3
+npm install --global @glide-the/ink-claude-code-dream@0.1.4
 export PATH="$(npm prefix --global)/bin:$PATH"
 command -v ink-claude-code-dream
 ink-claude-code-dream --version
@@ -169,7 +171,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-This command must exit 0 and print the resolved `0.1.3` executable path. If `command -v` still points to an older `~/.local/bin/ink-claude-code-dream`, reorder `PATH` or replace that stale installation before starting Dream. A running process keeps the `PATH` it inherited; restart only the process you own after changing it.
+This command must exit 0 and print the resolved `0.1.4` executable path. If `command -v` still points to an older `~/.local/bin/ink-claude-code-dream`, reorder `PATH` or replace that stale installation before starting Dream. A running process keeps the `PATH` it inherited; restart only the process you own after changing it.
 
 Do not use `CLAUDE_CODE_CLI_PATH` to bypass the normal manifest-qualified Runtime path. That variable is reserved for an explicit, reviewed absolute-path rollback.
 
@@ -203,6 +205,7 @@ INK_GATEWAY_ENABLED=1
 INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
 
 AGENT_CWD=/absolute/path/to/agentdata/agent-workspace
+INK_AGENT_SANDBOX_ENABLED=true
 INK_NOTION_RUNTIME_ROOT=/absolute/path/to/agentdata/notion-runtime
 INK_NOTION_MAX_SNAPSHOT_BYTES=134217728
 INK_NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS=60
@@ -263,7 +266,7 @@ npm run build
 cd ..
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.144 \
-  --runtime-version 0.1.3 \
+  --runtime-version 0.1.4 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -281,6 +284,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 8. **Model output capability is server-owned.** Admin's selected model `maxOutputTokens` is projected to the Runtime; browser settings, user env, workspace files, and Gateway body rewriting must not replace it.
 9. **Notion Runtime binding is actor/thread-owned.** Canonical durable state belongs under server agentdata; policy-driven index refresh is independent of Chat, and every Runtime turn receives only the current actor's current-scope per-Thread projection. Dream replaces ambient `NOTION_*` values with that projection before exposing the four supported variables to Agent Bash.
 10. **Editor writes bind actor, live session, and durable state.** The runner rejects writes for a stale session, the Editor MCP child receives only the server-owned actor and effective PostgreSQL capability, every query/update is actor-scoped, and business failures refresh the single in-memory EditorState cache without publishing a success event. Notion indexes and on-demand page bodies never enter EditorState.
+11. **Claude Bash sandbox enablement is deployment-owned.** `INK_AGENT_SANDBOX_ENABLED` defaults to `true`, and invalid values also keep it enabled. Setting it to `false` preserves Workspace Mode, cwd, context, file tools, hooks, and tool confirmations, but approved Bash commands run directly as the Dream service account without bubblewrap filesystem/network isolation. User Settings and user env cannot override this capability. AutoDL projects `false` because its outer container rejects the required namespace creation; Dream currently runs as `root` there, so an approved Bash command has root authority inside that outer container.
 
 ## Troubleshooting
 
@@ -294,7 +298,7 @@ readlink "$(command -v ink-claude-code-dream)"
 ink-claude-code-dream --version
 ```
 
-For the current `develop` branch, the manifest must contain Runtime `0.1.3`. Capability flags may all be `true` while the request still fails because the actual Runtime version is stale.
+For the current `develop` branch, the manifest must contain Runtime `0.1.4`. Capability flags may all be `true` while the request still fails because the actual Runtime version is stale.
 
 ### `uv sync` removed pytest
 

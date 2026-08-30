@@ -22,6 +22,9 @@
 # [Sync] 2026-08-17: download endpoint packages selected directories as ZIP files.
 # [Sync] 2026-08-22: add a no-create, Thread-owner-bound, Workspace Mode-gated
 #                    regular-file content endpoint for workspace:// Chat rendering.
+# [Sync] 2026-08-30: keep Workspace Mode independent from the deployment-owned
+#                    INK_AGENT_SANDBOX_ENABLED capability when file APIs
+#                    refresh per-thread Claude settings.
 
 """Workspace file management API.
 
@@ -65,6 +68,7 @@ from libs.claude_agent_kit.server.workspace import (
     move_workspace_file,
     read_workspace_file_content,
     read_workspace_download_content,
+    resolve_sandbox_enabled,
     write_workspace_file,
     WorkspaceFileInfo,
     WorkspaceFileTreeNode,
@@ -158,7 +162,7 @@ def _workspace_init_kwargs_for_user(current_user: dict) -> dict:
         system_config = {}
 
     return {
-        "sandbox_enabled": bool(system_config.get("workspace_enabled", True)),
+        "sandbox_enabled": resolve_sandbox_enabled(),
         "sandbox_network_mode": _coerce_sandbox_network_mode(
             system_config.get("sandbox_network_mode")
         ),

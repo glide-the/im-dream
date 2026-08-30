@@ -6,6 +6,8 @@
 <!-- [同步] 2026-08-29：记录当前选择范围过滤、thread 最小元数据、空范围撤销和重新授权 LKG 行为。 -->
 <!-- [同步] 2026-08-29：记录 Settings Notion 能力/Skill 审阅界面和 Hosted MCP 读写的真实边界。 -->
 <!-- [同步] 2026-08-30：记录按 actor/thread 绑定的 Notion CLI 环境注入与认证前 ntn 安装检查。 -->
+<!-- [同步] 2026-08-30：记录由部署所有的 Claude Bash sandbox 开关和 AutoDL 显式关闭配置。 -->
+<!-- [同步] 2026-08-30：在安装、验证、registry 验收和故障排查中统一采用已公开的 clean-room Runtime 0.1.4。 -->
 
 # Ink & Memory
 
@@ -64,11 +66,11 @@ Python SDK 和 npm Runtime 虽然通过不同包生态发布，但 Dream 必须�
 | Python | `>=3.12` |
 | Node.js | Runtime selector 要求 `>=22 <25` |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.3` |
+| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
 | Runtime CLI 兼容输出 | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 
-重要：`uv sync` 只管理 Python 环境。它会安装 Python SDK，但不会安装或升级 npm Runtime。源码要求 Runtime `0.1.3` 时，即使其他 capability 全部合法，也会拒绝 `0.1.2` 可执行文件。
+重要：`uv sync` 只管理 Python 环境。它会安装 Python SDK，但不会安装或升级 npm Runtime。源码要求 Runtime `0.1.4` 时，即使其他 capability 全部合法，也会拒绝 `0.1.3` 可执行文件。
 
 ## 环境要求
 
@@ -150,7 +152,7 @@ uv run --with pytest==9.1.1 pytest -q
 Runtime 是 npm/native 制品，必须单独安装公开 selector 包：
 
 ```bash
-npm install --global @glide-the/ink-claude-code-dream@0.1.3
+npm install --global @glide-the/ink-claude-code-dream@0.1.4
 export PATH="$(npm prefix --global)/bin:$PATH"
 command -v ink-claude-code-dream
 ink-claude-code-dream --version
@@ -169,7 +171,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-该命令必须 exit 0 并输出解析到的 `0.1.3` 可执行路径。如果 `command -v` 仍指向旧的 `~/.local/bin/ink-claude-code-dream`，必须在启动 Dream 前调整 `PATH` 顺序或替换旧安装。运行中的进程会保留启动时继承的 `PATH`；修改后只重启自己拥有的进程。
+该命令必须 exit 0 并输出解析到的 `0.1.4` 可执行路径。如果 `command -v` 仍指向旧的 `~/.local/bin/ink-claude-code-dream`，必须在启动 Dream 前调整 `PATH` 顺序或替换旧安装。运行中的进程会保留启动时继承的 `PATH`；修改后只重启自己拥有的进程。
 
 正常生产资格路径禁止使用 `CLAUDE_CODE_CLI_PATH` 绕过 manifest 校验。该变量只保留给经过评审的显式绝对路径回滚。
 
@@ -203,6 +205,7 @@ INK_GATEWAY_ENABLED=1
 INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
 
 AGENT_CWD=/absolute/path/to/agentdata/agent-workspace
+INK_AGENT_SANDBOX_ENABLED=true
 INK_NOTION_RUNTIME_ROOT=/absolute/path/to/agentdata/notion-runtime
 INK_NOTION_MAX_SNAPSHOT_BYTES=134217728
 INK_NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS=60
@@ -263,7 +266,7 @@ npm run build
 cd ..
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.144 \
-  --runtime-version 0.1.3 \
+  --runtime-version 0.1.4 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -281,6 +284,7 @@ python3 scripts/verify_claude_registry_release.py \
 8. **模型输出能力由服务端所有。** Admin 最终选中模型的 `maxOutputTokens` 必须投影到 Runtime；浏览器设置、用户环境、workspace 文件和 Gateway body 改写均不得替代它。
 9. **Notion Runtime 绑定归当前 actor/thread 所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，每个 Runtime turn 只接收当前 actor、当前选择范围内的 per-Thread 投影；Dream 在向 Agent Bash 暴露四个受支持变量前替换所有 ambient `NOTION_*` 值。
 10. **Editor 写入同时绑定 actor、当前 session 和持久状态。** runner 拒绝面向过期 session 的写入；Editor MCP 子进程只接收服务端所有的 actor 与有效 PostgreSQL capability；每次查询/更新均按 actor 限定；业务失败只刷新唯一内存 EditorState 软缓存，不发布成功事件。Notion 索引和按需页面正文不得进入 EditorState。
+11. **Claude Bash sandbox 开关由部署所有。** `INK_AGENT_SANDBOX_ENABLED` 缺省为 `true`，非法值也保持启用。设为 `false` 仍保留 Workspace Mode、cwd、上下文、文件工具、hooks 和工具确认，但已批准的 Bash 会绕过 bubblewrap 文件系统/网络隔离，直接以 Dream 服务账号运行；用户 Settings 与用户 env 均不能覆盖该能力。AutoDL 的外层容器拒绝所需 namespace 创建，因此发布环境固定投影为 `false`；当前 Dream 在 AutoDL 以 `root` 运行，所以已批准 Bash 在该外层容器内拥有 root 权限。
 
 ## 故障排查
 
@@ -294,7 +298,7 @@ readlink "$(command -v ink-claude-code-dream)"
 ink-claude-code-dream --version
 ```
 
-当前 `develop` 要求 manifest 中的 Runtime 为 `0.1.3`。即使 capability flag 全部为 `true`，实际 Runtime 版本过旧仍会失败。
+当前 `develop` 要求 manifest 中的 Runtime 为 `0.1.4`。即使 capability flag 全部为 `true`，实际 Runtime 版本过旧仍会失败。
 
 ### `uv sync` 删除了 pytest
 

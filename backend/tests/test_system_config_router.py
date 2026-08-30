@@ -5,6 +5,8 @@
 #                    network config so frontend Settings can hydrate after save.
 # [Sync] 2026-07-26: cover sandbox_fs_allowed_write_paths sanitizer (absolute-
 #                    only, trailing-slash strip, dedupe, caps) via PUT.
+# [Sync] 2026-08-30: reject the deployment-owned sandbox enablement key from
+#                    user env_vars and redact legacy stored copies.
 
 """Regression tests for the system-config router."""
 from __future__ import annotations
@@ -105,8 +107,9 @@ class TestSystemConfigRouter(unittest.TestCase):
                 "/api/system-config",
                 json={
                     "env_vars": {
-                        "ANTHROPIC_AUTH_TOKEN": "must-not-be-stored",
-                        "ANTHROPIC_BASE_URL": "https://bypass.example",
+                    "ANTHROPIC_AUTH_TOKEN": "must-not-be-stored",
+                    "ANTHROPIC_BASE_URL": "https://bypass.example",
+                    "INK_AGENT_SANDBOX_ENABLED": "false",
                     }
                 },
             )
@@ -123,6 +126,7 @@ class TestSystemConfigRouter(unittest.TestCase):
                 "env_vars": {
                     "ANTHROPIC_AUTH_TOKEN": "legacy-secret",
                     "ANTHROPIC_BASE_URL": "https://legacy.example",
+                    "INK_AGENT_SANDBOX_ENABLED": "false",
                     "API_TIMEOUT_MS": "120000",
                 },
             },

@@ -21,13 +21,14 @@
 # [Sync] 2026-08-26: install ink-claude-dream-agent-sdk 0.2.144 from PyPI
 #        through the uv-exported version/hash lock; verify distribution/import
 #        ownership at build time. Install the exact public
-#        ink-claude-code-dream 0.1.3
+#        ink-claude-code-dream 0.1.4
 #        selector as the default production-qualified Runtime, then install
 #        official Claude Code 2.1.241 after safely removing only the selector's
 #        conflicting `claude` alias, so /usr/local/bin/claude remains the
 #        explicit CLAUDE_CODE_CLI_PATH rollback artifact.
 # [Sync] 2026-08-28: install and verify ntn 0.15.1 so the backend-owned Notion
 #        Skill/MCP path exists in the same backend-only image as its built-in Skill.
+# [Sync] 2026-08-30: advance the exact public clean-room Runtime to 0.1.4.
 
 ARG NODE_VERSION=22.18.0
 FROM node:${NODE_VERSION}-bookworm-slim AS node_runtime
@@ -57,7 +58,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - bash curl jq git ripgrep: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 ARG CLAUDE_CODE_VERSION=2.1.241
-ARG INK_CLAUDE_CODE_VERSION=0.1.3
+ARG INK_CLAUDE_CODE_VERSION=0.1.4
 ARG NOTION_CLI_VERSION=0.15.1
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -100,7 +101,7 @@ RUN set -eux; \
 # default remains `ink-claude-code-dream`, while `/usr/local/bin/claude` is the
 # explicit official rollback selected only through CLAUDE_CODE_CLI_PATH.
 RUN set -eux; \
-    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.3"; \
+    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.4"; \
     test "${CLAUDE_CODE_VERSION}" = "2.1.241"; \
     npm install -g \
         --registry="${INK_CLAUDE_NPM_REGISTRY}" \

@@ -3,6 +3,8 @@
 # [Output] Automated topology, idempotency, ownership, mode, and symlink checks.
 # [Pos] Provider-free AutoDL deployment contract test.
 # [Sync] 2026-08-26: keep root-runtime topology assertions portable across GNU and BSD stat.
+# [Sync] 2026-08-30: require the explicit AutoDL 2.1.88 local-core CLI path and
+#                    deployment-owned disabled Claude Bash sandbox capability.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,6 +35,7 @@ ARTIFACT_WORKSPACE_ROOT=/tmp/stale-artifacts
 INK_AGENT_MAX_CONCURRENT_RUNS=9
 INK_AGENT_RUN_MEMORY_BUDGET_MIB=8192
 INK_AGENT_MEMORY_RESERVE_MIB=2048
+INK_AGENT_SANDBOX_ENABLED=true
 EOF
 cat >"${ADMIN_ENV}" <<'EOF'
 POSTGRES_USER=ink_test
@@ -52,6 +55,8 @@ grep -Fx "AGENT_CWD=${PROJECTED_DATA_ROOT}/agent-workspaces" "${OUTPUT_ENV}"
 grep -Fx "ARTIFACT_WORKSPACE_ROOT=${PROJECTED_DATA_ROOT}/artifacts" "${OUTPUT_ENV}"
 grep -Fx "FILE_STORAGE_LOCAL_DIR=${PROJECTED_DATA_ROOT}/file-storage" "${OUTPUT_ENV}"
 grep -Fx "INK_CLAUDE_PLUGIN_RUNTIME_ROOT=${PROJECTED_DATA_ROOT}/claude-plugin-runtime" "${OUTPUT_ENV}"
+grep -Fx "CLAUDE_CODE_CLI_PATH=/root/ink-autodl/runtime/npm/bin/ink-claude-code-dream" "${OUTPUT_ENV}"
+grep -Fx "INK_AGENT_SANDBOX_ENABLED=false" "${OUTPUT_ENV}"
 if grep -Eq '^INK_AGENT_(MAX_CONCURRENT_RUNS|RUN_MEMORY_BUDGET_MIB|MEMORY_RESERVE_MIB)=' "${OUTPUT_ENV}"; then
   printf 'AutoDL projected an explicit Agent admission override\n' >&2
   exit 1

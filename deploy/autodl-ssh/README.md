@@ -4,6 +4,8 @@
 [Output] Explain the application and provide a minimal one-command startup workflow.
 [Pos] User-facing README for an already deployed AutoDL Ink & Memory stack.
 [Sync] 2026-08-26: document root Dream runtime and isolated Admin/PostgreSQL ownership.
+[Sync] 2026-08-30: document the qualified 2.1.88 local-core and restored on-disk apply-seccomp passthrough.
+[Sync] 2026-08-30: document the deployment-owned disabled Bash sandbox profile and its root-service consequence.
 -->
 
 ## 应用介绍
@@ -25,6 +27,10 @@ AutoDL 版本不依赖 Docker 或 Nginx：Admin 与内嵌 PostgreSQL 监听 `127
 Dream 的 Thread workspace、共享 Artifact、本地文件、运行用户 home 与 Claude plugin runtime 默认统一位于 `/root/autodl-tmp/ink-memory`。Admin 的 PostgreSQL 数据独立位于服务用户拥有的 `/root/ink-autodl/data/postgres`；启动器不会迁移、恢复或删除数据库。
 
 Dream 前后端及 Claude Runtime 由 `root` 启动，使 `.dream/runtime` 的安全目录协议能够逐级打开 `/root` 下的 workspace；Admin 与内嵌 PostgreSQL 继续使用独立非 root 用户。启动脚本不会用 `setpriv` 将 Dream 降权为其他账户。
+
+AutoDL 发布不再安装 clean-room npm Runtime 作为 Agent 主路径。通用 `ink-claude-code-dream` 构建流程从授权的 2.1.88 源码生成 Runtime `0.1.4` Linux x64 local-core，并在具备 bubblewrap 所需权限的 Docker 中完成 SDK/Bash/MCP 资格化；`deploy.sh sync` 只同步 verifier 合同与这份已资格化制品。制品内恢复了 `vendor/seccomp/x64/apply-seccomp` Docker-style passthrough，并由 receipt/checksum 绑定；它属于 Linux Runtime，不是 AutoDL 专用模式。Dream 通过绝对 `CLAUDE_CODE_CLI_PATH` 使用该 local-core。
+
+AutoDL 的外层容器禁止 Claude Code/bubblewrap 创建所需 namespace，因此 `prepare-env.sh` 会忽略来源 env 中的同名值，并在 Dream 运行环境固定写入 `INK_AGENT_SANDBOX_ENABLED=false`。这不会关闭 Workspace Mode：Thread cwd、上下文、文件侧栏、内置文件边界、hooks 与可见工具确认继续工作；只是已批准的 Bash 不再经过 bubblewrap 文件系统/网络 sandbox，而是直接以 Dream 的 `root` 服务账号在 AutoDL 外层容器内执行。恢复的 `apply-seccomp` 仍保留在通用 Runtime 中，但 sandbox 关闭时不会进入该链路。
 
 ## 快速开始
 

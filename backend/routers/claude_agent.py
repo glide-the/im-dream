@@ -37,6 +37,8 @@
 # [Sync] 2026-08-17: allow same-Deck Agent selection per turn while Deck provenance stays immutable.
 # [Sync] 2026-08-28: resolve the full server-owned model selection so Claude Code Runtime
 #                    windows reach the turn without exposing them to the browser request.
+# [Sync] 2026-08-30: use the server-owned sandbox enablement capability when
+#                    attachment handling initializes a full Thread workspace.
 
 import asyncio
 import base64
@@ -67,7 +69,11 @@ from claude_agent.thread_retrieval import (
     search_chat_threads,
 )
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
-from libs.claude_agent_kit.server.workspace import get_or_create_workspace, get_workspace_root
+from libs.claude_agent_kit.server.workspace import (
+    get_or_create_workspace,
+    get_workspace_root,
+    resolve_sandbox_enabled,
+)
 from libs.claude_agent_kit.server.workspace_file_sync import (
     WorkspaceFileSyncError,
     WorkspaceFileSyncErrorCode,
@@ -615,7 +621,7 @@ async def claude_agent_stream(
             if workspace_enabled:
                 workspace_path = get_or_create_workspace(
                     thread_id,
-                    sandbox_enabled=True,
+                    sandbox_enabled=resolve_sandbox_enabled(),
                     sandbox_network_mode=_coerce_sandbox_network_mode(
                         system_config.get("sandbox_network_mode")
                     ),

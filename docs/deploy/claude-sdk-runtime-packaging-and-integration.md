@@ -1,7 +1,7 @@
 <!-- [输入] SDK/Runtime 仓库当前构建脚本、Trusted Publisher 工作流、Dream 依赖锁与 Runtime resolver 合同。 -->
 <!-- [输出] 自有 Python SDK 与多平台 clean-room Runtime 的打包、发布、Dream 集成、验证和回滚操作手册。 -->
 <!-- [定位] Claude SDK/Runtime 发布与 IM Dream 接入的中文执行真相源；不负责服务器部署。 -->
-<!-- [同步] 2026-08-28：记录 PyPI SDK 0.2.144、npm Runtime 0.1.3、opaque 模型输出能力、same-SHA workflow、持久最小权限 token 边界及 Dream 精确接入。 -->
+<!-- [同步] 2026-08-30：记录 PyPI SDK 0.2.144、npm Runtime 0.1.4、Notion Bash sandbox 能力、same-SHA workflow、持久最小权限 token 边界及 Dream 精确接入。 -->
 
 # Claude SDK/Runtime 打包、发布与 IM Dream 集成
 
@@ -25,9 +25,9 @@ MCP 状态机或 Runtime 实现。
 | SDK | PyPI `ink-claude-dream-agent-sdk==0.2.144` |
 | SDK 源码/发布仓库 | `v0.2.144@fa10c9ef04ec006d9dcf0a88b1b35dab4ef4723b` |
 | SDK 发布 workflow | `32874352449`；TestPyPI、PyPI 与远端字节复验成功 |
-| Runtime selector | npm `@glide-the/ink-claude-code-dream@0.1.3` |
-| Runtime 仓库 | release `main@9339c9a0ff60e1b2cd6d5a23c8e795aeffff91f9` |
-| Runtime 发布 workflow | qualification `33157330350`；publish `33157476036` |
+| Runtime selector | npm `@glide-the/ink-claude-code-dream@0.1.4` |
+| Runtime 仓库 | release `main@0ebafe95db22101cf77db2c27e73b561d3af37a6` |
+| Runtime 发布 workflow | qualification `33306855166`；publish `33306940462` |
 | Dream Runtime 接口标识 | `2.1.241 (Claude Code)` |
 
 ## 2. 仓库职责
@@ -507,18 +507,19 @@ size: 373286
 sha256: 1b2b6dfad5bfa766de24682d7b26ef1f1394097b92a5d32be1eae40530fbd517
 ```
 
-Runtime `0.1.3`：五个 npm 包均已公开；selector 与 `claude` alias 均输出
+Runtime `0.1.4`：五个 npm 包均已公开；selector 与 `claude` alias 均输出
 `2.1.241 (Claude Code)`，release manifest 配对 SDK `0.2.144`，四个平台包均为 standalone，
-registry fresh install 只选择当前平台包且安装树无 `.map`。qualification `33157330350` 与 publish
-`33157476036` 均成功；五包 granular npm token 与 GitHub `npm` Environment 的 `NPM_TOKEN` 按用户
+registry fresh install 只选择当前平台包且安装树无 `.map`。qualification `33306855166` 与 publish
+`33306940462` 均成功；五包 granular npm token 与 GitHub `npm` Environment 的 `NPM_TOKEN` 按用户
 要求保留且不进入日志、Git 或制品，本地明文中转副本已清除。
 
-本版本新增 vendor-scoped、server-owned `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`。
-Dream 只从认证 Admin 模型目录投影该 capability；Runtime 将它用作 opaque alias 的默认值和
-上界，最终 HTTP body 仍由统一 Messages builder 生成。真实 `deepseek-v4-pro` 首轮/resume
-均为 `max_tokens=384000`、`output_config.effort=low`、`stream=true`。回执绑定 source tree
-`c8d0a7ecff51833f82d5c4c9fd1cffd7cb4a8bf8f0a8227ce85e701779c87cb9` 与 darwin-arm64
-executable `9b1090643050dca561a8fdc3c6ba3bd97e5ed9f542d78bb38fd89b788af9d1d4`。
+本版本保留 vendor-scoped、server-owned `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`，并新增稳定
+`sandbox.notion-cli` capability。Runtime 只把通过 canonical thread home、权限、native `ntn`
+和三主机网络校验的 Notion binding 交给 production Bash；provider helper 与 stdio MCP 子进程
+继续移除这些变量。真实 fresh/resume Dream Chat 回执绑定 source tree
+`266362ac3543ca6d5dc7a400e2a23ac718e231abb761eab8f824726ab595de81`、darwin-arm64 executable
+`969f9193be8750e2573e4c4ea9c3556d48687925d9f57b8ea676669d753980dd`，授权回执 SHA-256 为
+`87f3d1c6040e5462d85e6259a5cb16509a5d26838d5299d1ba350a4ba463dbea`。
 
 这些值只是当前版本示例。发布新版本时必须从新 workflow/registry 回执重新取得，不得
 复制旧摘要。

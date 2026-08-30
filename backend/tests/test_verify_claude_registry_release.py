@@ -6,6 +6,8 @@
 # [Sync] 2026-08-24: initial provider-free registry release acceptance coverage.
 # [Sync] 2026-08-26: require full npm evidence, source-only sdist failure, and
 #                    the exact ink-claude-code-dream/claude alias pair.
+# [Sync] 2026-08-30: require the clean-room npm 0.1.4 sandbox.notion-cli
+#                    capability without changing Dream's portable baseline.
 
 from __future__ import annotations
 
@@ -336,7 +338,7 @@ def _cleanroom_npm_release_bodies() -> dict[str, bytes]:
     receipt_sha = "8" * 64
     bodies: dict[str, bytes] = {}
     platform_bindings: dict[str, dict[str, str]] = {}
-    capability_ids = sorted(acceptance.REQUIRED_RUNTIME_CAPABILITIES)
+    capability_ids = sorted(acceptance.REQUIRED_PUBLIC_NPM_CAPABILITIES)
     for target, package in acceptance.NPM_PLATFORMS.items():
         os_name, cpu = target.split("-", 1)
         executable = f"standalone-{target}".encode()
@@ -652,6 +654,34 @@ def test_current_cleanroom_release_binds_selector_and_platform_executables(
         re.fullmatch(r"[0-9a-f]{64}", item["entrypointSha256"])
         for item in summaries.values()
     )
+
+
+def test_current_cleanroom_release_requires_notion_sandbox_capability(
+    tmp_path: Path,
+) -> None:
+    bodies = _cleanroom_npm_release_bodies()
+    package = FIXTURE["runtime"]["platforms"][0]
+    files = _untar_files(bodies[package])
+    capabilities_path = "package/runtime/manifest/capabilities.json"
+    artifact_path = "package/runtime/manifest/artifact-manifest.json"
+    capabilities = json.loads(files[capabilities_path])
+    capabilities["capabilities"] = [
+        item
+        for item in capabilities["capabilities"]
+        if item["id"] != "sandbox.notion-cli"
+    ]
+    capabilities_body = json.dumps(capabilities).encode()
+    artifact = json.loads(files[artifact_path])
+    artifact["capabilitiesSha256"] = hashlib.sha256(capabilities_body).hexdigest()
+    files[capabilities_path] = capabilities_body
+    files[artifact_path] = json.dumps(artifact).encode()
+    bodies[package] = _tar_bytes(files)
+
+    with pytest.raises(acceptance.AcceptanceError) as caught:
+        acceptance.verify_npm_release_tarballs(
+            _write_npm_release(tmp_path, bodies), FIXTURE["runtime"]["version"]
+        )
+    assert caught.value.code == "RUNTIME_EVIDENCE_MISMATCH"
 
 
 def test_current_cleanroom_release_rejects_tampered_platform_executable(

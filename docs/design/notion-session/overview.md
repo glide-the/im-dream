@@ -18,7 +18,7 @@ Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空
 > [Sync] 2026-07-08: 资源选择持久化收敛为 `connector_resources` / connector `sources`：Settings 已挂载来源、Chat 已链接资源和 Agent snapshot 入口读取同一份后端状态；Notion People 系统 data source 在 discovery 层过滤。
 > [Sync] 2026-07-09: Chat `ResourceConnectorTabPanel` 根内容区减少线框化，状态信息块使用虚线边界但无卡片底色 / 阴影，空态和已链接资源行用轻表面和留白承接摘要内容。
 > [Sync] 2026-07-09: Settings `ResourceOptionRow` 与 `MountedSourcesSection` 的页数元信息只在 `pageCount > 0` 时显示，避免 `0 pages` 占用资源行右侧状态区域。
-> [Sync] 2026-08-30: 当前凭证、Runtime 与内置 Skill 合同改由 [`runtime-credential-and-skill-design.md`](./runtime-credential-and-skill-design.md) 与 [`runtime-credential-and-skill-sequence.md`](./runtime-credential-and-skill-sequence.md) 定义；Agent CLI 通过 `sdk_env` 获得当前 actor/thread 的四个 `NOTION_*` 变量。
+> [Sync] 2026-08-30: 当前凭证、Runtime 与内置 Skill 合同改由 [`runtime-credential-and-skill-design.md`](./runtime-credential-and-skill-design.md) 与 [`runtime-credential-and-skill-sequence.md`](./runtime-credential-and-skill-sequence.md) 定义；Agent CLI 通过 `sdk_env` 获得当前 actor/thread 的四个 `NOTION_*` 变量。Runtime 0.1.3 Agent Bash allowlist 缺口及修复验收见 [`runtime-bash-env-remediation.md`](./runtime-bash-env-remediation.md)。
 > [Sync] 2026-08-28: canonical current snapshot 与凭证统一进入 actor `notion-runtime`；保存资源和策略 worker 负责远程同步，Chat 初始化只投影到 thread `.notion/`。
 
 > **当前运行结论：** durable Notion 凭证与 index-only canonical current snapshot 位于 server-owned agentdata actor root；启用可信 thread workspace 的 Chat Runtime 每 turn 分别刷新 `{thread}/.notion-home` 与 `{thread}/.notion`，但不触发远程 snapshot 构建。`sdk_env` 把当前 thread 的 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与可选 `NOTION_WORKERS_CONFIG_FILE` 注入 Agent Bash；`notion-session` 的 Read hook 与 `notion-cli` 的 `ntn` 命令共用该投影。

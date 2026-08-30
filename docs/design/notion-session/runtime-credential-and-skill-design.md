@@ -7,10 +7,11 @@
 <!-- [Sync] 2026-08-30: expose the current actor/thread Notion projection to Agent Bash through sdk_env and remove the superseded no-CLI credential rule. -->
 <!-- [Sync] 2026-08-30: generate README Skill rows from build_notion_capability_catalog and reuse that section in per-turn workspace context. -->
 <!-- [Sync] 2026-08-30: define catalog output—not a renderer-local Skill list—as the sole Settings/workspace Skill index contract. -->
+<!-- [Sync] 2026-08-30: record that Runtime 0.1.4 passes real fresh/resume Notion CLI acceptance and the separate public release gates. -->
 
 # Notion 用户凭证、轻量索引与 Runtime CLI/Read 设计
 
-Status: Implemented and verified  
+Status: Dream projection implemented; Runtime 0.1.4 real-business verified, publicly released, and adopted
 Updated: 2026-08-30
 Scope: Notion 连接、用户凭证、策略同步、thread 投影、Skill、Agent CLI 与按需正文读取
 
@@ -197,8 +198,10 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 
 ## 11. 项目职责
 
-- `ink-dream-memory`：唯一受影响项目，拥有 connector、Runtime hook、Skill、前端、workspace、文档和测试。
+- `ink-dream-memory`：拥有 connector、Runtime hook、Skill、前端、workspace、Dream-side binding、设计和真实 Chat 验收。
+- `ink-claude-code-dream`：已确认受影响；生产 Bash sandbox 必须补齐精确 thread-bound Notion binding、capability/build/version 合同和 compiled-process 测试。
+- `claude-code-sourcemap/restored-src`：仅作为 `a8a678c` 上游 Bash 环境继承参考，不直接修改。
 - `ink-admin-memory`：本次无 schema/capability 变化，不创建迁移任务。
-- 生产部署：不在本次范围；只验证当前本机代码与真实账户链路。
+- 生产部署：不在本次范围；本机真实链路只有使用 qualified Runtime 制品后才能声明通过。
 
-业务时序见 [runtime-credential-and-skill-sequence.md](runtime-credential-and-skill-sequence.md)，上游差异见 [upstream-gap-and-sync-review.md](upstream-gap-and-sync-review.md)。
+业务时序见 [runtime-credential-and-skill-sequence.md](runtime-credential-and-skill-sequence.md)，本次根因与修复设计见 [runtime-bash-env-remediation.md](runtime-bash-env-remediation.md)，上游差异见 [upstream-gap-and-sync-review.md](upstream-gap-and-sync-review.md)。

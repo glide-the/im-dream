@@ -59,6 +59,10 @@
 > `0700` before CLI spawn. Workspace Mode disabled creates only this minimal
 > runtime root; it still does not pass `cwd`, inject workspace context, expose
 > files, or write sandbox settings.
+> [Sync] 2026-08-30: separate deployment-owned
+> `INK_AGENT_SANDBOX_ENABLED` from user Workspace Mode; missing/invalid values
+> fail closed to enabled, while AutoDL explicitly disables only Bash OS
+> sandboxing because its outer container rejects namespace creation.
 
 # Claude-Agent Workspace Sandbox
 
@@ -152,6 +156,29 @@ skips workspace file sync. `get_or_create_thread_runtime_workspace()` creates
 only `{AGENT_CWD}/{thread_id}/.claude-tmp` so inline CLI settings and shell
 scratch never fall back to a shared process directory. The server carries this
 path through `AgentRunOptions.claude_tmp_workspace`, separately from `cwd`.
+
+### 2.2 Deployment-owned sandbox capability
+
+`INK_AGENT_SANDBOX_ENABLED` is a process-level deployment capability, not a
+user Settings field. Missing, empty, or invalid values resolve to `true`.
+Only an explicit supported false spelling disables the Claude Bash OS sandbox.
+The system-config API removes this key from user `env_vars`, and backend startup
+preserves the deployment value through Agent-env cleanup.
+
+Disabling this capability does not disable Workspace Mode. Dream still creates
+the full Thread workspace, passes its cwd, injects workspace/memory context,
+serves the file sidebar, and applies built-in file-tool guards and PreToolUse
+confirmation policy. The generated Claude settings use a coherent disabled
+block: `enabled=false`, `failIfUnavailable=false`,
+`autoAllowBashIfSandboxed=false`, and `allowUnsandboxedCommands=true`.
+
+AutoDL fixes this capability to `false` because the outer platform container
+rejects the namespace creation bubblewrap needs before `apply-seccomp` runs.
+Approved Bash therefore executes directly as the Dream service account; under
+the current AutoDL topology that account is `root` inside the outer container.
+Bubblewrap filesystem/network policy is not enforced in this profile. Hooks,
+tool confirmations, Workspace file APIs, and built-in file-tool boundaries
+remain valuable controls, but they are not an OS boundary for approved Bash.
 
 `enableWeakerNestedSandbox` is emitted automatically when the backend detects
 that it is running inside a Linux container. Docker Compose and Remote SSH
@@ -380,11 +407,11 @@ performs the search.
 
 | File | Responsibility |
 |---|---|
-| `backend/libs/claude_agent_kit/server/workspace.py` | Merge the per-thread `sandbox` block into `{workspace}/.claude/settings.json` on every init. |
+| `backend/libs/claude_agent_kit/server/workspace.py` | Resolve deployment-owned `INK_AGENT_SANDBOX_ENABLED` with a fail-closed enabled default and merge the coherent per-thread `sandbox` block into `{workspace}/.claude/settings.json` on every full init. |
 | `backend/libs/claude_agent_kit/server/agent_runner.py` | Enforce the same thread-workspace boundary for built-in file/search tools, because the Bash sandbox does not cover `Read` / `Grep` / `Glob`. |
 | `backend/claude_agent/service.py` | Read `system_config.workspace_enabled` and sandbox network policy before cwd resolution; when enabled, resolve Claude Code cwd through the server-owned `{AGENT_CWD}/{thread_id}` workspace; when disabled, skip workspace initialization, clear cached `state.cwd`, and pass `cwd=None`. |
 | `backend/libs/claude_agent_kit/server/agent_runner.py` | Enforce `sandbox_network_mode="disabled"` in PreToolUse so network tools are denied even if sandbox domain wildcard semantics or fallback prompts would otherwise allow execution. |
-| `backend/routers/system_config.py` | Persist and sanitize `sandbox_network_mode` / `sandbox_network_allowed_domains` / `sandbox_fs_allowed_write_paths`. |
+| `backend/routers/system_config.py` | Persist and sanitize `sandbox_network_mode` / `sandbox_network_allowed_domains` / `sandbox_fs_allowed_write_paths`; reject user `env_vars` ownership of `INK_AGENT_SANDBOX_ENABLED`. |
 | `backend/routers/claude_agent.py` | Initialize attachment workspaces with the same Settings-backed sandbox filesystem and network policy before file sync only when Workspace Mode is enabled; skip attachment workspace sync when disabled. |
 | `backend/routers/workspace.py` | Initialize file-sidebar workspaces with the same Settings-backed sandbox filesystem and network policy so listing/upload/download does not revert `.claude/settings.json` to defaults. |
 | `backend/libs/claude_agent_kit/server/sdk_env.py` | Already forces project-only setting sources, so the thread-local settings file is authoritative for Claude Code. |
@@ -395,6 +422,7 @@ performs the search.
 | `backend/Dockerfile` | Installs Claude Code Linux sandbox dependencies (`bubblewrap`, `socat`) plus runtime tools needed by agent commands; ensures standard `sbin` directories exist for bubblewrap rootfs mounts. |
 | `docker-compose.yml` | Enables Docker nested Bash sandbox mode for local Compose backend and grants the runtime privileges bubblewrap needs (`SYS_ADMIN`, unconfined seccomp/AppArmor). |
 | `deploy/remote-ssh/docker-compose.yml` | Enables the same Docker nested Bash sandbox runtime privileges for Remote SSH backend. |
+| `deploy/autodl-ssh/prepare-env.sh` | Overrides source env and fixes `INK_AGENT_SANDBOX_ENABLED=false` for the outer-container topology without changing Workspace Mode. |
 
 ## 7. Non-Goals
 
@@ -423,6 +451,10 @@ Required checks for this design:
   nested sandbox mode is auto-detected, the project root is not default
   read-allowed, disabled/allowlist network policies are emitted, and open mode
   omits `sandbox.network`.
+- Workspace/service/startup/system-config tests confirm missing/invalid
+  deployment values fail closed to enabled, explicit false preserves the full
+  Workspace lifecycle, startup cleanup retains it, and user env cannot
+  override it. AutoDL topology tests require the generated value to be false.
 - Service tests confirm `workspace_enabled=false` does not call
   full `get_or_create_workspace`, clears cached `cwd`, produces
   `AgentRunOptions.cwd=None`, and binds a runtime-only thread root through

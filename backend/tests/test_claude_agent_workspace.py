@@ -52,6 +52,9 @@
 #                    read/write access to the thread credential projection.
 # [Sync] 2026-08-28: prove the index-only/lazy-Read Notion reference set is
 #                    refreshed with the built-in Skill.
+# [Sync] 2026-08-30: cover the server-owned INK_AGENT_SANDBOX_ENABLED parser,
+#                    fail-closed default, and environment-driven disabled
+#                    settings without disabling Workspace Mode.
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -72,6 +75,7 @@ import tests._sdk_stubs  # noqa: F401
 from libs.claude_agent_kit.server.editor_index import EDITOR_RESOURCES
 from libs.claude_agent_kit.server.workspace import (
     CLAUDE_MCP_RUNTIME_ROOT_ENV,
+    SANDBOX_ENABLED_ENV,
     SANDBOX_EXTRA_ALLOW_READ_ENV,
     WORKSPACE_SUBDIRS,
     _append_existing_sandbox_read_path,
@@ -80,6 +84,7 @@ from libs.claude_agent_kit.server.workspace import (
     get_or_create_workspace,
     get_workspace_root,
     init_workspace,
+    resolve_sandbox_enabled,
     sync_workspace_sandbox_settings,
 )
 
@@ -103,6 +108,31 @@ class TestGetWorkspaceRoot(unittest.TestCase):
             root = get_workspace_root()
         self.assertTrue(root.is_absolute())
         self.assertEqual(root.name, "ink-agent-workspaces")
+
+
+class TestSandboxEnabledCapability(unittest.TestCase):
+    def test_missing_value_defaults_enabled(self):
+        self.assertTrue(resolve_sandbox_enabled({}))
+
+    def test_explicit_boolean_spellings(self):
+        for value in ("1", "true", "YES", "on"):
+            with self.subTest(value=value):
+                self.assertTrue(
+                    resolve_sandbox_enabled({SANDBOX_ENABLED_ENV: value})
+                )
+        for value in ("0", "false", "NO", "off"):
+            with self.subTest(value=value):
+                self.assertFalse(
+                    resolve_sandbox_enabled({SANDBOX_ENABLED_ENV: value})
+                )
+
+    def test_invalid_value_fails_closed_enabled(self):
+        with self.assertLogs(
+            "libs.claude_agent_kit.server.workspace", level="WARNING"
+        ):
+            self.assertTrue(
+                resolve_sandbox_enabled({SANDBOX_ENABLED_ENV: "sometimes"})
+            )
 
 
 class TestInitWorkspace(unittest.TestCase):
@@ -256,6 +286,21 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertFalse(sandbox["autoAllowBashIfSandboxed"])
         self.assertTrue(sandbox["allowUnsandboxedCommands"])
         self.assertNotIn("enableWeakerNestedSandbox", sandbox)
+
+    def test_environment_can_disable_sandbox_without_disabling_workspace(self):
+        with unittest.mock.patch.dict(
+            os.environ,
+            {SANDBOX_ENABLED_ENV: "false"},
+        ):
+            ws = init_workspace("sandbox-disabled-by-env")
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        sandbox = settings["sandbox"]
+        self.assertFalse(sandbox["enabled"])
+        self.assertFalse(sandbox["failIfUnavailable"])
+        self.assertFalse(sandbox["autoAllowBashIfSandboxed"])
+        self.assertTrue(sandbox["allowUnsandboxedCommands"])
+        for subdir in WORKSPACE_SUBDIRS:
+            self.assertTrue((ws / subdir).is_dir())
 
     def test_can_disable_sandbox_network_access(self):
         ws = init_workspace(

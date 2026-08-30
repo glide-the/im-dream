@@ -43,6 +43,8 @@
 #                    notion-session Skill and its canonical instruction path.
 # [Sync] 2026-08-30: require workspace context to consume the dynamic README
 #                    Skill section instead of a hard-coded notion-session row.
+# [Sync] 2026-08-30: prove Chat context assembly passes the deployment-owned
+#                    disabled sandbox capability independently of Workspace Mode.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -51,6 +53,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -587,6 +590,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             workspace_path = Path(tmp_dir) / "thread_service_config"
             with (
+                unittest.mock.patch.dict(
+                    os.environ,
+                    {"INK_AGENT_SANDBOX_ENABLED": "false"},
+                ),
                 unittest.mock.patch.object(
                     service_module._db,
                     "get_system_config",
@@ -637,7 +644,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         get_chat_thread.assert_called_once_with("thread_service_config", 7)
         get_or_create_workspace.assert_called_once_with(
             "thread_service_config",
-            sandbox_enabled=True,
+            sandbox_enabled=False,
             sandbox_network_mode="allowlist",
             sandbox_network_allowed_domains=[
                 "raw.githubusercontent.com",

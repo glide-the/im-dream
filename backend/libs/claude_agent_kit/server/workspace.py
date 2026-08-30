@@ -93,6 +93,10 @@
 # [Sync] 2026-08-30: remove the superseded Notion projection read/write deny because sdk_env now binds that exact thread home for ntn Bash execution.
 # [Sync] 2026-08-28: make the projected `.notion` index read-only so the lazy
 #                    page hook cannot be widened by Agent-authored IDs.
+# [Sync] 2026-08-30: make Claude Bash sandbox enablement a server-owned
+#                    INK_AGENT_SANDBOX_ENABLED capability; default/invalid
+#                    values fail closed to enabled while explicit false keeps
+#                    Workspace Mode active and emits coherent unsandboxed flags.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -138,7 +142,7 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal, Mapping, Optional
 
 from .sdk_env import (
     CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME,
@@ -157,6 +161,7 @@ ARCHIVE_EXTENSIONS: frozenset[str] = frozenset(
     {".zip", ".skill", ".tar.gz", ".tgz", ".tar"}
 )
 SANDBOX_EXTRA_ALLOW_READ_ENV = "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"
+SANDBOX_ENABLED_ENV = "INK_AGENT_SANDBOX_ENABLED"
 CLAUDE_MCP_RUNTIME_ROOT_ENV = "INK_CLAUDE_MCP_RUNTIME_ROOT"
 SANDBOX_PRESERVE_ALIAS_READ_PATHS: frozenset[str] = frozenset(
     {"/bin", "/sbin", "/lib", "/lib64"}
@@ -172,6 +177,33 @@ SANDBOX_NETWORK_ALLOW_ALL_DOMAIN = "*"
 _PROJECT_ROOT: Path = Path(__file__).resolve().parents[4]
 _BACKEND_ROOT: Path = Path(__file__).resolve().parents[3]
 _BUILTIN_SKILLS_ROOT: Path = _BACKEND_ROOT / "builtin_skills"
+
+
+def resolve_sandbox_enabled(
+    environment: Optional[Mapping[str, str]] = None,
+) -> bool:
+    """Resolve the server-owned Claude Bash sandbox capability.
+
+    Missing and invalid values fail closed to ``True``. Only explicit common
+    boolean spellings can disable the sandbox; the browser/system-config env
+    overlay is not an authority for this process-level deployment capability.
+    """
+
+    source = os.environ if environment is None else environment
+    raw_value = source.get(SANDBOX_ENABLED_ENV)
+    if raw_value is None or not str(raw_value).strip():
+        return True
+    normalized = str(raw_value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    logger.warning(
+        "Invalid %s=%r; keeping Claude Bash sandbox enabled.",
+        SANDBOX_ENABLED_ENV,
+        raw_value,
+    )
+    return True
 
 
 def _project_root() -> Path:
@@ -678,7 +710,7 @@ def sync_workspace_sandbox_settings(
 def init_workspace(
     session_id: str,
     *,
-    sandbox_enabled: bool = True,
+    sandbox_enabled: Optional[bool] = None,
     sandbox_network_mode: object = "allowlist",
     sandbox_network_allowed_domains: object = None,
     sandbox_fs_allowed_write_paths: object = None,
@@ -693,6 +725,11 @@ def init_workspace(
     Returns the fully-qualified workspace path.
     """
     workspace = get_or_create_thread_runtime_workspace(session_id)
+    effective_sandbox_enabled = (
+        resolve_sandbox_enabled()
+        if sandbox_enabled is None
+        else bool(sandbox_enabled)
+    )
 
     # Ensure standard subdirectories exist (idempotent).
     for subdir in WORKSPACE_SUBDIRS:
@@ -706,7 +743,7 @@ def init_workspace(
     # template unchanged.
     sync_workspace_sandbox_settings(
         workspace,
-        enabled=sandbox_enabled,
+        enabled=effective_sandbox_enabled,
         network_mode=sandbox_network_mode,
         network_allowed_domains=sandbox_network_allowed_domains,
         fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
@@ -734,7 +771,7 @@ def init_workspace(
 def get_or_create_workspace(
     session_id: str,
     *,
-    sandbox_enabled: bool = True,
+    sandbox_enabled: Optional[bool] = None,
     sandbox_network_mode: object = "allowlist",
     sandbox_network_allowed_domains: object = None,
     sandbox_fs_allowed_write_paths: object = None,
