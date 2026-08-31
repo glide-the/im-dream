@@ -16,6 +16,8 @@
 // [Sync] 2026-08-16: route Settings / Work as the parent surface for Deck, resource, and plugin management.
 // [Sync] 2026-08-13: explicit Dream/Execution Chat actions carry their bound
 //                    thread through the router before opening canonical Chat.
+// [Sync] 2026-08-31: pass the validated creation-guide focus query into Execution;
+//                    existing source-history state owns return navigation.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
@@ -192,6 +194,7 @@ function renderStoryWorkspaceRoute(
     case 'run-execution':
       return (
         <StoryWorkspaceExecutionPage
+          initialFocus={match.query.get('focus')}
           key={match.params.storyWorkspaceRunId}
           onNavigate={onNavigate}
           onOpenChatThread={onOpenChatThread}

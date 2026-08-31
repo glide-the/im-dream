@@ -1,7 +1,8 @@
 <!-- [Input] Published Project/Episode identities, Dream stage projections, and canonical Episode artifacts. -->
 <!-- [Output] Product rules for draft focus, sync coordination, and responsive Episode reading. -->
 <!-- [Pos] Story Workspace Project/Episode workbench interaction contract. -->
-<!-- [Sync] 2026-08-31: assign the canonical file reader to its matching draft EP focus. -->
+<!-- [Sync] 2026-08-31: assign the reader to its draft EP and move its overview into the list description. -->
+<!-- [Sync] 2026-08-31: define the header-triggered, three-stage creation guide and its read-only future boundary. -->
 
 # Project 与 Episode 工作台
 
@@ -24,6 +25,41 @@ Project
 Episode 导航以已经发布的注册表为准，不通过目录发现推断。选择操作使用稳定的
 Project、Episode 和来源键；只用于渲染的 View ID 可以派生，但不能持久化成业务身份。
 
+## 创作阶段指引
+
+### 背景与问题
+
+首次进入故事线的用户需要先理解哪些工作只做一次、哪些工作要按 Episode 循环，以及尚未开放的
+制作环节。若把指引混入 EP 索引，会让说明性内容看起来像一条业务产物，并打断 EP01、EP02 的
+连续顺序。
+
+### 目标与边界
+
+绑定 Run 的 Dream 页在“创作工作空间”标题下方提供“查看短剧创作阶段指引”入口；Execution
+的 Outline 标题说明位置保留同名入口。两个入口都打开该 Run 同一个分镜预览式聚焦层，且不占用
+故事线索引条目。Dream 入口只在现有 Execution 路由上携带一次性初始聚焦参数，不建立新的业务
+路由、持久化状态、Agent 调用、Hook 或数据库写入。阶段三仅说明完整制作方向，不能展示成可执行、
+可确认或已交付功能。从 Dream 页进入时，指引的返回操作使用工作台路由已记录的来源历史回到原
+“创作工作空间”；从 Execution 的 Outline 原位进入时，返回操作仍回到当前故事线。
+聚焦页只保留中性标题“短剧创作流程”，不叠加英文眉题、宣传口号或重复引导句。桌面端遵循
+UI Design v2 的三功能卡结构并在一个视口内横向呈现三个阶段；卡片使用暖纸底色、12px 圆角、
+轻边框和零静态阴影。窄屏再转为单列自然阅读。
+
+### 概念与规则
+
+| 阶段 | 业务规则 | 指令说明 |
+|---|---|---|
+| 阶段一 · 跨集复用 | 角色卡和场景卡首次创建并定稿后，由后续所有 Episode 复用 | `/drama-init` 初始化项目；`/drama-plan` 分集规划；`/drama-asset` 创建并定稿角色卡、场景卡 |
+| 阶段二 · 每个 EP 重复 | 每一集都依次完成剧本、分镜、Prompt 包和五维度审查 | `/drama-script (EP01)`；`/drama-storyboard (EP01)`；`/drama-prompt (EP01)`；`/script-reviewer` |
+| 阶段三 · 尚未实现 | 只读展示未来的渲染、配音、后期和宣发方向 | `/drama-render + /drama-voice`；`/drama-edit`；`/drama-promote` |
+
+指引页的三段插图只承担“共享资产 → 每集循环 → 尚未开放”的关系解释，不形成第四套流程事实；
+页面文本仍是可访问、可检索的权威说明，图片不能替代阶段标题和命令描述。角色身份与识别配件
+来自 `docs/prd/Ink & Memory UI Design v2.pdf` 的 Mimo 定义，并按本工作台插图语境转译为“小黑”式
+二维黑色手绘形象，不使用 C4D：保留笔形耳、折纸耳、黄色记忆徽章、绿色灵感星和炭棕斜挎包，
+但让黑色主体轮廓保持第一识别层。三个阶段复用同一张角色原图的不同画面段，避免独立生成造成
+角色走样。
+
 ## 阅读交互
 
 进入 Execution 时默认显示“初稿”：人物、场景和分镜 stage 直接占据主工作面，不再包在
@@ -43,6 +79,10 @@ Project、Episode 和来源键；只用于渲染的 View ID 可以派生，但�
 保留当前节拍选择。从同步视图点击“阅读分集大纲/剧本/分镜/审阅”时，页面回到初稿中与
 canonical Episode code 或关系匹配的分镜条目，并在该 EP 聚焦页定位 reader 对应标签。直接从
 初稿点击 EP 时也在同一位置显示 reader，不形成推荐动作或 Episode 状态机。
+
+初稿的分镜索引描述使用 Episode 投影中的镜头数量与组合时长（例如“14 镜、53 秒。”），
+不得把 YAML/对象的扁平化正文当作描述展示。该概览只在索引中出现；进入 EP 聚焦页后直接展示
+镜头说明和文件 reader，不再重复“分镜概览”区块。
 
 ```mermaid
 sequenceDiagram

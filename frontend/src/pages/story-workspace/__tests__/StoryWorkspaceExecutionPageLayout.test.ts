@@ -6,6 +6,9 @@
 // [Sync] 2026-08-14: guard structured frontmatter and real storyboard note identifiers.
 // [Sync] 2026-08-14: guard default draft and exclusive dialog-selected sync surfaces.
 // [Sync] 2026-08-31: guard the canonical reader inside the matching draft Episode focus.
+// [Sync] 2026-08-31: guard the concise storyboard overview in the EP list description.
+// [Sync] 2026-08-31: guard the read-only three-stage guide and its in-place focus entry.
+// [Sync] 2026-08-31: guard source-aware back navigation for deep-linked guides.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -21,6 +24,10 @@ const CSS_SOURCE = readFileSync(new URL(
 ), 'utf8');
 const DIALOG_SOURCE = readFileSync(new URL(
   '../../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx',
+  import.meta.url,
+), 'utf8');
+const CREATION_GUIDE_SOURCE = readFileSync(new URL(
+  '../../../components/story-workspace/StoryWorkspaceCreationGuide.tsx',
   import.meta.url,
 ), 'utf8');
 const EPISODE_WORKBENCH_SOURCE = readFileSync(new URL(
@@ -76,18 +83,69 @@ test('asset focus renders the Hook-published complete document while indexes kee
   expect(PAGE_SOURCE).toContain('aria-label="资产元数据"');
   expect(PAGE_SOURCE).toContain('{document.body}');
   expect(PAGE_SOURCE).toContain('skipHtml');
-  expect(PAGE_SOURCE).toContain("<p>{entry.summary || '等待 Agent 补充主要信息。'}</p>");
+  expect(PAGE_SOURCE).toContain("entry.summary || '等待 Agent 补充主要信息。'");
   expect(CSS_SOURCE).toContain('.story-workspace-collaboration__asset-document');
   expect(CSS_SOURCE).toContain('.story-workspace-collaboration__asset-metadata');
   expect(CSS_SOURCE).toMatch(/asset-document h1\s*\{[^}]*font-size:\s*clamp\(25px,\s*3vw,\s*34px\)/s);
 });
 
-test('storyboard overview and note follow projected shots instead of the flattened stage summary', () => {
+test('storyboard list description and note follow projected shots instead of the flattened summary', () => {
   expect(PAGE_SOURCE).toContain('focusedStoryboardShot?.shotId ?? focusedEntry.entityId');
   expect(PAGE_SOURCE).toContain("focusedStoryboardShot?.visual ?? '等待镜头说明写入工作空间。'");
-  expect(PAGE_SOURCE).toContain('`共 ${storyboardShots.length} 个镜头 · ${storyboardDurationSeconds} 秒`');
+  expect(PAGE_SOURCE).toContain('`${storyboardShots.length} 镜、${storyboardDurationSeconds} 秒。`');
+  expect(PAGE_SOURCE).toContain("entry.key === episodeDraftEntry?.key && storyboardShots.length > 0");
+  expect(PAGE_SOURCE).not.toContain("? '分镜概览'");
   expect(PAGE_SOURCE).not.toContain('<b>01</b>');
   expect(CSS_SOURCE).toContain('.story-workspace-collaboration__shot-note code');
+});
+
+test('Outline header opens a read-only three-stage guide in the shared focus layer', () => {
+  const guideTrigger = PAGE_SOURCE.indexOf('className="story-workspace-collaboration__guide-trigger"');
+  const episodeIndex = PAGE_SOURCE.indexOf('id="story-workspace-execution-index"');
+
+  expect(guideTrigger).toBeGreaterThan(-1);
+  expect(episodeIndex).toBeGreaterThan(guideTrigger);
+  expect(PAGE_SOURCE).toContain('查看短剧创作阶段指引');
+  expect(PAGE_SOURCE).not.toContain('STORY_WORKSPACE_CREATION_GUIDE_INDEX_COPY');
+  expect(PAGE_SOURCE).not.toContain('story-workspace-collaboration__guide-entry');
+  expect(PAGE_SOURCE).toContain('creationGuideFocused ? (');
+  expect(PAGE_SOURCE).toContain("backLabel={initialFocusKey ? '返回上一页' : undefined}");
+  expect(PAGE_SOURCE).toContain('onBack={returnFromCreationGuide}');
+  expect(PAGE_SOURCE).toContain('storyWorkspaceDreamShouldReturnToHistory(window.history.state)');
+  expect(PAGE_SOURCE).toContain('window.history.back()');
+  expect(PAGE_SOURCE).toContain('if (creationGuideFocused) {\n        returnFromCreationGuide();');
+  expect(PAGE_SOURCE).toContain("focusKey === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY");
+  expect(PAGE_SOURCE).toContain('initialFocus === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY');
+  expect(PAGE_SOURCE).toContain('useState<string | null>(initialFocusKey)');
+  expect(CREATION_GUIDE_SOURCE).toContain('角色卡和场景卡首次定稿后');
+  expect(CREATION_GUIDE_SOURCE).toContain('每个 EP 重复');
+  expect(CREATION_GUIDE_SOURCE).toContain('尚未实现');
+  for (const command of [
+    '/drama-init',
+    '/drama-plan',
+    '/drama-asset',
+    '/drama-script (EP01)',
+    '/drama-storyboard (EP01)',
+    '/drama-prompt (EP01)',
+    '/script-reviewer',
+    '/drama-render + /drama-voice',
+    '/drama-edit',
+    '/drama-promote',
+  ]) expect(CREATION_GUIDE_SOURCE).toContain(command);
+  expect(CREATION_GUIDE_SOURCE.match(/<button/g) ?? []).toHaveLength(1);
+  expect(CREATION_GUIDE_SOURCE).toContain(
+    '/assets/story-workspace-guide-illustrations/01-mimo-xiaohei-workflow-triptych.png',
+  );
+  expect(CREATION_GUIDE_SOURCE.match(/<img/g) ?? []).toHaveLength(1);
+  expect(CREATION_GUIDE_SOURCE).toContain('Mimo 把角色卡和场景卡');
+  expect(CREATION_GUIDE_SOURCE).not.toContain('C4D');
+  expect(CSS_SOURCE).toContain('.story-workspace-creation-guide__stage--shared > section');
+  expect(CSS_SOURCE).toContain('.story-workspace-creation-guide__stage--future');
+  expect(CSS_SOURCE).toContain('aspect-ratio: 3 / 2');
+  expect(CSS_SOURCE).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+  expect(CSS_SOURCE).toContain("font-family: 'Excalifont', 'Xiaolai', Georgia, serif");
+  expect(CSS_SOURCE).not.toContain('story-workspace-creation-guide::before');
+  expect(CSS_SOURCE).toContain('.story-workspace-collaboration__guide-trigger');
 });
 
 test('execution page uses exactly one dashed rule', () => {

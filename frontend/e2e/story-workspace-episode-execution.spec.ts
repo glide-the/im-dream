@@ -8,6 +8,13 @@
 //                    dialog outside the desktop viewport.
 // [Sync] 2026-08-31: the canonical file reader opens in the matching draft EP,
 //                    while sync read actions navigate back to that focus.
+// [Sync] 2026-08-31: the draft EP list replaces raw storyboard summary payloads
+//                    with projected shot count and duration.
+// [Sync] 2026-08-31: Outline opens an illustrated three-stage creation guide
+//                    through the same focus/back interaction as an Episode.
+// [Sync] 2026-08-31: Dream's guide entry returns to the originating run workbench.
+// [Sync] 2026-08-31: the bound Dream masthead opens that same guide focus below
+//                    the “创作工作空间” title.
 
 // @ts-expect-error Playwright E2E has Node built-ins; the browser app tsconfig omits Node types.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -61,7 +68,16 @@ test.use({ channel: 'chromium', timezoneId: 'Asia/Shanghai' });
 // canonical Artifact DTOs stay unchanged; Run-private publication, Hook writes,
 // PostgreSQL materialization, and shared conversation mutations are out of
 // scope. Only the final UI consumer ownership changes: the file reader mounts
-// in the matching draft EP and sync read actions navigate to it.
+// in the matching draft EP, sync read actions navigate to it, and the EP list
+// projects shot count/duration instead of the raw stage summary. The added
+// creation guide is static, read-only UI and performs no workflow mutation.
+//
+// Concept/fact impact brief for this provider-free browser lane:
+// - Project identity/title: mocked Story Index is the authority; unchanged.
+// - Episode identity/artifacts: mocked canonical DTO is the authority; unchanged.
+// - Run-private publication and Hook/PostgreSQL materialization: not in scope.
+// - Shared Thread/session: fixture identity remains unchanged; no new turn.
+// - Final UI consumer: Outline gains one header trigger and a local focus guide.
 
 function coverage(linked = 1, total = 1) {
   return { availability: 'available', linked, total, ratio: linked / total };
@@ -92,7 +108,7 @@ function dreamFiles() {
         items: [{
           entityId: 'ep01_storyboard',
           displayName: 'EP01: 雨夜重逢',
-          summary: '第一集详细分镜。',
+          summary: '1 镜、3 秒。episode: EP01 total_shots: 1 total_duration_sec: 3',
           sourceFile: 'stories/proj-u12/episodes/EP01/storyboard.yaml',
           relations: ['EP01'],
         }],
@@ -573,7 +589,7 @@ async function expectNoHorizontalOverflow(page: Page) {
     body: document.body.scrollWidth <= window.innerWidth + 1,
     workbench: (() => {
       const element = document.querySelector<HTMLElement>('[aria-label="Episode 叙事工作台"]');
-      return element !== null && element.scrollWidth <= element.clientWidth + 1;
+      return element === null || element.scrollWidth <= element.clientWidth + 1;
     })(),
   }))).toEqual({ document: true, body: true, workbench: true });
 }
@@ -705,6 +721,65 @@ test('keeps an unbound first Episode read-only while automatic publication and b
   expect(diagnostics).toEqual([]);
 });
 
+test('Dream run title opens the shared creation guide without adding an index item', async ({ page }) => {
+  const diagnostics: string[] = [];
+  const state: BrowserFixtureState = {
+    revisionIndex: 0,
+    artifactReads: 0,
+  };
+  page.on('console', (message) => {
+    if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+  page.on('requestfailed', (request) => {
+    const url = request.url();
+    if (request.failure()?.errorText === 'net::ERR_ABORTED') return;
+    if (!url.includes('fonts.googleapis.com') && !url.includes('fonts.gstatic.com')
+      && !url.includes('react-grab.com')) {
+      diagnostics.push(`requestfailed: ${request.failure()?.errorText ?? 'failed'} ${url}`);
+    }
+  });
+
+  await page.clock.setFixedTime(FROZEN_NOW);
+  await installApiFixture(page, state);
+  await page.addInitScript(() => {
+    localStorage.setItem('auth_token', 'u12-browser-token');
+    localStorage.setItem('migration_completed', 'true');
+    localStorage.setItem('ink-language', 'zh');
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${WEB_BASE}/story-workspace/dream?run=${RUN_ID}`);
+
+  const title = page.getByRole('heading', { name: '创作工作空间' });
+  const guideTrigger = page.getByRole('button', { name: '查看短剧创作阶段指引' });
+  await expect(title).toBeVisible();
+  await expect(guideTrigger).toBeVisible();
+  const titleBox = await title.boundingBox();
+  const triggerBox = await guideTrigger.boundingBox();
+  expect(titleBox).not.toBeNull();
+  expect(triggerBox).not.toBeNull();
+  expect(triggerBox!.y).toBeGreaterThanOrEqual(titleBox!.y + titleBox!.height);
+
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
+  await page.screenshot({
+    path: resolve(EVIDENCE_DIR, 'dream-creation-guide-entry-desktop-1440x1000.png'),
+  });
+
+  await guideTrigger.click();
+  await expect(page).toHaveURL(
+    new RegExp(`/story-workspace/runs/${RUN_ID}/execution\\?focus=creation-guide$`),
+  );
+  await expect(page.getByRole('article', { name: '短剧创作流程' })).toBeVisible();
+  await expect(page.getByRole('button').filter({ hasText: 'EP01: 雨夜重逢' })).toHaveCount(0);
+  await page.getByRole('button', { name: '← 返回上一页' }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/story-workspace/dream\\?run=${RUN_ID}$`),
+  );
+  await expect(page.getByRole('heading', { name: '创作工作空间' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '查看短剧创作阶段指引' })).toBeVisible();
+  expect(diagnostics).toEqual([]);
+});
+
 test('mocked REST facts recover responsively and preserve the selected shot across revisions', async ({
   context,
   page,
@@ -752,13 +827,81 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     const artifactWorkbench = page.getByRole('region', { name: 'Episode 产物工作台' });
     const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
     const artifactReader = page.getByRole('region', { name: 'EP01 文件阅读器' });
+    const creationGuideEntry = dreamDraft.getByRole('button', {
+      name: '查看短剧创作阶段指引',
+    });
     const draftEpisodeEntry = dreamDraft.getByRole('button')
       .filter({ hasText: 'EP01: 雨夜重逢' });
     await expect(dreamDraft).toBeVisible();
     await expect(artifactWorkbench).toHaveCount(0);
     await expect(artifactReader).toHaveCount(0);
+    await expect(creationGuideEntry).toBeVisible();
+    expect(await creationGuideEntry.evaluate((guide, episode) => (
+      guide.compareDocumentPosition(episode) & Node.DOCUMENT_POSITION_FOLLOWING
+    ) !== 0, await draftEpisodeEntry.elementHandle())).toBe(true);
+    await creationGuideEntry.click();
+    const creationGuide = page.getByRole('article', { name: '短剧创作流程' });
+    await expect(creationGuide).toBeVisible();
+    await expect(creationGuide.locator(
+      '.story-workspace-creation-guide__stages > .story-workspace-creation-guide__stage',
+    )).toHaveCount(3);
+    await expect(creationGuide.getByRole('heading', { name: '建立项目与共享资产' }))
+      .toBeVisible();
+    await expect(creationGuide.getByRole('heading', { name: '逐集创作与审查' })).toBeVisible();
+    await expect(creationGuide.getByRole('heading', { name: '渲染、后期与宣发' })).toBeVisible();
+    await expect(creationGuide.getByText('Creation guide · Three stages')).toHaveCount(0);
+    await expect(creationGuide.getByText('从共享资产到逐集成片')).toHaveCount(0);
+    await expect(creationGuide.getByText('跨集复用', { exact: true })).toBeVisible();
+    await expect(creationGuide.getByText('每个 EP 重复', { exact: true })).toBeVisible();
+    await expect(creationGuide.getByText('尚未实现', { exact: true })).toBeVisible();
+    for (const command of [
+      '/drama-init',
+      '/drama-plan',
+      '/drama-asset',
+      '/drama-script (EP01)',
+      '/drama-storyboard (EP01)',
+      '/drama-prompt (EP01)',
+      '/script-reviewer',
+      '/drama-render + /drama-voice',
+      '/drama-edit',
+      '/drama-promote',
+    ]) await expect(creationGuide.getByText(command, { exact: true })).toBeVisible();
+    const guideIllustrations = creationGuide.getByRole('img', { name: /Mimo/ });
+    await expect(guideIllustrations).toHaveCount(3);
+    for (let index = 0; index < 3; index += 1) {
+      const illustration = guideIllustrations.nth(index);
+      await expect(illustration).toBeVisible();
+      expect(await illustration.evaluate((image) => ({
+        complete: (image as HTMLImageElement).complete,
+        naturalWidth: (image as HTMLImageElement).naturalWidth,
+      }))).toEqual({ complete: true, naturalWidth: 887 });
+    }
+    const guideViewport = await page.locator('[data-execution-depth="focus"]')
+      .evaluate((focus) => ({
+        clientHeight: focus.clientHeight,
+        overflow: focus.scrollHeight - focus.clientHeight,
+        scrollHeight: focus.scrollHeight,
+      }));
+    expect(guideViewport.overflow).toBeLessThanOrEqual(1);
+    await expect(artifactReader).toHaveCount(0);
+    await page.screenshot({
+      path: resolve(EVIDENCE_DIR, 'creation-guide-desktop-1440x1000.png'),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: resolve(EVIDENCE_DIR, 'creation-guide-narrow-390x844.png'),
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('button', { name: '← 返回故事线' }).click();
+    await expect(creationGuide).toHaveCount(0);
+    await expect(draftEpisodeEntry.locator('p')).toHaveText('1 镜、3 秒。');
+    await expect(draftEpisodeEntry.locator('p')).not.toContainText('episode:');
     await draftEpisodeEntry.click();
     await expect(artifactReader).toBeVisible();
+    await expect(dreamDraft.getByText('分镜概览', { exact: true })).toHaveCount(0);
     await expect(artifactReader.getByRole('tab', { name: /分镜/ }))
       .toHaveAttribute('aria-selected', 'true');
     await page.getByRole('button', { name: '← 返回故事线' }).click();

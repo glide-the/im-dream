@@ -10,6 +10,7 @@
 /* [Sync] 2026-08-14: style only Dream's initial/in-progress re-entry outcomes. */
 /* [Sync] 2026-08-14: replace bordered home cards with a quiet manuscript index and reveal control. */
 /* [Sync] 2026-08-16: remove deferred community Deck card/install styles. */
+/* [Sync] 2026-08-31: place the shared creation-guide entry below the run title. */
 
 .story-workspace-dream,
 .story-workspace-dream-launch,
@@ -95,6 +96,25 @@
   font-size: clamp(25px, 2.3vw, 36px);
   font-weight: 500;
   letter-spacing: -.03em;
+}
+
+.story-workspace-dream__guide-trigger {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 0;
+  color: var(--dream-action);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--dream-action) 48%, transparent);
+  cursor: pointer;
+  font: 11px/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.story-workspace-dream__guide-trigger b {
+  font-weight: 400;
 }
 
 .story-workspace-dream__activity {

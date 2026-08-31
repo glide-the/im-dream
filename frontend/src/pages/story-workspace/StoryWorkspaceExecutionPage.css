@@ -10,6 +10,8 @@
 /* [Sync] 2026-08-14: make the draft surface primary and keep Episode coordination
    in an exclusive sync surface selected from the Dream Agent header. */
 /* [Sync] 2026-08-31: render the Episode file reader inside its draft focus article. */
+/* [Sync] 2026-08-31: style the illustrated three-stage creation guide as an
+   in-place Outline focus surface with compact UI v2 Mimo stage cards. */
 
 .story-workspace-collaboration {
   --collaboration-canvas: var(--color-bg-app, #f6efe5);
@@ -243,13 +245,32 @@
   letter-spacing: -.03em;
 }
 
-.story-workspace-collaboration__overview > header > span {
+.story-workspace-collaboration__overview > header > span,
+.story-workspace-collaboration__guide-trigger {
   display: block;
   max-width: 650px;
   margin-top: 11px;
   color: var(--collaboration-muted);
   font-size: 12px;
   line-height: 1.7;
+}
+
+.story-workspace-collaboration__guide-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  color: var(--collaboration-action);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--collaboration-action) 48%, transparent);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.story-workspace-collaboration__guide-trigger b {
+  font-weight: 400;
 }
 
 .story-workspace-collaboration__manuscript {
@@ -346,6 +367,167 @@
 .story-workspace-collaboration__focus-nav button:disabled {
   cursor: default;
   opacity: .35;
+}
+
+.story-workspace-creation-guide {
+  position: relative;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-top: 22px;
+  padding-bottom: 12px;
+}
+
+.story-workspace-creation-guide > .story-workspace-collaboration__focus-nav {
+  margin-bottom: 18px;
+}
+
+.story-workspace-creation-guide__intro {
+  padding: 0 0 14px;
+}
+
+.story-workspace-creation-guide__intro h2 {
+  font-family: 'Excalifont', 'Xiaolai', Georgia, serif;
+  font-size: clamp(26px, 2.4vw, 34px);
+  letter-spacing: -.015em;
+}
+
+.story-workspace-creation-guide__stages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.story-workspace-creation-guide__stage + .story-workspace-creation-guide__stage {
+  margin-top: 0;
+}
+
+.story-workspace-creation-guide__stage > section {
+  display: flex;
+  height: 100%;
+  max-width: none;
+  flex-direction: column;
+  padding: 16px;
+  background: color-mix(in srgb, var(--collaboration-paper) 96%, transparent);
+  border: 1px solid color-mix(in srgb, var(--collaboration-rule) 55%, transparent);
+  border-radius: 12px;
+}
+
+.story-workspace-creation-guide__stage-copy > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.story-workspace-creation-guide__stage-copy > header > span,
+.story-workspace-creation-guide__stage-copy > header > small {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.story-workspace-creation-guide__stage-copy > header > span {
+  color: var(--collaboration-ink);
+  background: color-mix(in srgb, var(--collaboration-action) 13%, var(--collaboration-paper));
+}
+
+.story-workspace-creation-guide__stage-copy > header > small {
+  color: var(--collaboration-action);
+  border: 1px solid color-mix(in srgb, var(--collaboration-action) 34%, transparent);
+}
+
+.story-workspace-creation-guide__stage--future .story-workspace-creation-guide__stage-copy > header > small {
+  color: var(--collaboration-action);
+  border-color: color-mix(in srgb, var(--collaboration-action) 38%, transparent);
+}
+
+.story-workspace-creation-guide__stage h3 {
+  margin: 0;
+  color: var(--collaboration-ink);
+  font-family: 'Excalifont', 'Xiaolai', Georgia, serif;
+  font-size: clamp(18px, 1.7vw, 22px);
+  font-weight: 500;
+  letter-spacing: -.02em;
+}
+
+.story-workspace-creation-guide__stage-copy > p {
+  max-width: 690px;
+  margin: 4px 0 0;
+  color: var(--collaboration-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.story-workspace-creation-guide__stage-copy > ul {
+  display: grid;
+  gap: 0;
+  margin: 9px 0 0;
+  padding: 0;
+  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 65%, transparent);
+  list-style: none;
+}
+
+.story-workspace-creation-guide__stage-copy > ul > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--collaboration-rule) 58%, transparent);
+}
+
+.story-workspace-creation-guide__stage-copy code {
+  overflow-wrap: anywhere;
+  color: var(--collaboration-action);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.story-workspace-creation-guide__stage-copy li > span {
+  color: var(--collaboration-body);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.story-workspace-creation-guide__stage--future .story-workspace-creation-guide__stage-copy code {
+  color: var(--collaboration-action);
+}
+
+.story-workspace-creation-guide figure {
+  order: -1;
+  width: 100%;
+  margin: 0 0 13px;
+  overflow: hidden;
+  background: var(--collaboration-paper);
+  border: 1px solid color-mix(in srgb, var(--collaboration-rule) 62%, transparent);
+  border-radius: 8px;
+}
+
+.story-workspace-creation-guide figure img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+}
+
+.story-workspace-creation-guide__illustration--shared {
+  object-position: center top;
+}
+
+.story-workspace-creation-guide__illustration--repeat {
+  object-position: center center;
+}
+
+.story-workspace-creation-guide__illustration--future {
+  object-position: center bottom;
 }
 
 .story-workspace-collaboration__focus-title dl {
@@ -1230,6 +1412,29 @@
 
   .story-workspace-collaboration__masthead h1 {
     font-size: 27px;
+  }
+
+  .story-workspace-collaboration__overview,
+  .story-workspace-collaboration__focus {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .story-workspace-creation-guide__stage--shared > section {
+    display: flex;
+  }
+
+  .story-workspace-creation-guide__stage > section {
+    padding: 22px 18px;
+  }
+
+  .story-workspace-creation-guide__stages {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .story-workspace-creation-guide__stage-copy > ul > li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
   }
 
   .story-workspace-collaboration__shot-note > div {

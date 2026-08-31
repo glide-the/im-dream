@@ -20,6 +20,11 @@
 //                    Episode coordination behind the dialog's draft/sync switch.
 // [Sync] 2026-08-31: host the canonical file reader inside its matching draft
 //                    Episode focus instead of the sync surface.
+// [Sync] 2026-08-31: summarize storyboard shot count and duration in the EP
+//                    list description instead of repeating a focus section.
+// [Sync] 2026-08-31: add a three-stage creation guide trigger to the Outline
+//                    header and open it through the same in-place focus navigation.
+// [Sync] 2026-08-31: return deep-linked creation guides to their recorded source page.
 
 import {
   useCallback,
@@ -65,7 +70,12 @@ import {
   type StoryWorkspaceEpisodeReviewLocateSelection,
 } from '../../components/story-workspace/episode/StoryWorkspaceEpisodeReviewPanel';
 import { StoryWorkspaceEpisodeShotAuxiliary } from '../../components/story-workspace/episode/StoryWorkspaceEpisodeShotAuxiliary';
+import {
+  STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY,
+  StoryWorkspaceCreationGuide,
+} from '../../components/story-workspace/StoryWorkspaceCreationGuide';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
+import { storyWorkspaceDreamShouldReturnToHistory } from './storyWorkspaceDreamNavigation';
 import {
   storyWorkspaceBuildEpisodeExecutionViewModel,
   storyWorkspaceEpisodeNavigationItems,
@@ -310,6 +320,7 @@ function storyWorkspaceEpisodeArtifactAvailability(
 }
 
 export interface StoryWorkspaceExecutionPageProps {
+  initialFocus?: string | null;
   runId: string;
   episodeId?: string | null;
   onNavigate?: (href: string, notice?: string) => void;
@@ -341,13 +352,17 @@ function EmptyWorkspaceModule({ module }: { module: ExecutionModule }) {
 }
 
 export function StoryWorkspaceExecutionPage({
+  initialFocus = null,
   runId,
   episodeId,
   onNavigate,
   onOpenChatThread,
 }: StoryWorkspaceExecutionPageProps) {
+  const initialFocusKey = initialFocus === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY
+    ? STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY
+    : null;
   const [activeModule, setActiveModule] = useState<ExecutionModule>('outline');
-  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [focusKey, setFocusKey] = useState<string | null>(initialFocusKey);
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<StoryWorkspaceExecutionView>('draft');
   const [focusedArtifact, setFocusedArtifact] =
@@ -375,6 +390,18 @@ export function StoryWorkspaceExecutionPage({
       window.location.assign(href);
     }
   }, [onNavigate]);
+  const returnFromCreationGuide = useCallback(() => {
+    if (
+      initialFocusKey
+      && typeof window !== 'undefined'
+      && window.history.length > 1
+      && storyWorkspaceDreamShouldReturnToHistory(window.history.state)
+    ) {
+      window.history.back();
+      return;
+    }
+    setFocusKey(null);
+  }, [initialFocusKey]);
 
   useEffect(() => {
     void selectRun(runId).catch(() => {
@@ -475,6 +502,7 @@ export function StoryWorkspaceExecutionPage({
   const focusedEntry = focusKey
     ? allEntries.find((entry) => entry.key === focusKey) ?? null
     : null;
+  const creationGuideFocused = focusKey === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY;
   const focusNeighbors = useMemo(() => {
     const focusEntries = focusedEntry?.module === 'Assets'
       ? workspace?.assets ?? []
@@ -485,11 +513,11 @@ export function StoryWorkspaceExecutionPage({
   useEffect(() => {
     setWorkspaceView('draft');
     setActiveModule('outline');
-    setFocusKey(null);
+    setFocusKey(initialFocusKey);
     setFocusedArtifact('storyboard.yaml');
     setPendingArtifactReaderFocus(null);
     setEpisodeExpandedKeys(new Set());
-  }, [runId]);
+  }, [initialFocusKey, runId]);
 
   const handleEpisodeArtifactRead = useCallback((
     artifact: StoryWorkspaceEpisodeReadableArtifact,
@@ -533,18 +561,27 @@ export function StoryWorkspaceExecutionPage({
   }, [episodeDraftEntry?.key, focusKey, focusedArtifact, pendingArtifactReaderFocus, workspaceView]);
 
   useEffect(() => {
-    if (!focusKey || allEntries.some((entry) => entry.key === focusKey)) return;
+    if (
+      !focusKey
+      || focusKey === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY
+      || allEntries.some((entry) => entry.key === focusKey)
+    ) return;
     setFocusKey(null);
   }, [allEntries, focusKey]);
 
   useEffect(() => {
-    if (!focusedEntry) return;
+    if (!focusedEntry && !creationGuideFocused) return;
     const closeFocus = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setFocusKey(null);
+      if (event.key !== 'Escape') return;
+      if (creationGuideFocused) {
+        returnFromCreationGuide();
+        return;
+      }
+      setFocusKey(null);
     };
     window.addEventListener('keydown', closeFocus);
     return () => window.removeEventListener('keydown', closeFocus);
-  }, [focusedEntry]);
+  }, [creationGuideFocused, focusedEntry, returnFromCreationGuide]);
 
   useEffect(() => {
     if (!files.data || storyWorkspaceCanAccessExecution(files.data)) return;
@@ -711,7 +748,12 @@ export function StoryWorkspaceExecutionPage({
         id="story-workspace-draft-surface"
       >
         <div className="story-workspace-collaboration__surface">
-        {focusedEntry ? (
+        {creationGuideFocused ? (
+          <StoryWorkspaceCreationGuide
+            backLabel={initialFocusKey ? '返回上一页' : undefined}
+            onBack={returnFromCreationGuide}
+          />
+        ) : focusedEntry ? (
           <main
             className="story-workspace-collaboration__focus-layer"
             data-execution-depth="focus"
@@ -744,27 +786,21 @@ export function StoryWorkspaceExecutionPage({
                 )}
               </div>
 
-              <section className="story-workspace-collaboration__prose">
-                <span>{focusedEntry.stage === 'storyboards'
-                  ? '分镜概览'
-                  : focusedEntry.content ? '完整资产资料' : '主要信息'}</span>
-                {focusedEntry.stage === 'storyboards' ? (
-                  <p>
-                    {storyboardShots.length > 0
-                      ? `共 ${storyboardShots.length} 个镜头 · ${storyboardDurationSeconds} 秒`
-                      : '当前尚未投影出可阅读镜头。'}
-                  </p>
-                ) : focusedEntry.content ? (
-                  <div className="story-workspace-collaboration__asset-document">
-                    <StoryWorkspaceAssetContent
-                      content={focusedEntry.content}
-                      sourceFile={focusedEntry.sourceFile}
-                    />
-                  </div>
-                ) : (
-                  <p>{focusedEntry.summary || 'Agent 尚未写入摘要。'}</p>
-                )}
-              </section>
+              {focusedEntry.stage !== 'storyboards' && (
+                <section className="story-workspace-collaboration__prose">
+                  <span>{focusedEntry.content ? '完整资产资料' : '主要信息'}</span>
+                  {focusedEntry.content ? (
+                    <div className="story-workspace-collaboration__asset-document">
+                      <StoryWorkspaceAssetContent
+                        content={focusedEntry.content}
+                        sourceFile={focusedEntry.sourceFile}
+                      />
+                    </div>
+                  ) : (
+                    <p>{focusedEntry.summary || 'Agent 尚未写入摘要。'}</p>
+                  )}
+                </section>
+              )}
 
               {focusedEntry.stage === 'storyboards' && (
                 <>
@@ -820,11 +856,18 @@ export function StoryWorkspaceExecutionPage({
               <header>
                 <p>{MODULE_COPY[activeModule].label} · Narrative execution</p>
                 <h2>{activeModule === 'assets' ? '故事资产' : '故事线与叙事点'}</h2>
-                <span>
-                  {activeModule === 'assets'
-                    ? 'Agent 持续同步人物与场景；选择条目可查看聚焦上下文。'
-                    : '选择一条分镜摘要，进入同一工作面内的聚焦协作层。'}
-                </span>
+                {activeModule === 'assets' ? (
+                  <span>Agent 持续同步人物与场景；选择条目可查看聚焦上下文。</span>
+                ) : (
+                  <button
+                    className="story-workspace-collaboration__guide-trigger"
+                    onClick={() => setFocusKey(STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY)}
+                    type="button"
+                  >
+                    查看短剧创作阶段指引
+                    <b aria-hidden="true">→</b>
+                  </button>
+                )}
               </header>
 
               <section
@@ -845,7 +888,11 @@ export function StoryWorkspaceExecutionPage({
                         <span>
                           <small>{entry.stageLabel} · r{entry.revision}</small>
                           <strong>{entry.title}</strong>
-                          <p>{entry.summary || '等待 Agent 补充主要信息。'}</p>
+                          <p>{entry.stage === 'storyboards'
+                            ? entry.key === episodeDraftEntry?.key && storyboardShots.length > 0
+                              ? `${storyboardShots.length} 镜、${storyboardDurationSeconds} 秒。`
+                              : '分镜概览尚未生成。'
+                            : entry.summary || '等待 Agent 补充主要信息。'}</p>
                         </span>
                         <b aria-hidden="true">→</b>
                       </button>
