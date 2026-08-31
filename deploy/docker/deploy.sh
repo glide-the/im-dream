@@ -5,6 +5,7 @@
 # [Sync] 2026-06-12: add platform-scoped Docker release helper with help, dry-run, and check modes.
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from verification URL.
 # [Sync] 2026-06-23: require Mihomo TUN config for the default backend proxy namespace.
+# [Sync] 2026-08-31: remove the unused legacy models.json prerequisite.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -105,7 +106,6 @@ check_prereqs() {
   require_file "${COMPOSE_FILE}" || { warn "Missing Compose file: ${COMPOSE_FILE}"; failed=1; }
   require_file "${CLASH_CONFIG_FILE}" || { warn "Missing Clash config: ${CLASH_CONFIG_FILE}. Copy your profile to deploy/clash/config.yaml and merge deploy/clash/config.tun-snippet.yaml."; failed=1; }
   require_file "${REPO_ROOT}/backend/.env" || { warn "Missing backend/.env. Compose env_file requires it."; failed=1; }
-  require_file "${REPO_ROOT}/backend/models.json" || { warn "Missing backend/models.json. Compose mounts it read-only."; failed=1; }
   require_file "${REPO_ROOT}/backend/Dockerfile" || { warn "Missing backend/Dockerfile."; failed=1; }
   require_file "${REPO_ROOT}/frontend/Dockerfile" || { warn "Missing frontend/Dockerfile."; failed=1; }
   require_file "${REPO_ROOT}/frontend/nginx.conf.template" || { warn "Missing frontend/nginx.conf.template."; failed=1; }

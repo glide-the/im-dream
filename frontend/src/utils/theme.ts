@@ -1,11 +1,12 @@
 // [Input] window.matchMedia for system preference; localStorage for persisted preference.
 // [Output] Theme mode ('light' | 'dark' | 'system') persisted to localStorage; resolved theme applied as data-theme on <html>; change notifications to subscribers.
-// [Pos] single source of truth for theme state in frontend/src/utils; all theme UI (TopNavBar toggle, settings segmented control) must read/write through this module.
+// [Pos] single source of truth for theme state in frontend/src/utils; StoryWorkspaceSidebar and Settings controls read/write through this module.
 // [Sync] 2026-05-29: created; implements initTheme / getTheme / setTheme / toggleTheme.
 // [Sync] 2026-06-01: initTheme no longer persists system preference; removes data-theme when no explicit pref so CSS media query auto-follows system. Added onThemeChange() for live system updates.
 // [Sync] 2026-07-23: unified the two competing theme systems (ink-theme toggle vs dashboard-theme settings control) into this module.
 //                    Added ThemeMode ('system'), onThemeChange subscription, migration of the legacy 'dashboard-theme' key,
 //                    and fixed the "needs two clicks / stale icon" bug caused by ModelConfigSection and TopNavBar each writing data-theme independently.
+// [Sync] 2026-08-31: StoryWorkspaceSidebar is the only app-shell theme toggle after legacy TopNavBar removal.
 
 import { STORAGE_KEYS } from '../constants/storageKeys';
 

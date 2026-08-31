@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.services.admin_gateway.inference import GatewayInferenceError
+from backend.services.admin_gateway.errors import GatewayInferenceError
 from backend.services.admin_gateway.models import GatewayModel, GatewayModelCatalog
 from backend.services.admin_gateway.selection import (
     resolve_platform_model,

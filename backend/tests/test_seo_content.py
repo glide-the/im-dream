@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # [Input] Consume backend seo_content helpers.
-# [Output] Verify public SEO crawler files use configured base URLs and private path exclusions.
+# [Output] Verify public SEO files use configured URLs, curated knowledge links, and private path exclusions.
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-14: created for Codex SEO robots/sitemap/llms content generators.
 # [Sync] 2026-06-14: cover split frontend app URL and backend API origin in llms.txt.
 # [Sync] 2026-06-15: cover root frontend URL after removing /ink-and-memory prefix.
+# [Sync] 2026-08-31: cover the ordered bilingual Blog and Knowledge Base references in llms.txt.
+# [Sync] 2026-08-31: align private-path coverage with removal of /polycli.
 """Unit tests for public SEO content generation."""
 
 from __future__ import annotations
@@ -61,7 +63,6 @@ class TestSeoContent(unittest.TestCase):
         self.assertIn("<loc>https://ink.example.com/</loc>", sitemap)
         self.assertIn("<lastmod>2026-06-14</lastmod>", sitemap)
         self.assertNotIn("/api/", sitemap)
-        self.assertNotIn("/polycli/", sitemap)
 
     def test_llms_txt_describes_frontend_and_private_api_boundary(self):
         llms = build_llms_txt(
@@ -74,6 +75,23 @@ class TestSeoContent(unittest.TestCase):
         self.assertIn("https://ink-backend.suoxya.com/", llms)
         self.assertIn("https://ink-backend.suoxya.com/api/health", llms)
         self.assertIn("Authenticated application APIs under /api/", llms)
+        self.assertIn("## Blog and Knowledge Base", llms)
+        self.assertIn(
+            "https://medium.com/@glide-the/lecture-notes-when-connectors-enter-the-agent-workspace-boundaries-of-state-trust-and-action-e13fc6839b99",
+            llms,
+        )
+        self.assertIn(
+            "https://mp.weixin.qq.com/s/N8guDNouFjWClKXHmWQo-A",
+            llms,
+        )
+        self.assertLess(
+            llms.index("When Connectors Enter the Agent Workspace"),
+            llms.index("Workspace 工作空间状态管理与交互入口设计"),
+        )
+        self.assertNotIn(
+            "https://suoxya.com/blog/connectors-in-agent-workspace-state-trust-action-boundaries",
+            llms,
+        )
 
 
 if __name__ == "__main__":

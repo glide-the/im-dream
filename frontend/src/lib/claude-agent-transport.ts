@@ -26,6 +26,7 @@
  *                      toolMetadata so ToolConfirmationDock can render the
  *                      network-variant confirmation card
  *                      (claude-agent-sandbox-network-permission-tool.md §5).
+ * [Sync]   2026-08-31: preserve structured Agent errorCode/retryability for safe UI mapping.
  *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
@@ -44,7 +45,7 @@
  *   data: {"type": "tool-approval-request", "toolCallId": "...", "toolName": "...", "input": {...}}
  *   data: {"type": "message-final",         "text": "...", "usage": {...}, "sessionId": "..."}
  *   data: {"type": "finish",                "finishReason": "stop"|"error"}
- *   data: {"type": "error",                 "errorText": "..."}
+ *   data: {"type": "error",                 "errorText": "...", "errorCode": "...", "retryable": false}
  *
  * This transport converts those events into the UIMessageChunk objects that
  * @ai-sdk/react's useChat hook expects.
@@ -197,6 +198,31 @@ interface BackendFinish {
 interface BackendError {
   type: 'error';
   errorText: string;
+  errorCode?: string;
+  retryable?: boolean;
+  retryAfterSeconds?: number;
+}
+
+export class ClaudeAgentTransportError extends Error {
+  readonly errorCode: string | null;
+  readonly retryable: boolean | null;
+  readonly retryAfterSeconds: number | null;
+
+  constructor(event: BackendError) {
+    super(event.errorText || 'Claude-agent error');
+    this.name = 'ClaudeAgentTransportError';
+    this.errorCode = typeof event.errorCode === 'string' && event.errorCode
+      ? event.errorCode
+      : null;
+    this.retryable = typeof event.retryable === 'boolean' ? event.retryable : null;
+    this.retryAfterSeconds = Number.isInteger(event.retryAfterSeconds)
+      ? event.retryAfterSeconds ?? null
+      : null;
+  }
+}
+
+export function readClaudeAgentErrorCode(error: unknown): string | null {
+  return error instanceof ClaudeAgentTransportError ? error.errorCode : null;
 }
 
 type BackendEvent =
@@ -456,7 +482,7 @@ function convertEvent(
     }
 
     case 'error': {
-      throw new Error(event.errorText);
+      throw new ClaudeAgentTransportError(event);
     }
   }
 

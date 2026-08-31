@@ -10,6 +10,7 @@
 // [Sync] 2026-08-15: keep those entries collapsed under More until requested.
 // [Sync] 2026-08-15: accept the public default-Deck reconciliation request while
 //                    traversing Chat/Dream/Deck-aware routes; it is not an unexpected mutation.
+// [Sync] 2026-08-31: removed /ink-and-memory visits normalize to canonical Chat without exposing a second app shell.
 
 import { expect, test } from '@playwright/test';
 
@@ -50,6 +51,46 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
 
   const email = 'story-workspace-default@example.test';
   const password = 'story-workspace-default-entry';
+  const writingThreadId = 'thread-writing-panel-e2e';
+  const writingSession = {
+    id: 'current-session',
+    name: 'Writing with linked Thread',
+    labels: [],
+    created_at: '2026-08-31T01:00:00Z',
+    updated_at: '2026-08-31T01:00:00Z',
+    editor_state: {
+      id: 'current-session',
+      createdAt: '2026-08-31T01:00:00Z',
+      selectedState: 'ok',
+      cells: [
+        { id: 'writing-text-before', type: 'text', content: '右侧 Thread Chat 验收。' },
+        {
+          id: 'writing-chat-widget',
+          type: 'widget',
+          widgetType: 'chat',
+          data: {
+            id: 'writing-thread-widget',
+            voiceName: 'market-researcher',
+            voiceConfig: {
+              name: '市场研究员专家',
+              tagline: '分析当前写作材料。',
+              icon: 'brain',
+              color: 'blue',
+            },
+            threadId: writingThreadId,
+            messages: [],
+            createdAt: 1788128400000,
+          },
+        },
+        { id: 'writing-text-after', type: 'text', content: '继续写作。' },
+      ],
+      commentors: [],
+      tasks: [],
+      weightPath: [],
+      overlappedPhrases: [],
+      notFoundPhrases: [],
+    },
+  };
   await page.route(`${WEB_BASE}/api/**`, async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
@@ -64,7 +105,15 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
       return;
     }
     if (pathname === '/api/sessions') {
-      await route.fulfill({ json: request.method() === 'GET' ? { sessions: [] } : { ok: true } });
+      await route.fulfill({
+        json: request.method() === 'GET'
+          ? { sessions: [{ ...writingSession, editor_state: undefined }] }
+          : { ok: true },
+      });
+      return;
+    }
+    if (pathname === '/api/sessions/current-session') {
+      await route.fulfill({ json: writingSession });
       return;
     }
     if (pathname === '/api/sessions/range') {
@@ -121,6 +170,62 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
     }
     if (pathname === '/api/claude-agent/threads') {
       await route.fulfill({ json: { threads: [] } });
+      return;
+    }
+    if (pathname === `/api/claude-agent/threads/${writingThreadId}/messages`) {
+      await route.fulfill({
+        json: {
+          thread: {
+            id: writingThreadId,
+            title: '市场研究写作讨论',
+            created_at: '2026-08-31T01:00:00Z',
+            updated_at: '2026-08-31T01:03:00Z',
+          },
+          messages: [{
+            id: 'writing-thread-assistant-message',
+            role: 'assistant',
+            parts: [{ type: 'text', text: '这是右侧 canonical ChatViewContent。' }],
+            metadata: {},
+            created_at: '2026-08-31T01:03:00Z',
+          }],
+        },
+      });
+      return;
+    }
+    if (pathname === `/api/claude-agent/threads/${writingThreadId}/status`) {
+      await route.fulfill({
+        json: {
+          running: false,
+          lifecycle: 'idle',
+          turn_count: 1,
+          pending_tool_call_ids: [],
+          tool_confirmation_observation: 'known',
+        },
+      });
+      return;
+    }
+    if (pathname === `/api/claude-agent/threads/${writingThreadId}/plugin-load-receipt`) {
+      await route.fulfill({
+        json: {
+          thread_id: writingThreadId,
+          deck_id: null,
+          workspace_found: false,
+          receipt: null,
+          launch_manifest: null,
+        },
+      });
+      return;
+    }
+    if (pathname === `/api/claude-agent/threads/${writingThreadId}/plan`) {
+      await route.fulfill({ json: { exists: false, plan_mode: 'none', content: null } });
+      return;
+    }
+    if (pathname === `/api/claude-agent/threads/${writingThreadId}/todos`) {
+      await route.fulfill({ json: { exists: false, source: null, todos: [], truncated: false } });
+      return;
+    }
+    if (pathname === `/api/claude-agent/threads/${writingThreadId}/subagents`) {
+      await route.fulfill({ json: { tasks: [], updated_at: null } });
       return;
     }
     if (pathname === '/api/story-workspace/dream-runs') {
@@ -196,6 +301,11 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
   await expect(reloadedNavigation.getByRole('button', { name: 'More' })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('textbox', { name: 'Chat input' })).toBeVisible();
 
+  await page.goto(`${WEB_BASE}/ink-and-memory/`);
+  await expect(page).toHaveURL(`${WEB_BASE}/story-workspace/chat`);
+  await expect(page.getByRole('navigation', { name: 'Story Workspace 导航' })).toBeVisible();
+  await expect(page.locator('nav').filter({ hasText: 'WritingTimeline' })).toHaveCount(0);
+
   await page.screenshot({
     path: 'output/playwright/story-workspace-chat-first/login-default-desktop.png',
     fullPage: true,
@@ -220,6 +330,33 @@ test('password login at root opens canonical Story Workspace Chat', async ({ pag
     reloadedNavigation.getByRole('button', { name: 'Writing' }),
   ).toHaveAttribute('aria-current', 'page');
   await expect(page.getByPlaceholder('Start writing...')).toBeVisible();
+  const openWritingThread = page.getByRole('button', { name: 'Chat →' });
+  await openWritingThread.locator('..').hover();
+  await expect(openWritingThread).toBeVisible();
+  await openWritingThread.click();
+  const writingChatPanel = page.getByRole('complementary', { name: 'Writing Thread Chat' });
+  await expect(writingChatPanel).toBeVisible();
+  await expect(writingChatPanel.getByText('这是右侧 canonical ChatViewContent。')).toBeVisible();
+  const resizeWritingChat = writingChatPanel.getByRole('separator', { name: /调整 Writing Chat 宽度/ });
+  const panelBeforeResize = await writingChatPanel.boundingBox();
+  const resizeBox = await resizeWritingChat.boundingBox();
+  expect(panelBeforeResize).not.toBeNull();
+  expect(resizeBox).not.toBeNull();
+  if (panelBeforeResize && resizeBox) {
+    await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(resizeBox.x - 80, resizeBox.y + resizeBox.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(async () => (await writingChatPanel.boundingBox())?.width ?? 0).toBeGreaterThan(
+      panelBeforeResize.width + 40,
+    );
+  }
+  await page.screenshot({
+    path: 'output/playwright/story-workspace-chat-first/writing-thread-chat-resized.png',
+    fullPage: true,
+  });
+  await writingChatPanel.getByRole('button', { name: '关闭 Writing Thread Chat' }).click();
+  await expect(writingChatPanel).toHaveCount(0);
 
   await page.reload();
   const writingNavigation = page.getByRole('navigation', { name: 'Story Workspace 导航' });

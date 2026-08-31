@@ -13,6 +13,7 @@
 # [Sync] 2026-06-23: route backend container egress through a Mihomo TUN proxy namespace.
 # [Sync] 2026-06-24: remove backend extra_hosts because Docker forbids custom
 #                    host mappings with network_mode: service:tun-proxy.
+# [Sync] 2026-08-31: remove the unused legacy models.json mount.
 # [Sync] 2026-08-21: allow a later Alibaba Cloud override to attach tun-proxy
 #                    to the Admin-owned shared platform network.
 
@@ -64,7 +65,6 @@ services:
     network_mode: "service:tun-proxy"
     volumes:
       - ../../backend/data:/app/data
-      - ../../backend/models.json:/app/models.json:ro
     env_file:
       - ../../backend/.env
     environment:

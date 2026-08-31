@@ -1,3 +1,8 @@
+# [Input] Authorized Dream rows, launch provenance, mutable current Agent, stage files, and live Thread facts.
+# [Output] Verify durable Dream re-entry, provenance filtering, titles, ordering, and stale-workspace isolation.
+# [Pos] Unit and route contract for StoryWorkspaceDreamReentryService.
+# [Sync] 2026-08-31: keep a Run visible after a legal same-Deck current-Agent switch.
+
 """Durable Dream re-entry projection and stale-workspace isolation tests."""
 
 from __future__ import annotations
@@ -589,6 +594,26 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             if "FROM workflow_runs AS run" in statement
         )
         self.assertIn("thread.voice_id AS thread_voice_id", authorized)
+
+    def test_real_launch_remains_visible_after_current_agent_switch(self) -> None:
+        value = self._add_run(
+            169,
+            complete=False,
+            real_launch_metadata=True,
+            agent_id="voice-launch",
+        )
+        self.db.execute(
+            "UPDATE chat_thread SET voice_id = ? WHERE id = ?",
+            ("voice-current", "thread-169"),
+        )
+        self.db.commit()
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(
+            [item.story_workspace_run_id for item in response.runs],
+            [value],
+        )
 
     def test_agent_provenance_is_paired_and_matches_the_authorized_thread(self) -> None:
         valid = self._add_run(

@@ -5,6 +5,7 @@
 // [Sync] 2026-08-14: lock system-default inclusion and visible provenance in Community Decks.
 // [Sync] 2026-08-14: lock the actor-default fallback when no shared system row exists.
 // [Sync] 2026-08-16: require the deferred Deck marketplace to stay out of Dream.
+// [Sync] 2026-08-31: assert App has one Story Workspace shell and workspace-owned Chat/Writing surfaces.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -61,14 +62,12 @@ test('router keeps Decks content route-scoped and Dream free of Chat seams', () 
   expect(ROUTER_SOURCE).not.toContain('ChatView');
   expect(ROUTER_SOURCE).not.toContain('ChatWidgetUI');
 
-  const storyWorkspaceStart = APP_SOURCE.indexOf("{currentView === 'story-workspace' && (");
-  const storyWorkspaceBranch = APP_SOURCE.slice(
-    storyWorkspaceStart,
-    APP_SOURCE.indexOf("{currentView === 'writing' && (", storyWorkspaceStart),
-  );
-  expect(storyWorkspaceBranch).toContain('<StoryWorkspaceRouter');
-  expect(storyWorkspaceBranch).toContain('legacyContent={{');
-  expect(storyWorkspaceBranch).not.toContain('dreamContent=');
+  expect(APP_SOURCE).toContain('<StoryWorkspaceRouter');
+  expect(APP_SOURCE).toContain('workspaceContent={{');
+  expect(APP_SOURCE).toContain('<WritingWorkspaceSplitPane');
+  expect(APP_SOURCE).not.toContain("currentView === 'story-workspace'");
+  expect(APP_SOURCE).not.toContain('legacyContent={{');
+  expect(APP_SOURCE).not.toContain('dreamContent=');
 });
 
 test('discovery page removes the duplicate launch form and invented workflow actions', () => {

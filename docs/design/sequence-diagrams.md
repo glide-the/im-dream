@@ -1,5 +1,7 @@
 # Ink & Memory — 业务功能模块时序图
 
+<!-- [Sync] 2026-08-31: replace daily-picture generation with historical read-only Timeline access and remove its scheduler/runtime. -->
+
 > 本文档梳理了 Ink & Memory 项目的核心业务功能模块，并以 Mermaid 时序图形式呈现各模块的交互流程。
 
 ---
@@ -8,15 +10,14 @@
 
 1. [用户认证模块（注册 / 登录）](#1-用户认证模块)
 2. [编辑器会话管理模块](#2-编辑器会话管理模块)
-3. [语音分析模块（AI 旁白评论）](#3-语音分析模块)
+3. [历史语音评论兼容](#3-历史语音评论兼容)
 4. [写作灵感模块（实时写作建议）](#4-写作灵感模块)
 5. [语音对话模块（Chat with Voice）](#5-语音对话模块)
 6. [深度分析模块（回响 / 特质 / 模式）](#6-深度分析模块)
-7. [每日图片生成模块](#7-每日图片生成模块)
+7. [历史图片读取模块](#7-历史图片读取模块)
 8. [卡组与声音管理模块](#8-卡组与声音管理模块)
 9. [好友系统模块](#9-好友系统模块)
 10. [语音输入模块（WebSocket 语音识别）](#10-语音输入模块)
-11. [定时任务模块（每日图片自动生成）](#11-定时任务模块)
 
 ---
 
@@ -194,36 +195,9 @@ sequenceDiagram
 
 ---
 
-## 3. 语音分析模块
+## 3. 历史语音评论兼容
 
-AI 语音角色（Voice）分析用户文本并生成内嵌评论。
-
-```mermaid
-sequenceDiagram
-    actor User as 用户
-    participant FE as Frontend
-    participant Hook as useTextCells
-    participant PolyCLI as PolyCLI /polycli/api/trigger-sync
-    participant Session as analyze_text()
-    participant Analyzer as stateless_analyzer.py
-    participant LLM as LLM API
-    participant DB as database.py
-
-    User->>FE: 编辑文本（触发分析阈值）
-    FE->>Hook: 文本内容变化
-    Hook->>PolyCLI: POST /polycli/api/trigger-sync\n{session: "Analyze Voices", text, applied_comments, ...}
-    PolyCLI->>Session: analyze_text(text, user_id, applied_comments, ...)
-    Session->>DB: load_voices_from_user_decks(user_id)
-    DB-->>Session: 用户启用的声音列表
-    Session->>Analyzer: analyze_stateless(agent, text, applied_comments, voices, ...)
-    Analyzer->>LLM: 调用 LLM 生成评论（含声音角色 system prompt）
-    LLM-->>Analyzer: 新评论（含 voice, phrase, comment）
-    Analyzer-->>Session: {voices: [...], new_voices_added: N}
-    Session-->>PolyCLI: 分析结果
-    PolyCLI-->>Hook: {voices, new_voices_added, status: "completed"}
-    Hook->>FE: 更新 editor state（commentors）
-    FE-->>User: 文本旁显示语音评论卡片
-```
+普通 Writing 编辑只更新本地 `cells` 与 `weightPath`，不再自动调用模型，也不再注册 `analyze_text` PolyCLI session。已保存 Edit Session 中的 `commentors` 继续按原位置只读显示；用户显式发起历史评论对话时，前端复用对应 Voice 的 Claude Thread SSE。
 
 ---
 
@@ -236,24 +210,22 @@ sequenceDiagram
     actor User as 用户
     participant FE as Frontend
     participant Hook as useInspiration
-    participant PolyCLI as PolyCLI /polycli/api/trigger-sync
-    participant Session as get_writing_suggestion()
-    participant DB as database.py
-    participant LLM as LLM API
+    participant Voice as 已启用 Voice 配置
+    participant Thread as Voice Claude Thread
+    participant Agent as POST /api/claude-agent (SSE)
 
     User->>FE: 输入文字（≥10字符）
     FE->>Hook: onTextChange(allText, selectedState)
     Hook->>Hook: 取消上一个定时器，启动 2s 防抖
     Note over Hook: 2 秒后触发
-    Hook->>PolyCLI: POST /polycli/api/trigger-sync\n{session: "Get Writing Suggestion", text, meta_prompt, state_prompt}
-    PolyCLI->>Session: get_writing_suggestion(text, user_id, ...)
-    Session->>DB: load_voices_from_user_decks(user_id)
-    DB-->>Session: 启用的声音列表
-    Session->>Session: random.choice(voices) → 随机选一个声音
-    Session->>LLM: 以该声音角色生成写作建议（≤15字）
-    LLM-->>Session: 建议文本
-    Session-->>PolyCLI: {success, inspiration, voice, voice_key, icon, color}
-    PolyCLI-->>Hook: 灵感数据
+    Hook->>Voice: 从页面已加载配置随机选择一个 enabled Voice
+    Voice-->>Hook: voice metadata + thread_id（可为空）
+    alt Voice 尚未绑定 Thread
+        Hook->>Thread: POST /api/claude-agent/threads
+        Thread-->>Hook: thread_id
+    end
+    Hook->>Agent: resume=true + thread_id + Voice systemPrompt + 当前正文
+    Agent-->>Hook: text-delta...（逐段更新打字机文本） / finish
     Hook->>Hook: 校验文本未变化（防竞态）
     Hook->>FE: setCurrentInspiration(suggestion)
     FE-->>User: 顶部弹出灵感卡片（带语音角色图标）
@@ -270,22 +242,18 @@ sequenceDiagram
     actor User as 用户
     participant FE as Frontend
     participant Hook as useComments
-    participant PolyCLI as PolyCLI /polycli/api/trigger-sync
-    participant Session as chat_with_voice()
-    participant DB as database.py
-    participant LLM as LLM API
+    participant Thread as Voice Claude Thread
+    participant Agent as POST /api/claude-agent (SSE)
 
     User->>FE: 展开评论卡片，输入消息并发送
     FE->>Hook: handleCommentChatSend(commentId, message)
     Hook->>Hook: addCommentChatMessage(commentId, "user", message)
-    Hook->>PolyCLI: POST /polycli/api/trigger-sync\n{session: "Chat with Voice", voice_id, conversation_history,\nuser_message, original_text, meta_prompt, state_prompt}
-    PolyCLI->>Session: chat_with_voice(voice_id, user_id, ...)
-    Session->>DB: load_voices_from_user_decks(user_id)
-    DB-->>Session: 声音配置（含 systemPrompt）
-    Session->>LLM: 构造含对话历史的 prompt，调用 LLM
-    LLM-->>Session: 角色回复（1-3句）
-    Session-->>PolyCLI: {response, voice_name}
-    PolyCLI-->>Hook: 对话回复
+    alt Voice 尚未绑定 Thread
+        Hook->>Thread: POST /api/claude-agent/threads
+        Thread-->>Hook: thread_id
+    end
+    Hook->>Agent: resume=true + thread_id + Voice prompt + 历史评论对话
+    Agent-->>Hook: text-delta... / finish
     Hook->>Hook: addCommentChatMessage(commentId, "assistant", response)
     Hook->>FE: 更新评论对话历史
     FE-->>User: 显示角色回复
@@ -303,21 +271,21 @@ sequenceDiagram
 sequenceDiagram
     actor User as 用户
     participant FE as Frontend (AnalysisView)
-    participant PolyCLI as PolyCLI /polycli/api/trigger-sync
-    participant Session as analyze_echoes()
-    participant DB as database.py
-    participant LLM as LLM API
+    participant TaskAPI as Reflections Task API
+    participant Stream as Reflections SSE
+    participant Agent as Reflections Agent
     participant ReportAPI as POST /api/reports
 
     User->>FE: 点击「分析回响」
-    FE->>PolyCLI: POST /polycli/api/trigger-sync\n{session: "Analyze Echoes", user_id, language}
-    PolyCLI->>Session: analyze_echoes(user_id, language)
-    Session->>DB: get_all_sessions_with_text(user_id)
-    DB-->>Session: 所有笔记文本
-    Session->>LLM: 识别 3-5 个反复出现的主题
-    LLM-->>Session: [{title, description, examples}, ...]
-    Session-->>PolyCLI: {echoes: [...]}
-    PolyCLI-->>FE: 分析结果
+    FE->>TaskAPI: POST /api/reflections/tasks\n{sections: ["echoes"], auto_start: false}
+    TaskAPI-->>FE: task_id
+    FE->>Stream: GET /api/reflections/tasks/{task_id}/events
+    FE->>TaskAPI: POST /api/reflections/tasks/{task_id}/start
+    TaskAPI->>Agent: 执行 echoes 分区分析
+    Agent-->>Stream: reflection.* 增量事件
+    Stream-->>FE: SSE 进度事件
+    FE->>TaskAPI: GET /api/reflections/tasks/{task_id}/results
+    TaskAPI-->>FE: echoes 结果
     FE->>ReportAPI: POST /api/reports {report_type: "echoes", report_data}
     ReportAPI-->>FE: {success: true}
     FE-->>User: 展示回响卡片列表
@@ -325,60 +293,37 @@ sequenceDiagram
 
 ### 6.2 特质分析 / 模式分析
 
-流程与回响分析相同，仅 session 名称、LLM 提示词及返回字段不同：
-- **Analyze Traits** → 返回 `{traits: [{trait, strength, evidence}]}`
-- **Analyze Patterns** → 返回 `{patterns: [{pattern, description, frequency}]}`
+流程与回响分析相同，仅 Reflections section 与返回字段不同：
+- **traits** → 返回 `{traits: [{trait, strength, evidence}]}`
+- **patterns** → 返回 `{patterns: [{pattern, description, frequency}]}`
 
 ---
 
-## 7. 每日图片生成模块
+## 7. 历史图片读取模块
 
-根据用户当日笔记内容，生成一幅极简主义艺术图片。
+Timeline 只读取并展示数据库中已保留的历史图片，不提供生成、重绘或保存入口。
 
 ```mermaid
 sequenceDiagram
     actor User as 用户
     participant FE as Frontend
-    participant API as POST /api/pictures/generate
-    participant Generator as _generate_picture_for_date()
+    participant API as GET /api/pictures/range
     participant DB as database.py
-    participant Claude as Image Description LLM
-    participant ImageModel as Image Generation Model
+    participant FullAPI as GET /api/pictures/{date}/full
 
-    User->>FE: 点击「生成今日图片」
-    FE->>API: POST /api/pictures/generate\n{target_date, timezone, skip_if_exists}
+    User->>FE: 打开 Timeline
+    FE->>API: GET /api/pictures/range?start_date&end_date
+    API->>DB: get_daily_pictures_range(user_id, ...)
+    DB-->>API: 历史缩略图
+    API-->>FE: {pictures: [...]}
+    FE-->>User: 展示历史图片
 
-    API->>Generator: _generate_picture_for_date(user_id, date, ...)
-
-    alt skip_if_exists=true 且已有图片
-        Generator->>DB: get_daily_pictures_range(user_id, date, ...)
-        DB-->>Generator: 已有图片
-        Generator-->>API: {skipped: true, image_base64: ...}
-    else 需要生成
-        Generator->>DB: extract_text_from_sessions_on_date(user_id, date, timezone)
-        DB-->>Generator: 当日笔记文本
-
-        alt 无笔记内容
-            Generator-->>API: {skipped: true, reason: "no notes for date"}
-        else 有笔记内容
-            Generator->>DB: 获取近 5 张图片的 prompt（避免重复）
-            Generator->>Claude: 将笔记转换为极简图片描述（1-2句）
-            Claude-->>Generator: image_description
-
-            loop 最多重试 N 次
-                Generator->>ImageModel: 根据描述生成图片
-                ImageModel-->>Generator: base64 PNG 数据
-            end
-
-            Generator->>Generator: PNG → JPEG 压缩 + 生成缩略图
-            Generator->>DB: save_daily_picture(user_id, date, image_base64, thumbnail_base64, prompt)
-            DB-->>Generator: OK
-            Generator-->>API: {image_base64, thumbnail_base64, prompt, date}
-        end
-    end
-
-    API-->>FE: 图片数据
-    FE-->>User: 展示生成的图片
+    User->>FE: 点击历史缩略图
+    FE->>FullAPI: GET /api/pictures/{date}/full
+    FullAPI->>DB: get_daily_picture_full(user_id, date)
+    DB-->>FullAPI: full_image_base64
+    FullAPI-->>FE: {image_base64}
+    FE-->>User: 展示全尺寸图片
 ```
 
 ---
@@ -569,45 +514,6 @@ sequenceDiagram
 
 ---
 
-## 11. 定时任务模块
-
-每日午夜（Asia/Shanghai 时区）自动为所有当日有笔记的用户生成时间线图片。
-
-```mermaid
-sequenceDiagram
-    participant Scheduler as APScheduler (每日 00:00)
-    participant Job as daily_generation_job()
-    participant Task as generate_timeline_images_for_date()
-    participant DB as database.py
-    participant Generator as generate_for_user()
-    participant ImageGen as _generate_picture_for_date()
-    participant LLM as LLM / Image API
-
-    Scheduler->>Job: 触发（每日 00:00 Asia/Shanghai）
-    Job->>Task: generate_timeline_images_for_date(yesterday, timezone)
-
-    Task->>DB: get_users_with_activity_on_date(date, timezone)
-    DB-->>Task: [user_id_1, user_id_2, ...]
-
-    loop 每个有活动的用户（最多 5 个并发）
-        Task->>DB: extract_text_from_sessions_on_date(user_id, date, timezone)
-        DB-->>Task: 当日笔记文本
-
-        Task->>Generator: generate_for_user(user_id, text, date, timezone)
-        Generator->>ImageGen: generate_daily_picture(user_id, date, skip_if_exists=True, ...)
-        ImageGen->>LLM: 生成图片描述 + 生成图片
-        LLM-->>ImageGen: image_base64
-        ImageGen->>DB: save_daily_picture(user_id, date, image_base64, ...)
-        DB-->>Generator: OK
-        Generator-->>Task: {success: true}
-    end
-
-    Task-->>Job: {total, success, failed, skipped}
-    Note over Scheduler: 等待下一个午夜触发
-```
-
----
-
 ## 附录：系统架构概览
 
 ```mermaid
@@ -621,13 +527,11 @@ graph TB
     subgraph Backend["后端 (FastAPI + Python)"]
         AuthAPI["认证 API<br/>/api/register<br/>/api/login"]
         SessionAPI["会话 API<br/>/api/sessions"]
-        PictureAPI["图片 API<br/>/api/pictures"]
+        PictureAPI["历史图片只读 API<br/>/api/pictures"]
         PrefsAPI["偏好 API<br/>/api/preferences"]
         DeckAPI["卡组 API<br/>/api/decks<br/>/api/voices"]
         FriendAPI["好友 API<br/>/api/friends"]
-        PolyCLI["PolyCLI Sessions<br/>analyze_text<br/>chat_with_voice<br/>get_writing_suggestion<br/>analyze_echoes/traits/patterns<br/>generate_daily_picture"]
         WSEndpoint["WebSocket<br/>/ws/speech-recognition"]
-        Scheduler["定时任务<br/>APScheduler"]
     end
 
     subgraph Storage["存储"]
@@ -636,12 +540,10 @@ graph TB
 
     subgraph External["外部服务"]
         LLM["LLM API<br/>(Claude / 其他)"]
-        ImgAPI["图片生成 API"]
         ASR["DashScope ASR"]
     end
 
     Frontend --> Backend
     Backend --> Storage
     Backend --> External
-    Scheduler --> Backend
 ```

@@ -1,3 +1,8 @@
+<!-- [Input] Actor-owned Dream Run projection, canonical Chat Thread history/status, and mutable same-Deck next-turn Agent selection. -->
+<!-- [Output] Dream discovery, re-entry, Chat switching, Agent workbench, and input-state contract. -->
+<!-- [Pos] Story Workspace re-entry source of truth. -->
+<!-- [Sync] 2026-08-31: separate immutable launch Agent provenance from the mutable current Thread Agent and link conflict recovery. -->
+
 # Dream workspace and re-entry
 
 ## Eligible run discovery
@@ -10,6 +15,12 @@ Retry attempts are presented as one chain. The server follows
 `retry_of_run_id`, validates frozen provenance and returns the single
 unsuperseded leaf. Broken/cyclic graphs or multiple independent leaves fail
 closed instead of guessing.
+
+The launch Agent remains part of immutable source provenance and its request
+fingerprint. The Thread's current `voice_id` is the next-turn Agent and may
+change to another enabled Agent in the same Deck. A legal change does not hide
+the Run or invalidate re-entry; source top-level/nested Agent fields must still
+match each other and their launch fingerprint.
 
 Empty results and technical failure are different states: empty offers launch;
 failure keeps recovery controls and does not claim there are no Runs.
@@ -82,3 +93,8 @@ Input enablement comes from the canonical thread state. A genuinely running main
 turn disables duplicate send and exposes Stop. Historical subagent content or a
 terminal business Run alone does not block input. Private system command rows
 follow Chat visibility rules and never create blank bubbles.
+
+If the server cannot prove one safe Dream authority, it keeps the binding
+protection and returns the structured Chat error contract defined in
+[Thread binding conflict and recovery](./thread-binding-conflict-recovery.md).
+Reloading reads history/status only; it never changes a binding or retries a turn.

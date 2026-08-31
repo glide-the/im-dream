@@ -9,6 +9,7 @@
                     public HTTPS Admin origin required by runtime validation.
 [Sync] 2026-08-22: document the ECS backend block-I/O budget and the production
                     read-storm evidence that requires it.
+[Sync] 2026-08-31: remove the deleted legacy models.json prerequisite.
 -->
 
 阿里云 ECS 直接使用本路径，不维护另一套发布脚本。跨 Dream/Admin 两仓库的
@@ -379,6 +380,6 @@ curl -fsS http://127.0.0.1:8765/api/health
 
 ## 前置条件与边界
 
-本地需要 `ssh`、`rsync`，仓库内需要 `backend/.env` 与 `backend/models.json`。远端需要已安装并启动 Docker、已安装 `docker-compose`，且部署用户有权限访问 Docker daemon。
+本地需要 `ssh`、`rsync`，仓库内需要 `backend/.env`。远端需要已安装并启动 Docker、已安装 `docker-compose`，且部署用户有权限访问 Docker daemon。
 
 Remote SSH 不创建云资源，不读取 `.cloud-env` / `.storage-env`，不管理 GCS 或 Secret Manager。云厂商安全组仍需放行主机 nginx 的 `80` / `443`。

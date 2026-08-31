@@ -16,6 +16,8 @@
 # [Sync] 2026-08-22: cover startup preservation of Claude Agent resource-admission keys.
 # [Sync] 2026-08-28: cover composition-owned higher-revision replacement,
 #                    same-revision diagnostics-only refresh, and lifecycle ordering.
+# [Sync] 2026-08-31: remove obsolete legacy-session, image scheduler, and stateless analyzer stubs;
+#                    assert pictures are read-only and the legacy mount is absent.
 # [Sync] 2026-08-23: cover fail-closed custom SDK distribution validation before
 #                    the Claude Agent factory starts.
 # [Sync] 2026-08-28: pin startup diagnostics to SDK 0.2.144 and Runtime 0.1.3.
@@ -156,43 +158,9 @@ def _stub_deep(dotted_path: str, **attrs):
     return mod
 
 
-# apscheduler
-if "apscheduler" not in sys.modules:
-    class _FakeScheduler:
-        def add_job(self, *a, **k): pass
-        def start(self): pass
-        def shutdown(self, *a, **k): pass
-
-    _stub_deep("apscheduler")
-    _stub_deep("apscheduler.schedulers")
-    _stub_deep("apscheduler.schedulers.asyncio", AsyncIOScheduler=_FakeScheduler)
-
-# polycli
-if "polycli" not in sys.modules:
-    def _session_def(*a, **k):
-        def _dec(fn): return fn
-        return _dec
-
-    _stub_deep("polycli")
-    _stub_deep("polycli.orchestration")
-    _stub_deep("polycli.orchestration.session_registry",
-               session_def=_session_def, get_registry=lambda: None)
-    _stub_deep("polycli.integrations")
-    _stub_deep("polycli.integrations.fastapi", mount_control_panel=lambda *a, **k: None)
-    _stub_deep("polycli", PolyAgent=object)
-
 # dashscope / speech recognition
 if "dashscope" not in sys.modules:
     _stub_deep("dashscope")
-
-# stateless_analyzer (local module, may not be importable without deps)
-if "stateless_analyzer" not in sys.modules:
-    _stub_deep("stateless_analyzer", analyze_stateless=lambda *a, **k: {})
-
-# scheduler (local module)
-if "scheduler" not in sys.modules:
-    _stub_deep("scheduler", daily_generation_job=lambda: None)
-
 
 # ---------------------------------------------------------------------------
 # Try to import server — skip all tests if full deps not installed
@@ -322,6 +290,30 @@ class TestClaudeAgentRouteRegistration(unittest.TestCase):
 
     def test_post_thread_stop(self):
         self.assertTrue(self._has_route("POST", "/api/claude-agent/threads/{thread_id}/stop"))
+
+
+@_skip_if_no_server
+class TestHistoricalPictureRouteRegistration(unittest.TestCase):
+    """Historical pictures remain readable without any generation or save route."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.routes = {
+            (method, route.path)
+            for route in _SERVER_MODULE.app.routes
+            if hasattr(route, "path")
+            for method in (getattr(route, "methods", None) or set())
+        }
+
+    def test_historical_picture_reads_remain_registered(self):
+        self.assertIn(("GET", "/api/pictures"), self.routes)
+        self.assertIn(("GET", "/api/pictures/range"), self.routes)
+        self.assertIn(("GET", "/api/pictures/{date}/full"), self.routes)
+
+    def test_picture_mutations_and_legacy_runtime_are_absent(self):
+        self.assertNotIn(("POST", "/api/pictures"), self.routes)
+        self.assertNotIn(("POST", "/api/pictures/generate"), self.routes)
+        self.assertFalse(any(path.startswith("/polycli") for _, path in self.routes))
 
 
 @_skip_if_no_server

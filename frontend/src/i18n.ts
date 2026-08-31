@@ -19,6 +19,8 @@
 // [Sync] 2026-08-23: add the inert Workspace-image fallback used when a protected asset cannot be embedded in Chat export.
 // [Sync] 2026-08-23: localize the shared Mermaid/Workspace enlarge, download, close, and zoom controls.
 // [Sync] 2026-08-29: add truthful Editor write failure and retained-input recovery copy.
+// [Sync] 2026-08-31: add safe structured Chat turn-error and Thread reload copy.
+// [Sync] 2026-08-31: remove the unused daily-picture generation status copy.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -327,7 +329,6 @@ const resources = {
       },
       timeline: {
         today: 'Today',
-        generating: 'Generating...',
         entryCount_one: '{{count}} entry',
         entryCount_other: '{{count}} entries',
         friendSelector: {
@@ -662,6 +663,14 @@ const resources = {
         },
         panel: {
           scrollToBottom: 'Scroll to bottom'
+        },
+        turnError: {
+          bindingConflictTitle: 'This conversation cannot continue the Dream yet',
+          bindingConflictDescription: 'To avoid writing into the wrong creative task, the Agent did not start. Your message and attachments remain in the conversation. Reload the conversation; if it is still unavailable, start a new conversation from the top bar.',
+          genericTitle: 'The message was not processed',
+          genericDescription: 'Reload the conversation to check its latest state before deciding whether to send again.',
+          reload: 'Reload conversation',
+          reloading: 'Reloading…'
         },
         planPanel: {
           planning: 'Planning',
@@ -1147,7 +1156,6 @@ const resources = {
       },
       timeline: {
         today: '今天',
-        generating: '生成中...',
         entryCount_one: '{{count}} 条记录',
         entryCount_other: '{{count}} 条记录',
         friendSelector: {
@@ -1480,6 +1488,14 @@ const resources = {
         },
         panel: {
           scrollToBottom: '滚动到底部'
+        },
+        turnError: {
+          bindingConflictTitle: '当前对话暂时无法继续创作',
+          bindingConflictDescription: '为避免把内容写入错误的创作任务，本次 Agent 未开始处理。消息和附件已保留在对话记录中。请重新加载对话状态；如果仍无法继续，可从页面顶部新建对话。',
+          genericTitle: '消息处理未完成',
+          genericDescription: '请重新加载对话以确认最新状态，再决定是否重新发送。',
+          reload: '重新加载对话',
+          reloading: '正在重新加载…'
         },
         planPanel: {
           planning: '规划中',

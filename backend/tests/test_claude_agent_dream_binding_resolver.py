@@ -1,3 +1,8 @@
+# [Input] Dream Run rows, launch provenance, mutable Thread Agent selection, and retry-graph variants.
+# [Output] Verify actor-scoped Dream context resolution and fail-closed binding integrity rules.
+# [Pos] Unit contract for services/story_workspace/dream_thread_binding.py.
+# [Sync] 2026-08-31: prove a legal current-Agent switch preserves launch provenance and uses the new Agent.
+
 from __future__ import annotations
 
 import copy
@@ -155,6 +160,20 @@ class TestDreamRunBindingResolver(unittest.TestCase):
                 "thread_id": "thread-1",
                 "actor_id": "7",
             },
+        )
+
+    def test_current_agent_may_differ_from_immutable_launch_agent(self) -> None:
+        context = DreamRunBindingResolver(_DB([attempt()])).resolve(
+            actor_id=7,
+            thread_id="thread-1",
+            owned_thread={**self.thread, "voice_id": "voice-2"},
+        )
+
+        self.assertEqual(context.workflow_run_id, RUN_A)
+        self.assertEqual(context.agent_id, "voice-2")
+        self.assertEqual(
+            attempt()["source_message_metadata"]["agentId"],
+            "voice-1",
         )
 
     def test_linear_retry_chain_selects_unique_unsuperseded_leaf(self) -> None:

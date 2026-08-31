@@ -17,6 +17,7 @@
 #                    verified Docker build cache during routine releases.
 # [Sync] 2026-08-22: keep local virtualenvs, QA artifacts, and generated output
 #                    out of the Remote SSH release tree on small ECS disks.
+# [Sync] 2026-08-31: remove the unused legacy models.json prerequisite.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -332,7 +333,6 @@ check_local_prereqs() {
   require_file "${REPO_ROOT}/deploy/remote-ssh/setup-storage.sh" || { warn "Missing remote storage setup script."; failed=1; }
   require_file "${REPO_ROOT}/deploy/remote-ssh/sync-data.sh" || { warn "Missing remote data sync script."; failed=1; }
   require_file "${REPO_ROOT}/backend/.env" || { warn "Missing backend/.env. Remote Compose env_file requires it."; failed=1; }
-  require_file "${REPO_ROOT}/backend/models.json" || { warn "Missing backend/models.json. Remote Compose mounts it read-only."; failed=1; }
   require_file "${REPO_ROOT}/backend/Dockerfile" || { warn "Missing backend/Dockerfile."; failed=1; }
   require_file "${REPO_ROOT}/frontend/Dockerfile" || { warn "Missing frontend/Dockerfile."; failed=1; }
   require_file "${REPO_ROOT}/frontend/docker-entrypoint.sh" || { warn "Missing frontend/docker-entrypoint.sh."; failed=1; }

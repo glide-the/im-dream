@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// [Input] Existing local Dream/Admin/PostgreSQL state and a named real business account.
+// [Output] Run the isolated-clone real-model Story Workspace acceptance workflow.
+// [Pos] Root real-model clone orchestration script.
+// [Sync] 2026-08-31: stop injecting the retired inference model alias.
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -876,7 +880,6 @@ try {
     FILE_STORAGE_LOCAL_DIR: localFilesRoot,
     INK_GATEWAY_ENABLED: '1',
     INK_GATEWAY_BASE_URL: adminBaseUrl,
-    INK_GATEWAY_TEXT_MODEL_ALIAS: targetModelAlias,
     INK_ADMIN_PRODUCT_API_BASE_URL: adminBaseUrl,
     INK_ADMIN_PRODUCT_ORIGIN: productOrigin,
     INK_WORKFLOW_TOKEN_SECRET: `workflow_${randomBytes(48).toString('base64url')}`,

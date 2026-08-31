@@ -9,6 +9,7 @@
 //                    original positions and continue using the existing routes.
 // [Sync] 2026-08-15: assert those restored entries live under the More disclosure.
 // [Sync] 2026-08-16: allow the restored Deck maintenance popup to hand its selected Agent to Chat.
+// [Sync] 2026-08-31: lock the single Story Workspace shell, unchanged ChatWidgetUI layout, and resizable Writing Thread Chat handoff.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam reads source only; browser app omits Node types.
@@ -21,6 +22,9 @@ const PATHS = readFileSync(new URL('../../../../router/storyWorkspacePath.ts', i
 const SUBSCRIPTION = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSubscriptionPage.tsx', import.meta.url), 'utf8');
 const SETTINGS = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSettingsPage.tsx', import.meta.url), 'utf8');
 const DREAM_LAUNCH = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceDreamLaunch.tsx', import.meta.url), 'utf8');
+const WRITING_SPLIT = readFileSync(new URL('../WritingWorkspaceSplitPane.tsx', import.meta.url), 'utf8');
+const CHAT_WIDGET = readFileSync(new URL('../../../ChatWidgetUI.tsx', import.meta.url), 'utf8');
+const RESIZE_HOOK = readFileSync(new URL('../../../../hooks/useResizableRightPanel.ts', import.meta.url), 'utf8');
 
 test('sidebar restores legacy routes under an accessible More disclosure', () => {
   expect(SIDEBAR).toContain("dream: '/story-workspace/dream'");
@@ -133,28 +137,46 @@ test('subscription moves into the focused Settings layout', () => {
   expect(SETTINGS).toContain('<section aria-labelledby=');
   expect(SETTINGS).toContain('className="story-workspace-settings__section"');
   expect(SETTINGS).toContain('role="region"');
-  expect(SETTINGS).toContain('aria-label="返回应用"');
+  expect(SETTINGS).toContain("aria-label={t('settings.workspace.backToApp')}");
   expect(SETTINGS).toContain("onNavigate('/story-workspace/dream')");
   expect(ROUTER).toContain('showSidebar={!isSettingsRoute}');
   expect(ROUTER).toContain("|| activeRoute === 'subscription'");
   expect(ROUTER).toContain('workflowContext={isDreamRoute || isSettingsRoute');
 });
 
-test('legacy page links render through the workspace router main region', () => {
+test('restored page links stay in the Story Workspace shell', () => {
   expect(PATHS).toContain("writing: '/story-workspace/writing'");
   expect(PATHS).toContain("timeline: '/story-workspace/timeline'");
   expect(PATHS).toContain("analysis: '/story-workspace/analysis'");
   expect(PATHS).toContain("chat: '/story-workspace/chat'");
-  expect(ROUTER).toContain('legacyContent');
+  expect(ROUTER).toContain('workspaceContent');
   expect(ROUTER).toContain("case 'writing':");
   expect(ROUTER).toContain("case 'timeline':");
   expect(ROUTER).toContain("case 'analysis':");
   expect(ROUTER).toContain("case 'chat':");
-  expect(APP).toContain('legacyContent={{');
-  expect(APP).toContain('storyWorkspaceLegacyView');
+  expect(APP).toContain('workspaceContent={{');
+  expect(APP).toContain('writingRouteActive');
   expect(APP).toContain('onRouteChange={handleStoryWorkspaceRouteChange}');
   expect(APP).toContain('Start writing...');
-  expect(APP).not.toContain('onGlobalNavigate={handleAppViewChange}');
+  expect(APP).not.toContain('handleAppViewChange');
+  expect(APP).not.toContain('TopNavBar');
+  expect(APP).not.toContain("currentView === 'writing'");
+});
+
+test('writing keeps the existing ChatWidgetUI layout and opens canonical Chat in one resizable right panel', () => {
+  expect(APP).toContain('<WritingWorkspaceSplitPane');
+  expect(APP).toContain('requestedThreadId={requestedChatThreadId}');
+  expect(APP).toContain('handleOpenWritingChatThread(threadId');
+  expect(CHAT_WIDGET).toContain('Chat →');
+  expect(CHAT_WIDGET).toContain('onSendMessage');
+  expect(CHAT_WIDGET).toContain('onToggleCollapse');
+  expect(CHAT_WIDGET).toContain('streamingText');
+  expect(APP).toContain('onOpenChat={(cell.data as ChatWidgetData).threadId');
+  expect(WRITING_SPLIT).toContain('role="separator"');
+  expect(WRITING_SPLIT).toContain('resize.handleResizePointerDown');
+  expect(WRITING_SPLIT).toContain('resize.handleResizeKeyDown');
+  expect(RESIZE_HOOK).toContain('export function useResizableRightPanel');
+  expect(RESIZE_HOOK).toContain('window.localStorage.setItem(storageKey');
 });
 
 test('workspace user area owns the floating logout menu', () => {

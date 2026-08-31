@@ -14,7 +14,7 @@ from typing import Any, Mapping, Protocol
 import requests
 
 from .config import AdminGatewayConfig, AdminGatewayConfigurationError
-from .inference import GatewayInferenceError
+from .errors import GatewayInferenceError
 from .token import issue_gateway_subject_token
 
 

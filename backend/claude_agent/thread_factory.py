@@ -20,6 +20,7 @@
 #                    lease before context/SDK startup and release it in every terminal path.
 # [Sync] 2026-08-28: inject the last-known-good global Claude Code Runtime snapshot
 #                    into every service-built turn without querying PostgreSQL on-path.
+# [Sync] 2026-08-31: emit safe public text beside structured codes for binding-integrity failures.
 
 """Claude Agent Thread Factory — 四阶段会话编排入口."""
 from __future__ import annotations
@@ -505,14 +506,21 @@ class ClaudeAgentThreadFactory:
             logger.exception("Turn setup/execution failed for session_id=%s", session_id)
             if not bus.is_done:
                 try:
-                    error_text = _format_exception_for_sse(exc)
+                    raw_public_message = getattr(exc, "public_message", None)
+                    public_message = (
+                        raw_public_message
+                        if isinstance(raw_public_message, str)
+                        and raw_public_message.strip()
+                        else None
+                    )
+                    error_text = public_message or _format_exception_for_sse(exc)
                     raw_error_code = getattr(exc, "code", None)
                     error_code = (
                         raw_error_code
                         if isinstance(raw_error_code, str) and raw_error_code
                         else None
                     )
-                    if error_code:
+                    if error_code and public_message is None:
                         error_text = f"[{error_code}] {error_text}"
                     retryable = getattr(exc, "retryable", None)
                     if not isinstance(retryable, bool):

@@ -7,7 +7,7 @@ import jwt
 import pytest
 
 from backend.services.admin_gateway.config import AdminGatewayConfig
-from backend.services.admin_gateway.inference import GatewayInferenceError
+from backend.services.admin_gateway.errors import GatewayInferenceError
 from backend.services.admin_gateway.models import GatewayModelCatalogClient
 
 

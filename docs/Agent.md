@@ -1,5 +1,7 @@
 # Agent Interaction Patterns
 
+<!-- [Sync] 2026-08-31: historical comment chat now reuses the Voice Claude Agent Thread SSE contract; the stateless legacy transport is removed. -->
+
 This document describes the interaction patterns and responsibilities for all AI-agent
 features in **Ink & Memory**.  Read this when adding or modifying any agent-driven UI.
 
@@ -18,7 +20,7 @@ features in **Ink & Memory**.  Read this when adding or modifying any agent-driv
 | `@`-picker in editor     | claude-agent       | Stay in Writing view | `voice.system_prompt` (inline widget) |
 | "Chat →" button in widget | claude-agent      | Open Chat view | `voice.system_prompt` (forwarded) |
 | Deck Manager "Chat" btn  | claude-agent       | Open Chat view | `voice.system_prompt`            |
-| Comments chat            | chatWithVoice (polycli) | Stay inline | voice ID lookup on backend  |
+| Comments chat            | claude-agent       | Stay inline | selected Voice system prompt |
 
 ---
 
@@ -80,9 +82,9 @@ systemPrompt: data.voiceConfig.tagline
 
 ## Comments Chat
 
-Powered by `chatWithVoice` (PolyCLI sync endpoint).  Stateless — no thread, no history.
-Used exclusively by the Comments feature (`handleCommentChatSend`).  Do **not** use this
-for Deck voice interactions.
+Powered by the same Voice Claude Agent Thread SSE transport as current Writing/Chat
+interactions. The Comments surface remains inline while the selected Voice's thread
+preserves conversation history.
 
 ---
 

@@ -35,6 +35,7 @@
 //                    button that opens the matching subagent sidebar item.
 // [Sync] 2026-08-22: bind assistant/user Markdown workspace:// references to this
 //                    list's already-owned Thread ID.
+// [Sync] 2026-08-31: replace raw turn exceptions with accessible structured error cards and reload recovery.
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -49,12 +50,15 @@ import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmat
 import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 import { useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { SubagentToolButton } from './SubagentPanel';
+import { readClaudeAgentErrorCode } from '../../lib/claude-agent-transport';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
   threadId: string;
   isLoading: boolean;
   error?: Error | null;
+  onReloadAfterError?: () => void | Promise<void>;
+  isReloadingAfterError?: boolean;
   addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
   shouldShowLoadingIndicator?: boolean;
   readonly?: boolean;
@@ -241,11 +245,13 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled }: ChatMessageListProps) {
   const { t } = useTranslation();
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
+  const errorCode = readClaudeAgentErrorCode(error);
+  const isDreamBindingConflict = errorCode === 'DREAM_THREAD_BINDING_CONFLICT';
 
   const handleCopy = async (id: string, text: string) => {
     try {
@@ -524,7 +530,51 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
       })}
 
       {shouldShowLoadingIndicator ? <div style={{ alignSelf: 'flex-start', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '0.8rem 0.95rem', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>Thinking…</div> : null}
-      {error ? <div style={{ alignSelf: 'flex-start', maxWidth: '80%', borderRadius: '18px', padding: '0.8rem 0.95rem', background: 'color-mix(in srgb, var(--color-state-error) 10%, transparent)', color: 'var(--color-state-error)', fontSize: '0.85rem' }}>Error: {error.message}</div> : null}
+      {error ? (
+        <div
+          role="alert"
+          data-chat-turn-error={isDreamBindingConflict ? 'dream-thread-binding-conflict' : 'generic'}
+          style={{
+            alignSelf: 'flex-start',
+            width: 'min(100%, 42rem)',
+            maxWidth: '100%',
+            boxSizing: 'border-box',
+            borderRadius: '18px',
+            border: '1px solid color-mix(in srgb, var(--color-state-error) 24%, transparent)',
+            padding: '0.9rem 1rem',
+            background: 'color-mix(in srgb, var(--color-state-error) 8%, var(--color-bg-paper))',
+            color: 'var(--color-text-primary)',
+            fontSize: '0.85rem',
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>
+            {t(isDreamBindingConflict ? 'chat.turnError.bindingConflictTitle' : 'chat.turnError.genericTitle')}
+          </div>
+          <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+            {t(isDreamBindingConflict ? 'chat.turnError.bindingConflictDescription' : 'chat.turnError.genericDescription')}
+          </p>
+          {onReloadAfterError ? (
+            <button
+              type="button"
+              onClick={() => void onReloadAfterError()}
+              disabled={isReloadingAfterError}
+              style={{
+                marginTop: '0.75rem',
+                minHeight: '2.25rem',
+                border: '1px solid var(--color-border-paper)',
+                borderRadius: '999px',
+                padding: '0.35rem 0.85rem',
+                background: 'var(--color-bg-surface-solid)',
+                color: 'var(--color-text-primary)',
+                cursor: isReloadingAfterError ? 'wait' : 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              {t(isReloadingAfterError ? 'chat.turnError.reloading' : 'chat.turnError.reload')}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

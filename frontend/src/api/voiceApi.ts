@@ -17,6 +17,10 @@
 //                    settings-style management surface; remove active marketplace list/publish transports.
 // [Sync] 2026-08-16: consume capability-backed Deck content vN and draft state in list/detail DTOs.
 // [Sync] 2026-08-17: carry server sharing-policy facts only for system-initialized Deck display.
+// [Sync] 2026-08-31: route debounced Writing inspiration through the existing
+//                    Claude Agent SSE voice thread instead of the retired PolyCLI session.
+// [Sync] 2026-08-31: remove the automatic analyze_text transport retired from EditorEngine.
+// [Sync] 2026-08-31: remove the retired daily-picture generation and save transports; Timeline is read-only for historical pictures.
 /**
  * API client for voice analysis backend - FastAPI sync API version
  * [Sync] 2026-06-01: normalize user_sessions.labels in session API responses for frontend display.
@@ -26,7 +30,7 @@
 
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { API_BASE } from '../lib/apiBase';
-import type { Commentor, EditorState } from '../engine/EditorEngine';
+import type { EditorState } from '../engine/EditorEngine';
 
 // ========== Inline Types (workaround for Vite bug) ==========
 export interface VoiceConfig {
@@ -193,85 +197,6 @@ export async function getDefaultVoices(): Promise<Record<string, Omit<VoiceConfi
   return await response.json() as Record<string, Omit<VoiceConfig, 'name' | 'enabled'>>;
 }
 
-interface SyncResponse {
-  success: boolean;
-  result?: {
-    voices?: Array<{
-      phrase: string;
-      voice_id: string;  // NEW: Voice ID for lookup
-      voice: string;     // Display name
-      comment: string;
-      icon: string;
-      color: string;
-    }>;
-    new_voices_added?: number;
-    status?: string;
-    response?: string;  // For chat responses
-    voice_name?: string;  // For chat responses
-    echoes?: ReflectionResult[];  // For echoes analysis
-    traits?: ReflectionResult[];  // For traits analysis
-    patterns?: ReflectionResult[];  // For patterns analysis
-    image_base64?: string;  // For image generation
-    thumbnail_base64?: string;  // Thumbnail for image generation
-    prompt?: string;  // Image generation prompt
-    date?: string;
-    error?: string;
-    reason?: string;
-  };
-  error?: string;
-  exec_id?: string;  // Still included for debugging
-}
-
-/**
- * Analyze text and return voices with metadata (PolyCLI direct call)
- * Backend loads voice configs from database using user_id from JWT token
- */
-export async function analyzeText(
-  text: string,
-  sessionId: string,
-  appliedComments?: Commentor[],
-  metaPrompt?: string,
-  statePrompt?: string,
-  overlappedPhrases?: string[],
-  notFoundPhrases?: string[]
-) {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-
-  const response = await fetch(`${API_BASE}/polycli/api/trigger-sync`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      session_id: 'analyze_text',  // Maps to function name in backend (NOT the display name)
-      params: {
-        text,
-        editor_session_id: sessionId,  // Renamed to avoid conflict with PolyCLI routing session_id
-        applied_comments: appliedComments || [],
-        meta_prompt: metaPrompt || '',
-        state_prompt: statePrompt || '',
-        overlapped_phrases: overlappedPhrases || [],
-        not_found_phrases: notFoundPhrases || []
-      },
-      timeout: 90
-    })
-  });
-
-  const data: SyncResponse = await response.json();
-
-  if (!data.success) {
-    console.error('❌ Analysis failed:', data);
-    throw new Error(data.error || 'Analysis failed');
-  }
-
-  // Return both voices and new_voices_added for energy refund mechanism
-  return {
-    voices: data.result?.voices || [],
-    new_voices_added: data.result?.new_voices_added ?? 0
-  };
-}
-
 /**
  * Chat with a voice via Claude-agent SSE streaming.
  * Calls POST /api/claude-agent with the voice's thread_id and system prompt.
@@ -388,47 +313,60 @@ export async function chatWithVoiceSSE({
   }
 }
 
-/**
- * Chat with a voice persona (PolyCLI direct call)
- * Backend loads voice config from database using voice_id and user_id from JWT
- */
+export interface VoiceChatResult {
+  response: string;
+  thread_id: string;
+}
+
+/** Chat with a historical inline comment through the same Voice Claude Thread. */
 export async function chatWithVoice(
-  voiceId: string,  // Voice ID for database lookup (e.g., "holder", "mirror")
+  voiceId: string,
+  voice: VoiceConfig,
   conversationHistory: Array<{ role: string; content: string }>,
   userMessage: string,
   originalText?: string,
   metaPrompt?: string,
-  statePrompt?: string
-): Promise<string> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  statePrompt?: string,
+  resolvedThreadId?: string,
+): Promise<VoiceChatResult> {
+  const threadId = await ensureVoiceThread(
+    voiceId,
+    voice.thread_id || resolvedThreadId,
+  );
+  let systemPrompt = `You are ${voice.name}, an inner voice persona.
+Your role: ${voice.systemPrompt}
 
-  const response = await fetch(`${API_BASE}/polycli/api/trigger-sync`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      session_id: 'chat_with_voice',
-      params: {
-        voice_id: voiceId,
-        conversation_history: conversationHistory,
-        user_message: userMessage,
-        original_text: originalText || '',
-        meta_prompt: metaPrompt || '',
-        state_prompt: statePrompt || ''
-      },
-      timeout: 60
-    })
-  });
-
-  const data: SyncResponse = await response.json();
-
-  if (!data.success) {
-    throw new Error(data.error || 'Chat failed');
+Respond in character. Be concise and focus on your distinct perspective.`;
+  if (originalText?.trim()) {
+    systemPrompt += `\n\nThe user is writing this text:\n---\n${originalText.trim()}\n---`;
+  }
+  if (metaPrompt?.trim()) {
+    systemPrompt += `\n\nAdditional writing guidance:\n${metaPrompt.trim()}`;
+  }
+  if (statePrompt?.trim()) {
+    systemPrompt += `\n\nThe user's current state:\n${statePrompt.trim()}`;
   }
 
-  return data.result?.response || 'Sorry, I could not respond.';
+  const serializedHistory = conversationHistory
+    .map((entry) => `${entry.role === 'assistant' ? voice.name : 'User'}: ${entry.content}`)
+    .join('\n');
+  const message = serializedHistory
+    ? `Previous inline-comment conversation:\n${serializedHistory}\n\nUser: ${userMessage}`
+    : userMessage;
+  const response = await new Promise<string>((resolve, reject) => {
+    void chatWithVoiceSSE({
+      threadId,
+      message,
+      systemPrompt,
+      onDelta: () => undefined,
+      onComplete: (fullText) => resolve(fullText.trim()),
+      onError: reject,
+    });
+  });
+  return {
+    response: response || 'Sorry, I could not respond.',
+    thread_id: threadId,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -825,47 +763,6 @@ export async function analyzePatterns(onDelta?: (d: string) => void): Promise<Re
   return bySection.patterns;
 }
 
-/**
- * Generate a daily picture based on user's notes (PolyCLI direct call)
- */
-export async function generateDailyPicture(targetDate?: string, timezone?: string): Promise<{ image_base64: string; thumbnail_base64?: string; prompt: string; date?: string }> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  const params: Record<string, string> = {};
-  if (targetDate) params.target_date = targetDate;
-  if (timezone) params.timezone = timezone;
-
-  const response = await fetch(`${API_BASE}/polycli/api/trigger-sync`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      session_id: 'generate_daily_picture',
-      params,
-      timeout: 60
-    })
-  });
-
-  const data: SyncResponse = await response.json();
-
-  if (!data.success) {
-    throw new Error(data.error || 'Image generation failed');
-  }
-
-  const res = data.result || {};
-  if (res.image_base64) {
-    return {
-      image_base64: res.image_base64,
-      thumbnail_base64: res.thumbnail_base64,
-      prompt: res.prompt || 'Generated from your notes',
-      date: res.date
-    };
-  }
-
-  throw new Error(res.error || res.reason || 'Image generation failed - no image in response');
-}
-
 // ========== Authenticated Endpoints (require login) ==========
 
 /**
@@ -1034,27 +931,6 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Save daily picture
- */
-export async function saveDailyPicture(date: string, imageBase64: string, prompt: string, thumbnailBase64?: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/api/pictures`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify({
-      date,
-      image_base64: imageBase64,
-      thumbnail_base64: thumbnailBase64,
-      prompt
-    })
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Save picture failed');
-  }
-}
-
-/**
  * Get daily pictures (thumbnails only for fast timeline loading)
  */
 type PictureRangeOptions = {
@@ -1161,45 +1037,73 @@ export interface VoiceInspiration {
   color: string;
 }
 
-export async function getSuggestion(text: string, metaPrompt?: string, statePrompt?: string): Promise<VoiceInspiration | null> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+export type VoiceInspirationResult = VoiceInspiration & {
+  /** Resolved thread is returned so the hook can reuse it before Deck state refreshes. */
+  thread_id: string;
+};
 
-  const response = await fetch(`${API_BASE}/polycli/api/trigger-sync`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      session_id: 'get_writing_suggestion',
-      params: {
-        text,
-        meta_prompt: metaPrompt || '',
-        state_prompt: statePrompt || ''
+export async function getSuggestion(
+  text: string,
+  voices: Record<string, VoiceConfig>,
+  metaPrompt?: string,
+  statePrompt?: string,
+  resolvedThreadIds?: ReadonlyMap<string, string>,
+  onSuggestionDelta?: (suggestion: VoiceInspirationResult) => void,
+): Promise<VoiceInspirationResult | null> {
+  const enabledVoices = Object.entries(voices).filter(([, voice]) => voice.enabled);
+  if (enabledVoices.length === 0) return null;
+
+  const selectedIndex = Math.floor(Math.random() * enabledVoices.length);
+  const [voiceKey, voice] = enabledVoices[selectedIndex];
+  const threadId = await ensureVoiceThread(
+    voiceKey,
+    voice.thread_id || resolvedThreadIds?.get(voiceKey),
+  );
+
+  let systemPrompt = `You are ${voice.name}, an inner voice persona.
+Your role: ${voice.systemPrompt}
+
+Read what the user just wrote and offer one very short, gentle nudge about what to write next.
+
+Rules:
+- Write one short sentence, no more than 15 words.
+- Be warm, conversational, and inspiring.
+- Suggest what to explore next; do not analyze, critique, or summarize the writing.
+- Return only the suggestion.`;
+
+  if (statePrompt?.trim()) {
+    systemPrompt += `\n\nEmotional context: ${statePrompt.trim()}`;
+  }
+  if (metaPrompt?.trim()) {
+    systemPrompt += `\n\nWriter's style: ${metaPrompt.trim()}`;
+  }
+
+  const message = `The user just wrote:\n\n${text}\n\nGive them one very short, gentle nudge about what to write next.`;
+  const buildResult = (inspiration: string): VoiceInspirationResult => ({
+    inspiration,
+    voice: voice.name,
+    voice_key: voiceKey,
+    icon: voice.icon,
+    color: voice.color,
+    thread_id: threadId,
+  });
+  let streamedInspiration = '';
+  const inspiration = await new Promise<string>((resolve, reject) => {
+    void chatWithVoiceSSE({
+      threadId,
+      message,
+      systemPrompt,
+      onDelta: (delta) => {
+        streamedInspiration += delta;
+        onSuggestionDelta?.(buildResult(streamedInspiration));
       },
-      timeout: 60
-    })
+      onComplete: (fullText) => resolve(fullText.trim()),
+      onError: reject,
+    });
   });
 
-  if (!response.ok) {
-    console.error('Suggestion request failed');
-    return null;
-  }
-
-  const data = await response.json();
-
-  // PolyCLI returns {success: true, result: {...}}
-  if (data.success && data.result?.inspiration) {
-    return {
-      inspiration: data.result.inspiration,
-      voice: data.result.voice,
-      voice_key: data.result.voice_key,
-      icon: data.result.icon,
-      color: data.result.color
-    };
-  }
-
-  return null;
+  if (!inspiration) return null;
+  return buildResult(inspiration);
 }
 
 /**

@@ -1,8 +1,10 @@
 # Component Reuse Rule
 
+<!-- [Sync] 2026-08-31: align backend reuse order with the current FastAPI/Claude Agent runtime after legacy session and picture scheduler removal. -->
+
 ## Mandatory
 
-- Search the active workspace before adding a React component, hook, API helper, backend endpoint, PolyCLI session, database helper, prompt file, or script.
+- Search the active workspace before adding a React component, hook, API helper, backend endpoint, Claude Agent service, database helper, prompt file, or script.
 - Prefer extending existing Ink & Memory ownership boundaries over creating parallel implementations.
 - Do not import Pawkeyland-specific modules, pet-domain paths, Claude Agent services, or prompt policy assumptions into this app as a shortcut.
 
@@ -17,8 +19,8 @@
 
 ## Backend Search Order
 
-1. Existing FastAPI route or PolyCLI session in `backend/server.py`.
-2. Auth, persistence, and runtime helpers in `backend/auth.py`, `backend/database.py`, `backend/config.py`, `backend/scheduler.py`, `backend/stateless_analyzer.py`, and `backend/speech_recognition.py`.
+1. Existing focused FastAPI router under `backend/routers/` and composition in `backend/server.py`.
+2. Auth, persistence, and runtime helpers in `backend/auth.py`, `backend/database.py`, `backend/config.py`, `backend/claude_agent/`, and `backend/speech_recognition.py`.
 3. Existing prompt assets in `backend/prompts/`.
 4. Existing tooling and tests in `backend/tools/` and `backend/tests/`.
 5. New module only when the behavior has a stable owner and would otherwise make `server.py` or `database.py` harder to maintain.
@@ -27,7 +29,7 @@
 
 - Add editor UI by extending existing components such as `App.tsx`, `ChatWidgetUI.tsx`, `DeckManager.tsx`, or smaller components nearby before introducing a new screen.
 - Add reusable client state through a hook in `frontend/src/hooks/` when multiple components need the same lifecycle, persistence, or API orchestration.
-- Add backend voice/deck behavior by reusing the existing `database.py` access patterns and PolyCLI session definitions before adding another route shape.
+- Add backend voice/deck behavior by reusing the existing database access patterns and Claude Agent Thread/SSE contracts before adding another route shape.
 - Add prompt behavior by creating or editing a file in `backend/prompts/` and loading it through `backend/config.py` patterns, not by embedding prompt bodies in request handlers.
 
 ## Documentation Requirement

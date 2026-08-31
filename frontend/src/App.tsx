@@ -1,5 +1,5 @@
 // [Input] Consume React hooks, editor engine modules, app views/components, auth/session hooks, storage utilities, and API helpers.
-// [Output] Render the authenticated Ink & Memory app shell and route current view state.
+// [Output] Render the authenticated Story Workspace shell, writing canvas, and canonical Chat surfaces.
 // [Pos] frontend app-root node in frontend/src
 // [Sync] 2026-05-25: remove ChatView settings-navigation prop after left chat nav Settings button deletion.
 // [Sync] 2026-05-29: pass state as editorState prop to ChatView so agent receives current EditorState snapshot.
@@ -35,6 +35,8 @@
 // [Sync] 2026-08-25: render the MCP OAuth callback entirely in the SPA so its
 //                    one-time code/state never reaches Dream backend access logs.
 // [Sync] 2026-08-25: submit the same-origin MCP OAuth callback automatically by non-secret operation ID; users never copy authorization URLs.
+// [Sync] 2026-08-31: remove the standalone legacy app-view path; authenticated navigation stays in StoryWorkspaceSidebar, and Writing's existing ChatWidgetUI layout opens linked Threads in a resizable right-side ChatView.
+// [Sync] 2026-08-31: pass enabled Voice configs to historical comment chat and stream Writing inspiration deltas in place.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -44,16 +46,13 @@ import './App.css';
 import {
   FaBrain, FaHeart, FaQuestion, FaCloud, FaTheaterMasks, FaEye,
   FaFistRaised, FaLightbulb, FaShieldAlt, FaWind, FaFire, FaCompass,
-  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments,
 } from 'react-icons/fa';
-import TopNavBar from './components/TopNavBar';
 import LeftToolbar from './components/LeftToolbar';
 import DeckManager from './components/DeckManager';
 import CalendarPopup from './components/CalendarPopup';
 import { type CalendarEntry } from './utils/calendarStorage';
 import CollectionsView from './components/CollectionsView';
 import AnalysisView from './components/AnalysisView';
-import AboutView from './components/AboutView';
 import AgentDropdown from './components/AgentDropdown';
 import ChatWidgetUI from './components/ChatWidgetUI';
 import StateChooser from './components/StateChooser';
@@ -77,16 +76,11 @@ import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
 import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
-import ModelConfigSection from './components/dashboard/ModelConfigSection';
-import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
-import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDetailPage';
-import ClaudeMcpServerDetailPage from './components/claude-mcp/ClaudeMcpServerDetailPage';
 import { submitClaudeMcpRedirect } from './api/claudeMcpApi';
 import {
   forgetClaudeMcpOAuthOperation,
   readClaudeMcpOAuthOperation,
 } from './components/claude-mcp/oauthHandoff';
-import ClaudePluginAdminPage from './components/claude-plugin-admin/ClaudePluginAdminPage';
 import {
   resolveStoryWorkspacePath,
   STORY_WORKSPACE_PATHS,
@@ -94,6 +88,7 @@ import {
   type StoryWorkspaceRoute,
 } from './router/story-workspace';
 import { StoryWorkspaceSettingsPage } from './pages/story-workspace';
+import { WritingWorkspaceSplitPane } from './components/story-workspace/layout';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -191,15 +186,6 @@ function McpOAuthCallbackPage() {
   );
 }
 
-// [Sync] 2026-07-08: Settings default sections use a narrower reading-width column;
-// the Notion ConnectorNotionDetailPage owns a wider single-account resource
-// configuration layout, so it gets its own max width instead of sharing SETTINGS_MAX_WIDTH_PX.
-const SETTINGS_MAX_WIDTH_PX = 800;
-const SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX = 1220;
-
-type AppView = 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector' | 'story-workspace';
-type GlobalAppView = AppView;
-
 // @@@ Color map with gradient colors for watercolor effect
 const colorMap: Record<string, { gradient: string; text: string; glow: string }> = {
   blue: {
@@ -235,15 +221,9 @@ export default function App() {
   const { isAuthenticated, isLoading } = useAuth();
   const isDeviceVerificationRoute = window.location.pathname === '/oauth/device/verify';
   const isMcpOAuthCallbackRoute = window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
-  const { t, i18n } = useTranslation();
-  const mobileNavHeight = 64;
-  const mobileBottomOffset = isMobile
-    ? `calc(${mobileNavHeight}px + env(safe-area-inset-bottom, 0px))`
-    : '0px';
-  const mobileTopInset = isMobile ? 'env(safe-area-inset-top, 0px)' : '48px';
-  const viewTopOffset = isMobile ? 0 : 48;
+  const { i18n } = useTranslation();
   const writingBottomPadding = isMobile
-    ? `calc(${mobileNavHeight}px + env(safe-area-inset-bottom, 0px) + 12px)`
+    ? 'calc(env(safe-area-inset-bottom, 0px) + 12px)'
     : '41px';
 
   // @@@ Auth screen state
@@ -265,16 +245,11 @@ export default function App() {
     }
   }, [currentLanguage, i18n]);
 
-  const [currentView, setCurrentView] = useState<AppView>(() => (
-    resolveStoryWorkspacePath(window.location.pathname) ? 'story-workspace' : 'writing'
-  ));
-  const [storyWorkspaceLegacyView, setStoryWorkspaceLegacyView] = useState<'writing' | null>(() => (
-    resolveStoryWorkspacePath(window.location.pathname)?.route === 'writing' ? 'writing' : null
+  const [writingRouteActive, setWritingRouteActive] = useState(() => (
+    resolveStoryWorkspacePath(window.location.pathname, window.location.search)?.route === 'writing'
   ));
   const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
-  const [chatLandingTab, setChatLandingTab] = useState<'history' | 'dreams'>('history');
-  const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
-  const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
+  const [chatLandingTab] = useState<'history' | 'dreams'>('history');
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
   // [Sync] 2026-07-08: track whether the dedicated Notion "具体配置页面" is open; navigating into it
@@ -287,29 +262,16 @@ export default function App() {
   });
 
   useLayoutEffect(() => {
-    if (!isAuthenticated || isDeviceVerificationRoute || isMcpOAuthCallbackRoute || window.location.pathname !== '/') return;
+    if (!isAuthenticated || isDeviceVerificationRoute || isMcpOAuthCallbackRoute) return;
+    const currentMatch = resolveStoryWorkspacePath(window.location.pathname, window.location.search);
+    if (window.location.pathname !== '/' && currentMatch) return;
     window.history.replaceState(
       { inkDreamView: 'story-workspace' },
       '',
       STORY_WORKSPACE_PATHS.chat,
     );
-    setStoryWorkspaceLegacyView(null);
-    setCurrentView('story-workspace');
+    setWritingRouteActive(false);
   }, [isAuthenticated, isDeviceVerificationRoute, isMcpOAuthCallbackRoute]);
-
-  const openConnectorSettings = useCallback(() => {
-    window.history.pushState(
-      { inkDreamView: 'story-workspace' },
-      '',
-      `${STORY_WORKSPACE_PATHS['settings-work']}?tab=resources`,
-    );
-    window.dispatchEvent(new PopStateEvent('popstate'));
-    setCurrentView('story-workspace');
-    setShowNotionConnectorDetail(false);
-    setClaudeMcpDetailServerName(null);
-    setConnectorSettingsFocusNonce((value) => value + 1);
-    setChatLandingTab('history');
-  }, []);
 
   const openNotionConnectorDetail = useCallback(() => {
     setClaudeMcpDetailServerName(null);
@@ -354,66 +316,8 @@ export default function App() {
   }, []);
 
   const handleStoryWorkspaceRouteChange = useCallback((route: StoryWorkspaceRoute) => {
-    setStoryWorkspaceLegacyView(route === 'writing' ? 'writing' : null);
-  }, []);
-
-  const handleAppViewChange = useCallback((view: GlobalAppView) => {
-    if (view === 'story-workspace') {
-      window.history.pushState(
-        { inkDreamView: 'story-workspace' },
-        '',
-        STORY_WORKSPACE_PATHS.dream,
-      );
-      setShowNotionConnectorDetail(false);
-      setClaudeMcpDetailServerName(null);
-      setCurrentView('story-workspace');
-      return;
-    }
-    if (view === 'settings') {
-      window.history.pushState(
-        { inkDreamView: 'story-workspace' },
-        '',
-        STORY_WORKSPACE_PATHS.settings,
-      );
-      setShowNotionConnectorDetail(false);
-      setClaudeMcpDetailServerName(null);
-      setCurrentView('story-workspace');
-      return;
-    }
-    if (view === 'connector') {
-      openConnectorSettings();
-      return;
-    }
-    if (resolveStoryWorkspacePath(window.location.pathname)) {
-      window.history.pushState({ inkDreamView: view }, '', '/');
-    }
-    setCurrentView(view);
-  }, [openConnectorSettings]);
-
-  useEffect(() => {
-    const handlePopState = (event: PopStateEvent) => {
-      if (resolveStoryWorkspacePath(window.location.pathname)) {
-        setCurrentView('story-workspace');
-        return;
-      }
-
-      if (event.state?.inkDreamView === 'settings') {
-        window.history.replaceState(
-          { inkDreamView: 'story-workspace' },
-          '',
-          STORY_WORKSPACE_PATHS.settings,
-        );
-        setShowNotionConnectorDetail(false);
-        setClaudeMcpDetailServerName(null);
-        setCurrentView('story-workspace');
-        return;
-      }
-
-      setCurrentView((view) => view === 'story-workspace' ? 'writing' : view);
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    setWritingRouteActive(route === 'writing');
+    if (route !== 'writing') setWritingChatPanelOpen(false);
   }, []);
 
   const browserTimezone = useMemo(() => {
@@ -468,6 +372,7 @@ export default function App() {
   } | undefined>(undefined);
   /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
   const [activeChatVoice, setActiveChatVoice] = useState<ActiveChatVoice | undefined>(undefined);
+  const [writingChatPanelOpen, setWritingChatPanelOpen] = useState(false);
 
   // @@@ Warning dialog state
   const [showWarning, setShowWarning] = useState(false);
@@ -485,7 +390,7 @@ export default function App() {
     isAppearing: inspirationAppearing,
     onTextChange: onInspirationTextChange,
     setTextGetter: setInspirationTextGetter,
-  } = useInspiration();
+  } = useInspiration({ voices: voiceConfigs });
 
   // @@@ Provide text getter to inspiration hook for validation
   useEffect(() => {
@@ -552,6 +457,7 @@ export default function App() {
     stateConfig,
     isMobile,
     engineRef,
+    voiceConfigs,
   });
 
   const pendingEditorWriteFallbacksRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -641,14 +547,6 @@ export default function App() {
   const [showFullEnergy, setShowFullEnergy] = useState(false);
   const fullEnergyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const energyProgress = showFullEnergy ? 1 : energyRemainder / energyThreshold;
-  const mobileNavItems = [
-    { key: 'writing' as const, label: t('nav.writing'), icon: FaPenNib },
-    { key: 'timeline' as const, label: t('nav.timeline'), icon: FaRegClock },
-    { key: 'analysis' as const, label: t('nav.analysis'), icon: FaChartBar },
-    { key: 'decks' as const, label: t('nav.decks'), icon: FaLayerGroup },
-    { key: 'chat' as const, label: t('nav.chat'), icon: FaComments },
-    { key: 'settings' as const, label: t('nav.settings'), icon: FaCog },
-  ];
 
   useEffect(() => {
     const prevLevel = energyLevelRef.current;
@@ -691,20 +589,13 @@ export default function App() {
     }
   }, [refsReady, state?.cells.length]);
 
-  // @@@ Trigger re-render when returning to writing view to recalculate comment positions
+  // @@@ Trigger re-render when returning to the Story Workspace writing route.
   useEffect(() => {
-    if (currentView === 'writing') {
+    if (writingRouteActive) {
       // Force re-render to recalculate comment positions
       setRefsReady(prev => prev + 1);
     }
-  }, [currentView]);
-
-  // @@@ Preserve ChatView local state after the first visit while avoiding eager thread creation on app load.
-  useEffect(() => {
-    if (currentView === 'chat') {
-      setHasOpenedChatView(true);
-    }
-  }, [currentView]);
+  }, [writingRouteActive]);
 
   // @@@ Force recalculation when selectedState changes (StateChooser height changes)
   useEffect(() => {
@@ -760,12 +651,12 @@ export default function App() {
     }
   }, [voiceConfigs]);
 
-  // @@@ Reload state config when returning to writing view
+  // @@@ Reload state config when returning to the Story Workspace writing route.
   useEffect(() => {
-    if (currentView === 'writing') {
+    if (writingRouteActive) {
       setStateConfig(getStateConfig());
     }
-  }, [currentView]);
+  }, [writingRouteActive]);
 
   // @@@ Check for localStorage migration after login
   useEffect(() => {
@@ -1076,14 +967,20 @@ export default function App() {
       const cellId = (e as CustomEvent<{ cellId: string }>).detail?.cellId;
       if (!cellId) return;
       jumpToCellRef.current = cellId;
-      setCurrentView('writing');
+      window.history.pushState(
+        { inkDreamView: 'story-workspace' },
+        '',
+        STORY_WORKSPACE_PATHS.writing,
+      );
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      setWritingRouteActive(true);
     };
     window.addEventListener('editor:jump-to-cell', handler);
     return () => window.removeEventListener('editor:jump-to-cell', handler);
   }, []);
 
   useEffect(() => {
-    if (currentView !== 'writing' || !jumpToCellRef.current) return;
+    if (!writingRouteActive || !jumpToCellRef.current) return;
     const cellId = jumpToCellRef.current;
     jumpToCellRef.current = null;
     const attemptScroll = (attempts = 0) => {
@@ -1098,7 +995,7 @@ export default function App() {
       }
     };
     setTimeout(() => attemptScroll(), 100);
-  }, [currentView]);
+  }, [writingRouteActive]);
 
   // @@@ Handle localStorage migration
   const handleMigrateData = useCallback(async () => {
@@ -1222,14 +1119,13 @@ export default function App() {
     }
   }, [composingCells, handleTextCellKeyDown]);
 
-  // @@@ Navigate to Chat view with a specific thread (used by editor widgets and Deck manager).
-  const handleOpenChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
+  // Writing keeps its canvas visible while the canonical Thread Chat expands on the right.
+  const handleOpenWritingChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
     setRequestedChatThreadId(threadId);
     setRequestedChatThreadNonce((value) => value + 1);
     setRequestedChatDeck(undefined);
     setActiveChatVoice(voiceInfo);
-    setCurrentView('chat');
-    setHasOpenedChatView(true);
+    setWritingChatPanelOpen(true);
   }, []);
 
   // Dream owns its presentation protocol, but its source thread remains a
@@ -1240,6 +1136,7 @@ export default function App() {
     setRequestedChatThreadNonce((value) => value + 1);
     setRequestedChatDeck(undefined);
     setActiveChatVoice(undefined);
+    setWritingChatPanelOpen(false);
   }, []);
 
   // Every Deck maintenance handoff starts in canonical Story Workspace Chat.
@@ -1256,8 +1153,6 @@ export default function App() {
       `${STORY_WORKSPACE_PATHS.chat}?${query.toString()}`,
     );
     window.dispatchEvent(new PopStateEvent('popstate'));
-    setCurrentView('story-workspace');
-    setHasOpenedChatView(true);
   }, []);
 
   const handleOpenSettingsFromDeck = useCallback(() => {
@@ -1267,7 +1162,6 @@ export default function App() {
       STORY_WORKSPACE_PATHS['settings-work'],
     );
     window.dispatchEvent(new PopStateEvent('popstate'));
-    setCurrentView('story-workspace');
   }, []);
 
   const handleDeckManagerUpdate = async () => {
@@ -1330,8 +1224,8 @@ export default function App() {
     const updatedCells = engineRef.current.getState().cells;
     const newWidget = updatedCells.find(c => c.type === 'widget' && !beforeWidgetIds.has(c.id));
 
-    // Create Claude-agent thread asynchronously, then update widget with thread_id.
-    // The user stays in the Writing view — the inline ChatWidgetUI handles the conversation.
+    // Create the Claude-agent thread, persist the writing-cell link, then open
+    // the same canonical Thread Chat in the right-side workbench panel.
     void (async () => {
       try {
         const threadId = await ensureVoiceThread(voiceName, voiceConfig.thread_id);
@@ -1339,6 +1233,12 @@ export default function App() {
           const widgetWithThread = new ChatWidget(voiceName, voiceConfig, threadId);
           engineRef.current.updateWidgetData(newWidget.id, widgetWithThread.getData());
         }
+        handleOpenWritingChatThread(threadId, {
+          name: voiceConfig.name,
+          systemPrompt: voiceConfig.systemPrompt,
+          icon: voiceConfig.icon,
+          color: voiceConfig.color,
+        });
       } catch (err) {
         console.error('Failed to create Claude-agent thread for voice:', err);
       }
@@ -1362,7 +1262,7 @@ export default function App() {
         }, 0);
       }
     }
-  }, [dropdownTriggerCellId]);
+  }, [dropdownTriggerCellId, handleOpenWritingChatThread]);
 
   // @@@ Handle deleting chat widget
   const handleChatDelete = useCallback((widgetId: string) => {
@@ -1479,6 +1379,7 @@ export default function App() {
       },
     });
   }, [ensureSessionPersistedForAgent, state]);
+
 
   // @@@ Helper to get watercolor background
   const getWatercolorBg = (color: string) => {
@@ -1722,24 +1623,18 @@ export default function App() {
         </div>
       )}
 
-      {/* @@@ Hide top nav on mobile */}
-      {!isMobile && currentView !== 'story-workspace' && (
-        <TopNavBar currentView={currentView} onViewChange={handleAppViewChange} />
-      )}
-
-      {currentView === 'story-workspace' && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          minWidth: 0,
-          minHeight: 0,
-          overflow: 'hidden',
-        }}>
-          <StoryWorkspaceRouter
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        minWidth: 0,
+        minHeight: 0,
+        overflow: 'hidden',
+      }}>
+        <StoryWorkspaceRouter
             decksContent={storyWorkspaceDeckManager}
             onChatThreadRequest={handleStoryWorkspaceChatThreadRequest}
             onRouteChange={handleStoryWorkspaceRouteChange}
-            legacyContent={{
+            workspaceContent={{
               timeline: (
                 <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
                   <CollectionsView isVisible voiceConfigs={voiceConfigs} timezone={userTimezone} />
@@ -1789,23 +1684,34 @@ export default function App() {
                 workDeckContent={storyWorkspaceDeckSettingsManager}
               />
             )}
-          />
-        </div>
-      )}
+        />
+      </div>
 
-      {(currentView === 'writing' || storyWorkspaceLegacyView === 'writing') && (
+      {writingRouteActive && (
+        <WritingWorkspaceSplitPane
+          chat={(
+            <ChatView
+              activeVoice={activeChatVoice}
+              editorState={state ? (state as unknown as Record<string, unknown>) : null}
+              ensureEditorSessionPersisted={ensureSessionPersistedForAgent}
+              isMobile={isMobile}
+              landingTab="history"
+              onEditorWriteConfirmed={handleEditorWriteConfirmed}
+              requestedThreadId={requestedChatThreadId}
+              requestedThreadNonce={requestedChatThreadNonce}
+            />
+          )}
+          chatOpen={writingChatPanelOpen && Boolean(requestedChatThreadId)}
+          isMobile={isMobile}
+          onCloseChat={() => setWritingChatPanelOpen(false)}
+        >
         <div style={{
           display: 'flex',
-          height: storyWorkspaceLegacyView === 'writing' ? '100%' : '100vh',
-          position: storyWorkspaceLegacyView === 'writing' ? 'fixed' : undefined,
-          top: storyWorkspaceLegacyView === 'writing' ? 0 : undefined,
-          left: storyWorkspaceLegacyView === 'writing' ? 'var(--story-workspace-sidebar-width, 240px)' : undefined,
-          right: storyWorkspaceLegacyView === 'writing' ? 0 : undefined,
-          bottom: storyWorkspaceLegacyView === 'writing' ? 0 : undefined,
-          zIndex: storyWorkspaceLegacyView === 'writing' ? 12 : undefined,
-          transform: storyWorkspaceLegacyView === 'writing' ? 'translateZ(0)' : undefined,
-          paddingTop: storyWorkspaceLegacyView === 'writing' ? 0 : mobileTopInset,
-          paddingBottom: writingBottomPadding,  // @@@ Space for fixed stats bar + mobile nav
+          width: '100%',
+          height: '100%',
+          minWidth: 0,
+          minHeight: 0,
+          paddingBottom: writingBottomPadding,
           fontFamily: 'var(--font-family-ui)',
           boxSizing: 'border-box'
         }}>
@@ -1816,8 +1722,8 @@ export default function App() {
               title="New Session"
               style={{
                 position: 'fixed',
-                left: '20px',
-                top: '72px',
+                left: 'calc(var(--story-workspace-sidebar-width, 240px) + 20px)',
+                top: '24px',
                 zIndex: 101,
                 width: '32px',
                 height: '32px',
@@ -1851,8 +1757,8 @@ export default function App() {
           {!isMobile && (
             <div style={{
               position: 'fixed',
-              left: '12px',
-              top: '100px',
+              left: 'calc(var(--story-workspace-sidebar-width, 240px) + 12px)',
+              top: '52px',
               zIndex: 100
             }}>
               <LeftToolbar
@@ -1964,7 +1870,7 @@ export default function App() {
                   padding: '20px',
                   paddingLeft: isMobile ? '20px' : '80px',  // @@@ Extra left padding for floating toolbar
                   paddingBottom: isMobile
-                    ? `calc(80px + ${mobileNavHeight}px + env(safe-area-inset-bottom, 0px))`
+                    ? 'calc(80px + env(safe-area-inset-bottom, 0px))'
                     : '80px',  // Extra space for smooth scrolling to bottom
                   backgroundColor: 'var(--color-bg-paper)'  // @@@ Cream paper background for notebook lines
                 }}>
@@ -2061,7 +1967,7 @@ export default function App() {
                           onSendMessage={(msg) => handleChatSend(cell.id, msg)}
                           onOpenChat={(cell.data as ChatWidgetData).threadId ? (threadId) => {
                             const d = cell.data as ChatWidgetData;
-                            handleOpenChatThread(threadId, {
+                            handleOpenWritingChatThread(threadId, {
                               name: d.voiceConfig.name,
                               systemPrompt: d.voiceConfig.tagline,
                               icon: d.voiceConfig.icon,
@@ -2175,7 +2081,7 @@ export default function App() {
                 {isMobile && mobileActiveComment && (
                   <div style={{
                     position: 'fixed',
-                    bottom: `calc(${mobileNavHeight}px + 20px + env(safe-area-inset-bottom, 0px))`,
+                    bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
                     left: '10px',
                     right: '10px',
                     background: 'var(--color-bg-surface-solid)',
@@ -2217,9 +2123,9 @@ export default function App() {
               {/* Debug stats bar at bottom */}
               <div style={{
                 position: 'fixed',
-                bottom: isMobile ? mobileBottomOffset : 0,
-                left: 0,
-                right: 0,
+                bottom: 0,
+                left: 'var(--story-workspace-sidebar-width, 240px)',
+                right: 'var(--story-workspace-writing-chat-width, 0px)',
                 padding: isMobile ? '8px 12px' : '10px 20px',
                 borderTop: '1px solid var(--color-border-neutral)',
                 fontSize: isMobile ? '11px' : '12px',
@@ -2281,334 +2187,8 @@ export default function App() {
             />
           )}
         </div>
+        </WritingWorkspaceSplitPane>
       )}
-      {currentView === 'decks' && (
-        <div style={{
-          position: 'fixed',
-          top: viewTopOffset,
-          left: 0,
-          right: 0,
-          bottom: mobileBottomOffset,
-          background: 'var(--color-bg-app)',
-          display: 'flex',
-          overflow: 'hidden'
-        }}>
-          {storyWorkspaceDeckManager}
-        </div>
-      )}
-      {currentView === 'settings' && (
-        <div style={{
-          flex: 1,
-          display: 'flex',
-          justifyContent: 'center',
-          padding: isMobile ? '24px 16px 120px 16px' : '60px 40px 120px 40px',
-          overflow: 'auto',
-          position: 'fixed',
-          top: viewTopOffset,
-          left: 0,
-          right: 0,
-          bottom: mobileBottomOffset,
-          background: 'var(--color-bg-app)'
-        }}>
-          {claudeMcpDetailServerName ? (
-            <div style={{ maxWidth: SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX, width: '100%' }}>
-              <ClaudeMcpServerDetailPage serverName={claudeMcpDetailServerName} onBack={closeClaudeMcpDetail} isMobile={isMobile} />
-            </div>
-          ) : showNotionConnectorDetail ? (
-            <div style={{ maxWidth: SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX, width: '100%' }}>
-              <ConnectorNotionDetailPage onBack={closeNotionConnectorDetail} isMobile={isMobile} />
-            </div>
-          ) : (
-          <div style={{
-            maxWidth: SETTINGS_MAX_WIDTH_PX,
-            width: '100%'
-          }}>
-            <section style={{ marginBottom: 48 }}>
-              <h2 style={{
-                fontSize: 24,
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-                marginBottom: 16,
-                fontFamily: 'Georgia, "Times New Roman", serif'
-              }}>
-                {t('nav.settings')}
-              </h2>
-              <div style={{
-                background: 'var(--color-bg-surface)',
-                border: '1px solid var(--color-border-paper)',
-                borderRadius: 8,
-                padding: 24
-              }}>
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: 'var(--color-text-primary)',
-                    marginBottom: 6,
-                    display: 'block',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-                  }}>
-                    Language / 语言
-                  </label>
-                  <p style={{
-                    margin: 0,
-                    fontSize: 13,
-                    color: 'var(--color-text-secondary)',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-                  }}>
-                    {t('settings.language.description')}
-                  </p>
-                </div>
-
-                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                  {LANGUAGE_CODES.map(code => {
-                    const isActive = currentLanguage === code;
-                    return (
-                      <button
-                        key={code}
-                        onClick={() => handleUILanguageChange(code)}
-                        style={{
-                          padding: '8px 16px',
-                          background: isActive ? 'var(--color-text-primary)' : 'transparent',
-                          color: isActive ? 'var(--color-text-on-action)' : 'var(--color-text-secondary)',
-                          border: isActive ? 'none' : '1px solid var(--color-border-paper)',
-                          borderRadius: 6,
-                          fontSize: 14,
-                          fontWeight: 500,
-                          cursor: isActive ? 'default' : 'pointer',
-                          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          boxShadow: isActive ? '0 2px 8px var(--color-shadow-medium)' : 'none',
-                          transition: 'all 0.2s ease'
-                        }}
-                      >
-                        {t(`settings.language.options.${code}`)}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <p style={{
-                  marginTop: 12,
-                  fontSize: 12,
-                  color: 'var(--color-text-muted)',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-                }}>
-                  {t('settings.language.preview')}
-                </p>
-
-                <div style={{
-                  marginTop: 20,
-                  paddingTop: 16,
-                  borderTop: '1px dashed var(--color-border-paper)'
-                }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12
-                  }}>
-                    <div>
-                      <div style={{
-                        fontSize: 14,
-                        fontWeight: 500,
-                        color: 'var(--color-text-primary)',
-                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-                      }}>
-                        Energy Bar / 能量条
-                      </div>
-                      <div style={{
-                        marginTop: 6,
-                        fontSize: 12,
-                        color: 'var(--color-text-secondary)',
-                        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-                      }}>
-                        Toggle the energy progress bar in the bottom stats line.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowEnergyBar(prev => !prev)}
-                      aria-pressed={showEnergyBar}
-                      style={{
-                        width: 44,
-                        height: 24,
-                        borderRadius: 999,
-                        border: showEnergyBar ? '1px solid var(--color-text-primary)' : '1px solid var(--color-border-paper)',
-                        background: showEnergyBar ? 'var(--color-text-primary)' : 'transparent',
-                        cursor: 'pointer',
-                        position: 'relative',
-                        padding: 0,
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      <span style={{
-                        position: 'absolute',
-                        top: 3,
-                        left: showEnergyBar ? 'auto' : 4,
-                        right: showEnergyBar ? 4 : 'auto',
-                        width: 16,
-                        height: 16,
-                        borderRadius: '50%',
-                        background: showEnergyBar ? 'var(--color-text-on-action)' : 'var(--color-text-muted)',
-                        transition: 'all 0.2s ease'
-                      }} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Resource Connector Settings */}
-            <section style={{ marginBottom: 48 }}>
-              <ConnectorSettingsSection
-                focusNonce={connectorSettingsFocusNonce}
-                isMobile={isMobile}
-                onOpenNotionDetail={openNotionConnectorDetail}
-                onOpenClaudeMcpDetail={openClaudeMcpDetail}
-              />
-            </section>
-
-            {/* Claude Code Plugin Admin (shared install + digest artifacts) */}
-            <section style={{ marginBottom: 48 }}>
-              <ClaudePluginAdminPage />
-            </section>
-
-            {/* AI Model Configuration */}
-            <section style={{ marginBottom: 48 }}>
-              <h2 style={{
-                fontSize: 24,
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-                marginBottom: 16,
-                fontFamily: 'Georgia, "Times New Roman", serif'
-              }}>
-                AI 模型配置
-              </h2>
-              <div style={{
-                background: 'var(--color-bg-surface)',
-                border: '1px solid var(--color-border-paper)',
-                borderRadius: 8,
-                padding: 24
-              }}>
-                <ModelConfigSection />
-              </div>
-            </section>
-
-            {/* About Content */}
-            <AboutView />
-          </div>
-          )}
-        </div>
-      )}
-      {/* @@@ Always render timeline to pre-load data and position scroll */}
-      <div style={{
-        position: 'fixed',
-        top: viewTopOffset,
-        left: 0,
-        right: 0,
-        bottom: mobileBottomOffset,
-        background: 'var(--color-bg-app)',
-        display: currentView === 'timeline' ? 'flex' : 'none',
-        overflow: 'hidden'
-      }}>
-        <CollectionsView
-          isVisible={currentView === 'timeline'}
-          voiceConfigs={voiceConfigs}
-          timezone={userTimezone}
-        />
-      </div>
-      {currentView === 'analysis' && (
-        <div style={{
-          position: 'fixed',
-          top: viewTopOffset,
-          left: 0,
-          right: 0,
-          bottom: mobileBottomOffset,
-          background: 'var(--color-bg-app)',
-          display: 'flex',
-          overflow: 'hidden'
-        }}>
-          <AnalysisView />
-        </div>
-      )}
-
-      {shouldRenderChatView && (
-        <div style={{
-          position: 'fixed',
-          top: viewTopOffset,
-          left: 0,
-          right: 0,
-          bottom: mobileBottomOffset,
-          display: currentView === 'chat' ? 'flex' : 'none',
-          minHeight: 0,
-          minWidth: 0,
-          overflow: 'hidden'
-        }}>
-          <ChatView
-            editorState={state ? (state as unknown as Record<string, unknown>) : null}
-            ensureEditorSessionPersisted={ensureSessionPersistedForAgent}
-            onEditorWriteConfirmed={handleEditorWriteConfirmed}
-            requestedThreadId={requestedChatThreadId}
-            requestedThreadNonce={requestedChatThreadNonce}
-            requestedDeckId={requestedChatDeck?.deckId}
-            requestedAgentId={requestedChatDeck?.agentId}
-            requestedDeckInput={requestedChatDeck?.input}
-            requestedDeckNonce={requestedChatDeck?.nonce}
-            activeVoice={activeChatVoice}
-            isMobile={isMobile}
-            landingTab={chatLandingTab}
-          />
-        </div>
-      )}
-
-      {isMobile && currentView !== 'story-workspace' && (
-        <nav style={{
-          position: 'fixed',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: `calc(${mobileNavHeight}px + env(safe-area-inset-bottom, 0px))`,
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-          background: 'var(--color-bg-app)',
-          borderTop: '1px solid var(--color-border-paper)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-around',
-          zIndex: 900
-        }}>
-          {mobileNavItems.map((item) => {
-            const isActive = currentView === item.key;
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.key}
-                onClick={() => handleAppViewChange(item.key)}
-                aria-pressed={isActive}
-                style={{
-                  flex: 1,
-                  height: '100%',
-                  border: 'none',
-                  background: 'transparent',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 4,
-                  color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                  fontSize: 11,
-                  fontWeight: isActive ? 600 : 400,
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                  cursor: isActive ? 'default' : 'pointer'
-                }}
-              >
-                <Icon size={18} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-      )}
-
       {/* Warning Dialog */}
       {showWarning && (
         <div style={{

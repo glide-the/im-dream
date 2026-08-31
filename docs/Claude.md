@@ -1,5 +1,7 @@
 # Claude Agent — Business Usage Guide
 
+<!-- [Sync] 2026-08-31: remove the retired stateless voice-chat transport; all Voice interactions reuse Claude Agent Threads. -->
+
 This document describes how the Claude-agent service is used in **Ink & Memory** and the
 rules that govern its integration.  Read this before modifying any Deck, editor-chat, or
 agent-session code.
@@ -81,9 +83,8 @@ breaks the Deck voice experience.
 
 ## Do Not Do
 
-- ❌ Do not replace the claude-agent call with `chatWithVoice` (polycli endpoint) for
-  Deck interactions.  `chatWithVoice` is stateless and does not support tools or history.
-  It is reserved for the Comments chat feature only.
+- ❌ Do not add a second stateless Voice transport. Deck, Writing inspiration, and
+  historical-comment chat all reuse the selected Voice's Claude Agent Thread.
 - ❌ Do not auto-navigate to the Chat view when the user selects a voice via `@`.
   The interaction must remain inline in the editor.
 - ❌ Do not strip or omit the `systemPrompt` field from Deck voice messages.

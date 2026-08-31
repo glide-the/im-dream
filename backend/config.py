@@ -1,9 +1,10 @@
 # [Input] Environment-backed runtime policy values and repository prompt files.
-# [Output] Central configuration for image retries, voice archetypes, screenplay Deck defaults,
+# [Output] Central configuration for voice archetypes, screenplay Deck defaults,
 #          and the default Claude plugin selected for newly created Decks.
 # [Pos] backend configuration source of truth
 # [Sync] 2026-08-14: define the screenplay-creation Deck template, retire legacy
 #                    system Deck defaults, and select drama-forge v1.0.1 for new Decks.
+# [Sync] 2026-08-31: remove retired daily-picture generation tuning.
 """Voice archetypes and product-default configuration."""
 
 import os
@@ -99,20 +100,6 @@ SCREENPLAY_DECK_TEMPLATE = {
 # Runtime model routing and credentials are intentionally absent here. Every
 # inference entrypoint resolves an Admin-published alias through
 # services.admin_gateway and has no direct Provider endpoint/key fallback.
-
-# Retry configuration for image generation
-IMAGE_RETRY_MAX_ATTEMPTS: int = int(os.getenv("INK_IMAGE_RETRY_MAX_ATTEMPTS", "3"))
-IMAGE_RETRY_BASE_TIMEOUT: int = int(os.getenv("INK_IMAGE_RETRY_BASE_TIMEOUT", "90"))
-IMAGE_RETRY_TIMEOUT_INCREMENT: int = int(
-    os.getenv("INK_IMAGE_RETRY_TIMEOUT_INCREMENT", "30")
-)
-IMAGE_MAX_TOKENS: int = int(os.getenv("INK_IMAGE_MAX_TOKENS", "1000"))
-IMAGE_DESCRIPTION_MAX_TOKENS: int = int(
-    os.getenv("INK_IMAGE_DESCRIPTION_MAX_TOKENS", "500")
-)
-IMAGE_DESCRIPTION_TIMEOUT: int = int(
-    os.getenv("INK_IMAGE_DESCRIPTION_TIMEOUT", "120")
-)
 
 # ---------------------------------------------------------------------------
 # Prompt helpers and voice archetypes

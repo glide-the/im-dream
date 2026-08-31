@@ -55,6 +55,7 @@
 // [Sync] 2026-08-15: historical composers no longer accept a duplicate locked
 //                    Deck/Agent context control from ChatView.
 // [Sync] 2026-08-17: read Deck/Agent turn context from a live ref so same-Thread selection reaches transport.
+// [Sync] 2026-08-31: reload authoritative Thread state from structured turn errors without resending the failed message.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -349,7 +350,7 @@ export default function ChatPanel({
     settingsSystemPrompt: systemConfig?.system_prompt,
   };
 
-  const { messages, sendMessage, setMessages, status, error, addToolResult, stop } = useChat({
+  const { messages, sendMessage, setMessages, status, error, addToolResult, stop, clearError } = useChat({
     id: threadId,
     transport: new ClaudeAgentChatTransport({
       threadId,
@@ -563,6 +564,18 @@ export default function ChatPanel({
       return undefined;
     }
   }, [threadId]);
+
+  const [isReloadingAfterError, setIsReloadingAfterError] = useState(false);
+  const handleReloadAfterError = useCallback(async () => {
+    if (isReloadingAfterError) return;
+    setIsReloadingAfterError(true);
+    try {
+      const recovered = await recoverAuthoritativeHistory();
+      if (recovered !== undefined) clearError();
+    } finally {
+      if (chatPanelMountedRef.current) setIsReloadingAfterError(false);
+    }
+  }, [clearError, isReloadingAfterError, recoverAuthoritativeHistory]);
 
   const recoverLocalCompletion = useCallback(async (attempt = 0): Promise<void> => {
     const snapshot = await recoverAuthoritativeHistory();
@@ -941,6 +954,8 @@ export default function ChatPanel({
             threadId={threadId}
             isLoading={chatLoading}
             error={error}
+            onReloadAfterError={handleReloadAfterError}
+            isReloadingAfterError={isReloadingAfterError}
             addToolResult={addToolResult}
             shouldShowLoadingIndicator={shouldShowLoadingIndicator}
             toolChoice={effectiveToolChoice}

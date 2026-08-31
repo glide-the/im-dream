@@ -1,6 +1,7 @@
-/* [Input] Ink & Memory UI v2 semantic tokens. */
-/* [Output] Responsive Story Workspace layout with a persistent compact navigation rail. */
+/* [Input] Ink & Memory UI v2 semantic tokens and the shared right-panel resize contract. */
+/* [Output] Responsive Story Workspace layout with a persistent navigation rail and resizable Writing Chat. */
 /* [Pos] Story Workspace layout stylesheet. */
+/* [Sync] 2026-08-31: add the viewport-contained Writing canvas / Thread Chat split pane. */
 .story-workspace-layout,
 .story-workspace-layout *,
 .story-workspace-layout *::before,
@@ -45,6 +46,142 @@
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--color-bg-paper);
+}
+
+.story-workspace-writing-split {
+  position: fixed;
+  z-index: 12;
+  inset: 0 0 0 var(--story-workspace-sidebar-width, 240px);
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-bg-paper);
+}
+
+.story-workspace-writing-split__canvas {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.story-workspace-writing-split__chat {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 0 0 auto;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg-app);
+  border-left: 1px solid var(--color-border-paper);
+  box-shadow: -8px 0 24px color-mix(in srgb, var(--color-shadow-medium) 58%, transparent);
+}
+
+.story-workspace-writing-split__resize {
+  position: absolute;
+  z-index: 4;
+  inset: 0 auto 0 0;
+  width: .7rem;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+  background: transparent;
+  transition: background-color 140ms ease;
+}
+
+.story-workspace-writing-split__resize > span {
+  position: absolute;
+  top: 50%;
+  left: .16rem;
+  width: 1px;
+  height: 100%;
+  background: var(--color-border-paper);
+  transform: translateY(-50%);
+  transition: width 140ms ease, height 140ms ease, background-color 140ms ease;
+}
+
+.story-workspace-writing-split__resize--active {
+  background: color-mix(in srgb, var(--color-action-link) 11%, transparent);
+}
+
+.story-workspace-writing-split__resize--active > span {
+  width: .16rem;
+  height: 4.5rem;
+  border-radius: 999px;
+  background: var(--color-action-link);
+}
+
+.story-workspace-writing-split__chat-header {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px 9px 18px;
+  border-bottom: 1px solid var(--color-border-paper);
+}
+
+.story-workspace-writing-split__chat-header > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.story-workspace-writing-split__chat-header strong,
+.story-workspace-writing-split__chat-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-workspace-writing-split__chat-header strong {
+  color: var(--color-text-primary);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 15px;
+}
+
+.story-workspace-writing-split__chat-header span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.story-workspace-writing-split__chat-header button {
+  display: inline-grid;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 22px;
+}
+
+.story-workspace-writing-split__chat-header button:hover,
+.story-workspace-writing-split__chat-header button:focus-visible {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-paper);
+}
+
+.story-workspace-writing-split__chat-header button:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.story-workspace-writing-split__chat-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .story-workspace-decks-surface {
@@ -1000,5 +1137,17 @@
     max-width: calc(100% - 72px);
     min-width: 0;
     overflow-x: hidden;
+  }
+
+  .story-workspace-writing-split {
+    left: 72px;
+  }
+
+  .story-workspace-writing-split__chat {
+    position: absolute;
+    inset: 0;
+    max-width: none;
+    border-left: 0;
+    box-shadow: none;
   }
 }

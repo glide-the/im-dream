@@ -12,6 +12,7 @@
 //                    authorization code/state queries never enter FastAPI access logs.
 // [Sync] 2026-08-26: share API/OAuth proxy and configurable host allowlist with
 //                    Vite Preview for the direct-host AutoDL 6006 frontend.
+// [Sync] 2026-08-31: remove the retired PolyCLI development/preview proxy.
 // [Sync] 2026-07-20: upgrade to Vite 8 (rolldown/Rust bundler) so production
 //                    builds fit 1G Docker build hosts — measured ~605MB peak RSS
 //                    with a 512MB heap vs ~1.25GB RSS / 1024MB heap minimum on
@@ -104,10 +105,6 @@ export default defineConfig(({ mode }) => {
           return '/index.html'
         }
       },
-    },
-    '/polycli': {
-      target: devApiProxyTarget,
-      changeOrigin: true,
     },
   }
 

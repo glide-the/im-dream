@@ -29,6 +29,8 @@
 # [Sync] 2026-08-28: install and verify ntn 0.15.1 so the backend-owned Notion
 #        Skill/MCP path exists in the same backend-only image as its built-in Skill.
 # [Sync] 2026-08-30: advance the exact public clean-room Runtime to 0.1.4.
+# [Sync] 2026-08-31: remove Pillow-only JPEG/zlib build dependencies after
+#        retiring daily-picture generation.
 
 ARG NODE_VERSION=22.18.0
 FROM node:${NODE_VERSION}-bookworm-slim AS node_runtime
@@ -54,7 +56,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_PROGRESS_BAR=off
 
 # System deps:
-#   - gcc / libffi / libssl / libjpeg / zlib: cryptography + Pillow
+#   - gcc / libffi / libssl: cryptography and native Python dependencies
 #   - bash curl jq git ripgrep: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 ARG CLAUDE_CODE_VERSION=2.1.241
@@ -73,8 +75,6 @@ RUN set -eux; \
         gcc \
         libffi-dev \
         libssl-dev \
-        libjpeg62-turbo-dev \
-        zlib1g-dev \
         bash \
         curl \
         jq \

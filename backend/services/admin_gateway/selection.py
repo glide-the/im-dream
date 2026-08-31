@@ -15,7 +15,7 @@ try:
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend import database
 
-from .inference import GatewayInferenceError
+from .errors import GatewayInferenceError
 from .models import GatewayModel, GatewayModelCatalog, GatewayModelCatalogClient
 
 

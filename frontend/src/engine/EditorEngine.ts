@@ -6,11 +6,9 @@
  * [Sync] 2026-05-30: fix deleteCell to guarantee last cell is always text after widget removal.
  * [Sync] 2026-06-14: add loadState source markers so remote Agent-write reloads
  *   can skip the next automatic save cycle.
+ * [Sync] 2026-08-31: retire automatic PolyCLI voice analysis on text edits;
+ *   Writing inspiration and explicit Thread Chat own model interaction.
  */
-
-import { findNormalizedPhrase } from '../utils/textNormalize';
-import { debugLogger } from '../utils/debugLogger';
-import { STORAGE_KEYS } from '../constants/storageKeys';
 
 // @@@ Core data model - cells + commentors + tasks + WeightPath
 export interface EditorState {
@@ -105,32 +103,10 @@ export function computeWeight(text: string): number {
   return weight;
 }
 
-// @@@ Extract completed sentences (for backend analysis)
-export function getCompletedSentences(text: string): string {
-  // Split by sentence boundaries (including Chinese comma and newline)
-  const parts = text.split(/([.!?。！？，\n]+)/);
-
-  let result = '';
-  for (let i = 0; i < parts.length - 1; i += 2) {
-    // Include sentence + its punctuation
-    if (i + 1 < parts.length) {
-      result += parts[i] + parts[i + 1];
-    }
-  }
-
-  // Don't include the last part if it doesn't end with punctuation
-  return result.trim();
-}
-
 // @@@ Main engine class
 export class EditorEngine {
   private state: EditorState;
-  private usedEnergy: number = 0;
-  private threshold: number = 50;
-  private commentorWaitlist: Commentor[] = [];
-  private sentCache: Map<string, string> = new Map(); // Track sent sentences -> commentor hash
   private onStateChange?: (state: EditorState) => void;
-  private isRequesting: boolean = false; // Track if request in progress
   private blankResetSubscribers: Set<() => void> = new Set();
   private lastLoadSource: EditorStateLoadSource = 'local';
 
@@ -177,7 +153,7 @@ export class EditorEngine {
     this.applyTextUpdate();
   }
 
-  // @@@ Apply weight calculation and trigger analysis
+  // @@@ Apply local weight calculation; text edits never start model requests
   private applyTextUpdate() {
     const combinedText = this.getCombinedText();
 
@@ -203,23 +179,6 @@ export class EditorEngine {
       delta,
       energy
     });
-
-    // Check if we should request analysis
-    this.checkAnalysisTrigger(combinedText);
-
-    // Check if we can apply commentors
-    const result = this.checkCommentorApplication(combinedText, energy);
-
-    // @@@ If comments were skipped, invalidate cache to allow fresh request
-    if (result.skippedAny && !result.appliedAny) {
-      debugLogger.log('skip', 'Comments were skipped, invalidating cache to allow fresh request', {
-        waitlistLength: this.commentorWaitlist.length
-      });
-      const completedSentences = getCompletedSentences(combinedText);
-      if (completedSentences) {
-        this.sentCache.delete(completedSentences);
-      }
-    }
 
     this.notifyChange();
   }
@@ -260,283 +219,8 @@ export class EditorEngine {
       createdAt: preservedTimestamp
     };
 
-    this.usedEnergy = 0;
-    this.commentorWaitlist = [];
-    this.sentCache.clear();
-    this.isRequesting = false;
-
     this.notifyChange();
     this.notifyBlankReset();
-  }
-
-
-  // @@@ Check if we should send text for analysis
-  private checkAnalysisTrigger(text: string) {
-    const completedSentences = getCompletedSentences(text);
-
-    // Skip if no completed sentences or already requesting
-    if (!completedSentences || this.isRequesting) {
-      return;
-    }
-
-    // Build hash of current commentor configuration
-    const commentorHash = this.getCommentorHash();
-
-    // Check if this text+commentor combination was already sent
-    const cachedHash = this.sentCache.get(completedSentences);
-
-    // Only send if not in cache OR commentor config changed
-    if (!cachedHash || cachedHash !== commentorHash) {
-      this.sentCache.set(completedSentences, commentorHash);
-
-      // Request analysis from backend (async, results go to waitlist)
-      this.requestAnalysis(completedSentences);
-    }
-  }
-
-  // @@@ Get hash of current commentor configuration
-  private getCommentorHash(): string {
-    // For now, just use applied commentor count as simple hash
-    // Could be more sophisticated if needed
-    return `v1_${this.state.commentors.filter(c => c.appliedAt).length}`;
-  }
-
-  // @@@ Check if we can apply commentors from waitlist
-  private checkCommentorApplication(text: string, currentEnergy: number): { appliedAny: boolean; skippedAny: boolean } {
-    let appliedAny = false;
-    let skippedAny = false;
-
-    // Apply ONE commentor at a time when we have enough energy
-    while (this.commentorWaitlist.length > 0) {
-      const unusedEnergy = currentEnergy - this.usedEnergy;
-
-      // Stop if we don't have enough energy for the next commentor
-      if (unusedEnergy < this.threshold) {
-        break;
-      }
-
-      const commentor = this.commentorWaitlist.pop()!;
-
-      // Check if text still matches (current text starts with snapshot)
-      if (!text.startsWith(commentor.textSnapshot)) {
-        debugLogger.log('skip', `Skipped outdated commentor: ${commentor.voice}`, {
-          voice: commentor.voice,
-          phrase: commentor.phrase,
-          reason: 'text snapshot mismatch'
-        });
-        skippedAny = true;
-        continue;
-      }
-
-      // @@@ Check for overlap with existing highlights (with normalized matching)
-      const phraseIndex = findNormalizedPhrase(text, commentor.phrase);
-      if (phraseIndex === -1) {
-        // @@@ Deep debugging - show character codes
-        const phraseChars = Array.from(commentor.phrase.slice(0, 30)).map(c => `${c}(${c.charCodeAt(0)})`).join(' ');
-        const textSnippet = text.includes('transcend') ? text.substring(text.indexOf('transcend'), text.indexOf('transcend') + 50) : '';
-        const textChars = textSnippet ? Array.from(textSnippet.slice(0, 30)).map(c => `${c}(${c.charCodeAt(0)})`).join(' ') : '';
-
-        debugLogger.log('phrase_not_found', `Skipped commentor (phrase not found): ${commentor.voice}`, {
-          voice: commentor.voice,
-          phrase: commentor.phrase,
-          phraseCharCodes: phraseChars,
-          textLength: text.length,
-          fullText: text,
-          textSnippet: textSnippet,
-          textCharCodes: textChars
-        });
-        if (!this.state.notFoundPhrases.includes(commentor.phrase)) {
-          this.state.notFoundPhrases.push(commentor.phrase);
-        }
-        skippedAny = true;
-        continue;
-      }
-
-      const phraseStart = phraseIndex;
-      const phraseEnd = phraseIndex + commentor.phrase.length;
-
-      // Check overlap with all applied commentors
-      let hasOverlap = false;
-      for (const applied of this.state.commentors.filter(c => c.appliedAt)) {
-        const appliedIndex = findNormalizedPhrase(text, applied.phrase);
-        if (appliedIndex === -1) continue;
-
-        const appliedStart = appliedIndex;
-        const appliedEnd = appliedIndex + applied.phrase.length;
-
-        // Check if ranges overlap: [phraseStart, phraseEnd) overlaps with [appliedStart, appliedEnd)
-        if (phraseStart < appliedEnd && phraseEnd > appliedStart) {
-          hasOverlap = true;
-          debugLogger.log('overlap', `Skipped overlapping commentor: "${commentor.phrase}" overlaps with "${applied.phrase}"`, {
-            newVoice: commentor.voice,
-            newPhrase: commentor.phrase,
-            newRange: [phraseStart, phraseEnd],
-            existingVoice: applied.voice,
-            existingPhrase: applied.phrase,
-            existingRange: [appliedStart, appliedEnd]
-          });
-          break;
-        }
-      }
-
-      if (hasOverlap) {
-        // @@@ Track overlapped phrase for backend feedback
-        if (!this.state.overlappedPhrases.includes(commentor.phrase)) {
-          this.state.overlappedPhrases.push(commentor.phrase);
-        }
-        skippedAny = true;
-        continue;
-      }
-
-      // Apply commentor
-      commentor.appliedAt = Date.now();
-      this.state.commentors.push(commentor);
-      this.usedEnergy += this.threshold;
-      appliedAny = true;
-      debugLogger.log('apply', `Applied commentor: ${commentor.voice} on "${commentor.phrase}"`, {
-        voice: commentor.voice,
-        phrase: commentor.phrase,
-        comment: commentor.comment,
-        usedEnergy: this.usedEnergy,
-        totalEnergy: currentEnergy,
-        remainingEnergy: currentEnergy - this.usedEnergy,
-        waitlistRemaining: this.commentorWaitlist.length
-      });
-    }
-
-    if (appliedAny) {
-      this.notifyChange();
-    }
-
-    return { appliedAny, skippedAny };
-  }
-
-  // @@@ Request analysis from backend
-  private async requestAnalysis(text: string) {
-    // Prevent duplicate requests
-    if (this.isRequesting) {
-      return;
-    }
-
-    this.isRequesting = true;
-
-    // Add a task to show we're working
-    const task: Task = {
-      id: generateId(),
-      type: 'thinking',
-      message: 'Analyzing text...',
-      startedAt: Date.now()
-    };
-    this.state.tasks.push(task);
-    this.notifyChange();
-
-    try {
-      // Call backend (returns ONLY ONE comment at a time)
-      // Backend loads voice configs from database using user_id from JWT token
-      const { analyzeText } = await import('../api/voiceApi');
-      const { getMetaPrompt, getStateConfig } = await import('../utils/voiceStorage');
-
-      // Send only APPLIED commentors to backend
-      const appliedCommentors = this.state.commentors.filter(c => c.appliedAt);
-      const metaPrompt = getMetaPrompt();
-
-      // Get state prompt from localStorage
-      const selectedState = localStorage.getItem(STORAGE_KEYS.SELECTED_STATE);
-      const stateConfig = getStateConfig();
-      const statePrompt = selectedState && stateConfig.states[selectedState]
-        ? stateConfig.states[selectedState].prompt
-        : '';
-
-      const result = await analyzeText(
-        text,
-        this.state.id,
-        appliedCommentors,
-        metaPrompt,
-        statePrompt,
-        this.state.overlappedPhrases,
-        this.state.notFoundPhrases
-      );
-
-      // Backend returns at most ONE voice
-      if (result.voices.length > 0) {
-        const voice = result.voices[0]; // Only take first one
-        const commentor: Commentor = {
-          id: generateId(),
-          phrase: voice.phrase,
-          comment: voice.comment,
-          voiceId: voice.voice_id,     // NEW: Store ID for config lookup
-          voice: voice.voice,           // KEEP: Store name for display
-          icon: voice.icon,
-          color: voice.color,
-          computedAt: Date.now(),
-          textSnapshot: text
-        };
-        this.commentorWaitlist.push(commentor);
-        debugLogger.log('waitlist', `Added 1 commentor to waitlist: ${commentor.voice}`, {
-          voice: commentor.voice,
-          phrase: commentor.phrase,
-          comment: commentor.comment,
-          waitlistLength: this.commentorWaitlist.length
-        });
-      } else {
-        debugLogger.log('request', 'No new commentor from backend', {
-          appliedCount: this.state.commentors.filter(c => c.appliedAt).length
-        });
-      }
-    } catch (error) {
-      debugLogger.log('request', 'Analysis failed', { error: String(error) });
-      console.error('Analysis failed:', error);
-    } finally {
-      this.isRequesting = false;
-
-      // Complete task
-      task.completedAt = Date.now();
-      this.notifyChange();
-
-      // Remove task after a delay
-      setTimeout(() => {
-        const idx = this.state.tasks.indexOf(task);
-        if (idx !== -1) {
-          this.state.tasks.splice(idx, 1);
-          this.notifyChange();
-        }
-      }, 2000);
-
-      // @@@ After request completes, immediately check if we can apply and request more
-      this.processPendingComments(text);
-    }
-  }
-
-  // @@@ Process pending comments and trigger more requests if needed
-  private processPendingComments(text: string) {
-    const lastEntry = this.state.weightPath[this.state.weightPath.length - 1];
-    const currentEnergy = lastEntry?.energy || 0;
-
-    // Try to apply comments from waitlist
-    const result = this.checkCommentorApplication(text, currentEnergy);
-
-    // @@@ If comments were skipped but not applied, invalidate cache
-    if (result.skippedAny && !result.appliedAny) {
-      debugLogger.log('skip', 'All pending comments were skipped, invalidating cache', {
-        waitlistLength: this.commentorWaitlist.length,
-        willRetry: true
-      });
-      const completedSentences = getCompletedSentences(text);
-      if (completedSentences) {
-        this.sentCache.delete(completedSentences);
-        // Trigger a fresh request immediately
-        setTimeout(() => {
-          this.checkAnalysisTrigger(text);
-        }, 50);
-      }
-    }
-    // If we applied comments, hash changed, so check if we need another request
-    else if (result.appliedAny) {
-      // Give a small delay to let the UI update
-      setTimeout(() => {
-        this.checkAnalysisTrigger(text);
-      }, 50);
-    }
   }
 
   // @@@ Merge consecutive text cells to prevent text-text pattern
@@ -730,8 +414,6 @@ export class EditorEngine {
     if (!this.state.notFoundPhrases) {
       this.state.notFoundPhrases = [];
     }
-    // Recompute used energy from applied commentors
-    this.usedEnergy = this.state.commentors.filter(c => c.appliedAt).length * this.threshold;
     this.notifyChange();
   }
 

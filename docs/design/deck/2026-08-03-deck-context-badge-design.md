@@ -1,7 +1,7 @@
 <!-- [Input] Chat Thread Deck/Agent binding, Deck receipt metadata, and enabled Agent projection. -->
 <!-- [Output] Deck context badge and same-Deck next-turn Agent-selection interaction contract. -->
 <!-- [Pos] Chat consumption interaction design under Deck. -->
-<!-- [Sync] 2026-08-17: make enabled Agents clickable while Thread, Deck, content version, and receipt stay fixed. -->
+<!-- [Sync] 2026-08-31: confirm Dream-bound Threads preserve launch provenance while the current next-turn Agent changes. -->
 
 # Deck 上下文徽章 · 交互方案设计稿
 
@@ -93,6 +93,8 @@ S3a ──成员/权限/CAS失败──▶ S3b ──刷新──▶ S3
 - **禁用/跨 Deck Agent**：前端不展示禁用项；伪造或过期请求由 `DeckChatContextService` fail closed，不更新 Thread。
 - **并发切换**：后端以当前 `voice_id` 为 expected value 更新；CAS 失败返回 `CHAT_AGENT_CONFLICT`，不启动本轮运行。
 - **运行提示词**：下一轮只使用经后端重新解析的所选 Agent `system_prompt`，不信任浏览器传入提示词。
+- **Dream-bound Thread**：切换只改变当前下一轮 Agent；Dream launch message 的 Agent 与请求
+  指纹保持不可变。两者不同不是 binding conflict，Run、Thread 和 Dream 重入继续有效。
 
 ---
 

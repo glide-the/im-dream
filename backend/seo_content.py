@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-# [Input] Consume public frontend/backend URL values and public crawler requests.
-# [Output] Generate SEO metadata content for robots.txt, sitemap.xml, and llms.txt.
+# [Input] Consume public frontend/backend URL values, curated knowledge links, and public crawler requests.
+# [Output] Generate SEO metadata content for robots.txt, sitemap.xml, and llms.txt with public knowledge references.
 # [Pos] backend SEO content helper
 # [Sync] 2026-06-14: created for Codex SEO optimized crawler and AI-search content.
 # [Sync] 2026-06-14: split frontend app URL from backend API origin for llms.txt.
 # [Sync] 2026-06-15: remove /ink-and-memory public app prefix from crawler policies.
+# [Sync] 2026-08-31: add the latest bilingual connector essay and descriptive blog/knowledge-base links to llms.txt.
+# [Sync] 2026-08-31: remove the retired /polycli path from crawler policy.
 """SEO content generators for public crawler and AI-search discovery files."""
 
 from __future__ import annotations
@@ -27,6 +29,35 @@ APP_KEYWORDS = (
     "inner voice feedback",
     "visual diary",
     "memory timeline",
+)
+
+BLOG_AND_KNOWLEDGE_BASE_LINKS = (
+    ("Blog index", "https://suoxya.com/blog/"),
+    (
+        "English article — Lecture Notes | When Connectors Enter the Agent Workspace: "
+        "Boundaries of State, Trust, and Action",
+        "https://medium.com/@glide-the/lecture-notes-when-connectors-enter-the-agent-workspace-boundaries-of-state-trust-and-action-e13fc6839b99",
+    ),
+    (
+        "Chinese article — 讲义｜连接器进入 Agent 工作空间之后：状态、信任与动作的边界",
+        "https://mp.weixin.qq.com/s/N8guDNouFjWClKXHmWQo-A",
+    ),
+    (
+        "Article page — Workspace 工作空间状态管理与交互入口设计",
+        "https://suoxya.com/blog/workspace-state-management/",
+    ),
+    (
+        "Chinese original — Workspace 工作空间状态管理与交互入口设计",
+        "https://mp.weixin.qq.com/s/RIdUu6gs3FlJI6tzRPEphA",
+    ),
+    (
+        "Article page — How Does an AI Know What You Are Writing?",
+        "https://suoxya.com/blog/how-does-an-ai-know-what-you-are-writing/",
+    ),
+    (
+        "English original — How Does an AI Know What You Are Writing?",
+        "https://medium.com/@glide-the/how-does-an-ai-know-what-you-are-writing-b545edbfe8b2",
+    ),
 )
 
 PUBLIC_APP_PATHS = (
@@ -53,7 +84,6 @@ TRAINING_CRAWLERS = (
 
 PRIVATE_PATHS = (
     "/api/",
-    "/polycli/",
     "/ws/",
 )
 
@@ -151,12 +181,18 @@ def build_llms_txt(
         if backend_origin != "/"
         else "/api/health"
     )
+    knowledge_base_links = "\n".join(
+        f"- {label}: {url}" for label, url in BLOG_AND_KNOWLEDGE_BASE_LINKS
+    )
 
     return f"""# {APP_NAME}
 > {APP_DESCRIPTION}
 
 ## Main Pages
 - [{APP_NAME}]({app_url}): Daily AI journaling studio with bilingual reflective writing, inner voice feedback, customizable voice decks, saved writing sessions, and visual memory timelines.
+
+## Blog and Knowledge Base
+{knowledge_base_links}
 
 ## Product Facts
 - {APP_NAME} helps writers capture personal notes, reflect on recurring thoughts, and talk with configurable AI voice personas.

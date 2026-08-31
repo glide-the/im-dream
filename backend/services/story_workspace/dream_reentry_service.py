@@ -4,6 +4,7 @@
 #          initial/in-progress projection derived from confirmation facts.
 # [Pos] Story Workspace Dream list query; it does not author Project titles.
 # [Sync] 2026-08-26: isolate a historical Run whose Thread workspace is absent.
+# [Sync] 2026-08-31: keep launch-Agent provenance immutable while allowing the Thread's current Agent to change.
 
 """Actor-scoped durable projection for the Dream workbench re-entry list."""
 
@@ -253,9 +254,8 @@ class StoryWorkspaceDreamReentryService:
             "OR ((COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
             "->> 'schemaVersion') = %s "
             "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
-            "->> 'agentId') IS NOT DISTINCT FROM thread.voice_id "
-            "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
-            "#>> '{dreamContext,agent_id}') IS NOT DISTINCT FROM thread.voice_id)) "
+            "->> 'agentId') IS NOT DISTINCT FROM (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
+            "#>> '{dreamContext,agent_id}'))) "
             + run_filter
             + "ORDER BY run.created_at DESC, run.id ASC"
             + limit_clause,
@@ -613,11 +613,6 @@ class StoryWorkspaceDreamReentryService:
             ):
                 return False
             if top_agent != context_agent:
-                return False
-            if (
-                thread_agent_id is not _STORY_WORKSPACE_DREAM_VOICE_NOT_PROVIDED
-                and top_agent != thread_agent_id
-            ):
                 return False
         return (
             metadata.get("kind") == "story-workspace-dream-launch"

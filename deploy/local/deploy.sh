@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# [Input] backend/server.py, backend/.env, backend/models.json, frontend/package.json.
+# [Input] backend/server.py, backend/.env, frontend/package.json.
 # [Output] Local check/build/start/verify/stop workflow for Ink & Memory.
 # [Pos] platform release entry in deploy/local/
 # [Sync] 2026-06-12: add platform-scoped local release helper with help, dry-run, and check modes.
 # [Sync] 2026-08-07: expose the frontend dev server on all network interfaces by default.
 # [Sync] 2026-08-22: source Dream's local database URL from the Admin-owned
 #                    embedded PostgreSQL env file instead of a stale local DSN.
+# [Sync] 2026-08-31: remove the unused legacy models.json prerequisite.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -127,7 +128,6 @@ check_prereqs() {
   require_file "${BACKEND_DIR}/server.py" || { warn "Missing backend/server.py."; failed=1; }
   require_file "${BACKEND_DIR}/database.py" || { warn "Missing backend/database.py."; failed=1; }
   require_file "${BACKEND_DIR}/.env" || { warn "Missing backend/.env. Copy backend/.env.example first."; failed=1; }
-  require_file "${BACKEND_DIR}/models.json" || { warn "Missing backend/models.json. Copy backend/models.json.example first."; failed=1; }
   require_file "${LOCAL_ADMIN_ENV_FILE}" || { warn "Missing Admin env file at ${LOCAL_ADMIN_ENV_FILE}. Set LOCAL_ADMIN_ENV_FILE or run Admin env:setup."; failed=1; }
   require_file "${FRONTEND_DIR}/package.json" || { warn "Missing frontend/package.json."; failed=1; }
   require_file "${FRONTEND_DIR}/node_modules/.package-lock.json" || warn "frontend/node_modules is not installed; run npm install before start/build."
