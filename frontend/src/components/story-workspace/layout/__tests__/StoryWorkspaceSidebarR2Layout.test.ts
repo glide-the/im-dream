@@ -9,6 +9,9 @@
 //                    original positions and continue using the existing routes.
 // [Sync] 2026-08-15: assert those restored entries live under the More disclosure.
 // [Sync] 2026-08-16: allow the restored Deck maintenance popup to hand its selected Agent to Chat.
+// [Sync] 2026-08-31: require completed Editor writes to enter the sidebar-owned
+//                    Writing route and keep the retired desktop top bar absent.
+// [Sync] 2026-08-31: follow the Settings return control's localized accessible label.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam reads source only; browser app omits Node types.
@@ -17,6 +20,7 @@ import { readFileSync } from 'node:fs';
 const SIDEBAR = readFileSync(new URL('../StoryWorkspaceSidebar.tsx', import.meta.url), 'utf8');
 const ROUTER = readFileSync(new URL('../../../../router/story-workspace.tsx', import.meta.url), 'utf8');
 const APP = readFileSync(new URL('../../../../App.tsx', import.meta.url), 'utf8');
+const EDITOR_WRITE = readFileSync(new URL('../../../chat/EditorWriteApprovalUI.tsx', import.meta.url), 'utf8');
 const PATHS = readFileSync(new URL('../../../../router/storyWorkspacePath.ts', import.meta.url), 'utf8');
 const SUBSCRIPTION = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSubscriptionPage.tsx', import.meta.url), 'utf8');
 const SETTINGS = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSettingsPage.tsx', import.meta.url), 'utf8');
@@ -133,7 +137,7 @@ test('subscription moves into the focused Settings layout', () => {
   expect(SETTINGS).toContain('<section aria-labelledby=');
   expect(SETTINGS).toContain('className="story-workspace-settings__section"');
   expect(SETTINGS).toContain('role="region"');
-  expect(SETTINGS).toContain('aria-label="返回应用"');
+  expect(SETTINGS).toContain("aria-label={t('settings.workspace.backToApp')}");
   expect(SETTINGS).toContain("onNavigate('/story-workspace/dream')");
   expect(ROUTER).toContain('showSidebar={!isSettingsRoute}');
   expect(ROUTER).toContain("|| activeRoute === 'subscription'");
@@ -155,6 +159,17 @@ test('legacy page links render through the workspace router main region', () => 
   expect(APP).toContain('onRouteChange={handleStoryWorkspaceRouteChange}');
   expect(APP).toContain('Start writing...');
   expect(APP).not.toContain('onGlobalNavigate={handleAppViewChange}');
+});
+
+test('completed Editor writes use the canonical sidebar Writing route without the retired top bar', () => {
+  expect(EDITOR_WRITE).toContain("window.dispatchEvent(new CustomEvent('editor:jump-to-cell'");
+  expect(APP).toContain("window.addEventListener('editor:jump-to-cell', handler)");
+  expect(APP).toContain('STORY_WORKSPACE_PATHS.writing');
+  expect(APP).toContain("setStoryWorkspaceLegacyView('writing')");
+  expect(APP).toContain("setCurrentView('story-workspace')");
+  expect(APP).toContain("currentView === 'story-workspace' && storyWorkspaceLegacyView === 'writing'");
+  expect(APP).not.toContain("import TopNavBar from './components/TopNavBar'");
+  expect(APP).not.toContain('<TopNavBar');
 });
 
 test('workspace user area owns the floating logout menu', () => {

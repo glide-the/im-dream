@@ -147,4 +147,4 @@ Ink & Memory 亮色主题的关键词是 **"暖纸张、手写笔记本、安静
 | 文字主 | `--color-text-body` | `#333333` | 条目名称。 |
 | 文字次 | `--color-text-secondary` | `#666666` | 描述/元信息。 |
 
-> `AgentDropdown`、`TopNavBar` 用户菜单、`CalendarPopup` 条目卡、`LeftToolbar` Tooltip 均遵循此规范。
+> `AgentDropdown`、Story Workspace 侧边栏用户菜单、`CalendarPopup` 条目卡、`LeftToolbar` Tooltip 均遵循此规范。

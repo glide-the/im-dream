@@ -6,6 +6,7 @@
 [Sync] 2026-08-26: document root Dream runtime and isolated Admin/PostgreSQL ownership.
 [Sync] 2026-08-30: document the qualified 2.1.88 local-core and restored on-disk apply-seccomp passthrough.
 [Sync] 2026-08-30: document the deployment-owned disabled Bash sandbox profile and its root-service consequence.
+[Sync] 2026-08-31: document the explicit Vite allow-all host override for dynamic AutoDL mappings.
 -->
 
 ## 应用介绍
@@ -23,6 +24,8 @@ Ink & Memory 是一款面向长篇故事、剧本和创意写作的 AI 创作工
 - 自动保存创作内容和历史记录。
 
 AutoDL 版本不依赖 Docker 或 Nginx：Admin 与内嵌 PostgreSQL 监听 `127.0.0.1:6008`，Dream 前端监听 `127.0.0.1:6006`，Dream 后端监听 `127.0.0.1:8765`。公网服务映射只需要暴露前端 `6006` 和 Admin `6008`。
+
+Vite 默认只接受 Dream 公网 origin 的精确主机。AutoDL 服务地址会动态变化时，可在 `platform.env` 显式设置 `AUTODL_VITE_ALLOWED_HOSTS=*`；`prepare-env.sh` 会投影 `VITE_ALLOWED_HOSTS=*`，Vite 将其解释为 `allowedHosts: true`。该设置会关闭 Vite 的 Host 校验，只应由部署者明确启用。
 
 Dream 的 Thread workspace、共享 Artifact、本地文件、运行用户 home 与 Claude plugin runtime 默认统一位于 `/root/autodl-tmp/ink-memory`。Admin 的 PostgreSQL 数据独立位于服务用户拥有的 `/root/ink-autodl/data/postgres`；启动器不会迁移、恢复或删除数据库。
 

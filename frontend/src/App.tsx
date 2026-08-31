@@ -37,6 +37,8 @@
 // [Sync] 2026-08-25: render the MCP OAuth callback entirely in the SPA so its
 //                    one-time code/state never reaches Dream backend access logs.
 // [Sync] 2026-08-25: submit the same-origin MCP OAuth callback automatically by non-secret operation ID; users never copy authorization URLs.
+// [Sync] 2026-08-31: remove the retired desktop TopNavBar and route completed
+//                    Editor-note jumps through canonical Story Workspace Writing before focusing the target cell.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -48,7 +50,6 @@ import {
   FaFistRaised, FaLightbulb, FaShieldAlt, FaWind, FaFire, FaCompass,
   FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments,
 } from 'react-icons/fa';
-import TopNavBar from './components/TopNavBar';
 import LeftToolbar from './components/LeftToolbar';
 import DeckManager from './components/DeckManager';
 import CalendarPopup from './components/CalendarPopup';
@@ -242,8 +243,8 @@ export default function App() {
   const mobileBottomOffset = isMobile
     ? `calc(${mobileNavHeight}px + env(safe-area-inset-bottom, 0px))`
     : '0px';
-  const mobileTopInset = isMobile ? 'env(safe-area-inset-top, 0px)' : '48px';
-  const viewTopOffset = isMobile ? 0 : 48;
+  const mobileTopInset = isMobile ? 'env(safe-area-inset-top, 0px)' : '0px';
+  const viewTopOffset = 0;
   const writingBottomPadding = isMobile
     ? `calc(${mobileNavHeight}px + env(safe-area-inset-bottom, 0px) + 12px)`
     : '41px';
@@ -1078,20 +1079,33 @@ export default function App() {
 
   // @@@ Jump to a specific cell in the writing view (triggered by editor:jump-to-cell custom event)
   const jumpToCellRef = useRef<string | null>(null);
+  const [jumpToCellRequestNonce, setJumpToCellRequestNonce] = useState(0);
 
   useEffect(() => {
     const handler = (e: Event) => {
       const cellId = (e as CustomEvent<{ cellId: string }>).detail?.cellId;
       if (!cellId) return;
       jumpToCellRef.current = cellId;
-      setCurrentView('writing');
+      setJumpToCellRequestNonce((value) => value + 1);
+      if (window.location.pathname + window.location.search !== STORY_WORKSPACE_PATHS.writing) {
+        window.history.pushState(
+          { inkDreamView: 'story-workspace' },
+          '',
+          STORY_WORKSPACE_PATHS.writing,
+        );
+      }
+      setStoryWorkspaceLegacyView('writing');
+      setCurrentView('story-workspace');
+      window.dispatchEvent(new PopStateEvent('popstate'));
     };
     window.addEventListener('editor:jump-to-cell', handler);
     return () => window.removeEventListener('editor:jump-to-cell', handler);
   }, []);
 
   useEffect(() => {
-    if (currentView !== 'writing' || !jumpToCellRef.current) return;
+    const isWritingRoute = currentView === 'writing'
+      || (currentView === 'story-workspace' && storyWorkspaceLegacyView === 'writing');
+    if (!isWritingRoute || !jumpToCellRef.current) return;
     const cellId = jumpToCellRef.current;
     jumpToCellRef.current = null;
     const attemptScroll = (attempts = 0) => {
@@ -1106,7 +1120,7 @@ export default function App() {
       }
     };
     setTimeout(() => attemptScroll(), 100);
-  }, [currentView]);
+  }, [currentView, jumpToCellRequestNonce, storyWorkspaceLegacyView]);
 
   // @@@ Handle localStorage migration
   const handleMigrateData = useCallback(async () => {
@@ -1728,11 +1742,6 @@ export default function App() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* @@@ Hide top nav on mobile */}
-      {!isMobile && currentView !== 'story-workspace' && (
-        <TopNavBar currentView={currentView} onViewChange={handleAppViewChange} />
       )}
 
       {currentView === 'story-workspace' && (

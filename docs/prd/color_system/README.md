@@ -4,6 +4,7 @@
 > 本文是索引入口，具体设计稿见子文档。不修改源码、不引入新业务逻辑。
 > [Sync] 2026-07-09: Settings / connector detail pages may use one dashed paper boundary, while inner sections and resource rows must stay flat, whitespace-led, and non-card-like; selected resources use a right-side checkmark, not dark fills.
 > [Sync] 2026-07-09: Decks uses the same paper-boundary rule: one dashed page boundary, flat deck items, small accent marks, and no gradient / shadow-heavy ordinary cards.
+> [Sync] 2026-08-31: theme and account chrome are owned by the Story Workspace sidebar after the legacy top navigation was removed.
 
 ---
 
@@ -31,7 +32,7 @@
 |---|---|
 | `frontend/src/styles/tokens.css` | `:root` 定义亮色，`[data-theme='dark']` 定义暗色，`prefers-color-scheme: dark` 媒体查询提供系统自动回退。 |
 | `frontend/src/App.css` | 产品底色为暖纸张；`.notebook-lines` 使用 `color-mix` 派生格线色；滚动条颜色已全部替换为 token。 |
-| `frontend/src/App.tsx` / `TopNavBar.tsx` | 已完成从硬编码 `#fff`/`#555`/`#d44` 等到 CSS 变量的迁移。 |
+| `frontend/src/App.tsx` / `components/story-workspace/layout/StoryWorkspaceSidebar.tsx` | 应用画布、导航与账户控件使用语义 CSS 变量。 |
 | `frontend/src/utils/theme.ts` | 提供 `initTheme` / `setTheme` / `toggleTheme` / `getTheme`；`main.tsx` 在 render 前调用 `initTheme()`。 |
 
 冲突取舍：
@@ -87,7 +88,7 @@ Ink & Memory 的视觉关键词是 **"纸张、笔记、手写、安静工具台
 
 - `tokens.css` 中 `:root` 与 `[data-theme='dark']` 覆盖全部语义 token，两套值完整对称。
 - `prefers-color-scheme: dark` 媒体查询在用户未手动设置时自动生效。
-- `TopNavBar` 右侧 🌙/☀️ 按钮可切换主题，偏好持久化到 `localStorage`（键名 `ink-theme`）。
+- Story Workspace 侧边栏的 🌙/☀️ 按钮可切换主题，偏好持久化到 `localStorage`（键名 `ink-theme`）。
 - 所有组件中不存在孤立十六进制颜色（已通过代码审查确认）。
 - `docs/prd` 下 PRD 文档颜色引用均可追溯到 `light-theme.md` 或 `dark-theme.md` 中的 token。
 - UI 中状态反馈不只用颜色表达。

@@ -8,6 +8,8 @@
 #                    selects its installed absolute CLI path.
 # [Sync] 2026-08-30: force deployment-owned Claude Bash sandbox enablement to
 #                    false because the outer AutoDL container rejects userns.
+# [Sync] 2026-08-31: allow an explicit AutoDL Vite host policy override,
+#                    including the operator-selected allow-all `*` value.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +30,7 @@ AUTODL_ADMIN_PORT="${AUTODL_ADMIN_PORT:-6008}"
 AUTODL_DREAM_PUBLIC_ORIGIN="${AUTODL_DREAM_PUBLIC_ORIGIN:-}"
 AUTODL_ADMIN_PUBLIC_ORIGIN="${AUTODL_ADMIN_PUBLIC_ORIGIN:-}"
 AUTODL_CLAUDE_CODE_CLI_PATH="${AUTODL_CLAUDE_CODE_CLI_PATH:-/root/ink-autodl/runtime/npm/bin/ink-claude-code-dream}"
+AUTODL_VITE_ALLOWED_HOSTS="${AUTODL_VITE_ALLOWED_HOSTS:-}"
 
 err() { printf '[error] %s\n' "$*" >&2; exit 1; }
 env_value() { awk -F= -v key="$2" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$1"; }
@@ -46,9 +49,11 @@ database_password="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_PASSWORD)"
 database_name="$(env_value "${ADMIN_ENV_FILE}" POSTGRES_DB)"
 dream_public_host="${AUTODL_DREAM_PUBLIC_ORIGIN#https://}"
 dream_public_host="${dream_public_host%%:*}"
+vite_allowed_hosts="${AUTODL_VITE_ALLOWED_HOSTS:-${dream_public_host}}"
 [[ "${database_user}" =~ ^[A-Za-z0-9_]+$ ]] || err "Admin POSTGRES_USER is missing or unsupported."
 [[ "${database_password}" =~ ^[A-Za-z0-9._~-]+$ ]] || err "Admin POSTGRES_PASSWORD must be URL-safe."
 [[ "${database_name}" =~ ^[A-Za-z0-9_-]+$ ]] || err "Admin POSTGRES_DB is missing or unsupported."
+[[ "${vite_allowed_hosts}" =~ ^(\*|[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*)$ ]] || err "AUTODL_VITE_ALLOWED_HOSTS must be '*' or a comma-separated host list without ports."
 
 temp_file="$(mktemp "${SCRIPT_DIR}/.env.XXXXXX")"
 trap 'rm -f "${temp_file}"' EXIT
@@ -85,7 +90,7 @@ awk -F= '
   printf 'CLAUDE_CODE_CLI_PATH=%s\n' "${AUTODL_CLAUDE_CODE_CLI_PATH}"
   printf 'INK_AGENT_SANDBOX_ENABLED=false\n'
   printf 'INK_LOAD_DATABASE_URL_FROM_ENV_FILE=0\n'
-  printf 'VITE_ALLOWED_HOSTS=%s\n' "${dream_public_host}"
+  printf 'VITE_ALLOWED_HOSTS=%s\n' "${vite_allowed_hosts}"
   printf 'VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:%s\n' "${AUTODL_DREAM_BACKEND_PORT}"
 } >>"${temp_file}"
 

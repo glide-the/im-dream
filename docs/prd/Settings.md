@@ -17,10 +17,11 @@
 > `.claude/settings.json` 的 `sandbox.network`。
 > **[Sync] 2026-07-08**: 新增资源链接设置区，Connector 入口改为进入 Settings 的资源链接管理；Chat 只保留轻量摘要面板和跳转按钮。
 > **[Sync] 2026-07-08**: 修复设置页问题——Notion「管理」不再原地展开，改为导航到独立的 `ConnectorNotionDetailPage`（带面包屑导航），并移除顶部/移动端导航栏里单独的 `Connector` 入口，统一由 Settings 资源链接区和 Chat 轻量摘要面板承载入口。
+> **[Sync] 2026-08-31**: 桌面端移除旧 `TopNavBar`；Settings、主题和用户操作统一由 Story Workspace 侧边栏承载，移动端底部导航保持现状。
 
 ## 1. 文档范围
 
-Settings 是应用的全局配置页面，作为顶部导航栏（`TopNavBar`）和移动端底部导航栏中"设置"入口的对应视图。本次更新新增 **资源链接** 与 **AI 模型配置区域**，将原本位于 Chat 页面侧边栏的模型配置迁移至此，并新增 **用户 API 配置区域**，支持每位用户存储自己的 Anthropic API 密钥及模型端点配置。
+Settings 是应用的全局配置页面，作为 Story Workspace 侧边栏和移动端底部导航栏中“设置”入口的对应视图。本次更新新增 **资源链接** 与 **AI 模型配置区域**，将原本位于 Chat 页面侧边栏的模型配置迁移至此，并新增 **用户 API 配置区域**，支持每位用户存储自己的 Anthropic API 密钥及模型端点配置。
 
 该页面包含：
 - 语言偏好设置
@@ -339,9 +340,9 @@ SettingsView（position: fixed，overflow: auto）
 
 Settings 页面通过以下入口访问：
 
-- 桌面端顶部导航栏（`TopNavBar`）的 Settings 选项。
+- 桌面端 Story Workspace 侧边栏的 Settings 选项。
 - 移动端底部导航栏的 Settings 图标。
-- Chat 侧 `ConnectorLandingPanel` 的跳转按钮会打开 Settings 并自动滚动、聚焦到资源链接区（顶部导航栏与移动端底部导航栏不再单独展示 `Connector` 入口）。
+- Chat 侧 `ConnectorLandingPanel` 的跳转按钮会打开 Settings 并自动滚动、聚焦到资源链接区（Story Workspace 侧边栏与移动端底部导航栏不单独展示 `Connector` 入口）。
 
 ## 10. 可访问性
 
@@ -355,7 +356,7 @@ Settings 页面通过以下入口访问：
 - Settings 页面包含 AI 模型配置区域（主题、模型、系统提示词、工作区模式、沙箱网络、IM 审批模式）。
 - Settings 页面包含资源链接区域（Notion / 飞书 / 本地 CLI 执行器占位）；点击 Notion「管理」会导航到独立的 `ConnectorNotionDetailPage`（带「← 资源连接器 > Notion Connector」面包屑），而不是在资源链接卡片内原地展开。
 - Settings 页面包含用户 API 配置区域（API 密钥、API 端点、默认模型三个输入项）。
-- Chat 页面不再渲染模型配置侧边栏，也不再承载完整 connector workbench；顶部导航栏与移动端底部导航栏不再展示 `Connector` 入口，Connector 管理只能通过 Settings 资源链接区或 Chat 轻量摘要面板的跳转按钮进入。
+- Chat 页面不再渲染模型配置侧边栏，也不再承载完整 connector workbench；Story Workspace 侧边栏与移动端底部导航栏不展示 `Connector` 入口，Connector 管理只能通过 Settings 资源链接区或 Chat 轻量摘要面板的跳转按钮进入。
 - 所有颜色引用 [Color System](<./color_system/README.md>) token，无孤立十六进制值。
 - Light/Dark 模式均可正常显示。
 - 配置变更后正确同步到 `/api/system-config`。
@@ -376,7 +377,7 @@ Settings 页面通过以下入口访问：
 - 新建 `ConnectorLandingPanel.tsx`，作为 Chat 中的轻量 connector 摘要和 Settings 跳转 CTA。
 - 在 `App.tsx` Settings 视图中注入 `<ModelConfigSection />`，作为独立区域显示。
 - 在 `App.tsx` 新增 `showNotionConnectorDetail` 状态；点击 Notion「管理」时把 Settings 视图整体切换为 `<ConnectorNotionDetailPage />`，不再与其它设置分区混排。
-- `TopNavBar.tsx` 与移动端底部导航栏不再渲染独立的 `Connector` 按钮；`VerticalNav.tsx` 不再渲染 Settings 图标；Settings 保留顶部导航栏和移动端底部导航栏入口。
+- 桌面端 Story Workspace 侧边栏与移动端底部导航栏不渲染独立的 `Connector` 按钮；`VerticalNav.tsx` 不再渲染 Settings 图标；Settings 保留侧边栏和移动端底部导航栏入口。
 - `ChatView.tsx` 只在 Chat 视图内渲染轻量 connector landing panel，不再挂载黑底 connector workbench。
 
 **用户 API 配置（待实现）**：

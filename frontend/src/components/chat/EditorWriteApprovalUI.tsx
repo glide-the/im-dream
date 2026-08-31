@@ -9,6 +9,8 @@
 //        states) resolves through the chat.editorWrite namespace (en + zh) via useTranslation.
 // [Sync] 2026-08-29: render truthful Editor failure guidance and retain the
 //        approved-but-unwritten input preview without exposing backend internals.
+// [Sync] 2026-08-31: completed-card note jumps remain target-cell intents while
+//        App resolves them through the canonical Story Workspace Writing route.
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { EditorWriteResult } from './editorWriteTools';

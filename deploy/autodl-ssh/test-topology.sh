@@ -5,6 +5,7 @@
 # [Sync] 2026-08-26: keep root-runtime topology assertions portable across GNU and BSD stat.
 # [Sync] 2026-08-30: require the explicit AutoDL 2.1.88 local-core CLI path and
 #                    deployment-owned disabled Claude Bash sandbox capability.
+# [Sync] 2026-08-31: cover the explicit Vite allow-all host projection.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,6 +50,7 @@ AUTODL_ENV_FILE="${OUTPUT_ENV}" \
 AUTODL_DATA_ROOT="${PROJECTED_DATA_ROOT}" \
 AUTODL_DREAM_PUBLIC_ORIGIN=https://dream.example.test \
 AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin.example.test \
+AUTODL_VITE_ALLOWED_HOSTS='*' \
   "${SCRIPT_DIR}/prepare-env.sh"
 
 grep -Fx "AGENT_CWD=${PROJECTED_DATA_ROOT}/agent-workspaces" "${OUTPUT_ENV}"
@@ -57,6 +59,7 @@ grep -Fx "FILE_STORAGE_LOCAL_DIR=${PROJECTED_DATA_ROOT}/file-storage" "${OUTPUT_
 grep -Fx "INK_CLAUDE_PLUGIN_RUNTIME_ROOT=${PROJECTED_DATA_ROOT}/claude-plugin-runtime" "${OUTPUT_ENV}"
 grep -Fx "CLAUDE_CODE_CLI_PATH=/root/ink-autodl/runtime/npm/bin/ink-claude-code-dream" "${OUTPUT_ENV}"
 grep -Fx "INK_AGENT_SANDBOX_ENABLED=false" "${OUTPUT_ENV}"
+grep -Fx "VITE_ALLOWED_HOSTS=*" "${OUTPUT_ENV}"
 if grep -Eq '^INK_AGENT_(MAX_CONCURRENT_RUNS|RUN_MEMORY_BUDGET_MIB|MEMORY_RESERVE_MIB)=' "${OUTPUT_ENV}"; then
   printf 'AutoDL projected an explicit Agent admission override\n' >&2
   exit 1
