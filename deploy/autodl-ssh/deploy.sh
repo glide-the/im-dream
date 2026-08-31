@@ -376,7 +376,9 @@ verify_seo_origin() {
     [[ "${content_type}" == "${expected_type}"* ]] || err "${label} /${endpoint} returned ${content_type:-no content type}; expected ${expected_type}."
     body="$(curl -fsS --retry 5 --retry-delay 2 --retry-connrefused --max-time 15 "${origin%/}/${endpoint}")"
     [[ "${body}" == *"${marker}"* ]] || err "${label} /${endpoint} did not contain its required machine-readable marker."
-    [[ "${body,,}" != *"<html"* ]] || err "${label} /${endpoint} returned SPA HTML instead of the backend crawler file."
+    if printf '%s' "${body}" | grep -Eiq '<html'; then
+      err "${label} /${endpoint} returned SPA HTML instead of the backend crawler file."
+    fi
   done <<'EOF'
 robots.txt|text/plain|User-agent:
 sitemap.xml|application/xml|<urlset
