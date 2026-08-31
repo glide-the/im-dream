@@ -1,6 +1,7 @@
 # [Input] Authenticated actor, an already owner-scoped Chat thread, and workflow binding rows.
 # [Output] Resolve the unique trusted Dream retry leaf into StoryWorkspaceDreamRunContext.
 # [Pos] Server-only authorization seam between canonical Chat ingress and Dream runtime context.
+# [Sync] 2026-08-31: separate immutable launch-Agent provenance from the mutable same-Deck next-turn Agent.
 
 """Resolve a Dream workflow binding from an authenticated Chat thread.
 
@@ -57,6 +58,8 @@ class DreamThreadBindingConflict(RuntimeError):
 
     code = "DREAM_THREAD_BINDING_CONFLICT"
     status_code = 409
+    public_message = "This conversation's Dream binding is unavailable."
+    retryable = False
 
     def __init__(self, reason: str) -> None:
         # ``reason`` is an internal bounded classifier, not row data.  Routes
@@ -207,7 +210,6 @@ def _validate_source_message_provenance(
     thread_id: str,
     workspace_id: str,
     deck_id: str,
-    thread_agent_id: object,
 ) -> None:
     """Prove the retry graph still originates from one server launch row.
 
@@ -234,6 +236,11 @@ def _validate_source_message_provenance(
 
         goal = metadata.get("goal")
         agent_id = metadata.get("agentId")
+        launch_agent_is_valid = agent_id is None or (
+            isinstance(agent_id, str)
+            and bool(agent_id)
+            and agent_id == agent_id.strip()
+        )
         fingerprint_payload: dict[str, Any] = {
             "deck_id": deck_id,
             "goal": goal,
@@ -259,12 +266,7 @@ def _validate_source_message_provenance(
             and metadata.get("requestFingerprint")
             == _sha256_json(fingerprint_payload)
             and attempt.input_hash == _sha256_json({"goal": goal})
-            and agent_id
-            == (
-                thread_agent_id
-                if isinstance(thread_agent_id, str) and thread_agent_id
-                else None
-            )
+            and launch_agent_is_valid
         )
         if not valid:
             raise DreamThreadBindingConflict("source_message_provenance_mismatch")
@@ -396,6 +398,12 @@ class DreamRunBindingResolver:
             thread_owner = _mapping_value(owned_thread, "user_id")
             thread_deck_id = _mapping_value(owned_thread, "deck_id")
             thread_agent_id = _mapping_value(owned_thread, "voice_id")
+            if thread_agent_id is not None and (
+                not isinstance(thread_agent_id, str)
+                or not thread_agent_id
+                or thread_agent_id != thread_agent_id.strip()
+            ):
+                raise DreamThreadBindingConflict("thread_current_agent_invalid")
             if (
                 str(_mapping_value(owned_thread, "id") or "") != thread_id
                 or thread_owner is None
@@ -431,7 +439,6 @@ class DreamRunBindingResolver:
                 thread_id=thread_id,
                 workspace_id=leaf.workspace_id,
                 deck_id=thread_deck_id,
-                thread_agent_id=thread_agent_id,
             )
             try:
                 leaf_status = RunStatus(leaf.status)

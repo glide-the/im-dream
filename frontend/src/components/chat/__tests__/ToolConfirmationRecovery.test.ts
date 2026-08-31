@@ -1,10 +1,15 @@
 // [Input] Chat reconnect SSE events, tool confirmation response decoder, and pending-part classifier.
 // [Output] Regression coverage for ordered reasoning replay, editor tool failures, and already-resolved confirmations.
 // [Pos] Generic Chat confirmation recovery TDD seam.
+// [Sync] 2026-08-31: lock structured SSE error identity without parsing display strings.
 
 import { expect, test } from '@playwright/test';
 import type { DynamicToolUIPart } from 'ai';
-import { ClaudeAgentChatTransport } from '../../../lib/claude-agent-transport';
+import {
+  ClaudeAgentChatTransport,
+  ClaudeAgentTransportError,
+  readClaudeAgentErrorCode,
+} from '../../../lib/claude-agent-transport';
 import { toolConfirmationKeyboardDecision } from '../chatRuntimeState';
 import {
   applyBackendEventToMessages,
@@ -511,6 +516,39 @@ test('primary chat transport converts a text delta split across network chunks',
     delta: '逐步输出',
   });
   expect(chunks.at(-1)).toEqual({ type: 'finish', finishReason: 'stop' });
+});
+
+test('primary Chat transport preserves the structured Dream binding error code', async () => {
+  class TestTransport extends ClaudeAgentChatTransport {
+    convert(stream: ReadableStream<Uint8Array>) {
+      return this.processResponseStream(stream);
+    }
+  }
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(
+        'data: {"type":"error","errorText":"safe fallback",'
+        + '"errorCode":"DREAM_THREAD_BINDING_CONFLICT","retryable":false}\n\n',
+      ));
+      controller.close();
+    },
+  });
+  const reader = new TestTransport().convert(stream).getReader();
+
+  await expect(reader.read()).rejects.toMatchObject({
+    name: 'ClaudeAgentTransportError',
+    message: 'safe fallback',
+    errorCode: 'DREAM_THREAD_BINDING_CONFLICT',
+    retryable: false,
+  });
+  const error = new ClaudeAgentTransportError({
+    type: 'error',
+    errorText: 'safe fallback',
+    errorCode: 'DREAM_THREAD_BINDING_CONFLICT',
+  });
+  expect(readClaudeAgentErrorCode(error)).toBe('DREAM_THREAD_BINDING_CONFLICT');
+  expect(readClaudeAgentErrorCode(new Error('[DREAM_THREAD_BINDING_CONFLICT]'))).toBeNull();
 });
 
 test('primary Chat transport preserves 334 deltas across unrelated network chunks', async () => {
