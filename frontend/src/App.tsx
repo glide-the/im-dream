@@ -32,6 +32,8 @@
 // [Sync] 2026-08-16: make the Deck-home Settings action navigate directly to Settings / Work.
 // [Sync] 2026-08-17: carry Deck preview example copy into the new Chat draft without URL persistence or auto-send.
 // [Sync] 2026-08-20: route actor-owned Claude MCP cards into a refresh-stable capability detail workbench.
+// [Sync] 2026-08-31: reconcile connector detail state on every Story Workspace
+//                    route change so Settings category navigation cannot stay trapped in a stale detail.
 // [Sync] 2026-08-25: render the MCP OAuth callback entirely in the SPA so its
 //                    one-time code/state never reaches Dream backend access logs.
 // [Sync] 2026-08-25: submit the same-origin MCP OAuth callback automatically by non-secret operation ID; users never copy authorization URLs.
@@ -355,6 +357,12 @@ export default function App() {
 
   const handleStoryWorkspaceRouteChange = useCallback((route: StoryWorkspaceRoute) => {
     setStoryWorkspaceLegacyView(route === 'writing' ? 'writing' : null);
+    setShowNotionConnectorDetail(false);
+    const query = new URLSearchParams(window.location.search);
+    const serverName = route === 'settings-work' && query.get('tab') === 'resources'
+      ? query.get('mcp-server')
+      : null;
+    setClaudeMcpDetailServerName(serverName);
   }, []);
 
   const handleAppViewChange = useCallback((view: GlobalAppView) => {

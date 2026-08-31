@@ -1,3 +1,8 @@
+/* [Input] Story Workspace Settings structure, semantic theme tokens, and the shared 767px narrow-layout boundary. */
+/* [Output] Responsive Settings category rail, Work tabs, and single-column preference content. */
+/* [Pos] Canonical styling for the Story Workspace Settings and Work surfaces. */
+/* [Sync] 2026-08-31: align the Settings single-column boundary with the Story Workspace mobile shell. */
+
 .story-workspace-settings,
 .story-workspace-settings * {
   box-sizing: border-box;
@@ -414,7 +419,7 @@
   background: var(--color-text-on-action);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .story-workspace-settings {
     display: block;
   }

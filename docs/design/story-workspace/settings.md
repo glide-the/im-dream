@@ -17,6 +17,10 @@ remain server-owned and are not represented as arbitrary free-form settings.
 
 - Deep links select a known settings section; unknown sections fall back to the
   section index without writing state.
+- Notion and Claude MCP details belong only to Work / Resources. Choosing any
+  Settings category clears transient Notion detail state and reconciles Claude
+  MCP detail state from the destination URL, so a detail cannot mask another
+  category's content.
 - Dirty forms prompt before navigation.
 - Save uses field-level validation and version/CAS where concurrent changes are
   possible.
@@ -26,7 +30,11 @@ remain server-owned and are not represented as arbitrary free-form settings.
 
 ## Responsive and accessible layout
 
-Desktop uses section navigation and a bounded form pane. Narrow screens use a
-section list followed by a dedicated form page. Labels, descriptions, errors
-and destructive effects are programmatically associated. Keyboard focus moves
-to the first invalid field on submit and back to the invoking section on exit.
+Desktop uses section navigation and a bounded form pane. At the shared 767px
+boundary, narrow screens switch the entire Settings surface to one column: the
+search and horizontally scrollable category rail occupy full width above a
+full-width content pane. Because Settings hides the global Story Workspace
+sidebar, the outer layout must not reserve the compact rail's 72px width.
+Labels, descriptions, errors and destructive effects are programmatically
+associated. Keyboard focus moves to the first invalid field on submit and back
+to the invoking section on exit.

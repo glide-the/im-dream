@@ -4,6 +4,8 @@
 // [Sync] 2026-08-17: localize the complete Settings shell and Work surface; render one locale at a time.
 // [Sync] 2026-08-20: host the actor-owned Claude MCP detail projection beside the Notion detail page.
 // [Sync] 2026-08-29: let the Notion detail own its sole h1 and long-page hierarchy instead of wrapping it in a duplicate SettingsSection header.
+// [Sync] 2026-08-31: constrain connector details to Work / Resources so stale
+//                    detail state cannot override another Settings category.
 /* eslint-disable react-refresh/only-export-components -- route metadata helpers intentionally share this page module. */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FaArrowLeft, FaBriefcase, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
@@ -172,6 +174,7 @@ export function StoryWorkspaceSettingsPage({
     || activeSection === 'settings-resources'
     || activeSection === 'settings-plugins';
   const workTab = storyWorkspaceWorkTabForSection(activeSection);
+  const canShowResourceDetail = isWorkSection && workTab === 'resources';
   const workTabs = [
     { id: 'deck' as const, label: t('settings.workspace.work.tabs.deck'), icon: FaBriefcase },
     { id: 'resources' as const, label: t('settings.workspace.work.tabs.resources'), icon: FaDatabase },
@@ -189,7 +192,7 @@ export function StoryWorkspaceSettingsPage({
     <ClaudePluginAdminPage />
   ) : workDeckContent;
 
-  const content = claudeMcpDetailServerName ? (
+  const content = canShowResourceDetail && claudeMcpDetailServerName ? (
     <SettingsSection
       id="settings-claude-mcp-detail"
       title="Claude MCP"
@@ -201,7 +204,7 @@ export function StoryWorkspaceSettingsPage({
         isMobile={isMobile}
       />
     </SettingsSection>
-  ) : showNotionConnectorDetail ? (
+  ) : canShowResourceDetail && showNotionConnectorDetail ? (
     <div id="settings-resource-detail">
       <ConnectorNotionDetailPage onBack={onCloseNotionDetail ?? (() => undefined)} isMobile={isMobile} />
     </div>

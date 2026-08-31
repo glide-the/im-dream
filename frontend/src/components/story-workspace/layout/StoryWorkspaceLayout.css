@@ -1,6 +1,8 @@
 /* [Input] Ink & Memory UI v2 semantic tokens. */
 /* [Output] Responsive Story Workspace layout with a persistent compact navigation rail. */
 /* [Pos] Story Workspace layout stylesheet. */
+/* [Sync] 2026-08-31: let sidebar-hidden narrow routes consume the full viewport
+   instead of reserving the compact rail's 72px width. */
 .story-workspace-layout,
 .story-workspace-layout *,
 .story-workspace-layout *::before,
@@ -1000,5 +1002,11 @@
     max-width: calc(100% - 72px);
     min-width: 0;
     overflow-x: hidden;
+  }
+
+  .story-workspace-layout[data-sidebar-state='hidden'] .story-workspace-layout__main {
+    flex-basis: 100%;
+    width: 100%;
+    max-width: 100%;
   }
 }
