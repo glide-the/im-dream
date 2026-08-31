@@ -5,6 +5,7 @@
 // [Sync] 2026-08-14: guard against restoring the removed workspace update feed.
 // [Sync] 2026-08-14: guard structured frontmatter and real storyboard note identifiers.
 // [Sync] 2026-08-14: guard default draft and exclusive dialog-selected sync surfaces.
+// [Sync] 2026-08-31: guard the canonical reader inside the matching draft Episode focus.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -112,11 +113,14 @@ test('execution status preview opens the Dream Agent floating dialog without mou
   expect(PAGE_SOURCE).not.toContain('<ChatView');
 });
 
-test('draft is the default full surface and Episode artifacts are an exclusive sync view', () => {
+test('draft is the default full surface and sync remains an exclusive coordination view', () => {
   const projectionStart = PAGE_SOURCE.indexOf('aria-label="Dream 初稿工作台"');
   const artifactMarker = 'aria-label="Episode 产物工作台"';
   const artifactStart = PAGE_SOURCE.indexOf(artifactMarker);
   const agentDialogStart = PAGE_SOURCE.indexOf('<StoryWorkspaceDreamAgentDialog');
+  const focusStart = PAGE_SOURCE.indexOf('data-execution-depth="focus"');
+  const overviewStart = PAGE_SOURCE.indexOf('data-execution-depth="overview"');
+  const readerStart = PAGE_SOURCE.indexOf('<StoryWorkspaceEpisodeArtifactReader');
 
   expect(projectionStart).toBeGreaterThan(-1);
   expect(PAGE_SOURCE.match(new RegExp(artifactMarker, 'g')) ?? []).toHaveLength(1);
@@ -126,6 +130,12 @@ test('draft is the default full surface and Episode artifacts are an exclusive s
   expect(PAGE_SOURCE).toContain("workspaceView === 'draft'");
   expect(PAGE_SOURCE).toContain("workspaceView === 'sync'");
   expect(PAGE_SOURCE).toContain('onWorkspaceViewChange={setWorkspaceView}');
+  expect(readerStart).toBeGreaterThan(focusStart);
+  expect(readerStart).toBeLessThan(overviewStart);
+  expect(PAGE_SOURCE.slice(artifactStart, agentDialogStart))
+    .not.toContain('<StoryWorkspaceEpisodeArtifactReader');
+  expect(PAGE_SOURCE).toContain("setWorkspaceView('draft')");
+  expect(PAGE_SOURCE).toContain('setFocusKey(episodeDraftEntry.key)');
   expect(PAGE_SOURCE).not.toContain('<summary>Dream 初稿阶段投影</summary>');
   expect(PAGE_SOURCE).not.toContain('dreamProjectionDetailsRef');
   expect(DIALOG_SOURCE).toContain('aria-label="工作台视图"');

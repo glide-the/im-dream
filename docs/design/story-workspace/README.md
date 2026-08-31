@@ -1,7 +1,7 @@
 <!-- [Input] Current Story Workspace product modules and cross-system Dream/Deck contracts. -->
 <!-- [Output] Authoritative index for Story Workspace product and interaction design. -->
 <!-- [Pos] Story Workspace design entry point. -->
-<!-- [Sync] 2026-08-31: index Dream Thread binding conflict recovery and legal same-Deck Agent switching. -->
+<!-- [Sync] 2026-08-31: index Dream Thread recovery and draft Episode-owned artifact reading. -->
 
 # Story Workspace 业务设计索引
 
@@ -39,6 +39,7 @@ Agent 对话与 Project/Episode 跨系统合同由以下文档定义：
 
 ## Sync
 
+- 2026-08-31: Episode 文件 reader 归属初稿的对应 EP 聚焦页；同步视图只保留协调事实和入口。
 - 2026-08-16: 所有以 Deck 为主语的设计文档已迁至 `docs/design/deck/`；本目录只通过 Deck 索引引用跨模块消费合同。
 - 2026-08-16: Dream 首页移除社区 Deck 安装入口，避免暂缓的市场分发继续形成第二套 Deck 流程。
 - 2026-08-31: 合法的同 Deck 下一轮 Agent 切换不改变 Dream launch provenance；真实绑定冲突保留 fail-closed 并进入用户安全的消息级恢复状态。

@@ -1,3 +1,8 @@
+<!-- [Input] Published Project/Episode identities, Dream stage projections, and canonical Episode artifacts. -->
+<!-- [Output] Product rules for draft focus, sync coordination, and responsive Episode reading. -->
+<!-- [Pos] Story Workspace Project/Episode workbench interaction contract. -->
+<!-- [Sync] 2026-08-31: assign the canonical file reader to its matching draft EP focus. -->
+
 # Project 与 Episode 工作台
 
 ## 内容层级
@@ -25,16 +30,19 @@ Project、Episode 和来源键；只用于渲染的 View ID 可以派生，但�
 “Dream 初稿阶段投影”的折叠层中。Dream Agent 对话框标题栏在 Chat 入口旁提供“初稿 / 同步”
 切换：
 
-- 初稿：读取 `dream-files` 的人物、场景、分镜和完整资产正文，是默认视图；
-- 同步：读取 Episode Artifact、文件 reader、Story Index、审阅与辅助产物，是按需扩展视图；
+- 初稿：读取 `dream-files` 的人物、场景、分镜和完整资产正文，是默认视图；点击分镜中的
+  对应 Episode 后，在该 Episode 聚焦页读取 canonical 文件 reader；
+- 同步：读取 Episode Artifact 的关联/可用性、Story Index、故事线、审阅与辅助产物，
+  是按需扩展的协调视图，但不承载文件 reader；
 - 两个视图互斥显示，切换只影响当前页面呈现，不写入数据库、不触发 Hook、不改变 thread；
 - 刷新或进入另一个 Run 后回到初稿，不把上一次页面选择持久化成业务事实；
 - 窄屏在切换后收起 Dream Agent 对话框，立即露出目标工作面。
 
 同步视图选择当前已注册的 Episode，再选择首个可用的叙事条目。模块导航分别显示大纲、
 剧本、分镜和审阅报告是否可用。选择节拍会限定中间阅读面；选择镜头会打开详情检查器，同时
-保留当前节拍选择。从同步视图点击“阅读分集大纲/剧本/分镜/审阅”时，同一同步工作面内的
-文件 reader 定位对应标签；reader 不再嵌入初稿分镜详情，也不形成推荐动作或 Episode 状态机。
+保留当前节拍选择。从同步视图点击“阅读分集大纲/剧本/分镜/审阅”时，页面回到初稿中与
+canonical Episode code 或关系匹配的分镜条目，并在该 EP 聚焦页定位 reader 对应标签。直接从
+初稿点击 EP 时也在同一位置显示 reader，不形成推荐动作或 Episode 状态机。
 
 ```mermaid
 sequenceDiagram
@@ -46,6 +54,8 @@ sequenceDiagram
 
     U->>P: 进入 Execution
     P-->>U: 默认显示初稿工作台
+    U->>P: 点击初稿中的对应 EP
+    P-->>U: 在 EP 聚焦页显示 canonical 文件 reader
     U->>P: 打开 Dream Agent
     U->>D: 点击“同步”
     D->>P: 本地切换同步视图
@@ -55,8 +65,8 @@ sequenceDiagram
     VM-->>P: Episode/节拍/场景/镜头图与本地可用性
     U->>P: 依次选择节拍和镜头
     P->>P: 保留 Episode/节拍，打开镜头检查器
-    U->>D: 点击“初稿”
-    D->>P: 恢复初稿工作台
+    U->>P: 点击“阅读剧本”等文件入口
+    P->>P: 返回匹配 EP 聚焦页并定位 reader 标签
     Note over P,API: 切换不产生写入或同步副作用
 ```
 

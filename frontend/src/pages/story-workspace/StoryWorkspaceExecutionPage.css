@@ -7,8 +7,9 @@
 /* [Sync] 2026-08-14: remove the obsolete workspace update-feed presentation. */
 /* [Sync] 2026-08-14: present asset frontmatter as responsive metadata and use
    stable storyboard identifiers in compact shot notes. */
-/* [Sync] 2026-08-14: make the draft surface primary and keep Episode artifacts
+/* [Sync] 2026-08-14: make the draft surface primary and keep Episode coordination
    in an exclusive sync surface selected from the Dream Agent header. */
+/* [Sync] 2026-08-31: render the Episode file reader inside its draft focus article. */
 
 .story-workspace-collaboration {
   --collaboration-canvas: var(--color-bg-app, #f6efe5);

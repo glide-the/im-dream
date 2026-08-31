@@ -6,6 +6,8 @@
 //                    Chat content without page- or message-level horizontal overflow.
 // [Sync] 2026-08-13: scrolling the Episode workbench must not move the open Dream Agent
 //                    dialog outside the desktop viewport.
+// [Sync] 2026-08-31: the canonical file reader opens in the matching draft EP,
+//                    while sync read actions navigate back to that focus.
 
 // @ts-expect-error Playwright E2E has Node built-ins; the browser app tsconfig omits Node types.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -53,6 +55,13 @@ const EVIDENCE_DIR = resolve(
 );
 
 test.use({ channel: 'chromium', timezoneId: 'Asia/Shanghai' });
+
+// Provider-free QA impact contract:
+// Project title stays unchanged in the mocked Story Index; EP01 identity and
+// canonical Artifact DTOs stay unchanged; Run-private publication, Hook writes,
+// PostgreSQL materialization, and shared conversation mutations are out of
+// scope. Only the final UI consumer ownership changes: the file reader mounts
+// in the matching draft EP and sync read actions navigate to it.
 
 function coverage(linked = 1, total = 1) {
   return { availability: 'available', linked, total, ratio: linked / total };
@@ -700,6 +709,7 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
   context,
   page,
 }) => {
+  test.setTimeout(60_000);
   mkdirSync(EVIDENCE_DIR, { recursive: true });
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   const diagnostics: string[] = [];
@@ -741,8 +751,18 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     const dreamDraft = page.getByRole('region', { name: 'Dream 初稿工作台' });
     const artifactWorkbench = page.getByRole('region', { name: 'Episode 产物工作台' });
     const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
+    const artifactReader = page.getByRole('region', { name: 'EP01 文件阅读器' });
+    const draftEpisodeEntry = dreamDraft.getByRole('button')
+      .filter({ hasText: 'EP01: 雨夜重逢' });
     await expect(dreamDraft).toBeVisible();
     await expect(artifactWorkbench).toHaveCount(0);
+    await expect(artifactReader).toHaveCount(0);
+    await draftEpisodeEntry.click();
+    await expect(artifactReader).toBeVisible();
+    await expect(artifactReader.getByRole('tab', { name: /分镜/ }))
+      .toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('button', { name: '← 返回故事线' }).click();
+    await expect(artifactReader).toHaveCount(0);
     await openAgent.click();
     let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
     await expect(agentDialog.getByRole('button', { name: '初稿', exact: true }))
@@ -767,15 +787,6 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await expect(artifactProgress.getByRole('button')).toHaveCount(4);
     await expect(artifactProgress.getByRole('button', { name: '阅读Prompts' })).toHaveCount(0);
     await expect(artifactProgress.getByRole('button', { name: '阅读渲染指引' })).toHaveCount(0);
-    const readOutline = artifactProgress.getByRole('button', { name: '阅读分集大纲' });
-    await readOutline.focus();
-    await readOutline.press('Enter');
-    const artifactReader = page.getByRole('region', { name: 'EP01 文件阅读器' });
-    await expect(artifactReader).toBeVisible();
-    await expect(artifactReader).toBeInViewport();
-    await expect(artifactReader.getByRole('tab', { name: /分集大纲/ }))
-      .toHaveAttribute('aria-selected', 'true');
-    await expect(artifactReader.getByRole('tab', { name: /分集大纲/ })).toBeFocused();
     await expect(artifactProgress.getByText('Prompts', { exact: true })).toBeVisible();
     await expect(artifactProgress.getByText('渲染指引', { exact: true })).toBeVisible();
     await expect(artifactProgress.getByText('Renders', { exact: true })).toHaveCount(0);
@@ -843,9 +854,31 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await expect(page.getByRole('treeitem', { name: 'S01 车站外', exact: true }))
       .toHaveAttribute('aria-current', 'true');
 
+    await page.getByRole('treeitem', { name: '雨夜重逢', exact: true }).click();
+    await expect(artifactProgress).toBeVisible();
+    const readOutline = artifactProgress.getByRole('button', { name: '阅读分集大纲' });
+    await readOutline.focus();
+    await readOutline.press('Enter');
+    await expect(artifactWorkbench).toHaveCount(0);
+    await expect(dreamDraft).toBeVisible();
+    await expect(artifactReader).toBeVisible();
+    await expect(artifactReader).toBeInViewport();
+    await expect(artifactReader.getByRole('tab', { name: /分集大纲/ }))
+      .toHaveAttribute('aria-selected', 'true');
+    await expect(artifactReader.getByRole('tab', { name: /分集大纲/ })).toBeFocused();
+    await page.screenshot({
+      path: resolve(EVIDENCE_DIR, 'draft-episode-reader-desktop-1440x1000.png'),
+      fullPage: true,
+    });
+
     const readsBeforeReload = state.artifactReads;
     await page.reload();
     await expect(dreamDraft).toBeVisible();
+    await expect(artifactReader).toHaveCount(0);
+    await draftEpisodeEntry.click();
+    await expect(artifactReader).toBeVisible();
+    await expect.poll(() => state.artifactReads).toBeGreaterThan(readsBeforeReload);
+    await page.getByRole('button', { name: '← 返回故事线' }).click();
     await openAgent.click();
     agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
     await agentDialog.getByRole('button', { name: '同步', exact: true }).click();
@@ -853,8 +886,7 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await expect(agentDialog).toBeHidden();
     await expect(openAgent).toBeFocused();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
-    await expect.poll(() => state.artifactReads).toBeGreaterThan(readsBeforeReload);
-    await expect(page.getByRole('region', { name: 'EP01 文件阅读器' })).toBeVisible();
+    await expect(artifactReader).toHaveCount(0);
     await selectShotWithKeyboard(page);
     await expect(page.getByRole('article', { name: 'Shot Detail' })
       .getByText('雨夜车站，车灯从背景掠过。', { exact: true }))

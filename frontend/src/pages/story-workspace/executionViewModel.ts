@@ -4,6 +4,8 @@
 // [Sync] 2026-08-14: preserve Hook-published full asset content for the focus reader.
 // [Sync] 2026-08-14: remove the revision-derived workspace update feed; the
 //                    Execution surface presents current artifacts only.
+// [Sync] 2026-08-31: resolve the canonical Episode reader host from the
+//                    matching storyboard entry in the Dream draft.
 
 import type {
   StoryWorkspaceDreamFilesResponse,
@@ -99,6 +101,22 @@ export function storyWorkspaceBuildExecutionWorkspace(
   }
 
   return { assets, outline };
+}
+
+/** Match a published Episode projection to its Dream storyboard entry. */
+export function storyWorkspaceExecutionEpisodeEntry(
+  entries: readonly StoryWorkspaceExecutionEntry[],
+  episodeCode: string | null | undefined,
+): StoryWorkspaceExecutionEntry | null {
+  const canonicalEpisodeCode = episodeCode?.trim();
+  if (!canonicalEpisodeCode) return null;
+  return entries.find((entry) => (
+    entry.stage === 'storyboards'
+    && (
+      entry.entityId === canonicalEpisodeCode
+      || entry.relations.includes(canonicalEpisodeCode)
+    )
+  )) ?? null;
 }
 
 export function storyWorkspaceExecutionFocusNeighbors(

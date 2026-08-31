@@ -1,6 +1,7 @@
 // [Input] Real local actor, persisted Dream run, and actor-scoped Episode artifact API.
-// [Output] Browser evidence that canonical Markdown and storyboard properties are readable in Execution.
+// [Output] Browser evidence that canonical Markdown and storyboard properties are readable in the matching draft EP.
 // [Pos] Opt-in Story Workspace real-data regression; never mutates the workflow or artifact files.
+// [Sync] 2026-08-31: verify that sync read actions return to the draft EP-owned reader.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -117,7 +118,7 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       stages: {
         storyboards?: {
           sourceFiles: string[];
-          items: Array<{ entityId: string }>;
+          items: Array<{ entityId: string; displayName: string }>;
         };
       };
     };
@@ -128,6 +129,7 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       expect.stringMatching(/storyboard\.yaml$/),
     ]));
     const hasStoryboardReaderHost = (dreamFiles.stages.storyboards?.items.length ?? 0) > 0;
+    const draftEpisodeLabel = dreamFiles.stages.storyboards?.items[0]?.displayName ?? 'EP01';
     const surface = await episodeResponse.json() as {
       bindingAvailability: string;
       opaqueEpisodeId: string | null;
@@ -219,6 +221,20 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     await expect(page.getByRole('region', { name: 'Dream 初稿工作台' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Episode 产物工作台' })).toHaveCount(0);
     const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
+    const reader = page.getByRole('region', { name: 'EP01 文件阅读器' });
+    const draftEpisodeEntry = page.getByRole('region', { name: 'Dream 初稿工作台' })
+      .getByRole('button')
+      .filter({ hasText: draftEpisodeLabel })
+      .first();
+    if (hasStoryboardReaderHost) {
+      await expect(reader).toHaveCount(0);
+      await draftEpisodeEntry.click();
+      await expect(reader).toBeVisible();
+      await expect(reader.getByRole('tab', { name: /分镜/ }))
+        .toHaveAttribute('aria-selected', 'true');
+      await page.getByRole('button', { name: '← 返回故事线' }).click();
+      await expect(reader).toHaveCount(0);
+    }
     await openAgent.click();
     let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
     await expect(agentDialog).toBeVisible();
@@ -233,6 +249,7 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     await page.keyboard.press('Escape');
     await expect(agentDialog).toHaveCount(0);
     await expect(openAgent).toBeFocused();
+    await expect(reader).toHaveCount(0);
     const overview = page.getByRole('article', { name: 'Episode Overview' });
     await expect(overview).toBeVisible();
     const progress = overview.getByRole('list', { name: 'EP01 产物进度' });
@@ -252,7 +269,6 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       fullPage: true,
     });
 
-    const reader = page.getByRole('region', { name: 'EP01 文件阅读器' });
     if (hasStoryboardReaderHost) {
       for (const label of ['阅读分集大纲', '阅读剧本', '阅读分镜', '阅读审阅报告']) {
         await expect(progress.getByRole('button', { name: label })).toBeVisible();
@@ -260,6 +276,8 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       const readScript = progress.getByRole('button', { name: '阅读剧本' });
       await readScript.focus();
       await readScript.press('Enter');
+      await expect(page.getByRole('region', { name: 'Episode 产物工作台' })).toHaveCount(0);
+      await expect(page.getByRole('region', { name: 'Dream 初稿工作台' })).toBeVisible();
       await expect(reader).toBeVisible();
       await expect(reader).toBeInViewport();
       await expect(reader.getByRole('tab', { name: /剧本/ }))
@@ -269,7 +287,7 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       await expect(reader.getByRole('article', { name: '剧本文件内容' }))
         .toContainText('浮世行路');
 
-      await progress.getByRole('button', { name: '阅读分镜' }).click();
+      await reader.getByRole('tab', { name: /分镜/ }).click();
       await expect(reader).toBeInViewport();
       await expect(reader.getByRole('tab', { name: /分镜/ }))
         .toHaveAttribute('aria-selected', 'true');
@@ -291,12 +309,17 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       await expect(reader.getByRole('article', { name: '剧本文件内容' }))
         .toContainText('浮世行路');
 
-      await progress.getByRole('button', { name: '阅读审阅报告' }).click();
+      await reader.getByRole('tab', { name: /审阅/ }).click();
       await expect(reader).toBeInViewport();
       await expect(reader.getByRole('tab', { name: /审阅/ })).toBeFocused();
       await expect(reader.getByRole('tab', { name: /审阅/ })).toBeInViewport();
       await expect(reader.getByRole('article', { name: '审阅文件内容' }))
         .toContainText('审查报告');
+      await openAgent.click();
+      agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+      await agentDialog.getByRole('button', { name: '同步', exact: true }).click();
+      await page.keyboard.press('Escape');
+      await expect(reader).toHaveCount(0);
       await page.getByRole('button', { name: '定位镜头：S04-E01-020a' }).click();
       await expect(page.getByRole('article', { name: 'Prompt kling' })).toBeVisible();
       await expect(page.getByRole('article', { name: 'Prompt runway' })).toBeVisible();
@@ -312,14 +335,7 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
     await page.setViewportSize({ width: 390, height: 844 });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(1);
-    if (hasStoryboardReaderHost) {
-      await expect(reader).toBeVisible();
-      await page.evaluate(() => {
-        const element = document.querySelector<HTMLElement>('nav[aria-label="EP01 文件导航"]');
-        if (element === null) throw new Error('Episode artifact navigation is missing.');
-        element.scrollIntoView({ block: 'start' });
-      });
-    }
+    await expect(reader).toHaveCount(0);
     await page.screenshot({
       path: resolve(
         EVIDENCE_DIR,

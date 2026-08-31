@@ -1,13 +1,15 @@
 // [Input] Run-scoped Dream file projections used after the single confirmation.
-// [Output] Assets / Outline indexes, current artifact content, and focus navigation coverage.
+// [Output] Assets / Outline indexes, Episode reader hosting, current artifact content, and focus navigation coverage.
 // [Pos] Story Workspace execution collaboration view-model test (Task 3 F5)
 // [Sync] 2026-08-14: remove update-feed assertions with the deleted view-model seam.
+// [Sync] 2026-08-31: cover canonical Episode-to-storyboard entry matching.
 
 import { expect, test } from '@playwright/test';
 import type { StoryWorkspaceDreamFilesResponse } from '../../../hooks/story-workspace/contracts';
 import {
   storyWorkspaceBuildExecutionWorkspace,
   storyWorkspaceCanAccessExecution,
+  storyWorkspaceExecutionEpisodeEntry,
   storyWorkspaceExecutionFocusNeighbors,
   storyWorkspaceResolveDreamDisplayTitle,
 } from '../executionViewModel';
@@ -64,7 +66,7 @@ function files(): StoryWorkspaceDreamFilesResponse {
         items: [
           {
             entityId: 'beat-01', displayName: '雨夜抵达', summary: '远景建立车站。',
-            sourceFile: 'storyboards/beat-01.md', relations: ['林默', '旧车站'],
+            sourceFile: 'storyboards/beat-01.md', relations: ['EP01', '林默', '旧车站'],
           },
           {
             entityId: 'beat-02', displayName: '冲突发生', summary: '苏遥出现。',
@@ -107,6 +109,17 @@ test('focus neighbors stay inside the ordered Outline manuscript', () => {
     .toEqual({ previousKey: 'storyboards:beat-01', nextKey: null });
   expect(storyWorkspaceExecutionFocusNeighbors(outline, 'missing'))
     .toEqual({ previousKey: null, nextKey: null });
+});
+
+test('resolves the Episode reader host from an exact entity or canonical relation', () => {
+  const outline = storyWorkspaceBuildExecutionWorkspace(files()).outline;
+
+  expect(storyWorkspaceExecutionEpisodeEntry(outline, 'beat-01')?.key)
+    .toBe('storyboards:beat-01');
+  expect(storyWorkspaceExecutionEpisodeEntry(outline, 'EP01')?.key)
+    .toBe('storyboards:beat-01');
+  expect(storyWorkspaceExecutionEpisodeEntry(outline, 'missing')).toBeNull();
+  expect(storyWorkspaceExecutionEpisodeEntry(outline, null)).toBeNull();
 });
 
 test('route gate uses the durable Dream confirmation fact, never WorkflowRun.status', () => {

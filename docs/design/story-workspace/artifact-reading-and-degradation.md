@@ -1,3 +1,8 @@
+<!-- [Input] Authorized Episode artifact observations and per-module availability facts. -->
+<!-- [Output] Safe reader ownership, revision refresh, degradation, and recovery rules. -->
+<!-- [Pos] Story Workspace canonical Artifact reading contract. -->
+<!-- [Sync] 2026-08-31: keep one reader in the matching draft EP and none in sync. -->
+
 # Artifact reading and degradation
 
 ## Projection contract
@@ -15,6 +20,12 @@ generating | available | missing | invalid | unavailable
 `unavailable` means the storage observation could not be made safely (for
 example unstable multi-file reads or service outage); it is not equivalent to
 missing.
+
+The file reader belongs to the matching Episode focus in the default Dream
+draft. A direct EP selection opens it in place; a read action from the sync
+coordination view returns to the same EP focus and selects the requested file
+tab. The sync view may expose availability and navigation facts, but it does not
+host a second reader.
 
 ## Isolation rules
 
