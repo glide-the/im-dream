@@ -8,9 +8,11 @@
 # [Sync] 2026-08-03: sliding token renewal - authenticated requests receive a
 #                    fresh access token (header + cookie) once the current one
 #                    is past half of its lifetime.
+# [Sync] 2026-08-31: normalize PostgreSQL datetime and ISO-string timestamps as
+#                    UTC-aware values for timezone-correct calendar grouping.
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from typing import Optional
 
@@ -109,15 +111,26 @@ def get_current_user(
     return user_data
 
 
-def _clean_timestamp(ts_raw: Optional[str]) -> Optional[datetime]:
-    """Best-effort ISO parser for timestamps stored in DB."""
+def _clean_timestamp(ts_raw: Optional[str | datetime]) -> Optional[datetime]:
+    """Normalize PostgreSQL datetimes or ISO strings to timezone-aware values."""
     if not ts_raw:
         return None
     try:
+        if isinstance(ts_raw, datetime):
+            return (
+                ts_raw
+                if ts_raw.tzinfo is not None
+                else ts_raw.replace(tzinfo=timezone.utc)
+            )
         cleaned = ts_raw.replace("Z", "+00:00")
         if "T" not in cleaned and " " in cleaned:
             cleaned = cleaned.replace(" ", "T")
-        return datetime.fromisoformat(cleaned)
+        parsed = datetime.fromisoformat(cleaned)
+        return (
+            parsed
+            if parsed.tzinfo is not None
+            else parsed.replace(tzinfo=timezone.utc)
+        )
     except Exception:
         return None
 

@@ -5,6 +5,8 @@
 # [Sync] 2026-05-25: extracted session storage routes from backend/server.py.
 # [Sync] 2026-06-14: publish Edit Session update/delete events and expose
 #                    /api/sessions/events SSE for frontend Agent-write sync.
+# [Sync] 2026-08-31: preserve timezone-correct date_key values when PostgreSQL
+#                    returns native datetime objects for writing sessions.
 
 import asyncio
 from typing import List, Optional

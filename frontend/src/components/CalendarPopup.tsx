@@ -2,6 +2,7 @@
 // [Output] Modal calendar popup with month grid and entry list.
 // [Pos] calendar-popup component in frontend/src/components
 // [Sync] 2026-05-29: replace all hardcoded colors with CSS tokens / color-mix for dark theme support.
+// [Sync] 2026-08-31: derive missing session day keys from persisted timestamps instead of today.
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getDateLocale } from '../i18n';
@@ -14,7 +15,7 @@ import {
 } from '../utils/calendarStorage';
 import type { UserSession } from '../api/voiceApi';
 import { useAuth } from '../contexts/AuthContext';
-import { parseFlexibleTimestamp } from '../utils/timezone';
+import { getLocalDayKey, parseFlexibleTimestamp } from '../utils/timezone';
 
 interface Props {
   onLoadEntry: (entry: CalendarEntry) => void;
@@ -62,7 +63,9 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
         const grouped: Record<string, CalendarListEntry[]> = {};
 
         sessions.forEach((session: UserSession) => {
-          const dateKey = session.date_key || getTodayKey();
+          const dayTimestamp = session.created_at || session.updated_at;
+          const dateKey = session.date_key || getLocalDayKey(dayTimestamp, timezone);
+          if (!dateKey) return;
           const tsRaw = session.updated_at || session.created_at;
           const ts = parseFlexibleTimestamp(tsRaw)?.getTime() ?? Date.now();
           const firstLine = session.first_line || session.name || 'Untitled';
