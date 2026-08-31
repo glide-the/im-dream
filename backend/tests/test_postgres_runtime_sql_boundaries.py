@@ -1,3 +1,8 @@
+# [Input] Production SQL-bearing modules and PostgreSQL-only Story Workspace query contracts.
+# [Output] Reject runtime DDL/SQLite fallbacks and lock the Dream re-entry authorization predicates.
+# [Pos] Static PostgreSQL boundary regression suite.
+# [Sync] 2026-08-31: allow mutable current-Agent selection while keeping launch metadata internally consistent.
+
 """Regression gates for the PostgreSQL-only Dream runtime SQL boundary."""
 
 from __future__ import annotations
@@ -175,7 +180,8 @@ def test_dream_reentry_queries_have_postgresql_jsonb_and_bound_parameters() -> N
     authorized_sql, authorized_parameters = db.executions[-1]
     assert "jsonb_array_elements" in authorized_sql
     assert "::jsonb" in authorized_sql
-    assert authorized_sql.count("IS NOT DISTINCT FROM thread.voice_id") == 2
+    assert "IS NOT DISTINCT FROM thread.voice_id" not in authorized_sql
+    assert authorized_sql.count("IS NOT DISTINCT FROM") == 1
     assert authorized_sql.count("%s") == len(authorized_parameters) == 5
 
     facts = StoryWorkspaceDreamReentryService._confirmation_facts(

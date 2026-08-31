@@ -10,6 +10,7 @@
 # [Sync] 2026-06-06: align session_id expectations with current thread_id
 #                    strategy and ClaudeAgentRunRequest.message_parts.
 # [Sync] 2026-06-25: cover frontend stop flow cancelling a running background turn.
+# [Sync] 2026-08-31: cover safe structured Dream binding failure SSE without code duplication in errorText.
 
 """Unit tests for ClaudeAgentThreadFactory.
 
@@ -1205,6 +1206,23 @@ class TestAssembleContextFailure(unittest.TestCase):
         error_frames = [f for f in frames if '"type":"error"' in f.replace(" ", "")]
         self.assertTrue(error_frames, f"expected an SSE error frame, got: {frames!r}")
         self.assertIn("kaboom", error_frames[0])
+
+    def test_dream_binding_failure_emits_safe_structured_error(self):
+        from services.story_workspace.dream_thread_binding import (
+            DreamThreadBindingConflict,
+        )
+
+        self._fail_assemble(DreamThreadBindingConflict("branched_retry_graph"))
+        frames = self._drain(_make_request("user_dream_binding_fail"))
+        error_frame = next(
+            frame for frame in frames if '"type":"error"' in frame.replace(" ", "")
+        )
+
+        self.assertIn('"errorCode":"DREAM_THREAD_BINDING_CONFLICT"', error_frame)
+        self.assertIn('"retryable":false', error_frame)
+        self.assertIn("This conversation's Dream binding is unavailable.", error_frame)
+        self.assertNotIn("branched_retry_graph", error_frame)
+        self.assertNotIn("[DREAM_THREAD_BINDING_CONFLICT]", error_frame)
 
     def test_failure_resets_lifecycle_and_allows_retry(self):
         from services.claude_plugin.workspace_packer import WorkspacePackError

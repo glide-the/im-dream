@@ -1,3 +1,8 @@
+<!-- [Input] Shared Chat Thread/SSE runtime, Dream authority, confirmations, Stop, reconnect, and Deck Agent selection. -->
+<!-- [Output] Canonical Dream Agent interaction contract without a parallel runtime or client-selected authority. -->
+<!-- [Pos] Dream Agent interaction source of truth. -->
+<!-- [Sync] 2026-08-31: consume structured Thread binding errors and permit legal same-Deck current-Agent switching. -->
+
 # Dream Agent 共享交互设计
 
 > 状态：当前设计。本文只定义 Dream 与 Chat 共用的 Agent 交互；Skill、工作台文件和
@@ -20,6 +25,12 @@ run。Dream 页面可以额外读取 actor-scoped 的业务投影，但它不能
 `ChatPanel` 是唯一实时消息与输入状态 owner。Dream 不建立第二套 EventSource、消息过滤、
 parser、reducer 或 Stop 状态。用户消息和内部 JSON 控制报文遵循 Chat 的原始可见性合同，
 Dream 不额外做正文脱敏或页面级过滤。
+
+Dream launch message 中的 Agent 是不可变来源证明；Thread 当前 Agent 是下一轮执行者，允许
+在同一 Deck 内按既有 CAS 规则切换。resolver 必须校验 launch Agent 与其 top-level/nested
+字段和请求指纹自洽，但不得要求它永远等于当前 Thread Agent。真正无法证明 authority 时，
+沿用标准 Chat SSE 的结构化 `errorCode`，前端按
+[Thread 绑定冲突与恢复](../story-workspace/thread-binding-conflict-recovery.md) 显示安全状态。
 
 ## 2. 普通发送与增量输出
 

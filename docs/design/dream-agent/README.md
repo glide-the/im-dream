@@ -1,3 +1,8 @@
+<!-- [Input] Current Dream Agent runtime, Story Workspace workbench, and canonical Chat Thread contracts. -->
+<!-- [Output] Authoritative Dream Agent design index and current acceptance boundary. -->
+<!-- [Pos] Dream Agent current-design entry point. -->
+<!-- [Sync] 2026-08-31: link Thread binding conflict recovery and legal current-Agent switching. -->
+
 # Dream Agent 当前设计
 
 > 状态：**已实现并通过本机真实业务验收（2026-08-13）**。
@@ -31,6 +36,8 @@ Dream 没有第二套 Agent runtime、SSE、parser 或 reducer。
 ## 2. 当前业务范围
 
 - Dream 发起时创建经权限校验的 Workflow Run，并绑定同一 actor-owned Chat thread。
+- launch Agent 保留为不可变来源证明；同一 Deck 内按 turn 切换当前 Agent 不改变 Run、Thread、
+  插件 binding 或来源指纹，下一轮使用当前 Agent。
 - 服务端给首轮 Agent 明确的项目 ID；Agent 只构建工作台产物，不写 `.dream`。
 - Chat 输入 `/` 时只读取启用且安装就绪、摘要和版本匹配的 Skill；选择建议只填入输入框。
 - 除首次 `/drama-init` 默认引导外，Skill 可以任意、重复执行，不由代码推导下一步。
@@ -60,6 +67,7 @@ Observer 主动同步、MCP 作为同步前置条件，以及 Admin sealed Artif
 | [工作台上下文初始化与逐轮注入](./workbench-context-injection-design.md) | 静态合同部署、每 turn 实际路径 Read 与安全边界 |
 | [Agent 资产协作](./asset-collaboration-design.md) | 人物、场景、分镜自然语言 CRUD、引用完整性与 Hook 同步 |
 | [Project / Episode 合同](./project-episode-artifact-contract.md) | 当前 Run preview 与 Admin 权威 Artifact 的区别 |
+| [Thread 绑定冲突与恢复](../story-workspace/thread-binding-conflict-recovery.md) | launch/current Agent 分离、结构化错误、消息/附件保留和恢复 |
 | [工具与自动同步边界](./dreamflow-tool-boundaries.md) | Agent、Hook、Observer、MCP 的职责 |
 | [设计审查](./design-review.md) | 当前架构接受结论与证据 |
 | [Prompt 轮次记录](./prompt-rounds.md) | 可追溯执行记录，不是业务规范 |
