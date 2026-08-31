@@ -6,6 +6,8 @@
 # [Sync] 2026-08-30: require the explicit AutoDL 2.1.88 local-core CLI path and
 #                    deployment-owned disabled Claude Bash sandbox capability.
 # [Sync] 2026-08-31: cover the explicit Vite allow-all host projection.
+# [Sync] 2026-08-31: require Vite SEO proxy routes and the deploy-time
+#                    machine-readable public response gate.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,6 +24,11 @@ CURRENT_GROUP="$(id -gn)"
 
 grep -Fq 'AUTODL_SERVICE_USER="${AUTODL_SERVICE_USER:-root}"' "${SCRIPT_DIR}/deploy.sh"
 grep -Fq 'DREAM_SERVICE_USER="${INK_AUTODL_DREAM_SERVICE_USER:-root}"' "${SCRIPT_DIR}/runtime/start-ink-memory.sh"
+for seo_path in robots.txt sitemap.xml llms.txt; do
+  grep -Fq "'/${seo_path}': { ...backendProxy }" "${SCRIPT_DIR}/../../frontend/vite.config.ts"
+done
+grep -Fq 'verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origin"' "${SCRIPT_DIR}/deploy.sh"
+grep -Fq 'returned SPA HTML instead of the backend crawler file' "${SCRIPT_DIR}/deploy.sh"
 if grep -F 'screen -dmS "${DREAM_SCREEN}"' -A2 "${SCRIPT_DIR}/runtime/start-ink-memory.sh" | grep -q 'setpriv'; then
   printf 'standalone Dream launcher still drops to a separate service user\n' >&2
   exit 1

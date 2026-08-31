@@ -8,6 +8,8 @@
 # [Sync] 2026-08-30: install qualified Runtime 0.1.4, built from authorized
 #                    2.1.88 local-core with its restored on-disk
 #                    vendor/seccomp apply-seccomp passthrough.
+# [Sync] 2026-08-31: fail every start/deploy/verify/rollback when Vite Preview
+#                    serves SPA HTML instead of FastAPI crawler files.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -367,14 +369,32 @@ verify_default_plugin() {
   remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os; from dotenv import dotenv_values; os.environ.update({key: value for key, value in dotenv_values(\"${AUTODL_APP_ROOT}/config/dream.env\").items() if value is not None}); from services.deck.defaults import resolve_default_deck_plugin_ref; resolve_default_deck_plugin_ref()'"
 }
 
+verify_seo_origin() {
+  local origin="$1" label="$2" endpoint expected_type marker content_type body
+  while IFS='|' read -r endpoint expected_type marker; do
+    content_type="$(curl -fsS --retry 5 --retry-delay 2 --retry-connrefused --max-time 15 -o /dev/null -w '%{content_type}' "${origin%/}/${endpoint}")"
+    [[ "${content_type}" == "${expected_type}"* ]] || err "${label} /${endpoint} returned ${content_type:-no content type}; expected ${expected_type}."
+    body="$(curl -fsS --retry 5 --retry-delay 2 --retry-connrefused --max-time 15 "${origin%/}/${endpoint}")"
+    [[ "${body}" == *"${marker}"* ]] || err "${label} /${endpoint} did not contain its required machine-readable marker."
+    [[ "${body,,}" != *"<html"* ]] || err "${label} /${endpoint} returned SPA HTML instead of the backend crawler file."
+  done <<'EOF'
+robots.txt|text/plain|User-agent:
+sitemap.xml|application/xml|<urlset
+llms.txt|text/plain|# Ink & Memory
+EOF
+}
+
 verify() {
   local topology
-  topology="$(remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_ADMIN_PORT}/admin/login >/dev/null; screen -ls | grep -q '[.]${AUTODL_SCREEN_NAME}[[:space:]]'; if [ -s \"\${current}/frontend/dist/index.html\" ]; then curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_FRONTEND_PORT}$'; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_BACKEND_PORT}$'; printf stack; else curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; printf legacy; fi")"
+  topology="$(remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_ADMIN_PORT}/admin/login >/dev/null; screen -ls | grep -q '[.]${AUTODL_SCREEN_NAME}[[:space:]]'; if [ -s \"\${current}/frontend/dist/index.html\" ]; then curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; for endpoint in robots.txt sitemap.xml llms.txt; do content_type=\$(curl -fsS --max-time 10 -o /dev/null -w '%{content_type}' http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/\${endpoint}); case \"\${content_type}\" in text/html*) exit 1 ;; esac; done; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_FRONTEND_PORT}$'; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_BACKEND_PORT}$'; printf stack; else curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; printf legacy; fi")"
   [[ -n "${AUTODL_DREAM_PUBLIC_ORIGIN}" ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN is required for public verification."
   curl -fsS --retry 15 --retry-delay 3 --retry-connrefused --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/api/health" >/dev/null
-  if [[ "${topology}" == "stack" ]]; then curl -fsS --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/" >/dev/null; fi
+  if [[ "${topology}" == "stack" ]]; then
+    curl -fsS --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/" >/dev/null
+    verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origin"
+  fi
   verify_default_plugin
-  log "Dream ${topology} topology, default plugin artifact, Admin dependency, screen supervisor, and public mapping passed."
+  log "Dream ${topology} topology, SEO crawler files, default plugin artifact, Admin dependency, screen supervisor, and public mapping passed."
 }
 
 deploy() { command_check; setup_host; sync_files; build_release; stop_dream; start_dream; verify; }

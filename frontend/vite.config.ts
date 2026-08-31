@@ -14,6 +14,9 @@
 //                    Vite Preview for the direct-host AutoDL 6006 frontend.
 // [Sync] 2026-08-31: treat an explicit VITE_ALLOWED_HOSTS=* as Vite's
 //                    allow-all host policy for dynamic AutoDL service URLs.
+// [Sync] 2026-08-31: proxy robots.txt, sitemap.xml, and llms.txt through
+//                    FastAPI in Vite dev/preview so AutoDL never serves SPA
+//                    HTML from its public machine-readable SEO URLs.
 // [Sync] 2026-07-20: upgrade to Vite 8 (rolldown/Rust bundler) so production
 //                    builds fit 1G Docker build hosts — measured ~605MB peak RSS
 //                    with a 512MB heap vs ~1.25GB RSS / 1024MB heap minimum on
@@ -78,15 +81,16 @@ export default defineConfig(({ mode }) => {
   const allowedHosts: true | string[] = configuredAllowedHosts.includes('*')
     ? true
     : configuredAllowedHosts
+  const backendProxy: ProxyOptions = {
+    target: devApiProxyTarget,
+    changeOrigin: true,
+  }
   const proxy: Record<string, ProxyOptions> = {
-    '/api': {
-      target: devApiProxyTarget,
-      changeOrigin: true,
-    },
-    '/auth': {
-      target: devApiProxyTarget,
-      changeOrigin: true,
-    },
+    '/robots.txt': { ...backendProxy },
+    '/sitemap.xml': { ...backendProxy },
+    '/llms.txt': { ...backendProxy },
+    '/api': { ...backendProxy },
+    '/auth': { ...backendProxy },
     '/oauth/device/verify': {
       target: devApiProxyTarget,
       changeOrigin: true,
@@ -110,10 +114,7 @@ export default defineConfig(({ mode }) => {
         }
       },
     },
-    '/polycli': {
-      target: devApiProxyTarget,
-      changeOrigin: true,
-    },
+    '/polycli': { ...backendProxy },
   }
 
   return {

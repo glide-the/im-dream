@@ -8,6 +8,8 @@
 [Sync] 2026-08-30: document the deployment-owned disabled Bash sandbox profile and its root-service consequence.
 [Sync] 2026-08-31: document the explicit Vite allow-all host override for dynamic AutoDL mappings.
 [Sync] 2026-08-31: document safe discovery of AutoDL-injected 6006/6008 public service URLs.
+[Sync] 2026-08-31: require all three backend-generated crawler files to pass
+                   MIME, content-marker, and non-HTML checks on every release.
 -->
 
 ## 应用介绍
@@ -88,6 +90,30 @@ screen -ls
 curl -fsS http://127.0.0.1:6008/admin/login >/dev/null && echo "Admin OK"
 curl -fsS http://127.0.0.1:6006/api/health && echo
 ```
+
+## 每次发布的 SEO 必检项
+
+AutoDL 使用 Vite Preview，而不是 frontend Docker 镜像内的 Nginx。因此 Vite
+必须把 `/robots.txt`、`/sitemap.xml` 和 `/llms.txt` 同源代理到私有 FastAPI
+`127.0.0.1:8765`；缺少这些代理时，Vite 会返回 `index.html`，HTTP 仍是 200，
+但搜索引擎与 AI crawler 实际拿到的是错误的 SPA HTML。
+
+`deploy.sh` 的 `start`、`deploy`、`verify` 和 `rollback` 统一执行以下硬门禁：
+
+- `robots.txt` 必须是 `text/plain` 且包含 `User-agent:`；
+- `sitemap.xml` 必须是 `application/xml` 且包含 `<urlset`；
+- `llms.txt` 必须是 `text/plain` 且包含 `# Ink & Memory`；
+- 三个响应都不得包含 `<html`，任一失败即判定发布失败。
+
+人工复核可执行：
+
+```bash
+for path in robots.txt sitemap.xml llms.txt; do
+  curl -fsS -D - "${AutoDLService6006URL%/}/${path}" -o /dev/null
+done
+```
+
+禁止只检查 HTTP 200；必须同时检查 MIME 与正文标记。
 
 查看日志：
 

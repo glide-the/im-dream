@@ -8,6 +8,7 @@
 <!-- [同步] 2026-08-30：记录按 actor/thread 绑定的 Notion CLI 环境注入与认证前 ntn 安装检查。 -->
 <!-- [同步] 2026-08-30：记录由部署所有的 Claude Bash sandbox 开关和 AutoDL 显式关闭配置。 -->
 <!-- [同步] 2026-08-30：在安装、验证、registry 验收和故障排查中统一采用已公开的 clean-room Runtime 0.1.4。 -->
+<!-- [同步] 2026-08-31：要求 AutoDL 发布验证后端生成的 crawler 文件并拒绝 Vite SPA HTML fallback。 -->
 
 # Ink & Memory
 
@@ -285,6 +286,7 @@ python3 scripts/verify_claude_registry_release.py \
 9. **Notion Runtime 绑定归当前 actor/thread 所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，每个 Runtime turn 只接收当前 actor、当前选择范围内的 per-Thread 投影；Dream 在向 Agent Bash 暴露四个受支持变量前替换所有 ambient `NOTION_*` 值。
 10. **Editor 写入同时绑定 actor、当前 session 和持久状态。** runner 拒绝面向过期 session 的写入；Editor MCP 子进程只接收服务端所有的 actor 与有效 PostgreSQL capability；每次查询/更新均按 actor 限定；业务失败只刷新唯一内存 EditorState 软缓存，不发布成功事件。Notion 索引和按需页面正文不得进入 EditorState。
 11. **Claude Bash sandbox 开关由部署所有。** `INK_AGENT_SANDBOX_ENABLED` 缺省为 `true`，非法值也保持启用。设为 `false` 仍保留 Workspace Mode、cwd、上下文、文件工具、hooks 和工具确认，但已批准的 Bash 会绕过 bubblewrap 文件系统/网络隔离，直接以 Dream 服务账号运行；用户 Settings 与用户 env 均不能覆盖该能力。AutoDL 的外层容器拒绝所需 namespace 创建，因此发布环境固定投影为 `false`；当前 Dream 在 AutoDL 以 `root` 运行，所以已批准 Bash 在该外层容器内拥有 root 权限。
+12. **AutoDL crawler 文件属于发布门禁。** Vite Preview 必须把 `/robots.txt`、`/sitemap.xml` 和 `/llms.txt` 代理到 FastAPI。每次 AutoDL start、deploy、verify 与 rollback 都检查公网 MIME、必要正文标记及不存在 SPA HTML；仅 HTTP 200 不算验收通过。
 
 ## 故障排查
 
