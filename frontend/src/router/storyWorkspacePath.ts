@@ -13,6 +13,7 @@
 // [Sync] 2026-08-14: parse stable Deck/Agent Chat intent; neither parameter
 //                    declares or authorizes Dream mode.
 // [Sync] 2026-08-16: add the canonical Settings / Work route while retaining resource/plugin deep links.
+// [Sync] 2026-08-31: register the run-independent creation guide as a static route.
 
 export type StoryWorkspaceStaticRoute =
   | 'dream'
@@ -24,6 +25,7 @@ export type StoryWorkspaceStaticRoute =
   | 'characters'
   | 'scenes'
   | 'decks'
+  | 'creation-guide'
   | 'subscription'
   | 'settings'
   | 'settings-work'
@@ -46,6 +48,7 @@ export const STORY_WORKSPACE_PATHS: Record<StoryWorkspaceStaticRoute, string> = 
   characters: '/story-workspace/characters',
   scenes: '/story-workspace/scenes',
   decks: '/story-workspace/decks',
+  'creation-guide': '/story-workspace/creation-guide',
   subscription: '/story-workspace/subscription',
   settings: '/story-workspace/settings',
   'settings-work': '/story-workspace/settings/work',
@@ -295,6 +298,7 @@ export function storyWorkspaceAllowsLegacyReviewPanel(
     || match.route === 'episode-review'
     || match.route === 'run-execution'
     || match.route === 'decks'
+    || match.route === 'creation-guide'
     || match.route === 'writing'
     || match.route === 'timeline'
     || match.route === 'analysis'

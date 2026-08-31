@@ -10,6 +10,7 @@
 //                    pushState/replaceState integration stays in the tsx
 //                    adapter (window-dependent, not node-testable).
 // [Sync] 2026-08-16: cover the Settings / Work route and its tab query.
+// [Sync] 2026-08-31: cover the run-independent static creation-guide route.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -62,6 +63,10 @@ test('static routes resolve exactly as before (no regression)', () => {
     canonicalPath: STORY_WORKSPACE_PATHS.decks,
     route: 'decks',
   });
+  expect(resolveStoryWorkspacePath('/story-workspace/creation-guide')).toMatchObject({
+    canonicalPath: STORY_WORKSPACE_PATHS['creation-guide'],
+    route: 'creation-guide',
+  });
   expect(resolveStoryWorkspacePath('/story-workspace/settings')).toMatchObject({
     canonicalPath: STORY_WORKSPACE_PATHS.settings,
     route: 'settings',
@@ -98,13 +103,14 @@ test('run-bound character and scene routes target their Dream file stages', () =
   expect(characterList && storyWorkspaceDreamStageForRoute(characterList)).toBeNull();
 });
 
-test('Dream run surfaces never mount the legacy review panel', () => {
+test('Dream and creation-guide surfaces never mount the legacy review panel', () => {
   const cases = [
     resolveStoryWorkspacePath('/story-workspace/dream'),
     resolveStoryWorkspacePath('/story-workspace/dream', '?run=run_1'),
     resolveStoryWorkspacePath('/story-workspace/characters', '?run=run_1'),
     resolveStoryWorkspacePath('/story-workspace/scenes', '?run=run_1'),
     resolveStoryWorkspacePath('/story-workspace/runs/run_1/execution'),
+    resolveStoryWorkspacePath('/story-workspace/creation-guide'),
   ];
   expect(cases.every((match) => match && !storyWorkspaceAllowsLegacyReviewPanel(match))).toBe(true);
   expect(storyWorkspaceAllowsLegacyReviewPanel(

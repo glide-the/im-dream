@@ -8,7 +8,7 @@
 // [Sync] 2026-08-31: guard the canonical reader inside the matching draft Episode focus.
 // [Sync] 2026-08-31: guard the concise storyboard overview in the EP list description.
 // [Sync] 2026-08-31: guard the read-only three-stage guide and its in-place focus entry.
-// [Sync] 2026-08-31: guard source-aware back navigation for deep-linked guides.
+// [Sync] 2026-08-31: keep the Outline guide local after Dream moves to a static route.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -109,14 +109,10 @@ test('Outline header opens a read-only three-stage guide in the shared focus lay
   expect(PAGE_SOURCE).not.toContain('STORY_WORKSPACE_CREATION_GUIDE_INDEX_COPY');
   expect(PAGE_SOURCE).not.toContain('story-workspace-collaboration__guide-entry');
   expect(PAGE_SOURCE).toContain('creationGuideFocused ? (');
-  expect(PAGE_SOURCE).toContain("backLabel={initialFocusKey ? '返回上一页' : undefined}");
-  expect(PAGE_SOURCE).toContain('onBack={returnFromCreationGuide}');
-  expect(PAGE_SOURCE).toContain('storyWorkspaceDreamShouldReturnToHistory(window.history.state)');
-  expect(PAGE_SOURCE).toContain('window.history.back()');
-  expect(PAGE_SOURCE).toContain('if (creationGuideFocused) {\n        returnFromCreationGuide();');
+  expect(PAGE_SOURCE).toContain('<StoryWorkspaceCreationGuide onBack={() => setFocusKey(null)} />');
   expect(PAGE_SOURCE).toContain("focusKey === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY");
-  expect(PAGE_SOURCE).toContain('initialFocus === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY');
-  expect(PAGE_SOURCE).toContain('useState<string | null>(initialFocusKey)');
+  expect(PAGE_SOURCE).toContain('useState<string | null>(null)');
+  expect(PAGE_SOURCE).not.toContain('initialFocus');
   expect(CREATION_GUIDE_SOURCE).toContain('角色卡和场景卡首次定稿后');
   expect(CREATION_GUIDE_SOURCE).toContain('每个 EP 重复');
   expect(CREATION_GUIDE_SOURCE).toContain('尚未实现');

@@ -3,6 +3,7 @@
 <!-- [Pos] Story Workspace Project/Episode workbench interaction contract. -->
 <!-- [Sync] 2026-08-31: assign the reader to its draft EP and move its overview into the list description. -->
 <!-- [Sync] 2026-08-31: define the header-triggered, three-stage creation guide and its read-only future boundary. -->
+<!-- [Sync] 2026-08-31: move the Dream guide entry to a run-independent static route. -->
 
 # Project 与 Episode 工作台
 
@@ -35,12 +36,12 @@ Project、Episode 和来源键；只用于渲染的 View ID 可以派生，但�
 
 ### 目标与边界
 
-绑定 Run 的 Dream 页在“创作工作空间”标题下方提供“查看短剧创作阶段指引”入口；Execution
-的 Outline 标题说明位置保留同名入口。两个入口都打开该 Run 同一个分镜预览式聚焦层，且不占用
-故事线索引条目。Dream 入口只在现有 Execution 路由上携带一次性初始聚焦参数，不建立新的业务
-路由、持久化状态、Agent 调用、Hook 或数据库写入。阶段三仅说明完整制作方向，不能展示成可执行、
-可确认或已交付功能。从 Dream 页进入时，指引的返回操作使用工作台路由已记录的来源历史回到原
-“创作工作空间”；从 Execution 的 Outline 原位进入时，返回操作仍回到当前故事线。
+绑定 Run 的 Dream 页在“创作工作空间”标题下方提供“查看短剧创作阶段指引”入口，跳转到与 Run
+和 Execution 均无关的静态 `/story-workspace/creation-guide` 页面；Execution 的 Outline 标题说明
+位置保留同名入口，但只在当前页面打开分镜预览式聚焦层。两个入口复用同一只读指引组件，且不
+占用故事线索引条目，不建立持久化状态、Agent 调用、Hook 或数据库写入。阶段三仅说明完整制作
+方向，不能展示成可执行、可确认或已交付功能。静态页返回操作使用工作台路由已记录的来源历史
+回到原“创作工作空间”；Outline 原位入口仍返回当前故事线。
 聚焦页只保留中性标题“短剧创作流程”，不叠加英文眉题、宣传口号或重复引导句。桌面端遵循
 UI Design v2 的三功能卡结构并在一个视口内横向呈现三个阶段；卡片使用暖纸底色、12px 圆角、
 轻边框和零静态阴影。窄屏再转为单列自然阅读。

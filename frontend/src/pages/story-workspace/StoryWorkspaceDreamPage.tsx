@@ -5,7 +5,7 @@
 // [Sync] 2026-08-13: hand the bound Dream thread to canonical Chat on request.
 // [Sync] 2026-08-14: no-run Dream now discovers Decks/runs only; all creation begins in Chat.
 // [Sync] 2026-08-14: open the bound Dream Agent editor by default when entering or switching runs.
-// [Sync] 2026-08-31: link the run masthead to the shared creation-guide focus surface.
+// [Sync] 2026-08-31: link the run masthead to the static creation-guide route.
 
 import {
   useCallback,
@@ -39,7 +39,7 @@ import {
   StoryWorkspaceDreamAgentPanel,
 } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentPanel';
 import { StoryWorkspaceDreamAgentRail } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentRail';
-import { STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY } from '../../components/story-workspace/StoryWorkspaceCreationGuide';
+import { STORY_WORKSPACE_PATHS } from '../../router/storyWorkspacePath';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import type { WorkflowRun } from '../../api/storyWorkspaceApi';
 import {
@@ -399,7 +399,7 @@ export function StoryWorkspaceDreamPage({
           <button
             className="story-workspace-dream__guide-trigger"
             onClick={() => {
-              const href = `/story-workspace/runs/${encodeURIComponent(runId)}/execution?focus=${encodeURIComponent(STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY)}`;
+              const href = STORY_WORKSPACE_PATHS['creation-guide'];
               if (onNavigate) onNavigate(href);
               else window.location.assign(href);
             }}

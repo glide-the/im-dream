@@ -1,12 +1,13 @@
 # Ink & Memory AutoDL 启动
 <!--
 [Input] Existing AutoDL Admin/Dream releases and the standalone stack launcher.
-[Output] Explain the application and provide a minimal one-command startup workflow.
+[Output] Explain the application, discover AutoDL public mappings, and provide a minimal one-command startup workflow.
 [Pos] User-facing README for an already deployed AutoDL Ink & Memory stack.
 [Sync] 2026-08-26: document root Dream runtime and isolated Admin/PostgreSQL ownership.
 [Sync] 2026-08-30: document the qualified 2.1.88 local-core and restored on-disk apply-seccomp passthrough.
 [Sync] 2026-08-30: document the deployment-owned disabled Bash sandbox profile and its root-service consequence.
 [Sync] 2026-08-31: document the explicit Vite allow-all host override for dynamic AutoDL mappings.
+[Sync] 2026-08-31: document safe discovery of AutoDL-injected 6006/6008 public service URLs.
 -->
 
 ## 应用介绍
@@ -34,6 +35,19 @@ Dream 前后端及 Claude Runtime 由 `root` 启动，使 `.dream/runtime` 的�
 AutoDL 发布不再安装 clean-room npm Runtime 作为 Agent 主路径。通用 `ink-claude-code-dream` 构建流程从授权的 2.1.88 源码生成 Runtime `0.1.4` Linux x64 local-core，并在具备 bubblewrap 所需权限的 Docker 中完成 SDK/Bash/MCP 资格化；`deploy.sh sync` 只同步 verifier 合同与这份已资格化制品。制品内恢复了 `vendor/seccomp/x64/apply-seccomp` Docker-style passthrough，并由 receipt/checksum 绑定；它属于 Linux Runtime，不是 AutoDL 专用模式。Dream 通过绝对 `CLAUDE_CODE_CLI_PATH` 使用该 local-core。
 
 AutoDL 的外层容器禁止 Claude Code/bubblewrap 创建所需 namespace，因此 `prepare-env.sh` 会忽略来源 env 中的同名值，并在 Dream 运行环境固定写入 `INK_AGENT_SANDBOX_ENABLED=false`。这不会关闭 Workspace Mode：Thread cwd、上下文、文件侧栏、内置文件边界、hooks 与可见工具确认继续工作；只是已批准的 Bash 不再经过 bubblewrap 文件系统/网络 sandbox，而是直接以 Dream 的 `root` 服务账号在 AutoDL 外层容器内执行。恢复的 `apply-seccomp` 仍保留在通用 Runtime 中，但 sandbox 关闭时不会进入该链路。
+
+## 获取当前公网映射
+
+SSH 登录目标实例后，可从 AutoDL 注入的只读服务变量获取当前 `6006` 和 `6008` 公网映射：
+
+```bash
+source /etc/profile.d/autodl.env.sh
+printf 'Dream: %s\nAdmin: %s\n' \
+  "${AutoDLService6006URL}" \
+  "${AutoDLService6008URL}"
+```
+
+`AutoDLService6006URL` 对应 Dream 前端，`AutoDLService6008URL` 对应 Admin。不要输出整份环境变量，也不要直接展示 `/etc/profile.d/autodl.env.sh` 的完整内容；同一文件还包含 AutoDL 面板令牌等敏感变量。
 
 ## 快速开始
 

@@ -4,7 +4,7 @@
 // [Pos] Story Workspace Dream re-entry Node seam (U2 Red).
 // [Sync] 2026-08-14: cover natural-flow re-entry, canonical whole-row links, and pagination.
 // [Sync] 2026-08-16: restore pre-01a00576 Deck maintenance and keep its handoff in canonical Chat.
-// [Sync] 2026-08-31: guard the run-title creation-guide entry and shared focus deep link.
+// [Sync] 2026-08-31: guard the run-title creation-guide entry and static route.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -131,10 +131,11 @@ test('Dream run masthead places the shared creation-guide entry below its title'
   expect(title).toBeGreaterThan(-1);
   expect(guideTrigger).toBeGreaterThan(title);
   expect(masthead).toContain('查看短剧创作阶段指引');
-  expect(masthead).toContain('STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY');
-  expect(masthead).toContain('/execution?focus=');
+  expect(masthead).toContain("STORY_WORKSPACE_PATHS['creation-guide']");
+  expect(masthead).not.toContain('/execution?focus=');
   expect(DREAM_CSS).toContain('.story-workspace-dream__guide-trigger');
-  expect(ROUTER_SOURCE).toContain("initialFocus={match.query.get('focus')}");
+  expect(ROUTER_SOURCE).toContain("case 'creation-guide':");
+  expect(ROUTER_SOURCE).toContain('storyWorkspaceDreamShouldReturnToHistory(window.history.state)');
 });
 
 test('Dream workbench opens its bound Agent editor by default for every run', () => {

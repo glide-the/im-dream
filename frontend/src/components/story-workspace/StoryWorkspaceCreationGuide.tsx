@@ -1,9 +1,11 @@
 // [Input] Static drama workflow rules and the Story Workspace guide illustration.
 // [Output] A read-only, three-stage creation guide inside the draft focus layer.
-// [Pos] Story Workspace Execution Outline guide surface.
+// [Pos] Shared Story Workspace static/Outline creation-guide surface.
 // [Sync] 2026-08-31: introduce shared-asset, per-Episode, and future-stage guidance
 //                    with Mimo identity in the Xiaohei-style 2D triptych.
 // [Sync] 2026-08-31: let the shared guide name the actual source surface in its back action.
+// [Sync] 2026-08-31: support the run-independent static guide route while
+//                    retaining the Outline's in-place focus reuse.
 
 export const STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY = 'creation-guide';
 
@@ -79,8 +81,9 @@ export function StoryWorkspaceCreationGuide({
   onBack,
 }: StoryWorkspaceCreationGuideProps) {
   return (
-    <main
-      className="story-workspace-collaboration__focus-layer"
+    <section
+      aria-label="短剧创作阶段指引"
+      className="story-workspace-collaboration__focus-layer story-workspace-creation-guide-surface"
       data-execution-depth="focus"
     >
       <article
@@ -131,6 +134,6 @@ export function StoryWorkspaceCreationGuide({
           ))}
         </ol>
       </article>
-    </main>
+    </section>
   );
 }

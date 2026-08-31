@@ -16,8 +16,8 @@
 // [Sync] 2026-08-16: route Settings / Work as the parent surface for Deck, resource, and plugin management.
 // [Sync] 2026-08-13: explicit Dream/Execution Chat actions carry their bound
 //                    thread through the router before opening canonical Chat.
-// [Sync] 2026-08-31: pass the validated creation-guide focus query into Execution;
-//                    existing source-history state owns return navigation.
+// [Sync] 2026-08-31: render the creation guide on its own static route and use
+//                    the recorded source history for its return navigation.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
@@ -28,6 +28,7 @@ import {
 import {
   StoryWorkspaceSidebar,
 } from '../components/story-workspace/layout/StoryWorkspaceSidebar';
+import { StoryWorkspaceCreationGuide } from '../components/story-workspace/StoryWorkspaceCreationGuide';
 import { useRunDeepLink } from '../hooks/story-workspace';
 import type { WorkflowRun } from '../api/storyWorkspaceApi';
 import {
@@ -45,7 +46,10 @@ import {
   StoryWorkspaceSubscriptionPage,
   storyWorkspaceSettingsSectionForRoute,
 } from '../pages/story-workspace';
-import { storyWorkspaceDreamReturnState } from '../pages/story-workspace/storyWorkspaceDreamNavigation';
+import {
+  storyWorkspaceDreamReturnState,
+  storyWorkspaceDreamShouldReturnToHistory,
+} from '../pages/story-workspace/storyWorkspaceDreamNavigation';
 import {
   readStoryWorkspaceRunParam,
   readStoryWorkspaceDeckParam,
@@ -191,10 +195,25 @@ function renderStoryWorkspaceRoute(
           />;
     case 'decks':
       return <div className="story-workspace-decks-surface">{decksContent}</div>;
+    case 'creation-guide':
+      return (
+        <StoryWorkspaceCreationGuide
+          backLabel="返回上一页"
+          onBack={() => {
+            if (
+              window.history.length > 1
+              && storyWorkspaceDreamShouldReturnToHistory(window.history.state)
+            ) {
+              window.history.back();
+              return;
+            }
+            onNavigate(STORY_WORKSPACE_PATHS.dream);
+          }}
+        />
+      );
     case 'run-execution':
       return (
         <StoryWorkspaceExecutionPage
-          initialFocus={match.query.get('focus')}
           key={match.params.storyWorkspaceRunId}
           onNavigate={onNavigate}
           onOpenChatThread={onOpenChatThread}
@@ -364,11 +383,11 @@ export function StoryWorkspaceRouter({
     handleNavigate(STORY_WORKSPACE_PATHS.chat, undefined, threadId);
   }, [handleNavigate]);
 
-  // DEC-030: the execution page keeps the Dream entry selected in the app
-  // chrome (it is a Dream surface page, not a fifth sidebar entry).
-  const currentPath = activeRoute in STORY_WORKSPACE_PATHS
-    ? STORY_WORKSPACE_PATHS[activeRoute as keyof typeof STORY_WORKSPACE_PATHS]
-    : STORY_WORKSPACE_PATHS.dream;
+  // DEC-030: execution and the static creation guide keep Dream selected in
+  // the app chrome; neither surface becomes another sidebar entry.
+  const currentPath = activeRoute === 'creation-guide' || !(activeRoute in STORY_WORKSPACE_PATHS)
+    ? STORY_WORKSPACE_PATHS.dream
+    : STORY_WORKSPACE_PATHS[activeRoute as keyof typeof STORY_WORKSPACE_PATHS];
   const isSettingsRoute = activeRoute === 'settings'
     || activeRoute === 'settings-work'
     || activeRoute === 'settings-resources'

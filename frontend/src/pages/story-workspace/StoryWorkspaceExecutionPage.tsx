@@ -24,7 +24,7 @@
 //                    list description instead of repeating a focus section.
 // [Sync] 2026-08-31: add a three-stage creation guide trigger to the Outline
 //                    header and open it through the same in-place focus navigation.
-// [Sync] 2026-08-31: return deep-linked creation guides to their recorded source page.
+// [Sync] 2026-08-31: keep the Outline guide local while Dream uses its static route.
 
 import {
   useCallback,
@@ -75,7 +75,6 @@ import {
   StoryWorkspaceCreationGuide,
 } from '../../components/story-workspace/StoryWorkspaceCreationGuide';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
-import { storyWorkspaceDreamShouldReturnToHistory } from './storyWorkspaceDreamNavigation';
 import {
   storyWorkspaceBuildEpisodeExecutionViewModel,
   storyWorkspaceEpisodeNavigationItems,
@@ -320,7 +319,6 @@ function storyWorkspaceEpisodeArtifactAvailability(
 }
 
 export interface StoryWorkspaceExecutionPageProps {
-  initialFocus?: string | null;
   runId: string;
   episodeId?: string | null;
   onNavigate?: (href: string, notice?: string) => void;
@@ -352,17 +350,13 @@ function EmptyWorkspaceModule({ module }: { module: ExecutionModule }) {
 }
 
 export function StoryWorkspaceExecutionPage({
-  initialFocus = null,
   runId,
   episodeId,
   onNavigate,
   onOpenChatThread,
 }: StoryWorkspaceExecutionPageProps) {
-  const initialFocusKey = initialFocus === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY
-    ? STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY
-    : null;
   const [activeModule, setActiveModule] = useState<ExecutionModule>('outline');
-  const [focusKey, setFocusKey] = useState<string | null>(initialFocusKey);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<StoryWorkspaceExecutionView>('draft');
   const [focusedArtifact, setFocusedArtifact] =
@@ -390,19 +384,6 @@ export function StoryWorkspaceExecutionPage({
       window.location.assign(href);
     }
   }, [onNavigate]);
-  const returnFromCreationGuide = useCallback(() => {
-    if (
-      initialFocusKey
-      && typeof window !== 'undefined'
-      && window.history.length > 1
-      && storyWorkspaceDreamShouldReturnToHistory(window.history.state)
-    ) {
-      window.history.back();
-      return;
-    }
-    setFocusKey(null);
-  }, [initialFocusKey]);
-
   useEffect(() => {
     void selectRun(runId).catch(() => {
       // Dream files own the access fact. A run read is optional context for
@@ -513,11 +494,11 @@ export function StoryWorkspaceExecutionPage({
   useEffect(() => {
     setWorkspaceView('draft');
     setActiveModule('outline');
-    setFocusKey(initialFocusKey);
+    setFocusKey(null);
     setFocusedArtifact('storyboard.yaml');
     setPendingArtifactReaderFocus(null);
     setEpisodeExpandedKeys(new Set());
-  }, [initialFocusKey, runId]);
+  }, [runId]);
 
   const handleEpisodeArtifactRead = useCallback((
     artifact: StoryWorkspaceEpisodeReadableArtifact,
@@ -573,15 +554,11 @@ export function StoryWorkspaceExecutionPage({
     if (!focusedEntry && !creationGuideFocused) return;
     const closeFocus = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      if (creationGuideFocused) {
-        returnFromCreationGuide();
-        return;
-      }
       setFocusKey(null);
     };
     window.addEventListener('keydown', closeFocus);
     return () => window.removeEventListener('keydown', closeFocus);
-  }, [creationGuideFocused, focusedEntry, returnFromCreationGuide]);
+  }, [creationGuideFocused, focusedEntry]);
 
   useEffect(() => {
     if (!files.data || storyWorkspaceCanAccessExecution(files.data)) return;
@@ -749,10 +726,7 @@ export function StoryWorkspaceExecutionPage({
       >
         <div className="story-workspace-collaboration__surface">
         {creationGuideFocused ? (
-          <StoryWorkspaceCreationGuide
-            backLabel={initialFocusKey ? '返回上一页' : undefined}
-            onBack={returnFromCreationGuide}
-          />
+          <StoryWorkspaceCreationGuide onBack={() => setFocusKey(null)} />
         ) : focusedEntry ? (
           <main
             className="story-workspace-collaboration__focus-layer"

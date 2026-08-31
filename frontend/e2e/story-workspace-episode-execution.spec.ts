@@ -12,9 +12,9 @@
 //                    with projected shot count and duration.
 // [Sync] 2026-08-31: Outline opens an illustrated three-stage creation guide
 //                    through the same focus/back interaction as an Episode.
-// [Sync] 2026-08-31: Dream's guide entry returns to the originating run workbench.
-// [Sync] 2026-08-31: the bound Dream masthead opens that same guide focus below
-//                    the “创作工作空间” title.
+// [Sync] 2026-08-31: Dream's static guide route returns to the originating run workbench.
+// [Sync] 2026-08-31: the bound Dream masthead opens the independent static guide
+//                    below the “创作工作空间” title.
 
 // @ts-expect-error Playwright E2E has Node built-ins; the browser app tsconfig omits Node types.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -77,7 +77,7 @@ test.use({ channel: 'chromium', timezoneId: 'Asia/Shanghai' });
 // - Episode identity/artifacts: mocked canonical DTO is the authority; unchanged.
 // - Run-private publication and Hook/PostgreSQL materialization: not in scope.
 // - Shared Thread/session: fixture identity remains unchanged; no new turn.
-// - Final UI consumer: Outline gains one header trigger and a local focus guide.
+// - Final UI consumers: Outline keeps a local focus guide; Dream opens the static route.
 
 function coverage(linked = 1, total = 1) {
   return { availability: 'available', linked, total, ratio: linked / total };
@@ -721,7 +721,7 @@ test('keeps an unbound first Episode read-only while automatic publication and b
   expect(diagnostics).toEqual([]);
 });
 
-test('Dream run title opens the shared creation guide without adding an index item', async ({ page }) => {
+test('Dream run title opens the static creation guide without adding an index item', async ({ page }) => {
   const diagnostics: string[] = [];
   const state: BrowserFixtureState = {
     revisionIndex: 0,
@@ -767,7 +767,7 @@ test('Dream run title opens the shared creation guide without adding an index it
 
   await guideTrigger.click();
   await expect(page).toHaveURL(
-    new RegExp(`/story-workspace/runs/${RUN_ID}/execution\\?focus=creation-guide$`),
+    new RegExp('/story-workspace/creation-guide$'),
   );
   await expect(page.getByRole('article', { name: '短剧创作流程' })).toBeVisible();
   await expect(page.getByRole('button').filter({ hasText: 'EP01: 雨夜重逢' })).toHaveCount(0);

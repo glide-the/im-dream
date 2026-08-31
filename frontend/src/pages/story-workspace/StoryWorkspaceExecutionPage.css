@@ -12,8 +12,11 @@
 /* [Sync] 2026-08-31: render the Episode file reader inside its draft focus article. */
 /* [Sync] 2026-08-31: style the illustrated three-stage creation guide as an
    in-place Outline focus surface with compact UI v2 Mimo stage cards. */
+/* [Sync] 2026-08-31: give the same guide surface standalone theme variables for
+   its static Story Workspace route. */
 
-.story-workspace-collaboration {
+.story-workspace-collaboration,
+.story-workspace-creation-guide-surface {
   --collaboration-canvas: var(--color-bg-app, #f6efe5);
   --collaboration-paper: var(--color-bg-paper, #fffaf2);
   --collaboration-ink: var(--color-text-primary, #352820);
@@ -28,6 +31,9 @@
   --dream-muted: var(--collaboration-muted);
   --dream-action: var(--collaboration-action);
   --dream-rule: var(--collaboration-rule);
+}
+
+.story-workspace-collaboration {
   position: relative;
   display: flex;
   width: 100%;
