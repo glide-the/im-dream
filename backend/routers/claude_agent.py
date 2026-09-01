@@ -41,6 +41,8 @@
 #                    attachment handling initializes a full Thread workspace.
 # [Sync] 2026-09-01: project the allowlisted Dream auto-repair message contract
 #                    and reserve its server-owned message-id namespace.
+# [Sync] 2026-09-01: preserve validated projectCleanup trusted/stale facts in
+#                    history so SSE and refresh expose the same repair message.
 
 import asyncio
 import base64
@@ -152,6 +154,7 @@ class PublicChatMetadataDto(BaseModel):
     repairAttempt: int | None = None
     validationCode: str | None = None
     idempotencyKey: str | None = None
+    projectCleanup: dict[str, Any] | None = None
 
     @classmethod
     def from_storage(
@@ -246,6 +249,9 @@ class PublicChatMetadataDto(BaseModel):
                     "idempotencyKey",
                 ):
                     values[field] = metadata[field]
+                project_cleanup = metadata.get("projectCleanup")
+                if isinstance(project_cleanup, dict):
+                    values["projectCleanup"] = project_cleanup
             else:
                 # An incomplete server-owned repair envelope could otherwise
                 # expose instruction text without verifiable provenance.

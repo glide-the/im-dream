@@ -6,6 +6,8 @@
 <!-- [Sync] 2026-09-01: keep duplicate-root workspaces enterable during context assembly and make managed Skill links non-recursive workspace-tree leaves. -->
 <!-- [Sync] 2026-09-01: bind exact stale-project cleanup to the persisted repair marker plus fresh launch authority and a one-Turn typed PreToolUse scope. -->
 <!-- [Sync] 2026-09-01: require actionable full-root guidance when a marked repair attempts marker-only project.yaml deletion. -->
+<!-- [Sync] 2026-09-01: persist and project exact trusted/stale repair facts so a fresh Session cannot delete the protected root. -->
+<!-- [Sync] 2026-09-01: preserve legacy v1 history while denying cleanup scope unless persisted and fresh facts match. -->
 
 # Dream 后置同步失败后的 Agent 自动自检修正
 
@@ -51,6 +53,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 
 该能力首次上线后的生产数据回放又发现一个更窄的交互缺口：Agent 没有请求完整根清理，而是尝试 `rm stories/<old-slug>/project.yaml`，希望只移除 canonical marker。Guard 正确拒绝了绕过，但返回的是与实际任务无关的通用 `.dream` 提示，Agent 随即结束本轮，第二次 Hook 仍得到 `DREAM_CANONICAL_PROJECT_AMBIGUOUS`。因此修复不能放宽 marker-only 删除；应在同一个 Guard 内识别该意图并返回当前可信 scope 唯一可执行的完整根命令，让 Agent 在同一 Turn 改正工具调用。
 
+随后对同一生产 Thread 的完整 transcript 回放确认了更根本的事实断层：歧义模板只说“以服务器上下文指定路径为准”，但没有给出具体可信根；同时旧 Claude transcript 不可恢复时，正常 resume 会安全降级为 fresh SDK Session，而 `.dream/WORKBENCH.md` 的歧义上下文又故意不选择任一根。Agent 因此根据文件内容猜反，连续请求删除服务器可信根。Guard 拒绝删除是正确的，错误在于服务器已经知道 `trusted/stale`，却只把它用于末端权限判断，没有作为同一轮可读取、可持久化的业务事实交给 Agent。
+
 ## 2. 目标与边界
 
 ### 2.1 目标
@@ -62,6 +66,7 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 - context assembly 遇到多个合法 project 根时生成 `project_resolution=ambiguous` 的不绑定上下文，不猜测可信 slug、不创建第三套项目，并允许正常 Agent Turn 进入修正。
 - 工作空间递归树不得跟随 thread 外的 Skill 链接；文件浏览保持可用，直接读取/下载仍按 symlink 安全合同拒绝。
 - 自动修正 Turn 根据已持久化 marker 重新验证 Run/Thread/launch authority，并只向 PreToolUse 传递本轮允许清理的旧项目 slug；普通 Turn 不获得该能力。
+- 项目根修正把同一份可信/stale scope 同时写入自动 user 消息 metadata/正文和服务器控制的 `.dream/WORKBENCH.md`；fresh Session 不依赖旧 transcript 猜测方向。
 - 同一 originating message/turn 最多一次自动修正；第二次失败停止。
 
 ### 2.2 非目标
@@ -113,9 +118,9 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 
 ### 3.4 可修正歧义的上下文规则
 
-`DreamWorkbenchContext` 仍对 workspace/thread 不匹配、`.dream`/`stories`/project 文件符号链接和不安全文件类型 fail closed。唯一例外是“发现两个及以上结构安全的 canonical project 根”：它不再选中任意一个项目，也不再在 Runner 前抛错，而是写入 `project_slug=null`、`project_resolution=ambiguous`、`canonical_project_count=<n>` 和空 Episode 列表。内部指令明确禁止创建第三套 Project，并要求检查、合并和清理既有目录。
+`DreamWorkbenchContext` 仍对 workspace/thread 不匹配、`.dream`/`stories`/project 文件符号链接和不安全文件类型 fail closed。普通 Turn 发现两个及以上结构安全的 canonical project 根时，不选中任意一个项目，而是写入 `project_slug=null`、`project_resolution=ambiguous`、`canonical_project_count=<n>` 和空 Episode 列表。自动修正 Turn 则在保持该歧义状态的同时增加 `auto_repair` 服务器事实：validation code、attempt、必须保留的 `trusted_project_slug/path`、仅允许清理的 `stale_project_slugs/paths`、固定合并方向以及 `trusted_root_delete_allowed=false`。
 
-该规则不声明任意目录为可信。最终 slug、唯一根、stage schema 和 launch authority 仍全部由同一个后置 Hook 校验；Agent 无法通过上下文降级修改 server-owned metadata。
+普通歧义上下文不声明任意目录为可信；只有已持久化自动消息中的 `projectCleanup` 与 fresh Hook scope 完全一致时，服务端才刷新 `.dream` 修正事实。最终 slug、唯一根、stage schema 和 launch authority 仍全部由同一个后置 Hook 校验；Agent 只能读取 `.dream`，无法修改 server-owned metadata 或修正事实。
 
 ### 3.5 自动修正执行 scope
 
@@ -124,9 +129,10 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 1. 验证消息为 `dispatch_status=dispatched`，且 `workflowRunId`、Thread 与当前可信 Dream context 一致；
 2. 从 authoritative Workflow Run 的 source message 重新校验 actor、workspace、thread、Run、Deck、Agent、binding revision、runtime snapshot 和 plugin lock；
 3. 读取当前结构安全、project identity 合法的 canonical project roots，以 launch `projectStorySlug` 为可信根，其余根才可成为 stale candidates；
-4. 构造 repr-hidden `DreamAutoRepairExecutionScope`，只放入当前 repair message、originating Turn、Run/Thread、validation code、可信 slug 和 stale slug 集合。
+4. 将可信 slug/stale slug 集合作为 `projectCleanup` 随自动 user 消息持久化，并在自动 Turn 中要求它与 fresh 解析结果完全一致；不一致 fail closed；
+5. 用同一结果刷新 `.dream/WORKBENCH.md` 的 `auto_repair` 事实，再构造 repr-hidden `DreamAutoRepairExecutionScope`，放入当前 repair message、originating Turn、Run/Thread、validation code、可信 slug 和 stale slug 集合。
 
-该 scope 不进入公共 Chat DTO、message metadata、Claude subprocess env 或 MCP env，并只存在于本轮 `AgentRunOptions`。PreToolUse 不增加第二个并列权限入口；唯一 `_apply_dream_surface_write_guard` 在其既有 `tool_name == "Bash"` 分支内先判断这项窄授权，再执行通用 Dream Bash 写保护。窄授权只接受单条、单目标、无 shell metacharacter 的递归 `rm`，目标必须精确解析为 `stories/<scoped-stale-slug>`。执行前还要求：workspace/stories/可信根/旧根均非 symlink，双方均有普通 `project.yaml`，旧树每个普通文件和目录的相对路径都已存在于可信根，且树内无 symlink/特殊文件。满足时由 server marker 自动放行，不再弹没有决策价值的确认框。若 marked repair 尝试只删除 `stories/<stale>/project.yaml` 来隐藏重复根，仍然拒绝该命令，但拒绝理由必须指出不得只删 marker，并给出当前 scope 唯一允许的 `rm -rf -- stories/<stale>`；普通 session 不得获得 slug 或命令提示。其他条件不满足则回到同一 guard 的 `.dream` 通用 hard deny，Agent 可先补齐迁移后在同一 Turn 重试。
+公开消息 metadata/正文与 `.dream` 只包含经过 slug allowlist 的相对业务路径，不包含绝对 workspace 路径；真正能授权 Bash 的 typed execution scope 仍不进入公共 DTO、Claude subprocess env 或 MCP env，只存在于本轮 `AgentRunOptions`。PreToolUse 不增加第二个并列权限入口；唯一 `_apply_dream_surface_write_guard` 在其既有 `tool_name == "Bash"` 分支内先判断这项窄授权，再执行通用 Dream Bash 写保护。窄授权只接受单条、单目标、无 shell metacharacter 的递归 `rm`，目标必须精确解析为 `stories/<scoped-stale-slug>`。执行前还要求：workspace/stories/可信根/旧根均非 symlink，双方均有普通 `project.yaml`，旧树每个普通文件和目录的相对路径都已存在于可信根，且树内无 symlink/特殊文件。满足时由 server marker 自动放行，不再弹没有决策价值的确认框。若 marked repair 尝试删除可信根，Guard 必须明确指出该根受保护，并返回只允许删除的 stale 根命令；只删 stale `project.yaml` 时同样拒绝绕过并返回完整根命令；stale 树尚未满足覆盖/安全条件时明确要求先按 `stale -> trusted` 合并。普通 session 仍只收到通用拒绝，不得获得 scope slug。
 
 ## 4. 错误分类
 
@@ -164,7 +170,11 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
     "repairAttempt": 1,
     "validationCode": "PROJECT_STORY_SLUG_MISMATCH",
     "idempotencyKey": "dream-auto-repair/v1:<stable_sha256>",
-    "dispatch_status": "dispatched"
+    "dispatch_status": "dispatched",
+    "projectCleanup": {
+      "trustedProjectSlug": "proj-8b75aa06",
+      "staleProjectSlugs": ["old-project"]
+    }
   }
 }
 ```
@@ -176,6 +186,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 - `dispatching`：自动 user 消息已落库，但执行权尚未完成 CAS；正常情况下不发布该中间态 SSE；
 - `dispatched`：本消息已唯一取得自动修正执行权；
 - `failed`：修正 Runner/assembly/cancel/第二次 Hook 未完成或失败。
+
+已经持久化、但早于 `projectCleanup` 字段上线的 v1 消息仍作为真实历史显示；它只能用于展示和“一次修正已发生”的循环判断。新消息构造器强制项目根错误携带 `projectCleanup`，而自动 Turn 还必须让该字段与 fresh Hook scope 完全一致，因此旧消息不会获得项目根删除能力。
 
 ### 5.2 allowlist 正文模板
 
@@ -192,13 +204,17 @@ Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成
 - 失败原因：当前文件生成到了另一套项目目录，无法证明其属于本次 Dream Run
 - 修正要求：将旧项目内容移动或合并到服务器指定的 canonical project 路径，同步修正 project_id/project_slug；确认内容完整后移除旧 slug 的重复项目根
 - 清理要求：不得只复制目录，也不得只删除旧根的 project.yaml 来隐藏重复项目；核对迁移完整后必须移除整个旧项目根，stories 下最终只能保留本次 Run 的唯一 canonical 项目
+- 服务器可信项目根（必须保留）：stories/<trusted slug>
+- 本轮旧项目根（仅允许清理这些路径）：stories/<stale slug>
+- 合并方向：使用 Read/Glob 与文件编辑工具逐文件核对，将旧根内容合并到可信根；不得反向覆盖或删除可信根
+- 目录清理命令（确认内容合并完整后执行）：rm -rf -- stories/<stale slug>
 - 禁止操作：不得修改 Dream 启动元数据、actor/thread/run 身份、Deck/plugin lock 或伪造绑定信息
 - 完成标准：重新执行同一个后置同步校验并全部通过
 ```
 
 不得把 exception `str()`, traceback、数据库 error、绝对路径、用户正文、DSN、token 或环境变量拼入消息。
 
-`DREAM_CANONICAL_PROJECT_AMBIGUOUS`、`DREAM_STAGE_ENTITY_ID_DUPLICATE` 和 `DREAM_STAGE_SCHEMA_INVALID` 使用各自固定模板，不插入目录列表、绝对路径或原始 Pydantic 文本。stage 名仅允许 `characters/scenes/storyboards`。重复实体修正必须先合并内容再移除旧来源，不得通过编造 `entity_id` 制造表面唯一。
+`DREAM_CANONICAL_PROJECT_AMBIGUOUS` 和需要项目根清理的 stage duplicate 模板只插入 Hook 已验证的 canonical slug 相对路径，并与 metadata `projectCleanup`、`.dream auto_repair` 事实完全一致；仍不得插入绝对路径、任意目录名或原始 Pydantic 文本。stage 名仅允许 `characters/scenes/storyboards`。重复实体修正必须先合并内容再移除旧来源，不得通过编造 `entity_id` 制造表面唯一。
 
 ## 6. SSE 事件与前端表现
 
@@ -300,7 +316,7 @@ stateDiagram-v2
 - 消息正文由 code-specific template 生成，不使用原始 exception text。
 - SSE 使用已经持久化的 exact DTO；历史接口继续通过 `PublicChatMetadataDto` allowlist 投影。
 - 不修改或删除 Claude transcript；修正 Turn 使用现有 session id resume。
-- 歧义上下文不输出目录清单、不选择“看起来正确”的 slug；只公开计数和 `ambiguous` 状态。
+- 普通歧义上下文不输出目录清单、不选择“看起来正确”的 slug；自动修正上下文只输出服务器重新验证的 trusted/stale 相对路径事实。
 - 文件树使用 `lstat` 获取 link 自身元数据，不读取、遍历或暴露 thread 外的 link target。
 
 ## 11. 验收标准
@@ -323,6 +339,8 @@ stateDiagram-v2
 16. 只有 `dispatched` 自动消息且 fresh Run/Thread/launch authority 全部一致时，Runner 才收到 typed cleanup scope；metadata 伪造或 authority 漂移不得授权删除。
 17. scope 内单个 stale root 在所有树条目已迁入可信根后可无弹窗执行；普通 session、非 scope 目标、多目标、未完整迁移、symlink/特殊文件和越界路径继续 hard deny。
 18. marked repair 只删 stale `project.yaml` 时收到完整根清理命令并可在同一 Turn 重试；普通 session 仍只收到通用拒绝，不泄露 scope slug。
+19. `DREAM_CANONICAL_PROJECT_AMBIGUOUS` 自动消息正文/metadata 与 `.dream/WORKBENCH.md` 同时明确 trusted/stale 根和 `stale -> trusted` 合并方向；fresh SDK Session 不依赖旧 transcript。
+20. marked repair 请求删除 trusted 根时必须拒绝并指出该根受保护，同时返回 scoped stale 根命令；消息、`.dream` 与 fresh Hook scope 任一不一致都 fail closed。
 
 ## 12. 编码前设计复核
 

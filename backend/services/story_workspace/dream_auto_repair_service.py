@@ -7,6 +7,9 @@
 #                    when the single repair attempt is exhausted.
 # [Sync] 2026-09-01: explicitly forbid deleting only a stale project.yaml
 #                    marker so the Agent removes the fully merged duplicate root.
+# [Sync] 2026-09-01: persist the server-resolved trusted/stale project cleanup
+#                    scope in the visible repair fact so fresh Sessions cannot
+#                    guess the protected root from ambiguous workspace content.
 
 """Build and persist one allowlisted Dream workspace auto-repair message."""
 
@@ -48,6 +51,20 @@ _AUTO_REPAIR_VALIDATION_CODES = frozenset(
         "DREAM_CANONICAL_PROJECT_AMBIGUOUS",
         "DREAM_STAGE_ENTITY_ID_DUPLICATE",
         "DREAM_STAGE_SCHEMA_INVALID",
+    }
+)
+_PROJECT_CLEANUP_VALIDATION_CODES = frozenset(
+    {
+        "PROJECT_STORY_SLUG_MISMATCH",
+        "DREAM_CANONICAL_PROJECT_AMBIGUOUS",
+        "DREAM_STAGE_ENTITY_ID_DUPLICATE",
+        "DREAM_STAGE_SCHEMA_INVALID",
+    }
+)
+_PROJECT_CLEANUP_REQUIRED_CODES = frozenset(
+    {
+        "PROJECT_STORY_SLUG_MISMATCH",
+        "DREAM_CANONICAL_PROJECT_AMBIGUOUS",
     }
 )
 _EXHAUSTED_PUBLIC_DETAILS = {
@@ -131,10 +148,46 @@ class DreamAutoRepairMessage:
         }
 
 
+def _decode_project_cleanup(
+    raw: object,
+) -> tuple[str, tuple[str, ...]] | None:
+    """Decode one allowlisted server-owned cleanup fact without guessing."""
+
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError("Dream project cleanup metadata must be an object")
+    trusted = raw.get("trustedProjectSlug")
+    stale = raw.get("staleProjectSlugs")
+    if (
+        not isinstance(trusted, str)
+        or _STORY_SLUG.fullmatch(trusted) is None
+        or not isinstance(stale, list)
+        or not stale
+        or any(
+            not isinstance(slug, str)
+            or _STORY_SLUG.fullmatch(slug) is None
+            or slug == trusted
+            for slug in stale
+        )
+        or len(stale) != len(set(stale))
+    ):
+        raise ValueError("Dream project cleanup metadata is invalid")
+    return trusted, tuple(stale)
+
+
+def dream_auto_repair_project_cleanup_from_metadata(
+    metadata: Mapping[str, Any],
+) -> tuple[str, tuple[str, ...]] | None:
+    """Return the persisted project cleanup scope, rejecting malformed facts."""
+
+    return _decode_project_cleanup(metadata.get("projectCleanup"))
+
+
 def dream_auto_repair_metadata_is_valid(metadata: object) -> bool:
     """Recognize only the server-authored v1 attempt marker."""
 
-    return (
+    valid = (
         isinstance(metadata, Mapping)
         and metadata.get("kind") == DREAM_AUTO_REPAIR_METADATA_KIND
         and metadata.get("schemaVersion") == DREAM_AUTO_REPAIR_SCHEMA_VERSION
@@ -155,14 +208,108 @@ def dream_auto_repair_metadata_is_valid(metadata: object) -> bool:
             DREAM_AUTO_REPAIR_FAILED,
         }
     )
+    if not valid:
+        return False
+    try:
+        cleanup = dream_auto_repair_project_cleanup_from_metadata(metadata)
+    except ValueError:
+        return False
+    # Preserve already-persisted v1 rows that predate ``projectCleanup`` so
+    # refresh does not erase a real conversation fact.  New root-repair
+    # messages cannot omit it because ``build_dream_auto_repair_message``
+    # calls ``_normalize_project_cleanup``; execution additionally compares
+    # the persisted value with a fresh authoritative Hook scope.
+    return (
+        cleanup is None
+        or metadata.get("validationCode")
+        in _PROJECT_CLEANUP_VALIDATION_CODES
+    )
 
 
-def _repair_text(issue: DreamArtifactValidationIssue) -> str:
+def _normalize_project_cleanup(
+    issue: DreamArtifactValidationIssue,
+    project_cleanup: tuple[str, tuple[str, ...]] | None,
+) -> tuple[str, tuple[str, ...]] | None:
+    """Validate the Hook-derived cleanup fact against the public issue."""
+
+    if project_cleanup is None:
+        if issue.code in _PROJECT_CLEANUP_REQUIRED_CODES:
+            raise DreamAutoRepairError(
+                "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+                "Dream 自动修正缺少可信项目根身份，已安全停止。",
+            )
+        return None
+    try:
+        trusted, stale = project_cleanup
+    except (TypeError, ValueError) as exc:
+        raise DreamAutoRepairError(
+            "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+            "Dream 自动修正项目根身份不可验证，已安全停止。",
+            cause=exc,
+        ) from exc
+    try:
+        normalized = _decode_project_cleanup(
+            {
+                "trustedProjectSlug": trusted,
+                "staleProjectSlugs": list(stale),
+            }
+        )
+    except (TypeError, ValueError) as exc:
+        raise DreamAutoRepairError(
+            "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+            "Dream 自动修正项目根身份不可验证，已安全停止。",
+            cause=exc,
+        ) from exc
+    assert normalized is not None
+    trusted, stale = normalized
+    if issue.code not in _PROJECT_CLEANUP_VALIDATION_CODES:
+        raise DreamAutoRepairError(
+            "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+            "Dream 自动修正项目根身份与校验类型不一致，已安全停止。",
+        )
+    if issue.code == "PROJECT_STORY_SLUG_MISMATCH" and (
+        issue.expected != trusted or issue.actual not in stale
+    ):
+        raise DreamAutoRepairError(
+            "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+            "Dream 自动修正项目根身份与校验结果不一致，已安全停止。",
+        )
+    return trusted, stale
+
+
+def _project_cleanup_lines(
+    project_cleanup: tuple[str, tuple[str, ...]],
+) -> tuple[str, ...]:
+    """Render exact safe paths from an already validated server fact."""
+
+    trusted, stale = project_cleanup
+    stale_paths = "、".join(f"stories/{slug}" for slug in stale)
+    commands = "；".join(f"rm -rf -- stories/{slug}" for slug in stale)
+    return (
+        f"- 服务器可信项目根（必须保留）：stories/{trusted}",
+        f"- 本轮旧项目根（仅允许清理这些路径）：{stale_paths}",
+        f"- 合并方向：使用 Read/Glob 与文件编辑工具逐文件核对，将旧根内容合并到 stories/{trusted}；不得反向覆盖或删除可信根",
+        f"- 目录清理命令（确认内容合并完整后逐条执行）：{commands}",
+        "- Bash 使用规则：不要用 pwd/ls/find 等 shell 命令探测工作区；目录删除仅使用上面的精确命令",
+    )
+
+
+def _repair_text(
+    issue: DreamArtifactValidationIssue,
+    *,
+    project_cleanup: tuple[str, tuple[str, ...]] | None,
+) -> str:
     if issue.repairability is not DreamArtifactRepairability.AGENT_REPAIRABLE:
         raise DreamAutoRepairError(
             "DREAM_AUTO_REPAIR_NOT_ALLOWLISTED",
             "Dream 工作区校验不在自动修正允许范围内，已安全停止。",
         )
+    normalized_cleanup = _normalize_project_cleanup(issue, project_cleanup)
+    cleanup_lines = (
+        _project_cleanup_lines(normalized_cleanup)
+        if normalized_cleanup is not None
+        else ()
+    )
     common_prefix = (
         "Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成本轮。",
         "",
@@ -191,6 +338,7 @@ def _repair_text(issue: DreamArtifactValidationIssue) -> str:
             "- 失败原因：当前文件生成到了另一套项目目录，无法证明其属于本次 Dream Run",
             "- 修正要求：将旧项目内容移动或合并到服务器指定的 canonical project 路径，同步修正 project_id/project_slug；确认内容完整后移除旧 slug 的重复项目根",
             "- 清理要求：不得只复制目录，也不得只删除旧根的 project.yaml 来隐藏重复项目；核对迁移完整后必须移除整个旧项目根，stories 下最终只能保留本次 Run 的唯一 canonical 项目",
+            *cleanup_lines,
         )
     elif issue.code == "DREAM_CANONICAL_PROJECT_AMBIGUOUS":
         if issue.expected is not None or issue.actual is not None:
@@ -205,6 +353,7 @@ def _repair_text(issue: DreamArtifactValidationIssue) -> str:
             "- 修正要求：以服务器上下文指定的 canonical 项目路径为准，先合并或移动本次内容，核对完整后移除其余重复项目根",
             "- 根清理要求：不得只删除旧根的 project.yaml 来绕过识别；必须在内容迁移完整后移除整个旧项目根",
             "- 清理要求：不得通过伪造新 slug、改写可信绑定或把同一 Episode 改成虚假 entity_id 来绕过唯一性校验",
+            *cleanup_lines,
         )
     elif issue.code in {
         "DREAM_STAGE_ENTITY_ID_DUPLICATE",
@@ -238,6 +387,7 @@ def _repair_text(issue: DreamArtifactValidationIssue) -> str:
             ),
             "- 修正要求：根据 source_file 合并重复实体并保留唯一 canonical 来源；若重复来自旧项目根，迁移内容后移除旧根",
             "- 清理要求：不得仅篡改 entity_id 制造表面唯一，也不得删除尚未合并的用户内容",
+            *cleanup_lines,
         )
     else:
         raise DreamAutoRepairError(
@@ -254,6 +404,7 @@ def build_dream_auto_repair_message(
     thread_id: str,
     originating_message_id: str,
     originating_turn_id: str,
+    project_cleanup: tuple[str, tuple[str, ...]] | None = None,
 ) -> DreamAutoRepairMessage:
     """Build one deterministic message from server-owned bounded facts."""
 
@@ -268,7 +419,8 @@ def build_dream_auto_repair_message(
                 "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
                 f"Dream 自动修正缺少可信 {label} 身份，已安全停止。",
             )
-    text = _repair_text(issue)
+    normalized_cleanup = _normalize_project_cleanup(issue, project_cleanup)
+    text = _repair_text(issue, project_cleanup=normalized_cleanup)
     digest = hashlib.sha256(
         "\n".join(
             (
@@ -291,6 +443,12 @@ def build_dream_auto_repair_message(
         "idempotencyKey": f"dream-auto-repair/v1:{digest}",
         "dispatch_status": DREAM_AUTO_REPAIR_DISPATCHING,
     }
+    if normalized_cleanup is not None:
+        trusted, stale = normalized_cleanup
+        metadata["projectCleanup"] = {
+            "trustedProjectSlug": trusted,
+            "staleProjectSlugs": list(stale),
+        }
     return DreamAutoRepairMessage(
         id=message_id,
         thread_id=thread_id,
@@ -378,6 +536,7 @@ def settle_dream_auto_repair_message(
                     "repairAttempt",
                     "validationCode",
                     "idempotencyKey",
+                    "projectCleanup",
                 )
             )
         )
@@ -443,6 +602,7 @@ def settle_dream_auto_repair_message(
                             "repairAttempt",
                             "validationCode",
                             "idempotencyKey",
+                            "projectCleanup",
                         )
                     )
                 )
@@ -483,6 +643,7 @@ __all__ = [
     "DreamAutoRepairMessage",
     "build_dream_auto_repair_message",
     "dream_auto_repair_metadata_is_valid",
+    "dream_auto_repair_project_cleanup_from_metadata",
     "persist_dream_auto_repair_message",
     "settle_dream_auto_repair_message",
 ]

@@ -4,6 +4,8 @@
 // [Pos] Shared Chat/Dream reconnect reducer regression test.
 // [Sync] 2026-09-01: initial visible auto-repair user message coverage.
 // [Sync] 2026-09-01: preserve the typed public reason for a bounded exhausted repair.
+// [Sync] 2026-09-01: preserve trusted/stale project cleanup facts and accept
+//                    ambiguous-root repair boundaries in real time.
 
 import { expect, test } from '@playwright/test';
 import type { UIMessage } from 'ai';
@@ -28,6 +30,10 @@ const metadata = {
   validationCode: 'PROJECT_STORY_SLUG_MISMATCH',
   idempotencyKey: 'dream-auto-repair/v1:stable',
   dispatch_status: 'dispatched',
+  projectCleanup: {
+    trustedProjectSlug: 'server-project',
+    staleProjectSlugs: ['stale-project'],
+  },
 };
 
 const repairEvent: BackendEvent = {
@@ -84,6 +90,27 @@ test('refresh history plus replayed boundary stays single-valued by message id',
   expect(withRepairAssistant.at(-1)?.parts).toEqual([
     { type: 'text', text: '已完成修正' },
   ]);
+});
+
+test('ambiguous project repair inserts the exact protected-root fact', () => {
+  const ambiguousMetadata = {
+    ...metadata,
+    validationCode: 'DREAM_CANONICAL_PROJECT_AMBIGUOUS',
+  };
+  const next = applyBackendEventToMessages([origin], {
+    ...repairEvent,
+    message: {
+      ...(repairEvent.message as Record<string, unknown>),
+      metadata: ambiguousMetadata,
+    },
+  });
+
+  expect(next.at(-1)).toEqual({
+    id: 'dream_repair_stable',
+    role: 'user',
+    parts: [{ type: 'text', text: '请修正 workspace slug。' }],
+    metadata: ambiguousMetadata,
+  });
 });
 
 test('malformed or client-forged chat-message boundary is ignored', () => {

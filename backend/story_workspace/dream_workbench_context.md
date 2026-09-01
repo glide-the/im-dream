@@ -72,3 +72,15 @@ Agent 可以读取 `.dream` 了解宿主发布结果，但不得使用 Write、E
 ## 当前服务端事实
 
 本节由 `ClaudeAgentService.assemble_context` 在每个 Dream turn 调用模型前刷新。
+
+当本轮是服务器自动发起的项目根修正时，事实 JSON 中的 `auto_repair` 不是普通业务状态，
+而是本轮唯一可信的修正权限边界：
+
+- `trusted_project_slug` / `trusted_project_path` 指定必须保留的服务器可信项目根；
+- `stale_project_slugs` / `stale_project_paths` 指定核对并完成内容合并后才允许清理的旧根；
+- `merge_direction` 固定为旧根到可信根，禁止根据文件时间、内容多少或目录名称反向猜测；
+- `trusted_root_delete_allowed` 必须为 `false`，Agent 不得删除可信根；
+- `validation_code`、`repair_attempt` 必须与当前自动 user 消息一致，不一致时立即停止修改。
+
+项目根修正应使用 Read/Glob 与文件编辑工具核对和合并内容；普通 Bash 探测不是事实来源。
+只有 `.dream` 事实和自动 user 消息给出的精确旧根目录删除命令可以进入受限清理校验。

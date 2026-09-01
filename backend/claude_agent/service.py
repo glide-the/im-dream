@@ -11,6 +11,9 @@
 # [Sync] 2026-09-01: convert allowlisted Dream workspace identity/schema
 #                    failures into one persisted user message and normal resume
 #                    continuation; the second Hook failure remains terminal.
+# [Sync] 2026-09-01: bind visible auto-repair instructions, persisted metadata,
+#                    .dream workbench facts, and Bash cleanup permission to one
+#                    freshly revalidated trusted/stale project-root scope.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -270,6 +273,7 @@ from services.story_workspace.dream_auto_repair_service import (
     DreamAutoRepairExhaustedError,
     build_dream_auto_repair_message,
     dream_auto_repair_metadata_is_valid,
+    dream_auto_repair_project_cleanup_from_metadata,
     persist_dream_auto_repair_message,
     settle_dream_auto_repair_message,
 )
@@ -1843,6 +1847,23 @@ class ClaudeAgentService:
                         validation_code=str(metadata["validationCode"]),
                     )
                 )
+                try:
+                    persisted_cleanup = (
+                        dream_auto_repair_project_cleanup_from_metadata(
+                            metadata
+                        )
+                    )
+                except ValueError as exc:
+                    raise DreamAutoRepairError(
+                        "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+                        "Dream 自动修正项目根身份不可验证，已安全停止。",
+                        cause=exc,
+                    ) from exc
+                if cleanup != persisted_cleanup:
+                    raise DreamAutoRepairError(
+                        "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+                        "Dream 自动修正项目根事实已变化，已安全停止。",
+                    )
                 if cleanup is not None:
                     trusted_project_slug, stale_project_slugs = cleanup
                     run_options.dream_auto_repair_scope = (
@@ -1862,6 +1883,19 @@ class ClaudeAgentService:
                             trusted_project_slug=trusted_project_slug,
                             stale_project_slugs=stale_project_slugs,
                         )
+                    )
+                    # The visible message is a durable conversation fact;
+                    # WORKBENCH.md is the matching server-owned filesystem fact
+                    # that a fresh Claude Session must read before acting.
+                    await asyncio.to_thread(
+                        self._dream_workbench_context.refresh_for_turn,
+                        context=dream_context,
+                        workspace_root=cwd,
+                        auto_repair_project_cleanup=cleanup,
+                        auto_repair_validation_code=str(
+                            metadata["validationCode"]
+                        ),
+                        auto_repair_attempt=int(metadata["repairAttempt"]),
                     )
 
         from claude_agent.event_bus import BusProxyQueue
@@ -2085,12 +2119,28 @@ class ClaudeAgentService:
             == DREAM_AUTO_REPAIR_METADATA_KIND
         ):
             raise DreamAutoRepairExhaustedError(error.issue.code)
+        dream_artifact_turn_ticket = getattr(
+            execution,
+            "dream_artifact_turn_ticket",
+            None,
+        )
+        if dream_artifact_turn_ticket is None:
+            raise DreamAutoRepairError(
+                "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+                "Dream 自动修正缺少可信工作区校验身份，已安全停止。",
+            )
+        project_cleanup = await asyncio.to_thread(
+            self._dream_artifact_turn_hook.resolve_auto_repair_project_cleanup_scope,
+            dream_artifact_turn_ticket,
+            validation_code=error.issue.code,
+        )
         message = build_dream_auto_repair_message(
             issue=error.issue,
             workflow_run_id=dream_context.workflow_run_id,
             thread_id=execution.request.thread_id,
             originating_message_id=str(originating_message_id or ""),
             originating_turn_id=str(originating_turn_id or ""),
+            project_cleanup=project_cleanup,
         )
         await asyncio.to_thread(persist_dream_auto_repair_message, message)
         dispatch_claimed = False

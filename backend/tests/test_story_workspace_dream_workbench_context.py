@@ -3,6 +3,8 @@
 # [Pos] Story Workspace workbench-context contract test.
 # [Sync] 2026-09-01: prove duplicate canonical roots remain available to a
 #                    repair turn without binding context to either project.
+# [Sync] 2026-09-01: require a marked repair turn to project its protected and
+#                    stale project roots as explicit server facts in .dream.
 
 from __future__ import annotations
 
@@ -147,9 +149,79 @@ class DreamWorkbenchContextTest(unittest.TestCase):
             self.assertEqual(result.episode_codes, ())
             self.assertIn('"project_resolution": "ambiguous"', deployed)
             self.assertIn('"canonical_project_count": 2', deployed)
+            self.assertIn('"auto_repair": null', deployed)
             self.assertIn("当前检测到多个 canonical project", result.instruction)
             self.assertIn("不得创建第三套 Project", result.instruction)
             self.assertNotIn("唯一 canonical project 是", result.instruction)
+
+    def test_auto_repair_projects_trusted_and_stale_roots_into_dream_fact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary) / THREAD_ID
+            (workspace / ".dream").mkdir(parents=True)
+            for slug in ("trusted-story", "stale-story"):
+                project = workspace / "stories" / slug / "project.yaml"
+                project.parent.mkdir(parents=True)
+                project.write_text(
+                    f"project_id: {slug}\nproject_slug: {slug}\n",
+                    encoding="utf-8",
+                )
+
+            result = DreamWorkbenchContext().refresh_for_turn(
+                context=context(),
+                workspace_root=workspace,
+                auto_repair_project_cleanup=(
+                    "trusted-story",
+                    ("stale-story",),
+                ),
+                auto_repair_validation_code=(
+                    "DREAM_CANONICAL_PROJECT_AMBIGUOUS"
+                ),
+                auto_repair_attempt=1,
+            )
+
+            deployed = Path(result.workspace_file).read_text(encoding="utf-8")
+            self.assertIn(
+                '"trusted_project_slug": "trusted-story"',
+                deployed,
+            )
+            self.assertIn(
+                '"stale_project_slugs": [\n      "stale-story"',
+                deployed,
+            )
+            self.assertIn(
+                '"trusted_root_delete_allowed": false',
+                deployed,
+            )
+            self.assertIn(
+                "必须保留 `stories/trusted-story`",
+                result.instruction,
+            )
+            self.assertIn("`stories/stale-story`", result.instruction)
+
+    def test_auto_repair_fact_rejects_unobserved_stale_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary) / THREAD_ID
+            (workspace / ".dream").mkdir(parents=True)
+            project = workspace / "stories" / "trusted-story" / "project.yaml"
+            project.parent.mkdir(parents=True)
+            project.write_text(
+                "project_id: trusted-story\nproject_slug: trusted-story\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(DreamWorkbenchContextError):
+                DreamWorkbenchContext().refresh_for_turn(
+                    context=context(),
+                    workspace_root=workspace,
+                    auto_repair_project_cleanup=(
+                        "trusted-story",
+                        ("missing-stale",),
+                    ),
+                    auto_repair_validation_code=(
+                        "DREAM_CANONICAL_PROJECT_AMBIGUOUS"
+                    ),
+                    auto_repair_attempt=1,
+                )
 
     def test_missing_asset_contract_is_restored_on_next_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

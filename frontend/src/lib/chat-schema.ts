@@ -4,6 +4,7 @@
 // [Sync] 2026-05-25: remove frontend customer-context request fields from the chat schema.
 // [Sync] 2026-08-17: expose per-message Deck/Agent provenance used by same-Deck Agent switching.
 // [Sync] 2026-09-01: type the visible server-owned Dream auto-repair message metadata.
+// [Sync] 2026-09-01: carry canonical trusted/stale cleanup facts on project-root repairs.
 import type { LanguageModelUsage, UIMessage } from 'ai';
 
 export type ChatAttachment = {
@@ -63,6 +64,10 @@ export type ChatMetadata = {
   validationCode?: string;
   idempotencyKey?: string;
   dispatch_status?: 'dispatching' | 'dispatched' | 'failed';
+  projectCleanup?: {
+    trustedProjectSlug: string;
+    staleProjectSlugs: string[];
+  };
 };
 
 /** Voice / deck info displayed in the Chat view and forwarded to the backend as voice context. */

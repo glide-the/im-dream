@@ -6,6 +6,10 @@
 #                    cleanup guidance, and safe exhausted-error detail.
 # [Sync] 2026-09-01: require root-cleanup prompts to reject marker-only
 #                    project.yaml deletion observed in the production replay.
+# [Sync] 2026-09-01: require ambiguous repair messages and .dream projection
+#                    inputs to name the protected root and the only stale roots.
+# [Sync] 2026-09-01: keep legacy v1 history readable while requiring every new
+#                    project-root repair message to carry server cleanup facts.
 
 """Dream workbench auto-repair message and continuation tests."""
 
@@ -44,12 +48,15 @@ from services.story_workspace.dream_auto_repair_service import (
     DreamAutoRepairError,
     DreamAutoRepairExhaustedError,
     build_dream_auto_repair_message,
+    dream_auto_repair_metadata_is_valid,
     persist_dream_auto_repair_message,
 )
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 
 RUN_ID = "run_0123456789abcdef0123456789abcdef"
+PROJECT_CLEANUP = ("server-project", ("workspace-project",))
+AMBIGUOUS_PROJECT_CLEANUP = ("server-project", ("stale-project",))
 
 
 def mismatch_issue(
@@ -129,6 +136,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             thread_id="thread-auto-repair",
             originating_message_id="message-origin",
             originating_turn_id="turn-origin",
+            project_cleanup=PROJECT_CLEANUP,
         )
         second = build_dream_auto_repair_message(
             issue=mismatch_issue(),
@@ -136,6 +144,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             thread_id="thread-auto-repair",
             originating_message_id="message-origin",
             originating_turn_id="turn-origin",
+            project_cleanup=PROJECT_CLEANUP,
         )
         recovered_turn = build_dream_auto_repair_message(
             issue=mismatch_issue(),
@@ -143,6 +152,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             thread_id="thread-auto-repair",
             originating_message_id="message-origin",
             originating_turn_id="turn-after-process-recovery",
+            project_cleanup=PROJECT_CLEANUP,
         )
 
         self.assertEqual(first.id, second.id)
@@ -164,6 +174,15 @@ class DreamAutoRepairContractTest(unittest.TestCase):
         self.assertIn("移动或合并", text)
         self.assertIn("不得只复制目录", text)
         self.assertIn("唯一 canonical 项目", text)
+        self.assertIn("服务器可信项目根（必须保留）：stories/server-project", text)
+        self.assertIn("rm -rf -- stories/workspace-project", text)
+        self.assertEqual(
+            first.metadata["projectCleanup"],
+            {
+                "trustedProjectSlug": "server-project",
+                "staleProjectSlugs": ["workspace-project"],
+            },
+        )
         self.assertNotIn("postgresql://", text)
 
     def test_duplicate_project_and_stage_issues_use_bounded_cleanup_templates(self) -> None:
@@ -173,6 +192,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             thread_id="thread-auto-repair",
             originating_message_id="message-project-ambiguous",
             originating_turn_id="turn-origin",
+            project_cleanup=AMBIGUOUS_PROJECT_CLEANUP,
         )
         duplicate = build_dream_auto_repair_message(
             issue=duplicate_stage_issue(),
@@ -195,6 +215,18 @@ class DreamAutoRepairContractTest(unittest.TestCase):
         )
         self.assertIn("移除其余重复项目根", ambiguous.parts[0]["text"])
         self.assertIn("不得只删除旧根的 project.yaml", ambiguous.parts[0]["text"])
+        self.assertIn(
+            "服务器可信项目根（必须保留）：stories/server-project",
+            ambiguous.parts[0]["text"],
+        )
+        self.assertIn(
+            "本轮旧项目根（仅允许清理这些路径）：stories/stale-project",
+            ambiguous.parts[0]["text"],
+        )
+        self.assertIn(
+            "rm -rf -- stories/stale-project",
+            ambiguous.parts[0]["text"],
+        )
         self.assertEqual(
             duplicate.metadata["validationCode"],
             "DREAM_STAGE_ENTITY_ID_DUPLICATE",
@@ -206,6 +238,40 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             "DREAM_STAGE_SCHEMA_INVALID",
         )
         self.assertIn("characters stage", invalid.parts[0]["text"])
+
+    def test_new_project_root_repair_has_fact_while_legacy_v1_stays_visible(self) -> None:
+        message = build_dream_auto_repair_message(
+            issue=mismatch_issue(),
+            workflow_run_id=RUN_ID,
+            thread_id="thread-auto-repair",
+            originating_message_id="message-origin",
+            originating_turn_id="turn-origin",
+            project_cleanup=PROJECT_CLEANUP,
+        )
+
+        self.assertTrue(dream_auto_repair_metadata_is_valid(message.metadata))
+        without_cleanup = dict(message.metadata)
+        without_cleanup.pop("projectCleanup")
+        self.assertTrue(dream_auto_repair_metadata_is_valid(without_cleanup))
+
+    def test_stage_schema_repair_may_carry_observed_cleanup_fact(self) -> None:
+        message = build_dream_auto_repair_message(
+            issue=invalid_stage_issue(),
+            workflow_run_id=RUN_ID,
+            thread_id="thread-auto-repair",
+            originating_message_id="message-stage-invalid",
+            originating_turn_id="turn-origin",
+            project_cleanup=PROJECT_CLEANUP,
+        )
+
+        self.assertTrue(dream_auto_repair_metadata_is_valid(message.metadata))
+        self.assertEqual(
+            message.metadata["projectCleanup"],
+            {
+                "trustedProjectSlug": "server-project",
+                "staleProjectSlugs": ["workspace-project"],
+            },
+        )
 
     def test_exhausted_error_exposes_only_allowlisted_final_reason(self) -> None:
         error = DreamAutoRepairExhaustedError(
@@ -229,8 +295,29 @@ class DreamAutoRepairContractTest(unittest.TestCase):
                 originating_turn_id="turn-origin",
             )
 
-        self.assertEqual(raised.exception.code, "DREAM_AUTO_REPAIR_NOT_ALLOWLISTED")
+        self.assertIn(
+            raised.exception.code,
+            {
+                "DREAM_AUTO_REPAIR_NOT_ALLOWLISTED",
+                "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+            },
+        )
         self.assertNotIn("secret", raised.exception.public_message)
+
+    def test_ambiguous_project_without_server_cleanup_fact_fails_closed(self) -> None:
+        with self.assertRaises(DreamAutoRepairError) as raised:
+            build_dream_auto_repair_message(
+                issue=ambiguous_project_issue(),
+                workflow_run_id=RUN_ID,
+                thread_id="thread-auto-repair",
+                originating_message_id="message-origin",
+                originating_turn_id="turn-origin",
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+        )
 
     def test_persistence_uses_exact_sse_message_identity(self) -> None:
         message = build_dream_auto_repair_message(
@@ -239,6 +326,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             thread_id="thread-auto-repair",
             originating_message_id="message-origin",
             originating_turn_id="turn-origin",
+            project_cleanup=PROJECT_CLEANUP,
         )
         with patch(
             "services.story_workspace.dream_auto_repair_service.database.save_chat_message"
@@ -258,7 +346,13 @@ class DreamAutoRepairContractTest(unittest.TestCase):
 
     def test_continuation_commits_message_and_resume_before_sse(self) -> None:
         async def scenario():
-            service = ClaudeAgentService()
+            artifact_hook = unittest.mock.Mock()
+            artifact_hook.resolve_auto_repair_project_cleanup_scope.return_value = (
+                PROJECT_CLEANUP
+            )
+            service = ClaudeAgentService(
+                dream_artifact_turn_hook=artifact_hook
+            )
             order: list[str] = []
             queue = RecordingQueue(order)
             state = AgentRunState(session_id="thread-auto-repair")
@@ -274,6 +368,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
                 state=state,
                 dream_context=dream_context(),
                 turn_context=SimpleNamespace(queue=queue),
+                dream_artifact_turn_ticket=unittest.mock.sentinel.ticket,
             )
             error = DreamArtifactTurnHookError(
                 "slug mismatch",
@@ -311,9 +406,9 @@ class DreamAutoRepairContractTest(unittest.TestCase):
                     result=SimpleNamespace(session_id="claude-session"),
                     error=error,
                 )
-            return continuation, order, queue.events
+            return continuation, order, queue.events, artifact_hook
 
-        continuation, order, events = asyncio.run(scenario())
+        continuation, order, events, artifact_hook = asyncio.run(scenario())
 
         self.assertEqual(
             order,
@@ -336,6 +431,14 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             event.data["message"]["metadata"],
             continuation.request.message_metadata,
         )
+        artifact_hook.resolve_auto_repair_project_cleanup_scope.assert_called_once_with(
+            unittest.mock.sentinel.ticket,
+            validation_code="PROJECT_STORY_SLUG_MISMATCH",
+        )
+        self.assertIn(
+            "服务器可信项目根（必须保留）：stories/server-project",
+            continuation.request.message_parts[0]["text"],
+        )
 
     def test_second_hook_failure_stops_without_a_third_turn(self) -> None:
         async def scenario():
@@ -352,6 +455,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
                 thread_id="thread-auto-repair",
                 originating_message_id="message-origin",
                 originating_turn_id="turn-origin",
+                project_cleanup=PROJECT_CLEANUP,
             )
             message.metadata["dispatch_status"] = DREAM_AUTO_REPAIR_DISPATCHED
             request = ClaudeAgentRunRequest(
@@ -427,6 +531,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
                 thread_id="thread-auto-repair",
                 originating_message_id="message-origin",
                 originating_turn_id="turn-origin",
+                project_cleanup=PROJECT_CLEANUP,
             )
             message.metadata["dispatch_status"] = DREAM_AUTO_REPAIR_DISPATCHED
             request = ClaudeAgentRunRequest(
@@ -494,7 +599,13 @@ class DreamAutoRepairContractTest(unittest.TestCase):
 
     def test_existing_dispatch_claim_does_not_publish_or_start_duplicate(self) -> None:
         async def scenario():
-            service = ClaudeAgentService()
+            artifact_hook = unittest.mock.Mock()
+            artifact_hook.resolve_auto_repair_project_cleanup_scope.return_value = (
+                PROJECT_CLEANUP
+            )
+            service = ClaudeAgentService(
+                dream_artifact_turn_hook=artifact_hook
+            )
             order: list[str] = []
             queue = RecordingQueue(order)
             state = AgentRunState(session_id="thread-auto-repair")
@@ -509,6 +620,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
                 state=state,
                 dream_context=dream_context(),
                 turn_context=SimpleNamespace(queue=queue),
+                dream_artifact_turn_ticket=unittest.mock.sentinel.ticket,
             )
             error = DreamArtifactTurnHookError(
                 "slug mismatch",

@@ -6,6 +6,7 @@
 <!-- [Sync] 2026-09-01: show repair-safe ambiguous context assembly before the normal Runner turn. -->
 <!-- [Sync] 2026-09-01: show fresh launch-authority cleanup scope resolution and exact PreToolUse stale-root deletion. -->
 <!-- [Sync] 2026-09-01: show marker-only deletion denial returning the exact safe full-root retry command. -->
+<!-- [Sync] 2026-09-01: show persisted projectCleanup, matching .dream facts, and actionable trusted-root denial. -->
 
 # Dream 工作区自动修正业务时序图
 
@@ -55,7 +56,9 @@ sequenceDiagram
     Hook->>Hook: 在任何投影写入前校验 canonical roots、stage collection 与 launch authority
     Hook-->>Service: PROJECT_STORY_SLUG_MISMATCH / agent_repairable
 
-    Service->>Service: allowlist 模板 + stable id/attempt=1
+    Service->>Hook: resolve trusted/stale project cleanup fact
+    Hook-->>Service: projectCleanup(trusted, stale[])
+    Service->>Service: allowlist 模板 + exact relative paths + stable id/attempt=1
     Service->>DB: INSERT user chat_message (dispatching)
     DB-->>Service: commit exact row
     Service->>DB: CAS dispatching -> dispatched（唯一执行权）
@@ -73,11 +76,15 @@ sequenceDiagram
     Factory->>Factory: 记录逻辑 Turn 边界并分配新 Turn id；保持 lock/task/admission/EventBus
     Factory->>Service: assemble_context(auto user request, resume=true)
     Service->>Context: refresh_for_turn(workspace)
-    Context-->>Service: ambiguous 时返回同一不绑定修正上下文
+    Context-->>Service: ambiguous 时先返回不猜根的普通上下文
     Service->>Hook: resolve_auto_repair_project_cleanup_scope(ticket, validationCode)
     Hook->>DB: reload authoritative Run + immutable launch message
     DB-->>Hook: trusted Run/Thread/Deck/plugin/projectStorySlug
-    Hook-->>Service: trusted slug + exact stale slug set
+    Hook-->>Service: fresh trusted slug + exact stale slug set
+    Service->>Service: compare persisted projectCleanup == fresh scope
+    Service->>Context: refresh_for_turn(auto_repair=fresh scope)
+    Context->>WS: rewrite server-owned .dream/WORKBENCH.md facts
+    Context-->>Service: trusted/stale/merge direction/trusted delete=false
     Service->>Service: build repr-hidden typed execution scope
     Service->>DB: exact CAS replay auto user message
     Service->>Claude: run_streaming(normal repair Turn)
@@ -153,9 +160,13 @@ sequenceDiagram
         Guard-->>Claude: deny marker-only bypass + 返回 exact full-root command
         Claude->>Guard: rm -rf -- stories/<stale>
         Guard->>WS: 重新执行完整 scope/path/tree 校验
+    else scope 合法且请求删除 trusted root
+        Guard-->>Claude: deny；明确 trusted root 必须保留 + 返回 stale root exact command
+        Claude->>WS: Read/Glob + Edit/Write，按 stale -> trusted 合并
+        Claude->>Guard: rm -rf -- stories/<stale>
     else scope 合法且请求递归清理
         Guard->>WS: resolve exact stories/<stale-slug>
-        alt 多目标、越界、可信根、非 scope slug 或 shell script
+        alt 多目标、越界、非 scope slug 或 shell script
             WS-->>Guard: target mismatch
             Guard-->>Claude: deny
         else exact stale root

@@ -50,6 +50,8 @@
 #                    sandbox reads; degraded projection keeps common only.
 # [Sync] 2026-09-01: prove a dispatched server auto-repair message receives the
 #                    fresh typed stale-root scope consumed by the single Bash guard.
+# [Sync] 2026-09-01: require persisted cleanup metadata, fresh Hook scope, and
+#                    .dream WORKBENCH facts to agree before an automatic turn.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -412,6 +414,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 "validationCode": "PROJECT_STORY_SLUG_MISMATCH",
                 "idempotencyKey": "repair-key",
                 "dispatch_status": "dispatched",
+                "projectCleanup": {
+                    "trustedProjectSlug": "server-project",
+                    "staleProjectSlugs": ["stale-project"],
+                },
             },
         )
 
@@ -419,6 +425,13 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             workspace_path = Path(tmp_dir) / context.thread_id
             workspace_path.mkdir()
             (workspace_path / ".dream").mkdir()
+            for slug in ("server-project", "stale-project"):
+                project = workspace_path / "stories" / slug / "project.yaml"
+                project.parent.mkdir(parents=True)
+                project.write_text(
+                    f"project_id: {slug}\nproject_slug: {slug}\n",
+                    encoding="utf-8",
+                )
             with (
                 unittest.mock.patch.object(
                     service_module._db,
@@ -451,6 +464,9 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     bus=_FakeBus(),
                     runner=unittest.mock.Mock(),
                 )
+                workbench_text = (
+                    workspace_path / ".dream" / "WORKBENCH.md"
+                ).read_text(encoding="utf-8")
 
         scope = execution.run_options.dream_auto_repair_scope
         self.assertIsInstance(scope, DreamAutoRepairExecutionScope)
@@ -465,6 +481,14 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scope.actor_id, "7")
         self.assertEqual(scope.trusted_project_slug, "server-project")
         self.assertEqual(scope.stale_project_slugs, ("stale-project",))
+        self.assertIn(
+            '"trusted_project_slug": "server-project"',
+            workbench_text,
+        )
+        self.assertIn(
+            '"stale_project_slugs": [\n      "stale-project"',
+            workbench_text,
+        )
         artifact_hook.resolve_auto_repair_project_cleanup_scope.assert_called_once_with(
             ticket,
             validation_code="PROJECT_STORY_SLUG_MISMATCH",

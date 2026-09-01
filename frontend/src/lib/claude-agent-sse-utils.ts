@@ -16,6 +16,8 @@
  *                      so tool/text barriers keep separate thinking blocks in order.
  * [Sync]   2026-09-01: treat persisted Dream auto-repair user messages as an
  *                      idempotent boundary that replaces uncommitted assistant replay.
+ * [Sync]   2026-09-01: accept every backend-allowlisted repair code and require
+ *                      exact trusted/stale cleanup facts for project-root repairs.
  */
 
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -117,6 +119,37 @@ function ensureAssistantMessage(messages: UIMessage[]): { messages: UIMessage[];
 
 const DREAM_AUTO_REPAIR_KIND = 'story-workspace-dream-auto-repair';
 const DREAM_AUTO_REPAIR_SCHEMA = 'story-workspace-dream-auto-repair/v1';
+const DREAM_AUTO_REPAIR_CODES = new Set([
+  'PROJECT_STORY_SLUG_MISMATCH',
+  'DREAM_CANONICAL_PROJECT_AMBIGUOUS',
+  'DREAM_STAGE_ENTITY_ID_DUPLICATE',
+  'DREAM_STAGE_SCHEMA_INVALID',
+]);
+const DREAM_PROJECT_CLEANUP_CODES = new Set([
+  'PROJECT_STORY_SLUG_MISMATCH',
+  'DREAM_CANONICAL_PROJECT_AMBIGUOUS',
+]);
+const DREAM_PROJECT_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function hasValidDreamProjectCleanup(meta: Record<string, unknown>): boolean {
+  const raw = meta.projectCleanup;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const cleanup = raw as Record<string, unknown>;
+  const trusted = cleanup.trustedProjectSlug;
+  const stale = cleanup.staleProjectSlugs;
+  return (
+    typeof trusted === 'string'
+    && DREAM_PROJECT_SLUG_PATTERN.test(trusted)
+    && Array.isArray(stale)
+    && stale.length > 0
+    && stale.every((slug) => (
+      typeof slug === 'string'
+      && DREAM_PROJECT_SLUG_PATTERN.test(slug)
+      && slug !== trusted
+    ))
+    && new Set(stale).size === stale.length
+  );
+}
 
 function readDreamAutoRepairMessage(event: BackendEvent): UIMessage | null {
   const raw = event.message;
@@ -126,6 +159,8 @@ function readDreamAutoRepairMessage(event: BackendEvent): UIMessage | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
   const meta = metadata as Record<string, unknown>;
   const status = meta.dispatch_status;
+  const validationCode = meta.validationCode;
+  const projectCleanupValid = hasValidDreamProjectCleanup(meta);
   const valid = (
     typeof message.id === 'string'
     && message.id.startsWith('dream_repair_')
@@ -134,7 +169,13 @@ function readDreamAutoRepairMessage(event: BackendEvent): UIMessage | null {
     && meta.kind === DREAM_AUTO_REPAIR_KIND
     && meta.schemaVersion === DREAM_AUTO_REPAIR_SCHEMA
     && meta.repairAttempt === 1
-    && meta.validationCode === 'PROJECT_STORY_SLUG_MISMATCH'
+    && typeof validationCode === 'string'
+    && DREAM_AUTO_REPAIR_CODES.has(validationCode)
+    && (
+      !DREAM_PROJECT_CLEANUP_CODES.has(validationCode)
+      || projectCleanupValid
+    )
+    && (meta.projectCleanup === undefined || projectCleanupValid)
     && typeof meta.originatingMessageId === 'string'
     && Boolean(meta.originatingMessageId)
     && typeof meta.originatingTurnId === 'string'

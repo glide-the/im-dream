@@ -22,6 +22,9 @@
 # [Sync] 2026-09-01: when a marked repair tries to delete only a stale
 #                    project.yaml marker, deny it with the exact safe root-cleanup
 #                    command instead of the unrelated generic .dream guidance.
+# [Sync] 2026-09-01: when a marked repair targets the server-trusted root or
+#                    an incompletely merged stale root, return the scoped merge
+#                    direction instead of a generic Story Workspace denial.
 # [Sync] 2026-08-22: pass the server-owned thread runtime workspace separately
 #                    from cwd when applying CLAUDE_CODE_TMPDIR defaults.
 # [Sync] 2026-08-22: restore authenticated remote MCP injection and the
@@ -1238,6 +1241,71 @@ def _dream_auto_repair_project_marker_delete_reason(
     )
 
 
+def _dream_auto_repair_project_root_delete_reason(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+    scope: DreamAutoRepairExecutionScope | None,
+    mcp_env: Mapping[str, str],
+) -> str | None:
+    """Explain an exact marked root deletion that the cleanup scope denies."""
+
+    if (
+        _SHELL_METACHAR_RE.search(command)
+        or "\n" in command
+        or "\r" in command
+    ):
+        return None
+    raw_target = _single_recursive_rm_target(tokens)
+    if raw_target is None:
+        return None
+    context = _resolve_dream_auto_repair_project_cleanup_context(
+        cwd,
+        scope,
+        mcp_env,
+    )
+    if context is None or scope is None:
+        return None
+    workspace, _, trusted = context
+    try:
+        supplied = Path(raw_target).expanduser()
+        if not supplied.is_absolute():
+            supplied = workspace / supplied
+        visible_target = supplied.lstat()
+        target = supplied.resolve(strict=True)
+        relative = target.relative_to(workspace)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return None
+    if (
+        stat.S_ISLNK(visible_target.st_mode)
+        or not stat.S_ISDIR(visible_target.st_mode)
+        or len(relative.parts) != 2
+        or relative.parts[0] != "stories"
+    ):
+        return None
+    slug = relative.parts[1]
+    stale_commands = "; ".join(
+        f"rm -rf -- stories/{stale_slug}"
+        for stale_slug in scope.stale_project_slugs
+    )
+    if target == trusted and slug == scope.trusted_project_slug:
+        return (
+            "Refusing to delete the server-trusted canonical project root "
+            f"stories/{scope.trusted_project_slug}. Preserve this root, merge "
+            "content from the scoped stale root(s) into it with Read/Glob and "
+            f"file editing tools, then remove only: {stale_commands}"
+        )
+    if slug not in scope.stale_project_slugs:
+        return None
+    return (
+        f"The scoped stale project root stories/{slug} is not yet safe to "
+        "remove because its tree failed the server coverage/safety check. "
+        f"Merge every needed file into stories/{scope.trusted_project_slug} "
+        "with Read/Glob and file editing tools, then retry exactly: "
+        f"rm -rf -- stories/{slug}"
+    )
+
+
 def _apply_dream_surface_write_guard(
     tool_name: str,
     tool_input: dict[str, Any],
@@ -1267,6 +1335,21 @@ def _apply_dream_surface_write_guard(
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "allow",
+                }
+            }
+        root_delete_reason = _dream_auto_repair_project_root_delete_reason(
+            command,
+            tokens,
+            cwd,
+            auto_repair_scope,
+            mcp_env,
+        )
+        if root_delete_reason is not None:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": root_delete_reason,
                 }
             }
         marker_delete_reason = _dream_auto_repair_project_marker_delete_reason(

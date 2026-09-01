@@ -4,6 +4,9 @@
 # [Sync] 2026-08-14: deploy workbench and asset-collaboration contracts and require both actual-path Reads every Dream turn.
 # [Sync] 2026-09-01: keep a multiple-project workspace repairable by rendering
 #                    an unbound context instead of stopping before the Agent turn.
+# [Sync] 2026-09-01: project a revalidated automatic-repair trusted/stale root
+#                    fact into WORKBENCH.md so fresh Sessions never infer which
+#                    ambiguous project root is protected.
 
 """Materialize and render the canonical Dream workbench context.
 
@@ -39,6 +42,7 @@ DREAM_ASSET_COLLABORATION_SOURCE_PATH = Path(__file__).with_name(
 )
 _STORY_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _EPISODE_CODE = re.compile(r"^EP[0-9]{2}$")
+_VALIDATION_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _CONTEXT_FILE_MAX_BYTES = 128 * 1024
 
 
@@ -321,6 +325,11 @@ class DreamWorkbenchContext:
         *,
         context: StoryWorkspaceDreamRunContext,
         workspace_root: str | Path,
+        auto_repair_project_cleanup: (
+            tuple[str, tuple[str, ...]] | None
+        ) = None,
+        auto_repair_validation_code: str | None = None,
+        auto_repair_attempt: int | None = None,
     ) -> DreamWorkbenchTurnContext:
         workspace = self._safe_workspace(workspace_root, context.thread_id)
         dream_root = workspace / ".dream"
@@ -339,6 +348,62 @@ class DreamWorkbenchContext:
             raise DreamWorkbenchContextError("Dream surface is unsafe")
 
         projects = self._discover_projects(workspace)
+        auto_repair_fact: dict[str, object] | None = None
+        if any(
+            value is not None
+            for value in (
+                auto_repair_project_cleanup,
+                auto_repair_validation_code,
+                auto_repair_attempt,
+            )
+        ):
+            try:
+                trusted_project_slug, stale_project_slugs = (
+                    auto_repair_project_cleanup or ("", ())
+                )
+            except (TypeError, ValueError) as exc:
+                raise DreamWorkbenchContextError(
+                    "Dream auto-repair project fact is invalid"
+                ) from exc
+            project_slugs = {slug for slug, _ in projects}
+            if (
+                _STORY_SLUG.fullmatch(trusted_project_slug) is None
+                or not stale_project_slugs
+                or any(
+                    _STORY_SLUG.fullmatch(slug) is None
+                    or slug == trusted_project_slug
+                    or slug not in project_slugs
+                    for slug in stale_project_slugs
+                )
+                or len(stale_project_slugs)
+                != len(set(stale_project_slugs))
+                or not isinstance(auto_repair_validation_code, str)
+                or _VALIDATION_CODE.fullmatch(
+                    auto_repair_validation_code
+                )
+                is None
+                or auto_repair_attempt != 1
+            ):
+                raise DreamWorkbenchContextError(
+                    "Dream auto-repair project fact is invalid"
+                )
+            auto_repair_fact = {
+                "schema_version": "dream-workbench-auto-repair-fact/v1",
+                "validation_code": auto_repair_validation_code,
+                "repair_attempt": auto_repair_attempt,
+                "trusted_project_slug": trusted_project_slug,
+                "trusted_project_path": (
+                    f"stories/{trusted_project_slug}"
+                ),
+                "stale_project_slugs": list(stale_project_slugs),
+                "stale_project_paths": [
+                    f"stories/{slug}" for slug in stale_project_slugs
+                ],
+                "merge_direction": (
+                    "stale_project_paths -> trusted_project_path"
+                ),
+                "trusted_root_delete_allowed": False,
+            }
         project_is_ambiguous = len(projects) > 1
         project_slug = projects[0][0] if len(projects) == 1 else None
         episode_codes = projects[0][1] if len(projects) == 1 else ()
@@ -368,6 +433,7 @@ class DreamWorkbenchContext:
                 str(canonical_project) if canonical_project is not None else None
             ),
             "episode_codes": list(episode_codes),
+            "auto_repair": auto_repair_fact,
         }
         payload = (
             load_dream_workbench_contract()
@@ -410,6 +476,20 @@ class DreamWorkbenchContext:
             project_line = (
                 "当前尚未发现 canonical project；初始化时必须先创建唯一 project.yaml。"
             )
+        repair_line = ""
+        if auto_repair_fact is not None:
+            trusted_project_slug = str(
+                auto_repair_fact["trusted_project_slug"]
+            )
+            stale_paths = "、".join(
+                str(path)
+                for path in auto_repair_fact["stale_project_paths"]
+            )
+            repair_line = (
+                "本轮存在服务器签发的自动修正事实：必须保留 "
+                f"`stories/{trusted_project_slug}`，仅可在内容向可信根合并完整后清理 "
+                f"`{stale_paths}`；不得根据文件新旧或内容多少反向猜测。\n"
+            )
         instruction = (
             "<story_workspace_dream_workbench>\n"
             "当前请求属于 Dream 工作区。宿主已确认或刷新本轮工作台上下文文件。\n"
@@ -418,6 +498,7 @@ class DreamWorkbenchContext:
             "不能只依赖上一轮记忆。\n"
             f"当前 workflow_run_id 是 `{context.workflow_run_id}`，thread_id 是 `{context.thread_id}`。\n"
             f"{project_line}\n"
+            f"{repair_line}"
             "如果该文件无法读取或其中的 run/thread/project 与本指令不一致，停止修改并报告"
             "工作区上下文不可用，不得猜测或创建另一套 Project。\n"
             "用户提出标题或项目属性修改时，直接编辑 canonical `project.yaml`，不要只返回 JSON、"

@@ -29,6 +29,10 @@
 # [Sync] 2026-08-25: align MCP auth route registration with database server identifiers.
 # [Sync] 2026-08-27: cover PostgreSQL resource sampler/sink/publisher lifecycle ordering.
 # [Sync] 2026-09-01: cover public Dream auto-repair metadata projection and reserved IDs.
+# [Sync] 2026-09-01: preserve exact server-owned projectCleanup facts through
+#                    the existing history DTO without adding an SSE protocol.
+# [Sync] 2026-09-01: retain already-persisted v1 repair rows that predate the
+#                    projectCleanup fact without granting them execution scope.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -492,12 +496,43 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
             "validationCode": "PROJECT_STORY_SLUG_MISMATCH",
             "idempotencyKey": "dream-auto-repair/v1:stable",
             "dispatch_status": "dispatched",
+            "projectCleanup": {
+                "trustedProjectSlug": "server-project",
+                "staleProjectSlugs": ["stale-project"],
+            },
         }
         message = {
             "id": "dream_repair_stable",
             "role": "user",
             "parts": [{"type": "text", "text": "修正 workspace"}],
             "metadata": metadata,
+            "created_at": "2026-09-01T00:00:00Z",
+        }
+
+        projected = route_module.PublicChatMessageDto.from_storage(
+            message
+        ).model_dump(exclude_unset=True, mode="json")
+
+        self.assertEqual(projected, message)
+
+    def test_legacy_v1_auto_repair_history_remains_visible_without_cleanup_fact(self):
+        import routers.claude_agent as route_module
+
+        message = {
+            "id": "dream_repair_legacy",
+            "role": "user",
+            "parts": [{"type": "text", "text": "旧自动修正消息"}],
+            "metadata": {
+                "kind": "story-workspace-dream-auto-repair",
+                "schemaVersion": "story-workspace-dream-auto-repair/v1",
+                "originatingMessageId": "legacy-origin-message",
+                "originatingTurnId": "legacy-origin-turn",
+                "workflowRunId": "run_" + "b" * 32,
+                "repairAttempt": 1,
+                "validationCode": "PROJECT_STORY_SLUG_MISMATCH",
+                "idempotencyKey": "dream-auto-repair/v1:legacy",
+                "dispatch_status": "failed",
+            },
             "created_at": "2026-09-01T00:00:00Z",
         }
 
