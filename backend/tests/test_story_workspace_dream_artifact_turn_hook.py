@@ -1,3 +1,8 @@
+# [Input] Canonical Dream workbench fixtures, trusted launch metadata, and the post-turn Hook.
+# [Output] Verify deterministic artifact sync plus repairable/non-repairable validation classification.
+# [Pos] Story Workspace post-turn Hook contract test in backend/tests.
+# [Sync] 2026-09-01: cover allowlisted project-slug repair and fail-closed launch authority.
+
 """Automatic root-turn workbench synchronization contract."""
 
 from __future__ import annotations
@@ -8,7 +13,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import yaml
 
@@ -18,6 +23,7 @@ if str(ROOT) not in sys.path:
 
 from models.workflow_run import RunStatus, WorkflowRun
 from services.story_workspace.dream_artifact_turn_hook import (
+    DreamArtifactRepairability,
     DreamArtifactTurnHook,
     DreamArtifactTurnHookError,
 )
@@ -81,6 +87,30 @@ def episode_authority() -> StoryWorkspaceEpisodeAuthority:
         story_slug="demo-project",
         episode_code="EP01",
     )
+
+
+def launched_run() -> WorkflowRun:
+    return authoritative_run().model_copy(update={
+        "source_message_id": "dream-launch-message",
+        "source_message_time": datetime(2026, 8, 13, tzinfo=timezone.utc),
+    })
+
+
+def launch_metadata(*, project_story_slug: str = "demo-project") -> dict:
+    selected_context = context()
+    return {
+        "kind": "story-workspace-dream-launch",
+        "schemaVersion": "story-workspace-dream-launch/v1",
+        "actorId": "actor-1",
+        "workspaceId": "workspace-1",
+        "deckId": "deck-1",
+        "agentId": None,
+        "workflowRunId": RUN_ID,
+        "threadId": THREAD_ID,
+        "goal": "雨夜归途",
+        "projectStorySlug": project_story_slug,
+        "dreamContext": selected_context.model_dump(mode="json"),
+    }
 
 
 class DreamArtifactTurnHookTest(unittest.TestCase):
@@ -159,6 +189,69 @@ shots:
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
+
+    def _binding_error(self, metadata: dict) -> DreamArtifactTurnHookError:
+        hook = DreamArtifactTurnHook()
+        ticket = hook.before_main_turn(
+            context=context(),
+            actor_id="actor-1",
+            cwd=str(self.workspace),
+        )
+        db = MagicMock()
+        db.in_transaction = False
+        db.execute.return_value.fetchone.return_value = {
+            "metadata": json.dumps(metadata),
+        }
+        with (
+            patch(
+                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
+                return_value=db,
+            ),
+            self.assertRaises(DreamArtifactTurnHookError) as raised,
+        ):
+            hook._ensure_first_episode_binding(
+                ticket,
+                launched_run(),
+                private_files={
+                    "stories/demo-project/episodes/EP01/script.md": b"# EP01\n",
+                },
+            )
+        db.close.assert_called_once_with()
+        return raised.exception
+
+    def test_project_story_slug_mismatch_is_agent_repairable(self) -> None:
+        error = self._binding_error(
+            launch_metadata(project_story_slug="server-project")
+        )
+
+        self.assertEqual(error.code, "PROJECT_STORY_SLUG_MISMATCH")
+        self.assertIs(
+            error.issue.repairability,
+            DreamArtifactRepairability.AGENT_REPAIRABLE,
+        )
+        self.assertEqual(error.issue.expected, "server-project")
+        self.assertEqual(error.issue.actual, "demo-project")
+
+    def test_launch_actor_thread_run_deck_and_plugin_authority_are_not_repairable(self) -> None:
+        mutations = {
+            "actor": lambda value: value.update(actorId="actor-forged"),
+            "run": lambda value: value.update(workflowRunId="run_" + "f" * 32),
+            "thread": lambda value: value.update(threadId="thread-forged"),
+            "deck": lambda value: value.update(deckId="deck-forged"),
+            "plugin_lock": lambda value: value["dreamContext"].update(
+                runtime_plugin_lock_id="lock-forged"
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(authority=label):
+                metadata = launch_metadata()
+                mutate(metadata)
+                error = self._binding_error(metadata)
+                self.assertEqual(error.code, "DREAM_LAUNCH_AUTHORITY_INVALID")
+                self.assertIs(
+                    error.issue.repairability,
+                    DreamArtifactRepairability.NON_REPAIRABLE,
+                )
 
     def test_successful_root_turn_projects_page_stages_and_private_artifacts(self) -> None:
         hook = DreamArtifactTurnHook()

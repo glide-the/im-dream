@@ -21,6 +21,8 @@
 # [Sync] 2026-08-28: inject the last-known-good global Claude Code Runtime snapshot
 #                    into every service-built turn without querying PostgreSQL on-path.
 # [Sync] 2026-08-31: emit safe public text beside structured codes for binding-integrity failures.
+# [Sync] 2026-09-01: execute one persisted Dream auto-repair user message as a
+#                    normal continuation under the same lock, EventBus, and admission lease.
 
 """Claude Agent Thread Factory — 四阶段会话编排入口."""
 from __future__ import annotations
@@ -45,6 +47,7 @@ from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.service import (
     ClaudeAgentRunRequest,
     ClaudeAgentService,
+    ClaudeAgentTurnContinuation,
     _format_exception_for_sse,
 )
 from claude_agent.thread_pool import (
@@ -452,11 +455,12 @@ class ClaudeAgentThreadFactory:
         turn_id = state.current_turn_id
         session_started = False
         admission_lease: AgentAdmissionLease | None = None
+        current_request = request
         try:
             admission_lease = self._admission.try_acquire(session_id)
             await self._observers.emit_before_context_assembly(
                 session_id,
-                {"resume": request.resume},
+                {"resume": current_request.resume},
             )
             if state.runner is None:
                 await self._observers.emit_before_runner_created(session_id)
@@ -465,31 +469,64 @@ class ClaudeAgentThreadFactory:
                 await self._observers.emit_after_runner_created(session_id, runner)
             else:
                 runner = state.runner
-            execution = await self._service.assemble_context(
-                request,
-                state=state,
-                bus=bus,
-                runner=runner,
-            )
-            state.current_dream_context = execution.dream_context
-            await self._observers.emit_after_context_assembly(
-                session_id,
-                {
-                    "system_prompt_len": len(state.system_prompt),
-                    "turn_id": turn_id,
-                    "actor_id": str(request.user_id),
-                    "event_bus": bus,
-                    "dream_context": execution.dream_context,
-                },
-            )
-            await self._observers.emit_before_session_started(
-                session_id,
-                {"resume": request.resume},
-            )
-            session_started = True
-            await self._service.execute_session(execution)
+            first_execution = True
+            while True:
+                state.current_message_metadata = (
+                    dict(current_request.message_metadata)
+                    if isinstance(current_request.message_metadata, dict)
+                    else None
+                )
+                state.current_message_id = current_request.message_id
+                state.current_user_id = str(current_request.user_id)
+                execution = await self._service.assemble_context(
+                    current_request,
+                    state=state,
+                    bus=bus,
+                    runner=runner,
+                )
+                state.current_dream_context = execution.dream_context
+                if first_execution:
+                    # Observers classify the externally visible workflow once;
+                    # repair is a second logical message within that same
+                    # EventBus lifecycle, not a second admission/session.
+                    await self._observers.emit_after_context_assembly(
+                        session_id,
+                        {
+                            "system_prompt_len": len(state.system_prompt),
+                            "turn_id": turn_id,
+                            "actor_id": str(current_request.user_id),
+                            "event_bus": bus,
+                            "dream_context": execution.dream_context,
+                        },
+                    )
+                    await self._observers.emit_before_session_started(
+                        session_id,
+                        {"resume": current_request.resume},
+                    )
+                    session_started = True
+                    first_execution = False
+                continuation: ClaudeAgentTurnContinuation | None = (
+                    await self._service.execute_session(execution)
+                )
+                if continuation is None:
+                    break
+                state.mark_turn_continued()
+                # The EventBus remains the externally observed workflow stream,
+                # while tool confirmations and diagnostics receive a fresh
+                # logical Turn identity for the persisted repair message.
+                state.current_turn_id = str(uuid4())
+                current_request = continuation.request
         except asyncio.CancelledError:
             logger.info("Turn cancelled for session_id=%s", session_id)
+            try:
+                await self._service.mark_auto_repair_failed(current_request)
+            except Exception:
+                logger.exception(
+                    "Dream auto-repair cancellation status could not be persisted "
+                    "session_id=%s message_id=%s",
+                    session_id,
+                    current_request.message_id,
+                )
             if bus is not None and not bus.is_done:
                 try:
                     await _publish_terminal_resilient(
@@ -504,6 +541,15 @@ class ClaudeAgentThreadFactory:
             raise
         except Exception as exc:
             logger.exception("Turn setup/execution failed for session_id=%s", session_id)
+            try:
+                await self._service.mark_auto_repair_failed(current_request)
+            except Exception:
+                logger.exception(
+                    "Dream auto-repair setup failure status could not be persisted "
+                    "session_id=%s message_id=%s",
+                    session_id,
+                    current_request.message_id,
+                )
             if not bus.is_done:
                 try:
                     raw_public_message = getattr(exc, "public_message", None)

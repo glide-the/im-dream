@@ -8,6 +8,8 @@
 # [Sync] 2026-08-30: resolve the server-owned INK_AGENT_SANDBOX_ENABLED
 #                    capability for every full Chat/Dream workspace without
 #                    coupling sandbox enablement to Workspace Mode.
+# [Sync] 2026-09-01: convert one allowlisted Dream post-turn slug mismatch into
+#                    a persisted user message and normal resume continuation.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -173,6 +175,8 @@
 # [Sync] 2026-09-01: enable Notion platform builtin Skills only after the
 #                    current actor/thread credential projection is available;
 #                    common Skills remain owned by workspace initialization.
+# [Sync] 2026-09-01: persist and publish one allowlisted Dream auto-repair user
+#                    message, then return a normal resume Turn continuation.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -196,6 +200,8 @@ SSE event schema (aligned with Pawkeyland)::
            "contentBytes": 1832, "truncated": false, "updatedAt": "..."}
     data: {"type": "todo-updated", "source": "todo_write"|"task_v2", "todos": [...],
            "truncated": false, "updatedAt": "..."}
+    data: {"type": "chat-message", "message": {"id": "...", "role": "user",
+           "parts": [...], "metadata": {...}}}
     data: {"type": "message-final",  "text": "...", "usage": {...}, "sessionId": "..."}
     data: {"type": "finish",         "finishReason": "stop"|"error"}
     data: {"type": "error",          "errorText": "..."}
@@ -209,7 +215,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -248,8 +254,21 @@ from services.story_workspace.agent_integration import (
 )
 from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
 from services.story_workspace.dream_artifact_turn_hook import (
+    DreamArtifactRepairability,
     DreamArtifactTurnHook,
+    DreamArtifactTurnHookError,
     DreamArtifactTurnTicket,
+)
+from services.story_workspace.dream_auto_repair_service import (
+    DREAM_AUTO_REPAIR_DISPATCHED,
+    DREAM_AUTO_REPAIR_FAILED,
+    DREAM_AUTO_REPAIR_METADATA_KIND,
+    DreamAutoRepairError,
+    DreamAutoRepairExhaustedError,
+    build_dream_auto_repair_message,
+    dream_auto_repair_metadata_is_valid,
+    persist_dream_auto_repair_message,
+    settle_dream_auto_repair_message,
 )
 from story_workspace.dream_workbench_context import DreamWorkbenchContext
 from story_workspace.contracts import (
@@ -1151,6 +1170,13 @@ class ClaudeAgentRunRequest:
     # launcher boundary.
 
 
+@dataclass(frozen=True)
+class ClaudeAgentTurnContinuation:
+    """One server-owned next Turn that remains inside the canonical factory."""
+
+    request: ClaudeAgentRunRequest
+
+
 # ---------------------------------------------------------------------------
 # Turn context (extrinsic state bundle)
 # ---------------------------------------------------------------------------
@@ -1814,11 +1840,14 @@ class ClaudeAgentService:
     # Phase 3: Session Execution
     # ------------------------------------------------------------------
 
-    async def execute_session(self, execution: "_TurnExecution") -> None:
+    async def execute_session(
+        self,
+        execution: "_TurnExecution",
+    ) -> ClaudeAgentTurnContinuation | None:
         """Execute a turn and unconditionally release confirmation resources."""
 
         try:
-            await self._execute_session_inner(execution)
+            return await self._execute_session_inner(execution)
         finally:
             # Timeout/reject leaves only a bounded tombstone while the turn is
             # active.  Every terminal/error/cancellation path clears both live
@@ -1826,7 +1855,10 @@ class ClaudeAgentService:
             # turn context.
             execution.turn_context.confirmation_store.cancel_all()
 
-    async def _execute_session_inner(self, execution: "_TurnExecution") -> None:
+    async def _execute_session_inner(
+        self,
+        execution: "_TurnExecution",
+    ) -> ClaudeAgentTurnContinuation | None:
         """Stream the agent turn and emit SSE events via the queue.
 
         User message is persisted immediately before inference starts so that
@@ -1874,6 +1906,15 @@ class ClaudeAgentService:
             # Explicit stop / shutdown cancellation — flush partial assistant
             # content so the next load of this thread shows completed pieces.
             await self._persist_partial_assistant(execution)
+            try:
+                await self.mark_auto_repair_failed(execution.request)
+            except Exception:
+                logger.exception(
+                    "Dream auto-repair cancellation status could not be persisted "
+                    "thread_id=%s message_id=%s",
+                    execution.request.thread_id,
+                    execution.request.message_id,
+                )
             await _put_terminal(
                 queue,
                 _event(
@@ -1907,14 +1948,38 @@ class ClaudeAgentService:
                         len(sync_result.private_files),
                         sync_result.story_index_status,
                     )
+                except DreamArtifactTurnHookError as exc:
+                    logger.exception(
+                        "Dream workbench synchronization failed for thread_id=%s",
+                        execution.request.thread_id,
+                    )
+                    if dream_auto_repair_metadata_is_valid(
+                        execution.request.message_metadata
+                    ):
+                        await self.mark_auto_repair_failed(execution.request)
+                        raise DreamAutoRepairExhaustedError(exc.issue.code) from exc
+                    if (
+                        exc.issue.repairability
+                        is DreamArtifactRepairability.AGENT_REPAIRABLE
+                    ):
+                        return await self._build_dream_auto_repair_continuation(
+                            execution,
+                            result=result,
+                            error=exc,
+                        )
+                    # Artifact publication is a root-turn postcondition, not an
+                    # optional Observer projection. Propagate through the same
+                    # Chat turn terminal path; never emit a second lifecycle.
+                    raise
                 except Exception:
                     logger.exception(
                         "Dream workbench synchronization failed for thread_id=%s",
                         execution.request.thread_id,
                     )
-                    # Artifact publication is a root-turn postcondition, not an
-                    # optional Observer projection. Propagate through the same
-                    # Chat turn terminal path; never emit a second lifecycle.
+                    if dream_auto_repair_metadata_is_valid(
+                        execution.request.message_metadata
+                    ):
+                        await self.mark_auto_repair_failed(execution.request)
                     raise
             full_text = result.full_text
             await queue.put(
@@ -1940,9 +2005,170 @@ class ClaudeAgentService:
                 await queue.put(_event("error", {"errorText": error_msg}))
             # Even on error, flush whatever partial assistant content was collected.
             await self._persist_partial_assistant(execution)
+            await self.mark_auto_repair_failed(execution.request)
             terminal = _event("finish", {"finishReason": "error"})
 
         await _put_terminal(queue, terminal)
+        return None
+
+    async def _build_dream_auto_repair_continuation(
+        self,
+        execution: "_TurnExecution",
+        *,
+        result: Any,
+        error: DreamArtifactTurnHookError,
+    ) -> ClaudeAgentTurnContinuation:
+        """Persist and announce one allowlisted user fact before continuing."""
+
+        dream_context = execution.dream_context
+        originating_message_id = execution.request.message_id
+        originating_turn_id = execution.state.current_turn_id
+        if dream_context is None:
+            raise DreamAutoRepairError(
+                "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+                "Dream 自动修正缺少可信 Run 上下文，已安全停止。",
+            )
+        if (
+            isinstance(execution.request.message_metadata, Mapping)
+            and execution.request.message_metadata.get("kind")
+            == DREAM_AUTO_REPAIR_METADATA_KIND
+        ):
+            raise DreamAutoRepairExhaustedError(error.issue.code)
+        message = build_dream_auto_repair_message(
+            issue=error.issue,
+            workflow_run_id=dream_context.workflow_run_id,
+            thread_id=execution.request.thread_id,
+            originating_message_id=str(originating_message_id or ""),
+            originating_turn_id=str(originating_turn_id or ""),
+        )
+        await asyncio.to_thread(persist_dream_auto_repair_message, message)
+        dispatch_claimed = False
+        try:
+            # ``dispatched`` is committed before publication so SSE, history,
+            # and the next Turn share one exact message representation.
+            await self._settle_auto_repair_message(
+                message,
+                DREAM_AUTO_REPAIR_DISPATCHED,
+            )
+            dispatch_claimed = True
+            await self._persist_auto_repair_resume_session(execution, result)
+            await execution.turn_context.queue.put(
+                _event("chat-message", {"message": message.sse_message()})
+            )
+        except BaseException:
+            # The message remains a durable conversation fact when resume or
+            # EventBus publication fails. Do not mask cancellation or the
+            # original fail-closed exception with a status-write failure.
+            if dispatch_claimed:
+                try:
+                    await self._settle_auto_repair_message(
+                        message,
+                        DREAM_AUTO_REPAIR_FAILED,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Dream auto-repair dispatch failure status could not be persisted "
+                        "thread_id=%s message_id=%s",
+                        message.thread_id,
+                        message.id,
+                    )
+            raise
+        continuation_request = replace(
+            execution.request,
+            reconnect=False,
+            resume=True,
+            message_id=message.id,
+            message_parts=message.persistence_parts(),
+            message_metadata=dict(message.metadata),
+            attachments=None,
+        )
+        return ClaudeAgentTurnContinuation(request=continuation_request)
+
+    @staticmethod
+    async def _settle_auto_repair_message(
+        message: Any,
+        status: str,
+    ) -> None:
+        transitioned = await asyncio.to_thread(
+            settle_dream_auto_repair_message,
+            message.id,
+            thread_id=message.thread_id,
+            expected_metadata=dict(message.metadata),
+            status=status,
+        )
+        if status == DREAM_AUTO_REPAIR_DISPATCHED and not transitioned:
+            raise DreamAutoRepairError(
+                "DREAM_AUTO_REPAIR_ALREADY_DISPATCHED",
+                "Dream 自动修正已由同一条持久化消息启动，未重复执行。",
+            )
+        message.metadata["dispatch_status"] = status
+
+    @staticmethod
+    async def _persist_auto_repair_resume_session(
+        execution: "_TurnExecution",
+        result: Any,
+    ) -> None:
+        """Make the first Claude transcript resumable before the repair Turn."""
+
+        captured_session_id = str(getattr(result, "session_id", None) or "").strip()
+        if captured_session_id:
+            try:
+                await asyncio.to_thread(
+                    _db.update_chat_thread_claude_session,
+                    execution.request.thread_id,
+                    captured_session_id,
+                    _AGENT_RUNTIME_CONTRACT_VERSION,
+                )
+                return
+            except Exception as exc:
+                raise DreamAutoRepairError(
+                    "DREAM_AUTO_REPAIR_RESUME_UNAVAILABLE",
+                    "Dream 自动修正无法安全续接 Claude 会话，已停止自动修正。",
+                    cause=exc,
+                ) from exc
+        try:
+            existing = await asyncio.to_thread(
+                _db.get_chat_thread,
+                execution.request.thread_id,
+                int(execution.request.user_id),
+            )
+        except Exception as exc:
+            raise DreamAutoRepairError(
+                "DREAM_AUTO_REPAIR_RESUME_UNAVAILABLE",
+                "Dream 自动修正无法安全续接 Claude 会话，已停止自动修正。",
+                cause=exc,
+            ) from exc
+        if not _has_usable_claude_resume(existing):
+            raise DreamAutoRepairError(
+                "DREAM_AUTO_REPAIR_RESUME_UNAVAILABLE",
+                "Dream 自动修正无法安全续接 Claude 会话，已停止自动修正。",
+            )
+
+    @staticmethod
+    async def _settle_auto_repair(
+        request: ClaudeAgentRunRequest,
+        status: str,
+    ) -> None:
+        metadata = request.message_metadata
+        if not dream_auto_repair_metadata_is_valid(metadata):
+            return
+        await asyncio.to_thread(
+            settle_dream_auto_repair_message,
+            str(request.message_id or ""),
+            thread_id=request.thread_id,
+            expected_metadata=dict(metadata),
+            status=status,
+        )
+
+    async def mark_auto_repair_failed(
+        self,
+        request: ClaudeAgentRunRequest,
+    ) -> None:
+        """Durably settle an internal repair request as failed."""
+
+        if not dream_auto_repair_metadata_is_valid(request.message_metadata):
+            return
+        await self._settle_auto_repair(request, DREAM_AUTO_REPAIR_FAILED)
 
     async def _store_story_workspace_output(
         self,

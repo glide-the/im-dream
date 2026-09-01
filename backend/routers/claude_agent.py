@@ -39,6 +39,8 @@
 #                    windows reach the turn without exposing them to the browser request.
 # [Sync] 2026-08-30: use the server-owned sandbox enablement capability when
 #                    attachment handling initializes a full Thread workspace.
+# [Sync] 2026-09-01: project the allowlisted Dream auto-repair message contract
+#                    and reserve its server-owned message-id namespace.
 
 import asyncio
 import base64
@@ -89,6 +91,10 @@ from services.admin_gateway import (
     GatewayModelCatalogClient,
     resolve_platform_model,
 )
+from services.story_workspace.dream_auto_repair_service import (
+    DREAM_AUTO_REPAIR_METADATA_KIND,
+    dream_auto_repair_metadata_is_valid,
+)
 
 from .deps import get_current_user
 
@@ -98,7 +104,12 @@ router = APIRouter()
 
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
 _PLATFORM_MODEL_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
-_SERVER_MESSAGE_ID_PREFIXES = ("dream_agent_", "dream_confirm_", "guide_")
+_SERVER_MESSAGE_ID_PREFIXES = (
+    "dream_agent_",
+    "dream_confirm_",
+    "dream_repair_",
+    "guide_",
+)
 class PublicDispatchStatus(str, Enum):
     PENDING = "pending"
     DISPATCHING = "dispatching"
@@ -134,6 +145,13 @@ class PublicChatMetadataDto(BaseModel):
     toolChoice: PublicToolChoice | None = None
     toolCount: int | None = None
     is_partial: bool | None = None
+    schemaVersion: str | None = None
+    originatingMessageId: str | None = None
+    originatingTurnId: str | None = None
+    workflowRunId: str | None = None
+    repairAttempt: int | None = None
+    validationCode: str | None = None
+    idempotencyKey: str | None = None
 
     @classmethod
     def from_storage(
@@ -215,6 +233,23 @@ class PublicChatMetadataDto(BaseModel):
         is_partial = metadata.get("is_partial")
         if isinstance(is_partial, bool):
             values["is_partial"] = is_partial
+
+        if kind == DREAM_AUTO_REPAIR_METADATA_KIND:
+            if dream_auto_repair_metadata_is_valid(metadata):
+                for field in (
+                    "schemaVersion",
+                    "originatingMessageId",
+                    "originatingTurnId",
+                    "workflowRunId",
+                    "repairAttempt",
+                    "validationCode",
+                    "idempotencyKey",
+                ):
+                    values[field] = metadata[field]
+            else:
+                # An incomplete server-owned repair envelope could otherwise
+                # expose instruction text without verifiable provenance.
+                malformed_discriminator = True
 
         # Dream business rows use the shared Chat history as their visible
         # transcript.  Their body must not be redacted merely because the row
@@ -476,7 +511,7 @@ async def claude_agent_stream(
     """SSE streaming endpoint for Claude Agent.
 
     Returns ``text/event-stream``; each frame is a JSON object:
-    ``{"type": "text-delta"|"tool-event"|"message-final"|"finish"|"error", ...}``
+    ``{"type": "text-delta"|"tool-event"|"chat-message"|"message-final"|"finish"|"error", ...}``
 
     Requires a ``thread_id`` (created via ``POST /api/claude-agent/threads``).
     """

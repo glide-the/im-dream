@@ -36,6 +36,7 @@
 // [Sync] 2026-08-22: bind assistant/user Markdown workspace:// references to this
 //                    list's already-owned Thread ID.
 // [Sync] 2026-08-31: replace raw turn exceptions with accessible structured error cards and reload recovery.
+// [Sync] 2026-09-01: identify validated Dream auto-repair user metadata and show a minimal source label.
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -51,6 +52,7 @@ import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation
 import { useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { SubagentToolButton } from './SubagentPanel';
 import { readClaudeAgentErrorCode } from '../../lib/claude-agent-transport';
+import type { ChatMetadata } from '../../lib/chat-schema';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -267,6 +269,18 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
     <div style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowWrap: 'anywhere' }}>
       {messages.map((message, index) => {
         const isLastMessage = index === messages.length - 1;
+        const messageMetadata = message.metadata as ChatMetadata | undefined;
+        const isDreamAutoRepair = (
+          message.role === 'user'
+          && messageMetadata?.kind === 'story-workspace-dream-auto-repair'
+          && messageMetadata.schemaVersion === 'story-workspace-dream-auto-repair/v1'
+          && messageMetadata.repairAttempt === 1
+        );
+        const autoRepairSourceLabel = isDreamAutoRepair
+          ? t(messageMetadata?.dispatch_status === 'failed'
+            ? 'chat.autoRepair.failed'
+            : 'chat.autoRepair.source')
+          : undefined;
         return (
           <div key={message.id} style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {message.parts?.map((part, partIndex) => {
@@ -337,7 +351,14 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
               if (part.type === 'text' && part.text) {
                 const isUser = message.role === 'user';
                 if (isUser) {
-                  return <UserMessagePart key={partKey} text={part.text} workspaceSessionId={threadId} />;
+                  return (
+                    <UserMessagePart
+                      key={partKey}
+                      text={part.text}
+                      workspaceSessionId={threadId}
+                      sourceLabel={autoRepairSourceLabel}
+                    />
+                  );
                 }
 
                 const isLastPart = partIndex === (message.parts?.length ?? 0) - 1;

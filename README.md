@@ -10,6 +10,7 @@
 <!-- [Sync] 2026-08-30: adopt the publicly released clean-room Runtime 0.1.4 across install, verification, registry acceptance, and troubleshooting. -->
 <!-- [Sync] 2026-08-31: require AutoDL releases to verify backend-generated crawler files and reject Vite SPA HTML fallback. -->
 <!-- [Sync] 2026-09-01: document production skill-creator packaging, AutoDL discovery verification, and visible unknown-Skill failures. -->
+<!-- [Sync] 2026-09-01: document persisted, one-shot Dream workspace auto-repair through the canonical Chat/SSE/Turn path. -->
 
 # Ink & Memory
 
@@ -30,6 +31,7 @@ This repository contains the Dream application. It does not own the shared datab
 - **Writing** — write and save sessions, browse the timeline, and review reflections.
 - **Chat** — talk with a Deck Agent in a persistent Thread with streaming, tools, resume, plans, and TODOs.
 - **Dream** — launch a Dream Run and review scripts, storyboards, prompts, and generated artifacts.
+- **Dream workspace recovery** — when an allowlisted, safe post-sync workspace validation fails, Dream persists one visible auto-repair user message and resumes the same Claude session through the normal Chat/SSE/Turn path. Trusted actor, Thread, Run, Deck, and plugin authority failures still stop closed; one originating Turn can dispatch at most one repair.
 - **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
 - **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
 - **Skill authoring** — use the backend-owned `skill-creator` package to create, evaluate, and improve Skills in the existing Thread workspace; production releases refresh its canonical lowercase discovery ID.

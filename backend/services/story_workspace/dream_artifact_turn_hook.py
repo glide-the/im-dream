@@ -12,6 +12,8 @@
 #                    compact summaries for the Execution focus reader.
 # [Sync] 2026-08-14: compare stage projections through the canonical storage
 #                    model so whitespace/default normalization stays idempotent.
+# [Sync] 2026-09-01: classify trusted-authority failures separately from the
+#                    allowlisted workspace project-slug mismatch repair case.
 
 """Root-turn synchronization from canonical workbench files to one Dream Run.
 
@@ -26,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from enum import Enum
 import fcntl
 import hashlib
 import json
@@ -137,8 +140,72 @@ _PRIVATE_FILE_NAMES = frozenset(
 )
 
 
+class DreamArtifactRepairability(str, Enum):
+    """Server-owned decision about whether an Agent may edit workspace facts."""
+
+    AGENT_REPAIRABLE = "agent_repairable"
+    NON_REPAIRABLE = "non_repairable"
+
+
+@dataclass(frozen=True)
+class DreamArtifactValidationIssue:
+    """Allowlisted, public-safe classification for one Hook failure."""
+
+    code: str
+    repairability: DreamArtifactRepairability
+    public_message: str
+    expected: str | None = None
+    actual: str | None = None
+
+
+def _artifact_sync_issue() -> DreamArtifactValidationIssue:
+    return DreamArtifactValidationIssue(
+        code="DREAM_ARTIFACT_SYNC_FAILED",
+        repairability=DreamArtifactRepairability.NON_REPAIRABLE,
+        public_message=(
+            "Dream 工作区同步未完成，自动修正未启动。请保留当前工作区并重新加载对话。"
+        ),
+    )
+
+
+def _launch_authority_issue() -> DreamArtifactValidationIssue:
+    return DreamArtifactValidationIssue(
+        code="DREAM_LAUNCH_AUTHORITY_INVALID",
+        repairability=DreamArtifactRepairability.NON_REPAIRABLE,
+        public_message=(
+            "Dream 可信启动身份未通过校验。为避免写入错误的 Run，自动修正未启动。"
+        ),
+    )
+
+
+def _project_story_slug_mismatch_issue(
+    *,
+    expected: str,
+    actual: str,
+) -> DreamArtifactValidationIssue:
+    return DreamArtifactValidationIssue(
+        code="PROJECT_STORY_SLUG_MISMATCH",
+        repairability=DreamArtifactRepairability.AGENT_REPAIRABLE,
+        public_message="Dream 工作区 project slug 与服务器可信绑定不一致。",
+        expected=expected,
+        actual=actual,
+    )
+
+
 class DreamArtifactTurnHookError(RuntimeError):
-    """A bounded workbench synchronization failure."""
+    """A bounded workbench synchronization failure with safe classification."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        issue: DreamArtifactValidationIssue | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.issue = issue or _artifact_sync_issue()
+        self.code = self.issue.code
+        self.public_message = self.issue.public_message
+        self.retryable = False
 
 
 @dataclass(frozen=True)
@@ -629,15 +696,22 @@ class DreamArtifactTurnHook:
         if isinstance(raw, dict):
             return dict(raw)
         if not isinstance(raw, str):
-            raise DreamArtifactTurnHookError("Dream launch metadata is unavailable")
+            raise DreamArtifactTurnHookError(
+                "Dream launch metadata is unavailable",
+                issue=_launch_authority_issue(),
+            )
         try:
             value = json.loads(raw)
         except (TypeError, ValueError) as exc:
             raise DreamArtifactTurnHookError(
-                "Dream launch metadata is unavailable"
+                "Dream launch metadata is unavailable",
+                issue=_launch_authority_issue(),
             ) from exc
         if not isinstance(value, dict):
-            raise DreamArtifactTurnHookError("Dream launch metadata is unavailable")
+            raise DreamArtifactTurnHookError(
+                "Dream launch metadata is unavailable",
+                issue=_launch_authority_issue(),
+            )
         return value
 
     @classmethod
@@ -657,7 +731,10 @@ class DreamArtifactTurnHook:
             return None
         source_message_id = workflow_run.source_message_id
         if not isinstance(source_message_id, str) or not source_message_id:
-            raise DreamArtifactTurnHookError("Dream launch source is unavailable")
+            raise DreamArtifactTurnHookError(
+                "Dream launch source is unavailable",
+                issue=_launch_authority_issue(),
+            )
 
         db = database.get_db()
         try:
@@ -669,7 +746,10 @@ class DreamArtifactTurnHook:
             if db.in_transaction:
                 db.rollback()
             if row is None:
-                raise DreamArtifactTurnHookError("Dream launch source is unavailable")
+                raise DreamArtifactTurnHookError(
+                    "Dream launch source is unavailable",
+                    issue=_launch_authority_issue(),
+                )
             raw_metadata = row["metadata"]
             metadata = cls._decode_source_metadata(raw_metadata)
             dream_context = metadata.get("dreamContext")
@@ -680,26 +760,49 @@ class DreamArtifactTurnHook:
                     goal
                 )
                 metadata["projectStorySlug"] = trusted_story_slug
-            if not (
+            launch_authority_is_valid = (
                 metadata.get("kind") == "story-workspace-dream-launch"
                 and metadata.get("schemaVersion") == "story-workspace-dream-launch/v1"
                 and str(metadata.get("actorId")) == ticket.actor_id
+                and metadata.get("workspaceId") == workflow_run.workspace_id
+                and metadata.get("deckId") == ticket.context.deck_id
+                and metadata.get("agentId") == ticket.context.agent_id
                 and metadata.get("workflowRunId") == ticket.context.workflow_run_id
                 and metadata.get("threadId") == ticket.context.thread_id
                 and isinstance(dream_context, dict)
                 and dream_context.get("workflow_run_id")
                 == ticket.context.workflow_run_id
                 and dream_context.get("thread_id") == ticket.context.thread_id
+                and dream_context.get("deck_id") == ticket.context.deck_id
+                and dream_context.get("agent_id") == ticket.context.agent_id
                 and dream_context.get("deck_plugin_id")
                 == ticket.context.deck_plugin_id
                 and dream_context.get("deck_plugin_version")
                 == ticket.context.deck_plugin_version
+                and dream_context.get("deck_plugin_binding_id")
+                == ticket.context.deck_plugin_binding_id
+                and dream_context.get("binding_revision")
+                == ticket.context.binding_revision
+                and dream_context.get("deck_runtime_snapshot_id")
+                == ticket.context.deck_runtime_snapshot_id
                 and dream_context.get("runtime_plugin_lock_id")
                 == ticket.context.runtime_plugin_lock_id
                 and isinstance(trusted_story_slug, str)
-                and trusted_story_slug == story_slug
-            ):
-                raise DreamArtifactTurnHookError("Dream launch authority changed")
+                and _STORY_SLUG.fullmatch(trusted_story_slug) is not None
+            )
+            if not launch_authority_is_valid:
+                raise DreamArtifactTurnHookError(
+                    "Dream launch authority changed",
+                    issue=_launch_authority_issue(),
+                )
+            if trusted_story_slug != story_slug:
+                raise DreamArtifactTurnHookError(
+                    "Dream workspace project slug does not match launch authority",
+                    issue=_project_story_slug_mismatch_issue(
+                        expected=trusted_story_slug,
+                        actual=story_slug,
+                    ),
+                )
 
             authority_value = metadata.get("story_workspace_episode_identity")
             authority = StoryWorkspaceEpisodeAuthority.parse(
@@ -709,7 +812,8 @@ class DreamArtifactTurnHook:
             if authority is None:
                 if authority_value is not None:
                     raise DreamArtifactTurnHookError(
-                        "Dream Episode authority is malformed"
+                        "Dream Episode authority is malformed",
+                        issue=_launch_authority_issue(),
                     )
                 episode_uid = uuid4().hex
                 metadata["story_workspace_episode_identity"] = {
@@ -797,7 +901,10 @@ class DreamArtifactTurnHook:
                 ),
             ).fetchone()
             if row is None:
-                raise DreamArtifactTurnHookError("Dream Run authority is unavailable")
+                raise DreamArtifactTurnHookError(
+                    "Dream Run authority is unavailable",
+                    issue=_launch_authority_issue(),
+                )
             run = WorkflowRunService(
                 db,
                 token_secret=story_workspace_workflow_token_secret(),
@@ -829,7 +936,10 @@ class DreamArtifactTurnHook:
             ticket.context.runtime_plugin_lock_id,
         )
         if frozen != expected:
-            raise DreamArtifactTurnHookError("Dream Run frozen authority changed")
+            raise DreamArtifactTurnHookError(
+                "Dream Run frozen authority changed",
+                issue=_launch_authority_issue(),
+            )
         return run
 
     @classmethod
@@ -1300,9 +1410,11 @@ class DreamArtifactTurnHook:
 
 
 __all__ = [
+    "DreamArtifactRepairability",
     "DreamArtifactTurnHook",
     "DreamArtifactTurnHookError",
     "DreamArtifactTurnResult",
     "DreamArtifactTurnTicket",
+    "DreamArtifactValidationIssue",
     "StoryWorkspaceDreamArtifactPublisher",
 ]

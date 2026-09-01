@@ -28,6 +28,7 @@
 # [Sync] 2026-08-24: cover credential-free SDK/CLI startup identity logging.
 # [Sync] 2026-08-25: align MCP auth route registration with database server identifiers.
 # [Sync] 2026-08-27: cover PostgreSQL resource sampler/sink/publisher lifecycle ordering.
+# [Sync] 2026-09-01: cover public Dream auto-repair metadata projection and reserved IDs.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -478,6 +479,51 @@ class TestToolConfirmRequestModel(unittest.TestCase):
 
 @_skip_if_no_server
 class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
+    def test_auto_repair_history_preserves_exact_visible_message_contract(self):
+        import routers.claude_agent as route_module
+
+        metadata = {
+            "kind": "story-workspace-dream-auto-repair",
+            "schemaVersion": "story-workspace-dream-auto-repair/v1",
+            "originatingMessageId": "origin-message",
+            "originatingTurnId": "origin-turn",
+            "workflowRunId": "run_" + "a" * 32,
+            "repairAttempt": 1,
+            "validationCode": "PROJECT_STORY_SLUG_MISMATCH",
+            "idempotencyKey": "dream-auto-repair/v1:stable",
+            "dispatch_status": "dispatched",
+        }
+        message = {
+            "id": "dream_repair_stable",
+            "role": "user",
+            "parts": [{"type": "text", "text": "修正 workspace"}],
+            "metadata": metadata,
+            "created_at": "2026-09-01T00:00:00Z",
+        }
+
+        projected = route_module.PublicChatMessageDto.from_storage(
+            message
+        ).model_dump(exclude_unset=True, mode="json")
+
+        self.assertEqual(projected, message)
+
+    def test_malformed_auto_repair_metadata_hides_instruction_body(self):
+        import routers.claude_agent as route_module
+
+        projected = route_module.PublicChatMessageDto.from_storage({
+            "id": "dream_repair_malformed",
+            "role": "user",
+            "parts": [{"type": "text", "text": "SECRET_INSTRUCTION"}],
+            "metadata": {
+                "kind": "story-workspace-dream-auto-repair",
+                "schemaVersion": "story-workspace-dream-auto-repair/v1",
+                "dispatch_status": "dispatched",
+            },
+        }).model_dump(exclude_unset=True, mode="json")
+
+        self.assertEqual(projected["parts"], [])
+        self.assertNotIn("SECRET_INSTRUCTION", json.dumps(projected))
+
     def test_corrupt_stored_metadata_fails_closed_through_database_decode(self):
         import routers.claude_agent as route_module
 
@@ -1182,7 +1228,12 @@ class TestClaudeAgentDreamBindingRoute(unittest.TestCase):
     def test_generic_chat_rejects_every_server_owned_message_prefix(self):
         import routers.claude_agent as route_module
 
-        for prefix in ("dream_agent_", "dream_confirm_", "guide_"):
+        for prefix in (
+            "dream_agent_",
+            "dream_confirm_",
+            "dream_repair_",
+            "guide_",
+        ):
             body = route_module.ClaudeAgentRequestBody(
                 thread_id="thread-generic",
                 message={

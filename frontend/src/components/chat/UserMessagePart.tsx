@@ -7,6 +7,7 @@
 // [Sync] 2026-07-26: add bottom-right copy button under the bubble via shared useCopy hook
 //                    and shared IconCopy/IconCheck, matching the assistant action style.
 // [Sync] 2026-08-22: accept the owning Chat Thread for explicit workspace:// rendering.
+// [Sync] 2026-09-01: render a lightweight source label for persisted Dream auto-repair messages.
 import { memo } from 'react';
 import { useCopy } from '../../hooks/useCopy';
 import { IconCheck, IconCopy } from './Icons';
@@ -15,13 +16,26 @@ import ChatMarkdown from './ChatMarkdown';
 interface UserMessagePartProps {
   text: string;
   workspaceSessionId?: string;
+  sourceLabel?: string;
 }
 
-export default memo(function UserMessagePart({ text, workspaceSessionId }: UserMessagePartProps) {
+export default memo(function UserMessagePart({ text, workspaceSessionId, sourceLabel }: UserMessagePartProps) {
   const { copied, copy } = useCopy();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+      {sourceLabel ? (
+        <span
+          style={{
+            paddingRight: '0.35rem',
+            color: 'var(--color-text-muted)',
+            fontSize: '0.72rem',
+            lineHeight: 1.4,
+          }}
+        >
+          {sourceLabel}
+        </span>
+      ) : null}
       <div
         style={{
           maxWidth: '85%',

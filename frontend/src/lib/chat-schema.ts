@@ -3,6 +3,7 @@
 // [Pos] chat-schema type node in frontend/src/lib
 // [Sync] 2026-05-25: remove frontend customer-context request fields from the chat schema.
 // [Sync] 2026-08-17: expose per-message Deck/Agent provenance used by same-Deck Agent switching.
+// [Sync] 2026-09-01: type the visible server-owned Dream auto-repair message metadata.
 import type { LanguageModelUsage, UIMessage } from 'ai';
 
 export type ChatAttachment = {
@@ -53,6 +54,15 @@ export type ChatMetadata = {
   workspaceSessionId?: string;
   deckId?: string;
   voiceId?: string;
+  kind?: string;
+  schemaVersion?: string;
+  originatingMessageId?: string;
+  originatingTurnId?: string;
+  workflowRunId?: string;
+  repairAttempt?: number;
+  validationCode?: string;
+  idempotencyKey?: string;
+  dispatch_status?: 'dispatching' | 'dispatched' | 'failed';
 };
 
 /** Voice / deck info displayed in the Chat view and forwarded to the backend as voice context. */

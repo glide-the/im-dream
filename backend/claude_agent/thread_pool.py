@@ -24,6 +24,8 @@
 #                    object for the GET /threads/{id}/todos endpoint.
 # [Sync] 2026-08-04: preserve a lock created by get_lock() before first-state
 #                    creation so queued same-thread turns cannot bypass it.
+# [Sync] 2026-09-01: count one server-owned Dream repair continuation while
+#                    retaining the same RUNNING lifecycle and factory lock.
 
 """Claude Agent Thread Session Pool.
 
@@ -215,6 +217,16 @@ class AgentRunState:
         if self.lifecycle == AgentRunLifecycle.RUNNING:
             self.turn_count += 1
         self.lifecycle = AgentRunLifecycle.IDLE
+        self._last_active_ts = time.monotonic()
+
+    def mark_turn_continued(self) -> None:
+        """Complete one logical Turn without releasing RUNNING ownership."""
+
+        if self.lifecycle != AgentRunLifecycle.RUNNING:
+            raise RuntimeError(
+                f"Cannot continue non-RUNNING session {self.session_id!r}"
+            )
+        self.turn_count += 1
         self._last_active_ts = time.monotonic()
 
     def mark_destroyed(self) -> None:

@@ -27,6 +27,8 @@
  *                      network-variant confirmation card
  *                      (claude-agent-sandbox-network-permission-tool.md §5).
  * [Sync]   2026-08-31: preserve structured Agent errorCode/retryability for safe UI mapping.
+ * [Sync]   2026-09-01: end the single-assistant POST response at a persisted
+ *                      auto-repair user boundary; reconnect continues the same EventBus.
  *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
@@ -43,6 +45,7 @@
  *   data: {"type": "tool-input-available",  "toolCallId": "...", "toolName": "...", "input": {...}}
  *   data: {"type": "tool-output-available", "toolCallId": "...", "output": ..., "isError": false}
  *   data: {"type": "tool-approval-request", "toolCallId": "...", "toolName": "...", "input": {...}}
+ *   data: {"type": "chat-message",         "message": {"id": "...", "role": "user", "parts": [...], "metadata": {...}}}
  *   data: {"type": "message-final",         "text": "...", "usage": {...}, "sessionId": "..."}
  *   data: {"type": "finish",                "finishReason": "stop"|"error"}
  *   data: {"type": "error",                 "errorText": "...", "errorCode": "...", "retryable": false}
@@ -183,6 +186,16 @@ interface BackendStoryWorkspaceOutput extends StoryWorkspaceOutputReceipt {
   type: 'story-workspace-output';
 }
 
+interface BackendChatMessage {
+  type: 'chat-message';
+  message: {
+    id: string;
+    role: 'user';
+    parts: UIMessage['parts'];
+    metadata: Record<string, unknown>;
+  };
+}
+
 interface BackendMessageFinal {
   type: 'message-final';
   text: string;
@@ -242,6 +255,7 @@ type BackendEvent =
   | BackendPlanUpdated
   | BackendTodoUpdated
   | BackendStoryWorkspaceOutput
+  | BackendChatMessage
   | BackendMessageFinal
   | BackendFinish
   | BackendError;
@@ -527,14 +541,24 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
     const dispatch = (
       raw: string,
       controller: TransformStreamDefaultController<UIMessageChunk>,
-    ) => {
+    ): boolean => {
       const events = parseSSEChunk(raw);
       for (const event of events) {
+        if (event.type === 'chat-message') {
+          // AI SDK owns one assistant response per POST. Close this reader so
+          // ChatPanel hydrates the committed user fact and reconnects to the
+          // still-running canonical factory task for the repair response.
+          controller.enqueue({ type: 'finish-step' });
+          controller.enqueue({ type: 'finish', finishReason: 'stop' });
+          controller.terminate();
+          return false;
+        }
         const uiChunks = convertEvent(event, conversionState);
         for (const uiChunk of uiChunks) {
           controller.enqueue(uiChunk);
         }
       }
+      return true;
     };
 
     return stream.pipeThrough(
@@ -545,7 +569,7 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
           sseBuffer = drained.buffer;
           for (const frame of drained.frames) {
             try {
-              dispatch(`${frame}\n\n`, controller);
+              if (!dispatch(`${frame}\n\n`, controller)) return;
             } catch (err) {
               controller.error(err);
               return;

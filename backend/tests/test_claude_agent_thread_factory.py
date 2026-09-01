@@ -11,6 +11,7 @@
 #                    strategy and ClaudeAgentRunRequest.message_parts.
 # [Sync] 2026-06-25: cover frontend stop flow cancelling a running background turn.
 # [Sync] 2026-08-31: cover safe structured Dream binding failure SSE without code duplication in errorText.
+# [Sync] 2026-09-01: cover one normal Dream repair continuation under the same factory lifecycle.
 
 """Unit tests for ClaudeAgentThreadFactory.
 
@@ -51,7 +52,11 @@ from claude_agent.thread_pool import (
     AgentRunStatePool,
     AgentRunStateSweeper,
 )
-from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService
+from claude_agent.service import (
+    ClaudeAgentRunRequest,
+    ClaudeAgentService,
+    ClaudeAgentTurnContinuation,
+)
 from claude_agent.observer import LoggingObserver, SessionObserverRegistry
 from services.story_workspace.dream_lifecycle_observer import DreamObserver
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
@@ -396,6 +401,65 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
         with unittest.mock.patch("claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner):
             _run(self._collect_gen(req))
         self.assertEqual(len(getattr(self.factory, "_test_runner_instances", [])), 1)
+
+    def test_server_owned_continuation_reuses_factory_and_counts_two_turns(self):
+        request = _make_request(
+            "auto_repair",
+            message="original",
+            thread_id="thread-auto-repair-factory",
+        )
+        request.message_id = "origin-message"
+        executed_message_ids: list[str | None] = []
+
+        async def execute(execution):
+            executed_message_ids.append(execution.request.message_id)
+            if len(executed_message_ids) == 1:
+                await execution.turn_context.queue.put(
+                    NormalizedAgentEvent.create(
+                        "chat-message",
+                        {
+                            "message": {
+                                "id": "dream_repair_stable",
+                                "role": "user",
+                                "parts": [{"type": "text", "text": "repair"}],
+                                "metadata": {},
+                            }
+                        },
+                    )
+                )
+                return ClaudeAgentTurnContinuation(
+                    request=ClaudeAgentRunRequest(
+                        user_id=execution.request.user_id,
+                        thread_id=execution.request.thread_id,
+                        resume=True,
+                        message_id="dream_repair_stable",
+                        message_parts=[{"type": "text", "text": "repair"}],
+                    )
+                )
+            await execution.turn_context.queue.put(
+                NormalizedAgentEvent.create(
+                    "finish",
+                    {"finishReason": "stop"},
+                )
+            )
+            await execution.turn_context.queue.put(None)
+            return None
+
+        self.factory._service.execute_session = execute
+        frames = self._drain(request)
+        snapshot = self.factory.session_snapshot(request.thread_id)
+
+        self.assertEqual(
+            executed_message_ids,
+            ["origin-message", "dream_repair_stable"],
+        )
+        self.assertEqual(snapshot["lifecycle"], "idle")
+        self.assertEqual(snapshot["turn_count"], 2)
+        self.assertEqual(
+            sum('"type":"finish"' in frame.replace(" ", "") for frame in frames),
+            1,
+        )
+        self.assertIn('"type":"chat-message"', "".join(frames).replace(" ", ""))
 
     def test_run_streaming_exposes_same_turn_completion_handle(self):
         async def collect():

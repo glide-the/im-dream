@@ -14,6 +14,8 @@
  *                      reaches tool confirmations without thousands of React updates.
  * [Sync]   2026-08-13: preserve reasoning-start/delta/end identities during reconnect
  *                      so tool/text barriers keep separate thinking blocks in order.
+ * [Sync]   2026-09-01: treat persisted Dream auto-repair user messages as an
+ *                      idempotent boundary that replaces uncommitted assistant replay.
  */
 
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -111,6 +113,69 @@ function ensureAssistantMessage(messages: UIMessage[]): { messages: UIMessage[];
   };
   next.push(assistant);
   return { messages: next, index: next.length - 1 };
+}
+
+const DREAM_AUTO_REPAIR_KIND = 'story-workspace-dream-auto-repair';
+const DREAM_AUTO_REPAIR_SCHEMA = 'story-workspace-dream-auto-repair/v1';
+
+function readDreamAutoRepairMessage(event: BackendEvent): UIMessage | null {
+  const raw = event.message;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const message = raw as Record<string, unknown>;
+  const metadata = message.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const meta = metadata as Record<string, unknown>;
+  const status = meta.dispatch_status;
+  const valid = (
+    typeof message.id === 'string'
+    && message.id.startsWith('dream_repair_')
+    && message.role === 'user'
+    && Array.isArray(message.parts)
+    && meta.kind === DREAM_AUTO_REPAIR_KIND
+    && meta.schemaVersion === DREAM_AUTO_REPAIR_SCHEMA
+    && meta.repairAttempt === 1
+    && meta.validationCode === 'PROJECT_STORY_SLUG_MISMATCH'
+    && typeof meta.originatingMessageId === 'string'
+    && Boolean(meta.originatingMessageId)
+    && typeof meta.originatingTurnId === 'string'
+    && Boolean(meta.originatingTurnId)
+    && typeof meta.workflowRunId === 'string'
+    && Boolean(meta.workflowRunId)
+    && typeof meta.idempotencyKey === 'string'
+    && Boolean(meta.idempotencyKey)
+    && (status === 'dispatching' || status === 'dispatched' || status === 'failed')
+  );
+  if (!valid) return null;
+  return {
+    id: message.id as string,
+    role: 'user',
+    parts: message.parts as UIMessage['parts'],
+    metadata: { ...meta },
+  };
+}
+
+function mergeDreamAutoRepairMessage(
+  messages: UIMessage[],
+  message: UIMessage,
+): UIMessage[] {
+  const existingIndex = messages.findIndex((item) => item.id === message.id);
+  if (existingIndex >= 0) {
+    return [...messages.slice(0, existingIndex), message];
+  }
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  const originId = typeof metadata?.originatingMessageId === 'string'
+    ? metadata.originatingMessageId
+    : '';
+  const originIndex = originId
+    ? messages.findIndex((item) => item.id === originId)
+    : -1;
+  if (originIndex >= 0) {
+    return [...messages.slice(0, originIndex + 1), message];
+  }
+  const next = [...messages];
+  if (next.at(-1)?.role === 'assistant') next.pop();
+  next.push(message);
+  return next;
 }
 
 function appendTextDelta(parts: UIMessage['parts'], delta: string): UIMessage['parts'] {
@@ -230,6 +295,12 @@ export function applyBackendEventToMessages(
   messages: UIMessage[],
   event: BackendEvent,
 ): UIMessage[] {
+  if (event.type === 'chat-message') {
+    const repairMessage = readDreamAutoRepairMessage(event);
+    return repairMessage
+      ? mergeDreamAutoRepairMessage(messages, repairMessage)
+      : messages;
+  }
   const { messages: base, index } = ensureAssistantMessage(messages);
   const target = base[index];
   const parts = [...(target.parts ?? [])];

@@ -1,0 +1,285 @@
+<!-- [Input] Current Dream post-turn Hook, ClaudeAgentService/ThreadFactory, chat_message persistence, EventBus/SSE, and ChatPanel history/reconnect reducer contracts. -->
+<!-- [Output] Product and implementation contract for one bounded, visible, server-owned Dream workspace auto-repair turn. -->
+<!-- [Pos] Interaction/architecture source of truth for repairable Dream post-turn validation failures. -->
+<!-- [Sync] 2026-09-01: initial design after source investigation and pre-implementation simplification review. -->
+
+# Dream 后置同步失败后的 Agent 自动自检修正
+
+## 1. 背景与问题
+
+### 1.1 当前真实调用链
+
+Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 与普通 Chat HTTP 都构造 `ClaudeAgentRunRequest`，进入同一个 `ClaudeAgentThreadFactory.run_streaming()`：
+
+1. `ClaudeAgentThreadFactory` 获取 Thread lock、`AgentRunState`、EventBus 和 admission lease。
+2. `ClaudeAgentService.assemble_context()` 从 authenticated actor + canonical Thread 解析 `StoryWorkspaceDreamRunContext`，组装 workspace、Deck/plugin、Claude resume 和 Runner options。
+3. `ClaudeAgentService.execute_session()` 先把 user `chat_message` 持久化，再调用 `ClaudeAgentRunner.run_streaming()`；回调把 normalized events 发布到 EventBus。
+4. Claude 成功返回后，Service 调用 `DreamArtifactTurnHook.after_main_turn()`，把 workspace 文件同步到 Run-private artifact、Episode binding 和 PostgreSQL story projection。
+5. Hook 成功后才发送 `message-final`、持久化 assistant `chat_message` 并发送唯一 terminal `finish`。
+6. 前端 POST stream 由 `ClaudeAgentChatTransport` 消费；断线/刷新后由 Thread status + EventBus replay + `applyBackendEventToMessages()` 恢复，最终以消息历史覆盖临时流状态。
+
+### 1.2 错误发生位置与 assistant 未保存原因
+
+`DreamArtifactTurnHook.after_main_turn()` 位于 Claude Runner 成功与 assistant 持久化之间。当前 `Dream launch authority changed` 是一个无结构的 `DreamArtifactTurnHookError`。Service 捕获后直接 re-raise；ThreadFactory 只能发布通用 `error + finish(error)`。
+
+因此：
+
+- 原 user 消息已经持久化；
+- Claude 的 workspace 修改和临时 SSE 输出已经发生；
+- `message-final` 尚未发送；
+- `_persist_assistant_turn()` 尚未执行；
+- 前端只得到通用错误映射，历史刷新后没有本轮 assistant 事实，也不知道 workspace 哪条规则失败。
+
+### 1.3 根因拆分
+
+当前同一个条件同时比较两类事实：
+
+- server-owned launch authority：actor、thread、Workflow Run、Deck/plugin binding/version/lock；
+- Agent-owned workspace projection：canonical project story slug。
+
+两者失败后的安全处理完全不同。可信身份不一致必须 fail closed；workspace slug 与可信 slug 不一致可以由 Agent 修改文件修复。继续使用同一个字符串异常会迫使上层在“全部自动修”与“全部失败”之间二选一。
+
+## 2. 目标与边界
+
+### 2.1 目标
+
+- 把 allowlist 内、可由 Agent 安全修改 workspace 解决的 Hook 校验失败转换为结构化结果。
+- 生成一条真实、可见、可持久化的 user `chat_message`，明确规则、期望/实际、修正要求和禁止操作。
+- 消息落库后才发布 SSE，并通过现有历史/重连链路立即恢复为 user 气泡。
+- 在同一个 ThreadFactory 受控任务内，再次执行正常 context assembly、Claude resume、Runner callbacks、Hook 和 assistant persistence。
+- 同一 originating message/turn 最多一次自动修正；第二次失败停止。
+
+### 2.2 非目标
+
+- 不把数据库、CAS、权限、可信身份或安全边界异常交给 Agent。
+- 不新增 Dream HTTP 控制 endpoint、消息队列、数据库表、migration、工作流引擎或第二套 Runner。
+- 不让浏览器负责决定或启动修正。
+- 不修改 Dream launch metadata、actor/thread/run/Deck/plugin authority，也不删除或重建 Claude transcript。
+- 不为普通 Chat、tool confirmation、resume、cancel 建立分支实现。
+
+## 3. 概念与业务规则
+
+### 3.1 结构化校验问题
+
+`DreamArtifactTurnHookError` 必须携带 server-authored issue：
+
+| 字段 | 规则 |
+|---|---|
+| `code` | allowlist 稳定码；不使用原始 exception text 作为协议 |
+| `repairability` | 仅 `agent_repairable` 或 `non_repairable` |
+| `public_message` | 可进入 error SSE 的安全摘要，不含堆栈/DSN/路径/凭证 |
+| `expected` / `actual` | 只有对应 code 明确允许公开时才存在；slug 必须先通过 canonical slug 校验 |
+
+未知或缺字段的异常一律视为 `non_repairable`。
+
+### 3.2 自动修正消息
+
+自动消息是普通 `chat_message(role='user')`，不是 UI-only 提示。它有稳定 server-reserved message id、文本 `parts` 和 server-owned metadata。第一次写入与完全相同的 CAS replay 都成功；不同内容占用同一 id 必须 fail closed。
+
+### 3.3 两个逻辑 Turn、一个受控运行任务
+
+原始 Turn 与自动修正 Turn 各调用一次正常的：
+
+- `assemble_context()`；
+- Claude Runner `run_streaming()`；
+- resume/session transcript；
+- callbacks、tool confirmation、usage 采集；
+- Dream post-turn Hook；
+- assistant persistence。
+
+两者保留在同一个 Thread lock、EventBus、background task 和 admission lease 中。原因不是建立新状态机，而是保证：
+
+- Dream launch dispatcher/observer 只看到修正后的最终 terminal，不会把中间校验失败提前结算为 Run 失败；
+- Stop 仍取消唯一 `bg_task`；
+- 浏览器断开只取消 subscriber，不取消修正；
+- 同 Thread 的其他 user Turn 不能插入原始 Turn 与自动修正 Turn 之间。
+
+逻辑 Turn 边界仍更新 `turn_count`，自动修正取得新的内部 Turn id，且 `message-metadata.turnIndex` 使用下一序号；对外 EventBus 仍是同一个可重连 workflow stream。
+
+## 4. 错误分类
+
+| code | repairability | 判定 | 处理 |
+|---|---|---|---|
+| `PROJECT_STORY_SLUG_MISMATCH` | `agent_repairable` | launch metadata 中可信 slug 合法且完整，但 workspace 唯一 canonical story slug 不同 | 生成一次自动 user 消息，要求整理目录及 `project_id/project_slug` 后重新执行 Hook |
+| `DREAM_LAUNCH_AUTHORITY_INVALID` | `non_repairable` | actor/thread/run/Deck/plugin binding/version/lock、source message、launch schema 或 frozen Run authority 不一致/缺失 | fail closed；不生成自动消息 |
+| `DREAM_ARTIFACT_SYNC_FAILED` | `non_repairable` | 未 allowlist 的文件安全、数据库、CAS、权限、projection 或内部异常 | fail closed；只显示安全摘要 |
+
+后续若增加 repairable code，必须同时增加：分类条件、正文模板、公开字段 allowlist 和测试。仅设置 `repairability='agent_repairable'` 但没有模板时仍 fail closed。
+
+## 5. 自动 user 消息合同
+
+### 5.1 持久化记录
+
+```json
+{
+  "id": "dream_repair_<stable_sha256>",
+  "role": "user",
+  "parts": [
+    {
+      "type": "text",
+      "text": "Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成本轮。\n..."
+    }
+  ],
+  "metadata": {
+    "kind": "story-workspace-dream-auto-repair",
+    "schemaVersion": "story-workspace-dream-auto-repair/v1",
+    "originatingMessageId": "...",
+    "originatingTurnId": "...",
+    "workflowRunId": "run_...",
+    "repairAttempt": 1,
+    "validationCode": "PROJECT_STORY_SLUG_MISMATCH",
+    "idempotencyKey": "dream-auto-repair/v1:<stable_sha256>",
+    "dispatch_status": "dispatched"
+  }
+}
+```
+
+稳定摘要输入只包含 server-owned `workflowRunId`、持久化 originating message identity 和 validation code；`originatingTurnId` 保留为诊断事实，但不参与 key，避免进程恢复后新的内存 Turn id 绕过一次性边界。前端不能提交 `dream_repair_` message id；公共 Chat route 将该前缀列为 reserved namespace。
+
+消息先以 `dispatching` 写入，再以单条 CAS 争抢执行权；只有 CAS 获胜者把状态改为 `dispatched` 并发布 SSE。因此 SSE 与历史恢复看到的初始可见记录完全一致。`dispatch_status` 复用现有 Chat/Dream 公开合同：
+
+- `dispatching`：自动 user 消息已落库，但执行权尚未完成 CAS；正常情况下不发布该中间态 SSE；
+- `dispatched`：本消息已唯一取得自动修正执行权；
+- `failed`：修正 Runner/assembly/cancel/第二次 Hook 未完成或失败。
+
+### 5.2 allowlist 正文模板
+
+`PROJECT_STORY_SLUG_MISMATCH` 正文只插入已验证的 expected/actual slug：
+
+```text
+Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成本轮。
+
+校验错误：
+- 错误代码：PROJECT_STORY_SLUG_MISMATCH
+- 规则：workspace canonical project slug 必须等于服务器分配的可信 project slug
+- 期望值：<trusted slug>
+- 当前状态：<workspace slug>
+- 失败原因：当前文件生成到了另一套项目目录，无法证明其属于本次 Dream Run
+- 修正要求：将本次项目文件整理到服务器指定的 canonical project 路径，并同步修正项目文件中的 project_id/project_slug
+- 禁止操作：不得修改 Dream 启动元数据、actor/thread/run 身份、Deck/plugin lock 或伪造绑定信息
+- 完成标准：重新执行同一个后置同步校验并全部通过
+```
+
+不得把 exception `str()`, traceback、数据库 error、绝对路径、用户正文、DSN、token 或环境变量拼入消息。
+
+## 6. SSE 事件与前端表现
+
+### 6.1 新增事件
+
+自动消息落库成功后发布唯一新事件：
+
+```json
+{
+  "type": "chat-message",
+  "message": {
+    "id": "dream_repair_...",
+    "role": "user",
+    "parts": [{"type": "text", "text": "..."}],
+    "metadata": {"kind": "story-workspace-dream-auto-repair", "...": "..."}
+  }
+}
+```
+
+不新增独立 auto-repair event family。`message.id/role/parts/metadata` 必须与刚提交的数据库记录一致；发布失败不得撤销已提交消息，但 Turn 必须 fail closed，不能无可观察地继续执行。
+
+### 6.2 POST stream handoff
+
+一次 AI SDK POST response 只能组装一个 assistant UIMessage，不能安全地在同一 response 中间插入 user + 第二个 assistant。直接复制一套前端消息组装器会造成双 reducer。
+
+因此 `ClaudeAgentChatTransport` 收到 `chat-message` 后正常终止本地 response reader，不抛通用错误。后端 producer 继续运行。现有 `ChatPanel` completion recovery 随即：
+
+1. 从 `/threads/{id}/messages` 读取已持久化自动 user 消息；
+2. 从 `/status` 看到同一 Thread 仍为 running；
+3. 使用既有 `/stream` reconnect；
+4. 用现有 replay reducer 渲染修正 Turn。
+
+这不是第二个执行入口；它只是现有“subscriber 断开、producer 继续、history first、replay then live”合同的一次主动 handoff。
+
+### 6.3 reconnect reducer 幂等边界
+
+`applyBackendEventToMessages()` 对 `chat-message` 按 message id upsert：
+
+- 已存在同 id：替换为事件中的 exact parts/metadata，不追加气泡；
+- 尚不存在：插入 user 消息；
+- 同时移除该边界之前仅存在于 replay 的未持久化原 assistant 临时消息；
+- 后续 text/tool events 创建新的 repair assistant 临时消息；最终历史恢复以数据库 assistant id 覆盖它。
+
+普通 user 气泡只增加一行轻量来源标记：`工作台自动修正`；历史状态为 `failed` 时显示 `工作台自动修正 · 已停止`。不增加弹窗、确认框或独立页面。
+
+## 7. 自动修正状态转换
+
+```mermaid
+stateDiagram-v2
+    [*] --> OriginalRunning: 原始 user 消息已持久化
+    OriginalRunning --> OriginalHookCheck: Claude 成功修改 workspace
+    OriginalHookCheck --> Completed: Hook 通过
+    OriginalHookCheck --> FailedClosed: non_repairable
+    OriginalHookCheck --> RepairDispatching: agent_repairable 且 attempt=0\n持久化 user 消息
+    RepairDispatching --> RepairRunning: CAS status=dispatched\n发布 chat-message + 正常 assemble/resume/Runner
+    RepairRunning --> Completed: Hook 通过\nassistant 持久化
+    RepairRunning --> RepairFailed: Runner/cancel/Hook 再失败\nstatus=failed
+    RepairFailed --> [*]: error terminal；不创建第三个 Turn
+    FailedClosed --> [*]: error terminal
+    Completed --> [*]: message-final + finish(stop)
+```
+
+## 8. 幂等、并发和重试边界
+
+- 默认且当前唯一值：同一持久化 originating message/Turn 的 `repairAttempt=1`。
+- 自动消息 id 和 idempotency key 由稳定 server-owned Run + originating message 输入计算；内存 Turn id 不改变唯一键。`chat_message.id` 唯一约束只保证单行，`dispatching -> dispatched` CAS 只允许一个调用者取得修正执行权。
+- `save_chat_message()` 只接受 exact replay；同 id 不同 body/metadata 抛 identity conflict。
+- 重复回调若看到同一消息已 `dispatched`，会以安全的 `DREAM_AUTO_REPAIR_ALREADY_DISPATCHED` 结束自己的任务，不发布第二条消息，也不启动第二个 Agent 修正。
+- request metadata 若已是 `story-workspace-dream-auto-repair/v1`，任何 repairable Hook 失败都直接终止，不再生成消息。
+- EventBus 重放或重复 `chat-message` 由前端 message-id upsert 去重。
+- 同 Thread lock 覆盖两个逻辑 Turn，其他 user send/confirmation dispatcher 只能排队，不能并发插入。
+- 没有定时 retry、指数退避、attempt 表或通用 workflow engine。
+
+## 9. 失败与降级
+
+| 失败点 | 行为 |
+|---|---|
+| 自动消息持久化失败/identity conflict | 不发布 SSE、不启动修正，安全 error terminal |
+| EventBus 发布失败 | 消息保留在历史；不启动无可观察修正，error terminal |
+| 修正 Turn assembly/Runner 失败 | metadata `dispatch_status=failed`，现有 error terminal |
+| 用户 Stop/cancel | 唯一 `bg_task` 被取消；partial repair assistant 按现有规则保存；自动消息标记 failed；不重启 |
+| 第二次 Hook 仍失败 | 自动消息标记 failed，发布安全结构化最终错误，不创建第三轮 |
+| 浏览器断线/刷新 | producer 继续；history 恢复 auto user；running 时 reconnect；idle 时显示最终持久状态 |
+| 进程在 `dispatching`/`dispatched` 后崩溃 | 自动消息仍可见但本版本不跨进程恢复执行；保留当前状态作为诊断事实，不引入 durable workflow engine |
+
+## 10. 安全与隐私
+
+- 只有 `PROJECT_STORY_SLUG_MISMATCH` 进入 auto-repair allowlist。
+- trusted slug 来自 server launch metadata；workspace slug 只作为校验后的实际值展示。Agent 只能改 workspace。
+- actor/thread/run/Deck/plugin/source metadata/frozen authority 任一异常均为 `DREAM_LAUNCH_AUTHORITY_INVALID`，绝不通过提示 Agent 修改可信事实。
+- auto request 由服务端内部构造；公共 route 拒绝 reserved message id，也不接受浏览器自带的 server metadata。
+- 消息正文由 code-specific template 生成，不使用原始 exception text。
+- SSE 使用已经持久化的 exact DTO；历史接口继续通过 `PublicChatMetadataDto` allowlist 投影。
+- 不修改或删除 Claude transcript；修正 Turn 使用现有 session id resume。
+
+## 11. 验收标准
+
+1. slug mismatch 分类为 `PROJECT_STORY_SLUG_MISMATCH / agent_repairable`，expected/actual 均为合法 slug。
+2. actor/thread/run/Deck/plugin authority 异常分类为 non-repairable，且不创建自动消息。
+3. 自动 user 消息使用稳定 id，只存在一行；metadata 合同完整。
+4. 数据库提交发生在 `chat-message` 发布之前。
+5. SSE 与 history 的 message id、parts、metadata 一致。
+6. POST stream 在消息边界 handoff；历史恢复立即显示 user 气泡；reconnect 继续 repair assistant。
+7. refresh/reconnect/replay 不产生重复气泡，也不保留第一次未持久化 assistant 临时输出。
+8. 自动修正调用正常 context assembly、Runner resume、callbacks、Hook、persistence、EventBus、cancel 与 admission-owned task。
+9. 修正成功后 auto metadata 为 dispatched，并正常保存 assistant。
+10. 第二次失败或 cancel 后 metadata 为 failed，不创建第三轮。
+11. 消息模板不包含 traceback、DSN、密钥、绝对路径或任意内部异常文本。
+12. 普通 Chat、Dream launch/confirmation、resume、SSE reconnect、Stop、tool confirmation 既有测试不回归。
+
+## 12. 编码前设计复核
+
+| 复核问题 | 结论 |
+|---|---|
+| 用户是否知道为什么停下？ | 是。真实 user 消息展示 code、规则、期望/实际、修正和禁止项；failed 状态刷新后仍存在。 |
+| 可预期错误是否自动修正？ | 是。仅 slug mismatch 自动进入一次正常 repair Turn。 |
+| 是否可观察、可恢复？ | 是。persistence-first，EventBus 只通知；history 是恢复真相源。 |
+| Agent 能否修改可信身份？ | 否。身份异常 non-repairable；模板明确禁止；context 每轮重新从服务端解析。 |
+| 是否可能无限循环？ | 否。server metadata + stable id + attempt=1 三重边界。 |
+| 是否新增多余 endpoint/表/队列/弹窗？ | 否。只新增结构化 issue、一个 chat-message SSE 事件和既有 reducer 分支。 |
+| 是否复用消息/SSE/Turn 基础设施？ | 是。复用 `chat_message`、EventBus、history/status/reconnect、ThreadFactory、Service 和 Runner。 |
+| 是否过度设计？ | 已删去独立 retry coordinator、repair endpoint、repair table、浏览器发起 Turn 和双前端 reducer 方案。保留的 continuation loop 仅支持一次、仅服务此边界。 |

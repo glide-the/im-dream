@@ -22,6 +22,7 @@
 // [Sync] 2026-08-31: add safe structured Chat turn-error and Thread reload copy.
 // [Sync] 2026-08-31: remove the unused daily-picture generation status copy.
 // [Sync] 2026-09-01: add manual Writing suggestion trigger, lifecycle, and recovery copy.
+// [Sync] 2026-09-01: label visible Dream workbench auto-repair user messages.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -552,6 +553,10 @@ const resources = {
           empty: 'No Dreams are available to resume.',
           listAria: 'Resumable Dreams',
           open: 'Continue'
+        },
+        autoRepair: {
+          source: 'Workbench auto-repair',
+          failed: 'Workbench auto-repair · stopped'
         },
         filters: {
           filterAll: 'Filter: All',
@@ -1393,6 +1398,10 @@ const resources = {
           empty: '当前没有可恢复的 Dream。',
           listAria: '可恢复的 Dream',
           open: '继续查看'
+        },
+        autoRepair: {
+          source: '工作台自动修正',
+          failed: '工作台自动修正 · 已停止'
         },
         filters: {
           filterAll: '筛选：全部',
