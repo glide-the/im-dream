@@ -1,7 +1,7 @@
 // [Input] Actor-scoped run ID, Episode artifact REST surface, and optional output hints.
 // [Output] Strict ETag fetch seam, last-good reducer, and polling/reentry hook.
 // [Pos] Story Workspace Episode artifact query boundary (U5)
-// [Sync] 2026-09-02: accept an exact weak HTTP ETag wrapper from transforming proxies.
+// [Sync] 2026-09-02: reuse the shared strong/weak response ETag policy.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -10,6 +10,10 @@ import {
   storyWorkspaceParseEpisodeArtifactSurface,
   type StoryWorkspaceEpisodeArtifactSurface,
 } from './contracts';
+import {
+  storyWorkspaceQuotedEtag,
+  storyWorkspaceResponseMatchesEtag,
+} from './httpEtag';
 
 const STORY_WORKSPACE_EPISODE_OUTPUT_EVENT = 'ink:story-workspace-output';
 const STORY_WORKSPACE_EPISODE_MIN_POLL_INTERVAL_MS = 5000;
@@ -186,19 +190,6 @@ export type StoryWorkspaceEpisodeArtifactsFetchResult =
   | { readonly kind: 'surface'; readonly data: StoryWorkspaceEpisodeArtifactSurface }
   | { readonly kind: 'not-modified'; readonly etag: string };
 
-function storyWorkspaceEpisodeQuotedEtag(etag: string): string {
-  return `"${etag}"`;
-}
-
-/** Match one business revision while allowing the standard HTTP weak marker. */
-function storyWorkspaceEpisodeResponseMatchesEtag(
-  responseEtag: string | null,
-  etag: string,
-): boolean {
-  const quotedEtag = storyWorkspaceEpisodeQuotedEtag(etag);
-  return responseEtag === quotedEtag || responseEtag === `W/${quotedEtag}`;
-}
-
 /** Fetch one authoritative snapshot without ever consuming an error response body. */
 export async function storyWorkspaceFetchEpisodeArtifacts(
   endpoint: string,
@@ -206,7 +197,7 @@ export async function storyWorkspaceFetchEpisodeArtifacts(
 ): Promise<StoryWorkspaceEpisodeArtifactsFetchResult> {
   const headers = new Headers({ Accept: 'application/json' });
   if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
-  if (options.etag) headers.set('If-None-Match', storyWorkspaceEpisodeQuotedEtag(options.etag));
+  if (options.etag) headers.set('If-None-Match', storyWorkspaceQuotedEtag(options.etag));
   const response = await (options.fetchImpl ?? fetch)(endpoint, {
     credentials: 'include',
     headers,
@@ -217,7 +208,7 @@ export async function storyWorkspaceFetchEpisodeArtifacts(
       throw new StoryWorkspaceEpisodeArtifactsContractError();
     }
     const responseEtag = response.headers.get('ETag');
-    if (!storyWorkspaceEpisodeResponseMatchesEtag(responseEtag, options.etag)) {
+    if (!storyWorkspaceResponseMatchesEtag(responseEtag, options.etag)) {
       throw new StoryWorkspaceEpisodeArtifactsContractError();
     }
     return { kind: 'not-modified', etag: options.etag };
@@ -240,7 +231,7 @@ export async function storyWorkspaceFetchEpisodeArtifacts(
   }
   const responseEtag = response.headers.get('ETag');
   if (data.bindingAvailability === 'bound') {
-    if (data.etag === null || !storyWorkspaceEpisodeResponseMatchesEtag(responseEtag, data.etag)) {
+    if (data.etag === null || !storyWorkspaceResponseMatchesEtag(responseEtag, data.etag)) {
       throw new StoryWorkspaceEpisodeArtifactsContractError();
     }
   } else if (responseEtag !== null) {

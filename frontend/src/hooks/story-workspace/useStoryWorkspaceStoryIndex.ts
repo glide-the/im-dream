@@ -1,6 +1,8 @@
 // [Input] Actor-scoped Dream run identity and the dedicated Story Index REST projection.
 // [Output] Strict ETag reads with bounded Project title, last-good state, and one idempotent reconcile mutation.
 // [Pos] Story Workspace Story Index query boundary; independent from Episode Artifact CAS.
+// [Sync] 2026-09-02: reuse the shared strong/weak response ETag policy while
+//                    keeping strong If-Match request semantics.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -10,6 +12,10 @@ import type {
   StoryWorkspaceStoryIndexProjection,
   StoryWorkspaceStoryIndexStatus,
 } from './contracts';
+import {
+  storyWorkspaceQuotedEtag,
+  storyWorkspaceResponseMatchesEtag,
+} from './httpEtag';
 
 const STORY_WORKSPACE_STORY_INDEX_INVALID_MESSAGE = 'Story index data is unavailable.';
 export const STORY_WORKSPACE_STORY_INDEX_POLL_INTERVAL_MS = 30_000;
@@ -91,10 +97,6 @@ function storyWorkspaceStoryIndexNullableErrorCode(
     || !STORY_WORKSPACE_STORY_INDEX_ERROR_CODES.has(value as StoryWorkspaceStoryIndexErrorCode)
   ) throw new StoryWorkspaceStoryIndexContractError();
   return value as StoryWorkspaceStoryIndexErrorCode;
-}
-
-function storyWorkspaceStoryIndexQuotedEtag(etag: string): string {
-  return `"${etag}"`;
 }
 
 function storyWorkspaceStoryIndexSafeErrorCode(
@@ -243,7 +245,7 @@ export async function storyWorkspaceFetchStoryIndex(
 ): Promise<StoryWorkspaceStoryIndexFetchResult> {
   const headers = new Headers({ Accept: 'application/json' });
   if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
-  if (options.etag) headers.set('If-None-Match', storyWorkspaceStoryIndexQuotedEtag(options.etag));
+  if (options.etag) headers.set('If-None-Match', storyWorkspaceQuotedEtag(options.etag));
   const response = await (options.fetchImpl ?? fetch)(endpoint, {
     credentials: 'include',
     headers,
@@ -252,7 +254,7 @@ export async function storyWorkspaceFetchStoryIndex(
   if (response.status === 304) {
     if (
       !options.etag
-      || response.headers.get('ETag') !== storyWorkspaceStoryIndexQuotedEtag(options.etag)
+      || !storyWorkspaceResponseMatchesEtag(response.headers.get('ETag'), options.etag)
     ) throw new StoryWorkspaceStoryIndexContractError();
     return { kind: 'not-modified', etag: options.etag };
   }
@@ -272,7 +274,7 @@ export async function storyWorkspaceFetchStoryIndex(
   if (options.expectedRunId !== undefined && data.runId !== options.expectedRunId) {
     throw new StoryWorkspaceStoryIndexContractError();
   }
-  if (response.headers.get('ETag') !== storyWorkspaceStoryIndexQuotedEtag(data.etag)) {
+  if (!storyWorkspaceResponseMatchesEtag(response.headers.get('ETag'), data.etag)) {
     throw new StoryWorkspaceStoryIndexContractError();
   }
   return { kind: 'projection', data };
@@ -310,7 +312,7 @@ export async function storyWorkspaceReconcileStoryIndex(
   const headers = new Headers({
     Accept: 'application/json',
     'Content-Type': 'application/json',
-    'If-Match': storyWorkspaceStoryIndexQuotedEtag(etag),
+    'If-Match': storyWorkspaceQuotedEtag(etag),
   });
   if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
   const response = await (options.fetchImpl ?? fetch)(
@@ -338,7 +340,7 @@ export async function storyWorkspaceReconcileStoryIndex(
   const data = storyWorkspaceParseStoryIndexProjection(payload);
   if (
     data.runId !== runId
-    || response.headers.get('ETag') !== storyWorkspaceStoryIndexQuotedEtag(data.etag)
+    || !storyWorkspaceResponseMatchesEtag(response.headers.get('ETag'), data.etag)
   ) throw new StoryWorkspaceStoryIndexContractError();
   return data;
 }

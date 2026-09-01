@@ -1,6 +1,7 @@
 // [Input] Synthetic Story Index projections and HTTP responses.
 // [Output] Strict contract, independent ETag, last-good, and reconcile-CAS coverage.
 // [Pos] Story Workspace Story Index frontend query seam.
+// [Sync] 2026-09-02: accept proxy weak response ETags without weakening If-Match.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam reads source; browser app omits Node types.
@@ -176,6 +177,38 @@ test('GET validates its own response ETag and exact 304 while retaining auth sco
       headers: { ETag: `"${ETAG_2}"` },
     })) as typeof fetch,
   })).rejects.toThrow('Story index data is unavailable.');
+});
+
+test('GET and POST accept matching proxy weak response ETags', async () => {
+  const data = projection('indexed');
+  await expect(storyWorkspaceFetchStoryIndex('/api/story-index', {
+    expectedRunId: RUN_ID,
+    fetchImpl: (async () => new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ETag: `W/"${data.etag}"` },
+    })) as typeof fetch,
+  })).resolves.toEqual({ kind: 'projection', data });
+
+  await expect(storyWorkspaceFetchStoryIndex('/api/story-index', {
+    etag: data.etag,
+    fetchImpl: (async () => new Response(null, {
+      status: 304,
+      headers: { ETag: `W/"${data.etag}"` },
+    })) as typeof fetch,
+  })).resolves.toEqual({ kind: 'not-modified', etag: data.etag });
+
+  const indexed = { ...data, etag: ETAG_2 };
+  let requestHeaders = new Headers();
+  await expect(storyWorkspaceReconcileStoryIndex(RUN_ID, ETAG_1, {
+    fetchImpl: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestHeaders = new Headers(init?.headers);
+      return new Response(JSON.stringify(indexed), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', ETag: `W/"${ETAG_2}"` },
+      });
+    }) as typeof fetch,
+  })).resolves.toEqual(indexed);
+  expect(requestHeaders.get('If-Match')).toBe(`"${ETAG_1}"`);
 });
 
 test('GET errors retain last-good data and never consume unsafe server detail', async () => {
