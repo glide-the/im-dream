@@ -29,6 +29,9 @@
 //                    sources with explicit backend entrypoints.
 // [Sync] 2026-08-30: accept the installed notion-session Read and notion-cli Bash tool boundaries without treating either as an operation source.
 // [Sync] 2026-08-30: parse the server ntn installation prerequisite and requires_installation state before connector auth.
+// [Sync] 2026-09-01: accept archive-backed Notion Skills that require the
+//                    canonical Read+Bash combination while rejecting unknown
+//                    or duplicate tool names.
 /**
  * Resource connector API helpers.
  *
@@ -211,7 +214,7 @@ export interface NotionSkillFileDescriptor {
 export interface NotionSkillDetail {
   packageRevision: string;
   skill: NotionCapabilitySkillSummary & {
-    tools: ['Read'] | ['Bash'];
+    tools: Array<'Read' | 'Bash'>;
     body: string;
   };
   files: NotionSkillFileDescriptor[];
@@ -678,10 +681,13 @@ function normalizeNotionSkillDetail(raw: unknown): NotionSkillDetail {
   const skillRecord = asRecord(record.skill);
   const tools = skillRecord.tools;
   const files = record.files;
+  const validTools = Array.isArray(tools)
+    && tools.length >= 1
+    && tools.length <= 2
+    && tools.every((tool) => tool === 'Read' || tool === 'Bash')
+    && new Set(tools).size === tools.length;
   if (
-    !Array.isArray(tools)
-    || tools.length !== 1
-    || (tools[0] !== 'Read' && tools[0] !== 'Bash')
+    !validTools
     || !Array.isArray(files)
   ) {
     throw new ResourceConnectorApiError(502, 'Notion Skill detail is invalid. Please retry.');
@@ -690,7 +696,7 @@ function normalizeNotionSkillDetail(raw: unknown): NotionSkillDetail {
     packageRevision: requireNonEmptyString(record.package_revision ?? record.packageRevision, 'package revision'),
     skill: {
       ...normalizeCapabilitySkill(skillRecord),
-      tools: tools[0] === 'Read' ? ['Read'] : ['Bash'],
+      tools: [...tools] as Array<'Read' | 'Bash'>,
       body: requireNonEmptyString(skillRecord.body, 'Skill body'),
     },
     files: files.map(normalizeSkillFileDescriptor),

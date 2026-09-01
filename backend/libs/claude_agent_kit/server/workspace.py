@@ -1,6 +1,7 @@
 # [Input] None — reads AGENT_CWD env var and project root for template assets.
 # [Output] Provide get_workspace_root, get_or_create_thread_runtime_workspace,
 #          init_workspace, get_or_create_workspace, get_existing_workspace,
+#          sync_builtin_workspace_skills,
 #          extract_archive_in_skills, list_workspace_files, list_workspace_file_tree,
 #          read_workspace_file_content, read_workspace_download_content,
 #          write_workspace_file, delete_workspace_file,
@@ -97,6 +98,10 @@
 #                    INK_AGENT_SANDBOX_ENABLED capability; default/invalid
 #                    values fail closed to enabled while explicit false keeps
 #                    Workspace Mode active and emits coherent unsandboxed flags.
+# [Sync] 2026-09-01: publish common/platform builtin Skill packages through the
+#                    shared catalog, safely unpack canonical `.skill` archives,
+#                    keep Runtime discovery flat by Skill ID, and contain
+#                    package/publication failures outside the Agent turn.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -142,7 +147,15 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Literal, Mapping, Optional
+from typing import Any, Iterable, List, Literal, Mapping, Optional
+
+from .builtin_skill_packages import (
+    BuiltinSkillPackageError,
+    BuiltinSkillSyncResult,
+    DEFAULT_BUILTIN_SKILLS_ROOT,
+    materialize_skill_archive,
+    sync_builtin_skill_packages,
+)
 
 from .sdk_env import (
     CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME,
@@ -176,7 +189,7 @@ SANDBOX_NETWORK_ALLOW_ALL_DOMAIN = "*"
 
 _PROJECT_ROOT: Path = Path(__file__).resolve().parents[4]
 _BACKEND_ROOT: Path = Path(__file__).resolve().parents[3]
-_BUILTIN_SKILLS_ROOT: Path = _BACKEND_ROOT / "builtin_skills"
+_BUILTIN_SKILLS_ROOT: Path = DEFAULT_BUILTIN_SKILLS_ROOT
 
 
 def resolve_sandbox_enabled(
@@ -496,6 +509,27 @@ def _sandbox_fs_extra_write_paths(raw: object) -> list[str]:
     return result
 
 
+def _sandbox_builtin_skill_read_paths(raw: object) -> list[str]:
+    """Keep server-selected directory Skill symlink targets readable only."""
+
+    if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes, Mapping)):
+        return []
+    builtin_root = _BUILTIN_SKILLS_ROOT.resolve(strict=False)
+    result: list[str] = []
+    for item in raw:
+        candidate = Path(str(item)).resolve(strict=False)
+        if (
+            not candidate.is_dir()
+            or candidate.is_symlink()
+            or not candidate.is_relative_to(builtin_root)
+        ):
+            continue
+        value = str(candidate)
+        if value not in result:
+            result.append(value)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Public API — workspace lifecycle
 # ---------------------------------------------------------------------------
@@ -546,6 +580,7 @@ def _workspace_sandbox_config(
     network_mode: object = "allowlist",
     network_allowed_domains: object = None,
     fs_allowed_write_paths: object = None,
+    builtin_skill_read_paths: object = None,
 ) -> dict:
     """Return Claude Code sandbox settings for a single thread workspace.
 
@@ -565,7 +600,11 @@ def _workspace_sandbox_config(
     )
     enabled = bool(enabled)
 
-    allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
+    allow_read = [
+        str(workspace_abs),
+        *_sandbox_builtin_skill_read_paths(builtin_skill_read_paths),
+        *_sandbox_runtime_read_allow_paths(),
+    ]
 
     # Write policy is allow-only for the thread workspace, plus Claude Code's
     # own sandbox TMPDIR (runtime scratch, kills the cwd-* zsh noise), plus
@@ -644,6 +683,7 @@ def sync_workspace_sandbox_settings(
     network_mode: object = "allowlist",
     network_allowed_domains: object = None,
     fs_allowed_write_paths: object = None,
+    builtin_skill_read_paths: object = None,
 ) -> None:
     """Merge per-thread sandbox settings into ``{workspace}/.claude/settings.json``.
 
@@ -693,6 +733,7 @@ def sync_workspace_sandbox_settings(
         network_mode=network_mode,
         network_allowed_domains=network_allowed_domains,
         fs_allowed_write_paths=fs_allowed_write_paths,
+        builtin_skill_read_paths=builtin_skill_read_paths,
     )
     try:
         settings_path.write_text(
@@ -736,7 +777,7 @@ def init_workspace(
         (workspace / subdir).mkdir(exist_ok=True)
 
     # Copy template assets from project root (only on first init).
-    _copy_template_assets(workspace)
+    builtin_sync_result = _copy_template_assets(workspace)
 
     # Keep per-thread Bash sandbox settings current. The sandbox block depends
     # on this workspace's resolved path, so it cannot live in the project
@@ -747,6 +788,11 @@ def init_workspace(
         network_mode=sandbox_network_mode,
         network_allowed_domains=sandbox_network_allowed_domains,
         fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
+        builtin_skill_read_paths=(
+            builtin_sync_result.linked_source_paths
+            if builtin_sync_result is not None
+            else ()
+        ),
     )
 
     # Claude Code protects creation of new directories inside `.claude` from
@@ -1114,35 +1160,52 @@ def _seed_workspace_skills(project_root: Path, workspace: Path) -> None:
             )
 
 
-def _sync_builtin_workspace_skills(workspace: Path) -> None:
-    """Refresh server-owned Skills shipped inside the backend build context.
+def _sync_builtin_workspace_skills(
+    workspace: Path,
+    *,
+    enabled_platforms: Iterable[str] = (),
+    prune_inactive_platforms: bool = False,
+) -> BuiltinSkillSyncResult | None:
+    """Refresh server-owned common and selected-platform Skill packages."""
 
-    A backend-only Docker build cannot see the repository-root ``.claude``
-    directory. Built-in names are therefore authoritative and repaired on each
-    full workspace init; unrelated user/runtime-installed Skills are untouched.
-    """
+    try:
+        result = sync_builtin_skill_packages(
+            workspace,
+            enabled_platforms=enabled_platforms,
+            skills_root=_BUILTIN_SKILLS_ROOT,
+            prune_inactive_platforms=prune_inactive_platforms,
+        )
+    except (BuiltinSkillPackageError, OSError):
+        logger.warning(
+            "Builtin Skill catalog refresh failed safely; preserving the prior workspace state.",
+            exc_info=True,
+        )
+        return None
+    logger.debug(
+        "Refreshed builtin Skills synced=%s removed=%s",
+        result.synced_ids,
+        result.removed_ids,
+    )
+    return result
 
-    if not _BUILTIN_SKILLS_ROOT.is_dir():
-        return
-    destination_root = workspace / "skills"
-    destination_root.mkdir(parents=True, exist_ok=True)
-    for source in sorted(_BUILTIN_SKILLS_ROOT.iterdir()):
-        if source.name.startswith(".") or not source.is_dir() or source.is_symlink():
-            continue
-        destination = destination_root / source.name
-        try:
-            if destination.is_symlink() or destination.is_file():
-                destination.unlink()
-            elif destination.is_dir():
-                shutil.rmtree(destination)
-            shutil.copytree(source, destination)
-            logger.debug("Refreshed built-in skill %s → %s", source.name, destination)
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Failed to refresh built-in skill %s; capability remains local to that skill.",
-                source.name,
-                exc_info=True,
-            )
+
+def sync_builtin_workspace_skills(
+    workspace: Path,
+    *,
+    enabled_platforms: Iterable[str] = (),
+    prune_inactive_platforms: bool = False,
+) -> BuiltinSkillSyncResult | None:
+    """Refresh builtin packages and rebuild the existing Runtime discovery links."""
+
+    result = _sync_builtin_workspace_skills(
+        workspace,
+        enabled_platforms=enabled_platforms,
+        prune_inactive_platforms=prune_inactive_platforms,
+    )
+    from .workspace_file_sync import sync_skills_symlinks  # local import avoids circular
+
+    sync_skills_symlinks(workspace)
+    return result
 
 
 _EDITOR_INDEX_README = """\
@@ -1237,7 +1300,7 @@ def _init_editor_index(workspace: Path) -> None:
             )
 
 
-def _copy_template_assets(workspace: Path) -> None:
+def _copy_template_assets(workspace: Path) -> BuiltinSkillSyncResult | None:
     """Copy/sync project-root template assets into *workspace*.
 
     Assets copied:
@@ -1262,7 +1325,7 @@ def _copy_template_assets(workspace: Path) -> None:
     # Backend-owned Skills are part of the deployable image and repair stale
     # workspace copies on every full init. This runs after the dev-only root
     # seed so one canonical built-in wins in both local and container topology.
-    _sync_builtin_workspace_skills(workspace)
+    builtin_sync_result = _sync_builtin_workspace_skills(workspace)
 
     # Copy .mcp.json (optional — silently skipped when absent).
     src_mcp = project_root / ".mcp.json"
@@ -1275,6 +1338,7 @@ def _copy_template_assets(workspace: Path) -> None:
             logger.warning(
                 "Failed to copy .mcp.json to %s; skipping.", dst_mcp, exc_info=True
             )
+    return builtin_sync_result
 
 
 # ---------------------------------------------------------------------------
@@ -1369,7 +1433,14 @@ def extract_archive_in_skills(
             tempfile.mkdtemp(prefix=".extract_tmp_", dir=skills_dir)
         )
 
-        if archive_name.endswith(".zip") or archive_name.endswith(".skill"):
+        if archive_name.endswith(".skill"):
+            tmp_dir.rmdir()
+            materialize_skill_archive(
+                archive_path,
+                tmp_dir,
+                expected_skill_id=target_name,
+            )
+        elif archive_name.endswith(".zip"):
             _extract_zip_safe(archive_path, tmp_dir)
         elif (
             archive_name.endswith(".tar.gz")
@@ -1400,7 +1471,7 @@ def extract_archive_in_skills(
         )
         return "extracted", None
 
-    except _ArchiveSecurityError as exc:
+    except (BuiltinSkillPackageError, _ArchiveSecurityError) as exc:
         logger.warning(
             "Archive security validation failed (%s): %s", archive_rel_path, exc
         )

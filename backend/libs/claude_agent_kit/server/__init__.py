@@ -5,6 +5,7 @@
 # [Pos] subpackage root in libs/claude_agent_kit/server
 # [Sync] 2026-05-09: export necklace MCP server factory.
 # [Sync] 2026-05-09: export memory MCP server factory.
+# [Sync] 2026-09-01: export connector-selected builtin Skill workspace refresh.
 
 """Server subpackage for ClaudeAgentKit."""
 from .agent_runner import ClaudeAgentRunner, create_agent_runner
@@ -33,6 +34,7 @@ from .workspace import (
     get_workspace_root,
     init_workspace,
     get_or_create_workspace,
+    sync_builtin_workspace_skills,
     resolve_safe_path,
     is_archive,
     extract_archive_in_skills,
@@ -57,6 +59,7 @@ __all__ = [
     "get_workspace_root",
     "init_workspace",
     "get_or_create_workspace",
+    "sync_builtin_workspace_skills",
     "resolve_safe_path",
     # Archive extraction (WSK-04)
     "is_archive",

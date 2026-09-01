@@ -23,6 +23,11 @@
 # [Sync] 2026-06-16: cover direct .claude/skills writes imported back into
 #                    workspace/skills before discovery symlinks are rebuilt.
 # [Sync] 2026-08-30: require notion-cli to refresh and discover beside notion-session without weakening the latter's Read-only contract.
+# [Sync] 2026-09-01: require the production skill-creator package to refresh
+#                    and remain discoverable in existing thread workspaces.
+# [Sync] 2026-09-01: require common directory Skills to use exact source
+#                    symlinks, platform Skills to be connector-selected, and
+#                    `.skill` packages to unpack flat inside the current thread.
 # [Sync] 2026-08-22: cover exact read/write denial for projected Claude MCP
 #                    credential and user-config files inside the thread home.
 # [Sync] 2026-06-17: cover Linux sbin runtime allowlist needed by bubblewrap.
@@ -85,6 +90,7 @@ from libs.claude_agent_kit.server.workspace import (
     get_workspace_root,
     init_workspace,
     resolve_sandbox_enabled,
+    sync_builtin_workspace_skills,
     sync_workspace_sandbox_settings,
 )
 
@@ -613,11 +619,24 @@ class TestSkillsSync(unittest.TestCase):
 
     def test_bundled_notion_skills_are_discovered_and_repair_stale_copies(self):
         ws = init_workspace("skills-builtin-notion")
+        sync_builtin_workspace_skills(
+            ws,
+            prune_inactive_platforms=True,
+        )
+        self.assertFalse((ws / "skills" / "notion-session").exists())
+        sync_builtin_workspace_skills(
+            ws,
+            enabled_platforms=("notion",),
+            prune_inactive_platforms=True,
+        )
         skill = ws / "skills" / "notion-session" / "SKILL.md"
         discovery = ws / ".claude" / "skills" / "notion-session"
         cli_skill = ws / "skills" / "notion-cli" / "SKILL.md"
         cli_discovery = ws / ".claude" / "skills" / "notion-cli"
+        diary_root = ws / "skills" / "notion-diary-sync"
+        diary_discovery = ws / ".claude" / "skills" / "notion-diary-sync"
 
+        self.assertTrue(skill.parent.is_symlink())
         content = skill.read_text(encoding="utf-8")
         self.assertIn(".notion/pages/<page_id>.json", content)
         self.assertIn('tools: ["Read"]', content)
@@ -642,6 +661,7 @@ class TestSkillsSync(unittest.TestCase):
         self.assertTrue(discovery.is_symlink())
         self.assertEqual(discovery.resolve(), skill.parent.resolve())
         cli_content = cli_skill.read_text(encoding="utf-8")
+        self.assertTrue(cli_skill.parent.is_symlink())
         self.assertIn("name: notion-cli", cli_content)
         self.assertIn('tools: ["Bash"]', cli_content)
         self.assertIn("ntn api v1/search", cli_content)
@@ -651,16 +671,119 @@ class TestSkillsSync(unittest.TestCase):
             {path.name for path in (cli_skill.parent / "references").glob("*.md")},
             expected_references,
         )
+        self.assertTrue((diary_root / "SKILL.md").is_file())
+        self.assertFalse(diary_root.is_symlink())
+        self.assertFalse((diary_root / "notion-diary-sync").exists())
+        self.assertTrue(diary_discovery.is_symlink())
+        self.assertEqual(diary_discovery.resolve(), diary_root.resolve())
 
+        skill.parent.unlink()
+        skill.parent.mkdir()
         skill.write_text("stale runtime copy", encoding="utf-8")
+        cli_skill.parent.unlink()
+        cli_skill.parent.mkdir()
         cli_skill.write_text("stale CLI runtime copy", encoding="utf-8")
-        init_workspace("skills-builtin-notion")
+        (diary_root / "SKILL.md").write_text(
+            "stale diary runtime copy",
+            encoding="utf-8",
+        )
+        sync_builtin_workspace_skills(
+            ws,
+            enabled_platforms=("notion",),
+            prune_inactive_platforms=True,
+        )
         repaired = skill.read_text(encoding="utf-8")
         repaired_cli = cli_skill.read_text(encoding="utf-8")
         self.assertIn("Runtime Read hook", repaired)
         self.assertNotIn("stale runtime copy", repaired)
         self.assertIn("Notion CLI 工作空间数据助手", repaired_cli)
         self.assertNotIn("stale CLI runtime copy", repaired_cli)
+        self.assertIn(
+            "日记同步到 Notion",
+            (diary_root / "SKILL.md").read_text(encoding="utf-8"),
+        )
+
+        sync_builtin_workspace_skills(
+            ws,
+            prune_inactive_platforms=True,
+        )
+        self.assertFalse(skill.parent.exists())
+        self.assertFalse(cli_skill.parent.exists())
+        self.assertFalse(diary_root.exists())
+
+    def test_bundled_skill_creator_is_discovered_and_repairs_stale_copy(self):
+        ws = init_workspace("skills-builtin-creator")
+        skill_root = ws / "skills" / "skill-creator"
+        skill = skill_root / "SKILL.md"
+        discovery = ws / ".claude" / "skills" / "skill-creator"
+
+        content = skill.read_text(encoding="utf-8")
+        self.assertTrue(skill_root.is_symlink())
+        self.assertIn("name: skill-creator", content)
+        self.assertTrue((skill_root / "scripts" / "quick_validate.py").is_file())
+        self.assertTrue((skill_root / "references" / "schemas.md").is_file())
+        self.assertTrue(discovery.is_symlink())
+        self.assertEqual(discovery.resolve(), skill_root.resolve())
+
+        skill_root.unlink()
+        skill_root.mkdir()
+        skill.write_text("stale runtime copy", encoding="utf-8")
+        init_workspace("skills-builtin-creator")
+        repaired = skill.read_text(encoding="utf-8")
+        self.assertIn("# Skill Creator", repaired)
+        self.assertNotIn("stale runtime copy", repaired)
+        self.assertTrue(skill_root.is_symlink())
+
+    def test_sandbox_allows_only_selected_directory_skill_sources(self):
+        ws = init_workspace("skills-builtin-sandbox", sandbox_enabled=True)
+        common_source = (ws / "skills" / "skill-creator").resolve()
+        initial = json.loads((ws / ".claude" / "settings.json").read_text())
+        initial_fs = initial["sandbox"]["filesystem"]
+        self.assertIn(str(common_source), initial_fs["allowRead"])
+        self.assertIn(str(ROOT.resolve()), initial_fs["denyRead"])
+        self.assertNotIn(
+            str((ROOT / "builtin_skills" / "notion" / "notion-session").resolve()),
+            initial_fs["allowRead"],
+        )
+
+        result = sync_builtin_workspace_skills(
+            ws,
+            enabled_platforms=("notion",),
+            prune_inactive_platforms=True,
+        )
+        self.assertIsNotNone(result)
+        assert result is not None
+        sync_workspace_sandbox_settings(
+            ws,
+            enabled=True,
+            builtin_skill_read_paths=result.linked_source_paths,
+        )
+        updated = json.loads((ws / ".claude" / "settings.json").read_text())
+        updated_allow_read = updated["sandbox"]["filesystem"]["allowRead"]
+        self.assertIn(
+            str((ws / "skills" / "notion-session").resolve()),
+            updated_allow_read,
+        )
+        self.assertNotIn(
+            str((ROOT / "builtin_skills" / "notion" / "notion-diary-sync.skill").resolve()),
+            updated_allow_read,
+        )
+
+    def test_builtin_publish_io_failure_does_not_interrupt_workspace_refresh(self):
+        ws = init_workspace("skills-builtin-io-failure")
+
+        with unittest.mock.patch(
+            "libs.claude_agent_kit.server.workspace.sync_builtin_skill_packages",
+            side_effect=OSError("synthetic publish failure"),
+        ):
+            result = sync_builtin_workspace_skills(
+                ws,
+                enabled_platforms=("notion",),
+                prune_inactive_platforms=True,
+            )
+
+        self.assertIsNone(result)
+        self.assertTrue((ws / ".claude" / "skills").is_dir())
 
 
 class TestSessionIdValidation(unittest.TestCase):

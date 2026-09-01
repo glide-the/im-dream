@@ -18,6 +18,8 @@
 # [Sync] 2026-08-29: verify capability/Skill/file routes stay inspectable before connection,
 #                    expose only stable IDs, and reject stale package revisions.
 # [Sync] 2026-08-30: expose ntn installation metadata and connected Agent CLI availability.
+# [Sync] 2026-09-01: expose schema v5's archive-backed diary Skill and its
+#                    canonical Read+Bash tool boundary through read-only routes.
 
 from __future__ import annotations
 
@@ -403,13 +405,13 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         )
         self.assertEqual(catalog_response.status_code, 200, catalog_response.text)
         catalog = catalog_response.json()["catalog"]
-        self.assertEqual(catalog["schema_version"], 4)
+        self.assertEqual(catalog["schema_version"], 5)
         self.assertEqual(catalog["cli_installation"]["status"], "installed")
         self.assertEqual(catalog["cli_installation"]["required_version"], "0.15.1")
         self.assertEqual(catalog["mcp_inventory"]["status"], "not_integrated")
         self.assertEqual(
             [skill["id"] for skill in catalog["skills"]],
-            ["notion-session", "notion-cli"],
+            ["notion-session", "notion-cli", "notion-diary-sync"],
         )
         self.assertTrue(
             all(skill["availability"] == "requires_connection" for skill in catalog["skills"])
@@ -458,6 +460,19 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self.assertEqual(cli_detail["skill"]["tools"], ["Bash"])
         self.assertIn("Notion CLI 工作空间数据助手", cli_detail["skill"]["body"])
         self.assertEqual(len(cli_detail["files"]), 3)
+
+        diary_detail_response = self.client.get(
+            "/api/connectors/notion/skills/notion-diary-sync",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(
+            diary_detail_response.status_code,
+            200,
+            diary_detail_response.text,
+        )
+        diary_detail = diary_detail_response.json()
+        self.assertEqual(diary_detail["skill"]["tools"], ["Read", "Bash"])
+        self.assertEqual(diary_detail["files"], [])
 
     def test_connector_auth_poll_no_pending_session_does_not_regress_auth(self):
         create_response = self.client.post(

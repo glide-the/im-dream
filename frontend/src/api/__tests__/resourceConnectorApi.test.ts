@@ -6,6 +6,8 @@
 // [Sync] 2026-08-29: cover recoverable failed-reauth warnings and compact selection payloads without raw upstream data.
 // [Sync] 2026-08-29: validate server-owned Notion Skill plus real Hook/workspace operation, stable file ID, and revision transport contracts.
 // [Sync] 2026-08-30: require the ntn installation contract and connected notion-cli availability.
+// [Sync] 2026-09-01: require capability schema v5's third archive-backed
+//                    Notion Skill and its Read+Bash detail boundary.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -217,7 +219,7 @@ test('policy updates preserve backend desired/effective revision', async () => {
 test('capability catalog preserves real Hook and workspace entrypoints', async () => {
   globalThis.fetch = (async () => jsonResponse({
     catalog: {
-      schema_version: 4,
+      schema_version: 5,
       package_revision: 'revision-1',
       cli_installation: {
         status: 'installed',
@@ -242,6 +244,13 @@ test('capability catalog preserves real Hook and workspace entrypoints', async (
           id: 'notion-cli',
           title: 'Notion CLI 工作空间数据助手',
           description: '通过 ntn CLI 访问 Notion',
+          source: 'builtin',
+          availability: 'available',
+        },
+        {
+          id: 'notion-diary-sync',
+          title: '日记同步到 Notion',
+          description: '将今日笔记同步到已选 Notion 数据源',
           source: 'builtin',
           availability: 'available',
         },
@@ -277,7 +286,7 @@ test('capability catalog preserves real Hook and workspace entrypoints', async (
     installCommand: 'npm install -g ntn@0.15.1',
   });
   expect(catalog.mcpInventory.writeStatus).toBe('not_integrated');
-  expect(catalog.skills.map((skill) => skill.id)).toEqual(['notion-session', 'notion-cli']);
+  expect(catalog.skills.map((skill) => skill.id)).toEqual(['notion-session', 'notion-cli', 'notion-diary-sync']);
   expect(catalog.skills[1]?.availability).toBe('available');
   expect(catalog.operations).toEqual(expect.arrayContaining([
     expect.objectContaining({ kind: 'read', source: 'runtime_hook', entrypoint: 'apply_notion_page_read_redirect' }),
@@ -390,6 +399,26 @@ test('renamed notion-cli detail preserves its Bash tool boundary', async () => {
   expect(detail.skill.tools).toEqual(['Bash']);
   expect(detail.skill.availability).toBe('available');
   expect(detail.skill.body).toContain('ntn api v1/search');
+});
+
+test('archive-backed diary sync detail preserves its Read and Bash boundary', async () => {
+  globalThis.fetch = (async () => jsonResponse({
+    package_revision: 'diary-revision-1',
+    skill: {
+      id: 'notion-diary-sync',
+      title: '日记同步到 Notion',
+      description: '将今日笔记同步到已选 Notion 数据源',
+      source: 'builtin',
+      availability: 'available',
+      tools: ['Read', 'Bash'],
+      body: '# 日记同步到 Notion',
+    },
+    files: [],
+  })) as typeof fetch;
+
+  const detail = await getNotionSkillDetail('notion-diary-sync');
+  expect(detail.skill.tools).toEqual(['Read', 'Bash']);
+  expect(detail.files).toEqual([]);
 });
 
 test('Skill file DTO rejects traversal-like relative paths', async () => {

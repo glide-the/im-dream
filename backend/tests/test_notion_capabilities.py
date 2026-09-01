@@ -1,10 +1,12 @@
-# [Input] Installed notion-session/notion-cli packages plus connected/unconnected connector projections.
+# [Input] Installed notion platform directory/.skill packages plus connected/unconnected connector projections.
 # [Output] Verify installed multi-Skill content plus real Hook/workspace capability states, stable file IDs, revisions, and symlink/path fail-closed behavior.
 # [Pos] Focused unit test node for backend/notion/capabilities.py.
 # [Sync] 2026-08-29: add coverage for the Settings capability and safe Skill Markdown projection contract.
 # [Sync] 2026-08-29: require catalog operations to identify the real Read hook/workspace materializer and derive Skill title/files from disk.
 # [Sync] 2026-08-30: require both built-in Notion packages, their distinct tool boundaries, and truthful CLI execution availability.
 # [Sync] 2026-08-30: gate notion-cli on the explicit installed/missing ntn prerequisite and expose the install command before auth.
+# [Sync] 2026-09-01: require the namespaced archive-backed notion-diary-sync
+#                    package, its Read+Bash boundary, and path-safe metadata reads.
 
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ if str(ROOT) not in sys.path:
 
 from notion.capabilities import (  # noqa: E402
     NOTION_CLI_SKILL_ID,
+    NOTION_DIARY_SYNC_SKILL_ID,
     NOTION_SESSION_SKILL_ID,
     NOTION_SKILL_ID,
     NOTION_SKILL_IDS,
@@ -45,7 +48,7 @@ class TestNotionCapabilities(unittest.TestCase):
             cli_installation=NotionCliInstallation(status="installed"),
         )
 
-        self.assertEqual(catalog["schema_version"], 4)
+        self.assertEqual(catalog["schema_version"], 5)
         self.assertEqual(catalog["cli_installation"]["status"], "installed")
         self.assertEqual(
             catalog["cli_installation"]["install_command"],
@@ -103,6 +106,7 @@ class TestNotionCapabilities(unittest.TestCase):
             {
                 NOTION_SESSION_SKILL_ID: "available",
                 NOTION_CLI_SKILL_ID: "available",
+                NOTION_DIARY_SYNC_SKILL_ID: "available",
             },
         )
         self.assertEqual(
@@ -164,6 +168,20 @@ class TestNotionCapabilities(unittest.TestCase):
         )
         self.assertIn("ntn api v1/search", response["file"]["content"])
 
+    def test_diary_sync_skill_is_read_from_archive_without_fixed_business_ids(self):
+        detail = get_notion_skill_detail(
+            NOTION_DIARY_SYNC_SKILL_ID,
+            {"auth_status": "authenticated"},
+            cli_installation=NotionCliInstallation(status="installed"),
+        )
+
+        self.assertEqual(detail["skill"]["tools"], ["Read", "Bash"])
+        self.assertEqual(detail["skill"]["availability"], "available")
+        self.assertIn("日记同步到 Notion", detail["skill"]["body"])
+        self.assertIn("data-source:<已选_data_source_id>", detail["skill"]["body"])
+        self.assertNotIn("NOTION_WORKERS_CONFIG_FILE", detail["skill"]["body"])
+        self.assertEqual(detail["files"], [])
+
     def test_missing_ntn_is_actionable_before_connection(self):
         catalog = build_notion_capability_catalog(
             None,
@@ -174,6 +192,10 @@ class TestNotionCapabilities(unittest.TestCase):
         }
         self.assertEqual(availability[NOTION_SESSION_SKILL_ID], "requires_connection")
         self.assertEqual(availability[NOTION_CLI_SKILL_ID], "requires_installation")
+        self.assertEqual(
+            availability[NOTION_DIARY_SYNC_SKILL_ID],
+            "requires_installation",
+        )
 
     def test_symlinked_public_file_is_rejected(self):
         source_root = ROOT / "builtin_skills"
@@ -182,6 +204,7 @@ class TestNotionCapabilities(unittest.TestCase):
             shutil.copytree(source_root, skills_root)
             public_file = (
                 skills_root
+                / "notion"
                 / NOTION_SKILL_ID
                 / "references"
                 / "notion-search.md"
@@ -208,7 +231,7 @@ class TestNotionCapabilities(unittest.TestCase):
                 None,
                 skills_root=skills_root,
             )
-            skill_path = skills_root / NOTION_SKILL_ID / "SKILL.md"
+            skill_path = skills_root / "notion" / NOTION_SKILL_ID / "SKILL.md"
             content = skill_path.read_text(encoding="utf-8")
             content = "\n".join(
                 "description: 从安装包读取的测试说明。"
@@ -222,7 +245,11 @@ class TestNotionCapabilities(unittest.TestCase):
             )
             skill_path.write_text(content, encoding="utf-8")
             extra_reference = (
-                skills_root / NOTION_SKILL_ID / "references" / "workspace-stage.md"
+                skills_root
+                / "notion"
+                / NOTION_SKILL_ID
+                / "references"
+                / "workspace-stage.md"
             )
             extra_reference.write_text("# Workspace stage\n", encoding="utf-8")
 

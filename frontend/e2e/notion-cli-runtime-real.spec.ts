@@ -2,6 +2,8 @@
 // [Output] Real-business proof that visible Notion CLI capability reaches new/resumed Agent Bash, preserves optional-workers semantics, and leaves ordinary Chat healthy.
 // [Pos] Opt-in Notion CLI Runtime acceptance; it preserves the connector and three-turn Chat thread for review.
 // [Sync] 2026-08-30: verify Settings capability, current actor/thread Bash binding, read-only ntn execution, same-thread resume, and ordinary Chat regression safety.
+// [Sync] 2026-09-01: require the live capability catalog's common/platform
+//                    package schema v5 before Runtime acceptance.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -225,7 +227,7 @@ test('visible Notion CLI capability executes a read-only ntn check in Chat', asy
     '/api/connectors/notion/capabilities',
     token,
   );
-  expect(capabilities.catalog.schema_version).toBe(4);
+  expect(capabilities.catalog.schema_version).toBe(5);
   expect(capabilities.catalog.cli_installation.status).toBe('installed');
   expect(capabilities.catalog.skills).toContainEqual(expect.objectContaining({
     id: 'notion-cli',

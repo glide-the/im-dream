@@ -8,6 +8,8 @@
 // [Sync] 2026-08-30: require ntn installation metadata and verify connected notion-cli is available through Agent Bash.
 // [Sync] 2026-08-30: require the overview heading to identify the connector as Notion CLI.
 // [Sync] 2026-08-30: classify Vite 8 HMR transport-send failures as harness diagnostics during isolated-port QA.
+// [Sync] 2026-09-01: expose the third archive-backed Notion diary Skill in
+//                    the production-shaped capability catalog fixture.
 
 import { expect, test } from '@playwright/test';
 
@@ -99,13 +101,14 @@ test('Notion Settings exposes the seven-section overview and focused child views
     if (request.method() === 'GET' && path === '/api/connectors/notion/capabilities') {
       const availability = disconnected ? 'requires_connection' : 'available';
       await route.fulfill({ json: { catalog: {
-        schema_version: 4,
+        schema_version: 5,
         package_revision: 'revision-1',
         cli_installation: { status: 'installed', required_version: '0.15.1', install_command: 'npm install -g ntn@0.15.1' },
         mcp_inventory: { status: 'not_integrated', revision: null, read_status: 'not_integrated', write_status: 'not_integrated' },
         skills: [
           { id: 'notion-session', title: 'Notion 工作空间助手', description: '只读搜索和读取当前用户已挂载的 Notion 内容', source: 'builtin', availability },
           { id: 'notion-cli', title: 'Notion CLI 工作空间数据助手', description: '通过 ntn CLI 访问 Notion', source: 'builtin', availability },
+          { id: 'notion-diary-sync', title: '日记同步到 Notion', description: '将今日笔记同步到已选 Notion 数据源', source: 'builtin', availability },
         ],
         operations: [
           { id: 'notion-page-read-hook', title: '按需读取页面正文', description: '只在回答需要时校验已选范围，并读取一个页面的最新 Markdown。', kind: 'read', source: 'runtime_hook', entrypoint: 'apply_notion_page_read_redirect', availability },

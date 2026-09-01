@@ -170,6 +170,9 @@
 #                    thread and pass only that private path to the lazy Read hook.
 # [Sync] 2026-08-28: consume only actor-agentdata current index snapshots during
 #                    Chat assembly and clear stale thread content when projection fails.
+# [Sync] 2026-09-01: enable Notion platform builtin Skills only after the
+#                    current actor/thread credential projection is available;
+#                    common Skills remain owned by workspace initialization.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -226,6 +229,8 @@ from libs.claude_agent_kit.server.workspace import (
     get_workspace_root,
     read_task_items,
     resolve_sandbox_enabled,
+    sync_builtin_workspace_skills,
+    sync_workspace_sandbox_settings,
 )
 from claude_agent.tool_confirmation_store import (
     ToolConfirmationNotPending,
@@ -1399,6 +1404,7 @@ class ClaudeAgentService:
                     cwd,
                 )
             state.with_cwd(cwd)
+            enabled_builtin_skill_platforms: set[str] = set()
 
             # Phase 1: establish the per-thread Claude config home together
             # with cwd — BEFORE any claude module (resume transcript probe,
@@ -1451,6 +1457,7 @@ class ClaudeAgentService:
                         )
                         if projection.available and projection.thread_home is not None:
                             notion_credential_home = str(projection.thread_home)
+                            enabled_builtin_skill_platforms.add("notion")
                     except NotionCredentialError:
                         # Missing/invalid credentials fail closed for Notion only.
                         try:
@@ -1474,6 +1481,21 @@ class ClaudeAgentService:
                         "Notion Runtime projection failed safely for session_id=%s.",
                         state.session_id,
                     )
+
+            builtin_sync_result = sync_builtin_workspace_skills(
+                workspace_path,
+                enabled_platforms=enabled_builtin_skill_platforms,
+                prune_inactive_platforms=True,
+            )
+            if builtin_sync_result is not None:
+                sync_workspace_sandbox_settings(
+                    workspace_path,
+                    enabled=resolve_sandbox_enabled(),
+                    network_mode=sandbox_network_mode,
+                    network_allowed_domains=sandbox_network_allowed_domains,
+                    fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
+                    builtin_skill_read_paths=builtin_sync_result.linked_source_paths,
+                )
         else:
             cwd = ""
             if request.cwd:

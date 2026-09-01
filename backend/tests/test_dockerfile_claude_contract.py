@@ -12,10 +12,13 @@
 #                    backend build context.
 # [Sync] 2026-08-30: require the renamed upstream notion-cli package beside notion-session.
 # [Sync] 2026-08-30: require the published clean-room Runtime 0.1.4 selector.
+# [Sync] 2026-09-01: require the notion platform namespace and canonical
+#                    archive-backed notion-diary-sync package.
 
 from __future__ import annotations
 
 from pathlib import Path
+import zipfile
 
 import tomllib
 from packaging.requirements import Requirement
@@ -114,7 +117,8 @@ def test_dockerfile_installs_supported_notion_cli_and_bundled_skill() -> None:
     assert 'test "$(ntn --version)" = "ntn ${NOTION_CLI_VERSION}"' in dockerfile
     assert "ntn login --help" in dockerfile
     assert "ntn doctor --help" in dockerfile
-    skill = BACKEND_ROOT / "builtin_skills" / "notion-session" / "SKILL.md"
+    notion_root = BACKEND_ROOT / "builtin_skills" / "notion"
+    skill = notion_root / "notion-session" / "SKILL.md"
     assert skill.is_file()
     content = skill.read_text(encoding="utf-8")
     assert ".notion/pages/<page_id>.json" in content
@@ -127,7 +131,7 @@ def test_dockerfile_installs_supported_notion_cli_and_bundled_skill() -> None:
         "notion-page-read.md",
         "notion-db-query.md",
     }
-    cli_skill = BACKEND_ROOT / "builtin_skills" / "notion-cli" / "SKILL.md"
+    cli_skill = notion_root / "notion-cli" / "SKILL.md"
     assert cli_skill.is_file()
     cli_content = cli_skill.read_text(encoding="utf-8")
     assert "name: notion-cli" in cli_content
@@ -138,3 +142,10 @@ def test_dockerfile_installs_supported_notion_cli_and_bundled_skill() -> None:
         "notion-page-read.md",
         "notion-db-query.md",
     }
+    diary_skill = notion_root / "notion-diary-sync.skill"
+    assert diary_skill.is_file()
+    with zipfile.ZipFile(diary_skill) as archive:
+        content = archive.read("notion-diary-sync/SKILL.md").decode("utf-8")
+    assert "name: notion-diary-sync" in content
+    assert 'allowed-tools: ["Read", "Bash"]' in content
+    assert "NOTION_WORKERS_CONFIG_FILE" not in content

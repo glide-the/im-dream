@@ -45,6 +45,9 @@
 #                    Skill section instead of a hard-coded notion-session row.
 # [Sync] 2026-08-30: prove Chat context assembly passes the deployment-owned
 #                    disabled sandbox capability independently of Workspace Mode.
+# [Sync] 2026-09-01: prove current actor/thread Notion projection selects the
+#                    Notion builtin platform and refreshes exact directory-source
+#                    sandbox reads; degraded projection keeps common only.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -1037,6 +1040,15 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                     "notion.build_notion_facade",
                     return_value=_FakeFacade(),
                 ) as build_notion_facade,
+                unittest.mock.patch.object(
+                    service_module,
+                    "sync_builtin_workspace_skills",
+                    return_value=SimpleNamespace(linked_source_paths=("/builtin/common", "/builtin/notion")),
+                ) as sync_builtin_workspace_skills,
+                unittest.mock.patch.object(
+                    service_module,
+                    "sync_workspace_sandbox_settings",
+                ) as sync_workspace_sandbox_settings,
             ):
                 execution = await service.assemble_context(
                     request,
@@ -1046,6 +1058,17 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                 )
 
             build_notion_facade.assert_called_once_with(7)
+            sync_builtin_workspace_skills.assert_called_once_with(
+                workspace_path,
+                enabled_platforms={"notion"},
+                prune_inactive_platforms=True,
+            )
+            self.assertEqual(
+                sync_workspace_sandbox_settings.call_args.kwargs[
+                    "builtin_skill_read_paths"
+                ],
+                ("/builtin/common", "/builtin/notion"),
+            )
             self.assertEqual(execution.run_options.cwd, str(workspace_path))
             self.assertEqual(
                 execution.run_options.notion_credential_home,
@@ -1140,6 +1163,15 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
                     "notion.build_notion_facade",
                     side_effect=RuntimeError(secret),
                 ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "sync_builtin_workspace_skills",
+                    return_value=SimpleNamespace(linked_source_paths=("/builtin/common",)),
+                ) as sync_builtin_workspace_skills,
+                unittest.mock.patch.object(
+                    service_module,
+                    "sync_workspace_sandbox_settings",
+                ),
                 self.assertLogs(service_module.logger, level="WARNING") as logs,
             ):
                 execution = await service.assemble_context(
@@ -1153,6 +1185,11 @@ class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(execution.run_options.cwd, str(workspace_path))
         self.assertIsNone(execution.run_options.notion_credential_home)
         self.assertTrue(stale_snapshot_removed)
+        sync_builtin_workspace_skills.assert_called_once_with(
+            workspace_path,
+            enabled_platforms=set(),
+            prune_inactive_platforms=True,
+        )
         self.assertNotIn(secret, "\n".join(logs.output))
         self.assertIn("Notion Runtime projection failed safely", "\n".join(logs.output))
 

@@ -4,6 +4,9 @@
 > **适配说明**: 从 Next.js / TypeScript 迁移到 Python / FastAPI 架构。
 > **[Sync] 2026-06-16**: 同步入口会先导入 `.claude/skills/` 下真实文件/目录，
 > 再重建从 `workspace/skills/` 到 `.claude/skills/` 的软链接。
+> **[Sync] 2026-09-01**: builtin 源目录使用 `common/` 与 `<platform>/`；
+> common 在完整 workspace 中常驻，platform 由当前 actor/thread 的有效连接器
+> Runtime 投影启用，目录包与 `.skill` 解包后仍以扁平 Skill ID 进入发现目录。
 
 ## 概述
 
@@ -29,6 +32,7 @@ flowchart TD
     H --> H2["创建 logs/ 目录"]
     H --> H3["创建 skills/ 目录"]
     H --> H4["同步 .claude/ 到工作空间"]
+    H --> H4A["同步 common builtin Skills"]
     H --> H5["复制 .mcp.json 到工作空间（首次）"]
     H3 --> H6["sync_skills_symlinks()"]
     H6 --> H6A["导入 .claude/skills/ 中的真实写入"]
@@ -47,7 +51,9 @@ flowchart TD
 
     N[用户发送消息] --> O["POST /api/claude-agent"]
     O --> P["get_or_create_workspace(conversationId)"]
-    P --> Q["agent_runner.run_streaming(cwd=workspace_path)"]
+    P --> P1["投影当前 actor/thread 平台连接器"]
+    P1 --> P2["同步已启用 platform builtin Skills"]
+    P2 --> Q["agent_runner.run_streaming(cwd=workspace_path)"]
     Q --> R["Agent 读写 {conversationId}/ 下的文件"]
     R --> S["Agent 可能生成新文件"]
     S --> J
@@ -116,6 +122,25 @@ canonical 目录 `{workspace}/.claude/skills/` 创建真实文件或目录，下
 | 删除 skills/ | `delete_workspace_file()` → `sync_skills_symlinks()` | 删除后清理链接 |
 | 移动涉及 skills/ | `move_workspace_file()` → `sync_skills_symlinks()` | 移动后更新链接 |
 
+### Builtin 源目录与 Runtime 目录
+
+Builtin Skills 的服务端源码按所有权分层，但 Runtime 发现保持扁平：
+
+```text
+backend/builtin_skills/common/skill-creator/
+  -> workspace/skills/skill-creator (精确只读源软链接)
+  -> workspace/.claude/skills/skill-creator
+
+backend/builtin_skills/notion/notion-diary-sync.skill
+  -> 安全解包 staging
+  -> workspace/skills/notion-diary-sync/
+  -> workspace/.claude/skills/notion-diary-sync
+```
+
+`common` 不依赖平台；platform 包由当前 actor/thread 已生效的连接器 Runtime 投影选择。
+完整状态、失败边界与回滚见
+[`builtin-skills-platform-layout.md`](./builtin-skills-platform-layout.md)。
+
 ---
 
 ## 数据通道总览
@@ -135,8 +160,10 @@ sequenceDiagram
     FS->>API: GET /files?sessionId={cid}
     API->>WS: get_or_create_workspace(cid)
     WS->>DISK: mkdir files/ + logs/ + skills/
-    WS->>DISK: sync .claude/ + .mcp.json
+    WS->>DISK: sync .claude/ + common builtin Skills + .mcp.json
     WS->>DISK: sync_skills_symlinks → import .claude/skills real entries + symlink to .claude/skills/
+    AGENT->>WS: connector Runtime 投影成功后选择 platform builtin Skills
+    WS->>DISK: 目录复制 / .skill staging 解包 → 扁平 skills/{id}
     WS-->>API: workspace_path
     API-->>FS: 文件列表
 
