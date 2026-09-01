@@ -1,3 +1,8 @@
+# [Input] Canonical and adversarial Episode auxiliary artifact fixtures.
+# [Output] Projection, association, and public-text policy contract evidence.
+# [Pos] Regression suite for the Story Workspace auxiliary artifact adapter.
+# [Sync] 2026-09-02: canonical Episode evidence paths are not credentials.
+
 """Safe Episode prompt/render/review projection contract tests."""
 
 from __future__ import annotations
@@ -173,6 +178,28 @@ def test_missing_auxiliary_artifacts_are_a_normal_empty_projection() -> None:
     assert projection.associations.shot_render_queue_coverage.availability is (
         StoryWorkspaceEpisodeMetricAvailability.UNAVAILABLE
     )
+
+
+def test_review_allows_canonical_episode_file_reference() -> None:
+    report = b"""---
+scope: script
+overall_verdict: APPROVED
+reviewed_files:
+  - script.md
+---
+# Review
+
+## Provenance
+
+| Rule | Result | Evidence |
+| --- | --- | --- |
+| Canonical script | PASS | Evidence: stories/proj-8b75aa06/episodes/EP01/script.md |
+"""
+
+    projection = _project(review_report=report)
+
+    assert projection.review is not None
+    assert projection.review.overall_verdict == "APPROVED"
 
 
 def test_supports_multi_document_files_and_multiple_explicit_prompt_kinds() -> None:

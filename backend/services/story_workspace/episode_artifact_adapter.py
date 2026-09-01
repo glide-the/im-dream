@@ -1,8 +1,8 @@
 # [Input] Canonical Episode outline/script/storyboard bytes and opaque Episode identity.
 # [Output] Bounded public narrative projection or allowlisted content/schema reason.
 # [Pos] Story Workspace read-only artifact parser and public-text security boundary.
-# [Sync] 2026-09-01: canonical assets/** and stories/** references plus prose
-#                    range tildes are no longer misclassified as secrets/paths.
+# [Sync] 2026-09-02: share the canonical workspace-reference allowlist with
+#                    auxiliary Episode public-text projections.
 
 """Safe read-only projection for Episode outline, script, and storyboard files."""
 
@@ -17,6 +17,15 @@ from uuid import UUID, uuid5
 
 import yaml
 from yaml.events import AliasEvent, CollectionEndEvent, CollectionStartEvent, NodeEvent
+
+try:
+    from services.story_workspace.episode_public_text_policy import (
+        is_story_workspace_episode_public_relative_reference,
+    )
+except ModuleNotFoundError:  # Support repository-root package imports.
+    from backend.services.story_workspace.episode_public_text_policy import (
+        is_story_workspace_episode_public_relative_reference,
+    )
 
 from story_workspace.contracts import (
     StoryWorkspaceEpisodeAssociationCoverage,
@@ -122,14 +131,6 @@ _LONG_TOKEN_CANDIDATE_RE = re.compile(
 )
 _PUBLIC_DREAM_RUN_ID_RE = re.compile(r"run_[0-9a-f]{32}")
 _PUBLIC_CHARACTER_BEAT_ID_RE = re.compile(r"ARC-[A-Z0-9-]{1,124}")
-_PUBLIC_WORKSPACE_RELATIVE_REFERENCE_RE = re.compile(
-    r"(?:"
-    r"assets/(?:characters|scenes|props)/[A-Za-z0-9][A-Za-z0-9._-]{0,127}|"
-    r"stories/[a-z0-9]+(?:-[a-z0-9]+)*/episodes/EP[0-9]{2}/"
-    r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
-    r")",
-    re.IGNORECASE,
-)
 _SENSITIVE_CREDENTIAL_KEYS = (
     "apikey",
     "token",
@@ -793,8 +794,7 @@ def _looks_like_high_entropy_secret(value: str) -> bool:
         for match in _LONG_TOKEN_CANDIDATE_RE.finditer(value)
         if _PUBLIC_DREAM_RUN_ID_RE.fullmatch(match.group(0)) is None
         and _PUBLIC_CHARACTER_BEAT_ID_RE.fullmatch(match.group(0)) is None
-        and _PUBLIC_WORKSPACE_RELATIVE_REFERENCE_RE.fullmatch(match.group(0))
-        is None
+        and not is_story_workspace_episode_public_relative_reference(match.group(0))
     )
 
 

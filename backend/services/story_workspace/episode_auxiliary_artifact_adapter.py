@@ -1,6 +1,10 @@
+# [Input] Canonical Episode prompt, render-guide, and review artifact bytes.
+# [Output] Bounded public auxiliary projection or allowlisted safe failure.
+# [Pos] Story Workspace auxiliary artifact parser and public-text boundary.
+# [Sync] 2026-09-02: canonical workspace-relative references share the same
+#                    strict allowlist as narrative Episode projections.
+
 """Safe read-only projection for Episode prompts, render guide, and review."""
-# [Sync] 2026-08-22: keep review target indexing valid on the declared
-# Python 3.11 runtime by moving the newline join outside the f-string.
 
 from __future__ import annotations
 
@@ -26,6 +30,15 @@ from yaml.events import (
     NodeEvent,
     ScalarEvent,
 )
+
+try:
+    from services.story_workspace.episode_public_text_policy import (
+        is_story_workspace_episode_public_relative_reference,
+    )
+except ModuleNotFoundError:  # Support repository-root package imports.
+    from backend.services.story_workspace.episode_public_text_policy import (
+        is_story_workspace_episode_public_relative_reference,
+    )
 
 from story_workspace.contracts import (
     StoryWorkspaceEpisodeArtifactSection,
@@ -1420,6 +1433,7 @@ def _looks_like_high_entropy_secret(value: str) -> bool:
             minimum_character_classes=3,
         )
         for match in _ASSIGNED_TOKEN_CANDIDATE_RE.finditer(value)
+        if not is_story_workspace_episode_public_relative_reference(match.group(1))
     ):
         return True
     return any(
@@ -1430,6 +1444,7 @@ def _looks_like_high_entropy_secret(value: str) -> bool:
         )
         for match in _LONG_TOKEN_CANDIDATE_RE.finditer(value)
         if _PUBLIC_DREAM_RUN_ID_RE.fullmatch(match.group(0)) is None
+        and not is_story_workspace_episode_public_relative_reference(match.group(0))
     )
 
 
