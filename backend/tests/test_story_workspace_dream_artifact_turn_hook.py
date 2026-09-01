@@ -2,6 +2,8 @@
 # [Output] Verify deterministic artifact sync plus repairable/non-repairable validation classification.
 # [Pos] Story Workspace post-turn Hook contract test in backend/tests.
 # [Sync] 2026-09-01: cover allowlisted project-slug repair and fail-closed launch authority.
+# [Sync] 2026-09-01: cover pre-write rejection of duplicate canonical roots
+#                    and duplicate stage entity identities.
 
 """Automatic root-turn workbench synchronization contract."""
 
@@ -252,6 +254,103 @@ shots:
                     error.issue.repairability,
                     DreamArtifactRepairability.NON_REPAIRABLE,
                 )
+
+    def test_multiple_canonical_project_roots_are_repairable_before_projection_write(self) -> None:
+        duplicate_episode = (
+            self.workspace
+            / "stories"
+            / "stale-project"
+            / "episodes"
+            / "EP01"
+        )
+        duplicate_episode.mkdir(parents=True)
+        (duplicate_episode.parents[1] / "project.yaml").write_text(
+            "project_id: stale-project\nproject_name: 旧项目副本\n",
+            encoding="utf-8",
+        )
+        (duplicate_episode / "storyboard.yaml").write_text(
+            "episode: EP01\ntotal_shots: 1\n",
+            encoding="utf-8",
+        )
+        hook = DreamArtifactTurnHook()
+        ticket = hook.before_main_turn(
+            context=context(),
+            actor_id="actor-1",
+            cwd=str(self.workspace),
+        )
+
+        with (
+            patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
+            patch.object(hook, "_ensure_first_episode_binding") as bind,
+            self.assertRaises(DreamArtifactTurnHookError) as raised,
+        ):
+            hook.after_main_turn(ticket)
+
+        self.assertEqual(
+            raised.exception.code,
+            "DREAM_CANONICAL_PROJECT_AMBIGUOUS",
+        )
+        self.assertIs(
+            raised.exception.issue.repairability,
+            DreamArtifactRepairability.AGENT_REPAIRABLE,
+        )
+        bind.assert_not_called()
+        run_file = (
+            self.workspace
+            / ".dream"
+            / "runtime"
+            / "runs"
+            / RUN_ID
+            / "run.json"
+        )
+        self.assertFalse(run_file.exists())
+
+    def test_duplicate_stage_entity_ids_are_agent_repairable(self) -> None:
+        (self.workspace / "assets" / "characters" / "lead-copy.md").write_text(
+            "---\nchar_id: lead\nchar_name: 林夏副本\n---\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(DreamArtifactTurnHookError) as raised:
+            DreamArtifactTurnHook._collect_stage_projections(
+                self.workspace.resolve()
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "DREAM_STAGE_ENTITY_ID_DUPLICATE",
+        )
+        self.assertEqual(raised.exception.issue.expected, "characters")
+        self.assertEqual(
+            raised.exception.issue.actual,
+            "duplicate_entity_id",
+        )
+        self.assertIs(
+            raised.exception.issue.repairability,
+            DreamArtifactRepairability.AGENT_REPAIRABLE,
+        )
+
+    def test_invalid_workspace_stage_schema_is_agent_repairable(self) -> None:
+        (self.workspace / "assets" / "characters" / "invalid-id.md").write_text(
+            "---\nchar_id: " + ("a" * 129) + "\nchar_name: 越界身份\n---\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(DreamArtifactTurnHookError) as raised:
+            DreamArtifactTurnHook._collect_stage_projections(
+                self.workspace.resolve()
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "DREAM_STAGE_SCHEMA_INVALID",
+        )
+        self.assertEqual(raised.exception.issue.expected, "characters")
+        self.assertEqual(raised.exception.issue.actual, "schema_invalid")
+        self.assertIs(
+            raised.exception.issue.repairability,
+            DreamArtifactRepairability.AGENT_REPAIRABLE,
+        )
 
     def test_successful_root_turn_projects_page_stages_and_private_artifacts(self) -> None:
         hook = DreamArtifactTurnHook()

@@ -2,6 +2,8 @@
 # [Output] Verify allowlisted/redacted message construction, stable identity, and persistence-before-SSE ordering.
 # [Pos] Dream workbench auto-repair application contract test in backend/tests.
 # [Sync] 2026-09-01: initial bounded auto-repair message and dispatch coverage.
+# [Sync] 2026-09-01: cover duplicate-root/stage templates, move-not-copy
+#                    cleanup guidance, and safe exhausted-error detail.
 
 """Dream workbench auto-repair message and continuation tests."""
 
@@ -59,6 +61,37 @@ def mismatch_issue(
         public_message="safe",
         expected=expected,
         actual=actual,
+    )
+
+
+def ambiguous_project_issue() -> DreamArtifactValidationIssue:
+    return DreamArtifactValidationIssue(
+        code="DREAM_CANONICAL_PROJECT_AMBIGUOUS",
+        repairability=DreamArtifactRepairability.AGENT_REPAIRABLE,
+        public_message="safe",
+    )
+
+
+def duplicate_stage_issue(
+    *,
+    stage: str = "storyboards",
+) -> DreamArtifactValidationIssue:
+    return DreamArtifactValidationIssue(
+        code="DREAM_STAGE_ENTITY_ID_DUPLICATE",
+        repairability=DreamArtifactRepairability.AGENT_REPAIRABLE,
+        public_message="safe",
+        expected=stage,
+        actual="duplicate_entity_id",
+    )
+
+
+def invalid_stage_issue() -> DreamArtifactValidationIssue:
+    return DreamArtifactValidationIssue(
+        code="DREAM_STAGE_SCHEMA_INVALID",
+        repairability=DreamArtifactRepairability.AGENT_REPAIRABLE,
+        public_message="safe",
+        expected="characters",
+        actual="schema_invalid",
     )
 
 
@@ -126,7 +159,62 @@ class DreamAutoRepairContractTest(unittest.TestCase):
         text = first.parts[0]["text"]
         self.assertIn("server-project", text)
         self.assertIn("workspace-project", text)
+        self.assertIn("移动或合并", text)
+        self.assertIn("不得只复制目录", text)
+        self.assertIn("唯一 canonical 项目", text)
         self.assertNotIn("postgresql://", text)
+
+    def test_duplicate_project_and_stage_issues_use_bounded_cleanup_templates(self) -> None:
+        ambiguous = build_dream_auto_repair_message(
+            issue=ambiguous_project_issue(),
+            workflow_run_id=RUN_ID,
+            thread_id="thread-auto-repair",
+            originating_message_id="message-project-ambiguous",
+            originating_turn_id="turn-origin",
+        )
+        duplicate = build_dream_auto_repair_message(
+            issue=duplicate_stage_issue(),
+            workflow_run_id=RUN_ID,
+            thread_id="thread-auto-repair",
+            originating_message_id="message-stage-duplicate",
+            originating_turn_id="turn-origin",
+        )
+        invalid = build_dream_auto_repair_message(
+            issue=invalid_stage_issue(),
+            workflow_run_id=RUN_ID,
+            thread_id="thread-auto-repair",
+            originating_message_id="message-stage-invalid",
+            originating_turn_id="turn-origin",
+        )
+
+        self.assertEqual(
+            ambiguous.metadata["validationCode"],
+            "DREAM_CANONICAL_PROJECT_AMBIGUOUS",
+        )
+        self.assertIn("移除其余重复项目根", ambiguous.parts[0]["text"])
+        self.assertEqual(
+            duplicate.metadata["validationCode"],
+            "DREAM_STAGE_ENTITY_ID_DUPLICATE",
+        )
+        self.assertIn("storyboards stage", duplicate.parts[0]["text"])
+        self.assertIn("不得仅篡改 entity_id", duplicate.parts[0]["text"])
+        self.assertEqual(
+            invalid.metadata["validationCode"],
+            "DREAM_STAGE_SCHEMA_INVALID",
+        )
+        self.assertIn("characters stage", invalid.parts[0]["text"])
+
+    def test_exhausted_error_exposes_only_allowlisted_final_reason(self) -> None:
+        error = DreamAutoRepairExhaustedError(
+            "DREAM_STAGE_ENTITY_ID_DUPLICATE"
+        )
+        unsafe = DreamAutoRepairExhaustedError("postgresql://secret")
+
+        self.assertEqual(error.code, "DREAM_WORKBENCH_AUTO_REPAIR_FAILED")
+        self.assertIn("DREAM_STAGE_ENTITY_ID_DUPLICATE", error.public_message)
+        self.assertIn("不会发起第三轮", error.public_message)
+        self.assertNotIn("postgresql://", unsafe.public_message)
+        self.assertNotIn("secret", unsafe.public_message)
 
     def test_unallowlisted_or_unsafe_issue_never_reaches_visible_message(self) -> None:
         with self.assertRaises(DreamAutoRepairError) as raised:

@@ -14,6 +14,9 @@
 #                    model so whitespace/default normalization stays idempotent.
 # [Sync] 2026-09-01: classify trusted-authority failures separately from the
 #                    allowlisted workspace project-slug mismatch repair case.
+# [Sync] 2026-09-01: validate workspace-derived project/stage collections before
+#                    projection writes and classify duplicate canonical roots or
+#                    stage entity identities as bounded Agent-repairable issues.
 
 """Root-turn synchronization from canonical workbench files to one Dream Run.
 
@@ -189,6 +192,44 @@ def _project_story_slug_mismatch_issue(
         public_message="Dream 工作区 project slug 与服务器可信绑定不一致。",
         expected=expected,
         actual=actual,
+    )
+
+
+def _canonical_project_ambiguous_issue() -> DreamArtifactValidationIssue:
+    return DreamArtifactValidationIssue(
+        code="DREAM_CANONICAL_PROJECT_AMBIGUOUS",
+        repairability=DreamArtifactRepairability.AGENT_REPAIRABLE,
+        public_message=(
+            "Dream 工作区存在多个 canonical 项目目录，无法确定本次 Run 的唯一项目。"
+        ),
+    )
+
+
+def _stage_entity_id_duplicate_issue(
+    stage: StoryWorkspaceDreamStage,
+) -> DreamArtifactValidationIssue:
+    return DreamArtifactValidationIssue(
+        code="DREAM_STAGE_ENTITY_ID_DUPLICATE",
+        repairability=DreamArtifactRepairability.AGENT_REPAIRABLE,
+        public_message=(
+            f"Dream 工作区 {stage.value} stage 中存在重复 entity_id。"
+        ),
+        expected=stage.value,
+        actual="duplicate_entity_id",
+    )
+
+
+def _stage_schema_invalid_issue(
+    stage: StoryWorkspaceDreamStage,
+) -> DreamArtifactValidationIssue:
+    return DreamArtifactValidationIssue(
+        code="DREAM_STAGE_SCHEMA_INVALID",
+        repairability=DreamArtifactRepairability.AGENT_REPAIRABLE,
+        public_message=(
+            f"Dream 工作区 {stage.value} stage 不符合工作台结构合同。"
+        ),
+        expected=stage.value,
+        actual="schema_invalid",
     )
 
 
@@ -522,6 +563,19 @@ class DreamArtifactTurnHook:
         ticket: DreamArtifactTurnTicket,
     ) -> DreamArtifactTurnResult:
         workflow_run = self._load_authoritative_run(ticket)
+
+        # Validate every Agent-owned workspace collection before writing any
+        # Run-private projection.  In particular, a slug repair must move or
+        # merge the old project tree instead of leaving a second canonical
+        # root whose EP01 would collide in the storyboards stage.
+        private_files = self._collect_private_artifact_files(ticket.workspace_root)
+        projections = self._collect_stage_projections(ticket.workspace_root)
+        episode_authority = self._ensure_first_episode_binding(
+            ticket,
+            workflow_run,
+            private_files=private_files,
+        )
+
         writer = StoryWorkspaceDreamFileWriter(ticket.workspace_root)
         reader = StoryWorkspaceDreamFileReader(ticket.workspace_root)
         try:
@@ -538,7 +592,6 @@ class DreamArtifactTurnHook:
         if run_file.workflow_run_id != ticket.context.workflow_run_id:
             raise DreamArtifactTurnHookError("Dream run projection changed identity")
 
-        projections = self._collect_stage_projections(ticket.workspace_root)
         projection_by_stage = {
             projection.stage: projection for projection in projections
         }
@@ -573,7 +626,6 @@ class DreamArtifactTurnHook:
             )
             changed_stages.append(projection.stage.value)
 
-        private_files = self._collect_private_artifact_files(ticket.workspace_root)
         private_changed = StoryWorkspaceDreamArtifactPublisher(
             ticket.workspace_root
         ).publish(
@@ -584,11 +636,6 @@ class DreamArtifactTurnHook:
             STORY_WORKSPACE_DREAM_REQUIRED_STAGES
         ):
             self._record_output_ready(ticket, workflow_run)
-        episode_authority = self._ensure_first_episode_binding(
-            ticket,
-            workflow_run,
-            private_files=private_files,
-        )
         story_index_status = self._materialize_story_index(
             ticket,
             workflow_run,
@@ -1214,7 +1261,10 @@ class DreamArtifactTurnHook:
                 heading or candidate.stem,
             )
             if not identity or len(identity) > 128 or not display_name:
-                raise DreamArtifactTurnHookError("asset identity is invalid")
+                raise DreamArtifactTurnHookError(
+                    "workspace stage asset identity is invalid",
+                    issue=_stage_schema_invalid_issue(stage),
+                )
             summary_parts: list[str] = []
             for key in ("occupation", "type", "location_class"):
                 value = metadata.get(key)
@@ -1334,7 +1384,46 @@ class DreamArtifactTurnHook:
             ),
             cls._storyboard_projection(workspace),
         )
-        return tuple(value for value in values if value is not None)
+        projections = tuple(value for value in values if value is not None)
+        for projection in projections:
+            cls._validate_stage_projection(projection)
+        return projections
+
+    @staticmethod
+    def _validate_stage_projection(projection: _StageProjection) -> None:
+        """Classify only schema facts derived from editable workspace files."""
+
+        if (
+            not projection.source_files
+            or len(projection.source_files) != len(set(projection.source_files))
+            or len(projection.source_files) > STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX
+            or len(projection.items) > STORY_WORKSPACE_DREAM_ITEMS_MAX
+        ):
+            raise DreamArtifactTurnHookError(
+                "workspace stage projection is invalid",
+                issue=_stage_schema_invalid_issue(projection.stage),
+            )
+        try:
+            items = tuple(
+                StoryWorkspaceDreamStageItem.model_validate(item)
+                for item in projection.items
+            )
+        except ValueError as exc:
+            raise DreamArtifactTurnHookError(
+                "workspace stage item payload is invalid",
+                issue=_stage_schema_invalid_issue(projection.stage),
+            ) from exc
+        if any(item.source_file not in projection.source_files for item in items):
+            raise DreamArtifactTurnHookError(
+                "workspace stage source identity is invalid",
+                issue=_stage_schema_invalid_issue(projection.stage),
+            )
+        entity_ids = tuple(item.entity_id for item in items)
+        if len(entity_ids) != len(set(entity_ids)):
+            raise DreamArtifactTurnHookError(
+                "workspace stage entity identity is duplicated",
+                issue=_stage_entity_id_duplicate_issue(projection.stage),
+            )
 
     @staticmethod
     def _stage_is_current(
@@ -1383,7 +1472,8 @@ class DreamArtifactTurnHook:
             return {}
         if len(projects) != 1:
             raise DreamArtifactTurnHookError(
-                "Dream Run must resolve exactly one canonical project"
+                "Dream Run must resolve exactly one canonical project",
+                issue=_canonical_project_ambiguous_issue(),
             )
         story, project_payload = projects[0]
         values = {f"stories/{story.name}/project.yaml": project_payload}

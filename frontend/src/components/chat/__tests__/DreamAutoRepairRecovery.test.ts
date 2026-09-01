@@ -1,7 +1,9 @@
 // [Input] Persisted Dream auto-repair chat-message SSE boundaries and canonical history rows.
-// [Output] Verify real-time insertion, first-attempt rollback, refresh recovery, and idempotent de-duplication.
+// [Output] Verify real-time insertion, first-attempt rollback, refresh recovery,
+//          idempotent de-duplication, and typed exhausted-error preservation.
 // [Pos] Shared Chat/Dream reconnect reducer regression test.
 // [Sync] 2026-09-01: initial visible auto-repair user message coverage.
+// [Sync] 2026-09-01: preserve the typed public reason for a bounded exhausted repair.
 
 import { expect, test } from '@playwright/test';
 import type { UIMessage } from 'ai';
@@ -10,7 +12,11 @@ import {
   applyBackendEventToMessages,
   type BackendEvent,
 } from '../../../lib/claude-agent-sse-utils';
-import { ClaudeAgentChatTransport } from '../../../lib/claude-agent-transport';
+import {
+  ClaudeAgentChatTransport,
+  ClaudeAgentTransportError,
+  readClaudeAgentErrorText,
+} from '../../../lib/claude-agent-transport';
 
 const metadata = {
   kind: 'story-workspace-dream-auto-repair',
@@ -126,4 +132,18 @@ test('direct POST transport closes cleanly at the persisted user boundary', asyn
     chunk.type === 'text-delta' && chunk.delta === 'must use reconnect'
   ))).toBe(false);
   expect(chunks.at(-1)).toMatchObject({ type: 'finish', finishReason: 'stop' });
+});
+
+test('typed exhausted error preserves only the server-authored public reason', () => {
+  const error = new ClaudeAgentTransportError({
+    type: 'error',
+    errorText: '最终错误：DREAM_STAGE_ENTITY_ID_DUPLICATE；已停止自动修正。',
+    errorCode: 'DREAM_WORKBENCH_AUTO_REPAIR_FAILED',
+    retryable: false,
+  });
+
+  expect(readClaudeAgentErrorText(error)).toContain(
+    'DREAM_STAGE_ENTITY_ID_DUPLICATE',
+  );
+  expect(readClaudeAgentErrorText(new Error('internal stack'))).toBeNull();
 });

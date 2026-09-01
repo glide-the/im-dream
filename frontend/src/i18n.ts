@@ -688,6 +688,8 @@ const resources = {
         turnError: {
           bindingConflictTitle: 'This conversation cannot continue the Dream yet',
           bindingConflictDescription: 'To avoid writing into the wrong creative task, the Agent did not start. Your message and attachments remain in the conversation. Reload the conversation; if it is still unavailable, start a new conversation from the top bar.',
+          autoRepairFailedTitle: 'Workbench auto-repair stopped',
+          autoRepairFailedDescription: 'The one automatic repair attempt did not pass the final workspace validation. Reload the conversation to review the retained repair message and latest state.',
           genericTitle: 'The message was not processed',
           genericDescription: 'Reload the conversation to check its latest state before deciding whether to send again.',
           reload: 'Reload conversation',
@@ -1532,6 +1534,8 @@ const resources = {
         turnError: {
           bindingConflictTitle: '当前对话暂时无法继续创作',
           bindingConflictDescription: '为避免把内容写入错误的创作任务，本次 Agent 未开始处理。消息和附件已保留在对话记录中。请重新加载对话状态；如果仍无法继续，可从页面顶部新建对话。',
+          autoRepairFailedTitle: '工作台自动修正已停止',
+          autoRepairFailedDescription: '唯一一次自动修正未通过最终工作区校验。请重新加载对话，查看已保留的修正消息和最新状态。',
           genericTitle: '消息处理未完成',
           genericDescription: '请重新加载对话以确认最新状态，再决定是否重新发送。',
           reload: '重新加载对话',

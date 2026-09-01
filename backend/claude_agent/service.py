@@ -8,8 +8,9 @@
 # [Sync] 2026-08-30: resolve the server-owned INK_AGENT_SANDBOX_ENABLED
 #                    capability for every full Chat/Dream workspace without
 #                    coupling sandbox enablement to Workspace Mode.
-# [Sync] 2026-09-01: convert one allowlisted Dream post-turn slug mismatch into
-#                    a persisted user message and normal resume continuation.
+# [Sync] 2026-09-01: convert allowlisted Dream workspace identity/schema
+#                    failures into one persisted user message and normal resume
+#                    continuation; the second Hook failure remains terminal.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.

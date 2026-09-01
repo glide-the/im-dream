@@ -29,6 +29,9 @@
  * [Sync]   2026-08-31: preserve structured Agent errorCode/retryability for safe UI mapping.
  * [Sync]   2026-09-01: end the single-assistant POST response at a persisted
  *                      auto-repair user boundary; reconnect continues the same EventBus.
+ * [Sync]   2026-09-01: expose server-authored error text only through the
+ *                      typed transport error so known UI codes can render a
+ *                      safe structured terminal reason.
  *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
@@ -236,6 +239,12 @@ export class ClaudeAgentTransportError extends Error {
 
 export function readClaudeAgentErrorCode(error: unknown): string | null {
   return error instanceof ClaudeAgentTransportError ? error.errorCode : null;
+}
+
+export function readClaudeAgentErrorText(error: unknown): string | null {
+  return error instanceof ClaudeAgentTransportError && error.message.trim()
+    ? error.message
+    : null;
 }
 
 type BackendEvent =

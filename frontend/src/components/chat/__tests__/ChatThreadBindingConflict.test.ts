@@ -1,7 +1,10 @@
 // [Input] Structured Dream binding-conflict SSE, a persisted user text/file message, and ChatPanel authoritative recovery callback.
-// [Output] Browser regression proving safe error copy, attachment retention, one-turn submission, and read-only reload recovery.
+// [Output] Browser regression proving safe binding/auto-repair error copy,
+//          attachment retention, one-turn submission, and read-only reload recovery.
 // [Pos] Mocked-browser acceptance seam for Dream-bound Chat turn failures.
 // [Sync] 2026-08-31: initial binding-conflict interaction coverage.
+// [Sync] 2026-09-01: show the allowlisted final Dream auto-repair reason instead
+//                    of the generic message card.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -120,6 +123,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
   });
 
   let agentPostCount = 0;
+  let errorMode: 'binding' | 'auto-repair' = 'binding';
   const diagnostics: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') diagnostics.push(message.text());
@@ -141,11 +145,24 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     }
     if (path === '/api/claude-agent' && request.method() === 'POST') {
       agentPostCount += 1;
+      const event = errorMode === 'binding'
+        ? {
+            type: 'error',
+            errorText: 'Dream binding unavailable.',
+            errorCode: 'DREAM_THREAD_BINDING_CONFLICT',
+            retryable: false,
+          }
+        : {
+            type: 'error',
+            errorText: '最终错误：DREAM_CANONICAL_PROJECT_AMBIGUOUS；workspace 仍存在多个 canonical 项目目录。已停止自动修正，不会发起第三轮。',
+            errorCode: 'DREAM_WORKBENCH_AUTO_REPAIR_FAILED',
+            retryable: false,
+          };
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream; charset=utf-8',
         body: [
-          'data: {"type":"error","errorText":"Dream binding unavailable.","errorCode":"DREAM_THREAD_BINDING_CONFLICT","retryable":false}',
+          `data: ${JSON.stringify(event)}`,
           'data: {"type":"finish","finishReason":"error"}',
           '',
         ].join('\n\n'),
@@ -196,6 +213,22 @@ test('binding conflict keeps the submitted text and attachment while reload stay
       clientWidth: document.documentElement.clientWidth,
     }));
     expect(bodyMetrics.scrollWidth).toBeLessThanOrEqual(bodyMetrics.clientWidth);
+
+    errorMode = 'auto-repair';
+    await page.reload();
+    await expect.poll(() => agentPostCount).toBe(2);
+    const repairAlert = page.getByRole('alert');
+    await expect(repairAlert).toHaveAttribute(
+      'data-chat-turn-error',
+      'dream-auto-repair-failed',
+    );
+    await expect(repairAlert).toContainText('工作台自动修正已停止');
+    await expect(repairAlert).toContainText(
+      'DREAM_CANONICAL_PROJECT_AMBIGUOUS',
+    );
+    await expect(repairAlert).toContainText('不会发起第三轮');
+    await expect(repairAlert).not.toContainText('消息处理未完成');
+    expect(diagnostics).toEqual([]);
   } finally {
     await server.close();
   }

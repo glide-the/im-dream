@@ -2,6 +2,7 @@
 <!-- [Output] Product and implementation contract for one bounded, visible, server-owned Dream workspace auto-repair turn. -->
 <!-- [Pos] Interaction/architecture source of truth for repairable Dream post-turn validation failures. -->
 <!-- [Sync] 2026-09-01: initial design after source investigation and pre-implementation simplification review. -->
+<!-- [Sync] 2026-09-01: validate project/stage collections before writes, add duplicate-root/entity classifications, require move-not-copy cleanup, and expose the safe exhausted reason. -->
 
 # Dream 后置同步失败后的 Agent 自动自检修正
 
@@ -20,7 +21,7 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 
 ### 1.2 错误发生位置与 assistant 未保存原因
 
-`DreamArtifactTurnHook.after_main_turn()` 位于 Claude Runner 成功与 assistant 持久化之间。当前 `Dream launch authority changed` 是一个无结构的 `DreamArtifactTurnHookError`。Service 捕获后直接 re-raise；ThreadFactory 只能发布通用 `error + finish(error)`。
+`DreamArtifactTurnHook.after_main_turn()` 位于 Claude Runner 成功与 assistant 持久化之间。本方案实施前，`Dream launch authority changed` 是一个无结构的 `DreamArtifactTurnHookError`；Service 直接 re-raise，ThreadFactory 只能发布通用 `error + finish(error)`。
 
 因此：
 
@@ -38,6 +39,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 - Agent-owned workspace projection：canonical project story slug。
 
 两者失败后的安全处理完全不同。可信身份不一致必须 fail closed；workspace slug 与可信 slug 不一致可以由 Agent 修改文件修复。继续使用同一个字符串异常会迫使上层在“全部自动修”与“全部失败”之间二选一。
+
+线上回执进一步暴露了第二个边界：Agent 将错误 slug 项目复制到可信路径后保留了旧项目根，Hook 同时发现两份 `EP01/storyboard.yaml`，Pydantic 以 `items must have unique entity_id values within a stage` 终止。该错误来自可编辑 workspace，但既没有结构化分类，也没有在前端安全展示；同时旧顺序会在 slug/集合完整性校验前开始写 stage，留下部分投影风险。
 
 ## 2. 目标与边界
 
@@ -101,6 +104,9 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 | code | repairability | 判定 | 处理 |
 |---|---|---|---|
 | `PROJECT_STORY_SLUG_MISMATCH` | `agent_repairable` | launch metadata 中可信 slug 合法且完整，但 workspace 唯一 canonical story slug 不同 | 生成一次自动 user 消息，要求整理目录及 `project_id/project_slug` 后重新执行 Hook |
+| `DREAM_CANONICAL_PROJECT_AMBIGUOUS` | `agent_repairable` | `stories/` 中存在多个通过 project identity 校验的 canonical 项目根 | 要求把本次内容移动/合并到服务器上下文指定的唯一项目根，核对后移除旧根；不得只复制 |
+| `DREAM_STAGE_ENTITY_ID_DUPLICATE` | `agent_repairable` | workspace source collection 在同一 stage 投影出重复 `entity_id` | 要求合并重复实体并保留唯一 canonical source；不得伪造 ID 绕过校验 |
+| `DREAM_STAGE_SCHEMA_INVALID` | `agent_repairable` | workspace-derived stage item/source collection 不满足字段、引用、大小或集合合同 | 要求修正 Agent 可编辑源文件；不把私有 `.dream` 损坏或数据库错误归入本类 |
 | `DREAM_LAUNCH_AUTHORITY_INVALID` | `non_repairable` | actor/thread/run/Deck/plugin binding/version/lock、source message、launch schema 或 frozen Run authority 不一致/缺失 | fail closed；不生成自动消息 |
 | `DREAM_ARTIFACT_SYNC_FAILED` | `non_repairable` | 未 allowlist 的文件安全、数据库、CAS、权限、projection 或内部异常 | fail closed；只显示安全摘要 |
 
@@ -155,12 +161,15 @@ Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成
 - 期望值：<trusted slug>
 - 当前状态：<workspace slug>
 - 失败原因：当前文件生成到了另一套项目目录，无法证明其属于本次 Dream Run
-- 修正要求：将本次项目文件整理到服务器指定的 canonical project 路径，并同步修正项目文件中的 project_id/project_slug
+- 修正要求：将旧项目内容移动或合并到服务器指定的 canonical project 路径，同步修正 project_id/project_slug；确认内容完整后移除旧 slug 的重复项目根
+- 清理要求：不得只复制目录并同时保留两套 project.yaml 或同一 Episode；stories 下最终只能保留本次 Run 的唯一 canonical 项目
 - 禁止操作：不得修改 Dream 启动元数据、actor/thread/run 身份、Deck/plugin lock 或伪造绑定信息
 - 完成标准：重新执行同一个后置同步校验并全部通过
 ```
 
 不得把 exception `str()`, traceback、数据库 error、绝对路径、用户正文、DSN、token 或环境变量拼入消息。
+
+`DREAM_CANONICAL_PROJECT_AMBIGUOUS`、`DREAM_STAGE_ENTITY_ID_DUPLICATE` 和 `DREAM_STAGE_SCHEMA_INVALID` 使用各自固定模板，不插入目录列表、绝对路径或原始 Pydantic 文本。stage 名仅允许 `characters/scenes/storyboards`。重复实体修正必须先合并内容再移除旧来源，不得通过编造 `entity_id` 制造表面唯一。
 
 ## 6. SSE 事件与前端表现
 
@@ -204,7 +213,7 @@ Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成
 - 同时移除该边界之前仅存在于 replay 的未持久化原 assistant 临时消息；
 - 后续 text/tool events 创建新的 repair assistant 临时消息；最终历史恢复以数据库 assistant id 覆盖它。
 
-普通 user 气泡只增加一行轻量来源标记：`工作台自动修正`；历史状态为 `failed` 时显示 `工作台自动修正 · 已停止`。不增加弹窗、确认框或独立页面。
+普通 user 气泡只增加一行轻量来源标记：`工作台自动修正`；历史状态为 `failed` 时显示 `工作台自动修正 · 已停止`。第二次 Hook 失败的 error card 只对 `DREAM_WORKBENCH_AUTO_REPAIR_FAILED` 展示后端 allowlist 生成的最终 validation code 和安全说明；普通异常仍使用通用文案。不增加弹窗、确认框或独立页面。
 
 ## 7. 自动修正状态转换
 
@@ -242,13 +251,13 @@ stateDiagram-v2
 | EventBus 发布失败 | 消息保留在历史；不启动无可观察修正，error terminal |
 | 修正 Turn assembly/Runner 失败 | metadata `dispatch_status=failed`，现有 error terminal |
 | 用户 Stop/cancel | 唯一 `bg_task` 被取消；partial repair assistant 按现有规则保存；自动消息标记 failed；不重启 |
-| 第二次 Hook 仍失败 | 自动消息标记 failed，发布安全结构化最终错误，不创建第三轮 |
+| 第二次 Hook 仍失败 | 自动消息标记 failed，发布含 allowlisted 最终 validation code 的安全结构化错误，不创建第三轮 |
 | 浏览器断线/刷新 | producer 继续；history 恢复 auto user；running 时 reconnect；idle 时显示最终持久状态 |
 | 进程在 `dispatching`/`dispatched` 后崩溃 | 自动消息仍可见但本版本不跨进程恢复执行；保留当前状态作为诊断事实，不引入 durable workflow engine |
 
 ## 10. 安全与隐私
 
-- 只有 `PROJECT_STORY_SLUG_MISMATCH` 进入 auto-repair allowlist。
+- 只有 `PROJECT_STORY_SLUG_MISMATCH`、`DREAM_CANONICAL_PROJECT_AMBIGUOUS`、`DREAM_STAGE_ENTITY_ID_DUPLICATE`、`DREAM_STAGE_SCHEMA_INVALID` 进入 auto-repair allowlist；每个 code 都有固定正文模板和字段校验。
 - trusted slug 来自 server launch metadata；workspace slug 只作为校验后的实际值展示。Agent 只能改 workspace。
 - actor/thread/run/Deck/plugin/source metadata/frozen authority 任一异常均为 `DREAM_LAUNCH_AUTHORITY_INVALID`，绝不通过提示 Agent 修改可信事实。
 - auto request 由服务端内部构造；公共 route 拒绝 reserved message id，也不接受浏览器自带的 server metadata。
@@ -259,24 +268,25 @@ stateDiagram-v2
 ## 11. 验收标准
 
 1. slug mismatch 分类为 `PROJECT_STORY_SLUG_MISMATCH / agent_repairable`，expected/actual 均为合法 slug。
-2. actor/thread/run/Deck/plugin authority 异常分类为 non-repairable，且不创建自动消息。
-3. 自动 user 消息使用稳定 id，只存在一行；metadata 合同完整。
-4. 数据库提交发生在 `chat-message` 发布之前。
-5. SSE 与 history 的 message id、parts、metadata 一致。
-6. POST stream 在消息边界 handoff；历史恢复立即显示 user 气泡；reconnect 继续 repair assistant。
-7. refresh/reconnect/replay 不产生重复气泡，也不保留第一次未持久化 assistant 临时输出。
-8. 自动修正调用正常 context assembly、Runner resume、callbacks、Hook、persistence、EventBus、cancel 与 admission-owned task。
-9. 修正成功后 auto metadata 为 dispatched，并正常保存 assistant。
-10. 第二次失败或 cancel 后 metadata 为 failed，不创建第三轮。
-11. 消息模板不包含 traceback、DSN、密钥、绝对路径或任意内部异常文本。
-12. 普通 Chat、Dream launch/confirmation、resume、SSE reconnect、Stop、tool confirmation 既有测试不回归。
+2. 多 canonical 项目根和 stage 重复 `entity_id` 在任何 stage/private projection 写入前被分类为 Agent-repairable；模板明确移动/合并后清理旧根，不允许 copy-only。
+3. actor/thread/run/Deck/plugin authority 异常分类为 non-repairable，且不创建自动消息。
+4. 自动 user 消息使用稳定 id，只存在一行；metadata 合同完整。
+5. 数据库提交发生在 `chat-message` 发布之前。
+6. SSE 与 history 的 message id、parts、metadata 一致。
+7. POST stream 在消息边界 handoff；历史恢复立即显示 user 气泡；reconnect 继续 repair assistant。
+8. refresh/reconnect/replay 不产生重复气泡，也不保留第一次未持久化 assistant 临时输出。
+9. 自动修正调用正常 context assembly、Runner resume、callbacks、Hook、persistence、EventBus、cancel 与 admission-owned task。
+10. 修正成功后 auto metadata 为 dispatched，并正常保存 assistant。
+11. 第二次失败或 cancel 后 metadata 为 failed，不创建第三轮；error card 显示 allowlisted 最终 validation code 与安全说明。
+12. 消息模板不包含 traceback、DSN、密钥、绝对路径或任意内部异常文本。
+13. 普通 Chat、Dream launch/confirmation、resume、SSE reconnect、Stop、tool confirmation 既有测试不回归。
 
 ## 12. 编码前设计复核
 
 | 复核问题 | 结论 |
 |---|---|
 | 用户是否知道为什么停下？ | 是。真实 user 消息展示 code、规则、期望/实际、修正和禁止项；failed 状态刷新后仍存在。 |
-| 可预期错误是否自动修正？ | 是。仅 slug mismatch 自动进入一次正常 repair Turn。 |
+| 可预期错误是否自动修正？ | 是。仅四个明确的 workspace identity/schema code 可进入一次正常 repair Turn。 |
 | 是否可观察、可恢复？ | 是。persistence-first，EventBus 只通知；history 是恢复真相源。 |
 | Agent 能否修改可信身份？ | 否。身份异常 non-repairable；模板明确禁止；context 每轮重新从服务端解析。 |
 | 是否可能无限循环？ | 否。server metadata + stable id + attempt=1 三重边界。 |

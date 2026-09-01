@@ -11,6 +11,7 @@
 <!-- [同步] 2026-08-31：要求 AutoDL 发布验证后端生成的 crawler 文件并拒绝 Vite SPA HTML fallback。 -->
 <!-- [同步] 2026-09-01：记录生产 skill-creator 打包、AutoDL discovery 验证与未知 Skill 可见失败。 -->
 <!-- [同步] 2026-09-01：记录经规范 Chat/SSE/Turn 路径持久化并单次执行的 Dream 工作区自动修正。 -->
+<!-- [同步] 2026-09-01：要求投影写入前校验重复项目根/stage，采用 move-not-copy 清理，并在唯一一次修正停止时显示安全原因。 -->
 
 # Ink & Memory
 
@@ -31,7 +32,7 @@ Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 
 - **Writing** —— 写作并保存 Session，通过时间线查看历史和 Reflections。
 - **Chat** —— 使用 Deck Agent 在持久 Thread 中进行流式对话、工具调用、resume、计划和 TODO。
 - **Dream** —— 启动 Dream Run，审阅剧本、分镜、提示词和生成产物。
-- **Dream 工作区恢复** —— 当经过 allowlist 的安全后置同步工作区校验失败时，Dream 会持久化一条可见的自动修正 user 消息，并通过正常 Chat/SSE/Turn 路径续接同一 Claude 会话。可信 actor、Thread、Run、Deck 或 plugin authority 异常仍会 fail closed；同一个 originating Turn 最多只会发起一次修正。
+- **Dream 工作区恢复** —— Dream 在写入后置投影前，对 allowlist 内的 workspace slug、重复 canonical 项目根和 stage identity/schema 错误进行分类；随后持久化一条可见的自动修正 user 消息，明确要求移动/合并并清理旧项目根而不是只复制目录，再通过正常 Chat/SSE/Turn 路径续接同一 Claude 会话。可信 actor、Thread、Run、Deck 或 plugin authority 异常仍会 fail closed；同一个 originating Turn 最多只发起一次修正，第二次失败只显示 allowlist 内的安全原因且不会启动第三轮。
 - **Decks** —— 创建并版本化 Deck、Agent、Prompt、资源和 Claude Plugin 引用。
 - **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、MCP Server、Skill 和插件。
 - **Skill 创作** —— 在既有 Thread workspace 中使用后端所有的 `skill-creator` 创建、评估和改进 Skill；生产发布会按 canonical 小写 ID 刷新其 discovery。

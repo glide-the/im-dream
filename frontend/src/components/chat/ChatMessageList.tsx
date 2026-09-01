@@ -37,6 +37,8 @@
 //                    list's already-owned Thread ID.
 // [Sync] 2026-08-31: replace raw turn exceptions with accessible structured error cards and reload recovery.
 // [Sync] 2026-09-01: identify validated Dream auto-repair user metadata and show a minimal source label.
+// [Sync] 2026-09-01: render the allowlisted auto-repair exhausted reason from
+//                    its typed SSE error while generic failures remain redacted.
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -51,7 +53,7 @@ import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmat
 import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 import { useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { SubagentToolButton } from './SubagentPanel';
-import { readClaudeAgentErrorCode } from '../../lib/claude-agent-transport';
+import { readClaudeAgentErrorCode, readClaudeAgentErrorText } from '../../lib/claude-agent-transport';
 import type { ChatMetadata } from '../../lib/chat-schema';
 
 interface ChatMessageListProps {
@@ -254,6 +256,10 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
   const errorCode = readClaudeAgentErrorCode(error);
   const isDreamBindingConflict = errorCode === 'DREAM_THREAD_BINDING_CONFLICT';
+  const isDreamAutoRepairFailure = errorCode === 'DREAM_WORKBENCH_AUTO_REPAIR_FAILED';
+  const dreamAutoRepairFailureText = isDreamAutoRepairFailure
+    ? readClaudeAgentErrorText(error)
+    : null;
 
   const handleCopy = async (id: string, text: string) => {
     try {
@@ -554,7 +560,13 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
       {error ? (
         <div
           role="alert"
-          data-chat-turn-error={isDreamBindingConflict ? 'dream-thread-binding-conflict' : 'generic'}
+          data-chat-turn-error={
+            isDreamBindingConflict
+              ? 'dream-thread-binding-conflict'
+              : isDreamAutoRepairFailure
+                ? 'dream-auto-repair-failed'
+                : 'generic'
+          }
           style={{
             alignSelf: 'flex-start',
             width: 'min(100%, 42rem)',
@@ -569,10 +581,22 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
           }}
         >
           <div style={{ fontWeight: 700 }}>
-            {t(isDreamBindingConflict ? 'chat.turnError.bindingConflictTitle' : 'chat.turnError.genericTitle')}
+            {t(
+              isDreamBindingConflict
+                ? 'chat.turnError.bindingConflictTitle'
+                : isDreamAutoRepairFailure
+                  ? 'chat.turnError.autoRepairFailedTitle'
+                  : 'chat.turnError.genericTitle',
+            )}
           </div>
           <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
-            {t(isDreamBindingConflict ? 'chat.turnError.bindingConflictDescription' : 'chat.turnError.genericDescription')}
+            {dreamAutoRepairFailureText ?? t(
+              isDreamBindingConflict
+                ? 'chat.turnError.bindingConflictDescription'
+                : isDreamAutoRepairFailure
+                  ? 'chat.turnError.autoRepairFailedDescription'
+                  : 'chat.turnError.genericDescription',
+            )}
           </p>
           {onReloadAfterError ? (
             <button

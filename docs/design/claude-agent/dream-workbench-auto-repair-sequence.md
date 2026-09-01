@@ -2,6 +2,7 @@
 <!-- [Output] Business sequence diagrams for success, bounded failure, cancellation, and refresh/reconnect de-duplication. -->
 <!-- [Pos] Sequence-diagram companion to dream-workbench-auto-repair.md; it does not define a separate protocol. -->
 <!-- [Sync] 2026-09-01: initial business sequence set. -->
+<!-- [Sync] 2026-09-01: add pre-write collection validation, move/merge cleanup, and visible structured exhausted failure. -->
 
 # Dream 工作区自动修正业务时序图
 
@@ -39,7 +40,7 @@ sequenceDiagram
     Claude->>WS: 修改 workspace
     Claude-->>Service: success result
     Service->>Hook: after_main_turn(trusted ticket)
-    Hook->>Hook: 校验 launch authority 与 workspace projection
+    Hook->>Hook: 在任何投影写入前校验 canonical roots、stage collection 与 launch authority
     Hook-->>Service: PROJECT_STORY_SLUG_MISMATCH / agent_repairable
 
     Service->>Service: allowlist 模板 + stable id/attempt=1
@@ -61,7 +62,8 @@ sequenceDiagram
     Factory->>Service: assemble_context(auto user request, resume=true)
     Service->>DB: exact CAS replay auto user message
     Service->>Claude: run_streaming(normal repair Turn)
-    Claude->>WS: 整理 canonical 目录并修正 project_id/project_slug
+    Claude->>WS: 移动/合并到 canonical 目录并修正 project_id/project_slug
+    Claude->>WS: 核对后移除旧项目根，不保留重复 EP/entity_id
     Claude-->>Service: success result
     Service->>Hook: after_main_turn(new trusted ticket)
     Hook-->>Service: validation passed
@@ -98,7 +100,11 @@ sequenceDiagram
         alt workspace slug 与 trusted slug 不同
             WS-->>Hook: safe validated actual slug
             Hook-->>Service: PROJECT_STORY_SLUG_MISMATCH / agent_repairable
-            Note over Service: 仅此 allowlist code 可启动一次修正
+            Note over Service: allowlist code 可启动一次修正
+        else 多 canonical 项目根 / stage schema 或 entity_id 重复
+            WS-->>Hook: bounded workspace collection facts
+            Hook-->>Service: allowlisted agent_repairable issue
+            Note over Service: 固定模板要求移动/合并/清理；不公开原始路径或 Pydantic 文本
         else DB/CAS/权限/路径安全/未知异常
             Hook-->>Service: DREAM_ARTIFACT_SYNC_FAILED / non_repairable
             Service->>Bus: safe error + finish(error)
@@ -134,12 +140,12 @@ sequenceDiagram
         Service->>Bus: safe error + finish(error)
     else Claude 成功但 Hook 再失败
         Service->>Hook: after_main_turn(ticket)
-        Hook-->>Service: structured issue
+        Hook-->>Service: structured issue（例如 canonical roots 仍重复）
         Service->>DB: CAS auto status=failed
-        Service->>Bus: DREAM_WORKBENCH_AUTO_REPAIR_FAILED + finish(error)
+        Service->>Bus: DREAM_WORKBENCH_AUTO_REPAIR_FAILED + allowlisted 最终 validation code + finish(error)
     end
     Note over Service,Factory: 不构造第二条 auto user 消息，不存在第三个 Turn
-    Bus-->>UI: terminal
+    Bus-->>UI: terminal error card 显示安全最终原因
     UI->>DB: 通过 history API 恢复
     DB-->>UI: 同一 auto user 气泡，来源标记“工作台自动修正未通过”
 ```

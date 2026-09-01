@@ -11,6 +11,7 @@
 <!-- [Sync] 2026-08-31: require AutoDL releases to verify backend-generated crawler files and reject Vite SPA HTML fallback. -->
 <!-- [Sync] 2026-09-01: document production skill-creator packaging, AutoDL discovery verification, and visible unknown-Skill failures. -->
 <!-- [Sync] 2026-09-01: document persisted, one-shot Dream workspace auto-repair through the canonical Chat/SSE/Turn path. -->
+<!-- [Sync] 2026-09-01: require pre-write duplicate-root/stage validation, move-not-copy cleanup, and a visible safe reason when the one repair attempt stops. -->
 
 # Ink & Memory
 
@@ -31,7 +32,7 @@ This repository contains the Dream application. It does not own the shared datab
 - **Writing** — write and save sessions, browse the timeline, and review reflections.
 - **Chat** — talk with a Deck Agent in a persistent Thread with streaming, tools, resume, plans, and TODOs.
 - **Dream** — launch a Dream Run and review scripts, storyboards, prompts, and generated artifacts.
-- **Dream workspace recovery** — when an allowlisted, safe post-sync workspace validation fails, Dream persists one visible auto-repair user message and resumes the same Claude session through the normal Chat/SSE/Turn path. Trusted actor, Thread, Run, Deck, and plugin authority failures still stop closed; one originating Turn can dispatch at most one repair.
+- **Dream workspace recovery** — before writing post-turn projections, Dream classifies allowlisted workspace slug, duplicate canonical-project-root, and stage identity/schema failures. It persists one visible auto-repair user message, instructs the Agent to move/merge and clean stale roots instead of copying them, and resumes the same Claude session through the normal Chat/SSE/Turn path. Trusted actor, Thread, Run, Deck, and plugin authority failures still stop closed; one originating Turn can dispatch at most one repair, and a second failure shows only an allowlisted safe reason without starting a third Turn.
 - **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
 - **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
 - **Skill authoring** — use the backend-owned `skill-creator` package to create, evaluate, and improve Skills in the existing Thread workspace; production releases refresh its canonical lowercase discovery ID.
