@@ -14,6 +14,7 @@
                    and document recovery without replacing the Claude session.
 [Sync] 2026-09-01: require a full FastAPI import before release switching so
                    missing locked runtime dependencies cannot stop Dream.
+[Sync] 2026-09-01: retain only a fully verified release as the rollback candidate.
 -->
 
 ## 应用介绍
@@ -138,6 +139,9 @@ workspace，并硬性检查：
 检查失败即发布失败。恢复既有 Thread 时不要删除 transcript，也不需要新建 Claude
 session；正常 workspace 初始化会修复内置 Skill，随后在原 Thread 重发即可。若
 Runtime 仍收到未知 Skill，本轮必须返回可见错误，不能保存空 assistant 消息。
+
+发布器只在全部门禁通过后更新 `qualified` 指针；下一次构建从该指针选择
+`previous`，因此一次失败的中间 release 不会覆盖最近一次合格回滚候选。
 
 build 在切换 `current` 之前还会加载生成的 Dream env 并导入完整 FastAPI `server`。
 源码使用的模块必须声明在 `backend/pyproject.toml`、`uv.lock` 与导出的

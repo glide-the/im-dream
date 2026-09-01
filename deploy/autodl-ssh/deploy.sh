@@ -19,6 +19,8 @@
 #                    the production frontend build as well as env projection.
 # [Sync] 2026-09-01: follow the namespaced builtin Skill source layout while
 #                    retaining flat workspace/Runtime discovery verification.
+# [Sync] 2026-09-01: advance the qualified rollback pointer only after all
+#                    release gates pass; failed current releases are never reused.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -346,7 +348,13 @@ test \"\$(/root/ink-autodl/runtime/npm/bin/ntn --version)\" = $(quote "ntn ${AUT
 rm -rf \"\${release}\"
 mv \"\${staging}\" \"\${release}\"
 chown -R $(quote "${AUTODL_SERVICE_USER}"):$(quote "${AUTODL_SERVICE_USER}") \"\${release}\"
-if [ -L $(quote "${AUTODL_APP_ROOT}/current") ]; then ln -sfn \"\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current"))\" $(quote "${AUTODL_APP_ROOT}/previous"); fi
+rollback_source=''
+if [ -L $(quote "${AUTODL_APP_ROOT}/qualified") ]; then
+  rollback_source=\"\$(readlink -f $(quote "${AUTODL_APP_ROOT}/qualified"))\"
+elif [ -L $(quote "${AUTODL_APP_ROOT}/current") ]; then
+  rollback_source=\"\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current"))\"
+fi
+if [ -n \"\${rollback_source}\" ]; then test -d \"\${rollback_source}\"; ln -sfn \"\${rollback_source}\" $(quote "${AUTODL_APP_ROOT}/previous"); fi
 ln -sfn \"\${release}\" $(quote "${AUTODL_APP_ROOT}/current")"
 }
 
@@ -422,13 +430,17 @@ verify() {
   log "Dream ${topology} topology, SEO crawler files, built-in Skills, default plugin artifact, Admin dependency, screen supervisor, and public mapping passed."
 }
 
-deploy() { command_check; setup_host; sync_files; build_release; stop_dream; start_dream; verify; }
+mark_current_qualified() {
+  remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); test -d \"\${current}\"; ln -sfn \"\${current}\" $(quote "${AUTODL_APP_ROOT}/qualified")"
+}
+
+deploy() { command_check; setup_host; sync_files; build_release; stop_dream; start_dream; verify; mark_current_qualified; }
 
 rollback() {
   remote "test -L $(quote "${AUTODL_APP_ROOT}/previous")"
   stop_dream
   remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); previous=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/previous")); ln -sfn \"\${current}\" $(quote "${AUTODL_APP_ROOT}/rollback-candidate"); ln -sfn \"\${previous}\" $(quote "${AUTODL_APP_ROOT}/current"); ln -sfn \"\$(readlink -f $(quote "${AUTODL_APP_ROOT}/rollback-candidate"))\" $(quote "${AUTODL_APP_ROOT}/previous"); rm -f $(quote "${AUTODL_APP_ROOT}/rollback-candidate")"
-  start_dream; verify
+  start_dream; verify; mark_current_qualified
   log "Dream application rolled back; Admin, PostgreSQL, and workspace data were unchanged."
 }
 
@@ -447,7 +459,7 @@ case "${COMMAND:-help}" in
   sync) require_config; sync_files ;;
   build) command_check; setup_host; sync_files; build_release ;;
   deploy) deploy ;;
-  start) require_config; start_dream; verify ;;
+  start) require_config; start_dream; verify; mark_current_qualified ;;
   stop) require_config; stop_dream ;;
   status) require_config; remote "screen -ls 2>/dev/null | grep '[.]${AUTODL_SCREEN_NAME}[[:space:]]' || true; if [ -f $(quote "${AUTODL_APP_ROOT}/run/dream.pid") ]; then pid=\$(cat $(quote "${AUTODL_APP_ROOT}/run/dream.pid")); ps -o pid,ppid,user,stat,etimes,cmd -p \"\${pid}\"; ps -o pid,ppid,user,stat,etimes,cmd --ppid \"\${pid}\"; fi; ss -ltnp 2>/dev/null | grep -E ':(${AUTODL_DREAM_FRONTEND_PORT}|${AUTODL_DREAM_BACKEND_PORT})[[:space:]]' || true" ;;
   logs) require_config; remote "tail -n 200 $(quote "${AUTODL_APP_ROOT}/logs/dream.log")" ;;
