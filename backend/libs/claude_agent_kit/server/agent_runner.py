@@ -16,6 +16,9 @@
 #                    boundary so the parent turn consumes child completion.
 # [Sync] 2026-08-14: allow only confirmation-gated, single-file canonical
 #                    character/scene/prop deletion; keep .dream and broad Bash mutation denied.
+# [Sync] 2026-09-01: let one server-authenticated Dream auto-repair Turn remove
+#                    only its precomputed stale canonical project roots after
+#                    the trusted root contains every source tree entry.
 # [Sync] 2026-08-22: pass the server-owned thread runtime workspace separately
 #                    from cwd when applying CLAUDE_CODE_TMPDIR defaults.
 # [Sync] 2026-08-22: restore authenticated remote MCP injection and the
@@ -263,6 +266,8 @@ from ..types import (
     AgentRunOptions,
     AgentRunResult,
     AgentStreamingCallbacks,
+    DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION,
+    DreamAutoRepairExecutionScope,
     IClaudeAgentSDKClient,
     ToolChoiceMode,
     ToolEventPayload,
@@ -290,6 +295,11 @@ from .sdk_env import (
 )
 from .plugin_launcher import apply_plugin_launch_options
 from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
+
+try:
+    from story_workspace.contracts import STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX
+except ModuleNotFoundError:  # Support repository-root package imports.
+    from backend.story_workspace.contracts import STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX
 
 logger = logging.getLogger(__name__)
 
@@ -519,6 +529,17 @@ _DREAM_SURFACE_REFERENCE_RE = re.compile(
 )
 _DREAM_PATH_FRAGMENT_RE = re.compile(r"\.[A-Za-z0-9_?*\[\]!.^-]+")
 _STORY_WORKSPACE_DREAM_RUN_RE = re.compile(r"^run_[0-9a-f]{32}$")
+_STORY_WORKSPACE_PROJECT_SLUG_RE = re.compile(
+    r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+)
+_DREAM_AUTO_REPAIR_MESSAGE_ID_RE = re.compile(r"^dream_repair_[0-9a-f]{40}$")
+_DREAM_AUTO_REPAIR_PROJECT_CLEANUP_CODES: frozenset[str] = frozenset({
+    "PROJECT_STORY_SLUG_MISMATCH",
+    "DREAM_CANONICAL_PROJECT_AMBIGUOUS",
+    "DREAM_STAGE_ENTITY_ID_DUPLICATE",
+    "DREAM_STAGE_SCHEMA_INVALID",
+})
+_DREAM_AUTO_REPAIR_TREE_ENTRY_MAX = STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX * 4
 _STORY_WORKSPACE_DREAM_CANONICAL_ROOTS: tuple[str, ...] = (
     "assets",
     "stories",
@@ -955,12 +976,185 @@ def _is_explicit_canonical_asset_delete(
     )
 
 
+def _single_recursive_rm_target(tokens: list[str]) -> str | None:
+    """Return the sole target of one narrowly parsed recursive rm command."""
+
+    if not tokens or tokens[0] != "rm":
+        return None
+    recursive = False
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            index += 1
+            break
+        if not token.startswith("-") or token == "-":
+            break
+        if token in {"--recursive", "--force"}:
+            recursive = recursive or token == "--recursive"
+            index += 1
+            continue
+        if token.startswith("--"):
+            return None
+        flags = token[1:]
+        if not flags or any(flag not in {"r", "R", "f"} for flag in flags):
+            return None
+        recursive = recursive or "r" in flags or "R" in flags
+        index += 1
+    if not recursive or len(tokens[index:]) != 1:
+        return None
+    target = tokens[index]
+    if any(character in target for character in "*?[]{}"):
+        return None
+    return target
+
+
+def _safe_project_tree_entries(root: Path) -> set[tuple[str, str]] | None:
+    """Return a bounded, no-symlink project tree inventory for merge proof."""
+
+    entries: set[tuple[str, str]] = set()
+    pending: list[Path] = [root]
+    try:
+        while pending:
+            directory = pending.pop()
+            for child in directory.iterdir():
+                metadata = child.lstat()
+                if stat.S_ISLNK(metadata.st_mode):
+                    return None
+                relative = child.relative_to(root).as_posix()
+                if stat.S_ISDIR(metadata.st_mode):
+                    entries.add(("directory", relative))
+                    pending.append(child)
+                elif stat.S_ISREG(metadata.st_mode):
+                    entries.add(("file", relative))
+                else:
+                    return None
+                if len(entries) > _DREAM_AUTO_REPAIR_TREE_ENTRY_MAX:
+                    return None
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return entries
+
+
+def _is_explicit_dream_auto_repair_project_root_delete(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+    scope: DreamAutoRepairExecutionScope | None,
+    mcp_env: Mapping[str, str],
+) -> bool:
+    """Authorize one exact stale-root cleanup for a server-owned repair Turn.
+
+    The capability is deliberately stronger than the normal single-asset
+    confirmation seam, so it requires an in-memory typed scope plus fresh
+    actor/thread/Run bindings.  The stale tree must be fully represented by
+    regular destination entries before recursive removal is allowed.
+    """
+
+    if (
+        scope is None
+        or not isinstance(scope, DreamAutoRepairExecutionScope)
+        or not cwd
+        or _SHELL_METACHAR_RE.search(command)
+        or "\n" in command
+        or "\r" in command
+        or scope.schema_version != DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION
+        or scope.repair_attempt != 1
+        or scope.validation_code
+        not in _DREAM_AUTO_REPAIR_PROJECT_CLEANUP_CODES
+        or _DREAM_AUTO_REPAIR_MESSAGE_ID_RE.fullmatch(scope.message_id) is None
+        or not scope.originating_turn_id
+        or _STORY_WORKSPACE_DREAM_RUN_RE.fullmatch(scope.workflow_run_id) is None
+        or _STORY_WORKSPACE_PROJECT_SLUG_RE.fullmatch(
+            scope.trusted_project_slug
+        )
+        is None
+        or not scope.stale_project_slugs
+        or len(scope.stale_project_slugs) != len(set(scope.stale_project_slugs))
+        or scope.trusted_project_slug in scope.stale_project_slugs
+        or any(
+            _STORY_WORKSPACE_PROJECT_SLUG_RE.fullmatch(slug) is None
+            for slug in scope.stale_project_slugs
+        )
+    ):
+        return False
+    trusted_run_id = _trusted_story_workspace_run_id(dict(mcp_env))
+    trusted_thread_id = str(mcp_env.get("INK_AGENT_THREAD_ID") or "").strip()
+    trusted_actor_id = str(mcp_env.get("INK_AGENT_USER_ID") or "").strip()
+    if (
+        trusted_run_id != scope.workflow_run_id
+        or trusted_thread_id != scope.thread_id
+        or trusted_actor_id != scope.actor_id
+        or not trusted_actor_id.isdigit()
+        or int(trusted_actor_id) <= 0
+    ):
+        return False
+
+    raw_target = _single_recursive_rm_target(tokens)
+    if raw_target is None:
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=True)
+        visible_workspace = Path(cwd).expanduser().lstat()
+        if (
+            stat.S_ISLNK(visible_workspace.st_mode)
+            or not workspace.is_dir()
+            or workspace.name != scope.thread_id
+        ):
+            return False
+        stories = workspace / "stories"
+        visible_stories = stories.lstat()
+        if stat.S_ISLNK(visible_stories.st_mode) or not stories.is_dir():
+            return False
+        supplied = Path(raw_target).expanduser()
+        if not supplied.is_absolute():
+            supplied = workspace / supplied
+        visible_target = supplied.lstat()
+        target = supplied.resolve(strict=True)
+        relative = target.relative_to(workspace)
+        if (
+            stat.S_ISLNK(visible_target.st_mode)
+            or not target.is_dir()
+            or len(relative.parts) != 2
+            or relative.parts[0] != "stories"
+            or relative.parts[1] not in scope.stale_project_slugs
+        ):
+            return False
+        trusted = (stories / scope.trusted_project_slug).resolve(strict=True)
+        visible_trusted = (stories / scope.trusted_project_slug).lstat()
+        if (
+            stat.S_ISLNK(visible_trusted.st_mode)
+            or not trusted.is_dir()
+            or trusted.parent != stories
+        ):
+            return False
+        for project_file in (target / "project.yaml", trusted / "project.yaml"):
+            project_metadata = project_file.lstat()
+            if (
+                stat.S_ISLNK(project_metadata.st_mode)
+                or not stat.S_ISREG(project_metadata.st_mode)
+            ):
+                return False
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return False
+
+    stale_entries = _safe_project_tree_entries(target)
+    trusted_entries = _safe_project_tree_entries(trusted)
+    return (
+        stale_entries is not None
+        and trusted_entries is not None
+        and stale_entries.issubset(trusted_entries)
+    )
+
+
 def _apply_dream_surface_write_guard(
     tool_name: str,
     tool_input: dict[str, Any],
     cwd: Optional[str],
+    auto_repair_scope: DreamAutoRepairExecutionScope | None,
+    mcp_env: Mapping[str, str],
 ) -> Optional[HookJSONOutput]:
-    """Hard-deny every generic mutation path into the controlled Dream surface."""
+    """Apply the single Dream Bash/write policy, including scoped repair cleanup."""
 
     denied = False
     if tool_name in {"Write", "Edit", "MultiEdit"}:
@@ -969,8 +1163,23 @@ def _apply_dream_surface_write_guard(
             cwd,
         )
     elif tool_name == "Bash":
+        command = str(tool_input.get("command") or "")
+        tokens = _split_shell_command(command)
+        if _is_explicit_dream_auto_repair_project_root_delete(
+            command,
+            tokens,
+            cwd,
+            auto_repair_scope,
+            mcp_env,
+        ):
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                }
+            }
         denied = _is_dream_mutating_bash_command(
-            str(tool_input.get("command") or ""),
+            command,
             cwd,
         )
     if not denied:
@@ -2538,6 +2747,8 @@ class ClaudeAgentRunner:
                 tool_name,
                 tool_input,
                 cwd,
+                opts.dream_auto_repair_scope,
+                mcp_env,
             )
             if dream_write_guard is not None:
                 return dream_write_guard

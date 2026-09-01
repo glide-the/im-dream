@@ -4,6 +4,7 @@
 <!-- [Sync] 2026-09-01: initial design after source investigation and pre-implementation simplification review. -->
 <!-- [Sync] 2026-09-01: validate project/stage collections before writes, add duplicate-root/entity classifications, require move-not-copy cleanup, and expose the safe exhausted reason. -->
 <!-- [Sync] 2026-09-01: keep duplicate-root workspaces enterable during context assembly and make managed Skill links non-recursive workspace-tree leaves. -->
+<!-- [Sync] 2026-09-01: bind exact stale-project cleanup to the persisted repair marker plus fresh launch authority and a one-Turn typed PreToolUse scope. -->
 
 # Dream 后置同步失败后的 Agent 自动自检修正
 
@@ -45,6 +46,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 
 修正功能上线后的真实恢复又暴露了两个入口缺口：下一条正常或自动修正 Turn 会先执行 `DreamWorkbenchContext.refresh_for_turn()`，旧实现遇到多个 canonical project 时在 Runner 启动前终止，导致 Agent 永远无法进入 workspace 完成已允许的修正；同时递归工作区文件树会跟随 `skills/*` 下受控的只读内置 Skill 源链接，随后被 containment guard 判为 path traversal 并返回 500。这两者都不是新的身份放宽点：前者只取消对可编辑歧义状态的前置阻断，后置 Hook 仍负责唯一性验收；后者只把符号链接作为不可递归叶节点展示，内容读取和下载仍拒绝 symlink。
 
+第三个执行缺口发生在 Agent 已进入修正 Turn 之后：`.dream` 工作区的 PreToolUse 策略默认拒绝一切非只读 Bash，唯一删除例外只是经确认的单个 character/scene/prop 文件。因此提示要求“移除旧项目根”，但 Agent 实际执行 `rm -rf stories/<old-slug>` 时必然被安全钩子拒绝。问题不是安全策略过严，而是自动修正 session 的 server-owned marker 没有被投影成精确、短寿命的执行能力；提示合同与执行合同不一致。
+
 ## 2. 目标与边界
 
 ### 2.1 目标
@@ -55,6 +58,7 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 - 在同一个 ThreadFactory 受控任务内，再次执行正常 context assembly、Claude resume、Runner callbacks、Hook 和 assistant persistence。
 - context assembly 遇到多个合法 project 根时生成 `project_resolution=ambiguous` 的不绑定上下文，不猜测可信 slug、不创建第三套项目，并允许正常 Agent Turn 进入修正。
 - 工作空间递归树不得跟随 thread 外的 Skill 链接；文件浏览保持可用，直接读取/下载仍按 symlink 安全合同拒绝。
+- 自动修正 Turn 根据已持久化 marker 重新验证 Run/Thread/launch authority，并只向 PreToolUse 传递本轮允许清理的旧项目 slug；普通 Turn 不获得该能力。
 - 同一 originating message/turn 最多一次自动修正；第二次失败停止。
 
 ### 2.2 非目标
@@ -109,6 +113,17 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 `DreamWorkbenchContext` 仍对 workspace/thread 不匹配、`.dream`/`stories`/project 文件符号链接和不安全文件类型 fail closed。唯一例外是“发现两个及以上结构安全的 canonical project 根”：它不再选中任意一个项目，也不再在 Runner 前抛错，而是写入 `project_slug=null`、`project_resolution=ambiguous`、`canonical_project_count=<n>` 和空 Episode 列表。内部指令明确禁止创建第三套 Project，并要求检查、合并和清理既有目录。
 
 该规则不声明任意目录为可信。最终 slug、唯一根、stage schema 和 launch authority 仍全部由同一个后置 Hook 校验；Agent 无法通过上下文降级修改 server-owned metadata。
+
+### 3.5 自动修正执行 scope
+
+持久化 metadata 的 `kind/schemaVersion/repairAttempt/validationCode` 是自动 session marker，但 marker 本身不等于删除权限。修正 Turn 每次 `assemble_context()` 必须重新：
+
+1. 验证消息为 `dispatch_status=dispatched`，且 `workflowRunId`、Thread 与当前可信 Dream context 一致；
+2. 从 authoritative Workflow Run 的 source message 重新校验 actor、workspace、thread、Run、Deck、Agent、binding revision、runtime snapshot 和 plugin lock；
+3. 读取当前结构安全、project identity 合法的 canonical project roots，以 launch `projectStorySlug` 为可信根，其余根才可成为 stale candidates；
+4. 构造 repr-hidden `DreamAutoRepairExecutionScope`，只放入当前 repair message、originating Turn、Run/Thread、validation code、可信 slug 和 stale slug 集合。
+
+该 scope 不进入公共 Chat DTO、message metadata、Claude subprocess env 或 MCP env，并只存在于本轮 `AgentRunOptions`。PreToolUse 不增加第二个并列权限入口；唯一 `_apply_dream_surface_write_guard` 在其既有 `tool_name == "Bash"` 分支内先判断这项窄授权，再执行通用 Dream Bash 写保护。窄授权只接受单条、单目标、无 shell metacharacter 的递归 `rm`，目标必须精确解析为 `stories/<scoped-stale-slug>`。执行前还要求：workspace/stories/可信根/旧根均非 symlink，双方均有普通 `project.yaml`，旧树每个普通文件和目录的相对路径都已存在于可信根，且树内无 symlink/特殊文件。满足时由 server marker 自动放行，不再弹没有决策价值的确认框；任何条件不满足都回到同一 guard 的 `.dream` 通用 hard deny，Agent 可先补齐迁移后在同一 Turn 重试。
 
 ## 4. 错误分类
 
@@ -235,7 +250,7 @@ stateDiagram-v2
     OriginalHookCheck --> Completed: Hook 通过
     OriginalHookCheck --> FailedClosed: non_repairable
     OriginalHookCheck --> RepairDispatching: agent_repairable 且 attempt=0\n持久化 user 消息
-    RepairDispatching --> RepairRunning: CAS status=dispatched\n发布 chat-message + 正常 assemble/resume/Runner
+    RepairDispatching --> RepairRunning: CAS status=dispatched\n发布 chat-message + fresh authority scope + 正常 assemble/resume/Runner
     RepairRunning --> Completed: Hook 通过\nassistant 持久化
     RepairRunning --> RepairFailed: Runner/cancel/Hook 再失败\nstatus=failed
     RepairFailed --> [*]: error terminal；不创建第三个 Turn
@@ -262,6 +277,8 @@ stateDiagram-v2
 | EventBus 发布失败 | 消息保留在历史；不启动无可观察修正，error terminal |
 | 修正 Turn assembly/Runner 失败 | metadata `dispatch_status=failed`，现有 error terminal |
 | context assembly 发现多个安全 canonical 根 | 生成不绑定具体项目的 repair-safe context，继续正常 Turn；最终唯一性由 Hook 决定 |
+| 自动 session marker 合法但 launch authority 已变化 | 不生成 cleanup scope，按 `DREAM_LAUNCH_AUTHORITY_INVALID` fail closed；不执行删除 |
+| Agent 请求删除未列入 scope 的目录、多个目标、未完整迁移的旧树或含 symlink 的树 | PreToolUse hard deny；不执行删除；Agent 可在本轮补齐文件后重试 |
 | 递归文件树遇到受控或用户创建的 symlink | 返回非目录叶节点且不跟随目标；直接内容/下载继续返回安全 400，不升级为 500 |
 | 用户 Stop/cancel | 唯一 `bg_task` 被取消；partial repair assistant 按现有规则保存；自动消息标记 failed；不重启 |
 | 第二次 Hook 仍失败 | 自动消息标记 failed，发布含 allowlisted 最终 validation code 的安全结构化错误，不创建第三轮 |
@@ -274,6 +291,8 @@ stateDiagram-v2
 - trusted slug 来自 server launch metadata；workspace slug 只作为校验后的实际值展示。Agent 只能改 workspace。
 - actor/thread/run/Deck/plugin/source metadata/frozen authority 任一异常均为 `DREAM_LAUNCH_AUTHORITY_INVALID`，绝不通过提示 Agent 修改可信事实。
 - auto request 由服务端内部构造；公共 route 拒绝 reserved message id，也不接受浏览器自带的 server metadata。
+- 持久化 marker 不直接授权 Bash。typed execution scope 来自 fresh authoritative Run/launch 校验，不可由浏览器、用户文本、workspace 文件、Deck/plugin 或 Agent env 构造。
+- 自动 scope 只允许 exact stale `stories/<slug>` 的单目标递归删除；不放开 `.dream`、可信 project、`assets`、任意绝对目录、通配符、多目标、脚本、symlink 或未完成迁移的树。
 - 消息正文由 code-specific template 生成，不使用原始 exception text。
 - SSE 使用已经持久化的 exact DTO；历史接口继续通过 `PublicChatMetadataDto` allowlist 投影。
 - 不修改或删除 Claude transcript；修正 Turn 使用现有 session id resume。
@@ -297,6 +316,8 @@ stateDiagram-v2
 13. `skills/*` 外部目录链接在递归工作区树中作为叶节点返回，接口为 200；link target 内容不出现在响应，直接读取/下载仍 fail closed。
 14. 消息模板不包含 traceback、DSN、密钥、绝对路径或任意内部异常文本。
 15. 普通 Chat、Dream launch/confirmation、resume、SSE reconnect、Stop、tool confirmation 既有测试不回归。
+16. 只有 `dispatched` 自动消息且 fresh Run/Thread/launch authority 全部一致时，Runner 才收到 typed cleanup scope；metadata 伪造或 authority 漂移不得授权删除。
+17. scope 内单个 stale root 在所有树条目已迁入可信根后可无弹窗执行；普通 session、非 scope 目标、多目标、未完整迁移、symlink/特殊文件和越界路径继续 hard deny。
 
 ## 12. 编码前设计复核
 
@@ -305,7 +326,7 @@ stateDiagram-v2
 | 用户是否知道为什么停下？ | 是。真实 user 消息展示 code、规则、期望/实际、修正和禁止项；failed 状态刷新后仍存在。 |
 | 可预期错误是否自动修正？ | 是。仅四个明确的 workspace identity/schema code 可进入一次正常 repair Turn。 |
 | 是否可观察、可恢复？ | 是。persistence-first，EventBus 只通知；history 是恢复真相源。 |
-| Agent 能否修改可信身份？ | 否。身份异常 non-repairable；模板明确禁止；context 每轮重新从服务端解析。 |
+| Agent 能否修改可信身份？ | 否。身份异常 non-repairable；模板明确禁止；context 与 cleanup scope 每轮重新从 authoritative Run/launch 解析。 |
 | 是否可能无限循环？ | 否。server metadata + stable id + attempt=1 三重边界。 |
 | 是否新增多余 endpoint/表/队列/弹窗？ | 否。只新增结构化 issue、一个 chat-message SSE 事件和既有 reducer 分支。 |
 | 是否复用消息/SSE/Turn 基础设施？ | 是。复用 `chat_message`、EventBus、history/status/reconnect、ThreadFactory、Service 和 Runner。 |

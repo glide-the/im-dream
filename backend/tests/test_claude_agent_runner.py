@@ -15,6 +15,8 @@
 # [Sync] 2026-08-30: verify runner composition injects all current actor/thread Notion CLI variables into SDK options.
 # [Sync] 2026-09-01: cover synthetic local-command no-response classification
 #                    so unavailable Skills cannot become empty successful turns.
+# [Sync] 2026-09-01: prove that only a server-scoped automatic repair Turn can
+#                    remove a fully merged stale canonical project root.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -269,6 +271,8 @@ from libs.claude_agent_kit.types import (  # noqa: E402
     AgentRunOptions,
     AgentStreamingCallbacks,
     AgentRunResult,
+    DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION,
+    DreamAutoRepairExecutionScope,
     ToolEventPayload,
 )
 
@@ -1286,6 +1290,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         sandbox_network_mode: str = "allowlist",
         on_tool_confirmation_request=None,
         mcp_env: Optional[dict[str, str]] = None,
+        dream_auto_repair_scope: Optional[DreamAutoRepairExecutionScope] = None,
         notion_credential_home: Optional[str] = None,
         editor_state: Optional[dict[str, Any]] = None,
     ):
@@ -1302,6 +1307,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 im_full_access_enabled=im_full_access_enabled,
                 sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
                 mcp_env=mcp_env or {},
+                dream_auto_repair_scope=dream_auto_repair_scope,
                 claude_tmp_workspace=cwd,
                 notion_credential_home=notion_credential_home,
                 editor_state=editor_state,
@@ -1784,6 +1790,175 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                         _hook_specific(result, {}).get("permissionDecision"),
                         "deny",
                     )
+
+    @staticmethod
+    def _dream_auto_repair_scope(
+        *,
+        thread_id: str,
+    ) -> DreamAutoRepairExecutionScope:
+        return DreamAutoRepairExecutionScope(
+            schema_version=DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION,
+            message_id="dream_repair_" + ("a" * 40),
+            originating_turn_id="11111111-1111-4111-8111-111111111111",
+            workflow_run_id="run_" + ("2" * 32),
+            thread_id=thread_id,
+            actor_id="1",
+            repair_attempt=1,
+            validation_code="PROJECT_STORY_SLUG_MISMATCH",
+            trusted_project_slug="server-project",
+            stale_project_slugs=("stale-project",),
+        )
+
+    @staticmethod
+    def _write_project_tree(workspace: Path) -> None:
+        for slug in ("server-project", "stale-project"):
+            episode = workspace / "stories" / slug / "episodes" / "EP01"
+            episode.mkdir(parents=True)
+            (episode.parents[1] / "project.yaml").write_text(
+                f"project_id: {slug}\nproject_slug: {slug}\n",
+                encoding="utf-8",
+            )
+            (episode / "script.md").write_text(
+                "# merged\n",
+                encoding="utf-8",
+            )
+
+    async def test_auto_repair_scope_allows_only_fully_merged_stale_project_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            thread_id = "thread-auto-repair"
+            workspace = Path(temp_dir) / thread_id
+            (workspace / ".dream").mkdir(parents=True)
+            self._write_project_tree(workspace)
+            confirmations: list[dict[str, Any]] = []
+
+            async def confirm(payload: dict[str, Any]):
+                confirmations.append(payload)
+                return {"approved": True}
+
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                dream_auto_repair_scope=self._dream_auto_repair_scope(
+                    thread_id=thread_id
+                ),
+                mcp_env={
+                    "INK_AGENT_USER_ID": "1",
+                    "INK_AGENT_THREAD_ID": thread_id,
+                    "INK_AGENT_WORKFLOW_RUN_ID": "run_" + ("2" * 32),
+                },
+                on_tool_confirmation_request=confirm,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {
+                        "command": "rm -rf -- stories/stale-project"
+                    },
+                },
+                "call-auto-repair-root-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(
+            _hook_specific(result, {}).get("permissionDecision"),
+            "allow",
+        )
+        self.assertEqual(confirmations, [])
+
+    async def test_project_root_delete_without_matching_auto_repair_scope_is_denied(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            thread_id = "thread-auto-repair-denied"
+            workspace = Path(temp_dir) / thread_id
+            (workspace / ".dream").mkdir(parents=True)
+            self._write_project_tree(workspace)
+            cases = (
+                (None, {}),
+                (
+                    self._dream_auto_repair_scope(thread_id=thread_id),
+                    {
+                        "INK_AGENT_USER_ID": "1",
+                        "INK_AGENT_THREAD_ID": thread_id,
+                        "INK_AGENT_WORKFLOW_RUN_ID": "run_" + ("3" * 32),
+                    },
+                ),
+            )
+            for scope, mcp_env in cases:
+                with self.subTest(scope=scope is not None):
+                    hook = await self._capture_pre_tool_use_hook(
+                        cwd=str(workspace),
+                        dream_auto_repair_scope=scope,
+                        mcp_env=mcp_env,
+                    )
+                    result = await hook(
+                        {
+                            "tool_name": "Bash",
+                            "tool_input": {
+                                "command": "rm -rf stories/stale-project"
+                            },
+                        },
+                        "call-denied-project-root-delete",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(
+                        _hook_specific(result, {}).get("permissionDecision"),
+                        "deny",
+                    )
+
+    async def test_auto_repair_project_root_delete_requires_complete_safe_merge(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            thread_id = "thread-auto-repair-incomplete"
+            workspace = Path(temp_dir) / thread_id
+            (workspace / ".dream").mkdir(parents=True)
+            self._write_project_tree(workspace)
+            stale = workspace / "stories" / "stale-project"
+            trusted = workspace / "stories" / "server-project"
+            (stale / "episodes" / "EP01" / "unique.md").write_text(
+                "must survive\n",
+                encoding="utf-8",
+            )
+            scope = self._dream_auto_repair_scope(thread_id=thread_id)
+            mcp_env = {
+                "INK_AGENT_USER_ID": "1",
+                "INK_AGENT_THREAD_ID": thread_id,
+                "INK_AGENT_WORKFLOW_RUN_ID": "run_" + ("2" * 32),
+            }
+
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                dream_auto_repair_scope=scope,
+                mcp_env=mcp_env,
+            )
+            incomplete = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "rm -rf stories/stale-project"},
+                },
+                "call-incomplete-project-root-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+            (trusted / "episodes" / "EP01" / "unique.md").write_text(
+                "merged differently\n",
+                encoding="utf-8",
+            )
+            (stale / "unsafe-link").symlink_to(
+                workspace / "stories" / "server-project"
+            )
+            unsafe = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "rm -rf stories/stale-project"},
+                },
+                "call-unsafe-project-root-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(
+            _hook_specific(incomplete, {}).get("permissionDecision"),
+            "deny",
+        )
+        self.assertEqual(
+            _hook_specific(unsafe, {}).get("permissionDecision"),
+            "deny",
+        )
 
     async def test_bash_dream_guard_denies_find_env_glob_and_normalized_path_bypasses(self):
         for full_access in (False, True):

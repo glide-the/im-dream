@@ -178,6 +178,8 @@
 #                    common Skills remain owned by workspace initialization.
 # [Sync] 2026-09-01: persist and publish one allowlisted Dream auto-repair user
 #                    message, then return a normal resume Turn continuation.
+# [Sync] 2026-09-01: derive one fresh server-owned stale-project cleanup scope
+#                    for the marked repair Turn and pass it only to PreToolUse.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -276,7 +278,13 @@ from story_workspace.contracts import (
     StoryWorkspaceAgentStoryPayload,
     StoryWorkspaceDreamRunContext,
 )
-from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
+from libs.claude_agent_kit.types import (
+    AgentRunOptions,
+    AgentStreamingCallbacks,
+    DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION,
+    DreamAutoRepairExecutionScope,
+    ToolEventPayload,
+)
 from services.claude_plugin.workspace_packer import pack_workspace_plugins
 from services.deck.chat_context import DeckChatContextService
 from services.admin_gateway import GatewayModel, resolve_platform_model
@@ -1813,6 +1821,48 @@ class ClaudeAgentService:
                     cwd=cwd,
                 )
             )
+            if dream_auto_repair_metadata_is_valid(request.message_metadata):
+                metadata = dict(request.message_metadata or {})
+                if (
+                    metadata.get("dispatch_status")
+                    != DREAM_AUTO_REPAIR_DISPATCHED
+                    or metadata.get("workflowRunId")
+                    != dream_context.workflow_run_id
+                    or request.thread_id != dream_context.thread_id
+                    or not isinstance(request.message_id, str)
+                    or not request.message_id
+                ):
+                    raise DreamAutoRepairError(
+                        "DREAM_AUTO_REPAIR_IDENTITY_INVALID",
+                        "Dream 自动修正执行身份不可验证，已安全停止。",
+                    )
+                cleanup = (
+                    self._dream_artifact_turn_hook
+                    .resolve_auto_repair_project_cleanup_scope(
+                        dream_artifact_turn_ticket,
+                        validation_code=str(metadata["validationCode"]),
+                    )
+                )
+                if cleanup is not None:
+                    trusted_project_slug, stale_project_slugs = cleanup
+                    run_options.dream_auto_repair_scope = (
+                        DreamAutoRepairExecutionScope(
+                            schema_version=(
+                                DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION
+                            ),
+                            message_id=request.message_id,
+                            originating_turn_id=str(
+                                metadata["originatingTurnId"]
+                            ),
+                            workflow_run_id=dream_context.workflow_run_id,
+                            thread_id=dream_context.thread_id,
+                            actor_id=str(request.user_id),
+                            repair_attempt=int(metadata["repairAttempt"]),
+                            validation_code=str(metadata["validationCode"]),
+                            trusted_project_slug=trusted_project_slug,
+                            stale_project_slugs=stale_project_slugs,
+                        )
+                    )
 
         from claude_agent.event_bus import BusProxyQueue
 

@@ -48,6 +48,8 @@
 # [Sync] 2026-09-01: prove current actor/thread Notion projection selects the
 #                    Notion builtin platform and refreshes exact directory-source
 #                    sandbox reads; degraded projection keeps common only.
+# [Sync] 2026-09-01: prove a dispatched server auto-repair message receives the
+#                    fresh typed stale-root scope consumed by the single Bash guard.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -82,7 +84,12 @@ from claude_agent.service import (
 from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from claude_agent.stream_events import NormalizedAgentEvent
-from libs.claude_agent_kit.types import AgentRunResult, ToolEventPayload
+from libs.claude_agent_kit.types import (
+    AgentRunResult,
+    DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION,
+    DreamAutoRepairExecutionScope,
+    ToolEventPayload,
+)
 from services.admin_gateway.models import GatewayModel
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 class _FakeContextBuilder:
@@ -369,6 +376,98 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             builder.user_message_calls[0]["model"],
             "dream-balanced",
+        )
+
+    async def test_dispatched_auto_repair_turn_receives_fresh_cleanup_scope(self):
+        context = self._dream_context()
+        mapper = _StaticDreamContextMapper(context)
+        artifact_hook = unittest.mock.Mock()
+        ticket = unittest.mock.sentinel.auto_repair_ticket
+        artifact_hook.before_main_turn.return_value = ticket
+        artifact_hook.resolve_auto_repair_project_cleanup_scope.return_value = (
+            "server-project",
+            ("stale-project",),
+        )
+        service = ClaudeAgentService(
+            context_builder=_FakeContextBuilder(),
+            platform_model_resolver=lambda _user_id, _alias: "dream-balanced",
+            dream_context_mapper=mapper,
+            dream_artifact_turn_hook=artifact_hook,
+            dream_runtime_init_activator=unittest.mock.AsyncMock(),
+        )
+        message_id = "dream_repair_" + ("a" * 40)
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id=context.thread_id,
+            resume=False,
+            message_id=message_id,
+            message_parts=[{"type": "text", "text": "repair"}],
+            message_metadata={
+                "kind": "story-workspace-dream-auto-repair",
+                "schemaVersion": "story-workspace-dream-auto-repair/v1",
+                "originatingMessageId": "message-origin",
+                "originatingTurnId": "turn-origin",
+                "workflowRunId": context.workflow_run_id,
+                "repairAttempt": 1,
+                "validationCode": "PROJECT_STORY_SLUG_MISMATCH",
+                "idempotencyKey": "repair-key",
+                "dispatch_status": "dispatched",
+            },
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace_path = Path(tmp_dir) / context.thread_id
+            workspace_path.mkdir()
+            (workspace_path / ".dream").mkdir()
+            with (
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_system_config",
+                    return_value={"workspace_enabled": True},
+                ),
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_chat_thread",
+                    return_value={"deck_id": context.deck_id},
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "get_or_create_workspace",
+                    return_value=workspace_path,
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "_pack_thread_workspace_plugins",
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "_resolve_story_workspace_dream_deck_prompt",
+                    new=unittest.mock.AsyncMock(return_value="dream prompt"),
+                ),
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=AgentRunState(session_id=context.thread_id),
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        scope = execution.run_options.dream_auto_repair_scope
+        self.assertIsInstance(scope, DreamAutoRepairExecutionScope)
+        assert scope is not None
+        self.assertEqual(
+            scope.schema_version,
+            DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION,
+        )
+        self.assertEqual(scope.message_id, message_id)
+        self.assertEqual(scope.workflow_run_id, context.workflow_run_id)
+        self.assertEqual(scope.thread_id, context.thread_id)
+        self.assertEqual(scope.actor_id, "7")
+        self.assertEqual(scope.trusted_project_slug, "server-project")
+        self.assertEqual(scope.stale_project_slugs, ("stale-project",))
+        artifact_hook.resolve_auto_repair_project_cleanup_scope.assert_called_once_with(
+            ticket,
+            validation_code="PROJECT_STORY_SLUG_MISMATCH",
         )
 
     async def test_shared_thread_resume_uses_persisted_claude_session(self):

@@ -4,6 +4,8 @@
 # [Sync] 2026-09-01: cover allowlisted project-slug repair and fail-closed launch authority.
 # [Sync] 2026-09-01: cover pre-write rejection of duplicate canonical roots
 #                    and duplicate stage entity identities.
+# [Sync] 2026-09-01: cover fresh launch-authority resolution of the exact stale
+#                    project roots granted to an automatic repair Turn.
 
 """Automatic root-turn workbench synchronization contract."""
 
@@ -304,6 +306,80 @@ shots:
             / "run.json"
         )
         self.assertFalse(run_file.exists())
+
+    def test_auto_repair_cleanup_scope_uses_fresh_trusted_launch_authority(self) -> None:
+        stale = self.workspace / "stories" / "stale-project"
+        stale.mkdir(parents=True)
+        (stale / "project.yaml").write_text(
+            "project_id: stale-project\nproject_slug: stale-project\n",
+            encoding="utf-8",
+        )
+        hook = DreamArtifactTurnHook()
+        ticket = hook.before_main_turn(
+            context=context(),
+            actor_id="actor-1",
+            cwd=str(self.workspace),
+        )
+        db = MagicMock()
+        db.in_transaction = False
+        db.execute.return_value.fetchone.return_value = {
+            "metadata": json.dumps(launch_metadata()),
+        }
+
+        with (
+            patch.object(hook, "_load_authoritative_run", return_value=launched_run()),
+            patch(
+                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
+                return_value=db,
+            ),
+        ):
+            cleanup = hook.resolve_auto_repair_project_cleanup_scope(
+                ticket,
+                validation_code="DREAM_CANONICAL_PROJECT_AMBIGUOUS",
+            )
+
+        self.assertEqual(cleanup, ("demo-project", ("stale-project",)))
+        db.close.assert_called_once_with()
+
+    def test_auto_repair_cleanup_scope_rejects_changed_launch_authority(self) -> None:
+        stale = self.workspace / "stories" / "stale-project"
+        stale.mkdir(parents=True)
+        (stale / "project.yaml").write_text(
+            "project_id: stale-project\nproject_slug: stale-project\n",
+            encoding="utf-8",
+        )
+        hook = DreamArtifactTurnHook()
+        ticket = hook.before_main_turn(
+            context=context(),
+            actor_id="actor-1",
+            cwd=str(self.workspace),
+        )
+        changed = launch_metadata()
+        changed["actorId"] = "actor-forged"
+        db = MagicMock()
+        db.in_transaction = False
+        db.execute.return_value.fetchone.return_value = {
+            "metadata": json.dumps(changed),
+        }
+
+        with (
+            patch.object(hook, "_load_authoritative_run", return_value=launched_run()),
+            patch(
+                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
+                return_value=db,
+            ),
+            self.assertRaises(DreamArtifactTurnHookError) as raised,
+        ):
+            hook.resolve_auto_repair_project_cleanup_scope(
+                ticket,
+                validation_code="PROJECT_STORY_SLUG_MISMATCH",
+            )
+
+        self.assertEqual(raised.exception.code, "DREAM_LAUNCH_AUTHORITY_INVALID")
+        self.assertIs(
+            raised.exception.issue.repairability,
+            DreamArtifactRepairability.NON_REPAIRABLE,
+        )
 
     def test_duplicate_stage_entity_ids_are_agent_repairable(self) -> None:
         (self.workspace / "assets" / "characters" / "lead-copy.md").write_text(

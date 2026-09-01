@@ -17,6 +17,8 @@
 # [Sync] 2026-09-01: validate workspace-derived project/stage collections before
 #                    projection writes and classify duplicate canonical roots or
 #                    stage entity identities as bounded Agent-repairable issues.
+# [Sync] 2026-09-01: revalidate launch authority before an automatic repair Turn
+#                    receives an exact stale-project cleanup scope.
 
 """Root-turn synchronization from canonical workbench files to one Dream Run.
 
@@ -139,6 +141,14 @@ _PRIVATE_FILE_NAMES = frozenset(
         "episode-outline.md",
         "storyboard.yaml",
         "review-report.md",
+    }
+)
+_PROJECT_ROOT_CLEANUP_VALIDATION_CODES = frozenset(
+    {
+        "PROJECT_STORY_SLUG_MISMATCH",
+        "DREAM_CANONICAL_PROJECT_AMBIGUOUS",
+        "DREAM_STAGE_ENTITY_ID_DUPLICATE",
+        "DREAM_STAGE_SCHEMA_INVALID",
     }
 )
 
@@ -276,6 +286,16 @@ class _StageProjection:
     stage: StoryWorkspaceDreamStage
     source_files: tuple[str, ...]
     items: tuple[dict[str, object], ...]
+
+
+@dataclass(frozen=True)
+class _DreamLaunchAuthority:
+    """Pinned launch metadata used by binding and auto-repair authorization."""
+
+    source_message_id: str
+    raw_metadata: object
+    metadata: dict[str, Any]
+    trusted_story_slug: str
 
 
 class StoryWorkspaceDreamArtifactPublisher:
@@ -762,6 +782,176 @@ class DreamArtifactTurnHook:
         return value
 
     @classmethod
+    def _load_launch_authority(
+        cls,
+        db: Any,
+        ticket: DreamArtifactTurnTicket,
+        workflow_run: WorkflowRun,
+    ) -> _DreamLaunchAuthority:
+        """Load and validate the immutable launch facts for this exact Run."""
+
+        source_message_id = workflow_run.source_message_id
+        if not isinstance(source_message_id, str) or not source_message_id:
+            raise DreamArtifactTurnHookError(
+                "Dream launch source is unavailable",
+                issue=_launch_authority_issue(),
+            )
+        row = db.execute(
+            "SELECT metadata FROM chat_message WHERE id = %s "
+            "AND thread_id = %s LIMIT 1",
+            (source_message_id, ticket.context.thread_id),
+        ).fetchone()
+        if db.in_transaction:
+            db.rollback()
+        if row is None:
+            raise DreamArtifactTurnHookError(
+                "Dream launch source is unavailable",
+                issue=_launch_authority_issue(),
+            )
+        raw_metadata = row["metadata"]
+        metadata = cls._decode_source_metadata(raw_metadata)
+        dream_context = metadata.get("dreamContext")
+        goal = metadata.get("goal")
+        trusted_story_slug = metadata.get("projectStorySlug")
+        if trusted_story_slug is None and isinstance(goal, str) and goal:
+            trusted_story_slug = story_workspace_canonical_project_fallback_slug(
+                goal
+            )
+            metadata["projectStorySlug"] = trusted_story_slug
+        launch_authority_is_valid = (
+            metadata.get("kind") == "story-workspace-dream-launch"
+            and metadata.get("schemaVersion")
+            == "story-workspace-dream-launch/v1"
+            and str(metadata.get("actorId")) == ticket.actor_id
+            and metadata.get("workspaceId") == workflow_run.workspace_id
+            and metadata.get("deckId") == ticket.context.deck_id
+            and metadata.get("agentId") == ticket.context.agent_id
+            and metadata.get("workflowRunId")
+            == ticket.context.workflow_run_id
+            and metadata.get("threadId") == ticket.context.thread_id
+            and isinstance(dream_context, dict)
+            and dream_context.get("workflow_run_id")
+            == ticket.context.workflow_run_id
+            and dream_context.get("thread_id") == ticket.context.thread_id
+            and dream_context.get("deck_id") == ticket.context.deck_id
+            and dream_context.get("agent_id") == ticket.context.agent_id
+            and dream_context.get("deck_plugin_id")
+            == ticket.context.deck_plugin_id
+            and dream_context.get("deck_plugin_version")
+            == ticket.context.deck_plugin_version
+            and dream_context.get("deck_plugin_binding_id")
+            == ticket.context.deck_plugin_binding_id
+            and dream_context.get("binding_revision")
+            == ticket.context.binding_revision
+            and dream_context.get("deck_runtime_snapshot_id")
+            == ticket.context.deck_runtime_snapshot_id
+            and dream_context.get("runtime_plugin_lock_id")
+            == ticket.context.runtime_plugin_lock_id
+            and isinstance(trusted_story_slug, str)
+            and _STORY_SLUG.fullmatch(trusted_story_slug) is not None
+        )
+        if not launch_authority_is_valid:
+            raise DreamArtifactTurnHookError(
+                "Dream launch authority changed",
+                issue=_launch_authority_issue(),
+            )
+        return _DreamLaunchAuthority(
+            source_message_id=source_message_id,
+            raw_metadata=raw_metadata,
+            metadata=metadata,
+            trusted_story_slug=trusted_story_slug,
+        )
+
+    @classmethod
+    def _canonical_project_slugs_for_repair(
+        cls,
+        workspace: Path,
+    ) -> tuple[str, ...]:
+        """List only safe canonical project roots eligible for scoped cleanup."""
+
+        stories = workspace / "stories"
+        try:
+            stories_metadata = stories.lstat()
+        except FileNotFoundError:
+            return ()
+        except OSError as exc:
+            raise DreamArtifactTurnHookError(
+                "canonical stories directory cannot be inspected"
+            ) from exc
+        if stat.S_ISLNK(stories_metadata.st_mode) or not stat.S_ISDIR(
+            stories_metadata.st_mode
+        ):
+            raise DreamArtifactTurnHookError(
+                "canonical stories directory is unsafe"
+            )
+        binding_service = StoryWorkspaceEpisodeBindingService(workspace)
+        candidates: list[str] = []
+        try:
+            entries = sorted(stories.iterdir(), key=lambda path: path.name)
+        except OSError as exc:
+            raise DreamArtifactTurnHookError(
+                "canonical stories directory cannot be inspected"
+            ) from exc
+        for entry in entries:
+            if _STORY_SLUG.fullmatch(entry.name) is None:
+                continue
+            try:
+                visible = entry.lstat()
+            except OSError as exc:
+                raise DreamArtifactTurnHookError(
+                    "canonical project directory cannot be inspected"
+                ) from exc
+            if stat.S_ISLNK(visible.st_mode):
+                raise DreamArtifactTurnHookError(
+                    "canonical project directory is unsafe"
+                )
+            if not stat.S_ISDIR(visible.st_mode):
+                continue
+            project_file = entry / "project.yaml"
+            if not project_file.exists():
+                continue
+            try:
+                project_id = binding_service.read_canonical_project_story_slug(
+                    entry.name
+                )
+            except StoryWorkspaceEpisodeBindingError as exc:
+                raise DreamArtifactTurnHookError(
+                    "canonical project identity is invalid"
+                ) from exc
+            if project_id != entry.name:
+                raise DreamArtifactTurnHookError(
+                    "canonical project identity is invalid"
+                )
+            candidates.append(entry.name)
+        return tuple(candidates)
+
+    def resolve_auto_repair_project_cleanup_scope(
+        self,
+        ticket: DreamArtifactTurnTicket,
+        *,
+        validation_code: str,
+    ) -> tuple[str, tuple[str, ...]] | None:
+        """Return fresh trusted/stale roots for one marked repair Turn."""
+
+        if validation_code not in _PROJECT_ROOT_CLEANUP_VALIDATION_CODES:
+            return None
+        workflow_run = self._load_authoritative_run(ticket)
+        db = database.get_db()
+        try:
+            launch = self._load_launch_authority(db, ticket, workflow_run)
+        finally:
+            db.close()
+        candidates = self._canonical_project_slugs_for_repair(
+            ticket.workspace_root
+        )
+        stale = tuple(
+            slug for slug in candidates if slug != launch.trusted_story_slug
+        )
+        if not stale:
+            return None
+        return launch.trusted_story_slug, stale
+
+    @classmethod
     def _ensure_first_episode_binding(
         cls,
         ticket: DreamArtifactTurnTicket,
@@ -776,72 +966,13 @@ class DreamArtifactTurnHook:
         episode_prefix = f"stories/{story_slug}/episodes/EP01/"
         if not any(path.startswith(episode_prefix) for path in private_files):
             return None
-        source_message_id = workflow_run.source_message_id
-        if not isinstance(source_message_id, str) or not source_message_id:
-            raise DreamArtifactTurnHookError(
-                "Dream launch source is unavailable",
-                issue=_launch_authority_issue(),
-            )
-
         db = database.get_db()
         try:
-            row = db.execute(
-                "SELECT metadata FROM chat_message WHERE id = %s "
-                "AND thread_id = %s LIMIT 1",
-                (source_message_id, ticket.context.thread_id),
-            ).fetchone()
-            if db.in_transaction:
-                db.rollback()
-            if row is None:
-                raise DreamArtifactTurnHookError(
-                    "Dream launch source is unavailable",
-                    issue=_launch_authority_issue(),
-                )
-            raw_metadata = row["metadata"]
-            metadata = cls._decode_source_metadata(raw_metadata)
-            dream_context = metadata.get("dreamContext")
-            goal = metadata.get("goal")
-            trusted_story_slug = metadata.get("projectStorySlug")
-            if trusted_story_slug is None and isinstance(goal, str) and goal:
-                trusted_story_slug = story_workspace_canonical_project_fallback_slug(
-                    goal
-                )
-                metadata["projectStorySlug"] = trusted_story_slug
-            launch_authority_is_valid = (
-                metadata.get("kind") == "story-workspace-dream-launch"
-                and metadata.get("schemaVersion") == "story-workspace-dream-launch/v1"
-                and str(metadata.get("actorId")) == ticket.actor_id
-                and metadata.get("workspaceId") == workflow_run.workspace_id
-                and metadata.get("deckId") == ticket.context.deck_id
-                and metadata.get("agentId") == ticket.context.agent_id
-                and metadata.get("workflowRunId") == ticket.context.workflow_run_id
-                and metadata.get("threadId") == ticket.context.thread_id
-                and isinstance(dream_context, dict)
-                and dream_context.get("workflow_run_id")
-                == ticket.context.workflow_run_id
-                and dream_context.get("thread_id") == ticket.context.thread_id
-                and dream_context.get("deck_id") == ticket.context.deck_id
-                and dream_context.get("agent_id") == ticket.context.agent_id
-                and dream_context.get("deck_plugin_id")
-                == ticket.context.deck_plugin_id
-                and dream_context.get("deck_plugin_version")
-                == ticket.context.deck_plugin_version
-                and dream_context.get("deck_plugin_binding_id")
-                == ticket.context.deck_plugin_binding_id
-                and dream_context.get("binding_revision")
-                == ticket.context.binding_revision
-                and dream_context.get("deck_runtime_snapshot_id")
-                == ticket.context.deck_runtime_snapshot_id
-                and dream_context.get("runtime_plugin_lock_id")
-                == ticket.context.runtime_plugin_lock_id
-                and isinstance(trusted_story_slug, str)
-                and _STORY_SLUG.fullmatch(trusted_story_slug) is not None
-            )
-            if not launch_authority_is_valid:
-                raise DreamArtifactTurnHookError(
-                    "Dream launch authority changed",
-                    issue=_launch_authority_issue(),
-                )
+            launch = cls._load_launch_authority(db, ticket, workflow_run)
+            source_message_id = launch.source_message_id
+            raw_metadata = launch.raw_metadata
+            metadata = launch.metadata
+            trusted_story_slug = launch.trusted_story_slug
             if trusted_story_slug != story_slug:
                 raise DreamArtifactTurnHookError(
                     "Dream workspace project slug does not match launch authority",

@@ -39,6 +39,9 @@
 #                    separately from user SDK env so model/global policy wins.
 # [Sync] 2026-08-28: carry the repr-hidden thread Notion credential projection
 #                    path to the lazy Read hook, separately from Agent/browser env.
+# [Sync] 2026-09-01: carry one server-authenticated Dream auto-repair project
+#                    cleanup scope to the PreToolUse boundary without exposing
+#                    it through the public Chat request or subprocess env.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -163,6 +166,32 @@ class AgentStreamingCallbacks:
 # Run options & result
 # ---------------------------------------------------------------------------
 
+DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION = (
+    "story-workspace-dream-auto-repair-execution/v1"
+)
+
+
+@dataclass(frozen=True)
+class DreamAutoRepairExecutionScope:
+    """One server-owned cleanup capability for an automatic repair Turn.
+
+    The persisted user message proves why the Turn exists; this in-memory
+    value additionally binds the exact workflow/thread/message identity and
+    the only stale canonical project roots that PreToolUse may remove.  Public
+    request DTOs cannot construct or populate this capability.
+    """
+
+    schema_version: str
+    message_id: str
+    originating_turn_id: str
+    workflow_run_id: str
+    thread_id: str
+    actor_id: str
+    repair_attempt: int
+    validation_code: str
+    trusted_project_slug: str
+    stale_project_slugs: tuple[str, ...]
+
 
 @dataclass
 class AgentRunOptions:
@@ -259,6 +288,14 @@ class AgentRunOptions:
     turn_runtime: dict[str, Any] = field(default_factory=dict)
     # Environment passed to project-owned MCP subprocesses for current-session bindings.
     mcp_env: dict[str, str] = field(default_factory=dict)
+    # Server-authenticated automatic Dream repair capability. It is derived
+    # from the persisted repair message plus fresh launch authority immediately
+    # before the repair Turn, and is consumed only by the host PreToolUse hook.
+    # It is never projected into Claude's process environment or MCP config.
+    dream_auto_repair_scope: Optional[DreamAutoRepairExecutionScope] = field(
+        default=None,
+        repr=False,
+    )
     # User-scoped SDK env vars from system_config.env_vars.
     # Allowlist-filtered before injection into ClaudeAgentOptions.env.
     # Priority: higher than backend/.env, lower than explicit options.env.

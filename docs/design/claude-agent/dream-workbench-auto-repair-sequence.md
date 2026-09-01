@@ -4,6 +4,7 @@
 <!-- [Sync] 2026-09-01: initial business sequence set. -->
 <!-- [Sync] 2026-09-01: add pre-write collection validation, move/merge cleanup, and visible structured exhausted failure. -->
 <!-- [Sync] 2026-09-01: show repair-safe ambiguous context assembly before the normal Runner turn. -->
+<!-- [Sync] 2026-09-01: show fresh launch-authority cleanup scope resolution and exact PreToolUse stale-root deletion. -->
 
 # Dream 工作区自动修正业务时序图
 
@@ -23,6 +24,7 @@ sequenceDiagram
     participant Context as DreamWorkbenchContext
     participant DB as PostgreSQL chat_message
     participant Claude as ClaudeAgentRunner
+    participant Guard as PreToolUse safety guard
     participant Hook as DreamArtifactTurnHook
     participant WS as Thread workspace
 
@@ -71,10 +73,18 @@ sequenceDiagram
     Factory->>Service: assemble_context(auto user request, resume=true)
     Service->>Context: refresh_for_turn(workspace)
     Context-->>Service: ambiguous 时返回同一不绑定修正上下文
+    Service->>Hook: resolve_auto_repair_project_cleanup_scope(ticket, validationCode)
+    Hook->>DB: reload authoritative Run + immutable launch message
+    DB-->>Hook: trusted Run/Thread/Deck/plugin/projectStorySlug
+    Hook-->>Service: trusted slug + exact stale slug set
+    Service->>Service: build repr-hidden typed execution scope
     Service->>DB: exact CAS replay auto user message
     Service->>Claude: run_streaming(normal repair Turn)
     Claude->>WS: 移动/合并到 canonical 目录并修正 project_id/project_slug
-    Claude->>WS: 核对后移除旧项目根，不保留重复 EP/entity_id
+    Claude->>Guard: Bash rm -rf exact stale project root
+    Guard->>Guard: 校验 typed scope、Run/Thread、单目标、路径、no-symlink、merge coverage
+    Guard-->>Claude: permissionDecision=allow（无需确认框）
+    Claude->>WS: 移除旧项目根，不保留重复 EP/entity_id
     Claude-->>Service: success result
     Service->>Hook: after_main_turn(new trusted ticket)
     Hook-->>Service: validation passed
@@ -119,6 +129,40 @@ sequenceDiagram
         else DB/CAS/权限/路径安全/未知异常
             Hook-->>Service: DREAM_ARTIFACT_SYNC_FAILED / non_repairable
             Service->>Bus: safe error + finish(error)
+        end
+    end
+```
+
+## 2.1 自动清理安全分支
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Claude as ClaudeAgentRunner
+    participant Guard as PreToolUse
+    participant Scope as DreamAutoRepairExecutionScope
+    participant WS as Thread workspace
+
+    Claude->>Guard: recursive rm request
+    Guard->>Scope: validate typed server-only marker
+    alt 普通 session / Run、Thread 或 validation 不匹配
+        Scope-->>Guard: invalid or absent
+        Guard-->>Claude: deny（通用 .dream write guard）
+    else scope 合法
+        Guard->>WS: resolve exact stories/<stale-slug>
+        alt 多目标、越界、可信根、非 scope slug 或 shell script
+            WS-->>Guard: target mismatch
+            Guard-->>Claude: deny
+        else exact stale root
+            Guard->>WS: lstat workspace/stories/roots/tree + compare relative entries
+            alt 未完整迁移 / symlink / 特殊文件 / tree 超限
+                WS-->>Guard: unsafe or incomplete
+                Guard-->>Claude: deny；先补齐迁移
+            else every stale entry represented under trusted root
+                WS-->>Guard: cleanup preconditions satisfied
+                Guard-->>Claude: allow original exact rm
+                Claude->>WS: remove scoped stale root
+            end
         end
     end
 ```
