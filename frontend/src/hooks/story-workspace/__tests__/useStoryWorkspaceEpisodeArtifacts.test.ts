@@ -1,6 +1,7 @@
 // [Input] Canonical Episode artifact GET snapshots and lifecycle signals.
 // [Output] Contract, ETag, polling, invalidation, cancellation, and last-good coverage.
 // [Pos] Story Workspace read-only Episode artifact query seam.
+// [Sync] 2026-09-02: accept standalone prose tildes while retaining home-path rejection.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -67,6 +68,29 @@ function boundSurface(availability: 'not_generated' | 'invalid' = 'not_generated
   };
 }
 
+function boundSurfaceWithOutline(markdown: string) {
+  const surface = boundSurface();
+  return {
+    ...surface,
+    artifacts: surface.artifacts.map((artifact) => (
+      artifact.relativeKey === 'episode-outline.md'
+        ? {
+            ...artifact,
+            availability: 'available' as const,
+            contentRevision: REVISION,
+            mtime: '2026-09-02T00:00:00Z',
+            size: markdown.length,
+          }
+        : artifact
+    )),
+    documents: [{
+      relativeKey: 'episode-outline.md',
+      markdown,
+      sourceRevision: REVISION,
+    }],
+  };
+}
+
 test('parses the canonical bound and unbound surfaces without workflow action fields', () => {
   expect(storyWorkspaceParseEpisodeArtifactSurface(boundSurface()).episodeCode).toBe('EP01');
   expect(storyWorkspaceParseEpisodeArtifactSurface(unboundSurface()).bindingAvailability).toBe('unbound');
@@ -81,6 +105,18 @@ test('requires all canonical artifact roots for a bound Episode', () => {
     ...boundSurface(),
     artifacts: boundSurface().artifacts.slice(1),
   })).toThrow(/all six artifacts/i);
+});
+
+test('accepts a standalone prose tilde but still rejects real home paths', () => {
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(
+    boundSurfaceWithOutline('建议时长 3 ~ 5 分钟。'),
+  )).not.toThrow();
+
+  for (const markdown of ['读取 ~/secrets.txt', String.raw`读取 ~\secrets.txt`]) {
+    expect(() => storyWorkspaceParseEpisodeArtifactSurface(
+      boundSurfaceWithOutline(markdown),
+    )).toThrow(/sensitive path/i);
+  }
 });
 
 test('GET uses the run-scoped endpoint, bearer token, and exact quoted ETag', async () => {

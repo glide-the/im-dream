@@ -9,6 +9,7 @@
 <!-- [Sync] 2026-09-01: persist and project exact trusted/stale repair facts so a fresh Session cannot delete the protected root. -->
 <!-- [Sync] 2026-09-01: preserve legacy v1 history while denying cleanup scope unless persisted and fresh facts match. -->
 <!-- [Sync] 2026-09-01: persist every successful Claude logical Turn before its Dream Hook, retain that assistant across repair SSE handoff, and accept canonical relative artifact references/compact storyboard forms. -->
+<!-- [Sync] 2026-09-02: require backend and frontend Episode path audits to treat only slash-qualified home paths, never a standalone prose tilde, as sensitive. -->
 
 # Dream 后置同步失败后的 Agent 自动自检修正
 
@@ -327,6 +328,7 @@ stateDiagram-v2
 - SSE 使用已经持久化的 exact DTO；历史接口继续通过 `PublicChatMetadataDto` allowlist 投影。
 - reasoning/tool/text live SSE 继续使用既有事件；同一 collected event 集在 Hook 前线性转换并保存到 assistant `parts`，不另建 SSE 日志表。
 - canonical `assets/(characters|scenes|props)/**` 与 `stories/<slug>/episodes/EPxx/**` 是可公开的 workspace 相对引用；绝对路径、home/env 路径、credential literal、高熵非业务 token 和 raw command 仍 fail closed。
+- backend artifact adapter 与 frontend strict response parser 使用相同的 home-path 边界：仅 `~/...`、`~\...` 及显式 HOME/env 形式视为敏感路径，正文范围符号等独立 `~` 不得让整个 Episode response 降级为 `invalid_payload`。
 - 不修改或删除 Claude transcript；修正 Turn 使用现有 session id resume。
 - 普通歧义上下文不输出目录清单、不选择“看起来正确”的 slug；自动修正上下文只输出服务器重新验证的 trusted/stale 相对路径事实。
 - 文件树使用 `lstat` 获取 link 自身元数据，不读取、遍历或暴露 thread 外的 link target。
@@ -353,7 +355,7 @@ stateDiagram-v2
 18. marked repair 只删 stale `project.yaml` 时收到完整根清理命令并可在同一 Turn 重试；普通 session 仍只收到通用拒绝，不泄露 scope slug。
 19. `DREAM_CANONICAL_PROJECT_AMBIGUOUS` 自动消息正文/metadata 与 `.dream/WORKBENCH.md` 同时明确 trusted/stale 根和 `stale -> trusted` 合并方向；fresh SDK Session 不依赖旧 transcript。
 20. marked repair 请求删除 trusted 根时必须拒绝并指出该根受保护，同时返回 scoped stale 根命令；消息、`.dream` 与 fresh Hook scope 任一不一致都 fail closed。
-21. 生产副本中的 canonical 相对路径、`~` 范围符号、紧凑 character refs 与单对象 dialogue 可投影；真实绝对路径、凭证和高熵非业务 token 仍被拒绝。
+21. 生产副本中的 canonical 相对路径、`~` 范围符号、紧凑 character refs 与单对象 dialogue 同时通过 backend projection 与 frontend strict parser；真实 home/绝对路径、凭证和高熵非业务 token 仍被拒绝。
 
 ## 12. 编码前设计复核
 

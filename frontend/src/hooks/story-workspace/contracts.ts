@@ -2,6 +2,8 @@
 // [Output] Shared strict frontend DTOs with separate Project and Episode titles.
 // [Pos] Story Workspace browser contract declarations; no transport or reducer state.
 // [Sync] 2026-08-14: constrain Dream re-entry to its initial/in-progress outcome states.
+// [Sync] 2026-09-02: align Episode public-text path auditing with the backend;
+//                    a standalone prose `~` is not a home-directory path.
 
 export type StoryWorkspaceReviewStatus = 'pending' | 'confirmed' | 'rejected' | 'archived';
 
@@ -912,7 +914,7 @@ const STORY_WORKSPACE_EPISODE_BEAT_KEY = /^SC-[0-9]{2,}$/;
 const STORY_WORKSPACE_EPISODE_REVIEWED_ARTIFACT =
   /^(?:episode-outline\.md|script\.md|storyboard\.yaml|prompts\/[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.ya?ml|renders\/render-guide\.md)$/;
 const STORY_WORKSPACE_EPISODE_SENSITIVE_PATH =
-  /(?:^|[\s('"`=])(?:\/(?!\/)[A-Za-z0-9._~-]+(?:\/[^\s`]+)*|[A-Za-z]:[\\/][^\s`]+|\\\\[^\\\s]+\\[^\s`]+|file:\/\/(?:localhost)?\/[^\s`]+|(?:~|\$HOME|\$\{HOME\}|%(?:USERPROFILE|HOMEPATH)%|\$env:(?:USERPROFILE|HOME))(?=$|[\\/\s`])(?:[\\/][^\s`]*)?|\.\.[\\/])/i;
+  /(?:^|[\s('"`=])(?:\/(?!\/)[A-Za-z0-9._~-]+(?:\/[^\s`]+)*|[A-Za-z]:[\\/][^\s`]+|\\\\[^\\\s]+\\[^\s`]+|file:\/\/(?:localhost)?\/[^\s`]+|(?:~(?=[\\/])|\$HOME|\$\{HOME\}|%(?:USERPROFILE|HOMEPATH)%|\$env:(?:USERPROFILE|HOME))(?=$|[\\/\s`])(?:[\\/][^\s`]*)?|\.\.[\\/])/i;
 const STORY_WORKSPACE_EPISODE_HTML = /<!--|<\/?[A-Za-z][^>]*>/;
 const STORY_WORKSPACE_EPISODE_CREDENTIAL = /(?:\bbearer\s+[A-Za-z0-9._-]{8,}|(?<![A-Za-z0-9_-])(?:sk-(?:(?:ant|proj)-)?|gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])|(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])|(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_-])|(?<![A-Z0-9])AKIA[A-Z0-9]{16}(?![A-Z0-9])|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:api[\s_-]*keys?|access[\s_-]*tokens?|refresh[\s_-]*tokens?|tokens?|secrets?|auth(?:orization)?|credentials?|passwords?|private[\s_-]*keys?)\b\s*[:=]\s*[^\s`]+)/i;
 const STORY_WORKSPACE_EPISODE_PRIVATE_MODEL_TEXT = /(?:\bchain[\s_-]*(?:of[\s_-]*)?thought\b|\b(?:hidden|internal|private|model)[\s_-]*reasoning\b|\bsystem[\s_-]*prompt\b|隐藏推理|内部推理|思维链|系统提示词)/i;
