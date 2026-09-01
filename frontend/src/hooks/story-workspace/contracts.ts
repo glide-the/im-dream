@@ -2,8 +2,8 @@
 // [Output] Shared strict frontend DTOs with separate Project and Episode titles.
 // [Pos] Story Workspace browser contract declarations; no transport or reducer state.
 // [Sync] 2026-08-14: constrain Dream re-entry to its initial/in-progress outcome states.
-// [Sync] 2026-09-02: align Episode public-text path auditing with the backend;
-//                    a standalone prose `~` is not a home-directory path.
+// [Sync] 2026-09-02: align Episode public-text path and entropy auditing with
+//                    the backend canonical workspace-reference allowlist.
 
 export type StoryWorkspaceReviewStatus = 'pending' | 'confirmed' | 'rejected' | 'archived';
 
@@ -921,6 +921,7 @@ const STORY_WORKSPACE_EPISODE_PRIVATE_MODEL_TEXT = /(?:\bchain[\s_-]*(?:of[\s_-]
 const STORY_WORKSPACE_EPISODE_RAW_COMMAND = /(?:^|[\s`])(?:\$\s+|sudo\s+|curl\b|wget\b|(?:ba|z|fi)?sh\b|python(?:3(?:\.\d+)?)?\b|node(?=\s+(?:--?[A-Za-z0-9]|[./~$]|[A-Za-z0-9_.-]+\/|[A-Za-z0-9_.-]+\.(?:c?js|mjs|ts|tsx|json)\b))|npm\b|npx\b|pnpm\b|yarn\b|git\b|claude\b|rm\s+(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+|cat\s+(?:~?\/\.ssh\/|\/etc\/(?:passwd|shadow)|\S*(?:credential|secret|token|private[_-]?key))|dd\s+[^\n]{0,240}\bif=\S+[^\n]{0,240}\bof=\S+|\/drama-forge:[a-z0-9_-]+|(?:tool(?:_name)?|renderer|raw_command|command(?:_line)?)\s*[:=])/i;
 const STORY_WORKSPACE_EPISODE_SENSITIVE_OPTION = /(?<![A-Za-z0-9_-])--(?:api[-_]?key|token|secret|password|credential|authorization)(?:[=\s]|$)/i;
 const STORY_WORKSPACE_EPISODE_TOOL_OPTION = /(?<![A-Za-z0-9_-])(?:tool|renderer)\b[^\r\n]*?(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*/i;
+const STORY_WORKSPACE_EPISODE_PUBLIC_RELATIVE_REFERENCE = /^(?:assets\/(?:characters|scenes|props)\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}|stories\/[a-z0-9]+(?:-[a-z0-9]+)*\/episodes\/EP[0-9]{2}\/[A-Za-z0-9][A-Za-z0-9._-]{0,127})$/i;
 type StoryWorkspaceEpisodeWireRecord = Record<string, unknown>;
 type StoryWorkspaceEpisodeStringFieldVisitor = (
   field: string,
@@ -1036,6 +1037,7 @@ function storyWorkspaceEpisodeLooksLikeSecret(value: string): boolean {
   const candidates = value.match(/(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_-]{32,}={0,2}(?![A-Za-z0-9+/_=-])/g) ?? [];
   return candidates.some((candidate) => {
     const token = candidate.replace(/=+$/, '');
+    if (STORY_WORKSPACE_EPISODE_PUBLIC_RELATIVE_REFERENCE.test(token)) return false;
     const slashSeparatedLabels = token.split('/');
     if (
       slashSeparatedLabels.length >= 4

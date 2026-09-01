@@ -1,7 +1,7 @@
 // [Input] Canonical Episode artifact GET snapshots and lifecycle signals.
 // [Output] Contract, ETag, polling, invalidation, cancellation, and last-good coverage.
 // [Pos] Story Workspace read-only Episode artifact query seam.
-// [Sync] 2026-09-02: accept matching strong/weak HTTP ETags while rejecting changed revisions.
+// [Sync] 2026-09-02: accept proxy weak ETags and canonical Episode evidence paths.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -117,6 +117,20 @@ test('accepts a standalone prose tilde but still rejects real home paths', () =>
       boundSurfaceWithOutline(markdown),
     )).toThrow(/sensitive path/i);
   }
+});
+
+test('accepts canonical Episode evidence paths without weakening secret checks', () => {
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(
+    boundSurfaceWithOutline(
+      'Evidence: stories/proj-8b75aa06/episodes/EP01/script.md',
+    ),
+  )).not.toThrow();
+
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(
+    boundSurfaceWithOutline(
+      'Evidence: outside/stories/proj-8b75aa06/episodes/EP01/script.md',
+    ),
+  )).toThrow(/public_text policy/i);
 });
 
 test('GET uses the run-scoped endpoint, bearer token, and exact quoted request ETag', async () => {
