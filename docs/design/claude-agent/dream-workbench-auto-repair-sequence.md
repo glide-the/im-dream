@@ -5,6 +5,7 @@
 <!-- [Sync] 2026-09-01: add pre-write collection validation, move/merge cleanup, and visible structured exhausted failure. -->
 <!-- [Sync] 2026-09-01: show repair-safe ambiguous context assembly before the normal Runner turn. -->
 <!-- [Sync] 2026-09-01: show fresh launch-authority cleanup scope resolution and exact PreToolUse stale-root deletion. -->
+<!-- [Sync] 2026-09-01: show marker-only deletion denial returning the exact safe full-root retry command. -->
 
 # Dream 工作区自动修正业务时序图
 
@@ -143,12 +144,16 @@ sequenceDiagram
     participant Scope as DreamAutoRepairExecutionScope
     participant WS as Thread workspace
 
-    Claude->>Guard: recursive rm request
+    Claude->>Guard: rm request
     Guard->>Scope: validate typed server-only marker
     alt 普通 session / Run、Thread 或 validation 不匹配
         Scope-->>Guard: invalid or absent
         Guard-->>Claude: deny（通用 .dream write guard）
-    else scope 合法
+    else scope 合法且只请求 rm stories/<stale>/project.yaml
+        Guard-->>Claude: deny marker-only bypass + 返回 exact full-root command
+        Claude->>Guard: rm -rf -- stories/<stale>
+        Guard->>WS: 重新执行完整 scope/path/tree 校验
+    else scope 合法且请求递归清理
         Guard->>WS: resolve exact stories/<stale-slug>
         alt 多目标、越界、可信根、非 scope slug 或 shell script
             WS-->>Guard: target mismatch

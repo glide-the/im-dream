@@ -19,6 +19,9 @@
 # [Sync] 2026-09-01: let one server-authenticated Dream auto-repair Turn remove
 #                    only its precomputed stale canonical project roots after
 #                    the trusted root contains every source tree entry.
+# [Sync] 2026-09-01: when a marked repair tries to delete only a stale
+#                    project.yaml marker, deny it with the exact safe root-cleanup
+#                    command instead of the unrelated generic .dream guidance.
 # [Sync] 2026-08-22: pass the server-owned thread runtime workspace separately
 #                    from cwd when applying CLAUDE_CODE_TMPDIR defaults.
 # [Sync] 2026-08-22: restore authenticated remote MCP injection and the
@@ -945,15 +948,8 @@ def _is_explicit_canonical_asset_delete(
 
     if not cwd or _SHELL_METACHAR_RE.search(command) or "\n" in command or "\r" in command:
         return False
-    if not tokens or tokens[0] != "rm":
-        return False
-    index = 1
-    if index < len(tokens) and tokens[index] in {"-f", "--"}:
-        index += 1
-    if index >= len(tokens) or len(tokens[index:]) != 1:
-        return False
-    raw_target = tokens[index]
-    if any(character in raw_target for character in "*?[]{}"):
+    raw_target = _single_nonrecursive_rm_target(tokens)
+    if raw_target is None:
         return False
     try:
         workspace = Path(cwd).expanduser().resolve(strict=True)
@@ -974,6 +970,22 @@ def _is_explicit_canonical_asset_delete(
         and relative.parts[0] == "assets"
         and relative.parts[1] in _STORY_WORKSPACE_DREAM_ASSET_DIRECTORIES
     )
+
+
+def _single_nonrecursive_rm_target(tokens: list[str]) -> str | None:
+    """Return the sole target of the existing narrow non-recursive rm form."""
+
+    if not tokens or tokens[0] != "rm":
+        return None
+    index = 1
+    if index < len(tokens) and tokens[index] in {"-f", "--"}:
+        index += 1
+    if index >= len(tokens) or len(tokens[index:]) != 1:
+        return None
+    target = tokens[index]
+    if any(character in target for character in "*?[]{}"):
+        return None
+    return target
 
 
 def _single_recursive_rm_target(tokens: list[str]) -> str | None:
@@ -1036,28 +1048,17 @@ def _safe_project_tree_entries(root: Path) -> set[tuple[str, str]] | None:
     return entries
 
 
-def _is_explicit_dream_auto_repair_project_root_delete(
-    command: str,
-    tokens: list[str],
+def _resolve_dream_auto_repair_project_cleanup_context(
     cwd: Optional[str],
     scope: DreamAutoRepairExecutionScope | None,
     mcp_env: Mapping[str, str],
-) -> bool:
-    """Authorize one exact stale-root cleanup for a server-owned repair Turn.
-
-    The capability is deliberately stronger than the normal single-asset
-    confirmation seam, so it requires an in-memory typed scope plus fresh
-    actor/thread/Run bindings.  The stale tree must be fully represented by
-    regular destination entries before recursive removal is allowed.
-    """
+) -> tuple[Path, Path, Path] | None:
+    """Resolve the trusted workspace/stories/project roots for one repair Turn."""
 
     if (
         scope is None
         or not isinstance(scope, DreamAutoRepairExecutionScope)
         or not cwd
-        or _SHELL_METACHAR_RE.search(command)
-        or "\n" in command
-        or "\r" in command
         or scope.schema_version != DREAM_AUTO_REPAIR_EXECUTION_SCHEMA_VERSION
         or scope.repair_attempt != 1
         or scope.validation_code
@@ -1077,7 +1078,7 @@ def _is_explicit_dream_auto_repair_project_root_delete(
             for slug in scope.stale_project_slugs
         )
     ):
-        return False
+        return None
     trusted_run_id = _trusted_story_workspace_run_id(dict(mcp_env))
     trusted_thread_id = str(mcp_env.get("INK_AGENT_THREAD_ID") or "").strip()
     trusted_actor_id = str(mcp_env.get("INK_AGENT_USER_ID") or "").strip()
@@ -1088,11 +1089,7 @@ def _is_explicit_dream_auto_repair_project_root_delete(
         or not trusted_actor_id.isdigit()
         or int(trusted_actor_id) <= 0
     ):
-        return False
-
-    raw_target = _single_recursive_rm_target(tokens)
-    if raw_target is None:
-        return False
+        return None
     try:
         workspace = Path(cwd).expanduser().resolve(strict=True)
         visible_workspace = Path(cwd).expanduser().lstat()
@@ -1101,11 +1098,60 @@ def _is_explicit_dream_auto_repair_project_root_delete(
             or not workspace.is_dir()
             or workspace.name != scope.thread_id
         ):
-            return False
+            return None
         stories = workspace / "stories"
         visible_stories = stories.lstat()
         if stat.S_ISLNK(visible_stories.st_mode) or not stories.is_dir():
-            return False
+            return None
+        trusted = (stories / scope.trusted_project_slug).resolve(strict=True)
+        visible_trusted = (stories / scope.trusted_project_slug).lstat()
+        trusted_project_metadata = (trusted / "project.yaml").lstat()
+        if (
+            stat.S_ISLNK(visible_trusted.st_mode)
+            or not trusted.is_dir()
+            or trusted.parent != stories
+            or stat.S_ISLNK(trusted_project_metadata.st_mode)
+            or not stat.S_ISREG(trusted_project_metadata.st_mode)
+        ):
+            return None
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return None
+    return workspace, stories, trusted
+
+
+def _is_explicit_dream_auto_repair_project_root_delete(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+    scope: DreamAutoRepairExecutionScope | None,
+    mcp_env: Mapping[str, str],
+) -> bool:
+    """Authorize one exact stale-root cleanup for a server-owned repair Turn.
+
+    The capability is deliberately stronger than the normal single-asset
+    confirmation seam, so it requires an in-memory typed scope plus fresh
+    actor/thread/Run bindings.  The stale tree must be fully represented by
+    regular destination entries before recursive removal is allowed.
+    """
+
+    if (
+        _SHELL_METACHAR_RE.search(command)
+        or "\n" in command
+        or "\r" in command
+    ):
+        return False
+    raw_target = _single_recursive_rm_target(tokens)
+    if raw_target is None:
+        return False
+    context = _resolve_dream_auto_repair_project_cleanup_context(
+        cwd,
+        scope,
+        mcp_env,
+    )
+    if context is None or scope is None:
+        return False
+    workspace, _, trusted = context
+    try:
         supplied = Path(raw_target).expanduser()
         if not supplied.is_absolute():
             supplied = workspace / supplied
@@ -1120,21 +1166,12 @@ def _is_explicit_dream_auto_repair_project_root_delete(
             or relative.parts[1] not in scope.stale_project_slugs
         ):
             return False
-        trusted = (stories / scope.trusted_project_slug).resolve(strict=True)
-        visible_trusted = (stories / scope.trusted_project_slug).lstat()
+        project_metadata = (target / "project.yaml").lstat()
         if (
-            stat.S_ISLNK(visible_trusted.st_mode)
-            or not trusted.is_dir()
-            or trusted.parent != stories
+            stat.S_ISLNK(project_metadata.st_mode)
+            or not stat.S_ISREG(project_metadata.st_mode)
         ):
             return False
-        for project_file in (target / "project.yaml", trusted / "project.yaml"):
-            project_metadata = project_file.lstat()
-            if (
-                stat.S_ISLNK(project_metadata.st_mode)
-                or not stat.S_ISREG(project_metadata.st_mode)
-            ):
-                return False
     except (FileNotFoundError, OSError, RuntimeError, ValueError):
         return False
 
@@ -1144,6 +1181,60 @@ def _is_explicit_dream_auto_repair_project_root_delete(
         stale_entries is not None
         and trusted_entries is not None
         and stale_entries.issubset(trusted_entries)
+    )
+
+
+def _dream_auto_repair_project_marker_delete_reason(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+    scope: DreamAutoRepairExecutionScope | None,
+    mcp_env: Mapping[str, str],
+) -> str | None:
+    """Guide a marked repair away from hiding a stale root via project.yaml."""
+
+    if (
+        _SHELL_METACHAR_RE.search(command)
+        or "\n" in command
+        or "\r" in command
+    ):
+        return None
+    raw_target = _single_nonrecursive_rm_target(tokens)
+    if raw_target is None:
+        return None
+    context = _resolve_dream_auto_repair_project_cleanup_context(
+        cwd,
+        scope,
+        mcp_env,
+    )
+    if context is None or scope is None:
+        return None
+    workspace, _, _ = context
+    try:
+        supplied = Path(raw_target).expanduser()
+        if not supplied.is_absolute():
+            supplied = workspace / supplied
+        visible_target = supplied.lstat()
+        target = supplied.resolve(strict=True)
+        relative = target.relative_to(workspace)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return None
+    if (
+        stat.S_ISLNK(visible_target.st_mode)
+        or not stat.S_ISREG(visible_target.st_mode)
+        or len(relative.parts) != 3
+        or relative.parts[0] != "stories"
+        or relative.parts[1] not in scope.stale_project_slugs
+        or relative.parts[2] != "project.yaml"
+    ):
+        return None
+    stale_slug = relative.parts[1]
+    return (
+        "This marked Dream auto-repair must remove the complete stale canonical "
+        f"project root, not only stories/{stale_slug}/project.yaml. After "
+        "confirming every stale file is represented under "
+        f"stories/{scope.trusted_project_slug}, use exactly: "
+        f"rm -rf -- stories/{stale_slug}"
     )
 
 
@@ -1176,6 +1267,21 @@ def _apply_dream_surface_write_guard(
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "allow",
+                }
+            }
+        marker_delete_reason = _dream_auto_repair_project_marker_delete_reason(
+            command,
+            tokens,
+            cwd,
+            auto_repair_scope,
+            mcp_env,
+        )
+        if marker_delete_reason is not None:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": marker_delete_reason,
                 }
             }
         denied = _is_dream_mutating_bash_command(

@@ -5,6 +5,8 @@
 # [Sync] 2026-09-01: add bounded canonical-root/stage-schema repair templates,
 #                    require move/merge cleanup, and expose a safe final reason
 #                    when the single repair attempt is exhausted.
+# [Sync] 2026-09-01: explicitly forbid deleting only a stale project.yaml
+#                    marker so the Agent removes the fully merged duplicate root.
 
 """Build and persist one allowlisted Dream workspace auto-repair message."""
 
@@ -188,7 +190,7 @@ def _repair_text(issue: DreamArtifactValidationIssue) -> str:
             f"- 当前状态：{issue.actual}",
             "- 失败原因：当前文件生成到了另一套项目目录，无法证明其属于本次 Dream Run",
             "- 修正要求：将旧项目内容移动或合并到服务器指定的 canonical project 路径，同步修正 project_id/project_slug；确认内容完整后移除旧 slug 的重复项目根",
-            "- 清理要求：不得只复制目录并同时保留两套 project.yaml 或同一 Episode；stories 下最终只能保留本次 Run 的唯一 canonical 项目",
+            "- 清理要求：不得只复制目录，也不得只删除旧根的 project.yaml 来隐藏重复项目；核对迁移完整后必须移除整个旧项目根，stories 下最终只能保留本次 Run 的唯一 canonical 项目",
         )
     elif issue.code == "DREAM_CANONICAL_PROJECT_AMBIGUOUS":
         if issue.expected is not None or issue.actual is not None:
@@ -201,6 +203,7 @@ def _repair_text(issue: DreamArtifactValidationIssue) -> str:
             "- 规则：一次 Dream Run 只能解析到一个 canonical 项目目录",
             "- 失败原因：stories 下存在多套带 project.yaml 的项目根，无法确定哪套文件属于本次 Run",
             "- 修正要求：以服务器上下文指定的 canonical 项目路径为准，先合并或移动本次内容，核对完整后移除其余重复项目根",
+            "- 根清理要求：不得只删除旧根的 project.yaml 来绕过识别；必须在内容迁移完整后移除整个旧项目根",
             "- 清理要求：不得通过伪造新 slug、改写可信绑定或把同一 Episode 改成虚假 entity_id 来绕过唯一性校验",
         )
     elif issue.code in {

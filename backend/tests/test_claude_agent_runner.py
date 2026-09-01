@@ -17,6 +17,8 @@
 #                    so unavailable Skills cannot become empty successful turns.
 # [Sync] 2026-09-01: prove that only a server-scoped automatic repair Turn can
 #                    remove a fully merged stale canonical project root.
+# [Sync] 2026-09-01: replay the production marker-only deletion attempt and
+#                    require an exact full-root cleanup instruction in its denial.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -1863,6 +1865,67 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             "allow",
         )
         self.assertEqual(confirmations, [])
+
+    async def test_auto_repair_marker_only_delete_receives_exact_root_guidance(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            thread_id = "thread-auto-repair-marker"
+            workspace = Path(temp_dir) / thread_id
+            (workspace / ".dream").mkdir(parents=True)
+            self._write_project_tree(workspace)
+            mcp_env = {
+                "INK_AGENT_USER_ID": "1",
+                "INK_AGENT_THREAD_ID": thread_id,
+                "INK_AGENT_WORKFLOW_RUN_ID": "run_" + ("2" * 32),
+            }
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                dream_auto_repair_scope=self._dream_auto_repair_scope(
+                    thread_id=thread_id
+                ),
+                mcp_env=mcp_env,
+            )
+            marked = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {
+                        "command": 'rm "stories/stale-project/project.yaml"'
+                    },
+                },
+                "call-marker-only-project-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+            ordinary_hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                mcp_env=mcp_env,
+            )
+            ordinary = await ordinary_hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {
+                        "command": 'rm "stories/stale-project/project.yaml"'
+                    },
+                },
+                "call-ordinary-marker-delete",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        marked_output = _hook_specific(marked, {})
+        self.assertEqual(marked_output.get("permissionDecision"), "deny")
+        self.assertIn(
+            "not only stories/stale-project/project.yaml",
+            marked_output.get("permissionDecisionReason", ""),
+        )
+        self.assertIn(
+            "rm -rf -- stories/stale-project",
+            marked_output.get("permissionDecisionReason", ""),
+        )
+        ordinary_output = _hook_specific(ordinary, {})
+        self.assertEqual(ordinary_output.get("permissionDecision"), "deny")
+        self.assertNotIn(
+            "stories/stale-project",
+            ordinary_output.get("permissionDecisionReason", ""),
+        )
 
     async def test_project_root_delete_without_matching_auto_repair_scope_is_denied(self):
         with tempfile.TemporaryDirectory() as temp_dir:

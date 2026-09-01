@@ -4,6 +4,8 @@
 # [Sync] 2026-09-01: initial bounded auto-repair message and dispatch coverage.
 # [Sync] 2026-09-01: cover duplicate-root/stage templates, move-not-copy
 #                    cleanup guidance, and safe exhausted-error detail.
+# [Sync] 2026-09-01: require root-cleanup prompts to reject marker-only
+#                    project.yaml deletion observed in the production replay.
 
 """Dream workbench auto-repair message and continuation tests."""
 
@@ -192,6 +194,7 @@ class DreamAutoRepairContractTest(unittest.TestCase):
             "DREAM_CANONICAL_PROJECT_AMBIGUOUS",
         )
         self.assertIn("移除其余重复项目根", ambiguous.parts[0]["text"])
+        self.assertIn("不得只删除旧根的 project.yaml", ambiguous.parts[0]["text"])
         self.assertEqual(
             duplicate.metadata["validationCode"],
             "DREAM_STAGE_ENTITY_ID_DUPLICATE",

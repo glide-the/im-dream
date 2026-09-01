@@ -5,6 +5,7 @@
 <!-- [Sync] 2026-09-01: validate project/stage collections before writes, add duplicate-root/entity classifications, require move-not-copy cleanup, and expose the safe exhausted reason. -->
 <!-- [Sync] 2026-09-01: keep duplicate-root workspaces enterable during context assembly and make managed Skill links non-recursive workspace-tree leaves. -->
 <!-- [Sync] 2026-09-01: bind exact stale-project cleanup to the persisted repair marker plus fresh launch authority and a one-Turn typed PreToolUse scope. -->
+<!-- [Sync] 2026-09-01: require actionable full-root guidance when a marked repair attempts marker-only project.yaml deletion. -->
 
 # Dream 后置同步失败后的 Agent 自动自检修正
 
@@ -47,6 +48,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 修正功能上线后的真实恢复又暴露了两个入口缺口：下一条正常或自动修正 Turn 会先执行 `DreamWorkbenchContext.refresh_for_turn()`，旧实现遇到多个 canonical project 时在 Runner 启动前终止，导致 Agent 永远无法进入 workspace 完成已允许的修正；同时递归工作区文件树会跟随 `skills/*` 下受控的只读内置 Skill 源链接，随后被 containment guard 判为 path traversal 并返回 500。这两者都不是新的身份放宽点：前者只取消对可编辑歧义状态的前置阻断，后置 Hook 仍负责唯一性验收；后者只把符号链接作为不可递归叶节点展示，内容读取和下载仍拒绝 symlink。
 
 第三个执行缺口发生在 Agent 已进入修正 Turn 之后：`.dream` 工作区的 PreToolUse 策略默认拒绝一切非只读 Bash，唯一删除例外只是经确认的单个 character/scene/prop 文件。因此提示要求“移除旧项目根”，但 Agent 实际执行 `rm -rf stories/<old-slug>` 时必然被安全钩子拒绝。问题不是安全策略过严，而是自动修正 session 的 server-owned marker 没有被投影成精确、短寿命的执行能力；提示合同与执行合同不一致。
+
+该能力首次上线后的生产数据回放又发现一个更窄的交互缺口：Agent 没有请求完整根清理，而是尝试 `rm stories/<old-slug>/project.yaml`，希望只移除 canonical marker。Guard 正确拒绝了绕过，但返回的是与实际任务无关的通用 `.dream` 提示，Agent 随即结束本轮，第二次 Hook 仍得到 `DREAM_CANONICAL_PROJECT_AMBIGUOUS`。因此修复不能放宽 marker-only 删除；应在同一个 Guard 内识别该意图并返回当前可信 scope 唯一可执行的完整根命令，让 Agent 在同一 Turn 改正工具调用。
 
 ## 2. 目标与边界
 
@@ -123,7 +126,7 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 3. 读取当前结构安全、project identity 合法的 canonical project roots，以 launch `projectStorySlug` 为可信根，其余根才可成为 stale candidates；
 4. 构造 repr-hidden `DreamAutoRepairExecutionScope`，只放入当前 repair message、originating Turn、Run/Thread、validation code、可信 slug 和 stale slug 集合。
 
-该 scope 不进入公共 Chat DTO、message metadata、Claude subprocess env 或 MCP env，并只存在于本轮 `AgentRunOptions`。PreToolUse 不增加第二个并列权限入口；唯一 `_apply_dream_surface_write_guard` 在其既有 `tool_name == "Bash"` 分支内先判断这项窄授权，再执行通用 Dream Bash 写保护。窄授权只接受单条、单目标、无 shell metacharacter 的递归 `rm`，目标必须精确解析为 `stories/<scoped-stale-slug>`。执行前还要求：workspace/stories/可信根/旧根均非 symlink，双方均有普通 `project.yaml`，旧树每个普通文件和目录的相对路径都已存在于可信根，且树内无 symlink/特殊文件。满足时由 server marker 自动放行，不再弹没有决策价值的确认框；任何条件不满足都回到同一 guard 的 `.dream` 通用 hard deny，Agent 可先补齐迁移后在同一 Turn 重试。
+该 scope 不进入公共 Chat DTO、message metadata、Claude subprocess env 或 MCP env，并只存在于本轮 `AgentRunOptions`。PreToolUse 不增加第二个并列权限入口；唯一 `_apply_dream_surface_write_guard` 在其既有 `tool_name == "Bash"` 分支内先判断这项窄授权，再执行通用 Dream Bash 写保护。窄授权只接受单条、单目标、无 shell metacharacter 的递归 `rm`，目标必须精确解析为 `stories/<scoped-stale-slug>`。执行前还要求：workspace/stories/可信根/旧根均非 symlink，双方均有普通 `project.yaml`，旧树每个普通文件和目录的相对路径都已存在于可信根，且树内无 symlink/特殊文件。满足时由 server marker 自动放行，不再弹没有决策价值的确认框。若 marked repair 尝试只删除 `stories/<stale>/project.yaml` 来隐藏重复根，仍然拒绝该命令，但拒绝理由必须指出不得只删 marker，并给出当前 scope 唯一允许的 `rm -rf -- stories/<stale>`；普通 session 不得获得 slug 或命令提示。其他条件不满足则回到同一 guard 的 `.dream` 通用 hard deny，Agent 可先补齐迁移后在同一 Turn 重试。
 
 ## 4. 错误分类
 
@@ -188,7 +191,7 @@ Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成
 - 当前状态：<workspace slug>
 - 失败原因：当前文件生成到了另一套项目目录，无法证明其属于本次 Dream Run
 - 修正要求：将旧项目内容移动或合并到服务器指定的 canonical project 路径，同步修正 project_id/project_slug；确认内容完整后移除旧 slug 的重复项目根
-- 清理要求：不得只复制目录并同时保留两套 project.yaml 或同一 Episode；stories 下最终只能保留本次 Run 的唯一 canonical 项目
+- 清理要求：不得只复制目录，也不得只删除旧根的 project.yaml 来隐藏重复项目；核对迁移完整后必须移除整个旧项目根，stories 下最终只能保留本次 Run 的唯一 canonical 项目
 - 禁止操作：不得修改 Dream 启动元数据、actor/thread/run 身份、Deck/plugin lock 或伪造绑定信息
 - 完成标准：重新执行同一个后置同步校验并全部通过
 ```
@@ -279,6 +282,7 @@ stateDiagram-v2
 | context assembly 发现多个安全 canonical 根 | 生成不绑定具体项目的 repair-safe context，继续正常 Turn；最终唯一性由 Hook 决定 |
 | 自动 session marker 合法但 launch authority 已变化 | 不生成 cleanup scope，按 `DREAM_LAUNCH_AUTHORITY_INVALID` fail closed；不执行删除 |
 | Agent 请求删除未列入 scope 的目录、多个目标、未完整迁移的旧树或含 symlink 的树 | PreToolUse hard deny；不执行删除；Agent 可在本轮补齐文件后重试 |
+| marked Agent 只请求删除 stale root 的 `project.yaml` | 继续 deny，返回 exact scoped full-root 命令；不允许通过移除 marker 绕过 canonical root 识别 |
 | 递归文件树遇到受控或用户创建的 symlink | 返回非目录叶节点且不跟随目标；直接内容/下载继续返回安全 400，不升级为 500 |
 | 用户 Stop/cancel | 唯一 `bg_task` 被取消；partial repair assistant 按现有规则保存；自动消息标记 failed；不重启 |
 | 第二次 Hook 仍失败 | 自动消息标记 failed，发布含 allowlisted 最终 validation code 的安全结构化错误，不创建第三轮 |
@@ -318,6 +322,7 @@ stateDiagram-v2
 15. 普通 Chat、Dream launch/confirmation、resume、SSE reconnect、Stop、tool confirmation 既有测试不回归。
 16. 只有 `dispatched` 自动消息且 fresh Run/Thread/launch authority 全部一致时，Runner 才收到 typed cleanup scope；metadata 伪造或 authority 漂移不得授权删除。
 17. scope 内单个 stale root 在所有树条目已迁入可信根后可无弹窗执行；普通 session、非 scope 目标、多目标、未完整迁移、symlink/特殊文件和越界路径继续 hard deny。
+18. marked repair 只删 stale `project.yaml` 时收到完整根清理命令并可在同一 Turn 重试；普通 session 仍只收到通用拒绝，不泄露 scope slug。
 
 ## 12. 编码前设计复核
 
