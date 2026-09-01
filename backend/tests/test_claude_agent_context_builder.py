@@ -16,6 +16,8 @@
 # [Sync] 2026-06-22: cover Settings SYSTEM_PROMPT rendering as a lower-priority
 #                    configurable prompt block and empty-config fallback.
 # [Sync] 2026-08-22: cover the canonical workspace:// file reference contract.
+# [Sync] 2026-09-01: cover case-insensitive leading workspace Skill command
+#                    resolution to the canonical on-disk ID.
 
 """Unit tests for ClaudeAgentContextBuilder (Ink & Memory writing context)."""
 from __future__ import annotations
@@ -23,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sys
+import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -611,6 +614,32 @@ class TestBuildUserMessageWorkspaceContext(unittest.TestCase):
         last = blocks[-1]
         self.assertEqual(last["type"], "text")
         self.assertEqual(last["text"], "final text")
+
+    def test_title_case_skill_command_uses_canonical_workspace_id(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            skill = Path(temp_dir) / "skills" / "skill-creator"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: skill-creator\ndescription: test\n---\n",
+                encoding="utf-8",
+            )
+            blocks = self.builder.build_user_message(
+                self._parts("/Skill-Creator improve this skill"),
+                cwd=temp_dir,
+            )
+        self.assertEqual(
+            blocks[-1]["text"],
+            "/skill-creator improve this skill",
+        )
+
+    def test_non_skill_slash_command_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            (Path(temp_dir) / "skills").mkdir()
+            blocks = self.builder.build_user_message(
+                self._parts("/Unknown-Command keep casing"),
+                cwd=temp_dir,
+            )
+        self.assertEqual(blocks[-1]["text"], "/Unknown-Command keep casing")
 
 if __name__ == "__main__":
     unittest.main()

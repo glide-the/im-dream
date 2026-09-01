@@ -51,6 +51,9 @@
 # [Sync] 2026-08-28: classify a terminal message_delta stop_reason=max_tokens as
 #                    an incomplete run after the full SDK stream ends; later
 #                    end_turn/tool_use events still preserve SDK-owned recovery.
+# [Sync] 2026-09-01: classify Claude Runtime's synthetic local-command
+#                    "No response requested." result as an error, surfacing an
+#                    unavailable Skill instead of persisting an empty reply.
 # [Sync] 2026-05-27: migrate _pre_tool_use_hook hookSpecificOutput from old {"tool_input":...} format to CLI ≥2.1 format: hookEventName + permissionDecision:"allow" + updatedInput for input override; permissionDecision:"deny" + permissionDecisionReason for all block paths. The old "tool_input" key is silently ignored by the CLI, leaving AskUserQuestion without answers and returning isError:true / output:null.
 # [Sync] 2026-05-27: add _ALWAYS_CONFIRM_TOOL_NAMES constant; original auto mode
 #                    only confirmed AskUserQuestion/mcp__user__ask_user. Superseded
@@ -2226,6 +2229,77 @@ def _assistant_message_error_detail(message: AssistantMessage) -> str:
     return "\n".join(text_parts)[:4096]
 
 
+_UNKNOWN_SKILL_RE = re.compile(
+    r"(?:^|\b)unknown\s+skill\s*:\s*([A-Za-z0-9][A-Za-z0-9._-]{0,127})",
+    re.IGNORECASE,
+)
+_SYNTHETIC_NO_RESPONSE_TEXT = "No response requested."
+
+
+def _message_text_fragments(message: Any) -> list[str]:
+    """Return bounded public diagnostic text from one SDK message.
+
+    The Runtime represents a missing local Skill as a synthetic assistant
+    response plus a short ``Unknown skill: <name>`` user/system message. Keep
+    this extractor deliberately narrow: it does not serialize arbitrary SDK
+    objects or include the original command arguments in logs/errors.
+    """
+
+    fragments: list[str] = []
+    if isinstance(message, SystemMessage):
+        data = getattr(message, "data", None)
+        if isinstance(data, dict):
+            for key in ("message", "text", "content"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    fragments.append(value.strip()[:512])
+
+    content = getattr(message, "content", None)
+    if isinstance(content, str) and content.strip():
+        fragments.append(content.strip()[:512])
+    elif isinstance(content, list):
+        for block in content:
+            if _block_type(block) != "text":
+                continue
+            value = _block_value(block, "text", "")
+            if isinstance(value, str) and value.strip():
+                fragments.append(value.strip()[:512])
+    return fragments
+
+
+def _local_command_no_response_error(messages: list[Any]) -> RuntimeError | None:
+    """Classify a Runtime-consumed local command that produced no Agent turn."""
+
+    synthetic_no_response = False
+    unknown_skill_name: str | None = None
+    for message in messages:
+        fragments = _message_text_fragments(message)
+        if (
+            isinstance(message, AssistantMessage)
+            and str(getattr(message, "model", "")) == "<synthetic>"
+            and any(text == _SYNTHETIC_NO_RESPONSE_TEXT for text in fragments)
+        ):
+            synthetic_no_response = True
+        if unknown_skill_name is None:
+            for text in fragments:
+                match = _UNKNOWN_SKILL_RE.search(text)
+                if match:
+                    unknown_skill_name = match.group(1)
+                    break
+
+    if not synthetic_no_response:
+        return None
+    if unknown_skill_name:
+        return RuntimeError(
+            f"当前运行环境未安装 Skill：{unknown_skill_name}。"
+            "请安装后在原会话重试。"
+        )
+    return RuntimeError(
+        "Claude Runtime 处理了本地命令，但没有产生 Agent 回复。"
+        "请检查该命令或 Skill 是否已安装。"
+    )
+
+
 def _maybe_json(value: str) -> Any:
     text = str(value or "").strip()
     if not text:
@@ -3186,6 +3260,12 @@ class ClaudeAgentRunner:
                     "模型达到输出长度上限，本轮尚未完成。"
                     "请发送“继续”从当前会话恢复。"
                 )
+                await _call(callbacks.on_error, run_error)
+            elif not full_text and (
+                local_command_error := _local_command_no_response_error(messages)
+            ) is not None:
+                success = False
+                run_error = local_command_error
                 await _call(callbacks.on_error, run_error)
             elif full_text and callbacks.on_text_done:
                 await _call(callbacks.on_text_done, full_text)

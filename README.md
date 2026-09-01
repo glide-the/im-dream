@@ -9,6 +9,7 @@
 <!-- [Sync] 2026-08-30: document deployment-owned Claude Bash sandbox enablement and the explicit AutoDL disabled profile. -->
 <!-- [Sync] 2026-08-30: adopt the publicly released clean-room Runtime 0.1.4 across install, verification, registry acceptance, and troubleshooting. -->
 <!-- [Sync] 2026-08-31: require AutoDL releases to verify backend-generated crawler files and reject Vite SPA HTML fallback. -->
+<!-- [Sync] 2026-09-01: document production skill-creator packaging, AutoDL discovery verification, and visible unknown-Skill failures. -->
 
 # Ink & Memory
 
@@ -31,6 +32,7 @@ This repository contains the Dream application. It does not own the shared datab
 - **Dream** — launch a Dream Run and review scripts, storyboards, prompts, and generated artifacts.
 - **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
 - **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
+- **Skill authoring** — use the backend-owned `skill-creator` package to create, evaluate, and improve Skills in the existing Thread workspace; production releases refresh its canonical lowercase discovery ID.
 - **Notion resources** — connect in Settings, select the exact allowed scope, inspect the installed `notion-session` and `notion-cli` packages, and keep lightweight indexes refreshed outside Chat. Dream checks that pinned `ntn` is installed before authentication and injects the current actor/thread projection as `NOTION_HOME`, `NOTION_API_TOKEN`, `NOTION_KEYRING`, and `NOTION_WORKERS_CONFIG_FILE` into Agent Runtime Bash. Hosted Notion MCP remains separate from this CLI path.
 - **Platform integration** — consume authenticated model aliases, subscription eligibility, usage, and billing from Admin/Gateway.
 
@@ -287,6 +289,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 10. **Editor writes bind actor, live session, and durable state.** The runner rejects writes for a stale session, the Editor MCP child receives only the server-owned actor and effective PostgreSQL capability, every query/update is actor-scoped, and business failures refresh the single in-memory EditorState cache without publishing a success event. Notion indexes and on-demand page bodies never enter EditorState.
 11. **Claude Bash sandbox enablement is deployment-owned.** `INK_AGENT_SANDBOX_ENABLED` defaults to `true`, and invalid values also keep it enabled. Setting it to `false` preserves Workspace Mode, cwd, context, file tools, hooks, and tool confirmations, but approved Bash commands run directly as the Dream service account without bubblewrap filesystem/network isolation. User Settings and user env cannot override this capability. AutoDL projects `false` because its outer container rejects the required namespace creation; Dream currently runs as `root` there, so an approved Bash command has root authority inside that outer container.
 12. **AutoDL crawler files are a release gate.** Vite Preview must proxy `/robots.txt`, `/sitemap.xml`, and `/llms.txt` to FastAPI. Every AutoDL start, deploy, verify, and rollback checks the public MIME type, required marker, and absence of SPA HTML; HTTP 200 alone is not acceptance.
+13. **Production Skills must be in the backend build context.** AutoDL start, deploy, verify, and rollback initialize an isolated workspace and require `skill-creator` source, workspace copy, `.claude/skills` discovery, and title-case `/Skill-Creator` normalization to the canonical lowercase ID. A Runtime-consumed unknown Skill command is an explicit turn error, never an empty successful assistant message; an existing Claude session remains reusable after the package is repaired.
 
 ## Troubleshooting
 

@@ -53,6 +53,9 @@
 #                    on every bound turn so natural-language edits stay file-backed.
 # [Sync] 2026-08-22: add the canonical workspace://files/... Chat reference
 #                    contract to the existing engine system prompt lifecycle.
+# [Sync] 2026-09-01: canonicalize only an exact leading workspace Skill command
+#                    by case-insensitive discovery, so `/Skill-Creator` reaches
+#                    the canonical lowercase `skill-creator` package.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -73,7 +76,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
@@ -103,6 +108,46 @@ _INLINE_IMAGE_MIME_TYPES = frozenset(
 # Number of recent sessions injected into system prompt.
 # Configurable via INK_AGENT_CONTEXT_SESSIONS (default 5).
 _CONTEXT_SESSIONS_DEFAULT = 5
+_WORKSPACE_SKILL_COMMAND_RE = re.compile(r"^/([A-Za-z0-9:_-]+)(?=$|\s)")
+
+
+def _canonicalize_workspace_skill_command(user_text: str, cwd: Optional[str]) -> str:
+    """Resolve a leading slash command to one installed Skill's exact casing.
+
+    Claude Runtime command lookup is case-sensitive while user-facing Skill
+    labels are commonly title-cased. Resolve only a unique, real workspace
+    Skill directory and leave built-in/plugin commands and ordinary prose
+    untouched. The original UI message remains the persistence source.
+    """
+
+    if not cwd or not user_text:
+        return user_text
+    match = _WORKSPACE_SKILL_COMMAND_RE.match(user_text)
+    if match is None:
+        return user_text
+    requested = match.group(1)
+    skills_root = Path(cwd) / "skills"
+    try:
+        candidates = [
+            entry.name
+            for entry in skills_root.iterdir()
+            if entry.name.casefold() == requested.casefold()
+            and entry.is_dir()
+            and not entry.is_symlink()
+            and (entry / "SKILL.md").is_file()
+            and not (entry / "SKILL.md").is_symlink()
+        ]
+    except OSError:
+        return user_text
+    if len(candidates) != 1 or candidates[0] == requested:
+        return user_text
+    canonical = candidates[0]
+    logger.info(
+        "Canonicalized workspace Skill command: requested=%s canonical=%s",
+        requested,
+        canonical,
+    )
+    return f"/{canonical}{user_text[match.end(1):]}"
 
 
 def _context_session_count() -> int:
@@ -512,6 +557,7 @@ class ClaudeAgentContextBuilder:
         # Convert all message_parts (text, file, source-url, workspace-file) to
         # a single text string using the full UIMessage parts protocol.
         user_text = extract_text_from_parts(message_parts)
+        user_text = _canonicalize_workspace_skill_command(user_text, cwd)
         blocks.append({"type": "text", "text": user_text})
         return blocks
 

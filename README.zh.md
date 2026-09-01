@@ -9,6 +9,7 @@
 <!-- [同步] 2026-08-30：记录由部署所有的 Claude Bash sandbox 开关和 AutoDL 显式关闭配置。 -->
 <!-- [同步] 2026-08-30：在安装、验证、registry 验收和故障排查中统一采用已公开的 clean-room Runtime 0.1.4。 -->
 <!-- [同步] 2026-08-31：要求 AutoDL 发布验证后端生成的 crawler 文件并拒绝 Vite SPA HTML fallback。 -->
+<!-- [同步] 2026-09-01：记录生产 skill-creator 打包、AutoDL discovery 验证与未知 Skill 可见失败。 -->
 
 # Ink & Memory
 
@@ -31,6 +32,7 @@ Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 
 - **Dream** —— 启动 Dream Run，审阅剧本、分镜、提示词和生成产物。
 - **Decks** —— 创建并版本化 Deck、Agent、Prompt、资源和 Claude Plugin 引用。
 - **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、MCP Server、Skill 和插件。
+- **Skill 创作** —— 在既有 Thread workspace 中使用后端所有的 `skill-creator` 创建、评估和改进 Skill；生产发布会按 canonical 小写 ID 刷新其 discovery。
 - **Notion 资源** —— 在 Settings 中连接并选择精确允许范围，审阅已安装的 `notion-session` 与 `notion-cli`，并在 Chat 外刷新轻量索引。Dream 在认证前检查固定版本 `ntn` 是否已安装，并把当前 actor/thread 投影作为 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与 `NOTION_WORKERS_CONFIG_FILE` 注入 Agent Runtime Bash。Hosted Notion MCP 与这条 CLI 路径相互独立。
 - **平台集成** —— 从 Admin/Gateway 获取已认证的模型 alias、订阅资格、用量和计费能力。
 
@@ -287,6 +289,7 @@ python3 scripts/verify_claude_registry_release.py \
 10. **Editor 写入同时绑定 actor、当前 session 和持久状态。** runner 拒绝面向过期 session 的写入；Editor MCP 子进程只接收服务端所有的 actor 与有效 PostgreSQL capability；每次查询/更新均按 actor 限定；业务失败只刷新唯一内存 EditorState 软缓存，不发布成功事件。Notion 索引和按需页面正文不得进入 EditorState。
 11. **Claude Bash sandbox 开关由部署所有。** `INK_AGENT_SANDBOX_ENABLED` 缺省为 `true`，非法值也保持启用。设为 `false` 仍保留 Workspace Mode、cwd、上下文、文件工具、hooks 和工具确认，但已批准的 Bash 会绕过 bubblewrap 文件系统/网络隔离，直接以 Dream 服务账号运行；用户 Settings 与用户 env 均不能覆盖该能力。AutoDL 的外层容器拒绝所需 namespace 创建，因此发布环境固定投影为 `false`；当前 Dream 在 AutoDL 以 `root` 运行，所以已批准 Bash 在该外层容器内拥有 root 权限。
 12. **AutoDL crawler 文件属于发布门禁。** Vite Preview 必须把 `/robots.txt`、`/sitemap.xml` 和 `/llms.txt` 代理到 FastAPI。每次 AutoDL start、deploy、verify 与 rollback 都检查公网 MIME、必要正文标记及不存在 SPA HTML；仅 HTTP 200 不算验收通过。
+13. **生产 Skill 必须进入 backend build context。** AutoDL start、deploy、verify 与 rollback 会初始化隔离 workspace，并检查 `skill-creator` source、workspace copy、`.claude/skills` discovery，以及 title-case `/Skill-Creator` 到 canonical 小写 ID 的归一化。Runtime 消费未知 Skill 命令时必须返回明确 turn error，不能保存空成功 assistant；修复 package 后可继续复用原 Claude session。
 
 ## 故障排查
 

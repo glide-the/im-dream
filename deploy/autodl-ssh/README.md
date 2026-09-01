@@ -10,6 +10,10 @@
 [Sync] 2026-08-31: document safe discovery of AutoDL-injected 6006/6008 public service URLs.
 [Sync] 2026-08-31: require all three backend-generated crawler files to pass
                    MIME, content-marker, and non-HTML checks on every release.
+[Sync] 2026-09-01: require production skill-creator discovery on every release
+                   and document recovery without replacing the Claude session.
+[Sync] 2026-09-01: require a full FastAPI import before release switching so
+                   missing locked runtime dependencies cannot stop Dream.
 -->
 
 ## 应用介绍
@@ -114,6 +118,31 @@ done
 ```
 
 禁止只检查 HTTP 200；必须同时检查 MIME 与正文标记。
+
+## 每次发布的内置 Skill 必检项
+
+AutoDL release 只把 `backend/` 复制进运行目录，因此生产 Skill 必须位于
+`backend/builtin_skills/`，不能只存在于仓库根目录的 `.agents/skills/` 或
+`.claude/skills/`。否则 Runtime 会把 `/Skill-Name ...` 解析成未知本地命令，
+返回合成的 `No response requested.`；旧实现会将它误记为空 assistant，页面表现为
+发起对话后立即停止。
+
+`deploy.sh` 的 `start`、`deploy`、`verify` 和 `rollback` 会创建一个隔离临时
+workspace，并硬性检查：
+
+- release 中存在 `builtin_skills/skill-creator/SKILL.md`，frontmatter 的 canonical ID 为 `skill-creator`；
+- workspace 初始化后存在 `skills/skill-creator/SKILL.md`；
+- `.claude/skills/skill-creator` 是指向该 workspace Skill 的发现链接。
+- 用户输入 `/Skill-Creator` 时会按 workspace 中唯一匹配项归一化为 `/skill-creator`，兼容 Runtime 的大小写敏感查找。
+
+检查失败即发布失败。恢复既有 Thread 时不要删除 transcript，也不需要新建 Claude
+session；正常 workspace 初始化会修复内置 Skill，随后在原 Thread 重发即可。若
+Runtime 仍收到未知 Skill，本轮必须返回可见错误，不能保存空 assistant 消息。
+
+build 在切换 `current` 之前还会加载生成的 Dream env 并导入完整 FastAPI `server`。
+源码使用的模块必须声明在 `backend/pyproject.toml`、`uv.lock` 与导出的
+`requirements.txt` 中；例如 YAML 路径统一依赖锁定的 PyYAML。导入失败时旧 release
+继续服务，禁止先停服务再临时 `pip install`。
 
 查看日志：
 

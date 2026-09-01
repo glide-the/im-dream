@@ -10,6 +10,13 @@
 #                    vendor/seccomp apply-seccomp passthrough.
 # [Sync] 2026-08-31: fail every start/deploy/verify/rollback when Vite Preview
 #                    serves SPA HTML instead of FastAPI crawler files.
+# [Sync] 2026-09-01: verify the production skill-creator package through a
+#                    real isolated workspace init on every release lifecycle.
+# [Sync] 2026-09-01: import the FastAPI application with the generated runtime
+#                    env before switching current, catching undeclared runtime
+#                    dependencies while the old release is still serving.
+# [Sync] 2026-09-01: honor the explicit AutoDL Vite allow-all host policy during
+#                    the production frontend build as well as env projection.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,6 +50,7 @@ AUTODL_DREAM_FRONTEND_PORT="${AUTODL_DREAM_FRONTEND_PORT:-${AUTODL_DREAM_PORT:-6
 AUTODL_DREAM_BACKEND_PORT="${AUTODL_DREAM_BACKEND_PORT:-8765}"
 AUTODL_ADMIN_PORT="${AUTODL_ADMIN_PORT:-6008}"
 AUTODL_DREAM_PUBLIC_ORIGIN="${AUTODL_DREAM_PUBLIC_ORIGIN:-}"
+AUTODL_VITE_ALLOWED_HOSTS="${AUTODL_VITE_ALLOWED_HOSTS:-}"
 AUTODL_SCREEN_NAME="${AUTODL_DREAM_SCREEN_NAME:-ink-dream}"
 AUTODL_NPM_TOKEN="${AUTODL_NPM_TOKEN:-}"
 AUTODL_NPM_REGISTRY="${AUTODL_NPM_REGISTRY:-https://registry.npmjs.org}"
@@ -57,6 +65,13 @@ quote() { printf '%q' "$1"; }
 dream_public_host() {
   local host="${AUTODL_DREAM_PUBLIC_ORIGIN#https://}"
   printf '%s\n' "${host%%:*}"
+}
+vite_allowed_hosts() {
+  if [[ "${AUTODL_VITE_ALLOWED_HOSTS}" == "*" ]]; then
+    printf '*\n'
+  else
+    dream_public_host
+  fi
 }
 
 usage() {
@@ -319,11 +334,12 @@ chmod 0755 \"\${staging}/start-dream.sh\"
 export PATH=/root/ink-autodl/runtime/node/bin:\$PATH
 cd \"\${staging}/frontend\"
 npm ci --no-audit --no-fund --registry $(quote "${AUTODL_NPM_REGISTRY}")
-NODE_OPTIONS=--max-old-space-size=4096 VITE_PUBLIC_SITE_URL=$(quote "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/") VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT} VITE_ALLOWED_HOSTS=$(quote "$(dream_public_host)") npm run build
+NODE_OPTIONS=--max-old-space-size=4096 VITE_PUBLIC_SITE_URL=$(quote "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/") VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT} VITE_ALLOWED_HOSTS=$(quote "$(vite_allowed_hosts)") npm run build
 test -s \"\${staging}/frontend/dist/index.html\"
 cd \"\${staging}/app\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from importlib import metadata as m; import claude_agent_sdk as sdk; assert m.version('ink-claude-dream-agent-sdk') == '0.2.144'; assert sdk.__version__ == '0.2.144'\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; assert resolve_claude_cli_path().endswith('/ink-claude-code-dream')\"
+PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"import os; from dotenv import dotenv_values; os.environ.update({key: value for key, value in dotenv_values('$(quote "${AUTODL_APP_ROOT}/config/dream.env")').items() if value is not None}); import server\"
 test \"\$(/root/ink-autodl/runtime/npm/bin/ntn --version)\" = $(quote "ntn ${AUTODL_NOTION_CLI_VERSION}")
 rm -rf \"\${release}\"
 mv \"\${staging}\" \"\${release}\"
@@ -369,6 +385,10 @@ verify_default_plugin() {
   remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os; from dotenv import dotenv_values; os.environ.update({key: value for key, value in dotenv_values(\"${AUTODL_APP_ROOT}/config/dream.env\").items() if value is not None}); from services.deck.defaults import resolve_default_deck_plugin_ref; resolve_default_deck_plugin_ref()'"
 }
 
+verify_builtin_skills() {
+  remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os, tempfile; from pathlib import Path; check = tempfile.TemporaryDirectory(prefix=\"ink-dream-skill-verify-\"); os.environ[\"AGENT_CWD\"] = check.name; from libs.claude_agent_kit.server.workspace import init_workspace; workspace = init_workspace(\"deploy-skill-verification\"); source = Path(\"builtin_skills/skill-creator/SKILL.md\"); installed = workspace / \"skills\" / \"skill-creator\" / \"SKILL.md\"; discovery = workspace / \".claude\" / \"skills\" / \"skill-creator\"; assert source.is_file() and \"name: skill-creator\" in source.read_text(encoding=\"utf-8\"); assert installed.is_file() and \"name: skill-creator\" in installed.read_text(encoding=\"utf-8\"); assert discovery.is_symlink() and discovery.resolve() == installed.parent.resolve(); from claude_agent.context_builder import _canonicalize_workspace_skill_command; assert _canonicalize_workspace_skill_command(\"/Skill-Creator verify\", str(workspace)) == \"/skill-creator verify\"; check.cleanup()'"
+}
+
 verify_seo_origin() {
   local origin="$1" label="$2" endpoint expected_type marker content_type body
   while IFS='|' read -r endpoint expected_type marker; do
@@ -396,7 +416,8 @@ verify() {
     verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origin"
   fi
   verify_default_plugin
-  log "Dream ${topology} topology, SEO crawler files, default plugin artifact, Admin dependency, screen supervisor, and public mapping passed."
+  verify_builtin_skills
+  log "Dream ${topology} topology, SEO crawler files, built-in Skills, default plugin artifact, Admin dependency, screen supervisor, and public mapping passed."
 }
 
 deploy() { command_check; setup_host; sync_files; build_release; stop_dream; start_dream; verify; }

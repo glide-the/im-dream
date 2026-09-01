@@ -13,6 +13,8 @@
 # [Sync] 2026-08-29: Editor MCP config carries only trusted actor/DB capability,
 #                    and write calls fail closed when their session differs from live state.
 # [Sync] 2026-08-30: verify runner composition injects all current actor/thread Notion CLI variables into SDK options.
+# [Sync] 2026-09-01: cover synthetic local-command no-response classification
+#                    so unavailable Skills cannot become empty successful turns.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -983,6 +985,34 @@ class TestSdkMessageBufferFailureHintHelper(unittest.TestCase):
 
 class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
     """Errors from the SDK are caught and reported via on_error."""
+
+    async def test_unknown_skill_synthetic_response_sets_success_false(self):
+        synthetic = AssistantMessage([_text_block("No response requested.")])
+        synthetic.model = "<synthetic>"
+        self.set_query([
+            synthetic,
+            UserMessage("Unknown skill: Skill-Creator"),
+        ])
+        runner = self.make_runner()
+        errors: list[Exception] = []
+
+        result = await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="unknown-skill-001",
+                user_message="/Skill-Creator make a skill",
+                tool_choice="none",
+            ),
+            callbacks=AgentStreamingCallbacks(
+                on_text_delta=lambda _delta: None,
+                on_error=lambda error: errors.append(error),
+            ),
+        )
+
+        self.assertFalse(result.success)
+        self.assertIsNotNone(result.error)
+        self.assertIn("Skill-Creator", str(result.error))
+        self.assertEqual(errors, [result.error])
+        self.assertEqual(result.full_text, "")
 
     async def test_assistant_message_error_sets_success_false(self):
         assistant_error = AssistantMessage(

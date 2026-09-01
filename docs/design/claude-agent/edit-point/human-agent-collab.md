@@ -1,10 +1,11 @@
 # UI 人机协作设计 — Agent 操作可视化与确认流
 
 Status: Updated  
-Updated: 2026-06-28
+Updated: 2026-09-01
 Scope: Design + 实现对应前端组件
 
 > [Sync] 2026-06-28: 补充 Notion connector proposal 确认卡边界；Notion 写入必须携带 canonical snapshot identity 并等待事件驱动刷新。
+> [Sync] 2026-09-01: Writing 建议改由 `useWritingSuggestions` 显式触发；普通文本 Hook 不再承担建议 debounce，Suggestion Cell 属于 EditorState 且与 Agent 写操作确认流保持独立。
 
 ---
 
@@ -47,7 +48,7 @@ Editor UI / Hooks 层的当前职责是**人类操作的适配层**：接收键�
 | `useComments` | 评论分组/分页、星标/杀死、评论聊天 |
 | `useSessionLifecycle` | 会话初始化、加载、自动保存（3s 防抖）、新一天检测 |
 | `useVoiceInput` | 语音输入适配 |
-| `useInspiration` | 写作灵感提示 |
+| `useWritingSuggestions` | 用户显式触发产品级 Writing 建议；管理 Session Thread、Suggestion Cell、SSE 与过期响应隔离 |
 
 ### 2.2 新增职责（Agent 协作路径）
 
