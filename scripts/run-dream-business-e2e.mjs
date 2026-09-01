@@ -6,6 +6,7 @@
 // [Sync] 2026-08-14: make the registration lane bootstrap a priced model with
 //                    no prior entitlement, then cover signup -> Free -> default
 //                    model -> first turn without the retired Episode state leg.
+// [Sync] 2026-08-31: stop injecting the retired inference model alias.
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -510,7 +511,6 @@ try {
     INK_GATEWAY_SUBJECT_JWT_AUDIENCE: gatewayAudience,
     INK_GATEWAY_SERVICE_CLIENT_ID: gatewayClientId,
     INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS: '240',
-    INK_GATEWAY_TEXT_MODEL_ALIAS: fixture.modelAliases[0],
     INK_ADMIN_PRODUCT_API_BASE_URL: adminBaseUrl,
     INK_ADMIN_PRODUCT_ORIGIN: dreamWebBase,
     INK_ADMIN_PRODUCT_JWT_SECRET: productJwtSecret,

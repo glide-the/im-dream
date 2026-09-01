@@ -5,10 +5,12 @@
 // [Sync] 2026-08-05: render the latest result through the shared ChatMarkdown/prose chain.
 // [Sync] 2026-08-05: add a draggable/keyboard resize rail and readable operational typography.
 // [Sync] 2026-08-05: compact task index and conversation-first readonly task detail.
+// [Sync] 2026-08-31: reuse the shared right-panel resize hook without changing Subagent presentation.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getDateLocale } from '../../i18n';
+import { useResizableRightPanel } from '../../hooks/useResizableRightPanel';
 import {
   hydrateThreadSubagents,
   useThreadSubagents,
@@ -46,33 +48,6 @@ const STATUS_COLORS: Record<ThreadSubagentStatus, string> = {
   failed: 'var(--color-state-error)',
   cancelled: 'var(--color-text-muted)',
 };
-
-function getSidebarWidthBounds(): { min: number; max: number } {
-  if (typeof window === 'undefined') {
-    return { min: MIN_SIDEBAR_WIDTH_PX, max: MAX_SIDEBAR_WIDTH_PX };
-  }
-  const responsiveMin = Math.min(MIN_SIDEBAR_WIDTH_PX, Math.max(280, window.innerWidth - MIN_CHAT_WIDTH_PX));
-  const responsiveMax = Math.max(
-    responsiveMin,
-    Math.min(MAX_SIDEBAR_WIDTH_PX, window.innerWidth - MIN_CHAT_WIDTH_PX),
-  );
-  return { min: responsiveMin, max: responsiveMax };
-}
-
-function clampSidebarWidth(value: number): number {
-  const { min, max } = getSidebarWidthBounds();
-  return Math.min(max, Math.max(min, value));
-}
-
-function readInitialSidebarWidth(): number {
-  if (typeof window === 'undefined') return DEFAULT_SIDEBAR_WIDTH_PX;
-  try {
-    const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-    return clampSidebarWidth(Number.isFinite(stored) && stored > 0 ? stored : DEFAULT_SIDEBAR_WIDTH_PX);
-  } catch {
-    return clampSidebarWidth(DEFAULT_SIDEBAR_WIDTH_PX);
-  }
-}
 
 function avatarHue(value: string): number {
   let hash = 0;
@@ -372,111 +347,18 @@ export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: Su
   const { t, i18n } = useTranslation();
   const state = useThreadSubagents(threadId);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(readInitialSidebarWidth);
-  const [isResizing, setIsResizing] = useState(false);
-  const [resizeRailActive, setResizeRailActive] = useState(false);
-  const sidebarWidthRef = useRef(sidebarWidth);
-  const resizeStartRef = useRef<{ clientX: number; width: number } | null>(null);
-  const bodyStyleRef = useRef<{ cursor: string; userSelect: string } | null>(null);
-
-  useEffect(() => {
-    sidebarWidthRef.current = sidebarWidth;
-  }, [sidebarWidth]);
-
-  const persistSidebarWidth = useCallback((width: number) => {
-    try {
-      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(width)));
-    } catch {
-      // Storage can be unavailable in hardened/private browser contexts.
-    }
-  }, []);
-
-  const finishResize = useCallback(() => {
-    if (!resizeStartRef.current) return;
-    resizeStartRef.current = null;
-    setIsResizing(false);
-    persistSidebarWidth(sidebarWidthRef.current);
-    if (bodyStyleRef.current) {
-      document.body.style.cursor = bodyStyleRef.current.cursor;
-      document.body.style.userSelect = bodyStyleRef.current.userSelect;
-      bodyStyleRef.current = null;
-    }
-  }, [persistSidebarWidth]);
-
-  const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    resizeStartRef.current = { clientX: event.clientX, width: sidebarWidthRef.current };
-    bodyStyleRef.current = {
-      cursor: document.body.style.cursor,
-      userSelect: document.body.style.userSelect,
-    };
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setIsResizing(true);
-  }, []);
-
-  const handleResizePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const start = resizeStartRef.current;
-    if (!start) return;
-    const nextWidth = clampSidebarWidth(start.width + start.clientX - event.clientX);
-    sidebarWidthRef.current = nextWidth;
-    setSidebarWidth(nextWidth);
-  }, []);
-
-  const handleResizePointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    finishResize();
-  }, [finishResize]);
-
-  const resetSidebarWidth = useCallback(() => {
-    const width = clampSidebarWidth(DEFAULT_SIDEBAR_WIDTH_PX);
-    sidebarWidthRef.current = width;
-    setSidebarWidth(width);
-    persistSidebarWidth(width);
-  }, [persistSidebarWidth]);
-
-  const handleResizeKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const { min, max } = getSidebarWidthBounds();
-    const step = event.shiftKey ? 32 : 16;
-    let nextWidth: number | null = null;
-    if (event.key === 'ArrowLeft') nextWidth = sidebarWidthRef.current + step;
-    if (event.key === 'ArrowRight') nextWidth = sidebarWidthRef.current - step;
-    if (event.key === 'Home') nextWidth = min;
-    if (event.key === 'End') nextWidth = max;
-    if (nextWidth == null) return;
-    event.preventDefault();
-    const width = clampSidebarWidth(nextWidth);
-    sidebarWidthRef.current = width;
-    setSidebarWidth(width);
-    persistSidebarWidth(width);
-  }, [persistSidebarWidth]);
+  const resize = useResizableRightPanel({
+    defaultWidth: DEFAULT_SIDEBAR_WIDTH_PX,
+    minWidth: MIN_SIDEBAR_WIDTH_PX,
+    maxWidth: MAX_SIDEBAR_WIDTH_PX,
+    minSiblingWidth: MIN_CHAT_WIDTH_PX,
+    storageKey: SIDEBAR_WIDTH_STORAGE_KEY,
+  });
+  const finishResize = resize.finishResize;
 
   useEffect(() => {
     if (!open) finishResize();
   }, [finishResize, open]);
-
-  useEffect(() => {
-    const handleWindowResize = () => {
-      const width = clampSidebarWidth(sidebarWidthRef.current);
-      sidebarWidthRef.current = width;
-      setSidebarWidth(width);
-    };
-    window.addEventListener('resize', handleWindowResize);
-    return () => window.removeEventListener('resize', handleWindowResize);
-  }, []);
-
-  useEffect(() => () => {
-    resizeStartRef.current = null;
-    if (bodyStyleRef.current) {
-      document.body.style.cursor = bodyStyleRef.current.cursor;
-      document.body.style.userSelect = bodyStyleRef.current.userSelect;
-      bodyStyleRef.current = null;
-    }
-  }, []);
 
   useEffect(() => {
     if (open) void hydrateThreadSubagents(threadId);
@@ -487,7 +369,7 @@ export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: Su
   const endedTasks = state.tasks.filter((task) => task.status === 'failed' || task.status === 'cancelled');
   const focusedTaskId = state.tasks.find((task) => task.toolCallId === focusToolCallId)?.taskId ?? null;
   const selectedTask = state.tasks.find((task) => task.taskId === selectedTaskId) ?? null;
-  const sidebarWidthBounds = getSidebarWidthBounds();
+  const sidebarWidthBounds = resize.bounds;
 
   useEffect(() => {
     setSelectedTaskId(null);
@@ -519,12 +401,12 @@ export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: Su
       id="thread-subagent-sidebar"
       aria-label={t('chat.subagents.title')}
       style={{
-        width: open ? sidebarWidth : 0,
-        minWidth: open ? sidebarWidth : 0,
+        width: open ? resize.width : 0,
+        minWidth: open ? resize.width : 0,
         overflow: 'hidden',
         borderLeft: open ? '1px solid var(--color-border-paper)' : 'none',
         background: 'var(--color-bg-app)',
-        transition: isResizing ? 'none' : 'width 0.25s ease, min-width 0.25s ease',
+        transition: resize.isResizing ? 'none' : 'width 0.25s ease, min-width 0.25s ease',
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
@@ -540,21 +422,21 @@ export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: Su
             aria-label={t('chat.subagents.resizeSidebar')}
             aria-valuemin={Math.round(sidebarWidthBounds.min)}
             aria-valuemax={Math.round(sidebarWidthBounds.max)}
-            aria-valuenow={Math.round(sidebarWidth)}
-            aria-valuetext={`${Math.round(sidebarWidth)} px`}
+            aria-valuenow={Math.round(resize.width)}
+            aria-valuetext={`${Math.round(resize.width)} px`}
             tabIndex={0}
             title={t('chat.subagents.resizeSidebar')}
-            onPointerDown={handleResizePointerDown}
-            onPointerMove={handleResizePointerMove}
-            onPointerUp={handleResizePointerEnd}
-            onPointerCancel={handleResizePointerEnd}
-            onLostPointerCapture={finishResize}
-            onDoubleClick={resetSidebarWidth}
-            onKeyDown={handleResizeKeyDown}
-            onMouseEnter={() => setResizeRailActive(true)}
-            onMouseLeave={() => setResizeRailActive(false)}
-            onFocus={() => setResizeRailActive(true)}
-            onBlur={() => setResizeRailActive(false)}
+            onPointerDown={resize.handleResizePointerDown}
+            onPointerMove={resize.handleResizePointerMove}
+            onPointerUp={resize.handleResizePointerEnd}
+            onPointerCancel={resize.handleResizePointerEnd}
+            onLostPointerCapture={resize.finishResize}
+            onDoubleClick={resize.resetWidth}
+            onKeyDown={resize.handleResizeKeyDown}
+            onMouseEnter={() => resize.setResizeRailActive(true)}
+            onMouseLeave={() => resize.setResizeRailActive(false)}
+            onFocus={() => resize.setResizeRailActive(true)}
+            onBlur={() => resize.setResizeRailActive(false)}
             style={{
               position: 'absolute',
               inset: '0 auto 0 0',
@@ -563,7 +445,7 @@ export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: Su
               cursor: 'col-resize',
               touchAction: 'none',
               outline: 'none',
-              background: isResizing || resizeRailActive
+              background: resize.isResizing || resize.resizeRailActive
                 ? 'color-mix(in srgb, var(--color-action-link) 11%, transparent)'
                 : 'transparent',
               transition: 'background 0.14s ease',
@@ -575,10 +457,10 @@ export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: Su
                 position: 'absolute',
                 left: '0.14rem',
                 top: '50%',
-                width: isResizing || resizeRailActive ? '0.15rem' : '1px',
-                height: isResizing || resizeRailActive ? '4.5rem' : '100%',
+                width: resize.isResizing || resize.resizeRailActive ? '0.15rem' : '1px',
+                height: resize.isResizing || resize.resizeRailActive ? '4.5rem' : '100%',
                 borderRadius: '999px',
-                background: isResizing || resizeRailActive ? 'var(--color-action-link)' : 'var(--color-border-paper)',
+                background: resize.isResizing || resize.resizeRailActive ? 'var(--color-action-link)' : 'var(--color-border-paper)',
                 transform: 'translateY(-50%)',
                 transition: 'height 0.14s ease, width 0.14s ease, background 0.14s ease',
               }}

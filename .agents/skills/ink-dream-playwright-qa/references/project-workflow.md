@@ -1,5 +1,7 @@
 # Ink-Dream Playwright project workflow
 
+<!-- [Sync] 2026-08-31: remove the retired /polycli Vite proxy from repository facts. -->
+
 ## Contents
 
 1. [Repository facts](#repository-facts)
@@ -22,7 +24,7 @@
 - Backend entry: `backend/server.py`
 - Backend Python: `backend/.venv/bin/python`
 - Browser package: `frontend/node_modules/@playwright/test`
-- Vite proxies `/api`, `/auth`, `/oauth`, and `/polycli` to port 8765.
+- Vite proxies `/api`, `/auth`, and `/oauth` to port 8765.
 - The repo has no root Playwright config; run commands from `frontend/` and specify focused files explicitly.
 - Existing browser specs live in `frontend/e2e/`. Many source-level contract tests also use the Playwright test runner under `frontend/src/**/__tests__/`.
 - Browser specs use the full Chromium channel with `test.use({ channel: 'chromium' })`.

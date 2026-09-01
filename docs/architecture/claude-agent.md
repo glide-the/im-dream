@@ -7,11 +7,12 @@
 [Sync] 2026-08-22: document the v2.1-scoped Workspace thumbnail and shared accessible full-size modal presentation.
 [Sync] 2026-08-23: document authenticated in-memory Workspace image resolution for the existing Chat long-image exporter.
 [Sync] 2026-08-28: align env/desired/public replacement/effective snapshots to positive JSON-safe integers, exact combined-memory bytes, and monotonic no-restart LKG refresh.
+[Sync] 2026-08-31: remove the retired legacy session runtime from current architecture boundaries.
 -->
 
 **模块目标**：为 Ink & Memory 提供基于 Claude Code SDK 的流式 AI 写作助手后端能力，  
 支持多轮对话、会话保活（Flyweight 会话池）、工具确认、SSE 流式输出，  
-独立于现有 PolyCLI agent 模块，不与其产生交叉关联。
+作为 Voice/Writing/Chat 的单一 Thread SSE Agent runtime，不依赖第二套会话注册表。
 
 ---
 
@@ -45,7 +46,7 @@ backend/
 ```
 
 **单向依赖**：`claude_agent/` → `libs/claude_agent_kit/`，kit 层不依赖应用层。  
-**隔离说明**：`claude_agent` 模块与现有 PolyCLI `agent` 会话完全独立，不共享注册表、状态或导入。
+**运行时说明**：`claude_agent` 是当前唯一 Agent 会话运行时；旧会话注册表和挂载点已经删除。
 
 ---
 
@@ -281,13 +282,8 @@ Notion 只将轻量索引和 Skill 导航投影到 Thread workspace；页面正�
 
 ---
 
-## 10. 与现有 agent 模块的隔离说明
+## 10. 单一 Agent Runtime 边界
 
-| 维度 | PolyCLI agent（现有）| claude_agent（新增）|
-|------|----------------------|---------------------|
-| 注册方式 | `@session_def(...)` → `/polycli` 挂载 | `@app.post/get/delete(...)` → `/api/claude-agent/*` |
-| SDK | PolyCLI / PolyAgent | claude_agent_sdk |
-| 会话管理 | PolyCLI session registry | AgentRunStatePool（Flyweight）|
-| 鉴权 | `auth_callback=auth.verify_access_token` | `Depends(get_current_user)`（同现有 REST 路由）|
-| 数据库 | `server.py` 内直接调用 database | `service.py` 内调用 database（只读写作会话）|
-| 导入关系 | `claude_agent` **不导入** PolyCLI 任何模块 | PolyCLI 模块 **不导入** claude_agent |
+Claude Agent 通过 `/api/claude-agent/*`、`claude_agent_sdk`、
+`AgentRunStatePool` 和 FastAPI `Depends(get_current_user)` 统一承载 Thread、SSE、
+鉴权与持久化。服务端不再挂载第二套 session registry。

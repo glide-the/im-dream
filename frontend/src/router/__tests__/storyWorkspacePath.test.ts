@@ -11,6 +11,7 @@
 //                    adapter (window-dependent, not node-testable).
 // [Sync] 2026-08-16: cover the Settings / Work route and its tab query.
 // [Sync] 2026-08-31: cover the run-independent static creation-guide route.
+// [Sync] 2026-08-31: root resolves to Chat and the removed /ink-and-memory prefix stays unmatched.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -34,12 +35,13 @@ import {
 
 const ROUTER_SOURCE = readFileSync(new URL('../story-workspace.tsx', import.meta.url), 'utf8');
 
-test('static routes resolve exactly as before (no regression)', () => {
+test('static routes resolve inside the Story Workspace shell', () => {
   expect(resolveStoryWorkspacePath('/')).toMatchObject({
-    canonicalPath: STORY_WORKSPACE_PATHS.dream,
-    route: 'dream',
+    canonicalPath: STORY_WORKSPACE_PATHS.chat,
+    route: 'chat',
     params: {},
   });
+  expect(resolveStoryWorkspacePath('/ink-and-memory/')).toBeNull();
   expect(resolveStoryWorkspacePath('/story-workspace')).toMatchObject({
     canonicalPath: STORY_WORKSPACE_PATHS.dream,
     route: 'dream',

@@ -11,6 +11,7 @@
 #                    host mappings with network_mode: service:tun-proxy.
 # [Sync] 2026-08-28: bind the server-owned Notion user credential root to the
 #                    persisted agentdata volume beside AGENT_CWD.
+# [Sync] 2026-08-31: remove the retired PolyCLI proxy and unused models.json mount contracts.
 
 services:
   # ── Mihomo TUN proxy (backend network namespace) ───────────────────────────
@@ -55,7 +56,6 @@ services:
     network_mode: "service:tun-proxy"
     volumes:
       - ./backend/data:/app/data
-      - ./backend/models.json:/app/models.json:ro
     env_file:
       - ./backend/.env
     environment:
@@ -87,7 +87,7 @@ services:
     ports:
       - "80:80"
     environment:
-      # nginx.conf.template uses this to proxy /api/ and /polycli/ requests.
+      # nginx.conf.template uses this to proxy API/auth requests.
       # Backend shares tun-proxy's network namespace when TUN is enabled.
       BACKEND_URL: http://tun-proxy:8765
       # runtime-config.js uses this browser-facing URL for direct CORS requests.

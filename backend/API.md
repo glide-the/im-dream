@@ -4,6 +4,7 @@
 [Output] Human-readable API reference for authenticated app APIs and public utility endpoints.
 [Sync] 2026-06-14: document public SEO endpoints generated from INK_PUBLIC_BASE_URL and INK_BACKEND_PUBLIC_BASE_URL.
 [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public SEO endpoint notes.
+[Sync] 2026-08-31: document curated latest-first Blog and Knowledge Base references in llms.txt.
 [Sync] 2026-06-21: document system-config sandbox network policy fields.
 [Sync] 2026-06-23: document Google OAuth, auth cookie aliases, and OAuth Device Flow endpoints.
 [Sync] 2026-08-14: document transactional default Free provisioning and Admin-default model resolution for email and Google registration.
@@ -20,6 +21,7 @@
 [Sync] 2026-08-22: document retryable Claude Agent capacity and memory-pressure SSE errors.
 [Sync] 2026-08-29: document the authenticated Notion connector capability catalog, parsed Skill detail, and revision-aware stable-ID Markdown file reads.
 [Sync] 2026-08-29: capability schema v2 derives Skill metadata/files from the installed package and operations from the real Read hook/workspace materializer entrypoints.
+[Sync] 2026-08-31: remove daily-picture mutation/generation and legacy voice-analysis APIs; historical picture reads remain.
 -->
 
 **Version:** 2.0.0
@@ -53,7 +55,7 @@ Returns an XML sitemap for the public SPA surface using `INK_PUBLIC_BASE_URL` as
 
 ### GET `/llms.txt`
 
-Returns a structured AI-search summary describing Ink & Memory, primary public pages, product facts, keywords, backend API origin, and authenticated API boundaries.
+Returns a structured AI-search summary describing Ink & Memory, primary public pages, a latest-first Blog and Knowledge Base list, product facts, keywords, backend API origin, and authenticated API boundaries. The newest bilingual connector essay points only to its published Medium and WeChat originals; no unpublished site URL is synthesized.
 
 ---
 
@@ -657,30 +659,18 @@ Get recent daily pictures.
 
 ---
 
-### POST `/api/pictures`
+### GET `/api/pictures/range`
 
-Save a daily picture.
+Get historical picture thumbnails within an optional date range.
 
 **Headers:** `Authorization: Bearer <token>`
 
-**Request:**
-```json
-{
-  "date": "2025-11-02",
-  "image_base64": "iVBORw0KGgoAAAANSUhEUg...",
-  "prompt": "A serene landscape..."
-}
-```
+**Query params:** `start_date`, `end_date`, `limit`.
 
-**Response:**
-```json
-{
-  "success": true
-}
-```
+### GET `/api/pictures/{date}/full`
 
-**Errors:**
-- `400` - date or image_base64 missing
+Get the historical full-resolution image for one `YYYY-MM-DD` date. Returns `404`
+when that date has no retained picture.
 
 ---
 
@@ -801,189 +791,6 @@ Save an analysis report.
 
 **Errors:**
 - `400` - report_type or report_data missing
-
----
-
-## Voice Analysis (PolyCLI)
-
-### POST `/api/analyze`
-
-Analyze text and return ONE new voice comment (sync API).
-
-**Request:**
-```json
-{
-  "text": "User's text to analyze",
-  "session_id": "session-123",
-  "voices": {...},
-  "applied_comments": [],
-  "meta_prompt": "",
-  "state_prompt": "",
-  "overlapped_phrases": []
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "result": {
-    "voices": [
-      {
-        "phrase": "exact phrase",
-        "voice": "Logic",
-        "comment": "What the voice says",
-        "icon": "brain",
-        "color": "blue"
-      }
-    ],
-    "new_voices_added": 1
-  }
-}
-```
-
----
-
-### POST `/api/chat`
-
-Chat with a voice persona (sync API).
-
-**Request:**
-```json
-{
-  "voice_name": "Logic",
-  "voice_config": {...},
-  "conversation_history": [
-    {"role": "user", "content": "Hi"},
-    {"role": "assistant", "content": "Hello"}
-  ],
-  "user_message": "What do you think?",
-  "original_text": "User's writing context",
-  "meta_prompt": "",
-  "state_prompt": ""
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "result": {
-    "response": "Voice's response to the user"
-  }
-}
-```
-
----
-
-### POST `/api/generate-image`
-
-Generate artistic image from notes (sync API, 60s timeout).
-
-**Request:**
-```json
-{
-  "all_notes": "All user's notes combined..."
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "result": {
-    "image_base64": "iVBORw0KGgoAAAANSUhEUg...",
-    "prompt": "Creative image description"
-  }
-}
-```
-
----
-
-### POST `/api/analyze-echoes`
-
-Find recurring themes in notes (sync API).
-
-**Request:**
-```json
-{
-  "all_notes": "All user's notes combined..."
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "result": {
-    "echoes": [
-      {
-        "title": "Theme title",
-        "description": "Pattern description",
-        "examples": ["quote1", "quote2"]
-      }
-    ]
-  }
-}
-```
-
----
-
-### POST `/api/analyze-traits`
-
-Identify personality traits from notes (sync API).
-
-**Request:**
-```json
-{
-  "all_notes": "All user's notes combined..."
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "result": {
-    "traits": [
-      {
-        "trait": "Curious",
-        "strength": 4,
-        "evidence": "Examples from text..."
-      }
-    ]
-  }
-}
-```
-
----
-
-### POST `/api/analyze-patterns`
-
-Identify behavioral patterns from notes (sync API).
-
-**Request:**
-```json
-{
-  "all_notes": "All user's notes combined..."
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "result": {
-    "patterns": [
-      {
-        "pattern": "Pattern name",
-        "description": "Pattern description",
-        "frequency": "Often/Sometimes/Rarely"
-      }
-    ]
-  }
-}
-```
 
 ---
 
@@ -1220,7 +1027,6 @@ python test_real_migration.py      # Test with real data
 
 **API Docs:**
 - Interactive docs: http://localhost:8765/docs
-- PolyCLI control panel: http://localhost:8765/polycli
 
 ---
 
@@ -1237,7 +1043,7 @@ init_db()
 **Tables:**
 - `users` - User accounts
 - `user_sessions` - Editor sessions
-- `daily_pictures` - Generated images
+- `daily_pictures` - Historical timeline images retained for read-only viewing
 - `user_preferences` - User settings
 - `analysis_reports` - Analysis results
 - `auth_sessions` - Session tokens (optional)

@@ -8,6 +8,7 @@
 #                    and activation Event.
 # [Sync] 2026-08-14: rollback verification compares the pre-test database
 #                    baseline because the full-business harness has seeded users.
+# [Sync] 2026-08-31: remove the retired daily-picture mutation helper from the runtime contract.
 
 """Opt-in, rollback-only contract for Dream's PostgreSQL runtime helpers.
 
@@ -159,18 +160,6 @@ def test_runtime_helpers_execute_on_postgres_and_rollback(monkeypatch) -> None:
         assert database.list_sessions_in_range(user_id, None, None, include_text=True)[0][
             "text"
         ] == "PostgreSQL runtime"
-        database.save_daily_picture(
-            user_id,
-            "2026-08-09",
-            "data:image/png;base64,postgresql-runtime",
-            prompt="PostgreSQL range",
-        )
-        assert database.get_daily_pictures_range(
-            user_id,
-            "2026-08-09",
-            "2026-08-09",
-        )[0]["prompt"] == "PostgreSQL range"
-
         thread_id = database.create_chat_thread(user_id, title="PostgreSQL chat")
         message_id = f"pg-message-{suffix}"
         database.save_chat_message(

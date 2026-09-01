@@ -1,5 +1,5 @@
 // [Input] Browser location/history, Story Workspace layout/sidebar, and route page skeletons.
-// [Output] Resolve canonical Story Workspace paths and render synchronized route content.
+// [Output] Resolve canonical Story Workspace paths and render every authenticated surface inside its shared layout.
 // [Pos] Story Workspace state-router adapter for the existing App architecture.
 // [Sync] 2026-08-04: Task 5 Step 0 (C10) — path resolution moved to the pure
 //                    storyWorkspacePath.ts seams: parameterized routes
@@ -18,6 +18,7 @@
 //                    thread through the router before opening canonical Chat.
 // [Sync] 2026-08-31: render the creation guide on its own static route and use
 //                    the recorded source history for its return navigation.
+// [Sync] 2026-08-31: make Chat the unmatched-location fallback and rename retained App surfaces as workspace content, removing legacy app-view ownership.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
@@ -81,8 +82,8 @@ export type { StoryWorkspaceRoute, StoryWorkspaceRouteMatch } from './storyWorks
 const STORY_WORKSPACE_SIDEBAR_COLLAPSED_KEY = 'ink-dream:story-workspace:sidebar-collapsed';
 
 const DEFAULT_MATCH: StoryWorkspaceRouteMatch = {
-  canonicalPath: STORY_WORKSPACE_PATHS.dream,
-  route: 'dream',
+  canonicalPath: STORY_WORKSPACE_PATHS.chat,
+  route: 'chat',
   params: {},
   query: new URLSearchParams(),
 };
@@ -127,7 +128,7 @@ function renderStoryWorkspaceRoute(
   onOpenChatThread: (threadId: string) => void,
   resolvedDreamRun: WorkflowRun | null,
   decksContent: ReactNode,
-  legacyContent: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>,
+  workspaceContent: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>,
   renderSettings: ((section: ReturnType<typeof storyWorkspaceSettingsSectionForRoute>, onNavigate: (path: string, notice?: string) => void) => ReactNode) | undefined,
 ) {
   const runId = storyWorkspaceDreamResolvedRunId(resolvedDreamRun);
@@ -135,13 +136,13 @@ function renderStoryWorkspaceRoute(
   const dreamStage = storyWorkspaceDreamStageForRoute(match);
   switch (match.route) {
     case 'writing':
-      return legacyContent.writing ?? null;
+      return workspaceContent.writing ?? null;
     case 'timeline':
-      return legacyContent.timeline ?? <StoryWorkspaceDashboardPage title="时间线" description="在右侧工作区查看时间线。" />;
+      return workspaceContent.timeline ?? <StoryWorkspaceDashboardPage title="时间线" description="在右侧工作区查看时间线。" />;
     case 'analysis':
-      return legacyContent.analysis ?? <StoryWorkspaceDashboardPage title="分析" description="在右侧工作区查看分析结果。" />;
+      return workspaceContent.analysis ?? <StoryWorkspaceDashboardPage title="分析" description="在右侧工作区查看分析结果。" />;
     case 'chat':
-      return legacyContent.chat ?? <StoryWorkspaceDashboardPage title="对话" description="在右侧工作区打开对话。" />;
+      return workspaceContent.chat ?? <StoryWorkspaceDashboardPage title="对话" description="在右侧工作区打开对话。" />;
     case 'stories':
       return <StoryWorkspaceStoriesPage onReview={(story) => onReview({ resourceType: 'story', resourceId: story.id })} refreshNonce={refreshNonce} />;
     case 'characters':
@@ -237,8 +238,8 @@ function renderStoryWorkspaceRoute(
 
 export interface StoryWorkspaceRouterProps {
   decksContent: ReactNode;
-  legacyContent?: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>;
-  /** Reopen the actor-scoped Dream source thread before rendering legacy Chat. */
+  workspaceContent?: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>;
+  /** Reopen the actor-scoped Dream source thread before rendering canonical Chat. */
   onChatThreadRequest?: (threadId: string) => void;
   onRouteChange?: (route: StoryWorkspaceRoute) => void;
   renderSettings?: (section: ReturnType<typeof storyWorkspaceSettingsSectionForRoute>, onNavigate: (path: string, notice?: string) => void) => ReactNode;
@@ -246,7 +247,7 @@ export interface StoryWorkspaceRouterProps {
 
 export function StoryWorkspaceRouter({
   decksContent,
-  legacyContent = {},
+  workspaceContent = {},
   onChatThreadRequest,
   onRouteChange,
   renderSettings,
@@ -448,7 +449,7 @@ export function StoryWorkspaceRouter({
         handleOpenChatThread,
         runDeepLink.run,
         decksContent,
-        legacyContent,
+        workspaceContent,
         renderSettings,
       )}
     </StoryWorkspaceLayout>

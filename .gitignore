@@ -1,7 +1,6 @@
 # Python
 backup/
 backend/.venv/
-backend/models.json
 backend/.polycache/
 backend/benchmark/
 backend/tests/__pycache__/

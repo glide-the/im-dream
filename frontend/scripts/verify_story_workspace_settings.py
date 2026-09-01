@@ -1,3 +1,8 @@
+# [Input] Story Workspace preview build and mocked authenticated API reads.
+# [Output] Provider-free browser layout verification and named screenshots.
+# [Pos] Frontend verification script.
+# [Sync] 2026-08-31: stop mocking the removed /polycli runtime surface.
+
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -50,7 +55,7 @@ def mock_api(route: Route) -> None:
     if path in {"/api/default-voices", "/api/voices"}:
         json_response(route, "[]")
         return
-    if path.startswith("/api/") or path.startswith("/polycli/"):
+    if path.startswith("/api/"):
         json_response(route, "{}")
         return
     route.continue_()

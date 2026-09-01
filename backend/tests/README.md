@@ -4,6 +4,8 @@
 [Output] Human-readable test inventory, commands, and coverage summary.
 [Sync] 2026-08-16: document Deck deletion and exact runtime-binding history regression contracts.
 [Sync] 2026-08-17: document Deck-filtered Chat history, corrected deletion dependency classification, and workspace directory ZIP coverage.
+[Sync] 2026-08-31: document llms.txt Blog and Knowledge Base link coverage.
+[Sync] 2026-08-31: remove obsolete PolyCLI installation troubleshooting.
 -->
 
 ## Overview
@@ -225,6 +227,7 @@ python tests/test_seo_content.py -v
 - ✅ `robots.txt` allows AI search crawlers while excluding private API paths
 - ✅ `sitemap.xml` contains only public app URLs
 - ✅ `llms.txt` describes the app, backend API origin, health endpoint, and authenticated API boundary
+- ✅ `llms.txt` lists the latest bilingual connector essay through its published Medium and WeChat URLs without inventing a site article URL
 - ✅ Frontend public URL expectations use the origin root, not `/ink-and-memory/`
 
 ### Database Layer (`test_database.py`)
@@ -273,7 +276,7 @@ python tests/test_seo_content.py -v
 **"Server failed to start"**
 - Check if port 8765 is already in use: `lsof -i:8765`
 - Kill existing process: `lsof -ti:8765 | xargs kill -9`
-- Check `models.json` exists in backend directory
+- Check the required backend/Admin environment configuration.
 
 **"Database tests failed"**
 - Ensure database is properly initialized: `python database.py`
@@ -281,4 +284,4 @@ python tests/test_seo_content.py -v
 
 **"API tests return 502"**
 - Server may have crashed - check `/tmp/test_server.log`
-- Verify PolyCLI is installed: `pip show polycli`
+- Verify the backend lock is installed and inspect the server traceback.

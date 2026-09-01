@@ -17,6 +17,7 @@
 // [Sync] 2026-08-31: proxy robots.txt, sitemap.xml, and llms.txt through
 //                    FastAPI in Vite dev/preview so AutoDL never serves SPA
 //                    HTML from its public machine-readable SEO URLs.
+// [Sync] 2026-08-31: remove the retired PolyCLI development/preview proxy.
 // [Sync] 2026-07-20: upgrade to Vite 8 (rolldown/Rust bundler) so production
 //                    builds fit 1G Docker build hosts — measured ~605MB peak RSS
 //                    with a 512MB heap vs ~1.25GB RSS / 1024MB heap minimum on
@@ -114,7 +115,6 @@ export default defineConfig(({ mode }) => {
         }
       },
     },
-    '/polycli': { ...backendProxy },
   }
 
   return {

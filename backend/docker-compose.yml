@@ -1,4 +1,4 @@
-# [Input] Published backend image, local backend data directory, models.json.
+# [Input] Published backend image, local backend data directory, and environment configuration.
 # [Output] Reference single-backend Docker Compose service.
 # [Pos] legacy backend-only compose example in backend/
 # [Sync] 2026-06-17: grant Claude Code bubblewrap Bash sandbox runtime privileges
@@ -6,6 +6,7 @@
 # [Sync] 2026-06-17: remove obsolete Compose version field for Docker Compose v2.
 # [Sync] 2026-08-28: persist actor-scoped Notion credentials beside AGENT_CWD
 #                    instead of using the container process user's home.
+# [Sync] 2026-08-31: remove the unused legacy models.json mount.
 
 services:
   ink-backend:
@@ -30,7 +31,6 @@ services:
       - "127.0.0.1:8765:8765"
     volumes:
       - ./data:/app/data
-      - ./models.json:/app/models.json:ro
     environment:
       BACKEND_VERSION: ghcr.io/shuxueshuxue/ink-backend:latest
       AGENT_CWD: /app/data/agent-workspace

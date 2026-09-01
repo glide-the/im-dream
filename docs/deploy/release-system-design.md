@@ -1,5 +1,7 @@
 # 发布体系梳理与方案设计
 
+<!-- [Sync] 2026-08-31: replace deleted models.json deployment ownership with the Admin Gateway catalog. -->
+
 本文基于仓库当前 `docs/deploy/` 与 `deploy/` 目录，以及相关 Docker、README、规则文档，给出发布体系处理判断和团队协作落地方案。
 
 ## 处理判断
@@ -21,7 +23,7 @@
 
 1. **文档职责混杂**：`docs/deploy/overview.md` 标题和主体是 Google Cloud Run，但结尾包含“本地 Docker Compose 运行”；本地直跑流程仅在 README，发布文档入口没有分流。
 2. **环境变量说明与脚本实现不一致**：改造前 `overview.md` 描述的 Secret Manager 变量与 [`../../deploy/setup-env.sh`](../../deploy/setup-env.sh) 实际确认的 `ANTHROPIC_*`、`AGENT_CWD`、`FILE_STORAGE_LOCAL_DIR` 等 key 不一致；本次已先同步文档，后续仍建议重做 secret 分类。
-3. **Secret 与普通配置边界不清**：`AGENT_CWD`、`FILE_STORAGE_LOCAL_DIR` 是路径配置，不应长期作为 Secret 管理；同时 `TEXT_API_KEY`、`INK_IMAGE_API_KEY`、`INK_AGENT_MEM0_API_KEY` 等敏感值若出现在 `backend/.env`，当前脚本会被普通 env 透传，存在配置暴露风险。
+3. **Secret 与普通配置边界不清**：`AGENT_CWD`、`FILE_STORAGE_LOCAL_DIR` 是路径配置，不应长期作为 Secret 管理；同时 `INK_GATEWAY_SERVICE_KEY`、`INK_AGENT_MEM0_API_KEY` 等敏感值若出现在 `backend/.env`，当前脚本会被普通 env 透传，存在配置暴露风险。
 4. **数据同步文档与脚本行为不一致**：`data-sync.md` 写了数据库、`file-storage/`、`agent-workspace/` 的手动同步；[`../../deploy/google-cloud/sync-data.sh`](../../deploy/google-cloud/sync-data.sh) 只上传 SQLite 主文件和 WAL/SHM 文件并重启后端，未同步两个目录，根路径 [`../../deploy/sync-data.sh`](../../deploy/sync-data.sh) 仅做兼容委托。
 5. **脚本文案存在轻微误导**：改造前 `setup-storage.sh` 结束提示 `run ./deploy.sh`，本次已调整为 `./deploy/google-cloud/deploy.sh deploy`。
 6. **运行时说明滞后**：改造前 `overview.md` 描述后端镜像为 `python:3.9-slim`、前端构建为 `npm ci`；本次已对齐 [`../../backend/Dockerfile`](../../backend/Dockerfile) 与 [`../../frontend/Dockerfile`](../../frontend/Dockerfile)。
@@ -35,7 +37,7 @@
 |------|----------|------|
 | 文档层 | 拆分入口与平台发布说明 | `docs/deploy/README.md` 做分流；后续将 `overview.md` 拆为 `google-cloud.md`、`remote-ssh.md`、`docker.md`、`local.md` |
 | 脚本层 | 新增平台子目录，保留旧云脚本兼容 | `deploy/local/`、`deploy/docker/`、`deploy/google-cloud/` 提供统一入口；Google Cloud 主流程在平台目录实现，旧根脚本继续可用 |
-| 配置层 | 明确配置来源和敏感度 | 以 `backend/.env.example`、`backend/models.json.example`、`.storage-env`、`.cloud-env`、shell export 为来源，避免写死业务资源 |
+| 配置层 | 明确配置来源和敏感度 | 以 `backend/.env.example`、Admin model catalog、`.storage-env`、`.cloud-env`、shell export 为来源，避免写死业务资源 |
 | 流程层 | 建立三条互斥操作路径 | 本地直跑不触碰 Docker/Cloud；Docker 不创建云资源；Google Cloud 不依赖本地端口与本地卷 |
 
 ### 拆分、保留、合并、重命名建议
@@ -63,7 +65,7 @@ flowchart TD
   B -->|"容器化验收/单机自托管"| D["Docker 发布"]
   B -->|"公网云服务/团队线上环境"| G["Google Cloud 发布"]
 
-  L --> L1["backend/.env + backend/models.json"]
+  L --> L1["backend/.env + Admin model catalog"]
   L --> L2["backend/data 本地 SQLite"]
   L --> L3["deploy/local/deploy.sh + python server.py + npm run dev"]
 
@@ -94,14 +96,14 @@ flowchart TD
 
 - Docker Engine 与 Docker Compose 可用。
 - `backend/.env` 已从 [`../../backend/.env.example`](../../backend/.env.example) 复制并填入必要值。
-- `backend/models.json` 已按 [`../../backend/models.json.example`](../../backend/models.json.example) 准备。
+- Admin Gateway 已发布当前用户可调用的 model catalog。
 - 本机 80 与 8765 端口没有冲突；如冲突，应通过 Compose 参数或 override 文件调整。
 
 ### 环境变量与配置来源
 
 | 配置 | 来源 | 说明 |
 |------|------|------|
-| 后端密钥与模型配置 | `backend/.env`、`backend/models.json` | 由 Compose 传入后端容器或挂载 |
+| 后端密钥与模型配置 | `backend/.env`、Admin model catalog | Dream 环境由 Compose 注入；模型由 Admin Gateway 发布 |
 | 后端数据 | `backend/data/` | 挂载为 `/app/data`，不访问 GCS |
 | 前端 API 目标 | `docker-compose.yml` 的 `API_BASE_URL=http://127.0.0.1:8765` | 指向浏览器可访问的本机后端端口 |
 | nginx fallback 目标 | `docker-compose.yml` 的 `BACKEND_URL=http://ink-backend:8765` | 保留同源代理兼容路径 |
@@ -146,7 +148,7 @@ http://localhost/
 |------|------|
 | 80 端口占用 | 调整 Compose 端口映射，或停止占用 80 的服务 |
 | 前端能打开但 API 失败 | 检查 `API_BASE_URL` 是否为浏览器可访问地址；Compose 默认是 `http://127.0.0.1:8765` |
-| 后端缺少模型或密钥 | 检查 `backend/.env` 和 `backend/models.json` 是否挂载/传入 |
+| 后端缺少模型或密钥 | 检查 `backend/.env` 及 Admin Gateway catalog/callability |
 | Claude-agent Bash 报 `bwrap: Failed to make / slave: Permission denied` | 确认 backend 容器使用根 Compose 的 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 设置，并已重新创建容器 |
 | Claude-agent Bash 报 `bwrap: Can't mount tmpfs on /newroot/sbin: No such file or directory` | 确认 backend 镜像包含 `/sbin`、`/usr/sbin`、`/usr/local/sbin` 目录兜底，且 workspace sandbox allowlist 包含这些已存在的系统运行时目录；重新构建并重建容器 |
 | 数据丢失 | 确认 `backend/data/` 被持久化挂载，不要删除本地目录 |
@@ -177,14 +179,14 @@ http://localhost/
 - Node.js 18+ 可用。
 - 已安装后端依赖并创建虚拟环境。
 - 已安装前端依赖。
-- `backend/.env`、`backend/models.json`、`backend/data/` 准备完成。
+- `backend/.env`、`backend/data/` 准备完成，Admin Gateway catalog 可用。
 
 ### 环境变量与配置来源
 
 | 配置 | 来源 | 说明 |
 |------|------|------|
 | 后端运行配置 | `backend/.env` | 本地直接加载，不进入 Secret Manager |
-| 模型与角色配置 | `backend/models.json` | 本地文件，gitignored |
+| 模型与角色配置 | Admin Gateway catalog | Admin-owned capability |
 | 数据库与文件 | `backend/data/` | 本地 SQLite 与文件存储 |
 | 前端开发服务 | Vite dev server | 默认 `http://localhost:5173` |
 | 后端服务 | `python server.py` | README 当前说明为 `http://localhost:8765` |
@@ -240,7 +242,7 @@ npm run dev
 | Python 版本不匹配 | 按 README 与 `backend/pyproject.toml` 使用 Python 3.12+；Docker 与本地必须满足同一源码基线 |
 | 前端 API 跨域或路径异常 | 检查前端 API 基础路径和后端端口，避免混用云端固定公开域名 |
 | 数据库表不存在 | 先运行 `python database.py` |
-| 模型调用失败 | 检查 `backend/.env` 与 `backend/models.json` 的 endpoint、key、role 映射 |
+| 模型调用失败 | 检查 `backend/.env` 的 Gateway 集成配置与 Admin catalog/callability |
 
 ### 与其他发布方式的边界
 
@@ -388,7 +390,7 @@ export GCP_PROJECT_ID=your-project-id
 ### 发布方式拆分原则
 
 1. **入口互斥**：用户先选择本地、Docker、Google Cloud，再进入对应文档。
-2. **配置归属清楚**：本地与 Docker 使用 `backend/.env`、`backend/models.json`、本地数据；Google Cloud 使用 `.storage-env`、`.cloud-env`、Secret Manager、GCS。
+2. **配置归属清楚**：本地与 Docker 使用 `backend/.env`、Admin model catalog、本地数据；Google Cloud 使用 `.storage-env`、`.cloud-env`、Secret Manager、GCS。
 3. **脚本职责单一**：`deploy/` 按平台分目录组织发布入口；本地、Docker、Google Cloud 的脚本只编排各自平台，不复制业务逻辑。
 4. **共享资产只共享构建，不共享流程**：Dockerfile、nginx 模板可被 Docker 与 Cloud Run 共用，但文档流程必须分开。
 5. **敏感值优先进入 Secret Manager**：云发布脚本应明确 secret allowlist，不把 API key 作为普通 env 透传。

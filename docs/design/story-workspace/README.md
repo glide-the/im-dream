@@ -1,7 +1,7 @@
 <!-- [Input] Current Story Workspace product modules and cross-system Dream/Deck contracts. -->
 <!-- [Output] Authoritative index for Story Workspace product and interaction design. -->
 <!-- [Pos] Story Workspace design entry point. -->
-<!-- [Sync] 2026-08-31: index Dream Thread recovery and draft Episode-owned artifact reading. -->
+<!-- [Sync] 2026-08-31: index Dream Thread binding recovery, legal same-Deck Agent switching, and draft Episode-owned artifact reading. -->
 
 # Story Workspace 业务设计索引
 

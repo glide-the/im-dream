@@ -14,6 +14,7 @@
 //                    declares or authorizes Dream mode.
 // [Sync] 2026-08-16: add the canonical Settings / Work route while retaining resource/plugin deep links.
 // [Sync] 2026-08-31: register the run-independent creation guide as a static route.
+// [Sync] 2026-08-31: authenticated root resolves to canonical Chat; unsupported historical prefixes are not routes.
 
 export type StoryWorkspaceStaticRoute =
   | 'dream'
@@ -139,7 +140,17 @@ export function resolveStoryWorkspacePath(
 
   if (
     normalizedPath === '/'
-    || normalizedPath === '/story-workspace'
+  ) {
+    return {
+      canonicalPath: STORY_WORKSPACE_PATHS.chat,
+      route: 'chat',
+      params: {},
+      query,
+    };
+  }
+
+  if (
+    normalizedPath === '/story-workspace'
     || normalizedPath === '/story-workspace/dashboard'
     || normalizedPath === STORY_WORKSPACE_PATHS.dream
   ) {

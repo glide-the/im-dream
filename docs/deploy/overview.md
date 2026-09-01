@@ -1,5 +1,7 @@
 # 部署指南：Google Cloud Run
 
+<!-- [Sync] 2026-08-31: remove the retired /polycli same-origin fallback. -->
+
 本文档描述 Ink & Memory 的 Cloud Run 部署架构与操作步骤。当前云发布主入口是 [`../../deploy/google-cloud/deploy.sh`](../../deploy/google-cloud/deploy.sh)，旧的 `deploy/*.sh` 路径仅保留兼容或作为主入口编排的辅助脚本。
 
 ---
@@ -274,7 +276,7 @@ docker build \
 nginx 配置要点：
 - 前端默认通过 `runtime-config.js` 读取 `API_BASE_URL`，浏览器直接跨域请求固定后端域名 `https://ink-backend.suoxya.com`
 - `runtime-config.js` 和 SPA HTML 入口设置为 `no-store`，避免浏览器沿用旧入口或旧的空 `apiBaseUrl` 后把 POST/PUT 请求打回前端静态服务并触发 `Method Not Allowed`
-- `nginx.conf.template` 保留 `/api/` 和 `/polycli/` 反向代理，用作同源调用 fallback
+- `nginx.conf.template` 保留 `/api/` 反向代理，用作同源调用 fallback
 - 静态资源设置 1 年强缓存（`immutable`）
 
 ### 前端请求返回 Method Not Allowed
@@ -286,16 +288,13 @@ curl -fsS https://ink-backend.suoxya.com/api/health
 curl -fsS https://ink-frontend.suoxya.com/runtime-config.js?runtime=1
 ```
 
-`runtime-config.js` 中的 `apiBaseUrl` 应为 `https://ink-backend.suoxya.com`。如果为空，前端会回退到同源 `/api` / `/polycli` 路径；若同源代理未正确指向后端，POST/PUT 请求可能落到前端静态服务，从而返回 `405 Method Not Allowed`。重新发布前端镜像并强制刷新浏览器缓存即可验证；新模板已对该文件禁用缓存。
+`runtime-config.js` 中的 `apiBaseUrl` 应为 `https://ink-backend.suoxya.com`。如果为空，前端会回退到同源 `/api` 路径；若同源代理未正确指向后端，POST/PUT 请求可能落到前端静态服务，从而返回 `405 Method Not Allowed`。重新发布前端镜像并强制刷新浏览器缓存即可验证；新模板已对该文件禁用缓存。
 
 ---
 
 ## 本地 Docker Compose 运行
 
 ```bash
-# 复制并填写后端配置
-cp backend/models.json.example backend/models.json
-
 docker compose up --build
 # 访问 http://localhost/
 ```

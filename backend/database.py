@@ -43,6 +43,8 @@
 #                    and advance its Admin-capability-backed draft revision.
 # [Sync] 2026-08-17: distinguish related Chat threads from immutable runtime snapshots;
 #                    allow unused plugin bindings to be cleaned before Deck deletion.
+# [Sync] 2026-08-31: remove the daily-picture mutation helper; historical picture
+#                    reads and explicit legacy-data import remain.
 # [Sync] 2026-08-17: CAS-update the current Agent inside an already bound Chat Deck.
 """
 PostgreSQL runtime persistence helpers for Ink & Memory.
@@ -50,7 +52,7 @@ PostgreSQL runtime persistence helpers for Ink & Memory.
 Schema:
 - users: User accounts (email, password_hash)
 - user_sessions: Editor sessions (editor state JSON)
-- daily_pictures: Generated images (base64)
+- daily_pictures: Historical timeline images (base64)
 - user_preferences: Voice configs, meta prompts, etc.
 """
 
@@ -2425,28 +2427,7 @@ def extract_text_from_sessions_on_date(user_id: int, target_date: str, timezone:
     finally:
         db.close()
 
-# ========== Daily Pictures ==========
-
-def save_daily_picture(user_id: int, date: str, image_base64: str, prompt: str = None, thumbnail_base64: str = None):
-    """Save daily picture (replaces any existing picture for this user+date)."""
-    db = get_db()
-    try:
-        # @@@ Delete old pictures for this user+date combination first
-        # This ensures only ONE picture per day while avoiding UNIQUE constraint timezone issues
-        db.execute("""
-        DELETE FROM daily_pictures
-        WHERE user_id = %s AND date = %s
-        """, (user_id, date))
-
-        # Insert the new picture
-        db.execute("""
-        INSERT INTO daily_pictures (user_id, date, image_base64, thumbnail_base64, prompt)
-        VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, date, image_base64, thumbnail_base64, prompt))
-
-        db.commit()
-    finally:
-        db.close()
+# ========== Historical Daily Pictures ==========
 
 def get_daily_pictures(user_id: int, limit: int = 30):
     """Get recent daily pictures (returns ONLY thumbnails for fast timeline loading)."""

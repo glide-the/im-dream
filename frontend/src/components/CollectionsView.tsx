@@ -1,3 +1,8 @@
+// [Input] Persisted Writing sessions, historical daily pictures, Voice metadata, and the selected timezone.
+// [Output] Read-only Story Workspace timeline with historical picture viewing and comment context.
+// [Pos] Timeline/Collections surface in frontend/src/components
+// [Sync] 2026-08-31: remove daily-picture generation and redraw controls while preserving historical pictures.
+
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -208,13 +213,11 @@ interface TimelineCardProps {
   day: TimelineDay;
   dayData?: TimelineEntryData;
   hasData: boolean;
-  isGenerating: boolean;
   textByDate: Map<string, string>;
   firstLineByDate: Map<string, string>;
   dateLocale: string;
   t: TFunction;
   onImageClick: (picture: TimelinePicture) => void;
-  onGenerate?: (date: string) => void;
   side: 'left' | 'right';
   isMobile: boolean;
 }
@@ -223,25 +226,21 @@ function TimelineCard({
   day,
   dayData,
   hasData,
-  isGenerating,
   textByDate,
   firstLineByDate,
   dateLocale,
   t,
   onImageClick,
-  onGenerate,
   side,
   isMobile
 }: TimelineCardProps) {
-  const cardCursor = dayData?.picture && !isGenerating ? 'pointer' : 'default';
+  const cardCursor = dayData?.picture ? 'pointer' : 'default';
   const textContent = textByDate.get(day.date);
   const firstLine = firstLineByDate.get(day.date);
   const commentCount = dayData?.comments?.length || 0;
 
   let description = '';
-  if (isGenerating) {
-    description = t('timeline.generating');
-  } else if (day.isToday && !dayData?.picture) {
+  if (day.isToday && !dayData?.picture) {
     description = '';
   } else if (firstLine) {
     description = firstLine;
@@ -280,7 +279,7 @@ function TimelineCard({
         borderRadius: '8px',
       }}
       onMouseEnter={e => {
-        if (dayData?.picture && !isGenerating) {
+        if (dayData?.picture) {
           e.currentTarget.style.transform = 'scale(1.02)';
           e.currentTarget.style.boxShadow = '0 4px 12px var(--color-shadow-soft)';
         }
@@ -324,7 +323,7 @@ function TimelineCard({
       {/* Image - on the inner side (near center line) */}
       <div style={{ flexShrink: 0 }}>
         {dayData?.picture ? (
-          <div style={{ position: 'relative' }}>
+          <div>
             <img
               src={`data:image/${dayData.picture.base64?.startsWith('iVBOR') ? 'png' : 'jpeg'};base64,${dayData.picture.base64}`}
               alt={dayData.picture.prompt}
@@ -336,42 +335,6 @@ function TimelineCard({
                 boxShadow: '0 2px 8px var(--color-shadow-medium)'
               }}
             />
-            {onGenerate && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!isGenerating) onGenerate(day.date);
-                }}
-                disabled={isGenerating}
-                style={{
-                  position: 'absolute',
-                  top: '4px',
-                  right: '4px',
-                  width: '22px',
-                  height: '22px',
-                  borderRadius: '50%',
-                  background: 'var(--color-bg-surface-solid)',
-                  border: 'none',
-                  cursor: isGenerating ? 'wait' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: 0.85,
-                  transition: 'opacity 0.2s'
-                }}
-                onMouseEnter={e => {
-                  if (!isGenerating) e.currentTarget.style.opacity = '1';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.opacity = '0.85';
-                }}
-                title="Redraw image"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
-                </svg>
-              </button>
-            )}
           </div>
         ) : (
           <div style={{
@@ -388,7 +351,6 @@ function TimelineCard({
             fontSize: '20px',
             color: 'var(--color-text-muted)',
           }}>
-            {isGenerating ? '⏳' : ''}
           </div>
         )}
       </div>
@@ -415,7 +377,6 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
   const [textByDate, setTextByDate] = useState<Map<string, string>>(new Map());
   const [firstLineByDate, setFirstLineByDate] = useState<Map<string, string>>(new Map());
   const [picturesByDate, setPicturesByDate] = useState<Map<string, TimelinePicture>>(new Map());
-  const [generatingForDate, setGeneratingForDate] = useState<string | null>(null);
   const [viewingImage, setViewingImage] = useState<{ base64: string; full_base64?: string; prompt: string; date: string; } | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [loadingCommentsForDate, setLoadingCommentsForDate] = useState<string | null>(null);
@@ -785,47 +746,6 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
     await reloadCommentsForDate(stored.date);
   };
 
-  const handleGenerateForDate = async (dateStr: string) => {
-    if (!isAuthenticated) {
-      alert('Please log in to generate images. Image generation requires authentication.');
-      return;
-    }
-
-    setGeneratingForDate(dateStr);
-
-    try {
-      const { generateDailyPicture, saveDailyPicture } = await import('../api/voiceApi');
-      const { image_base64, thumbnail_base64, prompt } = await generateDailyPicture(dateStr, timezone);
-
-      if (!image_base64) {
-        alert('No notes found to generate an image. Please write and save entries first.');
-        return;
-      }
-
-      const pictureDate = dateStr;
-
-      const newPicture = {
-        date: pictureDate,
-        base64: thumbnail_base64 || image_base64,
-        prompt: prompt
-      };
-
-      await saveDailyPicture(pictureDate, image_base64, prompt, thumbnail_base64);
-
-      setPicturesByDate(prev => {
-        const next = new Map(prev);
-        next.set(pictureDate, newPicture);
-        return next;
-      });
-    } catch (error) {
-      console.error('Image generation failed:', error);
-      const message = error instanceof Error ? error.message : 'Failed to generate image. Please try again.';
-      alert(message);
-    } finally {
-      setGeneratingForDate(null);
-    }
-  };
-
   if (initialLoading) {
     return null;
   }
@@ -898,7 +818,6 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
           const globalIndex = renderStart + localIndex;
           const dayData = timelineByDate.get(day.date);
           const hasData = timelineByDate.has(day.date);
-          const isGenerating = generatingForDate === day.date;
           const isLeftSide = globalIndex % 2 === 0;
           const topPosition = globalIndex * SLOT_HEIGHT;
 
@@ -941,13 +860,11 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
                 day={day}
                 dayData={dayData}
                 hasData={hasData}
-                isGenerating={isGenerating}
                 textByDate={textByDate}
                 firstLineByDate={firstLineByDate}
                 dateLocale={dateLocale}
                 t={t}
                 onImageClick={handleImageClick}
-                onGenerate={handleGenerateForDate}
                 side={isLeftSide ? 'left' : 'right'}
                 isMobile={isMobile}
               />

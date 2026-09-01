@@ -1,6 +1,12 @@
+// [Input] Persisted editor comments, enabled Voice configs, textarea geometry, and Claude Agent SSE helpers.
+// [Output] Historical comment grouping/navigation/feedback plus explicit Voice Thread chat actions.
+// [Pos] Writing historical-comment compatibility hook in frontend/src/hooks
+// [Sync] 2026-08-31: migrate explicit historical comment chat from PolyCLI to the Voice Claude Thread.
+
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { MutableRefObject, Dispatch, SetStateAction, SyntheticEvent } from 'react';
 import type { EditorState, Commentor, TextCell, EditorEngine } from '../engine/EditorEngine';
+import type { VoiceConfig } from '../api/voiceApi';
 import { findNormalizedPhrase } from '../utils/textNormalize';
 import { getMetaPrompt, getStateConfig } from '../utils/voiceStorage';
 import { chatWithVoice } from '../api/voiceApi';
@@ -23,6 +29,7 @@ export interface UseCommentsOptions {
   stateConfig: ReturnType<typeof getStateConfig>;
   isMobile: boolean;
   engineRef: MutableRefObject<EditorEngine | null>;
+  voiceConfigs: Record<string, VoiceConfig>;
 }
 
 export interface UseCommentsReturn {
@@ -50,6 +57,7 @@ export function useComments({
   stateConfig,
   isMobile,
   engineRef,
+  voiceConfigs,
 }: UseCommentsOptions): UseCommentsReturn {
   const [groupPages, setGroupPages] = useState<Map<string, number>>(new Map());
   const prevGroupSignatures = useRef<Map<string, string>>(new Map());
@@ -59,6 +67,7 @@ export function useComments({
   const [mobileActiveComment, setMobileActiveComment] = useState<Commentor | null>(null);
   const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
   const [commentChatProcessing, setCommentChatProcessing] = useState<Set<string>>(new Set());
+  const resolvedVoiceThreadIdsRef = useRef<Map<string, string>>(new Map());
 
   const commentGroups = useMemo(() => {
     const groups = new Map<string, CommentGroup>();
@@ -321,17 +330,27 @@ export function useComments({
         : '';
 
       const voiceId = comment.voiceId || comment.voice;
+      const voiceConfig = voiceConfigs[voiceId] ?? {
+        name: comment.voice,
+        systemPrompt: '',
+        enabled: true,
+        icon: comment.icon,
+        color: comment.color,
+      };
 
-      const response = await chatWithVoice(
+      const result = await chatWithVoice(
         voiceId,
+        voiceConfig,
         chatHistory,
         message,
         allText,
         metaPrompt,
-        statePrompt
+        statePrompt,
+        resolvedVoiceThreadIdsRef.current.get(voiceId),
       );
+      resolvedVoiceThreadIdsRef.current.set(voiceId, result.thread_id);
 
-      engineRef.current.addCommentChatMessage(commentId, 'assistant', response);
+      engineRef.current.addCommentChatMessage(commentId, 'assistant', result.response);
     } catch (error) {
       console.error('Comment chat failed:', error);
       engineRef.current.addCommentChatMessage(commentId, 'assistant', 'Sorry, I encountered an error.');
@@ -342,7 +361,7 @@ export function useComments({
         return next;
       });
     }
-  }, [state, selectedState, stateConfig, engineRef]);
+  }, [state, selectedState, stateConfig, engineRef, voiceConfigs]);
 
   return {
     commentGroups,

@@ -3,6 +3,7 @@
 [Input] AutoDL direct-host platform scripts and SeetaCloud service mappings.
 [Output] Define Dream/Admin ordering, frontend/API topology, secure environment projection, verification, and rollback.
 [Sync] 2026-08-26: run Dream as root while retaining isolated Admin/PostgreSQL ownership.
+[Sync] 2026-08-31: remove the retired /polycli proxy from the Dream topology.
 -->
 
 ## 拓扑与发布顺序
@@ -12,7 +13,7 @@ AutoDL 由两个仓库各自的 `deploy/autodl-ssh` 平台发布，先 Admin、�
 ```mermaid
 flowchart LR
   DreamPublic["Dream HTTPS mapping"] --> Frontend["Vite Preview 127.0.0.1:6006"]
-  Frontend -->|"/api /auth /oauth /polycli"| Dream["FastAPI 127.0.0.1:8765"]
+  Frontend -->|"/api /auth /oauth"| Dream["FastAPI 127.0.0.1:8765"]
   AdminPublic["Admin HTTPS mapping"] --> Admin["Next.js 127.0.0.1:6008"]
   Dream --> Admin
   Dream --> PG["Admin-owned embedded PostgreSQL 127.0.0.1:54329"]

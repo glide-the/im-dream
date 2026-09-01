@@ -1,8 +1,10 @@
 # Claude Agent 设计文档
 
+<!-- [Sync] 2026-08-31: remove the retired second session runtime from the current design boundary. -->
+
 **功能边界**：为 Ink & Memory 用户提供基于 Claude Code SDK 的流式写作助手，  
 支持多轮对话、写作上下文注入、工具确认，以及跨请求会话保活。  
-本模块与现有 PolyCLI agent 会话完全隔离，不存在任何共享状态或导入依赖。
+本模块是当前 Voice/Writing/Chat 的单一 Thread SSE Agent runtime。
 
 ---
 
@@ -200,15 +202,15 @@ data: {"type": "finish", "reason": "error"}
 
 ---
 
-## 5. 隔离约束（不与现有 agent 模块交叉关联）
+## 5. 单一 Agent Runtime 约束
 
 | 约束维度 | 说明 |
 |----------|------|
-| **代码层**| `claude_agent` 不导入 `polycli`、`polyagent` 任何模块 |
-| **路由层**| `claude_agent` 端点前缀 `/api/claude-agent/*`；PolyCLI 挂载于 `/polycli` |
-| **会话层**| `AgentRunStatePool` 独立于 PolyCLI `get_registry()`；互不可见 |
+| **代码层**| `claude_agent` 不依赖第二套 session runtime |
+| **路由层**| Agent 端点统一使用 `/api/claude-agent/*` |
+| **会话层**| `AgentRunStatePool` 是唯一运行中 Agent 会话池 |
 | **工厂层**| `ClaudeAgentThreadFactory` 单独实例化，不加入任何共享容器 |
-| **鉴权层**| 两套路由均用 `Depends(get_current_user)` 但路由处理函数完全独立 |
+| **鉴权层**| Agent 路由统一使用 `Depends(get_current_user)` |
 
 ---
 

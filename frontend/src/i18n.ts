@@ -20,6 +20,7 @@
 // [Sync] 2026-08-23: localize the shared Mermaid/Workspace enlarge, download, close, and zoom controls.
 // [Sync] 2026-08-29: add truthful Editor write failure and retained-input recovery copy.
 // [Sync] 2026-08-31: add safe structured Chat turn-error and Thread reload copy.
+// [Sync] 2026-08-31: remove the unused daily-picture generation status copy.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -328,7 +329,6 @@ const resources = {
       },
       timeline: {
         today: 'Today',
-        generating: 'Generating...',
         entryCount_one: '{{count}} entry',
         entryCount_other: '{{count}} entries',
         friendSelector: {
@@ -1156,7 +1156,6 @@ const resources = {
       },
       timeline: {
         today: '今天',
-        generating: '生成中...',
         entryCount_one: '{{count}} 条记录',
         entryCount_other: '{{count}} 条记录',
         friendSelector: {

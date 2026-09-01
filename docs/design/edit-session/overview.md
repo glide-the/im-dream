@@ -1,8 +1,8 @@
 # 编辑器会话模块设计梳理
 
-Status: Draft
-Updated: 2026-06-14
-Scope: Design only — 不含实现代码，不含重构建议
+Status: Current
+Updated: 2026-08-31
+Scope: 当前实现边界
 
 ---
 
@@ -24,7 +24,7 @@ Scope: Design only — 不含实现代码，不含重构建议
 
 ### 1.1 背景
 
-Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中输入文本，系统根据"能量"模型（trace-based energy model）自动触发 AI 语音角色分析，将旁白评论嵌入文档。编辑器会话（Edit Session）是该链路的中枢——它既是文档载体，也是状态机，同时承担与后端 API 的持久化协调。
+Ink & Memory 是一个以写作体验为核心的应用。EditorEngine 在用户输入时只维护文档单元、历史评论兼容数据和本地 `weightPath`，不自动调用模型。当前模型交互由防抖 Writing 灵感和用户显式打开的 Voice Thread Chat 承担。编辑器会话（Edit Session）是文档状态与持久化协调的中枢。
 
 ### 1.2 目标
 
@@ -41,14 +41,14 @@ Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中�
 
 | 层次 | 文件 | 职责 |
 |------|------|------|
-| 引擎层 | `frontend/src/engine/EditorEngine.ts` | 核心状态机：管理 cells、commentors、tasks、weightPath；驱动能量计算和分析触发 |
+| 引擎层 | `frontend/src/engine/EditorEngine.ts` | 核心状态机：管理 cells、历史 commentors、tasks、weightPath；文本编辑只执行本地状态计算 |
 | 引擎层 | `frontend/src/engine/ChatWidget.ts` | 嵌入式聊天小部件：管理单个 Voice 的对话历史 |
 | Hooks 层 | `frontend/src/hooks/useSessionLifecycle.ts` | 会话生命周期协调：初始化、加载、自动保存、新建、新一天检测 |
 | Hooks 层 | `frontend/src/hooks/useTextCells.ts` | 文本单元格管理：本地文本、IME 组合输入、粘贴、键盘事件 |
 | Hooks 层 | `frontend/src/hooks/useComments.ts` | 评论管理：分组、分页、星标/杀死、评论聊天 |
 | Hooks 层 | `frontend/src/hooks/useInspiration.ts` | 写作灵感提示 |
 | Hooks 层 | `frontend/src/hooks/useVoiceInput.ts` | 语音输入 |
-| API 层 | `frontend/src/api/voiceApi.ts` | 后端 API 调用：analyzeText、chatWithVoice、saveSession、listSessions、getSession |
+| API 层 | `frontend/src/api/voiceApi.ts` | 后端 API 调用：Claude SSE Writing 灵感/Voice 对话、saveSession、listSessions、getSession |
 | 后端 API | `backend/server.py` → `/api/sessions/*` | 会话持久化：CRUD |
 | 持久化层 | `backend/database.py` | SQLite/DB 操作 |
 
@@ -115,7 +115,7 @@ Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中�
 
 负责所有状态变更的唯一可信源（single source of truth）。主要职责：
 
-- `updateTextCell(cellId, text)` — 文本变更入口，触发能量计算和分析
+- `updateTextCell(cellId, text)` — 文本变更入口，只触发本地权重与状态更新
 - `insertWidgetAtCursor(...)` / `insertWidgetAfterLine(...)` — 插入 WidgetCell
 - `deleteCell(cellId)` — 删除单元格
 - `addCommentChatMessage(commentId, role, content)` — 追加评论聊天消息
@@ -124,11 +124,7 @@ Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中�
 - `subscribe(callback)` — 单一订阅者（React state bridge）
 - `onBlankReset(callback)` — 空白重置订阅（支持多订阅者）
 
-内部自动维护：
-- `commentorWaitlist`：候选评论队列
-- `sentCache`：文本→commentorHash 的去重缓存
-- `usedEnergy`：已消耗能量（控制评论应用节奏）
-- `isRequesting`：防重复请求标志
+Engine 不保存模型客户端、请求队列或自动分析缓存。已持久化 `commentors` 仅用于历史会话兼容显示与显式对话。
 
 ---
 
@@ -142,14 +138,12 @@ Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中�
 | F4 | @ 触发 Voice 选择 | `handleKeyDown` + `AgentDropdown` | 键入 `@` |
 | F5 | 插入 ChatWidget | `engine.insertWidgetAtCursor` | 选择 Voice 后 |
 | F6 | 能量计算 | `computeWeight` + `applyTextUpdate` | 每次文本变更 |
-| F7 | 分析触发（自动） | `checkAnalysisTrigger` | 句子完成 + 能量/缓存条件 |
-| F8 | 评论候选排队 | `commentorWaitlist.push` | 后端返回分析结果 |
-| F9 | 评论应用（能量门控） | `checkCommentorApplication` | 能量充足 + 无重叠 + 快照匹配 |
-| F10 | 评论高亮与分组 | `useComments.commentGroups` | 状态变更后重新计算 |
-| F11 | 评论分页导航 | `handleGroupNavigate` | 用户点击翻页 |
-| F12 | 光标位置评论激活 | `useComments` cursor effect | 光标移动 |
-| F13 | 评论聊天（Chat with Voice） | `handleCommentChatSend` | 用户发送消息 |
-| F14 | 评论星标 / 杀死 | `handleCommentStar/Kill` | 用户点击 |
+| F7 | Writing 灵感 SSE | `useInspiration` + `chatWithVoiceSSE` | 停止输入 2 秒后 |
+| F8 | 历史评论高亮与分组 | `useComments.commentGroups` | 加载含 commentors 的旧会话 |
+| F9 | 历史评论显式对话 | `handleCommentChatSend` | 用户发送消息，复用 Voice Thread |
+| F10 | 评论分页导航 | `handleGroupNavigate` | 用户点击翻页 |
+| F11 | 光标位置评论激活 | `useComments` cursor effect | 光标移动 |
+| F12 | 评论星标 / 杀死 | `handleCommentStar/Kill` | 用户点击 |
 | F15 | 会话初始化 | `useSessionLifecycle` effect | 应用启动 |
 | F16 | 新一天检测 | `useSessionLifecycle` timezone check | 应用启动时比较日期 |
 | F17 | 自动保存（3s 防抖） | `useSessionLifecycle` state effect | 状态变更后 3s |
@@ -159,7 +153,6 @@ Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中�
 | F21 | 空白重置 | `resetEditorToBlank` + `onBlankReset` | 所有内容清空 |
 | F22 | 情感状态选择 | `StateChooser` + `selectedState` | 用户选择情感状态 |
 | F23 | 语音输入 | `useVoiceInput` | 麦克风按钮 |
-| F24 | 写作灵感提示 | `useInspiration` | 文本变更时 |
 
 ---
 
@@ -175,9 +168,9 @@ Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中�
 |------|------|---------|---------|
 | **创建** | 应用启动 / 新一天 / 用户新建 | `buildBlankState()` → `engine.loadState()` | EditorState 初始化，`id` 分配，`createdAt` 记录 |
 | **激活** | 加载成功 | `engine.subscribe()` 绑定，React state 同步 | Engine 进入订阅状态，UI 渲染 |
-| **编辑** | 用户键入/粘贴/语音 | `updateTextCell()` → 能量计算 → 分析触发 | cells 变更，weightPath 增长，commentors 变化 |
-| **分析等待** | 分析请求发出 | `isRequesting=true`，Task 入队 | tasks 增加，UI 显示加载状态 |
-| **评论应用** | 能量充足 + 结果返回 | `checkCommentorApplication()` | commentors 增加，UI 高亮渲染 |
+| **编辑** | 用户键入/粘贴/语音 | `updateTextCell()` → 本地权重计算 | cells 变更，weightPath 增长，不发网络请求 |
+| **灵感等待/流式显示** | 停止输入约 2 秒 | Voice Thread SSE `text-delta` | `currentInspiration` 逐段增长，正文变化时丢弃旧流 |
+| **历史评论兼容** | 加载旧会话 | 读取既有 commentors | UI 可继续高亮、反馈和显式对话，不自动新增评论 |
 | **保存** | 3s 防抖 / 手动 / 新建前 | `saveSessionToDatabase()` | `id` 可能更新（首次保存），DB 持久化 |
 | **结束** | 新一天 / 用户新建 / 内容清空 | 保存当前 → `buildBlankState()` → 新 `id` | Engine 重置，React state 清空 |
 
@@ -202,40 +195,22 @@ Ink & Memory 是一个以写作体验为核心的应用。用户在编辑器中�
       → applyTextUpdate()
         → computeWeight(combinedText)
         → weightPath.push(entry)
-        → checkAnalysisTrigger(text, energy)   // 可能发起后端请求
-        → checkCommentorApplication(text, energy)  // 可能应用评论
         → notifyChange()  // 触发 React re-render
   → textarea resize
   → Inspiration hint update
 ```
 
-### 6.2 分析请求 / 评论应用流
+### 6.2 Writing 灵感流
 
 ```
-checkAnalysisTrigger:
-  completedSentences = getCompletedSentences(text)
-  if cached AND commentorHash unchanged → skip
-  else:
-    sentCache.set(text, hash)
-    requestAnalysis(text)
-      isRequesting = true
-      tasks.push({type:'thinking'})
-      notifyChange()
-      → POST /polycli/api/trigger-sync {session_id:'analyze_text', params:{...}}
-      ← {voices: [{phrase, comment, voice_id, voice, icon, color}]}
-      commentorWaitlist.push(newCommentor)
-      isRequesting = false
-      tasks.remove(task)
-      processPendingComments(text)
-        checkCommentorApplication(text, energy)
-          if energy - usedEnergy >= threshold:
-            validate snapshot match
-            validate phrase found in text
-            validate no overlap with applied commentors
-            → commentor.appliedAt = now
-            → state.commentors.push(commentor)
-            → usedEnergy += threshold
-            → notifyChange()
+useInspiration.onTextChange:
+  cancel previous debounce
+  after 2 seconds:
+    select one enabled Voice and reuse/create its Thread
+    → POST /api/claude-agent (SSE)
+    ← text-delta: append and display immediately
+    ← finish: settle final text
+    before every projection: require live editor text == request snapshot
 ```
 
 ### 6.3 保存事件链
@@ -317,9 +292,6 @@ flowchart LR
   subgraph Engine["⚙️ EditorEngine"]
     E1[updateTextCell]
     E2[applyTextUpdate\n能量计算]
-    E3[checkAnalysisTrigger\n缓存判断]
-    E4[requestAnalysis\nisRequesting guard]
-    E5[checkCommentorApplication\n快照+重叠+能量]
     E6[notifyChange]
     E7[resetEditorToBlank]
     E8[loadState]
@@ -331,15 +303,11 @@ flowchart LR
   subgraph SessionState["📋 EditorState"]
     S1[cells 变更]
     S2[weightPath 增长]
-    S3[commentorWaitlist\n候选队列]
-    S4[commentors 应用]
-    S5[tasks 状态]
     S6[id / createdAt]
   end
 
   subgraph Backend["🌐 Backend API"]
-    B1[POST /polycli/api/trigger-sync\nanalyze_text]
-    B2[POST /polycli/api/trigger-sync\nchat_with_voice]
+    B2[POST /api/claude-agent\nVoice Thread SSE]
     B3[POST /api/sessions\n保存会话]
     B4[GET /api/sessions\n列表 / 详情]
   end
@@ -373,22 +341,13 @@ flowchart LR
   E1 --> E2
   E2 --> S1
   E2 --> S2
-  E2 --> E3
-  E2 --> E5
   E2 --> E6
-  E3 --> E4
-  E4 --> S5
-  E4 --> B1
-  E4 --> S3
-  E5 --> S4
-  E5 --> E6
   E6 --> H2
   E7 --> S6
   E8 --> S1
   E9 --> S1
 
-  %% Backend → Engine (async response)
-  B1 -->|voices result| S3
+  %% Explicit historical comment chat
   B2 -->|chat response| E11
 
   %% Session Lifecycle → Backend
@@ -411,12 +370,12 @@ flowchart LR
 
 - **Human User 泳道**：所有用户交互的起点，包括文本输入、命令操作（保存/新建）和评论互动。
 - **Editor UI / Hooks 泳道**：React Hooks 层作为用户意图与引擎之间的适配器，负责本地状态同步（localTexts）、事件去抖（3s 自动保存）和 IME 保护。
-- **EditorEngine 泳道**：唯一的状态变更权威，所有操作通过此对象修改 EditorState。分析触发、评论应用的门控逻辑在此执行。
-- **EditorState 泳道**：纯数据，由引擎维护，是序列化和持久化的单元。包含 cells、commentors（含候选队列标识）、tasks、weightPath。
-- **Backend API 泳道**：两类调用——分析/聊天（PolyCLI）和会话持久化（REST）。均为异步，结果通过回调或 Promise 更新引擎状态。
+- **EditorEngine 泳道**：唯一的状态变更权威，所有操作通过此对象修改 EditorState；普通文本编辑只执行本地计算。
+- **EditorState 泳道**：纯数据，由引擎维护，是序列化和持久化的单元。包含 cells、历史 commentors、tasks、weightPath。
+- **Backend API 泳道**：模型交互统一由 Voice Thread Claude SSE 承担；会话持久化继续使用 REST。
 - **Persistence 泳道**：已登录用户使用后端数据库；未登录用户 fallback 到 localStorage。保存路径（B3→P1）由 Hooks 层驱动，加载路径（P2→Engine）在会话初始化时执行。
-- **确认点**：分析触发有缓存守卫（`sentCache`）和并发守卫（`isRequesting`）；评论应用有能量门控、快照匹配、重叠检测三重守卫；保存有竞态守卫（`live id == snapshot id`）。
-- **回滚/失败路径**：分析请求失败时 `isRequesting` 复位，task 移除，cache 保持（可重试）；保存失败时 console.error，无重试机制（当前限制）。
+- **确认点**：Writing 灵感每个 delta 都校验正文快照；保存保留 `live id == snapshot id` 竞态守卫。
+- **失败路径**：SSE 错误保留后端安全错误码并停止当前灵感流；保存失败仍记录 console.error，当前没有重试队列。
 
 ---
 
@@ -429,7 +388,7 @@ flowchart LR
 | **状态变更通知** | `subscribe(callback)` — 单一订阅者 | 可扩展为多订阅者 EventBus 或 Observable |
 | **空白重置通知** | `onBlankReset(cb)` — 已支持多订阅者 `Set<() => void>` | 可作为通用事件系统的模板 |
 | **WidgetCell 类型** | `widgetType: 'chat' \| 'greeting' \| 'other'` | 可注册新类型，Engine 对 data 无约束 |
-| **分析触发策略** | 固定 threshold=50 + completedSentences 判断 | 可提取为策略对象，支持不同触发规则 |
+| **Writing 灵感策略** | 2 秒防抖 + 正文快照校验 + Voice Thread SSE | 可增加显式取消信号，不在 EditorEngine 内恢复自动分析 |
 | **持久化适配** | 硬编码调用 `voiceApi.saveSession` | 可抽象为 StorageAdapter 接口 |
 | **认证与会话绑定** | JWT ****** | 已支持，可扩展 Agent 身份令牌 |
 | **任务类型** | `'searching' \| 'thinking' \| 'other'` | 可注册新类型 |
@@ -444,7 +403,7 @@ flowchart LR
 | **Agent 操作无入口** | 当前所有状态变更入口仅暴露给人类 UI（React Hooks），无 Agent 可调用的命令接口 |
 | **Agent MCP 写工具确认后前端状态未及时更新** | 用户在 Chat 视图批准 `mcp__editor__` 写工具时，`POST /api/claude-agent/tool-confirm` 的响应不代表 DB 写入完成。现已通过 `SessionEventBus` 在成功 editor write `tool_result` 后发布 `session_updated source=agent`，前端按 `toolCallId` 收到事件后 reload 当前 Writing session；SSE 不可用时按配置超时 fallback。 |
 | **保存无重试机制** | 自动保存失败仅 console.error，无排队重试 |
-| **评论应用不可配置** | threshold=50 硬编码在 Engine 构造函数中 |
+| **历史评论不再自动新增** | 旧 commentors 可继续读取和显式对话；普通编辑不会产生新的内嵌评论 |
 | **跨设备同步** | 无冲突解决机制，最后写入覆盖（last-write-wins） |
 | **无 Edit Point 概念** | 当前没有"编辑点"抽象，人类和 Agent 操作无共同的事件表达模型 |
 
@@ -456,7 +415,7 @@ flowchart LR
 
 - **EditorEngine 是单一状态权威**：所有状态变更通过 Engine 方法入口，副作用在 Engine 内完成后以快照推送给订阅者。这是一个**命令模式（Command Pattern）的弱化版本**——命令存在（方法调用）但没有显式的命令对象。
 
-- **能量模型是核心设计**：文本写作的"量感"通过 weight/delta/energy 积累来量化，驱动 AI 评论的节奏感。这是 Ink & Memory 区别于普通编辑器的核心设计。
+- **权重模型是本地状态**：文本写作的 weight/delta/energy 继续作为兼容状态和页面反馈，但不再隐式触发模型请求。
 
 - **Hooks 层是用户意图到引擎命令的适配器**：React Hooks 承担了 UI 事件的适配、IME 保护、防抖、认证判断等横切关注点，使 Engine 保持纯粹。
 
@@ -467,14 +426,13 @@ flowchart LR
 | 设计结论 | 来源文件 | 关键位置 |
 |---------|---------|---------|
 | EditorEngine 单一订阅 | `engine/EditorEngine.ts` | L706 `subscribe(callback)` |
-| 能量模型 threshold=50 | `engine/EditorEngine.ts` | L122 `private threshold: number = 50` |
-| 评论应用三重守卫 | `engine/EditorEngine.ts` | L296–403 `checkCommentorApplication` |
+| 普通编辑零网络请求 | `engine/EditorEngine.ts` | `applyTextUpdate` 仅计算并通知；`EditorEngineWritingNetwork.test.ts` 提供回归证据 |
 | 空白重置多订阅 | `engine/EditorEngine.ts` | L127 `blankResetSubscribers: Set<() => void>` |
 | 会话生命周期 | `hooks/useSessionLifecycle.ts` | L246–517 |
 | 自动保存 3s 防抖 | `hooks/useSessionLifecycle.ts` | L487–517 |
 | 竞态守卫 | `hooks/useSessionLifecycle.ts` | L494–499 |
 | 新一天检测 | `hooks/useSessionLifecycle.ts` | L339–368 |
-| 分析 API 入口 | `api/voiceApi.ts` | L128–172 `analyzeText` |
+| Writing 灵感 SSE | `api/voiceApi.ts` | `getSuggestion` 逐段转发 `text-delta` |
 | 会话持久化 API | `api/voiceApi.ts` | L389–467 `saveSession/listSessions/getSession` |
 | WidgetCell 类型 | `engine/EditorEngine.ts` | L24 `WidgetCell.widgetType` |
 | IME 保护 | `hooks/useTextCells.ts` | L105–126 `handleCompositionStart/End` |
