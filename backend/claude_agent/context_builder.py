@@ -54,8 +54,8 @@
 # [Sync] 2026-08-22: add the canonical workspace://files/... Chat reference
 #                    contract to the existing engine system prompt lifecycle.
 # [Sync] 2026-09-01: canonicalize only an exact leading workspace Skill command
-#                    by case-insensitive discovery, so `/Skill-Creator` reaches
-#                    the canonical lowercase `skill-creator` package.
+#                    by case-insensitive discovery, accepting physical workspace
+#                    packages and server-owned namespaced builtin source links.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -82,6 +82,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
+from libs.claude_agent_kit.server.builtin_skill_packages import (
+    DEFAULT_BUILTIN_SKILLS_ROOT,
+)
 from claude_agent.workspace_context import build_workspace_context_block
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
@@ -111,6 +114,24 @@ _CONTEXT_SESSIONS_DEFAULT = 5
 _WORKSPACE_SKILL_COMMAND_RE = re.compile(r"^/([A-Za-z0-9:_-]+)(?=$|\s)")
 
 
+def _is_canonicalizable_workspace_skill(entry: Path) -> bool:
+    """Accept physical Skills plus exact server-owned builtin directory links."""
+
+    try:
+        if not entry.is_dir():
+            return False
+        if entry.is_symlink():
+            target = entry.resolve(strict=True)
+            builtin_root = DEFAULT_BUILTIN_SKILLS_ROOT.resolve(strict=True)
+            relative = target.relative_to(builtin_root)
+            if len(relative.parts) != 2 or target.name != entry.name:
+                return False
+        manifest = entry / "SKILL.md"
+        return manifest.is_file() and not manifest.is_symlink()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def _canonicalize_workspace_skill_command(user_text: str, cwd: Optional[str]) -> str:
     """Resolve a leading slash command to one installed Skill's exact casing.
 
@@ -132,10 +153,7 @@ def _canonicalize_workspace_skill_command(user_text: str, cwd: Optional[str]) ->
             entry.name
             for entry in skills_root.iterdir()
             if entry.name.casefold() == requested.casefold()
-            and entry.is_dir()
-            and not entry.is_symlink()
-            and (entry / "SKILL.md").is_file()
-            and not (entry / "SKILL.md").is_symlink()
+            and _is_canonicalizable_workspace_skill(entry)
         ]
     except OSError:
         return user_text

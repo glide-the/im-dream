@@ -10,7 +10,7 @@
 [Sync] 2026-08-31: document safe discovery of AutoDL-injected 6006/6008 public service URLs.
 [Sync] 2026-08-31: require all three backend-generated crawler files to pass
                    MIME, content-marker, and non-HTML checks on every release.
-[Sync] 2026-09-01: require production skill-creator discovery on every release
+[Sync] 2026-09-01: require namespaced production skill-creator source and flat discovery on every release
                    and document recovery without replacing the Claude session.
 [Sync] 2026-09-01: require a full FastAPI import before release switching so
                    missing locked runtime dependencies cannot stop Dream.
@@ -130,7 +130,7 @@ AutoDL release 只把 `backend/` 复制进运行目录，因此生产 Skill 必�
 `deploy.sh` 的 `start`、`deploy`、`verify` 和 `rollback` 会创建一个隔离临时
 workspace，并硬性检查：
 
-- release 中存在 `builtin_skills/skill-creator/SKILL.md`，frontmatter 的 canonical ID 为 `skill-creator`；
+- release 中存在 `builtin_skills/common/skill-creator/SKILL.md`，frontmatter 的 canonical ID 为 `skill-creator`；
 - workspace 初始化后存在 `skills/skill-creator/SKILL.md`；
 - `.claude/skills/skill-creator` 是指向该 workspace Skill 的发现链接。
 - 用户输入 `/Skill-Creator` 时会按 workspace 中唯一匹配项归一化为 `/skill-creator`，兼容 Runtime 的大小写敏感查找。

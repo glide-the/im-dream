@@ -17,6 +17,8 @@
 #                    dependencies while the old release is still serving.
 # [Sync] 2026-09-01: honor the explicit AutoDL Vite allow-all host policy during
 #                    the production frontend build as well as env projection.
+# [Sync] 2026-09-01: follow the namespaced builtin Skill source layout while
+#                    retaining flat workspace/Runtime discovery verification.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -386,7 +388,7 @@ verify_default_plugin() {
 }
 
 verify_builtin_skills() {
-  remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os, tempfile; from pathlib import Path; check = tempfile.TemporaryDirectory(prefix=\"ink-dream-skill-verify-\"); os.environ[\"AGENT_CWD\"] = check.name; from libs.claude_agent_kit.server.workspace import init_workspace; workspace = init_workspace(\"deploy-skill-verification\"); source = Path(\"builtin_skills/skill-creator/SKILL.md\"); installed = workspace / \"skills\" / \"skill-creator\" / \"SKILL.md\"; discovery = workspace / \".claude\" / \"skills\" / \"skill-creator\"; assert source.is_file() and \"name: skill-creator\" in source.read_text(encoding=\"utf-8\"); assert installed.is_file() and \"name: skill-creator\" in installed.read_text(encoding=\"utf-8\"); assert discovery.is_symlink() and discovery.resolve() == installed.parent.resolve(); from claude_agent.context_builder import _canonicalize_workspace_skill_command; assert _canonicalize_workspace_skill_command(\"/Skill-Creator verify\", str(workspace)) == \"/skill-creator verify\"; check.cleanup()'"
+  remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os, tempfile; from pathlib import Path; check = tempfile.TemporaryDirectory(prefix=\"ink-dream-skill-verify-\"); os.environ[\"AGENT_CWD\"] = check.name; from libs.claude_agent_kit.server.workspace import init_workspace; workspace = init_workspace(\"deploy-skill-verification\"); source = Path(\"builtin_skills/common/skill-creator/SKILL.md\"); installed = workspace / \"skills\" / \"skill-creator\" / \"SKILL.md\"; discovery = workspace / \".claude\" / \"skills\" / \"skill-creator\"; assert source.is_file() and \"name: skill-creator\" in source.read_text(encoding=\"utf-8\"); assert installed.is_file() and \"name: skill-creator\" in installed.read_text(encoding=\"utf-8\"); assert discovery.is_symlink() and discovery.resolve() == installed.parent.resolve(); from claude_agent.context_builder import _canonicalize_workspace_skill_command; assert _canonicalize_workspace_skill_command(\"/Skill-Creator verify\", str(workspace)) == \"/skill-creator verify\"; check.cleanup()'"
 }
 
 verify_seo_origin() {

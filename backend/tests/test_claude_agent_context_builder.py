@@ -17,7 +17,8 @@
 #                    configurable prompt block and empty-config fallback.
 # [Sync] 2026-08-22: cover the canonical workspace:// file reference contract.
 # [Sync] 2026-09-01: cover case-insensitive leading workspace Skill command
-#                    resolution to the canonical on-disk ID.
+#                    resolution for physical packages and trusted builtin links,
+#                    while rejecting links outside the server package catalog.
 
 """Unit tests for ClaudeAgentContextBuilder (Ink & Memory writing context)."""
 from __future__ import annotations
@@ -630,6 +631,47 @@ class TestBuildUserMessageWorkspaceContext(unittest.TestCase):
         self.assertEqual(
             blocks[-1]["text"],
             "/skill-creator improve this skill",
+        )
+
+    def test_title_case_builtin_skill_link_uses_canonical_workspace_id(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            skills = Path(temp_dir) / "skills"
+            skills.mkdir()
+            (skills / "skill-creator").symlink_to(
+                ROOT / "builtin_skills" / "common" / "skill-creator",
+                target_is_directory=True,
+            )
+            blocks = self.builder.build_user_message(
+                self._parts("/Skill-Creator improve this skill"),
+                cwd=temp_dir,
+            )
+        self.assertEqual(
+            blocks[-1]["text"],
+            "/skill-creator improve this skill",
+        )
+
+    def test_title_case_external_skill_link_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            external = root / "external" / "skill-creator"
+            external.mkdir(parents=True)
+            (external / "SKILL.md").write_text(
+                "---\nname: skill-creator\ndescription: test\n---\n",
+                encoding="utf-8",
+            )
+            skills = root / "workspace" / "skills"
+            skills.mkdir(parents=True)
+            (skills / "skill-creator").symlink_to(
+                external,
+                target_is_directory=True,
+            )
+            blocks = self.builder.build_user_message(
+                self._parts("/Skill-Creator improve this skill"),
+                cwd=str(root / "workspace"),
+            )
+        self.assertEqual(
+            blocks[-1]["text"],
+            "/Skill-Creator improve this skill",
         )
 
     def test_non_skill_slash_command_is_not_rewritten(self):
