@@ -1,7 +1,7 @@
 // [Input] Canonical Episode artifact GET snapshots and lifecycle signals.
 // [Output] Contract, ETag, polling, invalidation, cancellation, and last-good coverage.
 // [Pos] Story Workspace read-only Episode artifact query seam.
-// [Sync] 2026-09-02: accept standalone prose tildes while retaining home-path rejection.
+// [Sync] 2026-09-02: accept matching strong/weak HTTP ETags while rejecting changed revisions.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -119,7 +119,7 @@ test('accepts a standalone prose tilde but still rejects real home paths', () =>
   }
 });
 
-test('GET uses the run-scoped endpoint, bearer token, and exact quoted ETag', async () => {
+test('GET uses the run-scoped endpoint, bearer token, and exact quoted request ETag', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const result = await storyWorkspaceFetchEpisodeArtifacts(
     storyWorkspaceEpisodeArtifactsEndpoint(RUN_ID),
@@ -137,6 +137,42 @@ test('GET uses the run-scoped endpoint, bearer token, and exact quoted ETag', as
   expect(calls[0].url).toContain(`/workflow-runs/${RUN_ID}/episode-artifacts`);
   expect(new Headers(calls[0].init?.headers).get('Authorization')).toBe('Bearer local-token');
   expect(new Headers(calls[0].init?.headers).get('If-None-Match')).toBe(`"${REVISION}"`);
+});
+
+test('GET accepts matching strong or weak response ETags and rejects a changed revision', async () => {
+  for (const responseEtag of [`"${REVISION}"`, `W/"${REVISION}"`]) {
+    const surface = await storyWorkspaceFetchEpisodeArtifacts('/episode', {
+      expectedRunId: RUN_ID,
+      fetchImpl: (async () => new Response(JSON.stringify(boundSurface()), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ETag: responseEtag,
+        },
+      })) as typeof fetch,
+    });
+    expect(surface).toEqual({ kind: 'surface', data: boundSurface() });
+
+    const notModified = await storyWorkspaceFetchEpisodeArtifacts('/episode', {
+      etag: REVISION,
+      fetchImpl: (async () => new Response(null, {
+        status: 304,
+        headers: { ETag: responseEtag },
+      })) as typeof fetch,
+    });
+    expect(notModified).toEqual({ kind: 'not-modified', etag: REVISION });
+  }
+
+  await expect(storyWorkspaceFetchEpisodeArtifacts('/episode', {
+    expectedRunId: RUN_ID,
+    fetchImpl: (async () => new Response(JSON.stringify(boundSurface()), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ETag: `W/"sha256:${'3'.repeat(64)}"`,
+      },
+    })) as typeof fetch,
+  })).rejects.toBeInstanceOf(StoryWorkspaceEpisodeArtifactsContractError);
 });
 
 test('GET rejects mismatched run identity, malformed payload, and error status', async () => {

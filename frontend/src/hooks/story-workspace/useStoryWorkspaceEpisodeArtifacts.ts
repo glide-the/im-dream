@@ -1,7 +1,7 @@
 // [Input] Actor-scoped run ID, Episode artifact REST surface, and optional output hints.
 // [Output] Strict ETag fetch seam, last-good reducer, and polling/reentry hook.
 // [Pos] Story Workspace Episode artifact query boundary (U5)
-// [Sync] 2026-08-06: REST is authoritative; output events only invalidate the query.
+// [Sync] 2026-09-02: accept an exact weak HTTP ETag wrapper from transforming proxies.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -190,6 +190,15 @@ function storyWorkspaceEpisodeQuotedEtag(etag: string): string {
   return `"${etag}"`;
 }
 
+/** Match one business revision while allowing the standard HTTP weak marker. */
+function storyWorkspaceEpisodeResponseMatchesEtag(
+  responseEtag: string | null,
+  etag: string,
+): boolean {
+  const quotedEtag = storyWorkspaceEpisodeQuotedEtag(etag);
+  return responseEtag === quotedEtag || responseEtag === `W/${quotedEtag}`;
+}
+
 /** Fetch one authoritative snapshot without ever consuming an error response body. */
 export async function storyWorkspaceFetchEpisodeArtifacts(
   endpoint: string,
@@ -208,7 +217,7 @@ export async function storyWorkspaceFetchEpisodeArtifacts(
       throw new StoryWorkspaceEpisodeArtifactsContractError();
     }
     const responseEtag = response.headers.get('ETag');
-    if (responseEtag !== storyWorkspaceEpisodeQuotedEtag(options.etag)) {
+    if (!storyWorkspaceEpisodeResponseMatchesEtag(responseEtag, options.etag)) {
       throw new StoryWorkspaceEpisodeArtifactsContractError();
     }
     return { kind: 'not-modified', etag: options.etag };
@@ -231,7 +240,7 @@ export async function storyWorkspaceFetchEpisodeArtifacts(
   }
   const responseEtag = response.headers.get('ETag');
   if (data.bindingAvailability === 'bound') {
-    if (data.etag === null || responseEtag !== storyWorkspaceEpisodeQuotedEtag(data.etag)) {
+    if (data.etag === null || !storyWorkspaceEpisodeResponseMatchesEtag(responseEtag, data.etag)) {
       throw new StoryWorkspaceEpisodeArtifactsContractError();
     }
   } else if (responseEtag !== null) {
