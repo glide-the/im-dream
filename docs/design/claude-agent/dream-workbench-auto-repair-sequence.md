@@ -7,6 +7,7 @@
 <!-- [Sync] 2026-09-01: show fresh launch-authority cleanup scope resolution and exact PreToolUse stale-root deletion. -->
 <!-- [Sync] 2026-09-01: show marker-only deletion denial returning the exact safe full-root retry command. -->
 <!-- [Sync] 2026-09-01: show persisted projectCleanup, matching .dream facts, and actionable trusted-root denial. -->
+<!-- [Sync] 2026-09-01: show assistant persistence before both Hook attempts and preserve the committed reply across SSE/history handoff. -->
 
 # Dream 工作区自动修正业务时序图
 
@@ -52,6 +53,8 @@ sequenceDiagram
     end
     Claude->>WS: 修改 workspace
     Claude-->>Service: success result
+    Service->>DB: save original assistant(exact reasoning/tool/text parts + session)
+    DB-->>Service: commit
     Service->>Hook: after_main_turn(trusted ticket)
     Hook->>Hook: 在任何投影写入前校验 canonical roots、stage collection 与 launch authority
     Hook-->>Service: PROJECT_STORY_SLUG_MISMATCH / agent_repairable
@@ -68,8 +71,8 @@ sequenceDiagram
     UI->>UI: 结束当前 AI SDK reader（不报错）
     UI->>API: GET history then status
     API->>DB: SELECT messages
-    DB-->>API: 自动 user 消息
-    API-->>UI: user 气泡 + running=true
+    DB-->>API: 原始 assistant + 自动 user 消息
+    API-->>UI: 保留 assistant + user 气泡 + running=true
     UI->>API: GET existing /threads/{id}/stream
     API->>Bus: subscribe(replay then live)
 
@@ -94,16 +97,16 @@ sequenceDiagram
     Guard-->>Claude: permissionDecision=allow（无需确认框）
     Claude->>WS: 移除旧项目根，不保留重复 EP/entity_id
     Claude-->>Service: success result
+    Service->>DB: save repair assistant(exact reasoning/tool/text parts + session)
+    DB-->>Service: commit
     Service->>Hook: after_main_turn(new trusted ticket)
     Hook-->>Service: validation passed
-    Service->>DB: save repair assistant message + Claude session
-    DB-->>Service: commit
     Service->>Bus: message-final + finish(stop)
     Bus-->>UI: repair assistant events + terminal
     Factory->>Factory: release admission/lock, RUNNING -> IDLE
     UI->>API: final authoritative history recovery
     API->>DB: SELECT messages
-    DB-->>UI: original user + auto user + repair assistant
+    DB-->>UI: original user + original assistant + auto user + repair assistant
 ```
 
 ## 2. 错误分类与禁止自动修复
@@ -210,6 +213,8 @@ sequenceDiagram
         Service->>DB: auto status=failed
         Service->>Bus: safe error + finish(error)
     else Claude 成功但 Hook 再失败
+        Service->>DB: persist completed repair assistant SSE parts
+        DB-->>Service: commit
         Service->>Hook: after_main_turn(ticket)
         Hook-->>Service: structured issue（例如 canonical roots 仍重复）
         Service->>DB: CAS auto status=failed
@@ -218,7 +223,7 @@ sequenceDiagram
     Note over Service,Factory: 不构造第二条 auto user 消息，不存在第三个 Turn
     Bus-->>UI: terminal error card 显示安全最终原因
     UI->>DB: 通过 history API 恢复
-    DB-->>UI: 同一 auto user 气泡，来源标记“工作台自动修正未通过”
+    DB-->>UI: 同一 auto user + 已完成 repair assistant，来源标记“工作台自动修正未通过”
 ```
 
 ## 4. 刷新、断线重连与去重
@@ -233,7 +238,7 @@ sequenceDiagram
     participant DB as chat_message
     participant UI2 as 刷新后的 ChatPanel
 
-    Producer->>DB: commit dream_repair_X + CAS dispatched
+    Producer->>DB: original assistant 已提交；commit dream_repair_X + CAS dispatched
     Producer->>Bus: chat-message(id=dream_repair_X, status=dispatched)
     Bus-->>UI1: chat-message
     UI1-xBus: 主动结束 POST subscriber
@@ -241,14 +246,14 @@ sequenceDiagram
 
     User->>UI2: 页面刷新/重新进入 Thread
     UI2->>DB: history API
-    DB-->>UI2: dream_repair_X（唯一持久行）
+    DB-->>UI2: original assistant + dream_repair_X（唯一持久行）
     UI2->>Producer: status API
     Producer-->>UI2: running=true
     UI2->>Bus: subscribe
     Bus-->>UI2: replay 原始 Turn events
-    UI2->>UI2: 暂存 reconnect assistant
+    UI2->>UI2: replay 原始 SSE；history assistant 保持为 durable 事实
     Bus-->>UI2: replay chat-message(dream_repair_X)
-    UI2->>UI2: message-id upsert + 清除边界前未持久化 assistant
+    UI2->>UI2: message-id upsert；保留边界前 durable assistant，清除边界后的原 Turn 临时 replay
     Bus-->>UI2: replay/live repair Turn events
     UI2->>UI2: 在 auto user 后创建 repair assistant
 
@@ -257,7 +262,7 @@ sequenceDiagram
         UI2->>UI2: replace same id；气泡数量不变
     end
 
-    Producer->>DB: persist final assistant/status
+    Producer->>DB: Hook 前已 persist final repair assistant/status
     Producer->>Bus: finish
     UI2->>DB: final history recovery
     DB-->>UI2: exact ids/parts/metadata

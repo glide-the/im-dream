@@ -3,11 +3,12 @@
 > **[Sync] 2026-05-25 v2**: 对齐 better-chatbot schema：`parts TEXT NOT NULL DEFAULT '[]'`（移除 `content` 列和 `parts_json` 列）；`save_chat_message(parts: list, metadata: dict)` 签名；`list_chat_messages` 返回已解析对象；前端读 `m.parts` 直接使用。  
 > **[Sync] 2026-05-25 v3**: 重大设计重构 — `collected_parts` 改为收集**原始 SSE 事件报文**；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做线性转换；`tool_inv_by_id` 等状态字段从 `_TurnContext` 移除。
 > **[Sync] 2026-05-29 v4**: Claude SDK session ID 持久化落地 — `chat_thread` 新增 `claude_session_id TEXT` 和 `agent_contract_version TEXT` 两列；`_persist_turn` 每次成功 turn 后调用 `update_chat_thread_claude_session` 写回 `result.session_id`；`assemble_context` Phase 1 据此决定是否 resume（详见 `claude-agent-context-assembly.md §4.7`）。
+> **[Sync] 2026-09-01**: user 在推理前写入；每个 successful assistant 在 Dream post-Hook 前由 `_persist_assistant_turn` 写入。Hook continuation/第二次失败不再造成 SSE transcript 丢失。
 
 # Claude Agent 会话持久化设计
 
 > **关联参考**：[better-chatbot route.ts `onFinish` 回调](https://github.com/cgoinglove/better-chatbot/blob/main/src/app/api/chat/route.ts#L345)  
-> **落地路径**：`backend/database.py`（DB 层）、`backend/claude_agent/service.py::_persist_turn`（服务层）  
+> **落地路径**：`backend/database.py`（DB 层）、`backend/claude_agent/service.py::_persist_user_message/_persist_assistant_turn/_persist_partial_assistant`（服务层）
 > **关联设计**：[claude-agent-thread-session-patterns.md](./claude-agent-thread-session-patterns.md)
 >
 > **会话持久化分两层**：
@@ -15,7 +16,7 @@
 > | 层 | 落地 | 生命周期 | 作用 |
 > |---|---|---|---|
 > | **进程内 Thread Session（享元 + 状态）** | `backend/claude_agent/thread_pool.py::AgentRunStatePool` | `INK_AGENT_TTL_S`（默认 600 s）keepalive；TTL 超时 / `close_thread` / `aclose` 销毁 | 维护绑定到 `session_id` 的 `ClaudeAgentRunner` + `system_prompt` / `cwd` 享元缓存，后续轮次复用，不再重复构造 |
-> | **DB 持久化（chat_thread + chat_message）** | `backend/database.py` + `backend/claude_agent/service.py::_persist_turn` | 与 `thread_id` 同生命周期，跨进程 / 重启持久 | 真源存储：`chat_thread` 保存会话 metadata，`chat_message` 保存每轮 user/assistant 消息（含完整 `parts_json`） |
+> | **DB 持久化（chat_thread + chat_message）** | `backend/database.py` + `backend/claude_agent/service.py` 三段 persistence 方法 | 与 `thread_id` 同生命周期，跨进程 / 重启持久 | 真源存储：`chat_thread` 保存会话 metadata，`chat_message` 保存每轮 user/assistant 消息（含完整 `parts`） |
 
 ---
 
@@ -323,7 +324,7 @@ GET /api/claude-agent/threads/{thread_id}/messages
 |-------|--------------|-----------|
 | **Phase 1 — Context Assembly** | `Service.assemble_context()` | **新（2026-05-29）**：调用 `database.get_chat_thread()` 加载 `existing_session`，读取 `claude_session_id` / `agent_contract_version` 决定是否 resume；无写操作。首轮享元组装 `system_prompt`，续轮享元短路 |
 | **Phase 2 — Runner Creation** | `state.runner = create_agent_runner()` | 无 DB 交互 |
-| **Phase 3 — Session Start** | `Service.execute_session()` | run 完成后调用 `_persist_turn`：写入 user + assistant `chat_message` 行；首轮写 `chat_thread.title`；**每次成功 turn 写回 `chat_thread.claude_session_id` + `agent_contract_version`（2026-05-29）** |
+| **Phase 3 — Session Start** | `Service.execute_session()` | Runner 前调用 `_persist_user_message`；Runner 成功后、Dream Hook 前调用 `_persist_assistant_turn` 写 exact SSE parts 与 session；取消/Runner error 调用 `_persist_partial_assistant`。因此 Hook continuation 或终止失败不会删除已完成 assistant。 |
 | **Phase 4 — Session End** | `close_thread` / TTL Sweeper / `aclose` | 享元销毁不触发 DB 变更；`chat_thread` + `chat_message` 原状保留，下轮重新加载 |
 
 ---

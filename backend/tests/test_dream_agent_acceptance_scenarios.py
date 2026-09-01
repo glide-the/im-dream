@@ -4,6 +4,9 @@ These tests deliberately exercise the canonical Chat confirmation route,
 ClaudeAgentService, shared EventBus, and Dream lifecycle Observer production
 objects.  They never call a real model and they keep every scenario ID in the
 test name so the S01-S14 release matrix is machine-auditable.
+
+[Sync] 2026-09-01: S13 requires successful assistant persistence before the
+Dream Hook/message-final terminal boundary.
 """
 
 from __future__ import annotations
@@ -729,7 +732,7 @@ class DreamAgentS13SingleTerminalAcceptance(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-    async def test_s13_success_persists_after_message_final_before_one_finish(
+    async def test_s13_success_persists_before_message_final_and_one_finish(
         self,
     ) -> None:
         trace: list[str] = []
@@ -751,8 +754,8 @@ class DreamAgentS13SingleTerminalAcceptance(unittest.IsolatedAsyncioTestCase):
 
         self.assertLess(trace.index("persist:user"), trace.index("event:message-final"))
         self.assertLess(
-            trace.index("event:message-final"),
             trace.index("persist:assistant"),
+            trace.index("event:message-final"),
         )
         self.assertLess(
             trace.index("persist:assistant"),

@@ -11,6 +11,7 @@
 > **[Sync] 2026-08-22**: Workspace Mode 关闭仍不初始化完整产品 workspace、
 > 不传 `cwd` 或 context；新增最小 thread runtime root，并单独通过
 > `AgentRunOptions.claude_tmp_workspace` 绑定 CLI 的 `.claude-tmp`。
+> **[Sync] 2026-09-01**: 每个成功 Claude 逻辑 Turn 在任何 Dream 后置 Hook 前持久化 exact SSE-derived assistant parts；Hook continuation/失败不再跳过回复事实。
 
 # ClaudeAgentService 模块设计
 
@@ -133,7 +134,7 @@ classDiagram
 `ClaudeAgentService` 不再暴露 all-in-one orchestrator，只提供两个 phase-aware 方法：
 
 - **`assemble_context(request, *, state, queue, runner)`** — Phase 1 单一所有者（Ink & Memory）。每轮读取 Settings、构建或复用 system prompt，并产出 `user_message`、`AgentRunOptions`、`_TurnContext`。`workspace_enabled=false` 时跳过完整 `get_or_create_workspace`，清空 `state.cwd`，以 `cwd=None` 调用 runner；同时调用最小 runtime initializer，将当前 thread 根写入 `claude_tmp_workspace`，只服务 CLI temp 隔离，不进入 prompt 或文件界面。
-- **`execute_session(execution)`** — Phase 3 纯消费者。构造 5 个 `AgentStreamingCallbacks` 闭包，驱动 `runner.run_streaming(opts, callbacks)`，emit `message-final` / `finish` / `error`。每个 SSE 回调在发出事件到 `queue` 的同时，将**原始 SSE 事件 dict**追加到 `turn_ctx.collected_parts`。成功后调用 `_persist_turn`，通过 `_sse_events_to_ui_parts(collected_parts)` 做一次线性转换，将 SSE 事件流还原为 UIMessage-compatible parts 后写入 `chat_message.parts` 列。
+- **`execute_session(execution)`** — Phase 3 纯消费者。构造 `AgentStreamingCallbacks` 闭包，驱动 `runner.run_streaming(opts, callbacks)`，emit `message-final` / `finish` / `error`。每个 SSE 回调在发出事件到 `queue` 的同时，将**原始 SSE 事件 dict**追加到 `turn_ctx.collected_parts`。Runner 成功后立即调用 `_persist_assistant_turn`，通过 `_sse_events_to_ui_parts(collected_parts)` 做一次线性转换并提交 assistant；只有提交成功才执行 Dream post-Hook。普通成功、自动 continuation 和 Hook 终止失败共享此顺序。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -179,7 +180,9 @@ sequenceDiagram
         HTTP-->>HTTP: f"data: {json}\n\n"
     end
 
-    Svc->>Queue: emit message-final + finish + persist conversation
+    Svc->>Svc: persist assistant exact SSE parts
+    Svc->>Svc: run Dream post-Hook（如有）
+    Svc->>Queue: emit message-final + finish
     Svc->>Queue: put(None) [sentinel]
     deactivate Svc
 

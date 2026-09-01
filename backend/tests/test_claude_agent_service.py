@@ -25,6 +25,8 @@
 # [Sync] 2026-08-12: cover shared Chat/Dream SDK-native Session ID persistence
 #                    through on_message before a cancelled turn can skip the
 #                    successful assistant persistence path.
+# [Sync] 2026-09-01: cover exact repair SSE-part persistence, assistant-before-
+#                    Hook ordering, and fail-closed persistence failure.
 # [Sync] 2026-08-14: cover trusted Dream binding selecting the Deck
 #                    workspace-file prompt without changing Chat/session DTOs.
 # [Sync] 2026-08-22: cover thread-local Claude CLI temp binding while
@@ -1585,6 +1587,72 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
 
 
 class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
+    def test_completed_repair_persists_collected_sse_parts_and_source(self):
+        async def scenario():
+            import database
+
+            service = ClaudeAgentService()
+            turn_ctx = _TurnContext(
+                queue=asyncio.Queue(),
+                confirmation_store=ToolConfirmationStore(),
+            )
+            turn_ctx.collected_parts.extend([
+                {"type": "reasoning-start", "id": "reasoning-1"},
+                {"type": "reasoning-delta", "id": "reasoning-1", "delta": "检查工作区"},
+                {"type": "reasoning-end", "id": "reasoning-1"},
+                {"type": "text-start", "id": "text-1"},
+                {"type": "text-delta", "id": "text-1", "delta": "修正完成"},
+                {"type": "text-end", "id": "text-1"},
+            ])
+            execution = service_module._TurnExecution(
+                request=ClaudeAgentRunRequest(
+                    user_id="7",
+                    thread_id="thread-persist-repair",
+                    message_id="dream_repair_stable",
+                    message_parts=[{"type": "text", "text": "自动修正"}],
+                    message_metadata={
+                        "kind": "story-workspace-dream-auto-repair",
+                    },
+                    model="claude-test",
+                ),
+                state=AgentRunState(session_id="thread-persist-repair"),
+                runner=unittest.mock.Mock(),
+                run_options=unittest.mock.Mock(),
+                turn_context=turn_ctx,
+                dream_context=SimpleNamespace(
+                    workflow_run_id="run_" + "a" * 32,
+                    thread_id="thread-persist-repair",
+                ),
+            )
+            result = AgentRunResult(
+                full_text="修正完成",
+                session_id="claude-session",
+                success=True,
+                usage={"input_tokens": 3, "output_tokens": 2},
+            )
+            with (
+                unittest.mock.patch.object(database, "save_chat_message") as save,
+                unittest.mock.patch.object(
+                    database,
+                    "update_chat_thread_claude_session",
+                ),
+            ):
+                await service._persist_assistant_turn(execution, result)
+            return save.call_args
+
+        call = _run(scenario())
+        self.assertEqual(call.args[:2], ("thread-persist-repair", "assistant"))
+        self.assertEqual(call.kwargs["parts"], [
+            {"type": "reasoning", "id": "reasoning-1", "text": "检查工作区"},
+            {"type": "text", "text": "修正完成"},
+        ])
+        metadata = call.kwargs["metadata"]
+        self.assertEqual(metadata["usage"]["totalTokens"], 5)
+        self.assertEqual(
+            metadata["story_workspace_dream_source"]["kind"],
+            "story-workspace-dream-auto-repair",
+        )
+
     def test_identity_and_postgres_failures_are_rethrown_before_inference(self):
         import database
 
@@ -1721,12 +1789,16 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
 
     def test_successful_root_turn_synchronizes_before_terminal_finish(self):
         async def scenario():
+            order: list[str] = []
             artifact_hook = unittest.mock.Mock()
-            artifact_hook.after_main_turn.return_value = SimpleNamespace(
-                changed_stages=("characters",),
-                private_artifact_changed=True,
-                private_files=("stories/demo/project.yaml",),
-                story_index_status="updated",
+            artifact_hook.after_main_turn.side_effect = lambda _ticket: (
+                order.append("hook")
+                or SimpleNamespace(
+                    changed_stages=("characters",),
+                    private_artifact_changed=True,
+                    private_files=("stories/demo/project.yaml",),
+                    story_index_status="updated",
+                )
             )
             service = ClaudeAgentService(dream_artifact_turn_hook=artifact_hook)
             queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -1767,7 +1839,9 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
                 unittest.mock.patch.object(
                     service,
                     "_persist_assistant_turn",
-                    new=unittest.mock.AsyncMock(),
+                    new=unittest.mock.AsyncMock(
+                        side_effect=lambda *_args: order.append("assistant")
+                    ),
                 ),
                 unittest.mock.patch.object(
                     service,
@@ -1779,15 +1853,66 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
             frames: list[str | None] = []
             while not queue.empty():
                 frames.append(queue.get_nowait())
-            return artifact_hook, frames
+            return artifact_hook, frames, order
 
-        artifact_hook, frames = _run(scenario())
+        artifact_hook, frames, order = _run(scenario())
+        self.assertEqual(order, ["assistant", "hook"])
         artifact_hook.after_main_turn.assert_called_once_with(
             unittest.mock.sentinel.dream_ticket
         )
         parsed_frames = [_parse_sse(frame) for frame in frames if frame is not None]
         self.assertEqual(parsed_frames[-1]["type"], "finish")
         self.assertIsNone(frames[-1])
+
+    def test_assistant_persistence_failure_prevents_post_hook(self):
+        async def scenario():
+            artifact_hook = unittest.mock.Mock()
+            service = ClaudeAgentService(dream_artifact_turn_hook=artifact_hook)
+            execution = service_module._TurnExecution(
+                request=ClaudeAgentRunRequest(
+                    user_id="7",
+                    thread_id="thread-persist-failure",
+                    message_parts=[{"type": "text", "text": "hello"}],
+                ),
+                state=AgentRunState(session_id="thread-persist-failure"),
+                runner=unittest.mock.Mock(
+                    run_streaming=unittest.mock.AsyncMock(
+                        return_value=AgentRunResult(
+                            full_text="done",
+                            session_id="claude-session",
+                            success=True,
+                        )
+                    )
+                ),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+                dream_artifact_turn_ticket=unittest.mock.sentinel.dream_ticket,
+            )
+            with (
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_user_message",
+                    new=unittest.mock.AsyncMock(),
+                ),
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_assistant_turn",
+                    new=unittest.mock.AsyncMock(
+                        side_effect=service_module.ClaudeAgentAssistantPersistenceError()
+                    ),
+                ),
+            ):
+                with self.assertRaises(
+                    service_module.ClaudeAgentAssistantPersistenceError
+                ):
+                    await service.execute_session(execution)
+            return artifact_hook
+
+        artifact_hook = _run(scenario())
+        artifact_hook.after_main_turn.assert_not_called()
 
     def test_make_error_cb_includes_exception_notes(self):
         async def scenario():

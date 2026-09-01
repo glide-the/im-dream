@@ -1,3 +1,10 @@
+# [Input] Canonical and adversarial Episode outline/script/storyboard fixtures.
+# [Output] Verify bounded narrative projection and public-text safety policy.
+# [Pos] Episode artifact adapter contract tests in backend/tests.
+# [Sync] 2026-09-01: accept canonical workspace refs, prose range tildes, and
+#                    compact Drama Forge character/dialogue forms without
+#                    weakening absolute-path or credential rejection.
+
 """Safe Episode outline/script/storyboard projection contract tests."""
 
 from __future__ import annotations
@@ -713,6 +720,46 @@ title: Pilot
         projection.model_dump_json(by_alias=True) if projection is not None else ""
     )
     assert unsafe_text not in serialized_projection
+
+
+def test_canonical_relative_references_and_compact_storyboard_are_public_safe() -> None:
+    outline = b"""---
+series: Safe Series
+episode: 1
+title: Pilot
+---
+# Pilot
+## Time range
+INT-01 ~ INT-02
+"""
+    script = b"""---
+source_outline: stories/proj-8b75aa06/episodes/EP01/episode-outline.md
+---
+# Script
+"""
+    storyboard = b"""shots:
+  - shot_id: S01-E01-001
+    visual: assets/characters/mc-01-shen-qingyin
+    characters:
+      - assets/characters/mc-01-shen-qingyin
+    dialogue:
+      speaker: mc-01
+      text: Safe line.
+      tone: restrained
+"""
+
+    projection = _adapter().project(
+        outline=outline,
+        script=script,
+        storyboard=storyboard,
+    )
+
+    assert len(projection.shots) == 1
+    assert projection.shots[0].characters[0].ref == (
+        "assets/characters/mc-01-shen-qingyin"
+    )
+    assert projection.shots[0].dialogue[0].line == "Safe line."
+    assert projection.shots[0].dialogue[0].type.value == "spoken"
 
 
 PUBLIC_TEXT_FIELDS = (

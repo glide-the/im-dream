@@ -15,7 +15,8 @@
  * [Sync]   2026-08-13: preserve reasoning-start/delta/end identities during reconnect
  *                      so tool/text barriers keep separate thinking blocks in order.
  * [Sync]   2026-09-01: treat persisted Dream auto-repair user messages as an
- *                      idempotent boundary that replaces uncommitted assistant replay.
+ *                      idempotent boundary while retaining the preceding
+ *                      assistant Turn that the server now commits before Hook.
  * [Sync]   2026-09-01: accept every backend-allowlisted repair code and require
  *                      exact trusted/stale cleanup facts for project-root repairs.
  */
@@ -201,22 +202,17 @@ function mergeDreamAutoRepairMessage(
 ): UIMessage[] {
   const existingIndex = messages.findIndex((item) => item.id === message.id);
   if (existingIndex >= 0) {
+    // History hydration may already end at this durable boundary while a full
+    // EventBus replay temporarily rebuilds the original Turn after it.  At the
+    // boundary, discard only that following pre-boundary replay; everything
+    // before the persisted user fact (including its assistant) remains true.
     return [...messages.slice(0, existingIndex), message];
   }
-  const metadata = message.metadata as Record<string, unknown> | undefined;
-  const originId = typeof metadata?.originatingMessageId === 'string'
-    ? metadata.originatingMessageId
-    : '';
-  const originIndex = originId
-    ? messages.findIndex((item) => item.id === originId)
-    : -1;
-  if (originIndex >= 0) {
-    return [...messages.slice(0, originIndex + 1), message];
-  }
-  const next = [...messages];
-  if (next.at(-1)?.role === 'assistant') next.pop();
-  next.push(message);
-  return next;
+  // The assistant immediately before this server-owned user fact is no
+  // longer provisional: its exact SSE-derived parts were committed before
+  // the Dream Hook ran.  Keep it visible while the repair Turn starts; final
+  // history hydration replaces any client-generated id with the DB identity.
+  return [...messages, message];
 }
 
 function appendTextDelta(parts: UIMessage['parts'], delta: string): UIMessage['parts'] {

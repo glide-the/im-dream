@@ -14,6 +14,9 @@
 # [Sync] 2026-09-01: bind visible auto-repair instructions, persisted metadata,
 #                    .dream workbench facts, and Bash cleanup permission to one
 #                    freshly revalidated trusted/stale project-root scope.
+# [Sync] 2026-09-01: commit every successful Claude logical Turn, including its
+#                    reasoning/tool/text parts, before any Dream post-turn Hook;
+#                    Hook continuation or failure can no longer erase the reply.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -1120,6 +1123,7 @@ def _attach_story_workspace_dream_assistant_source(
             "story-workspace-dream-launch",
             "story-workspace-dream-confirmation",
             "story-workspace-dream-agent-user",
+            "story-workspace-dream-auto-repair",
         }
     ):
         return
@@ -1188,6 +1192,20 @@ class ClaudeAgentTurnContinuation:
     """One server-owned next Turn that remains inside the canonical factory."""
 
     request: ClaudeAgentRunRequest
+
+
+class ClaudeAgentAssistantPersistenceError(RuntimeError):
+    """Safe terminal error raised before a Dream Hook can outpace Chat truth."""
+
+    code = "CHAT_ASSISTANT_PERSISTENCE_FAILED"
+    public_message = (
+        "Agent 已完成本轮，但回复未能安全保存；"
+        "后置同步未执行。请重新加载后重试。"
+    )
+    retryable = True
+
+    def __init__(self) -> None:
+        super().__init__(self.public_message)
 
 
 # ---------------------------------------------------------------------------
@@ -2010,6 +2028,12 @@ class ClaudeAgentService:
             raise
 
         if result.success:
+            full_text = result.full_text
+            # A completed Claude Turn is an immutable conversation fact even
+            # when the Dream workspace postcondition requests one repair Turn
+            # or ultimately fails.  Commit the exact collected SSE parts first;
+            # the Hook may mutate projection state, never Chat history truth.
+            await self._persist_assistant_turn(execution, result)
             dream_artifact_turn_ticket = getattr(
                 execution,
                 "dream_artifact_turn_ticket",
@@ -2066,7 +2090,6 @@ class ClaudeAgentService:
                     ):
                         await self.mark_auto_repair_failed(execution.request)
                     raise
-            full_text = result.full_text
             await queue.put(
                 _event("message-final", {
                     "text": full_text,
@@ -2074,8 +2097,6 @@ class ClaudeAgentService:
                     "sessionId": result.session_id,
                 })
             )
-            # Persist assistant message (user message already saved above).
-            await self._persist_assistant_turn(execution, result)
             # A structured story proposal is persisted before the terminal frame
             # so Dream can open the canonical review panel without polling or
             # trusting client-derived provenance.
@@ -2520,21 +2541,33 @@ class ClaudeAgentService:
                 metadata=asst_metadata or None,
             )
 
-            captured_session_id = result.session_id if result else None
-            if captured_session_id:
-                database.update_chat_thread_claude_session(
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, _save_assistant)
+        except Exception as exc:
+            logger.exception(
+                "Failed to persist assistant message for thread_id=%s", thread_id
+            )
+            raise ClaudeAgentAssistantPersistenceError() from exc
+
+        captured_session_id = result.session_id if result else None
+        if captured_session_id:
+            try:
+                await loop.run_in_executor(
+                    None,
+                    _db.update_chat_thread_claude_session,
                     thread_id,
                     captured_session_id,
                     _AGENT_RUNTIME_CONTRACT_VERSION,
                 )
-
-        loop = asyncio.get_running_loop()
-        try:
-            await loop.run_in_executor(None, _save_assistant)
-        except Exception:
-            logger.exception(
-                "Failed to persist assistant message for thread_id=%s", thread_id
-            )
+            except Exception:
+                # The SDK on_message callback already owns eager Session
+                # persistence.  Its successful assistant row must not be
+                # reclassified as missing if this idempotent safeguard fails.
+                logger.exception(
+                    "Failed to persist completed Claude Session for thread_id=%s",
+                    thread_id,
+                )
 
     # Keep _persist_turn as a legacy alias used by test stubs / older callers.
     async def _persist_turn(

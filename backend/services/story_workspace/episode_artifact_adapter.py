@@ -1,3 +1,9 @@
+# [Input] Canonical Episode outline/script/storyboard bytes and opaque Episode identity.
+# [Output] Bounded public narrative projection or allowlisted content/schema reason.
+# [Pos] Story Workspace read-only artifact parser and public-text security boundary.
+# [Sync] 2026-09-01: canonical assets/** and stories/** references plus prose
+#                    range tildes are no longer misclassified as secrets/paths.
+
 """Safe read-only projection for Episode outline, script, and storyboard files."""
 
 from __future__ import annotations
@@ -63,7 +69,7 @@ _ABSOLUTE_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9])file://(?:localhost)?/[^\s`]+|"
     r"(?<![A-Za-z0-9])[A-Z]:[\\/][^\s`]+|"
     r"(?<![A-Za-z0-9])\\\\[^\\\s]+\\[^\s`]+|"
-    r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\}|"
+    r"(?<![A-Za-z0-9])(?:~(?=[\\/])|\$HOME|\$\{HOME\}|"
     r"%(?:USERPROFILE|HOMEPATH)%|\$env:(?:USERPROFILE|HOME))"
     r"(?=$|[\\/\s`])(?:[\\/][^\s`]*)?"
     r")"
@@ -116,6 +122,14 @@ _LONG_TOKEN_CANDIDATE_RE = re.compile(
 )
 _PUBLIC_DREAM_RUN_ID_RE = re.compile(r"run_[0-9a-f]{32}")
 _PUBLIC_CHARACTER_BEAT_ID_RE = re.compile(r"ARC-[A-Z0-9-]{1,124}")
+_PUBLIC_WORKSPACE_RELATIVE_REFERENCE_RE = re.compile(
+    r"(?:"
+    r"assets/(?:characters|scenes|props)/[A-Za-z0-9][A-Za-z0-9._-]{0,127}|"
+    r"stories/[a-z0-9]+(?:-[a-z0-9]+)*/episodes/EP[0-9]{2}/"
+    r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+    r")",
+    re.IGNORECASE,
+)
 _SENSITIVE_CREDENTIAL_KEYS = (
     "apikey",
     "token",
@@ -779,6 +793,8 @@ def _looks_like_high_entropy_secret(value: str) -> bool:
         for match in _LONG_TOKEN_CANDIDATE_RE.finditer(value)
         if _PUBLIC_DREAM_RUN_ID_RE.fullmatch(match.group(0)) is None
         and _PUBLIC_CHARACTER_BEAT_ID_RE.fullmatch(match.group(0)) is None
+        and _PUBLIC_WORKSPACE_RELATIVE_REFERENCE_RE.fullmatch(match.group(0))
+        is None
     )
 
 
@@ -1267,6 +1283,16 @@ def _shot_characters(value: Any) -> list[StoryWorkspaceEpisodeShotCharacter]:
         raise StoryWorkspaceEpisodeArtifactParseError("storyboard", "shape_limit")
     results: list[StoryWorkspaceEpisodeShotCharacter] = []
     for item in value:
+        if isinstance(item, str):
+            # Canonical Drama Forge storyboards commonly use a compact list of
+            # character refs.  It is semantically the same as ``{ref: ...}``;
+            # keep the richer object form for optional projection details.
+            results.append(
+                StoryWorkspaceEpisodeShotCharacter(
+                    ref=_required_source_text(item, "storyboard")
+                )
+            )
+            continue
         if not isinstance(item, Mapping):
             raise StoryWorkspaceEpisodeArtifactParseError("storyboard", "invalid_shape")
         ref = _required_source_text(item.get("ref"), "storyboard")
@@ -1319,19 +1345,30 @@ def _shot_camera(value: Any) -> StoryWorkspaceEpisodeShotCamera:
 def _shot_dialogue(value: Any) -> list[StoryWorkspaceEpisodeStoryboardDialogue]:
     if value is None:
         return []
-    if not isinstance(value, list) or len(value) > 128:
+    # The workspace contract accepts one compact Drama Forge dialogue object
+    # as well as the richer list form projected by newer versions.
+    items = [value] if isinstance(value, Mapping) else value
+    if not isinstance(items, list) or len(items) > 128:
         raise StoryWorkspaceEpisodeArtifactParseError("storyboard", "shape_limit")
     results: list[StoryWorkspaceEpisodeStoryboardDialogue] = []
-    for item in value:
+    for item in items:
         if not isinstance(item, Mapping):
             raise StoryWorkspaceEpisodeArtifactParseError(
                 "storyboard",
                 "invalid_shape",
             )
         speaker = _required_source_text(item.get("speaker"), "storyboard")
-        line = _optional_string_text(item.get("line"), 2000, "storyboard")
-        dialogue_type = _optional_string_text(item.get("type"), 32, "storyboard")
-        if line is None or dialogue_type is None:
+        line = _optional_string_text(
+            item.get("line") if "line" in item else item.get("text"),
+            2000,
+            "storyboard",
+        )
+        dialogue_type = _optional_string_text(
+            item.get("type") if "type" in item else "spoken",
+            32,
+            "storyboard",
+        )
+        if line is None:
             raise StoryWorkspaceEpisodeArtifactParseError(
                 "storyboard",
                 "missing_dialogue_field",

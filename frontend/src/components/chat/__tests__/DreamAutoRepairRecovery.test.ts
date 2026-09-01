@@ -1,11 +1,12 @@
 // [Input] Persisted Dream auto-repair chat-message SSE boundaries and canonical history rows.
-// [Output] Verify real-time insertion, first-attempt rollback, refresh recovery,
-//          idempotent de-duplication, and typed exhausted-error preservation.
+// [Output] Verify real-time insertion, preceding assistant retention, refresh
+//          recovery, idempotent de-duplication, and typed exhausted errors.
 // [Pos] Shared Chat/Dream reconnect reducer regression test.
 // [Sync] 2026-09-01: initial visible auto-repair user message coverage.
 // [Sync] 2026-09-01: preserve the typed public reason for a bounded exhausted repair.
 // [Sync] 2026-09-01: preserve trusted/stale project cleanup facts and accept
 //                    ambiguous-root repair boundaries in real time.
+// [Sync] 2026-09-01: retain the completed assistant Turn persisted before Hook.
 
 import { expect, test } from '@playwright/test';
 import type { UIMessage } from 'ai';
@@ -52,7 +53,7 @@ const origin: UIMessage = {
   parts: [{ type: 'text', text: '生成项目' }],
 };
 
-test('live auto-repair boundary removes unpersisted assistant and inserts exact user fact', () => {
+test('live auto-repair boundary retains completed assistant and inserts exact user fact', () => {
   const firstAttempt: UIMessage = {
     id: 'reconnect-asst-first-attempt',
     role: 'assistant',
@@ -63,6 +64,7 @@ test('live auto-repair boundary removes unpersisted assistant and inserts exact 
 
   expect(next).toEqual([
     origin,
+    firstAttempt,
     {
       id: 'dream_repair_stable',
       role: 'user',
@@ -90,6 +92,25 @@ test('refresh history plus replayed boundary stays single-valued by message id',
   expect(withRepairAssistant.at(-1)?.parts).toEqual([
     { type: 'text', text: '已完成修正' },
   ]);
+});
+
+test('replayed repair boundary drops only stale pre-boundary replay', () => {
+  const persistedOriginal: UIMessage = {
+    id: 'persisted-original-assistant',
+    role: 'assistant',
+    parts: [{ type: 'text', text: '原始结果' }],
+  };
+  const staleReplay: UIMessage = {
+    id: 'reconnect-asst-stale-original-replay',
+    role: 'assistant',
+    parts: [{ type: 'text', text: '原始结果' }],
+  };
+  const repairMessage = repairEvent.message as UIMessage;
+  const history = [origin, persistedOriginal, repairMessage, staleReplay];
+
+  const replayed = applyBackendEventToMessages(history, repairEvent);
+
+  expect(replayed).toEqual([origin, persistedOriginal, repairMessage]);
 });
 
 test('ambiguous project repair inserts the exact protected-root fact', () => {

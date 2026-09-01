@@ -10,6 +10,8 @@
 #                    inputs to name the protected root and the only stale roots.
 # [Sync] 2026-09-01: keep legacy v1 history readable while requiring every new
 #                    project-root repair message to carry server cleanup facts.
+# [Sync] 2026-09-01: a completed repair attempt is persisted before its second
+#                    Hook failure is classified, so the SSE transcript survives.
 
 """Dream workbench auto-repair message and continuation tests."""
 
@@ -499,21 +501,96 @@ class DreamAutoRepairContractTest(unittest.TestCase):
                 ),
                 patch.object(
                     service,
+                    "_persist_assistant_turn",
+                    new=AsyncMock(),
+                ) as persist_assistant,
+                patch.object(
+                    service,
                     "mark_auto_repair_failed",
                     new=AsyncMock(),
                 ) as mark_failed,
             ):
                 with self.assertRaises(DreamAutoRepairExhaustedError):
                     await service.execute_session(execution)
-            return artifact_hook, mark_failed, list(queue._queue)
+            return artifact_hook, persist_assistant, mark_failed, list(queue._queue)
 
-        artifact_hook, mark_failed, events = asyncio.run(scenario())
+        artifact_hook, persist_assistant, mark_failed, events = asyncio.run(scenario())
 
+        persist_assistant.assert_awaited_once()
         artifact_hook.after_main_turn.assert_called_once_with(
             unittest.mock.sentinel.ticket
         )
         mark_failed.assert_awaited_once()
         self.assertFalse(any(getattr(event, "type", None) == "chat-message" for event in events))
+
+    def test_first_repairable_hook_runs_after_assistant_persistence(self) -> None:
+        async def scenario():
+            order: list[str] = []
+            error = DreamArtifactTurnHookError(
+                "slug mismatch",
+                issue=mismatch_issue(),
+            )
+            artifact_hook = unittest.mock.Mock()
+
+            def fail_hook(_ticket):
+                order.append("hook")
+                raise error
+
+            artifact_hook.after_main_turn.side_effect = fail_hook
+            service = ClaudeAgentService(dream_artifact_turn_hook=artifact_hook)
+            request = ClaudeAgentRunRequest(
+                user_id="7",
+                thread_id="thread-auto-repair",
+                message_id="message-origin",
+                message_parts=[{"type": "text", "text": "original"}],
+            )
+            execution = _TurnExecution(
+                request=request,
+                state=AgentRunState(session_id="thread-auto-repair"),
+                runner=unittest.mock.Mock(
+                    run_streaming=AsyncMock(
+                        return_value=AgentRunResult(
+                            full_text="first attempt",
+                            session_id="claude-session",
+                            success=True,
+                        )
+                    )
+                ),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+                dream_context=dream_context(),
+                dream_artifact_turn_ticket=unittest.mock.sentinel.ticket,
+            )
+            expected = unittest.mock.sentinel.continuation
+            with (
+                patch.object(service, "_persist_user_message", new=AsyncMock()),
+                patch.object(
+                    service,
+                    "_persist_assistant_turn",
+                    new=AsyncMock(
+                        side_effect=lambda *_args: order.append("assistant")
+                    ),
+                ),
+                patch.object(
+                    service,
+                    "_build_dream_auto_repair_continuation",
+                    new=AsyncMock(
+                        side_effect=lambda *_args, **_kwargs: (
+                            order.append("continuation") or expected
+                        )
+                    ),
+                ),
+            ):
+                actual = await service.execute_session(execution)
+            return actual, expected, order
+
+        actual, expected, order = asyncio.run(scenario())
+
+        self.assertIs(actual, expected)
+        self.assertEqual(order, ["assistant", "hook", "continuation"])
 
     def test_successful_repair_hook_persists_assistant_and_finishes_normally(self) -> None:
         async def scenario():

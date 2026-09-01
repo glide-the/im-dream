@@ -8,6 +8,7 @@
 <!-- [Sync] 2026-09-01: require actionable full-root guidance when a marked repair attempts marker-only project.yaml deletion. -->
 <!-- [Sync] 2026-09-01: persist and project exact trusted/stale repair facts so a fresh Session cannot delete the protected root. -->
 <!-- [Sync] 2026-09-01: preserve legacy v1 history while denying cleanup scope unless persisted and fresh facts match. -->
+<!-- [Sync] 2026-09-01: persist every successful Claude logical Turn before its Dream Hook, retain that assistant across repair SSE handoff, and accept canonical relative artifact references/compact storyboard forms. -->
 
 # Dream 后置同步失败后的 Agent 自动自检修正
 
@@ -20,20 +21,20 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 1. `ClaudeAgentThreadFactory` 获取 Thread lock、`AgentRunState`、EventBus 和 admission lease。
 2. `ClaudeAgentService.assemble_context()` 从 authenticated actor + canonical Thread 解析 `StoryWorkspaceDreamRunContext`，组装 workspace、Deck/plugin、Claude resume 和 Runner options。
 3. `ClaudeAgentService.execute_session()` 先把 user `chat_message` 持久化，再调用 `ClaudeAgentRunner.run_streaming()`；回调把 normalized events 发布到 EventBus。
-4. Claude 成功返回后，Service 调用 `DreamArtifactTurnHook.after_main_turn()`，把 workspace 文件同步到 Run-private artifact、Episode binding 和 PostgreSQL story projection。
-5. Hook 成功后才发送 `message-final`、持久化 assistant `chat_message` 并发送唯一 terminal `finish`。
-6. 前端 POST stream 由 `ClaudeAgentChatTransport` 消费；断线/刷新后由 Thread status + EventBus replay + `applyBackendEventToMessages()` 恢复，最终以消息历史覆盖临时流状态。
+4. Claude 成功返回后，Service 先将本逻辑 Turn 已发送的 reasoning/tool/text SSE parts 持久化为 assistant `chat_message`，并更新 Claude session。
+5. assistant 提交成功后才调用 `DreamArtifactTurnHook.after_main_turn()`，把 workspace 文件同步到 Run-private artifact、Episode binding 和 PostgreSQL story projection；Hook 成功后发送 `message-final` 与唯一 terminal `finish`。
+6. 前端 POST stream 由 `ClaudeAgentChatTransport` 消费；自动 user 消息触发 history/reconnect handoff，上一条已持久化 assistant 保持可见；断线/刷新后最终以消息历史覆盖临时 id。
 
 ### 1.2 错误发生位置与 assistant 未保存原因
 
-`DreamArtifactTurnHook.after_main_turn()` 位于 Claude Runner 成功与 assistant 持久化之间。本方案实施前，`Dream launch authority changed` 是一个无结构的 `DreamArtifactTurnHookError`；Service 直接 re-raise，ThreadFactory 只能发布通用 `error + finish(error)`。
+`DreamArtifactTurnHook.after_main_turn()` 曾位于 Claude Runner 成功与 assistant 持久化之间。本方案首次实施只修复了自动 user 消息，却没有改变这条旧顺序：Hook 返回 continuation 或抛出第二次错误时，控制流仍会绕过 `_persist_assistant_turn()`。
 
 因此：
 
 - 原 user 消息已经持久化；
 - Claude 的 workspace 修改和临时 SSE 输出已经发生；
 - `message-final` 尚未发送；
-- `_persist_assistant_turn()` 尚未执行；
+- `_persist_assistant_turn()` 被 continuation/异常分支跳过；
 - 前端只得到通用错误映射，历史刷新后没有本轮 assistant 事实，也不知道 workspace 哪条规则失败。
 
 ### 1.3 根因拆分
@@ -55,6 +56,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 
 随后对同一生产 Thread 的完整 transcript 回放确认了更根本的事实断层：歧义模板只说“以服务器上下文指定路径为准”，但没有给出具体可信根；同时旧 Claude transcript 不可恢复时，正常 resume 会安全降级为 fresh SDK Session，而 `.dream/WORKBENCH.md` 的歧义上下文又故意不选择任一根。Agent 因此根据文件内容猜反，连续请求删除服务器可信根。Guard 拒绝删除是正确的，错误在于服务器已经知道 `trusted/stale`，却只把它用于末端权限判断，没有作为同一轮可读取、可持久化的业务事实交给 Agent。
 
+最新生产副本重放又确认了两个独立问题。第一，多个成功 Claude Turn 的实时 SSE 已包含完整推理、工具和正文，但 `chat_message` 序列只有 user/auto-user，没有对应 assistant；根因正是 Hook-before-persistence。第二，旧项目根已成功移除，后续 `story_index_invalid_artifact` 并非数据库或可信身份异常，而是 Episode 公共文本扫描器把合法 `stories/...`、`assets/...` 相对引用和正文范围符号 `~` 误判为凭证/绝对路径，且 adapter 不接受当前 Drama Forge 常见的紧凑 `characters: [ref]` 与单对象 `dialogue`。修复保持绝对路径和凭证 fail closed，只给 canonical 相对引用与既有紧凑 schema 明确兼容。
+
 ## 2. 目标与边界
 
 ### 2.1 目标
@@ -62,6 +65,7 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 - 把 allowlist 内、可由 Agent 安全修改 workspace 解决的 Hook 校验失败转换为结构化结果。
 - 生成一条真实、可见、可持久化的 user `chat_message`，明确规则、期望/实际、修正要求和禁止操作。
 - 消息落库后才发布 SSE，并通过现有历史/重连链路立即恢复为 user 气泡。
+- 每个 Claude 逻辑 Turn 成功后先持久化 exact SSE-derived assistant parts；后置 Hook 只决定投影/continuation/terminal，不决定回复是否成为对话事实。
 - 在同一个 ThreadFactory 受控任务内，再次执行正常 context assembly、Claude resume、Runner callbacks、Hook 和 assistant persistence。
 - context assembly 遇到多个合法 project 根时生成 `project_resolution=ambiguous` 的不绑定上下文，不猜测可信 slug、不创建第三套项目，并允许正常 Agent Turn 进入修正。
 - 工作空间递归树不得跟随 thread 外的 Skill 链接；文件浏览保持可用，直接读取/下载仍按 symlink 安全合同拒绝。
@@ -106,6 +110,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 - callbacks、tool confirmation、usage 采集；
 - Dream post-turn Hook；
 - assistant persistence。
+
+上述单个逻辑 Turn 内部顺序固定为 `user persistence -> Runner/SSE -> assistant persistence -> Dream Hook -> message-final/terminal`。assistant 持久化失败时不执行 Hook，并返回脱敏的 `CHAT_ASSISTANT_PERSISTENCE_FAILED`；不能在没有 durable Chat 事实时继续改变业务投影。
 
 两者保留在同一个 Thread lock、EventBus、background task 和 admission lease 中。原因不是建立新状态机，而是保证：
 
@@ -253,9 +259,9 @@ Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成
 
 `applyBackendEventToMessages()` 对 `chat-message` 按 message id upsert：
 
-- 已存在同 id：替换为事件中的 exact parts/metadata，不追加气泡；
+- 已存在同 id：替换为事件中的 exact parts/metadata，并清除 EventBus 全量 replay 在该持久化边界之后临时重建的原 Turn；
 - 尚不存在：插入 user 消息；
-- 同时移除该边界之前仅存在于 replay 的未持久化原 assistant 临时消息；
+- 保留该边界之前已由服务端提交的原 assistant；实时临时 id 在最终 history hydration 时由数据库 id 替换；
 - 后续 text/tool events 创建新的 repair assistant 临时消息；最终历史恢复以数据库 assistant id 覆盖它。
 
 普通 user 气泡只增加一行轻量来源标记：`工作台自动修正`；历史状态为 `failed` 时显示 `工作台自动修正 · 已停止`。第二次 Hook 失败的 error card 只对 `DREAM_WORKBENCH_AUTO_REPAIR_FAILED` 展示后端 allowlist 生成的最终 validation code 和安全说明；普通异常仍使用通用文案。不增加弹窗、确认框或独立页面。
@@ -265,13 +271,16 @@ Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成
 ```mermaid
 stateDiagram-v2
     [*] --> OriginalRunning: 原始 user 消息已持久化
-    OriginalRunning --> OriginalHookCheck: Claude 成功修改 workspace
+    OriginalRunning --> OriginalReplyCommitted: Claude 成功\nassistant SSE parts 已持久化
+    OriginalReplyCommitted --> OriginalHookCheck: 执行后置 Hook
     OriginalHookCheck --> Completed: Hook 通过
     OriginalHookCheck --> FailedClosed: non_repairable
     OriginalHookCheck --> RepairDispatching: agent_repairable 且 attempt=0\n持久化 user 消息
     RepairDispatching --> RepairRunning: CAS status=dispatched\n发布 chat-message + fresh authority scope + 正常 assemble/resume/Runner
-    RepairRunning --> Completed: Hook 通过\nassistant 持久化
-    RepairRunning --> RepairFailed: Runner/cancel/Hook 再失败\nstatus=failed
+    RepairRunning --> RepairReplyCommitted: Claude 成功\nassistant SSE parts 已持久化
+    RepairReplyCommitted --> Completed: Hook 通过
+    RepairReplyCommitted --> RepairFailed: Hook 再失败\nstatus=failed
+    RepairRunning --> RepairFailed: Runner/cancel 失败\nstatus=failed
     RepairFailed --> [*]: error terminal；不创建第三个 Turn
     FailedClosed --> [*]: error terminal
     Completed --> [*]: message-final + finish(stop)
@@ -293,6 +302,7 @@ stateDiagram-v2
 | 失败点 | 行为 |
 |---|---|
 | 自动消息持久化失败/identity conflict | 不发布 SSE、不启动修正，安全 error terminal |
+| successful assistant 持久化失败 | 不执行 Dream Hook；发布脱敏 `CHAT_ASSISTANT_PERSISTENCE_FAILED` terminal，保留原 user 和 workspace |
 | EventBus 发布失败 | 消息保留在历史；不启动无可观察修正，error terminal |
 | 修正 Turn assembly/Runner 失败 | metadata `dispatch_status=failed`，现有 error terminal |
 | context assembly 发现多个安全 canonical 根 | 生成不绑定具体项目的 repair-safe context，继续正常 Turn；最终唯一性由 Hook 决定 |
@@ -315,6 +325,8 @@ stateDiagram-v2
 - 自动 scope 只允许 exact stale `stories/<slug>` 的单目标递归删除；不放开 `.dream`、可信 project、`assets`、任意绝对目录、通配符、多目标、脚本、symlink 或未完成迁移的树。
 - 消息正文由 code-specific template 生成，不使用原始 exception text。
 - SSE 使用已经持久化的 exact DTO；历史接口继续通过 `PublicChatMetadataDto` allowlist 投影。
+- reasoning/tool/text live SSE 继续使用既有事件；同一 collected event 集在 Hook 前线性转换并保存到 assistant `parts`，不另建 SSE 日志表。
+- canonical `assets/(characters|scenes|props)/**` 与 `stories/<slug>/episodes/EPxx/**` 是可公开的 workspace 相对引用；绝对路径、home/env 路径、credential literal、高熵非业务 token 和 raw command 仍 fail closed。
 - 不修改或删除 Claude transcript；修正 Turn 使用现有 session id resume。
 - 普通歧义上下文不输出目录清单、不选择“看起来正确”的 slug；自动修正上下文只输出服务器重新验证的 trusted/stale 相对路径事实。
 - 文件树使用 `lstat` 获取 link 自身元数据，不读取、遍历或暴露 thread 外的 link target。
@@ -328,8 +340,8 @@ stateDiagram-v2
 5. 数据库提交发生在 `chat-message` 发布之前。
 6. SSE 与 history 的 message id、parts、metadata 一致。
 7. POST stream 在消息边界 handoff；历史恢复立即显示 user 气泡；reconnect 继续 repair assistant。
-8. refresh/reconnect/replay 不产生重复气泡，也不保留第一次未持久化 assistant 临时输出。
-9. 自动修正调用正常 context assembly、Runner resume、callbacks、Hook、persistence、EventBus、cancel 与 admission-owned task。
+8. refresh/reconnect/replay 不产生重复气泡；原始与修正两个成功 Claude Turn 的 assistant reasoning/tool/text 均在各自 Hook 前落库并保留可见。
+9. 自动修正调用正常 context assembly、Runner resume、callbacks、assistant-before-Hook persistence、EventBus、cancel 与 admission-owned task。
 10. 修正成功后 auto metadata 为 dispatched，并正常保存 assistant。
 11. 第二次失败或 cancel 后 metadata 为 failed，不创建第三轮；error card 显示 allowlisted 最终 validation code 与安全说明。
 12. 已有多个 canonical project 的 Thread 能完成 context assembly 并进入正常 Runner；上下文不绑定任一 slug，明确禁止创建第三套 Project。
@@ -341,6 +353,7 @@ stateDiagram-v2
 18. marked repair 只删 stale `project.yaml` 时收到完整根清理命令并可在同一 Turn 重试；普通 session 仍只收到通用拒绝，不泄露 scope slug。
 19. `DREAM_CANONICAL_PROJECT_AMBIGUOUS` 自动消息正文/metadata 与 `.dream/WORKBENCH.md` 同时明确 trusted/stale 根和 `stale -> trusted` 合并方向；fresh SDK Session 不依赖旧 transcript。
 20. marked repair 请求删除 trusted 根时必须拒绝并指出该根受保护，同时返回 scoped stale 根命令；消息、`.dream` 与 fresh Hook scope 任一不一致都 fail closed。
+21. 生产副本中的 canonical 相对路径、`~` 范围符号、紧凑 character refs 与单对象 dialogue 可投影；真实绝对路径、凭证和高熵非业务 token 仍被拒绝。
 
 ## 12. 编码前设计复核
 
@@ -348,7 +361,7 @@ stateDiagram-v2
 |---|---|
 | 用户是否知道为什么停下？ | 是。真实 user 消息展示 code、规则、期望/实际、修正和禁止项；failed 状态刷新后仍存在。 |
 | 可预期错误是否自动修正？ | 是。仅四个明确的 workspace identity/schema code 可进入一次正常 repair Turn。 |
-| 是否可观察、可恢复？ | 是。persistence-first，EventBus 只通知；history 是恢复真相源。 |
+| 是否可观察、可恢复？ | 是。user 与每个 successful assistant 都 persistence-first；EventBus 只通知，history 是恢复真相源。 |
 | Agent 能否修改可信身份？ | 否。身份异常 non-repairable；模板明确禁止；context 与 cleanup scope 每轮重新从 authoritative Run/launch 解析。 |
 | 是否可能无限循环？ | 否。server metadata + stable id + attempt=1 三重边界。 |
 | 是否新增多余 endpoint/表/队列/弹窗？ | 否。只新增结构化 issue、一个 chat-message SSE 事件和既有 reducer 分支。 |
