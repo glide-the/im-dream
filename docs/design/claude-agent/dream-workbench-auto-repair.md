@@ -3,6 +3,7 @@
 <!-- [Pos] Interaction/architecture source of truth for repairable Dream post-turn validation failures. -->
 <!-- [Sync] 2026-09-01: initial design after source investigation and pre-implementation simplification review. -->
 <!-- [Sync] 2026-09-01: validate project/stage collections before writes, add duplicate-root/entity classifications, require move-not-copy cleanup, and expose the safe exhausted reason. -->
+<!-- [Sync] 2026-09-01: keep duplicate-root workspaces enterable during context assembly and make managed Skill links non-recursive workspace-tree leaves. -->
 
 # Dream 后置同步失败后的 Agent 自动自检修正
 
@@ -42,6 +43,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 
 线上回执进一步暴露了第二个边界：Agent 将错误 slug 项目复制到可信路径后保留了旧项目根，Hook 同时发现两份 `EP01/storyboard.yaml`，Pydantic 以 `items must have unique entity_id values within a stage` 终止。该错误来自可编辑 workspace，但既没有结构化分类，也没有在前端安全展示；同时旧顺序会在 slug/集合完整性校验前开始写 stage，留下部分投影风险。
 
+修正功能上线后的真实恢复又暴露了两个入口缺口：下一条正常或自动修正 Turn 会先执行 `DreamWorkbenchContext.refresh_for_turn()`，旧实现遇到多个 canonical project 时在 Runner 启动前终止，导致 Agent 永远无法进入 workspace 完成已允许的修正；同时递归工作区文件树会跟随 `skills/*` 下受控的只读内置 Skill 源链接，随后被 containment guard 判为 path traversal 并返回 500。这两者都不是新的身份放宽点：前者只取消对可编辑歧义状态的前置阻断，后置 Hook 仍负责唯一性验收；后者只把符号链接作为不可递归叶节点展示，内容读取和下载仍拒绝 symlink。
+
 ## 2. 目标与边界
 
 ### 2.1 目标
@@ -50,6 +53,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 - 生成一条真实、可见、可持久化的 user `chat_message`，明确规则、期望/实际、修正要求和禁止操作。
 - 消息落库后才发布 SSE，并通过现有历史/重连链路立即恢复为 user 气泡。
 - 在同一个 ThreadFactory 受控任务内，再次执行正常 context assembly、Claude resume、Runner callbacks、Hook 和 assistant persistence。
+- context assembly 遇到多个合法 project 根时生成 `project_resolution=ambiguous` 的不绑定上下文，不猜测可信 slug、不创建第三套项目，并允许正常 Agent Turn 进入修正。
+- 工作空间递归树不得跟随 thread 外的 Skill 链接；文件浏览保持可用，直接读取/下载仍按 symlink 安全合同拒绝。
 - 同一 originating message/turn 最多一次自动修正；第二次失败停止。
 
 ### 2.2 非目标
@@ -98,6 +103,12 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 - 同 Thread 的其他 user Turn 不能插入原始 Turn 与自动修正 Turn 之间。
 
 逻辑 Turn 边界仍更新 `turn_count`，自动修正取得新的内部 Turn id，且 `message-metadata.turnIndex` 使用下一序号；对外 EventBus 仍是同一个可重连 workflow stream。
+
+### 3.4 可修正歧义的上下文规则
+
+`DreamWorkbenchContext` 仍对 workspace/thread 不匹配、`.dream`/`stories`/project 文件符号链接和不安全文件类型 fail closed。唯一例外是“发现两个及以上结构安全的 canonical project 根”：它不再选中任意一个项目，也不再在 Runner 前抛错，而是写入 `project_slug=null`、`project_resolution=ambiguous`、`canonical_project_count=<n>` 和空 Episode 列表。内部指令明确禁止创建第三套 Project，并要求检查、合并和清理既有目录。
+
+该规则不声明任意目录为可信。最终 slug、唯一根、stage schema 和 launch authority 仍全部由同一个后置 Hook 校验；Agent 无法通过上下文降级修改 server-owned metadata。
 
 ## 4. 错误分类
 
@@ -250,6 +261,8 @@ stateDiagram-v2
 | 自动消息持久化失败/identity conflict | 不发布 SSE、不启动修正，安全 error terminal |
 | EventBus 发布失败 | 消息保留在历史；不启动无可观察修正，error terminal |
 | 修正 Turn assembly/Runner 失败 | metadata `dispatch_status=failed`，现有 error terminal |
+| context assembly 发现多个安全 canonical 根 | 生成不绑定具体项目的 repair-safe context，继续正常 Turn；最终唯一性由 Hook 决定 |
+| 递归文件树遇到受控或用户创建的 symlink | 返回非目录叶节点且不跟随目标；直接内容/下载继续返回安全 400，不升级为 500 |
 | 用户 Stop/cancel | 唯一 `bg_task` 被取消；partial repair assistant 按现有规则保存；自动消息标记 failed；不重启 |
 | 第二次 Hook 仍失败 | 自动消息标记 failed，发布含 allowlisted 最终 validation code 的安全结构化错误，不创建第三轮 |
 | 浏览器断线/刷新 | producer 继续；history 恢复 auto user；running 时 reconnect；idle 时显示最终持久状态 |
@@ -264,6 +277,8 @@ stateDiagram-v2
 - 消息正文由 code-specific template 生成，不使用原始 exception text。
 - SSE 使用已经持久化的 exact DTO；历史接口继续通过 `PublicChatMetadataDto` allowlist 投影。
 - 不修改或删除 Claude transcript；修正 Turn 使用现有 session id resume。
+- 歧义上下文不输出目录清单、不选择“看起来正确”的 slug；只公开计数和 `ambiguous` 状态。
+- 文件树使用 `lstat` 获取 link 自身元数据，不读取、遍历或暴露 thread 外的 link target。
 
 ## 11. 验收标准
 
@@ -278,8 +293,10 @@ stateDiagram-v2
 9. 自动修正调用正常 context assembly、Runner resume、callbacks、Hook、persistence、EventBus、cancel 与 admission-owned task。
 10. 修正成功后 auto metadata 为 dispatched，并正常保存 assistant。
 11. 第二次失败或 cancel 后 metadata 为 failed，不创建第三轮；error card 显示 allowlisted 最终 validation code 与安全说明。
-12. 消息模板不包含 traceback、DSN、密钥、绝对路径或任意内部异常文本。
-13. 普通 Chat、Dream launch/confirmation、resume、SSE reconnect、Stop、tool confirmation 既有测试不回归。
+12. 已有多个 canonical project 的 Thread 能完成 context assembly 并进入正常 Runner；上下文不绑定任一 slug，明确禁止创建第三套 Project。
+13. `skills/*` 外部目录链接在递归工作区树中作为叶节点返回，接口为 200；link target 内容不出现在响应，直接读取/下载仍 fail closed。
+14. 消息模板不包含 traceback、DSN、密钥、绝对路径或任意内部异常文本。
+15. 普通 Chat、Dream launch/confirmation、resume、SSE reconnect、Stop、tool confirmation 既有测试不回归。
 
 ## 12. 编码前设计复核
 

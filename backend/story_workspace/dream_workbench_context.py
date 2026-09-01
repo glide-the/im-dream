@@ -2,6 +2,8 @@
 # [Output] Initialized/refreshed `.dream` Agent contracts plus a bounded per-turn context block with actual paths.
 # [Pos] Story Workspace domain context contract; not an Agent runtime, Hook, or protocol.
 # [Sync] 2026-08-14: deploy workbench and asset-collaboration contracts and require both actual-path Reads every Dream turn.
+# [Sync] 2026-09-01: keep a multiple-project workspace repairable by rendering
+#                    an unbound context instead of stopping before the Agent turn.
 
 """Materialize and render the canonical Dream workbench context.
 
@@ -245,10 +247,6 @@ class DreamWorkbenchContext:
                         "canonical Episode directory cannot be inspected"
                     ) from exc
             projects.append((story.name, episodes))
-        if len(projects) > 1:
-            raise DreamWorkbenchContextError(
-                "Dream workspace has multiple canonical projects"
-            )
         return tuple(projects)
 
     @staticmethod
@@ -341,8 +339,9 @@ class DreamWorkbenchContext:
             raise DreamWorkbenchContextError("Dream surface is unsafe")
 
         projects = self._discover_projects(workspace)
-        project_slug = projects[0][0] if projects else None
-        episode_codes = projects[0][1] if projects else ()
+        project_is_ambiguous = len(projects) > 1
+        project_slug = projects[0][0] if len(projects) == 1 else None
+        episode_codes = projects[0][1] if len(projects) == 1 else ()
         context_file = resolved_dream / DREAM_WORKBENCH_CONTEXT_RELATIVE_PATH.name
         asset_collaboration_file = (
             resolved_dream / DREAM_ASSET_COLLABORATION_RELATIVE_PATH.name
@@ -359,6 +358,12 @@ class DreamWorkbenchContext:
             "workbench_context_path": str(context_file),
             "asset_collaboration_path": str(asset_collaboration_file),
             "project_slug": project_slug,
+            "project_resolution": (
+                "ambiguous"
+                if project_is_ambiguous
+                else "resolved" if project_slug is not None else "missing"
+            ),
+            "canonical_project_count": len(projects),
             "canonical_project_path": (
                 str(canonical_project) if canonical_project is not None else None
             ),
@@ -391,11 +396,20 @@ class DreamWorkbenchContext:
             label="asset collaboration context",
         )
 
-        project_line = (
-            f"唯一 canonical project 是 `stories/{project_slug}/project.yaml`。"
-            if project_slug is not None
-            else "当前尚未发现 canonical project；初始化时必须先创建唯一 project.yaml。"
-        )
+        if project_is_ambiguous:
+            project_line = (
+                "当前检测到多个 canonical project；这是可整理的工作区错误。"
+                "不得创建第三套 Project，必须检查现有 stories 内容并按本轮校验要求合并、"
+                "移动和清理重复项目根。"
+            )
+        elif project_slug is not None:
+            project_line = (
+                f"唯一 canonical project 是 `stories/{project_slug}/project.yaml`。"
+            )
+        else:
+            project_line = (
+                "当前尚未发现 canonical project；初始化时必须先创建唯一 project.yaml。"
+            )
         instruction = (
             "<story_workspace_dream_workbench>\n"
             "当前请求属于 Dream 工作区。宿主已确认或刷新本轮工作台上下文文件。\n"

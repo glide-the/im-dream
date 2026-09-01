@@ -11,6 +11,8 @@
 # [Sync] 2026-08-17: cover directory ZIP layout, Unicode names, and symlink escape denial.
 # [Sync] 2026-08-22: cover the no-create workspace:// content boundary: owned Thread,
 #                    Workspace Mode, strict public paths, regular files, and no symlinks.
+# [Sync] 2026-09-01: keep recursive workspace trees available when managed
+#                    builtin Skills are read-only links outside the thread.
 
 """Regression tests for the workspace file router."""
 from __future__ import annotations
@@ -354,6 +356,33 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
         refreshed_settings = json.loads(settings_path.read_text(encoding="utf-8"))
         allow_write = refreshed_settings["sandbox"]["filesystem"]["allowWrite"]
         self.assertEqual(allow_write[-2:], ["/data/out", "/var/cache"])
+
+    def test_recursive_list_keeps_external_skill_link_as_leaf(self):
+        session_id = "recursive-managed-skill-link"
+        workspace = get_or_create_workspace(session_id)
+        managed_source = Path(self._tmp.name) / "managed-skill-source"
+        managed_source.mkdir()
+        (managed_source / "SKILL.md").write_text(
+            "managed instructions",
+            encoding="utf-8",
+        )
+        managed_link = workspace / "skills" / "managed-skill"
+        managed_link.symlink_to(managed_source, target_is_directory=True)
+
+        response = self.client.get(
+            "/api/workspace/files",
+            params={"sessionId": session_id, "recursive": "1"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        tree = response.json()["tree"]
+        skills = next(node for node in tree if node["name"] == "skills")
+        managed = next(
+            node for node in skills["children"] if node["name"] == "managed-skill"
+        )
+        self.assertFalse(managed["isDirectory"])
+        self.assertNotIn("children", managed)
 
 
 if __name__ == "__main__":

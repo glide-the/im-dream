@@ -102,6 +102,8 @@
 #                    shared catalog, safely unpack canonical `.skill` archives,
 #                    keep Runtime discovery flat by Skill ID, and contain
 #                    package/publication failures outside the Agent turn.
+# [Sync] 2026-09-01: expose symbolic-link entries as non-recursive leaves in
+#                    workspace trees without following targets outside the thread.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -1714,7 +1716,7 @@ def list_workspace_files(
         if entry.name.startswith("."):
             continue
         try:
-            stat = entry.stat()
+            metadata = entry.lstat()
         except OSError:
             continue
         relative_path = f"{normalized_sub}/{entry.name}" if normalized_sub else entry.name
@@ -1722,9 +1724,13 @@ def list_workspace_files(
             WorkspaceFileInfo(
                 name=entry.name,
                 path=relative_path,
-                is_directory=entry.is_dir(),
-                size=stat.st_size,
-                modified_at=_mtime_iso(stat),
+                # Never follow a visible workspace symlink while building the
+                # sidebar tree. Managed builtin Skills intentionally link to a
+                # read-only server source outside the thread; treating the link
+                # as a leaf preserves containment and prevents recursive 500s.
+                is_directory=stat_module.S_ISDIR(metadata.st_mode),
+                size=metadata.st_size,
+                modified_at=_mtime_iso(metadata),
             )
         )
 

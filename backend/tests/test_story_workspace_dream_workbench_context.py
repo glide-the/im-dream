@@ -1,6 +1,8 @@
 # [Input] DreamWorkbenchContext and a server-owned Thread workspace fixture.
 # [Output] Verify durable context refresh, actual-path instruction, and current project/Episode facts.
 # [Pos] Story Workspace workbench-context contract test.
+# [Sync] 2026-09-01: prove duplicate canonical roots remain available to a
+#                    repair turn without binding context to either project.
 
 from __future__ import annotations
 
@@ -122,6 +124,32 @@ class DreamWorkbenchContextTest(unittest.TestCase):
             self.assertTrue(Path(second.workspace_file).is_file())
             self.assertTrue(Path(second.asset_collaboration_file).is_file())
             self.assertIn(RUN_ID, Path(second.workspace_file).read_text("utf-8"))
+
+    def test_multiple_projects_render_unbound_repair_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary) / THREAD_ID
+            (workspace / ".dream").mkdir(parents=True)
+            for slug in ("trusted-story", "stale-story"):
+                project = workspace / "stories" / slug / "project.yaml"
+                project.parent.mkdir(parents=True)
+                project.write_text(
+                    f"project_id: {slug}\nproject_slug: {slug}\n",
+                    encoding="utf-8",
+                )
+
+            result = DreamWorkbenchContext().refresh_for_turn(
+                context=context(),
+                workspace_root=workspace,
+            )
+
+            deployed = Path(result.workspace_file).read_text(encoding="utf-8")
+            self.assertIsNone(result.project_slug)
+            self.assertEqual(result.episode_codes, ())
+            self.assertIn('"project_resolution": "ambiguous"', deployed)
+            self.assertIn('"canonical_project_count": 2', deployed)
+            self.assertIn("当前检测到多个 canonical project", result.instruction)
+            self.assertIn("不得创建第三套 Project", result.instruction)
+            self.assertNotIn("唯一 canonical project 是", result.instruction)
 
     def test_missing_asset_contract_is_restored_on_next_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

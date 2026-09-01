@@ -3,6 +3,7 @@
 <!-- [Pos] Sequence-diagram companion to dream-workbench-auto-repair.md; it does not define a separate protocol. -->
 <!-- [Sync] 2026-09-01: initial business sequence set. -->
 <!-- [Sync] 2026-09-01: add pre-write collection validation, move/merge cleanup, and visible structured exhausted failure. -->
+<!-- [Sync] 2026-09-01: show repair-safe ambiguous context assembly before the normal Runner turn. -->
 
 # Dream 工作区自动修正业务时序图
 
@@ -19,6 +20,7 @@ sequenceDiagram
     participant Factory as ClaudeAgentThreadFactory
     participant Bus as EventBus
     participant Service as ClaudeAgentService
+    participant Context as DreamWorkbenchContext
     participant DB as PostgreSQL chat_message
     participant Claude as ClaudeAgentRunner
     participant Hook as DreamArtifactTurnHook
@@ -29,6 +31,13 @@ sequenceDiagram
     API->>Factory: run_streaming(original request)
     Factory->>Factory: Thread lock + admission + RUNNING
     Factory->>Service: assemble_context(original request)
+    Service->>Context: refresh_for_turn(workspace)
+    alt workspace 有多个结构安全的 canonical project
+        Context-->>Service: unbound context(project_resolution=ambiguous)
+        Note over Context,Service: 不选择任一 slug；禁止创建第三套 Project；不修改可信身份
+    else 唯一或尚无 project
+        Context-->>Service: resolved/missing context
+    end
     Service->>DB: save original user message
     DB-->>Service: commit
     Service->>Claude: run_streaming(normal options/resume)
@@ -60,6 +69,8 @@ sequenceDiagram
 
     Factory->>Factory: 记录逻辑 Turn 边界并分配新 Turn id；保持 lock/task/admission/EventBus
     Factory->>Service: assemble_context(auto user request, resume=true)
+    Service->>Context: refresh_for_turn(workspace)
+    Context-->>Service: ambiguous 时返回同一不绑定修正上下文
     Service->>DB: exact CAS replay auto user message
     Service->>Claude: run_streaming(normal repair Turn)
     Claude->>WS: 移动/合并到 canonical 目录并修正 project_id/project_slug
