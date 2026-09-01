@@ -1,3 +1,8 @@
+// [Input] EditorEngine text Cells, textarea events, IME state, and Agent dropdown state.
+// [Output] Manage local TextCell mirrors, composition, paste, key handling, and textarea refs without model side effects.
+// [Pos] Text Cell interaction hook in frontend/src/hooks.
+// [Sync] 2026-09-01: remove the inspiration callback so every prose edit remains model-request-free.
+
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { RefObject, Dispatch, SetStateAction } from 'react';
 import type { EditorEngine, EditorState, TextCell } from '../engine/EditorEngine';
@@ -5,8 +10,6 @@ import type { EditorEngine, EditorState, TextCell } from '../engine/EditorEngine
 export interface UseTextCellsOptions {
   engineRef: RefObject<EditorEngine | null>;
   state: EditorState | null;
-  onInspirationTextChange?: (allText: string, selectedState: string | null) => void;
-  selectedState?: string | null;
   dropdownVisible?: boolean;
   dropdownTriggerCellId?: string | null;
   onDropdownClose?: () => void;
@@ -32,8 +35,6 @@ export interface UseTextCellsReturn {
 export function useTextCells({
   engineRef,
   state,
-  onInspirationTextChange,
-  selectedState,
   dropdownVisible,
   dropdownTriggerCellId,
   onDropdownClose,
@@ -81,25 +82,12 @@ export function useTextCells({
       engineRef.current.updateTextCell(cellId, newText);
     }
 
-    if (onInspirationTextChange && state) {
-      const allText = state.cells
-        .filter(c => c.type === 'text')
-        .map(c => {
-          if (c.id === cellId) return newText;
-          return (c as TextCell).content;
-        })
-        .join('');
-      onInspirationTextChange(allText, selectedState ?? null);
-    }
   }, [
     composingCells,
     dropdownVisible,
     dropdownTriggerCellId,
     onDropdownClose,
-    engineRef,
-    state,
-    onInspirationTextChange,
-    selectedState
+    engineRef
   ]);
 
   const handleCompositionStart = useCallback((cellId: string) => {

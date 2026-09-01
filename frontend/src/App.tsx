@@ -40,9 +40,12 @@
 // [Sync] 2026-08-31: reconcile connector detail state on every Story Workspace route change.
 // [Sync] 2026-09-01: completed Editor jumps activate their exact persisted
 //                    Editor Session before canonical Writing focuses the target cell.
+// [Sync] 2026-09-01: replace debounced random-Voice inspiration with explicit,
+//                    persistent WritingSuggestionCells on one Session-owned Thread.
+// [Sync] 2026-09-01: expose regeneration only on the latest Writing suggestion Cell.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
+import type { Commentor, EditorState, TextCell, WritingSuggestionCell as WritingSuggestionCellData } from './engine/EditorEngine';
 import { ChatWidget } from './engine/ChatWidget';
 import type { ChatWidgetData } from './engine/ChatWidget';
 import './App.css';
@@ -72,8 +75,11 @@ import DeviceVerificationPage from './components/Auth/DeviceVerificationPage';
 import { STORAGE_KEYS } from './constants/storageKeys';
 import { getLocalDayKey, getTodayKeyInTimezone } from './utils/timezone';
 import { useSessionLifecycle } from './hooks/useSessionLifecycle';
-import { useInspiration } from './hooks/useInspiration';
-import { InspirationHint } from './components/Editor/InspirationHint';
+import { useWritingSuggestions } from './hooks/useWritingSuggestions';
+import {
+  WritingSuggestionCell,
+  WritingSuggestionTrigger,
+} from './components/Editor/WritingSuggestionCell';
 import { useComments } from './hooks/useComments';
 import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
@@ -397,26 +403,16 @@ export default function App() {
   // @@@ Comment alignment state
   const [commentsAligned, setCommentsAligned] = useState(false);
 
-  // @@@ Writing inspiration/suggestion state
-  const {
-    currentInspiration,
-    isDisappearing: inspirationDisappearing,
-    isAppearing: inspirationAppearing,
-    onTextChange: onInspirationTextChange,
-    setTextGetter: setInspirationTextGetter,
-  } = useInspiration({ voices: voiceConfigs });
-
-  // @@@ Provide text getter to inspiration hook for validation
-  useEffect(() => {
-    setInspirationTextGetter(() => {
-      if (!engineRef.current) return '';
-      const cells = engineRef.current.getState().cells;
-      return cells
-        .filter(c => c.type === 'text')
-        .map(c => (c as TextCell).content)
-        .join('');
-    });
-  }, [setInspirationTextGetter]);
+  const { generateSuggestion, retrySuggestion } = useWritingSuggestions({
+    engineRef,
+    sessionId: state?.id ?? null,
+    selectedState: state?.selectedState ?? selectedState,
+    persistSession: saveSessionToDatabase,
+  });
+  const latestWritingSuggestionCellId = state?.cells.reduce<string | null>(
+    (latestId, cell) => (cell.type === 'writing-suggestion' ? cell.id : latestId),
+    null,
+  ) ?? null;
 
   // @@@ Text cell management (IME, refs, dropdown helpers)
   const {
@@ -434,8 +430,6 @@ export default function App() {
   } = useTextCells({
     engineRef,
     state,
-    onInspirationTextChange,
-    selectedState,
     dropdownVisible,
     dropdownTriggerCellId,
     onDropdownClose: () => {
@@ -1942,6 +1936,17 @@ export default function App() {
                       const textCell = cell as TextCell;
                       // Use local text if available, otherwise use engine state
                       const content = localTexts.get(cell.id) ?? textCell.content;
+                      const hasSuggestion = state.cells.some(
+                        (candidate) => candidate.type === 'writing-suggestion'
+                          && candidate.anchor.textCellId === cell.id,
+                      );
+                      const hasStreamingSuggestion = state.cells.some(
+                        (candidate) => candidate.type === 'writing-suggestion'
+                          && candidate.status === 'streaming',
+                      );
+                      const canGenerateSuggestion = content.trim().length > 0
+                        && !hasSuggestion
+                        && !hasStreamingSuggestion;
 
                       return (
                         <div key={cell.id} style={{
@@ -2000,7 +2005,22 @@ export default function App() {
                             }}
                           />
 
+                          {canGenerateSuggestion ? (
+                            <WritingSuggestionTrigger
+                              onGenerate={() => { generateSuggestion(cell.id); }}
+                            />
+                          ) : null}
+
                         </div>
+                      );
+                    } else if (cell.type === 'writing-suggestion') {
+                      return (
+                        <WritingSuggestionCell
+                          key={cell.id}
+                          cell={cell as WritingSuggestionCellData}
+                          isLatestSuggestion={cell.id === latestWritingSuggestionCellId}
+                          onRetry={() => { retrySuggestion(cell.id); }}
+                        />
                       );
                     } else if (cell.type === 'widget' && cell.widgetType === 'chat') {
                       return (
@@ -2029,12 +2049,6 @@ export default function App() {
                     return null;
                   })}
 
-                  {/* @@@ Inline Inspiration */}
-                  <InspirationHint
-                    inspiration={currentInspiration}
-                    isDisappearing={inspirationDisappearing}
-                    isAppearing={inspirationAppearing}
-                  />
                 </div>
 
                 {/* Comments layer (absolute positioned) - hide on mobile */}

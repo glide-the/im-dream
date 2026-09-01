@@ -1,5 +1,6 @@
 # Ink & Memory — 业务功能模块时序图
 
+<!-- [Sync] 2026-09-01: replace debounced random-Voice inspiration with manual persistent Suggestion Cells on one Session-owned Claude Thread. -->
 <!-- [Sync] 2026-08-31: replace daily-picture generation with historical read-only Timeline access and remove its scheduler/runtime. -->
 
 > 本文档梳理了 Ink & Memory 项目的核心业务功能模块，并以 Mermaid 时序图形式呈现各模块的交互流程。
@@ -11,7 +12,7 @@
 1. [用户认证模块（注册 / 登录）](#1-用户认证模块)
 2. [编辑器会话管理模块](#2-编辑器会话管理模块)
 3. [历史语音评论兼容](#3-历史语音评论兼容)
-4. [写作灵感模块（实时写作建议）](#4-写作灵感模块)
+4. [Writing 手动建议模块](#4-写作灵感模块)
 5. [语音对话模块（Chat with Voice）](#5-语音对话模块)
 6. [深度分析模块（回响 / 特质 / 模式）](#6-深度分析模块)
 7. [历史图片读取模块](#7-历史图片读取模块)
@@ -201,34 +202,37 @@ sequenceDiagram
 
 ---
 
-## 4. 写作灵感模块
+## 4. Writing 手动建议模块
 
-用户停止输入约 2 秒后，随机选择一个已启用的语音角色给出一句简短的写作建议。
+普通输入、粘贴、IME、回车、标点和停顿都不触发请求。用户点击 `Go deeper` 后，编辑器立即插入独立 Suggestion Cell；该 Writing Session 首次点击时懒创建产品级 Claude Agent Thread，后续建议与 Refresh 复用同一 Thread。
 
 ```mermaid
 sequenceDiagram
     actor User as 用户
     participant FE as Frontend
-    participant Hook as useInspiration
-    participant Voice as 已启用 Voice 配置
-    participant Thread as Voice Claude Thread
+    participant Engine as EditorEngine
+    participant Hook as useWritingSuggestions
+    participant Session as Session 持久化
+    participant Thread as Session Claude Thread
     participant Agent as POST /api/claude-agent (SSE)
 
-    User->>FE: 输入文字（≥10字符）
-    FE->>Hook: onTextChange(allText, selectedState)
-    Hook->>Hook: 取消上一个定时器，启动 2s 防抖
-    Note over Hook: 2 秒后触发
-    Hook->>Voice: 从页面已加载配置随机选择一个 enabled Voice
-    Voice-->>Hook: voice metadata + thread_id（可为空）
-    alt Voice 尚未绑定 Thread
+    User->>FE: 输入/回车/停顿
+    FE->>Engine: 仅更新 TextCell 与本地 Weight
+    Note over FE,Agent: 不发送模型请求
+    User->>FE: 点击 Go deeper
+    FE->>Engine: 插入 streaming Suggestion Cell（绑定正文快照）
+    FE->>Hook: generateSuggestion(textCellId)
+    alt Session 尚未绑定 Thread
         Hook->>Thread: POST /api/claude-agent/threads
         Thread-->>Hook: thread_id
+        Hook->>Engine: setWritingThreadId(sessionId, thread_id)
     end
-    Hook->>Agent: resume=true + thread_id + Voice systemPrompt + 当前正文
-    Agent-->>Hook: text-delta...（逐段更新打字机文本） / finish
-    Hook->>Hook: 校验文本未变化（防竞态）
-    Hook->>FE: setCurrentInspiration(suggestion)
-    FE-->>User: 顶部弹出灵感卡片（带语音角色图标）
+    Hook->>Session: 保存含 writingThreadId 的 EditorState
+    Hook->>Agent: resume=true + thread_id + 产品级 Writing prompt + 点击快照
+    Agent-->>Hook: text-delta... / finish
+    Hook->>Engine: 校验 Session/Cell/request/Thread 后增量更新
+    Engine-->>FE: Suggestion Cell completed
+    FE-->>User: 蓝色只读建议 + Refresh
 ```
 
 ---
@@ -520,7 +524,7 @@ sequenceDiagram
 graph TB
     subgraph Frontend["前端 (React + TypeScript + Vite)"]
         Editor["编辑器<br/>EditorEngine"]
-        Hooks["Hooks<br/>useSessionLifecycle<br/>useComments<br/>useInspiration<br/>useVoiceInput"]
+        Hooks["Hooks<br/>useSessionLifecycle<br/>useComments<br/>useWritingSuggestions<br/>useVoiceInput"]
         Views["页面视图<br/>CollectionsView<br/>AnalysisView<br/>FriendsView<br/>DeckManager"]
     end
 

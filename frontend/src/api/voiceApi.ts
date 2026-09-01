@@ -21,6 +21,8 @@
 //                    Claude Agent SSE voice thread instead of the retired PolyCLI session.
 // [Sync] 2026-08-31: remove the automatic analyze_text transport retired from EditorEngine.
 // [Sync] 2026-08-31: remove the retired daily-picture generation and save transports; Timeline is read-only for historical pictures.
+// [Sync] 2026-09-01: expose one product-neutral Claude Agent turn streamer that
+//                    reuses the shared SSE parser; remove random-Voice Writing suggestions.
 /**
  * API client for voice analysis backend - FastAPI sync API version
  * [Sync] 2026-06-01: normalize user_sessions.labels in session API responses for frontend display.
@@ -31,6 +33,8 @@
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { API_BASE } from '../lib/apiBase';
 import type { EditorState } from '../engine/EditorEngine';
+import { consumeClaudeAgentSseStream } from '../lib/claude-agent-sse-utils';
+import { ClaudeAgentTransportError } from '../lib/claude-agent-transport';
 
 // ========== Inline Types (workaround for Vite bug) ==========
 export interface VoiceConfig {
@@ -198,11 +202,11 @@ export async function getDefaultVoices(): Promise<Record<string, Omit<VoiceConfi
 }
 
 /**
- * Chat with a voice via Claude-agent SSE streaming.
- * Calls POST /api/claude-agent with the voice's thread_id and system prompt.
- * Fires onDelta for each text-delta chunk, onComplete with full text, onError on failure.
+ * Stream one existing Claude Agent Thread through the shared SSE protocol.
+ * Callers own the Thread identity and product/Voice system prompt; this transport
+ * only projects ordered deltas, terminal completion, and structured failures.
  */
-export async function chatWithVoiceSSE({
+export async function streamClaudeAgentTurn({
   threadId,
   message,
   systemPrompt,
@@ -212,6 +216,7 @@ export async function chatWithVoiceSSE({
   onReasoningEnd,
   onComplete,
   onError,
+  signal,
 }: {
   threadId: string;
   message: string;
@@ -226,6 +231,7 @@ export async function chatWithVoiceSSE({
   /** Called with (fullResponseText, fullReasoningText) when the stream completes. */
   onComplete: (fullText: string, reasoning?: string) => void;
   onError: (error: Error) => void;
+  signal?: AbortSignal;
 }): Promise<void> {
   const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
 
@@ -241,7 +247,7 @@ export async function chatWithVoiceSSE({
         id: threadId,
         resume: true,
         message: {
-          id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+          id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-writing`,
           role: 'user',
           parts: [{ type: 'text', text: message }],
         },
@@ -252,6 +258,7 @@ export async function chatWithVoiceSSE({
         systemPrompt,
         ...(editorState != null ? { editor_state: editorState } : {}),
       }),
+      signal,
     });
   } catch (err) {
     onError(err instanceof Error ? err : new Error(String(err)));
@@ -264,54 +271,49 @@ export async function chatWithVoiceSSE({
   }
 
   const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   let accumulated = '';
   let accumulatedReasoning = '';
+  let settled = false;
 
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const frames = buffer.split(/\n\n+/);
-      buffer = frames.pop() ?? '';
-
-      for (const frame of frames) {
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const json = line.slice('data: '.length).trim();
-          if (!json) continue;
-          let evt: { type: string; delta?: string; errorText?: string };
-          try {
-            evt = JSON.parse(json);
-          } catch {
-            continue;
-          }
-          if (evt.type === 'text-delta' && typeof evt.delta === 'string') {
-            accumulated += evt.delta;
-            onDelta(evt.delta);
-          } else if (evt.type === 'reasoning-delta' && typeof evt.delta === 'string') {
-            accumulatedReasoning += evt.delta;
-            onReasoningDelta?.(evt.delta);
-          } else if (evt.type === 'reasoning-end') {
-            onReasoningEnd?.();
-          } else if (evt.type === 'error') {
-            onError(new Error(evt.errorText ?? 'Claude-agent error'));
-            return;
-          } else if (evt.type === 'finish') {
-            onComplete(accumulated, accumulatedReasoning || undefined);
-            return;
-          }
-        }
+    await consumeClaudeAgentSseStream(reader, (event) => {
+      if (event.type === 'text-delta' && typeof event.delta === 'string') {
+        accumulated += event.delta;
+        onDelta(event.delta);
+      } else if (event.type === 'reasoning-delta' && typeof event.delta === 'string') {
+        accumulatedReasoning += event.delta;
+        onReasoningDelta?.(event.delta);
+      } else if (event.type === 'reasoning-end') {
+        onReasoningEnd?.();
+      } else if (event.type === 'error') {
+        settled = true;
+        onError(new ClaudeAgentTransportError({
+          type: 'error',
+          errorText: typeof event.errorText === 'string' ? event.errorText : 'Claude-agent error',
+          errorCode: typeof event.errorCode === 'string' ? event.errorCode : undefined,
+          retryable: typeof event.retryable === 'boolean' ? event.retryable : undefined,
+          retryAfterSeconds: typeof event.retryAfterSeconds === 'number'
+            ? event.retryAfterSeconds
+            : undefined,
+        }));
+        return false;
+      } else if (event.type === 'finish') {
+        settled = true;
+        onComplete(accumulated, accumulatedReasoning || undefined);
+        return false;
       }
+      return true;
+    });
+    if (!settled) {
+      onError(new Error('Claude-agent stream ended before finish'));
     }
-    onComplete(accumulated, accumulatedReasoning || undefined);
   } catch (err) {
     onError(err instanceof Error ? err : new Error(String(err)));
   }
 }
+
+/** Voice chat compatibility alias; product-neutral Writing calls the generic name. */
+export const chatWithVoiceSSE = streamClaudeAgentTurn;
 
 export interface VoiceChatResult {
   response: string;
@@ -1024,86 +1026,6 @@ export async function getPreferences(): Promise<UserPreferences> {
   }
 
   return await response.json() as UserPreferences;
-}
-
-/**
- * Get writing inspiration from a voice persona
- */
-export interface VoiceInspiration {
-  inspiration: string;
-  voice: string;
-  voice_key: string;
-  icon: string;
-  color: string;
-}
-
-export type VoiceInspirationResult = VoiceInspiration & {
-  /** Resolved thread is returned so the hook can reuse it before Deck state refreshes. */
-  thread_id: string;
-};
-
-export async function getSuggestion(
-  text: string,
-  voices: Record<string, VoiceConfig>,
-  metaPrompt?: string,
-  statePrompt?: string,
-  resolvedThreadIds?: ReadonlyMap<string, string>,
-  onSuggestionDelta?: (suggestion: VoiceInspirationResult) => void,
-): Promise<VoiceInspirationResult | null> {
-  const enabledVoices = Object.entries(voices).filter(([, voice]) => voice.enabled);
-  if (enabledVoices.length === 0) return null;
-
-  const selectedIndex = Math.floor(Math.random() * enabledVoices.length);
-  const [voiceKey, voice] = enabledVoices[selectedIndex];
-  const threadId = await ensureVoiceThread(
-    voiceKey,
-    voice.thread_id || resolvedThreadIds?.get(voiceKey),
-  );
-
-  let systemPrompt = `You are ${voice.name}, an inner voice persona.
-Your role: ${voice.systemPrompt}
-
-Read what the user just wrote and offer one very short, gentle nudge about what to write next.
-
-Rules:
-- Write one short sentence, no more than 15 words.
-- Be warm, conversational, and inspiring.
-- Suggest what to explore next; do not analyze, critique, or summarize the writing.
-- Return only the suggestion.`;
-
-  if (statePrompt?.trim()) {
-    systemPrompt += `\n\nEmotional context: ${statePrompt.trim()}`;
-  }
-  if (metaPrompt?.trim()) {
-    systemPrompt += `\n\nWriter's style: ${metaPrompt.trim()}`;
-  }
-
-  const message = `The user just wrote:\n\n${text}\n\nGive them one very short, gentle nudge about what to write next.`;
-  const buildResult = (inspiration: string): VoiceInspirationResult => ({
-    inspiration,
-    voice: voice.name,
-    voice_key: voiceKey,
-    icon: voice.icon,
-    color: voice.color,
-    thread_id: threadId,
-  });
-  let streamedInspiration = '';
-  const inspiration = await new Promise<string>((resolve, reject) => {
-    void chatWithVoiceSSE({
-      threadId,
-      message,
-      systemPrompt,
-      onDelta: (delta) => {
-        streamedInspiration += delta;
-        onSuggestionDelta?.(buildResult(streamedInspiration));
-      },
-      onComplete: (fullText) => resolve(fullText.trim()),
-      onError: reject,
-    });
-  });
-
-  if (!inspiration) return null;
-  return buildResult(inspiration);
 }
 
 /**

@@ -21,6 +21,7 @@
 // [Sync] 2026-08-29: add truthful Editor write failure and retained-input recovery copy.
 // [Sync] 2026-08-31: add safe structured Chat turn-error and Thread reload copy.
 // [Sync] 2026-08-31: remove the unused daily-picture generation status copy.
+// [Sync] 2026-09-01: add manual Writing suggestion trigger, lifecycle, and recovery copy.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -41,6 +42,21 @@ const resources = {
         more: 'More',
         friends: 'Friends',
         settings: 'Settings'
+      },
+      writingSuggestion: {
+        goDeeper: 'Go deeper',
+        loading: 'Going deeper…',
+        refresh: 'Refresh',
+        retry: 'Retry',
+        regionLabel: 'Writing suggestion',
+        threadTitle: 'Writing suggestions',
+        failed: 'The suggestion was interrupted. Your writing is unchanged.',
+        unavailable: 'Suggestions are unavailable right now.',
+        errors: {
+          threadCreate: 'The suggestion conversation could not be started. Try again.',
+          threadPersist: 'The suggestion conversation could not be saved. Try again.',
+          interrupted: 'The suggestion was interrupted. Your writing is unchanged.'
+        }
       },
       settings: {
         heading: 'The Voice Council',
@@ -868,6 +884,21 @@ const resources = {
         more: '更多',
         friends: '好友',
         settings: '设置'
+      },
+      writingSuggestion: {
+        goDeeper: '深入一下',
+        loading: '正在深入…',
+        refresh: '重新生成',
+        retry: '重试',
+        regionLabel: '写作建议',
+        threadTitle: '写作建议',
+        failed: '建议生成中断，你的正文未受影响。',
+        unavailable: '暂时无法生成建议。',
+        errors: {
+          threadCreate: '无法开始建议对话，请重试。',
+          threadPersist: '无法保存建议对话，请重试。',
+          interrupted: '建议生成中断，你的正文未受影响。'
+        }
       },
       settings: {
         heading: '心灵议会',

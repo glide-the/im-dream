@@ -1,0 +1,161 @@
+/* [Input] Writing suggestion component state classes and the shared Ink & Memory semantic color tokens. */
+/* [Output] Theme-aware, responsive, reduced-motion-safe manual trigger and suggestion Cell presentation. */
+/* [Pos] WritingSuggestionCell presentation in frontend/src/components/Editor. */
+/* [Sync] 2026-09-01: add restrained blue boundary/content styling for manual persistent suggestions. */
+
+.writing-suggestion-trigger {
+  display: flex;
+  align-items: center;
+  min-height: 3.5rem;
+  padding: 0.35rem 0 0.8rem;
+}
+
+.writing-suggestion-trigger__button,
+.writing-suggestion-cell__action {
+  min-height: 2.75rem;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  padding: 0.65rem 1.1rem;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.writing-suggestion-trigger__button {
+  background: var(--color-text-primary);
+  color: var(--color-text-on-action);
+}
+
+.writing-suggestion-trigger__button:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--color-text-primary) 88%, var(--color-action-link));
+}
+
+.writing-suggestion-trigger__button svg,
+.writing-suggestion-cell__action svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+}
+
+.writing-suggestion-trigger__button:focus-visible,
+.writing-suggestion-cell__action:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 3px;
+}
+
+.writing-suggestion-cell {
+  position: relative;
+  margin: 0.15rem 0 0.65rem;
+  padding: 0.35rem 0 0.5rem 1.2rem;
+  overflow-wrap: anywhere;
+}
+
+.writing-suggestion-cell::before {
+  content: '';
+  position: absolute;
+  inset: 0.25rem auto 0.5rem 0;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-action-link) 72%, var(--color-border-paper));
+}
+
+.writing-suggestion-cell__body {
+  min-width: 0;
+}
+
+.writing-suggestion-cell__content {
+  margin: 0;
+  color: var(--color-action-link);
+  font-family: 'Excalifont', 'Xiaolai', 'Georgia', serif;
+  font-size: 1.05rem;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.writing-suggestion-cell__content--previous {
+  opacity: 0.46;
+}
+
+.writing-suggestion-cell__streaming {
+  min-height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--color-action-link);
+}
+
+.writing-suggestion-cell__streaming svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  animation: writing-suggestion-pulse 1.2s ease-in-out infinite;
+}
+
+.writing-suggestion-cell__status-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.writing-suggestion-cell__error {
+  margin: 0.45rem 0 0;
+  color: var(--color-state-error);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.writing-suggestion-cell__action {
+  min-height: 2.5rem;
+  margin-top: 0.55rem;
+  padding: 0.45rem 0.85rem;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.writing-suggestion-cell__action:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+@keyframes writing-suggestion-pulse {
+  0%, 100% { opacity: 0.42; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 767px) {
+  .writing-suggestion-trigger {
+    min-height: 3.75rem;
+  }
+
+  .writing-suggestion-trigger__button,
+  .writing-suggestion-cell__action {
+    min-height: 2.75rem;
+  }
+
+  .writing-suggestion-cell {
+    padding-left: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .writing-suggestion-trigger__button,
+  .writing-suggestion-cell__action {
+    transition: none;
+  }
+
+  .writing-suggestion-cell__streaming svg {
+    animation: none;
+  }
+}

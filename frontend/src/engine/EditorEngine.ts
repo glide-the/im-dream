@@ -8,6 +8,8 @@
  *   can skip the next automatic save cycle.
  * [Sync] 2026-08-31: retire automatic PolyCLI voice analysis on text edits;
  *   Writing inspiration and explicit Thread Chat own model interaction.
+ * [Sync] 2026-09-01: add persistent WritingSuggestionCell sequencing and a
+ *   Session-owned Writing Thread while keeping all prose metrics TextCell-only.
  */
 
 // @@@ Core data model - cells + commentors + tasks + WeightPath
@@ -19,11 +21,13 @@ export interface EditorState {
   overlappedPhrases: string[];  // @@@ Phrases rejected due to overlap (feedback to backend)
   notFoundPhrases: string[];  // @@@ Phrases LLM suggested that were not found in text
   id: string;
+  /** Product-level Claude Agent Thread shared by every suggestion in this Session. */
+  writingThreadId?: string;
   selectedState?: string | null;  // @@@ Emotional state for this session (stored per-session)
   createdAt?: string;  // @@@ ISO timestamp when session was created
 }
 
-export type Cell = TextCell | WidgetCell;
+export type Cell = TextCell | WidgetCell | WritingSuggestionCell;
 
 export interface TextCell {
   id: string;
@@ -36,6 +40,34 @@ export interface WidgetCell {
   type: 'widget';
   widgetType: 'chat' | 'greeting' | 'other';
   data: unknown;  // Widget-specific data; consumers narrow by widgetType before use
+}
+
+export type WritingSuggestionStatus = 'idle' | 'streaming' | 'completed' | 'failed';
+
+export interface WritingSuggestionError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface WritingSuggestionAnchor {
+  textCellId: string;
+  textSnapshot: string;
+}
+
+export interface WritingSuggestionCell {
+  id: string;
+  type: 'writing-suggestion';
+  content: string;
+  status: WritingSuggestionStatus;
+  anchor: WritingSuggestionAnchor;
+  createdAt: string;
+  updatedAt: string;
+  error?: WritingSuggestionError;
+  /** Transient generation identity persisted only to reject stale responses safely. */
+  requestId?: string;
+  /** Completed content retained while Refresh waits for its first replacement delta. */
+  previousContent?: string;
 }
 
 export interface ChatMessage {
@@ -191,10 +223,12 @@ export class EditorEngine {
       .join('');
   }
 
-  // @@@ Detect when all text cells are empty and no other cells remain
+  // @@@ Detect when all text cells are empty and no user-authored widgets remain.
+  // Suggestions are derived content, so clearing the prose clears them and the
+  // Session-owned Writing Thread association together.
   private shouldResetEditorState(combinedText: string): boolean {
-    const hasNonTextCells = this.state.cells.some(cell => cell.type !== 'text');
-    if (hasNonTextCells) {
+    const hasUserWidgetCells = this.state.cells.some(cell => cell.type === 'widget');
+    if (hasUserWidgetCells) {
       return false;
     }
 
@@ -386,6 +420,148 @@ export class EditorEngine {
     }
   }
 
+  hasWritingSuggestionForTextCell(textCellId: string): boolean {
+    return this.state.cells.some(
+      (cell) => cell.type === 'writing-suggestion' && cell.anchor.textCellId === textCellId,
+    );
+  }
+
+  getWritingSuggestionCell(cellId: string): WritingSuggestionCell | undefined {
+    const cell = this.state.cells.find((candidate) => candidate.id === cellId);
+    return cell?.type === 'writing-suggestion' ? cell : undefined;
+  }
+
+  insertWritingSuggestionAfterTextCell(
+    textCellId: string,
+    textSnapshot: string,
+    requestId: string,
+  ): WritingSuggestionCell | null {
+    const cellIndex = this.state.cells.findIndex(
+      (cell) => cell.id === textCellId && cell.type === 'text',
+    );
+    if (cellIndex < 0 || textSnapshot.trim().length === 0) return null;
+    if (this.hasWritingSuggestionForTextCell(textCellId)) return null;
+
+    const timestamp = new Date().toISOString();
+    const suggestion: WritingSuggestionCell = {
+      id: generateId(),
+      type: 'writing-suggestion',
+      content: '',
+      status: 'streaming',
+      anchor: { textCellId, textSnapshot },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      requestId,
+    };
+
+    this.state.cells.splice(cellIndex + 1, 0, suggestion);
+    const cellAfterSuggestion = this.state.cells[cellIndex + 2];
+    if (!cellAfterSuggestion || cellAfterSuggestion.type !== 'text') {
+      this.state.cells.splice(cellIndex + 2, 0, {
+        id: generateId(),
+        type: 'text',
+        content: '',
+      });
+    }
+    this.notifyChange();
+    return suggestion;
+  }
+
+  beginWritingSuggestionRetry(cellId: string, requestId: string): WritingSuggestionCell | null {
+    const cell = this.getWritingSuggestionCell(cellId);
+    if (!cell || cell.status === 'streaming') return null;
+
+    cell.previousContent = cell.content || cell.previousContent;
+    cell.content = '';
+    cell.status = 'streaming';
+    cell.requestId = requestId;
+    cell.error = undefined;
+    cell.updatedAt = new Date().toISOString();
+    this.notifyChange();
+    return cell;
+  }
+
+  isWritingSuggestionRequestCurrent(
+    sessionId: string,
+    cellId: string,
+    requestId: string,
+    threadId?: string,
+  ): boolean {
+    if (this.state.id !== sessionId) return false;
+    if (threadId && this.state.writingThreadId !== threadId) return false;
+    return this.getWritingSuggestionCell(cellId)?.requestId === requestId;
+  }
+
+  appendWritingSuggestionDelta(
+    sessionId: string,
+    cellId: string,
+    requestId: string,
+    threadId: string,
+    delta: string,
+  ): boolean {
+    if (!delta || !this.isWritingSuggestionRequestCurrent(sessionId, cellId, requestId, threadId)) {
+      return false;
+    }
+    const cell = this.getWritingSuggestionCell(cellId);
+    if (!cell) return false;
+    cell.content += delta;
+    cell.updatedAt = new Date().toISOString();
+    this.notifyChange();
+    return true;
+  }
+
+  completeWritingSuggestion(
+    sessionId: string,
+    cellId: string,
+    requestId: string,
+    threadId: string,
+  ): boolean {
+    if (!this.isWritingSuggestionRequestCurrent(sessionId, cellId, requestId, threadId)) {
+      return false;
+    }
+    const cell = this.getWritingSuggestionCell(cellId);
+    if (!cell) return false;
+    cell.status = 'completed';
+    cell.requestId = undefined;
+    cell.previousContent = undefined;
+    cell.error = undefined;
+    cell.updatedAt = new Date().toISOString();
+    this.notifyChange();
+    return true;
+  }
+
+  failWritingSuggestion(
+    sessionId: string,
+    cellId: string,
+    requestId: string,
+    error: WritingSuggestionError,
+    threadId?: string,
+  ): boolean {
+    if (!this.isWritingSuggestionRequestCurrent(sessionId, cellId, requestId, threadId)) {
+      return false;
+    }
+    const cell = this.getWritingSuggestionCell(cellId);
+    if (!cell) return false;
+    if (cell.previousContent) {
+      cell.content = cell.previousContent;
+    }
+    cell.status = 'failed';
+    cell.requestId = undefined;
+    cell.previousContent = undefined;
+    cell.error = error;
+    cell.updatedAt = new Date().toISOString();
+    this.notifyChange();
+    return true;
+  }
+
+  setWritingThreadId(sessionId: string, threadId: string): boolean {
+    if (this.state.id !== sessionId || !threadId.trim()) return false;
+    if (this.state.writingThreadId && this.state.writingThreadId !== threadId) return false;
+    this.state.writingThreadId = threadId;
+    this.notifyChange();
+    return true;
+  }
+
   // @@@ Subscribe to state changes
   subscribe(callback: (state: EditorState) => void) {
     this.onStateChange = callback;
@@ -406,7 +582,40 @@ export class EditorEngine {
       throw new Error('EditorState.id is required when loading');
     }
     this.lastLoadSource = options.source ?? 'local';
-    this.state = { ...state };
+    const restoredAt = new Date().toISOString();
+    const cells = Array.isArray(state.cells) ? state.cells.map((cell) => {
+      if (cell.type !== 'writing-suggestion') return cell;
+      const restored: WritingSuggestionCell = {
+        ...cell,
+        content: typeof cell.content === 'string' ? cell.content : '',
+        status: cell.status === 'streaming' ? 'failed' : cell.status,
+        anchor: {
+          textCellId: cell.anchor?.textCellId ?? '',
+          textSnapshot: cell.anchor?.textSnapshot ?? '',
+        },
+        createdAt: cell.createdAt || restoredAt,
+        updatedAt: cell.status === 'streaming' ? restoredAt : (cell.updatedAt || restoredAt),
+        requestId: undefined,
+        previousContent: undefined,
+        ...(cell.status === 'streaming'
+          ? {
+              error: {
+                code: 'WRITING_SSE_INTERRUPTED',
+                message: 'The suggestion stream was interrupted.',
+                retryable: true,
+              },
+            }
+          : {}),
+      };
+      return restored;
+    }) : [];
+    this.state = {
+      ...state,
+      cells: cells.length > 0 ? cells : [{ id: generateId(), type: 'text', content: '' }],
+      ...(typeof state.writingThreadId === 'string' && state.writingThreadId.trim()
+        ? { writingThreadId: state.writingThreadId }
+        : { writingThreadId: undefined }),
+    };
     // @@@ Ensure overlappedPhrases field exists (migration for old state)
     if (!this.state.overlappedPhrases) {
       this.state.overlappedPhrases = [];

@@ -1,7 +1,7 @@
 # 编辑器会话模块设计梳理
 
 Status: Current
-Updated: 2026-08-31
+Updated: 2026-09-01
 Scope: 当前实现边界
 
 ---
@@ -24,7 +24,7 @@ Scope: 当前实现边界
 
 ### 1.1 背景
 
-Ink & Memory 是一个以写作体验为核心的应用。EditorEngine 在用户输入时只维护文档单元、历史评论兼容数据和本地 `weightPath`，不自动调用模型。当前模型交互由防抖 Writing 灵感和用户显式打开的 Voice Thread Chat 承担。编辑器会话（Edit Session）是文档状态与持久化协调的中枢。
+Ink & Memory 是一个以写作体验为核心的应用。EditorEngine 在用户输入时只维护文档单元、历史评论兼容数据和本地 `weightPath`，不自动调用模型。Writing 建议只能由用户点击 `Go deeper` 发起，并成为持久的 `WritingSuggestionCell`；同一 Writing Session 懒绑定并复用一个产品级 Claude Agent Thread。显式打开的 Voice Thread Chat 保持独立。编辑器会话（Edit Session）是文档状态与持久化协调的中枢。
 
 ### 1.2 目标
 
@@ -41,14 +41,14 @@ Ink & Memory 是一个以写作体验为核心的应用。EditorEngine 在用户
 
 | 层次 | 文件 | 职责 |
 |------|------|------|
-| 引擎层 | `frontend/src/engine/EditorEngine.ts` | 核心状态机：管理 cells、历史 commentors、tasks、weightPath；文本编辑只执行本地状态计算 |
+| 引擎层 | `frontend/src/engine/EditorEngine.ts` | 核心状态机：管理 Text/Widget/Suggestion cells、Session Writing Thread、历史 commentors、tasks、weightPath；文本编辑只执行本地状态计算 |
 | 引擎层 | `frontend/src/engine/ChatWidget.ts` | 嵌入式聊天小部件：管理单个 Voice 的对话历史 |
 | Hooks 层 | `frontend/src/hooks/useSessionLifecycle.ts` | 会话生命周期协调：初始化、加载、自动保存、新建、新一天检测 |
 | Hooks 层 | `frontend/src/hooks/useTextCells.ts` | 文本单元格管理：本地文本、IME 组合输入、粘贴、键盘事件 |
 | Hooks 层 | `frontend/src/hooks/useComments.ts` | 评论管理：分组、分页、星标/杀死、评论聊天 |
-| Hooks 层 | `frontend/src/hooks/useInspiration.ts` | 写作灵感提示 |
+| Hooks 层 | `frontend/src/hooks/useWritingSuggestions.ts` | 手动建议控制器：Thread 懒创建/持久化、SSE、重试和过期响应隔离 |
 | Hooks 层 | `frontend/src/hooks/useVoiceInput.ts` | 语音输入 |
-| API 层 | `frontend/src/api/voiceApi.ts` | 后端 API 调用：Claude SSE Writing 灵感/Voice 对话、saveSession、listSessions、getSession |
+| API 层 | `frontend/src/api/voiceApi.ts` | 后端 API 调用：共享 Claude Agent SSE turn、Voice 对话、saveSession、listSessions、getSession |
 | 后端 API | `backend/server.py` → `/api/sessions/*` | 会话持久化：CRUD |
 | 持久化层 | `backend/database.py` | SQLite/DB 操作 |
 
@@ -63,7 +63,8 @@ Ink & Memory 是一个以写作体验为核心的应用。EditorEngine 在用户
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `id` | `string` | 会话唯一 ID（UUID） |
-| `cells` | `Cell[]` | 文档单元格列表（TextCell \| WidgetCell） |
+| `cells` | `Cell[]` | 文档单元格列表（TextCell \| WidgetCell \| WritingSuggestionCell） |
+| `writingThreadId` | `string?` | 当前 Writing Session 唯一的产品级 Claude Agent Thread 引用；首次手动生成时懒创建 |
 | `commentors` | `Commentor[]` | 已计算/已应用的评论列表 |
 | `tasks` | `Task[]` | 当前运行中的后台任务（分析、搜索等） |
 | `weightPath` | `WeightEntry[]` | 能量增长路径（时序快照） |
@@ -74,12 +75,13 @@ Ink & Memory 是一个以写作体验为核心的应用。EditorEngine 在用户
 
 ### 3.2 Cell（文档单元格）
 
-文档由 Cell 数组线性组成，分为两种类型：
+文档由 Cell 数组线性组成，分为三种类型：
 
 | 类型 | 结构 | 职责 |
 |------|------|------|
 | `TextCell` | `{id, type:'text', content:string}` | 可编辑纯文本区域 |
 | `WidgetCell` | `{id, type:'widget', widgetType, data}` | 嵌入式交互部件（chat/greeting/other） |
+| `WritingSuggestionCell` | `{id, type:'writing-suggestion', content, status, anchor, createdAt, updatedAt, error?}` | 只读、可恢复、可持久化的产品级写作建议；不参与正文与 Weight/Energy |
 
 设计约束：数组中不能出现连续两个 TextCell（`mergeConsecutiveTextCells` 自动合并）。
 
@@ -138,7 +140,7 @@ Engine 不保存模型客户端、请求队列或自动分析缓存。已持久�
 | F4 | @ 触发 Voice 选择 | `handleKeyDown` + `AgentDropdown` | 键入 `@` |
 | F5 | 插入 ChatWidget | `engine.insertWidgetAtCursor` | 选择 Voice 后 |
 | F6 | 能量计算 | `computeWeight` + `applyTextUpdate` | 每次文本变更 |
-| F7 | Writing 灵感 SSE | `useInspiration` + `chatWithVoiceSSE` | 停止输入 2 秒后 |
+| F7 | Writing 手动建议 SSE | `useWritingSuggestions` + `streamClaudeAgentTurn` | 用户点击 `Go deeper` 或建议 Cell 的 Refresh/Retry |
 | F8 | 历史评论高亮与分组 | `useComments.commentGroups` | 加载含 commentors 的旧会话 |
 | F9 | 历史评论显式对话 | `handleCommentChatSend` | 用户发送消息，复用 Voice Thread |
 | F10 | 评论分页导航 | `handleGroupNavigate` | 用户点击翻页 |
@@ -169,7 +171,7 @@ Engine 不保存模型客户端、请求队列或自动分析缓存。已持久�
 | **创建** | 应用启动 / 新一天 / 用户新建 | `buildBlankState()` → `engine.loadState()` | EditorState 初始化，`id` 分配，`createdAt` 记录 |
 | **激活** | 加载成功 | `engine.subscribe()` 绑定，React state 同步 | Engine 进入订阅状态，UI 渲染 |
 | **编辑** | 用户键入/粘贴/语音 | `updateTextCell()` → 本地权重计算 | cells 变更，weightPath 增长，不发网络请求 |
-| **灵感等待/流式显示** | 停止输入约 2 秒 | Voice Thread SSE `text-delta` | `currentInspiration` 逐段增长，正文变化时丢弃旧流 |
+| **建议流式显示** | 用户点击 `Go deeper` / Refresh | 先插入 Suggestion Cell；Session Thread SSE `text-delta` | 绑定点击快照与 Session/Cell/request/Thread，逐段写入原 Cell；不阻塞后续编辑 |
 | **历史评论兼容** | 加载旧会话 | 读取既有 commentors | UI 可继续高亮、反馈和显式对话，不自动新增评论 |
 | **保存** | 3s 防抖 / 手动 / 新建前 | `saveSessionToDatabase()` | `id` 可能更新（首次保存），DB 持久化 |
 | **结束** | 新一天 / 用户新建 / 内容清空 | 保存当前 → `buildBlankState()` → 新 `id` | Engine 重置，React state 清空 |
@@ -197,20 +199,20 @@ Engine 不保存模型客户端、请求队列或自动分析缓存。已持久�
         → weightPath.push(entry)
         → notifyChange()  // 触发 React re-render
   → textarea resize
-  → Inspiration hint update
+  → 不启动计时器，不发送模型请求
 ```
 
-### 6.2 Writing 灵感流
+### 6.2 Writing 手动建议流
 
 ```
-useInspiration.onTextChange:
-  cancel previous debounce
-  after 2 seconds:
-    select one enabled Voice and reuse/create its Thread
-    → POST /api/claude-agent (SSE)
-    ← text-delta: append and display immediately
-    ← finish: settle final text
-    before every projection: require live editor text == request snapshot
+用户点击 Go deeper:
+  → EditorEngine 在锚点 TextCell 后同步插入 streaming Suggestion Cell
+  → useWritingSuggestions 获取/懒创建 Session writingThreadId
+  → 先保存含 Thread 关联的 EditorState（失败则 fail closed）
+  → POST /api/claude-agent (SSE)
+  ← text-delta: 仅在 Session + Cell + request + Thread 均匹配时追加
+  ← finish: 原 Cell 进入 completed
+  × 普通输入、IME、粘贴、回车、标点、停止输入：均无请求
 ```
 
 ### 6.3 保存事件链
@@ -432,7 +434,8 @@ flowchart LR
 | 自动保存 3s 防抖 | `hooks/useSessionLifecycle.ts` | L487–517 |
 | 竞态守卫 | `hooks/useSessionLifecycle.ts` | L494–499 |
 | 新一天检测 | `hooks/useSessionLifecycle.ts` | L339–368 |
-| Writing 灵感 SSE | `api/voiceApi.ts` | `getSuggestion` 逐段转发 `text-delta` |
+| Writing 手动建议 | `hooks/useWritingSuggestions.ts` | 首次点击懒创建/持久化 Session Thread；Session/Cell/request/Thread 四元组隔离响应 |
+| Suggestion Cell 状态机 | `engine/EditorEngine.ts` | `insertWritingSuggestionAfterTextCell`、delta/complete/fail/retry 与 reload 恢复 |
 | 会话持久化 API | `api/voiceApi.ts` | L389–467 `saveSession/listSessions/getSession` |
 | WidgetCell 类型 | `engine/EditorEngine.ts` | L24 `WidgetCell.widgetType` |
 | IME 保护 | `hooks/useTextCells.ts` | L105–126 `handleCompositionStart/End` |

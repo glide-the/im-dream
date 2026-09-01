@@ -2,6 +2,7 @@
 // [Output] Typed create/list/delete helpers shared by Chat history and Deck related-conversation management.
 // [Pos] Chat history transport owner in frontend/src/api.
 // [Sync] 2026-08-17: centralize Chat history transport and expose actor-scoped Deck filtering.
+// [Sync] 2026-09-01: allow product-owned Thread titles without attaching a Deck or Voice.
 
 import { getAuthToken } from '../contexts/AuthContext';
 import { API_BASE } from '../lib/apiBase';
@@ -35,7 +36,11 @@ function authHeaders(): HeadersInit {
   return { Authorization: `Bearer ${getAuthToken()}` };
 }
 
-export async function createChatThread(deckId?: string, voiceId?: string): Promise<string | null> {
+export async function createChatThread(
+  deckId?: string,
+  voiceId?: string,
+  title?: string,
+): Promise<string | null> {
   try {
     const response = await fetch(`${API_BASE}/api/claude-agent/threads`, {
       method: 'POST',
@@ -43,7 +48,11 @@ export async function createChatThread(deckId?: string, voiceId?: string): Promi
         ...authHeaders(),
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(deckId ? { deckId, ...(voiceId ? { voiceId } : {}) } : {}),
+      body: JSON.stringify({
+        ...(deckId ? { deckId } : {}),
+        ...(voiceId ? { voiceId } : {}),
+        ...(title?.trim() ? { title: title.trim() } : {}),
+      }),
     });
     if (!response.ok) return null;
     const data = await response.json() as { thread_id?: string };

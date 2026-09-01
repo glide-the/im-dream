@@ -8,6 +8,8 @@
 //                    immediate pre-Agent persistence barrier for editor snapshots.
 // [Sync] 2026-09-01: centralize intentional persisted-note activation so calendar
 //                    and Editor completion jumps retain exact session identity.
+// [Sync] 2026-09-01: include the Session-owned Writing suggestion Thread in
+//                    persistence signatures and saved EditorState snapshots.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorEngine } from '../engine/EditorEngine';
 import type { EditorState, TextCell } from '../engine/EditorEngine';
@@ -27,6 +29,7 @@ function createSessionId() {
 export function getEditorStatePersistenceSignature(editorState: EditorState): string {
   return JSON.stringify({
     id: editorState.id,
+    writingThreadId: editorState.writingThreadId ?? null,
     cells: editorState.cells,
     commentors: editorState.commentors,
     tasks: editorState.tasks,
