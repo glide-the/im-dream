@@ -37,8 +37,9 @@
 // [Sync] 2026-08-25: submit the same-origin MCP OAuth callback automatically by non-secret operation ID; users never copy authorization URLs.
 // [Sync] 2026-08-31: remove the standalone legacy app-view path; authenticated navigation stays in StoryWorkspaceSidebar, and Writing's existing ChatWidgetUI layout opens linked Threads in a resizable right-side ChatView.
 // [Sync] 2026-08-31: pass enabled Voice configs to historical comment chat and stream Writing inspiration deltas in place.
-// [Sync] 2026-08-31: reconcile connector detail state on every Story Workspace
-//                    route change and keep completed Editor jumps repeatable on canonical Writing.
+// [Sync] 2026-08-31: reconcile connector detail state on every Story Workspace route change.
+// [Sync] 2026-09-01: completed Editor jumps activate their exact persisted
+//                    Editor Session before canonical Writing focuses the target cell.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -96,6 +97,10 @@ import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
   EDITOR_WRITE_EVENT_FALLBACK_TIMEOUT_MS,
 } from './constants/sessionSync';
+import {
+  parseEditorJumpToCellDetail,
+  type EditorJumpToCellDetail,
+} from './components/chat/editorWriteTools';
 
 // @@@ Icon map with React Icons
 const iconMap = {
@@ -351,6 +356,7 @@ export default function App() {
     getFirstLineFromState,
     saveSessionToDatabase,
     ensureSessionPersistedForAgent,
+    loadPersistedEditorSession,
     startDetachedBlankSession,
     handleNewSession,
     confirmStartFresh
@@ -836,23 +842,18 @@ export default function App() {
   }, [ensureStateForPersistence, getFirstLineFromState, isAuthenticated, saveSessionToDatabase]);
 
   const handleLoadEntry = useCallback((entry: CalendarEntry) => {
-    if (!engineRef.current) return;
-
-    const nextState: EditorState = {
-      ...entry.state,
-      id: entry.id,
-      createdAt: entry.state.createdAt ?? new Date().toISOString()
-    };
-
-    engineRef.current.loadState(nextState);
-    setCurrentSessionLabels(entry.labels ?? []);
-    if (nextState.selectedState !== undefined) {
-      setSelectedState(nextState.selectedState);
-    }
-
+    const loaded = loadPersistedEditorSession({
+      sessionId: entry.id,
+      editorState: {
+        ...entry.state,
+        createdAt: entry.state.createdAt ?? new Date().toISOString(),
+      },
+      labels: entry.labels,
+    });
+    if (!loaded) return;
     setRefsReady(prev => prev + 1);
     setShowCalendarPopup(false);
-  }, []);
+  }, [loadPersistedEditorSession, setRefsReady]);
 
   const handleCalendarEntryDeleted = useCallback((entryId: string) => {
     if (!entryId || !engineRef.current) return;
@@ -969,14 +970,38 @@ export default function App() {
 
   // @@@ Jump to a specific cell in the writing view (triggered by editor:jump-to-cell custom event)
   const jumpToCellRef = useRef<string | null>(null);
+  const jumpToCellSequenceRef = useRef(0);
   const [jumpToCellRequestNonce, setJumpToCellRequestNonce] = useState(0);
+
+  const activateEditorJumpTarget = useCallback(async (target: EditorJumpToCellDetail) => {
+    if (!engineRef.current) return false;
+    if (!target.editorSessionId || engineRef.current.getState().id === target.editorSessionId) {
+      return true;
+    }
+    if (!isAuthenticated) return false;
+
+    try {
+      await ensureSessionPersistedForAgent();
+      const { getSession } = await import('./api/voiceApi');
+      const session = await getSession(target.editorSessionId);
+      if (!session.editor_state) return false;
+      return loadPersistedEditorSession({
+        sessionId: target.editorSessionId,
+        editorState: session.editor_state,
+        labels: session.labels,
+      });
+    } catch (error) {
+      console.error('Failed to open the Editor session for a completed write:', error);
+      return false;
+    }
+  }, [engineRef, ensureSessionPersistedForAgent, isAuthenticated, loadPersistedEditorSession]);
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const cellId = (e as CustomEvent<{ cellId: string }>).detail?.cellId;
-      if (!cellId) return;
-      jumpToCellRef.current = cellId;
-      setJumpToCellRequestNonce((value) => value + 1);
+      const target = parseEditorJumpToCellDetail((e as CustomEvent<unknown>).detail);
+      if (!target) return;
+      const sequence = jumpToCellSequenceRef.current + 1;
+      jumpToCellSequenceRef.current = sequence;
       if (window.location.pathname + window.location.search !== STORY_WORKSPACE_PATHS.writing) {
         window.history.pushState(
           { inkDreamView: 'story-workspace' },
@@ -986,10 +1011,16 @@ export default function App() {
       }
       window.dispatchEvent(new PopStateEvent('popstate'));
       setWritingRouteActive(true);
+
+      void activateEditorJumpTarget(target).then((isReady) => {
+        if (!isReady || jumpToCellSequenceRef.current !== sequence) return;
+        jumpToCellRef.current = target.cellId;
+        setJumpToCellRequestNonce((value) => value + 1);
+      });
     };
     window.addEventListener('editor:jump-to-cell', handler);
     return () => window.removeEventListener('editor:jump-to-cell', handler);
-  }, []);
+  }, [activateEditorJumpTarget]);
 
   useEffect(() => {
     if (!writingRouteActive || !jumpToCellRef.current) return;

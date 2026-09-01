@@ -9,8 +9,8 @@
 //                    original positions and continue using the existing routes.
 // [Sync] 2026-08-15: assert those restored entries live under the More disclosure.
 // [Sync] 2026-08-16: allow the restored Deck maintenance popup to hand its selected Agent to Chat.
-// [Sync] 2026-08-31: require completed Editor writes to enter the sidebar-owned
-//                    Writing route and keep the retired desktop top bar absent.
+// [Sync] 2026-09-01: require completed Editor writes to activate the exact note
+//                    before entering the sidebar-owned Writing target cell.
 // [Sync] 2026-08-31: follow the Settings return control's localized accessible label.
 // [Sync] 2026-08-31: lock the single Story Workspace shell, unchanged ChatWidgetUI layout, and resizable Writing Thread Chat handoff.
 
@@ -22,6 +22,7 @@ const SIDEBAR = readFileSync(new URL('../StoryWorkspaceSidebar.tsx', import.meta
 const ROUTER = readFileSync(new URL('../../../../router/story-workspace.tsx', import.meta.url), 'utf8');
 const APP = readFileSync(new URL('../../../../App.tsx', import.meta.url), 'utf8');
 const EDITOR_WRITE = readFileSync(new URL('../../../chat/EditorWriteApprovalUI.tsx', import.meta.url), 'utf8');
+const SESSION_LIFECYCLE = readFileSync(new URL('../../../../hooks/useSessionLifecycle.ts', import.meta.url), 'utf8');
 const PATHS = readFileSync(new URL('../../../../router/storyWorkspacePath.ts', import.meta.url), 'utf8');
 const SUBSCRIPTION = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSubscriptionPage.tsx', import.meta.url), 'utf8');
 const SETTINGS = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSettingsPage.tsx', import.meta.url), 'utf8');
@@ -183,10 +184,17 @@ test('writing keeps the existing ChatWidgetUI layout and opens canonical Chat in
   expect(RESIZE_HOOK).toContain('window.localStorage.setItem(storageKey');
 });
 
-test('completed Editor writes use the canonical sidebar Writing route without the retired top bar', () => {
+test('completed Editor writes open their exact note through canonical Writing', () => {
   expect(EDITOR_WRITE).toContain("window.dispatchEvent(new CustomEvent('editor:jump-to-cell'");
+  expect(EDITOR_WRITE).toContain('{ detail: jumpTarget }');
   expect(APP).toContain("window.addEventListener('editor:jump-to-cell', handler)");
   expect(APP).toContain('STORY_WORKSPACE_PATHS.writing');
+  expect(APP).toContain('await ensureSessionPersistedForAgent()');
+  expect(APP).toContain('await getSession(target.editorSessionId)');
+  expect(APP).toContain('sessionId: target.editorSessionId');
+  expect(APP).toContain('activateEditorJumpTarget(target).then((isReady)');
+  expect(SESSION_LIFECYCLE).toContain("loadState(normalizedState, { source: 'remote' })");
+  expect(SESSION_LIFECYCLE).toContain('ensuredSessionForDayRef.current = getTodayKeyInTimezone(');
   expect(APP).toContain('setJumpToCellRequestNonce((value) => value + 1)');
   expect(APP).toContain('setWritingRouteActive(true)');
   expect(APP).toContain('[jumpToCellRequestNonce, writingRouteActive]');

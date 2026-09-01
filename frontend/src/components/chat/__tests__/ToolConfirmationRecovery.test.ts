@@ -2,6 +2,8 @@
 // [Output] Regression coverage for ordered reasoning replay, editor tool failures, and already-resolved confirmations.
 // [Pos] Generic Chat confirmation recovery TDD seam.
 // [Sync] 2026-08-31: lock structured SSE error identity without parsing display strings.
+// [Sync] 2026-09-01: lock completed Editor jump intents to their exact persisted
+//                    session as well as the target cell.
 
 import { expect, test } from '@playwright/test';
 import type { DynamicToolUIPart } from 'ai';
@@ -29,7 +31,11 @@ import {
   runtimePendingToolCallIdsFromStatus,
 } from '../toolConfirmation';
 import { getEditorStatePersistenceSignature } from '../../../hooks/useSessionLifecycle';
-import { parseEditorWriteResult } from '../editorWriteTools';
+import {
+  parseEditorJumpToCellDetail,
+  parseEditorWriteResult,
+  resolveEditorWriteJumpTarget,
+} from '../editorWriteTools';
 
 const stalePart: DynamicToolUIPart = {
   type: 'dynamic-tool',
@@ -121,6 +127,26 @@ test('editor write result parser unwraps the stdio business result envelope', ()
     .toEqual({ ok: true, cellId: 'cell-a', recovered: true });
   expect(parseEditorWriteResult({ content: [{ type: 'image', data: 'ignored' }] }))
     .toBeNull();
+});
+
+test('completed editor write jump keeps the target session and cell together', () => {
+  expect(resolveEditorWriteJumpTarget(
+    'mcp__editor__write_segment',
+    { editor_session_id: 'session-history', cellId: 'cell-input' },
+    { ok: true, cellId: 'cell-output' },
+  )).toEqual({
+    cellId: 'cell-output',
+    editorSessionId: 'session-history',
+  });
+
+  expect(parseEditorJumpToCellDetail({
+    cellId: ' cell-output ',
+    editorSessionId: ' session-history ',
+  })).toEqual({
+    cellId: 'cell-output',
+    editorSessionId: 'session-history',
+  });
+  expect(parseEditorJumpToCellDetail({ editorSessionId: 'session-history' })).toBeNull();
 });
 
 test('editor persistence signature includes session identity', () => {

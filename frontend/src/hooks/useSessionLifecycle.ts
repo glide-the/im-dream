@@ -1,11 +1,13 @@
 // [Input] Auth state, browser timezone, editor engine, session API helpers, and voice preference setters.
-// [Output] Provide editor session lifecycle state, persistence helpers, and current user_session metadata.
+// [Output] Provide editor session lifecycle state, persistence helpers, exact persisted-session activation, and current user_session metadata.
 // [Pos] session-lifecycle hook in frontend/src/hooks
 // [Sync] 2026-06-01: expose current user_session.labels for the writing view StateChooser.
 // [Sync] 2026-06-14: skip one automatic save after remote Agent-write session reload.
 // [Sync] 2026-06-14: avoid scheduling auto-save debounce when the editor content signature is unchanged.
 // [Sync] 2026-08-13: scope persistence signatures by session id and expose an
 //                    immediate pre-Agent persistence barrier for editor snapshots.
+// [Sync] 2026-09-01: centralize intentional persisted-note activation so calendar
+//                    and Editor completion jumps retain exact session identity.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorEngine } from '../engine/EditorEngine';
 import type { EditorState, TextCell } from '../engine/EditorEngine';
@@ -58,6 +60,12 @@ interface UseSessionLifecycleParams {
   browserTimezone: string;
   setVoiceConfigs: SetVoiceConfigs;
   setStateConfig: SetStateConfig;
+}
+
+interface PersistedEditorSession {
+  sessionId: string;
+  editorState: EditorState;
+  labels?: SessionLabels;
 }
 
 export function useSessionLifecycle({
@@ -164,6 +172,30 @@ export function useSessionLifecycle({
     clearAutoSaveTimer();
     await saveSessionToDatabase(editorState);
   }, [clearAutoSaveTimer, isAuthenticated, saveSessionToDatabase]);
+
+  const loadPersistedEditorSession = useCallback(({
+    sessionId,
+    editorState,
+    labels = [],
+  }: PersistedEditorSession): boolean => {
+    if (!engineRef.current || !sessionId) return false;
+
+    const normalizedState: EditorState = {
+      ...editorState,
+      id: sessionId,
+    };
+    clearAutoSaveTimer();
+    ensuredSessionForDayRef.current = getTodayKeyInTimezone(
+      userTimezoneRef.current || browserTimezone,
+    );
+    engineRef.current.loadState(normalizedState, { source: 'remote' });
+    markSessionPersisted(normalizedState);
+    setState({ ...engineRef.current.getState() });
+    setLocalTexts(collectTextCellContent(normalizedState));
+    setCurrentSessionLabels(labels);
+    setSelectedState(normalizedState.selectedState ?? null);
+    return true;
+  }, [browserTimezone, clearAutoSaveTimer, markSessionPersisted]);
 
   const buildBlankState = useCallback((options: { preserveSelectedState?: boolean; selectedStateOverride?: string | null } = {}): EditorState => {
     const {
@@ -661,6 +693,7 @@ export function useSessionLifecycle({
     saveSessionToDatabase,
     persistSessionImmediately,
     ensureSessionPersistedForAgent,
+    loadPersistedEditorSession,
     startDetachedBlankSession,
     handleNewSession,
     confirmStartFresh,

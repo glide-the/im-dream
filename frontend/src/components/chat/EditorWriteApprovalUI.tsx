@@ -9,11 +9,14 @@
 //        states) resolves through the chat.editorWrite namespace (en + zh) via useTranslation.
 // [Sync] 2026-08-29: render truthful Editor failure guidance and retain the
 //        approved-but-unwritten input preview without exposing backend internals.
-// [Sync] 2026-08-31: completed-card note jumps remain target-cell intents while
-//        App resolves them through the canonical Story Workspace Writing route.
+// [Sync] 2026-09-01: completed-card note jumps carry the exact Editor Session
+//        with the target cell so Writing opens historical notes before focusing.
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { EditorWriteResult } from './editorWriteTools';
+import {
+  resolveEditorWriteJumpTarget,
+  type EditorWriteResult,
+} from './editorWriteTools';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -472,13 +475,6 @@ const COMPLETED_LABEL_KEY: Record<string, string> = {
   'mcp__editor__reply_to_comment': 'chat.editorWrite.completed.replyComment',
 };
 
-function resolveTargetCellId(toolName: string, input: Record<string, unknown>, output: EditorWriteOutput): string | null {
-  if (output.cellId) return output.cellId;
-  if (typeof input.cellId === 'string') return input.cellId;
-  if (toolName === 'mcp__editor__reply_to_comment' && typeof input.commentId === 'string') return input.commentId;
-  return null;
-}
-
 function failureMessageKey(error: string | undefined): string {
   if (error === 'cell_not_found' || error === 'comment_not_found' || error === 'after_cell_not_found') {
     return 'chat.editorWrite.failureTargetMissing';
@@ -498,7 +494,8 @@ export function EditorWriteCompletedCard({ toolName, input, output }: EditorWrit
   const labelKey = COMPLETED_LABEL_KEY[name];
   const label = labelKey ? t(labelKey) : toolName;
   const isSuccess = output.ok !== false;
-  const targetCellId = resolveTargetCellId(name, input, output);
+  const jumpTarget = resolveEditorWriteJumpTarget(name, input, output);
+  const targetCellId = jumpTarget?.cellId ?? null;
   const reason = output.reason ?? (typeof input.reason === 'string' ? input.reason : undefined);
   const retainedInput = typeof input.text === 'string'
     ? input.text
@@ -507,8 +504,8 @@ export function EditorWriteCompletedCard({ toolName, input, output }: EditorWrit
       : null;
 
   const handleJumpToCell = () => {
-    if (!targetCellId) return;
-    window.dispatchEvent(new CustomEvent('editor:jump-to-cell', { detail: { cellId: targetCellId } }));
+    if (!jumpTarget) return;
+    window.dispatchEvent(new CustomEvent('editor:jump-to-cell', { detail: jumpTarget }));
   };
 
   return (
