@@ -1,7 +1,7 @@
 // [Input] Validated historical turn projection and a deliberately heavy lazy part renderer.
 // [Output] Browser proof for final-only default mount, accessibility, order, unmount, and anchor stability.
 // [Pos] Shared Chat/Dream historical-turn interaction acceptance seam.
-// [Sync] 2026-09-02: created for the approved process disclosure interaction.
+// [Sync] 2026-09-02: cover the full projection fields and approved disclosure interaction.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node harness imports Node APIs outside the browser tsconfig.
@@ -48,6 +48,8 @@ test('collapsed history mounts only final and keyboard expansion mounts exact pr
           turnKey: 'turn-stable',
           finalPartIndex: 3,
           processPartIndexes: [0, 1, 2],
+          processAvailable: true,
+          deferredProcess: false,
           durationMs: 3200,
         },
         expanded,

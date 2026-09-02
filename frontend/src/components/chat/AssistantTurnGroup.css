@@ -1,7 +1,7 @@
 /* [Input] Shared Chat color tokens and AssistantTurnGroup state attributes. */
 /* [Output] Low-interruption historical process disclosure matching Chat/Dream themes. */
 /* [Pos] Shared historical assistant turn styles for both ChatPanel hosts. */
-/* [Sync] 2026-09-02: created; process height is never animated or hidden in CSS. */
+/* [Sync] 2026-09-02: add compact loading/error/retry treatment for lazy process detail. */
 
 .chat-assistant-turn {
   width: 100%;
@@ -81,6 +81,30 @@
 
 .chat-assistant-turn__final {
   padding-top: 1rem;
+}
+
+.chat-assistant-turn__process-state {
+  display: flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.chat-assistant-turn__process-state button {
+  padding: 0.25rem 0.65rem;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-neutral);
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.chat-assistant-turn__process-state button:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

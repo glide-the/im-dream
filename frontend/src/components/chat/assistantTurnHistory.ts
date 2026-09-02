@@ -1,7 +1,7 @@
 // [Input] Hydrated AI SDK UIMessage plus server-owned Chat turn metadata.
-// [Output] Pure, fail-closed projection of one historical assistant turn into process/final indexes.
+// [Output] Pure, fail-closed projection of full or final-only historical assistant turns.
 // [Pos] Shared history-turn protocol node used by every ChatPanel/ChatMessageList host.
-// [Sync] 2026-09-02: created for completed-turn final projection without rendering hidden process DOM.
+// [Sync] 2026-09-02: support server-owned final-only v1 rows whose process loads on expansion.
 
 import { isToolUIPart, type UIMessage } from 'ai';
 import type { ChatMetadata } from '../../lib/chat-schema';
@@ -10,6 +10,8 @@ export interface HistoricalAssistantTurnProjection {
   readonly turnKey: string;
   readonly finalPartIndex: number;
   readonly processPartIndexes: readonly number[];
+  readonly processAvailable: boolean;
+  readonly deferredProcess: boolean;
   readonly durationMs: number | null;
 }
 
@@ -67,6 +69,41 @@ export function projectHistoricalAssistantTurn(
     : {};
   if (metadata.is_partial === true || metadata.turnProjectionInvalid === true) return null;
 
+  if (metadata.historyProjectionVersion === 1) {
+    if (typeof metadata.historyProcessAvailable !== 'boolean'
+      || message.parts.length !== 1
+      || message.parts[0]?.type !== 'text'
+      || typeof message.parts[0].text !== 'string'
+      || !message.parts[0].text.trim()) {
+      return null;
+    }
+    const hasCompletionEnvelope = (
+      hasOwn(metadata, 'turnId')
+      || hasOwn(metadata, 'turnStatus')
+      || hasOwn(metadata, 'finalPartIndex')
+      || hasOwn(metadata, 'durationMs')
+      || hasOwn(metadata, 'turnProjectionInvalid')
+    );
+    if (hasCompletionEnvelope && (
+      metadata.turnStatus !== 'completed'
+      || typeof metadata.turnId !== 'string'
+      || !metadata.turnId
+      || !Number.isInteger(metadata.finalPartIndex)
+      || (metadata.finalPartIndex as number) < 0
+      || metadata.historyProcessAvailable !== ((metadata.finalPartIndex as number) > 0)
+    )) return null;
+    return {
+      turnKey: typeof metadata.turnId === 'string' && metadata.turnId
+        ? metadata.turnId
+        : message.id,
+      finalPartIndex: 0,
+      processPartIndexes: [],
+      processAvailable: metadata.historyProcessAvailable,
+      deferredProcess: metadata.historyProcessAvailable,
+      durationMs: validDuration(metadata.durationMs),
+    };
+  }
+
   const strictFinalIndex = resolveCompletedFinalPartIndex(message);
   const hasNewProjection = (
     hasOwn(metadata, 'turnId')
@@ -102,6 +139,8 @@ export function projectHistoricalAssistantTurn(
     processPartIndexes: message.parts
       .map((_part, index) => index)
       .filter((index) => index !== finalPartIndex),
+    processAvailable: finalPartIndex > 0,
+    deferredProcess: false,
     durationMs,
   };
 }

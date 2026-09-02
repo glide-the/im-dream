@@ -7,6 +7,7 @@
 // [Sync] 2026-09-01: carry canonical trusted/stale cleanup facts on project-root repairs.
 // [Sync] 2026-09-02: type server-owned turn completion/final/duration metadata
 //                    used by the shared historical assistant turn projector.
+// [Sync] 2026-09-02: type read-only final projection flags used to defer process hydration.
 import type { LanguageModelUsage, UIMessage } from 'ai';
 
 export type ChatAttachment = {
@@ -72,6 +73,8 @@ export type ChatMetadata = {
   finalPartIndex?: number;
   durationMs?: number;
   turnProjectionInvalid?: boolean;
+  historyProjectionVersion?: 1;
+  historyProcessAvailable?: boolean;
   projectCleanup?: {
     trustedProjectSlug: string;
     staleProjectSlugs: string[];

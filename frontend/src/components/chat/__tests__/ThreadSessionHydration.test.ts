@@ -1,7 +1,7 @@
 // [Input] Persisted canonical thread rows shared by Chat and Dream.
 // [Output] Exact private-row and visible-part filtering contract.
 // [Pos] Shared thread hydration visibility regression seam.
-// [Sync] 2026-09-02: cover paged history metadata and stable session snapshots.
+// [Sync] 2026-09-02: cover final-only flags, exact-id process fetch, and stable snapshots.
 
 import { expect, test } from '@playwright/test';
 import type { UIMessage } from 'ai';
@@ -11,6 +11,7 @@ import {
   claudeThreadHydrationRetryDelayMs,
   claudeThreadPartIsVisible,
   fetchClaudeThreadMessages,
+  fetchClaudeThreadMessageProcess,
   fetchFullClaudeThreadMessages,
   fetchClaudeThreadStatus,
   filterClaudeThreadVisibleMessages,
@@ -76,6 +77,74 @@ test('history transport requests one page, preserves large bodies, and keeps ful
     } else {
       delete (globalThis as { window?: Window }).window;
     }
+  }
+});
+
+test('final-only page maps read-only flags and process detail uses exact message id', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const urls: string[] = [];
+  try {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: { getItem: () => 'test-token' },
+    });
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { __INK_RUNTIME_CONFIG__: { apiBaseUrl: 'http://chat.test' } },
+    });
+    globalThis.fetch = (async (input) => {
+      urls.push(String(input));
+      const detail = String(input).endsWith('/messages/assistant%2F1/process');
+      return new Response(JSON.stringify(detail ? {
+        id: 'assistant/1',
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'work' },
+          { type: 'text', text: 'answer' },
+        ],
+        metadata: {
+          turnId: 'turn-1',
+          turnStatus: 'completed',
+          finalPartIndex: 1,
+        },
+      } : {
+        messages: [{
+          id: 'assistant/1',
+          role: 'assistant',
+          parts: [{ type: 'text', text: 'answer' }],
+          metadata: {
+            turnId: 'turn-1',
+            turnStatus: 'completed',
+            finalPartIndex: 1,
+          },
+          projection_version: 1,
+          process_available: true,
+          created_at: '2026-09-02T07:00:00Z',
+        }],
+        next_cursor: null,
+        has_more: false,
+        latest_message_id: 'assistant/1',
+        unchanged: false,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+
+    const page = await fetchClaudeThreadMessages('thread/1');
+    expect(page.messages[0].metadata).toMatchObject({
+      historyProjectionVersion: 1,
+      historyProcessAvailable: true,
+    });
+    expect(page.messages[0].parts).toEqual([{ type: 'text', text: 'answer' }]);
+    const detail = await fetchClaudeThreadMessageProcess('thread/1', 'assistant/1');
+    expect(detail.parts).toHaveLength(2);
+    expect(urls[1]).toContain('/threads/thread%2F1/messages/assistant%2F1/process');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
+    else delete (globalThis as { localStorage?: Storage }).localStorage;
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else delete (globalThis as { window?: Window }).window;
   }
 });
 

@@ -45,6 +45,8 @@
 #                    history so SSE and refresh expose the same repair message.
 # [Sync] 2026-09-02: add stable cursor Chat message pages and known-latest
 #                    identity stabilization while preserving the legacy full response.
+# [Sync] 2026-09-02: expose final-only paged assistant rows and an owned exact-id
+#                    process-detail endpoint backed by canonical message parts.
 
 import asyncio
 import base64
@@ -421,6 +423,8 @@ class PublicChatMessageDto(BaseModel):
     created_at: Any = None
     parts: list[Any] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    projection_version: int | None = None
+    process_available: bool | None = None
 
     @classmethod
     def from_storage(cls, message: dict[str, Any]) -> "PublicChatMessageDto":
@@ -447,6 +451,12 @@ class PublicChatMessageDto(BaseModel):
             [] if suppress_parts else parts if isinstance(parts, list) else []
         )
         values["metadata"] = public_metadata
+        if (
+            message.get("history_projection_version") == 1
+            and isinstance(message.get("history_process_available"), bool)
+        ):
+            values["projection_version"] = 1
+            values["process_available"] = message["history_process_available"]
         return cls.model_validate(values)
 
 
@@ -1231,6 +1241,26 @@ async def claude_agent_thread_messages(
         "latest_message_id": page.get("latest_message_id"),
         "unchanged": False,
     }
+
+
+@router.get(
+    "/api/claude-agent/threads/{thread_id}/messages/{message_id}/process"
+)
+async def claude_agent_thread_message_process(
+    thread_id: str,
+    message_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return one owned projected assistant message's canonical process parts."""
+
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Message process not found")
+    message = database.get_chat_message_process_detail(thread_id, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message process not found")
+    return _project_chat_message_for_client(message)
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/subagents")

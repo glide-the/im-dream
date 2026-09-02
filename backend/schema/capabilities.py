@@ -7,6 +7,7 @@
 [Sync] 2026-08-25: add the exact Admin-published managed MCP Resources v1 capability check.
 [Sync] 2026-08-28: require the Admin-owned Claude Code Runtime model/policy capability before consuming optional env projections.
 [Sync] 2026-09-02: require the exact Admin-owned Chat history keyset index capability.
+[Sync] 2026-09-02: require the exact Admin-owned Chat assistant final-projection capability.
 """
 
 from __future__ import annotations
@@ -54,6 +55,13 @@ CHAT_HISTORY_KEYSET_PAGINATION_VERSION: Final = 1
 CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256: Final = (
     "a0dfe5f8d4b4330a9e17db07a8716d5d2bc25e291f3624f09005e79c01fc8ab0"
 )
+CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY: Final = (
+    "dream.chat-history-final-projection.v1"
+)
+CHAT_HISTORY_FINAL_PROJECTION_VERSION: Final = 1
+CHAT_HISTORY_FINAL_PROJECTION_CONTRACT_SHA256: Final = (
+    "50c27f86113c170064b0913bf052f9bd12884d3345c920d7b11468a768e0a432"
+)
 REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     UNIFIED_DREAM_CAPABILITY: 1,
     "dream.workflow.thread-lookup.v1": 1,
@@ -66,6 +74,9 @@ REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY: (
         CHAT_HISTORY_KEYSET_PAGINATION_VERSION
     ),
+    CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY: (
+        CHAT_HISTORY_FINAL_PROJECTION_VERSION
+    ),
 }
 _EXACT_RUNTIME_CONTRACTS: Final[Mapping[str, str]] = {
     CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: (
@@ -76,6 +87,9 @@ _EXACT_RUNTIME_CONTRACTS: Final[Mapping[str, str]] = {
     ),
     CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY: (
         CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256
+    ),
+    CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY: (
+        CHAT_HISTORY_FINAL_PROJECTION_CONTRACT_SHA256
     ),
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -264,6 +278,9 @@ def claude_code_runtime_config_capability_available(connection: Any) -> bool:
 
 
 __all__ = [
+    "CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY",
+    "CHAT_HISTORY_FINAL_PROJECTION_CONTRACT_SHA256",
+    "CHAT_HISTORY_FINAL_PROJECTION_VERSION",
     "CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY",
     "CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256",
     "CHAT_HISTORY_KEYSET_PAGINATION_VERSION",

@@ -41,7 +41,9 @@
 //                    its typed SSE error while generic failures remain redacted.
 // [Sync] 2026-09-02: group completed hydrated assistant turns behind one shared
 //                    lazy process disclosure while keeping live/error turns unfolded.
-import { useState } from 'react';
+// [Sync] 2026-09-02: fetch canonical process parts once per historical assistant
+//                    only after expansion; abort stale Thread requests and keep final visible.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -59,6 +61,7 @@ import { readClaudeAgentErrorCode, readClaudeAgentErrorText } from '../../lib/cl
 import type { ChatMetadata } from '../../lib/chat-schema';
 import AssistantTurnGroup from './AssistantTurnGroup';
 import { projectHistoricalAssistantTurn } from './assistantTurnHistory';
+import { fetchClaudeThreadMessageProcess } from './threadSessionHydration';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -91,6 +94,10 @@ interface ChatMessageListProps {
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';
+type HistoricalProcessDetailState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'loaded'; readonly message: UIMessage }
+  | { readonly status: 'error'; readonly error: Error };
 
 const TOOL_COMPLETED_STATES = new Set(['output-available', 'output-error']);
 const REASONING_PREVIEW_LENGTH = 80;
@@ -268,6 +275,10 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
+  const [historicalProcessDetails, setHistoricalProcessDetails] = useState<
+    Record<string, HistoricalProcessDetailState>
+  >({});
+  const historicalProcessControllers = useRef<Map<string, AbortController>>(new Map());
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
   const errorCode = readClaudeAgentErrorCode(error);
   const isDreamBindingConflict = errorCode === 'DREAM_THREAD_BINDING_CONFLICT';
@@ -275,6 +286,69 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   const dreamAutoRepairFailureText = isDreamAutoRepairFailure
     ? readClaudeAgentErrorText(error)
     : null;
+
+  useEffect(() => {
+    const controllers = historicalProcessControllers.current;
+    setHistoricalProcessDetails({});
+    return () => {
+      controllers.forEach((controller) => controller.abort());
+      controllers.clear();
+    };
+  }, [threadId]);
+
+  const loadHistoricalProcess = useCallback(async (
+    summaryMessage: UIMessage,
+  ) => {
+    const key = `${threadId}:${summaryMessage.id}`;
+    if (historicalProcessControllers.current.has(key)
+      || historicalProcessDetails[key]?.status === 'loaded') return;
+    const summaryProjection = projectHistoricalAssistantTurn(summaryMessage);
+    if (!summaryProjection?.deferredProcess) return;
+    const controller = new AbortController();
+    historicalProcessControllers.current.set(key, controller);
+    setHistoricalProcessDetails((current) => ({
+      ...current,
+      [key]: { status: 'loading' },
+    }));
+    try {
+      const detail = await fetchClaudeThreadMessageProcess(
+        threadId,
+        summaryMessage.id,
+        controller.signal,
+      );
+      const detailProjection = projectHistoricalAssistantTurn(detail);
+      const summaryFinal = summaryMessage.parts[summaryProjection.finalPartIndex];
+      const detailFinal = detailProjection
+        ? detail.parts[detailProjection.finalPartIndex]
+        : undefined;
+      if (!detailProjection
+        || detailProjection.deferredProcess
+        || !detailProjection.processAvailable
+        || detailProjection.turnKey !== summaryProjection.turnKey
+        || summaryFinal?.type !== 'text'
+        || detailFinal?.type !== 'text'
+        || detailFinal.text !== summaryFinal.text) {
+        throw new Error('Historical process detail does not match its final message.');
+      }
+      setHistoricalProcessDetails((current) => ({
+        ...current,
+        [key]: { status: 'loaded', message: detail },
+      }));
+    } catch (reason) {
+      if (controller.signal.aborted) return;
+      const detailError = reason instanceof Error
+        ? reason
+        : new Error('Historical process detail could not be loaded.');
+      setHistoricalProcessDetails((current) => ({
+        ...current,
+        [key]: { status: 'error', error: detailError },
+      }));
+    } finally {
+      if (historicalProcessControllers.current.get(key) === controller) {
+        historicalProcessControllers.current.delete(key);
+      }
+    }
+  }, [historicalProcessDetails, threadId]);
 
   const handleCopy = async (id: string, text: string) => {
     try {
@@ -306,7 +380,12 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
           <span data-chat-history-end="true">{t('chat.historyTurn.start')}</span>
         ) : null}
       </div>
-      {messages.map((message, index) => {
+      {messages.map((persistedMessage, index) => {
+        const processDetailKey = `${threadId}:${persistedMessage.id}`;
+        const processDetail = historicalProcessDetails[processDetailKey];
+        const message = processDetail?.status === 'loaded'
+          ? processDetail.message
+          : persistedMessage;
         const isLastMessage = index === messages.length - 1;
         const messageMetadata = message.metadata as ChatMetadata | undefined;
         const isDreamAutoRepair = (
@@ -320,11 +399,14 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
             ? 'chat.autoRepair.failed'
             : 'chat.autoRepair.source')
           : undefined;
+        const summaryProjection = historicalMessageIds.has(persistedMessage.id)
+          ? projectHistoricalAssistantTurn(persistedMessage)
+          : null;
         const historicalProjection = historicalMessageIds.has(message.id)
           ? projectHistoricalAssistantTurn(message)
           : null;
         const projection = historicalProjection
-          && historicalProjection.processPartIndexes.length > 0
+          && historicalProjection.processAvailable
           && !livePresentedTurnIds.has(historicalProjection.turnKey)
           ? historicalProjection
           : null;
@@ -608,8 +690,28 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 expanded={expandedTurns[projection.turnKey] ?? false}
                 onExpandedChange={(turnKey, expanded) => {
                   setExpandedTurns((current) => ({ ...current, [turnKey]: expanded }));
+                  if (expanded && summaryProjection?.deferredProcess) {
+                    void loadHistoricalProcess(persistedMessage);
+                  }
                 }}
                 renderPart={(partIndex, kind) => renderPart(partIndex, kind)}
+                renderDeferredProcess={() => (
+                  processDetail?.status === 'error' ? (
+                    <div className="chat-assistant-turn__process-state" role="alert">
+                      <span>{t('chat.historyTurn.processLoadFailed')}</span>
+                      <button
+                        type="button"
+                        onClick={() => void loadHistoricalProcess(persistedMessage)}
+                      >
+                        {t('chat.historyTurn.retry')}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="chat-assistant-turn__process-state" role="status">
+                      {t('chat.historyTurn.loadingProcess')}
+                    </div>
+                  )
+                )}
               />
             ) : message.parts?.map((_part, partIndex) => renderPart(partIndex, 'normal'))}
           </div>

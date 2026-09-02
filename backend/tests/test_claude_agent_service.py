@@ -6,6 +6,7 @@
 # [Sync] 2026-06-14: combine system_config assembly coverage with tool_input_delta
 #                    -> tool-input-delta SSE forwarding coverage.
 # [Sync] 2026-08-28: carry selected model max-output capability into the immutable Runtime env snapshot.
+# [Sync] 2026-09-02: verify completed assistant persistence writes the matching final projection.
 # [Sync] 2026-06-14: cover Edit Session event publication after successful
 #                    editor MCP write tool results.
 # [Sync] 2026-06-17: cover SSE error formatting that includes exception notes
@@ -1678,6 +1679,9 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
         self.assertEqual(metadata["finalPartIndex"], 1)
         self.assertEqual(metadata["durationMs"], 1250)
         self.assertTrue(metadata["turnId"])
+        self.assertEqual(call.kwargs["history_final_text"], "修正完成")
+        self.assertTrue(call.kwargs["history_process_available"])
+        self.assertEqual(call.kwargs["history_projection_version"], 1)
         self.assertEqual(
             metadata["story_workspace_dream_source"]["kind"],
             "story-workspace-dream-auto-repair",

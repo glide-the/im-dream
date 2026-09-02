@@ -19,6 +19,8 @@
 #                    Hook continuation or failure can no longer erase the reply.
 # [Sync] 2026-09-02: persist server-owned turn/final/duration metadata and expose
 #                    the same turn identity in live message metadata for history folding.
+# [Sync] 2026-09-02: write the strict completed assistant final projection beside
+#                    canonical process parts for lightweight history hydration.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -2572,6 +2574,17 @@ class ClaudeAgentService:
                 thread_id, "assistant",
                 parts=asst_parts,
                 metadata=asst_metadata or None,
+                history_final_text=(
+                    asst_parts[final_part_index]["text"]
+                    if final_part_index is not None
+                    else None
+                ),
+                history_process_available=(
+                    final_part_index is not None and final_part_index > 0
+                ),
+                history_projection_version=(
+                    1 if final_part_index is not None else None
+                ),
             )
 
         loop = asyncio.get_running_loop()

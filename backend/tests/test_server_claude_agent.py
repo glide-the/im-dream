@@ -35,6 +35,7 @@
 #                    projectCleanup fact without granting them execution scope.
 # [Sync] 2026-09-02: cover stable message cursors, ID-only stabilization,
 #                    large-body integrity, and completed-turn metadata projection.
+# [Sync] 2026-09-02: cover final-only page flags and owned exact-id process detail.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -564,6 +565,109 @@ class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
         self.assertEqual(timestamp, created_at)
         self.assertEqual(message_id, "message-large")
         self.assertFalse(is_null)
+
+    def test_message_page_exposes_final_projection_flags_without_storage_columns(self):
+        import routers.claude_agent as route_module
+
+        created_at = datetime(2026, 9, 2, 7, 0, tzinfo=timezone.utc)
+        row = {
+            "id": "assistant-projected",
+            "role": "assistant",
+            "parts": [{"type": "text", "text": "visible final"}],
+            "metadata": {
+                "turnId": "turn-projected",
+                "turnStatus": "completed",
+                "finalPartIndex": 2,
+            },
+            "created_at": created_at,
+            "history_final_text": "visible final",
+            "history_process_available": True,
+            "history_projection_version": 1,
+        }
+
+        async def call_route():
+            return await route_module.claude_agent_thread_messages(
+                "thread-owned",
+                limit=20,
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-owned", "user_id": 7},
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "list_chat_message_page",
+                return_value={
+                    "messages": [row],
+                    "has_more": False,
+                    "latest_message_id": "assistant-projected",
+                },
+            ),
+        ):
+            payload = asyncio.run(call_route())
+
+        projected = payload["messages"][0]
+        self.assertEqual(projected["parts"], [{"type": "text", "text": "visible final"}])
+        self.assertEqual(projected["projection_version"], 1)
+        self.assertTrue(projected["process_available"])
+        self.assertNotIn("history_final_text", projected)
+        self.assertNotIn("history_projection_version", projected)
+
+    def test_message_process_detail_requires_owned_thread_and_exact_assistant(self):
+        import routers.claude_agent as route_module
+        from fastapi import HTTPException
+
+        full = {
+            "id": "assistant-1",
+            "role": "assistant",
+            "parts": [
+                {"type": "reasoning", "text": "work"},
+                {"type": "text", "text": "answer"},
+            ],
+            "metadata": {
+                "turnId": "turn-1",
+                "turnStatus": "completed",
+                "finalPartIndex": 1,
+            },
+        }
+
+        async def call_detail():
+            return await route_module.claude_agent_thread_message_process(
+                "thread-owned",
+                "assistant-1",
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-owned", "user_id": 7},
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_message_process_detail",
+                return_value=full,
+            ) as detail,
+        ):
+            payload = asyncio.run(call_detail())
+        self.assertEqual(payload["id"], "assistant-1")
+        self.assertEqual(payload["parts"], full["parts"])
+        detail.assert_called_once_with("thread-owned", "assistant-1")
+
+        with unittest.mock.patch.object(
+            route_module.database,
+            "get_chat_thread",
+            return_value=None,
+        ):
+            with self.assertRaises(HTTPException) as captured:
+                asyncio.run(call_detail())
+        self.assertEqual(captured.exception.status_code, 404)
+        self.assertEqual(captured.exception.detail, "Message process not found")
 
     def test_known_latest_uses_id_only_probe_and_invalid_cursor_is_400(self):
         import routers.claude_agent as route_module

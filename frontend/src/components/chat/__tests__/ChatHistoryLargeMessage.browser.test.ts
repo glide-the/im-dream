@@ -1,7 +1,7 @@
 // [Input] Production AssistantTurnGroup + ChatMarkdown with one generated oversized historical process body.
 // [Output] Local-Chrome node/time evidence that collapsed history skips heavy Markdown DOM and remounts on demand.
 // [Pos] Performance-characterization acceptance seam; assertions are structural, not a fixed millisecond SLA.
-// [Sync] 2026-09-02: created for oversized AI message render-cost validation.
+// [Sync] 2026-09-02: validate oversized render cost through the full projection contract.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node harness imports Node APIs outside the browser tsconfig.
@@ -61,6 +61,8 @@ test('oversized historical process has zero Markdown DOM until expansion and unm
           turnKey: 'turn-large',
           finalPartIndex: 1,
           processPartIndexes: [0],
+          processAvailable: true,
+          deferredProcess: false,
           durationMs: null,
         },
         expanded,

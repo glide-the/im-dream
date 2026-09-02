@@ -1,3 +1,8 @@
+# [Input] Immutable chat message writes, including optional derived final projection fields.
+# [Output] Verify message-id CAS and strict projection validation without PostgreSQL.
+# [Pos] Provider-free chat_message persistence contract tests.
+# [Sync] 2026-09-02: extend the insert fake and tests for assistant final projection columns.
+
 from __future__ import annotations
 
 import json
@@ -41,7 +46,16 @@ class _Connection:
         with self.shared.lock:
             self.shared.statements.append(normalized)
             if normalized.startswith("INSERT INTO chat_message"):
-                message_id, thread_id, role, parts, metadata = params
+                (
+                    message_id,
+                    thread_id,
+                    role,
+                    parts,
+                    metadata,
+                    history_final_text,
+                    history_process_available,
+                    history_projection_version,
+                ) = params
                 if message_id in self.shared.rows:
                     return _Cursor()
                 self.shared.rows[message_id] = {
@@ -49,6 +63,9 @@ class _Connection:
                     "role": role,
                     "parts": parts,
                     "metadata": metadata,
+                    "history_final_text": history_final_text,
+                    "history_process_available": history_process_available,
+                    "history_projection_version": history_projection_version,
                 }
                 return _Cursor({"id": message_id})
             if normalized.startswith(
@@ -154,6 +171,45 @@ class ChatMessageIdentityCASTest(unittest.TestCase):
                 self.assertEqual(json.loads(str(row["parts"])), baseline_parts)
                 self.assertEqual(json.loads(str(row["metadata"])), baseline_metadata)
                 self.assertEqual(self.shared.touches, 1)
+
+    def test_completed_assistant_projection_must_match_canonical_final(self) -> None:
+        parts = [
+            {"type": "reasoning", "text": "work"},
+            {"type": "text", "text": "answer"},
+        ]
+        metadata = {
+            "turnId": "turn-1",
+            "turnStatus": "completed",
+            "finalPartIndex": 1,
+        }
+        self.save(
+            role="assistant",
+            parts=parts,
+            metadata=metadata,
+            history_final_text="answer",
+            history_process_available=True,
+            history_projection_version=1,
+        )
+        row = self.shared.rows["message-1"]
+        self.assertEqual(row["history_final_text"], "answer")
+        self.assertTrue(row["history_process_available"])
+        self.assertEqual(row["history_projection_version"], 1)
+
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.save(
+                message_id="message-2",
+                role="assistant",
+                parts=parts,
+                metadata=metadata,
+                history_final_text="different",
+                history_process_available=True,
+                history_projection_version=1,
+            )
+
+    def test_partial_projection_fields_fail_before_database_write(self) -> None:
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            self.save(history_final_text="answer")
+        self.assertEqual(self.shared.statements, [])
 
     def test_concurrent_different_payloads_have_one_winner_without_reparent(self) -> None:
         barrier = threading.Barrier(2)

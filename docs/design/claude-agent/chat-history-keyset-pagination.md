@@ -4,6 +4,7 @@
 <!-- [Output] 无消息截断的 keyset 分页、轻量最新版本复核、异步旧页，以及历史已完成 assistant turn 的过程卸载/最终答复常驻交互合同。 -->
 <!-- [Pos] Claude Agent Chat 历史消息性能修复的交互与技术设计真相源；实现、测试和性能验收必须与本文同步。 -->
 <!-- [Sync] 2026-09-02: 基于全链路与超大 JSON 证据建立最小方案；选择稳定分页与协议语义型历史 turn 折叠，并由 Admin 0042 发布精确 keyset 索引 capability。 -->
+<!-- [Sync] 2026-09-02: 单条 assistant 大 JSON 的后续 final projection/按 message_id 过程读取由 chat-history-final-projection.md 接管；本文保留分页、排序和首轮 DOM 基线。 -->
 
 ## 背景与问题
 
@@ -279,6 +280,9 @@ USING btree (thread_id, created_at DESC NULLS LAST, id DESC NULLS LAST);
 方案 A + F 是最小充分修复：A 删除“打开 Chat 必须全量历史”和空闲竞态复核第二次大页读取；F 删除已证明可达秒级的历史过程 ReactMarkdown/tool DOM 创建。两者都不制造 payload 阈值、详情 N+1 或跨仓 Schema。它明确保留单条极大 final 与完整 PostgreSQL/网络 JSON 的风险，等待真实 PostgreSQL capability/plan 后再决定是否需要 Admin-managed projection。
 
 ## 根治单条极大消息所需的 Admin capability
+
+> 该后续阶段已经获得产品方向并进入实现；当前合同见
+> [`chat-history-final-projection.md`](./chat-history-final-projection.md)。下列内容保留为上一阶段的能力推导记录。
 
 如果实现后真实 Thread 证据仍表明单条近期正文导致不可接受的首屏 commit，根治能力必须由 Admin Drizzle 以 expand/backfill/validate 方式发布，Dream 不得自行建表或加列。建议的 capability 边界为 `chat_message_render_projection_v1`，而不是一个 Dream 端字节阈值：
 

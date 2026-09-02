@@ -1,7 +1,7 @@
-// [Input] One validated historical assistant turn projection plus the existing part renderer.
+// [Input] One validated historical assistant turn projection plus existing/deferred process renderers.
 // [Output] Accessible process disclosure that never constructs collapsed process React children.
 // [Pos] Shared turn-level view beneath ChatMessageList for Chat and Dream hosts.
-// [Sync] 2026-09-02: created from the approved historical turn folding design.
+// [Sync] 2026-09-02: render process detail state only after explicit expansion.
 
 import { useId, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -20,6 +20,7 @@ interface AssistantTurnGroupProps {
   readonly expanded: boolean;
   readonly onExpandedChange: (turnKey: string, expanded: boolean) => void;
   readonly renderPart: (partIndex: number, kind: 'process' | 'final') => ReactNode;
+  readonly renderDeferredProcess?: () => ReactNode;
 }
 
 export default function AssistantTurnGroup({
@@ -27,6 +28,7 @@ export default function AssistantTurnGroup({
   expanded,
   onExpandedChange,
   renderPart,
+  renderDeferredProcess,
 }: AssistantTurnGroupProps) {
   const { t, i18n } = useTranslation();
   const processRegionId = useId();
@@ -57,8 +59,10 @@ export default function AssistantTurnGroup({
     const button = toggleRef.current;
     if (!anchor || !button) return;
     restoreChatScrollAnchor(anchor);
-    pendingAnchorRef.current = null;
-  }, [expanded]);
+    if (!expanded || !projection.deferredProcess) {
+      pendingAnchorRef.current = null;
+    }
+  }, [expanded, projection.deferredProcess]);
 
   return (
     <section
@@ -87,9 +91,11 @@ export default function AssistantTurnGroup({
           className="chat-assistant-turn__process"
           data-turn-process={projection.turnKey}
         >
-          {projection.processPartIndexes.map((partIndex) => (
-            renderPart(partIndex, 'process')
-          ))}
+          {projection.deferredProcess
+            ? renderDeferredProcess?.()
+            : projection.processPartIndexes.map((partIndex) => (
+              renderPart(partIndex, 'process')
+            ))}
         </div>
       ) : null}
 

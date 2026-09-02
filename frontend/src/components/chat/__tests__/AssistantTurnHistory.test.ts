@@ -1,7 +1,7 @@
 // [Input] Hydrated assistant UIMessage parts and persisted turn metadata.
 // [Output] Fail-closed process/final grouping and stable turn identity regressions.
 // [Pos] Provider-free pure contract test for the shared Chat/Dream history projector.
-// [Sync] 2026-09-02: created for completed, legacy, partial, and malformed turns.
+// [Sync] 2026-09-02: cover full and final-only completed turns plus fail-closed shapes.
 
 import { expect, test } from '@playwright/test';
 import type { UIMessage } from 'ai';
@@ -48,8 +48,41 @@ test('new completed envelope uses the protocol final and stable turn key', () =>
     turnKey: 'turn-stable',
     finalPartIndex: 3,
     processPartIndexes: [0, 1, 2],
+    processAvailable: true,
+    deferredProcess: false,
     durationMs: 2300,
   });
+});
+
+test('final-only v1 projection defers process while retaining canonical turn identity', () => {
+  expect(projectHistoricalAssistantTurn(assistant(
+    [{ type: 'text', text: '最终正文' }],
+    {
+      turnId: 'turn-stable',
+      turnStatus: 'completed',
+      finalPartIndex: 3,
+      durationMs: 2300,
+      historyProjectionVersion: 1,
+      historyProcessAvailable: true,
+    },
+  ))).toEqual({
+    turnKey: 'turn-stable',
+    finalPartIndex: 0,
+    processPartIndexes: [],
+    processAvailable: true,
+    deferredProcess: true,
+    durationMs: 2300,
+  });
+  expect(projectHistoricalAssistantTurn(assistant(
+    [{ type: 'text', text: '最终正文' }],
+    {
+      turnId: 'turn-stable',
+      turnStatus: 'completed',
+      finalPartIndex: 3,
+      historyProjectionVersion: 1,
+      historyProcessAvailable: false,
+    },
+  ))).toBeNull();
 });
 
 test('legacy completed shape infers only one strict text suffix', () => {

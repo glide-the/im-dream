@@ -1,6 +1,7 @@
 // [Input] User locale and product-facing translation keys.
 // [Output] English and Simplified Chinese UI copy for Ink & Memory surfaces.
 // [Pos] Frontend i18next resource registry.
+// [Sync] 2026-09-02: add lazy historical process loading and failure copy.
 // [Sync] 2026-08-14: add actor-owned publication and system-default sharing copy.
 // [Sync] 2026-08-15: add the localized More disclosure for restored legacy navigation.
 // [Sync] 2026-08-16: add the PDF-led Deck home, create menu, enabled strip, counted filters,
@@ -514,6 +515,8 @@ const resources = {
           collapseAriaNoDuration: 'Collapse process',
           loadEarlier: 'Load earlier messages',
           loadingEarlier: 'Loading earlier messages…',
+          loadingProcess: 'Loading process…',
+          processLoadFailed: 'Process could not be loaded.',
           loadFailed: 'Earlier messages could not be loaded.',
           initialLoadFailed: 'Conversation history could not be loaded.',
           retry: 'Retry',
@@ -1376,6 +1379,8 @@ const resources = {
           collapseAriaNoDuration: '收起执行过程',
           loadEarlier: '加载更早消息',
           loadingEarlier: '正在加载更早消息…',
+          loadingProcess: '正在加载过程…',
+          processLoadFailed: '过程加载失败。',
           loadFailed: '更早消息加载失败。',
           initialLoadFailed: '历史消息加载失败。',
           retry: '重试',

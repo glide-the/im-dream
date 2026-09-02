@@ -3,6 +3,8 @@
 // [Pos] Minimal session hydration primitive; ChatPanel remains the only live reducer.
 // [Sync] 2026-09-02: hydrate the newest stable keyset page, expose older-page state,
 //                    and replace idle's second full read with a latest-ID probe.
+// [Sync] 2026-09-02: map final-only assistant rows and fetch canonical process
+//                    detail by owned thread/message identity on explicit expansion.
 
 import { isToolUIPart, type UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -30,6 +32,8 @@ interface RawClaudeThreadMessage {
   role: string;
   parts: UIMessage['parts'];
   metadata?: Record<string, unknown>;
+  projection_version?: unknown;
+  process_available?: unknown;
   created_at: string;
 }
 
@@ -52,7 +56,7 @@ export interface ClaudeThreadHydrationSnapshot extends ClaudeThreadHistorySnapsh
   running: boolean;
 }
 
-export type ClaudeThreadHydrationUnknownStage = 'messages' | 'status';
+export type ClaudeThreadHydrationUnknownStage = 'messages' | 'message-process' | 'status';
 export const CHAT_MESSAGE_PAGE_SIZE = 20;
 
 export interface FetchClaudeThreadMessagesOptions {
@@ -108,6 +112,25 @@ export function filterClaudeThreadVisibleMessages<T extends UIMessage>(
   return filterStoryWorkspaceControlMessages(messages).filter(
     (message) => (message.parts ?? []).some(claudeThreadPartIsVisible),
   );
+}
+
+function rawClaudeThreadMessageToUIMessage(
+  message: RawClaudeThreadMessage,
+): UIMessage {
+  const metadata = message.metadata && typeof message.metadata === 'object'
+    ? { ...message.metadata }
+    : {};
+  if (message.projection_version === 1
+    && typeof message.process_available === 'boolean') {
+    metadata.historyProjectionVersion = 1;
+    metadata.historyProcessAvailable = message.process_available;
+  }
+  return {
+    id: message.id,
+    role: message.role as UIMessage['role'],
+    parts: Array.isArray(message.parts) ? message.parts : [],
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+  };
 }
 
 export async function fetchClaudeThreadStatus(
@@ -193,14 +216,7 @@ export async function fetchClaudeThreadMessages(
         dispatchStatusByMessageId[message.id] = dispatchStatus;
       }
     }
-    const messages = rawMessages.map((message): UIMessage => ({
-      id: message.id,
-      role: message.role as UIMessage['role'],
-      parts: Array.isArray(message.parts) ? message.parts : [],
-      metadata: message.metadata && typeof message.metadata === 'object'
-        ? message.metadata
-        : undefined,
-    }));
+    const messages = rawMessages.map(rawClaudeThreadMessageToUIMessage);
     const paged = !options.full;
     const nextCursor = typeof payload.next_cursor === 'string'
       ? payload.next_cursor
@@ -232,6 +248,49 @@ export async function fetchClaudeThreadMessages(
     throw new ClaudeThreadHydrationUnknownError(
       'messages',
       'Claude thread history could not be read.',
+      { cause: reason },
+    );
+  }
+}
+
+export async function fetchClaudeThreadMessageProcess(
+  threadId: string,
+  messageId: string,
+  signal?: AbortSignal,
+): Promise<UIMessage> {
+  try {
+    const response = await fetch(
+      `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`
+      + `/messages/${encodeURIComponent(messageId)}/process`,
+      {
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
+        signal,
+      },
+    );
+    if (!response.ok) {
+      throw new ClaudeThreadHydrationUnknownError(
+        'message-process',
+        `Claude message process is not authoritative (${response.status}).`,
+        { httpStatus: response.status },
+      );
+    }
+    const payload = await response.json() as RawClaudeThreadMessage;
+    if (!payload
+      || typeof payload !== 'object'
+      || payload.id !== messageId
+      || payload.role !== 'assistant'
+      || !Array.isArray(payload.parts)) {
+      throw new ClaudeThreadHydrationUnknownError(
+        'message-process',
+        'Claude message process payload is malformed.',
+      );
+    }
+    return rawClaudeThreadMessageToUIMessage(payload);
+  } catch (reason) {
+    if (reason instanceof ClaudeThreadHydrationUnknownError) throw reason;
+    throw new ClaudeThreadHydrationUnknownError(
+      'message-process',
+      'Claude message process could not be read.',
       { cause: reason },
     );
   }

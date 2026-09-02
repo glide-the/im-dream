@@ -1,7 +1,7 @@
 # [Input] Consume read-only Admin schema capability inspectors with injected PostgreSQL rows.
 # [Output] Verify runtime authority and exact managed-MCP/resource-Observer/Runtime/Chat-history contracts.
 # [Pos] Provider-free schema capability consumer tests in backend/tests.
-# [Sync] 2026-09-02: require the exact Admin-owned Chat history keyset pagination hash.
+# [Sync] 2026-09-02: require exact Admin-owned Chat keyset and final-projection hashes.
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ from dataclasses import dataclass
 
 import pytest
 from schema.capabilities import (
+    CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY,
+    CHAT_HISTORY_FINAL_PROJECTION_CONTRACT_SHA256,
+    CHAT_HISTORY_FINAL_PROJECTION_VERSION,
     CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY,
     CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256,
     CHAT_HISTORY_KEYSET_PAGINATION_VERSION,
@@ -88,6 +91,8 @@ def _required_capabilities() -> dict[str, tuple[int, str]]:
             if name == CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY
             else CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256
             if name == CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY
+            else CHAT_HISTORY_FINAL_PROJECTION_CONTRACT_SHA256
+            if name == CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY
             else _HASH,
         )
         for name, version in REQUIRED_RUNTIME_CAPABILITIES.items()
@@ -202,6 +207,25 @@ def test_chat_history_keyset_capability_is_required_with_exact_admin_hash() -> N
     drifted = dict(capabilities)
     drifted[CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY] = (
         CHAT_HISTORY_KEYSET_PAGINATION_VERSION,
+        "b" * 64,
+    )
+    with pytest.raises(SchemaCapabilityError):
+        inspect_schema_authority(
+            _Connection(capabilities=drifted),
+            required_capabilities=REQUIRED_RUNTIME_CAPABILITIES,
+        )
+
+
+def test_chat_history_final_projection_is_required_with_exact_admin_hash() -> None:
+    capabilities = _required_capabilities()
+    assert capabilities[CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY] == (
+        CHAT_HISTORY_FINAL_PROJECTION_VERSION,
+        CHAT_HISTORY_FINAL_PROJECTION_CONTRACT_SHA256,
+    )
+
+    drifted = dict(capabilities)
+    drifted[CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY] = (
+        CHAT_HISTORY_FINAL_PROJECTION_VERSION,
         "b" * 64,
     )
     with pytest.raises(SchemaCapabilityError):
