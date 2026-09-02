@@ -1,6 +1,7 @@
 // [Input] Actor-scoped threadId from the Dream files projection.
 // [Output] Dream shell composition of the canonical ChatPanel/session contract.
 // [Pos] Business-surface adapter only; owns no transport, parser, or live reducer.
+// [Sync] 2026-09-02: pass the shared message-page cursor through hydration/recovery.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ChatPanel, {
@@ -32,6 +33,8 @@ export function StoryWorkspaceDreamThreadChat({
 }: StoryWorkspaceDreamThreadChatProps) {
   const [snapshot, setSnapshot] = useState<ClaudeThreadHydrationSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [hydrationFailed, setHydrationFailed] = useState(false);
+  const [manualHydrationNonce, setManualHydrationNonce] = useState(0);
   const [reconnectStreamNonce, setReconnectStreamNonce] = useState(0);
   const [terminalHistoryGeneration, setTerminalHistoryGeneration] = useState(0);
   const [subagentSidebarOpen, setSubagentSidebarOpen] = useState(false);
@@ -61,6 +64,7 @@ export function StoryWorkspaceDreamThreadChat({
     if (generation !== generationRef.current) return undefined;
     setSnapshot(next);
     setIsLoading(false);
+    setHydrationFailed(false);
     return next;
   }, [threadId]);
 
@@ -70,6 +74,7 @@ export function StoryWorkspaceDreamThreadChat({
     hydratedThreadIdRef.current = threadId;
     if (threadChanged) setSnapshot(null);
     setIsLoading(true);
+    setHydrationFailed(false);
     setSubagentSidebarOpen(false);
     setFocusedSubagentToolCallId(null);
     const generation = generationRef.current;
@@ -87,6 +92,7 @@ export function StoryWorkspaceDreamThreadChat({
 
     const applyInitial = (next: ClaudeThreadHydrationSnapshot) => {
       if (generation !== generationRef.current) return;
+      setHydrationFailed(false);
       setSnapshot(next);
       if (expectedMessageId === null) setIsLoading(false);
       if (next.running) {
@@ -148,7 +154,10 @@ export function StoryWorkspaceDreamThreadChat({
         hydrationAttempt = 0;
         applyInitial(next);
       } catch {
-        if (generation === generationRef.current) schedule(() => void loadInitial());
+        if (generation === generationRef.current) {
+          setHydrationFailed(true);
+          schedule(() => void loadInitial());
+        }
       }
     };
     void loadInitial();
@@ -156,7 +165,7 @@ export function StoryWorkspaceDreamThreadChat({
       generationRef.current += 1;
       if (observationTimer !== null) window.clearTimeout(observationTimer);
     };
-  }, [expectedMessageId, hydrate, notifySettled, refreshNonce, threadId]);
+  }, [expectedMessageId, hydrate, manualHydrationNonce, notifySettled, refreshNonce, threadId]);
 
   const recover = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     const next = await hydrate();
@@ -166,11 +175,22 @@ export function StoryWorkspaceDreamThreadChat({
       settledToolCallIds: next.settledToolCallIds,
       runtimePendingToolCallIds: next.runtimePendingToolCallIds,
       running: next.running,
+      historyPage: {
+        nextCursor: next.nextCursor,
+        hasMore: next.hasMore,
+        latestMessageId: next.latestMessageId,
+      },
+      toolConfirmationKnown: next.status?.tool_confirmation_observation === 'known',
     };
   }, [hydrate]);
 
   if (snapshot === null) {
-    return <p className="story-workspace-dream-thread-chat__loading" role="status">正在读取同一 Agent 会话…</p>;
+    return hydrationFailed ? (
+      <div className="story-workspace-dream-thread-chat__loading" role="alert">
+        <p>历史消息加载失败。</p>
+        <button type="button" onClick={() => setManualHydrationNonce((value) => value + 1)}>重试</button>
+      </div>
+    ) : <p className="story-workspace-dream-thread-chat__loading" role="status">正在读取同一 Agent 会话…</p>;
   }
 
   return (
@@ -182,6 +202,12 @@ export function StoryWorkspaceDreamThreadChat({
         initialRuntimePendingToolCallIds={snapshot.runtimePendingToolCallIds}
         initialRuntimeRunning={snapshot.running}
         initialSettledToolCallIds={snapshot.settledToolCallIds}
+        initialToolConfirmationKnown={snapshot.status?.tool_confirmation_observation === 'known'}
+        initialHistoryPage={{
+          nextCursor: snapshot.nextCursor,
+          hasMore: snapshot.hasMore,
+          latestMessageId: snapshot.latestMessageId,
+        }}
         inputPlaceholder="给 Dream Agent 留言…"
         isLoading={isLoading}
         onConversationSettled={notifySettled}

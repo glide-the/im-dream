@@ -1,6 +1,7 @@
 // [Input] Persisted canonical thread rows shared by Chat and Dream.
 // [Output] Exact private-row and visible-part filtering contract.
 // [Pos] Shared thread hydration visibility regression seam.
+// [Sync] 2026-09-02: cover paged history metadata and stable session snapshots.
 
 import { expect, test } from '@playwright/test';
 import type { UIMessage } from 'ai';
@@ -10,10 +11,73 @@ import {
   claudeThreadHydrationRetryDelayMs,
   claudeThreadPartIsVisible,
   fetchClaudeThreadMessages,
+  fetchFullClaudeThreadMessages,
   fetchClaudeThreadStatus,
   filterClaudeThreadVisibleMessages,
   type ClaudeThreadHydrationSnapshot,
 } from '../threadSessionHydration';
+
+test('history transport requests one page, preserves large bodies, and keeps full reads explicit', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const urls: string[] = [];
+  const largeText = '长'.repeat(200_000);
+  try {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: { getItem: () => 'test-token' },
+    });
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { __INK_RUNTIME_CONFIG__: { apiBaseUrl: 'http://chat.test' } },
+    });
+    globalThis.fetch = (async (input) => {
+      urls.push(String(input));
+      const paged = String(input).includes('limit=20');
+      return new Response(JSON.stringify({
+        messages: [{
+          id: 'message-large',
+          role: 'assistant',
+          parts: [{ type: 'text', text: largeText }],
+          metadata: {},
+          created_at: '2026-09-02T07:00:00Z',
+        }],
+        ...(paged ? {
+          next_cursor: 'cursor-older',
+          has_more: true,
+          latest_message_id: 'message-large',
+          unchanged: false,
+        } : {}),
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+
+    const page = await fetchClaudeThreadMessages('thread page');
+    expect(page.messages[0].parts[0]).toEqual({ type: 'text', text: largeText });
+    expect(page).toMatchObject({
+      nextCursor: 'cursor-older',
+      hasMore: true,
+      latestMessageId: 'message-large',
+      unchanged: false,
+    });
+    await fetchFullClaudeThreadMessages('thread page');
+
+    expect(urls[0]).toContain('/threads/thread%20page/messages?limit=20');
+    expect(urls[1]).toMatch(/\/threads\/thread%20page\/messages$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalLocalStorage) {
+      Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
+    } else {
+      delete (globalThis as { localStorage?: Storage }).localStorage;
+    }
+    if (originalWindow) {
+      Object.defineProperty(globalThis, 'window', originalWindow);
+    } else {
+      delete (globalThis as { window?: Window }).window;
+    }
+  }
+});
 
 test('failed and malformed hydration samples are typed unknown, never empty/idle', async () => {
   const originalFetch = globalThis.fetch;
@@ -143,6 +207,10 @@ test('only the exact persisted internal command can settle an idle pre-mounted o
   const snapshot = (dispatchStatus: 'dispatching' | 'dispatched' | 'failed') => ({
     messages: [],
     dispatchStatusByMessageId: { 'expected-command': dispatchStatus },
+    nextCursor: null,
+    hasMore: false,
+    latestMessageId: null,
+    unchanged: false,
     status: {
       running: false,
       lifecycle: 'idle',

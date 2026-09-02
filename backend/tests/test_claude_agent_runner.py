@@ -21,6 +21,7 @@
 #                    require an exact full-root cleanup instruction in its denial.
 # [Sync] 2026-09-01: replay the production trusted-root deletion attempt and
 #                    require the Hook to name the protected and stale roots.
+# [Sync] 2026-09-02: cover one-success-Result completion and reliable duration capture.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -332,7 +333,10 @@ def StreamEvent(event=None, session_id=None):
 
 
 def UserMessage(content=None):
-    return _SDK_USER(content or [])
+    try:
+        return _SDK_USER(content or [])
+    except TypeError:
+        return _SDK_USER(content=content or [])
 
 
 def _text_block(text: str):
@@ -680,6 +684,41 @@ class TestClaudeAgentRunnerSessionId(_RunnerBase):
         )
 
         self.assertEqual(result.session_id, "sess-xyz")
+        self.assertIs(result.protocol_completed, True)
+
+    async def test_protocol_completion_rejects_multiple_results_and_captures_duration(self):
+        first = ResultMessage(session_id="sess-duplicate")
+        second = ResultMessage(session_id="sess-duplicate")
+        first.is_error = False
+        second.is_error = False
+        self.set_query([first, second])
+        runner = self.make_runner()
+
+        result = await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="duplicate-result",
+                user_message="ping",
+                tool_choice="none",
+            ),
+            callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
+        )
+
+        self.assertIs(result.protocol_completed, False)
+
+        completed = ResultMessage(session_id="sess-complete")
+        completed.duration_ms = 345
+        completed.is_error = False
+        self.set_query([completed])
+        result = await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="single-result",
+                user_message="ping",
+                tool_choice="none",
+            ),
+            callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
+        )
+        self.assertIs(result.protocol_completed, True)
+        self.assertEqual(result.duration_ms, 345)
 
 
 class TestClaudeAgentRunnerOnToolEvent(_RunnerBase):

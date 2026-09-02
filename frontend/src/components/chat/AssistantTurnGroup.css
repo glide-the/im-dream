@@ -1,0 +1,91 @@
+/* [Input] Shared Chat color tokens and AssistantTurnGroup state attributes. */
+/* [Output] Low-interruption historical process disclosure matching Chat/Dream themes. */
+/* [Pos] Shared historical assistant turn styles for both ChatPanel hosts. */
+/* [Sync] 2026-09-02: created; process height is never animated or hidden in CSS. */
+
+.chat-assistant-turn {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.chat-assistant-turn__toggle {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  padding: 0.55rem 0.25rem;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-neutral);
+  border-radius: 0.5rem 0.5rem 0 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+  transition: color 120ms ease-out, background 120ms ease-out;
+}
+
+.chat-assistant-turn__toggle:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+}
+
+.chat-assistant-turn__toggle:active {
+  background: var(--color-bg-active);
+}
+
+.chat-assistant-turn__toggle:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.chat-assistant-turn__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-assistant-turn__chevron {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: 0 0 auto;
+  transform: rotate(0deg);
+  transform-origin: center;
+  transition: transform 150ms ease-out;
+}
+
+.chat-assistant-turn__toggle[aria-expanded='true'] .chat-assistant-turn__chevron {
+  transform: rotate(90deg);
+}
+
+.chat-assistant-turn__process,
+.chat-assistant-turn__final {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-assistant-turn__process {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 1rem;
+}
+
+.chat-assistant-turn__final {
+  padding-top: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-assistant-turn__toggle,
+  .chat-assistant-turn__chevron {
+    transition: none;
+  }
+}

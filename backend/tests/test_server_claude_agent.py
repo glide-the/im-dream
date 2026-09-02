@@ -33,6 +33,8 @@
 #                    the existing history DTO without adding an SSE protocol.
 # [Sync] 2026-09-01: retain already-persisted v1 repair rows that predate the
 #                    projectCleanup fact without granting them execution scope.
+# [Sync] 2026-09-02: cover stable message cursors, ID-only stabilization,
+#                    large-body integrity, and completed-turn metadata projection.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -52,6 +54,7 @@ import unittest
 import unittest.mock
 import asyncio
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]  # backend/
@@ -483,6 +486,137 @@ class TestToolConfirmRequestModel(unittest.TestCase):
 
 @_skip_if_no_server
 class TestClaudeAgentThreadMessageProjection(unittest.TestCase):
+    def test_completed_turn_metadata_is_projected_and_invalid_envelope_keeps_diagnostics(self):
+        import routers.claude_agent as route_module
+
+        valid, private = route_module._project_public_chat_metadata({
+            "turnId": "turn-stable",
+            "turnStatus": "completed",
+            "finalPartIndex": 3,
+            "durationMs": 1250,
+        })
+        self.assertFalse(private)
+        self.assertEqual(valid, {
+            "turnId": "turn-stable",
+            "turnStatus": "completed",
+            "finalPartIndex": 3,
+            "durationMs": 1250,
+        })
+
+        invalid, private = route_module._project_public_chat_metadata({
+            "turnId": "turn-stable",
+            "turnStatus": "completed",
+        })
+        self.assertFalse(private)
+        self.assertEqual(invalid, {
+            "turnId": "turn-stable",
+            "turnProjectionInvalid": True,
+        })
+
+    def test_message_page_returns_stable_cursor_and_complete_large_text(self):
+        import routers.claude_agent as route_module
+
+        large_text = "长" * 200_000
+        created_at = datetime(2026, 9, 2, 7, 0, tzinfo=timezone.utc)
+        rows = [{
+            "id": "message-large",
+            "role": "assistant",
+            "parts": [{"type": "text", "text": large_text}],
+            "metadata": {
+                "turnId": "turn-large",
+                "turnStatus": "completed",
+                "finalPartIndex": 0,
+            },
+            "created_at": created_at,
+        }]
+
+        async def call_route():
+            return await route_module.claude_agent_thread_messages(
+                "thread-owned",
+                limit=1,
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-owned", "user_id": 7},
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "list_chat_message_page",
+                return_value={
+                    "messages": rows,
+                    "has_more": True,
+                    "latest_message_id": "message-large",
+                },
+            ),
+        ):
+            payload = asyncio.run(call_route())
+
+        self.assertEqual(payload["messages"][0]["parts"][0]["text"], large_text)
+        self.assertEqual(payload["latest_message_id"], "message-large")
+        self.assertTrue(payload["has_more"])
+        timestamp, message_id, is_null = route_module._decode_chat_message_cursor(
+            "thread-owned", payload["next_cursor"]
+        )
+        self.assertEqual(timestamp, created_at)
+        self.assertEqual(message_id, "message-large")
+        self.assertFalse(is_null)
+
+    def test_known_latest_uses_id_only_probe_and_invalid_cursor_is_400(self):
+        import routers.claude_agent as route_module
+        from fastapi import HTTPException
+
+        async def call_known():
+            return await route_module.claude_agent_thread_messages(
+                "thread-owned",
+                limit=20,
+                known_latest_message_id="message-latest",
+                current_user={"user_id": 7},
+            )
+
+        list_page = unittest.mock.Mock()
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-owned", "user_id": 7},
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_latest_chat_message_id",
+                return_value="message-latest",
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "list_chat_message_page",
+                list_page,
+            ),
+        ):
+            payload = asyncio.run(call_known())
+        self.assertTrue(payload["unchanged"])
+        self.assertEqual(payload["messages"], [])
+        list_page.assert_not_called()
+
+        async def call_invalid():
+            return await route_module.claude_agent_thread_messages(
+                "thread-owned",
+                limit=20,
+                cursor="not-a-cursor",
+                current_user={"user_id": 7},
+            )
+
+        with unittest.mock.patch.object(
+            route_module.database,
+            "get_chat_thread",
+            return_value={"id": "thread-owned", "user_id": 7},
+        ):
+            with self.assertRaises(HTTPException) as captured:
+                asyncio.run(call_invalid())
+        self.assertEqual(captured.exception.status_code, 400)
+
     def test_auto_repair_history_preserves_exact_visible_message_contract(self):
         import routers.claude_agent as route_module
 

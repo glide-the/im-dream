@@ -11,6 +11,8 @@
 //        resolveSandboxNetworkRequest() helper (design: claude-agent-sandbox-network-permission-tool.md §5A).
 // [Sync] 2026-07-26: drop the optional `source` field — the PreToolUse gate was removed;
 //        can_use_tool (runtime sandbox proxy) is the single network-confirmation channel.
+// [Sync] 2026-09-02: let session hydration stabilize an idle history with an
+//                    ID-only latest probe instead of repeating a full transcript read.
 import { getToolName, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
@@ -36,6 +38,7 @@ export interface ChatThreadStatusResult {
 export async function loadChatHistoryThenRuntimeStatus<T>(
   loadHistory: () => Promise<T>,
   loadStatus: () => Promise<ChatThreadStatusResult | null>,
+  stabilizeIdleHistory?: (history: T) => Promise<T>,
 ): Promise<{ history: T; status: ChatThreadStatusResult | null }> {
   let history = await loadHistory();
   const status = await loadStatus();
@@ -45,7 +48,9 @@ export async function loadChatHistoryThenRuntimeStatus<T>(
   // Chat from Dream cannot miss the just-completed assistant turn and then
   // skip SSE reconnect because the runtime is already idle.
   if (status && !status.running) {
-    history = await loadHistory();
+    history = stabilizeIdleHistory
+      ? await stabilizeIdleHistory(history)
+      : await loadHistory();
   }
   return { history, status };
 }
@@ -95,7 +100,14 @@ export function deriveSettledToolCallIdsFromHistory(
   status: ChatThreadStatusResult | null,
 ): ReadonlySet<string> {
   if (status?.tool_confirmation_observation !== 'known') return new Set<string>();
-  const runtimePending = new Set(status.pending_tool_call_ids);
+  return deriveSettledToolCallIdsFromKnownPending(messages, status.pending_tool_call_ids);
+}
+
+export function deriveSettledToolCallIdsFromKnownPending(
+  messages: readonly UIMessage[],
+  runtimePendingToolCallIds: Iterable<string>,
+): ReadonlySet<string> {
+  const runtimePending = new Set(runtimePendingToolCallIds);
   const settled = new Set<string>();
   for (const message of messages) {
     for (const part of message.parts ?? []) {

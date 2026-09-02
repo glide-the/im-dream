@@ -56,6 +56,8 @@
 //                    Deck/Agent context control from ChatView.
 // [Sync] 2026-08-17: read Deck/Agent turn context from a live ref so same-Thread selection reaches transport.
 // [Sync] 2026-08-31: reload authoritative Thread state from structured turn errors without resending the failed message.
+// [Sync] 2026-09-02: own stable older-page loading, anchor-preserving prepend,
+//                    historical/live turn identity, and latest-page recovery merging.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -73,6 +75,7 @@ import { useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import {
   type ChatApiSchemaRequestBody,
   type ChatAttachment,
+  type ChatMetadata,
   type ToolChoice,
 } from '../../lib/chat-schema';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
@@ -84,6 +87,7 @@ import AIInputDock from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
 import ToolConfirmationDock from './ToolConfirmationDock';
 import {
+  deriveSettledToolCallIdsFromKnownPending,
   resolvePendingToolConfirmation,
   resolveSandboxNetworkRequest,
   resolveToolName,
@@ -98,6 +102,8 @@ import {
 } from '../../lib/story-workspace-events';
 import {
   claudeThreadHydrationRetryDelayMs,
+  ClaudeThreadHydrationUnknownError,
+  fetchClaudeThreadMessages,
   fetchClaudeThreadStatus,
   filterClaudeThreadVisibleMessages,
 } from './threadSessionHydration';
@@ -121,6 +127,12 @@ import {
   chatStopMayAbortLocalReaders,
   parseThreadStopResponse,
 } from './chatRuntimeState';
+import {
+  captureChatScrollAnchor,
+  mergeRecoveredLatestPage,
+  prependUniqueOlderMessages,
+  restoreChatScrollAnchor,
+} from './chatHistoryWindow';
 const CHAT_BOTTOM_PROXIMITY_PX = 120;
 const EMPTY_TOOL_CALL_IDS: ReadonlySet<string> = new Set<string>();
 
@@ -147,6 +159,8 @@ interface ChatPanelProps {
   initialRuntimePendingToolCallIds?: ReadonlySet<string>;
   /** Authoritative main-turn status sampled after history hydration. */
   initialRuntimeRunning?: boolean;
+  initialToolConfirmationKnown?: boolean;
+  initialHistoryPage?: ChatPanelHistoryPage;
   /** Called after reconnect stream finishes so parent can reload persisted messages. */
   onReconnectComplete?: () => (
     Promise<ChatPanelRecoverySnapshot | undefined>
@@ -188,6 +202,14 @@ export interface ChatPanelRecoverySnapshot {
   settledToolCallIds: ReadonlySet<string>;
   runtimePendingToolCallIds: ReadonlySet<string>;
   running: boolean;
+  historyPage?: ChatPanelHistoryPage;
+  toolConfirmationKnown?: boolean;
+}
+
+export interface ChatPanelHistoryPage {
+  nextCursor: string | null;
+  hasMore: boolean;
+  latestMessageId: string | null;
 }
 
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
@@ -211,6 +233,8 @@ export default function ChatPanel({
   initialSettledToolCallIds = EMPTY_TOOL_CALL_IDS,
   initialRuntimePendingToolCallIds = EMPTY_TOOL_CALL_IDS,
   initialRuntimeRunning = false,
+  initialToolConfirmationKnown = false,
+  initialHistoryPage = { nextCursor: null, hasMore: false, latestMessageId: null },
   onReconnectComplete,
   className,
   inputPlaceholder = 'Press i to chat',
@@ -250,6 +274,7 @@ export default function ChatPanel({
   const setMessagesRef = useRef<
     ((value: UIMessage[] | ((messages: UIMessage[]) => UIMessage[])) => void) | null
   >(null);
+  const messagesRef = useRef<UIMessage[]>([]);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [settledToolCallIds, setSettledToolCallIds] = useState<ReadonlySet<string>>(
@@ -258,6 +283,17 @@ export default function ChatPanel({
   const [runtimePendingToolCallIds, setRuntimePendingToolCallIds] = useState<ReadonlySet<string>>(
     () => new Set(initialRuntimePendingToolCallIds),
   );
+  const [toolConfirmationKnown, setToolConfirmationKnown] = useState(initialToolConfirmationKnown);
+  const [historyPage, setHistoryPage] = useState<ChatPanelHistoryPage>(initialHistoryPage);
+  const [historicalMessageIds, setHistoricalMessageIds] = useState<ReadonlySet<string>>(
+    () => new Set((initialMessages ?? []).map((message) => message.id)),
+  );
+  const [livePresentedTurnIds, setLivePresentedTurnIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
+  const [olderHistoryError, setOlderHistoryError] = useState<Error | null>(null);
+  const olderHistoryAbortRef = useRef<AbortController | null>(null);
   const [runtimeRunning, setRuntimeRunning] = useState(initialRuntimeRunning);
   const [reconnectRetryNonce, setReconnectRetryNonce] = useState(0);
   const reconnectRetryTimerRef = useRef<number | null>(null);
@@ -282,6 +318,8 @@ export default function ChatPanel({
       stopRequestAbortRef.current = null;
       reconnectAbortRef.current?.abort();
       reconnectAbortRef.current = null;
+      olderHistoryAbortRef.current?.abort();
+      olderHistoryAbortRef.current = null;
       for (const timerRef of [
         reconnectRetryTimerRef,
         localCompletionRetryTimerRef,
@@ -406,6 +444,7 @@ export default function ChatPanel({
   });
 
   setMessagesRef.current = setMessages;
+  messagesRef.current = messages;
 
   // DEC-032: story-workspace guidance rows persist in chat_message but must
   // never render as Chat bubbles — every render/export seam below consumes
@@ -446,12 +485,18 @@ export default function ChatPanel({
     setSettledToolCallIds(new Set(initialSettledToolCallIds));
     setRuntimePendingToolCallIds(new Set(initialRuntimePendingToolCallIds));
     setRuntimeRunning(initialRuntimeRunning);
+    setToolConfirmationKnown(initialToolConfirmationKnown);
     setReconnectRetryNonce(0);
     reconnectRecoveryAttemptRef.current = 0;
     lastReconnectNonceRef.current = 0;
     lastReconnectCountersRef.current = { external: 0, retry: 0 };
     previousChatStatusRef.current = 'ready';
     turnGenerationRef.current = 0;
+    setHistoryPage(initialHistoryPage);
+    setHistoricalMessageIds(new Set((initialMessages ?? []).map((message) => message.id)));
+    setLivePresentedTurnIds(new Set<string>());
+    setOlderHistoryError(null);
+    setIsLoadingOlderHistory(false);
   // ChatView keys panels by threadId; the explicit reset also keeps direct
   // consumers safe if they reuse an instance for another thread.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -474,6 +519,10 @@ export default function ChatPanel({
   }, [initialRuntimeRunning]);
 
   useEffect(() => {
+    setToolConfirmationKnown(initialToolConfirmationKnown);
+  }, [initialToolConfirmationKnown]);
+
+  useEffect(() => {
     if (hasInitializedRef.current) {
       return;
     }
@@ -483,8 +532,23 @@ export default function ChatPanel({
     if (initialMessages.length > 0) {
       setMessages(initialMessages);
     }
+    setHistoryPage(initialHistoryPage);
+    setHistoricalMessageIds(new Set(initialMessages.map((message) => message.id)));
     hasInitializedRef.current = true;
-  }, [initialMessages, setMessages]);
+  }, [initialHistoryPage, initialMessages, setMessages]);
+
+  useEffect(() => {
+    if (status !== 'submitted' && status !== 'streaming' && !runtimeRunning) return;
+    setLivePresentedTurnIds((current) => {
+      const next = new Set(current);
+      for (const message of messages) {
+        if (message.role !== 'assistant' || historicalMessageIds.has(message.id)) continue;
+        const metadata = message.metadata as ChatMetadata | undefined;
+        if (typeof metadata?.turnId === 'string' && metadata.turnId) next.add(metadata.turnId);
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [historicalMessageIds, messages, runtimeRunning, status]);
 
   useEffect(() => {
     if (!queuedPromptNonce || queuedPromptNonce === lastQueuedNonceRef.current) {
@@ -557,7 +621,22 @@ export default function ChatPanel({
       });
       setRuntimePendingToolCallIds(new Set(snapshot.runtimePendingToolCallIds));
       setRuntimeRunning(snapshot.running);
-      setMessagesRef.current?.(recoveredMessages);
+      setToolConfirmationKnown(snapshot.toolConfirmationKnown ?? false);
+      const recovered = mergeRecoveredLatestPage(messagesRef.current, recoveredMessages);
+      const recoveredPage = snapshot.historyPage ?? {
+        nextCursor: null,
+        hasMore: false,
+        latestMessageId: null,
+      };
+      setMessagesRef.current?.(recovered.messages);
+      setHistoricalMessageIds((currentIds) => {
+        const next = recovered.overlapsLoadedWindow ? new Set(currentIds) : new Set<string>();
+        recoveredMessages.forEach((message) => next.add(message.id));
+        return next;
+      });
+      setHistoryPage((currentPage) => recovered.overlapsLoadedWindow
+        ? { ...currentPage, latestMessageId: recoveredPage.latestMessageId }
+        : recoveredPage);
       if (!snapshot.running) onConversationSettledRef.current?.();
       return snapshot;
     } catch {
@@ -576,6 +655,61 @@ export default function ChatPanel({
       if (chatPanelMountedRef.current) setIsReloadingAfterError(false);
     }
   }, [clearError, isReloadingAfterError, recoverAuthoritativeHistory]);
+
+  const loadOlderHistory = useCallback(async () => {
+    if (!historyPage.hasMore || !historyPage.nextCursor || olderHistoryAbortRef.current) return;
+    const controller = new AbortController();
+    olderHistoryAbortRef.current = controller;
+    setIsLoadingOlderHistory(true);
+    setOlderHistoryError(null);
+    const scroller = chatContainerRef.current;
+    const anchor = scroller?.querySelector<HTMLElement>('[data-chat-message-id]') ?? null;
+    const scrollAnchor = captureChatScrollAnchor(scroller, anchor);
+    try {
+      const page = await fetchClaudeThreadMessages(threadId, {
+        cursor: historyPage.nextCursor,
+        signal: controller.signal,
+      });
+      setMessagesRef.current?.((current) => prependUniqueOlderMessages(current, page.messages));
+      setHistoricalMessageIds((current) => {
+        const next = new Set(current);
+        page.messages.forEach((message) => next.add(message.id));
+        return next;
+      });
+      if (toolConfirmationKnown) {
+        const pageSettled = deriveSettledToolCallIdsFromKnownPending(
+          page.messages,
+          runtimePendingToolCallIds,
+        );
+        setSettledToolCallIds((current) => {
+          const next = new Set(current);
+          pageSettled.forEach((toolCallId) => next.add(toolCallId));
+          return next.size === current.size ? current : next;
+        });
+      }
+      setHistoryPage({
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+        latestMessageId: historyPage.latestMessageId ?? page.latestMessageId,
+      });
+      if (scrollAnchor) {
+        requestAnimationFrame(() => {
+          restoreChatScrollAnchor(scrollAnchor);
+        });
+      }
+    } catch (reason) {
+      if (controller.signal.aborted) return;
+      if (reason instanceof ClaudeThreadHydrationUnknownError && reason.httpStatus === 400) {
+        const recovered = await recoverAuthoritativeHistory();
+        if (recovered === undefined) setOlderHistoryError(reason);
+      } else {
+        setOlderHistoryError(reason instanceof Error ? reason : new Error('history page failed'));
+      }
+    } finally {
+      if (olderHistoryAbortRef.current === controller) olderHistoryAbortRef.current = null;
+      if (chatPanelMountedRef.current) setIsLoadingOlderHistory(false);
+    }
+  }, [historyPage, recoverAuthoritativeHistory, runtimePendingToolCallIds, threadId, toolConfirmationKnown]);
 
   const recoverLocalCompletion = useCallback(async (attempt = 0): Promise<void> => {
     const snapshot = await recoverAuthoritativeHistory();
@@ -845,7 +979,8 @@ export default function ChatPanel({
       }
     }
   }, [abortLocalReaders, canStopMainTurn, isStopping, recoverAfterStop, threadId]);
-  const shouldShowMessageSurface = visibleMessages.length > 0 || Boolean(error) || chatLoading;
+  const historyIsEmpty = initialMessages !== undefined && visibleMessages.length === 0 && !chatLoading;
+  const shouldShowMessageSurface = visibleMessages.length > 0 || Boolean(error) || chatLoading || historyIsEmpty;
 
   const effectiveToolChoice: ToolChoice = imFullAccessEnabled ? 'auto' : currentToolChoice;
 
@@ -909,7 +1044,8 @@ export default function ChatPanel({
       return;
     }
     updateScrollToBottomVisibility(element);
-  }, [updateScrollToBottomVisibility]);
+    if (element.scrollTop <= 0) void loadOlderHistory();
+  }, [loadOlderHistory, updateScrollToBottomVisibility]);
 
   const handleScrollToBottom = useCallback(() => {
     const element = chatContainerRef.current;
@@ -965,6 +1101,13 @@ export default function ChatPanel({
             onOpenSubagentTask={onOpenSubagentTask}
             settledToolCallIds={settledToolCallIds}
             onToolConfirmationSettled={markToolConfirmationSettled}
+            historicalMessageIds={historicalMessageIds}
+            livePresentedTurnIds={livePresentedTurnIds}
+            historyHasMore={historyPage.hasMore}
+            historyLoading={isLoadingOlderHistory}
+            historyError={olderHistoryError}
+            historyEmpty={historyIsEmpty}
+            onLoadOlder={loadOlderHistory}
           />
           <div aria-hidden="true" />
         </div>

@@ -6,6 +6,7 @@
 [Sync] 2026-08-19: add the exact ClaudePlugin Remote Marketplace v1 contract hash.
 [Sync] 2026-08-25: add the exact Admin-published managed MCP Resources v1 capability check.
 [Sync] 2026-08-28: require the Admin-owned Claude Code Runtime model/policy capability before consuming optional env projections.
+[Sync] 2026-09-02: require the exact Admin-owned Chat history keyset index capability.
 """
 
 from __future__ import annotations
@@ -46,6 +47,13 @@ CLAUDE_CODE_RUNTIME_CONFIG_VERSION: Final = 1
 CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256: Final = (
     "7b4d46bad9cfb340336a05aa9c9a2b70f5518622e5e2e94d47aac2ca76d63c1d"
 )
+CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY: Final = (
+    "dream.chat-history-keyset-pagination.v1"
+)
+CHAT_HISTORY_KEYSET_PAGINATION_VERSION: Final = 1
+CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256: Final = (
+    "a0dfe5f8d4b4330a9e17db07a8716d5d2bc25e291f3624f09005e79c01fc8ab0"
+)
 REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     UNIFIED_DREAM_CAPABILITY: 1,
     "dream.workflow.thread-lookup.v1": 1,
@@ -55,6 +63,9 @@ REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
         CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION
     ),
     CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY: CLAUDE_CODE_RUNTIME_CONFIG_VERSION,
+    CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY: (
+        CHAT_HISTORY_KEYSET_PAGINATION_VERSION
+    ),
 }
 _EXACT_RUNTIME_CONTRACTS: Final[Mapping[str, str]] = {
     CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: (
@@ -62,6 +73,9 @@ _EXACT_RUNTIME_CONTRACTS: Final[Mapping[str, str]] = {
     ),
     CLAUDE_CODE_RUNTIME_CONFIG_CAPABILITY: (
         CLAUDE_CODE_RUNTIME_CONFIG_CONTRACT_SHA256
+    ),
+    CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY: (
+        CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256
     ),
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -250,6 +264,9 @@ def claude_code_runtime_config_capability_available(connection: Any) -> bool:
 
 
 __all__ = [
+    "CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY",
+    "CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256",
+    "CHAT_HISTORY_KEYSET_PAGINATION_VERSION",
     "CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY",
     "CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256",
     "CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION",

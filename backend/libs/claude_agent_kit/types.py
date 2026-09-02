@@ -42,6 +42,8 @@
 # [Sync] 2026-09-01: carry one server-authenticated Dream auto-repair project
 #                    cleanup scope to the PreToolUse boundary without exposing
 #                    it through the public Chat request or subprocess env.
+# [Sync] 2026-09-02: expose runner-owned terminal completion proof and reliable
+#                    ResultMessage duration to Chat persistence metadata.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -350,6 +352,14 @@ class AgentRunResult:
     messages: list[Any] = field(default_factory=list)
     # Token usage statistics.
     usage: Optional[dict[str, Optional[int]]] = None
+    # Runner-owned proof that one non-error success ResultMessage ended at a
+    # valid terminal reason.  None keeps older injected test/provider results
+    # backward compatible; the production runner always returns a bool.
+    protocol_completed: Optional[bool] = None
+    # Reliable provider-reported wall duration for this turn, when available.
+    duration_ms: Optional[int] = None
+    # Latest typed terminal stop reason observed from the SDK stream.
+    terminal_stop_reason: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

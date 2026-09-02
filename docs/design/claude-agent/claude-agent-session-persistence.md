@@ -4,6 +4,7 @@
 > **[Sync] 2026-05-25 v3**: 重大设计重构 — `collected_parts` 改为收集**原始 SSE 事件报文**；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做线性转换；`tool_inv_by_id` 等状态字段从 `_TurnContext` 移除。
 > **[Sync] 2026-05-29 v4**: Claude SDK session ID 持久化落地 — `chat_thread` 新增 `claude_session_id TEXT` 和 `agent_contract_version TEXT` 两列；`_persist_turn` 每次成功 turn 后调用 `update_chat_thread_claude_session` 写回 `result.session_id`；`assemble_context` Phase 1 据此决定是否 resume（详见 `claude-agent-context-assembly.md §4.7`）。
 > **[Sync] 2026-09-01**: user 在推理前写入；每个 successful assistant 在 Dream post-Hook 前由 `_persist_assistant_turn` 写入。Hook continuation/第二次失败不再造成 SSE transcript 丢失。
+> **[Sync] 2026-09-02**: Chat/Dream 首屏改为稳定 message keyset page + latest-ID 复核；completed assistant metadata 提供 turn/final/duration，历史过程折叠时不创建重型 DOM。
 
 # Claude Agent 会话持久化设计
 
@@ -276,10 +277,14 @@ async def _persist_turn(self, execution, result) -> None:
 ## 5. 前端历史加载流程（对齐 better-chatbot）
 
 ```
-GET /api/claude-agent/threads/{thread_id}/messages
-  → database.list_chat_messages(thread_id)
+GET /api/claude-agent/threads/{thread_id}/messages?limit=20[&cursor=...]
+  → database.list_chat_message_page(thread_id, limit, stable boundary)
   → [{id, role, content, parts: list, metadata: dict|None, created_at}, ...]
   ↑ parts 和 metadata 在 DB 层已反序列化（aligned with better-chatbot selectMessagesByThreadId）
+
+初始页同时返回 next_cursor / has_more / latest_message_id。history → status
+观察到 idle 后，以 known_latest_message_id 做 ID-only 复核；相同则不再读取
+parts/metadata，不同才替换最近页。无 limit 的完整历史仅保留兼容与用户显式导出。
 
 前端 fetchThreadMessages()：
   msgs.map(m => ({
@@ -291,16 +296,20 @@ GET /api/claude-agent/threads/{thread_id}/messages
     metadata:  m.metadata,                               // 已解析为 dict
     createdAt: new Date(m.created_at),
   }))
-  → UIMessage[]   直接传入 useChat({ initialMessages })
+  → 最近 UIMessage[] 直接传入 useChat；上滚按 cursor 去重 prepend 并保持锚点
 ```
 
 `ChatMessageList.tsx` 渲染时：
 
 | part.type | 渲染组件 / 逻辑 |
 |-----------|----------------|
-| `"reasoning"` | 折叠 `<details>` 显示 thinking 链（`part.text`） |
+| `"reasoning"` | 实时 turn 逐步可见；已完成历史 turn 收纳在共享过程 disclosure |
 | `"tool-invocation"`（`isToolUIPart(part)`） | 终端样式工具结果面板（命令 + 输出 + exit code） |
 | `"text"` | Markdown + ReactMarkdown 渲染 |
+
+历史 hydration 中具有可信 `turnStatus=completed + finalPartIndex` 的 assistant
+turn 默认只挂载 final；reasoning/tool/intermediate text 的 renderer 在过程折叠时
+不会创建，展开时才按原序挂载。error/cancel/no-final 保留完整诊断渲染。
 
 ---
 

@@ -22,6 +22,7 @@
 [Sync] 2026-08-29: document the authenticated Notion connector capability catalog, parsed Skill detail, and revision-aware stable-ID Markdown file reads.
 [Sync] 2026-08-29: capability schema v2 derives Skill metadata/files from the installed package and operations from the real Read hook/workspace materializer entrypoints.
 [Sync] 2026-08-31: remove daily-picture mutation/generation and legacy voice-analysis APIs; historical picture reads remain.
+[Sync] 2026-09-02: document stable Chat message pages, latest-ID stabilization, and legacy full-history compatibility.
 -->
 
 **Version:** 2.0.0
@@ -542,6 +543,24 @@ the authoritative source for Settings / Work related-conversation previews.
 - `min_score` (optional) - fuzzy threshold, `0` to `1`
 - `limit` (optional) - max result count
 - `offset` (optional, default `0`) - default-list page offset; ignored by search retrieval
+
+### GET `/api/claude-agent/threads/{thread_id}/messages`
+
+Read an owned Thread's messages. With no query parameters, the legacy contract
+returns the complete chronological history. Chat and Dream use stable keyset
+pages by sending `limit`; each returned message still contains its complete
+public `parts` and metadata and is never truncated by payload size.
+
+**Query params:**
+
+- `limit` (optional, `1..100`) - enable newest-to-older keyset pagination; the response page is chronological
+- `cursor` (optional) - opaque, versioned and Thread-bound boundary for the next older page
+- `known_latest_message_id` (optional) - ID-only idle stabilization probe; mutually exclusive with `cursor`
+
+Paged responses add `next_cursor`, `has_more`, `latest_message_id`, and
+`unchanged`. An unchanged probe returns no messages and does not read
+`parts`/`metadata`; a changed probe returns a replacement latest page. Invalid,
+expired-version, or cross-Thread cursors return HTTP 400. Ownership remains 404.
 
 **Response:**
 ```json

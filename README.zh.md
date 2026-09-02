@@ -12,6 +12,7 @@
 <!-- [同步] 2026-09-01：记录生产 skill-creator 打包、AutoDL discovery 验证与未知 Skill 可见失败。 -->
 <!-- [同步] 2026-09-01：记录经规范 Chat/SSE/Turn 路径持久化并单次执行的 Dream 工作区自动修正。 -->
 <!-- [同步] 2026-09-01：允许歧义 Dream 工作区进入修正 Turn，并安全截断递归 Skill 链接。 -->
+<!-- [同步] 2026-09-02：Dream 启动前要求 Admin 0042 发布精确 Chat 历史 keyset pagination capability。 -->
 <!-- [同步] 2026-09-01：要求投影写入前校验重复项目根/stage，采用 move-not-copy 清理，并在唯一一次修正停止时显示安全原因。 -->
 
 # Ink & Memory
@@ -117,6 +118,7 @@ pnpm db:migrate:check
 ```
 
 所有共享 PostgreSQL migration 只能由 Admin 管理。Dream 禁止临时创建共享表，也没有运行时 SQLite fallback。
+当前 Chat 历史分页路径要求 Admin migration `0042_chat_history_keyset_pagination` 和精确 capability `dream.chat-history-keyset-pagination.v1`；启动 Dream 前，`pnpm db:migrate:check` 必须返回 current。
 
 在终端 A 启动 Admin/Gateway：
 
@@ -315,7 +317,7 @@ ink-claude-code-dream --version
 
 ### PostgreSQL 或 Schema capability 不可用
 
-启动 Admin supervisor，检查 `../ink-admin-memory/.env.local`，并执行 Admin migration check。禁止从 Dream 建表。
+启动 Admin supervisor，检查 `../ink-admin-memory/.env.local`，并执行 Admin migration check。若 Dream 报告缺少 Chat-history capability，应应用并验证 Admin migration `0042_chat_history_keyset_pagination`；禁止从 Dream 创建该索引或 capability。
 
 ### 没有可调用模型
 

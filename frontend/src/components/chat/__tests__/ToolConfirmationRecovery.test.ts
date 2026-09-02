@@ -4,6 +4,7 @@
 // [Sync] 2026-08-31: lock structured SSE error identity without parsing display strings.
 // [Sync] 2026-09-01: lock completed Editor jump intents to their exact persisted
 //                    session as well as the target cell.
+// [Sync] 2026-09-02: prove idle stabilization can use a latest-ID probe instead of a second full read.
 
 import { expect, test } from '@playwright/test';
 import type { DynamicToolUIPart } from 'ai';
@@ -24,6 +25,7 @@ import {
 } from '../chatRecovery';
 import {
   deriveSettledToolCallIdsFromHistory,
+  deriveSettledToolCallIdsFromKnownPending,
   interpretToolConfirmationResponse,
   loadChatHistoryThenRuntimeStatus,
   parseChatThreadStatus,
@@ -240,6 +242,17 @@ test('reconnect approval preserves prior input and recognizes reject-only policy
   expect(resolvePendingToolConfirmation(part, 'auto')).toBe('reject-only');
 });
 
+test('reconnect metadata preserves the server turn identity used for live/history merge', () => {
+  const replayed = applyBackendEventToMessages([], {
+    type: 'message-metadata',
+    sessionId: 'session-1',
+    turnIndex: 2,
+    turnId: 'turn-stable',
+  });
+  expect(replayed).toHaveLength(1);
+  expect(replayed[0].metadata).toMatchObject({ turnId: 'turn-stable' });
+});
+
 test('direct settlement marker closes AskUser and manual confirmation unless runtime still owns it', () => {
   const settledAskUser = {
     type: 'dynamic-tool' as const,
@@ -313,6 +326,20 @@ test('known runtime status settles only historical tool calls that are no longer
     'manual',
     settled,
   )).toBe('confirm');
+});
+
+test('a later history page inherits the same known pending ownership snapshot', () => {
+  const settled = deriveSettledToolCallIdsFromKnownPending([
+    {
+      id: 'older-assistant',
+      role: 'assistant',
+      parts: [
+        stalePart,
+        { ...stalePart, toolCallId: 'call-still-pending' },
+      ],
+    },
+  ], new Set(['call-still-pending']));
+  expect([...settled]).toEqual(['call-stale']);
 });
 
 test('known empty idle status settles stale history while unknown status settles nothing', () => {
@@ -407,6 +434,32 @@ test('idle observed after history reloads the terminal turn before Chat resumes'
     { id: 'dream-user' },
     { id: 'dream-assistant-terminal' },
   ]);
+});
+
+test('idle stabilization delegates to the latest-ID probe without calling full history twice', async () => {
+  let fullHistoryReads = 0;
+  let probes = 0;
+  const recovery = await loadChatHistoryThenRuntimeStatus(
+    async () => {
+      fullHistoryReads += 1;
+      return { messages: ['latest-page'], latestMessageId: 'message-latest' };
+    },
+    async () => ({
+      running: false,
+      lifecycle: 'idle',
+      turn_count: 1,
+      pending_tool_call_ids: [],
+      tool_confirmation_observation: 'known',
+    }),
+    async (history) => {
+      probes += 1;
+      return history;
+    },
+  );
+
+  expect(fullHistoryReads).toBe(1);
+  expect(probes).toBe(1);
+  expect(recovery.history.latestMessageId).toBe('message-latest');
 });
 
 test('destroyed and not_found authoritative states also stabilize terminal history', async () => {

@@ -12,6 +12,7 @@
 <!-- [Sync] 2026-09-01: document production skill-creator packaging, AutoDL discovery verification, and visible unknown-Skill failures. -->
 <!-- [Sync] 2026-09-01: document persisted, one-shot Dream workspace auto-repair through the canonical Chat/SSE/Turn path. -->
 <!-- [Sync] 2026-09-01: keep ambiguous Dream workspaces enterable and recursive Skill-link trees safe. -->
+<!-- [Sync] 2026-09-02: require Admin 0042's exact Chat history keyset pagination capability before Dream starts. -->
 <!-- [Sync] 2026-09-01: require pre-write duplicate-root/stage validation, move-not-copy cleanup, and a visible safe reason when the one repair attempt stops. -->
 
 # Ink & Memory
@@ -117,6 +118,7 @@ pnpm db:migrate:check
 ```
 
 Admin owns all shared PostgreSQL migrations. Dream must never create missing shared tables or use a runtime SQLite fallback.
+The current Chat history pagination path requires Admin migration `0042_chat_history_keyset_pagination` and exact capability `dream.chat-history-keyset-pagination.v1`; `pnpm db:migrate:check` must report current before starting Dream.
 
 Start Admin/Gateway in terminal A:
 
@@ -315,7 +317,7 @@ For the current `develop` branch, the manifest must contain Runtime `0.1.4`. Cap
 
 ### PostgreSQL or schema capability unavailable
 
-Start the Admin supervisor, verify `../ink-admin-memory/.env.local`, and run Admin's migration checks. Do not create tables from Dream.
+Start the Admin supervisor, verify `../ink-admin-memory/.env.local`, and run Admin's migration checks. If Dream reports the Chat-history capability missing, apply and verify Admin migration `0042_chat_history_keyset_pagination`; do not create its index or capability from Dream.
 
 ### No callable model
 

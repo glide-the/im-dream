@@ -46,6 +46,10 @@
 # [Sync] 2026-08-31: remove the daily-picture mutation helper; historical picture
 #                    reads and explicit legacy-data import remain.
 # [Sync] 2026-08-17: CAS-update the current Agent inside an already bound Chat Deck.
+# [Sync] 2026-09-02: add stable keyset Chat message pages and a lightweight latest-id read;
+#                    keep the legacy full-history reader for explicit compatibility consumers.
+# [Sync] 2026-09-02: make message-id NULL ordering explicit and split the nullable legacy
+#                    tail so Admin Drizzle 0042 serves each keyset page without rescanning newer rows.
 """
 PostgreSQL runtime persistence helpers for Ink & Memory.
 
@@ -3460,6 +3464,37 @@ def save_chat_message(
         db.close()
 
 
+def _decode_chat_message_rows(rows: list[Mapping[str, object]]) -> list[dict]:
+    """Decode Chat JSON columns without weakening corrupt-metadata fail-closed."""
+
+    results: list[dict] = []
+    for row in rows:
+        message = dict(row)
+        # Keep SQL NULL (a valid "no metadata" value) distinguishable
+        # from a corrupt stored JSON envelope.  The HTTP projection uses
+        # this internal flag to withhold message parts fail-closed; the
+        # flag itself is never part of the client response allowlist.
+        message["metadata_decode_error"] = False
+        try:
+            message["parts"] = json.loads(message["parts"]) if message["parts"] else []
+        except Exception:
+            message["parts"] = []
+        if message.get("metadata"):
+            try:
+                message["metadata"] = json.loads(message["metadata"])
+                if not isinstance(message["metadata"], dict):
+                    # A stored JSON scalar/array (including literal null)
+                    # is not the SQL NULL "no metadata" state.  Preserve
+                    # that distinction so the client projection fails
+                    # closed even when JSON decoding itself succeeds.
+                    message["metadata_decode_error"] = True
+            except Exception:
+                message["metadata"] = None
+                message["metadata_decode_error"] = True
+        results.append(message)
+    return results
+
+
 def list_chat_messages(thread_id: str) -> list[dict]:
     """Return all messages for a thread in chronological order.
 
@@ -3470,35 +3505,111 @@ def list_chat_messages(thread_id: str) -> list[dict]:
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT id, role, parts, metadata, created_at FROM chat_message WHERE thread_id = %s ORDER BY created_at ASC",
+            "SELECT id, role, parts, metadata, created_at "
+            "FROM chat_message WHERE thread_id = %s "
+            "ORDER BY created_at ASC NULLS FIRST, id ASC",
             (thread_id,),
         ).fetchall()
-        results = []
-        for row in rows:
-            m = dict(row)
-            # Keep SQL NULL (a valid "no metadata" value) distinguishable
-            # from a corrupt stored JSON envelope.  The HTTP projection uses
-            # this internal flag to withhold message parts fail-closed; the
-            # flag itself is never part of the client response allowlist.
-            m["metadata_decode_error"] = False
-            try:
-                m["parts"] = json.loads(m["parts"]) if m["parts"] else []
-            except Exception:
-                m["parts"] = []
-            if m.get("metadata"):
-                try:
-                    m["metadata"] = json.loads(m["metadata"])
-                    if not isinstance(m["metadata"], dict):
-                        # A stored JSON scalar/array (including literal null)
-                        # is not the SQL NULL "no metadata" state.  Preserve
-                        # that distinction so the client projection fails
-                        # closed even when JSON decoding itself succeeds.
-                        m["metadata_decode_error"] = True
-                except Exception:
-                    m["metadata"] = None
-                    m["metadata_decode_error"] = True
-            results.append(m)
-        return results
+        return _decode_chat_message_rows(rows)
+    finally:
+        db.close()
+
+
+def list_chat_message_page(
+    thread_id: str,
+    limit: int,
+    *,
+    before_created_at: datetime | None = None,
+    before_id: str | None = None,
+    before_created_at_is_null: bool = False,
+) -> dict[str, object]:
+    """Return one newest-to-older keyset page, exposed in chronological order.
+
+    ``before_id is None`` selects the newest page.  A cursor whose timestamp is
+    SQL NULL sets ``before_created_at_is_null`` so NULL peers continue by id.
+    The newest page's latest identity is taken from the same row snapshot, not
+    from a second query that could drift during status stabilization.
+    """
+
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    if before_id is None and (before_created_at is not None or before_created_at_is_null):
+        raise ValueError("cursor boundary requires before_id")
+    if before_id is not None and before_created_at is None and not before_created_at_is_null:
+        raise ValueError("cursor boundary timestamp kind is required")
+    if before_created_at is not None and before_created_at_is_null:
+        raise ValueError("cursor boundary timestamp is ambiguous")
+
+    db = get_db()
+    try:
+        select_page = (
+            "SELECT id, role, parts, metadata, created_at "
+            "FROM chat_message WHERE "
+        )
+        order_page = (
+            " ORDER BY created_at DESC NULLS LAST, id DESC NULLS LAST "
+            "LIMIT %s"
+        )
+        page_size = limit + 1
+        if before_id is None:
+            rows = db.execute(
+                select_page + "thread_id = %s" + order_page,
+                (thread_id, page_size),
+            ).fetchall()
+        elif before_created_at_is_null:
+            rows = db.execute(
+                select_page
+                + "thread_id = %s AND created_at IS NULL AND id < %s"
+                + order_page,
+                (thread_id, before_id, page_size),
+            ).fetchall()
+        else:
+            # A row-value boundary lets PostgreSQL start the exact composite
+            # index scan at the cursor.  Mixing legacy NULL timestamps into
+            # the same OR predicate would demote the boundary to a filter and
+            # rescan all newer rows, so NULL-tail rows fill only the remainder.
+            nonnull_rows = db.execute(
+                select_page
+                + "thread_id = %s AND (created_at, id) < (%s, %s)"
+                + order_page,
+                (thread_id, before_created_at, before_id, page_size),
+            ).fetchall()
+            rows = list(nonnull_rows)
+            remaining = page_size - len(rows)
+            if remaining > 0:
+                null_rows = db.execute(
+                    select_page + "thread_id = %s AND created_at IS NULL" + order_page,
+                    (thread_id, remaining),
+                ).fetchall()
+                rows.extend(null_rows)
+        latest_message_id = (
+            str(rows[0]["id"])
+            if before_id is None and rows
+            else None
+        )
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        messages = _decode_chat_message_rows(list(reversed(page_rows)))
+        return {
+            "messages": messages,
+            "has_more": has_more,
+            "latest_message_id": latest_message_id,
+        }
+    finally:
+        db.close()
+
+
+def get_latest_chat_message_id(thread_id: str) -> str | None:
+    """Read only the current stable latest Chat message identity."""
+
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT id FROM chat_message WHERE thread_id = %s "
+            "ORDER BY created_at DESC NULLS LAST, id DESC NULLS LAST LIMIT 1",
+            (thread_id,),
+        ).fetchone()
+        return str(row["id"]) if row is not None else None
     finally:
         db.close()
 

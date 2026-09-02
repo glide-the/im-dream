@@ -10,6 +10,8 @@
 //                    while a fresh conversation keeps Deck -> Agent selection;
 //                    a packed plugin receipt cannot replace the visible Deck name.
 // [Sync] 2026-08-17: switch the next-turn Agent from the historical Thread Deck metadata popover.
+// [Sync] 2026-09-02: serve the paged history contract and visually verify completed-turn
+//                    process folding before the same-thread next turn.
 
 import { expect, test } from '@playwright/test';
 
@@ -81,6 +83,30 @@ const historicalThread = {
   created_at: '2026-08-14T07:00:00Z',
   updated_at: '2026-08-14T07:30:00Z',
 };
+
+const historicalMessages = [{
+  id: 'history-user-message-e2e',
+  role: 'user',
+  parts: [{ type: 'text', text: '请分析这一段历史内容。' }],
+  metadata: {},
+  created_at: '2026-08-14T07:10:00Z',
+}, {
+  id: 'history-assistant-message-e2e',
+  role: 'assistant',
+  parts: [
+    { type: 'reasoning', text: '历史思考链仅在展开后挂载。' },
+    { type: 'text', text: '历史中间文本仅在展开后挂载。' },
+    { type: 'reasoning', text: '历史收束过程仍属于同一轮。' },
+    { type: 'text', text: '这是历史轮次的最终答复。' },
+  ],
+  metadata: {
+    turnId: 'history-completed-turn-e2e',
+    turnStatus: 'completed',
+    finalPartIndex: 3,
+    durationMs: 12_500,
+  },
+  created_at: '2026-08-14T07:12:00Z',
+}];
 
 function dreamRun(
   suffix: string,
@@ -242,7 +268,17 @@ test('Dream active Deck context → workbench → Chat active tab → production
         },
       });
     }
-    if (pathname === '/api/claude-agent/threads/thread-dream-e2e/messages') return route.fulfill({ json: { messages: [] } });
+    if (pathname === '/api/claude-agent/threads/thread-dream-e2e/messages') {
+      return route.fulfill({
+        json: {
+          messages: [],
+          next_cursor: null,
+          has_more: false,
+          latest_message_id: null,
+          unchanged: false,
+        },
+      });
+    }
     if (pathname === '/api/claude-agent/threads/thread-dream-e2e/plugin-load-receipt') {
       return route.fulfill({
         json: {
@@ -266,7 +302,17 @@ test('Dream active Deck context → workbench → Chat active tab → production
       });
     }
     if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/messages`) {
-      return route.fulfill({ json: { thread: historicalThread, messages: [] } });
+      const unchanged = url.searchParams.get('known_latest_message_id') === 'history-assistant-message-e2e';
+      return route.fulfill({
+        json: {
+          thread: historicalThread,
+          messages: unchanged ? [] : historicalMessages,
+          next_cursor: null,
+          has_more: false,
+          latest_message_id: 'history-assistant-message-e2e',
+          unchanged,
+        },
+      });
     }
     if (pathname === `/api/claude-agent/threads/${HISTORICAL_THREAD_ID}/plugin-load-receipt`) {
       return route.fulfill({
@@ -391,6 +437,22 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(agentSelector).toBeVisible();
   await page.getByRole('button', { name: historicalThread.title }).click();
   await expect(page.getByRole('textbox', { name: '聊天输入' })).toBeVisible();
+  const historicalAssistantTurn = page.locator('[data-chat-assistant-turn="history-completed-turn-e2e"]');
+  const historicalProcessToggle = historicalAssistantTurn.locator('.chat-assistant-turn__toggle');
+  await expect(historicalAssistantTurn.getByText('这是历史轮次的最终答复。')).toBeVisible();
+  await expect(historicalProcessToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText('历史思考链仅在展开后挂载。')).toHaveCount(0);
+  await page.screenshot({ path: '../output/playwright/chat-history-process-collapsed.png' });
+  await historicalProcessToggle.focus();
+  await historicalProcessToggle.press('Enter');
+  await expect(historicalProcessToggle).toHaveAttribute('aria-expanded', 'true');
+  const historicalProcess = historicalAssistantTurn.locator('[data-turn-process="history-completed-turn-e2e"]');
+  await expect(historicalProcess).toContainText('历史思考链仅在展开后挂载。');
+  await expect(historicalProcess).toContainText('历史中间文本仅在展开后挂载。');
+  await page.screenshot({ path: '../output/playwright/chat-history-process-expanded.png' });
+  await historicalProcessToggle.press('Enter');
+  await expect(historicalProcessToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText('历史思考链仅在展开后挂载。')).toHaveCount(0);
   await expect(agentSelector).toHaveCount(0);
   const historicalDeckContext = page.getByRole('button', { name: 'Deck 元信息' });
   await expect(historicalDeckContext).toBeVisible();

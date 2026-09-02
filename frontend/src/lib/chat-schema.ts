@@ -5,6 +5,8 @@
 // [Sync] 2026-08-17: expose per-message Deck/Agent provenance used by same-Deck Agent switching.
 // [Sync] 2026-09-01: type the visible server-owned Dream auto-repair message metadata.
 // [Sync] 2026-09-01: carry canonical trusted/stale cleanup facts on project-root repairs.
+// [Sync] 2026-09-02: type server-owned turn completion/final/duration metadata
+//                    used by the shared historical assistant turn projector.
 import type { LanguageModelUsage, UIMessage } from 'ai';
 
 export type ChatAttachment = {
@@ -64,6 +66,12 @@ export type ChatMetadata = {
   validationCode?: string;
   idempotencyKey?: string;
   dispatch_status?: 'dispatching' | 'dispatched' | 'failed';
+  is_partial?: boolean;
+  turnId?: string;
+  turnStatus?: 'completed' | 'cancelled' | 'error';
+  finalPartIndex?: number;
+  durationMs?: number;
+  turnProjectionInvalid?: boolean;
   projectCleanup?: {
     trustedProjectSlug: string;
     staleProjectSlugs: string[];

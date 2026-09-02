@@ -7,6 +7,7 @@
 //                    never scrollable Story Workspace ancestors via scrollIntoView.
 // [Sync] 2026-08-13: require both Dream Agent surfaces to open their bound Chat thread.
 // [Sync] 2026-08-14: require the Execution draft/sync switch beside Chat.
+// [Sync] 2026-09-02: require both Chat hosts to share one paged historical-turn renderer.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -19,6 +20,7 @@ const PANEL = readFileSync(new URL('../../../components/story-workspace/dream/St
 const DIALOG = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx', import.meta.url), 'utf8');
 const THREAD_CHAT = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx', import.meta.url), 'utf8');
 const CHAT_PANEL = readFileSync(new URL('../../../components/chat/ChatPanel.tsx', import.meta.url), 'utf8');
+const MESSAGE_LIST = readFileSync(new URL('../../../components/chat/ChatMessageList.tsx', import.meta.url), 'utf8');
 const RAIL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentRail.tsx', import.meta.url), 'utf8');
 const ROUTER = readFileSync(new URL('../../../router/story-workspace.tsx', import.meta.url), 'utf8');
 const DREAM_CSS = readFileSync(new URL('../StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
@@ -48,6 +50,16 @@ test('shared ChatPanel owns confirmation, Stop and subagent seams on both surfac
   expect(PAGE).not.toContain('pendingToolConfirmation');
   expect(CHAT_PANEL).toContain('loading={chatLoading}');
   expect(CHAT_PANEL).toContain('onStop={canStopMainTurn ? handleStop : undefined}');
+});
+
+test('Chat and Dream share one paged message list and one historical turn projector', () => {
+  expect(THREAD_CHAT).toContain('initialHistoryPage={{');
+  expect(CHAT_PANEL).toContain('<ChatMessageList');
+  expect(CHAT_PANEL).toContain('loadOlderHistory');
+  expect(CHAT_PANEL).toContain('historicalMessageIds={historicalMessageIds}');
+  expect(MESSAGE_LIST).toContain('<AssistantTurnGroup');
+  expect(MESSAGE_LIST).toContain('projectHistoricalAssistantTurn(message)');
+  expect(THREAD_CHAT).not.toContain('projectHistoricalAssistantTurn');
 });
 
 test('Dream initial idle is only a baseline; settlement comes from ChatPanel recovery', () => {

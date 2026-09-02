@@ -43,16 +43,21 @@
 #                    and reserve its server-owned message-id namespace.
 # [Sync] 2026-09-01: preserve validated projectCleanup trusted/stale facts in
 #                    history so SSE and refresh expose the same repair message.
+# [Sync] 2026-09-02: add stable cursor Chat message pages and known-latest
+#                    identity stabilization while preserving the legacy full response.
 
 import asyncio
 import base64
+import binascii
 import json
 import logging
+import math
 import os
 import re
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Annotated, Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AliasChoices, BaseModel, Field, model_validator
@@ -112,6 +117,86 @@ _SERVER_MESSAGE_ID_PREFIXES = (
     "dream_repair_",
     "guide_",
 )
+_CHAT_MESSAGE_CURSOR_VERSION = 1
+
+
+def _chat_message_cursor_timestamp(value: object) -> str | None:
+    """Serialize a PostgreSQL timestamp without losing offset or microseconds."""
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        timestamp = value
+    elif isinstance(value, str):
+        try:
+            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("cursor timestamp is invalid") from exc
+    else:
+        raise ValueError("cursor timestamp is invalid")
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        # The PostgreSQL driver historically returned UTC-naive values in a
+        # few tests; attach the storage timezone rather than ambient local time.
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.isoformat(timespec="microseconds")
+
+
+def _encode_chat_message_cursor(thread_id: str, message: dict[str, Any]) -> str:
+    message_id = message.get("id")
+    if not isinstance(message_id, str) or not message_id:
+        raise ValueError("cursor message id is invalid")
+    payload = {
+        "v": _CHAT_MESSAGE_CURSOR_VERSION,
+        "thread_id": thread_id,
+        "created_at": _chat_message_cursor_timestamp(message.get("created_at")),
+        "id": message_id,
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("=")
+
+
+def _decode_chat_message_cursor(thread_id: str, cursor: str) -> tuple[datetime | None, str, bool]:
+    """Decode and bind one opaque cursor to its owning Thread."""
+
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        raw = base64.b64decode(
+            f"{cursor}{padding}",
+            altchars=b"-_",
+            validate=True,
+        )
+        payload = json.loads(raw.decode("utf-8"))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("cursor encoding is invalid") from exc
+    if not isinstance(payload, dict) or set(payload) != {"v", "thread_id", "created_at", "id"}:
+        raise ValueError("cursor shape is invalid")
+    if payload.get("v") != _CHAT_MESSAGE_CURSOR_VERSION:
+        raise ValueError("cursor version is unsupported")
+    if payload.get("thread_id") != thread_id:
+        raise ValueError("cursor thread does not match")
+    message_id = payload.get("id")
+    if not isinstance(message_id, str) or not message_id:
+        raise ValueError("cursor message id is invalid")
+    timestamp_value = payload.get("created_at")
+    if timestamp_value is None:
+        return None, message_id, True
+    if not isinstance(timestamp_value, str):
+        raise ValueError("cursor timestamp is invalid")
+    try:
+        timestamp = datetime.fromisoformat(timestamp_value)
+    except ValueError as exc:
+        raise ValueError("cursor timestamp is invalid") from exc
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise ValueError("cursor timestamp must include an offset")
+    return timestamp, message_id, False
+
+
 class PublicDispatchStatus(str, Enum):
     PENDING = "pending"
     DISPATCHING = "dispatching"
@@ -123,6 +208,12 @@ class PublicToolChoice(str, Enum):
     AUTO = "auto"
     MANUAL = "manual"
     NONE = "none"
+
+
+class PublicAssistantTurnStatus(str, Enum):
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    ERROR = "error"
 
 
 class PublicChatThreadDto(BaseModel):
@@ -147,6 +238,11 @@ class PublicChatMetadataDto(BaseModel):
     toolChoice: PublicToolChoice | None = None
     toolCount: int | None = None
     is_partial: bool | None = None
+    turnId: str | None = None
+    turnStatus: PublicAssistantTurnStatus | None = None
+    finalPartIndex: int | None = None
+    durationMs: int | float | None = None
+    turnProjectionInvalid: bool | None = None
     schemaVersion: str | None = None
     originatingMessageId: str | None = None
     originatingTurnId: str | None = None
@@ -236,6 +332,60 @@ class PublicChatMetadataDto(BaseModel):
         is_partial = metadata.get("is_partial")
         if isinstance(is_partial, bool):
             values["is_partial"] = is_partial
+
+        turn_fields = {"turnId", "turnStatus", "finalPartIndex", "durationMs"}
+        if any(field in metadata for field in turn_fields):
+            turn_id = metadata.get("turnId")
+            turn_status_raw = metadata.get("turnStatus")
+            final_part_index = metadata.get("finalPartIndex")
+            duration_ms = metadata.get("durationMs")
+            try:
+                turn_status = PublicAssistantTurnStatus(turn_status_raw)
+            except (TypeError, ValueError):
+                turn_status = None
+            duration_valid = (
+                duration_ms is None
+                or (
+                    isinstance(duration_ms, (int, float))
+                    and not isinstance(duration_ms, bool)
+                    and math.isfinite(duration_ms)
+                    and duration_ms >= 0
+                )
+            )
+            completed_shape = (
+                turn_status is PublicAssistantTurnStatus.COMPLETED
+                and isinstance(final_part_index, int)
+                and not isinstance(final_part_index, bool)
+                and final_part_index >= 0
+                and is_partial is not True
+            )
+            partial_shape = (
+                turn_status in {
+                    PublicAssistantTurnStatus.CANCELLED,
+                    PublicAssistantTurnStatus.ERROR,
+                }
+                and final_part_index is None
+                and is_partial is True
+            )
+            if (
+                isinstance(turn_id, str)
+                and bool(turn_id.strip())
+                and duration_valid
+                and (completed_shape or partial_shape)
+            ):
+                values["turnId"] = turn_id
+                values["turnStatus"] = turn_status
+                if completed_shape:
+                    values["finalPartIndex"] = final_part_index
+                if duration_ms is not None:
+                    values["durationMs"] = duration_ms
+            else:
+                # Ordinary turn projection corruption must not trigger the
+                # private Dream-envelope parts suppression.  Tell the shared
+                # renderer to retain the complete diagnostic transcript.
+                if isinstance(turn_id, str) and bool(turn_id.strip()):
+                    values["turnId"] = turn_id
+                values["turnProjectionInvalid"] = True
 
         if kind == DREAM_AUTO_REPAIR_METADATA_KIND:
             if dream_auto_repair_metadata_is_valid(metadata):
@@ -1000,9 +1150,12 @@ async def claude_agent_list_threads(
 @router.get("/api/claude-agent/threads/{thread_id}/messages")
 async def claude_agent_thread_messages(
     thread_id: str,
+    limit: Annotated[int | None, Query(ge=1, le=100)] = None,
+    cursor: str | None = None,
+    known_latest_message_id: str | None = None,
     current_user: dict = Depends(get_current_user),
 ):
-    """Return all persisted messages for *thread_id* in chronological order.
+    """Return legacy full history or one stable newest-to-older message page.
 
     Returns 404 if the thread does not exist or belongs to another user.
     """
@@ -1010,13 +1163,73 @@ async def claude_agent_thread_messages(
     thread = database.get_chat_thread(thread_id, user_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    messages = [
-        _project_chat_message_for_client(message)
-        for message in database.list_chat_messages(thread_id)
-    ]
+    if limit is None:
+        if cursor is not None or known_latest_message_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="limit is required for cursor pagination",
+            )
+        messages = [
+            _project_chat_message_for_client(message)
+            for message in database.list_chat_messages(thread_id)
+        ]
+        return {
+            "thread": _project_chat_thread_for_client(thread),
+            "messages": messages,
+        }
+    if cursor is not None and known_latest_message_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="cursor and known_latest_message_id are mutually exclusive",
+        )
+    if known_latest_message_id is not None:
+        if not known_latest_message_id:
+            raise HTTPException(status_code=400, detail="known latest id is invalid")
+        latest_message_id = database.get_latest_chat_message_id(thread_id)
+        if latest_message_id == known_latest_message_id:
+            return {
+                "thread": _project_chat_thread_for_client(thread),
+                "messages": [],
+                "next_cursor": None,
+                "has_more": False,
+                "latest_message_id": latest_message_id,
+                "unchanged": True,
+            }
+
+    before_created_at: datetime | None = None
+    before_id: str | None = None
+    before_created_at_is_null = False
+    if cursor is not None:
+        try:
+            before_created_at, before_id, before_created_at_is_null = (
+                _decode_chat_message_cursor(thread_id, cursor)
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    page = database.list_chat_message_page(
+        thread_id,
+        limit,
+        before_created_at=before_created_at,
+        before_id=before_id,
+        before_created_at_is_null=before_created_at_is_null,
+    )
+    page_messages = page["messages"]
+    if not isinstance(page_messages, list):
+        raise RuntimeError("chat message page result is invalid")
+    next_cursor = None
+    if page.get("has_more") is True and page_messages:
+        next_cursor = _encode_chat_message_cursor(thread_id, page_messages[0])
     return {
         "thread": _project_chat_thread_for_client(thread),
-        "messages": messages,
+        "messages": [
+            _project_chat_message_for_client(message)
+            for message in page_messages
+        ],
+        "next_cursor": next_cursor,
+        "has_more": page.get("has_more") is True,
+        "latest_message_id": page.get("latest_message_id"),
+        "unchanged": False,
     }
 
 

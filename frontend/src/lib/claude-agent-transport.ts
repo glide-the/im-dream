@@ -32,6 +32,8 @@
  * [Sync]   2026-09-01: expose server-authored error text only through the
  *                      typed transport error so known UI codes can render a
  *                      safe structured terminal reason.
+ * [Sync]   2026-09-02: carry the server-owned turnId through message metadata
+ *                      so a live turn and its persisted history row share identity.
  *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
@@ -80,6 +82,7 @@ interface BackendMessageMetadata {
   type: 'message-metadata';
   sessionId: string;
   turnIndex?: number;
+  turnId?: string;
   [key: string]: unknown;
 }
 
@@ -486,6 +489,7 @@ function convertEvent(
         messageMetadata: {
           sessionId: event.sessionId,
           turnIndex: event.turnIndex,
+          turnId: event.turnId,
         },
       });
       break;

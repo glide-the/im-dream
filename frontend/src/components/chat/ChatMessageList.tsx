@@ -39,6 +39,8 @@
 // [Sync] 2026-09-01: identify validated Dream auto-repair user metadata and show a minimal source label.
 // [Sync] 2026-09-01: render the allowlisted auto-repair exhausted reason from
 //                    its typed SSE error while generic failures remain redacted.
+// [Sync] 2026-09-02: group completed hydrated assistant turns behind one shared
+//                    lazy process disclosure while keeping live/error turns unfolded.
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -55,6 +57,8 @@ import { useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { SubagentToolButton } from './SubagentPanel';
 import { readClaudeAgentErrorCode, readClaudeAgentErrorText } from '../../lib/claude-agent-transport';
 import type { ChatMetadata } from '../../lib/chat-schema';
+import AssistantTurnGroup from './AssistantTurnGroup';
+import { projectHistoricalAssistantTurn } from './assistantTurnHistory';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -75,6 +79,15 @@ interface ChatMessageListProps {
   onToolConfirmationSettled?: (toolCallId: string) => void;
   /** Opens the right-side task panel for an Agent/Task tool invocation. */
   onOpenSubagentTask?: (toolCallId: string) => void;
+  /** Message IDs loaded from persisted history rather than the current live turn. */
+  historicalMessageIds?: ReadonlySet<string>;
+  /** Stable turn IDs first presented live; they remain unfolded until remount. */
+  livePresentedTurnIds?: ReadonlySet<string>;
+  historyHasMore?: boolean;
+  historyLoading?: boolean;
+  historyError?: Error | null;
+  historyEmpty?: boolean;
+  onLoadOlder?: () => void | Promise<void>;
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';
@@ -86,6 +99,7 @@ const WRITE_PREVIEW_COLLAPSE_LINE_LIMIT = 24;
 const WRITE_PREVIEW_COLLAPSED_MAX_HEIGHT = `${WRITE_PREVIEW_COLLAPSE_LINE_LIMIT * 1.65}em`;
 const WRITE_PREVIEW_DEFAULT_MAX_HEIGHT = '24rem';
 const WRITE_PREVIEW_EXPANDED_MAX_HEIGHT = '36rem';
+const EMPTY_ID_SET: ReadonlySet<string> = new Set<string>();
 
 function getToolStatus(part: ToolUIPart | DynamicToolUIPart, isLoading: boolean): ToolStatus {
   if (part.state === 'output-error') return 'error';
@@ -249,10 +263,11 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, livePresentedTurnIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder }: ChatMessageListProps) {
   const { t } = useTranslation();
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
+  const [expandedTurns, setExpandedTurns] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
   const errorCode = readClaudeAgentErrorCode(error);
   const isDreamBindingConflict = errorCode === 'DREAM_THREAD_BINDING_CONFLICT';
@@ -273,6 +288,24 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
 
   return (
     <div style={{ width: '100%', minWidth: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowWrap: 'anywhere' }}>
+      <div style={{ alignSelf: 'center', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
+        {historyError ? (
+          <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+            <span>{t('chat.historyTurn.loadFailed')}</span>
+            {onLoadOlder ? (
+              <button type="button" onClick={() => void onLoadOlder()}>{t('chat.historyTurn.retry')}</button>
+            ) : null}
+          </div>
+        ) : historyLoading ? (
+          <span role="status">{t('chat.historyTurn.loadingEarlier')}</span>
+        ) : historyHasMore && onLoadOlder ? (
+          <button type="button" onClick={() => void onLoadOlder()}>{t('chat.historyTurn.loadEarlier')}</button>
+        ) : historyEmpty ? (
+          <span role="status">{t('chat.historyTurn.empty')}</span>
+        ) : messages.length > 0 ? (
+          <span data-chat-history-end="true">{t('chat.historyTurn.start')}</span>
+        ) : null}
+      </div>
       {messages.map((message, index) => {
         const isLastMessage = index === messages.length - 1;
         const messageMetadata = message.metadata as ChatMetadata | undefined;
@@ -287,11 +320,21 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
             ? 'chat.autoRepair.failed'
             : 'chat.autoRepair.source')
           : undefined;
-        return (
-          <div key={message.id} style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {message.parts?.map((part, partIndex) => {
+        const historicalProjection = historicalMessageIds.has(message.id)
+          ? projectHistoricalAssistantTurn(message)
+          : null;
+        const projection = historicalProjection
+          && historicalProjection.processPartIndexes.length > 0
+          && !livePresentedTurnIds.has(historicalProjection.turnKey)
+          ? historicalProjection
+          : null;
+        const renderPart = (partIndex: number, partKind: 'normal' | 'process' | 'final') => {
+              const part = message.parts?.[partIndex];
+              if (!part) return null;
               const partKey = `${message.id}-${partIndex}`;
               const isExpanded = expandedParts[partKey] ?? false;
+              const isExpandedInHistoricalProcess = partKind === 'process';
+              const effectiveExpanded = isExpandedInHistoricalProcess || isExpanded;
               const toggleExpanded = () => setExpandedParts((current) => ({ ...current, [partKey]: !isExpanded }));
 
               if (part.type === 'reasoning') {
@@ -299,7 +342,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const reasoningText = reasoningPart.text ?? '';
                 const isStreaming = reasoningPart.state === 'streaming';
                 // Keep live reasoning visible, then collapse it once streaming completes.
-                const isExpandedActual = expandedParts[partKey] ?? false;
+                const isExpandedActual = isExpandedInHistoricalProcess || (expandedParts[partKey] ?? false);
                 const showContent = isExpandedActual || isStreaming;
                 const toggleReasoningExpanded = () =>
                   setExpandedParts((current) => ({ ...current, [partKey]: !isExpandedActual }));
@@ -307,7 +350,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: `2px solid ${isStreaming ? 'var(--color-action-link)' : 'var(--color-border-paper)'}`, transition: 'border-color 0.3s' }}>
                     <button
                       type="button"
-                      onClick={isStreaming ? undefined : toggleReasoningExpanded}
+                      onClick={isStreaming || isExpandedInHistoricalProcess ? undefined : toggleReasoningExpanded}
                       aria-expanded={showContent}
                       style={{
                         width: '100%',
@@ -320,7 +363,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                         color: 'var(--color-text-muted)',
                         fontSize: '0.85rem',
                         fontStyle: 'italic',
-                        cursor: isStreaming ? 'default' : 'pointer',
+                        cursor: isStreaming || isExpandedInHistoricalProcess ? 'default' : 'pointer',
                       }}
                     >
                       {isStreaming ? (
@@ -334,7 +377,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       <span style={{ flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {reasoningText.slice(0, REASONING_PREVIEW_LENGTH) || 'Thinking…'}
                       </span>
-                      {!isStreaming ? <span>{isExpandedActual ? '‹' : '›'}</span> : null}
+                      {!isStreaming && !isExpandedInHistoricalProcess ? <span>{isExpandedActual ? '‹' : '›'}</span> : null}
                     </button>
                     {showContent ? (
                       <div style={{ marginTop: '0.5rem', whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.7, color: 'var(--color-text-secondary)' }}>
@@ -367,8 +410,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   );
                 }
 
-                const isLastPart = partIndex === (message.parts?.length ?? 0) - 1;
-                const previousMessage = index > 0 ? messages[index - 1] : undefined;
+                const isLastPart = partKind === 'final' || partIndex === (message.parts?.length ?? 0) - 1;
+                const previousCandidate = index > 0 ? messages[index - 1] : undefined;
+                const previousMessage = previousCandidate?.role === 'user' ? previousCandidate : undefined;
                 return (
                   <div key={partKey} style={{ width: '100%' }}>
                     <AssistMessagePart
@@ -377,7 +421,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       isLoading={isLoading}
                       message={message}
                       prevMessage={previousMessage}
-                      showActions={isLastMessage ? isLastPart && !isLoading : isLastPart}
+                      showActions={partKind !== 'process' && (isLastMessage ? isLastPart && !isLoading : isLastPart)}
                       readonly={readonly}
                       setMessages={setMessages}
                       sendMessage={sendMessage}
@@ -427,7 +471,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                         isLastMessage={isLastMessage}
                         onCopy={(id, text) => void handleCopy(id, text)}
                         copiedPartId={copiedPartId}
-                        isContentExpanded={isExpanded}
+                        isContentExpanded={effectiveExpanded}
                         onToggleContent={toggleExpanded}
                       />
                     </div>
@@ -513,7 +557,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                         isLastMessage={isLastMessage}
                         onCopy={(id, text) => void handleCopy(id, text)}
                         copiedPartId={copiedPartId}
-                        isContentExpanded={isExpanded}
+                        isContentExpanded={effectiveExpanded}
                         onToggleContent={toggleExpanded}
                       />
                     </div>
@@ -538,9 +582,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                           {pendingConfirmationKind === 'askuser' ? t('chat.toolConfirmation.pendingAnswer') : t('chat.toolConfirmation.pendingConfirm')}
                         </span>
                       ) : null}
-                      <span style={{ color: 'var(--color-text-muted)' }}>{isExpanded ? '‹' : '›'}</span>
+                      <span style={{ color: 'var(--color-text-muted)' }}>{effectiveExpanded ? '‹' : '›'}</span>
                     </button>
-                    {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} settledToolCallIds={settledToolCallIds} onConfirmationSettled={onToolConfirmationSettled} /></div> : null}
+                    {effectiveExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} settledToolCallIds={settledToolCallIds} onConfirmationSettled={onToolConfirmationSettled} /></div> : null}
                   </div>
                 );
               }
@@ -551,7 +595,23 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
               }
 
               return null;
-            })}
+        };
+        return (
+          <div
+            key={message.id}
+            data-chat-message-id={message.id}
+            style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}
+          >
+            {projection ? (
+              <AssistantTurnGroup
+                projection={projection}
+                expanded={expandedTurns[projection.turnKey] ?? false}
+                onExpandedChange={(turnKey, expanded) => {
+                  setExpandedTurns((current) => ({ ...current, [turnKey]: expanded }));
+                }}
+                renderPart={(partIndex, kind) => renderPart(partIndex, kind)}
+              />
+            ) : message.parts?.map((_part, partIndex) => renderPart(partIndex, 'normal'))}
           </div>
         );
       })}

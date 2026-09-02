@@ -88,6 +88,8 @@
 //                    Deck related-conversation management.
 // [Sync] 2026-08-17: apply Deck preview example handoffs to the fresh Chat composer as unsent drafts.
 // [Sync] 2026-08-17: allow an active Thread to select the next-turn Agent within its bound Deck.
+// [Sync] 2026-09-02: hydrate only the newest message page and reserve full-history
+//                    transport for an explicit whole-thread export.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -96,7 +98,7 @@ import './ChatView.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
 import AIInputDock from './AIInputDock';
-import ChatPanel, { type ChatPanelRecoverySnapshot } from './ChatPanel';
+import ChatPanel, { type ChatPanelHistoryPage, type ChatPanelRecoverySnapshot } from './ChatPanel';
 import {
   type Attachment,
   type UploadedFile,
@@ -122,10 +124,12 @@ import DeckChatSelector from '../deck/DeckChatSelector';
 import PluginReceiptBadge from './PluginReceiptBadge';
 import {
   claudeThreadHydrationRetryDelayMs,
+  fetchFullClaudeThreadMessages,
   hydrateClaudeThreadSession,
   type ClaudeThreadRecord,
 } from './threadSessionHydration';
 import { chatReconnectNonceForHydratedThread } from './chatRuntimeState';
+import { mergeCompleteHistoryWithLive } from './chatHistoryWindow';
 import {
   storyWorkspaceDreamRunPath,
   useStoryWorkspaceDreamLaunch,
@@ -348,7 +352,14 @@ function ChatViewContent({
     () => new Set<string>(),
   );
   const [initialRuntimeRunning, setInitialRuntimeRunning] = useState(false);
+  const [initialToolConfirmationKnown, setInitialToolConfirmationKnown] = useState(false);
+  const [initialHistoryPage, setInitialHistoryPage] = useState<ChatPanelHistoryPage>({
+    nextCursor: null,
+    hasMore: false,
+    latestMessageId: null,
+  });
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [messageHydrationError, setMessageHydrationError] = useState(false);
   const [draftInputError, setDraftInputError] = useState<string | null>(null);
   const [availableDecks, setAvailableDecks] = useState<Deck[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<string | undefined>();
@@ -375,6 +386,10 @@ function ChatViewContent({
   // Bump to signal ChatPanel to attach GET /threads/{id}/stream when backend is still running.
   const [reconnectStreamNonce, setReconnectStreamNonce] = useState(0);
   const dreamLaunch = useStoryWorkspaceDreamLaunch();
+
+  useEffect(() => {
+    setInitialToolConfirmationKnown(false);
+  }, [activeThreadId]);
   const dreamRuns = useStoryWorkspaceDreamRuns();
   const dreamReentryRuns = useMemo(
     () => dreamRuns.data?.runs ?? [],
@@ -595,7 +610,9 @@ function ChatViewContent({
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
     setInitialRuntimeRunning(false);
+    setInitialHistoryPage({ nextCursor: null, hasMore: false, latestMessageId: null });
     setIsLoadingMessages(true);
+    setMessageHydrationError(false);
     if (requestedThreadId === activeThreadId) {
       setThreadReloadNonce((value) => value + 1);
     } else {
@@ -628,6 +645,7 @@ function ChatViewContent({
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
     setInitialRuntimeRunning(false);
+    setInitialHistoryPage({ nextCursor: null, hasMore: false, latestMessageId: null });
     setHasConversationStarted(false);
     setQueuedPrompt('');
     setQueuedAttachments([]);
@@ -652,9 +670,11 @@ function ChatViewContent({
     setIsLoadingMessages(true);
     if (threadChanged) {
       setThreadMessages(null);
+      setMessageHydrationError(false);
       setInitialSettledToolCallIds(new Set<string>());
       setInitialRuntimePendingToolCallIds(new Set<string>());
       setInitialRuntimeRunning(false);
+      setInitialHistoryPage({ nextCursor: null, hasMore: false, latestMessageId: null });
     }
 
     const hydrate = async () => {
@@ -663,6 +683,7 @@ function ChatViewContent({
         snapshot = await hydrateClaudeThreadSession(activeThreadId);
       } catch {
         if (!cancelled) {
+          setMessageHydrationError(true);
           retryTimer = window.setTimeout(
             () => void hydrate(),
             claudeThreadHydrationRetryDelayMs(hydrationAttempt),
@@ -672,10 +693,19 @@ function ChatViewContent({
         return;
       }
       if (cancelled) return;
+      setMessageHydrationError(false);
       const msgs = snapshot.messages;
       setInitialSettledToolCallIds(snapshot.settledToolCallIds);
       setInitialRuntimePendingToolCallIds(snapshot.runtimePendingToolCallIds);
       setInitialRuntimeRunning(snapshot.running);
+      setInitialToolConfirmationKnown(
+        snapshot.status?.tool_confirmation_observation === 'known',
+      );
+      setInitialHistoryPage({
+        nextCursor: snapshot.nextCursor,
+        hasMore: snapshot.hasMore,
+        latestMessageId: snapshot.latestMessageId,
+      });
       setThreadMessages(msgs);
       setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
       setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
@@ -710,6 +740,14 @@ function ChatViewContent({
     setInitialSettledToolCallIds(snapshot.settledToolCallIds);
     setInitialRuntimePendingToolCallIds(snapshot.runtimePendingToolCallIds);
     setInitialRuntimeRunning(snapshot.running);
+    const toolConfirmationKnown = snapshot.status?.tool_confirmation_observation === 'known';
+    setInitialToolConfirmationKnown(toolConfirmationKnown);
+    const historyPage = {
+      nextCursor: snapshot.nextCursor,
+      hasMore: snapshot.hasMore,
+      latestMessageId: snapshot.latestMessageId,
+    };
+    setInitialHistoryPage(historyPage);
     setThreadMessages(snapshot.messages);
     setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
     setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
@@ -718,6 +756,8 @@ function ChatViewContent({
       settledToolCallIds: snapshot.settledToolCallIds,
       runtimePendingToolCallIds: snapshot.runtimePendingToolCallIds,
       running: snapshot.running,
+      historyPage,
+      toolConfirmationKnown,
     };
   }, [activeThreadId]);
 
@@ -736,7 +776,9 @@ function ChatViewContent({
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
     setInitialRuntimeRunning(false);
+    setInitialHistoryPage({ nextCursor: null, hasMore: false, latestMessageId: null });
     setIsLoadingMessages(false);
+    setMessageHydrationError(false);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
     onLandingTabChange('history');
@@ -824,7 +866,9 @@ function ChatViewContent({
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
     setInitialRuntimeRunning(false);
+    setInitialHistoryPage({ nextCursor: null, hasMore: false, latestMessageId: null });
     setIsLoadingMessages(false);
+    setMessageHydrationError(false);
     setActiveThreadId(null);
     setHasConversationStarted(false);
     setQueuedPrompt('');
@@ -845,7 +889,9 @@ function ChatViewContent({
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
     setInitialRuntimeRunning(false);
+    setInitialHistoryPage({ nextCursor: null, hasMore: false, latestMessageId: null });
     setIsLoadingMessages(true);
+    setMessageHydrationError(false);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
     onLandingTabChange('history');
@@ -904,7 +950,12 @@ function ChatViewContent({
     setShareProgress(null);
     try {
       const snapshot = getChatExportSnapshot(activeThreadId);
-      const exportMessages = snapshot.messages
+      const persisted = await fetchFullClaudeThreadMessages(activeThreadId);
+      const completeMessages = mergeCompleteHistoryWithLive(
+        persisted.messages,
+        snapshot.messages,
+      );
+      const exportMessages = completeMessages
         .map((message) => toExportChatMessage(message, snapshot.toolChoice, t))
         .filter((message): message is ExportChatMessage => message !== null);
       if (exportMessages.length === 0) {
@@ -989,6 +1040,7 @@ function ChatViewContent({
       setInitialSettledToolCallIds(new Set<string>());
       setInitialRuntimePendingToolCallIds(new Set<string>());
       setInitialRuntimeRunning(false);
+      setInitialHistoryPage({ nextCursor: null, hasMore: false, latestMessageId: null });
       setHasConversationStarted(false);
       setQueuedPrompt('');
       setQueuedAttachments([]);
@@ -1209,7 +1261,14 @@ function ChatViewContent({
             <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               {activeThreadId && landingTab === 'history' && threadMessages === null ? (
                 <div style={{ width: '100%', maxWidth: '52rem', margin: '1rem auto' }}>
-                  <SkeletonList rows={3} />
+                  {messageHydrationError ? (
+                    <div role="alert" style={{ padding: '1rem', color: 'var(--color-text-secondary)' }}>
+                      <p>{t('chat.historyTurn.initialLoadFailed')}</p>
+                      <button type="button" onClick={() => setThreadReloadNonce((value) => value + 1)}>
+                        {t('chat.historyTurn.retry')}
+                      </button>
+                    </div>
+                  ) : <SkeletonList rows={3} />}
                 </div>
               ) : activeThreadId && landingTab === 'history' ? (
                 <ChatPanel
@@ -1224,6 +1283,8 @@ function ChatViewContent({
                   initialSettledToolCallIds={initialSettledToolCallIds}
                   initialRuntimePendingToolCallIds={initialRuntimePendingToolCallIds}
                   initialRuntimeRunning={initialRuntimeRunning}
+                  initialToolConfirmationKnown={initialToolConfirmationKnown}
+                  initialHistoryPage={initialHistoryPage}
                   onReconnectComplete={notifyReconnectComplete}
                   queuedPrompt={queuedPrompt}
                   queuedAttachments={queuedAttachments}

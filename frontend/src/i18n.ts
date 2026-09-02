@@ -23,6 +23,8 @@
 // [Sync] 2026-08-31: remove the unused daily-picture generation status copy.
 // [Sync] 2026-09-01: add manual Writing suggestion trigger, lifecycle, and recovery copy.
 // [Sync] 2026-09-01: label visible Dream workbench auto-repair user messages.
+// [Sync] 2026-09-02: localize historical assistant process disclosure and
+//                    paged-history loading/recovery states.
 
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -502,6 +504,21 @@ const resources = {
           allShown: 'All conversations shown',
           deleteThread: 'Delete conversation',
           close: 'Close'
+        },
+        historyTurn: {
+          duration: 'Took {{duration}}',
+          viewProcess: 'View process',
+          expandAria: 'Expand process, {{label}}',
+          collapseAria: 'Collapse process, {{label}}',
+          expandAriaNoDuration: 'Expand process',
+          collapseAriaNoDuration: 'Collapse process',
+          loadEarlier: 'Load earlier messages',
+          loadingEarlier: 'Loading earlier messages…',
+          loadFailed: 'Earlier messages could not be loaded.',
+          initialLoadFailed: 'Conversation history could not be loaded.',
+          retry: 'Retry',
+          empty: 'No messages yet',
+          start: 'Start of conversation'
         },
         share: {
           title: 'Share conversation',
@@ -1349,6 +1366,21 @@ const resources = {
           allShown: '已显示全部会话',
           deleteThread: '删除对话',
           close: '关闭'
+        },
+        historyTurn: {
+          duration: '用时 {{duration}}',
+          viewProcess: '查看过程',
+          expandAria: '展开执行过程，{{label}}',
+          collapseAria: '收起执行过程，{{label}}',
+          expandAriaNoDuration: '展开执行过程',
+          collapseAriaNoDuration: '收起执行过程',
+          loadEarlier: '加载更早消息',
+          loadingEarlier: '正在加载更早消息…',
+          loadFailed: '更早消息加载失败。',
+          initialLoadFailed: '历史消息加载失败。',
+          retry: '重试',
+          empty: '暂无消息',
+          start: '已到对话开头'
         },
         share: {
           title: '分享对话',

@@ -17,6 +17,8 @@
 # [Sync] 2026-09-01: commit every successful Claude logical Turn, including its
 #                    reasoning/tool/text parts, before any Dream post-turn Hook;
 #                    Hook continuation or failure can no longer erase the reply.
+# [Sync] 2026-09-02: persist server-owned turn/final/duration metadata and expose
+#                    the same turn identity in live message metadata for history folding.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -1977,7 +1979,14 @@ class ClaudeAgentService:
 
         # Emit session metadata header
         await queue.put(
-            _event("message-metadata", {"sessionId": execution.state.session_id, "turnIndex": execution.state.turn_count})
+            _event(
+                "message-metadata",
+                {
+                    "sessionId": execution.state.session_id,
+                    "turnIndex": execution.state.turn_count,
+                    "turnId": execution.state.current_turn_id,
+                },
+            )
         )
 
         error_event_emitted = False
@@ -2008,7 +2017,7 @@ class ClaudeAgentService:
         except asyncio.CancelledError:
             # Explicit stop / shutdown cancellation — flush partial assistant
             # content so the next load of this thread shows completed pieces.
-            await self._persist_partial_assistant(execution)
+            await self._persist_partial_assistant(execution, turn_status="cancelled")
             try:
                 await self.mark_auto_repair_failed(execution.request)
             except Exception:
@@ -2027,7 +2036,7 @@ class ClaudeAgentService:
             )
             raise
 
-        if result.success:
+        if result.success and getattr(result, "protocol_completed", None) is not False:
             full_text = result.full_text
             # A completed Claude Turn is an immutable conversation fact even
             # when the Dream workspace postcondition requests one repair Turn
@@ -2105,12 +2114,15 @@ class ClaudeAgentService:
                 await queue.put(_event("story-workspace-output", story_output))
             terminal = _event("finish", {"finishReason": "stop"})
         else:
-            error_msg = _format_exception_for_sse(result.error)
+            result_error = result.error or RuntimeError(
+                "Claude turn ended without a trustworthy terminal ResultMessage."
+            )
+            error_msg = _format_exception_for_sse(result_error)
             if not error_event_emitted:
                 error_event_emitted = True
                 await queue.put(_event("error", {"errorText": error_msg}))
             # Even on error, flush whatever partial assistant content was collected.
-            await self._persist_partial_assistant(execution)
+            await self._persist_partial_assistant(execution, turn_status="error")
             await self.mark_auto_repair_failed(execution.request)
             terminal = _event("finish", {"finishReason": "error"})
 
@@ -2413,7 +2425,12 @@ class ClaudeAgentService:
                 "Failed to persist user message for thread_id=%s", thread_id
             )
 
-    async def _persist_partial_assistant(self, execution: "_TurnExecution") -> None:
+    async def _persist_partial_assistant(
+        self,
+        execution: "_TurnExecution",
+        *,
+        turn_status: str = "error",
+    ) -> None:
         """Flush partial assistant content collected so far (called on cancel/error).
 
         Converts whatever SSE events were collected before cancellation into
@@ -2432,7 +2449,11 @@ class ClaudeAgentService:
             return
 
         thread_id = execution.request.thread_id
-        asst_metadata: dict = {"is_partial": True}
+        asst_metadata: dict = {
+            "is_partial": True,
+            "turnId": execution.state.current_turn_id,
+            "turnStatus": turn_status,
+        }
         _attach_story_workspace_dream_assistant_source(
             asst_metadata,
             execution.request,
@@ -2511,6 +2532,18 @@ class ClaudeAgentService:
                 asst_parts = [{"type": "text", "text": assistant_text}] if assistant_text else []
 
             asst_metadata: dict = {}
+            final_part_index = _completed_turn_final_part_index(asst_parts)
+            asst_metadata["turnId"] = execution.state.current_turn_id
+            if final_part_index is not None:
+                asst_metadata["turnStatus"] = "completed"
+                asst_metadata["finalPartIndex"] = final_part_index
+            duration_ms = getattr(result, "duration_ms", None)
+            if (
+                isinstance(duration_ms, int)
+                and not isinstance(duration_ms, bool)
+                and duration_ms >= 0
+            ):
+                asst_metadata["durationMs"] = duration_ms
             _attach_story_workspace_dream_assistant_source(
                 asst_metadata,
                 execution.request,
@@ -3111,6 +3144,36 @@ def _sse_events_to_ui_parts(events: list) -> list:
                 inv["output"] = event.get("output")
 
     return parts
+
+
+def _completed_turn_final_part_index(parts: list) -> int | None:
+    """Return the unique protocol-safe final text suffix for a completed turn.
+
+    Persistence emits only text, reasoning, and tool-invocation parts.  A final
+    answer is trustworthy when the suffix after the last process part contains
+    exactly one non-empty text part and no unknown/diagnostic part.  This keeps
+    intermediate assistant text before later tools in the process region and
+    deliberately refuses ambiguous or tool-ended turns.
+    """
+
+    last_process_index = -1
+    for index, part in enumerate(parts):
+        if not isinstance(part, dict):
+            return None
+        part_type = part.get("type")
+        if part_type not in {"text", "reasoning", "tool-invocation"}:
+            return None
+        if part_type in {"reasoning", "tool-invocation"}:
+            last_process_index = index
+
+    suffix = list(enumerate(parts[last_process_index + 1 :], last_process_index + 1))
+    if len(suffix) != 1:
+        return None
+    index, part = suffix[0]
+    if part.get("type") != "text":
+        return None
+    text = part.get("text")
+    return index if isinstance(text, str) and bool(text.strip()) else None
 
 
 # ---------------------------------------------------------------------------

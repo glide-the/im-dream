@@ -63,6 +63,8 @@
 # [Sync] 2026-09-01: classify Claude Runtime's synthetic local-command
 #                    "No response requested." result as an error, surfacing an
 #                    unavailable Skill instead of persisting an empty reply.
+# [Sync] 2026-09-02: retain ResultMessage subtype/error/duration and publish a
+#                    strict protocol-completed bit for historical final projection.
 # [Sync] 2026-05-27: migrate _pre_tool_use_hook hookSpecificOutput from old {"tool_input":...} format to CLI ≥2.1 format: hookEventName + permissionDecision:"allow" + updatedInput for input override; permissionDecision:"deny" + permissionDecisionReason for all block paths. The old "tool_input" key is silently ignored by the CLI, leaving AskUserQuestion without answers and returning isError:true / output:null.
 # [Sync] 2026-05-27: add _ALWAYS_CONFIRM_TOOL_NAMES constant; original auto mode
 #                    only confirmed AskUserQuestion/mcp__user__ask_user. Superseded
@@ -239,6 +241,7 @@ from fnmatch import fnmatchcase
 import inspect
 import json
 import logging
+import math
 import os
 import re
 import shlex
@@ -2798,6 +2801,10 @@ class ClaudeAgentRunner:
         run_error: Optional[Exception] = None
         usage: dict[str, Optional[int]] = {}
         terminal_stop_reason: Optional[str] = None
+        result_message_count = 0
+        result_message_subtype: Optional[str] = None
+        result_message_is_error: Optional[bool] = None
+        result_duration_ms: Optional[int] = None
 
         # Pending tool-call tracker (tool_call_id → {tool_name, input})
         pending_tool_calls: dict[str, dict[str, Any]] = {}
@@ -3651,6 +3658,19 @@ class ClaudeAgentRunner:
                     stop_reason = getattr(message, "stop_reason", None)
                     if isinstance(stop_reason, str) and stop_reason:
                         terminal_stop_reason = stop_reason
+                if isinstance(message, ResultMessage):
+                    result_message_count += 1
+                    subtype = getattr(message, "subtype", None)
+                    result_message_subtype = subtype if isinstance(subtype, str) else None
+                    result_message_is_error = getattr(message, "is_error", False) is True
+                    raw_duration_ms = getattr(message, "duration_ms", None)
+                    if (
+                        isinstance(raw_duration_ms, (int, float))
+                        and not isinstance(raw_duration_ms, bool)
+                        and math.isfinite(raw_duration_ms)
+                        and raw_duration_ms >= 0
+                    ):
+                        result_duration_ms = int(raw_duration_ms)
 
             full_text = "".join(text_parts)
 
@@ -3813,6 +3833,12 @@ class ClaudeAgentRunner:
                     os.unlink(_rpath)
                 except Exception:  # noqa: BLE001
                     pass
+        protocol_completed = (
+            result_message_count == 1
+            and result_message_subtype == "success"
+            and result_message_is_error is False
+            and terminal_stop_reason in {None, "end_turn", "stop_sequence"}
+        )
         return AgentRunResult(
             full_text=full_text,  # type: ignore[possibly-undefined]
             session_id=current_session_id,
@@ -3824,6 +3850,9 @@ class ClaudeAgentRunner:
                 if (usage.get("input_tokens") or usage.get("output_tokens"))
                 else None
             ),
+            protocol_completed=protocol_completed,
+            duration_ms=result_duration_ms,
+            terminal_stop_reason=terminal_stop_reason,
         )
 
     async def load_messages(self, session_id: str) -> list[Any]:

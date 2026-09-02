@@ -19,6 +19,8 @@
  *                      assistant Turn that the server now commits before Hook.
  * [Sync]   2026-09-01: accept every backend-allowlisted repair code and require
  *                      exact trusted/stale cleanup facts for project-root repairs.
+ * [Sync]   2026-09-02: retain server turnId on reconnect-built assistant messages
+ *                      so live completion and persisted history share identity.
  */
 
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -343,6 +345,21 @@ export function applyBackendEventToMessages(
   const parts = [...(target.parts ?? [])];
 
   switch (event.type) {
+    case 'message-metadata': {
+      const turnId = typeof event.turnId === 'string' && event.turnId
+        ? event.turnId
+        : undefined;
+      base[index] = {
+        ...target,
+        metadata: {
+          ...(target.metadata && typeof target.metadata === 'object'
+            ? target.metadata as Record<string, unknown>
+            : {}),
+          ...(turnId ? { turnId } : {}),
+        },
+      };
+      return base;
+    }
     case 'text-delta': {
       const delta = String(event.delta ?? '');
       base[index] = { ...target, parts: appendTextDelta(parts, delta) };

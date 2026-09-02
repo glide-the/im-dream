@@ -6,6 +6,8 @@
 // [Sync] 2026-08-05: add a draggable/keyboard resize rail and readable operational typography.
 // [Sync] 2026-08-05: compact task index and conversation-first readonly task detail.
 // [Sync] 2026-08-31: reuse the shared right-panel resize hook without changing Subagent presentation.
+// [Sync] 2026-09-02: share the existing localized duration presentation with
+//                    historical assistant turns through the pure chatDuration helper.
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -19,6 +21,7 @@ import {
 } from '../../hooks/useThreadSubagents';
 import { IconLoader, IconSubagents, IconX } from './Icons';
 import SubagentMessageTimeline from './SubagentMessageTimeline';
+import { formatChatDuration } from './chatDuration';
 
 const SUBAGENT_REFRESH_INTERVAL_MS = 8000;
 const RECENT_AGENT_LIMIT = 4;
@@ -81,24 +84,9 @@ function AgentAvatar({ task, size = '1.75rem' }: { task: ThreadSubagentTask; siz
   );
 }
 
-function formatDuration(milliseconds: number | null, language?: string): string {
-  if (milliseconds == null || !Number.isFinite(milliseconds)) return '';
-  const locale = getDateLocale(language);
-  const seconds = Math.max(0, Math.round(milliseconds / 1000));
-  if (seconds < 60) {
-    return new Intl.NumberFormat(locale, { style: 'unit', unit: 'second', unitDisplay: 'narrow' }).format(seconds);
-  }
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) {
-    return new Intl.NumberFormat(locale, { style: 'unit', unit: 'minute', unitDisplay: 'narrow' }).format(minutes);
-  }
-  const hours = Math.round(minutes / 60);
-  return new Intl.NumberFormat(locale, { style: 'unit', unit: 'hour', unitDisplay: 'narrow' }).format(hours);
-}
-
 function TaskRow({ task, focused = false, onSelect }: { task: ThreadSubagentTask; focused?: boolean; onSelect: () => void }) {
   const { t, i18n } = useTranslation();
-  const duration = formatDuration(task.durationMs, i18n.language);
+  const duration = formatChatDuration(task.durationMs, i18n.language);
   const status = t(`chat.subagents.status.${task.status}`);
   return (
     <li id={`thread-subagent-task-${task.taskId}`}>
@@ -481,7 +469,7 @@ export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: Su
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
               {selectedTask ? <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.08rem', marginRight: '0.15rem', color: STATUS_COLORS[selectedTask.status], fontSize: '0.68rem', fontWeight: 650, whiteSpace: 'nowrap' }}>
                 <span>{t(`chat.subagents.status.${selectedTask.status}`)}</span>
-                <span style={{ color: 'var(--color-text-muted)', fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>{formatDuration(selectedTask.durationMs, i18n.language) || t('chat.subagents.unknown')}</span>
+                <span style={{ color: 'var(--color-text-muted)', fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>{formatChatDuration(selectedTask.durationMs, i18n.language) || t('chat.subagents.unknown')}</span>
               </span> : null}
               <button type="button" onClick={() => void hydrateThreadSubagents(threadId)} aria-label={t('chat.subagents.refresh')} title={t('chat.subagents.refresh')} style={{ width: '2.2rem', height: '2.2rem', border: 'none', borderRadius: '0.45rem', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
                 {state.loading ? <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} /> : '↻'}

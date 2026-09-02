@@ -54,6 +54,7 @@
 #                    fresh typed stale-root scope consumed by the single Bash guard.
 # [Sync] 2026-09-01: require persisted cleanup metadata, fresh Hook scope, and
 #                    .dream WORKBENCH facts to agree before an automatic turn.
+# [Sync] 2026-09-02: cover protocol-safe completed-turn projection metadata and duration.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -1573,12 +1574,17 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
 
         persist_user.assert_awaited_once()
         persist_partial.assert_awaited_once()
+        self.assertEqual(persist_partial.await_args.kwargs["turn_status"], "cancelled")
         persist_session.assert_called_once_with(
             "thread-stop-service",
             "44444444-4444-4444-8444-444444444444",
             service_module._AGENT_RUNTIME_CONTRACT_VERSION,
         )
         parsed_frames = [_parse_sse(frame) for frame in frames if frame is not None]
+        metadata_frame = next(
+            frame for frame in parsed_frames if frame["type"] == "message-metadata"
+        )
+        self.assertTrue(metadata_frame["turnId"])
         self.assertEqual(parsed_frames[-1]["type"], "finish")
         self.assertEqual(parsed_frames[-1]["finishReason"], "stop")
         self.assertIs(parsed_frames[-1]["cancelled"], True)
@@ -1587,6 +1593,25 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
 
 
 class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
+    def test_completed_final_projection_requires_one_text_suffix_after_process(self):
+        self.assertEqual(
+            service_module._completed_turn_final_part_index([
+                {"type": "reasoning", "text": "分析"},
+                {"type": "text", "text": "中间说明"},
+                {"type": "tool-invocation", "toolCallId": "tool-1"},
+                {"type": "text", "text": "最终正文"},
+            ]),
+            3,
+        )
+        self.assertIsNone(service_module._completed_turn_final_part_index([
+            {"type": "tool-invocation", "toolCallId": "tool-1"},
+        ]))
+        self.assertIsNone(service_module._completed_turn_final_part_index([
+            {"type": "reasoning", "text": "分析"},
+            {"type": "text", "text": "正文一"},
+            {"type": "text", "text": "正文二"},
+        ]))
+
     def test_completed_repair_persists_collected_sse_parts_and_source(self):
         async def scenario():
             import database
@@ -1629,6 +1654,7 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
                 session_id="claude-session",
                 success=True,
                 usage={"input_tokens": 3, "output_tokens": 2},
+                duration_ms=1250,
             )
             with (
                 unittest.mock.patch.object(database, "save_chat_message") as save,
@@ -1648,6 +1674,10 @@ class TestClaudeAgentMessageIdentityPersistence(unittest.TestCase):
         ])
         metadata = call.kwargs["metadata"]
         self.assertEqual(metadata["usage"]["totalTokens"], 5)
+        self.assertEqual(metadata["turnStatus"], "completed")
+        self.assertEqual(metadata["finalPartIndex"], 1)
+        self.assertEqual(metadata["durationMs"], 1250)
+        self.assertTrue(metadata["turnId"])
         self.assertEqual(
             metadata["story_workspace_dream_source"]["kind"],
             "story-workspace-dream-auto-repair",
