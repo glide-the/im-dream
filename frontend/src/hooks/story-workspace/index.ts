@@ -1,3 +1,8 @@
+// [Input] Story Workspace hook modules and their public TypeScript contracts.
+// [Output] Stable barrel exports for Episode index/artifacts, Story Index, and Dream file consumers.
+// [Pos] Public query-hook entry point for Story Workspace frontend surfaces.
+// [Sync] 2026-09-02: export the index-first Episode registry hook beside exact Episode artifact reads.
+
 export { useStories } from './useStories';
 export {
   StoryWorkspaceStoryIndexContractError,
@@ -80,6 +85,14 @@ export {
   useStoryWorkspaceDreamRuns,
 } from './useStoryWorkspaceDreamRuns';
 export type { StoryWorkspaceDreamRunsState } from './useStoryWorkspaceDreamRuns';
+export {
+  StoryWorkspaceEpisodeIndexContractError,
+  StoryWorkspaceEpisodeIndexHttpError,
+  storyWorkspaceEpisodeIndexEndpoint,
+  storyWorkspaceFetchEpisodeIndex,
+  useStoryWorkspaceEpisodeIndex,
+} from './useStoryWorkspaceEpisodeIndex';
+export type { StoryWorkspaceEpisodeIndexState } from './useStoryWorkspaceEpisodeIndex';
 export type {
   StoryWorkspaceCharacter,
   StoryWorkspaceDreamConfirmationCommand,
@@ -97,6 +110,8 @@ export type {
   StoryWorkspaceDreamStageItem,
   StoryWorkspaceDreamStagePage,
   StoryWorkspaceDreamStageProjection,
+  StoryWorkspaceEpisodeIndexItem,
+  StoryWorkspaceEpisodeIndexSurface,
   StoryWorkspaceGuidanceAccepted,
   StoryWorkspaceGuidanceCommandPayload,
   StoryWorkspaceGuidanceHistoryEntry,

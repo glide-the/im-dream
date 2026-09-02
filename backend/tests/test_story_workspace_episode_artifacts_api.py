@@ -1,3 +1,8 @@
+# [Input] Actor-scoped Run registries, canonical Episode fixtures, and REST requests.
+# [Output] Verify Episode index plus explicit Run+Episode artifact isolation and ETags.
+# [Pos] Story Workspace Episode read-boundary tests.
+# [Sync] 2026-09-02: cover index-first metadata and explicit EP01/EP02 reads.
+
 """Actor-scoped Episode artifact aggregation and REST boundary tests."""
 
 from __future__ import annotations
@@ -42,6 +47,8 @@ from story_workspace.contracts import (
     StoryWorkspaceEpisodeArtifactAvailability,
     StoryWorkspaceEpisodeArtifactSurface,
     StoryWorkspaceEpisodeBindingAvailability,
+    StoryWorkspaceEpisodeIndexItem,
+    StoryWorkspaceEpisodeIndexSurface,
     StoryWorkspaceStoryIndexProjection,
     StoryWorkspaceStoryIndexReconcileCommand,
 )
@@ -107,15 +114,16 @@ def _unbound_surface() -> StoryWorkspaceEpisodeArtifactSurface:
 class _RecordingGateway:
     def __init__(self, response: StoryWorkspaceEpisodeArtifactSurface) -> None:
         self.response = response
-        self.calls: list[tuple[str, dict[str, str]]] = []
+        self.calls: list[tuple[str, dict[str, str], str | None]] = []
 
     async def get_episode_artifacts(
         self,
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        episode_id: str | None = None,
     ) -> StoryWorkspaceEpisodeArtifactSurface:
-        self.calls.append((workflow_run_id, actor))
+        self.calls.append((workflow_run_id, actor, episode_id))
         return self.response
 
 
@@ -380,7 +388,7 @@ def test_story_index_route_never_forwards_unknown_api_error_or_500_status() -> N
     assert "secret" not in response.text
 
 
-def test_route_passes_only_run_and_actor_and_honors_etag() -> None:
+def test_route_passes_run_actor_and_optional_episode_identity() -> None:
     surface = _unbound_surface()
     app = FastAPI()
     gateway = _RecordingGateway(surface)
@@ -394,19 +402,26 @@ def test_route_passes_only_run_and_actor_and_honors_etag() -> None:
 
     with TestClient(app) as client:
         response = client.get(
-            f"/api/story-workspace/workflow-runs/{RUN_ID}/episode-artifacts"
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/episode-artifacts",
+            params={"episode": "a" * 32},
         )
 
     assert response.status_code == 200
     assert response.json()["bindingAvailability"] == "unbound"
-    assert gateway.calls == [(RUN_ID, {"actor_id": ACTOR_ID})]
+    assert gateway.calls == [(RUN_ID, {"actor_id": ACTOR_ID}, "a" * 32)]
 
 
 def test_route_returns_304_only_for_the_exact_quoted_manifest_etag() -> None:
     manifest_revision = "sha256:" + "a" * 64
     class EtagGateway(_RecordingGateway):
-        async def get_episode_artifacts(self, workflow_run_id: str, *, actor: dict[str, str]):
-            self.calls.append((workflow_run_id, actor))
+        async def get_episode_artifacts(
+            self,
+            workflow_run_id: str,
+            *,
+            actor: dict[str, str],
+            episode_id: str | None = None,
+        ):
+            self.calls.append((workflow_run_id, actor, episode_id))
             return type("Surface", (), {
                 "model_dump": lambda self, **_: {
                     "runId": workflow_run_id,
@@ -435,6 +450,71 @@ def test_route_returns_304_only_for_the_exact_quoted_manifest_etag() -> None:
     assert response.headers["etag"] == f'"{manifest_revision}"'
     assert response.content == b""
     assert unquoted.status_code == 200
+
+
+def test_episode_index_route_returns_stable_ids_and_honors_etag() -> None:
+    etag = "sha256:" + "d" * 64
+    active_id = "a" * 32
+    index = StoryWorkspaceEpisodeIndexSurface(
+        runId=RUN_ID,
+        registryRevision=2,
+        activeEpisodeId=active_id,
+        etag=etag,
+        episodes=[
+            StoryWorkspaceEpisodeIndexItem(
+                opaqueEpisodeId=active_id,
+                episodeCode="EP01",
+                active=True,
+                availableArtifactCount=1,
+                hasArtifactIssues=False,
+            ),
+            StoryWorkspaceEpisodeIndexItem(
+                opaqueEpisodeId="b" * 32,
+                episodeCode="EP02",
+                active=False,
+                availableArtifactCount=0,
+                hasArtifactIssues=False,
+            ),
+        ],
+    )
+
+    class IndexGateway(_RecordingGateway):
+        async def get_episode_index(
+            self,
+            workflow_run_id: str,
+            *,
+            actor: dict[str, str],
+        ) -> StoryWorkspaceEpisodeIndexSurface:
+            assert workflow_run_id == RUN_ID
+            assert actor == {"actor_id": ACTOR_ID}
+            return index
+
+    app = FastAPI()
+    gateway = IndexGateway(_unbound_surface())
+    app.dependency_overrides[story_workspace.get_current_user] = lambda: {
+        "user_id": int(ACTOR_ID),
+    }
+    app.dependency_overrides[story_workspace.get_dream_artifact_service] = lambda: gateway
+    app.include_router(story_workspace.router)
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/episodes"
+        )
+        not_modified = client.get(
+            f"/api/story-workspace/workflow-runs/{RUN_ID}/episodes",
+            headers={"If-None-Match": f'"{etag}"'},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["etag"] == f'"{etag}"'
+    assert [item["episodeCode"] for item in response.json()["episodes"]] == [
+        "EP01",
+        "EP02",
+    ]
+    assert response.json()["episodes"][0]["opaqueEpisodeId"] != response.json()[
+        "episodes"
+    ][1]["opaqueEpisodeId"]
+    assert not_modified.status_code == 304
 
 
 class TestStoryWorkspaceEpisodeArtifactService:
@@ -1612,6 +1692,10 @@ def test_gateway_owner_get_reads_bound_episode_after_full_authorization() -> Non
         (workspace / ".dream").mkdir(parents=True)
         story = workspace / "stories" / "didi-zhengzhou"
         (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "episodes" / "EP01" / "script.md").write_text(
+            "# EP01\n\nOnly EP01 content.\n",
+            encoding="utf-8",
+        )
         (story / "project.yaml").write_text(
             "project_id: didi-zhengzhou\n",
             encoding="utf-8",
@@ -1646,6 +1730,10 @@ def test_gateway_projects_the_registry_active_episode_without_rewriting_launch_a
         (workspace / ".dream").mkdir(parents=True)
         story = workspace / "stories" / "didi-zhengzhou"
         (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "episodes" / "EP01" / "script.md").write_text(
+            "# EP01\n\nOnly EP01 content.\n",
+            encoding="utf-8",
+        )
         (story / "project.yaml").write_text(
             "project_id: didi-zhengzhou\nformat:\n  total_episodes: 3\n",
             encoding="utf-8",
@@ -1672,6 +1760,30 @@ def test_gateway_projects_the_registry_active_episode_without_rewriting_launch_a
                 RUN_ID,
                 {"actor_id": ACTOR_ID},
             )
+            ep01_surface = gateway._get_episode_artifacts_from_db(
+                db,
+                RUN_ID,
+                {"actor_id": ACTOR_ID},
+                episode_id=first.episode_uid,
+            )
+            ep02_surface = gateway._get_episode_artifacts_from_db(
+                db,
+                RUN_ID,
+                {"actor_id": ACTOR_ID},
+                episode_id=ep02.episode_uid,
+            )
+            index_surface = gateway._get_episode_index_from_db(
+                db,
+                RUN_ID,
+                {"actor_id": ACTOR_ID},
+            )
+            with pytest.raises(ApiRouteError) as invalid_episode:
+                gateway._get_episode_artifacts_from_db(
+                    db,
+                    RUN_ID,
+                    {"actor_id": ACTOR_ID},
+                    episode_id="f" * 32,
+                )
 
     source_authority = gateway._episode_authority_from_source(
         gateway._authorized_episode_row(db, RUN_ID, {"actor_id": ACTOR_ID}),
@@ -1683,6 +1795,20 @@ def test_gateway_projects_the_registry_active_episode_without_rewriting_launch_a
     assert surface.opaque_episode_id == ep02.episode_uid
     assert surface.episode_code == "EP02"
     assert all(item.availability.value == "not_generated" for item in surface.artifacts)
+    assert ep01_surface.episode_code == "EP01"
+    assert ep01_surface.opaque_episode_id == first.episode_uid
+    assert next(
+        item for item in ep01_surface.artifacts if item.relative_key == "script.md"
+    ).availability.value == "available"
+    assert ep02_surface.episode_code == "EP02"
+    assert ep02_surface.opaque_episode_id == ep02.episode_uid
+    assert all(
+        item.availability.value == "not_generated"
+        for item in ep02_surface.artifacts
+    )
+    assert [item.episode_code for item in index_surface.episodes] == ["EP01", "EP02"]
+    assert [item.available_artifact_count for item in index_surface.episodes] == [1, 0]
+    assert invalid_episode.value.status_code == 404
     db.close()
 
 

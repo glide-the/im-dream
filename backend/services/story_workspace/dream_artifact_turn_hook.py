@@ -1,7 +1,7 @@
 # [Input] Consume trusted Dream Run context, WorkflowRun authority, canonical
 #         Story Workspace files, and existing Dream file reader/writer contracts.
 # [Output] Before-turn canonical snapshot plus successful-turn deterministic
-#          synchronization into the Run-private preview, EP01 binding, and
+#          synchronization into the Run-private preview, Episode registry, and
 #          PostgreSQL Story projection consumed by the Execution page.
 # [Pos] Dream post-turn business Hook above ClaudeAgentService; not an Agent
 #       runtime, Observer, SSE adapter, or SDK entry point.
@@ -19,6 +19,8 @@
 #                    stage entity identities as bounded Agent-repairable issues.
 # [Sync] 2026-09-01: revalidate launch authority before an automatic repair Turn
 #                    receives an exact stale-project cleanup scope.
+# [Sync] 2026-09-02: extend the registry from canonical contiguous Episodes and
+#                    activate one unambiguous changed or newly discovered Episode.
 
 """Root-turn synchronization from canonical workbench files to one Dream Run.
 
@@ -587,10 +589,10 @@ class DreamArtifactTurnHook:
         # Validate every Agent-owned workspace collection before writing any
         # Run-private projection.  In particular, a slug repair must move or
         # merge the old project tree instead of leaving a second canonical
-        # root whose EP01 would collide in the storyboards stage.
+        # root whose Episode identity would collide in the storyboards stage.
         private_files = self._collect_private_artifact_files(ticket.workspace_root)
         projections = self._collect_stage_projections(ticket.workspace_root)
-        episode_authority = self._ensure_first_episode_binding(
+        episode_authority = self._synchronize_episode_registry(
             ticket,
             workflow_run,
             private_files=private_files,
@@ -952,20 +954,49 @@ class DreamArtifactTurnHook:
         return launch.trusted_story_slug, stale
 
     @classmethod
-    def _ensure_first_episode_binding(
+    def _synchronize_episode_registry(
         cls,
         ticket: DreamArtifactTurnTicket,
         workflow_run: WorkflowRun,
         *,
         private_files: Mapping[str, bytes],
     ) -> StoryWorkspaceEpisodeAuthority | None:
+        """Bootstrap canonical Episode authority and select one Episode fact.
+
+        The immutable launch identity is derived from the first canonical
+        Episode already present in trusted business files. Registry members are
+        added only for the complete contiguous canonical sequence. One changed
+        Episode wins; otherwise one newly discovered registry member is the
+        deterministic target. Ambiguous changes/discovery keep the prior active
+        member, so selection is never guessed from list order.
+        """
         binding_service = StoryWorkspaceEpisodeBindingService(ticket.workspace_root)
         story_slug = binding_service.discover_unique_canonical_project_story_slug()
         if story_slug is None:
             return None
-        episode_prefix = f"stories/{story_slug}/episodes/EP01/"
-        if not any(path.startswith(episode_prefix) for path in private_files):
+        episode_codes = sorted(
+            {
+                parts[3]
+                for path in private_files
+                if (
+                    len(parts := PurePosixPath(path).parts) == 5
+                    and parts[:3] == ("stories", story_slug, "episodes")
+                    and _EPISODE_CODE.fullmatch(parts[3]) is not None
+                )
+            },
+            key=lambda code: int(code[2:]),
+        )
+        if not episode_codes:
             return None
+        expected_codes = [
+            f"EP{number:02d}"
+            for number in range(1, len(episode_codes) + 1)
+        ]
+        if episode_codes != expected_codes:
+            raise DreamArtifactTurnHookError(
+                "canonical Episode roots must form a contiguous sequence"
+            )
+        canonical_launch_episode_code = next(iter(episode_codes))
         db = database.get_db()
         try:
             launch = cls._load_launch_authority(db, ticket, workflow_run)
@@ -999,7 +1030,7 @@ class DreamArtifactTurnHook:
                     "workflow_run_id": ticket.context.workflow_run_id,
                     "episode_uid": episode_uid,
                     "story_slug": story_slug,
-                    "episode_code": "EP01",
+                    "episode_code": canonical_launch_episode_code,
                 }
                 encoded = json.dumps(
                     metadata,
@@ -1021,7 +1052,10 @@ class DreamArtifactTurnHook:
                 db.commit()
             else:
                 episode_uid = authority.episode_uid
-                if authority.story_slug != story_slug or authority.episode_code != "EP01":
+                if (
+                    authority.story_slug != story_slug
+                    or authority.episode_code != canonical_launch_episode_code
+                ):
                     raise DreamArtifactTurnHookError(
                         "Dream Episode authority conflicts with canonical project"
                     )
@@ -1048,20 +1082,96 @@ class DreamArtifactTurnHook:
         finally:
             db.close()
 
-        binding_service.bind_first_episode(
-            StoryWorkspaceEpisodeBindingContext(
-                workflow_run_id=ticket.context.workflow_run_id,
-                trusted_project_story_slug=story_slug,
-                locked_context_story_slug=trusted_story_slug,
-                run_provenance_story_slug=trusted_story_slug,
-                episode_uid=episode_uid,
+        binding_context = StoryWorkspaceEpisodeBindingContext(
+            workflow_run_id=ticket.context.workflow_run_id,
+            trusted_project_story_slug=story_slug,
+            locked_context_story_slug=trusted_story_slug,
+            run_provenance_story_slug=trusted_story_slug,
+            episode_uid=episode_uid,
+        )
+        first_binding = binding_service.bind_first_episode(binding_context)
+        if first_binding.episode_code != canonical_launch_episode_code:
+            raise DreamArtifactTurnHookError(
+                "Episode binding does not match canonical launch identity"
             )
+        registry = binding_service.read_episode_registry(binding_context)
+        previous_active_uid = registry.active_episode_uid
+        registered_episode_codes = {
+            episode.episode_code for episode in registry.episodes
+        }
+
+        current_hashes = {
+            path: "sha256:" + hashlib.sha256(payload).hexdigest()
+            for path, payload in private_files.items()
+        }
+        baseline_hashes = dict(ticket.baseline_files)
+        changed_episode_codes = {
+            parts[3]
+            for path in set(baseline_hashes) | set(current_hashes)
+            if baseline_hashes.get(path) != current_hashes.get(path)
+            and len(parts := PurePosixPath(path).parts) == 5
+            and parts[:3] == ("stories", story_slug, "episodes")
+            and parts[3] in episode_codes
+        }
+
+        observed_total = len(episode_codes)
+        planned_total = binding_service.read_canonical_project_total_episodes(
+            story_slug
+        )
+        trusted_total = planned_total or observed_total
+        if trusted_total < observed_total:
+            raise DreamArtifactTurnHookError(
+                "canonical Episode roots exceed the project plan"
+            )
+        while len(registry.episodes) < observed_total:
+            latest = registry.episodes[-1]
+            if registry.active_episode_uid != latest.episode_uid:
+                registry = binding_service.activate_episode(
+                    binding_context,
+                    episode_uid=latest.episode_uid,
+                    expected_revision=registry.revision,
+                )
+            registry = binding_service.ensure_next_episode(
+                binding_context,
+                expected_revision=registry.revision,
+                total_episodes=trusted_total,
+            )
+
+        target_uid = previous_active_uid
+        if len(changed_episode_codes) == 1:
+            changed_code = next(iter(changed_episode_codes))
+            target_uid = next(
+                episode.episode_uid
+                for episode in registry.episodes
+                if episode.episode_code == changed_code
+            )
+        elif not changed_episode_codes:
+            newly_discovered_codes = [
+                code for code in episode_codes if code not in registered_episode_codes
+            ]
+            if len(newly_discovered_codes) == 1:
+                discovered_code = newly_discovered_codes[0]
+                target_uid = next(
+                    episode.episode_uid
+                    for episode in registry.episodes
+                    if episode.episode_code == discovered_code
+                )
+        if registry.active_episode_uid != target_uid:
+            registry = binding_service.activate_episode(
+                binding_context,
+                episode_uid=target_uid,
+                expected_revision=registry.revision,
+            )
+        selected = next(
+            episode
+            for episode in registry.episodes
+            if episode.episode_uid == registry.active_episode_uid
         )
         return StoryWorkspaceEpisodeAuthority(
             workflow_run_id=ticket.context.workflow_run_id,
-            episode_uid=episode_uid,
+            episode_uid=selected.episode_uid,
             story_slug=story_slug,
-            episode_code="EP01",
+            episode_code=selected.episode_code,
         )
 
     @staticmethod
@@ -1484,7 +1594,7 @@ class DreamArtifactTurnHook:
             items.append(
                 {
                     "entity_id": episode_code,
-                    "display_name": f"{episode_code} 分镜",
+                    "display_name": episode_code,
                     "summary": (summary or None),
                     "source_file": relative,
                     "relations": [],

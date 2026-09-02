@@ -15,6 +15,7 @@
 // [Sync] 2026-08-16: add the canonical Settings / Work route while retaining resource/plugin deep links.
 // [Sync] 2026-08-31: register the run-independent creation guide as a static route.
 // [Sync] 2026-08-31: authenticated root resolves to canonical Chat; unsupported historical prefixes are not routes.
+// [Sync] 2026-09-02: carry one opaque Episode UID in the Execution query string.
 
 export type StoryWorkspaceStaticRoute =
   | 'dream'
@@ -191,6 +192,17 @@ export function storyWorkspaceExecutionPath(storyWorkspaceRunId: string): string
   return `/story-workspace/runs/${encodeURIComponent(storyWorkspaceRunId)}/execution`;
 }
 
+/** Execution path for either the Episode index or one stable registry member. */
+export function storyWorkspaceExecutionEpisodePath(
+  storyWorkspaceRunId: string,
+  storyWorkspaceEpisodeId?: string | null,
+): string {
+  const path = storyWorkspaceExecutionPath(storyWorkspaceRunId);
+  if (!storyWorkspaceEpisodeId) return path;
+  const query = new URLSearchParams({ episode: storyWorkspaceEpisodeId });
+  return `${path}?${query.toString()}`;
+}
+
 /** Convert a former run URL into the one Dream workbench route without new state ownership. */
 export function storyWorkspaceDreamLegacyRunRedirectPath(
   storyWorkspaceRunId: string,
@@ -276,6 +288,12 @@ export function parseStoryWorkspaceRunParam(search: string): string | null {
 export function readStoryWorkspaceRunParam(query: URLSearchParams): string | null {
   const run = query.get('run');
   return run && run.trim() ? run : null;
+}
+
+/** Read the opaque Episode selection; registry membership remains server-owned. */
+export function readStoryWorkspaceEpisodeParam(query: URLSearchParams): string | null {
+  const episode = query.get('episode');
+  return episode && episode.trim() ? episode : null;
 }
 
 /** Optional Deck preselection is navigation intent only; it never authorizes a run. */

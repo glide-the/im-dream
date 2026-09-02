@@ -1,7 +1,7 @@
 // [Input] Story Workspace execution and Dream dialog sources.
 // [Output] Static integration guards for draft-hosted read-only artifacts and shared Chat interaction.
 // [Pos] Prevents the deleted Episode action state machine from returning.
-// [Sync] 2026-08-31: keep the file reader in its matching draft Episode focus.
+// [Sync] 2026-09-02: guard index-first navigation and Run+Episode query isolation.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -22,6 +22,10 @@ const QUERY_SOURCE = readFileSync(
   new URL('../../../hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts.ts', import.meta.url),
   'utf8',
 );
+const INDEX_QUERY_SOURCE = readFileSync(
+  new URL('../../../hooks/story-workspace/useStoryWorkspaceEpisodeIndex.ts', import.meta.url),
+  'utf8',
+);
 
 test('Execution renders the canonical Episode artifact reader as a read-only projection', () => {
   const draftFocusStart = PAGE_SOURCE.indexOf('data-execution-depth="focus"');
@@ -36,9 +40,11 @@ test('Execution renders the canonical Episode artifact reader as a read-only pro
   expect(PAGE_SOURCE.slice(syncStart, dialogStart))
     .not.toContain('<StoryWorkspaceEpisodeArtifactReader');
   expect(PAGE_SOURCE).toContain('focusedEntry.key === episodeDraftEntry?.key');
-  expect(PAGE_SOURCE).toContain('尚未构建');
-  expect(PAGE_SOURCE).toContain('产物关联');
-  expect(PAGE_SOURCE).not.toContain('尚未建立可信');
+  expect(PAGE_SOURCE).toContain('Episode 索引');
+  expect(PAGE_SOURCE).toContain('← 返回 Episode 索引');
+  expect(PAGE_SOURCE).toContain('Episode 不存在或已失效');
+  expect(PAGE_SOURCE).not.toContain('Episode execution');
+  expect(PAGE_SOURCE).not.toContain('EP01 分镜');
 });
 
 test('Dream dialog composes the shared Chat panel without workflow recommendation controls', () => {
@@ -56,6 +62,10 @@ test('Episode artifact query exposes GET, ETag, polling and invalidation only', 
   expect(QUERY_SOURCE).toContain('storyWorkspaceFetchEpisodeArtifacts');
   expect(QUERY_SOURCE).toContain("credentials: 'include'");
   expect(QUERY_SOURCE).toContain('If-None-Match');
+  expect(QUERY_SOURCE).toContain('expectedEpisodeId');
+  expect(QUERY_SOURCE).toContain('?episode=');
+  expect(INDEX_QUERY_SOURCE).toContain('/episodes`');
+  expect(INDEX_QUERY_SOURCE).toContain('If-None-Match');
   expect(QUERY_SOURCE).not.toContain('episode-actions/continue');
   expect(QUERY_SOURCE).not.toContain('episode-binding/recover');
   expect(QUERY_SOURCE).not.toMatch(/method:\s*['"]POST['"]/);

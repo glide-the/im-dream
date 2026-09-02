@@ -14,6 +14,7 @@
 <!-- [同步] 2026-09-01：允许歧义 Dream 工作区进入修正 Turn，并安全截断递归 Skill 链接。 -->
 <!-- [同步] 2026-09-02：Dream 启动前要求 Admin 0042 发布精确 Chat 历史 keyset pagination capability。 -->
 <!-- [同步] 2026-09-01：要求投影写入前校验重复项目根/stage，采用 move-not-copy 清理，并在唯一一次修正停止时显示安全原因。 -->
+<!-- [同步] 2026-09-02：记录索引优先的 Episode 同步、稳定的逐 Episode 导航以及禁止跨 Episode 产物回退。 -->
 
 # Ink & Memory
 
@@ -34,6 +35,7 @@ Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 
 - **Writing** —— 写作并保存 Session，通过时间线查看历史和 Reflections。
 - **Chat** —— 使用 Deck Agent 在持久 Thread 中进行流式对话、工具调用、resume、计划和 TODO。
 - **Dream** —— 启动 Dream Run，审阅剧本、分镜、提示词和生成产物。
+- **Episode 同步** —— 同步视图先打开 Run 范围的 Episode 索引，通过稳定的不透明标识分别进入 EP01/EP02，并返回同一 Run 的索引。每个产物请求、ETag 和最近有效快照都按 Episode 隔离，因此 EP02 缺少产物时绝不展示 EP01 内容。
 - **Dream 工作区恢复** —— Dream 在写入后置投影前，对 allowlist 内的 workspace slug、重复 canonical 项目根和 stage identity/schema 错误进行分类；随后持久化一条可见的自动修正 user 消息，明确要求移动/合并并清理旧项目根而不是只复制目录，再通过正常 Chat/SSE/Turn 路径续接同一 Claude 会话。多个安全项目根会生成不绑定任一 slug 的修正上下文，不再在 Agent 启动前终止；递归文件树也不会跟随 Thread 外的只读内置 Skill 链接。可信 actor、Thread、Run、Deck 或 plugin authority 异常仍会 fail closed；同一个 originating Turn 最多只发起一次修正，第二次失败只显示 allowlist 内的安全原因且不会启动第三轮。
 - **Decks** —— 创建并版本化 Deck、Agent、Prompt、资源和 Claude Plugin 引用。
 - **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、MCP Server、Skill 和插件。

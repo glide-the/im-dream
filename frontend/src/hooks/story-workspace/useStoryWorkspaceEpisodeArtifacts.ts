@@ -1,7 +1,7 @@
-// [Input] Actor-scoped run ID, Episode artifact REST surface, and optional output hints.
-// [Output] Strict ETag fetch seam, last-good reducer, and polling/reentry hook.
+// [Input] Actor-scoped Run plus registry Episode UID, artifact REST surface, and output hints.
+// [Output] Run+Episode-isolated ETag fetch seam, last-good reducer, and polling hook.
 // [Pos] Story Workspace Episode artifact query boundary (U5)
-// [Sync] 2026-09-02: reuse the shared strong/weak response ETag policy.
+// [Sync] 2026-09-02: key requests, reducers, ETags, and last-good data by Run+Episode.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -51,8 +51,12 @@ export class StoryWorkspaceEpisodeArtifactsContractError extends Error {
   }
 }
 
-export function storyWorkspaceEpisodeArtifactsEndpoint(runId: string): string {
-  return `/api/story-workspace/workflow-runs/${encodeURIComponent(runId)}/episode-artifacts`;
+export function storyWorkspaceEpisodeArtifactsEndpoint(
+  runId: string,
+  episodeId?: string | null,
+): string {
+  const endpoint = `/api/story-workspace/workflow-runs/${encodeURIComponent(runId)}/episode-artifacts`;
+  return episodeId ? `${endpoint}?episode=${encodeURIComponent(episodeId)}` : endpoint;
 }
 
 export function storyWorkspaceEpisodeArtifactsPollInterval(requested?: number): number {
@@ -88,22 +92,25 @@ export interface StoryWorkspaceEpisodeArtifactsCommitGuard {
   readonly signal: AbortSignal;
   readonly requestRunId: string;
   readonly currentRunId: string | null;
+  readonly requestEpisodeId: string | null;
+  readonly currentEpisodeId: string | null;
   readonly requestGeneration: number;
   readonly currentGeneration: number;
 }
 
 export interface StoryWorkspaceEpisodeArtifactsRequestTicket {
   readonly runId: string;
+  readonly episodeId: string | null;
   readonly generation: number;
   readonly signal: AbortSignal;
 }
 
 export interface StoryWorkspaceEpisodeArtifactsRequestLifecycle {
-  activate: (runId: string | null) => void;
-  begin: (runId: string) => StoryWorkspaceEpisodeArtifactsRequestTicket;
+  activate: (runId: string | null, episodeId?: string | null) => void;
+  begin: (runId: string, episodeId?: string | null) => StoryWorkspaceEpisodeArtifactsRequestTicket;
   shouldCommit: (ticket: StoryWorkspaceEpisodeArtifactsRequestTicket) => boolean;
   commitEtag: (ticket: StoryWorkspaceEpisodeArtifactsRequestTicket, etag: string | null) => boolean;
-  etagFor: (runId: string) => string | null;
+  etagFor: (runId: string, episodeId?: string | null) => string | null;
   cleanup: () => void;
 }
 
@@ -113,19 +120,22 @@ export interface StoryWorkspaceEpisodeArtifactsRequestLifecycle {
  */
 export function storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(
   initialRunId: string | null,
+  initialEpisodeId: string | null = null,
 ): StoryWorkspaceEpisodeArtifactsRequestLifecycle {
   let generation = 0;
   let currentRunId = initialRunId;
+  let currentEpisodeId = initialEpisodeId;
   let mounted = true;
   let etag: string | null = null;
   let controller: AbortController | null = null;
 
-  const moveToRun = (runId: string | null) => {
-    if (currentRunId === runId) return;
+  const moveToQuery = (runId: string | null, episodeId: string | null) => {
+    if (currentRunId === runId && currentEpisodeId === episodeId) return;
     controller?.abort();
     controller = null;
     generation += 1;
     currentRunId = runId;
+    currentEpisodeId = episodeId;
     etag = null;
   };
   const shouldCommit = (ticket: StoryWorkspaceEpisodeArtifactsRequestTicket) => (
@@ -133,23 +143,25 @@ export function storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(
       signal: ticket.signal,
       requestRunId: ticket.runId,
       currentRunId,
+      requestEpisodeId: ticket.episodeId,
+      currentEpisodeId,
       requestGeneration: ticket.generation,
       currentGeneration: generation,
     })
   );
 
   return {
-    activate(runId) {
-      moveToRun(runId);
+    activate(runId, episodeId = null) {
+      moveToQuery(runId, episodeId);
       mounted = true;
     },
-    begin(runId) {
+    begin(runId, episodeId = null) {
       if (!mounted) throw new Error('Episode artifact request lifecycle is inactive.');
-      moveToRun(runId);
+      moveToQuery(runId, episodeId);
       controller?.abort();
       controller = new AbortController();
       generation += 1;
-      return { runId, generation, signal: controller.signal };
+      return { runId, episodeId, generation, signal: controller.signal };
     },
     shouldCommit,
     commitEtag(ticket, value) {
@@ -157,8 +169,10 @@ export function storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(
       etag = value;
       return true;
     },
-    etagFor(runId) {
-      return mounted && currentRunId === runId ? etag : null;
+    etagFor(runId, episodeId = null) {
+      return mounted && currentRunId === runId && currentEpisodeId === episodeId
+        ? etag
+        : null;
     },
     cleanup() {
       mounted = false;
@@ -175,6 +189,7 @@ export function storyWorkspaceShouldCommitEpisodeArtifactsResponse(
 ): boolean {
   return !guard.signal.aborted
     && guard.requestRunId === guard.currentRunId
+    && guard.requestEpisodeId === guard.currentEpisodeId
     && guard.requestGeneration === guard.currentGeneration;
 }
 
@@ -183,6 +198,7 @@ export interface StoryWorkspaceEpisodeArtifactsFetchOptions {
   readonly token?: string | null;
   readonly etag?: string | null;
   readonly expectedRunId?: string;
+  readonly expectedEpisodeId?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -229,6 +245,10 @@ export async function storyWorkspaceFetchEpisodeArtifacts(
   if (options.expectedRunId !== undefined && data.runId !== options.expectedRunId) {
     throw new StoryWorkspaceEpisodeArtifactsContractError();
   }
+  if (
+    options.expectedEpisodeId !== undefined
+    && data.opaqueEpisodeId !== options.expectedEpisodeId
+  ) throw new StoryWorkspaceEpisodeArtifactsContractError();
   const responseEtag = response.headers.get('ETag');
   if (data.bindingAvailability === 'bound') {
     if (data.etag === null || !storyWorkspaceResponseMatchesEtag(responseEtag, data.etag)) {
@@ -247,6 +267,7 @@ export interface StoryWorkspaceEpisodeArtifactsDiagnostic {
 
 export interface StoryWorkspaceEpisodeArtifactsFetchState {
   readonly runId: string | null;
+  readonly episodeId: string | null;
   /** Per-artifact merged display surface; its manifest always comes from latest. */
   readonly data: StoryWorkspaceEpisodeArtifactSurface | null;
   /** Unmodified latest structurally valid 200 response. */
@@ -267,18 +288,20 @@ export type StoryWorkspaceEpisodeArtifactSessionCache = Readonly<Partial<Record<
 >>>;
 
 export type StoryWorkspaceEpisodeArtifactsFetchAction =
-  | { readonly type: 'reset'; readonly runId: string | null }
-  | { readonly type: 'start'; readonly runId: string; readonly generation: number }
-  | { readonly type: 'success'; readonly runId: string; readonly generation: number; readonly data: StoryWorkspaceEpisodeArtifactSurface }
-  | { readonly type: 'not-modified'; readonly runId: string; readonly generation: number }
-  | { readonly type: 'invalid'; readonly runId: string; readonly generation: number; readonly diagnostic: StoryWorkspaceEpisodeArtifactsDiagnostic }
-  | { readonly type: 'error'; readonly runId: string; readonly generation: number; readonly error: Error };
+  | { readonly type: 'reset'; readonly runId: string | null; readonly episodeId?: string | null }
+  | { readonly type: 'start'; readonly runId: string; readonly episodeId?: string | null; readonly generation: number }
+  | { readonly type: 'success'; readonly runId: string; readonly episodeId?: string | null; readonly generation: number; readonly data: StoryWorkspaceEpisodeArtifactSurface }
+  | { readonly type: 'not-modified'; readonly runId: string; readonly episodeId?: string | null; readonly generation: number }
+  | { readonly type: 'invalid'; readonly runId: string; readonly episodeId?: string | null; readonly generation: number; readonly diagnostic: StoryWorkspaceEpisodeArtifactsDiagnostic }
+  | { readonly type: 'error'; readonly runId: string; readonly episodeId?: string | null; readonly generation: number; readonly error: Error };
 
 export function storyWorkspaceEpisodeArtifactsInitialState(
   runId: string | null = null,
+  episodeId: string | null = null,
 ): StoryWorkspaceEpisodeArtifactsFetchState {
   return {
     runId,
+    episodeId,
     data: null,
     latest: null,
     artifactCache: {},
@@ -381,8 +404,14 @@ export function storyWorkspaceReduceEpisodeArtifactsFetch(
   state: StoryWorkspaceEpisodeArtifactsFetchState,
   action: StoryWorkspaceEpisodeArtifactsFetchAction,
 ): StoryWorkspaceEpisodeArtifactsFetchState {
-  if (action.type === 'reset') return storyWorkspaceEpisodeArtifactsInitialState(action.runId);
-  if (action.runId !== state.runId || action.generation < state.generation) return state;
+  if (action.type === 'reset') {
+    return storyWorkspaceEpisodeArtifactsInitialState(action.runId, action.episodeId ?? null);
+  }
+  if (
+    action.runId !== state.runId
+    || (action.episodeId ?? null) !== state.episodeId
+    || action.generation < state.generation
+  ) return state;
   if (action.type === 'start') {
     return { ...state, error: null, isLoading: true, generation: action.generation };
   }
@@ -405,6 +434,7 @@ export function storyWorkspaceReduceEpisodeArtifactsFetch(
     );
     return {
       runId: state.runId,
+      episodeId: state.episodeId,
       data: storyWorkspaceMergeEpisodeArtifactLastGood(action.data, artifactCache, staleArtifactKeys),
       latest: action.data,
       artifactCache,
@@ -466,37 +496,48 @@ export interface StoryWorkspaceEpisodeArtifactsState {
 }
 
 /**
- * Reenter and poll one run's server-bound Episode. ETags and last-good data live
- * only for this mounted hook instance and are cleared when the run ID changes.
+ * Reenter and poll one explicit registry Episode. ETags and last-good data live
+ * only for this mounted hook instance and clear when either identity changes.
  */
 export function useStoryWorkspaceEpisodeArtifacts(
   runId: string | null | undefined,
+  episodeId: string | null | undefined,
   options: StoryWorkspaceEpisodeArtifactsUseOptions = {},
 ): StoryWorkspaceEpisodeArtifactsState {
   const normalizedRunId = runId ?? null;
+  const normalizedEpisodeId = episodeId ?? null;
   const [state, dispatch] = useReducer(
     storyWorkspaceReduceEpisodeArtifactsFetch,
-    normalizedRunId,
-    storyWorkspaceEpisodeArtifactsInitialState,
+    storyWorkspaceEpisodeArtifactsInitialState(normalizedRunId, normalizedEpisodeId),
   );
   const lifecycleRef = useRef<StoryWorkspaceEpisodeArtifactsRequestLifecycle | null>(null);
   const renderedRunIdRef = useRef<string | null>(normalizedRunId);
+  const renderedEpisodeIdRef = useRef<string | null>(normalizedEpisodeId);
   if (lifecycleRef.current === null) {
-    lifecycleRef.current = storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(normalizedRunId);
+    lifecycleRef.current = storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(
+      normalizedRunId,
+      normalizedEpisodeId,
+    );
   }
   const lifecycle = lifecycleRef.current;
 
   const refresh = useCallback(() => {
-    if (!normalizedRunId) return;
-    const ticket = lifecycle.begin(normalizedRunId);
-    dispatch({ type: 'start', runId: normalizedRunId, generation: ticket.generation });
+    if (!normalizedRunId || !normalizedEpisodeId) return;
+    const ticket = lifecycle.begin(normalizedRunId, normalizedEpisodeId);
+    dispatch({
+      type: 'start',
+      runId: normalizedRunId,
+      episodeId: normalizedEpisodeId,
+      generation: ticket.generation,
+    });
     void storyWorkspaceFetchEpisodeArtifacts(
-      apiUrl(storyWorkspaceEpisodeArtifactsEndpoint(normalizedRunId)),
+      apiUrl(storyWorkspaceEpisodeArtifactsEndpoint(normalizedRunId, normalizedEpisodeId)),
       {
         fetchImpl: options.fetchImpl,
         token: options.token === undefined ? getAuthToken() : options.token,
-        etag: lifecycle.etagFor(normalizedRunId),
+        etag: lifecycle.etagFor(normalizedRunId, normalizedEpisodeId),
         expectedRunId: normalizedRunId,
+        expectedEpisodeId: normalizedEpisodeId,
         signal: ticket.signal,
       },
     ).then((result) => {
@@ -505,6 +546,7 @@ export function useStoryWorkspaceEpisodeArtifacts(
         dispatch({
           type: 'not-modified',
           runId: normalizedRunId,
+          episodeId: normalizedEpisodeId,
           generation: ticket.generation,
         });
         return;
@@ -513,6 +555,7 @@ export function useStoryWorkspaceEpisodeArtifacts(
       dispatch({
         type: 'success',
         runId: normalizedRunId,
+        episodeId: normalizedEpisodeId,
         generation: ticket.generation,
         data: result.data,
       });
@@ -525,6 +568,7 @@ export function useStoryWorkspaceEpisodeArtifacts(
         dispatch({
           type: 'invalid',
           runId: normalizedRunId,
+          episodeId: normalizedEpisodeId,
           generation: ticket.generation,
           diagnostic: {
             kind: 'invalid_payload',
@@ -536,35 +580,44 @@ export function useStoryWorkspaceEpisodeArtifacts(
       dispatch({
         type: 'error',
         runId: normalizedRunId,
+        episodeId: normalizedEpisodeId,
         generation: ticket.generation,
         error: reason instanceof Error
           ? reason
           : new Error('Episode artifact request failed.'),
       });
     });
-  }, [lifecycle, normalizedRunId, options.fetchImpl, options.token]);
+  }, [lifecycle, normalizedEpisodeId, normalizedRunId, options.fetchImpl, options.token]);
 
   useEffect(() => {
-    lifecycle.activate(normalizedRunId);
-    if (renderedRunIdRef.current !== normalizedRunId) {
+    lifecycle.activate(normalizedRunId, normalizedEpisodeId);
+    if (
+      renderedRunIdRef.current !== normalizedRunId
+      || renderedEpisodeIdRef.current !== normalizedEpisodeId
+    ) {
       renderedRunIdRef.current = normalizedRunId;
-      dispatch({ type: 'reset', runId: normalizedRunId });
+      renderedEpisodeIdRef.current = normalizedEpisodeId;
+      dispatch({
+        type: 'reset',
+        runId: normalizedRunId,
+        episodeId: normalizedEpisodeId,
+      });
     }
-    if (normalizedRunId) refresh();
+    if (normalizedRunId && normalizedEpisodeId) refresh();
     return () => lifecycle.cleanup();
-  }, [lifecycle, normalizedRunId, refresh]);
+  }, [lifecycle, normalizedEpisodeId, normalizedRunId, refresh]);
 
   useEffect(() => {
-    if (!normalizedRunId) return;
+    if (!normalizedRunId || !normalizedEpisodeId) return;
     const timer = window.setInterval(
       refresh,
       storyWorkspaceEpisodeArtifactsPollInterval(options.pollIntervalMs),
     );
     return () => window.clearInterval(timer);
-  }, [normalizedRunId, options.pollIntervalMs, refresh]);
+  }, [normalizedEpisodeId, normalizedRunId, options.pollIntervalMs, refresh]);
 
   useEffect(() => {
-    if (!normalizedRunId) return;
+    if (!normalizedRunId || !normalizedEpisodeId) return;
     const handleOutput = (event: Event) => {
       if (storyWorkspaceShouldInvalidateEpisodeArtifacts(
         (event as CustomEvent<unknown>).detail,
@@ -573,20 +626,23 @@ export function useStoryWorkspaceEpisodeArtifacts(
     };
     window.addEventListener(STORY_WORKSPACE_EPISODE_OUTPUT_EVENT, handleOutput);
     return () => window.removeEventListener(STORY_WORKSPACE_EPISODE_OUTPUT_EVENT, handleOutput);
-  }, [normalizedRunId, refresh]);
+  }, [normalizedEpisodeId, normalizedRunId, refresh]);
+
+  const isCurrentQuery = state.runId === normalizedRunId
+    && state.episodeId === normalizedEpisodeId;
 
   return {
-    data: state.runId === normalizedRunId ? state.data : null,
-    latest: state.runId === normalizedRunId ? state.latest : null,
-    invalidArtifactKeys: state.runId === normalizedRunId ? state.invalidArtifactKeys : [],
-    unavailableArtifactKeys: state.runId === normalizedRunId
+    data: isCurrentQuery ? state.data : null,
+    latest: isCurrentQuery ? state.latest : null,
+    invalidArtifactKeys: isCurrentQuery ? state.invalidArtifactKeys : [],
+    unavailableArtifactKeys: isCurrentQuery
       ? state.unavailableArtifactKeys
       : [],
-    staleArtifactKeys: state.runId === normalizedRunId ? state.staleArtifactKeys : [],
-    diagnostic: state.runId === normalizedRunId ? state.diagnostic : null,
-    error: state.runId === normalizedRunId ? state.error : null,
-    isLoading: state.runId === normalizedRunId && state.isLoading,
-    isShowingLastGood: state.runId === normalizedRunId
+    staleArtifactKeys: isCurrentQuery ? state.staleArtifactKeys : [],
+    diagnostic: isCurrentQuery ? state.diagnostic : null,
+    error: isCurrentQuery ? state.error : null,
+    isLoading: isCurrentQuery && state.isLoading,
+    isShowingLastGood: isCurrentQuery
       && state.data !== null
       && (state.diagnostic !== null || state.staleArtifactKeys.length > 0),
     refresh,

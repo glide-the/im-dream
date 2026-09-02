@@ -8,7 +8,7 @@
 // [Sync] 2026-08-31: guard the canonical reader inside the matching draft Episode focus.
 // [Sync] 2026-08-31: guard the concise storyboard overview in the EP list description.
 // [Sync] 2026-08-31: guard the read-only three-stage guide and its in-place focus entry.
-// [Sync] 2026-08-31: keep the Outline guide local after Dream moves to a static route.
+// [Sync] 2026-09-02: guard Outline-aligned Episode index and accessible return navigation.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -204,6 +204,24 @@ test('draft is the default full surface and sync remains an exclusive coordinati
   expect(ROUTER_SOURCE).toContain("case 'run-execution':");
   expect(ROUTER_SOURCE).toContain('key={match.params.storyWorkspaceRunId}');
   expect(ROUTER_SOURCE).toContain('runId={match.params.storyWorkspaceRunId}');
+  expect(ROUTER_SOURCE).toContain('episodeId={readStoryWorkspaceEpisodeParam(match.query)}');
+});
+
+test('Sync defaults to the Outline-aligned Episode index before an explicit selection', () => {
+  const sync = PAGE_SOURCE.slice(
+    PAGE_SOURCE.indexOf('aria-label="Episode 产物工作台"'),
+    PAGE_SOURCE.indexOf('<StoryWorkspaceDreamAgentDialog'),
+  );
+  expect(sync).toContain('episodeId === null || episodeId === undefined');
+  expect(sync).toContain('id="story-workspace-episode-index-title"');
+  expect(sync).toContain('<StoryWorkspaceManuscriptIndex');
+  expect(sync).toContain('items={episodeIndexItems}');
+  expect(PAGE_SOURCE).toContain('← 返回 Episode 索引');
+  expect(sync).toContain('Episode 不存在或已失效');
+  expect(sync).not.toContain('Episode execution');
+  expect(PAGE_SOURCE).toContain('artifactEpisodeId');
+  expect(PAGE_SOURCE).toContain('selectedEpisode?.opaqueEpisodeId ?? null');
+  expect(CSS_SOURCE).toContain('.story-workspace-collaboration__episode-back');
 });
 
 test('Episode workbench uses a two-column master-detail hierarchy', () => {

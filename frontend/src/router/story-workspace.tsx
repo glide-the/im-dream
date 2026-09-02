@@ -19,6 +19,7 @@
 // [Sync] 2026-08-31: render the creation guide on its own static route and use
 //                    the recorded source history for its return navigation.
 // [Sync] 2026-08-31: make Chat the unmatched-location fallback and rename retained App surfaces as workspace content, removing legacy app-view ownership.
+// [Sync] 2026-09-02: pass the Execution query Episode UID without creating router-owned selection state.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
@@ -53,6 +54,7 @@ import {
 } from '../pages/story-workspace/storyWorkspaceDreamNavigation';
 import {
   readStoryWorkspaceRunParam,
+  readStoryWorkspaceEpisodeParam,
   readStoryWorkspaceDeckParam,
   resolveStoryWorkspacePath,
   storyWorkspaceCommitNavigation,
@@ -74,6 +76,7 @@ export {
   resolveStoryWorkspacePath,
   STORY_WORKSPACE_PATHS,
   storyWorkspaceEpisodeReviewPath,
+  storyWorkspaceExecutionEpisodePath,
   storyWorkspaceExecutionPath,
   STORY_WORKSPACE_ROUTE_PATTERNS,
 } from './storyWorkspacePath';
@@ -219,6 +222,7 @@ function renderStoryWorkspaceRoute(
           onNavigate={onNavigate}
           onOpenChatThread={onOpenChatThread}
           runId={match.params.storyWorkspaceRunId}
+          episodeId={readStoryWorkspaceEpisodeParam(match.query)}
         />
       );
     case 'episode-review':

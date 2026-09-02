@@ -1,3 +1,8 @@
+# [Input] Trusted Run/project authority and canonical numbered Episode roots.
+# [Output] Immutable Episode bindings plus a CAS-protected Run-scoped registry.
+# [Pos] Story Workspace Episode identity owner; never derives UI selection from list order.
+# [Sync] 2026-09-02: derive the canonical first Episode code from its business number.
+
 """Fail-closed run-scoped binding for the first canonical Episode."""
 
 from __future__ import annotations
@@ -65,6 +70,7 @@ _PROJECT_NAME_SECRET_PATTERN = re.compile(
     r"\b[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b)",
     re.IGNORECASE,
 )
+_FIRST_EPISODE_NUMBER = 1
 
 
 class StoryWorkspaceEpisodeBindingError(RuntimeError):
@@ -234,6 +240,10 @@ class StoryWorkspaceEpisodeBindingService:
             )
         return value
 
+    @staticmethod
+    def _episode_code(episode_number: int) -> str:
+        return f"EP{episode_number:02d}"
+
     def _proved_story_slug(
         self,
         context: StoryWorkspaceEpisodeBindingContext,
@@ -323,7 +333,12 @@ class StoryWorkspaceEpisodeBindingService:
             workspace_descriptor = self._open_workspace()
             descriptors.append(workspace_descriptor)
             parent = workspace_descriptor
-            components = ("stories", story_slug, "episodes", "EP01")
+            components = (
+                "stories",
+                story_slug,
+                "episodes",
+                self._episode_code(_FIRST_EPISODE_NUMBER),
+            )
             for index, component in enumerate(components):
                 child = self._open_child_directory(
                     parent,
@@ -954,7 +969,7 @@ class StoryWorkspaceEpisodeBindingService:
         self,
         context: StoryWorkspaceEpisodeBindingContext,
     ) -> StoryWorkspaceEpisodeRegistryFile:
-        """Read v2 identity facts, projecting legacy EP01 without rewriting it."""
+        """Read v2 identity facts, projecting the legacy first Episode unchanged."""
 
         story_slug = self._proved_story_slug(context, allow_unproven=False)
         assert story_slug is not None
@@ -1136,7 +1151,7 @@ class StoryWorkspaceEpisodeBindingService:
         self,
         context: StoryWorkspaceEpisodeBindingContext,
     ) -> StoryWorkspaceEpisodeBindingFile:
-        """CAS-create EP01 or return the identical immutable binding."""
+        """CAS-create the first numbered Episode or return its immutable binding."""
 
         story_slug = self._proved_story_slug(context, allow_unproven=False)
         assert story_slug is not None
@@ -1159,13 +1174,13 @@ class StoryWorkspaceEpisodeBindingService:
                 first = registry.episodes[0]
                 if requested_uid != first.episode_uid:
                     raise StoryWorkspaceEpisodeBindingIdentityConflict(
-                        "legacy first-Episode binding view requires EP01 authority"
+                        "legacy first-Episode binding view requires launch authority"
                     )
                 return StoryWorkspaceEpisodeBindingFile(
                     workflow_run_id=registry.workflow_run_id,
                     episode_uid=first.episode_uid,
                     story_slug=registry.story_slug,
-                    episode_code="EP01",
+                    episode_code=self._episode_code(_FIRST_EPISODE_NUMBER),
                     episode_root=first.episode_root,
                     revision=1,
                     updated_at=first.created_at,
@@ -1188,8 +1203,11 @@ class StoryWorkspaceEpisodeBindingService:
                     else uuid4().hex
                 ),
                 story_slug=story_slug,
-                episode_code="EP01",
-                episode_root=f"stories/{story_slug}/episodes/EP01",
+                episode_code=self._episode_code(_FIRST_EPISODE_NUMBER),
+                episode_root=(
+                    f"stories/{story_slug}/episodes/"
+                    f"{self._episode_code(_FIRST_EPISODE_NUMBER)}"
+                ),
                 revision=1,
                 updated_at=datetime.now(timezone.utc),
             )

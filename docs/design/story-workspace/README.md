@@ -1,7 +1,7 @@
 <!-- [Input] Current Story Workspace product modules and cross-system Dream/Deck contracts. -->
 <!-- [Output] Authoritative index for Story Workspace product and interaction design. -->
 <!-- [Pos] Story Workspace design entry point. -->
-<!-- [Sync] 2026-08-31: index Dream Thread binding recovery, legal same-Deck Agent switching, and draft Episode-owned artifact reading. -->
+<!-- [Sync] 2026-09-02: index the Episode-first synchronization plan and EP02 isolated-read sequence. -->
 
 # Story Workspace 业务设计索引
 
@@ -14,6 +14,8 @@
 |---|---|
 | [产品范围与导航](./product-scope-and-navigation.md) | 角色、信息架构、路由与响应式外壳 |
 | [Dream 工作空间与重入](./dream-workspace-and-reentry.md) | Run 发现、选择、同一 Thread 恢复与 Agent 工作台 |
+| [Episode 同步索引](./episode-sync-index.md) | 索引优先、稳定 Episode 导航、数据隔离、状态与验收边界 |
+| [Episode 同步业务时序](./episode-sync-index-sequence.md) | EP02 注册、精确读取、产物分支与返回索引的 Mermaid 时序 |
 | [Project 与 Episode 工作台](./project-and-episode-workbench.md) | Episode、故事线、场景、镜头的阅读与编辑 |
 | [Artifact 阅读与降级](./artifact-reading-and-degradation.md) | 文件投影、revision、缺失、无效与降级显示 |
 | [Skill 指令与工作台自动同步](./skill-commands-and-workbench-sync.md) | 已安装 Skill 的自由调用、Chat Slash 菜单和主 Agent Hook 自动同步 |
@@ -39,6 +41,7 @@ Agent 对话与 Project/Episode 跨系统合同由以下文档定义：
 
 ## Sync
 
+- 2026-09-02: 同步视图先展示 Episode 索引；稳定 Episode UID 贯穿路由、查询与缓存，缺少指定 Episode 产物时禁止回退其它 Episode。
 - 2026-08-31: Episode 文件 reader 归属初稿的对应 EP 聚焦页；同步视图只保留协调事实和入口。
 - 2026-08-16: 所有以 Deck 为主语的设计文档已迁至 `docs/design/deck/`；本目录只通过 Deck 索引引用跨模块消费合同。
 - 2026-08-16: Dream 首页移除社区 Deck 安装入口，避免暂缓的市场分发继续形成第二套 Deck 流程。

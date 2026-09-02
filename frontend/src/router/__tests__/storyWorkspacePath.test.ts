@@ -12,6 +12,7 @@
 // [Sync] 2026-08-16: cover the Settings / Work route and its tab query.
 // [Sync] 2026-08-31: cover the run-independent static creation-guide route.
 // [Sync] 2026-08-31: root resolves to Chat and the removed /ink-and-memory prefix stays unmatched.
+// [Sync] 2026-09-02: cover opaque Episode query selection and index return path.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
@@ -20,6 +21,7 @@ import { storyWorkspaceExecutionDeepLink } from '../../components/story-workspac
 import {
   matchStoryWorkspaceRoutePattern,
   parseStoryWorkspaceRunParam,
+  readStoryWorkspaceEpisodeParam,
   resolveStoryWorkspacePath,
   storyWorkspaceDreamStageForRoute,
   storyWorkspaceAllowsLegacyReviewPanel,
@@ -27,6 +29,7 @@ import {
   STORY_WORKSPACE_ROUTE_PATTERNS,
   storyWorkspaceEpisodeReviewPath,
   storyWorkspaceExecutionPath,
+  storyWorkspaceExecutionEpisodePath,
   storyWorkspaceDreamLegacyRunRedirectPath,
   storyWorkspaceDreamPathWithoutRun,
   storyWorkspaceCommitNavigation,
@@ -231,6 +234,17 @@ test('canonical path builders stay identical to the surface-link deep links', ()
   expect(storyWorkspaceExecutionPath('r1')).toBe(storyWorkspaceExecutionDeepLink('r1'));
   expect(storyWorkspaceEpisodeReviewPath('ep1')).toBe('/story-workspace/episodes/ep1/review');
   expect(storyWorkspaceEpisodeReviewPath('ep 1')).toBe('/story-workspace/episodes/ep%201/review');
+  expect(storyWorkspaceExecutionEpisodePath('r1', 'a'.repeat(32))).toBe(
+    `/story-workspace/runs/r1/execution?episode=${'a'.repeat(32)}`,
+  );
+  expect(storyWorkspaceExecutionEpisodePath('r1')).toBe(storyWorkspaceExecutionPath('r1'));
+  const selected = resolveStoryWorkspacePath(
+    '/story-workspace/runs/r1/execution',
+    `?episode=${'b'.repeat(32)}`,
+  );
+  expect(readStoryWorkspaceEpisodeParam(selected?.query ?? new URLSearchParams())).toBe(
+    'b'.repeat(32),
+  );
 });
 
 test('parseStoryWorkspaceRunParam is the unified ?run= seam (absorbs Task 4 R2)', () => {

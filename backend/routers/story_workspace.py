@@ -2,7 +2,7 @@
 # [Input] Consume authenticated users, canonical PostgreSQL Story Workspace tables, and REST requests.
 # [Output] Publish user-scoped Story Workspace read and controlled-update API routes.
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
-# [Sync] 2026-08-01: add task_202 workspace, story, character, and scene REST baseline.
+# [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
 
@@ -247,6 +247,14 @@ class DreamArtifactService(Protocol):
     ) -> Any: ...
 
     async def get_episode_artifacts(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+        episode_id: str | None = None,
+    ) -> Any: ...
+
+    async def get_episode_index(
         self,
         workflow_run_id: str,
         *,
@@ -1396,11 +1404,16 @@ async def story_workspace_get_workflow_run_dream_files(
 @router.get("/workflow-runs/{workflow_run_id}/episode-artifacts")
 async def story_workspace_get_workflow_run_episode_artifacts(
     workflow_run_id: str,
+    episode_id: Optional[str] = Query(
+        default=None,
+        alias="episode",
+        pattern=r"^[0-9a-f]{32}$",
+    ),
     if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
     current_user: dict[str, Any] = Depends(get_current_user),
     service: DreamArtifactService = Depends(get_dream_artifact_service),
 ):
-    """Return only the server-bound Episode surface; no path input is accepted."""
+    """Return one registry-owned Episode surface; no browser path is accepted."""
 
     try:
         actor = {"actor_id": str(current_user["user_id"])}
@@ -1411,7 +1424,44 @@ async def story_workspace_get_workflow_run_episode_artifacts(
             content=build_error_payload(exc.code),
         )
     result = await _workflow_call(
-        service.get_episode_artifacts(workflow_run_id, actor=actor),
+        service.get_episode_artifacts(
+            workflow_run_id,
+            actor=actor,
+            episode_id=episode_id,
+        ),
+        by_alias=True,
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    etag = result.get("etag") if isinstance(result, dict) else None
+    headers: dict[str, str] = {}
+    if isinstance(etag, str):
+        quoted_etag = f'"{etag}"'
+        headers["ETag"] = quoted_etag
+        if if_none_match is not None and if_none_match.strip() == quoted_etag:
+            return Response(status_code=304, headers=headers)
+    return JSONResponse(content=result, headers=headers)
+
+
+@router.get("/workflow-runs/{workflow_run_id}/episodes")
+async def story_workspace_get_workflow_run_episodes(
+    workflow_run_id: str,
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    service: DreamArtifactService = Depends(get_dream_artifact_service),
+):
+    """Return registry identity and bounded availability facts without bodies."""
+
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    result = await _workflow_call(
+        service.get_episode_index(workflow_run_id, actor=actor),
         by_alias=True,
     )
     if isinstance(result, JSONResponse):

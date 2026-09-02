@@ -1,7 +1,7 @@
 // [Input] Canonical Episode artifact GET snapshots and lifecycle signals.
 // [Output] Contract, ETag, polling, invalidation, cancellation, and last-good coverage.
 // [Pos] Story Workspace read-only Episode artifact query seam.
-// [Sync] 2026-09-02: accept proxy weak ETags and canonical Episode evidence paths.
+// [Sync] 2026-09-02: verify Run+Episode endpoint, lifecycle, and last-good isolation.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -19,6 +19,8 @@ import {
 import { storyWorkspaceParseEpisodeArtifactSurface } from '../contracts';
 
 const RUN_ID = `run_${'1'.repeat(32)}`;
+const EP01_ID = 'a'.repeat(32);
+const EP02_ID = 'b'.repeat(32);
 const REVISION = `sha256:${'2'.repeat(64)}`;
 
 const ARTIFACT_SPECS = [
@@ -48,7 +50,7 @@ function unboundSurface() {
 function boundSurface(availability: 'not_generated' | 'invalid' = 'not_generated') {
   return {
     runId: RUN_ID,
-    opaqueEpisodeId: 'a'.repeat(32),
+    opaqueEpisodeId: EP01_ID,
     episodeCode: 'EP01',
     manifestRevision: REVISION,
     etag: REVISION,
@@ -136,11 +138,12 @@ test('accepts canonical Episode evidence paths without weakening secret checks',
 test('GET uses the run-scoped endpoint, bearer token, and exact quoted request ETag', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const result = await storyWorkspaceFetchEpisodeArtifacts(
-    storyWorkspaceEpisodeArtifactsEndpoint(RUN_ID),
+    storyWorkspaceEpisodeArtifactsEndpoint(RUN_ID, EP01_ID),
     {
       token: 'local-token',
       etag: REVISION,
       expectedRunId: RUN_ID,
+      expectedEpisodeId: EP01_ID,
       fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
         calls.push({ url: String(input), init });
         return new Response(null, { status: 304, headers: { ETag: `"${REVISION}"` } });
@@ -149,6 +152,7 @@ test('GET uses the run-scoped endpoint, bearer token, and exact quoted request E
   );
   expect(result).toEqual({ kind: 'not-modified', etag: REVISION });
   expect(calls[0].url).toContain(`/workflow-runs/${RUN_ID}/episode-artifacts`);
+  expect(calls[0].url).toContain(`episode=${EP01_ID}`);
   expect(new Headers(calls[0].init?.headers).get('Authorization')).toBe('Bearer local-token');
   expect(new Headers(calls[0].init?.headers).get('If-None-Match')).toBe(`"${REVISION}"`);
 });
@@ -224,6 +228,45 @@ test('request lifecycle aborts stale requests after switching run', () => {
   expect(lifecycle.shouldCommit(second)).toBe(true);
   lifecycle.cleanup();
   expect(second.signal.aborted).toBe(true);
+});
+
+test('same-run Episode switch aborts stale requests and clears its ETag identity', () => {
+  const lifecycle = storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(RUN_ID, EP01_ID);
+  const ep01 = lifecycle.begin(RUN_ID, EP01_ID);
+  expect(lifecycle.commitEtag(ep01, REVISION)).toBe(true);
+  lifecycle.activate(RUN_ID, EP02_ID);
+  expect(ep01.signal.aborted).toBe(true);
+  expect(lifecycle.shouldCommit(ep01)).toBe(false);
+  expect(lifecycle.etagFor(RUN_ID, EP02_ID)).toBeNull();
+  const ep02 = lifecycle.begin(RUN_ID, EP02_ID);
+  expect(lifecycle.shouldCommit(ep02)).toBe(true);
+  lifecycle.cleanup();
+});
+
+test('reducer never accepts EP01 last-good data after switching to EP02', () => {
+  let state = storyWorkspaceEpisodeArtifactsInitialState(RUN_ID, EP01_ID);
+  state = storyWorkspaceReduceEpisodeArtifactsFetch(state, {
+    type: 'success',
+    runId: RUN_ID,
+    episodeId: EP01_ID,
+    generation: 1,
+    data: storyWorkspaceParseEpisodeArtifactSurface(boundSurfaceWithOutline('EP01 only')),
+  });
+  state = storyWorkspaceReduceEpisodeArtifactsFetch(state, {
+    type: 'reset',
+    runId: RUN_ID,
+    episodeId: EP02_ID,
+  });
+  state = storyWorkspaceReduceEpisodeArtifactsFetch(state, {
+    type: 'success',
+    runId: RUN_ID,
+    episodeId: EP01_ID,
+    generation: 2,
+    data: storyWorkspaceParseEpisodeArtifactSurface(boundSurfaceWithOutline('late EP01')),
+  });
+  expect(state.episodeId).toBe(EP02_ID);
+  expect(state.data).toBeNull();
+  expect(state.artifactCache).toEqual({});
 });
 
 test('reducer keeps the last-good artifact while the latest root is invalid', () => {

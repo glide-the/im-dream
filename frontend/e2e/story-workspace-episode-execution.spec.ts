@@ -1,5 +1,5 @@
 // [Input] Deterministic actor-scoped Dream/Episode REST snapshots served at the browser boundary.
-// [Output] Chromium evidence for responsive Episode navigation, read-only binding state, and revision-stable selection.
+// [Output] Local Chrome evidence for index-first EP01/EP02 navigation, isolation, return focus, and responsive workbench behavior.
 // [Pos] Story Workspace Episode Execution mocked-browser QA (U12); never claims external workflow success.
 // [Sync] 2026-08-13: unbound EP01 remains read-only while the turn Hook publishes and binds.
 // [Sync] 2026-08-13: Dream Agent dialog uses its full conversation row and contains long
@@ -15,6 +15,8 @@
 // [Sync] 2026-08-31: Dream's static guide route returns to the originating run workbench.
 // [Sync] 2026-08-31: the bound Dream masthead opens the independent static guide
 //                    below the “创作工作空间” title.
+// [Sync] 2026-09-02: add Episode index-first, EP02 empty-state isolation, and return navigation coverage.
+// [Sync] 2026-09-02: await the paginated Chat scroller before measuring the dialog layout.
 
 // @ts-expect-error Playwright E2E has Node built-ins; the browser app tsconfig omits Node types.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -26,6 +28,7 @@ import { storyWorkspaceParseEpisodeArtifactSurface } from '../src/hooks/story-wo
 const WEB_BASE = process.env.INK_E2E_WEB_BASE ?? 'http://127.0.0.1:4177';
 const RUN_ID = `run_${'1'.repeat(32)}`;
 const EPISODE_ID = 'e'.repeat(32);
+const EP02_ID = '8'.repeat(32);
 const EPISODE_VIEW_ID = 'a'.repeat(32);
 const ARC_ID = 'b'.repeat(32);
 const BEAT_ID = 'c'.repeat(32);
@@ -38,6 +41,8 @@ const REVIEW_SECTION_ID = '4'.repeat(32);
 const REVIEW_TARGET_ID = '5'.repeat(32);
 const STORY_INDEX_ID = '123e4567-e89b-52d3-a456-426614174000';
 const STORY_INDEX_ETAG = `sha256:${'9'.repeat(64)}`;
+const EPISODE_INDEX_ETAG = `sha256:${'5'.repeat(64)}`;
+const EP02_ETAG = `sha256:${'8'.repeat(64)}`;
 const FROZEN_NOW = '2026-08-06T04:00:00.000Z';
 const CONTENT_REVISION = `sha256:${'a'.repeat(64)}`;
 const MANIFEST_REVISIONS = [
@@ -61,7 +66,7 @@ const EVIDENCE_DIR = resolve(
   '../output/playwright/story-workspace-episode-execution-u12',
 );
 
-test.use({ channel: 'chromium', timezoneId: 'Asia/Shanghai' });
+test.use({ channel: 'chrome', timezoneId: 'Asia/Shanghai' });
 
 // Provider-free QA impact contract:
 // Project title stays unchanged in the mocked Story Index; EP01 identity and
@@ -376,6 +381,56 @@ function unboundEpisodeSurface() {
   };
 }
 
+function emptyEp02Surface() {
+  return {
+    runId: RUN_ID,
+    opaqueEpisodeId: EP02_ID,
+    episodeCode: 'EP02',
+    manifestRevision: EP02_ETAG,
+    etag: EP02_ETAG,
+    bindingAvailability: 'bound',
+    artifacts: ALL_ARTIFACTS.map(([relativeKey, producerAction, consumers]) => ({
+      relativeKey,
+      availability: 'not_generated',
+      contentRevision: null,
+      mtime: null,
+      size: null,
+      producerAction,
+      consumers,
+    })),
+    documents: [],
+    narrative: null,
+    auxiliary: null,
+  };
+}
+
+function episodeIndexSurface(unbound = false) {
+  return {
+    runId: RUN_ID,
+    registryRevision: unbound ? 0 : 3,
+    activeEpisodeId: unbound ? null : EPISODE_ID,
+    etag: EPISODE_INDEX_ETAG,
+    episodes: unbound ? [] : [
+      {
+        opaqueEpisodeId: EPISODE_ID,
+        episodeCode: 'EP01',
+        active: true,
+        availableArtifactCount: 6,
+        hasArtifactIssues: false,
+        updatedAt: '2026-08-06T01:02:03Z',
+      },
+      {
+        opaqueEpisodeId: EP02_ID,
+        episodeCode: 'EP02',
+        active: false,
+        availableArtifactCount: 0,
+        hasArtifactIssues: false,
+        updatedAt: null,
+      },
+    ],
+  };
+}
+
 function json(route: Route, body: unknown, status = 200, headers?: Record<string, string>) {
   return route.fulfill({
     status,
@@ -508,6 +563,22 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       await json(route, dreamFiles());
       return;
     }
+    if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/episodes`)) {
+      if (request.headers()['if-none-match'] === `"${EPISODE_INDEX_ETAG}"`) {
+        await route.fulfill({
+          status: 304,
+          headers: { ETag: `"${EPISODE_INDEX_ETAG}"` },
+        });
+      } else {
+        await json(
+          route,
+          episodeIndexSurface(state.bindingAvailability === 'unbound'),
+          200,
+          { ETag: `"${EPISODE_INDEX_ETAG}"` },
+        );
+      }
+      return;
+    }
     if (matches('GET', '/api/system-config')) {
       await json(route, { data: { im_full_access_enabled: false } });
       return;
@@ -522,7 +593,16 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       });
       return;
     }
-    if (matches('GET', '/api/claude-agent/threads/thread-u12-browser/messages')) {
+    if (method === 'GET' && path === '/api/claude-agent/threads/thread-u12-browser/messages') {
+      const knownLatestMessageId = url.searchParams.get('known_latest_message_id');
+      if (
+        url.searchParams.get('limit') !== '20'
+        || url.searchParams.has('cursor')
+        || (
+          knownLatestMessageId !== null
+          && knownLatestMessageId !== 'message-u12-browser'
+        )
+      ) throw new Error(`Unexpected Dream history query: ${url.search}`);
       await json(route, {
         thread: {
           id: 'thread-u12-browser',
@@ -530,7 +610,7 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
           created_at: '2026-08-06T01:00:00Z',
           updated_at: '2026-08-06T01:04:01Z',
         },
-        messages: [{
+        messages: knownLatestMessageId === 'message-u12-browser' ? [] : [{
           id: 'message-u12-browser',
           role: 'assistant',
           parts: [{
@@ -540,6 +620,10 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
           metadata: {},
           created_at: '2026-08-06T01:04:00Z',
         }],
+        next_cursor: null,
+        has_more: false,
+        latest_message_id: 'message-u12-browser',
+        unchanged: knownLatestMessageId === 'message-u12-browser',
       });
       return;
     }
@@ -565,11 +649,25 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       await json(route, { ok: true, approved: true });
       return;
     }
-    if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/episode-artifacts`)) {
+    if (
+      method === 'GET'
+      && path === `/api/story-workspace/workflow-runs/${RUN_ID}/episode-artifacts`
+    ) {
       state.artifactReads += 1;
       if (state.bindingAvailability === 'unbound') {
         await json(route, unboundEpisodeSurface());
         return;
+      }
+      if (url.searchParams.get('episode') === EP02_ID) {
+        if (request.headers()['if-none-match'] === `"${EP02_ETAG}"`) {
+          await route.fulfill({ status: 304, headers: { ETag: `"${EP02_ETAG}"` } });
+        } else {
+          await json(route, emptyEp02Surface(), 200, { ETag: `"${EP02_ETAG}"` });
+        }
+        return;
+      }
+      if (url.searchParams.get('episode') !== EPISODE_ID) {
+        throw new Error(`Unknown Episode artifact identity: ${url.search}`);
       }
       const etag = AGGREGATE_ETAGS[state.revisionIndex];
       if (request.headers()['if-none-match'] === `"${etag}"`) {
@@ -595,7 +693,10 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 async function expectDreamAgentConversationLayout(page: Page) {
-  const metrics = await page.getByRole('dialog', { name: 'Dream Agent' }).evaluate((dialog) => {
+  const dialog = page.getByRole('dialog', { name: 'Dream Agent' });
+  await dialog.locator('[data-chat-scroll-region="messages"]')
+    .waitFor({ state: 'visible' });
+  const metrics = await dialog.evaluate((dialog) => {
     const header = dialog.querySelector<HTMLElement>('.story-workspace-dream-agent-dialog__header');
     const thread = dialog.querySelector<HTMLElement>('.story-workspace-dream-agent-dialog__thread-chat');
     const messageScroller = dialog.querySelector<HTMLElement>('[data-chat-scroll-region="messages"]');
@@ -660,7 +761,7 @@ async function selectShotWithKeyboard(page: Page) {
   return shot;
 }
 
-test('keeps an unbound first Episode read-only while automatic publication and binding finish', async ({
+test('keeps an empty Episode index read-only while automatic publication and binding finish', async ({
   page,
 }) => {
   const diagnostics: string[] = [];
@@ -703,14 +804,10 @@ test('keeps an unbound first Episode read-only while automatic publication and b
   let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
   await agentDialog.getByRole('button', { name: '同步', exact: true }).click();
   await agentDialog.getByRole('button', { name: '收起 Dream Agent' }).click();
-  await expect(page.getByRole('heading', { name: '尚未构建 Episode 产物关联' })).toBeVisible();
-  await expect(page.getByRole('status').filter({
-    hasText: '关联状态：等待主 Agent 成功构建并自动发布',
-  })).toBeVisible();
-  await expect(page.locator(
-    'main[aria-labelledby="story-workspace-episode-unbound-title"] > p',
-  ).last()).toContainText('无需手动构建');
+  await expect(page.getByRole('heading', { name: 'Episodes' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: '尚无 Episode' })).toBeVisible();
   await expect(page.getByRole('button', { name: '构建第一集产物关联' })).toHaveCount(0);
+  expect(state.artifactReads).toBe(0);
 
   await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
   agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
@@ -916,9 +1013,35 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await agentDialog.getByRole('button', { name: '收起 Dream Agent' }).click();
     await expect(dreamDraft).toHaveCount(0);
     await expect(artifactWorkbench).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Episodes' })).toBeVisible();
+    const ep01IndexEntry = page.getByRole('button', { name: /^EP01，/ });
+    const ep02IndexEntry = page.getByRole('button', { name: /^EP02，/ });
+    await expect(ep01IndexEntry).toBeVisible();
+    await expect(ep02IndexEntry).toBeVisible();
+    await expect(ep01IndexEntry).toContainText('6 项产物可查看');
+    await expect(ep02IndexEntry).toContainText('尚无可查看产物');
+    await page.screenshot({
+      path: resolve(EVIDENCE_DIR, 'episode-index-desktop-1440x1000.png'),
+    });
+    await ep02IndexEntry.click();
+    await expect(page).toHaveURL(new RegExp(`execution\\?episode=${EP02_ID}$`));
+    await expect(page.getByRole('heading', { name: 'EP02', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '雨夜归途', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Dream', exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: '故事线尚未生成' })).toBeVisible();
+    await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toHaveCount(0);
+    await expect(page.getByText('雨夜重逢', { exact: true })).toHaveCount(0);
+    await page.screenshot({
+      path: resolve(EVIDENCE_DIR, 'episode-ep02-empty-desktop-1440x1000.png'),
+    });
+    await page.getByRole('button', { name: '← 返回 Episode 索引' }).click();
+    await expect(page).toHaveURL(new RegExp(`/execution$`));
+    await expect(page.getByRole('heading', { name: 'Episodes' })).toBeVisible();
+    await expect(ep02IndexEntry).toBeFocused();
+    await ep01IndexEntry.click();
+    await expect(page).toHaveURL(new RegExp(`execution\\?episode=${EPISODE_ID}$`));
+    await expect(page.getByRole('heading', { name: 'EP01', exact: true }).first()).toBeVisible();
     await expect(page.getByRole('heading', { name: '雨夜重逢' }).first()).toBeVisible();
-    await expect(page.getByRole('status').filter({ hasText: 'EP01 产物关联：已关联' }))
-      .toBeVisible();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
     expect(await executionRoot.evaluate((root) => getComputedStyle(root).overflowY)).toBe('auto');
     const desktopScrollRange = await executionRoot.evaluate((root) => ({
@@ -1028,6 +1151,8 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await agentDialog.getByRole('button', { name: '收起 Dream Agent' }).click();
     await expect(agentDialog).toBeHidden();
     await expect(openAgent).toBeFocused();
+    await expect(page.getByRole('heading', { name: 'Episodes' })).toBeVisible();
+    await page.getByRole('button', { name: /^EP01，/ }).click();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
     await expect(artifactReader).toHaveCount(0);
     await selectShotWithKeyboard(page);

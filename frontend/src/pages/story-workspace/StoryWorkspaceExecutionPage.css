@@ -14,6 +14,7 @@
    in-place Outline focus surface with compact UI v2 Mimo stage cards. */
 /* [Sync] 2026-08-31: give the same guide surface standalone theme variables for
    its static Story Workspace route. */
+/* [Sync] 2026-09-02: align the Sync Episode index with Outline and style accessible return navigation. */
 
 .story-workspace-collaboration,
 .story-workspace-creation-guide-surface {
@@ -948,8 +949,9 @@
 .story-workspace-collaboration > section[aria-label="Episode 产物工作台"] {
   width: 100%;
   min-width: 0;
-  flex: 0 0 auto;
-  padding: 0 clamp(20px, 3.2vw, 48px) 48px;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 0;
 }
 
 .story-workspace-collaboration > section[aria-label="Episode 产物工作台"] > main {
@@ -958,12 +960,52 @@
   margin: 0 auto;
 }
 
+.story-workspace-collaboration > section[aria-label="Episode 产物工作台"] > main:not(.story-workspace-collaboration__overview-layer) {
+  padding: 0 clamp(20px, 3.2vw, 48px) 48px;
+}
+
+.story-workspace-collaboration__episode-back {
+  width: max-content;
+  padding: 0 0 4px;
+  color: var(--collaboration-action);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.story-workspace-collaboration > section[aria-label="Episode 产物工作台"] > main:not(.story-workspace-collaboration__overview-layer) > header {
+  padding: 30px 0 24px;
+  border-bottom: 1px solid color-mix(in srgb, var(--collaboration-rule) 82%, transparent);
+}
+
+.story-workspace-collaboration > section[aria-label="Episode 产物工作台"] > main:not(.story-workspace-collaboration__overview-layer) > header > h2 {
+  margin: 14px 0 6px;
+  color: var(--collaboration-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(28px, 3vw, 42px);
+  font-weight: 500;
+  letter-spacing: -.035em;
+}
+
+.story-workspace-collaboration > section[aria-label="Episode 产物工作台"] > main:not(.story-workspace-collaboration__overview-layer) > header > p {
+  margin: 7px 0 0;
+  color: var(--collaboration-muted);
+  font-size: 11px;
+}
+
 .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 13px 32px;
   padding: 30px 0 24px;
   border-bottom: 1px solid color-mix(in srgb, var(--collaboration-rule) 82%, transparent);
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > .story-workspace-collaboration__episode-back {
+  grid-column: 1 / -1;
 }
 
 .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > p,

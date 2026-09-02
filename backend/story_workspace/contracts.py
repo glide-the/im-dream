@@ -2,7 +2,8 @@
 # [Output] Strict persistence and wire DTOs, including separate Project and
 #          Episode presentation contracts.
 # [Pos] Pure domain contract module; no runtime, database, or transport owner.
-# [Sync] 2026-08-14: constrain Dream re-entry to initial/in-progress outcome states.
+# [Sync] 2026-09-02: add the actor-scoped Episode index read model used by
+#                    index-first Execution navigation.
 
 """Canonical contracts for the Story Workspace domain.
 
@@ -1645,6 +1646,65 @@ class StoryWorkspaceEpisodeArtifactDocument(_StoryWorkspaceDreamWireModel):
         ):
             raise ValueError("artifact Markdown cannot contain control characters")
         return value
+
+
+class StoryWorkspaceEpisodeIndexItem(_StoryWorkspaceDreamWireModel):
+    """One registry-owned Episode summary without canonical document bodies."""
+
+    opaque_episode_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    episode_code: str = Field(pattern=r"^EP[0-9]{2}$")
+    active: StrictBool
+    available_artifact_count: _StoryWorkspaceDreamNonNegativeInt = Field(le=6)
+    has_artifact_issues: StrictBool
+    updated_at: Optional[datetime] = None
+
+    @field_validator("updated_at")
+    @classmethod
+    def updated_at_is_utc(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+
+class StoryWorkspaceEpisodeIndexSurface(_StoryWorkspaceDreamWireModel):
+    """Actor-scoped registry index plus bounded artifact availability facts."""
+
+    run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    registry_revision: _StoryWorkspaceDreamNonNegativeInt
+    active_episode_id: Optional[str] = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{32}$",
+    )
+    etag: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    episodes: list[StoryWorkspaceEpisodeIndexItem] = Field(
+        max_length=99,
+    )
+
+    @model_validator(mode="after")
+    def index_identity_is_unique_and_contiguous(
+        self,
+    ) -> "StoryWorkspaceEpisodeIndexSurface":
+        episode_ids = [episode.opaque_episode_id for episode in self.episodes]
+        if len(episode_ids) != len(set(episode_ids)):
+            raise ValueError("Episode index identities must be unique")
+        if not self.episodes:
+            if self.registry_revision != 0 or self.active_episode_id is not None:
+                raise ValueError("empty Episode indexes cannot expose registry identity")
+            return self
+        if self.registry_revision < 1 or self.active_episode_id is None:
+            raise ValueError("bound Episode indexes require registry identity")
+        for number, episode in enumerate(self.episodes, start=1):
+            if episode.episode_code != f"EP{number:02d}":
+                raise ValueError("Episode index codes must remain contiguous")
+        active = [episode for episode in self.episodes if episode.active]
+        if (
+            len(active) != 1
+            or active[0].opaque_episode_id != self.active_episode_id
+        ):
+            raise ValueError("Episode index must expose one matching active Episode")
+        return self
 
 
 class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):

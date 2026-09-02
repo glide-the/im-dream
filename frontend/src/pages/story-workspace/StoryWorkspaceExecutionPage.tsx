@@ -1,12 +1,11 @@
-// [Input] Confirmed run identity, `.dream` projections, authoritative Project
-//         Story index, and Episode artifact surface.
-// [Output] Current Project title and revision-stable Episode workbench with the
-//          shared Dream Agent thread.
+// [Input] Confirmed Run, `.dream` projections, registry Episode index, and one
+//         explicitly selected Episode artifact surface.
+// [Output] Outline-aligned Episode index plus Run+Episode-isolated workbench and return navigation.
 // [Pos] /story-workspace/runs/:storyWorkspaceRunId/execution (Task 3 U11)
 // [Sync] 2026-08-06: compose Episode artifacts without changing their REST ownership.
-// [Sync] 2026-08-13: describe an unbound EP01 as a pending artifact-association
+// [Sync] 2026-08-13: describe an unbound Episode as a pending artifact-association
 //                    build, reserving trust language for server identity checks.
-// [Sync] 2026-08-13: keep EP01 association state read-only; confirmed turns
+// [Sync] 2026-08-13: keep Episode association state read-only; confirmed turns
 //                    publish and bind automatically without a manual UI action.
 // [Sync] 2026-08-13: render canonical Project title separately from Episode title.
 // [Sync] 2026-08-13: hand the dialog's bound Dream thread to canonical Chat.
@@ -25,6 +24,7 @@
 // [Sync] 2026-08-31: add a three-stage creation guide trigger to the Outline
 //                    header and open it through the same in-place focus navigation.
 // [Sync] 2026-08-31: keep the Outline guide local while Dream uses its static route.
+// [Sync] 2026-09-02: make Sync index-first, route selection by Episode UID, and remove storyboard-title ambiguity.
 
 import {
   useCallback,
@@ -34,6 +34,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
   type RefObject,
 } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -53,8 +54,10 @@ import type {
   StoryWorkspaceEpisodeAssociationCoverage,
   StoryWorkspaceEpisodeArtifactAvailability,
   StoryWorkspaceEpisodeArtifactSurface,
+  StoryWorkspaceEpisodeIndexItem,
 } from '../../hooks/story-workspace/contracts';
 import { useStoryWorkspaceEpisodeArtifacts } from '../../hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts';
+import { useStoryWorkspaceEpisodeIndex } from '../../hooks/story-workspace/useStoryWorkspaceEpisodeIndex';
 import {
   StoryWorkspaceDreamAgentDialog,
   type StoryWorkspaceExecutionView,
@@ -75,6 +78,7 @@ import {
   StoryWorkspaceCreationGuide,
 } from '../../components/story-workspace/StoryWorkspaceCreationGuide';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
+import { storyWorkspaceExecutionEpisodePath } from '../../router/storyWorkspacePath';
 import {
   storyWorkspaceBuildEpisodeExecutionViewModel,
   storyWorkspaceEpisodeNavigationItems,
@@ -339,6 +343,77 @@ function focusListItem(
   list?.querySelectorAll<HTMLButtonElement>(':scope > li > button')[nextIndex]?.focus();
 }
 
+interface StoryWorkspaceManuscriptItem {
+  readonly key: string;
+  readonly ordinal: string;
+  readonly eyebrow: string;
+  readonly title: string;
+  readonly description: string;
+  readonly accessibleName?: string;
+  readonly dataEpisodeId?: string;
+}
+
+function StoryWorkspaceManuscriptIndex({
+  items,
+  onSelect,
+  empty,
+}: {
+  readonly items: readonly StoryWorkspaceManuscriptItem[];
+  readonly onSelect: (item: StoryWorkspaceManuscriptItem) => void;
+  readonly empty: ReactNode;
+}) {
+  if (items.length === 0) return <>{empty}</>;
+  return (
+    <ol className="story-workspace-collaboration__manuscript">
+      {items.map((item, index) => (
+        <li key={item.key}>
+          <button
+            aria-label={item.accessibleName}
+            data-episode-id={item.dataEpisodeId}
+            onClick={() => onSelect(item)}
+            onKeyDown={(event) => focusListItem(event, index, items.length)}
+            type="button"
+          >
+            <span>{item.ordinal}</span>
+            <span>
+              <small>{item.eyebrow}</small>
+              <strong>{item.title}</strong>
+              <p>{item.description}</p>
+            </span>
+            <b aria-hidden="true">→</b>
+          </button>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function storyWorkspaceEpisodeIndexStatus(
+  episode: StoryWorkspaceEpisodeIndexItem,
+  runIsComplete: boolean,
+): string {
+  if (episode.hasArtifactIssues) return '读取失败';
+  if (episode.active && !runIsComplete) return '执行中';
+  if (episode.availableArtifactCount > 0) return '已有产物';
+  return '暂无产物';
+}
+
+function storyWorkspaceEpisodeIndexDescription(
+  episode: StoryWorkspaceEpisodeIndexItem,
+): string {
+  const availability = episode.availableArtifactCount > 0
+    ? `${episode.availableArtifactCount} 项产物可查看`
+    : '尚无可查看产物';
+  if (episode.updatedAt === null) return availability;
+  const updated = new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(episode.updatedAt));
+  return `${availability} · 更新于 ${updated}`;
+}
+
 function EmptyWorkspaceModule({ module }: { module: ExecutionModule }) {
   return (
     <div className="story-workspace-collaboration__empty" role="status">
@@ -367,6 +442,8 @@ export function StoryWorkspaceExecutionPage({
     useState<ReadonlySet<string>>(() => new Set());
   const agentPreviewTriggerRef = useRef<HTMLButtonElement>(null);
   const episodeArtifactReaderRef = useRef<HTMLDivElement>(null);
+  const episodeIndexRef = useRef<HTMLElement>(null);
+  const pendingEpisodeIndexFocusRef = useRef<string | null>(null);
   const { run, selectRun } = useWorkflowRun({ eventsEnabled: true });
   const currentRun = run?.workflow_run_id === runId ? run : null;
   const dreamRuns = useStoryWorkspaceDreamRuns();
@@ -398,10 +475,27 @@ export function StoryWorkspaceExecutionPage({
   });
   const canQueryEpisode = files.data !== null
     && storyWorkspaceCanAccessExecution(files.data);
-  const episodeArtifacts = useStoryWorkspaceEpisodeArtifacts(
+  const episodeIndex = useStoryWorkspaceEpisodeIndex(
     canQueryEpisode ? runId : null,
   );
-  const storyIndex = useStoryWorkspaceStoryIndex(runId, { enabled: canQueryEpisode });
+  const selectedEpisode = useMemo(
+    () => episodeId === null || episodeId === undefined
+      ? null
+      : episodeIndex.data?.episodes.find((episode) => (
+        episode.opaqueEpisodeId === episodeId
+      )) ?? null,
+    [episodeId, episodeIndex.data],
+  );
+  const artifactEpisodeId = workspaceView === 'sync'
+    ? selectedEpisode?.opaqueEpisodeId ?? null
+    : episodeIndex.data?.activeEpisodeId ?? null;
+  const episodeArtifacts = useStoryWorkspaceEpisodeArtifacts(
+    canQueryEpisode ? runId : null,
+    artifactEpisodeId,
+  );
+  const storyIndex = useStoryWorkspaceStoryIndex(runId, {
+    enabled: canQueryEpisode,
+  });
   const refreshEpisodeArtifacts = episodeArtifacts.refresh;
   const retryStoryIndex = useCallback(async () => {
     try {
@@ -426,7 +520,10 @@ export function StoryWorkspaceExecutionPage({
     onSelection: setEpisodeSelection,
     selection: episodeSelection,
     workbenchRef: episodeWorkbenchRef,
-  } = useStoryWorkspaceEpisodeRevisionSelection(runId, episodeViewModel);
+  } = useStoryWorkspaceEpisodeRevisionSelection(
+    `${runId}:${artifactEpisodeId ?? 'index'}`,
+    episodeViewModel,
+  );
 
   const locateEpisodeReviewTarget = useCallback((
     selection: StoryWorkspaceEpisodeReviewLocateSelection,
@@ -500,6 +597,25 @@ export function StoryWorkspaceExecutionPage({
     setEpisodeExpandedKeys(new Set());
   }, [runId]);
 
+  useEffect(() => {
+    if (episodeId) setWorkspaceView('sync');
+  }, [episodeId]);
+
+  useLayoutEffect(() => {
+    if (episodeId !== null && episodeId !== undefined) return;
+    const pendingEpisodeId = pendingEpisodeIndexFocusRef.current;
+    if (pendingEpisodeId === null) return;
+    const frame = window.requestAnimationFrame(() => {
+      const button = episodeIndexRef.current?.querySelector<HTMLButtonElement>(
+        `[data-episode-id="${pendingEpisodeId}"]`,
+      );
+      if (button === undefined || button === null) return;
+      pendingEpisodeIndexFocusRef.current = null;
+      button.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [episodeId, episodeIndex.data]);
+
   const handleEpisodeArtifactRead = useCallback((
     artifact: StoryWorkspaceEpisodeReadableArtifact,
   ) => {
@@ -509,7 +625,8 @@ export function StoryWorkspaceExecutionPage({
     setFocusKey(episodeDraftEntry.key);
     setFocusedArtifact(artifact);
     setPendingArtifactReaderFocus(artifact);
-  }, [episodeDraftEntry]);
+    navigate(storyWorkspaceExecutionEpisodePath(runId));
+  }, [episodeDraftEntry, navigate, runId]);
   const episodeArtifactReadAction = episodeSurface?.bindingAvailability === 'bound'
     && episodeDraftEntry !== null
     ? handleEpisodeArtifactRead
@@ -674,6 +791,43 @@ export function StoryWorkspaceExecutionPage({
   } else if (episodeSelection?.kind === 'shot') {
     currentReviewSelection = { kind: 'shot', id: episodeSelection.id };
   }
+  const episodeIndexItems: readonly StoryWorkspaceManuscriptItem[] = (
+    episodeIndex.data?.episodes ?? []
+  ).map((episode) => {
+    const status = storyWorkspaceEpisodeIndexStatus(
+      episode,
+      currentRun?.status === 'completed',
+    );
+    const description = storyWorkspaceEpisodeIndexDescription(episode);
+    return {
+      key: episode.opaqueEpisodeId,
+      ordinal: episode.episodeCode.slice(2),
+      eyebrow: `Episode · ${status}`,
+      title: episode.episodeCode,
+      description,
+      accessibleName: `${episode.episodeCode}，${status}，${description}`,
+      dataEpisodeId: episode.opaqueEpisodeId,
+    };
+  });
+  const openEpisode = (item: StoryWorkspaceManuscriptItem) => {
+    setWorkspaceView('sync');
+    navigate(storyWorkspaceExecutionEpisodePath(runId, item.key));
+  };
+  const returnToEpisodeIndex = () => {
+    if (selectedEpisode !== null) {
+      pendingEpisodeIndexFocusRef.current = selectedEpisode.opaqueEpisodeId;
+    }
+    navigate(storyWorkspaceExecutionEpisodePath(runId));
+  };
+  const episodeReturnButton = (
+    <button
+      className="story-workspace-collaboration__episode-back"
+      onClick={returnToEpisodeIndex}
+      type="button"
+    >
+      ← 返回 Episode 索引
+    </button>
+  );
 
   return (
     <section
@@ -849,33 +1003,21 @@ export function StoryWorkspaceExecutionPage({
                 id="story-workspace-execution-index"
                 role="tabpanel"
               >
-                {visibleEntries.length > 0 ? (
-                  <ol className="story-workspace-collaboration__manuscript">
-                  {visibleEntries.map((entry, index) => (
-                    <li key={entry.key}>
-                      <button
-                        onClick={() => setFocusKey(entry.key)}
-                        onKeyDown={(event) => focusListItem(event, index, visibleEntries.length)}
-                        type="button"
-                      >
-                        <span>{String(index + 1).padStart(2, '0')}</span>
-                        <span>
-                          <small>{entry.stageLabel} · r{entry.revision}</small>
-                          <strong>{entry.title}</strong>
-                          <p>{entry.stage === 'storyboards'
-                            ? entry.key === episodeDraftEntry?.key && storyboardShots.length > 0
-                              ? `${storyboardShots.length} 镜、${storyboardDurationSeconds} 秒。`
-                              : '分镜概览尚未生成。'
-                            : entry.summary || '等待 Agent 补充主要信息。'}</p>
-                        </span>
-                        <b aria-hidden="true">→</b>
-                      </button>
-                    </li>
-                  ))}
-                  </ol>
-                ) : (
-                  <EmptyWorkspaceModule module={activeModule} />
-                )}
+                <StoryWorkspaceManuscriptIndex
+                  empty={<EmptyWorkspaceModule module={activeModule} />}
+                  items={visibleEntries.map((entry, index) => ({
+                    key: entry.key,
+                    ordinal: String(index + 1).padStart(2, '0'),
+                    eyebrow: `${entry.stageLabel} · r${entry.revision}`,
+                    title: entry.title,
+                    description: entry.stage === 'storyboards'
+                      ? entry.key === episodeDraftEntry?.key && storyboardShots.length > 0
+                        ? `${storyboardShots.length} 镜、${storyboardDurationSeconds} 秒。`
+                        : '分镜概览尚未生成。'
+                      : entry.summary || '等待 Agent 补充主要信息。',
+                  }))}
+                  onSelect={(item) => setFocusKey(item.key)}
+                />
               </section>
 
             </div>
@@ -886,43 +1028,103 @@ export function StoryWorkspaceExecutionPage({
       )}
       {workspaceView === 'sync' && (
       <section aria-label="Episode 产物工作台" id="story-workspace-sync-surface">
-        {episodeSurface === null ? (
-          <div role="status">
-            {episodeArtifacts.diagnostic !== null ? (
-              <p>Episode 产物来源无效，暂无法读取。</p>
-            ) : episodeArtifacts.error !== null ? (
-              <p>Episode 产物尚未同步，页面会继续读取。</p>
-            ) : (
-              <p>正在读取 Episode 产物…</p>
-            )}
-          </div>
+        {episodeId === null || episodeId === undefined ? (
+          <main
+            aria-labelledby="story-workspace-episode-index-title"
+            className="story-workspace-collaboration__overview-layer"
+            ref={episodeIndexRef}
+          >
+            <div className="story-workspace-collaboration__overview">
+              <header>
+                <p>Sync · Episode index</p>
+                <h2 id="story-workspace-episode-index-title">Episodes</h2>
+                <span>选择一个 Episode 查看对应状态与产物。</span>
+              </header>
+              <section aria-label="Episode 索引">
+                {episodeIndex.data !== null ? (
+                  <StoryWorkspaceManuscriptIndex
+                    empty={(
+                      <div className="story-workspace-collaboration__empty" role="status">
+                        <span aria-hidden="true" />
+                        <p>尚无 Episode</p>
+                        <small>Agent 创建首个 Episode 后会在这里显示。</small>
+                      </div>
+                    )}
+                    items={episodeIndexItems}
+                    onSelect={openEpisode}
+                  />
+                ) : (
+                  <div className="story-workspace-collaboration__empty" role="status">
+                    <span aria-hidden="true" />
+                    <p>{episodeIndex.error !== null
+                      ? 'Episode 索引加载失败'
+                      : '正在读取 Episode 索引…'}</p>
+                    <small>{episodeIndex.error !== null
+                      ? '页面会继续读取；也可稍后重试。'
+                      : '正在获取当前任务中的 Episode。'}</small>
+                    {episodeIndex.error !== null && (
+                      <button onClick={episodeIndex.refresh} type="button">重试</button>
+                    )}
+                  </div>
+                )}
+              </section>
+            </div>
+          </main>
+        ) : episodeIndex.data !== null && selectedEpisode === null ? (
+          <main aria-labelledby="story-workspace-episode-invalid-title">
+            <header>
+              {episodeReturnButton}
+              <h2 id="story-workspace-episode-invalid-title">Episode 不存在或已失效</h2>
+              <p role="status">当前链接不属于这个任务，请返回 Episode 索引重新选择。</p>
+            </header>
+          </main>
+        ) : episodeSurface === null ? (
+          <main aria-labelledby="story-workspace-episode-loading-title">
+            <header>
+              {episodeReturnButton}
+              <h2 id="story-workspace-episode-loading-title">
+                {selectedEpisode?.episodeCode ?? 'Episode'}
+              </h2>
+              <p role="status">
+                {episodeIndex.error !== null ? 'Episode 索引加载失败，页面会继续读取。'
+                  : episodeArtifacts.diagnostic !== null ? 'Episode 产物来源无效，暂无法读取。'
+                    : episodeArtifacts.error !== null ? 'Episode 产物尚未同步，页面会继续读取。'
+                      : '正在读取 Episode 产物…'}
+              </p>
+            </header>
+          </main>
         ) : episodeSurface.bindingAvailability === 'unbound' ? (
           <main aria-labelledby="story-workspace-episode-unbound-title">
-            <h2 id="story-workspace-episode-unbound-title">尚未构建 Episode 产物关联</h2>
-            <p role="status">关联状态：等待主 Agent 成功构建并自动发布</p>
-            <p>
-              确认后的 Dream Agent 成功生成并通过服务端校验后，系统会自动发布产物、
-              构建关联并由页面读取更新，无需手动构建。
-            </p>
+            <header>
+              {episodeReturnButton}
+              <h2 id="story-workspace-episode-unbound-title">
+                {selectedEpisode?.episodeCode ?? 'Episode'}
+              </h2>
+              <p role="status">暂无产物</p>
+            </header>
           </main>
         ) : (
           <main aria-labelledby="story-workspace-episode-title">
             <header>
-              <p>{episodeSurface.episodeCode} · Episode execution</p>
+              {episodeReturnButton}
               <h2 id="story-workspace-episode-title">
-                {episodeSurface.narrative?.overview.title
-                  ?? `${episodeSurface.episodeCode} 产物`}
+                {episodeSurface.episodeCode}
               </h2>
-              <p role="status">{episodeSurface.episodeCode} 产物关联：已关联</p>
-              <StoryWorkspaceStoryIndexStatus
-                error={storyIndex.error}
-                fileStatus={storyIndexFileStatus}
-                isLoading={storyIndex.isLoading}
-                isSyncing={storyIndex.isReconciling}
-                onRefresh={storyIndex.refresh}
-                onRetry={() => { void retryStoryIndex(); }}
-                projection={storyIndex.data}
-              />
+              {episodeSurface.narrative?.overview.title && (
+                <p>{episodeSurface.narrative.overview.title}</p>
+              )}
+              <p role="status">{selectedEpisode?.availableArtifactCount ?? 0} 项产物可查看</p>
+              {artifactEpisodeId === episodeIndex.data?.activeEpisodeId && (
+                <StoryWorkspaceStoryIndexStatus
+                  error={storyIndex.error}
+                  fileStatus={storyIndexFileStatus}
+                  isLoading={storyIndex.isLoading}
+                  isSyncing={storyIndex.isReconciling}
+                  onRefresh={storyIndex.refresh}
+                  onRetry={() => { void retryStoryIndex(); }}
+                  projection={storyIndex.data}
+                />
+              )}
               {episodeArtifacts.isLoading && (
                 <p aria-live="polite">正在检查新的 artifact revision…</p>
               )}
@@ -1036,6 +1238,7 @@ export function StoryWorkspaceExecutionPage({
           onOpenChatThread={onOpenChatThread}
           onWorkspaceViewChange={setWorkspaceView}
           onSettled={() => {
+            episodeIndex.refresh();
             refreshEpisodeArtifacts();
             storyIndex.refresh();
           }}

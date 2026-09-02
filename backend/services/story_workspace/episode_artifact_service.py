@@ -1,3 +1,8 @@
+# [Input] Actor-authorized Run Episode authority, registry identity, and canonical allowlisted artifact roots.
+# [Output] Pinned per-Episode artifact surfaces plus body-free Episode index availability summaries.
+# [Pos] Story Workspace Episode artifact read boundary; it never mutates registry or canonical content.
+# [Sync] 2026-09-02: add registry-index projection while preserving explicit per-Episode reads.
+
 """Pinned, allowlisted Episode artifact reader and aggregate surface builder."""
 
 from __future__ import annotations
@@ -44,6 +49,8 @@ try:
         StoryWorkspaceEpisodeArtifactSurface,
         StoryWorkspaceEpisodeBindingAvailability,
         StoryWorkspaceEpisodeBindingFile,
+        StoryWorkspaceEpisodeIndexItem,
+        StoryWorkspaceEpisodeIndexSurface,
         StoryWorkspaceEpisodeRegistryFile,
         StoryWorkspaceEpisodeProducerAction,
         StoryWorkspaceEpisodeReviewScope,
@@ -77,6 +84,8 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceEpisodeArtifactSurface,
         StoryWorkspaceEpisodeBindingAvailability,
         StoryWorkspaceEpisodeBindingFile,
+        StoryWorkspaceEpisodeIndexItem,
+        StoryWorkspaceEpisodeIndexSurface,
         StoryWorkspaceEpisodeRegistryFile,
         StoryWorkspaceEpisodeProducerAction,
         StoryWorkspaceEpisodeReviewScope,
@@ -863,6 +872,139 @@ class StoryWorkspaceEpisodeArtifactService:
         return StoryWorkspaceEpisodeArtifactSurface(
             runId=workflow_run_id,
             bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
+        )
+
+    @staticmethod
+    def unbound_index(
+        workflow_run_id: str,
+    ) -> StoryWorkspaceEpisodeIndexSurface:
+        encoded = json.dumps(
+            [workflow_run_id, 0, None, []],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return StoryWorkspaceEpisodeIndexSurface(
+            runId=workflow_run_id,
+            registryRevision=0,
+            activeEpisodeId=None,
+            etag="sha256:" + hashlib.sha256(encoded).hexdigest(),
+            episodes=[],
+        )
+
+    def read_index(
+        self,
+        workflow_run_id: str,
+        *,
+        episode_authority: object,
+        registry: StoryWorkspaceEpisodeRegistryFile,
+    ) -> StoryWorkspaceEpisodeIndexSurface:
+        """Return registry identity plus body-free allowlisted artifact facts."""
+
+        if _RUN_ID_RE.fullmatch(workflow_run_id) is None:
+            raise StoryWorkspaceEpisodeArtifactContractError(
+                "workflow run identity is invalid"
+            )
+        authority = StoryWorkspaceEpisodeAuthority.parse(
+            episode_authority,
+            expected_run_id=workflow_run_id,
+        )
+        if authority is None:
+            raise StoryWorkspaceEpisodeArtifactContractError(
+                "Episode launch authority is unavailable"
+            )
+        if (
+            registry.workflow_run_id != workflow_run_id
+            or registry.story_slug != authority.story_slug
+            or not any(
+                item.episode_uid == authority.episode_uid
+                for item in registry.episodes
+            )
+        ):
+            raise StoryWorkspaceEpisodeArtifactContractError(
+                "Episode registry does not match launch authority"
+            )
+
+        items: list[StoryWorkspaceEpisodeIndexItem] = []
+        etag_items: list[list[object]] = []
+        for episode in registry.episodes:
+            binding = self._read_existing_binding(
+                workflow_run_id,
+                episode.episode_uid,
+            )
+            if (
+                binding is None
+                or binding.story_slug != registry.story_slug
+                or binding.episode_code != episode.episode_code
+                or binding.episode_root != episode.episode_root
+            ):
+                raise StoryWorkspaceEpisodeArtifactContractError(
+                    "Episode registry member cannot be resolved"
+                )
+            reads = self._read_bound_episode(binding)
+            facts = self._raw_manifest_facts(reads, reads.invalid_revisions)
+            available_count = sum(
+                availability
+                == StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE.value
+                for availability, _revision in facts.values()
+            )
+            has_issues = any(
+                availability in {
+                    StoryWorkspaceEpisodeArtifactAvailability.INVALID.value,
+                    StoryWorkspaceEpisodeArtifactAvailability.UNAVAILABLE.value,
+                }
+                for availability, _revision in facts.values()
+            )
+            observed = [
+                value.mtime
+                for value in (
+                    reads.outline,
+                    reads.script,
+                    reads.storyboard,
+                    reads.prompts,
+                    reads.renders,
+                    reads.review,
+                )
+                if value is not None and value.mtime is not None
+            ]
+            updated_at = max(observed) if observed else None
+            items.append(
+                StoryWorkspaceEpisodeIndexItem(
+                    opaqueEpisodeId=episode.episode_uid,
+                    episodeCode=episode.episode_code,
+                    active=episode.episode_uid == registry.active_episode_uid,
+                    availableArtifactCount=available_count,
+                    hasArtifactIssues=has_issues,
+                    updatedAt=updated_at,
+                )
+            )
+            etag_items.append(
+                [
+                    episode.episode_uid,
+                    episode.episode_code,
+                    [
+                        [key, availability, revision]
+                        for key, (availability, revision) in sorted(facts.items())
+                    ],
+                ]
+            )
+        etag_payload = json.dumps(
+            [
+                workflow_run_id,
+                registry.revision,
+                registry.active_episode_uid,
+                etag_items,
+            ],
+            ensure_ascii=True,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        etag = "sha256:" + hashlib.sha256(etag_payload).hexdigest()
+        return StoryWorkspaceEpisodeIndexSurface(
+            runId=workflow_run_id,
+            registryRevision=registry.revision,
+            activeEpisodeId=registry.active_episode_uid,
+            etag=etag,
+            episodes=items,
         )
 
     def read_surface(

@@ -4,8 +4,7 @@
 # [Sync] 2026-09-01: cover allowlisted project-slug repair and fail-closed launch authority.
 # [Sync] 2026-09-01: cover pre-write rejection of duplicate canonical roots
 #                    and duplicate stage entity identities.
-# [Sync] 2026-09-01: cover fresh launch-authority resolution of the exact stale
-#                    project roots granted to an automatic repair Turn.
+# [Sync] 2026-09-02: cover changed/preexisting EP02 registry activation and Episode-only titles.
 
 """Automatic root-turn workbench synchronization contract."""
 
@@ -34,6 +33,10 @@ from services.story_workspace.dream_artifact_turn_hook import (
 from services.story_workspace.dream_file_service import StoryWorkspaceDreamFileReader
 from services.story_workspace.episode_artifact_service import (
     StoryWorkspaceEpisodeAuthority,
+)
+from services.story_workspace.episode_binding_service import (
+    StoryWorkspaceEpisodeBindingContext,
+    StoryWorkspaceEpisodeBindingService,
 )
 from story_workspace.contracts import (
     StoryWorkspaceDreamRunContext,
@@ -213,7 +216,7 @@ shots:
             ),
             self.assertRaises(DreamArtifactTurnHookError) as raised,
         ):
-            hook._ensure_first_episode_binding(
+            hook._synchronize_episode_registry(
                 ticket,
                 launched_run(),
                 private_files={
@@ -235,6 +238,115 @@ shots:
         )
         self.assertEqual(error.issue.expected, "server-project")
         self.assertEqual(error.issue.actual, "demo-project")
+
+    def test_successful_ep02_change_extends_registry_and_activates_ep02(self) -> None:
+        hook = DreamArtifactTurnHook()
+        ticket = hook.before_main_turn(
+            context=context(),
+            actor_id="actor-1",
+            cwd=str(self.workspace),
+        )
+        binding_service = StoryWorkspaceEpisodeBindingService(self.workspace)
+        binding_context = StoryWorkspaceEpisodeBindingContext(
+            workflow_run_id=RUN_ID,
+            trusted_project_story_slug="demo-project",
+            locked_context_story_slug="demo-project",
+            run_provenance_story_slug="demo-project",
+            episode_uid="5" * 32,
+        )
+        binding_service.bind_first_episode(binding_context)
+        metadata = launch_metadata()
+        metadata["story_workspace_episode_identity"] = {
+            "schema": "story-workspace-episode-authority/v1",
+            "workflow_run_id": RUN_ID,
+            "episode_uid": "5" * 32,
+            "story_slug": "demo-project",
+            "episode_code": "EP01",
+        }
+        ep02 = self.workspace / "stories" / "demo-project" / "episodes" / "EP02"
+        ep02.mkdir()
+        (ep02 / "script.md").write_text(
+            "# EP02 剧本\n\n只属于 EP02 的内容。\n",
+            encoding="utf-8",
+        )
+        private_files = hook._collect_private_artifact_files(ticket.workspace_root)
+        db = MagicMock()
+        db.in_transaction = False
+        db.execute.return_value.fetchone.return_value = {
+            "metadata": json.dumps(metadata),
+        }
+
+        with patch(
+            "services.story_workspace.dream_artifact_turn_hook.database.get_db",
+            return_value=db,
+        ):
+            authority = hook._synchronize_episode_registry(
+                ticket,
+                launched_run(),
+                private_files=private_files,
+            )
+
+        registry = binding_service.read_episode_registry(binding_context)
+        self.assertIsNotNone(authority)
+        self.assertEqual(authority.episode_code, "EP02")
+        self.assertEqual([item.episode_code for item in registry.episodes], ["EP01", "EP02"])
+        self.assertEqual(registry.active_episode_uid, authority.episode_uid)
+
+    def test_single_preexisting_unregistered_ep02_becomes_active(self) -> None:
+        binding_service = StoryWorkspaceEpisodeBindingService(self.workspace)
+        binding_context = StoryWorkspaceEpisodeBindingContext(
+            workflow_run_id=RUN_ID,
+            trusted_project_story_slug="demo-project",
+            locked_context_story_slug="demo-project",
+            run_provenance_story_slug="demo-project",
+            episode_uid="5" * 32,
+        )
+        first = binding_service.bind_first_episode(binding_context)
+        ep02 = self.workspace / "stories" / "demo-project" / "episodes" / "EP02"
+        ep02.mkdir()
+        (ep02 / "script.md").write_text(
+            "# EP02 剧本\n\n本轮开始前已经存在的 EP02。\n",
+            encoding="utf-8",
+        )
+        hook = DreamArtifactTurnHook()
+        ticket = hook.before_main_turn(
+            context=context(),
+            actor_id="actor-1",
+            cwd=str(self.workspace),
+        )
+        metadata = launch_metadata()
+        metadata["story_workspace_episode_identity"] = {
+            "schema": "story-workspace-episode-authority/v1",
+            "workflow_run_id": RUN_ID,
+            "episode_uid": first.episode_uid,
+            "story_slug": "demo-project",
+            "episode_code": "EP01",
+        }
+        db = MagicMock()
+        db.in_transaction = False
+        db.execute.return_value.fetchone.return_value = {
+            "metadata": json.dumps(metadata),
+        }
+
+        with patch(
+            "services.story_workspace.dream_artifact_turn_hook.database.get_db",
+            return_value=db,
+        ):
+            authority = hook._synchronize_episode_registry(
+                ticket,
+                launched_run(),
+                private_files=hook._collect_private_artifact_files(
+                    ticket.workspace_root
+                ),
+            )
+
+        registry = binding_service.read_episode_registry(binding_context)
+        self.assertIsNotNone(authority)
+        self.assertEqual([item.episode_code for item in registry.episodes], ["EP01", "EP02"])
+        self.assertEqual(registry.revision, 3)
+        self.assertEqual(registry.episodes[0].episode_uid, first.episode_uid)
+        self.assertEqual(authority.episode_code, "EP02")
+        self.assertEqual(registry.active_episode_uid, authority.episode_uid)
 
     def test_launch_actor_thread_run_deck_and_plugin_authority_are_not_repairable(self) -> None:
         mutations = {
@@ -283,7 +395,7 @@ shots:
 
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
-            patch.object(hook, "_ensure_first_episode_binding") as bind,
+            patch.object(hook, "_synchronize_episode_registry") as bind,
             self.assertRaises(DreamArtifactTurnHookError) as raised,
         ):
             hook.after_main_turn(ticket)
@@ -438,7 +550,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
+            patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
             result = hook.after_main_turn(ticket)
 
@@ -458,6 +570,7 @@ shots:
         self.assertEqual(projection.stages["characters"].items[0].display_name, "林夏")
         self.assertEqual(projection.stages["scenes"].items[0].display_name, "雨夜车站")
         self.assertEqual(projection.stages["storyboards"].items[0].entity_id, "EP01")
+        self.assertEqual(projection.stages["storyboards"].items[0].display_name, "EP01")
 
         artifact = self.workspace / ".dream" / "runtime" / "runs" / RUN_ID / "artifact"
         private_episode = artifact / "stories" / "demo-project" / "episodes" / "EP01"
@@ -483,7 +596,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
+            patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
             first = hook.after_main_turn(ticket)
             second = hook.after_main_turn(ticket)
@@ -499,7 +612,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
+            patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
             third = hook.after_main_turn(ticket)
         self.assertEqual(third.changed_stages, ())
@@ -533,7 +646,7 @@ shots:
         patches = (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
+            patch.object(hook, "_synchronize_episode_registry", return_value=True),
         )
         with patches[0], patches[1], patches[2]:
             hook.after_main_turn(ticket)
@@ -543,7 +656,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
+            patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
             removed = hook.after_main_turn(ticket)
 
@@ -558,7 +671,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
+            patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
             rebuilt = hook.after_main_turn(ticket)
 
@@ -588,7 +701,7 @@ shots:
                 patch.object(hook, "_record_output_ready"),
                 patch.object(
                     hook,
-                    "_ensure_first_episode_binding",
+                    "_synchronize_episode_registry",
                     return_value=True,
                 ),
             ):
@@ -749,7 +862,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
+            patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
             hook.after_main_turn(ticket)
 
@@ -761,7 +874,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_ensure_first_episode_binding", return_value=True),
+            patch.object(hook, "_synchronize_episode_registry", return_value=True),
         ):
             result = hook.after_main_turn(ticket)
 
@@ -793,7 +906,7 @@ shots:
         with (
             patch.object(hook, "_load_authoritative_run", return_value=authoritative_run()),
             patch.object(hook, "_record_output_ready"),
-            patch.object(hook, "_ensure_first_episode_binding", return_value=True) as bind,
+            patch.object(hook, "_synchronize_episode_registry", return_value=True) as bind,
         ):
             result = hook.after_main_turn(ticket)
         bind.assert_called_once()

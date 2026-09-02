@@ -2,7 +2,7 @@
 // [Output] Assets / Outline indexes, Episode reader hosting, current artifact content, and focus navigation coverage.
 // [Pos] Story Workspace execution collaboration view-model test (Task 3 F5)
 // [Sync] 2026-08-14: remove update-feed assertions with the deleted view-model seam.
-// [Sync] 2026-08-31: cover canonical Episode-to-storyboard entry matching.
+// [Sync] 2026-09-02: cover canonical Episode container titles without storyboard suffixes.
 
 import { expect, test } from '@playwright/test';
 import type { StoryWorkspaceDreamFilesResponse } from '../../../hooks/story-workspace/contracts';
@@ -98,6 +98,27 @@ test('builds Assets and Outline from workspace files without approval states', (
     content: '# 林默\n\n身份：调查记者。\n\n动机：寻找真相。',
   });
   expect(Object.keys(workspace)).toEqual(['assets', 'outline']);
+});
+
+test('uses the canonical Episode code for a storyboard Episode container title', () => {
+  const value = files();
+  const storyboards = value.stages.storyboards;
+  if (!storyboards) throw new Error('storyboards fixture is required');
+  const workspace = storyWorkspaceBuildExecutionWorkspace({
+    ...value,
+    stages: {
+      ...value.stages,
+      storyboards: {
+        ...storyboards,
+        items: [{
+          ...storyboards.items[0],
+          entityId: 'EP01',
+          displayName: 'EP01 分镜',
+        }],
+      },
+    },
+  });
+  expect(workspace.outline[0].title).toBe('EP01');
 });
 
 test('focus neighbors stay inside the ordered Outline manuscript', () => {

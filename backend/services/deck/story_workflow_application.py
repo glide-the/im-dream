@@ -1,7 +1,8 @@
 # [Input] Authorized Story Workflow rows, Dream thread workspaces, and application commands.
 # [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
 # [Pos] Deck-domain Story Workflow application orchestration.
-# [Sync] 2026-08-26: classify only an absent re-entry Thread workspace as stale history.
+# [Sync] 2026-09-02: expose the registry Episode index and authorize explicit
+#                    registry-member artifact reads without changing active state.
 
 """Focused application services for Dream workflow business APIs."""
 
@@ -531,8 +532,9 @@ class _StoryWorkspaceApplicationSupport:
     def _episode_authority_from_registry(
         source_authority: StoryWorkspaceEpisodeAuthority,
         registry: Any,
+        selected_episode_id: str | None = None,
     ) -> StoryWorkspaceEpisodeAuthority:
-        """Derive the active Episode while keeping launch authority immutable."""
+        """Derive one registry member while keeping launch authority immutable."""
 
         if (
             getattr(registry, "workflow_run_id", None)
@@ -550,24 +552,28 @@ class _StoryWorkspaceApplicationSupport:
             raise StoryWorkspaceEpisodeBindingError(
                 "launch Episode is absent from the registry"
             )
-        active_uid = getattr(registry, "active_episode_uid", None)
-        active = next(
+        target_uid = (
+            selected_episode_id
+            if selected_episode_id is not None
+            else getattr(registry, "active_episode_uid", None)
+        )
+        selected = next(
             (
                 item
                 for item in entries
-                if getattr(item, "episode_uid", None) == active_uid
+                if getattr(item, "episode_uid", None) == target_uid
             ),
             None,
         )
-        if active is None:
+        if selected is None:
             raise StoryWorkspaceEpisodeBindingError(
-                "active Episode is absent from the registry"
+                "selected Episode is absent from the registry"
             )
         return StoryWorkspaceEpisodeAuthority(
             workflow_run_id=source_authority.workflow_run_id,
-            episode_uid=active.episode_uid,
+            episode_uid=selected.episode_uid,
             story_slug=source_authority.story_slug,
-            episode_code=active.episode_code,
+            episode_code=selected.episode_code,
         )
 
 
@@ -805,11 +811,27 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+        episode_id: str | None = None,
     ) -> Any:
-        """Project the bound Episode only after full run provenance authorization."""
+        """Project one registry Episode after full run provenance authorization."""
 
         return await asyncio.to_thread(
             self._get_episode_artifacts_sync,
+            workflow_run_id,
+            actor,
+            episode_id,
+        )
+
+    async def get_episode_index(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        """Project the body-free registry Episode index for Execution."""
+
+        return await asyncio.to_thread(
+            self._get_episode_index_sync,
             workflow_run_id,
             actor,
         )
@@ -982,12 +1004,31 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
         self,
         workflow_run_id: str,
         actor: dict[str, str],
+        episode_id: str | None = None,
     ) -> Any:
         """Keep authorization and pinned filesystem projection in one worker."""
 
         db = database.get_db()
         try:
             return self._get_episode_artifacts_from_db(
+                db,
+                workflow_run_id,
+                actor,
+                episode_id=episode_id,
+            )
+        finally:
+            db.close()
+
+    def _get_episode_index_sync(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+    ) -> Any:
+        """Keep index authorization and pinned filesystem reads in one worker."""
+
+        db = database.get_db()
+        try:
+            return self._get_episode_index_from_db(
                 db,
                 workflow_run_id,
                 actor,
@@ -1223,56 +1264,117 @@ class DreamArtifactApplicationService(_StoryWorkspaceApplicationSupport):
             db.close()
 
 
-    def _get_episode_artifacts_from_db(
+    def _authorized_episode_registry_context(
+        self,
+        db: Any,
+        workflow_run_id: str,
+        actor: dict[str, str],
+    ) -> tuple[Path, StoryWorkspaceEpisodeAuthority, Any] | None:
+        """Resolve one authorized workspace, launch authority, and registry."""
+
+        row = self._authorized_episode_row(
+            db,
+            workflow_run_id,
+            actor,
+        )
+        source_authority = self._episode_authority_from_source(
+            row,
+            workflow_run_id,
+        )
+        if source_authority is None:
+            return None
+        thread_id = str(row["thread_id"])
+        try:
+            workspace = self._thread_workspace(thread_id)
+        except ApiRouteError as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
+        binding_service = StoryWorkspaceEpisodeBindingService(workspace)
+        canonical_story_slug = binding_service.read_canonical_project_story_slug(
+            source_authority.story_slug
+        )
+        binding_context = StoryWorkspaceEpisodeBindingContext(
+            workflow_run_id=workflow_run_id,
+            trusted_project_story_slug=canonical_story_slug,
+            locked_context_story_slug=source_authority.story_slug,
+            run_provenance_story_slug=source_authority.story_slug,
+            episode_uid=source_authority.episode_uid,
+        )
+        registry = binding_service.read_episode_registry_read_only(binding_context)
+        return workspace, source_authority, registry
+
+    def _get_episode_index_from_db(
         self,
         db: Any,
         workflow_run_id: str,
         actor: dict[str, str],
     ) -> Any:
-        """Authorize all relational facts before probing the thread workspace."""
+        """Authorize the Run before projecting its body-free Episode index."""
 
         try:
-            row = self._authorized_episode_row(
+            context = self._authorized_episode_registry_context(
                 db,
                 workflow_run_id,
                 actor,
             )
-            source_authority = self._episode_authority_from_source(
-                row,
+            if context is None:
+                return StoryWorkspaceEpisodeArtifactService.unbound_index(
+                    workflow_run_id
+                )
+            workspace, source_authority, registry = context
+            return StoryWorkspaceEpisodeArtifactService(workspace).read_index(
                 workflow_run_id,
+                episode_authority=source_authority,
+                registry=registry,
             )
-            if source_authority is None:
+        except ApiRouteError:
+            raise
+        except StoryWorkspaceEpisodeArtifactPathError as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
+        except StoryWorkspaceEpisodeArtifactContractError as exc:
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
+        except StoryWorkspaceEpisodeArtifactError as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+        except StoryWorkspaceEpisodeBindingError as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
+        except PostgresError as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+
+    def _get_episode_artifacts_from_db(
+        self,
+        db: Any,
+        workflow_run_id: str,
+        actor: dict[str, str],
+        *,
+        episode_id: str | None = None,
+    ) -> Any:
+        """Authorize all relational facts before probing one registry Episode."""
+
+        try:
+            context = self._authorized_episode_registry_context(
+                db,
+                workflow_run_id,
+                actor,
+            )
+            if context is None:
                 return StoryWorkspaceEpisodeArtifactService.unbound_surface(
                     workflow_run_id
                 )
-            thread_id = str(row["thread_id"])
-            try:
-                workspace = self._thread_workspace(thread_id)
-            except ApiRouteError as exc:
-                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
-            binding_service = StoryWorkspaceEpisodeBindingService(workspace)
-            canonical_story_slug = (
-                binding_service.read_canonical_project_story_slug(
-                    source_authority.story_slug
-                )
-            )
-            binding_context = StoryWorkspaceEpisodeBindingContext(
-                workflow_run_id=workflow_run_id,
-                trusted_project_story_slug=canonical_story_slug,
-                locked_context_story_slug=source_authority.story_slug,
-                run_provenance_story_slug=source_authority.story_slug,
-                episode_uid=source_authority.episode_uid,
-            )
-            registry = binding_service.read_episode_registry(binding_context)
+            workspace, source_authority, registry = context
             authority = self._episode_authority_from_registry(
                 source_authority,
                 registry,
+                selected_episode_id=episode_id,
             )
-            surface = StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
+            return StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
                 workflow_run_id,
                 episode_authority=authority,
             )
-            return surface
         except ApiRouteError:
             raise
         except StoryWorkspaceEpisodeArtifactPathError as exc:

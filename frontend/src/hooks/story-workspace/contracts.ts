@@ -2,8 +2,7 @@
 // [Output] Shared strict frontend DTOs with separate Project and Episode titles.
 // [Pos] Story Workspace browser contract declarations; no transport or reducer state.
 // [Sync] 2026-08-14: constrain Dream re-entry to its initial/in-progress outcome states.
-// [Sync] 2026-09-02: align Episode public-text path and entropy auditing with
-//                    the backend canonical workspace-reference allowlist.
+// [Sync] 2026-09-02: add the strict body-free Episode registry index contract.
 
 export type StoryWorkspaceReviewStatus = 'pending' | 'confirmed' | 'rejected' | 'archived';
 
@@ -725,6 +724,24 @@ export interface StoryWorkspaceEpisodeAuxiliaryProjection {
   readonly associations: StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics;
 }
 
+export interface StoryWorkspaceEpisodeIndexItem {
+  readonly opaqueEpisodeId: string;
+  readonly episodeCode: string;
+  readonly active: boolean;
+  readonly availableArtifactCount: number;
+  readonly hasArtifactIssues: boolean;
+  readonly updatedAt: string | null;
+}
+
+/** GET /api/story-workspace/workflow-runs/{runId}/episodes. */
+export interface StoryWorkspaceEpisodeIndexSurface {
+  readonly runId: string;
+  readonly registryRevision: number;
+  readonly activeEpisodeId: string | null;
+  readonly etag: string;
+  readonly episodes: readonly StoryWorkspaceEpisodeIndexItem[];
+}
+
 /** GET /api/story-workspace/workflow-runs/{runId}/episode-artifacts. */
 export interface StoryWorkspaceEpisodeArtifactSurface {
   readonly runId: string;
@@ -748,6 +765,12 @@ export type StoryWorkspaceEpisodeStringFieldClass =
 
 /** Exhaustive trust class for every string/string[] field in the Episode wire DTO. */
 export const storyWorkspaceEpisodeStringFieldClassification = {
+  'index.runId': 'machine_enum_or_pattern',
+  'index.activeEpisodeId': 'machine_enum_or_pattern',
+  'index.etag': 'machine_enum_or_pattern',
+  'index.episodes[].opaqueEpisodeId': 'machine_enum_or_pattern',
+  'index.episodes[].episodeCode': 'machine_enum_or_pattern',
+  'index.episodes[].updatedAt': 'machine_enum_or_pattern',
   'surface.runId': 'machine_enum_or_pattern',
   'surface.opaqueEpisodeId': 'machine_enum_or_pattern',
   'surface.episodeCode': 'machine_enum_or_pattern',
@@ -1939,6 +1962,88 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
   };
   storyWorkspaceEpisodeAssertLinks(surface);
   return surface;
+}
+
+/** Strictly hydrate the body-free registry Episode index. */
+export function storyWorkspaceParseEpisodeIndexSurface(
+  value: unknown,
+): StoryWorkspaceEpisodeIndexSurface {
+  const record = storyWorkspaceEpisodeRecord(value, 'Episode index', [
+    'runId', 'registryRevision', 'activeEpisodeId', 'etag', 'episodes',
+  ]);
+  const runId = storyWorkspaceEpisodeString(record.runId, 'index.runId', {
+    pattern: STORY_WORKSPACE_EPISODE_RUN_ID,
+  });
+  const registryRevision = storyWorkspaceEpisodeNumber(
+    record.registryRevision,
+    'index.registryRevision',
+    { integer: true, min: 0 },
+  );
+  const activeEpisodeId = record.activeEpisodeId === null
+    ? null
+    : storyWorkspaceEpisodeId(record.activeEpisodeId, 'index.activeEpisodeId');
+  const etag = storyWorkspaceEpisodeString(record.etag, 'index.etag', {
+    pattern: STORY_WORKSPACE_EPISODE_REVISION,
+  });
+  const episodes = storyWorkspaceEpisodeArray(
+    record.episodes,
+    'index.episodes',
+    (item, index) => {
+      const label = `index.episodes[${index}]`;
+      const episode = storyWorkspaceEpisodeRecord(item, label, [
+        'opaqueEpisodeId', 'episodeCode', 'active', 'availableArtifactCount',
+        'hasArtifactIssues', 'updatedAt',
+      ]);
+      if (typeof episode.active !== 'boolean' || typeof episode.hasArtifactIssues !== 'boolean') {
+        throw new Error(`${label} status flags must be boolean.`);
+      }
+      return {
+        opaqueEpisodeId: storyWorkspaceEpisodeId(
+          episode.opaqueEpisodeId,
+          `${label}.opaqueEpisodeId`,
+        ),
+        episodeCode: storyWorkspaceEpisodeString(
+          episode.episodeCode,
+          `${label}.episodeCode`,
+          { pattern: STORY_WORKSPACE_EPISODE_DISPLAY_LABEL },
+        ),
+        active: episode.active,
+        availableArtifactCount: storyWorkspaceEpisodeNumber(
+          episode.availableArtifactCount,
+          `${label}.availableArtifactCount`,
+          { integer: true, min: 0, max: 6 },
+        ),
+        hasArtifactIssues: episode.hasArtifactIssues,
+        updatedAt: episode.updatedAt === null
+          ? null
+          : storyWorkspaceEpisodeDatetime(episode.updatedAt, `${label}.updatedAt`),
+      };
+    },
+    99,
+  );
+  storyWorkspaceEpisodeUnique(
+    episodes.map((episode) => episode.opaqueEpisodeId),
+    'index.episodes.opaqueEpisodeId',
+  );
+  episodes.forEach((episode, index) => {
+    if (episode.episodeCode !== `EP${String(index + 1).padStart(2, '0')}`) {
+      throw new Error('Episode index codes must remain contiguous.');
+    }
+  });
+  if (episodes.length === 0) {
+    if (registryRevision !== 0 || activeEpisodeId !== null) {
+      throw new Error('Empty Episode index cannot expose registry identity.');
+    }
+  } else {
+    const active = episodes.filter((episode) => episode.active);
+    if (
+      registryRevision < 1
+      || activeEpisodeId === null
+      || active.length !== 1
+      || active[0].opaqueEpisodeId !== activeEpisodeId
+    ) throw new Error('Episode index active identity is inconsistent.');
+  }
+  return { runId, registryRevision, activeEpisodeId, etag, episodes };
 }
 
 export interface StoryWorkspaceEpisodeArtifactParseOptions {

@@ -6,6 +6,7 @@
 //                    Execution surface presents current artifacts only.
 // [Sync] 2026-08-31: resolve the canonical Episode reader host from the
 //                    matching storyboard entry in the Dream draft.
+// [Sync] 2026-09-02: use the Episode identity, not a storyboard label, as its container title.
 
 import type {
   StoryWorkspaceDreamFilesResponse,
@@ -74,7 +75,9 @@ function toEntry(
     stageLabel: STAGE_COPY[stage].label,
     module: STAGE_COPY[stage].module,
     entityId: item.entityId,
-    title: item.displayName,
+    title: stage === 'storyboards' && /^EP[0-9]{2}$/.test(item.entityId)
+      ? item.entityId
+      : item.displayName,
     summary: item.summary,
     content: item.content ?? null,
     relations: [...item.relations],
