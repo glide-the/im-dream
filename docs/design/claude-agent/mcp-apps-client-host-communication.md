@@ -1,13 +1,13 @@
-<!-- [输入] MCP Apps 稳定规范、OpenAI 共享字段指南、IM Node Apps Runtime 设计。 -->
+<!-- [输入] MCP Apps 稳定规范、OpenAI 共享字段指南、IM Next.js Node Apps Runtime 设计。 -->
 <!-- [输出] 定义 App View、Browser Runtime、Node Apps Host 与 MCP Server 的客户端承载通信协议。 -->
 <!-- [定位] MCP Apps 客户端平台通信专项设计；iframe 安全容器见同目录 iframe 专项稿。 -->
-<!-- [同步] 2026-09-04：window.im 仅替换 openai namespace；App View 的 UI 框架与组件库不在本协议规定。 -->
+<!-- [同步] 2026-09-04：Browser Runtime 归属 Next.js Client Component，window.im 仅替换 openai namespace。 -->
 
 # IM MCP Apps 客户端承载通信协议
 
 > 状态：设计评审稿，未实现
 >
-> 结论：IM 为 App View 提供 `window.im` 客户端接口，其兼容字段、方法和行为与 `window.openai` 一致，仅将 `openai` namespace 改为 `im`。Browser Runtime 运行 AppBridge，Node Apps Host 提供方法处理、MCP 路由、实例状态与事件；Python 不参与这套客户端通信协议。
+> 结论：IM 为 App View 提供 `window.im` 客户端接口，其兼容字段、方法和行为与 `window.openai` 一致，仅将 `openai` namespace 改为 `im`。Next.js Client Component 运行 Browser Runtime/AppBridge，进程级 Node Apps Host 提供方法处理、MCP 路由、实例状态与事件；Python 不参与这套客户端通信协议。
 
 参考资料（访问日期：2026-09-04）：
 
@@ -56,8 +56,8 @@ IM 因此只建立一条跨 iframe 通信通道，并在通道上区分两类能
 
 ```mermaid
 flowchart LR
-    S["MCP Server 模块<br/>tools / resources"] <--> N["Node Apps Host<br/>MCP session / policy / instance / events"]
-    N <--> B["IM Browser Runtime<br/>AppBridge / iframe controller"]
+    S["MCP Server 模块<br/>tools / resources"] <--> N["Next Node Apps Host<br/>MCP session / policy / instance / events"]
+    N <--> B["Next.js Client Component<br/>AppBridge / iframe controller"]
     B <-->|"客户端承载通信"| V["App View"]
     V <--> U["用户"]
 ```
@@ -91,7 +91,7 @@ AppBridge 位于 Host 侧。App View 通过客户端方法与事件使用 Host �
 
 ### 3.3 初始化
 
-1. Browser Runtime 为 tool call 创建唯一 App instance ID，并把 Host 侧 AppBridge 连接到 iframe transport。
+1. Browser Runtime 请求 Node Apps Host 创建 App instance，取得 Node 生成的唯一 instance ID 后，把 Host 侧 AppBridge 连接到 iframe transport。
 2. iframe 内的 App client 连接 `PostMessageTransport`；连接过程发起 `ui/initialize` 并声明能力。
 3. AppBridge 返回协议版本、Host capabilities 和当前 Host context。
 4. App 发出 `ui/notifications/initialized`。

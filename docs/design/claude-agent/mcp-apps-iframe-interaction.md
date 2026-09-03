@@ -1,13 +1,13 @@
-<!-- [输入] MCP Apps 稳定规范、AppBridge、IM Node Apps Runtime 与 Vite Browser Runtime 边界。 -->
+<!-- [输入] MCP Apps 稳定规范、AppBridge、IM Next.js Node Apps Runtime 与 Browser Runtime 边界。 -->
 <!-- [输出] 定义 Node 获取 UI resource、Browser 加载 iframe、客户端通信和失败降级。 -->
 <!-- [定位] MCP Apps iframe 专项设计；客户端字段、方法与平台扩展见客户端承载通信协议。 -->
-<!-- [同步] 2026-09-04：按 OpenAI 官方说明将 Apps SDK UI 定义为 App View 可选组件库。 -->
+<!-- [同步] 2026-09-04：iframe Host 挂载点统一为 Next.js Client Component。 -->
 
 # MCP Apps iframe 渲染与交互设计
 
 > 状态：设计评审稿，未实现
 >
-> 结论：MCP Server 返回 `ui://` HTML resource；Node Apps Host 通过自己的持久 MCP session 读取资源并创建 App render instance；Vite 构建的 Browser Runtime 在 Chrome 中挂载 iframe 并运行 Host 侧 `AppBridge(null, ...)`。App View 通过客户端通信完成初始化、通知、工具调用、消息和模型上下文交互。Python 不参与这条链路。
+> 结论：MCP Server 返回 `ui://` HTML resource；Next Node Apps Host 通过自己的持久 MCP session 读取资源并创建 App render instance；Next.js Client Component 在 Chrome 中挂载 iframe 并运行 Host 侧 `AppBridge(null, ...)`。App View 通过客户端通信完成初始化、通知、工具调用、消息和模型上下文交互。Python 不参与这条链路。
 
 参考资料（访问日期：2026-09-03）：
 
@@ -38,7 +38,7 @@ Node “提供渲染”指 Node 提供经过校验的资源和页面实例；DOM
 ### 2.1 目标
 
 - UI resource、tool input/result 和页面实例由同一 Node Host 关联。
-- Vite 页面、Browser Runtime 和 App View 保持三个清楚的发布边界。
+- Next.js Web、Browser Runtime Client Component 和 App View 保持三个清楚的发布边界。
 - App View 通过统一的客户端通信与 Browser Runtime 交互。
 - 页面加载失败时回到同一次工具调用的普通 fallback。
 - 不可信 App HTML 与 IM 顶层页面保持 origin、DOM、存储和权限隔离。
@@ -46,7 +46,7 @@ Node “提供渲染”指 Node 提供经过校验的资源和页面实例；DOM
 ### 2.2 非目标
 
 - 不规定 App View 使用的前端框架或组件库。
-- 不让 IM Vite 工程编译第三方 App 源码。
+- 不让 IM Next.js 工程编译第三方 App 源码。
 - 不让 Browser 直接访问 `ui://`、MCP transport 或 credential。
 - 不让 Python 读取 UI resource、转发页面消息或保存 App 状态。
 - 不在本稿定义 Node 获取 managed MCP 配置的接口。
@@ -58,8 +58,8 @@ Node “提供渲染”指 Node 提供经过校验的资源和页面实例；DOM
 
 | 发布物 | 构建者 | 内容 | 运行位置 |
 |---|---|---|---|
-| IM Shell bundle | IM Vite 工程 | Chat、App 挂载点、loading/fallback UI、Runtime loader | 顶层 IM 页面 |
-| IM Apps Browser Runtime | IM Apps 插件 | Node channel、Host 侧 AppBridge、iframe controller 和客户端通信 handlers | 顶层页面中的浏览器代码 |
+| IM Web | Dream Next.js App Router | Chat、App 挂载点、loading/fallback UI、Host 接口 | Next Node + 顶层 IM 页面 |
+| IM Apps Browser Runtime | IM Apps 插件 | Node channel、Host 侧 AppBridge、iframe controller 和客户端通信 handlers | Next.js Client Component |
 | App View bundle | MCP App 开发者 | App HTML/JS/CSS 和客户端通信 adapter | 隔离 iframe |
 
 `@openai/apps-sdk-ui` 是 App View 可选组件库，提供与 ChatGPT 容器相匹配的按钮、卡片、输入控件和布局原语；App 开发者可用它获得一致样式而无需重建基础组件。

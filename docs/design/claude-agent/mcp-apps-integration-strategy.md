@@ -1,13 +1,13 @@
-<!-- [输入] MCP Apps 稳定规范、OpenAI UI 指南、IM Claude Agent/MCP/Node/Vite 当前边界。 -->
+<!-- [输入] MCP Apps 稳定规范、OpenAI UI 指南、IM Claude Agent/MCP 与 Next.js 目标边界。 -->
 <!-- [输出] 定义 IM 接入 MCP Apps 的产品流程、职责边界、方案选择、阶段与验收。 -->
 <!-- [定位] MCP Apps 主设计；配置接口、客户端通信、iframe 和源码证据由同目录专项文档维护。 -->
-<!-- [同步] 2026-09-04：按 OpenAI 官方说明将 Apps SDK UI 定义为 App View 可选组件库。 -->
+<!-- [同步] 2026-09-04：Dream Web 明确迁移 Next.js，作为 MCP Apps 落地范围而非待定前置项。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
 > 状态：设计评审稿，未实现
 >
-> 结论：当前 Dream 只支持普通 MCP tool/resource，不是 MCP Apps Host。IM 应把 AppBridge 作为浏览器插件依赖，以 Node Apps Runtime 实现 Host 服务端能力和 `PersistentConnectorManager`。App View 与 IM 通过统一的客户端承载通信完成初始化、通知、工具调用、消息和模型上下文交互。Python 只提供受控 MCP 配置，不进入 UI 交互链路。Vite 可以继续构建 IM Web Shell，不需要因 MCP Apps 迁移 Next.js。
+> 结论：当前 Dream 只支持普通 MCP tool/resource，不是 MCP Apps Host。IM 必须把 AppBridge 作为浏览器插件依赖，将 Dream Web 从 Vite 迁移到自托管 Next.js App Router，并由 Next Node 进程中的 Apps Runtime 实现 Host 服务端能力和 `PersistentConnectorManager`。App View 与 IM 通过统一的客户端承载通信完成初始化、通知、工具调用、消息和模型上下文交互。Python 只提供受控 MCP 配置，不进入 UI 交互链路。
 
 配套文档：
 
@@ -49,8 +49,7 @@ MCP Server 仍是一个模块：它提供 tools、resources、UI resource 和业
 - 不新增 Agent Session phase，不改变 turn/resume/cancel/SSE 语义。
 - 不把 Python 改成 Apps Connector、UI resource 服务或前端消息代理。
 - 不为此引入独立 Bridge/Gateway 产品。
-- 不把 Dream 前端迁到 Next.js 作为前置条件。
-- 不重构无关 Agent、Thread、EventBus、模型调用或数据库。
+- 不借 Next.js 迁移重构无关 Agent、Thread、EventBus、模型调用或数据库。
 
 ## 3. 概念与规则
 
@@ -62,8 +61,8 @@ MCP Server 仍是一个模块：它提供 tools、resources、UI resource 和业
 | 数据工具 | 获取、计算或修改数据；返回 `content` / `structuredContent`，通常不创建页面。 |
 | 渲染工具 | 展示最终数据；Tool descriptor 用 `_meta.ui.resourceUri` 指向 UI resource。 |
 | UI resource | MCP Server 通过 `resources/read` 返回的 `ui://` HTML；不是浏览器直接导航的 URL。 |
-| Node Apps Runtime | IM 的 MCP Apps Host 服务端；内含 `PersistentConnectorManager`、tool catalog、resource loader、App instance 与事件。 |
-| IM Browser Runtime | Vite 构建并在 Chrome 运行；创建 iframe、运行 AppBridge、连接 Node。 |
+| Node Apps Runtime | Next Node 进程中的 MCP Apps Host 服务；内含 `PersistentConnectorManager`、tool catalog、resource loader、App instance 与事件。 |
+| IM Browser Runtime | Next.js Client Component，在 Chrome 运行；创建 iframe、运行 AppBridge、连接同源 Node Host 接口。 |
 | AppBridge | Browser Host 侧的 MCP Apps 桥；通过 iframe transport 接收标准请求并发送标准通知，IM Web 使用 `client = null` 手动 handlers。 |
 | App View | UI resource 中的 HTML/JS/CSS，在隔离 iframe 内运行，并使用 IM 客户端承载通信。 |
 | `@openai/apps-sdk-ui` | App View 可选组件库，提供与 ChatGPT 容器相匹配的按钮、卡片、输入控件和布局原语；用于获得一致样式而无需重建基础组件。 |
@@ -168,7 +167,7 @@ flowchart LR
         P["Python Managed MCP Config Provider<br/>静态配置 + turn-scoped 明文配置"]
     end
 
-    subgraph HOST["Node Apps Runtime"]
+    subgraph HOST["Next Node Apps Runtime"]
         C["PersistentConnectorManager<br/>MCP Client/session"]
         T["Apps-aware Tool Catalog"]
         R["UI Resource Loader"]
@@ -178,7 +177,7 @@ flowchart LR
 
     S["MCP Server 模块"] <--> C
     P -."仅建连配置".-> C
-    I <--> B["IM Browser Runtime<br/>AppBridge + iframe controller"]
+    I <--> B["Next.js Client Component<br/>AppBridge + iframe controller"]
     B <-->|"MCP Apps 客户端通信"| V["App View"]
     V <--> U["用户"]
 ```
@@ -187,8 +186,8 @@ flowchart LR
 |---|---|---|
 | Claude Agent Runtime | 首次工具选择和调用、结果进入对话 | App 页面连接和后续局部交互 |
 | Python Config Provider | 静态 Server 描述、一次建连明文配置、revision/OAuth 投影 | MCP session、resource、AppBridge、浏览器事件 |
-| Node Apps Runtime | MCP session、tool catalog、resource 读取、权限、instance、事件、fallback 决策 | DOM 渲染、Agent 推理、长期落盘 secret |
-| Browser Runtime 插件 | AppBridge、iframe、Host/View 消息和页面生命周期 | MCP Client、credential、权威连接状态 |
+| Next Node Apps Runtime | MCP session、tool catalog、resource 读取、权限、instance、事件、fallback 决策 | DOM 渲染、Agent 推理、长期落盘 secret |
+| Browser Runtime 插件 | 作为 Next.js Client Component 承载 AppBridge、iframe、Host/View 消息和页面生命周期 | MCP Client、credential、权威连接状态 |
 | App View | 页面展示、局部 UI 状态和客户端通信 | 直接访问 IM credential、顶层 DOM 或任意 MCP Server |
 | MCP Server 模块 | tools、resources、业务结果和 UI bundle | IM 用户身份、Thread 和页面布局 |
 
@@ -199,7 +198,8 @@ flowchart LR
 | 方案 | 判断 | 原因 |
 |---|---|---|
 | Dream 核心原生实现全部 Apps Host | 不选 | 把 iframe/UI 生命周期耦合进 Claude Agent Runtime，turn 结束后也无法自然承载页面交互 |
-| AppBridge 浏览器插件 + Node Apps Runtime | **选择** | 与 Web/iframe 运行位置一致；Node 可持久连接；可以按 feature flag 启停并保留 fallback |
+| Next.js Browser 插件 + 进程级 Node Apps Runtime | **选择** | Next.js 提供 Server/Client 边界、同源 Host 接口与统一 Node 发布单元；Browser 负责 iframe，进程级 Runtime 持久连接并保留 fallback |
+| Vite Web + 独立 Node Apps Runtime | 不选 | 协议上可行，但不符合已经确定的 Next.js 目标架构；只保留为迁移回滚路径 |
 | 独立 Bridge/Gateway 服务 | 暂不引入 | 只有多 Host 复用、跨网络聚合等独立需求成立时再考虑；不是支持 Apps 的前提 |
 | 直接采用第三方 bridge | 不直接采用 | 可参考 transport、路由和观测实现，但身份、Thread、权限、fallback 必须遵守 IM 合同 |
 | 只保留普通 tool result | 作为回退 | 不能提供交互式 App，但应一直保留为兼容和回滚路径 |
@@ -215,12 +215,14 @@ AppBridge 适合作为插件集成，但“插件化”只指可独立发布和�
 
 | 阶段 | 范围 | 验收 | 回滚 |
 |---|---|---|---|
-| Phase 0 | 官方示例 App；Node 单连接；读取 `ui://`；Browser AppBridge `null` 模式 | render tool 返回后出现可加载 iframe；普通 tool 仍按原样显示；浏览器无 credential | 关闭 Apps flag |
+| Phase 0 | Next.js compatibility shell；官方示例 App；进程级 Node 单连接；读取 `ui://`；Browser AppBridge `null` 模式 | 现有 Dream 主路径在 Next.js 下可用；render tool 返回后出现可加载 iframe；普通 tool 仍按原样显示；浏览器无 credential | 切回迁移前 Vite image 并关闭 Apps flag |
 | Phase 1 | 只读/低风险 App、状态模型、fallback | Agent turn 结束后 App 仍可读；加载失败回退同一次 result；关闭/重开不串 instance | 禁用页面动作 |
 | Phase 2 | 受控 `tools/call`、`ui/message`、OAuth 恢复 | 每次请求绑定当前 actor/thread/server/tool；拒绝不触发 Server；`ui/message` 创建新 turn | 回到只读 |
 | Phase 3 | 多 App/多 session、版本治理、审计和可选非 Node-local runtime | 多用户隔离；版本不兼容 fail closed；事件可追踪；插件可独立升级/卸载 | 回滚插件版本 |
 
 ## 7. 测试与 Go / No-Go
+
+本节 Go/No-Go 只决定当前 MCP Apps 阶段能否发布，不撤销 Next.js 迁移决策。
 
 必须通过：
 
@@ -233,6 +235,6 @@ AppBridge 适合作为插件集成，但“插件化”只指可独立发布和�
 - Python/Browser 日志、事件和页面中不出现 MCP secret；
 - 不支持 Apps 的客户端始终看到普通 fallback。
 
-Go 条件：Node 能从受控配置接口建立目标 MCP 连接；Agent 结果能携带稳定的 Server/tool/call 身份；官方示例 App 能完成加载和双向交互；目标首期 Server 不依赖 Agent 物理连接私有状态。
+Go 条件：Next.js compatibility shell 保持现有路由、认证、Agent SSE、WebSocket 和运行时配置行为；Node 能从受控配置接口建立目标 MCP 连接；Agent 结果能携带稳定的 Server/tool/call 身份；官方示例 App 能完成加载和双向交互；目标首期 Server 不依赖 Agent 物理连接私有状态。
 
 No-Go 条件：需要把 credential 送到 Browser；无法校验 App instance 与用户/Thread/Server；必须依赖 Python 转发每条 UI 消息；或目标本地 MCP 不在 Node 可达位置且没有另行批准的本地运行时。

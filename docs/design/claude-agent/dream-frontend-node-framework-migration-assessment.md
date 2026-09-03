@@ -1,31 +1,34 @@
 <!-- [输入] Dream Vite 前端、Admin Next.js 16 基线、MCP Apps Browser/Node Host 职责边界。 -->
-<!-- [输出] 评估 Dream 前端迁移 Node/Next.js 的必要性、改动范围、候选路径和 Go/No-Go。 -->
+<!-- [输出] 记录 Dream 必须迁移 Next.js 的决策、改动范围、目标架构、阶段和发布门槛。 -->
 <!-- [定位] MCP Apps 的前端框架专项决策；不修改前端代码，不定义 MCP Apps bridge 细节。 -->
-<!-- [同步] 2026-09-04：Vite 继续构建 MCP Apps Browser Runtime；MCP Apps 不要求迁 Next。 -->
+<!-- [同步] 2026-09-04：Next.js 迁移确定纳入 MCP Apps 交付，现有问题统一视为工作量和验收项。 -->
 
-# Dream 前端 Node/Next.js 迁移范围评估
+# Dream 前端 Next.js 迁移决策与范围
 
 > 状态：设计评审稿，未实施
 >
-> 结论：**MCP Apps 不是迁移 Next.js 的理由。** Vite 能构建 Browser Runtime、AppBridge 和 iframe Host；Node Apps Runtime 是独立的长期 Host 服务，不等于前端框架。首期保留 Vite，新增 Node Apps Runtime，由其中的 `PersistentConnectorManager` 持有 MCP session。Python 只提供受控配置。只有出现独立的 SSR、文件路由、Node Web 统一部署或长期前端平台化目标时，才启动 Next.js 迁移。
+> 结论：**Dream Web 必须从 Vite 迁移到自托管 Next.js App Router，迁移属于 MCP Apps 的交付范围。** MCP Apps 规范本身不限定框架，但 IM 选择用 Next.js 统一 Web Shell、Server/Client 边界、同源 Host 接口、运行时配置和 Node 发布单元。Browser Runtime 作为 Client Component 运行；`PersistentConnectorManager` 由 Next Node 进程启动时创建并长期持有，Route Handler 只做认证、作用域校验和协议适配。Python 只提供受控配置。现有路由、认证、SSE、WebSocket、CSS、部署和测试耦合只决定迁移工作量与验收，不再决定是否迁移。
 
-参考资料（访问日期：2026-09-03）：
+参考资料（访问日期：2026-09-04）：
 
-- [Next.js Custom Server](https://nextjs.org/docs/app/guides/custom-server)
 - [Next.js Backend for Frontend](https://nextjs.org/docs/app/guides/backend-for-frontend)
 - [Next.js Route Handlers](https://nextjs.org/docs/app/api-reference/file-conventions/route)
+- [Next.js Server and Client Components](https://nextjs.org/docs/app/getting-started/server-and-client-components)
+- [Next.js Self-Hosting](https://nextjs.org/docs/app/guides/self-hosting)
 - [Next.js standalone output](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)
 
 ## 1. 背景与问题
 
-Dream 当前是 React 19 + Vite 8 SPA，构建后由 Nginx 提供静态页面；Python 负责既有业务 API、认证、Claude Agent、MCP 配置和实时流。MCP Apps 的 Browser Runtime 运行在 Chrome 中，只需要 DOM、iframe、`postMessage` 和到 Node Apps Runtime 的通道，这些能力不依赖 Next.js。
+Dream 当前是 React 19 + Vite 8 SPA，构建后由 Nginx 提供静态页面；Python 负责既有业务 API、认证、Claude Agent、MCP 配置和实时流。目标形态改为自托管 Next.js App Router：页面和 Browser Runtime 使用 React Server/Client Component 边界，Next Node 侧提供同源 Host 接口并承载进程级 Apps Runtime。
 
-需要 Node 的部分是 Node Apps Host：`PersistentConnectorManager` 持有物理 MCP session，Host 同时保存 tool catalog、UI resource、App instance、事件顺序和 Browser 订阅。把它放进 Next Route Handler 会把长期连接和状态绑到一次请求生命周期。
+`PersistentConnectorManager` 持有物理 MCP session；Apps Runtime 同时保存 tool catalog、UI resource、App instance、事件顺序和 Browser 订阅。它在 Node 进程启动时创建，Route Handler 是调用它的请求适配器，不把长期连接和状态绑定到单次请求生命周期。
 
-因此需要分别回答两个问题：
+本稿不再判断“是否迁移”，而是确定迁移如何完成：
 
-1. MCP Apps Host 是否需要 Node Runtime：需要，用于持久 MCP 连接、UI resource、App instance 与浏览器事件。
-2. Dream 页面是否需要从 Vite 迁移 Next.js：不需要；这是另一项前端平台决策。
+1. 先用 Next.js compatibility shell 接住现有 React SPA 行为；
+2. 在 Next Node 进程建立 Apps Runtime composition root 和同源 Host 接口；
+3. 再把自制路由、页面壳和公共资源逐步迁入 App Router；
+4. 路由、认证、SSE、WebSocket、CSS、部署和测试问题全部进入工作量清单与发布验收。
 
 ## 2. 目标与边界
 
@@ -33,9 +36,9 @@ Dream 当前是 React 19 + Vite 8 SPA，构建后由 Nginx 提供静态页面；
 
 - 量化当前 Dream 前端迁移面。
 - 判断 Admin 的 Node/Next.js 基线能复用什么。
-- 比较保留 Vite、Next compatibility shell、完整 App Router 和 custom server。
+- 定义 compatibility shell、完整 App Router 与 Node Apps Runtime 的迁移顺序。
 - 保持 Python 认证、OAuth、Agent SSE、MCP 配置和数据库边界不变；仅新增受控 Node 配置接口。
-- 给出可回滚的迁移路径及 Go/No-Go。
+- 给出可回滚的迁移路径及每阶段发布门槛。
 
 ### 2.2 非目标
 
@@ -51,26 +54,27 @@ Dream 当前是 React 19 + Vite 8 SPA，构建后由 Nginx 提供静态页面；
 
 | 边界 | 当前/目标职责 | 与 Next.js 的关系 |
 |---|---|---|
-| Dream Web Shell | Chat、创作页面、Browser Runtime 挂载点、fallback | Vite 或 Next 都能构建 |
-| Browser Runtime | iframe、Host 侧 AppBridge 和 Host/View 消息处理 | 必须在浏览器运行，与 SSR 无关 |
-| Node Apps Runtime | `PersistentConnectorManager`、tool catalog、UI resource、App instance、事件与 Browser channel | 独立长期进程；不是页面 Route Handler |
+| Dream Web Shell | Chat、创作页面、Browser Runtime 挂载点、fallback | 迁移为 Next.js App Router |
+| Browser Runtime | iframe、Host 侧 AppBridge 和 Host/View 消息处理 | Next.js Client Component，只在浏览器运行 |
+| Node Apps Runtime | `PersistentConnectorManager`、tool catalog、UI resource、App instance、事件与 Browser channel | Next Node 进程级服务；Route Handler 只是适配器 |
 | Python Config Provider | managed MCP 静态配置、turn-scoped 明文配置、credential/OAuth 投影 | 只提供配置；不持有 Apps session，不参与 UI 链路 |
 
 ```mermaid
 flowchart LR
-    USER["用户浏览器"] --> WEB["Dream Web Shell<br/>Vite 或 Next"]
-    WEB --> RUNTIME["Browser Runtime<br/>AppBridge + iframe"]
-    RUNTIME <--> NODE["独立 Node Apps Runtime<br/>MCP session、resource、instance、events"]
+    USER["用户浏览器"] --> WEB["Next.js App Router<br/>Dream Web Shell"]
+    WEB --> RUNTIME["Client Component<br/>AppBridge + iframe"]
+    RUNTIME <--> ADAPTER["同源 Host 接口<br/>Route Handler adapter"]
+    ADAPTER <--> NODE["进程级 Node Apps Runtime<br/>MCP session、resource、instance、events"]
     NODE <--> MCP["MCP Server 模块"]
     PY["Python Config Provider<br/>静态配置 + turn-scoped 明文配置"] -."仅配置".-> NODE
 ```
 
-### 3.2 “Node 前端”不是一个单一方案
+### 3.2 Next.js 内部职责
 
-- **Vite + Node service**：页面继续静态部署，另有一个 Node Apps Runtime。
-- **Next.js Web + Node service**：页面由 Next 运行，Apps Runtime 仍是独立进程。
-- **Next Route Handler 内建 Apps Host**：把长期连接和状态放入请求生命周期，本稿拒绝。
-- **Custom Next server**：一个自定义 Node HTTP server 同时启动 Next 与 Apps Host；可行但失去已验证的 standalone 路径并扩大运维边界。
+- **App Router**：接管页面、layout、metadata、Web 静态公开资源和导航；Python 提供的动态公开资源绕过 Next catch-all。
+- **Client Component**：承载 Browser Runtime、AppBridge、iframe、浏览器状态和交互事件。
+- **Route Handler**：提供同源 HTTP 命令、资源接口和 SSE 事件流；执行登录态、Thread、Server、tool 与 instance scope 校验。
+- **Apps Runtime composition root**：在自托管 Next Node server startup 时创建 `PersistentConnectorManager`，供 Route Handler 调用；不按请求重建。
 
 ## 4. Dream 当前前端规模
 
@@ -174,39 +178,46 @@ Admin 是框架和运维模式参考，不是 Dream 用户前端的宿主。
 
 | 方案 | MCP Apps 收益 | 改动与风险 | 结论 |
 |---|---|---|---|
-| Vite SPA + 独立 Node Apps Runtime | 完整满足持久 MCP session、Browser Runtime 与状态同步 | 新增独立 Node 服务和 Host runtime；现有页面/部署最少变化 | **MCP Apps 首期推荐** |
-| Next client-only compatibility shell + 独立 Apps Runtime | 与上项相同；额外获得 Next Web 基线 | 约 30–35 个配置/部署/文档文件、3–5 个 Next 新文件；业务 UI 基本保留 | 仅在已有 Node Web 统一目标时选 |
-| Idiomatic App Router + 独立 Apps Runtime | 不增加 MCP Apps 能力 | 预计触及 80–150 个业务模块；路由、auth、CSS、实时流同时变化 | 不与 MCP Apps 同期实施 |
-| Apps Host 放进 Route Handler | 无额外能力 | 请求生命周期、重启/副本状态、WebSocket 与部署超时不适合成为连接权威 | 拒绝 |
-| Custom Next server 合并 Apps Host | 可以同进程持有长期状态 | 自行负责 upgrade/auth/drain；官方说明 custom server 与 standalone output 不能共用 | 默认拒绝 |
+| Next.js compatibility shell + 进程级 Apps Runtime | 先取得 Next Web/Node 基线，同时保留现有 React 页面行为 | 约 30–35 个配置、部署和文档文件，新增 Next app/layout/composition root | **迁移第一阶段** |
+| Idiomatic App Router + 同一 Apps Runtime | 形成最终 Server/Client 边界、同源 Host 接口和统一发布模型 | 预计触及 80–150 个业务模块；需要逐路由迁移 auth、CSS、实时流 | **最终目标** |
+| Vite SPA + 独立 Node Apps Runtime | 协议上可行 | 不进入已经确定的 Next.js 目标架构 | 不选；仅作迁移回滚 |
+| Apps Host 作为 request-local Route Handler 对象 | 无 | 请求结束或实例切换会丢失连接权威 | 拒绝；Route Handler 只能调用进程级 Runtime |
 | Dream 并入 Admin | 无 MCP Apps 独有收益 | 违反仓库边界，混入 RBAC/DB/Gateway 领域 | 拒绝 |
 
-Next 官方指出，某些部署会让 Route Handler 无法跨请求共享数据、长请求可能超时、WebSocket 会随响应或超时关闭；Node Apps Host 不能设计成 request-local object。自托管 Next 可以处理 HTTP streaming，但仍不能把 App instance、pending action 和物理 MCP session 绑到单次请求。官方同时说明 custom server 与 standalone output 不能一起使用。
+Next.js 已提供本设计需要的框架能力：App Router、Server/Client Component 边界、Route Handler、自托管 streaming、运行时环境变量和 server startup 注册。IM 采用自托管 Node 部署，并把 Apps Runtime 放在进程 composition root；因此浏览器依赖、SSR 边界、Host API 和长期状态都有明确位置。
 
-Admin 当前 Next 16.1.6 也没有可用于 App Route 的 WebSocket upgrade API：`/Users/dmeck/project/ink-admin-memory/node_modules/next/dist/server/lib/router-server.js:640-648` 对 upgrade 完成路由匹配后，若命中 App/Page 输出会结束 socket。Admin 的 `/Users/dmeck/project/ink-admin-memory/app/v1/messages/route.ts:1` 只做 HTTP SSE 委托，真正的 `ReadableStream`、cancel 和 request abort 位于 `/Users/dmeck/project/ink-admin-memory/app/lib/gateway/proxy-handler.ts:43-315`。这证明 Route Handler 可承载请求绑定的流，但不能据此推导出它适合成为 Coordinator 的 WebSocket 和状态所有者。
+IM 的 Apps channel 确定为 Route Handler HTTP 命令与 SSE 事件流；Apps Runtime 状态位于自托管 Node 进程，不位于请求对象。现有语音 WebSocket 继续直连原有入口，不要求 Next 接管 upgrade。
+
+Admin 当前 Next 16.1.6 已提供可复用的 App Router、Client Provider、Route Handler、HTTP SSE、Node 22 镜像和 Playwright 基线。它没有直接提供 Dream Apps Runtime，但已经覆盖框架、构建、流式请求和部署模式；Dream 需要新增的是进程级 `PersistentConnectorManager` 与 Host adapter，而不是重新判断是否采用 Next.js。
 
 ## 8. 目标部署
 
-推荐首期：
+目标部署：
 
 ```mermaid
 flowchart TB
     INGRESS["同域 Ingress"]
-    VITE["Vite 静态 Web<br/>Chat + Browser Runtime loader"]
-    NODE["Node Apps Runtime<br/>PersistentConnectorManager + Host"]
+    subgraph NEXT["自托管 Next.js Node"]
+        WEB["App Router<br/>Dream Web Shell"]
+        API["Host Route Handlers<br/>HTTP commands + SSE events"]
+        NODE["进程级 Apps Runtime<br/>PersistentConnectorManager + Host"]
+        API <--> NODE
+    end
+    BROWSER["Client Component<br/>AppBridge + iframe"]
     PY["Python Dream<br/>业务 API + Managed MCP Config Provider"]
     MCP["MCP Server 模块"]
 
-    INGRESS -->|"页面与静态资源"| VITE
-    INGRESS -->|"Apps runtime channel"| NODE
+    INGRESS -->|"页面与静态资源"| WEB
+    WEB --> BROWSER
+    BROWSER <--> API
     INGRESS -->|"业务 API、Agent SSE、OAuth"| PY
     PY -."仅静态配置 / turn-scoped 明文配置".-> NODE
     NODE <--> MCP
 ```
 
-如果以后迁 Next，只替换图中的 Vite Web，不移动 Node Apps Runtime。Apps Runtime 可以与 Next 同一发布单元或容器编排，但必须保留独立进程、健康检查和优雅关闭边界；不能由 Route Handler 按请求创建。
+Next Node 进程是 Web 与 Apps Host 的共同发布单元。Apps Runtime 保持独立模块和生命周期，由进程启动/退出管理；Route Handler 不拥有连接。Python 仍是业务 API 与 managed MCP 配置源，不参与 UI 协议。
 
-## 9. 若另行批准 Next 迁移
+## 9. Next.js 迁移阶段
 
 ### Stage 1：Compatibility shell
 
@@ -217,7 +228,12 @@ flowchart TB
 
 验收：现有主要页面 URL、刷新、OAuth callback、Agent streaming、语音 WebSocket 和动态 SEO 资源与 Vite 版本一致。回滚为原 Nginx `dist` image。
 
-### Stage 2：构建与部署切换
+### Stage 2：Apps Runtime 与构建部署切换
+
+- 在 Next Node 进程 composition root 创建 `PersistentConnectorManager` 和 Apps Runtime。
+- Route Handler 提供同源 Host 命令与事件接口，只做认证、scope 和协议适配。
+- Browser Runtime 迁为 Client Component，挂载 AppBridge 与 iframe。
+- 完成 Python 受控配置接口和 Node 建连。
 
 至少影响：
 
@@ -228,6 +244,8 @@ flowchart TB
 - README、前端与部署 `.folder.md`。
 
 当前 AutoDL 脚本检查 `dist/index.html` 并启动 `vite preview`，Cloud Run 前端使用端口 80 和 256 MiB；这些不能直接沿用。
+
+验收：同一 Next 发布单元可以提供 Dream 页面、Host 接口和进程级 Apps Runtime；连续请求复用同一 connection generation；Node 重启后以新 epoch 重连；Browser 不获得 credential。回滚为 Stage 1 Next shell 或迁移前 Vite image。
 
 ### Stage 3：逐路由迁移
 
@@ -241,42 +259,40 @@ flowchart TB
 
 | 场景 | 可观察标准 |
 |---|---|
-| Vite 保留 | Browser Runtime 可加载；AppBridge 页面工作；MCP credential 不进入浏览器、磁盘、日志或事件；Node 只在建连内存中消费短时配置 |
 | Compatibility shell | 现有 URL 直接打开和刷新均返回正确页面；无 SSR `window is not defined` |
+| Next Browser Runtime | AppBridge 与 iframe 只在 Client Component 初始化；服务端渲染不访问 `window`、`document` 或 `localStorage` |
+| 进程级 Apps Runtime | 多次 Route Handler 请求复用同一 Node epoch 和 connection generation；请求结束不销毁 MCP session |
 | OAuth callback | code/state 只由前端专用路径消费，不进入通用 Python request log |
 | Agent SSE | 首 chunk、连续 chunk、取消、断线恢复与 Vite 基线一致，无代理缓冲 |
 | Voice WebSocket | 能建立、关闭并在页面卸载时释放；Next 不拦截 upgrade |
 | Runtime config | 同一 image 启动时可切换 API/WS base，不需重新 build |
+| CSS | 现有页面关键视觉回归截图无布局、字体、主题和层叠顺序差异；全局样式只从允许的 App Router 入口加载 |
 | 动态公开资源 | `robots.txt`、`sitemap.xml`、`llms.txt` 继续来自 Python |
+| 部署 | Next Node 健康检查、优雅退出、端口、内存与回滚镜像在每个目标部署拓扑通过；不再依赖 `dist/index.html` 或 `vite preview` |
 | E2E | 38 个 spec 的核心 journey 在目标 Web server 上通过 |
-| Node Apps Runtime | Next/Vite Web 重启不改变 MCP session 所有权；Node epoch 变化后 Browser 重绑 |
+| Node Apps Runtime | Next Node 重启后 epoch 变化，Browser 重新绑定，Connector 使用最新受控配置重连 |
 | 回滚 | 切回旧 Vite image 后 Python API、数据和 OAuth 状态无需迁移 |
 
 现有测试中有 15 个文件直接导入 Vite server、5 个文件注入 `/@vite/client` 或 React refresh、27 个文件写有 5173 端口。Compatibility shell 可暂时保留 Vite test-only harness；彻底移除 Vite 至少需要修改约 20 个测试文件。
 
 ## 11. Go / No-Go
 
-### MCP Apps 首期
+Next.js 迁移决策已经为 **Go**，不再设置“是否采用 Next.js”的条件。实施按 Stage 1—4 推进，工作量增加不改变目标架构。
 
-**Go：保留 Vite + 独立 Node Apps Runtime。** 条件是 Python 配置接口、Node `PersistentConnectorManager`、Browser Runtime/iframe、Tool UI 声明关联和同域 runtime channel 均通过。
+每阶段只有满足以下条件才允许发布到下一阶段：
 
-### Next.js 迁移
+- compatibility shell 的路由、OAuth、Agent SSE、语音 WebSocket、runtime config 和 E2E 基线通过；
+- Apps Runtime 是进程级服务，Route Handler 请求结束不释放 MCP session；
+- Python 仍是 managed MCP 配置和 credential 事实源，但不参与 Apps UI 链路；
+- Browser 和 App View 不获得 MCP credential；
+- rollback image 与回滚步骤可执行。
 
-只有同时满足以下条件才 Go：
+以下情况阻止当前阶段发布，但不撤销 Next.js 迁移决策：
 
-- 存在独立于 MCP Apps 的 SSR、文件路由或 Node Web 平台目标；
-- 团队接受从静态 Nginx 转为长期 Node Web 的资源与运维成本；
-- compatibility shell 的 OAuth、SSE、WS、runtime config 和 E2E 基线通过；
-- Node Apps Runtime 保持独立进程，不进入 Route Handler；
-- Python 仍是 managed MCP 配置和 credential 事实源，但不参与 Apps UI 链路。
-
-以下任一情况成立则 No-Go：
-
-- 唯一理由是“AppBridge 用 TypeScript”或“需要 Node Apps Runtime”；
-- 计划同时重做路由、认证、SSE 和 MCP Apps；
-- 要把 Node Apps Host 放进 request-local Route Handler；
-- 要直接复制 Admin RBAC、DB 或 Gateway；
-- 无法保留 OAuth callback 与回滚路径。
+- 路由、认证、SSE、WebSocket 或 OAuth callback 与当前用户行为不一致；
+- Apps Runtime 被实现成 request-local Route Handler 对象；
+- 计划直接复制 Admin RBAC、DB 或 Gateway；
+- 无法验证 credential 隔离、连接重建或回滚路径。
 
 ## 12. 调研命令回执
 
@@ -286,5 +302,5 @@ flowchart TB
 | `find frontend/e2e -name '*.spec.ts' ...` | 0 | 38 specs，15,117 lines |
 | `rg -l` 统计生产源码浏览器专属全局 | 0 | 90 files |
 | `rg -l "from ['\"']vite['\"']" frontend/src frontend/e2e` | 0 | 15 files 直接依赖 Vite test harness |
-| 本地 Markdown link 检查 | 0 | 8 files，0 broken local links |
-| Playwright + 本机 Chrome 执行 `mermaid.parse()` | 0 | 15 Mermaid blocks，0 parse errors |
+| 本地 Markdown link 检查 | 0 | `6` files，`10` local links，`0` broken |
+| Frontend Node + `mermaid.parse()` | 0 | `16` Mermaid blocks，`0` failures |

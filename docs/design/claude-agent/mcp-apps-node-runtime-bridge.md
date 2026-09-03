@@ -1,7 +1,7 @@
 <!-- [输入] IM managed MCP 配置源码、AppBridge 手动模式、网站与本地 MCP 的运行边界。 -->
 <!-- [输出] 定义 Python 配置接口、Node PersistentConnectorManager、Browser Runtime 和 MCP Server 的职责。 -->
 <!-- [定位] MCP Apps Node Runtime 与连接同步专项设计；不定义业务工具，不实现生产接口。 -->
-<!-- [同步] 2026-09-04：Node 文档只保留连接与 Host handler 边界，客户端接口细节由专项文档维护。 -->
+<!-- [同步] 2026-09-04：Node Apps Runtime 纳入自托管 Next.js 进程，Route Handler 仅作请求适配。 -->
 
 # IM MCP Apps Node Runtime 与连接同步设计
 
@@ -217,11 +217,11 @@ Node 化不会自动解决用户电脑本地 MCP。它解决的是网站 Host �
 
 具体 Node 身份断言和内部接口传输方式需要 PoC；它们是配置访问边界，不应混入 MCP Apps Host/View 协议。
 
-### 3.9 Vite 与 Node
+### 3.9 Next.js 与 Node Apps Runtime
 
-Vite 继续构建 IM Shell、Browser Runtime loader 和 iframe 挂载 UI。`PersistentConnectorManager` 是 Node 服务端进程对象，不在 Vite bundle 中，也不要求把 Dream 页面迁到 Next.js。
+Dream Web 迁移到自托管 Next.js App Router。Browser Runtime 作为 Client Component 构建并在浏览器运行；Apps Runtime 在 Next Node 进程启动时创建，`PersistentConnectorManager` 是进程级对象，不进入浏览器 bundle，也不由每次 Route Handler 请求创建。
 
-若 Node Apps Runtime 与静态前端同一域，由现有反向代理分别路由静态页面、Node runtime channel 和 Python API。前端框架是否迁移只影响 Web Shell，不改变连接所有权。
+Next Route Handler 通过 HTTP 命令和 SSE 事件流承载 Browser/Host 通信，只负责现有登录态校验、instance scope 校验以及协议适配，再调用同进程 Apps Runtime。页面、Host 接口和 Python API 通过同域 ingress 发布。路由、认证、SSE、WebSocket、运行时配置和测试迁移属于明确工作量与验收范围，不再作为是否迁移 Next.js 的判断条件。
 
 ## 4. 阶段与验收
 

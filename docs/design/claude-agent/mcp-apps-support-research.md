@@ -1,7 +1,7 @@
 <!-- [输入] MCP Apps/OpenAI Apps 官方资料、Codex 历史任务 01a06233-628d-7a83-8d66-5c3185a80613、Dream 0.1.4 与 IM 当前源码。 -->
 <!-- [输出] 记录 MCP Apps 支持状态、Runtime 继承证据、能力缺口、候选方案和验证命令。 -->
 <!-- [定位] `mcp-apps-integration-strategy.md` 的独立调研证据；不定义产品交互，不授权实现。 -->
-<!-- [同步] 2026-09-04：按 OpenAI 官方说明收束 Apps SDK UI 定义，删除无关包实现调查。 -->
+<!-- [同步] 2026-09-04：记录 IM 选择 Next.js 作为 MCP Apps Web/Node 承载平台。 -->
 
 # MCP Apps 支持状态调研
 
@@ -130,7 +130,7 @@ async with ClaudeSDKClient(options=effective_options) as client:
 | `/Users/dmeck/project/ink-dream-memory/backend/claude_mcp/runtime_snapshot.py:51-185` | 每个 turn 在 Python 内存生成包含明文 transport/credential 的 detached config，但丢弃 server/config/credential revision | 可抽出配置解析逻辑；现有返回值不能直接作为 Node 接口 |
 | `/Users/dmeck/project/ink-dream-memory/frontend/src/api/claudeMcpApi.ts:158-169` | Browser 用 IM bearer/cookie 访问 Python API | 当前只有用户→Python 登录态，没有 Browser→Node instance ticket |
 
-Vite 可以构建 IM Shell、iframe controller 和 AppBridge。Web bundle 不能启动 stdio；用户电脑 localhost HTTP 在 CORS、secure context、mixed content、PNA 和认证均允许时技术上可能可达。IM 首期规定 AppBridge 传 `null` 并注册手动 handlers，Browser 只连接 Node，物理 MCP 连接由 Node `PersistentConnectorManager` 持有。
+Vite 在技术上可以构建 iframe controller 和 AppBridge，但这不再是 IM 的目标架构。IM 选择把 Dream Web 迁移到自托管 Next.js App Router：Browser Runtime 位于 Client Component，进程级 Node Apps Runtime 持有 `PersistentConnectorManager`，Route Handler 只做身份、scope 和协议适配。现有 Vite 耦合项是迁移工作量与验收基线，不是是否迁移的决策条件。
 
 ### 5.1 Managed MCP snapshot loader 不落盘，也不是 Connector
 
@@ -145,7 +145,7 @@ Vite 可以构建 IM Shell、iframe controller 和 AppBridge。Web bundle 不能
 
 现有 `/api/claude-mcp/servers` 只返回安全 Server DTO，没有解密 credential、resolved stdio launch config 或 effective workspace override；它也不是 Node service-to-service 接口。当前源码不存在 Node 可调用的配置接口。
 
-目标设计应抽出两种受控投影：
+目标设计必须提供两种受控投影：
 
 1. 非敏感、带 revision 的有效静态配置；
 2. 单 Server、短时、绑定 actor/workspace/server/revisions 和 Node runtime identity 的明文 turn-scoped 配置。
@@ -193,7 +193,7 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 | 插件启停、升级、卸载 | 现有插件机制未承载 Apps Host | Node/Browser 同版本 manifest、feature flag、teardown 和 fallback |
 | 协议/SDK 版本兼容 | 无 | manifest 范围 + capability negotiation；不兼容 fail closed |
 | fallback | 普通结果存在但未与 UI 绑定 | 同一工具结果的普通展示 |
-| UI instance lifecycle | 无 | 前端按 thread + toolCall + instance 隔离 |
+| UI instance lifecycle | 无 | Node 管理 instance 权威生命周期；Browser 管理对应 iframe 生命周期 |
 | audit/日志/诊断 | 只有 tool trace | Node 增加 instance/request/generation correlation，统一脱敏 |
 
 ## 8. 方案比较记录
@@ -202,7 +202,7 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 |---|---|---|
 | Dream Runtime 内实现全部 Host | 把浏览器页面生命周期耦合进模型执行 | 不选 |
 | AppBridge 自动转发，Browser 创建 MCP Client | 只能覆盖浏览器可达 HTTP，不能启动 stdio，并把 transport/credential/reconnect 放入浏览器 | IM Web 首期不选；非规范禁止 |
-| Node Apps Host + Browser AppBridge 插件 | Node 持有 MCP session、resource、instance 和事件；Browser 用手动 handlers | 推荐 |
+| Next.js Node Apps Host + Browser AppBridge 插件 | 进程级 Node Runtime 持有 MCP session、resource、instance 和事件；Client Component 用手动 handlers | 已选择 |
 | 独立 Bridge/Gateway | 增加单独身份、session、部署和追踪边界 | 仅在多 Host 复用或跨网络聚合成为独立需求时考虑；不是 Apps 前提 |
 | 直接复用第三方 bridge | 权限、生命周期和版本边界无法直接视为 IM 合同 | 只作实现参考 |
 | 只保留普通 fallback | 无交互 UI | 只作降级 |
