@@ -15,6 +15,7 @@
 <!-- [同步] 2026-09-02：Dream 启动前要求 Admin 0042 发布精确 Chat 历史 keyset pagination capability。 -->
 <!-- [同步] 2026-09-01：要求投影写入前校验重复项目根/stage，采用 move-not-copy 清理，并在唯一一次修正停止时显示安全原因。 -->
 <!-- [同步] 2026-09-02：记录索引优先的 Episode 同步、稳定的逐 Episode 导航以及禁止跨 Episode 产物回退。 -->
+<!-- [同步] 2026-09-04：记录 actor 绑定的 notion-cli Bash 审批路由及其 fail-closed 命令/网络边界。 -->
 
 # Ink & Memory
 
@@ -227,6 +228,8 @@ Admin provision 命令会把其余本机服务身份和模型 alias 写入 gitig
 `INK_NOTION_RUNTIME_ROOT` 必须是与 `AGENT_CWD` 位于同一持久 agentdata 区域的服务端绝对路径。Dream 将每个用户的不透明凭证源保存到 `users/<actor-hash>/home`，并将每个连接器最近一次成功的轻量索引保存到 `users/<actor-hash>/snapshots/<connector-id>/current.json`。保存资源选择时立即执行首次索引同步；之后由连接器的服务端策略在后台刷新到期索引，不要求用户先发起 Chat 或初始化 workspace。索引只含已选 ID 与紧凑元数据，不保存页面 Markdown、blocks 或附件。
 
 启用可信 thread workspace 的 Chat turn 会在 Runtime 初始化时把当前用户有效凭证和最近一次成功索引复制到 `{AGENT_CWD}/{thread_id}/.notion-home` 与 `.notion`；投影前先与用户当前选择范围求交，并最小化连接器元数据。随后 `sdk_env.py` 将该精确 thread 投影通过 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与 `NOTION_WORKERS_CONFIG_FILE` 绑定到 Agent Runtime Bash；ambient 值会被清空，不能选择其他用户或 home。投影过程不会调用 Notion 或执行索引同步，因此即使新索引刷新失败，清空或缩小选择范围也会在下一 turn 生效。既有页面 Read hook 与 Agent 直接使用 `ntn` CLI 并存。Workspace Mode 关闭时不提供两种投影和四个 Runtime 环境变量。
+
+actor 绑定的 Notion CLI 会话发起 Skill 已记录的只读 `ntn api` 调用时，继续遵循既有 Bash 策略：Auto 与手动模式走正常前端确认，Full Access 可不弹该确认，禁网模式仍硬拒绝。这是窄化路由规则，不是 Bash allowlist；缺少 actor/thread 绑定、wrapper 或替代 executable 路径、未声明 endpoint、shell 拼接/替换、畸形 data 和非 Notion Bash 均保持 fail-closed。若 Chat 报告 `Hook PreToolUse:Bash denied this tool`，应检查当前 connector 投影、改用已安装 `notion-cli` Skill 记录的命令并核对有效 network mode；不得以全局放开 Bash 绕过。
 
 ### 6. 启动 Dream
 

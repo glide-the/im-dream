@@ -1,12 +1,13 @@
 <!-- [Input] Dream actor/thread Notion projections, Claude Agent SDK 0.2.144, Runtime 0.1.3 baseline and published 0.1.4, restored Claude Code 2.1.88 source reference, and real Chat evidence from 2026-08-30. -->
-<!-- [Output] Root-cause matrix, user interaction contract, minimal remediation decision, business impact scope, and acceptance gates for Notion CLI environment delivery to Agent Bash. -->
+<!-- [Output] Root-cause matrix, user interaction contract, minimal remediation decisions, business impact scope, and acceptance gates for Notion CLI environment delivery and PreToolUse routing to Agent Bash. -->
 <!-- [Pos] Focused remediation design for the Dream-to-Runtime Notion CLI boundary; the broader credential/index product model remains in runtime-credential-and-skill-design.md. -->
 <!-- [Sync] 2026-08-30: record the digest-bound Runtime 0.1.4 real Chat acceptance and completed same-SHA public release. -->
+<!-- [Sync] 2026-09-04: separate the Dream PreToolUse .dream-guard collision from the earlier Runtime env defect and record the narrow actor-bound read-command remediation. -->
 
 # Notion CLI Agent Bash 环境修复设计
 
-Status: Implemented, real-business verified, publicly released as Runtime 0.1.4, and adopted by Dream
-Updated: 2026-08-30
+Status: Runtime environment fix released and real-business verified; Dream PreToolUse remediation implemented and provider-free verified
+Updated: 2026-09-04
 Scope: 当前 actor/thread 的 Notion CLI 凭证从 Dream 投影到 Agent Bash 与只读 `ntn` 验收
 
 ## 1. 背景与问题
@@ -79,6 +80,49 @@ Scope: 当前 actor/thread 的 Notion CLI 凭证从 Dream 投影到 Agent Bash �
 | resume | 每轮刷新后与新 turn 一致 | 第二轮再次被同一 sandbox allowlist 清除 | 同一真实 Chat thread 的第二个 Bash | 否（非缓存） | 不新增 resume cache；修复单一 spawn 路径。 |
 
 结论：这是 **Runtime fork 的生产 Bash sandbox 环境继承缺陷**，并伴随一个独立但合理的“workers 配置文件不存在”状态。它不是普通 shell 检查位置问题，不是 Dream 投影、SDK 合并顺序或 resume 缓存缺陷。上游 Bash 广泛使用 `subprocessEnv()`，clean-room Runtime 有意采用更窄的 allowlist；真正缺口是 Notion 能力加入 Dream 后，Runtime allowlist/capability/build contract 未同步扩展，不能笼统描述为 Claude Code 源码迁移时漏抄某个函数。
+
+### 4.1 2026-09-04 Dream PreToolUse 拒绝事件
+
+Runtime 0.1.4 已正确交付 Notion 环境后，线上仍可在 Dream workspace 复现另一条独立故障：`notion-cli` Skill 发起
+
+```text
+ntn api v1/search --data '{"query":"心学","page_size":10}'
+```
+
+立即得到 `Hook PreToolUse:Bash denied this tool`。使用 production runner 的真实
+`_apply_dream_surface_write_guard`、包含 `.dream/` 的临时 workspace 和同一命令，
+无需 Notion credential 或远程内容即可稳定得到 Story Workspace 的通用 mutation
+deny reason。这证明拒绝发生在 Bash 启动前，Runtime、workspace OS sandbox 和
+`ntn` 都尚未执行。
+
+| 边界 | 证据 | 判定 |
+|---|---|---|
+| `allowed_tools` | Runner 同时暴露精确 `Bash` 与 `Skill`；Auto 自定义清单也保留 `Skill`。 | 不是工具未暴露。 |
+| permission mode | Dream 不依赖 native TUI permission mode 做产品裁决；PreToolUse 返回显式 allow/deny，`can_use_tool` 处理 Runtime 系统询问。 | 不是 native prompt 配置缺失。 |
+| Skill | Skill frontmatter 声明 `tools: ["Bash"]`，且发布的 search/page/database/block 命令均为 read-oriented `ntn api`。 | Skill 声明正确。 |
+| PreToolUse | `.dream` surface guard 在 disabled-network、full-access 与 frontend confirmation 之前执行；workspace 含 `.dream/` 时，未识别命令被保守视作 mutation。 | **直接根因。** |
+| Skill provenance | SDK `PreToolUseHookInput` 只有 tool name/input/session/cwd 等字段，没有可验证的 originating-Skill identity。 | 不得依赖 prompt 名称伪造来源。 |
+| actor/thread binding | 只有 service 成功投影当前 actor/thread credential 后才设置 `notion_credential_home` 并启用 Notion Skill。 | 可作为 server-owned capability gate。 |
+| workspace sandbox / Runtime | 两者位于 hook allow 之后；原故障没有到达它们。 | 无需修改 sibling Runtime/SDK。 |
+
+根因判定为 **Dream 代码缺陷**：Story Workspace 的 `.dream` 写保护错误地把跨域、
+只读且本应进入普通 Bash 审批策略的 Notion CLI 调用硬拒绝。它不是“所有 Skill
+Bash 都应自动执行”的产品规则缺口。
+
+最小修复只在 Dream guard 增加分类出口：当前 turn 必须有 server-owned
+`notion_credential_home`，可执行 token 必须是 literal `ntn`，endpoint 必须属于内置
+Skill 已发布的 read API 集合，search/query 的 `--data` 必须是单引号包裹的 JSON
+object；wrapper、绝对/相对替代路径、写/未知 endpoint、换行、拼接和命令替换均不
+匹配。匹配结果仅表示“不是 `.dream` mutation”，不返回 allow：禁网模式随后硬拒绝，
+Full Access 保持既有语义，Auto/手动模式仍发出原有 frontend confirmation，拒绝、
+取消或确认通道缺失继续 fail closed。`ntn api` 同时加入 disabled-network 识别，避免
+Full Access 越过禁网设置。
+
+provider-free production-path 验收使用本地 fake Messages SSE provider 和
+workspace-local fake `ntn` executable，经真实 SDK/manifest-qualified Runtime、启用的
+sandbox、实际投影的 `notion-cli` Skill 与一次 Bash confirmation 执行固定 fixture
+命令；fake 输出回到 provider，turn 正常结束。该验收不连接 Notion、不读取用户内容、
+不使用真实凭证或 PostgreSQL，不能冒充真实业务验收。
 
 ## 5. 用户交互方案
 
@@ -164,6 +208,7 @@ workers 配置缺失本身不降低普通 API/doctor 能力，也不单独显示
 6. 同一真实 thread 的新 turn 与 resume 都重新获得最新 binding；无旧 session env cache。
 7. Dream、Runtime 相关测试、构建、manifest/capability、Markdown inventory/path 和 `git diff --check` 全部通过。
 8. 只有完成正常 Dream/真实账户/公开 Chat 验收后，才能把状态改为 Implemented and verified。
+9. Dream PreToolUse 修复必须证明 Auto/手动/Full Access/禁网、批准/拒绝/取消/确认通道缺失、actor binding、合法 endpoint、wrapper/拼接/替换/未知 endpoint 和非 Notion Bash；真实 Runtime 验收只使用 fake provider 与 fake `ntn`，不得读取真实 Notion 内容。
 
 业务时序见 [runtime-credential-and-skill-sequence.md](./runtime-credential-and-skill-sequence.md)。
 

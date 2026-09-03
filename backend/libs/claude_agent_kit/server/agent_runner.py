@@ -7,6 +7,8 @@
 # [Sync] 2026-08-28: apply the exact server-owned Claude Code Runtime env whitelist
 #                    after user overlays and before Gateway enforcement.
 # [Sync] 2026-08-30: apply actor/thread-bound NOTION_* values at the final Runtime environment boundary for Bash ntn commands.
+# [Sync] 2026-09-04: let only strictly parsed, actor-bound notion-cli read API
+#                    commands leave the Dream write guard for normal approval.
 # [Sync] 2026-08-29: keep Editor virtual-Read redirect files inside the
 #                    server-owned thread .claude-tmp boundary with 0600 mode.
 # [Sync] 2026-08-29: project only the trusted actor and effective PostgreSQL
@@ -532,6 +534,22 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
 
 # Shell metacharacters that would make a Bash command unsafe for auto-allow.
 _SHELL_METACHAR_RE = re.compile(r'[|;&<>`]|\$\(|\$\{')
+_NOTION_CLI_API_SEGMENT_PATTERN = r"[A-Za-z0-9_%~-]+"
+_NOTION_CLI_API_NO_DATA_ENDPOINT_RE = re.compile(
+    rf"^v1/(?:"
+    rf"databases/{_NOTION_CLI_API_SEGMENT_PATTERN}|"
+    rf"pages/{_NOTION_CLI_API_SEGMENT_PATTERN}(?:/markdown|/properties/{_NOTION_CLI_API_SEGMENT_PATTERN})?|"
+    rf"blocks/{_NOTION_CLI_API_SEGMENT_PATTERN}/children"
+    rf")$"
+)
+_NOTION_CLI_API_DATA_ENDPOINT_RE = re.compile(
+    rf"^v1/(?:search|databases/{_NOTION_CLI_API_SEGMENT_PATTERN}/query)$"
+)
+_NOTION_CLI_API_COMMAND_RE = re.compile(
+    r"^[ \t]*ntn[ \t]+api[ \t]+"
+    r"(?P<endpoint>v1/[A-Za-z0-9_/%~-]+)"
+    r"(?:[ \t]+--data[ \t]+'(?P<data>[^'\r\n]*)')?[ \t]*$"
+)
 _DREAM_SURFACE_REFERENCE_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])\.dream(?=$|[/\\\s'\";&|<>])",
     re.IGNORECASE,
@@ -672,6 +690,36 @@ def _is_low_sensitivity_bash_command(command: str) -> bool:
     return first_token in _LOW_SENSITIVITY_BASH_PREFIXES
 
 
+def _is_notion_cli_read_api_command(command: str) -> bool:
+    """Return whether *command* is one exact documented notion-cli read call.
+
+    This classifier never grants permission. It only lets an actor-bound
+    ``ntn api`` call leave the conservative Dream-surface write guard so the
+    existing full-access/Auto/manual confirmation policy can decide it. Keep
+    the executable literal (no paths or wrappers), reject shell composition,
+    and admit only the read endpoints published by the builtin notion-cli
+    Skill. ``--data`` is limited to search/query with one JSON object.
+    """
+
+    match = _NOTION_CLI_API_COMMAND_RE.fullmatch(command)
+    if match is None:
+        return False
+    endpoint = match.group("endpoint")
+    data = match.group("data")
+    if data is None:
+        return bool(
+            _NOTION_CLI_API_NO_DATA_ENDPOINT_RE.fullmatch(endpoint)
+            or _NOTION_CLI_API_DATA_ENDPOINT_RE.fullmatch(endpoint)
+        )
+    if _NOTION_CLI_API_DATA_ENDPOINT_RE.fullmatch(endpoint) is None:
+        return False
+    try:
+        payload = json.loads(data)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(payload, dict)
+
+
 def _split_shell_command(command: str) -> list[str]:
     """Best-effort shell tokenization for policy classification."""
 
@@ -720,6 +768,8 @@ def _is_network_bash_command(command: str) -> bool:
 
     name = _command_name(tokens[0])
     if name in _NETWORK_BASH_PREFIXES:
+        return True
+    if name == "ntn" and len(tokens) >= 2 and tokens[1] == "api":
         return True
 
     if name in {"python", "python3"} and len(tokens) >= 4:
@@ -916,7 +966,12 @@ def _unwrap_dream_read_only_command_tokens(
     return None
 
 
-def _is_dream_mutating_bash_command(command: str, cwd: Optional[str]) -> bool:
+def _is_dream_mutating_bash_command(
+    command: str,
+    cwd: Optional[str],
+    *,
+    notion_cli_bound: bool = False,
+) -> bool:
     """Conservatively identify shell attempts to mutate the Dream surface.
 
     If cwd already contains ``.dream/``, static target inspection is not a safe
@@ -929,6 +984,8 @@ def _is_dream_mutating_bash_command(command: str, cwd: Optional[str]) -> bool:
 
     tokens = _split_shell_command(command)
     if _is_explicit_canonical_asset_delete(command, tokens, cwd):
+        return False
+    if notion_cli_bound and _is_notion_cli_read_api_command(command):
         return False
     if _workspace_has_dream_surface(cwd):
         return not _is_definitely_read_only_dream_bash_command(command, tokens)
@@ -1315,6 +1372,8 @@ def _apply_dream_surface_write_guard(
     cwd: Optional[str],
     auto_repair_scope: DreamAutoRepairExecutionScope | None,
     mcp_env: Mapping[str, str],
+    *,
+    notion_cli_bound: bool = False,
 ) -> Optional[HookJSONOutput]:
     """Apply the single Dream Bash/write policy, including scoped repair cleanup."""
 
@@ -1373,6 +1432,7 @@ def _apply_dream_surface_write_guard(
         denied = _is_dream_mutating_bash_command(
             command,
             cwd,
+            notion_cli_bound=notion_cli_bound,
         )
     if not denied:
         return None
@@ -2945,6 +3005,9 @@ class ClaudeAgentRunner:
                 cwd,
                 opts.dream_auto_repair_scope,
                 mcp_env,
+                notion_cli_bound=bool(
+                    (getattr(sdk_options, "env", None) or {}).get("NOTION_HOME")
+                ),
             )
             if dream_write_guard is not None:
                 return dream_write_guard
