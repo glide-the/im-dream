@@ -1,13 +1,13 @@
 <!-- [输入] MCP Apps 稳定规范、AppBridge、IM Node Apps Runtime 与 Vite Browser Runtime 边界。 -->
-<!-- [输出] 定义 Node 获取 UI resource、Browser 加载 iframe、标准 postMessage bridge、可选 IM 扩展和失败降级。 -->
-<!-- [定位] MCP Apps iframe 专项设计；完整共享方法与 window.im 扩展见客户端承载通信协议。 -->
-<!-- [同步] 2026-09-03：App client/PostMessageTransport 定为 iframe 主通信入口；window.im 仅作可选扩展。 -->
+<!-- [输出] 定义 Node 获取 UI resource、Browser 加载 iframe、客户端通信和失败降级。 -->
+<!-- [定位] MCP Apps iframe 专项设计；客户端字段、方法与平台扩展见客户端承载通信协议。 -->
+<!-- [同步] 2026-09-04：删除传输与平台接口的重复比较，只保留 iframe 所需通信机制。 -->
 
 # MCP Apps iframe 渲染与交互设计
 
 > 状态：设计评审稿，未实现
 >
-> 结论：MCP Server 返回 `ui://` HTML resource；Node Apps Host 通过自己的持久 MCP session 读取资源并创建 App render instance；Vite 构建的 Browser Runtime 在 Chrome 中挂载 iframe 并运行 Host 侧 `AppBridge(null, ...)`。iframe 内的 App client 通过 `PostMessageTransport` 完成初始化、通知、工具调用、消息和模型上下文交互；`window.im` 只是可选 IM 扩展。Python 不参与这条链路。
+> 结论：MCP Server 返回 `ui://` HTML resource；Node Apps Host 通过自己的持久 MCP session 读取资源并创建 App render instance；Vite 构建的 Browser Runtime 在 Chrome 中挂载 iframe 并运行 Host 侧 `AppBridge(null, ...)`。App View 通过客户端通信完成初始化、通知、工具调用、消息和模型上下文交互。Python 不参与这条链路。
 
 参考资料（访问日期：2026-09-03）：
 
@@ -38,7 +38,7 @@ Node “提供渲染”指 Node 提供经过校验的资源和页面实例；DOM
 
 - UI resource、tool input/result 和页面实例由同一 Node Host 关联。
 - Vite 页面、Browser Runtime 和 App View 保持三个清楚的发布边界。
-- App View 以 MCP Apps App client + `PostMessageTransport` 为主通信入口；`window.im` 仅用于标准未覆盖的 IM 扩展。
+- App View 通过统一的客户端通信与 Browser Runtime 交互。
 - 页面加载失败时回到同一次工具调用的普通 fallback。
 - 不可信 App HTML 与 IM 顶层页面保持 origin、DOM、存储和权限隔离。
 
@@ -58,8 +58,8 @@ Node “提供渲染”指 Node 提供经过校验的资源和页面实例；DOM
 | 发布物 | 构建者 | 内容 | 运行位置 |
 |---|---|---|---|
 | IM Shell bundle | IM Vite 工程 | Chat、App 挂载点、loading/fallback UI、Runtime loader | 顶层 IM 页面 |
-| IM Apps Browser Runtime | IM Apps 插件 | Node channel、Host 侧 AppBridge、iframe controller、`window.im` 扩展 handlers | 顶层页面中的浏览器代码 |
-| App View bundle | MCP App 开发者 | App HTML/JS/CSS、MCP Apps App client、`PostMessageTransport`、可选 IM adapter | 隔离 iframe |
+| IM Apps Browser Runtime | IM Apps 插件 | Node channel、Host 侧 AppBridge、iframe controller 和客户端通信 handlers | 顶层页面中的浏览器代码 |
+| App View bundle | MCP App 开发者 | App HTML/JS/CSS 和客户端通信 adapter | 隔离 iframe |
 
 `@openai/apps-sdk-ui` 只可能存在于 App View bundle。它不读取 `ui://`、不创建 Host iframe、不建立 MCP session，也不参与 IM 主流程。
 
@@ -76,7 +76,7 @@ Node 向 Browser Runtime 提供的是一个页面实例，不是 MCP 凭证或�
 
 Browser 不允许用该实例读取其他 Server 或其他 URI。resource 发生 revision 变化时，Node 创建新实例，不热替换正在执行的第三方脚本。
 
-### 3.3 iframe 内的主通信入口
+### 3.3 iframe 客户端通信
 
 ```mermaid
 flowchart LR
@@ -86,7 +86,7 @@ flowchart LR
     BRIDGE <--> NODE["Node Apps Host"]
 ```
 
-iframe 的标准入口是 App client，不是 `window.im`。官方 SDK 的典型连接是 `App.connect(new PostMessageTransport(window.parent, window.parent))`；不使用 SDK 的 View 也必须产生同样的 MCP Apps JSON-RPC 消息。底层 `postMessage` 承载：
+官方 SDK 的典型连接是 `App.connect(new PostMessageTransport(window.parent, window.parent))`；不使用 SDK 的 View 也必须产生兼容的 MCP Apps 消息。该通信承载：
 
 | 交互 | 标准消息 | 方向 |
 |---|---|---|
@@ -98,7 +98,7 @@ iframe 的标准入口是 App client，不是 `window.im`。官方 SDK 的典型
 | 页面更新模型可见上下文 | `ui/update-model-context` | App → Host |
 | 日志、尺寸和显示模式请求 | `notifications/message`、`ui/notifications/size-changed`、`ui/request-display-mode` | App → Host |
 
-App 业务代码通过 client API 和事件监听使用这些能力；不应自行把 `window.im` 映射成 `tools/call` 或 `ui/message`。`window.im` 只在 App 明确接入 IM adapter 时出现，并复用同一跨 iframe transport 发送 IM 命名空间扩展消息。
+App 业务代码通过客户端方法和事件监听使用这些能力。IM 平台扩展的字段与方法只在 [客户端承载通信协议](./mcp-apps-client-host-communication.md) 定义。
 
 ### 3.4 页面创建流程
 
@@ -199,7 +199,7 @@ sequenceDiagram
     V-->>U: 局部更新
 ```
 
-同一标准通道还承载 `ui/message` 与 `ui/update-model-context`。前者由 Node 作为当前用户和 Thread 的后续消息提交给现有 Chat ingress；后者只更新当前 App instance 供未来 turn 使用的模型上下文。两者都不通过 `window.im`。完整方法映射见 [客户端承载通信协议](./mcp-apps-client-host-communication.md)。
+同一客户端通信还承载 `ui/message` 与 `ui/update-model-context`。前者由 Node 作为当前用户和 Thread 的后续消息提交给现有 Chat ingress；后者只更新当前 App instance 供未来 turn 使用的模型上下文。完整方法映射见 [客户端承载通信协议](./mcp-apps-client-host-communication.md)。
 
 ### 3.8 加载状态
 
@@ -240,7 +240,7 @@ sequenceDiagram
         B-->>V: 当前动作失败
     else MCP session 中断
         N-->>B: connection changed / new generation
-        B-->>V: window.im connectionchange（若已接入）
+        B-->>V: 连接状态变化事件
         V-->>U: 保留已显示内容，暂停新操作
     end
 ```
@@ -261,9 +261,9 @@ sequenceDiagram
 - Browser/Sandbox Proxy 校验 `message.source`、origin 和 schema；Browser AppBridge 与 Node 再校验 instance、用户、Thread、Server、tool、epoch 和 generation。
 - App View 不能读取顶层 cookie/localStorage、MCP credential、完整对话或系统提示词。
 - `tools/call` 只能进入当前 instance 绑定的 Node Host 和 MCP Server。
-- `window.im` 由 App-side adapter 在 View 内创建；Host 不改写第三方 HTML 注入任意脚本。
+- Host 不改写第三方 HTML 注入任意脚本。
 - teardown 后拒绝该 instance 的所有请求。
 
 ## 4. 设计结论
 
-Node Apps Host 负责取回和提供 iframe 所需的 UI resource、页面实例、Host 方法与事件；Browser Runtime 负责 Chrome 中的 iframe 和 Host 侧 AppBridge；App View 负责页面渲染并以 App client + `PostMessageTransport` 使用全部 MCP Apps 标准能力。`window.im` 仅为可选扩展，Python 完全不参与这条链路。Sandbox Proxy 仅是 Web iframe 的隔离实现，不能出现在产品主流程中。
+Node Apps Host 负责取回和提供 iframe 所需的 UI resource、页面实例、Host 方法与事件；Browser Runtime 负责 Chrome 中的 iframe 和 Host 侧 AppBridge；App View 负责页面渲染与客户端交互。Python 完全不参与这条链路。Sandbox Proxy 仅是 Web iframe 的隔离实现，不能出现在产品主流程中。

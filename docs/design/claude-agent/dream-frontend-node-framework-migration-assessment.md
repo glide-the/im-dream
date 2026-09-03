@@ -1,7 +1,7 @@
 <!-- [输入] Dream Vite 前端、Admin Next.js 16 基线、MCP Apps Browser/Node Host 职责边界。 -->
 <!-- [输出] 评估 Dream 前端迁移 Node/Next.js 的必要性、改动范围、候选路径和 Go/No-Go。 -->
 <!-- [定位] MCP Apps 的前端框架专项决策；不修改前端代码，不定义 MCP Apps bridge 细节。 -->
-<!-- [同步] 2026-09-03：Vite 继续构建标准 AppBridge/PostMessageTransport Browser Runtime；MCP Apps 不要求迁 Next。 -->
+<!-- [同步] 2026-09-04：Vite 继续构建 MCP Apps Browser Runtime；MCP Apps 不要求迁 Next。 -->
 
 # Dream 前端 Node/Next.js 迁移范围评估
 
@@ -52,7 +52,7 @@ Dream 当前是 React 19 + Vite 8 SPA，构建后由 Nginx 提供静态页面；
 | 边界 | 当前/目标职责 | 与 Next.js 的关系 |
 |---|---|---|
 | Dream Web Shell | Chat、创作页面、Browser Runtime 挂载点、fallback | Vite 或 Next 都能构建 |
-| Browser Runtime | iframe、Host 侧 AppBridge/`PostMessageTransport`、标准 Host/View 消息处理 | 必须在浏览器运行，与 SSR 无关 |
+| Browser Runtime | iframe、Host 侧 AppBridge 和 Host/View 消息处理 | 必须在浏览器运行，与 SSR 无关 |
 | Node Apps Runtime | `PersistentConnectorManager`、tool catalog、UI resource、App instance、事件与 Browser channel | 独立长期进程；不是页面 Route Handler |
 | Python Config Provider | managed MCP 静态配置、turn-scoped 明文配置、credential/OAuth 投影 | 只提供配置；不持有 Apps session，不参与 UI 链路 |
 

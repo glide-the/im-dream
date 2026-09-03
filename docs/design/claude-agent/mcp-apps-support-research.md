@@ -1,7 +1,7 @@
 <!-- [输入] MCP Apps/OpenAI Apps 官方资料、Codex 历史任务 01a06233-628d-7a83-8d66-5c3185a80613、Dream 0.1.4 与 IM 当前源码。 -->
 <!-- [输出] 记录 MCP Apps 支持状态、Runtime 继承证据、能力缺口、候选方案和验证命令。 -->
 <!-- [定位] `mcp-apps-integration-strategy.md` 的独立调研证据；不定义产品交互，不授权实现。 -->
-<!-- [同步] 2026-09-03：补明确 App client/PostMessageTransport/AppBridge 为 Host/View 主通道，window.im 仅为可选扩展。 -->
+<!-- [同步] 2026-09-04：保留官方 bridge 事实，移除调研稿中重复的平台接口对比。 -->
 
 # MCP Apps 支持状态调研
 
@@ -28,7 +28,7 @@ MCP Apps `2026-01-26` 稳定规范和 OpenAI 当前文档规定：
 
 - MCP Server 用 `_meta.ui.resourceUri` 把 render tool 与 UI resource 关联。
 - Host 用 `resources/read` 读取 `ui://` 资源；浏览器不直接解析 `ui://`。
-- MCP Apps App client ↔ `PostMessageTransport` ↔ AppBridge 是 Host/View 主通道，负责初始化、标准通知、App tool call、消息和 model context；`window.im` 只可作为复用该通道的 IM 扩展适配器。
+- MCP Apps bridge 负责 Host/View 初始化、通知、App tool call、消息和 model context。
 - 普通 MCP tools 必须在没有 UI 时仍可用。
 - OpenAI 专有能力放在 `window.openai`，每项单独检测。
 - `@openai/apps-sdk-ui` 是可选组件库，不是 Host bridge。
@@ -219,7 +219,7 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 5. UI resource 缓存与失效依据。
 6. Web Host 的独立 Sandbox Proxy origin 如何随 IM 发布。
 7. Node Host 权限策略如何继承当前用户、Thread 和 MCP tool 可见性，不让 App 自报身份。
-8. App-side adapter 如何在跨 origin View 内把可选 `window.im` 扩展映射到现有 AppBridge/`PostMessageTransport`，且不接管标准方法；CSP 与完整性约束如何验证。
+8. IM 平台扩展如何在跨 origin View 内提供，并满足 CSP、完整性和消息校验要求。
 
 ## 10. 验证命令
 

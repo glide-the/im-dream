@@ -1,13 +1,13 @@
 <!-- [输入] IM managed MCP 配置源码、AppBridge 手动模式、网站与本地 MCP 的运行边界。 -->
 <!-- [输出] 定义 Python 配置接口、Node PersistentConnectorManager、Browser Runtime 和 MCP Server 的职责。 -->
 <!-- [定位] MCP Apps Node Runtime 与连接同步专项设计；不定义业务工具，不实现生产接口。 -->
-<!-- [同步] 2026-09-03：Node 承接 Browser AppBridge handlers；iframe 标准通信由 App client 通过 postMessage 发起。 -->
+<!-- [同步] 2026-09-04：Node 文档只保留连接与 Host handler 边界，客户端接口细节由专项文档维护。 -->
 
 # IM MCP Apps Node Runtime 与连接同步设计
 
 > 状态：设计评审稿，未实现
 >
-> 结论：`PersistentConnectorManager` 在 Node 中实现。Python 只按已认证用户和 workspace 提供 MCP 静态配置及一次建连所需的 turn-scoped 明文配置；Node 建立并保持 MCP Client/session，读取 UI resource，维护 App 实例与事件，并向浏览器提供 iframe 渲染实例。Python 不读取 UI resource，不保存 Apps 连接状态，也不参与 AppBridge 或 `window.im` 消息。
+> 结论：`PersistentConnectorManager` 在 Node 中实现。Python 只按已认证用户和 workspace 提供 MCP 静态配置及一次建连所需的 turn-scoped 明文配置；Node 建立并保持 MCP Client/session，读取 UI resource，维护 App 实例与事件，并向浏览器提供 iframe 渲染实例。Python 不读取 UI resource、不保存 Apps 连接状态，也不参与客户端交互。
 
 参考资料（访问日期：2026-09-03）：
 
@@ -77,7 +77,7 @@ IM 网站采用 AppBridge 的 `client = null` 手动模式。Browser Runtime 不
 | Node Apps Runtime | `PersistentConnectorManager`、MCP Client/session、tool catalog、UI resource、App instance、事件 | 数据库密钥、长期落盘的明文 credential、Agent 推理状态 |
 | Claude Agent Runtime | 本次 Agent turn 的 MCP 配置与工具调用 | turn 结束后的 App 页面连接 |
 | IM Browser Runtime | Host 侧 AppBridge、iframe controller、Node 事件镜像 | MCP Client、credential、权威连接状态 |
-| App View | MCP Apps App client、`PostMessageTransport`、页面局部状态 | Node 内部 API、credential、权威连接状态 |
+| App View | 客户端通信和页面局部状态 | Node 内部 API、credential、权威连接状态 |
 | MCP Server 模块 | tools、resources、UI resource、业务结果 | IM 页面与用户会话 |
 
 Python 只出现在配置准备关系中，不出现在用户使用 App 的运行流程中。
@@ -182,7 +182,7 @@ sequenceDiagram
     participant S as MCP Server 模块
 
     U->>V: 点击或提交
-    V->>B: App.callServerTool<br/>postMessage: tools/call
+    V->>B: tools/call
     B->>N: 当前 instance 的标准请求
     N->>N: 校验用户、Thread、Server、tool 与 generation
     N->>S: tools/call（持久 MCP session）

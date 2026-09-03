@@ -1,13 +1,13 @@
 <!-- [输入] MCP Apps 稳定规范、OpenAI UI 指南、IM Claude Agent/MCP/Node/Vite 当前边界。 -->
 <!-- [输出] 定义 IM 接入 MCP Apps 的产品流程、职责边界、方案选择、阶段与验收。 -->
 <!-- [定位] MCP Apps 主设计；配置接口、客户端通信、iframe 和源码证据由同目录专项文档维护。 -->
-<!-- [同步] 2026-09-03：明确 App View 以 MCP Apps postMessage bridge 为主通信入口；window.im 仅为可选 IM 扩展。 -->
+<!-- [同步] 2026-09-04：主设计只保留客户端承载通信边界，具体传输与平台扩展下沉到专项文档。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
 > 状态：设计评审稿，未实现
 >
-> 结论：当前 Dream 只支持普通 MCP tool/resource，不是 MCP Apps Host。IM 应把 AppBridge 作为浏览器插件依赖，以 Node Apps Runtime 实现 Host 服务端能力和 `PersistentConnectorManager`。iframe 内的 App View 以 MCP Apps JSON-RPC over `postMessage` 处理初始化、通知、工具调用、消息和模型上下文；`window.im` 只提供标准未覆盖的 IM 扩展。Python 只提供受控 MCP 配置，不进入 UI 交互链路。Vite 可以继续构建 IM Web Shell，不需要因 MCP Apps 迁移 Next.js。
+> 结论：当前 Dream 只支持普通 MCP tool/resource，不是 MCP Apps Host。IM 应把 AppBridge 作为浏览器插件依赖，以 Node Apps Runtime 实现 Host 服务端能力和 `PersistentConnectorManager`。App View 与 IM 通过统一的客户端承载通信完成初始化、通知、工具调用、消息和模型上下文交互。Python 只提供受控 MCP 配置，不进入 UI 交互链路。Vite 可以继续构建 IM Web Shell，不需要因 MCP Apps 迁移 Next.js。
 
 配套文档：
 
@@ -39,8 +39,7 @@ MCP Server 仍是一个模块：它提供 tools、resources、UI resource 和业
 - 沿用现有 Claude Agent Runtime 的 MCP 工具调用。
 - 当被调用工具存在 `_meta.ui.resourceUri` 时，在同一工具结果位置展示 App iframe。
 - Node 持有 MCP Client/session、Apps tool catalog、UI resource、App instance 和连接事件。
-- App View 通过 MCP Apps App client 和 `PostMessageTransport` 接入 Browser Runtime 的 AppBridge。
-- `ui/initialize`、Host 通知、`tools/call`、`ui/message` 和 `ui/update-model-context` 全部走标准 bridge；`window.im` 只提供少量 IM 平台扩展。
+- Browser Runtime 通过 AppBridge 承载 App View 的初始化、通知、工具调用、消息和模型上下文交互。
 - App 内工具调用受当前用户、Thread、Server、tool 和页面实例约束。
 - 无 Apps 能力、插件关闭或页面失败时显示普通 tool result fallback。
 
@@ -67,8 +66,7 @@ MCP Server 仍是一个模块：它提供 tools、resources、UI resource 和业
 | Node Apps Runtime | IM 的 MCP Apps Host 服务端；内含 `PersistentConnectorManager`、tool catalog、resource loader、App instance 与事件。 |
 | IM Browser Runtime | Vite 构建并在 Chrome 运行；创建 iframe、运行 AppBridge、连接 Node。 |
 | AppBridge | Browser Host 侧的 MCP Apps 桥；通过 iframe transport 接收标准请求并发送标准通知，IM Web 使用 `client = null` 手动 handlers。 |
-| App View | UI resource 中的 HTML/JS/CSS，在隔离 iframe 内运行；其 MCP Apps App client 通过 `PostMessageTransport` 连接 Host。 |
-| `window.im` | 复用标准跨 iframe transport 的可选 IM 扩展适配器；不是独立 Host/View 入口，也不复制 MCP Apps 标准方法。 |
+| App View | UI resource 中的 HTML/JS/CSS，在隔离 iframe 内运行，并使用 IM 客户端承载通信。 |
 | Apps SDK UI | App 开发者可选的前端组件与样式库，与 IM Host 主链无关。 |
 
 ### 3.2 主产品链路
@@ -80,7 +78,7 @@ flowchart LR
     S --> B["现有 IM 工具结果位置"]
     B --> N["Node Apps Host<br/>读取 UI resource、生成 App 实例"]
     N --> B2["IM Browser Runtime<br/>AppBridge + iframe"]
-    B2 <--> V["App View<br/>App client + PostMessageTransport"]
+    B2 <--> V["App View<br/>客户端承载通信"]
     V --> U
 ```
 
@@ -114,7 +112,7 @@ sequenceDiagram
     S-->>N: MCP App HTML resource
     N-->>B: App render instance
     B->>V: 创建 iframe 并加载 App View
-    V->>B: App.connect(PostMessageTransport)<br/>ui/initialize + initialized
+    V->>B: 建立客户端通信<br/>ui/initialize + initialized
     B-->>V: 标准 tool input / tool result 通知
     V-->>U: 显示并可交互
 ```
@@ -125,9 +123,9 @@ sequenceDiagram
 - Tool UI URI 来自 Tool descriptor，不从 `CallToolResult` 猜测。
 - `content` / `structuredContent` 始终保留，既供模型使用，也作为失败 fallback。
 - Node 使用自己的 Apps-aware MCP session 读取 tool catalog 和 UI resource；不继承 Agent Runtime 的 socket。
-- 页面内 `tools/call` 经 App View 的 MCP Apps client → `postMessage` → Browser AppBridge → Node → MCP Server，不触发模型。
+- 页面内 `tools/call` 经 App View → Browser AppBridge → Node → MCP Server，不触发模型。
 - 页面发出 `ui/message` 时，才把受控用户消息提交给现有 Chat ingress，启动下一 Agent turn。
-- 页面发出 `ui/update-model-context` 时，Node 更新当前 App instance 提供给后续 turn 的受控上下文；它不立即启动模型，也不经过 `window.im`。
+- 页面发出 `ui/update-model-context` 时，Node 更新当前 App instance 提供给后续 turn 的受控上下文；它不立即启动模型。
 
 如果 MCP Server 把业务状态只放在某一条物理连接里，Agent session 与 Node session 可能看不到同一状态。首期 Go 条件是官方示例和目标 Server 不依赖这种连接私有状态；否则需要单独设计 Agent 与 Node 共用连接，不能隐式假设会继承。
 
@@ -182,20 +180,20 @@ flowchart LR
     S["MCP Server 模块"] <--> C
     P -."仅建连配置".-> C
     I <--> B["IM Browser Runtime<br/>AppBridge + iframe controller"]
-    B <-->|"JSON-RPC over postMessage"| V["App View<br/>App client"]
+    B <-->|"MCP Apps 客户端通信"| V["App View"]
     V <--> U["用户"]
 ```
 
 | 模块 | 负责 | 不负责 |
 |---|---|---|
 | Claude Agent Runtime | 首次工具选择和调用、结果进入对话 | App 页面连接和后续局部交互 |
-| Python Config Provider | 静态 Server 描述、一次建连明文配置、revision/OAuth 投影 | MCP session、resource、AppBridge、`window.im`、浏览器事件 |
+| Python Config Provider | 静态 Server 描述、一次建连明文配置、revision/OAuth 投影 | MCP session、resource、AppBridge、浏览器事件 |
 | Node Apps Runtime | MCP session、tool catalog、resource 读取、权限、instance、事件、fallback 决策 | DOM 渲染、Agent 推理、长期落盘 secret |
-| Browser Runtime 插件 | AppBridge、iframe、标准 Host/View `postMessage` transport、页面生命周期 | MCP Client、credential、权威连接状态 |
-| App View | 页面展示、局部 UI 状态、MCP Apps App client | 直接访问 IM credential、顶层 DOM 或任意 MCP Server |
+| Browser Runtime 插件 | AppBridge、iframe、Host/View 消息和页面生命周期 | MCP Client、credential、权威连接状态 |
+| App View | 页面展示、局部 UI 状态和客户端通信 | 直接访问 IM credential、顶层 DOM 或任意 MCP Server |
 | MCP Server 模块 | tools、resources、业务结果和 UI bundle | IM 用户身份、Thread 和页面布局 |
 
-标准 Host/View 通信不依赖 `window.im` 或 `window.openai` 这类平台 facade：App View 通过 MCP Apps client 与 `PostMessageTransport` 发出和接收标准消息，Browser Runtime 通过 AppBridge 处理。`window.im` 的 Host handlers、状态和事件由 Node 提供；跨 origin View 内的 `window.im` 对象由 App-side adapter 创建，并复用已经建立的跨 iframe transport。
+客户端字段、方法与平台扩展统一由 [客户端承载通信协议](./mcp-apps-client-host-communication.md) 定义；主设计不重复传输与接口细节。
 
 ## 5. 方案选型
 
@@ -209,7 +207,7 @@ flowchart LR
 
 AppBridge 适合作为插件集成，但“插件化”只指可独立发布和启停的 Apps 功能包：
 
-- 浏览器插件部分：AppBridge、iframe controller、标准 `postMessage` transport、`window.im` Host adapter；
+- 浏览器插件部分：AppBridge、iframe controller 和客户端通信 adapter；
 - Node 插件部分：Apps Host、`PersistentConnectorManager`、tool catalog、resource loader、instance 和事件；
 - Dream 核心只需把现有工具调用上下文稳定交给 Apps Host：当前用户、Thread、Server、tool、toolCall、配置 revision，以及原 tool input/result；不新增交接标识；
 - Python managed MCP 只提供版本化配置接口。

@@ -1,15 +1,15 @@
 <!-- [输入] MCP Apps 稳定规范、OpenAI 共享字段指南、IM Node Apps Runtime 设计。 -->
 <!-- [输出] 定义 App View、Browser Runtime、Node Apps Host 与 MCP Server 的客户端承载通信协议。 -->
 <!-- [定位] MCP Apps 客户端平台通信专项设计；iframe 安全容器见同目录 iframe 专项稿。 -->
-<!-- [同步] 2026-09-03：标准 postMessage bridge 定为主通信入口；window.im 仅承载 IM 专有扩展。 -->
+<!-- [同步] 2026-09-04：window.im 兼容 window.openai 的字段、方法和行为，仅将 openai namespace 替换为 im。 -->
 
 # IM MCP Apps 客户端承载通信协议
 
 > 状态：设计评审稿，未实现
 >
-> 结论：App View 的主通信入口是 MCP Apps App client：它通过 `PostMessageTransport` 与 iframe 外的 AppBridge 建立标准通道。初始化、Host 通知、工具调用、消息交换和模型可见上下文都走该通道；`window.im` 只补充标准没有定义的 IM 平台能力。Node Apps Host 提供方法处理、MCP 路由、实例状态与事件，Python 不参与这套客户端通信协议。
+> 结论：IM 为 App View 提供 `window.im` 客户端接口，其兼容字段、方法和行为与 `window.openai` 一致，仅将 `openai` namespace 改为 `im`。Browser Runtime 运行 AppBridge，Node Apps Host 提供方法处理、MCP 路由、实例状态与事件；Python 不参与这套客户端通信协议。
 
-参考资料（访问日期：2026-09-03）：
+参考资料（访问日期：2026-09-04）：
 
 - [MCP Apps 2026-01-26 稳定规范（ext-apps v1.7.5）](https://github.com/modelcontextprotocol/ext-apps/blob/v1.7.5/specification/2026-01-26/apps.mdx)
 - [MCP Apps Overview](https://modelcontextprotocol.io/extensions/apps/overview)
@@ -22,12 +22,12 @@
 
 MCP Server 提供工具结果和 UI resource；IM 把该资源显示为 iframe。页面加载后需要继续接收 tool input/result、调用工具、发送后续消息，并感知连接、认证和页面生命周期。
 
-OpenAI 的 `window.openai` 是 ChatGPT 的平台接口，不是 MCP Apps 标准本身。OpenAI 当前文档明确建议新页面优先使用 MCP Apps 的共享字段和 bridge methods；ChatGPT 别名只做兼容。
+OpenAI 的 `window.openai` 定义了 App 页面可直接使用的状态字段和 Host 方法。IM 沿用这套页面开发模型，在 App View 中提供 `window.im`；兼容字段和方法保持同名、同参数、同返回值和同状态语义，只把标识中的 `openai` namespace 更换为 `im`。
 
 IM 因此只建立一条跨 iframe 通信通道，并在通道上区分两类能力：
 
-1. MCP Apps 标准能力：默认且完整，覆盖 Host/View 初始化、通知、工具、资源、消息、模型上下文和生命周期；
-2. IM 平台扩展能力：可选，`window.im` 只暴露连接状态、认证入口和页面状态。
+1. MCP Apps 共享能力：覆盖 Host/View 初始化、通知、工具、资源、消息、模型上下文和生命周期；
+2. `window.im` 页面接口：以 `window.openai` 的行为作为兼容基线，并承载 IM 平台能力；兼容成员和 IM 特有扩展分别进行 capability detection。
 
 协议不等于一组 RPC 名称。它还规定能力协商、实例绑定、状态归属、事件顺序、权限、失败和关闭语义。
 
@@ -35,10 +35,10 @@ IM 因此只建立一条跨 iframe 通信通道，并在通道上区分两类能
 
 ### 2.1 目标
 
-- 新 App 使用 MCP Apps App client 和 `PostMessageTransport`；不以 `window.im` 代替标准 bridge。
+- 新 App 使用统一的客户端承载通信，不按 Host 产品名选择不同交互链路。
 - Browser Runtime 用 `AppBridge(null, ...)` 承载单个 iframe。
 - Node Apps Host 是服务端状态和方法处理入口。
-- `window.im` 只定义 IM 特有能力，不实现或包裹初始化、标准通知、`tools/call`、`resources/read`、`ui/message` 或 `ui/update-model-context`。
+- `window.im` 兼容字段与方法必须保持 `window.openai` 的参数、返回值、事件和状态语义。
 - App 按 capability feature detection 工作，不按 Host 产品名分支。
 - 页面关闭、Thread 切换、连接重建和版本不兼容都有确定语义。
 
@@ -47,7 +47,7 @@ IM 因此只建立一条跨 iframe 通信通道，并在通道上区分两类能
 - 不定义 MCP Server 的业务工具和页面数据结构。
 - 不规定 App 使用 React、Apps SDK UI 或其他 UI 框架。
 - 不让 App 直接访问 Node 内部 API、MCP credential、完整 Thread、系统提示词或顶层 DOM。
-- 不复制 OpenAI checkout、文件、Modal 等专有能力。
+- 文件、Modal 等可选能力未启用时不暴露对应方法；启用后保持与 `window.openai` 相同的调用行为。
 - 不把 Python 后端加入 Browser Host 与 App View 的通信链。
 
 ## 3. 概念与规则
@@ -58,7 +58,7 @@ IM 因此只建立一条跨 iframe 通信通道，并在通道上区分两类能
 flowchart LR
     S["MCP Server 模块<br/>tools / resources"] <--> N["Node Apps Host<br/>MCP session / policy / instance / events"]
     N <--> B["IM Browser Runtime<br/>AppBridge / iframe controller"]
-    B <-->|"JSON-RPC 2.0 over postMessage"| V["App View<br/>App client + PostMessageTransport<br/>optional window.im"]
+    B <-->|"客户端承载通信"| V["App View"]
     V <--> U["用户"]
 ```
 
@@ -66,25 +66,28 @@ flowchart LR
 |---|---|---|
 | Node ↔ MCP Server | MCP tools/resources/notifications | Node 持有物理 session 和 Apps tool catalog |
 | Node ↔ Browser Runtime | IM Apps Runtime Protocol | Node 持有 instance、connection state、epoch 和有序事件 |
-| Browser Runtime ↔ App View | MCP Apps JSON-RPC 2.0 over `postMessage` | AppBridge 与 App client 管单 View 初始化、请求、通知和 teardown |
-| Browser Runtime ↔ App View 上的可选扩展 | `window.im` adapter 复用同一 transport | 只传 IM 专有请求与脱敏状态，不承载标准 MCP Apps 方法 |
+| Browser Runtime ↔ App View | MCP Apps 方法与 IM 平台扩展 | 管理单 View 初始化、请求、通知和 teardown |
 
 Browser Runtime 不向 AppBridge 传 MCP Client。Server-bound method 由 AppBridge manual handler 发给 Node；Node 使用自己的 MCP session 执行。
 
-App View 侧使用官方 `App` client（或等价的合规实现），连接 `PostMessageTransport(window.parent, window.parent)`。App 业务代码调用 client 方法或订阅事件；transport 才使用底层 `window.postMessage`。AppBridge 位于 Host 侧，`window.im` 不参与标准消息的发送、解析或路由。
+AppBridge 位于 Host 侧。App View 通过客户端方法与事件使用 Host 提供的能力；具体 iframe transport 见 [iframe 渲染与交互](./mcp-apps-iframe-interaction.md)。
 
 ### 3.2 共享字段和方法优先
 
-| 目标 | MCP Apps 标准 | ChatGPT 兼容别名 | IM 规则 |
+| 目标 | MCP Apps 共享方法 | `window.im` 兼容接口 | IM Host 处理 |
 |---|---|---|---|
-| 工具关联 UI resource | `Tool._meta.ui.resourceUri` | `_meta["openai/outputTemplate"]` | 标准字段为主；别名只在兼容模式读取 |
-| 页面接收工具输入 | `ui/initialize` + `ui/notifications/tool-input` | `window.openai.toolInput` | 初始化后发给当前 instance |
-| 页面接收工具结果 | `ui/notifications/tool-result` | `window.openai.toolOutput` | 发送标准 `CallToolResult`，保留 fallback |
-| 页面调用工具 | `tools/call` | `window.openai.callTool` | Node 校验后调用同一 MCP Server |
-| 页面发送后续消息 | `ui/message` | `window.openai.sendFollowUpMessage` | 作为用户消息进入现有 Chat ingress |
-| 页面更新模型可见上下文 | `ui/update-model-context` | 无必需别名 | 覆盖当前 App instance 的最新上下文，供后续 turn 使用 |
+| 工具关联 UI resource | `Tool._meta.ui.resourceUri` | 不另设别名 | Node 按标准字段读取资源 |
+| 页面接收工具输入 | `ui/notifications/tool-input` | `window.im.toolInput` | 初始化后更新当前 instance 字段 |
+| 页面接收工具结果 | `ui/notifications/tool-result` | `window.im.toolOutput`、`window.im.toolResponseMetadata` | 投影 `structuredContent` 和完整结果 metadata |
+| 页面保存界面状态 | Host 持久化页面状态 | `window.im.widgetState`、`window.im.setWidgetState(state)` | 按当前 App instance 保存和恢复 |
+| 页面调用工具 | `tools/call` | `window.im.callTool(name, args)` | Node 校验后调用同一 MCP Server |
+| 页面发送后续消息 | `ui/message` | `window.im.sendFollowUpMessage({ prompt, scrollToBottom })` | 作为用户消息进入现有 Chat ingress |
+| 页面请求显示模式 | `ui/request-display-mode` | `window.im.requestDisplayMode(...)` | Browser 决定实际显示模式 |
+| 页面请求关闭 | Host teardown 生命周期 | `window.im.requestClose()` | Browser 接受请求后发送 `ui/resource-teardown` 并关闭页面 |
+| 页面尺寸变化 | `ui/notifications/size-changed` | `window.im.notifyIntrinsicHeight(...)` | Browser 更新容器高度 |
+| 页面打开链接 | `ui/open-link` | `window.im.openExternal(...)` | Browser 校验后打开外部链接 |
 
-新 App 不依赖右侧别名。IM 兼容层只暴露实际实现的方法，并逐项 feature-detect。
+这里的“兼容”只替换客户端接口的 namespace：`window.openai.method(...)` 对应 `window.im.method(...)`，`openai:set_globals` 对应 `im:set_globals`。方法参数、返回值、事件 payload 和状态语义保持一致；MCP 字段和 `_meta.ui.resourceUri` 不改名。可选方法仍需逐项 feature-detect。
 
 ### 3.3 初始化
 
@@ -108,7 +111,7 @@ Host context 只包含当前页面需要的信息：
 
 ### 3.4 Host → App
 
-以下通知由 Browser AppBridge 经 `postMessage` 发给 App client；App 通过 client event handlers 接收，不读取 `window.im`：
+以下通知由 Browser AppBridge 发给 App View：
 
 | 方法或通知 | 触发时机 | 页面行为 |
 |---|---|---|
@@ -121,7 +124,7 @@ Host context 只包含当前页面需要的信息：
 
 ### 3.5 App → Host
 
-以下请求或通知由 App client 经同一 `postMessage` transport 发给 AppBridge；AppBridge 在 Browser 处理本地能力，或通过 manual handler 转给 Node：
+以下请求或通知由 App View 发给 AppBridge；AppBridge 在 Browser 处理本地能力，或通过 manual handler 转给 Node：
 
 | 方法 | Node/Browser 处理 | 规则 |
 |---|---|---|
@@ -147,7 +150,7 @@ sequenceDiagram
 
     alt 页面内局部操作
         U->>V: 点击或提交
-        V->>B: App.callServerTool<br/>postMessage: tools/call
+        V->>B: tools/call
         B->>N: 当前 instance 请求
         N->>N: 校验能力、身份、Thread、Server 和 tool
         N->>S: tools/call
@@ -156,7 +159,7 @@ sequenceDiagram
         B-->>V: tools/call response
     else 请求 Agent 继续处理
         U->>V: 发送给 Agent
-        V->>B: App.sendMessage<br/>postMessage: ui/message
+        V->>B: ui/message
         B->>N: 当前 instance 消息
         N->>A: 正常用户消息，开始新 turn
     end
@@ -164,55 +167,31 @@ sequenceDiagram
 
 `tools/call` 是页面局部交互，不制造模型 turn。`ui/message` 才重新进入 Claude Agent Runtime。`ui/update-model-context` 只更新未来 turn 可见的 App 上下文，不立即启动模型。
 
-### 3.7 `window.im`
+### 3.7 `window.im` 兼容合同
 
-`window.im` 不是 MCP Apps 或 AppBridge 自动提供的全局对象，也不是 App View 的标准通信入口。App View 与顶层页面跨 origin，Node 和顶层 Browser Runtime 不能直接给内层 `window` 赋值。
+`window.im` 是 IM 提供给 App View 的平台接口。兼容部分直接采用 `window.openai` 的字段名、方法名和行为，只把 `openai` namespace 改为 `im`。
 
-首期由 App 自带 IM adapter：adapter 在 App View 内创建 `window.im`，通过现有 AppBridge 消息通道调用 Host 扩展；Node 提供 Host handlers、状态、事件和服务端路由。不带 adapter 的 App 仍能使用 MCP Apps 标准能力。
+| 能力组 | `window.im` 字段或方法 | 兼容要求 |
+|---|---|---|
+| 工具数据 | `toolInput`、`toolOutput`、`toolResponseMetadata` | 值来源、空值时机和更新行为与 `window.openai` 一致 |
+| 页面状态 | `widgetState`、`setWidgetState` | 状态作用域和持久化时机一致 |
+| 工具与消息 | `callTool`、`sendFollowUpMessage` | 参数、返回值、失败和滚动参数语义一致 |
+| 显示与导航 | `requestDisplayMode`、`requestModal`、`requestClose`、`notifyIntrinsicHeight`、`openExternal`、`setOpenInAppUrl` | Host 所有权和请求语义一致 |
+| 文件 | `uploadFile`、`selectFiles`、`getFileDownloadUrl` | 仅在 IM 提供对应能力时暴露，调用行为一致 |
+| 环境上下文 | `theme`、`displayMode`、`maxHeight`、`safeArea`、`view`、`userAgent`、`locale` | 值语义与更新方式一致 |
 
-```ts
-interface ImPlatformRuntime {
-  version: string
-  connectionState:
-    | 'connecting'
-    | 'ready'
-    | 'needs_auth'
-    | 'reconnecting'
-    | 'failed'
-    | 'closed'
-  addEventListener(type: 'connectionchange', listener: (event: unknown) => void): void
-  removeEventListener(type: 'connectionchange', listener: (event: unknown) => void): void
-  requestAuthentication?(): Promise<void>
-  viewState?: unknown
-  setViewState?(nextState: unknown): Promise<void>
-  requestClose?(): Promise<void>
-}
-```
+全局更新事件相应使用 IM namespace，例如 `openai:set_globals` 对应 `im:set_globals`。除此之外，不改变 payload 结构和订阅语义。
+
+IM 特有能力与兼容合同分开声明：
 
 | IM 扩展 | 作用 | 不得做什么 |
 |---|---|---|
 | `connectionState` / `connectionchange` | 投影当前 Node MCP session 的脱敏状态 | 不暴露 URL、credential 或内部错误栈 |
 | `requestAuthentication` | 请求顶层 Host 打开现有 MCP 认证流程 | 不返回 token，不允许 App 修改 Server 绑定 |
-| `viewState` / `setViewState` | 恢复当前页面筛选、选中和折叠状态 | 不进入模型，不代表业务写入 |
-| `requestClose` | 请求收起当前 App | Host 仍需执行标准 teardown |
 
-扩展消息复用已建立的跨 iframe transport，并使用 IM 命名空间与独立 schema；至少绑定协议版本、当前 App instance、Node epoch、事件序号、请求 ID 和连接 generation。未知方法返回不支持；未知事件忽略；写操作超时后不自动重放。
+IM 特有扩展使用独立 schema；至少绑定协议版本、当前 App instance、Node epoch、事件序号、请求 ID 和连接 generation。未知方法返回不支持；未知事件忽略；写操作超时后不自动重放。
 
-`window.im` 不实现或包裹 `ui/initialize`、标准通知、`tools/call`、`resources/read`、`ui/message`、`ui/update-model-context`、tool input/result 或 Host context。文件、Modal、结账、跨 Thread 导航和编辑器写入不在首期扩展中。
-
-### 3.8 `window.openai` 兼容
-
-兼容层只服务已经为 ChatGPT 构建的 App：
-
-- `toolInput` / `toolOutput` 映射标准通知；
-- `callTool` 映射 `tools/call`；
-- `sendFollowUpMessage` 映射 `ui/message`；
-- `_meta["openai/outputTemplate"]` 只作为旧 Tool UI 声明别名；
-- file、checkout、modal 等 OpenAI 平台扩展默认不存在。
-
-IM 不伪装 ChatGPT，也不根据 Host 名称分支；App 必须检测具体 capability。
-
-### 3.9 状态、错误和关闭
+### 3.8 状态、错误和关闭
 
 | 情况 | Host 行为 | App 表现 |
 |---|---|---|
@@ -228,4 +207,4 @@ IM 不伪装 ChatGPT，也不根据 Host 名称分支；App 必须检测具体 c
 
 ## 4. 设计结论
 
-IM 的客户端平台通信以 MCP Apps App client ↔ `PostMessageTransport` ↔ AppBridge 为主链。它完整承载初始化、通知、`tools/call`、`ui/message`、`ui/update-model-context` 和生命周期；Node Apps Host 处理 Server-bound 方法、实例状态、权限和事件。`window.im` 仅补充 IM 平台状态与操作，Python 只提供 Node 建连配置，不属于这份协议的参与方。
+IM 的 `window.im` 以 `window.openai` 为页面兼容基线，仅将 `openai` namespace 替换为 `im`；底层客户端通信统一处理初始化、通知、`tools/call`、`ui/message`、`ui/update-model-context`、平台扩展和生命周期。Browser Runtime 运行 AppBridge，Node Apps Host 处理 Server-bound 方法、实例状态、权限和事件；Python 只提供 Node 建连配置，不属于这份协议的参与方。
