@@ -1,94 +1,86 @@
-<!-- [输入] MCP Apps 稳定规范、OpenAI UI 指南、IM Claude Agent/MCP 与 Next.js 目标边界。 -->
-<!-- [输出] 定义 IM 接入 MCP Apps 的产品流程、职责边界、方案选择、阶段与验收。 -->
-<!-- [定位] MCP Apps 主设计；配置接口、客户端通信、iframe 和源码证据由同目录专项文档维护。 -->
-<!-- [同步] 2026-09-04：Dream Web 明确迁移 Next.js，作为 MCP Apps 落地范围而非待定前置项。 -->
+<!-- [输入] MCP Apps 稳定规范、@mcp-ui/client AppRenderer、IM Claude Agent/MCP 与 Next.js 目标边界。 -->
+<!-- [输出] 定义 IM 接入 MCP Apps 的产品流程、最小架构、阶段与验收。 -->
+<!-- [定位] MCP Apps 主设计；连接、客户端扩展、iframe 和源码证据由同目录专项文档维护。 -->
+<!-- [同步] 2026-09-04：Host 渲染统一复用 AppRenderer，Browser 通过 Node 受控 MCP transport 访问上游 Server。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
 > 状态：设计评审稿，未实现
 >
-> 结论：当前 Dream 只支持普通 MCP tool/resource，不是 MCP Apps Host。IM 必须把 AppBridge 作为浏览器插件依赖，将 Dream Web 从 Vite 迁移到自托管 Next.js App Router，并由 Next Node 进程中的 Apps Runtime 实现 Host 服务端能力和 `PersistentConnectorManager`。App View 与 IM 通过统一的客户端承载通信完成初始化、通知、工具调用、消息和模型上下文交互。Python 只提供受控 MCP 配置，不进入 UI 交互链路。
+> 结论：当前 Dream 不是 MCP Apps Host。IM 采用 `@mcp-ui/client` 的 `AppRenderer`，不自建 App View renderer、iframe controller 或 AppBridge 封装；Browser MCP Client 只连接 Next Node Apps Runtime 暴露的受控 MCP transport，Node `PersistentConnectorManager` 再连接真实 MCP Server。Python 只提供 Node 建连配置，不参与页面交互。
 
 配套文档：
 
 - [源码与协议调研](./mcp-apps-support-research.md)
-- [Node Runtime 与连接同步](./mcp-apps-node-runtime-bridge.md)
-- [客户端承载通信协议](./mcp-apps-client-host-communication.md)
-- [iframe 渲染与交互](./mcp-apps-iframe-interaction.md)
-- [Dream 前端 Node/Next.js 迁移评估](./dream-frontend-node-framework-migration-assessment.md)
+- [Node 受控 MCP Transport 与连接同步](./mcp-apps-node-runtime-bridge.md)
+- [`window.im` 客户端平台扩展](./mcp-apps-client-host-communication.md)
+- [`AppRenderer` iframe 交互](./mcp-apps-iframe-interaction.md)
+- [Dream 前端 Next.js 迁移评估](./dream-frontend-node-framework-migration-assessment.md)
 
 ## 1. 背景与问题
 
-Dream 当前能让 Claude Agent Runtime 调用 MCP Server 模块提供的工具，并显示文本或工具卡片。它还没有：
+Dream 当前可以让 Claude Agent Runtime 调用 MCP Server 模块提供的工具，并在 Chat 中显示普通工具结果，但没有 MCP Apps Host 的能力协商、UI resource 读取、iframe 渲染和双向交互。
 
-- 协商 MCP Apps capability；
-- 保存 Tool descriptor 中的 `_meta.ui.resourceUri`；
-- 将 tool result 与对应 UI resource 关联；
-- 读取并承载 `ui://` HTML；
-- 建立 iframe Host/View 双向通信；
-- 在 Agent turn 结束后维持 App 所需的 MCP session。
+MCP Server 仍是一个模块：它提供工具、资源和业务结果。支持 MCP Apps 的工具通过 descriptor 中的 `_meta.ui.resourceUri` 指向 `ui://` HTML resource；普通 `CallToolResult` 继续提供模型可见数据和无 UI 客户端的 fallback。
 
-普通 MCP tool result 只给模型和用户提供结果。MCP App 还要求 Host 根据 Tool UI 声明读取资源、建立页面实例，并处理页面后续的 `tools/call`、`ui/message` 和生命周期。
-
-MCP Server 仍是一个模块：它提供 tools、resources、UI resource 和业务结果。IM 新增的是客户端 Host 承载能力，不是另一套 MCP，也不是新的 Session Start。
+此前设计把资源读取、AppBridge、iframe 和 Browser/Node 消息分别实现了一遍。`AppRenderer` 已经完成这些 Host 侧职责，因此 IM 只需要提供一个连接到受控 Node MCP 端点的 Client，以及 IM 自己的权限和页面集成。
 
 ## 2. 目标与边界
 
 ### 2.1 目标
 
-- 沿用现有 Claude Agent Runtime 的 MCP 工具调用。
-- 当被调用工具存在 `_meta.ui.resourceUri` 时，在同一工具结果位置展示 App iframe。
-- Node 持有 MCP Client/session、Apps tool catalog、UI resource、App instance 和连接事件。
-- Browser Runtime 通过 AppBridge 承载 App View 的初始化、通知、工具调用、消息和模型上下文交互。
-- App 内工具调用受当前用户、Thread、Server、tool 和页面实例约束。
-- 无 Apps 能力、插件关闭或页面失败时显示普通 tool result fallback。
+- 沿用 Claude Agent Runtime 现有的首次工具选择和 `tools/call`。
+- 在已完成工具结果的位置挂载 `AppRenderer`。
+- Browser 不接触真实 MCP 地址、OAuth token、headers、stdio command 或 env。
+- Node 过滤并代理 Browser 发出的 MCP tools/resources 请求。
+- App 页面可以继续调用同一 MCP Server 的授权工具，也可以通过 `ui/message` 请求新的 Agent turn。
+- 不支持 Apps、插件关闭或页面失败时继续显示同一次普通 tool result。
 
 ### 2.2 非目标
 
-- 不修改 MCP Server 的模块定位。
-- 不新增 Agent Session phase，不改变 turn/resume/cancel/SSE 语义。
-- 不把 Python 改成 Apps Connector、UI resource 服务或前端消息代理。
-- 不为此引入独立 Bridge/Gateway 产品。
+- 不实现一套替代 `AppRenderer` 的 iframe/AppBridge runtime。
+- 不新增 Session Start 阶段，不改变 Claude Agent turn、resume、cancel 或 SSE 语义。
+- 不把 Python 改成 UI resource 服务、Apps session owner 或前端消息代理。
+- 不新增独立 Bridge/Gateway 服务。
 - 不借 Next.js 迁移重构无关 Agent、Thread、EventBus、模型调用或数据库。
 
 ## 3. 概念与规则
 
-### 3.1 概念
+### 3.1 最小概念
 
 | 概念 | 在 IM 中的含义 |
 |---|---|
-| MCP Server 模块 | 提供数据工具、渲染工具、UI resource 和业务动作。 |
-| 数据工具 | 获取、计算或修改数据；返回 `content` / `structuredContent`，通常不创建页面。 |
-| 渲染工具 | 展示最终数据；Tool descriptor 用 `_meta.ui.resourceUri` 指向 UI resource。 |
-| UI resource | MCP Server 通过 `resources/read` 返回的 `ui://` HTML；不是浏览器直接导航的 URL。 |
-| Node Apps Runtime | Next Node 进程中的 MCP Apps Host 服务；内含 `PersistentConnectorManager`、tool catalog、resource loader、App instance 与事件。 |
-| IM Browser Runtime | Next.js Client Component，在 Chrome 运行；创建 iframe、运行 AppBridge、连接同源 Node Host 接口。 |
-| AppBridge | Browser Host 侧的 MCP Apps 桥；通过 iframe transport 接收标准请求并发送标准通知，IM Web 使用 `client = null` 手动 handlers。 |
-| App View | UI resource 中的 HTML/JS/CSS，在隔离 iframe 内运行，并使用 IM 客户端承载通信。 |
-| `@openai/apps-sdk-ui` | App View 可选组件库，提供与 ChatGPT 容器相匹配的按钮、卡片、输入控件和布局原语；用于获得一致样式而无需重建基础组件。 |
+| MCP Server 模块 | 提供 tools、`ui://` resource 和业务结果。 |
+| App resource | MCP Server 经 `resources/read` 返回的 `text/html;profile=mcp-app` 文档；HTML 可包含已打包的 JS/CSS。 |
+| Browser MCP Client | 浏览器中声明 UI extension capability 的 MCP SDK Client；只连接 IM Node 受控端点，不连接真实 Server。 |
+| 受控 MCP transport | Browser Client 使用的标准 Streamable HTTP transport；目标是 IM Node 的同源、已认证 MCP 端点。 |
+| `PersistentConnectorManager` | Node 内的上游连接管理器；按用户、workspace 和 Server 隔离连接，并执行权限过滤和代理。 |
+| `AppRenderer` | `@mcp-ui/client` 提供的 React Host 组件；负责发现/读取 App resource、创建 AppBridge、挂载隔离 iframe，并传递 tool input/result。 |
+| `window.im` | App 页面可选的 IM 平台接口；兼容 `window.openai` 的字段和方法，但不替代 MCP Apps 标准 bridge。 |
 
-### 3.2 主产品链路
+`App resource` 是 Server 提供的页面内容，不是 IM 要构建的新 bundle runtime。`@openai/apps-sdk-ui` 只是 App 作者可选的页面组件库；Host 渲染复用的是 `@mcp-ui/client/AppRenderer`。
+
+### 3.2 主链路
 
 ```mermaid
 flowchart LR
-    U["用户"] --> A["Claude Agent Runtime<br/>调用现有 MCP 工具"]
-    A --> S["MCP Server 模块<br/>render tool + result"]
-    S --> B["现有 IM 工具结果位置"]
-    B --> N["Node Apps Host<br/>读取 UI resource、生成 App 实例"]
-    N --> B2["IM Browser Runtime<br/>AppBridge + iframe"]
-    B2 <--> V["App View<br/>客户端承载通信"]
+    U["用户"] --> A["Claude Agent Runtime<br/>现有 tools/call"]
+    A <--> S["MCP Server 模块"]
+    A --> R["IM Chat 工具结果"]
+    R --> AR["Next Client Component<br/>Browser Client + AppRenderer"]
+    AR <-->|"标准 MCP Streamable HTTP"| N["Next Node Apps Runtime<br/>受控 MCP 端点"]
+    N <--> C["PersistentConnectorManager"]
+    C <--> S
+    AR --> V["App 页面"]
     V --> U
 ```
 
-主链只包含五个阶段：
+流程只有两段：
 
-1. 用户通过现有 Chat 发起 Agent turn。
-2. Claude Agent Runtime 调用 MCP Server 的工具。
-3. 现有 IM 工具结果进入 Browser 后，Browser 请求 Node 为当前工具调用创建 App；Node 使用当前已认证用户、Thread、Server、tool 和 toolCall 上下文校验请求，再用 Tool descriptor 中的 `_meta.ui.resourceUri` 关联结果并执行 `resources/read`。
-4. Node 将 UI resource、tool input/result 和不透明 instance context 作为 iframe 渲染实例交付 Browser Runtime。
-5. Browser Runtime 在工具结果位置显示 App，用户在其中继续操作。
+1. Claude Agent Runtime 按现有方式调用 MCP 工具，把 tool name、input、完整 `CallToolResult` 和 tool call identity 交给 Chat。
+2. Next Client Component 创建 Browser MCP Client，连接 Node 受控 MCP 端点，并把 Client 与工具数据传给 `AppRenderer`；后续 descriptor 查询、`resources/read`、iframe 和页面工具调用都沿同一 MCP Client 完成。
 
-Python 不出现在这条流程中。它只在 Node 建连前提供配置，详见 [Node Runtime 与连接同步](./mcp-apps-node-runtime-bridge.md)。
+Browser 发起的是到 IM 网站 Node 端点的连接，不是到真实 MCP Server 的连接。真实 Server 的 URL、stdio 配置和凭证不进入 Browser：Python 是 managed MCP 配置与凭证的事实源，Node 仅在建连和使用上游连接期间以内存保存 Python 签发的短时单 Server 建连配置。
 
 ### 3.3 与 Claude Agent Runtime 的继承
 
@@ -97,144 +89,126 @@ sequenceDiagram
     actor U as 用户
     participant A as Claude Agent Runtime
     participant S as MCP Server 模块
-    participant N as Node Apps Host
-    participant B as Browser Runtime
-    participant V as App View
+    participant B as Browser Client + AppRenderer
+    participant N as Node Apps Runtime
 
     U->>A: 正常 Chat 消息
-    A->>S: tools/call(render tool)
-    S-->>A: CallToolResult + fallback
-    A-->>B: 现有工具结果事件<br/>server、tool、toolCall、input/result
-    B->>N: 为当前工具调用请求 App instance
-    N->>S: resources/read(Tool._meta.ui.resourceUri)
-    S-->>N: MCP App HTML resource
-    N-->>B: App render instance
-    B->>V: 创建 iframe 并加载 App View
-    V->>B: 建立客户端通信<br/>ui/initialize + initialized
-    B-->>V: 标准 tool input / tool result 通知
-    V-->>U: 显示并可交互
+    A->>S: tools/call
+    S-->>A: CallToolResult
+    A-->>B: 现有工具结果<br/>server、tool、call、input、result
+    B->>N: Client.connect(受控 Streamable HTTP transport)
+    N->>S: 建立或复用受控上游 MCP 连接
+    B->>N: tools/list / resources/read(ui://...)
+    N->>S: 权限过滤后代理请求
+    S-->>N: Tool descriptor / App resource
+    N-->>B: 标准 MCP 响应
+    B->>B: AppRenderer 创建 AppBridge 和 iframe
+    B-->>U: 展示可交互页面
 ```
 
 继承规则：
 
-- Session Start、tool selection、首次 `tools/call` 和现有工具结果事件继续由当前 Claude Agent Runtime/Chat 链路负责。
-- Tool UI URI 来自 Tool descriptor，不从 `CallToolResult` 猜测。
-- `content` / `structuredContent` 始终保留，既供模型使用，也作为失败 fallback。
-- Node 使用自己的 Apps-aware MCP session 读取 tool catalog 和 UI resource；不继承 Agent Runtime 的 socket。
-- 页面内 `tools/call` 经 App View → Browser AppBridge → Node → MCP Server，不触发模型。
-- 页面发出 `ui/message` 时，才把受控用户消息提交给现有 Chat ingress，启动下一 Agent turn。
-- 页面发出 `ui/update-model-context` 时，Node 更新当前 App instance 提供给后续 turn 的受控上下文；它不立即启动模型。
+- Session Start、工具选择和首次调用仍由 Claude Agent Runtime 负责。
+- UI URI 来自 Tool descriptor，不从 `CallToolResult` 猜测。
+- Chat 工具结果需要持久化 `serverRef`、上游原始 tool name、`toolCallId`、tool input 和完整 `CallToolResult`；当前工具事件只稳定提供 tool name/call/input/output，`serverRef` 与完整 MCP result envelope 是实施缺口。
+- `serverRef` 只是 Browser 选择受控 Node MCP endpoint 的不可信路由参数；Node 必须根据当前 IM 登录用户和 workspace 重新验证该 Server 已启用。`toolCallId` 只关联 Chat 结果和诊断，不作为授权凭证、MCP session 标识或上游连接选择条件。
+- `AppRenderer` 使用独立的 Browser MCP Client 获取 descriptor 和 resource，但不重复执行创建页面的原始工具调用。
+- App 内 `tools/call` 是页面局部交互，不触发模型。
+- App 发出 `ui/message` 时，IM 才把消息提交给现有 Chat ingress，开始新的 Agent turn。
+- `content` / `structuredContent` 始终保留，作为模型输入和失败 fallback。
 
-如果 MCP Server 把业务状态只放在某一条物理连接里，Agent session 与 Node session 可能看不到同一状态。首期 Go 条件是官方示例和目标 Server 不依赖这种连接私有状态；否则需要单独设计 Agent 与 Node 共用连接，不能隐式假设会继承。
+若目标 Server 把业务状态只保存在 Agent Runtime 的某条物理连接里，Browser 经 Node 建立的新 MCP session 可能看不到该状态。首期只接入不依赖连接私有状态的 Server；其他 Server 需先完成共享状态验证。
 
-### 3.4 数据处理与页面渲染分开
+### 3.4 页面内工具调用
 
-| 工具 | 结果 | 页面行为 |
-|---|---|---|
-| 数据工具 | 完整 `structuredContent` 和文本 fallback | 不创建 iframe，可被 Agent 或 App 复用 |
-| 渲染工具 | 最终展示数据，并声明 `_meta.ui.resourceUri` | 创建一次 App instance |
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant V as App 页面
+    participant AR as AppRenderer
+    participant C as Browser MCP Client
+    participant N as Node Apps Runtime
+    participant S as MCP Server 模块
 
-采用 OpenAI 当前建议：先处理数据，再调用渲染工具；只有渲染工具带 UI resource。App 内局部刷新调用数据工具，不反复重建 iframe。
+    U->>V: 点击、筛选或提交
+    V->>AR: tools/call
+    AR->>C: 自动转发
+    C->>N: 标准 MCP 请求
+    N->>N: 校验登录用户、workspace、Server 和 tool scope
+    N->>S: tools/call
+    S-->>N: CallToolResult
+    N-->>C: 标准 MCP 响应
+    C-->>AR: 调用结果
+    AR-->>V: tools/call response
+    V-->>U: 局部更新
+```
+
+Node 是最终权限边界。Browser 中的 capability、按钮禁用和 AppRenderer callback 只能改善体验，不能替代 Node 的授权检查。
 
 ### 3.5 状态模型
 
-| 状态 | 进入条件 | 用户反馈 | 可用操作与恢复 |
+| 状态 | 进入条件 | 用户反馈 | 恢复 |
 |---|---|---|---|
-| `unavailable` | Client 不支持 Apps | 普通 tool result | 无 App 操作 |
-| `disabled` | 插件或 Server Apps 能力关闭 | 普通 tool result | 启用后只影响后续实例 |
-| `negotiating` | Node 建立 MCP session、读取 tool catalog | 原工具位置 loading | 成功进入 loading；失败降级 |
-| `loading` | Node 读取 resource，Browser 初始化 iframe | 页面骨架 | 完成后 ready；超时降级 |
-| `ready` | instance、连接和 bridge 都有效 | 可交互页面 | 页面操作、关闭、切换显示模式 |
-| `interacting` | 页面请求正在执行 | 当前控件局部 loading | 成功回 ready；拒绝或失败保留页面 |
-| `degraded` | resource、bridge 或 MCP 连接失败且 fallback 可用 | 普通结果与重新加载 | Node 恢复后重新创建实例 |
-| `failed` | 无法提供安全页面且无可用结果 | 明确错误 | 重新执行原工具 |
-| `closed` | 用户关闭、Thread 切换、登录失效或插件停用 | 折叠为普通结果 | 重开时创建新 instance |
+| `unavailable` | 客户端或工具没有 Apps 能力 | 普通 tool result | 无需恢复 |
+| `disabled` | 功能开关或 Server 配置关闭 | 普通 tool result | 启用后影响后续加载 |
+| `connecting` | Browser Client 连接 Node MCP 端点 | 工具结果位置显示骨架 | 失败后降级 |
+| `loading` | Browser Client 建连，AppRenderer 查询 descriptor、读取 resource 并挂载 iframe | 原工具结果保持可见，App 区域显示加载状态 | `onError` 或超时后降级 |
+| `ready` | App 页面已经呈现且可操作 | 展示 App；不把私有初始化回调作为前提 | 可关闭或继续操作 |
+| `interacting` | 页面请求执行中 | 只在当前控件显示进行中 | 成功或失败后回到 ready |
+| `degraded` | transport、resource 或 iframe 失败且有 fallback | 显示普通结果和重试 | 重新建立 Client 并重新挂载 |
+| `closed` | 用户关闭、Thread 切换、登出或插件停用 | 折叠为普通结果 | 重开时新建 Client/View |
 
-配置状态不得混淆：
-
-- `default`：产品默认是否允许 Apps；
-- `desired`：当前用户/Server 配置希望启用的版本；
-- `effective`：Node 当前实际协商并可提供的能力；
-- `revision`：配置或 credential 变化标识。
-
-只有 Node 的 effective revisions 与配置接口返回的 desired revisions 一致时，instance 才能进入 `ready`。
+配置的 `default`、`desired`、`effective` 和 `revision` 只描述 Apps 是否可用；它们不扩展 MCP Apps wire protocol。Node 仅在配置和 credential revision 有效时接受 Browser MCP session。
 
 ## 4. 架构与职责
 
-```mermaid
-flowchart LR
-    subgraph CONFIG["配置准备（不进入 UI 交互链）"]
-        P["Python Managed MCP Config Provider<br/>静态配置 + turn-scoped 明文配置"]
-    end
-
-    subgraph HOST["Next Node Apps Runtime"]
-        C["PersistentConnectorManager<br/>MCP Client/session"]
-        T["Apps-aware Tool Catalog"]
-        R["UI Resource Loader"]
-        I["App Instance / Policy / Events"]
-        C --- T --- R --- I
-    end
-
-    S["MCP Server 模块"] <--> C
-    P -."仅建连配置".-> C
-    I <--> B["Next.js Client Component<br/>AppBridge + iframe controller"]
-    B <-->|"MCP Apps 客户端通信"| V["App View"]
-    V <--> U["用户"]
-```
-
 | 模块 | 负责 | 不负责 |
 |---|---|---|
-| Claude Agent Runtime | 首次工具选择和调用、结果进入对话 | App 页面连接和后续局部交互 |
-| Python Config Provider | 静态 Server 描述、一次建连明文配置、revision/OAuth 投影 | MCP session、resource、AppBridge、浏览器事件 |
-| Next Node Apps Runtime | MCP session、tool catalog、resource 读取、权限、instance、事件、fallback 决策 | DOM 渲染、Agent 推理、长期落盘 secret |
-| Browser Runtime 插件 | 作为 Next.js Client Component 承载 AppBridge、iframe、Host/View 消息和页面生命周期 | MCP Client、credential、权威连接状态 |
-| App View | 页面展示、局部 UI 状态和客户端通信 | 直接访问 IM credential、顶层 DOM 或任意 MCP Server |
-| MCP Server 模块 | tools、resources、业务结果和 UI bundle | IM 用户身份、Thread 和页面布局 |
-
-客户端字段、方法与平台扩展统一由 [客户端承载通信协议](./mcp-apps-client-host-communication.md) 定义；主设计不重复传输与接口细节。
+| Claude Agent Runtime | 首次工具选择、调用和结果进入 Chat | App iframe 和页面后续交互 |
+| Next Client Component | 创建 Browser MCP Client、挂载 AppRenderer、loading/fallback、标准 Host callbacks | 上游凭证和真实 MCP 地址 |
+| `AppRenderer` | descriptor/resource 获取、AppBridge、iframe、标准 Host/View 消息、tool input/result | IM 用户授权和上游连接配置 |
+| Node Apps Runtime | 暴露受控 MCP Streamable HTTP 端点；校验身份/scope；调用 Connector | DOM、iframe、App 页面构建 |
+| `PersistentConnectorManager` | 建立、复用、重连和关闭上游 MCP session；过滤 tools/resources；隐藏凭证 | 浏览器 UI 和 Agent 推理 |
+| Python Config Provider | 为 Node 提供当前 Server 的受控建连配置 | Apps UI、MCP 请求转发和前端事件 |
+| MCP Server 模块 | tools、resources、App HTML 和业务状态 | IM 页面、用户身份和 Thread 权限 |
 
 ## 5. 方案选型
 
-| 方案 | 判断 | 原因 |
+| 方案 | 结论 | 原因 |
 |---|---|---|
-| Dream 核心原生实现全部 Apps Host | 不选 | 把 iframe/UI 生命周期耦合进 Claude Agent Runtime，turn 结束后也无法自然承载页面交互 |
-| Next.js Browser 插件 + 进程级 Node Apps Runtime | **选择** | Next.js 提供 Server/Client 边界、同源 Host 接口与统一 Node 发布单元；Browser 负责 iframe，进程级 Runtime 持久连接并保留 fallback |
-| Vite Web + 独立 Node Apps Runtime | 不选 | 协议上可行，但不符合已经确定的 Next.js 目标架构；只保留为迁移回滚路径 |
-| 独立 Bridge/Gateway 服务 | 暂不引入 | 只有多 Host 复用、跨网络聚合等独立需求成立时再考虑；不是支持 Apps 的前提 |
-| 直接采用第三方 bridge | 不直接采用 | 可参考 transport、路由和观测实现，但身份、Thread、权限、fallback 必须遵守 IM 合同 |
-| 只保留普通 tool result | 作为回退 | 不能提供交互式 App，但应一直保留为兼容和回滚路径 |
+| 自建 iframe/AppBridge Host runtime | 拒绝 | 与 AppRenderer 的 resource、bridge、iframe 和生命周期能力重复 |
+| `AppRenderer` + Browser Client 直连真实 MCP | 拒绝 | 暴露真实地址/认证，且无法统一支持 Node-local stdio/localhost Server |
+| `AppRenderer` + Node 受控 MCP transport + PersistentConnectorManager | **选择** | 复用标准 Host renderer，同时把真实连接、身份和安全过滤留在 Node |
+| 独立 Bridge/Gateway 服务 | 暂不引入 | 当前 Next Node 已能承担受控 MCP 端点；没有额外产品边界需求 |
+| 只显示普通 tool result | 保留为 fallback | 保证不支持 Apps 或加载失败时仍可完成任务 |
 
-AppBridge 适合作为插件集成，但“插件化”只指可独立发布和启停的 Apps 功能包：
-
-- 浏览器插件部分：AppBridge、iframe controller 和客户端通信 adapter；
-- Node 插件部分：Apps Host、`PersistentConnectorManager`、tool catalog、resource loader、instance 和事件；
-- Dream 核心只需把现有工具调用上下文稳定交给 Apps Host：当前用户、Thread、Server、tool、toolCall、配置 revision，以及原 tool input/result；不新增交接标识；
-- Python managed MCP 只提供版本化配置接口。
+AppRenderer 作为 IM Apps 插件的浏览器依赖集成；`PersistentConnectorManager` 和受控 MCP 端点是同一插件在 Node 侧的服务。插件化不改变 Dream 核心的首次工具调用，只扩展工具结果的展示分支。
 
 ## 6. 分阶段交付
 
-| 阶段 | 范围 | 验收 | 回滚 |
+| 阶段 | 范围 | 可观察验收 | 回滚 |
 |---|---|---|---|
-| Phase 0 | Next.js compatibility shell；官方示例 App；进程级 Node 单连接；读取 `ui://`；Browser AppBridge `null` 模式 | 现有 Dream 主路径在 Next.js 下可用；render tool 返回后出现可加载 iframe；普通 tool 仍按原样显示；浏览器无 credential | 切回迁移前 Vite image 并关闭 Apps flag |
-| Phase 1 | 只读/低风险 App、状态模型、fallback | Agent turn 结束后 App 仍可读；加载失败回退同一次 result；关闭/重开不串 instance | 禁用页面动作 |
-| Phase 2 | 受控 `tools/call`、`ui/message`、OAuth 恢复 | 每次请求绑定当前 actor/thread/server/tool；拒绝不触发 Server；`ui/message` 创建新 turn | 回到只读 |
-| Phase 3 | 多 App/多 session、版本治理、审计和可选非 Node-local runtime | 多用户隔离；版本不兼容 fail closed；事件可追踪；插件可独立升级/卸载 | 回滚插件版本 |
+| Phase 0 | Next.js compatibility shell；一个 Node 可达的官方示例 Server；Browser Client；受控 Streamable HTTP 端点；AppRenderer | render tool 完成后出现 App；`resources/read` 经 Node；浏览器无真实 Server URL/credential；普通工具保持原样；选定的 AppRenderer 版本能执行所需 sandbox/CSP policy | 关闭 Apps flag，显示普通结果 |
+| Phase 1 | 只读/低风险工具、完整 fallback、关闭/重开 | Agent turn 结束后页面仍可读；资源或 iframe 失败显示同一次结果；Thread 切换后旧页面不可调用 | 禁用 AppRenderer 挂载 |
+| Phase 2 | 受控页面 `tools/call`、`ui/message`、OAuth 恢复；可选 `window.im` 兼容适配层 | 每次调用在 Node 校验当前用户/workspace/Server；拒绝不触发上游；`ui/message` 创建新 turn；未实现的兼容成员不暴露 | 回到只读 |
+| Phase 3 | 多 App/多 session、版本治理、审计和插件升级 | 多用户与多 Thread 不串请求；不兼容版本 fail closed；可按 tool call 追踪；插件可独立禁用 | 回滚插件版本 |
 
 ## 7. 测试与 Go / No-Go
 
-本节 Go/No-Go 只决定当前 MCP Apps 阶段能否发布，不撤销 Next.js 迁移决策。
+必须验证：
 
-必须通过：
+- 官方示例 App 经 Browser Client → Node transport → MCP Server 完成 initialize、tools/list、resources/read 和 iframe 初始化；
+- 页面内 `tools/call` 由 AppRenderer 自动转发，但 Node 对未授权 Server/tool 拒绝且不访问上游；
+- tool result 事件能提供稳定 `serverRef`、原始 tool name、`toolCallId`、input 和完整 `CallToolResult`；
+- 普通工具、无 `_meta.ui.resourceUri` 的工具和不支持 Apps 的客户端只显示原结果；
+- resource MIME 错误、CSP 拒绝、iframe 超时、Node 断线、上游断线和 OAuth 失效均可降级；
+- Browser 请求、日志和页面中不出现上游 MCP 地址、OAuth token、headers 或 stdio env；
+- Next Node 重启后 Browser 能重新连接；旧请求不能进入新页面；
+- AppRenderer、MCP SDK 与 ext-apps 的版本组合通过官方 demo 和 ui-inspector 合同测试。
+- 当前 `AppRenderer@7.1.1` 未通过公共 prop 暴露初始化完成回调，且其实现未应用 `SandboxConfig.permissions`；Phase 0 必须升级到已修复版本或完成上游修复验证，不能把类型声明当成已执行的安全策略。
 
-- 官方 MCP App 的 capability、tool descriptor、`resources/read` 和初始化流程；
-- 普通 MCP tool result 不创建 iframe；
-- render tool 的 UI URI 与 `serverRef + toolName + toolCallId` 准确关联；
-- App tool call 成功、权限拒绝、超时、取消、断线和重连；
-- CSP、origin、消息 source/schema、跨 instance 和跨 Thread 拒绝；
-- 插件禁用、版本不兼容、Node 重启和 Browser 刷新；
-- Python/Browser 日志、事件和页面中不出现 MCP secret；
-- 不支持 Apps 的客户端始终看到普通 fallback。
+本节 Go/No-Go 只控制 MCP Apps 阶段发布，不撤销 Next.js 迁移决策。
 
-Go 条件：Next.js compatibility shell 保持现有路由、认证、Agent SSE、WebSocket 和运行时配置行为；Node 能从受控配置接口建立目标 MCP 连接；Agent 结果能携带稳定的 Server/tool/call 身份；官方示例 App 能完成加载和双向交互；目标首期 Server 不依赖 Agent 物理连接私有状态。
+Go：官方示例 App 和目标首期 Server 通过上述链路；Node 端点能根据现有登录态、workspace 和经验证的 `serverRef` 选择唯一上游 Server；Browser 无凭证；sandbox/CSP policy 可验证；fallback 完整。
 
-No-Go 条件：需要把 credential 送到 Browser；无法校验 App instance 与用户/Thread/Server；必须依赖 Python 转发每条 UI 消息；或目标本地 MCP 不在 Node 可达位置且没有另行批准的本地运行时。
+No-Go：必须让 Browser 取得真实 Server 地址或凭证；当前工具结果无法稳定定位上游 Server；Node 无法在请求到达上游前实施权限过滤；或目标 Server 依赖 Agent 物理连接私有状态。

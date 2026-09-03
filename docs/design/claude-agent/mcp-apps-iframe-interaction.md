@@ -1,270 +1,228 @@
-<!-- [输入] MCP Apps 稳定规范、AppBridge、IM Next.js Node Apps Runtime 与 Browser Runtime 边界。 -->
-<!-- [输出] 定义 Node 获取 UI resource、Browser 加载 iframe、客户端通信和失败降级。 -->
-<!-- [定位] MCP Apps iframe 专项设计；客户端字段、方法与平台扩展见客户端承载通信协议。 -->
-<!-- [同步] 2026-09-04：iframe Host 挂载点统一为 Next.js Client Component。 -->
+<!-- [输入] MCP Apps 稳定规范、@mcp-ui/client AppRenderer 与 IM Next.js/Node Apps Runtime 边界。 -->
+<!-- [输出] 定义 AppRenderer 的挂载、业务交互、失败降级和 iframe 安全边界。 -->
+<!-- [定位] MCP Apps iframe 专项设计；不重复实现 AppRenderer 内部 bridge。 -->
+<!-- [同步] 2026-09-04：删除自建 App View runtime，统一由 AppRenderer 管理 resource、AppBridge 和 iframe。 -->
 
-# MCP Apps iframe 渲染与交互设计
+# MCP Apps `AppRenderer` iframe 交互设计
 
 > 状态：设计评审稿，未实现
 >
-> 结论：MCP Server 返回 `ui://` HTML resource；Next Node Apps Host 通过自己的持久 MCP session 读取资源并创建 App render instance；Next.js Client Component 在 Chrome 中挂载 iframe 并运行 Host 侧 `AppBridge(null, ...)`。App View 通过客户端通信完成初始化、通知、工具调用、消息和模型上下文交互。Python 不参与这条链路。
+> 结论：IM 不实现自己的 App View renderer。Next.js Client Component 创建 Browser MCP Client，将 `client`、`toolName`、`toolInput`、`toolResult` 和 sandbox 配置交给 `AppRenderer`；`AppRenderer` 负责读取 `ui://` resource、创建 AppBridge、挂载 iframe 和转发标准 MCP Apps 消息。
 
-参考资料（访问日期：2026-09-03）：
+参考资料（访问日期：2026-09-04）：
 
-- [MCP Apps 2026-01-26 稳定规范（ext-apps v1.7.5）](https://github.com/modelcontextprotocol/ext-apps/blob/v1.7.5/specification/2026-01-26/apps.mdx)
 - [MCP Apps Overview](https://modelcontextprotocol.io/extensions/apps/overview)
+- [`@mcp-ui/client` walkthrough](https://mcpui.dev/guide/client/walkthrough)
+- [`AppRenderer` API](https://mcpui.dev/guide/client/app-renderer)
+- [`AppRenderer` 7.1.1 源码](https://github.com/MCP-UI-Org/mcp-ui/blob/client/v7.1.1/sdks/typescript/client/src/components/AppRenderer.tsx)
+- [`AppFrame` 7.1.1 源码](https://github.com/MCP-UI-Org/mcp-ui/blob/client/v7.1.1/sdks/typescript/client/src/components/AppFrame.tsx)
 - [OpenAI：Add UI to your MCP server](https://developers.openai.com/plugins/build/chatgpt-ui#overview)
-- [OpenAI：Optional OpenAI component library](https://developers.openai.com/plugins/build/chatgpt-ui#optional-openai-component-library)
-- [OpenAI：Separate data processing from UI rendering](https://developers.openai.com/plugins/build/chatgpt-ui#separate-data-processing-from-ui-rendering)
-- [MCP Apps `App` client API](https://apps.extensions.modelcontextprotocol.io/api/classes/app.App.html)
-- [AppBridge API](https://apps.extensions.modelcontextprotocol.io/api/classes/app-bridge.AppBridge.html)
 
 ## 1. 背景与问题
 
-MCP Apps 的 UI resource 是 MCP Server 提供的一份 HTML 文档，通常已经包含页面需要的 JavaScript 和 CSS。Tool descriptor 用 `_meta.ui.resourceUri` 把渲染工具关联到该资源；`CallToolResult` 提供页面数据和文本 fallback，不是 UI URI 的来源。
+MCP Server 通过 Tool descriptor 的 `_meta.ui.resourceUri` 指向 App resource。这个资源是 `resources/read` 返回的 HTML 文档，不是 Chrome 可以直接访问的 `ui://` 网页地址。
 
-`ui://` 是 MCP resource URI，不是 Chrome 可直接导航的 Web URL。IM 的加载顺序是：
+`AppRenderer` 已经实现 Host 侧完整渲染链：
 
-1. Node Apps Host 从 Apps-aware tool catalog 找到 `_meta.ui.resourceUri`；
-2. Node 通过 `PersistentConnectorManager` 的 MCP session 执行 `resources/read`；
-3. Node 校验 URI、MIME 和资源策略，创建绑定当前 tool call 的 render instance；
-4. Browser Runtime 获取该 instance，在工具结果位置创建 iframe；
-5. iframe 执行资源中的 HTML/JS，App client 通过 `postMessage` transport 与 Host 侧 AppBridge 交互。
+1. 使用传入的 MCP Client 查询工具 descriptor；
+2. 读取 `ui://` HTML resource；
+3. 创建 `AppBridge(client, hostInfo, hostCapabilities)`；
+4. 创建隔离 iframe，并在内部连接 `PostMessageTransport`；
+5. 向 App 发送 tool input/result 和 Host context；
+6. 把 App 发出的标准 tools/resources 请求转给 MCP Client。
 
-Node “提供渲染”指 Node 提供经过校验的资源和页面实例；DOM 与 JavaScript 实际仍由用户浏览器执行。
+因此 IM 的工作是集成和授权，不是重写这六步。
+
+Server 提供的 App HTML bundle 自己使用 MCP Apps `App` client 和 `PostMessageTransport` 连接父级 Host；`AppRenderer` 管理对应的 Host 侧 `AppBridge`。IM 不编译第三方 App 页面，也不为每个 App 重写这层客户端代码。
 
 ## 2. 目标与边界
 
 ### 2.1 目标
 
-- UI resource、tool input/result 和页面实例由同一 Node Host 关联。
-- Next.js Web、Browser Runtime Client Component 和 App View 保持三个清楚的发布边界。
-- App View 通过统一的客户端通信与 Browser Runtime 交互。
-- 页面加载失败时回到同一次工具调用的普通 fallback。
-- 不可信 App HTML 与 IM 顶层页面保持 origin、DOM、存储和权限隔离。
+- 在现有 Chat 工具结果位置挂载 `AppRenderer`。
+- Browser Client 只通过 Node 受控 MCP transport 获取 descriptor、resource 和工具结果。
+- App 初始化完成前展示页面骨架，失败时显示原工具结果。
+- 关闭、重开和 Thread 切换时正确卸载 renderer 和 Client。
+- sandbox、CSP 和消息来源满足 Web Host 安全要求；无法验证的权限能力 fail closed。
 
 ### 2.2 非目标
 
-- 不规定 App View 使用的前端框架或组件库。
-- 不让 IM Next.js 工程编译第三方 App 源码。
-- 不让 Browser 直接访问 `ui://`、MCP transport 或 credential。
-- 不让 Python 读取 UI resource、转发页面消息或保存 App 状态。
-- 不在本稿定义 Node 获取 managed MCP 配置的接口。
-- 不在本稿重构 Agent、Chat SSE 或业务工具。
+- 不封装新的 iframe controller、AppBridge wrapper 或 resource loader。
+- 不修改 Server 提供的 HTML，不把第三方 App 源码编译进 Dream。
+- 不把 `@openai/apps-sdk-ui` 当作 Host renderer；它只是 App 页面可选组件库。
+- 不在本文定义 Python 配置接口或 Node 上游连接实现。
+- 不把 sandbox iframe 当作业务阶段或后端服务。
 
 ## 3. 概念与规则
 
-### 3.1 三个浏览器相关发布物
+### 3.1 IM 传给 `AppRenderer` 的内容
 
-| 发布物 | 构建者 | 内容 | 运行位置 |
-|---|---|---|---|
-| IM Web | Dream Next.js App Router | Chat、App 挂载点、loading/fallback UI、Host 接口 | Next Node + 顶层 IM 页面 |
-| IM Apps Browser Runtime | IM Apps 插件 | Node channel、Host 侧 AppBridge、iframe controller 和客户端通信 handlers | Next.js Client Component |
-| App View bundle | MCP App 开发者 | App HTML/JS/CSS 和客户端通信 adapter | 隔离 iframe |
+| 输入 | 来源 | 规则 |
+|---|---|---|
+| `client` | Next Client Component | 已连接 Node 受控 MCP transport；不含真实 Server 地址或凭证 |
+| `toolName` | Claude Agent 工具事件 | 必须是目标 Server descriptor 中的原始工具名，不能只靠展示名猜测 |
+| `toolInput` | 原工具调用 | 保持完整结构，不放入页面无关上下文 |
+| `toolResult` | 原工具完成事件 | 保持完整 MCP `CallToolResult`，包括 `structuredContent` 和 `_meta` |
+| `sandbox.url` | IM Host 配置 | 指向隔离的 sandbox proxy 页面，不由 MCP Server 指定 |
+| `sandbox.csp` | IM Host 的 sandbox policy | 传给能够以响应头执行 CSP 的隔离 sandbox proxy；resource metadata 的合并能力需随所选 AppRenderer 版本验证 |
+| `hostInfo` / `hostCapabilities` | IM Apps 插件 | 反映当前实际支持能力，不虚报 |
+| callbacks | IM Apps 插件 | 处理打开链接、后续消息、尺寸、错误和明确允许的平台扩展 |
 
-`@openai/apps-sdk-ui` 是 App View 可选组件库，提供与 ChatGPT 容器相匹配的按钮、卡片、输入控件和布局原语；App 开发者可用它获得一致样式而无需重建基础组件。
+如果 `toolResourceUri` 已由可信 Node 结果明确提供，可直接传入以避免再次遍历工具列表；否则让 `AppRenderer` 通过 Client 调用 `tools/list` 查找。两种方式都必须由 Node transport 限制到当前 Server。
 
-### 3.2 Node render instance
+### 3.2 挂载位置
 
-Node 向 Browser Runtime 提供的是一个页面实例，不是 MCP 凭证或任意资源 URL。概念上包含：
+当前前端的通用工具结果入口是 `/Users/dmeck/project/ink-dream-memory/frontend/src/components/chat/ToolMessagePart.tsx:59-216`。MCP App 只扩展该结果分支：
 
-- App instance ID、Node epoch 和有效期；
-- 当前用户、Thread、Server 和 toolCall 绑定；Node 从已认证的 IM runtime session 校验，不接受 App View 自报；
-- 已校验的 App HTML resource 与 resource metadata；
-- 当前完整 tool input 和 `CallToolResult`；
-- Host capabilities、显示策略与 CSP/permissions policy；
-- 普通 fallback。
+- 工具执行中继续使用现有 loading；
+- 工具完成且 descriptor 有 UI resource 时挂载 `AppRenderer`；
+- 无 UI resource 或 Apps 不可用时继续渲染现有工具卡片；
+- 专用审批卡片仍先完成原工具授权，不让 App 提前取得未批准参数。
 
-Browser 不允许用该实例读取其他 Server 或其他 URI。resource 发生 revision 变化时，Node 创建新实例，不热替换正在执行的第三方脚本。
+当前 Browser 事件只稳定提供 `toolCallId`、`toolName`、input 和 output：
 
-### 3.3 iframe 客户端通信
+- `/Users/dmeck/project/ink-dream-memory/frontend/src/lib/claude-agent-transport.ts:121-150`
+- `/Users/dmeck/project/ink-dream-memory/frontend/src/lib/claude-agent-transport.ts:388-421`
+
+实施前需补齐 `serverRef`、原始 Server tool name 和完整 `CallToolResult`；这些字段继续保存在现有 Chat 工具结果中，不增加新的中转对象。
+
+### 3.3 组件关系
 
 ```mermaid
 flowchart LR
-    APP["App 页面代码"] --> CLIENT["MCP Apps App client"]
-    CLIENT <-->|"PostMessageTransport<br/>JSON-RPC 2.0"| PROXY["Sandbox Proxy<br/>透明转发"]
-    PROXY <--> BRIDGE["Browser AppBridge<br/>Host handlers"]
-    BRIDGE <--> NODE["Node Apps Host"]
+    T["ToolMessagePart<br/>工具结果位置"] --> C["Browser MCP Client"]
+    C <-->|"同源 Streamable HTTP"| N["Node 受控 MCP 端点"]
+    T --> R["@mcp-ui/client AppRenderer"]
+    C --> R
+    R --> I["AppRenderer 管理的隔离 iframe<br/>运行 Server 提供的 App resource"]
+    I --> U["用户"]
 ```
 
-官方 SDK 的典型连接是 `App.connect(new PostMessageTransport(window.parent, window.parent))`；不使用 SDK 的 View 也必须产生兼容的 MCP Apps 消息。该通信承载：
+图中的 iframe 是 `AppRenderer` 的内部渲染边界，不是 IM 新增的业务模块。
 
-| 交互 | 标准消息 | 方向 |
-|---|---|---|
-| 初始化与能力协商 | `ui/initialize`、`ui/notifications/initialized` | App → Host |
-| 工具输入与结果 | `ui/notifications/tool-input-partial`、`ui/notifications/tool-input`、`ui/notifications/tool-result`、`ui/notifications/tool-cancelled` | Host → App |
-| Host 上下文与关闭 | `ui/notifications/host-context-changed`、`ui/resource-teardown` | Host → App |
-| 页面调用工具或读取资源 | `tools/call`、`resources/read` | App → Host |
-| 页面向对话发送消息 | `ui/message` | App → Host |
-| 页面更新模型可见上下文 | `ui/update-model-context` | App → Host |
-| 日志、尺寸和显示模式请求 | `notifications/message`、`ui/notifications/size-changed`、`ui/request-display-mode` | App → Host |
-
-App 业务代码通过客户端方法和事件监听使用这些能力。IM 平台扩展的字段与方法只在 [客户端承载通信协议](./mcp-apps-client-host-communication.md) 定义。
-
-### 3.4 页面创建流程
-
-```mermaid
-flowchart TD
-    T["Node Apps-aware Tool Catalog<br/>Tool._meta.ui.resourceUri"] --> R["收到 render tool 结果"]
-    R --> READ["Node resources/read ui://"]
-    READ --> VALIDATE{"URI、MIME、policy 是否有效"}
-    VALIDATE -->|是| INSTANCE["Node 创建 render instance"]
-    INSTANCE --> B["Browser Runtime 获取实例"]
-    B --> FRAME["在工具结果位置创建 iframe"]
-    FRAME --> INIT["App client 通过 postMessage<br/>完成 ui/initialize"]
-    INIT --> DATA["Host 发送 tool input/result"]
-    DATA --> READY["用户使用 App"]
-    VALIDATE -->|否| FALLBACK["显示同一次 tool result fallback"]
-```
-
-只有实际 render tool call 才创建页面。`tools/list` 发现 UI URI 可以用于预取，但不能单独向对话插入 iframe。
-
-### 3.5 Web iframe 安全容器
-
-MCP Apps Web Host 的稳定规范使用一个与顶层 Host 不同 origin 的 Sandbox Proxy，再由它加载 App View。这里的 Sandbox Proxy 是浏览器安全容器，不是 MCP Server、Agent 阶段、Node 服务或业务参与者；它只在 iframe 专项设计中出现。
-
-```mermaid
-flowchart TB
-    HOST["IM 顶层页面<br/>Shell + Browser Runtime"]
-    PROXY["Sandbox Proxy iframe<br/>独立 origin"]
-    VIEW["App View iframe<br/>执行 MCP App HTML/JS"]
-
-    HOST <-->|"Host/Proxy 控制消息"| PROXY
-    PROXY <-->|"透明转发 MCP Apps 消息"| VIEW
-```
-
-Sandbox Proxy 负责：
-
-- 接收 Host 已读取和校验的 HTML resource；
-- 根据 resource metadata 建立内层 App View；
-- 在顶层 Host 与 App View 之间转发 MCP Apps 消息；
-- 隔离顶层 DOM、cookie、localStorage 和 origin 权限。
-
-它不调用业务工具、不持有 MCP credential、不保存 Thread 状态。用户界面只显示一个 App 区域，不展示双 iframe 结构。
-
-### 3.6 首次加载
+### 3.4 正常加载业务时序
 
 ```mermaid
 sequenceDiagram
     actor U as 用户
     participant A as Claude Agent Runtime
     participant S as MCP Server 模块
-    participant N as Node Apps Host
-    participant B as IM Browser Runtime
-    participant X as Sandbox Proxy
-    participant V as App View
+    participant B as IM Browser
+    participant N as Node Apps Runtime
+    participant R as AppRenderer
+    participant V as App 页面
 
     U->>A: 发起正常任务
-    A->>S: tools/call(render tool)
-    S-->>A: CallToolResult + fallback
-    A-->>B: 现有工具结果事件<br/>server、tool、toolCall、input/result
-    B->>N: 为当前工具调用请求 App instance
-    N->>N: 从 Tool catalog 取得 resourceUri
-    N->>S: resources/read(resourceUri)
-    S-->>N: MCP App HTML resource
-    N->>N: 校验并创建 render instance
-    N-->>B: instance + resource + input/result
-    B->>X: 创建独立 origin Proxy
-    B->>B: AppBridge(null) 注册 manual handlers
-    B->>X: Host 侧连接 iframe transport
-    X->>V: 加载 App HTML
-    V->>V: 创建 App client 并注册事件监听
-    V->>B: App.connect(PostMessageTransport)<br/>ui/initialize(appCapabilities)
-    B-->>V: protocolVersion + hostCapabilities + hostContext
-    V->>B: ui/notifications/initialized
-    B-->>V: ui/notifications/tool-input
-    B-->>V: ui/notifications/tool-result
-    V-->>U: 显示 ready 页面
+    A->>S: tools/call
+    S-->>A: CallToolResult
+    A-->>B: 工具结果进入 Chat
+    B->>N: Browser Client 连接受控 MCP transport
+    N->>S: 建立或复用受控上游连接
+    B->>R: 传入 client、tool、input、result
+    R->>N: tools/list / resources/read
+    N->>S: 过滤并代理
+    S-->>N: descriptor / App resource
+    N-->>R: 标准 MCP 响应
+    R->>V: 创建 bridge、iframe 并发送 input/result
+    V-->>U: 页面可用
 ```
 
-Browser Runtime 运行 Host 侧 AppBridge；App View 运行 App client。双方的 transport 都在浏览器中，以 `postMessage` 穿过 Sandbox Proxy 通信。Node 是 Host 的服务端处理与状态来源，不在服务端创建 DOM 或 iframe。
+用户看到的是“工具执行 → 页面加载 → 页面可用”。页面不展示 resource URI、transport、iframe 层级或 MCP session 信息。
 
-### 3.7 页面内交互
+### 3.5 页面内操作业务时序
 
 ```mermaid
 sequenceDiagram
     actor U as 用户
-    participant V as App View
-    participant B as Browser Runtime / AppBridge
-    participant N as Node Apps Host
+    participant V as App 页面
+    participant R as AppRenderer
+    participant C as Browser MCP Client
+    participant N as Node Apps Runtime
     participant S as MCP Server 模块
 
-    U->>V: 点击、筛选或提交
-    V->>B: App.callServerTool<br/>postMessage: tools/call
-    B->>N: 当前 instance 请求
-    N->>N: 校验 instance、capability、用户、Thread、Server 和 tool
+    U->>V: 点击或提交
+    V->>R: tools/call
+    R->>C: AppBridge 自动转发
+    C->>N: 标准 MCP 请求
+    N->>N: 校验当前用户、workspace、Server 和 tool
     N->>S: tools/call
     S-->>N: CallToolResult
-    N-->>B: 标准结果
-    B-->>V: tools/call response
+    N-->>C: 标准 MCP 响应
+    C-->>R: 结果
+    R-->>V: tools/call response
     V-->>U: 局部更新
 ```
 
-同一客户端通信还承载 `ui/message` 与 `ui/update-model-context`。前者由 Node 作为当前用户和 Thread 的后续消息提交给现有 Chat ingress；后者只更新当前 App instance 供未来 turn 使用的模型上下文。完整方法映射见 [客户端承载通信协议](./mcp-apps-client-host-communication.md)。
+App 使用标准 bridge；可选 `window.im` 兼容适配层在实现后也只映射到同一消息链。
 
-### 3.8 加载状态
-
-| 阶段 | IM 页面 | App 页面 |
-|---|---|---|
-| 工具执行中 | 原工具位置 loading | 尚未创建 |
-| Node 读取/校验资源 | 保持同一 loading 区域 | 不显示空 iframe |
-| iframe 初始化 | 显示页面骨架 | 暂不接受写操作 |
-| ready | 展示 App | 可交互 |
-| action pending | 页面保持可见 | 仅触发控件局部 loading |
-| degraded | 显示 fallback 和重新加载 | 销毁失败实例 |
-| closed | 折叠为普通结果 | teardown 后停止消息 |
-
-页面不展示 resource URI、协议版本、iframe 层数或内部连接错误。
-
-### 3.9 失败与降级
+### 3.6 失败与降级业务时序
 
 ```mermaid
 sequenceDiagram
-    participant S as MCP Server 模块
-    participant N as Node Apps Host
-    participant B as Browser Runtime
-    participant V as App View
     actor U as 用户
+    participant B as IM Browser
+    participant N as Node Apps Runtime
+    participant R as AppRenderer
+    participant S as MCP Server 模块
 
-    alt Client 不支持 Apps或插件停用
+    alt Apps 未启用或工具无 UI resource
         B-->>U: 显示普通 tool result
-    else resources/read 或 MIME 校验失败
-        S-->>N: error / invalid resource
-        N-->>B: render instance unavailable
-        B-->>U: fallback + 重新加载入口
-    else iframe 初始化超时
-        V--xB: 未完成 initialized
-        B->>N: 关闭 instance
-        B-->>U: fallback + 重新加载入口
-    else 页面请求被拒绝
-        N-->>B: permission denied
-        B-->>V: 当前动作失败
-    else MCP session 中断
-        N-->>B: connection changed / new generation
-        B-->>V: 连接状态变化事件
-        V-->>U: 保留已显示内容，暂停新操作
+    else Node transport 或上游连接失败
+        B->>N: 连接或 MCP 请求
+        N--xB: unavailable / auth required
+        B-->>U: 普通结果 + 重试或认证入口
+    else resource 无效
+        R->>N: resources/read
+        N->>S: 过滤后请求
+        S-->>N: invalid MIME / error
+        N-->>R: 标准错误
+        R-->>B: onError
+        B-->>U: 普通结果 + 重新加载
+    else iframe 初始化失败
+        R--xB: onError / timeout
+        B-->>U: 普通结果 + 重新加载
+    else 页面工具无权限
+        R->>N: tools/call
+        N-->>R: permission denied
+        R-->>U: 页面保留，当前操作失败
     end
 ```
 
-### 3.10 关闭与恢复
+失败不能清除原工具结果，也不能自动重放写操作。
 
-- 用户关闭：Browser 发 `ui/resource-teardown`，销毁 iframe，再通知 Node 关闭 instance。
-- 重新打开：Browser 向 Node 请求新 instance；不复用已关闭的消息通道。
-- 切换 Thread：Browser 关闭当前实例；Node 拒绝旧 Thread 的后续动作。
-- Browser 刷新：重新取得 Node snapshot 并创建 iframe；不把浏览器内存视为权威状态。
-- Node 重启：epoch 改变，旧 instance 全部失效；普通 result 保留。
-- 插件停用或版本不兼容：不创建新 iframe，现有页面 teardown，显示 fallback。
+### 3.7 页面状态
 
-### 3.11 安全边界
+| 状态 | 页面表现 | 允许操作 |
+|---|---|---|
+| 工具执行中 | 现有工具 loading | 取消原工具 |
+| Client 连接中 | 同一位置骨架 | 等待或关闭 |
+| resource/iframe 加载中 | 同一位置骨架 | 等待或关闭 |
+| ready | App 页面已经呈现且可操作；Host 不依赖 `AppRenderer` 私有初始化状态 | 使用页面、关闭、请求支持的显示模式 |
+| action pending | 页面保持可见，当前控件 loading | 取消可取消操作 |
+| degraded | 原工具结果 + 重试/认证入口 | 重试或继续对话 |
+| closed | 折叠为原工具结果 | 重新打开 |
 
-- Node 只读取当前 tool catalog 声明的 UI resource，并校验 URI、MIME、大小和 policy。
-- App View 与顶层 IM 页面不同 origin；CSP 和 permissions 默认拒绝未声明的外部能力。
-- Browser/Sandbox Proxy 校验 `message.source`、origin 和 schema；Browser AppBridge 与 Node 再校验 instance、用户、Thread、Server、tool、epoch 和 generation。
-- App View 不能读取顶层 cookie/localStorage、MCP credential、完整对话或系统提示词。
-- `tools/call` 只能进入当前 instance 绑定的 Node Host 和 MCP Server。
-- Host 不改写第三方 HTML 注入任意脚本。
-- teardown 后拒绝该 instance 的所有请求。
+### 3.8 关闭与恢复
+
+- 用户关闭：调用 `AppRendererHandle.teardownResource()` 并卸载当前 App；同一 Thread/Server 下仍被其他 App 使用的 Client 不受影响。
+- Thread 切换或登出：卸载该作用域内的 App，并关闭对应 Browser MCP Client。
+- 页面重开：重新挂载 AppRenderer，不复用已关闭 iframe。
+- Browser 刷新：从持久化的 Chat 工具结果重新判断是否可挂载；不恢复 DOM 内存。
+- Node 或上游重连：Browser Client 按 transport 语义重新连接；已失败的写操作不自动重放。
+- 插件停用或版本不兼容：不挂载 AppRenderer，保留普通结果。
+
+### 3.9 安全边界
+
+- `AppRenderer` 的 sandbox URL 必须来自 IM 配置，不接受 App 或 MCP Server 覆盖。
+- sandbox proxy 与顶层 IM 页面使用隔离 origin；CSP 必须由 sandbox proxy 响应头执行，不能只依赖页面脚本。
+- `AppRenderer@7.1.1` 的类型声明包含 `SandboxConfig.permissions`，但当前 `AppFrame` 实现没有应用该值，而是写入固定 sandbox 属性；在升级或上游修复验证前，只允许不需要额外浏览器权限的 App，其他 App fail closed。
+- 该版本的 `AppRenderer` 也没有公开成功初始化回调。IM 不读取内部 bridge 状态；加载期间保留普通工具结果，并只根据 `onError`、transport 错误和超时进入降级。
+- Node 受控 MCP 端点不接受 Browser 自报的真实 Server URL、credential 或 stdio command。
+- Node 在代理 `tools/call`、`resources/read` 之前校验当前登录态、workspace、Server 和 tool scope。
+- App 页面不能读取顶层 cookie/localStorage、完整对话、系统提示词或 MCP credential。
+- AppRenderer/bridge 的浏览器校验不替代 Node 授权。
+- `ui://` HTML 经 Node MCP 端点返回 Browser；页面声明的外部网络请求仍受 sandbox/CSP 控制，不能假称为 Node 已代理。
 
 ## 4. 设计结论
 
-Node Apps Host 负责取回和提供 iframe 所需的 UI resource、页面实例、Host 方法与事件；Browser Runtime 负责 Chrome 中的 iframe 和 Host 侧 AppBridge；App View 负责页面渲染与客户端交互。Python 完全不参与这条链路。Sandbox Proxy 仅是 Web iframe 的隔离实现，不能出现在产品主流程中。
+iframe 渲染的唯一 Host 组件是 `AppRenderer`。IM 只实现 Browser Client、Node 受控 MCP transport、工具结果挂载和 Host callbacks；`window.im` 若启用，则另由版本化 sandbox 兼容适配层提供。资源读取、AppBridge、iframe 创建、标准消息传递和 input/result 投递不再作为 IM 自研模块。
