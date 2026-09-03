@@ -1,31 +1,41 @@
 #!/usr/bin/env python3
 """Deterministic Anthropic SSE provider for a real Docker Claude sandbox probe.
 
-[Input] HTTP POST requests from a test-owned Claude Code CLI and a caller-supplied listen port.
-[Output] One Bash tool_use followed by one end_turn response; no external model/OAuth traffic.
+[Input] HTTP POST requests from a test-owned Claude Code CLI, caller-supplied listen port, and optional fixed Bash/final-text fixtures.
+[Output] One configurable Bash tool_use followed by one end_turn response; no external model/OAuth traffic.
 [Pos] Manual/CI container compatibility fixture, outside production runtime.
 [Sync] 2026-08-19: add provider-free CLI 2.1.235 Bash and credential deny-read validation.
+[Sync] 2026-09-04: expose a reusable handler factory for process-isolated notion-cli Runtime contracts while preserving CLI defaults.
 """
 
 from __future__ import annotations
 
 import argparse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+
+_DEFAULT_COMMAND = (
+    "printf 'workspace-write-ok\\n' > sandbox-write.txt; "
+    "if cat .claude-home/.credentials.json >/dev/null 2>&1; "
+    "then printf 'credential-readable\\n'; exit 91; "
+    "else printf 'credential-denied\\n'; fi"
+)
+_DEFAULT_FINAL_TEXT = "sandbox probe complete"
 
 
 def _frame(event: str, payload: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
 
 
-def _response(*, request_number: int, use_tool: bool) -> bytes:
+def _response(
+    *,
+    request_number: int,
+    use_tool: bool,
+    command: str = _DEFAULT_COMMAND,
+    final_text: str = _DEFAULT_FINAL_TEXT,
+) -> bytes:
     if use_tool:
-        command = (
-            "printf 'workspace-write-ok\\n' > sandbox-write.txt; "
-            "if cat .claude-home/.credentials.json >/dev/null 2>&1; "
-            "then printf 'credential-readable\\n'; exit 91; "
-            "else printf 'credential-denied\\n'; fi"
-        )
         events = (
             (
                 "message_start",
@@ -109,7 +119,7 @@ def _response(*, request_number: int, use_tool: bool) -> bytes:
                 {
                     "type": "content_block_delta",
                     "index": 0,
-                    "delta": {"type": "text_delta", "text": "sandbox probe complete"},
+                    "delta": {"type": "text_delta", "text": final_text},
                 },
             ),
             ("content_block_stop", {"type": "content_block_stop", "index": 0}),
@@ -126,50 +136,70 @@ def _response(*, request_number: int, use_tool: bool) -> bytes:
     return "".join(_frame(event, payload) for event, payload in events).encode()
 
 
-class _Handler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
-    request_number = 0
+def build_handler(
+    *,
+    command: str = _DEFAULT_COMMAND,
+    final_text: str = _DEFAULT_FINAL_TEXT,
+    requests_seen: list[dict[str, Any]] | None = None,
+    announce_requests: bool = True,
+) -> type[BaseHTTPRequestHandler]:
+    """Build an isolated deterministic Provider handler for one test server."""
 
-    def log_message(self, _format: str, *_args: object) -> None:
-        return
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        request_number = 0
 
-    def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
-        size = int(self.headers.get("content-length", "0"))
-        body = self.rfile.read(size)
-        if self.path.endswith("/count_tokens"):
-            encoded = json.dumps({"input_tokens": 1}).encode()
-            content_type = "application/json"
-        else:
-            type(self).request_number += 1
-            try:
-                payload = json.loads(body)
-            except json.JSONDecodeError:
-                payload = {}
-            messages = payload.get("messages") if isinstance(payload, dict) else []
-            has_tool_result = any(
-                isinstance(item, dict) and item.get("type") == "tool_result"
-                for message in messages or []
-                if isinstance(message, dict)
-                for item in (
-                    message.get("content")
-                    if isinstance(message.get("content"), list)
-                    else []
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+        def do_POST(self) -> None:
+            size = int(self.headers.get("content-length", "0"))
+            body = self.rfile.read(size)
+            if self.path.endswith("/count_tokens"):
+                encoded = json.dumps({"input_tokens": 1}).encode()
+                content_type = "application/json"
+            else:
+                type(self).request_number += 1
+                try:
+                    payload = json.loads(body)
+                except json.JSONDecodeError:
+                    payload = {}
+                if requests_seen is not None and isinstance(payload, dict):
+                    requests_seen.append(payload)
+                messages = payload.get("messages") if isinstance(payload, dict) else []
+                has_tool_result = any(
+                    isinstance(item, dict) and item.get("type") == "tool_result"
+                    for message in messages or []
+                    if isinstance(message, dict)
+                    for item in (
+                        message.get("content")
+                        if isinstance(message.get("content"), list)
+                        else []
+                    )
                 )
-            )
-            encoded = _response(
-                request_number=type(self).request_number,
-                use_tool=not has_tool_result,
-            )
-            content_type = "text/event-stream"
-            print(
-                f"REQUEST {type(self).request_number} tool_result={has_tool_result}",
-                flush=True,
-            )
-        self.send_response(200)
-        self.send_header("content-type", content_type)
-        self.send_header("content-length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
+                encoded = _response(
+                    request_number=type(self).request_number,
+                    use_tool=not has_tool_result,
+                    command=command,
+                    final_text=final_text,
+                )
+                content_type = "text/event-stream"
+                if announce_requests:
+                    print(
+                        f"REQUEST {type(self).request_number} "
+                        f"tool_result={has_tool_result}",
+                        flush=True,
+                    )
+            self.send_response(200)
+            self.send_header("content-type", content_type)
+            self.send_header("content-length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+    return Handler
+
+
+_Handler = build_handler()
 
 
 def main() -> int:

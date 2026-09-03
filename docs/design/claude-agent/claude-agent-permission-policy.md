@@ -1,4 +1,4 @@
-> [Input] `backend/libs/claude_agent_kit/server/agent_runner.py`, Claude Code restored source `tools/SkillTool/constants.ts`, `backend/claude_agent/context_builder.py`, frontend tool confirmation flow.
+> [Input] `backend/libs/claude_agent_kit/server/agent_runner.py`, Claude Code restored source `tools/SkillTool/constants.ts`, `backend/claude_agent/context_builder.py`, actor/thread Notion projection, frontend tool confirmation flow.
 > [Output] Claude-agent tool permission policy for `tool_choice` modes, sensitivity classes, and PreToolUse hook decisions.
 > [Pos] permission-policy-doc in `docs/design/claude-agent`
 > [Sync] 2026-06-09: initial standalone policy extracted from runner implementation and product rule: query-like tools are low-sensitivity; execution/write/interactive tools are high-sensitivity unless explicitly listed.
@@ -29,6 +29,9 @@
 > PreToolUse decision chain returns to its pre-feature shape; `open` mode
 > reverts to "unrestricted egress"; the network-variant confirmation card
 > still exists but is only triggered by can_use_tool (`SandboxNetworkAccess`).
+> [Sync] 2026-09-04: actor-bound, strictly parsed notion-cli read API commands
+> leave the Dream-surface mutation guard for the existing network/full-access/
+> frontend-confirmation decision chain; no direct Bash allow was added.
 
 # Claude-Agent Permission Policy
 
@@ -50,7 +53,7 @@ It describes the product policy, not Claude Code's internal classifier.
 | `manual` | All non-special tools go through frontend confirmation. `.editor/` virtual-index `Read` redirects still run because they only replace placeholder reads with a safe tempfile snapshot. |
 | `none` | No tools are exposed; auto allow rules do not apply. |
 
-When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`, except answer-form tools (`AskUserQuestion`, `mcp__user__ask_user`), built-in file/search tools whose resolved path is outside the current thread workspace, and network tools when `sandbox_network_mode="disabled"`. Answer-form tools still go through frontend confirmation because the form is the only place where user answers are collected and merged into `updatedInput`; out-of-workspace file/search tools and disabled-network tools are hard-denied before full-access is considered. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
+When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`, except answer-form tools (`AskUserQuestion`, `mcp__user__ask_user`), built-in file/search tools whose resolved path is outside the current thread workspace, commands rejected by the Dream-surface write guard, and network tools when `sandbox_network_mode="disabled"`. Answer-form tools still go through frontend confirmation because the form is the only place where user answers are collected and merged into `updatedInput`; Dream-surface mutation, out-of-workspace file/search, and disabled-network decisions are hard denials before full-access is considered. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
 
 Settings `system_config.workspace_enabled=true` additionally enables the
 per-thread Claude Code Bash sandbox described in
@@ -94,6 +97,17 @@ Current auto-allow inventory:
 `switch_editor` is low-sensitivity because the MCP handler is a no-op and the PostToolUse hook only changes which existing editor session `.editor/` reads resolve to. It does not modify document content.
 
 `Skill` is low-sensitivity because Claude Code exposes skills through the built-in `Skill` tool, whose job is to expand or run a named skill prompt. The exact tool name was confirmed in restored Claude Code source: `src/tools/SkillTool/constants.ts` exports `SKILL_TOOL_NAME = 'Skill'`. Do not use a broad `skill*` prefix. Allowing `Skill` does not allow later tool calls made by that skill; those calls are evaluated again by this policy.
+
+The PreToolUse Bash payload does not carry trustworthy originating-Skill
+identity. Therefore the notion-cli exception is capability- and command-bound,
+not prompt-name-bound: the service must have projected the current actor/thread
+Notion credential home, and the command must be a literal `ntn api` read form
+published by the built-in Skill. Executable paths/wrappers, undeclared
+endpoints, write forms, malformed JSON, command composition/substitution, and
+missing binding remain inside the conservative Dream-surface deny. Matching
+only means “not a `.dream` mutation”; it does not grant Bash permission. The
+command then reaches disabled-network enforcement and the ordinary
+full-access/Auto/manual confirmation rules.
 
 Implementation detail: hook payloads are normalized before policy lookup. The runner accepts both Claude hook JSON keys (`tool_name`, `tool_input`) and adjacent SDK/frontend camelCase keys (`toolName`, `toolInput`) so a payload such as `{"toolName": "Skill"}` cannot fall through as an unknown tool. In `auto` mode, `Skill` is also retained in effective `allowed_tools` even if a caller passes a custom allowlist, because Claude Code's SkillTool has its own permission path that otherwise defaults to ask for some skill metadata.
 
@@ -148,14 +162,22 @@ Deny decisions use:
 
 `agent_runner.py::_pre_tool_use_hook` applies decisions in this order:
 
-1. `.editor/` virtual-index `Read` redirect, all modes.
-2. Disabled-network check; `WebFetch`, `WebSearch`, and common Bash network commands are hard-denied when `sandbox_network_mode="disabled"`.
-3. Built-in file/search workspace-boundary check, all modes; outside current thread workspace is a hard deny.
-4. If `im_full_access_enabled` is true, tools are exposed, and the tool is not an answer-form tool: explicit allow.
-5. In `auto` only: workspace `files/` built-in file permission.
-6. In `auto` only: explicit low-sensitivity tool allow.
-7. Frontend confirmation callback.
-8. Deny by default when confirmation is required but unavailable.
+1. Exact Notion virtual-page `Read` redirect, all modes.
+2. `.editor/` live-session binding and virtual-index `Read` redirect, all modes.
+3. Dream-surface write guard. A strictly parsed actor-bound notion-cli read is
+   classified as outside this guard but is not allowed here.
+4. Disabled-network check; `WebFetch`, `WebSearch`, and common Bash network
+   commands, including `ntn api`, are hard-denied when
+   `sandbox_network_mode="disabled"`.
+5. Built-in file/search workspace-boundary check, all modes; outside current
+   thread workspace is a hard deny.
+6. In `auto` only: server-scoped Story Workspace canonical/control writes.
+7. If `im_full_access_enabled` is true, tools are exposed, and the tool is not
+   an answer-form tool: explicit allow.
+8. In `auto` only: workspace `files/` built-in file permission.
+9. In `auto` only: explicit low-sensitivity tool allow.
+10. Frontend confirmation callback.
+11. Deny by default when confirmation is required but unavailable.
 
 Bash sandboxing is not a step in this order. Claude Code loads the sandbox
 settings from the current thread workspace and enforces them when a Bash command
@@ -190,5 +212,6 @@ This remains true in full-access mode.
 | `AskUserQuestion` / `mcp__user__ask_user` | Confirm with form | Confirm with form | Not exposed |
 | `AskUserQuestion` / `mcp__user__ask_user` with full access | Confirm with form | Confirm with form | Not exposed |
 | Read-only Bash subset | Allow | Confirm | Not exposed |
+| Actor-bound, documented `ntn api` read | Confirm | Confirm | Not exposed |
 | Complex or mutating Bash | Confirm | Confirm | Not exposed |
 | Unknown tool | Confirm | Confirm | Not exposed |
