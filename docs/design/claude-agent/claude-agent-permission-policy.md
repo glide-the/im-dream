@@ -29,6 +29,9 @@
 > PreToolUse decision chain returns to its pre-feature shape; `open` mode
 > reverts to "unrestricted egress"; the network-variant confirmation card
 > still exists but is only triggered by can_use_tool (`SandboxNetworkAccess`).
+> [Sync] 2026-09-04: classify only actor/thread-bound, exact read-only `ntn`
+> commands as Auto queries; keep Manual confirmation, disabled-network denial,
+> missing bindings, wrappers, shell composition, method overrides, and writes closed.
 
 # Claude-Agent Permission Policy
 
@@ -62,7 +65,8 @@ processes. It is deliberately not implemented as a shell path parser in
 When `system_config.sandbox_network_mode="disabled"`, `_pre_tool_use_hook`
 adds an execution-layer guard: `WebFetch`, `WebSearch`, and common Bash network
 commands (`curl`, `wget`, `git fetch`, `npm install`, `python -m pip install`,
-etc.) return explicit deny before full-access or low-sensitivity allow rules.
+`ntn` API/doctor calls, etc.) return explicit deny before full-access or
+low-sensitivity allow rules. `ntn --version` remains a local version check.
 
 The `allowlist` / `open` modes are NOT enforced in this PreToolUse layer: they
 configure Claude Code's own sandbox (`sandbox.network` written into per-thread
@@ -89,11 +93,33 @@ Current auto-allow inventory:
 | Skill invocation | `Skill` |
 | Plan Mode session state | `EnterPlanMode`, `ExitPlanMode` **[2026-07-20]** |
 | Todo / task list session state | `TodoWrite`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet` **[2026-07-20]** |
-| Read-only Bash subset | `Bash` only when the command has no shell metacharacters and the first token is in the read-only/navigation allowlist (`ls`, `cd`, `pwd`, `echo`, `cat`, `head`, `tail`, `wc`, `find`, `which`, `type`, `date`, `whoami`, `id`, `groups`, `env`, `printenv`, `uname`, `hostname`) |
+| Read-only Bash subset | `Bash` only when the command has no shell composition/variable expansion, does not name `.notion-home`, and the parsed executable/arguments match the read-only/navigation allowlist (`ls`, `cd`, `pwd`, `echo`, `cat`, `head`, `tail`, `wc`, non-mutating `find`, `which`, `type`, display-only `date`, `whoami`, `id`, `groups`, `uname`, bare `hostname`). `env`/`printenv` are deliberately excluded because the Bash environment can contain server-owned connector bindings. |
+| Actor-bound Notion CLI query | Literal `ntn --version`, `ntn doctor`, or an exact supported read-only `ntn api` endpoint. API bodies are accepted only for `v1/search` and data-source/database query endpoints and must be one `-d`/`--data` JSON object. The final Runtime environment must contain the validated thread-owned `NOTION_HOME`/token/file-keyring binding. |
 
 `switch_editor` is low-sensitivity because the MCP handler is a no-op and the PostToolUse hook only changes which existing editor session `.editor/` reads resolve to. It does not modify document content.
 
 `Skill` is low-sensitivity because Claude Code exposes skills through the built-in `Skill` tool, whose job is to expand or run a named skill prompt. The exact tool name was confirmed in restored Claude Code source: `src/tools/SkillTool/constants.ts` exports `SKILL_TOOL_NAME = 'Skill'`. Do not use a broad `skill*` prefix. Allowing `Skill` does not allow later tool calls made by that skill; those calls are evaluated again by this policy.
+
+The `notion-cli` Skill therefore does not grant Bash by itself. In Auto mode,
+its subsequent Bash call is auto-allowed only when the final server-owned
+actor/thread Notion binding is effective and the parsed argv is one of:
+
+- `ntn --version` or `ntn doctor`;
+- `ntn api v1/users/me`;
+- exact page/database/data-source reads or block-children reads with a UUID or
+  32-hex resource ID and no additional arguments;
+- `ntn api v1/search -d|--data <JSON object>` or an exact
+  database/data-source query endpoint with the same single JSON body.
+
+Literal executable matching is intentional. Paths, `command`/`env` wrappers,
+inline environment assignment, method overrides, extra arguments, malformed
+JSON, `$` expansion, substitutions, pipes, redirects, separators, and newlines
+do not inherit the Notion query exception. They continue to the normal visible
+confirmation branch (or fail closed when no callback exists). Manual mode
+always confirms the exact Bash input; rejection and cancellation keep their
+existing turn/SSE semantics. This classifier does not replace Runtime
+`sandbox.notion-cli`, workspace confinement, credential projection, or network
+policy.
 
 Implementation detail: hook payloads are normalized before policy lookup. The runner accepts both Claude hook JSON keys (`tool_name`, `tool_input`) and adjacent SDK/frontend camelCase keys (`toolName`, `toolInput`) so a payload such as `{"toolName": "Skill"}` cannot fall through as an unknown tool. In `auto` mode, `Skill` is also retained in effective `allowed_tools` even if a caller passes a custom allowlist, because Claude Code's SkillTool has its own permission path that otherwise defaults to ask for some skill metadata.
 
@@ -111,7 +137,7 @@ High-sensitivity tools require frontend confirmation in `auto` and `manual` mode
 
 | Tool class | Examples |
 |---|---|
-| Execution / complex shell | `Bash` with pipes, redirects, substitutions, separators, unknown commands, or write side effects |
+| Execution / complex shell | `Bash` with pipes, redirects, substitutions, separators, unknown commands, write side effects, or `ntn` forms outside the exact actor-bound read-only subset |
 | Writes outside workspace files | `Write`, `Edit`, `MultiEdit` when the resolved path is outside `{cwd}/files/**` |
 | Editor writes | `mcp__editor__write_segment`, `mcp__editor__delete_segment`, `mcp__editor__insert_widget`, `mcp__editor__reply_to_comment` |
 | User interaction | `AskUserQuestion`, `mcp__user__ask_user` |
@@ -149,7 +175,7 @@ Deny decisions use:
 `agent_runner.py::_pre_tool_use_hook` applies decisions in this order:
 
 1. `.editor/` virtual-index `Read` redirect, all modes.
-2. Disabled-network check; `WebFetch`, `WebSearch`, and common Bash network commands are hard-denied when `sandbox_network_mode="disabled"`.
+2. Disabled-network check; `WebFetch`, `WebSearch`, common Bash network commands, and network-using `ntn` forms are hard-denied when `sandbox_network_mode="disabled"`.
 3. Built-in file/search workspace-boundary check, all modes; outside current thread workspace is a hard deny.
 4. If `im_full_access_enabled` is true, tools are exposed, and the tool is not an answer-form tool: explicit allow.
 5. In `auto` only: workspace `files/` built-in file permission.
@@ -190,5 +216,8 @@ This remains true in full-access mode.
 | `AskUserQuestion` / `mcp__user__ask_user` | Confirm with form | Confirm with form | Not exposed |
 | `AskUserQuestion` / `mcp__user__ask_user` with full access | Confirm with form | Confirm with form | Not exposed |
 | Read-only Bash subset | Allow | Confirm | Not exposed |
+| Actor-bound exact read-only `ntn` | Allow | Confirm | Not exposed |
+| Read-only `ntn` without the final actor/thread binding | Confirm / fail closed if no callback | Confirm | Not exposed |
+| Wrapped, composed, mutating, or unknown `ntn` | Confirm / fail closed if no callback | Confirm | Not exposed |
 | Complex or mutating Bash | Confirm | Confirm | Not exposed |
 | Unknown tool | Confirm | Confirm | Not exposed |

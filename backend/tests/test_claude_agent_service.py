@@ -15,6 +15,8 @@
 #                    assembly, config-change cache rebuild, and config-load
 #                    failure fallback.
 # [Sync] 2026-06-25: cover CancelledError stop path emitting finish and stream sentinel.
+# [Sync] 2026-09-04: cover denied Bash tool results preserving the visible SSE
+#                    error flag used by notion-cli confirmation failures.
 # [Sync] 2026-07-04: cover workspace-local Notion snapshot attach and
 #                    workspace_context Notion block rendering.
 # [Sync] 2026-07-05: cover explicit Notion connector identity / sync cursor
@@ -1374,6 +1376,41 @@ class TestClaudeAgentServiceToolInputDelta(unittest.TestCase):
         self.assertEqual(second["toolName"], "Write")
         self.assertEqual(second["delta"], '{"file_path":"files/note.md"')
         self.assertEqual(turn_ctx.collected_parts, [])
+
+    def test_denied_bash_result_preserves_visible_sse_error(self):
+        async def scenario():
+            queue: asyncio.Queue = asyncio.Queue()
+            turn_ctx = _TurnContext(
+                queue=queue,
+                confirmation_store=ToolConfirmationStore(),
+            )
+            callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx)
+
+            await callback(
+                ToolEventPayload(
+                    type="tool_result",
+                    tool_name="Bash",
+                    tool_call_id="call-ntn-denied",
+                    output="Hook PreToolUse:Bash denied this tool",
+                    is_error=True,
+                )
+            )
+
+            frames = []
+            while not queue.empty():
+                frames.append(_parse_sse(queue.get_nowait()))
+            return frames, turn_ctx.collected_parts
+
+        frames, collected_parts = _run(scenario())
+        output_frame = next(
+            frame for frame in frames if frame["type"] == "tool-output-available"
+        )
+        self.assertTrue(output_frame["isError"])
+        self.assertEqual(
+            output_frame["output"],
+            "Hook PreToolUse:Bash denied this tool",
+        )
+        self.assertTrue(collected_parts[-1]["isError"])
 
 
 class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):

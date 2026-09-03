@@ -2,9 +2,11 @@
 """Deterministic Anthropic SSE provider for a real Docker Claude sandbox probe.
 
 [Input] HTTP POST requests from a test-owned Claude Code CLI and a caller-supplied listen port.
-[Output] One Bash tool_use followed by one end_turn response; no external model/OAuth traffic.
+[Output] One configurable Bash tool_use followed by one end_turn response; no external model/OAuth traffic.
 [Pos] Manual/CI container compatibility fixture, outside production runtime.
 [Sync] 2026-08-19: add provider-free CLI 2.1.235 Bash and credential deny-read validation.
+[Sync] 2026-09-04: accept an explicit test-owned command for provider-free
+                    PreToolUse/Runtime contract probes; retain the sandbox probe default.
 """
 
 from __future__ import annotations
@@ -18,14 +20,8 @@ def _frame(event: str, payload: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
 
 
-def _response(*, request_number: int, use_tool: bool) -> bytes:
+def _response(*, request_number: int, use_tool: bool, command: str) -> bytes:
     if use_tool:
-        command = (
-            "printf 'workspace-write-ok\\n' > sandbox-write.txt; "
-            "if cat .claude-home/.credentials.json >/dev/null 2>&1; "
-            "then printf 'credential-readable\\n'; exit 91; "
-            "else printf 'credential-denied\\n'; fi"
-        )
         events = (
             (
                 "message_start",
@@ -129,6 +125,12 @@ def _response(*, request_number: int, use_tool: bool) -> bytes:
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     request_number = 0
+    command = (
+        "printf 'workspace-write-ok\\n' > sandbox-write.txt; "
+        "if cat .claude-home/.credentials.json >/dev/null 2>&1; "
+        "then printf 'credential-readable\\n'; exit 91; "
+        "else printf 'credential-denied\\n'; fi"
+    )
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -159,6 +161,7 @@ class _Handler(BaseHTTPRequestHandler):
             encoded = _response(
                 request_number=type(self).request_number,
                 use_tool=not has_tool_result,
+                command=type(self).command,
             )
             content_type = "text/event-stream"
             print(
@@ -175,7 +178,10 @@ class _Handler(BaseHTTPRequestHandler):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--command")
     args = parser.parse_args()
+    if args.command:
+        _Handler.command = args.command
     server = ThreadingHTTPServer(("0.0.0.0", args.port), _Handler)
     print(f"READY {args.port}", flush=True)
     try:

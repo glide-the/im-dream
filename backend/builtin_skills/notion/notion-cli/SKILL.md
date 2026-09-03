@@ -5,6 +5,7 @@ tools: ["Bash"]
 ---
 
 <!-- [Source] glide-the/ink-and-memory develop e3523db9; renamed from notion-session to notion-cli on 2026-08-30. -->
+<!-- [Sync] 2026-09-04: constrain examples to the exact read-only ntn command surface recognized by Dream's actor-bound Bash policy. -->
 
 # Notion CLI 工作空间数据助手
 
@@ -46,7 +47,7 @@ cat .notion/databases/<database_id>.json
 |------|------|---------|
 | 搜索内容 | `ntn api v1/search` | `references/notion-search.md` |
 | 读取页面 | `ntn api v1/pages/<id>/markdown` | `references/notion-page-read.md` |
-| 查询数据库 | `ntn api v1/databases/<id>/query` | `references/notion-db-query.md` |
+| 查询数据源 | `ntn api v1/data_sources/<id>/query` | `references/notion-db-query.md` |
 
 ## 核心命令速查
 
@@ -62,10 +63,10 @@ ntn api v1/search --data '{"query":"<关键词>","page_size":10}'
 ntn api v1/pages/<page_id>/markdown
 ```
 
-### 查询数据库
+### 查询数据源
 
 ```bash
-ntn api v1/databases/<database_id>/query --data '{}'
+ntn api v1/data_sources/<data_source_id>/query --data '{}'
 ```
 
 ## 参考文档
@@ -78,6 +79,12 @@ ntn api v1/databases/<database_id>/query --data '{}'
 
 ## 注意事项
 
+- 只使用上面的单条只读 `ntn` 形式；不要添加 pipe、重定向、`;`、命令替换、
+  inline 环境变量、`env`/`command` wrapper、`--method` 或文件上传参数
+- 不要用 Bash 拼装或打印 `NOTION_*` 值；凭证由 Dream 按当前 actor/thread
+  注入，Skill 不拥有凭证选择权
+- 写入、删除或不在上述只读范围内的命令必须走 Dream 既有的可见工具确认，
+  不得通过只读 API 形式伪装
 - `ntn api` 自动添加 Auth 和 Version 头，无需手动设置
 - 搜索 API 仅支持标题匹配，不支持正文全文搜索
 - 单次查询最大 `page_size` 为 100，超过需分页

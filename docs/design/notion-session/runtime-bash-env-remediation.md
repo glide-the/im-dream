@@ -2,6 +2,7 @@
 <!-- [Output] Root-cause matrix, user interaction contract, minimal remediation decision, business impact scope, and acceptance gates for Notion CLI environment delivery to Agent Bash. -->
 <!-- [Pos] Focused remediation design for the Dream-to-Runtime Notion CLI boundary; the broader credential/index product model remains in runtime-credential-and-skill-design.md. -->
 <!-- [Sync] 2026-08-30: record the digest-bound Runtime 0.1.4 real Chat acceptance and completed same-SHA public release. -->
+<!-- [Sync] 2026-09-04: distinguish the later PreToolUse Auto-classification regression from the resolved Runtime environment issue and record its bounded Dream-side remediation. -->
 
 # Notion CLI Agent Bash 环境修复设计
 
@@ -182,3 +183,60 @@ workers 配置缺失本身不降低普通 API/doctor 能力，也不单独显示
 | 版本绑定业务资格、四平台资格、npm 发布、registry 安装 | Runtime publication policy 和 Dream exact manifest gate | **已完成**；qualification `33306855166`、publish `33306940462` 成功，五包 registry fresh install 与 Dream 0.1.4 原子版本面通过。 |
 
 因此，本问题的本机实现、真实 Dream 验收、四目标 release qualification、registry 回下载、公网五包发布和 Dream 0.1.4 版本采用均已完成。真实业务回执与 provider-free registry 验收继续保持独立证据语义。
+
+## 11. 2026-09-04 `PreToolUse:Bash` 回归：独立根因与修复
+
+### 11.1 现象与边界判断
+
+Runtime 0.1.4 已正确保存 actor/thread Notion binding 后，线上出现了另一条
+独立故障：`notion-cli` Skill 成功启动，随后模型发出
+`ntn api v1/search --data '{...}'`，但在命令执行前收到
+`Hook PreToolUse:Bash denied this tool`。
+
+| 层 | 证据 | 判定 |
+|---|---|---|
+| `allowed_tools` | Dream 默认面已经同时暴露 `Skill` 与 `Bash`；Auto 还强制保留 `Skill`。 | 非根因。 |
+| permission mode | Manual 会对 Bash 发起可见确认；Auto 只有命中低敏分类才直接 allow；无 callback 时默认 deny。 | 触发条件。 |
+| `notion-cli` Skill | Skill frontmatter 声明 Bash，但 `Skill` allow 不会授权其后续 Bash。 | 符合边界，不是授权源。 |
+| Dream `PreToolUse` | 通用只读 Bash 首 token allowlist 没有 `ntn`，因此合法只读 search 落入确认；线上链路没有得到确认结果后显式 deny。 | **根因：产品已提供只读 Notion CLI 能力，但 Dream 分类未接线，是代码缺陷。** |
+| `can_use_tool` | SDK 警告整工具 `allowed_tools` 会遮蔽普通 callback；Dream 已用 `PreToolUse` 作为逐调用裁决点。 | 非根因，不应迁移修复。 |
+| Runtime / sandbox | provider-free 编译 Runtime 探针能收到 Hook allow、执行 test-owned `ntn` 并返回成功；`sandbox.notion-cli` 仍负责可执行、网络、凭证与 workspace 边界。 | 非根因，继续保留。 |
+
+### 11.2 最小修复
+
+Dream 在既有单一 `PreToolUse` 决策链中新增一类 actor-bound Notion 查询，
+没有新增 Runtime 分支、wrapper、HTTP 控制通道或第二套权限系统：
+
+1. 只有最终 SDK 环境已经包含由 `apply_notion_cli_env_to_options` 产生的
+   canonical `NOTION_HOME`、非空 token 和 file-keyring 模式时，Auto 例外才可用；
+2. 只匹配 literal `ntn`，拒绝相对/绝对路径、`command`/`env` wrapper 和
+   inline 环境覆盖；
+3. 只允许 version/doctor、身份和精确资源 GET、search，以及
+   database/data-source query；只有 search/query 可以携带恰好一个
+   `-d`/`--data` JSON object；
+4. CR/LF、`$`、命令替换、反引号、pipe、redirect、separator、method
+   override、额外参数、未知 endpoint 和写命令不命中 Auto 例外；
+5. Manual 始终走原有确认，拒绝/取消保持原语义；network disabled 在
+   full-access 和低敏判断之前拒绝网络型 `ntn`；`none` 仍不暴露工具；
+6. Runtime `sandbox.notion-cli`、workspace sandbox、凭证投影和 SSE 映射均
+   不被绕过。SDK/Runtime 无需发版或同步依赖版本。
+
+调查同时发现，旧通用“首 token”只读判断会把 `env rm ...`、mutating
+`find`、`date -s`、带参数 `hostname` 和换行后的第二条命令误归为查询；
+裸 `env`/`printenv`、变量 expansion 与直接 `.notion-home` operand 还可能
+显示 server-owned connector binding。同一分类函数改为 `shlex` token 精确
+判断并增加对应负向合同，避免为了修复 `ntn` 留下通用命令执行或凭证输出旁路。
+
+### 11.3 验证语义
+
+- Runner 合同覆盖 Auto/Manual、批准/拒绝/取消、有效/缺失 actor binding、
+  精确 search/query/read、伪装/拼接/替换、非 Notion Bash、network disabled；
+- Service 合同证明被拒 Bash 的 `tool_result.is_error` 继续成为
+  `tool-output-available.isError=true`，前端不会把拒绝持久化为成功；
+- provider-free 编译 Runtime 探针使用临时 production workspace、本地 fake
+  Messages SSE 和 test-owned shell `ntn`，完成 Runner → SDK → Runtime → Hook →
+  Bash，全程不访问 Notion、不读取/输出用户凭证或正文；
+- 本轮没有可用的本机 Dream/Admin/Gateway/PostgreSQL 服务、已命名真实账户，
+  且前端 Playwright 依赖未安装，因此没有冒充“真实业务验收”。既有
+  2026-08-30 真实账户回执只证明 Runtime 环境/可执行能力，不代替本修复的
+  线上账户复验。

@@ -15,6 +15,7 @@
 <!-- [Sync] 2026-09-02: require Admin 0042's exact Chat history keyset pagination capability before Dream starts. -->
 <!-- [Sync] 2026-09-01: require pre-write duplicate-root/stage validation, move-not-copy cleanup, and a visible safe reason when the one repair attempt stops. -->
 <!-- [Sync] 2026-09-02: document index-first Episode synchronization, stable per-Episode navigation, and no cross-Episode artifact fallback. -->
+<!-- [Sync] 2026-09-04: document actor-bound read-only ntn Auto permission and the unchanged Manual/sandbox/confirmation boundaries. -->
 
 # Ink & Memory
 
@@ -227,6 +228,16 @@ Admin provisioning writes the remaining local service identity and model aliases
 `INK_NOTION_RUNTIME_ROOT` must be an absolute server-owned path in the same persistent agentdata area as `AGENT_CWD`. Dream stores each user's opaque credential source under `users/<actor-hash>/home` and each connector's latest successful lightweight index under `users/<actor-hash>/snapshots/<connector-id>/current.json`. Saving a resource selection performs the first index sync immediately; the connector's server-owned strategy then refreshes due indexes in the background, without requiring a Chat or workspace initialization. These snapshots contain selected IDs and compact metadata only, never page Markdown, blocks, or attachments.
 
 For a Chat turn with the trusted thread workspace enabled, Runtime initialization copies the current user's effective credential and latest successful index into `{AGENT_CWD}/{thread_id}/.notion-home` and `.notion`; before projection, the index is intersected with the user's current selected scope and connector metadata is minimized. `sdk_env.py` then binds that exact thread projection to Agent Runtime Bash through `NOTION_HOME`, `NOTION_API_TOKEN`, `NOTION_KEYRING`, and `NOTION_WORKERS_CONFIG_FILE`; ambient values are cleared and cannot select another user or home. Projection does not call Notion or run an index sync. Clearing or shrinking the selected scope therefore takes effect for the next turn even when a newer index refresh fails. The existing indexed-page Read hook remains available alongside direct `ntn` CLI use. Workspace Mode disabled keeps both projections and the four runtime variables unavailable.
+
+In Auto tool mode, Dream treats only literal, actor/thread-bound read-only
+`ntn` commands as query operations: version/doctor, exact identity/resource
+reads, search, and data-source/database queries with one JSON object body.
+Manual mode still confirms every `ntn` Bash call. Missing bindings, disabled
+network, executable paths or wrappers, shell composition/substitution,
+method overrides, writes, and unknown endpoints never inherit the Auto
+exception; they remain denied or use the existing visible Bash confirmation.
+This policy does not broaden Bash, expose credentials, or replace the Runtime
+sandbox and workspace boundaries.
 
 ### 6. Start Dream
 

@@ -7,6 +7,10 @@
 # [Sync] 2026-08-28: apply the exact server-owned Claude Code Runtime env whitelist
 #                    after user overlays and before Gateway enforcement.
 # [Sync] 2026-08-30: apply actor/thread-bound NOTION_* values at the final Runtime environment boundary for Bash ntn commands.
+# [Sync] 2026-09-04: auto-allow only exact read-only ntn forms when the final
+#                    actor/thread Runtime binding is effective; keep manual,
+#                    disabled-network, shell-composition, credential-exposure,
+#                    and impostor paths closed.
 # [Sync] 2026-08-29: keep Editor virtual-Read redirect files inside the
 #                    server-owned thread .claude-tmp boundary with 0600 mode.
 # [Sync] 2026-08-29: project only the trusted actor and effective PostgreSQL
@@ -291,6 +295,9 @@ from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
     CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
     CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME,
+    NOTION_API_TOKEN_ENV_NAME,
+    NOTION_HOME_ENV_NAME,
+    NOTION_KEYRING_ENV_NAME,
     apply_claude_config_home_to_options,
     apply_claude_secure_storage_home_to_options,
     apply_cli_path_to_options,
@@ -532,6 +539,25 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
 
 # Shell metacharacters that would make a Bash command unsafe for auto-allow.
 _SHELL_METACHAR_RE = re.compile(r'[|;&<>`]|\$\(|\$\{')
+_LOW_SENSITIVITY_SHELL_UNSAFE_RE = re.compile(r'[\r\n|;&<>`$]')
+_NOTION_SHELL_UNSAFE_RE = re.compile(r'[\r\n|;&<>`$]')
+_NOTION_PRIVATE_PATH_RE = re.compile(
+    r"(?:^|[/\\])\.notion-home(?:$|[/\\])",
+    re.IGNORECASE,
+)
+_NOTION_RESOURCE_ID_PATTERN = (
+    r"(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
+_NOTION_API_NO_BODY_ENDPOINT_RE = re.compile(
+    rf"^(?:v1/users/me|v1/pages/{_NOTION_RESOURCE_ID_PATTERN}(?:/markdown)?|"
+    rf"v1/(?:databases|data_sources)/{_NOTION_RESOURCE_ID_PATTERN}|"
+    rf"v1/blocks/{_NOTION_RESOURCE_ID_PATTERN}/children)$"
+)
+_NOTION_API_BODY_ENDPOINT_RE = re.compile(
+    rf"^(?:v1/search|v1/(?:databases|data_sources)/"
+    rf"{_NOTION_RESOURCE_ID_PATTERN}/query)$"
+)
 _DREAM_SURFACE_REFERENCE_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])\.dream(?=$|[/\\\s'\";&|<>])",
     re.IGNORECASE,
@@ -560,9 +586,8 @@ _STORY_WORKSPACE_DREAM_ASSET_DIRECTORIES: frozenset[str] = frozenset({
     "props",
 })
 
-# Read-only / navigation shell commands that carry no filesystem side effects.
-# Any command whose first token matches one of these and contains no shell
-# metacharacters is considered low-sensitivity and receives hook-level allow.
+# Candidate read-only/navigation commands. The classifier below parses argv
+# and applies command-specific restrictions before granting hook-level allow.
 _LOW_SENSITIVITY_BASH_PREFIXES: frozenset[str] = frozenset({
     "ls",       # list directory
     "cd",       # change directory (no filesystem mutation)
@@ -579,8 +604,6 @@ _LOW_SENSITIVITY_BASH_PREFIXES: frozenset[str] = frozenset({
     "whoami",   # print current user
     "id",       # print user/group identity
     "groups",   # list group memberships
-    "env",      # print environment
-    "printenv", # print specific env vars
     "uname",    # print system info
     "hostname", # print hostname
 })
@@ -656,9 +679,13 @@ _FIND_MUTATING_ACTIONS: frozenset[str] = frozenset({
 def _is_low_sensitivity_bash_command(command: str) -> bool:
     """Return True when *command* is a safe, read-only shell invocation.
 
-    Checks two conditions:
-    1. No shell metacharacters (``|`` ``&`` ``;`` ``<`` ``>`` `` ` `` ``$(`` ``${``).
-    2. The first token is one of :data:`_LOW_SENSITIVITY_BASH_PREFIXES`.
+    Checks three conditions:
+    1. No shell metacharacters or variable expansion
+       (``|`` ``&`` ``;`` ``<`` ``>`` `` ` `` ``$``).
+    2. The parsed executable is exactly one of
+       :data:`_LOW_SENSITIVITY_BASH_PREFIXES` (never a caller-selected path).
+    3. Commands with mutating forms (mutating ``find``, clock-setting ``date``,
+       hostname-setting arguments) or a `.notion-home` operand are rejected.
 
     Examples that pass: ``ls -la``, ``cd /tmp``, ``cat notes.md``, ``echo hello``.
     Examples that fail: ``ls | grep foo``, ``cat file > out``, ``rm -rf /``.
@@ -666,10 +693,65 @@ def _is_low_sensitivity_bash_command(command: str) -> bool:
     cmd = command.strip()
     if not cmd:
         return False
-    if _SHELL_METACHAR_RE.search(cmd):
+    if _LOW_SENSITIVITY_SHELL_UNSAFE_RE.search(cmd):
         return False
-    first_token = cmd.split()[0]
-    return first_token in _LOW_SENSITIVITY_BASH_PREFIXES
+    try:
+        tokens = shlex.split(cmd, posix=True)
+    except ValueError:
+        return False
+    if not tokens or tokens[0] not in _LOW_SENSITIVITY_BASH_PREFIXES:
+        return False
+    if any(_NOTION_PRIVATE_PATH_RE.search(token) for token in tokens[1:]):
+        return False
+    if tokens[0] == "find" and any(
+        token.lower() in _FIND_MUTATING_ACTIONS for token in tokens[1:]
+    ):
+        return False
+    if tokens[0] == "date" and any(
+        token not in {"-u"} and not token.startswith("+")
+        for token in tokens[1:]
+    ):
+        return False
+    if tokens[0] == "hostname" and len(tokens) != 1:
+        return False
+    return True
+
+
+def _is_read_only_notion_cli_bash_command(command: str) -> bool:
+    """Recognize the narrow actor-bound ntn query surface used by Notion Skills.
+
+    This is a permission classifier, not an executable resolver. The Runtime's
+    ``sandbox.notion-cli`` capability still owns native executable, workspace,
+    credential, and network enforcement. Requiring the literal ``ntn`` token
+    prevents path, wrapper, and environment-prefix lookalikes from inheriting
+    this auto-mode exception.
+    """
+
+    cmd = command.strip()
+    if not cmd or _NOTION_SHELL_UNSAFE_RE.search(cmd):
+        return False
+    try:
+        tokens = shlex.split(cmd, posix=True)
+    except ValueError:
+        return False
+    if tokens in (["ntn", "--version"], ["ntn", "doctor"]):
+        return True
+    if len(tokens) < 3 or tokens[:2] != ["ntn", "api"]:
+        return False
+
+    endpoint = tokens[2]
+    arguments = tokens[3:]
+    if _NOTION_API_NO_BODY_ENDPOINT_RE.fullmatch(endpoint):
+        return not arguments
+    if not _NOTION_API_BODY_ENDPOINT_RE.fullmatch(endpoint):
+        return False
+    if len(arguments) != 2 or arguments[0] not in {"-d", "--data"}:
+        return False
+    try:
+        body = json.loads(arguments[1])
+    except json.JSONDecodeError:
+        return False
+    return isinstance(body, dict)
 
 
 def _split_shell_command(command: str) -> list[str]:
@@ -721,6 +803,8 @@ def _is_network_bash_command(command: str) -> bool:
     name = _command_name(tokens[0])
     if name in _NETWORK_BASH_PREFIXES:
         return True
+    if name == "ntn":
+        return len(tokens) < 2 or tokens[1] not in {"--version", "-V"}
 
     if name in {"python", "python3"} and len(tokens) >= 4:
         return (
@@ -2427,6 +2511,8 @@ def _apply_story_workspace_dream_canonical_write_permission(
 def _apply_low_sensitivity_query_permission(
     tool_name: str,
     tool_input: Optional[dict[str, Any]] = None,
+    *,
+    notion_cli_runtime_enabled: bool = False,
 ) -> Optional[HookJSONOutput]:
     """Explicitly allow auto-mode tools whose product class is low-sensitivity.
 
@@ -2436,9 +2522,10 @@ def _apply_low_sensitivity_query_permission(
     Claude Code's native permission prompt in auto mode, so the hook must return
     an explicit ``permissionDecision: "allow"``.
 
-    Special case — ``Bash``: only read-only/navigation commands qualify. Any
-    command containing shell metacharacters is treated as high-sensitivity and
-    falls through to frontend confirmation.
+    Special case — ``Bash``: generic read-only/navigation commands qualify;
+    exact read-only ``ntn`` additionally requires the final server-owned
+    actor/thread binding. Shell composition, credential exposure, and unknown
+    commands remain high-sensitivity and fall through to frontend confirmation.
     """
 
     if tool_name in _LOW_SENSITIVITY_QUERY_TOOL_NAMES:
@@ -2451,7 +2538,10 @@ def _apply_low_sensitivity_query_permission(
 
     if tool_name == "Bash":
         command = str((tool_input or {}).get("command") or "").strip()
-        if _is_low_sensitivity_bash_command(command):
+        if _is_low_sensitivity_bash_command(command) or (
+            notion_cli_runtime_enabled
+            and _is_read_only_notion_cli_bash_command(command)
+        ):
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -2783,6 +2873,7 @@ class ClaudeAgentRunner:
                 if required_tool not in allowed_tools:
                     allowed_tools.append(required_tool)
         sandbox_network_mode = str(opts.sandbox_network_mode or "allowlist")
+        notion_cli_runtime_enabled = False
         system_prompt = opts.system_prompt
         mcp_env = dict(opts.mcp_env or {})
         turn_runtime = dict(opts.turn_runtime or {})
@@ -3002,7 +3093,9 @@ class ClaudeAgentRunner:
                     return workspace_files_permission
 
                 low_sensitivity_permission = _apply_low_sensitivity_query_permission(
-                    tool_name, tool_input
+                    tool_name,
+                    tool_input,
+                    notion_cli_runtime_enabled=notion_cli_runtime_enabled,
                 )
                 if low_sensitivity_permission is not None:
                     return low_sensitivity_permission
@@ -3556,6 +3649,12 @@ class ClaudeAgentRunner:
             sdk_options,
             opts.notion_credential_home,
             thread_workspace=opts.claude_tmp_workspace,
+        )
+        notion_runtime_env = getattr(sdk_options, "env", None) or {}
+        notion_cli_runtime_enabled = bool(
+            notion_runtime_env.get(NOTION_HOME_ENV_NAME)
+            and notion_runtime_env.get(NOTION_API_TOKEN_ENV_NAME)
+            and notion_runtime_env.get(NOTION_KEYRING_ENV_NAME) == "0"
         )
         existing_extra_args = getattr(sdk_options, "extra_args", None)
         sdk_options.extra_args = dict(existing_extra_args or {})

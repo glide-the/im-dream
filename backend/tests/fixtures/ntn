@@ -1,0 +1,16 @@
+#!/bin/sh
+# [Input] Exact read-only argv emitted by the Notion CLI Skill acceptance probe.
+# [Output] A content-free marker, or exit 64 for every other argv.
+# [Pos] Test-only native shell fixture; production Runtime never selects this file.
+# [Sync] 2026-09-04: add a zero-network, zero-credential ntn API search fixture.
+
+if [ "$#" -ne 4 ] || [ "$1" != "api" ] || [ "$2" != "v1/search" ]; then
+  exit 64
+fi
+if [ "$3" != "-d" ] && [ "$3" != "--data" ]; then
+  exit 64
+fi
+if [ "$4" != '{"query":"policy-probe","page_size":1}' ]; then
+  exit 64
+fi
+printf '%s\n' 'fake-ntn-read-ok'

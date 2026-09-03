@@ -22,6 +22,8 @@
 # [Sync] 2026-09-01: replay the production trusted-root deletion attempt and
 #                    require the Hook to name the protected and stale roots.
 # [Sync] 2026-09-02: cover one-success-Result completion and reliable duration capture.
+# [Sync] 2026-09-04: cover the actor-bound read-only ntn Bash policy across
+#                    auto/manual/disabled-network and command-confusion cases.
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
@@ -1323,6 +1325,22 @@ class TestClaudeAgentRunnerRemoteMcp(_RunnerBase):
 class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
     """PreToolUse policy branches that can be exercised through SDK hooks."""
 
+    @staticmethod
+    def _notion_projection(workspace: Path) -> Path:
+        notion_home = workspace / ".notion-home"
+        notion_home.mkdir(mode=0o700)
+        (notion_home / "auth.json").write_text(
+            json.dumps({"workspace-current": "synthetic-current-token"}),
+            encoding="utf-8",
+        )
+        (notion_home / "config.json").write_text(
+            json.dumps(
+                {"defaultWorkspaceIds": {"prod": "workspace-current"}}
+            ),
+            encoding="utf-8",
+        )
+        return notion_home
+
     async def _capture_pre_tool_use_hook(
         self,
         *,
@@ -2173,9 +2191,14 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                             "call-bash-dream-read",
                             _SDK_HOOK_CONTEXT(),
                         )
+                        expected = (
+                            "deny"
+                            if command.startswith("env ") and not full_access
+                            else "allow"
+                        )
                         self.assertEqual(
                             _hook_specific(result, {}).get("permissionDecision"),
-                            "allow",
+                            expected,
                         )
 
     async def test_existing_dream_surface_denies_dynamic_paths_and_prewritten_scripts(self):
@@ -2571,6 +2594,252 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertEqual(specific.get("permissionDecisionReason"), "needs review")
+
+    async def test_auto_actor_bound_read_only_ntn_commands_get_query_allow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            notion_home = self._notion_projection(workspace)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                notion_credential_home=str(notion_home),
+            )
+
+            commands = [
+                "ntn api v1/search --data '{\"query\":\"\u5fc3\u5b66\",\"page_size\":10}'",
+                "ntn api v1/data_sources/0123456789abcdef0123456789abcdef/query --data '{}'",
+                "ntn api v1/pages/0123456789abcdef0123456789abcdef/markdown",
+                "ntn api v1/blocks/0123456789abcdef0123456789abcdef/children",
+                "ntn api v1/users/me",
+                "ntn doctor",
+                "ntn --version",
+            ]
+            for index, command in enumerate(commands):
+                with self.subTest(command=command):
+                    result = await hook(
+                        {
+                            "tool_name": "Bash",
+                            "tool_input": {"command": command},
+                        },
+                        f"call-ntn-safe-{index}",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    specific = _hook_specific(result, {})
+                    self.assertEqual(
+                        specific.get("permissionDecision"),
+                        "allow",
+                    )
+
+    async def test_manual_actor_bound_read_only_ntn_uses_visible_confirmation(self):
+        confirmation_requests: list[dict[str, Any]] = []
+
+        async def confirm(payload: dict[str, Any]):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        command = "ntn api v1/search --data '{\"query\":\"\u5fc3\u5b66\",\"page_size\":10}'"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            notion_home = self._notion_projection(workspace)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                tool_choice="manual",
+                notion_credential_home=str(notion_home),
+                on_tool_confirmation_request=confirm,
+            )
+            result = await hook(
+                {"tool_name": "Bash", "tool_input": {"command": command}},
+                "call-ntn-manual-approve",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(
+            confirmation_requests,
+            [
+                {
+                    "tool_call_id": "call-ntn-manual-approve",
+                    "tool_name": "Bash",
+                    "input": {"command": command},
+                }
+            ],
+        )
+        self.assertEqual(
+            _hook_specific(result, {}).get("permissionDecision"),
+            "allow",
+        )
+
+    async def test_manual_actor_bound_read_only_ntn_rejection_denies(self):
+        async def reject(_payload: dict[str, Any]):
+            return {"approved": False, "reason": "user cancelled Notion read"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            notion_home = self._notion_projection(workspace)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                tool_choice="manual",
+                notion_credential_home=str(notion_home),
+                on_tool_confirmation_request=reject,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "ntn api v1/users/me"},
+                },
+                "call-ntn-manual-reject",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertEqual(
+            specific.get("permissionDecisionReason"),
+            "user cancelled Notion read",
+        )
+
+    async def test_manual_actor_bound_read_only_ntn_turn_cancellation_propagates(self):
+        async def cancel(_payload: dict[str, Any]):
+            raise asyncio.CancelledError
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            notion_home = self._notion_projection(workspace)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                tool_choice="manual",
+                notion_credential_home=str(notion_home),
+                on_tool_confirmation_request=cancel,
+            )
+            with self.assertRaises(asyncio.CancelledError):
+                await hook(
+                    {
+                        "tool_name": "Bash",
+                        "tool_input": {"command": "ntn api v1/users/me"},
+                    },
+                    "call-ntn-manual-cancel",
+                    _SDK_HOOK_CONTEXT(),
+                )
+
+    async def test_auto_ntn_without_actor_binding_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(cwd=temp_dir)
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "ntn api v1/users/me"},
+                },
+                "call-ntn-no-binding",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertIn(
+            "\u9700\u8981\u7528\u6237\u786e\u8ba4",
+            specific.get("permissionDecisionReason", ""),
+        )
+
+    async def test_auto_ntn_command_confusion_never_bypasses_confirmation(self):
+        commands = [
+            "./ntn api v1/users/me",
+            "/usr/local/bin/ntn api v1/users/me",
+            "command ntn api v1/users/me",
+            "env NOTION_API_TOKEN=attacker ntn api v1/users/me",
+            "env",
+            "printenv NOTION_API_TOKEN",
+            "echo $NOTION_API_TOKEN",
+            "cat .notion-home/auth.json",
+            "ntn api v1/users/me; rm -rf files",
+            "ntn api v1/users/me | cat",
+            "ntn api v1/users/me $(touch files/pwned)",
+            "ntn api v1/users/me `$SHELL -c id`",
+            "ntn api v1/users/me\nrm -rf files",
+            "ntn api v1/pages/0123456789abcdef0123456789abcdef --method DELETE",
+            "ntn api v1/pages/0123456789abcdef0123456789abcdef --data '{\"archived\":true}'",
+            "ntn api v1/databases/0123456789abcdef0123456789abcdef/markdown",
+            "ntn page create --title pwned",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            notion_home = self._notion_projection(workspace)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                notion_credential_home=str(notion_home),
+            )
+            for index, command in enumerate(commands):
+                with self.subTest(command=command):
+                    result = await hook(
+                        {
+                            "tool_name": "Bash",
+                            "tool_input": {"command": command},
+                        },
+                        f"call-ntn-confused-{index}",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(
+                        _hook_specific(result, {}).get("permissionDecision"),
+                        "deny",
+                    )
+
+    async def test_auto_non_notion_and_mutating_read_prefix_bash_fail_closed(self):
+        commands = [
+            "python -c 'print(1)'",
+            "env rm -rf files",
+            "find files -delete",
+            "find files -exec rm {} ;",
+            "date -s 2030-01-01",
+            "hostname attacker-host",
+            "ls\nrm -rf files",
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(cwd=temp_dir)
+            for index, command in enumerate(commands):
+                with self.subTest(command=command):
+                    result = await hook(
+                        {
+                            "tool_name": "Bash",
+                            "tool_input": {"command": command},
+                        },
+                        f"call-non-notion-{index}",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(
+                        _hook_specific(result, {}).get("permissionDecision"),
+                        "deny",
+                    )
+
+    async def test_disabled_network_denies_actor_bound_ntn_before_full_access(self):
+        confirmation_requests: list[dict[str, Any]] = []
+
+        async def confirm(payload: dict[str, Any]):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            notion_home = self._notion_projection(workspace)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                notion_credential_home=str(notion_home),
+                sandbox_network_mode="disabled",
+                im_full_access_enabled=True,
+                on_tool_confirmation_request=confirm,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "ntn api v1/users/me"},
+                },
+                "call-ntn-network-disabled",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(confirmation_requests, [])
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertIn(
+            "\u4ee3\u7406\u7f51\u7edc\u8bbf\u95ee\u5df2\u5173\u95ed",
+            specific.get("permissionDecisionReason", ""),
+        )
 
     async def test_auto_bash_low_sensitivity_commands_get_query_allow(self):
         """Bash read-only/navigation commands bypass confirmation in auto mode."""
