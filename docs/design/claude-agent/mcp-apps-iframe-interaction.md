@@ -1,7 +1,7 @@
 <!-- [输入] MCP Apps 稳定规范、AppBridge、IM Node Apps Runtime 与 Vite Browser Runtime 边界。 -->
 <!-- [输出] 定义 Node 获取 UI resource、Browser 加载 iframe、客户端通信和失败降级。 -->
 <!-- [定位] MCP Apps iframe 专项设计；客户端字段、方法与平台扩展见客户端承载通信协议。 -->
-<!-- [同步] 2026-09-04：删除传输与平台接口的重复比较，只保留 iframe 所需通信机制。 -->
+<!-- [同步] 2026-09-04：按 OpenAI 官方说明将 Apps SDK UI 定义为 App View 可选组件库。 -->
 
 # MCP Apps iframe 渲染与交互设计
 
@@ -14,6 +14,7 @@
 - [MCP Apps 2026-01-26 稳定规范（ext-apps v1.7.5）](https://github.com/modelcontextprotocol/ext-apps/blob/v1.7.5/specification/2026-01-26/apps.mdx)
 - [MCP Apps Overview](https://modelcontextprotocol.io/extensions/apps/overview)
 - [OpenAI：Add UI to your MCP server](https://developers.openai.com/plugins/build/chatgpt-ui#overview)
+- [OpenAI：Optional OpenAI component library](https://developers.openai.com/plugins/build/chatgpt-ui#optional-openai-component-library)
 - [OpenAI：Separate data processing from UI rendering](https://developers.openai.com/plugins/build/chatgpt-ui#separate-data-processing-from-ui-rendering)
 - [MCP Apps `App` client API](https://apps.extensions.modelcontextprotocol.io/api/classes/app.App.html)
 - [AppBridge API](https://apps.extensions.modelcontextprotocol.io/api/classes/app-bridge.AppBridge.html)
@@ -44,7 +45,7 @@ Node “提供渲染”指 Node 提供经过校验的资源和页面实例；DOM
 
 ### 2.2 非目标
 
-- 不规定 App 使用 React、Vue、Apps SDK UI 或其他框架。
+- 不规定 App View 使用的前端框架或组件库。
 - 不让 IM Vite 工程编译第三方 App 源码。
 - 不让 Browser 直接访问 `ui://`、MCP transport 或 credential。
 - 不让 Python 读取 UI resource、转发页面消息或保存 App 状态。
@@ -61,7 +62,7 @@ Node “提供渲染”指 Node 提供经过校验的资源和页面实例；DOM
 | IM Apps Browser Runtime | IM Apps 插件 | Node channel、Host 侧 AppBridge、iframe controller 和客户端通信 handlers | 顶层页面中的浏览器代码 |
 | App View bundle | MCP App 开发者 | App HTML/JS/CSS 和客户端通信 adapter | 隔离 iframe |
 
-`@openai/apps-sdk-ui` 只可能存在于 App View bundle。它不读取 `ui://`、不创建 Host iframe、不建立 MCP session，也不参与 IM 主流程。
+`@openai/apps-sdk-ui` 是 App View 可选组件库，提供与 ChatGPT 容器相匹配的按钮、卡片、输入控件和布局原语；App 开发者可用它获得一致样式而无需重建基础组件。
 
 ### 3.2 Node render instance
 

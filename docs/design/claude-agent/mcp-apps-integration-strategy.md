@@ -1,7 +1,7 @@
 <!-- [输入] MCP Apps 稳定规范、OpenAI UI 指南、IM Claude Agent/MCP/Node/Vite 当前边界。 -->
 <!-- [输出] 定义 IM 接入 MCP Apps 的产品流程、职责边界、方案选择、阶段与验收。 -->
 <!-- [定位] MCP Apps 主设计；配置接口、客户端通信、iframe 和源码证据由同目录专项文档维护。 -->
-<!-- [同步] 2026-09-04：主设计只保留客户端承载通信边界，具体传输与平台扩展下沉到专项文档。 -->
+<!-- [同步] 2026-09-04：按 OpenAI 官方说明将 Apps SDK UI 定义为 App View 可选组件库。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
@@ -47,7 +47,6 @@ MCP Server 仍是一个模块：它提供 tools、resources、UI resource 和业
 
 - 不修改 MCP Server 的模块定位。
 - 不新增 Agent Session phase，不改变 turn/resume/cancel/SSE 语义。
-- 不把 `@openai/apps-sdk-ui` 作为 Host 依赖；它只是 MCP App 页面可选的 UI 组件库。
 - 不把 Python 改成 Apps Connector、UI resource 服务或前端消息代理。
 - 不为此引入独立 Bridge/Gateway 产品。
 - 不把 Dream 前端迁到 Next.js 作为前置条件。
@@ -67,7 +66,7 @@ MCP Server 仍是一个模块：它提供 tools、resources、UI resource 和业
 | IM Browser Runtime | Vite 构建并在 Chrome 运行；创建 iframe、运行 AppBridge、连接 Node。 |
 | AppBridge | Browser Host 侧的 MCP Apps 桥；通过 iframe transport 接收标准请求并发送标准通知，IM Web 使用 `client = null` 手动 handlers。 |
 | App View | UI resource 中的 HTML/JS/CSS，在隔离 iframe 内运行，并使用 IM 客户端承载通信。 |
-| Apps SDK UI | App 开发者可选的前端组件与样式库，与 IM Host 主链无关。 |
+| `@openai/apps-sdk-ui` | App View 可选组件库，提供与 ChatGPT 容器相匹配的按钮、卡片、输入控件和布局原语；用于获得一致样式而无需重建基础组件。 |
 
 ### 3.2 主产品链路
 

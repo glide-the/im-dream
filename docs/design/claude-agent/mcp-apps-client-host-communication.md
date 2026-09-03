@@ -1,7 +1,7 @@
 <!-- [输入] MCP Apps 稳定规范、OpenAI 共享字段指南、IM Node Apps Runtime 设计。 -->
 <!-- [输出] 定义 App View、Browser Runtime、Node Apps Host 与 MCP Server 的客户端承载通信协议。 -->
 <!-- [定位] MCP Apps 客户端平台通信专项设计；iframe 安全容器见同目录 iframe 专项稿。 -->
-<!-- [同步] 2026-09-04：window.im 兼容 window.openai 的字段、方法和行为，仅将 openai namespace 替换为 im。 -->
+<!-- [同步] 2026-09-04：window.im 仅替换 openai namespace；App View 的 UI 框架与组件库不在本协议规定。 -->
 
 # IM MCP Apps 客户端承载通信协议
 
@@ -45,7 +45,7 @@ IM 因此只建立一条跨 iframe 通信通道，并在通道上区分两类能
 ### 2.2 非目标
 
 - 不定义 MCP Server 的业务工具和页面数据结构。
-- 不规定 App 使用 React、Apps SDK UI 或其他 UI 框架。
+- 不规定 App View 使用的 UI 框架或组件库。
 - 不让 App 直接访问 Node 内部 API、MCP credential、完整 Thread、系统提示词或顶层 DOM。
 - 文件、Modal 等可选能力未启用时不暴露对应方法；启用后保持与 `window.openai` 相同的调用行为。
 - 不把 Python 后端加入 Browser Host 与 App View 的通信链。

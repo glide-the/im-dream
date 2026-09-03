@@ -1,7 +1,7 @@
 <!-- [输入] MCP Apps/OpenAI Apps 官方资料、Codex 历史任务 01a06233-628d-7a83-8d66-5c3185a80613、Dream 0.1.4 与 IM 当前源码。 -->
 <!-- [输出] 记录 MCP Apps 支持状态、Runtime 继承证据、能力缺口、候选方案和验证命令。 -->
 <!-- [定位] `mcp-apps-integration-strategy.md` 的独立调研证据；不定义产品交互，不授权实现。 -->
-<!-- [同步] 2026-09-04：保留官方 bridge 事实，移除调研稿中重复的平台接口对比。 -->
+<!-- [同步] 2026-09-04：按 OpenAI 官方说明收束 Apps SDK UI 定义，删除无关包实现调查。 -->
 
 # MCP Apps 支持状态调研
 
@@ -18,7 +18,6 @@
 | Dream package | `0.1.4` |
 | Dream MCP SDK | `@modelcontextprotocol/sdk` `1.30.0` |
 | IM 源码 | `/Users/dmeck/project/ink-dream-memory` |
-| Apps SDK UI | `@openai/apps-sdk-ui` `0.2.2` |
 
 Dream 当前工作树有未提交的 Marketplace、设计稿和兼容性测试，但没有 `src/` 或 `runtime/` 业务实现改动。本调研保留这些改动，不把文档或 characterization test 视为 Host 已实现。
 
@@ -31,7 +30,7 @@ MCP Apps `2026-01-26` 稳定规范和 OpenAI 当前文档规定：
 - MCP Apps bridge 负责 Host/View 初始化、通知、App tool call、消息和 model context。
 - 普通 MCP tools 必须在没有 UI 时仍可用。
 - OpenAI 专有能力放在 `window.openai`，每项单独检测。
-- `@openai/apps-sdk-ui` 是可选组件库，不是 Host bridge。
+- `@openai/apps-sdk-ui` 是可选组件库，提供与 ChatGPT 容器相匹配的按钮、卡片、输入控件和布局原语，用于获得一致样式而无需重建基础组件。
 - AppBridge 构造器接受已连接 MCP `Client` 或 `null`；传 `null` 时 Host 必须手工注册 `oncalltool`、`onreadresource` 等 handlers。
 - `client.connect(serverTransport)` 是 Host 到 Server 的 MCP transport；`AppBridge.connect(PostMessageTransport)` 是 Host 到 View 的 iframe transport，两条连接不能混为一谈。
 - 数据工具和 render tool 应分开；只有 render tool 关联 UI resource。
@@ -42,14 +41,12 @@ MCP Apps `2026-01-26` 稳定规范和 OpenAI 当前文档规定：
 - [Add UI to your MCP server](https://developers.openai.com/plugins/build/chatgpt-ui)
 - [UI Guidelines](https://developers.openai.com/plugins/concepts/ui-guidelines#overview)
 - [`window.openai` reference](https://developers.openai.com/plugins/reference)
-- [Apps SDK UI](https://openai.github.io/apps-sdk-ui/)
+- [OpenAI：Optional OpenAI component library](https://developers.openai.com/plugins/build/chatgpt-ui#optional-openai-component-library)
 - [MCP Apps 2026-01-26 stable specification（ext-apps v1.7.5）](https://github.com/modelcontextprotocol/ext-apps/blob/v1.7.5/specification/2026-01-26/apps.mdx)
 - [MCP Apps overview](https://modelcontextprotocol.io/extensions/apps/overview)
 - [ext-apps v1.7.5 AppBridge constructor/manual example](https://github.com/modelcontextprotocol/ext-apps/blob/v1.7.5/src/app-bridge.ts#L355-L417)
 - [ext-apps v1.7.5 AppBridge connect/automatic forwarding](https://github.com/modelcontextprotocol/ext-apps/blob/v1.7.5/src/app-bridge.ts#L1792-L1925)
 - [ext-apps v1.7.5 browser basic host](https://github.com/modelcontextprotocol/ext-apps/blob/v1.7.5/examples/basic-host/src/implementation.ts#L251-L276)
-
-`@openai/apps-sdk-ui@0.2.2` package 只导出 CSS、components、hooks、theme 和 helpers。peer dependencies 是 React 18/19 与 Tailwind 4；没有 transport、MCP Client 或 AppBridge export。
 
 `@modelcontextprotocol/ext-apps@1.7.5` 的 `AppBridge` 构造器类型是 `Client | null`。传已初始化 Client 时会自动转发 Server-bound tools/resources/prompts；传 `null` 时 Host 注册 manual handlers。官方 basic host 也证明 Browser Client 可以连接浏览器可达的 Streamable HTTP/SSE，因此“IM Browser 不直连”是本设计的安全策略，不是 SDK 限制。
 
@@ -133,7 +130,7 @@ async with ClaudeSDKClient(options=effective_options) as client:
 | `/Users/dmeck/project/ink-dream-memory/backend/claude_mcp/runtime_snapshot.py:51-185` | 每个 turn 在 Python 内存生成包含明文 transport/credential 的 detached config，但丢弃 server/config/credential revision | 可抽出配置解析逻辑；现有返回值不能直接作为 Node 接口 |
 | `/Users/dmeck/project/ink-dream-memory/frontend/src/api/claudeMcpApi.ts:158-169` | Browser 用 IM bearer/cookie 访问 Python API | 当前只有用户→Python 登录态，没有 Browser→Node instance ticket |
 
-Vite 可以构建 IM Shell、iframe controller 和 AppBridge。Web bundle 不能启动 stdio；用户电脑 localhost HTTP 在 CORS、secure context、mixed content、PNA 和认证均允许时技术上可能可达。IM 首期规定 AppBridge 传 `null` 并注册手动 handlers，Browser 只连接 Node，物理 MCP 连接由 Node `PersistentConnectorManager` 持有。`@openai/apps-sdk-ui` 只可能成为某个 View bundle 的依赖。
+Vite 可以构建 IM Shell、iframe controller 和 AppBridge。Web bundle 不能启动 stdio；用户电脑 localhost HTTP 在 CORS、secure context、mixed content、PNA 和认证均允许时技术上可能可达。IM 首期规定 AppBridge 传 `null` 并注册手动 handlers，Browser 只连接 Node，物理 MCP 连接由 Node `PersistentConnectorManager` 持有。
 
 ### 5.1 Managed MCP snapshot loader 不落盘，也不是 Connector
 
@@ -233,9 +230,6 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 | `rg -n 'AppBridge|ui/initialize|...|postMessage|<iframe' frontend/src backend/claude_agent`（IM） | 1 | 产品前端和 Agent 后端没有 Apps Host/iframe bridge 命中 |
 | `rg -n 'get_default_managed_mcp_runtime_snapshot_loader|class ManagedMcpRuntimeSnapshotLoader|async def load' backend/claude_mcp backend/claude_agent` | 0 | 命中 service provider、loader 与 Agent `assemble_context` 调用链 |
 | `../.venv/bin/python -m pytest tests/test_claude_mcp_runtime_snapshot.py -q` | 0 | `6 passed`；包含 loader 不写临时目录、明文只在返回 snapshot 的断言 |
-| `npm view @openai/apps-sdk-ui version repository.url homepage --json` | 0 | `0.2.2`，官方仓库 `openai/apps-sdk-ui` |
-| `npm pack @openai/apps-sdk-ui` 并检查 package exports | 0 | 无 bridge/transport export；React 18/19、Tailwind 4 |
-| `rg -n '"react"|"tailwindcss"' frontend/package.json` | 0 | React `19.1.0`；无 Tailwind dependency |
-| 本地 Markdown link 检查 | 0 | `8` files，`8` local links，`0` broken |
-| Playwright + 本机 Chrome 执行 `mermaid.parse()` | 0 | `15` Mermaid blocks，`0` failures |
+| 本地 Markdown link 检查 | 0 | `6` files，`10` local links，`0` broken |
+| Frontend Node + `mermaid.parse()` | 0 | `16` Mermaid blocks，`0` failures |
 | `git diff --check` | 0 | 无 whitespace error |
