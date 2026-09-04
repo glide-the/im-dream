@@ -15,6 +15,8 @@
 [Sync] 2026-09-01: require a full FastAPI import before release switching so
                    missing locked runtime dependencies cannot stop Dream.
 [Sync] 2026-09-01: retain only a fully verified release as the rollback candidate.
+[Sync] 2026-09-04: verify every backend common Skill package and discovery link
+                   instead of checking only skill-creator.
 -->
 
 ## 应用介绍
@@ -128,12 +130,17 @@ AutoDL release 只把 `backend/` 复制进运行目录，因此生产 Skill 必�
 返回合成的 `No response requested.`；旧实现会将它误记为空 assistant，页面表现为
 发起对话后立即停止。
 
+仓库 `.claude/skills/<id>` 中的每个项目级包都必须在
+`backend/builtin_skills/common/<id>` 保持逐文件一致的生产镜像；provider-free
+测试在合并前检查这项 parity，发布门禁再验证 backend-only release 的实际 catalog。
+
 `deploy.sh` 的 `start`、`deploy`、`verify` 和 `rollback` 会创建一个隔离临时
 workspace，并硬性检查：
 
-- release 中存在 `builtin_skills/common/skill-creator/SKILL.md`，frontmatter 的 canonical ID 为 `skill-creator`；
-- workspace 初始化后存在 `skills/skill-creator/SKILL.md`；
-- `.claude/skills/skill-creator` 是指向该 workspace Skill 的发现链接。
+- release 中 `builtin_skills/common/` 的每个目录或 `.skill` 包都有合法且一致的 canonical ID；
+- workspace 初始化后的每个 common Skill manifest 与 release source 完全一致；
+- 目录包发布为只读 source 软链接，`.skill` 包按既有合同解压到当前 Thread；
+- `.claude/skills/<id>` 是指向对应 workspace Skill 的发现链接；
 - 用户输入 `/Skill-Creator` 时会按 workspace 中唯一匹配项归一化为 `/skill-creator`，兼容 Runtime 的大小写敏感查找。
 
 检查失败即发布失败。恢复既有 Thread 时不要删除 transcript，也不需要新建 Claude

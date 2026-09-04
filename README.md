@@ -17,6 +17,7 @@
 <!-- [Sync] 2026-09-01: require pre-write duplicate-root/stage validation, move-not-copy cleanup, and a visible safe reason when the one repair attempt stops. -->
 <!-- [Sync] 2026-09-02: document index-first Episode synchronization, stable per-Episode navigation, and no cross-Episode artifact fallback. -->
 <!-- [Sync] 2026-09-04: document actor-bound notion-cli Bash approval routing and its fail-closed command/network boundaries. -->
+<!-- [Sync] 2026-09-04: mirror every repository Claude Skill into the backend common catalog and verify the complete catalog in AutoDL releases. -->
 
 # Ink & Memory
 
@@ -42,7 +43,7 @@ This repository contains the Dream application. It does not own the shared datab
 - **Dream turn settlement** — a successful assistant Turn is committed before the after-turn Hook publishes canonical character/scene files into the Run-private artifact and PostgreSQL projection. If that later synchronization fails, Chat reports a typed post-commit sync error, preserves the reply, and directs the user to reload without resending. Execution re-reads `dream-files` whenever the shared Thread settles so newly published assets appear without a page reload.
 - **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
 - **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
-- **Skill authoring** — use the backend-owned `skill-creator` package to create, evaluate, and improve Skills in the existing Thread workspace; production releases refresh its canonical lowercase discovery ID.
+- **Common Skills** — every full Thread receives the backend-owned `asr`, `hhxg-market`, `investment-data`, `skill-creator`, and `symbolic-board` packages through canonical lowercase discovery IDs. Repository `.claude/skills` packages must have exact backend/common release mirrors because production ships only the backend build context.
 - **Notion resources** — connect in Settings, select the exact allowed scope, inspect the installed `notion-session` and `notion-cli` packages, and keep lightweight indexes refreshed outside Chat. Dream checks that pinned `ntn` is installed before authentication and injects the current actor/thread projection as `NOTION_HOME`, `NOTION_API_TOKEN`, `NOTION_KEYRING`, and `NOTION_WORKERS_CONFIG_FILE` into Agent Runtime Bash. Hosted Notion MCP remains separate from this CLI path.
 - **Platform integration** — consume authenticated model aliases, subscription eligibility, usage, and billing from Admin/Gateway.
 
@@ -302,7 +303,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 10. **Editor writes bind actor, live session, and durable state.** The runner rejects writes for a stale session, the Editor MCP child receives only the server-owned actor and effective PostgreSQL capability, every query/update is actor-scoped, and business failures refresh the single in-memory EditorState cache without publishing a success event. Notion indexes and on-demand page bodies never enter EditorState.
 11. **Claude Bash sandbox enablement is deployment-owned.** `INK_AGENT_SANDBOX_ENABLED` defaults to `true`, and invalid values also keep it enabled. Setting it to `false` preserves Workspace Mode, cwd, context, file tools, hooks, and tool confirmations, but approved Bash commands run directly as the Dream service account without bubblewrap filesystem/network isolation. User Settings and user env cannot override this capability. AutoDL projects `false` because its outer container rejects the required namespace creation; Dream currently runs as `root` there, so an approved Bash command has root authority inside that outer container.
 12. **AutoDL crawler files are a release gate.** Vite Preview must proxy `/robots.txt`, `/sitemap.xml`, and `/llms.txt` to FastAPI. Every AutoDL start, deploy, verify, and rollback checks the public MIME type, required marker, and absence of SPA HTML; HTTP 200 alone is not acceptance.
-13. **Production Skills must be in the backend build context.** AutoDL start, deploy, verify, and rollback initialize an isolated workspace and require `skill-creator` source, workspace copy, `.claude/skills` discovery, and title-case `/Skill-Creator` normalization to the canonical lowercase ID. A Runtime-consumed unknown Skill command is an explicit turn error, never an empty successful assistant message; an existing Claude session remains reusable after the package is repaired.
+13. **Production Skills must be in the backend build context.** Every repository `.claude/skills/<id>` package has an exact `backend/builtin_skills/common/<id>` release mirror. AutoDL start, deploy, verify, and rollback initialize an isolated workspace and validate every common source, read-only workspace link, and `.claude/skills` discovery link; they also retain the title-case `/Skill-Creator` normalization check. A Runtime-consumed unknown Skill command is an explicit turn error, never an empty successful assistant message; an existing Claude session remains reusable after the package is repaired.
 
 ## Troubleshooting
 

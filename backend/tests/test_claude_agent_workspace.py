@@ -23,8 +23,8 @@
 # [Sync] 2026-06-16: cover direct .claude/skills writes imported back into
 #                    workspace/skills before discovery symlinks are rebuilt.
 # [Sync] 2026-08-30: require notion-cli to refresh and discover beside notion-session without weakening the latter's Read-only contract.
-# [Sync] 2026-09-01: require the production skill-creator package to refresh
-#                    and remain discoverable in existing thread workspaces.
+# [Sync] 2026-09-04: require every project Claude Skill to resolve through its
+#                    backend-owned common source and Runtime discovery link.
 # [Sync] 2026-09-01: require common directory Skills to use exact source
 #                    symlinks, platform Skills to be connector-selected, and
 #                    `.skill` packages to unpack flat inside the current thread.
@@ -711,28 +711,40 @@ class TestSkillsSync(unittest.TestCase):
         self.assertFalse(cli_skill.parent.exists())
         self.assertFalse(diary_root.exists())
 
-    def test_bundled_skill_creator_is_discovered_and_repairs_stale_copy(self):
-        ws = init_workspace("skills-builtin-creator")
-        skill_root = ws / "skills" / "skill-creator"
-        skill = skill_root / "SKILL.md"
-        discovery = ws / ".claude" / "skills" / "skill-creator"
+    def test_bundled_common_skills_are_discovered_and_repair_stale_copy(self):
+        ws = init_workspace("skills-builtin-common")
+        project_skills_root = ROOT.parent / ".claude" / "skills"
+        project_skill_ids = sorted(
+            path.name
+            for path in project_skills_root.iterdir()
+            if path.is_dir() and (path / "SKILL.md").is_file()
+        )
 
-        content = skill.read_text(encoding="utf-8")
-        self.assertTrue(skill_root.is_symlink())
-        self.assertIn("name: skill-creator", content)
-        self.assertTrue((skill_root / "scripts" / "quick_validate.py").is_file())
-        self.assertTrue((skill_root / "references" / "schemas.md").is_file())
-        self.assertTrue(discovery.is_symlink())
-        self.assertEqual(discovery.resolve(), skill_root.resolve())
+        for skill_id in project_skill_ids:
+            with self.subTest(skill_id=skill_id):
+                source_root = ROOT / "builtin_skills" / "common" / skill_id
+                skill_root = ws / "skills" / skill_id
+                discovery = ws / ".claude" / "skills" / skill_id
+                self.assertTrue(skill_root.is_symlink())
+                self.assertEqual(skill_root.resolve(), source_root.resolve())
+                self.assertTrue((skill_root / "SKILL.md").is_file())
+                self.assertTrue(discovery.is_symlink())
+                self.assertEqual(discovery.resolve(), source_root.resolve())
 
-        skill_root.unlink()
-        skill_root.mkdir()
-        skill.write_text("stale runtime copy", encoding="utf-8")
-        init_workspace("skills-builtin-creator")
-        repaired = skill.read_text(encoding="utf-8")
-        self.assertIn("# Skill Creator", repaired)
+        creator_root = ws / "skills" / "skill-creator"
+        self.assertTrue((creator_root / "scripts" / "quick_validate.py").is_file())
+        self.assertTrue((creator_root / "references" / "schemas.md").is_file())
+
+        stale_root = ws / "skills" / "asr"
+        stale_manifest = stale_root / "SKILL.md"
+        stale_root.unlink()
+        stale_root.mkdir()
+        stale_manifest.write_text("stale runtime copy", encoding="utf-8")
+        init_workspace("skills-builtin-common")
+        repaired = stale_manifest.read_text(encoding="utf-8")
+        self.assertIn("name: asr", repaired)
         self.assertNotIn("stale runtime copy", repaired)
-        self.assertTrue(skill_root.is_symlink())
+        self.assertTrue(stale_root.is_symlink())
 
     def test_sandbox_allows_only_selected_directory_skill_sources(self):
         ws = init_workspace("skills-builtin-sandbox", sandbox_enabled=True)
