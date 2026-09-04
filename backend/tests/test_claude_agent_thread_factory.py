@@ -12,6 +12,8 @@
 # [Sync] 2026-06-25: cover frontend stop flow cancelling a running background turn.
 # [Sync] 2026-08-31: cover safe structured Dream binding failure SSE without code duplication in errorText.
 # [Sync] 2026-09-01: cover one normal Dream repair continuation under the same factory lifecycle.
+# [Sync] 2026-09-04: cover the typed post-commit Dream synchronization error
+#                    crossing the factory/EventBus boundary with one terminal.
 
 """Unit tests for ClaudeAgentThreadFactory.
 
@@ -56,6 +58,7 @@ from claude_agent.service import (
     ClaudeAgentRunRequest,
     ClaudeAgentService,
     ClaudeAgentTurnContinuation,
+    DreamArtifactSyncAfterCommitError,
 )
 from claude_agent.observer import LoggingObserver, SessionObserverRegistry
 from services.story_workspace.dream_lifecycle_observer import DreamObserver
@@ -1354,6 +1357,29 @@ class TestAssembleContextFailure(unittest.TestCase):
         self.assertEqual(events[1].data["finishReason"], "error")
         self.assertEqual(state.lifecycle, AgentRunLifecycle.IDLE)
         self.assertIsNone(state.event_bus)
+
+    def test_post_commit_dream_sync_failure_keeps_typed_terminal(self):
+        self._fail_assemble(
+            DreamArtifactSyncAfterCommitError("DREAM_ARTIFACT_SYNC_FAILED")
+        )
+        frames = self._drain(_make_request("user_dream_sync_after_commit"))
+        error_frames = [
+            frame for frame in frames if '"type":"error"' in frame.replace(" ", "")
+        ]
+
+        self.assertEqual(len(error_frames), 1)
+        self.assertIn(
+            '"errorCode":"DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT"',
+            error_frames[0],
+        )
+        self.assertIn('"retryable":false', error_frames[0])
+        self.assertIn("Agent 回复已保存", error_frames[0])
+        self.assertNotIn("DREAM_ARTIFACT_SYNC_FAILED]", error_frames[0])
+        self.assertEqual(
+            sum('"type":"finish"' in frame.replace(" ", "") for frame in frames),
+            1,
+        )
+        self.assertIn('"finishReason":"error"', "".join(frames))
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@
 <!-- [Sync] 2026-09-01: show marker-only deletion denial returning the exact safe full-root retry command. -->
 <!-- [Sync] 2026-09-01: show persisted projectCleanup, matching .dream facts, and actionable trusted-root denial. -->
 <!-- [Sync] 2026-09-01: show assistant persistence before both Hook attempts and preserve the committed reply across SSE/history handoff. -->
+<!-- [Sync] 2026-09-04: show the explicit post-commit synchronization terminal and read-only UI reconciliation. -->
 
 # Dream 工作区自动修正业务时序图
 
@@ -118,15 +119,19 @@ sequenceDiagram
     participant Hook as DreamArtifactTurnHook
     participant Authority as Server-owned authority
     participant WS as Workspace facts
+    participant DB as PostgreSQL chat_message
     participant Bus as EventBus/SSE
+    participant UI as ChatPanel
 
+    Service->>DB: persist completed assistant
+    DB-->>Service: commit
     Service->>Hook: after_main_turn(ticket)
     Hook->>Authority: 校验 actor/thread/run/Deck/plugin/source/frozen facts
     alt 可信身份异常
         Authority-->>Hook: mismatch/missing/tampered
         Hook-->>Service: DREAM_LAUNCH_AUTHORITY_INVALID / non_repairable
-        Service->>Bus: safe error + finish(error)
-        Note over Service,Bus: 不生成 user 消息，不提示 Agent 修改 authority
+        Service->>Bus: DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT + finish(error)
+        Note over Service,Bus: assistant 保留；不生成 user 消息，不提示 Agent 修改 authority
     else 可信身份合法
         Hook->>WS: 读取唯一 canonical project slug
         alt workspace slug 与 trusted slug 不同
@@ -139,9 +144,10 @@ sequenceDiagram
             Note over Service: 固定模板要求移动/合并/清理；不公开原始路径或 Pydantic 文本
         else DB/CAS/权限/路径安全/未知异常
             Hook-->>Service: DREAM_ARTIFACT_SYNC_FAILED / non_repairable
-            Service->>Bus: safe error + finish(error)
+            Service->>Bus: DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT + finish(error)
         end
     end
+    Bus-->>UI: typed terminal；只读 history/status reload，不重发
 ```
 
 ## 2.1 自动清理安全分支

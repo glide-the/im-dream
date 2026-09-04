@@ -13,8 +13,12 @@
 <!-- [同步] 2026-09-01：记录经规范 Chat/SSE/Turn 路径持久化并单次执行的 Dream 工作区自动修正。 -->
 <!-- [同步] 2026-09-01：允许歧义 Dream 工作区进入修正 Turn，并安全截断递归 Skill 链接。 -->
 <!-- [同步] 2026-09-02：Dream 启动前要求 Admin 0042 发布精确 Chat 历史 keyset pagination capability。 -->
+<!-- [同步] 2026-09-04：记录已提交回复后的 Dream 同步错误与 Execution 资产即时刷新。 -->
 <!-- [同步] 2026-09-01：要求投影写入前校验重复项目根/stage，采用 move-not-copy 清理，并在唯一一次修正停止时显示安全原因。 -->
 <!-- [同步] 2026-09-02：记录索引优先的 Episode 同步、稳定的逐 Episode 导航以及禁止跨 Episode 产物回退。 -->
+<!-- [同步] 2026-09-04：记录 actor 绑定的 notion-cli Bash 审批路由及其 fail-closed 命令/网络边界。 -->
+<!-- [同步] 2026-09-04：把仓库 Claude Skills 全量镜像进 backend common catalog，并在 AutoDL 发布中验证完整 catalog。 -->
+<!-- [同步] 2026-09-04：让 Chat 的 Slash 候选与 Deck 插件 Skills 一起读取后端 common catalog。 -->
 
 # Ink & Memory
 
@@ -37,9 +41,10 @@ Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 
 - **Dream** —— 启动 Dream Run，审阅剧本、分镜、提示词和生成产物。
 - **Episode 同步** —— 同步视图先打开 Run 范围的 Episode 索引，通过稳定的不透明标识分别进入 EP01/EP02，并返回同一 Run 的索引。每个产物请求、ETag 和最近有效快照都按 Episode 隔离，因此 EP02 缺少产物时绝不展示 EP01 内容。
 - **Dream 工作区恢复** —— Dream 在写入后置投影前，对 allowlist 内的 workspace slug、重复 canonical 项目根和 stage identity/schema 错误进行分类；随后持久化一条可见的自动修正 user 消息，明确要求移动/合并并清理旧项目根而不是只复制目录，再通过正常 Chat/SSE/Turn 路径续接同一 Claude 会话。多个安全项目根会生成不绑定任一 slug 的修正上下文，不再在 Agent 启动前终止；递归文件树也不会跟随 Thread 外的只读内置 Skill 链接。可信 actor、Thread、Run、Deck 或 plugin authority 异常仍会 fail closed；同一个 originating Turn 最多只发起一次修正，第二次失败只显示 allowlist 内的安全原因且不会启动第三轮。
+- **Dream 回合结算** —— successful assistant Turn 会先持久化，再由 after-turn Hook 将 canonical 人物/场景文件发布到 Run-private artifact 并写入 PostgreSQL 投影。若后续同步失败，Chat 使用明确的已提交同步错误，保留正文并提示重新加载、无需重发；共享 Thread 结算时 Execution 会重新读取 `dream-files`，新发布资产无需刷新整页即可出现。
 - **Decks** —— 创建并版本化 Deck、Agent、Prompt、资源和 Claude Plugin 引用。
 - **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、MCP Server、Skill 和插件。
-- **Skill 创作** —— 在既有 Thread workspace 中使用后端所有的 `skill-creator` 创建、评估和改进 Skill；生产发布会按 canonical 小写 ID 刷新其 discovery。
+- **通用 Skills** —— 每个完整 Thread 都通过 canonical 小写 discovery ID 获得后端所有的 `asr`、`hhxg-market`、`investment-data`、`skill-creator` 与 `symbolic-board` 包。Workspace Mode 开启时，Chat 即使尚未选择 Deck 或创建 Thread，也会从同一个认证后端 catalog 读取 `/` 候选；选择后只插入可编辑普通文本，不会自动发送。生产只发布 backend build context，因此仓库 `.claude/skills` 包必须在 backend/common 中存在完全一致的 release 镜像。
 - **Notion 资源** —— 在 Settings 中连接并选择精确允许范围，审阅已安装的 `notion-session` 与 `notion-cli`，并在 Chat 外刷新轻量索引。Dream 在认证前检查固定版本 `ntn` 是否已安装，并把当前 actor/thread 投影作为 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与 `NOTION_WORKERS_CONFIG_FILE` 注入 Agent Runtime Bash。Hosted Notion MCP 与这条 CLI 路径相互独立。
 - **平台集成** —— 从 Admin/Gateway 获取已认证的模型 alias、订阅资格、用量和计费能力。
 
@@ -228,6 +233,8 @@ Admin provision 命令会把其余本机服务身份和模型 alias 写入 gitig
 
 启用可信 thread workspace 的 Chat turn 会在 Runtime 初始化时把当前用户有效凭证和最近一次成功索引复制到 `{AGENT_CWD}/{thread_id}/.notion-home` 与 `.notion`；投影前先与用户当前选择范围求交，并最小化连接器元数据。随后 `sdk_env.py` 将该精确 thread 投影通过 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与 `NOTION_WORKERS_CONFIG_FILE` 绑定到 Agent Runtime Bash；ambient 值会被清空，不能选择其他用户或 home。投影过程不会调用 Notion 或执行索引同步，因此即使新索引刷新失败，清空或缩小选择范围也会在下一 turn 生效。既有页面 Read hook 与 Agent 直接使用 `ntn` CLI 并存。Workspace Mode 关闭时不提供两种投影和四个 Runtime 环境变量。
 
+actor 绑定的 Notion CLI 会话发起 Skill 已记录的只读 `ntn api` 调用时，继续遵循既有 Bash 策略：Auto 与手动模式走正常前端确认，Full Access 可不弹该确认，禁网模式仍硬拒绝。这是窄化路由规则，不是 Bash allowlist；缺少 actor/thread 绑定、wrapper 或替代 executable 路径、未声明 endpoint、shell 拼接/替换、畸形 data 和非 Notion Bash 均保持 fail-closed。若 Chat 报告 `Hook PreToolUse:Bash denied this tool`，应检查当前 connector 投影、改用已安装 `notion-cli` Skill 记录的命令并核对有效 network mode；不得以全局放开 Bash 绕过。
+
 ### 6. 启动 Dream
 
 终端 B——后端：
@@ -297,7 +304,7 @@ python3 scripts/verify_claude_registry_release.py \
 10. **Editor 写入同时绑定 actor、当前 session 和持久状态。** runner 拒绝面向过期 session 的写入；Editor MCP 子进程只接收服务端所有的 actor 与有效 PostgreSQL capability；每次查询/更新均按 actor 限定；业务失败只刷新唯一内存 EditorState 软缓存，不发布成功事件。Notion 索引和按需页面正文不得进入 EditorState。
 11. **Claude Bash sandbox 开关由部署所有。** `INK_AGENT_SANDBOX_ENABLED` 缺省为 `true`，非法值也保持启用。设为 `false` 仍保留 Workspace Mode、cwd、上下文、文件工具、hooks 和工具确认，但已批准的 Bash 会绕过 bubblewrap 文件系统/网络隔离，直接以 Dream 服务账号运行；用户 Settings 与用户 env 均不能覆盖该能力。AutoDL 的外层容器拒绝所需 namespace 创建，因此发布环境固定投影为 `false`；当前 Dream 在 AutoDL 以 `root` 运行，所以已批准 Bash 在该外层容器内拥有 root 权限。
 12. **AutoDL crawler 文件属于发布门禁。** Vite Preview 必须把 `/robots.txt`、`/sitemap.xml` 和 `/llms.txt` 代理到 FastAPI。每次 AutoDL start、deploy、verify 与 rollback 都检查公网 MIME、必要正文标记及不存在 SPA HTML；仅 HTTP 200 不算验收通过。
-13. **生产 Skill 必须进入 backend build context。** AutoDL start、deploy、verify 与 rollback 会初始化隔离 workspace，并检查 `skill-creator` source、workspace copy、`.claude/skills` discovery，以及 title-case `/Skill-Creator` 到 canonical 小写 ID 的归一化。Runtime 消费未知 Skill 命令时必须返回明确 turn error，不能保存空成功 assistant；修复 package 后可继续复用原 Claude session。
+13. **生产 Skill 必须进入 backend build context。** 每个仓库 `.claude/skills/<id>` 包都必须在 `backend/builtin_skills/common/<id>` 有完全一致的 release 镜像。AutoDL start、deploy、verify 与 rollback 会初始化隔离 workspace，验证全部 common source、只读 workspace 链接与 `.claude/skills` discovery 链接，并保留 title-case `/Skill-Creator` 的归一化检查。Runtime 消费未知 Skill 命令时必须返回明确 turn error，不能保存空成功 assistant；修复 package 后可继续复用原 Claude session。
 
 ## 故障排查
 

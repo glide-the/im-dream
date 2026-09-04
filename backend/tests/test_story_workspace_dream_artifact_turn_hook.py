@@ -5,6 +5,8 @@
 # [Sync] 2026-09-01: cover pre-write rejection of duplicate canonical roots
 #                    and duplicate stage entity identities.
 # [Sync] 2026-09-02: cover changed/preexisting EP02 registry activation and Episode-only titles.
+# [Sync] 2026-09-04: connect canonical character/scene publication to the
+#                    run-private reader and PostgreSQL materializer seam.
 
 """Automatic root-turn workbench synchronization contract."""
 
@@ -584,6 +586,11 @@ shots:
         self.assertEqual(
             {entry["path"] for entry in manifest["files"]},
             set(result.private_files),
+        )
+        self.story_index_materialize_mock.assert_called_once_with(
+            ticket,
+            authoritative_run(),
+            episode_authority=True,
         )
 
     def test_repeated_root_turn_is_idempotent_and_changed_file_republishes(self) -> None:

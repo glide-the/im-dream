@@ -1,6 +1,7 @@
-// [Input] Installed Claude-plugin inventories, Deck refs, and optional frozen thread receipts.
-// [Output] Contract coverage for safe slash Skill discovery and text-only matching.
+// [Input] Backend common commands plus installed Claude-plugin inventories, Deck refs, and receipts.
+// [Output] Contract coverage for safe merged slash Skill discovery and text-only matching.
 // [Pos] Chat composer Skill suggestion unit contract.
+// [Sync] 2026-09-04: cover validated common commands, common-first de-duplication, and filtering.
 import { expect, test } from '@playwright/test';
 import type {
   ClaudePluginInstallation,
@@ -9,6 +10,8 @@ import type {
 } from '../../../api/claudePluginAdminApi';
 import {
   filterInstalledSkillCommands,
+  mergeSkillCommands,
+  resolveCommonSkillCommands,
   resolveInstalledSkillCommands,
 } from '../slashSkillCommands';
 
@@ -92,6 +95,27 @@ test('resolves the thirteen installed drama Skills without a stage order', () =>
 
   expect(commands.map((item) => item.command)).toEqual(SKILLS.map((name) => `/${name}`));
   expect(commands).toHaveLength(13);
+});
+
+test('resolves safe backend common Skills and rejects malformed public commands', () => {
+  expect(resolveCommonSkillCommands([
+    { command: '/asr', name: 'asr' },
+    { command: '/hhxg-market', name: 'hhxg-market' },
+    { command: '/symbolic-board', name: 'symbolic-board' },
+    { command: '/ASR', name: 'asr' },
+    { command: '/../unsafe', name: '../unsafe' },
+  ])).toEqual([
+    { command: '/asr', name: 'asr', sourceLabel: 'Ink & Memory' },
+    { command: '/hhxg-market', name: 'hhxg-market', sourceLabel: 'Ink & Memory' },
+    { command: '/symbolic-board', name: 'symbolic-board', sourceLabel: 'Ink & Memory' },
+  ]);
+});
+
+test('keeps the backend common command when a Deck plugin exposes the same name', () => {
+  const common = resolveCommonSkillCommands([{ command: '/asr', name: 'asr' }]);
+  const deck = [{ command: '/asr', name: 'asr', sourceLabel: 'audio@deck' }];
+
+  expect(mergeSkillCommands(common, deck)).toEqual(common);
 });
 
 test('filters slash text only and never interprets a workflow stage', () => {

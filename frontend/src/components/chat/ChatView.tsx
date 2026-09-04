@@ -27,6 +27,7 @@
 //                    cannot expose an unpersisted snapshot to the Agent.
 // [Sync] 2026-06-22: hide the workspace file sidebar entry when Settings
 //                    Workspace Mode is disabled.
+// [Sync] 2026-09-04: gate fresh-chat common/Deck slash suggestions with Workspace Mode.
 // [Sync] 2026-06-27: add Chat history search over thread titles and persisted
 //                    conversation text via backend retriever params.
 // [Sync] 2026-06-28: move history search from sidebar input to centered search
@@ -320,7 +321,7 @@ function ChatViewContent({
   onLandingTabChange,
 }: ChatViewContentProps) {
   const { t, i18n } = useTranslation();
-  const { workspaceEnabled } = useWorkspaceSession();
+  const { workspaceConfigLoaded, workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [subagentSidebarOpen, setSubagentSidebarOpen] = useState(false);
   const [focusedSubagentToolCallId, setFocusedSubagentToolCallId] = useState<string | null>(null);
@@ -1319,6 +1320,7 @@ function ChatViewContent({
                     <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, paddingBottom: '0.25rem' }}>
                       <AIInputDock
                         deckId={selectedDeckId}
+                        workspaceEnabled={workspaceConfigLoaded && workspaceEnabled}
                         prefill={requestedDeckInput}
                         prefillNonce={requestedDeckNonce}
                         onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {

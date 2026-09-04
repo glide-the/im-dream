@@ -22,6 +22,9 @@
 > `finish{finishReason:"error"}`，`message-final` 只是成功输出/持久化证据。确认 policy
 > 由服务端在 approval publish 前绑定 active `(threadId,turnId,toolCallId)` 并原子校验
 > AskUser/network/reject-only；Dream run-scoped messages/events/tool-confirm 不再是公开合同。
+> **[Sync] 2026-09-04**: 新增认证只读 `GET /api/claude-agent/skill-commands`，从
+> backend common package catalog 返回 canonical Slash 候选；该读取不创建 Thread、
+> 不执行 Skill，也不改变原 `POST /api/claude-agent` 消息合同。
 
 # Ink & Memory Claude Agent 服务入参与SSE响应报文整理
 
@@ -49,6 +52,7 @@ Dream 页面共同消费这一个 thread SSE 协议。
 
 - `POST /api/claude-agent` 的请求体契约、默认值、校验与服务层归一规则。
 - `POST /api/claude-agent/tool-confirm` 的请求/响应契约。
+- `GET /api/claude-agent/skill-commands` 的只读 common Skill 候选契约。
 - Claude Agent SSE 通道的传输约定、事件全集、事件顺序和字段语义；该合同同样适用
   于 Dream surface。
 - `pet_info`、`runtime`、硬件状态、`long_term_profile` 在服务层中的实际消费方式。
@@ -79,6 +83,7 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `POST /api/claude-agent` | 启动 Claude Agent 一轮会话，并持续输出 SSE 事件 | `text/event-stream` |
 | `POST /api/claude-agent/tool-confirm` | 对交互工具（动画事件、问答等）的待确认调用做批准/拒绝 | `application/json` |
 | `POST /api/claude-agent/threads/{thread_id}/stop` | 用户主动停止当前运行中的 Agent turn，不删除 thread | `application/json` |
+| `GET /api/claude-agent/skill-commands` | 返回 backend common catalog 的 canonical Slash 候选，不创建 Thread、不执行 Skill | `application/json` |
 
 其中：
 
@@ -86,6 +91,26 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 - `backend/claude_agent/thread_factory.py` 是 SSE 入口（Factory 模式），驱动 Phase 1（`service.assemble_context`）+ Phase 2（`create_agent_runner`）+ Phase 3（`service.execute_session`）+ Phase 4（`_fire_session_ended`），并维护每会话 `asyncio.Lock`、`AgentRunStatePool` 享元、10 分钟 TTL 清扫器。
 - `backend/claude_agent/service.py` 在 Phase 1 / Phase 3 内完成上下文构建、pet-agent 调用和 SSE 事件出流；`run_streaming` 入口已删，对外只暴露 `assemble_context` + `execute_session` + `confirm_tool`。
 - `backend/claude_agent/context_builder.py` 负责把宠物信息、运行时和显式诊断 `long_term_profile` 覆盖拼进 prompt；正式长期记忆由 Mem0 memory MCP 按需召回。
+
+#### 4.1.1 Common Skill Slash catalog
+
+`GET /api/claude-agent/skill-commands` 必须通过现有用户鉴权。服务端直接调用 builtin
+package validator 枚举 `backend/builtin_skills/common`，并按 canonical ID 稳定返回：
+
+```json
+{
+  "commands": [
+    {"command": "/asr", "name": "asr"},
+    {"command": "/hhxg-market", "name": "hhxg-market"}
+  ]
+}
+```
+
+完整集合由发布中的 catalog 决定，前端不得复制固定 ID。Chat 仅在 Workspace Mode
+开启、Runtime 会物化 workspace Skill 时加载候选。任一 package 非法时端点返回
+安全 `503 COMMON_SKILL_CATALOG_UNAVAILABLE`；Chat 只降级该候选来源，普通输入和 Deck
+插件候选保持可用。候选点击只插入普通消息文本，实际执行仍经
+`POST /api/claude-agent`、原 Thread/session 与 Runtime Skill discovery。
 
 ### 4.2 `POST /api/claude-agent` 入参契约
 

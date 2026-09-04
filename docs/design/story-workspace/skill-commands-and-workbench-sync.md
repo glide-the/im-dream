@@ -1,3 +1,9 @@
+<!-- [Input] Shared Dream Thread turns, canonical Project/Episode assets, after-turn Hook, private publication, PostgreSQL/API projections, and Execution consumers. -->
+<!-- [Output] Business contract for common/Drama slash use and deterministic post-turn workbench synchronization. -->
+<!-- [Pos] Story Workspace source of truth for Skill invocation versus host-owned synchronization. -->
+<!-- [Sync] 2026-09-04: preserve committed assistant truth on post-Hook failure and refresh Dream assets whenever the shared Thread settles. -->
+<!-- [Sync] 2026-09-04: merge backend common and Deck plugin Skills in the shared slash menu through an authenticated catalog read. -->
+
 # Skill 指令与工作台自动同步
 
 > 本文是当前业务设计。十三个 Drama Skill 是用户可自由调用的能力，不是由页面或服务端推进的阶段状态机。
@@ -6,7 +12,7 @@
 
 首次创建故事空间时，系统默认引导 `/drama-init` 建立 Project。初始化完成后，用户可以在同一 Chat thread 中任意、重复执行已安装的 Skill；系统不根据 Episode 产物、审阅结果或 completion fact 决定“下一步”。
 
-Chat 输入框输入 `/` 时展示当前 Deck 实际安装且可用的 Skill。选择结果只插入普通文本，用户可以继续补充 Episode 和创作要求，再主动发送。
+Workspace Mode 开启时，Chat 输入框输入 `/` 会展示后端实际发布的 common Skill，以及当前 Deck 实际安装且可用的插件 Skill。common Skill 不依赖 Deck 或既有 thread，因此新对话也可发现。选择结果只插入普通文本，用户可以继续补充参数、Episode 和创作要求，再主动发送。Workspace Mode 关闭时，Runtime 不创建 Skill workspace，前端也不得展示不可执行的 common/Deck Skill 候选。
 
 ## 2. 十三个业务 Skill
 
@@ -34,12 +40,12 @@ Chat 输入框输入 `/` 时展示当前 Deck 实际安装且可用的 Skill。�
 sequenceDiagram
     actor U as 用户
     participant I as Chat 输入框
-    participant P as Deck 插件安装事实
+    participant P as Common catalog + Deck 插件事实
     participant T as 共享 Chat transport
     participant A as 主 Agent
 
     U->>I: 输入 /
-    I->>P: 读取当前 Deck/thread 可用 Skill
+    I->>P: 读取后端 common 与当前 Deck/thread Skill
     P-->>I: 返回安全的已安装 Skill 名称
     I-->>U: 显示 Slash 建议
     U->>I: 选择 /drama-script
@@ -51,6 +57,10 @@ sequenceDiagram
 
 Skill 来源规则：
 
+- common 候选只能来自认证的后端 catalog 响应；前端不得复制 ID 清单；
+- common catalog 直接枚举 `backend/builtin_skills/common` 的有效 package，因此线上发布内容、Workspace discovery 与 Slash 展示使用同一来源；
+- common 不要求 Deck/thread；与 Deck 插件命令同名时，保留后端 common 命令；
+- Slash 候选只在 Workspace Mode 开启时加载，必须与 Runtime 的 workspace discovery 可用性一致；
 - 已存在 thread 时，优先尊重其冻结插件加载事实；
 - 尚未创建 thread 时，读取当前选中 Deck 的 enabled、ready 插件引用；
 - 安装状态、版本和 digest 必须匹配；
@@ -84,6 +94,7 @@ sequenceDiagram
     participant A as 主 Agent
     participant W as canonical 工作台
     participant D as .dream 私有 Run
+    participant P as PostgreSQL/API 投影
     participant O as DreamObserver
 
     U->>C: 发送任意 /drama-* 指令
@@ -93,13 +104,17 @@ sequenceDiagram
     S->>A: 原 run_streaming
     A->>W: 创建或修改产物
     A-->>S: 根 turn 成功
+    S->>S: 持久化 assistant Chat 事实
     S->>H: after_main_turn
     H->>W: 扫描并校验当前快照
     H->>D: 幂等更新 stage 和 Artifact
     H->>D: 最后原子提交 manifest
+    H->>P: 物化 Story/Episode 投影
     H-->>O: 发布非控制型同步结果
     O-->>O: 投影、审计或指标
     S-->>C: 原 Chat 单终态
+    C->>P: Thread settle 后重读 dream-files/Story/Episode
+    P-->>C: 返回当前人物、场景和 Episode 资产
 ```
 
 Agent 未调用 MCP 时，上述同步仍必须成立。
@@ -122,11 +137,14 @@ sequenceDiagram
         Note over S,D: 不发布本轮半成品
     else Hook 校验或发布失败
         H--xS: 记录独立同步错误
-        Note over S,D: 保留 last-good manifest，不重跑模型，不新增 Chat 终态
+        Note over S,D: assistant 已提交；保留 last-good manifest，不重跑模型
+        S-->>S: 映射 DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT
     end
 ```
 
 canonical 源文件删除后，Hook 必须生成明确空投影或移除对应发布引用，页面不能永久保留旧 stage。
+
+`DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT` 只表示 assistant 已成为持久化 Chat 事实之后的工作台同步失败。ThreadFactory 仍沿用唯一 error + `finish(error)` 终态；前端必须显示“回复已保存，工作台同步未完成”，只读重新加载并禁止暗示用户重发。无论 Hook 成功还是这一已提交同步终态，Execution 都在共享 Thread settle 后重新读取 `dream-files`、Episode 和 Story 投影，避免 completed Run 停止轮询后永久显示旧人物/场景。
 
 ## 7. 明确删除的历史设计
 
@@ -148,6 +166,6 @@ canonical 源文件删除后，Hook 必须生成明确空投影或移除对应�
 - Slash 菜单只插入普通文本；
 - Hook 是同步正确性的 owner，Observer 不是；
 - MCP 是可选辅助；
-- 不新增 API、DDL、SSE、事件存储或第二 runtime；
+- 只新增认证的只读 common Skill catalog API；不新增 DDL、SSE、事件存储或第二 runtime；
 - 不修改 Claude runner、报文、thread、session 或 `claude_session_id`；
 - 安全与业务授权继续保留。

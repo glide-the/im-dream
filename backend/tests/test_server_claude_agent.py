@@ -36,6 +36,7 @@
 # [Sync] 2026-09-02: cover stable message cursors, ID-only stabilization,
 #                    large-body integrity, and completed-turn metadata projection.
 # [Sync] 2026-09-02: cover final-only page flags and owned exact-id process detail.
+# [Sync] 2026-09-04: cover the authenticated backend common Skill slash catalog.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -299,6 +300,52 @@ class TestClaudeAgentRouteRegistration(unittest.TestCase):
 
     def test_post_thread_stop(self):
         self.assertTrue(self._has_route("POST", "/api/claude-agent/threads/{thread_id}/stop"))
+
+    def test_get_common_skill_commands(self):
+        self.assertTrue(self._has_route("GET", "/api/claude-agent/skill-commands"))
+
+
+@_skip_if_no_server
+class TestClaudeAgentCommonSkillCommands(unittest.TestCase):
+    """The slash catalog must reflect the validated backend common source."""
+
+    def test_returns_every_backend_common_skill_in_canonical_order(self):
+        import routers.claude_agent as route_module
+
+        payload = asyncio.run(route_module.claude_agent_skill_commands(
+            current_user={"user_id": 7},
+        ))
+
+        self.assertEqual(
+            [command.model_dump() for command in payload.commands],
+            [
+                {"command": "/asr", "name": "asr"},
+                {"command": "/hhxg-market", "name": "hhxg-market"},
+                {"command": "/investment-data", "name": "investment-data"},
+                {"command": "/skill-creator", "name": "skill-creator"},
+                {"command": "/symbolic-board", "name": "symbolic-board"},
+            ],
+        )
+
+    def test_invalid_backend_common_catalog_fails_closed(self):
+        import routers.claude_agent as route_module
+        from fastapi import HTTPException
+
+        with unittest.mock.patch.object(
+            route_module,
+            "discover_builtin_skill_packages",
+            side_effect=route_module.BuiltinSkillPackageError("invalid catalog"),
+        ):
+            with self.assertRaises(HTTPException) as captured:
+                asyncio.run(route_module.claude_agent_skill_commands(
+                    current_user={"user_id": 7},
+                ))
+
+        self.assertEqual(captured.exception.status_code, 503)
+        self.assertEqual(
+            captured.exception.detail["error_code"],
+            "COMMON_SKILL_CATALOG_UNAVAILABLE",
+        )
 
 
 @_skip_if_no_server
@@ -2472,6 +2519,10 @@ class TestClaudeAgentAuth(unittest.TestCase):
 
     def test_chat_history_requires_auth(self):
         resp = self.client.get("/api/claude-agent/chat-history")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_common_skill_commands_require_auth(self):
+        resp = self.client.get("/api/claude-agent/skill-commands")
         self.assertEqual(resp.status_code, 401)
 
     def test_session_status_requires_auth(self):
