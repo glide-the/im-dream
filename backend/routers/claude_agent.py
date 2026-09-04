@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# [Input] Consume database chat APIs, Claude Agent request types/factory, and shared auth dependency.
-# [Output] Register /api/claude-agent* endpoints.
+# [Input] Consume database chat APIs, Claude Agent request types/factory, builtin Skill catalog, and shared auth dependency.
+# [Output] Register /api/claude-agent* turn, thread, and common Skill catalog endpoints.
 # [Pos] claude-agent route node in backend/routers
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-08-28: preserve validated model metadata across backend/services dual import identities.
@@ -45,6 +45,8 @@
 #                    history so SSE and refresh expose the same repair message.
 # [Sync] 2026-09-02: add stable cursor Chat message pages and known-latest
 #                    identity stabilization while preserving the legacy full response.
+# [Sync] 2026-09-04: expose the authenticated backend-owned common Skill command
+#                    catalog used by the shared Chat slash menu.
 
 import asyncio
 import base64
@@ -78,6 +80,11 @@ from claude_agent.thread_retrieval import (
     search_chat_threads,
 )
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
+from libs.claude_agent_kit.server.builtin_skill_packages import (
+    COMMON_SKILL_NAMESPACE,
+    BuiltinSkillPackageError,
+    discover_builtin_skill_packages,
+)
 from libs.claude_agent_kit.server.workspace import (
     get_or_create_workspace,
     get_workspace_root,
@@ -657,6 +664,47 @@ class CreateThreadRequestBody(BaseModel):
     deck_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("deck_id", "deckId"))
     voice_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("voice_id", "voiceId"))
     title: Optional[str] = Field(default=None, max_length=200)
+
+
+class PublicSkillCommandDto(BaseModel):
+    command: str
+    name: str
+
+
+class PublicSkillCommandCatalogDto(BaseModel):
+    commands: list[PublicSkillCommandDto]
+
+
+@router.get(
+    "/api/claude-agent/skill-commands",
+    response_model=PublicSkillCommandCatalogDto,
+)
+async def claude_agent_skill_commands(
+    current_user: dict = Depends(get_current_user),
+):
+    """Return validated backend-owned common Skills for Chat slash discovery."""
+
+    del current_user
+    try:
+        packages = discover_builtin_skill_packages((COMMON_SKILL_NAMESPACE,))
+    except (BuiltinSkillPackageError, OSError) as exc:
+        logger.error("Backend-owned common Skill catalog is unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "COMMON_SKILL_CATALOG_UNAVAILABLE",
+                "message": "Common Skills are temporarily unavailable.",
+            },
+        ) from exc
+    return PublicSkillCommandCatalogDto(
+        commands=[
+            PublicSkillCommandDto(
+                command=f"/{package.skill_id}",
+                name=package.skill_id,
+            )
+            for package in packages
+        ],
+    )
 
 
 @router.post("/api/claude-agent")

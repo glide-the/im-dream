@@ -1,7 +1,8 @@
 <!-- [Input] Shared Dream Thread turns, canonical Project/Episode assets, after-turn Hook, private publication, PostgreSQL/API projections, and Execution consumers. -->
-<!-- [Output] Business contract for free-form Drama Skill use and deterministic post-turn workbench synchronization. -->
+<!-- [Output] Business contract for common/Drama slash use and deterministic post-turn workbench synchronization. -->
 <!-- [Pos] Story Workspace source of truth for Skill invocation versus host-owned synchronization. -->
 <!-- [Sync] 2026-09-04: preserve committed assistant truth on post-Hook failure and refresh Dream assets whenever the shared Thread settles. -->
+<!-- [Sync] 2026-09-04: merge backend common and Deck plugin Skills in the shared slash menu through an authenticated catalog read. -->
 
 # Skill 指令与工作台自动同步
 
@@ -11,7 +12,7 @@
 
 首次创建故事空间时，系统默认引导 `/drama-init` 建立 Project。初始化完成后，用户可以在同一 Chat thread 中任意、重复执行已安装的 Skill；系统不根据 Episode 产物、审阅结果或 completion fact 决定“下一步”。
 
-Chat 输入框输入 `/` 时展示当前 Deck 实际安装且可用的 Skill。选择结果只插入普通文本，用户可以继续补充 Episode 和创作要求，再主动发送。
+Workspace Mode 开启时，Chat 输入框输入 `/` 会展示后端实际发布的 common Skill，以及当前 Deck 实际安装且可用的插件 Skill。common Skill 不依赖 Deck 或既有 thread，因此新对话也可发现。选择结果只插入普通文本，用户可以继续补充参数、Episode 和创作要求，再主动发送。Workspace Mode 关闭时，Runtime 不创建 Skill workspace，前端也不得展示不可执行的 common/Deck Skill 候选。
 
 ## 2. 十三个业务 Skill
 
@@ -39,12 +40,12 @@ Chat 输入框输入 `/` 时展示当前 Deck 实际安装且可用的 Skill。�
 sequenceDiagram
     actor U as 用户
     participant I as Chat 输入框
-    participant P as Deck 插件安装事实
+    participant P as Common catalog + Deck 插件事实
     participant T as 共享 Chat transport
     participant A as 主 Agent
 
     U->>I: 输入 /
-    I->>P: 读取当前 Deck/thread 可用 Skill
+    I->>P: 读取后端 common 与当前 Deck/thread Skill
     P-->>I: 返回安全的已安装 Skill 名称
     I-->>U: 显示 Slash 建议
     U->>I: 选择 /drama-script
@@ -56,6 +57,10 @@ sequenceDiagram
 
 Skill 来源规则：
 
+- common 候选只能来自认证的后端 catalog 响应；前端不得复制 ID 清单；
+- common catalog 直接枚举 `backend/builtin_skills/common` 的有效 package，因此线上发布内容、Workspace discovery 与 Slash 展示使用同一来源；
+- common 不要求 Deck/thread；与 Deck 插件命令同名时，保留后端 common 命令；
+- Slash 候选只在 Workspace Mode 开启时加载，必须与 Runtime 的 workspace discovery 可用性一致；
 - 已存在 thread 时，优先尊重其冻结插件加载事实；
 - 尚未创建 thread 时，读取当前选中 Deck 的 enabled、ready 插件引用；
 - 安装状态、版本和 digest 必须匹配；
@@ -161,6 +166,6 @@ canonical 源文件删除后，Hook 必须生成明确空投影或移除对应�
 - Slash 菜单只插入普通文本；
 - Hook 是同步正确性的 owner，Observer 不是；
 - MCP 是可选辅助；
-- 不新增 API、DDL、SSE、事件存储或第二 runtime；
+- 只新增认证的只读 common Skill catalog API；不新增 DDL、SSE、事件存储或第二 runtime；
 - 不修改 Claude runner、报文、thread、session 或 `claude_session_id`；
 - 安全与业务授权继续保留。

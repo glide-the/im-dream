@@ -18,6 +18,7 @@
 <!-- [同步] 2026-09-02：记录索引优先的 Episode 同步、稳定的逐 Episode 导航以及禁止跨 Episode 产物回退。 -->
 <!-- [同步] 2026-09-04：记录 actor 绑定的 notion-cli Bash 审批路由及其 fail-closed 命令/网络边界。 -->
 <!-- [同步] 2026-09-04：把仓库 Claude Skills 全量镜像进 backend common catalog，并在 AutoDL 发布中验证完整 catalog。 -->
+<!-- [同步] 2026-09-04：让 Chat 的 Slash 候选与 Deck 插件 Skills 一起读取后端 common catalog。 -->
 
 # Ink & Memory
 
@@ -43,7 +44,7 @@ Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 
 - **Dream 回合结算** —— successful assistant Turn 会先持久化，再由 after-turn Hook 将 canonical 人物/场景文件发布到 Run-private artifact 并写入 PostgreSQL 投影。若后续同步失败，Chat 使用明确的已提交同步错误，保留正文并提示重新加载、无需重发；共享 Thread 结算时 Execution 会重新读取 `dream-files`，新发布资产无需刷新整页即可出现。
 - **Decks** —— 创建并版本化 Deck、Agent、Prompt、资源和 Claude Plugin 引用。
 - **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、MCP Server、Skill 和插件。
-- **通用 Skills** —— 每个完整 Thread 都通过 canonical 小写 discovery ID 获得后端所有的 `asr`、`hhxg-market`、`investment-data`、`skill-creator` 与 `symbolic-board` 包。生产只发布 backend build context，因此仓库 `.claude/skills` 包必须在 backend/common 中存在完全一致的 release 镜像。
+- **通用 Skills** —— 每个完整 Thread 都通过 canonical 小写 discovery ID 获得后端所有的 `asr`、`hhxg-market`、`investment-data`、`skill-creator` 与 `symbolic-board` 包。Workspace Mode 开启时，Chat 即使尚未选择 Deck 或创建 Thread，也会从同一个认证后端 catalog 读取 `/` 候选；选择后只插入可编辑普通文本，不会自动发送。生产只发布 backend build context，因此仓库 `.claude/skills` 包必须在 backend/common 中存在完全一致的 release 镜像。
 - **Notion 资源** —— 在 Settings 中连接并选择精确允许范围，审阅已安装的 `notion-session` 与 `notion-cli`，并在 Chat 外刷新轻量索引。Dream 在认证前检查固定版本 `ntn` 是否已安装，并把当前 actor/thread 投影作为 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与 `NOTION_WORKERS_CONFIG_FILE` 注入 Agent Runtime Bash。Hosted Notion MCP 与这条 CLI 路径相互独立。
 - **平台集成** —— 从 Admin/Gateway 获取已认证的模型 alias、订阅资格、用量和计费能力。
 
