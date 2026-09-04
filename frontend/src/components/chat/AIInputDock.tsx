@@ -1,5 +1,5 @@
-// [Input] Consume file upload hook, file proxy utility, input-dock helpers, chat icons, auth token, and keyboard interaction helpers.
-// [Output] Render the Markdown-aware chat input dock, attachment upload controls, and message submit/stop actions.
+// [Input] Consume file upload, common/Deck Skill discovery, input-dock helpers, chat icons, auth, and keyboard helpers.
+// [Output] Render the Markdown-aware chat input, slash suggestions, attachments, and message submit/stop actions.
 // [Pos] chat-input-dock component node in frontend/src/components/chat
 // [Sync] 2026-05-25: remove frontend customer-context props and move helper exports to AIInputDock.helpers.
 // [Sync] 2026-05-27: add internal toolChoice state with Auto/逐步确认 segmented toggle; sends selected toolChoice via onSendMessage.
@@ -20,6 +20,7 @@
 //                    announced accurately without exposing a non-functional Stop action.
 // [Sync] 2026-08-13: suggest installed Deck Skills when a Chat draft starts with slash.
 // [Sync] 2026-08-17: accept nonce-scoped Deck preview copy as an editable, unsent Chat draft.
+// [Sync] 2026-09-04: include backend-owned common Skills in slash suggestions without requiring a Deck.
 import {
   useCallback,
   useEffect,
@@ -52,8 +53,8 @@ import { API_BASE } from '../../lib/apiBase';
 import MarkdownInputEditor from './MarkdownInputEditor';
 import {
   filterInstalledSkillCommands,
-  loadInstalledSkillCommands,
-  type InstalledSkillCommand,
+  loadAvailableSkillCommands,
+  type AvailableSkillCommand,
 } from './slashSkillCommands';
 
 type AIInputDockMode = 'simple' | 'full';
@@ -82,6 +83,8 @@ interface AIInputDockProps {
   deckId?: string;
   /** Existing thread whose frozen plugin receipt narrows suggestions. */
   threadId?: string;
+  /** Whether this Chat can materialize and execute workspace-backed Skills. */
+  workspaceEnabled?: boolean;
   /** External draft text to apply only when prefillNonce changes. */
   prefill?: string;
   /** Request identity that prevents rerenders from overwriting user edits. */
@@ -147,6 +150,7 @@ export default function AIInputDock({
   contextControl,
   deckId,
   threadId,
+  workspaceEnabled = true,
   prefill,
   prefillNonce,
 }: AIInputDockProps) {
@@ -159,7 +163,7 @@ export default function AIInputDock({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [toolChoice, setToolChoice] = useState<ToolChoice>(defaultToolChoice);
   const [resolvedFullAccessEnabled, setResolvedFullAccessEnabled] = useState(fullAccessEnabled ?? false);
-  const [installedSkillCommands, setInstalledSkillCommands] = useState<readonly InstalledSkillCommand[]>([]);
+  const [installedSkillCommands, setInstalledSkillCommands] = useState<readonly AvailableSkillCommand[]>([]);
   const [activeSkillIndex, setActiveSkillIndex] = useState(0);
   const [dismissedSlashDraft, setDismissedSlashDraft] = useState<string | null>(null);
   const skillListboxId = useId();
@@ -178,8 +182,8 @@ export default function AIInputDock({
   useEffect(() => {
     let active = true;
     setInstalledSkillCommands([]);
-    if (!deckId && !threadId) return () => { active = false; };
-    void loadInstalledSkillCommands({ deckId, threadId })
+    if (!workspaceEnabled) return () => { active = false; };
+    void loadAvailableSkillCommands({ deckId, threadId })
       .then((commands) => {
         if (active) setInstalledSkillCommands(commands);
       })
@@ -187,7 +191,7 @@ export default function AIInputDock({
         if (active) setInstalledSkillCommands([]);
       });
     return () => { active = false; };
-  }, [deckId, threadId]);
+  }, [deckId, threadId, workspaceEnabled]);
 
   const matchingSkillCommands = useMemo(
     () => !isInputFocused || dismissedSlashDraft === query
@@ -203,7 +207,7 @@ export default function AIInputDock({
     }
   }, [dismissedSlashDraft, query]);
 
-  const selectSkillCommand = useCallback((command: InstalledSkillCommand) => {
+  const selectSkillCommand = useCallback((command: AvailableSkillCommand) => {
     setQuery(`${command.command} `);
     setDismissedSlashDraft(null);
   }, []);
@@ -672,7 +676,7 @@ export default function AIInputDock({
             <button
               aria-selected={index === activeSkillIndex}
               id={`${skillListboxId}-option-${index}`}
-              key={`${command.packageSpec}:${command.command}`}
+              key={`${command.sourceLabel}:${command.command}`}
               onClick={() => selectSkillCommand(command)}
               onMouseDown={(event) => event.preventDefault()}
               role="option"
@@ -695,7 +699,7 @@ export default function AIInputDock({
               }}
             >
               <strong>{command.command}</strong>
-              <small style={{ color: 'var(--color-text-muted)' }}>{command.packageSpec}</small>
+              <small style={{ color: 'var(--color-text-muted)' }}>{command.sourceLabel}</small>
             </button>
           ))}
         </div>

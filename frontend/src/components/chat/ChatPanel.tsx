@@ -23,6 +23,8 @@
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
 // [Sync] 2026-06-22: respect Workspace Mode by withholding workspaceSessionId
 //                    from the input dock when workspace is disabled.
+// [Sync] 2026-09-04: forward Workspace Mode to the slash catalog so only executable
+//                    workspace-backed Skills are suggested.
 // [Sync] 2026-06-25: stop button now calls the backend thread stop endpoint
 //                    instead of only aborting the local browser stream.
 // [Sync] 2026-07-20: pass threadId into ClaudeAgentChatTransport so plan-* SSE
@@ -305,7 +307,7 @@ export default function ChatPanel({
   const chatPanelMountedRef = useRef(true);
   const previousChatStatusRef = useRef<string>('ready');
   const reconnectAbortRef = useRef<AbortController | null>(null);
-  const { setActiveSessionId, workspaceEnabled } = useWorkspaceSession();
+  const { setActiveSessionId, workspaceConfigLoaded, workspaceEnabled } = useWorkspaceSession();
 
   onReconnectCompleteRef.current = onReconnectComplete;
   onConversationSettledRef.current = onConversationSettled;
@@ -1170,6 +1172,7 @@ export default function ChatPanel({
           <AIInputDock
             deckId={deckId}
             threadId={threadId}
+            workspaceEnabled={workspaceConfigLoaded && workspaceEnabled}
             openFileDialogSignal={openFileDialogSignal}
             fullAccessEnabled={imFullAccessEnabled}
             onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {

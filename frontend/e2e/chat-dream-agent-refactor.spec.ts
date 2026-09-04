@@ -1,7 +1,7 @@
-// [Input] Authenticated Story Workspace routes and production-shaped Deck/Dream API fixtures.
+// [Input] Authenticated Story Workspace routes and production-shaped Deck/Dream/common-Skill API fixtures.
 // [Output] Provider-free browser evidence for Dream's two-state home, adaptive horizontal Chat list,
 //          whole-card Dream navigation, historical composer provenance, same-Deck Agent switching,
-//          and launch handoff.
+//          common-Skill slash submission, and launch handoff.
 // [Pos] Dream/Chat Agent refactor business E2E in frontend/e2e.
 // [Sync] 2026-08-14: cover initial/in-progress states and adaptive horizontal Chat scrolling.
 // [Sync] 2026-08-14: prove Community Decks visibly includes the system default projection.
@@ -12,6 +12,7 @@
 // [Sync] 2026-08-17: switch the next-turn Agent from the historical Thread Deck metadata popover.
 // [Sync] 2026-09-02: serve the paged history contract and visually verify completed-turn
 //                    process folding before the same-thread next turn.
+// [Sync] 2026-09-04: prove common Skills appear through slash and submit as the ordinary user message.
 
 import { expect, test } from '@playwright/test';
 
@@ -192,7 +193,7 @@ test('Dream active Deck context → workbench → Chat active tab → production
     if (pathname === '/api/pictures/range') return route.fulfill({ json: { pictures: [] } });
     if (pathname === '/api/default-voices') return route.fulfill({ json: {} });
     if (pathname === '/api/storage') return route.fulfill({ json: { type: 'unknown', supportsDirectUpload: false, isConfigured: true } });
-    if (pathname === '/api/system-config') return route.fulfill({ json: { data: { im_full_access_enabled: false, workspace_enabled: false } } });
+    if (pathname === '/api/system-config') return route.fulfill({ json: { data: { im_full_access_enabled: false, workspace_enabled: true } } });
     if (pathname === '/api/decks/defaults/reconcile' && request.method() === 'POST') {
       return route.fulfill({ json: { deck_id: actorSystemDefaultDeck.id, reconciled: false, reason: 'refs_preserved' } });
     }
@@ -208,6 +209,19 @@ test('Dream active Deck context → workbench → Chat active tab → production
     }
     if (pathname === '/api/claude-plugins/installations') return route.fulfill({ json: { installations: [] } });
     if (pathname === `/api/decks/${dreamDeck.id}/claude-plugins`) return route.fulfill({ json: { deck_id: dreamDeck.id, refs: [] } });
+    if (pathname === '/api/claude-agent/skill-commands') {
+      return route.fulfill({
+        json: {
+          commands: [
+            { command: '/asr', name: 'asr' },
+            { command: '/hhxg-market', name: 'hhxg-market' },
+            { command: '/investment-data', name: 'investment-data' },
+            { command: '/skill-creator', name: 'skill-creator' },
+            { command: '/symbolic-board', name: 'symbolic-board' },
+          ],
+        },
+      });
+    }
     if (pathname === '/api/claude-agent/threads' && request.method() === 'GET') {
       return route.fulfill({ json: { threads: [historicalThread] } });
     }
@@ -470,13 +484,27 @@ test('Dream active Deck context → workbench → Chat active tab → production
   await expect(deckMetadataDialog.getByRole('button', { name: '结构顾问，当前 Agent' })).toHaveAttribute('aria-pressed', 'true');
   await expect(deckMetadataDialog).toContainText('drama-forge@drama-studio');
   await historicalDeckContext.click();
-  await page.getByRole('textbox', { name: '聊天输入' }).fill('请从结构角度继续分析。');
+  const historicalComposer = page.getByRole('textbox', { name: '聊天输入' });
+  await historicalComposer.fill('/');
+  const commonSkillListbox = page.getByRole('listbox', { name: '已安装的 Skill 指令' });
+  await expect(commonSkillListbox).toBeVisible();
+  await expect(commonSkillListbox.getByRole('option')).toHaveCount(5);
+  await expect(commonSkillListbox.getByRole('option', { name: /\/asr\b.*Ink & Memory/ })).toBeVisible();
+  await page.screenshot({ path: '../output/playwright/common-skills-slash-menu.png' });
+  await commonSkillListbox.getByRole('option', { name: /\/asr\b/ }).click();
+  await expect(historicalComposer).toHaveText('/asr ');
+  expect(historicalChatTurnBody).toBeNull();
+  await historicalComposer.fill('/asr 请从结构角度继续分析。');
   await page.getByRole('button', { name: '发送消息' }).click();
   await expect.poll(() => historicalChatTurnBody).not.toBeNull();
   expect(historicalChatTurnBody).toMatchObject({
     id: HISTORICAL_THREAD_ID,
     deckId: dreamDeck.id,
     voiceId: 'dream-agent-e2e-structure',
+    message: {
+      role: 'user',
+      parts: [{ type: 'text', text: '/asr 请从结构角度继续分析。' }],
+    },
   });
   await page.screenshot({ path: '../output/playwright/chat-history-context-wide.png' });
   await page.setViewportSize({ width: 760, height: 780 });

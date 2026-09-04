@@ -1,7 +1,8 @@
-// [Input] Real local actor, persisted Dream Run, and installed Deck plugin inventory.
-// [Output] Visible-browser evidence that shared Chat suggests installed Skills without sending or workflow controls.
+// [Input] Real local actor, persisted Dream Run, backend common catalog, and installed Deck plugin inventory.
+// [Output] Visible-browser evidence that shared Chat suggests common/Deck Skills without sending or workflow controls.
 // [Pos] Opt-in non-cloning Story Workspace real-data QA.
 // [Sync] 2026-08-16: real-model continuity asserts the latest repeated query in a historical Thread.
+// [Sync] 2026-09-04: require all backend common Skills beside the Deck plugin Skills.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -35,6 +36,13 @@ const DRAMA_SKILLS = [
   'drama-script',
   'drama-storyboard',
   'drama-voice',
+] as const;
+const COMMON_SKILLS = [
+  'asr',
+  'hhxg-market',
+  'investment-data',
+  'skill-creator',
+  'symbolic-board',
 ] as const;
 
 test.use({ channel: 'chromium', timezoneId: 'Asia/Shanghai' });
@@ -129,7 +137,10 @@ test('real Dream thread lists installed slash Skills without a recommendation st
     for (const skill of DRAMA_SKILLS) {
       await expect(listbox.getByRole('option', { name: new RegExp(`/${skill}\\b`) })).toBeVisible();
     }
-    await expect(listbox.getByRole('option')).toHaveCount(14);
+    for (const skill of COMMON_SKILLS) {
+      await expect(listbox.getByRole('option', { name: new RegExp(`/${skill}\\b`) })).toContainText('Ink & Memory');
+    }
+    await expect(listbox.getByRole('option')).toHaveCount(18);
 
     await listbox.getByRole('option', { name: /\/drama-script\b/ }).click();
     await expect(composer).toHaveText('/drama-script ');

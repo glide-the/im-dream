@@ -18,6 +18,7 @@
 <!-- [Sync] 2026-09-02: document index-first Episode synchronization, stable per-Episode navigation, and no cross-Episode artifact fallback. -->
 <!-- [Sync] 2026-09-04: document actor-bound notion-cli Bash approval routing and its fail-closed command/network boundaries. -->
 <!-- [Sync] 2026-09-04: mirror every repository Claude Skill into the backend common catalog and verify the complete catalog in AutoDL releases. -->
+<!-- [Sync] 2026-09-04: expose the backend common catalog in Chat slash discovery beside Deck plugin Skills. -->
 
 # Ink & Memory
 
@@ -43,7 +44,7 @@ This repository contains the Dream application. It does not own the shared datab
 - **Dream turn settlement** — a successful assistant Turn is committed before the after-turn Hook publishes canonical character/scene files into the Run-private artifact and PostgreSQL projection. If that later synchronization fails, Chat reports a typed post-commit sync error, preserves the reply, and directs the user to reload without resending. Execution re-reads `dream-files` whenever the shared Thread settles so newly published assets appear without a page reload.
 - **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
 - **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
-- **Common Skills** — every full Thread receives the backend-owned `asr`, `hhxg-market`, `investment-data`, `skill-creator`, and `symbolic-board` packages through canonical lowercase discovery IDs. Repository `.claude/skills` packages must have exact backend/common release mirrors because production ships only the backend build context.
+- **Common Skills** — every full Thread receives the backend-owned `asr`, `hhxg-market`, `investment-data`, `skill-creator`, and `symbolic-board` packages through canonical lowercase discovery IDs. With Workspace Mode enabled, Chat reads that same authenticated backend catalog for `/` suggestions even before a Deck or Thread is selected; selecting a suggestion inserts ordinary editable text and does not auto-send. Repository `.claude/skills` packages must have exact backend/common release mirrors because production ships only the backend build context.
 - **Notion resources** — connect in Settings, select the exact allowed scope, inspect the installed `notion-session` and `notion-cli` packages, and keep lightweight indexes refreshed outside Chat. Dream checks that pinned `ntn` is installed before authentication and injects the current actor/thread projection as `NOTION_HOME`, `NOTION_API_TOKEN`, `NOTION_KEYRING`, and `NOTION_WORKERS_CONFIG_FILE` into Agent Runtime Bash. Hosted Notion MCP remains separate from this CLI path.
 - **Platform integration** — consume authenticated model aliases, subscription eligibility, usage, and billing from Admin/Gateway.
 
