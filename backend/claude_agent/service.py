@@ -19,6 +19,9 @@
 #                    Hook continuation or failure can no longer erase the reply.
 # [Sync] 2026-09-02: persist server-owned turn/final/duration metadata and expose
 #                    the same turn identity in live message metadata for history folding.
+# [Sync] 2026-09-04: classify Dream post-turn Hook failures after assistant
+#                    commit with an explicit synchronization terminal so Chat
+#                    never implies that the persisted reply was unprocessed.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -1210,6 +1213,21 @@ class ClaudeAgentAssistantPersistenceError(RuntimeError):
         super().__init__(self.public_message)
 
 
+class DreamArtifactSyncAfterCommitError(RuntimeError):
+    """Safe terminal error for a failed Dream projection after Chat commit."""
+
+    code = "DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT"
+    public_message = (
+        "Agent 回复已保存，但 Dream 工作区同步未完成。"
+        "请重新加载对话核对工作台状态，无需重发消息。"
+    )
+    retryable = False
+
+    def __init__(self, sync_error_code: str) -> None:
+        super().__init__(self.public_message)
+        self.sync_error_code = sync_error_code
+
+
 # ---------------------------------------------------------------------------
 # Turn context (extrinsic state bundle)
 # ---------------------------------------------------------------------------
@@ -2088,8 +2106,8 @@ class ClaudeAgentService:
                     # Artifact publication is a root-turn postcondition, not an
                     # optional Observer projection. Propagate through the same
                     # Chat turn terminal path; never emit a second lifecycle.
-                    raise
-                except Exception:
+                    raise DreamArtifactSyncAfterCommitError(exc.issue.code) from exc
+                except Exception as exc:
                     logger.exception(
                         "Dream workbench synchronization failed for thread_id=%s",
                         execution.request.thread_id,
@@ -2098,7 +2116,12 @@ class ClaudeAgentService:
                         execution.request.message_metadata
                     ):
                         await self.mark_auto_repair_failed(execution.request)
-                    raise
+                        raise DreamAutoRepairExhaustedError(
+                            "DREAM_ARTIFACT_SYNC_FAILED"
+                        ) from exc
+                    raise DreamArtifactSyncAfterCommitError(
+                        "DREAM_ARTIFACT_SYNC_FAILED"
+                    ) from exc
             await queue.put(
                 _event("message-final", {
                     "text": full_text,

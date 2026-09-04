@@ -17,6 +17,8 @@
 //                    below the “创作工作空间” title.
 // [Sync] 2026-09-02: add Episode index-first, EP02 empty-state isolation, and return navigation coverage.
 // [Sync] 2026-09-02: await the paginated Chat scroller before measuring the dialog layout.
+// [Sync] 2026-09-04: prove a settled shared Chat turn invalidates dream-files
+//                    and renders newly projected character/scene assets without reload.
 
 // @ts-expect-error Playwright E2E has Node built-ins; the browser app tsconfig omits Node types.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -88,7 +90,7 @@ function coverage(linked = 1, total = 1) {
   return { availability: 'available', linked, total, ratio: linked / total };
 }
 
-function dreamFiles() {
+function dreamFiles(assetPublished = false) {
   return {
     storyWorkspaceRunId: RUN_ID,
     threadId: 'thread-u12-browser',
@@ -100,8 +102,42 @@ function dreamFiles() {
       runtimePluginLockId: 'lock-u12-browser',
     },
     requiredStages: ['characters', 'scenes', 'storyboards'],
-    runRevision: 1,
+    runRevision: assetPublished ? 2 : 1,
     stages: {
+      ...(assetPublished ? {
+        characters: {
+          stage: 'characters',
+          revision: 1,
+          sourceFiles: ['assets/characters/lead.md'],
+          page: {
+            title: '人物',
+            entryRoute: `/story-workspace/characters?run=${RUN_ID}`,
+          },
+          items: [{
+            entityId: 'lead',
+            displayName: '林夏',
+            summary: '在雨夜寻找失联的搭档。',
+            sourceFile: 'assets/characters/lead.md',
+            relations: ['station-platform'],
+          }],
+        },
+        scenes: {
+          stage: 'scenes',
+          revision: 1,
+          sourceFiles: ['assets/scenes/station-platform.md'],
+          page: {
+            title: '场景',
+            entryRoute: `/story-workspace/scenes?run=${RUN_ID}`,
+          },
+          items: [{
+            entityId: 'station-platform',
+            displayName: '深夜站台',
+            summary: '雨幕覆盖的末班车站台。',
+            sourceFile: 'assets/scenes/station-platform.md',
+            relations: ['lead'],
+          }],
+        },
+      } : {}),
       storyboards: {
         stage: 'storyboards',
         revision: 1,
@@ -444,6 +480,9 @@ type BrowserFixtureState = {
   revisionIndex: 0 | 1;
   artifactReads: number;
   bindingAvailability?: 'bound' | 'unbound';
+  assetPublished?: boolean;
+  dreamFileReads?: number;
+  chatPostCount?: number;
 };
 
 async function installApiFixture(page: Page, state: BrowserFixtureState) {
@@ -560,7 +599,8 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       return;
     }
     if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/dream-files`)) {
-      await json(route, dreamFiles());
+      state.dreamFileReads = (state.dreamFileReads ?? 0) + 1;
+      await json(route, dreamFiles(state.assetPublished === true));
       return;
     }
     if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/episodes`)) {
@@ -595,14 +635,35 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
     }
     if (method === 'GET' && path === '/api/claude-agent/threads/thread-u12-browser/messages') {
       const knownLatestMessageId = url.searchParams.get('known_latest_message_id');
+      const latestMessageId = state.assetPublished
+        ? 'message-u12-assets-assistant'
+        : 'message-u12-browser';
       if (
         url.searchParams.get('limit') !== '20'
         || url.searchParams.has('cursor')
         || (
           knownLatestMessageId !== null
           && knownLatestMessageId !== 'message-u12-browser'
+          && knownLatestMessageId !== 'message-u12-assets-assistant'
         )
       ) throw new Error(`Unexpected Dream history query: ${url.search}`);
+      const publishedMessages = state.assetPublished ? [{
+        id: 'message-u12-assets-user',
+        role: 'user',
+        parts: [{ type: 'text', text: '请同步刚写入的人物与场景。' }],
+        metadata: {},
+        created_at: '2026-08-06T01:05:00Z',
+      }, {
+        id: 'message-u12-assets-assistant',
+        role: 'assistant',
+        parts: [{ type: 'text', text: '人物与场景已经写入 canonical workspace。' }],
+        metadata: {
+          turnId: 'turn-u12-assets',
+          turnStatus: 'completed',
+          finalPartIndex: 0,
+        },
+        created_at: '2026-08-06T01:05:01Z',
+      }] : [];
       await json(route, {
         thread: {
           id: 'thread-u12-browser',
@@ -610,7 +671,7 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
           created_at: '2026-08-06T01:00:00Z',
           updated_at: '2026-08-06T01:04:01Z',
         },
-        messages: knownLatestMessageId === 'message-u12-browser' ? [] : [{
+        messages: knownLatestMessageId === latestMessageId ? [] : [{
           id: 'message-u12-browser',
           role: 'assistant',
           parts: [{
@@ -619,11 +680,11 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
           }],
           metadata: {},
           created_at: '2026-08-06T01:04:00Z',
-        }],
+        }, ...publishedMessages],
         next_cursor: null,
         has_more: false,
-        latest_message_id: 'message-u12-browser',
-        unchanged: knownLatestMessageId === 'message-u12-browser',
+        latest_message_id: latestMessageId,
+        unchanged: knownLatestMessageId === latestMessageId,
       });
       return;
     }
@@ -647,6 +708,23 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
     }
     if (matches('POST', '/api/claude-agent/tool-confirm')) {
       await json(route, { ok: true, approved: true });
+      return;
+    }
+    if (matches('POST', '/api/claude-agent')) {
+      state.chatPostCount = (state.chatPostCount ?? 0) + 1;
+      state.assetPublished = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream; charset=utf-8',
+        body: [
+          'data: {"type":"message-metadata","sessionId":"session-u12-assets","turnId":"turn-u12-assets"}',
+          'data: {"type":"text-start","id":"answer-u12-assets"}',
+          'data: {"type":"text-delta","id":"answer-u12-assets","delta":"人物与场景已经写入 canonical workspace。"}',
+          'data: {"type":"text-end","id":"answer-u12-assets"}',
+          'data: {"type":"finish","finishReason":"stop"}',
+          '',
+        ].join('\n\n'),
+      });
       return;
     }
     if (
@@ -760,6 +838,65 @@ async function selectShotWithKeyboard(page: Page) {
   await expect(page.getByRole('article', { name: 'Shot Detail' })).toBeVisible();
   return shot;
 }
+
+test('settled Dream Chat turn refreshes newly projected character and scene assets', async ({
+  page,
+}) => {
+  const diagnostics: string[] = [];
+  const state: BrowserFixtureState = {
+    revisionIndex: 0,
+    artifactReads: 0,
+    assetPublished: false,
+    dreamFileReads: 0,
+    chatPostCount: 0,
+  };
+  page.on('console', (message) => {
+    if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+  page.on('requestfailed', (request) => {
+    const url = request.url();
+    if (request.failure()?.errorText === 'net::ERR_ABORTED') return;
+    if (!url.includes('fonts.googleapis.com') && !url.includes('fonts.gstatic.com')
+      && !url.includes('react-grab.com')) {
+      diagnostics.push(`requestfailed: ${request.failure()?.errorText ?? 'failed'} ${url}`);
+    }
+  });
+
+  await page.clock.setFixedTime(FROZEN_NOW);
+  await installApiFixture(page, state);
+  await page.addInitScript(() => {
+    localStorage.setItem('auth_token', 'u12-browser-token');
+    localStorage.setItem('migration_completed', 'true');
+    localStorage.setItem('ink-language', 'zh');
+  });
+
+  await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
+  const draft = page.getByRole('region', { name: 'Dream 初稿工作台' });
+  await draft.getByRole('tab', { name: 'Assets 人物与场景' }).click();
+  await expect(draft.getByRole('heading', { name: '故事资产' })).toBeVisible();
+  await expect(draft.getByText('林夏', { exact: true })).toHaveCount(0);
+  await expect(draft.getByText('深夜站台', { exact: true })).toHaveCount(0);
+  const readsBeforeTurn = state.dreamFileReads ?? 0;
+
+  await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Dream Agent' });
+  await dialog.getByRole('textbox', { name: '聊天输入' })
+    .fill('请同步刚写入的人物与场景。');
+  await dialog.getByRole('button', { name: '发送消息' }).click();
+  await expect.poll(() => state.chatPostCount).toBe(1);
+  await expect.poll(() => state.dreamFileReads ?? 0).toBeGreaterThan(readsBeforeTurn);
+  await expect(dialog.getByText('人物与场景已经写入 canonical workspace。', { exact: true }))
+    .toBeVisible();
+  await dialog.getByRole('button', { name: '收起 Dream Agent' }).click();
+
+  await expect(draft.getByText('林夏', { exact: true })).toBeVisible();
+  await expect(draft.getByText('深夜站台', { exact: true })).toBeVisible();
+  await expect(draft.getByText('人物 · r1', { exact: true })).toBeVisible();
+  await expect(draft.getByText('场景 · r1', { exact: true })).toBeVisible();
+  expect(state.chatPostCount).toBe(1);
+  expect(diagnostics).toEqual([]);
+});
 
 test('keeps an empty Episode index read-only while automatic publication and binding finish', async ({
   page,

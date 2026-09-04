@@ -25,6 +25,8 @@
 //                    header and open it through the same in-place focus navigation.
 // [Sync] 2026-08-31: keep the Outline guide local while Dream uses its static route.
 // [Sync] 2026-09-02: make Sync index-first, route selection by Episode UID, and remove storyboard-title ambiguity.
+// [Sync] 2026-09-04: refresh run-private character/scene stages when the shared
+//                    Dream Thread settles, including a typed post-Hook failure.
 
 import {
   useCallback,
@@ -1238,6 +1240,7 @@ export function StoryWorkspaceExecutionPage({
           onOpenChatThread={onOpenChatThread}
           onWorkspaceViewChange={setWorkspaceView}
           onSettled={() => {
+            files.refresh();
             episodeIndex.refresh();
             refreshEpisodeArtifacts();
             storyIndex.refresh();

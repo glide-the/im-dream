@@ -55,6 +55,9 @@
 # [Sync] 2026-09-01: require persisted cleanup metadata, fresh Hook scope, and
 #                    .dream WORKBENCH facts to agree before an automatic turn.
 # [Sync] 2026-09-02: cover protocol-safe completed-turn projection metadata and duration.
+# [Sync] 2026-09-04: require unexpected Dream post-turn synchronization
+#                    failures to retain the committed assistant and use the
+#                    existing typed workbench-sync error contract.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -1893,6 +1896,74 @@ class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
         parsed_frames = [_parse_sse(frame) for frame in frames if frame is not None]
         self.assertEqual(parsed_frames[-1]["type"], "finish")
         self.assertIsNone(frames[-1])
+
+    def test_unexpected_post_hook_failure_is_typed_after_assistant_commit(self):
+        async def scenario():
+            order: list[str] = []
+            artifact_hook = unittest.mock.Mock()
+
+            def fail_after_main_turn(_ticket):
+                order.append("hook")
+                raise RuntimeError("fixture database detail must stay private")
+
+            artifact_hook.after_main_turn.side_effect = fail_after_main_turn
+            service = ClaudeAgentService(dream_artifact_turn_hook=artifact_hook)
+            execution = service_module._TurnExecution(
+                request=ClaudeAgentRunRequest(
+                    user_id="7",
+                    thread_id="thread-post-hook-failure",
+                    message_parts=[{"type": "text", "text": "同步角色卡"}],
+                ),
+                state=AgentRunState(session_id="thread-post-hook-failure"),
+                runner=unittest.mock.Mock(
+                    run_streaming=unittest.mock.AsyncMock(
+                        return_value=AgentRunResult(
+                            full_text="角色卡已写入。",
+                            session_id="claude-session",
+                            success=True,
+                        )
+                    )
+                ),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+                dream_artifact_turn_ticket=unittest.mock.sentinel.dream_ticket,
+            )
+            with (
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_user_message",
+                    new=unittest.mock.AsyncMock(),
+                ),
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_assistant_turn",
+                    new=unittest.mock.AsyncMock(
+                        side_effect=lambda *_args: order.append("assistant")
+                    ),
+                ) as persist_assistant,
+            ):
+                with self.assertRaises(
+                    service_module.DreamArtifactSyncAfterCommitError
+                ) as raised:
+                    await service.execute_session(execution)
+            return raised.exception, persist_assistant, order
+
+        error, persist_assistant, order = _run(scenario())
+
+        persist_assistant.assert_awaited_once()
+        self.assertEqual(order, ["assistant", "hook"])
+        self.assertEqual(error.code, "DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT")
+        self.assertEqual(error.sync_error_code, "DREAM_ARTIFACT_SYNC_FAILED")
+        self.assertEqual(
+            error.public_message,
+            "Agent 回复已保存，但 Dream 工作区同步未完成。"
+            "请重新加载对话核对工作台状态，无需重发消息。",
+        )
+        self.assertNotIn("fixture database detail", error.public_message)
+        self.assertIsInstance(error.__cause__, RuntimeError)
 
     def test_assistant_persistence_failure_prevents_post_hook(self):
         async def scenario():

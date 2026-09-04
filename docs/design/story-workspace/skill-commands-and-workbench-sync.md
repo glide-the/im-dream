@@ -1,3 +1,8 @@
+<!-- [Input] Shared Dream Thread turns, canonical Project/Episode assets, after-turn Hook, private publication, PostgreSQL/API projections, and Execution consumers. -->
+<!-- [Output] Business contract for free-form Drama Skill use and deterministic post-turn workbench synchronization. -->
+<!-- [Pos] Story Workspace source of truth for Skill invocation versus host-owned synchronization. -->
+<!-- [Sync] 2026-09-04: preserve committed assistant truth on post-Hook failure and refresh Dream assets whenever the shared Thread settles. -->
+
 # Skill 指令与工作台自动同步
 
 > 本文是当前业务设计。十三个 Drama Skill 是用户可自由调用的能力，不是由页面或服务端推进的阶段状态机。
@@ -84,6 +89,7 @@ sequenceDiagram
     participant A as 主 Agent
     participant W as canonical 工作台
     participant D as .dream 私有 Run
+    participant P as PostgreSQL/API 投影
     participant O as DreamObserver
 
     U->>C: 发送任意 /drama-* 指令
@@ -93,13 +99,17 @@ sequenceDiagram
     S->>A: 原 run_streaming
     A->>W: 创建或修改产物
     A-->>S: 根 turn 成功
+    S->>S: 持久化 assistant Chat 事实
     S->>H: after_main_turn
     H->>W: 扫描并校验当前快照
     H->>D: 幂等更新 stage 和 Artifact
     H->>D: 最后原子提交 manifest
+    H->>P: 物化 Story/Episode 投影
     H-->>O: 发布非控制型同步结果
     O-->>O: 投影、审计或指标
     S-->>C: 原 Chat 单终态
+    C->>P: Thread settle 后重读 dream-files/Story/Episode
+    P-->>C: 返回当前人物、场景和 Episode 资产
 ```
 
 Agent 未调用 MCP 时，上述同步仍必须成立。
@@ -122,11 +132,14 @@ sequenceDiagram
         Note over S,D: 不发布本轮半成品
     else Hook 校验或发布失败
         H--xS: 记录独立同步错误
-        Note over S,D: 保留 last-good manifest，不重跑模型，不新增 Chat 终态
+        Note over S,D: assistant 已提交；保留 last-good manifest，不重跑模型
+        S-->>S: 映射 DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT
     end
 ```
 
 canonical 源文件删除后，Hook 必须生成明确空投影或移除对应发布引用，页面不能永久保留旧 stage。
+
+`DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT` 只表示 assistant 已成为持久化 Chat 事实之后的工作台同步失败。ThreadFactory 仍沿用唯一 error + `finish(error)` 终态；前端必须显示“回复已保存，工作台同步未完成”，只读重新加载并禁止暗示用户重发。无论 Hook 成功还是这一已提交同步终态，Execution 都在共享 Thread settle 后重新读取 `dream-files`、Episode 和 Story 投影，避免 completed Run 停止轮询后永久显示旧人物/场景。
 
 ## 7. 明确删除的历史设计
 
