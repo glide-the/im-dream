@@ -1,7 +1,8 @@
 # [Input] Temporary common/platform Skill source trees and canonical/invalid `.skill` ZIP packages.
 # [Output] Regression proof for catalog identity, directory symlinks, thread-local archive extraction, pruning, and fail-closed archive validation.
 # [Pos] Focused unit test node for libs/claude_agent_kit/server/builtin_skill_packages.py.
-# [Sync] 2026-09-01: cover the common/platform builtin Skill package contract.
+# [Sync] 2026-09-04: require every repository .claude Skill to have an exact
+#                    backend/common release mirror before production packaging.
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = ROOT.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -45,7 +47,53 @@ def _write_archive_skill(root: Path, namespace: str, skill_id: str) -> Path:
     return archive_path
 
 
+def _package_files(root: Path) -> dict[str, bytes]:
+    """Return stable package contents while ignoring local interpreter caches."""
+
+    files: dict[str, bytes] = {}
+    for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+        relative = path.relative_to(root)
+        if (
+            not path.is_file()
+            or "__pycache__" in relative.parts
+            or path.suffix == ".pyc"
+            or path.name == ".DS_Store"
+        ):
+            continue
+        files[relative.as_posix()] = path.read_bytes()
+    return files
+
+
 class TestBuiltinSkillPackages(unittest.TestCase):
+    def test_project_claude_skills_have_exact_common_release_mirrors(self) -> None:
+        project_skills_root = PROJECT_ROOT / ".claude" / "skills"
+        project_packages = tuple(
+            sorted(
+                path
+                for path in project_skills_root.iterdir()
+                if path.is_dir() and (path / "SKILL.md").is_file()
+            )
+        )
+        common_packages = {
+            package.skill_id: package
+            for package in discover_builtin_skill_packages(
+                ("common",),
+                skills_root=ROOT / "builtin_skills",
+            )
+        }
+
+        self.assertGreater(len(project_packages), 0)
+        for project_package in project_packages:
+            with self.subTest(skill_id=project_package.name):
+                release_package = common_packages.get(project_package.name)
+                self.assertIsNotNone(release_package)
+                assert release_package is not None
+                self.assertFalse(release_package.is_archive)
+                self.assertEqual(
+                    _package_files(release_package.source_path),
+                    _package_files(project_package),
+                )
+
     def test_directory_packages_link_and_archives_unpack_flat_in_thread(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory) / "builtin"

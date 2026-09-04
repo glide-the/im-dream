@@ -10,8 +10,8 @@
 #                    vendor/seccomp apply-seccomp passthrough.
 # [Sync] 2026-08-31: fail every start/deploy/verify/rollback when Vite Preview
 #                    serves SPA HTML instead of FastAPI crawler files.
-# [Sync] 2026-09-01: verify the production skill-creator package through a
-#                    real isolated workspace init on every release lifecycle.
+# [Sync] 2026-09-04: verify the complete production common Skill catalog
+#                    through a real isolated workspace init on every release.
 # [Sync] 2026-09-01: import the FastAPI application with the generated runtime
 #                    env before switching current, catching undeclared runtime
 #                    dependencies while the old release is still serving.
@@ -396,7 +396,7 @@ verify_default_plugin() {
 }
 
 verify_builtin_skills() {
-  remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os, tempfile; from pathlib import Path; check = tempfile.TemporaryDirectory(prefix=\"ink-dream-skill-verify-\"); os.environ[\"AGENT_CWD\"] = check.name; from libs.claude_agent_kit.server.workspace import init_workspace; workspace = init_workspace(\"deploy-skill-verification\"); source = Path(\"builtin_skills/common/skill-creator/SKILL.md\"); installed = workspace / \"skills\" / \"skill-creator\" / \"SKILL.md\"; discovery = workspace / \".claude\" / \"skills\" / \"skill-creator\"; assert source.is_file() and \"name: skill-creator\" in source.read_text(encoding=\"utf-8\"); assert installed.is_file() and \"name: skill-creator\" in installed.read_text(encoding=\"utf-8\"); assert discovery.is_symlink() and discovery.resolve() == installed.parent.resolve(); from claude_agent.context_builder import _canonicalize_workspace_skill_command; assert _canonicalize_workspace_skill_command(\"/Skill-Creator verify\", str(workspace)) == \"/skill-creator verify\"; check.cleanup()'"
+  remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); cd \"\${current}/app\"; \"\${current}/venv/bin/python\" -c 'import os, tempfile; check = tempfile.TemporaryDirectory(prefix=\"ink-dream-skill-verify-\"); os.environ[\"AGENT_CWD\"] = check.name; from libs.claude_agent_kit.server.builtin_skill_packages import COMMON_SKILL_NAMESPACE, discover_builtin_skill_packages, read_builtin_skill_file; from libs.claude_agent_kit.server.workspace import init_workspace; packages = discover_builtin_skill_packages((COMMON_SKILL_NAMESPACE,)); assert packages; workspace = init_workspace(\"deploy-skill-verification\"); assert all((workspace / \"skills\" / package.skill_id / \"SKILL.md\").read_bytes() == read_builtin_skill_file(package, \"SKILL.md\") and (workspace / \"skills\" / package.skill_id).is_symlink() == (not package.is_archive) and (workspace / \".claude\" / \"skills\" / package.skill_id).is_symlink() and (workspace / \".claude\" / \"skills\" / package.skill_id).resolve() == (workspace / \"skills\" / package.skill_id).resolve() for package in packages); from claude_agent.context_builder import _canonicalize_workspace_skill_command; assert _canonicalize_workspace_skill_command(\"/Skill-Creator verify\", str(workspace)) == \"/skill-creator verify\"; check.cleanup()'"
 }
 
 verify_seo_origin() {
