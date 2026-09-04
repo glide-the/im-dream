@@ -11,6 +11,20 @@ screenshot-only approval.
 
 Read [references/project-workflow.md](references/project-workflow.md) before starting a browser run. Read its SubAgent fixture section only when testing SubAgent projections or timelines.
 
+## Test execution agent
+
+Delegate bounded provider-free, isolated, mocked-browser, source/unit, and
+visual-regression execution to the `luna_test_runner` custom agent. It is
+configured for `gpt-5.6-luna`, high reasoning, and Fast mode. Give it the exact
+spec/command, worktree, expected evidence, owned ports/data, and cleanup scope;
+wait for its command receipts before accepting results.
+
+Keep real-user or real-model business acceptance, production mutation,
+migration/destructive work, approvals, diagnosis, and implementation in the
+primary agent. If the runner cannot access the required browser or runtime,
+report a harness blocker; do not silently replace the requested lane. Apply the
+full routing contract from `$luna-test-stage` when available.
+
 ## Non-negotiable rules
 
 - Run Playwright from `frontend/` with the installed `@playwright/test`; do not depend on a global `playwright-cli` or an MCP wrapper.
