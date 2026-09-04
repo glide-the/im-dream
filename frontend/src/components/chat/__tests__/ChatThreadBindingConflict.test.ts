@@ -5,6 +5,8 @@
 // [Sync] 2026-08-31: initial binding-conflict interaction coverage.
 // [Sync] 2026-09-01: show the allowlisted final Dream auto-repair reason instead
 //                    of the generic message card.
+// [Sync] 2026-09-04: prove a committed assistant remains processed when its
+//                    post-turn Dream synchronization reports a typed failure.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -57,7 +59,19 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     const recovery = () => {
       window.__bindingReloadCount += 1;
       return {
-        messages: persistedMessages,
+        messages: [
+          ...persistedMessages,
+          {
+            id: 'message-sync-assistant-persisted',
+            role: 'assistant',
+            parts: [{ type: 'text', text: '角色卡已写入 canonical workspace。' }],
+            metadata: {
+              turnId: 'turn-sync-failed-after-commit',
+              turnStatus: 'completed',
+              finalPartIndex: 0,
+            },
+          },
+        ],
         settledToolCallIds: new Set(),
         runtimePendingToolCallIds: new Set(),
         running: false,
@@ -123,7 +137,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
   });
 
   let agentPostCount = 0;
-  let errorMode: 'binding' | 'auto-repair' = 'binding';
+  let errorMode: 'binding' | 'auto-repair' | 'sync' = 'binding';
   const diagnostics: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') diagnostics.push(message.text());
@@ -152,16 +166,29 @@ test('binding conflict keeps the submitted text and attachment while reload stay
             errorCode: 'DREAM_THREAD_BINDING_CONFLICT',
             retryable: false,
           }
-        : {
+        : errorMode === 'auto-repair' ? {
             type: 'error',
             errorText: '最终错误：DREAM_CANONICAL_PROJECT_AMBIGUOUS；workspace 仍存在多个 canonical 项目目录。已停止自动修正，不会发起第三轮。',
             errorCode: 'DREAM_WORKBENCH_AUTO_REPAIR_FAILED',
             retryable: false,
+          }
+        : {
+            type: 'error',
+            errorText: 'Agent 回复已保存，但 Dream 工作区同步未完成。请重新加载对话核对工作台状态，无需重发消息。',
+            errorCode: 'DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT',
+            retryable: false,
           };
+      const assistantFrames = errorMode === 'sync' ? [
+        'data: {"type":"message-metadata","sessionId":"session-sync","turnId":"turn-sync-failed-after-commit"}',
+        'data: {"type":"text-start","id":"sync-answer"}',
+        'data: {"type":"text-delta","id":"sync-answer","delta":"角色卡已写入 canonical workspace。"}',
+        'data: {"type":"text-end","id":"sync-answer"}',
+      ] : [];
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream; charset=utf-8',
         body: [
+          ...assistantFrames,
           `data: ${JSON.stringify(event)}`,
           'data: {"type":"finish","finishReason":"error"}',
           '',
@@ -228,6 +255,24 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     );
     await expect(repairAlert).toContainText('不会发起第三轮');
     await expect(repairAlert).not.toContainText('消息处理未完成');
+
+    errorMode = 'sync';
+    await page.reload();
+    await expect.poll(() => agentPostCount).toBe(3);
+    const syncAlert = page.getByRole('alert');
+    await expect(syncAlert).toHaveAttribute(
+      'data-chat-turn-error',
+      'dream-artifact-sync-failed',
+    );
+    await expect(syncAlert).toContainText('回复已保存，工作台同步未完成');
+    await expect(syncAlert).toContainText('重新加载对话');
+    await expect(syncAlert).not.toContainText('消息处理未完成');
+    await expect(page.getByText('角色卡已写入 canonical workspace。')).toBeVisible();
+
+    await page.getByRole('button', { name: '重新加载对话' }).click();
+    await expect(syncAlert).toHaveCount(0);
+    await expect(page.getByText('角色卡已写入 canonical workspace。')).toBeVisible();
+    expect(agentPostCount).toBe(3);
     expect(diagnostics).toEqual([]);
   } finally {
     await server.close();

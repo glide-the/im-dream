@@ -41,6 +41,8 @@
 //                    its typed SSE error while generic failures remain redacted.
 // [Sync] 2026-09-02: group completed hydrated assistant turns behind one shared
 //                    lazy process disclosure while keeping live/error turns unfolded.
+// [Sync] 2026-09-04: distinguish a typed Dream synchronization failure after
+//                    a committed assistant reply from an unprocessed turn.
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -272,6 +274,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   const errorCode = readClaudeAgentErrorCode(error);
   const isDreamBindingConflict = errorCode === 'DREAM_THREAD_BINDING_CONFLICT';
   const isDreamAutoRepairFailure = errorCode === 'DREAM_WORKBENCH_AUTO_REPAIR_FAILED';
+  const isDreamArtifactSyncFailure = (
+    errorCode === 'DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT'
+  );
   const dreamAutoRepairFailureText = isDreamAutoRepairFailure
     ? readClaudeAgentErrorText(error)
     : null;
@@ -625,7 +630,9 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
               ? 'dream-thread-binding-conflict'
               : isDreamAutoRepairFailure
                 ? 'dream-auto-repair-failed'
-                : 'generic'
+                : isDreamArtifactSyncFailure
+                  ? 'dream-artifact-sync-failed'
+                  : 'generic'
           }
           style={{
             alignSelf: 'flex-start',
@@ -646,6 +653,8 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 ? 'chat.turnError.bindingConflictTitle'
                 : isDreamAutoRepairFailure
                   ? 'chat.turnError.autoRepairFailedTitle'
+                  : isDreamArtifactSyncFailure
+                    ? 'chat.turnError.artifactSyncFailedTitle'
                   : 'chat.turnError.genericTitle',
             )}
           </div>
@@ -655,6 +664,8 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 ? 'chat.turnError.bindingConflictDescription'
                 : isDreamAutoRepairFailure
                   ? 'chat.turnError.autoRepairFailedDescription'
+                  : isDreamArtifactSyncFailure
+                    ? 'chat.turnError.artifactSyncFailedDescription'
                   : 'chat.turnError.genericDescription',
             )}
           </p>

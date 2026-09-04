@@ -10,6 +10,7 @@
 <!-- [Sync] 2026-09-01: preserve legacy v1 history while denying cleanup scope unless persisted and fresh facts match. -->
 <!-- [Sync] 2026-09-01: persist every successful Claude logical Turn before its Dream Hook, retain that assistant across repair SSE handoff, and accept canonical relative artifact references/compact storyboard forms. -->
 <!-- [Sync] 2026-09-02: require backend and frontend Episode path audits to treat only slash-qualified home paths, never a standalone prose tilde, as sensitive. -->
+<!-- [Sync] 2026-09-04: distinguish post-commit Hook synchronization failure from an unprocessed message and keep reload/resume/SSE semantics unchanged. -->
 
 # Dream 后置同步失败后的 Agent 自动自检修正
 
@@ -25,6 +26,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 4. Claude 成功返回后，Service 先将本逻辑 Turn 已发送的 reasoning/tool/text SSE parts 持久化为 assistant `chat_message`，并更新 Claude session。
 5. assistant 提交成功后才调用 `DreamArtifactTurnHook.after_main_turn()`，把 workspace 文件同步到 Run-private artifact、Episode binding 和 PostgreSQL story projection；Hook 成功后发送 `message-final` 与唯一 terminal `finish`。
 6. 前端 POST stream 由 `ClaudeAgentChatTransport` 消费；自动 user 消息触发 history/reconnect handoff，上一条已持久化 assistant 保持可见；断线/刷新后最终以消息历史覆盖临时 id。
+
+assistant 提交后的 non-repairable 或未知 Hook 异常统一投影为 `DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT`。该码复用既有 error + `finish(error)`、history reload 与 Thread IDLE 收敛路径，只澄清“回复已保存、工作台同步未完成”；不得回滚 assistant、自动重发消息或创建第二个终态。
 
 ### 1.2 错误发生位置与 assistant 未保存原因
 
@@ -113,6 +116,8 @@ Dream 的 Agent Turn 没有独立 Runner。Dream launch/confirmation dispatcher 
 - assistant persistence。
 
 上述单个逻辑 Turn 内部顺序固定为 `user persistence -> Runner/SSE -> assistant persistence -> Dream Hook -> message-final/terminal`。assistant 持久化失败时不执行 Hook，并返回脱敏的 `CHAT_ASSISTANT_PERSISTENCE_FAILED`；不能在没有 durable Chat 事实时继续改变业务投影。
+
+assistant 已持久化后，non-repairable/未知 Hook 失败必须返回 `DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT`；这与 Runner 或 assistant persistence 失败不同。前端据此保留正文并提供只读 reload，Execution 同时重新读取 Dream/Episode/Story 投影；普通 `DREAM_ARTIFACT_SYNC_FAILED` 仍是 Hook 内部同步分类，不足以独立声明 assistant 已提交。
 
 两者保留在同一个 Thread lock、EventBus、background task 和 admission lease 中。原因不是建立新状态机，而是保证：
 
@@ -265,7 +270,7 @@ Dream 工作区同步校验未通过，请修正当前 workspace 后重新完成
 - 保留该边界之前已由服务端提交的原 assistant；实时临时 id 在最终 history hydration 时由数据库 id 替换；
 - 后续 text/tool events 创建新的 repair assistant 临时消息；最终历史恢复以数据库 assistant id 覆盖它。
 
-普通 user 气泡只增加一行轻量来源标记：`工作台自动修正`；历史状态为 `failed` 时显示 `工作台自动修正 · 已停止`。第二次 Hook 失败的 error card 只对 `DREAM_WORKBENCH_AUTO_REPAIR_FAILED` 展示后端 allowlist 生成的最终 validation code 和安全说明；普通异常仍使用通用文案。不增加弹窗、确认框或独立页面。
+普通 user 气泡只增加一行轻量来源标记：`工作台自动修正`；历史状态为 `failed` 时显示 `工作台自动修正 · 已停止`。第二次 Hook 失败的 error card 只对 `DREAM_WORKBENCH_AUTO_REPAIR_FAILED` 展示后端 allowlist 生成的最终 validation code 和安全说明；原始 Turn 在 assistant commit 后的非修正同步失败只对 `DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT` 显示“回复已保存”，其余异常仍使用通用文案。不增加弹窗、确认框或独立页面。
 
 ## 7. 自动修正状态转换
 
@@ -275,7 +280,7 @@ stateDiagram-v2
     OriginalRunning --> OriginalReplyCommitted: Claude 成功\nassistant SSE parts 已持久化
     OriginalReplyCommitted --> OriginalHookCheck: 执行后置 Hook
     OriginalHookCheck --> Completed: Hook 通过
-    OriginalHookCheck --> FailedClosed: non_repairable
+    OriginalHookCheck --> FailedClosed: non_repairable/unknown\npost-commit sync terminal
     OriginalHookCheck --> RepairDispatching: agent_repairable 且 attempt=0\n持久化 user 消息
     RepairDispatching --> RepairRunning: CAS status=dispatched\n发布 chat-message + fresh authority scope + 正常 assemble/resume/Runner
     RepairRunning --> RepairReplyCommitted: Claude 成功\nassistant SSE parts 已持久化
@@ -304,6 +309,7 @@ stateDiagram-v2
 |---|---|
 | 自动消息持久化失败/identity conflict | 不发布 SSE、不启动修正，安全 error terminal |
 | successful assistant 持久化失败 | 不执行 Dream Hook；发布脱敏 `CHAT_ASSISTANT_PERSISTENCE_FAILED` terminal，保留原 user 和 workspace |
+| assistant 已持久化后 Hook non-repairable/未知失败 | 发布 `DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT` + `finish(error)`；保留 assistant，reload 不重发；Execution 失效并重读工作台投影 |
 | EventBus 发布失败 | 消息保留在历史；不启动无可观察修正，error terminal |
 | 修正 Turn assembly/Runner 失败 | metadata `dispatch_status=failed`，现有 error terminal |
 | context assembly 发现多个安全 canonical 根 | 生成不绑定具体项目的 repair-safe context，继续正常 Turn；最终唯一性由 Hook 决定 |

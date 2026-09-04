@@ -9,6 +9,7 @@
 [Sync] 2026-08-24: add the Chinese SDK/Runtime packaging, PyPI/npm publishing,
                     Dream exact-version/hash integration, validation, and rollback guide.
 [Sync] 2026-08-31: remove the unused legacy models.json deployment prerequisite.
+[Sync] 2026-09-04: add post-release verification for Dream post-commit sync terminals and Execution asset refresh; no migration or config change is required.
 -->
 
 ## 定位
@@ -108,6 +109,17 @@ Docker 和 Remote SSH Compose 默认包含 `tun-proxy` 服务，使用
 真实 `config.yaml` 已 gitignored；配置准备见 [`../../deploy/clash/README.md`](../../deploy/clash/README.md)。
 
 ## 维护规则
+
+### Dream 回合同步发布后检查
+
+本修复没有 PostgreSQL migration、runtime DDL、环境变量或部署拓扑变更。发布 Dream frontend/backend 后，使用已有测试 Run 与授权账号执行一轮可写人物/场景的正常 Dream Turn，并按同一业务链确认：
+
+1. assistant 正文进入同一 Thread 历史；canonical `assets/characters` / `assets/scenes` 的变更由 after-turn Hook 发布到对应 Run-private artifact；
+2. authenticated `dream-files` 与 Story/Episode API 返回新 revision，Execution“故事资产”无需整页刷新即可出现人物/场景；
+3. 在隔离故障注入中让 Hook 尾部失败时，SSE 只出现 `DREAM_ARTIFACT_SYNC_FAILED_AFTER_COMMIT` 与唯一 `finish(error)`，页面提示回复已保存，reload 后正文保留且 Agent POST 不增加；
+4. 若 PostgreSQL capability 不可用，Dream 必须 fail closed 并保留已提交回复；从 Admin Drizzle 修复 capability，禁止在 Dream 新增 DDL、Alembic 或 fallback。
+
+回滚只需回滚本次 Dream frontend/backend 版本；没有数据回滚或 schema contract 操作。该 provider-free 故障注入不能替代真实业务发布验收。
 
 - 本地 Dream 不启动 PostgreSQL；必须先运行 Admin `pnpm dev`，由 `@ink-memory/db`
   supervisor 启动 embedded PostgreSQL。`deploy/local/deploy.sh` 会让 Dream 只读取 Admin env

@@ -9,6 +9,8 @@
 // [Sync] 2026-08-31: guard the concise storyboard overview in the EP list description.
 // [Sync] 2026-08-31: guard the read-only three-stage guide and its in-place focus entry.
 // [Sync] 2026-09-02: guard Outline-aligned Episode index and accessible return navigation.
+// [Sync] 2026-09-04: require shared-thread settlement to refresh the Dream
+//                    asset stages before the completed Execution view can go stale.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -165,6 +167,18 @@ test('execution status preview opens the Dream Agent floating dialog without mou
   expect(DIALOG_SOURCE).toContain('<StoryWorkspaceDreamThreadChat');
   expect(PAGE_SOURCE).not.toContain('useStoryWorkspaceDreamAgent');
   expect(PAGE_SOURCE).not.toContain('<ChatView');
+});
+
+test('settled Dream turns refresh assets as well as Episode and Story projections', () => {
+  const settlementStart = PAGE_SOURCE.indexOf('onSettled={() => {');
+  const settlementEnd = PAGE_SOURCE.indexOf('restoreFocusRef=', settlementStart);
+  const settlement = PAGE_SOURCE.slice(settlementStart, settlementEnd);
+
+  expect(settlementStart).toBeGreaterThan(-1);
+  expect(settlement).toContain('files.refresh();');
+  expect(settlement).toContain('episodeIndex.refresh();');
+  expect(settlement).toContain('refreshEpisodeArtifacts();');
+  expect(settlement).toContain('storyIndex.refresh();');
 });
 
 test('draft is the default full surface and sync remains an exclusive coordination view', () => {
