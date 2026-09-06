@@ -1,14 +1,15 @@
 <!-- [输入] MCP Apps 稳定规范、OpenAI 共享字段指南、IM MCP Apps Host 设计。 -->
-<!-- [输出] 定义 IM App 页面可使用的标准能力与 window.im 兼容接口。 -->
+<!-- [输出] 定义当前 technical preview 中 IM App 页面可使用的标准能力与 window.im 兼容接口。 -->
 <!-- [定位] IM App 客户端平台能力合同；不定义 Browser 与 Node 的私有传输协议。 -->
 <!-- [同步] 2026-09-04：SUO-383 后标准主链由 Browser MCP Client、最小 Host adapter 与 @mcp-ui/client AppBridge 承载，window.im 仍仅为兼容接口。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 明确本客户端能力只属于 frontend/ 根 Web package，不导入同级 server-only Runtime package。 -->
+<!-- [同步] 2026-09-06：按 54f3bbe5 标记 Host/window.im 代码与 provider-free 验证已存在，同时保留 production-off 边界。 -->
 
 # IM MCP Apps 客户端平台能力合同
 
-> 状态：设计评审稿，未实现
+> 状态：代码已存在并完成 provider-free technical-preview 验证；只暴露 actor-effective 成员，production 未启用
 >
-> 结论：IM App 以 MCP Apps 标准字段和 `ui/*` 方法作为主接口。IM 额外提供可选的 `window.im`，其字段、方法、参数、返回值和行为与 `window.openai` 对应成员一致，只更换 namespace。`window.im` 不替代 MCP Apps bridge，也不承担 MCP 连接、认证或连接状态同步。
+> 结论：IM App 以 MCP Apps 标准字段和 `ui/*` 方法作为主接口。technical preview 额外提供可选的 `window.im`，只在认证 Host capability handshake 后暴露 actor-effective 成员；其字段、方法、参数、返回值和行为与 `window.openai` 对应成员一致，只更换 namespace。`window.im` 不替代 MCP Apps bridge，也不承担 MCP 连接、认证或连接状态同步。公开应用与 production enablement 尚无证据。
 
 参考资料（访问日期：2026-09-04）：
 
@@ -99,7 +100,7 @@ Host adapter 复用标准 AppBridge 和页面消息 transport，不实现第二�
 
 `window.im` 是 IM 要提供的客户端平台兼容合同，不是 Host adapter 的现成能力。目标交付方式是在 IM 自有、版本化的 sandbox proxy 中加载兼容适配器，把字段和方法映射到同一 MCP Apps bridge；顶层页面不能跨 origin 直接给第三方 iframe 赋值，Node 也不能跨进程注入浏览器全局对象。
 
-Phase 0 只要求标准 MCP Apps bridge。Phase 2 必须先用 PoC 验证适配器能在不改写 Server HTML 的前提下完成初始化、CSP/origin 隔离和消息来源校验，验证通过后才提供 `window.im`。任何未实现的成员保持缺失；文件、modal、显示模式等能力还必须有对应的 Host callback 和产品能力，不能只增加同名函数。
+Phase 0 只要求标准 MCP Apps bridge。Phase 2 已以 provider-free Browser PoC 验证适配器可在不改写 Server HTML 的前提下完成初始化、CSP/origin 隔离和消息来源校验；当前实现只提供通过 actor-effective policy 的最小 `window.im` 成员。任何未实现的成员保持缺失；文件、modal、显示模式等能力还必须有对应的 Host callback 和产品能力，不能只增加同名函数。
 
 | 能力组 | `window.im` 成员 | 规则 |
 |---|---|---|
@@ -167,4 +168,4 @@ IM 需要定义上述客户端平台能力合同，但不需要第二套 Browser
 
 `window.im` 是 `window.openai` 的 IM namespace 兼容接口：标准已有能力时只做别名，OpenAI 可选平台能力按 IM 实际支持情况逐项提供。它不是 MCP transport、AppBridge 的替代品，也不定义认证和连接同步协议。
 
-目录归属不在本稿重复定义；唯一结构以[DEC-005 canonical 目录树](./dream-frontend-node-framework-migration-assessment.md#62-唯一-canonical-目录树)为准。旧 `frontend/app/app/**` 和 `frontend/app/_dream/server/mcp-apps/**` 不得成为客户端兼容层的双写目标。
+目录归属不在本稿重复定义；唯一结构以[当前 source ownership](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)为准。旧 `frontend/app/app/**` 和 `frontend/app/_dream/server/mcp-apps/**` 不得成为客户端兼容层的双写目标。

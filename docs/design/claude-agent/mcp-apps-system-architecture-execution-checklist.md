@@ -1,16 +1,17 @@
-<!-- [输入] MCP Apps 主设计、Node Transport、客户端平台合同、iframe 设计、源码调研与 Next.js 迁移评估。 -->
-<!-- [输出] 提供按依赖排序、可勾选、可验收和可回滚的 IM MCP Apps 系统架构执行清单。 -->
-<!-- [定位] MCP Apps 实施入口；架构理由和协议证据仍以同目录六份设计稿为准。 -->
+<!-- [输入] MCP Apps 主设计、54f3bbe5 当前源码、Node Transport、客户端平台合同、iframe 设计与统一技术回执。 -->
+<!-- [输出] 提供按依赖排序、可验收和可回滚的 IM MCP Apps 技术工作、真实证据和生产缺口索引。 -->
+<!-- [定位] MCP Apps 实现/验收索引；架构理由和协议证据仍以同目录现行设计稿为准。 -->
 <!-- [同步] 2026-09-04：SUO-383 以 DEC-002 修正 P0-04 renderer/permissions 合同，并限定 P0-04/P0-08 重跑。 -->
 <!-- [同步] 2026-09-05：SUO-397 以 DEC-003 将 S1-01 纠正为 IM-owned、provider-free 自建 AppServer 测试目标；production Apps 仍关闭。 -->
 <!-- [同步] 2026-09-05：SUO-403 以 DEC-004 废止 Phase 1 自建 AppServer，改为原样复用官方 basic-server-vanillajs@1.7.5 发布制品。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 锁定 frontend/ 根 workspace、单一 app/** 与同级 mcp-apps-runtime package，并作废旧目录下游输入。 -->
 <!-- [同步] 2026-09-06：清单改用技术依赖、当前证据和真实失败判断完成度。 -->
 <!-- [同步] 2026-09-06：当前 pnpm/official-AppServer 候选完成 Phase 0—3 provider-free 技术验收，production 保持关闭。 -->
+<!-- [同步] 2026-09-06：移除已失效的迁移派工语义，区分代码存在、技术验收、公开应用与 production enablement。 -->
 
 # IM MCP Apps 系统架构执行清单
 
-> 当前证据：当前 pnpm lock、未修改官方 `1.7.5`、本机 Chrome 和 production modules 已完成 Phase 0—3 provider-free 技术验收；[统一回执](../../exec/mcp-apps/current-candidate-validation.md)明确 `productionAppsEffective=false`，真实外部 Server/账号/OAuth/运维发布仍未执行。
+> 当前证据：`54f3bbe5` 已包含完整 technical-preview 代码；当前 pnpm lock、未修改官方 `1.7.5`、本机 Chrome 和 production modules 已完成 Phase 0—3 provider-free 技术验收。[统一回执](../../exec/mcp-apps/current-candidate-validation.md)明确 `productionAppsEffective=false`，真实外部 Server/账号/OAuth、公开应用和生产运维发布仍未执行。
 >
 > 目标链路：`Claude Agent Runtime → Chat 工具结果 → ImMcpAppHostAdapter（复用 AppBridge）→ Browser MCP Client → Next Node 受控 MCP endpoint → PersistentConnectorManager → MCP Server`。
 
@@ -21,13 +22,13 @@
 - [`window.im` 客户端平台能力合同](./mcp-apps-client-host-communication.md)
 - [Host adapter 与 iframe 权限交互设计](./mcp-apps-iframe-interaction.md)
 - [源码与协议调研](./mcp-apps-support-research.md)
-- [Dream 前端 Next.js 迁移评估](./dream-frontend-node-framework-migration-assessment.md)
+- [Dream Web 当前 Next.js 架构与迁移历史](./dream-frontend-node-framework-migration-assessment.md)
 
 ## 1. 背景与问题
 
-Dream 当前能调用普通 MCP 工具并展示结果，但没有 MCP Apps capability negotiation、Tool UI metadata 投影、Browser MCP Client、受控 Node MCP endpoint、iframe Host 和双向页面交互。
+Dream 的生产路径当前只承诺普通 MCP 工具与普通结果。代码基线另有默认关闭的 MCP Apps technical preview，已实现 capability negotiation、Tool UI metadata 投影、Browser MCP Client、受控 Node MCP endpoint、iframe Host 和受控双向页面交互；这些代码与技术验证不等于公开应用或生产启用。
 
-本清单把已有架构决策转成实施顺序和验收门槛。它不重新讨论候选架构，也不把设计文档改写成生产代码说明。
+本清单把架构决策映射为已完成的技术工作、真实依赖、可观察证据和剩余缺口。它不通过派工状态、审批链或旧版本设计结论推断完成度。
 
 ## 2. 目标与边界
 
@@ -40,7 +41,7 @@ Dream 当前能调用普通 MCP 工具并展示结果，但没有 MCP Apps capab
 - Python 只提供 managed MCP 静态配置和短时单 Server 建连配置。
 - 普通结果始终作为无 UI、失败、禁用和不兼容时的 fallback。
 - 以官方 `modelcontextprotocol/ext-apps` 发布的 `basic-server-vanillajs` 原样制品作为 S1-01 唯一测试/集成目标。
-- Dream Web 按已确定决策迁移到自托管 Next.js App Router。
+- Dream Web 运行在自托管 Next.js App Router。
 - Dream Web 只采用 `frontend/` 根 workspace/package、`frontend/app/**` 单一 App Router 与 `frontend/packages/mcp-apps-runtime/**` 独立 Node package。
 
 ### 2.2 不在清单内
@@ -133,11 +134,11 @@ Phase 0 回滚：删除隔离 PoC 部署和测试配置，不修改现有 Dream 
 
 Phase 1 的只读集成验证要求 pnpm workspace 锁下的 P0-08 重新为 Go，且本章 N1、C1、S1、M1、H1 和门槛全部完成。Next.js compatibility shell 可以与 Phase 0 重跑并行推进，但 Apps 不得在新 P0-08 通过前生效；官方 demo 闭环只解除测试/集成验证前置，不构成 production Apps 开启条件。
 
-### 5.1 Next.js 平台迁移
+### 5.1 Next.js 平台
 
 | 证据 | ID | 执行动作 | 责任模块 | 依赖 | 可观察验收 | 回滚点 |
 |---|---|---|---|---|---|---|
-| [x] | N1-01 | 按 DEC-005 建立 `frontend/` 根 workspace/package、单一 `app/**` 与自托管 Next.js compatibility shell，先承载现有 Dream SPA | Frontend Platform | 已确定的 Next.js 迁移决策 | 根目录结构逐项对应 Admin；现有 URL、刷新、认证和静态资源行为一致；无 `frontend/app/app/**` | 切回现有 Vite image，不恢复嵌套 Next 项目 |
+| [x] | N1-01 | 按 DEC-005 建立 `frontend/` 根 workspace/package、单一 `app/**` 与自托管 Next.js compatibility shell，承载 Dream Web | Frontend Platform | 已接受的 Next.js 结构决策 | 根目录结构逐项对应当前合同；现有 URL、刷新、认证和静态资源行为一致；无 `frontend/app/app/**` | 切回上一已验证 Next image，不恢复嵌套 Next 或 Vite owner |
 | [x] | N1-02 | 明确 Server/Client Component 边界，浏览器专属模块只从 Client Component 加载 | Frontend Platform | N1-01 | Next server render 不访问 `window`、`document`、localStorage、AudioContext | 保留 `ssr:false` compatibility shell |
 | [x] | N1-03 | 保持 Python API、OAuth callback、Agent SSE 和语音 WebSocket 原入口 | Frontend / Backend | N1-01 | 登录、OAuth、Agent streaming、cancel/resume、语音回归通过 | 回退对应 route/ingress 变更 |
 | [x] | N1-04 | 建立 Apps Host 的 Browser 入口和 `frontend/packages/mcp-apps-runtime/**` Node package，并在其 composition root 创建进程级 Runtime | Node / Plugin Platform | N1-01、pnpm lock 下 P0-08 Go | 单向 package graph；Browser 不导入 server package；manager 只在进程级创建 | 关闭 Apps feature flag |
@@ -232,7 +233,9 @@ Phase 3 以 Phase 2 全部通过为前提；本章所有执行项完成后才能
 
 Phase 3 回滚：回滚插件版本或按 Server/App 禁用；不改变 Claude Agent 普通 MCP 工具路径。
 
-## 8. 全链路业务验收
+## 8. 全链路技术验收
+
+本节 checkbox 表示 provider-free technical-preview 证据，不是“真实业务测试”或 production 发布回执。
 
 ```mermaid
 sequenceDiagram
@@ -274,7 +277,7 @@ sequenceDiagram
     end
 ```
 
-最终发布前逐项确认：
+当前技术候选已确认：
 
 - [x] 普通 MCP tool、无 UI tool、Apps tool 三类结果行为明确且可复现。
 - [x] 首次工具调用只由 Claude Agent Runtime 执行一次。
@@ -287,6 +290,14 @@ sequenceDiagram
 - [x] 多用户、多 Server 和多 Browser session 不串数据、catalog、通知或 credential。
 - [x] 审计日志不包含 secret、完整对话、系统提示词或 App 私有正文。
 - [x] Next.js 和 Apps 插件均有已演练的独立回滚路径。
+
+公开应用与 production 仍缺：
+
+- [ ] 使用用户授权的真实账号和既有业务实体，通过正常 Dream/Admin/Gateway/PostgreSQL 路径接入真实外部 MCP Server。
+- [ ] 完成真实 OAuth/refresh、实际权限降级与真实 Server 生命周期验收。
+- [ ] 发布可追溯的公开应用制品，并证明版本、完整性、运营与回滚边界。
+- [ ] 在目标生产拓扑完成发布、容量、观测、优雅退出和回滚验收。
+- [ ] 经独立产品/安全决策定义 production 状态转换；当前常量仍为 `productionAppsEffective=false`。
 
 ## 9. 执行记录规则
 
@@ -306,13 +317,13 @@ sequenceDiagram
 
 | 范围 | 已验证事实 | 当前仍需证据 |
 |---|---|---|
-| Phase 0 | 旧 npm lock 上存在 P0-01—P0-08 历史 PoC 与 Go 记录。 | 在当前 pnpm lock、当前 Browser 入口和当前源码上重跑 P0-01、P0-04、P0-08；其余 P0 证据必须核对同一指纹。 |
-| N1 | DEC-005 已确定 `frontend/` 根 workspace、单一 App Router 与 sibling Runtime package。 | 当前候选的根 build/start/standalone、route manifest、Vite 退出和现有业务回归。 |
-| C1/M1 | Python 最小投影、进程级 Runtime、薄 Route Handler 与连接隔离合同已定义。 | 当前 Backend/Node tests、秘密边界、revision/expiry、进程级复用和 teardown 证据。 |
-| S1 | 官方 `@modelcontextprotocol/server-basic-vanillajs@1.7.5` 的身份与标准 `/mcp` 行为已经定义。 | 完整 production dependency closure、离线安装、零网络运行、逐文件 digest 和清理证据。 |
-| H1 | DEC-002 确定 Host adapter、双 iframe、sandbox proxy、普通 fallback 和 server-owned result identity。 | 当前 Chrome 中的来源校验、权限正反向 probe、zero-call、refresh/reconnect、identity mismatch 与 teardown。 |
-| I2 | Phase 2 的标准 `tools/call`、`ui/message` 和 `window.im` 边界已定义。 | 代码实现和当前候选 E2E；高风险写工具继续拒绝。 |
-| G3 | Phase 3 的版本、生命周期、隔离、诊断和资源策略已定义。 | 代码实现、多会话压力/隔离、升级/回滚和最终发布证据。 |
+| Phase 0 | 当前 pnpm lock 上 P0-01—P0-08 技术证据通过；旧 npm lock 只保留历史追溯。 | 依赖、Browser 或安全边界变化时在同一新候选重跑；不继承旧指纹。 |
+| N1 | `frontend/` 根 workspace、单一 App Router、唯一 `app/_dream` 应用源、sibling Runtime package、root build 和 standalone 已验证。 | 目标生产拓扑的实际发布、容量、观测、优雅退出和回滚。 |
+| C1/M1 | Python 最小投影、进程级 Runtime、薄 Route Handler、revision/expiry、secret 边界和 teardown 已通过 Backend/Node 技术测试。 | 真实账号、真实外部 Server 与真实 OAuth 下的业务回执。 |
+| S1 | 未修改官方 `@modelcontextprotocol/server-basic-vanillajs@1.7.5` 已完成来源和 Browser→production-module 兼容验证。 | 公开应用制品及其生产供应链、运营与回滚证据；官方 demo 不能替代。 |
+| H1 | 当前 Chrome 已覆盖来源校验、权限正反向 probe、zero-call、refresh/reconnect、identity mismatch 与 teardown。 | 真实外部应用的实际 CSP/permission/降级行为。 |
+| I2 | 标准 `tools/call`、`ui/message` 和 actor-effective `window.im` 已实现并完成 provider-free E2E；高风险写工具拒绝。 | 真实业务工具与 OAuth 失效/恢复验收。 |
+| G3 | 版本、生命周期、隔离、诊断和资源策略已完成技术测试。 | 公开发布与生产运行证据；production 状态仍不可变关闭。 |
 
 任何真实失败都保留原命令、退出码、失败类型和受影响 ID。替代命令只能证明其实际覆盖范围，不得改写成原命令通过。
 
@@ -321,8 +332,7 @@ sequenceDiagram
 ### DEC-001：Phase 0→3 清单是实现与验收基线
 
 - 50 个 P0/N1/C1/S1/M1/H1/I2/G3 ID 定义范围和证据。
-- 执行可以直接从明确工作项、必要技术依赖和写入边界开始。
-- 实施从明确工作项、必要技术依赖和写入边界直接开始。
+- 后续工作只从未完成的真实证据、必要依赖和明确写入边界开始，不重复已完成迁移。
 
 ### DEC-002：Host adapter 持有 iframe 安全
 
@@ -349,9 +359,9 @@ sequenceDiagram
 
 ## 12. 实施与文档维护规则
 
-1. 按 [技术执行计划](../../stage/stage_mcp-apps-system-architecture.md) 的依赖顺序推进，同时允许不重叠的准备和测试并行。
+1. 当前工作只围绕第 8 节未勾选的真实业务、公开应用和生产证据，按其实际技术依赖推进。
 2. 开始前记录工作树状态并保护现有改动；目标文件发生并发变化时先协调再继续。
-3. 每个 checkbox 只有在当前候选上同时存在实现、命令、退出码、关键输出和可回读证据时才能改为 `[x]`。
-4. 旧 lock、旧目录、旧截图、旧 Server 或历史 Go 只能标明历史适用范围，不能拼接成当前结论。
-5. 失败时保留普通 MCP/Chat 路径和 `production_apps_effective=false`；只清理本轮具名资源。
-6. 更新 task/requirement、`docs/exec` 证据和受影响的 `.folder.md`；行为、版本、命令或部署边界变化时同步双语 README。
+3. 每个 checkbox 只有在同一候选上同时存在实现、命令、退出码、关键输出和可回读证据时才能改为 `[x]`。
+4. 旧 lock、旧目录、旧截图、旧 Server、派工状态或历史 Go 只能标明历史适用范围，不能拼接成当前结论。
+5. 失败时保留普通 MCP/Chat 路径和 `productionAppsEffective=false`；只清理本轮具名资源。
+6. 更新对应设计、`docs/exec` 证据和受影响的 `.folder.md`；行为、版本、命令或部署边界变化时同步双语 README。

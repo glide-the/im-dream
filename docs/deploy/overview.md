@@ -1,8 +1,14 @@
-# 部署指南：Google Cloud Run
+<!-- [Input] Google Cloud deployment scripts, current Next standalone image, and the Admin-owned PostgreSQL schema contract. -->
+<!-- [Output] Historical Cloud Run topology plus the current blocking data/configuration gaps. -->
+<!-- [Pos] Google Cloud deployment record; not a supported production runbook until the documented blockers are migrated and accepted. -->
+# Google Cloud Run 历史部署合同与当前阻塞
 
 <!-- [Sync] 2026-08-31: remove the retired /polycli same-origin fallback. -->
+<!-- [Sync] 2026-09-06: align the frontend image with Next standalone and mark the legacy SQLite/GCS data path unsupported. -->
 
-本文档描述 Ink & Memory 的 Cloud Run 部署架构与操作步骤。当前云发布主入口是 [`../../deploy/google-cloud/deploy.sh`](../../deploy/google-cloud/deploy.sh)，旧的 `deploy/*.sh` 路径仅保留兼容或作为主入口编排的辅助脚本。
+> **当前不是可支持的 Dream 生产发布入口。** `deploy/google-cloud/deploy.sh` 构建的 `frontend/Dockerfile` 已是根 Next.js 16 + pnpm frozen-lock standalone；但脚本仍传入未被 Dockerfile 消费的 `VITE_PUBLIC_SITE_URL`，数据脚本仍依赖 SQLite/GCS，与 Admin-owned PostgreSQL/Drizzle 合同冲突。在数据路径迁移并重验前，下文 Cloud 资源和数据步骤只作历史参考，不得用于真实业务发布。当前分流见 [发布文档入口](README.md)。
+
+本文档描述历史 Cloud Run 部署架构与操作步骤。对应脚本入口是 [`../../deploy/google-cloud/deploy.sh`](../../deploy/google-cloud/deploy.sh)，旧的 `deploy/*.sh` 路径仅保留兼容或作为该入口的辅助脚本；两者都受上述当前阻塞约束。
 
 ---
 
@@ -15,8 +21,8 @@
 ┌─────────────────────────────────────┐
 │  Cloud Run: ink-frontend            │
 │  Public: https://ink-frontend.suoxya.com │
-│  nginx 1.27-alpine                  │
-│  · 服务 / 静态资源                  │
+│  Next.js 16 standalone (Node 22)    │
+│  · 服务 App Router / 静态资源       │
 │  · runtime-config.js 注入 API_BASE_URL │
 └─────────────────────┬───────────────┘
                       │ 浏览器跨域 HTTPS (API_BASE_URL)
@@ -149,7 +155,7 @@ Step 3  确认 Artifact Registry 仓库存在（idempotent）
 Step 4  配置 Docker 认证
 Step 5  并行构建后端镜像 + 前端镜像
 Step 6  并行推送两个镜像
-Step 7  部署后端服务 → 获取 BACKEND_URL（run.app 服务 URL，作为 nginx fallback）
+Step 7  部署后端服务 → 获取 BACKEND_URL（run.app 服务 URL，由容器入口投影为 Next 内部 rewrite fallback）
         部署前端服务（默认注入 API_BASE_URL=https://ink-backend.suoxya.com）
         回写后端 WEBUI_URL / API_BASE_URL / cookie policy / INK_CORS_ALLOW_ORIGINS
         默认 WEBUI_URL=https://ink-frontend.suoxya.com
@@ -233,7 +239,8 @@ curl -I https://ink-frontend.suoxya.com/runtime-config.js
 | `DEBIAN_SECURITY_MIRROR` | `https://mirrors.aliyun.com/debian-security` | 后端 apt security 源 |
 | `PYPI_INDEX_URL` | `https://mirrors.aliyun.com/pypi/simple/` | 后端 pip 主源 |
 | `PYPI_TRUSTED_HOST` | `mirrors.aliyun.com` | 后端 pip trusted host |
-| `NPM_REGISTRY` | `https://registry.npmmirror.com` | 前端 npm install、后端 Claude Code CLI 安装 |
+| `PNPM_REGISTRY` | `https://registry.npmmirror.com` | 前端 pnpm frozen-lock 安装 |
+| `NPM_REGISTRY` | `https://registry.npmmirror.com` | 后端 Claude Runtime/CLI 的 npm 安装；不是 frontend package-manager owner |
 
 示例：
 
@@ -270,13 +277,13 @@ docker build \
 ### 前端（`frontend/Dockerfile`）
 
 两阶段构建：
-1. **构建阶段**：`node:22-alpine`，先用 `NPM_REGISTRY` 设置 npm registry，再执行 `npm install && npm run build`，输出到 `dist/`
-2. **服务阶段**：`nginx:1.27-alpine`，拷贝 `dist/` 到 `/usr/share/nginx/html/`，容器启动时生成 `runtime-config.js` 注入 `API_BASE_URL`，同时保留 `nginx.conf.template` 的 `BACKEND_URL` 同源代理 fallback
+1. **构建阶段**：`node:22-alpine`，启用 Corepack，使用 `PNPM_REGISTRY` 和唯一 `pnpm-lock.yaml` 执行 `pnpm install --frozen-lockfile`，再运行 `pnpm run build:docker` 生成 `.next/standalone`。
+2. **服务阶段**：`node:22-alpine`，拷贝 standalone server、`.next/static` 和 `public`；容器入口生成 `runtime-config.js`、投影 `INK_BACKEND_INTERNAL_URL`，然后执行 `node server.js`。
 
-nginx 配置要点：
+Next 配置要点：
 - 前端默认通过 `runtime-config.js` 读取 `API_BASE_URL`，浏览器直接跨域请求固定后端域名 `https://ink-backend.suoxya.com`
 - `runtime-config.js` 和 SPA HTML 入口设置为 `no-store`，避免浏览器沿用旧入口或旧的空 `apiBaseUrl` 后把 POST/PUT 请求打回前端静态服务并触发 `Method Not Allowed`
-- `nginx.conf.template` 保留 `/api/` 反向代理，用作同源调用 fallback
+- `next.config.js` 在存在 `INK_BACKEND_INTERNAL_URL` 时提供 `/api` / auth / OAuth 同源 rewrite fallback
 - 静态资源设置 1 年强缓存（`immutable`）
 
 ### 前端请求返回 Method Not Allowed
@@ -299,7 +306,7 @@ docker compose up --build
 # 访问 http://localhost/
 ```
 
-`docker-compose.yml` 中前端保留 `BACKEND_URL=http://ink-backend:8765` 作为 nginx fallback，同时设置 `API_BASE_URL=http://127.0.0.1:8765`，浏览器默认直接跨域请求本机后端端口。
+`docker-compose.yml` 中前端保留 `BACKEND_URL=http://tun-proxy:8765`，容器入口将它投影为 Next 的 `INK_BACKEND_INTERNAL_URL` rewrite fallback；同时设置 `API_BASE_URL=http://127.0.0.1:8765`，浏览器默认直接跨域请求本机后端端口。根 Compose 仍传入未被当前 Dockerfile 消费的 `VITE_PUBLIC_SITE_URL`，且注释仍把 frontend 写成 nginx/Vite 与 nginx fallback；这是配置/注释漂移，不影响 Next 镜像构建但也不能作为 public-site metadata 证据。
 
 Claude-agent 的 Bash sandbox 在 Docker 中由 bubblewrap 创建 mount namespace。
 根目录 `docker-compose.yml` 的 backend 服务因此设置：

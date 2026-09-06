@@ -1,4 +1,22 @@
-# Story Workspace Issue 清单（增量更新版）
+<!-- [输入] 2026-08-01 Story Workspace 设计拆解、Issue 编号和当时执行编排。 -->
+<!-- [输出] 历史工作分解、范围和失败事实；当前实现状态由源码与 exec 回执判定。 -->
+<!-- [范围] 不作为当前派工、审批、checkout、assignee 或生产能力合同。 -->
+<!-- [同步] 2026-09-06：降级为历史拆解账本，并补充当前源码、证据与缺口入口。 -->
+
+# Story Workspace Issue 清单（历史拆解账本）
+
+> **当前适用性。** 本文 2026-08-01 的 IssueDispatcher/CEOOrchestrator、分发去向、状态、依赖图和批准链只保留当时设计拆解，不再支配当前工作。现行 Dream Web owner 是 `frontend/app/_dream/**`，由根 Next.js 16 + pnpm workspace 构建；新的工作必须以实际源码、技术依赖和可复核证据为准。
+
+## 当前实现、证据与缺口
+
+| 范围 | 当前事实 | 证据或缺口 |
+|---|---|---|
+| 合同 canonical 迁移 | 已完成当时候选验证；旧 `backend/types/` owner 被移除，frontend 合同 owner 位于 `app/_dream`。 | [task_205b 执行回执](../exec/exec_task_205b_story-workspace-contract-migration.md)；23 项 focused tests、build/lint、hash 与扫描通过。 |
+| Review workflow | 首次因持久化合同缺口 fail closed，后续 retry 完成。 | [task_203 执行回执](../exec/exec_task_203_story-workspace-review-workflow.md) 同时保留 blocked 与 superseding PASS。 |
+| 历史持久化 Schema | 旧 SQLite fixture 曾通过技术验证，但不构成当前 Dream Schema 权限。 | [task_203a 回执](../exec/exec_task_203a_story-workspace-review-persistence-schema.md) 仅作历史证据；共享 PostgreSQL Schema 由 Admin Drizzle 唯一管理。 |
+| 数据表 Browser/Network | 尚无通过证据。 | [task_202c 补证回执](../exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md) 为 `blocked`；当前 `frontend/e2e/**` harness 存在，但必须针对当前 Next 候选重跑真实页面和 Network 验收。 |
+
+这些结果都是技术验证或缺口，不等同于公开应用可用、生产部署完成或真实业务验收。下文全部“当前”“待分发”“准入”“owner”表述均按历史快照阅读；安全约束和失败事实继续有效。
 
 > **增量 Issue**: SUO-226、**SUO-230**、**SUO-299**
 > **父 Issue**: SUO-198 / SUO-235 / SUO-237
@@ -29,7 +47,7 @@
 - 下游 Agent：
   - `TaskDesignAgent`
 - 共享设计稿来源：`docs/design/story-workspace/`
-- 是否作为当前实现合同：是
+- 是否作为当前实现合同：否；仅作历史拆解与审计输入
 - 备注：
   - 本文档由设计稿拆解生成，经 SUO-236 按 SUO-235 Deck-only 裁决修订。
   - 所有 Desk 引用已统一为 Deck；运行配置、不可变快照、secret-ref、权限、preflight、审计和回滚合同归属 Deck。

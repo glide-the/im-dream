@@ -1,4 +1,10 @@
+<!-- [Input] Dated task_202a implementation, command, and visual evidence. -->
+<!-- [Output] Immutable historical execution receipt with current frontend ownership clearly separated. -->
+<!-- [Pos] Historical Exec evidence; not a current build, deploy, or task-status contract. -->
+<!-- [Sync] 2026-09-06: mark npm/Vite and orchestration details as historical and link the current Next.js/pnpm architecture. -->
 # Exec Report: task_202a - Story Workspace 三栏布局骨架
+
+> **历史执行回执（2026-08-01）。** 本文中的 npm/Vite、端口、Paperclip 派工、checkout 与 assignee 只记录当时实际执行事实，不是当前工作状态或实现入口。现行 frontend 为 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`；当前架构见 [Dream frontend Node framework migration assessment](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md)。下文命令和结果按原样保留。
 
 ## 1. 执行上下文
 
@@ -78,8 +84,8 @@
 | `npm ci`（授权联网） | PASS | 按 `frontend/package-lock.json` 安装 446 packages；未修改锁文件 |
 | `npm run build`（依赖恢复后） | PASS | `tsc -b && vite build`，2602 modules transformed；仅有项目既有 dynamic-import/chunk-size warnings |
 | 目标文件 `eslint` | PASS | 两个 TSX 与两个 `index.ts` 无 lint 错误或警告 |
-| `rg '@media|768px|1279px|useMediaQuery|matchMedia'` | PASS | `frontend/app/_dream/components/story-workspace/` 无命中 |
-| 硬编码色值 `rg '#...|rgb(...)'` | PASS | story-workspace 产品代码无命中，全部使用 token |
+| `rg '@media\|768px\|1279px\|useMediaQuery\|matchMedia'` | PASS | `frontend/app/_dream/components/story-workspace/` 无命中 |
+| 硬编码色值 `rg '#...\|rgb(...)'` | PASS | story-workspace 产品代码无命中，全部使用 token |
 | 240px / 360px CSS 声明计数 | PASS | Sidebar 3 个固定宽度声明；Review Panel 4 个固定宽度声明 |
 | `git diff --check` | PASS | 无 whitespace 错误 |
 | agent-browser console/errors | PASS | 无页面错误；console 仅 Vite connected 与 React DevTools 提示 |

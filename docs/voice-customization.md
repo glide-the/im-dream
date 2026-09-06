@@ -1,277 +1,128 @@
-# Voice Customization System
+<!-- [Input] frontend/app/_dream voice, Deck, preference, storage, and Claude Agent Thread implementations. -->
+<!-- [Output] Current ownership, precedence, data-flow, and validation boundaries for Voice configuration. -->
+<!-- [Pos] Current Voice configuration design note; supersedes the retired analyze_text/trigger customization proposal. -->
+<!-- [Sync] 2026-09-06: replace the pre-Next proposal with the implemented Next private-source and Deck-owned flow. -->
 
-## Architecture
+# Voice configuration
 
-### Source of Truth
-- **Server**: Owns default voice configurations
-- **localStorage**: Stores user customizations (complete replacement, not merge)
+## Background and problem
 
-### Rule: No Merging
-- User either uses server defaults OR their own customizations
-- Never merge the two
-- Clear ownership prevents conflicts
+The former design described a dedicated Settings panel, a `voice-customizations`
+browser key, and `/api/sessions/analyze_text` plus `/api/trigger` as the active
+Voice path. Those interfaces are not the current implementation. Automatic
+`analyze_text` transport has been retired, the Dream Web source now lives below
+the private Next.js App Router tree, and authenticated Voice identities come
+from Deck data.
 
-## Data Flow
+This document records the checked-in implementation. It does not promise a new
+customization panel, import or export workflow, public template library, or
+deployment status.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ 1. App Init: GET /api/sessions/analyze_text            │
-│    Server returns default voices                        │
-└────────────────┬────────────────────────────────────────┘
-                 │
-┌────────────────▼────────────────────────────────────────┐
-│ 2. Check localStorage['voice-customizations']          │
-│    EXISTS    → Use customizations (ignore server)       │
-│    NOT EXIST → Use server defaults                      │
-└────────────────┬────────────────────────────────────────┘
-                 │
-┌────────────────▼────────────────────────────────────────┐
-│ 3. User edits in Settings Panel                        │
-│    [Save]        → Write to localStorage                │
-│    [Use Default] → Delete from localStorage             │
-│    [Export]      → Download JSON file                   │
-│    [Import]      → Read JSON → Write to localStorage    │
-└─────────────────────────────────────────────────────────┘
-```
+## Goals and boundaries
 
-## API Contract
+- Identify the current source owners and API owners.
+- State the actual startup precedence for Voice configuration.
+- Separate authenticated Deck data, authenticated preferences, browser migration
+  data, and backend defaults.
+- Preserve the ordinary Claude Agent Thread and server-owned Deck Plugin
+  boundaries.
 
-### GET /api/sessions/{session_id}
+The following are outside the current contract:
 
-**Response:**
-```json
-{
-  "id": "analyze_text",
-  "name": "Analyze Voices",
-  "description": "Detect inner voices in writing",
-  "defaultVoices": {
-    "logic": {
-      "name": "Logic",
-      "systemPrompt": "You are Logic. Analyze for patterns and inconsistencies...",
-      "icon": "🧠",
-      "color": "#4a5568",
-      "highlightColor": "blue"
-    },
-    "empathy": {
-      "name": "Empathy",
-      "systemPrompt": "You are Empathy. Focus on emotional depth...",
-      "icon": "❤️",
-      "color": "#e53e3e",
-      "highlightColor": "pink"
-    },
-    "creativity": { /* ... */ },
-    "criticism": { /* ... */ }
-  }
-}
-```
+- `/api/sessions/analyze_text` as an automatic Editor request;
+- `/api/trigger` as the Voice execution entry;
+- a `voice-customizations` browser-storage key;
+- the former Save, Use Default, Import, and Export Settings panel;
+- any claim that a proposed Voice marketplace or analytics feature is available.
 
-### POST /api/trigger
+## Concepts and rules
 
-**Request:**
-```json
-{
-  "text": "The protagonist walked slowly...",
-  "voices": {
-    "logic": {
-      "name": "Logic",
-      "systemPrompt": "You are Logic...",
-      "enabled": true,
-      "icon": "🧠",
-      "color": "#4a5568",
-      "highlightColor": "blue"
-    }
-  }
-}
-```
+### Source ownership
 
-**Notes:**
-- Frontend sends complete voice configs (not IDs)
-- Backend uses provided systemPrompt (doesn't look up)
-- Only enabled voices are sent
+| Concern | Current owner |
+|---|---|
+| Browser application and Voice state | `frontend/app/_dream/App.tsx` |
+| Voice and preference API client | `frontend/app/_dream/api/voiceApi.ts` |
+| Legacy browser migration helpers | `frontend/app/_dream/utils/voiceStorage.ts` and `frontend/app/_dream/constants/storageKeys.ts` |
+| Authenticated session preference hydration | `frontend/app/_dream/hooks/useSessionLifecycle.ts` |
+| Deck and Voice REST endpoints | `backend/routers/voices.py` |
+| Preferences and backend defaults | `backend/routers/preferences.py` |
+| Writing Voice execution | the existing Claude Agent Thread Server-Sent Events path exposed by `streamClaudeAgentTurn` |
 
-## Type Definitions
+All browser-owned modules above are under `frontend/app/_dream/**`. They are
+loaded through `frontend/app/client-shell.tsx`; they are not a second App Router,
+an independent Vite application, or a server-side Runtime package.
 
-### TypeScript
-```typescript
-// src/types/voice.ts
-export interface VoiceConfig {
-  name: string;
-  systemPrompt: string;
-  enabled: boolean;
-  icon: string;
-  color: string;
-  highlightColor: string;
-}
+### Configuration precedence
 
-export type VoicesPayload = Record<string, VoiceConfig>;
-```
+The initial browser load follows the implemented order below:
 
-### Python
-```python
-# backend/types.py
-from pydantic import BaseModel
+1. Fetch backend fallback values from `GET /api/default-voices`.
+2. For an authenticated actor, load enabled Voices from enabled Decks through
+   `GET /api/decks` and `GET /api/decks/{deck_id}`.
+3. If authenticated Deck Voices exist, use them.
+4. Otherwise, use the legacy `voice-configs` browser value when it exists.
+5. Otherwise, use backend default Voices.
+6. During authenticated session hydration, a persisted `voice_configs`
+   preference can replace the earlier in-memory value.
 
-class VoiceConfig(BaseModel):
-    name: str
-    systemPrompt: str
-    enabled: bool
-    icon: str
-    color: str
-    highlightColor: str
+This is precedence, not merging. A selected source supplies the complete
+in-memory Voice map for that step. The application does not merge individual
+fields from Deck, browser, and default records.
+
+### Persistence boundaries
+
+- `voice-configs`, `meta-prompt`, and `state-config` are legacy browser keys
+  centralized in `STORAGE_KEYS`; no code should invent alternate key names.
+- Authenticated preferences are read through `GET /api/preferences` and written
+  through `POST /api/preferences`.
+- Deck and Voice records are server-owned business data. Browser storage is not
+  authoritative for an authenticated Deck.
+- First-login migration is a separate workflow. Existing browser data may cause
+  the migration prompt; after server preferences report completion, non-auth
+  browser application keys are cleared by the current application logic.
+
+### Execution boundary
+
+Writing Voice interactions use the same Claude Agent Thread transport as other
+current Writing interactions. The browser sends the selected Voice system prompt
+and current Editor snapshot to the existing `/api/claude-agent` Server-Sent
+Events request. Voice configuration does not create a parallel Agent runtime,
+Gateway, persistence protocol, or deployment-specific behavior.
+
+### Client and server boundary
+
+- The browser may render names, icons, colors, and enabled state from the
+  selected Voice map.
+- The backend owns authentication, Deck access, preference persistence, and the
+  Claude Agent Thread request boundary.
+- The browser must not infer Deck Plugin readiness or server capabilities from a
+  model identifier or local configuration.
+- The server must not treat browser-storage values as authority for another
+  actor's Deck or preference data.
+
+## Validation entry points
+
+Use commands that match the current package and source layout:
+
+```bash
+cd frontend
+pnpm run lint
+pnpm run build
 ```
 
-## localStorage Schema
+Focused transport coverage lives at
+`frontend/app/_dream/api/__tests__/voiceApi.writing-sse.test.ts`; Editor removal
+of the automatic analysis request is covered by
+`frontend/app/_dream/engine/__tests__/EditorEngineWritingNetwork.test.ts`.
+These are technical checks. They do not by themselves prove that a public
+deployment, a real model call, or a production Voice workflow is available.
 
-**Key:** `voice-customizations`
+## Known gaps
 
-**Value:**
-```json
-{
-  "version": "1.0.0",
-  "voices": {
-    "logic": {
-      "name": "My Logic",
-      "systemPrompt": "Custom prompt...",
-      "enabled": true,
-      "icon": "🧠",
-      "color": "#4a5568",
-      "highlightColor": "blue"
-    }
-  }
-}
-```
-
-**Important:** If key exists, use it completely. Don't merge with server defaults.
-
-## Settings Panel UI
-
-```
-┌────────────────────────────────────┐
-│ Voice Settings              [Close]│
-├────────────────────────────────────┤
-│                                    │
-│ [Import] [Export] [Use Default]    │
-│                                    │
-│ ┌──────────────────────────────┐  │
-│ │ ☑ 🧠 Logic                   │  │
-│ │ System Prompt:                │  │
-│ │ ┌──────────────────────────┐ │  │
-│ │ │You are Logic. Analyze... │ │  │
-│ │ │                          │ │  │
-│ │ └──────────────────────────┘ │  │
-│ │ Color: [#4a5568 ▼]           │  │
-│ └──────────────────────────────┘  │
-│                                    │
-│ ┌──────────────────────────────┐  │
-│ │ ☑ ❤️ Empathy                  │  │
-│ │ ...                           │  │
-│ └──────────────────────────────┘  │
-│                                    │
-│              [Save Changes]        │
-└────────────────────────────────────┘
-```
-
-### Buttons
-
-**[Import]**
-- Opens file picker
-- Reads JSON file
-- Validates schema
-- Writes to localStorage
-- Reloads app state
-
-**[Export]**
-- Reads current voices (from state, not localStorage)
-- Downloads as `voice-config-{timestamp}.json`
-- No server interaction
-
-**[Use Default]**
-- Deletes `voice-customizations` from localStorage
-- Fetches server defaults again
-- Reloads app state
-
-**[Save Changes]**
-- Writes current form state to localStorage
-- No server interaction
-- Shows confirmation toast
-
-## Implementation Checklist
-
-### Backend
-- [ ] Add `defaultVoices` to session response
-- [ ] Update `/api/trigger` to accept `voices` parameter
-- [ ] Remove hardcoded voice lookups
-
-### Frontend
-- [ ] Create `VoiceConfig` type
-- [ ] Create `SettingsPanel` component
-- [ ] Create `VoiceEditor` component
-- [ ] Implement localStorage manager
-- [ ] Add import/export functions
-- [ ] Update API calls to send voices
-- [ ] Add settings toggle button
-
-### Testing
-- [ ] Test: Use server defaults (no localStorage)
-- [ ] Test: Save customizations
-- [ ] Test: Export → Import
-- [ ] Test: Use Default (clears localStorage)
-- [ ] Test: Invalid import JSON (error handling)
-
-## Edge Cases
-
-### Server defaults change
-- User has old customizations in localStorage
-- **Decision:** User customizations take precedence
-- User must manually "Use Default" to get new server voices
-- Alternative: Show notification "Server voices updated" with option to review
-
-### Invalid localStorage data
-- Corrupted JSON
-- Missing required fields
-- **Decision:** Delete and fall back to server defaults
-- Log error to console for debugging
-
-### Voice disabled mid-analysis
-- User disables voice while analysis running
-- **Decision:** Let current analysis finish
-- Next trigger respects new enabled state
-
-## Migration Plan
-
-### Phase 1: Backend changes
-1. Add `defaultVoices` to session endpoint
-2. Accept `voices` in trigger endpoint
-3. Deploy backend
-
-### Phase 2: Frontend changes (compatible)
-1. Add Settings Panel UI (hidden behind flag)
-2. Add localStorage logic
-3. Update trigger to send voices
-4. Deploy frontend
-
-### Phase 3: Enable feature
-1. Remove feature flag
-2. Show Settings button
-3. Add onboarding tooltip
-
-## Future Enhancements
-
-### Voice Templates
-- Share voice configs via URL
-- Community voice library
-- One-click install presets
-
-### Validation
-- Max prompt length (prevent token overflow)
-- Required fields validation
-- Color format validation
-
-### Analytics
-- Track which voices are most used
-- Track customization adoption rate
-- Track default vs custom usage
-
----
-
-**Last Updated:** 2025-10-16
+- The legacy `voiceStorage.ts` fallback and first-login migration remain in the
+  application; their removal requires a separate compatibility decision.
+- `voiceApi.ts` still contains a historical comment referring to a Vite type
+  workaround even though the source now belongs to the Next.js private tree.
+- The former customization panel, import and export behavior, and template or
+  analytics proposals are not implemented by the files cited in this document.

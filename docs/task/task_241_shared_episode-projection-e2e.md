@@ -1,3 +1,7 @@
+<!-- [输入] Episodes projection E2E requirements, current production entry points, and evidence constraints. -->
+<!-- [输出] task_241 projection acceptance, failure, cleanup, and reporting contract. -->
+<!-- [定位] Shared E2E task contract; execution must use current source and cannot inherit historical orchestration state. -->
+<!-- [同步] 2026-09-06：将运行入口与证据语义对齐当前实现，旧派工字段仅保留追溯。 -->
 # Task: Story Workspace Episodes 统一投影端到端联调（Shared）
 
 > **Task ID**: `task_241_shared_episode-projection-e2e`  
@@ -72,7 +76,7 @@
 
 ### 4.6 固化证据与测试入口
 
-1. 当前仓库未检测到 Playwright/Cypress/Vitest/Jest harness；Stage 必须先安排独立 harness bootstrap，或明确批准等价的 agent-browser 可追溯方案。
+1. 复用现有 `frontend/e2e/**` Playwright harness 和本机兼容 Chrome；浏览器 runner 无法启动时记录为 harness 前置失败，不得另建第二 E2E 根。
 2. 自动化方案至少输出 API 契约断言、关键页面截图/trace、测试数据 IDs/hashes 和通过/失败摘要。
 3. 不把 harness 安装、跨仓库基础设施改造或生产实现混入本 shared task 的验收。
 
@@ -81,11 +85,11 @@
 ### 允许新增或修改
 
 ```text
-e2e/tests/story-workspace/episode-projection.spec.ts
-e2e/tests/story-workspace/fixtures/episodes/
-e2e/tests/story-workspace/fixtures/prompt-generated/
-e2e/tests/story-workspace/helpers/episode-api.helper.ts
-e2e/tests/story-workspace/helpers/episode-ui.helper.ts
+frontend/e2e/story-workspace/episode-projection.spec.ts
+frontend/e2e/story-workspace/fixtures/episodes/
+frontend/e2e/story-workspace/fixtures/prompt-generated/
+frontend/e2e/story-workspace/helpers/episode-api.helper.ts
+frontend/e2e/story-workspace/helpers/episode-ui.helper.ts
 backend/tests/story-workspace/episode-projection.contract*
 frontend/app/_dream/components/story-workspace/episode/__tests__/episode-projection.contract*
 ```
@@ -155,7 +159,7 @@ frontend/app/_dream/components/story-workspace/episode/__tests__/episode-project
 
 | 风险 | 处理 / 回滚 |
 |---|---|
-| 无现成 E2E harness | Stage 先安排 bootstrap/批准 agent-browser；不得在本 task 临时引入无维护基础设施 |
+| 当前 harness 无覆盖本场景 | 复用 `frontend/e2e/**` 增加定向用例并使用本机 Chrome；不得在本 task 另建 runner |
 | Agent 输出不确定导致 flaky | 使用 deterministic fixture/stub，并另保留真实 smoke 场景 |
 | 测试污染源样本或审计 | 复制到隔离命名空间，按显式前缀清理；源文件只读 |
 | `[CLARIFICATION_NEEDED] requiredArtifactKinds` | **Owner：CEOOrchestrator 路由 Deck owner**；记录快照规则，默认四项仅作 assumption |

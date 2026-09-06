@@ -1,7 +1,11 @@
-# Ink & Memory — 业务功能模块时序图
-
+<!-- [Input] Current Next.js Dream Web modules and Python business routes/services. -->
+<!-- [Output] Current cross-module business sequence diagrams. -->
+<!-- [Pos] Design-level sequence index; domain details remain in their focused documents. -->
+<!-- [Sync] 2026-09-06: replace the retired Vite frontend label with the sole Next.js app/_dream source boundary. -->
 <!-- [Sync] 2026-09-01: replace debounced random-Voice inspiration with manual persistent Suggestion Cells on one Session-owned Claude Thread. -->
 <!-- [Sync] 2026-08-31: replace daily-picture generation with historical read-only Timeline access and remove its scheduler/runtime. -->
+
+# Ink & Memory — 业务功能模块时序图
 
 > 本文档梳理了 Ink & Memory 项目的核心业务功能模块，并以 Mermaid 时序图形式呈现各模块的交互流程。
 
@@ -12,7 +16,7 @@
 1. [用户认证模块（注册 / 登录）](#1-用户认证模块)
 2. [编辑器会话管理模块](#2-编辑器会话管理模块)
 3. [历史语音评论兼容](#3-历史语音评论兼容)
-4. [Writing 手动建议模块](#4-写作灵感模块)
+4. [Writing 手动建议模块](#4-writing-手动建议模块)
 5. [语音对话模块（Chat with Voice）](#5-语音对话模块)
 6. [深度分析模块（回响 / 特质 / 模式）](#6-深度分析模块)
 7. [历史图片读取模块](#7-历史图片读取模块)
@@ -522,7 +526,7 @@ sequenceDiagram
 
 ```mermaid
 graph TB
-    subgraph Frontend["前端 (React + TypeScript + Vite)"]
+    subgraph Frontend["Dream Web (Next.js 16 + React + TypeScript)"]
         Editor["编辑器<br/>EditorEngine"]
         Hooks["Hooks<br/>useSessionLifecycle<br/>useComments<br/>useWritingSuggestions<br/>useVoiceInput"]
         Views["页面视图<br/>CollectionsView<br/>AnalysisView<br/>FriendsView<br/>DeckManager"]

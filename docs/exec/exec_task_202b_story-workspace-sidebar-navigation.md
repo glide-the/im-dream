@@ -1,4 +1,10 @@
+<!-- [Input] Dated task_202b implementation, command, and navigation evidence. -->
+<!-- [Output] Immutable historical execution receipt with current frontend ownership clearly separated. -->
+<!-- [Pos] Historical Exec evidence; not a current build, deploy, or task-status contract. -->
+<!-- [Sync] 2026-09-06: mark npm/Vite and orchestration details as historical and link the current Next.js/pnpm architecture. -->
 # Exec Report: task_202b - Story Workspace Sidebar 导航与路由
+
+> **历史执行回执（2026-08-01）。** 本文中的 npm/Vite、端口、Paperclip 派工、checkout 与 assignee 只记录当时实际执行事实，不是当前工作状态或实现入口。现行 frontend 为 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`；当前架构见 [Dream frontend Node framework migration assessment](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md)。下文命令和结果按原样保留。
 
 ## 1. 执行上下文
 

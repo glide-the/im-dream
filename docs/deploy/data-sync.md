@@ -1,4 +1,11 @@
-# 数据同步指南：本地 ↔ Cloud Storage
+# 历史数据同步记录：本地 ↔ Cloud Storage
+
+<!-- [Input] Legacy Google Cloud SQLite/GCS scripts and their historical operator contract. -->
+<!-- [Output] Preserve the old behavior without presenting it as a supported Dream runtime path. -->
+<!-- [Pos] Historical deployment record; shared business data is Admin-owned PostgreSQL. -->
+<!-- [Sync] 2026-09-06: mark the SQLite/GCS workflow unsupported under the current schema contract. -->
+
+> **当前禁止作为 Dream 发布步骤执行。** 共享业务 Schema 和数据由 Admin 的 PostgreSQL/Drizzle 唯一管理；Dream 没有 SQLite 运行时 fallback。`deploy/google-cloud/sync-data.sh` 与其 `.folder.md` 仍上传/备份 SQLite/WAL 文件，因此它们是尚未迁移的历史自动化，不得用于当前真实业务数据、生产发布或验收。当前边界见 [发布文档入口](README.md) 和 [阿里云 Admin-owned PostgreSQL 拓扑](aliyun.md)。下文仅保留旧脚本的行为与风险，便于识别和迁移；不是操作指南。
 
 后端运行时数据存储在 GCS bucket（通过 Cloud Storage FUSE 挂载到 `/app/data/`）。本文说明如何在本地和云端之间同步数据。
 

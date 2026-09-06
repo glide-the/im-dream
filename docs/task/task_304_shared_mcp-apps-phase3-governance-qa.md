@@ -1,9 +1,13 @@
 <!-- [输入] Phase 2 当前候选证据、插件生命周期设计、多会话隔离和观测需求。 -->
 <!-- [输出] G3-01—G3-07 的治理、版本、隔离、诊断、资源策略与最终 QA 合同。 -->
-<!-- [定位] Phase 3 技术工作项；不替代生产发布证据。 -->
-<!-- [同步] 2026-09-06：按真实 Phase 2 依赖和 G3 验收重建工作项。 -->
+<!-- [定位] 已完成的 Phase 3 provider-free 技术合同；不替代生产发布证据。 -->
+<!-- [同步] 2026-09-06：依据当前候选统一回执标记 G3 技术 preview 已完成。 -->
 
 # task_304：MCP Apps Phase 3 治理与最终 QA
+
+## 当前状态
+
+G3-01—G3-07 已在 canonical pnpm/official-AppServer 候选上完成 provider-free 技术验证，见 [Phase 0—3 当前候选统一回执](../exec/mcp-apps/current-candidate-validation.md)。真实外部 Server、账号/OAuth、公开应用、生产权限和运维回滚仍无验收；`productionAppsEffective=false`，Production `No-Go`。
 
 ## 1. 目标
 

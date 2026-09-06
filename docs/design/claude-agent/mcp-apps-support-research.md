@@ -1,14 +1,17 @@
 <!-- [输入] MCP Apps/OpenAI Apps 官方资料、@mcp-ui/client 7.1.1 源码、Codex 历史任务 01a06233-628d-7a83-8d66-5c3185a80613、Dream 0.1.4 与 IM 当前源码。 -->
 <!-- [输出] 记录 MCP Apps 支持状态、Host renderer/adapter 复用边界、Runtime 继承证据、能力缺口、候选方案和验证命令。 -->
-<!-- [定位] `mcp-apps-integration-strategy.md` 的独立调研证据；不定义产品交互，不授权实现。 -->
+<!-- [定位] `mcp-apps-integration-strategy.md` 的历史调研证据；当前实现与状态以现行架构文档和统一回执为准。 -->
 <!-- [同步] 2026-09-04：SUO-383 依据 task_301 P0-04 运行证据改选最小 Host adapter，AppBridge/transport 与 Node 受控主链继续复用。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 对照 Admin 真实 workspace/package 结构，确认 Dream 过渡 Next 实现存在嵌套项目与 legacy Runtime owner 偏差。 -->
+<!-- [同步] 2026-09-06：将 2026-09-05 缺口盘点标为历史，并登记 54f3bbe5 当前代码、pnpm 技术验证与 production-off 状态。 -->
 
-# MCP Apps 支持状态调研
+# MCP Apps 历史调研与当前状态补记
 
-> 调研日期：2026-09-05（Asia/Shanghai）
+> 历史调研日期：2026-09-05（Asia/Shanghai）。第 1—8、10 节保留当时的源码/方案证据，不是当前实施指南；第 9 节只登记这些旧缺口在当前候选中的处理结果。
 >
-> 结论：Dream `0.1.4` 是普通 MCP Client，不是 MCP Apps Host。IM 当前只能传递和展示普通工具结果；task_301 已证明 `AppRenderer@7.1.1` 不能执行所需 permissions 传播，故目标 Host 改为最小 adapter 复用同包的 `AppBridge`/`PostMessageTransport`。SUO-404 进一步确认当前过渡 Next 实现的目录不符合 Admin：目标必须是 `frontend/` 根 package + 单一 `app/**` + 同级 Runtime package。
+> 当前补记：`54f3bbe5` 已实现根 Next.js/pnpm Web、`frontend/app/_dream/**` Browser Host、薄 Route Handler 和 `frontend/packages/mcp-apps-runtime/src/**` server-only package；当前 pnpm 候选已完成 Phase 0—3 provider-free 技术验证。未修改官方 `basic-server-vanillajs@1.7.5` 只构成兼容证据，没有真实外部应用/账号/OAuth 或生产发布证据；`productionAppsEffective=false`。
+
+当前 source ownership 见[Dream Web 当前架构](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)，命令/退出码见[统一技术回执](../../exec/mcp-apps/current-candidate-validation.md)。
 
 ## 1. 调研对象
 
@@ -128,20 +131,20 @@ async with ClaudeSDKClient(options=effective_options) as client:
 - Node 端点调用进程级 `PersistentConnectorManager`，由 manager 持有独立受控上游 MCP session 并执行真实 Server 请求；manager 不会被直接传给 Browser；
 - `sendFollowUpMessage` 才重新进入正常 Claude Agent turn。
 
-## 5. IM 支持状态
+## 5. IM 支持状态（2026-09-05 历史快照）
 
-| 源码 | 当前行为 | 缺口 |
+| 当时源码 | 当时行为 | 当时缺口 |
 |---|---|---|
 | `/Users/dmeck/project/ink-dream-memory/backend/claude_agent/service.py:2791-2863` | 只发送 generic tool input/output | 没有 Agent UI event |
 | 同文件 `:3094-3159` | 只持久化 text、reasoning、tool invocation | 没有 Tool UI metadata 与上游 Server/tool call 绑定 |
 | `/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/lib/claude-agent-transport.ts:121-151,320-422` | Backend event 只定义普通 tool result | 不能识别 MCP App |
 | `/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/components/chat/ChatMessageList.tsx:580-680` | 工具结果进入普通 `ToolMessagePart` | 没有 Agent UI surface |
-| `frontend/package.json`、`frontend/app/**`、`frontend/app/_dream/server/mcp-apps/**` | 根脚本以 `next ... app` 启动下沉配置，实际 App Router 位于 `frontend/app/app/**`；Node Runtime 仍混放 legacy `src/server` | 违反 Admin 根 workspace + 单一 `app/**` + 同级 `packages/*` 基线；旧 build/readiness 失效 |
+| 2026-09-05 的 `frontend/package.json`、`frontend/app/**`、`frontend/app/_dream/server/mcp-apps/**` | 当时根脚本以 `next ... app` 启动下沉配置，App Router 位于 `frontend/app/app/**`，Node Runtime 仍混放 legacy `src/server` | 当时违反根 workspace + 单一 `app/**` + 同级 `packages/*` 基线；该目录和 readiness 已随 `54f3bbe5` 失效 |
 | `/Users/dmeck/project/ink-dream-memory/backend/claude_mcp/inventory.py:203-301,630-670` | MCP discovery 使用 request-local `ClientSession` | 不能向 Node 同步现有 socket，也不能支撑 turn 后页面交互 |
 | `/Users/dmeck/project/ink-dream-memory/backend/claude_mcp/runtime_snapshot.py:51-185` | 每个 turn 在 Python 内存生成包含明文 transport/credential 的 detached config，但丢弃 server/config/credential revision | 可抽出配置解析逻辑；现有返回值不能直接作为 Node 接口 |
 | `/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/api/claudeMcpApi.ts:158-169` | Browser 用 IM bearer/cookie 访问 Python API | 当前只有用户→Python 登录态，没有 Browser→Node MCP session 的受控身份绑定 |
 
-Vite 在技术上可以承载 Browser MCP Client 与 Host adapter，但这不再是 IM 的目标架构。IM 选择把 Dream Web 迁移到自托管 Next.js App Router：Client Component 创建 Browser Client 并挂载 Host adapter；Route Handler 暴露标准受控 MCP Streamable HTTP 端点；进程级 `PersistentConnectorManager` 作为端点后的服务层持有上游连接。DEC-005 固定 `frontend/` 为 workspace/package/Next 根、`frontend/app/**` 为唯一 App Router、`frontend/packages/mcp-apps-runtime/**` 为独立 Runtime owner；现有嵌套 Next 与 legacy Vite 耦合项只能作为迁移/回滚现状，不能作为目标结构。
+在 2026-09-05 的历史调研阶段，Vite 被确认可承载 Browser MCP Client 与 Host adapter，但已不再是 IM 的目标架构；当时存在的嵌套 Next 与 legacy Vite 耦合项只解释迁移决策和旧回执。提交 `54f3bbe5` 已完成结构收敛：`frontend/` 是 workspace/package/Next 根，`frontend/app/**` 是唯一 App Router，`frontend/app/_dream/**` 是唯一 Dream 应用源码，`frontend/packages/mcp-apps-runtime/src/**` 是独立 server-only Runtime owner；当前路径、职责与禁止项以[Dream Web 当前 Next.js 架构](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)为准。
 
 ### 5.1 Managed MCP snapshot loader 不落盘，也不是 Connector
 
@@ -176,9 +179,9 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 | 缺口 | capabilities `{}`、app-only tool 暴露、无 UI Host 与双向交互 | 当前源码一致 |
 | 未完成 | 没有真实 IM 浏览器闭环；历史记录没有 Dream git SHA | 仍需 PoC |
 
-## 7. 能力差距
+## 7. 能力差距（2026-09-05 历史快照）
 
-| 能力 | 当前状态 | 需要补齐的位置 |
+| 能力 | 2026-09-05 状态 | 当时计划补齐的位置 |
 |---|---|---|
 | Apps capability negotiation | Dream capabilities `{}` | Browser 与 manager 的上游 Client 声明 `UI_EXTENSION_CAPABILITIES`；Node 端点只返回 Server 已确认且 IM 允许的能力 |
 | Apps tool visibility | 所有 MCP tools 都可能给模型 | Host 按 `model` / `app` visibility 分流 |
@@ -219,30 +222,29 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 | 直接复用第三方 bridge | 权限、生命周期和版本边界无法直接视为 IM 合同 | 只作实现参考 |
 | 只保留普通 fallback | 无交互 UI | 只作降级 |
 
-## 9. 待验证项
+## 9. 历史待验证项的当前处理
 
-1. 产品所说的“本地 MCP”是 IM 后端本地、Agent worker 本地，还是用户设备本地。
-2. Node 是否与目标后端/worker stdio 或 localhost MCP 处于同一可达位置。
-3. 用户设备本地 MCP 是否属于本期范围；纯网站 + 云端 Node 无法启动用户设备 stdio。
-4. Python 配置接口如何输出有效静态配置和短时单 Server 明文建连配置，同时保留精确 revisions、最小化 secret 并验证 Node 服务身份。
-5. UI resource 缓存与失效依据。
-6. Web Host 的独立 Sandbox Proxy origin 如何随 IM 发布。
-7. Node Host 权限策略如何继承当前用户、workspace 和 MCP tool 可见性，不让 App 自报身份；`toolCallId` 只作为 Chat 关联和审计字段。
-8. `window.im` 兼容适配器如何由版本化 sandbox proxy 在跨 origin View 内提供，并满足 CSP、完整性和消息校验要求。
-9. DEC-002 已明确 adapter 合同；仍待 ExecTaskAgent 以同 lock 的 P0-04 Chrome 正反向探针证明 permissions→iframe allow，再原位修订 P0-08。类型声明不构成证据。
-10. DEC-005 下根 build/start/standalone、workspace tracing、route 唯一性和 Browser bundle server-only 排除仍须由新下游流水线重跑；pnpm 重锁还须重建 P0-01 并重跑 P0-04/P0-08，旧 `frontend/app/.next/**` 与 npm lock 回执无效。
+2026-09-05 列出的 Node/Python 投影、Host policy、sandbox、`window.im`、P0-04/P0-08、根 build 和 standalone 缺口，已由当前实现与 provider-free 统一回执覆盖。它们不再是待派工清单。
 
-## 10. 验证命令
+仍缺的是不同层次的真实证据：
+
+1. 真实账号与既有业务实体通过正常 Dream/Admin/Gateway/PostgreSQL 路径使用真实外部 MCP Server。
+2. 真实 OAuth/refresh、实际权限降级、Server 生命周期和普通结果 fallback。
+3. 面向用户的公开应用制品身份、完整性、版本、运营和回滚证据。
+4. 目标生产拓扑的发布、监控、容量、优雅退出和回滚验收。
+5. 另行批准的 production 状态转换；当前不可变事实仍是 `productionAppsEffective=false`。
+
+## 10. 历史验证命令
 
 | 命令 | 退出码 | 关键输出 |
 |---|---:|---|
 | `git -C /Users/dmeck/project/ink-claude-code-dream rev-parse HEAD` | 0 | `a1296453e463fb6e7b89917262650a60bd9a586c` |
 | `node -p "require('/Users/dmeck/project/ink-claude-code-dream/package.json').version"` | 0 | `0.1.4` |
-| `rg -n 'AppBridge|ui/initialize|window\\.openai' .../ink-claude-code-dream/src .../runtime` | 1 | 无 Apps Host 实现命中 |
+| `rg -n 'AppBridge\|ui/initialize\|window\\.openai' .../ink-claude-code-dream/src .../runtime` | 1 | 无 Apps Host 实现命中 |
 | `node --test tests/mcp-apps-compatibility.test.mjs`（Dream） | 0 | `2` tests passed；测试名称明确为“reads an MCP App resource but does not negotiate the Apps UI extension” |
 | `npm view @modelcontextprotocol/ext-apps version dist-tags.latest --json` | 0 | 当前 latest 为 `1.7.5` |
-| `rg -n 'AppBridge|ui/initialize|...|postMessage|<iframe' frontend/app/_dream backend/claude_agent`（IM） | 1 | 产品前端和 Agent 后端没有 Apps Host/iframe bridge 命中 |
-| `rg -n 'get_default_managed_mcp_runtime_snapshot_loader|class ManagedMcpRuntimeSnapshotLoader|async def load' backend/claude_mcp backend/claude_agent` | 0 | 命中 service provider、loader 与 Agent `assemble_context` 调用链 |
+| `rg -n 'AppBridge\|ui/initialize\|...\|postMessage\|<iframe' frontend/app/_dream backend/claude_agent`（IM） | 1 | 产品前端和 Agent 后端没有 Apps Host/iframe bridge 命中 |
+| `rg -n 'get_default_managed_mcp_runtime_snapshot_loader\|class ManagedMcpRuntimeSnapshotLoader\|async def load' backend/claude_mcp backend/claude_agent` | 0 | 命中 service provider、loader 与 Agent `assemble_context` 调用链 |
 | `../.venv/bin/python -m pytest tests/test_claude_mcp_runtime_snapshot.py -q` | 0 | `6 passed`；包含 loader 不写临时目录、明文只在返回 snapshot 的断言 |
 | 本地 Markdown link 检查 | 0 | `6` files，`5` local links，`0` broken |
 | 本机 Chrome + `mermaid.parse()` | 0 | `13` Mermaid blocks，`0` failures |

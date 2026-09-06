@@ -1,3 +1,7 @@
+<!-- [输入] Review Gate conflict E2E requirements, current production entry points, and evidence constraints. -->
+<!-- [输出] task_241 conflict acceptance, failure, cleanup, and reporting contract. -->
+<!-- [定位] Shared E2E task contract; execution must use current source and cannot inherit historical orchestration state. -->
+<!-- [同步] 2026-09-06：将运行入口与证据语义对齐当前实现，旧派工字段仅保留追溯。 -->
 # Task: Story Workspace Episodes Review Gate 冲突与过期联调（Shared）
 
 > **Task ID**: `task_241_shared_review-gate-conflict-e2e`  
@@ -72,7 +76,7 @@
 
 ### 4.6 固化自动化与证据
 
-1. 当前仓库无已检测到的 Playwright/Cypress/Vitest/Jest harness；Stage 先安排 harness bootstrap 或批准 agent-browser + API 的可追溯方案。
+1. 复用现有 `frontend/e2e/**` Playwright harness 和本机兼容 Chrome；不新建第二 E2E 根或 package-manager 安装路径。
 2. 证据至少包含请求/响应摘要、稳定错误码、数据库/审计断言、关键页面截图/trace 和测试规则版本。
 3. 对安全关键 API 使用自动化请求断言；仅靠按钮截图不能作为防绕过验收。
 
@@ -81,13 +85,13 @@
 ### 允许新增或修改
 
 ```text
-e2e/tests/story-workspace/review-gate-conflict.spec.ts
-e2e/tests/story-workspace/review-gate-stale.spec.ts
-e2e/tests/story-workspace/review-gate-bypass.spec.ts
-e2e/tests/story-workspace/review-gate-idempotency.spec.ts
-e2e/tests/story-workspace/fixtures/review-gate/
-e2e/tests/story-workspace/helpers/review-gate-api.helper.ts
-e2e/tests/story-workspace/helpers/review-gate-ui.helper.ts
+frontend/e2e/story-workspace/review-gate-conflict.spec.ts
+frontend/e2e/story-workspace/review-gate-stale.spec.ts
+frontend/e2e/story-workspace/review-gate-bypass.spec.ts
+frontend/e2e/story-workspace/review-gate-idempotency.spec.ts
+frontend/e2e/story-workspace/fixtures/review-gate/
+frontend/e2e/story-workspace/helpers/review-gate-api.helper.ts
+frontend/e2e/story-workspace/helpers/review-gate-ui.helper.ts
 backend/tests/story-workspace/review-gate.security*
 ```
 
@@ -164,5 +168,5 @@ backend/tests/story-workspace/review-gate.security*
 | `[CLARIFICATION_NEEDED] requiredArtifactKinds` | **Owner：CEOOrchestrator 路由 Deck owner**；用 locked test snapshot 显式声明，默认四项仅作 assumption |
 | `[CLARIFICATION_NEEDED] 时长差异阈值` | **Owner：产品 owner**；fixture 注入百分比规则，测试事实差异与等级分开断言 |
 | `[CLARIFICATION_NEEDED] 手工结构化编辑范围` | **Owner：产品 owner**；默认仅基线批准字段，新版本原子确认，禁止原地编辑已确认版本 |
-| 无现成 E2E harness | Stage 先安排 bootstrap/批准 agent-browser；安全 API 测试不得省略 |
+| 当前 harness 无覆盖本场景 | 复用 `frontend/e2e/**` 增加定向用例并使用本机 Chrome；不得另建 runner，安全 API 测试不得省略 |
 | 回滚弱化 Gate | 服务端保留 fail-closed；可回滚 UI 增量但不能放宽 API 校验或删除审计 |

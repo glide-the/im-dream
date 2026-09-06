@@ -1,3 +1,7 @@
+<!-- [输入] Story Workspace 表格需求、当前 app/_dream 实现路径与 pnpm/Next.js 验证入口。 -->
+<!-- [输出] task_202c 的实现、验收、验证与回滚合同。 -->
+<!-- [定位] 已执行功能的任务合同；真实 Browser/Network 证据由独立验证任务维护。 -->
+<!-- [同步] 2026-09-06：将源码路径和验证命令对齐当前 Next.js 16 + pnpm workspace。 -->
 # task_202c_frontend_data-table-components.md
 
 > **Task ID**: `task_202c`  
@@ -162,15 +166,15 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
 
 1. **构建**（从仓库根目录执行）：
    ```bash
-   cd frontend && npm run build
+   corepack pnpm --dir frontend build
    ```
-   通过标准：TypeScript 构建与 Vite 打包均成功。
+   通过标准：Next.js 16 根应用的 TypeScript、App Router pages 与 trace 构建均成功。
 2. **本 task scoped lint**（从仓库根目录执行）：
    ```bash
-   cd frontend && npx eslint app/_dream/components/story-workspace/table app/_dream/components/story-workspace/layout/StoryWorkspaceToolbar.tsx app/_dream/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx app/_dream/components/story-workspace/layout/index.ts app/_dream/components/story-workspace/index.ts app/_dream/hooks/story-workspace app/_dream/views/story-workspace/StoryWorkspaceStoriesPage.tsx app/_dream/views/story-workspace/StoryWorkspaceCharactersPage.tsx app/_dream/views/story-workspace/StoryWorkspaceScenesPage.tsx
+   corepack pnpm --dir frontend exec eslint app/_dream/components/story-workspace/table app/_dream/components/story-workspace/layout/StoryWorkspaceToolbar.tsx app/_dream/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx app/_dream/components/story-workspace/layout/index.ts app/_dream/components/story-workspace/index.ts app/_dream/hooks/story-workspace app/_dream/views/story-workspace/StoryWorkspaceStoriesPage.tsx app/_dream/views/story-workspace/StoryWorkspaceCharactersPage.tsx app/_dream/views/story-workspace/StoryWorkspaceScenesPage.tsx
    ```
    通过标准：本 task 闭集内无 ESLint error；若全仓历史 warning/error 不在闭集内，必须单独记录，不得越界修复。
-3. **单元测试**：`N/A`。当前 `frontend/package.json` 没有测试 runner 或 `test` script；本 task 禁止通过修改 `package.json`、lockfile 或新增依赖来引入测试框架。
+3. **单元/浏览器测试**：复用现有 Node test 文件与 `frontend/e2e/**` Playwright harness；执行前从 `frontend/package.json` 和目标目录读取实际命令。不得为本 task 新增第二 package manager/lock 或重复测试框架。
 4. **浏览器验证**：以 1280px 桌面视口逐一访问 `/story-workspace/stories`、`/story-workspace/characters`、`/story-workspace/scenes`，保留三页截图、交互记录及相关列表请求的 Network 证据。
 
 ### 8.2 验收与验证映射
@@ -178,7 +182,7 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
 | 验收 ID | 验收条件 | 对应验证 |
 |---|---|---|
 | `AC-202C-01` | 三个页面不再显示占位文案，分别实际渲染 Story / Character / Scene 表格；页面可通过现有 Sidebar 和 canonical 路由到达 | 构建 + 三路由 1280px 截图 |
-| `AC-202C-02` | Hooks 使用 `/api/story-workspace/stories|characters|scenes`，正确处理 `{ data, pagination }`；搜索、筛选、排序、分页产生与 REST 基线一致的 `q`、`review_status`、`sort`、`order`、`page`、`per_page` 参数 | 浏览器交互 + Network 请求/响应证据 |
+| `AC-202C-02` | Hooks 使用 `/api/story-workspace/stories\|characters\|scenes`，正确处理 `{ data, pagination }`；搜索、筛选、排序、分页产生与 REST 基线一致的 `q`、`review_status`、`sort`、`order`、`page`、`per_page` 参数 | 浏览器交互 + Network 请求/响应证据 |
 | `AC-202C-03` | pending 黄条、rejected 红条、选中态右侧 Action Brown 竖线、56px 行高与 Hover 可见 | 三类状态 fixture/真实数据截图 |
 | `AC-202C-04` | Checkbox 仅允许 pending 项；选择后批量栏替换常规 Toolbar，取消后恢复；本 task 只验证批量栏状态，不调用审阅 API | 浏览器交互记录 |
 | `AC-202C-05` | scoped lint 与 build 通过，实际 diff 只命中允许闭集；未修改 Review Panel、Dashboard、router/App、依赖文件或排除能力 | 命令输出 + `git diff --name-only` / `git diff --check` |

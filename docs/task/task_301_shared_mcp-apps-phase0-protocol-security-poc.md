@@ -1,11 +1,11 @@
 <!-- [输入] 旧 npm lock 下的 Phase 0 P0-01—P0-08 证据和 DEC-002。 -->
-<!-- [输出] Phase 0 历史技术合同及其在当前 pnpm 候选中的重验边界。 -->
-<!-- [定位] 历史 Task；当前重验由 task_411-03 承接。 -->
-<!-- [同步] 2026-09-06：保留 P0 验收、历史证据和当前重验入口。 -->
+<!-- [输出] Phase 0 历史技术合同、旧证据边界与当前 pnpm 结果入口。 -->
+<!-- [定位] 历史 Task；task_411-03 已完成当前重验。 -->
+<!-- [同步] 2026-09-06：保留旧 P0 事实并链接已完成的当前 pnpm 证据。 -->
 
 # task_301：MCP Apps Phase 0 协议与安全 PoC
 
-当前执行入口：[task_411-03](./task_411-03_shared_pnpm-standalone-phase0-gate.md)。
+当前结果入口：[task_411-03](./task_411-03_shared_pnpm-standalone-phase0-gate.md) 与 [Phase 0 当前证据](../exec/mcp-apps/phase-0/index.md)。
 
 ## 历史目标
 
@@ -13,15 +13,11 @@
 
 ## 历史证据边界
 
-旧 npm lock 上的证据位于 [Phase 0 索引](../exec/mcp-apps/phase-0/index.md)。这些证据证明当时的源码、lock、Chrome 和入口；DEC-005 改为 pnpm workspace 后，不能作为当前候选通过结论。
+旧 npm lock 上的证据位于 [task_301 历史执行回执](../exec/exec_task_301_mcp-apps-phase0-protocol-security-poc.md)。这些证据证明当时的源码、lock、Chrome 和入口；DEC-005 改为 pnpm workspace 后，不能作为当前候选通过结论。
 
-## 当前重验要求
+## 后续重验结果
 
-- P0-01 必须记录唯一 pnpm lock digest 和实际依赖树。
-- P0-04 必须在当前 Host adapter、sandbox proxy 和兼容 Chrome 上验证 requested/desired/effective/revision、两层 iframe、CSP/Permissions-Policy、正反向 probe 与 teardown。
-- P0-02/P0-03/P0-05/P0-06/P0-07 必须核对当前源码、lock、Browser 和入口指纹。
-- P0-08 只在同一候选证据完整时为 Go；任一必要条件失败即 No-Go。
-- 所有结果保持 production Apps 关闭。
+[Phase 0 当前证据](../exec/mcp-apps/phase-0/index.md) 已在唯一 pnpm lock、当前 Browser 入口和同一候选上覆盖 P0-01—P0-07，并形成 P0-08 `Go`。该结论只允许继续技术 preview；公开应用与生产仍为 `No-Go`，`productionAppsEffective=false`。
 
 ## 回滚
 

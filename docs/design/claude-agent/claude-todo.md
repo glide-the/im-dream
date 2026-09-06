@@ -2,7 +2,8 @@
 > [Output] claude-todo 功能设计：Claude Code 任务清单（v1 TodoWrite / v2 文件任务）的捕获、SSE/REST 数据契约、PlanButton 图标改造与 Todo 展示面板、Todo 工具低敏分级。
 > [Pos] todo-feature-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-07-20: 初版 — 依据 `claude-task-tools-source-analysis.md`（Claude Code 还原源码分析）与 `claude-plan.md` 既有范式；仅设计契约，业务代码实现见 §7/§8。
-> [Sync] 2026-07-20: §7 全部实现项已落地（后端 + 前端 + 测试 + 契约/策略文档登记）。验证：后端 todo 26 tests + plan 23 tests + runner 71 tests 全绿，前端 `npm run build` exit 0。
+> [Sync] 2026-07-20: §7 全部实现项已落地（后端 + 前端 + 测试 + 契约/策略文档登记）。历史验证：后端 todo 26 tests + plan 23 tests + runner 71 tests 全绿，前端当时的 production build exit 0。
+> [Sync] 2026-09-06: current frontend validation uses the sole pnpm/Next.js root.
 > [Sync] 2026-07-20: §5.6 按钮形态修订 — PlanButton 去除常驻文字，仅显示 `IconList` 列表图标（Icons.tsx 新增），「计划与待办」文字改为悬浮 tooltip（hover 且弹层未打开时显示，`aria-label` 保留语义）；`IconPlanTasks` 保留于弹层徽标处。
 > [Sync] 2026-07-20: §5.6 弹层样式修订（参照进度卡片样式图）— 弹层改为「计划」「待办」双卡片堆叠；待办区改为圆点状态图标（completed 实心+白勾+删除线 / in_progress 描边+中心点 / pending 空心圆）替代 #id 与文字徽章，默认展示前 3 条、超出经「展开 N 个 / 收起」折叠控制。
 
@@ -304,7 +305,9 @@ python tests/test_claude_agent_runner.py # 权限回归
 # 语法检查
 python -m py_compile backend/libs/claude_agent_kit/server/workspace.py backend/libs/claude_agent_kit/server/sdk_env.py backend/libs/claude_agent_kit/server/agent_runner.py backend/claude_agent/service.py backend/routers/claude_agent.py
 # 前端（frontend/）
-npx tsc -b && npm run lint && npm run build
+pnpm --dir frontend exec tsc --noEmit --incremental false
+pnpm --dir frontend lint
+pnpm --dir frontend build
 ```
 
 关键用例：① v1 `tool-input-available(TodoWrite)` → `todo-updated` 帧且不入 `collected_parts`；② v2 env 注入：`CLAUDE_CODE_TASK_LIST_ID=main` 无条件固定、`CLAUDE_CODE_ENABLE_TASKS=1` 仅在 `INK_AGENT_TASK_V2_ENABLED` on 时注入（2026-07-26 语义）；③ `get_tasks_dir` 越界/无 workspace 返回 `None`；④ v2 目录含 `_internal` 任务与已解决 blocker 时过滤正确；⑤ REST 归属校验 404 与 `exists:false` 契约；⑥ 五工具 PreToolUse 在 auto 模式返回显式 allow；⑦ 超出 `INK_AGENT_TODO_MAX_ITEMS` 截断置 `truncated:true`。

@@ -2,9 +2,13 @@
 <!--
 [Input] AutoDL direct-host platform scripts and SeetaCloud service mappings.
 [Output] Define Dream/Admin ordering, frontend/API topology, secure environment projection, verification, and rollback.
+[Pos] Blocked historical AutoDL topology record; not a current deployment runbook.
 [Sync] 2026-08-26: run Dream as root while retaining isolated Admin/PostgreSQL ownership.
 [Sync] 2026-08-31: remove the retired /polycli proxy from the Dream topology.
+[Sync] 2026-09-06: mark the direct-host path blocked because its scripts still require the deleted npm/Vite owners after the canonical Next/pnpm migration.
 -->
+
+> **当前状态：阻塞，不可用于 `54f3bbe5`。** `deploy/autodl-ssh/deploy.sh` 仍要求已删除的 `frontend/package-lock.json` 和 `frontend/vite.config.ts`，仍执行 `npm ci` / Vite build 并验证 `frontend/dist/index.html`；`runtime/start-dream.sh` 仍启动 Vite Preview。现行 frontend 是 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`。在 AutoDL 脚本迁移到根 Next build/start、pnpm frozen lock 并重跑 direct-host 验收前，下文只是历史拓扑与运维输入，不是可执行发布步骤。当前发布边界见 [发布文档入口](README.md)。
 
 ## 拓扑与发布顺序
 
@@ -41,7 +45,7 @@ AUTODL_DREAM_PUBLIC_ORIGIN=https://dream-tunnel.example.com:8443 \
 
 `bootstrap` 对非空目标 fail closed。migration 始终由 Admin 的 `@ink-memory/db` 显式运行，Dream 不执行 DDL。
 
-## Dream 发布
+## Dream 发布（历史流程，当前禁止执行）
 
 Dream env 从自身安全配置和上一步 Admin env 投影。浏览器-facing URL 使用 HTTPS mapping；前端 6006 同源代理后端 8765，同机 Gateway/Product API 使用 `127.0.0.1:6008`：
 
@@ -57,7 +61,7 @@ AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin-tunnel.example.com:8443 \
 
 私有 npm 包需要认证时，通过进程环境传入 `AUTODL_NPM_TOKEN`。脚本只生成临时 mode-0600 npmrc，完成 `ink-claude-code-dream` 与官方回滚 CLI 安装后立即删除；token 不进入 Dream runtime env、Git 或日志。
 
-## 已发布服务的一键启动
+## 已发布服务的一键启动（仅限旧 Vite release）
 
 Dream 的 `sync`、`build` 和 `deploy` 会自动将独立启动脚本安装到 `/root/ink-autodl/start-ink-memory.sh`。已有 source 但尚未重新发布时，也可手动安装：
 
@@ -71,6 +75,6 @@ bash /root/ink-autodl/start-ink-memory.sh
 
 该脚本无需 GPU，不执行构建、migration 或 restore。它会幂等检查现有端口，先恢复 Admin/内嵌 PostgreSQL，再恢复 Dream 前端与后端；健康服务不会被重复启动，未知进程占用端口时 fail closed。完整说明见 [`deploy/autodl-ssh/README.md`](../../deploy/autodl-ssh/README.md)。
 
-## 验证与回滚
+## 验证与回滚（历史合同）
 
 `verify` 同时检查本机 frontend 根页面、FastAPI 8765、6006 代理 `/api/health`、默认 Deck 插件 artifact、Admin、screen 和 Dream 公网根页面/API；Admin 平台另行验证公网 `/admin/login`。回滚只切换相应仓库的 `current`/`previous` release；首次拓扑回滚能识别旧 backend-only release 并恢复 6006 旧路径，不回滚 PostgreSQL migration、用户数据或 workspace。

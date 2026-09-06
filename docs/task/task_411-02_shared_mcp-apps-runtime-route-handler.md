@@ -1,11 +1,15 @@
 <!-- [输入] 411-01 canonical root、DEC-002/004/005、Node/Host 设计和官方离线制品。 -->
 <!-- [输出] sibling Node Runtime、薄 Route Handler、Python 最小投影、Chat result identity 和只读 Host 合同。 -->
-<!-- [定位] Phase 1 N1/C1/S1/M1/H1 核心实现工作项；最终 lock/standalone/P0 由 411-03 完成。 -->
-<!-- [同步] 2026-09-06：按 R2 技术闭集、可配置 scratch 与证据重建。 -->
+<!-- [定位] 已完成 Phase 1 Runtime/Host 技术合同；不构成生产 Apps 许可。 -->
+<!-- [同步] 2026-09-06：依据 54f3bbe5 与 C1/M1/H1 回执标记技术 preview 已完成。 -->
 
 # task_411-02：MCP Apps Runtime、Route Handler 与只读 Host
 
 配套 requirement：[TASK-REQUIREMENT-task_411-02_shared_mcp-apps-runtime-route-handler.md](./TASK-REQUIREMENT-task_411-02_shared_mcp-apps-runtime-route-handler.md)
+
+## 当前状态
+
+本工作项的 provider-free 技术 preview 已完成。`frontend/packages/mcp-apps-runtime/src/**` 是合法、独立、server-only 的唯一 Node Runtime owner；`frontend/app/api/mcp-apps/**` 只作薄 Route Handler，`frontend/app/_dream/**` 只拥有 Browser/Chat 模块。当前证据见 [C1/M1](../exec/mcp-apps/phase-1/c1-m1-contracts.md) 和 [H1](../exec/mcp-apps/phase-1/h1-browser.md)。真实外部 Server、凭证与生产运维尚未验收，`productionAppsEffective=false`。
 
 ## 1. 目标
 

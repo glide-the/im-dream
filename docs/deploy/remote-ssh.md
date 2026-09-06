@@ -2,6 +2,7 @@
 <!--
 [Input] Remote SSH deployment scripts, Docker Compose topology, backend runtime configuration, and production acceptance boundaries.
 [Output] Document deploy, rollback, diagnostics, and safe Claude Agent resource configuration for remote hosts.
+[Pos] Remote SSH operator guide; current frontend and data-contract gaps remain explicit acceptance boundaries.
 [Sync] 2026-08-22: add low-memory Claude Agent admission defaults and post-deploy RSS/cgroup verification.
 [Sync] 2026-08-22: document the measured 1.6 GiB ECS override separately from
                     the generic admission default.
@@ -10,6 +11,7 @@
 [Sync] 2026-08-22: document the ECS backend block-I/O budget and the production
                     read-storm evidence that requires it.
 [Sync] 2026-08-31: remove the deleted legacy models.json prerequisite.
+[Sync] 2026-09-06: align the frontend container with Next standalone and mark legacy VITE/SQLite script drift.
 -->
 
 阿里云 ECS 直接使用本路径，不维护另一套发布脚本。跨 Dream/Admin 两仓库的
@@ -21,6 +23,8 @@
 alias，Product 客户端不得配置为会被传输安全合同拒绝的非 loopback HTTP origin。
 
 Remote SSH 用于把 Ink & Memory 部署到一台已有 Docker 与 `docker-compose` 的远程服务器。主入口是：
+
+当前 `deploy/remote-ssh/docker-compose.yml` 确实从 `frontend/Dockerfile` 构建 Next standalone；但它仍传入 Dockerfile 未消费的 `VITE_PUBLIC_SITE_URL`，`deploy/remote-ssh/deploy.sh` 的 preflight 仍要求当前镜像未使用的 `frontend/nginx.conf.template`。因此容器构建路径可以按 Next 理解，但 public-site build 注入与该 nginx 文件检查属于配置漂移，不能作为已生效配置或生产验收证据。
 
 ```bash
 ./deploy/remote-ssh/deploy.sh deploy
@@ -72,7 +76,7 @@ Docker 容器仍是主隔离边界。
 Internet :80/:443
   └─ host nginx
       ├─ ink-backend.suoxya.com  → 127.0.0.1:8765  → tun-proxy network namespace → backend FastAPI
-      └─ ink-frontend.suoxya.com → 127.0.0.1:8080  → frontend nginx
+      └─ ink-frontend.suoxya.com → 127.0.0.1:8080  → frontend Next standalone
 ```
 
 关键默认值：
@@ -84,7 +88,7 @@ Internet :80/:443
 - 后端容器内部 `PORT` 默认固定为 `REMOTE_BACKEND_CONTAINER_PORT=8765`，避免 `backend/.env` 中的 `PORT` 让 uvicorn 监听端口与 Compose 映射脱节。
 - 前端 runtime `API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`。
 - 浏览器登录请求会访问 `https://ink-backend.suoxya.com/api/login`，不会访问 Docker 内部地址 `http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}/api/login`。
-- `BACKEND_URL=http://tun-proxy:${REMOTE_BACKEND_CONTAINER_PORT}` 只保留给前端容器内部 nginx fallback 使用。
+- `BACKEND_URL=http://tun-proxy:${REMOTE_BACKEND_CONTAINER_PORT}` 由前端容器入口投影为 `INK_BACKEND_INTERNAL_URL`，供 Next rewrite fallback 使用。
 - 后端 `WEBUI_URL` 默认为 `https://ink-frontend.suoxya.com`，`API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`，用于 Google OAuth callback 和登录成功跳转。
 - 后端生产 cookie 默认 `COOKIE_SECURE=true`、`COOKIE_SAMESITE=none`，CORS 默认只允许 `https://ink-frontend.suoxya.com` 且 `INK_CORS_ALLOW_CREDENTIALS=true`。
 
@@ -102,7 +106,7 @@ Internet :80/:443
 | `REMOTE_SETUP_STORAGE` | `1` | `deploy` 自动创建/修复远端持久化目录；设为 `0` 可跳过 |
 | `REMOTE_SETUP_SWAP` | `auto` | `deploy` 在 build 前自动确保远端有足够 swap；设为 `0` 可跳过 |
 | `REMOTE_SWAP_FILE` | `/swapfile` | `setup-swap` 使用的远端 swap 文件路径 |
-| `REMOTE_SWAP_SIZE_MB` | `2048` | `setup-swap` 确保的最小 swap 总量（MB）；前端 `vite build` 单独就需要 ~1G Node 堆（mermaid/tiptap/ai sdk 依赖图），1G 内存主机没有 swap 兜底会被 OOM Killer 杀掉 |
+| `REMOTE_SWAP_SIZE_MB` | `2048` | `setup-swap` 确保的最小 swap 总量（MB）；保留给 backend 与根 Next standalone 镜像构建的主机余量，不再以历史 Vite 堆测量解释当前构建 |
 | `REMOTE_SETUP_SSL` | `0` | 设为 `1` 时让 nginx setup 尝试执行 certbot |
 | `REMOTE_BUILD_PULL` | `0` | 设为 `1` 时构建前拉取更新的基础镜像；重新打包本身默认每次执行，无需开关 |
 | `REMOTE_BUILD_NO_CACHE` | `0` | 设为 `1` 时执行 clean rebuild；小磁盘服务器常规发布默认复用 build cache |
@@ -197,6 +201,8 @@ REMOTE_BUILD_PULL=1 ./deploy/remote-ssh/deploy.sh deploy
 
 ## 数据维护
 
+> 本节的 `backend/data` SQLite 同步是脚本残留，不是当前共享业务数据合同。阿里云/真实业务路径必须使用 Admin-owned PostgreSQL 及其备份/恢复流程，见 [aliyun.md](aliyun.md)。在 `deploy/remote-ssh/sync-data.sh` 迁移前，不得对真实业务执行下列 SQLite upload/download 操作。
+
 `deploy` 默认保护远端数据：`REMOTE_SYNC_DATA=0` 时不会 rsync 本地 `backend/data/` 到服务器。
 
 Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`download`。
@@ -224,6 +230,8 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
 
 `download-data` 会先把当前本地 `backend/data/` 备份到
 `backend/data/bak_local_YYYYMMDD_HHMMSS/`，再下载远端数据到本地目录。
+
+上述命令只记录旧脚本行为，不属于当前发布验收。
 
 也可以直接调用底层脚本：
 

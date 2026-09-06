@@ -1,4 +1,10 @@
+<!-- [Input] Dated task_212 implementation, static checks, concurrent failure, and recorded limitations. -->
+<!-- [Output] Immutable historical execution receipt separated from public-application and production status. -->
+<!-- [Pos] Historical Exec evidence; not a current build, deploy, or task-status contract. -->
+<!-- [Sync] 2026-09-06: preserve the original receipt while linking current Next.js/pnpm ownership and evidence boundaries. -->
 # Exec Report: task_212 - Deck Editor Plugin Binding UI
+
+> **历史执行回执（2026-08-01）。** 本文中的 npm/Vite、端口、Paperclip 派工、checkout 与 assignee 只记录当时实际执行事实，不是当前工作状态或实现入口。现行 frontend 为 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`；当前架构见 [Dream frontend Node framework migration assessment](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md)。下文命令、并发失败和结果按原样保留，且静态通过不等同于公开应用或生产启用。
 
 ## 1. 执行上下文
 

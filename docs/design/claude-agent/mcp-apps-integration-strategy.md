@@ -1,14 +1,15 @@
-<!-- [输入] MCP Apps 稳定规范、task_301 P0-04 运行证据、@mcp-ui/client 与 IM Claude Agent/MCP、Next.js 目标边界。 -->
-<!-- [输出] 定义 IM 接入 MCP Apps 的产品流程、最小架构、阶段与验收。 -->
+<!-- [输入] MCP Apps 稳定规范、当前 pnpm 技术回执、@mcp-ui/client 与 IM Claude Agent/MCP、Next.js 当前边界。 -->
+<!-- [输出] 定义 IM MCP Apps technical preview 的产品流程、最小架构、状态语义与验收。 -->
 <!-- [定位] MCP Apps 主设计；连接、客户端扩展、iframe 和源码证据由同目录专项文档维护。 -->
 <!-- [同步] 2026-09-04：SUO-383 以 DEC-002 选择最小 Host adapter 接管 permissions/iframe，Browser 主链与 production 关闭状态不变。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 将 Web Shell 固定到 frontend/ 根 package，将 Node Runtime 固定到同级 packages/mcp-apps-runtime。 -->
+<!-- [同步] 2026-09-06：按 54f3bbe5 标记 Phase 0—3 技术实现/验证已存在，公开应用与 production enablement 仍未完成。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
-> 状态：设计评审稿，未实现
+> 状态：代码已存在，Phase 0—3 provider-free technical preview 已验证；公开应用、真实外部 Server/账号/OAuth 与 production enablement 未完成
 >
-> 结论：当前 Dream 不是 MCP Apps Host。锁定的 `@mcp-ui/client@7.1.1` 仅复用 `AppBridge` 与 `PostMessageTransport`，由最小 `ImMcpAppHostAdapter` 持有 resource metadata、permissions policy 和 iframe；Browser MCP Client 只连接 Next Node Apps Runtime 暴露的受控 MCP transport，Node `PersistentConnectorManager` 再连接真实 MCP Server。Web Shell 属于 `frontend/` 根 package，Node Runtime 只属于 `frontend/packages/mcp-apps-runtime/**`；Python 只提供 Node 建连配置，不参与页面交互。
+> 结论：Dream 已具备默认关闭的 MCP Apps technical-preview Host 链路。锁定的 `@mcp-ui/client@7.1.1` 仅复用 `AppBridge` 与 `PostMessageTransport`，由最小 `ImMcpAppHostAdapter` 持有 resource metadata、permissions policy 和 iframe；Browser MCP Client 只连接 Next Node Apps Runtime 暴露的受控 MCP transport，Node `PersistentConnectorManager` 再连接真实 MCP Server。Web Shell 属于 `frontend/` 根 package，Node Runtime 只属于 `frontend/packages/mcp-apps-runtime/src/**`；Python 只提供经身份/业务规则校验的短时建连视图，不参与页面交互。`productionAppsEffective=false`。
 
 配套文档：
 
@@ -20,7 +21,7 @@
 
 ## 1. 背景与问题
 
-Dream 当前可以让 Claude Agent Runtime 调用 MCP Server 模块提供的工具，并在 Chat 中显示普通工具结果，但没有 MCP Apps Host 的能力协商、UI resource 读取、iframe 渲染和双向交互。
+Dream 的生产路径仍只保证 Claude Agent Runtime 调用 MCP Server 工具并在 Chat 中显示普通结果。代码基线 `54f3bbe5` 另有 MCP Apps technical preview，已经覆盖能力协商、UI resource、iframe 和受控双向交互；它默认关闭，且没有真实外部应用/账号/OAuth 或 production 发布证据。
 
 MCP Server 仍是一个模块：它提供工具、资源和业务结果。支持 MCP Apps 的工具通过 descriptor 中的 `_meta.ui.resourceUri` 指向 `ui://` HTML resource；普通 `CallToolResult` 继续提供模型可见数据和无 UI 客户端的 fallback。
 
@@ -188,6 +189,8 @@ Host adapter 作为 IM Apps 插件的浏览器入口；`PersistentConnectorManag
 
 ## 6. 分阶段交付
 
+下表是实现分解，不是待派工状态。当前 Phase 0—3 的 provider-free 技术回执已完成；阶段完成不改变 production No-Go。
+
 | 阶段 | 范围 | 可观察验收 | 回滚 |
 |---|---|---|---|
 | Phase 0 | `frontend/` 根 Next.js compatibility shell；一个 Node 可达的官方示例 Server；同级 Runtime package；Browser Client；受控 Streamable HTTP 端点；Host adapter | 单一 `frontend/app/**`；render tool 完成后出现 App；`resources/read` 经 Node；浏览器无真实 Server URL/credential；permissions→两层 iframe allow 与 runtime probe 一致 | 关闭 Apps flag，显示普通结果 |
@@ -217,4 +220,4 @@ No-Go：必须让 Browser 取得真实 Server 地址或凭证；当前工具结�
 
 ## 8. DEC-005 目录归属同步
 
-本稿只消费[迁移评估中的唯一 canonical 目录树](./dream-frontend-node-framework-migration-assessment.md#62-唯一-canonical-目录树)，不另定义等价路径。Browser Host 保留在根 Web package，Node MCP Runtime 是一个粗粒度同级 package；二者只通过同源标准 MCP HTTP 边界连接。旧嵌套 Next project、legacy server 目录及其下游 readiness 已由[系统架构清单第 12 节](./mcp-apps-system-architecture-execution-checklist.md#12-suo-404-目录基线纠偏与下游失效)明确作废。
+本稿只消费[当前目录与 source ownership](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)，不另定义等价路径。Browser Host 保留在根 Web package，Node MCP Runtime 是一个粗粒度同级 package；二者只通过同源标准 MCP HTTP 边界连接。旧嵌套 Next project、legacy server 目录及其旧 readiness 仅是历史证据；当前有效状态、证据和缺口见[系统架构清单第 10 节](./mcp-apps-system-architecture-execution-checklist.md#10-当前证据与实际缺口)。

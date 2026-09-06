@@ -1,27 +1,9 @@
-<!-- [输入] 当前 Dream/Admin/Gateway 拓扑、仓库合同以及已发布的 Claude SDK/Runtime 配对。 -->
-<!-- [输出] 说明 Ink & Memory 是什么、如何安装运行、如何配对版本，以及必须遵守的运维边界。 -->
-<!-- [定位] README.md 英文真相源的中文镜像；事实、结构和命令必须与 README.md 保持一致。 -->
-<!-- [同步] 2026-08-28：以当前 develop 流程、精确 SDK/Runtime 配对、本机 Runtime 安装、故障排查和注意事项替换旧说明。 -->
-<!-- [同步] 2026-08-28：记录固定 ntn 安装、agentdata 内按用户隔离的凭证与当前快照、后台策略同步及 per-Thread 投影合同。 -->
-<!-- [同步] 2026-08-29：记录当前选择范围过滤、thread 最小元数据、空范围撤销和重新授权 LKG 行为。 -->
-<!-- [同步] 2026-08-29：记录 Settings Notion 能力/Skill 审阅界面和 Hosted MCP 读写的真实边界。 -->
-<!-- [同步] 2026-08-30：记录按 actor/thread 绑定的 Notion CLI 环境注入与认证前 ntn 安装检查。 -->
-<!-- [同步] 2026-08-30：记录由部署所有的 Claude Bash sandbox 开关和 AutoDL 显式关闭配置。 -->
-<!-- [同步] 2026-08-30：在安装、验证、registry 验收和故障排查中统一采用已公开的 clean-room Runtime 0.1.4。 -->
-<!-- [同步] 2026-08-31：要求 AutoDL 发布验证后端生成的 crawler 文件并拒绝 Vite SPA HTML fallback。 -->
-<!-- [同步] 2026-09-01：记录生产 skill-creator 打包、AutoDL discovery 验证与未知 Skill 可见失败。 -->
-<!-- [同步] 2026-09-01：记录经规范 Chat/SSE/Turn 路径持久化并单次执行的 Dream 工作区自动修正。 -->
-<!-- [同步] 2026-09-01：允许歧义 Dream 工作区进入修正 Turn，并安全截断递归 Skill 链接。 -->
-<!-- [同步] 2026-09-02：Dream 启动前要求 Admin 0042 发布精确 Chat 历史 keyset pagination capability。 -->
-<!-- [同步] 2026-09-04：记录已提交回复后的 Dream 同步错误与 Execution 资产即时刷新。 -->
+<!-- [输入] 当前 Dream/Admin/Gateway 拓扑，以及提交 54f3bbe5 的真实源码与配置。 -->
+<!-- [输出] 说明所有权、精确依赖、安装、Next Runtime 边界、验证、部署缺口与 fail-closed 运维。 -->
+<!-- [定位] README.md 英文仓库入口的同结构中文镜像。 -->
+<!-- [同步] 2026-09-06：与唯一 Next.js 16/pnpm workspace、app/_dream 源码 owner、server-only MCP Apps Runtime 和 production-off 证据边界对齐。 -->
+
 <!-- [同步] 2026-09-06：允许显式 loopback MCP discovery，同时保留其他 non-global 字面 IP、URL 形状、redirect 与 Node host allowlist 边界。 -->
-<!-- [同步] 2026-09-01：要求投影写入前校验重复项目根/stage，采用 move-not-copy 清理，并在唯一一次修正停止时显示安全原因。 -->
-<!-- [同步] 2026-09-02：记录索引优先的 Episode 同步、稳定的逐 Episode 导航以及禁止跨 Episode 产物回退。 -->
-<!-- [同步] 2026-09-04：记录 actor 绑定的 notion-cli Bash 审批路由及其 fail-closed 命令/网络边界。 -->
-<!-- [同步] 2026-09-04：把仓库 Claude Skills 全量镜像进 backend common catalog，并在 AutoDL 发布中验证完整 catalog。 -->
-<!-- [同步] 2026-09-04：让 Chat 的 Slash 候选与 Deck 插件 Skills 一起读取后端 common catalog。 -->
-<!-- [同步] 2026-09-05：将 frontend/ 固定为唯一 Next.js workspace/Web 根，以根 App Router 和纯客户端兼容壳承载现有应用，并退出 Vite 源码默认入口。 -->
-<!-- [同步] 2026-09-06：记录受治理 MCP Apps 预览、revision 重验、独立 sandbox 与 production-off 边界。 -->
 
 # Ink & Memory
 
@@ -33,87 +15,93 @@
   <a href="README.md">English</a> · 中文
 </p>
 
-Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 的创作工作台。它由 React/Next.js 前端、FastAPI 后端、Admin 管理的 PostgreSQL Schema、提供模型访问和计费的 Admin Gateway，以及独立发布的 Claude Agent SDK 和 Claude Runtime 组成。
+Ink & Memory 是一个面向写作、持久 Agent Chat、Dream 创作流程和版本化 Deck 的工作台。本仓库拥有 Dream 应用：由自托管 Next.js 16 Web 进程承载的 React 19 应用，以及 FastAPI 后端。
 
-本仓库只包含 Dream 应用，不拥有共享数据库 Schema、模型 Provider 凭据、计费系统或 Claude SDK/Runtime 的内部实现。
+本仓库不拥有共享 PostgreSQL Schema、Provider 凭据、计费系统、公共 Claude Agent SDK 实现或原生 Claude Runtime 实现。
+
+## 当前状态
+
+| 范围 | 当前文档源码基线的状态 |
+| --- | --- |
+| Dream Web | `frontend/` 是唯一 Node workspace、Web package 和 Next project。Next `16.1.6` 通过唯一 App Router 与 client-only 兼容壳承载现有 Dream 浏览器应用。 |
+| Dream 源码 | 全部浏览器应用模块位于私有、不可路由的 `frontend/app/_dream/` 树；独立 server-only Runtime 合法保留在 `frontend/packages/mcp-apps-runtime/src/`。不存在受支持的 `frontend/src`、嵌套 Next 项目或 Vite 生产源码入口。 |
+| MCP Apps | Phase 0–3 已有 provider-free 技术预览证据。公开 health/status 合同仍返回 `productionAppsEffective: false`；这些代码不代表生产启用。 |
+| MCP Apps 真实业务验收 | Provider-free 证据不能建立该验收。真实账号、外部 App Server/OAuth、正常 Admin/Gateway/PostgreSQL 记录与生产运维需要单独执行 Apps Host 验收；既有 Claude Agent/managed MCP 验收属于另一条链，不能满足该 gate。 |
+| 部署 | 已存在 Next Dockerfile 与本机 Next launcher。若干旧 CI/direct-host 部署适配器仍引用已删除的 npm/Vite owner，不能作为生产证据；参见[构建与部署](#构建与部署)。 |
+
+仓库集成主线是 `develop`。本文依据提交 `54f3bbe5` 核对；部署时必须选择经过评审的明确 commit 或 tag，不得从分支名或旧任务/进度回执推断发布就绪。
 
 ## 可以做什么
 
-- **Writing** —— 写作并保存 Session，通过时间线查看历史和 Reflections。
-- **Chat** —— 使用 Deck Agent 在持久 Thread 中进行流式对话、工具调用、resume、计划和 TODO。
-- **Dream** —— 启动 Dream Run，审阅剧本、分镜、提示词和生成产物。
-- **Episode 同步** —— 同步视图先打开 Run 范围的 Episode 索引，通过稳定的不透明标识分别进入 EP01/EP02，并返回同一 Run 的索引。每个产物请求、ETag 和最近有效快照都按 Episode 隔离，因此 EP02 缺少产物时绝不展示 EP01 内容。
-- **Dream 工作区恢复** —— Dream 在写入后置投影前，对 allowlist 内的 workspace slug、重复 canonical 项目根和 stage identity/schema 错误进行分类；随后持久化一条可见的自动修正 user 消息，明确要求移动/合并并清理旧项目根而不是只复制目录，再通过正常 Chat/SSE/Turn 路径续接同一 Claude 会话。多个安全项目根会生成不绑定任一 slug 的修正上下文，不再在 Agent 启动前终止；递归文件树也不会跟随 Thread 外的只读内置 Skill 链接。可信 actor、Thread、Run、Deck 或 plugin authority 异常仍会 fail closed；同一个 originating Turn 最多只发起一次修正，第二次失败只显示 allowlist 内的安全原因且不会启动第三轮。
-- **Dream 回合结算** —— successful assistant Turn 会先持久化，再由 after-turn Hook 将 canonical 人物/场景文件发布到 Run-private artifact 并写入 PostgreSQL 投影。若后续同步失败，Chat 使用明确的已提交同步错误，保留正文并提示重新加载、无需重发；共享 Thread 结算时 Execution 会重新读取 `dream-files`，新发布资产无需刷新整页即可出现。
+- **Writing** —— 保存 Session、浏览时间线并查看 Reflections。
+- **Chat** —— 使用 Deck Agent 在持久 Thread 中完成流式对话、工具调用、resume、计划和 TODO。
+- **Dream** —— 启动 Run，并审阅剧本、分镜、提示词和生成产物。
 - **Decks** —— 创建并版本化 Deck、Agent、Prompt、资源和 Claude Plugin 引用。
-- **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、MCP Server、Skill 和插件。
-- **通用 Skills** —— 每个完整 Thread 都通过 canonical 小写 discovery ID 获得后端所有的 `asr`、`hhxg-market`、`investment-data`、`skill-creator` 与 `symbolic-board` 包。Workspace Mode 开启时，Chat 即使尚未选择 Deck 或创建 Thread，也会从同一个认证后端 catalog 读取 `/` 候选；选择后只插入可编辑普通文本，不会自动发送。生产只发布 backend build context，因此仓库 `.claude/skills` 包必须在 backend/common 中存在完全一致的 release 镜像。
-- **Notion 资源** —— 在 Settings 中连接并选择精确允许范围，审阅已安装的 `notion-session` 与 `notion-cli`，并在 Chat 外刷新轻量索引。Dream 在认证前检查固定版本 `ntn` 是否已安装，并把当前 actor/thread 投影作为 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与 `NOTION_WORKERS_CONFIG_FILE` 注入 Agent Runtime Bash。Hosted Notion MCP 与这条 CLI 路径相互独立。
-- **平台集成** —— 从 Admin/Gateway 获取已认证的模型 alias、订阅资格、用量和计费能力。
+- **Workspace 与工具** —— 使用 Thread 自有文件、沙箱工具、受管 MCP Server、通用 Skill 与插件。
+- **Notion 资源** —— 在 Settings 中授权 actor 范围的连接器，并只把该 actor 当前选择范围投影到合资格的 Thread Runtime。
+- **平台集成** —— 通过 Gateway 使用 Admin 所有的模型 alias、订阅资格、用量和计费能力。
 
 Deck 市场分发当前明确延期，参见 [docs/design/deck-register/README.md](docs/design/deck-register/README.md)。
 
-## 系统边界
+## 架构与所有权
 
 ```mermaid
 flowchart LR
-    Browser["浏览器 / Next Web Shell"] -->|"REST + SSE"| Dream["Dream / FastAPI"]
-    Dream -->|"Python 公共 API"| SDK["ink-claude-dream-agent-sdk"]
+    Browser["浏览器"] --> Next["Next.js 16 App Router"]
+    Browser -->|"配置后的 REST / SSE / WebSocket"| Dream["Dream / FastAPI"]
+    Next -->|"同源 rewrite + crawler proxy"| Dream
+    Next -->|"server-only import"| Apps["packages/mcp-apps-runtime"]
+    Apps -->|"短时 actor/workspace 配置"| Dream
+    Apps --> MCP["外部 MCP Server"]
+    Dream --> SDK["ink-claude-dream-agent-sdk"]
     SDK -->|"stdio JSONL"| Runtime["ink-claude-code-dream"]
-    Runtime -->|"Anthropic Messages"| Gateway["Admin Gateway"]
+    Runtime --> Gateway["Admin Gateway"]
     Gateway --> Provider["模型 Provider"]
     Dream --> PostgreSQL["Admin 管理的 PostgreSQL"]
-    Admin["Admin / Drizzle / Billing"] --> PostgreSQL
-    Admin --> Gateway
 ```
 
 | 仓库/服务 | 负责 | 禁止负责 |
 | --- | --- | --- |
-| `ink-dream-memory` | Dream 前后端、Thread/Run/Workspace 集成、SDK/Runtime 选择 | 共享 Schema migration、Provider Key、第二套 Agent/Runtime 协议 |
-| `ink-admin-memory` | Drizzle Schema、PostgreSQL、Admin、Gateway、模型目录、订阅、计费 | Dream Thread/Run 业务逻辑 |
-| `ink-claude-dream-agent-sdk-python` | Python SDK distribution 和公共 `claude_agent_sdk` API | Dream 业务 DTO 或数据库访问 |
-| `ink-claude-code-dream` | Clean-room CLI/Runtime、协议、工具、MCP、多平台 npm 包 | Dream/Admin 业务状态机或用户数据 |
+| `ink-dream-memory` | Dream Web/FastAPI、Thread/Run/Workspace 集成、最终 SDK/Runtime 选择 | 共享 Schema migration、Provider Key、计费或第二套 Agent 协议 |
+| `ink-admin-memory` | Drizzle Schema、PostgreSQL、Admin、Gateway、模型目录、订阅和计费 | Dream Thread/Run 业务行为 |
+| `ink-claude-dream-agent-sdk-python` | Python SDK distribution 和公共 `claude_agent_sdk` API | Dream DTO 或数据库访问 |
+| `ink-claude-code-dream` | Clean-room CLI/Runtime、协议、工具、MCP 与原生 npm 包 | Dream/Admin 业务状态或用户数据 |
 
-## 支持的版本合同
+共享 PostgreSQL Schema 只能由 Admin Drizzle 修改。Dream 只依赖已经发布的 capability，并在必要 capability 缺失时 fail closed。
 
-Python SDK 和 npm Runtime 虽然通过不同包生态发布，但 Dream 必须把它们作为一个兼容配对管理。
+## 支持版本
 
 | 组件 | 要求版本 |
 | --- | --- |
-| Dream 分支 | `develop` |
+| 仓库集成分支 | `develop` |
+| 已核对源码基线 | `54f3bbe5` |
 | Python | `>=3.12` |
-| Node.js | Runtime selector 要求 `>=22 <25` |
+| Node.js | `>=22 <25`；部署镜像使用 Node 22 |
+| 前端包管理器 | 由 Corepack 管理的 `pnpm@10.28.1` |
+| Next.js / React | `next@16.1.6`、`react@19.1.0`、`react-dom@19.1.0` |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
-| Runtime CLI 兼容输出 | `2.1.241 (Claude Code)` |
+| 原生 Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
+| Runtime 兼容输出 | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 
-重要：`uv sync` 只管理 Python 环境。它会安装 Python SDK，但不会安装或升级 npm Runtime。源码要求 Runtime `0.1.4` 时，即使其他 capability 全部合法，也会拒绝 `0.1.3` 可执行文件。
+`uv` 管理 Python 环境；npm 分发原生 Claude Runtime 与 Notion CLI；pnpm 独占管理 `frontend/` workspace。`uv sync` 不会安装或升级 Runtime，前端也不存在 npm lock 或受支持的 npm 安装/构建路径。
 
-## 环境要求
+已资格化 Runtime 支持 Darwin/Linux 的 arm64/x64；Windows 和 musl 目标会 fail closed。
 
-- Git
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
-- Node.js 22–24，以及用于 native Runtime 的 npm
-- 用于唯一 `frontend/` workspace 的 pnpm 9+
-- 同级目录中的 [Ink Admin Memory](https://github.com/glide-the/ink-admin-memory)
-- 仅 Docker/Remote SSH 部署路径需要 Docker
+## 安装
 
-当前 Runtime 支持 Darwin/Linux 的 arm64/x64；Windows 和 musl 目标会 fail closed。
-
-## 本机安装
-
-### 1. 获取当前开发分支
+### 1. 获取明确 revision
 
 ```bash
-git clone https://github.com/glide-the/im.git ink-dream-memory
+git clone https://github.com/glide-the/im-dream.git ink-dream-memory
 cd ink-dream-memory
+git fetch origin
 git switch develop
 git pull --ff-only origin develop
+git rev-parse HEAD
 ```
 
-除非配置了显式绝对路径，否则 Admin 应位于 `../ink-admin-memory`。
+功能分支必须从最新 `develop` 创建。发布或验收时应记录最终精确 commit，不要假定它仍与上方已核对基线相同。
 
 ### 2. 准备 Admin、PostgreSQL 和 Gateway
 
@@ -127,93 +115,70 @@ pnpm db:migrate
 pnpm db:migrate:check
 ```
 
-所有共享 PostgreSQL migration 只能由 Admin 管理。Dream 禁止临时创建共享表，也没有运行时 SQLite fallback。
-当前 Chat 历史分页路径要求 Admin migration `0042_chat_history_keyset_pagination` 和精确 capability `dream.chat-history-keyset-pagination.v1`；启动 Dream 前，`pnpm db:migrate:check` 必须返回 current。
+当前 Chat 历史链路要求 Admin migration `0042_chat_history_keyset_pagination` 和 capability `dream.chat-history-keyset-pagination.v1`。启动 Dream 前，Admin 必须报告 migration 已经 current。
 
-在终端 A 启动 Admin/Gateway：
-
-```bash
-cd ../ink-admin-memory
-pnpm dev
-```
-
-首次本机安装时，从 Admin 仓库发布默认订阅和 Dream 服务身份：
+首次本机安装时，按照 Admin 仓库说明发布默认订阅和 Dream 服务身份：
 
 ```bash
-cd ../ink-admin-memory
 pnpm db:data:subscriptions -- --apply
 pnpm product:provision-local-dream
 pnpm gateway:provision-local-dream
 ```
 
-这些命令属于本机身份操作。对任何非本机数据库执行前，必须先阅读 Admin 仓库说明。
+这些命令会修改 Admin 所有的身份和数据。没有对应 Admin 评审时，不得对非本机数据库执行。
 
-### 3. 同步 Dream Python 环境
-
-在本仓库执行：
+### 3. 安装 Dream Python 环境
 
 ```bash
-cd backend
-uv sync
+cd ../ink-dream-memory/backend
+uv sync --frozen
 ```
 
-`uv sync` 创建或更新 `backend/.venv`，并使其精确匹配 `backend/pyproject.toml` 和 `backend/uv.lock`。它可能删除未声明的包，尤其不会保留临时安装的 pytest，也不会管理 npm Runtime。
+`uv sync` 会让 `backend/.venv` 匹配 `backend/pyproject.toml` 与 `backend/uv.lock`，并可能删除未声明的包。
 
-无需把 pytest 永久加入生产环境即可运行后端测试：
-
-```bash
-cd backend
-uv run --with pytest==9.1.1 pytest -q
-```
-
-### 4. 安装精确 Claude Runtime 与 Notion CLI
-
-Runtime 是 npm/native 制品，必须单独安装公开 selector 包：
+### 4. 安装精确原生 Runtime 与 Notion CLI
 
 ```bash
 npm install --global @glide-the/ink-claude-code-dream@0.1.4
 export PATH="$(npm prefix --global)/bin:$PATH"
 command -v ink-claude-code-dream
 ink-claude-code-dream --version
-```
 
-版本命令必须输出：
-
-```text
-2.1.241 (Claude Code)
-```
-
-然后通过 Dream 的真实 resolver 校验 Runtime manifest：
-
-```bash
-cd backend
-.venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
-```
-
-该命令必须 exit 0 并输出解析到的 `0.1.4` 可执行路径。如果 `command -v` 仍指向旧的 `~/.local/bin/ink-claude-code-dream`，必须在启动 Dream 前调整 `PATH` 顺序或替换旧安装。运行中的进程会保留启动时继承的 `PATH`；修改后只重启自己拥有的进程。
-
-正常生产资格路径禁止使用 `CLAUDE_CODE_CLI_PATH` 绕过 manifest 校验。该变量只保留给经过评审的显式绝对路径回滚。
-
-安装 Dream 后端连接器路径使用的 Notion CLI：
-
-```bash
 npm install --global ntn@0.15.1
 ntn --version
 ntn login --help
 ntn doctor --help
 ```
 
-`ntn --version` 必须输出 `ntn 0.15.1`。Docker 与 AutoDL 发布会自动安装并验证同一版本。用户应通过 Dream Settings 授权；应用安装时不要在服务账号的默认 home 中运行 `ntn login`。
-
-### 5. 配置 Dream
-
-需要时创建 Dream 私有环境文件：
+Runtime 命令必须输出 `2.1.241 (Claude Code)`，`ntn --version` 必须输出 `ntn 0.15.1`。随后使用 Dream 真实的 manifest-qualified resolver：
 
 ```bash
-test -f backend/.env || cp backend/.env.example backend/.env
+.venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-推荐的本机数据库/Gateway 所有权配置：
+禁止用 `CLAUDE_CODE_CLI_PATH` 掩盖普通安装过旧的问题。它只保留给经过明确评审的绝对路径回滚。
+
+### 5. 安装前端 workspace
+
+```bash
+cd ../frontend
+corepack enable
+corepack pnpm --version
+corepack pnpm install --frozen-lockfile
+```
+
+版本命令必须输出 `10.28.1`。`frontend/pnpm-workspace.yaml` 包含根 Web package 和 `packages/*`；`frontend/pnpm-lock.yaml` 是它们唯一的依赖锁。
+
+## 配置与本机运行
+
+需要时创建私有后端环境文件：
+
+```bash
+cd ../backend
+test -f .env || cp .env.example .env
+```
+
+正常本机所有权模型从 Admin 加载数据库身份，并阻止 Provider Key 进入 Dream：
 
 ```dotenv
 DATABASE_URL=
@@ -226,61 +191,36 @@ INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
 AGENT_CWD=/absolute/path/to/agentdata/agent-workspace
 INK_AGENT_SANDBOX_ENABLED=true
 INK_NOTION_RUNTIME_ROOT=/absolute/path/to/agentdata/notion-runtime
-INK_NOTION_MAX_SNAPSHOT_BYTES=134217728
-INK_NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS=60
 ```
 
-Admin provision 命令会把其余本机服务身份和模型 alias 写入 gitignored 环境文件。不要把 Provider Key 复制到 Dream，也不要向浏览器暴露服务凭据。
+从三个最初位于 Dream 仓库根目录的终端开始，在终端 A 启动 Admin/Gateway：
 
-`INK_NOTION_RUNTIME_ROOT` 必须是与 `AGENT_CWD` 位于同一持久 agentdata 区域的服务端绝对路径。Dream 将每个用户的不透明凭证源保存到 `users/<actor-hash>/home`，并将每个连接器最近一次成功的轻量索引保存到 `users/<actor-hash>/snapshots/<connector-id>/current.json`。保存资源选择时立即执行首次索引同步；之后由连接器的服务端策略在后台刷新到期索引，不要求用户先发起 Chat 或初始化 workspace。索引只含已选 ID 与紧凑元数据，不保存页面 Markdown、blocks 或附件。
+```bash
+cd ../ink-admin-memory
+pnpm dev
+```
 
-启用可信 thread workspace 的 Chat turn 会在 Runtime 初始化时把当前用户有效凭证和最近一次成功索引复制到 `{AGENT_CWD}/{thread_id}/.notion-home` 与 `.notion`；投影前先与用户当前选择范围求交，并最小化连接器元数据。随后 `sdk_env.py` 将该精确 thread 投影通过 `NOTION_HOME`、`NOTION_API_TOKEN`、`NOTION_KEYRING` 与 `NOTION_WORKERS_CONFIG_FILE` 绑定到 Agent Runtime Bash；ambient 值会被清空，不能选择其他用户或 home。投影过程不会调用 Notion 或执行索引同步，因此即使新索引刷新失败，清空或缩小选择范围也会在下一 turn 生效。既有页面 Read hook 与 Agent 直接使用 `ntn` CLI 并存。Workspace Mode 关闭时不提供两种投影和四个 Runtime 环境变量。
-
-actor 绑定的 Notion CLI 会话发起 Skill 已记录的只读 `ntn api` 调用时，继续遵循既有 Bash 策略：Auto 与手动模式走正常前端确认，Full Access 可不弹该确认，禁网模式仍硬拒绝。这是窄化路由规则，不是 Bash allowlist；缺少 actor/thread 绑定、wrapper 或替代 executable 路径、未声明 endpoint、shell 拼接/替换、畸形 data 和非 Notion Bash 均保持 fail-closed。若 Chat 报告 `Hook PreToolUse:Bash denied this tool`，应检查当前 connector 投影、改用已安装 `notion-cli` Skill 记录的命令并核对有效 network mode；不得以全局放开 Bash 绕过。
-
-### 6. 启动 Dream
-
-终端 B——后端：
+在终端 B 启动 Dream 后端：
 
 ```bash
 cd backend
 .venv/bin/python server.py
 ```
 
-终端 C——前端：
+在终端 C 启动 Next 开发服务：
 
 ```bash
 cd frontend
-pnpm run dev --hostname 127.0.0.1 --port 5173
+INK_BACKEND_INTERNAL_URL=http://127.0.0.1:8765 \
+NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8765 \
+corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 ```
 
-前端 package、Next 配置和唯一 App Router 均位于 `frontend/` 根。全部 Dream 应用源码位于私有、不可路由的 `frontend/app/_dream/` 树，路由级浏览器 UI 模块位于其 `views/` 目录；不存在第二套嵌套 App Router、旧顶层源码树或兼容 import 路径。依赖锁定由后续 release gate 收口，因此验证本次布局时不得 install 或 relock。
+`INK_BACKEND_INTERNAL_URL` 驱动 Next 到 Python 的 API/auth/OAuth rewrite、crawler Route Handler 和 Node 到 Python 的 MCP Apps 配置调用。语音仍是浏览器 WebSocket，因此本机开发还必须提供其后端 base；Next 不拥有该 WebSocket upgrade。
 
-受治理 MCP Apps 预览的唯一 Node owner 位于 `frontend/packages/mcp-apps-runtime/`。Browser 只连接同源 `/api/mcp-apps/{serverRef}` 标准 Streamable HTTP 入口；根 Route Handler 薄委派给 server-only package，由该 package 从 Python 获取短时且绑定 actor/workspace/Server 的建连视图，绝不把上游 URL、header、环境变量或凭证返回 Browser。独立来源的 sandbox 只向精确配置的父页面 origin 提供版本化 proxy。Browser 与 Node 消费同一份服务端插件和策略 revision；配置缺失、禁用、销毁、不兼容、过期或 revision 变化时 fail closed，使旧 session 失效，并只从 fresh view 重新挂载，同时保留普通工具结果。session cleanup 发送有界标准 DELETE；若 SDK initialize 已先行中止 transport，则使用新的 signal 重试；Node adapter 还会让遗留 session 随短时 view 独立过期。Host 只手动绑定已启用的 AppBridge 操作，因此 SDK Client 无法自动转发 Browser 已关闭的 `tools/call`；`window.im` 成员来自认证 actor-effective Host handshake，App 消息与 composer、queued prompt 进入同一个 Chat-owned send coordinator。`productionAppsEffective` 始终为 `false`。
+容器启动时则会先用 `API_BASE_URL` 与 `WS_BASE_URL` 渲染 `public/runtime-config.js`，再启动 standalone `server.js`。该启动文件是浏览器 Runtime URL 的首要 owner；可选 `NEXT_PUBLIC_*` 只是 fallback，不是凭据或策略通道。
 
 托管 MCP discovery 允许与 Dream 后端共址的 Server 使用显式 IPv4 loopback 与 IPv6 `::1` endpoint。其他 non-global 字面 IP、URL credential/query/fragment 及上游 redirect 仍拒绝；MCP Apps Node Runtime host allowlist 继续作为独立执行边界。
-
-预览默认全部拒绝。请在服务进程环境中配置以下值；正安全整数、origin 与 host 必须来自部署策略，不要原样复制占位符：
-
-```bash
-INK_MCP_APPS_PHASE1_PREVIEW=true
-INK_MCP_APPS_PLUGIN_MANIFEST_JSON='<版本化插件 manifest JSON>'
-INK_MCP_APPS_POLICY_JSON='<default/desired/effective 与逐 Server allowlist>'
-INK_MCP_APPS_SANDBOX_URL='<独立 https origin>/mcp-apps-sandbox'
-INK_MCP_APPS_PARENT_ORIGINS='<精确 Dream Web origin>'
-INK_BACKEND_INTERNAL_URL='<Node 可达的 Dream API origin>'
-INK_MCP_APPS_NODE_SERVICE_TOKEN='<Node 到 Python 的共享 service token>'
-INK_MCP_APPS_CONNECTION_VIEW_TTL_SECONDS='<正数秒>'
-INK_MCP_APPS_MAX_RESOURCE_BYTES='<正数字节上限>'
-INK_MCP_APPS_MAX_CATALOG_PAGES='<正数页数上限>'
-INK_MCP_APPS_UPSTREAM_TIMEOUT_MS='<正数超时>'
-INK_MCP_APPS_MAX_CONCURRENCY_PER_SCOPE='<正数并发上限>'
-INK_MCP_APPS_NETWORK_HOST_ALLOWLIST='<逗号分隔的上游 hostname>'
-```
-
-插件 manifest 必须声明 `im.mcp-apps-host` `1.0.0`、仓库内 Browser/Node entry、协议 `2026-01-26`，以及与 MCP `1.30.0`、Ext Apps `1.7.5`、MCP UI `7.1.1` 兼容的 SDK 范围。`resourceReads`、`lowRiskToolCalls`、`uiMessage`、`windowIm` 是彼此独立的能力上限；`INK_MCP_APPS_PHASE2_TOOL_CALLS`、`INK_MCP_APPS_PHASE2_UI_MESSAGE`、`INK_MCP_APPS_WINDOW_IM` 只能继续收紧。页面工具调用仍须通过当前 Python policy revision、逐 Server allowlist 与低风险分类。上游 redirect 一律拒绝而不跟随，tool/resource catalog 必须在配置页数上限内完成。可选 Host/轮询/兼容超时为 `INK_MCP_APPS_HOST_READY_TIMEOUT_MS`、`INK_MCP_APPS_POLICY_POLL_MS`、`INK_MCP_APPS_WINDOW_IM_REQUEST_TIMEOUT_MS`。
-
-legacy Vite 入口仅用于回滚。必须通过 `deploy/local/deploy.sh` 选择 `LOCAL_FRONTEND_RUNTIME=vite-image`，并提供精确的 `LOCAL_VITE_ROLLBACK_IMAGE` tag 或 digest。`LOCAL_VITE_ROLLBACK_BACKEND_URL` 指定容器内部代理目标，`LOCAL_VITE_ROLLBACK_API_BASE_URL` / `LOCAL_VITE_ROLLBACK_WS_BASE_URL` 指定浏览器可见 runtime config（显式空 API 值表示同源请求），`LOCAL_VITE_ROLLBACK_NETWORK` 只能引用预先存在的隔离 Docker network。该 selector 不会从 Vite 源码重新构建。
 
 访问地址：
 
@@ -288,98 +228,179 @@ legacy Vite 入口仅用于回滚。必须通过 `deploy/local/deploy.sh` 选择
 - Dream API：<http://127.0.0.1:8765>
 - Admin：<http://127.0.0.1:3000/admin>
 
-## 主要页面
+仓库本机 launcher 使用同一个 Next 根，并为它启动的进程写入 pid/log：
 
-| 路径 | 用途 |
+```bash
+./deploy/local/deploy.sh --check
+./deploy/local/deploy.sh build
+./deploy/local/deploy.sh start
+./deploy/local/deploy.sh verify
+./deploy/local/deploy.sh stop
+```
+
+该 launcher 仍有两个缺口。它当前不会投影 Browser Voice WebSocket base，需要语音能力的本机运行必须使用上方显式手工 Next 命令；它的 `stop`/`clean` 只信任已保存 PID 和配置的回滚容器名，不会重验进程启动时间、命令、cwd、image 或 ownership label。停止前必须人工确认这些标识仍属于同一轮 launcher；过期 PID 文件或复用容器名可能命中无关进程/容器。
+
+## 前端与 Runtime 边界
+
+```text
+frontend/
+├── package.json, pnpm-workspace.yaml, pnpm-lock.yaml
+├── next.config.js, tsconfig.json
+├── app/                            # 唯一 App Router
+│   ├── layout.tsx                  # Server Component 文档/metadata owner
+│   ├── client-shell.tsx            # 唯一 ssr:false Dream client mount
+│   ├── [[...path]]/page.tsx        # 兼容路由
+│   ├── api/                         # Node Route Handler
+│   └── _dream/                     # 私有、不可路由的 Dream 浏览器源码
+└── packages/mcp-apps-runtime/src/  # 独立 server-only Node Runtime
+```
+
+- `app/client-shell.tsx` 是浏览器边界。现有应用拥有浏览器状态、`localStorage`、DOM API、SSE 和 WebSocket 行为，因此该文件以禁用 SSR 的动态方式挂载 `app/_dream/App.tsx`。
+- `app/_dream/**` 拥有浏览器 UI、API client、hook、路由和 MCP Apps Host 组件。Browser 代码创建标准 MCP `Client` 与同源 `StreamableHTTPClientTransport`，绝不导入 server-only Runtime package。
+- `frontend/app/api/mcp-apps/[serverRef]/route.ts` 是精简 Node GET/POST/DELETE adapter，只导入 `@ink-dream/mcp-apps-runtime` 的公共入口。
+- `phase1-status/route.ts` 与 `mcp-apps-sandbox/route.ts` 是当前例外：它们会导入 Browser 所有的 `host-policy`，并在 Route 层组合 preview policy。共享 manifest/Host contract 仍须抽到中立 shared/server owner；该缺口不代表独立 Runtime package 可以进入 Browser。
+- `packages/mcp-apps-runtime/src/index.ts` 导入 `server-only`。该 package 拥有进程级 connector manager、上游 MCP session/catalog、策略重验与过期回收；禁止导入 React、DOM 或根 Web 模块。
+- Python 继续拥有 actor、workspace、credential、managed-MCP 配置与业务数据权威。Node 只获得短时单 Server 建连视图；上游 URL、header、环境值与 credential 不会返回 Browser。
+- `robots.txt`、`sitemap.xml` 与 `llms.txt` 是公开 Next Route Handler，但其正文仍由 Python 所有并在运行时读取。后端配置缺失或非法时返回明确 `502/503`，绝不回退 SPA HTML。
+- Vite 与 `@vitejs/plugin-react` 作为隔离浏览器 fixture 的开发依赖可以合法保留，这些 fixture 会直接加载生产模块；它们不会恢复 Vite 生产入口、lock、build 或部署路径。
+
+MCP Apps preview 默认全部拒绝。preview 环境、插件 manifest、default/desired/effective policy、actor/workspace scope、allowlist、限制值与精确 sandbox/parent origin 必须全部一致。技术上 effective 的 preview 也不会改变不可变的公开 `productionAppsEffective: false` 回执。
+
+## 构建与部署
+
+当前 Web 应用只能从前端 workspace 根构建：
+
+```bash
+corepack pnpm --dir frontend exec tsc --noEmit --incremental false
+corepack pnpm --dir frontend lint
+NODE_ENV=production corepack pnpm --dir frontend build
+INK_NEXT_OUTPUT=standalone NODE_ENV=production corepack pnpm --dir frontend run build:docker
+test -f frontend/.next/standalone/server.js
+```
+
+`build` 执行 `next build --webpack`；`build:docker` 还会打开条件式 standalone 输出。canonical 容器是 `frontend/Dockerfile`：Node 22 使用 frozen pnpm 构建，然后在 80 端口运行 `node server.js`；不使用 Nginx 或 Vite bundle。
+
+提交 `54f3bbe5` 的部署事实：
+
+| 路径 | 当前事实 |
 | --- | --- |
-| `/story-workspace/chat` | 新建和历史 Agent Thread |
-| `/story-workspace/dream` | Dream Run 和创作工作台 |
-| `/story-workspace/decks` | 已启用、已发布的 Deck |
-| `/story-workspace/settings/work` | Deck、资源和插件管理 |
-| `/story-workspace/settings` | 账号、订阅、模型和应用设置 |
+| 本机直跑 | `deploy/local/deploy.sh` 使用 Next/pnpm 构建与启动；Vite 选项只接受单独具名的 immutable 回滚镜像。当前 launcher 尚未设置 Browser Voice WebSocket base，且 stop/clean 前不会强校验 PID/容器所有权。 |
+| 本机 Docker Compose | `deploy/docker/deploy.sh` 构建当前 standalone Next Dockerfile；其 preflight 仍要求历史 Nginx 模板，根 Compose 仍传递被忽略的 `VITE_PUBLIC_SITE_URL` 参数。 |
+| Remote SSH / 阿里云 profile | Remote Compose 构建同一 Next image，但仍传递被忽略的 Vite 命名参数；历史 Vite 内存证据不能建立当前 Next Node 的内存下限。 |
+| Google Cloud Run | **整体生产路径阻塞。** 构建会选择 Next Dockerfile，但公开 metadata 参数仍过时且未执行目标环境验收；相邻 SQLite 同步脚本违反 Admin-owned PostgreSQL-only 合同，不受支持。 |
+| AutoDL direct host | 仍要求已删除的 `frontend/package-lock.json` 和 `vite.config.ts`，执行退役的 npm/Vite 构建、检查 `dist/index.html` 并启动 Vite Preview；当前会在源码 preflight 失败，不是合法 Next 部署路径。 |
+| GitHub 前端自动化 | 前端 CI/静态发布仍假设已删除的 npm lock 和 `dist/` 产物，并使用较旧 Node 版本；单独迁移前与当前 pnpm/Next 源码不兼容。 |
 
-## 验证
+旧 `frontend/nginx.conf.template` 与测试自有 Vite fixture 只为历史/隔离用途保留，不支持从源码构建 Vite 发布。回滚只能选择已经构建并明确验证的 immutable image；不得重建已删除的 Vite owner 或第二个包锁。
+
+## 测试与验收
+
+Provider-free 检查不需要模型调用或生产账号：
 
 ```bash
 # 后端
-cd backend
-uv run --with pytest==9.1.1 pytest -q
+PYTHONPATH=backend uv run --native-tls --project backend --frozen \
+  --with pytest==9.1.1 --with pytest-asyncio \
+  python -m pytest backend/tests -q
 
-# 前端
-cd frontend
-pnpm run lint
-NODE_ENV=production pnpm run build
+# 前端源码与 Next build
+corepack pnpm --dir frontend exec tsc --noEmit --incremental false
+corepack pnpm --dir frontend lint
+NODE_ENV=production corepack pnpm --dir frontend build
 
-# MCP Apps Runtime、Host 与 provider-free policy 聚焦检查；不得 install 或 relock
-cd ..
-frontend/node_modules/.bin/tsc --noEmit -p frontend/packages/mcp-apps-runtime/tsconfig.integration.json
-node --experimental-strip-types --experimental-transform-types --test frontend/packages/mcp-apps-runtime/src/*.test.ts
-PYTHONPATH=backend uv run --native-tls --project backend --frozen --with pytest --with pytest-asyncio python -m pytest backend/tests/mcp_apps_phase1 backend/tests/mcp_apps_phase2 backend/tests/mcp_apps_phase3 -q
-node --experimental-strip-types --experimental-transform-types --test frontend/app/_dream/components/chat/mcp-apps/*.test.ts frontend/app/_dream/components/chat/__tests__/chatUserMessageIngress.test.ts
+# MCP Apps server-only Runtime 与集成边界
+corepack pnpm --dir frontend test:mcp-apps-runtime
+corepack pnpm --dir frontend typecheck:mcp-apps
+node --experimental-strip-types --experimental-transform-types --test \
+  frontend/app/_dream/components/chat/mcp-apps/*.test.ts \
+  frontend/app/_dream/components/chat/__tests__/chatUserMessageIngress.test.ts
 
-# 已发布 SDK/Runtime registry 验收；provider-free，不调用模型
-cd ..
+# Python Phase 1-3 聚焦策略合同
+PYTHONPATH=backend uv run --native-tls --project backend --frozen \
+  --with pytest --with pytest-asyncio python -m pytest \
+  backend/tests/mcp_apps_phase1 backend/tests/mcp_apps_phase2 backend/tests/mcp_apps_phase3 -q
+
+# 已发布 SDK/Runtime registry 验收；provider-free
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.144 \
   --runtime-version 0.1.4 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
-真实业务测试必须使用正常 Dream/Admin/Gateway/PostgreSQL 链路和指定的现有账号。Provider-free fixture 禁止汇报为真实业务验收。
+在已核对基线中，完整 TypeScript 与 Next build 均 exit `0`；lint exit `0` 并保留 17 个既有 `react-hooks/exhaustive-deps` warning；server-only Runtime suite 为 36 tests passed。这些都是技术回执，不是公网部署声明。
 
-## 运维与安全注意事项
+浏览器 E2E 必须优先复用本机已安装的兼容 Chrome。启动本轮自有的 Next server 后执行根页面聚焦旅程：
 
-1. **两个包管理器，一个兼容合同。** `uv` 管理 Python 包，npm 管理 native Runtime；版本变更必须在同一变更中更新两端和验收证据。
-2. **Fail closed。** Schema capability 缺失、SDK/Runtime 版本不匹配、manifest 非法、模型 alias 或凭据不可用时必须失败，禁止静默选择 ambient CLI 或伪数据。
-3. **Admin 拥有 Schema。** 共享 PostgreSQL Schema 只能通过 Admin Drizzle migration 和 capability 发布修改。
-4. **禁止提交 Secret。** 数据库密码、Gateway Service Key、Provider Key、OAuth Secret、npm token、transcript 和用户 Workspace 内容都不得进入 Git。
-5. **Thread 自有 Runtime 文件。** Claude 临时文件必须位于经过校验的 Thread workspace `.claude-tmp`，禁止放宽到 `/tmp` 或用户真实 Claude home。
-6. **禁止全局清理服务。** 测试只能停止和清理由本轮测试创建的进程与临时资源。
-7. **已发布版本不可覆盖。** 错误 Runtime 必须通过前向版本修复或显式评审回滚，正常回滚不得覆盖或 unpublish 已验收版本。
-8. **模型输出能力由服务端所有。** Admin 最终选中模型的 `maxOutputTokens` 必须投影到 Runtime；浏览器设置、用户环境、workspace 文件和 Gateway body 改写均不得替代它。
-9. **Notion Runtime 绑定归当前 actor/thread 所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，每个 Runtime turn 只接收当前 actor、当前选择范围内的 per-Thread 投影；Dream 在向 Agent Bash 暴露四个受支持变量前替换所有 ambient `NOTION_*` 值。
-10. **Editor 写入同时绑定 actor、当前 session 和持久状态。** runner 拒绝面向过期 session 的写入；Editor MCP 子进程只接收服务端所有的 actor 与有效 PostgreSQL capability；每次查询/更新均按 actor 限定；业务失败只刷新唯一内存 EditorState 软缓存，不发布成功事件。Notion 索引和按需页面正文不得进入 EditorState。
-11. **Claude Bash sandbox 开关由部署所有。** `INK_AGENT_SANDBOX_ENABLED` 缺省为 `true`，非法值也保持启用。设为 `false` 仍保留 Workspace Mode、cwd、上下文、文件工具、hooks 和工具确认，但已批准的 Bash 会绕过 bubblewrap 文件系统/网络隔离，直接以 Dream 服务账号运行；用户 Settings 与用户 env 均不能覆盖该能力。AutoDL 的外层容器拒绝所需 namespace 创建，因此发布环境固定投影为 `false`；当前 Dream 在 AutoDL 以 `root` 运行，所以已批准 Bash 在该外层容器内拥有 root 权限。
-12. **Crawler 文件仍属于发布门禁。** 根 Next Web Shell 必须让 `/robots.txt`、`/sitemap.xml` 和 `/llms.txt` 继续走后端所有的路径。任何 legacy immutable Vite 回滚镜像都必须满足相同 MIME/正文检查，且不得成为第二套源码入口；仅 HTTP 200 不算验收通过。
-13. **生产 Skill 必须进入 backend build context。** 每个仓库 `.claude/skills/<id>` 包都必须在 `backend/builtin_skills/common/<id>` 有完全一致的 release 镜像。AutoDL start、deploy、verify 与 rollback 会初始化隔离 workspace，验证全部 common source、只读 workspace 链接与 `.claude/skills` discovery 链接，并保留 title-case `/Skill-Creator` 的归一化检查。Runtime 消费未知 Skill 命令时必须返回明确 turn error，不能保存空成功 assistant；修复 package 后可继续复用原 Claude session。
+```bash
+cd frontend
+corepack pnpm exec playwright test e2e/root-next-shell.spec.ts --reporter=line --workers=1
+```
+
+部分聚焦浏览器测试会有意创建隔离 Vite fixture server。runner/browser 无法启动属于 harness 前置失败，不是页面或 API 缺陷。结束时只清理本轮具名的进程、端口、数据库和输出。
+
+真实业务验收属于独立车道：使用正常 Dream/Admin/Gateway/当前 PostgreSQL、用户指定的现有账号与业务实体，并从正常公开入口执行。产生的 Run、Thread、Gateway request、结算与失败记录必须保留在正常 Admin 可见范围，除非用户要求清理。Provider-free、隔离或 mock 证据禁止汇报为生产验收。
+
+## 安全与运维约束
+
+1. **Fail closed。** 缺少 Schema capability、SDK/Runtime 不匹配、manifest 非法、revision 过旧、credential 不可用或模型 alias 缺失时必须失败，禁止选择 ambient CLI 或伪数据。
+2. **Admin 拥有 Schema。** Dream 禁止新增 Alembic、runtime DDL、共享表自动创建或运行时 SQLite fallback。
+3. **三个包管理器各有 owner。** `uv` 管理 Python，npm 管理原生 Runtime/Notion CLI，pnpm 管理前端 workspace。禁止用 install hook 跨生态安装或产生第二个 lock。
+4. **Secret 不进入 Git 或 Browser。** 数据库密码、Gateway Service Key、Provider Key、OAuth Secret、registry token、transcript、用户 Workspace 正文与上游 MCP 建连材料均留在服务端。
+5. **Thread 自有 Runtime 文件。** `CLAUDE_CODE_TMPDIR` 必须是经过验证的 `{AGENT_CWD}/{thread_id}/.claude-tmp`，权限 `0700`，位于真实 Thread workspace 内且不是 symlink；不得把 sandbox 放宽到 `/tmp` 或用户 Claude home。
+6. **模型能力由服务端所有。** 全局 effort 来自 resource-policy LKG；context/compact/model max output 来自最终认证模型。Browser、用户 env、Deck、Plugin、workspace 与 Gateway body 改写均不得覆盖。
+7. **Notion 投影绑定 actor/thread。** 只有当前 actor 的当前选择范围可复制进合资格 Thread；投影四个受支持变量前先移除 ambient `NOTION_*` 值。Actor-bound CLI read 仍须服从正常 confirmation/full-access/network policy；wrapper、shell composition、未声明调用或缺少绑定都会 fail closed。
+8. **Editor 写入绑定实时权威。** 写入必须同时匹配 actor、live session 与 effective PostgreSQL capability；业务失败不得发布 success，Notion index 或按需页面正文也不得进入 EditorState。
+9. **Sandbox 开关由部署所有。** `INK_AGENT_SANDBOX_ENABLED` 缺省启用，非法值也保持启用，用户 Settings 不得覆盖。关闭 bubblewrap 仍保留工具确认，但已批准 Bash 会直接以 Dream 服务账号执行。当前阻断的 AutoDL profile 历史上固定为 `false` 且 Dream 以 `root` 运行；未来迁移必须保留并重新验收这一可见风险。
+10. **MCP Apps 只处于 preview。** Browser/Node revision、actor/workspace scope、expiry、manifest、policy、allowlist、origin isolation 与 no-redirect 均须重验。独立真实生产验收修改合同前，production effective 始终为 false。
+11. **Crawler 正文仍由 Python 所有。** 发布与回滚 image 必须核对 `robots.txt`、`sitemap.xml`、`llms.txt` 的 media type 和必要正文；只返回 HTTP 200 但正文是 Dream HTML 仍属于失败。
+12. **生产 Skill 必须进入 backend build context。** 仓库 `.claude/skills/<id>` 包必须存在精确一致的 backend common-catalog release mirror。未知 Runtime Skill 必须返回明确 turn error，禁止保存空成功 assistant。
+13. **进程所有权。** 测试和安装只能停止或删除自己创建的资源。修改 `PATH` 后，只能重启自己拥有的运行进程才能生效。
+14. **发布制品不可变。** 错误的已发布 Runtime 或前端 image 必须通过前向发布或显式评审回滚修复，禁止覆盖已验收制品。
 
 ## 故障排查
 
 ### `Dream Claude Runtime is not production-qualified`
 
-同时检查可执行文件和 release manifest：
-
 ```bash
 command -v ink-claude-code-dream
 readlink "$(command -v ink-claude-code-dream)"
 ink-claude-code-dream --version
+cd backend
+.venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-当前 `develop` 要求 manifest 中的 Runtime 为 `0.1.4`。即使 capability flag 全部为 `true`，实际 Runtime 版本过旧仍会失败。
+Manifest-qualified Runtime 必须为 `0.1.4`，兼容输出必须为 `2.1.241 (Claude Code)`。调整 `PATH` 顺序或替换普通旧安装后，只重启自己拥有的服务。
 
 ### `uv sync` 删除了 pytest
 
-`uv sync` 会删除不属于锁定生产环境的包。使用文档中的 `uv run --with pytest==9.1.1 pytest ...`，或者通过单独评审加入开发依赖组；禁止假设临时安装的包能跨 sync 保留。
+`uv sync` 会删除未声明包。使用文档中的临时 `uv run --with pytest...` 命令，或通过单独评审加入开发依赖组。
 
-### PostgreSQL 或 Schema capability 不可用
+### 前端安装或构建仍查找 npm/Vite 文件
 
-启动 Admin supervisor，检查 `../ink-admin-memory/.env.local`，并执行 Admin migration check。若 Dream 报告缺少 Chat-history capability，应应用并验证 Admin migration `0042_chat_history_keyset_pagination`；禁止从 Dream 创建该索引或 capability。
+当前运行的是过时 workflow 或部署 adapter。现有 workspace 使用 frozen pnpm 安装、构建 `.next` 并启动 Next；已核对源码不存在 `frontend/package-lock.json`、`vite.config.ts` 或生产 `dist/index.html`。
 
-### 没有可调用模型
+### Next build 在 prerender `_global-error` 时失败
 
-在 Admin 中配置已启用、有定价的模型 alias 和 Provider 凭据，然后执行本机 Gateway provision。Dream 只接受平台 alias，不接受浏览器传入的 Provider ID 或 Key。
+不要用非标准 `NODE_ENV=development` 构建。已核对的生产构建命令显式设置 `NODE_ENV=production` 并 exit `0`。
 
-### 模型已配置但仍发送 `max_tokens: 32000`
+### API 路由失败、crawler 文件返回 `502/503` 或语音无法连接
 
-先确认实际运行的 Runtime 版本，并检查 Admin 模型目录中的 `maxOutputTokens`。opaque Gateway alias 无法通过名称安全识别，因此 Dream 必须把认证目录值投影为 `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`。CLI 使用它作为模型 default/upper limit，`CLAUDE_CODE_MAX_OUTPUT_TOKENS` 只保留为受 capability 裁剪的 standalone override。目录值未设置时，unknown alias 会有意保留上游兼容的 32,000/64,000 fallback；禁止通过硬编码模型 ID 或改写 Gateway 请求体修复。
+分别核对各 owner：Next 到 Python rewrite/crawler proxy 使用 `INK_BACKEND_INTERNAL_URL`/`BACKEND_URL`，Browser REST/SSE 使用 `API_BASE_URL`，语音使用 Browser `WS_BASE_URL`。Crawler 失败应返回 text `502/503`，不得落入 Dream HTML shell。
+
+### PostgreSQL capability 或可调用模型不可用
+
+执行 Admin migration check，核对 Admin 所有的环境文件，并在 Admin 配置 enabled/priced 模型 alias 与 Provider credential。Dream 只接受平台 alias，不接受 Browser 提供的 Provider ID 或 Key。
 
 ## 文档与贡献规则
 
 - 仓库维护规则：[Agent.md](Agent.md)
 - Agent 产品交互说明：[docs/Agent.md](docs/Agent.md)
+- 规则索引：[docs/rules/README.md](docs/rules/README.md)
+- 部署入口矩阵：[deploy/README.md](deploy/README.md)
 - 架构总览：[docs/architecture/项目架构设计说明.md](docs/architecture/项目架构设计说明.md)
-- SDK/Runtime 打包与集成：[docs/deploy/claude-sdk-runtime-packaging-and-integration.md](docs/deploy/claude-sdk-runtime-packaging-and-integration.md)
+- 前端迁移决策：[docs/design/claude-agent/dream-frontend-node-framework-migration-assessment.md](docs/design/claude-agent/dream-frontend-node-framework-migration-assessment.md)
+- 当前 MCP Apps 技术证据：[docs/exec/mcp-apps/current-candidate-validation.md](docs/exec/mcp-apps/current-candidate-validation.md)
+- SDK/Runtime 打包：[docs/deploy/claude-sdk-runtime-packaging-and-integration.md](docs/deploy/claude-sdk-runtime-packaging-and-integration.md)
 - Registry 验收：[docs/deploy/claude-registry-release-acceptance.md](docs/deploy/claude-registry-release-acceptance.md)
-- Story Workspace 设计：[docs/design/story-workspace/](docs/design/story-workspace/)
 
-功能分支必须从最新 `develop` 创建；保留无关工作区改动；同步受影响的文件头和 `.folder.md`；最终报告必须包含精确验证命令和退出码。
+保留工作区无关改动，同步受影响文件头与 `.folder.md`，保持中英文 README 结构和事实一致，并报告精确验证命令、退出码、未执行车道及剩余生产动作。

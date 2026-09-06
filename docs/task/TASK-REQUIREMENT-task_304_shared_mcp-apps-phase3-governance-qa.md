@@ -1,9 +1,11 @@
 <!-- [输入] task_304 与 Phase 2 当前候选证据。 -->
 <!-- [输出] G3-01—G3-07 的直接执行要求和最终 QA 证据。 -->
-<!-- [定位] Phase 3 requirement；只包含技术依赖、范围、验收和回滚。 -->
-<!-- [同步] 2026-09-06：改用技术依赖、可观察验收与回滚。 -->
+<!-- [定位] 已执行的 Phase 3 requirement；保留技术依赖、范围、验收和回滚。 -->
+<!-- [同步] 2026-09-06：链接已完成的 G3 provider-free 技术回执。 -->
 
 # TASK-REQUIREMENT：Phase 3 治理与 QA
+
+> 本 requirement 已执行，不是新的派工入口。当前 G3 技术结果见 [Phase 0—3 当前候选统一回执](../exec/mcp-apps/current-candidate-validation.md)；真实外部 Server/账号/OAuth/生产运维仍未验收，`productionAppsEffective=false`。
 
 1. 核对 I2-01—I2-07 的当前候选实现、命令、退出码和 Browser 证据。
 2. 完成 G3-01—G3-07，确保 manifest、运行能力、版本和 feature flag 一致。
@@ -13,4 +15,4 @@
 6. 版本升级先运行官方 demo、inspector、兼容矩阵和当前业务回归。
 7. 资源限制来自配置/策略，不硬编码为产品配额；失败不传播到 Agent turn。
 8. 记录根 standalone、Backend/Node/Browser、供应链、文档、差异和清理证据。
-9. 最终结果明确区分本地技术验收与真实生产发布；`production_apps_effective=false` 保持。
+9. 最终结果明确区分本地技术验收与真实生产发布；公开状态 `productionAppsEffective=false` 保持。

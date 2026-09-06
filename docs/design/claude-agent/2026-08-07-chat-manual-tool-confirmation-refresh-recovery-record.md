@@ -1,8 +1,15 @@
+<!-- [Input] 2026-08-07 manual tool-confirmation refresh/re-entry implementation evidence. -->
+<!-- [Output] Preserve the dated receipt without defining current frontend build commands or runtime ownership. -->
+<!-- [Pos] Historical execution record; current frontend ownership is linked below. -->
+<!-- [Sync] 2026-09-06: mark npm/Vite/5173 evidence as historical and link the current Next.js/pnpm architecture. -->
+
 # Chat 非完全访问模式工具确认刷新恢复返工记录
 
 > 日期：2026-08-07
 > 上游：`claude-agent-tool-confirmation-flow.md`、`2026-08-06-chat-tool-confirmation-reconnect-recovery-record.md`
 > 范围：通用 Chat `ToolConfirmationDock`；不修改 Dream Agent adapter，不使用 localStorage
+
+> 历史边界：本文中的 npm/Vite/5173 只记录 2026-08-07 的实际测试环境，不是当前命令或 Web owner。当前指南见 [Dream Web 当前 Next.js 架构](./dream-frontend-node-framework-migration-assessment.md)。
 
 ## 0. 本轮规划前置器
 

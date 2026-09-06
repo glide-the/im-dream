@@ -1,3 +1,7 @@
+<!-- [输入] Legacy-unverified assumptions, current source ownership, and production evidence boundaries. -->
+<!-- [输出] task_275i scan, alignment, failure, and rollback contract. -->
+<!-- [定位] Shared verification task record; it does not grant production readiness. -->
+<!-- [同步] 2026-09-06：将旧状态字段降级为追溯信息，并以当前源码/证据判断缺口。 -->
 # task_275i_shared_legacy-unverified-alignment
 
 > Task ID: `task_275i`
@@ -112,7 +116,7 @@
 
 ```text
 rg -n -i '"latest"|sha256.*(placeholder|todo)|legacy_unverified|production_ready|artifact_digest' docs/task docs/stage docs/exec backend frontend
-npm --prefix frontend run lint
+corepack pnpm --dir frontend lint
 ```
 
 | 场景 | 通过标准 |

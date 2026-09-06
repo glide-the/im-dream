@@ -1,9 +1,18 @@
-# Agent Interaction Patterns
-
+<!-- [Input] Current Next.js Dream UI entry points and Python Claude Agent Thread/SSE contracts. -->
+<!-- [Output] Product-level Agent interaction patterns and integration rules for Dream surfaces. -->
+<!-- [Pos] Agent usage guide; repository governance remains in the root Agent.md. -->
 <!-- [Sync] 2026-08-31: historical comment chat now reuses the Voice Claude Agent Thread SSE contract; the stateless legacy transport is removed. -->
+<!-- [Sync] 2026-09-06: align UI ownership with frontend/app/_dream and keep Next Route Handlers outside Agent identity/business ownership. -->
+
+# Agent Interaction Patterns
 
 This document describes the interaction patterns and responsibilities for all AI-agent
 features in **Ink & Memory**.  Read this when adding or modifying any agent-driven UI.
+
+Current UI source ownership is `frontend/app/_dream/**` under the sole Next.js App Router.
+The browser continues to call Python-owned `/api/claude-agent*` contracts through the
+same-origin Web shell; a Next Route Handler must not become a second Thread, identity,
+SSE, or business-data owner.
 
 > **Terminology**: all business terms used here (Deck, claude-agent, thread, run,
 > story-workspace / Dream, packer, surfaces, guidance, etc.) are defined in the

@@ -1,4 +1,22 @@
-# Story Workspace 实施阶段计划与 Execute 准入矩阵
+<!-- [输入] 2026-08-01 Story Workspace task 集、当时 Stage 编排和执行准入。 -->
+<!-- [输出] 历史依赖顺序、范围、安全 Gate 与实际回执索引。 -->
+<!-- [范围] 不作为当前派工、审批、checkout、assignee 或生产启用依据。 -->
+<!-- [同步] 2026-09-06：降级为历史 Stage 账本，并以实际源码/exec 证据说明当前状态。 -->
+
+# Story Workspace 历史阶段计划与 Execute 准入账本
+
+> **当前适用性。** 本文后续的 wave、Paperclip/CEOOrchestrator、assignee、checkout、readiness 和进度表记录 2026-08-01 的编排过程，不是当前状态机。现行 frontend 是根 Next.js 16 + pnpm workspace，Dream 应用源码唯一位于 `frontend/app/_dream/**`；当前工作按真实技术依赖、源码状态和执行回执推进。
+
+## 当前状态与验收边界
+
+| 工作内容 | 当前证据 | 仍需注意 |
+|---|---|---|
+| `task_205b` 合同 canonical 迁移 | [执行回执](../exec/exec_task_205b_story-workspace-contract-migration.md) 为 completed；focused tests、build/lint、旧 owner 扫描和数据库 hash Gate 通过。 | 回执只证明当时候选；当前 contracts 或 consumers 变化后要重验。 |
+| `task_203` Review workflow | [执行回执](../exec/exec_task_203_story-workspace-review-workflow.md) 保留首次 blocked，并记录后续 retry 完成及测试证据。 | 失败事实不可删除；当前数据库能力仍受 Admin Drizzle 合同约束。 |
+| `task_203a` 持久化 Schema | [旧 SQLite fixture 回执](../exec/exec_task_203a_story-workspace-review-persistence-schema.md) 曾通过技术检查。 | 它不是当前 Schema 发布证据；Dream 禁止以 SQLite/runtime DDL 替代 Admin-owned PostgreSQL capability。 |
+| `task_202c` Browser/Network 补证 | [执行回执](../exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md) 为 blocked。 | `frontend/e2e/**` 已是合法 harness，不能再以“项目无 Playwright harness”作为事实；但仍须对当前 Next 页面、真实请求/响应与视觉交互形成新证据。 |
+
+上表区分技术验证、公开应用与生产启用：已有静态/focused 证据不自动证明公开入口或生产运行；blocked 浏览器证据也不能由旧 Vite 构建、源码阅读或派工状态替代。下文历史安全边界、失败原因和回滚约束继续有效。
 
 > **Stage ID**: `stage_001_story-workspace`  
 > **关联 Issue**: [SUO-208](/SUO/issues/SUO-208) / [SUO-240](/SUO/issues/SUO-240) / [SUO-301](/SUO/issues/SUO-301) / [SUO-319](/SUO/issues/SUO-319) / [SUO-320](/SUO/issues/SUO-320)
@@ -196,7 +214,7 @@ graph TD
 | **Phase B**<br/>后端 Gate 聚合 | `task_230-BE-001` 审阅 Gate 服务端聚合与防绕过验证 | `GET /workflow-runs/:id/review-gate` + 增强 confirm (版本校验) + `POST /continue` (幂等) + 防绕过逻辑 | `task_203` (BE-003) 基线审阅流转 + `task_226` run 模型 | `workflow_run` 数据模型尚未完成 (SUO-226)；接口设计需对齐 |
 | **Phase C**<br/>增量 E2E 联调 | `task_230-SH-001` 确认幂等 + 审阅版本校验 + 防绕过 E2E | E2E 测试报告 (幂等/版本/绕过/生命周期) + 缺陷记录 | `task_230-FE-002` + `task_230-BE-001` | **E2E harness 未配置**；需 StagePlanner 前置 gate 或等价验证方案 |
 
-> **关键约束**: `task_230-SH-001` 显式声明当前仓库无 Playwright/Cypress 配置，要求 StagePlanner 先安排 E2E harness 选型/引导，或批准等价的 agent-browser 可追溯验证方案。此约束作为准入条件进入 §5.1。
+> **历史约束修正**：当时 `task_230-SH-001` 以“无 Playwright/Cypress 配置”为前提；该前提对当前仓库已不成立。后续验证应复用 `frontend/e2e/**` 与本机 Chrome，不另建 runner，并为当前 Next 候选保存可追溯证据。
 
 ---
 
@@ -352,7 +370,7 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 | `task_230-FE-001` (Dream 导航) | `frontend/app/_dream/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`, `frontend/app/_dream/components/TopNavBar.tsx`, `frontend/app/_dream/router/story-workspace.tsx` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, Sidebar 结构 | ✅ 无冲突；与 task_202b 共用路由配置但为追加 |
 | `task_230-FE-002` (Dream 页面) | `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx`, `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`, Zustand store | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 表格核心组件 | ✅ 无冲突；与 task_202e 共用 Dashboard 但为组合复用 |
 | `task_230-BE-001` (Gate 聚合) | `backend/routers/story_workspace.py` (追加 Gate 端点), `backend/services/story_workspace/review_gate.py` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, Schema 定义 | ⚠️ 与 task_202/203/204 共用 `story_workspace.py` 但为追加；必须在 task_203 完成后执行 |
-| `task_230-SH-001` (E2E) | `e2e/tests/story-workspace/` (新建) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码修改 | ✅ 无冲突；仅新建测试文件 |
+| `task_230-SH-001` (E2E) | `frontend/e2e/story-workspace/`（复用现有 harness） | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码修改 | ✅ 不新增 runner；仅增加定向测试与证据 |
 
 ### 7.2 Single-Assignee 分配建议
 
@@ -480,7 +498,7 @@ Stage 整体完成后：
 | **已确认内容下游执行未定义** | 用户确认后无明确反馈 | 中 | 设计稿默认假设：暂存，后续迭代定义 | 标记为后续迭代需求 |
 | **共享路由并发写入风险** | `task_203` 与 `task_204` 同写 `backend/routers/story_workspace.py`，并发会导致合并冲突或测试互相破坏 | 高 | **显式串行 Gate**：task_204 先执行并验证，完成后 task_203 再 checkout；StagePlanner 在 §5.2 / §7.1 标注排他约束 | Wave 2 内串行，不并行 |
 | **SUO-226 workflow_run 模型未完成** | `task_230-BE-001` 和 `task_230-FE-002` 无法对接真实数据 | 高 | 使用占位组件/mock 数据先行开发；接口确定后切换 | 预留 1 轮接口对齐迭代 |
-| **E2E harness 未配置** | `task_230-SH-001` 无法自动化执行 | 中 | 明确 bootstrap 路径（Playwright/Cypress/agent-browser）；由 CEOOrchestrator 裁决 | 在 Wave 8 前完成 harness 选型 |
+| **当前 harness 尚缺该场景覆盖** | `task_230-SH-001` 尚无当前候选自动化证据 | 中 | 复用 `frontend/e2e/**` 和本机 Chrome 增加定向场景，不另建 runner | 在声称公开或生产验收前形成可回读证据 |
 | **Dashboard 与 Dream 双状态风险** | `task_230-FE-001` 重定向与 `task_202e` Dashboard 路由状态冲突 | 中 | 明确 Dashboard 仅重定向，不维护独立 store；`StoryWorkspaceDashboardPage` 保留复用 | Wave 7 前确认路由方案 |
 | **客户端绕过风险** | 恶意请求直接调用 continue API 绕过审阅 | 高 | 所有 continue/结束请求必须经过服务端聚合校验；不信任客户端任何状态标记 | `task_230-BE-001` 核心验收项 |
 
@@ -611,7 +629,7 @@ Stage 整体完成后：
 
 1. 从 `backend/` 执行 stdlib `types` + canonical contracts + `server` import smoke，`PYTHONPYCACHEPREFIX` 指向 run scratch。
 2. 执行 `tests.test_story_workspace_contracts`、`tests.test_story_workspace_api`、`tests.test_story_workspace_agent_integration` focused unittest。
-3. 执行前端 `npm run build` 与六个 hooks / contracts 文件的 scoped ESLint。
+3. 执行前端 `corepack pnpm --dir frontend build` 与六个 `frontend/app/_dream/hooks/**` / contracts 文件的 scoped ESLint。
 4. 执行旧路径、旧公共符号、shim / alias 禁止扫描，要求零命中。
 5. 对比执行前后 `backend/database.py` hash；核对 task-owned path 清单并执行定向 `git diff --check`。
 

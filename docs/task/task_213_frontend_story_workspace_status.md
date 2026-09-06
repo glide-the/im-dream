@@ -1,3 +1,7 @@
+<!-- [输入] Story Workspace status UI requirement, current app/_dream implementation, and dated execution evidence. -->
+<!-- [输出] task_213 implementation, acceptance, remaining backend/runtime E2E evidence, and rollback contract. -->
+<!-- [定位] 已执行前端任务记录；不声明真实业务或生产验收。 -->
+<!-- [同步] 2026-09-06：以当前源码和回执表达状态，移除旧派工语义。 -->
 # Task: Story Workspace 工作流状态与错误恢复体验
 
 > **Task ID**: `task_213_frontend_story_workspace_status`
@@ -6,9 +10,9 @@
 > **类型 / Domain**: `frontend`（domain 仅用于分类，不代表执行 Agent 身份）
 > **优先级**: `P1`
 > **生成日期**: 2026-08-01
-> **状态**: `pending_stage_recheck`
-> **唯一执行责任人**: `ExecTaskAgent`
-> **Stage 映射**: Stage 3 / Wave 1（独立 execute Issue、独立 checkout、独立验收）
+> **状态**: 前端实现与当时静态/合同验证已完成；真实 backend/runtime E2E 仍是独立缺口
+> **实现证据**: [`exec_task_213_frontend_story_workspace_status.md`](../exec/exec_task_213_frontend_story_workspace_status.md)
+> **当前作用**: 保留实现范围、验收和回滚合同；不作为派工/审批入口
 
 ---
 
@@ -23,7 +27,7 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 | 关联 | ID | 说明 |
 |---|---|---|
 | 源 Issue | `DECK-012` | Story Workspace 工作流状态与错误恢复体验 |
-| Readiness 修订 | `SUO-324` | 消除未来 execute 写入边界与冻结决策状态冲突 |
+| Readiness 修订 | `SUO-324` | 历史修订：曾用于消除执行写入边界与冻结决策状态冲突 |
 | 父 Issue | `SUO-217` | 组织 Deck 插件业务设计与 ClaudeAgent 交互方案分派 |
 | Design Issue | `SUO-218` | Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成设计 |
 | Issue 清单 | `SUO-223` | Deck Plugin 前端/后端 Issue 拆解 |
@@ -46,7 +50,7 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 
 本 task 与 story-workspace 既有布局、审阅 UI 增量集成，不推翻既有设计。
 
-未来实现仅由 `ExecTaskAgent` 在本 task 的独立 execute Issue 中执行；`frontend` 仅是 domain。本 task 不与其他 Stage 3/4 task 合并 checkout 或共享正式报告。
+前端实现已落在 `frontend/app/_dream/**`；当前是否需要新的集成工作，由 backend/runtime 可用性、现有 Playwright 入口和可回读证据缺口决定，不由旧 Issue assignee/checkout 状态决定。
 
 > **命名隔离原则**：本 task 涉及的插件标识必须使用 `deck_plugin_id` + `deck_plugin_version` 前缀，禁止与 `claude_code_plugin_id` 混用。来源追溯展示必须区分 Deck Plugin（业务工作流）和 Claude Code Plugin（运行时能力包）。
 
@@ -198,7 +202,7 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 
 ## 5. 涉及文件路径
 
-以下十八个路径是未来 execute 的完整实现/测试闭集；目录名不构成额外授权：
+以下十八个路径是已执行候选的完整实现/测试闭集；目录名不构成额外授权，后续修改仍须按实际任务重新界定：
 
 | 路径 | 动作 | 最小变更 |
 |---|---|---|
@@ -273,8 +277,8 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 ## 8. 测试策略
 
 0. **命令发现与静态验证**：
-   - execute Issue 先读取 `frontend/package.json` 的 `scripts` 与现有测试文件命名，逐字回填实际 runner、版本和命令；不得凭空假设 Vitest/Jest，也不得为本 task 新增测试框架、依赖锁或全局配置。
-   - 当前仓库已发现 `build`、`lint`，未发现 `test` script；从仓库根执行的最低静态验证为 `npm --prefix frontend run build`、`npm --prefix frontend run lint` 和 `git diff --check`。runner 发现命令固定为 `node -p "require('./frontend/package.json').scripts?.test ?? ''"`。若 execute 时仍无 test runner，必须在 execute Issue/正式报告记录发现输出，并以下述人工/E2E 场景补证；不得伪报单元测试已执行。
+   - 执行前读取当前 `frontend/package.json` scripts 与目标测试文件，回填实际 runner、版本和命令。当前最低根门禁为 `corepack pnpm --dir frontend build`、`corepack pnpm --dir frontend lint` 和 `git diff --check`。
+   - 仓库已有 Node focused tests 和 `frontend/e2e/**` Playwright harness；应复用与状态/UI 相匹配的现有入口。根 package 没有通用 `test` script 不等于没有 runner；不得伪报或新建第二 lock/框架。
 
 1. **状态渲染测试**：
    - 各状态（未选择/不可用/预检中/运行中/待审阅/失败/完成）正确渲染
@@ -307,7 +311,9 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 
 ---
 
-## 9. 完成标志
+## 9. 原验收清单
+
+> 下列 checkbox 是原实施输入；逐项通过和未执行的真实 backend/runtime E2E 见 [exec 回执](../exec/exec_task_213_frontend_story_workspace_status.md)。
 
 - [ ] Dashboard 工作流上下文条展示 Deck 插件名称/版本、工作流摘要、Deck 运行配置就绪标记
 - [ ] 各状态（未选择/不可用/Deck 运行配置未就绪/预检中/运行中/待审阅/失败/完成）均有明确 UI 表现
@@ -342,14 +348,14 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 
 ## 11. 允许修改范围与禁止修改范围
 
-### 11.1 未来 execute 允许闭集
+### 11.1 原执行允许闭集（历史）
 
 - §5 列出的十八个 frontend 实现/测试路径；每个路径仅限表中最小变更。
-- `docs/exec/exec_task_213_frontend_story_workspace_status.md`：仅允许 `ExecTaskAgent` 写入本 task 的唯一正式执行报告。
+- `docs/exec/exec_task_213_frontend_story_workspace_status.md`：对应实际执行回执。
 
-以上十九个路径可直接复制到 execute 模板（十八个 frontend 路径 + 一个正式报告例外）；未列出的路径默认禁止。
+以上路径记录当时实现的安全闭集；未列出的路径默认禁止。它们不构成新的派工或写入授权。
 
-### 11.2 未来 execute 禁止范围
+### 11.2 原执行禁止范围（继续作为安全边界）
 
 - `docs/exec/` 下除 `docs/exec/exec_task_213_frontend_story_workspace_status.md` 之外的全部路径。
 - `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`backend/`、依赖锁、测试/构建配置、生成物及 §11.1 未列出的任何实现或测试文件。
@@ -357,9 +363,9 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 - Voice chat 触发按钮或 `WorkflowRunLinkCard` 实现；本 task 只消费并展示 run 侧来源合同，不扩大到 chat 侧路径。
 - 前端自行推进 Preflight/Run 状态机、伪造服务端来源/权限结果、泄露 prompt/secret/session settings，或覆盖共享工作树既有差异。
 
-### 11.3 当前修订阶段约束
+### 11.3 实际执行结果与当前缺口
 
-[SUO-324](/SUO/issues/SUO-324) 只修订 task 合同，不授权实现 §11.1。未来 execute 必须由 `ExecTaskAgent` 在独立 Issue checkout 后实施；完成后由 StagePlanner 独立重跑 readiness，不得由本 task 自行宣布进入 execute 或通过 Stage 3 Gate。
+§11.1 已按 [执行回执](../exec/exec_task_213_frontend_story_workspace_status.md) 实施，并完成当时的静态/合同验证。旧 `SUO-324`、checkout、assignee 和 StagePlanner 文案仅说明历史治理过程，不再是当前状态。真实 backend/runtime E2E、生产证据和安全 Gate 尚未由该回执证明。
 
 ---
 

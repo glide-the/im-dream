@@ -1,7 +1,7 @@
-<!-- [输入] DEC-002、旧 npm lock 下的 P0-04/P0-08 证据与当前 pnpm 重验要求。 -->
-<!-- [输出] P0-04 权限修复的历史证据边界和当前重验要求。 -->
-<!-- [定位] 历史技术记录；只说明证据适用范围和当前重验条件。 -->
-<!-- [同步] 2026-09-06：保留安全合同、证据适用范围与重验条件。 -->
+<!-- [输入] DEC-002、旧 npm lock 下的 P0-04/P0-08 证据与后续 pnpm 重验。 -->
+<!-- [输出] P0-04 权限修复的历史证据边界和当前证据入口。 -->
+<!-- [定位] 历史技术记录；安全合同继续有效，当前结论由 pnpm 候选回执给出。 -->
+<!-- [同步] 2026-09-06：保留安全合同与旧证据，并链接已完成的当前重验。 -->
 
 # MCP Apps P0-04 / P0-08 历史证据说明
 
@@ -18,15 +18,17 @@
 
 这些结论只适用于当时的依赖、lock、Chrome、入口和 fixture 指纹。
 
-## 2. 当前适用范围
+## 2. 后续重验与当前适用范围
 
-DEC-005 改为 pnpm workspace 后，旧 P0-04/P0-08 不能迁移为当前结论。当前候选必须：
+DEC-005 改为 pnpm workspace 后，旧 P0-04/P0-08 不能迁移为当前结论。下列要求已在 [Phase 0 当前证据](../exec/mcp-apps/phase-0/index.md) 和 [统一回执](../exec/mcp-apps/current-candidate-validation.md) 中完成：
 
 1. 以唯一 `frontend/pnpm-lock.yaml` 重建 P0-01。
 2. 使用当前 Host adapter、sandbox proxy、Browser 入口和兼容 Chrome 重跑 P0-04。
 3. 核对 P0-02/P0-03/P0-05/P0-06/P0-07 是否与当前源码和 lock 一致。
 4. 原位更新唯一 P0-08 Go/No-Go 记录。
-5. 无论结论如何，都保持 `production_apps_effective=false`。
+5. 无论结论如何，都保持 `productionAppsEffective=false`。
+
+当前 P0-08 为 `Go`，但只代表 provider-free 技术前置通过；公开应用与 Production 仍是 `No-Go`。
 
 ## 3. P0-04 验收
 

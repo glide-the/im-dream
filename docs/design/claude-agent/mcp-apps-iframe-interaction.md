@@ -1,12 +1,13 @@
 <!-- [输入] MCP Apps 稳定规范、task_301 P0-04 运行证据、@mcp-ui/client@7.1.1 与 IM Next.js/Node Apps Runtime 边界。 -->
-<!-- [输出] 定义 IM Host adapter、permissions→iframe allow、业务交互、失败降级和 P0-04/P0-08 重跑合同。 -->
+<!-- [输出] 定义 IM Host adapter、permissions→iframe allow、业务交互、失败降级和当前回归合同。 -->
 <!-- [定位] MCP Apps iframe 与浏览器权限专项设计；不定义 Node 上游授权或生产启用。 -->
 <!-- [同步] 2026-09-04：SUO-384 最终接受 DEC-002，并锁定 production Gate、导航前提交点与普通工具结果回滚路径。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 明确 Host/iframe 属于 frontend/ 根 Web package，禁止导入或复制同级 Node Runtime。 -->
+<!-- [同步] 2026-09-06：当前 pnpm 候选已完成 P0-04/P0-08 与 Phase 0—3 provider-free 技术验证；旧 npm 重跑流程降级为历史。 -->
 
 # MCP Apps Host adapter 与 iframe 权限交互设计
 
-> 状态：P0-04 复审完成，待隔离 PoC 重跑
+> 状态：Host adapter/iframe 代码已存在，当前 pnpm 候选的实际 Chrome P0-04/P0-08 与 Phase 0—3 provider-free 验证已通过
 >
 > 结论：锁定的 `@mcp-ui/client@7.1.1` 不再作为 IM 的 iframe owner。IM 选择最小 `ImMcpAppHostAdapter`：复用该包导出的 `AppBridge` 与 `PostMessageTransport`，但由 adapter 读取并校验完整 resource metadata、计算有效权限，并在导航前设置 outer iframe、sandbox proxy 消息和 inner iframe。production Apps 继续关闭。
 
@@ -243,9 +244,9 @@ sequenceDiagram
 - adapter/bridge 的浏览器校验不替代 Node 授权。
 - `ui://` HTML 经 Node MCP 端点返回 Browser；页面声明的外部网络请求仍受 sandbox/CSP 控制，不能假称为 Node 已代理。
 
-## 4. P0-04 / P0-08 有界重跑合同
+## 4. P0-04 / P0-08 当前回归合同
 
-本次重跑必须固定为以下组合，不允许用浮动版本或另一套 Browser harness 替代：
+当前回归必须固定为以下组合，不允许用浮动版本或另一套 Browser harness 替代。2026-09-04 的 npm-lock 有界重跑说明已失效，只能作为历史背景；当前命令和退出码以[统一回执](../../exec/mcp-apps/current-candidate-validation.md)为准：
 
 | 项目 | 精确值 |
 |---|---|
@@ -253,12 +254,12 @@ sequenceDiagram
 | MCP Apps schema | `@modelcontextprotocol/ext-apps@1.7.5` |
 | MCP SDK | `@modelcontextprotocol/sdk@1.30.0` |
 | Browser runner | `@playwright/test@1.62.1`，本机 Chrome `152.0.7977.77` |
-| lock 证据 | `frontend/package-lock.json`；Phase 0 记录的 SHA-256 `9938d0c4476f1e36c11915fb8ecdfb29c17f961af19eaeed4c603089b17e27ac` |
+| lock 证据 | `frontend/pnpm-lock.yaml`；统一回执记录的 SHA-256 `68d3c30f35eef1eec745d8c814475615eb7eceaf8866f0f721c4743394c1afd0` |
 | 唯一 Browser 入口 | `frontend/e2e/mcp-apps/phase-0/phase0-app-renderer-harness.spec.ts`；入口改为挂载 `ImMcpAppHostAdapter`，不得继续让 `AppRenderer` / `AppFrame` 持有 iframe |
-| 精确命令 | 先运行 `npm --prefix frontend ls @modelcontextprotocol/ext-apps @modelcontextprotocol/sdk @mcp-ui/client --all`，再运行 `npm --prefix frontend run e2e:mcp-apps-phase0` |
-| 唯一决策记录 | 原位更新 `docs/exec/mcp-apps/phase-0/p0-08-decision.yaml`，不得创建第二份 Go/No-Go 文件 |
+| 精确命令 | 先运行 `pnpm --dir frontend list @modelcontextprotocol/ext-apps @modelcontextprotocol/sdk @mcp-ui/client --depth Infinity`，再运行 `pnpm --dir frontend run e2e:mcp-apps-phase0` |
+| 当前结论记录 | `docs/exec/mcp-apps/current-candidate-validation.md`；历史 P0 decision 只保留追溯价值 |
 
-依赖清单输出、lock SHA、Chrome 版本或测试入口任一不匹配时，立即退出“有界重跑”：保持 P0-04 fail、P0-08 No-Go 和 `production_apps_effective: false`，回到 P0-01 确定新的受影响范围。
+依赖清单输出、lock SHA、Chrome 版本或测试入口任一不匹配时，不得继承当前 pass；应按实际受影响范围重跑对应技术门。无论技术回归结果如何，`productionAppsEffective=false` 都保持不变，除非另有独立产品与安全决策。
 
 P0-04 仅在以下运行证据同时成立时改为 pass：
 
@@ -269,11 +270,11 @@ P0-04 仅在以下运行证据同时成立时改为 pass：
 5. trace 至少记录 `requestedPermissions`、`effectivePermissions`、policy revision、outer/inner `allow`、`Permissions-Policy`、正反向 probe、`appPermissionsPropagated=true` 与 `appSandboxOverridePropagated=true`；不得记录 HTML、凭证或用户正文。
 6. 首次工具调用仍为 1、proxy 转发工具调用仍为 0、resource read 仍为 1；不以重放写操作换取页面初始化。
 
-P0-08 只更新现有 decision 记录，不创建平行结论。仅当上述 P0-04 pass，且 P0-02/P0-03/P0-05/P0-06/P0-07 的同 lock 证据仍有效时，才可把 Phase 0 从 No-Go 修订为 Go。这里的 Go 只允许下游继续 Phase 1 实施，不启用 production Apps；任一条件失败则保持 No-Go。
+当前 P0-08 已在 pnpm lock 下为 Go，含义只限 Phase 0 技术门通过；它不代表公开应用、真实业务或 production Apps 启用。依赖或安全边界变化后必须在同一新候选上重建证据，不得继承旧 Go。
 
 ### 4.1 Gate 与回滚点
 
-- `production_apps_effective` 在 P0-04 和 P0-08 同时通过前必须为 `false`；P0-08 的 Go 只解除 Phase 1 实施前置，不能直接修改 production Gate。
+- `productionAppsEffective` 当前必须为 `false`；P0-08 的 Go 只说明技术门通过，不能直接修改 production Gate。
 - adapter 的安全提交点是 outer iframe 导航与 DOM 插入：只有 resource metadata、server-owned snapshot、policy revision、outer/inner `allow` 和 proxy header 输入均已校验并准备完成，才允许越过该点。
 - 任一版本/lock/metadata/policy/trace/真实能力探针不一致，或 revision 在运行中失效，立即停止新挂载并 teardown 当前 adapter、bridge、transport 与两层 iframe；页面回到同一次普通 tool result，不重放原工具调用。
 - 回滚不修改数据库、Node 授权、真实 Server 配置或现有 Chat 历史。后续若改用新的上游 renderer 版本，必须从 P0-01 重新建立版本与安全证据，不能沿用本次 Go 回执。
@@ -290,7 +291,7 @@ P0-08 只更新现有 decision 记录，不创建平行结论。仅当上述 P0-
 
 - adapter 会承担一小段上游 renderer 原本应负责的生命周期，存在协议漂移风险；用 ext-apps runtime schema、精确版本锁与 P0-04 browser contract 限制，不 fork 依赖。
 - Permissions Policy 是多层交集，单看 DOM 字符串可能误判；必须同时保留真实 Web API 正反向探针。
-- 生产 desired policy 的来源与发布尚未实现；在该配置、revision 失效和回滚合同落地前，production effective 必须保持关闭。
+- technical preview 的 desired/effective/revision policy 已实现并验证；真实生产策略、公开应用和发布运维证据仍未完成，因此 production effective 必须保持关闭。
 - 若未来上游精确版本原生满足同一合同，可替换 adapter 的 iframe/resource 层；替换属于 renderer 变更，必须重跑 P0-01—P0-04，不能沿用本次 P0-04 回执。
 
 ## 7. 关键决策记录
@@ -300,13 +301,12 @@ P0-08 只更新现有 decision 记录，不创建平行结论。仅当上述 P0-
 - **状态**：Accepted
 - **原因**：7.1.1 的实际 bundle 丢弃 resource permissions 和 sandbox override；升级到未指定版本会扩大当前重跑范围，直接 DOM 后处理又无法保证导航前 enforcement。
 - **决定**：在当前锁定组合中复用 `AppBridge`/`PostMessageTransport`，由 `ImMcpAppHostAdapter` 接管完整 resource metadata、policy decision、outer/proxy/inner iframe 与生命周期。
-- **影响**：修复与验证限定在隔离 PoC 的 P0-04/P0-08；production 保持关闭。上游 renderer 只有通过同一运行合同时才可替换。
+- **影响**：修复已进入 technical-preview 代码并在当前 pnpm/Chrome 候选验证；production 保持关闭。上游 renderer 只有通过同一运行合同时才可替换。
 
-## 8. 增量变更说明
+## 8. 当前实现与历史边界
 
-- 本次修订替代“`AppRenderer` 是唯一 iframe owner”的旧结论，但不改变 Browser Client → Node 受控 MCP endpoint → MCP Server 的主链。
-- SUO-386 不改变 DEC-002 的方案选择，仅补齐 P0-04/P0-08 的精确版本、唯一测试入口、命令与失配回退条件。
-- SUO-384 最终接受 DEC-002，不建立平行方案；增量仅明确 production Gate、导航前安全提交点和普通工具结果回滚路径。
-- 不新增 Python、数据库 schema、production endpoint、业务状态机或 production enablement。
-- 下游只需按本稿重跑 P0-04/P0-08；更广依赖升级或 renderer 替换必须回到完整受影响门槛。
-- SUO-404 不改变 DEC-002 的权限与 iframe 结论，只把 Browser Host 固定在 `frontend/` 根 Web package；但 pnpm 重锁会使旧“同 lock”回执失去新 Gate 权威，须重建 P0-01 并重跑 P0-04/P0-08。唯一目录与失效下游清单见 [DEC-005](./dream-frontend-node-framework-migration-assessment.md#dec-005frontend-是唯一-workspacepackagenext-根)。
+- 当前 Browser Host 只位于 `frontend/app/_dream/components/chat/mcp-apps/**`；目录真相源见[Dream Web 当前架构](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)。
+- DEC-002 继续要求 `ImMcpAppHostAdapter` 持有 iframe/resource permissions，`AppRenderer@7.1.1` 不是 iframe owner。
+- 旧 npm lock、旧 P0 decision 派工和嵌套 Next 路径只保留历史追溯价值；当前回归必须使用同一 pnpm 候选和当前 Browser 入口。
+- 当前实现与技术验证没有新增数据库 Schema、第二业务状态机或 production enablement。
+- 依赖、renderer、policy 或 sandbox 边界变化时，按实际影响重跑测试并记录命令/退出码；不沿用不同 lock 或不同源码指纹的 Go。

@@ -1,4 +1,10 @@
+<!-- [Input] Dated SUO-191 E2E context, commands, failures, and evidence. -->
+<!-- [Output] Immutable historical blocked receipt with current frontend ownership clearly separated. -->
+<!-- [Pos] Historical Exec evidence; not a current build, deploy, or task-status contract. -->
+<!-- [Sync] 2026-09-06: mark npm/Vite and orchestration details as historical and link the current Next.js/pnpm architecture. -->
 # Exec Report: SUO-191 - Notion 资源连接器前端 E2E 回归验证
+
+> **历史执行回执（2026-07-05）。** 本文中的 npm/Vite、端口、派工、checkout、assignee 与当时路径只记录实际发生的验证，不是当前开发或发布入口。现行 frontend 为 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`；当前架构见 [Dream frontend Node framework migration assessment](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md)。下文命令、阻塞和结果按原样保留，不得据此恢复旧拓扑。
 
 Status: blocked
 Updated: 2026-07-05

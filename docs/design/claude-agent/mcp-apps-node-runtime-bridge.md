@@ -1,16 +1,18 @@
 <!-- [输入] IM managed MCP 配置源码、MCP SDK Transport 合同、MCP Apps Host adapter 和网站/本地 MCP 运行边界。 -->
-<!-- [输出] 定义 Node 受控 MCP transport、PersistentConnectorManager、Python 配置来源和连接同步。 -->
+<!-- [输出] 定义当前 Node 受控 MCP transport、PersistentConnectorManager、Python 配置来源和连接同步。 -->
 <!-- [定位] MCP Apps Node 连接专项设计；不定义 iframe 实现、permission policy 或业务工具。 -->
 <!-- [同步] 2026-09-04：SUO-383 将 Browser consumer 名称对齐为 Host adapter；Node transport 与授权边界不变。 -->
 <!-- [同步] 2026-09-04：Browser MCP Client 改接 Node 标准受控端点，上游连接与安全过滤收束到 Node。 -->
-<!-- [同步] 2026-09-05：SUO-404/DEC-005 将本模块固定为 frontend/packages/mcp-apps-runtime，同根 App Router 仅保留薄 Route Handler。 -->
+<!-- [同步] 2026-09-05：SUO-404/DEC-005 将本模块固定为 frontend/packages/mcp-apps-runtime，根 App Router 的 [serverRef] transport Route 保持薄委派。 -->
+<!-- [同步] 2026-09-06：按 54f3bbe5 记录逐请求 Python revalidation、status/sandbox 反向 import 缺口与 production-off 边界。 -->
+
 <!-- [同步] 2026-09-06：Dream 管理面允许显式 loopback MCP discovery；Node Runtime 的独立 host allowlist 和其他 non-global 地址拒绝保持不变。 -->
 
 # IM MCP Apps Node 受控 MCP Transport 与连接同步设计
 
-> 状态：设计评审稿，未实现
+> 状态：代码已存在并完成 provider-free 技术验证；真实外部 Server/OAuth 与 production 运维未验收
 >
-> 结论：Browser MCP Client 的 `serverTransport` 指向 Next Node Apps Runtime 暴露的受控 Streamable HTTP MCP 端点。该端点由 `PersistentConnectorManager` 提供上游连接能力和安全过滤，但 manager 对象本身不会跨进程传给 Browser。Node 实现只存在于 `frontend/packages/mcp-apps-runtime/**`，`frontend/app/api/mcp-apps/**` 只作根 App Router 的薄入口；Browser 只连接 IM 网站。
+> 结论：Browser MCP Client 的 `serverTransport` 指向 Next Node Apps Runtime 暴露的受控 Streamable HTTP MCP 端点。该端点由进程级 `PersistentConnectorManager` 提供上游连接能力和安全过滤，但 manager 对象本身不会跨进程传给 Browser。Node 实现只存在于 `frontend/packages/mcp-apps-runtime/src/**`，`frontend/app/api/mcp-apps/[serverRef]/route.ts` 是薄 transport 入口；status/sandbox Route 当前仍有反向导入 Browser host-policy 的代码缺口。Browser 只连接 IM 网站。Python 仍拥有身份、managed MCP 配置与业务数据，并在 acquire 及已有 session 的每个请求上重验 connection view；`productionAppsEffective=false`。
 
 参考资料（访问日期：2026-09-04）：
 
@@ -31,9 +33,9 @@ const serverTransport = new StreamableHTTPClientTransport(nodeAppsMcpUrl)
 await client.connect(serverTransport)
 ```
 
-这里的 `nodeAppsMcpUrl` 是 IM 网站的受控 MCP 端点。端点后方调用 `PersistentConnectorManager`；真实 Server URL、stdio 进程和 credential 不返回 Browser。
+这里的 `nodeAppsMcpUrl` 是 IM 网站的受控 MCP 端点。端点后方调用 `PersistentConnectorManager`，manager 再通过 Python provider 获取或重验 actor/workspace/Server 的 connection view；真实 Server URL、stdio 进程和 credential 不返回 Browser。
 
-官方 MCP Inspector 也采用同一类拓扑：Browser Client 连接 Node transport，Node 再连接 stdio/SSE/Streamable HTTP 上游。IM 只参考这个连接形态，不采用 Inspector 面向调试工具的开放上游参数；Browser 从已完成工具结果取得 `serverRef`，Node 再根据 IM 登录态、workspace 和 managed MCP 配置验证目标 Server。
+官方 MCP Inspector 也采用同一类拓扑：Browser Client 连接 Node transport，Node 再连接 stdio/SSE/Streamable HTTP 上游。IM 只参考这个连接形态，不采用 Inspector 面向调试工具的开放上游参数；Browser 从已完成工具结果取得 `serverRef`，Node 将 IM Bearer 与 workspace/Server selector 交给 Python provider，使用其返回的权威 connection view 选择上游。
 
 ## 2. 目标与边界
 
@@ -41,9 +43,9 @@ await client.connect(serverTransport)
 
 - Node 向 Browser 提供标准 MCP Streamable HTTP 端点，不创建第二套 HTTP 命令或私有 SSE 协议。
 - `PersistentConnectorManager` 建立、复用、重连和关闭真实 MCP Server 的连接。
-- Node 在请求到达真实 Server 前完成用户、workspace、Server、tool/resource 和配置 revision 校验。
+- Node 先校验 origin、请求形状、session selector/fingerprint 和 tool/resource allowlist；Python connection-view provider 在 acquire 及已有 session 的每个请求上权威校验 actor、workspace、Server 与 revisions。
 - Browser Client 直接交给 Host adapter，使 descriptor、完整 resource 和页面工具请求走同一 MCP 连接；iframe 权限由 DEC-002 处理。
-- Python 继续提供受控建连配置，但不处理 Browser/App 请求。
+- Python 继续提供并逐请求重验受控 connection view；它不直接接收 Browser Apps transport，也不代理 UI resource/tool 交互。
 
 ### 2.2 非目标
 
@@ -89,7 +91,7 @@ Browser 仍会在 Chrome 中建立网络连接，但目标是 IM Node 端点，�
 
 SSE 只可能作为 Streamable HTTP 响应形式出现，不再单独定义 Apps 事件流。既有 Claude Agent SSE 和语音 WebSocket 保持原入口，与此端点无关。
 
-Node 不应采用 UI Inspector 示例中由 Browser query 指定上游 URL、command 或 env 的开放代理模式。Browser 只选择 `serverRef`；Node 根据当前登录用户、workspace 和 managed MCP 配置验证后才选择上游。
+Node 不应采用 UI Inspector 示例中由 Browser query 指定上游 URL、command 或 env 的开放代理模式。Browser 只提交不可信 `serverRef` 和 workspace selector；Node 把现有 Bearer 与 selector 交给 Python connection-view provider，只有 Python 返回通过 actor/workspace/Server/revision 校验的短时 view 后才选择上游。
 
 ### 3.3 `PersistentConnectorManager`
 
@@ -110,27 +112,27 @@ Manager 不必把自身实现为 Browser 侧 `Transport`。它是 Node 端点背
 
 当前 `get_default_managed_mcp_runtime_snapshot_loader()` 不是 Connector：
 
-- `/Users/dmeck/project/ink-dream-memory/backend/claude_mcp/service.py:473-475` 返回 Python 进程内 loader；
-- `/Users/dmeck/project/ink-dream-memory/backend/claude_mcp/runtime_snapshot.py:51-102` 按 actor/workspace 生成 detached config；
-- 同文件 `:104-185` 解析 transport 并将 OAuth/header/stdio credential 投影到返回对象；
-- `/Users/dmeck/project/ink-dream-memory/backend/libs/claude_agent_kit/server/agent_runner.py:3581-3598,3816-3825` 只为当前 Agent turn 写入并删除私有临时配置。
+- `backend/claude_mcp/runtime_snapshot.py` 继续为 Claude Agent turn 生成 detached config；
+- `backend/claude_mcp/service.py` 的 `mcp_apps_static_view()` / `mcp_apps_connection_view()` 复用同一 managed MCP 权威；
+- `backend/routers/claude_mcp.py` 暴露 `/api/claude-mcp/app-runtime/static` 与 `/connections/{server_ref}`，同时校验 Browser Bearer 和 Node service token；
+- `frontend/packages/mcp-apps-runtime/src/config-provider.ts` 消费这些接口并严格解析短时 view。
 
-Node 不能读取该临时目录，也不能接收整个 snapshot。Python 需要把现有解析能力暴露为两个受控视图：
+Node 不能读取 Agent 临时目录，也不能接收整个 snapshot。当前 Python API 已把现有解析能力暴露为两个受控视图：
 
 | 视图 | 用途 | 内容 |
 |---|---|---|
 | 静态配置 | Node 识别 Server、transport、enabled 和 revision | 不含明文 credential |
-| 单 Server 建连配置 | manager 首次连接或重连 | 当前 actor/workspace/Server 的 URL 或受控 stdio profile、必要 headers/env、精确 revision 和有效期 |
+| 单 Server connection view | manager 首次 acquire、已有 session 的逐请求 revalidation 或重连 | 当前 actor/workspace/Server 的 URL 或受控 stdio profile、必要 headers/env、精确 revisions 和有效期 |
 
-`RuntimeSnapshotLoader.load()` 继续服务 Claude Agent turn；Node 配置接口与它复用同一配置解析来源。Python 不创建 Node connection、不读取 UI resource，也不处理页面的 `tools/call` 或 `window.im`。
+`RuntimeSnapshotLoader.load()` 继续服务 Claude Agent turn；Node 配置接口与它复用同一配置解析来源。Python 对每次 connection-view 请求做 actor/workspace/Server/revision 权威校验，但不创建 Node connection、不读取 UI resource，也不执行页面的 `tools/call` 或 `window.im`。
 
 Python 在解密投影时短时生成建连配置，Node 接收后只在内存使用；两端都不写日志或磁盘，也不返回 Browser。OAuth 过期后由 manager 重新请求当前配置；不能把旧 access token 当作长期状态。
 
 ### 3.5 身份与 Server 选择
 
-Browser Client 使用现有 IM 登录态连接按 `serverRef` 路由的 Node MCP endpoint；认证只使用现有 IM 登录态：
+Browser Client 使用现有 IM 登录态连接按 `serverRef` 路由的 Node MCP endpoint：
 
-- Node 从现有登录态取得 actor，从现有产品上下文确定 workspace；Browser 传入的身份字段一律不作为事实源；
+- Node 只转发现有 Bearer 和 workspace/Server selector；Python 解析 actor 并校验 workspace/Server，Browser 传入的身份字段一律不作为事实源；
 - `serverRef` 是不可信选择器，必须对应当前 actor/workspace 已启用的 managed MCP Server；
 - Node endpoint 只暴露该 Server 中当前用户可见的 tool/resource catalog；每次 `tools/call`、`resources/read` 都再次执行 allowlist 与权限检查；
 - Browser 不能通过 path、query 或请求体覆盖真实 Server URL、credential、stdio command 或配置 revision；
@@ -147,22 +149,23 @@ sequenceDiagram
     participant P as Python Config Provider
     participant S as MCP Server 模块
 
-    B->>E: initialize<br/>IM 登录态 + serverRef 路由
-    E->>E: 校验用户、workspace 和 Server 权限
-    E->>M: 获取当前上游 Client
-    alt 已有有效连接
-        M-->>E: 复用 Client
-    else 首次连接或配置已变化
-        M->>P: 获取当前单 Server 建连配置
-        P-->>M: 短时单 Server 明文建连配置
+    B->>E: initialize 或后续请求<br/>Bearer + selectors + session id
+    E->>E: 校验 origin、请求形状与 session fingerprint
+    E->>M: acquire 或 revalidate
+    M->>P: 获取当前 connection view<br/>已有 session 携带 expected revisions
+    P->>P: 校验 actor、workspace、Server 与 revisions
+    P-->>M: 短时当前 connection view
+    alt 已有连接且 fingerprint/revisions 一致
+        M-->>E: 刷新 lease 并复用 Client
+    else 首次连接或允许的新 revision
         M->>S: MCP initialize
         S-->>M: capabilities
         M-->>E: 新 Client
     end
-    E-->>B: initialize result + 允许的 capabilities
+    E-->>B: 标准 MCP result<br/>initialize 时返回允许的 capabilities
 ```
 
-Python 只出现在连接准备分支，不出现在后续 UI resource 或页面交互请求中。
+Python 不代理后续 UI resource 或页面工具调用，但 manager 在每个已有 Browser session 请求开始时仍通过 Python provider 重验 connection view；验证失败会失效 lease/session，禁止继续调用上游。
 
 ### 3.7 本地 MCP
 
@@ -192,23 +195,25 @@ loopback 或 IPv6 `::1`；这不等于取消 Node 受控端点自己的 host all
 - `frontend/` 是 workspace、根 Web package 和 Next project 的共同根；本 Runtime 的唯一 owner 是 `frontend/packages/mcp-apps-runtime/**`。
 - package 的公开 server entry 显式导入 `server-only`，内部持有 config provider、SDK connector、manager、HTTP adapter 与 process singleton；不得导入根 `app/**`、`src/**`、React 或 DOM。
 - 根 `frontend/app/api/mcp-apps/[serverRef]/route.ts` 固定 `runtime = 'nodejs'`，只提取请求上下文并委派；不得复制 manager、配置读取或上游连接逻辑。
-- 依赖方向仅为根 Route Handler → Runtime package。Browser Host 通过同源 HTTP 使用它，不能从 Client Component import；standalone tracing 必须包含 package，Browser chunk 扫描必须排除它。
-- `frontend/app/_dream/server/mcp-apps/**` 与嵌套 `frontend/app/app/api/**` 均为废止路径，不设置 alias 或双写兼容层。完整目录合同见[迁移评估第 6 节](./dream-frontend-node-framework-migration-assessment.md#6-admin-工作区package-基线与复用边界)。
+- `[serverRef]` transport 依赖方向仅为根 Route Handler → Runtime package。Browser Host 通过同源 HTTP 使用它，不能从 Client Component import；standalone tracing 必须包含 package，Browser chunk 扫描必须排除它。`phase1-status` 与 sandbox Route 当前反向导入 `app/_dream/**/host-policy`，仍须抽到中立 shared/server owner。
+- `frontend/app/_dream/server/mcp-apps/**` 与嵌套 `frontend/app/app/api/**` 均为废止路径，不设置 alias 或双写兼容层。完整目录合同见[当前 source ownership](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)。
 
 ## 4. 阶段与验收
+
+以下阶段表记录已经实现的技术工作内容与回归门，不代表公开应用或生产启用状态。当前命令证据见[统一回执](../../exec/mcp-apps/current-candidate-validation.md)。
 
 | 阶段 | 范围 | 可观察验收 |
 |---|---|---|
 | Phase 0 | 一个 Node 可达 Server；Python 配置视图；Node 受控端点；manager；Browser Streamable HTTP Client | Browser 只访问 IM 域名；initialize/tools/list/resources/read 成功；上游 URL 和 credential 不出现在 Browser |
-| Phase 1 | 根 `app/api/**` 薄入口、同级 Runtime package、tool/resource allowlist、只读页面调用、关闭/重连 | 单向 package graph；未授权请求在 Node 被拒绝且上游无调用；Route Handler 请求结束后上游连接仍可复用 |
+| Phase 1 | 根 `[serverRef]` transport 薄入口、同级 Runtime package、tool/resource allowlist、只读页面调用、关闭/重连 | transport/package graph 单向；未授权请求在 Node 被拒绝且上游无调用；Route Handler 请求结束后上游连接仍可复用。status/sandbox Route 的 host-policy 反向 import 另列为待抽取缺口 |
 | Phase 2 | 写操作授权、OAuth 更新、`ui/message` | 写操作校验当前用户/workspace/Server；OAuth 失效可恢复；页面消息进入现有 Chat |
 | Phase 3 | 多用户、多 Server、版本治理与审计 | 连接不跨用户/Server；不兼容 capability fail closed；请求可按现有 identity 追踪 |
 
-实施前必须验证：
+当前已实现合同与仍需真实生产验证的边界：
 
-1. 当前工具结果如何稳定携带 `serverRef`、上游原始 tool name、完整 `CallToolResult`，并保留 `toolCallId` 作为结果关联字段；
-2. Node 如何验证现有 IM 登录态而不逐请求调用 Python；
-3. Python 配置接口如何限制 Node 服务身份、actor/workspace/Server 和 revision；
-4. Next Route Handler 对 MCP Streamable HTTP GET/POST/DELETE、流式 flush、取消和 session header 的兼容性；
-5. manager 对共享上游 Client 的并发、request ID 和通知分发策略；
-6. Node 与目标 stdio/localhost Server 的真实 locality。
+1. 当前工具结果稳定携带 `serverRef`、上游原始 tool name、完整 `CallToolResult`，并保留 `toolCallId` 作为结果关联字段；
+2. Node 不自行解析 actor；acquire 和已有 session 的每个请求都通过 Python provider 验证现有 IM Bearer、workspace/Server 与 expected revisions；
+3. Python 配置接口同时限制 Node service token、actor/workspace/Server 和 revisions；
+4. Next Route Handler 已覆盖 MCP Streamable HTTP GET/POST/DELETE、取消和 session header 合同；
+5. manager 按 actor/workspace/Server/browser session/revisions 隔离 lease，并对共享上游 Client 实施并发、request ID 和通知分发策略；
+6. 前五项已有 provider-free 技术回执；Node 与目标 stdio/localhost Server 的真实 locality、逐请求 revalidation 的目标容量/延迟仍需在生产拓扑验收。

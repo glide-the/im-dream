@@ -1,9 +1,11 @@
 <!-- [输入] task_411-01、DEC-005 和现有 frontend 行为。 -->
 <!-- [输出] N1-01—N1-05/N1-RB 的直接实施和验证要求。 -->
-<!-- [定位] 根 Web Shell requirement；包含技术依赖、范围、验收和回滚。 -->
-<!-- [同步] 2026-09-06：改用技术边界、当前工作树和可观察证据。 -->
+<!-- [定位] 历史实施 requirement；当前状态以 N1 回执和当前候选总回执为准。 -->
+<!-- [同步] 2026-09-06：标记 requirement 已执行，并链接现行 Next/pnpm/app/_dream 证据。 -->
 
 # TASK-REQUIREMENT：根 Web Shell 与 Vite 退出
+
+> 本 requirement 已执行完毕，不是当前派工入口。当前事实与验收见 [N1 回执](../exec/mcp-apps/phase-1/n1-build-health-rollback.md) 和 [Phase 0—3 当前候选总回执](../exec/mcp-apps/current-candidate-validation.md)。
 
 1. 记录当前工作树，保护用户和并发任务的现有改动。
 2. 将 `frontend/` 建为唯一 workspace/Web/Next root，`frontend/app/**` 建为唯一 App Router。

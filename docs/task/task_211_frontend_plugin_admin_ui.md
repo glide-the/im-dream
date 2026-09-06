@@ -1,3 +1,7 @@
+<!-- [输入] Plugin Admin UI requirement, current app/_dream implementation, and dated execution evidence. -->
+<!-- [输出] task_211 implementation, acceptance, remaining integration evidence, and rollback contract. -->
+<!-- [定位] 已执行前端任务记录；不声明真实 API、公开应用或生产验收。 -->
+<!-- [同步] 2026-09-06：以当前源码和回执表达状态，移除旧派工语义。 -->
 # Task: 前端管理端插件目录与安装状态 UI
 
 > **Task ID**: `task_211_frontend_plugin_admin_ui`
@@ -6,9 +10,9 @@
 > **类型 / Domain**: `frontend`（domain 仅用于分类，不代表执行 Agent 身份）
 > **优先级**: `P1`
 > **生成日期**: 2026-08-01
-> **状态**: `pending_stage_recheck`
-> **唯一执行责任人**: `ExecTaskAgent`
-> **Stage 映射**: Stage 3 / Wave 1（独立 execute Issue、独立 checkout、独立验收）
+> **状态**: 实现与当时静态验证已完成；真实 API/Browser 集成仍是独立缺口
+> **实现证据**: [`exec_task_211_frontend_plugin_admin_ui.md`](../exec/exec_task_211_frontend_plugin_admin_ui.md)
+> **当前作用**: 保留实现范围、验收和回滚合同；不作为派工/审批入口
 
 ---
 
@@ -23,7 +27,7 @@ DECK-010: 前端管理端插件目录与安装状态 UI
 | 关联 | ID | 说明 |
 |---|---|---|
 | 源 Issue | `DECK-010` | 前端管理端插件目录与安装状态 UI |
-| Readiness 修订 | `SUO-324` | 消除未来 execute 写入边界与冻结决策状态冲突 |
+| Readiness 修订 | `SUO-324` | 历史修订：曾用于消除执行写入边界与冻结决策状态冲突 |
 | 父 Issue | `SUO-217` | 组织 Deck 插件业务设计与 ClaudeAgent 交互方案分派 |
 | Design Issue | `SUO-218` | Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成设计 |
 | Issue 清单 | `SUO-223` | Deck Plugin 前端/后端 Issue 拆解 |
@@ -43,7 +47,7 @@ DECK-010: 前端管理端插件目录与安装状态 UI
 
 展示安装项、精确版本、三维状态（declared/materialized/loadable）、能力、兼容、健康和错误摘要。支持安装、启停、升级、卸载动作。
 
-未来实现仅由 `ExecTaskAgent` 在本 task 的独立 execute Issue 中执行；`frontend` 仅是 domain。本 task 不与其他 Stage 3/4 task 合并 checkout 或共享正式报告。
+实现已落在 `frontend/app/_dream/**` 的现行 Dream 源码树；当时静态验证、未验证项和回滚见上述 exec 回执。真实 API/Browser 集成需使用当前 pnpm/Next/Playwright 入口另行取证，不由旧 Issue assignee 或 checkout 状态决定。
 
 ### 3.1 UI 状态适用性矩阵
 
@@ -166,7 +170,7 @@ DECK-010: 前端管理端插件目录与安装状态 UI
 
 ## 5. 涉及文件路径
 
-以下十八个路径是未来 execute 的完整实现/测试闭集；目录名不构成额外授权：
+以下十八个路径是已执行候选的完整实现/测试闭集；目录名不构成额外授权，后续修改仍须按实际任务重新界定：
 
 | 路径 | 动作 | 最小变更 |
 |---|---|---|
@@ -244,8 +248,8 @@ POST /api/deck-plugins/{deck_plugin_id}/reconcile
 ## 8. 测试策略
 
 0. **命令发现与静态验证**：
-   - execute Issue 先读取 `frontend/package.json` 的 `scripts` 与现有测试文件命名，逐字回填实际 runner、版本和命令；不得凭空假设 Vitest/Jest，也不得为本 task 新增测试框架、依赖锁或全局配置。
-   - 当前仓库已发现 `build`、`lint`，未发现 `test` script；从仓库根执行的最低静态验证为 `npm --prefix frontend run build`、`npm --prefix frontend run lint` 和 `git diff --check`。runner 发现命令固定为 `node -p "require('./frontend/package.json').scripts?.test ?? ''"`。若 execute 时仍无 test runner，必须在 execute Issue/正式报告记录发现输出，并用下述人工/E2E 场景补证；不得伪报单元测试已执行。
+   - 执行前读取当前 `frontend/package.json` 的 scripts 与目标测试文件，回填实际 runner、版本和命令。当前 Node 依赖 owner 是 pnpm workspace/lock，根门禁至少包含 `corepack pnpm --dir frontend build`、`corepack pnpm --dir frontend lint` 和 `git diff --check`。
+   - 仓库已有 Node focused tests 和 `frontend/e2e/**` Playwright harness；本 task 应复用匹配的现有入口。根 package 没有通用 `test` script 不等于没有测试 runner；不得伪报、新建第二 lock 或重复测试框架。
 
 1. **列表渲染测试**：
    - 各状态标签正确渲染
@@ -272,7 +276,9 @@ POST /api/deck-plugins/{deck_plugin_id}/reconcile
 
 ---
 
-## 9. 完成标志
+## 9. 原验收清单
+
+> 下表为当时实施的验收输入；实际通过项与未验证的真实 Browser/API 缺口以 [exec 回执](../exec/exec_task_211_frontend_plugin_admin_ui.md) 为准，不得根据本文未勾选状态重复派工。
 
 - [ ] 管理端插件列表页面实现
 - [ ] 列表展示名称、来源、精确版本、三维状态、能力、兼容、健康、错误摘要
@@ -306,14 +312,14 @@ POST /api/deck-plugins/{deck_plugin_id}/reconcile
 
 ## 11. 允许修改范围与禁止修改范围
 
-### 11.1 未来 execute 允许闭集
+### 11.1 原执行允许闭集（历史）
 
 - §5 列出的十八个 frontend 实现/测试路径；每个路径仅限表中最小变更。
-- `docs/exec/exec_task_211_frontend_plugin_admin_ui.md`：仅允许 `ExecTaskAgent` 写入本 task 的唯一正式执行报告。
+- `docs/exec/exec_task_211_frontend_plugin_admin_ui.md`：对应实际执行回执。
 
-以上十九个路径可直接复制到 execute 模板；未列出的路径默认禁止。
+以上路径记录当时实现的安全闭集；未列出的路径默认禁止。它们不构成新的派工或写入授权。
 
-### 11.2 未来 execute 禁止范围
+### 11.2 原执行禁止范围（继续作为安全边界）
 
 - `docs/exec/` 下除 `docs/exec/exec_task_211_frontend_plugin_admin_ui.md` 之外的全部路径。
 - `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`backend/`、依赖锁、测试/构建配置、生成物及 §11.1 未列出的任何实现或测试文件。
@@ -321,9 +327,9 @@ POST /api/deck-plugins/{deck_plugin_id}/reconcile
 - Paperclip Plugin worker 模型或状态枚举；前端自行推进后端状态机、计算兼容性/权限或伪造 mutation 成功。
 - 借机重构、全文件格式化、清理无关代码或覆盖共享工作树既有差异。
 
-### 11.3 当前修订阶段约束
+### 11.3 实际执行结果与当前缺口
 
-[SUO-324](/SUO/issues/SUO-324) 只修订 task 合同，不授权实现 §11.1。未来 execute 必须由 `ExecTaskAgent` 在独立 Issue checkout 后实施；完成后仍由 StagePlanner 独立复核，不得由本 task 自行宣布进入 execute 或通过 Stage 3 Gate。
+§11.1 已按 [执行回执](../exec/exec_task_211_frontend_plugin_admin_ui.md) 实施并完成当时的静态验证。旧 `SUO-324`、checkout、assignee 和 StagePlanner 文案仅说明历史治理过程，不再是当前状态。真实 API/Browser 集成、生产证据和安全 Gate 尚未由该回执证明。
 
 ---
 

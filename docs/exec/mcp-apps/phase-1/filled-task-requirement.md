@@ -1,7 +1,7 @@
 <!-- [输入] task_302、旧 Phase 0 结论与旧自建 AppServer 候选。 -->
 <!-- [输出] 旧 Phase 1 候选使用的 N1/C1/S1/M1/H1 技术输入与验证边界。 -->
 <!-- [范围] 历史执行输入；DEC-004/005 后不得作为当前实现或发布结论。 -->
-<!-- [同步] 2026-09-06：保留旧候选合同、失败语义与当前重验要求。 -->
+<!-- [同步] 2026-09-06：保留旧候选合同和失败语义，并链接已完成的当前 Phase 1 回执。 -->
 
 # task_302 历史执行输入
 
@@ -55,7 +55,7 @@
 
 原命令无法运行时必须保留原始失败；修正 cwd、import root 或解释器路径后的命令只证明实际覆盖的目标。
 
-## 5. 当前适用性
+## 5. 当前适用性与后续解决
 
 DEC-004 已废止自建 AppServer，DEC-005 已废止旧 Runtime 目录和 npm lock。因此当前实施必须使用：
 
@@ -64,4 +64,4 @@ DEC-004 已废止自建 AppServer，DEC-005 已废止旧 Runtime 目录和 npm l
 - [task_411-03](../../../task/task_411-03_shared_pnpm-standalone-phase0-gate.md) 的唯一 pnpm lock、standalone 和 P0 重验；
 - [task_434](../../../task/task_434_shared_official-appserver-offline-supply.md) 的官方离线制品。
 
-旧输入和旧 `Go` 只作历史对照，不能启动 Phase 2 或 production Apps。
+上述新任务输入已经实施并形成 [Phase 1 当前证据索引](index.md) 与 [Phase 0—3 当前候选统一回执](../current-candidate-validation.md)。Phase 0—3 的 provider-free 技术 preview 已完成，但旧输入和旧 `Go` 仍只作历史对照，不能授权公开应用或 production Apps；当前公开状态保持 `productionAppsEffective=false`。

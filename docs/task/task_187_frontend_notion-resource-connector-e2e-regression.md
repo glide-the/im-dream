@@ -117,7 +117,7 @@ Scope: 前端任务规划 - Notion 资源连接器页面入口、创建 / 认证
 
 ## 9. 测试策略
 
-- 构建检查: `npm run build` 通过，确保 connector 工作台和入口在当前前端编译图里仍然可用。
+- 构建检查: `corepack pnpm --dir frontend build` 通过，确保 connector 工作台和入口位于根 Next.js 16 / `frontend/app/_dream/**` 编译图中。
 - 桌面 smoke: 从 `App.tsx` 入口进入 connector 工作台，完成 create -> auth -> poll -> select -> refresh 的完整浏览器路径。
 - 移动端 smoke: 在窄宽度和较短高度下复查同一条路径，确保资源选择区和来源卡片可以滚动到达。
 - contract smoke: 确认 `resourceConnectorApi.ts` 对 backend response 的归一仍保留真实 connector UUID 和资源选择状态，不被 local fallback 覆盖掉。

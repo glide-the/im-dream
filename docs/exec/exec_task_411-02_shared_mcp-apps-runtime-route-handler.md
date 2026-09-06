@@ -3,8 +3,11 @@
 <!-- [Pos] ExecTaskAgent-owned durable report; historical MCP Apps evidence remains read-only and evidence-disabled. -->
 <!-- [Sync] 2026-09-05: record the partial implementation, focused passing evidence, and two fail-closed completion blockers. -->
 <!-- [Sync] 2026-09-06: rebased current Dream source references from the retired frontend/src tree to frontend/app/_dream. -->
+<!-- [Sync] 2026-09-06: preserve the blocked run while linking its later canonical-candidate resolution. -->
 
 # Exec Report: task_411-02 - Runtime package、薄 Route Handler 与只读 Host
+
+> **适用边界。** 本报告的 official artifact、Chat identity、pnpm lock 和 Browser 阻塞是 411-02 当次执行的真实失败，不得删除；它们已在后续 canonical pnpm + official-AppServer 候选中解决，见 [Phase 1 当前证据](mcp-apps/phase-1/index.md) 和 [当前候选统一回执](mcp-apps/current-candidate-validation.md)。当前 `frontend/packages/mcp-apps-runtime/src/**` 是合法独立的 server-only package；provider-free 技术 preview 已完成，但生产仍为 `No-Go`，`productionAppsEffective=false`。
 
 ## 1. 执行上下文
 

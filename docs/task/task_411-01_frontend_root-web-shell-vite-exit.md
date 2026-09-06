@@ -1,11 +1,15 @@
 <!-- [输入] DEC-005、现有 Dream SPA、根 frontend 结构和 Next.js 迁移评估。 -->
 <!-- [输出] 根 workspace、单一 App Router、client-only Web Shell、Vite 退出和业务回归合同。 -->
-<!-- [定位] N1 平台迁移工作项；Runtime package、最终 lock、P0 与 production Apps 不在本项完成范围。 -->
-<!-- [同步] 2026-09-06：按源码范围、技术依赖和 N1 证据重构。 -->
+<!-- [定位] 已完成 N1 平台迁移合同；保留范围、验收与回滚边界。 -->
+<!-- [同步] 2026-09-06：依据 54f3bbe5 与 N1 回执，标记根 Next/pnpm/app/_dream 迁移已完成。 -->
 
 # task_411-01：根 Web Shell 与 Vite 退出
 
 配套 requirement：[TASK-REQUIREMENT-task_411-01_frontend_root-web-shell-vite-exit.md](./TASK-REQUIREMENT-task_411-01_frontend_root-web-shell-vite-exit.md)
+
+## 当前状态
+
+本工作项已完成：`frontend/` 是唯一 pnpm workspace/Web/Next.js 16 root，`frontend/app/**` 是唯一 App Router，`frontend/app/_dream/**` 是唯一 Dream 应用源码 owner。当前验收见 [N1 Build、Health 与 Rollback](../exec/mcp-apps/phase-1/n1-build-health-rollback.md)；Vite 只允许存在于已记录的不可变回滚镜像或隔离测试 harness，不是当前开发/构建/生产入口。
 
 ## 1. 目标
 
@@ -42,4 +46,4 @@
 
 ## 6. 回滚
 
-切回已验证 Vite image；不恢复嵌套 Next、legacy Runtime 或第二 lock。数据库、用户数据、普通 MCP/Chat 和 `production_apps_effective=false` 不变。
+切回已验证 Vite image；不恢复嵌套 Next、legacy Runtime 或第二 lock。数据库、用户数据、普通 MCP/Chat 和公开状态 `productionAppsEffective=false` 不变。

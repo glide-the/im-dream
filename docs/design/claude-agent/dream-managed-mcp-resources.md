@@ -5,6 +5,7 @@
 <!-- [同步] 2026-08-25：新增独立中文业务交互时序图集，并将详情页合同校准为自动 `force=false` inventory、无刷新按钮。 -->
 <!-- [同步] 2026-08-27：capability 仅缓存精确验证成功结果；PostgreSQL 瞬时查询失败与真实 schema 缺失使用不同安全错误，Resources 无按钮自动重试。 -->
 <!-- [同步] 2026-09-06：允许与 Dream 后端同网络命名空间的显式 IPv4/IPv6 loopback MCP endpoint，同时保留其他 non-global 字面 IP、URL 用户信息/query/fragment 与 redirect 拒绝。 -->
+<!-- [同步] 2026-09-06：将 2026-08-25 Vite/npm 回执标为历史，并链接当前 Next.js/pnpm source ownership；管理面 Python owner 不变。 -->
 
 # Dream 托管 MCP Resources：管理链路去 CLI 化设计
 
@@ -13,6 +14,7 @@
 > 目标 capability：`dream.managed-mcp-resources.v1`，version `1`，`contract_sha256=746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a`
 > 核心结论：Resources 管理面以 PostgreSQL 为唯一配置源，以标准 Python MCP SDK 直接完成发现；Chat 新建和 resume 每个 turn 注入一次数据库一致性快照。Claude Agent SDK 公共接口无需修改；clean-room Runtime 已仅补齐 legacy SSE config/transport 兼容，不接管管理职责。本文不承诺 MCP 协议 session 跨进程恢复。
 > 配套图集：[Dream 托管 MCP 业务交互时序图](./dream-managed-mcp-business-sequences.md)
+> 当前 Web/Node source ownership：[Dream Web 当前 Next.js 架构](./dream-frontend-node-framework-migration-assessment.md)。下述 2026-08-25 前端拓扑与命令仅为当时真实回执，不是当前操作指南。
 
 ## 证据标记
 
@@ -590,12 +592,12 @@ claude_mcp.api
 | Migration | fixture CLI config、重复跑 no-op、同名冲突、不可读 credential、rollback watermark | 指定真实账户先 dry-run/receipt，再 cutover 对账 |
 | Frontend | Vitest/RTL + `frontend/e2e/claude-mcp-resources.spec.ts` provider-free | `claude-mcp-resources-real.spec.ts`、`claude-mcp-chat-real.spec.ts`、`claude-mcp-cancel-real.spec.ts`、`claude-mcp-page-performance-real.spec.ts` |
 
-**真实业务边界**：已按既有授权使用现有真实账户与 Deck，通过正常 Vite、Dream、Admin/Gateway 与当前 PostgreSQL 的公开入口完成匿名 Streamable HTTP、server-owned stdio、legacy SSE、可见 cancel、页面性能、Admin 可见页和 Comfy OAuth logout/login/自动 callback/两次自然到期 refresh。测试创建的 Thread、Gateway request 与 Token ledger 记录保留；临时 Server 在流程结束删除。额度恢复后，浏览器在既有真实 Thread 中完成只读 `get_queue` 和无工具续聊；OAuth refresh、工具结果、最终文本、SSE 与结算均由公开入口和正常业务库共同证明，不以 fixture 代替。
+**2026-08-25 真实业务边界（历史 Web 入口）**：已按既有授权使用现有真实账户与 Deck，通过当时正常 Vite、Dream、Admin/Gateway 与 PostgreSQL 的公开入口完成匿名 Streamable HTTP、server-owned stdio、legacy SSE、可见 cancel、页面性能、Admin 可见页和 Comfy OAuth logout/login/自动 callback/两次自然到期 refresh。测试创建的 Thread、Gateway request 与 Token ledger 记录保留；临时 Server 在流程结束删除。额度恢复后，浏览器在既有真实 Thread 中完成只读 `get_queue` 和无工具续聊；OAuth refresh、工具结果、最终文本、SSE 与结算均由公开入口和正常业务库共同证明，不以 fixture 代替。该回执不能替代当前 Next.js 候选的真实业务复验。
 
 截至 2026-08-25 的隔离技术回执：
 
 - Dream 最新后端全量：`2019 passed, 24 skipped, 607 subtests passed`，exit 0；其中覆盖 DB-only CRUD/CAS、credential/snapshot invalidation、OAuth metadata 加密恢复、refresh/registration staging、交互 OAuth 独立 timeout/request/cancel ownership、三 transport discovery、同连接 tools/resources/prompts cursor 分页及 page/item 上限、partial/cancel、Chat new/resume 与 Runner/workspace Path 清理。一次误用仓库根 pytest 范围收集真实 workspace 内 749 份同名第三方 skill 测试，收集阶段 exit 2；改用正式 `backend/tests` 根后全量通过，失败记录不抹除。分页聚焦首轮曾因测试错误假设协程固定交错而 `30 passed, 1 failed`，改为顺序无关的 cursor 集合合同后为 `31 passed`；随后以标准 MCP Server + 真实 stdio ClientSession 验证两页合计 2 tools/2 resources/2 prompts，分页相关聚焦 `15 passed`，无残留 fixture 子进程。
-- Frontend：`npm run build` exit 0，`npm run lint` exit 0（19 条既有 Hook warning、0 error）；provider-free Playwright `claude-mcp-resources.spec.ts` 为 `2 passed`，覆盖自动 callback 的 code/state 页面与 storage 脱敏，以及 create→OAuth→inventory→CAS update→logout→delete。真实 spec 已删除 redirect 文件、输入框和手工提交 fallback，`playwright --list` 成功收集 1 个完整流程；Provider consent 后只能等待同源 callback 自动提交/关闭。自动 callback 首轮完整 journey 因 popup API 未使用 context route 超时，第二轮因 popup request 关闭后读取 headers 失败；harness 改为 context 级即时 header capture 后通过，失败记录不抹除。
+- Frontend（2026-08-25 历史入口）：当时的 build 与 lint 均 exit 0（19 条既有 Hook warning、0 error）；provider-free Playwright `claude-mcp-resources.spec.ts` 为 `2 passed`，覆盖自动 callback 的 code/state 页面与 storage 脱敏，以及 create→OAuth→inventory→CAS update→logout→delete。真实 spec 已删除 redirect 文件、输入框和手工提交 fallback，`playwright --list` 成功收集 1 个完整流程；Provider consent 后只能等待同源 callback 自动提交/关闭。自动 callback 首轮完整 journey 因 popup API 未使用 context route 超时，第二轮因 popup request 关闭后读取 headers 失败；harness 改为 context 级即时 header capture 后通过，失败记录不抹除。
 - MCP 详情无按钮修复：详情页进入后自动用 `force=false` 加载 inventory，配置/credential revision 变化时精准重载，并以 request sequence 丢弃过期响应；页面不再显示刷新/重试 inventory 控件。最终 Provider-free 浏览器回归 `2 passed (6.5s)`。真实已登录浏览器中，SeetaCloud 匿名 Server 自动显示 `40 tools/0 resources/0 prompts`，Comfy OAuth Server 自动显示 `41 tools/24 resources/10 prompts`；缓存命中后的可见 Tools 时间分别为 `602 ms` 与 `804 ms`，认证方式选择控件和 inventory 操作按钮均为 0。
 - Admin：managed schema + 既有 Dream schema 两文件 `4 passed`；DB build/typecheck、`drizzle-kit check`、`git diff --check` 均 exit 0。明确命名隔离库 `ink_mcp_schema_test_20260825_managed_mcp` 完成空库 39 个 migration replay、`migrate:check current`、第二次幂等运行，随后删除。正常本机 `127.0.0.1:54329/ink-memory` 已通过 `pnpm --filter @ink-memory/db migrate --through 0038_dream_managed_mcp_resources` 前向应用；以运行中 Dream 的同一 DSN 显式传 `MIGRATION_DATABASE_URL` 重跑为 39/39 current，latest=`0038_dream_managed_mcp_resources`。未显式 migration DSN 的两次 check 均被 embedded PID 66653 ownership guard 正确拒绝且没有写库，失败记录不抹除。
 - Runtime：SSE 增量补丁已无损整合到原 `codex/mcp-auth-routing-refactor` 工作树，没有覆盖既有 auth/security 修改；聚焦 MCP/OAuth/management `29 passed`、auth compat `46 passed/6 skipped`、lint 194 files/15 JSON、build 与 `git diff --check` 均 exit 0。此前隔离 worktree 的首次依赖缺失失败仍保留为历史回执。
@@ -647,7 +649,7 @@ claude_mcp.api
 | 5 Server discovery 连接 | list + 逐项 get 重复，约 `2N` | 5，恰好 `N` | -50% |
 | 5 Server执行 | 串行 | 上限 5 并行 | 批次化 |
 
-正常 topology（Vite `5173` → Dream `8765` → PostgreSQL `54329` → 公开 DeepWiki）实测如下。列表每组 30 样本；强制 inventory 每组 10 样本；缓存命中每组 20 样本。指定 actor 原有 2 个迁移配置保持不变，1/5 benchmark 只把精确临时 Server ID 传给 bulk discovery；结束后已删除 5 个临时 Server。
+2026-08-25 当时的正常 topology（Vite `5173` → Dream `8765` → PostgreSQL `54329` → 公开 DeepWiki）实测如下。该拓扑仅解释历史性能样本；当前 Web 入口已是 Next.js。列表每组 30 样本；强制 inventory 每组 10 样本；缓存命中每组 20 样本。指定 actor 原有 2 个迁移配置保持不变，1/5 benchmark 只把精确临时 Server ID 传给 bulk discovery；结束后已删除 5 个临时 Server。
 
 | 场景 | P50 | P95 | 备注 |
 |---|---:|---:|---|

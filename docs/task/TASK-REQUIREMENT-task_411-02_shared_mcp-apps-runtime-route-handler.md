@@ -1,9 +1,11 @@
 <!-- [输入] task_411-02、411-01 current root、DEC-002/004/005 和官方离线 artifact。 -->
 <!-- [输出] R2-graph—R2-gate 的直接实施、验证和回滚要求。 -->
-<!-- [定位] Phase 1 Runtime/Host requirement；只包含技术依赖、范围、验收和回滚。 -->
-<!-- [同步] 2026-09-06：按源码闭集、技术依赖、当前证据和 run-owned 资源重建。 -->
+<!-- [定位] 历史实施 requirement；当前状态以 C1/M1/H1 回执为准。 -->
+<!-- [同步] 2026-09-06：标记 requirement 已执行，并链接唯一 sibling Runtime 证据。 -->
 
 # TASK-REQUIREMENT：Runtime、Route Handler 与只读 Host
+
+> 本 requirement 已执行完毕，不得用它重建 `app/_dream/server` Runtime 或第二实现。当前验收见 [C1/M1](../exec/mcp-apps/phase-1/c1-m1-contracts.md)、[H1](../exec/mcp-apps/phase-1/h1-browser.md) 和 [当前候选总回执](../exec/mcp-apps/current-candidate-validation.md)。
 
 1. 记录工作树并协调目标文件；保留现有生成物和并发改动。
 2. 只在 `frontend/packages/mcp-apps-runtime/**` 建立 Node Runtime；公开入口显式 server-only，composition root 持有进程级 manager。

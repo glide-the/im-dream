@@ -1,13 +1,13 @@
 <!-- [输入] MCP Apps 系统架构执行清单、DEC-002/004/005、Phase 0/1 历史证据与当前实现候选。 -->
 <!-- [输出] Phase 0→3 的技术执行顺序、必要依赖、验收证据和回滚边界。 -->
 <!-- [范围] 只描述产品实现、技术依赖、验证关系与回滚边界。 -->
-<!-- [同步] 2026-09-06：按技术依赖和当前证据重建 Phase 0→3 执行计划。 -->
+<!-- [同步] 2026-09-06：依据 54f3bbe5 和统一回执，将 Phase 0—3 收敛为已验证技术 preview 与独立生产 No-Go。 -->
 
 # MCP Apps Phase 0→3 技术执行计划
 
 本计划只以当前候选的可观察证据判断进度。所有阶段继续遵守：
 
-- `production_apps_effective=false`，直至生产发布条件由当前候选的完整证据独立证明。
+- `productionAppsEffective=false`，直至生产发布条件由当前候选的完整证据独立证明。
 - Browser 只连接 IM 同源 Node endpoint，不获得上游 URL、headers、env、credential 或完整配置快照。
 - Python 只提供经过服务端鉴权的最小配置投影，不参与 iframe 通信。
 - Node Runtime 是唯一 MCP 上游连接 owner；Browser 不直连真实 MCP Server。
@@ -17,8 +17,9 @@
 ## 1. 来源与当前证据
 
 - [系统架构执行清单](../design/claude-agent/mcp-apps-system-architecture-execution-checklist.md)：50 个 P0/N1/C1/S1/M1/H1/I2/G3 工作项和完整验收边界。
-- [Phase 0 证据索引](../exec/mcp-apps/phase-0/index.md)：旧 npm lock 下的历史 PoC 证据；只能用于追溯，不代表当前 pnpm lock 通过。
-- [Phase 1 历史证据索引](../exec/mcp-apps/phase-1/index.md)：旧目录和旧实现路线的历史记录；不能替代当前 canonical package、官方制品和当前 Browser 证据。
+- [Phase 0 证据索引](../exec/mcp-apps/phase-0/index.md)：当前 pnpm lock/source/Chrome 候选的 P0-01—P0-08 回执和 `Go`。
+- [Phase 1 证据索引](../exec/mcp-apps/phase-1/index.md)：canonical package、官方制品和当前 Browser 的 N1/C1/S1/M1/H1 回执。
+- [Phase 0—3 统一回执](../exec/mcp-apps/current-candidate-validation.md)：同一候选的 provider-free 技术结论和 production No-Go 边界。
 - [DEC-005 根 Web Shell 任务](../task/task_411-01_frontend_root-web-shell-vite-exit.md)：`frontend/` 根 workspace、单一 App Router 和 Vite 退出的技术合同。
 - [Runtime 与 Route Handler 任务](../task/task_411-02_shared_mcp-apps-runtime-route-handler.md)：Node Runtime、Python 投影、Chat result identity、Host 与只读闭环的技术合同。
 - [pnpm/standalone/P0 任务](../task/task_411-03_shared_pnpm-standalone-phase0-gate.md)：唯一 lock、root standalone 和同 lock P0 重验合同。
@@ -61,7 +62,7 @@ flowchart TD
 
 ## 4. Phase 0：协议、安全与最小 PoC
 
-Phase 0 必须在当前 pnpm lock、当前 Browser 入口和当前源码上重建证据。旧 npm lock 的结果保留为历史事实。
+Phase 0 已在当前 pnpm lock、Browser 入口和源码上重建证据；旧 npm lock 结果仅保留为历史事实。下表保留验收合同，当前通过证据见 [Phase 0 索引](../exec/mcp-apps/phase-0/index.md)。
 
 | ID | 工作项 | 必要依赖 | 当前候选验收 |
 |---|---|---|---|
@@ -133,7 +134,7 @@ Phase 0 回滚只删除本轮隔离 PoC、测试配置和具名临时资源；�
 - 页面 `tools/call` 全部被拒绝且上游调用计数为零。
 - refresh/reconnect 不重放首次工具调用，identity mismatch 只移除 Apps 投影。
 - sandbox、CSP、来源校验、权限正反向 probe 和 teardown 通过真实兼容 Chrome。
-- 所有验证前后 `production_apps_effective=false`。
+- 所有验证前后公开状态 `productionAppsEffective=false`。
 
 Phase 1 回滚先关闭 Apps effective flag，再卸载 Host/iframe/Browser Client、拒绝旧 Node session并回收无引用 connector；必要时回退已验证 Web image。普通工具结果继续显示。
 
@@ -165,17 +166,17 @@ Phase 2 只有在 Phase 1 当前候选证据完整后才能验证。
 | G3-06 | resource 大小、超时、并发和网络访问策略。 | 超限只影响目标请求，不传播到 Agent turn。 |
 | G3-07 | 仅在出现多 Host 或跨网络真实需求时评估独立 Bridge/Gateway。 | 新拓扑必须另有 ADR；默认继续使用 Next Node Runtime。 |
 
-## 8. 当前实施顺序
+## 8. 当前状态与后续依赖
 
-1. 固定 canonical tree、单一 pnpm lock 和 Runtime package graph。
-2. 完成官方 AppServer 的可复现离线供应证据。
-3. 完成 C1 Python 最小投影、M1 进程级 Runtime 与 H1 server-owned result identity。
-4. 完成只读 Browser Host、sandbox proxy、fallback、zero-call 和 lifecycle。
-5. 在同一当前候选上运行 root standalone 与 P0-01→P0-04→P0-08。
-6. 汇总 Phase 1 当前候选的 Backend、Node、Browser、Next 和供应链证据。
-7. Phase 1 证据完整后实施 I2；I2 完成后实施 G3。
+| 范围 | 当前状态 | 证据/缺口 |
+|---|---|---|
+| N1 / root Web | 已验证 | Next.js 16 + pnpm workspace；`frontend/app/_dream/**` 是唯一 Dream 应用源码；root build/start/standalone 通过。 |
+| C1 / M1 / H1 | 已验证技术 preview | `frontend/packages/mcp-apps-runtime/src/**` 是唯一 Node Runtime owner；Backend/Node/Browser 回执完整。 |
+| P0 / S1 | 已验证 | 当前 pnpm lock 的 P0=`Go`；未修改官方 `1.7.5` 制品通过离线与协议 smoke。 |
+| I2 / G3 | 已验收技术 preview | 低风险交互、Chat ingress、actor-effective `window.im`、manifest/lifecycle/隔离/诊断/资源策略已有回执；高风险仍拒绝。 |
+| 公开应用 | 生产 No-Go | `productionAppsEffective=false`；未做真实账号、真实外部 Server、OAuth/credential、生产观测和回滚验收。 |
 
-步骤 1—6 可以在不互相覆盖文件的前提下准备独立测试，但验收结论必须基于同一源码、lock、配置和制品指纹。
+后续工作不是重复执行已关闭的派工链，而是在源码、lock、制品或策略发生变化时重跑相应门禁；若要生产启用，必须新增独立的真实业务发布验收，不得用本地 preview 证据替代。
 
 ## 9. 工作树、证据和回滚
 

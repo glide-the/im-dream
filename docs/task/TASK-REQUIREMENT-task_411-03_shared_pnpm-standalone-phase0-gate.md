@@ -1,9 +1,11 @@
 <!-- [输入] task_411-03、411-01/02 当前候选和 Phase 0 harness。 -->
 <!-- [输出] R3-lock—R3-production-off 的直接实施与验证要求。 -->
-<!-- [定位] pnpm/standalone/P0 requirement；只包含技术依赖、范围、验收和回滚。 -->
-<!-- [同步] 2026-09-06：改用唯一 lock、同一候选证据和精确回滚。 -->
+<!-- [定位] 历史实施 requirement；当前状态以 P0/N1 回执为准。 -->
+<!-- [同步] 2026-09-06：标记 pnpm/standalone/P0 requirement 已执行。 -->
 
 # TASK-REQUIREMENT：pnpm、standalone 与 P0 重验
+
+> 本 requirement 已执行完毕。当前依赖指纹、命令与结论见 [Phase 0 索引](../exec/mcp-apps/phase-0/index.md) 和 [N1 回执](../exec/mcp-apps/phase-1/n1-build-health-rollback.md)；旧 npm lock 仅作历史证据。
 
 1. 核对 411-01/02 的 canonical tree、Runtime/Route graph、Host、result identity 和官方 artifact。
 2. 创建或更新唯一 `frontend/pnpm-lock.yaml`，以 frozen install 证明依赖闭包；退役旧 npm lock。

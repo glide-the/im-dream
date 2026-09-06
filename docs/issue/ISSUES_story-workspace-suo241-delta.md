@@ -1,4 +1,11 @@
-# Story Workspace Issue 清单（SUO-241 增量 — Episodes 元信息渲染与审阅闭环）
+<!-- [输入] 2026-08-01 SUO-241 Episodes 设计增量和生成期工作拆解。 -->
+<!-- [输出] 历史增量范围、规则、安全约束与验收意图。 -->
+<!-- [范围] 不作为当前派工、审批、assignee、checkout 或实现状态合同。 -->
+<!-- [同步] 2026-09-06：明确历史适用性并链接当前 Story Workspace 证据入口。 -->
+
+# Story Workspace Issue 清单（SUO-241 历史增量）
+
+> 本文中的 IssueDispatcher、分发、owner 与批准链只记录 2026-08-01 的设计拆解。现行 Dream Web owner 是 `frontend/app/_dream/**`，由根 Next.js 16 + pnpm workspace 构建；当前实现、技术回执和 Browser/Network 缺口统一从 [Story Workspace 历史总索引的当前状态区](ISSUES_story-workspace.md#当前实现证据与缺口) 进入。本文的业务规则、安全约束和失败条件继续有效，但不代表功能已公开或已在生产启用。
 
 > **增量 Issue**: SUO-241  
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
@@ -24,7 +31,7 @@
 - 下游阶段：`task`
 - 下游 Agent：`TaskDesignAgent`
 - 共享设计稿来源：`docs/design/story-workspace/`
-- 是否作为当前实现合同：是
+- 是否作为当前实现合同：否；仅作历史增量与验收意图
 - 备注：
   - 本文档由 SUO-241 设计增量拆解生成，作为 task 阶段任务规划输入。
   - 本文档为**增量附录**：不重复 SUO-201 / SUO-226 / SUO-230 已稳定基线内容，仅追加 SUO-241 引入的新 Issue。

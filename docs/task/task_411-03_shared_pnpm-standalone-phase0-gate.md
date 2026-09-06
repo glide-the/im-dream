@@ -1,11 +1,15 @@
 <!-- [输入] 411-01/02 当前实现、唯一 pnpm workspace、DEC-002/004/005 和 Phase 0 harness。 -->
 <!-- [输出] 最终 pnpm lock、根 build/start/standalone、同 lock P0-01/P0-04/P0-08 与回滚证据。 -->
-<!-- [定位] N1 release/P0 集成工作项；不启用 production Apps。 -->
-<!-- [同步] 2026-09-06：按唯一 lock、当前候选和 P0 证据重构。 -->
+<!-- [定位] 已完成 pnpm/standalone/P0 集成合同；不启用 production Apps。 -->
+<!-- [同步] 2026-09-06：依据 54f3bbe5 与 P0/N1 回执标记当前候选已验证。 -->
 
 # task_411-03：pnpm、root standalone 与 Phase 0 重验
 
 配套 requirement：[TASK-REQUIREMENT-task_411-03_shared_pnpm-standalone-phase0-gate.md](./TASK-REQUIREMENT-task_411-03_shared_pnpm-standalone-phase0-gate.md)
+
+## 当前状态
+
+当前唯一 `frontend/pnpm-lock.yaml`、frozen install、根 Next build/standalone 和同 lock P0-01—P0-08 已验证，P0-08=`Go`。证据见 [Phase 0 索引](../exec/mcp-apps/phase-0/index.md) 与 [N1 回执](../exec/mcp-apps/phase-1/n1-build-health-rollback.md)。该 `Go` 只用于技术 preview，公开应用仍返回 `productionAppsEffective=false`。
 
 ## 1. 目标
 

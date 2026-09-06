@@ -1,7 +1,7 @@
 <!-- [输入] task_302 旧自建 AppServer 路线及其 Phase 1 验证回执。 -->
 <!-- [输出] 旧 N1/C1/S1/M1/H1 实现、成功、失败和废止原因的历史记录。 -->
 <!-- [范围] 只作历史技术证据；DEC-004/005 已使旧目录、自建 Server、npm lock 与 P1 结论失效。 -->
-<!-- [同步] 2026-09-06：保留真实命令回执，并明确当前候选必须重新验收。 -->
+<!-- [同步] 2026-09-06：保留真实命令回执，并链接已完成的当前 canonical 候选验收。 -->
 
 # task_302 Phase 1 历史执行证据
 
@@ -63,16 +63,11 @@
 | H1-01—H1-08 | pass | 旧 Host/Browser 证据；当前 result identity、官方制品和 Browser 入口必须重验。 |
 | P1 | historical Go | 只适用于旧 preview；不能授权当前 Phase 2 或生产发布。 |
 
-## 6. 当前验收要求
+## 6. 后续解决与当前边界
 
-当前 Phase 1 需要在同一源码、pnpm lock 和官方制品指纹上完成：
+当前 canonical 候选已在同一 pnpm lock、根 Next、官方 AppServer 制品和源码指纹上完成 N1/C1/S1/M1/H1 provider-free 验收，见 [Phase 1 当前证据索引](mcp-apps/phase-1/index.md) 与 [当前候选统一回执](mcp-apps/current-candidate-validation.md)。这些回执覆盖 root build/standalone、Runtime contracts、官方制品、Browser Host、server-owned result identity、sandbox/lifecycle 和 teardown。
 
-1. root Next build/start/standalone 与 canonical route manifest；
-2. C1/M1 当前 focused tests、secret boundary、revision/expiry 和 teardown；
-3. 官方制品离线供应、标准 Client smoke 与 IM Browser→Node→Manager 闭环；
-4. server-owned result identity 的 live/persisted/refresh/reconnect 验证；
-5. Chrome sandbox、来源校验、权限 probe、zero-call、fallback 和 lifecycle；
-6. 全程 `production_apps_effective=false`。
+该结果是技术 preview，不是公开应用或生产验收。真实账号、真实外部 MCP Server、真实 OAuth/权限和生产运维回滚尚未验收；`productionAppsEffective=false`，Production 仍为 `No-Go`。
 
 ## 7. 回滚
 

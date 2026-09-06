@@ -1,4 +1,10 @@
+<!-- [Input] Dated task_205b contract-migration implementation, commands, and acceptance evidence. -->
+<!-- [Output] Immutable historical execution receipt with its completed scope bounded to the recorded checks. -->
+<!-- [Pos] Historical Exec evidence; not a current build, deploy, or task-status contract. -->
+<!-- [Sync] 2026-09-06: preserve the original receipt while separating it from current Next.js/pnpm guidance. -->
 # Exec Report: task_205b - Story Workspace 合同 canonical 迁移与 Python 启动恢复
+
+> **历史执行回执（2026-08-01）。** 本文中的 npm/Vite、端口、Paperclip 派工、checkout 与 assignee 只记录当时实际执行事实，不是当前工作状态或实现入口。现行 frontend 为 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`；当前架构见 [Dream frontend Node framework migration assessment](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md)。下文命令和结果按原样保留；本报告的 `completed` 只证明当时列明的合同迁移验收。
 
 ## 1. 执行上下文
 

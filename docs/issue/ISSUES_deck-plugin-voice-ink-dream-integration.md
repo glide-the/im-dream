@@ -1,4 +1,11 @@
-# Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成 Issue 清单
+<!-- [输入] 2026-08-01 Voice Decks / Deck Plugin / ClaudeAgent 集成设计拆解。 -->
+<!-- [输出] 历史工作分解、范围、决策缺口和安全约束。 -->
+<!-- [范围] 不作为当前派工、审批、assignee、checkout 或生产启用合同。 -->
+<!-- [同步] 2026-09-06：以实际 task/exec 回执取代生成期分发状态。 -->
+
+# Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成 Issue 清单（历史拆解）
+
+> 本文中的 IssueDispatcher/CEOOrchestrator、分发去向、待确认与执行状态仅记录 2026-08-01 的拆解过程。前端 `task_211`—`task_213` 的当时实现与静态验证分别见 [Plugin Admin 回执](../exec/exec_task_211_frontend_plugin_admin_ui.md)、[Deck binding 回执](../exec/exec_task_212_frontend_deck_editor_plugin_binding.md) 和 [Story Workspace status 回执](../exec/exec_task_213_frontend_story_workspace_status.md)；这些证据不等同于真实 API/Browser、公开应用或生产启用。后续工作应按源码能力、真实依赖、安全 Gate 和新证据推进。
 
 > Issue: SUO-237 (修订版)
 > 来源设计稿: SUO-218 / SUO-236 (deck-plugin-voice-ink-dream-integration.md)
@@ -30,7 +37,7 @@
 - 下游 Agent:
   - `TaskDesignAgent`
 - 共享设计稿来源: `docs/design/`
-- 是否作为当前实现合同: 是
+- 是否作为当前实现合同: 否；仅作历史拆解与风险索引
 - 备注:
   - 本文档由 SUO-218 设计稿拆解生成，经 SUO-236 按 SUO-235 Deck-only 裁决修订。
   - 所有 Desk 引用已统一为 Deck；运行配置、不可变快照、secret-ref、权限、preflight、审计和回滚合同归属 Deck。

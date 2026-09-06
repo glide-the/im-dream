@@ -7,6 +7,7 @@
 > [Sync] 2026-08-23: Mermaid 与 Workspace 图片共用同一 Markdown media frame 和沉浸式预览骨架；复制按钮旁增加放大入口。
 > [Sync] 2026-08-23: 共享媒体查看区域增加非 passive 滚轮缩放，复用底部 50%–200% 状态并阻止背景滚动。
 > [Sync] 2026-08-23: 缩放目标收敛为实际图片或 Mermaid 图形，中央 Paper 画布保持适配视口后的固定尺寸。
+> [Sync] 2026-09-06: build/lint evidence now uses the sole pnpm/Next.js frontend entry.
 
 # Chat Markdown Mermaid 渲染设计
 
@@ -92,4 +93,4 @@ PNG 导出实现要点：
 
 - 当前共享链由 `ChatMarkdown.tsx` 统一承载 Mermaid 与 exact Workspace URI component routing；Workspace 解析组件不复制 `ReactMarkdown`。
 - 不影响后端与 SSE 事件契约。
-- 验证：`npm run build`（tsc + vite）与 `npm run lint` 通过；真实 Chromium 确认含 ```` ```mermaid ```` 的回答渲染为 SVG，放大按钮位于复制按钮之后，Mermaid/Workspace 外框计算样式一致；在 50%/100%/110%/200% 对比边界框，Paper 画布宽高稳定且实际图片/图形按比例变化；两者的媒体弹层均有下载/关闭/缩放且无 React 嵌套报错，普通代码块不受影响。
+- 验证：`pnpm --dir frontend build` 与 `pnpm --dir frontend lint` 通过；真实 Chromium 确认含 ```` ```mermaid ```` 的回答渲染为 SVG，放大按钮位于复制按钮之后，Mermaid/Workspace 外框计算样式一致；在 50%/100%/110%/200% 对比边界框，Paper 画布宽高稳定且实际图片/图形按比例变化；两者的媒体弹层均有下载/关闭/缩放且无 React 嵌套报错，普通代码块不受影响。

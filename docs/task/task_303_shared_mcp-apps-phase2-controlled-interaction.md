@@ -1,9 +1,13 @@
 <!-- [输入] Phase 1 当前候选证据、MCP Apps client-host 合同、DEC-002 与服务端权限策略。 -->
 <!-- [输出] I2-01—I2-07 受控双向交互的实现、验收和回滚合同。 -->
-<!-- [定位] Phase 2 技术工作项；只开放策略允许的低风险页面能力。 -->
-<!-- [同步] 2026-09-06：按真实 Phase 1 依赖与 I2 验收重建工作项。 -->
+<!-- [定位] 已完成的 Phase 2 provider-free 技术合同；只开放策略允许的低风险页面能力。 -->
+<!-- [同步] 2026-09-06：依据当前候选统一回执标记 I2 技术 preview 已完成。 -->
 
 # task_303：MCP Apps Phase 2 受控双向交互
+
+## 当前状态
+
+I2-01—I2-07 已在 canonical pnpm/official-AppServer 候选上完成 provider-free 技术验证，见 [Phase 0—3 当前候选统一回执](../exec/mcp-apps/current-candidate-validation.md)。该结果不证明真实外部 Server、账号/OAuth、公开应用或生产运维可用；`productionAppsEffective=false`。
 
 ## 1. 目标与边界
 

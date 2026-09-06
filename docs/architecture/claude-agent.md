@@ -2,15 +2,17 @@
 <!--
 [Input] Claude Agent application/kit runtime, SDK/CLI contracts, and deployment configuration.
 [Output] Document the current Claude Agent layers, lifecycle, configuration, data flow, and isolation boundaries.
+[Pos] Claude Agent architecture overview; focused interaction and runtime details remain in docs/design/claude-agent/.
 [Sync] 2026-08-22: add legacy-MCP default-off and process-local concurrency/memory admission contracts.
 [Sync] 2026-08-22: document the engine-prompt workspace:// output contract and owner-bound Workspace content bridge used by Chat Markdown.
 [Sync] 2026-08-22: document the v2.1-scoped Workspace thumbnail and shared accessible full-size modal presentation.
 [Sync] 2026-08-23: document authenticated in-memory Workspace image resolution for the existing Chat long-image exporter.
 [Sync] 2026-08-28: align env/desired/public replacement/effective snapshots to positive JSON-safe integers, exact combined-memory bytes, and monotonic no-restart LKG refresh.
 [Sync] 2026-08-31: remove the retired legacy session runtime from current architecture boundaries.
+[Sync] 2026-09-06: name the self-owned SDK/Runtime contract explicitly and align the Web caller with the sole Next.js app/_dream source tree.
 -->
 
-**模块目标**：为 Ink & Memory 提供基于 Claude Code SDK 的流式 AI 写作助手后端能力，  
+**模块目标**：为 Ink & Memory 提供基于自有 `ink-claude-dream-agent-sdk`（公共 import 为 `claude_agent_sdk`）和 manifest-qualified clean-room Runtime 的流式 AI 写作助手后端能力，
 支持多轮对话、会话保活（Flyweight 会话池）、工具确认、SSE 流式输出，  
 作为 Voice/Writing/Chat 的单一 Thread SSE Agent runtime，不依赖第二套会话注册表。
 
@@ -90,7 +92,7 @@ ThreadFactory (thread_factory.py)
 | 阶段 | 职责 | 触发时机 |
 |------|------|----------|
 | Phase 1 | 组装 system_prompt、获取近期写作会话上下文 | 每轮请求（首轮完整构建，续轮复用缓存） |
-| Phase 2 | 创建 ClaudeAgentRunner（Claude Code SDK 实例）| 首次 session 创建；TTL 过期后重建 |
+| Phase 2 | 创建 ClaudeAgentRunner（自有 Claude Agent SDK client）| 首次 session 创建；TTL 过期后重建 |
 | Phase 3 | 执行流式对话、持久化消息、发送 SSE 事件 | 每轮请求 |
 | Phase 4 | 触发 SessionObserver.on_session_ended | 仅在销毁时（close_thread / TTL 驱逐 / aclose）|
 
@@ -125,12 +127,12 @@ ThreadFactory (thread_factory.py)
 
 ## 5. 配置与环境变量
 
-所有运行时配置通过环境变量解析，不硬编码业务值。  
-Ink & Memory 的 Claude Code SDK 鉴权和模型配置直接使用 `ANTHROPIC_*`；`INK_AGENT_*` 仅用于本项目的会话和 Mem0 配置。
+所有运行时配置通过受控环境、Admin model catalog 或 resource-policy snapshot 解析，不硬编码业务值。
+SDK 的 Provider/Gateway 连接使用服务端允许的 `ANTHROPIC_*` 投影；`INK_AGENT_*` 只承载 Dream-owned Agent 运行策略。浏览器、用户 env、Deck、Plugin、Workspace 和 ambient parent env 均不得覆盖 server-owned effort/context/compact/model-max-output 键。
 
 ### 5.1 Agent SDK 配置
 
-直接在 `backend/.env` 中配置 Claude Code SDK 所需的 `ANTHROPIC_*` 变量；`server/sdk_env.py` 会把这些 key 合并到 SDK 子进程环境。
+服务端可在 `backend/.env` 或部署 Secret 中配置允许的 SDK/Gateway `ANTHROPIC_*` 连接变量；`server/sdk_env.py` 在启动子进程前执行 allowlist、scrub 和最终 server-owned snapshot 合并。
 
 | 环境变量（`.env`）| 默认值 | 用途 |
 |-------------------|--------|------|

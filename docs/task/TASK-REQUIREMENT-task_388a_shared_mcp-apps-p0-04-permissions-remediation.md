@@ -1,9 +1,11 @@
 <!-- [输入] task_388a、DEC-002 和当前 task_411-03。 -->
 <!-- [输出] P0-04 当前候选的权限与隔离验收摘要。 -->
-<!-- [定位] 历史 requirement；当前实施以 task_411-03 为准。 -->
-<!-- [同步] 2026-09-06：按真实 Browser 安全证据重建要求。 -->
+<!-- [定位] 已执行的历史 requirement；当前结果以 Phase 0 P0-04 回执为准。 -->
+<!-- [同步] 2026-09-06：链接已完成的真实 Browser 安全证据。 -->
 
 # TASK-REQUIREMENT：P0-04 当前候选
+
+> 本 requirement 已执行，不是新的派工入口。当前结果见 [P0-04 当前证据](../exec/mcp-apps/phase-0/evidence/p0-04-security-isolation.md)；`productionAppsEffective=false`。
 
 在当前 pnpm lock 和本机兼容 Chrome 上验证：
 

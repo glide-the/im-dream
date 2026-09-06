@@ -5,6 +5,7 @@
 <!-- [Pos] Claude Agent Chat 历史消息性能修复的交互与技术设计真相源；实现、测试和性能验收必须与本文同步。 -->
 <!-- [Sync] 2026-09-02: 基于全链路与超大 JSON 证据建立最小方案；选择稳定分页与协议语义型历史 turn 折叠，并由 Admin 0042 发布精确 keyset 索引 capability。 -->
 <!-- [Sync] 2026-09-02: 单条 assistant 大 JSON 的后续 final projection/按 message_id 过程读取由 chat-history-final-projection.md 接管；本文保留分页、排序和首轮 DOM 基线。 -->
+<!-- [Sync] 2026-09-06: current frontend labels/build evidence use the sole Next.js app/_dream and pnpm root; 2026-09-02 Vite topology remains explicitly historical. -->
 
 ## 背景与问题
 
@@ -205,7 +206,7 @@ USING btree (thread_id, created_at DESC NULLS LAST, id DESC NULLS LAST);
 
 ### 浏览器分层基准
 
-使用仓库 Playwright 1.62.1、本机 Chrome、Vite 源组件 `ChatMarkdown`，按历史样本 P95 与最大值生成等体积合成内容。每个样本同步 commit 并强制读取布局；结果仅用于分层，不作为固定 SLA：
+使用仓库 Playwright 1.62.1、本机 Chrome、`frontend/app/_dream` 源组件 `ChatMarkdown`，按历史样本 P95 与最大值生成等体积合成内容。每个样本同步 commit 并强制读取布局；结果仅用于分层，不作为固定 SLA：
 
 | 输入 | JSON.parse | 单 `<pre>` + layout | JSON fenced Markdown | 大量 Markdown 行 |
 | --- | ---: | ---: | ---: | ---: |
@@ -246,7 +247,7 @@ USING btree (thread_id, created_at DESC NULLS LAST, id DESC NULLS LAST);
 
 ### 运行证据边界
 
-初次设计阶段正常 Vite 5173 和 FastAPI 8765 健康可达，但旧的独立 `127.0.0.1:5433` 只读尝试被拒绝，故当时没有伪造 PostgreSQL plan。后续 Schema 阶段按 Admin 明确 topology 启动其持久 embedded PostgreSQL `54329`，取得上述真实本机 `EXPLAIN (ANALYZE, BUFFERS)`；两阶段证据不得混写成远程生产数据库结果。
+2026-09-02 初次设计阶段的历史 Vite 5173 和 FastAPI 8765 健康可达，但旧的独立 `127.0.0.1:5433` 只读尝试被拒绝，故当时没有伪造 PostgreSQL plan。后续 Schema 阶段按 Admin 明确 topology 启动其持久 embedded PostgreSQL `54329`，取得上述真实本机 `EXPLAIN (ANALYZE, BUFFERS)`；两阶段证据不得混写成当前 Next.js 或远程生产数据库结果。
 
 ## 字段消费者矩阵
 
@@ -652,7 +653,7 @@ sequenceDiagram
 | provider-free Chat/Dream 页面业务旅程 | `2 passed`，exit 0；覆盖分页 DTO、历史 final-only、键盘展开/收起、同 Thread 后续发送与宽/窄页面 |
 | 目标 ESLint | 无错误，exit 0 |
 | Python `py_compile` | 无错误，exit 0 |
-| TypeScript + Vite development build | 构建成功，exit 0 |
+| TypeScript + Next.js production build | 构建成功，exit 0 |
 | Admin 0042 schema contract + migration journal | `6 passed`，exit 0 |
 | Dream exact capability + pagination SQL | `14 passed`，exit 0 |
 | 具名隔离 PostgreSQL 空库 replay / 重复 / 双 migrator / check | 0000–0042 replay 成功；重复和两个并发 runner 均 exit 0；`43/43 current` |

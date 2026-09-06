@@ -3,8 +3,11 @@
 <!-- [Pos] Canonical ExecTaskAgent report for task_411-01; it grants no Runtime, lock, P0, standalone-release, or production approval. -->
 <!-- [Sync] 2026-09-05: completed all N1 gates after Docker recovery, isolated Vite rollback smoke, selector URL/network separation, and Chat SSE/resume fixture repair. -->
 <!-- [Sync] 2026-09-06: rebased current Dream source references from the retired frontend/src tree to frontend/app/_dream. -->
+<!-- [Sync] 2026-09-06: mark missing-lock and later-stage No-Go statements as dated execution facts superseded by current-candidate evidence. -->
 
 # Exec Report: task_411-01 - Root Web Shell and Vite Exit
+
+> **适用边界。** 本报告如实保留 411-01 执行时 pnpm lock 尚未落地、后续阶段尚未验证以及 Paperclip/checkout 的状态；这些是历史窗口，不是当前候选状态。411-03 和后续 Phase 0—3 已在唯一 pnpm lock 上完成 provider-free 技术验收，见 [当前候选统一回执](mcp-apps/current-candidate-validation.md)。生产仍为 `No-Go`，`productionAppsEffective=false`。
 
 ## 1. 任务标题与唯一 Execute Issue
 

@@ -1,6 +1,13 @@
+<!-- [Input] 2026-08-06 Chat tool-confirmation reconnect implementation and validation evidence. -->
+<!-- [Output] Preserve the dated implementation receipt without defining the current Web build/runtime owner. -->
+<!-- [Pos] Historical execution record; current frontend ownership is linked below. -->
+<!-- [Sync] 2026-09-06: mark Vite/service references as historical and link the current Next.js architecture. -->
+
 # Chat 工具确认重连恢复实施记录
 
 日期：2026-08-06
+
+> 历史边界：本文中的 Vite/5173 只描述 2026-08-06 的测试环境，不是当前操作指南。当前 Web source ownership 与 pnpm 命令见 [Dream Web 当前 Next.js 架构](./dream-frontend-node-framework-migration-assessment.md)。
 
 ## 1. 问题与裁决
 

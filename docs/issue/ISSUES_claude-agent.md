@@ -1,4 +1,11 @@
-# Claude Agent 模块 Issue 清单
+<!-- [输入] 早期 Claude Agent 设计拆解和流水线元数据。 -->
+<!-- [输出] 历史工作分解、范围和风险索引。 -->
+<!-- [范围] 不作为当前派工、审批、assignee、checkout 或实现状态合同。 -->
+<!-- [同步] 2026-09-06：明确历史适用性；当前事实以源码、目录合同和实际回执为准。 -->
+
+# Claude Agent 模块 Issue 清单（历史拆解索引）
+
+> 本文中的 IssueDispatcher、下游 Agent、状态和分发说明是生成期流水线记录，不是当前工作队列。继续开发时必须以现行源码、`AGENTS.md` / `Agent.md`、最近的 `docs/design/claude-agent/**` 合同和对应 `docs/exec/**` 实际证据为准；缺少 capability、真实业务或生产证据时保持 fail closed。
 
 ## 0. 文档元信息
 
@@ -38,7 +45,7 @@
   - `FrontendTaskAgent`
   - `BackendTaskAgent`
 - 共享设计稿来源：`docs/design/`
-- 是否作为当前实现合同：`是`
+- 是否作为当前实现合同：`否`；仅作历史拆解与风险索引
 - 备注：
   - 本文档由设计稿拆解生成，作为 task 阶段任务规划输入。
   - 若与设计稿冲突，以 `docs/design/` 中稳定设计稿为准。
