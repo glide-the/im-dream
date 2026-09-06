@@ -7,6 +7,8 @@
 # [Sync] 2026-09-02: cover changed/preexisting EP02 registry activation and Episode-only titles.
 # [Sync] 2026-09-04: connect canonical character/scene publication to the
 #                    run-private reader and PostgreSQL materializer seam.
+# [Sync] 2026-09-06: prove a current same-Deck Agent switch still publishes
+#                    canonical character changes while launch provenance stays frozen.
 
 """Automatic root-turn workbench synchronization contract."""
 
@@ -75,11 +77,12 @@ def authoritative_run() -> WorkflowRun:
     )
 
 
-def context() -> StoryWorkspaceDreamRunContext:
+def context(*, agent_id: str | None = None) -> StoryWorkspaceDreamRunContext:
     return StoryWorkspaceDreamRunContext(
         workflow_run_id=RUN_ID,
         thread_id=THREAD_ID,
         deck_id="deck-1",
+        agent_id=agent_id,
         deck_plugin_id="plugin-1",
         deck_plugin_version="1.2.3",
         deck_plugin_binding_id="binding-1",
@@ -105,15 +108,19 @@ def launched_run() -> WorkflowRun:
     })
 
 
-def launch_metadata(*, project_story_slug: str = "demo-project") -> dict:
-    selected_context = context()
+def launch_metadata(
+    *,
+    project_story_slug: str = "demo-project",
+    agent_id: str | None = None,
+) -> dict:
+    selected_context = context(agent_id=agent_id)
     return {
         "kind": "story-workspace-dream-launch",
         "schemaVersion": "story-workspace-dream-launch/v1",
         "actorId": "actor-1",
         "workspaceId": "workspace-1",
         "deckId": "deck-1",
-        "agentId": None,
+        "agentId": agent_id,
         "workflowRunId": RUN_ID,
         "threadId": THREAD_ID,
         "goal": "雨夜归途",
@@ -356,6 +363,9 @@ shots:
             "run": lambda value: value.update(workflowRunId="run_" + "f" * 32),
             "thread": lambda value: value.update(threadId="thread-forged"),
             "deck": lambda value: value.update(deckId="deck-forged"),
+            "launch_agent_provenance": lambda value: value.update(
+                agentId="voice-forged"
+            ),
             "plugin_lock": lambda value: value["dreamContext"].update(
                 runtime_plugin_lock_id="lock-forged"
             ),
@@ -370,6 +380,60 @@ shots:
                     error.issue.repairability,
                     DreamArtifactRepairability.NON_REPAIRABLE,
                 )
+
+    def test_current_agent_switch_still_publishes_character_stage(self) -> None:
+        character = self.workspace / "assets" / "characters" / "lead.md"
+        character.write_text(
+            """---
+char_id: lead
+char_name: 林夏
+occupation: 调查记者
+personality:
+  core_traits: [清明内求]
+---
+# 林夏
+
+她在雨夜返回旧车站寻找真相。
+""",
+            encoding="utf-8",
+        )
+        hook = DreamArtifactTurnHook()
+        ticket = hook.before_main_turn(
+            context=context(agent_id="voice-character-designer"),
+            actor_id="actor-1",
+            cwd=str(self.workspace),
+        )
+        db = MagicMock()
+        db.in_transaction = False
+        db.execute.return_value.fetchone.return_value = {
+            "metadata": json.dumps(
+                launch_metadata(agent_id="voice-screenwriter")
+            ),
+        }
+        db.execute.return_value.rowcount = 1
+
+        with (
+            patch.object(
+                hook,
+                "_load_authoritative_run",
+                return_value=launched_run(),
+            ),
+            patch.object(hook, "_record_output_ready"),
+            patch(
+                "services.story_workspace.dream_artifact_turn_hook.database.get_db",
+                return_value=db,
+            ),
+        ):
+            result = hook.after_main_turn(ticket)
+
+        self.assertIn("characters", result.changed_stages)
+        stage = StoryWorkspaceDreamFileReader(self.workspace).read_stage(
+            launched_run(),
+            stage=StoryWorkspaceDreamStage.CHARACTERS,
+        )
+        self.assertIsNotNone(stage)
+        self.assertEqual(stage.revision, 1)
+        self.assertIn("清明内求", stage.items[0].content or "")
 
     def test_multiple_canonical_project_roots_are_repairable_before_projection_write(self) -> None:
         duplicate_episode = (

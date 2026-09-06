@@ -1,7 +1,7 @@
 <!-- [Input] Dream launch provenance, mutable Chat next-turn Agent selection, canonical Chat send/SSE persistence, and Story Workspace re-entry authorization. -->
 <!-- [Output] Product and protocol contract for legal Agent switching and recoverable presentation of genuine Dream Thread binding conflicts. -->
 <!-- [Pos] Cross-surface interaction source of truth for Dream-bound Chat Thread integrity failures. -->
-<!-- [Sync] 2026-08-31: define provenance/current-Agent separation, failure persistence, safe copy, reload recovery, and acceptance criteria. -->
+<!-- [Sync] 2026-09-06: extend provenance/current-Agent separation through post-turn .dream publication. -->
 
 # Dream Thread 绑定冲突与恢复交互
 
@@ -76,7 +76,8 @@ Deck、完成必要 CAS、持久化消息、解析 binding，然后启动 Agent 
 
 用户在顶部 Deck 上下文中选择同一 Deck 的另一个已启用 Agent。下一次发送更新当前
 `thread.voice_id`；launch `agentId` 仍作为历史来源证明保留。两者不同不是冲突，Dream
-重入、Story Index 授权和后续 turn 均继续有效。
+重入、Story Index 授权、后续 turn 与 post-turn `.dream` stage 发布均继续有效；Hook
+只校验启动消息顶层/嵌套 Agent 来源自洽，不把当前 Agent 与启动 Agent 的相等性作为门禁。
 
 ### 4.3 真正线程绑定冲突
 
