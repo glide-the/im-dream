@@ -1,5 +1,8 @@
 {
   // Keep editor analysis, terminals, and Python commands on the backend environment.
   "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
-  "python.terminal.activateEnvironment": true
+  "python.terminal.activateEnvironment": true,
+  "inkDream.frontendHost": "127.0.0.1",
+  "inkDream.frontendPort": 5173,
+  "inkDream.backendUrl": "http://127.0.0.1:8765"
 }
