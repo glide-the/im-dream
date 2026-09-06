@@ -18,6 +18,7 @@
 > **[Sync] 2026-07-08**: 新增资源链接设置区，Connector 入口改为进入 Settings 的资源链接管理；Chat 只保留轻量摘要面板和跳转按钮。
 > **[Sync] 2026-07-08**: 修复设置页问题——Notion「管理」不再原地展开，改为导航到独立的 `ConnectorNotionDetailPage`（带面包屑导航），并移除顶部/移动端导航栏里单独的 `Connector` 入口，统一由 Settings 资源链接区和 Chat 轻量摘要面板承载入口。
 > **[Sync] 2026-08-31**: 桌面端移除旧 `TopNavBar`；Settings、主题和用户操作统一由 Story Workspace 侧边栏承载，移动端底部导航保持现状。
+> **[Sync] 2026-09-06**: 资源链接保留远程/本地连续结构；Claude MCP 新增 Server 改用可访问弹窗，连接详情把完整 App 设置并入“使用策略”并使用一个统一保存动作。
 
 ## 1. 文档范围
 
@@ -49,7 +50,7 @@ SettingsView（position: fixed，overflow: auto）
     ├── DisplaySection
     │   └── EnergyBarToggle
     ├── ConnectorSettingsSection（资源链接）
-    │   ├── 远程资源链接（Notion / 飞书）
+    │   ├── 远程资源链接（Notion / 飞书 / Claude MCP）
     │   └── 本地资源链接（CLI 执行器占位）
     ├── ModelConfigSection（AI 模型配置）
     │   ├── 标题：AI 模型配置
@@ -268,6 +269,7 @@ SettingsView（position: fixed，overflow: auto）
 
 - `ConnectorSettingsSection` 是 Settings 里的独立资源链接索引卡片；Chat 侧 `ConnectorLandingPanel` 的跳转按钮会打开 Settings 并自动滚动、聚焦到这里。
 - 首页分成两个区域：`远程资源链接` 和 `本地资源链接`。
+- 首页保持这两个连续区域，不增加“知识库 / MCP 服务 / 本地资源”二级 Tab 或分段切换。
 - `远程资源链接` 下展示 Notion / 飞书：
   - Notion 使用真实 connector 状态做摘要，显示绿色健康态、最近交互时间和「管理」按钮。
   - 飞书只保留禁用占位，不调用不存在的 API。
@@ -282,6 +284,16 @@ SettingsView（position: fixed，overflow: auto）
   - `MountedSourcesSection` 只展示当前 Notion 账号已挂载来源，不展示连接器列表或多实例切换。
   - 返回时重新聚焦资源链接索引卡片，与从 Chat 跳转过来的聚焦行为保持一致。
 - `ConnectorSettingsSection` 本身只负责入口、摘要和触发页面导航，不承载创建、认证、资源选择或同步逻辑。
+
+#### 4.4.1 Claude MCP 新增与使用策略
+
+- `ClaudeMcpResourceSection` 继续位于“远程资源链接”连续内容中。列表只读数据库状态，不因页面分区切换延迟加载，也不在列表阶段触发远端 discovery。
+- 新增 Server 的名称、传输方式、URL 或服务端 stdio profile 不再以内联表单占据长页；页面只显示“添加 MCP 服务”按钮，激活后打开共享 Modal。
+- 弹窗使用明确标题和关闭标签，打开后聚焦“服务名称”，支持 Tab 焦点约束、Escape / 遮罩关闭和关闭后焦点恢复。窄屏表单变为单列，操作按钮占满可用宽度，不产生横向滚动。
+- transport 选项、认证由后端 discovery 判定、客户端校验、保存、错误保留和成功后刷新列表的既有业务规则不变。
+- Server 详情只保留一个“使用策略”区域：完整包含“在聊天中使用 App”“低风险工具调用”“向聊天发送消息”，并同时显示 `default`、用户 `desired`、实际 `effective` 和 `revision`。
+- 页面不得再并列出现独立“App 设置”标题或“保存 App 设置”按钮。三个 App 选择由“使用策略”区域内唯一的“保存使用策略”动作一次提交；Server 配置保存、OAuth、inventory 与 Chat 工具审批仍是独立业务边界。
+- `desired=true` 但服务端上限未满足时，页面显示真实的不可用或部分可用原因；不得把用户选择伪装成实际已生效，也不得要求用户在服务端恢复后重复保存。
 
 ### 4.5 AboutSection
 

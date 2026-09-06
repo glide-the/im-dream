@@ -1,12 +1,22 @@
-// [Input] Open state, title/content, close callback, optional presentation variant, media toolbar actions, and controlled zoom state.
+// [Input] Open state, title/content, close callback, optional caller-owned initial focus, presentation variant, media toolbar actions, and controlled zoom state.
 // [Output] Portal-backed accessible modal with backdrop/Escape close, focus containment/restoration, and one shared media-preview skeleton whose controls resize only marked media content.
 // [Pos] shared modal component node in frontend/app/_dream/components/chat
 // [Sync] 2026-08-22: add dialog semantics, keyboard/focus lifecycle, and an image-preview size while preserving the default connector modal.
 // [Sync] 2026-08-23: replace the image-only surface with the shared Mermaid/Workspace immersive viewer: top-right actions and bottom zoom controls.
 // [Sync] 2026-08-23: add non-passive wheel zoom over the media stage, sharing the existing 50%–200% controlled state and blocking background scroll.
 // [Sync] 2026-08-23: keep the preview sheet at its fitted geometry while exposing zoom through a CSS variable for explicit image/diagram targets only.
+// [Sync] 2026-09-06: allow a dialog caller to select its initial focus target while preserving the close-button fallback.
 
-import { useEffect, useId, useRef, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import {
+  useEffect,
+  useId,
+  useRef,
+  type CSSProperties,
+  type Dispatch,
+  type ReactNode,
+  type RefObject,
+  type SetStateAction,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { IconMinus, IconPlus, IconX } from './Icons';
 import './Modal.css';
@@ -31,6 +41,7 @@ interface ModalProps {
   children: ReactNode;
   onClose: () => void;
   closeLabel?: string;
+  initialFocusRef?: RefObject<HTMLElement | null>;
   variant?: 'default' | 'media-preview';
   toolbarActions?: ReactNode;
   zoom?: {
@@ -47,6 +58,7 @@ export default function Modal({
   children,
   onClose,
   closeLabel = 'Close',
+  initialFocusRef,
   variant = 'default',
   toolbarActions,
   zoom,
@@ -71,8 +83,12 @@ export default function Modal({
       : null;
     const previousBodyOverflow = document.body.style.overflow;
     const focusFrame = window.requestAnimationFrame(() => {
+      const requestedTarget = initialFocusRef?.current;
       const autofocusTarget = dialogRef.current?.querySelector<HTMLElement>('[autofocus]');
-      (autofocusTarget ?? closeButtonRef.current)?.focus();
+      const safeRequestedTarget = requestedTarget && dialogRef.current?.contains(requestedTarget)
+        ? requestedTarget
+        : null;
+      (safeRequestedTarget ?? autofocusTarget ?? closeButtonRef.current)?.focus();
     });
 
     document.body.style.overflow = 'hidden';
@@ -108,7 +124,7 @@ export default function Modal({
       document.body.style.overflow = previousBodyOverflow;
       previouslyFocused?.focus();
     };
-  }, [open]);
+  }, [initialFocusRef, open]);
 
   useEffect(() => {
     if (!open || variant !== 'media-preview' || !zoomOnChange) return undefined;

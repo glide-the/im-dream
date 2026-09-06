@@ -4,6 +4,7 @@
 <!-- [同步] 2026-08-25：正常 PostgreSQL 已应用 0038；真实账户三 transport、Chat/resume、cancel、页面 P50/P95 与 Admin 可见页已验证；MCP 认证类型由后端 discovery 判定；真实 Comfy OAuth 已完成 logout/login、同源自动 callback、41/24/10 inventory、两次自然到期 `/oauth/token` refresh、只读工具调用与同 Thread 续聊终验。 -->
 <!-- [同步] 2026-08-25：新增独立中文业务交互时序图集，并将详情页合同校准为自动 `force=false` inventory、无刷新按钮。 -->
 <!-- [同步] 2026-08-27：capability 仅缓存精确验证成功结果；PostgreSQL 瞬时查询失败与真实 schema 缺失使用不同安全错误，Resources 无按钮自动重试。 -->
+<!-- [同步] 2026-09-06：Resources 保留既有远程/本地长页结构，仅把新增 Server 表单移入共享可访问弹窗；连接详情的 App 控制统一归入 MCP 使用策略。 -->
 <!-- [同步] 2026-09-06：允许与 Dream 后端同网络命名空间的显式 IPv4/IPv6 loopback MCP endpoint，同时保留其他 non-global 字面 IP、URL 用户信息/query/fragment 与 redirect 拒绝。 -->
 <!-- [同步] 2026-09-06：将 2026-08-25 Vite/npm 回执标为历史，并链接当前 Next.js/pnpm source ownership；管理面 Python owner 不变。 -->
 
@@ -447,7 +448,7 @@ type ClaudeMcpDiscoveryDto = {
 
 ## 12. Frontend 页面请求与交互
 
-Resources 初始加载并行请求 capability/list；未启用时只展示 capability 错误。list card 展示数据库状态，不把 stale 等同 disconnected，也不触发远端 discovery。
+Resources 初始加载并行请求 capability/list；未启用时只展示 capability 错误。list card 展示数据库状态，不把 stale 等同 disconnected，也不触发远端 discovery。资源链接页继续使用既有“远程资源链接 / 本地资源链接”连续结构，不增加知识库、MCP、本地资源二级分区。新增 Server 的名称、transport、URL/profile 表单只在用户点击“添加 MCP 服务”后进入共享可访问弹窗；成功保存才关闭并清空表单，校验或 API 失败保留输入并在弹窗内反馈，窄屏保持单列、Escape 关闭与触发按钮焦点恢复。
 
 进入详情页后，配置读取与 inventory 使用独立 loading state：配置先从数据库展示，随后前端自动调用单 Server discovery，固定发送 `force=false`。后端优先返回 revision 匹配且未过期的 snapshot；没有有效 snapshot 才通过标准 MCP Client 连接远端。页面不显示“刷新 inventory”“重试 inventory”或“重试探测”按钮。配置 revision 或 credential revision 变化后自动重新加载，并用请求序号丢弃旧 revision 的迟到响应。
 

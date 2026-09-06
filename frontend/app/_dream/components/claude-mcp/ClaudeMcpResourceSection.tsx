@@ -1,5 +1,5 @@
-// [Input] Database-managed Claude MCP capability/CRUD/server/operation DTOs and shared design tokens/icons.
-// [Output] Fast DB-backed server list, transport-safe create form, detail navigation, OAuth handoff, logout, and removal UI.
+// [Input] Database-managed Claude MCP capability/CRUD/server/operation DTOs plus the shared accessible Modal with an explicit initial-focus target and design tokens/icons.
+// [Output] Fast DB-backed server list, modal transport-safe creation, detail navigation, OAuth handoff, logout, and removal UI.
 // [Pos] `claude-mcp` feature surface embedded by the Settings Resources page.
 // [Sync] 2026-08-19: add the reviewed minimal MCP resource connector interaction.
 // [Sync] 2026-08-19: enable user-owned HTTPS add/remove and correct the cross-platform capability message.
@@ -11,8 +11,9 @@
 // [Sync] 2026-08-25: replace redirect URL copy/paste with same-origin automatic SPA callback submission.
 // [Sync] 2026-08-25: describe detail inventory as automatic; the list remains database-only and never discovers remotely.
 // [Sync] 2026-08-27: automatically retry transient capability verification without misreporting a missing migration.
+// [Sync] 2026-09-06: move MCP Server creation from the long settings flow into the shared accessible responsive dialog and focus its first field on open.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   cancelClaudeMcpAuth,
   configureClaudeMcpServer,
@@ -34,7 +35,9 @@ import {
   forgetClaudeMcpOAuthOperation,
   rememberClaudeMcpOAuthOperation,
 } from './oauthHandoff';
-import { IconCheck, IconChevronRight, IconDatabase, IconLoader, IconX } from '../chat/Icons';
+import { IconCheck, IconChevronRight, IconDatabase, IconLoader, IconPlus, IconX } from '../chat/Icons';
+import Modal from '../chat/Modal';
+import './ClaudeMcpResourceSection.css';
 
 const OPERATION_POLL_INTERVAL_MS = 1200;
 const CAPABILITY_RETRY_INTERVAL_MS = 2000;
@@ -167,8 +170,11 @@ export default function ClaudeMcpResourceSection({
   const [serverUrl, setServerUrl] = useState('');
   const [serverTransport, setServerTransport] = useState<'streamable_http' | 'sse' | 'stdio'>('streamable_http');
   const [stdioProfileKey, setStdioProfileKey] = useState('');
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [configuring, setConfiguring] = useState(false);
+  const [configurationError, setConfigurationError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const serverNameInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -268,13 +274,13 @@ export default function ClaudeMcpResourceSection({
     const url = serverUrl.trim();
     const profileKey = stdioProfileKey.trim();
     if (!name || (serverTransport === 'stdio' ? !profileKey : !url)) {
-      setError(serverTransport === 'stdio'
+      setConfigurationError(serverTransport === 'stdio'
         ? '请填写 MCP 服务名称并选择服务端 stdio profile。'
         : '请填写 MCP 服务名称和完整 HTTP 或 HTTPS URL。');
       return;
     }
     setConfiguring(true);
-    setError(null);
+    setConfigurationError(null);
     try {
       const next = await configureClaudeMcpServer(
         name,
@@ -291,8 +297,9 @@ export default function ClaudeMcpResourceSection({
       setServerName('');
       setServerUrl('');
       setStdioProfileKey('');
+      setAddDialogOpen(false);
     } catch (cause) {
-      setError(safeApiErrorMessage(cause, 'MCP 服务配置失败'));
+      setConfigurationError(safeApiErrorMessage(cause, 'MCP 服务配置失败'));
     } finally {
       setConfiguring(false);
     }
@@ -347,13 +354,30 @@ export default function ClaudeMcpResourceSection({
 
   return (
     <section aria-labelledby="claude-mcp-heading" style={{ display: 'grid', gap: '0.72rem' }}>
-      <div>
-        <h3 id="claude-mcp-heading" style={{ margin: 0, fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-          Claude MCP 资源
-        </h3>
-        <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-          Server 列表直接读取 Dream 数据库，不等待远端连接；进入详情后会自动加载 Tools、Resources 与 Prompts。
-        </p>
+      <div className="claude-mcp-resource__header">
+        <div>
+          <h3 id="claude-mcp-heading" style={{ margin: 0, fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+            Claude MCP 资源
+          </h3>
+          <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
+            Server 列表直接读取 Dream 数据库，不等待远端连接；进入详情后会自动加载 Tools、Resources 与 Prompts。
+          </p>
+        </div>
+        {capability?.enabled ? (
+          <button
+            aria-haspopup="dialog"
+            className="claude-mcp-resource__add-button"
+            onClick={() => {
+              setConfigurationError(null);
+              setAddDialogOpen(true);
+            }}
+            style={actionButton(true)}
+            type="button"
+          >
+            <IconPlus />
+            添加 MCP 服务
+          </button>
+        ) : null}
       </div>
 
       {loading ? (
@@ -370,25 +394,30 @@ export default function ClaudeMcpResourceSection({
         </div>
       ) : null}
 
-      {capability?.enabled ? (
+      <Modal
+        closeLabel="关闭添加 MCP 服务弹窗"
+        initialFocusRef={serverNameInputRef}
+        onClose={() => setAddDialogOpen(false)}
+        open={addDialogOpen && capability?.enabled === true}
+        title="添加 MCP 服务"
+      >
         <form
           aria-label="添加 Claude MCP 服务"
+          aria-busy={configuring}
+          className="claude-mcp-add-form"
           onSubmit={(event) => {
             event.preventDefault();
             void configure();
           }}
-          style={{ border: '1px solid var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', background: 'var(--color-bg-surface)', display: 'grid', gap: '0.68rem' }}
         >
-          <div>
-            <strong style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>添加 MCP 服务</strong>
-            <p style={{ margin: '0.22rem 0 0', fontSize: '0.73rem', lineHeight: 1.5, color: 'var(--color-text-secondary)' }}>
-              HTTP/SSE 只保存安全 URL；stdio 只能引用服务端批准的 profile，不接受浏览器命令、参数或环境变量。
-            </p>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(8rem, 0.8fr) minmax(8rem, 0.65fr) minmax(12rem, 1.3fr)', gap: '0.55rem' }}>
-            <label style={{ display: 'grid', gap: '0.3rem', fontSize: '0.73rem', color: 'var(--color-text-secondary)' }}>
+          <p className="claude-mcp-add-form__description">
+            HTTP/SSE 只保存安全 URL；stdio 只能引用服务端批准的 profile，不接受浏览器命令、参数或环境变量。
+          </p>
+          <div className="claude-mcp-add-form__fields">
+            <label>
               MCP 服务名称
               <input
+                ref={serverNameInputRef}
                 aria-label="MCP 服务名称"
                 value={serverName}
                 onChange={(event) => setServerName(event.target.value)}
@@ -396,23 +425,24 @@ export default function ClaudeMcpResourceSection({
                 maxLength={128}
                 required
                 placeholder="例如 comfy-cloud"
-                style={{ border: '1px solid var(--color-border-paper)', borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem', minWidth: 0 }}
               />
             </label>
-            <label style={{ display: 'grid', gap: '0.3rem', fontSize: '0.73rem', color: 'var(--color-text-secondary)' }}>
+            <label>
               传输方式
               <select
                 aria-label="MCP 传输方式"
                 value={serverTransport}
-                onChange={(event) => setServerTransport(event.target.value as typeof serverTransport)}
-                style={{ border: '1px solid var(--color-border-paper)', borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem', minWidth: 0 }}
+                onChange={(event) => {
+                  setServerTransport(event.target.value as typeof serverTransport);
+                  setConfigurationError(null);
+                }}
               >
                 <option value="streamable_http">Streamable HTTP</option>
                 <option value="sse">Legacy SSE</option>
                 <option value="stdio">stdio profile</option>
               </select>
             </label>
-            <label style={{ display: 'grid', gap: '0.3rem', fontSize: '0.73rem', color: 'var(--color-text-secondary)' }}>
+            <label className="claude-mcp-add-form__endpoint">
               {serverTransport === 'stdio' ? '服务端 profile key' : 'MCP 服务 URL'}
               <input
                 aria-label={serverTransport === 'stdio' ? 'MCP stdio profile key' : 'MCP 服务 URL'}
@@ -426,20 +456,30 @@ export default function ClaudeMcpResourceSection({
                 maxLength={serverTransport === 'stdio' ? 128 : 2048}
                 required
                 placeholder={serverTransport === 'stdio' ? '例如 local-files-readonly' : 'https://mcp.example.com/mcp'}
-                style={{ border: '1px solid var(--color-border-paper)', borderRadius: '0.72rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '0.62rem 0.72rem', minWidth: 0 }}
               />
             </label>
           </div>
-          <p style={{ margin: 0, fontSize: '0.72rem', lineHeight: 1.5, color: 'var(--color-text-muted)' }}>
+          <p className="claude-mcp-add-form__hint">
             认证要求由 Dream 连接 Server 后自动判断；无需选择无认证或 OAuth。
           </p>
-          <div>
+          {configurationError ? (
+            <div className="claude-mcp-add-form__error" role="alert">{configurationError}</div>
+          ) : null}
+          <div className="claude-mcp-add-form__actions">
+            <button
+              disabled={configuring}
+              onClick={() => setAddDialogOpen(false)}
+              style={actionButton()}
+              type="button"
+            >
+              取消
+            </button>
             <button type="submit" disabled={configuring} style={actionButton(true)}>
               {configuring ? '正在添加…' : '添加 MCP 服务'}
             </button>
           </div>
         </form>
-      ) : null}
+      </Modal>
 
       {capability?.enabled && !loading && servers.length === 0 ? (
         <div style={{ border: '1px dashed var(--color-border-paper)', borderRadius: '1rem', padding: '0.9rem', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>

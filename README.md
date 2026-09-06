@@ -3,6 +3,7 @@
 <!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
 <!-- [Sync] 2026-09-06: reorganize around getting started and using MCP Apps; retain exact setup, ownership, security, and validation facts in layered sections. -->
 <!-- [Sync] 2026-09-06: add sanitized real-component screenshots for the MCP connection, App settings, and Chat interaction steps. -->
+<!-- [Sync] 2026-09-06: align connection creation and App controls with the accessible Server modal and unified MCP usage-policy form. -->
 
 # Ink & Memory
 
@@ -150,22 +151,22 @@ Open:
 ### Add a connection and enable its App
 
 1. Sign in to Dream and open **Settings → Resource Links**.
-2. Add or open a managed MCP connection and complete its authentication.
-3. On the connection detail page, find **Apps**.
-4. Turn on **Show MCP App**. If needed, also allow **Low-risk tool calls** and **Send messages to this chat**.
-5. Save the settings and check the displayed actual status.
+2. Click **Add MCP Service**, enter the managed endpoint in the dialog, or open an existing connection, then complete its authentication.
+3. On the connection detail page, find **Usage policy**.
+4. Turn on **Use App in Chat**. If needed, also allow **Low-risk tool calls** and **Send messages to this chat**.
+5. Click **Save usage policy**, then compare the default policy, your saved choice, and the actual server status.
 
 These screenshots use safe example data and the real production UI components; they contain no account details or secrets.
 
 ![Add a managed MCP connection by entering its name, transport, and URL](assets/mcp-apps-guide/01-add-mcp-connection.png)
 
-*Add a managed MCP endpoint in Resource Links. Authentication requirements are detected after Dream connects to the Server.*
+*Open the Add MCP Service dialog from Resource Links and enter the managed endpoint. Authentication requirements are detected after Dream connects to the Server.*
 
 ![Enable the MCP App and choose its permitted interactions](assets/mcp-apps-guide/02-configure-mcp-app.png)
 
-*Enable the App first, then opt into only the interactions you want. “Actually available” reflects the current server-side result.*
+*One usage-policy form contains the App switch, interaction permissions, default, saved choice, revision, actual status, and the only save action.*
 
-Your saved choices and the actual available features are shown separately. A switch may be on while the App remains unavailable if the connection is offline, the Server does not advertise an App, or the server-side preview policy does not allow it.
+Default policy, your saved choice, and actual server status remain separate. A switch may be on while the App remains unavailable if the connection is offline, the Server does not advertise an App, or the server-side preview policy does not allow it.
 
 ### Call and use the App in Chat
 
@@ -260,7 +261,7 @@ For deployment profiles and known adapter gaps, see [deploy/README.md](deploy/RE
 ### The App does not appear
 
 - Confirm the MCP connection is connected and the tool advertises an App.
-- Open **Settings → Resource Links → connection → Apps** and compare your saved choice with the actual status.
+- Open **Settings → Resource Links → connection → Usage policy** and compare the default policy, your saved choice, and the actual status.
 - Confirm Admin migration `0053_rare_lenny_balinger` is applied and `dream.mcp-app-connection-settings.v1` is published.
 - Retry the Chat call after the connection inventory refreshes. For compact historical rows, expand the process once to load the saved detail; after loading, the App stays visible when the process is collapsed.
 - If policy, authentication, or the sandbox is unavailable, the ordinary result is the expected fallback.

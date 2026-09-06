@@ -8,6 +8,7 @@
 <!-- [同步] 2026-09-06：服务端 App-callable positive list 负责低风险分类；官方标准工具可省略 MCP 可选 risk hints，显式危险 hints 仍否决。 -->
 <!-- [同步] 2026-09-06：每条 MCP 连接增加独立 App desired/effective/revision 设置；服务器部署与凭据继续隐藏且作为能力上限。 -->
 <!-- [同步] 2026-09-06：汇总连接设置、discovery、首次模型调用、结果投影、实时/历史传递、Browser/Node Host、sandbox 和交互回流的端到端调用链。 -->
+<!-- [同步] 2026-09-06：连接详情将完整 App 控制收敛进“使用策略”区域，并以一个策略保存动作提交同一份 revision/CAS desired。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
@@ -183,6 +184,13 @@ effective 展示；已保存的两个子选择保持不变，重开后仍按最�
 服务器恢复后无需用户重存即可按同一 revision 重新组合 effective。Node 建连视图和
 Browser Host identity 都携带该 revision，旧页面、旧 lease 或同 revision 异值一律
 fail closed。
+
+连接详情的界面把这三项 App 选择、默认策略、用户 desired、实际 effective 与
+`app_settings_revision` 统一放在“使用策略”区域。页面不再并列展示独立“App 设置”
+区或“保存 App 设置”按钮；三个选择只通过同一个“保存使用策略”动作提交同一份
+CAS 请求。该组织方式只合并用户的策略编辑入口，不把 Server endpoint/transport
+编辑、认证、inventory 或 Chat 工具审批并入 App settings revision，也不改变任一
+服务端能力上限。
 
 ### 3.6 状态模型
 
