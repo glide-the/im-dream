@@ -2,8 +2,8 @@
 
 > **版本**: 2026-06-25 v1 — 最小实现稿  
 > **关联代码**:
-> - `frontend/src/components/chat/ChatPanel.tsx` — 停止按钮动作与前端流中断
-> - `frontend/src/components/chat/AIInputDock.tsx` — 停止中按钮状态
+> - `frontend/app/_dream/components/chat/ChatPanel.tsx` — 停止按钮动作与前端流中断
+> - `frontend/app/_dream/components/chat/AIInputDock.tsx` — 停止中按钮状态
 > - `backend/routers/claude_agent.py` — `POST /api/claude-agent/threads/{thread_id}/stop`
 > - `backend/claude_agent/thread_factory.py` — 当前 turn 取消与完成确认
 > - `backend/claude_agent/service.py` — 取消路径的部分消息持久化与 SSE 收尾

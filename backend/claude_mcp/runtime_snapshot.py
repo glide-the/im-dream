@@ -1,18 +1,25 @@
 """In-memory Runtime projection of managed MCP configuration.
 
 [Input] Enabled actor user/workspace Server rows, stdio policy profiles, and encrypted credential references.
-[Output] Detached public Agent-SDK `mcp_servers` mapping with workspace override and redacted repr.
-[Pos] Injectable Chat integration seam; performs no file write, logging, Agent import, CLI, or MCP network call.
+[Output] Detached Agent-SDK `mcp_servers` mapping plus non-secret Apps descriptor bindings, with workspace override and redacted repr.
+[Pos] Injectable Chat integration seam; performs no file write, sensitive logging, Agent import, CLI, or MCP network call.
 [Sync] 2026-08-25: add actor/workspace managed snapshot loader for later Chat service injection.
 [Sync] 2026-08-25: refresh expired OAuth through bounded standard-MCP discovery before projecting a Runtime bearer header.
+[Sync] 2026-09-06: re-read identity/enabled/revisions before any single-Server credential access.
+[Sync] 2026-09-06: return only a post-refresh record/credential-coherent single-Server projection.
+[Sync] 2026-09-06: carry fresh descriptor-owned MCP App resource bindings beside, never inside, secret Runtime configs.
+[Sync] 2026-09-06: expose descriptor binding extraction for connection App availability checks.
+[Sync] 2026-09-06: rebuild expired descriptor inventory for policy-selected App Servers before a new Chat turn so first-call results retain their App identity.
 """
 
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import json
-from typing import Any
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Mapping
 
 from .contracts import ClaudeMcpError, ClaudeMcpErrorCode, McpTransport
 from .crypto import (
@@ -25,14 +32,97 @@ from .crypto import (
 from .inventory import StdioProfileResolver
 
 
+logger = logging.getLogger(__name__)
+
+
+def _is_mcp_app_resource_uri(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and 5 < len(value) <= 2048
+        and value.startswith("ui://")
+        and not any(ord(char) < 0x20 or char.isspace() for char in value)
+    )
+
+
+def mcp_app_bindings_from_snapshot(snapshot: Any) -> dict[str, str]:
+    """Return exact tool→resource bindings from one current safe inventory."""
+
+    if not isinstance(snapshot, Mapping) or snapshot.get("status") != "complete":
+        return {}
+    inventory = snapshot.get("inventory")
+    if not isinstance(inventory, Mapping):
+        return {}
+    raw_tools = inventory.get("tools")
+    raw_resources = inventory.get("resources")
+    if not isinstance(raw_tools, list) or not isinstance(raw_resources, list):
+        return {}
+    resource_uris = {
+        resource.get("uri")
+        for resource in raw_resources
+        if isinstance(resource, Mapping)
+        and _is_mcp_app_resource_uri(resource.get("uri"))
+    }
+    bindings: dict[str, str] = {}
+    conflicts: set[str] = set()
+    for tool in raw_tools:
+        if not isinstance(tool, Mapping):
+            continue
+        name = tool.get("name")
+        metadata = tool.get("_meta")
+        ui = metadata.get("ui") if isinstance(metadata, Mapping) else None
+        resource_uri = ui.get("resourceUri") if isinstance(ui, Mapping) else None
+        if (
+            not isinstance(name, str)
+            or not name
+            or len(name) > 512
+            or not _is_mcp_app_resource_uri(resource_uri)
+            or resource_uri not in resource_uris
+        ):
+            continue
+        if name in bindings and bindings[name] != resource_uri:
+            conflicts.add(name)
+            bindings.pop(name, None)
+        elif name not in conflicts:
+            bindings[name] = resource_uri
+    return bindings
+
+
 class SecretMcpConfigDict(dict[str, Any]):
     def __repr__(self) -> str:
         return "SecretMcpConfigDict(<redacted>)"
 
 
 class ManagedMcpRuntimeSnapshot(dict[str, SecretMcpConfigDict]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.mcp_app_resource_bindings: dict[str, dict[str, str]] = {}
+
     def __repr__(self) -> str:
         return f"ManagedMcpRuntimeSnapshot(server_count={len(self)}, values=<redacted>)"
+
+
+@dataclass(frozen=True, repr=False)
+class ManagedMcpServerConfigProjection:
+    """One coherent single-Server config plus its authoritative revisions."""
+
+    config: SecretMcpConfigDict
+    config_revision: int
+    credential_revision: int
+
+    def __repr__(self) -> str:
+        return (
+            "ManagedMcpServerConfigProjection("
+            f"config_revision={self.config_revision}, "
+            f"credential_revision={self.credential_revision}, config=<redacted>)"
+        )
+
+
+@dataclass(frozen=True)
+class _McpConfigMaterial:
+    config: SecretMcpConfigDict
+    credential_id: str | None
+    credential_revision: int
+    refreshed: bool
 
 
 def _string_mapping(value: Any) -> dict[str, str]:
@@ -59,6 +149,8 @@ class ManagedMcpRuntimeSnapshotLoader:
         stdio_profiles: StdioProfileResolver,
         max_servers: int,
         oauth_refresher: Any | None = None,
+        app_inventory_refresher: Any | None = None,
+        app_server_keys_provider: Any | None = None,
     ) -> None:
         if max_servers < 1:
             raise ValueError("max_servers must be positive")
@@ -67,6 +159,8 @@ class ManagedMcpRuntimeSnapshotLoader:
         self.stdio_profiles = stdio_profiles
         self.max_servers = max_servers
         self.oauth_refresher = oauth_refresher
+        self.app_inventory_refresher = app_inventory_refresher
+        self.app_server_keys_provider = app_server_keys_provider
 
     async def load(
         self,
@@ -99,9 +193,185 @@ class ManagedMcpRuntimeSnapshotLoader:
         snapshot = ManagedMcpRuntimeSnapshot()
         for server, config in zip(ordered, configs):
             snapshot[server.server_key] = config
+        try:
+            snapshot.mcp_app_resource_bindings = await self._app_bindings_for_rows(
+                actor_id,
+                ordered,
+            )
+        except Exception:  # noqa: BLE001 - Apps enrichment never blocks ordinary MCP
+            logger.warning(
+                "Managed MCP App descriptor projection failed safely for actor scope."
+            )
         return snapshot
 
+    async def load_mcp_app_resource_bindings(
+        self,
+        actor_id: str,
+        workspace_id: str | None,
+    ) -> dict[str, dict[str, str]]:
+        """Read fresh, non-secret descriptor bindings without loading credentials."""
+
+        if not await self.repository.capability_available():
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.SCHEMA_CAPABILITY_MISSING,
+                "Managed Claude MCP schema capability is unavailable.",
+            )
+        rows = await self.repository.list_servers(actor_id, workspace_id)
+        enabled = [row for row in rows if row.enabled]
+        if len(enabled) > self.max_servers:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.SERVER_CONFIGURATION_INVALID,
+                "Managed Claude MCP server count exceeds policy.",
+            )
+        ordered = sorted(enabled, key=lambda row: 0 if row.scope == "user" else 1)
+        return await self._app_bindings_for_rows(actor_id, ordered)
+
+    async def _app_bindings_for_rows(
+        self,
+        actor_id: str,
+        rows: list[Any],
+    ) -> dict[str, dict[str, str]]:
+        getter = getattr(self.repository, "get_discovery_snapshot", None)
+        if not callable(getter) or not rows:
+            return {}
+
+        selected_keys: set[str] | None = None
+        if callable(self.app_server_keys_provider):
+            provided = self.app_server_keys_provider()
+            if not isinstance(provided, (tuple, list, set, frozenset)) or not all(
+                isinstance(key, str) and key for key in provided
+            ):
+                return {}
+            selected_keys = set(provided)
+
+        async def current_snapshot(server: Any) -> Any | None:
+            snapshot = await getter(actor_id, server)
+            if (
+                isinstance(snapshot, Mapping)
+                and snapshot.get("status") == "complete"
+                and isinstance(snapshot.get("inventory"), Mapping)
+            ):
+                return snapshot
+            if selected_keys is not None and server.server_key not in selected_keys:
+                return snapshot
+            discover_one = getattr(self.app_inventory_refresher, "discover_one", None)
+            if not callable(discover_one):
+                return snapshot
+            try:
+                refreshed = await discover_one(
+                    actor_id,
+                    server.id,
+                    workspace_id=server.workspace_id,
+                    force=False,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - optional App enrichment stays fail-closed
+                return snapshot
+            status = getattr(getattr(refreshed, "status", None), "value", None)
+            inventory_dict = getattr(refreshed, "inventory_dict", None)
+            if status == "complete" and callable(inventory_dict):
+                inventory = inventory_dict()
+                if isinstance(inventory, Mapping):
+                    return {"status": "complete", "inventory": dict(inventory)}
+            return await getter(actor_id, server)
+
+        snapshots = await asyncio.gather(
+            *(current_snapshot(server) for server in rows)
+        )
+        result: dict[str, dict[str, str]] = {}
+        for server, discovery_snapshot in zip(rows, snapshots):
+            # A workspace row intentionally replaces the same-key user row,
+            # including replacing an App-capable row with an ordinary Server.
+            result.pop(server.server_key, None)
+            if selected_keys is not None and server.server_key not in selected_keys:
+                continue
+            bindings = mcp_app_bindings_from_snapshot(discovery_snapshot)
+            if bindings:
+                result[server.server_key] = bindings
+        return result
+
+    async def load_server_config(
+        self,
+        actor_id: str,
+        server: Any,
+        *,
+        expected_config_revision: int | None = None,
+        expected_credential_revision: int | None = None,
+    ) -> ManagedMcpServerConfigProjection:
+        """Project one already-scoped Server after identity/enabled checks.
+
+        The caller must obtain the row through the actor-scoped repository. These
+        checks intentionally happen before `_server_config` can read/decrypt a
+        credential and leave the existing multi-Server `load()` path unchanged.
+        """
+        if str(server.user_id) != str(actor_id) or not server.enabled:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+                "MCP Apps connection view is unavailable.",
+            )
+        current = await self.repository.get_server(
+            actor_id,
+            server.id,
+            server.workspace_id,
+        )
+        if not self._same_enabled_server(actor_id, server, current):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+                "MCP Apps connection view is unavailable.",
+            )
+        if (
+            expected_config_revision is not None
+            and current.config_revision != expected_config_revision
+        ) or (
+            expected_credential_revision is not None
+            and current.credential_revision != expected_credential_revision
+        ):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT,
+                "MCP Apps session revision is no longer current.",
+            )
+        material = await self._server_config_material(actor_id, current)
+        authoritative = await self.repository.get_server(
+            actor_id,
+            current.id,
+            current.workspace_id,
+        )
+        if not self._same_enabled_server(actor_id, current, authoritative):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+                "MCP Apps connection view is unavailable.",
+            )
+        if (
+            authoritative.config_revision != current.config_revision
+            or authoritative.credential_revision != material.credential_revision
+            or authoritative.credential_id != material.credential_id
+            or authoritative.credential_configured
+            != (material.credential_id is not None)
+            or (
+                material.refreshed
+                and authoritative.credential_revision
+                <= current.credential_revision
+            )
+        ):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT,
+                "MCP Apps session revision is no longer current.",
+            )
+        return ManagedMcpServerConfigProjection(
+            config=material.config,
+            config_revision=authoritative.config_revision,
+            credential_revision=authoritative.credential_revision,
+        )
+
     async def _server_config(self, actor_id: str, server: Any) -> SecretMcpConfigDict:
+        return (await self._server_config_material(actor_id, server)).config
+
+    async def _server_config_material(
+        self,
+        actor_id: str,
+        server: Any,
+    ) -> _McpConfigMaterial:
         if server.transport is McpTransport.STREAMABLE_HTTP:
             config = SecretMcpConfigDict(type="http", url=server.remote_url)
         elif server.transport is McpTransport.SSE:
@@ -135,7 +405,13 @@ class ManagedMcpRuntimeSnapshotLoader:
 
         credential = await self.repository.get_credential(actor_id, server.id)
         if credential is None:
-            return config
+            return _McpConfigMaterial(config, None, 0, False)
+        if (
+            str(credential.server_id) != str(server.id)
+            or str(credential.user_id) != str(actor_id)
+        ):
+            raise McpCredentialIntegrityError()
+        refreshed = False
         if credential.kind == "oauth" and server.auth_kind.value != "oauth":
             raise McpCredentialIntegrityError()
         if credential.kind == "oauth" and self._is_expired(credential.expires_at):
@@ -144,6 +420,7 @@ class ManagedMcpRuntimeSnapshotLoader:
                     ClaudeMcpErrorCode.CREDENTIAL_REQUIRED,
                     "Managed Claude MCP authentication must be refreshed.",
                 )
+            previous_credential_revision = credential.credential_revision
             result = await self.oauth_refresher.discover_one(
                 actor_id,
                 server.id,
@@ -156,13 +433,19 @@ class ManagedMcpRuntimeSnapshotLoader:
                     "Managed Claude MCP authentication must be refreshed.",
                 )
             credential = await self.repository.get_credential(actor_id, server.id)
-            if credential is None or credential.kind != "oauth" or self._is_expired(
-                credential.expires_at
+            if (
+                credential is None
+                or str(credential.server_id) != str(server.id)
+                or str(credential.user_id) != str(actor_id)
+                or credential.kind != "oauth"
+                or credential.credential_revision <= previous_credential_revision
+                or self._is_expired(credential.expires_at)
             ):
                 raise ClaudeMcpError(
                     ClaudeMcpErrorCode.CREDENTIAL_REQUIRED,
                     "Managed Claude MCP authentication must be refreshed.",
                 )
+            refreshed = True
         document = self._credential_document(actor_id, server.id, credential)
         if credential.kind == "oauth":
             tokens = document.get("tokens")
@@ -182,7 +465,24 @@ class ManagedMcpRuntimeSnapshotLoader:
             }
         else:
             raise McpCredentialIntegrityError()
-        return config
+        return _McpConfigMaterial(
+            config,
+            str(credential.id),
+            credential.credential_revision,
+            refreshed,
+        )
+
+    @staticmethod
+    def _same_enabled_server(actor_id: str, expected: Any, current: Any) -> bool:
+        return bool(
+            current is not None
+            and str(current.id) == str(expected.id)
+            and str(current.user_id) == str(actor_id)
+            and current.server_key == expected.server_key
+            and current.scope == expected.scope
+            and current.workspace_id == expected.workspace_id
+            and current.enabled
+        )
 
     @staticmethod
     def _is_expired(expires_at: str | None) -> bool:
@@ -226,5 +526,6 @@ class ManagedMcpRuntimeSnapshotLoader:
 __all__ = [
     "ManagedMcpRuntimeSnapshot",
     "ManagedMcpRuntimeSnapshotLoader",
+    "ManagedMcpServerConfigProjection",
     "SecretMcpConfigDict",
 ]

@@ -180,7 +180,7 @@ test('real Execution renders complete asset metadata and storyboard notes within
     await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
     await page.evaluate(async () => {
-      const theme = await import('/src/utils/theme.ts');
+      const theme = await import('/app/_dream/utils/theme.ts');
       theme.setThemeMode('dark');
     });
 

@@ -1,4 +1,10 @@
+<!-- [Input] Dated task_211 implementation, static checks, and recorded limitations. -->
+<!-- [Output] Immutable historical execution receipt separated from public-application and production status. -->
+<!-- [Pos] Historical Exec evidence; not a current build, deploy, or task-status contract. -->
+<!-- [Sync] 2026-09-06: preserve the original receipt while linking current Next.js/pnpm ownership and evidence boundaries. -->
 # Exec Report: task_211 - 前端管理端插件目录与安装状态 UI
+
+> **历史执行回执（2026-08-01）。** 本文中的 npm/Vite、端口、Paperclip 派工、checkout 与 assignee 只记录当时实际执行事实，不是当前工作状态或实现入口。现行 frontend 为 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`；当前架构见 [Dream frontend Node framework migration assessment](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md)。下文命令和结果按原样保留，且静态通过不等同于公开应用或生产启用。
 
 ## 1. 执行上下文
 
@@ -14,7 +20,7 @@
 - Checkout: 本次 Paperclip harness 已预先领取 [SUO-327](/SUO/issues/SUO-327)，执行 Agent 未重复 checkout
 - 初始状态: `in_progress` / `standard` / `high`
 
-工作树基线存在大量其他 task 的未提交内容。与本 task 允许路径重叠的 `frontend/src/App.tsx` 在开始前已有 Story Workspace 路由接入差异；本次只新增一个受控 import 和 Settings 区块挂载，没有覆盖、重置或格式化该文件的其他差异。
+工作树基线存在大量其他 task 的未提交内容。与本 task 允许路径重叠的 `frontend/app/_dream/App.tsx` 在开始前已有 Story Workspace 路由接入差异；本次只新增一个受控 import 和 Settings 区块挂载，没有覆盖、重置或格式化该文件的其他差异。
 
 ## 2. TASK-REQUIREMENT-FORMAT.md 填充摘要
 
@@ -32,24 +38,24 @@
 
 允许修改：
 
-1. `frontend/src/components/plugin-admin/PluginAdminPage.tsx`
-2. `frontend/src/components/plugin-admin/PluginAdminList.tsx`
-3. `frontend/src/components/plugin-admin/PluginAdminListItem.tsx`
-4. `frontend/src/components/plugin-admin/PluginAdminDetail.tsx`
-5. `frontend/src/components/plugin-admin/PluginStatusBadge.tsx`
-6. `frontend/src/components/plugin-admin/PluginCapabilityDiff.tsx`
-7. `frontend/src/components/plugin-admin/PluginErrorCard.tsx`
-8. `frontend/src/components/plugin-admin/PluginOperationProgress.tsx`
-9. `frontend/src/components/plugin-admin/index.ts`
-10. `frontend/src/hooks/usePluginInstallations.ts`
-11. `frontend/src/hooks/usePluginInstallationDetail.ts`
-12. `frontend/src/hooks/usePluginOperation.ts`
-13. `frontend/src/hooks/usePluginRuntimeReadiness.ts`
-14. `frontend/src/api/deckPluginAdminApi.ts`
-15. `frontend/src/App.tsx`（仅 Settings 增量入口/挂载）
-16. `frontend/src/components/plugin-admin/PluginAdminPage.test.tsx`（仅现有 runner 可用时）
-17. `frontend/src/components/plugin-admin/PluginAdminDetail.test.tsx`（仅现有 runner 可用时）
-18. `frontend/src/hooks/usePluginOperation.test.ts`（仅现有 runner 可用时）
+1. `frontend/app/_dream/components/plugin-admin/PluginAdminPage.tsx`
+2. `frontend/app/_dream/components/plugin-admin/PluginAdminList.tsx`
+3. `frontend/app/_dream/components/plugin-admin/PluginAdminListItem.tsx`
+4. `frontend/app/_dream/components/plugin-admin/PluginAdminDetail.tsx`
+5. `frontend/app/_dream/components/plugin-admin/PluginStatusBadge.tsx`
+6. `frontend/app/_dream/components/plugin-admin/PluginCapabilityDiff.tsx`
+7. `frontend/app/_dream/components/plugin-admin/PluginErrorCard.tsx`
+8. `frontend/app/_dream/components/plugin-admin/PluginOperationProgress.tsx`
+9. `frontend/app/_dream/components/plugin-admin/index.ts`
+10. `frontend/app/_dream/hooks/usePluginInstallations.ts`
+11. `frontend/app/_dream/hooks/usePluginInstallationDetail.ts`
+12. `frontend/app/_dream/hooks/usePluginOperation.ts`
+13. `frontend/app/_dream/hooks/usePluginRuntimeReadiness.ts`
+14. `frontend/app/_dream/api/deckPluginAdminApi.ts`
+15. `frontend/app/_dream/App.tsx`（仅 Settings 增量入口/挂载）
+16. `frontend/app/_dream/components/plugin-admin/PluginAdminPage.test.tsx`（仅现有 runner 可用时）
+17. `frontend/app/_dream/components/plugin-admin/PluginAdminDetail.test.tsx`（仅现有 runner 可用时）
+18. `frontend/app/_dream/hooks/usePluginOperation.test.ts`（仅现有 runner 可用时）
 19. `docs/exec/exec_task_211_frontend_plugin_admin_ui.md`
 
 禁止修改：除上述文件外的 `docs/exec/`、全部 `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`backend/`、依赖锁、测试/构建配置、生成物与未列明实现路径。三个条件测试路径因 test runner 发现结果为空而未创建。
@@ -59,7 +65,7 @@
 - 验收: 原 Task §9 的 11 项全部保留，逐项结果见 §6。
 - 必跑命令: `node -p "require('./frontend/package.json').scripts?.test ?? ''"`、`npm --prefix frontend run build`、`npm --prefix frontend run lint`、`git diff --check`。
 - 替代验证: 无 test runner 时使用浏览器/E2E 或人工证据；不得新增 runner 或伪报单测。
-- 回滚: 仅删除本 task 新增文件，并从 `frontend/src/App.tsx` 移除本 task 的 import 和 Settings 挂载；不得回滚后端、历史审计或其他 task 差异；报告保留。
+- 回滚: 仅删除本 task 新增文件，并从 `frontend/app/_dream/App.tsx` 移除本 task 的 import 和 Settings 挂载；不得回滚后端、历史审计或其他 task 差异；报告保留。
 
 ## 3. 模型生成的执行任务
 
@@ -82,21 +88,21 @@
 
 | 文件 | 操作 | 说明 |
 |---|---|---|
-| `frontend/src/api/deckPluginAdminApi.ts` | create | Deck/runtime 独立类型、snake_case 响应归一化、权限 fail-closed、安装/启停/升级/回滚/卸载/reconcile/审批与 operation 查询 |
-| `frontend/src/hooks/usePluginInstallations.ts` | create | 安装目录、runtime 依赖扁平列表、权限与刷新状态 |
-| `frontend/src/hooks/usePluginInstallationDetail.ts` | create | 详情查询、取消与刷新 |
-| `frontend/src/hooks/usePluginOperation.ts` | create | mutation 执行、1.5 秒 operation 轮询、终态刷新和错误 |
-| `frontend/src/hooks/usePluginRuntimeReadiness.ts` | create | 服务端三维 readiness 查询，不进行客户端 run-ready 推导 |
-| `frontend/src/components/plugin-admin/PluginAdminPage.tsx` | create | Settings 根页面、双分类、安装 manifest/能力确认、操作协调、响应式样式 |
-| `frontend/src/components/plugin-admin/PluginAdminList.tsx` | create | loading/error/empty/list 状态 |
-| `frontend/src/components/plugin-admin/PluginAdminListItem.tsx` | create | 名称、ID、精确版本、来源、三维状态、兼容、健康、能力、错误、最近运行和条件动作 |
-| `frontend/src/components/plugin-admin/PluginAdminDetail.tsx` | create | Configuration/Status tabs、manifest/schema/runtime lock、effective capabilities、历史、最近 run、操作日志 |
-| `frontend/src/components/plugin-admin/PluginStatusBadge.tsx` | create | Task §4.2 的 declared/materialized/loadable 状态文案映射 |
-| `frontend/src/components/plugin-admin/PluginCapabilityDiff.tsx` | create | added/removed 展示与 upgrade_pending 明确批准/拒绝 |
-| `frontend/src/components/plugin-admin/PluginErrorCard.tsx` | create | 规范错误码安全文案、阶段/operation/run 引用与恢复入口 |
-| `frontend/src/components/plugin-admin/PluginOperationProgress.tsx` | create | queued/running/terminal 进度与失败反馈 |
-| `frontend/src/components/plugin-admin/index.ts` | create | 受控组件导出 |
-| `frontend/src/App.tsx` | update | 仅新增 `PluginAdminPage` import 与 Settings 内挂载；保留全部既有 Story Workspace 差异 |
+| `frontend/app/_dream/api/deckPluginAdminApi.ts` | create | Deck/runtime 独立类型、snake_case 响应归一化、权限 fail-closed、安装/启停/升级/回滚/卸载/reconcile/审批与 operation 查询 |
+| `frontend/app/_dream/hooks/usePluginInstallations.ts` | create | 安装目录、runtime 依赖扁平列表、权限与刷新状态 |
+| `frontend/app/_dream/hooks/usePluginInstallationDetail.ts` | create | 详情查询、取消与刷新 |
+| `frontend/app/_dream/hooks/usePluginOperation.ts` | create | mutation 执行、1.5 秒 operation 轮询、终态刷新和错误 |
+| `frontend/app/_dream/hooks/usePluginRuntimeReadiness.ts` | create | 服务端三维 readiness 查询，不进行客户端 run-ready 推导 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminPage.tsx` | create | Settings 根页面、双分类、安装 manifest/能力确认、操作协调、响应式样式 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminList.tsx` | create | loading/error/empty/list 状态 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminListItem.tsx` | create | 名称、ID、精确版本、来源、三维状态、兼容、健康、能力、错误、最近运行和条件动作 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminDetail.tsx` | create | Configuration/Status tabs、manifest/schema/runtime lock、effective capabilities、历史、最近 run、操作日志 |
+| `frontend/app/_dream/components/plugin-admin/PluginStatusBadge.tsx` | create | Task §4.2 的 declared/materialized/loadable 状态文案映射 |
+| `frontend/app/_dream/components/plugin-admin/PluginCapabilityDiff.tsx` | create | added/removed 展示与 upgrade_pending 明确批准/拒绝 |
+| `frontend/app/_dream/components/plugin-admin/PluginErrorCard.tsx` | create | 规范错误码安全文案、阶段/operation/run 引用与恢复入口 |
+| `frontend/app/_dream/components/plugin-admin/PluginOperationProgress.tsx` | create | queued/running/terminal 进度与失败反馈 |
+| `frontend/app/_dream/components/plugin-admin/index.ts` | create | 受控组件导出 |
+| `frontend/app/_dream/App.tsx` | update | 仅新增 `PluginAdminPage` import 与 Settings 内挂载；保留全部既有 Story Workspace 差异 |
 | `docs/exec/exec_task_211_frontend_plugin_admin_ui.md` | create | 唯一正式执行报告 |
 
 未创建 `PluginAdminPage.test.tsx`、`PluginAdminDetail.test.tsx`、`usePluginOperation.test.ts`：runner 发现命令输出为空，且 `frontend/package.json` 无 `test` script；按 Task 合同禁止新增测试框架或不可执行测试文件。
@@ -170,8 +176,8 @@
 
 ## 9. 回滚建议
 
-- 回滚文件: 删除本次新建的 `frontend/src/components/plugin-admin/` 九个文件、4 个 `usePlugin*` hooks 与 `frontend/src/api/deckPluginAdminApi.ts`。
-- App 回滚: 只从 `frontend/src/App.tsx` 移除 `PluginAdminPage` import 与 Settings 内 `Deck Plugin Admin` section；不得回滚该文件既有 Story Workspace 路由差异。
+- 回滚文件: 删除本次新建的 `frontend/app/_dream/components/plugin-admin/` 九个文件、4 个 `usePlugin*` hooks 与 `frontend/app/_dream/api/deckPluginAdminApi.ts`。
+- App 回滚: 只从 `frontend/app/_dream/App.tsx` 移除 `PluginAdminPage` import 与 Settings 内 `Deck Plugin Admin` section；不得回滚该文件既有 Story Workspace 路由差异。
 - 报告保留: `docs/exec/exec_task_211_frontend_plugin_admin_ui.md` 作为执行证据，不随代码回滚删除。
 - 注意事项: 不触碰后端 installation/release、审计记录、历史 run、依赖锁或其他 Settings 功能。
 - 回滚验证: 再执行 `npm --prefix frontend run build`、本 task 定向 lint 和 `git diff --check`，确认 Settings 其余功能与共享差异仍保留。

@@ -174,11 +174,11 @@ e2e/tests/story-workspace/
 ### 前端被测文件（只读引用）
 
 ```
-frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx
-frontend/src/components/story-workspace/review/StoryWorkspaceReviewGate.tsx
-frontend/src/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx
-frontend/src/components/story-workspace/review/StoryWorkspaceReviewActions.tsx
-frontend/src/hooks/story-workspace/useStoryWorkspaceStore.ts
+frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx
+frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewGate.tsx
+frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx
+frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewActions.tsx
+frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceStore.ts
 ```
 
 ### 后端被测文件（只读引用）

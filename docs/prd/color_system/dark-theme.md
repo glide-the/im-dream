@@ -1,6 +1,6 @@
 # Dark Theme 暗色主题设计稿
 
-> Source of truth: `frontend/src/styles/tokens.css` `[data-theme='dark']` 块。  
+> Source of truth: `frontend/app/_dream/styles/tokens.css` `[data-theme='dark']` 块。
 > 触发方式：`[data-theme='dark']`（用户手动切换）；系统偏好暗色时 `prefers-color-scheme: dark` 自动生效（`:root:not([data-theme='light'])`）。  
 > 切换入口：Story Workspace 侧边栏 🌙/☀️ 按钮 → 调用 `utils/theme.ts` `toggleTheme()`，持久化到 `localStorage`（键名 `ink-theme`）。
 > [Sync] 2026-07-09: Connector settings pages use a dashed deep-paper boundary plus flat low-contrast list rows; selected resources use a right-side checkmark, and ordinary resource rows do not use stacked dark cards or dark selected fills.

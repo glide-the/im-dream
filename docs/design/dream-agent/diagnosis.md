@@ -58,7 +58,7 @@ The endpoint search is unambiguous:
 
 ```text
 $ git log --all -S'/dream-agent/events' -- backend/routers/story_workspace.py \
-    frontend/src/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts
+    frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts
 61f70fc52ee6c557bd7294d65969a7f672851e4d feat: Implement Dream Agent functionality in Story Workspace
 ```
 
@@ -113,7 +113,7 @@ flowchart LR
 4. `DreamStreamAdapter` converts only selected text and terminal events in
    baseline `backend/services/story_workspace/dream_stream_adapter.py:37-208`.
 5. The browser separately parses, reduces and reconnects this stream in
-   baseline `frontend/src/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts:760-1205`.
+   baseline `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts:760-1205`.
 
 The Dream adapter also has three non-browser consumers that drain its internal
 iterator and therefore block simple deletion:
@@ -182,7 +182,7 @@ requests neither schedule nor start an Agent turn.
 | Legacy audit envelope | `backend/models/events.py` and `backend/services/events/**` | Tests/audit experiments | Append-only storage, but not the live Dream SSE path |
 
 The frontend explicitly documents that generic Workflow Run SSE is unavailable
-and polls REST every five seconds in `frontend/src/hooks/useWorkflowEvents.ts:1-4`
+and polls REST every five seconds in `frontend/app/_dream/hooks/useWorkflowEvents.ts:1-4`
 and `:43-71`.
 
 ## Public-contract difference matrix
@@ -205,49 +205,49 @@ and `:43-71`.
 ### Chat callers
 
 - Initial transport and event conversion:
-  `frontend/src/lib/claude-agent-transport.ts:252-458` and `:471-529`.
+  `frontend/app/_dream/lib/claude-agent-transport.ts:252-458` and `:471-529`.
 - Shared framing/parser:
-  `frontend/src/lib/claude-agent-sse-utils.ts:22-67`.
+  `frontend/app/_dream/lib/claude-agent-sse-utils.ts:22-67`.
 - Reconnect fetch and reducer dispatch:
-  `frontend/src/components/chat/ChatPanel.tsx:484-568`.
+  `frontend/app/_dream/components/chat/ChatPanel.tsx:484-568`.
 - History → status → reconnect and post-EOF recovery:
-  `frontend/src/components/chat/ChatView.tsx:711-796`.
+  `frontend/app/_dream/components/chat/ChatView.tsx:711-796`.
 - Tool confirmation:
-  `frontend/src/components/chat/ToolConfirmationDock.tsx:68-108`.
+  `frontend/app/_dream/components/chat/ToolConfirmationDock.tsx:68-108`.
 - `ChatPanel` is already the live owner: it constructs `useChat` and canonical
-  transport at `frontend/src/components/chat/ChatPanel.tsx:285-335`; reconnect is
+  transport at `frontend/app/_dream/components/chat/ChatPanel.tsx:285-335`; reconnect is
   at `:484-568`. `ChatView.tsx:711-796` owns surrounding history/status/recovery.
 
 ### Dream callers
 
 - Endpoint construction and run-scoped payloads:
-  `frontend/src/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts:220-280`.
+  `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts:220-280`.
 - Independent parser/fetch reader:
-  `frontend/src/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts:371-417`
+  `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts:371-417`
   and `:760-828`.
 - Independent polling, cursor, reducer and reconnect loop:
-  `frontend/src/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts:859-1205`.
+  `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceDreamAgent.ts:859-1205`.
 - Product consumers:
-  `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx:145-164`
-  and `frontend/src/pages/story-workspace/StoryWorkspaceExecutionPage.tsx:532-562`.
+  `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx:145-164`
+  and `frontend/app/_dream/views/story-workspace/StoryWorkspaceExecutionPage.tsx:532-562`.
 - Re-entry files binding already exists: actor-scoped Dream-files parsing returns
   `threadId` at
-  `frontend/src/hooks/story-workspace/useStoryWorkspaceDreamFiles.ts:178-193`.
+  `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceDreamFiles.ts:178-193`.
 
 ### Existing bridge in the opposite direction
 
 At the pinned baseline, Chat calls the Dream snapshot solely to recover Dream tool
-confirmations in `frontend/src/components/chat/ChatView.tsx:355-388` and routes
+confirmations in `frontend/app/_dream/components/chat/ChatView.tsx:355-388` and routes
 those confirmations back to the Dream endpoint in
-`frontend/src/components/chat/ToolConfirmationDock.tsx:68-108`. This is direct
+`frontend/app/_dream/components/chat/ToolConfirmationDock.tsx:68-108`. This is direct
 evidence that the two public protocols do not form clean product boundaries.
 
 ## Concrete defects and migration hazards
 
 1. **Reconnect reducer drift at the baseline.** Initial Chat conversion reuses cached tool input
    when an approval event omits `input`
-   (`frontend/src/lib/claude-agent-transport.ts:369-390`), but reconnect replaces
-   the input with `{}` (`frontend/src/lib/claude-agent-sse-utils.ts:177-210`). A
+   (`frontend/app/_dream/lib/claude-agent-transport.ts:369-390`), but reconnect replaces
+   the input with `{}` (`frontend/app/_dream/lib/claude-agent-sse-utils.ts:177-210`). A
    the canonical ChatPanel reducer path had to fix this before Dream cutover.
 2. **Dream context is not derived by generic Chat ingress at the baseline.** Dream dispatchers
    attach a server-authored `StoryWorkspaceDreamRunContext`; generic Chat POST
@@ -265,12 +265,12 @@ evidence that the two public protocols do not form clean product boundaries.
    canonical confirmation port before the Dream endpoint is removed.
 4. **Visibility changes have an existing shared filter and an empty-row gap at
    the baseline.**
-   `frontend/src/lib/story-workspace-guidance.ts:47-66` already removes guidance,
+   `frontend/app/_dream/lib/story-workspace-guidance.ts:47-66` already removes guidance,
    Dream business-confirmation and server episode-action envelope rows at Chat
    seams. Direct Chat adopts richer owner-visible reasoning/tool/error parts, but
    must retain that filter for history/live/reconnect/export. Baseline history
    hydration synthesizes `{type: "text", text: ""}` when parts are empty at
-   `frontend/src/components/chat/ChatView.tsx:401-404`, which can create a blank
+   `frontend/app/_dream/components/chat/ChatView.tsx:401-404`, which can create a blank
    bubble unless zero-visible-part rows are skipped.
 5. **Workflow refresh coupling at the baseline.** Dream pages refresh run/files when the custom
    hook's `settledRevision` changes. Replacing the hook without an Observer-backed

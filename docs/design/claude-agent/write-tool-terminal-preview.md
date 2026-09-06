@@ -1,4 +1,4 @@
-> [Input] `/Users/dmeck/Downloads/sse-message--report.md`, `backend/libs/claude_agent_kit/server/agent_runner.py`, `backend/claude_agent/service.py`, `frontend/src/lib/claude-agent-transport.ts`, `frontend/src/components/chat/ChatMessageList.tsx`
+> [Input] `/Users/dmeck/Downloads/sse-message--report.md`, `backend/libs/claude_agent_kit/server/agent_runner.py`, `backend/claude_agent/service.py`, `frontend/app/_dream/lib/claude-agent-transport.ts`, `frontend/app/_dream/components/chat/ChatMessageList.tsx`
 > [Output] Define the minimal interaction design for terminal-style previews while Claude Agent streams built-in `Write` tool input.
 > [Pos] interaction-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-06-13: initial design for `Write` tool input-delta SSE forwarding and frontend terminal preview.

@@ -2,7 +2,7 @@
 
 > **版本**: 2026-06-09 v2.1 — Port/Adapter + 部署环境变量（`backend/.env.example` § EventBus）  
 > **关联文件**: `backend/claude_agent/thread_factory.py`, `backend/claude_agent/thread_pool.py`,  
-> `backend/claude_agent/event_bus.py`（新建），`frontend/src/components/chat/ChatView.tsx`
+> `backend/claude_agent/event_bus.py`（新建），`frontend/app/_dream/components/chat/ChatView.tsx`
 
 > **[Sync 2026-08-11 / current contract]** 本文的“浏览器断线只取消 subscriber、
 > producer 继续、replay 后再 live、sentinel 单次关闭”仍有效。EventBus 当前存储并广播
@@ -630,8 +630,8 @@ multi-worker/pod HTTP reconnect。复现命令和证据边界见
 | `backend/claude_agent/thread_factory.py` | 修改 | `run_streaming` 重连分支；`finally` 改为仅 unsubscribe |
 | `backend/claude_agent/service.py` | 修改 | `assemble_context` 接受 `bus` 参数；`_TurnContext.queue` → `BusProxyQueue` |
 | `backend/routers/claude_agent.py` | 修改 | 新增 `GET /threads/{id}/stream` 重连端点 |
-| `frontend/src/components/chat/ChatView.tsx` | 修改 | status=running → SSE 重连，移除 banner 逻辑 |
-| `frontend/src/components/chat/ChatPanel.tsx` | 修改 | 移除 `isRunningBackground` prop 和 banner |
+| `frontend/app/_dream/components/chat/ChatView.tsx` | 修改 | status=running → SSE 重连，移除 banner 逻辑 |
+| `frontend/app/_dream/components/chat/ChatPanel.tsx` | 修改 | 移除 `isRunningBackground` prop 和 banner |
 
 ---
 

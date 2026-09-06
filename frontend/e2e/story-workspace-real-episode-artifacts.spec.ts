@@ -195,9 +195,9 @@ test('real actor loads persisted Dream files and EP01 artifacts without API fail
       'utf-8',
     );
     const browserParserError = await page.evaluate(async (runId) => {
-      const contract = await import('/src/hooks/story-workspace/contracts.ts');
-      const apiBase = await import('/src/lib/apiBase.ts');
-      const query = await import('/src/hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts.ts');
+      const contract = await import('/app/_dream/hooks/story-workspace/contracts.ts');
+      const apiBase = await import('/app/_dream/lib/apiBase.ts');
+      const query = await import('/app/_dream/hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts.ts');
       const endpoint = apiBase.apiUrl(
         `/api/story-workspace/workflow-runs/${encodeURIComponent(runId)}/episode-artifacts`,
       );

@@ -1,9 +1,16 @@
+<!-- [Input] Historical Dream Agent prompt rounds and their dated execution receipts. -->
+<!-- [Output] Preserve decision/evidence history without acting as current architecture, command, or runtime guidance. -->
+<!-- [Pos] Historical archive; current Dream Agent design is indexed by README.md and current Web ownership by the linked Next.js architecture. -->
+<!-- [Sync] 2026-09-06: make all Vite/npm/service references historical and link the current Next.js/pnpm source of truth. -->
+
 # Dream Agent design prompt rounds
 
 > Status: historical prompt and evidence trace through R35. This records inputs,
 > questions, measured results and artifact changes. It is not a transcript of
 > hidden reasoning; current implementation and acceptance claims still require
 > the source and executable evidence linked by the canonical design documents.
+
+Current guides: [Dream Agent design index](./README.md) and [Dream Web current Next.js architecture](../claude-agent/dream-frontend-node-framework-migration-assessment.md). Every Vite, npm, legacy migration, service-process, port, or deployment instruction below is a dated historical input/receipt and must not be replayed as current guidance.
 
 ## Purpose
 
@@ -1930,7 +1937,7 @@ from the diagnosis.
 
 - Dream launch/follow-up reuse `ClaudeAgentRunRequest` and the same factory.
 - Chat calls Dream snapshot/confirmation as a reverse bridge at
-  `frontend/src/components/chat/ChatView.tsx:355-388` and
+  `frontend/app/_dream/components/chat/ChatView.tsx:355-388` and
   `ToolConfirmationDock.tsx:68-108`.
 - Dream independently implements parser, cursor, reducer, polling and reconnect
   at `useStoryWorkspaceDreamAgent.ts:760-1205`.
@@ -4271,7 +4278,7 @@ before publisher implementation.
 
 **本轮检查或修改范围**
 
-- `frontend/src/components/chat/ChatPanel.tsx` 及共享 Chat 重连测试。
+- `frontend/app/_dream/components/chat/ChatPanel.tsx` 及共享 Chat 重连测试。
 - 当前真实 Run `run_5feb30d84d7e4b3fbfac6efd66bca3aa` 的只读状态、SSE 类型和可见页面确认。
 - 不修改 Dream transport、Claude Agent runner、Claude session 定义、数据库或真实 Run 内容。
 

@@ -8,11 +8,11 @@ Scope: 前端任务规划 - Chat 入口页 landing tabs、QuickActionStrip、she
 >      `docs/issue/ISSUES_notion-session-chat-connector-interaction.md`,
 >      `docs/design/notion-session/connector-interaction.md`,
 >      `docs/design/notion-session/overview.md`,
->      `frontend/src/App.tsx`,
->      `frontend/src/components/chat/ChatView.tsx`,
->      `frontend/src/components/chat/ChatPanel.tsx`,
->      `frontend/src/components/dashboard/Sidebar.tsx`,
->      `frontend/src/components/dashboard/VerticalNav.tsx`
+>      `frontend/app/_dream/App.tsx`,
+>      `frontend/app/_dream/components/chat/ChatView.tsx`,
+>      `frontend/app/_dream/components/chat/ChatPanel.tsx`,
+>      `frontend/app/_dream/components/dashboard/Sidebar.tsx`,
+>      `frontend/app/_dream/components/dashboard/VerticalNav.tsx`
 > [Output] 可执行的 Chat landing task 文档，定义入口、tab 切换与 shell 降级边界
 > [Pos] `task_196a_frontend_chat-shell-landing-tabs` in `docs/task`
 > [Sync] 2026-07-07: generated from the SUO-196 family after the issue split blocker cleared.
@@ -56,13 +56,13 @@ Scope: 前端任务规划 - Chat 入口页 landing tabs、QuickActionStrip、she
 
 | Path | Role |
 |---|---|
-| `frontend/src/App.tsx` | Chat 入口视图状态和 landing shell 切换。 |
-| `frontend/src/components/chat/ChatView.tsx` | Landing tabs、QuickActionStrip、shell_error 的主布局。 |
-| `frontend/src/components/chat/ChatPanel.tsx` | 若现有面板抽象影响入口布局，只做最小联动。 |
-| `frontend/src/components/chat/QuickActionStrip.tsx` | 若已存在则复用，否则作为最小新增组件。 |
-| `frontend/src/components/chat/ChatShellError.tsx` | shell-level 可恢复错误条。 |
-| `frontend/src/components/dashboard/Sidebar.tsx` | 如入口需要从 dashboard chrome 到达，保持最小同步。 |
-| `frontend/src/components/dashboard/VerticalNav.tsx` | 如移动端入口需要同步，保持最小同步。 |
+| `frontend/app/_dream/App.tsx` | Chat 入口视图状态和 landing shell 切换。 |
+| `frontend/app/_dream/components/chat/ChatView.tsx` | Landing tabs、QuickActionStrip、shell_error 的主布局。 |
+| `frontend/app/_dream/components/chat/ChatPanel.tsx` | 若现有面板抽象影响入口布局，只做最小联动。 |
+| `frontend/app/_dream/components/chat/QuickActionStrip.tsx` | 若已存在则复用，否则作为最小新增组件。 |
+| `frontend/app/_dream/components/chat/ChatShellError.tsx` | shell-level 可恢复错误条。 |
+| `frontend/app/_dream/components/dashboard/Sidebar.tsx` | 如入口需要从 dashboard chrome 到达，保持最小同步。 |
+| `frontend/app/_dream/components/dashboard/VerticalNav.tsx` | 如移动端入口需要同步，保持最小同步。 |
 
 ## 6. 输入 / 输出说明
 
@@ -79,8 +79,8 @@ Scope: 前端任务规划 - Chat 入口页 landing tabs、QuickActionStrip、she
 - `docs/design/notion-session/overview.md`
 - `SUO-195-A`
 - `SUO-195-D`
-- `frontend/src/App.tsx`
-- `frontend/src/components/chat/ChatView.tsx`
+- `frontend/app/_dream/App.tsx`
+- `frontend/app/_dream/components/chat/ChatView.tsx`
 
 ## 8. 测试策略
 

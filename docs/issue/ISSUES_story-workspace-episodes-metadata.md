@@ -340,9 +340,9 @@
 - 前置依赖：`SUO-230-FE-002`（Dream 页面与 ReviewGate 组件）、`SUO-243-SH-001`（投影合同定义）
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/episodes/StoryWorkspaceEpisodeListTable.tsx`
-  - `frontend/src/components/story-workspace/episodes/StoryWorkspaceEpisodeDetail.tsx`
-  - `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`
+  - `frontend/app/_dream/components/story-workspace/episodes/StoryWorkspaceEpisodeListTable.tsx`
+  - `frontend/app/_dream/components/story-workspace/episodes/StoryWorkspaceEpisodeDetail.tsx`
+  - `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -390,9 +390,9 @@
 - 前置依赖：`SUO-230-FE-002`（Dream 页面与 ReviewGate 组件）
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/prompt/StoryWorkspacePromptComposer.tsx`
-  - `frontend/src/components/story-workspace/prompt/StoryWorkspaceRuntimeProgress.tsx`
-  - `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`
+  - `frontend/app/_dream/components/story-workspace/prompt/StoryWorkspacePromptComposer.tsx`
+  - `frontend/app/_dream/components/story-workspace/prompt/StoryWorkspaceRuntimeProgress.tsx`
+  - `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -436,7 +436,7 @@
 - 前置依赖：`SUO-243-FE-001`（Dream 页面 Episodes 列表与详情骨架）
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/episodes/tabs/`
+  - `frontend/app/_dream/components/story-workspace/episodes/tabs/`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -479,7 +479,7 @@
 - 前置依赖：`SUO-226-FE-003`（配置/执行/失败状态 UI 组件）、`SUO-243-FE-001`（Episodes 列表与详情骨架）
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/state/`
+  - `frontend/app/_dream/components/story-workspace/state/`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -526,10 +526,10 @@
 - 前置依赖：`SUO-226-FE-002`（审阅面板来源溯源与版本信息展示）、`SUO-243-FE-001`（Episodes 列表与详情骨架）
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/review/StoryWorkspaceEpisodeReviewPanel.tsx`
-  - `frontend/src/components/story-workspace/review/StoryWorkspaceArtifactIntegrity.tsx`
-  - `frontend/src/components/story-workspace/review/StoryWorkspaceConflictAlert.tsx`
-  - `frontend/src/components/story-workspace/review/StoryWorkspaceAgentFindings.tsx`
+  - `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceEpisodeReviewPanel.tsx`
+  - `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceArtifactIntegrity.tsx`
+  - `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceConflictAlert.tsx`
+  - `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceAgentFindings.tsx`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -575,8 +575,8 @@
 - 前置依赖：`SUO-243-BE-003`（审阅事件与执行 Gate 审计记录）、`SUO-243-FE-005`（审阅面板 Episodes 增强）
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/episodes/`
-  - `frontend/src/components/story-workspace/review/`
+  - `frontend/app/_dream/components/story-workspace/episodes/`
+  - `frontend/app/_dream/components/story-workspace/review/`
   - `backend/src/services/story-workspace/`
   - `backend/src/routes/story-workspace/`
 

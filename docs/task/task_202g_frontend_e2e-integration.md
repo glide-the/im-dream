@@ -73,8 +73,8 @@ Story Workspace 审阅工作流前端-后端 E2E 联调
 ## 5. 涉及文件路径
 
 **前端涉及**：
-- `frontend/src/components/story-workspace/` 全部组件
-- `frontend/src/hooks/story-workspace/` 全部 Hooks
+- `frontend/app/_dream/components/story-workspace/` 全部组件
+- `frontend/app/_dream/hooks/story-workspace/` 全部 Hooks
 
 **后端涉及**（协作验证）：
 - `backend/src/routes/story-workspace/`
@@ -209,8 +209,8 @@ Story Workspace 审阅工作流前端-后端 E2E 联调
 ## 执行边界（增量修正）
 
 ### 允许修改范围
-- 允许修改前端组件以修复联调中发现的问题（在 `frontend/src/components/story-workspace/` 范围内）
-- 允许修改前端 Hooks 以适配 API 响应格式（在 `frontend/src/hooks/story-workspace/` 范围内）
+- 允许修改前端组件以修复联调中发现的问题（在 `frontend/app/_dream/components/story-workspace/` 范围内）
+- 允许修改前端 Hooks 以适配 API 响应格式（在 `frontend/app/_dream/hooks/story-workspace/` 范围内）
 - 允许创建 E2E 测试报告文档
 
 ### 禁止修改范围

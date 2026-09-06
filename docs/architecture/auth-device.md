@@ -1,4 +1,9 @@
-# Device Flow 认证方案
+<!-- [输入] Next.js Device Verification UI、Python RFC 8628 routes 和 Admin-owned PostgreSQL 认证状态。 -->
+<!-- [输出] 说明当前 Device Authorization Grant 路由、状态、轮询、安全和身份边界。 -->
+<!-- [定位] 当前 Device Flow 架构；Schema 由 Admin Drizzle 管理，本文不提供 Dream migration。 -->
+<!-- [同步] 2026-09-06：Verification UI 更新为唯一 Next.js App Router，并移除 SQLite 当前态叙述。 -->
+
+# Device Flow 认证架构
 
 > 本文定义 Ink & Memory 的 OAuth 2.0 Device Authorization Grant（RFC 8628）实施方案。Device Flow 面向 CLI、Desktop、Agent、MCP Client 等非浏览器或弱输入设备；普通网页端登录继续使用 Google OAuth / OIDC。
 
@@ -12,7 +17,7 @@ Device Flow 允许设备端先请求 `device_code`、`user_code` 和 `verificati
 | --- | --- |
 | Authorization Server | Python FastAPI 后端 |
 | Device Client | CLI / Desktop / Agent / MCP Client |
-| Verification UI | Vite 前端的 `/oauth/device/verify` 页面 |
+| Verification UI | Next.js Dream Web 中 `frontend/app/_dream/components/Auth/DeviceVerificationPage.tsx` 提供的 `/oauth/device/verify` 页面 |
 | User Login | 现有邮箱密码登录或 Google OAuth |
 | Final Token | Python 后端签发的本系统 `access_token` / `refresh_token` |
 
@@ -30,7 +35,7 @@ Device Flow 允许设备端先请求 `device_code`、`user_code` 和 `verificati
 
 | 场景 | 是否适用 | 说明 |
 | --- | --- | --- |
-| Vite 普通网页登录 | 否 | 直接走 Google OAuth / OIDC，更短链路 |
+| Next.js 普通网页登录 | 否 | 直接走 Python Google OAuth / OIDC，更短链路 |
 | CLI 登录 | 是 | `ink login` 可打印 `verification_uri` 和 `user_code` |
 | Desktop 登录 | 是 | 无需内置浏览器或 loopback callback |
 | Agent / MCP Client 登录 | 是 | 适合弱输入、跨进程认证 |
@@ -90,7 +95,7 @@ grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=opaque-devic
 
 ## 5. 数据表设计
 
-当前项目已有 `users` 表，不新增第二套用户表。Device Flow 增量表：
+当前 Admin-owned PostgreSQL 已有 `users` 表，不新增第二套用户表。下列内容只描述 `device_authorizations` 的逻辑状态，不是 Dream migration；表、索引和约束由 Admin Drizzle 发布并由 Dream 的统一 Schema capability 消费。
 
 ```sql
 CREATE TABLE IF NOT EXISTS device_authorizations (
@@ -274,7 +279,7 @@ Authlib 的 RFC 8628 支持要求实现两个扩展点：
 | `DeviceAuthorizationEndpoint` | 生成 `device_code` / `user_code` / `verification_uri`，保存到 `device_authorizations` |
 | `DeviceCodeGrant` | 在 `/oauth/token` 处理 device_code grant，查询设备授权状态，执行 slow_down / pending / token 签发 |
 
-Authlib 当前没有直接可用的 FastAPI authorization-server 集成；本项目在现有 FastAPI 路由内显式继承 RFC8628 核心类，并以 SQLite helper 实现 Authlib 所需查询与保存方法。
+Authlib 当前没有直接可用的 FastAPI authorization-server 集成；本项目在现有 FastAPI 路由内显式继承 RFC 8628 核心类，并通过 `backend/database.py` 的 PostgreSQL helper 实现 Authlib 所需查询与保存方法。Python 负责状态转换，Schema 仍只由 Admin Drizzle 管理。
 
 ## 14. 测试清单
 

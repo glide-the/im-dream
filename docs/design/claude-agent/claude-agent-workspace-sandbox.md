@@ -415,10 +415,10 @@ performs the search.
 | `backend/routers/claude_agent.py` | Initialize attachment workspaces with the same Settings-backed sandbox filesystem and network policy before file sync only when Workspace Mode is enabled; skip attachment workspace sync when disabled. |
 | `backend/routers/workspace.py` | Initialize file-sidebar workspaces with the same Settings-backed sandbox filesystem and network policy so listing/upload/download does not revert `.claude/settings.json` to defaults. |
 | `backend/libs/claude_agent_kit/server/sdk_env.py` | Already forces project-only setting sources, so the thread-local settings file is authoritative for Claude Code. |
-| `frontend/src/components/dashboard/ModelConfigSection.tsx` | Describes Workspace Mode as enabling workspace context plus Bash sandbox and emits same-tab Workspace Mode events after toggles. |
-| `frontend/src/contexts/WorkspaceContext.tsx` | Loads `workspace_enabled` from system-config and broadcasts the value to chat/file UI. |
-| `frontend/src/components/chat/ChatView.tsx` | Hides and closes the workspace file sidebar entry when Workspace Mode is disabled. |
-| `frontend/src/components/chat/ChatPanel.tsx` | Withholds `workspaceSessionId` from `AIInputDock` when Workspace Mode is disabled. |
+| `frontend/app/_dream/components/dashboard/ModelConfigSection.tsx` | Describes Workspace Mode as enabling workspace context plus Bash sandbox and emits same-tab Workspace Mode events after toggles. |
+| `frontend/app/_dream/contexts/WorkspaceContext.tsx` | Loads `workspace_enabled` from system-config and broadcasts the value to chat/file UI. |
+| `frontend/app/_dream/components/chat/ChatView.tsx` | Hides and closes the workspace file sidebar entry when Workspace Mode is disabled. |
+| `frontend/app/_dream/components/chat/ChatPanel.tsx` | Withholds `workspaceSessionId` from `AIInputDock` when Workspace Mode is disabled. |
 | `backend/Dockerfile` | Installs Claude Code Linux sandbox dependencies (`bubblewrap`, `socat`) plus runtime tools needed by agent commands; ensures standard `sbin` directories exist for bubblewrap rootfs mounts. |
 | `docker-compose.yml` | Enables Docker nested Bash sandbox mode for local Compose backend and grants the runtime privileges bubblewrap needs (`SYS_ADMIN`, unconfined seccomp/AppArmor). |
 | `deploy/remote-ssh/docker-compose.yml` | Enables the same Docker nested Bash sandbox runtime privileges for Remote SSH backend. |

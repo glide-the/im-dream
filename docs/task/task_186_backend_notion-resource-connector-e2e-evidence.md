@@ -109,7 +109,7 @@ Scope: 后端任务规划 - Notion 资源连接器后端链路 E2E 证据验证�
 
 ### 兼容性参考
 
-- `frontend/src/api/resourceConnectorApi.ts`
+- `frontend/app/_dream/api/resourceConnectorApi.ts`
 
 ## 6. 输入 / 输出说明
 

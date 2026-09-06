@@ -45,8 +45,15 @@
 #                    history so SSE and refresh expose the same repair message.
 # [Sync] 2026-09-02: add stable cursor Chat message pages and known-latest
 #                    identity stabilization while preserving the legacy full response.
+# [Sync] 2026-09-02: expose final-only paged assistant rows and an owned exact-id
+#                    process-detail endpoint backed by canonical message parts.
 # [Sync] 2026-09-04: expose the authenticated backend-owned common Skill command
 #                    catalog used by the shared Chat slash menu.
+# [Sync] 2026-09-06: validate the closed McpAppsToolResultProjectionV1 on saved
+#                    tool parts, including workspace scope; malformed/error identity
+#                    is removed without touching ordinary invocation/output refresh.
+# [Sync] 2026-09-06: reconstruct pre-fix user-scope Apps identity only from a
+#                    fresh actor-owned tools/list descriptor snapshot.
 
 import asyncio
 import base64
@@ -59,7 +66,7 @@ import re
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Any, List, Literal, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AliasChoices, BaseModel, Field, model_validator
@@ -67,7 +74,12 @@ from pydantic import AliasChoices, BaseModel, Field, model_validator
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
-from claude_agent.service import build_thread_plan_payload, build_thread_todos_payload
+from claude_agent.service import (
+    _build_mcp_apps_tool_result_projection,
+    _validated_mcp_apps_projection_for_tool_part,
+    build_thread_plan_payload,
+    build_thread_todos_payload,
+)
 from claude_agent.sse import streaming_sse_response
 from claude_agent.subagent_projection import build_thread_subagents_payload
 from claude_agent.tool_confirmation_store import (
@@ -422,15 +434,100 @@ class PublicChatMetadataDto(BaseModel):
         return cls.model_validate(values), malformed_discriminator
 
 
+class McpAppsToolResultProjectionV1(BaseModel):
+    """Closed, non-secret public identity for one saved managed MCP result."""
+
+    version: Literal[1]
+    serverRef: str
+    toolName: str
+    toolCallId: str
+    input: dict[str, Any]
+    workspaceScope: str | None
+    resourceUri: str
+    result: dict[str, Any]
+
+    model_config = {"extra": "forbid"}
+
+    @classmethod
+    def from_tool_part(
+        cls,
+        projection: Any,
+        part: dict[str, Any],
+    ) -> "McpAppsToolResultProjectionV1 | None":
+        safe = _validated_mcp_apps_projection_for_tool_part(
+            projection,
+            tool_name=part.get("toolName"),
+            tool_call_id=part.get("toolCallId"),
+            tool_input=part.get("input"),
+            output=part.get("output"),
+        )
+        if safe is None:
+            return None
+        try:
+            return cls.model_validate(safe)
+        except (TypeError, ValueError):
+            return None
+
+
+def _project_public_chat_parts(
+    parts: list[Any],
+    *,
+    mcp_app_resource_bindings: Mapping[str, Mapping[str, str]] | None = None,
+) -> list[Any]:
+    """Validate Apps identity and safely recover descriptor-bound old rows."""
+
+    projected: list[Any] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            projected.append(part)
+            continue
+        public_part = dict(part)
+        if "mcpAppResult" in public_part:
+            mcp_app_result = McpAppsToolResultProjectionV1.from_tool_part(
+                public_part.get("mcpAppResult"),
+                public_part,
+            )
+        elif mcp_app_resource_bindings and public_part.get("state") == "output-available":
+            candidate = _build_mcp_apps_tool_result_projection(
+                managed_server_keys=tuple(mcp_app_resource_bindings),
+                managed_app_resource_bindings=mcp_app_resource_bindings,
+                managed_workspace_scope=None,
+                registered_tool_name=public_part.get("toolName"),
+                tool_call_id=public_part.get("toolCallId"),
+                tool_input=public_part.get("input"),
+                call_tool_result=public_part.get("output"),
+                is_error=False,
+            )
+            mcp_app_result = McpAppsToolResultProjectionV1.from_tool_part(
+                candidate,
+                public_part,
+            )
+        else:
+            mcp_app_result = None
+        if mcp_app_result is None:
+            public_part.pop("mcpAppResult", None)
+        else:
+            public_part["mcpAppResult"] = mcp_app_result.model_dump(mode="json")
+        projected.append(public_part)
+    return projected
+
+
 class PublicChatMessageDto(BaseModel):
     id: Any = None
     role: Any = None
     created_at: Any = None
     parts: list[Any] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    projection_version: int | None = None
+    process_available: bool | None = None
 
     @classmethod
-    def from_storage(cls, message: dict[str, Any]) -> "PublicChatMessageDto":
+    def from_storage(
+        cls,
+        message: dict[str, Any],
+        *,
+        mcp_app_resource_bindings: Mapping[str, Mapping[str, str]] | None = None,
+    ) -> "PublicChatMessageDto":
         parts = message.get("parts")
         metadata = message.get("metadata")
         if message.get("metadata_decode_error") is True:
@@ -451,9 +548,26 @@ class PublicChatMessageDto(BaseModel):
             if key in message
         }
         values["parts"] = (
-            [] if suppress_parts else parts if isinstance(parts, list) else []
+            []
+            if suppress_parts
+            else _project_public_chat_parts(
+                parts,
+                mcp_app_resource_bindings=(
+                    mcp_app_resource_bindings
+                    if message.get("role") == "assistant"
+                    else None
+                ),
+            )
+            if isinstance(parts, list)
+            else []
         )
         values["metadata"] = public_metadata
+        if (
+            message.get("history_projection_version") == 1
+            and isinstance(message.get("history_process_available"), bool)
+        ):
+            values["projection_version"] = 1
+            values["process_available"] = message["history_process_available"]
         return cls.model_validate(values)
 
 
@@ -472,7 +586,11 @@ def _project_public_chat_metadata(
     return dto.model_dump(exclude_none=True, mode="json"), private
 
 
-def _project_chat_message_for_client(message: dict[str, Any]) -> dict[str, Any]:
+def _project_chat_message_for_client(
+    message: dict[str, Any],
+    *,
+    mcp_app_resource_bindings: Mapping[str, Mapping[str, str]] | None = None,
+) -> dict[str, Any]:
     """Redact server-owned control envelopes from canonical thread history.
 
     Control rows remain addressable by message id so shared Chat/Dream
@@ -480,10 +598,34 @@ def _project_chat_message_for_client(message: dict[str, Any]) -> dict[str, Any]:
     authority-bearing metadata are never browser-readable.
     """
 
-    return PublicChatMessageDto.from_storage(message).model_dump(
+    return PublicChatMessageDto.from_storage(
+        message,
+        mcp_app_resource_bindings=mcp_app_resource_bindings,
+    ).model_dump(
         exclude_unset=True,
         mode="json",
     )
+
+
+async def _load_current_user_mcp_app_resource_bindings(
+    user_id: int | str,
+) -> dict[str, dict[str, str]]:
+    """Best-effort read of current user-scope descriptor bindings for history."""
+
+    try:
+        from claude_mcp.service import (  # noqa: PLC0415
+            get_default_managed_mcp_runtime_snapshot_loader,
+        )
+
+        loader = get_default_managed_mcp_runtime_snapshot_loader()
+        if loader is None:
+            return {}
+        return await loader.load_mcp_app_resource_bindings(str(user_id), None)
+    except Exception:  # noqa: BLE001 - history must retain ordinary MCP output
+        logger.warning(
+            "Managed MCP App history descriptor projection failed safely."
+        )
+        return {}
 
 
 async def _resolve_platform_model_alias(
@@ -1217,8 +1359,14 @@ async def claude_agent_thread_messages(
                 status_code=400,
                 detail="limit is required for cursor pagination",
             )
+        mcp_app_resource_bindings = (
+            await _load_current_user_mcp_app_resource_bindings(user_id)
+        )
         messages = [
-            _project_chat_message_for_client(message)
+            _project_chat_message_for_client(
+                message,
+                mcp_app_resource_bindings=mcp_app_resource_bindings,
+            )
             for message in database.list_chat_messages(thread_id)
         ]
         return {
@@ -1268,10 +1416,16 @@ async def claude_agent_thread_messages(
     next_cursor = None
     if page.get("has_more") is True and page_messages:
         next_cursor = _encode_chat_message_cursor(thread_id, page_messages[0])
+    mcp_app_resource_bindings = (
+        await _load_current_user_mcp_app_resource_bindings(user_id)
+    )
     return {
         "thread": _project_chat_thread_for_client(thread),
         "messages": [
-            _project_chat_message_for_client(message)
+            _project_chat_message_for_client(
+                message,
+                mcp_app_resource_bindings=mcp_app_resource_bindings,
+            )
             for message in page_messages
         ],
         "next_cursor": next_cursor,
@@ -1279,6 +1433,32 @@ async def claude_agent_thread_messages(
         "latest_message_id": page.get("latest_message_id"),
         "unchanged": False,
     }
+
+
+@router.get(
+    "/api/claude-agent/threads/{thread_id}/messages/{message_id}/process"
+)
+async def claude_agent_thread_message_process(
+    thread_id: str,
+    message_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return one owned projected assistant message's canonical process parts."""
+
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Message process not found")
+    message = database.get_chat_message_process_detail(thread_id, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message process not found")
+    mcp_app_resource_bindings = (
+        await _load_current_user_mcp_app_resource_bindings(user_id)
+    )
+    return _project_chat_message_for_client(
+        message,
+        mcp_app_resource_bindings=mcp_app_resource_bindings,
+    )
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/subagents")

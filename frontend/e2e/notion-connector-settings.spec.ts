@@ -84,7 +84,7 @@ test('Notion Settings exposes the seven-section overview and focused child views
   await page.route(`${WEB_BASE}/notion-connector-settings-harness`, async (route) => {
     await route.fulfill({
       contentType: 'text/html',
-      body: '<!doctype html><html lang="zh-CN"><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh"; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/src/index.css"></head><body><div id="root"></div><script type="module" src="/e2e/fixtures/notionConnectorSettingsHarness.tsx"></script></body></html>',
+      body: '<!doctype html><html lang="zh-CN"><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh"; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app/_dream/index.css"></head><body><div id="root"></div><script type="module" src="/e2e/fixtures/notionConnectorSettingsHarness.tsx"></script></body></html>',
     });
   });
   await page.route('**/api/**', async (route) => {

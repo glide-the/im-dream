@@ -1,7 +1,7 @@
 # [Input] PostgreSQL-style chat_message rows and stable keyset boundaries.
-# [Output] Provider-free query/ordering contract for newest and older message pages.
+# [Output] Provider-free keyset ordering plus final-only list and exact process-detail contracts.
 # [Pos] Backend database pagination regression seam; performs no schema mutation.
-# [Sync] 2026-09-02: align both stable sort keys with the exact Admin 0042 index order.
+# [Sync] 2026-09-02: cover Admin 0042 keyset order and 0043 final/process projection reads.
 
 from __future__ import annotations
 
@@ -81,6 +81,50 @@ def test_newest_page_reverses_database_order_and_reads_limit_plus_one() -> None:
     assert "ORDER BY created_at DESC NULLS LAST, id DESC NULLS LAST LIMIT %s" in cursor.query
     assert cursor.params == ("thread-1", 3)
     assert cursor.closed is True
+
+
+def test_projected_assistant_page_decodes_final_without_canonical_parts() -> None:
+    instant = datetime(2026, 9, 2, 7, 0, tzinfo=timezone.utc)
+    cursor = _Rows([{
+        "id": "projected",
+        "role": "assistant",
+        "parts": None,
+        "metadata": json.dumps({
+            "turnId": "turn-projected",
+            "turnStatus": "completed",
+            "finalPartIndex": 2,
+        }),
+        "created_at": instant,
+        "history_final_text": "small final",
+        "history_process_available": True,
+        "history_projection_version": 1,
+    }])
+    with patch.object(database, "get_db", return_value=cursor):
+        page = database.list_chat_message_page("thread-1", 20)
+
+    message = page["messages"][0]
+    assert message["parts"] == [{"type": "text", "text": "small final"}]
+    assert message["history_process_available"] is True
+    assert message["history_projection_version"] == 1
+    assert "CASE WHEN role = 'assistant'" in cursor.query
+    assert "THEN NULL ELSE parts END AS parts" in cursor.query
+
+
+def test_process_detail_reads_one_owned_projected_assistant_canonical_message() -> None:
+    row = _row("assistant-1", datetime.now(timezone.utc), "full process")
+    cursor = _Rows([row])
+    with patch.object(database, "get_db", return_value=cursor):
+        message = database.get_chat_message_process_detail(
+            "thread-1",
+            "assistant-1",
+        )
+
+    assert message is not None
+    assert message["parts"][0]["text"] == "full process"
+    assert "thread_id = %s AND id = %s AND role = 'assistant'" in cursor.query
+    assert "history_projection_version = 1" in cursor.query
+    assert "history_process_available = true" in cursor.query
+    assert cursor.params == ("thread-1", "assistant-1")
 
 
 def test_nonnull_boundary_uses_index_tuple_then_null_tail_without_offset() -> None:

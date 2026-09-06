@@ -15,10 +15,10 @@
 | --- | --- |
 | `backend/claude_agent/subagent_projection.py` | 新增安全 `messages` 投影、稳定 id/顺序、截断/兼容元数据 |
 | `backend/tests/test_claude_agent_subagents.py` | 覆盖派发、文本、工具、终态、重复/未知/截断与旧记录 |
-| `frontend/src/hooks/useThreadSubagents.ts` | 新消息类型、标准化/排序/legacy 转换 |
-| `frontend/src/components/chat/ChatMessageList.tsx` | 提取或参数化只读消息渲染边界 |
-| `frontend/src/components/chat/SubagentPanel.tsx` | 紧凑列表、header、只读时间线与状态反馈 |
-| `frontend/src/i18n.ts` | 新增中英文消息/兼容/状态文案 |
+| `frontend/app/_dream/hooks/useThreadSubagents.ts` | 新消息类型、标准化/排序/legacy 转换 |
+| `frontend/app/_dream/components/chat/ChatMessageList.tsx` | 提取或参数化只读消息渲染边界 |
+| `frontend/app/_dream/components/chat/SubagentPanel.tsx` | 紧凑列表、header、只读时间线与状态反馈 |
+| `frontend/app/_dream/i18n.ts` | 新增中英文消息/兼容/状态文案 |
 | `.folder.md` | 同步共享组件与数据职责 |
 
 ## 1. 数据与展示

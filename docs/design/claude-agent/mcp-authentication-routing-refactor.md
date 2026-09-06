@@ -471,8 +471,8 @@ Runtime 未发布前，不应只改 Dream parser 把 `Needs authentication` 强�
 | clean-room Runtime | MCP management、HTTP connection/status、OAuth discovery/token、结构化 process result | 根因修复所在地；具体源码路径由 Runtime 仓库 folder contract 决定 |
 | `backend/claude_mcp` | `contracts.py`、`service.py`、`driver.py`、`parser.py`、`inventory.py`，必要时兼容 `credentials.py` | 状态门、安全 DTO/错误、opaque config reconciliation；不读 token |
 | `backend/routers/claude_mcp.py` | API error/status projection | 保持 thin router，不实现协议 |
-| `frontend/src/api/claudeMcpApi.ts` | 新 DTO/error code | 不持久化凭证 |
-| `frontend/src/components/claude-mcp` | 状态动作门与中文交互 | `removable`/scope 仍以后端为准 |
+| `frontend/app/_dream/api/claudeMcpApi.ts` | 新 DTO/error code | 不持久化凭证 |
+| `frontend/app/_dream/components/claude-mcp` | 状态动作门与中文交互 | `removable`/scope 仍以后端为准 |
 | Python SDK | 无修改 | 现有公开 API 足够 |
 | PostgreSQL/Admin Schema | 无修改 | 禁止 Dream migration/runtime DDL |
 

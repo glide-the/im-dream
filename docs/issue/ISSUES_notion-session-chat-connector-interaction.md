@@ -105,12 +105,12 @@
 - 前置依赖：无
 
 - 关联路径：
-  - `frontend/src/App.tsx`
-  - `frontend/src/components/chat/ChatView.tsx`
-  - `frontend/src/components/chat/` 目录下新增或改造的 landing tab 组件
-  - `frontend/src/components/chat/QuickActionStrip.tsx`（新增）
-  - `frontend/src/components/chat/ChatShellError.tsx`（新增）
-  - `frontend/src/components/dashboard/`（如涉及导航变更）
+  - `frontend/app/_dream/App.tsx`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/chat/` 目录下新增或改造的 landing tab 组件
+  - `frontend/app/_dream/components/chat/QuickActionStrip.tsx`（新增）
+  - `frontend/app/_dream/components/chat/ChatShellError.tsx`（新增）
+  - `frontend/app/_dream/components/dashboard/`（如涉及导航变更）
 
 - 分发去向：`@FrontendTaskAgent`
 
@@ -156,11 +156,11 @@
 - 前置依赖：`SUO-195-A`
 
 - 关联路径：
-  - `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-  - `frontend/src/components/chat/ConnectorTabPanel.tsx`（新增）
-  - `frontend/src/App.tsx`（路由调整）
-  - `frontend/src/api/resourceConnectorApi.ts`
-  - `frontend/src/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+  - `frontend/app/_dream/components/chat/ConnectorTabPanel.tsx`（新增）
+  - `frontend/app/_dream/App.tsx`（路由调整）
+  - `frontend/app/_dream/api/resourceConnectorApi.ts`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
 
 - 分发去向：`@FrontendTaskAgent`
 
@@ -209,9 +209,9 @@
 - 关联路径：
   - `backend/routers/notion.py`（poll 端点）
   - `backend/notion/auth.py`（poll 幂等逻辑）
-  - `frontend/src/api/resourceConnectorApi.ts`（poll 调用）
-  - `frontend/src/components/dashboard/ResourceConnectorPage.tsx`（状态映射）
-  - `frontend/src/components/chat/ConnectorTabPanel.tsx`（状态映射）
+  - `frontend/app/_dream/api/resourceConnectorApi.ts`（poll 调用）
+  - `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`（状态映射）
+  - `frontend/app/_dream/components/chat/ConnectorTabPanel.tsx`（状态映射）
   - `docs/design/notion-session/connector-interaction.md §11.1-11.4`
 
 - 分发去向：`@BackendTaskAgent` + `@FrontendTaskAgent`

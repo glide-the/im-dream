@@ -1,6 +1,6 @@
 # Component Reuse Rule
 
-<!-- [Sync] 2026-08-31: align backend reuse order with the current FastAPI/Claude Agent runtime after legacy session and picture scheduler removal. -->
+<!-- [Sync] 2026-09-06: resolve all Dream frontend reuse owners from the private frontend/app/_dream tree. -->
 
 ## Mandatory
 
@@ -10,11 +10,11 @@
 
 ## Frontend Search Order
 
-1. Nearest feature component under `frontend/src/components/`.
-2. Shared stateful logic under `frontend/src/hooks/`.
-3. Editor and chat behavior in `frontend/src/engine/`.
-4. API integration in `frontend/src/api/voiceApi.ts`.
-5. Shared constants and utilities in `frontend/src/constants/`, `frontend/src/utils/`, `frontend/src/i18n.ts`, and `frontend/src/contexts/`.
+1. Nearest feature component under `frontend/app/_dream/components/`.
+2. Shared stateful logic under `frontend/app/_dream/hooks/`.
+3. Editor and chat behavior in `frontend/app/_dream/engine/`.
+4. API integration in `frontend/app/_dream/api/voiceApi.ts`.
+5. Shared constants and utilities in `frontend/app/_dream/constants/`, `frontend/app/_dream/utils/`, `frontend/app/_dream/i18n.ts`, and `frontend/app/_dream/contexts/`.
 6. New component or hook only when reuse would create incorrect ownership, unclear props, or cross-feature coupling.
 
 ## Backend Search Order
@@ -28,7 +28,7 @@
 ## Practical Examples
 
 - Add editor UI by extending existing components such as `App.tsx`, `ChatWidgetUI.tsx`, `DeckManager.tsx`, or smaller components nearby before introducing a new screen.
-- Add reusable client state through a hook in `frontend/src/hooks/` when multiple components need the same lifecycle, persistence, or API orchestration.
+- Add reusable client state through a hook in `frontend/app/_dream/hooks/` when multiple components need the same lifecycle, persistence, or API orchestration.
 - Add backend voice/deck behavior by reusing the existing database access patterns and Claude Agent Thread/SSE contracts before adding another route shape.
 - Add prompt behavior by creating or editing a file in `backend/prompts/` and loading it through `backend/config.py` patterns, not by embedding prompt bodies in request handlers.
 

@@ -1,28 +1,33 @@
-# Google OAuth / OIDC 认证方案
+<!-- [输入] Next.js Dream Web 登录入口、Python Authlib/JWT 路由和 Admin-owned PostgreSQL 认证表。 -->
+<!-- [输出] 说明当前 Google OAuth/OIDC、系统 Token、账号绑定和 Device Flow 的身份边界。 -->
+<!-- [定位] 当前认证架构；数据库 DDL 由 Admin Drizzle 管理，本文不提供 Dream migration。 -->
+<!-- [同步] 2026-09-06：前端入口更新为唯一 Next.js App Router，并移除 Vite/SQLite 当前态叙述。 -->
 
-> 本文定义 Ink & Memory 的 Google OAuth / OIDC 实施方案。架构方向是“Python 后端作为认证中心，Authlib 负责 OAuth/OIDC 协议能力，Vite 只作为前端入口”。Google token 不等于本系统业务 token；业务 API 只识别 Python 后端签发的本系统 access token / refresh token。
+# Google OAuth / OIDC 认证架构
+
+> 本文定义 Ink & Memory 当前的 Google OAuth / OIDC 实现。Python 后端是认证中心，Authlib 负责 OAuth/OIDC 协议能力；Next.js 16 App Router 只承载登录 UI、浏览器跳转和同源薄转发，不成为第二个认证中心。Google token 不等于本系统业务 token；业务 API 只识别 Python 后端签发的本系统 access token / refresh token。
 
 ## 1. 目标
 
 | 目标 | 说明 |
 | --- | --- |
-| 网页端 Google 登录 | Vite 登录页提供 Google 登录按钮，跳转后端 `/oauth/google/login` |
+| 网页端 Google 登录 | `frontend/app/_dream/components/Auth/**` 提供登录 UI，跳转 Python `/oauth/google/login` |
 | 后端接管 OAuth callback | FastAPI 使用 Authlib 完成 state 校验、code 换 token、userinfo 解析 |
-| 复用现有用户体系 | 继续使用当前 `users` 表，不迁移 Better Auth，不创建 Next.js 认证中心 |
+| 复用现有用户体系 | 继续使用 Admin-owned PostgreSQL `users` 表，不迁移 Better Auth，不创建 Next.js 认证中心 |
 | 签发本系统 token | 登录成功后签发本系统 access token / refresh token |
 | 业务 API 统一鉴权 | 所有业务路由继续通过 `get_current_user` 获取 `user_id` |
 | 支持 Device Flow | 非浏览器设备通过 `/oauth/device/code` + `/oauth/token` 获得同类系统 token |
 
 ## 2. 为什么采用 Python + Authlib
 
-当前项目已经是 Vite + FastAPI 前后端分离：
+当前项目是 Next.js Web Shell + FastAPI 业务后端分层：
 
 | 现状 | 影响 |
 | --- | --- |
 | `backend/routers/auth.py` 已有 `/api/login`、`/api/register`、`/api/me` | Python 已经是认证中心 |
 | `backend/auth.py` 已有 PyJWT 和 bcrypt | 可增量扩展，不需要引入第二套用户体系 |
 | 业务路由普遍依赖 `Depends(get_current_user)` | 只要统一 token 校验，业务层无需知道登录方式 |
-| `database.py` 使用 SQLite 裸 SQL | OAuth 账号绑定表应增量加入，而不是套用外部 ORM |
+| `backend/database.py` 通过 PostgreSQL helper 访问 Admin-owned Schema | OAuth 账号、refresh token 与 Device Flow 数据继续由 Python 使用，但任何 Schema 变更必须先在 Admin Drizzle 发布 capability |
 
 Authlib 负责协议细节：Google OIDC discovery、authorization redirect、OAuth state、callback token exchange、userinfo。项目代码负责本地用户绑定、token 签发、cookie/header 策略和业务权限。
 
@@ -31,7 +36,7 @@ Authlib 负责协议细节：Google OIDC discovery、authorization redirect、OA
 | 方案 | 优点 | 问题 | 当前结论 |
 | --- | --- | --- | --- |
 | Python + Authlib | 贴合当前 FastAPI 业务；一个用户体系；业务 API 不需要迁移 | 需要自己维护 OAuth 表、refresh token、Device Flow | 采用 |
-| Better Auth / Next.js Auth | 前端生态成熟，适合 Next.js 全栈 | 会让 Python 和 Next.js 分别维护认证边界，当前 Vite 项目迁移成本高 | 不采用 |
+| Better Auth / Next.js Auth | 前端生态成熟，适合 Next.js 全栈 | 会让 Python 和 Next.js 分别维护身份、Token 和数据边界，破坏当前单一认证中心 | 不采用 |
 | 前端直接拿 Google token | 实现看似简单 | 泄漏 Google token，业务 API 无法统一权限，无法支持 Device Flow | 禁止 |
 
 ## 4. Open WebUI 参考结论
@@ -47,7 +52,7 @@ Authlib 负责协议细节：Google OIDC discovery、authorization redirect、OA
 | provider sub 优先绑定，email merge 可配置 | 采用 |
 | `ENABLE_OAUTH_SIGNUP` 控制 OAuth 新用户注册 | 采用 |
 | 登录成功签发自己的 JWT | 采用 |
-| SQLAlchemy 用户模型和 OAuth session 表 | 不照搬，改成 SQLite helper |
+| SQLAlchemy 用户模型和 OAuth session 表 | 不照搬；Python 复用现有 PostgreSQL helper 和 Admin-owned Schema |
 | 大型多 provider / group / role 管理 | 一期不引入 |
 | Svelte 登录页和 cookie 读取方式 | 不照搬，改造现有 React AuthContext |
 
@@ -56,7 +61,7 @@ Authlib 负责协议细节：Google OIDC discovery、authorization redirect、OA
 ```mermaid
 sequenceDiagram
     participant User
-    participant FE as Vite Frontend
+    participant FE as Next.js Dream Web
     participant BE as Python Backend
     participant Google as Google OAuth
     participant DB as Database
@@ -148,7 +153,7 @@ DEVICE_CODE_INTERVAL=5
 
 ## 8. 数据表设计
 
-当前已有 `users`：
+当前 Admin-owned PostgreSQL 已有 `users`：
 
 ```txt
 id
@@ -158,7 +163,7 @@ display_name
 created_at
 ```
 
-不重复创建 `users`，只增量建表：
+不重复创建 `users`。下列结构只表达认证领域的逻辑字段，不是可在 Dream 执行的 DDL；当前 `oauth_accounts`、`refresh_tokens`、`device_authorizations` 已属于统一 Dream Schema capability。后续字段、索引或约束必须先由 Admin Drizzle 以前向 migration 发布，Dream 只消费已发布 capability。
 
 ### oauth_accounts
 
@@ -289,7 +294,7 @@ JWT payload：
 
 ```mermaid
 sequenceDiagram
-    participant Client as Vite Frontend / Device Client
+    participant Client as Next.js Dream Web / Device Client
     participant Middleware as Python Auth Middleware
     participant API as Business API
     participant DB as Database

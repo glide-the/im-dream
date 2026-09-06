@@ -1,4 +1,11 @@
-# Claude Agent 模块 Issue 清单
+<!-- [输入] 早期 Claude Agent 设计拆解和流水线元数据。 -->
+<!-- [输出] 历史工作分解、范围和风险索引。 -->
+<!-- [范围] 不作为当前派工、审批、assignee、checkout 或实现状态合同。 -->
+<!-- [同步] 2026-09-06：明确历史适用性；当前事实以源码、目录合同和实际回执为准。 -->
+
+# Claude Agent 模块 Issue 清单（历史拆解索引）
+
+> 本文中的 IssueDispatcher、下游 Agent、状态和分发说明是生成期流水线记录，不是当前工作队列。继续开发时必须以现行源码、`AGENTS.md` / `Agent.md`、最近的 `docs/design/claude-agent/**` 合同和对应 `docs/exec/**` 实际证据为准；缺少 capability、真实业务或生产证据时保持 fail closed。
 
 ## 0. 文档元信息
 
@@ -38,7 +45,7 @@
   - `FrontendTaskAgent`
   - `BackendTaskAgent`
 - 共享设计稿来源：`docs/design/`
-- 是否作为当前实现合同：`是`
+- 是否作为当前实现合同：`否`；仅作历史拆解与风险索引
 - 备注：
   - 本文档由设计稿拆解生成，作为 task 阶段任务规划输入。
   - 若与设计稿冲突，以 `docs/design/` 中稳定设计稿为准。
@@ -84,13 +91,13 @@
   - `backend/libs/claude_agent_kit/server/workspace.py`
   - `backend/libs/claude_agent_kit/server/sdk_env.py`
   - `backend/libs/claude_agent_kit/server/agent_runner.py`
-  - `frontend/src/components/chat/ChatView.tsx`
-  - `frontend/src/components/chat/ChatPanel.tsx`
-  - `frontend/src/components/chat/AIInputDock.tsx`
-  - `frontend/src/components/chat/ChatMessageList.tsx`
-  - `frontend/src/components/chat/AskUserQuestionUI.tsx`
-  - `frontend/src/components/chat/EditorWriteApprovalUI.tsx`
-  - `frontend/src/lib/claude-agent-transport.ts`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/chat/ChatPanel.tsx`
+  - `frontend/app/_dream/components/chat/AIInputDock.tsx`
+  - `frontend/app/_dream/components/chat/ChatMessageList.tsx`
+  - `frontend/app/_dream/components/chat/AskUserQuestionUI.tsx`
+  - `frontend/app/_dream/components/chat/EditorWriteApprovalUI.tsx`
+  - `frontend/app/_dream/lib/claude-agent-transport.ts`
 
 - 本清单覆盖范围：
   - Claude Agent 运行合同的 request / response / SSE 归一
@@ -162,9 +169,9 @@
   - `backend/claude_agent/workspace_context.py`
   - `backend/claude_agent/service.py`
   - `backend/routers/system_config.py`
-  - `frontend/src/components/dashboard/ModelConfigSection.tsx`
-  - `frontend/src/components/dashboard/Sidebar.tsx`
-  - `frontend/src/contexts/WorkspaceContext.tsx`
+  - `frontend/app/_dream/components/dashboard/ModelConfigSection.tsx`
+  - `frontend/app/_dream/components/dashboard/Sidebar.tsx`
+  - `frontend/app/_dream/contexts/WorkspaceContext.tsx`
   - `backend/tests/test_claude_agent_workspace.py`
   - `backend/tests/test_claude_agent_runner.py`
 
@@ -310,8 +317,8 @@
   - `backend/claude_agent/event_bus_redis.py`
   - `backend/claude_agent/observer.py`
   - `backend/routers/claude_agent.py`
-  - `frontend/src/components/chat/ChatView.tsx`
-  - `frontend/src/components/chat/ChatPanel.tsx`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/chat/ChatPanel.tsx`
   - `backend/tests/test_event_bus.py`
   - `backend/tests/test_claude_agent_thread_factory.py`
 
@@ -355,10 +362,10 @@
   - `backend/routers/claude_agent.py`
   - `backend/claude_agent/thread_factory.py`
   - `backend/libs/claude_agent_kit/server/agent_runner.py`
-  - `frontend/src/components/chat/ChatMessageList.tsx`
-  - `frontend/src/components/chat/AskUserQuestionUI.tsx`
-  - `frontend/src/components/chat/EditorWriteApprovalUI.tsx`
-  - `frontend/src/lib/claude-agent-transport.ts`
+  - `frontend/app/_dream/components/chat/ChatMessageList.tsx`
+  - `frontend/app/_dream/components/chat/AskUserQuestionUI.tsx`
+  - `frontend/app/_dream/components/chat/EditorWriteApprovalUI.tsx`
+  - `frontend/app/_dream/lib/claude-agent-transport.ts`
   - `backend/tests/test_claude_agent_service.py`
   - `backend/tests/test_claude_agent_runner.py`
 
@@ -397,8 +404,8 @@
 
 - 前置依赖：`CA-BE-02`
 - 关联路径：
-  - `frontend/src/components/chat/ChatView.tsx`
-  - `frontend/src/components/chat/ChatPanel.tsx`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/chat/ChatPanel.tsx`
   - `backend/routers/claude_agent.py`
   - `backend/claude_agent/thread_retrieval.py`
   - `backend/tests/test_chat_thread_retrieval.py`
@@ -433,9 +440,9 @@
 
 - 前置依赖：`CA-SH-02`
 - 关联路径：
-  - `frontend/src/components/chat/ChatPanel.tsx`
-  - `frontend/src/components/chat/AIInputDock.tsx`
-  - `frontend/src/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/chat/ChatPanel.tsx`
+  - `frontend/app/_dream/components/chat/AIInputDock.tsx`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
   - `backend/routers/claude_agent.py`
   - `backend/tests/test_claude_agent_thread_factory.py`
 
@@ -469,10 +476,10 @@
 
 - 前置依赖：`CA-SH-03`
 - 关联路径：
-  - `frontend/src/lib/claude-agent-transport.ts`
-  - `frontend/src/components/chat/ChatMessageList.tsx`
-  - `frontend/src/components/chat/EditorWriteApprovalUI.tsx`
-  - `frontend/src/components/chat/ToolMessagePart.tsx`
+  - `frontend/app/_dream/lib/claude-agent-transport.ts`
+  - `frontend/app/_dream/components/chat/ChatMessageList.tsx`
+  - `frontend/app/_dream/components/chat/EditorWriteApprovalUI.tsx`
+  - `frontend/app/_dream/components/chat/ToolMessagePart.tsx`
   - `backend/tests/test_claude_agent_service.py`
 
 - 分发去向：`@FrontendTaskAgent`

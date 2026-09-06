@@ -94,12 +94,12 @@ App
 
 | 主题 | 证据 | 判断 |
 |---|---|---|
-| 路由 | `frontend/src/router/storyWorkspacePath.ts:39-56` | canonical route 是 `/story-workspace/settings/work`，tab 由 query 表达。 |
+| 路由 | `frontend/app/_dream/router/storyWorkspacePath.ts:39-56` | canonical route 是 `/story-workspace/settings/work`，tab 由 query 表达。 |
 | tab 选择 | `StoryWorkspaceSettingsPage.storyWorkspaceWorkTabForSection` | `?tab=resources` 归一为 Resources panel。 |
 | Resources 挂载 | `StoryWorkspaceSettingsPage:172-180` | Resources 渲染 `ConnectorSettingsSection`；Plugins 渲染 `ClaudePluginAdminPage`。 |
 | 数据加载 | `ConnectorSettingsSection.loadConnectors` | mount/focus nonce 时调用 `listConnectors()`，本地 `useState` 管理 loading/error/items。 |
 | Notion 详情 | `App.tsx:1643-1657`、`ConnectorNotionDetailPage` | App boolean 控制详情投影；详情本地 state 管理认证、资源、同步。 |
-| 当前 API | `frontend/src/api/resourceConnectorApi.ts` | `/api/connectors*`，带 browser-local fallback。新 `claude-mcp` 禁止复制此 fallback。 |
+| 当前 API | `frontend/app/_dream/api/resourceConnectorApi.ts` | `/api/connectors*`，带 browser-local fallback。新 `claude-mcp` 禁止复制此 fallback。 |
 
 ### 3.2 Notion 可复用与不可复用
 
@@ -225,8 +225,8 @@ backend/tests/test_claude_mcp_*.py
 ### 4.2 前端
 
 ```text
-frontend/src/api/claudeMcpApi.ts
-frontend/src/components/claude-mcp/
+frontend/app/_dream/api/claudeMcpApi.ts
+frontend/app/_dream/components/claude-mcp/
 ├─ ClaudeMcpResourceSection.tsx
 └─ ClaudeMcpServerDetailPage.tsx
 ```
@@ -865,9 +865,9 @@ mocked/isolated lane 覆盖：Resources → Start login → authorization URL �
 
 - `backend/claude_mcp/`：contract/settings/identity/credentials/parser/driver/service 加 `inventory.py`；默认 identity 按 canonical platform `user_id` 解析 opaque config root，并以 filesystem anchor 作为 neutral CLI cwd，避免继承 operator HOME/仓库 Project 配置。Parser 接受 absolute HTTP(S)、输出 scope；Remove 仅授权 formal user scope。Inventory 与 Chat 复用 exact CLI、用户定义和 secure-store selector，业务代码没有 credential payload API。
 - `backend/routers/claude_mcp.py`：认证 capability、server、prompt-free inventory、operation、redirect、cancel、logout API；`backend/server.py` 只负责挂载。
-- `frontend/src/api/claudeMcpApi.ts`：无 localStorage fallback 的严格后端 transport，包含 server scope/removability 与 tool inventory DTO。
-- `frontend/src/components/claude-mcp/ClaudeMcpResourceSection.tsx`：Resources 内 absolute HTTP(S) 配置、scope-aware discovery/Remove、详情 handoff、授权链接、redirect、进度恢复、cancel/retry/logout；redirect 提交后清空组件输入。
-- `frontend/src/components/claude-mcp/ClaudeMcpServerDetailPage.tsx`：Notion 同构 breadcrumb/hero/chips/单虚线骨架，Tools 搜索与安全筛选，Resources/Prompts 明确 not-reported。
+- `frontend/app/_dream/api/claudeMcpApi.ts`：无 localStorage fallback 的严格后端 transport，包含 server scope/removability 与 tool inventory DTO。
+- `frontend/app/_dream/components/claude-mcp/ClaudeMcpResourceSection.tsx`：Resources 内 absolute HTTP(S) 配置、scope-aware discovery/Remove、详情 handoff、授权链接、redirect、进度恢复、cancel/retry/logout；redirect 提交后清空组件输入。
+- `frontend/app/_dream/components/claude-mcp/ClaudeMcpServerDetailPage.tsx`：Notion 同构 breadcrumb/hero/chips/单虚线骨架，Tools 搜索与安全筛选，Resources/Prompts 明确 not-reported。
 - `backend/tests/fixtures/claude_mcp_fake_cli.py` 与 `backend/tests/test_claude_mcp_*.py`：真实 argv/PTTY 进程交互但无真实 provider。
 - `backend/claude_agent/service.py`：每个 Workspace-enabled turn 在 resume/config probe 前执行最小 MCP 交付，把 opaque remote definitions 与 macOS selector-backed user credential home 独立带入 `AgentRunOptions`；Workspace Mode 关闭且该用户存在 MCP state 时 fail closed。
 - `backend/libs/claude_agent_kit/types.py` / `server/agent_runner.py`：repr-hidden `claude_mcp_servers` 通过官方 `ClaudeAgentOptions.mcp_servers` 与内部 stdio servers 合并；名称冲突 fail closed，不增加 remote wildcard `allowed_tools`。

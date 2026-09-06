@@ -226,7 +226,7 @@ class TestSubagentProjection(unittest.TestCase):
                             "type": "tool_use",
                             "id": "tool-1",
                             "name": "Read",
-                            "input": {"file_path": "frontend/src/App.tsx", "api_key": "must-hide"},
+                            "input": {"file_path": "frontend/app/_dream/App.tsx", "api_key": "must-hide"},
                         },
                     ],
                 ),

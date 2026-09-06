@@ -44,6 +44,8 @@
 #                    it through the public Chat request or subprocess env.
 # [Sync] 2026-09-02: expose runner-owned terminal completion proof and reliable
 #                    ResultMessage duration to Chat persistence metadata.
+# [Sync] 2026-09-06: carry the SDK's complete, unchanged MCP CallToolResult
+#                    beside the legacy normalized output for trusted Apps projection.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -98,6 +100,11 @@ class ToolEventPayload:
     tool_call_id: Optional[str] = None
     input: Optional[Any] = None
     output: Optional[Any] = None
+    # Complete SDK user-message ``tool_use_result`` when one unambiguously
+    # belongs to this tool result.  The application layer may use it only
+    # after matching the current turn's canonical managed-MCP registration;
+    # ordinary output continues to use ``output`` above.
+    call_tool_result: Optional[dict[str, Any]] = field(default=None, repr=False)
     state: Optional[
         Literal[
             "input-available",

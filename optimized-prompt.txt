@@ -413,7 +413,7 @@ backend/libs/claude_agent_kit/server/agent_runner.py
 backend/services/deck/admin_gateway.py
 backend/services/deck/builtin_plugin.py
 backend/routers/deck_plugins.py
-frontend/src/components/plugin-admin/
+frontend/app/_dream/components/plugin-admin/
 ```
 
 必须输出迁移表：

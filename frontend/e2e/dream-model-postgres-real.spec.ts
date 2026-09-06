@@ -95,13 +95,13 @@ test('real Dream BFF persists only a live platform alias and restores it on mobi
   await page.route(`${WEB_BASE}/e2e/dream-model-postgres-real`, (route) => route.fulfill({
     status: 200,
     contentType: 'text/html',
-    body: '<!doctype html><html lang="zh-CN"><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh"; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script><script type="module" src="/@vite/client"></script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/src/index.css"></head><body><div id="root"></div><script type="module" src="/e2e/fixtures/modelSettingsHarness.tsx"></script></body></html>',
+    body: '<!doctype html><html lang="zh-CN"><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh"; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script><script type="module" src="/@vite/client"></script><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app/_dream/index.css"></head><body><div id="root"></div><script type="module" src="/e2e/fixtures/modelSettingsHarness.tsx"></script></body></html>',
   }));
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`${WEB_BASE}/e2e/dream-model-postgres-real`);
   expect(await page.evaluate(async () => (
-    (await import('/src/lib/apiBase.ts')).getApiBase()
+    (await import('/app/_dream/lib/apiBase.ts')).getApiBase()
   ))).toBe('');
   await expect.poll(() => browserApiRequests).toContain(
     `${WEB_BASE}/api/gateway/models`,

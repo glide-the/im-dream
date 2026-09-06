@@ -1,0 +1,26 @@
+# [Input] Current pnpm-lock P0-01—P0-07 evidence from one source/Chrome candidate.
+# [Output] The unique current P0-08 technical decision and production boundary.
+# [Pos] Phase 0 current-candidate gate; it authorizes Phase 1 technical validation only.
+# [Sync] 2026-09-06: replace the historical npm applicability with the completed pnpm rerun.
+
+phase: 0
+decision: Go
+applicability: current_pnpm_lock_candidate
+current_candidate_revalidation_required: false
+production_apps_effective: false
+frozen_lock_sha256: 68d3c30f35eef1eec745d8c814475615eb7eceaf8866f0f721c4743394c1afd0
+evidence_ids: [P0-01, P0-02, P0-03, P0-04, P0-05, P0-06, P0-07]
+unresolved_blockers: []
+decision_basis:
+  p0_04: >-
+    ImMcpAppHostAdapter is the sole iframe owner and current local-Chrome probes prove
+    requested/desired/effective permission enforcement, two-layer policy parity,
+    forged-message rejection, fail-closed invalid inputs, and ordered teardown.
+  same_lock_evidence: >-
+    P0-02, P0-03, P0-04, and P0-07 ran through the current pnpm Browser suite;
+    P0-05 and P0-06 ran through the named fixture/probe and focused Backend suite.
+    The exact lock SHA, package versions, Chrome, source tree, and entry are current.
+rollback:
+  action: phase0-isolated-poc-cleanup
+evidence_root: docs/exec/mcp-apps/phase-0/evidence/
+report: docs/exec/mcp-apps/current-candidate-validation.md

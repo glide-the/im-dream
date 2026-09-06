@@ -1,8 +1,9 @@
-> [Input] `docs/design/claude-agent/claude-task-tools-source-analysis.md`, `docs/design/claude-agent/claude-plan.md`, `backend/libs/claude_agent_kit/server/agent_runner.py`, `backend/libs/claude_agent_kit/server/sdk_env.py`, `backend/libs/claude_agent_kit/server/workspace.py`, `backend/claude_agent/service.py`, `backend/routers/claude_agent.py`, `frontend/src/lib/claude-agent-transport.ts`, `frontend/src/hooks/useThreadPlan.ts`, `frontend/src/components/chat/PlanPanel.tsx`, `frontend/src/components/chat/ChatView.tsx`, `frontend/src/components/chat/Icons.tsx`
+> [Input] `docs/design/claude-agent/claude-task-tools-source-analysis.md`, `docs/design/claude-agent/claude-plan.md`, `backend/libs/claude_agent_kit/server/agent_runner.py`, `backend/libs/claude_agent_kit/server/sdk_env.py`, `backend/libs/claude_agent_kit/server/workspace.py`, `backend/claude_agent/service.py`, `backend/routers/claude_agent.py`, `frontend/app/_dream/lib/claude-agent-transport.ts`, `frontend/app/_dream/hooks/useThreadPlan.ts`, `frontend/app/_dream/components/chat/PlanPanel.tsx`, `frontend/app/_dream/components/chat/ChatView.tsx`, `frontend/app/_dream/components/chat/Icons.tsx`
 > [Output] claude-todo 功能设计：Claude Code 任务清单（v1 TodoWrite / v2 文件任务）的捕获、SSE/REST 数据契约、PlanButton 图标改造与 Todo 展示面板、Todo 工具低敏分级。
 > [Pos] todo-feature-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-07-20: 初版 — 依据 `claude-task-tools-source-analysis.md`（Claude Code 还原源码分析）与 `claude-plan.md` 既有范式；仅设计契约，业务代码实现见 §7/§8。
-> [Sync] 2026-07-20: §7 全部实现项已落地（后端 + 前端 + 测试 + 契约/策略文档登记）。验证：后端 todo 26 tests + plan 23 tests + runner 71 tests 全绿，前端 `npm run build` exit 0。
+> [Sync] 2026-07-20: §7 全部实现项已落地（后端 + 前端 + 测试 + 契约/策略文档登记）。历史验证：后端 todo 26 tests + plan 23 tests + runner 71 tests 全绿，前端当时的 production build exit 0。
+> [Sync] 2026-09-06: current frontend validation uses the sole pnpm/Next.js root.
 > [Sync] 2026-07-20: §5.6 按钮形态修订 — PlanButton 去除常驻文字，仅显示 `IconList` 列表图标（Icons.tsx 新增），「计划与待办」文字改为悬浮 tooltip（hover 且弹层未打开时显示，`aria-label` 保留语义）；`IconPlanTasks` 保留于弹层徽标处。
 > [Sync] 2026-07-20: §5.6 弹层样式修订（参照进度卡片样式图）— 弹层改为「计划」「待办」双卡片堆叠；待办区改为圆点状态图标（completed 实心+白勾+删除线 / in_progress 描边+中心点 / pending 空心圆）替代 #id 与文字徽章，默认展示前 3 条、超出经「展开 N 个 / 收起」折叠控制。
 
@@ -172,7 +173,7 @@ data: {"type":"todo-updated","source":"todo_write","todos":[{"id":"1","content":
 
 ### 5.6 前端消费契约
 
-- Transport：`claude-agent-transport.ts` `convertEvent` 新增 `todo-updated` case；**不映射 UIMessageChunk**，转发到新增 store `frontend/src/hooks/useThreadTodos.ts`（按 threadId 键控，结构复刻 `useThreadPlan.ts`：`useSyncExternalStore` + `applyTodoEvent` + `hydrateThreadTodos`）。重连路径（`ChatPanel.tsx:356-360` 同处）同样转发。
+- Transport：`claude-agent-transport.ts` `convertEvent` 新增 `todo-updated` case；**不映射 UIMessageChunk**，转发到新增 store `frontend/app/_dream/hooks/useThreadTodos.ts`（按 threadId 键控，结构复刻 `useThreadPlan.ts`：`useSyncExternalStore` + `applyTodoEvent` + `hydrateThreadTodos`）。重连路径（`ChatPanel.tsx:356-360` 同处）同样转发。
 - 初始加载/重连：`ChatView.tsx` 在 `hydrateThreadPlan` 调用点（`:542-543`）旁并行调 `hydrateThreadTodos(activeThreadId)`。
 - **PlanButton 改造**（`PlanPanel.tsx`）：
   - 图标：**按钮为纯图标形态**——`Icons.tsx` 新增 `IconList`（圆点+三行的列表图标），不渲染常驻文字；「计划与待办」文字经悬浮 tooltip 展示（hover 且弹层未打开时显示，`role="tooltip"`，`pointerEvents:none`，`aria-label="计划与待办"` 保留可访问性）。`IconPlanTasks`（`createIcon` 工厂，文档+勾选组合笔画）保留用于弹层内计划区徽标。**不**直接复用 `IconTasks`（其语义为纯待办，无法表达"计划+待办"双区）。
@@ -274,12 +275,12 @@ sequenceDiagram
 | `backend/libs/claude_agent_kit/types.py` | 修改 | `AgentStreamingCallbacks` 增加 `on_tasks_changed` |
 | `backend/claude_agent/service.py` | 修改 | `TodoState` 内存态；v1 流观察；`_emit_todo_updated()`；`build_thread_todos_payload()` |
 | `backend/routers/claude_agent.py` | 修改 | 新增 `GET /threads/{thread_id}/todos` |
-| `frontend/src/lib/claude-agent-transport.ts` | 修改 | `BackendTodoUpdated` 类型 + union + `convertEvent` case |
-| `frontend/src/hooks/useThreadTodos.ts` | 新增 | 按 threadId 键控的 todos store（复刻 useThreadPlan 结构） |
-| `frontend/src/components/chat/Icons.tsx` | 修改 | 新增 `IconPlanTasks` |
-| `frontend/src/components/chat/PlanPanel.tsx` | 修改 | PlanButton 图标/文案/可见性；弹层新增 Todo 区（Phase B） |
-| `frontend/src/components/chat/ChatView.tsx` | 修改 | 并行水合 `hydrateThreadTodos` |
-| `frontend/src/components/chat/ChatPanel.tsx` | 修改 | 重连路径转发 `todo-updated` 帧 |
+| `frontend/app/_dream/lib/claude-agent-transport.ts` | 修改 | `BackendTodoUpdated` 类型 + union + `convertEvent` case |
+| `frontend/app/_dream/hooks/useThreadTodos.ts` | 新增 | 按 threadId 键控的 todos store（复刻 useThreadPlan 结构） |
+| `frontend/app/_dream/components/chat/Icons.tsx` | 修改 | 新增 `IconPlanTasks` |
+| `frontend/app/_dream/components/chat/PlanPanel.tsx` | 修改 | PlanButton 图标/文案/可见性；弹层新增 Todo 区（Phase B） |
+| `frontend/app/_dream/components/chat/ChatView.tsx` | 修改 | 并行水合 `hydrateThreadTodos` |
+| `frontend/app/_dream/components/chat/ChatPanel.tsx` | 修改 | 重连路径转发 `todo-updated` 帧 |
 | `backend/tests/test_claude_agent_todo.py` | 新增 | v1 流捕获 / v2 目录解析 / SSE 帧 / REST 契约 / 低敏分级 |
 | `docs/design/claude-agent/claude-agent-api-contracts.md` | 修改 | §4.5.2 事件表登记 `todo-updated` + §4.7 报文示例 |
 | `docs/design/claude-agent/claude-agent-permission-policy.md` | 修改 | 低敏清单登记五工具 + TaskUpdate 非只读偏差记录（Phase C） |
@@ -304,7 +305,9 @@ python tests/test_claude_agent_runner.py # 权限回归
 # 语法检查
 python -m py_compile backend/libs/claude_agent_kit/server/workspace.py backend/libs/claude_agent_kit/server/sdk_env.py backend/libs/claude_agent_kit/server/agent_runner.py backend/claude_agent/service.py backend/routers/claude_agent.py
 # 前端（frontend/）
-npx tsc -b && npm run lint && npm run build
+pnpm --dir frontend exec tsc --noEmit --incremental false
+pnpm --dir frontend lint
+pnpm --dir frontend build
 ```
 
 关键用例：① v1 `tool-input-available(TodoWrite)` → `todo-updated` 帧且不入 `collected_parts`；② v2 env 注入：`CLAUDE_CODE_TASK_LIST_ID=main` 无条件固定、`CLAUDE_CODE_ENABLE_TASKS=1` 仅在 `INK_AGENT_TASK_V2_ENABLED` on 时注入（2026-07-26 语义）；③ `get_tasks_dir` 越界/无 workspace 返回 `None`；④ v2 目录含 `_internal` 任务与已解决 blocker 时过滤正确；⑤ REST 归属校验 404 与 `exists:false` 契约；⑥ 五工具 PreToolUse 在 auto 模式返回显式 allow；⑦ 超出 `INK_AGENT_TODO_MAX_ITEMS` 截断置 `truncated:true`。

@@ -1,0 +1,33 @@
+{
+  "manifestVersion": 1,
+  "pluginId": "im.mcp-apps-host",
+  "pluginVersion": "1.0.0",
+  "revision": 1,
+  "lifecycle": "disabled",
+  "browserEntry": "frontend/app/_dream/components/chat/mcp-apps/McpAppHostPanel.tsx",
+  "nodeEntry": "@ink-dream/mcp-apps-runtime",
+  "protocol": {
+    "minimum": "2026-01-26",
+    "maximum": "2026-01-26"
+  },
+  "sdk": {
+    "mcp": {
+      "minimum": "1.30.0",
+      "maximum": "1.30.0"
+    },
+    "extApps": {
+      "minimum": "1.7.5",
+      "maximum": "1.7.5"
+    },
+    "mcpUi": {
+      "minimum": "7.1.1",
+      "maximum": "7.1.1"
+    }
+  },
+  "features": {
+    "resourceReads": true,
+    "lowRiskToolCalls": true,
+    "uiMessage": true,
+    "windowIm": true
+  }
+}

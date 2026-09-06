@@ -1,7 +1,7 @@
 > [Input] `backend/libs/claude_agent_kit/server/memory_workspace.py`,
 >         `backend/routers/reflections.py`, `backend/reflections_config.py`,
->         `frontend/src/api/voiceApi.ts`,
->         `frontend/src/components/AnalysisView.tsx`
+>         `frontend/app/_dream/api/voiceApi.ts`,
+>         `frontend/app/_dream/components/AnalysisView.tsx`
 > [Output] 定义 procedural Memory Workspace 设计：Reflections 分析场景的分区配置、初始化边界、完整时序与验证清单。
 > [Pos] memory-workspace-design-doc node in `docs/design/memory`
 > [Sync] 2026-06-06: 重写为 procedural-only Memory Workspace 设计，移除 `.claude/memory/` 运行时来源。
@@ -294,8 +294,8 @@ Tacit Boundary 示例（echoes 分区）：
 |---|---|
 | Reflections 三分区 procedural memory 配置 | `backend/reflections_config.py` |
 | Reflections Memory 初始化 endpoint | `backend/routers/reflections.py` |
-| Reflections 分析调用 + drain SSE + 取 messages + 解析 + 存储 | `frontend/src/api/voiceApi.ts` (`analyzeReflectionsSection`) |
-| Reflections 分析结果展示 | `frontend/src/components/AnalysisView.tsx` |
+| Reflections 分析调用 + drain SSE + 取 messages + 解析 + 存储 | `frontend/app/_dream/api/voiceApi.ts` (`analyzeReflectionsSection`) |
+| Reflections 分析结果展示 | `frontend/app/_dream/components/AnalysisView.tsx` |
 | Agent 消费 `<memory_context>`（引擎层，无改动） | `backend/claude_agent/context_builder.py` |
 
 ---

@@ -2,7 +2,7 @@
 > `docs/prd/Settings.md`, `backend/routers/system_config.py`,
 > `backend/libs/claude_agent_kit/server/workspace.py`,
 > `backend/claude_agent/service.py`, and
-> `frontend/src/components/dashboard/ModelConfigSection.tsx`.
+> `frontend/app/_dream/components/dashboard/ModelConfigSection.tsx`.
 > [Output] Interaction design for Settings-controlled Claude Agent sandbox
 > network policy.
 > [Pos] sandbox-network-interaction-plan in `docs/design/claude-agent`

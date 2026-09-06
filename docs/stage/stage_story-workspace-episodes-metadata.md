@@ -301,11 +301,11 @@ task_241-SH-001 (投影 E2E) + task_241-SH-002 (Gate 安全 E2E)
 | `task_241-BE-001` (适配层) | `backend/src/services/story-workspace/episode-adapter.ts`, `episode-parser/`, `db/schema/story-workspace/episode-projection.ts`, migrations, tests | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, `output/episodes` 原文 | ✅ 无冲突 |
 | `task_241-BE-002` (审计) | `backend/src/routes/story-workspace/runs.ts`, `run-record.service.ts`, `db/schema/story-workspace/run-record.ts`, migrations, tests | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, 既有已确认审计事实 | ✅ 无冲突；与 BE-001 共用 schema 目录但字段不重叠 |
 | `task_241-BE-003` (Gate) | `backend/src/routes/story-workspace/review-gate.ts`, `review-gate.service.ts`, `conflict-validator.ts`, tests | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, 基线 Gate 默认拒绝策略 | ✅ 无冲突；在 task_230-BE-001 基础上追加 episodes 校验 |
-| `task_241-FE-001` (骨架) | `frontend/src/pages/story-workspace/StoryWorkspaceEpisodeWorkspacePage.tsx`, `PromptComposer.tsx`, `RunProgress.tsx`, router, hooks, services | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, `StoryWorkspaceDreamPage` 基线核心 | ✅ 无冲突；与 Dream 页面为组合关系 |
-| `task_241-FE-002` (列表) | `frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeListTable.tsx`, `Toolbar.tsx`, tests, hooks | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 通用表格基线核心 | ✅ 无冲突 |
-| `task_241-FE-003` (详情) | `frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeDetail.tsx`, `tabs/`, tests | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 通用 Tabs 基线核心 | ✅ 无冲突 |
-| `task_241-FE-004` (审阅) | `frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeReviewPanel.tsx`, `review/`, tests, hooks, services | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端 Gate 规则, 基线 Review Panel 核心 | ✅ 无冲突；与 task_202d 为增量适配关系 |
-| `task_241-FE-005` (状态) | `frontend/src/components/story-workspace/episode/state/`, tests, hooks | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端状态机, 通用状态基线核心 | ✅ 无冲突 |
+| `task_241-FE-001` (骨架) | `frontend/app/_dream/views/story-workspace/StoryWorkspaceEpisodeWorkspacePage.tsx`, `PromptComposer.tsx`, `RunProgress.tsx`, router, hooks, services | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, `StoryWorkspaceDreamPage` 基线核心 | ✅ 无冲突；与 Dream 页面为组合关系 |
+| `task_241-FE-002` (列表) | `frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeListTable.tsx`, `Toolbar.tsx`, tests, hooks | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 通用表格基线核心 | ✅ 无冲突 |
+| `task_241-FE-003` (详情) | `frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeDetail.tsx`, `tabs/`, tests | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 通用 Tabs 基线核心 | ✅ 无冲突 |
+| `task_241-FE-004` (审阅) | `frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeReviewPanel.tsx`, `review/`, tests, hooks, services | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端 Gate 规则, 基线 Review Panel 核心 | ✅ 无冲突；与 task_202d 为增量适配关系 |
+| `task_241-FE-005` (状态) | `frontend/app/_dream/components/story-workspace/episode/state/`, tests, hooks | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端状态机, 通用状态基线核心 | ✅ 无冲突 |
 | `task_241-SH-001` (E2E) | `e2e/tests/story-workspace/episode-projection.spec.ts`, fixtures, helpers | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码修改 | ✅ 无冲突；仅新建测试文件 |
 | `task_241-SH-002` (E2E) | `e2e/tests/story-workspace/review-gate-*.spec.ts`, fixtures, helpers | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码修改 | ✅ 无冲突；仅新建测试文件 |
 
@@ -354,7 +354,7 @@ task_241-SH-001 (投影 E2E) + task_241-SH-002 (Gate 安全 E2E)
 | 适配层/投影 | 删除 `episode-adapter.ts` 和 `episode-parser/`；恢复基线投影接口 | BackendTaskAgent |
 | 审计 API | 删除 `runs.ts` 路由和 `run-record.service.ts`；保留已落库审计记录只读 | BackendTaskAgent |
 | Gate 增量 | 删除 `conflict-validator.ts`；恢复 `review-gate.service.ts` 至 task_230-BE-001 基线 | BackendTaskAgent |
-| 前端 Episodes | 删除 `frontend/src/components/story-workspace/episode/` 目录；恢复 Dream 页面至基线 | FrontendTaskAgent |
+| 前端 Episodes | 删除 `frontend/app/_dream/components/story-workspace/episode/` 目录；恢复 Dream 页面至基线 | FrontendTaskAgent |
 | E2E | 删除 `e2e/tests/story-workspace/episode-*` 和 `review-gate-*.spec.ts` | FrontendTaskAgent |
 
 ### 8.3 完成信号

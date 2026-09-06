@@ -9,10 +9,10 @@ Scope: 前端任务规划 - Chat / Connector 重构的 agent-browser E2E 证据
 >      `docs/design/notion-session/connector-interaction.md`,
 >      `docs/design/notion-session/overview.md`,
 >      `docs/stage/stage_notion-resource-connector-interaction.md`,
->      `frontend/src/App.tsx`,
->      `frontend/src/components/chat/ChatView.tsx`,
->      `frontend/src/components/dashboard/ResourceConnectorPage.tsx`,
->      `frontend/src/api/resourceConnectorApi.ts`
+>      `frontend/app/_dream/App.tsx`,
+>      `frontend/app/_dream/components/chat/ChatView.tsx`,
+>      `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`,
+>      `frontend/app/_dream/api/resourceConnectorApi.ts`
 > [Output] agent-browser E2E 验证任务文档，定义最小证据与失败诊断
 > [Pos] `task_196d_frontend_chat-connector-agent-browser-e2e` in `docs/task`
 > [Sync] 2026-07-07: generated as the verification slice for the SUO-196 task family.
@@ -56,10 +56,10 @@ Scope: 前端任务规划 - Chat / Connector 重构的 agent-browser E2E 证据
 
 | Path | Role |
 |---|---|
-| `frontend/src/App.tsx` | E2E 入口视图切换 surface。 |
-| `frontend/src/components/chat/ChatView.tsx` | landing tabs / shell recovery surface。 |
-| `frontend/src/components/dashboard/ResourceConnectorPage.tsx` | connector embedded workbench surface。 |
-| `frontend/src/api/resourceConnectorApi.ts` | connector auth/select/refresh client surface。 |
+| `frontend/app/_dream/App.tsx` | E2E 入口视图切换 surface。 |
+| `frontend/app/_dream/components/chat/ChatView.tsx` | landing tabs / shell recovery surface。 |
+| `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx` | connector embedded workbench surface。 |
+| `frontend/app/_dream/api/resourceConnectorApi.ts` | connector auth/select/refresh client surface。 |
 | `frontend/tests/**` | 如仓库引入最小 browser harness，则只在这里放置。 |
 
 ## 6. 输入 / 输出说明
@@ -80,9 +80,9 @@ Scope: 前端任务规划 - Chat / Connector 重构的 agent-browser E2E 证据
 - `SUO-195-B`
 - `SUO-195-C`
 - `SUO-195-D`
-- `frontend/src/App.tsx`
-- `frontend/src/components/chat/ChatView.tsx`
-- `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
+- `frontend/app/_dream/App.tsx`
+- `frontend/app/_dream/components/chat/ChatView.tsx`
+- `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
 
 ## 8. 测试策略
 

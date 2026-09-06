@@ -8,11 +8,11 @@ Scope: 前端任务规划 - ResourceConnectorPage 嵌入 Chat shell connector ta
 >      `docs/issue/ISSUES_notion-session-chat-connector-interaction.md`,
 >      `docs/design/notion-session/connector-interaction.md`,
 >      `docs/design/notion-session/overview.md`,
->      `frontend/src/components/dashboard/ResourceConnectorPage.tsx`,
->      `frontend/src/components/chat/ChatView.tsx`,
->      `frontend/src/App.tsx`,
->      `frontend/src/api/resourceConnectorApi.ts`,
->      `frontend/src/constants/storageKeys.ts`
+>      `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`,
+>      `frontend/app/_dream/components/chat/ChatView.tsx`,
+>      `frontend/app/_dream/App.tsx`,
+>      `frontend/app/_dream/api/resourceConnectorApi.ts`,
+>      `frontend/app/_dream/constants/storageKeys.ts`
 > [Output] 可执行的 connector 嵌入 task 文档，定义复用与嵌入边界
 > [Pos] `task_196b_frontend_connector-embedded-mode` in `docs/task`
 > [Sync] 2026-07-07: generated after the issue split completed and the frontend task family resumed.
@@ -56,11 +56,11 @@ Scope: 前端任务规划 - ResourceConnectorPage 嵌入 Chat shell connector ta
 
 | Path | Role |
 |---|---|
-| `frontend/src/components/dashboard/ResourceConnectorPage.tsx` | Connector workbench 主体，改造成可嵌入模式。 |
-| `frontend/src/components/chat/ChatView.tsx` | Connector tab 容器与嵌入点。 |
-| `frontend/src/App.tsx` | 入口视图切换与兼容入口处理。 |
-| `frontend/src/api/resourceConnectorApi.ts` | Connector client contract 和 state 归一。 |
-| `frontend/src/constants/storageKeys.ts` | Connector fallback key 隔离。 |
+| `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx` | Connector workbench 主体，改造成可嵌入模式。 |
+| `frontend/app/_dream/components/chat/ChatView.tsx` | Connector tab 容器与嵌入点。 |
+| `frontend/app/_dream/App.tsx` | 入口视图切换与兼容入口处理。 |
+| `frontend/app/_dream/api/resourceConnectorApi.ts` | Connector client contract 和 state 归一。 |
+| `frontend/app/_dream/constants/storageKeys.ts` | Connector fallback key 隔离。 |
 
 ## 6. 输入 / 输出说明
 
@@ -77,8 +77,8 @@ Scope: 前端任务规划 - ResourceConnectorPage 嵌入 Chat shell connector ta
 - `docs/design/notion-session/overview.md`
 - `SUO-195-B`
 - `SUO-195-C`
-- `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-- `frontend/src/api/resourceConnectorApi.ts`
+- `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+- `frontend/app/_dream/api/resourceConnectorApi.ts`
 
 ## 8. 测试策略
 

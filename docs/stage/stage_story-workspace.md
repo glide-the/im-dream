@@ -1,4 +1,22 @@
-# Story Workspace 实施阶段计划与 Execute 准入矩阵
+<!-- [输入] 2026-08-01 Story Workspace task 集、当时 Stage 编排和执行准入。 -->
+<!-- [输出] 历史依赖顺序、范围、安全 Gate 与实际回执索引。 -->
+<!-- [范围] 不作为当前派工、审批、checkout、assignee 或生产启用依据。 -->
+<!-- [同步] 2026-09-06：降级为历史 Stage 账本，并以实际源码/exec 证据说明当前状态。 -->
+
+# Story Workspace 历史阶段计划与 Execute 准入账本
+
+> **当前适用性。** 本文后续的 wave、Paperclip/CEOOrchestrator、assignee、checkout、readiness 和进度表记录 2026-08-01 的编排过程，不是当前状态机。现行 frontend 是根 Next.js 16 + pnpm workspace，Dream 应用源码唯一位于 `frontend/app/_dream/**`；当前工作按真实技术依赖、源码状态和执行回执推进。
+
+## 当前状态与验收边界
+
+| 工作内容 | 当前证据 | 仍需注意 |
+|---|---|---|
+| `task_205b` 合同 canonical 迁移 | [执行回执](../exec/exec_task_205b_story-workspace-contract-migration.md) 为 completed；focused tests、build/lint、旧 owner 扫描和数据库 hash Gate 通过。 | 回执只证明当时候选；当前 contracts 或 consumers 变化后要重验。 |
+| `task_203` Review workflow | [执行回执](../exec/exec_task_203_story-workspace-review-workflow.md) 保留首次 blocked，并记录后续 retry 完成及测试证据。 | 失败事实不可删除；当前数据库能力仍受 Admin Drizzle 合同约束。 |
+| `task_203a` 持久化 Schema | [旧 SQLite fixture 回执](../exec/exec_task_203a_story-workspace-review-persistence-schema.md) 曾通过技术检查。 | 它不是当前 Schema 发布证据；Dream 禁止以 SQLite/runtime DDL 替代 Admin-owned PostgreSQL capability。 |
+| `task_202c` Browser/Network 补证 | [执行回执](../exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md) 为 blocked。 | `frontend/e2e/**` 已是合法 harness，不能再以“项目无 Playwright harness”作为事实；但仍须对当前 Next 页面、真实请求/响应与视觉交互形成新证据。 |
+
+上表区分技术验证、公开应用与生产启用：已有静态/focused 证据不自动证明公开入口或生产运行；blocked 浏览器证据也不能由旧 Vite 构建、源码阅读或派工状态替代。下文历史安全边界、失败原因和回滚约束继续有效。
 
 > **Stage ID**: `stage_001_story-workspace`  
 > **关联 Issue**: [SUO-208](/SUO/issues/SUO-208) / [SUO-240](/SUO/issues/SUO-240) / [SUO-301](/SUO/issues/SUO-301) / [SUO-319](/SUO/issues/SUO-319) / [SUO-320](/SUO/issues/SUO-320)
@@ -196,7 +214,7 @@ graph TD
 | **Phase B**<br/>后端 Gate 聚合 | `task_230-BE-001` 审阅 Gate 服务端聚合与防绕过验证 | `GET /workflow-runs/:id/review-gate` + 增强 confirm (版本校验) + `POST /continue` (幂等) + 防绕过逻辑 | `task_203` (BE-003) 基线审阅流转 + `task_226` run 模型 | `workflow_run` 数据模型尚未完成 (SUO-226)；接口设计需对齐 |
 | **Phase C**<br/>增量 E2E 联调 | `task_230-SH-001` 确认幂等 + 审阅版本校验 + 防绕过 E2E | E2E 测试报告 (幂等/版本/绕过/生命周期) + 缺陷记录 | `task_230-FE-002` + `task_230-BE-001` | **E2E harness 未配置**；需 StagePlanner 前置 gate 或等价验证方案 |
 
-> **关键约束**: `task_230-SH-001` 显式声明当前仓库无 Playwright/Cypress 配置，要求 StagePlanner 先安排 E2E harness 选型/引导，或批准等价的 agent-browser 可追溯验证方案。此约束作为准入条件进入 §5.1。
+> **历史约束修正**：当时 `task_230-SH-001` 以“无 Playwright/Cypress 配置”为前提；该前提对当前仓库已不成立。后续验证应复用 `frontend/e2e/**` 与本机 Chrome，不另建 runner，并为当前 Next 候选保存可追溯证据。
 
 ---
 
@@ -340,19 +358,19 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 | **`task_203a` (BE-003a)** | **`backend/database.py` (character/scene 四列 DDL + migration), `backend/story_workspace/contracts.py` (v1.1.0), `backend/tests/test_database.py`, `backend/tests/test_story_workspace_contracts.py`** | **`docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, `backend/routers/story_workspace.py`, `backend/server.py`, 任何路由/服务实现** | 🔒 **独占 `backend/database.py` 与 `backend/story_workspace/contracts.py` 写入窗口**；`task_203` 在新 hash 冻结前不得启动；与 task_203 形成硬依赖链；**变更前候选基线为 `47d6290c29b0297fed2d5256a9854c2224ca93575764e277951940f4f17e0810`（相对 HEAD `f4ebabe03cf7935cdcfe80723c01fd421ae0b0f26534da84afeb592459218825` 为 `729` 行新增/`0` 行删除）；execute 首次写入前必须重算完整 hash 与 numstat，任一漂移立即 blocked 并记录写入 owner / 解锁动作** |
 | `task_203` (BE-003) | `backend/routers/story_workspace.py` (追加审阅端点), `backend/tests/test_story_workspace_review.py` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, 现有 CRUD 端点, **`backend/database.py` (禁止 Schema/DDL；已由 task_203a 完成并冻结)** | ⚠️ **共享路由排他**：与 task_204 同写 `backend/routers/story_workspace.py`；必须等 task_204 完成后串行执行；**task_203a 完成后方可启动** |
 | `task_204` (BE-004) | `backend/services/story_workspace/agent_integration.py`, `backend/routers/story_workspace.py` (追加内部端点), `backend/claude_agent/service.py`, `backend/tests/test_story_workspace_agent_integration.py` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, SSE 流核心协议, `backend/database.py` (禁止 Schema/DDL) | ⚠️ **共享路由排他**：与 task_203 同写 `backend/routers/story_workspace.py`；必须先于 task_203 串行执行 |
-| `task_205` (SH-002) | `backend/types/story-workspace/`, `frontend/src/types/story-workspace/` (参考模板) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码 | ✅ 无冲突 |
-| `task_202a` (FE-001) | `frontend/src/components/story-workspace/layout/`, `frontend/src/styles/tokens.css` (补充), `frontend/src/App.tsx` (接入) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 现有全局组件核心逻辑 | ✅ 无冲突 |
-| `task_202b` (FE-002) | `frontend/src/components/story-workspace/layout/StoryWorkspaceSidebar.tsx`, `frontend/src/router/story-workspace.tsx`, `frontend/src/pages/story-workspace/` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 用户认证核心逻辑 | ✅ 无冲突 |
-| `task_202c` (FE-003) | `frontend/src/components/story-workspace/table/`, `frontend/src/components/story-workspace/layout/StoryWorkspaceToolbar.tsx`, `frontend/src/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx`, `frontend/src/hooks/story-workspace/`, `frontend/src/pages/story-workspace/StoryWorkspace{Stories,Characters,Scenes}Page.tsx`, `frontend/src/components/story-workspace/layout/index.ts`, `frontend/src/components/story-workspace/index.ts` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, `frontend/src/router/story-workspace.tsx`, `frontend/src/App.tsx`, `frontend/package.json`, lockfile, Review Panel, Dashboard/Dream 页面, 测试 runner | ✅ 无冲突；页面接入与 barrel export 纳入最小闭集 |
-| `task_202d` (FE-004) | `frontend/src/components/story-workspace/review/`, `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, API 接口契约 | ✅ 无冲突 |
-| `task_202e` (FE-005) | `frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, Chat 系统代码 | ✅ 无冲突 |
-| `task_202f` (FE-006) | `frontend/src/components/story-workspace/state/` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, Toast/Modal 核心逻辑 | ✅ 无冲突 |
-| `task_202g` (SH-001) | `frontend/src/components/story-workspace/` (修复), `frontend/src/hooks/story-workspace/` (修复) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码 (问题反馈而非修改) | ✅ 无冲突 |
+| `task_205` (SH-002) | `backend/types/story-workspace/`, `frontend/app/_dream/types/story-workspace/` (参考模板) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码 | ✅ 无冲突 |
+| `task_202a` (FE-001) | `frontend/app/_dream/components/story-workspace/layout/`, `frontend/app/_dream/styles/tokens.css` (补充), `frontend/app/_dream/App.tsx` (接入) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 现有全局组件核心逻辑 | ✅ 无冲突 |
+| `task_202b` (FE-002) | `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceSidebar.tsx`, `frontend/app/_dream/router/story-workspace.tsx`, `frontend/app/_dream/views/story-workspace/` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 用户认证核心逻辑 | ✅ 无冲突 |
+| `task_202c` (FE-003) | `frontend/app/_dream/components/story-workspace/table/`, `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceToolbar.tsx`, `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx`, `frontend/app/_dream/hooks/story-workspace/`, `frontend/app/_dream/views/story-workspace/StoryWorkspace{Stories,Characters,Scenes}Page.tsx`, `frontend/app/_dream/components/story-workspace/layout/index.ts`, `frontend/app/_dream/components/story-workspace/index.ts` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, `frontend/app/_dream/router/story-workspace.tsx`, `frontend/app/_dream/App.tsx`, `frontend/package.json`, lockfile, Review Panel, Dashboard/Dream 页面, 测试 runner | ✅ 无冲突；页面接入与 barrel export 纳入最小闭集 |
+| `task_202d` (FE-004) | `frontend/app/_dream/components/story-workspace/review/`, `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, API 接口契约 | ✅ 无冲突 |
+| `task_202e` (FE-005) | `frontend/app/_dream/views/story-workspace/StoryWorkspaceDashboardPage.tsx` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, Chat 系统代码 | ✅ 无冲突 |
+| `task_202f` (FE-006) | `frontend/app/_dream/components/story-workspace/state/` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, Toast/Modal 核心逻辑 | ✅ 无冲突 |
+| `task_202g` (SH-001) | `frontend/app/_dream/components/story-workspace/` (修复), `frontend/app/_dream/hooks/story-workspace/` (修复) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码 (问题反馈而非修改) | ✅ 无冲突 |
 | `task_202h` (DO-001) | `docs/task/story-workspace-user-guide.md` (或等效路径) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码 | ✅ 无冲突 |
-| `task_230-FE-001` (Dream 导航) | `frontend/src/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`, `frontend/src/components/TopNavBar.tsx`, `frontend/src/router/story-workspace.tsx` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, Sidebar 结构 | ✅ 无冲突；与 task_202b 共用路由配置但为追加 |
-| `task_230-FE-002` (Dream 页面) | `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`, `frontend/src/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`, Zustand store | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 表格核心组件 | ✅ 无冲突；与 task_202e 共用 Dashboard 但为组合复用 |
+| `task_230-FE-001` (Dream 导航) | `frontend/app/_dream/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`, `frontend/app/_dream/components/TopNavBar.tsx`, `frontend/app/_dream/router/story-workspace.tsx` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, Sidebar 结构 | ✅ 无冲突；与 task_202b 共用路由配置但为追加 |
+| `task_230-FE-002` (Dream 页面) | `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx`, `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`, Zustand store | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 表格核心组件 | ✅ 无冲突；与 task_202e 共用 Dashboard 但为组合复用 |
 | `task_230-BE-001` (Gate 聚合) | `backend/routers/story_workspace.py` (追加 Gate 端点), `backend/services/story_workspace/review_gate.py` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, Schema 定义 | ⚠️ 与 task_202/203/204 共用 `story_workspace.py` 但为追加；必须在 task_203 完成后执行 |
-| `task_230-SH-001` (E2E) | `e2e/tests/story-workspace/` (新建) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码修改 | ✅ 无冲突；仅新建测试文件 |
+| `task_230-SH-001` (E2E) | `frontend/e2e/story-workspace/`（复用现有 harness） | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码修改 | ✅ 不新增 runner；仅增加定向测试与证据 |
 
 ### 7.2 Single-Assignee 分配建议
 
@@ -417,8 +435,8 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 |------|----------|--------|
 | 数据库 Schema | 调用 `drop_story_workspace_tables(db)` 删除所有 story-workspace 表 | BackendTaskAgent |
 | 后端 API | 从 `server.py` 移除 router 注册；删除 `story_workspace.py` | BackendTaskAgent |
-| 前端组件 | 删除 `frontend/src/components/story-workspace/` 目录；从 `App.tsx` 移除路由接入 | FrontendTaskAgent |
-| 类型定义 | 删除 `backend/types/story-workspace/` 和 `frontend/src/types/story-workspace/` | BackendTaskAgent + FrontendTaskAgent |
+| 前端组件 | 删除 `frontend/app/_dream/components/story-workspace/` 目录；从 `App.tsx` 移除路由接入 | FrontendTaskAgent |
+| 类型定义 | 删除 `backend/types/story-workspace/` 和 `frontend/app/_dream/types/story-workspace/` | BackendTaskAgent + FrontendTaskAgent |
 | Agent 集成 | 从 `claude_agent/service.py` 移除集成调用；删除 `services/story_workspace/agent_integration.py` | BackendTaskAgent |
 | Gate 聚合 | 从 `backend/routers/story_workspace.py` 移除 Gate 端点；删除 `backend/services/story_workspace/review_gate.py`；恢复 confirm 端点至基线 | BackendTaskAgent |
 | Dream 导航/页面 | 删除 `StoryWorkspaceDreamNavItem`；恢复 `TopNavBar` 至基线；删除 `StoryWorkspaceDreamPage` 和 `StoryWorkspaceReviewGate` | FrontendTaskAgent |
@@ -480,7 +498,7 @@ Stage 整体完成后：
 | **已确认内容下游执行未定义** | 用户确认后无明确反馈 | 中 | 设计稿默认假设：暂存，后续迭代定义 | 标记为后续迭代需求 |
 | **共享路由并发写入风险** | `task_203` 与 `task_204` 同写 `backend/routers/story_workspace.py`，并发会导致合并冲突或测试互相破坏 | 高 | **显式串行 Gate**：task_204 先执行并验证，完成后 task_203 再 checkout；StagePlanner 在 §5.2 / §7.1 标注排他约束 | Wave 2 内串行，不并行 |
 | **SUO-226 workflow_run 模型未完成** | `task_230-BE-001` 和 `task_230-FE-002` 无法对接真实数据 | 高 | 使用占位组件/mock 数据先行开发；接口确定后切换 | 预留 1 轮接口对齐迭代 |
-| **E2E harness 未配置** | `task_230-SH-001` 无法自动化执行 | 中 | 明确 bootstrap 路径（Playwright/Cypress/agent-browser）；由 CEOOrchestrator 裁决 | 在 Wave 8 前完成 harness 选型 |
+| **当前 harness 尚缺该场景覆盖** | `task_230-SH-001` 尚无当前候选自动化证据 | 中 | 复用 `frontend/e2e/**` 和本机 Chrome 增加定向场景，不另建 runner | 在声称公开或生产验收前形成可回读证据 |
 | **Dashboard 与 Dream 双状态风险** | `task_230-FE-001` 重定向与 `task_202e` Dashboard 路由状态冲突 | 中 | 明确 Dashboard 仅重定向，不维护独立 store；`StoryWorkspaceDashboardPage` 保留复用 | Wave 7 前确认路由方案 |
 | **客户端绕过风险** | 恶意请求直接调用 continue API 绕过审阅 | 高 | 所有 continue/结束请求必须经过服务端聚合校验；不信任客户端任何状态标记 | `task_230-BE-001` 核心验收项 |
 
@@ -589,15 +607,15 @@ Stage 整体完成后：
 
 #### Allowed（完整闭集）
 
-- 新建：`backend/story_workspace/__init__.py`、`backend/story_workspace/contracts.py`、`backend/tests/test_story_workspace_contracts.py`、`frontend/src/hooks/story-workspace/contracts.ts`。
-- 删除：`backend/types/__init__.py`、`backend/types/story_workspace/__init__.py`、`backend/types/story_workspace/naming-checklist.md`、`frontend/src/hooks/story-workspace/types.ts`。
-- 最小修改：`backend/routers/story_workspace.py`、`backend/services/story_workspace/agent_integration.py`、`backend/claude_agent/service.py`、`backend/tests/test_story_workspace_agent_integration.py`、`frontend/src/hooks/story-workspace/index.ts`、`useStoryWorkspaceList.ts`、`useStories.ts`、`useCharacters.ts`、`useScenes.ts`；仅允许合同移动、canonical import、公共符号前缀与迁移直接相关断言。
+- 新建：`backend/story_workspace/__init__.py`、`backend/story_workspace/contracts.py`、`backend/tests/test_story_workspace_contracts.py`、`frontend/app/_dream/hooks/story-workspace/contracts.ts`。
+- 删除：`backend/types/__init__.py`、`backend/types/story_workspace/__init__.py`、`backend/types/story_workspace/naming-checklist.md`、`frontend/app/_dream/hooks/story-workspace/types.ts`。
+- 最小修改：`backend/routers/story_workspace.py`、`backend/services/story_workspace/agent_integration.py`、`backend/claude_agent/service.py`、`backend/tests/test_story_workspace_agent_integration.py`、`frontend/app/_dream/hooks/story-workspace/index.ts`、`useStoryWorkspaceList.ts`、`useStories.ts`、`useCharacters.ts`、`useScenes.ts`；仅允许合同移动、canonical import、公共符号前缀与迁移直接相关断言。
 - 正式报告：`docs/exec/exec_task_205b_story-workspace-contract-migration.md`，仅由 `ExecTaskAgent` 写入。
 
 #### Forbidden（完整闭集）
 
 - `backend/database.py`、所有 Schema / DDL / migration / SQL、`backend/server.py`、依赖与 lockfile、环境 / Docker / 部署配置。
-- `frontend/src/components/**`、`frontend/src/pages/**`、`frontend/src/router/**`、`frontend/src/App.tsx`、`frontend/package.json`、测试 runner、仓库 mock 与生成物。
+- `frontend/app/_dream/components/**`、`frontend/app/_dream/views/**`、`frontend/app/_dream/router/**`、`frontend/app/_dream/App.tsx`、`frontend/package.json`、测试 runner、仓库 mock 与生成物。
 - Story Workspace 之外的业务域；REST payload、字段、枚举值、校验、状态机、数据表语义与 UI 行为。
 - `docs/design/**`、`docs/issue/**`、`docs/task/**`、`docs/stage/**`、其他既有 `docs/exec/**`；模板源文件只读。
 - 旧路径 shim / alias / re-export、`sys.path` workaround、兼容复制件；未列入 Allowed 的路径默认禁止。
@@ -611,7 +629,7 @@ Stage 整体完成后：
 
 1. 从 `backend/` 执行 stdlib `types` + canonical contracts + `server` import smoke，`PYTHONPYCACHEPREFIX` 指向 run scratch。
 2. 执行 `tests.test_story_workspace_contracts`、`tests.test_story_workspace_api`、`tests.test_story_workspace_agent_integration` focused unittest。
-3. 执行前端 `npm run build` 与六个 hooks / contracts 文件的 scoped ESLint。
+3. 执行前端 `corepack pnpm --dir frontend build` 与六个 `frontend/app/_dream/hooks/**` / contracts 文件的 scoped ESLint。
 4. 执行旧路径、旧公共符号、shim / alias 禁止扫描，要求零命中。
 5. 对比执行前后 `backend/database.py` hash；核对 task-owned path 清单并执行定向 `git diff --check`。
 

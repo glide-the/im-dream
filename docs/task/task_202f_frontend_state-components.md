@@ -33,7 +33,7 @@ Story Workspace 空态/加载/错误/选中态组件实现
 ## 4. 实现步骤
 
 1. **创建状态组件目录**
-   - `frontend/src/components/story-workspace/state/`
+   - `frontend/app/_dream/components/story-workspace/state/`
 
 2. **实现 `StoryWorkspaceEmptyState` 空态组件**
    - 居中显示
@@ -77,11 +77,11 @@ Story Workspace 空态/加载/错误/选中态组件实现
 ## 5. 涉及文件路径
 
 **新增文件**：
-- `frontend/src/components/story-workspace/state/`（目录）
-- `frontend/src/components/story-workspace/state/StoryWorkspaceEmptyState.tsx`
-- `frontend/src/components/story-workspace/state/StoryWorkspaceLoadingState.tsx`
-- `frontend/src/components/story-workspace/state/StoryWorkspaceErrorState.tsx`
-- `frontend/src/components/story-workspace/state/index.ts`
+- `frontend/app/_dream/components/story-workspace/state/`（目录）
+- `frontend/app/_dream/components/story-workspace/state/StoryWorkspaceEmptyState.tsx`
+- `frontend/app/_dream/components/story-workspace/state/StoryWorkspaceLoadingState.tsx`
+- `frontend/app/_dream/components/story-workspace/state/StoryWorkspaceErrorState.tsx`
+- `frontend/app/_dream/components/story-workspace/state/index.ts`
 
 **复用文件**（只读）：
 - 全局 Toast 组件（现有）
@@ -107,7 +107,7 @@ Story Workspace 空态/加载/错误/选中态组件实现
 | 依赖 | 状态 | 说明 |
 |---|---|---|
 | `task_202c` (FE-003 数据表格) | ⏳ 需先完成 | 骨架屏用于表格加载态 |
-| `frontend/src/styles/tokens.css` | ✅ 已存在 | 色彩 token |
+| `frontend/app/_dream/styles/tokens.css` | ✅ 已存在 | 色彩 token |
 | 全局 Toast 组件 | ✅ 已存在 | 通知提示 |
 
 **本任务被依赖**：
@@ -211,7 +211,7 @@ interface StoryWorkspaceErrorStateProps {
 ## 执行边界（增量修正）
 
 ### 允许修改范围
-- 允许创建 `frontend/src/components/story-workspace/state/` 目录及组件文件
+- 允许创建 `frontend/app/_dream/components/story-workspace/state/` 目录及组件文件
 - 允许配置各模块空态文案（通过组件 props 或配置文件）
 
 ### 禁止修改范围

@@ -1,24 +1,7 @@
-<!-- [Input] Current Dream/Admin/Gateway topology, repository contracts, and the released Claude SDK/Runtime pair. -->
-<!-- [Output] Explain what Ink & Memory is, how to install and run it, how versions are paired, and which operational boundaries must be respected. -->
-<!-- [Pos] Canonical English repository entry guide; README.zh.md must remain a faithful Chinese mirror. -->
-<!-- [Sync] 2026-08-28: replace stale branch/setup notes with the current develop workflow, exact SDK/Runtime pairing, local Runtime installation, troubleshooting, and operator notices. -->
-<!-- [Sync] 2026-08-28: document pinned ntn installation plus actor-scoped credentials/current snapshots in agentdata, policy-driven background refresh, and per-Thread projection. -->
-<!-- [Sync] 2026-08-29: document current-selection filtering, minimal thread metadata, empty-scope revocation, and reauthorization LKG behavior. -->
-<!-- [Sync] 2026-08-29: document the Settings Notion capability/Skill inspection surface and truthful Hosted MCP read/write boundary. -->
-<!-- [Sync] 2026-08-30: document actor/thread-bound Notion CLI environment injection and the pre-auth ntn installation check. -->
-<!-- [Sync] 2026-08-30: document deployment-owned Claude Bash sandbox enablement and the explicit AutoDL disabled profile. -->
-<!-- [Sync] 2026-08-30: adopt the publicly released clean-room Runtime 0.1.4 across install, verification, registry acceptance, and troubleshooting. -->
-<!-- [Sync] 2026-08-31: require AutoDL releases to verify backend-generated crawler files and reject Vite SPA HTML fallback. -->
-<!-- [Sync] 2026-09-01: document production skill-creator packaging, AutoDL discovery verification, and visible unknown-Skill failures. -->
-<!-- [Sync] 2026-09-01: document persisted, one-shot Dream workspace auto-repair through the canonical Chat/SSE/Turn path. -->
-<!-- [Sync] 2026-09-01: keep ambiguous Dream workspaces enterable and recursive Skill-link trees safe. -->
-<!-- [Sync] 2026-09-02: require Admin 0042's exact Chat history keyset pagination capability before Dream starts. -->
-<!-- [Sync] 2026-09-04: document post-commit Dream synchronization errors and immediate Execution asset refresh. -->
-<!-- [Sync] 2026-09-01: require pre-write duplicate-root/stage validation, move-not-copy cleanup, and a visible safe reason when the one repair attempt stops. -->
-<!-- [Sync] 2026-09-02: document index-first Episode synchronization, stable per-Episode navigation, and no cross-Episode artifact fallback. -->
-<!-- [Sync] 2026-09-04: document actor-bound notion-cli Bash approval routing and its fail-closed command/network boundaries. -->
-<!-- [Sync] 2026-09-04: mirror every repository Claude Skill into the backend common catalog and verify the complete catalog in AutoDL releases. -->
-<!-- [Sync] 2026-09-04: expose the backend common catalog in Chat slash discovery beside Deck plugin Skills. -->
+<!-- [Input] Current Dream/Admin/Gateway topology, supported versions, and user-visible MCP Apps workflow. -->
+<!-- [Output] Plain-language user and local-operator guide with deeper engineering details linked out. -->
+<!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
+<!-- [Sync] 2026-09-06: reorganize around getting started and using MCP Apps; retain exact setup, ownership, security, and validation facts in layered sections. -->
 
 # Ink & Memory
 
@@ -30,93 +13,45 @@
   English · <a href="README.zh.md">中文</a>
 </p>
 
-Ink & Memory is a creative workspace for writing, Chat, Dream workflows, and versioned Decks. It combines a React/Vite frontend, a FastAPI backend, an Admin-owned PostgreSQL schema, an Admin Gateway for model access and billing, and a separately released Claude Agent SDK and Claude Runtime.
+Ink & Memory is a workspace for writing with AI. You can keep long-running conversations, organize reusable Decks and Agents, connect external tools such as Notion or MCP Servers, and turn ideas into structured Dream workflows and creative assets.
 
-This repository contains the Dream application. It does not own the shared database schema, model-provider credentials, billing, or the internal implementation of the Claude SDK/Runtime.
+This repository contains the Dream Web application and its FastAPI backend. Admin, PostgreSQL, the model Gateway, the public Python SDK, and the native Claude Runtime are maintained separately.
 
 ## What you can do
 
-- **Writing** — write and save sessions, browse the timeline, and review reflections.
-- **Chat** — talk with a Deck Agent in a persistent Thread with streaming, tools, resume, plans, and TODOs.
-- **Dream** — launch a Dream Run and review scripts, storyboards, prompts, and generated artifacts.
-- **Episode synchronization** — open Sync on a Run-scoped Episode index, enter EP01/EP02 through stable opaque identities, and return to the same Run index. Each artifact request, ETag, and last-good snapshot is Episode-scoped, so a missing EP02 artifact never displays EP01 content.
-- **Dream workspace recovery** — before writing post-turn projections, Dream classifies allowlisted workspace slug, duplicate canonical-project-root, and stage identity/schema failures. It persists one visible auto-repair user message, instructs the Agent to move/merge and clean stale roots instead of copying them, and resumes the same Claude session through the normal Chat/SSE/Turn path. Multiple safe project roots render an unbound repair context instead of stopping before the Agent, while recursive workspace trees never follow read-only builtin Skill links outside the Thread. Trusted actor, Thread, Run, Deck, and plugin authority failures still stop closed; one originating Turn can dispatch at most one repair, and a second failure shows only an allowlisted safe reason without starting a third Turn.
-- **Dream turn settlement** — a successful assistant Turn is committed before the after-turn Hook publishes canonical character/scene files into the Run-private artifact and PostgreSQL projection. If that later synchronization fails, Chat reports a typed post-commit sync error, preserves the reply, and directs the user to reload without resending. Execution re-reads `dream-files` whenever the shared Thread settles so newly published assets appear without a page reload.
-- **Decks** — create and version Decks, Agents, prompts, resources, and Claude Plugin references.
-- **Workspace and tools** — use thread-owned files, sandboxed tools, MCP servers, Skills, and plugins.
-- **Common Skills** — every full Thread receives the backend-owned `asr`, `hhxg-market`, `investment-data`, `skill-creator`, and `symbolic-board` packages through canonical lowercase discovery IDs. With Workspace Mode enabled, Chat reads that same authenticated backend catalog for `/` suggestions even before a Deck or Thread is selected; selecting a suggestion inserts ordinary editable text and does not auto-send. Repository `.claude/skills` packages must have exact backend/common release mirrors because production ships only the backend build context.
-- **Notion resources** — connect in Settings, select the exact allowed scope, inspect the installed `notion-session` and `notion-cli` packages, and keep lightweight indexes refreshed outside Chat. Dream checks that pinned `ntn` is installed before authentication and injects the current actor/thread projection as `NOTION_HOME`, `NOTION_API_TOKEN`, `NOTION_KEYRING`, and `NOTION_WORKERS_CONFIG_FILE` into Agent Runtime Bash. Hosted Notion MCP remains separate from this CLI path.
-- **Platform integration** — consume authenticated model aliases, subscription eligibility, usage, and billing from Admin/Gateway.
+- **Write and reflect** — keep writing sessions, browse your timeline, and review reflections.
+- **Chat with persistent context** — continue a Thread with streaming replies, tools, plans, files, and TODOs.
+- **Build reusable Agents** — use Decks to organize prompts, resources, plugins, and Agent behavior.
+- **Run Dreams** — develop scripts, storyboards, prompts, and generated assets through guided workflows.
+- **Connect your tools** — authorize Notion or a managed MCP Server from Settings.
+- **Use interactive MCP Apps** — when a compatible tool returns an App, use its controls directly below the collapsed assistant process.
 
-Deck marketplace distribution is intentionally deferred. See [docs/design/deck-register/README.md](docs/design/deck-register/README.md).
+MCP Apps are currently a technical preview. The ordinary tool result remains available if an App is disabled, unavailable, or fails to load. Production enablement still requires separate real-account, external-Server, OAuth, and operations acceptance.
 
-## System boundaries
+## Start locally
 
-```mermaid
-flowchart LR
-    Browser["Browser / Vite"] -->|"REST + SSE"| Dream["Dream / FastAPI"]
-    Dream -->|"public Python API"| SDK["ink-claude-dream-agent-sdk"]
-    SDK -->|"stdio JSONL"| Runtime["ink-claude-code-dream"]
-    Runtime -->|"Anthropic Messages"| Gateway["Admin Gateway"]
-    Gateway --> Provider["Model Provider"]
-    Dream --> PostgreSQL["Admin-owned PostgreSQL"]
-    Admin["Admin / Drizzle / Billing"] --> PostgreSQL
-    Admin --> Gateway
-```
+### Requirements
 
-| Repository/service | Owns | Must not own |
-| --- | --- | --- |
-| `ink-dream-memory` | Dream frontend/backend, Thread/Run/Workspace integration, SDK/Runtime selection | Shared schema migrations, Provider keys, a second Agent/Runtime protocol |
-| `ink-admin-memory` | Drizzle schema, PostgreSQL, Admin, Gateway, model catalog, subscriptions, billing | Dream Thread/Run business logic |
-| `ink-claude-dream-agent-sdk-python` | Python SDK distribution and public `claude_agent_sdk` API | Dream business DTOs or database access |
-| `ink-claude-code-dream` | Clean-room CLI/Runtime, protocol, tools, MCP, multi-platform npm packages | Dream/Admin business state machines or user data |
+- macOS or glibc Linux on arm64/x64
+- Python `>=3.12` and [uv](https://docs.astral.sh/uv/)
+- Node.js `>=22 <25`, Corepack, and npm
+- The Admin repository, which provides PostgreSQL and the model Gateway
 
-## Supported version contract
+Windows and musl targets are not supported by the qualified native Runtime.
 
-Dream treats the Python SDK and npm Runtime as one compatibility pair even though they are published through different package ecosystems.
-
-| Component | Required version |
-| --- | --- |
-| Dream branch | `develop` |
-| Python | `>=3.12` |
-| Node.js | `>=22 <25` for the Runtime selector |
-| Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| npm Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
-| Runtime CLI compatibility output | `2.1.241 (Claude Code)` |
-| Notion CLI | `ntn@0.15.1` |
-
-Important: `uv sync` manages the Python environment only. It installs the Python SDK but does **not** install or upgrade the npm Runtime. A source checkout that expects Runtime `0.1.4` will reject a `0.1.3` executable even when all capability flags are otherwise valid.
-
-## Requirements
-
-- Git
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
-- Node.js 22–24 with npm
-- pnpm 9+
-- A sibling checkout of [Ink Admin Memory](https://github.com/glide-the/ink-admin-memory)
-- Docker only when using the Docker/Remote SSH deployment paths
-
-The currently released Runtime supports Darwin/Linux on arm64/x64. Windows and musl targets fail closed.
-
-## Local setup
-
-### 1. Check out the current development branch
+### 1. Get Dream and Admin
 
 ```bash
-git clone https://github.com/glide-the/im.git ink-dream-memory
-cd ink-dream-memory
-git switch develop
-git pull --ff-only origin develop
+git clone https://github.com/glide-the/im-dream.git ink-dream-memory
+git clone https://github.com/glide-the/dream-im-platform.git ink-admin-memory
 ```
 
-Admin is expected at `../ink-admin-memory` unless an explicit absolute path is configured.
+Use Dream's `develop` branch and Admin's `main` branch unless a reviewed release tells you otherwise.
 
 ### 2. Prepare Admin, PostgreSQL, and Gateway
 
 ```bash
-test -d ../ink-admin-memory || git clone https://github.com/glide-the/ink-admin-memory.git ../ink-admin-memory
-cd ../ink-admin-memory
+cd ink-admin-memory
 pnpm install
 pnpm env:setup
 pnpm env:check
@@ -124,93 +59,44 @@ pnpm db:migrate
 pnpm db:migrate:check
 ```
 
-Admin owns all shared PostgreSQL migrations. Dream must never create missing shared tables or use a runtime SQLite fallback.
-The current Chat history pagination path requires Admin migration `0042_chat_history_keyset_pagination` and exact capability `dream.chat-history-keyset-pagination.v1`; `pnpm db:migrate:check` must report current before starting Dream.
-
-Start Admin/Gateway in terminal A:
+For a first local installation, follow the Admin README to configure `.env.local`, then provision the default subscription and Dream service identities:
 
 ```bash
-cd ../ink-admin-memory
-pnpm dev
-```
-
-For an initial local installation, provision the default subscription and Dream service identities from the Admin repository:
-
-```bash
-cd ../ink-admin-memory
 pnpm db:data:subscriptions -- --apply
 pnpm product:provision-local-dream
 pnpm gateway:provision-local-dream
 ```
 
-These commands are local-identity operations. Read the Admin repository instructions before using them against any non-local database.
+These commands write Admin-owned data. Use them only with the intended local database unless a separate deployment review says otherwise.
 
-### 3. Sync the Dream Python environment
-
-From this repository:
+### 3. Install Dream and its Runtime
 
 ```bash
-cd backend
-uv sync
-```
+cd ../ink-dream-memory/backend
+uv sync --frozen
 
-`uv sync` creates/updates `backend/.venv` and makes it match `backend/pyproject.toml` and `backend/uv.lock`. It may remove undeclared packages. In particular, it does not preserve an ad-hoc pytest installation and it does not manage the npm Runtime.
-
-Run backend tests without adding pytest permanently to the production environment:
-
-```bash
-cd backend
-uv run --with pytest==9.1.1 pytest -q
-```
-
-### 4. Install the exact Claude Runtime and Notion CLI
-
-Install the public selector package separately because it is an npm/native artifact:
-
-```bash
 npm install --global @glide-the/ink-claude-code-dream@0.1.4
 export PATH="$(npm prefix --global)/bin:$PATH"
-command -v ink-claude-code-dream
 ink-claude-code-dream --version
-```
 
-The version command must print:
-
-```text
-2.1.241 (Claude Code)
-```
-
-Then verify the Runtime manifest through Dream's actual resolver:
-
-```bash
-cd backend
-.venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
-```
-
-This command must exit 0 and print the resolved `0.1.4` executable path. If `command -v` still points to an older `~/.local/bin/ink-claude-code-dream`, reorder `PATH` or replace that stale installation before starting Dream. A running process keeps the `PATH` it inherited; restart only the process you own after changing it.
-
-Do not use `CLAUDE_CODE_CLI_PATH` to bypass the normal manifest-qualified Runtime path. That variable is reserved for an explicit, reviewed absolute-path rollback.
-
-Install the Notion CLI used by Dream's backend-owned connector path:
-
-```bash
 npm install --global ntn@0.15.1
 ntn --version
-ntn login --help
-ntn doctor --help
+
+cd ../frontend
+corepack enable
+corepack pnpm install --frozen-lockfile
 ```
 
-`ntn --version` must print `ntn 0.15.1`. Docker and AutoDL releases install and verify the same version automatically. Users authorize through Dream's Settings UI; do not run `ntn login` in the service account's default home as application setup.
+The Runtime must print `2.1.241 (Claude Code)`, Notion CLI must print `ntn 0.15.1`, and Corepack must resolve `pnpm@10.28.1`.
 
-### 5. Configure Dream
+### 4. Configure Dream
 
-Create the private Dream environment file if needed:
+Create `backend/.env` from the example and point it at the Admin environment and your workspace root:
 
 ```bash
-test -f backend/.env || cp backend/.env.example backend/.env
+cd ../backend
+test -f .env || cp .env.example .env
 ```
-
-Recommended local database/Gateway ownership:
 
 ```dotenv
 DATABASE_URL=
@@ -223,126 +109,184 @@ INK_GATEWAY_BASE_URL=http://127.0.0.1:3000
 AGENT_CWD=/absolute/path/to/agentdata/agent-workspace
 INK_AGENT_SANDBOX_ENABLED=true
 INK_NOTION_RUNTIME_ROOT=/absolute/path/to/agentdata/notion-runtime
-INK_NOTION_MAX_SNAPSHOT_BYTES=134217728
-INK_NOTION_SYNC_SCHEDULER_INTERVAL_SECONDS=60
 ```
 
-Admin provisioning writes the remaining local service identity and model aliases to gitignored environment files. Do not copy Provider keys into Dream and never expose service credentials to the browser.
+Provider keys stay in Admin; do not copy them into Dream.
 
-`INK_NOTION_RUNTIME_ROOT` must be an absolute server-owned path in the same persistent agentdata area as `AGENT_CWD`. Dream stores each user's opaque credential source under `users/<actor-hash>/home` and each connector's latest successful lightweight index under `users/<actor-hash>/snapshots/<connector-id>/current.json`. Saving a resource selection performs the first index sync immediately; the connector's server-owned strategy then refreshes due indexes in the background, without requiring a Chat or workspace initialization. These snapshots contain selected IDs and compact metadata only, never page Markdown, blocks, or attachments.
+### 5. Run the three services
 
-For a Chat turn with the trusted thread workspace enabled, Runtime initialization copies the current user's effective credential and latest successful index into `{AGENT_CWD}/{thread_id}/.notion-home` and `.notion`; before projection, the index is intersected with the user's current selected scope and connector metadata is minimized. `sdk_env.py` then binds that exact thread projection to Agent Runtime Bash through `NOTION_HOME`, `NOTION_API_TOKEN`, `NOTION_KEYRING`, and `NOTION_WORKERS_CONFIG_FILE`; ambient values are cleared and cannot select another user or home. Projection does not call Notion or run an index sync. Clearing or shrinking the selected scope therefore takes effect for the next turn even when a newer index refresh fails. The existing indexed-page Read hook remains available alongside direct `ntn` CLI use. Workspace Mode disabled keeps both projections and the four runtime variables unavailable.
-
-Documented read-oriented `ntn api` calls from an actor-bound Notion CLI session follow the existing Bash policy: Auto and manual modes use the normal frontend confirmation, full-access mode may allow them without that prompt, and disabled network mode still hard-denies them. This is a narrow routing rule, not a Bash allowlist: missing actor/thread binding, wrappers or alternate executable paths, undeclared endpoints, shell composition/substitution, malformed data, and non-Notion Bash remain fail-closed. If Chat reports `Hook PreToolUse:Bash denied this tool`, verify the current connector projection, use a command documented by the installed `notion-cli` Skill, and check the effective network mode; never work around it by globally allowing Bash.
-
-### 6. Start Dream
-
-Terminal B — backend:
+Terminal A — Admin and Gateway:
 
 ```bash
-cd backend
+cd ink-admin-memory
+pnpm dev
+```
+
+Terminal B — Dream backend:
+
+```bash
+cd ink-dream-memory/backend
 .venv/bin/python server.py
 ```
 
-Terminal C — frontend:
+Terminal C — Dream Web:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+cd ink-dream-memory/frontend
+INK_BACKEND_INTERNAL_URL=http://127.0.0.1:8765 \
+NEXT_PUBLIC_WS_BASE_URL=ws://127.0.0.1:8765 \
+corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 ```
 
 Open:
 
 - Dream: <http://127.0.0.1:5173>
-- Dream API: <http://127.0.0.1:8765>
 - Admin: <http://127.0.0.1:3000/admin>
+- Dream API: <http://127.0.0.1:8765>
 
-## Main application routes
+## Use MCP Apps
 
-| Route | Purpose |
+### Add a connection and enable its App
+
+1. Sign in to Dream and open **Settings → Resource Links**.
+2. Add or open a managed MCP connection and complete its authentication.
+3. On the connection detail page, find **Apps**.
+4. Turn on **Show MCP App**. If needed, also allow **Low-risk tool calls** and **Send messages to this chat**.
+5. Save the settings and check the displayed actual status.
+
+Your saved choices and the actual available features are shown separately. A switch may be on while the App remains unavailable if the connection is offline, the Server does not advertise an App, or the server-side preview policy does not allow it.
+
+### Call and use the App in Chat
+
+1. Open Chat and select a Deck/Agent that can use the connection.
+2. Ask the Agent to use the relevant MCP tool, for example: “Check the server time.”
+3. The model calls the tool normally and writes its answer.
+4. The assistant's reasoning and ordinary tool details remain under the **View process / Took…** disclosure.
+5. A verified interactive App appears outside that disclosure, so collapsing the process does not hide the App.
+6. Use the App's buttons or fields directly. A permitted in-App tool action updates the App without starting another model turn. If the App sends a message to Chat, it becomes a normal user message and starts one new Agent turn.
+
+You can close and reopen the interactive view. Refreshing, switching Threads, changing permissions, or changing the connection revision creates a fresh governed session; the original tool is not replayed.
+
+The complete engineering flow—connection discovery, model tool call, trusted result projection, live/history recovery, Browser Host, Node proxy, sandbox, permissions, and Chat-message re-entry—is documented in [MCP Apps and IM Agent UI design](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链).
+
+## Supported versions and ownership
+
+| Component | Supported version / owner |
 | --- | --- |
-| `/story-workspace/chat` | New and existing Agent Threads |
-| `/story-workspace/dream` | Dream Runs and the creative workbench |
-| `/story-workspace/decks` | Enabled and published Decks |
-| `/story-workspace/settings/work` | Deck, resource, and plugin management |
-| `/story-workspace/settings` | Account, subscription, model, and application settings |
+| Dream integration branch | `develop` |
+| Python | `>=3.12` |
+| Node.js | `>=22 <25`; deployment images use Node 22 |
+| Frontend package manager | `pnpm@10.28.1` through Corepack |
+| Next.js / React | `next@16.1.6`, `react@19.1.0`, `react-dom@19.1.0` |
+| Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
+| Native Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
+| Runtime compatibility output | `2.1.241 (Claude Code)` |
+| Notion CLI | `ntn@0.15.1` |
+| Shared PostgreSQL schema, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
+| Dream Web, Thread/Run/Workspace integration | This repository |
 
-## Validation
+Package ownership is intentional: `uv` manages Dream's Python environment, npm distributes the native Runtime and Notion CLI, and pnpm manages `frontend/`. `uv sync` does not install or upgrade the native Runtime.
+
+Admin Drizzle is the only owner of shared PostgreSQL migrations. Dream consumes exact published capabilities and fails closed when a required capability is missing. MCP App connection settings require Admin migration `0053_rare_lenny_balinger` and capability `dream.mcp-app-connection-settings.v1` before the matching Dream code is released.
+
+## Build and test
+
+Common provider-free checks:
 
 ```bash
 # Backend
-cd backend
-uv run --with pytest==9.1.1 pytest -q
+PYTHONPATH=backend uv run --native-tls --project backend --frozen \
+  --with pytest==9.1.1 --with pytest-asyncio \
+  python -m pytest backend/tests -q
 
 # Frontend
-cd frontend
-npm run lint
-npm run build
+corepack pnpm --dir frontend exec tsc --noEmit --incremental false
+corepack pnpm --dir frontend lint
+NODE_ENV=production corepack pnpm --dir frontend build
 
-# Published SDK/Runtime registry acceptance; provider-free and no model call
-cd ..
+# MCP Apps Browser/Node contracts
+corepack pnpm --dir frontend test:mcp-apps-runtime
+corepack pnpm --dir frontend typecheck:mcp-apps
+```
+
+Published SDK/Runtime registry acceptance:
+
+```bash
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.144 \
   --runtime-version 0.1.4 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
-Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and a named existing account. Provider-free fixtures must not be reported as real-business validation.
+Build the standalone Web image only from the pnpm/Next workspace:
 
-## Operational and security notices
+```bash
+INK_NEXT_OUTPUT=standalone NODE_ENV=production \
+  corepack pnpm --dir frontend run build:docker
+test -f frontend/.next/standalone/server.js
+```
 
-1. **Two package managers, one compatibility contract.** `uv` owns Python packages; npm owns the native Runtime. Version changes must update both sides and their acceptance evidence in one change.
-2. **Fail closed.** Missing schema capabilities, SDK/Runtime version mismatches, invalid manifests, missing model aliases, and unavailable credentials must fail instead of silently selecting an ambient CLI or fake data.
-3. **Admin owns the schema.** Add shared PostgreSQL schema changes only through Admin Drizzle migrations and capability publication.
-4. **No secret commits.** Never commit database passwords, Gateway service keys, Provider keys, OAuth secrets, npm tokens, transcripts, or user Workspace content.
-5. **Thread-local Runtime files.** Claude temporary files belong under the validated Thread workspace `.claude-tmp`; do not widen access to `/tmp` or the user's real Claude home.
-6. **No service-wide cleanup.** Tests may stop only processes and temporary resources created by that test run.
-7. **Published versions are immutable.** Fix a bad Runtime with a forward release or an explicit reviewed rollback; do not overwrite or unpublish an accepted version as normal rollback.
-8. **Model output capability is server-owned.** Admin's selected model `maxOutputTokens` is projected to the Runtime; browser settings, user env, workspace files, and Gateway body rewriting must not replace it.
-9. **Notion Runtime binding is actor/thread-owned.** Canonical durable state belongs under server agentdata; policy-driven index refresh is independent of Chat, and every Runtime turn receives only the current actor's current-scope per-Thread projection. Dream replaces ambient `NOTION_*` values with that projection before exposing the four supported variables to Agent Bash.
-10. **Editor writes bind actor, live session, and durable state.** The runner rejects writes for a stale session, the Editor MCP child receives only the server-owned actor and effective PostgreSQL capability, every query/update is actor-scoped, and business failures refresh the single in-memory EditorState cache without publishing a success event. Notion indexes and on-demand page bodies never enter EditorState.
-11. **Claude Bash sandbox enablement is deployment-owned.** `INK_AGENT_SANDBOX_ENABLED` defaults to `true`, and invalid values also keep it enabled. Setting it to `false` preserves Workspace Mode, cwd, context, file tools, hooks, and tool confirmations, but approved Bash commands run directly as the Dream service account without bubblewrap filesystem/network isolation. User Settings and user env cannot override this capability. AutoDL projects `false` because its outer container rejects the required namespace creation; Dream currently runs as `root` there, so an approved Bash command has root authority inside that outer container.
-12. **AutoDL crawler files are a release gate.** Vite Preview must proxy `/robots.txt`, `/sitemap.xml`, and `/llms.txt` to FastAPI. Every AutoDL start, deploy, verify, and rollback checks the public MIME type, required marker, and absence of SPA HTML; HTTP 200 alone is not acceptance.
-13. **Production Skills must be in the backend build context.** Every repository `.claude/skills/<id>` package has an exact `backend/builtin_skills/common/<id>` release mirror. AutoDL start, deploy, verify, and rollback initialize an isolated workspace and validate every common source, read-only workspace link, and `.claude/skills` discovery link; they also retain the title-case `/Skill-Creator` normalization check. A Runtime-consumed unknown Skill command is an explicit turn error, never an empty successful assistant message; an existing Claude session remains reusable after the package is repaired.
+Focused MCP Apps commands and the current provider-free evidence are listed in [the MCP Apps validation receipt](docs/exec/mcp-apps/current-candidate-validation.md). Provider-free tests are technical checks, not proof of production availability.
+
+## Safety and release boundaries
+
+- Secrets, Provider keys, MCP credentials, transcripts, and Workspace content must not enter Git or Browser-visible configuration.
+- Dream never creates or migrates the shared schema at runtime. Apply reviewed Admin Drizzle migrations first.
+- Missing capabilities, mismatched Runtime/SDK versions, stale revisions, unavailable credentials, or invalid policy fail closed; ordinary MCP results remain the fallback where possible.
+- Browser MCP Apps connect only to the authenticated same-origin Node endpoint. The real Server address and credential stay server-side, and App content runs in a restricted iframe sandbox.
+- Tests and local launchers may stop or delete only resources they created.
+- Roll back only to an explicitly reviewed immutable image or release; do not restore retired npm/Vite build paths.
+- MCP Apps remain production-off (`productionAppsEffective=false`) until a separate real-business acceptance changes that contract.
+
+For deployment profiles and known adapter gaps, see [deploy/README.md](deploy/README.md). Do not treat an old Vite or npm workflow as a supported release path; the Web application is Next.js with a single pnpm lock.
 
 ## Troubleshooting
 
-### `Dream Claude Runtime is not production-qualified`
+### The App does not appear
 
-Check both the executable and its release manifest:
+- Confirm the MCP connection is connected and the tool advertises an App.
+- Open **Settings → Resource Links → connection → Apps** and compare your saved choice with the actual status.
+- Confirm Admin migration `0053_rare_lenny_balinger` is applied and `dream.mcp-app-connection-settings.v1` is published.
+- Retry the Chat call after the connection inventory refreshes. For compact historical rows, expand the process once to load the saved detail; after loading, the App stays visible when the process is collapsed.
+- If policy, authentication, or the sandbox is unavailable, the ordinary result is the expected fallback.
+
+### `Dream Claude Runtime is not production-qualified`
 
 ```bash
 command -v ink-claude-code-dream
 readlink "$(command -v ink-claude-code-dream)"
 ink-claude-code-dream --version
+cd backend
+.venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-For the current `develop` branch, the manifest must contain Runtime `0.1.4`. Capability flags may all be `true` while the request still fails because the actual Runtime version is stale.
+The manifest-qualified Runtime must be `0.1.4` and print `2.1.241 (Claude Code)`. Fix the normal `PATH` installation, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed rollback.
 
 ### `uv sync` removed pytest
 
-`uv sync` removes packages that are not part of the locked production environment. Use the documented `uv run --with pytest==9.1.1 pytest ...` command or add an explicitly reviewed development dependency group; do not assume ad-hoc packages survive sync.
+`uv sync` removes undeclared packages. Use the temporary `uv run --with pytest...` command from [Build and test](#build-and-test), or add a development dependency in a separate reviewed change.
 
-### PostgreSQL or schema capability unavailable
+### The Web page cannot reach an API or Voice
 
-Start the Admin supervisor, verify `../ink-admin-memory/.env.local`, and run Admin's migration checks. If Dream reports the Chat-history capability missing, apply and verify Admin migration `0042_chat_history_keyset_pagination`; do not create its index or capability from Dream.
+Check that Admin is on `3000`, Dream is on `8765`, and Web is on `5173`. Next-to-Dream rewrites use `INK_BACKEND_INTERNAL_URL`; Browser REST/SSE uses the runtime `API_BASE_URL`; Voice uses the Browser `WS_BASE_URL` or the local `NEXT_PUBLIC_WS_BASE_URL` fallback.
 
-### No callable model
+### A build still asks for npm/Vite files
 
-Configure an enabled, priced model alias and Provider credential in Admin, then run the local Gateway provisioning command. Dream accepts platform aliases, not browser-supplied Provider IDs or keys.
+The active Web workspace uses Corepack/pnpm, Next, `.next`, and `frontend/pnpm-lock.yaml`. A workflow looking for `frontend/package-lock.json`, `vite.config.ts`, or production `dist/index.html` is obsolete.
 
-### A configured model still sends `max_tokens: 32000`
+### PostgreSQL capability or model is unavailable
 
-First confirm the running Runtime version and inspect the Admin catalog's `maxOutputTokens`. An opaque Gateway alias cannot be safely classified from its name, so Dream must project the authenticated catalog value as `INK_CLAUDE_CODE_MODEL_MAX_OUTPUT_TOKENS`. The CLI uses that value as the model default/upper limit and keeps `CLAUDE_CODE_MAX_OUTPUT_TOKENS` only as a bounded standalone override. If the catalog value is absent, unknown aliases intentionally retain the upstream-compatible 32,000/64,000 fallback; do not fix this by hard-coding a model ID or rewriting the Gateway request body.
+Run the Admin migration check, verify the Admin-owned environment file, and configure an enabled/priced model alias plus Provider credential in Admin. Dream accepts platform model aliases, not Browser-supplied Provider IDs or keys.
 
-## Documentation and contribution rules
+## More documentation
 
-- Repository maintenance rules: [Agent.md](Agent.md)
-- Agent feature interaction guide: [docs/Agent.md](docs/Agent.md)
-- Architecture overview: [docs/architecture/项目架构设计说明.md](docs/architecture/项目架构设计说明.md)
-- SDK/Runtime packaging and integration: [docs/deploy/claude-sdk-runtime-packaging-and-integration.md](docs/deploy/claude-sdk-runtime-packaging-and-integration.md)
-- Registry acceptance: [docs/deploy/claude-registry-release-acceptance.md](docs/deploy/claude-registry-release-acceptance.md)
-- Story Workspace design: [docs/design/story-workspace/](docs/design/story-workspace/)
+- [MCP Apps end-to-end design](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链)
+- [MCP Apps current technical evidence](docs/exec/mcp-apps/current-candidate-validation.md)
+- [Repository maintenance rules](Agent.md)
+- [Agent product behavior](docs/Agent.md)
+- [Rules index](docs/rules/README.md)
+- [Deployment guide](deploy/README.md)
+- [SDK/Runtime packaging](docs/deploy/claude-sdk-runtime-packaging-and-integration.md)
+- [Registry acceptance](docs/deploy/claude-registry-release-acceptance.md)
 
-Create feature branches from the latest `develop`, preserve unrelated worktree changes, update affected file headers and `.folder.md` contracts, and report exact validation commands and exit codes.
+Keep `README.md` and `README.zh.md` structurally aligned. Preserve unrelated working-tree changes, update affected file headers and folder contracts, and report exact validation commands and any remaining release action.

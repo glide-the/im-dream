@@ -1,4 +1,4 @@
-> [Input] Chat 页面报错堆栈（`[<pre /> in Markdown (at react-markdown) in AssistMessagePart ...]`）、`frontend/src/components/chat/AssistMessagePart.tsx`、`frontend/src/components/chat/UserMessagePart.tsx`、`frontend/src/components/chat/PlanPanel.tsx`
+> [Input] Chat 页面报错堆栈（`[<pre /> in Markdown (at react-markdown) in AssistMessagePart ...]`）、`frontend/app/_dream/components/chat/AssistMessagePart.tsx`、`frontend/app/_dream/components/chat/UserMessagePart.tsx`、`frontend/app/_dream/components/chat/PlanPanel.tsx`
 > [Output] 定义 Chat 会话 Markdown 中 Mermaid 代码块的 SVG 渲染方案，并消除 `<pre>` 内嵌块级元素导致的 React DOM 嵌套报错。
 > [Pos] interaction-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-07-20: 初版 — Mermaid 按需加载渲染、共享 `ChatMarkdown` 渲染链、流式降级与 `<pre>` 嵌套修正。
@@ -7,6 +7,7 @@
 > [Sync] 2026-08-23: Mermaid 与 Workspace 图片共用同一 Markdown media frame 和沉浸式预览骨架；复制按钮旁增加放大入口。
 > [Sync] 2026-08-23: 共享媒体查看区域增加非 passive 滚轮缩放，复用底部 50%–200% 状态并阻止背景滚动。
 > [Sync] 2026-08-23: 缩放目标收敛为实际图片或 Mermaid 图形，中央 Paper 画布保持适配视口后的固定尺寸。
+> [Sync] 2026-09-06: build/lint evidence now uses the sole pnpm/Next.js frontend entry.
 
 # Chat Markdown Mermaid 渲染设计
 
@@ -33,8 +34,8 @@ Claude Agent 的回答经常包含 ```` ```mermaid ```` 围栏代码块（流程
 
 | 组件 | 位置 | 职责 |
 |---|---|---|
-| `ChatMarkdown` | `frontend/src/components/chat/ChatMarkdown.tsx` | 共享 `ReactMarkdown` 封装：统一 `remarkGfm` 插件与 `code`/`pre` 组件覆盖；`language-mermaid` 代码块路由到 `MermaidBlock`，其余代码块保持默认渲染 |
-| `MermaidBlock` | `frontend/src/components/chat/MermaidBlock.tsx` | 单个 Mermaid 图表的加载、渲染、错误降级 |
+| `ChatMarkdown` | `frontend/app/_dream/components/chat/ChatMarkdown.tsx` | 共享 `ReactMarkdown` 封装：统一 `remarkGfm` 插件与 `code`/`pre` 组件覆盖；`language-mermaid` 代码块路由到 `MermaidBlock`，其余代码块保持默认渲染 |
+| `MermaidBlock` | `frontend/app/_dream/components/chat/MermaidBlock.tsx` | 单个 Mermaid 图表的加载、渲染、错误降级 |
 
 三个调用点改为渲染 `<ChatMarkdown>`，不再直接引用 `react-markdown` / `remark-gfm`。
 
@@ -92,4 +93,4 @@ PNG 导出实现要点：
 
 - 当前共享链由 `ChatMarkdown.tsx` 统一承载 Mermaid 与 exact Workspace URI component routing；Workspace 解析组件不复制 `ReactMarkdown`。
 - 不影响后端与 SSE 事件契约。
-- 验证：`npm run build`（tsc + vite）与 `npm run lint` 通过；真实 Chromium 确认含 ```` ```mermaid ```` 的回答渲染为 SVG，放大按钮位于复制按钮之后，Mermaid/Workspace 外框计算样式一致；在 50%/100%/110%/200% 对比边界框，Paper 画布宽高稳定且实际图片/图形按比例变化；两者的媒体弹层均有下载/关闭/缩放且无 React 嵌套报错，普通代码块不受影响。
+- 验证：`pnpm --dir frontend build` 与 `pnpm --dir frontend lint` 通过；真实 Chromium 确认含 ```` ```mermaid ```` 的回答渲染为 SVG，放大按钮位于复制按钮之后，Mermaid/Workspace 外框计算样式一致；在 50%/100%/110%/200% 对比边界框，Paper 画布宽高稳定且实际图片/图形按比例变化；两者的媒体弹层均有下载/关闭/缩放且无 React 嵌套报错，普通代码块不受影响。

@@ -264,7 +264,7 @@ SettingsView（position: fixed，overflow: auto）
 
 ### 4.4 ConnectorSettingsSection（资源链接）与 ConnectorNotionDetailPage（Notion 具体配置页面）
 
-> 关联实现：[`frontend/src/components/dashboard/ConnectorSettingsSection.tsx`](../../frontend/src/components/dashboard/ConnectorSettingsSection.tsx)、[`frontend/src/components/dashboard/ConnectorNotionDetailPage.tsx`](../../frontend/src/components/dashboard/ConnectorNotionDetailPage.tsx)
+> 关联实现：[`frontend/app/_dream/components/dashboard/ConnectorSettingsSection.tsx`](../../frontend/app/_dream/components/dashboard/ConnectorSettingsSection.tsx)、[`frontend/app/_dream/components/dashboard/ConnectorNotionDetailPage.tsx`](../../frontend/app/_dream/components/dashboard/ConnectorNotionDetailPage.tsx)
 
 - `ConnectorSettingsSection` 是 Settings 里的独立资源链接索引卡片；Chat 侧 `ConnectorLandingPanel` 的跳转按钮会打开 Settings 并自动滚动、聚焦到这里。
 - 首页分成两个区域：`远程资源链接` 和 `本地资源链接`。

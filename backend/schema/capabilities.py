@@ -7,6 +7,8 @@
 [Sync] 2026-08-25: add the exact Admin-published managed MCP Resources v1 capability check.
 [Sync] 2026-08-28: require the Admin-owned Claude Code Runtime model/policy capability before consuming optional env projections.
 [Sync] 2026-09-02: require the exact Admin-owned Chat history keyset index capability.
+[Sync] 2026-09-02: require the exact Admin-owned Chat assistant final-projection capability.
+[Sync] 2026-09-06: add the exact Admin-owned per-connection MCP App settings capability.
 """
 
 from __future__ import annotations
@@ -33,6 +35,13 @@ MANAGED_MCP_RESOURCES_VERSION: Final = 1
 MANAGED_MCP_RESOURCES_CONTRACT_SHA256: Final = (
     "746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a"
 )
+MCP_APP_CONNECTION_SETTINGS_CAPABILITY: Final = (
+    "dream.mcp-app-connection-settings.v1"
+)
+MCP_APP_CONNECTION_SETTINGS_VERSION: Final = 1
+MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256: Final = (
+    "c8a1daebd20db54890ca31bf154faad4bd6f2714c609dba413acca88e2139202"
+)
 CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: Final = (
     "dream.claude-agent-resource-observer.v1"
 )
@@ -54,6 +63,13 @@ CHAT_HISTORY_KEYSET_PAGINATION_VERSION: Final = 1
 CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256: Final = (
     "a0dfe5f8d4b4330a9e17db07a8716d5d2bc25e291f3624f09005e79c01fc8ab0"
 )
+CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY: Final = (
+    "dream.chat-history-final-projection.v1"
+)
+CHAT_HISTORY_FINAL_PROJECTION_VERSION: Final = 1
+CHAT_HISTORY_FINAL_PROJECTION_CONTRACT_SHA256: Final = (
+    "50c27f86113c170064b0913bf052f9bd12884d3345c920d7b11468a768e0a432"
+)
 REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     UNIFIED_DREAM_CAPABILITY: 1,
     "dream.workflow.thread-lookup.v1": 1,
@@ -66,6 +82,9 @@ REQUIRED_RUNTIME_CAPABILITIES: Final[Mapping[str, int]] = {
     CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY: (
         CHAT_HISTORY_KEYSET_PAGINATION_VERSION
     ),
+    CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY: (
+        CHAT_HISTORY_FINAL_PROJECTION_VERSION
+    ),
 }
 _EXACT_RUNTIME_CONTRACTS: Final[Mapping[str, str]] = {
     CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY: (
@@ -76,6 +95,9 @@ _EXACT_RUNTIME_CONTRACTS: Final[Mapping[str, str]] = {
     ),
     CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY: (
         CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256
+    ),
+    CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY: (
+        CHAT_HISTORY_FINAL_PROJECTION_CONTRACT_SHA256
     ),
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -207,6 +229,34 @@ def managed_mcp_resources_capability_available(connection: Any) -> bool:
     )
 
 
+def mcp_app_connection_settings_capability_available(connection: Any) -> bool:
+    """Return whether Admin published the exact connection settings contract."""
+
+    try:
+        row = connection.execute(
+            "SELECT version, contract_sha256 "
+            "FROM drizzle.schema_capabilities WHERE capability = %s",
+            (MCP_APP_CONNECTION_SETTINGS_CAPABILITY,),
+        ).fetchone()
+    except Exception:
+        return False
+    if row is None:
+        return False
+    if isinstance(row, Mapping):
+        version = row.get("version")
+        contract_sha256 = row.get("contract_sha256")
+    else:
+        try:
+            version, contract_sha256 = row[0], row[1]
+        except (IndexError, KeyError, TypeError):
+            return False
+    return (
+        isinstance(version, int)
+        and version == MCP_APP_CONNECTION_SETTINGS_VERSION
+        and contract_sha256 == MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256
+    )
+
+
 def claude_agent_resource_observer_capability_available(connection: Any) -> bool:
     """Return whether the exact Admin-published resource Observer contract exists."""
 
@@ -264,6 +314,9 @@ def claude_code_runtime_config_capability_available(connection: Any) -> bool:
 
 
 __all__ = [
+    "CHAT_HISTORY_FINAL_PROJECTION_CAPABILITY",
+    "CHAT_HISTORY_FINAL_PROJECTION_CONTRACT_SHA256",
+    "CHAT_HISTORY_FINAL_PROJECTION_VERSION",
     "CHAT_HISTORY_KEYSET_PAGINATION_CAPABILITY",
     "CHAT_HISTORY_KEYSET_PAGINATION_CONTRACT_SHA256",
     "CHAT_HISTORY_KEYSET_PAGINATION_VERSION",
@@ -280,6 +333,9 @@ __all__ = [
     "MANAGED_MCP_RESOURCES_CAPABILITY",
     "MANAGED_MCP_RESOURCES_CONTRACT_SHA256",
     "MANAGED_MCP_RESOURCES_VERSION",
+    "MCP_APP_CONNECTION_SETTINGS_CAPABILITY",
+    "MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256",
+    "MCP_APP_CONNECTION_SETTINGS_VERSION",
     "REQUIRED_RUNTIME_CAPABILITIES",
     "SCHEMA_CAPABILITIES_RELATION",
     "SchemaAuthorityReceipt",
@@ -289,4 +345,5 @@ __all__ = [
     "claude_agent_resource_observer_capability_available",
     "claude_code_runtime_config_capability_available",
     "managed_mcp_resources_capability_available",
+    "mcp_app_connection_settings_capability_available",
 ]

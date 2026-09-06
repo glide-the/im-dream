@@ -23,6 +23,8 @@
 [Sync] 2026-08-29: capability schema v2 derives Skill metadata/files from the installed package and operations from the real Read hook/workspace materializer entrypoints.
 [Sync] 2026-08-31: remove daily-picture mutation/generation and legacy voice-analysis APIs; historical picture reads remain.
 [Sync] 2026-09-02: document stable Chat message pages, latest-ID stabilization, and legacy full-history compatibility.
+[Sync] 2026-09-02: document final-only assistant pages and owned exact-id process detail.
+[Sync] 2026-09-06: document explicit loopback MCP discovery without weakening other non-global IP or redirect denials.
 -->
 
 **Version:** 2.0.0
@@ -548,8 +550,11 @@ the authoritative source for Settings / Work related-conversation previews.
 
 Read an owned Thread's messages. With no query parameters, the legacy contract
 returns the complete chronological history. Chat and Dream use stable keyset
-pages by sending `limit`; each returned message still contains its complete
-public `parts` and metadata and is never truncated by payload size.
+pages by sending `limit`. A completed assistant row with projection v1 returns
+only its final text part plus `projection_version: 1` and
+`process_available`; user, partial, diagnostic, and unprojected legacy rows
+retain their complete public `parts`. The canonical message is never truncated
+or rewritten.
 
 **Query params:**
 
@@ -561,6 +566,15 @@ Paged responses add `next_cursor`, `has_more`, `latest_message_id`, and
 `unchanged`. An unchanged probe returns no messages and does not read
 `parts`/`metadata`; a changed probe returns a replacement latest page. Invalid,
 expired-version, or cross-Thread cursors return HTTP 400. Ownership remains 404.
+
+### GET `/api/claude-agent/threads/{thread_id}/messages/{message_id}/process`
+
+Read the complete canonical parts for one assistant message whose paged row
+advertised `process_available: true`. The Thread is ownership-checked before the
+exact `(thread_id, message_id)` assistant lookup. Unknown Threads/messages,
+user messages, final-only messages, and unprojected rows all return the same
+HTTP 404 response. This endpoint is intended for explicit process expansion;
+it does not change SSE, turn, resume, cancel, or the legacy full-history API.
 
 **Response:**
 ```json
@@ -986,6 +1000,11 @@ operation 仅表示把 connector-owned 轻量索引 materialize 到当前 thread
 或其他 MCP 管理 CLI。Token、Authorization Header、callback code/state 不会
 出现在公开 DTO、普通配置字段或 access log；OAuth 文档只以 actor/server AAD
 绑定的 AES-GCM envelope 保存。
+
+远程 transport 的 discovery 允许明确写出的 IPv4 loopback 或 IPv6 `::1`
+地址，以连接与 Dream 后端同网络命名空间的本机 MCP Server。其他 non-global
+字面 IP 仍拒绝；URL 不得包含用户信息、query 或 fragment，HTTP redirect 不跟随。
+这一管理面调整不会取消 MCP Apps Node Runtime 自己的 host allowlist。
 
 | Method | Route | Purpose |
 |---|---|---|

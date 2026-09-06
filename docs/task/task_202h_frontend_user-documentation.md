@@ -205,7 +205,7 @@ Story Workspace 使用文档编写
 - **禁止修改** `docs/stage/` 目录下任何文件
 - **禁止修改** `docs/exec/` 目录下任何文件
 - **禁止修改** `docs/task/` 下其他 task 文件
-- **禁止修改** 任何实现代码（`frontend/src/`, `backend/src/` 等）
+- **禁止修改** 任何实现代码（`frontend/app/_dream/`, `backend/src/` 等）
 - **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
 
 ### 明确排除项

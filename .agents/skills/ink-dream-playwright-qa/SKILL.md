@@ -11,6 +11,20 @@ screenshot-only approval.
 
 Read [references/project-workflow.md](references/project-workflow.md) before starting a browser run. Read its SubAgent fixture section only when testing SubAgent projections or timelines.
 
+## Test execution agent
+
+Delegate bounded provider-free, isolated, mocked-browser, source/unit, and
+visual-regression execution to the `luna_test_runner` custom agent. It is
+configured for `gpt-5.6-luna`, high reasoning, and Fast mode. Give it the exact
+spec/command, worktree, expected evidence, owned ports/data, and cleanup scope;
+wait for its command receipts before accepting results.
+
+Keep real-user or real-model business acceptance, production mutation,
+migration/destructive work, approvals, diagnosis, and implementation in the
+primary agent. If the runner cannot access the required browser or runtime,
+report a harness blocker; do not silently replace the requested lane. Apply the
+full routing contract from `$luna-test-stage` when available.
+
 ## Non-negotiable rules
 
 - Run Playwright from `frontend/` with the installed `@playwright/test`; do not depend on a global `playwright-cli` or an MCP wrapper.
@@ -96,10 +110,10 @@ Choose the smallest lane that proves the change:
 
 | Lane | Use for | Command pattern |
 | --- | --- | --- |
-| Source/unit | reducers, normalization, layout contracts | `npx playwright test src/path/test.ts` |
+| Source/unit | reducers, normalization, layout contracts | `npx playwright test app/_dream/path/test.ts` |
 | Mocked browser | UI behavior independent of backend/provider | `page.route()` plus a focused `e2e/*.spec.ts` |
-| Real local E2E | named real account/Run, real model, Admin-visible persistence, complete workspace projection | normal local Dream/Admin/Gateway/PostgreSQL + Vite |
-| Isolated integration | provider-free auth/API persistence and deterministic faults | isolated FastAPI + Vite |
+| Real local E2E | named real account/Run, real model, Admin-visible persistence, complete workspace projection | normal local Dream/Admin/Gateway/PostgreSQL + Next |
+| Isolated integration | provider-free auth/API persistence and deterministic faults | isolated FastAPI + Next |
 | Visual QA | theme, locale, responsive, overflow, long content | real or staged data plus screenshots |
 
 Do not invoke a real model or external provider unless that integration is the feature under test.
@@ -133,10 +147,10 @@ AGENT_CWD="$qa_runtime/workspaces" \
 backend/.venv/bin/python backend/server.py
 ```
 
-From `frontend/`, start:
+From `frontend/`, start the sole Next Web shell:
 
 ```bash
-npm run dev -- --host 127.0.0.1
+corepack pnpm run dev -- --hostname 127.0.0.1 --port 5173
 ```
 
 Wait for `http://127.0.0.1:8765/api/health` and `http://127.0.0.1:5173/` to respond. Recheck that the running backend sees the intended workspace root before staging filesystem fixtures.

@@ -31,7 +31,7 @@
 > 目标服务：`POST /api/claude-agent`
 > 配套接口：`POST /api/claude-agent/tool-confirm`
 > 代码依据：`backend/server.py`、`backend/claude_agent/service.py`、`backend/claude_agent/thread_factory.py`、`backend/claude_agent/context_builder.py`
-> 前端消费：`frontend/src/lib/claude-agent-transport.ts`
+> 前端消费：`frontend/app/_dream/lib/claude-agent-transport.ts`
 > 关联设计稿：
 > - `docs/design/claude-agent/claude-agent-service-design.md`
 > - `docs/design/claude-agent/claude-agent-thread-session-patterns.md`
@@ -485,7 +485,7 @@ data: {"type":"todo-updated","source":"task_v2","todos":[{"id":"1","content":"�
 - `tool-output-available` 的 `isError=true` 表示工具执行出错。
 - `finishReason` 成功时为 `"stop"`，失败时为 `"error"`。
 - `text-end` 与最近一次 `text-start` 对应；`id` 字段保证客户端能关联文本块。
-- 前端 `frontend/src/lib/claude-agent-transport.ts` 消费上述格式，将 SSE 事件转换为 `@ai-sdk/react` 的 `UIMessageChunk`；`tool-approval-request` 会更新对应 tool part 的 `toolMetadata.approvalRequested=true`。
+- 前端 `frontend/app/_dream/lib/claude-agent-transport.ts` 消费上述格式，将 SSE 事件转换为 `@ai-sdk/react` 的 `UIMessageChunk`；`tool-approval-request` 会更新对应 tool part 的 `toolMetadata.approvalRequested=true`。
 
 ## 5. 验收标准
 

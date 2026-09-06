@@ -355,9 +355,9 @@ sequenceDiagram
 
 | 文件 | 职责 |
 |------|------|
-| `frontend/src/components/chat/EditorWriteApprovalUI.tsx` | 4个专用确认 UI 组件 + `isEditorWriteTool()` 工具函数 |
-| `frontend/src/components/chat/ToolMessagePart.tsx` | 检测编辑器写工具，渲染 `EditorWriteApprovalUI` |
-| `frontend/src/components/chat/ChatMessageList.tsx` | 检测编辑器写工具，直接展开渲染（不折叠） |
+| `frontend/app/_dream/components/chat/EditorWriteApprovalUI.tsx` | 4个专用确认 UI 组件 + `isEditorWriteTool()` 工具函数 |
+| `frontend/app/_dream/components/chat/ToolMessagePart.tsx` | 检测编辑器写工具，渲染 `EditorWriteApprovalUI` |
+| `frontend/app/_dream/components/chat/ChatMessageList.tsx` | 检测编辑器写工具，直接展开渲染（不折叠） |
 
 ### 6.3 前端检测条件
 

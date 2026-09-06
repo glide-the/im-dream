@@ -49,3 +49,4 @@ vendor/
 marketplaces/
 .codex-pet-runs
 files/
+frontend/next-env.d.ts

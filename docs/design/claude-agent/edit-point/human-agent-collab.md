@@ -159,7 +159,7 @@ ToolConfirmationStore 有 5 分钟确认超时（现有机制）。超时后：
 
 ### 5.1 组件注册表
 
-以下组件均位于 `frontend/src/components/chat/EditorWriteApprovalUI.tsx`：
+以下组件均位于 `frontend/app/_dream/components/chat/EditorWriteApprovalUI.tsx`：
 
 | 组件名 | 对应工具 | 核心 Props | 职责 |
 |--------|---------|-----------|------|

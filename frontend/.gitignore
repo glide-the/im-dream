@@ -1,3 +1,4 @@
+# Frontend dependency, build, log, and editor artifacts excluded from Git.
 # Logs
 logs
 *.log
@@ -10,6 +11,10 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+
+# Next.js generated build output
+.next/
+next-env.d.ts
 *.local
 
 # Editor directories and files

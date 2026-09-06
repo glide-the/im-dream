@@ -120,7 +120,7 @@ adapter, hook and reducer. Before merge, verify:
 
 ```bash
 rg -n 'DreamStreamAdapter|iter_dream_run_events|/dream-agent/events|useStoryWorkspaceDreamAgent' \
-  backend frontend/src
+  backend frontend/app/_dream
 ```
 
 Expected production result is empty except explicit migration/source-scan tests.

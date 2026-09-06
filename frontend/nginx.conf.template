@@ -1,4 +1,8 @@
-# BACKEND_URL is injected at container startup via envsubst.
+# [Input] Frozen Vite rollback image runtime values; not consumed by the canonical Next image.
+# [Output] Legacy Nginx proxy/static configuration retained only inside an immutable rollback image.
+# [Pos] Historical Vite image input; default builds and local source execution must not reference it.
+# [Sync] 2026-09-05: retire this template from the default Docker path; rollback uses one prebuilt image only.
+# BACKEND_URL is injected at rollback-container startup via envsubst.
 # Local docker-compose: BACKEND_URL=http://ink-backend:8765
 # Cloud Run:            BACKEND_URL=<backend run.app service URL> as proxy fallback.
 # Browser API calls use runtime-config API_BASE_URL=https://ink-backend.suoxya.com.

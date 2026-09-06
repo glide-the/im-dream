@@ -8,8 +8,8 @@ Scope: 设计任务 — 前端视图、状态机、错误回退与认证会话�
 >      `docs/design/notion-session/connector-interaction.md`,
 >      `docs/design/notion-session/overview.md`,
 >      `docs/prd/notion-session/resource-connector.md`,
->      `frontend/src/components/dashboard/ResourceConnectorPage.tsx`,
->      `frontend/src/api/resourceConnectorApi.ts`
+>      `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`,
+>      `frontend/app/_dream/api/resourceConnectorApi.ts`
 > [Output] 输出 IM 资源连接器可执行交互规范（状态机、文案、异常回退、边界条件）
 > [Pos] `task_192_frontend_notion-resource-connector-interaction-design` in `docs/task`
 > [Sync] 2026-07-06: 新增 SUO-192 交互设计补充，专门收敛 poll 消费态、stale/missing 资源态、以及快照状态回写行为，避免实现端反复对齐。

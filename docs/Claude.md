@@ -1,17 +1,26 @@
-# Claude Agent — Business Usage Guide
-
+<!-- [Input] Current frontend/app/_dream interaction surfaces and Python Claude Agent Thread/SSE service. -->
+<!-- [Output] Business usage rules for Claude Agent across Deck, Writing, Chat, and session flows. -->
+<!-- [Pos] Product integration guide; Runtime packaging and repository governance are documented elsewhere. -->
 <!-- [Sync] 2026-08-31: remove the retired stateless voice-chat transport; all Voice interactions reuse Claude Agent Threads. -->
+<!-- [Sync] 2026-09-06: align the guide with the sole Next.js App Router source tree and the self-owned SDK/Runtime contract. -->
+
+# Claude Agent — Business Usage Guide
 
 This document describes how the Claude-agent service is used in **Ink & Memory** and the
 rules that govern its integration.  Read this before modifying any Deck, editor-chat, or
 agent-session code.
+
+The UI implementations named below live only in `frontend/app/_dream/**`. Next.js owns
+the Web shell and same-origin routing; Python remains the identity, Thread, SSE, Workspace,
+and business-data owner.
 
 ---
 
 ## What is the Claude-agent service?
 
 The Claude-agent service (`POST /api/claude-agent`) is a streaming SSE endpoint that runs
-a stateful, multi-turn conversation with Claude (via the Claude Code SDK).  Each
+a stateful, multi-turn conversation through the self-owned `ink-claude-dream-agent-sdk`
+and its manifest-qualified clean-room Runtime. Each
 conversation is tied to a **thread** (`chat_thread` row in the database), identified by a
 `thread_id`.
 

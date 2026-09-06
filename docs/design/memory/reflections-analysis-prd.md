@@ -1,5 +1,5 @@
 > [Input] `backend/reflections_config.py`, `backend/routers/reflections.py`,
->         `frontend/src/api/voiceApi.ts`, `frontend/src/components/AnalysisView.tsx`,
+>         `frontend/app/_dream/api/voiceApi.ts`, `frontend/app/_dream/components/AnalysisView.tsx`,
 >         `docs/design/memory/memory-workspace-design.md`
 > [Output] Reflections 页面分区记忆系统工作空间配置的完整 PRD：分区定义、配置文件内容、初始化流程、Agent 执行协议、输出格式、前端交互设计。
 > [Pos] reflections-analysis-prd node in `docs/design/memory`
@@ -1013,9 +1013,9 @@ REFLECTIONS_SECTION_CONFIGS["new_section"] = {
 | 用户自定义配置 DB 表 + 查询函数 | `backend/database.py` (`reflections_section_configs` 表) |
 | Memory 初始化端点（优先用户配置） | `backend/routers/reflections.py` → `POST /api/reflections/memory-init` |
 | 配置读写端点 | `backend/routers/reflections.py` → `GET/PUT/DELETE /api/reflections/config/{section}` |
-| 分析编排 + system_prompt 构造 + 解析 | `frontend/src/api/voiceApi.ts` → `analyzeReflectionsSection` |
-| 配置读写客户端函数 | `frontend/src/api/voiceApi.ts` → `getReflectionsSectionConfig / saveReflectionsSectionConfig / resetReflectionsSectionConfig` |
-| 结果展示（仪表盘 + PaperStack 报告视图 + 卡片）| `frontend/src/components/AnalysisView.tsx` |
-| 配置编辑 UI（SectionConfigModal，每分区 ⚙ 齿轮按钮） | `frontend/src/components/AnalysisView.tsx` |
+| 分析编排 + system_prompt 构造 + 解析 | `frontend/app/_dream/api/voiceApi.ts` → `analyzeReflectionsSection` |
+| 配置读写客户端函数 | `frontend/app/_dream/api/voiceApi.ts` → `getReflectionsSectionConfig / saveReflectionsSectionConfig / resetReflectionsSectionConfig` |
+| 结果展示（仪表盘 + PaperStack 报告视图 + 卡片）| `frontend/app/_dream/components/AnalysisView.tsx` |
+| 配置编辑 UI（SectionConfigModal，每分区 ⚙ 齿轮按钮） | `frontend/app/_dream/components/AnalysisView.tsx` |
 | memory_context 注入（引擎层，无改动） | `backend/claude_agent/context_builder.py` |
 | 分析报告存储 | `backend/routers/reports.py` + `backend/database.py` |

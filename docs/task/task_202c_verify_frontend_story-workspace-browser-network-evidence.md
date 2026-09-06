@@ -1,3 +1,7 @@
+<!-- [输入] task_202c Browser/Network 验收条件、历史执行回执与当前 Playwright harness。 -->
+<!-- [输出] 已执行但 blocked 的 evidence-only 验证合同及可复用重试边界。 -->
+<!-- [定位] Story Workspace 浏览器证据缺口记录；不以静态或旧 Vite 证据替代真实 Browser/Network 结果。 -->
+<!-- [同步] 2026-09-06：保留 blocked 事实并将重试入口对齐当前 Next.js/pnpm/Playwright 路径。 -->
 # task_202c_verify_frontend_story-workspace-browser-network-evidence.md
 
 > **Task ID**: `task_202c_verify`
@@ -8,11 +12,13 @@
 >
 > **优先级**: `P0`（来源业务 Issue）/ `high`（Task 定义 Issue）
 >
-> **Task 状态**: 合同已定义；Execute 尚未准入
+> **Task 状态**: 已执行但 blocked；六项 Browser/Network AC 尚无通过证据
 >
 > **唯一实现基线**: `task_202c` 既有产物，只读
 >
-> **正式执行报告**: `docs/exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md`（仅由未来 `ExecTaskAgent` 新建）
+> **正式执行报告**: [`docs/exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md`](../exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md)
+
+> **当前适用性**：下文派工、checkout、assignee 和 Execute readiness 表是执行前的历史合同；实际回执因浏览器控制缺失和随后检测到的生产源码漂移而 fail closed。当前仓库已有 `frontend/e2e/**` harness；重试必须复用它和本机 Chrome、重新冻结当前 Next 候选，并保留本次 blocked 事实，不能另建 runner 或把旧静态/Vite 证据当成 Browser/Network 通过。
 
 ---
 
@@ -44,9 +50,9 @@
 2. `docs/task/task_202c_frontend_data-table-components.md`，既有实现合同，只读。
 3. `docs/exec/exec_task_202c_story-workspace-data-table-components.md`，既有实现与静态验证证据，只读。
 4. `docs/issue/ISSUES_story-workspace.md` §3.4 `SUO-299-SH-002`。
-5. `docs/task/TASK-REQUIREMENT-FORMAT.md`，execute prompt 模板，只读；未来 execute Issue 必须单独复制并完整填充，本文档不预填 execute 模板。
+5. `docs/task/TASK-REQUIREMENT-FORMAT.md`，当时使用的 execute prompt 模板，只读；实际执行和阻塞事实以正式回执为准。
 
-如上述输入之间出现新冲突，未来执行者必须先在独立 execute Issue 评论中记录冲突、影响范围和 owner/action，并停止受影响的证据采集；不得自行选择较宽松口径。
+如上述输入之间出现新冲突，后续重试必须记录冲突、影响范围和解锁动作，并停止受影响的证据采集；不得自行选择较宽松口径。
 
 ---
 
@@ -81,9 +87,9 @@
 
 ## 4. 验证执行步骤
 
-### 4.1 前置 Gate
+### 4.1 原执行前置 Gate（历史）
 
-未来 `ExecTaskAgent` 开始前必须逐项确认：
+以下是实际 blocked run 开始前使用的 Gate，不是当前派工条件；安全和证据完整性约束继续有效：
 
 1. 前置顺序严格为 `task_205b → task_203 → task_202c_verify`。
 2. `task_205b` 与 `task_203` 的独立 execute Issue 均已为 `done`，对应执行锁已释放，无 merge / rollback 进行中。
@@ -96,7 +102,7 @@
 ### 4.2 建立只读基线
 
 1. 将 `git status --short` 原始结果保存到 run scratch，明确区分执行前已有 dirty diff 与本次动作。
-2. 对 `backend/` 与 `frontend/src/` 中 Git 已跟踪及未忽略的现有文件生成排序后的路径清单和 SHA-256 manifest，保存到 run scratch。
+2. 对 `backend/` 与 `frontend/app/_dream/` 中 Git 已跟踪及未忽略的现有文件生成排序后的路径清单和 SHA-256 manifest，保存到 run scratch。
 3. 记录运行时启动方式、commit / workspace 标识、viewport 宽高、device pixel ratio、浏览器版本和证据采集时间。
 4. 不得暂存、还原、格式化、清理或覆盖工作树中任何既有修改；尤其不得接触 `backend/database.py` 的既有 diff。
 
@@ -148,7 +154,7 @@
 
 ### 4.7 零生产代码 diff 与报告闭合
 
-1. 重新生成 `backend/` 与 `frontend/src/` 的排序路径清单和 SHA-256 manifest，与 §4.2 基线逐项比较；路径集合与内容 hash 必须完全一致。
+1. 重新生成 `backend/` 与 `frontend/app/_dream/` 的排序路径清单和 SHA-256 manifest，与 §4.2 基线逐项比较；路径集合与内容 hash 必须完全一致。
 2. 再次记录 `git status --short`，与基线对比。除未来执行报告 `docs/exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md` 外，不得出现本次新增或改变的仓库路径。
 3. 把浏览器、交互、Network、hash/diff 和未验证项逐项映射到 `AC-202C-V-01`～`AC-202C-V-06`。
 4. 证据文件作为 execute Issue 附件上传；仓库内不得新增截图、HAR、cache、日志或临时报告。
@@ -220,7 +226,7 @@ task_205b → task_203 → task_202c_verify
 - 任一前序进入 rollback、重新执行或失败：`task_202c_verify` 保持 `blocked`，直至前序重新通过 Gate。
 - 该串行顺序用于避免在合同迁移中或审阅路由变化中的运行时采集失真证据，即使本 Task 本身不写共享路由也不得并行。
 
-### 7.2 Execute Readiness
+### 7.2 原 Execute Readiness 与实际结果
 
 | Gate | 本 Task 文档完成时 | 未来 Execute 放行要求 |
 |---|---|---|
@@ -231,7 +237,7 @@ task_205b → task_203 → task_202c_verify
 | 运行时稳定 | 待 execute 前实时核验 | 三路由和对应 REST 列表端点可访问 |
 | Evidence-only 边界 | `PASS` | execute 全程保持，生产代码零 diff |
 
-**当前 Stage readiness：`BLOCKED / NOT READY FOR EXECUTE`。** 本文档只补齐 Stage §13.6 的“独立 Task 产物”缺口，不代表前序状态、execute Issue、checkout 或运行时 Gate 已满足，也不授权提前 @mention / 指派 `ExecTaskAgent`。
+实际执行已经发生，最终 disposition 为 `blocked`；原因和六项 AC 结果见 [正式回执](../exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md)。因此上表“未来 Execute”栏只保留历史准入意图，不得继续用旧 checkout/assignee 状态解释当前缺口。
 
 ---
 
@@ -319,13 +325,11 @@ task_205b → task_203 → task_202c_verify
 
 - 无生产代码回滚项。
 - 错误、过期或不完整证据只能标记为废弃 / superseded，并重新采集对应截图、交互或 Network 证据。
-- 正式报告中的错误区段只由 `ExecTaskAgent` 在当前 execute Issue 边界内修正；不得改写既有 `task_202c` Task/Exec、前序 Task/Exec 或 Stage 结论。
+- 正式报告中的错误区段不得被覆盖；后续重试只能追加 superseding 证据，不得改写既有 `task_202c` Task/Exec、前序 Task/Exec 或本次 blocked 结论。
 - 不得恢复旧合同路径、回滚 `task_205b` / `task_203` 或恢复 [SUO-277](/SUO/issues/SUO-277)。
 
 ---
 
-## 12. 下游执行提示
+## 12. 后续重试条件
 
-未来 execute Issue 必须先复制并完整填充 `docs/task/TASK-REQUIREMENT-FORMAT.md`，把本文档的依赖、Allowed、Forbidden、六项 AC、浏览器 / Network 验证与回滚闭集原样带入。该 filled prompt 应属于 execute Issue 的 run scratch 或治理产物，不得覆盖模板源文件。
-
-本文档完成只解决“缺少独立 `task_202c_verify` Task 产物”的 Task-stage 缺口；后续由 `CEOOrchestrator` 建立独立 execute Issue 与一等 blocker 串行边，并仅在全部 Gate 满足后唤醒 `ExecTaskAgent`。
+只有在当前 Next 运行时、认证账号、三条 canonical 路由与 REST endpoint 可用，并重新生成生产文件 hash 基线后才可重试。重试复用 `frontend/e2e/**` 和本机 Chrome，覆盖六项 AC；不得安装第二套 harness、修改生产代码或用 synthetic/静态结果替代真实列表 Network 请求。新结果追加到同一 exec 报告并显式 supersede 对应 blocked 项，原失败事实继续保留。

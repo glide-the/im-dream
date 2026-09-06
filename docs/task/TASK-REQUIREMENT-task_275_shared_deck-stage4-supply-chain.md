@@ -110,7 +110,7 @@ Canonical 集仅为本节列出的 `task_275a..275i` 与本填充 prompt。`TASK
 
 - 优先复用当前仓库的 `backend/models/deck_plugin.py`、`backend/services/deck_plugin/`、`backend/database.py`、`backend/tests/` 与 `.github/workflows/ci-backend.yml`；新增模块必须在 task 中逐文件授权。
 - runtime 二次摘要与 load receipt 使用 `backend/models/runtime_plugin.py`、`backend/services/runtime_plugin/`、`backend/tests/test_runtime_plugin_*` 闭集，并与既有 `task_deck_008` 合同做增量对齐。
-- shared legacy UI 只授权 `frontend/src/components/deck-plugin/`、`frontend/src/api/deckPluginApi.ts`、对应测试和后端权威检查路径；若真实代码尚未建立这些路径，Stage 必须先验证 owner/路径，不得扩大到整个 `frontend/` 或 `backend/`。
+- shared legacy UI 只授权 `frontend/app/_dream/components/deck-plugin/`、`frontend/app/_dream/api/deckPluginApi.ts`、对应测试和后端权威检查路径；若真实代码尚未建立这些路径，Stage 必须先验证 owner/路径，不得扩大到整个 `frontend/` 或 `backend/`。
 - 证据产物使用受控的 `artifacts/deck-plugin-stage4/` 或 CI artifact 外部 URL；不得把占位链接写成可点击证据已经存在。
 - 禁止修改 `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/`、无关 task、依赖锁文件、部署配置和实现闭集之外的源码。
 

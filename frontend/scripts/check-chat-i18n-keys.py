@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Verify every t('chat.*') key used in components exists in BOTH en and zh blocks of i18n.ts."""
+"""[Input] app/_dream Chat components, upload hook, and bilingual i18n catalog.
+[Output] Exit-zero parity/usage validation for every chat.* translation key.
+[Pos] Frontend source-contract checker; it reads only the canonical private App Router source tree.
+[Sync] 2026-09-06: follow the Dream source owner from src into app/_dream.
+
+Verify every t('chat.*') key used in components exists in BOTH en and zh blocks of i18n.ts.
+"""
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-I18N = ROOT / 'src' / 'i18n.ts'
+APP_SOURCE = ROOT / 'app' / '_dream'
+I18N = APP_SOURCE / 'i18n.ts'
 
 text = I18N.read_text(encoding='utf-8')
 
@@ -60,7 +67,7 @@ for k in sorted(zh_base - en_base):
 
 # keys used in source
 used = set()
-for path in list((ROOT / 'src' / 'components' / 'chat').glob('*.tsx')) + list((ROOT / 'src' / 'hooks').glob('useFileUpload.ts')):
+for path in list((APP_SOURCE / 'components' / 'chat').glob('*.tsx')) + list((APP_SOURCE / 'hooks').glob('useFileUpload.ts')):
     src = path.read_text(encoding='utf-8')
     for m in re.finditer(r"\bt\(\s*'(chat\.[A-Za-z0-9_.]+)'", src):
         used.add(m.group(1))

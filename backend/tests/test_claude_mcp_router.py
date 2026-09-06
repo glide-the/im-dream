@@ -6,6 +6,7 @@
 [Sync] 2026-08-25: replace CLI-shaped routes with managed database API coverage.
 [Sync] 2026-08-25: prove public CRUD rejects user-selected auth_kind and defaults detection state internally.
 [Sync] 2026-08-27: prove transient capability verification remains a safe disabled DTO and retryable 503.
+[Sync] 2026-09-06: cover strict connection-level MCP App settings GET/PATCH forwarding.
 """
 
 from __future__ import annotations
@@ -22,6 +23,10 @@ from claude_mcp.contracts import (
     ClaudeMcpOperation,
     ClaudeMcpServer,
     ClaudeMcpState,
+    McpAppAvailabilityState,
+    McpAppConnectionSettings,
+    McpAppPreferenceState,
+    McpAppServerAvailability,
     McpAuthKind,
 )
 from claude_mcp.inventory import McpDiscoveryError, McpDiscoveryResult, McpDiscoveryStatus
@@ -63,6 +68,29 @@ class _Service:
         self.calls.append(("create", actor, create)); return self.server
     async def update_server(self, actor, identifier, patch):
         self.calls.append(("update", actor, identifier, patch)); return self.server
+    async def get_mcp_app_connection_settings(self, actor, identifier, workspace_id=None):
+        self.calls.append(("get-app-settings", actor, identifier, workspace_id))
+        return McpAppConnectionSettings(
+            revision=3,
+            desired=McpAppPreferenceState(enabled=True),
+            server=McpAppServerAvailability(
+                McpAppAvailabilityState.READY,
+                None,
+                resource_reads=True,
+            ),
+        )
+    async def update_mcp_app_connection_settings(self, actor, identifier, patch):
+        self.calls.append(("update-app-settings", actor, identifier, patch))
+        return McpAppConnectionSettings(
+            revision=patch.expected_revision + 1,
+            desired=patch.desired,
+            server=McpAppServerAvailability(
+                McpAppAvailabilityState.READY,
+                None,
+                resource_reads=True,
+                low_risk_tool_calls=True,
+            ),
+        )
     async def remove_server(self, actor, identifier, expected_revision=None, workspace_id=None):
         self.calls.append(("delete", actor, identifier, expected_revision));
         return ClaudeMcpServer.managed(id="server-1", name="alpha", display_name="Alpha", transport="streamable_http", config_scope="user", auth_kind="none", enabled=False, revision=1, state=ClaudeMcpState.NOT_CONFIGURED)
@@ -118,6 +146,18 @@ def test_crud_discovery_bulk_and_logout_are_thin_forwarders():
     assert service.calls[-1][2].auth_kind is McpAuthKind.NONE
     patched = client.patch("/api/claude-mcp/servers/server-1", json={"expected_revision": 1, "enabled": False})
     assert patched.status_code == 200
+    app_settings = client.get("/api/claude-mcp/servers/server-1/app-settings")
+    assert app_settings.json()["appSettings"]["desired"]["enabled"] is True
+    updated_app_settings = client.patch(
+        "/api/claude-mcp/servers/server-1/app-settings",
+        json={
+            "expected_revision": 3,
+            "enabled": True,
+            "low_risk_tool_calls": True,
+            "ui_messages": True,
+        },
+    )
+    assert updated_app_settings.json()["appSettings"]["revision"] == 4
     discovered = client.post("/api/claude-mcp/servers/server-1/discoveries", json={"force": True})
     assert discovered.status_code == 200
     assert client.delete("/api/claude-mcp/servers/server-1/discoveries").json()["status"] == "cancelled"
@@ -125,7 +165,7 @@ def test_crud_discovery_bulk_and_logout_are_thin_forwarders():
     assert bulk.json()["status"] == "partial"
     assert client.delete("/api/claude-mcp/servers/server-1/credential").status_code == 200
     assert client.delete("/api/claude-mcp/servers/server-1?expected_revision=1").status_code == 200
-    assert {call[0] for call in service.calls} >= {"create", "update", "discover", "cancel-discovery", "bulk", "logout", "delete"}
+    assert {call[0] for call in service.calls} >= {"create", "update", "get-app-settings", "update-app-settings", "discover", "cancel-discovery", "bulk", "logout", "delete"}
 
 
 def test_transient_capability_verification_is_safe_and_retryable() -> None:

@@ -1,4 +1,10 @@
+<!-- [Input] Dated task_202c implementation, command, failure, and browser-evidence record. -->
+<!-- [Output] Immutable historical execution receipt with unresolved evidence gaps preserved. -->
+<!-- [Pos] Historical Exec evidence; not a current build, deploy, or task-status contract. -->
+<!-- [Sync] 2026-09-06: mark npm/Vite and orchestration details as historical and link the current Next.js/pnpm architecture. -->
 # Exec Report: task_202c - Story Workspace 三类数据表与页面接入
+
+> **历史执行回执（2026-08-01）。** 本文中的 npm/Vite、端口、Paperclip 派工、checkout 与 assignee 只记录当时实际执行事实，不是当前工作状态或实现入口。现行 frontend 为 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`；当前架构见 [Dream frontend Node framework migration assessment](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md)。下文命令、失败和结果按原样保留；浏览器/Network 证据缺口仍须按实际回执解释。
 
 ## 1. 执行上下文
 
@@ -49,32 +55,32 @@
 
 | 文件 | 操作 | 说明 |
 |---|---|---|
-| `frontend/src/components/story-workspace/table/StoryWorkspaceTable.css` | create | 页面、Toolbar、表格、56px 行、pending/rejected/selected/hover、Badge、标签和分页样式 |
-| `frontend/src/components/story-workspace/table/StoryWorkspaceTableRow.tsx` | create | pending-only checkbox、审阅状态类与右侧选中标记合同 |
-| `frontend/src/components/story-workspace/table/StoryWorkspaceReviewStatusBadge.tsx` | create | pending/confirmed/rejected/archived 四态标签 |
-| `frontend/src/components/story-workspace/table/StoryWorkspacePagination.tsx` | create | 20 条分页所需的上一页/下一页与计数展示 |
-| `frontend/src/components/story-workspace/table/StoryWorkspaceSortButton.tsx` | create | 表头升/降序切换 |
-| `frontend/src/components/story-workspace/table/tableHelpers.ts` | create | 日期格式化与 pending 选择集合操作 |
-| `frontend/src/components/story-workspace/table/StoryWorkspaceStoryTable.tsx` | create | 故事标题、状态、类型、角色/场景数、生成时间、操作列 |
-| `frontend/src/components/story-workspace/table/StoryWorkspaceCharacterTable.tsx` | create | 头像占位、名称、身份、性格胶囊、关联故事数、状态、操作列 |
-| `frontend/src/components/story-workspace/table/StoryWorkspaceSceneTable.tsx` | create | 名称、描述、关联故事 ID、关联角色数、状态、操作列 |
-| `frontend/src/components/story-workspace/table/index.ts` | create | table 稳定导出与样式入口 |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceToolbar.tsx` | create | 240px pill 搜索、状态/类型多选、REST 允许字段排序；无新建按钮 |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx` | create | Action Brown 批量栏与确认/驳回/取消回调合同 |
-| `frontend/src/components/story-workspace/layout/index.ts` | update | 最小追加两个 Toolbar 导出 |
-| `frontend/src/components/story-workspace/index.ts` | update | 最小追加 table 导出 |
-| `frontend/src/hooks/story-workspace/types.ts` | create | 当前闭集内 REST 列表/资源本地类型，无通用业务类型模块 |
-| `frontend/src/hooks/story-workspace/useStoryWorkspaceList.ts` | create | 鉴权 fetch、AbortController、`{ data, pagination }`、loading/error/refetch |
-| `frontend/src/hooks/story-workspace/useStories.ts` | create | `/api/story-workspace/stories` 与 `type` 多选参数 |
-| `frontend/src/hooks/story-workspace/useCharacters.ts` | create | `/api/story-workspace/characters` 查询 |
-| `frontend/src/hooks/story-workspace/useScenes.ts` | create | `/api/story-workspace/scenes` 与 `story_id` 参数 |
-| `frontend/src/hooks/story-workspace/index.ts` | create | Hooks 与本地类型导出 |
-| `frontend/src/pages/story-workspace/StoryWorkspaceStoriesPage.tsx` | update | 替换占位内容，接入查询/Toolbar/批量栏/Story Table/Pagination |
-| `frontend/src/pages/story-workspace/StoryWorkspaceCharactersPage.tsx` | update | 替换占位内容，接入查询/Toolbar/批量栏/Character Table/Pagination |
-| `frontend/src/pages/story-workspace/StoryWorkspaceScenesPage.tsx` | update | 替换占位内容，接入查询/Toolbar/批量栏/Scene Table/Pagination |
+| `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceTable.css` | create | 页面、Toolbar、表格、56px 行、pending/rejected/selected/hover、Badge、标签和分页样式 |
+| `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceTableRow.tsx` | create | pending-only checkbox、审阅状态类与右侧选中标记合同 |
+| `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceReviewStatusBadge.tsx` | create | pending/confirmed/rejected/archived 四态标签 |
+| `frontend/app/_dream/components/story-workspace/table/StoryWorkspacePagination.tsx` | create | 20 条分页所需的上一页/下一页与计数展示 |
+| `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceSortButton.tsx` | create | 表头升/降序切换 |
+| `frontend/app/_dream/components/story-workspace/table/tableHelpers.ts` | create | 日期格式化与 pending 选择集合操作 |
+| `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceStoryTable.tsx` | create | 故事标题、状态、类型、角色/场景数、生成时间、操作列 |
+| `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceCharacterTable.tsx` | create | 头像占位、名称、身份、性格胶囊、关联故事数、状态、操作列 |
+| `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceSceneTable.tsx` | create | 名称、描述、关联故事 ID、关联角色数、状态、操作列 |
+| `frontend/app/_dream/components/story-workspace/table/index.ts` | create | table 稳定导出与样式入口 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceToolbar.tsx` | create | 240px pill 搜索、状态/类型多选、REST 允许字段排序；无新建按钮 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx` | create | Action Brown 批量栏与确认/驳回/取消回调合同 |
+| `frontend/app/_dream/components/story-workspace/layout/index.ts` | update | 最小追加两个 Toolbar 导出 |
+| `frontend/app/_dream/components/story-workspace/index.ts` | update | 最小追加 table 导出 |
+| `frontend/app/_dream/hooks/story-workspace/types.ts` | create | 当前闭集内 REST 列表/资源本地类型，无通用业务类型模块 |
+| `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceList.ts` | create | 鉴权 fetch、AbortController、`{ data, pagination }`、loading/error/refetch |
+| `frontend/app/_dream/hooks/story-workspace/useStories.ts` | create | `/api/story-workspace/stories` 与 `type` 多选参数 |
+| `frontend/app/_dream/hooks/story-workspace/useCharacters.ts` | create | `/api/story-workspace/characters` 查询 |
+| `frontend/app/_dream/hooks/story-workspace/useScenes.ts` | create | `/api/story-workspace/scenes` 与 `story_id` 参数 |
+| `frontend/app/_dream/hooks/story-workspace/index.ts` | create | Hooks 与本地类型导出 |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceStoriesPage.tsx` | update | 替换占位内容，接入查询/Toolbar/批量栏/Story Table/Pagination |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceCharactersPage.tsx` | update | 替换占位内容，接入查询/Toolbar/批量栏/Character Table/Pagination |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceScenesPage.tsx` | update | 替换占位内容，接入查询/Toolbar/批量栏/Scene Table/Pagination |
 | `docs/exec/exec_task_202c_story-workspace-data-table-components.md` | create | 本 Issue 唯一正式执行报告 |
 
-未修改的禁止范围确认：本执行未修改 `frontend/src/router/story-workspace.tsx`、`frontend/src/App.tsx`、`frontend/package.json`、lockfile、后端、Review Panel、Dashboard/Dream 页面、设计/Issue/Task/Stage 文档、仓库 mock/快照/测试配置。共享工作树中这些路径的既有 diff 不属于本执行，且均被保留。
+未修改的禁止范围确认：本执行未修改 `frontend/app/_dream/router/story-workspace.tsx`、`frontend/app/_dream/App.tsx`、`frontend/package.json`、lockfile、后端、Review Panel、Dashboard/Dream 页面、设计/Issue/Task/Stage 文档、仓库 mock/快照/测试配置。共享工作树中这些路径的既有 diff 不属于本执行，且均被保留。
 
 ## 5. 测试与验证
 
@@ -86,7 +92,7 @@
 | task scoped ESLint 命令 | PASS | 第二次执行 0 error / 0 warning；首次发现 helper Fast Refresh 规则错误后已在闭集内拆分并修复 |
 | `git diff --check` | PASS | 无 whitespace/error 输出 |
 | `git diff --name-only` + `git ls-files --others --exclude-standard` | PASS（需结合初始基线） | 本 task 新增/修改仅命中 Issue 允许闭集和本报告；输出中的后端、App/router、设计/Stage/Task 等为启动前已存在或并发共享工作树改动，本执行未触碰 |
-| 业务类型扫描 | PASS | 本 task 仅在 `frontend/src/hooks/story-workspace/types.ts` 定义局部 REST 类型；未新增 `backend/types` 或 `frontend/src/types` 通用业务模块 |
+| 业务类型扫描 | PASS | 本 task 仅在 `frontend/app/_dream/hooks/story-workspace/types.ts` 定义局部 REST 类型；未新增 `backend/types` 或 `frontend/app/_dream/types` 通用业务模块 |
 | 单元测试 | N/A | `frontend/package.json` 无 test runner/script，且 task 禁止改依赖或引入 runner |
 
 ### 验收映射

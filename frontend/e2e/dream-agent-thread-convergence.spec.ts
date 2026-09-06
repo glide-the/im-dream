@@ -3,6 +3,7 @@
 //          transport, confirmation, subagent, Stop, failure, reconnect, and reload contracts.
 // [Pos] R10 convergence acceptance lane; uses the production ChatView, ChatPanel, and
 //       StoryWorkspaceDreamThreadChat against a strict in-process fake API (never a model).
+// [Sync] 2026-09-05: resolve the Dream page stylesheet from the non-framework app/_dream/views tree.
 // [Sync] 2026-08-24: serve the shell's read-only Dream Run collection alongside
 //                    canonical Thread fixtures while retaining strict API rejection.
 
@@ -44,11 +45,11 @@ function buildDreamHarnessModule(threadId: string): string {
   return `
     import React, { useState } from 'react';
     import { createRoot } from 'react-dom/client';
-    import '/src/i18n.ts';
-    import '/src/styles/tokens.css';
-    import '/src/styles/markdown.css';
-    import '/src/pages/story-workspace/StoryWorkspaceDreamPage.css';
-    import { StoryWorkspaceDreamThreadChat } from '/src/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
+    import '/app/_dream/i18n.ts';
+    import '/app/_dream/styles/tokens.css';
+    import '/app/_dream/styles/markdown.css';
+    import '/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.css';
+    import { StoryWorkspaceDreamThreadChat } from '/app/_dream/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
 
     function Harness() {
       const [settled, setSettled] = useState(0);
@@ -70,12 +71,12 @@ function buildSurfaceHarnessModule(threadId: string, initialSurface: SurfaceName
   return `
     import React, { useState } from 'react';
     import { createRoot } from 'react-dom/client';
-    import '/src/i18n.ts';
-    import '/src/styles/tokens.css';
-    import '/src/styles/markdown.css';
-    import '/src/pages/story-workspace/StoryWorkspaceDreamPage.css';
-    import ChatView from '/src/components/chat/ChatView.tsx';
-    import { StoryWorkspaceDreamThreadChat } from '/src/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
+    import '/app/_dream/i18n.ts';
+    import '/app/_dream/styles/tokens.css';
+    import '/app/_dream/styles/markdown.css';
+    import '/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.css';
+    import ChatView from '/app/_dream/components/chat/ChatView.tsx';
+    import { StoryWorkspaceDreamThreadChat } from '/app/_dream/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
 
     function Harness() {
       const [surface, setSurface] = useState('${initialSurface}');
@@ -562,12 +563,12 @@ test('S02 Dream -> actual ChatView -> Dream keeps one active thread and never im
   const moduleSource = `
     import React, { useState } from 'react';
     import { createRoot } from 'react-dom/client';
-    import '/src/i18n.ts';
-    import '/src/styles/tokens.css';
-    import '/src/styles/markdown.css';
-    import '/src/pages/story-workspace/StoryWorkspaceDreamPage.css';
-    import ChatView from '/src/components/chat/ChatView.tsx';
-    import { StoryWorkspaceDreamThreadChat } from '/src/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
+    import '/app/_dream/i18n.ts';
+    import '/app/_dream/styles/tokens.css';
+    import '/app/_dream/styles/markdown.css';
+    import '/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.css';
+    import ChatView from '/app/_dream/components/chat/ChatView.tsx';
+    import { StoryWorkspaceDreamThreadChat } from '/app/_dream/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
 
     function Harness() {
       const [surface, setSurface] = useState('dream');
@@ -1432,11 +1433,11 @@ test('S06 uncertain Stop keeps Dream locked, then typed success recovers canonic
   const moduleSource = `
     import React, { useState } from 'react';
     import { createRoot } from 'react-dom/client';
-    import '/src/i18n.ts';
-    import '/src/styles/tokens.css';
-    import '/src/styles/markdown.css';
-    import '/src/pages/story-workspace/StoryWorkspaceDreamPage.css';
-    import { StoryWorkspaceDreamThreadChat } from '/src/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
+    import '/app/_dream/i18n.ts';
+    import '/app/_dream/styles/tokens.css';
+    import '/app/_dream/styles/markdown.css';
+    import '/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.css';
+    import { StoryWorkspaceDreamThreadChat } from '/app/_dream/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
 
     function Harness() {
       const [settled, setSettled] = useState(0);
@@ -1618,11 +1619,11 @@ async function runFailureRecoveryScenario(page: Page, scenario: FailureScenario)
   const moduleSource = `
     import React, { useState } from 'react';
     import { createRoot } from 'react-dom/client';
-    import '/src/i18n.ts';
-    import '/src/styles/tokens.css';
-    import '/src/styles/markdown.css';
-    import '/src/pages/story-workspace/StoryWorkspaceDreamPage.css';
-    import { StoryWorkspaceDreamThreadChat } from '/src/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
+    import '/app/_dream/i18n.ts';
+    import '/app/_dream/styles/tokens.css';
+    import '/app/_dream/styles/markdown.css';
+    import '/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.css';
+    import { StoryWorkspaceDreamThreadChat } from '/app/_dream/components/story-workspace/dream/StoryWorkspaceDreamThreadChat.tsx';
 
     function Harness() {
       const [settled, setSettled] = useState(0);

@@ -1,3 +1,7 @@
+<!-- [输入] Deck Plugin binding requirement, current app/_dream implementation, and dated execution evidence. -->
+<!-- [输出] task_212 implementation, acceptance, remaining Browser/API evidence, and rollback contract. -->
+<!-- [定位] 已执行前端任务记录；不声明真实 API、公开应用或生产验收。 -->
+<!-- [同步] 2026-09-06：以当前源码和回执表达状态，移除旧派工语义。 -->
 # Task: Deck Editor 插件选择与版本绑定 UI
 
 > **Task ID**: `task_212_frontend_deck_editor_plugin_binding`
@@ -8,9 +12,9 @@
 > **优先级**: `P1`
 > **标签**: `frontend`, `deck-editor`, `deck-plugin`, `binding`
 > **生成日期**: 2026-08-01
-> **状态**: `pending_stage_recheck`
-> **唯一执行责任人**: `ExecTaskAgent`
-> **Stage 映射**: Stage 3 / Wave 1（独立 execute Issue、独立 checkout、独立验收）
+> **状态**: 实现与当时静态/合同验证已完成；真实 Browser/API 验收仍需独立证据
+> **实现证据**: [`exec_task_212_frontend_deck_editor_plugin_binding.md`](../exec/exec_task_212_frontend_deck_editor_plugin_binding.md)
+> **当前作用**: 保留实现范围、验收和回滚合同；不作为派工/审批入口
 
 ---
 
@@ -48,7 +52,7 @@ DECK-011: Deck Editor 插件选择与版本绑定 UI
 
 本 task 是 Deck Editor binding UI、hooks 与 API client 的**唯一前端执行单元**。`task_210_shared_deck_plugin_binding` 只保留共享合同索引，不再授权相同组件；后端实现唯一归属 `task_210a_backend_deck_plugin_binding`。
 
-- 未来 execute 必须由 `ExecTaskAgent` 在独立 Issue 上 checkout；不得与后端或其他 task 共用 checkout。
+- 当时 execute 已完成；当前实现、验收和缺口以 exec 回执为准，不再依赖旧 Issue checkout/assignee 状态。
 - 本 task 可以消费后端 fixture/接口，但禁止实现或改写 binding 模型、持久化、selection validation、权限与兼容性判定。
 
 > **命名隔离原则**：本 task 涉及的插件标识必须使用 `deck_plugin_id` + `deck_plugin_version` 前缀，禁止与 `claude_code_plugin_id` 或 Paperclip `pluginKey` 混用。UI 文案必须区分"Deck 工作流插件"和"ClaudeAgent 运行时插件"。
@@ -191,19 +195,19 @@ DECK-011: Deck Editor 插件选择与版本绑定 UI
 
 | 路径 | 动作 | 最小变更 |
 |---|---|---|
-| `frontend/src/components/deck/DeckPluginBindingCard.tsx` | 新建 | 当前 binding、空状态、版本与 capability 摘要 |
-| `frontend/src/components/deck/DeckPluginVersionPicker.tsx` | 新建 | options 列表、版本差异、选择与确认 |
-| `frontend/src/components/deck/DeckPluginVersionCard.tsx` | 新建 | 单版本状态、可选性与安全 reason 展示 |
-| `frontend/src/components/deck/DeckPluginBindingStatus.tsx` | 新建 | `next_run` 提示、加载/保存/冲突状态 |
-| `frontend/src/hooks/useDeckPluginBinding.ts` | 新建 | 当前 binding、保存、revision 冲突刷新与重新确认状态 |
-| `frontend/src/hooks/useDeckPluginOptions.ts` | 新建 | options 查询、缓存与刷新 |
-| `frontend/src/api/deckPluginApi.ts` | 新建 | 只封装 task_210a 冻结的四个 API 合同 |
-| `frontend/src/components/DeckEditorModal.tsx` | 修改 | 只增量集成 Deck 工作流插件区域 |
-| `frontend/src/components/deck/DeckPluginBindingCard.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖当前/空/运行中只读状态 |
-| `frontend/src/components/deck/DeckPluginVersionPicker.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖 options、选择和不可选原因 |
-| `frontend/src/hooks/useDeckPluginBinding.test.ts` | 条件新建 | 已有兼容 runner 时覆盖保存、409 刷新与重新确认 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingCard.tsx` | 新建 | 当前 binding、空状态、版本与 capability 摘要 |
+| `frontend/app/_dream/components/deck/DeckPluginVersionPicker.tsx` | 新建 | options 列表、版本差异、选择与确认 |
+| `frontend/app/_dream/components/deck/DeckPluginVersionCard.tsx` | 新建 | 单版本状态、可选性与安全 reason 展示 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingStatus.tsx` | 新建 | `next_run` 提示、加载/保存/冲突状态 |
+| `frontend/app/_dream/hooks/useDeckPluginBinding.ts` | 新建 | 当前 binding、保存、revision 冲突刷新与重新确认状态 |
+| `frontend/app/_dream/hooks/useDeckPluginOptions.ts` | 新建 | options 查询、缓存与刷新 |
+| `frontend/app/_dream/api/deckPluginApi.ts` | 新建 | 只封装 task_210a 冻结的四个 API 合同 |
+| `frontend/app/_dream/components/DeckEditorModal.tsx` | 修改 | 只增量集成 Deck 工作流插件区域 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingCard.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖当前/空/运行中只读状态 |
+| `frontend/app/_dream/components/deck/DeckPluginVersionPicker.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖 options、选择和不可选原因 |
+| `frontend/app/_dream/hooks/useDeckPluginBinding.test.ts` | 条件新建 | 已有兼容 runner 时覆盖保存、409 刷新与重新确认 |
 
-以上十一个路径是未来 execute 的完整闭集；未列出的路径默认禁止。三个测试路径仅在 §8 runner 发现命令返回非空且现有依赖可直接运行时创建；若仍无 runner，不得生成不可执行测试文件，改以浏览器 E2E/人工证据验收。这不授权修改 `package.json`、依赖锁或测试配置。所有路径 ownership 仅属于本 task，不与 `task_210` 共享。
+以上十一个路径是已执行候选的完整闭集；未列出的路径默认禁止。三个测试路径在当时 runner 发现命令返回非空且现有依赖可直接运行时才允许创建；若无 runner，不得生成不可执行测试文件，改以浏览器 E2E/人工证据验收。这不授权修改 `package.json`、依赖锁或测试配置。所有路径 ownership 仅属于本 task，不与 `task_210` 共享；后续修改须按实际任务重新界定。
 
 ---
 
@@ -281,11 +285,13 @@ DECK-011: Deck Editor 插件选择与版本绑定 UI
    - 两个编辑会话并发保存 → 后提交者收到冲突 → 刷新并重新确认
    - 当前运行来源保持不变；不得通过前端测试伪造或改写历史 run
 
-execute Issue 必须先读取 `frontend/package.json` 的 `scripts` 与现有测试文件命名，逐字回填实际 runner、版本和命令，不得凭空假设 Vitest/Jest。当前仓库已发现 `build`、`lint`，未发现 `test` script；从仓库根执行的最低静态验证为 `npm --prefix frontend run build`、`npm --prefix frontend run lint` 与 `git diff --check`，runner 发现命令固定为 `node -p "require('./frontend/package.json').scripts?.test ?? ''"`。若 execute 时仍无 test runner，必须在 execute Issue/正式报告记录发现输出，并以本节 E2E/人工场景补证；不得为了本 task 新增/更换测试框架、依赖锁或全局配置，也不得伪报单元测试已执行。
+执行前必须读取当前 `frontend/package.json` scripts 和目标测试文件，回填实际 runner、版本和命令。当前最低根门禁为 `corepack pnpm --dir frontend build`、`corepack pnpm --dir frontend lint` 与 `git diff --check`；自动化复用现有 Node focused tests 和 `frontend/e2e/**` Playwright harness。根 package 没有通用 `test` script 不等于没有 runner。不得伪报，也不得新增第二 lock 或重复测试框架。
 
 ---
 
-## 9. 完成标志
+## 9. 原验收清单
+
+> 下列 checkbox 是原实施输入；逐项通过与未运行的真实 Browser 验收见 [exec 回执](../exec/exec_task_212_frontend_deck_editor_plugin_binding.md)。
 
 - [ ] `DeckPluginBindingCard` 组件实现，展示当前绑定信息
 - [ ] `DeckPluginVersionPicker` 组件实现，展示版本列表与选择
@@ -318,22 +324,22 @@ execute Issue 必须先读取 `frontend/package.json` 的 `scripts` 与现有测
 
 ## 11. 允许修改范围与禁止修改范围
 
-### 11.1 未来 execute 允许闭集
+### 11.1 原执行允许闭集（历史）
 
-- `frontend/src/components/deck/DeckPluginBindingCard.tsx`
-- `frontend/src/components/deck/DeckPluginVersionPicker.tsx`
-- `frontend/src/components/deck/DeckPluginVersionCard.tsx`
-- `frontend/src/components/deck/DeckPluginBindingStatus.tsx`
-- `frontend/src/hooks/useDeckPluginBinding.ts`
-- `frontend/src/hooks/useDeckPluginOptions.ts`
-- `frontend/src/api/deckPluginApi.ts`
-- `frontend/src/components/DeckEditorModal.tsx`（仅增量添加插件区）
-- `frontend/src/components/deck/DeckPluginBindingCard.test.tsx`
-- `frontend/src/components/deck/DeckPluginVersionPicker.test.tsx`
-- `frontend/src/hooks/useDeckPluginBinding.test.ts`
-- `docs/exec/exec_task_212_frontend_deck_editor_plugin_binding.md`（仅允许 `ExecTaskAgent` 写入本 task 的唯一正式执行报告）
+- `frontend/app/_dream/components/deck/DeckPluginBindingCard.tsx`
+- `frontend/app/_dream/components/deck/DeckPluginVersionPicker.tsx`
+- `frontend/app/_dream/components/deck/DeckPluginVersionCard.tsx`
+- `frontend/app/_dream/components/deck/DeckPluginBindingStatus.tsx`
+- `frontend/app/_dream/hooks/useDeckPluginBinding.ts`
+- `frontend/app/_dream/hooks/useDeckPluginOptions.ts`
+- `frontend/app/_dream/api/deckPluginApi.ts`
+- `frontend/app/_dream/components/DeckEditorModal.tsx`（仅增量添加插件区）
+- `frontend/app/_dream/components/deck/DeckPluginBindingCard.test.tsx`
+- `frontend/app/_dream/components/deck/DeckPluginVersionPicker.test.tsx`
+- `frontend/app/_dream/hooks/useDeckPluginBinding.test.ts`
+- `docs/exec/exec_task_212_frontend_deck_editor_plugin_binding.md`（对应实际执行回执）
 
-### 11.2 未来 execute 禁止范围
+### 11.2 原执行禁止范围（继续作为安全边界）
 
 - `backend/` 全部路径；后端唯一 ownership 属于 `task_210a`
 - `docs/exec/` 下除 `docs/exec/exec_task_212_frontend_deck_editor_plugin_binding.md` 之外的全部路径
@@ -344,9 +350,9 @@ execute Issue 必须先读取 `frontend/package.json` 的 `scripts` 与现有测
 - 在客户端复制 release、installation、权限、兼容性、digest 或 runtime readiness 的权威裁决
 - 借机重构、全文件格式化、清理无关代码，或覆盖工作树既有改动
 
-### 11.3 当前规划阶段约束
+### 11.3 实际执行结果与当前缺口
 
-本次 [SUO-324](/SUO/issues/SUO-324) 仅增量修订 task 文档，不授权执行 §11.1 实现。未来必须由 `ExecTaskAgent` 在独立 execute Issue checkout 后才可按闭集实施；完成后由 StagePlanner 独立重跑 readiness，不得由本 task 自行宣布进入 execute 或通过 Stage 3 Gate。
+§11.1 已按 [执行回执](../exec/exec_task_212_frontend_deck_editor_plugin_binding.md) 实施，并完成当时的静态/合同验证。旧 `SUO-324`、checkout、assignee 和 StagePlanner 文案仅说明历史治理过程，不再是当前状态。真实 Browser/API 集成、生产证据和安全 Gate 尚未由该回执证明。
 
 ---
 

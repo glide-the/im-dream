@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standard-MCP inventory fixture for explicit stdio/SSE acceptance.
+"""Standard-MCP inventory fixture for explicit stdio/SSE/HTTP acceptance.
 
 [Input] An explicit test-only transport plus loopback host/port and optional bounded pagination mode.
 [Output] Deterministic read-only tools, resources, and prompts through the standard MCP Server API.
@@ -7,6 +7,7 @@
 [Sync] 2026-08-25: add normal-path stdio and legacy SSE inventory/Chat acceptance target.
 [Sync] 2026-08-25: treat an explicit harness interrupt as a clean fixture shutdown receipt.
 [Sync] 2026-08-25: add an opt-in two-page standard-MCP inventory for Dream cursor integration tests.
+[Sync] 2026-09-06: add explicit loopback Streamable HTTP transport for provider-free policy acceptance.
 """
 
 from __future__ import annotations
@@ -149,15 +150,21 @@ def build_server(*, host: str, port: int, paginated: bool = False) -> FastMCP:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--transport", choices=("stdio", "sse"), required=True)
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "sse", "streamable-http"),
+        required=True,
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--paginated", action="store_true")
     args = parser.parse_args()
     if args.host != "127.0.0.1":
         parser.error("fixture host must remain explicit loopback")
-    if args.transport == "sse" and not (0 < args.port < 65536):
-        parser.error("legacy SSE requires an explicit valid port")
+    if args.transport in {"sse", "streamable-http"} and not (
+        0 < args.port < 65536
+    ):
+        parser.error("network transports require an explicit valid port")
 
     try:
         build_server(

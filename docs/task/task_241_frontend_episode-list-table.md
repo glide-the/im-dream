@@ -70,10 +70,10 @@
 ### 允许新增或修改
 
 ```text
-frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeListTable.tsx
-frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeListToolbar.tsx
-frontend/src/components/story-workspace/episode/*EpisodeList*.test.tsx
-frontend/src/hooks/story-workspace/*episode-list*
+frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeListTable.tsx
+frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeListToolbar.tsx
+frontend/app/_dream/components/story-workspace/episode/*EpisodeList*.test.tsx
+frontend/app/_dream/hooks/story-workspace/*episode-list*
 ```
 
 ### 禁止修改

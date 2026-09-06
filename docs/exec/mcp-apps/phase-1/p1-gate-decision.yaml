@@ -1,0 +1,32 @@
+# [Input] Current canonical N1/C1/S1/M1/H1 evidence using the official AppServer.
+# [Output] Current Phase 1 technical-preview decision and production boundary.
+# [Pos] Provider-free integration gate; it does not enable production Apps.
+# [Sync] 2026-09-06: approve the reviewed official-artifact production-module technical evidence.
+schema_version: 1
+task_id: task_302
+scope: current_phase1_provider_free_official_preview
+decision: Go
+applicability: current_pnpm_official_artifact_candidate
+current_candidate_revalidation_required: false
+production_apps_effective: false
+external_provider_used: false
+remote_deployment_performed: false
+checks:
+  N1-01--N1-05: pass
+  C1-01--C1-06: pass
+  S1-01: pass
+  M1-01--M1-08: pass
+  H1-01--H1-08: pass
+evidence:
+  - ../current-candidate-validation.md
+  - n1-build-health-rollback.md
+  - c1-m1-contracts.md
+  - s1-appserver.md
+  - h1-browser.md
+rollback:
+  - keep production_apps_effective false
+  - do not restore the self-built AppServer route
+  - close historical browser sessions and process connectors if still running
+notes:
+  - The decision uses the unmodified official AppServer, canonical pnpm tree, and current Browser evidence.
+  - Phase 2 and Phase 3 technical gates also pass on this candidate; production remains a separate No-Go.

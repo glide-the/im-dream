@@ -1,3 +1,7 @@
+<!-- [输入] Legacy-unverified assumptions, current source ownership, and production evidence boundaries. -->
+<!-- [输出] task_275i scan, alignment, failure, and rollback contract. -->
+<!-- [定位] Shared verification task record; it does not grant production readiness. -->
+<!-- [同步] 2026-09-06：将旧状态字段降级为追溯信息，并以当前源码/证据判断缺口。 -->
 # task_275i_shared_legacy-unverified-alignment
 
 > Task ID: `task_275i`
@@ -71,10 +75,10 @@
 | `backend/routers/deck_plugins.py` | 新建 | 只暴露权威 verification 状态/拒绝 |
 | `backend/server.py` | 修改 | 仅注册 deck plugin router |
 | `backend/tests/test_deck_plugin_legacy_unverified.py` | 新建 | 环境、用途、API 与绕过测试 |
-| `frontend/src/api/deckPluginApi.ts` | 新建 | 结构化 verification 状态/reason API |
-| `frontend/src/components/deck-plugin/ArtifactVerificationBadge.tsx` | 新建 | 精确 verification badge |
-| `frontend/src/components/deck-plugin/LegacyUnverifiedWarning.tsx` | 新建 | 警告、禁用和迁移指引 |
-| `frontend/src/components/deck-plugin/__tests__/legacy-unverified.contract.tsx` | 条件新建 | 仅在已有前端测试 harness 可用时加入 |
+| `frontend/app/_dream/api/deckPluginApi.ts` | 新建 | 结构化 verification 状态/reason API |
+| `frontend/app/_dream/components/deck-plugin/ArtifactVerificationBadge.tsx` | 新建 | 精确 verification badge |
+| `frontend/app/_dream/components/deck-plugin/LegacyUnverifiedWarning.tsx` | 新建 | 警告、禁用和迁移指引 |
+| `frontend/app/_dream/components/deck-plugin/__tests__/legacy-unverified.contract.tsx` | 条件新建 | 仅在已有前端测试 harness 可用时加入 |
 | `${CI_ARTIFACT_DIR}/deck-plugin-stage4/legacy/alignment-inventory.json` | 运行时生成 | 扫描台账与 source hash |
 | 当前执行 Issue 评论/附件 | 新建 | inventory 链接与 IssueDispatcher 外部对齐记录 |
 
@@ -112,7 +116,7 @@
 
 ```text
 rg -n -i '"latest"|sha256.*(placeholder|todo)|legacy_unverified|production_ready|artifact_digest' docs/task docs/stage docs/exec backend frontend
-npm --prefix frontend run lint
+corepack pnpm --dir frontend lint
 ```
 
 | 场景 | 通过标准 |

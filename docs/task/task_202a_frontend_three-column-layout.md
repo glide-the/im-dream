@@ -33,8 +33,8 @@ Story Workspace 三栏布局骨架与全局样式实现
 ## 4. 实现步骤
 
 1. **创建布局目录结构**
-   - 创建 `frontend/src/components/story-workspace/layout/` 目录
-   - 创建 `frontend/src/components/story-workspace/` 根目录
+   - 创建 `frontend/app/_dream/components/story-workspace/layout/` 目录
+   - 创建 `frontend/app/_dream/components/story-workspace/` 根目录
 
 2. **实现 `StoryWorkspaceLayout` 根布局组件**
    - 三栏结构：Sidebar (240px) + Main Content (flex: 1) + Review Panel (360px)
@@ -55,7 +55,7 @@ Story Workspace 三栏布局骨架与全局样式实现
    - 布局在 ≥1280px 下正确渲染
 
 5. **样式 token 复用**
-   - 全部使用 `frontend/src/styles/tokens.css` 中已定义的 CSS Variable
+   - 全部使用 `frontend/app/_dream/styles/tokens.css` 中已定义的 CSS Variable
    - 不新增色彩定义，如需补充需在 tokens.css 中添加
 
 ---
@@ -63,16 +63,16 @@ Story Workspace 三栏布局骨架与全局样式实现
 ## 5. 涉及文件路径
 
 **新增文件**：
-- `frontend/src/components/story-workspace/`（目录）
-- `frontend/src/components/story-workspace/layout/`（目录）
-- `frontend/src/components/story-workspace/layout/StoryWorkspaceLayout.tsx`
-- `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`
-- `frontend/src/components/story-workspace/layout/index.ts`
+- `frontend/app/_dream/components/story-workspace/`（目录）
+- `frontend/app/_dream/components/story-workspace/layout/`（目录）
+- `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceLayout.tsx`
+- `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`
+- `frontend/app/_dream/components/story-workspace/layout/index.ts`
 
 **复用文件**（只读）：
-- `frontend/src/components/AppLayout.tsx` — 参考现有布局模式
-- `frontend/src/components/TopNavBar.tsx` — 全局 AppHeader
-- `frontend/src/styles/tokens.css` — 色彩/字体 token
+- `frontend/app/_dream/components/AppLayout.tsx` — 参考现有布局模式
+- `frontend/app/_dream/components/TopNavBar.tsx` — 全局 AppHeader
+- `frontend/app/_dream/styles/tokens.css` — 色彩/字体 token
 
 ---
 
@@ -94,8 +94,8 @@ Story Workspace 三栏布局骨架与全局样式实现
 
 | 依赖 | 状态 | 说明 |
 |---|---|---|
-| `frontend/src/styles/tokens.css` | ✅ 已存在 | 色彩系统 |
-| `frontend/src/components/TopNavBar.tsx` | ✅ 已存在 | 全局导航栏 |
+| `frontend/app/_dream/styles/tokens.css` | ✅ 已存在 | 色彩系统 |
+| `frontend/app/_dream/components/TopNavBar.tsx` | ✅ 已存在 | 全局导航栏 |
 | `SUO-201-SH-002` (共享类型包) | ⏳ 可选 | 类型定义可后续对齐 |
 
 **本任务被依赖**：
@@ -110,8 +110,8 @@ Story Workspace 三栏布局骨架与全局样式实现
    - 验证背景色、边框色与 tokens.css 一致
 
 2. **约束验证**：
-   - `grep -r "@media" frontend/src/components/story-workspace/layout/` 应无结果
-   - `grep -r "768px\|1279px" frontend/src/components/story-workspace/layout/` 应无结果
+   - `grep -r "@media" frontend/app/_dream/components/story-workspace/layout/` 应无结果
+   - `grep -r "768px\|1279px" frontend/app/_dream/components/story-workspace/layout/` 应无结果
 
 3. **交互验证**：
    - Review Panel 关闭后 Main Content 恢复全宽
@@ -185,10 +185,10 @@ interface StoryWorkspaceReviewPanelProps {
 ## 执行边界（增量修正）
 
 ### 允许修改范围
-- 允许创建 `frontend/src/components/story-workspace/layout/` 目录及子文件
-- 允许创建 `frontend/src/components/story-workspace/` 根目录
-- 允许修改 `frontend/src/styles/tokens.css`（如需补充新 token）
-- 允许修改 `frontend/src/App.tsx`（如需接入 Story Workspace 路由/视图）
+- 允许创建 `frontend/app/_dream/components/story-workspace/layout/` 目录及子文件
+- 允许创建 `frontend/app/_dream/components/story-workspace/` 根目录
+- 允许修改 `frontend/app/_dream/styles/tokens.css`（如需补充新 token）
+- 允许修改 `frontend/app/_dream/App.tsx`（如需接入 Story Workspace 路由/视图）
 
 ### 禁止修改范围
 - **禁止修改** `docs/design/` 目录下任何文件

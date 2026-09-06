@@ -13,6 +13,8 @@
 [Sync] 2026-08-25: distinguish missing OAuth callback configuration from missing credential encryption.
 [Sync] 2026-08-25: treat unprobed remote authentication as unknown until standard-MCP discovery supplies evidence.
 [Sync] 2026-08-27: distinguish transient PostgreSQL capability verification failures from a missing schema contract.
+[Sync] 2026-09-06: add versioned deny-by-default MCP Apps policy and Phase 2/3 Node projections.
+[Sync] 2026-09-06: add revisioned per-connection App preference and availability contracts.
 """
 
 from __future__ import annotations
@@ -21,11 +23,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 import re
+from types import MappingProxyType
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 
 _SERVER_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_MCP_APPS_SERVER_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _STDIO_PROFILE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -116,6 +120,11 @@ class ClaudeMcpErrorCode(str, Enum):
     PROTOCOL_ERROR = "CLAUDE_MCP_PROTOCOL_ERROR"
     STDIO_PROFILE_DENIED = "CLAUDE_MCP_STDIO_PROFILE_DENIED"
     INVENTORY_TOO_LARGE = "CLAUDE_MCP_INVENTORY_TOO_LARGE"
+    APP_RUNTIME_DENIED = "CLAUDE_MCP_APP_RUNTIME_DENIED"
+    APP_RUNTIME_REVISION_CONFLICT = "CLAUDE_MCP_APP_RUNTIME_REVISION_CONFLICT"
+    APP_RUNTIME_POLICY_INVALID = "CLAUDE_MCP_APP_RUNTIME_POLICY_INVALID"
+    APP_SETTINGS_CAPABILITY_MISSING = "CLAUDE_MCP_APP_SETTINGS_CAPABILITY_MISSING"
+    APP_SETTINGS_REVISION_CONFLICT = "CLAUDE_MCP_APP_SETTINGS_REVISION_CONFLICT"
 
 
 class ClaudeMcpError(RuntimeError):
@@ -183,6 +192,307 @@ class ClaudeMcpCapability:
             "schema_capability": self.schema_capability,
             "schema_version": self.schema_version,
             "transports": list(self.transports),
+        }
+
+
+@dataclass(frozen=True)
+class McpAppsPolicyState:
+    """One explicit policy state; defaults are always deny."""
+
+    resource_reads: bool = False
+    low_risk_tool_calls: bool = False
+
+    @classmethod
+    def from_mapping(cls, value: Any, *, field_name: str) -> "McpAppsPolicyState":
+        if not isinstance(value, dict) or set(value) != {
+            "resourceReads",
+            "lowRiskToolCalls",
+        }:
+            raise ValueError(f"invalid {field_name} MCP Apps policy state")
+        if not all(isinstance(item, bool) for item in value.values()):
+            raise ValueError(f"invalid {field_name} MCP Apps policy state")
+        return cls(
+            resource_reads=value["resourceReads"],
+            low_risk_tool_calls=value["lowRiskToolCalls"],
+        )
+
+    def to_dict(self) -> dict[str, bool]:
+        return {
+            "resourceReads": self.resource_reads,
+            "lowRiskToolCalls": self.low_risk_tool_calls,
+        }
+
+
+def _mcp_apps_string_tuple(value: Any, *, field_name: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item and "\x00" not in item for item in value
+    ):
+        raise ValueError(f"invalid {field_name}")
+    if len(value) != len(set(value)):
+        raise ValueError(f"duplicate {field_name}")
+    return tuple(value)
+
+
+@dataclass(frozen=True)
+class McpAppsServerPolicy:
+    """Server-owned positive lists; absence means that Server is unavailable to Apps."""
+
+    allowed_tools: tuple[str, ...] = ()
+    allowed_resources: tuple[str, ...] = ()
+    app_callable_low_risk_tools: tuple[str, ...] = ()
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "McpAppsServerPolicy":
+        if not isinstance(value, dict) or set(value) != {
+            "allowedTools",
+            "allowedResources",
+            "appCallableLowRiskTools",
+        }:
+            raise ValueError("invalid MCP Apps Server policy")
+        allowed_tools = _mcp_apps_string_tuple(
+            value["allowedTools"], field_name="allowedTools"
+        )
+        allowed_resources = _mcp_apps_string_tuple(
+            value["allowedResources"], field_name="allowedResources"
+        )
+        callable_tools = _mcp_apps_string_tuple(
+            value["appCallableLowRiskTools"],
+            field_name="appCallableLowRiskTools",
+        )
+        if not set(callable_tools).issubset(allowed_tools):
+            raise ValueError("appCallableLowRiskTools must be a subset of allowedTools")
+        if any(not item.startswith("ui://") for item in allowed_resources):
+            raise ValueError("allowedResources must contain only ui:// URIs")
+        return cls(allowed_tools, allowed_resources, callable_tools)
+
+
+@dataclass(frozen=True)
+class McpAppsRuntimePolicy:
+    """Versioned server-owned policy loaded from configuration, never Browser input."""
+
+    version: int
+    revision: int
+    default: McpAppsPolicyState
+    desired: McpAppsPolicyState
+    effective: McpAppsPolicyState
+    servers: Mapping[str, McpAppsServerPolicy]
+
+    @classmethod
+    def deny_all(cls) -> "McpAppsRuntimePolicy":
+        state = McpAppsPolicyState()
+        return cls(
+            version=1,
+            revision=1,
+            default=state,
+            desired=state,
+            effective=state,
+            servers=MappingProxyType({}),
+        )
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "McpAppsRuntimePolicy":
+        if not isinstance(value, dict) or set(value) != {
+            "version",
+            "revision",
+            "default",
+            "desired",
+            "effective",
+            "servers",
+        }:
+            raise ValueError("invalid MCP Apps policy")
+        version = value["version"]
+        revision = value["revision"]
+        if not isinstance(version, int) or isinstance(version, bool) or version != 1:
+            raise ValueError("unsupported MCP Apps policy version")
+        if (
+            not isinstance(revision, int)
+            or isinstance(revision, bool)
+            or revision < 1
+            or revision > 9_007_199_254_740_991
+        ):
+            raise ValueError("invalid MCP Apps policy revision")
+        default = McpAppsPolicyState.from_mapping(value["default"], field_name="default")
+        desired = McpAppsPolicyState.from_mapping(value["desired"], field_name="desired")
+        effective = McpAppsPolicyState.from_mapping(
+            value["effective"], field_name="effective"
+        )
+        if default != McpAppsPolicyState():
+            raise ValueError("MCP Apps default policy must deny every capability")
+        if effective.resource_reads and not desired.resource_reads:
+            raise ValueError("effective resourceReads exceeds desired policy")
+        if effective.low_risk_tool_calls and not desired.low_risk_tool_calls:
+            raise ValueError("effective lowRiskToolCalls exceeds desired policy")
+        raw_servers = value["servers"]
+        if not isinstance(raw_servers, dict) or not all(
+            isinstance(key, str) and _MCP_APPS_SERVER_REF.fullmatch(key)
+            for key in raw_servers
+        ):
+            raise ValueError("invalid MCP Apps Server policies")
+        servers = {
+            key: McpAppsServerPolicy.from_mapping(item)
+            for key, item in raw_servers.items()
+        }
+        return cls(
+            version,
+            revision,
+            default,
+            desired,
+            effective,
+            MappingProxyType(servers),
+        )
+
+    def state_dict(self) -> dict[str, object]:
+        return {
+            "version": self.version,
+            "revision": self.revision,
+            "default": self.default.to_dict(),
+            "desired": self.desired.to_dict(),
+            "effective": self.effective.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class McpAppPreferenceState:
+    """One actor-owned desired state; the immutable default denies every choice."""
+
+    enabled: bool = False
+    low_risk_tool_calls: bool = False
+    ui_messages: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "enabled": self.enabled,
+            "interactions": {
+                "lowRiskToolCalls": self.low_risk_tool_calls,
+                "uiMessages": self.ui_messages,
+            },
+        }
+
+
+class McpAppAvailabilityState(str, Enum):
+    READY = "ready"
+    CONNECTION_DISABLED = "connection_disabled"
+    TRANSPORT_UNSUPPORTED = "transport_unsupported"
+    SERVER_POLICY_UNAVAILABLE = "server_policy_unavailable"
+    INVENTORY_UNAVAILABLE = "inventory_unavailable"
+    APP_NOT_ADVERTISED = "app_not_advertised"
+
+
+@dataclass(frozen=True)
+class McpAppServerAvailability:
+    """Safe backend facts used by the Next deployment-policy composition root."""
+
+    state: McpAppAvailabilityState
+    reason_code: str | None
+    resource_reads: bool = False
+    low_risk_tool_calls: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "state": self.state.value,
+            "reasonCode": self.reason_code,
+            "resourceReads": self.resource_reads,
+            "lowRiskToolCalls": self.low_risk_tool_calls,
+        }
+
+
+@dataclass(frozen=True)
+class McpAppConnectionSettings:
+    """Default, actor desired, revision, and safe server-availability projection."""
+
+    revision: int
+    desired: McpAppPreferenceState
+    server: McpAppServerAvailability
+    default: McpAppPreferenceState = field(default_factory=McpAppPreferenceState)
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.version != 1 or self.revision < 1:
+            raise ValueError("invalid MCP App connection settings revision")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "version": self.version,
+            "revision": self.revision,
+            "default": self.default.to_dict(),
+            "desired": self.desired.to_dict(),
+            "server": self.server.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class McpAppSettingsPatch:
+    expected_revision: int
+    desired: McpAppPreferenceState
+    workspace_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.expected_revision < 1:
+            raise ValueError("expected_revision must be positive")
+
+
+@dataclass(frozen=True)
+class McpAppsStaticView:
+    """Non-sensitive Node composition metadata; never authorizes production Apps."""
+
+    protocol_version: str
+    policy: McpAppsRuntimePolicy = field(default_factory=McpAppsRuntimePolicy.deny_all)
+    production_apps_effective: bool = False
+    transports: tuple[str, ...] = (McpTransport.STREAMABLE_HTTP.value,)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "protocolVersion": self.protocol_version,
+            "productionAppsEffective": self.production_apps_effective,
+            "transports": list(self.transports),
+            "policy": self.policy.state_dict(),
+        }
+
+
+@dataclass(frozen=True, repr=False)
+class McpAppsConnectionView:
+    """Short-lived single-Server projection whose connection profile stays Node-only."""
+
+    actor_scope: str
+    workspace_scope: str | None
+    server_id: str
+    server_ref: str
+    config_revision: int
+    credential_revision: int
+    app_settings_revision: int
+    expires_at: str
+    allowed_tools: tuple[str, ...]
+    allowed_resources: tuple[str, ...]
+    app_callable_low_risk_tools: tuple[str, ...]
+    policy: McpAppsRuntimePolicy
+    connection_profile: Mapping[str, Any]
+
+    def __repr__(self) -> str:
+        return (
+            "McpAppsConnectionView("
+            f"server_ref={self.server_ref!r}, config_revision={self.config_revision}, "
+            f"credential_revision={self.credential_revision}, app_settings_revision={self.app_settings_revision}, "
+            f"policy_revision={self.policy.revision}, "
+            "connection_profile=<redacted>)"
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "actorScope": self.actor_scope,
+            "workspaceScope": self.workspace_scope,
+            "serverId": self.server_id,
+            "serverRef": self.server_ref,
+            "transportKind": McpTransport.STREAMABLE_HTTP.value,
+            "enabled": True,
+            "configRevision": self.config_revision,
+            "credentialRevision": self.credential_revision,
+            "appSettingsRevision": self.app_settings_revision,
+            "expiresAt": self.expires_at,
+            "allowedTools": list(self.allowed_tools),
+            "allowedResources": list(self.allowed_resources),
+            "appCallableLowRiskTools": list(self.app_callable_low_risk_tools),
+            "policy": self.policy.state_dict(),
+            "connectionProfile": dict(self.connection_profile),
         }
 
 

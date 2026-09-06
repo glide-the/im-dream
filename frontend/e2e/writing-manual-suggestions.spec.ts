@@ -49,11 +49,11 @@ test('manual Writing suggestions stream, refresh in place, reuse a Thread, and f
   const harnessModule = `
     import React, { useEffect, useMemo, useState } from 'react';
     import { createRoot } from 'react-dom/client';
-    import i18n from '/src/i18n.ts';
-    import { EditorEngine } from '/src/engine/EditorEngine.ts';
-    import { WritingSuggestionController } from '/src/hooks/useWritingSuggestions.ts';
-    import { WritingSuggestionCell, WritingSuggestionTrigger } from '/src/components/Editor/WritingSuggestionCell.tsx';
-    import '/src/styles/tokens.css';
+    import i18n from '/app/_dream/i18n.ts';
+    import { EditorEngine } from '/app/_dream/engine/EditorEngine.ts';
+    import { WritingSuggestionController } from '/app/_dream/hooks/useWritingSuggestions.ts';
+    import { WritingSuggestionCell, WritingSuggestionTrigger } from '/app/_dream/components/Editor/WritingSuggestionCell.tsx';
+    import '/app/_dream/styles/tokens.css';
 
     const engine = new EditorEngine('writing-browser-session');
     const firstText = engine.getState().cells.find((cell) => cell.type === 'text');
@@ -245,8 +245,8 @@ test('manual Writing suggestions stream, refresh in place, reuse a Thread, and f
 
     await page.evaluate(async () => {
       const [{ default: i18n }, theme] = await Promise.all([
-        import('/src/i18n.ts'),
-        import('/src/utils/theme.ts'),
+        import('/app/_dream/i18n.ts'),
+        import('/app/_dream/utils/theme.ts'),
       ]);
       await i18n.changeLanguage('zh');
       theme.setThemeMode('dark');

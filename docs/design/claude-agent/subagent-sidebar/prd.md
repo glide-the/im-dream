@@ -144,7 +144,7 @@ SubagentSidebar
 ### 4.1 入口按钮与元信息（A1–A2）
 
 1. 入口仅在当前 `threadId` 存在且该会话至少有一条真实子智能体任务记录时渲染；快照加载期间不因短暂空值反复出现/消失。
-2. 图标由 `frontend/src/components/chat/Icons.tsx` 提供统一 React SVG 组件，使用 `currentColor`，不得写死只适用于深色主题的描边色。
+2. 图标由 `frontend/app/_dream/components/chat/Icons.tsx` 提供统一 React SVG 组件，使用 `currentColor`，不得写死只适用于深色主题的描边色。
 3. 默认紧凑形态与现有 `PlanButton`、新建、更多按钮同高；桌面宽度允许时可展示头像与汇总文字，窄宽度下只保留图标和运行状态点，完整信息放入 tooltip/`aria-label`。
 4. 最近代理头像按最近活跃时间倒序去重，最多显示 4 个；超过 4 个时显示 `+N`。代理没有头像资源时，根据稳定的 `agentId` 或 `taskName` 生成确定性颜色与首字符/统一 glyph，刷新后不得变色。
 5. 汇总文案规则：
@@ -270,19 +270,19 @@ interface ThreadSubagentSnapshot {
 
 ### 6.1 推荐组件边界
 
-- `frontend/src/components/chat/Icons.tsx`
+- `frontend/app/_dream/components/chat/Icons.tsx`
   - 新增可复用的 `IconSubagents`，SVG 使用 `currentColor`、统一 `viewBox` 与 `SVGProps` 约定。
-- `frontend/src/components/chat/SubagentPanel.tsx`（建议新增）
+- `frontend/app/_dream/components/chat/SubagentPanel.tsx`（建议新增）
   - `SubagentButton`：只处理入口呈现、tooltip、未读点、聚合元信息与触发回调。
   - `SubagentSidebar`：接收 `threadId/open/onClose`，渲染标题、分组、列表、空态及分页。
   - `SubagentTaskRow`、`SubagentAvatarStack`、`formatDuration`：保持纯展示/纯函数，便于单测。
-- `frontend/src/hooks/useThreadSubagents.ts`（建议新增）
+- `frontend/app/_dream/hooks/useThreadSubagents.ts`（建议新增）
   - 负责按线程缓存、REST 水合、SSE 增量归并、版本防回退、错误和分页状态。
-- `frontend/src/lib/claude-agent-transport.ts`
+- `frontend/app/_dream/lib/claude-agent-transport.ts`
   - 声明并接收 `subagent-task-updated`；转发到 store 后返回空 chunk，确保不会产生错误消息气泡。
-- `frontend/src/components/chat/ChatView.tsx`
+- `frontend/app/_dream/components/chat/ChatView.tsx`
   - 持有 `subagentSidebarOpen`；渲染入口和根级右侧面板；协调与 `fileSidebarOpen` 互斥；线程切换时触发水合与复位。
-- `frontend/src/i18n.ts`
+- `frontend/app/_dream/i18n.ts`
   - 增加 `chat.subagents.*` 的中英文文案、数量复数和耗时单位，避免 JSX 内硬编码中文。
 
 ### 6.2 样式与主题

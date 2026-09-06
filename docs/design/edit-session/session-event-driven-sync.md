@@ -3,10 +3,10 @@
 > **版本**: 2026-06-14 v3 — 最小实现稿
 > **问题来源**: `api/sessions`（Edit Session / 写作日记会话）请求量偏高；Agent MCP 写工具确认后前端存在 `2000ms` 硬编码盲等待。
 > **关联代码**:
-> - `frontend/src/App.tsx` — `handleEditorWriteConfirmed` 与 Writing 视图 reload
-> - `frontend/src/hooks/useEditSessionEvents.ts` — `/api/sessions/events` 订阅
-> - `frontend/src/engine/EditorEngine.ts` — `loadState(..., { source: 'remote' })`
-> - `frontend/src/hooks/useSessionLifecycle.ts` — 自动保存跳过远端 reload
+> - `frontend/app/_dream/App.tsx` — `handleEditorWriteConfirmed` 与 Writing 视图 reload
+> - `frontend/app/_dream/hooks/useEditSessionEvents.ts` — `/api/sessions/events` 订阅
+> - `frontend/app/_dream/engine/EditorEngine.ts` — `loadState(..., { source: 'remote' })`
+> - `frontend/app/_dream/hooks/useSessionLifecycle.ts` — 自动保存跳过远端 reload
 > - `backend/session_events.py` — Edit Session 事件总线
 > - `backend/routers/sessions.py` — 普通 session 保存/删除事件与 SSE 端点
 > - `backend/claude_agent/service.py` — Agent MCP 写工具成功后发布 `source=agent` 事件
@@ -83,10 +83,10 @@
 
 ### 3.2 前端订阅
 
-新增 `frontend/src/hooks/useEditSessionEvents.ts`，使用 `fetch` 读取 SSE：
+新增 `frontend/app/_dream/hooks/useEditSessionEvents.ts`，使用 `fetch` 读取 SSE：
 
 - 使用现有 JWT `Authorization` header。
-- 使用 `frontend/src/lib/apiBase.ts` 的 runtime API base。
+- 使用 `frontend/app/_dream/lib/apiBase.ts` 的 runtime API base。
 - 不使用裸 `EventSource`，因为 `EventSource` 无法发送项目当前依赖的 `Authorization` header。
 - 断开后按 `SESSION_EVENT_RECONNECT_DELAY_MS` 重连。
 
@@ -200,7 +200,7 @@ sequenceDiagram
 
 ## 6. 验收标准
 
-1. `frontend/src/App.tsx` 不再出现 MCP 写确认后的 `setTimeout(..., 2000)` 盲等待。
+1. `frontend/app/_dream/App.tsx` 不再出现 MCP 写确认后的 `setTimeout(..., 2000)` 盲等待。
 2. 成功的 `mcp__editor__write_segment/delete_segment/insert_widget/reply_to_comment` 工具结果会发布 `session_updated source=agent`。
 3. 前端收到对应 `toolCallId` 事件后，只 reload 当前 Writing session。
 4. SSE 不可用时，按 `EDITOR_WRITE_EVENT_FALLBACK_TIMEOUT_MS` 降级 reload。

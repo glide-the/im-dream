@@ -1,4 +1,10 @@
+<!-- [Input] Dated task_213 implementation, static checks, and recorded limitations. -->
+<!-- [Output] Immutable historical execution receipt separated from public-application and production status. -->
+<!-- [Pos] Historical Exec evidence; not a current build, deploy, or task-status contract. -->
+<!-- [Sync] 2026-09-06: preserve the original receipt while linking current Next.js/pnpm ownership and evidence boundaries. -->
 # Exec Report: task_213 - Story Workspace Workflow Status UI
+
+> **历史执行回执（2026-08-01）。** 本文中的 npm/Vite、端口、Paperclip 派工、checkout 与 assignee 只记录当时实际执行事实，不是当前工作状态或实现入口。现行 frontend 为 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`；当前架构见 [Dream frontend Node framework migration assessment](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md)。下文命令和结果按原样保留，且静态通过不等同于公开应用或生产启用。
 
 ## 1. 执行上下文
 
@@ -87,20 +93,20 @@
 
 | 文件 | 操作 | 最小变更 |
 |---|---|---|
-| `frontend/src/api/storyWorkspaceApi.ts` | create | workflow preflight/run/event/source 类型与六个 API 操作 |
-| `frontend/src/hooks/useWorkflowPreflight.ts` | create | preflight create/get/poll 状态管理 |
-| `frontend/src/hooks/useWorkflowRun.ts` | create | run create/get/retry/cancel + event snapshot 状态管理 |
-| `frontend/src/hooks/useWorkflowEvents.ts` | create | SSE 去重、aggregate version 顺序保护、GET polling 降级 |
-| `frontend/src/components/story-workspace/workflow/WorkflowContextBar.tsx` | create | Deck Plugin、runtime readiness、run 状态和条件动作上下文条 |
-| `frontend/src/components/story-workspace/workflow/PreflightProgressPanel.tsx` | create | 8 步 preflight 进度、失败 hard-stop、passed 启动入口 |
-| `frontend/src/components/story-workspace/workflow/WorkflowRunStatusPanel.tsx` | create | 空/警告/运行/审阅/失败/取消/完成状态面板 |
-| `frontend/src/components/story-workspace/workflow/WorkflowErrorCard.tsx` | create | 结构化错误码到安全文案/恢复动作映射 |
-| `frontend/src/components/story-workspace/workflow/WorkflowRunTimeline.tsx` | create | transition 历史、结果引用、retry chain |
-| `frontend/src/components/story-workspace/workflow/ProvenanceBadge.tsx` | create | 不可变来源与 Voice 权限降级 |
-| `frontend/src/components/story-workspace/workflow/index.ts` | create | 受控导出 workflow 组件和类型 |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceLayout.tsx` | update | 可选 workflow context 与 review provenance props/slot |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx` | update | 可选来源卡插槽，不改 review children 语义 |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceLayout.css` | update | task_213 workflow/status/source/permission 样式与窄屏 context bar 排布 |
+| `frontend/app/_dream/api/storyWorkspaceApi.ts` | create | workflow preflight/run/event/source 类型与六个 API 操作 |
+| `frontend/app/_dream/hooks/useWorkflowPreflight.ts` | create | preflight create/get/poll 状态管理 |
+| `frontend/app/_dream/hooks/useWorkflowRun.ts` | create | run create/get/retry/cancel + event snapshot 状态管理 |
+| `frontend/app/_dream/hooks/useWorkflowEvents.ts` | create | SSE 去重、aggregate version 顺序保护、GET polling 降级 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowContextBar.tsx` | create | Deck Plugin、runtime readiness、run 状态和条件动作上下文条 |
+| `frontend/app/_dream/components/story-workspace/workflow/PreflightProgressPanel.tsx` | create | 8 步 preflight 进度、失败 hard-stop、passed 启动入口 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowRunStatusPanel.tsx` | create | 空/警告/运行/审阅/失败/取消/完成状态面板 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowErrorCard.tsx` | create | 结构化错误码到安全文案/恢复动作映射 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowRunTimeline.tsx` | create | transition 历史、结果引用、retry chain |
+| `frontend/app/_dream/components/story-workspace/workflow/ProvenanceBadge.tsx` | create | 不可变来源与 Voice 权限降级 |
+| `frontend/app/_dream/components/story-workspace/workflow/index.ts` | create | 受控导出 workflow 组件和类型 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceLayout.tsx` | update | 可选 workflow context 与 review provenance props/slot |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx` | update | 可选来源卡插槽，不改 review children 语义 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceLayout.css` | update | task_213 workflow/status/source/permission 样式与窄屏 context bar 排布 |
 | `docs/exec/exec_task_213_frontend_story_workspace_status.md` | create | 唯一正式执行报告 |
 
 未创建的条件路径：

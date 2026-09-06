@@ -69,14 +69,14 @@
 ### 允许新增或修改
 
 ```text
-frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeReviewPanel.tsx
-frontend/src/components/story-workspace/episode/*EpisodeReview*.test.tsx
-frontend/src/components/story-workspace/review/
-frontend/src/hooks/story-workspace/*episode-review*
-frontend/src/services/story-workspace/*review-gate*
+frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeReviewPanel.tsx
+frontend/app/_dream/components/story-workspace/episode/*EpisodeReview*.test.tsx
+frontend/app/_dream/components/story-workspace/review/
+frontend/app/_dream/hooks/story-workspace/*episode-review*
+frontend/app/_dream/services/story-workspace/*review-gate*
 ```
 
-对 `frontend/src/components/story-workspace/review/` 只做 episodes 增量适配，不全量重写基线 Review Panel。
+对 `frontend/app/_dream/components/story-workspace/review/` 只做 episodes 增量适配，不全量重写基线 Review Panel。
 
 ### 禁止修改
 

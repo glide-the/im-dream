@@ -68,13 +68,13 @@
 ### 允许新增或修改
 
 ```text
-frontend/src/pages/story-workspace/StoryWorkspaceEpisodeWorkspacePage.tsx
-frontend/src/components/story-workspace/episode/StoryWorkspacePromptComposer.tsx
-frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeRunProgress.tsx
-frontend/src/router/story-workspace.tsx
-frontend/src/hooks/story-workspace/*episode*
-frontend/src/services/story-workspace/*episode*
-frontend/src/pages/story-workspace/__tests__/*episode*
+frontend/app/_dream/views/story-workspace/StoryWorkspaceEpisodeWorkspacePage.tsx
+frontend/app/_dream/components/story-workspace/episode/StoryWorkspacePromptComposer.tsx
+frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeRunProgress.tsx
+frontend/app/_dream/router/story-workspace.tsx
+frontend/app/_dream/hooks/story-workspace/*episode*
+frontend/app/_dream/services/story-workspace/*episode*
+frontend/app/_dream/views/story-workspace/__tests__/*episode*
 ```
 
 ### 禁止修改

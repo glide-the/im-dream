@@ -11,12 +11,12 @@ Scope: 前端任务规划 - Notion 资源连接器页面入口、创建 / 认证
 >      `docs/prd/notion-session/resource-connector.md`,
 >      `docs/prd/notion-session/resource-connector-ui-design.md`,
 >      `docs/stage/stage_notion-resource-connector.md`,
->      `frontend/src/App.tsx`,
->      `frontend/src/api/resourceConnectorApi.ts`,
->      `frontend/src/components/dashboard/ResourceConnectorPage.tsx`,
->      `frontend/src/components/dashboard/Sidebar.tsx`,
->      `frontend/src/components/dashboard/VerticalNav.tsx`,
->      `frontend/src/constants/storageKeys.ts`
+>      `frontend/app/_dream/App.tsx`,
+>      `frontend/app/_dream/api/resourceConnectorApi.ts`,
+>      `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`,
+>      `frontend/app/_dream/components/dashboard/Sidebar.tsx`,
+>      `frontend/app/_dream/components/dashboard/VerticalNav.tsx`,
+>      `frontend/app/_dream/constants/storageKeys.ts`
 > [Output] 可执行的前端任务文档，供后续实现阶段直接拆分与排期
 > [Pos] `task_187_frontend_notion-resource-connector-e2e-regression` in `docs/task`
 > [Sync] 2026-07-05: generated from the filled SUO-187 requirement template after confirming the live issue payload and parent linkage.
@@ -55,10 +55,10 @@ Scope: 前端任务规划 - Notion 资源连接器页面入口、创建 / 认证
 
 ### In Scope
 
-- `frontend/src/App.tsx` 中的 `connector` 视图入口、视图切换与固定壳层滚动可达性。
-- `frontend/src/components/dashboard/ResourceConnectorPage.tsx` 中的创建、认证、资源选择、来源列表、来源卡片、空状态与响应式布局。
-- `frontend/src/api/resourceConnectorApi.ts` 中的 create / auth / poll / databases / pages / select / refresh 归一和 backend/local fallback 兼容。
-- `frontend/src/constants/storageKeys.ts` 中 connector 持久化 key 的隔离与清理边界。
+- `frontend/app/_dream/App.tsx` 中的 `connector` 视图入口、视图切换与固定壳层滚动可达性。
+- `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx` 中的创建、认证、资源选择、来源列表、来源卡片、空状态与响应式布局。
+- `frontend/app/_dream/api/resourceConnectorApi.ts` 中的 create / auth / poll / databases / pages / select / refresh 归一和 backend/local fallback 兼容。
+- `frontend/app/_dream/constants/storageKeys.ts` 中 connector 持久化 key 的隔离与清理边界。
 - 若发现入口或壳层需要最小调整以恢复链路可达性，只做与 E2E 回归直接相关的局部修复。
 - 若仓库后续引入最小 browser-e2e 或 smoke harness，则只编码这条 connector 链路，不扩张为完整前端测试平台。
 
@@ -82,12 +82,12 @@ Scope: 前端任务规划 - Notion 资源连接器页面入口、创建 / 认证
 
 | Path | Role |
 |---|---|
-| `frontend/src/App.tsx` | 资源连接器入口、视图切换和壳层可达性检查面。 |
-| `frontend/src/components/dashboard/ResourceConnectorPage.tsx` | 连接器主工作台，承载创建、认证、资源选择和来源状态。 |
-| `frontend/src/components/dashboard/Sidebar.tsx` | 与 connector reachability 相关的 dashboard chrome 检查面。 |
-| `frontend/src/components/dashboard/VerticalNav.tsx` | 与 connector reachability 相关的移动 / 折叠导航检查面。 |
-| `frontend/src/api/resourceConnectorApi.ts` | connector API client、认证轮询、资源发现、选择与刷新归一。 |
-| `frontend/src/constants/storageKeys.ts` | connector 本地 fallback 的 storage key 隔离。 |
+| `frontend/app/_dream/App.tsx` | 资源连接器入口、视图切换和壳层可达性检查面。 |
+| `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx` | 连接器主工作台，承载创建、认证、资源选择和来源状态。 |
+| `frontend/app/_dream/components/dashboard/Sidebar.tsx` | 与 connector reachability 相关的 dashboard chrome 检查面。 |
+| `frontend/app/_dream/components/dashboard/VerticalNav.tsx` | 与 connector reachability 相关的移动 / 折叠导航检查面。 |
+| `frontend/app/_dream/api/resourceConnectorApi.ts` | connector API client、认证轮询、资源发现、选择与刷新归一。 |
+| `frontend/app/_dream/constants/storageKeys.ts` | connector 本地 fallback 的 storage key 隔离。 |
 | `frontend/tests/**` | 可选的最小 browser-e2e / smoke harness；当前仓库没有现成树，仅在引入时使用。 |
 
 ## 7. 输入 / 输出说明
@@ -110,14 +110,14 @@ Scope: 前端任务规划 - Notion 资源连接器页面入口、创建 / 认证
 - `docs/prd/notion-session/resource-connector-ui-design.md`
 - `docs/stage/stage_notion-resource-connector.md`
 - `SUO-185` as the immediate parent evidence gate
-- `frontend/src/App.tsx`
-- `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-- `frontend/src/api/resourceConnectorApi.ts`
-- `frontend/src/constants/storageKeys.ts`
+- `frontend/app/_dream/App.tsx`
+- `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+- `frontend/app/_dream/api/resourceConnectorApi.ts`
+- `frontend/app/_dream/constants/storageKeys.ts`
 
 ## 9. 测试策略
 
-- 构建检查: `npm run build` 通过，确保 connector 工作台和入口在当前前端编译图里仍然可用。
+- 构建检查: `corepack pnpm --dir frontend build` 通过，确保 connector 工作台和入口位于根 Next.js 16 / `frontend/app/_dream/**` 编译图中。
 - 桌面 smoke: 从 `App.tsx` 入口进入 connector 工作台，完成 create -> auth -> poll -> select -> refresh 的完整浏览器路径。
 - 移动端 smoke: 在窄宽度和较短高度下复查同一条路径，确保资源选择区和来源卡片可以滚动到达。
 - contract smoke: 确认 `resourceConnectorApi.ts` 对 backend response 的归一仍保留真实 connector UUID 和资源选择状态，不被 local fallback 覆盖掉。

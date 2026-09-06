@@ -712,9 +712,9 @@ sequenceDiagram
 
 | 位置 | 设计职责 |
 |---|---|
-| `frontend/src/api/gatewayModelsApi.ts` | strict Zod、query、safe error |
-| `frontend/src/components/dashboard/ModelConfigSection.tsx` | visible/locked/stale 状态机 |
-| `frontend/src/api/productApi.ts` | subscription context/required plan 类型 |
+| `frontend/app/_dream/api/gatewayModelsApi.ts` | strict Zod、query、safe error |
+| `frontend/app/_dream/components/dashboard/ModelConfigSection.tsx` | visible/locked/stale 状态机 |
+| `frontend/app/_dream/api/productApi.ts` | subscription context/required plan 类型 |
 | Story Workspace Agent client | 402/403/409/429/502/503 与 SSE error |
 
 禁止生产 fallback：静态 model array、`models.json`、Provider 型号 env、从 alias 猜 Provider、mock entitlement/allowance。

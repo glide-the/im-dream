@@ -50,6 +50,8 @@
 #                    keep the legacy full-history reader for explicit compatibility consumers.
 # [Sync] 2026-09-02: make message-id NULL ordering explicit and split the nullable legacy
 #                    tail so Admin Drizzle 0042 serves each keyset page without rescanning newer rows.
+# [Sync] 2026-09-02: persist a strict assistant final projection, omit canonical
+#                    process parts from paged reads, and expose an exact-id detail read.
 """
 PostgreSQL runtime persistence helpers for Ink & Memory.
 
@@ -3339,12 +3341,76 @@ def _canonical_chat_message_json(value: object) -> str:
     )
 
 
+def _validate_chat_history_final_projection(
+    *,
+    role: str,
+    parts: object,
+    metadata: object,
+    history_final_text: Optional[str],
+    history_process_available: bool,
+    history_projection_version: Optional[int],
+) -> None:
+    """Fail closed unless the supplied v1 projection matches canonical parts."""
+
+    if history_projection_version is None:
+        if history_final_text is not None or history_process_available is not False:
+            raise ValueError("chat history projection fields are incomplete")
+        return
+    if (
+        not isinstance(history_projection_version, int)
+        or isinstance(history_projection_version, bool)
+        or history_projection_version != 1
+    ):
+        raise ValueError("chat history projection version is unsupported")
+    if role != "assistant":
+        raise ValueError("chat history projection requires an assistant message")
+    if not isinstance(history_final_text, str) or not history_final_text.strip():
+        raise ValueError("chat history final text must be non-empty")
+    if not isinstance(history_process_available, bool):
+        raise ValueError("chat history process availability must be boolean")
+    if not isinstance(parts, list) or not isinstance(metadata, dict):
+        raise ValueError("chat history projection requires canonical message data")
+    final_part_index = metadata.get("finalPartIndex")
+    if (
+        metadata.get("turnStatus") != "completed"
+        or not isinstance(metadata.get("turnId"), str)
+        or not metadata.get("turnId")
+        or not isinstance(final_part_index, int)
+        or isinstance(final_part_index, bool)
+    ):
+        raise ValueError("chat history projection requires completed turn metadata")
+    last_process_index = -1
+    for index, part in enumerate(parts):
+        if not isinstance(part, dict) or part.get("type") not in {
+            "text",
+            "reasoning",
+            "tool-invocation",
+        }:
+            raise ValueError("chat history projection parts are unsupported")
+        if part.get("type") in {"reasoning", "tool-invocation"}:
+            last_process_index = index
+    strict_final_index = last_process_index + 1
+    if len(parts) - strict_final_index != 1:
+        raise ValueError("chat history final part is ambiguous")
+    final_part = parts[strict_final_index]
+    if (
+        final_part_index != strict_final_index
+        or final_part.get("type") != "text"
+        or final_part.get("text") != history_final_text
+        or history_process_available != (strict_final_index > 0)
+    ):
+        raise ValueError("chat history projection does not match canonical parts")
+
+
 def save_chat_message(
     thread_id: str,
     role: str,
     parts: list,
     message_id: Optional[str] = None,
     metadata: Optional[dict] = None,
+    history_final_text: Optional[str] = None,
+    history_process_available: bool = False,
+    history_projection_version: Optional[int] = None,
     # Deprecated aliases kept for one-release backward compatibility.
     parts_json: Optional[str] = None,
     metadata_json: Optional[str] = None,
@@ -3404,17 +3470,38 @@ def save_chat_message(
         if metadata_value is not None
         else None
     )
+    _validate_chat_history_final_projection(
+        role=role,
+        parts=parts_value,
+        metadata=metadata_value,
+        history_final_text=history_final_text,
+        history_process_available=history_process_available,
+        history_projection_version=history_projection_version,
+    )
 
     db = get_db()
     try:
         inserted = db.execute(
             """
-            INSERT INTO chat_message (id, thread_id, role, parts, metadata)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO chat_message (
+                id, thread_id, role, parts, metadata,
+                history_final_text, history_process_available,
+                history_projection_version
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO NOTHING
             RETURNING id
             """,
-            (message_id, thread_id, role, parts_str, metadata_str),
+            (
+                message_id,
+                thread_id,
+                role,
+                parts_str,
+                metadata_str,
+                history_final_text,
+                history_process_available,
+                history_projection_version,
+            ),
         ).fetchone()
         if inserted is not None:
             _touch_chat_thread(db, thread_id)
@@ -3465,7 +3552,7 @@ def save_chat_message(
 
 
 def _decode_chat_message_rows(rows: list[Mapping[str, object]]) -> list[dict]:
-    """Decode Chat JSON columns without weakening corrupt-metadata fail-closed."""
+    """Decode Chat JSON or the row-level final projection, fail closed."""
 
     results: list[dict] = []
     for row in rows:
@@ -3475,10 +3562,27 @@ def _decode_chat_message_rows(rows: list[Mapping[str, object]]) -> list[dict]:
         # this internal flag to withhold message parts fail-closed; the
         # flag itself is never part of the client response allowlist.
         message["metadata_decode_error"] = False
-        try:
-            message["parts"] = json.loads(message["parts"]) if message["parts"] else []
-        except Exception:
-            message["parts"] = []
+        projected_final = message.get("history_final_text")
+        projection_version = message.get("history_projection_version")
+        process_available = message.get("history_process_available")
+        valid_projection = (
+            message.get("role") == "assistant"
+            and isinstance(projection_version, int)
+            and not isinstance(projection_version, bool)
+            and projection_version == 1
+            and isinstance(projected_final, str)
+            and bool(projected_final.strip())
+            and isinstance(process_available, bool)
+        )
+        if valid_projection:
+            message["parts"] = [{"type": "text", "text": projected_final}]
+        else:
+            try:
+                message["parts"] = (
+                    json.loads(message["parts"]) if message["parts"] else []
+                )
+            except Exception:
+                message["parts"] = []
         if message.get("metadata"):
             try:
                 message["metadata"] = json.loads(message["metadata"])
@@ -3543,7 +3647,14 @@ def list_chat_message_page(
     db = get_db()
     try:
         select_page = (
-            "SELECT id, role, parts, metadata, created_at "
+            "SELECT id, role, "
+            "CASE WHEN role = 'assistant' "
+            "AND history_projection_version = 1 "
+            "AND history_final_text IS NOT NULL "
+            "AND btrim(history_final_text) <> '' "
+            "THEN NULL ELSE parts END AS parts, "
+            "metadata, created_at, history_final_text, "
+            "history_process_available, history_projection_version "
             "FROM chat_message WHERE "
         )
         order_page = (
@@ -3595,6 +3706,30 @@ def list_chat_message_page(
             "has_more": has_more,
             "latest_message_id": latest_message_id,
         }
+    finally:
+        db.close()
+
+
+def get_chat_message_process_detail(
+    thread_id: str,
+    message_id: str,
+) -> Optional[dict]:
+    """Return one projected assistant's canonical process message by exact id."""
+
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT id, role, parts, metadata, created_at "
+            "FROM chat_message "
+            "WHERE thread_id = %s AND id = %s AND role = 'assistant' "
+            "AND history_projection_version = 1 "
+            "AND history_process_available = true",
+            (thread_id, message_id),
+        ).fetchone()
+        if row is None:
+            return None
+        messages = _decode_chat_message_rows([row])
+        return messages[0] if messages else None
     finally:
         db.close()
 

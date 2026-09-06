@@ -1,3 +1,7 @@
+<!-- [输入] Story Workspace canonical contract migration scope and its dated execution receipt. -->
+<!-- [输出] task_205b implementation, acceptance, failure, and rollback contract. -->
+<!-- [定位] 已执行迁移任务记录；完成状态只覆盖文内列明的技术验收。 -->
+<!-- [同步] 2026-09-06：用真实执行证据替代旧派工语义，并保留当前验证缺口。 -->
 # task_205b_backend_story-workspace-contract-migration.md
 
 > **Task ID**: `task_205b`
@@ -8,7 +12,8 @@
 > **上游裁决**: `DEC-026`（[SUO-299](/SUO/issues/SUO-299) 已完成）
 > **生成日期**: 2026-08-01
 > **生成 Agent**: `CEOOrchestrator`（direct-repair 代拟授权）
-> **状态**: canonical Task 已定义；等待独立 Stage 规划与 execute readiness check
+> **状态**: 已执行完成；当前用途为迁移范围、验收、失败和回滚记录
+> **执行证据**: [`exec_task_205b_story-workspace-contract-migration.md`](../exec/exec_task_205b_story-workspace-contract-migration.md)
 
 ---
 
@@ -22,7 +27,7 @@ Story Workspace 前后端合同 canonical 迁移与 Python 启动恢复
 
 1. 删除会从 `backend/` 启动时遮蔽 Python 标准库 `types` 的顶层 `backend/types/` 业务包。
 2. 将 Story Workspace 后端合同迁入唯一 canonical 文件 `backend/story_workspace/contracts.py`，并让现有 story-workspace 请求合同及其消费者直接引用 canonical 模块。
-3. 将前端本域合同由 `frontend/src/hooks/story-workspace/types.ts` 迁至同目录 `contracts.ts`，同步更新全部直接 import 与 barrel export。
+3. 将前端本域合同由 `frontend/app/_dream/hooks/story-workspace/types.ts` 迁至同目录 `contracts.ts`，同步更新全部直接 import 与 barrel export。
 4. 保持 REST payload、字段名、枚举值、校验规则、状态机、数据库结构、数据表语义和 UI 行为不变。
 5. 通过后端启动/import smoke、focused unittest、前端 build/scoped lint、禁止路径扫描和差异检查证明迁移闭合。
 
@@ -51,7 +56,7 @@ Story Workspace 前后端合同 canonical 迁移与 Python 启动恢复
 ### 3.3 Canonical owner 规则
 
 - 后端 Story Workspace 请求、响应、事件、投影、审阅值对象和 Agent 输入合同唯一归属 `backend/story_workspace/contracts.py`。
-- 前端局部 REST 合同唯一归属 `frontend/src/hooks/story-workspace/contracts.ts`。
+- 前端局部 REST 合同唯一归属 `frontend/app/_dream/hooks/story-workspace/contracts.ts`。
 - 后端公开 Python 业务类型使用 `StoryWorkspace*` 前缀；合同版本常量使用 `STORY_WORKSPACE_*` 前缀。
 - 不在旧路径或其他通用 `types` 路径保留 re-export、alias、shim、复制件或兼容包。
 - `backend/story_workspace/__init__.py` 只作为最小包标记，不 re-export 业务合同；消费者直接 import `story_workspace.contracts`。
@@ -72,19 +77,19 @@ Story Workspace 前后端合同 canonical 迁移与 Python 启动恢复
   - `backend/routers/story_workspace.py`
   - `backend/claude_agent/service.py`
   - `backend/tests/test_story_workspace_agent_integration.py`
-- 前端旧合同 `frontend/src/hooks/story-workspace/types.ts` 的直接 import 仅存在于：
-  - `frontend/src/hooks/story-workspace/index.ts`
-  - `frontend/src/hooks/story-workspace/useStoryWorkspaceList.ts`
-  - `frontend/src/hooks/story-workspace/useStories.ts`
-  - `frontend/src/hooks/story-workspace/useCharacters.ts`
-  - `frontend/src/hooks/story-workspace/useScenes.ts`
-- 表格、Toolbar 与页面通过 `frontend/src/hooks/story-workspace/index.ts` 消费合同；迁移不要求改写这些间接消费者。
+- 前端旧合同 `frontend/app/_dream/hooks/story-workspace/types.ts` 的直接 import 仅存在于：
+  - `frontend/app/_dream/hooks/story-workspace/index.ts`
+  - `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceList.ts`
+  - `frontend/app/_dream/hooks/story-workspace/useStories.ts`
+  - `frontend/app/_dream/hooks/story-workspace/useCharacters.ts`
+  - `frontend/app/_dream/hooks/story-workspace/useScenes.ts`
+- 表格、Toolbar 与页面通过 `frontend/app/_dream/hooks/story-workspace/index.ts` 消费合同；迁移不要求改写这些间接消费者。
 
 ### 4.2 增量原则
 
 - 只迁移合同归属、公共符号名称与 import；不得趁机重构路由、持久化、Hooks、表格或页面。
 - 旧路径扫描已经为零的消费者不做“预防性”修改。
-- 若 execute checkout 后出现新的旧路径直接消费者，只能先在执行 Issue 评论记录文件、owner 与冲突，再由 CEOOrchestrator 重新裁决边界；ExecTaskAgent 不自行扩大闭集。
+- 当时执行若发现新的旧路径直接消费者，只能先记录文件、owner 与冲突，不得自行扩大闭集；这一条保留为安全边界，不构成当前派工流程。
 
 ## 5. 实现步骤
 
@@ -150,10 +155,10 @@ Story Workspace 前后端合同 canonical 迁移与 Python 启动恢复
 
 ### Step 5：迁移前端本域合同
 
-1. 将 `frontend/src/hooks/story-workspace/types.ts` 原子迁移为 `frontend/src/hooks/story-workspace/contracts.ts`。
+1. 将 `frontend/app/_dream/hooks/story-workspace/types.ts` 原子迁移为 `frontend/app/_dream/hooks/story-workspace/contracts.ts`。
 2. 保持所有 type/interface 名称、字段、可选性、联合类型、默认语义和 REST payload 形状不变。
 3. 把第 4.1 节列出的五个直接消费者从 `./types` 更新为 `./contracts`。
-4. `frontend/src/hooks/story-workspace/index.ts` 继续作为本域稳定 barrel，但不得 re-export `./types`，不得创建兼容文件。
+4. `frontend/app/_dream/hooks/story-workspace/index.ts` 继续作为本域稳定 barrel，但不得 re-export `./types`，不得创建兼容文件。
 5. 表格、Toolbar、页面和路由只读；build 若暴露真实 import 缺口，先证明缺口是本迁移直接导致，再按 Issue 协议申请边界变更，不得顺手修改 UI。
 
 ### Step 6：完成验证与报告
@@ -178,7 +183,7 @@ Story Workspace 前后端合同 canonical 迁移与 Python 启动恢复
 - `backend/story_workspace/contracts.py`：唯一后端业务合同 owner
 - `backend/story_workspace/__init__.py`：无业务 re-export 的最小包标记
 - 删除 `backend/types/**` 并更新全部受影响的后端直接消费者
-- `frontend/src/hooks/story-workspace/contracts.ts`：唯一前端局部 REST 合同 owner
+- `frontend/app/_dream/hooks/story-workspace/contracts.ts`：唯一前端局部 REST 合同 owner
 - 删除旧 `types.ts` 并更新五个直接消费者
 - `backend/tests/test_story_workspace_contracts.py`：canonical 路径、前缀、默认值与禁止旧路径的定向回归
 - 正式 execute 报告：`docs/exec/exec_task_205b_story-workspace-contract-migration.md`
@@ -199,14 +204,14 @@ Story Workspace 前后端合同 canonical 迁移与 Python 启动恢复
 | `backend/claude_agent/service.py` | 修改 | 仅更新 Story Workspace payload import 与类型注解 |
 | `backend/tests/test_story_workspace_agent_integration.py` | 修改 | 仅更新 canonical import、类型名及迁移直接相关断言 |
 | `backend/tests/test_story_workspace_contracts.py` | 新建 | 覆盖 canonical import、公开名称、值/默认值、旧路径消失与 stdlib import safety |
-| `frontend/src/hooks/story-workspace/contracts.ts` | 新建 | 从旧 `types.ts` 迁入，合同语义不变 |
-| `frontend/src/hooks/story-workspace/types.ts` | 删除 | 删除旧 owner，不保留 shim |
-| `frontend/src/hooks/story-workspace/index.ts` | 修改 | `./types` 改为 `./contracts` |
-| `frontend/src/hooks/story-workspace/useStoryWorkspaceList.ts` | 修改 | `./types` 改为 `./contracts` |
-| `frontend/src/hooks/story-workspace/useStories.ts` | 修改 | `./types` 改为 `./contracts` |
-| `frontend/src/hooks/story-workspace/useCharacters.ts` | 修改 | `./types` 改为 `./contracts` |
-| `frontend/src/hooks/story-workspace/useScenes.ts` | 修改 | `./types` 改为 `./contracts` |
-| `docs/exec/exec_task_205b_story-workspace-contract-migration.md` | 新建 / 更新 | 仅由 ExecTaskAgent 写正式执行报告 |
+| `frontend/app/_dream/hooks/story-workspace/contracts.ts` | 新建 | 从旧 `types.ts` 迁入，合同语义不变 |
+| `frontend/app/_dream/hooks/story-workspace/types.ts` | 删除 | 删除旧 owner，不保留 shim |
+| `frontend/app/_dream/hooks/story-workspace/index.ts` | 修改 | `./types` 改为 `./contracts` |
+| `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceList.ts` | 修改 | `./types` 改为 `./contracts` |
+| `frontend/app/_dream/hooks/story-workspace/useStories.ts` | 修改 | `./types` 改为 `./contracts` |
+| `frontend/app/_dream/hooks/story-workspace/useCharacters.ts` | 修改 | `./types` 改为 `./contracts` |
+| `frontend/app/_dream/hooks/story-workspace/useScenes.ts` | 修改 | `./types` 改为 `./contracts` |
+| `docs/exec/exec_task_205b_story-workspace-contract-migration.md` | 已有回执 | 保留实际命令、失败、验收与回滚证据 |
 
 除上述路径外，所有仓库路径默认禁止修改。目录名不构成扩大父目录写权限的授权。
 
@@ -217,7 +222,7 @@ Story Workspace 前后端合同 canonical 迁移与 Python 启动恢复
 - `backend/server.py`、依赖、环境配置、Docker、部署文件与生成物。
 - 除 `backend/claude_agent/service.py` 点名 import/注解外的 Claude Agent 逻辑。
 - Story Workspace 之外的其他业务域与通用类型整理。
-- `frontend/src/components/**`、`frontend/src/pages/**`、`frontend/src/router/**`、`frontend/src/App.tsx`。
+- `frontend/app/_dream/components/**`、`frontend/app/_dream/views/**`、`frontend/app/_dream/router/**`、`frontend/app/_dream/App.tsx`。
 - `frontend/package.json`、任何 lockfile、构建配置、lint 配置、测试 runner 与仓库内 mock。
 - `docs/design/**`、`docs/issue/**`、`docs/stage/**`、其他 `docs/task/**`、既有 `docs/exec/**`。
 - `docs/task/TASK-REQUIREMENT-FORMAT.md`：execute 时只读，禁止预填或改写模板源文件。
@@ -272,24 +277,24 @@ python3 -m unittest \
 
 通过标准：全部测试通过；覆盖 canonical import、公共符号、字段/默认值、payload 校验、API 列表/详情/patch、Agent 解析与持久化，不以旧名 re-export 通过。
 
-### 9.3 前端 build
+### 9.3 前端 Next build
 
 ```bash
-cd frontend && npm run build
+corepack pnpm --dir frontend build
 ```
 
-通过标准：TypeScript build 与 Vite bundle 均成功；所有间接消费者通过 stable barrel 解析到 `contracts.ts`。
+通过标准：Next.js 16 根应用的 TypeScript/pages/trace 构建成功；所有间接消费者通过 stable barrel 解析到 `contracts.ts`。
 
 ### 9.4 前端 scoped lint
 
 ```bash
-cd frontend && npx eslint \
-  src/hooks/story-workspace/contracts.ts \
-  src/hooks/story-workspace/index.ts \
-  src/hooks/story-workspace/useStoryWorkspaceList.ts \
-  src/hooks/story-workspace/useStories.ts \
-  src/hooks/story-workspace/useCharacters.ts \
-  src/hooks/story-workspace/useScenes.ts
+corepack pnpm --dir frontend exec eslint \
+  app/_dream/hooks/story-workspace/contracts.ts \
+  app/_dream/hooks/story-workspace/index.ts \
+  app/_dream/hooks/story-workspace/useStoryWorkspaceList.ts \
+  app/_dream/hooks/story-workspace/useStories.ts \
+  app/_dream/hooks/story-workspace/useCharacters.ts \
+  app/_dream/hooks/story-workspace/useScenes.ts
 ```
 
 通过标准：零 ESLint error；不得以修改 lint 配置或依赖来绕过。
@@ -298,9 +303,9 @@ cd frontend && npx eslint \
 
 ```bash
 test ! -e backend/types
-test ! -e frontend/src/hooks/story-workspace/types.ts
+test ! -e frontend/app/_dream/hooks/story-workspace/types.ts
 ! rg -n "backend\.types\.story_workspace|types\.story_workspace|hooks/story-workspace/types|from ['\"]\./types['\"]" \
-  backend frontend/src --glob '*.py' --glob '*.ts' --glob '*.tsx'
+  backend frontend/app/_dream --glob '*.py' --glob '*.ts' --glob '*.tsx'
 ! rg -n "\\b(AgentStoryPayload|AgentCharacterPayload|AgentScenePayload|WorkspacePatch|StoryPatch|CharacterPatch|ScenePatch)\\b" \
   backend --glob '*.py'
 ```
@@ -320,7 +325,7 @@ git diff --name-only --diff-filter=ACDMRTUXB -- \
   backend/claude_agent/service.py \
   backend/tests/test_story_workspace_agent_integration.py \
   backend/tests/test_story_workspace_contracts.py \
-  frontend/src/hooks/story-workspace
+  frontend/app/_dream/hooks/story-workspace
 ```
 
 通过标准：`backend/database.py` 前后 hash 完全一致；task-owned 变更逐项落在第 7.1 节，未出现 UI、Schema、依赖或其他业务域写入。共享工作树已有差异必须与执行前基线对照，不能误记为本 Task 产物。
@@ -336,7 +341,7 @@ git diff --check -- \
   backend/claude_agent/service.py \
   backend/tests/test_story_workspace_agent_integration.py \
   backend/tests/test_story_workspace_contracts.py \
-  frontend/src/hooks/story-workspace
+  frontend/app/_dream/hooks/story-workspace
 ```
 
 通过标准：exit 0。另执行一次仓库级 `git diff --check`；若它命中执行前已经存在的越界差异，报告必须给出执行前后相同的证据，且本 Task scoped 检查仍须通过。
@@ -348,20 +353,22 @@ git diff --check -- \
 - 不得修改数据库、依赖、构建配置或 UI 来规避测试失败。
 - 若失败来自闭集外既有问题，记录 owner/action 并按 Issue 协议阻塞；不得把“未运行”写成 PASS。
 
-## 10. 完成标志
+## 10. 原验收清单与实际结果
 
-- [ ] `backend/story_workspace/contracts.py` 成为唯一后端 canonical owner。
-- [ ] `backend/story_workspace/__init__.py` 不含业务 re-export。
-- [ ] `backend/types/` 完全删除且旧路径/旧公开名扫描为零。
-- [ ] 后端请求合同迁出 router/service，全部直接消费者引用 canonical 名称。
-- [ ] 从 `backend/` 启动 Python、导入标准库 `types`、canonical contracts 与 `server` 均成功。
-- [ ] 三组 focused unittest 全部通过。
-- [ ] 前端 `contracts.ts` 已建立，旧 `types.ts` 删除，五个直接消费者更新。
-- [ ] 前端 build 与 scoped lint 通过。
-- [ ] REST、枚举、校验、状态机、数据库和 task_202c UI 语义不变。
-- [ ] `backend/database.py` 前后 hash 一致，无 Schema / DDL / migration / 依赖变更。
-- [ ] task-owned 路径闭集检查与 `git diff --check` 通过。
-- [ ] Exec report 已记录变更、测试、未验证项、风险和逐文件回滚建议。
+以下清单已由 2026-08-01 的 [执行回执](../exec/exec_task_205b_story-workspace-contract-migration.md) 逐项验证通过；它记录当时迁移候选的完成事实，不是待派工状态。当前代码发生后续变化时，应针对当前候选重跑相应验证，不能复用旧日期的通过结论。
+
+- [x] `backend/story_workspace/contracts.py` 成为唯一后端 canonical owner。
+- [x] `backend/story_workspace/__init__.py` 不含业务 re-export。
+- [x] `backend/types/` 完全删除且旧路径/旧公开名扫描为零。
+- [x] 后端请求合同迁出 router/service，全部直接消费者引用 canonical 名称。
+- [x] 从 `backend/` 启动 Python、导入标准库 `types`、canonical contracts 与 `server` 均成功。
+- [x] 三组 focused unittest 全部通过。
+- [x] 前端 `contracts.ts` 已建立，旧 `types.ts` 删除，五个直接消费者更新。
+- [x] 前端 build 与 scoped lint 通过。
+- [x] REST、枚举、校验、状态机、数据库和 task_202c UI 语义不变。
+- [x] `backend/database.py` 前后 hash 一致，无 Schema / DDL / migration / 依赖变更。
+- [x] task-owned 路径闭集检查与 `git diff --check` 通过。
+- [x] Exec report 已记录变更、测试、未验证项、风险和逐文件回滚建议。
 
 ## 11. 风险与缓解
 
@@ -396,38 +403,13 @@ git diff --check -- \
 
 `backend/database.py`、Schema / DDL、依赖、UI 与其他业务域不属于回滚清单，任何回滚 patch 命中这些路径都必须拒绝。
 
-## 13. Stage 与 Execute Handoff
+## 13. 当前实现、证据与后续边界
 
-### 13.1 StagePlanner 必须固化的准入
+`task_205b` 的合同 canonical 迁移已经执行完成，不再受旧 Stage、checkout、assignee 或审批链约束。权威回执为 [exec_task_205b_story-workspace-contract-migration](../exec/exec_task_205b_story-workspace-contract-migration.md)：23 项 focused unittest、前端构建/scoped lint、旧 owner 扫描、`backend/database.py` 冻结 hash 和 diff 检查均通过；第一次解释器依赖失败、并发数据库文件漂移和测试辅助常量误删也按原事实保留。
 
-- 为 `SUO-299` 增量建立独立 Stage，不能复用旧 `stage_story-workspace.md` 直接准入。
-- 将 `task_205b` 放入“合同 canonical 迁移与运行恢复”wave；该 wave 必须先于 task_202c 浏览器/Network evidence-only 验证。
-- Stage 完成信号至少包含：旧路径为零、`backend/` Python 启动恢复、focused unittest 通过、前端 build/scoped lint 通过、`backend/database.py` hash 不变、闭集与 diff check 通过。
-- Stage 不得把浏览器/Network 补证合并进本 Task；后续验证 Task 只能在本迁移完成后进入 execute。
+后续工作按真实技术依赖处理：
 
-### 13.2 当前 execute readiness
-
-| 检查项 | 当前状态 |
-|---|---|
-| task 任务内容 | ✅ 本文档已定义 |
-| 关联 Issue | ✅ `SUO-299-SH-001` / [SUO-300](/SUO/issues/SUO-300) |
-| 关联 Stage 允许 execute | ❌ 尚未由 StagePlanner 形成独立增量 Stage |
-| `TASK-REQUIREMENT-FORMAT.md` | ✅ 存在；execute 时只读使用 |
-| 允许修改范围 | ✅ 第 7.1 节闭集 |
-| 禁止修改范围 | ✅ 第 7.2 节 |
-| 验收条件 | ✅ 第 8 节 |
-| 测试 / 验证 | ✅ 第 9 节 |
-| execute Issue checkout / assignee | ❌ 尚未创建或切换到 ExecTaskAgent |
-| 结论 | **NOT READY — 当前只允许进入 Stage 规划，不得指派 execute** |
-
-### 13.3 正式 execute 约束
-
-Stage 准入通过后，CEOOrchestrator 仍须重新执行九项 execute readiness check。正式执行必须由 ExecTaskAgent：
-
-1. 先 checkout 唯一 execute Issue；
-2. 读取 `agents/exec-task-agent/AGENTS.md`；
-3. 读取并以当前 Issue + 本 Task + 最新 Stage 完整填充 `docs/task/TASK-REQUIREMENT-FORMAT.md`；
-4. 基于格式化后的单 Task prompt 执行，不得绕过模板；
-5. 仅写第 7.1 节实现闭集及正式报告 `docs/exec/exec_task_205b_story-workspace-contract-migration.md`。
-
-本 Task 文档的完成不等于 execute 准入，也不授权 CEOOrchestrator 直接实现迁移。
+1. 本迁移只证明合同 owner/导入路径迁移，不证明 Story Workspace 浏览器旅程、公开应用或生产部署可用。
+2. `task_202c` 的 Browser/Network 补证有独立 [blocked 回执](../exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md)；缺失的浏览器控制与随后发现的源码漂移不得被静态构建替代。
+3. 当前候选若修改 canonical contracts、直接消费者、数据库 hash 或 frontend 构建图，必须重跑受影响验证并记录新证据；旧派工状态不得作为通过或阻塞依据。
+4. 共享 PostgreSQL Schema 只由 Admin Drizzle 管理；历史 SQLite Schema 回执不能授权 Dream 新增或迁移运行时 Schema。

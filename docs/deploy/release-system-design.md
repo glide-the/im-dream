@@ -1,6 +1,12 @@
+<!-- [Input] Historical deployment-system design and the current Next.js/pnpm/PostgreSQL ownership contracts. -->
+<!-- [Output] Archived design rationale with an explicit handoff to the current deployment index. -->
+<!-- [Pos] Historical release-system design; not a current operator runbook. -->
 # 发布体系梳理与方案设计
 
 <!-- [Sync] 2026-08-31: replace deleted models.json deployment ownership with the Admin Gateway catalog. -->
+<!-- [Sync] 2026-09-06: archive this pre-Next/pre-PostgreSQL design as historical input and point operators to the current deploy index. -->
+
+> **历史设计，不是当前操作手册。** 本文保留了当时的 Vite/npm/nginx/SQLite/GCS 判断和脚本改造过程。当前 frontend 事实是 Next.js 16 + pnpm workspace，Dream 应用源码唯一位于 `frontend/app/_dream/**`，共享业务数据由 Admin PostgreSQL/Drizzle 管理。发布人员必须从 [当前发布文档入口](README.md) 开始，不得直接执行本文的旧命令或数据步骤。
 
 本文基于仓库当前 `docs/deploy/` 与 `deploy/` 目录，以及相关 Docker、README、规则文档，给出发布体系处理判断和团队协作落地方案。
 

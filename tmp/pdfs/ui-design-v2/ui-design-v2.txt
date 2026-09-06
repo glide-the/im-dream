@@ -6,7 +6,7 @@ Memory Companion Landing Page · 品牌提案 / 官网首屏 / 产品视觉概�
 
                            v2.1 · 2026-07-25
                色彩系统已对齐《Color System PRD》与
-        frontend/src/styles/tokens.css（唯一权威色值来源）
+        frontend/app/_dream/styles/tokens.css（唯一权威色值来源）
 分区规则：减少面板 · 增加留白 · 视觉收敛 · 轻纸面分区 · 单一虚线边界 ·
                                无卡片设计
 
@@ -66,7 +66,7 @@ Companion · Gentle Weirdness · Daily Record
         Ink & Memory UI Design v2.1 · 色彩系统对齐 tokens.css · 轻纸面分区 · 第 3 页
 5. 色彩系统（v2.0 重写）
 本章已与产品《Color System PRD》对齐。唯一权威色值来源为
-frontend/src/styles/tokens.css；本稿全部颜色引用均可追溯到该语义 Token 体系，不使用孤立色值。
+frontend/app/_dream/styles/tokens.css；本稿全部颜色引用均可追溯到该语义 Token 体系，不使用孤立色值。
 
 5.1 主色板（亮色主题）
 

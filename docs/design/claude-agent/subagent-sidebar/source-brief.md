@@ -3,9 +3,9 @@
 为聊天会话新增“子智能体任务”侧边栏入口和右侧详情面板。
 
 现有组件位置：
-- 入口位于 frontend/src/components/chat/PlanPanel.tsx 的 PlanButton，图标来自 frontend/src/components/chat/Icons.tsx。
-- 页面承载位于 frontend/src/components/chat/ChatView.tsx 的 ChatViewContent。
-- 右侧详情面板应复用 frontend/src/components/dashboard/FileSidebar.tsx 的布局与开合方式。
+- 入口位于 frontend/app/_dream/components/chat/PlanPanel.tsx 的 PlanButton，图标来自 frontend/app/_dream/components/chat/Icons.tsx。
+- 页面承载位于 frontend/app/_dream/components/chat/ChatView.tsx 的 ChatViewContent。
+- 右侧详情面板应复用 frontend/app/_dream/components/dashboard/FileSidebar.tsx 的布局与开合方式。
 
 截图说明：
 - 主图 `assets/subagent-detail.jpg`：任务详情页面。顶部显示“子智能体”，主体按“已开启”和“完成 · 数量”分组；任务行包含代理图标、任务名、摘要和耗时。

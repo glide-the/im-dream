@@ -47,7 +47,7 @@
 | 文件 / 对象 | 操作 | 说明 |
 |---|---|---|
 | `$PAPERCLIP_RUN_SCRATCH_DIR/git-status.before.txt` | create | checkout 后 184 条既存 dirty 基线 |
-| `$PAPERCLIP_RUN_SCRATCH_DIR/production-sha256.before.txt` | create | `backend/`、`frontend/src/` 344 文件排序 SHA-256 manifest |
+| `$PAPERCLIP_RUN_SCRATCH_DIR/production-sha256.before.txt` | create | `backend/`、`frontend/app/_dream/` 344 文件排序 SHA-256 manifest |
 | `$PAPERCLIP_RUN_SCRATCH_DIR/filled-task-requirement.md` | create | 完整填充的 execute prompt |
 | `$PAPERCLIP_RUN_SCRATCH_DIR/model-generated-execution-task.md` | create | 模型生成且经范围校验的单一执行任务 |
 | `$PAPERCLIP_RUN_SCRATCH_DIR/browser-control-availability.txt` | create | 浏览器控制接口缺失的阻塞证据 |
@@ -114,7 +114,7 @@
 ### Blocker 2：生产 SHA-256 manifest 漂移
 
 - 首次确认时间：2026-08-01 23:35:15+08:00
-- 期望：`backend/` 与 `frontend/src/` 的路径集合和内容 hash 在执行期间完全一致。
+- 期望：`backend/` 与 `frontend/app/_dream/` 的路径集合和内容 hash 在执行期间完全一致。
 - 实际：两项无关 backend 文件 hash 变化，停止点 manifest 摘要为 `8a1d19dd4aaf83e9bfb285a5c290d21f24ae4ae302bcbff2d952d58a12d6804f`；报告生成后两项继续变化，最终复核摘要为 `93270403ace1c7838cc5f19d3af53622478a0187fff81b9ea456165f40a61da9`，均与基线摘要不同；工作树还新增一份无关报告。
 - 影响：`AC-202C-V-06` 无法通过，继续采集会使证据失真。
 
