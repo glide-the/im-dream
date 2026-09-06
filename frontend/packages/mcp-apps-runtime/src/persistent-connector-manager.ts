@@ -2,6 +2,7 @@
 // [Output] Process-reused, policy-keyed leases with per-request validation, concurrency, and teardown.
 // [Pos] Sole upstream connection/catalog lifecycle owner inside the server-only Runtime package.
 // [Sync] 2026-09-06: revalidate every request and add Browser/plugin scope, expiry timers, and bounded operations.
+// [Sync] 2026-09-06: invalidate leases when per-connection App settings revision changes.
 
 import { randomUUID } from 'node:crypto';
 
@@ -139,6 +140,7 @@ export class PersistentConnectorManager {
         serverRef: context.serverRef,
         expectedConfigRevision: entry.view.configRevision,
         expectedCredentialRevision: entry.view.credentialRevision,
+        expectedAppSettingsRevision: entry.view.appSettingsRevision,
         expectedPolicyRevision: entry.view.policy.revision,
       });
     } catch (error) {

@@ -8,6 +8,7 @@
 [Sync] 2026-08-25: remove public auth_kind inputs; standard MCP discovery owns authentication classification.
 [Sync] 2026-08-27: map transient PostgreSQL capability verification failures to a safe retryable 503.
 [Sync] 2026-09-06: carry current policy revision through every Node revalidation and reject non-finite view TTL configuration.
+[Sync] 2026-09-06: expose actor-owned per-connection App settings and carry their revision into Node views.
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ try:
     from claude_mcp.contracts import (
         ClaudeMcpError,
         ClaudeMcpErrorCode,
+        McpAppPreferenceState,
+        McpAppSettingsPatch,
         McpAuthKind,
         McpScope,
         McpServerCreate,
@@ -43,6 +46,8 @@ except ModuleNotFoundError:  # pragma: no cover
     from backend.claude_mcp.contracts import (
         ClaudeMcpError,
         ClaudeMcpErrorCode,
+        McpAppPreferenceState,
+        McpAppSettingsPatch,
         McpAuthKind,
         McpScope,
         McpServerCreate,
@@ -83,6 +88,8 @@ _ERROR_STATUS = {
     ClaudeMcpErrorCode.APP_RUNTIME_DENIED: 403,
     ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT: 409,
     ClaudeMcpErrorCode.APP_RUNTIME_POLICY_INVALID: 503,
+    ClaudeMcpErrorCode.APP_SETTINGS_CAPABILITY_MISSING: 503,
+    ClaudeMcpErrorCode.APP_SETTINGS_REVISION_CONFLICT: 409,
     ClaudeMcpErrorCode.SERVER_NOT_FOUND: 404,
     ClaudeMcpErrorCode.OPERATION_NOT_FOUND: 404,
     ClaudeMcpErrorCode.AUTH_OPERATION_EXPIRED: 404,
@@ -186,7 +193,28 @@ class McpAppsConnectionRequest(BaseModel):
     workspace_scope: str | None = None
     expected_config_revision: int | None = Field(default=None, ge=1)
     expected_credential_revision: int | None = Field(default=None, ge=0)
+    expected_app_settings_revision: int | None = Field(default=None, ge=1)
     expected_policy_revision: int | None = Field(default=None, ge=1)
+
+
+class UpdateMcpAppSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+    enabled: bool
+    low_risk_tool_calls: bool
+    ui_messages: bool
+    workspace_id: str | None = None
+
+    def domain(self) -> McpAppSettingsPatch:
+        return McpAppSettingsPatch(
+            expected_revision=self.expected_revision,
+            desired=McpAppPreferenceState(
+                enabled=self.enabled,
+                low_risk_tool_calls=self.low_risk_tool_calls,
+                ui_messages=self.ui_messages,
+            ),
+            workspace_id=self.workspace_id,
+        )
 
 
 def _require_mcp_apps_node_service(
@@ -273,6 +301,7 @@ async def mcp_apps_connection_view(
             request.workspace_scope,
             expected_config_revision=request.expected_config_revision,
             expected_credential_revision=request.expected_credential_revision,
+            expected_app_settings_revision=request.expected_app_settings_revision,
             ttl_seconds=_mcp_apps_view_ttl_seconds(),
             expected_policy_revision=request.expected_policy_revision,
         )
@@ -306,6 +335,43 @@ async def get_server(identifier: str, workspace_id: str | None = None, current_u
     try:
         return {"server": (await service.get_server(_actor_id(current_user), identifier, workspace_id)).to_dict()}
     except ClaudeMcpError as exc:
+        return _error(exc)
+
+
+@router.get("/servers/{identifier}/app-settings")
+async def get_mcp_app_settings(
+    identifier: str,
+    workspace_id: str | None = None,
+    current_user=Depends(get_current_user),
+    service=Depends(get_claude_mcp_service),
+):
+    try:
+        value = await service.get_mcp_app_connection_settings(
+            _actor_id(current_user), identifier, workspace_id
+        )
+        return {"appSettings": value.to_dict()}
+    except ClaudeMcpError as exc:
+        return _error(exc)
+
+
+@router.patch("/servers/{identifier}/app-settings")
+async def update_mcp_app_settings(
+    identifier: str,
+    request: UpdateMcpAppSettingsRequest,
+    current_user=Depends(get_current_user),
+    service=Depends(get_claude_mcp_service),
+):
+    try:
+        value = await service.update_mcp_app_connection_settings(
+            _actor_id(current_user), identifier, request.domain()
+        )
+        return {"appSettings": value.to_dict()}
+    except (ClaudeMcpError, ValueError) as exc:
+        if isinstance(exc, ValueError):
+            exc = ClaudeMcpError(
+                ClaudeMcpErrorCode.SERVER_CONFIGURATION_INVALID,
+                "MCP App settings are invalid.",
+            )
         return _error(exc)
 
 

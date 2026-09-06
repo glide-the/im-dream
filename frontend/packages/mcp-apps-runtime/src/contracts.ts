@@ -3,6 +3,7 @@
 // [Pos] Runtime package validation boundary; no Browser, React, DOM, or root-Web imports.
 // [Sync] 2026-09-06: add strict static policy, finite expiry, per-request calls, and Browser/plugin/workspace isolation.
 // [Sync] 2026-09-06: hash canonical connection profiles into same-revision drift identity.
+// [Sync] 2026-09-06: validate connection-level App preferences and bind their revision to Runtime leases.
 
 import { createHash } from 'node:crypto';
 
@@ -59,6 +60,7 @@ export type McpAppsConnectionView = Readonly<{
   enabled: true;
   configRevision: number;
   credentialRevision: number;
+  appSettingsRevision: number;
   expiresAt: string;
   allowedTools: readonly string[];
   allowedResources: readonly string[];
@@ -90,6 +92,7 @@ export interface ConnectionViewProvider {
     serverRef: string;
     expectedConfigRevision?: number;
     expectedCredentialRevision?: number;
+    expectedAppSettingsRevision?: number;
     expectedPolicyRevision?: number;
   }>): Promise<McpAppsConnectionView>;
 }
@@ -101,6 +104,33 @@ export type ConnectionLease = Readonly<{
   connector: ManagedConnector;
   browserSessionScope: string | null;
   manifestRevision: number;
+}>;
+
+export type McpAppPreferenceState = Readonly<{
+  enabled: boolean;
+  interactions: Readonly<{
+    lowRiskToolCalls: boolean;
+    uiMessages: boolean;
+  }>;
+}>;
+
+export type McpAppConnectionSettingsView = Readonly<{
+  version: 1;
+  revision: number;
+  default: McpAppPreferenceState;
+  desired: McpAppPreferenceState;
+  server: Readonly<{
+    state:
+      | 'ready'
+      | 'connection_disabled'
+      | 'transport_unsupported'
+      | 'server_policy_unavailable'
+      | 'inventory_unavailable'
+      | 'app_not_advertised';
+    reasonCode: string | null;
+    resourceReads: boolean;
+    lowRiskToolCalls: boolean;
+  }>;
 }>;
 
 export class McpAppsRuntimeError extends Error {
@@ -196,6 +226,65 @@ export function parseMcpAppsStaticView(value: unknown): McpAppsStaticView {
   });
 }
 
+function parseAppPreferenceState(value: unknown, field: string): McpAppPreferenceState {
+  if (!isRecord(value)
+    || typeof value.enabled !== 'boolean'
+    || !isRecord(value.interactions)
+    || typeof value.interactions.lowRiskToolCalls !== 'boolean'
+    || typeof value.interactions.uiMessages !== 'boolean') {
+    throw new McpAppsRuntimeError(502, 'INVALID_APP_SETTINGS', `Invalid ${field}.`);
+  }
+  return Object.freeze({
+    enabled: value.enabled,
+    interactions: Object.freeze({
+      lowRiskToolCalls: value.interactions.lowRiskToolCalls,
+      uiMessages: value.interactions.uiMessages,
+    }),
+  });
+}
+
+export function parseMcpAppConnectionSettings(value: unknown): McpAppConnectionSettingsView {
+  if (!isRecord(value) || value.version !== 1 || !isRecord(value.server)) {
+    throw new McpAppsRuntimeError(502, 'INVALID_APP_SETTINGS', 'MCP App settings are invalid.');
+  }
+  const defaultState = parseAppPreferenceState(value.default, 'default App settings');
+  const desired = parseAppPreferenceState(value.desired, 'desired App settings');
+  if (defaultState.enabled
+    || defaultState.interactions.lowRiskToolCalls
+    || defaultState.interactions.uiMessages) {
+    throw new McpAppsRuntimeError(502, 'INVALID_APP_SETTINGS', 'Default MCP App settings must deny every choice.');
+  }
+  const server = value.server;
+  const states = new Set([
+    'ready',
+    'connection_disabled',
+    'transport_unsupported',
+    'server_policy_unavailable',
+    'inventory_unavailable',
+    'app_not_advertised',
+  ]);
+  if (!states.has(String(server.state))
+    || (server.reasonCode !== null && typeof server.reasonCode !== 'string')
+    || typeof server.resourceReads !== 'boolean'
+    || typeof server.lowRiskToolCalls !== 'boolean'
+    || (server.state === 'ready' && server.resourceReads !== true)
+    || (server.state !== 'ready' && (server.resourceReads || server.lowRiskToolCalls))) {
+    throw new McpAppsRuntimeError(502, 'INVALID_APP_SETTINGS', 'MCP App server availability is invalid.');
+  }
+  return Object.freeze({
+    version: 1,
+    revision: requireRevision(value.revision, 'App settings revision', 1),
+    default: defaultState,
+    desired,
+    server: Object.freeze({
+      state: server.state as McpAppConnectionSettingsView['server']['state'],
+      reasonCode: server.reasonCode as string | null,
+      resourceReads: server.resourceReads,
+      lowRiskToolCalls: server.lowRiskToolCalls,
+    }),
+  });
+}
+
 export function parseConnectionView(value: unknown): McpAppsConnectionView {
   if (!isRecord(value) || !isRecord(value.connectionProfile)) {
     throw new McpAppsRuntimeError(502, 'INVALID_CONNECTION_VIEW', 'Connection view is invalid.');
@@ -236,6 +325,7 @@ export function parseConnectionView(value: unknown): McpAppsConnectionView {
     enabled: true,
     configRevision: requireRevision(value.configRevision, 'configRevision', 1),
     credentialRevision: requireRevision(value.credentialRevision, 'credentialRevision', 0),
+    appSettingsRevision: requireRevision(value.appSettingsRevision, 'appSettingsRevision', 1),
     expiresAt,
     allowedTools,
     allowedResources,
@@ -288,6 +378,7 @@ export function connectionKey(
     view.serverRef,
     view.configRevision,
     view.credentialRevision,
+    view.appSettingsRevision,
     view.policy.revision,
     browserSessionScope,
     manifestRevision,
@@ -315,6 +406,7 @@ export function authorizationStateKey(view: McpAppsConnectionView): string {
     view.serverRef,
     view.configRevision,
     view.credentialRevision,
+    view.appSettingsRevision,
     view.policy,
     [...view.allowedTools].sort(),
     [...view.allowedResources].sort(),

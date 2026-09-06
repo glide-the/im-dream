@@ -2,6 +2,7 @@
 // [Output] Regression proof that window.im methods follow the actor-effective Host capabilities across a runtime-only downgrade.
 // [Pos] Provider-free Browser policy test; it starts only isolated loopback services and never touches business data.
 // [Sync] 2026-09-06: lock tool-only fail-closed projection and remove window.im after an effective-policy downgrade.
+// [Sync] 2026-09-06: retain two-part identity for the connection-free status probe; connection-scoped Host tests cover App-settings revisions.
 
 import { expect, test, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';

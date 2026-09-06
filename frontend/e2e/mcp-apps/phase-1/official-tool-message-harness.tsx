@@ -2,10 +2,11 @@
 // [Output] The production ToolMessagePart tree plus an auditable user-message boundary callback.
 // [Pos] Provider-free Browser mount only; production components and policy APIs remain unmodified.
 // [Sync] 2026-09-06: expose a deterministic same-mount Thread switch for Browser session lifecycle acceptance.
+// [Sync] 2026-09-06: expose a parent rerender with a fresh Chat callback identity to prove the mounted App keeps in-progress input.
 
 /* eslint-disable react-refresh/only-export-components -- provider-free browser entry renders at module load */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import '../../../app/_dream/i18n';
@@ -44,11 +45,12 @@ function OfficialToolMessageHarness() {
   const config = window.__MCP_APPS_E2E_CONFIG__;
   const [messageCount, setMessageCount] = useState(0);
   const [threadId, setThreadId] = useState(config.threadId);
-  const sendUserMessage = useCallback(async (message: ChatUserMessage) => {
+  const [parentRevision, setParentRevision] = useState(0);
+  const sendUserMessage = async (message: ChatUserMessage) => {
     harnessState.messages.push(structuredClone(message));
     harnessState.sendMessageCalls += 1;
     setMessageCount(harnessState.sendMessageCalls);
-  }, []);
+  };
   useEffect(() => {
     harnessState.switchThread = setThreadId;
     return () => {
@@ -60,8 +62,15 @@ function OfficialToolMessageHarness() {
     <main style={{ width: 'min(760px, calc(100vw - 48px))', margin: '24px auto', fontFamily: 'system-ui' }}>
       <h1>Official MCP App production-path harness</h1>
       <p data-testid="existing-chat-ingress-count">{messageCount}</p>
+      <button
+        type="button"
+        data-testid="mcp-app-parent-rerender"
+        onClick={() => setParentRevision((value) => value + 1)}
+      >
+        Parent rerender {parentRevision}
+      </button>
       <ToolMessagePart
-        part={config.part as never}
+        part={structuredClone(config.part) as never}
         threadId={threadId}
         sendUserMessage={sendUserMessage}
       />

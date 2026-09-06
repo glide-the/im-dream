@@ -1,7 +1,8 @@
-// [Input] Explicit official MCP App artifact roots and test-owned loopback policy endpoints.
-// [Output] Owned official processes, an auditable upstream relay, and a fake Python connection-view service.
+// [Input] Explicit official MCP App artifacts and test-owned loopback policy/App-settings endpoints.
+// [Output] Owned official processes, an auditable upstream relay, and a fake Python connection/settings service.
 // [Pos] Provider-free Phase 1-3 Node harness; never imported by production or connected to real business data.
 // [Sync] 2026-09-06: exercise official artifacts through the real Runtime with actor/workspace policy revalidation.
+// [Sync] 2026-09-06: model connection-level desired settings and their independent revision.
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -235,6 +236,7 @@ export async function startConnectionViewService({
   const state = {
     configRevision: 1,
     credentialRevision: 1,
+    appSettingsRevision: 1,
     policyRevision: 1,
     resourceReads: true,
     lowRiskToolCalls: false,
@@ -272,6 +274,42 @@ export async function startConnectionViewService({
       }));
       return;
     }
+    const expectedSettingsPath = `/api/claude-mcp/servers/${encodeURIComponent(serverRef)}/app-settings`;
+    if (request.method === 'GET' && url.pathname === expectedSettingsPath) {
+      if (request.headers.authorization !== browserAuthorization
+        || (url.searchParams.get('workspace_id') ?? null) !== workspaceScope) {
+        response.statusCode = 403;
+        response.end();
+        return;
+      }
+      response.statusCode = 200;
+      response.setHeader('content-type', 'application/json');
+      response.setHeader('cache-control', 'no-store');
+      response.end(JSON.stringify({
+        appSettings: {
+          version: 1,
+          revision: state.appSettingsRevision,
+          default: {
+            enabled: false,
+            interactions: { lowRiskToolCalls: false, uiMessages: false },
+          },
+          desired: {
+            enabled: true,
+            interactions: {
+              lowRiskToolCalls: state.lowRiskToolCalls,
+              uiMessages: true,
+            },
+          },
+          server: {
+            state: 'ready',
+            reasonCode: null,
+            resourceReads: true,
+            lowRiskToolCalls: state.lowRiskToolCalls,
+          },
+        },
+      }));
+      return;
+    }
     const expectedPath = `/api/claude-mcp/app-runtime/connections/${encodeURIComponent(serverRef)}`;
     if (request.method !== 'POST' || url.pathname !== expectedPath) {
       response.statusCode = 404;
@@ -291,6 +329,7 @@ export async function startConnectionViewService({
       workspaceScope: body.workspace_scope ?? null,
       expectedConfigRevision: body.expected_config_revision ?? null,
       expectedCredentialRevision: body.expected_credential_revision ?? null,
+      expectedAppSettingsRevision: body.expected_app_settings_revision ?? null,
       expectedPolicyRevision: body.expected_policy_revision ?? null,
     }));
     if (request.headers.authorization !== browserAuthorization
@@ -303,6 +342,7 @@ export async function startConnectionViewService({
     for (const [field, expected] of [
       ['expected_config_revision', state.configRevision],
       ['expected_credential_revision', state.credentialRevision],
+      ['expected_app_settings_revision', state.appSettingsRevision],
       ['expected_policy_revision', state.policyRevision],
     ]) {
       if (body[field] !== undefined && body[field] !== expected) {
@@ -324,6 +364,7 @@ export async function startConnectionViewService({
       enabled: true,
       configRevision: state.configRevision,
       credentialRevision: state.credentialRevision,
+      appSettingsRevision: state.appSettingsRevision,
       expiresAt: new Date(Date.now() + 300_000).toISOString(),
       allowedTools: enabledTools,
       allowedResources: ['ui://get-time/mcp-app.html'],

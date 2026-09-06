@@ -2,6 +2,7 @@
 // [Output] Immutable, compatibility-checked Browser Host policy or a fail-closed null.
 // [Pos] Browser-side Phase 1-3 plugin/policy boundary; contains no upstream selector or secret.
 // [Sync] 2026-09-06: bind the app/_dream Browser entry identity to independent server-owned plugin and runtime-policy revisions.
+// [Sync] 2026-09-06: bind Host policy to the current connection App-settings revision.
 
 export const MCP_APPS_HOST_MANIFEST = Object.freeze({
   schemaVersion: 'im.mcp-apps-host-manifest/v1',
@@ -43,6 +44,7 @@ export type McpAppsHostPolicy = Readonly<{
   revision: string;
   pluginRevision: string;
   runtimePolicyRevision: number;
+  appSettingsRevision: number | null;
   manifestVersion: string;
   sandboxUrl: string;
   sandboxOrigin: string;
@@ -175,7 +177,9 @@ export function parseMcpAppsHostPolicy(
   if (typeof policy.revision !== 'string' || !policy.revision
     || policy.pluginRevision !== String(plugin.revision)
     || !isPositiveSafeInteger(policy.runtimePolicyRevision)
-    || policy.revision !== `${policy.pluginRevision}:${policy.runtimePolicyRevision}`
+    || (policy.appSettingsRevision !== null
+      && !isPositiveSafeInteger(policy.appSettingsRevision))
+    || policy.revision !== `${policy.pluginRevision}:${policy.runtimePolicyRevision}${policy.appSettingsRevision === null ? '' : `:${policy.appSettingsRevision}`}`
     || policy.manifestVersion !== MCP_APPS_HOST_MANIFEST.version
     || typeof policy.sandboxUrl !== 'string'
     || !Array.isArray(policy.sandboxTokens)
@@ -206,6 +210,7 @@ export function parseMcpAppsHostPolicy(
     revision: policy.revision,
     pluginRevision: policy.pluginRevision,
     runtimePolicyRevision: policy.runtimePolicyRevision,
+    appSettingsRevision: policy.appSettingsRevision as number | null,
     manifestVersion: MCP_APPS_HOST_MANIFEST.version,
     sandboxUrl: sandbox.href,
     sandboxOrigin: sandbox.origin,
@@ -224,6 +229,7 @@ export function mcpAppsPolicyIdentity(policy: McpAppsHostPolicy): string {
     policy.revision,
     policy.pluginRevision,
     policy.runtimePolicyRevision,
+    policy.appSettingsRevision,
     policy.sandboxUrl,
     policy.features,
   ]);

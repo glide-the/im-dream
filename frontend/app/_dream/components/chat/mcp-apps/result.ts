@@ -2,6 +2,7 @@
 // [Output] A strict complete CallToolResult projection or null for ordinary fallback.
 // [Pos] Chat-to-MCP-Apps recognition boundary; it never infers owner/UI identity from output metadata.
 // [Sync] 2026-09-06: require trusted workspace scope and a complete non-error v1 result; reject spoofed/mismatched/sensitive projections.
+// [Sync] 2026-09-06: compare validated saved calls by JSON semantics so history polling cannot remount an unchanged App.
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
@@ -57,6 +58,21 @@ export type SavedMcpAppToolCall = Readonly<{
   workspaceScope: string | null;
   result: CallToolResult;
 }>;
+
+export function sameSavedMcpAppToolCall(
+  left: SavedMcpAppToolCall | null,
+  right: SavedMcpAppToolCall | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.serverRef === right.serverRef
+    && left.resourceUri === right.resourceUri
+    && left.toolName === right.toolName
+    && left.toolCallId === right.toolCallId
+    && left.workspaceScope === right.workspaceScope
+    && jsonEqual(left.input, right.input)
+    && jsonEqual(left.result, right.result);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

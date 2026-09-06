@@ -8,11 +8,16 @@
 // [Sync] 2026-08-25: remove editable authentication policy; backend discovery owns anonymous/OAuth classification.
 // [Sync] 2026-08-25: replace redirect URL copy/paste with same-origin automatic SPA callback submission.
 // [Sync] 2026-08-25: ignore stale inventory responses when config or credential revisions change mid-discovery.
+// [Sync] 2026-09-06: add connection-level MCP App desired controls and explicit effective availability.
+// [Sync] 2026-09-06: align connection-level App settings with the Notion detail split-section layout.
+// [Sync] 2026-09-06: describe low-risk eligibility as the server-owned positive classification without requiring optional tool hints.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   cancelClaudeMcpAuth,
   getClaudeMcpCapability,
+  getClaudeMcpAppEffectiveStatus,
+  getClaudeMcpAppSettings,
   getClaudeMcpOperation,
   getClaudeMcpServer,
   getClaudeMcpServerInventory,
@@ -20,8 +25,11 @@ import {
   removeClaudeMcpServer,
   startClaudeMcpAuth,
   updateClaudeMcpServer,
+  updateClaudeMcpAppSettings,
   ClaudeMcpApiError,
   type ClaudeMcpCapability,
+  type ClaudeMcpAppEffectiveStatus,
+  type ClaudeMcpAppSettings,
   type ClaudeMcpAuthState,
   type ClaudeMcpOperation,
   type ClaudeMcpServer,
@@ -121,6 +129,38 @@ function operationErrorMessage(operation: ClaudeMcpOperation): string | null {
   return operation.error
     ? `${operation.error.message}（${operation.error.code}）`
     : null;
+}
+
+const APP_STATUS_REASONS: Record<string, string> = {
+  user_disabled: '已按你的选择关闭；工具结果仍会保留普通文本或数据展示。',
+  service_not_enabled: '服务端尚未启用 MCP App 运行能力。',
+  plugin_unavailable: '服务端尚未准备好 MCP App Host。',
+  runtime_policy_unavailable: '服务端运行策略当前不可用。',
+  runtime_policy_denied: '服务端策略尚未允许 MCP App 读取此连接的资源。',
+  sandbox_not_configured: '服务端尚未完成 MCP App 隔离运行配置。',
+  host_policy_invalid: '服务端 MCP App 运行配置无效。',
+  connection_settings_unavailable: '连接的 App 设置当前不可读取。',
+  MCP_APP_CONNECTION_DISABLED: '此 MCP 连接已禁用。',
+  MCP_APP_STREAMABLE_HTTP_REQUIRED: '此连接的传输方式暂不支持 MCP App。',
+  MCP_APP_SERVER_POLICY_UNAVAILABLE: '服务端尚未允许此连接使用 MCP App。',
+  MCP_APP_INVENTORY_UNAVAILABLE: '尚未取得可用的连接能力清单。',
+  MCP_APP_NOT_ADVERTISED: '此连接没有声明可展示的 MCP App。',
+  interaction_partially_available: 'MCP App 可以展示，但部分已选择的交互尚未被服务端允许。',
+};
+
+function appStatusLabel(status: ClaudeMcpAppEffectiveStatus | null): string {
+  if (!status) return '状态未知';
+  if (status.effective.state === 'enabled') return '实际可用';
+  if (status.effective.state === 'partially_enabled') return '部分可用';
+  if (status.effective.state === 'disabled') return '已关闭';
+  return '暂不可用';
+}
+
+function appStatusTone(status: ClaudeMcpAppEffectiveStatus | null): Tone {
+  if (status?.effective.state === 'enabled') return 'success';
+  if (status?.effective.state === 'partially_enabled') return 'warning';
+  if (status?.effective.state === 'unavailable') return 'danger';
+  return 'neutral';
 }
 
 function connectionSummary(
@@ -245,12 +285,62 @@ function DetailSection({
   subtitle,
   action,
   children,
+  layout = 'stacked',
+  isMobile = false,
 }: {
   title: string;
   subtitle?: string;
   action?: ReactNode;
   children: ReactNode;
+  layout?: 'stacked' | 'split';
+  isMobile?: boolean;
 }) {
+  if (layout === 'split') {
+    return (
+      <section
+        style={{
+          borderTop: SOFT_CONTROL_BORDER,
+          borderBottom: SOFT_CONTROL_BORDER,
+        }}
+      >
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(176px, 0.36fr) minmax(0, 1fr)',
+            alignItems: 'start',
+            gap: isMobile ? '1rem' : '2.125rem',
+            padding: isMobile ? '1.5rem 0' : '1.625rem 0',
+          }}
+        >
+          <header style={{ minWidth: 0 }}>
+            <h2
+              style={{
+                margin: 0,
+                color: 'var(--color-text-primary)',
+                fontSize: isMobile ? '1rem' : '1.08rem',
+                fontWeight: 700,
+                letterSpacing: '-0.015em',
+              }}
+            >
+              {title}
+            </h2>
+            {subtitle ? (
+              <p style={{ margin: '0.35rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.74rem', lineHeight: 1.5 }}>
+                {subtitle}
+              </p>
+            ) : null}
+          </header>
+          <div style={{ minWidth: 0 }}>
+            {action ? (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: '0.6rem' }}>{action}</div>
+            ) : null}
+            {children}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap', paddingBottom: '0.58rem' }}>
@@ -350,6 +440,12 @@ export default function ClaudeMcpServerDetailPage({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const [appSettings, setAppSettings] = useState<ClaudeMcpAppSettings | null>(null);
+  const [appEffectiveStatus, setAppEffectiveStatus] = useState<ClaudeMcpAppEffectiveStatus | null>(null);
+  const [appSettingsError, setAppSettingsError] = useState<string | null>(null);
+  const [editAppEnabled, setEditAppEnabled] = useState(false);
+  const [editAppLowRiskToolCalls, setEditAppLowRiskToolCalls] = useState(false);
+  const [editAppUiMessages, setEditAppUiMessages] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState('');
   const [editTransport, setEditTransport] = useState<EditTransport>('streamable_http');
@@ -358,6 +454,7 @@ export default function ClaudeMcpServerDetailPage({
   const [editEnabled, setEditEnabled] = useState(true);
   const automaticInventoryKeyRef = useRef<string | null>(null);
   const inventoryRequestSequenceRef = useRef(0);
+  const serverWorkspaceRef = useRef<string | null>(null);
 
   const effectiveState = operation && ACTIVE_STATES.includes(operation.state)
     ? operation.state
@@ -370,6 +467,19 @@ export default function ClaudeMcpServerDetailPage({
       return `${tool.name} ${tool.description ?? ''}`.toLocaleLowerCase().includes(query);
     });
   }, [inventory?.tools, searchQuery, toolFilter]);
+
+  const loadAppEffectiveStatus = useCallback(async () => {
+    try {
+      const next = await getClaudeMcpAppEffectiveStatus(
+        serverName,
+        serverWorkspaceRef.current,
+      );
+      setAppEffectiveStatus(next);
+    } catch (error) {
+      setAppEffectiveStatus(null);
+      setAppSettingsError(errorMessage(error, 'MCP App 实际状态读取失败'));
+    }
+  }, [serverName]);
 
   const loadInventory = useCallback(async () => {
     const requestSequence = inventoryRequestSequenceRef.current + 1;
@@ -394,6 +504,7 @@ export default function ClaudeMcpServerDetailPage({
             ? (current.credential_configured ? 'authenticated' : 'anonymous')
             : current.auth_state,
       } : current);
+      void loadAppEffectiveStatus();
     } catch (error) {
       if (requestSequence !== inventoryRequestSequenceRef.current) return;
       setInventory(null);
@@ -401,7 +512,7 @@ export default function ClaudeMcpServerDetailPage({
     } finally {
       if (requestSequence === inventoryRequestSequenceRef.current) setInventoryLoading(false);
     }
-  }, [serverName]);
+  }, [loadAppEffectiveStatus, serverName]);
 
   const loadInventoryForServer = useCallback((nextServer: ClaudeMcpServer) => {
     const key = `${serverName}:${nextServer.revision ?? 'unknown'}:${nextServer.credential_revision}:`;
@@ -434,16 +545,37 @@ export default function ClaudeMcpServerDetailPage({
         setServer(null);
         setInventory(null);
         setInventoryLoading(false);
+        setAppSettings(null);
+        setAppEffectiveStatus(null);
         return;
       }
       if (serverResult.status === 'rejected') throw serverResult.reason;
       const nextServer = serverResult.value;
+      serverWorkspaceRef.current = nextServer.workspace_id;
       setServer(nextServer);
       setEditDisplayName(nextServer.display_name);
       setEditTransport((nextServer.transport ?? 'streamable_http') as EditTransport);
       setEditUrl(nextServer.url ?? '');
       setEditStdioProfile(nextServer.stdio_profile_key ?? '');
       setEditEnabled(nextServer.enabled);
+      try {
+        const nextAppSettings = await getClaudeMcpAppSettings(
+          nextServer.id ?? serverName,
+          nextServer.workspace_id,
+        );
+        setAppSettings(nextAppSettings);
+        setEditAppEnabled(nextAppSettings.desired.enabled);
+        setEditAppLowRiskToolCalls(
+          nextAppSettings.desired.interactions.lowRiskToolCalls,
+        );
+        setEditAppUiMessages(nextAppSettings.desired.interactions.uiMessages);
+        setAppSettingsError(null);
+        void loadAppEffectiveStatus();
+      } catch (error) {
+        setAppSettings(null);
+        setAppEffectiveStatus(null);
+        setAppSettingsError(errorMessage(error, 'MCP App 设置读取失败'));
+      }
       if (nextServer.active_operation_id) {
         setOperation(await getClaudeMcpOperation(nextServer.active_operation_id));
       }
@@ -453,7 +585,7 @@ export default function ClaudeMcpServerDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [loadInventoryForServer, serverName]);
+  }, [loadAppEffectiveStatus, loadInventoryForServer, serverName]);
 
   useEffect(() => {
     void load();
@@ -586,6 +718,36 @@ export default function ClaudeMcpServerDetailPage({
       setBusyAction(null);
     }
   }, [busyAction, onBack, server, serverName]);
+
+  const saveAppSettings = useCallback(async () => {
+    if (!server || !appSettings || busyAction) return;
+    setBusyAction('app-settings');
+    setAppSettingsError(null);
+    try {
+      const next = await updateClaudeMcpAppSettings(server, appSettings, {
+        enabled: editAppEnabled,
+        lowRiskToolCalls: editAppLowRiskToolCalls,
+        uiMessages: editAppUiMessages,
+      });
+      setAppSettings(next);
+      setEditAppEnabled(next.desired.enabled);
+      setEditAppLowRiskToolCalls(next.desired.interactions.lowRiskToolCalls);
+      setEditAppUiMessages(next.desired.interactions.uiMessages);
+      await loadAppEffectiveStatus();
+    } catch (error) {
+      setAppSettingsError(errorMessage(error, 'MCP App 设置保存失败'));
+    } finally {
+      setBusyAction(null);
+    }
+  }, [
+    appSettings,
+    busyAction,
+    editAppEnabled,
+    editAppLowRiskToolCalls,
+    editAppUiMessages,
+    loadAppEffectiveStatus,
+    server,
+  ]);
 
   const tabCounts = {
     tools: inventory?.capabilities.tools.count,
@@ -772,6 +934,97 @@ export default function ClaudeMcpServerDetailPage({
       </section>
 
       {pageError ? <div role="alert" style={{ borderRadius: '0.9rem', background: 'color-mix(in srgb, var(--color-state-error) 10%, var(--color-bg-paper))', color: 'var(--color-state-error)', padding: '0.75rem 0.9rem', fontSize: '0.82rem' }}>{pageError}</div> : null}
+
+      <DetailSection
+        title="App 设置"
+        layout="split"
+        isMobile={isMobile}
+      >
+        <div style={{ display: 'grid' }}>
+          {appSettings ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: isMobile ? 'wrap' : 'nowrap', paddingBottom: '1rem' }}>
+                <label style={{ display: 'flex', minWidth: 0, minHeight: '2.625rem', flex: '1 1 16rem', alignItems: 'flex-start', gap: '0.58rem', color: 'var(--color-text-primary)', fontSize: '0.82rem', fontWeight: 700 }}>
+                  <input
+                    type="checkbox"
+                    checked={editAppEnabled}
+                    onChange={(event) => setEditAppEnabled(event.target.checked)}
+                    disabled={Boolean(busyAction)}
+                  />
+                  <span>
+                    在聊天中使用 App
+                    <span style={{ display: 'block', marginTop: '0.18rem', maxWidth: '42rem', color: 'var(--color-text-muted)', fontSize: '0.74rem', fontWeight: 400, lineHeight: 1.5 }}>
+                      工具返回可视内容时，在当前连接的聊天中显示交互页面；普通工具结果始终保留。
+                    </span>
+                  </span>
+                </label>
+                <Pill tone={appStatusTone(appEffectiveStatus)}>{appStatusLabel(appEffectiveStatus)}</Pill>
+              </div>
+
+              <div style={{ display: 'grid', borderTop: SOFT_ROW_DIVIDER }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: isMobile ? 'wrap' : 'nowrap', padding: '0.9rem 0' }}>
+                  <label style={{ display: 'flex', minWidth: 0, flex: '1 1 16rem', alignItems: 'flex-start', gap: '0.58rem', color: editAppEnabled ? 'var(--color-text-secondary)' : 'var(--color-text-muted)', fontSize: '0.78rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={editAppLowRiskToolCalls}
+                      onChange={(event) => setEditAppLowRiskToolCalls(event.target.checked)}
+                      disabled={!editAppEnabled || Boolean(busyAction)}
+                    />
+                    <span>
+                      <strong style={{ display: 'block', color: 'inherit', fontSize: '0.8rem' }}>低风险工具调用</strong>
+                      <span style={{ display: 'block', marginTop: '0.18rem', color: 'var(--color-text-muted)', fontSize: '0.73rem', lineHeight: 1.45 }}>
+                        仅允许 App 调用服务端明确列入低风险清单的工具；显式危险工具仍会被拒绝。
+                      </span>
+                    </span>
+                  </label>
+                  <Pill tone={appEffectiveStatus?.effective.features.appToolCalls ? 'success' : 'neutral'}>
+                    {appEffectiveStatus?.effective.features.appToolCalls ? '实际可用' : '未生效'}
+                  </Pill>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: isMobile ? 'wrap' : 'nowrap', padding: '0.9rem 0', borderTop: SOFT_ROW_DIVIDER }}>
+                  <label style={{ display: 'flex', minWidth: 0, flex: '1 1 16rem', alignItems: 'flex-start', gap: '0.58rem', color: editAppEnabled ? 'var(--color-text-secondary)' : 'var(--color-text-muted)', fontSize: '0.78rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={editAppUiMessages}
+                      onChange={(event) => setEditAppUiMessages(event.target.checked)}
+                      disabled={!editAppEnabled || Boolean(busyAction)}
+                    />
+                    <span>
+                      <strong style={{ display: 'block', color: 'inherit', fontSize: '0.8rem' }}>向聊天发送消息</strong>
+                      <span style={{ display: 'block', marginTop: '0.18rem', color: 'var(--color-text-muted)', fontSize: '0.73rem', lineHeight: 1.45 }}>
+                        允许 App 将你在页面中触发的内容发送到当前聊天。
+                      </span>
+                    </span>
+                  </label>
+                  <Pill tone={appEffectiveStatus?.effective.features.uiMessage ? 'success' : 'neutral'}>
+                    {appEffectiveStatus?.effective.features.uiMessage ? '实际可用' : '未生效'}
+                  </Pill>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.85rem', flexWrap: 'wrap', paddingTop: '1rem', borderTop: SOFT_ROW_DIVIDER }}>
+                <div style={{ display: 'grid', gap: '0.22rem', color: 'var(--color-text-muted)', fontSize: '0.73rem', lineHeight: 1.45 }}>
+                  <span>你的选择：{appSettings.desired.enabled ? '开启' : '关闭'} · revision {appSettings.revision}</span>
+                  <span>
+                    实际状态：{APP_STATUS_REASONS[appEffectiveStatus?.effective.reasonCode ?? ''] ?? (appEffectiveStatus?.effective.enabled ? '当前连接可展示 MCP App。' : '正在检查服务端可用性。')}
+                  </span>
+                </div>
+                <button type="button" onClick={() => void saveAppSettings()} disabled={Boolean(busyAction)} style={{ ...actionStyle(true), width: isMobile ? '100%' : undefined, justifyContent: 'center', opacity: busyAction ? 0.62 : 1 }}>
+                  {busyAction === 'app-settings' ? <IconLoader style={{ width: '0.82rem', height: '0.82rem' }} /> : <IconCheck style={{ width: '0.82rem', height: '0.82rem' }} />}
+                  保存 App 设置
+                </button>
+              </div>
+            </>
+          ) : (
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem', lineHeight: 1.5 }}>
+              {appSettingsError ?? '正在读取此连接的 App 设置。'}
+            </div>
+          )}
+          {appSettings && appSettingsError ? (
+            <div role="alert" style={{ color: 'var(--color-state-error)', fontSize: '0.76rem' }}>{appSettingsError}</div>
+          ) : null}
+        </div>
+      </DetailSection>
 
       <section aria-label="MCP 使用策略" style={{ display: 'grid', gap: '0.28rem', padding: '0.1rem 0 0.25rem' }}>
         <h2 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '0.9rem', fontWeight: 700 }}>使用策略</h2>

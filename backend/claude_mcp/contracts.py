@@ -14,6 +14,7 @@
 [Sync] 2026-08-25: treat unprobed remote authentication as unknown until standard-MCP discovery supplies evidence.
 [Sync] 2026-08-27: distinguish transient PostgreSQL capability verification failures from a missing schema contract.
 [Sync] 2026-09-06: add versioned deny-by-default MCP Apps policy and Phase 2/3 Node projections.
+[Sync] 2026-09-06: add revisioned per-connection App preference and availability contracts.
 """
 
 from __future__ import annotations
@@ -122,6 +123,8 @@ class ClaudeMcpErrorCode(str, Enum):
     APP_RUNTIME_DENIED = "CLAUDE_MCP_APP_RUNTIME_DENIED"
     APP_RUNTIME_REVISION_CONFLICT = "CLAUDE_MCP_APP_RUNTIME_REVISION_CONFLICT"
     APP_RUNTIME_POLICY_INVALID = "CLAUDE_MCP_APP_RUNTIME_POLICY_INVALID"
+    APP_SETTINGS_CAPABILITY_MISSING = "CLAUDE_MCP_APP_SETTINGS_CAPABILITY_MISSING"
+    APP_SETTINGS_REVISION_CONFLICT = "CLAUDE_MCP_APP_SETTINGS_REVISION_CONFLICT"
 
 
 class ClaudeMcpError(RuntimeError):
@@ -349,6 +352,86 @@ class McpAppsRuntimePolicy:
 
 
 @dataclass(frozen=True)
+class McpAppPreferenceState:
+    """One actor-owned desired state; the immutable default denies every choice."""
+
+    enabled: bool = False
+    low_risk_tool_calls: bool = False
+    ui_messages: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "enabled": self.enabled,
+            "interactions": {
+                "lowRiskToolCalls": self.low_risk_tool_calls,
+                "uiMessages": self.ui_messages,
+            },
+        }
+
+
+class McpAppAvailabilityState(str, Enum):
+    READY = "ready"
+    CONNECTION_DISABLED = "connection_disabled"
+    TRANSPORT_UNSUPPORTED = "transport_unsupported"
+    SERVER_POLICY_UNAVAILABLE = "server_policy_unavailable"
+    INVENTORY_UNAVAILABLE = "inventory_unavailable"
+    APP_NOT_ADVERTISED = "app_not_advertised"
+
+
+@dataclass(frozen=True)
+class McpAppServerAvailability:
+    """Safe backend facts used by the Next deployment-policy composition root."""
+
+    state: McpAppAvailabilityState
+    reason_code: str | None
+    resource_reads: bool = False
+    low_risk_tool_calls: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "state": self.state.value,
+            "reasonCode": self.reason_code,
+            "resourceReads": self.resource_reads,
+            "lowRiskToolCalls": self.low_risk_tool_calls,
+        }
+
+
+@dataclass(frozen=True)
+class McpAppConnectionSettings:
+    """Default, actor desired, revision, and safe server-availability projection."""
+
+    revision: int
+    desired: McpAppPreferenceState
+    server: McpAppServerAvailability
+    default: McpAppPreferenceState = field(default_factory=McpAppPreferenceState)
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.version != 1 or self.revision < 1:
+            raise ValueError("invalid MCP App connection settings revision")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "version": self.version,
+            "revision": self.revision,
+            "default": self.default.to_dict(),
+            "desired": self.desired.to_dict(),
+            "server": self.server.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class McpAppSettingsPatch:
+    expected_revision: int
+    desired: McpAppPreferenceState
+    workspace_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.expected_revision < 1:
+            raise ValueError("expected_revision must be positive")
+
+
+@dataclass(frozen=True)
 class McpAppsStaticView:
     """Non-sensitive Node composition metadata; never authorizes production Apps."""
 
@@ -376,6 +459,7 @@ class McpAppsConnectionView:
     server_ref: str
     config_revision: int
     credential_revision: int
+    app_settings_revision: int
     expires_at: str
     allowed_tools: tuple[str, ...]
     allowed_resources: tuple[str, ...]
@@ -387,7 +471,8 @@ class McpAppsConnectionView:
         return (
             "McpAppsConnectionView("
             f"server_ref={self.server_ref!r}, config_revision={self.config_revision}, "
-            f"credential_revision={self.credential_revision}, policy_revision={self.policy.revision}, "
+            f"credential_revision={self.credential_revision}, app_settings_revision={self.app_settings_revision}, "
+            f"policy_revision={self.policy.revision}, "
             "connection_profile=<redacted>)"
         )
 
@@ -401,6 +486,7 @@ class McpAppsConnectionView:
             "enabled": True,
             "configRevision": self.config_revision,
             "credentialRevision": self.credential_revision,
+            "appSettingsRevision": self.app_settings_revision,
             "expiresAt": self.expires_at,
             "allowedTools": list(self.allowed_tools),
             "allowedResources": list(self.allowed_resources),

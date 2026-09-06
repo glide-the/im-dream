@@ -2,6 +2,7 @@
 /* [Output] Low-interruption historical process disclosure matching Chat/Dream themes. */
 /* [Pos] Shared historical assistant turn styles for both ChatPanel hosts. */
 /* [Sync] 2026-09-02: add compact loading/error/retry treatment for lazy process detail. */
+/* [Sync] 2026-09-06: place promoted interactive results outside the collapsible process region. */
 
 .chat-assistant-turn {
   width: 100%;
@@ -67,6 +68,7 @@
 }
 
 .chat-assistant-turn__process,
+.chat-assistant-turn__outside-process,
 .chat-assistant-turn__final {
   min-width: 0;
   max-width: 100%;
@@ -80,6 +82,10 @@
 }
 
 .chat-assistant-turn__final {
+  padding-top: 1rem;
+}
+
+.chat-assistant-turn__outside-process {
   padding-top: 1rem;
 }
 

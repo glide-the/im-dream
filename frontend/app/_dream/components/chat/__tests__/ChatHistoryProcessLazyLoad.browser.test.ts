@@ -1,7 +1,8 @@
 // [Input] Production ChatMessageList with one server-projected historical assistant final.
-// [Output] Local-Chrome evidence for expand-only exact-id fetch, single-flight, retry, and unmount.
+// [Output] Local-Chrome evidence for expand-only exact-id fetch, single-flight, retry, unmount, and MCP App promotion.
 // [Pos] Shared Chat/Dream lazy process-detail browser acceptance seam.
 // [Sync] 2026-09-02: created for final-first history hydration and on-demand canonical process rendering.
+// [Sync] 2026-09-06: prove the exact MCP App panel is a persistent sibling outside the collapsible process.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node harness imports Node APIs outside the browser tsconfig.
@@ -36,7 +37,7 @@ const harnessModule = `
   import '/app/_dream/styles/markdown.css';
   import ChatMessageList from '/app/_dream/components/chat/ChatMessageList.tsx';
 
-  const detailPayload = {
+  window.__detailPayload = {
     id: 'assistant/1',
     role: 'assistant',
     parts: [
@@ -61,13 +62,13 @@ const harnessModule = `
       return Promise.resolve(new Response('{}', { status: 503 }));
     }
     if (window.__processMode === 'success') {
-      return Promise.resolve(new Response(JSON.stringify(detailPayload), {
+      return Promise.resolve(new Response(JSON.stringify(window.__detailPayload), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }));
     }
     return new Promise((resolve) => {
-      window.__resolveProcess = () => resolve(new Response(JSON.stringify(detailPayload), {
+      window.__resolveProcess = () => resolve(new Response(JSON.stringify(window.__detailPayload), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }));
@@ -108,6 +109,7 @@ async function startHarness() {
     server: { host: '127.0.0.1', port, strictPort: true },
     plugins: [{
       name: 'chat-history-process-lazy-load-browser-harness',
+      enforce: 'pre',
       configureServer(vite) {
         vite.middlewares.use(async (request, response, next) => {
           if ((request as { url?: string }).url !== '/chat-history-process') return next();
@@ -121,9 +123,24 @@ async function startHarness() {
         });
       },
       resolveId(id) {
+        if (id.endsWith('/mcp-apps/McpAppHostPanel') || id.endsWith('/mcp-apps/McpAppHostPanel.tsx')) {
+          return '\0mock-mcp-app-host-panel.js';
+        }
         return id === '/chat-history-process.js' ? '\0chat-history-process.js' : null;
       },
       load(id) {
+        if (id === '\0mock-mcp-app-host-panel.js') {
+          return `
+            import React from 'react';
+            export default function MockMcpAppHostPanel({ call }) {
+              return React.createElement('section', {
+                'aria-label': 'Interactive tool result',
+                'data-testid': 'mcp-app-panel',
+                'data-tool-call-id': call.toolCallId,
+              }, 'interactive App result');
+            }
+          `;
+        }
         return id === '\0chat-history-process.js' ? harnessModule : null;
       },
     }],
@@ -176,6 +193,79 @@ test('detail failure keeps final readable and retry reuses the same public endpo
     await expect(page.locator('[data-turn-process]')
       .getByText('loaded process evidence').last()).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __processRequests: number }).__processRequests)).toBe(2);
+  } finally {
+    await server.close();
+  }
+});
+
+test('validated MCP App panel stays outside the process disclosure after collapse', async ({ page }) => {
+  const { server, url } = await startHarness();
+  try {
+    await page.goto(url);
+    await page.evaluate(() => {
+      const result = {
+        content: [{ type: 'text', text: 'Read-only state: ready' }],
+        structuredContent: { state: 'ready' },
+      };
+      (window as unknown as {
+        __processMode: string;
+        __detailPayload: unknown;
+      }).__processMode = 'success';
+      (window as unknown as { __detailPayload: unknown }).__detailPayload = {
+        id: 'assistant/1',
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'loaded process evidence' },
+          {
+            type: 'dynamic-tool',
+            toolName: 'mcp__official-basic__get-time',
+            toolCallId: 'call-1',
+            state: 'output-available',
+            input: { requested: true },
+            output: result,
+            toolMetadata: {
+              mcpAppResult: {
+                version: 1,
+                serverRef: 'official-basic',
+                toolName: 'get-time',
+                toolCallId: 'call-1',
+                input: { requested: true },
+                workspaceScope: 'workspace-1',
+                resourceUri: 'ui://get-time/mcp-app.html',
+                result,
+              },
+            },
+          },
+          { type: 'text', text: 'visible final answer' },
+        ],
+        metadata: {
+          turnId: 'turn-1',
+          turnStatus: 'completed',
+          finalPartIndex: 2,
+          durationMs: 1200,
+        },
+      };
+    });
+
+    const toggle = page.locator('.chat-assistant-turn__toggle');
+    await toggle.click();
+    await expect(page.locator('[data-turn-process]')
+      .getByText('loaded process evidence').last()).toBeVisible();
+
+    const panel = page.locator('[data-testid="mcp-app-panel"]');
+    await expect(panel).toHaveCount(1);
+    await expect(panel).toHaveText('interactive App result');
+    expect(await panel.evaluate((element) => ({
+      insideProcess: Boolean(element.closest('[data-turn-process]')),
+      insideOutsideProcess: Boolean(element.closest('[data-turn-outside-process]')),
+    }))).toEqual({ insideProcess: false, insideOutsideProcess: true });
+
+    await toggle.click();
+    await expect(page.locator('[data-turn-process]')).toHaveCount(0);
+    await expect(panel).toHaveCount(1);
+    expect(await panel.evaluate((element) => Boolean(
+      element.closest('[data-turn-outside-process]'),
+    ))).toBe(true);
   } finally {
     await server.close();
   }

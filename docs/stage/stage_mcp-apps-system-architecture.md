@@ -2,6 +2,7 @@
 <!-- [输出] Phase 0→3 的技术执行顺序、必要依赖、验收证据和回滚边界。 -->
 <!-- [范围] 只描述产品实现、技术依赖、验证关系与回滚边界。 -->
 <!-- [同步] 2026-09-06：依据 54f3bbe5 和统一回执，将 Phase 0—3 收敛为已验证技术 preview 与独立生产 No-Go。 -->
+<!-- [同步] 2026-09-06：明确服务端 App-callable positive list 可为缺少可选风险 hints 的标准工具完成低风险分类，显式危险 hints 仍否决。 -->
 
 # MCP Apps Phase 0→3 技术执行计划
 
@@ -145,7 +146,7 @@ Phase 2 只有在 Phase 1 当前候选证据完整后才能验证。
 | ID | 工作项 | 验收重点 |
 |---|---|---|
 | I2-01 | `AppBridge.oncalltool` 接管页面工具请求，并沿 Browser Client→Node→Server 标准链路调用。 | Host 与 Node 均执行权限校验；成功调用不创建 Agent turn。 |
-| I2-02 | 服务端 App-callable allowlist 只开放策略允许的低风险工具。 | 高风险、未分类和需要逐次确认的工具在 Node 拒绝且不上游。 |
+| I2-02 | 服务端 App-callable allowlist 只开放策略明确分类的低风险工具。 | 未列入 positive list、显式高风险或需要逐次确认的工具在 Node 拒绝且不上游；缺少可选 MCP risk hints 不额外阻断已分类工具。 |
 | I2-03 | `ui/message` 进入当前页面已有 Thread 的正常 Chat ingress。 | 一次请求产生一个普通用户消息和一个新 Agent turn。 |
 | I2-04 | Host→App 只发送声明范围内的 input/result/theme/locale/display context。 | 不包含完整对话或敏感上下文。 |
 | I2-05 | 版本化 `window.im` 兼容层与规范成员保持同参数、返回和失败语义。 | 只改变 namespace，不发明私有 transport。 |

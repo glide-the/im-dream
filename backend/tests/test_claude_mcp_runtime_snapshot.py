@@ -7,6 +7,7 @@
 [Sync] 2026-08-25: cover bounded standard-MCP refresh before expired OAuth projection.
 [Sync] 2026-09-06: require a monotonic refresh revision and coherent authoritative single-Server record.
 [Sync] 2026-09-06: bind Apps only through current descriptor metadata plus a listed ui:// resource.
+[Sync] 2026-09-06: refresh expired inventory only for policy-selected App Servers before a first Chat tool call.
 """
 
 from __future__ import annotations
@@ -150,6 +151,59 @@ def test_descriptor_app_bindings_follow_effective_scope_and_require_resource():
         assert await loader.load_mcp_app_resource_bindings("7", None) == {
             "apps": {"get-time": "ui://get-time/mcp-app.html"}
         }
+
+    asyncio.run(scenario())
+
+
+def test_expired_app_inventory_is_refreshed_before_first_turn_projection():
+    async def scenario():
+        app_server = _server("apps-server", "apps")
+        ordinary_server = _server("ordinary-server", "ordinary")
+        repository = _Repository([app_server, ordinary_server])
+        calls = []
+
+        class _InventoryRefresher:
+            async def discover_one(self, actor_id, server_id, **kwargs):
+                calls.append((actor_id, server_id, kwargs))
+                repository.snapshots[server_id] = {
+                    "status": "complete",
+                    "inventory": {
+                        "tools": [{
+                            "name": "get-time",
+                            "_meta": {
+                                "ui": {
+                                    "resourceUri": "ui://get-time/mcp-app.html"
+                                }
+                            },
+                        }],
+                        "resources": [{"uri": "ui://get-time/mcp-app.html"}],
+                    },
+                }
+                return SimpleNamespace(
+                    status=SimpleNamespace(value="complete"),
+                    inventory_dict=lambda: repository.snapshots[server_id]["inventory"],
+                )
+
+        loader = ManagedMcpRuntimeSnapshotLoader(
+            repository,
+            McpCredentialCipher(key=b"k" * 32, key_version=1),
+            stdio_profiles=StdioProfileResolver({}),
+            max_servers=8,
+            app_inventory_refresher=_InventoryRefresher(),
+            app_server_keys_provider=lambda: ("apps",),
+        )
+
+        first = await loader.load("7", None)
+        assert first.mcp_app_resource_bindings == {
+            "apps": {"get-time": "ui://get-time/mcp-app.html"}
+        }
+        assert calls == [
+            ("7", app_server.id, {"workspace_id": None, "force": False})
+        ]
+
+        second = await loader.load("7", None)
+        assert second.mcp_app_resource_bindings == first.mcp_app_resource_bindings
+        assert len(calls) == 1
 
     asyncio.run(scenario())
 

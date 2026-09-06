@@ -3,11 +3,12 @@
 // [Pos] Focused result-identity/refresh boundary test; no Browser or network state.
 // [Sync] 2026-09-06: require versioned workspace identity and preserve ordinary fallback on every rejection.
 // [Sync] 2026-09-06: match the official data-only CallToolResult; the resource URI belongs to the trusted descriptor projection.
+// [Sync] 2026-09-06: distinguish semantically identical history hydration from a changed saved call.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseSavedMcpAppToolCall } from './result.ts';
+import { parseSavedMcpAppToolCall, sameSavedMcpAppToolCall } from './result.ts';
 
 function fixture() {
   const result = {
@@ -47,6 +48,32 @@ test('consumes the versioned projection and preserves the complete CallToolResul
   assert.equal(parsed.toolName, 'get-time');
   assert.deepEqual(parsed.input, { requested: true });
   assert.equal(parsed.workspaceScope, 'workspace-1');
+});
+
+test('treats cloned saved calls as the same identity but detects result changes', () => {
+  const { result, projection } = fixture();
+  const first = parseSavedMcpAppToolCall({
+    mcpAppResult: projection,
+    output: result,
+    toolName: 'mcp__official-basic__get-time',
+    toolCallId: 'call-1',
+    input: { requested: true },
+  });
+  const clonedResult = structuredClone(result);
+  const second = parseSavedMcpAppToolCall({
+    mcpAppResult: structuredClone(projection),
+    output: clonedResult,
+    toolName: 'mcp__official-basic__get-time',
+    toolCallId: 'call-1',
+    input: { requested: true },
+  });
+  assert.ok(first && second);
+  assert.equal(sameSavedMcpAppToolCall(first, second), true);
+  const changed = {
+    ...second,
+    result: { ...second.result, structuredContent: { state: 'changed' } },
+  };
+  assert.equal(sameSavedMcpAppToolCall(first, changed), false);
 });
 
 test('never derives identity from spoofed ordinary output metadata', () => {

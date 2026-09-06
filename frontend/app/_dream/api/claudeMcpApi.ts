@@ -10,6 +10,7 @@
 // [Sync] 2026-08-25: add revision-aware PATCH for detail-page configuration edits.
 // [Sync] 2026-08-25: keep authentication classification backend-owned; CRUD callers never choose OAuth versus anonymous.
 // [Sync] 2026-08-25: make detail inventory cache-first so automatic loading never forces redundant remote discovery.
+// [Sync] 2026-09-06: add typed per-connection MCP App desired and effective settings APIs.
 
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -63,6 +64,51 @@ export interface ClaudeMcpServer {
   workspace_id: string | null;
   url: string | null;
   stdio_profile_key: string | null;
+}
+
+export interface ClaudeMcpAppPreferenceState {
+  enabled: boolean;
+  interactions: {
+    lowRiskToolCalls: boolean;
+    uiMessages: boolean;
+  };
+}
+
+export interface ClaudeMcpAppSettings {
+  version: 1;
+  revision: number;
+  default: ClaudeMcpAppPreferenceState;
+  desired: ClaudeMcpAppPreferenceState;
+  server: {
+    state: 'ready' | 'connection_disabled' | 'transport_unsupported' | 'server_policy_unavailable' | 'inventory_unavailable' | 'app_not_advertised';
+    reasonCode: string | null;
+    resourceReads: boolean;
+    lowRiskToolCalls: boolean;
+  };
+}
+
+export interface ClaudeMcpAppEffectiveStatus {
+  desired: {
+    enabled: boolean;
+    features: {
+      readResource: boolean;
+      appToolCalls: boolean;
+      uiMessage: boolean;
+      windowIm: boolean;
+    };
+  };
+  effective: {
+    enabled: boolean;
+    features: {
+      readResource: boolean;
+      appToolCalls: boolean;
+      uiMessage: boolean;
+      windowIm: boolean;
+    };
+    state: 'enabled' | 'partially_enabled' | 'disabled' | 'unavailable';
+    reasonCode: string | null;
+  };
+  connection: ClaudeMcpAppSettings | null;
 }
 
 export interface ClaudeMcpOperation {
@@ -199,6 +245,74 @@ export async function getClaudeMcpServer(serverName: string): Promise<ClaudeMcpS
     `/api/claude-mcp/servers/${encodeURIComponent(serverName)}`,
   );
   return payload.server;
+}
+
+export async function getClaudeMcpAppSettings(
+  serverIdentifier: string,
+  workspaceId: string | null = null,
+): Promise<ClaudeMcpAppSettings> {
+  const query = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : '';
+  const payload = await request<{ appSettings: ClaudeMcpAppSettings }>(
+    `/api/claude-mcp/servers/${encodeURIComponent(serverIdentifier)}/app-settings${query}`,
+  );
+  return payload.appSettings;
+}
+
+export async function updateClaudeMcpAppSettings(
+  server: ClaudeMcpServer,
+  settings: ClaudeMcpAppSettings,
+  desired: {
+    enabled: boolean;
+    lowRiskToolCalls: boolean;
+    uiMessages: boolean;
+  },
+): Promise<ClaudeMcpAppSettings> {
+  if (!server.id) {
+    throw new ClaudeMcpApiError(
+      'CLAUDE_MCP_SERVER_CONFIGURATION_INVALID',
+      'MCP Server 缺少可更新的数据库标识。',
+      409,
+    );
+  }
+  const payload = await request<{ appSettings: ClaudeMcpAppSettings }>(
+    `/api/claude-mcp/servers/${encodeURIComponent(server.id)}/app-settings`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        expected_revision: settings.revision,
+        enabled: desired.enabled,
+        low_risk_tool_calls: desired.lowRiskToolCalls,
+        ui_messages: desired.uiMessages,
+        workspace_id: server.workspace_id,
+      }),
+    },
+  );
+  return payload.appSettings;
+}
+
+export async function getClaudeMcpAppEffectiveStatus(
+  serverIdentifier: string,
+  workspaceId: string | null = null,
+): Promise<ClaudeMcpAppEffectiveStatus> {
+  const token = getAuthToken();
+  if (!token) {
+    throw new ClaudeMcpApiError('AUTH_REQUIRED', '需要登录后查看 MCP App 状态。', 401);
+  }
+  const query = new URLSearchParams({ serverRef: serverIdentifier });
+  if (workspaceId) query.set('workspaceScope', workspaceId);
+  const response = await fetch(`/api/mcp-apps/phase1-status?${query.toString()}`, {
+    cache: 'no-store',
+    credentials: 'include',
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new ClaudeMcpApiError(
+      `HTTP_${response.status}`,
+      'MCP App 实际状态读取失败。',
+      response.status,
+    );
+  }
+  return response.json() as Promise<ClaudeMcpAppEffectiveStatus>;
 }
 
 export async function getClaudeMcpServerInventory(

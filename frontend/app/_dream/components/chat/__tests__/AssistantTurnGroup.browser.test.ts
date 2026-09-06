@@ -1,7 +1,8 @@
-// [Input] Validated historical turn projection and a deliberately heavy lazy part renderer.
-// [Output] Browser proof for final-only default mount, accessibility, order, unmount, and anchor stability.
+// [Input] Validated historical turn projection plus persistent and deliberately heavy lazy renderers.
+// [Output] Browser proof for collapsed-process default, persistent outside result, accessibility, order, unmount, and anchor stability.
 // [Pos] Shared Chat/Dream historical-turn interaction acceptance seam.
 // [Sync] 2026-09-02: cover the full projection fields and approved disclosure interaction.
+// [Sync] 2026-09-06: prove a promoted App-like result remains mounted outside the process while process children toggle.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node harness imports Node APIs outside the browser tsconfig.
@@ -28,7 +29,7 @@ async function reserveEphemeralPort(): Promise<number> {
   });
 }
 
-test('collapsed history mounts only final and keyboard expansion mounts exact process order', async ({ page }) => {
+test('collapsed history keeps promoted result and final while keyboard expansion mounts exact process order', async ({ page }) => {
   const harnessModule = `
     import React, { useState } from 'react';
     import { createRoot } from 'react-dom/client';
@@ -54,6 +55,9 @@ test('collapsed history mounts only final and keyboard expansion mounts exact pr
         },
         expanded,
         onExpandedChange: (_turnKey, value) => setExpanded(value),
+        renderOutsideProcess: () => React.createElement('div', {
+          'data-persistent-result': 'true',
+        }, 'interactive-result'),
         renderPart: (partIndex, kind) => {
           window.__partCalls.push(partIndex);
           return React.createElement('div', {
@@ -102,6 +106,8 @@ test('collapsed history mounts only final and keyboard expansion mounts exact pr
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('[data-final-node="true"]')).toHaveText('final-answer');
     await expect(page.locator('[data-heavy-process-node]')).toHaveCount(0);
+    await expect(page.locator('[data-persistent-result="true"]')).toHaveText('interactive-result');
+    await expect(page.locator('[data-turn-outside-process]')).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __partCalls: number[] }).__partCalls)).toEqual([3]);
 
     const anchorTop = await toggle.evaluate((element) => element.getBoundingClientRect().top);
@@ -117,12 +123,14 @@ test('collapsed history mounts only final and keyboard expansion mounts exact pr
       'intermediate-markdown',
       'tool-output-json',
     ]);
+    await expect(page.locator('[data-persistent-result="true"]')).toHaveCount(1);
     const expandedTop = await toggle.evaluate((element) => element.getBoundingClientRect().top);
     expect(Math.abs(expandedTop - anchorTop)).toBeLessThan(1);
 
     await page.keyboard.press('Space');
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('[data-heavy-process-node]')).toHaveCount(0);
+    await expect(page.locator('[data-persistent-result="true"]')).toHaveCount(1);
     await expect(page.locator('[data-final-node="true"]')).toHaveText('final-answer');
     await expect(toggle).toBeFocused();
   } finally {

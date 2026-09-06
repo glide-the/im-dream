@@ -8,6 +8,8 @@
 [Sync] 2026-09-06: re-read identity/enabled/revisions before any single-Server credential access.
 [Sync] 2026-09-06: return only a post-refresh record/credential-coherent single-Server projection.
 [Sync] 2026-09-06: carry fresh descriptor-owned MCP App resource bindings beside, never inside, secret Runtime configs.
+[Sync] 2026-09-06: expose descriptor binding extraction for connection App availability checks.
+[Sync] 2026-09-06: rebuild expired descriptor inventory for policy-selected App Servers before a new Chat turn so first-call results retain their App identity.
 """
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ def _is_mcp_app_resource_uri(value: Any) -> bool:
     )
 
 
-def _mcp_app_bindings_from_snapshot(snapshot: Any) -> dict[str, str]:
+def mcp_app_bindings_from_snapshot(snapshot: Any) -> dict[str, str]:
     """Return exact tool→resource bindings from one current safe inventory."""
 
     if not isinstance(snapshot, Mapping) or snapshot.get("status") != "complete":
@@ -147,6 +149,8 @@ class ManagedMcpRuntimeSnapshotLoader:
         stdio_profiles: StdioProfileResolver,
         max_servers: int,
         oauth_refresher: Any | None = None,
+        app_inventory_refresher: Any | None = None,
+        app_server_keys_provider: Any | None = None,
     ) -> None:
         if max_servers < 1:
             raise ValueError("max_servers must be positive")
@@ -155,6 +159,8 @@ class ManagedMcpRuntimeSnapshotLoader:
         self.stdio_profiles = stdio_profiles
         self.max_servers = max_servers
         self.oauth_refresher = oauth_refresher
+        self.app_inventory_refresher = app_inventory_refresher
+        self.app_server_keys_provider = app_server_keys_provider
 
     async def load(
         self,
@@ -228,15 +234,59 @@ class ManagedMcpRuntimeSnapshotLoader:
         getter = getattr(self.repository, "get_discovery_snapshot", None)
         if not callable(getter) or not rows:
             return {}
+
+        selected_keys: set[str] | None = None
+        if callable(self.app_server_keys_provider):
+            provided = self.app_server_keys_provider()
+            if not isinstance(provided, (tuple, list, set, frozenset)) or not all(
+                isinstance(key, str) and key for key in provided
+            ):
+                return {}
+            selected_keys = set(provided)
+
+        async def current_snapshot(server: Any) -> Any | None:
+            snapshot = await getter(actor_id, server)
+            if (
+                isinstance(snapshot, Mapping)
+                and snapshot.get("status") == "complete"
+                and isinstance(snapshot.get("inventory"), Mapping)
+            ):
+                return snapshot
+            if selected_keys is not None and server.server_key not in selected_keys:
+                return snapshot
+            discover_one = getattr(self.app_inventory_refresher, "discover_one", None)
+            if not callable(discover_one):
+                return snapshot
+            try:
+                refreshed = await discover_one(
+                    actor_id,
+                    server.id,
+                    workspace_id=server.workspace_id,
+                    force=False,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - optional App enrichment stays fail-closed
+                return snapshot
+            status = getattr(getattr(refreshed, "status", None), "value", None)
+            inventory_dict = getattr(refreshed, "inventory_dict", None)
+            if status == "complete" and callable(inventory_dict):
+                inventory = inventory_dict()
+                if isinstance(inventory, Mapping):
+                    return {"status": "complete", "inventory": dict(inventory)}
+            return await getter(actor_id, server)
+
         snapshots = await asyncio.gather(
-            *(getter(actor_id, server) for server in rows)
+            *(current_snapshot(server) for server in rows)
         )
         result: dict[str, dict[str, str]] = {}
         for server, discovery_snapshot in zip(rows, snapshots):
             # A workspace row intentionally replaces the same-key user row,
             # including replacing an App-capable row with an ordinary Server.
             result.pop(server.server_key, None)
-            bindings = _mcp_app_bindings_from_snapshot(discovery_snapshot)
+            if selected_keys is not None and server.server_key not in selected_keys:
+                continue
+            bindings = mcp_app_bindings_from_snapshot(discovery_snapshot)
             if bindings:
                 result[server.server_key] = bindings
         return result

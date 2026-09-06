@@ -3,6 +3,7 @@
 // [Pos] task_411-02 manager contract test; no network, credential, database, or Browser state.
 // [Sync] 2026-09-06: prove scope isolation, revision revalidation, and automatic short-view expiry teardown.
 // [Sync] 2026-09-06: prove canonical hashed profile identity rejects same-revision credential drift.
+// [Sync] 2026-09-06: prove App-settings revision participates in lease revalidation.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -38,6 +39,7 @@ function view(revision = 4, expiresAt = '2099-01-01T00:00:00.000Z'): McpAppsConn
     enabled: true,
     configRevision: revision,
     credentialRevision: 2,
+    appSettingsRevision: 3,
     expiresAt,
     allowedTools: ['get-time'],
     allowedResources: ['ui://get-time/mcp-app.html'],
@@ -59,18 +61,21 @@ class Provider implements ConnectionViewProvider {
   calls: Array<{
     expectedConfigRevision?: number;
     expectedCredentialRevision?: number;
+    expectedAppSettingsRevision?: number;
     expectedPolicyRevision?: number;
   }> = [];
 
   async getConnectionView(input: {
     expectedConfigRevision?: number;
     expectedCredentialRevision?: number;
+    expectedAppSettingsRevision?: number;
     expectedPolicyRevision?: number;
   }): Promise<McpAppsConnectionView> {
     if (this.failure) throw this.failure;
     this.calls.push({
       expectedConfigRevision: input.expectedConfigRevision,
       expectedCredentialRevision: input.expectedCredentialRevision,
+      expectedAppSettingsRevision: input.expectedAppSettingsRevision,
       expectedPolicyRevision: input.expectedPolicyRevision,
     });
     return this.next;
@@ -173,6 +178,7 @@ test('a changed revision invalidates the old lease and connector', async () => {
   await assert.rejects(manager.revalidate(lease, context), /revision changed/);
   assert.equal(provider.calls.at(-1)?.expectedConfigRevision, 4);
   assert.equal(provider.calls.at(-1)?.expectedCredentialRevision, 2);
+  assert.equal(provider.calls.at(-1)?.expectedAppSettingsRevision, 3);
   assert.equal(provider.calls.at(-1)?.expectedPolicyRevision, 7);
   assert.equal(factory.closes, 1);
   assert.deepEqual(manager.diagnostics(), { connections: 0, leases: 0 });

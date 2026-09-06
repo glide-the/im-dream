@@ -9,6 +9,9 @@
 [Sync] 2026-08-27: report transient capability verification separately while allowing repository retries.
 [Sync] 2026-09-06: enforce versioned server-owned Apps policy before credential projection.
 [Sync] 2026-09-06: emit the authoritative post-refresh credential revision with each Node connection profile.
+[Sync] 2026-09-06: compose actor desired App settings with server policy and current descriptor availability.
+[Sync] 2026-09-06: let the server-owned App-callable list classify tools whose optional MCP risk hints are absent, while explicit unsafe hints still veto.
+[Sync] 2026-09-06: refresh an expired App inventory through the existing bounded discovery single-flight before declaring the connection unavailable.
 """
 
 from __future__ import annotations
@@ -29,6 +32,10 @@ from .contracts import (
     McpAppsConnectionView,
     McpAppsRuntimePolicy,
     McpAppsStaticView,
+    McpAppAvailabilityState,
+    McpAppConnectionSettings,
+    McpAppServerAvailability,
+    McpAppSettingsPatch,
     McpAuthKind,
     McpScope,
     McpServerCreate,
@@ -36,8 +43,44 @@ from .contracts import (
     McpTransport,
 )
 from .repository import McpServerRecord
+from .runtime_snapshot import mcp_app_bindings_from_snapshot
 
 _default_service: "ClaudeMcpService | None" = None
+
+
+def _inventory_tool_allows_app_call(tool: Any) -> bool:
+    if not isinstance(tool, dict) or not isinstance(tool.get("name"), str):
+        return False
+    annotations = tool.get("annotations")
+    metadata = tool.get("_meta")
+    if not isinstance(annotations, dict):
+        annotations = {}
+
+    # `appCallableLowRiskTools` is the server-owned classification and remains
+    # the positive authorization boundary. MCP ToolAnnotations are optional, so
+    # their absence must not make a standard App incompatible. Explicit unsafe
+    # or confirmation-required hints still veto that classification.
+    read_only_hints = (
+        annotations.get("readOnlyHint"),
+        annotations.get("read_only"),
+    )
+    destructive_hints = (
+        annotations.get("destructiveHint"),
+        annotations.get("destructive"),
+    )
+    return (
+        all(value is not False for value in read_only_hints)
+        and all(value is not True for value in destructive_hints)
+        and annotations.get("confirmationRequired") is not True
+        and annotations.get("requiresConfirmation") is not True
+        and (
+            not isinstance(metadata, dict)
+            or (
+                metadata.get("confirmationRequired") is not True
+                and metadata.get("requiresConfirmation") is not True
+            )
+        )
+    )
 
 
 class ClaudeMcpService:
@@ -65,6 +108,13 @@ class ClaudeMcpService:
             raise ClaudeMcpError(
                 ClaudeMcpErrorCode.SCHEMA_CAPABILITY_MISSING,
                 "Managed MCP database capability is unavailable.",
+            )
+
+    async def _require_app_settings_capability(self) -> None:
+        if not await self.repository.app_settings_capability_available():
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_SETTINGS_CAPABILITY_MISSING,
+                "MCP App connection settings are unavailable until the Admin schema capability is published.",
             )
 
     @staticmethod
@@ -157,6 +207,150 @@ class ClaudeMcpService:
             policy=self._mcp_apps_policy(),
         )
 
+    async def _current_mcp_app_inventory_snapshot(
+        self,
+        actor_id: str,
+        record: McpServerRecord,
+    ) -> Any | None:
+        """Return a current snapshot, rebuilding an expired cache through discovery."""
+        snapshot = await self.repository.get_discovery_snapshot(actor_id, record)
+        if (
+            isinstance(snapshot, dict)
+            and snapshot.get("status") == "complete"
+            and isinstance(snapshot.get("inventory"), dict)
+        ):
+            return snapshot
+
+        discover_one = getattr(self.discovery, "discover_one", None)
+        if not callable(discover_one):
+            return snapshot
+        try:
+            result = await discover_one(
+                actor_id,
+                record.id,
+                workspace_id=record.workspace_id,
+                force=False,
+            )
+        except ClaudeMcpError:
+            return snapshot
+
+        status = getattr(getattr(result, "status", None), "value", None)
+        inventory_dict = getattr(result, "inventory_dict", None)
+        if status == "complete" and callable(inventory_dict):
+            inventory = inventory_dict()
+            if isinstance(inventory, dict):
+                return {"status": "complete", "inventory": inventory}
+        return await self.repository.get_discovery_snapshot(actor_id, record)
+
+    async def _mcp_app_server_availability(
+        self,
+        actor_id: str,
+        record: McpServerRecord,
+    ) -> McpAppServerAvailability:
+        if not record.enabled:
+            return McpAppServerAvailability(
+                McpAppAvailabilityState.CONNECTION_DISABLED,
+                "MCP_APP_CONNECTION_DISABLED",
+            )
+        if record.transport is not McpTransport.STREAMABLE_HTTP:
+            return McpAppServerAvailability(
+                McpAppAvailabilityState.TRANSPORT_UNSUPPORTED,
+                "MCP_APP_STREAMABLE_HTTP_REQUIRED",
+            )
+        policy = self._mcp_apps_policy()
+        server_policy = policy.servers.get(record.server_key)
+        if server_policy is None or not policy.effective.resource_reads:
+            return McpAppServerAvailability(
+                McpAppAvailabilityState.SERVER_POLICY_UNAVAILABLE,
+                "MCP_APP_SERVER_POLICY_UNAVAILABLE",
+            )
+        snapshot = await self._current_mcp_app_inventory_snapshot(actor_id, record)
+        if not isinstance(snapshot, dict) or snapshot.get("status") != "complete":
+            return McpAppServerAvailability(
+                McpAppAvailabilityState.INVENTORY_UNAVAILABLE,
+                "MCP_APP_INVENTORY_UNAVAILABLE",
+            )
+        inventory = snapshot.get("inventory")
+        if not isinstance(inventory, dict):
+            return McpAppServerAvailability(
+                McpAppAvailabilityState.INVENTORY_UNAVAILABLE,
+                "MCP_APP_INVENTORY_UNAVAILABLE",
+            )
+        raw_tools = inventory.get("tools")
+        if not isinstance(raw_tools, list):
+            return McpAppServerAvailability(
+                McpAppAvailabilityState.INVENTORY_UNAVAILABLE,
+                "MCP_APP_INVENTORY_UNAVAILABLE",
+            )
+        bindings = mcp_app_bindings_from_snapshot(snapshot)
+        advertised = {
+            name: resource_uri
+            for name, resource_uri in bindings.items()
+            if name in server_policy.allowed_tools
+            and resource_uri in server_policy.allowed_resources
+        }
+        if not advertised:
+            return McpAppServerAvailability(
+                McpAppAvailabilityState.APP_NOT_ADVERTISED,
+                "MCP_APP_NOT_ADVERTISED",
+            )
+        app_callable_tools = {
+            str(tool["name"])
+            for tool in raw_tools
+            if _inventory_tool_allows_app_call(tool)
+        }
+        low_risk_tool_calls = bool(
+            policy.effective.low_risk_tool_calls
+            and app_callable_tools.intersection(
+                server_policy.app_callable_low_risk_tools
+            )
+        )
+        return McpAppServerAvailability(
+            McpAppAvailabilityState.READY,
+            None,
+            resource_reads=True,
+            low_risk_tool_calls=low_risk_tool_calls,
+        )
+
+    async def get_mcp_app_connection_settings(
+        self,
+        actor_id: str,
+        identifier: str,
+        workspace_id: str | None = None,
+    ) -> McpAppConnectionSettings:
+        await self._require_app_settings_capability()
+        record = await self._record(actor_id, identifier, workspace_id)
+        stored = await self.repository.get_app_settings(
+            actor_id, record.id, workspace_id
+        )
+        if stored is None:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.SERVER_NOT_FOUND,
+                "Claude MCP server was not found.",
+            )
+        return McpAppConnectionSettings(
+            revision=stored.revision,
+            desired=stored.desired,
+            server=await self._mcp_app_server_availability(actor_id, record),
+        )
+
+    async def update_mcp_app_connection_settings(
+        self,
+        actor_id: str,
+        identifier: str,
+        patch: McpAppSettingsPatch,
+    ) -> McpAppConnectionSettings:
+        await self._require_app_settings_capability()
+        record = await self._record(actor_id, identifier, patch.workspace_id)
+        stored = await self.repository.update_app_settings(
+            actor_id, record.id, patch
+        )
+        return McpAppConnectionSettings(
+            revision=stored.revision,
+            desired=stored.desired,
+            server=await self._mcp_app_server_availability(actor_id, record),
+        )
+
     async def mcp_apps_connection_view(
         self,
         actor_id: str,
@@ -165,6 +359,7 @@ class ClaudeMcpService:
         *,
         expected_config_revision: int | None,
         expected_credential_revision: int | None,
+        expected_app_settings_revision: int | None = None,
         ttl_seconds: float,
         expected_policy_revision: int | None = None,
         now: datetime | None = None,
@@ -189,6 +384,23 @@ class ClaudeMcpService:
                 ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT,
                 "MCP Apps session revision is no longer current.",
             )
+        await self._require_app_settings_capability()
+        app_settings = await self.repository.get_app_settings(
+            actor_id, record.id, workspace_scope
+        )
+        if app_settings is None or not app_settings.desired.enabled:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+                "MCP Apps are disabled for this connection.",
+            )
+        if (
+            expected_app_settings_revision is not None
+            and expected_app_settings_revision != app_settings.revision
+        ):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT,
+                "MCP Apps connection settings are no longer current.",
+            )
         policy = self._mcp_apps_policy()
         if (
             expected_policy_revision is not None
@@ -207,7 +419,7 @@ class ClaudeMcpService:
                 ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
                 "MCP Apps connection view is unavailable.",
             )
-        snapshot = await self.repository.get_discovery_snapshot(actor_id, record)
+        snapshot = await self._current_mcp_app_inventory_snapshot(actor_id, record)
         inventory = snapshot.get("inventory") if isinstance(snapshot, dict) else None
         if not isinstance(inventory, dict) or snapshot.get("status") != "complete":
             raise ClaudeMcpError(
@@ -221,35 +433,15 @@ class ClaudeMcpService:
                 ClaudeMcpErrorCode.INVENTORY_MALFORMED,
                 "MCP Apps catalog is invalid.",
             )
-        def inventory_tool_is_low_risk(tool: Any) -> bool:
-            if not isinstance(tool, dict) or not isinstance(tool.get("name"), str):
-                return False
-            annotations = tool.get("annotations")
-            metadata = tool.get("_meta")
-            return (
-                isinstance(annotations, dict)
-                and annotations.get("readOnlyHint") is True
-                and annotations.get("destructiveHint") is not True
-                and annotations.get("confirmationRequired") is not True
-                and annotations.get("requiresConfirmation") is not True
-                and (
-                    not isinstance(metadata, dict)
-                    or (
-                        metadata.get("confirmationRequired") is not True
-                        and metadata.get("requiresConfirmation") is not True
-                    )
-                )
-            )
-
         inventory_tools = {
             str(tool["name"])
             for tool in raw_tools
             if isinstance(tool, dict) and isinstance(tool.get("name"), str)
         }
-        inventory_safe_tools = {
+        inventory_app_callable_tools = {
             str(tool["name"])
             for tool in raw_tools
-            if inventory_tool_is_low_risk(tool)
+            if _inventory_tool_allows_app_call(tool)
         }
         allowed_tools = tuple(
             name
@@ -269,8 +461,9 @@ class ClaudeMcpService:
             for name in server_policy.app_callable_low_risk_tools
             if (
                 policy.effective.low_risk_tool_calls
+                and app_settings.desired.low_risk_tool_calls
                 and name in allowed_tools
-                and name in inventory_safe_tools
+                and name in inventory_app_callable_tools
             )
         )
         if not allowed_tools or not allowed_resources or self.runtime_snapshot_loader is None:
@@ -306,6 +499,7 @@ class ClaudeMcpService:
             server_ref=record.server_key,
             config_revision=projected.config_revision,
             credential_revision=projected.credential_revision,
+            app_settings_revision=app_settings.revision,
             expires_at=(current + timedelta(seconds=ttl_seconds)).isoformat(),
             allowed_tools=allowed_tools,
             allowed_resources=allowed_resources,
@@ -641,6 +835,10 @@ def build_default_claude_mcp_service() -> ClaudeMcpService:
         stdio_profiles=stdio_profiles,
         max_servers=settings.max_servers_per_actor,
         oauth_refresher=discovery,
+        app_inventory_refresher=discovery,
+        app_server_keys_provider=lambda: tuple(
+            _mcp_apps_policy_from_env().servers
+        ),
     )
     if metadata is not None:
         oauth = ManagedMcpOAuthCoordinator(

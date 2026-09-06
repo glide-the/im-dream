@@ -1,7 +1,8 @@
-// [Input] Injected Python projection responses and expected config/credential/policy revisions.
-// [Output] Request-shape, scope/static-policy validation, failure normalization, and expiry assertions.
+// [Input] Injected Python projections and expected config/credential/App-settings/policy revisions.
+// [Output] Request-shape, safe settings, scope/static-policy validation, failure normalization, and expiry assertions.
 // [Pos] Provider-free Node-to-Python boundary test; no network or credential logging.
 // [Sync] 2026-09-06: prove every-revision request and safe 403/409/503 mapping.
+// [Sync] 2026-09-06: prove App-settings reads and revision revalidation remain secret-free.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -19,6 +20,7 @@ function rawView() {
     enabled: true,
     configRevision: 4,
     credentialRevision: 2,
+    appSettingsRevision: 3,
     expiresAt: '2099-01-01T00:00:00.000Z',
     allowedTools: ['get-time'],
     allowedResources: ['ui://get-time/mcp-app.html'],
@@ -54,6 +56,7 @@ test('sends expected config, credential, and policy revisions on a no-store requ
     serverRef: 'official-basic',
     expectedConfigRevision: 4,
     expectedCredentialRevision: 2,
+    expectedAppSettingsRevision: 3,
     expectedPolicyRevision: 7,
   });
 
@@ -63,8 +66,51 @@ test('sends expected config, credential, and policy revisions on a no-store requ
     workspace_scope: 'workspace-1',
     expected_config_revision: 4,
     expected_credential_revision: 2,
+    expected_app_settings_revision: 3,
     expected_policy_revision: 7,
   });
+});
+
+test('reads a safe connection App-settings projection without the Node service credential', async () => {
+  let capturedUrl = '';
+  let captured: RequestInit | undefined;
+  const provider = new PythonConnectionViewProvider({
+    backendBaseUrl: 'https://backend.invalid',
+    serviceToken: 'service-private',
+    fetchImpl: async (url, init) => {
+      capturedUrl = String(url);
+      captured = init;
+      return Response.json({
+        appSettings: {
+          version: 1,
+          revision: 3,
+          default: {
+            enabled: false,
+            interactions: { lowRiskToolCalls: false, uiMessages: false },
+          },
+          desired: {
+            enabled: true,
+            interactions: { lowRiskToolCalls: true, uiMessages: false },
+          },
+          server: {
+            state: 'ready',
+            reasonCode: null,
+            resourceReads: true,
+            lowRiskToolCalls: true,
+          },
+        },
+      });
+    },
+  });
+  const settings = await provider.getAppConnectionSettings({
+    authorization: 'Bearer browser-private',
+    workspaceScope: 'workspace-1',
+    serverRef: 'official-basic',
+  });
+  assert.equal(settings.revision, 3);
+  assert.equal(settings.desired.interactions.lowRiskToolCalls, true);
+  assert.equal(capturedUrl, 'https://backend.invalid/api/claude-mcp/servers/official-basic/app-settings?workspace_id=workspace-1');
+  assert.deepEqual(captured?.headers, { authorization: 'Bearer browser-private' });
 });
 
 test('normalizes Python denial, revision conflict, and unavailability without reading bodies', async () => {

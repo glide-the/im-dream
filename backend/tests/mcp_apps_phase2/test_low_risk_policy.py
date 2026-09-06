@@ -4,6 +4,8 @@
 [Output] Positive low-risk projection plus pre-decryption denial/revision evidence.
 [Pos] Provider-free Phase 2 backend tests; Node owns actual tools/call execution.
 [Sync] 2026-09-06: prove annotations alone never authorize an App tool call.
+[Sync] 2026-09-06: intersect low-risk policy with the actor's connection App choice.
+[Sync] 2026-09-06: accept missing optional MCP risk hints only when the server positive list explicitly classifies the tool; explicit unsafe hints still veto.
 """
 
 from datetime import datetime, timezone
@@ -62,6 +64,7 @@ async def test_positive_low_risk_tool_is_projected_from_policy_and_safe_inventor
         "enabled",
         "configRevision",
         "credentialRevision",
+        "appSettingsRevision",
         "expiresAt",
         "allowedTools",
         "allowedResources",
@@ -136,12 +139,13 @@ async def test_upstream_annotation_without_server_positive_list_is_denied_before
     "annotations",
     [
         {"readOnlyHint": False, "destructiveHint": False},
+        {"read_only": False, "destructive": False},
         {"readOnlyHint": True, "destructiveHint": True},
+        {"read_only": True, "destructive": True},
         {"readOnlyHint": True, "confirmationRequired": True},
-        {},
     ],
 )
-async def test_high_risk_confirmation_required_and_unclassified_tools_stay_denied(
+async def test_explicitly_unsafe_or_confirmation_required_tools_stay_denied(
     annotations,
 ):
     inventory = {
@@ -163,6 +167,35 @@ async def test_high_risk_confirmation_required_and_unclassified_tools_stay_denie
     )
     assert view.allowed_tools == ("get-time",)
     assert view.app_callable_low_risk_tools == ()
+    assert loader.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("annotations", [{}, None])
+async def test_server_positive_list_classifies_tools_without_optional_risk_hints(
+    annotations,
+):
+    tool = {"name": "get-time"}
+    if annotations is not None:
+        tool["annotations"] = annotations
+    inventory = {
+        **INVENTORY,
+        "inventory": {
+            **INVENTORY["inventory"],
+            "tools": [tool],
+        },
+    }
+    service, loader = _service(POLICY, inventory)
+    view = await service.mcp_apps_connection_view(
+        SERVER.user_id,
+        SERVER.server_key,
+        SERVER.workspace_id,
+        expected_config_revision=4,
+        expected_credential_revision=2,
+        expected_policy_revision=7,
+        ttl_seconds=10,
+    )
+    assert view.app_callable_low_risk_tools == ("get-time",)
     assert loader.calls == 1
 
 

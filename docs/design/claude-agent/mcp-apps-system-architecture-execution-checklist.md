@@ -5,6 +5,7 @@
 <!-- [同步] 2026-09-05：SUO-397 以 DEC-003 将 S1-01 纠正为 IM-owned、provider-free 自建 AppServer 测试目标；production Apps 仍关闭。 -->
 <!-- [同步] 2026-09-05：SUO-403 以 DEC-004 废止 Phase 1 自建 AppServer，改为原样复用官方 basic-server-vanillajs@1.7.5 发布制品。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 锁定 frontend/ 根 workspace、单一 app/** 与同级 mcp-apps-runtime package，并作废旧目录下游输入。 -->
+<!-- [同步] 2026-09-06：服务端 App-callable positive list 显式完成低风险分类，缺少可选 MCP risk hints 不阻断官方标准示例。 -->
 <!-- [同步] 2026-09-06：清单改用技术依赖、当前证据和真实失败判断完成度。 -->
 <!-- [同步] 2026-09-06：当前 pnpm/official-AppServer 候选完成 Phase 0—3 provider-free 技术验收，production 保持关闭。 -->
 <!-- [同步] 2026-09-06：移除已失效的迁移派工语义，区分代码存在、技术验收、公开应用与 production enablement。 -->
@@ -206,7 +207,7 @@ Phase 2 以 Phase 1 全部通过为前提。本阶段只开放服务端策略允
 | 证据 | ID | 执行动作 | 责任模块 | 依赖 | 可观察验收 | 技术缺口条件 / 回滚 |
 |---|---|---|---|---|---|---|
 | [x] | I2-01 | 通过 Host adapter 的 `AppBridge.oncalltool` 接管页面 `tools/call`，再复用 Browser Client → Node endpoint 标准链路 | Browser / Node | Phase 1 Go | Host 可在发送前检查调用；成功调用不创建 Agent turn | 关闭页面 tool capability |
-| [x] | I2-02 | 建立 App-callable tool 服务端 allowlist，只开放当前策略允许的低风险工具 | Node / Product Security | I2-01 | 低风险工具可调用；高风险、未分类和需逐次确认的工具在 Node 拒绝且不上游 | 回退到 Phase 1 全拒绝 |
+| [x] | I2-02 | 建立 App-callable tool 服务端 allowlist，只开放当前策略显式分类的低风险工具 | Node / Product Security | I2-01 | 已列入工具即使省略可选 MCP risk hints 也可调用；未列入、显式高风险和需逐次确认的工具在 Node 拒绝且不上游 | 回退到 Phase 1 全拒绝 |
 | [x] | I2-03 | 把标准 `ui/message` 接入当前页面已有的 Chat Thread 和现有 Chat ingress | Browser Chat | H1-04 | 每次请求产生一个普通用户消息和新 Agent turn | 关闭 Host message capability |
 | [x] | I2-04 | 支持 Host → App 的 input、result、theme、locale、display context 更新 | Browser Host | H1-04 | App 收到声明范围内的标准通知；上下文不含完整对话 | 停止对应 capability 声明 |
 | [x] | I2-05 | 构建版本化 sandbox `window.im` 兼容适配层 | Browser Platform | P0-04、I2-01、I2-03 | 对应成员与 `window.openai` 同名、同参数、同返回和失败语义；仅 namespace 改为 `im` | 适配层 PoC 不通过则保持缺失 |

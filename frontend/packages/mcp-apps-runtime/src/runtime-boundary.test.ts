@@ -1,13 +1,14 @@
 // [Input] Untrusted same-origin route requests with no configured upstream Runtime.
-// [Output] Pre-composition rejection plus canonical colon-bearing serverRef acceptance/path rejection.
+// [Output] Pre-composition rejection, public-Host origin validation, and canonical colon-bearing serverRef acceptance/path rejection.
 // [Pos] task_411-02 thin-route security test; rejected requests cannot create an upstream connector.
 // [Sync] 2026-09-06: align route selectors with canonical managed-server keys while rejecting paths.
+// [Sync] 2026-09-06: cover the Next internal-host/public-Host same-origin boundary.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { normalizeServerRef } from './contracts.ts';
-import { closeMcpAppsRuntime, handleMcpAppsRequest } from './runtime.ts';
+import { closeMcpAppsRuntime, handleMcpAppsRequest, requestHasSameOrigin } from './runtime.ts';
 
 const origin = 'https://ink-memory.invalid';
 
@@ -61,4 +62,15 @@ test('accepts canonical colon-bearing server refs and rejects path-shaped select
   for (const candidate of ['official/basic', '../official-basic', 'official%2Fbasic']) {
     assert.throws(() => normalizeServerRef(candidate), /server selector is invalid/i);
   }
+});
+
+test('accepts the public Host when Next canonicalizes its internal request URL', () => {
+  assert.equal(requestHasSameOrigin(new Request(
+    'http://localhost:5173/api/mcp-apps/official-basic',
+    { headers: { host: '127.0.0.1:5173', origin: 'http://127.0.0.1:5173' } },
+  )), true);
+  assert.equal(requestHasSameOrigin(new Request(
+    'http://localhost:5173/api/mcp-apps/official-basic',
+    { headers: { host: '127.0.0.1:5173', origin: 'https://other.invalid' } },
+  )), false);
 });

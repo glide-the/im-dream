@@ -5,6 +5,7 @@
 [Pos] Provider-free persistence tests; no database connection or runtime DDL.
 [Sync] 2026-08-25: define the Admin-owned managed MCP table consumption contract.
 [Sync] 2026-08-27: prove only successful capability checks are cached and transient failures recover.
+[Sync] 2026-09-06: cover independent MCP App settings capability, ownership, and CAS writes.
 """
 
 from __future__ import annotations
@@ -20,12 +21,15 @@ from claude_mcp.contracts import (
     ClaudeMcpError,
     ClaudeMcpErrorCode,
     McpAuthKind,
+    McpAppPreferenceState,
+    McpAppSettingsPatch,
     McpScope,
     McpServerCreate,
     McpServerPatch,
     McpTransport,
 )
 from claude_mcp.repository import PostgresMcpRepository
+from schema.capabilities import MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256
 
 
 @dataclass
@@ -152,6 +156,58 @@ def test_transient_capability_query_failure_is_distinct_and_not_cached() -> None
     assert repository.capability_available_sync() is True
     assert repository.capability_available_sync() is True
     assert attempts == 2
+
+
+def test_app_settings_capability_and_actor_scoped_cas_are_independent() -> None:
+    def handler(query: str, _params: tuple[Any, ...]):
+        if "mcp:app-settings-capability" in query:
+            return [{
+                "version": 1,
+                "contract_sha256": MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256,
+            }]
+        if "mcp:app-settings-get" in query:
+            return [{
+                "app_desired_enabled": False,
+                "app_desired_low_risk_tool_calls": False,
+                "app_desired_ui_messages": False,
+                "app_settings_revision": 1,
+            }]
+        if "mcp:app-settings-update" in query:
+            return [{
+                "app_desired_enabled": True,
+                "app_desired_low_risk_tool_calls": True,
+                "app_desired_ui_messages": False,
+                "app_settings_revision": 2,
+            }]
+        return []
+
+    connection = _Connection(handler)
+    repository = _repository(connection)
+    assert repository.app_settings_capability_available_sync() is True
+    assert repository.app_settings_capability_available_sync() is True
+    current = repository.get_app_settings_sync("7", "server-1")
+    assert current is not None and current.revision == 1
+    updated = repository.update_app_settings_sync(
+        "7",
+        "server-1",
+        McpAppSettingsPatch(
+            expected_revision=1,
+            desired=McpAppPreferenceState(
+                enabled=True,
+                low_risk_tool_calls=True,
+            ),
+        ),
+    )
+    assert updated.revision == 2 and updated.desired.enabled is True
+    assert sum(
+        "mcp:app-settings-capability" in query
+        for query, _ in connection.calls
+    ) == 1
+    update_query = next(
+        query for query, _ in connection.calls if "mcp:app-settings-update" in query
+    )
+    assert "config_revision" not in update_query
+    assert "app_settings_revision = app_settings_revision + 1" in update_query
 
 
 def test_list_and_get_are_actor_and_workspace_scoped_reads() -> None:

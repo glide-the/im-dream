@@ -3,6 +3,7 @@
 // [Output] Stable root document, SEO metadata, and pre-hydration runtime config for the Dream shell.
 // [Pos] Next Server Component root; no browser globals are accessed here.
 // [Sync] 2026-09-06: resolve global presentation from the private canonical app/_dream source tree.
+// [Sync] 2026-09-06: load the user-installed Grab inspector only in the local development document.
 
 import type { Metadata } from 'next';
 import Script from 'next/script';
@@ -80,6 +81,15 @@ function structuredData() {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {process.env.NODE_ENV === "development" && (
+          <Script
+            src="//unpkg.com/react-grab/dist/index.global.js"
+            crossOrigin="anonymous"
+            strategy="beforeInteractive"
+          />
+        )}
+      </head>
       <body>
         <Script src="/runtime-config.js?runtime=1" strategy="beforeInteractive" />
         <script

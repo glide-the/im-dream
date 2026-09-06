@@ -5,6 +5,7 @@
 [Pos] Sole Dream persistence boundary for `dream_mcp_*`; contains no DDL, SQLite, CLI, network, or runtime fallback.
 [Sync] 2026-08-25: implement dream.managed-mcp-resources.v1 consumption with actor scope and CAS.
 [Sync] 2026-08-27: cache only a verified capability; transient query failures and missing contracts remain retryable.
+[Sync] 2026-09-06: persist per-connection MCP App desired state under an independent CAS revision.
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ try:
         MANAGED_MCP_RESOURCES_CAPABILITY,
         MANAGED_MCP_RESOURCES_CONTRACT_SHA256,
         MANAGED_MCP_RESOURCES_VERSION,
+        MCP_APP_CONNECTION_SETTINGS_CAPABILITY,
+        MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256,
+        MCP_APP_CONNECTION_SETTINGS_VERSION,
     )
 except ModuleNotFoundError:  # pragma: no cover - backend PYTHONPATH compatibility
     from persistence.errors import UniqueConstraintError
@@ -35,12 +39,17 @@ except ModuleNotFoundError:  # pragma: no cover - backend PYTHONPATH compatibili
         MANAGED_MCP_RESOURCES_CAPABILITY,
         MANAGED_MCP_RESOURCES_CONTRACT_SHA256,
         MANAGED_MCP_RESOURCES_VERSION,
+        MCP_APP_CONNECTION_SETTINGS_CAPABILITY,
+        MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256,
+        MCP_APP_CONNECTION_SETTINGS_VERSION,
     )
 
 from .contracts import (
     ClaudeMcpError,
     ClaudeMcpErrorCode,
     McpAuthKind,
+    McpAppPreferenceState,
+    McpAppSettingsPatch,
     McpScope,
     McpServerCreate,
     McpServerPatch,
@@ -100,13 +109,22 @@ class McpImportReceipt:
     canonical_config_sha256: str
 
 
+@dataclass(frozen=True)
+class McpAppSettingsRecord:
+    desired: McpAppPreferenceState
+    revision: int
+
+
 class ManagedMcpRepository(Protocol):
     async def capability_available(self) -> bool: ...
+    async def app_settings_capability_available(self) -> bool: ...
     async def list_servers(self, actor_id: str, workspace_id: str | None = None) -> list[McpServerRecord]: ...
     async def get_server(self, actor_id: str, identifier: str, workspace_id: str | None = None) -> McpServerRecord | None: ...
     async def create_server(self, actor_id: str, create: McpServerCreate) -> McpServerRecord: ...
     async def update_server(self, actor_id: str, server_id: str, patch: McpServerPatch) -> McpServerRecord: ...
     async def delete_server(self, actor_id: str, server_id: str, expected_revision: int | None, workspace_id: str | None = None) -> McpServerRecord: ...
+    async def get_app_settings(self, actor_id: str, server_id: str, workspace_id: str | None = None) -> McpAppSettingsRecord | None: ...
+    async def update_app_settings(self, actor_id: str, server_id: str, patch: McpAppSettingsPatch) -> McpAppSettingsRecord: ...
 
 
 _SERVER_SELECT = """
@@ -175,6 +193,13 @@ def _revision_conflict() -> ClaudeMcpError:
     )
 
 
+def _app_settings_revision_conflict() -> ClaudeMcpError:
+    return ClaudeMcpError(
+        ClaudeMcpErrorCode.APP_SETTINGS_REVISION_CONFLICT,
+        "MCP App settings changed before this request completed.",
+    )
+
+
 class PostgresMcpRepository:
     """Consume the exact Admin schema through explicit PostgreSQL UoWs."""
 
@@ -198,6 +223,7 @@ class PostgresMcpRepository:
             lambda **kwargs: PostgresUnitOfWork(pool, **kwargs)  # type: ignore[arg-type]
         )
         self._capability_cache: bool | None = None
+        self._app_settings_capability_cache: bool | None = None
         self._capability_lock = threading.Lock()
 
     def _uow(self, *, read_only: bool = False):
@@ -243,6 +269,40 @@ class PostgresMcpRepository:
                 self._capability_cache = True
             return available
 
+    async def app_settings_capability_available(self) -> bool:
+        return await asyncio.to_thread(self.app_settings_capability_available_sync)
+
+    def app_settings_capability_available_sync(self) -> bool:
+        if self._app_settings_capability_cache is True:
+            return True
+        with self._capability_lock:
+            if self._app_settings_capability_cache is True:
+                return True
+            try:
+                with self._uow(read_only=True) as uow:
+                    row = uow.execute(
+                        """/* mcp:app-settings-capability */
+                        SELECT version, contract_sha256
+                        FROM drizzle.schema_capabilities
+                        WHERE capability = %s
+                        """,
+                        (MCP_APP_CONNECTION_SETTINGS_CAPABILITY,),
+                    ).fetchone()
+            except Exception as exc:
+                raise ClaudeMcpError(
+                    ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE,
+                    "MCP App settings capability could not be verified.",
+                ) from exc
+            available = bool(
+                row
+                and int(row["version"]) == MCP_APP_CONNECTION_SETTINGS_VERSION
+                and row["contract_sha256"]
+                == MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256
+            )
+            if available:
+                self._app_settings_capability_cache = True
+            return available
+
     async def list_servers(self, actor_id: str, workspace_id: str | None = None) -> list[McpServerRecord]:
         return await asyncio.to_thread(self.list_servers_sync, actor_id, workspace_id)
 
@@ -282,6 +342,125 @@ class PostgresMcpRepository:
                 (identifier, identifier, actor_id, workspace_id, identifier),
             ).fetchone()
         return _server_from_row(row) if row else None
+
+    async def get_app_settings(
+        self,
+        actor_id: str,
+        server_id: str,
+        workspace_id: str | None = None,
+    ) -> McpAppSettingsRecord | None:
+        return await asyncio.to_thread(
+            self.get_app_settings_sync, actor_id, server_id, workspace_id
+        )
+
+    def get_app_settings_sync(
+        self,
+        actor_id: str,
+        server_id: str,
+        workspace_id: str | None = None,
+    ) -> McpAppSettingsRecord | None:
+        with self._uow(read_only=True) as uow:
+            row = uow.execute(
+                """/* mcp:app-settings-get */
+                SELECT app_desired_enabled,
+                       app_desired_low_risk_tool_calls,
+                       app_desired_ui_messages,
+                       app_settings_revision
+                FROM dream_mcp_servers
+                WHERE id = %s AND user_id = %s::bigint
+                  AND (
+                    (scope_type = 'user' AND scope_id IS NULL)
+                    OR (scope_type = 'workspace' AND scope_id = %s)
+                  )
+                """,
+                (server_id, actor_id, workspace_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return McpAppSettingsRecord(
+            desired=McpAppPreferenceState(
+                enabled=bool(row["app_desired_enabled"]),
+                low_risk_tool_calls=bool(
+                    row["app_desired_low_risk_tool_calls"]
+                ),
+                ui_messages=bool(row["app_desired_ui_messages"]),
+            ),
+            revision=int(row["app_settings_revision"]),
+        )
+
+    async def update_app_settings(
+        self,
+        actor_id: str,
+        server_id: str,
+        patch: McpAppSettingsPatch,
+    ) -> McpAppSettingsRecord:
+        return await asyncio.to_thread(
+            self.update_app_settings_sync, actor_id, server_id, patch
+        )
+
+    def update_app_settings_sync(
+        self,
+        actor_id: str,
+        server_id: str,
+        patch: McpAppSettingsPatch,
+    ) -> McpAppSettingsRecord:
+        with self._uow() as uow:
+            row = uow.execute(
+                """/* mcp:app-settings-update */
+                UPDATE dream_mcp_servers
+                SET app_desired_enabled = %s,
+                    app_desired_low_risk_tool_calls = %s,
+                    app_desired_ui_messages = %s,
+                    app_settings_revision = app_settings_revision + 1,
+                    updated_at = now()
+                WHERE id = %s AND user_id = %s::bigint
+                  AND app_settings_revision = %s
+                  AND (
+                    (scope_type = 'user' AND scope_id IS NULL)
+                    OR (scope_type = 'workspace' AND scope_id = %s)
+                  )
+                RETURNING app_desired_enabled,
+                          app_desired_low_risk_tool_calls,
+                          app_desired_ui_messages,
+                          app_settings_revision
+                """,
+                (
+                    patch.desired.enabled,
+                    patch.desired.low_risk_tool_calls,
+                    patch.desired.ui_messages,
+                    server_id,
+                    actor_id,
+                    patch.expected_revision,
+                    patch.workspace_id,
+                ),
+            ).fetchone()
+            if row is None:
+                owned = uow.execute(
+                    """/* mcp:app-settings-owner */
+                    SELECT app_settings_revision
+                    FROM dream_mcp_servers
+                    WHERE id = %s AND user_id = %s::bigint
+                      AND (
+                        (scope_type = 'user' AND scope_id IS NULL)
+                        OR (scope_type = 'workspace' AND scope_id = %s)
+                      )
+                    """,
+                    (server_id, actor_id, patch.workspace_id),
+                ).fetchone()
+                if owned is None:
+                    raise _not_found()
+                raise _app_settings_revision_conflict()
+            uow.commit()
+        return McpAppSettingsRecord(
+            desired=McpAppPreferenceState(
+                enabled=bool(row["app_desired_enabled"]),
+                low_risk_tool_calls=bool(
+                    row["app_desired_low_risk_tool_calls"]
+                ),
+                ui_messages=bool(row["app_desired_ui_messages"]),
+            ),
+            revision=int(row["app_settings_revision"]),
+        )
 
     async def create_server(self, actor_id: str, create: McpServerCreate) -> McpServerRecord:
         return await asyncio.to_thread(self.create_server_sync, actor_id, create)
@@ -801,6 +980,7 @@ class PostgresMcpRepository:
 
 __all__ = [
     "ManagedMcpRepository",
+    "McpAppSettingsRecord",
     "McpCredentialRecord",
     "McpImportReceipt",
     "McpServerRecord",

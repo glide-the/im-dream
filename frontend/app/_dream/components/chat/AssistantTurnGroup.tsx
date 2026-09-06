@@ -1,7 +1,8 @@
-// [Input] One validated historical assistant turn projection plus existing/deferred process renderers.
-// [Output] Accessible process disclosure that never constructs collapsed process React children.
+// [Input] One validated historical assistant turn projection plus process, persistent-result, and final renderers.
+// [Output] Accessible process disclosure that never constructs collapsed process children while keeping promoted results mounted outside it.
 // [Pos] Shared turn-level view beneath ChatMessageList for Chat and Dream hosts.
 // [Sync] 2026-09-02: render process detail state only after explicit expansion.
+// [Sync] 2026-09-06: keep promoted MCP App results outside the collapsible process region.
 
 import { useId, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -21,6 +22,7 @@ interface AssistantTurnGroupProps {
   readonly onExpandedChange: (turnKey: string, expanded: boolean) => void;
   readonly renderPart: (partIndex: number, kind: 'process' | 'final') => ReactNode;
   readonly renderDeferredProcess?: () => ReactNode;
+  readonly renderOutsideProcess?: () => ReactNode;
 }
 
 export default function AssistantTurnGroup({
@@ -29,6 +31,7 @@ export default function AssistantTurnGroup({
   onExpandedChange,
   renderPart,
   renderDeferredProcess,
+  renderOutsideProcess,
 }: AssistantTurnGroupProps) {
   const { t, i18n } = useTranslation();
   const processRegionId = useId();
@@ -96,6 +99,15 @@ export default function AssistantTurnGroup({
             : projection.processPartIndexes.map((partIndex) => (
               renderPart(partIndex, 'process')
             ))}
+        </div>
+      ) : null}
+
+      {renderOutsideProcess ? (
+        <div
+          className="chat-assistant-turn__outside-process"
+          data-turn-outside-process={projection.turnKey}
+        >
+          {renderOutsideProcess()}
         </div>
       ) : null}
 

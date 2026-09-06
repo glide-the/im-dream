@@ -3,6 +3,8 @@
 // [Pos] Local-Chrome technical lane only; it neither invokes a model nor mutates real Ink & Memory business state.
 // [Sync] 2026-09-06: prove Browser teardown sends DELETE and releases server sessions/connectors across lifecycle changes.
 // [Sync] 2026-09-06: mount the production Host from the persisted tool-invocation/direct-projection shape.
+// [Sync] 2026-09-06: include the connection App-settings revision in every Host policy identity assertion.
+// [Sync] 2026-09-06: prove ordinary parent rerenders do not remount the App or discard in-progress App input before ui/message.
 
 import { expect, test } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
@@ -34,11 +36,11 @@ const BROWSER_TOKEN = 'mcp-apps-e2e-browser-token';
 const BROWSER_AUTHORIZATION = `Bearer ${BROWSER_TOKEN}`;
 const SERVICE_TOKEN = 'mcp-apps-e2e-node-service-token';
 const UPSTREAM_SECRET = 'mcp-apps-e2e-upstream-only-secret';
-const POLICY_REVISION_1 = '1:1';
-const RUNTIME_POLICY_REVISION_2 = '1:2';
-const POLICY_REVISION_2 = '2:2';
-const POLICY_REVISION_3 = '3:3';
-const POLICY_REVISION_5 = '5:3';
+const POLICY_REVISION_1 = '1:1:1';
+const RUNTIME_POLICY_REVISION_2 = '1:2:1';
+const POLICY_REVISION_2 = '2:2:1';
+const POLICY_REVISION_3 = '3:3:1';
+const POLICY_REVISION_5 = '5:3:1';
 const UI_EXTENSION_CAPABILITIES = {
   'io.modelcontextprotocol/ui': { mimeTypes: [RESOURCE_MIME_TYPE] },
 };
@@ -444,6 +446,10 @@ test('official 1.7.5 renders through production Host, stays isolated, and follow
     expect(relay.methods.filter((method: string) => method === 'tools/call')).toHaveLength(1);
 
     await app.locator('#message-text').fill('Official App message through the existing Chat ingress.');
+    await page.getByTestId('mcp-app-parent-rerender').click();
+    await expect(app.locator('#message-text')).toHaveValue(
+      'Official App message through the existing Chat ingress.',
+    );
     await app.getByRole('button', { name: 'Send Message' }).click();
     await expect(page.getByTestId('existing-chat-ingress-count')).toHaveText('1');
     expect(await page.evaluate(() => window.mcpAppsE2e.messages)).toEqual([

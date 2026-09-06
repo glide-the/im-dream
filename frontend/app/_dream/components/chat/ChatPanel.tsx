@@ -61,6 +61,8 @@
 // [Sync] 2026-09-02: own stable older-page loading, anchor-preserving prepend,
 //                    historical/live turn identity, and latest-page recovery merging.
 // [Sync] 2026-09-06: route composer, queued, and MCP Apps user messages through one coordinated ingress.
+// [Sync] 2026-09-06: preserve verified live process/App parts when completion recovery returns a final-only history summary.
+// [Sync] 2026-09-06: retain live turn identity only for recovery merging; completed turns use the shared collapsed-process layout.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -636,7 +638,11 @@ export default function ChatPanel({
       setRuntimePendingToolCallIds(new Set(snapshot.runtimePendingToolCallIds));
       setRuntimeRunning(snapshot.running);
       setToolConfirmationKnown(snapshot.toolConfirmationKnown ?? false);
-      const recovered = mergeRecoveredLatestPage(messagesRef.current, recoveredMessages);
+      const recovered = mergeRecoveredLatestPage(
+        messagesRef.current,
+        recoveredMessages,
+        livePresentedTurnIds,
+      );
       const recoveredPage = snapshot.historyPage ?? {
         nextCursor: null,
         hasMore: false,
@@ -656,7 +662,7 @@ export default function ChatPanel({
     } catch {
       return undefined;
     }
-  }, [threadId]);
+  }, [livePresentedTurnIds, threadId]);
 
   const [isReloadingAfterError, setIsReloadingAfterError] = useState(false);
   const handleReloadAfterError = useCallback(async () => {
@@ -1116,7 +1122,6 @@ export default function ChatPanel({
             settledToolCallIds={settledToolCallIds}
             onToolConfirmationSettled={markToolConfirmationSettled}
             historicalMessageIds={historicalMessageIds}
-            livePresentedTurnIds={livePresentedTurnIds}
             historyHasMore={historyPage.hasMore}
             historyLoading={isLoadingOlderHistory}
             historyError={olderHistoryError}

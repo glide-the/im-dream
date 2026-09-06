@@ -5,10 +5,13 @@
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 将 Web Shell 固定到 frontend/ 根 package，将 Node Runtime 固定到同级 packages/mcp-apps-runtime。 -->
 <!-- [同步] 2026-09-06：按 54f3bbe5 标记 Phase 0—3 技术实现/验证已存在，公开应用与 production enablement 仍未完成。 -->
 <!-- [同步] 2026-09-06：UI identity 只取自 fresh tools/list descriptor；data-only CallToolResult 与修复前历史消息均沿同一受控投影恢复。 -->
+<!-- [同步] 2026-09-06：服务端 App-callable positive list 负责低风险分类；官方标准工具可省略 MCP 可选 risk hints，显式危险 hints 仍否决。 -->
+<!-- [同步] 2026-09-06：每条 MCP 连接增加独立 App desired/effective/revision 设置；服务器部署与凭据继续隐藏且作为能力上限。 -->
+<!-- [同步] 2026-09-06：汇总连接设置、discovery、首次模型调用、结果投影、实时/历史传递、Browser/Node Host、sandbox 和交互回流的端到端调用链。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
-> 状态：代码已存在，Phase 0—3 provider-free technical preview 已验证；公开应用、真实外部 Server/账号/OAuth 与 production enablement 未完成
+> 状态：代码已存在，Phase 0—3 provider-free technical preview 已验证；连接详情具备 App desired/effective 设置；production enablement 仍未完成
 >
 > 结论：Dream 已具备默认关闭的 MCP Apps technical-preview Host 链路。锁定的 `@mcp-ui/client@7.1.1` 仅复用 `AppBridge` 与 `PostMessageTransport`，由最小 `ImMcpAppHostAdapter` 持有 resource metadata、permissions policy 和 iframe；Browser MCP Client 只连接 Next Node Apps Runtime 暴露的受控 MCP transport，Node `PersistentConnectorManager` 再连接真实 MCP Server。Web Shell 属于 `frontend/` 根 package，Node Runtime 只属于 `frontend/packages/mcp-apps-runtime/src/**`；Python 只提供经身份/业务规则校验的短时建连视图，不参与页面交互。`productionAppsEffective=false`。
 
@@ -63,7 +66,7 @@ MCP Server 仍是一个模块：它提供工具、资源和业务结果。支持
 
 `App resource` 是 Server 提供的页面内容，不是 IM 要构建的新 bundle runtime。`@openai/apps-sdk-ui` 只是 App 作者可选的页面组件库；Host adapter 不修改 Server HTML，标准 bridge 继续来自 `@mcp-ui/client`。
 
-### 3.2 主链路
+### 3.2 端到端调用链
 
 ```mermaid
 flowchart LR
@@ -78,10 +81,20 @@ flowchart LR
     V --> U
 ```
 
-流程只有两段：
+完整调用链分为以下十步：
 
-1. Claude Agent Runtime 按现有方式调用 MCP 工具，把 tool name、input、完整 `CallToolResult` 和 tool call identity 交给 Chat。
-2. Next Client Component 创建 Browser MCP Client，连接 Node 受控 MCP 端点，并把 Client、工具数据与 server-owned policy snapshot 传给 Host adapter；后续 descriptor 查询、`resources/read`、iframe 和页面工具调用都沿同一 MCP Client 完成。
+1. **Admin 先发布 schema capability。** Drizzle migration 为每条受管 MCP 连接增加 deny-by-default 的 App 选择和独立 revision，再发布精确 capability。Dream 不建表，capability 缺失时 fail closed。
+2. **用户配置连接。** Settings 仅向 PostgreSQL 写当前 actor/workspace 的 `desired`；页面把它与连接、部署、凭据、descriptor 和服务端策略组合为可见的实际状态。
+3. **Discovery 确定 App 身份。** 受管 Server 的 fresh `tools/list` descriptor 必须为具体 tool 声明 `_meta.ui.resourceUri`，且该 `ui://` resource 存在。每个 Chat turn 开始前，Dream 只为服务端策略选中的 App Server 刷新缺失或过期 inventory。
+4. **模型执行首次工具调用。** Claude Agent Runtime 沿既有 MCP 路径选择工具、发送 input 并收到完整 `CallToolResult`；这一步不由 Browser App 触发。
+5. **Python 生成可信 App 投影。** 只有 Server/tool 与 fresh descriptor 精确匹配的成功结果，才会在完整普通结果旁增加版本化 `mcpAppResult`；其中绑定 `serverRef`、原始 tool name、`toolCallId`、input、workspace scope、resource URI 和原始 result。不从工具输出中猜 UI 地址。
+6. **结果经同一 Chat 流持久化。** 实时 SSE/reconnect 先把完整 parts 交给页面；完成恢复只在 turn 身份和最终文本精确匹配时保留已呈现过程。历史 detail 仍读 canonical parts，修复前 user-scope 结果只能在 fresh descriptor 再次精确匹配时补投影，全程不重放原始工具。
+7. **Chat 分离“过程”与“交互结果”。** reasoning 和普通 tool Input/Output 进入完成 turn 的折叠区；通过严格投影校验的 `mcp-app-panel` 作为折叠区外的单实例常驻。折叠不会卸载 App，展开不会复制 App。
+8. **Browser Host 建立受控连接。** Host 先读当前 actor/Server/workspace/revision 的 effective policy，再用标准 Browser MCP Client 连接同源 Next Route Handler。Node 向 Python 索取短时、单 Server、脱敏建连视图，由 `PersistentConnectorManager` 建立或复用真实上游 session；Browser 永远拿不到真实 URL、header、stdio command、env 或 credential。
+9. **Host 读取资源并进入 sandbox。** Browser Client 经 Node 执行 `tools/list` 和 `resources/read(ui://...)`；Host 再次校验 tool/resource 绑定、MIME、origin 和 policy，创建标准 AppBridge/PostMessage transport，并把 App 装入两层受限 iframe。没有真实声明的 Web 能力不会暴露。
+10. **App 交互沿两条受控路径回流。** App 内 `tools/call` 经 Host→Browser Client→Node，Node 在解密或访问上游前重验 actor、workspace、Server、revision、descriptor 和低风险 positive list；成功后只局部更新 App，不启动模型。App 的 `ui/message` 则进入与 composer/queued/retry 相同的 Chat ingress，生成一条普通用户消息和一个新 Agent turn。Thread 切换、关闭、登出、revision 变化或失败会关闭旧 Client/View/session。
+
+任一步缺少身份、能力、新鲜 revision 或安全证据时，App 链路 fail closed，但已保存的普通 `CallToolResult` 继续作为用户可见 fallback。
 
 Browser 发起的是到 IM 网站 Node 端点的连接，不是到真实 MCP Server 的连接。真实 Server 的 URL、stdio 配置和凭证不进入 Browser：Python 是 managed MCP 配置与凭证的事实源，Node 仅在建连和使用上游连接期间以内存保存 Python 签发的短时单 Server 建连配置。
 
@@ -149,7 +162,29 @@ sequenceDiagram
 
 Node 是工具/资源授权的最终边界。Browser 中的 iframe permission、capability 和 callback 负责 Web capability 收敛，但不能替代 Node 的业务授权检查。
 
-### 3.5 状态模型
+### 3.5 连接 App 设置
+
+App 设置属于每一条 MCP 连接详情，不是 Settings 顶层分类。用户只拥有
+`desired`，服务器继续拥有 `default`、部署配置、sandbox URL、Node service
+credential 和最终能力上限；普通页面与浏览器 API 均不得显示这些服务器配置。
+
+| 用户选择 | 含义 | 生效条件 |
+|---|---|---|
+| 显示 MCP App | 允许该连接的合资格工具结果挂载 App | 连接启用、fresh descriptor 声明 App、插件/沙箱/Runtime policy 均可用 |
+| 低风险工具调用 | 允许 App 调用同一 Server 中服务器批准的低风险工具 | 显示 App 已生效，且工具同时在 descriptor、服务端 positive list 与 effective policy 中；positive list 即显式分类，缺少可选 MCP risk hints 不额外阻断，显式写入/破坏/确认 hints 仍否决 |
+| 向当前对话发送消息 | 允许 App 请求现有 Chat ingress 开启新 turn | 显示 App 已生效，且插件与部署允许 `ui/message` |
+
+设置使用独立的正整数 `app_settings_revision` 做 actor/workspace 范围 CAS，
+不得推进 Server config、credential 或 inventory revision。关闭主开关只关闭当前
+effective 展示；已保存的两个子选择保持不变，重开后仍按最新服务器上限重新计算。
+
+页面必须同时展示“你的选择”和“实际可用状态”。`desired=true` 但服务器条件
+不满足时显示 `unavailable` 或 `partially_enabled` 及安全原因，不能显示成“已开启”；
+服务器恢复后无需用户重存即可按同一 revision 重新组合 effective。Node 建连视图和
+Browser Host identity 都携带该 revision，旧页面、旧 lease 或同 revision 异值一律
+fail closed。
+
+### 3.6 状态模型
 
 | 状态 | 进入条件 | 用户反馈 | 恢复 |
 |---|---|---|---|

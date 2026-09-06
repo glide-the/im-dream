@@ -2,6 +2,11 @@
 <!-- [输出] I2-01—I2-07 受控双向交互的实现、验收和回滚合同。 -->
 <!-- [定位] 已完成的 Phase 2 provider-free 技术合同；只开放策略允许的低风险页面能力。 -->
 <!-- [同步] 2026-09-06：依据当前候选统一回执标记 I2 技术 preview 已完成。 -->
+<!-- [同步] 2026-09-06：服务端 App-callable positive list 显式完成低风险分类，缺少可选 MCP risk hints 不阻断官方标准工具。 -->
+<!-- [同步] 2026-09-06：发现库存 TTL 到期后复用既有有界 discovery single-flight 自动重建，重启或长时间停留不依赖手动进入设置页恢复。 -->
+<!-- [同步] 2026-09-06：新 Chat turn 在注册 Runtime 前只为服务端策略选中的 App Server 重建过期 descriptor inventory，确保首次工具结果即携带可信 App 投影。 -->
+<!-- [同步] 2026-09-06：完成后的 latest-page 恢复仅在 turn 身份与最终文本精确匹配时保留本页实时收到的完整过程，避免 final-only 历史摘要抹掉首次 MCP App 面板。 -->
+<!-- [同步] 2026-09-06：完成 turn 保留过程折叠，但将已验证的 MCP App 面板作为折叠区外的常驻结果，折叠内仅保留普通工具详情。 -->
 
 # task_303：MCP Apps Phase 2 受控双向交互
 
@@ -21,13 +26,15 @@ I2-01—I2-07 已在 canonical pnpm/official-AppServer 候选上完成 provider-
 - Browser 只连接 IM 同源 endpoint；Node 每次调用前重验 actor/workspace/Server/tool/revision/allowlist。
 - Host adapter 持有 AppBridge、双 iframe、sandbox snapshot 和 teardown。
 - 普通 fallback、refresh/reconnect no-replay 与 production Apps 关闭证据完整。
+- 首次 Agent 调用完成时，latest-page 恢复不得用 final-only 摘要覆盖本页已验证的实时 App 结果；非当前页、文本不匹配或未知身份仍以服务端摘要为准。
+- 完成 turn 的过程 disclosure 只拥有 reasoning 和普通工具详情；已验证的交互 App 结果作为 disclosure 外的常驻同级内容，展开与折叠均不得重复或卸载该面板。
 
 ## 3. 工作项
 
 | ID | 工作项 | 通过标准 |
 |---|---|---|
 | I2-01 | 用 `AppBridge.oncalltool` 接管页面工具请求，并沿 Browser Client→Node→Server 标准链路调用。 | Host/Node 均校验；成功调用不创建 Agent turn。 |
-| I2-02 | 服务端 App-callable allowlist 只开放策略允许的低风险工具。 | 高风险、未分类和需逐次确认的工具在 Node 拒绝且不上游。 |
+| I2-02 | 服务端 App-callable allowlist 只开放策略明确分类的低风险工具。 | 未列入、显式高风险和需逐次确认的工具在 Node 拒绝且不上游；已列入工具无需额外提供可选 MCP risk hints。 |
 | I2-03 | `ui/message` 接入当前页面已有 Thread 的正常 Chat ingress。 | 一次请求生成一个普通用户消息和一个新 Agent turn。 |
 | I2-04 | Host→App 发送声明范围内的 input/result/theme/locale/display context。 | 不包含完整对话、系统提示词或敏感配置。 |
 | I2-05 | 实现版本化 `window.im` 兼容层。 | 与规范成员保持同参数、返回和失败语义；只改变 namespace。 |
@@ -44,6 +51,7 @@ I2-01—I2-07 已在 canonical pnpm/official-AppServer 候选上完成 provider-
 
 - 低风险正向调用、拒绝、高风险零上游调用、`ui/message`、context 最小披露和 `window.im` feature detection 均有当前 Chrome 证据。
 - Browser refresh、Thread switch、close/reopen、Node restart 和 revision 变化不重放写操作。
+- 完成 turn 默认折叠过程；`[data-testid="mcp-app-panel"]` 不得位于 `[data-turn-process]` 内，折叠前后保持单实例可见。
 - 日志不包含 secret、完整对话、App 正文或 credential。
 - 关闭 page-tool、message 或 `window.im` capability 可独立回退到 Phase 1 只读 App。
 - 验收失败只关闭对应 capability，保留普通结果与 production Apps 关闭。

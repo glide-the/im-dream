@@ -2,6 +2,7 @@
 // [Output] GET/POST/DELETE session, resource allowlist, negative zero-call, scope, and teardown assertions.
 // [Pos] Provider-free Runtime HTTP contract; it does not start or imitate an upstream MCP Server.
 // [Sync] 2026-09-06: cover server-owned calls, per-request revalidation, and no-request session expiry.
+// [Sync] 2026-09-06: bind sessions to the current connection App-settings revision.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -35,6 +36,7 @@ const connectionView: McpAppsConnectionView = Object.freeze({
   enabled: true,
   configRevision: 4,
   credentialRevision: 2,
+  appSettingsRevision: 3,
   expiresAt: '2099-01-01T00:00:00.000Z',
   allowedTools: ['get-time'],
   allowedResources: ['ui://get-time/mcp-app.html'],

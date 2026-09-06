@@ -19,6 +19,7 @@
 // [Sync] 2026-09-06: consume server-owned result identity from persisted parts or live/reconnect
 //                    toolMetadata and map ui/message to the existing one-message Chat ingress.
 // [Sync] 2026-09-06: resolve persisted direct toolName before validating MCP App identity.
+// [Sync] 2026-09-06: support tool-only and App-only placement so interactive results stay outside the turn-process disclosure.
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { DynamicToolUIPart, ToolUIPart } from 'ai';
@@ -63,9 +64,10 @@ interface ToolMessagePartProps {
   onEditorWriteConfirmed?: (toolCallId: string) => void;
   settledToolCallIds?: ReadonlySet<string>;
   onConfirmationSettled?: (toolCallId: string) => void;
+  presentation?: 'complete' | 'tool-only' | 'app-only';
 }
 
-export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResult, sendUserMessage, onEditorWriteConfirmed, settledToolCallIds, onConfirmationSettled }: ToolMessagePartProps) {
+export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResult, sendUserMessage, onEditorWriteConfirmed, settledToolCallIds, onConfirmationSettled, presentation = 'complete' }: ToolMessagePartProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
@@ -172,6 +174,16 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
     setConfirmationStatus('idle');
   }, [addToolResult, onConfirmationSettled, threadId, toolCallId, toolName, t]);
 
+  if (presentation === 'app-only') {
+    return savedMcpAppCall ? (
+      <McpAppHostPanel
+        call={savedMcpAppCall}
+        threadId={threadId}
+        onSendMessage={sendUserMessage ? sendMcpAppMessage : undefined}
+      />
+    ) : null;
+  }
+
   // Editor write tools (write_segment, delete_segment, insert_widget, reply_to_comment)
   // are always-confirm tools; render the specialized approval UI directly.
   if (shouldShowEditorWriteUI) {
@@ -249,7 +261,7 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
 
         {isExecuting ? <StatusRow tone="warning" label="Executing…" /> : null}
       </div>
-      {savedMcpAppCall ? (
+      {presentation === 'complete' && savedMcpAppCall ? (
         <McpAppHostPanel
           call={savedMcpAppCall}
           threadId={threadId}

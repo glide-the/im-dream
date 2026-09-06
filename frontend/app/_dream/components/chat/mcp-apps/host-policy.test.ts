@@ -2,6 +2,7 @@
 // [Output] Focused compatibility, lifecycle, and independent-origin assertions.
 // [Pos] Provider-free Browser Host policy contract test.
 // [Sync] 2026-09-06: lock plugin plus independent runtime-policy identity, lifecycle, origin, and capability boundaries.
+// [Sync] 2026-09-06: lock connection App-settings revision into Host policy identity.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -47,6 +48,7 @@ function status(overrides: Record<string, unknown> = {}) {
       revision: '7:11',
       pluginRevision: '7',
       runtimePolicyRevision: 11,
+      appSettingsRevision: null,
       manifestVersion: MCP_APPS_HOST_MANIFEST.version,
       sandboxUrl: 'http://127.0.0.1:43191/mcp-apps-sandbox?v=1.0.0&revision=7',
       sandboxTokens: ['allow-scripts'],
@@ -136,4 +138,14 @@ test('policy identity changes on revision, feature, or sandbox deployment change
   }), 'http://127.0.0.1:43190');
   assert.ok(policyOnly);
   assert.notEqual(mcpAppsPolicyIdentity(first), mcpAppsPolicyIdentity(policyOnly));
+
+  const connectionSettingsOnly = parseMcpAppsHostPolicy(status({
+    policy: {
+      ...(status().policy as Record<string, unknown>),
+      revision: '7:11:3',
+      appSettingsRevision: 3,
+    },
+  }), 'http://127.0.0.1:43190');
+  assert.ok(connectionSettingsOnly);
+  assert.notEqual(mcpAppsPolicyIdentity(first), mcpAppsPolicyIdentity(connectionSettingsOnly));
 });

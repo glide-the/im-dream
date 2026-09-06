@@ -2,6 +2,7 @@
 // [Output] Scaffold identity, lifecycle teardown, compatibility, limits, and diagnostic redaction evidence.
 // [Pos] Provider-free Phase 3 Node governance tests; no Browser, database, credential, or MCP provider.
 // [Sync] 2026-09-06: cover disabled lifecycle, bounded pagination, no-redirect networking, and safety policy.
+// [Sync] 2026-09-06: carry the connection App-settings revision in governance fixtures.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -60,6 +61,7 @@ const connectionView: McpAppsConnectionView = Object.freeze({
   enabled: true,
   configRevision: 4,
   credentialRevision: 2,
+  appSettingsRevision: 3,
   expiresAt: '2099-01-01T00:00:00.000Z',
   allowedTools: ['get-time'],
   allowedResources: ['ui://get-time/mcp-app.html'],

@@ -4,6 +4,7 @@
 // [Output] Metadata-validated AppBridge host with controlled calls/messages, context updates, and ordered teardown.
 // [Pos] Phase 1-3 sole iframe owner; Browser never receives upstream connection or credential material.
 // [Sync] 2026-09-06: disable AppBridge auto-forwarding and wire only policy-enabled resources, calls, messages, and context.
+// [Sync] 2026-09-06: keep the mounted official App stable when the current Chat ingress callback identity changes during parent polling/renders.
 
 import { useEffect, useRef, useState } from 'react';
 import { AppBridge, PostMessageTransport } from '@mcp-ui/client';
@@ -189,7 +190,13 @@ export default function ImMcpAppHostAdapter({
   onError,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const onSendMessageRef = useRef(onSendMessage);
   const [status, setStatus] = useState<'loading' | 'ready' | 'degraded'>('loading');
+  const messageIngressAvailable = Boolean(onSendMessage);
+
+  useEffect(() => {
+    onSendMessageRef.current = onSendMessage;
+  }, [onSendMessage]);
 
   useEffect(() => {
     let active = true;
@@ -245,7 +252,7 @@ export default function ImMcpAppHostAdapter({
         const hostCapabilities = McpUiHostCapabilitiesSchema.parse({
           serverResources: {},
           ...(policy.features.appToolCalls ? { serverTools: {} } : {}),
-          ...(policy.features.uiMessage && onSendMessage ? { message: { text: {} } } : {}),
+          ...(policy.features.uiMessage && messageIngressAvailable ? { message: { text: {} } } : {}),
           sandbox: { csp: EMPTY_CSP, permissions: {} },
         });
         bridge = new AppBridge(
@@ -271,12 +278,16 @@ export default function ImMcpAppHostAdapter({
             ),
           );
         }
-        if (policy.features.uiMessage && onSendMessage) {
+        if (policy.features.uiMessage && messageIngressAvailable) {
           bridge.onmessage = async (params) => {
             if (params.role !== 'user' || params.content.length === 0) {
               throw new Error('MCP App message is invalid.');
             }
-            await onSendMessage(params.content);
+            const sendMessage = onSendMessageRef.current;
+            if (!sendMessage) {
+              throw new Error('MCP App message ingress is unavailable.');
+            }
+            await sendMessage(params.content);
             return {};
           };
         }
@@ -327,7 +338,7 @@ export default function ImMcpAppHostAdapter({
       active = false;
       void teardown();
     };
-  }, [client, expectedResourceUri, onError, onSendMessage, policy, toolInput, toolName, toolResult]);
+  }, [client, expectedResourceUri, messageIngressAvailable, onError, policy, toolInput, toolName, toolResult]);
 
   return <div data-testid="im-mcp-app-host" data-status={status} ref={containerRef} />;
 }

@@ -5,6 +5,8 @@
 [Pos] Provider-free tests; no database, provider, or production Apps enablement.
 [Sync] 2026-09-06: require explicit server-owned policy before catalog or credential projection.
 [Sync] 2026-09-06: cover authoritative credential revision after an expired OAuth refresh.
+[Sync] 2026-09-06: require enabled connection App settings and bind their independent revision.
+[Sync] 2026-09-06: prove an expired discovery snapshot is rebuilt through the existing bounded discovery path.
 """
 
 import json
@@ -16,11 +18,16 @@ import pytest
 from backend.claude_mcp.contracts import (
     ClaudeMcpError,
     ClaudeMcpErrorCode,
+    McpAppPreferenceState,
     McpAuthKind,
     McpTransport,
 )
 from backend.claude_mcp.crypto import McpCredentialCipher, McpCredentialContext
-from backend.claude_mcp.repository import McpCredentialRecord, McpServerRecord
+from backend.claude_mcp.repository import (
+    McpAppSettingsRecord,
+    McpCredentialRecord,
+    McpServerRecord,
+)
 from backend.claude_mcp.runtime_snapshot import (
     ManagedMcpRuntimeSnapshotLoader,
     ManagedMcpServerConfigProjection,
@@ -58,6 +65,7 @@ INVENTORY = {
                     "readOnlyHint": True,
                     "destructiveHint": False,
                 },
+                "_meta": {"ui": {"resourceUri": "ui://get-time/mcp-app.html"}},
             },
             {"name": "write_not_allowed", "annotations": {"readOnlyHint": False}},
         ],
@@ -85,11 +93,29 @@ POLICY = {
 
 
 class Repository:
-    def __init__(self, record=SERVER):
+    def __init__(self, record=SERVER, app_settings=None):
         self.record = record
+        self.app_settings = app_settings or McpAppSettingsRecord(
+            desired=McpAppPreferenceState(
+                enabled=True,
+                low_risk_tool_calls=True,
+                ui_messages=True,
+            ),
+            revision=3,
+        )
 
     async def capability_available(self):
         return True
+
+    async def app_settings_capability_available(self):
+        return True
+
+    async def get_app_settings(self, actor_id, server_id, workspace_id=None):
+        if actor_id != self.record.user_id or server_id != self.record.id:
+            return None
+        if workspace_id != self.record.workspace_id:
+            return None
+        return self.app_settings
 
     async def get_server(self, actor_id, identifier, workspace_id=None):
         if actor_id != self.record.user_id or identifier not in {
@@ -133,10 +159,10 @@ class RecordingLoader:
         )
 
 
-def service(record=SERVER):
+def service(record=SERVER, app_settings=None):
     loader = RecordingLoader()
     return ClaudeMcpService(
-        repository=Repository(record),
+        repository=Repository(record, app_settings),
         discovery=object(),
         oauth=object(),
         runtime_snapshot_loader=loader,
@@ -153,6 +179,7 @@ async def test_connection_view_is_minimal_short_lived_and_repr_redacts_profile()
         SERVER.workspace_id,
         expected_config_revision=4,
         expected_credential_revision=2,
+        expected_app_settings_revision=3,
         expected_policy_revision=7,
         ttl_seconds=30,
         now=datetime(2026, 9, 5, tzinfo=timezone.utc),
@@ -163,6 +190,7 @@ async def test_connection_view_is_minimal_short_lived_and_repr_redacts_profile()
     assert payload["allowedTools"] == ["get-time"]
     assert payload["allowedResources"] == ["ui://get-time/mcp-app.html"]
     assert payload["appCallableLowRiskTools"] == ["get-time"]
+    assert payload["appSettingsRevision"] == 3
     assert payload["policy"]["revision"] == 7
     assert payload["connectionProfile"]["type"] == "streamable_http"
     assert payload["expiresAt"] == "2026-09-05T00:00:30+00:00"
@@ -213,6 +241,132 @@ async def test_wrong_actor_cannot_reach_config_projection():
         )
     assert caught.value.code is ClaudeMcpErrorCode.SERVER_NOT_FOUND
     assert loader.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_disabled_or_stale_app_settings_are_rejected_before_projection():
+    disabled = McpAppSettingsRecord(McpAppPreferenceState(), revision=3)
+    subject, loader = service(app_settings=disabled)
+    with pytest.raises(ClaudeMcpError) as caught:
+        await subject.mcp_apps_connection_view(
+            SERVER.user_id,
+            SERVER.server_key,
+            SERVER.workspace_id,
+            expected_config_revision=4,
+            expected_credential_revision=2,
+            expected_app_settings_revision=3,
+            expected_policy_revision=7,
+            ttl_seconds=30,
+        )
+    assert caught.value.code is ClaudeMcpErrorCode.APP_RUNTIME_DENIED
+    assert loader.calls == 0
+
+    subject, loader = service()
+    with pytest.raises(ClaudeMcpError) as caught:
+        await subject.mcp_apps_connection_view(
+            SERVER.user_id,
+            SERVER.server_key,
+            SERVER.workspace_id,
+            expected_config_revision=4,
+            expected_credential_revision=2,
+            expected_app_settings_revision=2,
+            expected_policy_revision=7,
+            ttl_seconds=30,
+        )
+    assert caught.value.code is ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT
+    assert loader.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_public_settings_separate_user_desired_from_server_availability():
+    subject, _ = service()
+    settings = await subject.get_mcp_app_connection_settings(
+        SERVER.user_id,
+        SERVER.server_key,
+        SERVER.workspace_id,
+    )
+    payload = settings.to_dict()
+    assert payload["default"] == {
+        "enabled": False,
+        "interactions": {"lowRiskToolCalls": False, "uiMessages": False},
+    }
+    assert payload["desired"]["enabled"] is True
+    assert payload["server"] == {
+        "state": "ready",
+        "reasonCode": None,
+        "resourceReads": True,
+        "lowRiskToolCalls": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_expired_inventory_is_refreshed_for_settings_and_connection_view():
+    class ExpiredRepository(Repository):
+        def __init__(self):
+            super().__init__()
+            self.snapshot = None
+
+        async def get_discovery_snapshot(self, actor_id, record):
+            assert actor_id == record.user_id
+            return self.snapshot
+
+    repository = ExpiredRepository()
+
+    class CompleteStatus:
+        value = "complete"
+
+    class RefreshedResult:
+        status = CompleteStatus()
+
+        @staticmethod
+        def inventory_dict():
+            return INVENTORY["inventory"]
+
+    class Discovery:
+        def __init__(self):
+            self.calls = 0
+
+        async def discover_one(self, actor_id, server_id, **kwargs):
+            self.calls += 1
+            assert (actor_id, server_id, kwargs) == (
+                SERVER.user_id,
+                SERVER.id,
+                {"workspace_id": SERVER.workspace_id, "force": False},
+            )
+            repository.snapshot = INVENTORY
+            return RefreshedResult()
+
+    discovery = Discovery()
+    loader = RecordingLoader()
+    subject = ClaudeMcpService(
+        repository=repository,
+        discovery=discovery,
+        oauth=object(),
+        runtime_snapshot_loader=loader,
+        mcp_apps_policy_provider=lambda: POLICY,
+    )
+
+    settings = await subject.get_mcp_app_connection_settings(
+        SERVER.user_id,
+        SERVER.server_key,
+        SERVER.workspace_id,
+    )
+    assert settings.server.state.value == "ready"
+    assert discovery.calls == 1
+
+    view = await subject.mcp_apps_connection_view(
+        SERVER.user_id,
+        SERVER.server_key,
+        SERVER.workspace_id,
+        expected_config_revision=SERVER.config_revision,
+        expected_credential_revision=SERVER.credential_revision,
+        expected_app_settings_revision=3,
+        expected_policy_revision=7,
+        ttl_seconds=10,
+    )
+    assert view.allowed_resources == ("ui://get-time/mcp-app.html",)
+    assert view.app_callable_low_risk_tools == ("get-time",)
+    assert discovery.calls == 1
 
 
 @pytest.mark.asyncio

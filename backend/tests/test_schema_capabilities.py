@@ -1,7 +1,8 @@
 # [Input] Consume read-only Admin schema capability inspectors with injected PostgreSQL rows.
-# [Output] Verify runtime authority and exact managed-MCP/resource-Observer/Runtime/Chat-history contracts.
+# [Output] Verify runtime authority and exact managed-MCP/App-settings/resource-Observer/Runtime/Chat-history contracts.
 # [Pos] Provider-free schema capability consumer tests in backend/tests.
 # [Sync] 2026-09-02: require exact Admin-owned Chat keyset and final-projection hashes.
+# [Sync] 2026-09-06: require the exact Admin-owned MCP App connection settings hash.
 
 from __future__ import annotations
 
@@ -23,12 +24,16 @@ from schema.capabilities import (
     MANAGED_MCP_RESOURCES_CAPABILITY,
     MANAGED_MCP_RESOURCES_CONTRACT_SHA256,
     MANAGED_MCP_RESOURCES_VERSION,
+    MCP_APP_CONNECTION_SETTINGS_CAPABILITY,
+    MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256,
+    MCP_APP_CONNECTION_SETTINGS_VERSION,
     REQUIRED_RUNTIME_CAPABILITIES,
     UNIFIED_DREAM_CAPABILITY,
     SchemaCapabilityError,
     claude_agent_resource_observer_capability_available,
     inspect_schema_authority,
     managed_mcp_resources_capability_available,
+    mcp_app_connection_settings_capability_available,
 )
 
 
@@ -173,6 +178,27 @@ def test_managed_mcp_capability_requires_the_exact_admin_hash() -> None:
     assert MANAGED_MCP_RESOURCES_CONTRACT_SHA256 == (
         "746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a"
     )
+
+
+def test_mcp_app_settings_capability_requires_the_exact_admin_hash() -> None:
+    exact = _Connection(
+        capabilities={
+            MCP_APP_CONNECTION_SETTINGS_CAPABILITY: (
+                MCP_APP_CONNECTION_SETTINGS_VERSION,
+                MCP_APP_CONNECTION_SETTINGS_CONTRACT_SHA256,
+            )
+        }
+    )
+    drifted = _Connection(
+        capabilities={
+            MCP_APP_CONNECTION_SETTINGS_CAPABILITY: (
+                MCP_APP_CONNECTION_SETTINGS_VERSION,
+                "f" * 64,
+            )
+        }
+    )
+    assert mcp_app_connection_settings_capability_available(exact) is True
+    assert mcp_app_connection_settings_capability_available(drifted) is False
 
 
 def test_resource_observer_capability_requires_exact_version_and_hash() -> None:

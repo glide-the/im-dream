@@ -46,6 +46,7 @@
 // [Sync] 2026-09-06: forward the existing one-message Chat ingress to controlled MCP Apps views.
 // [Sync] 2026-09-06: route validated completed MCP App parts through ToolMessagePart
 //                    before the generic Terminal renderer so the Host can mount.
+// [Sync] 2026-09-06: collapse completed live/history process while promoting the MCP App panel outside the disclosure without duplication.
 // [Sync] 2026-09-04: distinguish a typed Dream synchronization failure after
 //                    a committed assistant reply from an unprocessed turn.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -91,8 +92,6 @@ interface ChatMessageListProps {
   onOpenSubagentTask?: (toolCallId: string) => void;
   /** Message IDs loaded from persisted history rather than the current live turn. */
   historicalMessageIds?: ReadonlySet<string>;
-  /** Stable turn IDs first presented live; they remain unfolded until remount. */
-  livePresentedTurnIds?: ReadonlySet<string>;
   historyHasMore?: boolean;
   historyLoading?: boolean;
   historyError?: Error | null;
@@ -277,7 +276,7 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, livePresentedTurnIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, onReloadAfterError, isReloadingAfterError = false, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendUserMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled, historicalMessageIds = EMPTY_ID_SET, historyHasMore = false, historyLoading = false, historyError, historyEmpty = false, onLoadOlder }: ChatMessageListProps) {
   const { t } = useTranslation();
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
@@ -415,12 +414,10 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
         const historicalProjection = historicalMessageIds.has(message.id)
           ? projectHistoricalAssistantTurn(message)
           : null;
-        const projection = historicalProjection
-          && historicalProjection.processAvailable
-          && !livePresentedTurnIds.has(historicalProjection.turnKey)
+        const projection = historicalProjection?.processAvailable
           ? historicalProjection
           : null;
-        const renderPart = (partIndex: number, partKind: 'normal' | 'process' | 'final') => {
+        const renderPart = (partIndex: number, partKind: 'normal' | 'process' | 'outside-app' | 'final') => {
               const part = message.parts?.[partIndex];
               if (!part) return null;
               const partKey = `${message.id}-${partIndex}`;
@@ -549,6 +546,11 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 });
 
                 if (isCompleted && savedMcpAppCall) {
+                  const presentation = partKind === 'process'
+                    ? 'tool-only'
+                    : partKind === 'outside-app'
+                      ? 'app-only'
+                      : 'complete';
                   return (
                     <div key={partKey}>
                       <ToolMessagePart
@@ -560,6 +562,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                         sendUserMessage={sendUserMessage}
                         settledToolCallIds={settledToolCallIds}
                         onConfirmationSettled={onToolConfirmationSettled}
+                        presentation={presentation}
                       />
                     </div>
                   );
@@ -717,6 +720,27 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
 
               return null;
         };
+        const outsideMcpAppPartIndexes = projection
+          ? projection.processPartIndexes.filter((partIndex) => {
+              const part = message.parts?.[partIndex];
+              if (!part || !isToolUIPart(part)) return false;
+              const toolPart = part as ToolUIPart | DynamicToolUIPart;
+              if (getToolStatus(toolPart, isLoading) === 'executing') return false;
+              const toolName = resolveToolName(toolPart);
+              const metadata = toolPart as unknown as {
+                mcpAppResult?: unknown;
+                toolMetadata?: { mcpAppResult?: unknown };
+              };
+              return parseSavedMcpAppToolCall({
+                mcpAppResult: metadata.mcpAppResult
+                  ?? metadata.toolMetadata?.mcpAppResult,
+                output: 'output' in toolPart ? toolPart.output : undefined,
+                toolName,
+                toolCallId: toolPart.toolCallId,
+                input: readToolInput(toolPart),
+              }) !== null;
+            })
+          : [];
         return (
           <div
             key={message.id}
@@ -734,6 +758,11 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   }
                 }}
                 renderPart={(partIndex, kind) => renderPart(partIndex, kind)}
+                renderOutsideProcess={outsideMcpAppPartIndexes.length > 0
+                  ? () => outsideMcpAppPartIndexes.map((partIndex) => (
+                      renderPart(partIndex, 'outside-app')
+                    ))
+                  : undefined}
                 renderDeferredProcess={() => (
                   processDetail?.status === 'error' ? (
                     <div className="chat-assistant-turn__process-state" role="alert">

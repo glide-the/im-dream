@@ -4,8 +4,10 @@
 // [Output] Lifecycle-controlled same-origin Browser MCP Client plus Host adapter, or silent ordinary fallback.
 // [Pos] ToolMessagePart child; never replays the originating tools/call and never owns upstream authority.
 // [Sync] 2026-09-06: terminate each stateful session after any in-flight connect and keep identical policy polls stable.
+// [Sync] 2026-09-06: load only the current connection-scoped App policy and user interaction choices.
+// [Sync] 2026-09-06: retain a semantically unchanged saved call across history-poll object replacement so the App iframe and form state stay mounted.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -24,7 +26,7 @@ import {
   parseMcpAppsHostPolicy,
   type McpAppsHostPolicy,
 } from './host-policy';
-import type { SavedMcpAppToolCall } from './result';
+import { sameSavedMcpAppToolCall, type SavedMcpAppToolCall } from './result';
 import {
   cleanupFailedMcpAppsConnection,
   closeMcpAppsClientSession,
@@ -65,10 +67,16 @@ const PANEL_ACTION_STYLE = Object.freeze({
   padding: '0.35rem 0.7rem',
 } as const);
 
-async function loadPolicy(signal: AbortSignal): Promise<McpAppsHostPolicy | null> {
+async function loadPolicy(
+  signal: AbortSignal,
+  serverRef: string,
+  workspaceScope: string | null,
+): Promise<McpAppsHostPolicy | null> {
   const token = getAuthToken();
   if (!token) return null;
-  const response = await fetch('/api/mcp-apps/phase1-status', {
+  const query = new URLSearchParams({ serverRef });
+  if (workspaceScope) query.set('workspaceScope', workspaceScope);
+  const response = await fetch(`/api/mcp-apps/phase1-status?${query.toString()}`, {
     cache: 'no-store',
     headers: { authorization: `Bearer ${token}` },
     signal,
@@ -96,6 +104,11 @@ export default function McpAppHostPanel({
     MCP_APPS_HOST_MANIFEST.defaults.policyPollMs,
   );
   const [browserSession] = useState(() => globalThis.crypto.randomUUID());
+  const stableCallRef = useRef(call);
+  if (!sameSavedMcpAppToolCall(stableCallRef.current, call)) {
+    stableCallRef.current = call;
+  }
+  const stableCall = stableCallRef.current;
   const policy = panel.status === 'ready' ? panel.policy : null;
   const policyIdentity = useMemo(
     () => policy ? mcpAppsPolicyIdentity(policy) : null,
@@ -109,7 +122,7 @@ export default function McpAppHostPanel({
   useEffect(() => {
     setClosed(false);
     setBrowserError(null);
-  }, [call.serverRef, call.toolCallId, threadId]);
+  }, [stableCall.serverRef, stableCall.toolCallId, threadId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -120,7 +133,11 @@ export default function McpAppHostPanel({
       if (inspecting) return;
       inspecting = true;
       try {
-        const next = await loadPolicy(controller.signal);
+        const next = await loadPolicy(
+          controller.signal,
+          stableCall.serverRef,
+          stableCall.workspaceScope,
+        );
         if (!active) return;
         if (!next) {
           previousIdentity = null;
@@ -155,7 +172,7 @@ export default function McpAppHostPanel({
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [call.serverRef, policyIdentity, policyPollMs, retryRevision, threadId]);
+  }, [policyIdentity, policyPollMs, retryRevision, stableCall.serverRef, stableCall.workspaceScope, threadId]);
 
   useEffect(() => {
     if (!policy || !policyIdentity || closed || browserError) {
@@ -181,14 +198,14 @@ export default function McpAppHostPanel({
         const token = getAuthToken();
         if (!token) return;
         const endpoint = new URL(
-          `/api/mcp-apps/${encodeURIComponent(call.serverRef)}`,
+          `/api/mcp-apps/${encodeURIComponent(stableCall.serverRef)}`,
           window.location.origin,
         );
         const requestHeaders = {
           authorization: `Bearer ${token}`,
           'x-ink-mcp-apps-browser-session': browserSession,
-          ...(call.workspaceScope
-            ? { 'x-ink-workspace-scope': call.workspaceScope }
+          ...(stableCall.workspaceScope
+            ? { 'x-ink-workspace-scope': stableCall.workspaceScope }
             : {}),
         };
         const transport = new StreamableHTTPClientTransport(
@@ -242,7 +259,7 @@ export default function McpAppHostPanel({
       setConnection((current) => current?.client === closing?.client ? null : current);
       void teardownCurrentConnection();
     };
-  }, [browserError, browserSession, call.serverRef, call.workspaceScope, closed, policy, policyIdentity, threadId]);
+  }, [browserError, browserSession, closed, policy, policyIdentity, stableCall.serverRef, stableCall.workspaceScope, threadId]);
 
   useEffect(() => {
     if (!client || !policy || closed || browserError) return undefined;
@@ -349,10 +366,10 @@ export default function McpAppHostPanel({
       </header>
       <ImMcpAppHostAdapter
         client={client}
-        toolName={call.toolName}
-        toolInput={call.input}
-        toolResult={call.result}
-        expectedResourceUri={call.resourceUri}
+        toolName={stableCall.toolName}
+        toolInput={stableCall.input}
+        toolResult={stableCall.result}
+        expectedResourceUri={stableCall.resourceUri}
         policy={policy}
         onSendMessage={onSendMessage}
         onError={onError}

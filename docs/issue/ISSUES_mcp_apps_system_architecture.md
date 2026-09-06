@@ -2,6 +2,7 @@
 <!-- [输出] MCP Apps 已实现工作内容、技术依赖、现行证据与生产缺口索引。 -->
 <!-- [定位] MCP Apps 当前技术工作项、证据与回滚索引。 -->
 <!-- [同步] 2026-09-06：依据 54f3bbe5 与当前回执，将失效派工状态改为实现/证据/生产缺口语义。 -->
+<!-- [同步] 2026-09-06：低风险分类以服务端 App-callable positive list 为准，缺少可选 MCP risk hints 不等同于未分类。 -->
 
 # MCP Apps 技术工作项索引
 
@@ -35,7 +36,7 @@
 | MCPAPPS-411-02 | `frontend/packages/mcp-apps-runtime/src/**` 是合法、独立、server-only 的唯一 Node Runtime owner；根 Route Handler 薄委派，Python 只投影最小配置，Chat/Host 保留 ordinary fallback。 | [C1/M1](../exec/mcp-apps/phase-1/c1-m1-contracts.md)、[H1](../exec/mcp-apps/phase-1/h1-browser.md) | provider-free 技术 preview 已验收；未使用真实外部 Server/credential。 |
 | MCPAPPS-411-03 | 唯一 `frontend/pnpm-lock.yaml`、frozen install、root standalone 和同 lock P0-01—P0-08 重验。 | [P0 索引](../exec/mcp-apps/phase-0/index.md)、[P0-08](../exec/mcp-apps/phase-0/p0-08-decision.yaml) | P0=`Go` 只授权后续技术验收。 |
 | MCPAPPS-434 | 未修改的官方 `server-basic-vanillajs@1.7.5` 固定 identity、离线制品和标准 Client/Inspector smoke。 | [S1 回执](../exec/mcp-apps/phase-1/s1-appserver.md) | 只证明官方测试制品可复核。 |
-| MCPAPPS-003 | 服务端 allowlist 内的低风险 `tools/call`、现有 Chat ingress 的 `ui/message`、Host context 和 actor-effective `window.im`。 | [当前候选总回执](../exec/mcp-apps/current-candidate-validation.md) | 高风险、需确认和未分类工具仍 fail closed。 |
+| MCPAPPS-003 | 服务端 allowlist 内的低风险 `tools/call`、现有 Chat ingress 的 `ui/message`、Host context 和 actor-effective `window.im`。 | [当前候选总回执](../exec/mcp-apps/current-candidate-validation.md) | 未列入 positive list、显式高风险或需确认的工具仍 fail closed；已列入工具不要求提供可选 MCP risk hints。 |
 | MCPAPPS-004 | manifest/lifecycle、多维隔离、脱敏诊断、版本矩阵与可配置资源策略。 | [当前候选总回执](../exec/mcp-apps/current-candidate-validation.md) | Phase 3 技术 preview 完成；不替代生产发布。 |
 
 上表是工作与证据映射，不是派工或审批队列。后续改动只能由真实技术依赖和当前候选的可回读证据驱动。

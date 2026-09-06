@@ -2,11 +2,14 @@
 // [Output] One process-scoped policy/manifest-governed Runtime while production Apps stay off.
 // [Pos] Server-only composition root; no request-local manager and no Browser-visible configuration.
 // [Sync] 2026-09-06: compose configured limits plus authenticated static/connection policy for Browser/session isolation.
+// [Sync] 2026-09-06: expose a safe connection-settings read for Next policy composition.
+// [Sync] 2026-09-06: validate Browser origin against the public Host when Next canonicalizes its internal request URL.
 
 import {
   PRODUCTION_APPS_EFFECTIVE,
   McpAppsRuntimeError,
   type McpAppsStaticView,
+  type McpAppConnectionSettingsView,
   authorizationFingerprint,
   normalizeBrowserSessionScope,
   normalizeServerRef,
@@ -51,9 +54,56 @@ export async function readCurrentMcpAppsStaticView(
   return configuredProvider().getStaticView(authorization);
 }
 
+export async function readCurrentMcpAppConnectionSettings(
+  authorization: string,
+  serverRef: string,
+  workspaceScope: string | null,
+): Promise<McpAppConnectionSettingsView> {
+  return configuredProvider().getAppConnectionSettings({
+    authorization,
+    serverRef: normalizeServerRef(serverRef),
+    workspaceScope: normalizeWorkspaceScope(workspaceScope),
+  });
+}
+
 function processRuntime(): McpAppsHttpAdapter {
   globalThis.__inkDreamMcpAppsRuntime ??= createRuntime();
   return globalThis.__inkDreamMcpAppsRuntime;
+}
+
+function firstForwardedValue(value: string | null): string | null {
+  const candidate = value?.split(',')[0]?.trim();
+  return candidate || null;
+}
+
+function publicRequestOrigin(request: Request, requestUrl: URL): string | null {
+  const host = firstForwardedValue(request.headers.get('host'));
+  if (!host) return null;
+  const forwardedProtocol = firstForwardedValue(request.headers.get('x-forwarded-proto'));
+  const protocol = forwardedProtocol === 'http' || forwardedProtocol === 'https'
+    ? `${forwardedProtocol}:`
+    : requestUrl.protocol;
+  try {
+    const candidate = new URL(`${protocol}//${host}`);
+    if (candidate.username || candidate.password || candidate.pathname !== '/' || candidate.search || candidate.hash) {
+      return null;
+    }
+    return candidate.origin;
+  } catch {
+    return null;
+  }
+}
+
+export function requestHasSameOrigin(request: Request): boolean {
+  const origin = request.headers.get('origin');
+  if (!origin) return true;
+  let requestUrl: URL;
+  try {
+    requestUrl = new URL(request.url);
+  } catch {
+    return false;
+  }
+  return origin === requestUrl.origin || origin === publicRequestOrigin(request, requestUrl);
 }
 
 function safeFailure(error: unknown): Response {
@@ -71,8 +121,7 @@ export async function handleMcpAppsRequest(request: Request, rawServerRef: strin
       throw new McpAppsRuntimeError(404, 'MCP_APPS_DISABLED', 'MCP Apps are unavailable.');
     }
     const requestUrl = new URL(request.url);
-    const origin = request.headers.get('origin');
-    if (origin && origin !== requestUrl.origin) {
+    if (!requestHasSameOrigin(request)) {
       throw new McpAppsRuntimeError(403, 'CROSS_ORIGIN_DENIED', 'Cross-origin MCP Apps requests are denied.');
     }
     if (requestUrl.search) {
