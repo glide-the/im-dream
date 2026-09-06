@@ -2,6 +2,7 @@
 <!-- [Output] Plain-language user and local-operator guide with deeper engineering details linked out. -->
 <!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
 <!-- [Sync] 2026-09-06: reorganize around getting started and using MCP Apps; retain exact setup, ownership, security, and validation facts in layered sections. -->
+<!-- [Sync] 2026-09-06: add sanitized real-component screenshots for the MCP connection, App settings, and Chat interaction steps. -->
 
 # Ink & Memory
 
@@ -154,6 +155,16 @@ Open:
 4. Turn on **Show MCP App**. If needed, also allow **Low-risk tool calls** and **Send messages to this chat**.
 5. Save the settings and check the displayed actual status.
 
+These screenshots use safe example data and the real production UI components; they contain no account details or secrets.
+
+![Add a managed MCP connection by entering its name, transport, and URL](assets/mcp-apps-guide/01-add-mcp-connection.png)
+
+*Add a managed MCP endpoint in Resource Links. Authentication requirements are detected after Dream connects to the Server.*
+
+![Enable the MCP App and choose its permitted interactions](assets/mcp-apps-guide/02-configure-mcp-app.png)
+
+*Enable the App first, then opt into only the interactions you want. “Actually available” reflects the current server-side result.*
+
 Your saved choices and the actual available features are shown separately. A switch may be on while the App remains unavailable if the connection is offline, the Server does not advertise an App, or the server-side preview policy does not allow it.
 
 ### Call and use the App in Chat
@@ -164,6 +175,10 @@ Your saved choices and the actual available features are shown separately. A swi
 4. The assistant's reasoning and ordinary tool details remain under the **View process / Took…** disclosure.
 5. A verified interactive App appears outside that disclosure, so collapsing the process does not hide the App.
 6. Use the App's buttons or fields directly. A permitted in-App tool action updates the App without starting another model turn. If the App sends a message to Chat, it becomes a normal user message and starts one new Agent turn.
+
+![A collapsed MCP tool result with its interactive App still visible below it](assets/mcp-apps-guide/03-use-mcp-app-in-chat.png)
+
+*The tool details are collapsed at the top; the official example App remains available below for direct interaction.*
 
 You can close and reopen the interactive view. Refreshing, switching Threads, changing permissions, or changing the connection revision creates a fresh governed session; the original tool is not replayed.
 

@@ -15,6 +15,7 @@
 // [Sync] 2026-08-25: prove the MCP OAuth callback stays on the SPA, submits automatically, and never renders or stores its code/state.
 // [Sync] 2026-08-25: require cache-first automatic detail inventory and no refresh/retry inventory controls.
 // [Sync] 2026-08-27: prove transient PostgreSQL capability failures recover automatically without a user-facing retry button.
+// [Sync] 2026-09-06: cover connection-level App desired/effective settings and optional user-guide captures.
 
 import { expect, test } from '@playwright/test';
 
@@ -186,6 +187,27 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   let configured = false;
   let serverRevision = 1;
   let serverDisplayName = serverName;
+  let appSettingsRevision = 1;
+  let appDesired = {
+    enabled: false,
+    interactions: { lowRiskToolCalls: false, uiMessages: false },
+  };
+
+  const appSettingsPayload = () => ({
+    version: 1 as const,
+    revision: appSettingsRevision,
+    default: {
+      enabled: false,
+      interactions: { lowRiskToolCalls: false, uiMessages: false },
+    },
+    desired: appDesired,
+    server: {
+      state: serverState === 'connected' ? 'ready' : 'inventory_unavailable',
+      reasonCode: serverState === 'connected' ? null : 'MCP_APP_INVENTORY_UNAVAILABLE',
+      resourceReads: serverState === 'connected',
+      lowRiskToolCalls: serverState === 'connected',
+    },
+  });
 
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().includes('react-grab.com')) {
@@ -195,6 +217,9 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   page.on('pageerror', (error) => diagnostics.push(error.message));
   page.on('requestfailed', (request) => {
     const url = request.url();
+    if (url.includes('/api/sessions/events') && request.failure()?.errorText === 'net::ERR_ABORTED') {
+      return;
+    }
     if (!url.includes('react-grab.com') && !url.includes('fonts.googleapis.com') && !url.includes('fonts.gstatic.com')) {
       diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${url}`);
     }
@@ -209,6 +234,9 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
     }
   });
 
+  await page.route('http://unpkg.com/react-grab/dist/index.global.js', async (route) => {
+    await route.fulfill({ contentType: 'application/javascript', body: '' });
+  });
   await page.context().route('https://oauth.example.test/**', async (route) => {
     const automaticCallback = `${WEB_BASE}/oauth/callback?code=private-code&state=private-state`;
     await route.fulfill({
@@ -303,6 +331,56 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
             url: serverUrl,
             stdio_profile_key: null,
           },
+        },
+      });
+      return;
+    }
+    if (method === 'GET' && path === '/api/claude-mcp/servers/server-1/app-settings') {
+      await route.fulfill({ json: { appSettings: appSettingsPayload() } });
+      return;
+    }
+    if (method === 'PATCH' && path === '/api/claude-mcp/servers/server-1/app-settings') {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      expect(payload).toEqual({
+        expected_revision: appSettingsRevision,
+        enabled: true,
+        low_risk_tool_calls: true,
+        ui_messages: true,
+        workspace_id: null,
+      });
+      appSettingsRevision += 1;
+      appDesired = {
+        enabled: true,
+        interactions: { lowRiskToolCalls: true, uiMessages: true },
+      };
+      await route.fulfill({ json: { appSettings: appSettingsPayload() } });
+      return;
+    }
+    if (method === 'GET' && path === '/api/mcp-apps/phase1-status') {
+      const enabled = serverState === 'connected' && appDesired.enabled;
+      await route.fulfill({
+        json: {
+          desired: {
+            enabled: appDesired.enabled,
+            features: {
+              readResource: appDesired.enabled,
+              appToolCalls: appDesired.interactions.lowRiskToolCalls,
+              uiMessage: appDesired.interactions.uiMessages,
+              windowIm: appDesired.interactions.uiMessages,
+            },
+          },
+          effective: {
+            enabled,
+            features: {
+              readResource: enabled,
+              appToolCalls: enabled && appDesired.interactions.lowRiskToolCalls,
+              uiMessage: enabled && appDesired.interactions.uiMessages,
+              windowIm: enabled && appDesired.interactions.uiMessages,
+            },
+            state: enabled ? 'enabled' : 'disabled',
+            reasonCode: enabled ? null : 'connection_disabled',
+          },
+          connection: appSettingsPayload(),
         },
       });
       return;
@@ -560,12 +638,23 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
     localStorage.setItem('auth_token', authToken);
     localStorage.setItem('migration_completed', 'true');
   }, token);
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
 
   await expect(page.getByRole('heading', { name: '资源链接', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
   await expect(page.getByLabel('MCP 认证方式')).toHaveCount(0);
   await expect(page.getByText('认证要求由 Dream 连接 Server 后自动判断')).toBeVisible();
+  if (process.env.INK_CAPTURE_MCP_APPS_GUIDE === '1') {
+    await page.locator('nextjs-portal').evaluateAll((elements) => {
+      elements.forEach((element) => {
+        (element as HTMLElement).style.display = 'none';
+      });
+    });
+    await page.getByRole('form', { name: '添加 Claude MCP 服务' }).screenshot({
+      path: 'output/playwright/mcp-apps-guide/add-mcp-connection.png',
+    });
+  }
   await page.getByLabel('MCP 服务名称').fill(serverName);
   await page.getByLabel('MCP 服务 URL').fill(serverUrl);
   await page.getByRole('button', { name: '添加 MCP 服务' }).click();
@@ -592,6 +681,19 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   expect(await page.evaluate((secret) => Object.values(localStorage).every((value) => !value.includes(secret)), 'private-code')).toBe(true);
 
   await expect(page.getByRole('heading', { name: `${serverName} MCP Server` })).toBeVisible();
+  await page.getByRole('checkbox', { name: /在聊天中使用 App/ }).check();
+  await page.getByRole('checkbox', { name: /低风险工具调用/ }).check();
+  await page.getByRole('checkbox', { name: /向聊天发送消息/ }).check();
+  await page.getByRole('button', { name: '保存 App 设置' }).click();
+  await expect(page.getByText('你的选择：开启 · revision 2', { exact: true })).toBeVisible();
+  const appSettingsSection = page.getByRole('heading', { name: 'App 设置', exact: true })
+    .locator('xpath=ancestor::section[1]');
+  await expect(appSettingsSection.getByText('实际可用', { exact: true })).toHaveCount(3);
+  if (process.env.INK_CAPTURE_MCP_APPS_GUIDE === '1') {
+    await appSettingsSection.screenshot({
+      path: 'output/playwright/mcp-apps-guide/configure-mcp-app.png',
+    });
+  }
   await expect(page.getByRole('tab', { name: 'Tools 41' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText(serverUrl, { exact: true })).toBeVisible();
   await page.getByRole('searchbox', { name: '搜索 MCP 工具' }).fill('submit_workflow');
@@ -642,7 +744,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   expect(discoveryRequests).toHaveLength(4);
   expect(mcpRequests.filter((request) => (
     request.method !== 'GET' && !discoveryRequests.includes(request)
-  ))).toHaveLength(6);
+  ))).toHaveLength(7);
   expect(unexpectedApiRequests).toEqual([]);
   expect(diagnostics).toEqual([]);
 
