@@ -6,6 +6,7 @@
 [Sync] 2026-08-25: replace Agent-Runtime inventory polling with direct standard MCP ClientSession discovery.
 [Sync] 2026-08-25: exhaust bounded tools/resources/prompts pagination inside the same initialized MCP session.
 [Sync] 2026-08-25: isolate interactive OAuth discovery from short inventory single-flight/timeout ownership.
+[Sync] 2026-09-06: allow explicit IPv4/IPv6 loopback MCP endpoints while retaining other non-global IP denials.
 """
 
 from __future__ import annotations
@@ -195,7 +196,9 @@ def _validate_remote_url(url: str) -> str:
     except ValueError:
         pass
     else:
-        if not address.is_global:
+        if not address.is_loopback and (
+            not address.is_global or address.is_multicast
+        ):
             raise ValueError("remote MCP endpoint is denied")
     return url
 

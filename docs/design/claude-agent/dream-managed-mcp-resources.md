@@ -4,6 +4,7 @@
 <!-- [同步] 2026-08-25：正常 PostgreSQL 已应用 0038；真实账户三 transport、Chat/resume、cancel、页面 P50/P95 与 Admin 可见页已验证；MCP 认证类型由后端 discovery 判定；真实 Comfy OAuth 已完成 logout/login、同源自动 callback、41/24/10 inventory、两次自然到期 `/oauth/token` refresh、只读工具调用与同 Thread 续聊终验。 -->
 <!-- [同步] 2026-08-25：新增独立中文业务交互时序图集，并将详情页合同校准为自动 `force=false` inventory、无刷新按钮。 -->
 <!-- [同步] 2026-08-27：capability 仅缓存精确验证成功结果；PostgreSQL 瞬时查询失败与真实 schema 缺失使用不同安全错误，Resources 无按钮自动重试。 -->
+<!-- [同步] 2026-09-06：允许与 Dream 后端同网络命名空间的显式 IPv4/IPv6 loopback MCP endpoint，同时保留其他 non-global 字面 IP、URL 用户信息/query/fragment 与 redirect 拒绝。 -->
 
 # Dream 托管 MCP Resources：管理链路去 CLI 化设计
 
@@ -237,7 +238,7 @@ Chat 执行面的 legacy SSE 兼容已最小补齐：custom Runtime 严格解析
 
 统一 `McpConnectionSpec` 只含：`server_id`、`transport`、安全 endpoint 或 `stdio_profile_key`、resolved auth material、policy timeouts。三个 adapter 都返回同一 `async with` session 接口：
 
-- `streamable_http`：只允许策略批准的 `http/https`，默认生产策略应为 HTTPS；执行 DNS/IP/redirect/port/host allow/deny 的 SSRF 检查，重定向后重新检查。
+- `streamable_http`：允许符合现有 URL 形状合同的 `http/https`；与 Dream 后端同网络命名空间的 Server 可使用显式 IPv4 loopback 或 IPv6 `::1`，其他 non-global 字面 IP 继续拒绝。URL 用户信息、query、fragment 仍拒绝，redirect 不跟随；本调整不新增用户可控的放宽开关，也不取消 MCP Apps Node Runtime 的独立 host allowlist。
 - `sse`：使用 SDK legacy SSE client，遵守同一 URL/auth/timeout/取消合同；不得偷换为 Streamable HTTP。
 - `stdio`：profile 由服务端配置映射到 argv 数组；禁 shell、禁浏览器输入 env/cwd、精确限制 executable、args、环境键和值来源。每次 discovery 最多一个 SDK-owned child，退出时回收进程组。
 - 未探测/匿名：不附加 Authorization；详情自动或批量 discovery 成功即在响应中标记匿名，401/403 则安全映射为 `AUTH_REQUIRED` 并由后端 CAS 持久化内部 `auth_kind=oauth`。前端不能预选或强制 OAuth。

@@ -4,6 +4,7 @@
 <!-- [同步] 2026-09-04：SUO-383 将 Browser consumer 名称对齐为 Host adapter；Node transport 与授权边界不变。 -->
 <!-- [同步] 2026-09-04：Browser MCP Client 改接 Node 标准受控端点，上游连接与安全过滤收束到 Node。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 将本模块固定为 frontend/packages/mcp-apps-runtime，同根 App Router 仅保留薄 Route Handler。 -->
+<!-- [同步] 2026-09-06：Dream 管理面允许显式 loopback MCP discovery；Node Runtime 的独立 host allowlist 和其他 non-global 地址拒绝保持不变。 -->
 
 # IM MCP Apps Node 受控 MCP Transport 与连接同步设计
 
@@ -173,6 +174,10 @@ Python 只出现在连接准备分支，不出现在后续 UI resource 或页面
 | 用户电脑上的 stdio/localhost | 云端 Node 不可直接访问 | 不纳入首期；需要单独的用户设备运行时 |
 
 网页不能启动用户电脑上的 stdio 进程。Node transport 解决的是“Browser 不直连且 Node 可达”的 Server，不会凭空改变 Server 的物理位置。
+
+详情页的 Python 管理面 discovery 对同一网络命名空间只接受明确写出的 IPv4
+loopback 或 IPv6 `::1`；这不等于取消 Node 受控端点自己的 host allowlist，
+也不把其他 private、link-local 或保留地址扩为可用。
 
 ### 3.8 生命周期和部署
 

@@ -24,6 +24,7 @@
 [Sync] 2026-08-31: remove daily-picture mutation/generation and legacy voice-analysis APIs; historical picture reads remain.
 [Sync] 2026-09-02: document stable Chat message pages, latest-ID stabilization, and legacy full-history compatibility.
 [Sync] 2026-09-02: document final-only assistant pages and owned exact-id process detail.
+[Sync] 2026-09-06: document explicit loopback MCP discovery without weakening other non-global IP or redirect denials.
 -->
 
 **Version:** 2.0.0
@@ -999,6 +1000,11 @@ operation 仅表示把 connector-owned 轻量索引 materialize 到当前 thread
 或其他 MCP 管理 CLI。Token、Authorization Header、callback code/state 不会
 出现在公开 DTO、普通配置字段或 access log；OAuth 文档只以 actor/server AAD
 绑定的 AES-GCM envelope 保存。
+
+远程 transport 的 discovery 允许明确写出的 IPv4 loopback 或 IPv6 `::1`
+地址，以连接与 Dream 后端同网络命名空间的本机 MCP Server。其他 non-global
+字面 IP 仍拒绝；URL 不得包含用户信息、query 或 fragment，HTTP redirect 不跟随。
+这一管理面调整不会取消 MCP Apps Node Runtime 自己的 host allowlist。
 
 | Method | Route | Purpose |
 |---|---|---|

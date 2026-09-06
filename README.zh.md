@@ -14,6 +14,7 @@
 <!-- [同步] 2026-09-01：允许歧义 Dream 工作区进入修正 Turn，并安全截断递归 Skill 链接。 -->
 <!-- [同步] 2026-09-02：Dream 启动前要求 Admin 0042 发布精确 Chat 历史 keyset pagination capability。 -->
 <!-- [同步] 2026-09-04：记录已提交回复后的 Dream 同步错误与 Execution 资产即时刷新。 -->
+<!-- [同步] 2026-09-06：允许显式 loopback MCP discovery，同时保留其他 non-global 字面 IP、URL 形状、redirect 与 Node host allowlist 边界。 -->
 <!-- [同步] 2026-09-01：要求投影写入前校验重复项目根/stage，采用 move-not-copy 清理，并在唯一一次修正停止时显示安全原因。 -->
 <!-- [同步] 2026-09-02：记录索引优先的 Episode 同步、稳定的逐 Episode 导航以及禁止跨 Episode 产物回退。 -->
 <!-- [同步] 2026-09-04：记录 actor 绑定的 notion-cli Bash 审批路由及其 fail-closed 命令/网络边界。 -->
@@ -256,6 +257,8 @@ pnpm run dev --hostname 127.0.0.1 --port 5173
 前端 package、Next 配置和唯一 App Router 均位于 `frontend/` 根。全部 Dream 应用源码位于私有、不可路由的 `frontend/app/_dream/` 树，路由级浏览器 UI 模块位于其 `views/` 目录；不存在第二套嵌套 App Router、旧顶层源码树或兼容 import 路径。依赖锁定由后续 release gate 收口，因此验证本次布局时不得 install 或 relock。
 
 受治理 MCP Apps 预览的唯一 Node owner 位于 `frontend/packages/mcp-apps-runtime/`。Browser 只连接同源 `/api/mcp-apps/{serverRef}` 标准 Streamable HTTP 入口；根 Route Handler 薄委派给 server-only package，由该 package 从 Python 获取短时且绑定 actor/workspace/Server 的建连视图，绝不把上游 URL、header、环境变量或凭证返回 Browser。独立来源的 sandbox 只向精确配置的父页面 origin 提供版本化 proxy。Browser 与 Node 消费同一份服务端插件和策略 revision；配置缺失、禁用、销毁、不兼容、过期或 revision 变化时 fail closed，使旧 session 失效，并只从 fresh view 重新挂载，同时保留普通工具结果。session cleanup 发送有界标准 DELETE；若 SDK initialize 已先行中止 transport，则使用新的 signal 重试；Node adapter 还会让遗留 session 随短时 view 独立过期。Host 只手动绑定已启用的 AppBridge 操作，因此 SDK Client 无法自动转发 Browser 已关闭的 `tools/call`；`window.im` 成员来自认证 actor-effective Host handshake，App 消息与 composer、queued prompt 进入同一个 Chat-owned send coordinator。`productionAppsEffective` 始终为 `false`。
+
+托管 MCP discovery 允许与 Dream 后端共址的 Server 使用显式 IPv4 loopback 与 IPv6 `::1` endpoint。其他 non-global 字面 IP、URL credential/query/fragment 及上游 redirect 仍拒绝；MCP Apps Node Runtime host allowlist 继续作为独立执行边界。
 
 预览默认全部拒绝。请在服务进程环境中配置以下值；正安全整数、origin 与 host 必须来自部署策略，不要原样复制占位符：
 
