@@ -41,14 +41,14 @@ Ink & Memory 是一个以写作体验为核心的应用。EditorEngine 在用户
 
 | 层次 | 文件 | 职责 |
 |------|------|------|
-| 引擎层 | `frontend/src/engine/EditorEngine.ts` | 核心状态机：管理 Text/Widget/Suggestion cells、Session Writing Thread、历史 commentors、tasks、weightPath；文本编辑只执行本地状态计算 |
-| 引擎层 | `frontend/src/engine/ChatWidget.ts` | 嵌入式聊天小部件：管理单个 Voice 的对话历史 |
-| Hooks 层 | `frontend/src/hooks/useSessionLifecycle.ts` | 会话生命周期协调：初始化、加载、自动保存、新建、新一天检测 |
-| Hooks 层 | `frontend/src/hooks/useTextCells.ts` | 文本单元格管理：本地文本、IME 组合输入、粘贴、键盘事件 |
-| Hooks 层 | `frontend/src/hooks/useComments.ts` | 评论管理：分组、分页、星标/杀死、评论聊天 |
-| Hooks 层 | `frontend/src/hooks/useWritingSuggestions.ts` | 手动建议控制器：Thread 懒创建/持久化、SSE、重试和过期响应隔离 |
-| Hooks 层 | `frontend/src/hooks/useVoiceInput.ts` | 语音输入 |
-| API 层 | `frontend/src/api/voiceApi.ts` | 后端 API 调用：共享 Claude Agent SSE turn、Voice 对话、saveSession、listSessions、getSession |
+| 引擎层 | `frontend/app/_dream/engine/EditorEngine.ts` | 核心状态机：管理 Text/Widget/Suggestion cells、Session Writing Thread、历史 commentors、tasks、weightPath；文本编辑只执行本地状态计算 |
+| 引擎层 | `frontend/app/_dream/engine/ChatWidget.ts` | 嵌入式聊天小部件：管理单个 Voice 的对话历史 |
+| Hooks 层 | `frontend/app/_dream/hooks/useSessionLifecycle.ts` | 会话生命周期协调：初始化、加载、自动保存、新建、新一天检测 |
+| Hooks 层 | `frontend/app/_dream/hooks/useTextCells.ts` | 文本单元格管理：本地文本、IME 组合输入、粘贴、键盘事件 |
+| Hooks 层 | `frontend/app/_dream/hooks/useComments.ts` | 评论管理：分组、分页、星标/杀死、评论聊天 |
+| Hooks 层 | `frontend/app/_dream/hooks/useWritingSuggestions.ts` | 手动建议控制器：Thread 懒创建/持久化、SSE、重试和过期响应隔离 |
+| Hooks 层 | `frontend/app/_dream/hooks/useVoiceInput.ts` | 语音输入 |
+| API 层 | `frontend/app/_dream/api/voiceApi.ts` | 后端 API 调用：共享 Claude Agent SSE turn、Voice 对话、saveSession、listSessions、getSession |
 | 后端 API | `backend/server.py` → `/api/sessions/*` | 会话持久化：CRUD |
 | 持久化层 | `backend/database.py` | SQLite/DB 操作 |
 

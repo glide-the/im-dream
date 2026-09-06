@@ -197,7 +197,7 @@ async function preparePage(page: Page) {
     await route.fulfill({
       status: 200,
       contentType: 'text/html',
-      body: '<!doctype html><html lang="zh-CN"><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh"; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script><script type="module" src="/@vite/client"></script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/src/index.css"></head><body><main id="root"></main><script type="module" src="/e2e/fixtures/storyWorkspaceSubscriptionHarness.tsx"></script></body></html>',
+      body: '<!doctype html><html lang="zh-CN"><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh"; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script><script type="module" src="/@vite/client"></script><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app/_dream/index.css"></head><body><main id="root"></main><script type="module" src="/e2e/fixtures/storyWorkspaceSubscriptionHarness.tsx"></script></body></html>',
     });
   });
   await page.goto(`${WEB_BASE}/e2e/subscription-harness`);

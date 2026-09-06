@@ -191,17 +191,17 @@ DECK-011: Deck Editor 插件选择与版本绑定 UI
 
 | 路径 | 动作 | 最小变更 |
 |---|---|---|
-| `frontend/src/components/deck/DeckPluginBindingCard.tsx` | 新建 | 当前 binding、空状态、版本与 capability 摘要 |
-| `frontend/src/components/deck/DeckPluginVersionPicker.tsx` | 新建 | options 列表、版本差异、选择与确认 |
-| `frontend/src/components/deck/DeckPluginVersionCard.tsx` | 新建 | 单版本状态、可选性与安全 reason 展示 |
-| `frontend/src/components/deck/DeckPluginBindingStatus.tsx` | 新建 | `next_run` 提示、加载/保存/冲突状态 |
-| `frontend/src/hooks/useDeckPluginBinding.ts` | 新建 | 当前 binding、保存、revision 冲突刷新与重新确认状态 |
-| `frontend/src/hooks/useDeckPluginOptions.ts` | 新建 | options 查询、缓存与刷新 |
-| `frontend/src/api/deckPluginApi.ts` | 新建 | 只封装 task_210a 冻结的四个 API 合同 |
-| `frontend/src/components/DeckEditorModal.tsx` | 修改 | 只增量集成 Deck 工作流插件区域 |
-| `frontend/src/components/deck/DeckPluginBindingCard.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖当前/空/运行中只读状态 |
-| `frontend/src/components/deck/DeckPluginVersionPicker.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖 options、选择和不可选原因 |
-| `frontend/src/hooks/useDeckPluginBinding.test.ts` | 条件新建 | 已有兼容 runner 时覆盖保存、409 刷新与重新确认 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingCard.tsx` | 新建 | 当前 binding、空状态、版本与 capability 摘要 |
+| `frontend/app/_dream/components/deck/DeckPluginVersionPicker.tsx` | 新建 | options 列表、版本差异、选择与确认 |
+| `frontend/app/_dream/components/deck/DeckPluginVersionCard.tsx` | 新建 | 单版本状态、可选性与安全 reason 展示 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingStatus.tsx` | 新建 | `next_run` 提示、加载/保存/冲突状态 |
+| `frontend/app/_dream/hooks/useDeckPluginBinding.ts` | 新建 | 当前 binding、保存、revision 冲突刷新与重新确认状态 |
+| `frontend/app/_dream/hooks/useDeckPluginOptions.ts` | 新建 | options 查询、缓存与刷新 |
+| `frontend/app/_dream/api/deckPluginApi.ts` | 新建 | 只封装 task_210a 冻结的四个 API 合同 |
+| `frontend/app/_dream/components/DeckEditorModal.tsx` | 修改 | 只增量集成 Deck 工作流插件区域 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingCard.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖当前/空/运行中只读状态 |
+| `frontend/app/_dream/components/deck/DeckPluginVersionPicker.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖 options、选择和不可选原因 |
+| `frontend/app/_dream/hooks/useDeckPluginBinding.test.ts` | 条件新建 | 已有兼容 runner 时覆盖保存、409 刷新与重新确认 |
 
 以上十一个路径是未来 execute 的完整闭集；未列出的路径默认禁止。三个测试路径仅在 §8 runner 发现命令返回非空且现有依赖可直接运行时创建；若仍无 runner，不得生成不可执行测试文件，改以浏览器 E2E/人工证据验收。这不授权修改 `package.json`、依赖锁或测试配置。所有路径 ownership 仅属于本 task，不与 `task_210` 共享。
 
@@ -320,17 +320,17 @@ execute Issue 必须先读取 `frontend/package.json` 的 `scripts` 与现有测
 
 ### 11.1 未来 execute 允许闭集
 
-- `frontend/src/components/deck/DeckPluginBindingCard.tsx`
-- `frontend/src/components/deck/DeckPluginVersionPicker.tsx`
-- `frontend/src/components/deck/DeckPluginVersionCard.tsx`
-- `frontend/src/components/deck/DeckPluginBindingStatus.tsx`
-- `frontend/src/hooks/useDeckPluginBinding.ts`
-- `frontend/src/hooks/useDeckPluginOptions.ts`
-- `frontend/src/api/deckPluginApi.ts`
-- `frontend/src/components/DeckEditorModal.tsx`（仅增量添加插件区）
-- `frontend/src/components/deck/DeckPluginBindingCard.test.tsx`
-- `frontend/src/components/deck/DeckPluginVersionPicker.test.tsx`
-- `frontend/src/hooks/useDeckPluginBinding.test.ts`
+- `frontend/app/_dream/components/deck/DeckPluginBindingCard.tsx`
+- `frontend/app/_dream/components/deck/DeckPluginVersionPicker.tsx`
+- `frontend/app/_dream/components/deck/DeckPluginVersionCard.tsx`
+- `frontend/app/_dream/components/deck/DeckPluginBindingStatus.tsx`
+- `frontend/app/_dream/hooks/useDeckPluginBinding.ts`
+- `frontend/app/_dream/hooks/useDeckPluginOptions.ts`
+- `frontend/app/_dream/api/deckPluginApi.ts`
+- `frontend/app/_dream/components/DeckEditorModal.tsx`（仅增量添加插件区）
+- `frontend/app/_dream/components/deck/DeckPluginBindingCard.test.tsx`
+- `frontend/app/_dream/components/deck/DeckPluginVersionPicker.test.tsx`
+- `frontend/app/_dream/hooks/useDeckPluginBinding.test.ts`
 - `docs/exec/exec_task_212_frontend_deck_editor_plugin_binding.md`（仅允许 `ExecTaskAgent` 写入本 task 的唯一正式执行报告）
 
 ### 11.2 未来 execute 禁止范围

@@ -24,6 +24,9 @@
 # [Sync] 2026-09-04: classify Dream post-turn Hook failures after assistant
 #                    commit with an explicit synchronization terminal so Chat
 #                    never implies that the persisted reply was unprocessed.
+# [Sync] 2026-09-06: bind complete MCP Apps results to the exact managed Server
+#                    and workspace loaded for this turn; only non-error results
+#                    project, while live/history fallback preserves ordinary output.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -209,7 +212,8 @@ SSE event schema (aligned with Pawkeyland)::
     data: {"type": "tool-input-start",     "toolCallId": "...", "toolName": "..."}
     data: {"type": "tool-input-delta",     "toolCallId": "...", "toolName": "...", "delta": "..."}
     data: {"type": "tool-input-available", "toolCallId": "...", "toolName": "...", "input": {...}}
-    data: {"type": "tool-output-available","toolCallId": "...", "output": ..., "isError": false}
+    data: {"type": "tool-output-available","toolCallId": "...", "output": ..., "isError": false,
+           "mcpAppResult": {"version": 1, ...}}  # optional, managed MCP only
     data: {"type": "tool-approval-request","toolCallId": "...", "toolName": "...", "input": {...}}
     data: {"type": "plan-mode-changed", "planMode": "planning"|"exited", "toolCallId": "..."}
     data: {"type": "plan-updated", "slug": "...", "fileName": "...", "content": "...",
@@ -225,9 +229,11 @@ SSE event schema (aligned with Pawkeyland)::
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -314,6 +320,257 @@ _TRUSTED_STORY_WORKSPACE_ENV_KEYS = frozenset({
     "INK_AGENT_WORKFLOW_RUN_ID",
     "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
 })
+
+_MCP_APPS_RESULT_VERSION = 1
+_MCP_TOOL_REGISTRATION_PREFIX = "mcp__"
+_MCP_SERVER_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_MCP_APPS_PROJECTION_FIELDS = frozenset({
+    "version",
+    "serverRef",
+    "toolName",
+    "toolCallId",
+    "input",
+    "workspaceScope",
+    "resourceUri",
+    "result",
+})
+_MCP_APPS_SENSITIVE_KEYS = frozenset({
+    "authorization",
+    "connection_profile",
+    "connectionprofile",
+    "cookie",
+    "credential",
+    "credentials",
+    "env",
+    "headers",
+    "password",
+    "refresh_token",
+    "runtime_snapshot",
+    "runtimesnapshot",
+    "secret",
+    "socket",
+    "stdio_command",
+    "token",
+    "upstream_url",
+    "url",
+})
+
+
+def _normalized_sensitive_key(value: object) -> str:
+    return str(value).strip().lower().replace("-", "_")
+
+
+def _mcp_apps_value_has_sensitive_key(value: Any) -> bool:
+    """Reject connection/auth material without inspecting or logging values."""
+
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if _normalized_sensitive_key(key) in _MCP_APPS_SENSITIVE_KEYS:
+                return True
+            if _mcp_apps_value_has_sensitive_key(nested):
+                return True
+    elif isinstance(value, list):
+        return any(_mcp_apps_value_has_sensitive_key(item) for item in value)
+    return False
+
+
+def _is_json_value(value: Any, *, depth: int = 0) -> bool:
+    if depth > 64:
+        return False
+    if value is None or isinstance(value, (str, bool)):
+        return True
+    if isinstance(value, int):
+        return not isinstance(value, bool) and abs(value) <= 9_007_199_254_740_991
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return all(_is_json_value(item, depth=depth + 1) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str)
+            and _is_json_value(item, depth=depth + 1)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _is_mcp_app_resource_uri(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and 5 < len(value) <= 2048
+        and value.startswith("ui://")
+        and not any(ord(char) < 0x20 or char.isspace() for char in value)
+    )
+
+
+def _managed_mcp_tool_binding(
+    registered_tool_name: Any,
+    managed_server_keys: tuple[str, ...],
+) -> tuple[str, str] | None:
+    """Resolve one exact SDK registration from this turn's managed registry.
+
+    This is not a name-based owner guess: candidates are constructed solely
+    from the canonical ``server_key`` set that was loaded and registered in
+    this same turn.  Zero or multiple matches are rejected.
+    """
+
+    if not isinstance(registered_tool_name, str) or not registered_tool_name:
+        return None
+    matches: list[tuple[str, str]] = []
+    for server_key in managed_server_keys:
+        if not isinstance(server_key, str) or not _MCP_SERVER_REF_RE.fullmatch(
+            server_key
+        ):
+            continue
+        prefix = f"{_MCP_TOOL_REGISTRATION_PREFIX}{server_key}__"
+        if registered_tool_name.startswith(prefix):
+            upstream_tool_name = registered_tool_name[len(prefix):]
+            if upstream_tool_name:
+                matches.append((server_key, upstream_tool_name))
+    return matches[0] if len(matches) == 1 else None
+
+
+def _build_mcp_apps_tool_result_projection(
+    *,
+    managed_server_keys: tuple[str, ...],
+    managed_workspace_scope: str | None,
+    registered_tool_name: Any,
+    tool_call_id: Any,
+    tool_input: Any,
+    call_tool_result: Any,
+    is_error: bool,
+) -> dict[str, Any] | None:
+    """Build the optional v1 projection from one trusted registration binding."""
+
+    binding = _managed_mcp_tool_binding(
+        registered_tool_name,
+        managed_server_keys,
+    )
+    if binding is None:
+        return None
+    server_ref, upstream_tool_name = binding
+    if (
+        is_error
+        or not isinstance(tool_call_id, str)
+        or not tool_call_id
+        or len(tool_call_id) > 2048
+        or not isinstance(tool_input, dict)
+        or (
+            managed_workspace_scope is not None
+            and (
+                not isinstance(managed_workspace_scope, str)
+                or not _MCP_SERVER_REF_RE.fullmatch(managed_workspace_scope)
+            )
+        )
+        or not isinstance(call_tool_result, dict)
+        or not isinstance(call_tool_result.get("content"), list)
+        or not _is_json_value(tool_input)
+        or not _is_json_value(call_tool_result)
+        or _mcp_apps_value_has_sensitive_key(tool_input)
+        or _mcp_apps_value_has_sensitive_key(call_tool_result)
+    ):
+        return None
+    result_is_error = call_tool_result.get("isError")
+    if result_is_error is not None and (
+        not isinstance(result_is_error, bool) or result_is_error is not is_error
+    ):
+        return None
+    metadata = call_tool_result.get("_meta")
+    if not isinstance(metadata, dict):
+        return None
+    ui = metadata.get("ui")
+    if not isinstance(ui, dict):
+        return None
+    # This exact Server/tool's standard result may nominate a UI resource, but
+    # it never supplies owner identity.  The Browser-side MCP Client will
+    # independently require the same URI from the current tools/list descriptor
+    # before reading/mounting it.
+    resource_uri = ui.get("resourceUri")
+    if not _is_mcp_app_resource_uri(resource_uri):
+        return None
+    for asserted_server_ref in (metadata.get("serverRef"), ui.get("serverRef")):
+        if asserted_server_ref is not None and asserted_server_ref != server_ref:
+            return None
+    return {
+        "version": _MCP_APPS_RESULT_VERSION,
+        "serverRef": server_ref,
+        "toolName": upstream_tool_name,
+        "toolCallId": tool_call_id,
+        "input": deepcopy(tool_input),
+        "workspaceScope": managed_workspace_scope,
+        "resourceUri": resource_uri,
+        "result": deepcopy(call_tool_result),
+    }
+
+
+def _validated_mcp_apps_projection_for_tool_part(
+    projection: Any,
+    *,
+    tool_name: Any,
+    tool_call_id: Any,
+    tool_input: Any,
+    output: Any,
+) -> dict[str, Any] | None:
+    """Validate an internal/live projection before persistence transport."""
+
+    if (
+        not isinstance(projection, dict)
+        or set(projection) != _MCP_APPS_PROJECTION_FIELDS
+        or projection.get("version") != _MCP_APPS_RESULT_VERSION
+        or isinstance(projection.get("version"), bool)
+    ):
+        return None
+    server_ref = projection.get("serverRef")
+    projected_tool_name = projection.get("toolName")
+    expected_registered_name = (
+        f"{_MCP_TOOL_REGISTRATION_PREFIX}{server_ref}__{projected_tool_name}"
+    )
+    result = projection.get("result")
+    result_metadata = result.get("_meta") if isinstance(result, dict) else None
+    result_ui = (
+        result_metadata.get("ui") if isinstance(result_metadata, dict) else None
+    )
+    if (
+        not isinstance(server_ref, str)
+        or not _MCP_SERVER_REF_RE.fullmatch(server_ref)
+        or not isinstance(projected_tool_name, str)
+        or not projected_tool_name
+        or len(projected_tool_name) > 512
+        or not isinstance(tool_call_id, str)
+        or not tool_call_id
+        or len(tool_call_id) > 2048
+        or tool_name not in {projected_tool_name, expected_registered_name}
+        or projection.get("toolCallId") != tool_call_id
+        or projection.get("input") != tool_input
+        or (
+            projection.get("workspaceScope") is not None
+            and (
+                not isinstance(projection.get("workspaceScope"), str)
+                or not _MCP_SERVER_REF_RE.fullmatch(projection["workspaceScope"])
+            )
+        )
+        or projection.get("result") != output
+        or not _is_mcp_app_resource_uri(projection.get("resourceUri"))
+        or not isinstance(result, dict)
+        or not isinstance(result.get("content"), list)
+        or ("isError" in result and result.get("isError") is not False)
+        or not isinstance(result_ui, dict)
+        or result_ui.get("resourceUri") != projection.get("resourceUri")
+        or (
+            result_metadata.get("serverRef") is not None
+            and result_metadata.get("serverRef") != server_ref
+        )
+        or (
+            result_ui.get("serverRef") is not None
+            and result_ui.get("serverRef") != server_ref
+        )
+        or not _is_json_value(projection)
+        or _mcp_apps_value_has_sensitive_key(projection)
+    ):
+        return None
+    return deepcopy(projection)
+
+
 def _pack_thread_workspace_plugins(
     cwd: str,
     deck_id: Optional[str],
@@ -1278,6 +1535,13 @@ class _TurnContext:
     # tool_call_id → complete tool input. Editor result handling uses this
     # immutable identity to refresh only the actor's live Editor session.
     tool_input_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Canonical managed Server registry loaded and handed to the SDK for this
+    # exact turn.  Only these keys may own an MCP Apps result projection.
+    managed_mcp_server_keys: tuple[str, ...] = ()
+    # Exact backend-resolved business workspace that selected the registry.
+    # Browser clients may carry it back only as a selector; Python revalidates
+    # actor ownership and the Server scope before any credential access.
+    managed_mcp_workspace_scope: str | None = None
     # Thinking / reasoning tracking (for SSE reasoning-start/end emission).
     current_reasoning_id: Optional[str] = None
     has_thinking_delta: bool = False
@@ -1947,6 +2211,8 @@ class ClaudeAgentService:
         turn_ctx = _TurnContext(
             queue=BusProxyQueue(bus),
             confirmation_store=confirmation_store,
+            managed_mcp_server_keys=tuple(sorted(claude_mcp_servers)),
+            managed_mcp_workspace_scope=managed_workspace_id,
         )
         state.turn_context = turn_ctx
 
@@ -2872,7 +3138,13 @@ class ClaudeAgentService:
                     fallback_evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}
                     await queue.put(_event("tool-input-available", {"toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}))
                     turn_ctx.collected_parts.append(fallback_evt)
-                resolved_tool_name = tool_name or turn_ctx.tool_name_by_id.get(tool_call_id, "")
+                registered_tool_name = turn_ctx.tool_name_by_id.get(tool_call_id, "")
+                tool_name_conflicts = bool(
+                    tool_name
+                    and registered_tool_name
+                    and tool_name != registered_tool_name
+                )
+                resolved_tool_name = tool_name or registered_tool_name
                 editor_result = (
                     _extract_editor_tool_result(payload.output)
                     if resolved_tool_name in _EDITOR_WRITE_TOOL_NAMES
@@ -2881,8 +3153,37 @@ class ClaudeAgentService:
                 is_error = bool(payload.is_error) or _is_editor_tool_result_error(
                     resolved_tool_name, payload.output
                 )
-                evt = {"type": "tool-output-available", "toolCallId": tool_call_id, "output": payload.output, "isError": is_error}
-                await queue.put(_event("tool-output-available", {"toolCallId": tool_call_id, "output": payload.output, "isError": is_error}))
+                complete_result = payload.call_tool_result
+                if complete_result is None and isinstance(payload.output, dict):
+                    complete_result = payload.output
+                mcp_app_result = None
+                if not tool_name_conflicts:
+                    mcp_app_result = _build_mcp_apps_tool_result_projection(
+                        managed_server_keys=turn_ctx.managed_mcp_server_keys,
+                        managed_workspace_scope=turn_ctx.managed_mcp_workspace_scope,
+                        registered_tool_name=resolved_tool_name,
+                        tool_call_id=tool_call_id,
+                        tool_input=turn_ctx.tool_input_by_id.get(tool_call_id),
+                        call_tool_result=complete_result,
+                        is_error=is_error,
+                    )
+                # A valid Apps result is the complete CallToolResult and also
+                # remains the ordinary fallback output.  Rejected projections
+                # retain the pre-existing normalized output unchanged.
+                result_output = (
+                    mcp_app_result["result"]
+                    if mcp_app_result is not None
+                    else payload.output
+                )
+                event_data: dict[str, Any] = {
+                    "toolCallId": tool_call_id,
+                    "output": result_output,
+                    "isError": is_error,
+                }
+                if mcp_app_result is not None:
+                    event_data["mcpAppResult"] = mcp_app_result
+                evt = {"type": "tool-output-available", **event_data}
+                await queue.put(_event("tool-output-available", event_data))
                 turn_ctx.collected_parts.append(evt)
 
                 # Every actor/session-matched Editor result refreshes the single
@@ -3178,6 +3479,15 @@ def _sse_events_to_ui_parts(events: list) -> list:
                 inv = tool_by_id[tool_id]
                 inv["state"] = "output-error" if event.get("isError") else "output-available"
                 inv["output"] = event.get("output")
+                projection = _validated_mcp_apps_projection_for_tool_part(
+                    event.get("mcpAppResult"),
+                    tool_name=inv.get("toolName"),
+                    tool_call_id=tool_id,
+                    tool_input=inv.get("input"),
+                    output=inv.get("output"),
+                )
+                if projection is not None:
+                    inv["mcpAppResult"] = projection
 
     return parts
 

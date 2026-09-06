@@ -64,9 +64,9 @@
 ### 允许新增或修改
 
 ```text
-frontend/src/components/story-workspace/episode/state/
-frontend/src/components/story-workspace/episode/state/*.test.tsx
-frontend/src/hooks/story-workspace/*episode-state*
+frontend/app/_dream/components/story-workspace/episode/state/
+frontend/app/_dream/components/story-workspace/episode/state/*.test.tsx
+frontend/app/_dream/hooks/story-workspace/*episode-state*
 ```
 
 ### 禁止修改

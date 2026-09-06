@@ -42,15 +42,15 @@
 
 | 文件 | 操作 | 说明 |
 |---|---|---|
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceSidebar.tsx` | create | 固定 240px Sidebar；品牌、4 个路由项、Settings、复用 `useAuth` 的用户信息；实现选中、hover、键盘 focus 状态。 |
-| `frontend/src/router/story-workspace.tsx` | create | 原生 History API 等效路由配置；canonical/compat 解析、push/replace、`popstate` 同步及页面映射。 |
-| `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx` | create | canonical Dream 页面骨架，不包含业务 Dashboard 或审阅 Gate 内容。 |
-| `frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx` | create | 仅保留为可复用的页面骨架组件，不持有独立 canonical 路由。 |
-| `frontend/src/pages/story-workspace/StoryWorkspaceStoriesPage.tsx` | create | 故事列表页面骨架，不实现表格。 |
-| `frontend/src/pages/story-workspace/StoryWorkspaceCharactersPage.tsx` | create | 角色列表页面骨架，不实现表格。 |
-| `frontend/src/pages/story-workspace/StoryWorkspaceScenesPage.tsx` | create | 场景列表页面骨架，不实现表格。 |
-| `frontend/src/pages/story-workspace/index.ts` | create | Story Workspace 页面出口。 |
-| `frontend/src/App.tsx` | update | 最小新增 `story-workspace` App 状态、直接路由入口、Settings 跳转与浏览器历史恢复；域内隐藏全局顶部和移动导航。 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceSidebar.tsx` | create | 固定 240px Sidebar；品牌、4 个路由项、Settings、复用 `useAuth` 的用户信息；实现选中、hover、键盘 focus 状态。 |
+| `frontend/app/_dream/router/story-workspace.tsx` | create | 原生 History API 等效路由配置；canonical/compat 解析、push/replace、`popstate` 同步及页面映射。 |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx` | create | canonical Dream 页面骨架，不包含业务 Dashboard 或审阅 Gate 内容。 |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceDashboardPage.tsx` | create | 仅保留为可复用的页面骨架组件，不持有独立 canonical 路由。 |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceStoriesPage.tsx` | create | 故事列表页面骨架，不实现表格。 |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceCharactersPage.tsx` | create | 角色列表页面骨架，不实现表格。 |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceScenesPage.tsx` | create | 场景列表页面骨架，不实现表格。 |
+| `frontend/app/_dream/views/story-workspace/index.ts` | create | Story Workspace 页面出口。 |
+| `frontend/app/_dream/App.tsx` | update | 最小新增 `story-workspace` App 状态、直接路由入口、Settings 跳转与浏览器历史恢复；域内隐藏全局顶部和移动导航。 |
 | `docs/exec/exec_task_202b_story-workspace-sidebar-navigation.md` | create | 本任务唯一正式执行报告。 |
 
 ### 验收映射
@@ -69,8 +69,8 @@
 ## 5. 测试与验证
 
 - `cd frontend && npm run build`: **通过**；TypeScript build 与 Vite production build 完成。Vite 仅输出仓库既存的 dynamic-import/chunk-size 警告。
-- `cd frontend && npx eslint src/components/story-workspace/layout/StoryWorkspaceSidebar.tsx src/pages/story-workspace src/router/story-workspace.tsx`: **通过，0 问题**。
-- Issue 指定完整 ESLint 命令（含 `src/App.tsx`）: **已执行，未全绿**；仅命中 `App.tsx` 既存的 2 个 `@typescript-eslint/no-explicit-any`（当前行 528、941）和 17 个既存 Hook dependency 警告。本任务新增 Sidebar、页面与路由没有问题，且未越界清理 App 无关历史代码。
+- `cd frontend && npx eslint app/_dream/components/story-workspace/layout/StoryWorkspaceSidebar.tsx app/_dream/views/story-workspace app/_dream/router/story-workspace.tsx`: **通过，0 问题**。
+- Issue 指定完整 ESLint 命令（含 `app/_dream/App.tsx`）: **已执行，未全绿**；仅命中 `App.tsx` 既存的 2 个 `@typescript-eslint/no-explicit-any`（当前行 528、941）和 17 个既存 Hook dependency 警告。本任务新增 Sidebar、页面与路由没有问题，且未越界清理 App 无关历史代码。
 - `git diff --check`: **通过**。
 - 闭集差异检查: **通过**；本任务写入仅为第 4 节列出的 10 个文件。执行期间并行任务新增的 backend、Deck、Stage 和其他 exec report 改动均保持只读。
 - 浏览器验证: 使用 `agent-browser`、mock 本地 `/api/me`/session/preferences，仅验证本地开发页面；1280×800 下完成 canonical、4 个子路由、Sidebar 选中态、hover、键盘 focus、Settings、back/forward 和无第二套顶部导航检查，全部通过。

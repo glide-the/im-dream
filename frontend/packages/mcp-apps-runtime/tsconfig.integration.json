@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "incremental": false,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@/*": ["./app/*"],
+      "@ink-dream/mcp-apps-runtime": ["./packages/mcp-apps-runtime/src/index.ts"]
+    }
+  },
+  "include": [
+    "../../app/api/mcp-apps/**/*.ts",
+    "../../app/mcp-apps-sandbox/route.ts",
+    "../../app/_dream/components/chat/ToolMessagePart.tsx",
+    "../../app/_dream/components/chat/mcp-apps/**/*.ts",
+    "../../app/_dream/components/chat/mcp-apps/**/*.tsx",
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "../../app/_dream/**/*.test.ts",
+    "../../app/_dream/**/*.test.tsx",
+    "src/**/*.test.ts"
+  ]
+}

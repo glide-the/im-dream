@@ -84,13 +84,13 @@
   - `backend/libs/claude_agent_kit/server/workspace.py`
   - `backend/libs/claude_agent_kit/server/sdk_env.py`
   - `backend/libs/claude_agent_kit/server/agent_runner.py`
-  - `frontend/src/components/chat/ChatView.tsx`
-  - `frontend/src/components/chat/ChatPanel.tsx`
-  - `frontend/src/components/chat/AIInputDock.tsx`
-  - `frontend/src/components/chat/ChatMessageList.tsx`
-  - `frontend/src/components/chat/AskUserQuestionUI.tsx`
-  - `frontend/src/components/chat/EditorWriteApprovalUI.tsx`
-  - `frontend/src/lib/claude-agent-transport.ts`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/chat/ChatPanel.tsx`
+  - `frontend/app/_dream/components/chat/AIInputDock.tsx`
+  - `frontend/app/_dream/components/chat/ChatMessageList.tsx`
+  - `frontend/app/_dream/components/chat/AskUserQuestionUI.tsx`
+  - `frontend/app/_dream/components/chat/EditorWriteApprovalUI.tsx`
+  - `frontend/app/_dream/lib/claude-agent-transport.ts`
 
 - 本清单覆盖范围：
   - Claude Agent 运行合同的 request / response / SSE 归一
@@ -162,9 +162,9 @@
   - `backend/claude_agent/workspace_context.py`
   - `backend/claude_agent/service.py`
   - `backend/routers/system_config.py`
-  - `frontend/src/components/dashboard/ModelConfigSection.tsx`
-  - `frontend/src/components/dashboard/Sidebar.tsx`
-  - `frontend/src/contexts/WorkspaceContext.tsx`
+  - `frontend/app/_dream/components/dashboard/ModelConfigSection.tsx`
+  - `frontend/app/_dream/components/dashboard/Sidebar.tsx`
+  - `frontend/app/_dream/contexts/WorkspaceContext.tsx`
   - `backend/tests/test_claude_agent_workspace.py`
   - `backend/tests/test_claude_agent_runner.py`
 
@@ -310,8 +310,8 @@
   - `backend/claude_agent/event_bus_redis.py`
   - `backend/claude_agent/observer.py`
   - `backend/routers/claude_agent.py`
-  - `frontend/src/components/chat/ChatView.tsx`
-  - `frontend/src/components/chat/ChatPanel.tsx`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/chat/ChatPanel.tsx`
   - `backend/tests/test_event_bus.py`
   - `backend/tests/test_claude_agent_thread_factory.py`
 
@@ -355,10 +355,10 @@
   - `backend/routers/claude_agent.py`
   - `backend/claude_agent/thread_factory.py`
   - `backend/libs/claude_agent_kit/server/agent_runner.py`
-  - `frontend/src/components/chat/ChatMessageList.tsx`
-  - `frontend/src/components/chat/AskUserQuestionUI.tsx`
-  - `frontend/src/components/chat/EditorWriteApprovalUI.tsx`
-  - `frontend/src/lib/claude-agent-transport.ts`
+  - `frontend/app/_dream/components/chat/ChatMessageList.tsx`
+  - `frontend/app/_dream/components/chat/AskUserQuestionUI.tsx`
+  - `frontend/app/_dream/components/chat/EditorWriteApprovalUI.tsx`
+  - `frontend/app/_dream/lib/claude-agent-transport.ts`
   - `backend/tests/test_claude_agent_service.py`
   - `backend/tests/test_claude_agent_runner.py`
 
@@ -397,8 +397,8 @@
 
 - 前置依赖：`CA-BE-02`
 - 关联路径：
-  - `frontend/src/components/chat/ChatView.tsx`
-  - `frontend/src/components/chat/ChatPanel.tsx`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/chat/ChatPanel.tsx`
   - `backend/routers/claude_agent.py`
   - `backend/claude_agent/thread_retrieval.py`
   - `backend/tests/test_chat_thread_retrieval.py`
@@ -433,9 +433,9 @@
 
 - 前置依赖：`CA-SH-02`
 - 关联路径：
-  - `frontend/src/components/chat/ChatPanel.tsx`
-  - `frontend/src/components/chat/AIInputDock.tsx`
-  - `frontend/src/components/chat/ChatView.tsx`
+  - `frontend/app/_dream/components/chat/ChatPanel.tsx`
+  - `frontend/app/_dream/components/chat/AIInputDock.tsx`
+  - `frontend/app/_dream/components/chat/ChatView.tsx`
   - `backend/routers/claude_agent.py`
   - `backend/tests/test_claude_agent_thread_factory.py`
 
@@ -469,10 +469,10 @@
 
 - 前置依赖：`CA-SH-03`
 - 关联路径：
-  - `frontend/src/lib/claude-agent-transport.ts`
-  - `frontend/src/components/chat/ChatMessageList.tsx`
-  - `frontend/src/components/chat/EditorWriteApprovalUI.tsx`
-  - `frontend/src/components/chat/ToolMessagePart.tsx`
+  - `frontend/app/_dream/lib/claude-agent-transport.ts`
+  - `frontend/app/_dream/components/chat/ChatMessageList.tsx`
+  - `frontend/app/_dream/components/chat/EditorWriteApprovalUI.tsx`
+  - `frontend/app/_dream/components/chat/ToolMessagePart.tsx`
   - `backend/tests/test_claude_agent_service.py`
 
 - 分发去向：`@FrontendTaskAgent`

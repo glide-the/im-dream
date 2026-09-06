@@ -1,6 +1,7 @@
 // [Input] Deterministic actor-scoped Dream/Episode REST snapshots served at the browser boundary.
 // [Output] Local Chrome evidence for index-first EP01/EP02 navigation, isolation, return focus, and responsive workbench behavior.
 // [Pos] Story Workspace Episode Execution mocked-browser QA (U12); never claims external workflow success.
+// [Sync] 2026-09-05: resolve the execution source contract from the non-framework app/_dream/views tree.
 // [Sync] 2026-08-13: unbound EP01 remains read-only while the turn Hook publishes and binds.
 // [Sync] 2026-08-13: Dream Agent dialog uses its full conversation row and contains long
 //                    Chat content without page- or message-level horizontal overflow.
@@ -25,7 +26,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 // @ts-expect-error Playwright E2E has Node built-ins; the browser app tsconfig omits Node types.
 import { resolve } from 'node:path';
 import { expect, test, type Page, type Route } from '@playwright/test';
-import { storyWorkspaceParseEpisodeArtifactSurface } from '../src/hooks/story-workspace/contracts';
+import { storyWorkspaceParseEpisodeArtifactSurface } from '../app/_dream/hooks/story-workspace/contracts';
 
 const WEB_BASE = process.env.INK_E2E_WEB_BASE ?? 'http://127.0.0.1:4177';
 const RUN_ID = `run_${'1'.repeat(32)}`;
@@ -1358,7 +1359,7 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     ]) expect(bodyText).not.toContain(forbidden);
     expect(readFileSync(resolve(
       process.cwd(),
-      'src/pages/story-workspace/StoryWorkspaceExecutionPage.tsx',
+      'app/_dream/views/story-workspace/StoryWorkspaceExecutionPage.tsx',
     ), 'utf8')).not.toContain('<ChatView');
     expect(diagnostics).toEqual([]);
   } finally {

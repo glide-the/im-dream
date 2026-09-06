@@ -1,13 +1,15 @@
-<!-- [输入] IM managed MCP 配置源码、MCP SDK Transport 合同、AppRenderer 和网站/本地 MCP 运行边界。 -->
+<!-- [输入] IM managed MCP 配置源码、MCP SDK Transport 合同、MCP Apps Host adapter 和网站/本地 MCP 运行边界。 -->
 <!-- [输出] 定义 Node 受控 MCP transport、PersistentConnectorManager、Python 配置来源和连接同步。 -->
-<!-- [定位] MCP Apps Node 连接专项设计；不定义 iframe 实现或业务工具。 -->
+<!-- [定位] MCP Apps Node 连接专项设计；不定义 iframe 实现、permission policy 或业务工具。 -->
+<!-- [同步] 2026-09-04：SUO-383 将 Browser consumer 名称对齐为 Host adapter；Node transport 与授权边界不变。 -->
 <!-- [同步] 2026-09-04：Browser MCP Client 改接 Node 标准受控端点，上游连接与安全过滤收束到 Node。 -->
+<!-- [同步] 2026-09-05：SUO-404/DEC-005 将本模块固定为 frontend/packages/mcp-apps-runtime，同根 App Router 仅保留薄 Route Handler。 -->
 
 # IM MCP Apps Node 受控 MCP Transport 与连接同步设计
 
 > 状态：设计评审稿，未实现
 >
-> 结论：Browser MCP Client 的 `serverTransport` 指向 Next Node Apps Runtime 暴露的受控 Streamable HTTP MCP 端点。该端点由 `PersistentConnectorManager` 提供上游连接能力和安全过滤，但 manager 对象本身不会跨进程传给 Browser。Node 连接真实 MCP Server；Browser 只连接 IM 网站。
+> 结论：Browser MCP Client 的 `serverTransport` 指向 Next Node Apps Runtime 暴露的受控 Streamable HTTP MCP 端点。该端点由 `PersistentConnectorManager` 提供上游连接能力和安全过滤，但 manager 对象本身不会跨进程传给 Browser。Node 实现只存在于 `frontend/packages/mcp-apps-runtime/**`，`frontend/app/api/mcp-apps/**` 只作根 App Router 的薄入口；Browser 只连接 IM 网站。
 
 参考资料（访问日期：2026-09-04）：
 
@@ -39,7 +41,7 @@ await client.connect(serverTransport)
 - Node 向 Browser 提供标准 MCP Streamable HTTP 端点，不创建第二套 HTTP 命令或私有 SSE 协议。
 - `PersistentConnectorManager` 建立、复用、重连和关闭真实 MCP Server 的连接。
 - Node 在请求到达真实 Server 前完成用户、workspace、Server、tool/resource 和配置 revision 校验。
-- Browser Client 可以直接交给 `AppRenderer`，使 descriptor、resource 和页面工具请求走同一 MCP 连接。
+- Browser Client 直接交给 Host adapter，使 descriptor、完整 resource 和页面工具请求走同一 MCP 连接；iframe 权限由 DEC-002 处理。
 - Python 继续提供受控建连配置，但不处理 Browser/App 请求。
 
 ### 2.2 非目标
@@ -64,7 +66,7 @@ flowchart LR
 
 | 连接 | 作用 | 凭证 |
 |---|---|---|
-| Browser → Node | 为 `AppRenderer` 提供标准 MCP Client 连接 | 现有 IM 登录态；不含上游 MCP credential |
+| Browser → Node | 为 Host adapter 提供标准 MCP Client 连接 | 现有 IM 登录态；不含上游 MCP credential |
 | Node → MCP Server | 执行真实 tools/resources/notifications | 只在 Node 内存使用 Python 提供的当前 Server 建连配置 |
 
 Browser 仍会在 Chrome 中建立网络连接，但目标是 IM Node 端点，不是用户配置的 MCP 地址。这解决网站无法访问 Node-local stdio/localhost Server、也不应持有上游认证的问题。
@@ -180,12 +182,20 @@ Python 只出现在连接准备分支，不出现在后续 UI resource 或页面
 - Node 重启后 Browser Client 重新 initialize；未确认完成的写操作不自动重放。
 - 最后一个下游 session 关闭后，manager 是否短时保留上游连接由内部空闲策略决定，不成为产品限制。
 
+### 3.9 Workspace package 与 server-only 边界
+
+- `frontend/` 是 workspace、根 Web package 和 Next project 的共同根；本 Runtime 的唯一 owner 是 `frontend/packages/mcp-apps-runtime/**`。
+- package 的公开 server entry 显式导入 `server-only`，内部持有 config provider、SDK connector、manager、HTTP adapter 与 process singleton；不得导入根 `app/**`、`src/**`、React 或 DOM。
+- 根 `frontend/app/api/mcp-apps/[serverRef]/route.ts` 固定 `runtime = 'nodejs'`，只提取请求上下文并委派；不得复制 manager、配置读取或上游连接逻辑。
+- 依赖方向仅为根 Route Handler → Runtime package。Browser Host 通过同源 HTTP 使用它，不能从 Client Component import；standalone tracing 必须包含 package，Browser chunk 扫描必须排除它。
+- `frontend/app/_dream/server/mcp-apps/**` 与嵌套 `frontend/app/app/api/**` 均为废止路径，不设置 alias 或双写兼容层。完整目录合同见[迁移评估第 6 节](./dream-frontend-node-framework-migration-assessment.md#6-admin-工作区package-基线与复用边界)。
+
 ## 4. 阶段与验收
 
 | 阶段 | 范围 | 可观察验收 |
 |---|---|---|
 | Phase 0 | 一个 Node 可达 Server；Python 配置视图；Node 受控端点；manager；Browser Streamable HTTP Client | Browser 只访问 IM 域名；initialize/tools/list/resources/read 成功；上游 URL 和 credential 不出现在 Browser |
-| Phase 1 | tool/resource allowlist、只读页面调用、关闭/重连 | 未授权请求在 Node 被拒绝且上游无调用；Route Handler 请求结束后上游连接仍可复用 |
+| Phase 1 | 根 `app/api/**` 薄入口、同级 Runtime package、tool/resource allowlist、只读页面调用、关闭/重连 | 单向 package graph；未授权请求在 Node 被拒绝且上游无调用；Route Handler 请求结束后上游连接仍可复用 |
 | Phase 2 | 写操作授权、OAuth 更新、`ui/message` | 写操作校验当前用户/workspace/Server；OAuth 失效可恢复；页面消息进入现有 Chat |
 | Phase 3 | 多用户、多 Server、版本治理与审计 | 连接不跨用户/Server；不兼容 capability fail closed；请求可按现有 identity 追踪 |
 

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""生成导出长图专用的小篆字体子集。
+"""[Input] Public Xiaolai font plus the canonical app/_dream Chat export module.
+[Output] Export-only WOFF2 subset and its generated missing-glyph fallback table.
+[Pos] Frontend font-subset generator; outputs only to public/ and app/_dream.
+[Sync] 2026-09-06: move the generated TypeScript owner from src into app/_dream.
+
+生成导出长图专用的小篆字体子集。
 
 背景：导出长图走 SVG <img> 管线，SVG 图像文档禁止外部子资源，字体必须 base64 内嵌；
 完整 Xiaolai-Regular.woff2 有 11.8MB，每个分块都会被 Chrome 重新解析一次（实测约 190ms/块，
@@ -8,7 +13,7 @@
 
 产物：
   frontend/public/Xiaolai-ExportSubset.woff2   —— 子集字体（导出时 fetch 一次）
-  frontend/src/components/chat/exportFontSubset.ts —— 风险字符表（全量 cmap 有、子集没有的字；
+  frontend/app/_dream/components/chat/exportFontSubset.ts —— 风险字符表（全量 cmap 有、子集没有的字；
       导出管线逐块扫描文本，命中风险字的分块回退使用全量字体，保证任何字符渲染正确）
 
 依赖：pip install fonttools brotli
@@ -23,7 +28,7 @@ from fontTools.ttLib import TTFont
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_FONT = os.path.join(ROOT, 'public', 'Xiaolai-Regular.woff2')
 OUT_FONT = os.path.join(ROOT, 'public', 'Xiaolai-ExportSubset.woff2')
-OUT_TS = os.path.join(ROOT, 'src', 'components', 'chat', 'exportFontSubset.ts')
+OUT_TS = os.path.join(ROOT, 'app', '_dream', 'components', 'chat', 'exportFontSubset.ts')
 
 
 def gb2312_chars():

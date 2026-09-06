@@ -489,16 +489,16 @@ sequenceDiagram
 
 | 层 | 代码 | 责任 |
 |---|---|---|
-| Dream composition | `frontend/src/App.tsx`、`frontend/src/router/story-workspace.tsx` | Dream 导航、canonical 页面与 Chat 组合 |
-| Deck interaction | `frontend/src/components/deck/DeckChatSelector.tsx` | 首页单选及 thread 锁定来源展示 |
-| Chat contract | `frontend/src/components/chat/ChatView.tsx`、`ChatPanel.tsx`、`frontend/src/lib/chat-schema.ts` | `deckId` 创建/发送/恢复链路 |
+| Dream composition | `frontend/app/_dream/App.tsx`、`frontend/app/_dream/router/story-workspace.tsx` | Dream 导航、canonical 页面与 Chat 组合 |
+| Deck interaction | `frontend/app/_dream/components/deck/DeckChatSelector.tsx` | 首页单选及 thread 锁定来源展示 |
+| Chat contract | `frontend/app/_dream/components/chat/ChatView.tsx`、`ChatPanel.tsx`、`frontend/app/_dream/lib/chat-schema.ts` | `deckId` 创建/发送/恢复链路 |
 | Persistence/API | `backend/database.py`、`backend/routers/claude_agent.py` | `chat_thread.deck_id`、不可切换与权属校验 |
-| Plugin control plane | `backend/services/deck/admin_gateway.py`、`backend/routers/deck_plugins.py`、`frontend/src/components/plugin-admin/PluginAdminPage.tsx` | 安装、启停、升级、回滚、卸载、审批、readiness 与来源约束 |
+| Plugin control plane | `backend/services/deck/admin_gateway.py`、`backend/routers/deck_plugins.py`、`frontend/app/_dream/components/plugin-admin/PluginAdminPage.tsx` | 安装、启停、升级、回滚、卸载、审批、readiness 与来源约束 |
 | Built-in runtime plugin | `backend/services/deck/builtin_plugin.py`、`plugins/ink-dream-story/` | 发布并校验内置故事工作流插件与不可变 runtime lock |
 | Deck domain | `backend/services/deck/chat_context.py`、`runtime_context.py`、`story_workflow_application.py` | Deck/Voice/Binding 解析、preflight/run、不可变快照、readiness 与 SDK 设置生成 |
 | Claude runtime | `backend/claude_agent/service.py`、`backend/libs/claude_agent_kit/types.py`、`agent_runner.py` | 把服务端 settings 与已验证本地 plugin path 传入 Claude Agent SDK |
 | Review persistence | `backend/claude_agent/service.py`、`backend/services/story_workspace/agent_integration.py`、`backend/routers/story_workspace.py` | 合同输出原子写入待审阅资源；确认故事后原子发布故事并确认关联角色/场景 |
-| Review UI | `frontend/src/lib/story-workspace-events.ts`、`StoryWorkspaceReviewDetail.tsx`、`frontend/src/api/storyWorkspaceReviewApi.ts` | 接收 Agent receipt、自动打开审阅栏、编辑/驳回/确认及发布完成反馈 |
+| Review UI | `frontend/app/_dream/lib/story-workspace-events.ts`、`StoryWorkspaceReviewDetail.tsx`、`frontend/app/_dream/api/storyWorkspaceReviewApi.ts` | 接收 Agent receipt、自动打开审阅栏、编辑/驳回/确认及发布完成反馈 |
 
 ### 16.5 Development/Test 验收证据
 

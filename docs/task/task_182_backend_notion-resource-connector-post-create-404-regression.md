@@ -19,7 +19,7 @@ Scope: 后端任务规划 - Notion 资源连接器创建后响应契约、connec
 >      `backend/tests/test_notion_store.py`,
 >      `backend/tests/test_notion_snapshot_contract.py`,
 >      `backend/tests/test_server_claude_agent.py`,
->      `frontend/src/api/resourceConnectorApi.ts`
+>      `frontend/app/_dream/api/resourceConnectorApi.ts`
 > [Output] 可执行的后端任务文档，供后续实现阶段直接拆分与执行
 > [Pos] `task_182_backend_notion-resource-connector-post-create-404-regression` in `docs/task`
 > [Sync] 2026-07-04: generated from the filled requirement template for SUO-182.
@@ -108,7 +108,7 @@ Scope: 后端任务规划 - Notion 资源连接器创建后响应契约、connec
 
 ### 兼容性参考
 
-- `frontend/src/api/resourceConnectorApi.ts`
+- `frontend/app/_dream/api/resourceConnectorApi.ts`
 
 ### 测试
 

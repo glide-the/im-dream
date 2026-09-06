@@ -51,10 +51,10 @@
   - `backend/claude_agent/service.py`
   - `backend/claude_agent/workspace_context.py`
   - `backend/libs/claude_agent_kit/server/notion_snapshot.py`
-  - `frontend/src/App.tsx`
-  - `frontend/src/api/resourceConnectorApi.ts`
-  - `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-  - `frontend/src/components/chat/`
+  - `frontend/app/_dream/App.tsx`
+  - `frontend/app/_dream/api/resourceConnectorApi.ts`
+  - `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+  - `frontend/app/_dream/components/chat/`
   - `backend/tests/`
 
 - 本清单覆盖范围：
@@ -156,12 +156,12 @@
 - 前置依赖：`SUO-178`
 
 - 关联路径：
-  - `frontend/src/App.tsx`
-  - `frontend/src/api/resourceConnectorApi.ts`
-  - `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-  - `frontend/src/components/dashboard/Sidebar.tsx`
-  - `frontend/src/components/dashboard/VerticalNav.tsx`
-  - `frontend/src/constants/storageKeys.ts`
+  - `frontend/app/_dream/App.tsx`
+  - `frontend/app/_dream/api/resourceConnectorApi.ts`
+  - `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+  - `frontend/app/_dream/components/dashboard/Sidebar.tsx`
+  - `frontend/app/_dream/components/dashboard/VerticalNav.tsx`
+  - `frontend/app/_dream/constants/storageKeys.ts`
   - `frontend/tests/`
   - `docs/prd/notion-session/resource-connector.md`
   - `docs/prd/notion-session/resource-connector-ui-design.md`
@@ -210,9 +210,9 @@
   - `backend/notion/store.py`
   - `backend/notion/sync.py`
   - `backend/libs/claude_agent_kit/server/notion_snapshot.py`
-  - `frontend/src/components/chat/`
-  - `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-  - `frontend/src/lib/claude-agent-transport.ts`
+  - `frontend/app/_dream/components/chat/`
+  - `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+  - `frontend/app/_dream/lib/claude-agent-transport.ts`
   - `backend/tests/test_claude_agent_service.py`
   - `backend/tests/test_claude_agent_context_builder.py`
 

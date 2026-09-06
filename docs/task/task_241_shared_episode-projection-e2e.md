@@ -87,7 +87,7 @@ e2e/tests/story-workspace/fixtures/prompt-generated/
 e2e/tests/story-workspace/helpers/episode-api.helper.ts
 e2e/tests/story-workspace/helpers/episode-ui.helper.ts
 backend/tests/story-workspace/episode-projection.contract*
-frontend/src/components/story-workspace/episode/__tests__/episode-projection.contract*
+frontend/app/_dream/components/story-workspace/episode/__tests__/episode-projection.contract*
 ```
 
 生产代码路径默认只读；联调发现的实现缺陷回到对应 backend/frontend task 边界修复。

@@ -60,10 +60,10 @@ Scope: 前端任务总览 - Chat landing、connector workbench、auth state mapp
 | `docs/task/task_196b_frontend_connector-embedded-mode.md` | Embedded connector workbench slice |
 | `docs/task/task_196c_frontend_connector-auth-session-state-mapping.md` | Frontend auth-session contract slice |
 | `docs/task/task_196d_frontend_chat-connector-agent-browser-e2e.md` | Agent-browser verification slice |
-| `frontend/src/App.tsx` | Entry and view switching surface |
-| `frontend/src/components/chat/ChatView.tsx` | Landing tabs and shell-level UI surface |
-| `frontend/src/components/dashboard/ResourceConnectorPage.tsx` | Connector workbench surface |
-| `frontend/src/api/resourceConnectorApi.ts` | Connector client / auth polling / refresh surface |
+| `frontend/app/_dream/App.tsx` | Entry and view switching surface |
+| `frontend/app/_dream/components/chat/ChatView.tsx` | Landing tabs and shell-level UI surface |
+| `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx` | Connector workbench surface |
+| `frontend/app/_dream/api/resourceConnectorApi.ts` | Connector client / auth polling / refresh surface |
 
 ## 6. 输入 / 输出说明
 

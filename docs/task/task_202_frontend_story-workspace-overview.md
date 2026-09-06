@@ -69,8 +69,8 @@ Story Workspace 前端任务总览与验证边界
 - `docs/design/story-workspace/product-scope-and-navigation.md`
 - `docs/design/story-workspace/product-scope-and-navigation.md`
 - `docs/CLAUDE.md`
-- `frontend/src/styles/tokens.css`
-- `frontend/src/components/AppLayout.tsx`
+- `frontend/app/_dream/styles/tokens.css`
+- `frontend/app/_dream/components/AppLayout.tsx`
 
 ---
 
@@ -93,7 +93,7 @@ Story Workspace 前端任务总览与验证边界
 |---|---|---|
 | `SUO-201` (Issue 清单) | ✅ done | 上游 Issue 分发完成 |
 | `SUO-199` (设计稿) | ✅ done | PRD 和 Layout Design 已确认 |
-| `frontend/src/styles/tokens.css` | ✅ 已存在 | 色彩系统已就绪 |
+| `frontend/app/_dream/styles/tokens.css` | ✅ 已存在 | 色彩系统已就绪 |
 | `SUO-201-SH-002` (共享类型包) | ⏳ 并行 | 前后端共享类型定义 |
 
 ---
@@ -152,7 +152,7 @@ Story Workspace 前端任务总览与验证边界
 - **禁止修改** `docs/issue/` 目录下任何文件
 - **禁止修改** `docs/stage/` 目录下任何文件
 - **禁止修改** `docs/exec/` 目录下任何文件
-- **禁止修改** 任何实现代码（`frontend/src/`, `backend/src/` 等）
+- **禁止修改** 任何实现代码（`frontend/app/_dream/`, `backend/src/` 等）
 - **禁止修改** 后端 task 文件（`task_202_backend_*.md`, `task_204_backend_*.md` 等）
 - **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
 - **禁止修改** 其他前端 task 文件（`task_202a_*.md` ~ `task_202h_*.md`）的内容

@@ -49,6 +49,9 @@
 #                    process-detail endpoint backed by canonical message parts.
 # [Sync] 2026-09-04: expose the authenticated backend-owned common Skill command
 #                    catalog used by the shared Chat slash menu.
+# [Sync] 2026-09-06: validate the closed McpAppsToolResultProjectionV1 on saved
+#                    tool parts, including workspace scope; malformed/error identity
+#                    is removed without touching ordinary invocation/output refresh.
 
 import asyncio
 import base64
@@ -61,7 +64,7 @@ import re
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Any, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AliasChoices, BaseModel, Field, model_validator
@@ -69,7 +72,11 @@ from pydantic import AliasChoices, BaseModel, Field, model_validator
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
-from claude_agent.service import build_thread_plan_payload, build_thread_todos_payload
+from claude_agent.service import (
+    _validated_mcp_apps_projection_for_tool_part,
+    build_thread_plan_payload,
+    build_thread_todos_payload,
+)
 from claude_agent.sse import streaming_sse_response
 from claude_agent.subagent_projection import build_thread_subagents_payload
 from claude_agent.tool_confirmation_store import (
@@ -424,6 +431,62 @@ class PublicChatMetadataDto(BaseModel):
         return cls.model_validate(values), malformed_discriminator
 
 
+class McpAppsToolResultProjectionV1(BaseModel):
+    """Closed, non-secret public identity for one saved managed MCP result."""
+
+    version: Literal[1]
+    serverRef: str
+    toolName: str
+    toolCallId: str
+    input: dict[str, Any]
+    workspaceScope: str | None
+    resourceUri: str
+    result: dict[str, Any]
+
+    model_config = {"extra": "forbid"}
+
+    @classmethod
+    def from_tool_part(
+        cls,
+        projection: Any,
+        part: dict[str, Any],
+    ) -> "McpAppsToolResultProjectionV1 | None":
+        safe = _validated_mcp_apps_projection_for_tool_part(
+            projection,
+            tool_name=part.get("toolName"),
+            tool_call_id=part.get("toolCallId"),
+            tool_input=part.get("input"),
+            output=part.get("output"),
+        )
+        if safe is None:
+            return None
+        try:
+            return cls.model_validate(safe)
+        except (TypeError, ValueError):
+            return None
+
+
+def _project_public_chat_parts(parts: list[Any]) -> list[Any]:
+    """Strip only invalid Apps identity while preserving ordinary parts."""
+
+    projected: list[Any] = []
+    for part in parts:
+        if not isinstance(part, dict) or "mcpAppResult" not in part:
+            projected.append(part)
+            continue
+        public_part = dict(part)
+        mcp_app_result = McpAppsToolResultProjectionV1.from_tool_part(
+            public_part.get("mcpAppResult"),
+            public_part,
+        )
+        if mcp_app_result is None:
+            public_part.pop("mcpAppResult", None)
+        else:
+            public_part["mcpAppResult"] = mcp_app_result.model_dump(mode="json")
+        projected.append(public_part)
+    return projected
+
+
 class PublicChatMessageDto(BaseModel):
     id: Any = None
     role: Any = None
@@ -455,7 +518,11 @@ class PublicChatMessageDto(BaseModel):
             if key in message
         }
         values["parts"] = (
-            [] if suppress_parts else parts if isinstance(parts, list) else []
+            []
+            if suppress_parts
+            else _project_public_chat_parts(parts)
+            if isinstance(parts, list)
+            else []
         )
         values["metadata"] = public_metadata
         if (

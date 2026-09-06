@@ -9,6 +9,9 @@
 # [Sync] 2026-08-30: apply actor/thread-bound NOTION_* values at the final Runtime environment boundary for Bash ntn commands.
 # [Sync] 2026-09-04: let only strictly parsed, actor-bound notion-cli read API
 #                    commands leave the Dream write guard for normal approval.
+# [Sync] 2026-09-06: preserve an unambiguous SDK ``tool_use_result`` as the
+#                    complete MCP CallToolResult callback seam without changing
+#                    legacy normalized tool output or execution semantics.
 # [Sync] 2026-08-29: keep Editor virtual-Read redirect files inside the
 #                    server-owned thread .claude-tmp boundary with 0600 mode.
 # [Sync] 2026-08-29: project only the trusted actor and effective PostgreSQL
@@ -4315,6 +4318,16 @@ class ClaudeAgentRunner:
         elif isinstance(message, UserMessage):
             content = message.content
             if isinstance(content, list):
+                tool_result_blocks = [
+                    block for block in content if _block_type(block) == "tool_result"
+                ]
+                raw_call_tool_result = getattr(message, "tool_use_result", None)
+                complete_call_tool_result = (
+                    raw_call_tool_result
+                    if len(tool_result_blocks) == 1
+                    and isinstance(raw_call_tool_result, dict)
+                    else None
+                )
                 for block in content:
                     block_type = _block_type(block)
                     if block_type == "tool_result":
@@ -4349,6 +4362,7 @@ class ClaudeAgentRunner:
                                     ),
                                     tool_call_id=tool_use_id,
                                     output=output,
+                                    call_tool_result=complete_call_tool_result,
                                     is_error=is_err,
                                     state=(
                                         "output-error"

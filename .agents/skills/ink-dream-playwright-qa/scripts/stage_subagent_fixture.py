@@ -77,7 +77,7 @@ def main() -> int:
             record("2026-08-05T08:00:02Z", "assistant", [
                 {"type": "text", "text": "我会先检查布局，再运行相关测试。\n\n- 检查列表密度\n- 检查消息顺序"},
                 {"type": "tool_use", "id": "tool-read", "name": "Read", "input": {
-                    "file_path": "frontend/src/components/chat/SubagentPanel.tsx",
+                    "file_path": "frontend/app/_dream/components/chat/SubagentPanel.tsx",
                     "api_key": "qa-secret-must-not-render",
                 }},
             ]),

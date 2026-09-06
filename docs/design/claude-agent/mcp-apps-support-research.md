@@ -1,13 +1,14 @@
 <!-- [输入] MCP Apps/OpenAI Apps 官方资料、@mcp-ui/client 7.1.1 源码、Codex 历史任务 01a06233-628d-7a83-8d66-5c3185a80613、Dream 0.1.4 与 IM 当前源码。 -->
-<!-- [输出] 记录 MCP Apps 支持状态、AppRenderer 复用边界、Runtime 继承证据、能力缺口、候选方案和验证命令。 -->
+<!-- [输出] 记录 MCP Apps 支持状态、Host renderer/adapter 复用边界、Runtime 继承证据、能力缺口、候选方案和验证命令。 -->
 <!-- [定位] `mcp-apps-integration-strategy.md` 的独立调研证据；不定义产品交互，不授权实现。 -->
-<!-- [同步] 2026-09-04：Host 渲染选择 AppRenderer；Browser Client 经 Node 标准 MCP 端点访问受控上游连接。 -->
+<!-- [同步] 2026-09-04：SUO-383 依据 task_301 P0-04 运行证据改选最小 Host adapter，AppBridge/transport 与 Node 受控主链继续复用。 -->
+<!-- [同步] 2026-09-05：SUO-404/DEC-005 对照 Admin 真实 workspace/package 结构，确认 Dream 过渡 Next 实现存在嵌套项目与 legacy Runtime owner 偏差。 -->
 
 # MCP Apps 支持状态调研
 
-> 调研日期：2026-09-04（Asia/Shanghai）
+> 调研日期：2026-09-05（Asia/Shanghai）
 >
-> 结论：Dream `0.1.4` 是普通 MCP Client，不是 MCP Apps Host。IM 当前只能传递和展示普通工具结果；目标 Host 复用 `@mcp-ui/client@7.1.1` 的 `AppRenderer`，Browser MCP Client 连接 Next Node 暴露的标准受控 MCP Streamable HTTP 端点，再由端点后的 `PersistentConnectorManager` 连接真实 MCP Server。
+> 结论：Dream `0.1.4` 是普通 MCP Client，不是 MCP Apps Host。IM 当前只能传递和展示普通工具结果；task_301 已证明 `AppRenderer@7.1.1` 不能执行所需 permissions 传播，故目标 Host 改为最小 adapter 复用同包的 `AppBridge`/`PostMessageTransport`。SUO-404 进一步确认当前过渡 Next 实现的目录不符合 Admin：目标必须是 `frontend/` 根 package + 单一 `app/**` + 同级 Runtime package。
 
 ## 1. 调研对象
 
@@ -55,7 +56,7 @@ MCP Apps `2026-01-26` 稳定规范和 OpenAI 当前文档规定：
 3. 创建 `new AppBridge(client, hostInfo, hostCapabilities)`，让 Server-bound tools/resources/prompts 自动走该 Client；
 4. 把 HTML 与 bridge 交给 `AppFrame`；后者创建 sandbox iframe，并用 `PostMessageTransport` 连接 AppBridge，再投递 tool input/result。
 
-IM 当前选择是：Next Client Component 先创建 Browser `Client`，用 `StreamableHTTPClientTransport` 连接 IM Node 的标准受控 MCP 端点，再把已连接 Client 交给 `AppRenderer`。Node 端点背后的 `PersistentConnectorManager` 持有受控上游连接并访问真实 MCP Server。Manager 是 Node 服务层对象，不是能跨进程传给 Browser `client.connect(...)` 的 JavaScript `Transport`。
+初始选择是把已连接 Client 交给 `AppRenderer`。task_301 P0-04 随后证明该版本只保留 HTML、未传播 resource permissions 和 Host sandbox override，outer iframe 也没有 `allow`。DEC-002 因此改为：Client 交给最小 Host adapter；adapter 保留完整 resource metadata并复用 `AppBridge`/`PostMessageTransport`。Node 端点后的 `PersistentConnectorManager` 职责不变。
 
 官方 basic host 证明 Browser Client 可以连接浏览器可达的 Streamable HTTP/SSE。IM 禁止 Browser 直连真实 MCP Server 是地址、凭证、stdio/locality 和授权边界的安全选择，不是 SDK 限制；Browser 实际直连的是 IM Node 端点。
 
@@ -102,8 +103,8 @@ Runtime 对 MCP 的现有继承链：
 6. `agent_runner.py:4250-4290` 把 `tool_result` 转成 `ToolEventPayload`。
 7. `service.py:2791-2863` 把它变成 `tool-output-available`。
 8. `service.py:3094-3159` 把工具结果保存成 `tool-invocation` part。
-9. `frontend/src/lib/claude-agent-transport.ts:320-422` 转成 AI SDK UIMessage chunk。
-10. `frontend/src/components/chat/ToolMessagePart.tsx:168-215` 展示普通工具卡片。
+9. `frontend/app/_dream/lib/claude-agent-transport.ts:320-422` 转成 AI SDK UIMessage chunk。
+10. `frontend/app/_dream/components/chat/ToolMessagePart.tsx:168-215` 展示普通工具卡片。
 
 ### Runtime 不负责 turn 结束后的页面交互
 
@@ -123,7 +124,7 @@ async with ClaudeSDKClient(options=effective_options) as client:
 - 首次模型 tool call 可以完全走 Claude Agent Runtime；
 - UI 显示后发起的 `tools/call` 不能假设原 Runtime/MCP session 仍存在；
 - Next Client Component 创建 Browser MCP `Client`，但它只连接 IM Node 的标准受控 Streamable HTTP 端点，不获得真实 Server transport 或 credential；
-- `AppRenderer` 接收这个已连接 Client，并通过它完成 descriptor/resource 请求与后续 App tool call；
+- Host adapter 接收这个已连接 Client，并通过它完成 descriptor/完整 resource 请求与后续 App tool call；
 - Node 端点调用进程级 `PersistentConnectorManager`，由 manager 持有独立受控上游 MCP session 并执行真实 Server 请求；manager 不会被直接传给 Browser；
 - `sendFollowUpMessage` 才重新进入正常 Claude Agent turn。
 
@@ -133,14 +134,14 @@ async with ClaudeSDKClient(options=effective_options) as client:
 |---|---|---|
 | `/Users/dmeck/project/ink-dream-memory/backend/claude_agent/service.py:2791-2863` | 只发送 generic tool input/output | 没有 Agent UI event |
 | 同文件 `:3094-3159` | 只持久化 text、reasoning、tool invocation | 没有 Tool UI metadata 与上游 Server/tool call 绑定 |
-| `/Users/dmeck/project/ink-dream-memory/frontend/src/lib/claude-agent-transport.ts:121-151,320-422` | Backend event 只定义普通 tool result | 不能识别 MCP App |
-| `/Users/dmeck/project/ink-dream-memory/frontend/src/components/chat/ChatMessageList.tsx:580-680` | 工具结果进入普通 `ToolMessagePart` | 没有 Agent UI surface |
-| `/Users/dmeck/project/ink-dream-memory/frontend/package.json:26,49`、`/Users/dmeck/project/ink-dream-memory/frontend/vite.config.ts:120-155` | React `19.1.0`、Vite `8.1.5`，输出普通 SPA bundle | 构建器可承载 Host 插件，但 `frontend/src` 尚无 App iframe/bridge |
+| `/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/lib/claude-agent-transport.ts:121-151,320-422` | Backend event 只定义普通 tool result | 不能识别 MCP App |
+| `/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/components/chat/ChatMessageList.tsx:580-680` | 工具结果进入普通 `ToolMessagePart` | 没有 Agent UI surface |
+| `frontend/package.json`、`frontend/app/**`、`frontend/app/_dream/server/mcp-apps/**` | 根脚本以 `next ... app` 启动下沉配置，实际 App Router 位于 `frontend/app/app/**`；Node Runtime 仍混放 legacy `src/server` | 违反 Admin 根 workspace + 单一 `app/**` + 同级 `packages/*` 基线；旧 build/readiness 失效 |
 | `/Users/dmeck/project/ink-dream-memory/backend/claude_mcp/inventory.py:203-301,630-670` | MCP discovery 使用 request-local `ClientSession` | 不能向 Node 同步现有 socket，也不能支撑 turn 后页面交互 |
 | `/Users/dmeck/project/ink-dream-memory/backend/claude_mcp/runtime_snapshot.py:51-185` | 每个 turn 在 Python 内存生成包含明文 transport/credential 的 detached config，但丢弃 server/config/credential revision | 可抽出配置解析逻辑；现有返回值不能直接作为 Node 接口 |
-| `/Users/dmeck/project/ink-dream-memory/frontend/src/api/claudeMcpApi.ts:158-169` | Browser 用 IM bearer/cookie 访问 Python API | 当前只有用户→Python 登录态，没有 Browser→Node MCP session 的受控身份绑定 |
+| `/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/api/claudeMcpApi.ts:158-169` | Browser 用 IM bearer/cookie 访问 Python API | 当前只有用户→Python 登录态，没有 Browser→Node MCP session 的受控身份绑定 |
 
-Vite 在技术上可以承载 Browser MCP Client 与 `AppRenderer`，但这不再是 IM 的目标架构。IM 选择把 Dream Web 迁移到自托管 Next.js App Router：Client Component 创建 Browser Client 并挂载 `AppRenderer`；Route Handler 暴露标准受控 MCP Streamable HTTP 端点；进程级 `PersistentConnectorManager` 作为端点后的服务层持有上游连接。现有 Vite 耦合项是迁移工作量与验收基线，不是是否迁移的决策条件。
+Vite 在技术上可以承载 Browser MCP Client 与 Host adapter，但这不再是 IM 的目标架构。IM 选择把 Dream Web 迁移到自托管 Next.js App Router：Client Component 创建 Browser Client 并挂载 Host adapter；Route Handler 暴露标准受控 MCP Streamable HTTP 端点；进程级 `PersistentConnectorManager` 作为端点后的服务层持有上游连接。DEC-005 固定 `frontend/` 为 workspace/package/Next 根、`frontend/app/**` 为唯一 App Router、`frontend/packages/mcp-apps-runtime/**` 为独立 Runtime owner；现有嵌套 Next 与 legacy Vite 耦合项只能作为迁移/回滚现状，不能作为目标结构。
 
 ### 5.1 Managed MCP snapshot loader 不落盘，也不是 Connector
 
@@ -182,27 +183,27 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 | Apps capability negotiation | Dream capabilities `{}` | Browser 与 manager 的上游 Client 声明 `UI_EXTENSION_CAPABILITIES`；Node 端点只返回 Server 已确认且 IM 允许的能力 |
 | Apps tool visibility | 所有 MCP tools 都可能给模型 | Host 按 `model` / `app` visibility 分流 |
 | UI resource 关联 | Tool metadata 被普通投影丢弃；CallToolResult 本身不是 URI 来源 | Apps-aware Tool UI 目录 + server/tool/result 关联合同 |
-| UI resource 读取 | Runtime 能读取但 session 随 turn 结束 | `AppRenderer` 经 Browser Client 与 Node 端点读取；manager 调用上游 Client |
+| UI resource 读取 | Runtime 能读取但 session 随 turn 结束 | Host adapter 经 Browser Client 与 Node 端点读取完整 resource；manager 调用上游 Client |
 | tool result 双投影 | 无 | CallToolResult 保留模型数据与 fallback，并关联 Tool UI metadata |
 | Agent UI surface | 无 | Chat 工具结果挂载点 |
 | UI persistence | 无 | 复用现有消息 JSON；具体字段待 PoC，不改 schema |
-| Host renderer | 无 | Browser Runtime 复用 `@mcp-ui/client@7.1.1` `AppRenderer`，传入已连接 Node 受控端点的 Client |
-| iframe/WebView 容器 | 无 | `AppRenderer` / `AppFrame` + 不同 origin 的 Web iframe 隔离 |
-| CSP/origin/network 权限 | 无 Apps 页面策略；`AppRenderer@7.1.1` 自动读取路径未把 resource metadata 交给 Host，且没有应用声明的 `SandboxConfig.permissions` | Phase 0 升级或推动上游修复；sandbox proxy 用响应头执行 CSP；无法验证的权限 fail closed |
-| Host → App input/result/context | 无 | `AppRenderer` 标准 notifications/Host context |
-| App → Host 标准 MCP 请求 | 无 | `AppRenderer` → Browser Client → Node 标准 MCP 端点 |
+| Host renderer | 无 | 最小 Host adapter 复用 `@mcp-ui/client@7.1.1` 的 AppBridge/transport；7.1.1 Renderer/Frame 不持有 iframe |
+| iframe/WebView 容器 | 无 | Host adapter + 不同 origin 的版本化 sandbox proxy / inner iframe |
+| CSP/origin/network 权限 | 无 Apps 页面策略；`AppRenderer@7.1.1` 自动读取路径未把 resource metadata 交给 Host，且没有应用声明的 `SandboxConfig.permissions` | DEC-002 adapter runtime 校验 metadata，并让两层 `allow`、proxy header、Host capability 与实际 probe 一致；否则 fail closed |
+| Host → App input/result/context | 无 | Host adapter 通过标准 AppBridge notifications/Host context |
+| App → Host 标准 MCP 请求 | 无 | AppBridge → Browser Client → Node 标准 MCP 端点 |
 | 后端可达 MCP 持久连接 | 只有 Python request-local session | Node `PersistentConnectorManager`；必须与 Server 网络/locality 匹配 |
 | Agent worker 本地 MCP | 无持久连接 | Node 必须与 worker 共址；否则另行设计该 locality 的运行时 |
 | 用户设备本地 MCP | 无 | 不纳入首期；纯网站无法启动用户设备 stdio |
-| App `tools/call` | 无 | AppRenderer 自动转发 → Browser Client → Node 授权 → 上游 MCP session |
+| App `tools/call` | 无 | AppBridge 标准转发 → Browser Client → Node 授权 → 上游 MCP session |
 | follow-up/model context | 无 | 转成新 user turn / 下一 turn 受控上下文 |
 | display mode/theme/size | 无 | 前端 Host context |
-| loading/error/timeout/cancel/reconnect | 只有普通 Agent tool 状态 | 标准 transport 生命周期 + AppRenderer/Browser 状态机 |
+| loading/error/timeout/cancel/reconnect | 只有普通 Agent tool 状态 | 标准 transport 生命周期 + Host adapter/Browser 状态机 |
 | 多 App/多会话隔离 | 无 | Node 按 actor/workspace/server/MCP session 隔离；Thread/toolCall 只用于 Chat 展示与审计关联 |
 | 插件启停、升级、卸载 | 现有插件机制未承载 Apps Host | Node/Browser 同版本 manifest、feature flag、teardown 和 fallback |
 | 协议/SDK 版本兼容 | 无 | manifest 范围 + capability negotiation；不兼容 fail closed |
 | fallback | 普通结果存在但未与 UI 绑定 | 同一工具结果的普通展示 |
-| UI lifecycle | 无 | `AppRenderer` 管理 bridge/iframe 生命周期；Browser 管理挂载、关闭与 fallback |
+| UI lifecycle | 无 | Host adapter 管理 bridge/iframe 生命周期、关闭与 fallback |
 | audit/日志/诊断 | 只有 tool trace | Node MCP 日志记录 actor/workspace/server/session；Chat 日志保留 thread/toolCall，两侧分别按既有 trace 记录并统一脱敏 |
 
 ## 8. 方案比较记录
@@ -210,9 +211,10 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 | 方案 | 主要问题 | 判断 |
 |---|---|---|
 | Dream Runtime 内实现全部 Host | 把浏览器页面生命周期耦合进模型执行 | 不选 |
-| 自建 iframe/bridge 与 Browser 私有 Host API | 重复实现 AppRenderer 已有的 resource、bridge 与工具转发，并形成第二套 HTTP/SSE 协议 | 已否决的旧案 |
+| 自建完整 iframe/bridge 与 Browser 私有 Host API | 复制协议状态机并形成第二套 HTTP/SSE 协议 | 已否决的旧案 |
 | AppRenderer + Browser Client 直连真实 MCP Server | 只能覆盖浏览器可达 HTTP，不能启动 stdio，并把真实地址、credential 和 reconnect 放入浏览器 | 不选；非规范禁止 |
-| AppRenderer + Browser Client → Node 标准受控 MCP 端点 → PersistentConnectorManager → MCP Server | 复用 AppRenderer 与标准 Streamable HTTP，同时由 Node 服务层持有、过滤和复用真实上游连接 | 已选择 |
+| `AppRenderer@7.1.1` + Browser Client → Node 受控端点 | permissions/sandbox override 未传播，outer iframe 无 `allow` | P0-04 已否决 |
+| 最小 Host adapter + AppBridge/transport → Browser Client → Node 受控端点 → Manager → Server | 只接管 metadata/policy/iframe，标准 bridge 与 Node 连接边界继续复用 | DEC-002 已选择 |
 | 独立 Bridge/Gateway | 增加单独身份、session、部署和追踪边界 | 仅在多 Host 复用或跨网络聚合成为独立需求时考虑；不是 Apps 前提 |
 | 直接复用第三方 bridge | 权限、生命周期和版本边界无法直接视为 IM 合同 | 只作实现参考 |
 | 只保留普通 fallback | 无交互 UI | 只作降级 |
@@ -227,7 +229,8 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 6. Web Host 的独立 Sandbox Proxy origin 如何随 IM 发布。
 7. Node Host 权限策略如何继承当前用户、workspace 和 MCP tool 可见性，不让 App 自报身份；`toolCallId` 只作为 Chat 关联和审计字段。
 8. `window.im` 兼容适配器如何由版本化 sandbox proxy 在跨 origin View 内提供，并满足 CSP、完整性和消息校验要求。
-9. 所选 `AppRenderer` 版本如何让 Host 执行 resource CSP/permissions；`7.1.1` 的现有实现不能作为该能力已经成立的证据。
+9. DEC-002 已明确 adapter 合同；仍待 ExecTaskAgent 以同 lock 的 P0-04 Chrome 正反向探针证明 permissions→iframe allow，再原位修订 P0-08。类型声明不构成证据。
+10. DEC-005 下根 build/start/standalone、workspace tracing、route 唯一性和 Browser bundle server-only 排除仍须由新下游流水线重跑；pnpm 重锁还须重建 P0-01 并重跑 P0-04/P0-08，旧 `frontend/app/.next/**` 与 npm lock 回执无效。
 
 ## 10. 验证命令
 
@@ -238,7 +241,7 @@ RuntimeSnapshotLoader 继续服务 Claude Agent turn；Node `PersistentConnector
 | `rg -n 'AppBridge|ui/initialize|window\\.openai' .../ink-claude-code-dream/src .../runtime` | 1 | 无 Apps Host 实现命中 |
 | `node --test tests/mcp-apps-compatibility.test.mjs`（Dream） | 0 | `2` tests passed；测试名称明确为“reads an MCP App resource but does not negotiate the Apps UI extension” |
 | `npm view @modelcontextprotocol/ext-apps version dist-tags.latest --json` | 0 | 当前 latest 为 `1.7.5` |
-| `rg -n 'AppBridge|ui/initialize|...|postMessage|<iframe' frontend/src backend/claude_agent`（IM） | 1 | 产品前端和 Agent 后端没有 Apps Host/iframe bridge 命中 |
+| `rg -n 'AppBridge|ui/initialize|...|postMessage|<iframe' frontend/app/_dream backend/claude_agent`（IM） | 1 | 产品前端和 Agent 后端没有 Apps Host/iframe bridge 命中 |
 | `rg -n 'get_default_managed_mcp_runtime_snapshot_loader|class ManagedMcpRuntimeSnapshotLoader|async def load' backend/claude_mcp backend/claude_agent` | 0 | 命中 service provider、loader 与 Agent `assemble_context` 调用链 |
 | `../.venv/bin/python -m pytest tests/test_claude_mcp_runtime_snapshot.py -q` | 0 | `6 passed`；包含 loader 不写临时目录、明文只在返回 snapshot 的断言 |
 | 本地 Markdown link 检查 | 0 | `6` files，`5` local links，`0` broken |

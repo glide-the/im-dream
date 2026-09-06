@@ -5,8 +5,8 @@
 
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import ConnectorNotionDetailPage from '../../src/components/dashboard/ConnectorNotionDetailPage';
-import ConnectorSettingsSection from '../../src/components/dashboard/ConnectorSettingsSection';
+import ConnectorNotionDetailPage from '../../app/_dream/components/dashboard/ConnectorNotionDetailPage';
+import ConnectorSettingsSection from '../../app/_dream/components/dashboard/ConnectorSettingsSection';
 
 export function Harness() {
   const [detailOpen, setDetailOpen] = useState(false);

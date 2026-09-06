@@ -637,10 +637,10 @@ flowchart LR
 | `backend/services/admin_product/models.py` | strict Pydantic DTO |
 | `backend/services/admin_product/client.py` | signed subject、deadline、安全错误 |
 | `backend/routers/product.py` | same-origin BFF、身份防覆盖 |
-| `frontend/src/api/productApi.ts` | strict Zod、API client |
-| `frontend/src/hooks/story-workspace/useStoryWorkspaceSubscription.ts` | query key、invalidate、命令状态机 |
-| `frontend/src/pages/story-workspace/StoryWorkspaceSubscriptionPage.tsx` | 叙事化页面与状态 |
-| `frontend/src/pages/story-workspace/StoryWorkspaceSubscriptionPage.css` | desktop/mobile/focus/reduced-motion |
+| `frontend/app/_dream/api/productApi.ts` | strict Zod、API client |
+| `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceSubscription.ts` | query key、invalidate、命令状态机 |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceSubscriptionPage.tsx` | 叙事化页面与状态 |
+| `frontend/app/_dream/views/story-workspace/StoryWorkspaceSubscriptionPage.css` | desktop/mobile/focus/reduced-motion |
 
 Query keys：
 

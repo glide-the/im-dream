@@ -281,7 +281,7 @@ flowchart TD
 | `task_275f` | `backend/models/artifact_recovery.py`、`backend/services/deck_plugin/cold_storage_adapter.py`、`backend/services/deck_plugin/artifact_recovery_service.py`、`backend/routers/deck_plugin_retention.py`（增量）、`backend/database.py`（增量）、`backend/tests/test_deck_plugin_cold_recovery.py`、`artifacts/deck-plugin-stage4/operations/` |
 | `task_275g` | `backend/tests/test_deck_plugin_tamper_matrix.py`、测试 fixture、reporter、`.github/workflows/ci-backend.yml`（增量 tamper job）、CI artifact |
 | `task_275h` | `backend/tests/test_deck_plugin_recovery_purge_e2e.py`、drill runner、测试 fixture、reporter（增量 schema）、`.github/workflows/ci-backend.yml`（增量 cleanup job）、CI artifact |
-| `task_275i` | `backend/models/deck_plugin.py`（增量）、`backend/services/deck_plugin/release_service.py`、`backend/services/deck_plugin/compatibility_service.py`、`backend/routers/deck_plugins.py`、`backend/server.py`（仅注册）、`backend/tests/test_deck_plugin_legacy_unverified.py`、`frontend/src/api/deckPluginApi.ts`、`frontend/src/components/deck-plugin/`（badge/warning）、前端测试、CI artifact |
+| `task_275i` | `backend/models/deck_plugin.py`（增量）、`backend/services/deck_plugin/release_service.py`、`backend/services/deck_plugin/compatibility_service.py`、`backend/routers/deck_plugins.py`、`backend/server.py`（仅注册）、`backend/tests/test_deck_plugin_legacy_unverified.py`、`frontend/app/_dream/api/deckPluginApi.ts`、`frontend/app/_dream/components/deck-plugin/`（badge/warning）、前端测试、CI artifact |
 
 ### 9.2 禁止修改范围汇总（原样承接）
 

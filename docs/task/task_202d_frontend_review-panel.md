@@ -46,7 +46,7 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
 ## 4. 实现步骤
 
 1. **创建审阅组件目录**
-   - `frontend/src/components/story-workspace/review/`
+   - `frontend/app/_dream/components/story-workspace/review/`
 
 2. **实现 `StoryWorkspaceReviewActions` 审阅操作按钮**
    - 确认通过按钮：Spark Green 背景
@@ -91,12 +91,12 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
 ## 5. 涉及文件路径
 
 **新增文件**：
-- `frontend/src/components/story-workspace/review/`（目录）
-- `frontend/src/components/story-workspace/review/StoryWorkspaceReviewActions.tsx`
-- `frontend/src/components/story-workspace/review/StoryWorkspaceReviewNotesInput.tsx`
-- `frontend/src/components/story-workspace/review/StoryWorkspaceAgentContentDisplay.tsx`
-- `frontend/src/components/story-workspace/review/index.ts`
-- `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`（组装组件）
+- `frontend/app/_dream/components/story-workspace/review/`（目录）
+- `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewActions.tsx`
+- `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewNotesInput.tsx`
+- `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceAgentContentDisplay.tsx`
+- `frontend/app/_dream/components/story-workspace/review/index.ts`
+- `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`（组装组件）
 
 **复用文件**（只读）：
 - 全局 Toast 组件
@@ -247,8 +247,8 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
 ## 执行边界（增量修正）
 
 ### 允许修改范围
-- 允许创建 `frontend/src/components/story-workspace/review/` 目录及组件文件
-- 允许修改 `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`（组装审阅面板容器）
+- 允许创建 `frontend/app/_dream/components/story-workspace/review/` 目录及组件文件
+- 允许修改 `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`（组装审阅面板容器）
 - 允许创建审阅操作相关的 Hooks（如 `useReviewActions.ts`）
 
 ### 禁止修改范围

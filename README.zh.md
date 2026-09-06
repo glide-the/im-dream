@@ -19,6 +19,8 @@
 <!-- [同步] 2026-09-04：记录 actor 绑定的 notion-cli Bash 审批路由及其 fail-closed 命令/网络边界。 -->
 <!-- [同步] 2026-09-04：把仓库 Claude Skills 全量镜像进 backend common catalog，并在 AutoDL 发布中验证完整 catalog。 -->
 <!-- [同步] 2026-09-04：让 Chat 的 Slash 候选与 Deck 插件 Skills 一起读取后端 common catalog。 -->
+<!-- [同步] 2026-09-05：将 frontend/ 固定为唯一 Next.js workspace/Web 根，以根 App Router 和纯客户端兼容壳承载现有应用，并退出 Vite 源码默认入口。 -->
+<!-- [同步] 2026-09-06：记录受治理 MCP Apps 预览、revision 重验、独立 sandbox 与 production-off 边界。 -->
 
 # Ink & Memory
 
@@ -30,7 +32,7 @@
   <a href="README.md">English</a> · 中文
 </p>
 
-Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 的创作工作台。它由 React/Vite 前端、FastAPI 后端、Admin 管理的 PostgreSQL Schema、提供模型访问和计费的 Admin Gateway，以及独立发布的 Claude Agent SDK 和 Claude Runtime 组成。
+Ink & Memory 是一个面向写作、Chat、Dream 创作流程和版本化 Deck 的创作工作台。它由 React/Next.js 前端、FastAPI 后端、Admin 管理的 PostgreSQL Schema、提供模型访问和计费的 Admin Gateway，以及独立发布的 Claude Agent SDK 和 Claude Runtime 组成。
 
 本仓库只包含 Dream 应用，不拥有共享数据库 Schema、模型 Provider 凭据、计费系统或 Claude SDK/Runtime 的内部实现。
 
@@ -54,7 +56,7 @@ Deck 市场分发当前明确延期，参见 [docs/design/deck-register/README.m
 
 ```mermaid
 flowchart LR
-    Browser["浏览器 / Vite"] -->|"REST + SSE"| Dream["Dream / FastAPI"]
+    Browser["浏览器 / Next Web Shell"] -->|"REST + SSE"| Dream["Dream / FastAPI"]
     Dream -->|"Python 公共 API"| SDK["ink-claude-dream-agent-sdk"]
     SDK -->|"stdio JSONL"| Runtime["ink-claude-code-dream"]
     Runtime -->|"Anthropic Messages"| Gateway["Admin Gateway"]
@@ -92,8 +94,8 @@ Python SDK 和 npm Runtime 虽然通过不同包生态发布，但 Dream 必须�
 - Git
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- Node.js 22–24 和 npm
-- pnpm 9+
+- Node.js 22–24，以及用于 native Runtime 的 npm
+- 用于唯一 `frontend/` workspace 的 pnpm 9+
 - 同级目录中的 [Ink Admin Memory](https://github.com/glide-the/ink-admin-memory)
 - 仅 Docker/Remote SSH 部署路径需要 Docker
 
@@ -248,9 +250,34 @@ cd backend
 
 ```bash
 cd frontend
-npm install
-npm run dev
+pnpm run dev --hostname 127.0.0.1 --port 5173
 ```
+
+前端 package、Next 配置和唯一 App Router 均位于 `frontend/` 根。全部 Dream 应用源码位于私有、不可路由的 `frontend/app/_dream/` 树，路由级浏览器 UI 模块位于其 `views/` 目录；不存在第二套嵌套 App Router、旧顶层源码树或兼容 import 路径。依赖锁定由后续 release gate 收口，因此验证本次布局时不得 install 或 relock。
+
+受治理 MCP Apps 预览的唯一 Node owner 位于 `frontend/packages/mcp-apps-runtime/`。Browser 只连接同源 `/api/mcp-apps/{serverRef}` 标准 Streamable HTTP 入口；根 Route Handler 薄委派给 server-only package，由该 package 从 Python 获取短时且绑定 actor/workspace/Server 的建连视图，绝不把上游 URL、header、环境变量或凭证返回 Browser。独立来源的 sandbox 只向精确配置的父页面 origin 提供版本化 proxy。Browser 与 Node 消费同一份服务端插件和策略 revision；配置缺失、禁用、销毁、不兼容、过期或 revision 变化时 fail closed，使旧 session 失效，并只从 fresh view 重新挂载，同时保留普通工具结果。session cleanup 发送有界标准 DELETE；若 SDK initialize 已先行中止 transport，则使用新的 signal 重试；Node adapter 还会让遗留 session 随短时 view 独立过期。Host 只手动绑定已启用的 AppBridge 操作，因此 SDK Client 无法自动转发 Browser 已关闭的 `tools/call`；`window.im` 成员来自认证 actor-effective Host handshake，App 消息与 composer、queued prompt 进入同一个 Chat-owned send coordinator。`productionAppsEffective` 始终为 `false`。
+
+预览默认全部拒绝。请在服务进程环境中配置以下值；正安全整数、origin 与 host 必须来自部署策略，不要原样复制占位符：
+
+```bash
+INK_MCP_APPS_PHASE1_PREVIEW=true
+INK_MCP_APPS_PLUGIN_MANIFEST_JSON='<版本化插件 manifest JSON>'
+INK_MCP_APPS_POLICY_JSON='<default/desired/effective 与逐 Server allowlist>'
+INK_MCP_APPS_SANDBOX_URL='<独立 https origin>/mcp-apps-sandbox'
+INK_MCP_APPS_PARENT_ORIGINS='<精确 Dream Web origin>'
+INK_BACKEND_INTERNAL_URL='<Node 可达的 Dream API origin>'
+INK_MCP_APPS_NODE_SERVICE_TOKEN='<Node 到 Python 的共享 service token>'
+INK_MCP_APPS_CONNECTION_VIEW_TTL_SECONDS='<正数秒>'
+INK_MCP_APPS_MAX_RESOURCE_BYTES='<正数字节上限>'
+INK_MCP_APPS_MAX_CATALOG_PAGES='<正数页数上限>'
+INK_MCP_APPS_UPSTREAM_TIMEOUT_MS='<正数超时>'
+INK_MCP_APPS_MAX_CONCURRENCY_PER_SCOPE='<正数并发上限>'
+INK_MCP_APPS_NETWORK_HOST_ALLOWLIST='<逗号分隔的上游 hostname>'
+```
+
+插件 manifest 必须声明 `im.mcp-apps-host` `1.0.0`、仓库内 Browser/Node entry、协议 `2026-01-26`，以及与 MCP `1.30.0`、Ext Apps `1.7.5`、MCP UI `7.1.1` 兼容的 SDK 范围。`resourceReads`、`lowRiskToolCalls`、`uiMessage`、`windowIm` 是彼此独立的能力上限；`INK_MCP_APPS_PHASE2_TOOL_CALLS`、`INK_MCP_APPS_PHASE2_UI_MESSAGE`、`INK_MCP_APPS_WINDOW_IM` 只能继续收紧。页面工具调用仍须通过当前 Python policy revision、逐 Server allowlist 与低风险分类。上游 redirect 一律拒绝而不跟随，tool/resource catalog 必须在配置页数上限内完成。可选 Host/轮询/兼容超时为 `INK_MCP_APPS_HOST_READY_TIMEOUT_MS`、`INK_MCP_APPS_POLICY_POLL_MS`、`INK_MCP_APPS_WINDOW_IM_REQUEST_TIMEOUT_MS`。
+
+legacy Vite 入口仅用于回滚。必须通过 `deploy/local/deploy.sh` 选择 `LOCAL_FRONTEND_RUNTIME=vite-image`，并提供精确的 `LOCAL_VITE_ROLLBACK_IMAGE` tag 或 digest。`LOCAL_VITE_ROLLBACK_BACKEND_URL` 指定容器内部代理目标，`LOCAL_VITE_ROLLBACK_API_BASE_URL` / `LOCAL_VITE_ROLLBACK_WS_BASE_URL` 指定浏览器可见 runtime config（显式空 API 值表示同源请求），`LOCAL_VITE_ROLLBACK_NETWORK` 只能引用预先存在的隔离 Docker network。该 selector 不会从 Vite 源码重新构建。
 
 访问地址：
 
@@ -277,8 +304,15 @@ uv run --with pytest==9.1.1 pytest -q
 
 # 前端
 cd frontend
-npm run lint
-npm run build
+pnpm run lint
+NODE_ENV=production pnpm run build
+
+# MCP Apps Runtime、Host 与 provider-free policy 聚焦检查；不得 install 或 relock
+cd ..
+frontend/node_modules/.bin/tsc --noEmit -p frontend/packages/mcp-apps-runtime/tsconfig.integration.json
+node --experimental-strip-types --experimental-transform-types --test frontend/packages/mcp-apps-runtime/src/*.test.ts
+PYTHONPATH=backend uv run --native-tls --project backend --frozen --with pytest --with pytest-asyncio python -m pytest backend/tests/mcp_apps_phase1 backend/tests/mcp_apps_phase2 backend/tests/mcp_apps_phase3 -q
+node --experimental-strip-types --experimental-transform-types --test frontend/app/_dream/components/chat/mcp-apps/*.test.ts frontend/app/_dream/components/chat/__tests__/chatUserMessageIngress.test.ts
 
 # 已发布 SDK/Runtime registry 验收；provider-free，不调用模型
 cd ..
@@ -303,7 +337,7 @@ python3 scripts/verify_claude_registry_release.py \
 9. **Notion Runtime 绑定归当前 actor/thread 所有。** canonical 持久状态位于服务端 agentdata，策略索引同步与 Chat 解耦，每个 Runtime turn 只接收当前 actor、当前选择范围内的 per-Thread 投影；Dream 在向 Agent Bash 暴露四个受支持变量前替换所有 ambient `NOTION_*` 值。
 10. **Editor 写入同时绑定 actor、当前 session 和持久状态。** runner 拒绝面向过期 session 的写入；Editor MCP 子进程只接收服务端所有的 actor 与有效 PostgreSQL capability；每次查询/更新均按 actor 限定；业务失败只刷新唯一内存 EditorState 软缓存，不发布成功事件。Notion 索引和按需页面正文不得进入 EditorState。
 11. **Claude Bash sandbox 开关由部署所有。** `INK_AGENT_SANDBOX_ENABLED` 缺省为 `true`，非法值也保持启用。设为 `false` 仍保留 Workspace Mode、cwd、上下文、文件工具、hooks 和工具确认，但已批准的 Bash 会绕过 bubblewrap 文件系统/网络隔离，直接以 Dream 服务账号运行；用户 Settings 与用户 env 均不能覆盖该能力。AutoDL 的外层容器拒绝所需 namespace 创建，因此发布环境固定投影为 `false`；当前 Dream 在 AutoDL 以 `root` 运行，所以已批准 Bash 在该外层容器内拥有 root 权限。
-12. **AutoDL crawler 文件属于发布门禁。** Vite Preview 必须把 `/robots.txt`、`/sitemap.xml` 和 `/llms.txt` 代理到 FastAPI。每次 AutoDL start、deploy、verify 与 rollback 都检查公网 MIME、必要正文标记及不存在 SPA HTML；仅 HTTP 200 不算验收通过。
+12. **Crawler 文件仍属于发布门禁。** 根 Next Web Shell 必须让 `/robots.txt`、`/sitemap.xml` 和 `/llms.txt` 继续走后端所有的路径。任何 legacy immutable Vite 回滚镜像都必须满足相同 MIME/正文检查，且不得成为第二套源码入口；仅 HTTP 200 不算验收通过。
 13. **生产 Skill 必须进入 backend build context。** 每个仓库 `.claude/skills/<id>` 包都必须在 `backend/builtin_skills/common/<id>` 有完全一致的 release 镜像。AutoDL start、deploy、verify 与 rollback 会初始化隔离 workspace，验证全部 common source、只读 workspace 链接与 `.claude/skills` discovery 链接，并保留 title-case `/Skill-Creator` 的归一化检查。Runtime 消费未知 Skill 命令时必须返回明确 turn error，不能保存空成功 assistant；修复 package 后可继续复用原 Claude session。
 
 ## 故障排查

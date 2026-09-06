@@ -43,7 +43,7 @@ Story Workspace Dream 导航项（`StoryWorkspaceDreamNavItem`）与 canonical �
 
 - 内部标识：`story-workspace-dream`
 - 用户可见文案：`Dream`
-- 组件位置：`frontend/src/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`
+- 组件位置：`frontend/app/_dream/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`
 - 接收 props：`isActive: boolean`, `onClick: () => void`
 
 **选中态表现**：
@@ -72,7 +72,7 @@ const isDreamActive = pathname.startsWith('/story-workspace');
 
 ### Step 3: 路由配置更新
 
-修改 `frontend/src/router/story-workspace.tsx`（或等效路由配置）：
+修改 `frontend/app/_dream/router/story-workspace.tsx`（或等效路由配置）：
 
 ```typescript
 const storyWorkspaceRoutes = [
@@ -107,15 +107,15 @@ const storyWorkspaceRoutes = [
 ## 5. 涉及文件路径
 
 **新增文件**：
-- `frontend/src/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`
-- `frontend/src/components/story-workspace/navigation/index.ts`
+- `frontend/app/_dream/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`
+- `frontend/app/_dream/components/story-workspace/navigation/index.ts`
 
 **修改文件**（增量适配）：
-- `frontend/src/components/TopNavBar.tsx` — 插入 Dream 导航项
-- `frontend/src/router/story-workspace.tsx` — 追加 canonical 路由与重定向
+- `frontend/app/_dream/components/TopNavBar.tsx` — 插入 Dream 导航项
+- `frontend/app/_dream/router/story-workspace.tsx` — 追加 canonical 路由与重定向
 
 **复用文件**（只读）：
-- `frontend/src/styles/tokens.css` — 色彩 token
+- `frontend/app/_dream/styles/tokens.css` — 色彩 token
 
 ---
 
@@ -140,8 +140,8 @@ const storyWorkspaceRoutes = [
 | 依赖 | Issue ID | 状态 | 说明 |
 |---|---|---|---|
 | `task_202b` (FE-002 Sidebar 导航与路由) | `SUO-201-FE-002` | ✅ 基线稳定 | 提供路由配置基线；本任务在其上增量追加 canonical 路由与重定向 |
-| `frontend/src/components/TopNavBar.tsx` | — | ✅ 已存在 | 现有全局顶部导航组件 |
-| `frontend/src/styles/tokens.css` | — | ✅ 已存在 | 色彩 token |
+| `frontend/app/_dream/components/TopNavBar.tsx` | — | ✅ 已存在 | 现有全局顶部导航组件 |
+| `frontend/app/_dream/styles/tokens.css` | — | ✅ 已存在 | 色彩 token |
 | `StoryWorkspaceDreamPage` | `SUO-230-FE-002` | ⏳ 并行 | Dream 页面由 `task_230_frontend_dream-page-review-gate.md` 定义；本任务仅配置路由指向 |
 
 **本任务被依赖**：
@@ -225,10 +225,10 @@ const storyWorkspaceRoutes = [
 ## 执行边界
 
 ### 允许修改范围
-- 允许创建 `frontend/src/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`
-- 允许创建 `frontend/src/components/story-workspace/navigation/index.ts`
-- 允许修改 `frontend/src/components/TopNavBar.tsx`（插入 Dream 导航项）
-- 允许修改 `frontend/src/router/story-workspace.tsx`（追加 canonical 路由与重定向）
+- 允许创建 `frontend/app/_dream/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`
+- 允许创建 `frontend/app/_dream/components/story-workspace/navigation/index.ts`
+- 允许修改 `frontend/app/_dream/components/TopNavBar.tsx`（插入 Dream 导航项）
+- 允许修改 `frontend/app/_dream/router/story-workspace.tsx`（追加 canonical 路由与重定向）
 
 ### 禁止修改范围
 - **禁止修改** `docs/design/` 目录下任何文件

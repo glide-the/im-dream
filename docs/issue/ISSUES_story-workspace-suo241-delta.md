@@ -279,9 +279,9 @@
 - 前置依赖：`SUO-230-FE-002`（Dream 页面与 ReviewGate 基线）
 
 - 关联路径：
-  - `frontend/src/pages/story-workspace/StoryWorkspaceEpisodeWorkspacePage.tsx`
-  - `frontend/src/components/story-workspace/episode/StoryWorkspacePromptComposer.tsx`
-  - `frontend/src/router/story-workspace.tsx`
+  - `frontend/app/_dream/views/story-workspace/StoryWorkspaceEpisodeWorkspacePage.tsx`
+  - `frontend/app/_dream/components/story-workspace/episode/StoryWorkspacePromptComposer.tsx`
+  - `frontend/app/_dream/router/story-workspace.tsx`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -330,8 +330,8 @@
 - 前置依赖：`SUO-241-FE-001`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeListTable.tsx`
-  - `frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeListToolbar.tsx`
+  - `frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeListTable.tsx`
+  - `frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeListToolbar.tsx`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -376,8 +376,8 @@
 - 前置依赖：`SUO-241-FE-002`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeDetail.tsx`
-  - `frontend/src/components/story-workspace/episode/tabs/`
+  - `frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeDetail.tsx`
+  - `frontend/app/_dream/components/story-workspace/episode/tabs/`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -419,8 +419,8 @@
 - 前置依赖：`SUO-241-FE-003`、`SUO-201-FE-004`（审阅面板基线）
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeReviewPanel.tsx`
-  - `frontend/src/components/story-workspace/review/`
+  - `frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeReviewPanel.tsx`
+  - `frontend/app/_dream/components/story-workspace/review/`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -463,7 +463,7 @@
 - 前置依赖：`SUO-201-FE-006`（状态组件基线）、`SUO-241-FE-001`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/episode/state/`
+  - `frontend/app/_dream/components/story-workspace/episode/state/`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -505,7 +505,7 @@
 - 前置依赖：`SUO-241-BE-001`、`SUO-241-FE-004`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/episode/`
+  - `frontend/app/_dream/components/story-workspace/episode/`
   - `backend/src/services/story-workspace/episode-adapter/`
 
 - 分发去向：`@TaskDesignAgent`
@@ -547,7 +547,7 @@
 - 前置依赖：`SUO-241-BE-003`、`SUO-241-FE-004`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/episode/`
+  - `frontend/app/_dream/components/story-workspace/episode/`
   - `backend/src/routes/story-workspace/review-gate.ts`
 
 - 分发去向：`@TaskDesignAgent`

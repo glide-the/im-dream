@@ -110,10 +110,10 @@ Choose the smallest lane that proves the change:
 
 | Lane | Use for | Command pattern |
 | --- | --- | --- |
-| Source/unit | reducers, normalization, layout contracts | `npx playwright test src/path/test.ts` |
+| Source/unit | reducers, normalization, layout contracts | `npx playwright test app/_dream/path/test.ts` |
 | Mocked browser | UI behavior independent of backend/provider | `page.route()` plus a focused `e2e/*.spec.ts` |
-| Real local E2E | named real account/Run, real model, Admin-visible persistence, complete workspace projection | normal local Dream/Admin/Gateway/PostgreSQL + Vite |
-| Isolated integration | provider-free auth/API persistence and deterministic faults | isolated FastAPI + Vite |
+| Real local E2E | named real account/Run, real model, Admin-visible persistence, complete workspace projection | normal local Dream/Admin/Gateway/PostgreSQL + Next |
+| Isolated integration | provider-free auth/API persistence and deterministic faults | isolated FastAPI + Next |
 | Visual QA | theme, locale, responsive, overflow, long content | real or staged data plus screenshots |
 
 Do not invoke a real model or external provider unless that integration is the feature under test.
@@ -147,10 +147,10 @@ AGENT_CWD="$qa_runtime/workspaces" \
 backend/.venv/bin/python backend/server.py
 ```
 
-From `frontend/`, start:
+From `frontend/`, start the sole Next Web shell:
 
 ```bash
-npm run dev -- --host 127.0.0.1
+corepack pnpm run dev -- --hostname 127.0.0.1 --port 5173
 ```
 
 Wait for `http://127.0.0.1:8765/api/health` and `http://127.0.0.1:5173/` to respond. Recheck that the running backend sees the intended workspace root before staging filesystem fixtures.

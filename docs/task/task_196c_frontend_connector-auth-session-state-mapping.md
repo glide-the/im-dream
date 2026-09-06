@@ -9,10 +9,10 @@ Scope: 前端任务规划 - connector auth session UI mapping and poll contract 
 >      `docs/design/notion-session/connector-interaction.md`,
 >      `docs/design/notion-session/overview.md`,
 >      `docs/design/claude-agent/notion-point/interaction-snapshot-lifecycle.md`,
->      `frontend/src/api/resourceConnectorApi.ts`,
->      `frontend/src/components/dashboard/ResourceConnectorPage.tsx`,
->      `frontend/src/components/chat/ChatView.tsx`,
->      `frontend/src/constants/storageKeys.ts`
+>      `frontend/app/_dream/api/resourceConnectorApi.ts`,
+>      `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`,
+>      `frontend/app/_dream/components/chat/ChatView.tsx`,
+>      `frontend/app/_dream/constants/storageKeys.ts`
 > [Output] 前端 auth session 状态映射 task 文档，明确 UI 消费语义与退路
 > [Pos] `task_196c_frontend_connector-auth-session-state-mapping` in `docs/task`
 > [Sync] 2026-07-07: generated for the SUO-196 task family after the issue split completed.
@@ -56,10 +56,10 @@ Scope: 前端任务规划 - connector auth session UI mapping and poll contract 
 
 | Path | Role |
 |---|---|
-| `frontend/src/api/resourceConnectorApi.ts` | auth poll / status normalization consumer. |
-| `frontend/src/components/dashboard/ResourceConnectorPage.tsx` | auth state rendering and CTA mapping. |
-| `frontend/src/components/chat/ChatView.tsx` | embedded connector tab consumption of auth state. |
-| `frontend/src/constants/storageKeys.ts` | auth-related fallback isolation if needed. |
+| `frontend/app/_dream/api/resourceConnectorApi.ts` | auth poll / status normalization consumer. |
+| `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx` | auth state rendering and CTA mapping. |
+| `frontend/app/_dream/components/chat/ChatView.tsx` | embedded connector tab consumption of auth state. |
+| `frontend/app/_dream/constants/storageKeys.ts` | auth-related fallback isolation if needed. |
 
 ## 6. 输入 / 输出说明
 
@@ -76,8 +76,8 @@ Scope: 前端任务规划 - connector auth session UI mapping and poll contract 
 - `docs/design/notion-session/overview.md`
 - `docs/design/claude-agent/notion-point/interaction-snapshot-lifecycle.md`
 - `SUO-195-C`
-- `frontend/src/api/resourceConnectorApi.ts`
-- `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
+- `frontend/app/_dream/api/resourceConnectorApi.ts`
+- `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
 
 ## 8. 测试策略
 

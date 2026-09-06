@@ -9,10 +9,10 @@ Scope: 前端任务规划 - 资源连接器页面颜色系统收敛与 token 对
 >      `docs/prd/color_system/light-theme.md`,
 >      `docs/prd/notion-session/resource-connector.md`,
 >      `docs/prd/notion-session/resource-connector-ui-design.md`,
->      `frontend/src/components/dashboard/ResourceConnectorPage.tsx`,
->      `frontend/src/App.tsx`,
->      `frontend/src/components/TopNavBar.tsx`,
->      `frontend/src/styles/tokens.css`
+>      `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`,
+>      `frontend/app/_dream/App.tsx`,
+>      `frontend/app/_dream/components/TopNavBar.tsx`,
+>      `frontend/app/_dream/styles/tokens.css`
 > [Output] 可执行的前端任务文档，供后续实现阶段直接拆分与排期
 > [Pos] `task_181_frontend_notion-resource-connector-color-system-fix` in `docs/task`
 > [Sync] 2026-07-04: generated from the filled SUO-181 requirement template after the resource connector color-system drift report was triaged.
@@ -51,7 +51,7 @@ Scope: 前端任务规划 - 资源连接器页面颜色系统收敛与 token 对
 ### In Scope
 
 - `ResourceConnectorPage.tsx` 的页面壳、状态 pill、卡片、按钮、空状态、选择弹窗和 hover/focus 表现。
-- 将页面中的颜色映射到 `frontend/src/styles/tokens.css` 里已有的语义 token。
+- 将页面中的颜色映射到 `frontend/app/_dream/styles/tokens.css` 里已有的语义 token。
 - `App.tsx` 与 `TopNavBar.tsx` 中与 connector 页面同语境的背景、边框或按钮色偏差审查。
 - 如确有 token 覆盖缺口，仅补最小的语义 token 映射，并同步到 color-system 文档语义，不引入 feature-only palette。
 - 必要时同步更新被修改的 frontend 文件头注释，以保持仓库注释约定一致。
@@ -77,10 +77,10 @@ Scope: 前端任务规划 - 资源连接器页面颜色系统收敛与 token 对
 
 | Path | Role |
 |---|---|
-| `frontend/src/components/dashboard/ResourceConnectorPage.tsx` | 主修复面，收敛 connector 页面颜色系统。 |
-| `frontend/src/styles/tokens.css` | 共享 token source of truth，必要时补最小语义映射。 |
-| `frontend/src/App.tsx` | App shell 与 connector entry 的背景 / 色调审查面。 |
-| `frontend/src/components/TopNavBar.tsx` | 顶栏与 connector 页面相邻区域的视觉一致性审查面。 |
+| `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx` | 主修复面，收敛 connector 页面颜色系统。 |
+| `frontend/app/_dream/styles/tokens.css` | 共享 token source of truth，必要时补最小语义映射。 |
+| `frontend/app/_dream/App.tsx` | App shell 与 connector entry 的背景 / 色调审查面。 |
+| `frontend/app/_dream/components/TopNavBar.tsx` | 顶栏与 connector 页面相邻区域的视觉一致性审查面。 |
 | `docs/prd/color_system/README.md` | 颜色系统总入口参考。 |
 | `docs/prd/color_system/light-theme.md` | 亮色主题 token 与视觉规范参考。 |
 | `docs/prd/notion-session/resource-connector.md` | 连接器页面产品范围和状态定义参考。 |
@@ -102,10 +102,10 @@ Scope: 前端任务规划 - 资源连接器页面颜色系统收敛与 token 对
 - `docs/prd/color_system/light-theme.md`
 - `docs/prd/notion-session/resource-connector.md`
 - `docs/prd/notion-session/resource-connector-ui-design.md`
-- `frontend/src/styles/tokens.css`
-- `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-- `frontend/src/App.tsx`
-- `frontend/src/components/TopNavBar.tsx`
+- `frontend/app/_dream/styles/tokens.css`
+- `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+- `frontend/app/_dream/App.tsx`
+- `frontend/app/_dream/components/TopNavBar.tsx`
 - `SUO-172` as contextual parent issue
 
 ## 9. 测试策略

@@ -1,7 +1,8 @@
 <!-- [输入] MCP Apps 稳定规范、OpenAI 共享字段指南、IM MCP Apps Host 设计。 -->
 <!-- [输出] 定义 IM App 页面可使用的标准能力与 window.im 兼容接口。 -->
 <!-- [定位] IM App 客户端平台能力合同；不定义 Browser 与 Node 的私有传输协议。 -->
-<!-- [同步] 2026-09-04：标准主链改由已连接的 Browser MCP Client 与 @mcp-ui/client AppRenderer 承载，window.im 仅作为兼容接口。 -->
+<!-- [同步] 2026-09-04：SUO-383 后标准主链由 Browser MCP Client、最小 Host adapter 与 @mcp-ui/client AppBridge 承载，window.im 仍仅为兼容接口。 -->
+<!-- [同步] 2026-09-05：SUO-404/DEC-005 明确本客户端能力只属于 frontend/ 根 Web package，不导入同级 server-only Runtime package。 -->
 
 # IM MCP Apps 客户端平台能力合同
 
@@ -24,7 +25,7 @@ MCP Server 的工具描述通过 `_meta.ui.resourceUri` 关联 `ui://` 页面资
 这些能力已经由 MCP Apps 定义。IM 不再设计一套 Browser 与 Node 之间的页面实例、事件序号或连接状态协议，也不自行实现 iframe bridge：
 
 - Browser 创建 MCP `Client`，连接 Node Apps Runtime 提供的同源、受控 MCP Streamable HTTP endpoint；
-- `@mcp-ui/client` 的 `AppRenderer` 使用该 `Client` 完成 UI resource 获取与 App 渲染，并在内部管理 iframe、AppBridge 和页面消息通道；
+- 最小 `ImMcpAppHostAdapter` 使用该 `Client` 获取完整 UI resource，复用 `@mcp-ui/client` 的 AppBridge/transport，并管理经过权限策略约束的 iframe；
 - Node endpoint 将允许的 MCP 请求交给 `PersistentConnectorManager` 所持有的目标 MCP Server 连接；
 - `window.im` 只是 App 页面使用 IM 平台能力的可选兼容接口。
 
@@ -46,7 +47,8 @@ MCP Server 的工具描述通过 `_meta.ui.resourceUri` 关联 `ui://` 页面资
 - 本稿不定义自有 Browser↔Node RPC、SSE 或 WebSocket 协议。
 - 本稿不向 App 页面增加 MCP 连接状态、认证入口或内部会话同步字段。
 - App 不读取 MCP credential、真实上游地址、完整 Thread、系统提示词或父页面 DOM。
-- Python 不参与 App 页面、AppRenderer、`window.im` 或 Node MCP endpoint 之间的交互链。
+- Python 不参与 App 页面、Host adapter、`window.im` 或 Node MCP endpoint 之间的交互链。
+- 本能力属于 `frontend/` 根 Web package；Client Component 不得导入 `frontend/packages/mcp-apps-runtime/**`，只通过同源 MCP HTTP endpoint 交互。
 - IM 尚未承诺的平台能力不预先增加成员；未提供的可选成员必须保持缺失。
 
 ## 3. 概念与规则
@@ -57,7 +59,7 @@ MCP Server 的工具描述通过 `_meta.ui.resourceUri` 关联 `ui://` 页面资
 flowchart LR
     S["MCP Server 模块<br/>tools / ui resources"] <--> N["Node Apps Runtime<br/>受控 MCP endpoint / PersistentConnectorManager"]
     N <--> C["Browser MCP Client"]
-    C --> R["AppRenderer"]
+    C --> R["Host adapter + AppBridge"]
     R <--> V["iframe 中的 App"]
     V <--> U["用户"]
 ```
@@ -66,11 +68,11 @@ flowchart LR
 |---|---|
 | MCP Server | 声明 `_meta.ui.resourceUri`，返回 UI resource、tool result 和工具能力 |
 | Node Apps Runtime | 提供标准 MCP Streamable HTTP endpoint；校验用户、workspace、Server 和工具访问范围；代理资源与工具请求 |
-| Browser MCP Client | 连接 Node endpoint，作为 `AppRenderer` 使用的 MCP Client |
-| `AppRenderer` | 读取工具关联的 UI resource、渲染页面、发送输入和结果、承载 MCP Apps 双向交互 |
+| Browser MCP Client | 连接 Node endpoint，作为 Host adapter 使用的 MCP Client |
+| Host adapter | 读取完整 UI resource、执行 permission policy、复用 AppBridge、渲染页面并承载双向交互 |
 | App | 使用 MCP Apps 标准；需要 IM 可选平台能力时 feature-detect `window.im` |
 
-`AppRenderer` 内部使用 AppBridge 和页面消息 transport；IM 不再重复实现 resource 读取、iframe 创建或工具转发。
+Host adapter 复用标准 AppBridge 和页面消息 transport，不实现第二套 Browser↔Node 协议；其 resource metadata 与 iframe 职责遵循 [DEC-002](./mcp-apps-iframe-interaction.md#dec-002锁定组合选择最小-host-adapter)。
 
 ### 3.2 共享字段和方法优先
 
@@ -95,7 +97,7 @@ flowchart LR
 
 `window.im` 对应 `window.openai` 的页面能力。IM 实现某个成员时，必须保持该成员的字段含义、调用参数、返回值、失败和更新语义；未实现时不暴露该成员。
 
-`window.im` 是 IM 要提供的客户端平台兼容合同，不是 `AppRenderer` 的现成能力。目标交付方式是在 IM 自有、版本化的 sandbox proxy 中加载兼容适配器，把字段和方法映射到同一 MCP Apps bridge；顶层页面不能跨 origin 直接给第三方 iframe 赋值，Node 也不能跨进程注入浏览器全局对象。
+`window.im` 是 IM 要提供的客户端平台兼容合同，不是 Host adapter 的现成能力。目标交付方式是在 IM 自有、版本化的 sandbox proxy 中加载兼容适配器，把字段和方法映射到同一 MCP Apps bridge；顶层页面不能跨 origin 直接给第三方 iframe 赋值，Node 也不能跨进程注入浏览器全局对象。
 
 Phase 0 只要求标准 MCP Apps bridge。Phase 2 必须先用 PoC 验证适配器能在不改写 Server HTML 的前提下完成初始化、CSP/origin 隔离和消息来源校验，验证通过后才提供 `window.im`。任何未实现的成员保持缺失；文件、modal、显示模式等能力还必须有对应的 Host callback 和产品能力，不能只增加同名函数。
 
@@ -118,7 +120,7 @@ IM 专有扩展不混入上述兼容表。只有出现明确产品需求且 MCP 
 sequenceDiagram
     actor U as 用户
     participant V as App
-    participant R as AppRenderer
+    participant R as Host adapter
     participant C as Browser MCP Client
     participant N as Node Apps Runtime
     participant S as MCP Server
@@ -151,7 +153,7 @@ sequenceDiagram
 | 情况 | 平台行为 | 页面结果 |
 |---|---|---|
 | MCP Apps capability 不支持 | 不挂载 App UI | 展示普通 tool result |
-| UI resource 缺失、无效或加载失败 | `AppRenderer` 报告加载失败，Host 保留 fallback | 展示普通 tool result 与可重试操作 |
+| UI resource 缺失、无效或加载失败 | Host adapter 报告加载失败并保留 fallback | 展示普通 tool result 与可重试操作 |
 | 页面请求未声明的能力 | Host 拒绝请求 | 当前操作失败，页面仍可使用 |
 | 工具不可见或权限不足 | Node endpoint 在调用上游前拒绝 | 返回权限错误，不泄露 credential 或上游地址 |
 | MCP Server 断开或超时 | 标准 MCP 请求失败 | 保留已显示内容，允许用户按产品策略重试 |
@@ -161,6 +163,8 @@ App 页面不能通过 `window.im` 绕过 Node endpoint 的身份、Server 范�
 
 ## 4. 设计结论
 
-IM 需要定义上述客户端平台能力合同，但不需要第二套 Browser↔Node 传输协议。MCP Apps 标准主链由已连接的 Browser MCP Client 与 `AppRenderer` 完成；`tools/call` 通过 Node 的受控标准 MCP endpoint 到达 MCP Server，`ui/message` 进入 IM 现有消息入口。
+IM 需要定义上述客户端平台能力合同，但不需要第二套 Browser↔Node 传输协议。MCP Apps 标准主链由已连接的 Browser MCP Client、最小 Host adapter 和标准 AppBridge 完成；`tools/call` 通过 Node 的受控标准 MCP endpoint 到达 MCP Server，`ui/message` 进入 IM 现有消息入口。
 
 `window.im` 是 `window.openai` 的 IM namespace 兼容接口：标准已有能力时只做别名，OpenAI 可选平台能力按 IM 实际支持情况逐项提供。它不是 MCP transport、AppBridge 的替代品，也不定义认证和连接同步协议。
+
+目录归属不在本稿重复定义；唯一结构以[DEC-005 canonical 目录树](./dream-frontend-node-framework-migration-assessment.md#62-唯一-canonical-目录树)为准。旧 `frontend/app/app/**` 和 `frontend/app/_dream/server/mcp-apps/**` 不得成为客户端兼容层的双写目标。

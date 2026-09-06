@@ -1,0 +1,142 @@
+<!doctype html>
+<!-- [Input] Host-adapter messages plus a server-injected immutable policy decision. -->
+<!-- [Output] Revision-bound inner iframe policy, restrictive CSP, source/schema checks, and lifecycle relay. -->
+<!-- [Pos] Task_301 browser-only sandbox fixture; never served by production. -->
+<!-- [Sync] 2026-09-04: enforce DEC-002 effective permissions and sandbox tokens inside the proxy. -->
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body>
+<script>
+  (() => {
+    const policy = __PHASE0_POLICY_JSON__;
+    const parentOrigin = document.referrer ? new URL(document.referrer).origin : null;
+    let appFrame = null;
+
+    const record = (event) => fetch('/phase0/proxy-evidence', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(event),
+    }).catch(() => {});
+
+    const normalizeOrigins = (value) => (
+      Array.isArray(value)
+        ? value.filter((entry) => typeof entry === 'string' && /^https?:\/\//.test(entry))
+        : []
+    );
+    const permissionKeys = ['camera', 'microphone', 'geolocation', 'clipboardWrite'];
+    const permissionFeatures = {
+      camera: 'camera',
+      microphone: 'microphone',
+      geolocation: 'geolocation',
+      clipboardWrite: 'clipboard-write',
+    };
+    const isPlainRecord = (value) => (
+      typeof value === 'object' && value !== null && !Array.isArray(value)
+    );
+    const isPermissions = (value) => (
+      isPlainRecord(value)
+      && Object.keys(value).every((key) => permissionKeys.includes(key))
+      && Object.values(value).every((entry) => isPlainRecord(entry) && !Object.keys(entry).length)
+    );
+    const samePermissions = (left, right) => (
+      permissionKeys.every((key) => Boolean(left[key]) === Boolean(right[key]))
+    );
+    const buildAllow = (permissions) => permissionKeys.map((key) => (
+      permissions[key] ? permissionFeatures[key] : `${permissionFeatures[key]} 'none'`
+    )).join('; ');
+    const buildCsp = (csp) => {
+      const connect = normalizeOrigins(csp?.connectDomains);
+      const resources = normalizeOrigins(csp?.resourceDomains);
+      const frames = normalizeOrigins(csp?.frameDomains);
+      const bases = normalizeOrigins(csp?.baseUriDomains);
+      return [
+        "default-src 'none'",
+        `script-src 'unsafe-inline' ${resources.join(' ')}`.trim(),
+        `style-src 'unsafe-inline' ${resources.join(' ')}`.trim(),
+        `img-src data: ${resources.join(' ')}`.trim(),
+        `font-src ${resources.length ? resources.join(' ') : "'none'"}`,
+        `media-src ${resources.length ? resources.join(' ') : "'none'"}`,
+        `connect-src ${connect.length ? connect.join(' ') : "'none'"}`,
+        `frame-src ${frames.length ? frames.join(' ') : "'none'"}`,
+        `base-uri ${bases.length ? bases.join(' ') : "'none'"}`,
+        "object-src 'none'",
+      ].join('; ');
+    };
+    const withCsp = (html, csp) => {
+      const meta = `<meta http-equiv="Content-Security-Policy" content="${buildCsp(csp).replaceAll('"', '&quot;')}">`;
+      return html.includes('<head>') ? html.replace('<head>', `<head>${meta}`) : `${meta}${html}`;
+    };
+
+    window.addEventListener('message', (event) => {
+      const message = event.data;
+      if (!message || message.jsonrpc !== '2.0') {
+        record({ kind: 'rejected-schema' });
+        return;
+      }
+
+      if (event.source === parent) {
+        if (!parentOrigin || event.origin !== parentOrigin) {
+          record({ kind: 'rejected-parent-origin', origin: event.origin });
+          return;
+        }
+        if (message.method === 'ui/notifications/sandbox-resource-ready') {
+          const params = message.params ?? {};
+          if (
+            typeof params.html !== 'string'
+            || typeof params.sandbox !== 'string'
+            || !isPermissions(params.permissions)
+          ) {
+            record({ kind: 'rejected-resource-schema' });
+            return;
+          }
+          if (
+            params.sandbox !== policy.sandboxTokens
+            || !samePermissions(params.permissions, policy.effectivePermissions)
+          ) {
+            record({ kind: 'rejected-policy-mismatch', revision: policy.revision });
+            return;
+          }
+          if (appFrame) appFrame.remove();
+          appFrame = document.createElement('iframe');
+          const innerAllow = buildAllow(policy.effectivePermissions);
+          appFrame.setAttribute('sandbox', policy.sandboxTokens);
+          appFrame.setAttribute('allow', innerAllow);
+          appFrame.srcdoc = withCsp(params.html, params.csp);
+          document.body.appendChild(appFrame);
+          record({
+            kind: 'resource-ready',
+            cspPresent: Boolean(params.csp),
+            requestedPermissions: permissionKeys.filter((key) => params.permissions[key]),
+            effectivePermissions: permissionKeys.filter((key) => policy.effectivePermissions[key]),
+            revision: policy.revision,
+            innerAllow,
+            sandboxTokens: policy.sandboxTokens,
+            permissionsPresent: true,
+            sandboxOverridePresent: true,
+          });
+          return;
+        }
+        if (message.method === 'ui/resource-teardown') {
+          record({ kind: 'teardown-request-forwarded' });
+        }
+        appFrame?.contentWindow?.postMessage(message, '*');
+        return;
+      }
+
+      if (appFrame && event.source === appFrame.contentWindow) {
+        parent.postMessage(message, parentOrigin);
+        return;
+      }
+
+      record({ kind: 'rejected-message-source' });
+    });
+
+    parent.postMessage({
+      jsonrpc: '2.0',
+      method: 'ui/notifications/sandbox-proxy-ready',
+      params: {},
+    }, parentOrigin);
+  })();
+</script>
+</body>
+</html>

@@ -68,10 +68,10 @@
 ### 允许新增或修改
 
 ```text
-frontend/src/components/story-workspace/episode/StoryWorkspaceEpisodeDetail.tsx
-frontend/src/components/story-workspace/episode/tabs/
-frontend/src/components/story-workspace/episode/*EpisodeDetail*.test.tsx
-frontend/src/components/story-workspace/episode/tabs/*.test.tsx
+frontend/app/_dream/components/story-workspace/episode/StoryWorkspaceEpisodeDetail.tsx
+frontend/app/_dream/components/story-workspace/episode/tabs/
+frontend/app/_dream/components/story-workspace/episode/*EpisodeDetail*.test.tsx
+frontend/app/_dream/components/story-workspace/episode/tabs/*.test.tsx
 ```
 
 ### 禁止修改

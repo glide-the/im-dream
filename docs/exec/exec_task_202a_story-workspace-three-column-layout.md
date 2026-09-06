@@ -58,14 +58,14 @@
 
 | 文件 | 操作 | 说明 |
 |---|---|---|
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceLayout.tsx` | create | 三栏根布局、默认/受控面板状态与区域语义标记 |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx` | create | 360px 审阅容器、标题、可访问关闭按钮 |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceLayout.css` | create | 240px / fluid / 360px flex、Paper token、虚线边框与焦点态 |
-| `frontend/src/components/story-workspace/layout/index.ts` | create | 布局组件和 Props 类型命名导出 |
-| `frontend/src/components/story-workspace/index.ts` | create | story-workspace 根级布局导出 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceLayout.tsx` | create | 三栏根布局、默认/受控面板状态与区域语义标记 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx` | create | 360px 审阅容器、标题、可访问关闭按钮 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceLayout.css` | create | 240px / fluid / 360px flex、Paper token、虚线边框与焦点态 |
+| `frontend/app/_dream/components/story-workspace/layout/index.ts` | create | 布局组件和 Props 类型命名导出 |
+| `frontend/app/_dream/components/story-workspace/index.ts` | create | story-workspace 根级布局导出 |
 | `docs/exec/exec_task_202a_story-workspace-three-column-layout.md` | create | 本正式执行报告 |
 
-未修改：`frontend/src/App.tsx`、`frontend/src/styles/tokens.css`、`AppLayout.tsx`、`TopNavBar.tsx`、任何上游文档或后端文件。
+未修改：`frontend/app/_dream/App.tsx`、`frontend/app/_dream/styles/tokens.css`、`AppLayout.tsx`、`TopNavBar.tsx`、任何上游文档或后端文件。
 
 ## 6. 测试与验证
 
@@ -78,7 +78,7 @@
 | `npm ci`（授权联网） | PASS | 按 `frontend/package-lock.json` 安装 446 packages；未修改锁文件 |
 | `npm run build`（依赖恢复后） | PASS | `tsc -b && vite build`，2602 modules transformed；仅有项目既有 dynamic-import/chunk-size warnings |
 | 目标文件 `eslint` | PASS | 两个 TSX 与两个 `index.ts` 无 lint 错误或警告 |
-| `rg '@media|768px|1279px|useMediaQuery|matchMedia'` | PASS | `frontend/src/components/story-workspace/` 无命中 |
+| `rg '@media|768px|1279px|useMediaQuery|matchMedia'` | PASS | `frontend/app/_dream/components/story-workspace/` 无命中 |
 | 硬编码色值 `rg '#...|rgb(...)'` | PASS | story-workspace 产品代码无命中，全部使用 token |
 | 240px / 360px CSS 声明计数 | PASS | Sidebar 3 个固定宽度声明；Review Panel 4 个固定宽度声明 |
 | `git diff --check` | PASS | 无 whitespace 错误 |

@@ -19,12 +19,12 @@
 
 ## 3. 模型生成的执行任务
 - 任务目标: 修复 connector 固定视口的 overflow 归属，让页面滚动发生在 app shell，而不是被 `overflow: hidden` 裁切
-- 实现范围: `App.tsx` 的 connector viewport、`ResourceConnectorPage.tsx` 的文件头说明、`frontend/src/.folder.md`、`frontend/src/components/dashboard/.folder.md`
+- 实现范围: `App.tsx` 的 connector viewport、`ResourceConnectorPage.tsx` 的文件头说明、`frontend/app/_dream/.folder.md`、`frontend/app/_dream/components/dashboard/.folder.md`
 - 文件范围:
-  - `frontend/src/App.tsx`
-  - `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-  - `frontend/src/.folder.md`
-  - `frontend/src/components/dashboard/.folder.md`
+  - `frontend/app/_dream/App.tsx`
+  - `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+  - `frontend/app/_dream/.folder.md`
+  - `frontend/app/_dream/components/dashboard/.folder.md`
 - 实现步骤:
   1. 将 connector view shell 从 `overflow: hidden` 改为 `overflowY: auto`，保留横向裁切和 fixed 布局
   2. 保持 `ResourceConnectorPage` 内容结构不变，只让它适配可滚动的 shell
@@ -37,10 +37,10 @@
 ## 4. 实现变更记录
 | 文件 | 操作 | 说明 |
 |---|---|---|
-| `frontend/src/App.tsx` | update | 将 connector fixed shell 改为可纵向滚动，并保留横向裁切与 touch momentum scrolling；补充 sync 注释。 |
-| `frontend/src/components/dashboard/ResourceConnectorPage.tsx` | update | 补充 sync 注释，说明页面需要兼容可滚动的 app shell。 |
-| `frontend/src/.folder.md` | update | 记录 connector viewport scroll shell 的行为变化。 |
-| `frontend/src/components/dashboard/.folder.md` | update | 记录 connector shell 改为可滚动后，资源选择与来源列表仍可达。 |
+| `frontend/app/_dream/App.tsx` | update | 将 connector fixed shell 改为可纵向滚动，并保留横向裁切与 touch momentum scrolling；补充 sync 注释。 |
+| `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx` | update | 补充 sync 注释，说明页面需要兼容可滚动的 app shell。 |
+| `frontend/app/_dream/.folder.md` | update | 记录 connector viewport scroll shell 的行为变化。 |
+| `frontend/app/_dream/components/dashboard/.folder.md` | update | 记录 connector shell 改为可滚动后，资源选择与来源列表仍可达。 |
 
 ## 5. 测试与验证
 - 已执行测试: `pnpm -C frontend build`
@@ -70,10 +70,10 @@
 
 ## 8. 回滚建议
 - 回滚文件:
-  - `frontend/src/App.tsx`
-  - `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-  - `frontend/src/.folder.md`
-  - `frontend/src/components/dashboard/.folder.md`
+  - `frontend/app/_dream/App.tsx`
+  - `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+  - `frontend/app/_dream/.folder.md`
+  - `frontend/app/_dream/components/dashboard/.folder.md`
 - 回滚方式: 将 connector shell 的 `overflowY: auto` 改回 `overflow: hidden`，并删除对应 sync 注释与 folder 记录
 - 注意事项: 回滚后 lower resource-selection / source-list 区域会再次被固定视口裁切，需要同时撤回本次浏览器 smoke 结论
 

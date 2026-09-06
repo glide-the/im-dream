@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Read-only Ink-Dream Playwright environment preflight."""
+"""[Input] Canonical Next frontend/app source owner, backend runner, and local Playwright installation.
+[Output] Read-only repository, command, dependency, and conventional-port readiness report.
+[Pos] Ink-Dream Playwright environment preflight; it starts or mutates no service.
+[Sync] 2026-09-06: replace the retired Vite marker with the sole Next/app/_dream source contract.
+"""
 
 from __future__ import annotations
 
@@ -34,7 +38,8 @@ def main() -> int:
     package_path = frontend / "package.json"
     required = {
         "frontend/package.json": package_path,
-        "frontend/vite.config.ts": frontend / "vite.config.ts",
+        "frontend/next.config.js": frontend / "next.config.js",
+        "frontend/app/_dream": frontend / "app" / "_dream",
         "backend/server.py": backend / "server.py",
         "backend/.venv/bin/python": backend / ".venv" / "bin" / "python",
         "frontend/node_modules/@playwright/test": frontend / "node_modules" / "@playwright" / "test",

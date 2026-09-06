@@ -42,10 +42,10 @@
 
 | 层 | 代码证据 | 当前职责 | 迁移边界 |
 |---|---|---|---|
-| Settings/Resources | `frontend/src/components/dashboard/ConnectorSettingsSection.tsx:332` | 挂载 Resources 区块 | 保持入口；只换 DTO/交互语义 |
-| Resources 列表 | `frontend/src/components/claude-mcp/ClaudeMcpResourceSection.tsx:162-181` | 先 capability、再 list、再恢复 active operation | capability 与 list 可并行；list 不触发 discovery |
-| Server 详情 | `frontend/src/components/claude-mcp/ClaudeMcpServerDetailPage.tsx` | capability/get 并行，随后自动以 `force=false` 加载 inventory | 配置先展示，inventory 独立加载；不提供刷新/重试按钮 |
-| Frontend API | `frontend/src/api/claudeMcpApi.ts:104-218` | 统一 auth/fetch/error 和现有 Resources API | 复用 request 边界，扩展严格 DTO |
+| Settings/Resources | `frontend/app/_dream/components/dashboard/ConnectorSettingsSection.tsx:332` | 挂载 Resources 区块 | 保持入口；只换 DTO/交互语义 |
+| Resources 列表 | `frontend/app/_dream/components/claude-mcp/ClaudeMcpResourceSection.tsx:162-181` | 先 capability、再 list、再恢复 active operation | capability 与 list 可并行；list 不触发 discovery |
+| Server 详情 | `frontend/app/_dream/components/claude-mcp/ClaudeMcpServerDetailPage.tsx` | capability/get 并行，随后自动以 `force=false` 加载 inventory | 配置先展示，inventory 独立加载；不提供刷新/重试按钮 |
+| Frontend API | `frontend/app/_dream/api/claudeMcpApi.ts:104-218` | 统一 auth/fetch/error 和现有 Resources API | 复用 request 边界，扩展严格 DTO |
 | FastAPI Router | `backend/server.py:1163`；`backend/routers/claude_mcp.py:82-250` | 鉴权 actor、DTO、Service 编排 | 路由保持薄；禁止直接 SQL/MCP client |
 | Service | `backend/claude_mcp/service.py:137-232` | 每次请求校验 CLI 版本/四组 help，list 后逐 server get | 改为 capability repository + actor-scoped repository + discovery coordinator |
 | CLI Driver | `backend/claude_mcp/driver.py:128-285` | 唯一在线 subprocess owner；list/get/add/remove/login/logout | 仅保留只读旧配置迁移 adapter，切换完成后不在生产请求链 |
@@ -55,7 +55,7 @@
 | Agent Runner | `backend/libs/claude_agent_kit/server/agent_runner.py:2759-2805` | 冲突 fail closed，合并外部 MCP 并构造 `ClaudeAgentOptions.mcp_servers` | 公开 SDK 接口复用；Path 注入避免 secret argv |
 | clean-room Runtime | `src/cleanroom/mcp/config.ts`、`registry.ts`、`types.ts` | 已严格区分 legacy SSE 与 Streamable HTTP，并复用官方 SDK transport | 只承担 Agent 执行兼容；不增加管理数据库/CLI 职责 |
 | Run DTO | `backend/libs/claude_agent_kit/types.py:209-220` | `claude_mcp_servers` 关闭 repr | 字段保持；传入 detached snapshot |
-| 浏览器 Chat | `frontend/src/components/chat/ChatPanel.tsx:383-395`；`backend/routers/claude_agent.py:377-425` | 浏览器发送空 `allowedMcpServers`，后端 DTO 不消费该控制 | 保持服务端权威，不增加浏览器 MCP 注入 |
+| 浏览器 Chat | `frontend/app/_dream/components/chat/ChatPanel.tsx:383-395`；`backend/routers/claude_agent.py:377-425` | 浏览器发送空 `allowedMcpServers`，后端 DTO 不消费该控制 | 保持服务端权威，不增加浏览器 MCP 注入 |
 | Sandbox | `backend/libs/claude_agent_kit/server/workspace.py:513-568` | 禁止 Agent 读取/写入 thread credential/config 文件 | 新链路不写秘密文件；现有 deny 继续作为纵深防御 |
 
 ### 时序 1：当前 `11 + N` CLI 管理子进程

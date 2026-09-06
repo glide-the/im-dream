@@ -515,7 +515,7 @@ ChatPanel
             └─ shouldShowApprovalUI  = isManualToolInvocation && !shouldShowAskUserUI && !isCompleted
 ```
 
-`frontend/src/lib/claude-agent-transport.ts` 在收到 `tool-approval-request` SSE frame 时，会把对应 tool input chunk 标记为 `toolMetadata.approvalRequested=true`。因此 UI 不再只依赖本地 `toolChoice` 判断，auto 模式下后端要求确认的普通工具也会显示 Approve/Cancel。
+`frontend/app/_dream/lib/claude-agent-transport.ts` 在收到 `tool-approval-request` SSE frame 时，会把对应 tool input chunk 标记为 `toolMetadata.approvalRequested=true`。因此 UI 不再只依赖本地 `toolChoice` 判断，auto 模式下后端要求确认的普通工具也会显示 Approve/Cancel。
 
 ### 7.2 `ChatMessageList` 渲染决策
 
@@ -613,18 +613,18 @@ ChatPanel
 
 ### 8.4 涉及文件
 
-- `frontend/src/components/chat/toolConfirmation.ts`（新增）— `confirmToolCall`
+- `frontend/app/_dream/components/chat/toolConfirmation.ts`（新增）— `confirmToolCall`
   请求、`resolveToolName`、`isAskUserQuestionPart`、`resolvePendingToolConfirmation`。
-- `frontend/src/components/chat/ToolConfirmationDock.tsx`（新增）— 确认面板本体。
-- `frontend/src/components/chat/AskUserQuestionUI.tsx` — 新增 `framed` /
+- `frontend/app/_dream/components/chat/ToolConfirmationDock.tsx`（新增）— 确认面板本体。
+- `frontend/app/_dream/components/chat/AskUserQuestionUI.tsx` — 新增 `framed` /
   `showHeader` / `submitLabel` / `cancelLabel` / `compact` props，支持无框紧凑
   中文按钮变体。
-- `frontend/src/components/chat/ToolMessagePart.tsx` — 移除内联 Approve/Cancel
+- `frontend/app/_dream/components/chat/ToolMessagePart.tsx` — 移除内联 Approve/Cancel
   与 AskUserQuestion 渲染路径及 `isManualToolInvocation` prop；保留折叠详情卡与
   编辑器写入审批 UI。
-- `frontend/src/components/chat/ChatMessageList.tsx` — 待确认 part 渲染为折叠
+- `frontend/app/_dream/components/chat/ChatMessageList.tsx` — 待确认 part 渲染为折叠
   行 + 「待确认」标记。
-- `frontend/src/components/chat/ChatPanel.tsx` — 派生 `pendingConfirmation`，
+- `frontend/app/_dream/components/chat/ChatPanel.tsx` — 派生 `pendingConfirmation`，
   待确认时在输入区容器内用确认面板替换 `AIInputDock`。
 
 ### 8.5 重连重放与已处理确认收敛 **[2026-08-06]**

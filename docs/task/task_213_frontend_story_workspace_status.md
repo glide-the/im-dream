@@ -202,24 +202,24 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 
 | 路径 | 动作 | 最小变更 |
 |---|---|---|
-| `frontend/src/components/story-workspace/workflow/WorkflowContextBar.tsx` | 新建 | 工作流上下文条 |
-| `frontend/src/components/story-workspace/workflow/PreflightProgressPanel.tsx` | 新建 | 预检进度面板 |
-| `frontend/src/components/story-workspace/workflow/WorkflowRunStatusPanel.tsx` | 新建 | 运行状态面板 |
-| `frontend/src/components/story-workspace/workflow/WorkflowErrorCard.tsx` | 新建 | 错误恢复卡片 |
-| `frontend/src/components/story-workspace/workflow/WorkflowRunTimeline.tsx` | 新建 | 运行时间线 |
-| `frontend/src/components/story-workspace/workflow/ProvenanceBadge.tsx` | 新建 | 来源与权限降级展示 |
-| `frontend/src/components/story-workspace/workflow/index.ts` | 新建 | 受控导出 |
-| `frontend/src/hooks/useWorkflowPreflight.ts` | 新建 | preflight 状态管理 |
-| `frontend/src/hooks/useWorkflowRun.ts` | 新建 | run 状态管理 |
-| `frontend/src/hooks/useWorkflowEvents.ts` | 新建 | SSE/轮询事件消费 |
-| `frontend/src/api/storyWorkspaceApi.ts` | 新建/扩展 | story-workspace API client |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceLayout.tsx` | 修改 | 仅集成上下文条 |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx` | 修改 | 仅集成来源追溯 |
-| `frontend/src/components/story-workspace/layout/StoryWorkspaceLayout.css` | 修改 | 仅新增本 task workflow 状态、来源与权限降级样式，不改三栏几何骨架 |
-| `frontend/src/components/story-workspace/workflow/WorkflowRunStatusPanel.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖状态、来源与权限降级渲染 |
-| `frontend/src/components/story-workspace/workflow/PreflightProgressPanel.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖八步 preflight 与失败停止 |
-| `frontend/src/components/story-workspace/workflow/WorkflowErrorCard.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖错误码、恢复入口与脱敏 |
-| `frontend/src/hooks/useWorkflowEvents.test.ts` | 条件新建 | 已有兼容 runner 时覆盖事件去重、顺序和轮询降级 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowContextBar.tsx` | 新建 | 工作流上下文条 |
+| `frontend/app/_dream/components/story-workspace/workflow/PreflightProgressPanel.tsx` | 新建 | 预检进度面板 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowRunStatusPanel.tsx` | 新建 | 运行状态面板 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowErrorCard.tsx` | 新建 | 错误恢复卡片 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowRunTimeline.tsx` | 新建 | 运行时间线 |
+| `frontend/app/_dream/components/story-workspace/workflow/ProvenanceBadge.tsx` | 新建 | 来源与权限降级展示 |
+| `frontend/app/_dream/components/story-workspace/workflow/index.ts` | 新建 | 受控导出 |
+| `frontend/app/_dream/hooks/useWorkflowPreflight.ts` | 新建 | preflight 状态管理 |
+| `frontend/app/_dream/hooks/useWorkflowRun.ts` | 新建 | run 状态管理 |
+| `frontend/app/_dream/hooks/useWorkflowEvents.ts` | 新建 | SSE/轮询事件消费 |
+| `frontend/app/_dream/api/storyWorkspaceApi.ts` | 新建/扩展 | story-workspace API client |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceLayout.tsx` | 修改 | 仅集成上下文条 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx` | 修改 | 仅集成来源追溯 |
+| `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceLayout.css` | 修改 | 仅新增本 task workflow 状态、来源与权限降级样式，不改三栏几何骨架 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowRunStatusPanel.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖状态、来源与权限降级渲染 |
+| `frontend/app/_dream/components/story-workspace/workflow/PreflightProgressPanel.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖八步 preflight 与失败停止 |
+| `frontend/app/_dream/components/story-workspace/workflow/WorkflowErrorCard.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖错误码、恢复入口与脱敏 |
+| `frontend/app/_dream/hooks/useWorkflowEvents.test.ts` | 条件新建 | 已有兼容 runner 时覆盖事件去重、顺序和轮询降级 |
 
 四个测试路径是闭集内的条件授权：仅当 §8 runner 发现命令返回非空且现有依赖可直接运行时创建；若仍无 runner，则不得生成不可执行测试文件，改以浏览器 E2E/人工证据验收。这不授权修改 `package.json`、依赖锁或测试配置。
 

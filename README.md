@@ -19,6 +19,8 @@
 <!-- [Sync] 2026-09-04: document actor-bound notion-cli Bash approval routing and its fail-closed command/network boundaries. -->
 <!-- [Sync] 2026-09-04: mirror every repository Claude Skill into the backend common catalog and verify the complete catalog in AutoDL releases. -->
 <!-- [Sync] 2026-09-04: expose the backend common catalog in Chat slash discovery beside Deck plugin Skills. -->
+<!-- [Sync] 2026-09-05: make frontend/ the canonical Next.js workspace/Web root, with one root App Router and a client-only compatibility shell; retire Vite as the source default. -->
+<!-- [Sync] 2026-09-06: document the governed MCP Apps preview, revision revalidation, isolated sandbox, and production-off boundary. -->
 
 # Ink & Memory
 
@@ -30,7 +32,7 @@
   English · <a href="README.zh.md">中文</a>
 </p>
 
-Ink & Memory is a creative workspace for writing, Chat, Dream workflows, and versioned Decks. It combines a React/Vite frontend, a FastAPI backend, an Admin-owned PostgreSQL schema, an Admin Gateway for model access and billing, and a separately released Claude Agent SDK and Claude Runtime.
+Ink & Memory is a creative workspace for writing, Chat, Dream workflows, and versioned Decks. It combines a React/Next.js frontend, a FastAPI backend, an Admin-owned PostgreSQL schema, an Admin Gateway for model access and billing, and a separately released Claude Agent SDK and Claude Runtime.
 
 This repository contains the Dream application. It does not own the shared database schema, model-provider credentials, billing, or the internal implementation of the Claude SDK/Runtime.
 
@@ -54,7 +56,7 @@ Deck marketplace distribution is intentionally deferred. See [docs/design/deck-r
 
 ```mermaid
 flowchart LR
-    Browser["Browser / Vite"] -->|"REST + SSE"| Dream["Dream / FastAPI"]
+    Browser["Browser / Next Web Shell"] -->|"REST + SSE"| Dream["Dream / FastAPI"]
     Dream -->|"public Python API"| SDK["ink-claude-dream-agent-sdk"]
     SDK -->|"stdio JSONL"| Runtime["ink-claude-code-dream"]
     Runtime -->|"Anthropic Messages"| Gateway["Admin Gateway"]
@@ -92,8 +94,8 @@ Important: `uv sync` manages the Python environment only. It installs the Python
 - Git
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- Node.js 22–24 with npm
-- pnpm 9+
+- Node.js 22–24 with npm for the native Runtime
+- pnpm 9+ for the canonical `frontend/` workspace
 - A sibling checkout of [Ink Admin Memory](https://github.com/glide-the/ink-admin-memory)
 - Docker only when using the Docker/Remote SSH deployment paths
 
@@ -248,9 +250,34 @@ Terminal C — frontend:
 
 ```bash
 cd frontend
-npm install
-npm run dev
+pnpm run dev --hostname 127.0.0.1 --port 5173
 ```
+
+The frontend package, Next config, and sole App Router are rooted in `frontend/`. All Dream application source lives in the private, non-route `frontend/app/_dream/` tree; route-level browser UI modules are in its `views/` folder. There is no second nested App Router, legacy top-level source tree, or compatibility import path. Dependency lock finalization belongs to the release gate, so do not install or relock while validating this layout.
+
+The governed MCP Apps preview keeps its sole Node owner in `frontend/packages/mcp-apps-runtime/`. Browser code connects only to the same-origin `/api/mcp-apps/{serverRef}` standard Streamable HTTP route; the root Route Handler delegates to the server-only package, which obtains a short-lived actor/workspace/Server-bound connection view from Python and never returns upstream URLs, headers, environment values, or credentials to the Browser. A separately originated sandbox serves the versioned proxy only to exact configured parent origins. Browser and Node consume the same server-owned plugin and policy revisions; missing, disabled, destroyed, incompatible, expired, or revised configuration fails closed, invalidates stale sessions, and remounts only from a fresh view while the ordinary tool result remains visible. Session cleanup sends bounded standard DELETE, retries with a fresh signal if SDK initialization already aborted its transport, and the Node adapter independently expires abandoned sessions with their short-lived views. The Host manually wires only enabled AppBridge operations, so the SDK Client cannot auto-forward a Browser-disabled `tools/call`; `window.im` members are derived from the authenticated actor-effective Host handshake, and all App messages enter the same Chat-owned send coordinator as the composer and queued prompts. `productionAppsEffective` remains `false`.
+
+The preview is deny-by-default. Configure these values in the server process environment; use deployment-owned positive safe integers and exact origins/hosts rather than copying the placeholders literally:
+
+```bash
+INK_MCP_APPS_PHASE1_PREVIEW=true
+INK_MCP_APPS_PLUGIN_MANIFEST_JSON='<versioned plugin manifest JSON>'
+INK_MCP_APPS_POLICY_JSON='<default/desired/effective policy plus per-Server allowlists>'
+INK_MCP_APPS_SANDBOX_URL='<independent https origin>/mcp-apps-sandbox'
+INK_MCP_APPS_PARENT_ORIGINS='<exact Dream Web origin>'
+INK_BACKEND_INTERNAL_URL='<Node-reachable Dream API origin>'
+INK_MCP_APPS_NODE_SERVICE_TOKEN='<shared Node-to-Python service token>'
+INK_MCP_APPS_CONNECTION_VIEW_TTL_SECONDS='<positive seconds>'
+INK_MCP_APPS_MAX_RESOURCE_BYTES='<positive byte limit>'
+INK_MCP_APPS_MAX_CATALOG_PAGES='<positive page limit>'
+INK_MCP_APPS_UPSTREAM_TIMEOUT_MS='<positive timeout>'
+INK_MCP_APPS_MAX_CONCURRENCY_PER_SCOPE='<positive concurrency limit>'
+INK_MCP_APPS_NETWORK_HOST_ALLOWLIST='<comma-separated upstream hostnames>'
+```
+
+The plugin manifest must identify `im.mcp-apps-host` `1.0.0`, the checked-in Browser/Node entries, protocol `2026-01-26`, and compatible SDK ranges for MCP `1.30.0`, Ext Apps `1.7.5`, and MCP UI `7.1.1`. Its `resourceReads`, `lowRiskToolCalls`, `uiMessage`, and `windowIm` flags are independent upper bounds. `INK_MCP_APPS_PHASE2_TOOL_CALLS`, `INK_MCP_APPS_PHASE2_UI_MESSAGE`, and `INK_MCP_APPS_WINDOW_IM` may only narrow those flags; page tool calls still require the current Python policy revision, explicit Server allowlist, and a low-risk classification. Upstream redirects are rejected rather than followed, and tool/resource catalogs must finish within the configured page limit. Optional host/poll/compatibility timeouts are `INK_MCP_APPS_HOST_READY_TIMEOUT_MS`, `INK_MCP_APPS_POLICY_POLL_MS`, and `INK_MCP_APPS_WINDOW_IM_REQUEST_TIMEOUT_MS`.
+
+The legacy Vite entry is rollback-only. Select it through `deploy/local/deploy.sh` with `LOCAL_FRONTEND_RUNTIME=vite-image` and an exact `LOCAL_VITE_ROLLBACK_IMAGE` tag or digest. Use `LOCAL_VITE_ROLLBACK_BACKEND_URL` for the container-internal proxy target, `LOCAL_VITE_ROLLBACK_API_BASE_URL` / `LOCAL_VITE_ROLLBACK_WS_BASE_URL` for browser-visible runtime config (an explicitly empty API value keeps same-origin requests), and `LOCAL_VITE_ROLLBACK_NETWORK` only for a pre-existing isolated Docker network. The selector never rebuilds Vite source.
 
 Open:
 
@@ -277,8 +304,15 @@ uv run --with pytest==9.1.1 pytest -q
 
 # Frontend
 cd frontend
-npm run lint
-npm run build
+pnpm run lint
+NODE_ENV=production pnpm run build
+
+# Focused MCP Apps Runtime, Host, and provider-free policy checks; do not install or relock
+cd ..
+frontend/node_modules/.bin/tsc --noEmit -p frontend/packages/mcp-apps-runtime/tsconfig.integration.json
+node --experimental-strip-types --experimental-transform-types --test frontend/packages/mcp-apps-runtime/src/*.test.ts
+PYTHONPATH=backend uv run --native-tls --project backend --frozen --with pytest --with pytest-asyncio python -m pytest backend/tests/mcp_apps_phase1 backend/tests/mcp_apps_phase2 backend/tests/mcp_apps_phase3 -q
+node --experimental-strip-types --experimental-transform-types --test frontend/app/_dream/components/chat/mcp-apps/*.test.ts frontend/app/_dream/components/chat/__tests__/chatUserMessageIngress.test.ts
 
 # Published SDK/Runtime registry acceptance; provider-free and no model call
 cd ..
@@ -303,7 +337,7 @@ Real-business tests must use the normal Dream/Admin/Gateway/PostgreSQL path and 
 9. **Notion Runtime binding is actor/thread-owned.** Canonical durable state belongs under server agentdata; policy-driven index refresh is independent of Chat, and every Runtime turn receives only the current actor's current-scope per-Thread projection. Dream replaces ambient `NOTION_*` values with that projection before exposing the four supported variables to Agent Bash.
 10. **Editor writes bind actor, live session, and durable state.** The runner rejects writes for a stale session, the Editor MCP child receives only the server-owned actor and effective PostgreSQL capability, every query/update is actor-scoped, and business failures refresh the single in-memory EditorState cache without publishing a success event. Notion indexes and on-demand page bodies never enter EditorState.
 11. **Claude Bash sandbox enablement is deployment-owned.** `INK_AGENT_SANDBOX_ENABLED` defaults to `true`, and invalid values also keep it enabled. Setting it to `false` preserves Workspace Mode, cwd, context, file tools, hooks, and tool confirmations, but approved Bash commands run directly as the Dream service account without bubblewrap filesystem/network isolation. User Settings and user env cannot override this capability. AutoDL projects `false` because its outer container rejects the required namespace creation; Dream currently runs as `root` there, so an approved Bash command has root authority inside that outer container.
-12. **AutoDL crawler files are a release gate.** Vite Preview must proxy `/robots.txt`, `/sitemap.xml`, and `/llms.txt` to FastAPI. Every AutoDL start, deploy, verify, and rollback checks the public MIME type, required marker, and absence of SPA HTML; HTTP 200 alone is not acceptance.
+12. **Crawler files remain a release gate.** The root Next Web Shell must keep `/robots.txt`, `/sitemap.xml`, and `/llms.txt` on the backend-owned path. Any legacy immutable Vite rollback image must satisfy the same MIME/body checks and must never become a second source entry; HTTP 200 alone is not acceptance.
 13. **Production Skills must be in the backend build context.** Every repository `.claude/skills/<id>` package has an exact `backend/builtin_skills/common/<id>` release mirror. AutoDL start, deploy, verify, and rollback initialize an isolated workspace and validate every common source, read-only workspace link, and `.claude/skills` discovery link; they also retain the title-case `/Skill-Creator` normalization check. A Runtime-consumed unknown Skill command is an explicit turn error, never an empty successful assistant message; an existing Claude session remains reusable after the package is repaired.
 
 ## Troubleshooting

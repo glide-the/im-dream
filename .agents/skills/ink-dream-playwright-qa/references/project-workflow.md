@@ -1,6 +1,6 @@
 # Ink-Dream Playwright project workflow
 
-<!-- [Sync] 2026-08-31: remove the retired /polycli Vite proxy from repository facts. -->
+<!-- [Sync] 2026-09-06: use the sole Next frontend/app owner and private app/_dream source tree. -->
 
 ## Contents
 
@@ -24,9 +24,9 @@
 - Backend entry: `backend/server.py`
 - Backend Python: `backend/.venv/bin/python`
 - Browser package: `frontend/node_modules/@playwright/test`
-- Vite proxies `/api`, `/auth`, and `/oauth` to port 8765.
+- Next rewrites `/api`, `/auth`, and `/oauth` to port 8765 for the local Web shell.
 - The repo has no root Playwright config; run commands from `frontend/` and specify focused files explicitly.
-- Existing browser specs live in `frontend/e2e/`. Many source-level contract tests also use the Playwright test runner under `frontend/src/**/__tests__/`.
+- Existing browser specs live in `frontend/e2e/`. Many source-level contract tests also use the Playwright test runner under `frontend/app/_dream/**/__tests__/`.
 - Browser specs use the full Chromium channel with `test.use({ channel: 'chromium' })`.
 - Screenshots under `output/` are gitignored.
 
@@ -136,10 +136,10 @@ backend/.venv/bin/python backend/server.py
 
 The environment must be present when Python imports `database.py` and workspace modules. Setting it after server startup is too late.
 
-Start Vite from `frontend/`:
+Start Next from `frontend/`:
 
 ```bash
-npm run dev -- --host 127.0.0.1
+corepack pnpm run dev -- --hostname 127.0.0.1 --port 5173
 ```
 
 Before starting either service:
@@ -242,7 +242,7 @@ Structure business E2E cases in the order a normal user experiences them:
 
 For Dream, if the shared Thread has at least one completed turn and
 `running=false`, do not keep polling characters/scenes/storyboards merely
-because FastAPI, Vite, Admin, PostgreSQL, or an SSE reconnect loop is alive.
+because FastAPI, Next, Admin, PostgreSQL, or an SSE reconnect loop is alive.
 Assert the currently visible/persisted stages immediately; incomplete output is
 a business failure. A fixed sleep or a longer Artifact timeout cannot convert a
 stopped Agent into a running Dream workflow.
@@ -280,8 +280,8 @@ Switch theme and language live when reloading would reopen unrelated boot UI:
 ```ts
 await page.evaluate(async () => {
   const [{ default: i18n }, theme] = await Promise.all([
-    import('/src/i18n.ts'),
-    import('/src/utils/theme.ts'),
+    import('/app/_dream/i18n.ts'),
+    import('/app/_dream/utils/theme.ts'),
   ]);
   await i18n.changeLanguage('zh');
   theme.setThemeMode('dark');
@@ -376,7 +376,7 @@ On the final verification run, require zero application diagnostics.
 Use `try/finally`, test hooks, or managed terminal session cleanup.
 
 1. Close browser/context.
-2. Stop owned Vite and FastAPI sessions.
+2. Stop owned Next and FastAPI sessions.
 3. Check ports and terminate only verified orphan children.
 4. Remove the exact temp runtime created with `mktemp -d`.
 5. Remove temporary exploratory `.mjs`/`.spec.ts` files.
@@ -393,18 +393,18 @@ python3 .agents/skills/ink-dream-playwright-qa/scripts/preflight.py
 
 # Focused source tests
 cd frontend
-npx playwright test src/hooks/__tests__/useThreadSubagents.test.ts
+corepack pnpm exec playwright test app/_dream/hooks/__tests__/useThreadSubagents.test.ts
 
 # Focused browser spec
-npx playwright test e2e/subagent-detail.spec.ts --reporter=line --workers=1
+corepack pnpm exec playwright test e2e/subagent-detail.spec.ts --reporter=line --workers=1
 
 # Existing project E2E scripts
-npm run e2e:deck
-npm run e2e:claude-plugins
+corepack pnpm run e2e:deck
+corepack pnpm run e2e:claude-plugins
 
 # Targeted lint and production type/build verification
-npx eslint path/to/source.ts path/to/spec.ts
-npm run build
+corepack pnpm exec eslint path/to/source.ts path/to/spec.ts
+corepack pnpm run build
 
 # Backend regression tests
 cd ../backend

@@ -106,7 +106,7 @@
   - Ink-Dream 不存储 Deck 运行配置密钥或完整提示词正文，只保存版本化引用和脱敏摘要（DEC-012）
   - 重试默认沿用固定版本；升级插件或配置必须创建新 run（DEC-014）
   - **后端 story-workspace 请求、响应、事件、投影与审阅值对象唯一归属 `backend/story_workspace/contracts.py`；`backend/types/` 不保留业务合同、re-export、alias 或 shim（DEC-026）**
-  - **前端局部 REST 合同唯一归属 `frontend/src/hooks/story-workspace/contracts.ts`；旧 `types.ts` 不保留兼容层，所有消费者同步更新 import（DEC-026）**
+  - **前端局部 REST 合同唯一归属 `frontend/app/_dream/hooks/story-workspace/contracts.ts`；旧 `types.ts` 不保留兼容层，所有消费者同步更新 import（DEC-026）**
   - **合同符号继续使用 `StoryWorkspace*` 前缀；迁移不得改变 REST payload、状态机、现有数据表语义或产品行为**
   - **`backend/database.py` 只读，不新增审计 Schema / DDL，不扩大至其他业务域**
 
@@ -575,8 +575,8 @@
 - 前置依赖：`SUO-201-FE-005`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/workflow/StoryWorkspaceWorkflowContextBar.tsx`
-  - `frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx`
+  - `frontend/app/_dream/components/story-workspace/workflow/StoryWorkspaceWorkflowContextBar.tsx`
+  - `frontend/app/_dream/views/story-workspace/StoryWorkspaceDashboardPage.tsx`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -619,8 +619,8 @@
 - 前置依赖：`SUO-201-FE-004`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx`
-  - `frontend/src/components/story-workspace/review/StoryWorkspaceProvenanceInfo.tsx`
+  - `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx`
+  - `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceProvenanceInfo.tsx`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -661,7 +661,7 @@
 - 前置依赖：`SUO-201-FE-006`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/state/`
+  - `frontend/app/_dream/components/story-workspace/state/`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -750,7 +750,7 @@
 - 前置依赖：`SUO-226-BE-005`, `SUO-226-FE-001`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/`
+  - `frontend/app/_dream/components/story-workspace/`
   - `backend/src/routes/story-workspace/`
   - `backend/src/services/story-workspace/`
 
@@ -797,9 +797,9 @@
 - 前置依赖：`SUO-201-FE-002`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`
-  - `frontend/src/components/TopNavBar.tsx`
-  - `frontend/src/router/story-workspace.tsx`
+  - `frontend/app/_dream/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`
+  - `frontend/app/_dream/components/TopNavBar.tsx`
+  - `frontend/app/_dream/router/story-workspace.tsx`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -846,9 +846,9 @@
 - 前置依赖：`SUO-226-FE-001`, `SUO-201-FE-004`
 
 - 关联路径：
-  - `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`
-  - `frontend/src/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`
-  - `frontend/src/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx`
+  - `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx`
+  - `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`
+  - `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx`
 
 - 分发去向：`@TaskDesignAgent`
 
@@ -936,7 +936,7 @@
 - 前置依赖：`SUO-230-BE-001`, `SUO-230-FE-002`
 
 - 关联路径：
-  - `frontend/src/components/story-workspace/review/`
+  - `frontend/app/_dream/components/story-workspace/review/`
   - `backend/src/routes/story-workspace/`
   - `backend/src/services/story-workspace/`
 
@@ -968,7 +968,7 @@
 - 优先级：P0
 - 标签：`contract-migration`,`import-safety`,`runtime-recovery`,`delta`
 - 描述：
-  按 SUO-298 / DEC-026 原子迁移 story-workspace 前后端业务合同。后端移除 `backend/types/` 业务包，将请求、响应、事件、投影与审阅值对象统一迁至 `backend/story_workspace/contracts.py`；前端将局部 REST 合同由 `frontend/src/hooks/story-workspace/types.ts` 迁至同目录 `contracts.ts`。同步更新全部消费者 import，恢复后端安全导入/启动和前端构建能力，但不改变任何业务合同或产品行为。
+  按 SUO-298 / DEC-026 原子迁移 story-workspace 前后端业务合同。后端移除 `backend/types/` 业务包，将请求、响应、事件、投影与审阅值对象统一迁至 `backend/story_workspace/contracts.py`；前端将局部 REST 合同由 `frontend/app/_dream/hooks/story-workspace/types.ts` 迁至同目录 `contracts.ts`。同步更新全部消费者 import，恢复后端安全导入/启动和前端构建能力，但不改变任何业务合同或产品行为。
 
 - 增量影响：
   - **新增独立迁移工作，不重写既有业务 Issue 或 exec 结论。**
@@ -978,7 +978,7 @@
 - 允许修改范围：
   - `backend/story_workspace/contracts.py` 及建立该领域包所需的最小 `__init__.py`
   - 现有 `backend/types/` 中仅属于 story-workspace 的业务合同及其消费者 import
-  - `frontend/src/hooks/story-workspace/contracts.ts`、旧 `types.ts` 及其消费者/barrel import
+  - `frontend/app/_dream/hooks/story-workspace/contracts.ts`、旧 `types.ts` 及其消费者/barrel import
   - 为证明迁移和运行恢复所必需的 story-workspace 定向测试；不得借机扩写业务行为
 
 - 禁止修改范围：
@@ -992,7 +992,7 @@
   - [ ] 后端 story-workspace 业务合同唯一位于 `backend/story_workspace/contracts.py`，业务符号全部保留 `StoryWorkspace*` 前缀
   - [ ] `backend/types/` 业务包已移除；仓库中不存在指向其 story-workspace 合同的 import，也不存在 re-export、alias 或 shim
   - [ ] 后端定向 import / 启动 smoke 通过，不再发生顶层 `types` 对 Python 标准库的遮蔽；现有 story-workspace 定向测试通过
-  - [ ] 前端局部 REST 合同唯一位于 `frontend/src/hooks/story-workspace/contracts.ts`；旧 `types.ts` 已移除，全部消费者与 barrel import 已更新且无兼容层
+  - [ ] 前端局部 REST 合同唯一位于 `frontend/app/_dream/hooks/story-workspace/contracts.ts`；旧 `types.ts` 已移除，全部消费者与 barrel import 已更新且无兼容层
   - [ ] 前端 build 与合同 import 定向检查通过；`task_202c` 既有页面行为和 REST payload 形状不变
   - [ ] `backend/database.py` 对本工作单保持零 diff；没有 Schema / DDL / migration 变更
   - [ ] 变更文件扫描仅命中上述允许范围，没有扩大到其他业务域

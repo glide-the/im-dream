@@ -1,13 +1,13 @@
 # Rules Reference
 
-<!-- [Sync] 2026-08-31: remove retired PolyCLI, picture scheduler, and stateless analyzer ownership from the current rules index. -->
+<!-- [Sync] 2026-09-06: make frontend/app and its private _dream tree the sole Dream Web source owner. -->
 
 ## Scope
 
 These rule notes are the human-readable companion to the workspace guardrails in `.cursor/rules/`.
 They are adapted for the current Ink & Memory app:
 
-- `frontend/`: React 19 + Vite + TypeScript writing UI, editor engine, stateful hooks, localStorage constants, auth context, and API client.
+- `frontend/`: React 19 + Next.js 16 + TypeScript Web shell; the sole App Router and all Dream application modules live under `frontend/app/`.
 - `backend/`: FastAPI Python service for auth, session storage, Claude Agent/Reflections workflows, Decks, speech recognition, prompt loading, and model configuration.
 - `docs/`: architecture, design, API, and rule notes. Keep docs aligned with source ownership when behavior changes.
 
@@ -22,7 +22,7 @@ They are adapted for the current Ink & Memory app:
 
 ## Golden Rules
 
-1. Keep source-of-truth values centralized: frontend storage keys in `frontend/src/constants/storageKeys.ts`, UI language key in `frontend/src/i18n.ts`, callable model roles in the Admin Gateway catalog, and Dream runtime settings in `backend/config.py` and environment variables.
+1. Keep source-of-truth values centralized: frontend storage keys in `frontend/app/_dream/constants/storageKeys.ts`, UI language key in `frontend/app/_dream/i18n.ts`, callable model roles in the Admin Gateway catalog, and Dream runtime settings in `backend/config.py` and environment variables.
 2. Reuse existing React components, hooks, API helpers, backend auth/database/config modules, Claude Agent Thread contracts, prompt files, and tests before adding new code paths.
 3. Preserve the frontend/backend boundary: React calls typed API helpers; backend route behavior is composed by `backend/server.py` from focused routers and services such as `auth.py`, `database.py`, `claude_agent/`, and `services/`.
 4. Do not copy Pawkeyland-specific paths, pet-domain names, Claude Agent layers, or prompt-policy locations into this project unless an active Ink & Memory feature explicitly introduces them.

@@ -5,21 +5,25 @@
 [Pos] Provider-free Chat integration seam tests; does not import or modify Chat/Runner code.
 [Sync] 2026-08-25: define the injectable managed MCP runtime snapshot contract.
 [Sync] 2026-08-25: cover bounded standard-MCP refresh before expired OAuth projection.
+[Sync] 2026-09-06: require a monotonic refresh revision and coherent authoritative single-Server record.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-import json
 from types import SimpleNamespace
 
 import pytest
 
 from claude_mcp.contracts import ClaudeMcpError, McpAuthKind, McpTransport
-from claude_mcp.crypto import McpCredentialCipher, McpCredentialContext
-from claude_mcp.crypto import McpCredentialConfigurationError
+from claude_mcp.crypto import (
+    McpCredentialCipher,
+    McpCredentialConfigurationError,
+    McpCredentialContext,
+)
 from claude_mcp.inventory import StdioProfile, StdioProfileResolver
 from claude_mcp.repository import McpCredentialRecord, McpServerRecord
 from claude_mcp.runtime_snapshot import ManagedMcpRuntimeSnapshotLoader
@@ -51,13 +55,13 @@ class _Repository:
         return self.credential if self.credential and self.credential.server_id == server_id else None
 
 
-def _credential(cipher, server_id, token, *, expires_at=None):
+def _credential(cipher, server_id, token, *, expires_at=None, revision=1):
     payload = json.dumps({"tokens": {"access_token": token, "token_type": "Bearer"}}).encode()
     envelope = cipher.encrypt(payload, McpCredentialContext("7", server_id, "oauth", 1))
     return McpCredentialRecord(
         id="credential-1", server_id=server_id, user_id="7", kind="oauth",
         ciphertext=envelope.ciphertext, iv=envelope.iv, tag=envelope.tag,
-        fingerprint=envelope.fingerprint, key_version=1, credential_revision=1,
+        fingerprint=envelope.fingerprint, key_version=1, credential_revision=revision,
         expires_at=expires_at,
     )
 
@@ -160,6 +164,7 @@ def test_expired_oauth_is_refreshed_and_reloaded_before_runtime_projection():
                     server.id,
                     "fresh-secret",
                     expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                    revision=2,
                 )
                 return SimpleNamespace(error=None)
 
@@ -210,5 +215,59 @@ def test_expired_oauth_refresh_failure_is_safe_and_never_projects_stale_token():
             await loader.load("7", None)
         assert raised.value.code.value == "CLAUDE_MCP_CREDENTIAL_REQUIRED"
         assert "stale-secret" not in str(raised.value)
+
+    asyncio.run(scenario())
+
+
+def test_single_server_expired_oauth_fails_when_record_revision_does_not_advance():
+    async def scenario():
+        cipher = McpCredentialCipher(key=b"k" * 32, key_version=1)
+        server = _server("oauth-server", "shared")
+        repository = _Repository(
+            [server],
+            _credential(
+                cipher,
+                server.id,
+                "stale-secret",
+                expires_at=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+            ),
+        )
+
+        async def get_server(actor_id, identifier, workspace_id=None):
+            assert actor_id == server.user_id
+            assert identifier == server.id
+            assert workspace_id == server.workspace_id
+            return server
+
+        repository.get_server = get_server
+
+        class _Refresher:
+            async def discover_one(self, *_args, **_kwargs):
+                repository.credential = _credential(
+                    cipher,
+                    server.id,
+                    "fresh-secret",
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                    revision=2,
+                )
+                return SimpleNamespace(error=None)
+
+        loader = ManagedMcpRuntimeSnapshotLoader(
+            repository,
+            cipher,
+            stdio_profiles=StdioProfileResolver({}),
+            max_servers=8,
+            oauth_refresher=_Refresher(),
+        )
+        with pytest.raises(ClaudeMcpError) as raised:
+            await loader.load_server_config(
+                server.user_id,
+                server,
+                expected_config_revision=1,
+                expected_credential_revision=1,
+            )
+        assert raised.value.code.value == "CLAUDE_MCP_APP_RUNTIME_REVISION_CONFLICT"
+        assert "stale-secret" not in str(raised.value)
+        assert "fresh-secret" not in str(raised.value)
 
     asyncio.run(scenario())

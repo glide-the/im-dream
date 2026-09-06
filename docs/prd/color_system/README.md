@@ -22,7 +22,7 @@
 统一当前项目的视觉语言和 PRD 表达，避免新增 PRD 沿用旧稿中的 Tailwind 原型、霓虹橙主色、高级灰营销风或外部资产假设。
 
 本文基于当前产品实际视觉系统抽象 Design Token，用于指导后续设计、前端评审和 QA 验收。  
-`frontend/src/styles/tokens.css` 是运行时 source of truth；外部参考色只能作为未来独立探索，不得覆盖现有主题。
+`frontend/app/_dream/styles/tokens.css` 是运行时 source of truth；外部参考色只能作为未来独立探索，不得覆盖现有主题。
 
 ---
 
@@ -30,10 +30,10 @@
 
 | 依据 | 结论 |
 |---|---|
-| `frontend/src/styles/tokens.css` | `:root` 定义亮色，`[data-theme='dark']` 定义暗色，`prefers-color-scheme: dark` 媒体查询提供系统自动回退。 |
-| `frontend/src/App.css` | 产品底色为暖纸张；`.notebook-lines` 使用 `color-mix` 派生格线色；滚动条颜色已全部替换为 token。 |
-| `frontend/src/App.tsx` / `components/story-workspace/layout/StoryWorkspaceSidebar.tsx` | 应用画布、导航与账户控件使用语义 CSS 变量。 |
-| `frontend/src/utils/theme.ts` | 提供 `initTheme` / `setTheme` / `toggleTheme` / `getTheme`；`main.tsx` 在 render 前调用 `initTheme()`。 |
+| `frontend/app/_dream/styles/tokens.css` | `:root` 定义亮色，`[data-theme='dark']` 定义暗色，`prefers-color-scheme: dark` 媒体查询提供系统自动回退。 |
+| `frontend/app/_dream/App.css` | 产品底色为暖纸张；`.notebook-lines` 使用 `color-mix` 派生格线色；滚动条颜色已全部替换为 token。 |
+| `frontend/app/_dream/App.tsx` / `components/story-workspace/layout/StoryWorkspaceSidebar.tsx` | 应用画布、导航与账户控件使用语义 CSS 变量。 |
+| `frontend/app/_dream/utils/theme.ts` | 提供 `initTheme` / `setTheme` / `toggleTheme` / `getTheme`；`main.tsx` 在 render 前调用 `initTheme()`。 |
 
 冲突取舍：
 

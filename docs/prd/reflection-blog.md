@@ -1,7 +1,7 @@
 # Reflection Blog Page — 固定布局播放器交互优化 PRD
 
 > 文档类型：产品功能规格  
-> 组件路径：`frontend/src/components/AnalysisView.tsx` → `ReflectionBlogPage`  
+> 组件路径：`frontend/app/_dream/components/AnalysisView.tsx` → `ReflectionBlogPage`
 > 最后更新：2026-06-26（v5.1 — preserve layout, polish interaction）
 > 颜色规范：`docs/prd/color_system/reflection-blog.md`
 

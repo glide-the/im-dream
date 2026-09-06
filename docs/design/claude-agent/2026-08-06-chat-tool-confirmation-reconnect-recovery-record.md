@@ -50,7 +50,7 @@ EventBus 重放旧 `tool-approval-request` 后，前端缺少“该 call 已处�
 ### Green
 
 - `backend/tests/test_server_claude_agent.py`：`48 passed`。
-- `frontend/src/components/chat/__tests__/ToolConfirmationRecovery.test.ts`：
+- `frontend/app/_dream/components/chat/__tests__/ToolConfirmationRecovery.test.ts`：
   `4 passed`，包含 finish 到达后流仍未 EOF 的时序测试。
 - 改动前端文件 ESLint：通过。
 - 改动前端文件定向 TypeScript：通过。

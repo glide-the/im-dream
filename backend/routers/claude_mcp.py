@@ -7,14 +7,18 @@
 [Sync] 2026-08-25: map the explicit missing OAuth callback configuration gate to HTTP 503.
 [Sync] 2026-08-25: remove public auth_kind inputs; standard MCP discovery owns authentication classification.
 [Sync] 2026-08-27: map transient PostgreSQL capability verification failures to a safe retryable 503.
+[Sync] 2026-09-06: carry current policy revision through every Node revalidation and reject non-finite view TTL configuration.
 """
 
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import hmac
+import math
+import os
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -76,6 +80,9 @@ router = APIRouter(
 _ERROR_STATUS = {
     ClaudeMcpErrorCode.SCHEMA_CAPABILITY_MISSING: 503,
     ClaudeMcpErrorCode.SCHEMA_CAPABILITY_UNAVAILABLE: 503,
+    ClaudeMcpErrorCode.APP_RUNTIME_DENIED: 403,
+    ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT: 409,
+    ClaudeMcpErrorCode.APP_RUNTIME_POLICY_INVALID: 503,
     ClaudeMcpErrorCode.SERVER_NOT_FOUND: 404,
     ClaudeMcpErrorCode.OPERATION_NOT_FOUND: 404,
     ClaudeMcpErrorCode.AUTH_OPERATION_EXPIRED: 404,
@@ -174,6 +181,41 @@ class BulkDiscoveryRequest(DiscoveryRequest):
     server_ids: list[str] = Field(min_length=1, max_length=64)
 
 
+class McpAppsConnectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    workspace_scope: str | None = None
+    expected_config_revision: int | None = Field(default=None, ge=1)
+    expected_credential_revision: int | None = Field(default=None, ge=0)
+    expected_policy_revision: int | None = Field(default=None, ge=1)
+
+
+def _require_mcp_apps_node_service(
+    presented: str | None = Header(default=None, alias="X-Ink-Mcp-Apps-Service"),
+) -> None:
+    expected = os.environ.get("INK_MCP_APPS_NODE_SERVICE_TOKEN")
+    if not expected or not presented or not hmac.compare_digest(expected, presented):
+        raise HTTPException(status_code=403, detail="MCP Apps Node service identity is unavailable.")
+
+
+def _mcp_apps_view_ttl_seconds() -> float:
+    raw = os.environ.get("INK_MCP_APPS_CONNECTION_VIEW_TTL_SECONDS")
+    if raw is None:
+        raise ClaudeMcpError(
+            ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+            "MCP Apps connection view policy is unavailable.",
+        )
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0
+    if not math.isfinite(value) or value <= 0:
+        raise ClaudeMcpError(
+            ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+            "MCP Apps connection view policy is invalid.",
+        )
+    return value
+
+
 def get_claude_mcp_service() -> ClaudeMcpService:
     if _service is None:
         raise RuntimeError("Managed MCP service has not started.")
@@ -200,6 +242,43 @@ def _error(exc: ClaudeMcpError) -> JSONResponse:
 @router.get("/capability")
 async def capability(current_user=Depends(get_current_user), service=Depends(get_claude_mcp_service)):
     return (await service.capability(_actor_id(current_user))).to_dict()
+
+
+@router.get("/app-runtime/static", dependencies=[Depends(_require_mcp_apps_node_service)])
+async def mcp_apps_static_view(
+    current_user=Depends(get_current_user),
+    service=Depends(get_claude_mcp_service),
+):
+    try:
+        _actor_id(current_user)
+        return service.mcp_apps_static_view().to_dict()
+    except ClaudeMcpError as exc:
+        return _error(exc)
+
+
+@router.post(
+    "/app-runtime/connections/{identifier}",
+    dependencies=[Depends(_require_mcp_apps_node_service)],
+)
+async def mcp_apps_connection_view(
+    identifier: str,
+    request: McpAppsConnectionRequest,
+    current_user=Depends(get_current_user),
+    service=Depends(get_claude_mcp_service),
+):
+    try:
+        value = await service.mcp_apps_connection_view(
+            _actor_id(current_user),
+            identifier,
+            request.workspace_scope,
+            expected_config_revision=request.expected_config_revision,
+            expected_credential_revision=request.expected_credential_revision,
+            ttl_seconds=_mcp_apps_view_ttl_seconds(),
+            expected_policy_revision=request.expected_policy_revision,
+        )
+        return value.to_dict()
+    except ClaudeMcpError as exc:
+        return _error(exc)
 
 
 @router.get("/servers")

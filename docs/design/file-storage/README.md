@@ -219,7 +219,7 @@ Authentication accepts any of (first match wins):
    URLs (`<img src>`, `<a href download>`) that cannot send headers
 
 The frontend helper `toFileProxyUrl(key)` in
-`frontend/src/lib/toFileProxyUrl.ts` builds this URL automatically and appends
+`frontend/app/_dream/lib/toFileProxyUrl.ts` builds this URL automatically and appends
 the current auth token as `?token=`. `withStorageAuthToken(url)` re-attaches
 the token to persisted proxy URLs stored in message parts.
 

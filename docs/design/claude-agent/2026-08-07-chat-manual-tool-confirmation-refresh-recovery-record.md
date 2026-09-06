@@ -41,7 +41,7 @@
 
 现状证据
 
-→ 历史 tool part 的确认分类入口见 `frontend/src/components/chat/toolConfirmation.ts:267-283`；runtime `ToolConfirmationStore.pending_ids()` 只返回尚未完成的 Future，见 `backend/claude_agent/tool_confirmation_store.py:184-189`。修复后的首次加载必须把二者对账后再把集合交给 `ChatPanel`，见 `frontend/src/components/chat/ChatView.tsx:665-674`。
+→ 历史 tool part 的确认分类入口见 `frontend/app/_dream/components/chat/toolConfirmation.ts:267-283`；runtime `ToolConfirmationStore.pending_ids()` 只返回尚未完成的 Future，见 `backend/claude_agent/tool_confirmation_store.py:184-189`。修复后的首次加载必须把二者对账后再把集合交给 `ChatPanel`，见 `frontend/app/_dream/components/chat/ChatView.tsx:665-674`。
 
 根因
 
@@ -83,22 +83,22 @@ flowchart LR
 
 - Generic Chat runtime snapshot：非运行态返回 `known + empty`；运行态读取失败或超过 256 个有效 ID 返回 `unknown + empty`，避免错误 tombstone；见 `backend/claude_agent/thread_factory.py:547-610`。
 - actor-owned 状态合同：先按用户校验 thread，再读取 runtime snapshot；见 `backend/routers/claude_agent.py:693-738`。
-- 前端先加载历史再采样 runtime；严格解析响应，`unknown` 不产生 settled ID，`known` 只按精确差集产生 tombstone；见 `frontend/src/components/chat/toolConfirmation.ts:33-113`。
-- 首次进入和 SSE EOF 后恢复共用上述对账；ChatPanel 挂载前完成首次对账，重连结果仍受 thread/reconnect/turn checkpoint 保护；见 `frontend/src/components/chat/ChatView.tsx:657-713`、`frontend/src/components/chat/ChatView.tsx:1149-1162`、`frontend/src/components/chat/ChatPanel.tsx:367-386`、`frontend/src/components/chat/ChatPanel.tsx:438-463`。
-- runtime 精确拥有的 ID 即使恢复消息缺少 `approvalRequested` 仍显示；新 SSE ID 不在历史 tombstone 中，不被误抑制；见 `frontend/src/components/chat/toolConfirmation.ts:267-283`。
+- 前端先加载历史再采样 runtime；严格解析响应，`unknown` 不产生 settled ID，`known` 只按精确差集产生 tombstone；见 `frontend/app/_dream/components/chat/toolConfirmation.ts:33-113`。
+- 首次进入和 SSE EOF 后恢复共用上述对账；ChatPanel 挂载前完成首次对账，重连结果仍受 thread/reconnect/turn checkpoint 保护；见 `frontend/app/_dream/components/chat/ChatView.tsx:657-713`、`frontend/app/_dream/components/chat/ChatView.tsx:1149-1162`、`frontend/app/_dream/components/chat/ChatPanel.tsx:367-386`、`frontend/app/_dream/components/chat/ChatPanel.tsx:438-463`。
+- runtime 精确拥有的 ID 即使恢复消息缺少 `approvalRequested` 仍显示；新 SSE ID 不在历史 tombstone 中，不被误抑制；见 `frontend/app/_dream/components/chat/toolConfirmation.ts:267-283`。
 
 ### 3.3 测试输出
 
 | 验证 | 结果 |
 |---|---|
 | `backend/.venv/bin/pytest backend/tests/test_claude_agent_thread_factory.py backend/tests/test_server_claude_agent.py -q` | `108 passed, 16 warnings in 1.54s`；warnings 为既有 FastAPI `on_event` 弃用提示 |
-| `npx playwright test src/components/chat/__tests__/ToolConfirmationRecovery.test.ts --reporter=line --workers=1` | `8 passed (871ms)` |
+| `npx playwright test app/_dream/components/chat/__tests__/ToolConfirmationRecovery.test.ts --reporter=line --workers=1` | `8 passed (871ms)` |
 | `npx tsc -b` | 通过 |
 | `npm run build` | 通过；仅有既有 dynamic-import/chunk-size warnings |
 | scoped ESLint（全部 4 个改动前端文件） | 通过 |
 | `git diff --check` | 通过 |
 
-后端 snapshot、上限与所有权测试分别见 `backend/tests/test_claude_agent_thread_factory.py:721-791` 和 `backend/tests/test_server_claude_agent.py:647-751`；前端 manual、真实 pending、unknown、加载顺序、reconnect 与 typed 409 测试见 `frontend/src/components/chat/__tests__/ToolConfirmationRecovery.test.ts:29-205`。
+后端 snapshot、上限与所有权测试分别见 `backend/tests/test_claude_agent_thread_factory.py:721-791` 和 `backend/tests/test_server_claude_agent.py:647-751`；前端 manual、真实 pending、unknown、加载顺序、reconnect 与 typed 409 测试见 `frontend/app/_dream/components/chat/__tests__/ToolConfirmationRecovery.test.ts:29-205`。
 
 ### 3.4 独立评审
 

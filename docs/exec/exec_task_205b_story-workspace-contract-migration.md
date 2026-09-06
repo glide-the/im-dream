@@ -28,7 +28,7 @@
 - 明确不负责: review workflow、浏览器/Network 补证、Schema/DDL、数据库、UI 页面/组件、依赖及 Story Workspace 之外业务域
 - 关键约束:
   - 后端唯一 owner 为 `backend/story_workspace/contracts.py`
-  - 前端唯一 owner 为 `frontend/src/hooks/story-workspace/contracts.ts`
+  - 前端唯一 owner 为 `frontend/app/_dream/hooks/story-workspace/contracts.ts`
   - 后端公开合同使用 `StoryWorkspace*` / `STORY_WORKSPACE_*`
   - 不保留旧路径 shim、alias、re-export、复制件或 `sys.path` workaround
   - `backend/database.py` 严格只读，前后内容 hash 必须一致
@@ -67,13 +67,13 @@
 | `backend/claude_agent/service.py` | modified（前序 task） | `2ec764d62c4614703687c05f90b8400945652020` |
 | `backend/tests/test_story_workspace_agent_integration.py` | untracked（前序 task） | `4de9357500c99855ce8105f39e5edc41f2d7dd1b` |
 | `backend/tests/test_story_workspace_contracts.py` | MISSING | `MISSING` |
-| `frontend/src/hooks/story-workspace/contracts.ts` | MISSING | `MISSING` |
-| `frontend/src/hooks/story-workspace/types.ts` | untracked（前序 task） | `0d47c3590c694d510b03d9bbfe1a2e27d3f4810d` |
-| `frontend/src/hooks/story-workspace/index.ts` | untracked（前序 task） | `6b889a48533e372b00b875c27c3a1fae7a40626c` |
-| `frontend/src/hooks/story-workspace/useStoryWorkspaceList.ts` | untracked（前序 task） | `ebb1be786ca24af95838c8be0bad5e2641b56191` |
-| `frontend/src/hooks/story-workspace/useStories.ts` | untracked（前序 task） | `552af7f6b89a3fcc7ccc48e731679238384a1ba5` |
-| `frontend/src/hooks/story-workspace/useCharacters.ts` | untracked（前序 task） | `f6618a18f3022821c137b053d975eb0671cca74d` |
-| `frontend/src/hooks/story-workspace/useScenes.ts` | untracked（前序 task） | `b362974621794191c34e356f8256773b90aef573` |
+| `frontend/app/_dream/hooks/story-workspace/contracts.ts` | MISSING | `MISSING` |
+| `frontend/app/_dream/hooks/story-workspace/types.ts` | untracked（前序 task） | `0d47c3590c694d510b03d9bbfe1a2e27d3f4810d` |
+| `frontend/app/_dream/hooks/story-workspace/index.ts` | untracked（前序 task） | `6b889a48533e372b00b875c27c3a1fae7a40626c` |
+| `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceList.ts` | untracked（前序 task） | `ebb1be786ca24af95838c8be0bad5e2641b56191` |
+| `frontend/app/_dream/hooks/story-workspace/useStories.ts` | untracked（前序 task） | `552af7f6b89a3fcc7ccc48e731679238384a1ba5` |
+| `frontend/app/_dream/hooks/story-workspace/useCharacters.ts` | untracked（前序 task） | `f6618a18f3022821c137b053d975eb0671cca74d` |
+| `frontend/app/_dream/hooks/story-workspace/useScenes.ts` | untracked（前序 task） | `b362974621794191c34e356f8256773b90aef573` |
 | `docs/exec/exec_task_205b_story-workspace-contract-migration.md` | MISSING | `MISSING` |
 | `backend/database.py` | modified（闭集外既有差异，只读） | `570d54e68c9a438754f711dc15ccdd1a285a4062` |
 
@@ -97,13 +97,13 @@
 | `backend/claude_agent/service.py` | update | 仅将 Story Workspace payload 类型来源和注解改为 canonical 名称；保留前序 task_204 全部逻辑 | `1d716073d7f714c3b4d6db02106c91a56763d3a3` |
 | `backend/tests/test_story_workspace_agent_integration.py` | update | 仅切换 canonical payload import/名称；既有测试语义不变 | `b9819def995b94e69e42bc3c10304e94382b91b7` |
 | `backend/tests/test_story_workspace_contracts.py` | create | 覆盖 canonical owner、`__all__` 前缀、枚举/默认值、Pydantic 校验、stdlib import 与旧目录消失；最终移除不必要的 `sys.path` 注入 | `045faec5f4d4d0c2f3f555b8446b08633c2555d5` |
-| `frontend/src/hooks/story-workspace/contracts.ts` | create | 原 `types.ts` 内容原样迁入；字段、可选性、联合类型和 REST 形状不变 | `0d47c3590c694d510b03d9bbfe1a2e27d3f4810d` |
-| `frontend/src/hooks/story-workspace/types.ts` | delete | 删除旧 owner，不保留 shim | MISSING |
-| `frontend/src/hooks/story-workspace/index.ts` | update | barrel 从 `./types` 指向 `./contracts` | `2bc8afb3240f8e3c9396727c314e161ca8414edb` |
-| `frontend/src/hooks/story-workspace/useStoryWorkspaceList.ts` | update | type import 从 `./types` 指向 `./contracts` | `83dab41a453319bf4bcb85a919fd8272d1be97a4` |
-| `frontend/src/hooks/story-workspace/useStories.ts` | update | type import 从 `./types` 指向 `./contracts` | `1aa12b61dc98f11927d3ac155f136c8f70a94ce3` |
-| `frontend/src/hooks/story-workspace/useCharacters.ts` | update | type import 从 `./types` 指向 `./contracts` | `318a258376e195968f1017da3c6beb8a08777877` |
-| `frontend/src/hooks/story-workspace/useScenes.ts` | update | type import 从 `./types` 指向 `./contracts` | `8c351cce7da34a1051727f4d0ab0e151adfedf2a` |
+| `frontend/app/_dream/hooks/story-workspace/contracts.ts` | create | 原 `types.ts` 内容原样迁入；字段、可选性、联合类型和 REST 形状不变 | `0d47c3590c694d510b03d9bbfe1a2e27d3f4810d` |
+| `frontend/app/_dream/hooks/story-workspace/types.ts` | delete | 删除旧 owner，不保留 shim | MISSING |
+| `frontend/app/_dream/hooks/story-workspace/index.ts` | update | barrel 从 `./types` 指向 `./contracts` | `2bc8afb3240f8e3c9396727c314e161ca8414edb` |
+| `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceList.ts` | update | type import 从 `./types` 指向 `./contracts` | `83dab41a453319bf4bcb85a919fd8272d1be97a4` |
+| `frontend/app/_dream/hooks/story-workspace/useStories.ts` | update | type import 从 `./types` 指向 `./contracts` | `1aa12b61dc98f11927d3ac155f136c8f70a94ce3` |
+| `frontend/app/_dream/hooks/story-workspace/useCharacters.ts` | update | type import 从 `./types` 指向 `./contracts` | `318a258376e195968f1017da3c6beb8a08777877` |
+| `frontend/app/_dream/hooks/story-workspace/useScenes.ts` | update | type import 从 `./types` 指向 `./contracts` | `8c351cce7da34a1051727f4d0ab0e151adfedf2a` |
 | `docs/exec/exec_task_205b_story-workspace-contract-migration.md` | create | 唯一正式执行报告 | 本文件 |
 
 前端 rename 的关键证据：旧 `types.ts` 执行前 hash 与新 `contracts.ts` 执行后 hash 都是 `0d47c3590c694d510b03d9bbfe1a2e27d3f4810d`，证明合同正文未发生变化。
@@ -160,12 +160,12 @@ cd frontend && npm run build
 
 ```text
 cd frontend && npx eslint \
-  src/hooks/story-workspace/contracts.ts \
-  src/hooks/story-workspace/index.ts \
-  src/hooks/story-workspace/useStoryWorkspaceList.ts \
-  src/hooks/story-workspace/useStories.ts \
-  src/hooks/story-workspace/useCharacters.ts \
-  src/hooks/story-workspace/useScenes.ts
+  app/_dream/hooks/story-workspace/contracts.ts \
+  app/_dream/hooks/story-workspace/index.ts \
+  app/_dream/hooks/story-workspace/useStoryWorkspaceList.ts \
+  app/_dream/hooks/story-workspace/useStories.ts \
+  app/_dream/hooks/story-workspace/useCharacters.ts \
+  app/_dream/hooks/story-workspace/useScenes.ts
 ```
 
 结果: PASS（exit 0），零 ESLint error。
@@ -175,7 +175,7 @@ cd frontend && npx eslint \
 结果全部 PASS：
 
 - `test ! -e backend/types`: PASS
-- `test ! -e frontend/src/hooks/story-workspace/types.ts`: PASS
+- `test ! -e frontend/app/_dream/hooks/story-workspace/types.ts`: PASS
 - 旧路径/import 扫描: 0 matches
 - `AgentStoryPayload|AgentCharacterPayload|AgentScenePayload|WorkspacePatch|StoryPatch|CharacterPatch|ScenePatch` 旧公共符号扫描: 0 matches
 - router、Agent service、Claude consumer 与两个定向测试均直接 import `story_workspace.contracts`

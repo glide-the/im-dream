@@ -24,7 +24,7 @@ export function injectQuery(url) { return url; }
 const HARNESS_HTML = `<!doctype html>
 <html lang="zh-CN"><head>
 <script type="module">import { injectIntoGlobalHook } from '/@react-refresh'; injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;</script>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/src/index.css"></head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app/_dream/index.css"></head>
 <body><div id="root"></div><script type="module" src="/e2e/fixtures/modelSettingsHarness.tsx"></script></body></html>`;
 
 test.use({ channel: 'chromium' });

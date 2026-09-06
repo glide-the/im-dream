@@ -62,9 +62,9 @@ sequenceDiagram
 
 ## 6. 对应实现
 
-- `frontend/src/App.tsx`
-- `frontend/src/components/DeckManager.tsx`
-- `frontend/src/components/DeckEditorModal.tsx`
-- `frontend/src/pages/story-workspace/StoryWorkspaceDreamLaunch.tsx`
+- `frontend/app/_dream/App.tsx`
+- `frontend/app/_dream/components/DeckManager.tsx`
+- `frontend/app/_dream/components/DeckEditorModal.tsx`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamLaunch.tsx`
 - `frontend/e2e/chat-first-deck-defaults.spec.ts`
 - `frontend/e2e/chat-dream-agent-refactor.spec.ts`

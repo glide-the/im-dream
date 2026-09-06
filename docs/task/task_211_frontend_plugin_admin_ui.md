@@ -170,24 +170,24 @@ DECK-010: 前端管理端插件目录与安装状态 UI
 
 | 路径 | 动作 | 最小变更 |
 |---|---|---|
-| `frontend/src/components/plugin-admin/PluginAdminPage.tsx` | 新建 | 管理端页面根组件 |
-| `frontend/src/components/plugin-admin/PluginAdminList.tsx` | 新建 | 插件列表 |
-| `frontend/src/components/plugin-admin/PluginAdminListItem.tsx` | 新建 | 列表项 |
-| `frontend/src/components/plugin-admin/PluginAdminDetail.tsx` | 新建 | 详情抽屉/弹窗 |
-| `frontend/src/components/plugin-admin/PluginStatusBadge.tsx` | 新建 | 三维状态标签 |
-| `frontend/src/components/plugin-admin/PluginCapabilityDiff.tsx` | 新建 | 能力差异展示 |
-| `frontend/src/components/plugin-admin/PluginErrorCard.tsx` | 新建 | 错误摘要卡片 |
-| `frontend/src/components/plugin-admin/PluginOperationProgress.tsx` | 新建 | 操作进度 |
-| `frontend/src/components/plugin-admin/index.ts` | 新建 | 受控导出 |
-| `frontend/src/hooks/usePluginInstallations.ts` | 新建 | 安装列表查询 |
-| `frontend/src/hooks/usePluginInstallationDetail.ts` | 新建 | 详情查询 |
-| `frontend/src/hooks/usePluginOperation.ts` | 新建 | 安装/升级/卸载操作状态 |
-| `frontend/src/hooks/usePluginRuntimeReadiness.ts` | 新建 | runtime readiness 查询 |
-| `frontend/src/api/deckPluginAdminApi.ts` | 新建 | 管理端 API 客户端 |
-| `frontend/src/App.tsx` | 修改 | 仅在既有 Settings 视图中增量接入 Plugin Admin 入口/页面 |
-| `frontend/src/components/plugin-admin/PluginAdminPage.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖列表、权限与操作状态 |
-| `frontend/src/components/plugin-admin/PluginAdminDetail.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖详情、capability diff 与错误摘要 |
-| `frontend/src/hooks/usePluginOperation.test.ts` | 条件新建 | 已有兼容 runner 时覆盖 mutation、进度、失败与恢复 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminPage.tsx` | 新建 | 管理端页面根组件 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminList.tsx` | 新建 | 插件列表 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminListItem.tsx` | 新建 | 列表项 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminDetail.tsx` | 新建 | 详情抽屉/弹窗 |
+| `frontend/app/_dream/components/plugin-admin/PluginStatusBadge.tsx` | 新建 | 三维状态标签 |
+| `frontend/app/_dream/components/plugin-admin/PluginCapabilityDiff.tsx` | 新建 | 能力差异展示 |
+| `frontend/app/_dream/components/plugin-admin/PluginErrorCard.tsx` | 新建 | 错误摘要卡片 |
+| `frontend/app/_dream/components/plugin-admin/PluginOperationProgress.tsx` | 新建 | 操作进度 |
+| `frontend/app/_dream/components/plugin-admin/index.ts` | 新建 | 受控导出 |
+| `frontend/app/_dream/hooks/usePluginInstallations.ts` | 新建 | 安装列表查询 |
+| `frontend/app/_dream/hooks/usePluginInstallationDetail.ts` | 新建 | 详情查询 |
+| `frontend/app/_dream/hooks/usePluginOperation.ts` | 新建 | 安装/升级/卸载操作状态 |
+| `frontend/app/_dream/hooks/usePluginRuntimeReadiness.ts` | 新建 | runtime readiness 查询 |
+| `frontend/app/_dream/api/deckPluginAdminApi.ts` | 新建 | 管理端 API 客户端 |
+| `frontend/app/_dream/App.tsx` | 修改 | 仅在既有 Settings 视图中增量接入 Plugin Admin 入口/页面 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminPage.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖列表、权限与操作状态 |
+| `frontend/app/_dream/components/plugin-admin/PluginAdminDetail.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖详情、capability diff 与错误摘要 |
+| `frontend/app/_dream/hooks/usePluginOperation.test.ts` | 条件新建 | 已有兼容 runner 时覆盖 mutation、进度、失败与恢复 |
 
 三个测试路径是闭集内的条件授权：仅当 §8 runner 发现命令返回非空且现有依赖可直接运行时创建；若仍无 runner，则不得生成不可执行测试文件，改以浏览器 E2E/人工证据验收。这不授权修改 `package.json`、依赖锁或测试配置。
 
@@ -317,7 +317,7 @@ POST /api/deck-plugins/{deck_plugin_id}/reconcile
 
 - `docs/exec/` 下除 `docs/exec/exec_task_211_frontend_plugin_admin_ui.md` 之外的全部路径。
 - `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`backend/`、依赖锁、测试/构建配置、生成物及 §11.1 未列出的任何实现或测试文件。
-- §5 所列既有文件中与本 task 无关的行为；尤其禁止借 `frontend/src/App.tsx` 重构其他视图、路由或 Settings 功能。
+- §5 所列既有文件中与本 task 无关的行为；尤其禁止借 `frontend/app/_dream/App.tsx` 重构其他视图、路由或 Settings 功能。
 - Paperclip Plugin worker 模型或状态枚举；前端自行推进后端状态机、计算兼容性/权限或伪造 mutation 成功。
 - 借机重构、全文件格式化、清理无关代码或覆盖共享工作树既有差异。
 
@@ -346,12 +346,12 @@ POST /api/deck-plugins/{deck_plugin_id}/reconcile
 | DECK-018 runtime 分发 | `frozen` 设计；当前仅单节点 persistent rollout 限域通过 | 不把多节点/临时 runtime 标为 ready；run-ready 只信任 session load receipt |
 | DECK-019 安全撤销 | `frozen`：DISABLE 不终止；REVOKE 60 秒默认/300 秒上限后硬停；EMERGENCY 零 grace | 管理 UI 展示等级、状态和审计入口；production Gate 仍等待真实证据与独立审批 |
 | DECK-020 Voice chat → run UX | `frozen`；本 task 不涉及 Voice chat 入口 | 管理端只处理插件生命周期，不覆盖批准的 Voice → run 文案 |
-| 管理端路由位置 | Settings 既有视图内的增量入口 | 精确修改路径固定为 `frontend/src/App.tsx`；不得新增路由框架 |
+| 管理端路由位置 | Settings 既有视图内的增量入口 | 精确修改路径固定为 `frontend/app/_dream/App.tsx`；不得新增路由框架 |
 
 ---
 
 ## 14. 回滚边界
 
-- 只回退 §11.1 中本 task 新增的 Plugin Admin 组件、hooks、client、测试和 `frontend/src/App.tsx` 的最小入口/挂载区段。
+- 只回退 §11.1 中本 task 新增的 Plugin Admin 组件、hooks、client、测试和 `frontend/app/_dream/App.tsx` 的最小入口/挂载区段。
 - 不回滚后端 installation/release 状态，不删除审计记录，不修改其他 Settings 功能；后端不可用时 UI 回到只读/不可用安全状态，不伪造成功。
 - 回滚前后均执行 §8 的静态验证与关键人工场景，并在 `docs/exec/exec_task_211_frontend_plugin_admin_ui.md` 记录触发条件、变更路径、验证结果与剩余影响；正式报告本身不得在代码回滚中删除。

@@ -43,7 +43,7 @@ Story Workspace Dream 页面（`StoryWorkspaceDreamPage`）与审阅 Gate（`Sto
 
 ### Step 1: 实现 `StoryWorkspaceDreamPage` 页面
 
-- 位置：`frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`
+- 位置：`frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx`
 - 组合既有 Dashboard 概览能力（统计卡片、待审阅快捷入口、已确认列表）
 - 在 Dashboard 内容基础上追加：
   - `StoryWorkspaceWorkflowContextBar`（来自 `task_213_frontend_story_workspace_status.md` 或与 `SUO-226-FE-001` 对齐的等效实现）
@@ -67,7 +67,7 @@ Story Workspace Dream 页面（`StoryWorkspaceDreamPage`）与审阅 Gate（`Sto
 
 ### Step 2: 实现 `StoryWorkspaceReviewGate` 组件
 
-- 位置：`frontend/src/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`
+- 位置：`frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`
 - 四步进度指示：
   1. **Claude Agent 产出** — Agent 按 Deck 工作流生成内容
   2. **页面渲染** — 数据完整持久化后在表格展示
@@ -135,19 +135,19 @@ interface StoryWorkspaceState {
 ## 5. 涉及文件路径
 
 **新增文件**：
-- `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`
-- `frontend/src/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx`
+- `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`
 
 **修改文件**（增量适配）：
-- `frontend/src/hooks/story-workspace/useStoryWorkspaceStore.ts` — 追加 gate 状态
-- `frontend/src/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx` — 追加版本校验、gate 联动
-- `frontend/src/components/story-workspace/review/StoryWorkspaceReviewActions.tsx` — 追加确认版本参数
+- `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceStore.ts` — 追加 gate 状态
+- `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx` — 追加版本校验、gate 联动
+- `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewActions.tsx` — 追加确认版本参数
 
 **复用文件**（只读）：
-- `frontend/src/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx` — 基线审阅面板（`task_202d`）
-- `frontend/src/components/story-workspace/table/StoryWorkspaceStoryTable.tsx` — 基线表格（`task_202c`）
-- `frontend/src/components/story-workspace/workflow/StoryWorkspaceWorkflowContextBar.tsx` — 工作流上下文条（`task_213_frontend_story_workspace_status.md`）
-- `frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx` — Dashboard 基线（`task_202e`）
+- `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx` — 基线审阅面板（`task_202d`）
+- `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceStoryTable.tsx` — 基线表格（`task_202c`）
+- `frontend/app/_dream/components/story-workspace/workflow/StoryWorkspaceWorkflowContextBar.tsx` — 工作流上下文条（`task_213_frontend_story_workspace_status.md`）
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceDashboardPage.tsx` — Dashboard 基线（`task_202e`）
 
 ---
 
@@ -275,11 +275,11 @@ interface StoryWorkspaceState {
 ## 执行边界
 
 ### 允许修改范围
-- 允许创建 `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`
-- 允许创建 `frontend/src/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`
-- 允许修改 `frontend/src/hooks/story-workspace/useStoryWorkspaceStore.ts`（追加 gate 状态）
-- 允许修改 `frontend/src/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx`（追加 gate 联动、版本校验）
-- 允许修改 `frontend/src/components/story-workspace/review/StoryWorkspaceReviewActions.tsx`（追加确认版本参数）
+- 允许创建 `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx`
+- 允许创建 `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`
+- 允许修改 `frontend/app/_dream/hooks/story-workspace/useStoryWorkspaceStore.ts`（追加 gate 状态）
+- 允许修改 `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx`（追加 gate 联动、版本校验）
+- 允许修改 `frontend/app/_dream/components/story-workspace/review/StoryWorkspaceReviewActions.tsx`（追加确认版本参数）
 
 ### 禁止修改范围
 - **禁止修改** `docs/design/` 目录下任何文件

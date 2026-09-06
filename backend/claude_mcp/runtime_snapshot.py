@@ -5,13 +5,16 @@
 [Pos] Injectable Chat integration seam; performs no file write, logging, Agent import, CLI, or MCP network call.
 [Sync] 2026-08-25: add actor/workspace managed snapshot loader for later Chat service injection.
 [Sync] 2026-08-25: refresh expired OAuth through bounded standard-MCP discovery before projecting a Runtime bearer header.
+[Sync] 2026-09-06: re-read identity/enabled/revisions before any single-Server credential access.
+[Sync] 2026-09-06: return only a post-refresh record/credential-coherent single-Server projection.
 """
 
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from .contracts import ClaudeMcpError, ClaudeMcpErrorCode, McpTransport
@@ -33,6 +36,30 @@ class SecretMcpConfigDict(dict[str, Any]):
 class ManagedMcpRuntimeSnapshot(dict[str, SecretMcpConfigDict]):
     def __repr__(self) -> str:
         return f"ManagedMcpRuntimeSnapshot(server_count={len(self)}, values=<redacted>)"
+
+
+@dataclass(frozen=True, repr=False)
+class ManagedMcpServerConfigProjection:
+    """One coherent single-Server config plus its authoritative revisions."""
+
+    config: SecretMcpConfigDict
+    config_revision: int
+    credential_revision: int
+
+    def __repr__(self) -> str:
+        return (
+            "ManagedMcpServerConfigProjection("
+            f"config_revision={self.config_revision}, "
+            f"credential_revision={self.credential_revision}, config=<redacted>)"
+        )
+
+
+@dataclass(frozen=True)
+class _McpConfigMaterial:
+    config: SecretMcpConfigDict
+    credential_id: str | None
+    credential_revision: int
+    refreshed: bool
 
 
 def _string_mapping(value: Any) -> dict[str, str]:
@@ -101,7 +128,87 @@ class ManagedMcpRuntimeSnapshotLoader:
             snapshot[server.server_key] = config
         return snapshot
 
+    async def load_server_config(
+        self,
+        actor_id: str,
+        server: Any,
+        *,
+        expected_config_revision: int | None = None,
+        expected_credential_revision: int | None = None,
+    ) -> ManagedMcpServerConfigProjection:
+        """Project one already-scoped Server after identity/enabled checks.
+
+        The caller must obtain the row through the actor-scoped repository. These
+        checks intentionally happen before `_server_config` can read/decrypt a
+        credential and leave the existing multi-Server `load()` path unchanged.
+        """
+        if str(server.user_id) != str(actor_id) or not server.enabled:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+                "MCP Apps connection view is unavailable.",
+            )
+        current = await self.repository.get_server(
+            actor_id,
+            server.id,
+            server.workspace_id,
+        )
+        if not self._same_enabled_server(actor_id, server, current):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+                "MCP Apps connection view is unavailable.",
+            )
+        if (
+            expected_config_revision is not None
+            and current.config_revision != expected_config_revision
+        ) or (
+            expected_credential_revision is not None
+            and current.credential_revision != expected_credential_revision
+        ):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT,
+                "MCP Apps session revision is no longer current.",
+            )
+        material = await self._server_config_material(actor_id, current)
+        authoritative = await self.repository.get_server(
+            actor_id,
+            current.id,
+            current.workspace_id,
+        )
+        if not self._same_enabled_server(actor_id, current, authoritative):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+                "MCP Apps connection view is unavailable.",
+            )
+        if (
+            authoritative.config_revision != current.config_revision
+            or authoritative.credential_revision != material.credential_revision
+            or authoritative.credential_id != material.credential_id
+            or authoritative.credential_configured
+            != (material.credential_id is not None)
+            or (
+                material.refreshed
+                and authoritative.credential_revision
+                <= current.credential_revision
+            )
+        ):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT,
+                "MCP Apps session revision is no longer current.",
+            )
+        return ManagedMcpServerConfigProjection(
+            config=material.config,
+            config_revision=authoritative.config_revision,
+            credential_revision=authoritative.credential_revision,
+        )
+
     async def _server_config(self, actor_id: str, server: Any) -> SecretMcpConfigDict:
+        return (await self._server_config_material(actor_id, server)).config
+
+    async def _server_config_material(
+        self,
+        actor_id: str,
+        server: Any,
+    ) -> _McpConfigMaterial:
         if server.transport is McpTransport.STREAMABLE_HTTP:
             config = SecretMcpConfigDict(type="http", url=server.remote_url)
         elif server.transport is McpTransport.SSE:
@@ -135,7 +242,13 @@ class ManagedMcpRuntimeSnapshotLoader:
 
         credential = await self.repository.get_credential(actor_id, server.id)
         if credential is None:
-            return config
+            return _McpConfigMaterial(config, None, 0, False)
+        if (
+            str(credential.server_id) != str(server.id)
+            or str(credential.user_id) != str(actor_id)
+        ):
+            raise McpCredentialIntegrityError()
+        refreshed = False
         if credential.kind == "oauth" and server.auth_kind.value != "oauth":
             raise McpCredentialIntegrityError()
         if credential.kind == "oauth" and self._is_expired(credential.expires_at):
@@ -144,6 +257,7 @@ class ManagedMcpRuntimeSnapshotLoader:
                     ClaudeMcpErrorCode.CREDENTIAL_REQUIRED,
                     "Managed Claude MCP authentication must be refreshed.",
                 )
+            previous_credential_revision = credential.credential_revision
             result = await self.oauth_refresher.discover_one(
                 actor_id,
                 server.id,
@@ -156,13 +270,19 @@ class ManagedMcpRuntimeSnapshotLoader:
                     "Managed Claude MCP authentication must be refreshed.",
                 )
             credential = await self.repository.get_credential(actor_id, server.id)
-            if credential is None or credential.kind != "oauth" or self._is_expired(
-                credential.expires_at
+            if (
+                credential is None
+                or str(credential.server_id) != str(server.id)
+                or str(credential.user_id) != str(actor_id)
+                or credential.kind != "oauth"
+                or credential.credential_revision <= previous_credential_revision
+                or self._is_expired(credential.expires_at)
             ):
                 raise ClaudeMcpError(
                     ClaudeMcpErrorCode.CREDENTIAL_REQUIRED,
                     "Managed Claude MCP authentication must be refreshed.",
                 )
+            refreshed = True
         document = self._credential_document(actor_id, server.id, credential)
         if credential.kind == "oauth":
             tokens = document.get("tokens")
@@ -182,7 +302,24 @@ class ManagedMcpRuntimeSnapshotLoader:
             }
         else:
             raise McpCredentialIntegrityError()
-        return config
+        return _McpConfigMaterial(
+            config,
+            str(credential.id),
+            credential.credential_revision,
+            refreshed,
+        )
+
+    @staticmethod
+    def _same_enabled_server(actor_id: str, expected: Any, current: Any) -> bool:
+        return bool(
+            current is not None
+            and str(current.id) == str(expected.id)
+            and str(current.user_id) == str(actor_id)
+            and current.server_key == expected.server_key
+            and current.scope == expected.scope
+            and current.workspace_id == expected.workspace_id
+            and current.enabled
+        )
 
     @staticmethod
     def _is_expired(expires_at: str | None) -> bool:
@@ -226,5 +363,6 @@ class ManagedMcpRuntimeSnapshotLoader:
 __all__ = [
     "ManagedMcpRuntimeSnapshot",
     "ManagedMcpRuntimeSnapshotLoader",
+    "ManagedMcpServerConfigProjection",
     "SecretMcpConfigDict",
 ]

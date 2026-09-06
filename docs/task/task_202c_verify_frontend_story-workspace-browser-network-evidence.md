@@ -96,7 +96,7 @@
 ### 4.2 建立只读基线
 
 1. 将 `git status --short` 原始结果保存到 run scratch，明确区分执行前已有 dirty diff 与本次动作。
-2. 对 `backend/` 与 `frontend/src/` 中 Git 已跟踪及未忽略的现有文件生成排序后的路径清单和 SHA-256 manifest，保存到 run scratch。
+2. 对 `backend/` 与 `frontend/app/_dream/` 中 Git 已跟踪及未忽略的现有文件生成排序后的路径清单和 SHA-256 manifest，保存到 run scratch。
 3. 记录运行时启动方式、commit / workspace 标识、viewport 宽高、device pixel ratio、浏览器版本和证据采集时间。
 4. 不得暂存、还原、格式化、清理或覆盖工作树中任何既有修改；尤其不得接触 `backend/database.py` 的既有 diff。
 
@@ -148,7 +148,7 @@
 
 ### 4.7 零生产代码 diff 与报告闭合
 
-1. 重新生成 `backend/` 与 `frontend/src/` 的排序路径清单和 SHA-256 manifest，与 §4.2 基线逐项比较；路径集合与内容 hash 必须完全一致。
+1. 重新生成 `backend/` 与 `frontend/app/_dream/` 的排序路径清单和 SHA-256 manifest，与 §4.2 基线逐项比较；路径集合与内容 hash 必须完全一致。
 2. 再次记录 `git status --short`，与基线对比。除未来执行报告 `docs/exec/exec_task_202c_verify_story-workspace-browser-network-evidence.md` 外，不得出现本次新增或改变的仓库路径。
 3. 把浏览器、交互、Network、hash/diff 和未验证项逐项映射到 `AC-202C-V-01`～`AC-202C-V-06`。
 4. 证据文件作为 execute Issue 附件上传；仓库内不得新增截图、HAR、cache、日志或临时报告。

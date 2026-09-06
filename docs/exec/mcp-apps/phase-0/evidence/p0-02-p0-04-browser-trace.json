@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "serverRef": "phase0-standard-apps-fixture",
+  "browserEndpointPaths": [
+    "/phase0/im/mcp"
+  ],
+  "browserMethods": [
+    "initialize",
+    "notifications/initialized",
+    "tools/list",
+    "resources/read"
+  ],
+  "originatingToolCalls": 1,
+  "proxyForwardedToolCalls": 0,
+  "resourceReads": 1,
+  "sandboxEvidenceKinds": [
+    "resource-ready",
+    "rejected-schema",
+    "rejected-policy-mismatch",
+    "rejected-message-source",
+    "teardown-request-forwarded"
+  ],
+  "separateOrigin": true,
+  "cspHeaderMatched": true,
+  "requestedPermissions": [
+    "geolocation"
+  ],
+  "effectivePermissions": [
+    "geolocation"
+  ],
+  "policyRevision": "phase0-policy-revision-2",
+  "outerAllow": "camera 'none'; microphone 'none'; geolocation; clipboard-write 'none'",
+  "innerAllow": "camera 'none'; microphone 'none'; geolocation; clipboard-write 'none'",
+  "permissionsPolicy": "camera=(), microphone=(), geolocation=(self), clipboard-write=()",
+  "probes": {
+    "geolocation": "granted",
+    "camera": "denied-or-unavailable",
+    "forgedPolicyMessage": "rejected",
+    "foreignSource": "rejected",
+    "noPermissions": "denied",
+    "ungrantedCamera": "denied-or-unavailable",
+    "invalidMetadata": "degraded",
+    "unknownPermission": "degraded",
+    "invalidDesiredPolicy": "degraded"
+  },
+  "appPermissionsPropagated": true,
+  "appSandboxOverridePropagated": true,
+  "parentDomAccess": "denied",
+  "externalNetwork": "blocked",
+  "teardown": "received-and-frame-removed"
+}

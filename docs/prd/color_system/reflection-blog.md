@@ -1,8 +1,8 @@
 # Reflection Blog Page — 颜色与主题规范
 
 > 本文记录 `ReflectionBlogPage` 和 `BlogResultCard` 组件的颜色体系。  
-> Source of truth: `frontend/src/styles/tokens.css`  
-> 组件路径: `frontend/src/components/AnalysisView.tsx`  
+> Source of truth: `frontend/app/_dream/styles/tokens.css`
+> 组件路径: `frontend/app/_dream/components/AnalysisView.tsx`
 > 上次更新: 2026-06-09
 
 ---

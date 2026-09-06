@@ -55,14 +55,14 @@ Story Workspace Sidebar 导航与路由配置实现
    - Hover 效果：背景色轻微变化（Paper Cream 深色 5%）
 
 2. **创建路由配置**
-   - 新建 `frontend/src/router/story-workspace.tsx`（或等效路由配置）
+   - 新建 `frontend/app/_dream/router/story-workspace.tsx`（或等效路由配置）
    - 路由前缀：`/story-workspace`
    - 子路由：`/dream`（canonical 入口，SUO-230 增量）, `/stories`, `/characters`, `/scenes`
    - 默认重定向：`/story-workspace` → `/story-workspace/dream`（SUO-230 更新：原指向 `/dashboard`）
    - 兼容重定向：`/story-workspace/dashboard` → `/story-workspace/dream`（SUO-230 新增）
 
 3. **创建页面组件骨架**
-   - `frontend/src/pages/story-workspace/` 目录
+   - `frontend/app/_dream/views/story-workspace/` 目录
    - `StoryWorkspaceDreamPage.tsx`（Dream 页面骨架，SUO-230 增量）
    - `StoryWorkspaceDashboardPage.tsx`（Dashboard 保留复用，SUO-230：不再拥有独立路由状态）
    - `StoryWorkspaceStoriesPage.tsx`（故事列表骨架）
@@ -84,18 +84,18 @@ Story Workspace Sidebar 导航与路由配置实现
 ## 5. 涉及文件路径
 
 **新增文件**：
-- `frontend/src/components/story-workspace/layout/StoryWorkspaceSidebar.tsx`
-- `frontend/src/router/story-workspace.tsx`（或等效路由配置位置）
-- `frontend/src/pages/story-workspace/`（目录）
-- `frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx`
-- `frontend/src/pages/story-workspace/StoryWorkspaceStoriesPage.tsx`
-- `frontend/src/pages/story-workspace/StoryWorkspaceCharactersPage.tsx`
-- `frontend/src/pages/story-workspace/StoryWorkspaceScenesPage.tsx`
-- `frontend/src/pages/story-workspace/index.ts`
+- `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceSidebar.tsx`
+- `frontend/app/_dream/router/story-workspace.tsx`（或等效路由配置位置）
+- `frontend/app/_dream/views/story-workspace/`（目录）
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceDashboardPage.tsx`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceStoriesPage.tsx`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceCharactersPage.tsx`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceScenesPage.tsx`
+- `frontend/app/_dream/views/story-workspace/index.ts`
 
 **复用文件**（只读）：
-- `frontend/src/contexts/AuthContext.tsx` — 用户认证
-- `frontend/src/components/AppLayout.tsx` — 参考布局模式
+- `frontend/app/_dream/contexts/AuthContext.tsx` — 用户认证
+- `frontend/app/_dream/components/AppLayout.tsx` — 参考布局模式
 
 ---
 
@@ -119,8 +119,8 @@ Story Workspace Sidebar 导航与路由配置实现
 | 依赖 | 状态 | 说明 |
 |---|---|---|
 | `task_202a` (FE-001 布局骨架) | ⏳ 需先完成 | StoryWorkspaceLayout 提供布局容器 |
-| `frontend/src/contexts/AuthContext.tsx` | ✅ 已存在 | 用户认证信息 |
-| `frontend/src/styles/tokens.css` | ✅ 已存在 | 色彩/字体 token |
+| `frontend/app/_dream/contexts/AuthContext.tsx` | ✅ 已存在 | 用户认证信息 |
+| `frontend/app/_dream/styles/tokens.css` | ✅ 已存在 | 色彩/字体 token |
 
 **本任务被依赖**：
 - `task_202c` (FE-003 数据表格) — 依赖 Sidebar 导航和页面骨架
@@ -156,7 +156,7 @@ Story Workspace Sidebar 导航与路由配置实现
 - [ ] 路由配置：`/story-workspace` → redirect `/story-workspace/dream`（SUO-230 更新）
 - [ ] 兼容重定向：`/story-workspace/dashboard` → `/story-workspace/dream`（SUO-230 新增）
 - [ ] 子路由：`/dream`, `/stories`, `/characters`, `/scenes`
-- [ ] 路由文件：`frontend/src/router/story-workspace.tsx`（或等效位置）
+- [ ] 路由文件：`frontend/app/_dream/router/story-workspace.tsx`（或等效位置）
 - [ ] Logo 区显示「Ink & Memory 创作者工作台」
 - [ ] 用户信息区显示头像和用户名（复用现有用户体系）
 
@@ -196,7 +196,7 @@ Story Workspace Sidebar 导航与路由配置实现
 ## 附录：路由配置参考
 
 ```typescript
-// frontend/src/router/story-workspace.tsx
+// frontend/app/_dream/router/story-workspace.tsx
 const storyWorkspaceRoutes = [
   {
     path: '/story-workspace',
@@ -236,10 +236,10 @@ const storyWorkspaceRoutes = [
 ## 执行边界（增量修正）
 
 ### 允许修改范围
-- 允许创建 `frontend/src/components/story-workspace/layout/StoryWorkspaceSidebar.tsx`
-- 允许创建 `frontend/src/router/story-workspace.tsx`（或等效路由配置位置）
-- 允许创建 `frontend/src/pages/story-workspace/` 目录及页面骨架文件
-- 允许修改 `frontend/src/App.tsx`（接入 Story Workspace 路由/视图切换）
+- 允许创建 `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceSidebar.tsx`
+- 允许创建 `frontend/app/_dream/router/story-workspace.tsx`（或等效路由配置位置）
+- 允许创建 `frontend/app/_dream/views/story-workspace/` 目录及页面骨架文件
+- 允许修改 `frontend/app/_dream/App.tsx`（接入 Story Workspace 路由/视图切换）
 
 ### 禁止修改范围
 - **禁止修改** `docs/design/` 目录下任何文件

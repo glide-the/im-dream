@@ -10,12 +10,12 @@ Scope: 前端任务规划 - Notion 资源连接器创建、认证、资源选择
 >      `docs/design/notion-session/resource-connector-er.md`,
 >      `docs/prd/notion-session/resource-connector.md`,
 >      `docs/prd/notion-session/resource-connector-ui-design.md`,
->      `frontend/src/App.tsx`,
->      `frontend/src/components/dashboard/ResourceConnectorPage.tsx`,
->      `frontend/src/components/dashboard/Sidebar.tsx`,
->      `frontend/src/components/dashboard/VerticalNav.tsx`,
->      `frontend/src/api/resourceConnectorApi.ts`,
->      `frontend/src/constants/storageKeys.ts`
+>      `frontend/app/_dream/App.tsx`,
+>      `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`,
+>      `frontend/app/_dream/components/dashboard/Sidebar.tsx`,
+>      `frontend/app/_dream/components/dashboard/VerticalNav.tsx`,
+>      `frontend/app/_dream/api/resourceConnectorApi.ts`,
+>      `frontend/app/_dream/constants/storageKeys.ts`
 > [Output] 可执行的前端任务文档，供后续实现阶段直接拆分与排期
 > [Pos] `task_178_frontend_notion-resource-connector-create-auth-resource-selection` in `docs/task`
 > [Sync] 2026-07-04: generated from the filled SUO-178 requirement template after the `SUO-176` planning blocker was resolved.
@@ -82,12 +82,12 @@ Scope: 前端任务规划 - Notion 资源连接器创建、认证、资源选择
 
 | Path | Role |
 |---|---|
-| `frontend/src/App.tsx` | 资源连接器视图入口与 app shell 切换。 |
-| `frontend/src/components/dashboard/ResourceConnectorPage.tsx` | 资源连接器主工作台，承载创建、认证、资源选择和来源状态。 |
-| `frontend/src/components/dashboard/Sidebar.tsx` | 桌面 dashboard 导航入口与视图切换。 |
-| `frontend/src/components/dashboard/VerticalNav.tsx` | 移动端 / 折叠导航入口。 |
-| `frontend/src/api/resourceConnectorApi.ts` | connector API client、认证轮询、资源发现、选择与同步归一。 |
-| `frontend/src/constants/storageKeys.ts` | connector 本地 fallback 的 storage key。 |
+| `frontend/app/_dream/App.tsx` | 资源连接器视图入口与 app shell 切换。 |
+| `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx` | 资源连接器主工作台，承载创建、认证、资源选择和来源状态。 |
+| `frontend/app/_dream/components/dashboard/Sidebar.tsx` | 桌面 dashboard 导航入口与视图切换。 |
+| `frontend/app/_dream/components/dashboard/VerticalNav.tsx` | 移动端 / 折叠导航入口。 |
+| `frontend/app/_dream/api/resourceConnectorApi.ts` | connector API client、认证轮询、资源发现、选择与同步归一。 |
+| `frontend/app/_dream/constants/storageKeys.ts` | connector 本地 fallback 的 storage key。 |
 | `frontend/tests/**` | 可选测试目录；当前仓库没有现成目录，仅在后续创建时使用。 |
 
 ## 7. 输入 / 输出说明
@@ -108,10 +108,10 @@ Scope: 前端任务规划 - Notion 资源连接器创建、认证、资源选择
 - `docs/prd/notion-session/resource-connector-ui-design.md`
 - `SUO-176`（已 `done`，用于前置规划收敛）
 - `SUO-177`（backend contract / data layer，当前联动依赖）
-- `frontend/src/api/resourceConnectorApi.ts`
-- `frontend/src/constants/storageKeys.ts`
-- `frontend/src/App.tsx`
-- `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
+- `frontend/app/_dream/api/resourceConnectorApi.ts`
+- `frontend/app/_dream/constants/storageKeys.ts`
+- `frontend/app/_dream/App.tsx`
+- `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
 
 ## 9. 测试策略
 

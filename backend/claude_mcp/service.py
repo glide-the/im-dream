@@ -7,12 +7,17 @@
 [Sync] 2026-08-25: report OAuth callback and credential-cipher configuration gates separately.
 [Sync] 2026-08-25: derive anonymous/OAuth requirements from standard-MCP discovery instead of public CRUD inputs.
 [Sync] 2026-08-27: report transient capability verification separately while allowing repository retries.
+[Sync] 2026-09-06: enforce versioned server-owned Apps policy before credential projection.
+[Sync] 2026-09-06: emit the authoritative post-refresh credential revision with each Node connection profile.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .contracts import (
@@ -21,6 +26,9 @@ from .contracts import (
     ClaudeMcpErrorCode,
     ClaudeMcpServer,
     ClaudeMcpState,
+    McpAppsConnectionView,
+    McpAppsRuntimePolicy,
+    McpAppsStaticView,
     McpAuthKind,
     McpScope,
     McpServerCreate,
@@ -28,7 +36,6 @@ from .contracts import (
     McpTransport,
 )
 from .repository import McpServerRecord
-
 
 _default_service: "ClaudeMcpService | None" = None
 
@@ -43,12 +50,14 @@ class ClaudeMcpService:
         discovery: Any,
         oauth: Any,
         runtime_snapshot_loader: Any = None,
+        mcp_apps_policy_provider: Any = None,
         pool: Any = None,
     ) -> None:
         self.repository = repository
         self.discovery = discovery
         self.oauth = oauth
         self.runtime_snapshot_loader = runtime_snapshot_loader
+        self.mcp_apps_policy_provider = mcp_apps_policy_provider
         self._pool = pool
 
     async def _require_capability(self) -> None:
@@ -123,6 +132,187 @@ class ClaudeMcpService:
         self, actor_id: str, identifier: str, workspace_id: str | None = None
     ) -> ClaudeMcpServer:
         return self._project(await self._record(actor_id, identifier, workspace_id))
+
+    def _mcp_apps_policy(self) -> McpAppsRuntimePolicy:
+        try:
+            value = (
+                self.mcp_apps_policy_provider()
+                if callable(self.mcp_apps_policy_provider)
+                else self.mcp_apps_policy_provider
+            )
+            if value is None:
+                return McpAppsRuntimePolicy.deny_all()
+            if isinstance(value, McpAppsRuntimePolicy):
+                return value
+            return McpAppsRuntimePolicy.from_mapping(value)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_POLICY_INVALID,
+                "MCP Apps server policy is unavailable.",
+            ) from exc
+
+    def mcp_apps_static_view(self) -> McpAppsStaticView:
+        return McpAppsStaticView(
+            protocol_version="2026-01-26",
+            policy=self._mcp_apps_policy(),
+        )
+
+    async def mcp_apps_connection_view(
+        self,
+        actor_id: str,
+        identifier: str,
+        workspace_scope: str | None,
+        *,
+        expected_config_revision: int | None,
+        expected_credential_revision: int | None,
+        ttl_seconds: float,
+        expected_policy_revision: int | None = None,
+        now: datetime | None = None,
+    ) -> McpAppsConnectionView:
+        """Return one short-lived Node-only view after pre-decryption validation."""
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+        record = await self._record(actor_id, identifier, workspace_scope)
+        if str(record.user_id) != str(actor_id) or not record.enabled:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+                "MCP Apps connection view is unavailable.",
+            )
+        if (
+            expected_config_revision is not None
+            and expected_config_revision != record.config_revision
+        ) or (
+            expected_credential_revision is not None
+            and expected_credential_revision != record.credential_revision
+        ):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT,
+                "MCP Apps session revision is no longer current.",
+            )
+        policy = self._mcp_apps_policy()
+        if (
+            expected_policy_revision is not None
+            and expected_policy_revision != policy.revision
+        ):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_REVISION_CONFLICT,
+                "MCP Apps session policy revision is no longer current.",
+            )
+        server_policy = policy.servers.get(record.server_key)
+        if (
+            server_policy is None
+            or not policy.effective.resource_reads
+        ):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.APP_RUNTIME_DENIED,
+                "MCP Apps connection view is unavailable.",
+            )
+        snapshot = await self.repository.get_discovery_snapshot(actor_id, record)
+        inventory = snapshot.get("inventory") if isinstance(snapshot, dict) else None
+        if not isinstance(inventory, dict) or snapshot.get("status") != "complete":
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.INVENTORY_UNAVAILABLE,
+                "MCP Apps catalog is unavailable.",
+            )
+        raw_tools = inventory.get("tools")
+        raw_resources = inventory.get("resources")
+        if not isinstance(raw_tools, list) or not isinstance(raw_resources, list):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.INVENTORY_MALFORMED,
+                "MCP Apps catalog is invalid.",
+            )
+        def inventory_tool_is_low_risk(tool: Any) -> bool:
+            if not isinstance(tool, dict) or not isinstance(tool.get("name"), str):
+                return False
+            annotations = tool.get("annotations")
+            metadata = tool.get("_meta")
+            return (
+                isinstance(annotations, dict)
+                and annotations.get("readOnlyHint") is True
+                and annotations.get("destructiveHint") is not True
+                and annotations.get("confirmationRequired") is not True
+                and annotations.get("requiresConfirmation") is not True
+                and (
+                    not isinstance(metadata, dict)
+                    or (
+                        metadata.get("confirmationRequired") is not True
+                        and metadata.get("requiresConfirmation") is not True
+                    )
+                )
+            )
+
+        inventory_tools = {
+            str(tool["name"])
+            for tool in raw_tools
+            if isinstance(tool, dict) and isinstance(tool.get("name"), str)
+        }
+        inventory_safe_tools = {
+            str(tool["name"])
+            for tool in raw_tools
+            if inventory_tool_is_low_risk(tool)
+        }
+        allowed_tools = tuple(
+            name
+            for name in server_policy.allowed_tools
+            if name in inventory_tools
+        )
+        allowed_resources = tuple(
+            uri
+            for uri in server_policy.allowed_resources
+            if any(
+                isinstance(resource, dict) and resource.get("uri") == uri
+                for resource in raw_resources
+            )
+        )
+        app_callable_low_risk_tools = tuple(
+            name
+            for name in server_policy.app_callable_low_risk_tools
+            if (
+                policy.effective.low_risk_tool_calls
+                and name in allowed_tools
+                and name in inventory_safe_tools
+            )
+        )
+        if not allowed_tools or not allowed_resources or self.runtime_snapshot_loader is None:
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.INVENTORY_UNAVAILABLE,
+                "MCP Apps read-only catalog is unavailable.",
+            )
+        projected = await self.runtime_snapshot_loader.load_server_config(
+            actor_id,
+            record,
+            expected_config_revision=record.config_revision,
+            expected_credential_revision=record.credential_revision,
+        )
+        config = projected.config
+        if config.get("type") != "http" or not isinstance(config.get("url"), str):
+            raise ClaudeMcpError(
+                ClaudeMcpErrorCode.TRANSPORT_UNSUPPORTED,
+                "MCP Apps Phase 1 requires Streamable HTTP.",
+            )
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        profile: dict[str, Any] = {
+            "type": McpTransport.STREAMABLE_HTTP.value,
+            "url": config["url"],
+        }
+        if isinstance(config.get("headers"), dict):
+            profile["headers"] = dict(config["headers"])
+        return McpAppsConnectionView(
+            actor_scope=str(actor_id),
+            workspace_scope=workspace_scope,
+            server_id=str(record.id),
+            server_ref=record.server_key,
+            config_revision=projected.config_revision,
+            credential_revision=projected.credential_revision,
+            expires_at=(current + timedelta(seconds=ttl_seconds)).isoformat(),
+            allowed_tools=allowed_tools,
+            allowed_resources=allowed_resources,
+            app_callable_low_risk_tools=app_callable_low_risk_tools,
+            policy=policy,
+            connection_profile=profile,
+        )
 
     async def create_server(
         self, actor_id: str, create: McpServerCreate
@@ -366,6 +556,20 @@ class _CredentialUnavailableAuthResolver:
         return None
 
 
+def _mcp_apps_policy_from_env() -> McpAppsRuntimePolicy:
+    """Read the current server-owned policy on demand so revisions invalidate sessions."""
+    raw = os.environ.get("INK_MCP_APPS_POLICY_JSON")
+    if raw is None:
+        return McpAppsRuntimePolicy.deny_all()
+    try:
+        return McpAppsRuntimePolicy.from_mapping(json.loads(raw))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ClaudeMcpError(
+            ClaudeMcpErrorCode.APP_RUNTIME_POLICY_INVALID,
+            "MCP Apps server policy is unavailable.",
+        ) from exc
+
+
 def build_default_claude_mcp_service() -> ClaudeMcpService:
     """Open and inject the production PostgreSQL/MCP dependencies explicitly."""
     from .crypto import McpCredentialCipher, McpCredentialConfigurationError
@@ -458,6 +662,7 @@ def build_default_claude_mcp_service() -> ClaudeMcpService:
         discovery=discovery,
         oauth=oauth,
         runtime_snapshot_loader=runtime_snapshot_loader,
+        mcp_apps_policy_provider=_mcp_apps_policy_from_env,
         pool=pool,
     )
 

@@ -36,11 +36,11 @@ Scope: 前端执行证据与最小修复归档 - Notion 资源连接器创建 / 
 ## 3. 模型生成的执行任务
 
 - 任务目标: 在不扩大范围的前提下，排查并修复 Notion 资源连接器前端 E2E 回归中的 contract drift，并记录可审计证据。
-- 实现范围: `frontend/src/api/resourceConnectorApi.ts` 的 resource selection payload 兼容修复，以及对应 folder docs / exec report。
+- 实现范围: `frontend/app/_dream/api/resourceConnectorApi.ts` 的 resource selection payload 兼容修复，以及对应 folder docs / exec report。
 - 文件范围:
-  - `frontend/src/api/resourceConnectorApi.ts`
-  - `frontend/src/api/.folder.md`
-  - `frontend/src/.folder.md`
+  - `frontend/app/_dream/api/resourceConnectorApi.ts`
+  - `frontend/app/_dream/api/.folder.md`
+  - `frontend/app/_dream/.folder.md`
   - `docs/exec/.folder.md`
   - `docs/exec/exec_191_frontend_resource_connector_e2e_regression.md`
 - 实现步骤:
@@ -56,9 +56,9 @@ Scope: 前端执行证据与最小修复归档 - Notion 资源连接器创建 / 
 
 | 文件 | 操作 | 说明 |
 |---|---|---|
-| `frontend/src/api/resourceConnectorApi.ts` | update | 将资源选择请求体从 `database_ids/page_ids` 改为 backend 期望的 `selected_databases/selected_pages`，避免 `/resources/select` 保存后丢失选择。 |
-| `frontend/src/api/.folder.md` | update | 记录 resource connector client 现在使用 backend selection payload contract。 |
-| `frontend/src/.folder.md` | update | 记录 frontend app shell 内的 resource selection payload 对齐修复。 |
+| `frontend/app/_dream/api/resourceConnectorApi.ts` | update | 将资源选择请求体从 `database_ids/page_ids` 改为 backend 期望的 `selected_databases/selected_pages`，避免 `/resources/select` 保存后丢失选择。 |
+| `frontend/app/_dream/api/.folder.md` | update | 记录 resource connector client 现在使用 backend selection payload contract。 |
+| `frontend/app/_dream/.folder.md` | update | 记录 frontend app shell 内的 resource selection payload 对齐修复。 |
 | `docs/exec/.folder.md` | update | 记录新增 SUO-191 exec 报告与 live-auth blocker 边界。 |
 | `docs/exec/exec_191_frontend_resource_connector_e2e_regression.md` | create | 归档本次前端 E2E 回归验证、最小修复、测试结果、阻塞与回滚建议。 |
 
@@ -111,9 +111,9 @@ Scope: 前端执行证据与最小修复归档 - Notion 资源连接器创建 / 
 ## 8. 回滚建议
 
 - 回滚文件:
-  - `frontend/src/api/resourceConnectorApi.ts`
-  - `frontend/src/api/.folder.md`
-  - `frontend/src/.folder.md`
+  - `frontend/app/_dream/api/resourceConnectorApi.ts`
+  - `frontend/app/_dream/api/.folder.md`
+  - `frontend/app/_dream/.folder.md`
   - `docs/exec/.folder.md`
   - `docs/exec/exec_191_frontend_resource_connector_e2e_regression.md`
 - 回滚方式:

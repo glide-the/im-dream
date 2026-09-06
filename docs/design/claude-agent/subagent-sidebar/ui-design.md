@@ -152,15 +152,15 @@ SubagentPanel
 推荐文件边界：
 
 ```text
-frontend/src/components/chat/
+frontend/app/_dream/components/chat/
 ├── Icons.tsx                         # IconSubagents
 ├── SubagentPanel.tsx                 # A1–E3 组件
 └── SubagentPanel.css                 # 局部样式、响应式、reduced-motion
 
-frontend/src/hooks/
+frontend/app/_dream/hooks/
 └── useThreadSubagents.ts             # 线程级快照 + 增量 store
 
-frontend/src/lib/
+frontend/app/_dream/lib/
 └── claude-agent-transport.ts          # subagent-task-updated 转发，不生成消息气泡
 ```
 

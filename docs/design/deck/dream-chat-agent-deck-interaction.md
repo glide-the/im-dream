@@ -82,8 +82,8 @@ fail closed。
 
 ## 7. 对应实现
 
-- `frontend/src/pages/story-workspace/StoryWorkspaceDreamLaunch.tsx`
-- `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.css`
-- `frontend/src/pages/story-workspace/__tests__/StoryWorkspaceDreamLaunchLayout.test.ts`
-- `frontend/src/pages/story-workspace/__tests__/StoryWorkspaceDreamReentryLayout.test.ts`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamLaunch.tsx`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.css`
+- `frontend/app/_dream/views/story-workspace/__tests__/StoryWorkspaceDreamLaunchLayout.test.ts`
+- `frontend/app/_dream/views/story-workspace/__tests__/StoryWorkspaceDreamReentryLayout.test.ts`
 - `frontend/e2e/chat-dream-agent-refactor.spec.ts`

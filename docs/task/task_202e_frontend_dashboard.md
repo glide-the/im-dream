@@ -82,11 +82,11 @@ Story Workspace 工作台首页 Dashboard 实现
 ## 5. 涉及文件路径
 
 **新增/修改文件**：
-- `frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx`（填充内容）
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceDashboardPage.tsx`（填充内容）
 
 **复用文件**（只读）：
-- `frontend/src/components/story-workspace/state/StoryWorkspaceEmptyState.tsx` — 空态组件（FE-006 提供）
-- `frontend/src/components/story-workspace/table/StoryWorkspaceReviewStatusBadge.tsx` — 状态标签
+- `frontend/app/_dream/components/story-workspace/state/StoryWorkspaceEmptyState.tsx` — 空态组件（FE-006 提供）
+- `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceReviewStatusBadge.tsx` — 状态标签
 
 ---
 
@@ -204,7 +204,7 @@ Story Workspace 工作台首页 Dashboard 实现
 ## 执行边界（增量修正）
 
 ### 允许修改范围
-- 允许修改 `frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx`（填充 Dashboard 内容）
+- 允许修改 `frontend/app/_dream/views/story-workspace/StoryWorkspaceDashboardPage.tsx`（填充 Dashboard 内容）
 - 允许创建 Dashboard 专用的展示组件（如统计卡片、快捷入口卡片等）
 
 ### 禁止修改范围

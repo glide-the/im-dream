@@ -1,4 +1,4 @@
-> [Input] `docs/design/claude-agent/claude-plan-mode-analysis.md`, `backend/libs/claude_agent_kit/server/agent_runner.py`, `backend/libs/claude_agent_kit/server/sdk_env.py`, `backend/libs/claude_agent_kit/server/workspace.py`, `backend/claude_agent/service.py`, `backend/routers/claude_agent.py`, `frontend/src/lib/claude-agent-transport.ts`, `frontend/src/components/chat/ChatView.tsx`
+> [Input] `docs/design/claude-agent/claude-plan-mode-analysis.md`, `backend/libs/claude_agent_kit/server/agent_runner.py`, `backend/libs/claude_agent_kit/server/sdk_env.py`, `backend/libs/claude_agent_kit/server/workspace.py`, `backend/claude_agent/service.py`, `backend/routers/claude_agent.py`, `frontend/app/_dream/lib/claude-agent-transport.ts`, `frontend/app/_dream/components/chat/ChatView.tsx`
 > [Output] claude-plan 功能设计：Claude Code Plan Mode 计划文件的落盘路径解析、后端捕获机制、SSE/REST 数据契约与前端展示挂载点。
 > [Pos] plan-feature-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-07-20: 初版 — 依据 `claude-plan-mode-analysis.md`（Claude Code 还原源码分析）与现有 claude-agent 交互契约设计；仅设计契约，业务代码实现见 §7/§8。
@@ -163,7 +163,7 @@ data: {"type":"plan-updated","slug":"amber-churn-otter","fileName":"amber-churn-
 
 ### 5.6 前端消费契约
 
-- Transport：`claude-agent-transport.ts` `convertEvent` 新增两个 case；`plan-*` 事件**不映射为 UIMessageChunk**（不产生消息气泡），转发到新增轻量 plan store（`frontend/src/hooks/useThreadPlan.ts`，按 threadId 键控）。
+- Transport：`claude-agent-transport.ts` `convertEvent` 新增两个 case；`plan-*` 事件**不映射为 UIMessageChunk**（不产生消息气泡），转发到新增轻量 plan store（`frontend/app/_dream/hooks/useThreadPlan.ts`，按 threadId 键控）。
 - 初始加载/重连：`ChatView.tsx` 在现有 `GET .../status` 分支（约 529-531 行）旁并行调用 §5.5 端点水合 store。
 - 面板挂载点：ChatView 顶部右侧浮动控制栏（「新建对话」按钮所在区，约 725-731 行）**上方**新增可折叠 `PlanPanel`，复用 `CollapsibleSection.tsx`；数据全部来自 store，展示 `content`（Markdown 渲染）、`plan_mode` 徽标、`updated_at`；空态（`exists:false`）不渲染面板。
 
@@ -246,10 +246,10 @@ sequenceDiagram
 | `backend/libs/claude_agent_kit/server/agent_runner.py` | 修改 | 调用 env 注入；新增 PostToolUse 计划文件观察 hook；`_LOW_SENSITIVITY_QUERY_TOOL_NAMES` 增加两工具（Task 4） |
 | `backend/claude_agent/service.py` | 修改 | `plan_state` 内存态；SSE 流观察 `tool-input-available`；发射 `plan-mode-changed` / `plan-updated` |
 | `backend/routers/claude_agent.py` | 修改 | 新增 `GET /threads/{thread_id}/plan` |
-| `frontend/src/lib/claude-agent-transport.ts` | 修改 | `convertEvent` 新增 `plan-*` case |
-| `frontend/src/hooks/useThreadPlan.ts` | 新增 | 按 threadId 键控的 plan store |
-| `frontend/src/components/chat/PlanPanel.tsx` | 新增 | 可折叠计划面板（Task 2） |
-| `frontend/src/components/chat/ChatView.tsx` | 修改 | 挂载 PlanPanel + 重连水合 |
+| `frontend/app/_dream/lib/claude-agent-transport.ts` | 修改 | `convertEvent` 新增 `plan-*` case |
+| `frontend/app/_dream/hooks/useThreadPlan.ts` | 新增 | 按 threadId 键控的 plan store |
+| `frontend/app/_dream/components/chat/PlanPanel.tsx` | 新增 | 可折叠计划面板（Task 2） |
+| `frontend/app/_dream/components/chat/ChatView.tsx` | 修改 | 挂载 PlanPanel + 重连水合 |
 | `backend/tests/test_claude_agent_runner.py` | 修改 | 低敏分级用例（Task 4） |
 | `backend/tests/test_claude_agent_plan.py` | 新增 | 路径解析 / 事件发射 / REST 契约 |
 | `docs/design/claude-agent/claude-agent-api-contracts.md` | 修改 | §4.5.2 事件表登记两个新事件 + §4.7 报文示例 |

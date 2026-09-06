@@ -21,9 +21,9 @@ Stage §21.2、§21.3 已确认 task_212 九项 readiness 全部通过，Stage 2
 
 ### 工作树基线与冲突处理
 
-执行前已记录 `git status --short`。共享工作树包含 backend、design、issue、task、stage、其他 exec 报告、Story Workspace 与 frontend 的大量既有未提交/未跟踪内容；`frontend/src/App.tsx` 也已有他人差异。本轮没有重置、清理、覆盖或格式化这些内容。
+执行前已记录 `git status --short`。共享工作树包含 backend、design、issue、task、stage、其他 exec 报告、Story Workspace 与 frontend 的大量既有未提交/未跟踪内容；`frontend/app/_dream/App.tsx` 也已有他人差异。本轮没有重置、清理、覆盖或格式化这些内容。
 
-本 task 开始时授权实现路径中只有 `frontend/src/components/DeckEditorModal.tsx` 已存在且没有基线未提交差异；其余七个实际实现文件均为本轮新建。验证期间并行 task_211 新增了 `frontend/src/components/plugin-admin/` 内容并导致第二次全量 build 失败，本轮未修改这些闭集外文件。
+本 task 开始时授权实现路径中只有 `frontend/app/_dream/components/DeckEditorModal.tsx` 已存在且没有基线未提交差异；其余七个实际实现文件均为本轮新建。验证期间并行 task_211 新增了 `frontend/app/_dream/components/plugin-admin/` 内容并导致第二次全量 build 失败，本轮未修改这些闭集外文件。
 
 ## 2. TASK-REQUIREMENT-FORMAT.md 填充记录
 
@@ -89,17 +89,17 @@ Issue 级约束已完整带入：独立 checkout；仅修改 task §11.1 十一�
 
 | 路径 | 动作 | 最小授权变更 | 实际结果 |
 |---|---|---|---|
-| `frontend/src/components/deck/DeckPluginBindingCard.tsx` | create | 当前/空 binding、release/capability/readiness 摘要 | 已创建 |
-| `frontend/src/components/deck/DeckPluginVersionPicker.tsx` | create | 推荐/其他 options、差异、确认 | 已创建 |
-| `frontend/src/components/deck/DeckPluginVersionCard.tsx` | create | 精确版本状态、服务端可选性、安全 reason/recovery | 已创建 |
-| `frontend/src/components/deck/DeckPluginBindingStatus.tsx` | create | next-run、loading/saving/success/conflict/current-run | 已创建 |
-| `frontend/src/hooks/useDeckPluginBinding.ts` | create | current binding、CAS save、409 双刷新与重确认 | 已创建 |
-| `frontend/src/hooks/useDeckPluginOptions.ts` | create | options 查询、刷新与 stale-request 防护 | 已创建 |
-| `frontend/src/api/deckPluginApi.ts` | create | task_210a 四个冻结 API 的 typed client | 已创建 |
-| `frontend/src/components/DeckEditorModal.tsx` | update | metadata 下、Agents/Voice 上方增量集成 | 已修改最小区段 |
-| `frontend/src/components/deck/DeckPluginBindingCard.test.tsx` | conditional create | 有现有 runner 时创建 | 未创建：runner 发现为空 |
-| `frontend/src/components/deck/DeckPluginVersionPicker.test.tsx` | conditional create | 有现有 runner 时创建 | 未创建：runner 发现为空 |
-| `frontend/src/hooks/useDeckPluginBinding.test.ts` | conditional create | 有现有 runner 时创建 | 未创建：runner 发现为空 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingCard.tsx` | create | 当前/空 binding、release/capability/readiness 摘要 | 已创建 |
+| `frontend/app/_dream/components/deck/DeckPluginVersionPicker.tsx` | create | 推荐/其他 options、差异、确认 | 已创建 |
+| `frontend/app/_dream/components/deck/DeckPluginVersionCard.tsx` | create | 精确版本状态、服务端可选性、安全 reason/recovery | 已创建 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingStatus.tsx` | create | next-run、loading/saving/success/conflict/current-run | 已创建 |
+| `frontend/app/_dream/hooks/useDeckPluginBinding.ts` | create | current binding、CAS save、409 双刷新与重确认 | 已创建 |
+| `frontend/app/_dream/hooks/useDeckPluginOptions.ts` | create | options 查询、刷新与 stale-request 防护 | 已创建 |
+| `frontend/app/_dream/api/deckPluginApi.ts` | create | task_210a 四个冻结 API 的 typed client | 已创建 |
+| `frontend/app/_dream/components/DeckEditorModal.tsx` | update | metadata 下、Agents/Voice 上方增量集成 | 已修改最小区段 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingCard.test.tsx` | conditional create | 有现有 runner 时创建 | 未创建：runner 发现为空 |
+| `frontend/app/_dream/components/deck/DeckPluginVersionPicker.test.tsx` | conditional create | 有现有 runner 时创建 | 未创建：runner 发现为空 |
+| `frontend/app/_dream/hooks/useDeckPluginBinding.test.ts` | conditional create | 有现有 runner 时创建 | 未创建：runner 发现为空 |
 | `docs/exec/exec_task_212_frontend_deck_editor_plugin_binding.md` | create | 唯一正式执行报告 | 已创建 |
 
 禁止范围原样执行：未修改 `backend/`、其他 `docs/exec/`、`docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、依赖锁、测试/构建配置、生成物、Plugin Admin、Preflight/Run、ClaudeAgent、task_210/210a ownership；没有客户端 release/permission/compatibility/runtime 权威裁决副本。
@@ -119,14 +119,14 @@ Issue 级约束已完整带入：独立 checkout；仅修改 task §11.1 十一�
 
 | 文件 | 操作 | 最小变更说明 |
 |---|---|---|
-| `frontend/src/api/deckPluginApi.ts` | create | 定义 frozen binding/options/validation DTO；封装 GET options、GET binding、PUT binding、POST validate；只解析结构化 error code/current revision/validation |
-| `frontend/src/hooks/useDeckPluginOptions.ts` | create | 加载与刷新服务端权限过滤 options；忽略过期请求与其他 deck 的旧数据；输出安全错误文案 |
-| `frontend/src/hooks/useDeckPluginBinding.ts` | create | 加载 current binding；保存 `next_run` CAS；409 后刷新 binding/options、检查原选择仍为服务端 selectable、要求用户重新确认，不静默覆盖 |
-| `frontend/src/components/deck/DeckPluginBindingCard.tsx` | create | 展示 display name、精确版本、release/revision、capability 前三项+更多、installation/runtime/compatibility、空状态与 current run |
-| `frontend/src/components/deck/DeckPluginVersionCard.tsx` | create | 以服务端 `selectable` 作为唯一 enabled gate；展示 release/installation/runtime/contract/capability、非敏感 reason code 与 recovery owner/action |
-| `frontend/src/components/deck/DeckPluginVersionPicker.tsx` | create | 推荐可选版本、其他版本折叠、radio 选择、版本/capability 差异、显式确认；冲突后保持弹窗，不自动重试 |
-| `frontend/src/components/deck/DeckPluginBindingStatus.tsx` | create | 始终展示 next-run/历史当前 run 不变文案；展示加载、保存、成功、冲突、current run 与安全错误 |
-| `frontend/src/components/DeckEditorModal.tsx` | update | 仅新增 imports/hooks/plugin 区/picker；插件区位于 metadata 下、Agents/Voice 上；父内容允许滚动并为原 Voice 区保留高度 |
+| `frontend/app/_dream/api/deckPluginApi.ts` | create | 定义 frozen binding/options/validation DTO；封装 GET options、GET binding、PUT binding、POST validate；只解析结构化 error code/current revision/validation |
+| `frontend/app/_dream/hooks/useDeckPluginOptions.ts` | create | 加载与刷新服务端权限过滤 options；忽略过期请求与其他 deck 的旧数据；输出安全错误文案 |
+| `frontend/app/_dream/hooks/useDeckPluginBinding.ts` | create | 加载 current binding；保存 `next_run` CAS；409 后刷新 binding/options、检查原选择仍为服务端 selectable、要求用户重新确认，不静默覆盖 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingCard.tsx` | create | 展示 display name、精确版本、release/revision、capability 前三项+更多、installation/runtime/compatibility、空状态与 current run |
+| `frontend/app/_dream/components/deck/DeckPluginVersionCard.tsx` | create | 以服务端 `selectable` 作为唯一 enabled gate；展示 release/installation/runtime/contract/capability、非敏感 reason code 与 recovery owner/action |
+| `frontend/app/_dream/components/deck/DeckPluginVersionPicker.tsx` | create | 推荐可选版本、其他版本折叠、radio 选择、版本/capability 差异、显式确认；冲突后保持弹窗，不自动重试 |
+| `frontend/app/_dream/components/deck/DeckPluginBindingStatus.tsx` | create | 始终展示 next-run/历史当前 run 不变文案；展示加载、保存、成功、冲突、current run 与安全错误 |
+| `frontend/app/_dream/components/DeckEditorModal.tsx` | update | 仅新增 imports/hooks/plugin 区/picker；插件区位于 metadata 下、Agents/Voice 上；父内容允许滚动并为原 Voice 区保留高度 |
 | `docs/exec/exec_task_212_frontend_deck_editor_plugin_binding.md` | create | 模板填充、实现、验证、风险、回滚与完成报告 |
 
 ### 关键实现语义
@@ -160,7 +160,7 @@ Issue 级约束已完整带入：独立 checkout；仅修改 task §11.1 十一�
 
    `npm --prefix frontend run build`
 
-   结果：exit code `2`。验证期间并行 task_211 新增的 `frontend/src/components/plugin-admin/PluginAdminDetail.tsx` 与 `PluginAdminListItem.tsx` 出现 4 个 `PluginAdminItem` union property error；错误路径均在本 task 闭集外。本轮未修改这些文件。
+   结果：exit code `2`。验证期间并行 task_211 新增的 `frontend/app/_dream/components/plugin-admin/PluginAdminDetail.tsx` 与 `PluginAdminListItem.tsx` 出现 4 个 `PluginAdminItem` union property error；错误路径均在本 task 闭集外。本轮未修改这些文件。
 
 3. 最终本 task 定向 TypeScript：
 
@@ -252,8 +252,8 @@ Issue 级约束已完整带入：独立 checkout；仅修改 task §11.1 十一�
 
 ## 9. 回滚建议
 
-1. 先从 `frontend/src/components/DeckEditorModal.tsx` 精确移除本 task 的三个组件/两个 hook import、hook state、current option/current run 派生、plugin section 与 picker；把父容器 `overflowY` 和 Voice 区 `minHeight` 恢复为变更前值。
-2. 删除本 task 新建的七个实现文件：四个 `frontend/src/components/deck/DeckPlugin*.tsx`、两个 hooks、一个 API client。
+1. 先从 `frontend/app/_dream/components/DeckEditorModal.tsx` 精确移除本 task 的三个组件/两个 hook import、hook state、current option/current run 派生、plugin section 与 picker；把父容器 `overflowY` 和 Voice 区 `minHeight` 恢复为变更前值。
+2. 删除本 task 新建的七个实现文件：四个 `frontend/app/_dream/components/deck/DeckPlugin*.tsx`、两个 hooks、一个 API client。
 3. 不修改或删除 backend binding/API/revision/history；前端回滚只隐藏消费入口。
 4. 不回滚 task_211/213、Story Workspace、metadata、Agents/Voice、Voice chat → run 或共享工作树其他差异。
 5. 使用精确 patch 回滚，禁止 `git reset --hard`、目录级 clean/checkout 或整文件覆盖。

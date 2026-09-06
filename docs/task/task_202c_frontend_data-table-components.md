@@ -33,7 +33,7 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
 ## 4. 实现步骤
 
 1. **创建表格组件目录结构**
-   - `frontend/src/components/story-workspace/table/`
+   - `frontend/app/_dream/components/story-workspace/table/`
 
 2. **实现通用表格行组件 `StoryWorkspaceTableRow`**
    - 行高 56px
@@ -94,31 +94,31 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
 ## 5. 涉及文件路径
 
 **新增文件**：
-- `frontend/src/components/story-workspace/table/`（目录）
-- `frontend/src/components/story-workspace/table/StoryWorkspaceStoryTable.tsx`
-- `frontend/src/components/story-workspace/table/StoryWorkspaceCharacterTable.tsx`
-- `frontend/src/components/story-workspace/table/StoryWorkspaceSceneTable.tsx`
-- `frontend/src/components/story-workspace/table/StoryWorkspaceTableRow.tsx`
-- `frontend/src/components/story-workspace/table/StoryWorkspacePagination.tsx`
-- `frontend/src/components/story-workspace/table/StoryWorkspaceReviewStatusBadge.tsx`
-- `frontend/src/components/story-workspace/table/index.ts`
-- `frontend/src/components/story-workspace/layout/StoryWorkspaceToolbar.tsx`
-- `frontend/src/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx`
-- `frontend/src/hooks/story-workspace/`（目录）
-- `frontend/src/hooks/story-workspace/useStories.ts`
-- `frontend/src/hooks/story-workspace/useCharacters.ts`
-- `frontend/src/hooks/story-workspace/useScenes.ts`
-- `frontend/src/hooks/story-workspace/index.ts`
+- `frontend/app/_dream/components/story-workspace/table/`（目录）
+- `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceStoryTable.tsx`
+- `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceCharacterTable.tsx`
+- `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceSceneTable.tsx`
+- `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceTableRow.tsx`
+- `frontend/app/_dream/components/story-workspace/table/StoryWorkspacePagination.tsx`
+- `frontend/app/_dream/components/story-workspace/table/StoryWorkspaceReviewStatusBadge.tsx`
+- `frontend/app/_dream/components/story-workspace/table/index.ts`
+- `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceToolbar.tsx`
+- `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx`
+- `frontend/app/_dream/hooks/story-workspace/`（目录）
+- `frontend/app/_dream/hooks/story-workspace/useStories.ts`
+- `frontend/app/_dream/hooks/story-workspace/useCharacters.ts`
+- `frontend/app/_dream/hooks/story-workspace/useScenes.ts`
+- `frontend/app/_dream/hooks/story-workspace/index.ts`
 
 **修改文件（页面接入与导出闭环）**：
-- `frontend/src/components/story-workspace/layout/index.ts`
-- `frontend/src/components/story-workspace/index.ts`
-- `frontend/src/pages/story-workspace/StoryWorkspaceStoriesPage.tsx`
-- `frontend/src/pages/story-workspace/StoryWorkspaceCharactersPage.tsx`
-- `frontend/src/pages/story-workspace/StoryWorkspaceScenesPage.tsx`
+- `frontend/app/_dream/components/story-workspace/layout/index.ts`
+- `frontend/app/_dream/components/story-workspace/index.ts`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceStoriesPage.tsx`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceCharactersPage.tsx`
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceScenesPage.tsx`
 
 **复用文件**（只读）：
-- `frontend/src/styles/tokens.css` — 色彩 token
+- `frontend/app/_dream/styles/tokens.css` — 色彩 token
 
 ---
 
@@ -147,7 +147,7 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
 | `task_202b` (FE-002 Sidebar 导航) | ✅ 已完成（SUO-265） | 已提供三个列表页骨架和 canonical 路由 |
 | `SUO-201-BE-002` (REST API) | ✅ 已完成（SUO-264） | 已提供列表查询、搜索、筛选、排序与分页接口 |
 | `SUO-201-SH-002` (共享类型包) | ⏳ 可选 | TypeScript 类型定义 |
-| `frontend/src/styles/tokens.css` | ✅ 已存在 | 色彩系统 |
+| `frontend/app/_dream/styles/tokens.css` | ✅ 已存在 | 色彩系统 |
 
 **本任务被依赖**：
 - `task_202d` (FE-004 审阅面板) — 依赖表格行选中
@@ -167,7 +167,7 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
    通过标准：TypeScript 构建与 Vite 打包均成功。
 2. **本 task scoped lint**（从仓库根目录执行）：
    ```bash
-   cd frontend && npx eslint src/components/story-workspace/table src/components/story-workspace/layout/StoryWorkspaceToolbar.tsx src/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx src/components/story-workspace/layout/index.ts src/components/story-workspace/index.ts src/hooks/story-workspace src/pages/story-workspace/StoryWorkspaceStoriesPage.tsx src/pages/story-workspace/StoryWorkspaceCharactersPage.tsx src/pages/story-workspace/StoryWorkspaceScenesPage.tsx
+   cd frontend && npx eslint app/_dream/components/story-workspace/table app/_dream/components/story-workspace/layout/StoryWorkspaceToolbar.tsx app/_dream/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx app/_dream/components/story-workspace/layout/index.ts app/_dream/components/story-workspace/index.ts app/_dream/hooks/story-workspace app/_dream/views/story-workspace/StoryWorkspaceStoriesPage.tsx app/_dream/views/story-workspace/StoryWorkspaceCharactersPage.tsx app/_dream/views/story-workspace/StoryWorkspaceScenesPage.tsx
    ```
    通过标准：本 task 闭集内无 ESLint error；若全仓历史 warning/error 不在闭集内，必须单独记录，不得越界修复。
 3. **单元测试**：`N/A`。当前 `frontend/package.json` 没有测试 runner 或 `test` script；本 task 禁止通过修改 `package.json`、lockfile 或新增依赖来引入测试框架。
@@ -274,15 +274,15 @@ enum StoryType {
 ## 执行边界（增量修正）
 
 ### 允许修改范围
-- `frontend/src/components/story-workspace/table/**` — 仅创建/修改本 task 的表格、表格样式、状态标签与分页组件。
-- `frontend/src/components/story-workspace/layout/StoryWorkspaceToolbar.tsx` — 仅实现搜索/筛选/排序 Toolbar。
-- `frontend/src/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx` — 仅实现 pending 多选后的批量栏视觉与回调合同。
-- `frontend/src/components/story-workspace/layout/index.ts` — 仅追加上述两个 Toolbar 的导出。
-- `frontend/src/components/story-workspace/index.ts` — 仅追加 table / layout 的必要导出，不重组既有导出。
-- `frontend/src/hooks/story-workspace/**` — 仅创建/修改三类列表查询 Hooks 及其本地类型/导出。
-- `frontend/src/pages/story-workspace/StoryWorkspaceStoriesPage.tsx` — 仅替换占位内容并组合 Story Toolbar/Table/Pagination/Hook。
-- `frontend/src/pages/story-workspace/StoryWorkspaceCharactersPage.tsx` — 仅替换占位内容并组合 Character Toolbar/Table/Pagination/Hook。
-- `frontend/src/pages/story-workspace/StoryWorkspaceScenesPage.tsx` — 仅替换占位内容并组合 Scene Toolbar/Table/Pagination/Hook。
+- `frontend/app/_dream/components/story-workspace/table/**` — 仅创建/修改本 task 的表格、表格样式、状态标签与分页组件。
+- `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceToolbar.tsx` — 仅实现搜索/筛选/排序 Toolbar。
+- `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx` — 仅实现 pending 多选后的批量栏视觉与回调合同。
+- `frontend/app/_dream/components/story-workspace/layout/index.ts` — 仅追加上述两个 Toolbar 的导出。
+- `frontend/app/_dream/components/story-workspace/index.ts` — 仅追加 table / layout 的必要导出，不重组既有导出。
+- `frontend/app/_dream/hooks/story-workspace/**` — 仅创建/修改三类列表查询 Hooks 及其本地类型/导出。
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceStoriesPage.tsx` — 仅替换占位内容并组合 Story Toolbar/Table/Pagination/Hook。
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceCharactersPage.tsx` — 仅替换占位内容并组合 Character Toolbar/Table/Pagination/Hook。
+- `frontend/app/_dream/views/story-workspace/StoryWorkspaceScenesPage.tsx` — 仅替换占位内容并组合 Scene Toolbar/Table/Pagination/Hook。
 
 ### 禁止修改范围
 - **禁止修改** `docs/design/` 目录下任何文件
@@ -293,8 +293,8 @@ enum StoryType {
 - **禁止修改** 后端代码（`backend/src/` 等）
 - **禁止修改** 现有全局表格组件（如有）的核心逻辑
 - **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
-- **禁止修改** `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`、`frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx`、`frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`
-- **禁止修改** `frontend/src/router/story-workspace.tsx`、`frontend/src/App.tsx`、`frontend/package.json`、任何 lockfile；现有路由已由 `task_202b` 提供
+- **禁止修改** `frontend/app/_dream/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`、`frontend/app/_dream/views/story-workspace/StoryWorkspaceDashboardPage.tsx`、`frontend/app/_dream/views/story-workspace/StoryWorkspaceDreamPage.tsx`
+- **禁止修改** `frontend/app/_dream/router/story-workspace.tsx`、`frontend/app/_dream/App.tsx`、`frontend/package.json`、任何 lockfile；现有路由已由 `task_202b` 提供
 - **禁止新增** 仓库内 mock、快照或测试 runner 配置；当前无前端测试框架，验证采用 build、scoped lint 与浏览器证据
 
 ### 明确排除项

@@ -51,11 +51,11 @@
   - `backend/claude_agent/service.py`
   - `backend/claude_agent/workspace_context.py`
   - `backend/libs/claude_agent_kit/server/notion_snapshot.py`
-  - `frontend/src/App.tsx`
-  - `frontend/src/api/resourceConnectorApi.ts`
-  - `frontend/src/components/dashboard/`
-  - `frontend/src/components/chat/`
-  - `frontend/src/constants/storageKeys.ts`
+  - `frontend/app/_dream/App.tsx`
+  - `frontend/app/_dream/api/resourceConnectorApi.ts`
+  - `frontend/app/_dream/components/dashboard/`
+  - `frontend/app/_dream/components/chat/`
+  - `frontend/app/_dream/constants/storageKeys.ts`
 
 - 本清单覆盖范围：
   - Notion 资源连接器创建、认证、资源发现、资源选择与 snapshot 物化
@@ -154,12 +154,12 @@
 - 前置依赖：`SUO-174`
 
 - 关联路径：
-  - `frontend/src/App.tsx`
-  - `frontend/src/api/resourceConnectorApi.ts`
-  - `frontend/src/components/dashboard/`
-  - `frontend/src/components/dashboard/Sidebar.tsx`
-  - `frontend/src/components/dashboard/VerticalNav.tsx`
-  - `frontend/src/constants/storageKeys.ts`
+  - `frontend/app/_dream/App.tsx`
+  - `frontend/app/_dream/api/resourceConnectorApi.ts`
+  - `frontend/app/_dream/components/dashboard/`
+  - `frontend/app/_dream/components/dashboard/Sidebar.tsx`
+  - `frontend/app/_dream/components/dashboard/VerticalNav.tsx`
+  - `frontend/app/_dream/constants/storageKeys.ts`
   - `frontend/tests/`
 
 - 分发去向：`@FrontendTaskAgent`
@@ -208,9 +208,9 @@
   - `backend/notion/store.py`
   - `backend/notion/sync.py`
   - `backend/libs/claude_agent_kit/server/notion_snapshot.py`
-  - `frontend/src/components/chat/`
-  - `frontend/src/components/dashboard/ResourceConnectorPage.tsx`
-  - `frontend/src/lib/claude-agent-transport.ts`
+  - `frontend/app/_dream/components/chat/`
+  - `frontend/app/_dream/components/dashboard/ResourceConnectorPage.tsx`
+  - `frontend/app/_dream/lib/claude-agent-transport.ts`
   - `backend/tests/test_notion_snapshot_contract.py`
   - `backend/tests/test_server_claude_agent.py`
 

@@ -142,7 +142,7 @@
 
 ### 未执行测试及原因
 
-- 未执行前端镜像字段一致性测试：`frontend/src/types/story-workspace/` 明确由 FrontendTaskAgent 负责，当前 Issue 禁止写入，且仓库尚无该镜像合同文件。
+- 未执行前端镜像字段一致性测试：`frontend/app/_dream/types/story-workspace/` 明确由 FrontendTaskAgent 负责，当前 Issue 禁止写入，且仓库尚无该镜像合同文件。
 - 未执行全仓测试：本任务仅新增无业务副作用的静态合同与 Markdown 清单；目标验证已覆盖导入、实例化、枚举、字段、默认值、导出和排除项。
 - 未将并行数据库/前端/设计稿变更计入 task_205 diff：这些文件由其他 Issue 持有，本任务只做只读核对。
 
