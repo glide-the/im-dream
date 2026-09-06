@@ -12,6 +12,7 @@
 // [Sync] 2026-08-25: describe detail inventory as automatic; the list remains database-only and never discovers remotely.
 // [Sync] 2026-08-27: automatically retry transient capability verification without misreporting a missing migration.
 // [Sync] 2026-09-06: move MCP Server creation from the long settings flow into the shared accessible responsive dialog and focus its first field on open.
+// [Sync] 2026-09-06: group connection identity and endpoint inputs inside a caller-scoped wide dialog with a scrollable body and persistent action footer.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -399,6 +400,7 @@ export default function ClaudeMcpResourceSection({
         initialFocusRef={serverNameInputRef}
         onClose={() => setAddDialogOpen(false)}
         open={addDialogOpen && capability?.enabled === true}
+        surfaceClassName="claude-mcp-add-dialog"
         title="添加 MCP 服务"
       >
         <form
@@ -410,73 +412,89 @@ export default function ClaudeMcpResourceSection({
             void configure();
           }}
         >
-          <p className="claude-mcp-add-form__description">
-            HTTP/SSE 只保存安全 URL；stdio 只能引用服务端批准的 profile，不接受浏览器命令、参数或环境变量。
-          </p>
-          <div className="claude-mcp-add-form__fields">
-            <label>
-              MCP 服务名称
-              <input
-                ref={serverNameInputRef}
-                aria-label="MCP 服务名称"
-                value={serverName}
-                onChange={(event) => setServerName(event.target.value)}
-                autoComplete="off"
-                maxLength={128}
-                required
-                placeholder="例如 comfy-cloud"
-              />
-            </label>
-            <label>
-              传输方式
-              <select
-                aria-label="MCP 传输方式"
-                value={serverTransport}
-                onChange={(event) => {
-                  setServerTransport(event.target.value as typeof serverTransport);
-                  setConfigurationError(null);
-                }}
-              >
-                <option value="streamable_http">Streamable HTTP</option>
-                <option value="sse">Legacy SSE</option>
-                <option value="stdio">stdio profile</option>
-              </select>
-            </label>
-            <label className="claude-mcp-add-form__endpoint">
-              {serverTransport === 'stdio' ? '服务端 profile key' : 'MCP 服务 URL'}
-              <input
-                aria-label={serverTransport === 'stdio' ? 'MCP stdio profile key' : 'MCP 服务 URL'}
-                type={serverTransport === 'stdio' ? 'text' : 'url'}
-                value={serverTransport === 'stdio' ? stdioProfileKey : serverUrl}
-                onChange={(event) => serverTransport === 'stdio'
-                  ? setStdioProfileKey(event.target.value)
-                  : setServerUrl(event.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={serverTransport === 'stdio' ? 128 : 2048}
-                required
-                placeholder={serverTransport === 'stdio' ? '例如 local-files-readonly' : 'https://mcp.example.com/mcp'}
-              />
-            </label>
+          <div className="claude-mcp-add-form__body">
+            <p className="claude-mcp-add-form__description">
+              配置连接信息后，Dream 会自动判断服务是否需要认证并读取可用能力。
+            </p>
+            <fieldset className="claude-mcp-add-form__group">
+              <legend>连接信息</legend>
+              <p className="claude-mcp-add-form__group-hint">名称用于在 Resources 中识别此连接，传输方式应与服务端保持一致。</p>
+              <div className="claude-mcp-add-form__fields">
+                <label>
+                  MCP 服务名称
+                  <input
+                    ref={serverNameInputRef}
+                    aria-label="MCP 服务名称"
+                    value={serverName}
+                    onChange={(event) => setServerName(event.target.value)}
+                    autoComplete="off"
+                    maxLength={128}
+                    required
+                    placeholder="例如 comfy-cloud"
+                  />
+                </label>
+                <label>
+                  传输方式
+                  <select
+                    aria-label="MCP 传输方式"
+                    value={serverTransport}
+                    onChange={(event) => {
+                      setServerTransport(event.target.value as typeof serverTransport);
+                      setConfigurationError(null);
+                    }}
+                  >
+                    <option value="streamable_http">Streamable HTTP</option>
+                    <option value="sse">Legacy SSE</option>
+                    <option value="stdio">stdio profile</option>
+                  </select>
+                </label>
+              </div>
+            </fieldset>
+            <fieldset className="claude-mcp-add-form__group">
+              <legend>{serverTransport === 'stdio' ? '运行配置' : '连接地址'}</legend>
+              <p className="claude-mcp-add-form__group-hint">
+                {serverTransport === 'stdio'
+                  ? 'stdio 只能引用服务端批准的 profile，不接受浏览器命令、参数或环境变量。'
+                  : 'HTTP/SSE 只保存安全 URL，不保存浏览器中的认证信息。'}
+              </p>
+              <label className="claude-mcp-add-form__endpoint">
+                {serverTransport === 'stdio' ? '服务端 profile key' : 'MCP 服务 URL'}
+                <input
+                  aria-label={serverTransport === 'stdio' ? 'MCP stdio profile key' : 'MCP 服务 URL'}
+                  type={serverTransport === 'stdio' ? 'text' : 'url'}
+                  value={serverTransport === 'stdio' ? stdioProfileKey : serverUrl}
+                  onChange={(event) => serverTransport === 'stdio'
+                    ? setStdioProfileKey(event.target.value)
+                    : setServerUrl(event.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={serverTransport === 'stdio' ? 128 : 2048}
+                  required
+                  placeholder={serverTransport === 'stdio' ? '例如 local-files-readonly' : 'https://mcp.example.com/mcp'}
+                />
+              </label>
+              <p className="claude-mcp-add-form__hint">
+                认证要求由 Dream 连接 Server 后自动判断，无需预先选择认证方式。
+              </p>
+            </fieldset>
           </div>
-          <p className="claude-mcp-add-form__hint">
-            认证要求由 Dream 连接 Server 后自动判断；无需选择无认证或 OAuth。
-          </p>
-          {configurationError ? (
-            <div className="claude-mcp-add-form__error" role="alert">{configurationError}</div>
-          ) : null}
-          <div className="claude-mcp-add-form__actions">
-            <button
-              disabled={configuring}
-              onClick={() => setAddDialogOpen(false)}
-              style={actionButton()}
-              type="button"
-            >
-              取消
-            </button>
-            <button type="submit" disabled={configuring} style={actionButton(true)}>
-              {configuring ? '正在添加…' : '添加 MCP 服务'}
-            </button>
+          <div className="claude-mcp-add-form__footer">
+            {configurationError ? (
+              <div className="claude-mcp-add-form__error" role="alert">{configurationError}</div>
+            ) : null}
+            <div className="claude-mcp-add-form__actions">
+              <button
+                disabled={configuring}
+                onClick={() => setAddDialogOpen(false)}
+                style={actionButton()}
+                type="button"
+              >
+                取消
+              </button>
+              <button type="submit" disabled={configuring} style={actionButton(true)}>
+                {configuring ? '正在添加…' : '添加 MCP 服务'}
+              </button>
+            </div>
           </div>
         </form>
       </Modal>

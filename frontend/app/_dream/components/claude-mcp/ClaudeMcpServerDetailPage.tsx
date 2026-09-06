@@ -1,5 +1,5 @@
 // [Input] One actor-owned database MCP server identifier, typed claude-mcp APIs, and Settings navigation callbacks.
-// [Output] MCP detail workbench with automatic cache-first standard-SDK discovery, OAuth actions, one unified App usage-policy form, and searchable tools/resources/prompts inventory.
+// [Output] MCP detail workbench with automatic cache-first standard-SDK discovery, OAuth actions, one auto-saving App usage-policy group, and searchable tools/resources/prompts inventory.
 // [Pos] Server detail surface in the frontend claude-mcp business domain.
 // [Sync] 2026-08-20: add public-SDK tool discovery without `/mcp` TUI parsing or remote tool execution.
 // [Sync] 2026-08-25: separate anonymous, required, authenticated, and rollback-compatible unknown auth actions.
@@ -8,16 +8,17 @@
 // [Sync] 2026-08-25: remove editable authentication policy; backend discovery owns anonymous/OAuth classification.
 // [Sync] 2026-08-25: replace redirect URL copy/paste with same-origin automatic SPA callback submission.
 // [Sync] 2026-08-25: ignore stale inventory responses when config or credential revisions change mid-discovery.
-// [Sync] 2026-09-06: add connection-level MCP App desired controls and explicit effective availability.
+// [Sync] 2026-09-06: add connection-level MCP App desired controls while keeping effective composition server-owned.
 // [Sync] 2026-09-06: align connection-level App settings with the Notion detail split-section layout.
 // [Sync] 2026-09-06: describe low-risk eligibility as the server-owned positive classification without requiring optional tool hints.
-// [Sync] 2026-09-06: fold all connection-level App controls and their save action into one MCP usage-policy section.
+// [Sync] 2026-09-06: fold all connection-level App controls into one MCP usage-policy section.
+// [Sync] 2026-09-06: replace the manual usage-policy action with queued CAS auto-save, conflict rebasing, visible failure, and retained local edits.
+// [Sync] 2026-09-06: remove the usage-policy explanatory subtitle, summary/status footer, and all availability badges while retaining desired persistence and error alerts.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   cancelClaudeMcpAuth,
   getClaudeMcpCapability,
-  getClaudeMcpAppEffectiveStatus,
   getClaudeMcpAppSettings,
   getClaudeMcpOperation,
   getClaudeMcpServer,
@@ -29,7 +30,6 @@ import {
   updateClaudeMcpAppSettings,
   ClaudeMcpApiError,
   type ClaudeMcpCapability,
-  type ClaudeMcpAppEffectiveStatus,
   type ClaudeMcpAppSettings,
   type ClaudeMcpAuthState,
   type ClaudeMcpOperation,
@@ -66,8 +66,19 @@ type CapabilityTab = 'tools' | 'resources' | 'prompts';
 type ToolFilter = 'all' | 'read_only' | 'destructive' | 'open_world' | 'unspecified';
 type EditTransport = 'streamable_http' | 'sse' | 'stdio';
 type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
+type AppUsagePolicyField = 'enabled' | 'lowRiskToolCalls' | 'uiMessages';
+
+interface AppUsagePolicyDraft {
+  enabled: boolean;
+  lowRiskToolCalls: boolean;
+  uiMessages: boolean;
+}
 
 const OPERATION_POLL_INTERVAL_MS = 1200;
+const APP_USAGE_POLICY_AUTO_SAVE_DELAY_MS = 350;
+const APP_USAGE_POLICY_RETRY_DELAY_MS = 1200;
+const APP_USAGE_POLICY_MAX_CONFLICT_REBASES = 3;
+const APP_SETTINGS_REVISION_CONFLICT = 'CLAUDE_MCP_APP_SETTINGS_REVISION_CONFLICT';
 const ACTIVE_STATES: ClaudeMcpState[] = [
   'auth_starting',
   'waiting_for_user',
@@ -132,36 +143,12 @@ function operationErrorMessage(operation: ClaudeMcpOperation): string | null {
     : null;
 }
 
-const APP_STATUS_REASONS: Record<string, string> = {
-  user_disabled: '已按你的选择关闭；工具结果仍会保留普通文本或数据展示。',
-  service_not_enabled: '服务端尚未启用 MCP App 运行能力。',
-  plugin_unavailable: '服务端尚未准备好 MCP App Host。',
-  runtime_policy_unavailable: '服务端运行策略当前不可用。',
-  runtime_policy_denied: '服务端策略尚未允许 MCP App 读取此连接的资源。',
-  sandbox_not_configured: '服务端尚未完成 MCP App 隔离运行配置。',
-  host_policy_invalid: '服务端 MCP App 运行配置无效。',
-  connection_settings_unavailable: '连接的 App 设置当前不可读取。',
-  MCP_APP_CONNECTION_DISABLED: '此 MCP 连接已禁用。',
-  MCP_APP_STREAMABLE_HTTP_REQUIRED: '此连接的传输方式暂不支持 MCP App。',
-  MCP_APP_SERVER_POLICY_UNAVAILABLE: '服务端尚未允许此连接使用 MCP App。',
-  MCP_APP_INVENTORY_UNAVAILABLE: '尚未取得可用的连接能力清单。',
-  MCP_APP_NOT_ADVERTISED: '此连接没有声明可展示的 MCP App。',
-  interaction_partially_available: 'MCP App 可以展示，但部分已选择的交互尚未被服务端允许。',
-};
-
-function appStatusLabel(status: ClaudeMcpAppEffectiveStatus | null): string {
-  if (!status) return '状态未知';
-  if (status.effective.state === 'enabled') return '实际可用';
-  if (status.effective.state === 'partially_enabled') return '部分可用';
-  if (status.effective.state === 'disabled') return '已关闭';
-  return '暂不可用';
-}
-
-function appStatusTone(status: ClaudeMcpAppEffectiveStatus | null): Tone {
-  if (status?.effective.state === 'enabled') return 'success';
-  if (status?.effective.state === 'partially_enabled') return 'warning';
-  if (status?.effective.state === 'unavailable') return 'danger';
-  return 'neutral';
+function appUsagePolicyDraft(settings: ClaudeMcpAppSettings): AppUsagePolicyDraft {
+  return {
+    enabled: settings.desired.enabled,
+    lowRiskToolCalls: settings.desired.interactions.lowRiskToolCalls,
+    uiMessages: settings.desired.interactions.uiMessages,
+  };
 }
 
 function connectionSummary(
@@ -442,8 +429,8 @@ export default function ClaudeMcpServerDetailPage({
   const [pageError, setPageError] = useState<string | null>(null);
   const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [appSettings, setAppSettings] = useState<ClaudeMcpAppSettings | null>(null);
-  const [appEffectiveStatus, setAppEffectiveStatus] = useState<ClaudeMcpAppEffectiveStatus | null>(null);
   const [appSettingsError, setAppSettingsError] = useState<string | null>(null);
+  const [appUsagePolicySaving, setAppUsagePolicySaving] = useState(false);
   const [editAppEnabled, setEditAppEnabled] = useState(false);
   const [editAppLowRiskToolCalls, setEditAppLowRiskToolCalls] = useState(false);
   const [editAppUiMessages, setEditAppUiMessages] = useState(false);
@@ -455,7 +442,20 @@ export default function ClaudeMcpServerDetailPage({
   const [editEnabled, setEditEnabled] = useState(true);
   const automaticInventoryKeyRef = useRef<string | null>(null);
   const inventoryRequestSequenceRef = useRef(0);
-  const serverWorkspaceRef = useRef<string | null>(null);
+  const serverRef = useRef<ClaudeMcpServer | null>(null);
+  const appSettingsRef = useRef<ClaudeMcpAppSettings | null>(null);
+  const appUsagePolicyDraftRef = useRef<AppUsagePolicyDraft>({
+    enabled: false,
+    lowRiskToolCalls: false,
+    uiMessages: false,
+  });
+  const appUsagePolicyDirtyFieldsRef = useRef<Partial<Record<AppUsagePolicyField, number>>>({});
+  const appUsagePolicyChangeSequenceRef = useRef(0);
+  const appUsagePolicySaveInFlightRef = useRef(false);
+  const appUsagePolicySaveTimerRef = useRef<number | null>(null);
+  const appUsagePolicyScopeRef = useRef(0);
+
+  serverRef.current = server;
 
   const effectiveState = operation && ACTIVE_STATES.includes(operation.state)
     ? operation.state
@@ -469,18 +469,30 @@ export default function ClaudeMcpServerDetailPage({
     });
   }, [inventory?.tools, searchQuery, toolFilter]);
 
-  const loadAppEffectiveStatus = useCallback(async () => {
-    try {
-      const next = await getClaudeMcpAppEffectiveStatus(
-        serverName,
-        serverWorkspaceRef.current,
-      );
-      setAppEffectiveStatus(next);
-    } catch (error) {
-      setAppEffectiveStatus(null);
-      setAppSettingsError(errorMessage(error, 'MCP App 实际状态读取失败'));
+  const adoptAppUsagePolicySettings = useCallback((
+    next: ClaudeMcpAppSettings,
+    preserveDirtyDraft: boolean,
+  ) => {
+    const current = appSettingsRef.current;
+    if (current && next.revision < current.revision) return;
+
+    appSettingsRef.current = next;
+    setAppSettings(next);
+    const visibleDraft = appUsagePolicyDraft(next);
+    if (preserveDirtyDraft) {
+      const localDraft = appUsagePolicyDraftRef.current;
+      const dirtyFields = appUsagePolicyDirtyFieldsRef.current;
+      if (dirtyFields.enabled) visibleDraft.enabled = localDraft.enabled;
+      if (dirtyFields.lowRiskToolCalls) {
+        visibleDraft.lowRiskToolCalls = localDraft.lowRiskToolCalls;
+      }
+      if (dirtyFields.uiMessages) visibleDraft.uiMessages = localDraft.uiMessages;
     }
-  }, [serverName]);
+    appUsagePolicyDraftRef.current = visibleDraft;
+    setEditAppEnabled(visibleDraft.enabled);
+    setEditAppLowRiskToolCalls(visibleDraft.lowRiskToolCalls);
+    setEditAppUiMessages(visibleDraft.uiMessages);
+  }, []);
 
   const loadInventory = useCallback(async () => {
     const requestSequence = inventoryRequestSequenceRef.current + 1;
@@ -505,7 +517,6 @@ export default function ClaudeMcpServerDetailPage({
             ? (current.credential_configured ? 'authenticated' : 'anonymous')
             : current.auth_state,
       } : current);
-      void loadAppEffectiveStatus();
     } catch (error) {
       if (requestSequence !== inventoryRequestSequenceRef.current) return;
       setInventory(null);
@@ -513,7 +524,7 @@ export default function ClaudeMcpServerDetailPage({
     } finally {
       if (requestSequence === inventoryRequestSequenceRef.current) setInventoryLoading(false);
     }
-  }, [loadAppEffectiveStatus, serverName]);
+  }, [serverName]);
 
   const loadInventoryForServer = useCallback((nextServer: ClaudeMcpServer) => {
     const key = `${serverName}:${nextServer.revision ?? 'unknown'}:${nextServer.credential_revision}:`;
@@ -542,17 +553,19 @@ export default function ClaudeMcpServerDetailPage({
       const nextCapability = capabilityResult.value;
       setCapability(nextCapability);
       if (!nextCapability.enabled) {
+        appUsagePolicyScopeRef.current += 1;
         inventoryRequestSequenceRef.current += 1;
         setServer(null);
         setInventory(null);
         setInventoryLoading(false);
         setAppSettings(null);
-        setAppEffectiveStatus(null);
+        appSettingsRef.current = null;
+        appUsagePolicyDirtyFieldsRef.current = {};
+        setAppUsagePolicySaving(false);
         return;
       }
       if (serverResult.status === 'rejected') throw serverResult.reason;
       const nextServer = serverResult.value;
-      serverWorkspaceRef.current = nextServer.workspace_id;
       setServer(nextServer);
       setEditDisplayName(nextServer.display_name);
       setEditTransport((nextServer.transport ?? 'streamable_http') as EditTransport);
@@ -564,17 +577,10 @@ export default function ClaudeMcpServerDetailPage({
           nextServer.id ?? serverName,
           nextServer.workspace_id,
         );
-        setAppSettings(nextAppSettings);
-        setEditAppEnabled(nextAppSettings.desired.enabled);
-        setEditAppLowRiskToolCalls(
-          nextAppSettings.desired.interactions.lowRiskToolCalls,
-        );
-        setEditAppUiMessages(nextAppSettings.desired.interactions.uiMessages);
+        adoptAppUsagePolicySettings(nextAppSettings, true);
         setAppSettingsError(null);
-        void loadAppEffectiveStatus();
       } catch (error) {
-        setAppSettings(null);
-        setAppEffectiveStatus(null);
+        if (!appSettingsRef.current) setAppSettings(null);
         setAppSettingsError(errorMessage(error, 'MCP App 设置读取失败'));
       }
       if (nextServer.active_operation_id) {
@@ -586,7 +592,30 @@ export default function ClaudeMcpServerDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [loadAppEffectiveStatus, loadInventoryForServer, serverName]);
+  }, [adoptAppUsagePolicySettings, loadInventoryForServer, serverName]);
+
+  useEffect(() => {
+    appUsagePolicyScopeRef.current += 1;
+    appUsagePolicyDirtyFieldsRef.current = {};
+    appSettingsRef.current = null;
+    appUsagePolicyDraftRef.current = {
+      enabled: false,
+      lowRiskToolCalls: false,
+      uiMessages: false,
+    };
+    setAppUsagePolicySaving(false);
+    if (appUsagePolicySaveTimerRef.current !== null) {
+      window.clearTimeout(appUsagePolicySaveTimerRef.current);
+      appUsagePolicySaveTimerRef.current = null;
+    }
+    return () => {
+      appUsagePolicyScopeRef.current += 1;
+      if (appUsagePolicySaveTimerRef.current !== null) {
+        window.clearTimeout(appUsagePolicySaveTimerRef.current);
+        appUsagePolicySaveTimerRef.current = null;
+      }
+    };
+  }, [serverName]);
 
   useEffect(() => {
     void load();
@@ -720,35 +749,106 @@ export default function ClaudeMcpServerDetailPage({
     }
   }, [busyAction, onBack, server, serverName]);
 
-  const saveUsagePolicy = useCallback(async () => {
-    if (!server || !appSettings || busyAction) return;
-    setBusyAction('usage-policy');
+  const flushAppUsagePolicy = useCallback(async () => {
+    if (appUsagePolicySaveInFlightRef.current) return;
+    const activeServer = serverRef.current;
+    if (!activeServer || !appSettingsRef.current) return;
+
+    const scope = appUsagePolicyScopeRef.current;
+    let retryDelay: number | null = null;
+    let conflictRebases = 0;
+    appUsagePolicySaveInFlightRef.current = true;
+    setAppUsagePolicySaving(true);
     setAppSettingsError(null);
+
     try {
-      const next = await updateClaudeMcpAppSettings(server, appSettings, {
-        enabled: editAppEnabled,
-        lowRiskToolCalls: editAppLowRiskToolCalls,
-        uiMessages: editAppUiMessages,
-      });
-      setAppSettings(next);
-      setEditAppEnabled(next.desired.enabled);
-      setEditAppLowRiskToolCalls(next.desired.interactions.lowRiskToolCalls);
-      setEditAppUiMessages(next.desired.interactions.uiMessages);
-      await loadAppEffectiveStatus();
+      while (Object.keys(appUsagePolicyDirtyFieldsRef.current).length > 0) {
+        if (scope !== appUsagePolicyScopeRef.current) return;
+        const baseSettings = appSettingsRef.current;
+        if (!baseSettings) return;
+
+        const dirtySnapshot = { ...appUsagePolicyDirtyFieldsRef.current };
+        const localDraft = appUsagePolicyDraftRef.current;
+        const desired = appUsagePolicyDraft(baseSettings);
+        if (dirtySnapshot.enabled) desired.enabled = localDraft.enabled;
+        if (dirtySnapshot.lowRiskToolCalls) {
+          desired.lowRiskToolCalls = localDraft.lowRiskToolCalls;
+        }
+        if (dirtySnapshot.uiMessages) desired.uiMessages = localDraft.uiMessages;
+
+        let next: ClaudeMcpAppSettings;
+        try {
+          next = await updateClaudeMcpAppSettings(activeServer, baseSettings, desired);
+        } catch (error) {
+          const isRevisionConflict = error instanceof ClaudeMcpApiError
+            && error.code === APP_SETTINGS_REVISION_CONFLICT;
+          if (!isRevisionConflict || conflictRebases >= APP_USAGE_POLICY_MAX_CONFLICT_REBASES) {
+            throw error;
+          }
+          conflictRebases += 1;
+          const latest = await getClaudeMcpAppSettings(
+            activeServer.id ?? serverName,
+            activeServer.workspace_id,
+          );
+          if (scope !== appUsagePolicyScopeRef.current) return;
+          adoptAppUsagePolicySettings(latest, true);
+          continue;
+        }
+
+        if (scope !== appUsagePolicyScopeRef.current) return;
+        appSettingsRef.current = next;
+        const currentDirtyFields = appUsagePolicyDirtyFieldsRef.current;
+        (Object.keys(dirtySnapshot) as AppUsagePolicyField[]).forEach((field) => {
+          if (currentDirtyFields[field] === dirtySnapshot[field]) {
+            delete currentDirtyFields[field];
+          }
+        });
+        adoptAppUsagePolicySettings(next, true);
+        conflictRebases = 0;
+      }
+
+      setAppSettingsError(null);
     } catch (error) {
-      setAppSettingsError(errorMessage(error, 'MCP 使用策略保存失败'));
+      const detail = errorMessage(error, 'MCP 使用策略自动保存失败。');
+      setAppSettingsError(`${detail} 当前选择已保留，将自动重试。`);
+      retryDelay = APP_USAGE_POLICY_RETRY_DELAY_MS;
     } finally {
-      setBusyAction(null);
+      appUsagePolicySaveInFlightRef.current = false;
+      if (scope === appUsagePolicyScopeRef.current) setAppUsagePolicySaving(false);
+      if (
+        scope === appUsagePolicyScopeRef.current
+        && Object.keys(appUsagePolicyDirtyFieldsRef.current).length > 0
+        && appUsagePolicySaveTimerRef.current === null
+      ) {
+        appUsagePolicySaveTimerRef.current = window.setTimeout(() => {
+          appUsagePolicySaveTimerRef.current = null;
+          void flushAppUsagePolicy();
+        }, retryDelay ?? 0);
+      }
     }
-  }, [
-    appSettings,
-    busyAction,
-    editAppEnabled,
-    editAppLowRiskToolCalls,
-    editAppUiMessages,
-    loadAppEffectiveStatus,
-    server,
-  ]);
+  }, [adoptAppUsagePolicySettings, serverName]);
+
+  const updateAppUsagePolicyDraft = useCallback((
+    field: AppUsagePolicyField,
+    value: boolean,
+  ) => {
+    const nextDraft = { ...appUsagePolicyDraftRef.current, [field]: value };
+    appUsagePolicyDraftRef.current = nextDraft;
+    if (field === 'enabled') setEditAppEnabled(value);
+    if (field === 'lowRiskToolCalls') setEditAppLowRiskToolCalls(value);
+    if (field === 'uiMessages') setEditAppUiMessages(value);
+
+    appUsagePolicyChangeSequenceRef.current += 1;
+    appUsagePolicyDirtyFieldsRef.current[field] = appUsagePolicyChangeSequenceRef.current;
+    setAppSettingsError(null);
+    if (appUsagePolicySaveTimerRef.current !== null) {
+      window.clearTimeout(appUsagePolicySaveTimerRef.current);
+    }
+    appUsagePolicySaveTimerRef.current = window.setTimeout(() => {
+      appUsagePolicySaveTimerRef.current = null;
+      void flushAppUsagePolicy();
+    }, APP_USAGE_POLICY_AUTO_SAVE_DELAY_MS);
+  }, [flushAppUsagePolicy]);
 
   const tabCounts = {
     tools: inventory?.capabilities.tools.count,
@@ -938,17 +1038,13 @@ export default function ClaudeMcpServerDetailPage({
 
       <DetailSection
         title="使用策略"
-        subtitle="统一控制此连接的 MCP App 展示与交互；Chat 工具调用仍遵循现有权限确认和沙箱策略。"
         layout="split"
         isMobile={isMobile}
       >
-        <form
-          aria-busy={busyAction === 'usage-policy'}
+        <div
+          aria-busy={appUsagePolicySaving}
           aria-label="MCP 使用策略"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveUsagePolicy();
-          }}
+          role="group"
           style={{ display: 'grid' }}
         >
           {appSettings ? (
@@ -958,7 +1054,7 @@ export default function ClaudeMcpServerDetailPage({
                   <input
                     type="checkbox"
                     checked={editAppEnabled}
-                    onChange={(event) => setEditAppEnabled(event.target.checked)}
+                    onChange={(event) => updateAppUsagePolicyDraft('enabled', event.target.checked)}
                     disabled={Boolean(busyAction)}
                   />
                   <span>
@@ -968,7 +1064,6 @@ export default function ClaudeMcpServerDetailPage({
                     </span>
                   </span>
                 </label>
-                <Pill tone={appStatusTone(appEffectiveStatus)}>{appStatusLabel(appEffectiveStatus)}</Pill>
               </div>
 
               <div style={{ display: 'grid', borderTop: SOFT_ROW_DIVIDER }}>
@@ -977,7 +1072,7 @@ export default function ClaudeMcpServerDetailPage({
                     <input
                       type="checkbox"
                       checked={editAppLowRiskToolCalls}
-                      onChange={(event) => setEditAppLowRiskToolCalls(event.target.checked)}
+                      onChange={(event) => updateAppUsagePolicyDraft('lowRiskToolCalls', event.target.checked)}
                       disabled={!editAppEnabled || Boolean(busyAction)}
                     />
                     <span>
@@ -987,16 +1082,13 @@ export default function ClaudeMcpServerDetailPage({
                       </span>
                     </span>
                   </label>
-                  <Pill tone={appEffectiveStatus?.effective.features.appToolCalls ? 'success' : 'neutral'}>
-                    {appEffectiveStatus?.effective.features.appToolCalls ? '实际可用' : '未生效'}
-                  </Pill>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: isMobile ? 'wrap' : 'nowrap', padding: '0.9rem 0', borderTop: SOFT_ROW_DIVIDER }}>
                   <label style={{ display: 'flex', minWidth: 0, flex: '1 1 16rem', alignItems: 'flex-start', gap: '0.58rem', color: editAppEnabled ? 'var(--color-text-secondary)' : 'var(--color-text-muted)', fontSize: '0.78rem' }}>
                     <input
                       type="checkbox"
                       checked={editAppUiMessages}
-                      onChange={(event) => setEditAppUiMessages(event.target.checked)}
+                      onChange={(event) => updateAppUsagePolicyDraft('uiMessages', event.target.checked)}
                       disabled={!editAppEnabled || Boolean(busyAction)}
                     />
                     <span>
@@ -1006,25 +1098,9 @@ export default function ClaudeMcpServerDetailPage({
                       </span>
                     </span>
                   </label>
-                  <Pill tone={appEffectiveStatus?.effective.features.uiMessage ? 'success' : 'neutral'}>
-                    {appEffectiveStatus?.effective.features.uiMessage ? '实际可用' : '未生效'}
-                  </Pill>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.85rem', flexWrap: 'wrap', paddingTop: '1rem', borderTop: SOFT_ROW_DIVIDER }}>
-                <div style={{ display: 'grid', gap: '0.22rem', color: 'var(--color-text-muted)', fontSize: '0.73rem', lineHeight: 1.45 }}>
-                  <span>默认策略：{appSettings.default.enabled ? 'App 开启' : 'App 关闭'}</span>
-                  <span>你的选择：{appSettings.desired.enabled ? '开启' : '关闭'} · revision {appSettings.revision}</span>
-                  <span>
-                    实际状态：{APP_STATUS_REASONS[appEffectiveStatus?.effective.reasonCode ?? ''] ?? (appEffectiveStatus?.effective.enabled ? '当前连接可展示 MCP App。' : '正在检查服务端可用性。')}
-                  </span>
-                </div>
-                <button type="submit" disabled={Boolean(busyAction)} style={{ ...actionStyle(true), width: isMobile ? '100%' : undefined, justifyContent: 'center', opacity: busyAction ? 0.62 : 1 }}>
-                  {busyAction === 'usage-policy' ? <IconLoader style={{ width: '0.82rem', height: '0.82rem' }} /> : <IconCheck style={{ width: '0.82rem', height: '0.82rem' }} />}
-                  保存使用策略
-                </button>
-              </div>
             </>
           ) : (
             <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem', lineHeight: 1.5 }}>
@@ -1034,7 +1110,7 @@ export default function ClaudeMcpServerDetailPage({
           {appSettings && appSettingsError ? (
             <div role="alert" style={{ color: 'var(--color-state-error)', fontSize: '0.76rem' }}>{appSettingsError}</div>
           ) : null}
-        </form>
+        </div>
       </DetailSection>
 
       <DetailSection

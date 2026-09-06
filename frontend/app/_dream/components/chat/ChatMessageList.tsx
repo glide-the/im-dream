@@ -1,5 +1,6 @@
 // [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, UserMessagePart, FileMessagePart sub-components; toolInputSummary helpers.
 // [Output] Scrollable chat message list with tool, text, reasoning, and file part rendering.
+// [Sync] 2026-09-06: remove the decorative start-of-conversation label.
 // [Pos] chat-message-list component node in frontend/app/_dream/components/chat
 // [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
 // [Sync] 2026-05-27: add toolChoice prop; render non-completed tool parts in manual mode directly with isManualToolInvocation=true so Approve/Cancel UI is shown.
@@ -385,8 +386,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
           <button type="button" onClick={() => void onLoadOlder()}>{t('chat.historyTurn.loadEarlier')}</button>
         ) : historyEmpty ? (
           <span role="status">{t('chat.historyTurn.empty')}</span>
-        ) : messages.length > 0 ? (
-          <span data-chat-history-end="true">{t('chat.historyTurn.start')}</span>
+
         ) : null}
       </div>
       {messages.map((persistedMessage, index) => {

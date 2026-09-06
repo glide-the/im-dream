@@ -1,7 +1,8 @@
 /* [Input] Claude MCP resource-list structure, the shared Modal surface, and semantic theme tokens. */
-/* [Output] Responsive add action and compact MCP Server creation form for wide and narrow settings viewports. */
+/* [Output] Responsive add action plus a caller-scoped MCP Server dialog with grouped fields, scroll-contained content, and a persistent footer. */
 /* [Pos] Presentation contract for ClaudeMcpResourceSection's list header and modal form. */
 /* [Sync] 2026-09-06: move Server creation into a responsive shared dialog while preserving the paper settings style. */
+/* [Sync] 2026-09-06: widen only the MCP creation surface, group connection data, and separate its scrollable body from the always-visible actions. */
 
 .claude-mcp-resource__header {
   display: flex;
@@ -28,6 +29,26 @@
   height: 0.85rem;
 }
 
+.claude-mcp-add-dialog.modal-surface--default {
+  width: min(100%, 46rem);
+  max-width: 46rem;
+  padding: 0;
+  border-radius: 1.4rem;
+}
+
+.claude-mcp-add-dialog .modal-header--default {
+  padding: 1.2rem 1.4rem 1.05rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent);
+}
+
+.claude-mcp-add-dialog .modal-content--default {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+}
+
 .claude-mcp-resource__add-button:focus-visible,
 .claude-mcp-add-form button:focus-visible,
 .claude-mcp-add-form input:focus-visible,
@@ -37,8 +58,20 @@
 }
 
 .claude-mcp-add-form {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.claude-mcp-add-form__body {
   display: grid;
-  gap: 0.9rem;
+  min-height: 0;
+  gap: 1rem;
+  padding: 1.2rem 1.4rem 1.3rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .claude-mcp-add-form__description,
@@ -52,6 +85,29 @@
 .claude-mcp-add-form__hint {
   color: var(--color-text-muted);
   font-size: 0.73rem;
+}
+
+.claude-mcp-add-form__group {
+  min-width: 0;
+  margin: 0;
+  padding: 0.95rem 1rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--color-border-paper) 72%, transparent);
+  border-radius: 0.95rem;
+  background: color-mix(in srgb, var(--color-bg-surface) 72%, transparent);
+}
+
+.claude-mcp-add-form__group legend {
+  padding: 0 0.35rem;
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  font-weight: 720;
+}
+
+.claude-mcp-add-form__group-hint {
+  margin: 0 0 0.8rem;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
 }
 
 .claude-mcp-add-form__fields {
@@ -70,7 +126,7 @@
 }
 
 .claude-mcp-add-form__endpoint {
-  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .claude-mcp-add-form input,
@@ -87,16 +143,27 @@
 }
 
 .claude-mcp-add-form__error {
+  padding: 0.68rem 0.78rem;
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, var(--color-state-error) 9%, var(--color-bg-paper));
   color: var(--color-state-error);
   font-size: 0.78rem;
   line-height: 1.5;
+}
+
+.claude-mcp-add-form__footer {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 0.7rem;
+  padding: 0.95rem 1.4rem 1.05rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent);
+  background: var(--color-bg-paper);
 }
 
 .claude-mcp-add-form__actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.55rem;
-  padding-top: 0.2rem;
 }
 
 .claude-mcp-add-form__actions button {
@@ -114,12 +181,29 @@
     min-height: 44px;
   }
 
+  .claude-mcp-add-dialog.modal-surface--default {
+    border-radius: 1.05rem;
+  }
+
+  .claude-mcp-add-dialog .modal-header--default {
+    padding: 0.95rem 1rem 0.85rem;
+  }
+
+  .claude-mcp-add-form__body {
+    gap: 0.8rem;
+    padding: 0.9rem 1rem 1rem;
+  }
+
+  .claude-mcp-add-form__group {
+    padding: 0.8rem 0.85rem 0.85rem;
+  }
+
   .claude-mcp-add-form__fields {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .claude-mcp-add-form__endpoint {
-    grid-column: auto;
+  .claude-mcp-add-form__footer {
+    padding: 0.8rem 1rem 0.9rem;
   }
 
   .claude-mcp-add-form__actions {

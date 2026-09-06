@@ -8,11 +8,12 @@
 <!-- [同步] 2026-09-06：服务端 App-callable positive list 负责低风险分类；官方标准工具可省略 MCP 可选 risk hints，显式危险 hints 仍否决。 -->
 <!-- [同步] 2026-09-06：每条 MCP 连接增加独立 App desired/effective/revision 设置；服务器部署与凭据继续隐藏且作为能力上限。 -->
 <!-- [同步] 2026-09-06：汇总连接设置、discovery、首次模型调用、结果投影、实时/历史传递、Browser/Node Host、sandbox 和交互回流的端到端调用链。 -->
-<!-- [同步] 2026-09-06：连接详情将完整 App 控制收敛进“使用策略”区域，并以一个策略保存动作提交同一份 revision/CAS desired。 -->
+<!-- [同步] 2026-09-06：连接详情将完整 App 控制收敛进“使用策略”区域；修改通过串行 CAS 自动保存，冲突基于最新 revision 重放本地字段，失败保留选择并自动重试。 -->
+<!-- [同步] 2026-09-06：页面只呈现 desired 开关与可恢复保存错误；availability/effective 保留为 Runtime 内部组合语义，不在设置页展示。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
-> 状态：代码已存在，Phase 0—3 provider-free technical preview 已验证；连接详情具备 App desired/effective 设置；production enablement 仍未完成
+> 状态：代码已存在，Phase 0—3 provider-free technical preview 已验证；连接详情具备 App desired 设置，effective 由 Runtime 内部组合；production enablement 仍未完成
 >
 > 结论：Dream 已具备默认关闭的 MCP Apps technical-preview Host 链路。锁定的 `@mcp-ui/client@7.1.1` 仅复用 `AppBridge` 与 `PostMessageTransport`，由最小 `ImMcpAppHostAdapter` 持有 resource metadata、permissions policy 和 iframe；Browser MCP Client 只连接 Next Node Apps Runtime 暴露的受控 MCP transport，Node `PersistentConnectorManager` 再连接真实 MCP Server。Web Shell 属于 `frontend/` 根 package，Node Runtime 只属于 `frontend/packages/mcp-apps-runtime/src/**`；Python 只提供经身份/业务规则校验的短时建连视图，不参与页面交互。`productionAppsEffective=false`。
 
@@ -85,7 +86,7 @@ flowchart LR
 完整调用链分为以下十步：
 
 1. **Admin 先发布 schema capability。** Drizzle migration 为每条受管 MCP 连接增加 deny-by-default 的 App 选择和独立 revision，再发布精确 capability。Dream 不建表，capability 缺失时 fail closed。
-2. **用户配置连接。** Settings 仅向 PostgreSQL 写当前 actor/workspace 的 `desired`；页面把它与连接、部署、凭据、descriptor 和服务端策略组合为可见的实际状态。
+2. **用户配置连接。** Settings 仅向 PostgreSQL 写当前 actor/workspace 的 `desired`；Runtime 再把它与连接、部署、凭据、descriptor 和服务端策略组合为 `effective`，页面不展示该实际状态。
 3. **Discovery 确定 App 身份。** 受管 Server 的 fresh `tools/list` descriptor 必须为具体 tool 声明 `_meta.ui.resourceUri`，且该 `ui://` resource 存在。每个 Chat turn 开始前，Dream 只为服务端策略选中的 App Server 刷新缺失或过期 inventory。
 4. **模型执行首次工具调用。** Claude Agent Runtime 沿既有 MCP 路径选择工具、发送 input 并收到完整 `CallToolResult`；这一步不由 Browser App 触发。
 5. **Python 生成可信 App 投影。** 只有 Server/tool 与 fresh descriptor 精确匹配的成功结果，才会在完整普通结果旁增加版本化 `mcpAppResult`；其中绑定 `serverRef`、原始 tool name、`toolCallId`、input、workspace scope、resource URI 和原始 result。不从工具输出中猜 UI 地址。
@@ -179,18 +180,26 @@ credential 和最终能力上限；普通页面与浏览器 API 均不得显示�
 不得推进 Server config、credential 或 inventory revision。关闭主开关只关闭当前
 effective 展示；已保存的两个子选择保持不变，重开后仍按最新服务器上限重新计算。
 
-页面必须同时展示“你的选择”和“实际可用状态”。`desired=true` 但服务器条件
-不满足时显示 `unavailable` 或 `partially_enabled` 及安全原因，不能显示成“已开启”；
-服务器恢复后无需用户重存即可按同一 revision 重新组合 effective。Node 建连视图和
-Browser Host identity 都携带该 revision，旧页面、旧 lease 或同 revision 异值一律
-fail closed。
+页面仅以三个开关表达用户 `desired`，不在“使用策略”区域展示连接级 App 总状态、
+低风险调用或消息交互的 availability 徽标，也不额外展示 default/desired/revision/实际
+原因汇总区。`desired=true` 仍不能被 Runtime 视为已经 `effective`；服务器恢复后无需
+用户重存即可按同一 revision 重新组合 effective。Node 建连视图和 Browser Host
+identity 都携带该 revision，旧页面、旧 lease 或同 revision 异值一律 fail closed。
 
-连接详情的界面把这三项 App 选择、默认策略、用户 desired、实际 effective 与
-`app_settings_revision` 统一放在“使用策略”区域。页面不再并列展示独立“App 设置”
-区或“保存 App 设置”按钮；三个选择只通过同一个“保存使用策略”动作提交同一份
-CAS 请求。该组织方式只合并用户的策略编辑入口，不把 Server endpoint/transport
-编辑、认证、inventory 或 Chat 工具审批并入 App settings revision，也不改变任一
-服务端能力上限。
+连接详情的界面只把三项 App 选择放在“使用策略”区域，不显示解释 subtitle、任何
+availability 徽标、default/desired/revision/实际原因 footer 或自动保存状态行。
+`default` 与 `app_settings_revision` 仍保留在 API/CAS 合同中。页面不再展示独立
+“App 设置”区、“保存 App 设置”或“保存使用策略”按钮；任一选择变化先保留为
+本地 draft，再经短延迟合并为串行 CAS 自动保存。保存期间的新选择进入同一队列，
+不禁用开关或被旧响应回滚；成功后以服务端返回 revision 推进 desired，Runtime
+独立维护 effective。成功与保存中不增加技术性提示，只有失败在区域内显示可恢复错误。
+
+若 CAS 返回 revision conflict，前端先读取最新 settings，只把仍未确认的本地字段
+重放到最新 desired，未在本地修改的字段保留并发客户端的值，然后用新 revision
+继续 CAS。其他失败在区域内明确显示，当前 draft 不回滚并自动重试；因此移除手动
+按钮不会形成无保存入口，也不会用旧 revision 静默覆盖并发修改。该组织方式只合并
+用户的策略编辑入口，不把 Server endpoint/transport 编辑、认证、inventory 或 Chat
+工具审批并入 App settings revision，也不改变任一服务端能力上限。
 
 ### 3.6 状态模型
 

@@ -1,4 +1,4 @@
-// [Input] Open state, title/content, close callback, optional caller-owned initial focus, presentation variant, media toolbar actions, and controlled zoom state.
+// [Input] Open state, title/content, close callback, optional caller-owned initial focus/surface class, presentation variant, media toolbar actions, and controlled zoom state.
 // [Output] Portal-backed accessible modal with backdrop/Escape close, focus containment/restoration, and one shared media-preview skeleton whose controls resize only marked media content.
 // [Pos] shared modal component node in frontend/app/_dream/components/chat
 // [Sync] 2026-08-22: add dialog semantics, keyboard/focus lifecycle, and an image-preview size while preserving the default connector modal.
@@ -6,6 +6,7 @@
 // [Sync] 2026-08-23: add non-passive wheel zoom over the media stage, sharing the existing 50%–200% controlled state and blocking background scroll.
 // [Sync] 2026-08-23: keep the preview sheet at its fitted geometry while exposing zoom through a CSS variable for explicit image/diagram targets only.
 // [Sync] 2026-09-06: allow a dialog caller to select its initial focus target while preserving the close-button fallback.
+// [Sync] 2026-09-06: allow a caller-scoped surface class so one form dialog can refine geometry without changing other shared Modal callers.
 
 import {
   useEffect,
@@ -42,6 +43,7 @@ interface ModalProps {
   onClose: () => void;
   closeLabel?: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  surfaceClassName?: string;
   variant?: 'default' | 'media-preview';
   toolbarActions?: ReactNode;
   zoom?: {
@@ -59,6 +61,7 @@ export default function Modal({
   onClose,
   closeLabel = 'Close',
   initialFocusRef,
+  surfaceClassName,
   variant = 'default',
   toolbarActions,
   zoom,
@@ -182,7 +185,7 @@ export default function Modal({
     >
       <div
         ref={dialogRef}
-        className={`modal-surface modal-surface--${variant}`}
+        className={`modal-surface modal-surface--${variant}${surfaceClassName ? ` ${surfaceClassName}` : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
