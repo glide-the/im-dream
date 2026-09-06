@@ -16,12 +16,13 @@
 // [Sync] 2026-08-25: require cache-first automatic detail inventory and no refresh/retry inventory controls.
 // [Sync] 2026-08-27: prove transient PostgreSQL capability failures recover automatically without a user-facing retry button.
 // [Sync] 2026-09-06: cover connection-level App desired/effective settings and optional user-guide captures.
+// [Sync] 2026-09-06: verify accessible modal-only Server creation and unified usage-policy saving on wide and narrow screens.
 
 import { expect, test } from '@playwright/test';
 
 const WEB_BASE = process.env.E2E_WEB_BASE ?? 'http://127.0.0.1:5173';
 
-test.use({ channel: 'chromium' });
+test.use({ channel: 'chrome' });
 
 test('Resources automatically recovers after a transient capability verification failure', async ({ page }) => {
   let capabilityRequests = 0;
@@ -187,27 +188,24 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   let configured = false;
   let serverRevision = 1;
   let serverDisplayName = serverName;
-  let appSettingsRevision = 1;
-  let appDesired = {
-    enabled: false,
-    interactions: { lowRiskToolCalls: false, uiMessages: false },
-  };
-
-  const appSettingsPayload = () => ({
-    version: 1 as const,
-    revision: appSettingsRevision,
+  let appSettings = {
+    version: 1,
+    revision: 1,
     default: {
       enabled: false,
       interactions: { lowRiskToolCalls: false, uiMessages: false },
     },
-    desired: appDesired,
-    server: {
-      state: serverState === 'connected' ? 'ready' : 'inventory_unavailable',
-      reasonCode: serverState === 'connected' ? null : 'MCP_APP_INVENTORY_UNAVAILABLE',
-      resourceReads: serverState === 'connected',
-      lowRiskToolCalls: serverState === 'connected',
+    desired: {
+      enabled: false,
+      interactions: { lowRiskToolCalls: false, uiMessages: false },
     },
-  });
+    server: {
+      state: 'ready',
+      reasonCode: null,
+      resourceReads: true,
+      lowRiskToolCalls: true,
+    },
+  };
 
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().includes('react-grab.com')) {
@@ -217,10 +215,9 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   page.on('pageerror', (error) => diagnostics.push(error.message));
   page.on('requestfailed', (request) => {
     const url = request.url();
-    if (url.includes('/api/sessions/events') && request.failure()?.errorText === 'net::ERR_ABORTED') {
-      return;
-    }
-    if (!url.includes('react-grab.com') && !url.includes('fonts.googleapis.com') && !url.includes('fonts.gstatic.com')) {
+    const expectedNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
+      && new URL(url).pathname === '/api/sessions/events';
+    if (!expectedNavigationAbort && !url.includes('react-grab.com') && !url.includes('fonts.googleapis.com') && !url.includes('fonts.gstatic.com')) {
       diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${url}`);
     }
   });
@@ -336,51 +333,54 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
       return;
     }
     if (method === 'GET' && path === '/api/claude-mcp/servers/server-1/app-settings') {
-      await route.fulfill({ json: { appSettings: appSettingsPayload() } });
+      await route.fulfill({ json: { appSettings } });
       return;
     }
     if (method === 'PATCH' && path === '/api/claude-mcp/servers/server-1/app-settings') {
-      const payload = request.postDataJSON() as Record<string, unknown>;
-      expect(payload).toEqual({
-        expected_revision: appSettingsRevision,
+      expect(request.postDataJSON()).toEqual({
+        expected_revision: 1,
         enabled: true,
         low_risk_tool_calls: true,
         ui_messages: true,
         workspace_id: null,
       });
-      appSettingsRevision += 1;
-      appDesired = {
-        enabled: true,
-        interactions: { lowRiskToolCalls: true, uiMessages: true },
+      appSettings = {
+        ...appSettings,
+        revision: 2,
+        desired: {
+          enabled: true,
+          interactions: { lowRiskToolCalls: true, uiMessages: true },
+        },
       };
-      await route.fulfill({ json: { appSettings: appSettingsPayload() } });
+      await route.fulfill({ json: { appSettings } });
       return;
     }
     if (method === 'GET' && path === '/api/mcp-apps/phase1-status') {
-      const enabled = serverState === 'connected' && appDesired.enabled;
+      const appDesired = appSettings.desired.enabled;
       await route.fulfill({
         json: {
           desired: {
-            enabled: appDesired.enabled,
+            enabled: appDesired,
             features: {
-              readResource: appDesired.enabled,
-              appToolCalls: appDesired.interactions.lowRiskToolCalls,
-              uiMessage: appDesired.interactions.uiMessages,
-              windowIm: appDesired.interactions.uiMessages,
+              readResource: appDesired,
+              appToolCalls: appSettings.desired.interactions.lowRiskToolCalls,
+              uiMessage: appSettings.desired.interactions.uiMessages,
+              windowIm: appSettings.desired.interactions.lowRiskToolCalls
+                || appSettings.desired.interactions.uiMessages,
             },
           },
           effective: {
-            enabled,
+            enabled: false,
             features: {
-              readResource: enabled,
-              appToolCalls: enabled && appDesired.interactions.lowRiskToolCalls,
-              uiMessage: enabled && appDesired.interactions.uiMessages,
-              windowIm: enabled && appDesired.interactions.uiMessages,
+              readResource: false,
+              appToolCalls: false,
+              uiMessage: false,
+              windowIm: false,
             },
-            state: enabled ? 'enabled' : 'disabled',
-            reasonCode: enabled ? null : 'connection_disabled',
+            state: appDesired ? 'unavailable' : 'disabled',
+            reasonCode: appDesired ? 'service_not_enabled' : 'user_disabled',
           },
-          connection: appSettingsPayload(),
+          connection: appSettings,
         },
       });
       return;
@@ -643,6 +643,11 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
 
   await expect(page.getByRole('heading', { name: '资源链接', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
+  await expect(page.getByLabel('MCP 服务名称')).toHaveCount(0);
+  await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+  const addDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
+  await expect(addDialog).toBeVisible();
+  await expect(addDialog.getByLabel('MCP 服务名称')).toBeFocused();
   await expect(page.getByLabel('MCP 认证方式')).toHaveCount(0);
   await expect(page.getByText('认证要求由 Dream 连接 Server 后自动判断')).toBeVisible();
   if (process.env.INK_CAPTURE_MCP_APPS_GUIDE === '1') {
@@ -651,13 +656,14 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
         (element as HTMLElement).style.display = 'none';
       });
     });
-    await page.getByRole('form', { name: '添加 Claude MCP 服务' }).screenshot({
+    await addDialog.screenshot({
       path: 'output/playwright/mcp-apps-guide/add-mcp-connection.png',
     });
   }
-  await page.getByLabel('MCP 服务名称').fill(serverName);
-  await page.getByLabel('MCP 服务 URL').fill(serverUrl);
-  await page.getByRole('button', { name: '添加 MCP 服务' }).click();
+  await addDialog.getByLabel('MCP 服务名称').fill(serverName);
+  await addDialog.getByLabel('MCP 服务 URL').fill(serverUrl);
+  await addDialog.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+  await expect(addDialog).toHaveCount(0);
   const serverCard = page.getByRole('article', { name: `MCP 服务 ${serverName}` });
   await expect(serverCard).toBeVisible();
   await expect(serverCard).toContainText('已配置');
@@ -667,6 +673,20 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await expect(page.getByRole('button', { name: /刷新 inventory|重试 inventory|重试探测/ })).toHaveCount(0);
   await expect(page.getByText('需要认证', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('user · revision 2', { exact: true })).toBeVisible();
+  const usagePolicyForm = page.getByRole('form', { name: 'MCP 使用策略' });
+  await expect(page.getByRole('heading', { name: 'App 设置', exact: true })).toHaveCount(0);
+  await expect(usagePolicyForm.getByRole('button', { name: '保存 App 设置' })).toHaveCount(0);
+  await usagePolicyForm.getByLabel('在聊天中使用 App').check();
+  await usagePolicyForm.getByLabel('低风险工具调用').check();
+  await usagePolicyForm.getByLabel('向聊天发送消息').check();
+  await usagePolicyForm.getByRole('button', { name: '保存使用策略' }).click();
+  await expect(usagePolicyForm).toContainText('你的选择：开启 · revision 2');
+  await expect(usagePolicyForm).toContainText('服务端尚未启用 MCP App 运行能力');
+  if (process.env.INK_CAPTURE_MCP_APPS_GUIDE === '1') {
+    await usagePolicyForm.screenshot({
+      path: 'output/playwright/mcp-apps-guide/configure-mcp-app.png',
+    });
+  }
 
   await page.getByRole('button', { name: '开始认证' }).click();
   await expect(page.getByText('等待授权', { exact: true }).first()).toBeVisible();
@@ -681,19 +701,6 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   expect(await page.evaluate((secret) => Object.values(localStorage).every((value) => !value.includes(secret)), 'private-code')).toBe(true);
 
   await expect(page.getByRole('heading', { name: `${serverName} MCP Server` })).toBeVisible();
-  await page.getByRole('checkbox', { name: /在聊天中使用 App/ }).check();
-  await page.getByRole('checkbox', { name: /低风险工具调用/ }).check();
-  await page.getByRole('checkbox', { name: /向聊天发送消息/ }).check();
-  await page.getByRole('button', { name: '保存 App 设置' }).click();
-  await expect(page.getByText('你的选择：开启 · revision 2', { exact: true })).toBeVisible();
-  const appSettingsSection = page.getByRole('heading', { name: 'App 设置', exact: true })
-    .locator('xpath=ancestor::section[1]');
-  await expect(appSettingsSection.getByText('实际可用', { exact: true })).toHaveCount(3);
-  if (process.env.INK_CAPTURE_MCP_APPS_GUIDE === '1') {
-    await appSettingsSection.screenshot({
-      path: 'output/playwright/mcp-apps-guide/configure-mcp-app.png',
-    });
-  }
   await expect(page.getByRole('tab', { name: 'Tools 41' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText(serverUrl, { exact: true })).toBeVisible();
   await page.getByRole('searchbox', { name: '搜索 MCP 工具' }).fill('submit_workflow');
@@ -729,6 +736,15 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await page.setViewportSize({ width: 390, height: 760 });
   await expect(serverCard).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+  await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+  const narrowAddDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
+  await expect(narrowAddDialog).toBeVisible();
+  const narrowDialogBox = await narrowAddDialog.boundingBox();
+  expect(narrowDialogBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(744);
+  await page.screenshot({ fullPage: true, path: 'output/playwright/claude-mcp-add-dialog-narrow.png' });
+  await page.keyboard.press('Escape');
+  await expect(narrowAddDialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '添加 MCP 服务', exact: true })).toBeFocused();
   await page.screenshot({ fullPage: true, path: 'output/playwright/claude-mcp-resources-narrow.png' });
 
   await serverCard.getByRole('button', { name: '移除' }).click();

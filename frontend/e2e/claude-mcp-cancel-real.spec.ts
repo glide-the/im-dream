@@ -4,6 +4,7 @@
 // [Sync] 2026-08-25: add explicit Resources OAuth cancel plus Chat stop over the managed-DB MCP path.
 // [Sync] 2026-08-25: detect OAuth through detail discovery; the create form no longer accepts an auth policy.
 // [Sync] 2026-08-25: rely on automatic cache-first detail discovery and expose no inventory refresh control.
+// [Sync] 2026-09-06: configure temporary Servers through the visible modal.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -149,10 +150,12 @@ test('real actor visibly cancels an OAuth operation without creating a credentia
   let removed = false;
   await openResources(page, token);
   try {
-    await page.getByLabel('MCP 服务名称').fill(OAUTH_SERVER_NAME);
-    await page.getByLabel('MCP 传输方式').selectOption('streamable_http');
-    await page.getByLabel('MCP 服务 URL').fill(OAUTH_SERVER_URL);
-    await page.getByRole('button', { name: '添加 MCP 服务' }).click();
+    await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+    const addDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
+    await addDialog.getByLabel('MCP 服务名称').fill(OAUTH_SERVER_NAME);
+    await addDialog.getByLabel('MCP 传输方式').selectOption('streamable_http');
+    await addDialog.getByLabel('MCP 服务 URL').fill(OAUTH_SERVER_URL);
+    await addDialog.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
     const card = page.getByRole('article', { name: `MCP 服务 ${OAUTH_SERVER_NAME}` });
     await expect(card).toContainText('已配置');
     await card.getByRole('button', { name: '管理与工具' }).click();
@@ -202,10 +205,12 @@ test('real actor visibly stops a running managed-MCP Chat turn', async ({ page }
   let removed = false;
   await openResources(page, token);
   try {
-    await page.getByLabel('MCP 服务名称').fill(STDIO_SERVER_NAME);
-    await page.getByLabel('MCP 传输方式').selectOption('stdio');
-    await page.getByLabel('MCP stdio profile key').fill(STDIO_PROFILE_KEY);
-    await page.getByRole('button', { name: '添加 MCP 服务' }).click();
+    await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+    const addDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
+    await addDialog.getByLabel('MCP 服务名称').fill(STDIO_SERVER_NAME);
+    await addDialog.getByLabel('MCP 传输方式').selectOption('stdio');
+    await addDialog.getByLabel('MCP stdio profile key').fill(STDIO_PROFILE_KEY);
+    await addDialog.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
     const card = page.getByRole('article', { name: `MCP 服务 ${STDIO_SERVER_NAME}` });
     await expect(card).toContainText('已配置', { timeout: 30_000 });
 

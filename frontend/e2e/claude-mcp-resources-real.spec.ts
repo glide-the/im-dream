@@ -20,6 +20,7 @@
 // [Sync] 2026-08-25: permit only the exact read-only WaitForMcpServers pending-server handshake before the named MCP tool appears.
 // [Sync] 2026-08-25: remove the obsolete redirect-file/manual-submit fallback; real OAuth must complete through the same-origin automatic callback popup.
 // [Sync] 2026-08-25: wait for automatic detail inventory; no refresh inventory control is part of the business journey.
+// [Sync] 2026-09-06: configure temporary Servers through the visible modal.
 
 // @ts-expect-error Playwright E2E uses Node built-ins outside the browser app tsconfig.
 import { execFileSync } from 'node:child_process';
@@ -455,14 +456,16 @@ test('real actor completes MCP auth routing, inventory, Agent resume, and cleanu
     await page.goto(`${WEB_BASE}/story-workspace/settings/work?tab=resources`);
     await expect(page.getByRole('heading', { name: 'Claude MCP 资源' })).toBeVisible();
     await expect(page.getByText('安全门禁已关闭此能力')).toHaveCount(0);
-    await page.getByLabel('MCP 服务名称').fill(SERVER_NAME);
-    await page.getByLabel('MCP 传输方式').selectOption(SERVER_TRANSPORT);
+    await page.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
+    const addDialog = page.getByRole('dialog', { name: '添加 MCP 服务' });
+    await addDialog.getByLabel('MCP 服务名称').fill(SERVER_NAME);
+    await addDialog.getByLabel('MCP 传输方式').selectOption(SERVER_TRANSPORT);
     if (SERVER_TRANSPORT === 'stdio') {
-      await page.getByLabel('MCP stdio profile key').fill(STDIO_PROFILE_KEY);
+      await addDialog.getByLabel('MCP stdio profile key').fill(STDIO_PROFILE_KEY);
     } else {
-      await page.getByLabel('MCP 服务 URL').fill(SERVER_URL);
+      await addDialog.getByLabel('MCP 服务 URL').fill(SERVER_URL);
     }
-    await page.getByRole('button', { name: '添加 MCP 服务' }).click();
+    await addDialog.getByRole('button', { name: '添加 MCP 服务', exact: true }).click();
 
     const card = page.getByRole('article', { name: `MCP 服务 ${SERVER_NAME}` });
     if (AUTH_MODE === 'oauth') {

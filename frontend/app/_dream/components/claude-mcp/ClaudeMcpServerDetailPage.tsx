@@ -1,5 +1,5 @@
 // [Input] One actor-owned database MCP server identifier, typed claude-mcp APIs, and Settings navigation callbacks.
-// [Output] MCP detail workbench with automatic cache-first standard-SDK discovery, OAuth actions, and searchable tools/resources/prompts inventory.
+// [Output] MCP detail workbench with automatic cache-first standard-SDK discovery, OAuth actions, one unified App usage-policy form, and searchable tools/resources/prompts inventory.
 // [Pos] Server detail surface in the frontend claude-mcp business domain.
 // [Sync] 2026-08-20: add public-SDK tool discovery without `/mcp` TUI parsing or remote tool execution.
 // [Sync] 2026-08-25: separate anonymous, required, authenticated, and rollback-compatible unknown auth actions.
@@ -11,6 +11,7 @@
 // [Sync] 2026-09-06: add connection-level MCP App desired controls and explicit effective availability.
 // [Sync] 2026-09-06: align connection-level App settings with the Notion detail split-section layout.
 // [Sync] 2026-09-06: describe low-risk eligibility as the server-owned positive classification without requiring optional tool hints.
+// [Sync] 2026-09-06: fold all connection-level App controls and their save action into one MCP usage-policy section.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
@@ -719,9 +720,9 @@ export default function ClaudeMcpServerDetailPage({
     }
   }, [busyAction, onBack, server, serverName]);
 
-  const saveAppSettings = useCallback(async () => {
+  const saveUsagePolicy = useCallback(async () => {
     if (!server || !appSettings || busyAction) return;
-    setBusyAction('app-settings');
+    setBusyAction('usage-policy');
     setAppSettingsError(null);
     try {
       const next = await updateClaudeMcpAppSettings(server, appSettings, {
@@ -735,7 +736,7 @@ export default function ClaudeMcpServerDetailPage({
       setEditAppUiMessages(next.desired.interactions.uiMessages);
       await loadAppEffectiveStatus();
     } catch (error) {
-      setAppSettingsError(errorMessage(error, 'MCP App 设置保存失败'));
+      setAppSettingsError(errorMessage(error, 'MCP 使用策略保存失败'));
     } finally {
       setBusyAction(null);
     }
@@ -936,11 +937,20 @@ export default function ClaudeMcpServerDetailPage({
       {pageError ? <div role="alert" style={{ borderRadius: '0.9rem', background: 'color-mix(in srgb, var(--color-state-error) 10%, var(--color-bg-paper))', color: 'var(--color-state-error)', padding: '0.75rem 0.9rem', fontSize: '0.82rem' }}>{pageError}</div> : null}
 
       <DetailSection
-        title="App 设置"
+        title="使用策略"
+        subtitle="统一控制此连接的 MCP App 展示与交互；Chat 工具调用仍遵循现有权限确认和沙箱策略。"
         layout="split"
         isMobile={isMobile}
       >
-        <div style={{ display: 'grid' }}>
+        <form
+          aria-busy={busyAction === 'usage-policy'}
+          aria-label="MCP 使用策略"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveUsagePolicy();
+          }}
+          style={{ display: 'grid' }}
+        >
           {appSettings ? (
             <>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: isMobile ? 'wrap' : 'nowrap', paddingBottom: '1rem' }}>
@@ -1004,14 +1014,15 @@ export default function ClaudeMcpServerDetailPage({
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.85rem', flexWrap: 'wrap', paddingTop: '1rem', borderTop: SOFT_ROW_DIVIDER }}>
                 <div style={{ display: 'grid', gap: '0.22rem', color: 'var(--color-text-muted)', fontSize: '0.73rem', lineHeight: 1.45 }}>
+                  <span>默认策略：{appSettings.default.enabled ? 'App 开启' : 'App 关闭'}</span>
                   <span>你的选择：{appSettings.desired.enabled ? '开启' : '关闭'} · revision {appSettings.revision}</span>
                   <span>
                     实际状态：{APP_STATUS_REASONS[appEffectiveStatus?.effective.reasonCode ?? ''] ?? (appEffectiveStatus?.effective.enabled ? '当前连接可展示 MCP App。' : '正在检查服务端可用性。')}
                   </span>
                 </div>
-                <button type="button" onClick={() => void saveAppSettings()} disabled={Boolean(busyAction)} style={{ ...actionStyle(true), width: isMobile ? '100%' : undefined, justifyContent: 'center', opacity: busyAction ? 0.62 : 1 }}>
-                  {busyAction === 'app-settings' ? <IconLoader style={{ width: '0.82rem', height: '0.82rem' }} /> : <IconCheck style={{ width: '0.82rem', height: '0.82rem' }} />}
-                  保存 App 设置
+                <button type="submit" disabled={Boolean(busyAction)} style={{ ...actionStyle(true), width: isMobile ? '100%' : undefined, justifyContent: 'center', opacity: busyAction ? 0.62 : 1 }}>
+                  {busyAction === 'usage-policy' ? <IconLoader style={{ width: '0.82rem', height: '0.82rem' }} /> : <IconCheck style={{ width: '0.82rem', height: '0.82rem' }} />}
+                  保存使用策略
                 </button>
               </div>
             </>
@@ -1023,15 +1034,8 @@ export default function ClaudeMcpServerDetailPage({
           {appSettings && appSettingsError ? (
             <div role="alert" style={{ color: 'var(--color-state-error)', fontSize: '0.76rem' }}>{appSettingsError}</div>
           ) : null}
-        </div>
+        </form>
       </DetailSection>
-
-      <section aria-label="MCP 使用策略" style={{ display: 'grid', gap: '0.28rem', padding: '0.1rem 0 0.25rem' }}>
-        <h2 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '0.9rem', fontWeight: 700 }}>使用策略</h2>
-        <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: '0.78rem', lineHeight: 1.5 }}>
-          此页面只发现能力，不执行工具。Chat 中的工具调用继续遵循现有权限确认与沙箱策略。
-        </p>
-      </section>
 
       <DetailSection
         title="能力与工具"
