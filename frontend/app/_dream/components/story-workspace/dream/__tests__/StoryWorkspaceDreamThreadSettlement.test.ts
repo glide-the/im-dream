@@ -1,6 +1,7 @@
 // [Input] Dream wrapper over canonical thread history/status/SSE.
 // [Output] Initial idle is not a terminal signal; observed running -> EOF -> idle settles once.
 // [Pos] Shared-thread settlement race regression seam.
+// [Sync] 2026-09-06: keep the fixture aligned with paged history and latest-ID stabilization.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node harness intentionally imports Node APIs.
@@ -126,6 +127,12 @@ test('initial idle never settles; a canonical running to terminal transition set
       return;
     }
     if (path === '/api/claude-agent/threads/thread-dream-settlement/messages') {
+      const latestMessageId = expectedMessageId && expectedDispatchStatus
+        ? expectedMessageId
+        : 'assistant-terminal';
+      const knownLatestMessageId = new URL(route.request().url()).searchParams.get(
+        'known_latest_message_id',
+      );
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -134,7 +141,7 @@ test('initial idle never settles; a canonical running to terminal transition set
             id: 'thread-dream-settlement', title: 'Dream shared thread',
             created_at: '2026-08-11T00:00:00Z', updated_at: '2026-08-11T00:00:02Z',
           },
-          messages: [{
+          messages: knownLatestMessageId === latestMessageId ? [] : [{
             id: 'assistant-terminal', role: 'assistant',
             parts: [{ type: 'text', text: '同一 thread 的最终结果' }], metadata: {},
             created_at: '2026-08-11T00:00:02Z',
@@ -149,6 +156,10 @@ test('initial idle never settles; a canonical running to terminal transition set
             },
             created_at: '2026-08-11T00:00:03Z',
           }] : [])],
+          next_cursor: null,
+          has_more: false,
+          latest_message_id: latestMessageId,
+          unchanged: knownLatestMessageId === latestMessageId,
         }),
       });
       return;

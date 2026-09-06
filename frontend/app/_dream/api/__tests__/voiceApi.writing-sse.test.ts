@@ -2,6 +2,7 @@
 // [Output] Verify shared-parser streaming, structured errors, missing-finish recovery, and absence of random-Voice Writing transport.
 // [Pos] Writing Claude Agent browser transport regression test in frontend/app/_dream/api/__tests__.
 // [Sync] 2026-09-01: replace random Voice inspiration tests with product-level manual Writing SSE contracts.
+// [Sync] 2026-09-06: restore test-owned browser globals so later SSR contracts remain isolated.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam reads source only; browser app omits Node types.
@@ -11,6 +12,8 @@ import { createChatThread } from '../chatHistoryApi';
 import { readClaudeAgentErrorCode } from '../../lib/claude-agent-transport';
 
 const originalFetch = globalThis.fetch;
+let previousLocalStorage: PropertyDescriptor | undefined;
+let previousWindow: PropertyDescriptor | undefined;
 const storageValues = new Map<string, string>([['auth_token', 'writing-token']]);
 const storage: Storage = {
   get length() { return storageValues.size; },
@@ -41,6 +44,8 @@ function sseResponse(frames: Array<Record<string, unknown>>): Response {
 test.describe.configure({ mode: 'serial' });
 
 test.beforeEach(() => {
+  previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
   Object.defineProperty(globalThis, 'window', {
     value: { __INK_RUNTIME_CONFIG__: { apiBaseUrl: 'https://dream.test' } },
@@ -50,6 +55,10 @@ test.beforeEach(() => {
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
+  if (previousLocalStorage) Object.defineProperty(globalThis, 'localStorage', previousLocalStorage);
+  else delete (globalThis as { localStorage?: Storage }).localStorage;
+  if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+  else delete (globalThis as { window?: Window }).window;
 });
 
 test('Writing creates an unbound product Thread with only its localized title', async () => {

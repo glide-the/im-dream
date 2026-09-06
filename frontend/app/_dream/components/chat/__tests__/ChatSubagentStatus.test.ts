@@ -3,6 +3,7 @@
 // [Output] Browser regression proving message bodies remain visible while the
 //          composer uses the main thread runtime rather than transcript counts.
 // [Pos] Dream-to-Chat rendering and subagent composer status regression seam.
+// [Sync] 2026-09-06: serve the canonical paged-history metadata and stable latest-ID probe.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node harness intentionally imports Node APIs.
@@ -125,6 +126,12 @@ test('Chat preserves Dream message bodies and does not let stale subagent transc
       return;
     }
     if (path === '/api/claude-agent/threads/thread-dream-subagents/messages') {
+      const latestMessageId = dreamConfirmationPending
+        ? 'dream-assistant-confirmation'
+        : 'dream-assistant-result';
+      const knownLatestMessageId = new URL(request.url()).searchParams.get(
+        'known_latest_message_id',
+      );
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -135,7 +142,7 @@ test('Chat preserves Dream message bodies and does not let stale subagent transc
             created_at: '2026-08-11T08:08:50Z',
             updated_at: '2026-08-11T08:08:54Z',
           },
-          messages: [
+          messages: knownLatestMessageId === latestMessageId ? [] : [
             {
               id: 'dream_agent_human',
               role: 'user',
@@ -184,6 +191,10 @@ test('Chat preserves Dream message bodies and does not let stale subagent transc
               created_at: '2026-08-11T08:08:55Z',
             }] : []),
           ],
+          next_cursor: null,
+          has_more: false,
+          latest_message_id: latestMessageId,
+          unchanged: knownLatestMessageId === latestMessageId,
         }),
       });
       return;

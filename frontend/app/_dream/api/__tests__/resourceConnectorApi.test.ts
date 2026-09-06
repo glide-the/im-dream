@@ -8,6 +8,7 @@
 // [Sync] 2026-08-30: require the ntn installation contract and connected notion-cli availability.
 // [Sync] 2026-09-01: require capability schema v5's third archive-backed
 //                    Notion Skill and its Read+Bash detail boundary.
+// [Sync] 2026-09-06: restore test-owned browser globals after every serial API contract.
 
 import { expect, test } from '@playwright/test';
 import {
@@ -22,6 +23,8 @@ import {
 } from '../resourceConnectorApi';
 
 const originalFetch = globalThis.fetch;
+let previousLocalStorage: PropertyDescriptor | undefined;
+let previousWindow: PropertyDescriptor | undefined;
 const storageValues = new Map<string, string>();
 let storageWrites = 0;
 
@@ -75,6 +78,8 @@ function jsonResponse(payload: unknown, status = 200): Response {
 test.describe.configure({ mode: 'serial' });
 
 test.beforeEach(() => {
+  previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   storageValues.clear();
   storageWrites = 0;
   Object.defineProperty(globalThis, 'localStorage', {
@@ -89,6 +94,10 @@ test.beforeEach(() => {
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
+  if (previousLocalStorage) Object.defineProperty(globalThis, 'localStorage', previousLocalStorage);
+  else delete (globalThis as { localStorage?: Storage }).localStorage;
+  if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+  else delete (globalThis as { window?: Window }).window;
 });
 
 test('authenticated selection without a snapshot is not normalized as synced', () => {

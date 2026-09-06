@@ -7,12 +7,19 @@
 //                    of the generic message card.
 // [Sync] 2026-09-04: prove a committed assistant remains processed when its
 //                    post-turn Dream synchronization reports a typed failure.
+// [Sync] 2026-09-06: isolate Vite optimization cache and await finite SSE POSTs before reloads.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
 import { fileURLToPath } from 'node:url';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
 import { createServer as createNetServer } from 'node:net';
+// @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
+import { mkdtemp, rm } from 'node:fs/promises';
+// @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
+import { tmpdir } from 'node:os';
+// @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
+import { join } from 'node:path';
 import { createServer } from 'vite';
 
 test.use({ channel: 'chromium', viewport: { width: 390, height: 844 } });
@@ -100,8 +107,10 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     );
   `;
   const harnessPort = await reserveEphemeralPort();
+  const cacheDir = await mkdtemp(join(tmpdir(), 'ink-dream-binding-vite-'));
   const server = await createServer({
     root: fileURLToPath(new URL('../../../../../', import.meta.url)),
+    cacheDir,
     configFile: false,
     logLevel: 'silent',
     server: { host: '127.0.0.1', port: harnessPort, strictPort: true },
@@ -134,9 +143,13 @@ test('binding conflict keeps the submitted text and attachment while reload stay
         return id === '\0chat-thread-binding-conflict-harness.js' ? harnessModule : null;
       },
     }],
+  }).catch(async (error) => {
+    await rm(cacheDir, { recursive: true, force: true });
+    throw error;
   });
 
   let agentPostCount = 0;
+  let agentPostFinishedCount = 0;
   let errorMode: 'binding' | 'auto-repair' | 'sync' = 'binding';
   const diagnostics: string[] = [];
   page.on('console', (message) => {
@@ -145,6 +158,12 @@ test('binding conflict keeps the submitted text and attachment while reload stay
   page.on('pageerror', (error) => diagnostics.push(error.message));
   page.on('requestfailed', (request) => {
     diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
+  });
+  page.on('requestfinished', (request) => {
+    const url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname === '/api/claude-agent') {
+      agentPostFinishedCount += 1;
+    }
   });
   await page.addInitScript(() => {
     localStorage.setItem('auth_token', 'binding-conflict-test-token');
@@ -241,6 +260,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     }));
     expect(bodyMetrics.scrollWidth).toBeLessThanOrEqual(bodyMetrics.clientWidth);
 
+    await expect.poll(() => agentPostFinishedCount).toBe(1);
     errorMode = 'auto-repair';
     await page.reload();
     await expect.poll(() => agentPostCount).toBe(2);
@@ -256,6 +276,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     await expect(repairAlert).toContainText('不会发起第三轮');
     await expect(repairAlert).not.toContainText('消息处理未完成');
 
+    await expect.poll(() => agentPostFinishedCount).toBe(2);
     errorMode = 'sync';
     await page.reload();
     await expect.poll(() => agentPostCount).toBe(3);
@@ -269,6 +290,7 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     await expect(syncAlert).not.toContainText('消息处理未完成');
     await expect(page.getByText('角色卡已写入 canonical workspace。')).toBeVisible();
 
+    await expect.poll(() => agentPostFinishedCount).toBe(3);
     await page.getByRole('button', { name: '重新加载对话' }).click();
     await expect(syncAlert).toHaveCount(0);
     await expect(page.getByText('角色卡已写入 canonical workspace。')).toBeVisible();
@@ -276,5 +298,6 @@ test('binding conflict keeps the submitted text and attachment while reload stay
     expect(diagnostics).toEqual([]);
   } finally {
     await server.close();
+    await rm(cacheDir, { recursive: true, force: true });
   }
 });
