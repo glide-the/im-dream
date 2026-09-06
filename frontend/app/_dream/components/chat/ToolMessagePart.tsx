@@ -18,12 +18,13 @@
 // [Sync] 2026-09-05: preserve the complete saved CallToolResult and mount the read-only MCP App beside its ordinary fallback.
 // [Sync] 2026-09-06: consume server-owned result identity from persisted parts or live/reconnect
 //                    toolMetadata and map ui/message to the existing one-message Chat ingress.
+// [Sync] 2026-09-06: resolve persisted direct toolName before validating MCP App identity.
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
+import type { DynamicToolUIPart, ToolUIPart } from 'ai';
 import EditorWriteApprovalUI from './EditorWriteApprovalUI';
 import { isEditorWriteTool } from './editorWriteTools';
-import { confirmToolCall } from './toolConfirmation';
+import { confirmToolCall, resolveToolName } from './toolConfirmation';
 import { isShellTool, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
 import McpAppHostPanel from './mcp-apps/McpAppHostPanel';
@@ -70,7 +71,7 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
   const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
   const confirmationInFlightRef = useRef(false);
   const toolCallId = part.toolCallId;
-  const toolName = getToolName(part);
+  const toolName = resolveToolName(part);
   const input = 'input' in part ? part.input : undefined;
   const output = 'output' in part ? part.output : undefined;
   const state = part.state;

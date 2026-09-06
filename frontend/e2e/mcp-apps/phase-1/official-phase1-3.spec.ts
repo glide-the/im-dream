@@ -2,6 +2,7 @@
 // [Output] Provider-free Phase 1-3 protocol, UI, security, lifecycle, and compatibility evidence.
 // [Pos] Local-Chrome technical lane only; it neither invokes a model nor mutates real Ink & Memory business state.
 // [Sync] 2026-09-06: prove Browser teardown sends DELETE and releases server sessions/connectors across lifecycle changes.
+// [Sync] 2026-09-06: mount the production Host from the persisted tool-invocation/direct-projection shape.
 
 import { expect, test } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
@@ -245,23 +246,21 @@ test('official 1.7.5 renders through production Host, stays isolated, and follow
   const browserConfig = {
     threadId: 'mcp-apps-e2e-thread',
     part: {
-      type: 'dynamic-tool',
+      type: 'tool-invocation',
       toolName: `mcp__${SERVER_REF}__${TOOL_NAME}`,
       toolCallId,
       state: 'output-available',
       input,
       output: initialResult,
-      toolMetadata: {
-        mcpAppResult: {
-          version: 1,
-          serverRef: SERVER_REF,
-          toolName: TOOL_NAME,
-          toolCallId,
-          input,
-          workspaceScope: WORKSPACE_SCOPE,
-          resourceUri: RESOURCE_URI,
-          result: initialResult,
-        },
+      mcpAppResult: {
+        version: 1,
+        serverRef: SERVER_REF,
+        toolName: TOOL_NAME,
+        toolCallId,
+        input,
+        workspaceScope: WORKSPACE_SCOPE,
+        resourceUri: RESOURCE_URI,
+        result: initialResult,
       },
     },
   };

@@ -1,7 +1,7 @@
 // [Input] Persisted canonical thread rows shared by Chat and Dream.
 // [Output] Exact private-row and visible-part filtering contract.
 // [Pos] Shared thread hydration visibility regression seam.
-// [Sync] 2026-09-02: cover final-only flags, exact-id process fetch, and stable snapshots.
+// [Sync] 2026-09-06: require exact-id process reads to bypass stale browser caches.
 
 import { expect, test } from '@playwright/test';
 import type { UIMessage } from 'ai';
@@ -85,6 +85,7 @@ test('final-only page maps read-only flags and process detail uses exact message
   const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const urls: string[] = [];
+  const requestInits: Array<RequestInit | undefined> = [];
   try {
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
@@ -94,8 +95,9 @@ test('final-only page maps read-only flags and process detail uses exact message
       configurable: true,
       value: { __INK_RUNTIME_CONFIG__: { apiBaseUrl: 'http://chat.test' } },
     });
-    globalThis.fetch = (async (input) => {
+    globalThis.fetch = (async (input, init) => {
       urls.push(String(input));
+      requestInits.push(init);
       const detail = String(input).endsWith('/messages/assistant%2F1/process');
       return new Response(JSON.stringify(detail ? {
         id: 'assistant/1',
@@ -139,6 +141,7 @@ test('final-only page maps read-only flags and process detail uses exact message
     const detail = await fetchClaudeThreadMessageProcess('thread/1', 'assistant/1');
     expect(detail.parts).toHaveLength(2);
     expect(urls[1]).toContain('/threads/thread%2F1/messages/assistant%2F1/process');
+    expect(requestInits[1]?.cache).toBe('no-store');
   } finally {
     globalThis.fetch = originalFetch;
     if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);

@@ -44,6 +44,8 @@
 // [Sync] 2026-09-02: fetch canonical process parts once per historical assistant
 //                    only after expansion; abort stale Thread requests and keep final visible.
 // [Sync] 2026-09-06: forward the existing one-message Chat ingress to controlled MCP Apps views.
+// [Sync] 2026-09-06: route validated completed MCP App parts through ToolMessagePart
+//                    before the generic Terminal renderer so the Host can mount.
 // [Sync] 2026-09-04: distinguish a typed Dream synchronization failure after
 //                    a committed assistant reply from an unprocessed turn.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -66,6 +68,7 @@ import AssistantTurnGroup from './AssistantTurnGroup';
 import { projectHistoricalAssistantTurn } from './assistantTurnHistory';
 import { fetchClaudeThreadMessageProcess } from './threadSessionHydration';
 import type { ChatUserMessage } from './chatUserMessageIngress';
+import { parseSavedMcpAppToolCall } from './mcp-apps/result';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -532,6 +535,35 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const isBuiltInWrite = isBuiltInWriteTool(toolName);
                 const normalizedToolName = toolName.toLowerCase();
                 const isSubagentTool = normalizedToolName === 'agent' || normalizedToolName === 'task';
+                const mcpMetadata = toolPart as unknown as {
+                  mcpAppResult?: unknown;
+                  toolMetadata?: { mcpAppResult?: unknown };
+                };
+                const savedMcpAppCall = parseSavedMcpAppToolCall({
+                  mcpAppResult: mcpMetadata.mcpAppResult
+                    ?? mcpMetadata.toolMetadata?.mcpAppResult,
+                  output: 'output' in toolPart ? toolPart.output : undefined,
+                  toolName,
+                  toolCallId: toolPart.toolCallId,
+                  input: readToolInput(toolPart),
+                });
+
+                if (isCompleted && savedMcpAppCall) {
+                  return (
+                    <div key={partKey}>
+                      <ToolMessagePart
+                        part={toolPart}
+                        threadId={threadId}
+                        isLast={isLastMessage}
+                        isLoading={isLoading}
+                        addToolResult={addToolResult}
+                        sendUserMessage={sendUserMessage}
+                        settledToolCallIds={settledToolCallIds}
+                        onConfirmationSettled={onToolConfirmationSettled}
+                      />
+                    </div>
+                  );
+                }
 
                 // Editor write tools always render as EditorWriteCompletedCard when
                 // completed — this check is independent of outputText so that history-

@@ -7,6 +7,7 @@
 [Sync] 2026-08-25: exhaust bounded tools/resources/prompts pagination inside the same initialized MCP session.
 [Sync] 2026-08-25: isolate interactive OAuth discovery from short inventory single-flight/timeout ownership.
 [Sync] 2026-09-06: allow explicit IPv4/IPv6 loopback MCP endpoints while retaining other non-global IP denials.
+[Sync] 2026-09-06: retain only the descriptor-owned MCP App resource binding in safe tool inventory.
 """
 
 from __future__ import annotations
@@ -319,6 +320,41 @@ def _annotations(value: Any) -> dict[str, bool | None]:
         "destructive": getattr(value, "destructiveHint", getattr(value, "destructive", None)),
         "open_world": getattr(value, "openWorldHint", getattr(value, "open_world", None)),
     }
+
+
+def _mcp_app_tool_metadata(value: Any, maximum: int) -> dict[str, Any] | None:
+    """Normalize the public Apps binding from one standard Tool descriptor.
+
+    Pydantic exposes protocol ``_meta`` as ``meta``.  The stable Apps contract
+    permits both the nested and legacy flat resource URI spellings; conflicting
+    spellings are rejected instead of choosing one.  No other provider metadata
+    enters the managed inventory snapshot.
+    """
+
+    metadata = getattr(value, "meta", None)
+    if metadata is None:
+        metadata = getattr(value, "_meta", None)
+    if not isinstance(metadata, Mapping):
+        return None
+    ui = metadata.get("ui")
+    nested = ui.get("resourceUri") if isinstance(ui, Mapping) else None
+    flat = metadata.get("ui/resourceUri")
+    raw_resource_uri = nested if nested is not None else flat
+    if raw_resource_uri is None:
+        return None
+    resource_uri = str(raw_resource_uri).replace("\x00", "").strip()
+    if nested is not None and flat is not None:
+        flat_uri = str(flat).replace("\x00", "").strip()
+        nested_uri = str(nested).replace("\x00", "").strip()
+        if nested_uri != flat_uri:
+            return None
+    if (
+        not resource_uri.startswith("ui://")
+        or len(resource_uri) > min(maximum, 2048)
+        or any(ord(char) < 0x20 or char.isspace() for char in resource_uri)
+    ):
+        return None
+    return {"ui": {"resourceUri": resource_uri}}
 
 
 def _status_from_exception(exc: BaseException) -> int | None:
@@ -685,13 +721,18 @@ class McpDiscoveryCoordinator:
 
         tools = []
         for item in tools_raw[:remaining]:
-            tools.append(
-                {
-                    "name": _safe_text(getattr(item, "name", None), self.policy.max_text_length) or "unnamed",
-                    "description": _safe_text(getattr(item, "description", None), self.policy.max_text_length),
-                    "annotations": _annotations(getattr(item, "annotations", None)),
-                }
+            tool = {
+                "name": _safe_text(getattr(item, "name", None), self.policy.max_text_length) or "unnamed",
+                "description": _safe_text(getattr(item, "description", None), self.policy.max_text_length),
+                "annotations": _annotations(getattr(item, "annotations", None)),
+            }
+            app_metadata = _mcp_app_tool_metadata(
+                item,
+                self.policy.max_text_length,
             )
+            if app_metadata is not None:
+                tool["_meta"] = app_metadata
+            tools.append(tool)
         remaining -= len(tools)
         resources = []
         for item in resources_raw[:remaining]:

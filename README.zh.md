@@ -2,6 +2,7 @@
 <!-- [输出] 说明所有权、精确依赖、安装、Next Runtime 边界、验证、部署缺口与 fail-closed 运维。 -->
 <!-- [定位] README.md 英文仓库入口的同结构中文镜像。 -->
 <!-- [同步] 2026-09-06：与唯一 Next.js 16/pnpm workspace、app/_dream 源码 owner、server-only MCP Apps Runtime 和 production-off 证据边界对齐。 -->
+<!-- [同步] 2026-09-06：登记 descriptor 所有的 MCP Apps 结果投影与 data-only result fallback。 -->
 
 <!-- [同步] 2026-09-06：允许显式 loopback MCP discovery，同时保留其他 non-global 字面 IP、URL 形状、redirect 与 Node host allowlist 边界。 -->
 
@@ -261,6 +262,7 @@ frontend/
 - `phase1-status/route.ts` 与 `mcp-apps-sandbox/route.ts` 是当前例外：它们会导入 Browser 所有的 `host-policy`，并在 Route 层组合 preview policy。共享 manifest/Host contract 仍须抽到中立 shared/server owner；该缺口不代表独立 Runtime package 可以进入 Browser。
 - `packages/mcp-apps-runtime/src/index.ts` 导入 `server-only`。该 package 拥有进程级 connector manager、上游 MCP session/catalog、策略重验与过期回收；禁止导入 React、DOM 或根 Web 模块。
 - Python 继续拥有 actor、workspace、credential、managed-MCP 配置与业务数据权威。Node 只获得短时单 Server 建连视图；上游 URL、header、环境值与 credential 不会返回 Browser。
+- MCP Apps UI identity 只能来自 fresh managed `tools/list` descriptor 及其中已列出的 `ui://` resource。成功的 `CallToolResult` 可以只有数据；Python 把精确 descriptor 绑定投影在完整普通结果旁，并且只有当前 actor-owned descriptor 再次精确匹配时才补回修复前 user-scope 历史结果，全程不重放工具。
 - `robots.txt`、`sitemap.xml` 与 `llms.txt` 是公开 Next Route Handler，但其正文仍由 Python 所有并在运行时读取。后端配置缺失或非法时返回明确 `502/503`，绝不回退 SPA HTML。
 - Vite 与 `@vitejs/plugin-react` 作为隔离浏览器 fixture 的开发依赖可以合法保留，这些 fixture 会直接加载生产模块；它们不会恢复 Vite 生产入口、lock、build 或部署路径。
 

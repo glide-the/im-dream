@@ -5,6 +5,8 @@
 //                    and replace idle's second full read with a latest-ID probe.
 // [Sync] 2026-09-02: map final-only assistant rows and fetch canonical process
 //                    detail by owned thread/message identity on explicit expansion.
+// [Sync] 2026-09-06: bypass browser caches for exact process reads because fresh
+//                    MCP descriptor bindings can add a safe App projection.
 
 import { isToolUIPart, type UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -263,6 +265,7 @@ export async function fetchClaudeThreadMessageProcess(
       `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`
       + `/messages/${encodeURIComponent(messageId)}/process`,
       {
+        cache: 'no-store',
         headers: { Authorization: `Bearer ${getAuthToken()}` },
         signal,
       },

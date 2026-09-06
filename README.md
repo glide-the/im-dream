@@ -2,6 +2,7 @@
 <!-- [Output] Operator guide for ownership, exact dependencies, setup, Next runtime boundaries, validation, deployment gaps, and fail-closed operation. -->
 <!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
 <!-- [Sync] 2026-09-06: align the guide with the sole Next.js 16/pnpm workspace, app/_dream source owner, server-only MCP Apps Runtime, and production-off evidence boundary. -->
+<!-- [Sync] 2026-09-06: document descriptor-owned MCP Apps result projection and data-only result fallback. -->
 
 <!-- [Sync] 2026-09-06: allow explicit loopback MCP discovery while preserving every other non-global literal-IP, URL-shape, redirect, and Node host-allowlist boundary. -->
 
@@ -261,6 +262,7 @@ frontend/
 - `phase1-status/route.ts` and `mcp-apps-sandbox/route.ts` are current exceptions: they import Browser-owned `host-policy` and compose preview policy in the Route layer. Their shared manifest/Host contract still needs extraction to a neutral shared/server owner; this gap does not make the independent Runtime package browser-safe.
 - `packages/mcp-apps-runtime/src/index.ts` imports `server-only`. The package owns the process-scoped connector manager, upstream MCP sessions/catalogs, policy revalidation, and expiry. It must not import React, DOM, or root Web modules.
 - Python remains the actor, workspace, credential, managed-MCP configuration, and business-data authority. Node receives a short-lived single-Server connection view; upstream URLs, headers, environment values, and credentials are never returned to the Browser.
+- MCP Apps UI identity comes only from the fresh managed `tools/list` descriptor and its listed `ui://` resource. A successful `CallToolResult` may be data-only; Python projects the exact descriptor binding beside the complete ordinary result, and can recover a pre-fix user-scope history row only after the current actor-owned descriptor matches—without replaying the tool.
 - `robots.txt`, `sitemap.xml`, and `llms.txt` are public Next Route Handlers, but their content remains Python-owned and is fetched at runtime. Missing or invalid backend configuration returns a typed `502/503`, never SPA HTML.
 - Vite and `@vitejs/plugin-react` remain valid development dependencies for isolated browser fixtures that directly load production modules. They do not restore a Vite production entry, lock, build, or deployment path.
 

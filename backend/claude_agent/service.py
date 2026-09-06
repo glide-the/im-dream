@@ -27,6 +27,8 @@
 # [Sync] 2026-09-06: bind complete MCP Apps results to the exact managed Server
 #                    and workspace loaded for this turn; only non-error results
 #                    project, while live/history fallback preserves ordinary output.
+# [Sync] 2026-09-06: resolve MCP App UI identity from the turn's fresh tools/list
+#                    descriptor snapshot; CallToolResult remains data-only fallback.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/service.py.
 #                    Removed: pet/persona/mem0/sticker_filter/IdentityService.
 #                    Session context provided by ClaudeAgentContextBuilder.
@@ -433,6 +435,7 @@ def _managed_mcp_tool_binding(
 def _build_mcp_apps_tool_result_projection(
     *,
     managed_server_keys: tuple[str, ...],
+    managed_app_resource_bindings: Mapping[str, Mapping[str, str]],
     managed_workspace_scope: str | None,
     registered_tool_name: Any,
     tool_call_id: Any,
@@ -440,7 +443,7 @@ def _build_mcp_apps_tool_result_projection(
     call_tool_result: Any,
     is_error: bool,
 ) -> dict[str, Any] | None:
-    """Build the optional v1 projection from one trusted registration binding."""
+    """Build v1 from a trusted registration plus its tools/list descriptor."""
 
     binding = _managed_mcp_tool_binding(
         registered_tool_name,
@@ -449,8 +452,16 @@ def _build_mcp_apps_tool_result_projection(
     if binding is None:
         return None
     server_ref, upstream_tool_name = binding
+    server_bindings = managed_app_resource_bindings.get(server_ref)
+    resource_uri = (
+        server_bindings.get(upstream_tool_name)
+        if isinstance(server_bindings, Mapping)
+        else None
+    )
     if (
         is_error
+        or not _is_mcp_app_resource_uri(resource_uri)
+        or len(upstream_tool_name) > 512
         or not isinstance(tool_call_id, str)
         or not tool_call_id
         or len(tool_call_id) > 2048
@@ -475,22 +486,6 @@ def _build_mcp_apps_tool_result_projection(
         not isinstance(result_is_error, bool) or result_is_error is not is_error
     ):
         return None
-    metadata = call_tool_result.get("_meta")
-    if not isinstance(metadata, dict):
-        return None
-    ui = metadata.get("ui")
-    if not isinstance(ui, dict):
-        return None
-    # This exact Server/tool's standard result may nominate a UI resource, but
-    # it never supplies owner identity.  The Browser-side MCP Client will
-    # independently require the same URI from the current tools/list descriptor
-    # before reading/mounting it.
-    resource_uri = ui.get("resourceUri")
-    if not _is_mcp_app_resource_uri(resource_uri):
-        return None
-    for asserted_server_ref in (metadata.get("serverRef"), ui.get("serverRef")):
-        if asserted_server_ref is not None and asserted_server_ref != server_ref:
-            return None
     return {
         "version": _MCP_APPS_RESULT_VERSION,
         "serverRef": server_ref,
@@ -526,10 +521,6 @@ def _validated_mcp_apps_projection_for_tool_part(
         f"{_MCP_TOOL_REGISTRATION_PREFIX}{server_ref}__{projected_tool_name}"
     )
     result = projection.get("result")
-    result_metadata = result.get("_meta") if isinstance(result, dict) else None
-    result_ui = (
-        result_metadata.get("ui") if isinstance(result_metadata, dict) else None
-    )
     if (
         not isinstance(server_ref, str)
         or not _MCP_SERVER_REF_RE.fullmatch(server_ref)
@@ -554,16 +545,6 @@ def _validated_mcp_apps_projection_for_tool_part(
         or not isinstance(result, dict)
         or not isinstance(result.get("content"), list)
         or ("isError" in result and result.get("isError") is not False)
-        or not isinstance(result_ui, dict)
-        or result_ui.get("resourceUri") != projection.get("resourceUri")
-        or (
-            result_metadata.get("serverRef") is not None
-            and result_metadata.get("serverRef") != server_ref
-        )
-        or (
-            result_ui.get("serverRef") is not None
-            and result_ui.get("serverRef") != server_ref
-        )
         or not _is_json_value(projection)
         or _mcp_apps_value_has_sensitive_key(projection)
     ):
@@ -1538,6 +1519,11 @@ class _TurnContext:
     # Canonical managed Server registry loaded and handed to the SDK for this
     # exact turn.  Only these keys may own an MCP Apps result projection.
     managed_mcp_server_keys: tuple[str, ...] = ()
+    # Fresh, non-secret tools/list descriptor bindings captured beside the
+    # exact managed Runtime registry. CallToolResult never supplies this URI.
+    managed_mcp_app_resource_bindings: dict[str, dict[str, str]] = field(
+        default_factory=dict
+    )
     # Exact backend-resolved business workspace that selected the registry.
     # Browser clients may carry it back only as a selector; Python revalidates
     # actor ownership and the Server scope before any credential access.
@@ -1885,6 +1871,11 @@ class ClaudeAgentService:
                 for name, config in snapshot.items()
                 if isinstance(name, str) and isinstance(config, dict)
             }
+            managed_mcp_app_resource_bindings = deepcopy(
+                getattr(snapshot, "mcp_app_resource_bindings", {})
+            )
+            if not isinstance(managed_mcp_app_resource_bindings, dict):
+                managed_mcp_app_resource_bindings = {}
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
                 "Managed Claude MCP snapshot loading failed safely."
@@ -2212,6 +2203,7 @@ class ClaudeAgentService:
             queue=BusProxyQueue(bus),
             confirmation_store=confirmation_store,
             managed_mcp_server_keys=tuple(sorted(claude_mcp_servers)),
+            managed_mcp_app_resource_bindings=managed_mcp_app_resource_bindings,
             managed_mcp_workspace_scope=managed_workspace_id,
         )
         state.turn_context = turn_ctx
@@ -3160,6 +3152,9 @@ class ClaudeAgentService:
                 if not tool_name_conflicts:
                     mcp_app_result = _build_mcp_apps_tool_result_projection(
                         managed_server_keys=turn_ctx.managed_mcp_server_keys,
+                        managed_app_resource_bindings=(
+                            turn_ctx.managed_mcp_app_resource_bindings
+                        ),
                         managed_workspace_scope=turn_ctx.managed_mcp_workspace_scope,
                         registered_tool_name=resolved_tool_name,
                         tool_call_id=tool_call_id,

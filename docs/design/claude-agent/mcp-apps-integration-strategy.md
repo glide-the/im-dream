@@ -4,6 +4,7 @@
 <!-- [同步] 2026-09-04：SUO-383 以 DEC-002 选择最小 Host adapter 接管 permissions/iframe，Browser 主链与 production 关闭状态不变。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 将 Web Shell 固定到 frontend/ 根 package，将 Node Runtime 固定到同级 packages/mcp-apps-runtime。 -->
 <!-- [同步] 2026-09-06：按 54f3bbe5 标记 Phase 0—3 技术实现/验证已存在，公开应用与 production enablement 仍未完成。 -->
+<!-- [同步] 2026-09-06：UI identity 只取自 fresh tools/list descriptor；data-only CallToolResult 与修复前历史消息均沿同一受控投影恢复。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
@@ -112,7 +113,8 @@ sequenceDiagram
 
 - Session Start、工具选择和首次调用仍由 Claude Agent Runtime 负责。
 - UI URI 来自 Tool descriptor，不从 `CallToolResult` 猜测。
-- Chat 工具结果需要持久化 `serverRef`、上游原始 tool name、`toolCallId`、tool input 和完整 `CallToolResult`；当前工具事件只稳定提供 tool name/call/input/output，`serverRef` 与完整 MCP result envelope 是实施缺口。
+- discovery 仅把 Tool descriptor 中的 App resource 绑定脱敏保存；当前 turn 的 managed Server registry 与该 fresh 绑定共同生成 `serverRef`、上游原始 tool name、`toolCallId`、tool input、resource URI 和完整 `CallToolResult` 投影。`CallToolResult` 不要求也不信任 UI metadata。
+- 修复前已保存、但缺少 Apps 投影的 user-scope 成功结果，只能在当前 actor 的 fresh descriptor 精确匹配同一 Server/tool/resource 后由 history DTO 补投影；不匹配、过期、普通 MCP 或错误结果继续只显示原结果，且不会重放首次工具。
 - `serverRef` 只是 Browser 选择受控 Node MCP endpoint 的不可信路由参数；Node 必须根据当前 IM 登录用户和 workspace 重新验证该 Server 已启用。`toolCallId` 只关联 Chat 结果和诊断，不作为授权凭证、MCP session 标识或上游连接选择条件。
 - Host adapter 使用独立的 Browser MCP Client 获取 descriptor 和完整 resource，但不重复执行创建页面的原始工具调用。
 - App 内 `tools/call` 是页面局部交互，不触发模型。
@@ -204,7 +206,7 @@ Host adapter 作为 IM Apps 插件的浏览器入口；`PersistentConnectorManag
 
 - 官方示例 App 经 Browser Client → Node transport → MCP Server 完成 initialize、tools/list、resources/read 和 iframe 初始化；
 - 页面内 `tools/call` 由标准 AppBridge 转发，但 Node 对未授权 Server/tool 拒绝且不访问上游；
-- tool result 事件能提供稳定 `serverRef`、原始 tool name、`toolCallId`、input 和完整 `CallToolResult`；
+- tool result 事件能结合 fresh `tools/list` descriptor 提供稳定 `serverRef`、原始 tool name、`toolCallId`、input、resource URI 和完整 data-only `CallToolResult`；
 - 普通工具、无 `_meta.ui.resourceUri` 的工具和不支持 Apps 的客户端只显示原结果；
 - resource MIME 错误、CSP 拒绝、iframe 超时、Node 断线、上游断线和 OAuth 失效均可降级；
 - Browser 请求、日志和页面中不出现上游 MCP 地址、OAuth token、headers 或 stdio env；

@@ -6,6 +6,7 @@
 [Sync] 2026-08-25: define the injectable managed MCP runtime snapshot contract.
 [Sync] 2026-08-25: cover bounded standard-MCP refresh before expired OAuth projection.
 [Sync] 2026-09-06: require a monotonic refresh revision and coherent authoritative single-Server record.
+[Sync] 2026-09-06: bind Apps only through current descriptor metadata plus a listed ui:// resource.
 """
 
 from __future__ import annotations
@@ -44,8 +45,9 @@ def _server(server_id, key, *, scope="user", workspace_id=None, transport=McpTra
 
 
 class _Repository:
-    def __init__(self, rows, credential=None, capability=True):
+    def __init__(self, rows, credential=None, capability=True, snapshots=None):
         self.rows = rows; self.credential = credential; self.capability = capability
+        self.snapshots = snapshots or {}
     async def capability_available(self): return self.capability
     async def list_servers(self, actor_id, workspace_id=None):
         assert actor_id == "7"
@@ -53,6 +55,9 @@ class _Repository:
     async def get_credential(self, actor_id, server_id):
         assert actor_id == "7"
         return self.credential if self.credential and self.credential.server_id == server_id else None
+    async def get_discovery_snapshot(self, actor_id, server):
+        assert actor_id == "7"
+        return self.snapshots.get(server.id)
 
 
 def _credential(cipher, server_id, token, *, expires_at=None, revision=1):
@@ -90,6 +95,61 @@ def test_workspace_override_and_secret_projection_are_memory_only_and_repr_safe(
         }
         assert secret not in repr(snapshot) and secret not in repr(snapshot["shared"])
         assert list(tmp_path.iterdir()) == before
+
+    asyncio.run(scenario())
+
+
+def test_descriptor_app_bindings_follow_effective_scope_and_require_resource():
+    async def scenario():
+        user = _server("user-apps", "apps")
+        workspace = _server(
+            "workspace-apps",
+            "apps",
+            scope="workspace",
+            workspace_id="workspace-1",
+        )
+        snapshots = {
+            user.id: {
+                "status": "complete",
+                "inventory": {
+                    "tools": [{
+                        "name": "get-time",
+                        "_meta": {
+                            "ui": {"resourceUri": "ui://get-time/mcp-app.html"}
+                        },
+                    }],
+                    "resources": [{"uri": "ui://get-time/mcp-app.html"}],
+                },
+            },
+            workspace.id: {
+                "status": "complete",
+                "inventory": {
+                    "tools": [{
+                        "name": "get-time",
+                        "_meta": {
+                            "ui": {"resourceUri": "ui://missing/app.html"}
+                        },
+                    }],
+                    "resources": [],
+                },
+            },
+        }
+        loader = ManagedMcpRuntimeSnapshotLoader(
+            _Repository([user, workspace], snapshots=snapshots),
+            McpCredentialCipher(key=b"k" * 32, key_version=1),
+            stdio_profiles=StdioProfileResolver({}),
+            max_servers=8,
+        )
+
+        user_snapshot = await loader.load("7", None)
+        assert user_snapshot.mcp_app_resource_bindings == {
+            "apps": {"get-time": "ui://get-time/mcp-app.html"}
+        }
+        workspace_snapshot = await loader.load("7", "workspace-1")
+        assert workspace_snapshot.mcp_app_resource_bindings == {}
+        assert await loader.load_mcp_app_resource_bindings("7", None) == {
+            "apps": {"get-time": "ui://get-time/mcp-app.html"}
+        }
 
     asyncio.run(scenario())
 

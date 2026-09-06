@@ -6,6 +6,7 @@
 [Sync] 2026-08-25: retire Agent-runtime polling coverage after direct MCP SDK migration.
 [Sync] 2026-08-25: verify real standard-MCP nextCursor pagination over one managed stdio connection.
 [Sync] 2026-09-06: cover explicit loopback HTTP discovery while preserving other non-global and redirect denials.
+[Sync] 2026-09-06: preserve only normalized descriptor-owned MCP App resource metadata.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +30,7 @@ from claude_mcp.inventory import (
     McpDiscoveryPolicy,
     McpSdkSessionFactory,
     StdioProfileResolver,
+    _mcp_app_tool_metadata,
     _validate_remote_url,
 )
 from claude_mcp.contracts import McpAuthKind, McpTransport
@@ -145,6 +148,20 @@ def test_direct_sdk_factory_contains_no_agent_runtime_or_cli_inventory_path() ->
     assert "ClaudeSDKClient" not in source
     assert "ClaudeMcpCliDriver" not in source
     assert "create_subprocess_exec" not in source
+
+
+def test_mcp_app_tool_metadata_normalizes_descriptor_resource_uri_only() -> None:
+    descriptor = SimpleNamespace(meta={
+        "ui": {"resourceUri": "ui://get-time/mcp-app.html"},
+        "ui/resourceUri": "ui://get-time/mcp-app.html",
+        "private": {"token": "must-not-survive"},
+    })
+
+    assert _mcp_app_tool_metadata(descriptor, 200) == {
+        "ui": {"resourceUri": "ui://get-time/mcp-app.html"}
+    }
+    descriptor.meta["ui/resourceUri"] = "ui://other/app.html"
+    assert _mcp_app_tool_metadata(descriptor, 200) is None
 
 
 @pytest.mark.parametrize(

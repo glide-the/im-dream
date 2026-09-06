@@ -4,6 +4,7 @@
 [Output] Live SSE, persistence, public refresh, rejection, and Runner preservation assertions.
 [Pos] Provider-free result-identity tests; no database, MCP network, Browser, or schema writes.
 [Sync] 2026-09-06: add McpAppsToolResultProjectionV1 producer/transport/consumer coverage.
+[Sync] 2026-09-06: use the official descriptor-owned UI binding and data-only CallToolResult shape.
 """
 
 from __future__ import annotations
@@ -43,17 +44,15 @@ REGISTERED_TOOL = "mcp__official-basic__get-time"
 UPSTREAM_TOOL = "get-time"
 TOOL_CALL_ID = "opaque-call-id"
 TOOL_INPUT = {"timezone": "UTC"}
+DESCRIPTOR_BINDINGS = {
+    SERVER_REF: {UPSTREAM_TOOL: "ui://get-time/mcp-app.html"}
+}
 
 
 def call_tool_result() -> dict:
     return {
         "content": [{"type": "text", "text": "2026-09-06T00:00:00Z"}],
         "structuredContent": {"time": "2026-09-06T00:00:00Z"},
-        "isError": False,
-        "_meta": {
-            "ui": {"resourceUri": "ui://get-time/mcp-app.html"},
-            "extensionField": "must-survive",
-        },
         "extensionResult": {"supported": True},
     }
 
@@ -61,6 +60,7 @@ def call_tool_result() -> dict:
 async def emit_result(
     *,
     managed_keys: tuple[str, ...] = (SERVER_REF,),
+    descriptor_bindings: dict[str, dict[str, str]] | None = None,
     result: dict | None = None,
     normalized_output: object = "ordinary-output",
     result_tool_name: str = REGISTERED_TOOL,
@@ -71,6 +71,11 @@ async def emit_result(
         queue=queue,
         confirmation_store=ToolConfirmationStore(),
         managed_mcp_server_keys=managed_keys,
+        managed_mcp_app_resource_bindings=deepcopy(
+            DESCRIPTOR_BINDINGS
+            if descriptor_bindings is None
+            else descriptor_bindings
+        ),
         managed_mcp_workspace_scope="workspace-1",
     )
     callback = ClaudeAgentService._make_tool_event_cb(queue, context)
@@ -110,7 +115,7 @@ async def test_live_sse_and_persistence_keep_complete_result_and_trusted_identit
         "resourceUri": "ui://get-time/mcp-app.html",
         "result": call_tool_result(),
     }
-    assert projection["result"]["_meta"]["extensionField"] == "must-survive"
+    assert projection["result"]["extensionResult"] == {"supported": True}
 
     parts = _sse_events_to_ui_parts(context.collected_parts)
     assert len(parts) == 1
@@ -139,6 +144,54 @@ async def test_public_dto_refresh_preserves_valid_projection_losslessly():
         "version", "serverRef", "toolName", "toolCallId", "input", "workspaceScope",
         "resourceUri", "result",
     }
+
+
+def test_public_dto_recovers_existing_data_only_result_from_fresh_descriptor():
+    public = PublicChatMessageDto.from_storage(
+        {
+            "id": "message-before-fix",
+            "role": "assistant",
+            "parts": [{
+                "type": "tool-invocation",
+                "toolName": REGISTERED_TOOL,
+                "toolCallId": TOOL_CALL_ID,
+                "state": "output-available",
+                "input": TOOL_INPUT,
+                "output": call_tool_result(),
+                "dynamic": True,
+            }],
+            "metadata": {},
+        },
+        mcp_app_resource_bindings=DESCRIPTOR_BINDINGS,
+    ).model_dump(mode="json")
+
+    projection = public["parts"][0]["mcpAppResult"]
+    assert projection["serverRef"] == SERVER_REF
+    assert projection["toolName"] == UPSTREAM_TOOL
+    assert projection["workspaceScope"] is None
+    assert projection["resourceUri"] == "ui://get-time/mcp-app.html"
+    assert projection["result"] == call_tool_result()
+
+
+def test_public_dto_does_not_probe_an_ordinary_saved_mcp_result():
+    public = PublicChatMessageDto.from_storage(
+        {
+            "id": "ordinary-message",
+            "role": "assistant",
+            "parts": [{
+                "type": "tool-invocation",
+                "toolName": "mcp__ordinary__read-status",
+                "toolCallId": TOOL_CALL_ID,
+                "state": "output-available",
+                "input": {},
+                "output": call_tool_result(),
+            }],
+            "metadata": {},
+        },
+        mcp_app_resource_bindings=DESCRIPTOR_BINDINGS,
+    ).model_dump(mode="json")
+
+    assert "mcpAppResult" not in public["parts"][0]
 
 
 @pytest.mark.asyncio
@@ -170,14 +223,8 @@ async def test_missing_stale_ambiguous_or_conflicting_binding_drops_only_project
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda result: result.pop("_meta"),
-        lambda result: result["_meta"]["ui"].update(
-            {"resourceUri": "https://not-ui.invalid/app"}
-        ),
-        lambda result: result["_meta"]["ui"].update(
-            {"serverRef": "attacker-server"}
-        ),
-        lambda result: result["_meta"].update(
+        lambda result: result.pop("content"),
+        lambda result: result.update(
             {"headers": {"Authorization": "Bearer secret"}}
         ),
         lambda result: result.update({"isError": True}),
@@ -195,10 +242,47 @@ async def test_malformed_mismatch_or_sensitive_result_drops_only_apps_projection
     assert "mcpAppResult" not in part
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "descriptor_bindings",
+    [
+        {},
+        {SERVER_REF: {UPSTREAM_TOOL: "https://not-ui.invalid/app"}},
+        {SERVER_REF: {"other-tool": "ui://get-time/mcp-app.html"}},
+    ],
+)
+async def test_missing_or_invalid_descriptor_binding_drops_only_projection(
+    descriptor_bindings,
+):
+    live, context = await emit_result(descriptor_bindings=descriptor_bindings)
+
+    assert "mcpAppResult" not in live
+    assert live["output"] == "ordinary-output"
+    part = _sse_events_to_ui_parts(context.collected_parts)[0]
+    assert part["output"] == "ordinary-output"
+    assert "mcpAppResult" not in part
+
+
+@pytest.mark.asyncio
+async def test_call_result_ui_metadata_cannot_override_descriptor_binding():
+    result = call_tool_result()
+    result["_meta"] = {
+        "ui": {"resourceUri": "ui://attacker/other.html"},
+        "serverRef": "attacker-server",
+    }
+    live, _context = await emit_result(result=result)
+
+    assert live["mcpAppResult"]["resourceUri"] == (
+        "ui://get-time/mcp-app.html"
+    )
+    assert live["mcpAppResult"]["result"] == result
+
+
 def test_persistence_and_public_projection_reject_tampering_without_touching_output():
     result = call_tool_result()
     projection = _build_mcp_apps_tool_result_projection(
         managed_server_keys=(SERVER_REF,),
+        managed_app_resource_bindings=DESCRIPTOR_BINDINGS,
         managed_workspace_scope="workspace-1",
         registered_tool_name=REGISTERED_TOOL,
         tool_call_id=TOOL_CALL_ID,
@@ -246,6 +330,7 @@ def test_persistence_and_public_projection_reject_tampering_without_touching_out
 def test_tool_call_id_is_only_correlation_not_owner_authorization():
     first = _build_mcp_apps_tool_result_projection(
         managed_server_keys=(SERVER_REF,),
+        managed_app_resource_bindings=DESCRIPTOR_BINDINGS,
         managed_workspace_scope=None,
         registered_tool_name=REGISTERED_TOOL,
         tool_call_id="arbitrary-opaque-id",
@@ -255,6 +340,7 @@ def test_tool_call_id_is_only_correlation_not_owner_authorization():
     )
     missing_owner = _build_mcp_apps_tool_result_projection(
         managed_server_keys=(),
+        managed_app_resource_bindings=DESCRIPTOR_BINDINGS,
         managed_workspace_scope=None,
         registered_tool_name=REGISTERED_TOOL,
         tool_call_id="arbitrary-opaque-id",

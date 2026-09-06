@@ -2,6 +2,7 @@
 // [Output] Contract checks for strict, lossless, spoof-resistant MCP Apps recognition.
 // [Pos] Focused result-identity/refresh boundary test; no Browser or network state.
 // [Sync] 2026-09-06: require versioned workspace identity and preserve ordinary fallback on every rejection.
+// [Sync] 2026-09-06: match the official data-only CallToolResult; the resource URI belongs to the trusted descriptor projection.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -12,11 +13,6 @@ function fixture() {
   const result = {
     content: [{ type: 'text', text: 'Read-only state: ready' }],
     structuredContent: { state: 'ready', callCount: 1 },
-    isError: false,
-    _meta: {
-      ui: { resourceUri: 'ui://get-time/mcp-app.html' },
-      extensionField: 'must-survive',
-    },
     extensionResult: { supported: true },
   };
   const projection = {
@@ -44,7 +40,10 @@ test('consumes the versioned projection and preserves the complete CallToolResul
 
   assert.ok(parsed);
   assert.deepEqual(parsed.result, result);
-  assert.equal(parsed.result._meta?.extensionField, 'must-survive');
+  assert.deepEqual(
+    (parsed.result as unknown as Record<string, unknown>).extensionResult,
+    { supported: true },
+  );
   assert.equal(parsed.toolName, 'get-time');
   assert.deepEqual(parsed.input, { requested: true });
   assert.equal(parsed.workspaceScope, 'workspace-1');
