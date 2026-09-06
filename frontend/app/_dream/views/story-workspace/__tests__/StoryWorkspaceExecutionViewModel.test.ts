@@ -3,12 +3,14 @@
 // [Pos] Story Workspace execution collaboration view-model test (Task 3 F5)
 // [Sync] 2026-08-14: remove update-feed assertions with the deleted view-model seam.
 // [Sync] 2026-09-02: cover canonical Episode container titles without storyboard suffixes.
+// [Sync] 2026-09-06: cover focused draft Episode identity without active fallback.
 
 import { expect, test } from '@playwright/test';
 import type { StoryWorkspaceDreamFilesResponse } from '../../../hooks/story-workspace/contracts';
 import {
   storyWorkspaceBuildExecutionWorkspace,
   storyWorkspaceCanAccessExecution,
+  storyWorkspaceExecutionDraftEpisodeId,
   storyWorkspaceExecutionEpisodeEntry,
   storyWorkspaceExecutionFocusNeighbors,
   storyWorkspaceResolveDreamDisplayTitle,
@@ -141,6 +143,44 @@ test('resolves the Episode reader host from an exact entity or canonical relatio
     .toBe('storyboards:beat-01');
   expect(storyWorkspaceExecutionEpisodeEntry(outline, 'missing')).toBeNull();
   expect(storyWorkspaceExecutionEpisodeEntry(outline, null)).toBeNull();
+});
+
+test('resolves a focused draft storyboard to its own registry UID without active fallback', () => {
+  const outline = storyWorkspaceBuildExecutionWorkspace(files()).outline;
+  const episodes = [
+    {
+      opaqueEpisodeId: 'episode-01-uid',
+      episodeCode: 'EP01',
+      active: false,
+      availableArtifactCount: 3,
+      hasArtifactIssues: false,
+      updatedAt: null,
+    },
+    {
+      opaqueEpisodeId: 'episode-02-uid',
+      episodeCode: 'EP02',
+      active: true,
+      availableArtifactCount: 4,
+      hasArtifactIssues: false,
+      updatedAt: null,
+    },
+  ];
+
+  expect(storyWorkspaceExecutionDraftEpisodeId(
+    outline[0],
+    episodes,
+    'episode-02-uid',
+  )).toBe('episode-01-uid');
+  expect(storyWorkspaceExecutionDraftEpisodeId(
+    outline[1],
+    episodes,
+    'episode-02-uid',
+  )).toBeNull();
+  expect(storyWorkspaceExecutionDraftEpisodeId(
+    null,
+    episodes,
+    'episode-02-uid',
+  )).toBe('episode-02-uid');
 });
 
 test('route gate uses the durable Dream confirmation fact, never WorkflowRun.status', () => {

@@ -2,6 +2,7 @@
 <!-- [Output] Product and interaction contract for the Dream synchronization Episode index, per-Episode artifact page, and return navigation. -->
 <!-- [Pos] Story Workspace Episode synchronization planning and implementation source of truth. -->
 <!-- [Sync] 2026-09-02: define index-first synchronization, stable Episode selection, deterministic registry catch-up, per-Episode data isolation, and ambiguity-free titles. -->
+<!-- [Sync] 2026-09-06: require the Draft Outline reader to resolve the focused storyboard's own registry UID without active-Episode fallback. -->
 
 # 剧本产物同步：Episode 索引与产物页
 
@@ -44,7 +45,8 @@ canonical EP02 文件、registry active Episode、页面选择和缓存可能不
 3. 用户从 EP02 产物页返回索引，再进入 EP01；页面只显示 EP01，证明选择不是把默认值改成
    EP02。
 4. 用户通过浏览器前进/后退恢复同一 Run 的索引或指定 Episode，不创建新任务。
-5. 用户在初稿 Outline 看到 `EP01`、`EP02`，点击后仍进入现有聚焦阅读层。
+5. 用户在初稿 Outline 看到 `EP01`、`EP02`；点击后进入现有聚焦阅读层，并按该条目的
+   Episode code 解析 registry UID，而不是套用 active Episode 的内容。
 
 ## 4. 概念与产品规则
 
@@ -122,6 +124,10 @@ artifact surface 拼出替代列表。
 | Episode 产物 | `episode-artifacts?episode=<uid>` | 服务端验证 actor、Run、registry membership；响应必须回显相同 UID。 |
 | 初稿 Episode 列表 | 现有 Dream storyboard stage projection | 标题用动态 `entityId`/Episode code；阅读器按匹配 Episode UID 请求。 |
 
+初稿未聚焦 storyboard 时可沿用 active Episode 的轻量概览；一旦用户聚焦具体 storyboard，
+该条目就是显式选择。条目无法映射 registry UID 时不发 artifact 请求并展示真实待同步状态，
+不得继续展示 active Episode 或其他 Episode 的镜头。
+
 API 继续使用现有 Run actor/provenance 校验。新增的 index 是直接相关的只读 read model；artifact
 接口只增加 registry-member Episode 选择参数，不提供 activate、restart、kill 或派发能力。
 
@@ -154,8 +160,9 @@ API 继续使用现有 Run actor/provenance 校验。新增的 index 是直接�
 5. 返回索引不改变 Run/Thread，不创建任务；焦点回到 EP02。
 6. 再进入 EP01 正确显示 EP01，浏览器前进/后退可恢复选择。
 7. 初稿 Outline 标题为动态 `EPxx`，不再出现 `EPxx 分镜`。
-8. 键盘操作、accessible name、焦点可见性和 390px 窄屏无横向溢出通过。
-9. 普通 Dream turn、SSE、resume、cancel、确认、reader 和 Story Index 回归通过。
+8. 初稿聚焦 EP01 时只读取 EP01 UID；从 EP02 切回 EP01 后首镜不保留 EP02 内容。
+9. 键盘操作、accessible name、焦点可见性和 390px 窄屏无横向溢出通过。
+10. 普通 Dream turn、SSE、resume、cancel、确认、reader 和 Story Index 回归通过。
 
 ## 12. 不做什么
 

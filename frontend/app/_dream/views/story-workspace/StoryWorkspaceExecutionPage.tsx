@@ -27,6 +27,8 @@
 // [Sync] 2026-09-02: make Sync index-first, route selection by Episode UID, and remove storyboard-title ambiguity.
 // [Sync] 2026-09-04: refresh run-private character/scene stages when the shared
 //                    Dream Thread settles, including a typed post-Hook failure.
+// [Sync] 2026-09-06: bind a focused draft storyboard to its own registry
+//                    Episode UID instead of the mutable active Episode.
 
 import {
   useCallback,
@@ -92,6 +94,7 @@ import {
 import {
   storyWorkspaceBuildExecutionWorkspace,
   storyWorkspaceCanAccessExecution,
+  storyWorkspaceExecutionDraftEpisodeId,
   storyWorkspaceExecutionEpisodeEntry,
   storyWorkspaceExecutionFocusNeighbors,
   storyWorkspaceResolveDreamDisplayTitle,
@@ -488,9 +491,35 @@ export function StoryWorkspaceExecutionPage({
       )) ?? null,
     [episodeId, episodeIndex.data],
   );
+  const workspace = useMemo(
+    () => files.data ? storyWorkspaceBuildExecutionWorkspace(files.data) : null,
+    [files.data],
+  );
+  const visibleEntries = activeModule === 'assets'
+    ? workspace?.assets ?? []
+    : workspace?.outline ?? [];
+  const allEntries = useMemo(
+    () => [...(workspace?.assets ?? []), ...(workspace?.outline ?? [])],
+    [workspace],
+  );
+  const focusedEntry = focusKey
+    ? allEntries.find((entry) => entry.key === focusKey) ?? null
+    : null;
+  const creationGuideFocused = focusKey === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY;
+  const focusNeighbors = useMemo(() => {
+    const focusEntries = focusedEntry?.module === 'Assets'
+      ? workspace?.assets ?? []
+      : workspace?.outline ?? [];
+    return storyWorkspaceExecutionFocusNeighbors(focusEntries, focusKey ?? '');
+  }, [focusKey, focusedEntry?.module, workspace?.assets, workspace?.outline]);
+  const draftArtifactEpisodeId = storyWorkspaceExecutionDraftEpisodeId(
+    focusedEntry,
+    episodeIndex.data?.episodes ?? [],
+    episodeIndex.data?.activeEpisodeId ?? null,
+  );
   const artifactEpisodeId = workspaceView === 'sync'
     ? selectedEpisode?.opaqueEpisodeId ?? null
-    : episodeIndex.data?.activeEpisodeId ?? null;
+    : draftArtifactEpisodeId;
   const episodeArtifacts = useStoryWorkspaceEpisodeArtifacts(
     canQueryEpisode ? runId : null,
     artifactEpisodeId,
@@ -561,10 +590,6 @@ export function StoryWorkspaceExecutionPage({
     locateEpisodeSelection(selection);
   }, [episodeViewModel, locateEpisodeSelection]);
 
-  const workspace = useMemo(
-    () => files.data ? storyWorkspaceBuildExecutionWorkspace(files.data) : null,
-    [files.data],
-  );
   const episodeDraftEntry = useMemo(
     () => storyWorkspaceExecutionEpisodeEntry(
       workspace?.outline ?? [],
@@ -572,24 +597,6 @@ export function StoryWorkspaceExecutionPage({
     ),
     [episodeSurface?.episodeCode, workspace?.outline],
   );
-  const visibleEntries = activeModule === 'assets'
-    ? workspace?.assets ?? []
-    : workspace?.outline ?? [];
-  const allEntries = useMemo(
-    () => [...(workspace?.assets ?? []), ...(workspace?.outline ?? [])],
-    [workspace],
-  );
-  const focusedEntry = focusKey
-    ? allEntries.find((entry) => entry.key === focusKey) ?? null
-    : null;
-  const creationGuideFocused = focusKey === STORY_WORKSPACE_CREATION_GUIDE_FOCUS_KEY;
-  const focusNeighbors = useMemo(() => {
-    const focusEntries = focusedEntry?.module === 'Assets'
-      ? workspace?.assets ?? []
-      : workspace?.outline ?? [];
-    return storyWorkspaceExecutionFocusNeighbors(focusEntries, focusKey ?? '');
-  }, [focusKey, focusedEntry?.module, workspace?.assets, workspace?.outline]);
-
   useEffect(() => {
     setWorkspaceView('draft');
     setActiveModule('outline');
