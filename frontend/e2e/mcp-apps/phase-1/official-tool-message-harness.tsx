@@ -3,6 +3,7 @@
 // [Pos] Provider-free Browser mount only; production components and policy APIs remain unmodified.
 // [Sync] 2026-09-06: expose a deterministic same-mount Thread switch for Browser session lifecycle acceptance.
 // [Sync] 2026-09-06: expose a parent rerender with a fresh Chat callback identity to prove the mounted App keeps in-progress input.
+// [Sync] 2026-09-06: expose a stable guide-capture boundary around the real production tool-result tree.
 
 /* eslint-disable react-refresh/only-export-components -- provider-free browser entry renders at module load */
 
@@ -69,11 +70,13 @@ function OfficialToolMessageHarness() {
       >
         Parent rerender {parentRevision}
       </button>
-      <ToolMessagePart
-        part={structuredClone(config.part) as never}
-        threadId={threadId}
-        sendUserMessage={sendUserMessage}
-      />
+      <section data-testid="mcp-app-guide-result" style={{ display: 'grid', gap: '12px' }}>
+        <ToolMessagePart
+          part={structuredClone(config.part) as never}
+          threadId={threadId}
+          sendUserMessage={sendUserMessage}
+        />
+      </section>
     </main>
   );
 }

@@ -5,6 +5,7 @@
 // [Sync] 2026-09-06: mount the production Host from the persisted tool-invocation/direct-projection shape.
 // [Sync] 2026-09-06: include the connection App-settings revision in every Host policy identity assertion.
 // [Sync] 2026-09-06: prove ordinary parent rerenders do not remount the App or discard in-progress App input before ui/message.
+// [Sync] 2026-09-06: optionally capture the collapsed-process/visible-App user-guide image from the production tree.
 
 import { expect, test } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
@@ -534,6 +535,15 @@ test('official 1.7.5 renders through production Host, stays isolated, and follow
       path: 'output/playwright/mcp-apps/official-1.7.5-production-host.png',
       fullPage: true,
     });
+    if (process.env.INK_CAPTURE_MCP_APPS_GUIDE === '1') {
+      await page.getByText(`mcp__${SERVER_REF}__${TOOL_NAME}`, { exact: true }).click();
+      await expect(page.getByText('Output', { exact: true })).toHaveCount(0);
+      await page.getByTestId('mcp-app-guide-result').screenshot({
+        path: 'output/playwright/mcp-apps-guide/use-mcp-app-in-chat.png',
+      });
+      await page.getByText(`mcp__${SERVER_REF}__${TOOL_NAME}`, { exact: true }).click();
+      await expect(page.getByText('Output', { exact: true })).toBeVisible();
+    }
 
     const deletesBeforeClose = browserMcpResponses.filter(({ method }) => method === 'DELETE').length;
     await page.getByTestId('mcp-app-close').click();
