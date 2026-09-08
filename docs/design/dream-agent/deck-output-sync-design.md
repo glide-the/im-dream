@@ -1,6 +1,17 @@
+<!-- [Sync] 2026-09-06: define Run-bound synchronization independent of Agent selection. -->
 # Dream 工作台文件自动同步
 
 > 状态：已实现最小闭环。本文只定义“主 Agent 写工作台文件、服务端同步到当前 Run 的 `.dream`、Dream 页面读取并展示”。命令编排、next action、checkpoint、通用 revision 工作流和 MCP 重同步不属于本方案。
+
+### 同步预设：Run 身份与 Agent 角色无关
+
+Dream 工作台已由运行 ID（Run ID）确定同步目标。在既有身份权限与 Thread/workspace 绑定成立的前提下，任何 Agent 都可以依据当前工作台的 `.dream` 合同修改 canonical 文件；当前选择的角色、启动时使用的 Agent 或参与 Agent 的数量，不构成拒绝同步的条件。
+
+本同步需求不引入 `launch_agent_id` 与 `active_agent_id` 的身份拆分，也不以二者相等作为同步资格判断。切换角色不改变既有 Run 的同步目标。
+
+Agent 仍不得直接写入宿主拥有的 stage 投影。成功根 turn 后，由宿主 Hook 按合同读取 canonical 事实并更新当前 Run 的 `.dream` 与页面消费数据；失败、取消或等待确认的发布边界保持不变。
+
+当人物卡已更新而 stage 陈旧时，应核查 Hook 的触发、文件读取、解析、发布及页面读取链路，并以日志确认具体原因；不得以多个 Agent 或角色切换为由拒绝同步，也不得通过新增 Agent 身份拆分规避该同步责任。
 
 ## 1. 业务目标
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # [Input] AutoDL SSH settings, generated Dream env, Dream source, and a qualified Linux x64 Runtime package built from authorized 2.1.88 source.
-# [Output] Versioned direct-host Dream release using the restored 2.1.88 local-core Runtime and screen.
+# [Output] Versioned direct-host Next.js/FastAPI Dream release using the restored 2.1.88 local-core Runtime and screen.
 # [Pos] Dream AutoDL release entry; deliberately excludes Docker and nginx.
 # [Sync] 2026-08-26: run Dream as root so /root-hosted workspace protocol paths remain fully traversable.
 # [Sync] 2026-08-28: install and verify ntn 0.15.1 beside the backend-owned
@@ -21,6 +21,9 @@
 #                    retaining flat workspace/Runtime discovery verification.
 # [Sync] 2026-09-01: advance the qualified rollback pointer only after all
 #                    release gates pass; failed current releases are never reused.
+# [Sync] 2026-09-06: migrate the direct-host frontend to the canonical
+#                    Next.js/pnpm workspace and verify the Node MCP Apps routes.
+# [Sync] 2026-09-06: expose the fixed Node binary to Corepack's env-based launcher.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,6 +38,7 @@ AUTODL_SSH_USER="${AUTODL_SSH_USER:-root}"
 AUTODL_SSH_PORT="${AUTODL_SSH_PORT:-22}"
 AUTODL_SSH_KEY="${AUTODL_SSH_KEY:-}"
 AUTODL_SSH_CONTROL_PATH="${AUTODL_SSH_CONTROL_PATH:-}"
+AUTODL_SSH_BATCH_MODE="${AUTODL_SSH_BATCH_MODE:-yes}"
 AUTODL_APP_ROOT="${AUTODL_APP_ROOT:-/root/ink-autodl/dream}"
 AUTODL_DATA_ROOT="${AUTODL_DATA_ROOT:-/root/autodl-tmp/ink-memory}"
 AUTODL_STACK_START_SCRIPT="${AUTODL_STACK_START_SCRIPT:-/root/ink-autodl/start-ink-memory.sh}"
@@ -48,13 +52,13 @@ AUTODL_CLAUDE_REMOTE_PACKAGE_ROOT="${AUTODL_CLAUDE_REMOTE_PACKAGE_ROOT:-${AUTODL
 AUTODL_ENV_FILE="${AUTODL_ENV_FILE:-${SCRIPT_DIR}/.env}"
 AUTODL_SERVICE_USER="${AUTODL_SERVICE_USER:-root}"
 AUTODL_NODE_VERSION="${AUTODL_NODE_VERSION:-22.18.0}"
+AUTODL_PNPM_VERSION="${AUTODL_PNPM_VERSION:-10.28.1}"
 AUTODL_NOTION_CLI_VERSION="${AUTODL_NOTION_CLI_VERSION:-0.15.1}"
 AUTODL_PYTHON="${AUTODL_PYTHON:-/root/miniconda3/bin/python}"
 AUTODL_DREAM_FRONTEND_PORT="${AUTODL_DREAM_FRONTEND_PORT:-${AUTODL_DREAM_PORT:-6006}}"
 AUTODL_DREAM_BACKEND_PORT="${AUTODL_DREAM_BACKEND_PORT:-8765}"
 AUTODL_ADMIN_PORT="${AUTODL_ADMIN_PORT:-6008}"
 AUTODL_DREAM_PUBLIC_ORIGIN="${AUTODL_DREAM_PUBLIC_ORIGIN:-}"
-AUTODL_VITE_ALLOWED_HOSTS="${AUTODL_VITE_ALLOWED_HOSTS:-}"
 AUTODL_SCREEN_NAME="${AUTODL_DREAM_SCREEN_NAME:-ink-dream}"
 AUTODL_NPM_TOKEN="${AUTODL_NPM_TOKEN:-}"
 AUTODL_NPM_REGISTRY="${AUTODL_NPM_REGISTRY:-https://registry.npmjs.org}"
@@ -66,17 +70,6 @@ log() { printf '[dream-autodl] %s\n' "$*"; }
 warn() { printf '[warn] %s\n' "$*" >&2; }
 err() { printf '[error] %s\n' "$*" >&2; exit 1; }
 quote() { printf '%q' "$1"; }
-dream_public_host() {
-  local host="${AUTODL_DREAM_PUBLIC_ORIGIN#https://}"
-  printf '%s\n' "${host%%:*}"
-}
-vite_allowed_hosts() {
-  if [[ "${AUTODL_VITE_ALLOWED_HOSTS}" == "*" ]]; then
-    printf '*\n'
-  else
-    dream_public_host
-  fi
-}
 
 usage() {
   cat <<'EOF'
@@ -96,9 +89,10 @@ EOF
 }
 
 ssh_args() {
-  SSH_ARGS=(-p "${AUTODL_SSH_PORT}" -o BatchMode=yes)
+  SSH_ARGS=(-p "${AUTODL_SSH_PORT}" -o "BatchMode=${AUTODL_SSH_BATCH_MODE}")
   [[ -n "${AUTODL_SSH_KEY}" ]] && SSH_ARGS+=(-i "${AUTODL_SSH_KEY}")
   [[ -n "${AUTODL_SSH_CONTROL_PATH}" ]] && SSH_ARGS+=(-o "ControlPath=${AUTODL_SSH_CONTROL_PATH}")
+  return 0
 }
 
 ssh_target() { printf '%s@%s\n' "${AUTODL_SSH_USER}" "${AUTODL_SSH_HOST:-AUTODL_SSH_HOST}"; }
@@ -115,7 +109,7 @@ remote() {
 
 scp_file() {
   local source="$1" target="$2"
-  local args=(-P "${AUTODL_SSH_PORT}" -o BatchMode=yes)
+  local args=(-P "${AUTODL_SSH_PORT}" -o "BatchMode=${AUTODL_SSH_BATCH_MODE}")
   [[ -n "${AUTODL_SSH_KEY}" ]] && args+=(-i "${AUTODL_SSH_KEY}")
   [[ -n "${AUTODL_SSH_CONTROL_PATH}" ]] && args+=(-o "ControlPath=${AUTODL_SSH_CONTROL_PATH}")
   if [[ "${DRY_RUN}" == "1" ]]; then
@@ -127,6 +121,7 @@ scp_file() {
 
 require_config() {
   [[ -n "${AUTODL_SSH_HOST}" ]] || err "AUTODL_SSH_HOST is required."
+  [[ "${AUTODL_SSH_BATCH_MODE}" == "yes" || "${AUTODL_SSH_BATCH_MODE}" == "no" ]] || err "AUTODL_SSH_BATCH_MODE must be yes or no."
   [[ "${AUTODL_DREAM_PUBLIC_ORIGIN}" =~ ^https://[^/]+(:[0-9]+)?$ ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN must be an exact HTTPS origin."
   [[ "${AUTODL_SSH_USER}" == "root" ]] || err "AutoDL setup currently requires the root SSH account."
   [[ "${AUTODL_SERVICE_USER}" == "root" ]] || err "AutoDL Dream must run as root when its runtime and workspace live under /root."
@@ -140,9 +135,10 @@ require_config() {
 check_local() {
   local failed=0 mode
   for name in ssh scp rsync git; do command -v "${name}" >/dev/null 2>&1 || { warn "Missing local command: ${name}"; failed=1; }; done
-  for file in "${AUTODL_ENV_FILE}" "${SCRIPT_DIR}/runtime/start-dream.sh" "${SCRIPT_DIR}/runtime/start-ink-memory.sh" "${SCRIPT_DIR}/runtime/init-dream-data.sh" "${REPO_ROOT}/backend/requirements.txt" "${REPO_ROOT}/frontend/package.json" "${REPO_ROOT}/frontend/package-lock.json" "${REPO_ROOT}/frontend/vite.config.ts"; do
+  for file in "${AUTODL_ENV_FILE}" "${SCRIPT_DIR}/runtime/start-dream.sh" "${SCRIPT_DIR}/runtime/start-ink-memory.sh" "${SCRIPT_DIR}/runtime/init-dream-data.sh" "${REPO_ROOT}/backend/requirements.txt" "${REPO_ROOT}/frontend/package.json" "${REPO_ROOT}/frontend/pnpm-lock.yaml" "${REPO_ROOT}/frontend/pnpm-workspace.yaml" "${REPO_ROOT}/frontend/next.config.js" "${REPO_ROOT}/frontend/packages/mcp-apps-runtime/package.json"; do
     [[ -f "${file}" ]] || { warn "Missing file: ${file}"; failed=1; }
   done
+  [[ -d "${REPO_ROOT}/frontend/app/_dream" ]] || { warn "Missing canonical Dream App Router source: ${REPO_ROOT}/frontend/app/_dream"; failed=1; }
   for directory in "${AUTODL_CLAUDE_RUNTIME_REPOSITORY}" "${AUTODL_CLAUDE_RUNTIME_PACKAGE_ROOT}"; do
     [[ -d "${directory}" ]] || { warn "Missing Claude Runtime build input: ${directory}"; failed=1; }
   done
@@ -170,11 +166,12 @@ command_plan() {
   cat <<EOF
 AutoDL Dream direct-host release:
   SSH target:      $(ssh_target):${AUTODL_APP_ROOT}
-  Dream mapping:   http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT} (Vite Preview) -> ${AUTODL_DREAM_PUBLIC_ORIGIN:-<required>}
+  Dream mapping:   http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT} (Next.js) -> ${AUTODL_DREAM_PUBLIC_ORIGIN:-<required>}
   API upstream:    http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT} (FastAPI, private)
   Admin upstream:  http://127.0.0.1:${AUTODL_ADMIN_PORT}
   data:            ${AUTODL_DATA_ROOT}
-  runtime:         Miniconda Python 3.12 + Node ${AUTODL_NODE_VERSION} + screen
+  runtime:         Miniconda Python 3.12 + Node ${AUTODL_NODE_VERSION} + pnpm ${AUTODL_PNPM_VERSION} + screen
+  Web source:      frontend/app/_dream + Node MCP Apps runtime
   Claude pair:     ink-claude-dream-agent-sdk 0.2.144 + qualified 2.1.88 local-core (CLI compatibility 2.1.241)
   seccomp helper:  vendor path contains the checksum-bound Docker-style passthrough
   Notion CLI:      ntn ${AUTODL_NOTION_CLI_VERSION}
@@ -202,11 +199,15 @@ if [ ! -x \"\${node_root}/bin/node\" ]; then
 fi
 ln -sfn \"\${node_root}\" /root/ink-autodl/runtime/node
 install -d /root/ink-autodl/runtime/npm
-/root/ink-autodl/runtime/node/bin/node --version"
+export PATH=/root/ink-autodl/runtime/node/bin:\$PATH
+/root/ink-autodl/runtime/node/bin/node --version
+/root/ink-autodl/runtime/node/bin/corepack enable --install-directory /root/ink-autodl/runtime/node/bin
+/root/ink-autodl/runtime/node/bin/corepack install --global pnpm@$(quote "${AUTODL_PNPM_VERSION}")
+test \"\$(/root/ink-autodl/runtime/node/bin/pnpm --version)\" = $(quote "${AUTODL_PNPM_VERSION}")"
 }
 
 sync_plugin_artifacts() {
-  local transport="ssh -p $(quote "${AUTODL_SSH_PORT}") -o BatchMode=yes"
+  local transport="ssh -p $(quote "${AUTODL_SSH_PORT}") -o BatchMode=$(quote "${AUTODL_SSH_BATCH_MODE}")"
   [[ -n "${AUTODL_SSH_KEY}" ]] && transport+=" -i $(quote "${AUTODL_SSH_KEY}")"
   [[ -n "${AUTODL_SSH_CONTROL_PATH}" ]] && transport+=" -o ControlPath=$(quote "${AUTODL_SSH_CONTROL_PATH}")"
 
@@ -295,10 +296,10 @@ trap - EXIT"
 sync_files() {
   require_config; check_local
   remote "install -d -m 0750 $(quote "${AUTODL_APP_ROOT}/source") $(quote "${AUTODL_APP_ROOT}/config") $(quote "${AUTODL_CLAUDE_REMOTE_BUILD_ROOT}/ink-claude-code-dream") $(quote "${AUTODL_CLAUDE_REMOTE_PACKAGE_ROOT}")"
-  local transport="ssh -p $(quote "${AUTODL_SSH_PORT}") -o BatchMode=yes"
+  local transport="ssh -p $(quote "${AUTODL_SSH_PORT}") -o BatchMode=$(quote "${AUTODL_SSH_BATCH_MODE}")"
   [[ -n "${AUTODL_SSH_KEY}" ]] && transport+=" -i $(quote "${AUTODL_SSH_KEY}")"
   [[ -n "${AUTODL_SSH_CONTROL_PATH}" ]] && transport+=" -o ControlPath=$(quote "${AUTODL_SSH_CONTROL_PATH}")"
-  local args=(-az --delete --exclude '/.git/' --exclude '/.env*' --exclude '/.venv*/' --exclude '/.artifacts/' --exclude '/.codex-pet-runs/' --exclude '/output/' --exclude '/backend/.env' --exclude '/backend/.venv*/' --exclude '/backend/data/' --exclude '/frontend/node_modules/' --exclude '/frontend/dist/' --exclude '/node_modules/' --exclude '/test-results/' --exclude '/playwright-report/' --exclude '/deploy/remote-ssh/.env' --exclude '/deploy/autodl-ssh/.env' -e "${transport}")
+  local args=(-az --delete --exclude '/.git/' --exclude '/.env*' --exclude '/.venv*/' --exclude '/.artifacts/' --exclude '/.codex-pet-runs/' --exclude '/output/' --exclude '/backend/.env' --exclude '/backend/.venv*/' --exclude '/backend/data/' --exclude '/frontend/.env*' --exclude '/frontend/.next/' --exclude '/frontend/node_modules/' --exclude '/node_modules/' --exclude '/test-results/' --exclude '/playwright-report/' --exclude '/deploy/remote-ssh/.env' --exclude '/deploy/autodl-ssh/.env' -e "${transport}")
   log "Syncing Dream source without runtime secrets or mutable local data."
   if [[ "${DRY_RUN}" == "1" ]]; then printf '[dry-run] rsync'; printf ' %q' "${args[@]}" "${REPO_ROOT}/" "$(ssh_target):${AUTODL_APP_ROOT}/source/"; printf '\n';
   else rsync "${args[@]}" "${REPO_ROOT}/" "$(ssh_target):${AUTODL_APP_ROOT}/source/"; fi
@@ -320,26 +321,35 @@ sync_files() {
 
 build_release() {
   local release_id
-  release_id="$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD)"
+  release_id="$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD)-$(date -u +%Y%m%d%H%M%S)"
   log "Building Dream release ${release_id} on AutoDL."
   install_claude_runtime
   remote "set -euo pipefail
 staging=$(quote "${AUTODL_APP_ROOT}/releases/${release_id}.staging")
 release=$(quote "${AUTODL_APP_ROOT}/releases/${release_id}")
 rm -rf \"\${staging}\"
-install -d \"\${staging}/app\" \"\${staging}/frontend\"
+install -d \"\${staging}/app\" \"\${staging}/frontend-src\" \"\${staging}/frontend\"
 $(quote "${AUTODL_PYTHON}") -m venv \"\${staging}/venv\"
 \"\${staging}/venv/bin/python\" -m pip install --upgrade pip >/dev/null
 PIP_INDEX_URL=$(quote "${AUTODL_PYPI_INDEX_URL}") PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10 \"\${staging}/venv/bin/python\" -m pip install --require-hashes --extra-index-url https://pypi.org/simple -r $(quote "${AUTODL_APP_ROOT}/source/backend/requirements.txt")
 rsync -a --exclude '.env' --exclude '.venv*' --exclude 'data/' $(quote "${AUTODL_APP_ROOT}/source/backend/") \"\${staging}/app/\"
-rsync -a --exclude '.env*' --exclude 'node_modules/' --exclude 'dist/' $(quote "${AUTODL_APP_ROOT}/source/frontend/") \"\${staging}/frontend/\"
+rsync -a --exclude '.env*' --exclude '.next/' --exclude 'node_modules/' $(quote "${AUTODL_APP_ROOT}/source/frontend/") \"\${staging}/frontend-src/\"
 cp $(quote "${AUTODL_APP_ROOT}/source/deploy/autodl-ssh/runtime/start-dream.sh") \"\${staging}/start-dream.sh\"
 chmod 0755 \"\${staging}/start-dream.sh\"
 export PATH=/root/ink-autodl/runtime/node/bin:\$PATH
-cd \"\${staging}/frontend\"
-npm ci --no-audit --no-fund --registry $(quote "${AUTODL_NPM_REGISTRY}")
-NODE_OPTIONS=--max-old-space-size=4096 VITE_PUBLIC_SITE_URL=$(quote "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/") VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT} VITE_ALLOWED_HOSTS=$(quote "$(vite_allowed_hosts)") npm run build
-test -s \"\${staging}/frontend/dist/index.html\"
+cd \"\${staging}/frontend-src\"
+pnpm config set registry $(quote "${AUTODL_NPM_REGISTRY}")
+pnpm install --frozen-lockfile
+NODE_OPTIONS=--max-old-space-size=4096 INK_NEXT_OUTPUT=standalone INK_PUBLIC_SITE_URL=$(quote "${AUTODL_DREAM_PUBLIC_ORIGIN%/}") INK_BACKEND_INTERNAL_URL=http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT} pnpm run build
+test -s \"\${staging}/frontend-src/.next/standalone/server.js\"
+grep -Fq '/api/mcp-apps/[serverRef]' \"\${staging}/frontend-src/.next/app-path-routes-manifest.json\"
+grep -Fq '/mcp-apps-sandbox' \"\${staging}/frontend-src/.next/app-path-routes-manifest.json\"
+rsync -a \"\${staging}/frontend-src/.next/standalone/\" \"\${staging}/frontend/\"
+install -d \"\${staging}/frontend/.next\"
+rsync -a \"\${staging}/frontend-src/.next/static/\" \"\${staging}/frontend/.next/static/\"
+rsync -a \"\${staging}/frontend-src/public/\" \"\${staging}/frontend/public/\"
+rm -rf \"\${staging}/frontend-src\"
+test -s \"\${staging}/frontend/server.js\"
 cd \"\${staging}/app\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from importlib import metadata as m; import claude_agent_sdk as sdk; assert m.version('ink-claude-dream-agent-sdk') == '0.2.144'; assert sdk.__version__ == '0.2.144'\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; assert resolve_claude_cli_path().endswith('/ink-claude-code-dream')\"
@@ -368,25 +378,14 @@ INK_AUTODL_DATA_ROOT=$(quote "${AUTODL_DATA_ROOT}") INK_AUTODL_SERVICE_USER=$(qu
 test -L $(quote "${AUTODL_APP_ROOT}/current")
 current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current"))
 env_file=$(quote "${AUTODL_APP_ROOT}/config/dream.env")
-if [ ! -s \"\${current}/frontend/dist/index.html\" ]; then
-  env_file=$(quote "${AUTODL_APP_ROOT}/config/dream.env.legacy")
-  sed 's/^PORT=.*/PORT=${AUTODL_DREAM_FRONTEND_PORT}/' $(quote "${AUTODL_APP_ROOT}/config/dream.env") > \"\${env_file}.next\"
-  group=\$(id -gn $(quote "${AUTODL_SERVICE_USER}"))
-  chown root:\"\${group}\" \"\${env_file}.next\"
-  chmod 0640 \"\${env_file}.next\"
-  mv -f \"\${env_file}.next\" \"\${env_file}\"
-fi
+test -s \"\${current}/frontend/server.js\"
 rm -f $(quote "${AUTODL_APP_ROOT}/run/dream.pid")
 screen -S $(quote "${AUTODL_SCREEN_NAME}") -X quit >/dev/null 2>&1 || true
 screen -dmS $(quote "${AUTODL_SCREEN_NAME}") -L -Logfile $(quote "${AUTODL_APP_ROOT}/logs/dream.log") bash -lc \"exec env HOME=$(quote "${AUTODL_DATA_ROOT}/service-home") INK_AUTODL_DATA_ROOT=$(quote "${AUTODL_DATA_ROOT}") AUTODL_DREAM_ENV_FILE=\${env_file} AUTODL_DREAM_PID_FILE=$(quote "${AUTODL_APP_ROOT}/run/dream.pid") AUTODL_DREAM_FRONTEND_PORT=${AUTODL_DREAM_FRONTEND_PORT} AUTODL_DREAM_BACKEND_PORT=${AUTODL_DREAM_BACKEND_PORT} AUTODL_NODE_BIN=/root/ink-autodl/runtime/node/bin AUTODL_NPM_BIN=/root/ink-autodl/runtime/npm/bin $(quote "${AUTODL_APP_ROOT}/current/start-dream.sh")\"
-if [ -s \"\${current}/frontend/dist/index.html\" ]; then
-  for _ in \$(seq 1 120); do
-    curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null 2>&1 && curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null 2>&1 && curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null 2>&1 && exit 0
-    sleep 1
-  done
-else
-  for _ in \$(seq 1 120); do curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null 2>&1 && exit 0; sleep 1; done
-fi
+for _ in \$(seq 1 120); do
+  curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null 2>&1 && curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null 2>&1 && curl -fsS --max-time 3 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null 2>&1 && exit 0
+  sleep 1
+done
 tail -n 160 $(quote "${AUTODL_APP_ROOT}/logs/dream.log") >&2 || true
 exit 1"
 }
@@ -418,16 +417,14 @@ EOF
 
 verify() {
   local topology
-  topology="$(remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_ADMIN_PORT}/admin/login >/dev/null; screen -ls | grep -q '[.]${AUTODL_SCREEN_NAME}[[:space:]]'; if [ -s \"\${current}/frontend/dist/index.html\" ]; then curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; for endpoint in robots.txt sitemap.xml llms.txt; do content_type=\$(curl -fsS --max-time 10 -o /dev/null -w '%{content_type}' http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/\${endpoint}); case \"\${content_type}\" in text/html*) exit 1 ;; esac; done; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_FRONTEND_PORT}$'; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_BACKEND_PORT}$'; printf stack; else curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; printf legacy; fi")"
+  topology="$(remote "set -e; current=\$(readlink -f $(quote "${AUTODL_APP_ROOT}/current")); test -s \"\${current}/frontend/server.js\"; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_ADMIN_PORT}/admin/login >/dev/null; screen -ls | grep -q '[.]${AUTODL_SCREEN_NAME}[[:space:]]'; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/ >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_BACKEND_PORT}/api/health >/dev/null; curl -fsS --max-time 10 http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/api/health >/dev/null; for endpoint in robots.txt sitemap.xml llms.txt; do content_type=\$(curl -fsS --max-time 10 -o /dev/null -w '%{content_type}' http://127.0.0.1:${AUTODL_DREAM_FRONTEND_PORT}/\${endpoint}); case \"\${content_type}\" in text/html*) exit 1 ;; esac; done; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_FRONTEND_PORT}$'; ss -ltn | awk '{print \$4}' | grep -Eq '(^|:)${AUTODL_DREAM_BACKEND_PORT}$'; printf next")"
   [[ -n "${AUTODL_DREAM_PUBLIC_ORIGIN}" ]] || err "AUTODL_DREAM_PUBLIC_ORIGIN is required for public verification."
   curl -fsS --retry 15 --retry-delay 3 --retry-connrefused --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/api/health" >/dev/null
-  if [[ "${topology}" == "stack" ]]; then
-    curl -fsS --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/" >/dev/null
-    verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origin"
-  fi
+  curl -fsS --max-time 15 "${AUTODL_DREAM_PUBLIC_ORIGIN%/}/" >/dev/null
+  verify_seo_origin "${AUTODL_DREAM_PUBLIC_ORIGIN}" "AutoDL public origin"
   verify_default_plugin
   verify_builtin_skills
-  log "Dream ${topology} topology, SEO crawler files, built-in Skills, default plugin artifact, Admin dependency, screen supervisor, and public mapping passed."
+  log "Dream ${topology} topology, Node MCP Apps build, SEO crawler files, built-in Skills, default plugin artifact, Admin dependency, screen supervisor, and public mapping passed."
 }
 
 mark_current_qualified() {

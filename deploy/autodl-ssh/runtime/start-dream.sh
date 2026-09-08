@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # [Input] Versioned frontend/backend release, launcher paths, and mode-0640 Dream runtime env.
-# [Output] One supervised Vite Preview process on 6006 and FastAPI process on 8765.
+# [Output] One supervised standalone Next.js process on 6006 and FastAPI process on 8765.
 # [Pos] AutoDL screen-session entrypoint for the complete direct-host Dream stack.
 # [Sync] 2026-08-26: supervise same-origin frontend 6006 and private backend 8765 without nginx.
 # [Sync] 2026-08-28: bind Agent workspaces and Notion user credentials to the
 #                    explicit persistent AutoDL agentdata root.
+# [Sync] 2026-09-06: run the canonical Next.js standalone server and preserve
+#                    the Node MCP Apps runtime beside the private FastAPI API.
 set -euo pipefail
 
 : "${AUTODL_DREAM_ENV_FILE:?AUTODL_DREAM_ENV_FILE is required}"
@@ -40,17 +42,39 @@ for key, value in dotenv_values(env["AUTODL_DREAM_ENV_FILE"]).items():
 
 frontend_port = env.get("AUTODL_DREAM_FRONTEND_PORT", "6006")
 backend_port = env.get("AUTODL_DREAM_BACKEND_PORT", "8765")
-env["HOST"] = "127.0.0.1"
-env["PORT"] = backend_port
-env.setdefault("VITE_DEV_API_PROXY_TARGET", f"http://127.0.0.1:{backend_port}")
 env.setdefault("NO_COLOR", "1")
+if env.get("INK_AGENT_SANDBOX_ENABLED") != "false":
+    raise SystemExit("AutoDL must keep the deployment-owned sandbox capability disabled")
 agentdata_root = Path(env["INK_AUTODL_DATA_ROOT"]).resolve(strict=True)
 env.setdefault("AGENT_CWD", str(agentdata_root / "agent-workspaces"))
 env.setdefault("INK_NOTION_RUNTIME_ROOT", str(agentdata_root / "notion-runtime"))
 
 python = str(release_root / "venv/bin/python")
 node = str(Path(env["AUTODL_NODE_BIN"]) / "node")
-vite = str(release_root / "frontend/node_modules/vite/bin/vite.js")
+next_server = str(release_root / "frontend/server.js")
+if not Path(next_server).is_file():
+    raise SystemExit("Next.js standalone server is missing")
+
+backend_env = env.copy()
+backend_env["HOST"] = "127.0.0.1"
+backend_env["PORT"] = backend_port
+frontend_env = env.copy()
+frontend_env["NODE_ENV"] = "production"
+frontend_env["HOSTNAME"] = "127.0.0.1"
+frontend_env["PORT"] = frontend_port
+frontend_env["BACKEND_URL"] = f"http://127.0.0.1:{backend_port}"
+frontend_env["INK_BACKEND_INTERNAL_URL"] = f"http://127.0.0.1:{backend_port}"
+frontend_env["API_BASE_URL"] = ""
+frontend_env["WS_BASE_URL"] = ""
+runtime_template = release_root / "frontend/public/runtime-config.template.js"
+runtime_config = release_root / "frontend/public/runtime-config.js"
+if runtime_template.is_file():
+    runtime_config.write_text(
+        runtime_template.read_text(encoding="utf-8")
+        .replace("${API_BASE_URL}", "")
+        .replace("${WS_BASE_URL}", ""),
+        encoding="utf-8",
+    )
 children: list[subprocess.Popen[bytes]] = []
 
 def stop_children() -> None:
@@ -90,7 +114,7 @@ backend = subprocess.Popen(
         "--forwarded-allow-ips=*",
     ],
     cwd=release_root / "app",
-    env=env,
+    env=backend_env,
 )
 children.append(backend)
 
@@ -109,9 +133,9 @@ else:
     raise SystemExit("FastAPI did not become healthy within 120 seconds")
 
 frontend = subprocess.Popen(
-    [node, vite, "preview", "--host", "127.0.0.1", "--port", frontend_port, "--strictPort"],
+    [node, next_server],
     cwd=release_root / "frontend",
-    env=env,
+    env=frontend_env,
 )
 children.append(frontend)
 
