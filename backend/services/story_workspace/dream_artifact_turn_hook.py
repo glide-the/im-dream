@@ -21,6 +21,8 @@
 #                    receives an exact stale-project cleanup scope.
 # [Sync] 2026-09-02: extend the registry from canonical contiguous Episodes and
 #                    activate one unambiguous changed or newly discovered Episode.
+# [Sync] 2026-09-06: keep launch-Agent provenance internally consistent while
+#                    allowing any valid current same-Deck Agent to publish the Run.
 
 """Root-turn synchronization from canonical workbench files to one Dream Run.
 
@@ -814,6 +816,7 @@ class DreamArtifactTurnHook:
         metadata = cls._decode_source_metadata(raw_metadata)
         dream_context = metadata.get("dreamContext")
         goal = metadata.get("goal")
+        launch_agent_id = metadata.get("agentId")
         trusted_story_slug = metadata.get("projectStorySlug")
         if trusted_story_slug is None and isinstance(goal, str) and goal:
             trusted_story_slug = story_workspace_canonical_project_fallback_slug(
@@ -827,16 +830,23 @@ class DreamArtifactTurnHook:
             and str(metadata.get("actorId")) == ticket.actor_id
             and metadata.get("workspaceId") == workflow_run.workspace_id
             and metadata.get("deckId") == ticket.context.deck_id
-            and metadata.get("agentId") == ticket.context.agent_id
             and metadata.get("workflowRunId")
             == ticket.context.workflow_run_id
             and metadata.get("threadId") == ticket.context.thread_id
             and isinstance(dream_context, dict)
+            and (
+                launch_agent_id is None
+                or (
+                    isinstance(launch_agent_id, str)
+                    and bool(launch_agent_id)
+                    and launch_agent_id == launch_agent_id.strip()
+                )
+            )
             and dream_context.get("workflow_run_id")
             == ticket.context.workflow_run_id
             and dream_context.get("thread_id") == ticket.context.thread_id
             and dream_context.get("deck_id") == ticket.context.deck_id
-            and dream_context.get("agent_id") == ticket.context.agent_id
+            and dream_context.get("agent_id") == launch_agent_id
             and dream_context.get("deck_plugin_id")
             == ticket.context.deck_plugin_id
             and dream_context.get("deck_plugin_version")

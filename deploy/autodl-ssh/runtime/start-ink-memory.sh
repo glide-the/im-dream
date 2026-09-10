@@ -3,6 +3,8 @@
 # [Output] Idempotently preserve or start Admin first, then the Dream frontend/backend stack.
 # [Pos] Standalone AutoDL launch script; performs no build, migration, restore, GPU probe, or deployment.
 # [Sync] 2026-08-26: keep Admin isolated while running the /root-hosted Dream runtime as root.
+# [Sync] 2026-09-06: recognize only the canonical standalone Next.js Dream
+#                    release while preserving Admin-first startup ownership.
 set -euo pipefail
 
 ADMIN_ROOT="${INK_AUTODL_ADMIN_ROOT:-/root/ink-autodl/admin}"
@@ -122,13 +124,13 @@ start_dream() {
   [[ -L "${current_release}" ]] || fail "Dream current release link is missing: ${current_release}"
   [[ -x "${launcher}" ]] || fail "Dream launcher is missing or not executable: ${launcher}"
   [[ -r "${env_file}" ]] || fail "Dream runtime env is missing or unreadable: ${env_file}"
-  [[ -s "${current_release}/frontend/dist/index.html" ]] || fail "Dream frontend build is missing from the current release."
+  [[ -s "${current_release}/frontend/server.js" ]] || fail "Dream standalone Next.js server is missing from the current release."
   [[ -x "${current_release}/venv/bin/python" ]] || fail "Dream Python runtime is missing from the current release."
   [[ -x "${NODE_BIN}/node" ]] || fail "Node runtime is missing: ${NODE_BIN}/node"
   screen -S "${DREAM_SCREEN}" -X quit >/dev/null 2>&1 || true
   rm -f "${pid_file}"
   screen -dmS "${DREAM_SCREEN}" -L -Logfile "${DREAM_ROOT}/logs/dream.log" bash -lc \
-    "exec env HOME=$(quote "${DATA_ROOT}/service-home") AUTODL_DREAM_ENV_FILE=$(quote "${env_file}") AUTODL_DREAM_PID_FILE=$(quote "${pid_file}") AUTODL_DREAM_FRONTEND_PORT=${FRONTEND_PORT} AUTODL_DREAM_BACKEND_PORT=${BACKEND_PORT} AUTODL_NODE_BIN=$(quote "${NODE_BIN}") AUTODL_NPM_BIN=$(quote "${NPM_BIN}") $(quote "${launcher}")"
+    "exec env HOME=$(quote "${DATA_ROOT}/service-home") INK_AUTODL_DATA_ROOT=$(quote "${DATA_ROOT}") AUTODL_DREAM_ENV_FILE=$(quote "${env_file}") AUTODL_DREAM_PID_FILE=$(quote "${pid_file}") AUTODL_DREAM_FRONTEND_PORT=${FRONTEND_PORT} AUTODL_DREAM_BACKEND_PORT=${BACKEND_PORT} AUTODL_NODE_BIN=$(quote "${NODE_BIN}") AUTODL_NPM_BIN=$(quote "${NPM_BIN}") $(quote "${launcher}")"
 
   wait_until dream_is_healthy 120 || fail "Dream did not become healthy; inspect ${DREAM_ROOT}/logs/dream.log"
   log "Dream is ready on frontend 127.0.0.1:${FRONTEND_PORT} and backend 127.0.0.1:${BACKEND_PORT}."

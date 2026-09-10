@@ -63,6 +63,8 @@
 // [Sync] 2026-09-06: route composer, queued, and MCP Apps user messages through one coordinated ingress.
 // [Sync] 2026-09-06: preserve verified live process/App parts when completion recovery returns a final-only history summary.
 // [Sync] 2026-09-06: retain live turn identity only for recovery merging; completed turns use the shared collapsed-process layout.
+// [Sync] 2026-09-07: keep live turn identities in a ref so metadata replay cannot
+//                    recreate the recovery callback and abort an active reconnect stream.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -298,9 +300,7 @@ export default function ChatPanel({
   const [historicalMessageIds, setHistoricalMessageIds] = useState<ReadonlySet<string>>(
     () => new Set((initialMessages ?? []).map((message) => message.id)),
   );
-  const [livePresentedTurnIds, setLivePresentedTurnIds] = useState<ReadonlySet<string>>(
-    () => new Set<string>(),
-  );
+  const livePresentedTurnIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
   const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
   const [olderHistoryError, setOlderHistoryError] = useState<Error | null>(null);
   const olderHistoryAbortRef = useRef<AbortController | null>(null);
@@ -518,7 +518,7 @@ export default function ChatPanel({
     turnGenerationRef.current = 0;
     setHistoryPage(initialHistoryPage);
     setHistoricalMessageIds(new Set((initialMessages ?? []).map((message) => message.id)));
-    setLivePresentedTurnIds(new Set<string>());
+    livePresentedTurnIdsRef.current = new Set<string>();
     setOlderHistoryError(null);
     setIsLoadingOlderHistory(false);
   // ChatView keys panels by threadId; the explicit reset also keeps direct
@@ -563,15 +563,14 @@ export default function ChatPanel({
 
   useEffect(() => {
     if (status !== 'submitted' && status !== 'streaming' && !runtimeRunning) return;
-    setLivePresentedTurnIds((current) => {
-      const next = new Set(current);
-      for (const message of messages) {
-        if (message.role !== 'assistant' || historicalMessageIds.has(message.id)) continue;
-        const metadata = message.metadata as ChatMetadata | undefined;
-        if (typeof metadata?.turnId === 'string' && metadata.turnId) next.add(metadata.turnId);
-      }
-      return next.size === current.size ? current : next;
-    });
+    const current = livePresentedTurnIdsRef.current;
+    const next = new Set(current);
+    for (const message of messages) {
+      if (message.role !== 'assistant' || historicalMessageIds.has(message.id)) continue;
+      const metadata = message.metadata as ChatMetadata | undefined;
+      if (typeof metadata?.turnId === 'string' && metadata.turnId) next.add(metadata.turnId);
+    }
+    if (next.size !== current.size) livePresentedTurnIdsRef.current = next;
   }, [historicalMessageIds, messages, runtimeRunning, status]);
 
   useEffect(() => {
@@ -641,7 +640,7 @@ export default function ChatPanel({
       const recovered = mergeRecoveredLatestPage(
         messagesRef.current,
         recoveredMessages,
-        livePresentedTurnIds,
+        livePresentedTurnIdsRef.current,
       );
       const recoveredPage = snapshot.historyPage ?? {
         nextCursor: null,
@@ -662,7 +661,7 @@ export default function ChatPanel({
     } catch {
       return undefined;
     }
-  }, [livePresentedTurnIds, threadId]);
+  }, [threadId]);
 
   const [isReloadingAfterError, setIsReloadingAfterError] = useState(false);
   const handleReloadAfterError = useCallback(async () => {

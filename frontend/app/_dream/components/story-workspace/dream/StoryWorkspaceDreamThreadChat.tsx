@@ -2,8 +2,10 @@
 // [Output] Dream shell composition of the canonical ChatPanel/session contract.
 // [Pos] Business-surface adapter only; owns no transport, parser, or live reducer.
 // [Sync] 2026-09-02: pass the shared message-page cursor through hydration/recovery.
+// [Sync] 2026-09-07: provide the shared Workspace capability state to direct Dream ChatPanel hosts.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { WorkspaceProvider } from '../../../contexts/WorkspaceContext';
 import ChatPanel, {
   type ChatPanelRecoverySnapshot,
 } from '../../chat/ChatPanel';
@@ -194,39 +196,41 @@ export function StoryWorkspaceDreamThreadChat({
   }
 
   return (
-    <div className="story-workspace-dream-thread-chat" data-thread-id={threadId}>
-      <ChatPanel
-        key={`${threadId}:${terminalHistoryGeneration}`}
-        threadId={threadId}
-        initialMessages={snapshot.messages}
-        initialRuntimePendingToolCallIds={snapshot.runtimePendingToolCallIds}
-        initialRuntimeRunning={snapshot.running}
-        initialSettledToolCallIds={snapshot.settledToolCallIds}
-        initialToolConfirmationKnown={snapshot.status?.tool_confirmation_observation === 'known'}
-        initialHistoryPage={{
-          nextCursor: snapshot.nextCursor,
-          hasMore: snapshot.hasMore,
-          latestMessageId: snapshot.latestMessageId,
-        }}
-        inputPlaceholder="给 Dream Agent 留言…"
-        isLoading={isLoading}
-        onConversationSettled={notifySettled}
-        onOpenSubagentTask={(toolCallId) => {
-          setFocusedSubagentToolCallId(toolCallId);
-          setSubagentSidebarOpen(true);
-        }}
-        onReconnectComplete={recover}
-        reconnectStreamNonce={chatReconnectNonceForHydratedThread(
-          snapshot.running,
-          reconnectStreamNonce,
-        )}
-      />
-      <SubagentSidebar
-        focusToolCallId={focusedSubagentToolCallId}
-        onClose={() => setSubagentSidebarOpen(false)}
-        open={subagentSidebarOpen}
-        threadId={threadId}
-      />
-    </div>
+    <WorkspaceProvider>
+      <div className="story-workspace-dream-thread-chat" data-thread-id={threadId}>
+        <ChatPanel
+          key={`${threadId}:${terminalHistoryGeneration}`}
+          threadId={threadId}
+          initialMessages={snapshot.messages}
+          initialRuntimePendingToolCallIds={snapshot.runtimePendingToolCallIds}
+          initialRuntimeRunning={snapshot.running}
+          initialSettledToolCallIds={snapshot.settledToolCallIds}
+          initialToolConfirmationKnown={snapshot.status?.tool_confirmation_observation === 'known'}
+          initialHistoryPage={{
+            nextCursor: snapshot.nextCursor,
+            hasMore: snapshot.hasMore,
+            latestMessageId: snapshot.latestMessageId,
+          }}
+          inputPlaceholder="给 Dream Agent 留言…"
+          isLoading={isLoading}
+          onConversationSettled={notifySettled}
+          onOpenSubagentTask={(toolCallId) => {
+            setFocusedSubagentToolCallId(toolCallId);
+            setSubagentSidebarOpen(true);
+          }}
+          onReconnectComplete={recover}
+          reconnectStreamNonce={chatReconnectNonceForHydratedThread(
+            snapshot.running,
+            reconnectStreamNonce,
+          )}
+        />
+        <SubagentSidebar
+          focusToolCallId={focusedSubagentToolCallId}
+          onClose={() => setSubagentSidebarOpen(false)}
+          open={subagentSidebarOpen}
+          threadId={threadId}
+        />
+      </div>
+    </WorkspaceProvider>
   );
 }

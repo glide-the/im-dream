@@ -1,6 +1,7 @@
 // [Input] Parsed workspace:// URI, current Chat Thread identity, Workspace Mode state, runtime API base, and bearer auth token.
 // [Output] Abortable authenticated image thumbnail/shared Mermaid-style zoom preview or user-activated regular-file download with stable fail-closed states.
 // [Pos] workspace file Markdown reference component in frontend/app/_dream/components/chat
+// [Sync] 2026-09-09: download directory references as backend-generated binary ZIP archives.
 // [Sync] 2026-08-22: initial blob-backed image/download rendering; credentials and Thread identity remain runtime-only and never enter Markdown.
 // [Sync] 2026-08-22: resolve all user-facing loading/error/download states through the existing chat i18n namespace.
 // [Sync] 2026-08-22: constrain Workspace images to the v2.1 paper-card footprint and open the same ephemeral blob in an accessible full-size modal.
@@ -114,12 +115,15 @@ export function WorkspaceFileLink({
     setFailure(null);
     setDownloaded(false);
     try {
-      const response = await fetchWorkspaceFile(parsed, threadId);
+      const response = await fetchWorkspaceFile(parsed, threadId, undefined, true);
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = objectUrl;
-      anchor.download = parsed.fileName;
+      anchor.download = blob.type.split(';', 1)[0] === 'application/zip'
+        && !parsed.fileName.toLowerCase().endsWith('.zip')
+        ? `${parsed.fileName}.zip`
+        : parsed.fileName;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();

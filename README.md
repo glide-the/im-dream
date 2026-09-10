@@ -254,7 +254,7 @@ Focused MCP Apps commands and the current provider-free evidence are listed in [
 - Roll back only to an explicitly reviewed immutable image or release; do not restore retired npm/Vite build paths.
 - MCP Apps remain production-off (`productionAppsEffective=false`) until a separate real-business acceptance changes that contract.
 
-For deployment profiles and known adapter gaps, see [deploy/README.md](deploy/README.md). Do not treat an old Vite or npm workflow as a supported release path; the Web application is Next.js with a single pnpm lock.
+For deployment profiles, see [deploy/README.md](deploy/README.md). AutoDL now builds the same canonical Next.js workspace with the frozen pnpm lock and includes the server-only MCP Apps runtime; legacy Vite/npm/dist release paths are unsupported.
 
 ## Troubleshooting
 
@@ -306,3 +306,5 @@ Run the Admin migration check, verify the Admin-owned environment file, and conf
 - [Registry acceptance](docs/deploy/claude-registry-release-acceptance.md)
 
 Keep `README.md` and `README.zh.md` structurally aligned. Preserve unrelated working-tree changes, update affected file headers and folder contracts, and report exact validation commands and any remaining release action.
+
+For multi-file exports, ask the Agent to place the selected files in a dedicated workspace directory and provide a download link. Clicking the directory link downloads a real ZIP archive; shell archive commands are not required.

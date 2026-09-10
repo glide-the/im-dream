@@ -7,9 +7,12 @@
 // [Sync] 2026-08-31: resolve the canonical Episode reader host from the
 //                    matching storyboard entry in the Dream draft.
 // [Sync] 2026-09-02: use the Episode identity, not a storyboard label, as its container title.
+// [Sync] 2026-09-06: resolve a focused draft storyboard to its own registry
+//                    Episode UID without falling back to the active Episode.
 
 import type {
   StoryWorkspaceDreamFilesResponse,
+  StoryWorkspaceEpisodeIndexItem,
   StoryWorkspaceDreamStage,
   StoryWorkspaceDreamStageItem,
 } from '../../hooks/story-workspace/contracts';
@@ -120,6 +123,22 @@ export function storyWorkspaceExecutionEpisodeEntry(
       || entry.relations.includes(canonicalEpisodeCode)
     )
   )) ?? null;
+}
+
+/**
+ * Resolve the artifact query owned by the draft focus. A storyboard focus is
+ * explicit Episode selection: if its code is absent from the registry, the
+ * safe result is no query rather than another Episode's active artifacts.
+ */
+export function storyWorkspaceExecutionDraftEpisodeId(
+  focusedEntry: StoryWorkspaceExecutionEntry | null,
+  episodes: readonly StoryWorkspaceEpisodeIndexItem[],
+  activeEpisodeId: string | null,
+): string | null {
+  if (focusedEntry?.stage !== 'storyboards') return activeEpisodeId;
+  return episodes.find((episode) => (
+    storyWorkspaceExecutionEpisodeEntry([focusedEntry], episode.episodeCode) !== null
+  ))?.opaqueEpisodeId ?? null;
 }
 
 export function storyWorkspaceExecutionFocusNeighbors(

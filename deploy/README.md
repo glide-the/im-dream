@@ -24,7 +24,7 @@ known gaps that prevent an entry from being treated as current.
 | Local Docker Compose | [`docker/deploy.sh`](docker/deploy.sh) | Builds `frontend/Dockerfile`, which installs the frozen pnpm workspace and runs standalone Next.js. The helper still checks the historical Nginx template although the default image does not consume it. |
 | Remote SSH, including the Alibaba Cloud profile | [`remote-ssh/deploy.sh`](remote-ssh/deploy.sh) | Builds the same Next.js image through Compose. Its Compose file still passes `VITE_PUBLIC_SITE_URL`; the current Dockerfile ignores that argument, so it is configuration drift rather than active metadata injection. |
 | Google Cloud Run | [`google-cloud/deploy.sh`](google-cloud/deploy.sh) | **Blocked for production.** It builds the same Next.js image but still passes the ignored Vite build argument; adjacent SQLite synchronization conflicts with the Admin-owned PostgreSQL-only schema contract. |
-| AutoDL direct host | [`autodl-ssh/deploy.sh`](autodl-ssh/deploy.sh) | Blocked after the Next.js migration. It still requires deleted `frontend/package-lock.json` and `frontend/vite.config.ts`, runs `npm ci` and a Vite build, checks `dist/index.html`, and starts Vite Preview. Do not run it as a current deployment path until a separate code change migrates and validates it. |
+| AutoDL direct host | [`autodl-ssh/deploy.sh`](autodl-ssh/deploy.sh) | Builds the frozen pnpm workspace as standalone Next.js, verifies the Node MCP Apps routes, and supervises Next/FastAPI on 6006/8765 without database DDL. |
 
 The Docker, Remote SSH, and Google Cloud rows describe checked-in build
 mechanics. This documentation update did not deploy them, call a real model, or
@@ -91,19 +91,16 @@ release or business acceptance result.
 The following gaps require production-code changes and validation in a separate
 task; this documentation change does not repair them:
 
-1. Migrate `deploy/autodl-ssh/` from deleted Vite and npm inputs to the current
-   Next.js and pnpm workspace, including start, health, crawler, rollback, and
-   release checks.
-2. Remove or replace the ignored `VITE_PUBLIC_SITE_URL` arguments in root,
+1. Remove or replace the ignored `VITE_PUBLIC_SITE_URL` arguments in root,
    Remote SSH, and Google Cloud build orchestration with a real Next.js-owned
    metadata contract when one is designed.
-3. Retire the Google Cloud SQLite synchronization path under the Admin-owned
+2. Retire the Google Cloud SQLite synchronization path under the Admin-owned
    PostgreSQL schema contract.
-4. Remove the default Docker helper's obsolete Nginx-template prerequisite after
+3. Remove the default Docker helper's obsolete Nginx-template prerequisite after
    rollback ownership is explicitly separated.
-5. Project an explicit local Browser Voice WebSocket base, or render the runtime
+4. Project an explicit local Browser Voice WebSocket base, or render the runtime
    config, and add a launcher-owned Voice connection check.
-6. Bind local PID/container cleanup to verifiable run ownership such as process
+5. Bind local PID/container cleanup to verifiable run ownership such as process
    start time/command/cwd plus a container label; reject stale identifiers.
 
 ## Further documentation
@@ -111,4 +108,4 @@ task; this documentation change does not repair them:
 - [Root English operator guide](../README.md)
 - [Root Chinese operator guide](../README.zh.md)
 - [Deployment architecture and status](../docs/deploy/README.md)
-- [AutoDL blocked-path record](autodl-ssh/README.md)
+- [AutoDL direct-host guide](autodl-ssh/README.md)

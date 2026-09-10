@@ -11,6 +11,7 @@
 // [Sync] 2026-09-02: guard Outline-aligned Episode index and accessible return navigation.
 // [Sync] 2026-09-04: require shared-thread settlement to refresh the Dream
 //                    asset stages before the completed Execution view can go stale.
+// [Sync] 2026-09-06: require draft storyboard focus to use its own registry Episode.
 
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
@@ -99,6 +100,8 @@ test('storyboard list description and note follow projected shots instead of the
   expect(PAGE_SOURCE).not.toContain("? '分镜概览'");
   expect(PAGE_SOURCE).not.toContain('<b>01</b>');
   expect(CSS_SOURCE).toContain('.story-workspace-collaboration__shot-note code');
+  expect(PAGE_SOURCE).toContain('storyWorkspaceExecutionDraftEpisodeId(');
+  expect(PAGE_SOURCE).toContain(': draftArtifactEpisodeId;');
 });
 
 test('Outline header opens a read-only three-stage guide in the shared focus layer', () => {

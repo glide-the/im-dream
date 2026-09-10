@@ -1,9 +1,15 @@
 // [Input] A ChatView opened on a Dream-owned source thread while its turn is running.
-// [Output] Browser proof that Chat replays the original Chat SSE contract, recovers
-//          terminal history, and sends the next turn through the ordinary Chat POST.
+// [Output] Browser proof that refresh reattaches the same running turn, recovers
+//          terminal history once, and sends only the next turn through Chat POST.
 // [Pos] Dream -> Chat interoperability regression seam.
 // [Sync] 2026-09-05: serve the paged history/stabilization metadata required by
 //                    the shared current Chat/Dream hydration contract.
+// [Sync] 2026-09-06: reload during one live turn, require a second GET stream,
+//                    and reject duplicate POSTs or transcript rows.
+// [Sync] 2026-09-07: bind API_BASE to the fixture origin before module load so
+//                    the observed GET must reach the test-owned middleware.
+// [Sync] 2026-09-07: split metadata from the first text frame so a running
+//                    re-entry proves callback churn cannot abort live replay.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node harness intentionally imports Node APIs.
@@ -30,7 +36,7 @@ async function reserveEphemeralPort(): Promise<number> {
   });
 }
 
-test('Dream source thread reconnects with Chat SSE then continues as ordinary Chat', async ({ page }) => {
+test('refresh reconnects the same running turn without duplicate POST or messages', async ({ page }) => {
   const harnessModule = `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
@@ -49,6 +55,7 @@ test('Dream source thread reconnects with Chat SSE then continues as ordinary Ch
   const ordinaryChatRequests: Array<Record<string, unknown>> = [];
   let reconnectStarted = false;
   let reconnectFinished = false;
+  let reconnectStreamRequests = 0;
   const harnessPort = await reserveEphemeralPort();
   const server = await createServer({
     root: fileURLToPath(new URL('../../../../../', import.meta.url)),
@@ -74,25 +81,30 @@ test('Dream source thread reconnects with Chat SSE then continues as ordinary Ch
             requestPath === '/api/claude-agent/threads/thread-dream-chat/stream'
             && streamRequest.method === 'GET'
           ) {
+            reconnectStreamRequests += 1;
             reconnectStarted = true;
+            if (reconnectStreamRequests === 2) {
+              // Exact completion race: hydration observed running, but the
+              // producer committed its final message before GET /stream.
+              reconnectFinished = true;
+              response.statusCode = 409;
+              response.setHeader('Content-Type', 'application/json');
+              response.end('{"detail":"Thread is not running"}');
+              return;
+            }
             response.statusCode = 200;
             response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
             response.setHeader('Cache-Control', 'no-cache, no-transform');
             response.setHeader('X-Accel-Buffering', 'no');
-            response.write([
-              'data: {"type":"text-start","id":"dream-chat-text"}',
-              'data: {"type":"text-delta","id":"dream-chat-text","delta":"Dream delta replayed in Chat"}',
-              '',
-            ].join('\n\n'));
+            response.write('data: {"type":"message-metadata","turnId":"dream-turn-live"}\n\n');
             setTimeout(() => {
-              reconnectFinished = true;
-              response.end([
-                'data: {"type":"text-end","id":"dream-chat-text"}',
-                'data: {"type":"message-final","text":"Dream delta replayed in Chat"}',
-                'data: {"type":"finish","finishReason":"stop"}',
+              if (response.destroyed || response.writableEnded) return;
+              response.write([
+                'data: {"type":"text-start","id":"dream-chat-text"}',
+                'data: {"type":"text-delta","id":"dream-chat-text","delta":"Dream delta visible before refresh"}',
                 '',
               ].join('\n\n'));
-            }, 800);
+            }, 80);
             return;
           }
           if (requestPath === '/api/claude-agent' && streamRequest.method === 'POST') {
@@ -114,10 +126,96 @@ test('Dream source thread reconnects with Chat SSE then continues as ordinary Ch
             });
             return;
           }
+          if (
+            requestPath === '/api/claude-agent/threads/thread-dream-chat/messages'
+            && streamRequest.method === 'GET'
+          ) {
+            const latestMessageId = reconnectFinished ? 'dream-assistant' : 'dream-user';
+            const knownLatestMessageId = new URL(
+              requestUrl,
+              'http://127.0.0.1',
+            ).searchParams.get('known_latest_message_id');
+            const messages: Array<{
+              id: string;
+              role: string;
+              parts: Array<{ type: string; text: string }>;
+              metadata: Record<string, unknown>;
+              created_at: string;
+            }> = [{
+              id: 'dream-user',
+              role: 'user',
+              parts: [{ type: 'text', text: 'Dream source message' }],
+              metadata: { kind: 'story-workspace-dream-agent-user' },
+              created_at: '2026-08-11T00:00:00Z',
+            }];
+            if (reconnectFinished) messages.push({
+              id: 'dream-assistant',
+              role: 'assistant',
+              parts: [{ type: 'text', text: 'Dream terminal persisted in Chat' }],
+              metadata: {},
+              created_at: '2026-08-11T00:00:01Z',
+            });
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end(JSON.stringify({
+              thread: {
+                id: 'thread-dream-chat',
+                title: 'Dream source thread',
+                created_at: '2026-08-11T00:00:00Z',
+                updated_at: '2026-08-11T00:00:01Z',
+              },
+              messages,
+              next_cursor: null,
+              has_more: false,
+              latest_message_id: latestMessageId,
+              unchanged: knownLatestMessageId === latestMessageId,
+            }));
+            return;
+          }
+          if (
+            requestPath === '/api/claude-agent/threads/thread-dream-chat/status'
+            && streamRequest.method === 'GET'
+          ) {
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end(JSON.stringify({
+              running: !reconnectFinished,
+              lifecycle: reconnectFinished ? 'idle' : 'running',
+              turn_count: reconnectFinished ? 1 : 0,
+              pending_tool_call_ids: [],
+              tool_confirmation_observation: 'known',
+            }));
+            return;
+          }
+          if (requestPath === '/api/claude-agent/threads') {
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end('{"threads":[]}');
+            return;
+          }
+          if (requestPath === '/api/decks') {
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end('{"decks":[]}');
+            return;
+          }
+          if (requestPath === '/api/system-config') {
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end('{"data":{}}');
+            return;
+          }
+          if (requestPath.startsWith('/api/')) {
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'application/json');
+            response.end('{}');
+            return;
+          }
           if (requestUrl !== '/chat-dream-reconnect') return next();
           void vite.transformIndexHtml(requestUrl, `
             <!doctype html><html><head><link rel="icon" href="data:,"></head>
             <body><div id="root" style="height: 900px"></div>
+            <script>window.__INK_RUNTIME_CONFIG__ = { apiBaseUrl: window.location.origin, wsBaseUrl: '' };</script>
             <script type="module" src="/chat-dream-reconnect-harness.js"></script></body></html>
           `).then((html) => {
             response.statusCode = 200;
@@ -144,6 +242,12 @@ test('Dream source thread reconnects with Chat SSE then continues as ordinary Ch
   });
   page.on('pageerror', (error) => diagnostics.push(error.message));
   page.on('requestfailed', (request) => {
+    const requestPath = new URL(request.url()).pathname;
+    if (
+      requestPath === '/api/claude-agent/threads/thread-dream-chat/stream'
+      && request.failure()?.errorText === 'net::ERR_ABORTED'
+      && !reconnectFinished
+    ) return;
     diagnostics.push(`${request.failure()?.errorText ?? 'failed'} ${request.url()}`);
   });
   page.on('request', (request) => {
@@ -156,106 +260,33 @@ test('Dream source thread reconnects with Chat SSE then continues as ordinary Ch
     localStorage.setItem('auth_token', 'dream-chat-reconnect-token');
     localStorage.setItem('ink-language', 'en');
   });
-  await page.route('**/api/**', async (route) => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname;
-    if (!path.startsWith('/api/')) {
-      await route.continue();
-      return;
-    }
-    if (
-      path === '/api/claude-agent/threads/thread-dream-chat/stream'
-      || (path === '/api/claude-agent' && request.method() === 'POST')
-    ) {
-      await route.continue();
-      return;
-    }
-    if (path === '/api/claude-agent/threads/thread-dream-chat/messages') {
-      const latestMessageId = reconnectFinished ? 'dream-assistant' : 'dream-user';
-      const knownLatestMessageId = new URL(request.url()).searchParams.get(
-        'known_latest_message_id',
-      );
-      const messages: Array<{
-        id: string;
-        role: string;
-        parts: Array<{ type: string; text: string }>;
-        metadata: Record<string, unknown>;
-        created_at: string;
-      }> = [{
-        id: 'dream-user',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Dream source message' }],
-        metadata: { kind: 'story-workspace-dream-agent-user' },
-        created_at: '2026-08-11T00:00:00Z',
-      }];
-      if (reconnectFinished) messages.push({
-        id: 'dream-assistant',
-        role: 'assistant',
-        parts: [{ type: 'text', text: 'Dream terminal persisted in Chat' }],
-        metadata: {},
-        created_at: '2026-08-11T00:00:01Z',
-      });
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          thread: {
-            id: 'thread-dream-chat',
-            title: 'Dream source thread',
-            created_at: '2026-08-11T00:00:00Z',
-            updated_at: '2026-08-11T00:00:01Z',
-          },
-          messages,
-          next_cursor: null,
-          has_more: false,
-          latest_message_id: latestMessageId,
-          unchanged: knownLatestMessageId === latestMessageId,
-        }),
-      });
-      return;
-    }
-    if (path === '/api/claude-agent/threads/thread-dream-chat/status') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          running: !reconnectFinished,
-          lifecycle: reconnectFinished ? 'idle' : 'running',
-          turn_count: reconnectFinished ? 1 : 0,
-          pending_tool_call_ids: [],
-          tool_confirmation_observation: 'known',
-        }),
-      });
-      return;
-    }
-    if (path === '/api/claude-agent/threads') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"threads":[]}' });
-      return;
-    }
-    if (path === '/api/decks') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"decks":[]}' });
-      return;
-    }
-    if (path === '/api/system-config') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"data":{}}' });
-      return;
-    }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-  });
-
   try {
     await server.listen();
     const reconnectRequest = page.waitForRequest((request) => (
-      new URL(request.url()).pathname
-        === '/api/claude-agent/threads/thread-dream-chat/stream'
+      request.url().startsWith(`http://127.0.0.1:${harnessPort}/`)
+      && new URL(request.url()).pathname
+          === '/api/claude-agent/threads/thread-dream-chat/stream'
     ));
     await page.goto(`http://127.0.0.1:${harnessPort}/chat-dream-reconnect`);
 
     await reconnectRequest;
     await expect.poll(() => reconnectStarted).toBe(true);
-    await expect(page.getByText('Dream delta replayed in Chat', { exact: true })).toBeVisible();
+    await expect(page.getByText('Dream delta visible before refresh', { exact: true })).toBeVisible();
     expect(reconnectFinished).toBe(false);
+
+    const secondReconnectRequest = page.waitForRequest((request) => (
+      request.url().startsWith(`http://127.0.0.1:${harnessPort}/`)
+      && new URL(request.url()).pathname
+          === '/api/claude-agent/threads/thread-dream-chat/stream'
+    ));
+    await page.reload();
+    await secondReconnectRequest;
+    await expect.poll(() => reconnectStreamRequests).toBe(2);
+    expect(observedApiRequests.filter((request) => request === 'POST /api/claude-agent'))
+      .toHaveLength(0);
     await expect(page.getByText('Dream terminal persisted in Chat', { exact: true })).toBeVisible();
+    await expect(page.getByText('Dream source message', { exact: true })).toHaveCount(1);
+    await expect(page.getByText('Dream terminal persisted in Chat', { exact: true })).toHaveCount(1);
 
     const input = page.getByRole('textbox', { name: 'Chat input' });
     await expect(input).toBeEnabled();
@@ -271,6 +302,9 @@ test('Dream source thread reconnects with Chat SSE then continues as ordinary Ch
     expect(observedApiRequests).toContain(
       'GET /api/claude-agent/threads/thread-dream-chat/stream',
     );
+    expect(observedApiRequests.filter((request) => (
+      request === 'GET /api/claude-agent/threads/thread-dream-chat/stream'
+    ))).toHaveLength(2);
     expect(observedApiRequests.filter((request) => request === 'POST /api/claude-agent'))
       .toHaveLength(1);
     expect(diagnostics).toEqual([]);

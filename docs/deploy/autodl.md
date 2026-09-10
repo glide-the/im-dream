@@ -1,80 +1,63 @@
 # AutoDL SSH 部署
 <!--
-[Input] AutoDL direct-host platform scripts and SeetaCloud service mappings.
-[Output] Define Dream/Admin ordering, frontend/API topology, secure environment projection, verification, and rollback.
-[Pos] Blocked historical AutoDL topology record; not a current deployment runbook.
-[Sync] 2026-08-26: run Dream as root while retaining isolated Admin/PostgreSQL ownership.
-[Sync] 2026-08-31: remove the retired /polycli proxy from the Dream topology.
-[Sync] 2026-09-06: mark the direct-host path blocked because its scripts still require the deleted npm/Vite owners after the canonical Next/pnpm migration.
+[Input] AutoDL direct-host scripts, Admin env, MCP Apps env, and SeetaCloud mappings.
+[Output] Current Next.js/FastAPI/MCP Apps release, verification, and rollback contract.
+[Pos] AutoDL Dream production runbook.
+[Sync] 2026-09-06: migrate the direct-host release from Vite/npm/dist to standalone Next.js and frozen pnpm.
 -->
 
-> **当前状态：阻塞，不可用于 `54f3bbe5`。** `deploy/autodl-ssh/deploy.sh` 仍要求已删除的 `frontend/package-lock.json` 和 `frontend/vite.config.ts`，仍执行 `npm ci` / Vite build 并验证 `frontend/dist/index.html`；`runtime/start-dream.sh` 仍启动 Vite Preview。现行 frontend 是 Next.js 16 + pnpm workspace，Dream 源码唯一位于 `frontend/app/_dream/**`。在 AutoDL 脚本迁移到根 Next build/start、pnpm frozen lock 并重跑 direct-host 验收前，下文只是历史拓扑与运维输入，不是可执行发布步骤。当前发布边界见 [发布文档入口](README.md)。
+## 拓扑与边界
 
-## 拓扑与发布顺序
-
-AutoDL 由两个仓库各自的 `deploy/autodl-ssh` 平台发布，先 Admin、后 Dream：
+AutoDL 先发布 Admin，再发布 Dream。Dream 不安装 Docker/nginx：
 
 ```mermaid
 flowchart LR
-  DreamPublic["Dream HTTPS mapping"] --> Frontend["Vite Preview 127.0.0.1:6006"]
-  Frontend -->|"/api /auth /oauth"| Dream["FastAPI 127.0.0.1:8765"]
-  AdminPublic["Admin HTTPS mapping"] --> Admin["Next.js 127.0.0.1:6008"]
-  Dream --> Admin
-  Dream --> PG["Admin-owned embedded PostgreSQL 127.0.0.1:54329"]
-  Admin --> PG
+  Public["Dream HTTPS"] --> Next["Next.js 127.0.0.1:6006"]
+  Sandbox["MCP Apps sandbox HTTPS"] --> Next
+  Next -->|API/Auth rewrite| API["FastAPI 127.0.0.1:8765"]
+  API --> Admin["Admin/Gateway 127.0.0.1:6008"]
+  API --> PG["Admin-owned PostgreSQL 127.0.0.1:54329"]
 ```
 
-不安装 Docker/nginx。Dream 公网 8443 只映射前端 6006，FastAPI 8765 保持本机私有并由 Vite Preview 同源代理。`screen` 保持 SSH 断开后的服务进程；Dream 前后端和 Claude Runtime 以 `root` 运行，以便 `.dream/runtime` 安全目录协议逐级打开 `/root` 下的 workspace。Admin 与 PostgreSQL 仍使用专用非 root 用户。代码、配置和版本化 release 位于 `/root/ink-autodl`，持久数据位于 `/root/autodl-tmp/ink-memory`。
+唯一 Web 源码位于 `frontend/app/_dream/**`；构建使用
+`frontend/pnpm-lock.yaml` 和 standalone Next.js。MCP Apps 的 Browser Host 随
+Dream 页面构建，server-only Node Runtime 位于
+`frontend/packages/mcp-apps-runtime/**` 并由 Next Route Handler 执行。
 
-Claude 插件的不可变 artifacts 位于 `/root/autodl-tmp/ink-memory/claude-plugin-runtime`，不放入版本化 release。发布时可通过 `AUTODL_PLUGIN_ARTIFACTS_SOURCE` 从受信任的本机 artifact store 幂等补充；未提供本机 seed 时保留远端已有内容。远端 store 为空则发布失败，`verify` 还会解析并校验默认 Deck 插件，避免数据库 `ready` 记录与磁盘 artifact 脱节后产生注册 500。
+MCP Apps sandbox 必须使用与主 Dream 不同的 HTTPS origin，但仍路由到
+6006；主 origin 作为允许的 parent origin。Dream 只消费 Admin 已发布的
+PostgreSQL capability，不执行 migration、DDL、restore 或 SQLite fallback。
 
-两个仓库均先将 `platform.env.example` 复制为 gitignored 的 `platform.env`，填写 SSH endpoint、`/root` 路径和 SeetaCloud HTTPS 映射。Dream 的 `prepare-env.sh` 与两个仓库的 `deploy.sh` 会自动读取该文件；npm token 等秘密仍只通过进程环境传入。
+## 配置
 
-## Admin 首次发布
-
-在 Admin 仓库生成 gitignored runtime env，首次空目标执行 `bootstrap` 导入当前本机 embedded PostgreSQL；后续只执行 `deploy`：
-
-```bash
-AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin-tunnel.example.com:8443 \
-AUTODL_DREAM_PUBLIC_ORIGIN=https://dream-tunnel.example.com:8443 \
-./deploy/autodl-ssh/prepare-env.sh
-
-./deploy/autodl-ssh/deploy.sh check
-./deploy/autodl-ssh/deploy.sh bootstrap
-```
-
-`bootstrap` 对非空目标 fail closed。migration 始终由 Admin 的 `@ink-memory/db` 显式运行，Dream 不执行 DDL。
-
-## Dream 发布（历史流程，当前禁止执行）
-
-Dream env 从自身安全配置和上一步 Admin env 投影。浏览器-facing URL 使用 HTTPS mapping；前端 6006 同源代理后端 8765，同机 Gateway/Product API 使用 `127.0.0.1:6008`：
+从 `deploy/autodl-ssh/platform.env.example` 创建 gitignored
+`platform.env`，设置 SSH、Dream/Admin HTTPS origin、独立 sandbox origin
+和本机 MCP Apps env 文件。然后生成 mode-0600 runtime env：
 
 ```bash
 AUTODL_ADMIN_ENV_FILE=../ink-admin-memory/deploy/autodl-ssh/.env \
-AUTODL_DREAM_PUBLIC_ORIGIN=https://dream-tunnel.example.com:8443 \
-AUTODL_ADMIN_PUBLIC_ORIGIN=https://admin-tunnel.example.com:8443 \
-./deploy/autodl-ssh/prepare-env.sh
+  ./deploy/autodl-ssh/prepare-env.sh
+```
 
+投影会保留 backend-owned MCP Apps service token，读取 frontend 的 manifest、
+feature 和资源/network policy，并覆盖为生产 sandbox/parent origins。AutoDL
+固定 `INK_AGENT_SANDBOX_ENABLED=false`：外层容器无法提供 namespace sandbox，
+approved Bash 将以 Dream root 身份运行。
+
+## 发布与验证
+
+```bash
+./deploy/autodl-ssh/test-topology.sh
 ./deploy/autodl-ssh/deploy.sh check
 ./deploy/autodl-ssh/deploy.sh deploy
 ```
 
-私有 npm 包需要认证时，通过进程环境传入 `AUTODL_NPM_TOKEN`。脚本只生成临时 mode-0600 npmrc，完成 `ink-claude-code-dream` 与官方回滚 CLI 安装后立即删除；token 不进入 Dream runtime env、Git 或日志。
+脚本安装固定 Node/pnpm、Claude Runtime 与 Notion CLI，执行 frozen pnpm
+install 和 standalone Next build；release gate 验证 MCP Apps Node routes、
+FastAPI/Next/同源 API、`robots.txt`、`sitemap.xml`、`llms.txt`、内置
+Skills、默认 Deck Plugin、Admin 依赖和公网 origin。全部通过后才推进
+`qualified`。
 
-## 已发布服务的一键启动（仅限旧 Vite release）
-
-Dream 的 `sync`、`build` 和 `deploy` 会自动将独立启动脚本安装到 `/root/ink-autodl/start-ink-memory.sh`。已有 source 但尚未重新发布时，也可手动安装：
-
-```bash
-install -m 0755 \
-  /root/ink-autodl/dream/source/deploy/autodl-ssh/runtime/start-ink-memory.sh \
-  /root/ink-autodl/start-ink-memory.sh
-
-bash /root/ink-autodl/start-ink-memory.sh
-```
-
-该脚本无需 GPU，不执行构建、migration 或 restore。它会幂等检查现有端口，先恢复 Admin/内嵌 PostgreSQL，再恢复 Dream 前端与后端；健康服务不会被重复启动，未知进程占用端口时 fail closed。完整说明见 [`deploy/autodl-ssh/README.md`](../../deploy/autodl-ssh/README.md)。
-
-## 验证与回滚（历史合同）
-
-`verify` 同时检查本机 frontend 根页面、FastAPI 8765、6006 代理 `/api/health`、默认 Deck 插件 artifact、Admin、screen 和 Dream 公网根页面/API；Admin 平台另行验证公网 `/admin/login`。回滚只切换相应仓库的 `current`/`previous` release；首次拓扑回滚能识别旧 backend-only release 并恢复 6006 旧路径，不回滚 PostgreSQL migration、用户数据或 workspace。
+运维命令为 `status`、`logs`、`verify`、`start`、`stop` 和 `rollback`。
+启动/停止仅处理具名 Dream screen/PID；未知端口占用会 fail closed。回滚只
+切换 Dream release，不回滚 Admin migration、PostgreSQL 数据或 workspace。

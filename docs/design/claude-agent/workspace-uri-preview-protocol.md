@@ -7,6 +7,7 @@
 > [Sync] 2026-08-23: replace divergent image card/modal chrome with Mermaid's exact inline frame and the shared reference-style immersive viewer.
 > [Sync] 2026-08-23: add shared wheel-up/down zoom over the immersive media stage with scroll suppression and existing clamp reuse.
 > [Sync] 2026-08-23: correct zoom ownership so only image/diagram content scales while the fitted Paper sheet remains geometrically stable.
+> [Sync] 2026-09-07: require every direct ChatPanel host, including Story Workspace Dream, to provide the shared Workspace capability context before rendering recovered file references.
 
 # `workspace://` Workspace File Preview Protocol
 
@@ -207,6 +208,13 @@ client system-prompt field or a second initialization lifecycle.
 Chat-owned surfaces may use the active Thread fallback, but persisted message rendering
 does not depend on it.
 
+Every surface that hosts `ChatPanel` directly must also compose the existing
+`WorkspaceProvider`. Full Chat already owns that provider through `ChatView`; Story
+Workspace Dream owns it at `StoryWorkspaceDreamThreadChat`, because that adapter bypasses
+`ChatView` and mounts `ChatPanel` itself. A direct host must not rely on
+`useWorkspaceSession`'s non-network fallback: that fallback deliberately remains in the
+checking state and cannot prove whether Workspace Mode is enabled.
+
 ### 7.1 Image interaction and visual contract
 
 The source is [Ink & Memory UI Design v2.1](<../../prd/Ink & Memory UI Design v2.pdf>)
@@ -395,7 +403,10 @@ Frontend parser/component tests:
   previewable/downloadable PNG through the production tiled exporter; requests keep the
   current Thread and bearer;
 - normal HTTP(S) image/link behavior remains unchanged;
-- remount/history rendering resolves the same URI again.
+- remount/history rendering resolves the same URI again;
+- Story Workspace Dream's direct `ChatPanel` composition exits Workspace capability
+  checking, downloads exact bytes, and sends only bearer plus the recovered owning
+  Thread ID and validated `files/` path to the content route.
 
 Repository validation:
 
@@ -442,6 +453,8 @@ Rollback is file-local and does not require data migration:
 - The Agent context contains the canonical rule and example only through the existing
   context builder.
 - `workspace://files/fashion_flux2.png` renders in live and recovered Chat messages.
+- Recovered `workspace://files/...` links in the Story Workspace Dream message panel
+  leave capability checking and download through the same owned Thread content route.
 - Three supported images in one message render independently.
 - Each Workspace image is bounded inside Mermaid's exact responsive media frame and opens
   the same accessible full-screen download/close/zoom preview; wide and `360px` layouts
@@ -454,3 +467,7 @@ Rollback is file-local and does not require data migration:
   or disk paths and have stable UI fallbacks.
 - Existing SSE, Chat history, Workspace sidebar, HTTP(S) Markdown, ordinary links, GFM,
   Mermaid, sandbox, and session resume contracts remain unchanged.
+
+## 目录导出（2026-09-09）
+
+聊天中的显式下载操作走 `/api/workspace/files/download`；图片预览仍走 `/api/workspace/files/content`。`workspace://files/export-bundle` 指向实际存在的目录时，后端按现有目录下载合同返回二进制 ZIP，前端使用 ZIP 文件后缀。Agent 应把用户要求的文件放在独立导出目录后提供该链接，不应因为 shell `zip` 被拦截而声称无法生成压缩包，也不应伪称工作区已保存了 ZIP。`.dream` 写入保护不变。
