@@ -1756,6 +1756,66 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                     "allow",
                 )
 
+    async def test_bash_zip_archives_ordinary_workspace_files_without_touching_dream(self):
+        allowed = (
+            "zip -r files/export.zip files/scene",
+            "zip export.zip files/scene.md",
+            "zip -r export.zip .",
+            "zip -9 files/export.zip files/draft.md",
+            "zip -r export.zip *",
+        )
+        denied = (
+            "zip .dream/pwn.zip files/scene",
+            "zip -r files/export.zip .dream/runtime",
+            "zip -r files/export.zip .*",
+            "zip -b .dream/tmp files/export.zip files/scene",
+            "zip -r files/export.zip $(echo .dream)",
+            "zip -r files/export.zip files/scene; rm -rf .dream",
+            "files/zip -r files/export.zip files/scene",
+            "unzip files/export.zip -d files/scene",
+        )
+
+        async def approve(payload: dict) -> dict:
+            return {"approved": True}
+
+        for full_access in (False, True):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                (workspace / ".dream").mkdir()
+                (workspace / "files").mkdir()
+                (workspace / "files" / "scene.md").write_text("scene", encoding="utf-8")
+                hook_kwargs: dict[str, object] = {
+                    "cwd": str(workspace),
+                    "im_full_access_enabled": full_access,
+                }
+                if not full_access:
+                    # Auto mode routes zip through the visible confirmation seam;
+                    # an approval must reach an allow decision instead of the
+                    # .dream hard denial.
+                    hook_kwargs["on_tool_confirmation_request"] = approve
+                hook = await self._capture_pre_tool_use_hook(**hook_kwargs)
+                for command in allowed:
+                    with self.subTest(full_access=full_access, command=command):
+                        result = await hook(
+                            {"tool_name": "Bash", "tool_input": {"command": command}},
+                            "call-bash-zip-allow",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+                        self.assertEqual(
+                            _hook_specific(result, {}).get("permissionDecision"),
+                            "allow",
+                        )
+                for command in denied:
+                    with self.subTest(full_access=full_access, command=command):
+                        result = await hook(
+                            {"tool_name": "Bash", "tool_input": {"command": command}},
+                            "call-bash-zip-deny",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+                        specific = _hook_specific(result, {})
+                        self.assertEqual(specific.get("permissionDecision"), "deny")
+                        self.assertIn(".dream", str(specific.get("permissionDecisionReason")))
+
     async def test_canonical_asset_single_file_delete_uses_visible_confirmation(self):
         confirmation_requests: list[dict] = []
 

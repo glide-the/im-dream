@@ -476,8 +476,16 @@ Rollback is file-local and does not require data migration:
 
 `GET /api/workspace/files/download` 与 content 端点执行同一防护链：认证 → sessionId
 格式校验 → Thread 所有权（非本人 Thread 一律 404，不泄露存在性）→ Workspace Mode
-（关闭时 409）→ 严格公共路径校验（首段必须属于 `WORKSPACE_SUBDIRS`，拒绝 `%` 转义、
-控制字符、反斜杠、`?`/`#`、`..`、绝对路径与 Windows 盘符）→ 不创建工作区（缺失即
-404）→ 读取时拒绝符号链接（目录 ZIP 逐条目 resolve 校验不逃逸工作区根）。`.dream/`、
-`.claude/` 等点前缀运行面路径不可经该端点读取。回归证据见
+（关闭时 409）→ 严格公共路径校验（拒绝 `%` 转义、控制字符、反斜杠、`?`/`#`、`..`、
+绝对路径与 Windows 盘符）→ 不创建工作区（缺失即 404）→ 读取时拒绝符号链接（目录 ZIP 逐条目
+resolve 校验不逃逸工作区根）。`.dream/`、`.claude/` 等点前缀运行面路径不可经该端点读取。回归证据见
 `chat-slash-menu-and-workspace-zip-export-interaction.md`。
+
+### 下载范围（2026-09-11 产品决策）
+
+下载/打包范围是"非点前缀即可"：`files/`、`logs/`、`skills/`、工作区根级文件与
+Agent 创建的普通目录都可下载（目录即时打包为 ZIP，根目录如 `files` 整体下载亦然）；
+只有 `.dream`、`.claude` 等点前缀运行面目录不可寻址。对应的 Agent shell 边界：
+受保护工作区内严格解析的 `zip`（无 shell 元字符、无可执行路径伪装、任何参数不引用
+`.dream`）被放行，压缩包是它唯一的写入目标；`unzip` 等解包器与引用 `.dream` 的命令
+继续拒绝。

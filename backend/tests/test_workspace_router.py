@@ -177,6 +177,35 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
                 b"root export",
             )
 
+    def test_download_exports_ordinary_workspace_content_outside_managed_subdirs(self):
+        session_id = "download-ordinary-content"
+        workspace = get_or_create_workspace(session_id)
+        (workspace / "exports").mkdir()
+        (workspace / "exports" / "chapter-1.md").write_text("exported chapter", encoding="utf-8")
+        (workspace / "bundle-notes.txt").write_text("root-level note", encoding="utf-8")
+
+        directory_response = self.client.get(
+            "/api/workspace/files/download",
+            params={"sessionId": session_id, "path": "exports"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        root_file_response = self.client.get(
+            "/api/workspace/files/download",
+            params={"sessionId": session_id, "path": "bundle-notes.txt"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(directory_response.status_code, 200, directory_response.text)
+        self.assertEqual(directory_response.headers["content-type"], "application/zip")
+        self.assertIn(
+            'filename="exports.zip"',
+            directory_response.headers["content-disposition"],
+        )
+        with zipfile.ZipFile(io.BytesIO(directory_response.content)) as archive:
+            self.assertEqual(archive.read("exports/chapter-1.md"), b"exported chapter")
+        self.assertEqual(root_file_response.status_code, 200, root_file_response.text)
+        self.assertEqual(root_file_response.content, b"root-level note")
+
     def test_download_regular_file_rejects_in_workspace_symlink(self):
         session_id = "download-file-symlink"
         workspace = get_or_create_workspace(session_id)
@@ -249,7 +278,7 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
         self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_NOT_FOUND")
         self.assertFalse((Path(self._tmp.name) / session_id).exists())
 
-    def test_download_rejects_ambiguous_and_non_public_paths_without_workspace_probe(self):
+    def test_download_rejects_ambiguous_and_dot_runtime_paths_without_workspace_probe(self):
         invalid_paths = (
             "../secret.zip",
             "files/../secret.zip",
@@ -263,8 +292,11 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
             "files/export.zip?download=1",
             "files/export.zip#fragment",
             ".dream/state.json",
+            ".dream",
             ".claude/settings.json",
-            "history.json",
+            ".claude",
+            ".editor/index.json",
+            ".notion-home/credentials.json",
             "C:/secret.zip",
         )
         with unittest.mock.patch.object(

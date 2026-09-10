@@ -307,4 +307,4 @@ manifest-qualified Runtime 必须为 `0.1.4`，并输出 `2.1.241 (Claude Code)`
 
 保持 `README.md` 与 `README.zh.md` 结构一致。保留工作区无关改动，同步受影响的文件头与目录合同，并报告精确验证命令和剩余发布动作。
 
-导出多个文件时，可让 Agent 将选定文件放入独立的工作区目录并提供下载链接。点击目录链接即可下载真正的 ZIP 压缩包，无需执行 shell 压缩命令。
+导出多个文件时，Agent 可在工作区根目录运行 `zip`（压缩包放在 `.dream` 之外，例如 `zip -r files/export-bundle.zip files/scene`）并链接生成的压缩包，也可链接独立的工作区目录由下载服务打包真实 ZIP。涉及 `.dream` 路径的 shell 命令仍会被拒绝。

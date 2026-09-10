@@ -307,4 +307,4 @@ Run the Admin migration check, verify the Admin-owned environment file, and conf
 
 Keep `README.md` and `README.zh.md` structurally aligned. Preserve unrelated working-tree changes, update affected file headers and folder contracts, and report exact validation commands and any remaining release action.
 
-For multi-file exports, ask the Agent to place the selected files in a dedicated workspace directory and provide a download link. Clicking the directory link downloads a real ZIP archive; shell archive commands are not required.
+For multi-file exports, the Agent may run `zip` from the workspace root with the archive outside `.dream` (e.g. `zip -r files/export-bundle.zip files/scene`) and link the archive, or link a dedicated workspace directory whose download link packages a real ZIP. Shell commands naming `.dream` paths stay denied.

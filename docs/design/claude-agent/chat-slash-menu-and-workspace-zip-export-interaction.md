@@ -96,7 +96,8 @@ Agent 把用户要求的文件放入 `files/` 独立目录后返回
    认证 → sessionId 格式校验 → Thread 所有权（`_require_owned_workspace_thread`，
    非本人 Thread 一律 404）→ Workspace Mode（关闭时 409 `WORKSPACE_DISABLED`）
    → 严格公共路径校验（拒绝 `%` 转义、控制字符、反斜杠、`?`/`#`、`..`、
-   绝对路径，首段必须属于 `WORKSPACE_SUBDIRS`）→ 不创建工作区
+   绝对路径，首轮首段限定 `WORKSPACE_SUBDIRS`，第二轮按产品决策放宽为
+   "非点前缀即可"，见第六节）→ 不创建工作区
    （`get_existing_workspace`，缺失即 404 `WORKSPACE_NOT_FOUND`）→
    常规文件分支拒绝符号链接；目录分支不跟随目录符号链接且逐条目
    resolve 校验不逃逸工作区根。
@@ -147,3 +148,52 @@ Agent 把用户要求的文件放入 `files/` 独立目录后返回
 4. 测试新增集中于用户点名的验收面（真实 ZIP 字节/目录内容、文件名、
    预览不回归、权限与路径保护、菜单链路），未增加与验收无关的
    浏览器 revision、远程环境或部署状态检查。
+
+## 六、第二轮：shell zip 守卫纠偏与下载范围放宽（2026-09-11 产品决策）
+
+### 背景与问题
+
+用户澄清两点：①`.dream`、`.claude` 等点前缀运行面不可打包之外，工作空间的
+其他文件都应可压缩/下载；②PreToolUse 拦截 `zip` 本身是误伤——守卫的意图是
+保护 `.dream` 运行面，而不是禁止普通工作区导出。
+
+第一轮把下载路径限制在 `WORKSPACE_SUBDIRS`（files/logs/skills），并在
+`.dream` 工作区延续"所有 Bash 默认拒绝"的守卫口径（拒绝话术甚至写明
+"shell zip is not required"），与上述产品意图不符。
+
+### 目标与边界
+
+1. 受保护（含 `.dream/`）工作区内，严格解析的 `zip` 命令不再被 `.dream`
+   守卫硬拒；`.dream` 写边界、`unzip` 等解包器、动态构造与 `.dream` 引用
+   全部保持拒绝；放行后的 zip 走既有权限通道（full-access 直接允许，auto
+   模式可见用户确认）。
+2. 下载端点路径范围改为"非点前缀即可"：根级文件、普通目录（即时 ZIP，
+   含 `files` 根目录整体下载）都可导出；`.dream`/`.claude` 等点前缀目录
+   不可寻址；所有权/Mode/不创建/符号链接防护不变。
+3. Agent 引导与 README 同步为"zip 与目录链接两种导出方式并存"。
+
+### 概念与规则
+
+1. **zip 窄白名单**（`_is_dream_workspace_archive_write_command`）：命令不含
+   shell 元字符/换行（排除动态构造）、可执行名不可伪装（拒绝 `files/zip`）、
+   命令名属于 `{zip}`、任何参数不能引用 `.dream`（复用
+   `_bash_command_may_reference_dream_surface` 的词法 + cwd 解析判定，
+   `.` 与 `*` 不算 `.dream` 引用，`.*`/`.drea?` 算）。压缩包是 zip 唯一的
+   写入目标，运行面完整性不受影响；zip 读取 `.dream` 内容属于既有只读
+   白名单同级的读行为，由引导文案约束"不得打包进导出"。
+2. **下载范围**：`_validate_workspace_download_path` = 共享形态校验
+   （拒绝遍历/转义/控制字符/绝对路径/空段）+ 首段非点前缀；kit 层
+   `_resolve_workspace_safe_path(reject_symlinks=True)` 继续兜底逃逸与符号链接。
+3. **协议不变**：聊天 `workspace://` 链接仍锁定 `files/` 命名空间（前端
+   `unsupported_namespace` 不变），Agent 的 zip 产物放进 `files/` 后链接；
+   FileSidebar 与 API 直连享受放宽后的端点范围。
+
+### 回归
+
+- `tests.test_claude_agent_runner`：`test_bash_zip_archives_ordinary_workspace_files_without_touching_dream`
+  — 允许矩阵（相对/多文件/`.`/`-9`/`*`，full-access 与 auto+确认批准两种模式）
+  与拒绝矩阵（`.dream` 输出/输入/`.*`/`-b .dream/tmp`/`$(...)`/`;` 链接/
+  `files/zip`/`unzip`），拒绝理由必须含 `.dream`。
+- `tests.test_workspace_router`：`exports` 普通目录 ZIP、根级文件下载为正向
+  用例；`.dream`、`.claude`、`.editor`、`.notion-home`、裸目录名（`.dream`、
+  `.claude`）均在非法路径列表中；其余防护用例不变。

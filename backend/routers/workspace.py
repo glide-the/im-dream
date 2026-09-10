@@ -29,6 +29,10 @@
 #                    chain (Thread ownership, Workspace Mode, strict public path,
 #                    no-create) so Chat explicit downloads never expose non-public
 #                    workspace paths or create workspaces as a GET side effect.
+# [Sync] 2026-09-11: widen the download path scope per product decision — every
+#                    non-dot workspace path (files/, logs/, skills/, root files,
+#                    ordinary agent-created directories) is exportable; dot-prefixed
+#                    runtime surfaces (.dream, .claude, ...) stay unaddressable.
 
 """Workspace file management API.
 
@@ -226,19 +230,12 @@ def _require_workspace_mode_enabled(current_user: dict) -> None:
         )
 
 
-def _validate_workspace_content_path(
-    raw_path: str,
-    *,
-    allowed_first_segments: tuple[str, ...] = (WORKSPACE_SUBDIRS[0],),
-    allow_root_subdir: bool = False,
-) -> str:
-    """Validate the already transport-decoded workspace:// public file path.
+def _reject_unsafe_workspace_path_segments(raw_path: str) -> list[str]:
+    """Validate transport-decoded workspace path shape and return its segments.
 
-    ``allowed_first_segments`` narrows or widens the public roots; the content
-    endpoint keeps the default single-root contract while the download endpoint
-    accepts every listed workspace subdir. ``allow_root_subdir`` lets the
-    download endpoint also serve a bare public subdirectory (e.g. ``files``)
-    whose ZIP packaging the file sidebar exposes.
+    Shared by every endpoint: absolute, backslash, query/fragment, control
+    character, percent-escape, Windows drive, empty, dot, and traversal
+    segments are rejected before any filesystem access.
     """
 
     if (
@@ -257,11 +254,44 @@ def _validate_workspace_content_path(
 
     segments = raw_path.split("/")
     if (
-        len(segments) < (1 if allow_root_subdir else 2)
-        or segments[0] not in allowed_first_segments
-        or any(segment in {"", ".", ".."} for segment in segments)
+        any(segment in {"", ".", ".."} for segment in segments)
         or _WINDOWS_DRIVE_RE.match(segments[0])
     ):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid Workspace file path", "code": "INVALID_WORKSPACE_URI"},
+        )
+    return segments
+
+
+def _validate_workspace_content_path(raw_path: str) -> str:
+    """Validate the already transport-decoded workspace:// public file path.
+
+    The preview protocol keeps the single-root contract: only regular entries
+    under ``files/`` are readable for chat rendering.
+    """
+
+    segments = _reject_unsafe_workspace_path_segments(raw_path)
+    if len(segments) < 2 or segments[0] not in (WORKSPACE_SUBDIRS[0],):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid Workspace file path", "code": "INVALID_WORKSPACE_URI"},
+        )
+    return "/".join(segments)
+
+
+def _validate_workspace_download_path(raw_path: str) -> str:
+    """Validate a download/archive path: dot-prefixed runtime surfaces stay blocked.
+
+    Everything the user owns in the workspace is exportable — ``files/``,
+    ``logs/``, ``skills/``, root-level files, and ordinary agent-created
+    directories — while ``.dream``, ``.claude``, and any other dot-prefixed
+    runtime surface can never be addressed. The kit resolver still re-checks
+    symlink and escape containment before bytes are read.
+    """
+
+    segments = _reject_unsafe_workspace_path_segments(raw_path)
+    if segments[0].startswith("."):
         raise HTTPException(
             status_code=400,
             detail={"error": "Invalid Workspace file path", "code": "INVALID_WORKSPACE_URI"},
@@ -688,11 +718,7 @@ async def download_workspace_file(
     _validate_session_id(session_id)
     _require_owned_workspace_thread(session_id, current_user)
     _require_workspace_mode_enabled(current_user)
-    safe_path = _validate_workspace_content_path(
-        path,
-        allowed_first_segments=WORKSPACE_SUBDIRS,
-        allow_root_subdir=True,
-    )
+    safe_path = _validate_workspace_download_path(path)
 
     try:
         workspace_path = get_existing_workspace(session_id)
