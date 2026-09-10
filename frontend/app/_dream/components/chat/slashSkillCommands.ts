@@ -3,6 +3,10 @@
 // [Pos] Pure Chat composer discovery helper; it does not execute commands or inspect workflow state.
 // [Sync] 2026-08-13: added installed-Skill slash suggestions without a workflow state machine.
 // [Sync] 2026-09-04: merge backend-owned common Skills ahead of optional Deck plugin Skills.
+// [Sync] 2026-09-11: strip the Markdown serializer's trailing newline artifacts before
+//                    slash-draft matching so a standalone "/" typed into the Tiptap
+//                    composer opens the menu; the trailing space inserted after a
+//                    selection still closes the draft.
 
 import {
   listCommonSkillCommands,
@@ -128,8 +132,13 @@ export function filterInstalledSkillCommands(
   draft: string,
   commands: readonly AvailableSkillCommand[],
 ): readonly AvailableSkillCommand[] {
-  if (!SLASH_DRAFT.test(draft)) return [];
-  const query = draft.slice(1).toLowerCase();
+  // The Tiptap Markdown serializer appends trailing newlines to block content, so
+  // a standalone "/" reaches this matcher as "/\n\n". Those artifacts are not
+  // user whitespace and must not disable the trigger; ordinary trailing spaces
+  // (e.g. after inserting a selected command) still close the menu.
+  const normalizedDraft = draft.replace(/\n+$/, '');
+  if (!SLASH_DRAFT.test(normalizedDraft)) return [];
+  const query = normalizedDraft.slice(1).toLowerCase();
   return commands.filter((item) => item.name.includes(query));
 }
 

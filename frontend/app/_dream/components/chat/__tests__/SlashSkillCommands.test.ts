@@ -132,6 +132,23 @@ test('filters slash text only and never interprets a workflow stage', () => {
   expect(filterInstalledSkillCommands('/drama-script EP02', commands)).toEqual([]);
 });
 
+test('treats Markdown serializer trailing newlines as a standalone slash draft', () => {
+  const commands = resolveInstalledSkillCommands({
+    refs: [ref()],
+    installations: [installation()],
+  });
+
+  // getMarkdown() serializes a standalone "/" paragraph as "/\n\n"; the trigger
+  // must still fire while the intentional trailing space after a selection and
+  // ordinary sentence text keep the menu closed.
+  expect(filterInstalledSkillCommands('/\n\n', commands)).toHaveLength(13);
+  expect(filterInstalledSkillCommands('/drama-p\n', commands).map((item) => item.command)).toEqual([
+    '/drama-plan', '/drama-prompt', '/drama-promote', '/drama-payoff',
+  ]);
+  expect(filterInstalledSkillCommands('/drama-script ', commands)).toEqual([]);
+  expect(filterInstalledSkillCommands('/\ntext', commands)).toEqual([]);
+});
+
 test('fails closed for disabled, stale, unsafe, duplicate, and non-ready inventories', () => {
   const commands = resolveInstalledSkillCommands({
     refs: [

@@ -104,6 +104,10 @@
 #                    package/publication failures outside the Agent turn.
 # [Sync] 2026-09-01: expose symbolic-link entries as non-recursive leaves in
 #                    workspace trees without following targets outside the thread.
+# [Sync] 2026-09-11: read_workspace_download_content rejects symbolic links for
+#                    its top-level target and regular-file branch, matching the
+#                    content endpoint's read contract while directory ZIPs keep
+#                    per-entry escape validation.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -1887,13 +1891,18 @@ def read_workspace_download_content(
     ``os.walk`` never follows directory symlinks, and every archived file target
     is resolved against the workspace root before it is read.
     """
-    full_path = _resolve_workspace_safe_path(workspace_path, file_path)
+    full_path = _resolve_workspace_safe_path(workspace_path, file_path, reject_symlinks=True)
 
     if not full_path.exists():
         raise WorkspaceFileAccessError("NOT_FOUND", "File not found", 404)
 
     if not full_path.is_dir():
-        return read_workspace_file_content(workspace_path, file_path)
+        return read_workspace_file_content(
+            workspace_path,
+            file_path,
+            reject_symlinks=True,
+            require_regular_file=True,
+        )
 
     workspace_root = workspace_path.resolve()
     archive_root_name = full_path.name

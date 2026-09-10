@@ -13,6 +13,9 @@
 #                    Workspace Mode, strict public paths, regular files, and no symlinks.
 # [Sync] 2026-09-01: keep recursive workspace trees available when managed
 #                    builtin Skills are read-only links outside the thread.
+# [Sync] 2026-09-11: give the download endpoint the same ownership, Workspace
+#                    Mode, public-path, no-create, and symlink contract as the
+#                    content endpoint for Chat explicit downloads.
 
 """Regression tests for the workspace file router."""
 from __future__ import annotations
@@ -153,6 +156,166 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400, response.text)
         self.assertEqual(response.json()["detail"]["code"], "PATH_TRAVERSAL")
+
+    def test_download_public_subdir_root_returns_zip_for_file_sidebar(self):
+        session_id = "download-subdir-root"
+        workspace = get_or_create_workspace(session_id)
+        (workspace / "files" / "root-file.txt").write_text("root export", encoding="utf-8")
+
+        response = self.client.get(
+            "/api/workspace/files/download",
+            params={"sessionId": session_id, "path": "files"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["content-type"], "application/zip")
+        self.assertIn('filename="files.zip"', response.headers["content-disposition"])
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            self.assertEqual(
+                archive.read("files/root-file.txt"),
+                b"root export",
+            )
+
+    def test_download_exports_ordinary_workspace_content_outside_managed_subdirs(self):
+        session_id = "download-ordinary-content"
+        workspace = get_or_create_workspace(session_id)
+        (workspace / "exports").mkdir()
+        (workspace / "exports" / "chapter-1.md").write_text("exported chapter", encoding="utf-8")
+        (workspace / "bundle-notes.txt").write_text("root-level note", encoding="utf-8")
+
+        directory_response = self.client.get(
+            "/api/workspace/files/download",
+            params={"sessionId": session_id, "path": "exports"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        root_file_response = self.client.get(
+            "/api/workspace/files/download",
+            params={"sessionId": session_id, "path": "bundle-notes.txt"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(directory_response.status_code, 200, directory_response.text)
+        self.assertEqual(directory_response.headers["content-type"], "application/zip")
+        self.assertIn(
+            'filename="exports.zip"',
+            directory_response.headers["content-disposition"],
+        )
+        with zipfile.ZipFile(io.BytesIO(directory_response.content)) as archive:
+            self.assertEqual(archive.read("exports/chapter-1.md"), b"exported chapter")
+        self.assertEqual(root_file_response.status_code, 200, root_file_response.text)
+        self.assertEqual(root_file_response.content, b"root-level note")
+
+    def test_download_regular_file_rejects_in_workspace_symlink(self):
+        session_id = "download-file-symlink"
+        workspace = get_or_create_workspace(session_id)
+        (workspace / "files" / "target.txt").write_text("target", encoding="utf-8")
+        (workspace / "files" / "alias.txt").symlink_to(workspace / "files" / "target.txt")
+
+        response = self.client.get(
+            "/api/workspace/files/download",
+            params={"sessionId": session_id, "path": "files/alias.txt"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "SYMLINK_NOT_ALLOWED")
+
+    def test_download_foreign_thread_is_hidden_before_workspace_probe(self):
+        with (
+            unittest.mock.patch.object(
+                workspace_router.database,
+                "get_chat_thread",
+                return_value=None,
+            ),
+            unittest.mock.patch.object(
+                workspace_router,
+                "get_existing_workspace",
+            ) as existing_workspace,
+        ):
+            response = self.client.get(
+                "/api/workspace/files/download",
+                params={"sessionId": "foreign-thread", "path": "files/export.zip"},
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_NOT_FOUND")
+        existing_workspace.assert_not_called()
+        self.assertFalse((Path(self._tmp.name) / "foreign-thread").exists())
+
+    def test_download_workspace_disabled_is_rejected_before_workspace_probe(self):
+        with (
+            unittest.mock.patch.object(
+                workspace_router.database,
+                "get_system_config",
+                return_value={"workspace_enabled": False},
+            ),
+            unittest.mock.patch.object(
+                workspace_router,
+                "get_existing_workspace",
+            ) as existing_workspace,
+        ):
+            response = self.client.get(
+                "/api/workspace/files/download",
+                params={"sessionId": "disabled-thread", "path": "files/export.zip"},
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_DISABLED")
+        existing_workspace.assert_not_called()
+
+    def test_download_missing_workspace_does_not_create_one(self):
+        session_id = "download-missing-workspace"
+        response = self.client.get(
+            "/api/workspace/files/download",
+            params={"sessionId": session_id, "path": "files/report.pdf"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_NOT_FOUND")
+        self.assertFalse((Path(self._tmp.name) / session_id).exists())
+
+    def test_download_rejects_ambiguous_and_dot_runtime_paths_without_workspace_probe(self):
+        invalid_paths = (
+            "../secret.zip",
+            "files/../secret.zip",
+            "files/../.dream/state.json",
+            "/files/secret.zip",
+            "files\\secret.zip",
+            "files//secret.zip",
+            "files/./secret.zip",
+            "files/",
+            "files/%2e%2e/secret.zip",
+            "files/export.zip?download=1",
+            "files/export.zip#fragment",
+            ".dream/state.json",
+            ".dream",
+            ".claude/settings.json",
+            ".claude",
+            ".editor/index.json",
+            ".notion-home/credentials.json",
+            "C:/secret.zip",
+        )
+        with unittest.mock.patch.object(
+            workspace_router,
+            "get_existing_workspace",
+        ) as existing_workspace:
+            for path in invalid_paths:
+                with self.subTest(path=path):
+                    response = self.client.get(
+                        "/api/workspace/files/download",
+                        params={"sessionId": "download-paths", "path": path},
+                        headers={"Authorization": "Bearer test-token"},
+                    )
+                    self.assertEqual(response.status_code, 400, response.text)
+                    self.assertEqual(
+                        response.json()["detail"]["code"],
+                        "INVALID_WORKSPACE_URI",
+                    )
+        existing_workspace.assert_not_called()
 
     def test_content_reads_owned_unicode_regular_file_without_exposing_disk_path(self):
         session_id = "content-owned"

@@ -4,6 +4,9 @@
 // [Sync] 2026-08-06: replace the plain chat textarea with a Markdown-aware editor so user-authored
 //                    paragraphs, lists, inline code, and placeholder paths survive the user bubble round trip.
 // [Sync] 2026-08-13: expose listbox ARIA attributes for installed-Skill slash suggestions.
+// [Sync] 2026-09-11: create the Tiptap editor only after client mount
+//                    (immediatelyRender: false) so Next.js SSR never renders or
+//                    hydrates the composer before the browser runtime exists.
 import { useEffect, type FocusEventHandler, type KeyboardEventHandler } from 'react';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Markdown } from '@tiptap/markdown';
@@ -43,6 +46,7 @@ export default function MarkdownInputEditor({
   onBlur,
 }: MarkdownInputEditorProps) {
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit,
       Placeholder.configure({ placeholder }),

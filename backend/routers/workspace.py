@@ -25,6 +25,14 @@
 # [Sync] 2026-08-30: keep Workspace Mode independent from the deployment-owned
 #                    INK_AGENT_SANDBOX_ENABLED capability when file APIs
 #                    refresh per-thread Claude settings.
+# [Sync] 2026-09-11: give the download endpoint the content endpoint's protection
+#                    chain (Thread ownership, Workspace Mode, strict public path,
+#                    no-create) so Chat explicit downloads never expose non-public
+#                    workspace paths or create workspaces as a GET side effect.
+# [Sync] 2026-09-11: widen the download path scope per product decision — every
+#                    non-dot workspace path (files/, logs/, skills/, root files,
+#                    ordinary agent-created directories) is exportable; dot-prefixed
+#                    runtime surfaces (.dream, .claude, ...) stay unaddressable.
 
 """Workspace file management API.
 
@@ -222,8 +230,13 @@ def _require_workspace_mode_enabled(current_user: dict) -> None:
         )
 
 
-def _validate_workspace_content_path(raw_path: str) -> str:
-    """Validate the already transport-decoded workspace:// public file path."""
+def _reject_unsafe_workspace_path_segments(raw_path: str) -> list[str]:
+    """Validate transport-decoded workspace path shape and return its segments.
+
+    Shared by every endpoint: absolute, backslash, query/fragment, control
+    character, percent-escape, Windows drive, empty, dot, and traversal
+    segments are rejected before any filesystem access.
+    """
 
     if (
         not raw_path
@@ -241,11 +254,44 @@ def _validate_workspace_content_path(raw_path: str) -> str:
 
     segments = raw_path.split("/")
     if (
-        len(segments) < 2
-        or segments[0] != WORKSPACE_SUBDIRS[0]
-        or any(segment in {"", ".", ".."} for segment in segments)
+        any(segment in {"", ".", ".."} for segment in segments)
         or _WINDOWS_DRIVE_RE.match(segments[0])
     ):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid Workspace file path", "code": "INVALID_WORKSPACE_URI"},
+        )
+    return segments
+
+
+def _validate_workspace_content_path(raw_path: str) -> str:
+    """Validate the already transport-decoded workspace:// public file path.
+
+    The preview protocol keeps the single-root contract: only regular entries
+    under ``files/`` are readable for chat rendering.
+    """
+
+    segments = _reject_unsafe_workspace_path_segments(raw_path)
+    if len(segments) < 2 or segments[0] not in (WORKSPACE_SUBDIRS[0],):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid Workspace file path", "code": "INVALID_WORKSPACE_URI"},
+        )
+    return "/".join(segments)
+
+
+def _validate_workspace_download_path(raw_path: str) -> str:
+    """Validate a download/archive path: dot-prefixed runtime surfaces stay blocked.
+
+    Everything the user owns in the workspace is exportable — ``files/``,
+    ``logs/``, ``skills/``, root-level files, and ordinary agent-created
+    directories — while ``.dream``, ``.claude``, and any other dot-prefixed
+    runtime surface can never be addressed. The kit resolver still re-checks
+    symlink and escape containment before bytes are read.
+    """
+
+    segments = _reject_unsafe_workspace_path_segments(raw_path)
+    if segments[0].startswith("."):
         raise HTTPException(
             status_code=400,
             detail={"error": "Invalid Workspace file path", "code": "INVALID_WORKSPACE_URI"},
@@ -670,10 +716,18 @@ async def download_workspace_file(
             detail={"error": "sessionId and path are required"},
         )
     _validate_session_id(session_id)
+    _require_owned_workspace_thread(session_id, current_user)
+    _require_workspace_mode_enabled(current_user)
+    safe_path = _validate_workspace_download_path(path)
 
     try:
-        workspace_path = _get_or_create_workspace_for_user(session_id, current_user)
-        file_obj = read_workspace_download_content(workspace_path, path)
+        workspace_path = get_existing_workspace(session_id)
+        if workspace_path is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "Workspace file not found", "code": "WORKSPACE_NOT_FOUND"},
+            )
+        file_obj = read_workspace_download_content(workspace_path, safe_path)
     except WorkspaceFileAccessError as exc:
         raise HTTPException(
             status_code=exc.status,

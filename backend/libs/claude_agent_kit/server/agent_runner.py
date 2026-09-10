@@ -674,6 +674,13 @@ _FIND_MUTATING_ACTIONS: frozenset[str] = frozenset({
     "-fprintf",
 })
 
+# Archiving commands allowed inside protected Dream workspaces when no argument
+# can reference the .dream surface: the archive file is zip's only write target,
+# so ordinary workspace exports run while the runtime boundary stays intact.
+_DREAM_ARCHIVE_WRITE_COMMANDS: frozenset[str] = frozenset({
+    "zip",
+})
+
 
 def _is_low_sensitivity_bash_command(command: str) -> bool:
     """Return True when *command* is a safe, read-only shell invocation.
@@ -982,8 +989,10 @@ def _is_dream_mutating_bash_command(
     boundary: an interpreter can construct the path dynamically and a prewritten
     script can hide it completely. In that workspace every Bash call therefore
     defaults to deny unless parsing proves it is one of the narrow read-only
-    forms. Without an existing surface, the legacy lexical/path guard remains so
-    ordinary Bash behavior is unchanged. Writes must use the controlled MCP seam.
+    forms or a strictly parsed workspace ``zip`` whose arguments cannot reference
+    the surface. Without an existing surface, the legacy lexical/path guard
+    remains so ordinary Bash behavior is unchanged. Writes must use the
+    controlled MCP seam.
     """
 
     tokens = _split_shell_command(command)
@@ -992,10 +1001,39 @@ def _is_dream_mutating_bash_command(
     if notion_cli_bound and _is_notion_cli_read_api_command(command):
         return False
     if _workspace_has_dream_surface(cwd):
+        if _is_dream_workspace_archive_write_command(command, tokens, cwd):
+            return False
         return not _is_definitely_read_only_dream_bash_command(command, tokens)
     if not _bash_command_may_reference_dream_surface(command, tokens, cwd):
         return False
     return not _is_definitely_read_only_dream_bash_command(command, tokens)
+
+
+def _is_dream_workspace_archive_write_command(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+) -> bool:
+    """Allow narrow ``zip`` archiving whose arguments cannot reference ``.dream``.
+
+    The archive output is the only path ``zip`` mutates, so a strictly parsed
+    invocation — no shell metacharacters, no caller-selected executable, no
+    dynamic construction — that never names the surface keeps the runtime
+    boundary intact while letting ordinary workspace exports run. ``unzip`` and
+    other extractors stay denied: they write arbitrary workspace content.
+    """
+
+    if _SHELL_METACHAR_RE.search(command) or "\n" in command or "\r" in command:
+        return False
+    unwrapped = _unwrap_dream_read_only_command_tokens(tokens)
+    if unwrapped is None or not unwrapped:
+        return False
+    name = _command_name(unwrapped[0])
+    if unwrapped[0] != name:
+        return False
+    if name not in _DREAM_ARCHIVE_WRITE_COMMANDS:
+        return False
+    return not _bash_command_may_reference_dream_surface(command, tokens, cwd)
 
 
 def _is_explicit_canonical_asset_delete(
@@ -1447,9 +1485,9 @@ def _apply_dream_surface_write_guard(
             "permissionDecisionReason": (
                 "The .dream runtime surface is controlled by Story Workspace; "
                 "use its MCP write tools instead of generic file or shell mutation. "
-                "For ZIP exports, place requested files in a dedicated files/ directory "
-                "using file tools and return a Markdown link to workspace://files/<directory>. "
-                "The download service creates the binary ZIP; shell zip is not required."
+                "zip may archive ordinary workspace files when no argument names .dream "
+                "(for example: zip -r files/export.zip files/<directory>), but any "
+                "command that references .dream paths stays denied."
             ),
         }
     }
