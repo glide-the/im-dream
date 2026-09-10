@@ -1,3 +1,4 @@
+# [Sync] 2026-09-09: clarify binary archive export through the host download service.
 # [Input] Consume IClaudeAgentSDKClient, AgentStreamingCallbacks, AgentRunOptions,
 #         AgentRunResult, ToolEventPayload from types.py;
 #         build_user_message_content from messages/;
@@ -1445,7 +1446,10 @@ def _apply_dream_surface_write_guard(
             "permissionDecision": "deny",
             "permissionDecisionReason": (
                 "The .dream runtime surface is controlled by Story Workspace; "
-                "use its MCP write tools instead of generic file or shell mutation."
+                "use its MCP write tools instead of generic file or shell mutation. "
+                "For ZIP exports, place requested files in a dedicated files/ directory "
+                "using file tools and return a Markdown link to workspace://files/<directory>. "
+                "The download service creates the binary ZIP; shell zip is not required."
             ),
         }
     }

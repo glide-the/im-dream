@@ -1,3 +1,4 @@
+# [Sync] 2026-09-09: explain host-generated directory ZIP downloads to Agent replies.
 # [Input] Consume database.list_sessions_in_range (via database module import).
 #         Reads INK_AGENT_CONTEXT_SESSIONS env var.
 #         Imports build_workspace_context_block from claude_agent.workspace_context —
@@ -201,6 +202,14 @@ or stored in the current Thread Workspace, use a Markdown target in this exact f
 `workspace://files/<path-relative-to-the-current-thread-workspace>`.
 
 Example: `![Generated image](workspace://files/generated-image.png)`.
+
+For a multi-file export, write the requested files into a dedicated directory under
+`files/` using the normal file tools, then link that existing directory, for example
+`[Download ZIP](workspace://files/export-bundle)`. The authenticated download service
+packages directories into real binary ZIP files when clicked; no shell `zip` command
+is needed. Do not claim an on-disk ZIP already exists when offering a directory link,
+and do not replace a requested multi-file archive with one concatenated Markdown file.
+Do not include `.dream` runtime data or unrelated workspace files in an export.
 
 Use paths relative to the current Thread Workspace root. Never expose a local absolute
 path, `file://` URL, container path, or plain relative path for a Workspace file the user

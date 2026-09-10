@@ -306,3 +306,5 @@ Run the Admin migration check, verify the Admin-owned environment file, and conf
 - [Registry acceptance](docs/deploy/claude-registry-release-acceptance.md)
 
 Keep `README.md` and `README.zh.md` structurally aligned. Preserve unrelated working-tree changes, update affected file headers and folder contracts, and report exact validation commands and any remaining release action.
+
+For multi-file exports, ask the Agent to place the selected files in a dedicated workspace directory and provide a download link. Clicking the directory link downloads a real ZIP archive; shell archive commands are not required.

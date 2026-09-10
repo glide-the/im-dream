@@ -467,3 +467,7 @@ Rollback is file-local and does not require data migration:
   or disk paths and have stable UI fallbacks.
 - Existing SSE, Chat history, Workspace sidebar, HTTP(S) Markdown, ordinary links, GFM,
   Mermaid, sandbox, and session resume contracts remain unchanged.
+
+## 目录导出（2026-09-09）
+
+聊天中的显式下载操作走 `/api/workspace/files/download`；图片预览仍走 `/api/workspace/files/content`。`workspace://files/export-bundle` 指向实际存在的目录时，后端按现有目录下载合同返回二进制 ZIP，前端使用 ZIP 文件后缀。Agent 应把用户要求的文件放在独立导出目录后提供该链接，不应因为 shell `zip` 被拦截而声称无法生成压缩包，也不应伪称工作区已保存了 ZIP。`.dream` 写入保护不变。

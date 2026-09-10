@@ -1,6 +1,7 @@
 // [Input] Strictly parsed Workspace URI, current Chat Thread identity, bearer auth state, and optional abort signal.
 // [Output] Shared authenticated Workspace content response/image blob helpers with stable failure classification.
 // [Pos] workspace file runtime access utility in frontend/app/_dream/components/chat
+// [Sync] 2026-09-09: route explicit downloads through the existing directory-ZIP endpoint.
 // [Sync] 2026-08-23: extract the existing file fetch/MIME boundary so live Markdown and long-image export share one authenticated path.
 
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -31,9 +32,9 @@ export class WorkspaceFileRequestError extends Error {
   }
 }
 
-function contentUrl(threadId: string, path: string): string {
+function contentUrl(threadId: string, path: string, download = false): string {
   const query = new URLSearchParams({ sessionId: threadId, path });
-  return apiUrl(`/api/workspace/files/content?${query.toString()}`);
+  return apiUrl(`/api/workspace/files/${download ? 'download' : 'content'}?${query.toString()}`);
 }
 
 function failureFromStatus(status: number): WorkspaceFileRequestFailure {
@@ -48,10 +49,11 @@ export async function fetchWorkspaceFile(
   parsed: Extract<WorkspaceUriParseResult, { ok: true }>,
   threadId: string,
   signal?: AbortSignal,
+  download = false,
 ): Promise<Response> {
   const token = getAuthToken();
   if (!token) throw new WorkspaceFileRequestError('access');
-  const response = await fetch(contentUrl(threadId, parsed.path), {
+  const response = await fetch(contentUrl(threadId, parsed.path, download), {
     headers: { Authorization: `Bearer ${token}` },
     signal,
   });
