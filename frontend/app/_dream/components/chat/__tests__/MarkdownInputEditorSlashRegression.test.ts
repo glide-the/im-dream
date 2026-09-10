@@ -43,6 +43,7 @@ test('serializes a standalone slash as a slash draft after real Tiptap input', a
       const [markdown, setMarkdown] = useState('');
       return React.createElement(
         'main',
+        null,
         React.createElement(MarkdownInputEditor, {
           id: 'chat-input',
           value: markdown,

@@ -471,3 +471,13 @@ Rollback is file-local and does not require data migration:
 ## 目录导出（2026-09-09）
 
 聊天中的显式下载操作走 `/api/workspace/files/download`；图片预览仍走 `/api/workspace/files/content`。`workspace://files/export-bundle` 指向实际存在的目录时，后端按现有目录下载合同返回二进制 ZIP，前端使用 ZIP 文件后缀。Agent 应把用户要求的文件放在独立导出目录后提供该链接，不应因为 shell `zip` 被拦截而声称无法生成压缩包，也不应伪称工作区已保存了 ZIP。`.dream` 写入保护不变。
+
+## 下载端点防护合同（2026-09-11）
+
+`GET /api/workspace/files/download` 与 content 端点执行同一防护链：认证 → sessionId
+格式校验 → Thread 所有权（非本人 Thread 一律 404，不泄露存在性）→ Workspace Mode
+（关闭时 409）→ 严格公共路径校验（首段必须属于 `WORKSPACE_SUBDIRS`，拒绝 `%` 转义、
+控制字符、反斜杠、`?`/`#`、`..`、绝对路径与 Windows 盘符）→ 不创建工作区（缺失即
+404）→ 读取时拒绝符号链接（目录 ZIP 逐条目 resolve 校验不逃逸工作区根）。`.dream/`、
+`.claude/` 等点前缀运行面路径不可经该端点读取。回归证据见
+`chat-slash-menu-and-workspace-zip-export-interaction.md`。

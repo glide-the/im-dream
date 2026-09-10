@@ -25,6 +25,10 @@
 # [Sync] 2026-08-30: keep Workspace Mode independent from the deployment-owned
 #                    INK_AGENT_SANDBOX_ENABLED capability when file APIs
 #                    refresh per-thread Claude settings.
+# [Sync] 2026-09-11: give the download endpoint the content endpoint's protection
+#                    chain (Thread ownership, Workspace Mode, strict public path,
+#                    no-create) so Chat explicit downloads never expose non-public
+#                    workspace paths or create workspaces as a GET side effect.
 
 """Workspace file management API.
 
@@ -222,8 +226,20 @@ def _require_workspace_mode_enabled(current_user: dict) -> None:
         )
 
 
-def _validate_workspace_content_path(raw_path: str) -> str:
-    """Validate the already transport-decoded workspace:// public file path."""
+def _validate_workspace_content_path(
+    raw_path: str,
+    *,
+    allowed_first_segments: tuple[str, ...] = (WORKSPACE_SUBDIRS[0],),
+    allow_root_subdir: bool = False,
+) -> str:
+    """Validate the already transport-decoded workspace:// public file path.
+
+    ``allowed_first_segments`` narrows or widens the public roots; the content
+    endpoint keeps the default single-root contract while the download endpoint
+    accepts every listed workspace subdir. ``allow_root_subdir`` lets the
+    download endpoint also serve a bare public subdirectory (e.g. ``files``)
+    whose ZIP packaging the file sidebar exposes.
+    """
 
     if (
         not raw_path
@@ -241,8 +257,8 @@ def _validate_workspace_content_path(raw_path: str) -> str:
 
     segments = raw_path.split("/")
     if (
-        len(segments) < 2
-        or segments[0] != WORKSPACE_SUBDIRS[0]
+        len(segments) < (1 if allow_root_subdir else 2)
+        or segments[0] not in allowed_first_segments
         or any(segment in {"", ".", ".."} for segment in segments)
         or _WINDOWS_DRIVE_RE.match(segments[0])
     ):
@@ -670,10 +686,22 @@ async def download_workspace_file(
             detail={"error": "sessionId and path are required"},
         )
     _validate_session_id(session_id)
+    _require_owned_workspace_thread(session_id, current_user)
+    _require_workspace_mode_enabled(current_user)
+    safe_path = _validate_workspace_content_path(
+        path,
+        allowed_first_segments=WORKSPACE_SUBDIRS,
+        allow_root_subdir=True,
+    )
 
     try:
-        workspace_path = _get_or_create_workspace_for_user(session_id, current_user)
-        file_obj = read_workspace_download_content(workspace_path, path)
+        workspace_path = get_existing_workspace(session_id)
+        if workspace_path is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "Workspace file not found", "code": "WORKSPACE_NOT_FOUND"},
+            )
+        file_obj = read_workspace_download_content(workspace_path, safe_path)
     except WorkspaceFileAccessError as exc:
         raise HTTPException(
             status_code=exc.status,

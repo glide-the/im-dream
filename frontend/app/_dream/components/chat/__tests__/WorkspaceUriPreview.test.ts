@@ -24,6 +24,18 @@ test.use({ channel: 'chromium' });
 
 const PNG_BYTES = readFileSync(fileURLToPath(new URL('../../../../../public/placeholder-memory.png', import.meta.url)));
 
+// A real binary ZIP archive (verified with zipfile) holding export-bundle/大纲.md and
+// export-bundle/场景/开场.txt, standing in for the backend directory download contract.
+const ZIP_EXPORT_BUNDLE_BYTES = Buffer.from(
+  'UEsDBBQAAAAIANkIK10AAAAAAgAAAAAAAAAOAAAAZXhwb3J0LWJ1bmRsZS8DAFBLAwQUAAAICADZCCtdltU+SBEAAAAPAAAAFwAA'
+  + 'AGV4cG9ydC1idW5kbGUv5aSn57qyLm1kS85ILChJLVLILy3JycxLBQBQSwMEFAAACAgA2QgrXUgsV48PAAAADQAAAB8AAABleHBv'
+  + 'cnQtYnVuZGxlL+WcuuaZry/lvIDlnLoudHh0yy9IzcvMS1coTk7NSwUAUEsBAhQDFAAAAAgA2QgrXQAAAAACAAAAAAAAAA4AAAAA'
+  + 'AAAAAAAQAP1BAAAAAGV4cG9ydC1idW5kbGUvUEsBAhQDFAAACAgA2QgrXZbVPkgRAAAADwAAABcAAAAAAAAAAAAAAIABLgAAAGV4'
+  + 'cG9ydC1idW5kbGUv5aSn57qyLm1kUEsBAhQDFAAACAgA2QgrXUgsV48PAAAADQAAAB8AAAAAAAAAAAAAAIABdAAAAGV4cG9ydC1i'
+  + 'dW5kbGUv5Zy65pmvL+W8gOWcui50eHRQSwUGAAAAAAMAAwDOAAAAwAAAAAAA',
+  'base64',
+);
+
 async function reserveEphemeralPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createNetServer();
@@ -114,6 +126,8 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
       '![Remote](https://assets.example.test/remote.png)',
       '',
       '[Workspace report](workspace://files/report.pdf)',
+      '',
+      '[导出打包](workspace://files/export-bundle)',
       '',
       '[Web documentation](https://example.test/docs)',
       '',
@@ -238,6 +252,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
   const diagnostics: string[] = [];
   const expectedFileFailureDiagnostics: string[] = [];
   const fileRequests: Array<{ readonly path: string; readonly sessionId: string; readonly authorization: string | undefined }> = [];
+  const downloadRequests: Array<{ readonly path: string; readonly sessionId: string; readonly authorization: string | undefined }> = [];
   let workspaceEnabled = true;
   let retryAttempts = 0;
   page.on('console', (message) => {
@@ -290,6 +305,24 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
       return;
     }
     await route.fulfill({ body: PNG_BYTES, contentType: 'image/png' });
+  });
+  await page.route('**/api/workspace/files/download?**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.searchParams.get('path') ?? '';
+    downloadRequests.push({
+      path,
+      sessionId: url.searchParams.get('sessionId') ?? '',
+      authorization: route.request().headers().authorization,
+    });
+    if (path === 'files/export-bundle') {
+      await route.fulfill({
+        body: ZIP_EXPORT_BUNDLE_BYTES,
+        contentType: 'application/zip',
+        headers: { 'content-disposition': 'attachment; filename="export-bundle.zip"' },
+      });
+      return;
+    }
+    await route.fulfill({ body: Buffer.from('%PDF-1.4 workspace preview'), contentType: 'application/pdf' });
   });
 
   try {
@@ -504,6 +537,20 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     expect(download.suggestedFilename()).toBe('report.pdf');
     await expect(page.getByText('Download started.')).toBeVisible();
 
+    const zipDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: '导出打包' }).click();
+    const zipDownload = await zipDownloadPromise;
+    expect(zipDownload.suggestedFilename()).toBe('export-bundle.zip');
+    expect(downloadRequests.map((request) => request.path)).toEqual([
+      'files/report.pdf',
+      'files/export-bundle',
+    ]);
+    expect(downloadRequests.every((request) => request.sessionId === 'thread-preview')).toBe(true);
+    expect(downloadRequests.every((request) => request.authorization === 'Bearer workspace-preview-token')).toBe(true);
+    // Explicit downloads go to the download endpoint; image previews keep the content endpoint.
+    expect(fileRequests.some((request) => request.path.includes('report.pdf') || request.path.includes('export-bundle'))).toBe(false);
+    await expect(page.locator('[data-workspace-file-state="success"]', { hasText: '导出打包' })).toBeVisible();
+
     const requestsBeforeReload = fileRequests.length;
     await page.reload();
     await expect(page.locator('img[data-workspace-file-state="success"]')).toHaveCount(4);
@@ -535,7 +582,7 @@ test('renders three authenticated Workspace images and preserves safe fallbacks 
     workspaceEnabled = false;
     const requestsBeforeDisabledReload = fileRequests.length;
     await page.reload();
-    await expect(page.locator('[data-workspace-file-state="disabled"]')).toHaveCount(7);
+    await expect(page.locator('[data-workspace-file-state="disabled"]')).toHaveCount(8);
     await expect(page.locator('[data-workspace-file-state="invalid"]')).toHaveCount(1);
     expect(fileRequests).toHaveLength(requestsBeforeDisabledReload);
     expect(expectedFileFailureDiagnostics).toHaveLength(4);
