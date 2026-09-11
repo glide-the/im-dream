@@ -2,6 +2,7 @@
 <!-- [Output] Current release, runtime, safety, verification, and rollback procedure. -->
 <!-- [Pos] AutoDL Dream operator guide for the canonical Next.js/FastAPI topology. -->
 <!-- [Sync] 2026-09-06: migrate AutoDL to Next.js standalone, frozen pnpm, and the Node MCP Apps runtime. -->
+<!-- [Sync] 2026-09-11: restore public-origin discovery through the AutoDL-injected AutoDLService6006URL/AutoDLService6008URL mappings. -->
 
 # AutoDL direct-host deployment
 
@@ -21,6 +22,28 @@ and does not install Docker or Nginx.
 PostgreSQL identity, and a private MCP Apps env file. MCP Apps iframe content
 must use a separate HTTPS origin routed to the same port 6006 Next service;
 the parent origin remains the primary Dream HTTPS origin.
+
+## Public origin discovery
+
+AutoDL publishes the fixed listeners through its reverse proxy and injects the
+current public URLs as read-only service variables. After SSH login, print only
+the two required variables — never dump the whole `/etc/profile.d/autodl.env.sh`,
+which also contains AutoDL panel tokens:
+
+```bash
+source /etc/profile.d/autodl.env.sh
+printf 'Dream: %s\nAdmin: %s\n' "${AutoDLService6006URL}" "${AutoDLService6008URL}"
+```
+
+`AutoDLService6006URL` is the public origin of the Dream frontend (6006) and
+maps to `AUTODL_DREAM_PUBLIC_ORIGIN`; `AutoDLService6008URL` is the public
+origin of Admin (6008) and maps to `AUTODL_ADMIN_PUBLIC_ORIGIN`. Copy both into
+`platform.env` before running `prepare-env.sh`; the MCP Apps sandbox origin is a
+separate mapping to the same 6006 service and stays a distinct HTTPS origin.
+AutoDL's proxy does not reliably forward `Forwarded` / `X-Forwarded-*`, so the
+public origins are configured explicitly instead of being derived per request,
+and moving to a new instance regenerates these URLs — re-run the discovery and
+re-project the runtime env.
 
 ## Release
 

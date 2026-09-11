@@ -4,6 +4,7 @@
 [Output] Current Next.js/FastAPI/MCP Apps release, verification, and rollback contract.
 [Pos] AutoDL Dream production runbook.
 [Sync] 2026-09-06: migrate the direct-host release from Vite/npm/dist to standalone Next.js and frozen pnpm.
+[Sync] 2026-09-11: add safe discovery of the AutoDL-injected public mappings (AutoDLService6006URL/AutoDLService6008URL) and how they fill platform.env origins.
 -->
 
 ## 拓扑与边界
@@ -29,6 +30,19 @@ MCP Apps sandbox 必须使用与主 Dream 不同的 HTTPS origin，但仍路由�
 PostgreSQL capability，不执行 migration、DDL、restore 或 SQLite fallback。
 
 ## 配置
+
+公网 origin 取自 AutoDL 注入的只读服务变量。SSH 登录实例后只输出这两个变量——
+不要打印整个 `/etc/profile.d/autodl.env.sh`，其中还包含 AutoDL 面板令牌：
+
+```bash
+source /etc/profile.d/autodl.env.sh
+printf 'Dream: %s\nAdmin: %s\n' "${AutoDLService6006URL}" "${AutoDLService6008URL}"
+```
+
+`AutoDLService6006URL`（前端 6006）填入 `AUTODL_DREAM_PUBLIC_ORIGIN`，
+`AutoDLService6008URL`（Admin 6008）填入 `AUTODL_ADMIN_PUBLIC_ORIGIN`。AutoDL
+代理不保证转发 `Forwarded` / `X-Forwarded-*`，公网 origin 必须显式配置；更换
+实例后地址会重新生成，需重新发现并重新投影 runtime env。
 
 从 `deploy/autodl-ssh/platform.env.example` 创建 gitignored
 `platform.env`，设置 SSH、Dream/Admin HTTPS origin、独立 sandbox origin
