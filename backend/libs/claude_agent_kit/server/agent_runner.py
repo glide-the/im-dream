@@ -1,3 +1,4 @@
+# [Sync] 2026-09-11: allow built-in query tools (Read/Grep/Glob/LS/NotebookRead) to access symlinked/source files in DEFAULT_BUILTIN_SKILLS_ROOT while keeping write tools strictly confined.
 # [Sync] 2026-09-09: clarify binary archive export through the host download service.
 # [Input] Consume IClaudeAgentSDKClient, AgentStreamingCallbacks, AgentRunOptions,
 #         AgentRunResult, ToolEventPayload from types.py;
@@ -308,6 +309,7 @@ from .sdk_env import (
     ensure_claude_code_tmpdir,
     resolve_claude_agent_max_buffer_size,
 )
+from .builtin_skill_packages import DEFAULT_BUILTIN_SKILLS_ROOT
 from .plugin_launcher import apply_plugin_launch_options
 from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
 
@@ -2246,7 +2248,12 @@ def _extract_workspace_boundary_path(tool_name: str, tool_input: dict[str, Any])
     return str(raw_path).strip() if raw_path is not None else ""
 
 
-def _is_path_inside_workspace_root(raw_path: str, cwd: Optional[str]) -> bool:
+def _is_path_inside_workspace_root(
+    raw_path: str,
+    cwd: Optional[str],
+    *,
+    allow_builtin_skills: bool = False,
+) -> bool:
     """Return True when *raw_path* resolves inside the session workspace root."""
 
     if not cwd:
@@ -2258,8 +2265,21 @@ def _is_path_inside_workspace_root(raw_path: str, cwd: Optional[str]) -> bool:
         if not candidate.is_absolute():
             candidate = workspace / candidate
         resolved = candidate.resolve(strict=False)
-        resolved.relative_to(workspace)
-        return True
+        try:
+            resolved.relative_to(workspace)
+            return True
+        except ValueError:
+            pass
+
+        if allow_builtin_skills:
+            builtin_root = DEFAULT_BUILTIN_SKILLS_ROOT.resolve(strict=False)
+            try:
+                resolved.relative_to(builtin_root)
+                return True
+            except ValueError:
+                pass
+
+        return False
     except (OSError, RuntimeError, ValueError):
         return False
 
@@ -2298,11 +2318,16 @@ def _apply_workspace_boundary_permission(
     if tool_name not in _WORKSPACE_BOUNDARY_FILE_TOOLS:
         return None
 
+    is_query_tool = tool_name in _WORKSPACE_QUERY_PERMISSION_TOOLS
     raw_path = _extract_workspace_boundary_path(tool_name, tool_input)
-    if not _is_path_inside_workspace_root(raw_path, cwd):
+    if not _is_path_inside_workspace_root(
+        raw_path,
+        cwd,
+        allow_builtin_skills=is_query_tool,
+    ):
         return _workspace_boundary_deny(raw_path)
 
-    if auto_allow_queries and tool_name in _WORKSPACE_QUERY_PERMISSION_TOOLS:
+    if auto_allow_queries and is_query_tool:
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",

@@ -462,9 +462,9 @@ idna==3.11 \
     #   httpx
     #   requests
     #   yarl
-ink-claude-dream-agent-sdk==0.2.144 \
-    --hash=sha256:1b2b6dfad5bfa766de24682d7b26ef1f1394097b92a5d32be1eae40530fbd517 \
-    --hash=sha256:50801104b1dcf8c0eb64555eb62f27f6238b37635c2ccbcb391bd562ee85ca56
+ink-claude-dream-agent-sdk==0.2.145 \
+    --hash=sha256:09251798ca9648678ad85c1c3d90248f6e05eeed78a4a3e82c6fa8ea62b65eb8 \
+    --hash=sha256:9e16643718e4c2eb62ba2bef43a79b83a683f0291e083a61ccb027e47516a34e
     # via ink-and-memory-backend
 itsdangerous==2.2.0 \
     --hash=sha256:c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef \

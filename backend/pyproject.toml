@@ -24,7 +24,7 @@ dependencies = [
   "python-dotenv>=1,<2",
   "eval-type-backport>=0.2,<1",
   "websockets>=12,<14",
-  "ink-claude-dream-agent-sdk==0.2.144",
+  "ink-claude-dream-agent-sdk==0.2.145",
   "mcp>=1.27.0",
   "cryptography>=46,<47",
   "boto3>=1.34,<2",

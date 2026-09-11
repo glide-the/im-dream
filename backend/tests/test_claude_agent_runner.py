@@ -2434,6 +2434,74 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertIn("current thread workspace", specific.get("permissionDecisionReason", ""))
 
+    async def test_auto_read_builtin_skill_symlink_is_allowed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace = root / "thread-1"
+            workspace.mkdir()
+            (workspace / "files").mkdir()
+            skills_dir = workspace / "skills"
+            skills_dir.mkdir()
+            notion_cli_symlink = skills_dir / "notion-cli"
+            from libs.claude_agent_kit.server.builtin_skill_packages import (
+                DEFAULT_BUILTIN_SKILLS_ROOT,
+            )
+
+            target_source = DEFAULT_BUILTIN_SKILLS_ROOT / "notion" / "notion-cli"
+            if target_source.exists():
+                notion_cli_symlink.symlink_to(target_source, target_is_directory=True)
+
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            result = await hook(
+                {
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": "skills/notion-cli/SKILL.md"},
+                },
+                "call-read-builtin-skill",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_auto_write_builtin_skill_symlink_is_denied(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace = root / "thread-1"
+            workspace.mkdir()
+            (workspace / "files").mkdir()
+            skills_dir = workspace / "skills"
+            skills_dir.mkdir()
+            notion_cli_symlink = skills_dir / "notion-cli"
+            from libs.claude_agent_kit.server.builtin_skill_packages import (
+                DEFAULT_BUILTIN_SKILLS_ROOT,
+            )
+
+            target_source = DEFAULT_BUILTIN_SKILLS_ROOT / "notion" / "notion-cli"
+            if target_source.exists():
+                notion_cli_symlink.symlink_to(target_source, target_is_directory=True)
+
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            result = await hook(
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": "skills/notion-cli/SKILL.md",
+                        "content": "malicious overwrite",
+                    },
+                },
+                "call-write-builtin-skill",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertIn("Workspace sandbox boundary", specific.get("permissionDecisionReason", ""))
+
     async def test_auto_grep_outside_workspace_root_is_hard_denied(self):
         confirmation_requests: list[dict] = []
 

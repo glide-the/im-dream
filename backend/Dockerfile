@@ -6,6 +6,7 @@
 # [Sync] 2026-06-12: add configurable Debian/PyPI/npm mirror build args for faster China builds.
 # [Sync] 2026-06-14: install Claude Code Linux sandbox dependencies for Docker deployments.
 # [Sync] 2026-06-17: ensure standard sbin directories exist for bubblewrap rootfs mounts.
+# [Sync] 2026-09-11: atomically pair custom Agent SDK 0.2.145 with Runtime 0.1.5.
 # [Sync] 2026-08-26: atomically pair the custom Agent SDK 0.2.144 with its
 #        Claude Code 2.1.241 CLI line, assert public MCP login/logout/no-browser
 #        argv at build time,
@@ -60,7 +61,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - bash curl jq git ripgrep: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 ARG CLAUDE_CODE_VERSION=2.1.241
-ARG INK_CLAUDE_CODE_VERSION=0.1.4
+ARG INK_CLAUDE_CODE_VERSION=0.1.5
 ARG NOTION_CLI_VERSION=0.15.1
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -101,7 +102,7 @@ RUN set -eux; \
 # default remains `ink-claude-code-dream`, while `/usr/local/bin/claude` is the
 # explicit official rollback selected only through CLAUDE_CODE_CLI_PATH.
 RUN set -eux; \
-    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.4"; \
+    test "${INK_CLAUDE_CODE_VERSION}" = "0.1.5"; \
     test "${CLAUDE_CODE_VERSION}" = "2.1.241"; \
     npm install -g \
         --registry="${INK_CLAUDE_NPM_REGISTRY}" \
@@ -111,7 +112,7 @@ RUN set -eux; \
     DREAM_RUNTIME_ROOT="$(dirname "$(dirname "${DREAM_RUNTIME_ENTRYPOINT}")")"; \
     jq -e \
         --arg runtime_version "${INK_CLAUDE_CODE_VERSION}" \
-        --arg sdk_version "0.2.144" \
+        --arg sdk_version "0.2.145" \
         '.runtime.name == "ink-claude-code-dream" and .runtime.version == $runtime_version and .runtime.integration.sdkVersion == $sdk_version and .core.corePruned == true and .core.productionEligible == true' \
         "${DREAM_RUNTIME_ROOT}/release-manifest.json" >/dev/null; \
     test -L /usr/local/bin/claude; \
@@ -140,7 +141,7 @@ RUN python -m pip install --no-cache-dir --timeout 180 --retries 10 \
     --require-hashes \
     --extra-index-url https://pypi.org/simple \
     -r requirements.txt; \
-    python -c "from importlib import metadata as m; import claude_agent_sdk as sdk; from claude_agent_sdk._cli_version import __cli_version__; dist=m.distribution('ink-claude-dream-agent-sdk'); providers={name.lower().replace('_','-') for name in m.packages_distributions().get('claude_agent_sdk', [])}; installed={str(item.metadata.get('Name') or '').lower().replace('_','-') for item in m.distributions()}; assert dist.version == '0.2.144'; assert sdk.__version__ == '0.2.144'; assert __cli_version__ == '2.1.241'; assert providers == {'ink-claude-dream-agent-sdk'}; assert 'claude-agent-sdk' not in installed; assert all(hasattr(sdk, name) for name in ('ClaudeAgentOptions', 'ClaudeSDKClient', 'query'))"
+    python -c "from importlib import metadata as m; import claude_agent_sdk as sdk; from claude_agent_sdk._cli_version import __cli_version__; dist=m.distribution('ink-claude-dream-agent-sdk'); providers={name.lower().replace('_','-') for name in m.packages_distributions().get('claude_agent_sdk', [])}; installed={str(item.metadata.get('Name') or '').lower().replace('_','-') for item in m.distributions()}; assert dist.version == '0.2.145'; assert sdk.__version__ == '0.2.145'; assert __cli_version__ == '2.1.241'; assert providers == {'ink-claude-dream-agent-sdk'}; assert 'claude-agent-sdk' not in installed; assert all(hasattr(sdk, name) for name in ('ClaudeAgentOptions', 'ClaudeSDKClient', 'query'))"
 
 COPY . .
 

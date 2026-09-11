@@ -24,10 +24,10 @@ import tomllib
 from packaging.requirements import Requirement
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-SDK_VERSION = "0.2.144"
+SDK_VERSION = "0.2.145"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
-RUNTIME_VERSION = "0.1.4"
+RUNTIME_VERSION = "0.1.5"
 NOTION_CLI_VERSION = "0.15.1"
 
 

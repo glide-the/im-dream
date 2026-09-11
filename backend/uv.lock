@@ -683,7 +683,7 @@ requires-dist = [
     { name = "eval-type-backport", specifier = ">=0.2,<1" },
     { name = "fastapi", specifier = ">=0.110,<1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28,<0.29" },
-    { name = "ink-claude-dream-agent-sdk", specifier = "==0.2.144" },
+    { name = "ink-claude-dream-agent-sdk", specifier = "==0.2.145" },
     { name = "itsdangerous", specifier = ">=2.2,<3" },
     { name = "json-repair", specifier = ">=0.35,<1" },
     { name = "mcp", specifier = ">=1.27.0" },
@@ -703,7 +703,7 @@ requires-dist = [
 
 [[package]]
 name = "ink-claude-dream-agent-sdk"
-version = "0.2.144"
+version = "0.2.145"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -711,9 +711,9 @@ dependencies = [
     { name = "mcp" },
     { name = "sniffio" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/95/ed/8dec4fc0dd8ef5527006e67ef76bc729f715fe12e57a3d0ce9e57a344f83/ink_claude_dream_agent_sdk-0.2.144.tar.gz", hash = "sha256:1b2b6dfad5bfa766de24682d7b26ef1f1394097b92a5d32be1eae40530fbd517", size = 373286, upload-time = "2026-08-25T16:54:42.475Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/0b/4b8d9a2a77027b014463ead0c427cd1418210598afe9137fbc64796f2f94/ink_claude_dream_agent_sdk-0.2.145.tar.gz", hash = "sha256:09251798ca9648678ad85c1c3d90248f6e05eeed78a4a3e82c6fa8ea62b65eb8", size = 373283 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/25/4182adad95326fc0f9f6138d3bed0c7cd12383c9ce2e5a6bed671415bd24/ink_claude_dream_agent_sdk-0.2.144-py3-none-any.whl", hash = "sha256:50801104b1dcf8c0eb64555eb62f27f6238b37635c2ccbcb391bd562ee85ca56", size = 151704, upload-time = "2026-08-25T16:54:41.071Z" },
+    { url = "https://files.pythonhosted.org/packages/56/05/083bec154a60c1c5493310c238986fd378ac7c9adb1f41bbb05206384e7e/ink_claude_dream_agent_sdk-0.2.145-py3-none-any.whl", hash = "sha256:9e16643718e4c2eb62ba2bef43a79b83a683f0291e083a61ccb027e47516a34e", size = 151706 },
 ]
 
 [[package]]

@@ -347,7 +347,7 @@ class TestDreamSdkDistribution(unittest.TestCase):
     def test_distribution_version_drift_fails_closed(self):
         distribution = self._distribution(
             name=DREAM_CLAUDE_SDK_DISTRIBUTION,
-            version="0.2.145",
+            version="0.2.999",
         )
         with (
             unittest.mock.patch.object(

@@ -2202,7 +2202,7 @@ class TestFactoryLifecycle(unittest.TestCase):
         calls: list[str] = []
         distribution = types.SimpleNamespace(
             metadata={"Name": "ink-claude-dream-agent-sdk"},
-            version="0.2.144",
+            version="0.2.145",
         )
         with (
             unittest.mock.patch.object(
@@ -2272,18 +2272,18 @@ class TestFactoryLifecycle(unittest.TestCase):
             {
                 "cli_mode": "dream_runtime",
                 "cli_path": "/runtime/bin/ink-claude-code-dream",
-                "cli_runtime_release": "0.1.4",
+                "cli_runtime_release": "0.1.5",
                 "sdk_cli_compatibility_version": "2.1.241",
                 "sdk_distribution": "ink-claude-dream-agent-sdk",
                 "sdk_import": "claude_agent_sdk",
-                "sdk_version": "0.2.144",
+                "sdk_version": "0.2.145",
             },
         )
 
     def test_startup_identity_marks_explicit_cli_override(self):
         distribution = types.SimpleNamespace(
             metadata={"Name": "ink-claude-dream-agent-sdk"},
-            version="0.2.144",
+            version="0.2.145",
         )
         with (
             unittest.mock.patch.dict(
