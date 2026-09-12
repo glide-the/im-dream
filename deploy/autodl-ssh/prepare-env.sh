@@ -4,13 +4,12 @@
 # [Pos] AutoDL Dream configuration projector; no CLI/transport state is persisted here.
 # [Sync] 2026-08-26: leave Agent admission budgets unset so runtime auto-detects host/cgroup capacity.
 # [Sync] 2026-08-30: pin Dream to the generic qualified Linux x64 Runtime
-#                    0.1.5 built from authorized 2.1.88 source; AutoDL only
+#                    0.1.4 built from authorized 2.1.88 source; AutoDL only
 #                    selects its installed absolute CLI path.
 # [Sync] 2026-08-30: force deployment-owned Claude Bash sandbox enablement to
 #                    false because the outer AutoDL container rejects userns.
 # [Sync] 2026-09-06: project the server-only Node MCP Apps runtime alongside
 #                    the Next.js frontend and remove retired Vite settings.
-# [Sync] 2026-09-12: project the Runtime 0.1.5 candidate selected by the direct-host release contract.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

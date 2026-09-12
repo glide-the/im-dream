@@ -14,8 +14,7 @@
 # [Sync] 2026-08-30: require the published clean-room Runtime 0.1.4 selector.
 # [Sync] 2026-09-01: require the notion platform namespace and canonical
 #                    archive-backed notion-diary-sync package.
-# [Sync] 2026-09-12: require Info-ZIP in the production image and the
-#                    Runtime 0.1.5 / SDK 0.2.145 source pairing.
+# [Sync] 2026-09-12: require Info-ZIP in the production image.
 
 from __future__ import annotations
 
