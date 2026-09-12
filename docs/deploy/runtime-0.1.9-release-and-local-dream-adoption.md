@@ -1,7 +1,7 @@
 <!-- [Input] Runtime canonical original src, same-SHA CI/npm artifacts, and local Dream resolver/startup identity. -->
 <!-- [Output] Minimal release/adoption plan, version contract, evidence and rollback. -->
 <!-- [Pos] Current Runtime 0.1.9 integration; source changes alone do not prove publication or running-process adoption. -->
-<!-- [Sync] 2026-09-13: unique src, same-SHA public five-package release and measured local Dream startup adoption completed. -->
+<!-- [Sync] 2026-09-13: record operator-confirmed real model/Notion E2E and subsequent requested backend stop without restarting. -->
 
 # Runtime 0.1.9 发布与本机 Dream 接入
 
@@ -58,7 +58,8 @@ Linux hosted CI 的 AppArmor userns 前提只在一次性 job 准备、bwrap pre
 `CLAUDE_CODE_CLI_PATH` 仅用于经明确评审的绝对路径回滚，不能掩盖旧 PATH 安装。
 AutoDL 修改仅同步仓库版本合同，本次不操作任何远程环境。Docker daemon 不可用时
 如实记录未运行镜像验证，不伪装构建成功。所有协议测试使用本地 fake provider，
-不读取真实账号凭据、Notion 内容或用户工作区，不宣称真实用户业务 E2E。
+不读取真实账号凭据、Notion 内容或用户工作区；这些自动化测试不宣称真实用户业务 E2E。
+用户另行完成的真实业务验收与此技术范围分别记录，见下文。
 
 ## 目标审查与回退
 
@@ -118,7 +119,7 @@ Dream 代码回归 151 passed / 17 subtests，无失败或跳过；额外对已�
 只使用本地 fake provider、凭据和测试工作区，不访问真实 Notion。
 
 核对所有权/cwd/启动时间后，只优雅停止并重启任务拥有的本机后端。
-新进程的 cwd 与配置的 Dream backend 项目目录一致，复核仍存活；
+当时新进程的 cwd 与配置的 Dream backend 项目目录一致，复核仍存活；
 `/api/health` 返回 `ok` / `0.1.3`。逐进程 PID、启动时间、主机路径和日志
 仅保存在本机私有验收记录，不随公开仓库发布。
 该进程启动身份为 `cli_mode=dream_runtime`、`cli_runtime_release=0.1.9`、
@@ -133,3 +134,14 @@ AutoDL/远程生产环境未操作，SDK/依赖锁/API schema 未升级。
 0.1.4/0.1.5 历史业务收据不覆盖此实现。源码清理、方案审查、公开发布、
 本机安装和实际后端启动采用均完成；当前交付见
 [Dream PR #52](https://github.com/glide-the/im-dream/pull/52)。
+
+## 后续用户验收与进程状态
+
+2026-09-13，用户明确确认已验证真实用户模型对话及真实 Notion 端到端流程。
+这项结果来自用户验收，不是上述 fake provider/隔离测试推导出的自动化业务回执；
+本次仅记录结论，不读取、复制或公开真实对话、Notion 内容、账号或凭据。
+
+在此前启动采用完成后，任务启动的本机 Dream 后端已按用户要求优雅停止并确认
+退出。上述 health/身份是当时的启动验证，不意味着服务现在仍运行；后续文档和
+Runtime 发布工具收尾不重新启动服务、不重新安装或重发 `0.1.9`。Docker 镜像
+构建仍未验收，远程环境未操作。项目版本和 SDK/Runtime 配对保持不变。
