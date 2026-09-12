@@ -5,6 +5,10 @@
 
 # Runtime 0.1.7 source-structure integration
 
+> Superseded by [0.1.8](runtime-0.1.8-source-structure-integration.md). This historical
+> arrangement only restored a side snapshot; its separate cleanroom build did not meet
+> the required same-directory/same-module implementation contract. Do not use it as current guidance.
+
 Runtime now preserves `claude-code-sourcemap/restored-src/src` exactly, rather than treating
 an independently designed clean-room tree as the reference structure. The snapshot has 1,902 files,
 30,382,832 bytes, and all 35 original module directories. Source commit is

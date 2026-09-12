@@ -3,7 +3,7 @@
 #          factory is initialised, request/response models are correct, and
 #          authentication is enforced.
 # [Pos] test node in backend/tests
-# [Sync] 2026-09-13: expect the package-root Runtime 0.1.7 identity in startup diagnostics.
+# [Sync] 2026-09-13: expect the package-root Runtime 0.1.8 identity in startup diagnostics.
 # [Sync] 2026-05-22: initial — smoke tests for /api/claude-agent/* routes in server.py.
 #                    Adapted from Pawkeyland scripts/test_demo_server_import.py
 #                    (removed pet/persona/sticker/necklace contract tests).
@@ -2273,7 +2273,7 @@ class TestFactoryLifecycle(unittest.TestCase):
             {
                 "cli_mode": "dream_runtime",
                 "cli_path": "/runtime/bin/ink-claude-code-dream",
-                "cli_runtime_release": "0.1.7",
+                "cli_runtime_release": "0.1.8",
                 "sdk_cli_compatibility_version": "2.1.241",
                 "sdk_distribution": "ink-claude-dream-agent-sdk",
                 "sdk_import": "claude_agent_sdk",

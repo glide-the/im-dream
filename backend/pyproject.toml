@@ -1,7 +1,7 @@
 # [Input] Dream backend project metadata and exact Python dependency contract.
 # [Output] Backend package identity and uv dependency resolution input.
 # [Pos] Canonical backend project manifest; exported requirements and uv.lock must agree.
-# [Sync] 2026-09-13: bump project metadata to 0.1.1 for the Runtime 0.1.7 source-structure integration; SDK stays 0.2.145.
+# [Sync] 2026-09-13: bump project metadata to 0.1.2 for the unified original-module Runtime 0.1.8; SDK stays 0.2.145.
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ink-and-memory-backend"
-version = "0.1.1"
+version = "0.1.2"
 description = "Ink & Memory backend API"
 requires-python = ">=3.12"
 dependencies = [

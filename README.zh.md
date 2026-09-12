@@ -5,7 +5,7 @@
 <!-- [同步] 2026-09-06：为 MCP 连接、App 设置和 Chat 交互步骤加入经过脱敏的真实组件截图。 -->
 <!-- [同步] 2026-09-06：使新增连接和 App 控制与可访问 Server 弹窗、统一 MCP 使用策略表单一致。 -->
 <!-- [同步] 2026-09-12：增加使用显式 origin、可恢复的 NATAPP 边缘转发操作入口。 -->
-<!-- [同步] 2026-09-13：采用 SDK 0.2.145 与尚未发布的 Runtime 0.1.7 package-root selector 合同。 -->
+<!-- [同步] 2026-09-13：采用 SDK 0.2.145 与尚未发布的 Runtime 0.1.8 package-root selector 合同。 -->
 
 # Ink & Memory
 
@@ -75,13 +75,13 @@ pnpm gateway:provision-local-dream
 
 ### 3. 安装 Dream 与 Runtime
 
-`develop` 源码合同现要求 Runtime `0.1.7`。2026-09-13 对 npm 官方 registry 的查询仍显示 `latest` 为 `0.1.4`，所以下面的 npm 命令只有在同 SHA 五包发布完成后才可用。在此之前，应使用最后一个已资格化的 release 分支/镜像，不要把当前 Dream 源码与 Runtime `0.1.4` 混用；resolver 会按设计 fail closed。
+`develop` 源码合同现要求 Runtime `0.1.8`。2026-09-13 对 npm 官方 registry 的查询仍显示 `latest` 为 `0.1.4`，所以下面的 npm 命令只有在同 SHA 五包发布完成后才可用。在此之前，应使用最后一个已资格化的 release 分支/镜像，不要把当前 Dream 源码与 Runtime `0.1.4` 混用；resolver 会按设计 fail closed。
 
 ```bash
 cd ../ink-dream-memory/backend
 uv sync --frozen
 
-npm install --global @glide-the/ink-claude-code-dream@0.1.7
+npm install --global @glide-the/ink-claude-code-dream@0.1.8
 export PATH="$(npm prefix --global)/bin:$PATH"
 ink-claude-code-dream --version
 
@@ -93,7 +93,7 @@ corepack enable
 corepack pnpm install --frozen-lockfile
 ```
 
-Runtime 必须输出 `2.1.241 (Claude Code)`。两个 npm 命令 alias 都必须解析到 package-root `cli.js`，其相邻 `release-manifest.json` 必须声明 Runtime `0.1.7`；Notion CLI 必须输出 `ntn 0.15.1`，Corepack 必须解析到 `pnpm@10.28.1`。
+Runtime 必须输出 `2.1.241 (Claude Code)`。两个 npm 命令 alias 都必须解析到 package-root `cli.js`，其相邻 `release-manifest.json` 必须声明 Runtime `0.1.8`；Notion CLI 必须输出 `ntn 0.15.1`，Corepack 必须解析到 `pnpm@10.28.1`。
 
 ### 4. 配置 Dream
 
@@ -194,13 +194,13 @@ corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 | 组件 | 支持版本 / 所有者 |
 | --- | --- |
 | Dream 集成分支 | `develop` |
-| Dream 项目元数据 | backend `0.1.1`、frontend `0.0.1`；API schema 仍为 `2.0.0` |
+| Dream 项目元数据 | backend `0.1.2`、frontend `0.0.2`；API schema 仍为 `2.0.0` |
 | Python | `>=3.12` |
 | Node.js | `>=22 <25`；部署镜像使用 Node 22 |
 | 前端包管理器 | Corepack 提供的 `pnpm@10.28.1` |
 | Next.js / React | `next@16.1.6`、`react@19.1.0`、`react-dom@19.1.0` |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
-| 原生 Runtime | 源码合同 `@glide-the/ink-claude-code-dream@0.1.7`；截至 2026-09-13 registry `latest` 仍为 `0.1.4` |
+| 原生 Runtime | 源码合同 `@glide-the/ink-claude-code-dream@0.1.8`；截至 2026-09-13 registry `latest` 仍为 `0.1.4` |
 | Runtime 兼容输出 | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | 共享 PostgreSQL schema、Admin、Gateway、计费 | `dream-im-platform` / Admin 仓库 |
@@ -208,7 +208,7 @@ corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 
 包所有权是明确分开的：`uv` 管理 Dream Python 环境，npm 发布原生 Runtime 和 Notion CLI，pnpm 管理 `frontend/`。`uv sync` 不会安装或升级原生 Runtime。
 
-Runtime `0.1.7` 原样恢复 `claude-code-sourcemap/restored-src/src` 的研究源码树（1,902 个文件、35 个模块目录），取代不完整且未发布的 `0.1.6` 候选。快照保留 Anthropic 版权，不进入 clean-room npm 编译或 tarball。Dream 项目元数据和精确 Runtime pin 同步更新，不代表 API、ZIP 策略、数据库或生产部署发生变化。详见[源码结构接入说明](docs/deploy/runtime-0.1.7-source-structure-integration.md)。
+Runtime `0.1.8` 把原始模块作为实际实现：`src` 与 `restored-src/src` 的目录、模块路径、权限和初始字节完全一致（1,902 个文件、35 个模块目录）。默认构建读取 `src/entrypoints/cli.tsx`，并删除平行的 `src/cleanroom` 实现。headless 和 MCP 兼容变换保留在构建层。原始源码保留 Anthropic 版权，编译成功不代表获得再分发授权。Dream 项目元数据和精确 Runtime pin 同步更新，不代表 API、ZIP 策略、数据库或生产部署发生变化。详见[源码结构接入说明](docs/deploy/runtime-0.1.8-source-structure-integration.md)。
 
 Admin Drizzle 是共享 PostgreSQL migration 的唯一所有者。Dream 只消费精确发布的 capability，缺失时 fail closed。MCP App 连接设置要求先发布 Admin migration `0053_rare_lenny_balinger` 与 capability `dream.mcp-app-connection-settings.v1`，再发布对应 Dream 代码。
 
@@ -232,12 +232,12 @@ corepack pnpm --dir frontend test:mcp-apps-runtime
 corepack pnpm --dir frontend typecheck:mcp-apps
 ```
 
-SDK/Runtime 发布后 registry 验收（Runtime `0.1.7` 发布前预期失败）：
+SDK/Runtime 发布后 registry 验收（Runtime `0.1.8` 发布前预期失败）：
 
 ```bash
 python3 scripts/verify_claude_registry_release.py \
   --sdk-version 0.2.145 \
-  --runtime-version 0.1.7 \
+  --runtime-version 0.1.8 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -283,7 +283,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-当前源码要求 Runtime `0.1.7`，并输出 `2.1.241 (Claude Code)`。默认 npm 目标必须解析到 package-root `cli.js`；Dream 会读取同目录 `release-manifest.json`，校验精确版本、`runtime.entrypoint`、stream protocol、14 项必要 capabilities、生产标记和 selector 摘要。另行资格化且禁止再分发的 AutoDL local-core 制品保留精确的 `bin/ink-claude-code-dream` 入口、release-root manifest 和 13 项 baseline capability。Dream 会区分两种布局，而不会把其中一种冒充另一种；旧 registry 包、布局声明不匹配或仅 fixture 的候选证据都会被拒绝。`0.1.7` 发布后修正普通 `PATH` 安装，再只重启你自己拥有的服务。`CLAUDE_CODE_CLI_PATH` 仅保留给经明确评审的绝对路径回滚。
+当前源码要求 Runtime `0.1.8`，并输出 `2.1.241 (Claude Code)`。默认 npm 目标必须解析到 package-root `cli.js`；Dream 会读取同目录 `release-manifest.json`，校验精确版本、`runtime.entrypoint`、stream protocol、14 项必要 capabilities、生产标记和 selector 摘要。另行资格化且禁止再分发的 AutoDL local-core 制品保留精确的 `bin/ink-claude-code-dream` 入口、release-root manifest 和 13 项 baseline capability。Dream 会区分两种布局，而不会把其中一种冒充另一种；旧 registry 包、布局声明不匹配或仅 fixture 的候选证据都会被拒绝。`0.1.8` 发布后修正普通 `PATH` 安装，再只重启你自己拥有的服务。`CLAUDE_CODE_CLI_PATH` 仅保留给经明确评审的绝对路径回滚。
 
 ### `uv sync` 删除了 pytest
 

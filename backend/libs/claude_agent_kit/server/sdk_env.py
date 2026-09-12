@@ -77,7 +77,7 @@
 #                    the authorized 2.1.88 Linux vendor/seccomp assets while
 #                    preserving the 2.1.241 CLI compatibility identity.
 # [Sync] 2026-08-30: bind the current thread's NOTION_HOME/API token/keyring/workers file into the Agent Runtime after all user overlays.
-# [Sync] 2026-09-13: require Runtime 0.1.7 package-root cli.js and digests for npm while preserving the separately qualified local-core layout.
+# [Sync] 2026-09-13: require Runtime 0.1.8 package-root cli.js and digests for npm while preserving the separately qualified local-core layout.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -113,7 +113,7 @@ DREAM_CLAUDE_SDK_DISTRIBUTION = "ink-claude-dream-agent-sdk"
 DREAM_CLAUDE_SDK_VERSION = "0.2.145"
 DREAM_CLAUDE_SDK_IMPORT = "claude_agent_sdk"
 DREAM_CLAUDE_CLI_EXECUTABLE = "ink-claude-code-dream"
-DREAM_CLAUDE_CLI_VERSION = "0.1.7"
+DREAM_CLAUDE_CLI_VERSION = "0.1.8"
 DREAM_CLAUDE_RUNTIME_ENTRYPOINT = "cli.js"
 DREAM_CLAUDE_LOCAL_CORE_ENTRYPOINT = f"bin/{DREAM_CLAUDE_CLI_EXECUTABLE}"
 DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA = "ink-claude-cli-envelope/v1"
