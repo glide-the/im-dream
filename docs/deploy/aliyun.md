@@ -6,6 +6,7 @@
                     Admin origin while retaining the shared network only for embedded PG.
 [Sync] 2026-08-22: add calibrated backend read BPS/IOPS limits after a real
                     Claude resume turn saturated the ECS system disk and blocked SSH/health.
+[Sync] 2026-09-12: distinguish the edge-only NATAPP relay topology from the ECS Compose topology.
 -->
 
 ## 服务与仓库边界
@@ -34,6 +35,20 @@ flowchart LR
 
 Admin Compose 同时在 external network 发布 `ink-memory-admin` 与
 `ink-memory-postgres` alias。PG 只监听容器/共享网络，不映射 ECS host port。
+
+### NATAPP 边缘代理替代拓扑
+
+当 ECS 不再承载 Dream/Admin 运行服务、只保留 Cloudflare 后的 nginx 边缘入口时，
+不得继续运行上述 Compose 发布或从旧 AutoDL 端口猜上游。此拓扑把既有 Dream
+frontend/backend 域名统一转发到一个显式 Dream origin，并把 Admin 域名单独转发到
+显式 Admin origin；它不改变 Admin-owned PostgreSQL、认证、Gateway 或 Dream 数据
+所有权，也不授权停止或释放 AutoDL 实例。
+
+使用 [`switch-edge-relay.sh`](../../deploy/remote-ssh/switch-edge-relay.sh) 同时备份和
+更新两份 nginx 站点。脚本仅在 `nginx -t` 通过后平滑 reload，失败自动恢复；完整
+origin 身份核对、SSE/WebSocket、公开路由与回滚合同见
+[`natapp-edge-relay.md`](natapp-edge-relay.md)。两种拓扑是明确选择，不应把 NATAPP
+origin 写入 Compose 的内部数据库或服务地址。
 
 ## ECS 前置条件
 

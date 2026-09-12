@@ -2,6 +2,7 @@
 <!-- [Output] Current deployment entry matrix, commands, unsupported paths, and validation boundaries. -->
 <!-- [Pos] Operator index for deploy/; detailed configuration remains in platform directories and root README files. -->
 <!-- [Sync] 2026-09-06: align deployment status with Next.js, pnpm, and known script drift at revision 54f3bbe5. -->
+<!-- [Sync] 2026-09-12: add the explicit-origin NATAPP edge-relay entry and recovery boundary. -->
 
 # Deployment entry points
 
@@ -23,6 +24,7 @@ known gaps that prevent an entry from being treated as current.
 | Local direct processes | [`local/deploy.sh`](local/deploy.sh) | Uses `pnpm run build` and `pnpm run dev`; an immutable Vite image may be selected only as an explicit rollback. It does not project the Browser Voice WebSocket base, and stop/clean does not strongly revalidate PID/container ownership. |
 | Local Docker Compose | [`docker/deploy.sh`](docker/deploy.sh) | Builds `frontend/Dockerfile`, which installs the frozen pnpm workspace and runs standalone Next.js. The helper still checks the historical Nginx template although the default image does not consume it. |
 | Remote SSH, including the Alibaba Cloud profile | [`remote-ssh/deploy.sh`](remote-ssh/deploy.sh) | Builds the same Next.js image through Compose. Its Compose file still passes `VITE_PUBLIC_SITE_URL`; the current Dockerfile ignores that argument, so it is configuration drift rather than active metadata injection. |
+| NATAPP edge relay on an existing SSH host | [`remote-ssh/switch-edge-relay.sh`](remote-ssh/switch-edge-relay.sh) | Does not build or stop services. It atomically backs up and relays the existing Dream/Admin domains to two explicit origins, tests nginx, reloads it, and supports checksum-verified rollback. |
 | Google Cloud Run | [`google-cloud/deploy.sh`](google-cloud/deploy.sh) | **Blocked for production.** It builds the same Next.js image but still passes the ignored Vite build argument; adjacent SQLite synchronization conflicts with the Admin-owned PostgreSQL-only schema contract. |
 | AutoDL direct host | [`autodl-ssh/deploy.sh`](autodl-ssh/deploy.sh) | Builds the frozen pnpm workspace as standalone Next.js, verifies the Node MCP Apps routes, and supervises Next/FastAPI on 6006/8765 without database DDL. |
 
@@ -68,6 +70,9 @@ Inspect the Remote SSH plan without changing a server:
 ```bash
 ./deploy/remote-ssh/deploy.sh --dry-run plan
 ```
+
+For an edge-only NATAPP switch, do not use the Compose release path or infer a
+tunnel port. Follow the explicit-origin [edge-relay runbook](../docs/deploy/natapp-edge-relay.md).
 
 Remote deployment requires explicit target configuration, a protected backend
 environment file, and the Mihomo configuration described by
