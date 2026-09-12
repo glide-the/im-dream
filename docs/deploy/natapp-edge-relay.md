@@ -63,7 +63,8 @@ export REMOTE_NGINX_BACKUP_DIR=/etc/nginx/backups/ink-memory-relay-<timestamp>
 ./deploy/remote-ssh/switch-edge-relay.sh rollback
 ```
 
-`verify` 检查 nginx 语法/服务状态、Dream 前端、Dream `/api/health` 与 Admin 登录页。
+`verify` 检查 nginx 语法/服务状态，并分别通过边缘本机 Host 路由和公网 HTTPS 检查
+Dream 前端、Dream `/api/health` 与 Admin 登录页。
 业务验收还应使用既有授权账号检查登录、一个现有 Thread 的 SSE 重连及正常 API；
 若直接 origin 已经返回 5xx，应记录为 NATAPP 上游阻断，不能把边缘切换汇报为登录或
 Agent 业务验收通过。回滚先核对 SHA-256，再同时恢复两份站点、`nginx -t` 并 reload；

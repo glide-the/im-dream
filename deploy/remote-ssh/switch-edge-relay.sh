@@ -36,7 +36,7 @@ apply/verify require:
   REMOTE_DREAM_RELAY_ORIGIN   exact http(s) origin, without a path
   REMOTE_ADMIN_RELAY_ORIGIN   exact http(s) origin, without a path
 
-rollback additionally requires REMOTE_NGINX_BACKUP_DIR printed by apply.
+rollback requires REMOTE_SSH_HOST and REMOTE_NGINX_BACKUP_DIR printed by apply.
 The script never starts/stops application services or changes application data.
 EOF
 }
@@ -117,7 +117,10 @@ verify() {
     curl -fsS --max-time 20 -H 'Host: ${REMOTE_DREAM_FRONTEND_DOMAIN}' http://127.0.0.1/ >/dev/null; \
     curl -fsS --max-time 20 -H 'Host: ${REMOTE_DREAM_BACKEND_DOMAIN}' http://127.0.0.1/api/health >/dev/null; \
     curl -fsS --max-time 20 -H 'Host: ${REMOTE_ADMIN_DOMAIN}' http://127.0.0.1/admin/login >/dev/null"
-  log "nginx, Dream frontend, Dream health, and Admin login route passed."
+  curl -fsS --max-time 20 "https://${REMOTE_DREAM_FRONTEND_DOMAIN}/" >/dev/null
+  curl -fsS --max-time 20 "https://${REMOTE_DREAM_BACKEND_DOMAIN}/api/health" >/dev/null
+  curl -fsS --max-time 20 "https://${REMOTE_ADMIN_DOMAIN}/admin/login" >/dev/null
+  log "nginx plus edge-local and public Dream frontend, Dream health, and Admin login routes passed."
 }
 
 apply_relay() {
