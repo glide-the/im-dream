@@ -5,7 +5,7 @@
 <!-- [Sync] 2026-09-06: add sanitized real-component screenshots for the MCP connection, App settings, and Chat interaction steps. -->
 <!-- [Sync] 2026-09-06: align connection creation and App controls with the accessible Server modal and unified MCP usage-policy form. -->
 <!-- [Sync] 2026-09-12: add the recoverable explicit-origin NATAPP edge-relay operator path. -->
-<!-- [Sync] 2026-09-13: adopt SDK 0.2.145 and the unpublished Runtime 0.1.9 package-root selector contract. -->
+<!-- [Sync] 2026-09-13: adopt SDK 0.2.145 and the published Runtime 0.1.9 package-root selector contract. -->
 
 # Ink & Memory
 
@@ -75,7 +75,7 @@ These commands write Admin-owned data. Use them only with the intended local dat
 
 ### 3. Install Dream and its Runtime
 
-The `develop` source contract now requires Runtime `0.1.9`. An official-registry check on 2026-09-13 still reports `0.1.4` as `latest`, so the npm command below becomes usable only after the same-SHA five-package release. Until then, use the last qualified release branch/image rather than mixing current Dream source with Runtime `0.1.4`; the resolver intentionally fails closed.
+The `develop` source contract requires the published Runtime `0.1.9`. On 2026-09-13, all five public npm archives were verified byte-for-byte against the same-SHA four-platform CI release, and registry `latest` is `0.1.9`. Do not mix current Dream source with Runtime `0.1.4`; the resolver intentionally fails closed. See the [release and local adoption receipt](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md).
 
 ```bash
 cd ../ink-dream-memory/backend
@@ -200,7 +200,7 @@ The complete engineering flow—connection discovery, model tool call, trusted r
 | Frontend package manager | `pnpm@10.28.1` through Corepack |
 | Next.js / React | `next@16.1.6`, `react@19.1.0`, `react-dom@19.1.0` |
 | Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
-| Native Runtime | Source contract `@glide-the/ink-claude-code-dream@0.1.9`; registry `latest` remains `0.1.4` as of 2026-09-13 |
+| Native Runtime | Published `@glide-the/ink-claude-code-dream@0.1.9`; registry `latest` is `0.1.9` as of 2026-09-13 |
 | Runtime compatibility output | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | Shared PostgreSQL schema, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
@@ -232,7 +232,7 @@ corepack pnpm --dir frontend test:mcp-apps-runtime
 corepack pnpm --dir frontend typecheck:mcp-apps
 ```
 
-Post-publication SDK/Runtime registry acceptance (expected to fail until Runtime `0.1.9` is published):
+Post-publication SDK/Runtime registry acceptance:
 
 ```bash
 python3 scripts/verify_claude_registry_release.py \
@@ -283,7 +283,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-The current source requires Runtime `0.1.9` and output `2.1.241 (Claude Code)`. The default npm target must resolve to package-root `cli.js`; Dream reads `release-manifest.json` beside it and verifies the exact version, `runtime.entrypoint`, stream protocol, 14 required capabilities, production flags, and selector digest. The separately qualified, non-redistributable AutoDL local-core artifact retains its exact `bin/ink-claude-code-dream` entrypoint, release-root manifest, and 13-capability baseline. Dream distinguishes these layouts rather than treating one as the other; an older registry package, a mismatched layout claim, or fixture-only candidate evidence is rejected. Fix the normal `PATH` installation after `0.1.9` is published, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed absolute-path rollback.
+The current source requires Runtime `0.1.9` and output `2.1.241 (Claude Code)`. The default npm target must resolve to package-root `cli.js`; Dream reads `release-manifest.json` beside it and verifies the exact version, `runtime.entrypoint`, stream protocol, 14 required capabilities, production flags, and selector digest. The separately qualified, non-redistributable AutoDL local-core artifact retains its exact `bin/ink-claude-code-dream` entrypoint, release-root manifest, and 13-capability baseline. Dream distinguishes these layouts rather than treating one as the other; an older registry package, a mismatched layout claim, or fixture-only candidate evidence is rejected. Install the exact release on normal `PATH`, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed absolute-path rollback.
 
 ### `uv sync` removed pytest
 

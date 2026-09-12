@@ -1,7 +1,7 @@
 <!-- [Input] Runtime canonical original src, same-SHA CI/npm artifacts, and local Dream resolver/startup identity. -->
 <!-- [Output] Minimal release/adoption plan, version contract, evidence and rollback. -->
 <!-- [Pos] Current Runtime 0.1.9 integration; source changes alone do not prove publication or running-process adoption. -->
-<!-- [Sync] 2026-09-13: replace duplicate-source 0.1.8 stage with unique src and CI release. -->
+<!-- [Sync] 2026-09-13: unique src, same-SHA public five-package release and measured local Dream startup adoption completed. -->
 
 # Runtime 0.1.9 发布与本机 Dream 接入
 
@@ -76,5 +76,60 @@ Runtime PR [#19](https://github.com/glide-the/ink-claude-code-dream/pull/19) 已
 本机 Darwin ARM64 六项 full qualification、两遍字节一致打包和干净 npm smoke 通过；
 bundle SHA-256 `c8188a9249574352327ed8fde4b1703c9b389cc1a83d8d601beb44103bace675`，
 artifact-tree SHA-256 `cf28677c948855bc372881fdd4f1791fa5b077701318adfb893d10c544a227bc`。
-四平台 CI、公开 npm、Dream 安装及运行采用仍待对应阶段的实际证据；
-0.1.4/0.1.5 历史业务收据不覆盖此实现。
+同 SHA `820be726b5c9011a493bbb14a84a97fe548d58bd` 的
+[四平台资格与五包聚合](https://github.com/glide-the/ink-claude-code-dream/actions/runs/34710677422)
+已经全部通过。CI 原始五归档下载后经 `verify-npm-tarball.mjs` 再验，
+exact five-package inventory 和零 `.map` 均通过。
+[自动发布](https://github.com/glide-the/ink-claude-code-dream/actions/runs/34711405353)
+遇到新包 registry 可见性超过 30 秒核验窗口；只允许在既有公开摘要与原归档
+相等后重试同一 run，保留 main/qualification SHA 和原始制品，不重建已占用版本。
+发布 run 的 attempt 5 已成功，五包 `0.1.9` 全部公开，selector `latest=0.1.9`。
+匿名下载的每个归档与原 CI 字节完全相等，registry SHA-512 integrity 也逐包相等：
+
+| 包（均为 `@glide-the/ink-claude-code-dream` 前缀） | 公开归档 SHA-256 |
+| --- | --- |
+| selector | `b8bc59639e269a885d3b9ad781381acbce146da7a194f935d32f33f9ed58ca6a` |
+| `-darwin-arm64` | `448b8be16ef9c6e1388b7975d1050286d6c9346444d003a3666476eaa88ed3cc` |
+| `-darwin-x64` | `70f27a95c857bc107fc3c456bbc5c65532907f3bf6643562982e38df352824dd` |
+| `-linux-arm64` | `465b04f451a2d60e8f1eb90666f1027e42a57a16e7f7c957c9f6d7f72b678bce` |
+| `-linux-x64` | `7dfe4be34832fa5da493a25570c82505002ea6e219b310269426f9715c55af64` |
+
+公开 SDK wheel SHA-256 `9e16643718e4c2eb62ba2bef43a79b83a683f0291e083a61ccb027e47516a34e`，
+sdist SHA-256 `09251798ca9648678ad85c1c3d90248f6e05eeed78a4a3e82c6fa8ea62b65eb8`；
+官方摘要、元数据和零 map 均通过。复用现有 registry verifier 函数完成两个 Python
+3.12.9 独立安装、五包公开获取/校验、隔离 npm 安装和两个 SDK/CLI probe，均通过。
+唯一 SDK provider 为 `ink-claude-dream-agent-sdk`，没有安装官方 SDK distribution；
+`ClaudeAgentOptions`、`ClaudeSDKClient`、`query` API 和 exact CLI banner 均符合合同。
+这些是 provider-free 制品检查，不转发 registry/model 凭据，也不调用真实模型。
+
+正常 PATH 安装已验收为 `0.1.9`，两个 alias 都解析到同一个 npm package-root
+`@glide-the/ink-claude-code-dream/cli.js`。公开文档不记录具体主机安装路径。
+selector 和实际选中的 Darwin ARM64 payload 共 76 个文件逐字节匹配原公开 CI 归档，
+14 项 capability 和零 map 均通过。实际 native core SHA-256 为
+`e680a4d90fcd26a65d1fa820860a37ad5f96fbcb25c79e8f87ad3b706273a3cb`，
+selector release manifest SHA-256 为
+`712aaaf5228f664ff1a99c6cfab424ce96aa11fac9fd0af9b3f6f0839979d64a`，
+native artifact manifest SHA-256 为
+`60b8b0797a788c69a00a641c722bc9b9adf60e1758632069a889edda5b43e79f`。
+
+Dream 代码回归 151 passed / 17 subtests，无失败或跳过；额外对已安装公开 Runtime
+运行 `backend/tests/test_claude_agent_notion_cli_runtime.py`：1 passed / 0 skipped。
+该合同通过真实 ClaudeAgentRunner、SDK 和 sandbox 执行测试 native ntn，
+只使用本地 fake provider、凭据和测试工作区，不访问真实 Notion。
+
+核对所有权/cwd/启动时间后，只优雅停止并重启任务拥有的本机后端。
+新进程的 cwd 与配置的 Dream backend 项目目录一致，复核仍存活；
+`/api/health` 返回 `ok` / `0.1.3`。逐进程 PID、启动时间、主机路径和日志
+仅保存在本机私有验收记录，不随公开仓库发布。
+该进程启动身份为 `cli_mode=dream_runtime`、`cli_runtime_release=0.1.9`、
+`sdk_version=0.2.145`、`sdk_cli_compatibility_version=2.1.241`，cli_path 为上面的
+正常 PATH selector，无显式覆盖。启动代码提交为 `77dae52f`；后续提交只补文档。
+这证明本机服务启动选用了新 Runtime，配合同安装的 CLI/native/sandbox 合同通过，
+不冒充一次真实用户/model turn。Docker daemon 未启动，因此未运行镜像构建；
+AutoDL/远程生产环境未操作，SDK/依赖锁/API schema 未升级。
+
+旧 `0.1.5` selector 与 native 安装树已在本机任务专用目录备份，未删除；
+具体回退路径只记录在本机私有验收记录。
+0.1.4/0.1.5 历史业务收据不覆盖此实现。源码清理、方案审查、公开发布、
+本机安装和实际后端启动采用均完成；当前交付见
+[Dream PR #52](https://github.com/glide-the/im-dream/pull/52)。

@@ -2,7 +2,7 @@
 <!-- [输出] 自有 Python SDK 与多平台 clean-room Runtime 的打包、发布、Dream 集成、验证和回滚操作手册。 -->
 <!-- [定位] Claude SDK/Runtime 发布与 IM Dream 接入的中文执行真相源；不负责服务器部署。 -->
 <!-- [同步] 2026-08-30：记录 PyPI SDK 0.2.144、npm Runtime 0.1.4、Notion Bash sandbox 能力、same-SHA workflow、持久最小权限 token 边界及 Dream 精确接入。 -->
-<!-- [同步] 2026-09-13：当前源码合同升级为 SDK 0.2.145 × 未发布 Runtime 0.1.9 package-root selector；旧发布回执保持历史。 -->
+<!-- [同步] 2026-09-13：当前合同为 SDK 0.2.145 × 已发布 Runtime 0.1.9 package-root selector；四平台同字节发布见新回执，旧回执保持历史。 -->
 
 # Claude SDK/Runtime 打包、发布与 IM Dream 集成
 
@@ -25,9 +25,9 @@ MCP 状态机或 Runtime 实现。
 | --- | --- |
 | SDK | PyPI/lock `ink-claude-dream-agent-sdk==0.2.145` |
 | Dream 项目元数据 | backend `0.1.3`、frontend `0.0.3`；API schema `2.0.0` 不变 |
-| Runtime selector source contract | `@glide-the/ink-claude-code-dream@0.1.9`；package-root `cli.js`，尚未发布 |
-| Runtime checked gates | 用户已确认来源授权；本机 Darwin ARM64 full qualification 通过；四平台 CI 与公开 npm 尚待新同 SHA 回执，旧 0.1.5 acceptance 不复用 |
-| 最后已发布 Runtime | npm `0.1.4`；qualification `33306855166`、publish `33306940462` 仅作历史回滚证据 |
+| Runtime selector contract | 已发布 `@glide-the/ink-claude-code-dream@0.1.9`；package-root `cli.js` |
+| Runtime checked gates | 四平台资格 `34710677422` 和发布 `34711405353` 成功；五公开归档与同 SHA CI 字节一致，旧 acceptance 不复用 |
+| 历史已发布 Runtime | npm `0.1.4`；qualification `33306855166`、publish `33306940462` 仅作历史回滚证据 |
 | Dream Runtime 接口标识 | `2.1.241 (Claude Code)` |
 
 `0.1.9` 只保留 Runtime 原始 `src`，删除重复的 `restored-src`，目录、模块、
