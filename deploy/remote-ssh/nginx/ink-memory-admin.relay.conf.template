@@ -1,0 +1,38 @@
+# [Input] Explicit Admin relay origin and existing public Admin domain.
+# [Output] Host nginx Admin/Gateway edge relay with runtime DNS, TLS SNI, WebSocket, and SSE support.
+# [Pos] Rendered by switch-edge-relay.sh beside the Dream relay configuration.
+# [Sync] 2026-09-12: add the recoverable NATAPP edge-relay topology.
+
+upstream ink_admin_relay {
+    zone ink_admin_relay 64k;
+    server __ADMIN_RELAY_HOST__:__ADMIN_RELAY_PORT__ resolve;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __ADMIN_DOMAIN__;
+
+    client_max_body_size 100m;
+    access_log /var/log/nginx/ink-memory-admin-access.log;
+    error_log /var/log/nginx/ink-memory-admin-error.log warn;
+
+    location / {
+        proxy_pass __ADMIN_RELAY_SCHEME__://ink_admin_relay;
+        proxy_http_version 1.1;
+        proxy_set_header Host __ADMIN_RELAY_AUTHORITY__;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_ssl_server_name on;
+        proxy_ssl_name __ADMIN_RELAY_HOST__;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}

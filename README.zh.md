@@ -4,6 +4,7 @@
 <!-- [同步] 2026-09-06：以快速启动和 MCP Apps 用法重组；用分层章节保留精确安装、所有权、安全与验证事实。 -->
 <!-- [同步] 2026-09-06：为 MCP 连接、App 设置和 Chat 交互步骤加入经过脱敏的真实组件截图。 -->
 <!-- [同步] 2026-09-06：使新增连接和 App 控制与可访问 Server 弹窗、统一 MCP 使用策略表单一致。 -->
+<!-- [同步] 2026-09-12：增加使用显式 origin、可恢复的 NATAPP 边缘转发操作入口。 -->
 
 # Ink & Memory
 
@@ -254,7 +255,7 @@ MCP Apps 聚焦命令与当前 provider-free 证据请见 [MCP Apps 验收回执
 - 只能回滚到经明确评审的不可变镜像或发布版本；不得恢复已退役的 npm/Vite 构建路径。
 - MCP Apps 在独立真实业务验收改变合同前保持生产关闭（`productionAppsEffective=false`）。
 
-部署方式请见 [deploy/README.md](deploy/README.md)。AutoDL 现已使用同一个 Next.js workspace 与 frozen pnpm lock，并包含 server-only MCP Apps Runtime；旧 Vite/npm/dist 发布路径不再支持。
+部署方式请见 [deploy/README.md](deploy/README.md)。AutoDL 现已使用同一个 Next.js workspace 与 frozen pnpm lock，并包含 server-only MCP Apps Runtime；旧 Vite/npm/dist 发布路径不再支持。阿里云边缘把现有公开域名转发到显式 NATAPP Dream/Admin origins 时，应使用可恢复的[边缘转发流程](docs/deploy/natapp-edge-relay.md)，不得从 Compose 或历史端口猜测上游。
 
 ## 故障排查
 

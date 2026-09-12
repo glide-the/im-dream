@@ -1,0 +1,74 @@
+# [Input] Explicit Dream relay origin and existing public Dream frontend/backend domains.
+# [Output] Host nginx edge relay with runtime DNS, TLS SNI, WebSocket, and unbuffered SSE support.
+# [Pos] Rendered by switch-edge-relay.sh; this does not start or configure the upstream application.
+# [Sync] 2026-09-12: add the recoverable NATAPP edge-relay topology.
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+resolver 127.0.0.53 valid=30s ipv6=off;
+resolver_timeout 5s;
+
+upstream ink_backend {
+    zone ink_backend 64k;
+    server __DREAM_RELAY_HOST__:__DREAM_RELAY_PORT__ resolve;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DREAM_BACKEND_DOMAIN__;
+
+    access_log /var/log/nginx/ink-backend-access.log;
+    error_log /var/log/nginx/ink-backend-error.log warn;
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass __DREAM_RELAY_SCHEME__://ink_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host __DREAM_RELAY_AUTHORITY__;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_ssl_server_name on;
+        proxy_ssl_name __DREAM_RELAY_HOST__;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DREAM_FRONTEND_DOMAIN__;
+
+    access_log /var/log/nginx/ink-frontend-access.log;
+    error_log /var/log/nginx/ink-frontend-error.log warn;
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass __DREAM_RELAY_SCHEME__://ink_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host __DREAM_RELAY_AUTHORITY__;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_ssl_server_name on;
+        proxy_ssl_name __DREAM_RELAY_HOST__;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
