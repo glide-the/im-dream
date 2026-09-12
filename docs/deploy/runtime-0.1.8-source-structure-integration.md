@@ -5,6 +5,8 @@
 
 # Runtime 0.1.8 — same directories, same modules
 
+> Historical source-only integration, superseded by [Runtime 0.1.9 release and local Dream adoption](runtime-0.1.9-release-and-local-dream-adoption.md). Runtime 0.1.9 removes the duplicate `restored-src` directory and retains canonical original `src`; statements below describe the 0.1.8 stage only.
+
 Runtime `src` and `restored-src/src` now have identical module paths, directory trees,
 file modes and initial bytes: 1,902 files, 30,382,832 bytes, 35 original module directories.
 Their content/mode inventory SHA-256 is
