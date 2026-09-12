@@ -5,7 +5,7 @@
 # [Sync] 2026-08-26: run Dream as root so /root-hosted workspace protocol paths remain fully traversable.
 # [Sync] 2026-08-28: install and verify ntn 0.15.1 beside the backend-owned
 #                    Notion Skill/MCP on the direct-host topology.
-# [Sync] 2026-08-30: install qualified Runtime 0.1.4, built from authorized
+# [Sync] 2026-09-12: install qualified Runtime 0.1.5, built from authorized
 #                    2.1.88 local-core with its restored on-disk
 #                    vendor/seccomp apply-seccomp passthrough.
 # [Sync] 2026-08-31: fail every start/deploy/verify/rollback when Vite Preview
@@ -24,6 +24,8 @@
 # [Sync] 2026-09-06: migrate the direct-host frontend to the canonical
 #                    Next.js/pnpm workspace and verify the Node MCP Apps routes.
 # [Sync] 2026-09-06: expose the fixed Node binary to Corepack's env-based launcher.
+# [Sync] 2026-09-12: install Info-ZIP for approved ordinary-workspace exports
+#                    on the direct-host topology and pair SDK 0.2.145.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,7 +48,7 @@ AUTODL_DATA_INIT_SCRIPT="${AUTODL_DATA_INIT_SCRIPT:-/root/ink-autodl/init-dream-
 AUTODL_PLUGIN_RUNTIME_ROOT="${AUTODL_DATA_ROOT}/claude-plugin-runtime"
 AUTODL_PLUGIN_ARTIFACTS_SOURCE="${AUTODL_PLUGIN_ARTIFACTS_SOURCE:-${REPO_ROOT}/backend/data/claude-plugin-runtime/artifacts}"
 AUTODL_CLAUDE_RUNTIME_REPOSITORY="${AUTODL_CLAUDE_RUNTIME_REPOSITORY:-${REPO_ROOT}/../ink-claude-code-dream}"
-AUTODL_CLAUDE_RUNTIME_PACKAGE_ROOT="${AUTODL_CLAUDE_RUNTIME_PACKAGE_ROOT:-${AUTODL_CLAUDE_RUNTIME_REPOSITORY}/dist/core-package-linux-x64/ink-claude-code-dream-0.1.4}"
+AUTODL_CLAUDE_RUNTIME_PACKAGE_ROOT="${AUTODL_CLAUDE_RUNTIME_PACKAGE_ROOT:-${AUTODL_CLAUDE_RUNTIME_REPOSITORY}/dist/core-package-linux-x64/ink-claude-code-dream-0.1.5}"
 AUTODL_CLAUDE_REMOTE_BUILD_ROOT="${AUTODL_CLAUDE_REMOTE_BUILD_ROOT:-${AUTODL_APP_ROOT}/runtime-build}"
 AUTODL_CLAUDE_REMOTE_PACKAGE_ROOT="${AUTODL_CLAUDE_REMOTE_PACKAGE_ROOT:-${AUTODL_CLAUDE_REMOTE_BUILD_ROOT}/qualified-package}"
 AUTODL_ENV_FILE="${AUTODL_ENV_FILE:-${SCRIPT_DIR}/.env}"
@@ -172,7 +174,7 @@ AutoDL Dream direct-host release:
   data:            ${AUTODL_DATA_ROOT}
   runtime:         Miniconda Python 3.12 + Node ${AUTODL_NODE_VERSION} + pnpm ${AUTODL_PNPM_VERSION} + screen
   Web source:      frontend/app/_dream + Node MCP Apps runtime
-  Claude pair:     ink-claude-dream-agent-sdk 0.2.144 + qualified 2.1.88 local-core (CLI compatibility 2.1.241)
+  Claude pair:     ink-claude-dream-agent-sdk 0.2.145 + qualified 2.1.88 local-core (CLI compatibility 2.1.241)
   seccomp helper:  vendor path contains the checksum-bound Docker-style passthrough
   Notion CLI:      ntn ${AUTODL_NOTION_CLI_VERSION}
   excluded:        Docker, nginx, database migration
@@ -184,7 +186,7 @@ setup_host() {
   remote "set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update >/dev/null
-apt-get install -y --no-install-recommends ca-certificates curl xz-utils acl passwd screen jq iproute2 ripgrep bubblewrap socat gcc libffi-dev libssl-dev libjpeg-dev zlib1g-dev >/dev/null
+apt-get install -y --no-install-recommends ca-certificates curl xz-utils acl passwd screen jq iproute2 ripgrep zip bubblewrap socat gcc libffi-dev libssl-dev libjpeg-dev zlib1g-dev >/dev/null
 install -d -m 0750 $(quote "${AUTODL_APP_ROOT}") $(quote "${AUTODL_APP_ROOT}/source") $(quote "${AUTODL_APP_ROOT}/releases") $(quote "${AUTODL_APP_ROOT}/config")
 install -d -o root -g root -m 0750 $(quote "${AUTODL_APP_ROOT}/run") $(quote "${AUTODL_APP_ROOT}/logs")
 chgrp root $(quote "${AUTODL_APP_ROOT}/config")
@@ -258,13 +260,13 @@ test \"\$(\"\${bun_bin}\" --version)\" = '1.4.0'
 chown -R root:root \"\${runtime_repo}\" \"\${package_root}\"
 node \"\${runtime_repo}/scripts/verify-core-package-local.mjs\" --package-root \"\${package_root}\" >/dev/null
 manifest=\"\${package_root}/release-manifest.json\"
-jq -e '.runtime.version == \"0.1.4\" and .runtime.integration.sdkVersion == \"0.2.144\" and .core.corePruned == true and .core.productionEligible == true and .status.productionEligible == true and .core.sourceVersionEvidence == \"2.1.88\" and .core.cliCompatibilityVersion == \"2.1.241\" and .core.runtimeTarget == \"linux-x64\"' \"\${manifest}\" >/dev/null
+jq -e '.runtime.version == \"0.1.5\" and .runtime.integration.sdkVersion == \"0.2.145\" and .core.corePruned == true and .core.productionEligible == true and .status.productionEligible == true and .core.sourceVersionEvidence == \"2.1.88\" and .core.cliCompatibilityVersion == \"2.1.241\" and .core.runtimeTarget == \"linux-x64\"' \"\${manifest}\" >/dev/null
 apply_seccomp=\"\${package_root}/lib/core/chunks/vendor/seccomp/x64/apply-seccomp\"
 bpf=\"\${package_root}/lib/core/chunks/vendor/seccomp/x64/unix-block.bpf\"
 test \"\$(sha256sum \"\${apply_seccomp}\" | awk '{print \$1}')\" = 'bd2923ee44c624e03bac9efb57c84d72419726783ac7557acb708e431c16d74d'
 test -x \"\${apply_seccomp}\" && test -s \"\${bpf}\"
 core_digest=\$(jq -r '.core.coreBundleSha256' \"\${manifest}\")
-runtime_package=\"\${prefix}/share/ink-claude-code-dream/releases/0.1.4-\${core_digest:0:16}\"
+runtime_package=\"\${prefix}/share/ink-claude-code-dream/releases/0.1.5-\${core_digest:0:16}\"
 if [ ! -d \"\${runtime_package}\" ]; then
   install -d -m 0755 \"\$(dirname \"\${runtime_package}\")\"
   stage=\"\${runtime_package}.stage.\$\$\"
@@ -351,7 +353,7 @@ rsync -a \"\${staging}/frontend-src/public/\" \"\${staging}/frontend/public/\"
 rm -rf \"\${staging}/frontend-src\"
 test -s \"\${staging}/frontend/server.js\"
 cd \"\${staging}/app\"
-PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from importlib import metadata as m; import claude_agent_sdk as sdk; assert m.version('ink-claude-dream-agent-sdk') == '0.2.144'; assert sdk.__version__ == '0.2.144'\"
+PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from importlib import metadata as m; import claude_agent_sdk as sdk; assert m.version('ink-claude-dream-agent-sdk') == '0.2.145'; assert sdk.__version__ == '0.2.145'\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; assert resolve_claude_cli_path().endswith('/ink-claude-code-dream')\"
 PATH=/root/ink-autodl/runtime/npm/bin:/root/ink-autodl/runtime/node/bin:\$PATH \"\${staging}/venv/bin/python\" -c \"import os; from dotenv import dotenv_values; os.environ.update({key: value for key, value in dotenv_values('$(quote "${AUTODL_APP_ROOT}/config/dream.env")').items() if value is not None}); import server\"
 test \"\$(/root/ink-autodl/runtime/npm/bin/ntn --version)\" = $(quote "ntn ${AUTODL_NOTION_CLI_VERSION}")

@@ -14,6 +14,8 @@
 # [Sync] 2026-08-30: require the published clean-room Runtime 0.1.4 selector.
 # [Sync] 2026-09-01: require the notion platform namespace and canonical
 #                    archive-backed notion-diary-sync package.
+# [Sync] 2026-09-12: require Info-ZIP in the production image and the
+#                    Runtime 0.1.5 / SDK 0.2.145 source pairing.
 
 from __future__ import annotations
 
@@ -68,6 +70,7 @@ def test_dependency_manifests_lock_only_custom_sdk() -> None:
 
 def test_dockerfile_cross_asserts_sdk_runtime_and_rollback_cli_pair() -> None:
     dockerfile = (BACKEND_ROOT / "Dockerfile").read_text()
+    assert "        zip \\\n" in dockerfile
     assert f"ARG INK_CLAUDE_CODE_VERSION={RUNTIME_VERSION}" in dockerfile
     assert f"ARG CLAUDE_CODE_VERSION={CLI_VERSION}" in dockerfile
     assert f'test "${{INK_CLAUDE_CODE_VERSION}}" = "{RUNTIME_VERSION}"' in dockerfile

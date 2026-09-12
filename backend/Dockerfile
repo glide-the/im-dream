@@ -7,6 +7,8 @@
 # [Sync] 2026-06-14: install Claude Code Linux sandbox dependencies for Docker deployments.
 # [Sync] 2026-06-17: ensure standard sbin directories exist for bubblewrap rootfs mounts.
 # [Sync] 2026-09-11: atomically pair custom Agent SDK 0.2.145 with Runtime 0.1.5.
+# [Sync] 2026-09-12: install Info-ZIP so approved ordinary-workspace archive
+#        commands execute in the production backend image.
 # [Sync] 2026-08-26: atomically pair the custom Agent SDK 0.2.144 with its
 #        Claude Code 2.1.241 CLI line, assert public MCP login/logout/no-browser
 #        argv at build time,
@@ -58,7 +60,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # System deps:
 #   - gcc / libffi / libssl: cryptography and native Python dependencies
-#   - bash curl jq git ripgrep: runtime utilities used by agent/tooling
+#   - bash curl jq git ripgrep zip: runtime utilities used by agent/tooling
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 ARG CLAUDE_CODE_VERSION=2.1.241
 ARG INK_CLAUDE_CODE_VERSION=0.1.5
@@ -81,6 +83,7 @@ RUN set -eux; \
         jq \
         git \
         ripgrep \
+        zip \
         ca-certificates \
         bubblewrap \
         socat; \

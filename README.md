@@ -5,6 +5,7 @@
 <!-- [Sync] 2026-09-06: add sanitized real-component screenshots for the MCP connection, App settings, and Chat interaction steps. -->
 <!-- [Sync] 2026-09-06: align connection creation and App controls with the accessible Server modal and unified MCP usage-policy form. -->
 <!-- [Sync] 2026-09-12: add the recoverable explicit-origin NATAPP edge-relay operator path. -->
+<!-- [Sync] 2026-09-12: align source contracts with SDK 0.2.145 and Runtime 0.1.5 while recording its unpublished registry gate. -->
 
 # Ink & Memory
 
@@ -78,7 +79,7 @@ These commands write Admin-owned data. Use them only with the intended local dat
 cd ../ink-dream-memory/backend
 uv sync --frozen
 
-npm install --global @glide-the/ink-claude-code-dream@0.1.4
+npm install --global @glide-the/ink-claude-code-dream@0.1.5
 export PATH="$(npm prefix --global)/bin:$PATH"
 ink-claude-code-dream --version
 
@@ -89,6 +90,8 @@ cd ../frontend
 corepack enable
 corepack pnpm install --frozen-lockfile
 ```
+
+Runtime `0.1.5` is the source-pinned candidate. The public registry still listed `0.1.4` as latest on 2026-09-12, so this install and any production image build must fail closed until the same-SHA `0.1.5` five-package release and registry verification complete.
 
 The Runtime must print `2.1.241 (Claude Code)`, Notion CLI must print `ntn 0.15.1`, and Corepack must resolve `pnpm@10.28.1`.
 
@@ -195,8 +198,8 @@ The complete engineering flow—connection discovery, model tool call, trusted r
 | Node.js | `>=22 <25`; deployment images use Node 22 |
 | Frontend package manager | `pnpm@10.28.1` through Corepack |
 | Next.js / React | `next@16.1.6`, `react@19.1.0`, `react-dom@19.1.0` |
-| Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| Native Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
+| Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
+| Native Runtime | `@glide-the/ink-claude-code-dream@0.1.5` source candidate; public latest remains `0.1.4` until release |
 | Runtime compatibility output | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | Shared PostgreSQL schema, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
@@ -226,12 +229,12 @@ corepack pnpm --dir frontend test:mcp-apps-runtime
 corepack pnpm --dir frontend typecheck:mcp-apps
 ```
 
-Published SDK/Runtime registry acceptance:
+Current SDK/Runtime registry gate (run after Runtime `0.1.5` publication):
 
 ```bash
 python3 scripts/verify_claude_registry_release.py \
-  --sdk-version 0.2.144 \
-  --runtime-version 0.1.4 \
+  --sdk-version 0.2.145 \
+  --runtime-version 0.1.5 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -277,7 +280,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-The manifest-qualified Runtime must be `0.1.4` and print `2.1.241 (Claude Code)`. Fix the normal `PATH` installation, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed rollback.
+The source contract requires manifest-qualified Runtime `0.1.5` and output `2.1.241 (Claude Code)`. Until `0.1.5` is publicly released and registry-verified, production startup is expected to fail closed rather than silently use `0.1.4`. After release, fix the normal `PATH` installation, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed rollback.
 
 ### `uv sync` removed pytest
 
@@ -308,4 +311,4 @@ Run the Admin migration check, verify the Admin-owned environment file, and conf
 
 Keep `README.md` and `README.zh.md` structurally aligned. Preserve unrelated working-tree changes, update affected file headers and folder contracts, and report exact validation commands and any remaining release action.
 
-For multi-file exports, the Agent may run `zip` from the workspace root with the archive outside `.dream` (e.g. `zip -r files/export-bundle.zip files/scene`) and link the archive, or link a dedicated workspace directory whose download link packages a real ZIP. Shell commands naming `.dream` paths stay denied.
+For multi-file exports, the Agent may run `zip` from the workspace root with an explicit `.zip` output and explicit ordinary inputs (e.g. `zip -r files/export-bundle.zip files/scene`) and link the resulting binary archive, or link a dedicated workspace directory whose download packages a real ZIP. Dot-prefixed runtime paths, workspace escapes, symlinks, broad `.`/glob inputs, and shell-composed archive commands stay denied. The production backend image and the AutoDL direct-host release install Info-ZIP for this path.

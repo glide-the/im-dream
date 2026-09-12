@@ -8,6 +8,7 @@
 > [Sync] 2026-08-23: add shared wheel-up/down zoom over the immersive media stage with scroll suppression and existing clamp reuse.
 > [Sync] 2026-08-23: correct zoom ownership so only image/diagram content scales while the fitted Paper sheet remains geometrically stable.
 > [Sync] 2026-09-07: require every direct ChatPanel host, including Story Workspace Dream, to provide the shared Workspace capability context before rendering recovered file references.
+> [Sync] 2026-09-12: bind direct shell ZIP exports to literal ordinary paths and record Dream PreToolUse ownership separately from CLI Runtime structure.
 
 # `workspace://` Workspace File Preview Protocol
 
@@ -486,6 +487,7 @@ resolve 校验不逃逸工作区根）。`.dream/`、`.claude/` 等点前缀运�
 下载/打包范围是"非点前缀即可"：`files/`、`logs/`、`skills/`、工作区根级文件与
 Agent 创建的普通目录都可下载（目录即时打包为 ZIP，根目录如 `files` 整体下载亦然）；
 只有 `.dream`、`.claude` 等点前缀运行面目录不可寻址。对应的 Agent shell 边界：
-受保护工作区内严格解析的 `zip`（无 shell 元字符、无可执行路径伪装、任何参数不引用
-`.dream`）被放行，压缩包是它唯一的写入目标；`unzip` 等解包器与引用 `.dream` 的命令
-继续拒绝。
+受保护工作区内严格解析的 `zip` 只接受明确的工作区内 `.zip` 输出和已存在的普通
+输入；输入树不得包含点前缀条目、符号链接、特殊文件或越界目标，且拒绝 `.`、glob、
+参数文件、shell 组合与输出递归。通过该分类后仍走既有权限确认；`unzip` 等解包器不在
+此例外内。这个 PreToolUse 分类由 Dream 后端拥有，CLI Runtime 不复制第二套策略。

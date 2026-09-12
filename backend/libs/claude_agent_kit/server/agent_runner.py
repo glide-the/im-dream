@@ -1,3 +1,5 @@
+# [Sync] 2026-09-12: constrain shell ZIP exports to literal, in-workspace,
+#                    non-dot, non-symlink inputs and outputs.
 # [Sync] 2026-09-11: allow built-in query tools (Read/Grep/Glob/LS/NotebookRead) to access symlinked/source files in DEFAULT_BUILTIN_SKILLS_ROOT while keeping write tools strictly confined.
 # [Sync] 2026-09-09: clarify binary archive export through the host download service.
 # [Input] Consume IClaudeAgentSDKClient, AgentStreamingCallbacks, AgentRunOptions,
@@ -676,11 +678,16 @@ _FIND_MUTATING_ACTIONS: frozenset[str] = frozenset({
     "-fprintf",
 })
 
-# Archiving commands allowed inside protected Dream workspaces when no argument
-# can reference the .dream surface: the archive file is zip's only write target,
-# so ordinary workspace exports run while the runtime boundary stays intact.
+# Archiving commands admitted to the ordinary-workspace ZIP validator below.
 _DREAM_ARCHIVE_WRITE_COMMANDS: frozenset[str] = frozenset({
     "zip",
+})
+_ZIP_SAFE_SHORT_OPTIONS: frozenset[str] = frozenset({
+    "r",
+    "q",
+    "X",
+    "j",
+    *tuple(str(level) for level in range(10)),
 })
 
 
@@ -1016,13 +1023,14 @@ def _is_dream_workspace_archive_write_command(
     tokens: list[str],
     cwd: Optional[str],
 ) -> bool:
-    """Allow narrow ``zip`` archiving whose arguments cannot reference ``.dream``.
+    """Allow a literal ZIP export entirely inside the ordinary workspace.
 
-    The archive output is the only path ``zip`` mutates, so a strictly parsed
-    invocation — no shell metacharacters, no caller-selected executable, no
-    dynamic construction — that never names the surface keeps the runtime
-    boundary intact while letting ordinary workspace exports run. ``unzip`` and
-    other extractors stay denied: they write arbitrary workspace content.
+    A safe invocation has one in-workspace ``.zip`` output and one or more
+    existing literal inputs. Every input and output component is non-dot,
+    non-symlink, and remains below ``cwd``. Recursive directory inputs are
+    scanned before approval so hidden runtime trees and nested symlinks cannot
+    be smuggled into an otherwise ordinary parent. Broad ``.``/glob inputs,
+    option-driven file lists, shell composition, and extraction remain denied.
     """
 
     if _SHELL_METACHAR_RE.search(command) or "\n" in command or "\r" in command:
@@ -1035,7 +1043,155 @@ def _is_dream_workspace_archive_write_command(
         return False
     if name not in _DREAM_ARCHIVE_WRITE_COMMANDS:
         return False
-    return not _bash_command_may_reference_dream_surface(command, tokens, cwd)
+    if not cwd:
+        return False
+
+    operands = _parse_safe_zip_operands(unwrapped)
+    if operands is None:
+        return False
+    archive_name, input_names = operands
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=True)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return False
+    if not workspace.is_dir():
+        return False
+
+    archive = _resolve_safe_zip_output(workspace, archive_name)
+    if archive is None:
+        return False
+    inputs: list[Path] = []
+    for raw_input in input_names:
+        resolved = _resolve_safe_zip_input(workspace, raw_input)
+        if resolved is None:
+            return False
+        inputs.append(resolved)
+    return not any(
+        archive == item or (item.is_dir() and archive.is_relative_to(item))
+        for item in inputs
+    )
+
+
+def _parse_safe_zip_operands(tokens: list[str]) -> tuple[str, list[str]] | None:
+    """Parse the intentionally small safe subset of the Info-ZIP CLI."""
+
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            index += 1
+            break
+        if not token.startswith("-") or token == "-":
+            break
+        if token.startswith("--") or not token[1:]:
+            return None
+        if any(option not in _ZIP_SAFE_SHORT_OPTIONS for option in token[1:]):
+            return None
+        index += 1
+    operands = tokens[index:]
+    if len(operands) < 2:
+        return None
+    if any(item.startswith("-") or item.startswith("@") for item in operands):
+        return None
+    return operands[0], operands[1:]
+
+
+def _ordinary_workspace_path_parts(raw_path: str) -> tuple[str, ...] | None:
+    """Return safe literal relative parts, rejecting hidden/runtime surfaces."""
+
+    if not raw_path or raw_path == "." or raw_path.startswith("~"):
+        return None
+    if any(character in raw_path for character in "*?[]{}"):
+        return None
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        return None
+    parts = candidate.parts
+    if not parts or any(part in {"", ".", ".."} or part.startswith(".") for part in parts):
+        return None
+    return parts
+
+
+def _path_chain_has_symlink(workspace: Path, relative: Path) -> bool:
+    """Check each existing path component without following symbolic links."""
+
+    current = workspace
+    try:
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                return True
+    except (OSError, RuntimeError, ValueError):
+        return True
+    return False
+
+
+def _resolve_safe_zip_output(workspace: Path, raw_path: str) -> Path | None:
+    parts = _ordinary_workspace_path_parts(raw_path)
+    if parts is None:
+        return None
+    relative = Path(*parts)
+    candidate = workspace / relative
+    if candidate.suffix.lower() != ".zip":
+        return None
+    try:
+        if _path_chain_has_symlink(workspace, relative):
+            return None
+        parent = candidate.parent.resolve(strict=True)
+        resolved = candidate.resolve(strict=False)
+        if not parent.is_dir() or not parent.is_relative_to(workspace):
+            return None
+        if not resolved.is_relative_to(workspace):
+            return None
+        if candidate.exists() and not candidate.is_file():
+            return None
+        return resolved
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return None
+
+
+def _resolve_safe_zip_input(workspace: Path, raw_path: str) -> Path | None:
+    parts = _ordinary_workspace_path_parts(raw_path)
+    if parts is None:
+        return None
+    relative = Path(*parts)
+    candidate = workspace / relative
+    try:
+        if _path_chain_has_symlink(workspace, relative):
+            return None
+        resolved = candidate.resolve(strict=True)
+        if not resolved.is_relative_to(workspace):
+            return None
+        if not (resolved.is_file() or resolved.is_dir()):
+            return None
+        if resolved.is_dir() and not _zip_tree_is_ordinary(resolved, workspace):
+            return None
+        return resolved
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return None
+
+
+def _zip_tree_is_ordinary(root: Path, workspace: Path) -> bool:
+    """Reject hidden entries, symlinks, special files, and workspace escapes."""
+
+    pending = [root]
+    try:
+        while pending:
+            directory = pending.pop()
+            for child in directory.iterdir():
+                if child.name.startswith(".") or child.is_symlink():
+                    return False
+                resolved = child.resolve(strict=True)
+                if not resolved.is_relative_to(workspace):
+                    return False
+                metadata = child.lstat()
+                if stat.S_ISDIR(metadata.st_mode):
+                    pending.append(child)
+                elif not stat.S_ISREG(metadata.st_mode):
+                    return False
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return False
+    return True
 
 
 def _is_explicit_canonical_asset_delete(
@@ -1487,9 +1643,9 @@ def _apply_dream_surface_write_guard(
             "permissionDecisionReason": (
                 "The .dream runtime surface is controlled by Story Workspace; "
                 "use its MCP write tools instead of generic file or shell mutation. "
-                "zip may archive ordinary workspace files when no argument names .dream "
-                "(for example: zip -r files/export.zip files/<directory>), but any "
-                "command that references .dream paths stays denied."
+                "zip may archive explicit ordinary workspace paths "
+                "(for example: zip -r files/export.zip files/<directory>), but "
+                "dot-prefixed, escaping, globbed, symlinked, or composed paths stay denied."
             ),
         }
     }

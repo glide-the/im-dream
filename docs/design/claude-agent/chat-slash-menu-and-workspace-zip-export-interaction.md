@@ -1,8 +1,10 @@
-# Chat 斜杠快捷菜单与工作区 ZIP 导出交互设计稿（2026-09-11）
+# Chat 斜杠快捷菜单与工作区 ZIP 导出交互设计稿（2026-09-12）
 
 > [Pos] Claude Agent Chat 交互修复设计文档；承接 Codex 线程
 > `01a0845d-6d1f-7313-bc03-14cd3f24c405` 两项问题的继承评审、修复与回归合同。
 > 配套协议：`workspace-uri-preview-protocol.md`（workspace:// 预览与下载合同）。
+> [Sync] 2026-09-12: replace the `.dream`-name-only exception with a literal
+> ordinary-path classifier and real Info-ZIP execution evidence.
 
 ## 一、背景与问题
 
@@ -30,8 +32,9 @@ Route Handler 代理）全部存在，且组件本体自 Vite 时代迁移以来
 
 ### 问题二：Agent 因 shell `zip` 被拦截而拒绝提供真实 ZIP
 
-`.dream` 运行面写保护（PreToolUse guard）拒绝 shell 压缩命令是**正确行为**，
-不应放宽。父任务已建立"目录链接下载 = 后端即时打包真实二进制 ZIP"的方案：
+`.dream` 运行面写保护（PreToolUse guard）拒绝针对受保护路径的 shell 变更是
+**正确行为**，但因为 cwd 内存在 `.dream` 就拒绝所有 `zip` 是误伤。父任务已建立
+"目录链接下载 = 后端即时打包真实二进制 ZIP"的旁路方案：
 Agent 把用户要求的文件放入 `files/` 独立目录后返回
 `[Download ZIP](workspace://files/<目录>)`，聊天显式下载改走
 `GET /api/workspace/files/download`。继承评审发现三个缺口：
@@ -176,11 +179,11 @@ Agent 把用户要求的文件放入 `files/` 独立目录后返回
 
 1. **zip 窄白名单**（`_is_dream_workspace_archive_write_command`）：命令不含
    shell 元字符/换行（排除动态构造）、可执行名不可伪装（拒绝 `files/zip`）、
-   命令名属于 `{zip}`、任何参数不能引用 `.dream`（复用
-   `_bash_command_may_reference_dream_surface` 的词法 + cwd 解析判定，
-   `.` 与 `*` 不算 `.dream` 引用，`.*`/`.drea?` 算）。压缩包是 zip 唯一的
-   写入目标，运行面完整性不受影响；zip 读取 `.dream` 内容属于既有只读
-   白名单同级的读行为，由引导文案约束"不得打包进导出"。
+   只接受不携带外部文件参数的短选项、一个工作区内 `.zip` 输出和至少一个已
+   存在的明确输入。输出、输入及递归后代均不能有点前缀组件、符号链接、特殊
+   文件或工作区越界；输出不得位于被打包目录内。`.`、`*`、`.*`、`@file`、
+   `-b` 等无法静态证明精确范围的形式一律拒绝。通过后只离开 `.dream` 硬拒层，
+   仍走 full-access / Auto 可见确认的既有权限通道。
 2. **下载范围**：`_validate_workspace_download_path` = 共享形态校验
    （拒绝遍历/转义/控制字符/绝对路径/空段）+ 首段非点前缀；kit 层
    `_resolve_workspace_safe_path(reject_symlinks=True)` 继续兜底逃逸与符号链接。
@@ -190,10 +193,24 @@ Agent 把用户要求的文件放入 `files/` 独立目录后返回
 
 ### 回归
 
-- `tests.test_claude_agent_runner`：`test_bash_zip_archives_ordinary_workspace_files_without_touching_dream`
-  — 允许矩阵（相对/多文件/`.`/`-9`/`*`，full-access 与 auto+确认批准两种模式）
-  与拒绝矩阵（`.dream` 输出/输入/`.*`/`-b .dream/tmp`/`$(...)`/`;` 链接/
-  `files/zip`/`unzip`），拒绝理由必须含 `.dream`。
+- `tests.test_claude_agent_runner`：
+  `test_bash_zip_archives_ordinary_workspace_files_without_touching_dream`
+  覆盖普通相对目录、单文件、多文件与安全短选项；拒绝矩阵覆盖 `.dream`、
+  `.claude`、嵌套隐藏目录、工作区越界、顶层/嵌套符号链接、输出递归、`.`、
+  glob、参数文件、元字符、伪装可执行与 `unzip`。另以
+  `test_allowed_bash_zip_produces_real_binary_archive` 执行真实 `zip`，检查 `PK`
+  字节并用 `zipfile` 校验条目和 UTF-8 正文。
 - `tests.test_workspace_router`：`exports` 普通目录 ZIP、根级文件下载为正向
   用例；`.dream`、`.claude`、`.editor`、`.notion-home`、裸目录名（`.dream`、
   `.claude`）均在非法路径列表中；其余防护用例不变。
+
+### 实际归属与部署依赖（2026-09-12）
+
+本次误拦截的实际来源是 Dream 后端
+`backend/libs/claude_agent_kit/server/agent_runner.py` 的宿主
+`PreToolUse` 策略，不是 `ink-claude-code-dream` CLI 内部工具实现。CLI 只执行
+宿主已经批准的 Bash 调用，并由其 sandbox 设置继续实施 OS 文件边界。运行时包
+结构复核是独立的后续问题，不能用迁移 CLI 包或关闭整套 sandbox 来修复本策略。
+
+批准命令之后还需要系统存在 `zip` 可执行文件，因此 `backend/Dockerfile` 与
+`deploy/autodl-ssh/deploy.sh` 都显式安装 Info-ZIP；本任务不执行问题六部署。

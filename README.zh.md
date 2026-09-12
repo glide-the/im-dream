@@ -5,6 +5,7 @@
 <!-- [同步] 2026-09-06：为 MCP 连接、App 设置和 Chat 交互步骤加入经过脱敏的真实组件截图。 -->
 <!-- [同步] 2026-09-06：使新增连接和 App 控制与可访问 Server 弹窗、统一 MCP 使用策略表单一致。 -->
 <!-- [同步] 2026-09-12：增加使用显式 origin、可恢复的 NATAPP 边缘转发操作入口。 -->
+<!-- [同步] 2026-09-12：统一 SDK 0.2.145 与 Runtime 0.1.5 源码合同，并记录尚未公开的 registry 门禁。 -->
 
 # Ink & Memory
 
@@ -78,7 +79,7 @@ pnpm gateway:provision-local-dream
 cd ../ink-dream-memory/backend
 uv sync --frozen
 
-npm install --global @glide-the/ink-claude-code-dream@0.1.4
+npm install --global @glide-the/ink-claude-code-dream@0.1.5
 export PATH="$(npm prefix --global)/bin:$PATH"
 ink-claude-code-dream --version
 
@@ -89,6 +90,8 @@ cd ../frontend
 corepack enable
 corepack pnpm install --frozen-lockfile
 ```
+
+Runtime `0.1.5` 是源码固定的候选版本。2026-09-12 公共 registry 的最新版本仍为 `0.1.4`，因此在同一 SHA 的 `0.1.5` 五包发布并完成 registry 回验前，这条安装命令和生产镜像构建必须 fail closed。
 
 Runtime 必须输出 `2.1.241 (Claude Code)`，Notion CLI 必须输出 `ntn 0.15.1`，Corepack 必须解析到 `pnpm@10.28.1`。
 
@@ -195,8 +198,8 @@ corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 | Node.js | `>=22 <25`；部署镜像使用 Node 22 |
 | 前端包管理器 | Corepack 提供的 `pnpm@10.28.1` |
 | Next.js / React | `next@16.1.6`、`react@19.1.0`、`react-dom@19.1.0` |
-| Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| 原生 Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
+| Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
+| 原生 Runtime | `@glide-the/ink-claude-code-dream@0.1.5` 源码候选；发布前公共最新版仍为 `0.1.4` |
 | Runtime 兼容输出 | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | 共享 PostgreSQL schema、Admin、Gateway、计费 | `dream-im-platform` / Admin 仓库 |
@@ -226,12 +229,12 @@ corepack pnpm --dir frontend test:mcp-apps-runtime
 corepack pnpm --dir frontend typecheck:mcp-apps
 ```
 
-已发布 SDK/Runtime registry 验收：
+当前 SDK/Runtime registry 门禁（Runtime `0.1.5` 发布后执行）：
 
 ```bash
 python3 scripts/verify_claude_registry_release.py \
-  --sdk-version 0.2.144 \
-  --runtime-version 0.1.4 \
+  --sdk-version 0.2.145 \
+  --runtime-version 0.1.5 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -277,7 +280,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-manifest-qualified Runtime 必须为 `0.1.4`，并输出 `2.1.241 (Claude Code)`。修正普通 `PATH` 安装后，只重启你自己拥有的服务。`CLAUDE_CODE_CLI_PATH` 仅保留给经明确评审的回滚。
+源码合同要求 manifest-qualified Runtime 为 `0.1.5`，并输出 `2.1.241 (Claude Code)`。在 `0.1.5` 公开发布并完成 registry 回验前，生产启动应当 fail closed，不得静默使用 `0.1.4`。发布后修正普通 `PATH` 安装，只重启你自己拥有的服务。`CLAUDE_CODE_CLI_PATH` 仅保留给经明确评审的回滚。
 
 ### `uv sync` 删除了 pytest
 
@@ -308,4 +311,4 @@ manifest-qualified Runtime 必须为 `0.1.4`，并输出 `2.1.241 (Claude Code)`
 
 保持 `README.md` 与 `README.zh.md` 结构一致。保留工作区无关改动，同步受影响的文件头与目录合同，并报告精确验证命令和剩余发布动作。
 
-导出多个文件时，Agent 可在工作区根目录运行 `zip`（压缩包放在 `.dream` 之外，例如 `zip -r files/export-bundle.zip files/scene`）并链接生成的压缩包，也可链接独立的工作区目录由下载服务打包真实 ZIP。涉及 `.dream` 路径的 shell 命令仍会被拒绝。
+导出多个文件时，Agent 可在工作区根目录用明确的 `.zip` 输出路径和明确的普通输入路径运行 `zip`（例如 `zip -r files/export-bundle.zip files/scene`），再链接生成的真实二进制压缩包；也可链接独立的工作区目录，由下载服务即时打包真实 ZIP。点前缀运行路径、工作区越界、符号链接、宽泛的 `.`/glob 输入和 shell 组合命令仍会被拒绝。生产后端镜像和 AutoDL 直宿主发布均安装 Info-ZIP 以支持这条路径。
