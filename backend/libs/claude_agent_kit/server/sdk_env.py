@@ -77,11 +77,13 @@
 #                    the authorized 2.1.88 Linux vendor/seccomp assets while
 #                    preserving the 2.1.241 CLI compatibility identity.
 # [Sync] 2026-08-30: bind the current thread's NOTION_HOME/API token/keyring/workers file into the Agent Runtime after all user overlays.
+# [Sync] 2026-09-12: require Runtime 0.1.6 package-root cli.js and digests for npm while preserving the separately qualified local-core layout.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 import logging
 import os
@@ -111,7 +113,9 @@ DREAM_CLAUDE_SDK_DISTRIBUTION = "ink-claude-dream-agent-sdk"
 DREAM_CLAUDE_SDK_VERSION = "0.2.145"
 DREAM_CLAUDE_SDK_IMPORT = "claude_agent_sdk"
 DREAM_CLAUDE_CLI_EXECUTABLE = "ink-claude-code-dream"
-DREAM_CLAUDE_CLI_VERSION = "0.1.5"
+DREAM_CLAUDE_CLI_VERSION = "0.1.6"
+DREAM_CLAUDE_RUNTIME_ENTRYPOINT = "cli.js"
+DREAM_CLAUDE_LOCAL_CORE_ENTRYPOINT = f"bin/{DREAM_CLAUDE_CLI_EXECUTABLE}"
 DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA = "ink-claude-cli-envelope/v1"
 DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME = "release-manifest.json"
 DREAM_CLAUDE_STREAM_PROTOCOL_NAME = "claude-code-stream-json"
@@ -132,6 +136,9 @@ DREAM_CLAUDE_REQUIRED_CAPABILITIES = frozenset(
         "transcript.jsonl",
         "workspace.cwd",
     }
+)
+DREAM_CLAUDE_PACKAGE_REQUIRED_CAPABILITIES = (
+    DREAM_CLAUDE_REQUIRED_CAPABILITIES | {"sandbox.notion-cli"}
 )
 _DREAM_CLAUDE_SDK_PUBLIC_API = (
     "ClaudeAgentOptions",
@@ -332,21 +339,43 @@ def require_dream_claude_sdk_distribution() -> importlib_metadata.Distribution:
 def require_dream_claude_runtime_manifest(executable: Path | str) -> Path:
     """Require a production-qualified manifest for the default Dream Runtime.
 
-    The immutable release layout owns ``release-manifest.json`` beside its
-    ``bin/`` directory. This gate intentionally rejects compatibility
-    envelopes: Dream's default requires a pruned core and an explicit
-    production eligibility receipt, not delegation to the official CLI.
+    The npm selector owns ``release-manifest.json`` beside package-root
+    ``cli.js``. The separately qualified AutoDL/local-core artifact retains its
+    checked ``bin/ink-claude-code-dream`` layout. Both paths require their exact
+    manifest entrypoint, a pruned core, and explicit production evidence; only
+    the npm selector additionally requires ``sandbox.notion-cli`` and selector
+    digest bindings.
     """
 
     executable_path = Path(executable).resolve(strict=True)
-    manifest_path = (
-        executable_path.parent.parent / DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME
-    )
+    if executable_path.name == DREAM_CLAUDE_RUNTIME_ENTRYPOINT:
+        runtime_layout = "npm-package-root"
+        expected_entrypoint = DREAM_CLAUDE_RUNTIME_ENTRYPOINT
+        manifest_path = executable_path.parent / DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME
+        required_capabilities = DREAM_CLAUDE_PACKAGE_REQUIRED_CAPABILITIES
+        require_selector_digest = True
+    elif (
+        executable_path.name == DREAM_CLAUDE_CLI_EXECUTABLE
+        and executable_path.parent.name == "bin"
+    ):
+        runtime_layout = "qualified-local-core"
+        expected_entrypoint = DREAM_CLAUDE_LOCAL_CORE_ENTRYPOINT
+        manifest_path = (
+            executable_path.parent.parent / DREAM_CLAUDE_RUNTIME_MANIFEST_FILENAME
+        )
+        required_capabilities = DREAM_CLAUDE_REQUIRED_CAPABILITIES
+        require_selector_digest = False
+    else:
+        raise RuntimeError(
+            "Dream Claude Runtime executable layout is unsupported; "
+            f"executable={str(executable_path)!r}."
+        )
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(
-            f"{DREAM_CLAUDE_CLI_EXECUTABLE} has no readable release manifest."
+            f"{DREAM_CLAUDE_CLI_EXECUTABLE} has no readable release manifest; "
+            f"executable={str(executable_path)!r} manifest={str(manifest_path)!r}."
         ) from exc
     if not isinstance(manifest, dict):
         raise RuntimeError("Dream Claude Runtime manifest must be a JSON object.")
@@ -387,8 +416,14 @@ def require_dream_claude_runtime_manifest(executable: Path | str) -> Path:
             if capability_id:
                 capability_ids.add(capability_id)
     missing_capabilities = sorted(
-        DREAM_CLAUDE_REQUIRED_CAPABILITIES - capability_ids
+        required_capabilities - capability_ids
     )
+    capability_artifact = (
+        capability_evidence.get("artifact")
+        if isinstance(capability_evidence, dict)
+        else None
+    )
+    executable_sha256 = hashlib.sha256(executable_path.read_bytes()).hexdigest()
     core_pruned = isinstance(core, dict) and core.get("corePruned") is True
     production_eligible = (
         isinstance(core, dict) and core.get("productionEligible") is True
@@ -401,31 +436,60 @@ def require_dream_claude_runtime_manifest(executable: Path | str) -> Path:
         isinstance(capability_runtime, dict)
         and capability_runtime.get("productionEligible") is True
     )
+    actual_entrypoint = runtime.get("entrypoint") if isinstance(runtime, dict) else None
+    actual_version = runtime.get("version") if isinstance(runtime, dict) else None
+    actual_protocol_name = protocol.get("name") if isinstance(protocol, dict) else None
+    actual_protocol_version = protocol.get("version") if isinstance(protocol, dict) else None
+    core_digest = core.get("entrypointSha256") if isinstance(core, dict) else None
+    capability_digest = (
+        capability_artifact.get("entrypointSha256")
+        if isinstance(capability_artifact, dict)
+        else None
+    )
+    selector_digest_matches = (
+        core_digest == executable_sha256 if require_selector_digest else None
+    )
+    capability_digest_matches = (
+        capability_digest == executable_sha256 if require_selector_digest else None
+    )
     if (
         manifest.get("schemaVersion") != DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA
         or not isinstance(runtime, dict)
         or runtime.get("name") != DREAM_CLAUDE_CLI_EXECUTABLE
-        or runtime.get("version") != DREAM_CLAUDE_CLI_VERSION
-        or runtime.get("entrypoint") != f"bin/{DREAM_CLAUDE_CLI_EXECUTABLE}"
+        or actual_version != DREAM_CLAUDE_CLI_VERSION
+        or actual_entrypoint != expected_entrypoint
         or not isinstance(integration, dict)
         or integration.get("environment") != "CLAUDE_CODE_CLI_PATH"
         or integration.get("sdkVersion") != DREAM_CLAUDE_SDK_VERSION
         or integration.get("sdkOption") != "ClaudeAgentOptions.cli_path"
         or not core_pruned
         or not production_eligible
+        or selector_digest_matches is False
         or not capability_core_pruned
         or not capability_production_eligible
+        or capability_digest_matches is False
         or not isinstance(protocol, dict)
-        or protocol.get("name") != DREAM_CLAUDE_STREAM_PROTOCOL_NAME
-        or protocol.get("version") != DREAM_CLAUDE_STREAM_PROTOCOL_VERSION
+        or actual_protocol_name != DREAM_CLAUDE_STREAM_PROTOCOL_NAME
+        or actual_protocol_version != DREAM_CLAUDE_STREAM_PROTOCOL_VERSION
         or missing_capabilities
     ):
         raise RuntimeError(
             "Dream Claude Runtime is not production-qualified; "
+            f"executable={str(executable_path)!r} "
+            f"manifest={str(manifest_path)!r} "
+            f"layout={runtime_layout!r} "
+            f"expected_version={DREAM_CLAUDE_CLI_VERSION!r} "
+            f"actual_version={actual_version!r} "
+            f"expected_entrypoint={expected_entrypoint!r} "
+            f"actual_entrypoint={actual_entrypoint!r} "
+            f"expected_protocol={(DREAM_CLAUDE_STREAM_PROTOCOL_NAME, DREAM_CLAUDE_STREAM_PROTOCOL_VERSION)!r} "
+            f"actual_protocol={(actual_protocol_name, actual_protocol_version)!r} "
             f"core_pruned={core_pruned!r} "
             f"production_eligible={production_eligible!r} "
+            f"selector_digest_matches={selector_digest_matches!r} "
             f"capability_core_pruned={capability_core_pruned!r} "
             f"capability_production_eligible={capability_production_eligible!r} "
+            f"capability_digest_matches={capability_digest_matches!r} "
             f"missing_capabilities={missing_capabilities!r}."
         )
     return manifest_path.resolve()

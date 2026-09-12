@@ -15,6 +15,7 @@
 # [Sync] 2026-09-01: require the notion platform namespace and canonical
 #                    archive-backed notion-diary-sync package.
 # [Sync] 2026-09-12: require Info-ZIP in the production image.
+# [Sync] 2026-09-12: require Runtime 0.1.6 package-root cli.js and adjacent manifest validation.
 
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SDK_VERSION = "0.2.145"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
-RUNTIME_VERSION = "0.1.5"
+RUNTIME_VERSION = "0.1.6"
 NOTION_CLI_VERSION = "0.15.1"
 
 
@@ -86,6 +87,9 @@ def test_dockerfile_cross_asserts_sdk_runtime_and_rollback_cli_pair() -> None:
         'test "$(realpath /usr/local/bin/claude)" = '
         '"${DREAM_RUNTIME_ENTRYPOINT}"'
     ) in dockerfile
+    assert 'test "$(basename "${DREAM_RUNTIME_ENTRYPOINT}")" = "cli.js"' in dockerfile
+    assert 'DREAM_RUNTIME_ROOT="$(dirname "${DREAM_RUNTIME_ENTRYPOINT}")"' in dockerfile
+    assert '.runtime.entrypoint == "cli.js"' in dockerfile
     assert "unlink /usr/local/bin/claude" in dockerfile
     assert "npm install -g --force" not in dockerfile
     assert "INK_CLAUDE_NPM_REGISTRY=https://registry.npmjs.org" in dockerfile

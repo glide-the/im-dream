@@ -7,6 +7,7 @@
 #        selector-to-four-tarball bindings, and both supported CLI aliases.
 # [Sync] 2026-08-30: distinguish Dream's portable Runtime baseline from the
 #        clean-room npm 0.1.4 sandbox.notion-cli publication capability.
+# [Sync] 2026-09-12: require package-root cli.js for the current clean-room selector while retaining explicit legacy receipt parsing.
 
 """Accept an already-published Dream Claude SDK/Runtime registry release.
 
@@ -676,7 +677,7 @@ def _verify_cleanroom_npm_release_tarballs(
             release = _npm_json_file(files, "release-manifest.json")
             artifact = _npm_json_file(files, "manifest/artifact-manifest.json")
             capabilities = _npm_json_file(files, "manifest/capabilities.json")
-            entrypoint = "bin/ink-claude-code-dream"
+            entrypoint = "cli.js"
             expected_schema = "ink-cleanroom-npm-meta-publication-attestation/v1"
             expected_platforms = artifact.get("platforms")
             expected_optional = {
@@ -740,6 +741,8 @@ def _verify_cleanroom_npm_release_tarballs(
             or release.get("core", {}).get("entrypointSha256") != actual_entrypoint_sha
             or release.get("core", {}).get("productionEligible") is not True
             or release_runtime.get("version") != version
+            or release_runtime.get("entrypoint")
+            != ("cli.js" if package == NPM_SELECTOR else f"bin/{CLI_COMMAND}")
             or release_runtime.get("integration", {}).get("sdkVersion") is None
             or release_status
             != {
@@ -979,14 +982,23 @@ def validate_npm_tarball_manifest(
             platform_package: version
             for platform_package in NPM_PLATFORMS.values()
         }
+        if "exports" in manifest or manifest.get("type") not in (None, "module"):
+            raise AcceptanceError(
+                "CLI_CONTRACT_FAILED",
+                "npm-artifact",
+                "selector tarball must remain a CLI-only package without exports",
+            )
         if manifest.get("optionalDependencies") != expected_optional:
             raise AcceptanceError(
                 "PACKAGE_SET_MISMATCH",
                 "npm-artifact",
                 "selector tarball does not bind the exact four-platform package set",
             )
-        expected_bins = {alias: f"bin/{CLI_COMMAND}" for alias in CLI_ALIASES}
-        if manifest.get("bin") != expected_bins:
+        supported_bins = (
+            {alias: "cli.js" for alias in CLI_ALIASES},
+            {alias: f"bin/{CLI_COMMAND}" for alias in CLI_ALIASES},
+        )
+        if manifest.get("bin") not in supported_bins:
             raise AcceptanceError(
                 "CLI_CONTRACT_FAILED",
                 "npm-artifact",

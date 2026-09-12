@@ -2,15 +2,21 @@
 <!-- [输出] 发布后 provider-free registry 验收步骤与 fail-closed 判定。 -->
 <!-- [定位] SDK/Runtime 发布后的最小验收；完整打包、发布和 Dream 集成见相邻操作手册。 -->
 <!-- [同步] 2026-08-30：更新为已发布 SDK 0.2.144、Runtime 0.1.4、same-SHA workflow 回执和 provider-free registry fresh install。 -->
+<!-- [同步] 2026-09-12：把本页明确标为最近一次已完成的历史回执；当前源码合同 0.2.145 × 0.1.6 尚未发布，不能复用本页证据。 -->
 
 # Claude SDK/Runtime Registry 发布验收
 
 完整发布与 Dream 接入流程见
 [`claude-sdk-runtime-packaging-and-integration.md`](claude-sdk-runtime-packaging-and-integration.md)。
 
-## 当前状态
+## 最近一次已完成状态（历史）
 
-| 制品 | 状态 | 当前版本 |
+本页固定记录已发布的 SDK `0.2.144` × Runtime `0.1.4` registry 回执，不是
+当前 `develop` 源码合同。当前源码要求 SDK `0.2.145` × Runtime `0.1.6`；截至
+2026-09-12，npm `latest` 仍为 `0.1.4`，因此必须等 `0.1.6` 同字节发布后重新
+生成 fresh-install 回执，不能把下列摘要或旧 Runtime 0.1.5 业务回执迁移给新布局。
+
+| 制品 | 状态 | 历史已验收版本 |
 | --- | --- | --- |
 | PyPI SDK | 已公开 | `ink-claude-dream-agent-sdk==0.2.144` |
 | npm Runtime selector | 已公开 | `@glide-the/ink-claude-code-dream@0.1.4` |

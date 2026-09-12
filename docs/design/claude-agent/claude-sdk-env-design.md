@@ -4,6 +4,7 @@
 <!-- [同步] 2026-08-28：补充认证模型 max-output capability 到 opaque Runtime alias 的投影、所有权与失败规则。 -->
 <!-- [同步] 2026-08-30：默认 public clean-room Runtime 推进到 0.1.4；AutoDL local-core 保持独立制品边界。 -->
 <!-- [同步] 2026-08-25：CLI resolver 仅服务 Agent turn；MCP Resources 管理面改为 Dream PostgreSQL 与标准 MCP SDK。 -->
+<!-- [同步] 2026-09-12：源码合同升级到 SDK 0.2.145 × Runtime 0.1.6；npm 接受 package-root cli.js，另行保留严格资格化的 AutoDL local-core 布局。 -->
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
 > **[同步] 2026-05-24**：迁移请求级模型覆盖开关：`PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` → `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`；新 key 加入 `sdk_env.py` 白名单；旧 key 同时保留作为 fallback。
@@ -13,18 +14,16 @@
 > 迁移到 `{AGENT_CWD}/{thread_id}/.claude-tmp`。Phase 1 通过
 > `AgentRunOptions.claude_tmp_workspace` 传递 server-only 绑定，runner 与
 > final client adapter 重复合并时保持该绑定，spawn 前创建并校验 `0700`。
-> **[同步] 2026-08-26**：生产入口要求 `ink-claude-dream-agent-sdk==0.2.144`
+> **[同步] 2026-09-12**：生产入口要求 `ink-claude-dream-agent-sdk==0.2.145`
 > 唯一提供 `claude_agent_sdk`，并把默认 CLI 收敛为经 production manifest
-> 门禁的 `ink-claude-code-dream==0.1.4`。`CLAUDE_CODE_CLI_PATH` 是唯一显式
+> 门禁的 `ink-claude-code-dream==0.1.6`；npm 默认布局为 package-root `cli.js`，AutoDL local-core 保留独立受检布局。`CLAUDE_CODE_CLI_PATH` 是唯一显式
 > 绝对覆盖与官方 CLI 回滚入口；不再回退 ambient `claude` 或 SDK bundled CLI。
-> **[同步] 2026-08-24**：Python 依赖文件把
-> `ink-claude-dream-agent-sdk==0.2.144` 固定到正式 PyPI 精确版本，
+> **[同步] 2026-09-12**：Python 依赖文件把
+> `ink-claude-dream-agent-sdk==0.2.145` 固定到正式 PyPI 精确版本，
 > `uv.lock`/`requirements.txt` 记录 wheel 与 sdist SHA-256，Docker 使用
-> `--require-hashes`，并排除 official `claude-agent-sdk`。源码身份仍由不可变
-> `v0.2.144@fa10c9ef04ec006d9dcf0a88b1b35dab4ef4723b` 绑定。Docker 验证 metadata/import 所有权，只保留显式官方
-> CLI 回滚物。Runtime release `main@0ebafe95` 已公开发布五个 `0.1.4` npm 包；registry 空目录安装通过生产资格门的 clean-room
-> `@glide-the/ink-claude-code-dream@0.1.4` selector 与 darwin-arm64 平台包，
-> 两个 CLI alias、manifest/capability/attestation 和零 map 均通过。AutoDL 使用的授权 local-core 0.1.4 是独立、不可公开分发的制品，不冒充这五个 npm 包。
+> `--require-hashes`，并排除 official `claude-agent-sdk`。Docker 验证 metadata/import 所有权，只保留显式官方
+> CLI 回滚物。Runtime `0.1.6` 是未发布源码候选；2026-09-12 registry `latest` 仍为已完成五包验收的 `0.1.4`。
+> 当前源码不能与 `0.1.4` 混用，Docker 在 `0.1.6` 正式发布前会在精确 npm 安装处 fail closed。AutoDL local-core 是独立、不可公开分发的制品，不冒充 clean-room 五包。
 
 # Claude SDK 子进程环境与 Runtime 解析设计
 
@@ -218,7 +217,7 @@ options.extra_args["setting-sources"] = "project"
 ### 5.5A Claude Runtime 解析（cli_path）**[2026-08-24 当前合同]**
 
 Dream 只保留一条 Agent 业务路径：`server.py` 在 Agent factory 启动前验证
-`ink-claude-dream-agent-sdk==0.2.144` distribution metadata、唯一
+`ink-claude-dream-agent-sdk==0.2.145` distribution metadata、唯一
 `claude_agent_sdk` import provider、公共 `ClaudeAgentOptions` / client / query API
 和五类 stream message type。Runner 随后通过既有
 `sdk_env.apply_cli_path_to_options()` 只固定 Agent 执行面 CLI。MCP Resources 管理面
@@ -232,23 +231,26 @@ Dream 只保留一条 Agent 业务路径：`server.py` 在 Agent factory 启动�
 | 2 | `shutil.which("ink-claude-code-dream")` | 默认自有 Runtime；其 release-relative manifest/capabilities 必须通过生产资格门禁 |
 | 3 | 无匹配 | fail closed；禁止 SDK bundled CLI 或 ambient `claude` 静默形成第二条路径 |
 
-默认 Runtime manifest 必须明确 `productionEligible=true`、
-`claude-code-stream-json/v1`，并声明以下 13 项能力：streaming、双向 control、
+默认 npm Runtime manifest 必须位于解析后的 package-root `cli.js` 同目录，声明
+`runtime.entrypoint=cli.js`、`productionEligible=true`、匹配 selector/capability digest、
+`claude-code-stream-json/v1`，并声明以下 14 项能力：streaming、双向 control、
 session resume、JSONL transcript、workspace cwd、thread-local TMPDIR、sandbox、
-MCP stdio/HTTP/OAuth/management identity、plugins 和 cancel。只透明委托官方 core
-或缺少任一能力的 envelope 不满足门禁。Python SDK 已从正式 PyPI 按精确版本与
-SHA-256 锁原子切换到自有 distribution；源码发布身份为不可变
-`v0.2.144@fa10c9ef04ec006d9dcf0a88b1b35dab4ef4723b`，安装环境不再带 Git `direct_url.json`。
+`sandbox.notion-cli`、MCP stdio/HTTP/OAuth/management identity、plugins 和 cancel。只透明委托官方 core
+或缺少任一能力的 envelope 不满足门禁。另行资格化、不可公开再分发的 AutoDL local-core
+保留 `bin/ink-claude-code-dream` 与 release-root manifest；它必须声明匹配的 nested entrypoint、
+同一版本/协议/SDK 配对和原有 13 项 portable baseline，但不会被要求冒充 npm 专属的
+`sandbox.notion-cli` 或 selector digest。Python SDK 已从正式 PyPI 按精确版本与
+SHA-256 锁原子切换到自有 distribution，安装环境不再带 Git `direct_url.json`。
 
-当前 Dream 源码固定的 public Runtime 是 clean-room `@glide-the/ink-claude-code-dream@0.1.4`：
+当前 Dream 源码固定的是 clean-room `@glide-the/ink-claude-code-dream@0.1.6` 候选：
 源码只来自 Runtime 仓库自有 MIT `src/cleanroom/` 和兼容许可证依赖，
 Dream-facing CLI 兼容输出为 `2.1.241 (Claude Code)`。该字符串只表示 Dream 所需
-接口资格，不声明官方全产品等价。Bun `1.4.0` 在构建阶段生成四个平台 standalone，
-运行时 selector 不依赖独立 Bun 或 ambient Bun。真实业务 v2 回执绑定 source tree
-`266362ac…95de81` 与 darwin-arm64 executable `969f9193…980dd`；public registry fresh
-install 的两个 CLI alias、manifest SDK `0.2.144`/Runtime `0.1.4` 配对、`sandbox.notion-cli` 证据和零 `.map` 均通过。
+接口资格，不声明官方全产品等价。selector 源位于 Runtime 仓库 `package/`，两个 alias
+都指向 package-root `cli.js`；Bun `1.4.0` 在构建阶段生成四个平台 standalone，运行时
+selector 不依赖独立 Bun 或 ambient Bun。`0.1.6` 的新 source tree 尚无同 SHA 真实业务、
+四 target 与发布授权；`0.1.5` 回执不能复用。`0.1.4` registry fresh install 只保留为历史发布证据。
 
-当前镜像从 npm 官方 registry 精确安装 clean-room selector `0.1.4`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中执行 CLI version、manifest 与 Dream resolver 门。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。运行中的服务保留启动时选择的受检 Runtime；更新 PATH 后只重启操作者拥有的进程。
+当前 Docker 源码精确安装 clean-room selector `0.1.6`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中验证 `cli.js`、相邻 manifest 和 Dream resolver；在该版本正式发布前构建会按设计失败。AutoDL direct-host 部署继续消费单独资格化的 local-core，并由同一 resolver 按其精确 nested-bin 合同校验。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。运行中的服务保留启动时选择的受检 Runtime；更新 PATH 后只重启操作者拥有的进程。
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 

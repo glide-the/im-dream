@@ -5,6 +5,7 @@
 <!-- [Sync] 2026-09-06: add sanitized real-component screenshots for the MCP connection, App settings, and Chat interaction steps. -->
 <!-- [Sync] 2026-09-06: align connection creation and App controls with the accessible Server modal and unified MCP usage-policy form. -->
 <!-- [Sync] 2026-09-12: add the recoverable explicit-origin NATAPP edge-relay operator path. -->
+<!-- [Sync] 2026-09-12: adopt SDK 0.2.145 and the unpublished Runtime 0.1.6 package-root selector contract. -->
 
 # Ink & Memory
 
@@ -74,11 +75,13 @@ These commands write Admin-owned data. Use them only with the intended local dat
 
 ### 3. Install Dream and its Runtime
 
+The `develop` source contract now requires Runtime `0.1.6`. An official-registry check on 2026-09-12 still reports `0.1.4` as `latest`, so the npm command below becomes usable only after the same-SHA five-package release. Until then, use the last qualified release branch/image rather than mixing current Dream source with Runtime `0.1.4`; the resolver intentionally fails closed.
+
 ```bash
 cd ../ink-dream-memory/backend
 uv sync --frozen
 
-npm install --global @glide-the/ink-claude-code-dream@0.1.4
+npm install --global @glide-the/ink-claude-code-dream@0.1.6
 export PATH="$(npm prefix --global)/bin:$PATH"
 ink-claude-code-dream --version
 
@@ -90,7 +93,7 @@ corepack enable
 corepack pnpm install --frozen-lockfile
 ```
 
-The Runtime must print `2.1.241 (Claude Code)`, Notion CLI must print `ntn 0.15.1`, and Corepack must resolve `pnpm@10.28.1`.
+The Runtime must print `2.1.241 (Claude Code)`. Both npm command aliases must resolve to package-root `cli.js`, whose adjacent `release-manifest.json` must declare Runtime `0.1.6`; Notion CLI must print `ntn 0.15.1`, and Corepack must resolve `pnpm@10.28.1`.
 
 ### 4. Configure Dream
 
@@ -195,8 +198,8 @@ The complete engineering flow—connection discovery, model tool call, trusted r
 | Node.js | `>=22 <25`; deployment images use Node 22 |
 | Frontend package manager | `pnpm@10.28.1` through Corepack |
 | Next.js / React | `next@16.1.6`, `react@19.1.0`, `react-dom@19.1.0` |
-| Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| Native Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
+| Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
+| Native Runtime | Source contract `@glide-the/ink-claude-code-dream@0.1.6`; registry `latest` remains `0.1.4` as of 2026-09-12 |
 | Runtime compatibility output | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | Shared PostgreSQL schema, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
@@ -226,12 +229,12 @@ corepack pnpm --dir frontend test:mcp-apps-runtime
 corepack pnpm --dir frontend typecheck:mcp-apps
 ```
 
-Published SDK/Runtime registry acceptance:
+Post-publication SDK/Runtime registry acceptance (expected to fail until Runtime `0.1.6` is published):
 
 ```bash
 python3 scripts/verify_claude_registry_release.py \
-  --sdk-version 0.2.144 \
-  --runtime-version 0.1.4 \
+  --sdk-version 0.2.145 \
+  --runtime-version 0.1.6 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -277,7 +280,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-The manifest-qualified Runtime must be `0.1.4` and print `2.1.241 (Claude Code)`. Fix the normal `PATH` installation, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed rollback.
+The current source requires Runtime `0.1.6` and output `2.1.241 (Claude Code)`. The default npm target must resolve to package-root `cli.js`; Dream reads `release-manifest.json` beside it and verifies the exact version, `runtime.entrypoint`, stream protocol, 14 required capabilities, production flags, and selector digest. The separately qualified, non-redistributable AutoDL local-core artifact retains its exact `bin/ink-claude-code-dream` entrypoint, release-root manifest, and 13-capability baseline. Dream distinguishes these layouts rather than treating one as the other; an older registry package, a mismatched layout claim, or fixture-only candidate evidence is rejected. Fix the normal `PATH` installation after `0.1.6` is published, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed absolute-path rollback.
 
 ### `uv sync` removed pytest
 
