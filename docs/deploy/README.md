@@ -12,6 +12,7 @@
 [Sync] 2026-08-31: remove the unused legacy models.json deployment prerequisite.
 [Sync] 2026-09-04: add post-release verification for Dream post-commit sync terminals and Execution asset refresh; no migration or config change is required.
 [Sync] 2026-09-06: migrate AutoDL to the sole Next.js 16 + pnpm workspace and Node MCP Apps runtime; Cloud SQLite and ignored VITE build-arg gaps remain elsewhere.
+[Sync] 2026-09-12: add the explicit NATAPP edge-relay switch, verification, and rollback contract without changing application or data ownership.
 -->
 
 ## 定位
@@ -25,6 +26,7 @@
 | 本地发布 | [`../../deploy/local/deploy.sh`](../../deploy/local/deploy.sh) | 包装本地 backend/frontend 启动与验证；尚未投影 Browser Voice WS base，stop/clean 也未强校验 PID/容器所有权 |
 | Docker 发布 | [`../../deploy/docker/deploy.sh`](../../deploy/docker/deploy.sh) | 包装根目录 Compose 构建、启动、验证和清理；backend 出站默认通过 Mihomo TUN |
 | Remote SSH 发布（含阿里云 ECS） | [`../../deploy/remote-ssh/deploy.sh`](../../deploy/remote-ssh/deploy.sh) | Dream-only Compose；overlay 通过共享网络访问 embedded-PG alias，通过 Admin HTTPS origin 访问 Gateway/Product API，并从 mode-0600 topology 配置应用 backend block-device read budget，MinIO 暂停 |
+| NATAPP 边缘转发 | [`../../deploy/remote-ssh/switch-edge-relay.sh`](../../deploy/remote-ssh/switch-edge-relay.sh) | 仅更新现有 Dream/Admin nginx 公开入口，要求显式 relay origins，自动备份、测试、reload 与可验证回滚 |
 | Google Cloud 发布 | [`../../deploy/google-cloud/deploy.sh`](../../deploy/google-cloud/deploy.sh) | 前端可构建 Next standalone，但 SQLite/GCS 数据合同未迁移；当前阻塞，不是可支持的 Dream 生产入口 |
 | AutoDL 直宿主 | [`../../deploy/autodl-ssh/deploy.sh`](../../deploy/autodl-ssh/deploy.sh) | frozen pnpm 构建 standalone Next.js，运行 Node MCP Apps 与 FastAPI，保留 Admin-owned PostgreSQL 边界 |
 
@@ -35,6 +37,7 @@
 | [`overview.md`](overview.md) | Cloud Run 历史操作文档 | 前端镜像已走 Next standalone，但 Cloud 数据路径仍依赖旧 SQLite/GCS 合同，当前不是可支持的 Dream 生产入口 |
 | [`data-sync.md`](data-sync.md) | 历史 SQLite/GCS 回执说明 | 仅用于识别旧脚本行为；共享业务数据由 Admin PostgreSQL/Drizzle 管理，不得执行该 SQLite 同步作为当前发布步骤 |
 | [`remote-ssh.md`](remote-ssh.md) | Remote SSH 部署文档 | 说明远程 Docker 服务器的 SSH/rsync/docker-compose 发布路径；旧 SQLite 数据维护命令不属于当前业务数据合同 |
+| [`natapp-edge-relay.md`](natapp-edge-relay.md) | NATAPP 边缘转发文档 | 说明现有公开域名到显式 Dream/Admin relay origins 的原子切换、验证、上游降级识别与回滚 |
 | [`aliyun.md`](aliyun.md) | 阿里云 ECS 部署文档 | 说明 Admin-owned 数据平台栈、Dream-only 应用栈、首次数据引导、发布顺序、验证与回滚 |
 | [`autodl.md`](autodl.md) | AutoDL 直宿主部署文档 | 说明 frozen pnpm/standalone Next、Node MCP Apps、FastAPI、固定 sandbox capability、验证与回滚 |
 | [`release-system-design.md`](release-system-design.md) | 历史发布体系设计 | 保留旧 Vite/npm/nginx/SQLite/GCS 判断；不是当前操作手册 |

@@ -1,14 +1,14 @@
-# [Input] Production ClaudeAgentRunner, manifest-qualified Dream Runtime, local fake Provider, and a workspace-local fake ntn executable.
+# [Input] Production ClaudeAgentRunner, manifest-qualified Dream Runtime, local fake Provider, and a test-owned native ntn executable outside the workspace.
 # [Output] Process-isolated provider-free proof that an approved actor-bound notion-cli Bash call executes inside the real Runtime and sandbox.
 # [Pos] Integration contract test node in backend/tests; no real Notion credential or content is accessed.
 # [Sync] 2026-09-04: add the Dream notion-cli PreToolUse regression acceptance.
+# [Sync] 2026-09-13: compile the fixture to match Runtime 0.1.9 native ntn policy without allowing shell-script shadows.
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-import stat
 import subprocess
 import sys
 import threading
@@ -75,14 +75,17 @@ def _run_contract(tmp_path: Path) -> None:
         (workspace / ".dream").mkdir(exist_ok=True)
         sync_builtin_workspace_skills(workspace, enabled_platforms={"notion"})
 
-        fake_bin = workspace / "fake-bin"
+        fake_bin = tmp_path / "native-notion-bin"
         fake_bin.mkdir()
         fake_ntn = fake_bin / "ntn"
-        fake_ntn.write_text(
-            "#!/bin/sh\nprintf '%s\\n' '{\"fake_ntn\":\"ok\"}'\n",
-            encoding="utf-8",
+        subprocess.run(
+            ["cc", str(Path(__file__).with_name("fixtures") / "notion_cli_native.c"),
+             "-o", str(fake_ntn)],
+            check=True,
+            capture_output=True,
+            text=True,
         )
-        fake_ntn.chmod(fake_ntn.stat().st_mode | stat.S_IXUSR)
+        fake_ntn.chmod(0o755)
         os.environ["PATH"] = f"{fake_bin}{os.pathsep}{os.environ['PATH']}"
 
         notion_home = workspace / ".notion-home"

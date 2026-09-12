@@ -4,6 +4,8 @@
 <!-- [同步] 2026-09-06：以快速启动和 MCP Apps 用法重组；用分层章节保留精确安装、所有权、安全与验证事实。 -->
 <!-- [同步] 2026-09-06：为 MCP 连接、App 设置和 Chat 交互步骤加入经过脱敏的真实组件截图。 -->
 <!-- [同步] 2026-09-06：使新增连接和 App 控制与可访问 Server 弹窗、统一 MCP 使用策略表单一致。 -->
+<!-- [同步] 2026-09-12：增加使用显式 origin、可恢复的 NATAPP 边缘转发操作入口。 -->
+<!-- [同步] 2026-09-13：采用 SDK 0.2.145 与已发布 Runtime 0.1.9 package-root selector 合同。 -->
 
 # Ink & Memory
 
@@ -73,11 +75,13 @@ pnpm gateway:provision-local-dream
 
 ### 3. 安装 Dream 与 Runtime
 
+`develop` 源码合同要求已发布 Runtime `0.1.9`。2026-09-13，五个公开 npm 归档已逐字节核对为同 SHA 四平台 CI 制品，registry `latest` 为 `0.1.9`。不要把当前 Dream 源码与 Runtime `0.1.4` 混用；resolver 会按设计 fail closed。详见[发布与本机采用回执](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md)。
+
 ```bash
 cd ../ink-dream-memory/backend
 uv sync --frozen
 
-npm install --global @glide-the/ink-claude-code-dream@0.1.4
+npm install --global @glide-the/ink-claude-code-dream@0.1.9
 export PATH="$(npm prefix --global)/bin:$PATH"
 ink-claude-code-dream --version
 
@@ -89,7 +93,7 @@ corepack enable
 corepack pnpm install --frozen-lockfile
 ```
 
-Runtime 必须输出 `2.1.241 (Claude Code)`，Notion CLI 必须输出 `ntn 0.15.1`，Corepack 必须解析到 `pnpm@10.28.1`。
+Runtime 必须输出 `2.1.241 (Claude Code)`。两个 npm 命令 alias 都必须解析到 package-root `cli.js`，其相邻 `release-manifest.json` 必须声明 Runtime `0.1.9`；Notion CLI 必须输出 `ntn 0.15.1`，Corepack 必须解析到 `pnpm@10.28.1`。
 
 ### 4. 配置 Dream
 
@@ -190,18 +194,21 @@ corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 | 组件 | 支持版本 / 所有者 |
 | --- | --- |
 | Dream 集成分支 | `develop` |
+| Dream 项目元数据 | backend `0.1.3`、frontend `0.0.3`；API schema 仍为 `2.0.0` |
 | Python | `>=3.12` |
 | Node.js | `>=22 <25`；部署镜像使用 Node 22 |
 | 前端包管理器 | Corepack 提供的 `pnpm@10.28.1` |
 | Next.js / React | `next@16.1.6`、`react@19.1.0`、`react-dom@19.1.0` |
-| Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| 原生 Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
+| Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
+| 原生 Runtime | 已发布 `@glide-the/ink-claude-code-dream@0.1.9`；截至 2026-09-13 registry `latest` 为 `0.1.9` |
 | Runtime 兼容输出 | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | 共享 PostgreSQL schema、Admin、Gateway、计费 | `dream-im-platform` / Admin 仓库 |
 | Dream Web、Thread/Run/Workspace 集成 | 本仓库 |
 
 包所有权是明确分开的：`uv` 管理 Dream Python 环境，npm 发布原生 Runtime 和 Notion CLI，pnpm 管理 `frontend/`。`uv sync` 不会安装或升级原生 Runtime。
+
+Runtime `0.1.9` 保留唯一原始 `src` 实现（1,902 个内容不变的文件、35 个原始模块目录），删除重复 `restored-src`。默认构建读取 `src/entrypoints/cli.tsx`，不保留平行 `src/cleanroom`。source-bound headless、MCP 和 Dream 兼容变换仍位于构建层，制品保留原始版权与用户确认的再分发边界。Dream 精确 Runtime pin 和项目元数据原子更新；本机采用必须另有公开归档验证及明确拥有的后端启动身份，不能仅从源码推断。详见[发布与本机 Dream 接入方案](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md)。
 
 Admin Drizzle 是共享 PostgreSQL migration 的唯一所有者。Dream 只消费精确发布的 capability，缺失时 fail closed。MCP App 连接设置要求先发布 Admin migration `0053_rare_lenny_balinger` 与 capability `dream.mcp-app-connection-settings.v1`，再发布对应 Dream 代码。
 
@@ -225,12 +232,12 @@ corepack pnpm --dir frontend test:mcp-apps-runtime
 corepack pnpm --dir frontend typecheck:mcp-apps
 ```
 
-已发布 SDK/Runtime registry 验收：
+SDK/Runtime 发布后 registry 验收：
 
 ```bash
 python3 scripts/verify_claude_registry_release.py \
-  --sdk-version 0.2.144 \
-  --runtime-version 0.1.4 \
+  --sdk-version 0.2.145 \
+  --runtime-version 0.1.9 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -254,7 +261,7 @@ MCP Apps 聚焦命令与当前 provider-free 证据请见 [MCP Apps 验收回执
 - 只能回滚到经明确评审的不可变镜像或发布版本；不得恢复已退役的 npm/Vite 构建路径。
 - MCP Apps 在独立真实业务验收改变合同前保持生产关闭（`productionAppsEffective=false`）。
 
-部署方式请见 [deploy/README.md](deploy/README.md)。AutoDL 现已使用同一个 Next.js workspace 与 frozen pnpm lock，并包含 server-only MCP Apps Runtime；旧 Vite/npm/dist 发布路径不再支持。
+部署方式请见 [deploy/README.md](deploy/README.md)。AutoDL 现已使用同一个 Next.js workspace 与 frozen pnpm lock，并包含 server-only MCP Apps Runtime；旧 Vite/npm/dist 发布路径不再支持。阿里云边缘把现有公开域名转发到显式 NATAPP Dream/Admin origins 时，应使用可恢复的[边缘转发流程](docs/deploy/natapp-edge-relay.md)，不得从 Compose 或历史端口猜测上游。
 
 ## 故障排查
 
@@ -276,7 +283,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-manifest-qualified Runtime 必须为 `0.1.4`，并输出 `2.1.241 (Claude Code)`。修正普通 `PATH` 安装后，只重启你自己拥有的服务。`CLAUDE_CODE_CLI_PATH` 仅保留给经明确评审的回滚。
+当前源码要求 Runtime `0.1.9`，并输出 `2.1.241 (Claude Code)`。默认 npm 目标必须解析到 package-root `cli.js`；Dream 会读取同目录 `release-manifest.json`，校验精确版本、`runtime.entrypoint`、stream protocol、14 项必要 capabilities、生产标记和 selector 摘要。另行资格化且禁止再分发的 AutoDL local-core 制品保留精确的 `bin/ink-claude-code-dream` 入口、release-root manifest 和 13 项 baseline capability。Dream 会区分两种布局，而不会把其中一种冒充另一种；旧 registry 包、布局声明不匹配或仅 fixture 的候选证据都会被拒绝。将精确发布版本安装到普通 `PATH`，再只重启你自己拥有的服务。`CLAUDE_CODE_CLI_PATH` 仅保留给经明确评审的绝对路径回滚。
 
 ### `uv sync` 删除了 pytest
 
@@ -307,4 +314,4 @@ manifest-qualified Runtime 必须为 `0.1.4`，并输出 `2.1.241 (Claude Code)`
 
 保持 `README.md` 与 `README.zh.md` 结构一致。保留工作区无关改动，同步受影响的文件头与目录合同，并报告精确验证命令和剩余发布动作。
 
-导出多个文件时，Agent 可在工作区根目录运行 `zip`（压缩包放在 `.dream` 之外，例如 `zip -r files/export-bundle.zip files/scene`）并链接生成的压缩包，也可链接独立的工作区目录由下载服务打包真实 ZIP。涉及 `.dream` 路径的 shell 命令仍会被拒绝。
+导出多个文件时，Agent 可在工作区根目录用明确的 `.zip` 输出路径和明确的普通输入路径运行 `zip`（例如 `zip -r files/export-bundle.zip files/scene`），再链接生成的真实二进制压缩包；也可链接独立的工作区目录，由下载服务即时打包真实 ZIP。点前缀运行路径、工作区越界、符号链接、宽泛的 `.`/glob 输入和 shell 组合命令仍会被拒绝。生产后端镜像和 AutoDL 直宿主发布均安装 Info-ZIP 以支持这条路径。

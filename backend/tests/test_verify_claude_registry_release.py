@@ -8,6 +8,7 @@
 #                    the exact ink-claude-code-dream/claude alias pair.
 # [Sync] 2026-08-30: require the clean-room npm 0.1.4 sandbox.notion-cli
 #                    capability without changing Dream's portable baseline.
+# [Sync] 2026-09-12: require package-root cli.js for current clean-room selector fixtures and preserve legacy parsing fixtures.
 
 from __future__ import annotations
 
@@ -49,7 +50,7 @@ def _tar_bytes(files: dict[str, bytes]) -> bytes:
         for name, body in files.items():
             info = tarfile.TarInfo(name)
             info.size = len(body)
-            info.mode = 0o755 if name.endswith("/ink-claude-code-dream") else 0o644
+            info.mode = 0o755 if name.endswith(("/ink-claude-code-dream", "/cli.js")) else 0o644
             archive.addfile(info, io.BytesIO(body))
     return output.getvalue()
 
@@ -385,6 +386,7 @@ def _cleanroom_npm_release_bodies() -> dict[str, bytes]:
                 "runtimeTarget": target,
             },
             "runtime": {
+                "entrypoint": f"bin/{acceptance.CLI_COMMAND}",
                 "version": version,
                 "integration": {"sdkVersion": FIXTURE["sdk"]["version"]},
             },
@@ -454,10 +456,11 @@ def _cleanroom_npm_release_bodies() -> dict[str, bytes]:
         "name": acceptance.NPM_SELECTOR,
         "version": version,
         "license": "MIT",
+        "type": "module",
         "publishConfig": {"access": "public", "provenance": True},
         "scripts": {"prepack": "node scripts/prepack.mjs"},
         "bin": {
-            alias: f"bin/{acceptance.CLI_COMMAND}"
+            alias: "cli.js"
             for alias in acceptance.CLI_ALIASES
         },
         "optionalDependencies": optional,
@@ -466,7 +469,7 @@ def _cleanroom_npm_release_bodies() -> dict[str, bytes]:
         "schemaVersion": "ink-cleanroom-npm-meta/v1",
         "commands": ["claude", acceptance.CLI_COMMAND],
         "optionalDependencies": optional,
-        "selector": "bin/ink-claude-code-dream",
+        "selector": "cli.js",
         "sourcemap": "none",
         "supportedTargets": list(acceptance.NPM_PLATFORMS),
     }
@@ -474,6 +477,7 @@ def _cleanroom_npm_release_bodies() -> dict[str, bytes]:
         "schemaVersion": "ink-claude-cli-envelope/v1",
         "core": {"entrypointSha256": launcher_sha, "productionEligible": True},
         "runtime": {
+            "entrypoint": "cli.js",
             "version": version,
             "integration": {"sdkVersion": FIXTURE["sdk"]["version"]},
         },
@@ -510,8 +514,8 @@ def _cleanroom_npm_release_bodies() -> dict[str, bytes]:
             "package/package.json": json.dumps(selector_manifest).encode(),
             "package/runtime-manifest.json": json.dumps(runtime_manifest).encode(),
             "package/npm-publication-attestation.json": json.dumps(attestation).encode(),
-            "package/SHA256SUMS": f"{launcher_sha}  bin/ink-claude-code-dream\n".encode(),
-            "package/bin/ink-claude-code-dream": launcher,
+            "package/SHA256SUMS": f"{launcher_sha}  cli.js\n".encode(),
+            "package/cli.js": launcher,
             "package/release-manifest.json": json.dumps(release).encode(),
             "package/manifest/artifact-manifest.json": json.dumps(artifact).encode(),
             "package/manifest/capabilities.json": capabilities_body,

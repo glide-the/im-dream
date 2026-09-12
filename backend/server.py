@@ -31,6 +31,7 @@
 #                    official rollback) before starting the Agent factory.
 # [Sync] 2026-08-24: print validated SDK distribution and resolved CLI identity
 #                    before the Claude Agent factory starts.
+# [Sync] 2026-09-13: startup identity now reflects SDK 0.2.145 and package-root Runtime 0.1.9 validation.
 # [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
 #                    PostgreSQL sink, and publisher lifecycle around the database.
 # [Sync] 2026-08-30: preserve the deployment-owned Claude Bash sandbox
@@ -205,7 +206,6 @@ from agent_factory import (
 )
 from claude_agent.event_bus_redis import RedisStreamEventBus
 from libs.claude_agent_kit.server.sdk_env import (
-    DREAM_CLAUDE_CLI_EXECUTABLE,
     DREAM_CLAUDE_CLI_VERSION,
     DREAM_CLAUDE_SDK_IMPORT,
     require_dream_claude_sdk_distribution,
@@ -316,7 +316,10 @@ def _print_claude_runtime_identity(distribution: Any, cli_path: str) -> None:
             override_active = Path(override).resolve() == resolved_cli
         except (OSError, RuntimeError):
             override_active = False
-    is_dream_runtime = resolved_cli.name == DREAM_CLAUDE_CLI_EXECUTABLE
+    # The caller has passed the shared manifest resolver. Default npm cli.js
+    # and qualified local-core bin layouts are both Dream Runtime; do not infer
+    # package identity from a filename. Only an explicit override is external.
+    is_dream_runtime = not override_active
     identity = {
         "sdk_distribution": installed_name,
         "sdk_version": str(distribution.version),

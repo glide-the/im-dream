@@ -15,11 +15,13 @@
 # [Sync] 2026-08-28: verify exact server-owned Runtime env validation, precedence,
 #                    parent scrubbing, and omit-when-unset behavior.
 # [Sync] 2026-08-30: verify actor/thread-bound NOTION_* Runtime injection, token selection, tombstones, and path isolation.
+# [Sync] 2026-09-13: require Runtime 0.1.9 package-root cli.js and selector/capability digest binding.
 
 """Tests for sdk_env.apply_cli_path_to_options (2026-07-26)."""
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sys
 import tempfile
@@ -39,8 +41,11 @@ from libs.claude_agent_kit.server.sdk_env import (
     CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
     DREAM_CLAUDE_CLI_EXECUTABLE,
     DREAM_CLAUDE_CLI_VERSION,
+    DREAM_CLAUDE_LOCAL_CORE_ENTRYPOINT,
+    DREAM_CLAUDE_PACKAGE_REQUIRED_CAPABILITIES,
     DREAM_CLAUDE_REQUIRED_CAPABILITIES,
     DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA,
+    DREAM_CLAUDE_RUNTIME_ENTRYPOINT,
     DREAM_CLAUDE_SDK_DISTRIBUTION,
     DREAM_CLAUDE_SDK_IMPORT,
     DREAM_CLAUDE_SDK_VERSION,
@@ -68,22 +73,36 @@ class TestApplyCliPathToOptions(unittest.TestCase):
         return unittest.mock.patch.dict(os.environ, env, clear=True)
 
     @staticmethod
-    def _qualified_runtime(root: Path, **core_overrides: bool) -> Path:
-        executable = root / "bin" / DREAM_CLAUDE_CLI_EXECUTABLE
-        executable.parent.mkdir(parents=True)
+    def _qualified_runtime(
+        root: Path,
+        *,
+        layout: str = "npm-package-root",
+        **core_overrides: bool,
+    ) -> Path:
+        is_package = layout == "npm-package-root"
+        entrypoint = (
+            DREAM_CLAUDE_RUNTIME_ENTRYPOINT
+            if is_package
+            else DREAM_CLAUDE_LOCAL_CORE_ENTRYPOINT
+        )
+        executable = root / entrypoint
+        executable.parent.mkdir(parents=True, exist_ok=True)
         executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         executable.chmod(0o700)
+        executable_sha256 = hashlib.sha256(executable.read_bytes()).hexdigest()
         core = {
             "corePruned": True,
             "productionEligible": True,
             **core_overrides,
         }
+        if is_package:
+            core["entrypointSha256"] = executable_sha256
         manifest = {
             "schemaVersion": DREAM_CLAUDE_RUNTIME_MANIFEST_SCHEMA,
             "runtime": {
                 "name": DREAM_CLAUDE_CLI_EXECUTABLE,
                 "version": DREAM_CLAUDE_CLI_VERSION,
-                "entrypoint": f"bin/{DREAM_CLAUDE_CLI_EXECUTABLE}",
+                "entrypoint": entrypoint,
                 "integration": {
                     "environment": "CLAUDE_CODE_CLI_PATH",
                     "sdkVersion": DREAM_CLAUDE_SDK_VERSION,
@@ -98,9 +117,17 @@ class TestApplyCliPathToOptions(unittest.TestCase):
             "runtime": core,
             "capabilities": [
                 {"id": capability_id}
-                for capability_id in sorted(DREAM_CLAUDE_REQUIRED_CAPABILITIES)
+                for capability_id in sorted(
+                    DREAM_CLAUDE_PACKAGE_REQUIRED_CAPABILITIES
+                    if is_package
+                    else DREAM_CLAUDE_REQUIRED_CAPABILITIES
+                )
             ],
         }
+        if is_package:
+            capability_evidence["artifact"] = {
+                "entrypointSha256": executable_sha256
+            }
         (root / "release-manifest.json").write_text(
             json.dumps(manifest), encoding="utf-8"
         )
@@ -108,6 +135,26 @@ class TestApplyCliPathToOptions(unittest.TestCase):
         evidence_path.parent.mkdir()
         evidence_path.write_text(json.dumps(capability_evidence), encoding="utf-8")
         return executable
+
+    def test_qualified_local_core_layout_remains_supported(self):
+        with tempfile.TemporaryDirectory() as runtime_root:
+            root = Path(runtime_root)
+            cli = self._qualified_runtime(root, layout="qualified-local-core")
+            self.assertEqual(
+                sdk_env_module.require_dream_claude_runtime_manifest(cli),
+                (root / "release-manifest.json").resolve(),
+            )
+
+    def test_nested_bin_with_package_entrypoint_claim_is_rejected(self):
+        with tempfile.TemporaryDirectory() as runtime_root:
+            root = Path(runtime_root)
+            cli = self._qualified_runtime(root, layout="qualified-local-core")
+            manifest_path = root / "release-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["runtime"]["entrypoint"] = DREAM_CLAUDE_RUNTIME_ENTRYPOINT
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "expected_entrypoint"):
+                sdk_env_module.require_dream_claude_runtime_manifest(cli)
 
     def test_env_override_honored_when_path_exists(self):
         with tempfile.NamedTemporaryFile() as cli:

@@ -4,6 +4,8 @@
 <!-- [Sync] 2026-09-06: reorganize around getting started and using MCP Apps; retain exact setup, ownership, security, and validation facts in layered sections. -->
 <!-- [Sync] 2026-09-06: add sanitized real-component screenshots for the MCP connection, App settings, and Chat interaction steps. -->
 <!-- [Sync] 2026-09-06: align connection creation and App controls with the accessible Server modal and unified MCP usage-policy form. -->
+<!-- [Sync] 2026-09-12: add the recoverable explicit-origin NATAPP edge-relay operator path. -->
+<!-- [Sync] 2026-09-13: adopt SDK 0.2.145 and the published Runtime 0.1.9 package-root selector contract. -->
 
 # Ink & Memory
 
@@ -73,11 +75,13 @@ These commands write Admin-owned data. Use them only with the intended local dat
 
 ### 3. Install Dream and its Runtime
 
+The `develop` source contract requires the published Runtime `0.1.9`. On 2026-09-13, all five public npm archives were verified byte-for-byte against the same-SHA four-platform CI release, and registry `latest` is `0.1.9`. Do not mix current Dream source with Runtime `0.1.4`; the resolver intentionally fails closed. See the [release and local adoption receipt](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md).
+
 ```bash
 cd ../ink-dream-memory/backend
 uv sync --frozen
 
-npm install --global @glide-the/ink-claude-code-dream@0.1.4
+npm install --global @glide-the/ink-claude-code-dream@0.1.9
 export PATH="$(npm prefix --global)/bin:$PATH"
 ink-claude-code-dream --version
 
@@ -89,7 +93,7 @@ corepack enable
 corepack pnpm install --frozen-lockfile
 ```
 
-The Runtime must print `2.1.241 (Claude Code)`, Notion CLI must print `ntn 0.15.1`, and Corepack must resolve `pnpm@10.28.1`.
+The Runtime must print `2.1.241 (Claude Code)`. Both npm command aliases must resolve to package-root `cli.js`, whose adjacent `release-manifest.json` must declare Runtime `0.1.9`; Notion CLI must print `ntn 0.15.1`, and Corepack must resolve `pnpm@10.28.1`.
 
 ### 4. Configure Dream
 
@@ -190,18 +194,21 @@ The complete engineering flow—connection discovery, model tool call, trusted r
 | Component | Supported version / owner |
 | --- | --- |
 | Dream integration branch | `develop` |
+| Dream project metadata | backend `0.1.3`, frontend `0.0.3`; API schema remains `2.0.0` |
 | Python | `>=3.12` |
 | Node.js | `>=22 <25`; deployment images use Node 22 |
 | Frontend package manager | `pnpm@10.28.1` through Corepack |
 | Next.js / React | `next@16.1.6`, `react@19.1.0`, `react-dom@19.1.0` |
-| Python SDK | `ink-claude-dream-agent-sdk==0.2.144` |
-| Native Runtime | `@glide-the/ink-claude-code-dream@0.1.4` |
+| Python SDK | `ink-claude-dream-agent-sdk==0.2.145` |
+| Native Runtime | Published `@glide-the/ink-claude-code-dream@0.1.9`; registry `latest` is `0.1.9` as of 2026-09-13 |
 | Runtime compatibility output | `2.1.241 (Claude Code)` |
 | Notion CLI | `ntn@0.15.1` |
 | Shared PostgreSQL schema, Admin, Gateway, billing | `dream-im-platform` / Admin repository |
 | Dream Web, Thread/Run/Workspace integration | This repository |
 
 Package ownership is intentional: `uv` manages Dream's Python environment, npm distributes the native Runtime and Notion CLI, and pnpm manages `frontend/`. `uv sync` does not install or upgrade the native Runtime.
+
+Runtime `0.1.9` keeps the original modules as its single `src` implementation (1,902 unchanged files, 35 original module directories) and removes the duplicate `restored-src` directory. The default build reads `src/entrypoints/cli.tsx`; no parallel `src/cleanroom` remains. Source-bound headless, MCP and Dream compatibility transforms stay in the build layer. Original copyright and the user-attested redistribution boundary are preserved in the artifact. Dream's exact Runtime pin and project metadata move together; local adoption requires verified public archives and the owned backend's startup identity, not merely source edits. See the [release and local Dream adoption plan](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md).
 
 Admin Drizzle is the only owner of shared PostgreSQL migrations. Dream consumes exact published capabilities and fails closed when a required capability is missing. MCP App connection settings require Admin migration `0053_rare_lenny_balinger` and capability `dream.mcp-app-connection-settings.v1` before the matching Dream code is released.
 
@@ -225,12 +232,12 @@ corepack pnpm --dir frontend test:mcp-apps-runtime
 corepack pnpm --dir frontend typecheck:mcp-apps
 ```
 
-Published SDK/Runtime registry acceptance:
+Post-publication SDK/Runtime registry acceptance:
 
 ```bash
 python3 scripts/verify_claude_registry_release.py \
-  --sdk-version 0.2.144 \
-  --runtime-version 0.1.4 \
+  --sdk-version 0.2.145 \
+  --runtime-version 0.1.9 \
   --expected-cli-version '2.1.241 (Claude Code)'
 ```
 
@@ -254,7 +261,7 @@ Focused MCP Apps commands and the current provider-free evidence are listed in [
 - Roll back only to an explicitly reviewed immutable image or release; do not restore retired npm/Vite build paths.
 - MCP Apps remain production-off (`productionAppsEffective=false`) until a separate real-business acceptance changes that contract.
 
-For deployment profiles, see [deploy/README.md](deploy/README.md). AutoDL now builds the same canonical Next.js workspace with the frozen pnpm lock and includes the server-only MCP Apps runtime; legacy Vite/npm/dist release paths are unsupported.
+For deployment profiles, see [deploy/README.md](deploy/README.md). AutoDL now builds the same canonical Next.js workspace with the frozen pnpm lock and includes the server-only MCP Apps runtime; legacy Vite/npm/dist release paths are unsupported. An Alibaba edge that relays the existing public domains to explicit NATAPP Dream/Admin origins uses the recoverable [edge-relay procedure](docs/deploy/natapp-edge-relay.md), not an inferred Compose upstream.
 
 ## Troubleshooting
 
@@ -276,7 +283,7 @@ cd backend
 .venv/bin/python -c 'from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; print(resolve_claude_cli_path())'
 ```
 
-The manifest-qualified Runtime must be `0.1.4` and print `2.1.241 (Claude Code)`. Fix the normal `PATH` installation, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed rollback.
+The current source requires Runtime `0.1.9` and output `2.1.241 (Claude Code)`. The default npm target must resolve to package-root `cli.js`; Dream reads `release-manifest.json` beside it and verifies the exact version, `runtime.entrypoint`, stream protocol, 14 required capabilities, production flags, and selector digest. The separately qualified, non-redistributable AutoDL local-core artifact retains its exact `bin/ink-claude-code-dream` entrypoint, release-root manifest, and 13-capability baseline. Dream distinguishes these layouts rather than treating one as the other; an older registry package, a mismatched layout claim, or fixture-only candidate evidence is rejected. Install the exact release on normal `PATH`, then restart only the service you own. `CLAUDE_CODE_CLI_PATH` is reserved for an explicitly reviewed absolute-path rollback.
 
 ### `uv sync` removed pytest
 
@@ -307,4 +314,4 @@ Run the Admin migration check, verify the Admin-owned environment file, and conf
 
 Keep `README.md` and `README.zh.md` structurally aligned. Preserve unrelated working-tree changes, update affected file headers and folder contracts, and report exact validation commands and any remaining release action.
 
-For multi-file exports, the Agent may run `zip` from the workspace root with the archive outside `.dream` (e.g. `zip -r files/export-bundle.zip files/scene`) and link the archive, or link a dedicated workspace directory whose download link packages a real ZIP. Shell commands naming `.dream` paths stay denied.
+For multi-file exports, the Agent may run `zip` from the workspace root with an explicit `.zip` output and explicit ordinary inputs (e.g. `zip -r files/export-bundle.zip files/scene`) and link the resulting binary archive, or link a dedicated workspace directory whose download packages a real ZIP. Dot-prefixed runtime paths, workspace escapes, symlinks, broad `.`/glob inputs, and shell-composed archive commands stay denied. The production backend image and the AutoDL direct-host release install Info-ZIP for this path.

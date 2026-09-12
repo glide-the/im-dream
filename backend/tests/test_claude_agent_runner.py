@@ -3,6 +3,8 @@
 # [Output] Verify streaming callbacks, session_id extraction, bounded SDK message
 #          buffer/error guidance, on_text_done, tool events, confirmation, and env aliases.
 # [Pos] test node in backend/tests
+# [Sync] 2026-09-12: execute an admitted ZIP command and reject dot-prefixed,
+#                    escaping, globbed, and symlinked archive paths.
 # [Sync] 2026-08-20: cover the server-owned SDK stdout buffer option and safe overflow hint.
 # [Sync] 2026-08-28: cover terminal max_tokens classification so truncated
 #                    thinking-only turns cannot be reported as successful.
@@ -117,9 +119,11 @@ import asyncio
 import json
 import os
 import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1732,6 +1736,9 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             with tempfile.TemporaryDirectory() as temp_dir:
                 workspace = Path(temp_dir)
                 (workspace / ".dream").mkdir()
+                (workspace / ".dream" / "private.txt").write_text(
+                    "private", encoding="utf-8"
+                )
                 hook = await self._capture_pre_tool_use_hook(
                     cwd=str(workspace),
                     im_full_access_enabled=full_access,
@@ -1760,15 +1767,25 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         allowed = (
             "zip -r files/export.zip files/scene",
             "zip export.zip files/scene.md",
-            "zip -r export.zip .",
             "zip -9 files/export.zip files/draft.md",
-            "zip -r export.zip *",
+            "zip -rqX files/export.zip files/scene files/draft.md",
         )
         denied = (
             "zip .dream/pwn.zip files/scene",
             "zip -r files/export.zip .dream/runtime",
+            "zip -r files/export.zip .claude",
+            "zip -r files/export.zip files/has-hidden",
+            "zip -r files/export.zip files/linked-file",
+            "zip -r files/export.zip files/linked-directory",
+            "zip -r ../export.zip files/scene",
+            "zip -r files/export.zip ../outside.md",
+            "zip files/existing.zip files/existing.zip",
+            "zip -r files/scene/export.zip files/scene",
+            "zip -r export.zip .",
+            "zip -r export.zip *",
             "zip -r files/export.zip .*",
             "zip -b .dream/tmp files/export.zip files/scene",
+            "zip -@ files/export.zip",
             "zip -r files/export.zip $(echo .dream)",
             "zip -r files/export.zip files/scene; rm -rf .dream",
             "files/zip -r files/export.zip files/scene",
@@ -1783,7 +1800,23 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 workspace = Path(temp_dir)
                 (workspace / ".dream").mkdir()
                 (workspace / "files").mkdir()
+                (workspace / "files" / "scene").mkdir()
+                (workspace / "files" / "scene" / "script.md").write_text(
+                    "scene", encoding="utf-8"
+                )
                 (workspace / "files" / "scene.md").write_text("scene", encoding="utf-8")
+                (workspace / "files" / "draft.md").write_text("draft", encoding="utf-8")
+                (workspace / "files" / "existing.zip").write_bytes(b"PK-existing")
+                (workspace / ".claude").mkdir()
+                (workspace / ".claude" / "settings.json").write_text(
+                    "{}", encoding="utf-8"
+                )
+                (workspace / "files" / "has-hidden").mkdir()
+                (workspace / "files" / "has-hidden" / ".claude").mkdir()
+                (workspace / "files" / "linked-file").symlink_to(
+                    workspace / ".dream" / "private.txt"
+                )
+                (workspace / "files" / "linked-directory").symlink_to(workspace / ".dream")
                 hook_kwargs: dict[str, object] = {
                     "cwd": str(workspace),
                     "im_full_access_enabled": full_access,
@@ -1815,6 +1848,53 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                         specific = _hook_specific(result, {})
                         self.assertEqual(specific.get("permissionDecision"), "deny")
                         self.assertIn(".dream", str(specific.get("permissionDecisionReason")))
+
+    async def test_allowed_bash_zip_produces_real_binary_archive(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            source = workspace / "files" / "delivery"
+            source.mkdir(parents=True)
+            (source / "script.md").write_text("真实剧本", encoding="utf-8")
+            (source / "outline.yaml").write_text("episodes: 2\n", encoding="utf-8")
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                im_full_access_enabled=True,
+            )
+            command = "zip -rq files/delivery.zip files/delivery"
+            result = await hook(
+                {"tool_name": "Bash", "tool_input": {"command": command}},
+                "call-bash-zip-binary",
+                _SDK_HOOK_CONTEXT(),
+            )
+            self.assertEqual(
+                _hook_specific(result, {}).get("permissionDecision"),
+                "allow",
+            )
+
+            completed = subprocess.run(
+                ["zip", "-rq", "files/delivery.zip", "files/delivery"],
+                cwd=workspace,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            archive = workspace / "files" / "delivery.zip"
+            self.assertEqual(archive.read_bytes()[:2], b"PK")
+            with zipfile.ZipFile(archive) as payload:
+                self.assertEqual(
+                    set(payload.namelist()),
+                    {
+                        "files/delivery/",
+                        "files/delivery/script.md",
+                        "files/delivery/outline.yaml",
+                    },
+                )
+                self.assertEqual(
+                    payload.read("files/delivery/script.md").decode("utf-8"),
+                    "真实剧本",
+                )
 
     async def test_canonical_asset_single_file_delete_uses_visible_confirmation(self):
         confirmation_requests: list[dict] = []

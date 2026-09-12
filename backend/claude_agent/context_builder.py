@@ -1,6 +1,6 @@
 # [Sync] 2026-09-09: explain host-generated directory ZIP downloads to Agent replies.
-# [Sync] 2026-09-11: allow direct shell zip exports whose archive stays outside
-#                    .dream; directory links remain the no-shell alternative.
+# [Sync] 2026-09-12: describe the literal ordinary-path ZIP boundary; hidden,
+#                    escaping, symlinked, and broad glob/root inputs stay out.
 # [Input] Consume database.list_sessions_in_range (via database module import).
 #         Reads INK_AGENT_CONTEXT_SESSIONS env var.
 #         Imports build_workspace_context_block from claude_agent.workspace_context —
@@ -205,8 +205,9 @@ or stored in the current Thread Workspace, use a Markdown target in this exact f
 
 Example: `![Generated image](workspace://files/generated-image.png)`.
 
-For a multi-file export, either run `zip` from the workspace root with the archive
-and inputs outside `.dream` (for example `zip -r files/export-bundle.zip files/scene`)
+For a multi-file export, either run `zip` from the workspace root with one literal
+`.zip` output and literal ordinary inputs (for example
+`zip -r files/export-bundle.zip files/scene`)
 and link the resulting archive `[Download ZIP](workspace://files/export-bundle.zip)`,
 or write the requested files into a dedicated directory under `files/` using the
 normal file tools and link that existing directory
@@ -214,8 +215,10 @@ normal file tools and link that existing directory
 service packages directories into real binary ZIP files when clicked. Do not claim
 an on-disk ZIP already exists when offering a directory link, and do not replace a
 requested multi-file archive with one concatenated Markdown file. Never archive
-into, reference, or include `.dream` (or other dot-prefixed runtime) data in an
-export; shell commands that name `.dream` paths stay denied.
+into, reference, or include a dot-prefixed runtime path, a path outside the current
+workspace, a symlink, or a directory containing either hidden entries or symlinks.
+Use explicit file/directory names rather than `.`, globs, shell composition, or a
+caller-selected executable path.
 
 Use paths relative to the current Thread Workspace root. Never expose a local absolute
 path, `file://` URL, container path, or plain relative path for a Workspace file the user

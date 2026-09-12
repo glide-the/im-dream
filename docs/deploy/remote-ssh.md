@@ -12,6 +12,7 @@
                     read-storm evidence that requires it.
 [Sync] 2026-08-31: remove the deleted legacy models.json prerequisite.
 [Sync] 2026-09-06: align the frontend container with Next standalone and mark legacy VITE/SQLite script drift.
+[Sync] 2026-09-12: link the explicit, recoverable NATAPP edge-relay switch without changing the Compose release path.
 -->
 
 阿里云 ECS 直接使用本路径，不维护另一套发布脚本。跨 Dream/Admin 两仓库的
@@ -174,6 +175,13 @@ curl -I https://ink-frontend.suoxya.com/runtime-config.js
 ```bash
 REMOTE_SETUP_NGINX=0 ./deploy/remote-ssh/deploy.sh deploy
 ```
+
+如果这台 Remote SSH 主机只保留边缘代理，而 Dream/Admin 改由 NATAPP origin
+提供，不应运行 Compose 发布来猜测上游端口。使用
+[`switch-edge-relay.sh`](../../deploy/remote-ssh/switch-edge-relay.sh) 显式提供两个
+origin；脚本同时备份并替换 `ink-and-memory` 与 `ink-memory-admin`，通过
+`nginx -t` 后平滑 reload。完整身份核对、SSE/WebSocket、认证链和回滚合同见
+[`natapp-edge-relay.md`](natapp-edge-relay.md)。
 
 `setup-nginx` 会在安装或启动 nginx 前检查主机 `80` 端口：
 

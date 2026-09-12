@@ -6,6 +6,7 @@
 # [Sync] 2026-08-30: pin Dream to the generic qualified Linux x64 Runtime
 #                    0.1.4 built from authorized 2.1.88 source; AutoDL only
 #                    selects its installed absolute CLI path.
+# [Sync] 2026-09-13: expect qualified local-core 0.1.9; preparation remains inert until deployment supplies it.
 # [Sync] 2026-08-30: force deployment-owned Claude Bash sandbox enablement to
 #                    false because the outer AutoDL container rejects userns.
 # [Sync] 2026-09-06: project the server-only Node MCP Apps runtime alongside

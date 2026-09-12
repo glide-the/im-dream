@@ -14,6 +14,8 @@
 # [Sync] 2026-08-30: require the published clean-room Runtime 0.1.4 selector.
 # [Sync] 2026-09-01: require the notion platform namespace and canonical
 #                    archive-backed notion-diary-sync package.
+# [Sync] 2026-09-12: require Info-ZIP in the production image.
+# [Sync] 2026-09-13: require Runtime 0.1.9 package-root cli.js and adjacent manifest validation.
 
 from __future__ import annotations
 
@@ -27,7 +29,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SDK_VERSION = "0.2.145"
 SDK_REQUIREMENT = f"ink-claude-dream-agent-sdk=={SDK_VERSION}"
 CLI_VERSION = "2.1.241"
-RUNTIME_VERSION = "0.1.5"
+RUNTIME_VERSION = "0.1.9"
 NOTION_CLI_VERSION = "0.15.1"
 
 
@@ -68,6 +70,7 @@ def test_dependency_manifests_lock_only_custom_sdk() -> None:
 
 def test_dockerfile_cross_asserts_sdk_runtime_and_rollback_cli_pair() -> None:
     dockerfile = (BACKEND_ROOT / "Dockerfile").read_text()
+    assert "        zip \\\n" in dockerfile
     assert f"ARG INK_CLAUDE_CODE_VERSION={RUNTIME_VERSION}" in dockerfile
     assert f"ARG CLAUDE_CODE_VERSION={CLI_VERSION}" in dockerfile
     assert f'test "${{INK_CLAUDE_CODE_VERSION}}" = "{RUNTIME_VERSION}"' in dockerfile
@@ -84,6 +87,9 @@ def test_dockerfile_cross_asserts_sdk_runtime_and_rollback_cli_pair() -> None:
         'test "$(realpath /usr/local/bin/claude)" = '
         '"${DREAM_RUNTIME_ENTRYPOINT}"'
     ) in dockerfile
+    assert 'test "$(basename "${DREAM_RUNTIME_ENTRYPOINT}")" = "cli.js"' in dockerfile
+    assert 'DREAM_RUNTIME_ROOT="$(dirname "${DREAM_RUNTIME_ENTRYPOINT}")"' in dockerfile
+    assert '.runtime.entrypoint == "cli.js"' in dockerfile
     assert "unlink /usr/local/bin/claude" in dockerfile
     assert "npm install -g --force" not in dockerfile
     assert "INK_CLAUDE_NPM_REGISTRY=https://registry.npmjs.org" in dockerfile
