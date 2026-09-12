@@ -15,7 +15,7 @@
 # [Sync] 2026-08-28: verify exact server-owned Runtime env validation, precedence,
 #                    parent scrubbing, and omit-when-unset behavior.
 # [Sync] 2026-08-30: verify actor/thread-bound NOTION_* Runtime injection, token selection, tombstones, and path isolation.
-# [Sync] 2026-09-12: require Runtime 0.1.6 package-root cli.js and selector/capability digest binding.
+# [Sync] 2026-09-13: require Runtime 0.1.7 package-root cli.js and selector/capability digest binding.
 
 """Tests for sdk_env.apply_cli_path_to_options (2026-07-26)."""
 from __future__ import annotations

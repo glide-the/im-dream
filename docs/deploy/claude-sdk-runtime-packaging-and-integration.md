@@ -2,7 +2,7 @@
 <!-- [输出] 自有 Python SDK 与多平台 clean-room Runtime 的打包、发布、Dream 集成、验证和回滚操作手册。 -->
 <!-- [定位] Claude SDK/Runtime 发布与 IM Dream 接入的中文执行真相源；不负责服务器部署。 -->
 <!-- [同步] 2026-08-30：记录 PyPI SDK 0.2.144、npm Runtime 0.1.4、Notion Bash sandbox 能力、same-SHA workflow、持久最小权限 token 边界及 Dream 精确接入。 -->
-<!-- [同步] 2026-09-12：当前源码合同升级为 SDK 0.2.145 × 未发布 Runtime 0.1.6 package-root selector；旧发布回执保持历史。 -->
+<!-- [同步] 2026-09-13：当前源码合同升级为 SDK 0.2.145 × 未发布 Runtime 0.1.7 package-root selector；旧发布回执保持历史。 -->
 
 # Claude SDK/Runtime 打包、发布与 IM Dream 集成
 
@@ -24,10 +24,16 @@ MCP 状态机或 Runtime 实现。
 | 对象 | 当前身份 |
 | --- | --- |
 | SDK | PyPI/lock `ink-claude-dream-agent-sdk==0.2.145` |
-| Runtime selector source contract | `@glide-the/ink-claude-code-dream@0.1.6`；package-root `cli.js`，尚未发布 |
+| Dream 项目元数据 | backend `0.1.1`、frontend `0.0.1`；API schema `2.0.0` 不变 |
+| Runtime selector source contract | `@glide-the/ink-claude-code-dream@0.1.7`；package-root `cli.js`，尚未发布 |
 | Runtime checked gates | production/redistribution/publication/four targets 均 false；0.1.5 acceptance 不复用 |
 | 最后已发布 Runtime | npm `0.1.4`；qualification `33306855166`、publish `33306940462` 仅作历史回滚证据 |
 | Dream Runtime 接口标识 | `2.1.241 (Claude Code)` |
+
+`0.1.7` 原样恢复 Runtime 仓库的 `restored-src/src` 研究树（1,902 文件、35 模块目录），
+取代不完整且未发布的 `0.1.6`。研究快照保留 Anthropic 版权，不属于 MIT，也不进入
+clean-room npm 编译、tarball 或 SBOM provenance；Dream 不复制这些实现文件。
+版本和验证边界见[源码结构接入说明](runtime-0.1.7-source-structure-integration.md)。
 
 ## 2. 仓库职责
 
@@ -381,7 +387,7 @@ RUN npm install -g \
 
 selector 的 optional dependency 自动选择当前 Linux 平台包。Docker 可以另装 official
 Claude CLI 作为显式回滚，但 Dream 默认 resolver 仍选择 `ink-claude-code-dream`。
-`0.1.6` 的 npm alias 必须解析到 package-root `cli.js`，manifest 与 capability evidence
+`0.1.7` 的 npm alias 必须解析到 package-root `cli.js`，manifest 与 capability evidence
 位于相邻 release root 并绑定 selector SHA-256；npm 包若仍声称旧嵌套 `bin/` selector 会被拒绝。
 AutoDL direct-host 的 local-core 是另一种禁止公开再分发的受限制品：它继续使用精确的
 `bin/ink-claude-code-dream` 与 release-root manifest、13 项 portable capability baseline，
@@ -525,6 +531,6 @@ registry fresh install 只选择当前平台包且安装树无 `.map`。qualific
 `969f9193be8750e2573e4c4ea9c3556d48687925d9f57b8ea676669d753980dd`，授权回执 SHA-256 为
 `87f3d1c6040e5462d85e6259a5cb16509a5d26838d5299d1ba350a4ba463dbea`。
 
-这些值是 `0.2.144`/`0.1.4` 的历史示例。当前 `0.2.145`/`0.1.6` 源码配对必须从新
-workflow/registry 回执重新取得；在此之前 Docker 的精确 `0.1.6` 安装和 registry acceptance
+这些值是 `0.2.144`/`0.1.4` 的历史示例。当前 `0.2.145`/`0.1.7` 源码配对必须从新
+workflow/registry 回执重新取得；在此之前 Docker 的精确 `0.1.7` 安装和 registry acceptance
 按设计失败。不得复制旧摘要、旧 `0.1.5` acceptance 或旧 target qualification。
