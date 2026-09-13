@@ -62,11 +62,23 @@ README 同时校正已过期的“保存使用策略”说明为当前自动保�
   认证成功且 effective 四项 enabled。普通结果保留，未启动新模型消息。
 - 确定性验证：Host policy 5 tests passed；Runtime 39 tests passed；MCP Apps
   及全前端 TypeScript 检查通过。两个需要随机监听端口的测试在允许测试监听后通过。
+- 最终检查：本轮 6 个生产源文件 ESLint、两套 TypeScript 和 `git diff --check`
+  均 exit 0。双语 README 均 27 个 heading、13 个 fenced block，命令完全一致；
+  本轮新增 Markdown 链接目标存在。未将其他旧文档的示例链接纳入本轮修复。
 - 隔离 Chrome 回归：官方 1.7.4／1.7.5 协议 smoke、1.7.5 生产 Host 完整生命周期、
   window.im policy downgrade 共 4 tests passed（12.1s）。同前端随机入口挂载成功；
   两层文档 origin 均为 `null`，父 DOM／存储被拒；过期 URL／父来源配置不影响挂载。
   时间按钮、消息回流、历史不重放和标准 DELETE 回归均保留。
-- 修复后真实页面结果待本轮验证，不用隔离 harness 或旧验收冒充真实业务通过。
+- 修复后本机真实页面：已有账户和历史 `get-time` 结果沿生产 Next/后端链路挂载，
+  `ready`，无 fallback，单 App 实例。沙箱 URL 使用浏览器当前前端入口。
+  点击真实 **Get Server Time**，时间从 `2026-09-06T11:04:40.760Z` 更新为
+  `2026-09-13T05:52:46.222Z`；收起历史过程后按钮仍可见。
+  未重放历史初始工具、未发送新模型消息；本轮未重验真实 OAuth／消息结算。
+
+修复先在独立工作树验证，再将本轮提交仅本机 fast-forward 到 Dream `develop`。
+未推送、发布或重启用户前端／后端／Admin；既有 Next 自动加载源码。
+本机 sandbox HTTP 200，响应 CSP 包含 `sandbox allow-scripts`，设备权限仍关闭；
+原前端、后端、Admin 和官方示例继续监听，无额外沙箱端口监听。
 
 ## 本机操作与隔离回归
 
