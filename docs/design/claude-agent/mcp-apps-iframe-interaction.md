@@ -82,7 +82,7 @@ Server 提供的 App HTML bundle 自己使用 MCP Apps `App` client 和 `PostMes
 | `hostInfo` / `hostCapabilities` | IM Apps 插件 | 只声明实际 `effective` 能力，不回显未经授予的 resource request |
 | callbacks | IM Apps 插件 | 处理打开链接、后续消息、尺寸、错误和明确允许的平台扩展 |
 
-如果 `toolResourceUri` 已由可信 Node 结果明确提供，可直接使用；否则 adapter 通过 Client 调用 `tools/list` 查找。两种方式都必须由 Node transport 限制到当前 Server。adapter 必须用 `@modelcontextprotocol/ext-apps@1.7.5` 的运行时 schema 校验 metadata 和消息，并额外拒绝未知 permission key；TypeScript 类型通过不构成验收。
+如果 `toolResourceUri` 已由通过 actor/workspace/Server 权限校验的 Node 响应提供，可直接使用；否则 adapter 通过 Client 调用 `tools/list` 查找。两种方式都必须由 Node transport 限制到当前 Server。adapter 必须用 `@modelcontextprotocol/ext-apps@1.7.5` 的运行时 schema 校验 metadata 和消息，并额外拒绝未知 permission key；TypeScript 类型通过不构成验收。
 
 ### 3.2 挂载位置
 

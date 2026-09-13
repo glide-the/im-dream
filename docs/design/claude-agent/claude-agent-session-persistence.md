@@ -312,7 +312,7 @@ parts/metadata，不同才替换最近页。无 limit 的完整历史仅保留�
 | `"tool-invocation"`（`isToolUIPart(part)`） | 终端样式工具结果面板（命令 + 输出 + exit code） |
 | `"text"` | Markdown + ReactMarkdown 渲染 |
 
-历史 hydration 中具有可信 `turnStatus=completed + finalPartIndex` 的 assistant
+历史 hydration 中通过 `turnStatus=completed + finalPartIndex` 结构校验的 assistant
 turn 默认只挂载 final；reasoning/tool/intermediate text 的 renderer 在过程折叠时
 不会创建，展开时才按原序挂载。error/cancel/no-final 保留完整诊断渲染。
 

@@ -34,7 +34,7 @@ flowchart LR
 - Settings 是连接、授权、范围和策略的唯一产品配置入口。
 - Chat 只读取服务器状态和来源摘要，点击“管理”回到 Settings。
 - 后台同步只发布轻量索引；Chat 初始化只投影，不运行同步。
-- Settings 的 Skill 行、workspace `.notion/README.md` 与每轮 workspace context 都消费 `build_notion_capability_catalog` 的返回值；README/materializer 和 context 不维护 Skill ID、标题、状态或 revision 的第二份清单。
+- Settings 的 Skill 行、workspace `.notion/README.md` 与每轮 workspace context 都消费 `build_notion_capability_catalog` 的返回值；README 生成函数和 context 不维护 Skill ID、标题、状态或 revision 的第二份清单。
 - Agent 可通过 `notion-session` 的文件导航模型或 `notion-cli` 的 Bash 命令使用 Notion；两者绑定同一个 actor/thread projection。
 - `ntn` 未安装时 Settings 先提示固定安装命令；安装且连接后，`sdk_env` 将四个 `NOTION_*` 变量直接注入 Runtime。
 

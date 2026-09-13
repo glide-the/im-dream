@@ -172,7 +172,7 @@ Notion 授权已经成功，但此前实现把两件不同的事情合成了“s
 7. 正文只进入 thread `.claude-tmp` 0600 临时文件并在 turn 结束清理。
 8. auth/permission/API 错误脱敏且只影响该次 Read；普通 turn/resume/cancel/SSE 不变。
 9. 定时同步与保存 selection 不依赖 Chat；Chat 初始化不运行 index builder。
-10. workspace materializer 的测试证明 README 完整渲染 catalog 返回的每个 Skill、availability、revision 和两类路径；context 测试证明读取该生成段而非静态 Skill 名称。
+10. 工作区文件生成函数的测试证明 README 完整渲染 catalog 返回的每个 Skill、availability、revision 和两类路径；context 测试证明读取该生成段而非静态 Skill 名称。
 11. 后端、Runtime、前端、Skill 和文档自动化测试通过；真实账户链路只有在按本机真实业务测试协议执行后才能作为当次验收证据。
 
 ## 10. 反过度设计评审

@@ -11,7 +11,7 @@
 
 根因是 `chat_message.parts` 同时承载一个 assistant turn 的 reasoning、工具 input/output、中间 text 和最后 final text。前端折叠能避免过程 DOM，却不能阻止消息接口读取和传输已经折叠的过程 JSON。用户展开前并不需要这些过程内容。
 
-现有成功保存路径已经具备可靠分界：`_persist_assistant_turn()` 只在 runner 成功终态调用，`_completed_turn_final_part_index()` 只接受“最后一个 reasoning/tool 之后唯一的非空 text 后缀”。错误、取消或结构不可信的 turn 走 partial/诊断语义。因此 final 投影应在这个服务端成功边界生成，而不是由浏览器猜测数组最后一项。
+现有成功保存路径已经具备可靠分界：`_persist_assistant_turn()` 只在 runner 成功终态调用，`_completed_turn_final_part_index()` 只接受“最后一个 reasoning/tool 之后唯一的非空 text 后缀”。错误、取消或不满足该结构校验的 turn 走 partial/诊断语义。因此 final 投影应在这个服务端成功边界生成，而不是由浏览器猜测数组最后一项。
 
 ## 目标与边界
 
@@ -73,7 +73,7 @@ GET /api/claude-agent/threads/{thread_id}/messages/{assistant_message_id}/proces
 
 路由先验证 Thread 属于当前用户，再读取同 Thread、assistant role、version 1 且 `history_process_available=true` 的完整 canonical message。不存在、跨 Thread、user message、无过程或不可用 projection 均返回同一 404，不泄漏其他用户 message identity。响应复用现有 `PublicChatMessageDto` 的 metadata 隐私和 parts fail-closed 投影，不创建第二套消息 DTO。
 
-前端详情 helper 要求响应 ID、assistant role、strict final 和 turn identity 与列表项一致；不一致视为可重试的详情错误，不用不可信过程替换列表 final。
+前端详情 helper 要求响应 ID、assistant role、strict final 和 turn identity 与列表项一致；不一致视为可重试的详情错误，不用校验失败的过程数据替换列表 final。
 
 ### 加载与合并状态
 

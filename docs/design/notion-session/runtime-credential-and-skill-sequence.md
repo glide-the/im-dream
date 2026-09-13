@@ -55,7 +55,7 @@ sequenceDiagram
     UI->>Auth: 修复后下一 turn，再次刷新并执行同一链路
 ```
 
-该图是当前合同；后文带版本的候选/clean-room 流程仅为历史上下文。
+该图定义当前业务合同；带版本的执行结果仅证明对应版本，不能替代当前验收。
 本轮已在正常历史 thread 完成首轮恢复及两次后续在线 `ntn api v1/search`，
 后两轮保持同一实际 Claude ID，投影每轮更新，刷新历史可见且输入可用。
 首轮本地 Grep 不计 Notion 通过；完整 turn、权限与结算回执见
@@ -155,7 +155,7 @@ sequenceDiagram
     UI->>Service: Agent turn(thread_id, actor)
     Service->>Provider: 读取 actor credential + current index
     Provider->>Provider: LKG 与当前 selection 求交<br/>移除私有 connector 配置
-    Provider->>Catalog: materializer 调用 build_notion_capability_catalog(connector)
+    Provider->>Catalog: 工作区文件生成函数调用 build_notion_capability_catalog(connector)
     Catalog-->>Provider: Skill rows + availability + catalog revision
     Provider->>Runtime: 原子投影 {thread}/.notion-home 与 {thread}/.notion<br/>README 含动态 Skill index
     Service->>Runtime: workspace context 读取同一 README Skill 段

@@ -2,7 +2,6 @@
 <!-- [输出] 定义 Claude SDK 子进程环境、config home、临时根、Runtime 选择与回滚合同。 -->
 <!-- [定位] Claude Agent SDK 环境与进程启动设计真相源。 -->
 <!-- [同步] 2026-08-28：补充认证模型 max-output capability 到 opaque Runtime alias 的投影、所有权与失败规则。 -->
-<!-- [同步] 2026-08-30：默认 public clean-room Runtime 推进到 0.1.4；AutoDL local-core 保持独立制品边界。 -->
 <!-- [同步] 2026-08-25：CLI resolver 仅服务 Agent turn；MCP Resources 管理面改为 Dream PostgreSQL 与标准 MCP SDK。 -->
 <!-- [同步] 2026-09-13：源码合同升级到 SDK 0.2.145 × Runtime 0.1.9；npm 接受 package-root cli.js，另行保留严格资格化的 AutoDL local-core 布局。 -->
 
@@ -22,8 +21,7 @@
 > `ink-claude-dream-agent-sdk==0.2.145` 固定到正式 PyPI 精确版本，
 > `uv.lock`/`requirements.txt` 记录 wheel 与 sdist SHA-256，Docker 使用
 > `--require-hashes`，并排除 official `claude-agent-sdk`。Docker 验证 metadata/import 所有权，只保留显式官方
-> CLI 回滚物。Runtime `0.1.9` 是未发布源码候选；2026-09-13 registry `latest` 仍为已完成五包验收的 `0.1.4`。
-> 当前源码不能与 `0.1.4` 混用，Docker 在 `0.1.9` 正式发布前会在精确 npm 安装处 fail closed。AutoDL local-core 是独立、不可公开分发的制品，不冒充 clean-room 五包。
+> CLI 回滚物。Runtime `0.1.9` 已完成同 SHA 四平台资格、五包公开发布与本机 Dream 采用，见[发布与接入回执](../../deploy/runtime-0.1.9-release-and-local-dream-adoption.md)。Docker 源码固定同一版本，但本次未运行镜像构建；AutoDL local-core 是独立受检制品，不能替代 npm 五包验收。
 
 # Claude SDK 子进程环境与 Runtime 解析设计
 
@@ -242,23 +240,19 @@ session resume、JSONL transcript、workspace cwd、thread-local TMPDIR、sandbo
 `sandbox.notion-cli` 或 selector digest。Python SDK 已从正式 PyPI 按精确版本与
 SHA-256 锁原子切换到自有 distribution，安装环境不再带 Git `direct_url.json`。
 
-当前 Dream 源码固定的是原始模块统一实现 `@glide-the/ink-claude-code-dream@0.1.9` 候选：
+当前 Dream 源码固定的是原始模块统一实现 `@glide-the/ink-claude-code-dream@0.1.9`：
 实际实现来自 Runtime `src`，默认入口为 `src/entrypoints/cli.tsx`，原始源码版权保留，
 Dream-facing CLI 兼容输出为 `2.1.241 (Claude Code)`。该字符串只表示 Dream 所需
 接口资格，不声明官方全产品等价。selector 源位于 Runtime 仓库 `package/`，两个 alias
-都指向 package-root `cli.js`；Bun `1.4.0` 编译原始模块，当前 darwin-arm64 编译已验证。
-计划中的四个平台 standalone 必须重新资格化，不能套用旧 clean-room 实现的证据。
-`0.1.9` 已获用户确认的来源授权，并通过本机同 bundle 的 full qualification；
-四 target/registry 仍须新同 SHA 回执，真实用户业务不在本次 provider-free 验证范围。
-`0.1.5` 回执不能复用，`0.1.4` registry fresh install 仅保留为历史证据。
+都指向 package-root `cli.js`；Bun `1.4.0` 编译原始模块。四个平台已完成同 SHA 资格，五个公开归档 integrity 与 CI 原归档一致，本机安装和服务启动身份已核对。具体证据范围见[发布与接入回执](../../deploy/runtime-0.1.9-release-and-local-dream-adoption.md)，不把制品测试扩大为真实用户业务验收。
 
 Runtime 只保留原始 `src`（1,902 文件、35 模块目录），其目录、模块路径、
-内容和权限摘要保持不变；重复 `restored-src` 与平行 `src/cleanroom` 已删除。
+内容和权限摘要保持不变；重复 `restored-src` 已删除，不维护另一套源码树。
 来源摘要位于 `runtime/source-provenance.json`，原始源码进入构建且保留原版权。
 Dream backend/frontend 项目元数据分别 patch 升级为 `0.1.3`/`0.0.3`，
 SDK 与 API schema 不变；这不代表生产服务更新。
 
-当前 Docker 源码精确安装 selector `0.1.9`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中验证 `cli.js`、相邻 manifest 和 Dream resolver；在该版本正式发布前构建会按设计失败。AutoDL direct-host 部署继续消费单独资格化的 local-core，并由同一 resolver 按其精确 nested-bin 合同校验。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。运行中的服务保留启动时选择的受检 Runtime；更新 PATH 后只重启操作者拥有的进程。
+当前 Docker 源码精确安装 selector `0.1.9`，由 optional dependency 选择匹配 Linux 平台包，并在 build 中验证 `cli.js`、相邻 manifest 和 Dream resolver；精确版本与摘要不符时构建失败，不回退其他版本。本次未运行镜像构建。AutoDL direct-host 部署继续消费单独资格化的 local-core，并由同一 resolver 按其精确 nested-bin 合同校验。official CLI `2.1.241` 后装，确保 `/usr/local/bin/claude` 仍是显式绝对路径回滚；默认 resolver 只选 `ink-claude-code-dream`。两者都缺失时 fail closed。运行中的服务保留启动时选择的受检 Runtime；更新 PATH 后只重启操作者拥有的进程。
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 
@@ -389,7 +383,7 @@ sequenceDiagram
 - `options.env` 原有显式覆盖能力保留，并优先于当前进程环境和 `backend/.env`。
 - 不派生额外 auth key，避免引入未约定的环境变量。
 - 默认模型来源为 Claude Code env 配置，避免 HTTP `request.model` 意外覆盖。
-- Python SDK 缺少 `settingSources` typed 字段时，通过 `extra_args` 兼容当前版本；未来 SDK 增加 typed 字段后可替换实现，外部接口不变。
+- 当前 Python SDK 已提供 `setting_sources`；Dream 仍用既有 `extra_args["setting-sources"]="project"` passthrough 固定项目配置源，避免 SDK 自动发出的 `--setting-sources` 与既有参数组合改变语义。实际 argv 由启动合同测试验证，不新增 SDK 字段或第二套启动逻辑。
 
 ### 7.2 安全性
 
@@ -439,7 +433,9 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 - 命令退出码为 0。
 - 无 Python 语法错误。
 
-## 9. 当前验收状态
+## 9. 实现合同与版本化验收
+
+下列实现项描述当前代码合同；执行结果按日期和版本归入独立回执。2026-08-24 的计数不属于 `0.1.9` 新验收，本轮 Docker 只核对源码安装合同、未构建镜像。当前发布与本机采用见[发布回执](../../deploy/runtime-0.1.9-release-and-local-dream-adoption.md)，MCP Apps 修复与普通 Chat 复验见[恢复回执](../../exec/mcp-apps/local-startup-recovery.md)。
 
 - [x] `server.py` 启动加载 `backend/.env`，并在 Agent factory 前验证自有 SDK/Runtime。
 - [x] Runner 与 `SimpleClaudeAgentSDKClient` 都幂等应用共享 env/settings/TMPDIR helper。
@@ -447,9 +443,9 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 - [x] SDK options 携带 `--setting-sources project`，Workspace 初始化刷新项目 `.claude` 模板且保留 runtime skills。
 - [x] 默认 resolver 只选 qualified `ink-claude-code-dream`；bundled/ambient CLI 不形成第二路径。
 - [x] 本机无 override FastAPI 启动通过；Runtime 使用 Bun 1.4.0 standalone，不依赖 ambient Bun。
-- [x] SDK/Docker/env/registry 聚焦回归 `43 passed + 3 subtests`，相关后端回归 `592 passed + 181 subtests`。
-- [x] 真实账号通过 Chrome Comfy OAuth、两轮 tool call、刷新后同 Thread resume、Logout/Remove，Playwright `1 passed (2.3m)`。
-- [x] Docker 默认拓扑从 npm 安装 selector 与匹配 Linux 平台包；official `/usr/local/bin/claude` 仅作显式回滚。
+- 历史执行结果（2026-08-24）：SDK/Docker/env/registry 聚焦回归 `43 passed + 3 subtests`，相关后端回归 `592 passed + 181 subtests`。
+- 历史执行结果（对应版本）：真实账号通过 Chrome Comfy OAuth、两轮 tool call、刷新后同 Thread resume、Logout/Remove，Playwright `1 passed (2.3m)`。
+- Docker 源码合同：默认从 npm 安装精确 selector 与匹配 Linux 平台包；official `/usr/local/bin/claude` 仅作显式回滚。本轮未执行镜像构建。
 
 ## 10. 风险与回滚方式
 
@@ -462,15 +458,7 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 
 ### 10.2 回滚方式
 
-如需回滚：
-
-1. 移除 `SimpleClaudeAgentSDKClient.query_stream()` 中的 `apply_project_sdk_runtime_options(...)`。
-2. 移除 `ClaudeAgentRunner.run_streaming()` 中的 helper 包装。
-3. 移除 `backend/libs/claude_agent_kit/server/workspace.py` 中每次初始化刷新 `.claude` 模板的逻辑。
-4. 删除 `backend/libs/claude_agent_kit/server/sdk_env.py`。
-5. 删除对应测试用例。
-
-回滚后，Claude Code SDK 子进程将重新依赖调用方显式传入 env 或外部进程环境。
+回滚使用预检过的绝对 `CLAUDE_CODE_CLI_PATH` 或上一已验证的安装树，再仅重启明确拥有的后端服务。依赖版本、安装路径和启动身份保持一致；不删除 `sdk_env.py`、模板刷新或测试，不撤销 config home、settings、TMPDIR 和权限边界，不改变笔记/Thread/Claude 会话身份或持久化格式。
 
 ## 11. 后续优化
 

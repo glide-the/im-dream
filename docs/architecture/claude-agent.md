@@ -12,7 +12,7 @@
 [Sync] 2026-09-06: name the self-owned SDK/Runtime contract explicitly and align the Web caller with the sole Next.js app/_dream source tree.
 -->
 
-**模块目标**：为 Ink & Memory 提供基于自有 `ink-claude-dream-agent-sdk`（公共 import 为 `claude_agent_sdk`）和 manifest-qualified clean-room Runtime 的流式 AI 写作助手后端能力，
+**模块目标**：为 Ink & Memory 提供基于自有 `ink-claude-dream-agent-sdk`（公共 import 为 `claude_agent_sdk`）和 完成 manifest 校验的原始模块 Runtime 的流式 AI 写作助手后端能力，
 支持多轮对话、会话保活（Flyweight 会话池）、工具确认、SSE 流式输出，  
 作为 Voice/Writing/Chat 的单一 Thread SSE Agent runtime，不依赖第二套会话注册表。
 

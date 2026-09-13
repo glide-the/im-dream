@@ -70,7 +70,7 @@ CSP 强制文档 opaque origin。以下指纹和旧回执保留追溯，不能�
 
 - Python 在解密前校验 Node 服务身份、actor、workspace、Server、config/credential/policy revision、enabled 和有限正数有效期；OAuth refresh 后重读权威 record 并返回同步推进的 credential revision，只投影单 Server 短时连接视图。
 - Node 每次请求重验当前视图、manifest、policy 和 allowlist；connection profile 只以不可逆 canonical digest 参与同 revision 漂移判断。adapter session 与短时 view 同步到期，即使 Browser 崩溃或没有后续请求也会移除 secret-bearing view；revision/策略漂移、禁用、不兼容、到期与 provider 失败会使旧 session/connector 失效。catalog 分页有配置上限，携带凭据的上游请求拒绝 redirect。
-- Browser identity 来自 server-owned `mcpAppResult`，包括可信 workspace scope，不会从普通 output metadata 推断；`toolCallId` 不参与授权，error result 只保留普通输出。
+- Browser identity 来自 server-owned `mcpAppResult`，包括由服务端校验 actor/Thread 所有权后的 workspace scope，不会从普通 output metadata 推断；`toolCallId` 不参与授权，error result 只保留普通输出。
 - Phase 1 的页面 tool call 保持拒绝；AppBridge 不持有可自动转发的 SDK Client。Phase 2 只手动开放服务端 App-callable 正向列表明确分类的低风险工具；未列入、显式高风险或需确认的工具在解密/上游调用前拒绝。标准 MCP descriptor 的可选 risk hints 缺失不覆盖服务端显式分类。
 - sandbox 使用隔离文档 origin、两层 `sandbox="allow-scripts"`、零设备权限和闭网 CSP。当前 asset URL 跟随前端入口，响应 CSP 另有 `sandbox allow-scripts`；外层 CSP 保留 inline script/style，因为它会继承到官方 App 的 `srcdoc`；网络、object、base、font、media 仍全部关闭，frame 仅允许内层。
 - `ui/message`、composer、queued prompt 与 retry 共用同一 Chat-owned ingress，Editor 持久化和 turn generation 先于 transport dispatch；`window.im` 在认证 Host 的 `ui/initialize` capability 回执前保持不存在，并只声明 actor-effective 成员，自定义 response namespace 不泄漏到官方 App transport。
@@ -78,7 +78,7 @@ CSP 强制文档 opaque origin。以下指纹和旧回执保留追溯，不能�
 
 ## 6. 失败迭代与最终判定
 
-- 第一轮独立审阅发现 AppBridge 自动转发、跨 scope invalidation、Browser policy/expiry 漂移、workspace 未透传、App 消息绕开 Chat coordinator、redirect/pagination、error-result 投影及 E2E 表述不精确等缺口。候选据此改为 manual handler、exact-scope teardown、双 revision + ping/expiry、trusted workspace、统一 Chat ingress、no-redirect/有界分页、error ordinary-only。
+- 第一轮独立审阅发现 AppBridge 自动转发、跨 scope invalidation、Browser policy/expiry 漂移、workspace 未透传、App 消息绕开 Chat coordinator、redirect/pagination、error-result 投影及 E2E 表述不精确等缺口。候选据此改为 manual handler、exact-scope teardown、双 revision + ping/expiry、按服务端 actor/thread 归属和路径检查的 workspace、统一 Chat ingress、no-redirect/有界分页、error ordinary-only。
 - 第二轮独立审阅又发现 Browser close 未发标准 DELETE、OAuth refresh 后仍可能返回旧 credential revision、同 revision profile 漂移未比较，以及 `window.im.callTool` 可能与 actor-effective policy 失配。当前候选已增加 in-flight-connect 后的标准 DELETE、权威 revision 重读、secret-free canonical profile digest 和认证 Host capability handshake；真实 Chrome 明确验证 close/reopen/Thread switch/plugin disable 的 session/connector/lease 归零或归一。
 - 最终失败路径审阅复现 SDK 1.30 initialize 校验失败会先 abort transport，并发现 tool-only runtime downgrade 可能产生矛盾的 `window.im` status。Browser cleanup 现在先尝试 SDK termination，失败时以同 scope header 和新 AbortSignal 执行有界 DELETE，finally 关闭本地 Client；清理完成后再次核对 effect lifecycle，旧 Thread/revision 不得向新连接写入错误。Node adapter 另以 view expiry 回收无后续请求的 session。status 的 `windowIm` 改由 effective method 可用性派生；真实 SDK 单测、延迟 lifecycle 单测、Runtime expiry 单测与独立 actual-Chrome tool-only 回归均通过。
 - 同一独立审阅者在上述失败路径修复后完成最终 re-audit，结论为无 P1/P2 阻断；最终 actual-Chrome official run 也保持 `unexpectedDiagnostics=[]`。

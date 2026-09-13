@@ -31,13 +31,13 @@ Scope: 设计 + 方案代码合同 — Claude Agent 使用 Notion 资源连接�
 | Agent 本地维护 Notion context | 不符合目标 | Agent 只能维护 derived context，不能成为 source of truth |
 | 双向实时写回 | 过度设计 | 本期仅设计 proposal/write pipeline 边界，不接真实写入 |
 
-当前目标：任意 Agent 在初始化访问同一个 `workspaceId + resourceConnectorId + snapshotVersion` 时，必须读取同一个由资源连接器数据层物化的 canonical snapshot。
+当前目标：任意 Agent 在初始化访问同一个 `workspaceId + resourceConnectorId + snapshotVersion` 时，必须读取同一个由资源连接器数据层生成的索引快照。
 
 ---
 
 ## 2. Source Of Truth
 
-Notion 是远程外部事实来源，但 Agent 不直接把远程返回值当成运行时权威状态。系统内部的权威状态是资源连接器数据层物化出的 canonical snapshot。
+Notion 是远程外部事实来源，但 Agent 不直接把远程返回值当成运行时权威状态。系统内部的权威状态是资源连接器数据层生成的索引快照。
 
 ```
 Notion Remote Source
@@ -63,7 +63,7 @@ Notion Remote Source
 stateDiagram-v2
     [*] --> pending_sync: connector selected resources
     pending_sync --> synced: Notion sync completed
-    synced --> snapshot_ready: materialize canonical snapshot
+    synced --> snapshot_ready: generate canonical index snapshot
     snapshot_ready --> agent_attached: agent init / workspace attach
     agent_attached --> derived_context_ready: trim, rank, summarize
     derived_context_ready --> write_proposed: user/agent proposes patch
@@ -83,7 +83,7 @@ stateDiagram-v2
 |---|---|---|
 | `pending_sync` | 已配置连接器，等待数据层同步 | 显示同步中，不允许 Agent 读取 Notion 内容 |
 | `synced` | 远程数据已同步到连接器数据层 | 显示最近同步时间 |
-| `snapshot_ready` | canonical snapshot 已物化 | 可开始对话 |
+| `snapshot_ready` | 索引快照已生成 | 可开始对话 |
 | `agent_attached` | Agent 初始化并绑定快照版本 | 显示 Agent 正在使用的版本 |
 | `derived_context_ready` | Agent 完成本地裁剪/摘要 | 正常回答 |
 | `write_proposed` | Agent 产生写入 proposal | 显示差异预览和确认点 |
@@ -167,7 +167,7 @@ sequenceDiagram
     alt identity matches
         Pipe->>Notion: submit remote write
         Notion-->>Pipe: confirmed remote revision
-        Pipe->>Data: sync and materialize new snapshot version
+        Pipe->>Data: sync and generate a new index snapshot version
         Data->>Bus: session_updated(source="agent", toolCallId)
         Bus-->>FE: event
         FE->>FE: GET session/workspace after event

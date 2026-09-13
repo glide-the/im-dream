@@ -299,7 +299,7 @@ class AuthRevokedError(AuthError):
 
 数据层负责：
 
-- 从 Operation Layer 的 Notion data-source query 结果中物化 index-only `CanonicalWorkspaceSnapshot`
+- 从 Operation Layer 的 Notion data-source query 结果中生成 index-only `CanonicalWorkspaceSnapshot`
 - 维护 current snapshot 指针、历史版本和审计字段
 - 为任意 Agent 初始化提供同一 `workspaceId + connectorId + snapshotVersion` 下的一致快照
 - 通过 `.notion/` 投影 snapshot 的资源 ID 与紧凑元数据
@@ -369,12 +369,12 @@ class DataLayerProtocol(ABC):
 
     @abstractmethod
     async def sync_full(self, workspace_id: str, connector_id: str) -> SyncResult:
-        """全量同步并物化新的 canonical snapshot。"""
+        """全量同步并生成新的索引快照。"""
         ...
 
     @abstractmethod
     async def sync_incremental(self, workspace_id: str, connector_id: str) -> SyncResult:
-        """增量同步并在有变更时物化新的 canonical snapshot。"""
+        """增量同步并在有变更时生成新的索引快照。"""
         ...
 
     @abstractmethod
@@ -469,7 +469,7 @@ class DataLayerError(Exception):
     pass
 
 class SnapshotNotReadyError(DataLayerError):
-    """连接器尚未物化可用 snapshot。"""
+    """连接器尚未生成可用快照。"""
     pass
 
 class SnapshotConflictError(DataLayerError):
@@ -499,7 +499,7 @@ class RateLimitError(DataLayerError):
 
 操作层**不**负责：
 - 认证管理（通过 Auth Layer 获取凭证）
-- 快照版本管理（操作结果交给 Data Layer 物化 snapshot）
+- 快照版本管理（操作结果交给 Data Layer 生成快照）
 - 调度编排（由 Task Layer 驱动批量操作）
 
 ### 4.2 操作类型分类
@@ -756,7 +756,7 @@ class ResourceNotFoundError(OperationError):
 
 任务层**不**负责：
 - 底层 API 调用（委托 Operation Layer）
-- 快照内容解析（通知 Data Layer 物化 snapshot）
+- 快照内容解析（通知 Data Layer 生成快照）
 - 认证流程细节（委托 Auth Layer）
 
 ### 5.2 任务状态机
@@ -914,7 +914,7 @@ class TaskOrchestrator:
         2. 获取 Database 列表
         3. 逐 DB 查询 Row Pages
         4. 获取 Standalone Pages
-        5. Data Layer 物化 canonical snapshot
+        5. Data Layer 生成索引快照
         6. 更新 current snapshot pointer
         """
         task.status = TaskStatus.RUNNING
@@ -950,7 +950,7 @@ class TaskOrchestrator:
             standalone_pages = page_result.results
             task.progress.completed_items += 1
 
-            # Step 5: 物化 canonical snapshot
+            # Step 5: 生成索引快照
             sync_result = await self._data.sync_full(task.workspace_id, task.connector_id)
             task.metadata["snapshot_version"] = sync_result.snapshot_identity.snapshot_version
 
@@ -969,7 +969,7 @@ class TaskOrchestrator:
         1. 验证认证状态
         2. 检测变更页面
         3. 同步变更内容
-        4. 有变更时物化新 snapshot
+        4. 有变更时生成新快照
         """
         ...
 

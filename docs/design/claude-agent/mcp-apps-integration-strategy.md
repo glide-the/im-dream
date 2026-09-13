@@ -11,6 +11,8 @@
 <!-- [同步] 2026-09-06：连接详情将完整 App 控制收敛进“使用策略”区域；修改通过串行 CAS 自动保存，冲突基于最新 revision 重放本地字段，失败保留选择并自动重试。 -->
 <!-- [同步] 2026-09-06：页面只呈现 desired 开关与可恢复保存错误；availability/effective 保留为 Runtime 内部组合语义，不在设置页展示。 -->
 <!-- [同步] 2026-09-13：sandbox asset 跟随实际前端入口；两层 iframe 和响应 CSP 保持 opaque 文档隔离，不另启固定端口服务。 -->
+<!-- [同步] 2026-09-13：原 Runtime SDK wire result 先做 content 形状适配；已批准工具保留关联至结果到达，不冒充完整上游字节。 -->
+<!-- [同步] 2026-09-13：按通用产品设计原则补齐结果适配问题、边界和验收；用明确的校验与数据转换替代抽象标签。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
@@ -34,6 +36,11 @@ MCP Server 仍是一个模块：它提供工具、资源和业务结果。支持
 
 原设计选择 `AppRenderer` 统一承担资源、bridge 和 iframe。task_301 的 P0-04 运行证据证明 7.1.1 丢失 resource permissions、Host sandbox override 和 outer iframe `allow`，因此当前精确版本改由最小 Host adapter 补齐安全边界，不恢复旧的 Browser/Node 私有协议。
 
+本次正常 Chat 回归还暴露 SDK 结果形状不兼容：原 Runtime 会把 structuredContent
+转为文本，Dream 却要求 content 数组；批准分支提前删除 pending call，导致结果
+缺少工具名。修复范围是 Dream Kit 的 SDK 消息转换和调用关联生命周期，不是 MCP
+连接配置、sandbox 服务地址或新 Host 架构。
+
 ## 2. 目标与边界
 
 ### 2.1 目标
@@ -44,6 +51,8 @@ MCP Server 仍是一个模块：它提供工具、资源和业务结果。支持
 - Node 过滤并代理 Browser 发出的 MCP tools/resources 请求。
 - App 页面可以继续调用同一 MCP Server 的授权工具，也可以通过 `ui/message` 请求新的 Agent turn。
 - 不支持 Apps、插件关闭或页面失败时继续显示同一次普通 tool result。
+- 新 Chat 调用、App 按钮和历史按需加载复用既有流程；保留 SDK 实际发出的
+  文本及 envelope 字段，不重放原工具或声称恢复已被 Runtime 转换的数据。
 
 ### 2.2 非目标
 
@@ -90,7 +99,7 @@ flowchart LR
 2. **用户配置连接。** Settings 仅向 PostgreSQL 写当前 actor/workspace 的 `desired`；Runtime 再把它与连接、部署、凭据、descriptor 和服务端策略组合为 `effective`，页面不展示该实际状态。
 3. **Discovery 确定 App 身份。** 受管 Server 的 fresh `tools/list` descriptor 必须为具体 tool 声明 `_meta.ui.resourceUri`，且该 `ui://` resource 存在。每个 Chat turn 开始前，Dream 只为服务端策略选中的 App Server 刷新缺失或过期 inventory。
 4. **模型执行首次工具调用。** Claude Agent Runtime 沿既有 MCP 路径选择工具、发送 input 并收到完整 `CallToolResult`；这一步不由 Browser App 触发。
-5. **Python 生成可信 App 投影。** 只有 Server/tool 与 fresh descriptor 精确匹配的成功结果，才会在完整普通结果旁增加版本化 `mcpAppResult`；其中绑定 `serverRef`、原始 tool name、`toolCallId`、input、workspace scope、resource URI 和原始 result。不从工具输出中猜 UI 地址。
+5. **Python 转换 SDK 结果并校验 App 结果 DTO。** 原 Runtime 的 SDK `tool_use_result` 可能是文本、content 数组，或 `content` 为文本的 metadata envelope。仅在一条 result 与 pending MCP call 的 tool-use ID 匹配时，将文本原样包为 text block、数组包为 content，并保留 SDK envelope 的其余字段；完整 envelope 不变。不从模型 block 或 normalized JSON 构造结果，不声称恢复 Runtime 已转换掉的上游字节。工具批准后保留 pending call 至执行结果到达，再移除关联。随后只有 Server/tool 与当前 tools/list descriptor 精确匹配的成功结果，才生成版本化 `mcpAppResult`；包含 `serverRef`、原始 tool name、`toolCallId`、input、workspace scope、resource URI 和转换后的 result。UI 地址仍只取 descriptor，错误、不受管或关联不唯一的结果不生成 App DTO。
 6. **结果经同一 Chat 流持久化。** 实时 SSE/reconnect 先把完整 parts 交给页面；完成恢复只在 turn 身份和最终文本精确匹配时保留已呈现过程。历史 detail 仍读 canonical parts，修复前 user-scope 结果只能在 fresh descriptor 再次精确匹配时补投影，全程不重放原始工具。
 7. **Chat 分离“过程”与“交互结果”。** reasoning 和普通 tool Input/Output 进入完成 turn 的折叠区；通过严格投影校验的 `mcp-app-panel` 作为折叠区外的单实例常驻。折叠不会卸载 App，展开不会复制 App。
 8. **Browser Host 建立受控连接。** Host 先读当前 actor/Server/workspace/revision 的 effective policy，再用标准 Browser MCP Client 连接同源 Next Route Handler。Node 向 Python 索取短时、单 Server、脱敏建连视图，由 `PersistentConnectorManager` 建立或复用真实上游 session；Browser 永远拿不到真实 URL、header、stdio command、env 或 credential。
@@ -108,13 +117,16 @@ sequenceDiagram
     actor U as 用户
     participant A as Claude Agent Runtime
     participant S as MCP Server 模块
+    participant P as Dream Kit SDK adapter + DTO validation
     participant B as Browser Client + Host adapter
     participant N as Node Apps Runtime
 
     U->>A: 正常 Chat 消息
     A->>S: tools/call
     S-->>A: CallToolResult
-    A-->>B: 现有工具结果<br/>server、tool、call、input、result
+    A-->>P: SDK wire result<br/>text / array / metadata envelope
+    P->>P: 单一 MCP call 关联、content 适配<br/>managed registry + fresh descriptor 校验
+    P-->>B: 同一 SSE / saved parts / public DTO<br/>普通结果 + mcpAppResult
     B->>N: Client.connect(受控 Streamable HTTP transport)
     N->>S: 建立或复用受控上游 MCP 连接
     B->>N: tools/list / resources/read(ui://...)
@@ -129,13 +141,19 @@ sequenceDiagram
 
 - Session Start、工具选择和首次调用仍由 Claude Agent Runtime 负责。
 - UI URI 来自 Tool descriptor，不从 `CallToolResult` 猜测。
-- discovery 仅把 Tool descriptor 中的 App resource 绑定脱敏保存；当前 turn 的 managed Server registry 与该 fresh 绑定共同生成 `serverRef`、上游原始 tool name、`toolCallId`、tool input、resource URI 和完整 `CallToolResult` 投影。`CallToolResult` 不要求也不信任 UI metadata。
+- Python adapter 保留 SDK 已发出的文本及 envelope 字段；首轮 Agent 结果不冒充
+  上游原始字节。Node 代理 App 内调用仍返回标准 MCP 原始 `CallToolResult`。
+  旧记录若只剩 normalized JSON、缺少可验证的完整 result，保留普通结果而不
+  伪造 metadata；补投影不重放工具。
+- discovery 仅把 Tool descriptor 中的 App resource 绑定脱敏保存；当前 turn 的 managed Server registry 与该 fresh 绑定共同生成 `serverRef`、上游原始 tool name、`toolCallId`、tool input、resource URI 和适配后的 SDK 结果投影。结果不要求也不信任 UI metadata。
 - 修复前已保存、但缺少 Apps 投影的 user-scope 成功结果，只能在当前 actor 的 fresh descriptor 精确匹配同一 Server/tool/resource 后由 history DTO 补投影；不匹配、过期、普通 MCP 或错误结果继续只显示原结果，且不会重放首次工具。
-- `serverRef` 只是 Browser 选择受控 Node MCP endpoint 的不可信路由参数；Node 必须根据当前 IM 登录用户和 workspace 重新验证该 Server 已启用。`toolCallId` 只关联 Chat 结果和诊断，不作为授权凭证、MCP session 标识或上游连接选择条件。
+- `serverRef` 是 Browser 提交的路由参数，本身不证明访问权限；Node 必须根据当前 IM 登录用户和 workspace 重新验证该 Server 已启用。`toolCallId` 只关联 Chat 结果和诊断，不作为授权凭证、MCP session 标识或上游连接选择条件。
 - Host adapter 使用独立的 Browser MCP Client 获取 descriptor 和完整 resource，但不重复执行创建页面的原始工具调用。
 - App 内 `tools/call` 是页面局部交互，不触发模型。
 - App 发出 `ui/message` 时，IM 才把消息提交给现有 Chat ingress，开始新的 Agent turn。
-- `content` / `structuredContent` 始终保留，作为模型输入和失败 fallback。
+- 首轮 Agent 结果只保留 SDK 实际发出的 `content` / `structuredContent` 等字段，
+  不补造 Runtime 已丢弃的数据；App 内 Node 调用保留标准 MCP 结果。
+  普通 tool result 始终作为失败 fallback。
 
 若目标 Server 把业务状态只保存在 Agent Runtime 的某条物理连接里，Browser 经 Node 建立的新 MCP session 可能看不到该状态。首期只接入不依赖连接私有状态的 Server；其他 Server 需先完成共享状态验证。
 
@@ -263,11 +281,18 @@ Host adapter 作为 IM Apps 插件的浏览器入口；`PersistentConnectorManag
 
 ## 7. 测试与 Go / No-Go
 
+本次 SDK 结果修复影响共用 Runner、权限确认、SSE、保存的 Chat parts 和
+history DTO。验收必须包含新工具调用后显示 App、按钮更新但不产生新模型消息、
+刷新历史后从保存结果恢复、收起过程后仍可操作；同时覆盖错误、多结果、缺少
+调用关联与非 MCP 工具。实际命令与分层结果见
+[本机修复回执](../../exec/mcp-apps/local-startup-recovery.md#验证与操作回执)。
+不增加新状态、确认弹窗、数据库修复、通用重试或历史工具重放。
+
 必须验证：
 
 - 官方示例 App 经 Browser Client → Node transport → MCP Server 完成 initialize、tools/list、resources/read 和 iframe 初始化；
 - 页面内 `tools/call` 由标准 AppBridge 转发，但 Node 对未授权 Server/tool 拒绝且不访问上游；
-- tool result 事件能结合 fresh `tools/list` descriptor 提供稳定 `serverRef`、原始 tool name、`toolCallId`、input、resource URI 和完整 data-only `CallToolResult`；
+- 首轮 Agent tool result 的 SDK 文本/数组/envelope 先按 §3.2 适配，结合 fresh `tools/list` descriptor 提供稳定 `serverRef`、原始 tool name、`toolCallId`、input、resource URI 和 SDK 已发出的结果字段；App 内调用仍使用标准 `CallToolResult`；
 - 普通工具、无 `_meta.ui.resourceUri` 的工具和不支持 Apps 的客户端只显示原结果；
 - resource MIME 错误、CSP 拒绝、iframe 超时、Node 断线、上游断线和 OAuth 失效均可降级；
 - Browser 请求、日志和页面中不出现上游 MCP 地址、OAuth token、headers 或 stdio env；

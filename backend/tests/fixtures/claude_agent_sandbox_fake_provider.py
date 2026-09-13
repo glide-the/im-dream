@@ -2,10 +2,11 @@
 """Deterministic Anthropic SSE provider for a real Docker Claude sandbox probe.
 
 [Input] HTTP POST requests from a test-owned Claude Code CLI, caller-supplied listen port, and optional fixed Bash/final-text fixtures.
-[Output] One configurable Bash tool_use followed by one end_turn response; no external model/OAuth traffic.
+[Output] One configurable tool_use followed by one end_turn response; Bash remains the default, no external model/OAuth traffic.
 [Pos] Manual/CI container compatibility fixture, outside production runtime.
 [Sync] 2026-08-19: add provider-free CLI 2.1.235 Bash and credential deny-read validation.
 [Sync] 2026-09-04: expose a reusable handler factory for process-isolated notion-cli Runtime contracts while preserving CLI defaults.
+[Sync] 2026-09-13: accept an explicit test-owned MCP tool name/input to cover original Runtime result transport.
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ def _response(
     use_tool: bool,
     command: str = _DEFAULT_COMMAND,
     final_text: str = _DEFAULT_FINAL_TEXT,
+    tool_name: str = "Bash",
+    tool_input: dict[str, Any] | None = None,
 ) -> bytes:
     if use_tool:
         events = (
@@ -61,7 +64,7 @@ def _response(
                     "content_block": {
                         "type": "tool_use",
                         "id": "toolu_sandbox_probe",
-                        "name": "Bash",
+                        "name": tool_name,
                         "input": {},
                     },
                 },
@@ -73,7 +76,7 @@ def _response(
                     "index": 0,
                     "delta": {
                         "type": "input_json_delta",
-                        "partial_json": json.dumps({"command": command}),
+                        "partial_json": json.dumps({"command": command} if tool_input is None else tool_input),
                     },
                 },
             ),
@@ -142,6 +145,8 @@ def build_handler(
     final_text: str = _DEFAULT_FINAL_TEXT,
     requests_seen: list[dict[str, Any]] | None = None,
     announce_requests: bool = True,
+    tool_name: str = "Bash",
+    tool_input: dict[str, Any] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """Build an isolated deterministic Provider handler for one test server."""
 
@@ -182,6 +187,8 @@ def build_handler(
                     use_tool=not has_tool_result,
                     command=command,
                     final_text=final_text,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
                 )
                 content_type = "text/event-stream"
                 if announce_requests:

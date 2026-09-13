@@ -75,7 +75,7 @@ Dream 的生产路径当前只承诺普通 MCP 工具与普通结果。代码基
 
 ### 3.2 不可改变的规则
 
-1. `serverRef` 是不可信选择器，Node 必须按当前登录用户、workspace 和 managed MCP 配置重新验证。
+1. `serverRef` 是客户端选择参数，不证明权限；Node 必须按当前登录用户、workspace 和 managed MCP 配置重新验证访问权限。
 2. `toolCallId` 只用于 Chat 结果关联、审计和诊断，不作为权限凭证或上游连接选择条件。
 3. Browser 和 App 永远不获得真实 MCP Server URL、OAuth token、headers、stdio command 或 env。
 4. Python 在解密投影时短时接触明文；Node 只在内存中用于建连和连接存续，不写日志、磁盘或 Browser 响应。

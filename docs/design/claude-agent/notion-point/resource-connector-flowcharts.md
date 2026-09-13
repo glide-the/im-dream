@@ -53,7 +53,7 @@ flowchart TD
     K --> L[用户选择要同步的资源]
     L --> M[Task Layer: 提交全量同步任务]
     M --> N[Data Layer: 全量同步远程数据]
-    N --> O[Data Layer: 物化 canonical snapshot]
+    N --> O[Data Layer: 生成索引快照]
     O --> P[连接器创建完成 ✓]
 
     P --> Q[用户进入对话]
@@ -173,7 +173,7 @@ flowchart TD
     H -->|否| M[Operation Layer: search pages]
     M --> N[获取 Standalone Pages]
     N --> O[过滤用户选定的 Pages]
-    O --> P[Data Layer: 物化 CanonicalWorkspaceSnapshot]
+    O --> P[Data Layer: 生成 CanonicalWorkspaceSnapshot]
     P --> Q[Data Layer: 更新 current snapshot pointer]
     Q --> R[任务完成 ✓]
     R --> S[发布事件: SNAPSHOT_MATERIALIZED]
@@ -197,7 +197,7 @@ flowchart TD
     I -->|否| K[逐页同步变更]
 
     K --> L[Operation Layer: get changed pages]
-    L --> M[Data Layer: 物化新 snapshotVersion]
+    L --> M[Data Layer: 生成新的 snapshotVersion]
     M --> N[旧 snapshot → snapshot_superseded]
     N --> O[更新 checkpoint/current pointer]
     O --> P[任务完成 ✓]
@@ -215,7 +215,7 @@ flowchart TD
     D -->|否| F[返回 snapshot-scoped miss]
     F --> G[Agent 提示用户刷新连接器或选择已同步页面]
     G --> H[前端可触发 Sync now]
-    H --> I[Data Layer 物化新 snapshotVersion]
+    H --> I[Data Layer 生成新的 snapshotVersion]
 ```
 
 ---
@@ -336,7 +336,7 @@ flowchart TD
     H --> I[更新进度: completed++]
     I --> J{所有子任务完成?}
     J -->|否| F
-    J -->|是| K[物化新 canonical snapshot]
+    J -->|是| K[生成新索引快照]
 
     D -->|有移除资源| L[Data Layer: 从新 snapshot 中移除资源]
     L --> M[旧 snapshot → snapshot_superseded]
@@ -387,7 +387,7 @@ sequenceDiagram
     Task->>Ops: query_database(db_id) × N
     Ops-->>Task: Row Pages[]
     Task->>Data: sync_full(workspace_id, connector_id)
-    Data->>Data: 物化 canonical snapshot
+    Data->>Data: 生成索引快照
     Data-->>Task: SyncResult{snapshot_identity}
     Task->>Bus: publish(SNAPSHOT_MATERIALIZED)
     Task-->>FE: Task{COMPLETED}
@@ -455,7 +455,7 @@ flowchart TD
     M -->|是| J
     M -->|否| N[任务失败: 超时]
 
-    D -->|ResourceNotFoundError| O[Data Layer: 物化移除该资源的新 snapshot]
+    D -->|ResourceNotFoundError| O[Data Layer: 生成已移除该资源的新快照]
     O --> P[旧 snapshot → snapshot_superseded]
 
     D -->|AuthCLINotFoundError| Q[返回友好错误]
@@ -525,7 +525,7 @@ stateDiagram-v2
     [*] --> pending_sync: 创建连接器
 
     pending_sync --> synced: 远程同步成功
-    synced --> snapshot_ready: 物化 canonical snapshot
+    synced --> snapshot_ready: 生成索引快照
     snapshot_ready --> agent_attached: Agent init / workspace attach
     agent_attached --> derived_context_ready: Agent 裁剪/摘要
 

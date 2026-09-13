@@ -213,7 +213,13 @@ Default policy, your saved choice, and actual server status remain separate. A s
 
 You can close and reopen the interactive view. Refreshing, switching Threads, changing permissions, or changing the connection revision creates a fresh governed session; the original tool is not replayed.
 
-The complete engineering flow—connection discovery, model tool call, trusted result projection, live/history recovery, Browser Host, Node proxy, sandbox, permissions, and Chat-message re-entry—is documented in [MCP Apps and IM Agent UI design](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链).
+Dream adapts the original Runtime's SDK MCP text, content-array and metadata-envelope
+results into App-compatible content without parsing text or changing permissions.
+After updating Python code, restart your owned backend before testing a new normal
+Chat tool call. Older rows that lost the SDK envelope retain their ordinary result;
+Dream does not fabricate missing metadata or replay those tools.
+
+The complete engineering flow—connection discovery, model tool call, call-ID association and result DTO validation, live/history recovery, Browser Host, Node proxy, sandbox, permissions, and Chat-message re-entry—is documented in [MCP Apps and IM Agent UI design](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链).
 
 ## Supported versions and ownership
 
@@ -236,7 +242,7 @@ Package ownership is intentional: `uv` manages Dream's Python environment, npm d
 
 For Notion `Failed to read config.json`, distinguish file-read failure from malformed JSON and inspect the final Agent Bash binding. Runtime 0.1.9 rejects relative PATH entries before its native `ntn` candidate. Dream omits only relative directories proven absent at the current thread cwd from that bound launch's SDK environment, preserving valid command order and all strict shadow checks. It does not change shell profiles, parent PATH, credentials, or non-Notion turns. `ntn doctor` exit 0 alone is insufficient: inspect warnings and verify a read-only request through normal Chat.
 
-Runtime `0.1.9` keeps the original modules as its single `src` implementation (1,902 unchanged files, 35 original module directories) and removes the duplicate `restored-src` directory. The default build reads `src/entrypoints/cli.tsx`; no parallel `src/cleanroom` remains. Source-bound headless, MCP and Dream compatibility transforms stay in the build layer. Original copyright and the user-attested redistribution boundary are preserved in the artifact. Dream's exact Runtime pin and project metadata move together; local adoption requires verified public archives and the owned backend's startup identity, not merely source edits. See the [release and local Dream adoption plan](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md).
+Runtime `0.1.9` keeps the original modules as its single `src` implementation (1,902 unchanged files, 35 original module directories) and removes the duplicate `restored-src` directory. The default build reads `src/entrypoints/cli.tsx`; no second Runtime implementation is maintained. Source-bound headless, MCP and Dream compatibility transforms stay in the build layer. Original copyright and the user-attested redistribution boundary are preserved in the artifact. Dream's exact Runtime pin and project metadata move together; local adoption requires verified public archives and the owned backend's startup identity, not merely source edits. See the [release and local Dream adoption plan](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md).
 
 Admin Drizzle is the only owner of shared PostgreSQL migrations. Dream consumes exact published capabilities and fails closed when a required capability is missing. MCP App connection settings require Admin migration `0053_rare_lenny_balinger` and capability `dream.mcp-app-connection-settings.v1` before the matching Dream code is released.
 

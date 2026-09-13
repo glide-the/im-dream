@@ -91,7 +91,7 @@ Browser 仍会在 Chrome 中建立网络连接，但目标是 IM Node 端点，�
 
 SSE 只可能作为 Streamable HTTP 响应形式出现，不再单独定义 Apps 事件流。既有 Claude Agent SSE 和语音 WebSocket 保持原入口，与此端点无关。
 
-Node 不应采用 UI Inspector 示例中由 Browser query 指定上游 URL、command 或 env 的开放代理模式。Browser 只提交不可信 `serverRef` 和 workspace selector；Node 把现有 Bearer 与 selector 交给 Python connection-view provider，只有 Python 返回通过 actor/workspace/Server/revision 校验的短时 view 后才选择上游。
+Node 不应采用 UI Inspector 示例中由 Browser query 指定上游 URL、command 或 env 的开放代理模式。Browser 只提交 `serverRef` 和 workspace selector，这些参数不证明访问权限；Node 把现有 Bearer 与 selector 交给 Python connection-view provider，只有 Python 返回通过 actor/workspace/Server/revision 校验的短时 view 后才选择上游。
 
 ### 3.3 `PersistentConnectorManager`
 
@@ -133,7 +133,7 @@ Python 在解密投影时短时生成建连配置，Node 接收后只在内存�
 Browser Client 使用现有 IM 登录态连接按 `serverRef` 路由的 Node MCP endpoint：
 
 - Node 只转发现有 Bearer 和 workspace/Server selector；Python 解析 actor 并校验 workspace/Server，Browser 传入的身份字段一律不作为事实源；
-- `serverRef` 是不可信选择器，必须对应当前 actor/workspace 已启用的 managed MCP Server；
+- `serverRef` 是客户端选择参数，必须对应当前 actor/workspace 已启用的 managed MCP Server，并由服务端验证访问权限；
 - Node endpoint 只暴露该 Server 中当前用户可见的 tool/resource catalog；每次 `tools/call`、`resources/read` 都再次执行 allowlist 与权限检查；
 - Browser 不能通过 path、query 或请求体覆盖真实 Server URL、credential、stdio command 或配置 revision；
 - `toolCallId` 留在 Chat 工具结果中用于渲染关联、审计和诊断，不进入 MCP endpoint 的授权判断，也不选择上游连接；
