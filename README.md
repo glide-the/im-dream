@@ -6,6 +6,7 @@
 <!-- [Sync] 2026-09-06: align connection creation and App controls with the accessible Server modal and unified MCP usage-policy form. -->
 <!-- [Sync] 2026-09-12: add the recoverable explicit-origin NATAPP edge-relay operator path. -->
 <!-- [Sync] 2026-09-13: adopt SDK 0.2.145 and the published Runtime 0.1.9 package-root selector contract. -->
+<!-- [Sync] 2026-09-13: serve the opaque MCP Apps sandbox through the current frontend entry without a fixed second port. -->
 
 # Ink & Memory
 
@@ -152,13 +153,30 @@ Open:
 
 ## Use MCP Apps
 
+### Local preview services
+
+Keep the existing Admin, backend and Next.js services. Start the external MCP
+Server before opening its connection detail; Next.js already includes the Host.
+With the existing preview/plugin policy configured, Next.js also serves
+`/mcp-apps-sandbox`. Its URL follows the browser's current frontend scheme,
+hostname and port; no separate sandbox process or port is required. Legacy
+`INK_MCP_APPS_SANDBOX_URL` and `INK_MCP_APPS_PARENT_ORIGINS` are no longer used.
+Both iframe layers and the sandbox response CSP enforce opaque document origins
+without `allow-same-origin`; sharing the frontend URL does not grant App content
+access to the frontend DOM or storage. Authentication and permissions are unchanged.
+If discovery ran before the MCP Server started, re-enter or refresh the detail
+page after starting it; valid cached failures may remain until their TTL expires.
+If an App has already fallen back, use **Try interactive view again** after
+the frontend and external MCP Server are available.
+See the [local recovery design and evidence](docs/exec/mcp-apps/local-startup-recovery.md).
+
 ### Add a connection and enable its App
 
 1. Sign in to Dream and open **Settings → Resource Links**.
 2. Click **Add MCP Service**, enter the managed endpoint in the dialog, or open an existing connection, then complete its authentication.
 3. On the connection detail page, find **Usage policy**.
 4. Turn on **Use App in Chat**. If needed, also allow **Low-risk tool calls** and **Send messages to this chat**.
-5. Click **Save usage policy**, then compare the default policy, your saved choice, and the actual server status.
+5. Changes save automatically. A save failure retains your choice and retries; do not look for a save button.
 
 These screenshots use safe example data and the real production UI components; they contain no account details or secrets.
 
@@ -168,7 +186,7 @@ These screenshots use safe example data and the real production UI components; t
 
 ![Enable the MCP App and choose its permitted interactions](assets/mcp-apps-guide/02-configure-mcp-app.png)
 
-*One usage-policy form contains the App switch, interaction permissions, default, saved choice, revision, actual status, and the only save action.*
+*One usage-policy group contains the App switch and interaction choices. The current UI saves automatically and no longer displays the historical screenshot's status or save footer.*
 
 Default policy, your saved choice, and actual server status remain separate. A switch may be on while the App remains unavailable if the connection is offline, the Server does not advertise an App, or the server-side preview policy does not allow it.
 

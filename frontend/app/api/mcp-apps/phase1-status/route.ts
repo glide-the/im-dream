@@ -3,6 +3,7 @@
 // [Pos] Next policy projection for the Browser Host; it grants no upstream authority.
 // [Sync] 2026-09-06: derive Browser and window.im capabilities from one actor-effective runtime-policy snapshot in app/_dream.
 // [Sync] 2026-09-06: intersect per-connection user choices with hidden deployment and server capabilities.
+// [Sync] 2026-09-13: return a relative Next sandbox URL so scheme/hostname/port follow the Browser entry without a second listener.
 
 import {
   readCurrentMcpAppsStaticView,
@@ -12,7 +13,7 @@ import {
   type McpAppsStaticView,
   type McpAppConnectionSettingsView,
 } from '@ink-dream/mcp-apps-runtime';
-import { MCP_APPS_HOST_MANIFEST } from '../../../_dream/components/chat/mcp-apps/host-policy';
+import { MCP_APPS_HOST_MANIFEST, mcpAppsSandboxUrl } from '../../../_dream/components/chat/mcp-apps/host-policy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,23 +39,6 @@ function configuredPositiveInteger(value: string | undefined, fallback: number):
 
 function enabled(value: string | undefined): boolean {
   return value === 'true';
-}
-
-function resolveSandboxUrl(
-  value: string | undefined,
-  applicationOrigin: string,
-  revision: string | null,
-): string | null {
-  if (!value || !revision) return null;
-  try {
-    const candidate = new URL(value);
-    if (!['http:', 'https:'].includes(candidate.protocol) || candidate.origin === applicationOrigin) return null;
-    candidate.searchParams.set('v', MCP_APPS_HOST_MANIFEST.version);
-    candidate.searchParams.set('revision', revision);
-    return candidate.href;
-  } catch {
-    return null;
-  }
 }
 
 async function currentRuntimePolicy(request: Request): Promise<McpAppsStaticView | null> {
@@ -88,7 +72,6 @@ async function currentConnectionSettings(
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
-  const applicationOrigin = requestUrl.origin;
   const serverRef = requestUrl.searchParams.get('serverRef');
   const workspaceScope = requestUrl.searchParams.get('workspaceScope');
   const connectionRequested = serverRef !== null;
@@ -102,11 +85,7 @@ export async function GET(request: Request) {
     ? connectionSettings?.desired.enabled === true
     : previewRequested && plugin?.lifecycle === 'enabled';
   const revision = plugin ? String(plugin.revision) : null;
-  const sandboxUrl = resolveSandboxUrl(
-    process.env.INK_MCP_APPS_SANDBOX_URL,
-    applicationOrigin,
-    revision,
-  );
+  const sandboxUrl = revision ? mcpAppsSandboxUrl(revision) : null;
   const readyTimeoutMs = configuredPositiveInteger(
     process.env.INK_MCP_APPS_HOST_READY_TIMEOUT_MS,
     MCP_APPS_HOST_MANIFEST.defaults.hostReadyTimeoutMs,

@@ -5,6 +5,7 @@
 // [Pos] Phase 1-3 sole iframe owner; Browser never receives upstream connection or credential material.
 // [Sync] 2026-09-06: disable AppBridge auto-forwarding and wire only policy-enabled resources, calls, messages, and context.
 // [Sync] 2026-09-06: keep the mounted official App stable when the current Chat ingress callback identity changes during parent polling/renders.
+// [Sync] 2026-09-13: keep opaque source-identity validation when the sandbox asset follows the frontend's entry origin.
 
 import { useEffect, useRef, useState } from 'react';
 import { AppBridge, PostMessageTransport } from '@mcp-ui/client';
@@ -120,7 +121,8 @@ function waitForProxy(iframe: HTMLIFrameElement, policy: McpAppsHostPolicy): Pro
     const onMessage = (event: MessageEvent) => {
       // The outer proxy is itself sandboxed without allow-same-origin, so its
       // effective postMessage origin is precisely the opaque "null" origin.
-      // Source identity remains the exact independent-origin iframe Window.
+      // Source identity remains the exact iframe Window. The asset URL can
+      // share the Host's entry; iframe/CSP still isolate its document origin.
       if (event.source !== iframe.contentWindow || event.origin !== 'null') return;
       const parsed = McpUiSandboxProxyReadyNotificationSchema.safeParse(event.data);
       if (!parsed.success) return;

@@ -1,9 +1,10 @@
 // [Input] Versioned sandbox request plus server-owned parent-origin and compatibility policy.
-// [Output] Independently deployable opaque-origin proxy with a closed-network CSP, strict relay, and actor-effective window.im shim.
+// [Output] Current-entry opaque-origin proxy with a closed-network CSP, strict relay, and actor-effective window.im shim.
 // [Pos] Browser sandbox asset; it never receives upstream URLs, credentials, Chat history, or Runtime snapshots.
 // [Sync] 2026-09-06: derive window.im feature detection from the authenticated app/_dream Host handshake and fail closed before it.
+// [Sync] 2026-09-13: bind the parent to this frontend's public origin and enforce opaque isolation in CSP as well as both iframe attributes.
 
-import { readMcpAppsPluginManifest } from '@ink-dream/mcp-apps-runtime';
+import { publicRequestOrigin, readMcpAppsPluginManifest } from '@ink-dream/mcp-apps-runtime';
 import { MCP_APPS_HOST_MANIFEST } from '../_dream/components/chat/mcp-apps/host-policy';
 
 export const runtime = 'nodejs';
@@ -105,20 +106,6 @@ function positiveInteger(value: string | undefined, fallback: number): number | 
   if (!value) return fallback;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function configuredParentOrigins(value: string | undefined): readonly string[] {
-  if (!value) return [];
-  const origins = new Set<string>();
-  for (const candidate of value.split(',')) {
-    try {
-      const url = new URL(candidate.trim());
-      if (['http:', 'https:'].includes(url.protocol) && url.href === `${url.origin}/`) origins.add(url.origin);
-    } catch {
-      return [];
-    }
-  }
-  return Object.freeze([...origins]);
 }
 
 function buildWindowImShim(toolCalls: boolean, uiMessage: boolean, timeoutMs: number): string {
@@ -233,7 +220,8 @@ export function GET(request: Request) {
     return new Response('Not found.', { status: 404 });
   }
   const configuredRevision = String(plugin.revision);
-  const parentOrigins = configuredParentOrigins(process.env.INK_MCP_APPS_PARENT_ORIGINS);
+  const parentOrigin = publicRequestOrigin(request, url);
+  const parentOrigins = parentOrigin ? [parentOrigin] : [];
   const requestTimeoutMs = positiveInteger(
     process.env.INK_MCP_APPS_WINDOW_IM_REQUEST_TIMEOUT_MS,
     MCP_APPS_HOST_MANIFEST.defaults.compatibilityRequestTimeoutMs,
@@ -266,7 +254,7 @@ export function GET(request: Request) {
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
-      'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; media-src 'none'; connect-src 'none'; frame-src 'self'; base-uri 'none'; object-src 'none'",
+      'content-security-policy': "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; media-src 'none'; connect-src 'none'; frame-src 'self'; base-uri 'none'; object-src 'none'",
       'permissions-policy': 'camera=(), microphone=(), geolocation=(), clipboard-write=()',
       'x-content-type-options': 'nosniff',
       'referrer-policy': 'no-referrer',

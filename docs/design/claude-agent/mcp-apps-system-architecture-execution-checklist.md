@@ -9,6 +9,7 @@
 <!-- [同步] 2026-09-06：清单改用技术依赖、当前证据和真实失败判断完成度。 -->
 <!-- [同步] 2026-09-06：当前 pnpm/official-AppServer 候选完成 Phase 0—3 provider-free 技术验收，production 保持关闭。 -->
 <!-- [同步] 2026-09-06：移除已失效的迁移派工语义，区分代码存在、技术验收、公开应用与 production enablement。 -->
+<!-- [同步] 2026-09-13：H1-07 使用动态前端入口和强制 opaque 文档隔离，固定独立端口不再是当前 preview 前提。 -->
 
 # IM MCP Apps 系统架构执行清单
 
@@ -185,7 +186,7 @@ Phase 1 的只读集成验证要求 pnpm workspace 锁下的 P0-08 重新为 Go�
 | [x] | H1-04 | 把已连接 Client、原始 tool name、input、result 和 Host policy snapshot 传给 Host adapter | Browser Host | H1-03 | adapter 读取 descriptor/完整 resource，runtime 校验 metadata，创建标准 bridge 与受控 iframe；首次工具没有重放 | 卸载 Host adapter |
 | [x] | H1-05 | 加入 loading、error、timeout、close、reopen、Thread switch、Browser refresh、插件禁用和 revision 变化行为 | Browser Host | H1-04 | 原工具结果始终保留；关闭或失效时 teardown adapter/iframe 并关闭 Browser Client | 关闭 Apps flag |
 | [x] | H1-06 | 完成只读 App allowlist，并在 Host capabilities 中不声明页面工具调用能力 | Product / Browser Security | M1-08、H1-04 | 非 allowlist App 只显示 fallback；Phase 1 页面不能发起有效 `tools/call` | 回退为全局关闭 |
-| [x] | H1-07 | 部署版本化生产 sandbox proxy，并接入 Host adapter 的 server-owned sandbox/policy snapshot | Browser Platform / Security | P0-04、N1-05 | proxy 使用独立 origin、响应头 CSP/Permissions-Policy、固定 Host 配置和可回滚版本；不接受 Server/Browser 覆盖 URL 或放宽 policy | 继续使用仅适合 PoC 的 proxy 或未验证权限实现 |
+| [x] | H1-07 | 部署版本化 sandbox proxy，并接入 Host adapter 的 server-owned sandbox/policy snapshot | Browser Platform / Security | P0-04、N1-05 | 当前零权限 preview 使用动态前端入口、opaque 文档 origin、响应头 CSP/Permissions-Policy 与可回滚版本；不接受 Server/Browser 覆盖目标或放宽 policy，不代表 production enablement | 未验证隔离或权限实现 |
 | [x] | H1-08 | 验证 sandbox proxy 的消息来源、schema、HTML 交付和销毁行为 | Browser Security / QA | H1-07 | 非法来源/消息被忽略；关闭后 App 无法继续向 Host 发送请求 | 关闭 Apps flag |
 
 ### 5.6 Phase 1 只读集成与发布门槛

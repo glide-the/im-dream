@@ -6,6 +6,7 @@
 <!-- [同步] 2026-09-06：使新增连接和 App 控制与可访问 Server 弹窗、统一 MCP 使用策略表单一致。 -->
 <!-- [同步] 2026-09-12：增加使用显式 origin、可恢复的 NATAPP 边缘转发操作入口。 -->
 <!-- [同步] 2026-09-13：采用 SDK 0.2.145 与已发布 Runtime 0.1.9 package-root selector 合同。 -->
+<!-- [同步] 2026-09-13：由当前前端入口提供 opaque MCP Apps 沙箱，不再固定额外端口。 -->
 
 # Ink & Memory
 
@@ -152,13 +153,26 @@ corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 
 ## 使用 MCP Apps
 
+### 本机预览服务
+
+沿用现有 Admin、后端与 Next.js 服务。进入连接详情前先启动外部 MCP
+Server；Next.js 已包含 Host。在已有预览与插件策略配置基础上，Next.js 也提供
+`/mcp-apps-sandbox`。地址跟随浏览器当前前端入口的协议、主机名和端口，
+无需额外的沙箱进程或端口。旧 `INK_MCP_APPS_SANDBOX_URL` 与
+`INK_MCP_APPS_PARENT_ORIGINS` 不再使用。
+两层 iframe 及沙箱响应 CSP 均不带 `allow-same-origin`，强制文档使用 opaque
+origin；共享前端 URL 不会让 App 获得前端 DOM 或存储权限。认证与权限规则不变。
+如果发现操作早于 MCP Server 启动，启动后重新进入或刷新详情页；有效的失败
+缓存可能保留至 TTL 到期。如果 App 已降级，在前端与外部 MCP Server 可用后点击
+**Try interactive view again**。详见[本机恢复设计与证据](docs/exec/mcp-apps/local-startup-recovery.md)。
+
 ### 添加连接并启用 App
 
 1. 登录 Dream，打开 **设置 → 资源链接**。
 2. 点击 **添加 MCP 服务**，在弹窗中填写受管地址；也可以打开已有连接，然后完成鉴权。
 3. 在连接详情页找到 **使用策略**。
 4. 打开 **在聊天中使用 App**。如有需要，再允许 **低风险工具调用** 和 **向聊天发送消息**。
-5. 点击 **保存使用策略**，并对比默认策略、你保存的选择与服务端实际状态。
+5. 修改会自动保存；保存失败时保留你的选择并重试，无需寻找保存按钮。
 
 以下截图使用安全示例数据和真实生产界面组件，不包含账号信息或密钥。
 
@@ -168,7 +182,7 @@ corepack pnpm run dev --hostname 127.0.0.1 --port 5173
 
 ![启用 MCP App 并选择允许的交互能力](assets/mcp-apps-guide/02-configure-mcp-app.png)
 
-*同一个使用策略表单包含 App 开关、交互权限、默认值、已保存选择、revision、实际状态和唯一保存动作。*
+*同一个使用策略区包含 App 开关与交互选项。当前界面自动保存，已不再显示历史截图中的状态或保存页脚。*
 
 默认策略、你保存的选择与服务端实际状态保持独立。当连接离线、Server 没有声明 App，或服务端预览策略未允许时，开关即使已开启，App 也可能不可用。
 

@@ -1,14 +1,16 @@
 // [Input] Untrusted MCP Apps status candidates.
-// [Output] Focused compatibility, lifecycle, and independent-origin assertions.
+// [Output] Focused compatibility, lifecycle, dynamic-entry and opaque-origin assertions.
 // [Pos] Provider-free Browser Host policy contract test.
 // [Sync] 2026-09-06: lock plugin plus independent runtime-policy identity, lifecycle, origin, and capability boundaries.
 // [Sync] 2026-09-06: lock connection App-settings revision into Host policy identity.
+// [Sync] 2026-09-13: cover relative sandbox URLs across frontend ports/protocols and forbid permission or target-origin expansion.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
   MCP_APPS_HOST_MANIFEST,
+  mcpAppsSandboxUrl,
   mcpAppsPolicyIdentity,
   parseMcpAppsHostPolicy,
 } from './host-policy.ts';
@@ -50,7 +52,7 @@ function status(overrides: Record<string, unknown> = {}) {
       runtimePolicyRevision: 11,
       appSettingsRevision: null,
       manifestVersion: MCP_APPS_HOST_MANIFEST.version,
-      sandboxUrl: 'http://127.0.0.1:43191/mcp-apps-sandbox?v=1.0.0&revision=7',
+      sandboxUrl: mcpAppsSandboxUrl('7'),
       sandboxTokens: ['allow-scripts'],
       desiredPermissions: [],
       effectivePermissions: [],
@@ -61,14 +63,15 @@ function status(overrides: Record<string, unknown> = {}) {
   };
 }
 
-test('accepts one compatible, independently-originated effective snapshot', () => {
+test('accepts one compatible snapshot with an opaque sandbox at the current frontend entry', () => {
   const parsed = parseMcpAppsHostPolicy(status(), 'http://127.0.0.1:43190');
   assert.ok(parsed);
-  assert.equal(parsed.sandboxOrigin, 'http://127.0.0.1:43191');
+  assert.equal(parsed.sandboxUrl, 'http://127.0.0.1:43190/mcp-apps-sandbox?v=1.0.0&revision=7');
+  assert.equal(parsed.sandboxOrigin, 'null');
   assert.equal(parsed.features.appToolCalls, true);
 });
 
-test('rejects same-origin, disabled, and incompatible or stale plugin snapshots', () => {
+test('rejects unversioned routes, disabled, and incompatible or stale plugin snapshots', () => {
   assert.equal(parseMcpAppsHostPolicy(status({
     policy: { ...(status().policy as Record<string, unknown>), sandboxUrl: 'http://127.0.0.1:43190/mcp-apps-sandbox' },
   }), 'http://127.0.0.1:43190'), null);
@@ -98,7 +101,7 @@ test('rejects same-origin, disabled, and incompatible or stale plugin snapshots'
   assert.equal(parseMcpAppsHostPolicy(status({
     policy: {
       ...(status().policy as Record<string, unknown>),
-      sandboxUrl: 'http://127.0.0.1:43191/mcp-apps-sandbox?v=1.0.0&revision=6',
+      sandboxUrl: '/mcp-apps-sandbox?v=1.0.0&revision=6',
     },
   }), 'http://127.0.0.1:43190'), null);
   assert.equal(parseMcpAppsHostPolicy(status({
@@ -123,7 +126,7 @@ test('policy identity changes on revision, feature, or sandbox deployment change
       revision: '8:12',
       pluginRevision: '8',
       runtimePolicyRevision: 12,
-      sandboxUrl: 'http://127.0.0.1:43191/mcp-apps-sandbox?v=1.0.0&revision=8',
+      sandboxUrl: mcpAppsSandboxUrl('8'),
     },
   }), 'http://127.0.0.1:43190');
   assert.ok(first && second);
@@ -148,4 +151,30 @@ test('policy identity changes on revision, feature, or sandbox deployment change
   }), 'http://127.0.0.1:43190');
   assert.ok(connectionSettingsOnly);
   assert.notEqual(mcpAppsPolicyIdentity(first), mcpAppsPolicyIdentity(connectionSettingsOnly));
+});
+
+test('sandbox address follows frontend scheme, hostname and port without a configured listener', () => {
+  for (const origin of ['http://localhost:5173', 'http://127.0.0.1:42871', 'https://dream.example.test']) {
+    const policy = parseMcpAppsHostPolicy(status(), origin);
+    assert.ok(policy);
+    assert.equal(new URL(policy.sandboxUrl).origin, origin);
+    assert.equal(new URL(policy.sandboxUrl).pathname, '/mcp-apps-sandbox');
+    assert.equal(policy.sandboxOrigin, 'null');
+    assert.deepEqual(policy.sandboxTokens, ['allow-scripts']);
+  }
+});
+
+test('same-entry support cannot select an unrelated origin/route or grant same-origin access', () => {
+  for (const sandboxUrl of ['http://localhost:5174/mcp-apps-sandbox?v=1.0.0&revision=7',
+    '//external.example.test/mcp-apps-sandbox?v=1.0.0&revision=7',
+    '/api/me?v=1.0.0&revision=7', '/mcp-apps-sandbox?v=1.0.0&revision=7#fragment']) {
+    assert.equal(parseMcpAppsHostPolicy(status({
+      policy: { ...status().policy, sandboxUrl },
+    }), 'http://localhost:5173'), null);
+  }
+  for (const sandboxTokens of [[], ['allow-scripts', 'allow-same-origin'], ['allow-scripts', 'allow-forms']]) {
+    assert.equal(parseMcpAppsHostPolicy(status({
+      policy: { ...status().policy, sandboxTokens },
+    }), 'http://localhost:5173'), null);
+  }
 });

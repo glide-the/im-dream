@@ -6,6 +6,7 @@
 // [Sync] 2026-09-06: include the connection App-settings revision in every Host policy identity assertion.
 // [Sync] 2026-09-06: prove ordinary parent rerenders do not remount the App or discard in-progress App input before ui/message.
 // [Sync] 2026-09-06: optionally capture the collapsed-process/visible-App user-guide image from the production tree.
+// [Sync] 2026-09-13: prove current-entry sandbox resolution and opaque DOM/storage isolation despite obsolete environment URLs.
 
 import { expect, test } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
@@ -222,15 +223,15 @@ test('official 1.7.5 renders through production Host, stays isolated, and follow
   const initialTime = (initialResult.structuredContent as { time: string }).time;
 
   const hostPort = await reserveEphemeralPort();
-  const sandboxPort = await reserveEphemeralPort();
   const hostOrigin = `http://127.0.0.1:${hostPort}`;
-  const sandboxOrigin = `http://127.0.0.1:${sandboxPort}`;
+  const sandboxOrigin = hostOrigin;
   Object.assign(process.env, {
     INK_BACKEND_INTERNAL_URL: connectionView.origin,
     INK_MCP_APPS_NODE_SERVICE_TOKEN: SERVICE_TOKEN,
     INK_MCP_APPS_PHASE1_PREVIEW: 'true',
-    INK_MCP_APPS_SANDBOX_URL: `${sandboxOrigin}/mcp-apps-sandbox`,
-    INK_MCP_APPS_PARENT_ORIGINS: hostOrigin,
+    // Stale legacy deployment values must not pin the Browser to an old port.
+    INK_MCP_APPS_SANDBOX_URL: 'http://127.0.0.1:9/mcp-apps-sandbox',
+    INK_MCP_APPS_PARENT_ORIGINS: 'http://stale.example.test',
     INK_MCP_APPS_HOST_READY_TIMEOUT_MS: '5000',
     INK_MCP_APPS_POLICY_POLL_MS: '100',
     INK_MCP_APPS_PHASE2_TOOL_CALLS: 'false',
@@ -279,7 +280,6 @@ test('official 1.7.5 renders through production Host, stays isolated, and follow
     routes = await startProductionRouteHarness({
       frontendRoot: FRONTEND_ROOT,
       hostPort,
-      sandboxPort,
       browserConfig,
     });
     await page.addInitScript(
@@ -358,7 +358,8 @@ test('official 1.7.5 renders through production Host, stays isolated, and follow
       "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-write 'none'",
     );
     expect(new URL(await outer.getAttribute('src') ?? '').origin).toBe(sandboxOrigin);
-    expect(sandboxOrigin).not.toBe(hostOrigin);
+    expect(sandboxOrigin).toBe(hostOrigin);
+    expect(sandboxHeaders['content-security-policy']).toContain('sandbox allow-scripts;');
     const innerLocator = outer.contentFrame().getByTestId('im-mcp-app-resource-frame');
     await expect(innerLocator).toHaveAttribute('sandbox', 'allow-scripts');
     await expect(innerLocator).toHaveAttribute(
@@ -368,6 +369,15 @@ test('official 1.7.5 renders through production Host, stays isolated, and follow
     const app = innerLocator.contentFrame();
     await expect(app.getByRole('button', { name: 'Get Server Time' })).toBeVisible();
     await expect(app.locator('#server-time')).toHaveText(initialTime);
+    for (const frame of [outer.contentFrame(), app]) {
+      expect(await frame.locator('body').evaluate(() => {
+        let parentDomDenied = false;
+        let storageDenied = false;
+        try { void window.parent.document; } catch { parentDomDenied = true; }
+        try { void window.localStorage; } catch { storageDenied = true; }
+        return { origin: window.origin, parentDomDenied, storageDenied };
+      })).toEqual({ origin: 'null', parentDomDenied: true, storageDenied: true });
+    }
     const innerCsp = await app.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
     expect(innerCsp).toContain("default-src 'none'");
     expect(innerCsp).toContain("connect-src 'none'");

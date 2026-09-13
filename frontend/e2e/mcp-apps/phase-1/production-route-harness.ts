@@ -1,7 +1,8 @@
 // [Input] Test-owned Vite origins plus production Next Route Handler modules and Browser components.
-// [Output] Same-origin HTTP adaptation for the real Runtime and a distinct production sandbox origin.
+// [Output] One frontend-origin HTTP adaptation for the real Runtime and CSP-isolated production sandbox route.
 // [Pos] Provider-free Phase 1-3 transport harness; the server-only alias only emulates Next's compile guard.
 // [Sync] 2026-09-06: adapt exact production routes and suppress only normal cancelled long-poll requests in Vite.
+// [Sync] 2026-09-13: serve the production sandbox from the current frontend entry without a separate listener.
 
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 
@@ -64,12 +65,11 @@ function isCancelledLongPoll(error: unknown): boolean {
 
 
 function routeHarnessPlugin(
-  mode: 'host' | 'sandbox',
   origin: string,
   browserConfig?: Record<string, unknown>,
 ) {
   return {
-    name: `mcp-apps-production-${mode}-route-harness`,
+    name: 'mcp-apps-production-route-harness',
     enforce: 'pre' as const,
     resolveId(id: string) {
       // Next aliases this marker during its server build. The test keeps the
@@ -85,19 +85,17 @@ function routeHarnessPlugin(
       server.middlewares.use(async (request, response, next) => {
         try {
           const url = new URL(request.url ?? '/', origin);
-          if (mode === 'sandbox' && url.pathname === '/mcp-apps-sandbox') {
+          if (url.pathname === '/mcp-apps-sandbox') {
             const route = await server.ssrLoadModule('/app/mcp-apps-sandbox/route.ts');
             await writeWebResponse(await route.GET(await toWebRequest(request, origin)), response);
             return;
           }
-          if (mode === 'host' && url.pathname === '/api/mcp-apps/phase1-status') {
+          if (url.pathname === '/api/mcp-apps/phase1-status') {
             const route = await server.ssrLoadModule('/app/api/mcp-apps/phase1-status/route.ts');
             await writeWebResponse(await route.GET(await toWebRequest(request, origin)), response);
             return;
           }
-          const match = mode === 'host'
-            ? /^\/api\/mcp-apps\/([^/?]+)$/.exec(url.pathname)
-            : null;
+          const match = /^\/api\/mcp-apps\/([^/?]+)$/.exec(url.pathname);
           if (match) {
             const route = await server.ssrLoadModule('/app/api/mcp-apps/[serverRef]/route.ts');
             const handler = route[request.method ?? 'GET'];
@@ -112,7 +110,7 @@ function routeHarnessPlugin(
             ), response);
             return;
           }
-          if (mode === 'host' && url.pathname === '/mcp-apps-official-harness') {
+          if (url.pathname === '/mcp-apps-official-harness') {
             const html = await server.transformIndexHtml(url.pathname, `<!doctype html>
               <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"></head>
               <body><div id="root"></div>
@@ -142,50 +140,36 @@ function routeHarnessPlugin(
 export async function startProductionRouteHarness({
   frontendRoot,
   hostPort,
-  sandboxPort,
   browserConfig,
 }: Readonly<{
   frontendRoot: string;
   hostPort: number;
-  sandboxPort: number;
   browserConfig: Record<string, unknown>;
 }>) {
   const hostOrigin = `http://127.0.0.1:${hostPort}`;
-  const sandboxOrigin = `http://127.0.0.1:${sandboxPort}`;
-  const sandbox = await createViteServer({
-    root: frontendRoot,
-    configFile: false,
-    logLevel: 'silent',
-    ssr: { noExternal: ['@ink-dream/mcp-apps-runtime', 'server-only'] },
-    server: { host: '127.0.0.1', port: sandboxPort, strictPort: true, hmr: false },
-    plugins: [routeHarnessPlugin('sandbox', sandboxOrigin)],
-  });
   const host = await createViteServer({
     root: frontendRoot,
     configFile: false,
     logLevel: 'silent',
     ssr: { noExternal: ['@ink-dream/mcp-apps-runtime', 'server-only'] },
     server: { host: '127.0.0.1', port: hostPort, strictPort: true, hmr: false },
-    plugins: [routeHarnessPlugin('host', hostOrigin, browserConfig)],
+    plugins: [routeHarnessPlugin(hostOrigin, browserConfig)],
   });
   try {
-    await sandbox.listen();
     await host.listen();
   } catch (error) {
-    await Promise.allSettled([host.close(), sandbox.close()]);
+    await host.close();
     throw error;
   }
   return {
     host,
-    sandbox,
     hostOrigin,
-    sandboxOrigin,
     async closeRuntime() {
       const runtime = await host.ssrLoadModule('/packages/mcp-apps-runtime/src/index.ts');
       await runtime.closeMcpAppsRuntime();
     },
     async close() {
-      await Promise.allSettled([host.close(), sandbox.close()]);
+      await host.close();
     },
   };
 }

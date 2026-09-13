@@ -4,6 +4,7 @@
 // [Sync] 2026-09-06: compose configured limits plus authenticated static/connection policy for Browser/session isolation.
 // [Sync] 2026-09-06: expose a safe connection-settings read for Next policy composition.
 // [Sync] 2026-09-06: validate Browser origin against the public Host when Next canonicalizes its internal request URL.
+// [Sync] 2026-09-13: reuse the public-request origin parser for exact sandbox parent binding.
 
 import {
   PRODUCTION_APPS_EFFECTIVE,
@@ -76,9 +77,9 @@ function firstForwardedValue(value: string | null): string | null {
   return candidate || null;
 }
 
-function publicRequestOrigin(request: Request, requestUrl: URL): string | null {
+export function publicRequestOrigin(request: Request, requestUrl = new URL(request.url)): string | null {
   const host = firstForwardedValue(request.headers.get('host'));
-  if (!host) return null;
+  if (!host) return requestUrl.origin;
   const forwardedProtocol = firstForwardedValue(request.headers.get('x-forwarded-proto'));
   const protocol = forwardedProtocol === 'http' || forwardedProtocol === 'https'
     ? `${forwardedProtocol}:`
