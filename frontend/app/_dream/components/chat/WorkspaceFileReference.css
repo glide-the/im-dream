@@ -1,9 +1,26 @@
 /* [Input] Blob-backed Workspace image state and Ink & Memory v2.1 semantic tokens. */
-/* [Output] 420×315 maximum image content inside the exact Mermaid media frame plus shared immersive original-ratio preview. */
+/* [Output] Bounded report surfaces, 420×315 image content in the shared media frame, and immersive original-ratio preview. */
 /* [Pos] workspace file reference style node in frontend/app/_dream/components/chat */
 /* [Sync] 2026-08-22: add responsive thumbnail and full-size preview styling without affecting ordinary Markdown images. */
 /* [Sync] 2026-08-23: remove divergent card/badge/modal chrome; retain only image sizing inside the shared Markdown media UI. */
 /* [Sync] 2026-08-23: only the full-size image scales; its shared preview sheet remains fitted and stable. */
+/* [Sync] 2026-09-13: provide a viewport-contained report surface using the existing prose and modal styles. */
+
+.modal-surface.workspace-document-preview {
+  width: min(64rem, 100%);
+  max-width: 64rem;
+}
+
+.workspace-document-preview .prose {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace-document-preview .prose pre,
+.workspace-document-preview .prose table {
+  max-width: 100%;
+  overflow: auto;
+}
 
 .workspace-image-reference__trigger {
   display: grid;

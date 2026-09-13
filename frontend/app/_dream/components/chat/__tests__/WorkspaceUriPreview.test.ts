@@ -7,6 +7,7 @@
 // [Sync] 2026-08-23: verify Mermaid and Workspace share one inline frame/full-screen skeleton, with enlarge beside copy and accessible zoom/download controls.
 // [Sync] 2026-08-23: verify upward/downward wheel zoom, scroll suppression, shared percentage state, and 50%–200% clamping in Chromium.
 // [Sync] 2026-08-23: compare real geometry before/after zoom to prove only image/diagram content scales while the paper sheet stays fixed.
+// [Sync] 2026-09-13: reuse installed local Chrome for the shared media/report regression suite.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node-side harness intentionally imports Node APIs outside the browser tsconfig.
@@ -20,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { parseWorkspaceUri } from '../workspaceUri';
 
-test.use({ channel: 'chromium' });
+test.use({ channel: 'chrome' });
 
 const PNG_BYTES = readFileSync(fileURLToPath(new URL('../../../../../public/placeholder-memory.png', import.meta.url)));
 

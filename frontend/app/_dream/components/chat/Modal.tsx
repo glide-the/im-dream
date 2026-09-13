@@ -7,6 +7,7 @@
 // [Sync] 2026-08-23: keep the preview sheet at its fitted geometry while exposing zoom through a CSS variable for explicit image/diagram targets only.
 // [Sync] 2026-09-06: allow a dialog caller to select its initial focus target while preserving the close-button fallback.
 // [Sync] 2026-09-06: allow a caller-scoped surface class so one form dialog can refine geometry without changing other shared Modal callers.
+// [Sync] 2026-09-13: the topmost dialog owns Escape/Tab; nested report/image dialogs share a counted scroll lock and restore only connected focus targets.
 
 import {
   useEffect,
@@ -35,6 +36,8 @@ const MEDIA_ZOOM_MAX = 200;
 const MEDIA_ZOOM_STEP = 10;
 const MEDIA_WHEEL_ZOOM_THRESHOLD_PX = 40;
 const MEDIA_WHEEL_LINE_HEIGHT_PX = 16;
+let openModalCount = 0;
+let modalBodyOverflow = '';
 
 interface ModalProps {
   open: boolean;
@@ -84,7 +87,8 @@ export default function Modal({
     const previouslyFocused = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    const previousBodyOverflow = document.body.style.overflow;
+    if (openModalCount === 0) modalBodyOverflow = document.body.style.overflow;
+    openModalCount += 1;
     const focusFrame = window.requestAnimationFrame(() => {
       const requestedTarget = initialFocusRef?.current;
       const autofocusTarget = dialogRef.current?.querySelector<HTMLElement>('[autofocus]');
@@ -96,6 +100,8 @@ export default function Modal({
 
     document.body.style.overflow = 'hidden';
     const handleKeyDown = (event: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      if (dialogs.item(dialogs.length - 1) !== dialogRef.current) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onCloseRef.current();
@@ -124,8 +130,9 @@ export default function Modal({
     return () => {
       window.cancelAnimationFrame(focusFrame);
       window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousBodyOverflow;
-      previouslyFocused?.focus();
+      openModalCount -= 1;
+      if (openModalCount === 0) document.body.style.overflow = modalBodyOverflow;
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
   }, [initialFocusRef, open]);
 

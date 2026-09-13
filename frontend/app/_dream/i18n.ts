@@ -1,6 +1,7 @@
 // [Input] User locale and product-facing translation keys.
 // [Output] English and Simplified Chinese UI copy for Ink & Memory surfaces.
 // [Pos] Frontend i18next resource registry.
+// [Sync] 2026-09-13: add explicit file-download and report-preview close labels.
 // [Sync] 2026-09-02: add lazy historical process loading and failure copy.
 // [Sync] 2026-08-14: add actor-owned publication and system-default sharing copy.
 // [Sync] 2026-08-15: add the localized More disclosure for restored legacy navigation.
@@ -838,6 +839,8 @@ const resources = {
           previewTitle: 'Full-size preview · {{name}}',
           closePreview: 'Close image preview',
           downloadImage: 'Download image',
+          downloadFile: 'Download file',
+          closeDocumentPreview: 'Close report preview',
           loading: 'Loading…',
           downloading: 'Downloading…',
           downloadStarted: 'Download started.',
@@ -1709,6 +1712,8 @@ const resources = {
           previewTitle: '大图预览 · {{name}}',
           closePreview: '关闭图片预览',
           downloadImage: '下载图片',
+          downloadFile: '下载文件',
+          closeDocumentPreview: '关闭报告预览',
           loading: '正在加载…',
           downloading: '正在下载…',
           downloadStarted: '已开始下载。',
