@@ -2,6 +2,7 @@
 // [Output] Parse exact workspace://files/... references into canonical Thread-workspace-relative paths without network access.
 // [Pos] workspace URI protocol parser in frontend/app/_dream/components/chat
 // [Sync] 2026-08-22: initial strict parser for decoded Unicode/space paths, traversal and repeated-encoding rejection, and image type classification.
+// [Sync] 2026-09-13: resolve relative references only inside an explicitly Thread-owned Markdown document.
 
 export const WORKSPACE_URI_PREFIX = 'workspace://';
 
@@ -35,6 +36,15 @@ export type WorkspaceUriParseResult =
 
 export function isWorkspaceUri(value: string | null | undefined): value is string {
   return typeof value === 'string' && value.startsWith(WORKSPACE_URI_PREFIX);
+}
+
+export function resolveWorkspaceDocumentReference(value: string, documentPath?: string): string {
+  if (!documentPath || !value || value.startsWith(WORKSPACE_URI_PREFIX) || value.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(value)) return value;
+  const document = parseWorkspaceUri(`${WORKSPACE_URI_PREFIX}${documentPath}`);
+  if (!document.ok || value.startsWith('/')) return WORKSPACE_URI_PREFIX;
+  const directory = document.path.split('/').slice(0, -1).map(encodeURIComponent).join('/');
+  // Do not normalize traversal or repeatedly encoded segments; the existing parser rejects them.
+  return `${WORKSPACE_URI_PREFIX}${directory}/${value.replace(/^\.\//, '')}`;
 }
 
 function invalid(code: WorkspaceUriErrorCode): WorkspaceUriParseResult {

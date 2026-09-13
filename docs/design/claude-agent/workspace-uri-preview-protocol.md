@@ -9,10 +9,58 @@
 > [Sync] 2026-08-23: correct zoom ownership so only image/diagram content scales while the fitted Paper sheet remains geometrically stable.
 > [Sync] 2026-09-07: require every direct ChatPanel host, including Story Workspace Dream, to provide the shared Workspace capability context before rendering recovered file references.
 > [Sync] 2026-09-12: bind direct shell ZIP exports to literal ordinary paths and record Dream PreToolUse ownership separately from CLI Runtime structure.
+> [Sync] 2026-09-13: add in-app report reading without replacing Markdown, file auth, or Agent/history contracts.
 
 # `workspace://` Workspace File Preview Protocol
 
+## Report-preview extension — background, goals and rules
+
+### Background and problem
+
+A link labelled “open report” previously only downloaded its Markdown file. Its
+relative images were not downloaded with it, and ordinary local Markdown readers
+cannot resolve the application-owned `workspace://` scheme. An Agent showing
+image syntax inside backticks is a code example, not proof of a rendered image.
+
+### Goals and boundaries
+
+Open `.md`/`.markdown` links inside the application and supported image links in
+the existing immersive viewer, retaining explicit downloads. Reuse `ChatMarkdown`,
+`WorkspaceImage`, `Modal` and the current authenticated content endpoint. Do not
+alter historical messages, files, database schema, Agent turns, raw-HTML policy,
+or ordinary Chat-relative URLs. Literal code remains literal code.
+
+### Concepts and rules
+
+- Report reads are user-activated and accept only `text/markdown` or `text/plain`;
+  filename suffix alone never authorizes HTML or active content.
+- The owning Thread and bearer remain runtime-only. Report images use the same
+  strict parser, MIME allowlist and content endpoint as ordinary Workspace images.
+- Only an explicitly owned report supplies a document path to `ChatMarkdown`.
+  Sibling-relative references resolve against its directory; traversal, encoded
+  separators, repeated encoding and absolute paths remain invalid without reads.
+  No general Chat-relative URL rewriting or raw HTML renderer is introduced.
+- Opening an image link loads it on demand through `WorkspaceImage`, with the
+  existing zoom/download/close controls. Report-relative and exact Workspace images
+  use the same thumbnail and viewer. SVG/HTML and other unsupported types retain
+  the existing fail-closed/download behavior.
+- Closing a preview or changing Thread/reference/capability aborts pending reads.
+  Report-internal Markdown document links download rather than opening recursive
+  document dialogs; the topmost image dialog owns Escape/Tab while its report remains.
+  Nested dialogs share a counted body-scroll lock, including simultaneous Thread changes.
+- The file download action remains binary and preserves directory ZIP behavior.
+  A downloaded application-native report is not claimed to be an offline bundle.
+
+Technical evidence belongs in `WorkspaceReportPreview.test.ts`: visible report
+opening, three decoded images, lazy image-link activation, explicit download,
+nested Escape/focus ownership, narrow Chinese/dark layout, intact code and MIME
+rejection. This is provider-free validation, not real-model acceptance.
+
 ## 1. Background and problem
+
+Sections 1–16 record the original v1 decision. The report extension above and the
+current behavior table below supersede download-only `.md`/image-link handling;
+the authenticated binary download endpoint also supports directory ZIPs today.
 
 Claude Agent can create an image under the current Thread workspace, for example
 `files/fashion_flux2.png`, but a reply such as
@@ -56,8 +104,8 @@ The root cause is a missing cross-layer contract, not a missing file system:
 
 - Let Agent replies render generated PNG/JPEG/GIF/WebP files from the current
   authenticated Thread workspace.
-- Let an explicit Markdown link download any regular file under the same public
-  `files/` namespace.
+- Let an explicit Markdown link preview supported images/reports on activation and
+  retain downloads for files under the same public `files/` namespace.
 - Preserve Markdown, SSE, history, Workspace sidebar, sandbox, and SDK behavior.
 - Fail closed before file access for malformed, disabled, missing, foreign, traversing,
   repeatedly encoded, absolute, backslash, or symlink paths.
@@ -67,10 +115,12 @@ The root cause is a missing cross-layer contract, not a missing file system:
 
 ### Non-goals
 
-- Interpreting ordinary relative Markdown URLs as Workspace files.
-- Exposing directories, directory ZIPs, `.claude*`, `.notion`, `logs/`, `skills/`,
+- Interpreting ordinary Chat-relative Markdown URLs as Workspace files; only an
+  authenticated report resolves sibling references against its owned document path.
+- Reading directory content through the regular-file content endpoint, or exposing `.claude*`, `.notion`, `logs/`, `skills/`,
   `memory/`, `.dream/`, `assets/`, or `stories/` through this protocol.
-- Inline preview of SVG, HTML, PDF, video, audio, or text in v1.
+- Inline preview of SVG, HTML, PDF, video, audio, or arbitrary text; only authenticated
+  Markdown report files with a safe text MIME are opened in the shared renderer.
 - Changing upload, list, move, delete, or existing manual download behavior.
 - Adding a database capability, signed URL store, service worker, or long-lived blob URL.
 
@@ -86,7 +136,7 @@ Example:
 
 ```markdown
 ![Flux.2 Dev](workspace://files/fashion_flux2.png)
-[Download notes](workspace://files/%E5%88%86%E9%95%9C%20notes.md)
+[Open notes](workspace://files/%E5%88%86%E9%95%9C%20notes.md)
 ```
 
 `workspace://` is an application-owned opaque prefix. The text after the prefix is
@@ -144,12 +194,14 @@ prevents accidental network access; backend validation is the trust boundary.
 
 ### 4.5 File types
 
-| Markdown form | v1 behavior |
+| Markdown form | Current behavior |
 |---|---|
 | `![alt](workspace://files/x.png)` | Fetch with bearer; require response MIME in `image/png`, `image/jpeg`, `image/gif`, `image/webp`; render bounded image content inside Mermaid's exact media frame and open the shared immersive zoom/download viewer from one ephemeral blob URL. |
-| `[label](workspace://files/x.ext)` | Fetch only after user activation and download the regular-file blob using the final path segment. |
+| `[label](workspace://files/x.png)` | Fetch only after user activation and open the existing image viewer; validate the same safe image MIME allowlist. |
+| `[label](workspace://files/x.md)` / `.markdown` | Fetch only after user activation, require safe text MIME, and open the shared Markdown renderer; retain a separate binary download action. Report-internal document links download rather than opening recursive reports. |
+| `[label](workspace://files/x.ext)` for other files | Fetch only after user activation and download through the authenticated binary download endpoint using the final path segment. |
 | Workspace image URI with unsupported extension/MIME | Do not render inline; show a stable unsupported-type fallback and a safe download action. |
-| Directory | Reject; the content endpoint is regular-file only and uses descriptor-backed `O_NOFOLLOW` reads. |
+| Directory | The content endpoint rejects directories; explicit binary downloads retain backend-generated ZIP behavior. |
 
 SVG is deliberately not inline-previewed in v1. This avoids active-content and external
 resource ambiguity while preserving a download path.
@@ -200,8 +252,9 @@ client system-prompt field or a second initialization lifecycle.
 - Successful Workspace images render as responsive 4:3 `object-fit: contain` content in
   Mermaid's exact shared media frame; the toolbar and image both expose the same blob in
   the shared `Modal media-preview` viewer.
-- File links fetch only on click, create a temporary blob URL, trigger download, and
-  revoke the URL.
+- File links fetch only on click. Supported image links open the shared viewer;
+  Markdown report links require a safe text MIME and use the shared renderer.
+  Explicit downloads create and revoke a temporary blob URL through the binary endpoint.
 - Normal HTTP(S), `data`, `blob`, anchors, relative links, code, GFM, and Mermaid keep
   their current ReactMarkdown behavior.
 

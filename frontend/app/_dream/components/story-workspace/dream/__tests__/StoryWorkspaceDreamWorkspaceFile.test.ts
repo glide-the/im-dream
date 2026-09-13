@@ -1,7 +1,8 @@
 // [Input] Dream's direct ChatPanel host, an enabled Workspace config, owned Thread history, and a mocked regular file response.
-// [Output] Prove recovered workspace:// links leave capability checking, preserve actor/Thread/path binding, and download exact bytes.
+// [Output] Prove Dream's recovered report links open authenticated Markdown while their explicit downloads preserve actor/Thread/path binding and exact bytes.
 // [Pos] Dream workspace-file composition regression seam.
 // [Sync] 2026-09-07: cover the Next-era direct ChatPanel host that previously omitted WorkspaceProvider.
+// [Sync] 2026-09-13: cover in-app Markdown report opening plus the binary download endpoint using installed local Chrome.
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright's Node harness intentionally imports Node APIs.
@@ -12,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer as createNetServer } from 'node:net';
 import { createServer } from 'vite';
 
-test.use({ channel: 'chromium' });
+test.use({ channel: 'chrome' });
 
 const THREAD_ID = 'thread-dream-workspace-file';
 const FILE_PATH = 'files/EP01-穿越乐坊-剧本-v3.md';
@@ -35,7 +36,7 @@ async function reserveEphemeralPort(): Promise<number> {
   });
 }
 
-test('Dream recovered workspace file becomes downloadable through the owned Thread content route', async ({ page }) => {
+test('Dream recovered report opens and remains downloadable through the owned Thread routes', async ({ page }) => {
   const harnessModule = `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
@@ -85,6 +86,7 @@ test('Dream recovered workspace file becomes downloadable through the owned Thre
   });
 
   const fileRequests: Array<{
+    readonly endpoint: string;
     readonly authorization: string | undefined;
     readonly path: string | null;
     readonly sessionId: string | null;
@@ -180,8 +182,9 @@ test('Dream recovered workspace file becomes downloadable through the owned Thre
       });
       return;
     }
-    if (url.pathname === '/api/workspace/files/content') {
+    if (url.pathname === '/api/workspace/files/content' || url.pathname === '/api/workspace/files/download') {
       fileRequests.push({
+        endpoint: url.pathname,
         authorization: route.request().headers().authorization,
         path: url.searchParams.get('path'),
         sessionId: url.searchParams.get('sessionId'),
@@ -205,8 +208,14 @@ test('Dream recovered workspace file becomes downloadable through the owned Thre
     await expect(page.locator('[data-workspace-file-state="loading"]')).toHaveCount(0);
     await expect(page.locator('[data-workspace-file-state="ready"]')).toHaveCount(1);
 
-    const downloadPromise = page.waitForEvent('download');
     await downloadButton.click();
+    const report = page.getByRole('dialog', { name: FILE_NAME, exact: true });
+    await expect(report.getByRole('heading', { name: 'EP01 穿越乐坊' })).toBeVisible();
+    await expect(report).toContainText('确定性回归剧本正文。');
+    await page.keyboard.press('Escape');
+    await expect(report).toHaveCount(0);
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download file', exact: true }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe(FILE_NAME);
     const downloadedPath = await download.path();
@@ -215,6 +224,12 @@ test('Dream recovered workspace file becomes downloadable through the owned Thre
     await expect(page.locator('[data-workspace-file-state="success"]')).toHaveCount(1);
 
     expect(fileRequests).toEqual([{
+      endpoint: '/api/workspace/files/content',
+      authorization: 'Bearer dream-workspace-file-token',
+      path: FILE_PATH,
+      sessionId: THREAD_ID,
+    }, {
+      endpoint: '/api/workspace/files/download',
       authorization: 'Bearer dream-workspace-file-token',
       path: FILE_PATH,
       sessionId: THREAD_ID,

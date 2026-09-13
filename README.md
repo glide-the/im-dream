@@ -34,6 +34,7 @@ This repository contains the Dream Web application and its FastAPI backend. Admi
 
 - **Write and reflect** — keep writing sessions, browse your timeline, and review reflections.
 - **Chat with persistent context** — continue a Thread with streaming replies, tools, plans, files, and TODOs.
+- **Preview generated reports** — open Workspace Markdown reports and PNG/JPEG/GIF/WebP links in Chat, with Thread-bound images and separate download controls.
 - **Build reusable Agents** — use Decks to organize prompts, resources, plugins, and Agent behavior.
 - **Run Dreams** — develop scripts, storyboards, prompts, and generated assets through guided workflows.
 - **Connect your tools** — authorize Notion or a managed MCP Server from Settings.

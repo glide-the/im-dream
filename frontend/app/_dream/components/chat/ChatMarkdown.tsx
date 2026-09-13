@@ -1,5 +1,5 @@
-// [Input] Markdown text, optional owning Chat Thread ID, WorkspaceContext, and shared Markdown/file reference components.
-// [Output] GFM Markdown rendered through the shared chain, with Mermaid and exact workspace:// references safely routed.
+// [Input] Markdown text, owning Chat Thread ID, optional authenticated report path, WorkspaceContext and shared Markdown/file components.
+// [Output] Shared GFM/Mermaid rendering with safe workspace:// references and document-only relative resolution; code stays literal.
 // [Pos] chat-markdown component node in frontend/app/_dream/components/chat
 // [Sync] 2026-07-20: created per docs/design/claude-agent/chat-markdown-mermaid.md — consolidates the
 //                    three local ReactMarkdown+remarkGfm call sites; `pre` override unwraps Mermaid
@@ -7,13 +7,14 @@
 // [Sync] 2026-08-22: preserve only exact workspace:// candidates through the secure URL
 //                    transform and resolve them with current Thread/Workspace context.
 // [Sync] 2026-09-06: narrow React Markdown image sources before applying the Workspace URI boundary.
+// [Sync] 2026-09-13: reuse the same renderer for authenticated reports, resolving their relative references without changing ordinary Chat URLs or code.
 import { Children, isValidElement, memo, useMemo, type ReactNode } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import MermaidBlock from './MermaidBlock';
 import { WorkspaceFileLink, WorkspaceImage } from './WorkspaceFileReference';
-import { isWorkspaceUri } from './workspaceUri';
+import { isWorkspaceUri, resolveWorkspaceDocumentReference } from './workspaceUri';
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -50,13 +51,14 @@ const BASE_COMPONENTS: Components = {
 interface ChatMarkdownProps {
   text: string;
   workspaceSessionId?: string;
+  workspaceDocumentPath?: string;
 }
 
 function workspaceUrlTransform(value: string): string {
   return isWorkspaceUri(value) ? value : defaultUrlTransform(value);
 }
 
-export default memo(function ChatMarkdown({ text, workspaceSessionId }: ChatMarkdownProps) {
+export default memo(function ChatMarkdown({ text, workspaceSessionId, workspaceDocumentPath }: ChatMarkdownProps) {
   const { activeSessionId, workspaceConfigLoaded, workspaceEnabled } = useWorkspaceSession();
   const threadId = workspaceSessionId ?? activeSessionId ?? undefined;
   const workspaceAvailability = workspaceConfigLoaded
@@ -68,7 +70,7 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId }: ChatMark
       void node;
       if (isWorkspaceUri(href)) {
         return (
-          <WorkspaceFileLink uri={href} threadId={threadId} workspaceAvailability={workspaceAvailability}>
+          <WorkspaceFileLink uri={href} threadId={threadId} workspaceAvailability={workspaceAvailability} allowDocumentPreview={!workspaceDocumentPath}>
             {children}
           </WorkspaceFileLink>
         );
@@ -82,10 +84,10 @@ export default memo(function ChatMarkdown({ text, workspaceSessionId }: ChatMark
       }
       return <img src={src} alt={alt} {...props} />;
     },
-  }), [threadId, workspaceAvailability]);
+  }), [threadId, workspaceAvailability, workspaceDocumentPath]);
 
   return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components} urlTransform={workspaceUrlTransform}>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components} urlTransform={(value) => workspaceUrlTransform(resolveWorkspaceDocumentReference(value, workspaceDocumentPath))}>
       {text}
     </ReactMarkdown>
   );
