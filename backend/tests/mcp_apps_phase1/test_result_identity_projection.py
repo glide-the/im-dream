@@ -5,6 +5,7 @@
 [Pos] Provider-free result-identity tests; no database, MCP network, Browser, or schema writes.
 [Sync] 2026-09-06: add McpAppsToolResultProjectionV1 producer/transport/consumer coverage.
 [Sync] 2026-09-06: use the official descriptor-owned UI binding and data-only CallToolResult shape.
+[Sync] 2026-09-13: cover original Runtime SDK wire shapes, correlation and error fallback through history DTO.
 """
 
 from __future__ import annotations
@@ -453,3 +454,85 @@ async def test_runner_does_not_attach_one_complete_result_to_ambiguous_blocks():
     )
     assert len(captured) == 2
     assert all(payload.call_tool_result is None for payload in captured)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wire_form", ["array", "text", "text-envelope", "complete-envelope"])
+@pytest.mark.parametrize("is_error", [False, True])
+async def test_original_runtime_wire_result_reaches_live_saved_and_public_app(wire_form, is_error):
+    # Original Runtime emits processed content, optionally with mcpMeta.
+    # The SDK value, not the normalized model block, owns this adaptation.
+    raw_content = [{"type": "text", "text": '{"time":"fixture-time"}'}]
+    expected = {"content": deepcopy(raw_content)}
+    raw_result = deepcopy(raw_content)
+    if wire_form == "text":
+        raw_result = raw_content[0]["text"]
+    elif wire_form in {"text-envelope", "complete-envelope"}:
+        expected.update({"structuredContent": {"time": "fixture-time"}, "extensionResult": {"supported": True}})
+        raw_result = deepcopy(expected)
+        if wire_form == "text-envelope":
+            raw_result["content"] = raw_content[0]["text"]
+    message = runner_module.UserMessage(content=[{
+        "type": "tool_result", "tool_use_id": TOOL_CALL_ID,
+        "content": [{"type": "text", "text": '{"model_block":"not-sdk-wire"}'}], "is_error": is_error,
+    }])
+    message.tool_use_result = deepcopy(raw_result)
+    queue: asyncio.Queue = asyncio.Queue()
+    context = _TurnContext(
+        queue=queue, confirmation_store=ToolConfirmationStore(),
+        managed_mcp_server_keys=(SERVER_REF,),
+        managed_mcp_app_resource_bindings=deepcopy(DESCRIPTOR_BINDINGS),
+    )
+    callback = ClaudeAgentService._make_tool_event_cb(queue, context)
+    await callback(ToolEventPayload(
+        type="tool_input_available", tool_name=REGISTERED_TOOL,
+        tool_call_id=TOOL_CALL_ID, input=deepcopy(TOOL_INPUT),
+    ))
+    while not queue.empty():
+        queue.get_nowait()
+    runner = runner_module.ClaudeAgentRunner(sdk_client=SimpleNamespace())
+    await runner._process_message(
+        message,
+        AgentStreamingCallbacks(on_text_delta=lambda _text: None, on_tool_event=callback),
+        pending_tool_calls={TOOL_CALL_ID: {"tool_name": REGISTERED_TOOL, "input": TOOL_INPUT}},
+        emitted_tool_input_ids=set(), on_text_accumulate=lambda _text: None,
+    )
+    live = queue.get_nowait().payload()
+    public = PublicChatMessageDto.from_storage({
+        "id": "original-runtime-wire", "role": "assistant",
+        "parts": _sse_events_to_ui_parts(context.collected_parts), "metadata": {},
+    }).model_dump(mode="json")
+    if is_error:
+        assert live["isError"] is True
+        assert live["output"] == {"model_block": "not-sdk-wire"}
+        assert "mcpAppResult" not in live
+        assert public["parts"][0]["state"] == "output-error"
+        assert "mcpAppResult" not in public["parts"][0]
+        assert message.tool_use_result == raw_result
+        return
+    assert live["output"] == expected
+    assert live["mcpAppResult"]["resourceUri"] == DESCRIPTOR_BINDINGS[SERVER_REF][UPSTREAM_TOOL]
+    assert live["mcpAppResult"]["result"] == expected
+    assert public["parts"][0]["output"] == expected
+    assert public["parts"][0]["mcpAppResult"] == live["mcpAppResult"]
+    assert message.tool_use_result == raw_result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("registered_name,block_count", [("Read", 1), (None, 1), (REGISTERED_TOOL, 2)])
+@pytest.mark.parametrize("raw_result", ["raw-text", [{"type": "text", "text": "raw-array"}]])
+async def test_wire_content_needs_single_correlated_mcp_call(registered_name, block_count, raw_result):
+    message = runner_module.UserMessage(content=[{
+        "type": "tool_result", "tool_use_id": f"call-{index}", "content": "ordinary",
+    } for index in range(block_count)])
+    message.tool_use_result = deepcopy(raw_result)
+    captured = []
+    runner = runner_module.ClaudeAgentRunner(sdk_client=SimpleNamespace())
+    await runner._process_message(
+        message, AgentStreamingCallbacks(on_text_delta=lambda _text: None, on_tool_event=captured.append),
+        pending_tool_calls={"call-0": {"tool_name": registered_name}} if registered_name else {},
+        emitted_tool_input_ids=set(), on_text_accumulate=lambda _text: None,
+    )
+    assert len(captured) == block_count
+    assert all(payload.call_tool_result is None for payload in captured)
+    assert all(payload.output == "ordinary" for payload in captured)

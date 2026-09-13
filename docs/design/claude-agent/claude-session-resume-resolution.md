@@ -11,7 +11,7 @@
 
 现场 Dream thread `56887baf-e44a-4816-a3aa-0cfb44f3b0a1` 与 Claude ID `ad4f0c48-2090-4027-9b86-73b5b007c78a` 不同。只读文件元数据确认后者有 7829 字节 JSONL，但位于旧 SHA-256 项目目录。这不是“home 不存在”。
 
-Dream `b21fc783`（2026-05-29）首次引入 DB Claude ID、contract guard 和跨全部项目的 `locate_session_file` 预检；该预检及吞 DB 异常是已有缺陷。Runtime `a40037a` 从 clean-room 切换 original modules：前者 `src/cleanroom/session/paths.ts` 使用 SHA-256(canonical cwd)，后者 `src/utils/sessionStorage.ts::getProjectDir/loadSessionFile` 使用 `sessionStoragePortable.ts::sanitizePath`，按当前 original cwd 精确读取。Dream `0f7f3850` 接入 0.1.8，`77dae52f` 接入 0.1.9。这是布局兼容缺口的提交证据；没有现场进程版本及数据库快照前，不将具体失败时间归因于某次部署。
+Dream `b21fc783`（2026-05-29）首次引入 DB Claude ID、contract guard 和跨全部项目的 `locate_session_file` 预检；该预检及吞 DB 异常是已有缺陷。Runtime `a40037a` 更新了项目目录编码，历史 JSONL 的 SHA-256(canonical cwd) 目录不匹配当前精确读取路径。当前实现 `src/utils/sessionStorage.ts::getProjectDir/loadSessionFile` 使用 `sessionStoragePortable.ts::sanitizePath`，按当前 original cwd 精确读取。Dream `0f7f3850` 接入 0.1.8，`77dae52f` 接入 0.1.9。这是布局兼容缺口的提交证据；没有现场进程版本及数据库快照前，不将具体失败时间归因于某次部署。
 
 Runtime `cli/print.ts` 在恢复为空或无消息时输出同一 missing-session 错误。仅有 JSONL 文件也不足以证明可恢复。SDK `connect` 失败早于 `client.query`，因此可把竞态重试限定在初始化边界。
 

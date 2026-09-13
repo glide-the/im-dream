@@ -47,6 +47,8 @@
 #                    ResultMessage duration to Chat persistence metadata.
 # [Sync] 2026-09-06: carry the SDK's complete, unchanged MCP CallToolResult
 #                    beside the legacy normalized output for trusted Apps projection.
+# [Sync] 2026-09-13: canonicalize original-Runtime SDK wire text/array forms;
+#                    preserve emitted envelope fields, not unavailable upstream bytes.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -101,8 +103,11 @@ class ToolEventPayload:
     tool_call_id: Optional[str] = None
     input: Optional[Any] = None
     output: Optional[Any] = None
-    # Complete SDK user-message ``tool_use_result`` when one unambiguously
-    # belongs to this tool result.  The application layer may use it only
+    # SDK user-message ``tool_use_result`` in CallToolResult shape when one
+    # unambiguously belongs to this tool result. Original Runtime text/array
+    # wire forms are enveloped without parsing text or losing envelope fields.
+    # This does not claim to restore upstream content already transformed by
+    # the Runtime. The application layer may use it only
     # after matching the current turn's canonical managed-MCP registration;
     # ordinary output continues to use ``output`` above.
     call_tool_result: Optional[dict[str, Any]] = field(default=None, repr=False)

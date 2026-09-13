@@ -13,7 +13,7 @@
 > 状态：最小实现、正常库迁移、三 transport inventory/Chat、cancel、页面性能、Admin 可见页与真实 OAuth 自动 callback/login/logout/refresh/resume 已完成
 > 证据日期：2026-08-25
 > 目标 capability：`dream.managed-mcp-resources.v1`，version `1`，`contract_sha256=746dfcb1343c485bee9fb7cc3fa363424db4a66ad31cd6824ed2024be049614a`
-> 核心结论：Resources 管理面以 PostgreSQL 为唯一配置源，以标准 Python MCP SDK 直接完成发现；Chat 新建和 resume 每个 turn 注入一次数据库一致性快照。Claude Agent SDK 公共接口无需修改；clean-room Runtime 已仅补齐 legacy SSE config/transport 兼容，不接管管理职责。本文不承诺 MCP 协议 session 跨进程恢复。
+> 核心结论：Resources 管理面以 PostgreSQL 为唯一配置源，以标准 Python MCP SDK 直接完成发现；Chat 新建和 resume 每个 turn 注入一次数据库一致性快照。Claude Agent SDK 公共接口无需修改；Runtime 仅承担 Agent 执行期 MCP 连接，不接管 Dream 管理数据库或 CRUD/discovery 聚合。本文不承诺 MCP 协议 session 跨进程恢复。
 > 配套图集：[Dream 托管 MCP 业务交互时序图](./dream-managed-mcp-business-sequences.md)
 > 当前 Web/Node source ownership：[Dream Web 当前 Next.js 架构](./dream-frontend-node-framework-migration-assessment.md)。下述 2026-08-25 前端拓扑与命令仅为当时真实回执，不是当前操作指南。
 
@@ -36,7 +36,7 @@
 
 非目标：
 
-- 不修改 OAuth 协议语义、Chat 状态机、Deck 或 Gateway。clean-room Runtime 只允许修改与数据库快照注入直接相关的 legacy SSE config/transport 兼容；不得重新承担 Dream 管理数据库或 CRUD/discovery 聚合。
+- 不修改 OAuth 协议语义、Chat 状态机、Deck 或 Gateway。Runtime 协议兼容改动必须依据当前源码和数据库快照注入合同验证；不得重新承担 Dream 管理数据库或 CRUD/discovery 聚合。
 - 不建立第二套数据库 migration、runtime DDL、SQLite fallback 或环境名分支。
 - 不把一个进程里的 `ClientSession`、stdio 子进程、HTTP/SSE 连接或 OAuth operation 跨进程恢复写成能力。
 - 不允许浏览器提交任意 stdio executable、环境变量、工作目录或 shell 字符串。
@@ -57,7 +57,7 @@
 | CLI 文件同步 | `backend/claude_mcp/credentials.py:438-464,486-551` | 从 actor CLI config 读取定义并把 OAuth 投影到 thread 文件 | 换为 DB snapshot + 内存解密；旧实现只服务迁移/回滚窗口 |
 | Chat Service | `backend/claude_agent/service.py:1305-1359,1584-1605` | workspace 初始化、同步 actor MCP、构造 `AgentRunOptions` | 保留调用时机；snapshot loader 取代文件 synchronizer |
 | Agent Runner | `backend/libs/claude_agent_kit/server/agent_runner.py:2759-2805` | 冲突 fail closed，合并外部 MCP 并构造 `ClaudeAgentOptions.mcp_servers` | 公开 SDK 接口复用；Path 注入避免 secret argv |
-| clean-room Runtime | `src/cleanroom/mcp/config.ts`、`registry.ts`、`types.ts` | 已严格区分 legacy SSE 与 Streamable HTTP，并复用官方 SDK transport | 只承担 Agent 执行兼容；不增加管理数据库/CLI 职责 |
+| Runtime | `src/services/mcp/client.ts` 与 `compat/mcp-auth/` 构建变换 | 原始 MCP client 和源码哈希绑定的协议适配；运输协议必须按实际源码与进程合同验证 | 只承担 Agent 执行兼容；不增加 Dream 管理数据库/CRUD 职责 |
 | Run DTO | `backend/libs/claude_agent_kit/types.py:209-220` | `claude_mcp_servers` 关闭 repr | 字段保持；传入 detached snapshot |
 | 浏览器 Chat | `frontend/app/_dream/components/chat/ChatPanel.tsx:383-395`；`backend/routers/claude_agent.py:377-425` | 浏览器发送空 `allowedMcpServers`，后端 DTO 不消费该控制 | 保持服务端权威，不增加浏览器 MCP 注入 |
 | Sandbox | `backend/libs/claude_agent_kit/server/workspace.py:513-568` | 禁止 Agent 读取/写入 thread credential/config 文件 | 新链路不写秘密文件；现有 deny 继续作为纵深防御 |
@@ -774,5 +774,5 @@ rg -n "dream\.managed-mcp-resources\.v1|contract_sha256" \
 - 显式旧配置 importer：`backend/script/import_claude_mcp_config.py`、`backend/claude_mcp/importer.py`
 - MCP Python dependency：`backend/pyproject.toml`、`backend/uv.lock`
 - Admin schema/migration：`/Users/dmeck/project/ink-admin-memory/packages/db/src/schema/dream.ts`、`/Users/dmeck/project/ink-admin-memory/drizzle/0038_dream_managed_mcp_resources.sql`
-- Runtime SSE：`/Users/dmeck/project/ink-claude-code-dream/src/cleanroom/mcp/config.ts`、`registry.ts`、`types.ts`
+- Runtime MCP 执行兼容：`/Users/dmeck/project/ink-claude-code-dream/src/services/mcp/client.ts` 与 `compat/mcp-auth/`
 - Admin plaintext settings 结构：`/Users/dmeck/project/ink-admin-memory/packages/db/src/schema/index.ts:365-390`

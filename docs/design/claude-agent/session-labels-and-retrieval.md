@@ -282,7 +282,7 @@ def list_sessions_in_range(
 
 ### 5.4 `user_id` 读取方式
 
-工具在 MCP stdio 子进程中运行，通过环境变量 `INK_AGENT_USER_ID` 获取当前用户 ID（trusted subprocess 上下文，无需认证）：
+工具在 MCP stdio 子进程中运行，通过环境变量 `INK_AGENT_USER_ID` 获取当前用户 ID（由服务端启动并通过 env 绑定当前用户的 stdio 子进程上下文）：
 
 ```python
 user_id_str = os.getenv("INK_AGENT_USER_ID")

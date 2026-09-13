@@ -1,5 +1,5 @@
 <!-- [输入] SDK/Runtime 仓库当前构建脚本、Trusted Publisher 工作流、Dream 依赖锁与 Runtime resolver 合同。 -->
-<!-- [输出] 自有 Python SDK 与多平台 clean-room Runtime 的打包、发布、Dream 集成、验证和回滚操作手册。 -->
+<!-- [输出] 自有 Python SDK 与多平台原始模块 Runtime 的打包、发布、Dream 集成、验证和回滚操作手册。 -->
 <!-- [定位] Claude SDK/Runtime 发布与 IM Dream 接入的中文执行真相源；不负责服务器部署。 -->
 <!-- [同步] 2026-08-30：记录 PyPI SDK 0.2.144、npm Runtime 0.1.4、Notion Bash sandbox 能力、same-SHA workflow、持久最小权限 token 边界及 Dream 精确接入。 -->
 <!-- [同步] 2026-09-13：当前合同为 SDK 0.2.145 × 已发布 Runtime 0.1.9 package-root selector；四平台同字节发布见新回执，旧回执保持历史。 -->
@@ -32,8 +32,7 @@ MCP 状态机或 Runtime 实现。
 
 `0.1.9` 只保留 Runtime 原始 `src`，删除重复的 `restored-src`，目录、模块、
 1,902 文件/35 模块目录的内容和权限摘要不变，取代旧旁路快照加平行实现。
-默认构建实际编译 `src/entrypoints/cli.tsx`，headless/MCP 变换由构建层应用；不再编译
-`src/cleanroom`。原始源码仍保留 Anthropic 版权，派生制品的 SBOM 必须如实记录
+默认构建实际编译 `src/entrypoints/cli.tsx`，headless/MCP 变换由构建层应用，不维护另一套实现。原始源码仍保留 Anthropic 版权，派生制品的 SBOM 必须如实记录
 来源，不能将 selector MIT 用于重新许可原始模块；用户已确认来源授权，Dream 不复制实现文件。
 版本和验证边界见[源码结构接入说明](runtime-0.1.9-release-and-local-dream-adoption.md)。
 
@@ -81,7 +80,7 @@ wheel/sdist 必须排除：
 
 - `_bundled/claude`、`_bundled/claude.exe`；
 - 任意 `*.map`；
-- transcript、Workspace、插件物化数据；
+- transcript、Workspace、生成的插件文件；
 - MCP/OAuth 凭据、Token、环境变量；
 - 自定义 Runtime 二进制。
 

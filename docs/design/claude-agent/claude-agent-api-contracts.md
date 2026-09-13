@@ -17,7 +17,7 @@
 > **[Sync] 2026-07-26**: 触发条件④修订——PreToolUse 网络门禁拆除后，沙箱网络确认仅来自 SDK `can_use_tool` 通道的 `SandboxNetworkAccess` 运行时沙箱代理询问（§4.5.2 事件表）；曾短暂存在的 `networkRequest.source` 字段取消。
 > **[Sync] 2026-08-11**: 本文成为 Chat 与 Dream surface 的唯一 thread conversation
 > HTTP/SSE 合同。Dream 使用相同 history/status/stream/send/tool-confirm/stop；浏览器不传
-> workflow run/actor/turn selector，服务端以 authenticated actor + owned thread 解析可信
+> workflow run/actor/turn selector，服务端以 authenticated actor + owned thread 查询并校验
 > Dream retry leaf/context。`finish` 是唯一终态；失败必须为 `error` 后单个
 > `finish{finishReason:"error"}`，`message-final` 只是成功输出/持久化证据。确认 policy
 > 由服务端在 approval publish 前绑定 active `(threadId,turnId,toolCallId)` 并原子校验
@@ -107,7 +107,7 @@ package validator 枚举 `backend/builtin_skills/common`，并按 canonical ID �
 ```
 
 完整集合由发布中的 catalog 决定，前端不得复制固定 ID。Chat 仅在 Workspace Mode
-开启、Runtime 会物化 workspace Skill 时加载候选。任一 package 非法时端点返回
+开启、Runtime 会生成 workspace Skill 文件时加载候选。任一 package 非法时端点返回
 安全 `503 COMMON_SKILL_CATALOG_UNAVAILABLE`；Chat 只降级该候选来源，普通输入和 Deck
 插件候选保持可用。候选点击只插入普通消息文本，实际执行仍经
 `POST /api/claude-agent`、原 Thread/session 与 Runtime Skill discovery。

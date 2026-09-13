@@ -208,7 +208,12 @@ origin；共享前端 URL 不会让 App 获得前端 DOM 或存储权限。认�
 
 你可以关闭和重新打开交互视图。刷新、切换 Thread、修改权限或改变连接 revision 时会创建新的受控 session，不会重放原始工具。
 
-完整工程链路——连接 discovery、模型工具调用、可信结果投影、实时/历史恢复、Browser Host、Node 代理、sandbox、权限与 Chat 消息回流——请见 [MCP Apps 与 IM Agent UI 设计](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链)。
+Dream 会将原 Runtime 的 SDK MCP 文本、content 数组和 metadata envelope
+结果适配为 App 可用的 content，不解析文本或改变权限。更新 Python 代码后，
+先重启自己拥有的后端，再通过正常 Chat 发起新的工具调用。已丢失 SDK envelope
+的旧记录仍保留普通结果；Dream 不伪造缺失 metadata，也不重放这些工具。
+
+完整工程链路——连接 discovery、模型工具调用、调用关联与结果 DTO 校验、实时/历史恢复、Browser Host、Node 代理、sandbox、权限与 Chat 消息回流——请见 [MCP Apps 与 IM Agent UI 设计](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链)。
 
 ## 支持版本与所有权
 
@@ -231,7 +236,7 @@ origin；共享前端 URL 不会让 App 获得前端 DOM 或存储权限。认�
 
 遇到 Notion `Failed to read config.json`，应区分文件读取失败和 JSON 损坏，并检查最终 Agent Bash 绑定。Runtime 0.1.9 会拒绝原生 `ntn` 候选之前的相对 PATH 项。Dream 只在该绑定启动的 SDK 环境中移除当前 thread cwd 下已证实不存在的相对目录，保留有效命令顺序和所有严格 shadow 检查；不修改 shell profile、父 PATH、凭证或非 Notion turn。仅 `ntn doctor` exit 0 不足以证明正常：须检查警告，并通过正常 Chat 验证只读请求。
 
-Runtime `0.1.9` 保留唯一原始 `src` 实现（1,902 个内容不变的文件、35 个原始模块目录），删除重复 `restored-src`。默认构建读取 `src/entrypoints/cli.tsx`，不保留平行 `src/cleanroom`。source-bound headless、MCP 和 Dream 兼容变换仍位于构建层，制品保留原始版权与用户确认的再分发边界。Dream 精确 Runtime pin 和项目元数据原子更新；本机采用必须另有公开归档验证及明确拥有的后端启动身份，不能仅从源码推断。详见[发布与本机 Dream 接入方案](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md)。
+Runtime `0.1.9` 保留唯一原始 `src` 实现（1,902 个内容不变的文件、35 个原始模块目录），删除重复 `restored-src`。默认构建读取 `src/entrypoints/cli.tsx`，不维护第二套 Runtime 实现。source-bound headless、MCP 和 Dream 兼容变换仍位于构建层，制品保留原始版权与用户确认的再分发边界。Dream 精确 Runtime pin 和项目元数据原子更新；本机采用必须另有公开归档验证及明确拥有的后端启动身份，不能仅从源码推断。详见[发布与本机 Dream 接入方案](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md)。
 
 Admin Drizzle 是共享 PostgreSQL migration 的唯一所有者。Dream 只消费精确发布的 capability，缺失时 fail closed。MCP App 连接设置要求先发布 Admin migration `0053_rare_lenny_balinger` 与 capability `dream.mcp-app-connection-settings.v1`，再发布对应 Dream 代码。
 

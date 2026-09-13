@@ -43,7 +43,7 @@ It does not own:
 - runner creation or SDK process lifecycle;
 - streaming callbacks, SSE frame emission, or persistence;
 - tool execution, tool result interpretation, or manual approval UI;
-- client-provided system prompts, untrusted history arrays, or ad hoc `conversation_id` routing.
+- client-provided system prompts, client-supplied history arrays, or ad hoc `conversation_id` routing.
 
 ## 2. Lifecycle Position
 
@@ -97,7 +97,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | `request.tool_choice` | client request | no | Tool policy copied into `AgentRunOptions`; valid modes are `auto`, `manual`, and `none`. |
 | `request.model` | client request or server selection | no | Runtime context and SDK model override when allowed by server policy. |
 | `request.max_turns` | server default or client request | no | SDK turn budget; defaults belong in config/env, not in route logic. |
-| `request.cwd` | trusted internal/debug caller | no | Explicit workspace override. Production chat callers should omit it. |
+| `request.cwd` | authorized internal/debug caller | no | Explicit workspace override. Production chat callers should omit it. |
 | `state` | `AgentRunStatePool` | yes | Cross-turn cache for `system_prompt`, `cwd`, runner presence, lifecycle, and turn count. |
 | `queue` | factory-owned `asyncio.Queue` | yes | Shared queue later used by Phase 3 callbacks. |
 | `runner` | factory-owned runner cache | yes in current service signature | Passed through to `_TurnExecution`; not executed during assembly. |
@@ -202,7 +202,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | External facts | Do not prefetch arbitrary live data during assembly. Realtime facts must enter through explicit tools during Phase 3. |
 | Historical context | If DB context cannot be loaded, degrade to a valid system prompt with the no-session fallback. Do not fail the turn for missing optional history. |
 | Settings SYSTEM_PROMPT | Load only through `database.get_system_config(user_id)`. Treat as lower priority than `_SYSTEM_PROMPT_TEMPLATE`; omit when empty or unavailable. |
-| Workspace override | Treat `request.cwd` as trusted/internal only when Workspace Mode is enabled. When disabled, ignore it and do not initialize the full product workspace; only the server-owned runtime temp root is allowed. |
+| Workspace override | Treat `request.cwd` as authorized internal callers only when Workspace Mode is enabled. When disabled, ignore it and do not initialize the full product workspace; only the server-owned runtime temp root is allowed. |
 | Tool policy | Support `auto`, `manual`, and `none`; invalid values should be rejected before SDK execution. |
 | Prompt optimization | Preserve the raw user task for audit upstream, but pass only the optimized planning prompt into `message_parts` when the turn is a planning task. |
 
@@ -252,7 +252,7 @@ State side effects:
 - `state.system_prompt` cache is intentionally independent of persisted chat history. Updating recent journal context requires state rebuild or explicit invalidation.
 - Updating Settings SYSTEM_PROMPT does not require process restart; Phase 1 compares the current config value against `state.system_config_system_prompt` and rebuilds the cached prompt when it changes.
 - `message_parts=None` produces a valid content-block list with runtime context and empty text, but public routes should reject empty user-facing text before that point.
-- `request.cwd` can cause context to run outside the default workspace only when Workspace Mode is enabled and a trusted internal/debug caller provides it. Keep it out of public UI flows unless a trusted admin/debug policy is in place.
+- `request.cwd` can cause context to run outside the default workspace only when Workspace Mode is enabled and a authorized internal/debug caller provides it. Keep it out of public UI flows unless a explicit admin/debug authorization policy is in place.
 - **Cross-environment resume safety**: `chat_thread.claude_session_id` is durable in DB, but the SDK transcript JSONL lives in the local CLI runtime at `~/.claude/projects/<cwd-encoded>/<session_id>.jsonl`. After a fresh deployment or CLI retention reaping, the DB row still points at a stale `claude_session_id`; `assemble_context` probes the filesystem before committing to `--resume`. On a miss, the DB self-heals after `_persist_turn` writes the freshly captured `claude_session_id`.
 - **Contract version gating**: `_AGENT_RUNTIME_CONTRACT_VERSION` (env `INK_AGENT_CONTRACT_VERSION`) must be bumped whenever the system prompt, MCP tool set, or SDK interaction changes incompatibly with existing transcripts. The check prevents old transcripts from being resumed with a mismatched runtime.
 

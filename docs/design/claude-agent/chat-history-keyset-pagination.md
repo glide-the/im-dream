@@ -435,7 +435,7 @@ sequenceDiagram
                 Service-->>UI: 按原索引挂载 think/tool/intermediate
                 UI->>UI: 恢复锚点，焦点留在按钮
             end
-        else partial/error/cancel/no final/legacy 结构不可信
+        else partial/error/cancel/no final/legacy 结构不满足 final 协议校验
             Service-->>UI: 按原顺序完整挂载诊断内容
         end
         State-->>UI: 提交稳定最近页并定位到底部
@@ -544,10 +544,10 @@ sequenceDiagram
 - cursor 包含 Thread、完整微秒时间与 ID；NULL/同时间/边界行删除、旧页去重、single-flight、AbortController、实时 append 和持久化 turnId 替换均有明确合同，不依赖 OFFSET 或数组最后一项。
 - 大字段投影在现有单列 TEXT `parts` 上不能减少 TOAST/Python 解码；另建详情协议会带来 N+1 与搜索/复制/工具确认语义改变。故删去无证据的轻量 DTO 实现，仅保留未来 Admin projection capability。
 - `content-visibility` 实测只减少强制 layout，不减少主要的 ReactMarkdown commit 和 79k DOM 创建；通用虚拟化会引入动态估高、隐式回收、搜索/可访问性和实时滚动风险。两者均不进入本次实现。
-- 已选择的历史 completed turn 过程折叠不使用大小阈值：严格协议 final 常驻，过程按显式操作挂载/卸载；live、error、cancel、partial、无可信 final 全量诊断显示。这是单条大历史 AI JSON 在 Dream 不改 Schema 前最小的前端补偿。
+- 已选择的历史 completed turn 过程折叠不使用大小阈值：严格协议 final 常驻，过程按显式操作挂载/卸载；live、error、cancel、partial、没有通过协议校验的 final 全量诊断显示。这是单条大历史 AI JSON 在 Dream 不改 Schema 前最小的前端补偿。
 - 两个宿主继续汇入唯一 `ChatPanel → ChatMessageList`；`AssistMessagePart` 保持 text leaf。没有新增缓存、队列、后台任务、HTTP 控制通道、环境分支、复杂虚拟列表或持久化折叠配置。
 
-审查中要求修正的三点均已进入实现与测试：权威最近页用稳定 `turnId` 替换 live provisional ID；协议成功但 final 结构不可信时公开 invalid projection 并完整诊断；后续旧页使用初始权威 pending-tool snapshot 结算历史确认，不能因分页晚到重新弹出。
+审查中要求修正的三点均已进入实现与测试：权威最近页用稳定 `turnId` 替换 live provisional ID；协议成功但 final 结构不满足 final 协议校验时公开 invalid projection 并完整诊断；后续旧页使用初始权威 pending-tool snapshot 结算历史确认，不能因分页晚到重新弹出。
 
 ## 实现切面
 

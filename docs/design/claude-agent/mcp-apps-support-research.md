@@ -67,10 +67,10 @@ MCP Apps `2026-01-26` 稳定规范和 OpenAI 当前文档规定：
 
 | 源码 | 当前行为 | 缺口 |
 |---|---|---|
-| `/Users/dmeck/project/ink-claude-code-dream/src/cleanroom/mcp/registry.ts:630-633` | MCP Client capabilities 为 `{}` | 没有 Apps capability negotiation |
+| Runtime `src/services/mcp/client.ts` | 原始 headless Client 不声明 `io.modelcontextprotocol/ui` | Apps 协商由 Dream Node Host 负责，普通 MCP 不等于 Apps Host |
 | 同文件 `:732-750` | 模型工具只投影 name、description、input schema | 不处理 Apps tool visibility 和 UI metadata |
 | 同文件 `:753-800` | 支持普通 `tools/call`、`resources/list`、`resources/read` | 能读 resource，但不会建立 App UI |
-| `/Users/dmeck/project/ink-claude-code-dream/src/cleanroom/protocol.ts:990-1017` | MCP tool result 被 `JSON.stringify` 后写入普通 `tool_result` | `content`、`structuredContent`、`_meta` 没有独立可见性 |
+| Dream Kit `server/agent_runner.py` | 将 SDK 实际发出的结果转换为 App DTO，并匹配批准调用 ID | 只保留 SDK 已发出的字段，不承诺恢复 Runtime 未发出的 metadata |
 | 同文件 `:131-155` | `safeMcpEntries` 不保留 tool/resource `_meta` | Host 无法获得 UI 关联信息 |
 | `/Users/dmeck/project/ink-claude-code-dream/runtime/core-prune-profile.json:278-284` | `MCP_RICH_OUTPUT` disabled | 当前发行物未包含交互式 MCP rendering |
 | `/Users/dmeck/project/ink-claude-code-dream/tests/mcp-apps-compatibility.test.mjs:44-133` | 当前 characterization test 验证 resource/result 元数据可读，但 capabilities 为 `{}`、app-only tool 仍投给模型 | 明确证明普通 MCP 兼容不等于 Apps Host |
@@ -99,7 +99,7 @@ IM 当前 Runtime 生命周期：
 Runtime 对 MCP 的现有继承链：
 
 1. `service.py:1601-1610` 从 managed MCP loader 取得 Server snapshot。
-2. `service.py:1765-1815` 写入 `AgentRunOptions.claude_mcp_servers` 和可信 actor/thread 环境。
+2. `service.py:1765-1815` 写入 `AgentRunOptions.claude_mcp_servers` 和服务端按已授权 actor/thread 注入的环境。
 3. `agent_runner.py:3400-3455` 合并内部和远程 MCP Server 配置。
 4. `agent_runner.py:3457-3495` 创建 `ClaudeAgentOptions`，继续使用现有 PreToolUse/PostToolUse/can_use_tool。
 5. `agent_runner.py:3570-3675` 从 SDK `query_stream` 接收消息。

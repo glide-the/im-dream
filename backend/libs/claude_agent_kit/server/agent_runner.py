@@ -1,3 +1,5 @@
+# [Sync] 2026-09-13: adapt correlated original-Runtime MCP text/array wire
+#                    results; retain approved call identity until execution ends.
 # [Sync] 2026-09-12: constrain shell ZIP exports to literal, in-workspace,
 #                    non-dot, non-symlink inputs and outputs.
 # [Sync] 2026-09-11: allow built-in query tools (Read/Grep/Glob/LS/NotebookRead) to access symlinked/source files in DEFAULT_BUILTIN_SKILLS_ROOT while keeping write tools strictly confined.
@@ -3338,7 +3340,9 @@ class ClaudeAgentRunner:
                     and "approved" in confirmation_result
                 ):
                     if confirmation_result["approved"] is True:
-                        pending_tool_calls.pop(tool_call_id, None)
+                        # Approval completes confirmation, not execution.
+                        # Keep this trusted call identity until its result;
+                        # UserMessage carries only the tool-use ID.
                         updated_input: dict[str, Any] = tool_input
 
                         # For AskUserQuestion-style tools, merge answers with the
@@ -4563,6 +4567,33 @@ class ClaudeAgentRunner:
                             if tool_use_id
                             else None
                         )
+                        call_tool_result = complete_call_tool_result
+                        # Original Runtime's tool_use_result is processed MCP
+                        # content, optionally enveloped with mcpMeta. Its
+                        # structured-content lane emits a string, not the MCP
+                        # content array. Adapt this SDK wire value (never the
+                        # model-facing/JSON-normalized block) only for one
+                        # correlated MCP call. Managed identity/descriptor and
+                        # error checks remain application-owned.
+                        pending_tool_name = (pending_call or {}).get("tool_name")
+                        if (
+                            len(tool_result_blocks) == 1
+                            and isinstance(pending_tool_name, str)
+                            and pending_tool_name.startswith("mcp__")
+                        ):
+                            if isinstance(raw_call_tool_result, str):
+                                call_tool_result = {
+                                    "content": [{"type": "text", "text": raw_call_tool_result}],
+                                }
+                            elif isinstance(raw_call_tool_result, list):
+                                call_tool_result = {"content": raw_call_tool_result}
+                            elif isinstance(raw_call_tool_result, dict) and isinstance(
+                                raw_call_tool_result.get("content"), str
+                            ):
+                                call_tool_result = {
+                                    **raw_call_tool_result,
+                                    "content": [{"type": "text", "text": raw_call_tool_result["content"]}],
+                                }
                         if callbacks.on_tool_event:
                             is_err = bool(
                                 _block_value(
@@ -4585,7 +4616,7 @@ class ClaudeAgentRunner:
                                     ),
                                     tool_call_id=tool_use_id,
                                     output=output,
-                                    call_tool_result=complete_call_tool_result,
+                                    call_tool_result=call_tool_result,
                                     is_error=is_err,
                                     state=(
                                         "output-error"

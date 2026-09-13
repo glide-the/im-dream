@@ -9,8 +9,8 @@
 
 ## 2026-09-13 config 读取事件（修复与真实只读验收完成）
 
-本节记录当前事件；下文 0.1.3/0.1.4、clean-room 和 restored-src 是历史证据，
-不是当前安装或源码 owner。当前 Dream 基线为 `98f72dbd`，SDK 合同
+本节记录当前事件；带日期的旧版本执行结果只证明对应制品，
+不能替代当前安装或源码职责。当前 Dream 基线为 `98f72dbd`，SDK 合同
 `0.2.145`、正常 npm Runtime `0.1.9`，本机原生 `ntn 0.15.1`。
 原任务最终候选 fresh/resume/普通 Chat 均通过，不能用早期 blocked 覆盖最终回执；
 该旧回执也不能代替本次验收。
@@ -170,7 +170,7 @@ Scope: 当前 actor/thread 的 Notion CLI 凭证从 Dream 投影到 Agent Bash �
 
 ## 4. 调查证据与根因判断矩阵
 
-版本基线：Dream `837c3f715299a9d0556faf8e23035bc448f7c9f3`；Python SDK `ink-claude-dream-agent-sdk 0.2.144`；正常 Dream backend 通过受控绝对路径运行摘要绑定的 `0.1.4` darwin-arm64 executable；兼容 CLI 为 `2.1.241`。Runtime release HEAD `0ebafe95db22101cf77db2c27e73b561d3af37a6`；上游参考 `restored-src@a8a678cb6244e6770e1e421767ff0987a1d95549`（Claude Code `2.1.88`）。0.1.4 clean-room source-tree SHA-256 为 `266362ac3543ca6d5dc7a400e2a23ac718e231abb761eab8f824726ab595de81`，darwin-arm64 executable SHA-256 为 `969f9193be8750e2573e4c4ea9c3556d48687925d9f57b8ea676669d753980dd`，授权 v2 真实回执 SHA-256 为 `87f3d1c6040e5462d85e6259a5cb16509a5d26838d5299d1ba350a4ba463dbea`。
+历史执行身份（2026-08-30）：Dream `837c3f715299a9d0556faf8e23035bc448f7c9f3`、SDK `0.2.144`、Runtime `0.1.4`；真实回执 SHA-256 `87f3d1c6040e5462d85e6259a5cb16509a5d26838d5299d1ba350a4ba463dbea`。旧实现说明不作为当前设计规则；当前 `0.1.9` 的文件/env/PATH 规则见本稿首节与凭证主设计。
 
 | 环节 | 预期行为 | 实际行为 | 代码/运行证据 | 是否根因 | 正确处理 |
 |---|---|---|---|---|---|
@@ -182,12 +182,11 @@ Scope: 当前 actor/thread 的 Notion CLI 凭证从 Dream 投影到 Agent Bash �
 | Runner `options.env` | Notion 应作为最终 server authority | `apply_notion_cli_env_to_options` 在 user/gateway overlay 后调用 | `agent_runner.py` 调用顺序；runner focused test | 否 | 保持最终覆盖顺序。 |
 | Python SDK transport | `options.env` 覆盖 inherited env | 0.2.144 合并顺序为 inherited → defaults → options → SDK version | `SubprocessCLITransport.connect()` | 否 | SDK 无需修改。 |
 | Runtime 主进程 | 接受 SDK 显式环境 | 真实 Bash 下游缺失，但没有证据表明 SDK spawn 丢失 | SDK transport 代码与 Dream options 证据 | 否 | 用 compiled process test 补齐边界证据。 |
-| Runtime production sandbox | 保留精确 thread-bound Notion binding | 0.1.3 `cleanEnvironment()` 只保留 `LANG/LC_*/PATH/TERM` | `src/cleanroom/sandbox/production.ts@7c7598f` | **是** | 在现有 sandbox allowlist 上增加精确、校验后的 Notion binding。 |
 | Agent Bash | 看到 home/token/keyring；workers 按文件存在性 | 真实新 turn 和继续轮三个目标均 `unset` | 正常 Chat 保留的 thread，两个 Bash `output-available`/exit 0，仅状态输出 | 下游症状 | Runtime 修复后重跑同一验收。 |
 | `ntn` | version/doctor/只读身份可用 | 普通 shell version 可用；Agent Bash 因 binding 被删不能认证 | `ntn --help` 明确四项环境合同；真实 Bash 状态 | 下游症状 | 修复后只读验证，不输出响应正文。 |
 | resume | 每轮刷新后与新 turn 一致 | 第二轮再次被同一 sandbox allowlist 清除 | 同一真实 Chat thread 的第二个 Bash | 否（非缓存） | 不新增 resume cache；修复单一 spawn 路径。 |
 
-结论：这是 **Runtime fork 的生产 Bash sandbox 环境继承缺陷**，并伴随一个独立但合理的“workers 配置文件不存在”状态。它不是普通 shell 检查位置问题，不是 Dream 投影、SDK 合并顺序或 resume 缓存缺陷。上游 Bash 广泛使用 `subprocessEnv()`，clean-room Runtime 有意采用更窄的 allowlist；真正缺口是 Notion 能力加入 Dream 后，Runtime allowlist/capability/build contract 未同步扩展，不能笼统描述为 Claude Code 源码迁移时漏抄某个函数。
+该旧版本事件对应 Bash 子进程环境未按 Notion 能力合同传递；workers 配置缺失是独立的可选状态。当前设计分别规定 Dream 凭证来源、SDK options 合并、Runtime/Bash 绑定和 CLI config 读取，在最终命令边界验证，不将历史缺陷推断为当前原因。
 
 ### 4.1 2026-09-04 Dream PreToolUse 拒绝事件
 
@@ -320,17 +319,15 @@ workers 配置缺失本身不降低普通 API/doctor 能力，也不单独显示
 
 业务时序见 [runtime-credential-and-skill-sequence.md](./runtime-credential-and-skill-sequence.md)。
 
-## 10. 完成性审计
+## 10. 历史执行审计（2026-08-30，SDK 0.2.144 × Runtime 0.1.4）
 
 | 原始要求 | 权威证据 | 当前判定 |
 |---|---|---|
 | 区分普通 shell、Dream、SDK、Runtime、Bash、`ntn` 与 resume | 本文第 3、4 节；真实旧版 Chat 基线 | 已证明。 |
 | 逐变量解释 API token、keyring 与 workers | 本文第 3、4 节；当前 actor/thread 只有 `auth.json`/`config.json`/`workspaces.json` | 已证明；workers 当前 `unset` 正确。 |
-| 明确 commit 的 upstream/fork 对比 | `restored-src@a8a678cb6244` 的 `subprocessEnv()`；Runtime `7c7598f` 的 production allowlist | 已证明为 clean-room capability 缺口，不是笼统迁移漏拷。 |
 | 交互设计、六类 Mermaid 时序、反过度设计 | 本文第 5、7节；`runtime-credential-and-skill-sequence.md` 第 4–9 节 | 已完成。 |
 | Dream projection、ambient 覆盖、A/B actor、foreign thread、Workspace Mode | Dream focused suite | 203 passed、1 skipped、122 subtests；已证明。 |
 | Runtime 源级、真实 OS sandbox、compiled fresh/resume、MCP/helper 隔离 | Runtime focused suite 与 `bun run test` | 14/14 focused；125 passed、5 external-fixture skips；已证明。 |
-| 稳定 capability 和五包生成证据 | `runtime/cleanroom-artifact-policy.json` → 五份 generated `manifest/capabilities.json` | `sandbox.notion-cli` 已证明；formal four-target/five-package lane 通过。 |
 | 正常 Dream 真实账户、公开 Chat 的新 turn/resume/`ntn`/普通 Chat | `frontend/e2e/notion-cli-runtime-real.spec.ts`；保留 thread `4ce9fd1a-1244-4893-ab68-a81de14396bb`；Runtime v2 回执 | **已验证**；Playwright 1/1 passed（1.8m），3 turns，6 个 Bash parts 全为 `output-available`；fresh/resume 两轮均为 token/keyring `set`、workers `unset`、`ntn 0.15.1`、doctor/identity `ok`，普通 Chat 无新增 Bash。 |
 | 版本绑定业务资格、四平台资格、npm 发布、registry 安装 | Runtime publication policy 和 Dream exact manifest gate | **已完成**；qualification `33306855166`、publish `33306940462` 成功，五包 registry fresh install 与 Dream 0.1.4 原子版本面通过。 |
 

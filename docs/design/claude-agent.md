@@ -280,7 +280,7 @@ ALTER TABLE user_sessions ADD COLUMN labels TEXT;
 | 默认检索 | `retrieval_mode="fuzzy"`，字符模糊匹配 title / labels / excerpt / 正文 text |
 | 向量边界 | `retrieval_mode="vector"` 当前返回 `vector_retrieval_unavailable`，不接入向量库 |
 | 返回 | sessions 数组，每项含 `sessionId`, `name`, `labels`, `date`, `excerpt`, 可选 `match` |
-| 数据源 | 直接读取 `user_sessions` 数据库（trusted subprocess），`user_id` 通过 `INK_AGENT_USER_ID` env var 注入 |
+| 数据源 | 直接读取 `user_sessions` 数据库（server-launched stdio subprocess with actor-bound env），`user_id` 通过 `INK_AGENT_USER_ID` env var 注入 |
 
 **系统提示中的 Workflow 说明**（见 `_SYSTEM_PROMPT_TEMPLATE`）：
 

@@ -130,7 +130,7 @@ SDK 消费方经控制请求 `remote_control {enabled:true}` 启用（`src/cli/p
 - **work item 生命周期**：ack（JWT）/ 心跳（300s 租约）/ stop（force=false 重排队，true 终止）/ 5s 未 ack 被 reclaim。
 - **冲刷顺序**：`FlushGate` 在历史 POST 期间排队实时写入，跨传输替换保留。
 - **失败熔断**：初始化连续失败 3 次自动禁用；失败提示 10s 自动消散；跨进程死 token 退避（`bridgeOauthDeadFailCount≥3`）。
-- **认证模型**：注册/会话管理 = claude.ai OAuth（401 单重试刷新）；poll = environment_secret；ack/心跳/事件 = session-ingress JWT（v2 强制 worker 角色）；v1 传输刻意用 OAuth（自刷新），v2 用 JWT（服务端重派或 `/bridge` 重唤刷新）；可信设备令牌（ELEVATED 级）；`SAFE_ID_PATTERN` 防路径注入；work secret 严格版本校验。
+- **认证模型**：注册/会话管理 = claude.ai OAuth（401 单重试刷新）；poll = environment_secret；ack/心跳/事件 = session-ingress JWT（v2 强制 worker 角色）；v1 传输刻意用 OAuth（自刷新），v2 用 JWT（服务端重派或 `/bridge` 重唤刷新）；设备授权令牌（协议级别 `ELEVATED`）；`SAFE_ID_PATTERN` 防路径注入；work secret 严格版本校验。
 
 ---
 
