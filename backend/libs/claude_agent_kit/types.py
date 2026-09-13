@@ -2,6 +2,7 @@
 # [Output] Provide AgentRunOptions, AgentRunResult, AgentStreamingCallbacks, ToolEventPayload,
 #          IClaudeAgentSDKClient to server and application layers.
 # [Pos] type-contract node in libs/claude_agent_kit
+# [Sync] 2026-09-13: distinguish optional Claude resume identity from Dream thread identity.
 # [Sync] 2026-05-09: add MCP subprocess env bindings for current pet context.
 # [Sync] 2026-05-10: add include_runtime_context for specialized callers; pet chat uses the default SDK runtime block.
 # [Sync] 2026-05-10: add turn_runtime for app local time enrichment in SDK runtime_context.
@@ -207,11 +208,12 @@ class AgentRunOptions:
     """Options for running the agent.
 
     Maps to TypeScript ``AgentRunOptions`` in agent-runner.ts.
-    Note: ``thread_id`` in Claude Agent SDK is the same as ``session_id``.
+    ``thread_id`` is the legacy Kit name for a confirmed Claude session ID;
+    it is never the Dream business thread or a note session identifier.
     """
 
-    # Thread ID for conversation context — same as session_id in the SDK.
-    thread_id: str
+    # None requests a fresh Claude session; only a verified DB Claude ID resumes.
+    thread_id: Optional[str]
     # User's message: either a plain string or a pre-built list of content
     # blocks (as returned by ClaudeAgentContextBuilder.build_user_message).
     # When a list is provided the runner uses it directly without further

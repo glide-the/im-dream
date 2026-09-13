@@ -6,7 +6,14 @@
 <!-- [同步] 2026-09-06：使新增连接和 App 控制与可访问 Server 弹窗、统一 MCP 使用策略表单一致。 -->
 <!-- [同步] 2026-09-12：增加使用显式 origin、可恢复的 NATAPP 边缘转发操作入口。 -->
 <!-- [同步] 2026-09-13：采用 SDK 0.2.145 与已发布 Runtime 0.1.9 package-root selector 合同。 -->
+<!-- [同步] 2026-09-13：记录历史线程恢复的存储边界。 -->
+
+历史 Dream 线程对应的 Claude 会话在当前 Runtime 项目中不可用时，服务端会在
+同一业务线程内创建新 Claude 会话，保留笔记关联和历史消息。数据库和存储访问
+错误仍明确失败。详见[恢复合同与时序图](docs/design/claude-agent/claude-session-resume-resolution.md)。
 <!-- [同步] 2026-09-13：由当前前端入口提供 opaque MCP Apps 沙箱，不再固定额外端口。 -->
+
+<!-- [同步] 2026-09-13：记录 Notion 绑定启动的缺失相对 PATH 兼容和 config 读取诊断。 -->
 
 # Ink & Memory
 
@@ -221,6 +228,8 @@ origin；共享前端 URL 不会让 App 获得前端 DOM 或存储权限。认�
 | Dream Web、Thread/Run/Workspace 集成 | 本仓库 |
 
 包所有权是明确分开的：`uv` 管理 Dream Python 环境，npm 发布原生 Runtime 和 Notion CLI，pnpm 管理 `frontend/`。`uv sync` 不会安装或升级原生 Runtime。
+
+遇到 Notion `Failed to read config.json`，应区分文件读取失败和 JSON 损坏，并检查最终 Agent Bash 绑定。Runtime 0.1.9 会拒绝原生 `ntn` 候选之前的相对 PATH 项。Dream 只在该绑定启动的 SDK 环境中移除当前 thread cwd 下已证实不存在的相对目录，保留有效命令顺序和所有严格 shadow 检查；不修改 shell profile、父 PATH、凭证或非 Notion turn。仅 `ntn doctor` exit 0 不足以证明正常：须检查警告，并通过正常 Chat 验证只读请求。
 
 Runtime `0.1.9` 保留唯一原始 `src` 实现（1,902 个内容不变的文件、35 个原始模块目录），删除重复 `restored-src`。默认构建读取 `src/entrypoints/cli.tsx`，不保留平行 `src/cleanroom`。source-bound headless、MCP 和 Dream 兼容变换仍位于构建层，制品保留原始版权与用户确认的再分发边界。Dream 精确 Runtime pin 和项目元数据原子更新；本机采用必须另有公开归档验证及明确拥有的后端启动身份，不能仅从源码推断。详见[发布与本机 Dream 接入方案](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md)。
 

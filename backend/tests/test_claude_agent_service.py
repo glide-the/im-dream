@@ -3,6 +3,7 @@
 # [Output] Verify context assembly maps system_config into AgentRunOptions and
 #          service-level SSE event mapping remains correct.
 # [Pos] test node in backend/tests
+# [Sync] 2026-09-13: verify three identity scopes, resume intent, and DB failure boundaries.
 # [Sync] 2026-06-14: combine system_config assembly coverage with tool_input_delta
 #                    -> tool-input-delta SSE forwarding coverage.
 # [Sync] 2026-08-28: carry selected model max-output capability into the immutable Runtime env snapshot.
@@ -68,6 +69,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -184,6 +186,114 @@ class TestStoryWorkspaceOutputTransaction(unittest.TestCase):
 
 
 class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
+    async def test_fresh_init_receipt_is_the_next_turn_resume_identity(self):
+        from claude_agent_sdk.types import SystemMessage
+
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(
+            context_builder=builder,
+            platform_model_resolver=lambda *_: "dream-balanced",
+            dream_context_mapper=_StaticDreamContextMapper(None),
+        )
+        request = ClaudeAgentRunRequest(user_id="7", thread_id="same-dream-thread", resume=True)
+        row = {}
+        new_id = "44444444-4444-4444-8444-444444444444"
+
+        def save_id(thread_id, session_id, version):
+            self.assertEqual(thread_id, request.thread_id)
+            row.update(claude_session_id=session_id, agent_contract_version=version)
+
+        with (
+            tempfile.TemporaryDirectory(prefix="dream-resume-next-turn-") as tmp,
+            unittest.mock.patch.object(service_module._db, "get_system_config", return_value={"workspace_enabled": True}),
+            unittest.mock.patch.object(service_module._db, "get_chat_thread", side_effect=lambda *_: dict(row)),
+            unittest.mock.patch.object(service_module._db, "update_chat_thread_claude_session", side_effect=save_id) as save,
+            unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
+        ):
+            state = AgentRunState(session_id=request.thread_id)
+            fresh = await service.assemble_context(request, state=state, bus=_FakeBus(), runner=unittest.mock.Mock())
+            self.assertIsNone(fresh.run_options.thread_id)
+            await service._persist_sdk_session_from_message(fresh, SimpleNamespace(data={"session_id": request.thread_id}))
+            await service._persist_sdk_session_from_message(fresh, SystemMessage(subtype="error", data={"session_id": new_id}))
+            save.assert_not_called()
+            await service._persist_sdk_session_from_message(fresh, SystemMessage(subtype="init", data={"session_id": new_id}))
+            project = Path(tmp).resolve() / ".claude-home" / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", str(Path(tmp).resolve()))
+            project.mkdir(parents=True)
+            (project / f"{new_id}.jsonl").write_text(json.dumps({
+                "type": "user", "uuid": "fixture", "sessionId": new_id,
+                "message": {"role": "user", "content": "fixture"},
+            }) + "\n")
+            resumed = await service.assemble_context(request, state=state, bus=_FakeBus(), runner=unittest.mock.Mock())
+            self.assertTrue(resumed.run_options.resume)
+            self.assertEqual(resumed.run_options.thread_id, new_id)
+            self.assertEqual(resumed.request.thread_id, request.thread_id)
+
+    async def test_resume_intent_and_database_identity_matrix(self):
+        from libs.claude_agent_kit.server import session_files
+
+        claude_id = "44444444-4444-4444-8444-444444444444"
+        row = {
+            "claude_session_id": claude_id,
+            "agent_contract_version": service_module._AGENT_RUNTIME_CONTRACT_VERSION,
+        }
+        for resume, stored, located, expected in (
+            (True, {}, None, False),
+            (True, row, None, False),
+            (True, row, "/verified-transcript", True),
+            (False, row, "/verified-transcript", False),
+            (True, {**row, "agent_contract_version": "old"}, None, False),
+        ):
+            with self.subTest(resume=resume, stored=stored, located=located):
+                builder = _FakeContextBuilder()
+                service = ClaudeAgentService(
+                    context_builder=builder,
+                    platform_model_resolver=lambda *_: "dream-balanced",
+                    dream_context_mapper=_StaticDreamContextMapper(None),
+                )
+                request = ClaudeAgentRunRequest(
+                    user_id="7", thread_id="dream-business-thread", resume=resume,
+                    editor_state={"id": "note-business-session"},
+                    message_parts=[{"type": "text", "text": "isolated fixture"}],
+                )
+                with (
+                    tempfile.TemporaryDirectory(prefix="dream-resume-service-") as tmp,
+                    unittest.mock.patch.object(service_module._db, "get_system_config", return_value={"workspace_enabled": True}),
+                    unittest.mock.patch.object(service_module._db, "get_chat_thread", return_value=stored) as loader,
+                    unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
+                    unittest.mock.patch.object(session_files, "locate_resumable_session", return_value=located) as probe,
+                ):
+                    execution = await service.assemble_context(
+                        request, state=AgentRunState(session_id=request.thread_id),
+                        bus=_FakeBus(), runner=unittest.mock.Mock(),
+                    )
+                loader.assert_called_once_with(request.thread_id, 7)
+                self.assertEqual(execution.run_options.resume, expected)
+                self.assertEqual(execution.run_options.thread_id, claude_id if expected else None)
+                self.assertEqual(builder.user_message_calls[0]["thread_id"], request.thread_id)
+                self.assertEqual(builder.user_message_calls[0]["editor_session_id"], "note-business-session")
+                self.assertEqual(builder.user_message_calls[0]["resume"], expected)
+                if not resume or not stored or stored.get("agent_contract_version") == "old":
+                    probe.assert_not_called()
+
+    async def test_resume_database_failure_does_not_become_fresh(self):
+        service = ClaudeAgentService(
+            context_builder=_FakeContextBuilder(),
+            platform_model_resolver=lambda *_: "dream-balanced",
+            dream_context_mapper=_StaticDreamContextMapper(None),
+        )
+        request = ClaudeAgentRunRequest(user_id="7", thread_id="dream-db-error", resume=True)
+        with (
+            tempfile.TemporaryDirectory(prefix="dream-resume-db-error-") as tmp,
+            unittest.mock.patch.object(service_module._db, "get_system_config", return_value={"workspace_enabled": True}),
+            unittest.mock.patch.object(service_module._db, "get_chat_thread", side_effect=RuntimeError("secret database details")),
+            unittest.mock.patch.object(service_module, "get_or_create_workspace", return_value=Path(tmp).resolve()),
+            self.assertRaisesRegex(RuntimeError, "^CLAUDE_RESUME_DATABASE_UNAVAILABLE$"),
+        ):
+            await service.assemble_context(
+                request, state=AgentRunState(session_id=request.thread_id),
+                bus=_FakeBus(), runner=unittest.mock.Mock(),
+            )
+
     def setUp(self) -> None:
         self._dream_thread_loader = unittest.mock.patch.object(
             service_module._db,
@@ -523,16 +633,19 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             message_parts=[{"type": "text", "text": "继续"}],
         )
         with tempfile.TemporaryDirectory() as tmp_dir:
-            workspace_path = Path(tmp_dir) / request.thread_id
+            workspace_path = Path(tmp_dir).resolve() / request.thread_id
             transcript = (
                 workspace_path
                 / ".claude-home"
                 / "projects"
-                / "project"
+                / re.sub(r"[^a-zA-Z0-9]", "-", str(workspace_path.resolve()))
                 / f"{session_id}.jsonl"
             )
             transcript.parent.mkdir(parents=True)
-            transcript.write_text("{}\n", encoding="utf-8")
+            transcript.write_text(json.dumps({
+                "type": "user", "uuid": "fixture-message", "sessionId": session_id,
+                "message": {"role": "user", "content": "isolated fixture"},
+            }) + "\n", encoding="utf-8")
             with (
                 unittest.mock.patch.object(
                     service_module._db,
@@ -1535,8 +1648,9 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
                 async def run_streaming(self, opts, callbacks):
                     del opts
                     assert callbacks.on_message is not None
+                    from claude_agent_sdk.types import SystemMessage
                     await callbacks.on_message(
-                        SimpleNamespace(data={"session_id": session_id})
+                        SystemMessage(subtype="init", data={"session_id": session_id})
                     )
                     await callbacks.on_text_delta("partial")
                     raise asyncio.CancelledError()

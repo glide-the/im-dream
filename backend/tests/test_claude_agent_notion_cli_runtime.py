@@ -3,12 +3,14 @@
 # [Pos] Integration contract test node in backend/tests; no real Notion credential or content is accessed.
 # [Sync] 2026-09-04: add the Dream notion-cli PreToolUse regression acceptance.
 # [Sync] 2026-09-13: compile the fixture to match Runtime 0.1.9 native ntn policy without allowing shell-script shadows.
+# [Sync] 2026-09-13: assert final Bash binding and real config file readability.
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -21,7 +23,7 @@ import pytest
 _NTN_COMMAND = 'ntn api v1/search --data \'{"query":"fixture-only","page_size":1}\''
 
 
-def _run_contract(tmp_path: Path) -> None:
+def _run_contract(tmp_path: Path, *, installed_cli: bool = False, relative_shadow: bool = False) -> None:
     from libs.claude_agent_kit import (
         AgentRunOptions,
         AgentRunResult,
@@ -42,11 +44,12 @@ def _run_contract(tmp_path: Path) -> None:
     if runtime_path is None:  # pragma: no cover - external installation state
         raise SystemExit("Dream Runtime unavailable")
 
+    command = _NTN_COMMAND
     requests_seen: list[dict[str, Any]] = []
     server = ThreadingHTTPServer(
         ("127.0.0.1", 0),
         build_handler(
-            command=_NTN_COMMAND,
+            command=command,
             final_text="fake ntn contract complete",
             requests_seen=requests_seen,
             announce_requests=False,
@@ -86,16 +89,26 @@ def _run_contract(tmp_path: Path) -> None:
             text=True,
         )
         fake_ntn.chmod(0o755)
-        os.environ["PATH"] = f"{fake_bin}{os.pathsep}{os.environ['PATH']}"
+        if installed_cli:
+            if not shutil.which("ntn"):
+                raise SystemExit("Installed ntn unavailable")
+        else:
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{os.environ['PATH']}"
+        if relative_shadow:
+            (workspace / "relative-bin").mkdir()
+            os.environ["PATH"] = "relative-bin" + os.pathsep + os.environ["PATH"]
 
         notion_home = workspace / ".notion-home"
         notion_home.mkdir(mode=0o700)
         notion_auth = notion_home / "auth.json"
         notion_auth.write_text(
-            '{"access_token":"fixture-notion-token"}',
+            '{}' if installed_cli else '{"access_token":"fixture-notion-token"}',
             encoding="utf-8",
         )
         notion_auth.chmod(0o600)
+        notion_config = notion_home / "config.json"
+        notion_config.write_text('{"version":"0.15.1","defaultWorkspaceIds":{}}')
+        notion_config.chmod(0o600)
 
         confirmations: list[dict[str, Any]] = []
         errors: list[str] = []
@@ -135,7 +148,7 @@ def _run_contract(tmp_path: Path) -> None:
     assert result.success is True
     assert result.full_text == "fake ntn contract complete"
     assert errors == []
-    assert [item["input"]["command"] for item in confirmations] == [_NTN_COMMAND]
+    assert [item["input"]["command"] for item in confirmations if "command" in item.get("input", {})] == [command], confirmations
     assert (workspace / ".claude" / "skills" / "notion-cli").exists()
     settings = json.loads((workspace / ".claude" / "settings.json").read_text())
     assert settings["sandbox"]["enabled"] is True
@@ -149,19 +162,23 @@ def _run_contract(tmp_path: Path) -> None:
         )
         if isinstance(item, dict) and item.get("type") == "tool_result"
     ]
+    expected = "No workspace selected" if installed_cli else '{"fake_ntn":"ok"}'
+    if relative_shadow:
+        expected = "fixture binding unavailable"
     assert any(
-        isinstance(content, str) and '{"fake_ntn":"ok"}' in content
+        isinstance(content, str) and expected in content
         for content in tool_results
-    )
+    ), tool_results
 
 
+@pytest.mark.parametrize("installed_cli,relative_shadow", [(False, False), (True, False), (False, True)], ids=["native-fixture", "installed-ntn-config", "relative-shadow-denied"])
 def test_real_runtime_executes_approved_fake_ntn_without_notion_access(
-    tmp_path: Path,
+    tmp_path: Path, installed_cli: bool, relative_shadow: bool,
 ) -> None:
     """Use a clean process so SDK stubs from unit-test collection cannot leak."""
 
     completed = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), str(tmp_path)],
+        [sys.executable, str(Path(__file__).resolve()), str(tmp_path), str(int(installed_cli)), str(int(relative_shadow))],
         cwd=Path(__file__).resolve().parents[1],
         check=False,
         capture_output=True,
@@ -176,7 +193,7 @@ def test_real_runtime_executes_approved_fake_ntn_without_notion_access(
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     try:
-        _run_contract(Path(sys.argv[1]))
+        _run_contract(Path(sys.argv[1]), installed_cli=len(sys.argv) > 2 and sys.argv[2] == "1", relative_shadow=len(sys.argv) > 3 and sys.argv[3] == "1")
     except SystemExit as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(77) from exc

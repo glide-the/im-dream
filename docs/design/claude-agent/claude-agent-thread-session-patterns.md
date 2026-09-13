@@ -2,6 +2,11 @@
 
 # Claude Agent Thread Session — 设计模式重构方案
 
+> [Sync] 2026-09-13: [恢复身份与时序](./claude-session-resume-resolution.md)
+> 是当前合同。Factory 的 state.session_id/锁/EventBus 绑定 Dream thread；Kit
+> AgentRunOptions.thread_id 仅承载已验证的 Claude ID 或 None。旧 user-ID/session
+> 术语不具有选择 CLI 会话的权威性。
+
 > **来源**：基于现有 `backend/claude_agent/service.py` + `backend/libs/claude_agent_kit/server/agent_runner.py` 的会话管理重构设计
 > **目标**：引入 Thread 会话模型，通过 sessionId 在角色扮演状态加载前维护 Claude Runner 线程，实现工作空间初始化与宠物系统上下文一次性注入，后续轮次只传递用户消息
 > **关联设计**：

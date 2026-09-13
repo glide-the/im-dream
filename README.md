@@ -6,7 +6,15 @@
 <!-- [Sync] 2026-09-06: align connection creation and App controls with the accessible Server modal and unified MCP usage-policy form. -->
 <!-- [Sync] 2026-09-12: add the recoverable explicit-origin NATAPP edge-relay operator path. -->
 <!-- [Sync] 2026-09-13: adopt SDK 0.2.145 and the published Runtime 0.1.9 package-root selector contract. -->
+<!-- [Sync] 2026-09-13: document historical-thread resume storage boundaries. -->
+
+Historical Dream threads keep their note links and messages when their Claude
+session is unavailable in the current Runtime project: the server starts a new
+Claude session in the same thread. Database and storage-access errors remain
+visible failures. See the [resume contract and sequence diagram](docs/design/claude-agent/claude-session-resume-resolution.md).
 <!-- [Sync] 2026-09-13: serve the opaque MCP Apps sandbox through the current frontend entry without a fixed second port. -->
+
+<!-- [Sync] 2026-09-13: document bound Notion missing-relative-PATH compatibility and config-read diagnostics. -->
 
 # Ink & Memory
 
@@ -225,6 +233,8 @@ The complete engineering flow—connection discovery, model tool call, trusted r
 | Dream Web, Thread/Run/Workspace integration | This repository |
 
 Package ownership is intentional: `uv` manages Dream's Python environment, npm distributes the native Runtime and Notion CLI, and pnpm manages `frontend/`. `uv sync` does not install or upgrade the native Runtime.
+
+For Notion `Failed to read config.json`, distinguish file-read failure from malformed JSON and inspect the final Agent Bash binding. Runtime 0.1.9 rejects relative PATH entries before its native `ntn` candidate. Dream omits only relative directories proven absent at the current thread cwd from that bound launch's SDK environment, preserving valid command order and all strict shadow checks. It does not change shell profiles, parent PATH, credentials, or non-Notion turns. `ntn doctor` exit 0 alone is insufficient: inspect warnings and verify a read-only request through normal Chat.
 
 Runtime `0.1.9` keeps the original modules as its single `src` implementation (1,902 unchanged files, 35 original module directories) and removes the duplicate `restored-src` directory. The default build reads `src/entrypoints/cli.tsx`; no parallel `src/cleanroom` remains. Source-bound headless, MCP and Dream compatibility transforms stay in the build layer. Original copyright and the user-attested redistribution boundary are preserved in the artifact. Dream's exact Runtime pin and project metadata move together; local adoption requires verified public archives and the owned backend's startup identity, not merely source edits. See the [release and local Dream adoption plan](docs/deploy/runtime-0.1.9-release-and-local-dream-adoption.md).
 

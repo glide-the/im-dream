@@ -8,6 +8,11 @@
 
 # Claude Agent 会话持久化设计
 
+> [Sync] 2026-09-13 当前规则以 [恢复判定合同](./claude-session-resume-resolution.md)
+> 为准。下文 SQLite schema/自动建表片段仅为历史设计，不可执行；当前 PostgreSQL
+> schema 唯一由 Admin Drizzle 管理。DB Claude ID 仅来自 SDK 回执；跨项目文件存在
+> 不再构成恢复依据，初始化失败不产生新 ID 回执。
+
 > **关联参考**：[better-chatbot route.ts `onFinish` 回调](https://github.com/cgoinglove/better-chatbot/blob/main/src/app/api/chat/route.ts#L345)  
 > **落地路径**：`backend/database.py`（DB 层）、`backend/claude_agent/service.py::_persist_user_message/_persist_assistant_turn/_persist_partial_assistant`（服务层）
 > **关联设计**：[claude-agent-thread-session-patterns.md](./claude-agent-thread-session-patterns.md)
