@@ -1,6 +1,7 @@
 <!-- [Input] SUO-419 execute wake, task_411-01 filled requirement, Stage 1, the SUO-420 through SUO-424 unblock receipts, and the rechecked dirty-tree baseline. -->
 <!-- [Output] Completed Root Web Shell/Vite-exit implementation report, including the verified immutable rollback image and restored Chat regression gates. -->
 <!-- [Pos] Canonical ExecTaskAgent report for task_411-01; it grants no Runtime, lock, P0, standalone-release, or production approval. -->
+<!-- [Sync] 2026-09-13: update MCP Apps design references after relocation to docs/design/claude-mcp; preserve implementation and historical evidence. -->
 <!-- [Sync] 2026-09-05: completed all N1 gates after Docker recovery, isolated Vite rollback smoke, selector URL/network separation, and Chat SSE/resume fixture repair. -->
 <!-- [Sync] 2026-09-06: rebased current Dream source references from the retired frontend/src tree to frontend/app/_dream. -->
 <!-- [Sync] 2026-09-06: mark missing-lock and later-stage No-Go statements as dated execution facts superseded by current-candidate evidence. -->
@@ -30,7 +31,7 @@
 | Independent requirement | `docs/task/TASK-REQUIREMENT-task_411-01_frontend_root-web-shell-vite-exit.md` |
 | Stage | `docs/stage/stage_mcp-apps-system-architecture.md`, Stage 1 |
 | Canonical module | `docs/issue/ISSUES_mcp_apps_system_architecture.md`, `MCPAPPS-411-01` |
-| Direct design | `docs/design/claude-agent/dream-frontend-node-framework-migration-assessment.md` §3.2, §4–§6, §9–§11, §13–§15 and DEC-005; `docs/design/claude-agent/mcp-apps-system-architecture-execution-checklist.md` §5.1, §10–§12 |
+| Direct design | `docs/design/claude-agent/dream-frontend-node-framework-migration-assessment.md` §3.2, §4–§6, §9–§11, §13–§15 and DEC-005; `docs/design/claude-mcp/mcp-apps-system-architecture-execution-checklist.md` §5.1, §10–§12 |
 
 The execute input binds exactly one Issue, one Task, one independent requirement, and Stage 1. `MCPAPPS-411-02`, `MCPAPPS-411-03`, Phase 2/3, Runtime/P0, final standalone release, and production Apps remain excluded.
 

@@ -1,6 +1,7 @@
 <!-- [输入] MCP Apps 主设计、54f3bbe5 当前源码、Node Transport、客户端平台合同、iframe 设计与统一技术回执。 -->
 <!-- [输出] 提供按依赖排序、可验收和可回滚的 IM MCP Apps 技术工作、真实证据和生产缺口索引。 -->
 <!-- [定位] MCP Apps 实现/验收索引；架构理由和协议证据仍以同目录现行设计稿为准。 -->
+<!-- [同步] 2026-09-13：迁入 docs/design/claude-mcp；仅调整目录归属与引用，保留正文、历史决策和验证记录。 -->
 <!-- [同步] 2026-09-04：SUO-383 以 DEC-002 修正 P0-04 renderer/permissions 合同，并限定 P0-04/P0-08 重跑。 -->
 <!-- [同步] 2026-09-05：SUO-397 以 DEC-003 将 S1-01 纠正为 IM-owned、provider-free 自建 AppServer 测试目标；production Apps 仍关闭。 -->
 <!-- [同步] 2026-09-05：SUO-403 以 DEC-004 废止 Phase 1 自建 AppServer，改为原样复用官方 basic-server-vanillajs@1.7.5 发布制品。 -->
@@ -24,7 +25,7 @@
 - [`window.im` 客户端平台能力合同](./mcp-apps-client-host-communication.md)
 - [Host adapter 与 iframe 权限交互设计](./mcp-apps-iframe-interaction.md)
 - [源码与协议调研](./mcp-apps-support-research.md)
-- [Dream Web 当前 Next.js 架构与迁移历史](./dream-frontend-node-framework-migration-assessment.md)
+- [Dream Web 当前 Next.js 架构与迁移历史](../claude-agent/dream-frontend-node-framework-migration-assessment.md)
 
 ## 1. 背景与问题
 

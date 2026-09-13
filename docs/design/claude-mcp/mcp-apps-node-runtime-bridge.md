@@ -1,6 +1,7 @@
 <!-- [输入] IM managed MCP 配置源码、MCP SDK Transport 合同、MCP Apps Host adapter 和网站/本地 MCP 运行边界。 -->
 <!-- [输出] 定义当前 Node 受控 MCP transport、PersistentConnectorManager、Python 配置来源和连接同步。 -->
 <!-- [定位] MCP Apps Node 连接专项设计；不定义 iframe 实现、permission policy 或业务工具。 -->
+<!-- [同步] 2026-09-13：迁入 docs/design/claude-mcp；仅调整目录归属与引用，保留正文、历史决策和验证记录。 -->
 <!-- [同步] 2026-09-04：SUO-383 将 Browser consumer 名称对齐为 Host adapter；Node transport 与授权边界不变。 -->
 <!-- [同步] 2026-09-04：Browser MCP Client 改接 Node 标准受控端点，上游连接与安全过滤收束到 Node。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 将本模块固定为 frontend/packages/mcp-apps-runtime，根 App Router 的 [serverRef] transport Route 保持薄委派。 -->
@@ -196,7 +197,7 @@ loopback 或 IPv6 `::1`；这不等于取消 Node 受控端点自己的 host all
 - package 的公开 server entry 显式导入 `server-only`，内部持有 config provider、SDK connector、manager、HTTP adapter 与 process singleton；不得导入根 `app/**`、`src/**`、React 或 DOM。
 - 根 `frontend/app/api/mcp-apps/[serverRef]/route.ts` 固定 `runtime = 'nodejs'`，只提取请求上下文并委派；不得复制 manager、配置读取或上游连接逻辑。
 - `[serverRef]` transport 依赖方向仅为根 Route Handler → Runtime package。Browser Host 通过同源 HTTP 使用它，不能从 Client Component import；standalone tracing 必须包含 package，Browser chunk 扫描必须排除它。`phase1-status` 与 sandbox Route 当前反向导入 `app/_dream/**/host-policy`，仍须抽到中立 shared/server owner。
-- `frontend/app/_dream/server/mcp-apps/**` 与嵌套 `frontend/app/app/api/**` 均为废止路径，不设置 alias 或双写兼容层。完整目录合同见[当前 source ownership](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)。
+- `frontend/app/_dream/server/mcp-apps/**` 与嵌套 `frontend/app/app/api/**` 均为废止路径，不设置 alias 或双写兼容层。完整目录合同见[当前 source ownership](../claude-agent/dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)。
 
 ## 4. 阶段与验收
 

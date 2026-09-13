@@ -1,6 +1,7 @@
 <!-- [输入] MCP Apps/OpenAI Apps 官方资料、@mcp-ui/client 7.1.1 源码、Codex 历史任务 01a06233-628d-7a83-8d66-5c3185a80613、Dream 0.1.4 与 IM 当前源码。 -->
 <!-- [输出] 记录 MCP Apps 支持状态、Host renderer/adapter 复用边界、Runtime 继承证据、能力缺口、候选方案和验证命令。 -->
 <!-- [定位] `mcp-apps-integration-strategy.md` 的历史调研证据；当前实现与状态以现行架构文档和统一回执为准。 -->
+<!-- [同步] 2026-09-13：迁入 docs/design/claude-mcp；仅调整目录归属与引用，保留正文、历史决策和验证记录。 -->
 <!-- [同步] 2026-09-04：SUO-383 依据 task_301 P0-04 运行证据改选最小 Host adapter，AppBridge/transport 与 Node 受控主链继续复用。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 对照 Admin 真实 workspace/package 结构，确认 Dream 过渡 Next 实现存在嵌套项目与 legacy Runtime owner 偏差。 -->
 <!-- [同步] 2026-09-06：将 2026-09-05 缺口盘点标为历史，并登记 54f3bbe5 当前代码、pnpm 技术验证与 production-off 状态。 -->
@@ -11,7 +12,7 @@
 >
 > 当前补记：`54f3bbe5` 已实现根 Next.js/pnpm Web、`frontend/app/_dream/**` Browser Host、薄 Route Handler 和 `frontend/packages/mcp-apps-runtime/src/**` server-only package；当前 pnpm 候选已完成 Phase 0—3 provider-free 技术验证。未修改官方 `basic-server-vanillajs@1.7.5` 只构成兼容证据，没有真实外部应用/账号/OAuth 或生产发布证据；`productionAppsEffective=false`。
 
-当前 source ownership 见[Dream Web 当前架构](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)，命令/退出码见[统一技术回执](../../exec/mcp-apps/current-candidate-validation.md)。
+当前 source ownership 见[Dream Web 当前架构](../claude-agent/dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)，命令/退出码见[统一技术回执](../../exec/mcp-apps/current-candidate-validation.md)。
 
 ## 1. 调研对象
 
@@ -144,7 +145,7 @@ async with ClaudeSDKClient(options=effective_options) as client:
 | `/Users/dmeck/project/ink-dream-memory/backend/claude_mcp/runtime_snapshot.py:51-185` | 每个 turn 在 Python 内存生成包含明文 transport/credential 的 detached config，但丢弃 server/config/credential revision | 可抽出配置解析逻辑；现有返回值不能直接作为 Node 接口 |
 | `/Users/dmeck/project/ink-dream-memory/frontend/app/_dream/api/claudeMcpApi.ts:158-169` | Browser 用 IM bearer/cookie 访问 Python API | 当前只有用户→Python 登录态，没有 Browser→Node MCP session 的受控身份绑定 |
 
-在 2026-09-05 的历史调研阶段，Vite 被确认可承载 Browser MCP Client 与 Host adapter，但已不再是 IM 的目标架构；当时存在的嵌套 Next 与 legacy Vite 耦合项只解释迁移决策和旧回执。提交 `54f3bbe5` 已完成结构收敛：`frontend/` 是 workspace/package/Next 根，`frontend/app/**` 是唯一 App Router，`frontend/app/_dream/**` 是唯一 Dream 应用源码，`frontend/packages/mcp-apps-runtime/src/**` 是独立 server-only Runtime owner；当前路径、职责与禁止项以[Dream Web 当前 Next.js 架构](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)为准。
+在 2026-09-05 的历史调研阶段，Vite 被确认可承载 Browser MCP Client 与 Host adapter，但已不再是 IM 的目标架构；当时存在的嵌套 Next 与 legacy Vite 耦合项只解释迁移决策和旧回执。提交 `54f3bbe5` 已完成结构收敛：`frontend/` 是 workspace/package/Next 根，`frontend/app/**` 是唯一 App Router，`frontend/app/_dream/**` 是唯一 Dream 应用源码，`frontend/packages/mcp-apps-runtime/src/**` 是独立 server-only Runtime owner；当前路径、职责与禁止项以[Dream Web 当前 Next.js 架构](../claude-agent/dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)为准。
 
 ### 5.1 Managed MCP snapshot loader 不落盘，也不是 Connector
 

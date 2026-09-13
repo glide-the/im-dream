@@ -1,6 +1,7 @@
 <!-- [Input] SUO-424 checkout, task_411-01 N1-03 regression contract, current Chat source contract, and the two provider-free focused harnesses. -->
 <!-- [Output] Durable attribution, fixture changes, exact focused-test receipts, rollback guidance, and completion disposition. -->
 <!-- [Pos] ExecTaskAgent report for the Chat SSE/resume focused-harness unblock child of task_411-01. -->
+<!-- [Sync] 2026-09-13: update MCP Apps design references after relocation to docs/design/claude-mcp; preserve implementation and historical evidence. -->
 <!-- [Sync] 2026-09-05: repaired current Chat boot/hydration fixtures and restored both focused regression gates. -->
 <!-- [Sync] 2026-09-06: rebased current Dream source references from the retired frontend/src tree to frontend/app/_dream. -->
 
@@ -16,7 +17,7 @@
 - Requirement：[`TASK-REQUIREMENT-task_411-01_frontend_root-web-shell-vite-exit.md`](../task/TASK-REQUIREMENT-task_411-01_frontend_root-web-shell-vite-exit.md)。
 - 通用模板：[`TASK-REQUIREMENT-FORMAT.md`](../task/TASK-REQUIREMENT-FORMAT.md)。
 - Stage：[`stage_mcp-apps-system-architecture.md`](../stage/stage_mcp-apps-system-architecture.md) Stage 1；本轮只回填 `N1-03-regression`，不宣告其余 Stage 1 或后续 Stage 通过。
-- 直接设计引用：[`dream-frontend-node-framework-migration-assessment.md`](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md) §3.2、§5.3、§9—§11、DEC-005；[`mcp-apps-system-architecture-execution-checklist.md`](../design/claude-agent/mcp-apps-system-architecture-execution-checklist.md) §5.1、§10—§12。
+- 直接设计引用：[`dream-frontend-node-framework-migration-assessment.md`](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md) §3.2、§5.3、§9—§11、DEC-005；[`mcp-apps-system-architecture-execution-checklist.md`](../design/claude-mcp/mcp-apps-system-architecture-execution-checklist.md) §5.1、§10—§12。
 - 执行 Agent：`ExecTaskAgent`（`2a7a15fe-2ebb-4dc5-91a8-48ae2bcc5471`）。
 - 执行时间：2026-09-05 17:32 +08:00。
 - Checkout：`POST /api/issues/54698801-8e48-47b8-af62-aaba3a901ce0/checkout` 成功；唯一 assignee 为本 Agent，无 user assignee 或第二执行责任人。
