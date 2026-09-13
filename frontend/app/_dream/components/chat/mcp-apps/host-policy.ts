@@ -3,6 +3,13 @@
 // [Pos] Browser-side Phase 1-3 plugin/policy boundary; contains no upstream selector or secret.
 // [Sync] 2026-09-06: bind the app/_dream Browser entry identity to independent server-owned plugin and runtime-policy revisions.
 // [Sync] 2026-09-06: bind Host policy to the current connection App-settings revision.
+// [Sync] 2026-09-13: resolve the fixed Next sandbox route against the actual Browser entry; URL origin is not the enforced opaque document origin.
+
+export const MCP_APPS_SANDBOX_PATH = '/mcp-apps-sandbox';
+
+export function mcpAppsSandboxUrl(pluginRevision: string): string {
+  return `${MCP_APPS_SANDBOX_PATH}?${new URLSearchParams({ v: MCP_APPS_HOST_MANIFEST.version, revision: pluginRevision })}`;
+}
 
 export const MCP_APPS_HOST_MANIFEST = Object.freeze({
   schemaVersion: 'im.mcp-apps-host-manifest/v1',
@@ -194,13 +201,14 @@ export function parseMcpAppsHostPolicy(
   let sandbox: URL;
   let host: URL;
   try {
-    sandbox = new URL(policy.sandboxUrl);
+    sandbox = new URL(policy.sandboxUrl, browserOrigin);
     host = new URL(browserOrigin);
   } catch {
     return null;
   }
   if (!['http:', 'https:'].includes(sandbox.protocol)
-    || sandbox.origin === host.origin
+    || sandbox.origin !== host.origin
+    || sandbox.pathname !== MCP_APPS_SANDBOX_PATH
     || sandbox.username !== ''
     || sandbox.password !== ''
     || sandbox.hash !== ''
@@ -213,7 +221,7 @@ export function parseMcpAppsHostPolicy(
     appSettingsRevision: policy.appSettingsRevision as number | null,
     manifestVersion: MCP_APPS_HOST_MANIFEST.version,
     sandboxUrl: sandbox.href,
-    sandboxOrigin: sandbox.origin,
+    sandboxOrigin: 'null',
     sandboxTokens: Object.freeze(['allow-scripts'] as const),
     desiredPermissions: Object.freeze([] as const),
     effectivePermissions: Object.freeze([] as const),

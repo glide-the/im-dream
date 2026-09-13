@@ -3,6 +3,7 @@
 // [Pos] Provider-free Browser policy test; it starts only isolated loopback services and never touches business data.
 // [Sync] 2026-09-06: lock tool-only fail-closed projection and remove window.im after an effective-policy downgrade.
 // [Sync] 2026-09-06: retain two-part identity for the connection-free status probe; connection-scoped Host tests cover App-settings revisions.
+// [Sync] 2026-09-13: serve the sandbox through the actual frontend entry and ignore stale sandbox/parent environment values.
 
 import { expect, test, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
@@ -217,15 +218,13 @@ test('runtime-policy-only downgrade removes window.im.callTool while manifest an
   try {
     connectionView.state.lowRiskToolCalls = true;
     const hostPort = await reserveEphemeralPort();
-    const sandboxPort = await reserveEphemeralPort();
     const hostOrigin = `http://127.0.0.1:${hostPort}`;
-    const sandboxOrigin = `http://127.0.0.1:${sandboxPort}`;
     Object.assign(process.env, {
       INK_BACKEND_INTERNAL_URL: connectionView.origin,
       INK_MCP_APPS_NODE_SERVICE_TOKEN: SERVICE_TOKEN,
       INK_MCP_APPS_PHASE1_PREVIEW: 'true',
-      INK_MCP_APPS_SANDBOX_URL: `${sandboxOrigin}/mcp-apps-sandbox`,
-      INK_MCP_APPS_PARENT_ORIGINS: hostOrigin,
+      INK_MCP_APPS_SANDBOX_URL: 'http://127.0.0.1:9/mcp-apps-sandbox',
+      INK_MCP_APPS_PARENT_ORIGINS: 'http://stale.example.test',
       INK_MCP_APPS_PHASE2_TOOL_CALLS: 'true',
       INK_MCP_APPS_PHASE2_UI_MESSAGE: 'false',
       INK_MCP_APPS_WINDOW_IM: 'true',
@@ -234,7 +233,6 @@ test('runtime-policy-only downgrade removes window.im.callTool while manifest an
     routes = await startProductionRouteHarness({
       frontendRoot: FRONTEND_ROOT,
       hostPort,
-      sandboxPort,
       browserConfig: {},
     });
 

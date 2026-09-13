@@ -5,6 +5,7 @@
 <!-- [同步] 2026-09-06：修正官方标准 App 兼容合同：服务端 positive list 可分类缺少可选 risk hints 的工具，显式危险 hints 仍 fail closed。 -->
 <!-- [同步] 2026-09-06：补验 turn 前 descriptor inventory 刷新、首次实时 App 结果保留与 final-only 历史恢复。 -->
 <!-- [同步] 2026-09-06：补验完成 turn 过程折叠与 MCP App 面板在折叠区外的常驻布局。 -->
+<!-- [同步] 2026-09-13：独立端口为旧候选形态；当前 preview 使用动态前端入口和强制 opaque 文档隔离，增量回执另列。 -->
 
 # MCP Apps Phase 0—3 当前候选技术验收
 
@@ -19,6 +20,10 @@
 | Production | `No-Go` | `productionAppsEffective=false` 为不可变公开状态；未执行真实账号、真实外部 Server、真实 OAuth/生产运维验收。 |
 
 技术完成不等于生产发布。当前代码提供默认关闭、显式 desired/effective/revision、逐请求重验和可独立回滚的 preview 能力；没有修改数据库 schema，也没有建立独立 Bridge/Gateway。
+
+2026-09-13 增量修复：[本机恢复与动态入口](./local-startup-recovery.md)。原候选的
+独立 URL origin 改为实际前端入口下的版本化相对 sandbox URL；两层 iframe 与响应
+CSP 强制文档 opaque origin。以下指纹和旧回执保留追溯，不能当作本轮源码指纹。
 
 ## 2. 当前指纹与供应链
 
@@ -67,7 +72,7 @@
 - Node 每次请求重验当前视图、manifest、policy 和 allowlist；connection profile 只以不可逆 canonical digest 参与同 revision 漂移判断。adapter session 与短时 view 同步到期，即使 Browser 崩溃或没有后续请求也会移除 secret-bearing view；revision/策略漂移、禁用、不兼容、到期与 provider 失败会使旧 session/connector 失效。catalog 分页有配置上限，携带凭据的上游请求拒绝 redirect。
 - Browser identity 来自 server-owned `mcpAppResult`，包括可信 workspace scope，不会从普通 output metadata 推断；`toolCallId` 不参与授权，error result 只保留普通输出。
 - Phase 1 的页面 tool call 保持拒绝；AppBridge 不持有可自动转发的 SDK Client。Phase 2 只手动开放服务端 App-callable 正向列表明确分类的低风险工具；未列入、显式高风险或需确认的工具在解密/上游调用前拒绝。标准 MCP descriptor 的可选 risk hints 缺失不覆盖服务端显式分类。
-- sandbox 使用独立 origin、两层 `sandbox="allow-scripts"`、零设备权限和闭网 CSP。外层 CSP 必须允许 inline script/style，因为它会继承到官方 App 的 `srcdoc`；网络、object、base、font、media 仍全部关闭，frame 仅允许同源内层。
+- sandbox 使用隔离文档 origin、两层 `sandbox="allow-scripts"`、零设备权限和闭网 CSP。当前 asset URL 跟随前端入口，响应 CSP 另有 `sandbox allow-scripts`；外层 CSP 保留 inline script/style，因为它会继承到官方 App 的 `srcdoc`；网络、object、base、font、media 仍全部关闭，frame 仅允许内层。
 - `ui/message`、composer、queued prompt 与 retry 共用同一 Chat-owned ingress，Editor 持久化和 turn generation 先于 transport dispatch；`window.im` 在认证 Host 的 `ui/initialize` capability 回执前保持不存在，并只声明 actor-effective 成员，自定义 response namespace 不泄漏到官方 App transport。
 - 回滚顺序：关闭对应 Phase 2 capability → 禁用/回滚插件 revision → 关闭 preview effective；已有普通结果继续显示，Client/View/session 和无引用 connector 关闭。Next 可回滚至上一已验证 image。
 

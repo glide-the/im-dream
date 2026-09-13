@@ -77,6 +77,7 @@
 #                    the authorized 2.1.88 Linux vendor/seccomp assets while
 #                    preserving the 2.1.241 CLI compatibility identity.
 # [Sync] 2026-08-30: bind the current thread's NOTION_HOME/API token/keyring/workers file into the Agent Runtime after all user overlays.
+# [Sync] 2026-09-13: omit only absent relative PATH directories for bound Notion launches; preserve lookup order and strict Runtime shadow rejection.
 # [Sync] 2026-09-13: require Runtime 0.1.9 package-root cli.js and digests for npm while preserving the separately qualified local-core layout.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
@@ -1134,12 +1135,35 @@ def apply_notion_cli_env_to_options(
     # from binding an ambient process-user Notion account to an unrelated turn.
     for name in _NOTION_RUNTIME_ENV_NAMES:
         merged[name] = ""
-    merged.update(
-        resolve_notion_cli_runtime_env(
-            credential_home,
-            thread_workspace=thread_workspace,
-        )
+    notion_env = resolve_notion_cli_runtime_env(
+        credential_home,
+        thread_workspace=thread_workspace,
     )
+    merged.update(notion_env)
+    if notion_env and thread_workspace is not None:
+        # Runtime rejects a relative PATH entry before the native ntn candidate.
+        # A missing directory cannot select any command at this launch cwd.
+        # Keep all real/uncertain entries (including empty = cwd) so its strict
+        # shadow policy still applies. Never expand shell syntax or mutate the
+        # parent environment, and never promote a whole executable directory.
+        source_path = os.environ.get("PATH")
+        if source_path is not None:
+            workspace = Path(thread_workspace).resolve(strict=True)
+            directories = source_path.split(os.pathsep)
+            retained: list[str] = []
+            for directory in directories:
+                if directory and not Path(directory).is_absolute():
+                    try:
+                        (workspace / directory).lstat()
+                    except (FileNotFoundError, NotADirectoryError):
+                        continue
+                    except OSError:
+                        pass
+                retained.append(directory)
+            if retained != directories or "PATH" in merged:
+                merged["PATH"] = os.pathsep.join(retained)
+        else:
+            merged.pop("PATH", None)
     options.env = merged
     return options
 

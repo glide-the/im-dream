@@ -3,6 +3,7 @@
 #         Reads database module for session persistence.
 # [Output] Provide ClaudeAgentRunRequest, ClaudeAgentService to thread_factory.py.
 # [Pos] core-business node in backend/claude_agent
+# [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
 # [Sync] 2026-08-30: resolve the server-owned INK_AGENT_SANDBOX_ENABLED
@@ -62,7 +63,7 @@
 # [Sync] 2026-05-29: migrate existing_session design from Pawkeyland assemble_context:
 #                    load chat_thread to get claude_session_id; gate resume on
 #                    _has_usable_claude_resume (contract version check) + local file probe
-#                    via locate_session_file; set thread_id_for_agent=None on first turn,
+#                    via locate_session_file (superseded by strict project probe below),
 #                    claude_session_id on resume; _persist_turn writes back claude_session_id
 #                    + agent_contract_version so DB self-heals across deployments.
 #                    Added _AGENT_RUNTIME_CONTRACT_VERSION constant and
@@ -243,7 +244,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any, AsyncGenerator, Awaitable, Callable, Mapping, Optional
+from typing import Any, Awaitable, Callable, Mapping, Optional
 from uuid import uuid4
 
 import database as _db
@@ -1884,21 +1885,18 @@ class ClaudeAgentService:
         # ---------------------------------------------------------------
         # Resolve resume: load existing chat_thread to get claude_session_id.
         #
-        # First turn:  thread_id_for_agent=None  → SDK allocates new session.
-        # Resume turn: thread_id_for_agent=claude_session_id from DB → SDK
+        # First turn:  Claude ID=None → SDK allocates new session.
+        # Resume turn: verified claude_session_id from DB → SDK
         #              resumes the existing transcript.
         #
-        # Cross-environment safety: probe the local JSONL file before
+        # [Sync] 2026-09-13: probe the current Runtime project before
         # committing to resume.  A fresh deployment or CLI retention reaping
         # will cause the subprocess to exit 1 ("Fatal error in message reader")
-        # if we pass a stale claude_session_id.  On a miss we fall back to a
+        # if we pass a stale claude_session_id. Only missing records permit a
         # fresh SDK session; _persist_turn will write the new claude_session_id
         # so the DB self-heals for the next turn.
         # ---------------------------------------------------------------
-        from libs.claude_agent_kit.server.session_files import (
-            get_projects_root,
-            locate_session_file,
-        )
+        from libs.claude_agent_kit.server.session_files import locate_resumable_session
 
         existing_session: Optional[dict] = None
         try:
@@ -1906,10 +1904,7 @@ class ClaudeAgentService:
                 _db.get_chat_thread, request.thread_id, int(request.user_id)
             )
         except Exception:
-            logger.warning(
-                "Failed to load existing chat_thread for resume check; thread_id=%s",
-                request.thread_id,
-            )
+            raise RuntimeError("CLAUDE_RESUME_DATABASE_UNAVAILABLE") from None
 
         resume_existing_session: Optional[dict] = (
             existing_session
@@ -1919,30 +1914,27 @@ class ClaudeAgentService:
         if resume_existing_session is not None:
             candidate_session_id = str(
                 resume_existing_session.get("claude_session_id") or ""
-            ).strip()
-            projects_root = get_projects_root(cwd or None)
-            located_session_path = (
-                await locate_session_file(projects_root, candidate_session_id)
-                if (projects_root and candidate_session_id)
-                else None
+            )
+            located_session_path = await asyncio.to_thread(
+                locate_resumable_session,
+                candidate_session_id,
+                cwd=cwd or os.getcwd(),
+                config_home=claude_config_home,
             )
             if not located_session_path:
                 logger.warning(
                     "Claude session transcript missing locally; falling back "
-                    "to a fresh SDK session. thread_id=%s stale_claude_session_id=%s "
-                    "projects_root=%s",
+                    "to a fresh SDK session. thread_id=%s",
                     request.thread_id,
-                    candidate_session_id,
-                    projects_root,
                 )
                 resume_existing_session = None
 
-        existing_claude_session_id: Optional[str] = (
+        stored_claude_session_id: Optional[str] = (
             resume_existing_session.get("claude_session_id") if resume_existing_session else None
         )
-        should_resume = bool(request.resume and existing_claude_session_id)
+        effective_resume = bool(request.resume and stored_claude_session_id)
         # None on first turn lets the SDK allocate a fresh session ID.
-        thread_id_for_agent: Optional[str] = existing_claude_session_id if should_resume else None
+        claude_session_id_for_agent: Optional[str] = stored_claude_session_id if effective_resume else None
 
         # Deck plugin pack (deck-integration-delta §Chat Assembly): pack the
         # thread-locked Deck's enabled plugin installations into the thread
@@ -2002,7 +1994,7 @@ class ClaudeAgentService:
             )
 
         # editor_session_id is user_sessions.id from /api/sessions, carried in
-        # editor_state["id"].  This is distinct from state.session_id (Claude thread ID)
+        # editor_state["id"]. This is distinct from state.session_id (Dream thread ID)
         # and os.path.basename(cwd) (workspace directory name).
         #
         # Soft-cache semantics: update AgentRunState.editor_state when the request
@@ -2021,7 +2013,7 @@ class ClaudeAgentService:
             model=request.model,
             max_turns=request.max_turns,
             thread_id=state.session_id,
-            resume=should_resume,
+            resume=effective_resume,
             cwd=cwd,
             editor_session_id=editor_session_id,
             voice_system_prompt=turn_voice_system_prompt,
@@ -2036,7 +2028,7 @@ class ClaudeAgentService:
             **dict(self._claude_code_runtime_env_provider()),
         }
         run_options = AgentRunOptions(
-            thread_id=thread_id_for_agent,
+            thread_id=claude_session_id_for_agent,
             user_message=user_message_content,
             canonical_user_id=str(request.user_id),
             gateway_idempotency_key=(
@@ -2050,7 +2042,7 @@ class ClaudeAgentService:
                 if request.message_id
                 else None
             ),
-            resume=should_resume,
+            resume=effective_resume,
             model=request.model,
             cwd=cwd or None,
             claude_tmp_workspace=claude_tmp_workspace,
@@ -2769,6 +2761,11 @@ class ClaudeAgentService:
         message: Any,
     ) -> None:
         """Persist the SDK-native Session ID as soon as the stream exposes it."""
+
+        from claude_agent_sdk.types import SystemMessage
+
+        if not isinstance(message, SystemMessage) or message.subtype != "init":
+            return
 
         data = getattr(message, "data", None)
         if not isinstance(data, Mapping):

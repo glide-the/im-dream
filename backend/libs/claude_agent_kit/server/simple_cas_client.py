@@ -8,6 +8,7 @@
 #                    ClaudeSDKClient query/receive_response semantics unchanged.
 # [Sync] 2026-08-22: prepare the per-thread .claude-tmp directory immediately
 #                    before spawning Claude Code.
+# [Sync] 2026-09-13: retry only confirmed missing-session connect races, before query.
 
 """Simple Claude Agent SDK Client.
 
@@ -21,6 +22,9 @@ callbacks and in-process MCP servers.
 from __future__ import annotations
 
 import sys
+import asyncio
+import os
+from contextlib import AsyncExitStack
 from collections.abc import AsyncIterable
 from collections.abc import AsyncIterator
 from typing import Any, Optional
@@ -37,6 +41,7 @@ from .sdk_env import (
 from .session_files import (
     get_projects_root,
     locate_session_file,
+    locate_resumable_session,
     normalize_session_id,
     read_session_messages,
 )
@@ -66,15 +71,56 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
         ensure_claude_code_tmpdir(
             get_options_claude_tmp_workspace(effective_options)
         )
-        async with ClaudeSDKClient(options=effective_options) as client:
-            if isinstance(prompt, AsyncIterable) or isinstance(prompt, str):
-                await client.query(prompt)
-            else:
-                raise TypeError(
-                    "ClaudeSDKClient requires a string or async iterable prompt"
-                )
-            async for message in client.receive_response():
-                yield message
+        if not isinstance(prompt, (AsyncIterable, str)):
+            raise TypeError("ClaudeSDKClient requires a string or async iterable prompt")
+        resume_id = getattr(effective_options, "resume", None)
+        original_stderr = getattr(effective_options, "stderr", None)
+        missing_reported = False
+
+        def capture_stderr(line: str) -> None:
+            nonlocal missing_reported
+            if resume_id and line.strip() == f"No conversation found with session ID: {resume_id}":
+                missing_reported = True
+            if original_stderr is not None:
+                original_stderr(line)
+
+        effective_options.stderr = capture_stderr
+        try:
+            for attempt in range(2):
+                async with AsyncExitStack() as stack:
+                    try:
+                        # SDK connect cleans up its own failed initialization.
+                        # query has not consumed prompt or dispatched model/tools.
+                        client = await stack.enter_async_context(
+                            ClaudeSDKClient(options=effective_options)
+                        )
+                    except Exception as exc:
+                        marker = f"No conversation found with session ID: {resume_id}"
+                        if (
+                            attempt or not resume_id
+                            or getattr(effective_options, "session_store", None) is not None
+                            or getattr(effective_options, "continue_conversation", False)
+                            or getattr(effective_options, "fork_session", False)
+                            or not (missing_reported or marker in str(exc))
+                        ):
+                            raise
+                        env = getattr(effective_options, "env", None) or {}
+                        record = await asyncio.to_thread(
+                            locate_resumable_session,
+                            resume_id,
+                            cwd=getattr(effective_options, "cwd", None) or os.getcwd(),
+                            config_home=env.get("CLAUDE_CONFIG_DIR"),
+                        )
+                        if record is not None:
+                            raise
+                        effective_options.resume = None
+                        continue
+                    await client.query(prompt)
+                    async for message in client.receive_response():
+                        yield message
+                    return
+        finally:
+            effective_options.stderr = original_stderr
 
     async def load_messages(
         self,

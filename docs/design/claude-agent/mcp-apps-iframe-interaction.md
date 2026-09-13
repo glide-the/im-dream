@@ -4,6 +4,7 @@
 <!-- [同步] 2026-09-04：SUO-384 最终接受 DEC-002，并锁定 production Gate、导航前提交点与普通工具结果回滚路径。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 明确 Host/iframe 属于 frontend/ 根 Web package，禁止导入或复制同级 Node Runtime。 -->
 <!-- [同步] 2026-09-06：当前 pnpm 候选已完成 P0-04/P0-08 与 Phase 0—3 provider-free 技术验证；旧 npm 重跑流程降级为历史。 -->
+<!-- [同步] 2026-09-13：零权限 preview 的 sandbox asset 跟随前端入口，文档 opaque origin 由两层 iframe 与响应 CSP 强制。 -->
 
 # MCP Apps Host adapter 与 iframe 权限交互设计
 
@@ -230,7 +231,7 @@ sequenceDiagram
 ### 3.9 安全边界
 
 - sandbox URL、sandbox tokens 与 permission policy 必须来自 server-owned snapshot，不接受 App、resource 或 ambient Browser state 覆盖。
-- sandbox proxy 与顶层 IM 页面使用隔离 origin；CSP 必须由 sandbox proxy 响应头执行，不能只依赖页面脚本。
+- 当前零权限 preview 的 sandbox asset 位于实际前端入口的 `/mcp-apps-sandbox`，由 revisioned 相对 URL 定位，不另启固定端口服务。隔离的是文档有效 origin：两层 iframe 和响应 CSP 均仅有 `allow-scripts`，文档 origin 为 `null`，消息校验精确 source 与 origin；CSP 不能只依赖页面脚本。不能在此同入口模式下增加 `allow-same-origin` 或套用带 Web capability 的独立域名模式。
 - `requested` 取自本次实际渲染的 `contents[0]._meta.ui.permissions`；缺失为 empty，非法或未知 key 使该 App 降级为普通结果。
 - `default` 为全部 deny；`desired` 是 Host policy snapshot；`effective = requested ∩ desired ∩ Host supported`。revision 改变时旧实例立即 teardown，不能保留旧授权。
 - `camera`、`microphone`、`geolocation`、`clipboardWrite` 只分别映射到标准 iframe feature `camera`、`microphone`、`geolocation`、`clipboard-write`；未在 `effective` 中的 feature 必须显式 deny，禁止 `*`。

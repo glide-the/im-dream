@@ -16,6 +16,7 @@
 #                    parent scrubbing, and omit-when-unset behavior.
 # [Sync] 2026-08-30: verify actor/thread-bound NOTION_* Runtime injection, token selection, tombstones, and path isolation.
 # [Sync] 2026-09-13: require Runtime 0.1.9 package-root cli.js and selector/capability digest binding.
+# [Sync] 2026-09-13: cover cwd-bound absent PATH filtering without parent mutation or relative shadow bypass.
 
 """Tests for sdk_env.apply_cli_path_to_options (2026-07-26)."""
 from __future__ import annotations
@@ -527,6 +528,37 @@ class TestClaudeCodeRuntimeEnv(unittest.TestCase):
 
 
 class TestNotionCliRuntimeEnv(unittest.TestCase):
+    def test_bound_path_removes_only_missing_relative_directories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace, home = self._projection(Path(temp_dir).resolve())
+            (workspace / "present").mkdir()
+            (workspace / "dangling").symlink_to(workspace / "absent-target")
+            entries = ["/usr/bin", "~/missing", "", "present", "dangling", "./absent", "/absolute-missing", "/bin"]
+            original = os.pathsep.join(entries)
+            options = types.SimpleNamespace(env={"PATH": "/user-overlay"})
+            with unittest.mock.patch.dict(os.environ, {"PATH": original}):
+                apply_notion_cli_env_to_options(options, home, thread_workspace=workspace)
+                self.assertEqual(os.environ["PATH"], original)
+            self.assertEqual(options.env["PATH"], os.pathsep.join(["/usr/bin", "", "present", "dangling", "/absolute-missing", "/bin"]))
+
+    def test_relative_path_permission_failure_is_retained(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace, home = self._projection(Path(temp_dir).resolve())
+            original_lstat = Path.lstat
+            def restricted_lstat(path, *args, **kwargs):
+                if path == workspace / "unreadable":
+                    raise PermissionError("fixture denial")
+                return original_lstat(path, *args, **kwargs)
+            options = types.SimpleNamespace(env={})
+            with unittest.mock.patch.dict(os.environ, {"PATH": "unreadable:/usr/bin"}), unittest.mock.patch.object(Path, "lstat", restricted_lstat):
+                apply_notion_cli_env_to_options(options, home, thread_workspace=workspace)
+            self.assertNotIn("PATH", options.env)
+
+    def test_unbound_turn_keeps_path_untouched(self):
+        options = types.SimpleNamespace(env={"PATH": "unchanged:~/missing"})
+        apply_notion_cli_env_to_options(options, None, thread_workspace=None)
+        self.assertEqual(options.env["PATH"], "unchanged:~/missing")
+
     def _projection(self, root: Path, token: str = "token-current") -> tuple[Path, Path]:
         workspace = root / "thread-current"
         home = workspace / ".notion-home"

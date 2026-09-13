@@ -7,7 +7,44 @@
 
 # Notion CLI 环境进入 Agent Bash 修复任务
 
-## 任务记录
+<!-- [Sync] 2026-09-13: separate current config-read regression from completed historical 0.1.4 acceptance. -->
+
+## 当前 config-read 回归（2026-09-13）
+
+本轮任务 `01a09969-a9f1-7382-b707-c83337e2ae53` 基于 Dream `98f72dbd`，
+SDK 0.2.145 / 正常 Runtime 0.1.9 / ntn 0.15.1。历史任务最终 0.1.4 候选
+验收确已通过，旧 blocked 仅是早期阶段；下方发行及服务记录均属于历史，
+不能表示当前安装或替代本轮真实回执。
+
+本轮已用 installed Runtime 和真实 ntn、合成 config 复现相同读取错误，
+定位到 `2577b9a` 引入的严格 PATH 相对项拒绝与本机缺失相对目录组合。
+最小修改只在 Dream `sdk_env.py` 对当前有效 Notion launch 去除最终 cwd 下
+确证缺失的非空相对 PATH 目录；不重排有效路径、不前置目录、不改认证源、
+Runtime 版本或 resume。细节与影响矩阵见既有修复设计，业务图见既有时序文档。
+
+修复后四文件最终回归：45 passed，exit 0，0 skipped。包含 native fixture、
+installed ntn config 与 existing-relative-shadow-denied 三个 production Runner case。
+installed ntn case 空 auth、有效合成 config 返回本地未选 workspace；
+另一次 A/B 使用 synthetic token 到达外部 invalid-token 响应，明确不算离线。
+14 个正常命令 lookup 对照保持原路径，父 PATH 未改。
+四文件为 `test_notion_credentials.py`、`test_sdk_env.py`、
+`test_notion_runtime_integration.py`、`test_claude_agent_notion_cli_runtime.py`；
+准确运行命令和日志目录见修复设计本轮验收段。
+`git diff --check` exit 0；11 个 Markdown 文件、35 个相对链接检查通过，
+README EN/ZH 结构和新增事实一致。
+
+正常 backend 由并行 resume 任务唯一启动（PID 68562），本轮补丁已应用到正常仓库；
+现有前端/Admin/Gateway 未修改。真实 thread `56887baf-e44a-4816-a3aa-0cfb44f3b0a1`
+三轮 completed：首轮普通聊天/时间工具成功，Grep 不计 Notion；后二轮各一次
+真实 `ntn api v1/search` 返回 list、results=1、has_more=true 和 request_id，
+无 config 错误。第二/三轮 turn 为 `0f8f03d1-ad7d-4b0e-9b83-0745f048617a` /
+`b436289e-8f40-4391-8db2-9ca124950d1f`，保持首轮回写的同一 Claude ID。
+刷新重开后三轮历史可见，completed/idle、输入可用。三次 config 投影 mtime
+严格递增，权限仍为 config0600/home0700且非 symlink。具体元数据和边界见修复设计。
+该结果只证明在线只读 API 可用，不评价搜索匹配；未进行 Notion 写入。
+SDK/Runtime/ntn 继续使用正常安装 0.2.145/0.1.9/0.15.1，没有发布或替换制品。
+
+## 历史任务记录（0.1.4）
 
 | 字段 | 内容 |
 |---|---|

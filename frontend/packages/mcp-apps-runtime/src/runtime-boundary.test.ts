@@ -3,12 +3,13 @@
 // [Pos] task_411-02 thin-route security test; rejected requests cannot create an upstream connector.
 // [Sync] 2026-09-06: align route selectors with canonical managed-server keys while rejecting paths.
 // [Sync] 2026-09-06: cover the Next internal-host/public-Host same-origin boundary.
+// [Sync] 2026-09-13: cover public-origin reuse for dynamic sandbox binding and invalid Host rejection.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { normalizeServerRef } from './contracts.ts';
-import { closeMcpAppsRuntime, handleMcpAppsRequest, requestHasSameOrigin } from './runtime.ts';
+import { closeMcpAppsRuntime, handleMcpAppsRequest, publicRequestOrigin, requestHasSameOrigin } from './runtime.ts';
 
 const origin = 'https://ink-memory.invalid';
 
@@ -31,6 +32,19 @@ test('rejects disabled preview before composing the process Runtime', async () =
     else process.env.INK_MCP_APPS_PHASE1_PREVIEW = previous;
     await closeMcpAppsRuntime();
   }
+});
+
+test('sandbox parent origin follows the public frontend Host, protocol and port', () => {
+  assert.equal(publicRequestOrigin(new Request('http://127.0.0.1:5173/mcp-apps-sandbox', {
+    headers: { host: 'localhost:41827' },
+  })), 'http://localhost:41827');
+  assert.equal(publicRequestOrigin(new Request('http://127.0.0.1:5173/mcp-apps-sandbox', {
+    headers: { host: 'dream.example.test', 'x-forwarded-proto': 'https' },
+  })), 'https://dream.example.test');
+  assert.equal(publicRequestOrigin(new Request('https://dream.example.test/mcp-apps-sandbox')), 'https://dream.example.test');
+  assert.equal(publicRequestOrigin(new Request('http://127.0.0.1:5173/mcp-apps-sandbox', {
+    headers: { host: 'name@other.example.test' },
+  })), null);
 });
 
 test('rejects origin, query, authentication, and serverRef violations before upstream composition', async () => {

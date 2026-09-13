@@ -9,6 +9,59 @@
 
 # Notion 凭证、轻量索引与 Agent CLI/Read 业务时序
 
+<!-- [Sync] 2026-09-13: add current installed Runtime config-read recovery and final PATH ownership. -->
+
+## 当前 config 读取与下一轮恢复
+
+```mermaid
+sequenceDiagram
+    participant UI as 前端/现有业务线程
+    participant Auth as actor/connector 授权
+    participant CP as credential provider
+    participant TP as thread projection
+    participant SDK as SDK options
+    participant RT as 已安装 native Runtime
+    participant Bash as Agent Bash
+    participant CLI as ntn
+    participant API as Notion API
+    participant History as SSE/数据库历史
+    UI->>Auth: fresh 或同线程下一 turn/resume
+    Auth->>CP: 当前 actor 的有效授权
+    CP->>TP: 刷新当前 thread 派生文件
+    Note over CP,SDK: 凭证/config 不进入前端或模型正文
+    alt 无认证、投影缺失/损坏或权限失败
+        TP-->>History: 既有局部不可用状态，普通 Chat 保持
+    else 投影有效
+        TP->>SDK: 四项 server-owned binding
+        Note over SDK: 保持 PATH 顺序，仅去除 canonical cwd 下确证缺失的非空相对目录
+        SDK->>RT: 本次 env + qualified absolute cli_path
+        RT->>RT: native ntn、路径/owner/mode、安全规则校验
+        alt 真实 relative shadow 或 sandbox 拒绝
+            RT-->>History: 局部工具失败，不改会话身份
+        else 资格通过
+            RT->>Bash: 同一 PATH 与 Notion binding
+            Bash->>CLI: 已批准只读命令
+            CLI->>CLI: 读取/解析 config，选择 workspace/认证
+            alt 文件读取或 schema 失败
+                CLI-->>History: 准确失败，不清空源文件
+            else 配置可用
+                CLI->>API: 最小只读请求
+                API-->>CLI: 业务结果
+                CLI-->>History: 脱敏工具结果与完成状态
+                History-->>UI: SSE 后刷新可回读
+            end
+        end
+    end
+    UI->>Auth: 修复后下一 turn，再次刷新并执行同一链路
+```
+
+该图是当前合同；后文带版本的候选/clean-room 流程仅为历史上下文。
+本轮已在正常历史 thread 完成首轮恢复及两次后续在线 `ntn api v1/search`，
+后两轮保持同一实际 Claude ID，投影每轮更新，刷新历史可见且输入可用。
+首轮本地 Grep 不计 Notion 通过；完整 turn、权限与结算回执见
+[本轮修复验收](runtime-bash-env-remediation.md)。合成 fixture 或 doctor exit 0
+不能代替这两次真实 CLI 回执，搜索匹配语义与独立 Admin UI 登录不在已通过结论内。
+
 ## 1. 连接、选择与首次轻索引
 
 ```mermaid

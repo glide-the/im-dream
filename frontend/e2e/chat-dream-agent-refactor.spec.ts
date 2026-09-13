@@ -13,6 +13,7 @@
 // [Sync] 2026-09-02: serve the paged history contract and visually verify completed-turn
 //                    process folding before the same-thread next turn.
 // [Sync] 2026-09-04: prove common Skills appear through slash and submit as the ordinary user message.
+// [Sync] 2026-09-13: distinguish Edit Session SSE cleanup aborts from failed business requests.
 
 import { expect, test } from '@playwright/test';
 
@@ -170,7 +171,9 @@ test('Dream active Deck context → workbench → Chat active tab → production
   page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
   page.on('requestfailed', (request) => {
     const expectedNavigationAbort = request.failure()?.errorText === 'net::ERR_ABORTED'
-      && request.url().includes('/api/story-workspace/dream-runs');
+      && new URL(request.url()).origin === new URL(WEB_BASE).origin
+      && ['/api/story-workspace/dream-runs', '/api/sessions/events']
+        .includes(new URL(request.url()).pathname);
     if (!expectedNavigationAbort && !request.url().includes('react-grab.com') && !request.url().includes('fonts.')) {
       diagnostics.push(`${request.failure()?.errorText ?? 'request failed'} ${request.url()}`);
     }

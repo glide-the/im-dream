@@ -1,4 +1,10 @@
 # Ink & Memory API Documentation
+
+> [Sync] 2026-09-13: Claude Agent `resume` is intent only. After actor/thread
+> authorization, the server verifies the DB Claude ID in the current Runtime
+> project. Missing records start a fresh Claude session in the same business
+> thread, retaining note links and history; database/access faults fail closed.
+> See [resume contract](../docs/design/claude-agent/claude-session-resume-resolution.md).
 <!--
 [Input] Backend FastAPI routes and deployment public URL configuration.
 [Output] Human-readable API reference for authenticated app APIs and public utility endpoints.

@@ -3,11 +3,119 @@
 <!-- [Pos] Focused remediation design for the Dream-to-Runtime Notion CLI boundary; the broader credential/index product model remains in runtime-credential-and-skill-design.md. -->
 <!-- [Sync] 2026-08-30: record the digest-bound Runtime 0.1.4 real Chat acceptance and completed same-SHA public release. -->
 <!-- [Sync] 2026-09-04: separate the Dream PreToolUse .dream-guard collision from the earlier Runtime env defect and record the narrow actor-bound read-command remediation. -->
+<!-- [Sync] 2026-09-13: record bounded Dream PATH repair, 45 passing tests and two real resumed Notion CLI reads on installed 0.1.9. -->
 
 # Notion CLI Agent Bash 环境修复设计
 
-Status: Runtime environment fix released and real-business verified; Dream PreToolUse remediation implemented and provider-free verified
-Updated: 2026-09-04
+## 2026-09-13 config 读取事件（修复与真实只读验收完成）
+
+本节记录当前事件；下文 0.1.3/0.1.4、clean-room 和 restored-src 是历史证据，
+不是当前安装或源码 owner。当前 Dream 基线为 `98f72dbd`，SDK 合同
+`0.2.145`、正常 npm Runtime `0.1.9`，本机原生 `ntn 0.15.1`。
+原任务最终候选 fresh/resume/普通 Chat 均通过，不能用早期 blocked 覆盖最终回执；
+该旧回执也不能代替本次验收。
+
+### 背景与问题
+
+2026-09-13 05:50 UTC 的真实 thread `f9d0d6a4-5f29-4a79-a816-06d7f1221a9a`
+包含两个普通 `ntn api` Bash 的 exit 1：`Failed to read config.json`。
+命令没有 Notion 环境覆盖、wrapper 或 shell 组合。只读检查当前 actor source
+及最近 thread config：JSON 有效、文件 0600、home 0700、非符号链接。
+这些是检查时状态，不能反推失败瞬间的进程环境。
+
+当前可重复根因：Runtime `2577b9a` 引入的 `compat/dream-runtime/policy.ts`
+在原生 ntn 之前遇到任一非绝对 PATH 项就返回 undefined，随后四项 Notion
+binding 被清除。本机 PATH 在 `.local/bin/ntn` 之前含字面 `~/.dotnet/tools`，
+该目录在目标 cwd 下不存在。旧 `0ebafe9` 的 resolver 对不存在候选继续扫描。
+真实 installed Runtime/ntn + 合成文件的生产 Runner 已复现相同 read error。
+仅去掉相对项的对照曾推进到 synthetic token 的 API invalid-token 响应，
+该次发生了外部请求，不记为离线或真实用户验收。随后空 auth + 有效 config
+的已安装 CLI 生产 Runner 测试通过本地 `No workspace selected` 断言。
+
+方案评审拒绝把 ntn 所在目录前置：这会将 `uv`、`claude` 和 Runtime 裸命令
+切到 `.local/bin` 的其他版本。采纳当前 Notion launch 的有界 PATH 过滤：
+只按最终 canonical cwd 对非空相对目录执行 lstat，只有 ENOENT/ENOTDIR 才移除；
+不展开 `~` 或变量，保留 empty、现存目录、symlink 和权限/IO 不确定项。
+其余顺序不变，Runtime 原有 native/shadow 拒绝规则保持；不修改父环境。
+
+### 目标与边界
+
+恢复既有 actor/thread 的只读 CLI 链路。与 resume 任务分工：本任务只拥有
+Notion projection、环境和读取边界；会话身份、存储布局与初始化恢复由并行任务拥有。
+不得修理源凭证、重新登录、扩大 sandbox 根放行或以旧候选替代正常制品。
+
+### 概念与规则
+
+- source 是 actor credential store 权威，thread home 是每轮派生快照，CLI env 是本次 Runtime 绑定。
+- 默认无绑定；期望来自当前授权 connector；实际可用必须由最终 Bash/CLI 读取回执证明。
+- fresh 与下一轮/resume 重新投影；connector 切换或凭证刷新使用本轮权威，不继承旧认证。
+- workers 缺失是可选状态。缺 CLI、认证或权限是局部能力失败，普通 Chat 不因此改变身份。
+- `ntn doctor` exit 0 仍可能带 config 警告，不能单独作为认证或 config 可用证明。
+- 不输出 config/auth 原文、token、完整 env、Notion 正文；前端与模型只接收业务状态。
+
+### 影响范围与评审
+
+| 模块 | 当前证据 / 所需修改 | 风险与兼容 | 验证 / 回滚 |
+|---|---|---|---|
+| Dream credentials / sdk_env | 源和派生文件不改；最终 SDK env 过滤确证缺失的相对 PATH 目录 | 保持 actor/thread 隔离、命令顺序和四项 env 合同 | 单元及生产 Runner 测试；回退 sdk_env 差异，不改凭证 |
+| Runtime | 当前 owner 为原始 `src` 加 `compat/dream-runtime` 构建变换；2577b9a 的严格相对路径拒绝触发兼容缺口 | 保持已安装 0.1.9 native 校验，不改版本/制品 | 正常已安装制品验证；禁止旧目录/override |
+| ntn | read 与 parse 错误不同；缺配置可使用默认结构 | 不更换版本或修改安装文件 | 无 workspace 合成 config 只读失败边界 |
+| 测试 | 原 native fixture 只输出常量，遗漏环境/config 读取 | 只合成数据，fake provider；不能冒充真实验收 | 增加绑定和 fopen 断言；恢复测试差异即可 |
+| 正常运行态 | backend 缺失；前端/Admin 保持运行 | 与 resume 任务协调唯一启动者、合并模型轮次 | 技术门后正常入口验收；不停止其他服务 |
+
+保留现有 owner、授权、时序及错误呈现；修改有证据的测试缺口与历史状态文档。
+不实现通用 env 框架、UI 配置、wrapper、store、API、队列或 schema；不重写 resume。
+
+### 验收与回滚
+
+本轮基线四组测试 40 passed；增强 native fixture 的生产 Runner/正常 Runtime
+测试 1 passed。真实 macOS sandbox + 合成有效 config 返回本地未选择 workspace，
+证明父 deny/子 allow 本身不能解释现场故障。坏 JSON/schema 的本地诊断是
+`Failed to parse config.json`，与现场 read 错误不同。
+修复后四文件最终回归：45 passed、0 skipped、exit 0；包含 native fixture、
+installed ntn 空 auth config 和 existing-relative-shadow-denied 三个生产 Runner case。
+14 个常用 CLI lookup 保持原路径，空 auth case 无真实凭证或业务网络。
+正常 Chat 已执行三轮：首轮完成普通聊天与时间工具，但仅执行本地 Grep，
+不计为 Notion 验收；第二、第三轮各一次真实 `ntn api v1/search` 均成功。
+隔离测试未写真实数据库/凭证，真实验收保留正常业务历史。
+
+正常业务 thread `56887baf-e44a-4816-a3aa-0cfb44f3b0a1` 使用
+`deepseek-v4-pro`；第二轮 `0f8f03d1-ad7d-4b0e-9b83-0745f048617a`、
+第三轮 `b436289e-8f40-4391-8db2-9ca124950d1f` 均 completed。
+两次 CLI 均返回 list、results=1、has_more=true、request_id 存在，无 config 读取错误；
+这些证明在线只读调用成功，不证明 query 匹配语义或全局不存在。
+首轮恢复后持久化 Claude ID `9f47fc24-9dba-46e6-8eb5-6f6aeb21f8d3`，
+后二轮保持相同 ID，无新增 fallback。刷新并重开历史后三轮可见，状态 completed/idle，
+输入可用且无 Generating。没有 Notion 写入或额外模型请求。
+
+config 每轮投影 mtime_ns 依次为 `1789282906678351926`、
+`1789283040010594282`、`1789283222546145164`，严格递增；只读 lstat
+确认 config 0600、home 0700、均非 symlink，不读取或披露认证正文。
+正常 backend PID 68562 的父 PATH 保留原相对项且四项 NOTION 变量 unset；
+修复只进入本次 SDK 子进程 env。SDK 0.2.145、Runtime 0.1.9、ntn 0.15.1
+均为正常安装，无 Runtime override、版本更新或制品替换。
+
+补充独立 CLI 错误分类脚本 exit 0：有效/缺失 config 返回本地未选 workspace，
+坏 JSON/不支持 schema 返回 parse 错误，config 为目录返回 read/EISDIR 错误；
+五例均使用空 auth，未改变输入文件。只采用修正 endpoint argv 后的 final 日志，
+准确命令为 `/Users/dmeck/.local/bin/ntn -v api v1/users/me`。
+
+联合恢复补丁技术门运行 299 项，298 通过、1 个既有 skip；Ruff exit 0，Mypy 两项既有错误
+不计为本轮通过。正常 PostgreSQL read-only/rollback 诊断 exit 0：三轮共 7 条
+Gateway 请求全部 settled/succeeded/HTTP200/error null；21 条账本逐请求满足
+reserve=capture+release、capture=allowance charge。原始回执为
+`/private/tmp/dream-normal-gateway-receipts-01a0961b.json`。正常 Admin 资源查询同表，
+但独立 Admin UI 登录未验证，不宣称后台页面登录通过。
+
+最终技术命令：在 worktree backend，以既有项目 venv 执行
+`uv run --project /Users/dmeck/project/ink-dream-memory/backend --no-sync --with pytest --python /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest tests/test_notion_credentials.py tests/test_sdk_env.py tests/test_notion_runtime_integration.py tests/test_claude_agent_notion_cli_runtime.py`，
+并设置 `PYTHONPATH` 为当前 worktree backend。exit 0，45 passed in 11.02s。
+`git diff --check` exit 0；Markdown audit 11 个文件、35 个相对链接全部有效；
+README EN/ZH 标题层级及新诊断事实一致。原始日志位于本轮
+`/private/tmp/ntn-config-baseline-01a09969/`，合成验证不使用真实数据库或模型。
+
+Historical status through 2026-09-04: Runtime 0.1.4 environment fix released and real-business verified; Dream PreToolUse remediation implemented and provider-free verified
+Historical baseline updated: 2026-09-04
 Scope: 当前 actor/thread 的 Notion CLI 凭证从 Dream 投影到 Agent Bash 与只读 `ntn` 验收
 
 ## 1. 背景与问题

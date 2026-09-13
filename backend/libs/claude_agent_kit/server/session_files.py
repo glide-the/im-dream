@@ -3,6 +3,7 @@
 #          parse_session_messages_from_jsonl to simple_cas_client.
 # [Pos] utility node in libs/claude_agent_kit/server
 # [Sync] 2026-05-01: initial Python port from server/utils/session-files.ts
+# [Sync] 2026-09-13: separate strict current-project resume probes from history search.
 # [Sync] 2026-08-03: get_projects_root honors CLAUDE_CONFIG_DIR and accepts an
 #                    optional workspace cwd — apply_claude_config_home_to_options
 #                    (sdk_env) points the SDK subprocess's config home at
@@ -21,12 +22,145 @@ from __future__ import annotations
 
 import json
 import os
+import stat
+import unicodedata
 from pathlib import Path
 from typing import Any, Optional, Union
+from uuid import UUID
 
 from .sdk_env import resolve_claude_config_home
 
 SESSION_FILE_EXTENSION = ".jsonl"
+
+# Runtime 0.1.9 src/utils/sessionStoragePortable.ts::sanitizePath. This is a
+# storage-format boundary, not a business path-length limit.
+_RUNTIME_PROJECT_NAME_LIMIT = 200
+
+
+def _runtime_long_project_hash(value: str) -> str:
+    """Bun.hash(canonical cwd).toString(36), only for long project paths.
+
+    Runtime's sanitizePath uses seed-zero Wyhash, not the SDK's simpleHash.
+    Source: ziglang/zig 0.14.1 lib/std/hash/wyhash.zig (Wyhash.hash/final2),
+    based on the public-domain wangyi-fudan/wyhash algorithm. Kept local to
+    this storage-format adapter; native Runtime regression verifies parity.
+    """
+    data = value.encode("utf-8")
+    secret = (0xA0761D6478BD642F, 0xE7037ED1A0B428DB,
+              0x8EBC6AF09C88C6E3, 0x589965CC75374CC3)
+    mask = (1 << 64) - 1
+
+    def mix(a: int, b: int) -> int:
+        product = a * b
+        return (product & mask) ^ (product >> 64)
+
+    def read(offset: int) -> int:
+        return int.from_bytes(data[offset:offset + 8], "little")
+
+    state = [mix(secret[0], secret[1])] * 3
+    offset = 0
+    while offset + 48 < len(data):
+        for index in range(3):
+            start = offset + 16 * index
+            state[index] = mix(read(start) ^ secret[index + 1], read(start + 8) ^ state[index])
+        offset += 48
+    seed = state[0] ^ state[1] ^ state[2]
+    while offset + 16 < len(data):
+        seed = mix(read(offset) ^ secret[1], read(offset + 8) ^ seed)
+        offset += 16
+    product = (read(len(data) - 16) ^ secret[1]) * (read(len(data) - 8) ^ seed)
+    hashed = mix((product & mask) ^ secret[0] ^ len(data), (product >> 64) ^ secret[1])
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    encoded = ""
+    while hashed:
+        hashed, digit = divmod(hashed, 36)
+        encoded = digits[digit] + encoded
+    return encoded or "0"
+
+
+class ClaudeResumeStorageError(RuntimeError):
+    """Safe diagnostic: storage errors never authorize a fresh fallback."""
+
+
+def locate_resumable_session(
+    session_id: str,
+    *,
+    cwd: str,
+    config_home: Optional[str] = None,
+) -> Optional[str]:
+    """Probe only the project read by Runtime's ID-based resume.
+
+    Unlike history search, this must not accept a clean-room SHA256 directory
+    or another cwd. Read metadata without exposing transcript contents. Missing
+    paths/empty transcripts return None; corruption and access errors fail closed.
+    """
+    try:
+        if str(UUID(session_id)) != session_id.lower():
+            raise ValueError
+    except (ValueError, AttributeError, TypeError):
+        raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_SESSION_ID") from None
+
+    try:
+        runtime_cwd = unicodedata.normalize("NFC", str(Path(cwd).resolve(strict=True)))
+    except (OSError, ValueError):
+        raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_CWD") from None
+    try:
+        if not Path(runtime_cwd).is_dir():
+            raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_CWD")
+        # JS's non-Unicode regex replaces each UTF-16 code unit, not each
+        # Python Unicode codepoint (astral characters therefore yield '--').
+        units = runtime_cwd.encode("utf-16-le")
+        project_name = "".join(
+            chr(unit) if (48 <= unit <= 57 or 65 <= unit <= 90 or 97 <= unit <= 122) else "-"
+            for unit in (int.from_bytes(units[i:i + 2], "little") for i in range(0, len(units), 2))
+        )
+        if len(project_name) > _RUNTIME_PROJECT_NAME_LIMIT:
+            project_name = f"{project_name[:_RUNTIME_PROJECT_NAME_LIMIT]}-{_runtime_long_project_hash(runtime_cwd)}"
+        projects_root = (
+            str(Path(config_home) / "projects")
+            if config_home else get_projects_root(None)
+        )
+        if not projects_root or not Path(projects_root).is_absolute():
+            raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_CONFIG_HOME")
+        if os.path.normpath(projects_root) != projects_root:
+            raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_CONFIG_HOME")
+        target = Path(projects_root) / project_name / f"{session_id}.jsonl"
+        # Walk with directory descriptors: O_NOFOLLOW covers both links already
+        # present and links swapped into the path between check and open.
+        fd = os.open(target.anchor, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for component in target.parts[1:-1]:
+                next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = next_fd
+            transcript_fd = os.open(target.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        finally:
+            os.close(fd)
+        with os.fdopen(transcript_fd, encoding="utf-8") as transcript:
+            if not stat.S_ISREG(os.fstat(transcript.fileno()).st_mode):
+                raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_RECORD")
+            for line in transcript:
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    raise ClaudeResumeStorageError("CLAUDE_RESUME_INVALID_RECORD")
+                if (
+                    record.get("type") in {"user", "assistant"}
+                    and not record.get("isSidechain")
+                    and record.get("uuid")
+                    and isinstance(record.get("message"), dict)
+                ):
+                    if record.get("sessionId") != session_id:
+                        raise ClaudeResumeStorageError("CLAUDE_RESUME_RECORD_ID_MISMATCH")
+                    return str(target)
+        return None
+    except FileNotFoundError:
+        return None
+    except ClaudeResumeStorageError:
+        raise
+    except (OSError, ValueError, UnicodeError):
+        raise ClaudeResumeStorageError("CLAUDE_RESUME_STORAGE_UNAVAILABLE") from None
 
 
 def get_projects_root(cwd: Optional[Union[str, Path]] = None) -> Optional[str]:

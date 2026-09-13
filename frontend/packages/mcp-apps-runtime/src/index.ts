@@ -3,6 +3,7 @@
 // [Pos] Sole public Runtime entry; Browser/RSC/root-Web reverse imports are forbidden.
 // [Sync] 2026-09-06: export the same safe Node plugin manifest for Next policy routes.
 // [Sync] 2026-09-06: export safe connection-level App settings for status composition.
+// [Sync] 2026-09-13: export the existing credential-free public-origin parser for Next sandbox binding.
 
 import 'server-only';
 
@@ -15,6 +16,7 @@ export type { McpAppConnectionSettingsView } from './contracts.ts';
 
 export {
   closeMcpAppsRuntime,
+  publicRequestOrigin,
   readCurrentMcpAppConnectionSettings,
   readCurrentMcpAppsStaticView,
 } from './runtime.ts';

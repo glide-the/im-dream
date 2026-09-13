@@ -10,6 +10,7 @@
 <!-- [同步] 2026-09-06：汇总连接设置、discovery、首次模型调用、结果投影、实时/历史传递、Browser/Node Host、sandbox 和交互回流的端到端调用链。 -->
 <!-- [同步] 2026-09-06：连接详情将完整 App 控制收敛进“使用策略”区域；修改通过串行 CAS 自动保存，冲突基于最新 revision 重放本地字段，失败保留选择并自动重试。 -->
 <!-- [同步] 2026-09-06：页面只呈现 desired 开关与可恢复保存错误；availability/effective 保留为 Runtime 内部组合语义，不在设置页展示。 -->
+<!-- [同步] 2026-09-13：sandbox asset 跟随实际前端入口；两层 iframe 和响应 CSP 保持 opaque 文档隔离，不另启固定端口服务。 -->
 
 # MCP Apps 与 IM Agent UI 设计
 
@@ -169,6 +170,14 @@ Node 是工具/资源授权的最终边界。Browser 中的 iframe permission、
 App 设置属于每一条 MCP 连接详情，不是 Settings 顶层分类。用户只拥有
 `desired`，服务器继续拥有 `default`、部署配置、sandbox URL、Node service
 credential 和最终能力上限；普通页面与浏览器 API 均不得显示这些服务器配置。
+
+沙箱 asset 由同一个 Next 入口的 `/mcp-apps-sandbox` 提供，status 仅返回带版本与
+插件 revision 的根相对 URL；Browser 使用实际入口解析协议、主机名和端口。
+父页面来源绑定当前请求 public origin，旧沙箱 URL／父来源环境配置不再控制挂载。
+两层 iframe 和外层响应 CSP 均仅允许 `allow-scripts`，实际文档为 opaque origin，
+继续拒绝父 DOM／存储访问和非预期消息来源。此严格零权限 preview profile 不等同于
+带 `allow-same-origin` 的通用独立域名模式；后者不在本轮范围。详见
+[本机恢复与动态入口](../../exec/mcp-apps/local-startup-recovery.md)。
 
 | 用户选择 | 含义 | 生效条件 |
 |---|---|---|
