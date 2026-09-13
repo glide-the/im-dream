@@ -1,6 +1,7 @@
 <!-- [输入] MCP Apps 系统架构执行清单、DEC-002/004/005、Phase 0/1 历史证据与当前实现候选。 -->
 <!-- [输出] Phase 0→3 的技术执行顺序、必要依赖、验收证据和回滚边界。 -->
 <!-- [范围] 只描述产品实现、技术依赖、验证关系与回滚边界。 -->
+<!-- [同步] 2026-09-13：同步 MCP Apps 设计稿迁入 docs/design/claude-mcp 后的引用；不改实现或历史回执。 -->
 <!-- [同步] 2026-09-06：依据 54f3bbe5 和统一回执，将 Phase 0—3 收敛为已验证技术 preview 与独立生产 No-Go。 -->
 <!-- [同步] 2026-09-06：明确服务端 App-callable positive list 可为缺少可选风险 hints 的标准工具完成低风险分类，显式危险 hints 仍否决。 -->
 
@@ -17,7 +18,7 @@
 
 ## 1. 来源与当前证据
 
-- [系统架构执行清单](../design/claude-agent/mcp-apps-system-architecture-execution-checklist.md)：50 个 P0/N1/C1/S1/M1/H1/I2/G3 工作项和完整验收边界。
+- [系统架构执行清单](../design/claude-mcp/mcp-apps-system-architecture-execution-checklist.md)：50 个 P0/N1/C1/S1/M1/H1/I2/G3 工作项和完整验收边界。
 - [Phase 0 证据索引](../exec/mcp-apps/phase-0/index.md)：当前 pnpm lock/source/Chrome 候选的 P0-01—P0-08 回执和 `Go`。
 - [Phase 1 证据索引](../exec/mcp-apps/phase-1/index.md)：canonical package、官方制品和当前 Browser 的 N1/C1/S1/M1/H1 回执。
 - [Phase 0—3 统一回执](../exec/mcp-apps/current-candidate-validation.md)：同一候选的 provider-free 技术结论和 production No-Go 边界。

@@ -19,6 +19,7 @@
 // [Sync] 2026-09-06: verify accessible modal-only Server creation and unified usage-policy presentation on wide and narrow screens.
 // [Sync] 2026-09-06: prove usage-policy changes auto-save, preserve unrelated concurrent desired fields through CAS rebase, and retain/retry a failed local change.
 // [Sync] 2026-09-06: verify the caller-scoped MCP dialog uses grouped wide fields, a scroll-contained short viewport, and an always-visible action footer.
+// [Sync] 2026-09-13: use backend serverInfo fixtures; verify Server name/version and successful null metadata through the full Resources journey.
 
 import { expect, test } from '@playwright/test';
 
@@ -191,6 +192,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   let configured = false;
   let serverRevision = 1;
   let serverDisplayName = serverName;
+  let reportedServerInfo: { name: string; version: string } | null = { name: 'Technical MCP', version: '1.0.0' };
   let appSettings = {
     version: 1,
     revision: 1,
@@ -438,7 +440,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
               status: 'failed',
               config_revision: serverRevision,
               credential_revision: 0,
-              server_info: null,
+              serverInfo: null,
               tools: [],
               resources: [],
               prompts: [],
@@ -470,7 +472,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
             status: 'complete',
             config_revision: serverRevision,
             credential_revision: 1,
-            server_info: { name: 'Technical MCP', version: '1.0.0' },
+            serverInfo: reportedServerInfo,
             tools,
             resources: [{ uri: 'https://mcp.example.test/resources/readme', name: 'README', description: 'Read-only resource', mime_type: 'text/markdown' }],
             prompts: [{ name: 'inspect_workflow', description: 'Inspect without mutation', argument_count: 1 }],
@@ -720,6 +722,7 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await expect(page.getByRole('button', { name: /刷新 inventory|重试 inventory|重试探测/ })).toHaveCount(0);
   await expect(page.getByText('需要认证', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('user · revision 2', { exact: true })).toBeVisible();
+  await expect(page.getByText('Server info', { exact: true })).toHaveCount(0);
   const usagePolicyGroup = page.getByRole('group', { name: 'MCP 使用策略' });
   await expect(page.getByRole('heading', { name: 'App 设置', exact: true })).toHaveCount(0);
   await expect(usagePolicyGroup.getByRole('button', { name: /保存 App 设置|保存使用策略/ })).toHaveCount(0);
@@ -754,6 +757,9 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
 
   await expect(page.getByRole('heading', { name: `${serverName} MCP Server` })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Tools 41' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText('Server info', { exact: true })).toBeVisible();
+  await expect(page.getByText('Technical MCP', { exact: true })).toBeVisible();
+  await expect(page.getByText('1.0.0', { exact: true })).toBeVisible();
   await expect(page.getByText(serverUrl, { exact: true })).toBeVisible();
   await page.getByRole('searchbox', { name: '搜索 MCP 工具' }).fill('submit_workflow');
   const destructiveTool = page.getByRole('article', { name: 'MCP 工具 submit_workflow' });
@@ -776,8 +782,14 @@ test('Resources completes the provider-free Claude MCP login and logout journey'
   await page.setViewportSize({ width: 390, height: 760 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
   await page.screenshot({ fullPage: true, path: 'output/playwright/claude-mcp-detail-narrow.png' });
+  reportedServerInfo = null;
   await page.reload();
   await expect(page.getByRole('heading', { name: `${serverName} MCP Server` })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Tools 41' })).toBeVisible();
+  await expect(page.getByText('Server info', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Technical MCP', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: 'Resources 1' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Prompts 1' })).toBeVisible();
   await page.getByRole('button', { name: '资源连接器' }).click();
   await expect(serverCard).toBeVisible();
 

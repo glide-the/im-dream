@@ -1,6 +1,7 @@
 <!-- [Input] Current Dream/Admin/Gateway topology, supported versions, and user-visible MCP Apps workflow. -->
 <!-- [Output] Plain-language user and local-operator guide with deeper engineering details linked out. -->
 <!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
+<!-- [Sync] 2026-09-13: update MCP Apps design references after relocation to docs/design/claude-mcp; preserve implementation and historical evidence. -->
 <!-- [Sync] 2026-09-06: reorganize around getting started and using MCP Apps; retain exact setup, ownership, security, and validation facts in layered sections. -->
 <!-- [Sync] 2026-09-06: add sanitized real-component screenshots for the MCP connection, App settings, and Chat interaction steps. -->
 <!-- [Sync] 2026-09-06: align connection creation and App controls with the accessible Server modal and unified MCP usage-policy form. -->
@@ -15,6 +16,7 @@ visible failures. See the [resume contract and sequence diagram](docs/design/cla
 <!-- [Sync] 2026-09-13: serve the opaque MCP Apps sandbox through the current frontend entry without a fixed second port. -->
 
 <!-- [Sync] 2026-09-13: document bound Notion missing-relative-PATH compatibility and config-read diagnostics. -->
+<!-- [Sync] 2026-09-13: document reported Server metadata on MCP connection details. -->
 
 # Ink & Memory
 
@@ -187,6 +189,8 @@ See the [local recovery design and evidence](docs/exec/mcp-apps/local-startup-re
 4. Turn on **Use App in Chat**. If needed, also allow **Low-risk tool calls** and **Send messages to this chat**.
 5. Changes save automatically. A save failure retains your choice and retries; do not look for a save button.
 
+Connection details display the Server's reported name and version when supplied. Missing Server metadata does not hide its tools, resources, or prompts. See the [current connector design](docs/design/claude-mcp/claude-mcp-resource-connector-current-design.md#7-api-合同).
+
 These screenshots use safe example data and the real production UI components; they contain no account details or secrets.
 
 ![Add a managed MCP connection by entering its name, transport, and URL](assets/mcp-apps-guide/01-add-mcp-connection.png)
@@ -220,7 +224,7 @@ After updating Python code, restart your owned backend before testing a new norm
 Chat tool call. Older rows that lost the SDK envelope retain their ordinary result;
 Dream does not fabricate missing metadata or replay those tools.
 
-The complete engineering flow—connection discovery, model tool call, call-ID association and result DTO validation, live/history recovery, Browser Host, Node proxy, sandbox, permissions, and Chat-message re-entry—is documented in [MCP Apps and IM Agent UI design](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链).
+The complete engineering flow—connection discovery, model tool call, call-ID association and result DTO validation, live/history recovery, Browser Host, Node proxy, sandbox, permissions, and Chat-message re-entry—is documented in [MCP Apps and IM Agent UI design](docs/design/claude-mcp/mcp-apps-integration-strategy.md#32-端到端调用链).
 
 ## Supported versions and ownership
 
@@ -338,7 +342,7 @@ Run the Admin migration check, verify the Admin-owned environment file, and conf
 
 ## More documentation
 
-- [MCP Apps end-to-end design](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链)
+- [MCP Apps end-to-end design](docs/design/claude-mcp/mcp-apps-integration-strategy.md#32-端到端调用链)
 - [MCP Apps current technical evidence](docs/exec/mcp-apps/current-candidate-validation.md)
 - [Repository maintenance rules](Agent.md)
 - [Agent product behavior](docs/Agent.md)

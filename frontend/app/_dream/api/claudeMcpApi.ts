@@ -11,6 +11,7 @@
 // [Sync] 2026-08-25: keep authentication classification backend-owned; CRUD callers never choose OAuth versus anonymous.
 // [Sync] 2026-08-25: make detail inventory cache-first so automatic loading never forces redundant remote discovery.
 // [Sync] 2026-09-06: add typed per-connection MCP App desired and effective settings APIs.
+// [Sync] 2026-09-13: map discovery wire serverInfo to the existing page-model server_info field.
 
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
@@ -183,7 +184,7 @@ interface ManagedDiscoveryResult {
   tools: ClaudeMcpTool[];
   resources: ClaudeMcpResource[];
   prompts: ClaudeMcpPrompt[];
-  server_info: { name: string; version: string } | null;
+  serverInfo: { name: string; version: string } | null;
   error: { code: string; retryable: boolean; trace_id?: string | null } | null;
   discovered_at: string;
   cached: boolean;
@@ -333,7 +334,7 @@ export async function getClaudeMcpServerInventory(
     runtime_scope: null,
     transport: null,
     url: null,
-    server_info: result.server_info,
+    server_info: result.serverInfo,
     tools: result.tools,
     resources: result.resources,
     prompts: result.prompts,

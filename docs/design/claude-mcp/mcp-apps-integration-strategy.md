@@ -1,6 +1,7 @@
 <!-- [输入] MCP Apps 稳定规范、当前 pnpm 技术回执、@mcp-ui/client 与 IM Claude Agent/MCP、Next.js 当前边界。 -->
 <!-- [输出] 定义 IM MCP Apps technical preview 的产品流程、最小架构、状态语义与验收。 -->
 <!-- [定位] MCP Apps 主设计；连接、客户端扩展、iframe 和源码证据由同目录专项文档维护。 -->
+<!-- [同步] 2026-09-13：迁入 docs/design/claude-mcp；仅调整目录归属与引用，保留正文、历史决策和验证记录。 -->
 <!-- [同步] 2026-09-04：SUO-383 以 DEC-002 选择最小 Host adapter 接管 permissions/iframe，Browser 主链与 production 关闭状态不变。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 将 Web Shell 固定到 frontend/ 根 package，将 Node Runtime 固定到同级 packages/mcp-apps-runtime。 -->
 <!-- [同步] 2026-09-06：按 54f3bbe5 标记 Phase 0—3 技术实现/验证已存在，公开应用与 production enablement 仍未完成。 -->
@@ -26,7 +27,7 @@
 - [Node 受控 MCP Transport 与连接同步](./mcp-apps-node-runtime-bridge.md)
 - [`window.im` 客户端平台扩展](./mcp-apps-client-host-communication.md)
 - [Host adapter 与 iframe 权限交互](./mcp-apps-iframe-interaction.md)
-- [Dream 前端 Next.js 迁移评估](./dream-frontend-node-framework-migration-assessment.md)
+- [Dream 前端 Next.js 迁移评估](../claude-agent/dream-frontend-node-framework-migration-assessment.md)
 
 ## 1. 背景与问题
 
@@ -308,4 +309,4 @@ No-Go：必须让 Browser 取得真实 Server 地址或凭证；当前工具结�
 
 ## 8. DEC-005 目录归属同步
 
-本稿只消费[当前目录与 source ownership](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)，不另定义等价路径。Browser Host 保留在根 Web package，Node MCP Runtime 是一个粗粒度同级 package；二者只通过同源标准 MCP HTTP 边界连接。旧嵌套 Next project、legacy server 目录及其旧 readiness 仅是历史证据；当前有效状态、证据和缺口见[系统架构清单第 10 节](./mcp-apps-system-architecture-execution-checklist.md#10-当前证据与实际缺口)。
+本稿只消费[当前目录与 source ownership](../claude-agent/dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)，不另定义等价路径。Browser Host 保留在根 Web package，Node MCP Runtime 是一个粗粒度同级 package；二者只通过同源标准 MCP HTTP 边界连接。旧嵌套 Next project、legacy server 目录及其旧 readiness 仅是历史证据；当前有效状态、证据和缺口见[系统架构清单第 10 节](./mcp-apps-system-architecture-execution-checklist.md#10-当前证据与实际缺口)。

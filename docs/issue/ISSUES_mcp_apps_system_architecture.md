@@ -1,6 +1,7 @@
 <!-- [输入] DEC-002/004/005、系统架构执行清单、技术执行计划和对应 task/requirement。 -->
 <!-- [输出] MCP Apps 已实现工作内容、技术依赖、现行证据与生产缺口索引。 -->
 <!-- [定位] MCP Apps 当前技术工作项、证据与回滚索引。 -->
+<!-- [同步] 2026-09-13：同步 MCP Apps 设计稿迁入 docs/design/claude-mcp 后的引用；不改实现或历史回执。 -->
 <!-- [同步] 2026-09-06：依据 54f3bbe5 与当前回执，将失效派工状态改为实现/证据/生产缺口语义。 -->
 <!-- [同步] 2026-09-06：低风险分类以服务端 App-callable positive list 为准，缺少可选 MCP risk hints 不等同于未分类。 -->
 
@@ -8,12 +9,12 @@
 
 ## 1. 来源
 
-- [系统架构执行清单](../design/claude-agent/mcp-apps-system-architecture-execution-checklist.md)
+- [系统架构执行清单](../design/claude-mcp/mcp-apps-system-architecture-execution-checklist.md)
 - [Phase 0→3 技术执行计划](../stage/stage_mcp-apps-system-architecture.md)
 - [Next.js 迁移评估](../design/claude-agent/dream-frontend-node-framework-migration-assessment.md)
-- [Node MCP Runtime 设计](../design/claude-agent/mcp-apps-node-runtime-bridge.md)
-- [Browser/Host 通信设计](../design/claude-agent/mcp-apps-client-host-communication.md)
-- [iframe 与权限设计](../design/claude-agent/mcp-apps-iframe-interaction.md)
+- [Node MCP Runtime 设计](../design/claude-mcp/mcp-apps-node-runtime-bridge.md)
+- [Browser/Host 通信设计](../design/claude-mcp/mcp-apps-client-host-communication.md)
+- [iframe 与权限设计](../design/claude-mcp/mcp-apps-iframe-interaction.md)
 
 ## 2. 不可变边界
 

@@ -1,6 +1,7 @@
 <!-- [Input] SUO-422 execute handoff, task_411-01 N1-rollback contract, preserved frontend/dist baseline, and run-scoped Docker smoke evidence. -->
 <!-- [Output] Immutable Vite rollback image tag/digest, isolated smoke verdict, cleanup receipt, and parent handoff. -->
 <!-- [Pos] Child execute report for SUO-422; it supplements only N1-rollback and does not reopen or rewrite task_411-01 source implementation. -->
+<!-- [Sync] 2026-09-13: update MCP Apps design references after relocation to docs/design/claude-mcp; preserve implementation and historical evidence. -->
 <!-- [Sync] 2026-09-05: initialized the checked-out SUO-422 immutable Vite rollback smoke record. -->
 <!-- [Sync] 2026-09-06: rebased current Dream source references from the retired frontend/src tree to frontend/app/_dream. -->
 
@@ -26,7 +27,7 @@
 - Independent requirement：`docs/task/TASK-REQUIREMENT-task_411-01_frontend_root-web-shell-vite-exit.md`。
 - Reusable template：`docs/task/TASK-REQUIREMENT-FORMAT.md`（已在其他 task/stage/design 输入前读取）。
 - Stage：`docs/stage/stage_mcp-apps-system-architecture.md` 的 Stage 1；readiness ancestor 为 `SUO-416`（done），stage ancestor 为 `SUO-414`（done）。
-- Direct design：`docs/design/claude-agent/dream-frontend-node-framework-migration-assessment.md` §3.2、§6、§9—§11、DEC-005；`docs/design/claude-agent/mcp-apps-system-architecture-execution-checklist.md` §5.1、§10—§12。
+- Direct design：`docs/design/claude-agent/dream-frontend-node-framework-migration-assessment.md` §3.2、§6、§9—§11、DEC-005；`docs/design/claude-mcp/mcp-apps-system-architecture-execution-checklist.md` §5.1、§10—§12。
 - 单一绑定：本报告不合并 `MCPAPPS-411-02/03`，不继承旧 `task_302`、旧 nested Next、旧 lock 或旧 Exec/evidence 的通过结论。
 
 ### 2.2 TASK-REQUIREMENT-FORMAT.md 填充摘要

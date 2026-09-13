@@ -1,6 +1,7 @@
 <!-- [输入] MCP Apps 稳定规范、OpenAI 共享字段指南、IM MCP Apps Host 设计。 -->
 <!-- [输出] 定义当前 technical preview 中 IM App 页面可使用的标准能力与 window.im 兼容接口。 -->
 <!-- [定位] IM App 客户端平台能力合同；不定义 Browser 与 Node 的私有传输协议。 -->
+<!-- [同步] 2026-09-13：迁入 docs/design/claude-mcp；仅调整目录归属与引用，保留正文、历史决策和验证记录。 -->
 <!-- [同步] 2026-09-04：SUO-383 后标准主链由 Browser MCP Client、最小 Host adapter 与 @mcp-ui/client AppBridge 承载，window.im 仍仅为兼容接口。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 明确本客户端能力只属于 frontend/ 根 Web package，不导入同级 server-only Runtime package。 -->
 <!-- [同步] 2026-09-06：按 54f3bbe5 标记 Host/window.im 代码与 provider-free 验证已存在，同时保留 production-off 边界。 -->
@@ -168,4 +169,4 @@ IM 需要定义上述客户端平台能力合同，但不需要第二套 Browser
 
 `window.im` 是 `window.openai` 的 IM namespace 兼容接口：标准已有能力时只做别名，OpenAI 可选平台能力按 IM 实际支持情况逐项提供。它不是 MCP transport、AppBridge 的替代品，也不定义认证和连接同步协议。
 
-目录归属不在本稿重复定义；唯一结构以[当前 source ownership](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)为准。旧 `frontend/app/app/**` 和 `frontend/app/_dream/server/mcp-apps/**` 不得成为客户端兼容层的双写目标。
+目录归属不在本稿重复定义；唯一结构以[当前 source ownership](../claude-agent/dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)为准。旧 `frontend/app/app/**` 和 `frontend/app/_dream/server/mcp-apps/**` 不得成为客户端兼容层的双写目标。

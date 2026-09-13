@@ -1,6 +1,7 @@
 <!-- [输入] 54f3bbe5 的 frontend workspace、Next.js App Router、MCP Apps Runtime package 与当前技术验收回执。 -->
 <!-- [输出] 定义 Dream Web 当前 source ownership、依赖方向、构建入口、状态语义、验收证据与剩余缺口；迁移期内容仅作历史附录。 -->
 <!-- [定位] Dream Web / MCP Apps 当前架构真相源；不定义 Python 业务 API 或 iframe 协议细节。 -->
+<!-- [同步] 2026-09-13：同步 MCP Apps 设计稿迁入 docs/design/claude-mcp 后的引用；不改实现或历史回执。 -->
 <!-- [同步] 2026-09-06：迁移已完成，文档由未来式迁移计划重构为 54f3bbe5 当前架构与显式历史记录。 -->
 
 # Dream Web 当前 Next.js 架构与迁移历史
@@ -11,7 +12,7 @@
 >
 > MCP Apps 状态：Phase 0—3 provider-free 技术验证已完成，但真实外部 Server、真实账号/OAuth、公开应用发布和生产运维验收未完成；`productionAppsEffective=false`。
 
-当前 MCP Apps 技术结论与逐条命令见[当前候选技术验收](../../exec/mcp-apps/current-candidate-validation.md)。MCP Apps 产品链路见[主设计](./mcp-apps-integration-strategy.md)。
+当前 MCP Apps 技术结论与逐条命令见[当前候选技术验收](../../exec/mcp-apps/current-candidate-validation.md)。MCP Apps 产品链路见[主设计](../claude-mcp/mcp-apps-integration-strategy.md)。
 
 ## 1. 背景与问题
 

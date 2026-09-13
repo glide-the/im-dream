@@ -1,6 +1,7 @@
 <!-- [输入] MCP Apps 稳定规范、task_301 P0-04 运行证据、@mcp-ui/client@7.1.1 与 IM Next.js/Node Apps Runtime 边界。 -->
 <!-- [输出] 定义 IM Host adapter、permissions→iframe allow、业务交互、失败降级和当前回归合同。 -->
 <!-- [定位] MCP Apps iframe 与浏览器权限专项设计；不定义 Node 上游授权或生产启用。 -->
+<!-- [同步] 2026-09-13：迁入 docs/design/claude-mcp；仅调整目录归属与引用，保留正文、历史决策和验证记录。 -->
 <!-- [同步] 2026-09-04：SUO-384 最终接受 DEC-002，并锁定 production Gate、导航前提交点与普通工具结果回滚路径。 -->
 <!-- [同步] 2026-09-05：SUO-404/DEC-005 明确 Host/iframe 属于 frontend/ 根 Web package，禁止导入或复制同级 Node Runtime。 -->
 <!-- [同步] 2026-09-06：当前 pnpm 候选已完成 P0-04/P0-08 与 Phase 0—3 provider-free 技术验证；旧 npm 重跑流程降级为历史。 -->
@@ -306,7 +307,7 @@ P0-04 仅在以下运行证据同时成立时改为 pass：
 
 ## 8. 当前实现与历史边界
 
-- 当前 Browser Host 只位于 `frontend/app/_dream/components/chat/mcp-apps/**`；目录真相源见[Dream Web 当前架构](./dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)。
+- 当前 Browser Host 只位于 `frontend/app/_dream/components/chat/mcp-apps/**`；目录真相源见[Dream Web 当前架构](../claude-agent/dream-frontend-node-framework-migration-assessment.md#3-当前目录与-source-ownership)。
 - DEC-002 继续要求 `ImMcpAppHostAdapter` 持有 iframe/resource permissions，`AppRenderer@7.1.1` 不是 iframe owner。
 - 旧 npm lock、旧 P0 decision 派工和嵌套 Next 路径只保留历史追溯价值；当前回归必须使用同一 pnpm 候选和当前 Browser 入口。
 - 当前实现与技术验证没有新增数据库 Schema、第二业务状态机或 production enablement。

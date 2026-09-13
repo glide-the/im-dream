@@ -1,6 +1,7 @@
 <!-- [输入] 当前 Dream/Admin/Gateway 拓扑、支持版本与用户可见的 MCP Apps 流程。 -->
 <!-- [输出] 面向普通用户和本机运行者的简明指南，深入工程细节通过链接下沉。 -->
 <!-- [定位] 仓库中文入口指南；README.md 是同结构的英文正文。 -->
+<!-- [同步] 2026-09-13：同步 MCP Apps 设计稿迁入 docs/design/claude-mcp 后的引用；不改实现或历史回执。 -->
 <!-- [同步] 2026-09-06：以快速启动和 MCP Apps 用法重组；用分层章节保留精确安装、所有权、安全与验证事实。 -->
 <!-- [同步] 2026-09-06：为 MCP 连接、App 设置和 Chat 交互步骤加入经过脱敏的真实组件截图。 -->
 <!-- [同步] 2026-09-06：使新增连接和 App 控制与可访问 Server 弹窗、统一 MCP 使用策略表单一致。 -->
@@ -14,6 +15,7 @@
 <!-- [同步] 2026-09-13：由当前前端入口提供 opaque MCP Apps 沙箱，不再固定额外端口。 -->
 
 <!-- [同步] 2026-09-13：记录 Notion 绑定启动的缺失相对 PATH 兼容和 config 读取诊断。 -->
+<!-- [同步] 2026-09-13：记录 MCP 连接详情的 Server 上报信息显示。 -->
 
 # Ink & Memory
 
@@ -182,6 +184,8 @@ origin；共享前端 URL 不会让 App 获得前端 DOM 或存储权限。认�
 4. 打开 **在聊天中使用 App**。如有需要，再允许 **低风险工具调用** 和 **向聊天发送消息**。
 5. 修改会自动保存；保存失败时保留你的选择并重试，无需寻找保存按钮。
 
+连接详情在 Server 上报名称和版本时显示这些信息。缺少 Server 信息不会隐藏工具、资源或提示模板。详见[资源连接器现行设计](docs/design/claude-mcp/claude-mcp-resource-connector-current-design.md#7-api-合同)。
+
 以下截图使用安全示例数据和真实生产界面组件，不包含账号信息或密钥。
 
 ![填写名称、传输方式和 URL 以添加受管 MCP 连接](assets/mcp-apps-guide/01-add-mcp-connection.png)
@@ -214,7 +218,7 @@ Dream 会将原 Runtime 的 SDK MCP 文本、content 数组和 metadata envelope
 先重启自己拥有的后端，再通过正常 Chat 发起新的工具调用。已丢失 SDK envelope
 的旧记录仍保留普通结果；Dream 不伪造缺失 metadata，也不重放这些工具。
 
-完整工程链路——连接 discovery、模型工具调用、调用关联与结果 DTO 校验、实时/历史恢复、Browser Host、Node 代理、sandbox、权限与 Chat 消息回流——请见 [MCP Apps 与 IM Agent UI 设计](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链)。
+完整工程链路——连接 discovery、模型工具调用、调用关联与结果 DTO 校验、实时/历史恢复、Browser Host、Node 代理、sandbox、权限与 Chat 消息回流——请见 [MCP Apps 与 IM Agent UI 设计](docs/design/claude-mcp/mcp-apps-integration-strategy.md#32-端到端调用链)。
 
 ## 支持版本与所有权
 
@@ -332,7 +336,7 @@ cd backend
 
 ## 更多文档
 
-- [MCP Apps 端到端设计](docs/design/claude-agent/mcp-apps-integration-strategy.md#32-端到端调用链)
+- [MCP Apps 端到端设计](docs/design/claude-mcp/mcp-apps-integration-strategy.md#32-端到端调用链)
 - [MCP Apps 当前技术证据](docs/exec/mcp-apps/current-candidate-validation.md)
 - [仓库维护规则](Agent.md)
 - [Agent 产品行为](docs/Agent.md)

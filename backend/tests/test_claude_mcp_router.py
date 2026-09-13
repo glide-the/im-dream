@@ -7,12 +7,15 @@
 [Sync] 2026-08-25: prove public CRUD rejects user-selected auth_kind and defaults detection state internally.
 [Sync] 2026-08-27: prove transient capability verification remains a safe disabled DTO and retryable 503.
 [Sync] 2026-09-06: cover strict connection-level MCP App settings GET/PATCH forwarding.
+[Sync] 2026-09-13: assert real discovery serialization uses serverInfo for metadata objects and explicit null.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -129,6 +132,37 @@ def _client(service=None, actor_id=7):
     app.dependency_overrides[get_current_user] = lambda: {"user_id": actor_id}
     app.dependency_overrides[claude_mcp.get_claude_mcp_service] = lambda: service
     return TestClient(app), service
+
+
+@pytest.mark.parametrize("server_info", [{"name": "Technical MCP", "version": "1.0.0"}, None])
+def test_discovery_public_json_uses_server_info_wire_contract(server_info):
+    result = replace(
+        _discovery("server-1"),
+        server_info=server_info,
+        tools=({"name": "read_time"},),
+        resources=({"uri": "ui://clock", "name": "Clock"},),
+        prompts=({"name": "inspect_clock"},),
+        cached=True,
+        truncated=True,
+    )
+
+    class _DiscoveryService(_Service):
+        async def discover_server(self, actor, identifier, workspace_id=None, force=False):
+            self.calls.append(("discover", actor, identifier, force))
+            return result
+
+    client, service = _client(_DiscoveryService())
+    response = client.post("/api/claude-mcp/servers/server-1/discoveries", json={"force": False})
+    assert response.status_code == 200
+    discovery = response.json()["discovery"]
+    assert discovery["serverInfo"] == server_info
+    assert "server_info" not in discovery
+    assert discovery == result.to_dict()
+    assert discovery["tools"] == [{"name": "read_time"}]
+    assert discovery["resources"] == [{"uri": "ui://clock", "name": "Clock"}]
+    assert discovery["prompts"] == [{"name": "inspect_clock"}]
+    assert discovery["cached"] is True and discovery["truncated"] is True
+    assert service.calls[-1] == ("discover", "7", "server-1", False)
 
 
 def test_crud_discovery_bulk_and_logout_are_thin_forwarders():
