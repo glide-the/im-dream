@@ -4,6 +4,7 @@
 # [Sync] 2026-09-14: implement v1 contracts and shared bounded HTTP parsing and closed Deck conflict revisions without SQL/UOW emulation.
 # [Sync] 2026-09-15: expose catalog readiness so failed domain refreshes can recover through request authentication.
 # [Sync] 2026-09-15: synchronize catalog refresh/readiness/operation checks while keeping domain HTTP concurrent.
+# [Sync] 2026-09-15: read the dedicated original Preflight receipt without changing generic two-state receipts.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
 from __future__ import annotations
@@ -145,4 +146,22 @@ class AdminDataClient:
         if result.operation != name or result.request_id != request_id:
             raise invalid_response(request_id)
         # An absent receipt remains an explicit absent DTO; it never triggers a retry.
+        return result
+
+    def preflight_original_receipt(self, request_id: str, *, access_token: str):
+        # The domain composition checks its three exact schema requirements.
+        # This explicit reader keeps every generic receipt on its original DTO.
+        from .preflight_data import EXECUTE_PREFLIGHT, PreflightOriginalReceiptDTO
+        operation = EXECUTE_PREFLIGHT
+        name = operation.capability.name
+        with self._catalog_lock:
+            if self._operations.get(name) is not operation or self._advertised.get(name) != operation.capability:
+                raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+        if not access_token:
+            raise AdminDataError("INVALID_ACCESS_TOKEN", 401, request_id)
+        TypeAdapter(Identifier).validate_python(request_id)
+        result = self._request("GET", "/receipts/" + request_id, request_id, PreflightOriginalReceiptDTO,
+            params={"operation": name}, access_token=access_token)
+        if result.operation != name or result.request_id != request_id:
+            raise invalid_response(request_id)
         return result

@@ -686,3 +686,36 @@ Admin候选实际DTO只让Dream发送owned Run lookup+instruction_text，或Run 
 Admin矩阵报告未注册source23+ingress5、dispatch32（Service22/source4/Handler6）、type/lint/source gate exit0；Root未重跑这些命令，也未以它们代替公开PG或完整launch验收。Agent/model/binding prepare、failure recorder、公开PG与正常Runtime/完整launch仍pending。SystemConfig/default Workspace仍没有已发布operation；48SQL模块与动态Repository/stdio迁移继续开放。
 
 本次只读复核及文档命令：主venv Python /private/tmp/dream-admin-doc-check.py exit0，36files/394links/156inventory/history3 exact bytes/README parity/6Mermaid count/failures=[]（未render）；git diff --check exit0无输出。只更新这份执行记录及逐入口清单，不修改production/候选源码、服务、数据库、凭据、Runtime或模型，不重复已经通过的源码测试。
+
+## 阶段30：公开 Preflight execute 领域操作
+
+### Optimized Prompt · 2026-09-15
+
+已实际读取Run72安全回执：remaining public22 denial+10GET/230 exit0/skipped6；selected atomic9与真实finalCOMMIT丢响应业务68通过但原wrappercleanup exit1保留，独立SELECT cleanup3 exit0/owned触发器函数0。本阶段先消费发布PF execute，不将Run全命令/正常业务宣布完成，也不消费未注册launch source/dispatch。
+
+保持POST /api/story-workspace/workflow-preflights的202与原17字段模型projection，将原StoryWorkflowRunApplicationService.create_preflight替换为Admin唯一execute领域调用。_story_workflow_current_user现有default Workspace lookup仍保留并明确pending：实际输入须带workspace_id，尚无已发布default Workspace操作，不能用假workspace或其它DTO替代。保留actor选择顺序；test-only default loader以backend/tests依赖注入实现，不在business添加环境标签或fallback。
+
+复用PreflightDTO/原模型、strict安全整数/JSON与当前OAuth actor，输入workspace_id/deck_id/binding_revision/input_json仅由现有请求和server actor生成。JSON字符串按原PreflightService._canonical_json同一stdlib参数编码，保留Python大整数/float/negativezero与Unicode，不重算hash或check顺序。执行匹配identity/unified/0060 request三项exact schemas与execute SHA413db72b5d4bfc1fdf572d801aec4339a7b00549ea19ebc4025c67f5ae2cf494，response actor/Deck/revision匹配；in_progress须checking无token，committed可checking，不在Dream重开checks、TTL或token。
+
+提供独立typed原PF receipt reader，按已发布SHAad144287942f6f3ad2db82dda7c7b0f20cdf3578e68df4bd8e8b86e8dbbec2f2校对三态DTO与operation/request ID/result state/actor，absent无result。沿用同Admin HTTP transport但不改generic两态receipt parser；任何未知write仅保留原UUID/unknown并显式read receipt，无自动重发/假定rollback。读API不新增Browser/Runtime控制通道。
+
+复用已存在的SafeRequestValidationRoute+scoped router方式仅保护PF POST框架/DTO/JSON validation不回显私密input，其余Story Workspace路由不改。actual FastAPI/auth/client/DTO/MockTransport，fence oldservice/domainSQL，default Workspace fixture明确标记。覆盖完整四状态/request两状态、同原UUIDreceipt三态、无autoResume/retry、boundexpired/nulltoken、schema/hash/scope/actor-Deck-revision与private malformed，相关Workflow/Chat/Workspace技术回归与actual规范/原model/其他router AST、文档mirror/links/inventory验证。只报PF领域执行依赖关闭，不称该POST整体无PG；其他Run/默认/SystemConfig/全域SQL与正常验收继续pending。
+
+阶段30实际结果：PF POST领域执行改为Admin单operation，原202/17字段/纯模型datetime JSON保持；只在该POST安装现有安全validation router。default Workspace loader仍依赖生产SQL，fixture仅在tests显式注入。执行reply actor/Deck/revision绑定，input_json按原四项canonical编码参数保留raw Python数字/Unicode，DTO repr不含input/token。独立原receipt使用同transport和原Identifier（公开调用生成UUID，协议不是UUID-only）、三态/result-state/canonical actor约束；超时write保留原UUID/unknown、不自动重发或恢复，generic两态receipt方法AST未变。没有新增公开receipt路由或完整Browser恢复journey。
+
+阶段30规范检查时Admin已注册75项，实际registry接入source.ensure/dispatch.claim/finish；三个新增SHA分别cb498be127a6aca92c9e6e0cde099c9c80cf78ca2486186e9d043457c2263503、958549a9bfe4b02d8b31e1e538c81ffad020bb4525a328f542f865b377e8ec43、5aa3b738bef5319ee705f5851d83588e1d18dcaf37bdc5789267494fec480f2e。Dream未接这三项；此前72未注册复核是当时历史，不覆盖它。default Workspace/SystemConfig仍无目录操作，不猜hash或复用preferences代替。全部75 descriptor canonical SHA自洽，PF execute实际capability/三schema/closed input-output及独立receipt norm SHA/三schema/closed三态shape通过；known revision导出minimum差异显式标注，原runtime非负安全整数不改，时间校验继续复用原模型。
+
+primary fresh技术命令：
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_preflight_execution.py backend/tests/test_admin_preflight_routes.py backend/tests/test_admin_data_boundary.py backend/tests/test_admin_workflow_data.py backend/tests/test_admin_request_auth.py backend/tests/test_workflow_preflight.py backend/tests/test_story_workspace_api.py backend/tests/test_workspace_router.py
+# exit 0; 259 passed in 5.46s; no failures/skips
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage30-contract-check.py
+# exit 0; 75 actual descriptors,55 client operations,execute/receipt hashes,3 exact schemas,17 original fields; generic receipt/other Story routes/auth methods AST unchanged
+env PYTHONDONTWRITEBYTECODE=1 /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-doc-check.py
+# exit 0; 39files/395links/291inventory,3 history SHA unchanged,README parity,6Mermaid count only/failures=[]; no render
+git diff --check
+# exit 0; no output
+```
+
+本轮正常Dream/Admin/Gateway/PG/账户/模型/Browser/Runtime/CLI未调用，不修改Admin源码、SDK/Runtime pins、原模型、数据库或TMPDIR协议。Run公开消费与launch全域/selected model/default/SystemConfig/Gateway-purpose/CLIEditor及正常业务验收继续开放，不能据本阶段259技术测试宣布全域完成。

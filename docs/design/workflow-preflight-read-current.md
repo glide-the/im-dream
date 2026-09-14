@@ -1,9 +1,10 @@
-<!-- [Input] Published Admin Preflight read DTO and the original Dream GET/model semantics. -->
-<!-- [Output] Current ownership, state, failure and acceptance rules for public Preflight reads. -->
-<!-- [Pos] Current read design; original execute/Run designs remain separately applicable. -->
+<!-- [Input] Published Admin Preflight read/execute/receipt DTOs and original Dream model semantics. -->
+<!-- [Output] Current ownership, state, failure and acceptance rules for reads and staged execution. -->
+<!-- [Pos] Current consumer design; original stage/Run rules remain separately applicable. -->
 <!-- [Sync] 2026-09-15: migrate only the owner-scoped GET without default Workspace or SQL. -->
+<!-- [Sync] 2026-09-15: consume the execute domain and original three-state receipt; default lookup remains pending. -->
 
-# Preflight 读取现行设计
+# Preflight 读取与领域执行现行设计
 
 ## 背景与问题
 
@@ -11,7 +12,7 @@
 
 ## 目标与边界
 
-GET `/api/story-workspace/workflow-preflights/{preflight_id}` 使用统一 Admin OAuth 身份，返回原完整 17 字段。Dream 不读 PostgreSQL，不初始化 Workspace，不修改 Preflight，不创建 Run，不续 token TTL。POST execute、Run 创建/重试、默认 Workspace 与 SystemConfig 是后续入口；隐藏 launch-source.ensure 尚未注册。当前目录的 72 项注册不等于新增 Run 公开集成或正常业务验收已完成。
+GET `/api/story-workspace/workflow-preflights/{preflight_id}` 使用统一 Admin OAuth 身份，返回原完整 17 字段，不读 PostgreSQL、不初始化 Workspace、不修改 Preflight或TTL。POST 的领域执行使用已发布 workflow-preflight.execute；现有 default Workspace lookup 尚未迁移，因此 POST 整体仍有 SQL 依赖。Run 创建/重试消费、默认 Workspace、SystemConfig 和 launch source/dispatch 消费是后续入口。阶段30检查时目录已注册75项，新增三项launch仍未接Dream消费者；目录注册与隔离技术验收不等于正常业务完成。
 
 ## 概念与规则
 
@@ -26,9 +27,17 @@ checking、passed、failed、expired 读取都不转换状态。只有 failed �
 
 字段中的 nullable 项必须显式提供；空字符串保留原模型允许的含义，不新增产品限制。binding_revision 的非负安全整数是 JSON/TypeScript 技术边界。实际 Zod 执行 `.nonnegative().safe()`，目录 descriptor 的 minimum 仍为负安全下界，属于待修正的导出元数据差异；消费者按实际 runtime 非负规则拒绝负值，不改 capability hash。
 
+### POST 领域执行与原请求回执
+
+POST `/api/story-workspace/workflow-preflights` 保持原 202 与完整模型响应。共享 OAuth/dream:write 与现有默认 Workspace 选择后，输入仅包含 workspace_id、deck_id、binding_revision 和 input_json。JSON 使用原 canonical 编码参数（Unicode/finite/compact/sort keys），保留 Python float、negative zero 与大整数文本；Dream 不计算新 hash、检查事实或 token。Admin 负责原 stages 与数据库提交，执行需 identity/unified/0060 request 三项 exact schema 与实际 operation hash。响应 created_by/Deck/revision 必须匹配。
+
+request_state 为 in_progress 时必须保持 checking、无 token；committed 也可能复用旧 checking。Dream 不重开检查或续 TTL。公共响应继续仅返回原 17 字段，request-state只供领域协议使用。输入 validation/JSON 无法编码时固定 422，不回显 input；这项框架保护只应用于 PF POST。
+
+独立原 PF receipt reader 复用 Admin HTTP transport，要求原 operation/request ID、当前 actor 与三项 schema。公开调用生成 UUID；协议 request ID 仍遵循原 Identifier，并非仅允许 UUID。absent 没有 result；in_progress/committed 的 result.request_state 必须匹配状态，包含原完整 Preflight。in_progress 不自动 resume；absent 不表示 rollback，也不触发重发；committed 保留原时间和 token，即使目前已过期也不重签。所有其他领域仍使用原通用两态 receipt。服务器消费方法不增加公开恢复路由或自动恢复流程。
+
 ### 失败反馈
 
-坏路径 ID、缺失记录或其他 actor 继续返回原 WORKFLOW_PERMISSION_DENIED/404 与固定错误文案。capability/DTO/identity 错配 fail closed；transport 超时使用安全 code、原 request UUID 和 outcome_unknown=false，不自动重试，不回传上游消息或正文。token 从 DTO repr 中排除。没有额外确认弹窗或环境名称分支。
+GET 坏路径 ID、缺失记录或其他 actor 继续返回原 WORKFLOW_PERMISSION_DENIED/404。capability/DTO/identity 错配 fail closed；GET/receipt 超时使用安全 code、原 UUID 与 outcome_unknown=false。execute 已发出的超时/损坏回复或绑定错配保留原 UUID/outcome_unknown=true，不自动重发或猜测提交结果；显式读取原 receipt。token 与原始 input_json 从 DTO repr 中排除。没有额外确认或环境名称分支。
 
 ### 影响范围与验收
 
@@ -37,3 +46,5 @@ checking、passed、failed、expired 读取都不转换状态。只有 failed �
 [生产入口技术测试](../../backend/tests/test_admin_preflight_routes.py) 使用实际 FastAPI/OAuth owner/client/DTO 与 MockTransport，禁止 Dream get_db/default Workspace/旧 service。覆盖完整字段、所有状态与 null token、微秒/时区、required nullable、响应 actor/ID、schema/hash、原404、拒绝 Runtime grant及同 UUID 超时无重试。它不证明真实 Admin 签名或普通账户/模型业务链路。
 
 本地已发布安全回执提供 Admin remaining-read 8cases/74assertions 与原 permission tail 11assertions exit0；它们是隔离技术证据，原完整命令失败历史仍保留。正常服务、真实 PostgreSQL 和 Admin 可见业务验收由主协调执行。
+
+[领域执行技术测试](../../backend/tests/test_admin_preflight_execution.py) 使用生产 POST/认证/client/DTO，旧领域 service/SQL 被 fence，默认 Workspace loader 在测试中显式注入。覆盖 raw JSON、原202/17字段、request-state、三态同UUID receipt、capability/scope/绑定错配/私密validation与无自动重发。这个 fixture不证明生产 default lookup 已迁移，也不证明真实 token 或模型验收。

@@ -3,6 +3,7 @@
 # [Output] Publish user-scoped Story Workspace read and controlled-update API routes.
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
 # [Sync] 2026-09-15: read Preflight through Admin OAuth without default Workspace or Dream SQL.
+# [Sync] 2026-09-15: execute Preflight through Admin; existing default Workspace lookup remains pending.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
@@ -40,9 +41,9 @@ from services.story_workspace.agent_integration import (
     get_or_create_default_workspace,
     store_agent_story_output,
 )
-from .deps import get_current_user, invoke_admin_operation
+from .deps import SafeRequestValidationRoute, get_current_user, invoke_admin_operation
 from services.admin_data.errors import AdminDataError
-from services.admin_data.preflight_data import AdminPreflightData, PreflightInputDTO
+from services.admin_data.preflight_data import AdminPreflightData, PreflightExecutionInputDTO, PreflightInputDTO
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 
 try:
@@ -1282,11 +1283,26 @@ def receive_agent_story_output(
         ) from exc
 
 
-@router.post("/workflow-preflights", status_code=202)
+def _preflight_data(request: Request, current_user: dict = Depends(get_current_user)) -> AdminPreflightData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    actor = current_user.get("_admin_actor")
+    if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminPreflightData(owner.client, canonical_user_id=actor.canonical_user_id)
+
+
+class _PreflightExecutionRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid Preflight request"
+
+
+_preflight_execution_router = APIRouter(route_class=_PreflightExecutionRoute)
+
+
+@_preflight_execution_router.post("/workflow-preflights", status_code=202)
 async def create_workflow_preflight(
     request: _WorkflowPreflightRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    data: AdminPreflightData = Depends(_preflight_data),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1295,7 +1311,17 @@ async def create_workflow_preflight(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(service.create_preflight(request, actor=actor))
+    try:
+        input_json = json.dumps(request.input_data, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)
+        input_json.encode("utf-8")
+        input_dto = PreflightExecutionInputDTO(workspace_id=actor["workspace_id"], deck_id=request.deck_id,
+            binding_revision=request.binding_revision, input_json=input_json)
+    except (ValueError, RecursionError):
+        return JSONResponse(status_code=422, content={"detail": "Invalid Preflight request"})
+    return await invoke_admin_operation(current_user, data.execute, input_dto)
+
+
+router.include_router(_preflight_execution_router)
 
 
 @router.post("/dream-runs/start", status_code=201)
@@ -1335,14 +1361,6 @@ async def story_workspace_list_dream_runs(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(service.list_dream_runs(actor=actor), by_alias=True)
-
-
-def _preflight_data(request: Request, current_user: dict = Depends(get_current_user)) -> AdminPreflightData:
-    owner = getattr(request.app.state, "admin_request_auth", None)
-    actor = current_user.get("_admin_actor")
-    if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
-        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
-    return AdminPreflightData(owner.client, canonical_user_id=actor.canonical_user_id)
 
 
 def _preflight_read_error(exc: AdminDataError, request_id: str):
