@@ -1,6 +1,7 @@
 <!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
 <!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
 <!-- [Sync] 2026-09-15: consume Preflight execute and explicit original receipts; default Workspace remains pending. -->
+<!-- [Sync] 2026-09-15: consume full Run read/create/retry domains with scoped original receipts. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -81,7 +82,7 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 
 公开Deck用户/社区列表已使用单项typed Admin operation，保留原计数与作者字段，不执行文件或默认初始化步骤。
 
-公开 Preflight GET 使用 Admin owner-scoped 读取，不初始化 Workspace。POST 的领域执行已交给 Admin，保留原 202 和完整 17 字段；服务器可显式读取原请求三态 receipt，不重发未知提交。POST 仍依赖默认 Workspace 的 SQL lookup。Run 创建/重试、默认 Workspace 与系统配置仍待迁移。详见[现行消费规则](docs/design/workflow-preflight-read-current.md)。
+公开 Preflight GET 使用 Admin owner-scoped 读取，不初始化 Workspace；POST 领域执行保留原 202、17 字段及显式原请求三态 receipt。Run 读取/创建/重试也已使用 Admin 领域操作，保留完整 28 字段及原 200/201。未知提交保留原请求 ID，不自动重发。依赖默认 Workspace 的路由仍执行 SQL lookup；系统配置及其他 lifecycle/launch 领域继续待迁移。详见[Preflight 规则](docs/design/workflow-preflight-read-current.md)和[Run 规则](docs/design/workflow-run-admin-consumer-current.md)。
 
 Workspace content/download 已通过 typed Admin Chat 操作检查 Thread 所有权，再执行原 Workspace Mode、路径与文件检查。缺失 Thread 保留 404，metadata 故障保留安全 503；文件、ZIP 与 no-create 行为保持。系统配置与其他文件管理数据依赖仍待迁移。
 

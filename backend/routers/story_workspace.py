@@ -4,6 +4,7 @@
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
 # [Sync] 2026-09-15: read Preflight through Admin OAuth without default Workspace or Dream SQL.
 # [Sync] 2026-09-15: execute Preflight through Admin; existing default Workspace lookup remains pending.
+# [Sync] 2026-09-15: consume full Run read/create/retry domains while retaining default Workspace SQL.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
@@ -41,13 +42,14 @@ from services.story_workspace.agent_integration import (
     get_or_create_default_workspace,
     store_agent_story_output,
 )
-from .deps import SafeRequestValidationRoute, get_current_user, invoke_admin_operation
+from .deps import SafeRequestValidationRoute, get_admin_request_auth, get_current_user, invoke_admin_operation
 from services.admin_data.errors import AdminDataError
 from services.admin_data.preflight_data import AdminPreflightData, PreflightExecutionInputDTO, PreflightInputDTO
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from services.admin_data.run_data import AdminRunData, RunCreateInputDTO, RunLookupInputDTO, RunRetryInputDTO
 
 try:
-    from services.errors.error_registry import ApiRouteError, build_error_payload
+    from services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
     from services.deck.story_workflow_application import (
         get_dream_artifact_application_service,
         get_dream_confirmation_application_service,
@@ -60,7 +62,7 @@ try:
         StoryWorkspacePublicStoryRepository,
     )
 except ModuleNotFoundError:
-    from backend.services.errors.error_registry import ApiRouteError, build_error_payload
+    from backend.services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
     from backend.services.deck.story_workflow_application import (
         get_dream_artifact_application_service,
         get_dream_confirmation_application_service,
@@ -1384,11 +1386,34 @@ async def get_workflow_preflight(
     return await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_preflight_read_error)
 
 
-@router.post("/workflow-runs", status_code=201)
+def _run_data(owner: AdminRequestAuth = Depends(get_admin_request_auth), current_user: dict = Depends(get_current_user)) -> AdminRunData:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminRunData(owner.client, canonical_user_id=actor.canonical_user_id)
+
+
+def _run_data_error(exc: AdminDataError, request_id: str):
+    mapped = WORKFLOW_RUN_ROUTE_ERRORS.get(exc.code)
+    if not exc.outcome_unknown and ((mapped is not None and exc.status_code == mapped[1]) or (exc.code == "INVALID_RUN_REQUEST" and exc.status_code in {400, 422})):
+        error = workflow_run_route_error(exc.code)
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code, "request_id": request_id, "outcome_unknown": exc.outcome_unknown}) from None
+
+
+class _RunCommandRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid Workflow Run request"
+
+
+_run_create_router = APIRouter(route_class=_RunCommandRoute)
+_run_retry_router = APIRouter(route_class=_RunCommandRoute)
+
+
+@_run_create_router.post("/workflow-runs", status_code=201)
 async def create_workflow_run(
     request: _WorkflowRunCreateRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    data: AdminRunData = Depends(_run_data),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1397,14 +1422,25 @@ async def create_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(service.create_run(request, actor=actor))
+    try:
+        source_time = datetime.fromisoformat(request.source_message_time.replace("Z", "+00:00")).isoformat() if request.source_message_time else None
+        input_dto = RunCreateInputDTO(workspace_id=actor["workspace_id"], workflow_preflight_id=request.workflow_preflight_id,
+            preflight_token=request.preflight_token, idempotency_key=request.idempotency_key,
+            source_voice_thread_id=request.source_voice_thread_id, source_message_id=request.source_message_id, source_message_time=source_time)
+    except (ValueError, RecursionError):
+        error = workflow_run_route_error("INVALID_RUN_REQUEST")
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    return await invoke_admin_operation(current_user, data.create, input_dto, error_handler=_run_data_error)
+
+
+router.include_router(_run_create_router)
 
 
 @router.get("/workflow-runs/{workflow_run_id}")
 async def get_workflow_run(
     workflow_run_id: str,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    data: AdminRunData = Depends(_run_data),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1413,7 +1449,14 @@ async def get_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(service.get_run(workflow_run_id, actor=actor))
+    try:
+        input_dto = RunLookupInputDTO(workspace_id=actor["workspace_id"], workflow_run_id=workflow_run_id)
+        if input_dto.workflow_run_id != workflow_run_id:
+            raise ValueError("Run path is invalid")
+    except (ValueError, RecursionError):
+        error = workflow_run_route_error("WORKFLOW_RUN_NOT_FOUND")
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    return await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_run_data_error)
 
 
 @router.get("/workflow-runs/{workflow_run_id}/dream-files")
@@ -1609,12 +1652,12 @@ async def story_workspace_submit_workflow_run_dream_confirmation(
     )
 
 
-@router.post("/workflow-runs/{workflow_run_id}/retry", status_code=201)
+@_run_retry_router.post("/workflow-runs/{workflow_run_id}/retry", status_code=201)
 async def retry_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunRetryRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    data: AdminRunData = Depends(_run_data),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1623,7 +1666,22 @@ async def retry_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(service.retry_run(workflow_run_id, request, actor=actor))
+    try:
+        input_dto = RunRetryInputDTO(workspace_id=actor["workspace_id"], workflow_run_id=workflow_run_id,
+            workflow_preflight_id=request.workflow_preflight_id, preflight_token=request.preflight_token, idempotency_key=request.idempotency_key)
+        if input_dto.workflow_run_id != workflow_run_id:
+            raise ValueError("Run path is invalid")
+    except ValidationError as exc:
+        code = "WORKFLOW_RUN_NOT_FOUND" if any(error["loc"] == ("workflow_run_id",) for error in exc.errors(include_input=False)) else "INVALID_RUN_REQUEST"
+        error = workflow_run_route_error(code)
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    except ValueError:
+        error = workflow_run_route_error("WORKFLOW_RUN_NOT_FOUND")
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    return await invoke_admin_operation(current_user, data.retry, input_dto, error_handler=_run_data_error)
+
+
+router.include_router(_run_retry_router)
 
 
 @router.post("/workflow-runs/{workflow_run_id}/cancel")

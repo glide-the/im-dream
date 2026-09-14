@@ -2,6 +2,7 @@
 <!-- [Sync] 2026-09-15: close content/download Thread ownership and retain missing SystemConfig/default capabilities. -->
 <!-- [Sync] 2026-09-15: close public Preflight GET independently of Workspace/SystemConfig/Run dependencies. -->
 <!-- [Sync] 2026-09-15: consume PF execute/original receipts without claiming the default-dependent POST is DB-free. -->
+<!-- [Sync] 2026-09-15: consume full Run read/create/retry; other lifecycle and default dependencies stay open. -->
 <!-- [Sync] 2026-09-15: retain Runtime/shared-file technical regression and Gateway ownership gaps. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -40,11 +41,14 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 
 此表记录实际消费者范围，发布capability仍由Admin逐请求执行检查。技术合同通过不等于正常本机真实业务验收；完整startup/pool/159事务及其它生产入口继续开放。
 
+阶段31只读源码扫描增加无SQL的run_data模块：298scanned/48SQL模块/513字面execute候选、16driver模块、35legacy import模块与121直接helper Call候选，exit0/parse_errors=[]。旧application方法仍供其他调用者使用，默认Workspace及动态Repository/stdio仍未迁移，不能以三个公开领域调用替换推断这些SQL已退出全域。阶段29的297扫描是当时历史，以下原baseline与现有候选表保留各自范围。
+
 | 生产入口 | 实际Admin领域合同/消费者 | 已替换范围 | 保留的迁移依赖 |
 | --- | --- | --- | --- |
 | `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG；read/publish/close同活动锁，shutdown后台owner和Factory后关闭HTTP | 全域startup/其它DB与正常业务验收仍开放 |
 | 公开Deck完整列表 | [deck_list_data](../../backend/services/admin_data/deck_list_data.py)：deck.list | published false/true两mode无DB；原counts/author字段/owner int/ISO，Admin过滤排序装饰，单read | 创建/default/provision/install/后台与正常业务仍待；列表原路径无default/文件依赖 |
-| 公开Preflight读取/领域执行 | [preflight_data](../../backend/services/admin_data/preflight_data.py)：workflow-preflight.read/execute、独立original receipt reader | GET无default/旧service/SQL；POST领域操作交Admin，raw JSON/原202与17字段、actor-Deck-revision/three schemas、显式同ID三态receipt/no resend；generic receipt不改 | POST default Workspace仍SQL；Run/default/SystemConfig/隐藏source仍待；当前目录75不替代新增Run/launch公开集成或正常验收；revision descriptor元数据差异待Admin修正 |
+| 公开Preflight读取/领域执行 | [preflight_data](../../backend/services/admin_data/preflight_data.py)：workflow-preflight.read/execute、独立original receipt reader | GET无default/旧service/SQL；POST领域操作交Admin，raw JSON/原202与17字段、actor-Deck-revision/three schemas、显式同ID三态receipt/no resend；generic receipt不改 | POST default Workspace仍SQL；default/SystemConfig/隐藏source仍待；目录75不替代全域Run/launch或正常验收；revision descriptor元数据差异待Admin修正 |
+| 公开Run读取/创建/重试 | [run_data](../../backend/services/admin_data/run_data.py)：workflow-run.read/create/retry | 领域操作无旧service/SQL；原200/201/28required fields/lifecycle/微秒/key/source、actor/Workspace/ID或key-retry-source、two exact schemas/hash、显式generic原两态receipt/no resend；原error mapping共享 | 三个入口default Workspace仍SQL；cancel/guidance/confirmation/launch/Run其它持久化及正常验收仍待；原SQLite行锁并发skip保持，不宣称PG验收 |
 | 共享文件content/download Thread ownership | [workspace_data](../../backend/services/admin_data/workspace_data.py)：复用chat-thread.get | 两GET不再调用get_chat_thread，current OAuth/strict reply/actor-ID/four schemas，原Mode/path/FS顺序和404/503 | get_system_config的Mode/初始化读取与其他管理数据入口仍pending；原Workspace fixture已改实际Admin HTTP，正常共享文件/CLI验收另行 |
 | 隐藏launch来源与dispatch | 原[dream_launch_application_service](../../backend/services/story_workspace/dream_launch_application_service.py)/[dream_launch_infrastructure](../../backend/services/story_workspace/dream_launch_infrastructure.py) | 阶段30实际目录75与registry已注册dream-launch-source.ensure/dream-launch-dispatch.claim/finish，Dream尚未消费；原source→PF/Run→claim COMMIT→Voice/Runtime→独立finish语义保持待迁移 | 注册前source23+ingress5/dispatch32仅Admin报告技术gate；注册不替代prepare/Agent-model-binding/failure recorder/publicPG/full normal launch；当前SQL仍pending，default Workspace仍未注册 |
 | 公开Deck详情 | [deck_detail_data](../../backend/services/admin_data/deck_detail_data.py)：deck.detail | 单Admin owned aggregate；closed fields/owner int/ISO/原纯Memory解析/URL与nestedDeck匹配，无DB | Admin voiceRow emptytext→null投影差异需修正；其它create/default/install/内部helper继续开放 |

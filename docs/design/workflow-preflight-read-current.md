@@ -3,6 +3,7 @@
 <!-- [Pos] Current consumer design; original stage/Run rules remain separately applicable. -->
 <!-- [Sync] 2026-09-15: migrate only the owner-scoped GET without default Workspace or SQL. -->
 <!-- [Sync] 2026-09-15: consume the execute domain and original three-state receipt; default lookup remains pending. -->
+<!-- [Sync] 2026-09-15: link the subsequent full Run domain consumer while retaining workflow dependencies. -->
 
 # Preflight 读取与领域执行现行设计
 
@@ -12,7 +13,7 @@
 
 ## 目标与边界
 
-GET `/api/story-workspace/workflow-preflights/{preflight_id}` 使用统一 Admin OAuth 身份，返回原完整 17 字段，不读 PostgreSQL、不初始化 Workspace、不修改 Preflight或TTL。POST 的领域执行使用已发布 workflow-preflight.execute；现有 default Workspace lookup 尚未迁移，因此 POST 整体仍有 SQL 依赖。Run 创建/重试消费、默认 Workspace、SystemConfig 和 launch source/dispatch 消费是后续入口。阶段30检查时目录已注册75项，新增三项launch仍未接Dream消费者；目录注册与隔离技术验收不等于正常业务完成。
+GET `/api/story-workspace/workflow-preflights/{preflight_id}` 使用统一 Admin OAuth 身份，返回原完整 17 字段，不读 PostgreSQL、不初始化 Workspace、不修改 Preflight或TTL。POST 的领域执行使用已发布 workflow-preflight.execute；现有 default Workspace lookup 尚未迁移，因此 POST 整体仍有 SQL 依赖。Run领域消费见[现行Run设计](workflow-run-admin-consumer-current.md)；默认 Workspace、SystemConfig 和 launch source/dispatch 消费是后续入口。阶段30检查时目录已注册75项，新增三项launch仍未接Dream消费者；目录注册与隔离技术验收不等于正常业务完成。
 
 ## 概念与规则
 

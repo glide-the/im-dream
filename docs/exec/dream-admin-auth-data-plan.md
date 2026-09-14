@@ -719,3 +719,37 @@ git diff --check
 ```
 
 本轮正常Dream/Admin/Gateway/PG/账户/模型/Browser/Runtime/CLI未调用，不修改Admin源码、SDK/Runtime pins、原模型、数据库或TMPDIR协议。Run公开消费与launch全域/selected model/default/SystemConfig/Gateway-purpose/CLIEditor及正常业务验收继续开放，不能据本阶段259技术测试宣布全域完成。
+
+## 阶段31：Run 读取、创建与重试领域消费者
+
+### Optimized Prompt · 2026-09-15
+
+先读实际75目录、workflowRunDto/CreationDto/Service/Semantics与原WorkflowRun/RunService/application/public入口，复用完整28字段纯模型与原错误映射，不用旧summary投影。消费已发布workflow-run.read/create/retry（read实际hash读取后写入，create531d41a45a7a745b120a83c57a88bdb0cf40ffcdc52d245d56bc0d372342eb08/retry01c72910ed713ce10c86e03c426f98549c81d1991cbaf05415b6bbcdbb8e9bd7），均identity/unified两项exact schema，公开OAuth scope分read/write，不接受server grant。
+
+保留三个公开入口的原200/201、28字段、nullable provenance、Pydantic string strip与datetime JSON；strict wire DTO要求全部nullable字段显式存在，整数是正安全整数、原key最多255 codepoints、输出时间最多6位且aware/lifecycle复用原模型。Create输入仅server Workspace+PF/token/key+三项requirednullable source，allnull或完整tuple；source time沿原datetime.fromisoformat解析/精度截断再传输，Dream不计算token/hash/fingerprint/新RunID、不拆Admin原子事务。Retry只发送原owned Run lookup/PF/token/new key，source由Admin原Run推导，无preread/runtime dispatch。回复匹配canonical actor/Workspace/业务key/读取ID或retry_of；同key复用可能来自另一个同语义PF，不错误要求reply PF ID等于新输入。
+
+default Workspace操作仍未注册，这三个入口暂保留_story_workflow_current_user生产SQL，tests显式注入default loader并fence领域旧service/PG；不报整个route无PG。坏Run路径（包括前后空白）保持原Run-not-found registry404，不把DTO trim变成授权读取。公开写仅scoped复用SafeRequestValidationRoute隐藏token/source私密validation，不改变cancel/guidance/confirmation/launch/其它route。复用原八项业务error mapping到共享纯error_registry helper，原application静态方法调用同helper保持原fallback；只在实际code/status匹配且非unknown时投影旧payload，其他Admin错误保留safe UUID/unknown，不猜新alias。
+
+Unknown write不重发，不推断rollback；显式generic原两态receipt同UUID/同operation/input读取，完整bounded result再做actor/Workspace/key/retry匹配。原PF三态reader与所有其它通用transport保持。actual production FastAPI/OAuth/client/DTO+MockHTTP、所有Run statuses/nullable/微秒、source/255 astral keys/time/capability/identity/error与receipt/无retry测试，相关原Run技术合同回归；actual规范/hash/closed shape/原model/API其它functions/资源RunnerFilesAST与docs/README/history验证。正常PG/实体/模型验收仍由主协调，默认/SystemConfig/selected model/Gateway-purpose/CLIEditor/全域Repository等继续开放。
+
+阶段31实际结果：read SHAcaf17aab8bb1bdf49fa7a38e8f4ff4e257246adcb3f8c4dea6ea8b5991328f32以及create/retry两项SHA、两项exact schemas与全部closed DTO shape按实际目录通过；28字段全部required（包括nullable）、原纯模型lifecycle/time JSON保持。Create reply source tuple及aware time也匹配原input；同key原PF ID不强制改为新PF。Source parser沿原datetime.fromisoformat，再isoformat传输，不计算新hash/token。显式两态receipt先验证operation/input类型，完整result actor/Workspace/key/retry/source校验，无auto resend/resume或新增公开receipt路由。
+
+原application八项mapping AST值逐项相等，fallback原AGENT_EXECUTION_FAILED/422；原error registry/payload/classes与其他application类/方法保持。三个公开路由仍依赖原default Workspace SQL，actualOAuth/HTTP技术fixture仅在tests显式注入loader。其他router functions/classes、PF两读取消费/generic receipt/资源RunnerFiles/原database与models字节或AST保持。补齐现行Run设计、affected folders与README mirrors，不改历史原文。
+
+primary fresh命令：
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_run_routes.py backend/tests/test_workflow_run.py backend/tests/test_admin_preflight_execution.py backend/tests/test_admin_preflight_routes.py backend/tests/test_admin_data_boundary.py backend/tests/test_admin_request_auth.py backend/tests/test_story_workspace_api.py
+# exit 0; 317 passed,1 skipped in 5.11s
+# skip is existing SQLite concurrency test: legacy SQLite cannot model PostgreSQL row-lock concurrency; superseded by owned-PG contract
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage31-contract-check.py
+# exit 0; actual75/client58,3 Run hashes/2schemas/28closed required fields/8original mappings; other routers/application/error registry/PF receipts/Runtime/Files unchanged
+env PYTHONDONTWRITEBYTECODE=1 /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-doc-check.py
+# exit 0; 42files/405links/305inventory,3 original history SHA,README parity,6Mermaid count/failures=[]; no render
+env PYTHONDONTWRITEBYTECODE=1 /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-current-sql-scan.py
+# exit 0; 298scanned,48SQL modules/513literal candidates,16drivers,35legacy imports/121helper Calls,parse_errors=[]; not whole runtime reachable proof
+git diff --check
+# exit 0; no output
+```
+
+317/1是source reply/type guard补充后的fresh结果；之前315/1不替代它。原SQLitefixture只是技术回归，PG row-lock/Run正常链路不由这项skip或MockHTTP证明。本轮普通服务/PG/账户/模型/Browser/Runtime未调用；不修改Admin源码、SDK/Runtime pins或TMPDIR。默认Workspace/SystemConfig/selected model/purpose Gateway/CLIEditor、Run其它持久化与所有剩余SQL域继续开放。

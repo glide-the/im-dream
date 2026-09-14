@@ -1,6 +1,7 @@
 # [Input] Authorized Story Workflow rows, Dream thread workspaces, and application commands.
 # [Output] Dream workflow API projections with strict filesystem and provenance boundaries.
 # [Pos] Deck-domain Story Workflow application orchestration.
+# [Sync] 2026-09-15: reuse the unchanged original Run error mapping from the shared registry.
 # [Sync] 2026-09-02: expose the registry Episode index and authorize explicit
 #                    registry-member artifact reads without changing active state.
 
@@ -32,7 +33,7 @@ try:
         StoryWorkspaceStoryIndexProjection,
         StoryWorkspaceStoryIndexReconcileCommand,
     )
-    from services.errors.error_registry import ApiRouteError
+    from services.errors.error_registry import ApiRouteError, workflow_run_route_error
     from services.story_workspace.dream_file_service import (
         StoryWorkspaceDreamContractError,
         StoryWorkspaceDreamDurabilityIndeterminate,
@@ -108,7 +109,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceStoryIndexProjection,
         StoryWorkspaceStoryIndexReconcileCommand,
     )
-    from backend.services.errors.error_registry import ApiRouteError
+    from backend.services.errors.error_registry import ApiRouteError, workflow_run_route_error
     from backend.services.story_workspace.dream_file_service import (
         StoryWorkspaceDreamContractError,
         StoryWorkspaceDreamDurabilityIndeterminate,
@@ -384,18 +385,7 @@ class _StoryWorkspaceApplicationSupport:
 
     @staticmethod
     def _raise_run_error(exc: WorkflowRunError) -> None:
-        mapping = {
-            "IDEMPOTENCY_CONFLICT": ("IDEMPOTENCY_CONFLICT", 409),
-            "ILLEGAL_RUN_TRANSITION": ("WORKFLOW_STEP_FAILED", 409),
-            "WORKFLOW_RUN_NOT_FOUND": ("AGENT_EXECUTION_FAILED", 404),
-            "PREFLIGHT_NOT_FOUND_OR_NOT_AUTHORIZED": ("WORKFLOW_PERMISSION_DENIED", 404),
-            "PREFLIGHT_TOKEN_INVALID": ("WORKFLOW_PERMISSION_DENIED", 409),
-            "PREFLIGHT_TOKEN_EXPIRED": ("DECK_RUNTIME_CONFIG_UNAVAILABLE", 409),
-            "PREFLIGHT_TOKEN_REPLAYED": ("IDEMPOTENCY_CONFLICT", 409),
-            "RETRY_SOURCE_MISMATCH": ("CONFIG_VERSION_DRIFT", 409),
-        }
-        code, status = mapping.get(exc.code, ("AGENT_EXECUTION_FAILED", 422))
-        raise ApiRouteError(code, status_code=status) from exc
+        raise workflow_run_route_error(exc.code) from exc
 
     @staticmethod
     def _thread_workspace(thread_id: str) -> Path:

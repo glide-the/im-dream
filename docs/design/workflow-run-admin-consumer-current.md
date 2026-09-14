@@ -1,0 +1,45 @@
+<!-- [Input] Published Admin Run read/create/retry DTOs and original WorkflowRun/application semantics. -->
+<!-- [Output] Current consumer ownership, normal flow, states, failures and technical acceptance limits. -->
+<!-- [Pos] Current Run data migration rules; original lifecycle and launch designs remain indexed separately. -->
+<!-- [Sync] 2026-09-15: delegate three Run domain operations while retaining the default Workspace dependency. -->
+
+# Run Admin 消费现行设计
+
+## 背景与问题
+
+原公开 Run 读取、创建和重试通过 Dream application service 查询或写 PostgreSQL。Admin 已发布三个领域操作并承担身份归属、冻结来源、Preflight token 消费、Run/transition/receipt/audit 原子提交。Dream 继续负责公共投影及后续 Runtime/文件业务。
+
+## 目标与边界
+
+GET `/api/story-workspace/workflow-runs/{workflow_run_id}` 保持原200，POST `/workflow-runs` 与 POST `/workflow-runs/{workflow_run_id}/retry` 保持原201，全部返回原完整28字段模型。这三个领域调用不再使用 Dream SQL/service；现有默认 Workspace 选择仍通过 `_story_workflow_current_user` 查询生产SQL，因此不能称整个入口无PG。
+
+本设计只消费已发布 read/create/retry。cancel、guidance、confirmation、隐藏 launch、Agent/model/binding/failure recorder、SystemConfig/default Workspace/Gateway-purpose/CLIEditor 等入口继续按迁移清单追踪。目录75与隔离技术测试不等于正常业务验收。
+
+## 概念与规则
+
+### 正常流程与状态
+
+1. 共享认证校验当前 Admin OAuth 与 principal，GET要求dream:read，POST要求dream:write；Thread/Run server grant不能代替公开OAuth。
+2. 保持原默认 Workspace 选择与 `_workflow_actor` 顺序。消费者匹配 identity/unified 两项 exact schema及三个 operation 的版本/hash，缺少任何项即fail closed。
+3. Read仅传服务器Workspace与路径RunID。坏ID或前后空白按原Run-not-found返回registry404，不将DTO trim用作路径修复。
+4. Create只传Workspace、PF ID/token、业务key与三项required nullable source。Source必须全null或完整thread/message/aware time tuple；公开时间先用原datetime.fromisoformat解析，按Python微秒精度截断后传输，不计算token/hash/fingerprint/RunID。
+5. Retry只传原Run lookup、PF/token与新业务key。Admin读取原source并校验原failed/rejected/cancelled等前置条件；Dream不新增preread、状态转换或Runtime dispatch。
+6. Admin回复经闭集DTO、canonical actor/Workspace及完整原模型校验。Read匹配ID，write匹配key与retry_of，Create还匹配完整source tuple及aware time。相同key可复用另一个同语义PF，因此不要求回复PF ID等于本次输入。
+
+DTO复用原 [WorkflowRun](../../backend/models/workflow_run.py) 校验failed字段、receipt/session联合绑定、started状态、原legacy thread-only读取、source/session ID限制及created/started/completed状态与顺序。全部nullable字段必须显式提供，时间aware且输出最多六位微秒。公共datetime JSON继续由原模型生成，UTC为Z，不使用Dream clock改写历史状态。
+
+binding_revision/status_version为正安全整数；key最多255 Unicode codepoints，属于原协议和JSON技术边界。Pydantic trim后还按原Python strip拒绝空key；保留两者对额外控制字符的不同处理，不增加产品配额或sentinel。
+
+### 原请求回执与失败反馈
+
+写超时、损坏回复或绑定错配使用安全error code、原UUID与outcome_unknown=true；不重发、不推断rollback，也不自动启动模型。服务器显式用相同operation/input/UUID读取原通用两态receipt。absent无result且不触发重发；committed含完整bounded Run，重新校验actor/Workspace/key/retry或Create source。Admin在读取回执时验证当前owner与冻结来源，Dream不拿当前Run状态覆盖原请求结果。
+
+原八项业务错误映射提取到 [error_registry](../../backend/services/errors/error_registry.py)，原application静态方法继续调用同函数并保持fallback。公开消费者只在原code/status匹配且非unknown时返回旧registry payload；INVALID_RUN_REQUEST的400/422沿旧fallback返回422。其他Admin错误保留安全UUID/unknown，不猜新alias，不回显upstream文本。框架validation保护只安装在两个Run POST，固定422详情且不回显token/source；语义tuple/时间/key错误使用原安全422。token从input DTO repr排除。
+
+### 影响范围与验收
+
+[消费者](../../backend/services/admin_data/run_data.py)、[公开路由](../../backend/routers/story_workspace.py)、request-auth注册及原error mapping提取是本阶段范围。其他Story Workspace函数、原模型、PF三态/通用两态receipt、Runtime/资源LKG、共享文件和TMPDIR协议保持。
+
+[生产入口技术测试](../../backend/tests/test_admin_run_routes.py) 使用实际FastAPI/OAuth/client/DTO与MockHTTP。旧领域SQL/service被fence，default loader只在tests依赖注入；覆盖十种状态、28字段/required nullable/微秒/时区、完整source/255 astral key、错配/原404与业务错误、scope/schema/hash、同UUID两态receipt及无重试。原SQLite技术fixture仍跳过行锁并发测试，不代表PG并发已验收。
+
+Admin安全回执中的Run72 remaining public230、atomic业务68/原wrapper cleanup exit1与独立SELECT cleanup3 exit0均保留各自范围。Root未重跑隔离PG或正常业务；普通账户、真实PostgreSQL、Admin可见Run/账本及模型验收由主协调执行。

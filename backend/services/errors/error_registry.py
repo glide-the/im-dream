@@ -4,6 +4,7 @@
 [Output] Sanitized phase/meaning/recovery payloads for API consumers.
 [Pos] Shared error vocabulary; raw provider, Git, path, and database details stay server-side.
 [Sync] 2026-08-19: add Remote Marketplace capability, entry, and drift recovery contracts.
+[Sync] 2026-09-15: share the original Run business error projection with Admin consumers.
 """
 
 from __future__ import annotations
@@ -318,6 +319,23 @@ class ApiRouteError(RuntimeError):
         self.operation_id = operation_id
         self.run_id = run_id
         self.failed_check = failed_check
+
+
+WORKFLOW_RUN_ROUTE_ERRORS = {
+    "IDEMPOTENCY_CONFLICT": ("IDEMPOTENCY_CONFLICT", 409),
+    "ILLEGAL_RUN_TRANSITION": ("WORKFLOW_STEP_FAILED", 409),
+    "WORKFLOW_RUN_NOT_FOUND": ("AGENT_EXECUTION_FAILED", 404),
+    "PREFLIGHT_NOT_FOUND_OR_NOT_AUTHORIZED": ("WORKFLOW_PERMISSION_DENIED", 404),
+    "PREFLIGHT_TOKEN_INVALID": ("WORKFLOW_PERMISSION_DENIED", 409),
+    "PREFLIGHT_TOKEN_EXPIRED": ("DECK_RUNTIME_CONFIG_UNAVAILABLE", 409),
+    "PREFLIGHT_TOKEN_REPLAYED": ("IDEMPOTENCY_CONFLICT", 409),
+    "RETRY_SOURCE_MISMATCH": ("CONFIG_VERSION_DRIFT", 409),
+}
+
+
+def workflow_run_route_error(code: str) -> ApiRouteError:
+    public_code, status = WORKFLOW_RUN_ROUTE_ERRORS.get(code, ("AGENT_EXECUTION_FAILED", 422))
+    return ApiRouteError(public_code, status_code=status)
 
 
 def build_error_payload(

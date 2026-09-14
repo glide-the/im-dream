@@ -1,6 +1,7 @@
 <!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
 <!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
 <!-- [Sync] 2026-09-15: consume Preflight execute and explicit original receipts; default Workspace remains pending. -->
+<!-- [Sync] 2026-09-15: consume full Run read/create/retry domains with scoped original receipts. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -82,7 +83,7 @@ Public invitations, friend requests, relationships and friend picture reads now 
 
 Public Deck owned/community lists now use one typed Admin operation, preserving original counts and author fields without filesystem or default-initialization steps.
 
-Public Preflight GET uses an owner-scoped Admin read without initializing a Workspace. POST now delegates domain execution to Admin and preserves its 202 response and all 17 fields; the server can explicitly read original three-state receipts without resending an unknown write. POST still depends on the default Workspace SQL lookup. Run creation/retry, default Workspace and system configuration remain migration dependencies. See the [current consumer rules](docs/design/workflow-preflight-read-current.md).
+Public Preflight GET uses an owner-scoped Admin read without initializing a Workspace. POST delegates execution to Admin and preserves its 202 response and all 17 fields, with explicit original three-state receipts. Run read/create/retry also use Admin domains and preserve all 28 fields and original 200/201 responses. Unknown writes retain their original request ID without retries. Default-dependent routes still perform the Workspace SQL lookup; system configuration and remaining lifecycle/launch domains need migration. See the [Preflight rules](docs/design/workflow-preflight-read-current.md) and [Run rules](docs/design/workflow-run-admin-consumer-current.md).
 
 Workspace content/download reads now check Thread ownership through the typed Admin Chat operation before the existing Workspace Mode, path and filesystem checks. Missing Threads retain 404; metadata failures retain safe 503 responses. File, ZIP and no-create behavior remains; system configuration and other file-management data dependencies are still pending.
 
