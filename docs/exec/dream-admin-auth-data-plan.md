@@ -523,3 +523,26 @@ Luna unavailable usage已确认，本阶段primary执行bounded provider-free ac
 阶段26最终文档/源码技术回执：actual contract/closed DTO/exact four requirements/canonical hash/ISO与原pure helper AST/alias/其他database与router函数检查exit0；producer empty Memory语义gap明确保留。文档检查35files/280links/237inventory/history3SHA/README parity/6sequence计数0fail（未render），git diff --check exit0；之后更新write现行稿详情索引再检查引用。未跑正常业务/PG/model/network/Browser/服务，不宣称全部生产迁移完成。
 
 阶段26最后引用检查：35files/281links/237inventory，failures=[] exit0；历史与README/6sequence检查保持。
+
+## 阶段25–26命令与停止状态回执
+
+工作分支提交：1794bd81（五公开Deck写）；40f04ed4（owned详情读与原Voice纯投影提取）。primary使用已有Python依赖，本轮不运行PG、模型、Browser或用户服务。
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_deck_mutation_routes.py backend/tests/test_admin_deck_version_routes.py backend/tests/test_admin_voice_routes.py backend/tests/test_admin_session_routes.py backend/tests/test_admin_request_auth.py backend/tests/test_admin_data_boundary.py backend/tests/test_deck_defaults.py backend/tests/test_deck_sharing_policy.py backend/tests/test_deck_deletion.py
+# exit 0; 295 passed in 2.00s（新增十项结果/optional details之前）
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_deck_mutation_routes.py
+# exit 0; 63 passed in 0.95s（新增十项之后）
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_deck_detail_routes.py backend/tests/test_admin_deck_mutation_routes.py backend/tests/test_admin_voice_routes.py backend/tests/test_admin_request_auth.py backend/tests/test_admin_deck_version_routes.py backend/tests/test_deck_defaults.py backend/tests/test_deck_deletion.py backend/tests/test_deck_sharing_policy.py
+# exit 0; 246 passed in 1.84s
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage25-contract-check.py
+# exit 0; actual hashes/DTOs/requirements/gate/untouched-source PASS
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage26-contract-check.py
+# exit 0; actual hash/aggregate/requirements/ISO/alias/source PASS; producer empty Memory gap retained
+/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-doc-check.py
+# exit 0; 35 files, 281 links, 237 inventory; failures=[]; history3/README parity/6sequence count（未render）
+git diff --cached --check
+# exit 0（每项提交前）
+```
+
+最后只读检查：registry仍70；Workflow公开Run/PF读取使用_story_workflow_current_user，其默认workspace由Dream数据库取得，尚无发布的workspace默认领域合同；PF70完整fault/interruption/unknown验证仍pending，不能消费未关闭gate。其他全域清单、Admin empty Memory projection与timeline descriptor差异、正常本机真实业务/模型验收继续保留。协调任务同步仍受此前auto-review拒绝及未回复授权限制，不重试或绕过。get_goal返回usageLimited（用户用量控制状态），本目标未标记complete/blocked；本轮代码与目录文档均已提交，未消耗reset credit。
