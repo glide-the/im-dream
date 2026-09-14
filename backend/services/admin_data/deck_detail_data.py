@@ -2,6 +2,7 @@
 # [Output] Closed owned aggregate restored to the original public Deck/Voice response.
 # [Pos] Deck detail read consumer; Admin owns visibility, ordering and policy/version decoration.
 # [Sync] 2026-09-15: consume one read; default/create/list/install data remains pending.
+# [Sync] 2026-09-15: share original Deck policy fields and exact-true validation with list DTOs.
 from __future__ import annotations
 
 import json
@@ -68,7 +69,7 @@ class DeckRowDTO(OwnedRowDTO):
     published_draft_revision: NonnegativeSafeInteger
 
 
-class DeckDetailDTO(DeckRowDTO):
+class DeckPolicyDTO(DeckRowDTO):
     agent_type: Literal["chat", "dream"]
     agent_type_revision: NonnegativeSafeInteger
     deck_plugin_id: str | None
@@ -80,7 +81,6 @@ class DeckDetailDTO(DeckRowDTO):
     deck_version_dirty: bool
     deck_version_status: Literal["unpublished", "draft", "published"]
     next_deck_version: PositiveSafeInteger
-    voices: list[DeckVoiceDTO]
 
     @model_validator(mode="before")
     @classmethod
@@ -88,6 +88,10 @@ class DeckDetailDTO(DeckRowDTO):
         if isinstance(value, dict) and value.get("deck_version_capability") is not True:
             raise ValueError("Deck capability must be true")
         return value
+
+
+class DeckDetailDTO(DeckPolicyDTO):
+    voices: list[DeckVoiceDTO]
 
     def public_projection(self):
         result = super().public_projection()

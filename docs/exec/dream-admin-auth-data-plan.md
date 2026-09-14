@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record unregistered Run create/retry and original hidden-source dispatch ordering. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -557,3 +558,34 @@ create闭集输入为workspace_id/workflow_preflight_id/preflight_token/idempote
 ensure_source属于Admin未来持久化领域实现，Dream只在实际发布后接消费者。当前Dream原Application由actor/workspace/key的canonical JSON推导UUIDv5 Thread/message，在PF与Run前原子确保隐藏来源。原ensure_source metadata不含workflowRunId；Run确认后Application进入原dispatcher，dispatch claim先保存workflowRunId/dreamContext与dispatchStatus=dispatching，再调用turn dispatcher。不能将通知中的“dispatch后才绑定”扩写为Runtime接受后才写绑定或改变原claim/lease/失败重入语义。原来源tuple、fingerprint、UUID与source先提交/Run后dispatch顺序均继续作为验收依据。Runtime/Agent编排仍Dream所有；尚无已发布ensure_source/dispatch领域capability，生产PG迁移保持pending。
 
 本轮仅文档记录，未修改production代码、Admin源、registry/hash/schema、服务/数据库/模型，也未发送跨任务消息。
+
+## 阶段27：完整公开Deck列表
+
+### Optimized Prompt · 2026-09-15
+
+源码复核get_user_decks/get_published_decks都是只读aggregate，list不执行default reconcile/文件检查。因此消费已发布deck.list覆盖GET /api/decks全部published false/true业务模式，创建/default/provision/install仍保留独立依赖。公共published query沿用FastAPI原bool语义，内部community closed bool、current OAuth/dream:read与four exact Deck schemas/hash。Admin唯一负责owner/community/exclude-currentactor/retired visibility、enabled与total计数、author与binding/version/sharing装饰和排序，Dream不重算policy或SQL。
+
+复用Deck detail的OwnedRow/DeckRow/安全整数/ISO/canonical ID投影；将原公共policy字段与exacttrue validator原样提取为DeckPolicyDTO，detail只增加voices和其原projection，AST证明原行为。ListItem继承policy加voice_count、requirednullable total_voice_count/author_display_name；原user响应保留total_count、不包含新增author_display_name，community保留author_display_name、不包含新增total_count；server总是发送闭集nullable字段，Dream只做原响应投影。owner还原int、空/null/bool/zero/time保持，无默认初始化/文件操作/重试。
+
+provider-free实际HTTP/Auth/DTO/MockTransport/DBfence验证两mode/emptylist/计数与fields/大owner/时间/exactcap/权限/closed malformed/timeout与单read；旧同步list-route case改实际HTTP，原共享policy SQL fixtures保留。相关detail/mutation/Voice/version/current auth同批必要回归，不跑PG/账户/model/network/Browser/services/SDKRuntime/pins/tmp/Agent/SSE资源。同步受影响headers/folders/README/API/现行设计3基础、模式/状态/失败/范围/验收和迁移清单。整体全域目标与未发布PF/Run/source依赖保持pending。
+
+阶段27fresh技术回执：primary指定九文件 `270 passed in 2.27s` exit0无failure/skip。actual deck.list canonical hash/capability/four requirements/closed DTO comparator0；原policy fields/validator/detail projection AST与其他classes/router functions/database整体/原共享policy其他tests unchanged，公开list无DB。创建/default/provision/install/后台仍pending；仅迁移只读list不新增FS/init/确认/重试。
+
+阶段27当前源码清单：只读AST scanner排除tests/手工script/明确offline schema模块，exit0/parse_errors=[]；48个模块有513个字面SQL execute候选、16个模块有数据库driver/persistence imports。动态SQL与Repository/pool/stdio仍另行追踪，不能与baseline835片段相减或声明全域关闭。完整路径/计数记录当前迁移清单；本轮未调用正常PG/模型/服务/文件/Runtime。
+
+阶段27命令：
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_deck_list_routes.py backend/tests/test_admin_deck_detail_routes.py backend/tests/test_admin_deck_mutation_routes.py backend/tests/test_admin_voice_routes.py backend/tests/test_admin_deck_version_routes.py backend/tests/test_admin_request_auth.py backend/tests/test_deck_defaults.py backend/tests/test_deck_deletion.py backend/tests/test_deck_sharing_policy.py
+# exit 0; 270 passed in 2.27s
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage27-contract-check.py
+# exit 0; actual hash/DTO/four requirements/shared-policy/source PASS
+/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-current-sql-scan.py
+# exit 0; 48 SQL-bearing modules/513 literal candidates/16 driver-persistence import modules; parse_errors=[]
+/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-doc-check.py
+# exit 0; 35 files/341 links/239 inventory; failures=[]; original history/README parity/6sequence count（未render）
+git diff --check
+# exit 0
+```
+
+本轮actual关闭入口：GET /api/decks published false/true；原database两list helper仅剩旧test调用，没有生产Python调用者，但函数SQL本体作为现有fixture/清理依赖保留，未将整个database模块报告关闭。全域目标继续未完成；协调报告PF八失败/unknown/UOW/expiry/reads/三阶段中断已补，末段receipt权限/文档核验尚未发布完成通知，consumer仍以发布capability与实际完整gate为准。资源/Runtime/共享FS本轮无业务变更或真实回归，不用provider-free读接口PASS冒充其验收。

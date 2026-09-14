@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Input] Deck/Agent/plugin form APIs, Admin content-version capability, and CozeLoop commit reference. -->
 <!-- [Output] Create/update/draft/explicit-commit and folded immutable history interaction contract. -->
@@ -18,6 +19,19 @@ Deck配置草稿与不可变内容版本必须保持独立，网络超时不能�
 ## 概念与规则
 
 草稿保存、preview、commit与history按下方原状态执行。公开版本state/preview/commit/history/detail要求identity/unified/content-versions/canonical-storage四项exact capability；缺失拒绝，不伪造版本。snapshot raw字符串只校验shape并还原dict，保留数值类型/负零/大整数、null和微秒。409使用远端已校验revision刷新预览；已确认失败与结果不明按第6节分别恢复。
+
+## Deck 用户与社区列表读取
+
+GET `/api/decks`沿用原published bool query，内部deck.list/community为closed bool，current OAuth/dream:read和four exact schema/hash必须匹配。原两个database列表方法都是只读，不依赖default reconcile或文件证据。Admin按主体过滤owned列表或排除当前主体的community列表，处理retired visibility、enabled/total计数、author、binding/version/sharing装饰和排序；Dream不重算规则或排序。
+
+| 模式 | 原公开字段投影 | 状态与结果 |
+| --- | --- | --- |
+| user（published:false） | 保留voice_count/total_voice_count，省略wire-only author_display_name | owned已保存配置；空列表仍{decks:[]} |
+| community（published:true） | 保留voice_count/author_display_name，省略wire-only total_voice_count | Admin可收集结果；空列表仍{decks:[]} |
+
+owner decimalstring还原int，null/空值/false/zero与ISO微秒原样。原default/desired/effective与draft/publication/version保持独立，读取不推进配置、创建默认Deck或访问FS。无新产品quota/确认或重试。错误字段/必需nullable/类型/范围/时间/capability安全拒绝；timeout保留原UUID/outcome_unknown:false，无直连fallback。
+
+影响[list消费端](../../../backend/services/admin_data/deck_list_data.py)、公开路由、RequestAuth与原policy DTO共享提取；detail的policy字段/exacttrue validator/projection保持。[测试](../../../backend/tests/test_admin_deck_list_routes.py)调用实际HTTP/Auth/DTO/MockTransport并禁止两旧DB helper，验证原mode字段、计数/排序、owner/时间、闭集错误/cap/权限/timeout。相关detail/mutation/Voice/version与原共享policy/default/deletion技术fixture回归；普通真实业务仍独立待验收。
 
 ## Deck 当前配置详情读取
 

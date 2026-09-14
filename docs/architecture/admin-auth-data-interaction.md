@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record unregistered Run create/retry and original hidden-source dispatch ordering. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -289,3 +290,5 @@ list/prepare/replace经当前OAuth与exactidentity/unified，拒绝全部entityg
 Admin prospective workflow-run.create/retry当前不在70 registry，发布冻结期间不能调用。create来源三字段要求全null或完整aware tuple；retry沿用原Run来源，不能替换。两输出保持完整WorkflowRun；源码/ingress PASS属于Admin报告，不能替代注册或公开业务验收。
 
 隐藏来源必须沿用原执行顺序：Dream Application由verified actor/workspace/key canonical JSON确定UUIDv5 Thread/message；Admin未来领域事务在PF/Run前ensure_source，初始metadata不含workflowRunId。Run确认后原dispatch阶段的claim保存workflowRunId与dispatching，再调用turn dispatcher。持久化移Admin不改变该顺序、claim/lease/重入/失败或Runtime编排；实际source/dispatch capability未发布，消费端接线继续pending。
+
+GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](../design/deck/deck-detail-version-history.md)。

@@ -5,6 +5,7 @@
          and private Decks cannot be collected by ID.
 [Pos] Focused Deck sharing policy tests in backend/tests.
 [Sync] 2026-09-15: public mutation cases use actual FastAPI/Admin DTO owner.
+[Sync] 2026-09-15: community list case uses the current OAuth/DTO HTTP owner.
 [Sync] 2026-08-14: add My Published Decks permission coverage.
 """
 
@@ -12,9 +13,9 @@ from __future__ import annotations
 
 import pytest
 from tests.test_admin_deck_mutation_routes import boundary
+from tests.test_admin_deck_list_routes import boundary as list_boundary
 
 import config
-from routers import voices as voices_router
 from services.deck.sharing import (
     COLLECTION_SOURCE_UNAVAILABLE,
     DEFAULT_INITIALIZED_DECK,
@@ -100,18 +101,12 @@ def test_other_users_published_deck_remains_collectable() -> None:
     )
 
 
-def test_community_list_excludes_the_current_actor(monkeypatch) -> None:
-    calls: list[int | None] = []
-    monkeypatch.setattr(
-        voices_router.database,
-        "get_published_decks",
-        lambda exclude_owner_id=None: calls.append(exclude_owner_id) or [],
-    )
-    assert voices_router.list_decks(
-        published=True,
-        current_user={"user_id": 28},
-    ) == {"decks": []}
-    assert calls == [28]
+def test_community_list_excludes_the_current_actor(list_boundary) -> None:
+    browser, outputs, calls, *_ = list_boundary
+    outputs["decks"] = []
+    response = browser.get("/api/decks?published=true", headers={"authorization": "Bearer read-token"})
+    assert response.status_code == 200 and response.json() == {"decks": []}
+    assert len(calls) == 1 and calls[0][0] == {"community": True}
 
 
 def test_publish_route_returns_conflict_for_default_deck(boundary) -> None:

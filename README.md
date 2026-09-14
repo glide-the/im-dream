@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: public Voice mutations consume four Admin commands with raw Memory JSON. -->
@@ -75,6 +76,8 @@ Public user preference get/save now use two OAuth-bound Admin operations. Missin
 The shared Admin client serializes catalog refresh and capability checks. Failed refresh clears readiness for the next request to reload; domain HTTP remains concurrent and keeps each actor, DTO and request ID separate.
 
 Public invitations, friend requests, relationships and friend picture reads now use nine typed Admin operations. Admin owns invitation policy and atomic transitions; Dream preserves integer IDs, labels, timestamps, errors and unknown write IDs. Other database domains and normal business acceptance remain open.
+
+Public Deck owned/community lists now use one typed Admin operation, preserving original counts and author fields without filesystem or default-initialization steps.
 
 Public Deck detail now reads one typed Admin aggregate and restores original owner IDs, timestamps and legacy Memory values. An Admin producer difference for empty Memory remains documented for correction.
 

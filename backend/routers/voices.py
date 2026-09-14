@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-15: both public Deck list modes use Admin without default or filesystem side effects.
 # [Sync] 2026-09-15: public Deck detail uses Admin; legacy Memory projection remains pure and shared.
 # [Sync] 2026-09-15: four public Voice operations use Admin; Deck/default/plugin/internal data remains pending.
 # [Sync] 2026-09-15: five public Deck mutations use Admin; deletion keeps code-owned closed dependency messages.
-# [Input] Consume typed Admin public Deck/Voice writes, database Deck reads and the shared Deck-default service,
+# [Input] Consume typed Admin public Deck/Voice writes, legacy Deck create/default APIs and the shared Deck-default service,
 #         and shared auth dependency.
 # [Output] Register /api/decks* and /api/voices* endpoints; new Deck creation
 #          fails closed unless its configured default plugin ref is verified;
@@ -39,6 +40,7 @@ except ModuleNotFoundError:  # pragma: no cover - package import compatibility
 
 from services.admin_data.deck_mutation_data import AdminDeckMutationData, DeckUpdateRequestDTO
 from services.admin_data.deck_detail_data import AdminDeckDetailData
+from services.admin_data.deck_list_data import AdminDeckListData, DeckListInputDTO
 from services.admin_data.deck_version_models import DeckIdInputDTO
 from services.admin_data.models import DeckDeleteBlockedDetailsDTO
 from services.admin_data.voice_data import (
@@ -70,17 +72,17 @@ VoiceUpdateRequest = VoiceUpdateRequestDTO
 VoiceForkRequest = VoiceForkRequestDTO
 
 
+def _deck_list_data(request: Request) -> AdminDeckListData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminDeckListData(owner.client)
+
+
 @router.get("/api/decks")
-def list_decks(published: bool = False, current_user: dict = Depends(get_current_user)):
-    """Get actor Decks or collectable system/public community Decks."""
-    if published:
-        decks = database.get_published_decks(
-            exclude_owner_id=current_user["user_id"],
-        )
-    else:
-        user_id = current_user["user_id"]
-        decks = database.get_user_decks(user_id)
-    return {"decks": decks}
+async def list_decks(published: bool = False, current_user: dict = Depends(get_current_user), data: AdminDeckListData = Depends(_deck_list_data)):
+    """Read actor Decks or the collectable community aggregate through Admin."""
+    return await invoke_admin_operation(current_user, data.list, DeckListInputDTO(community=published))
 
 
 @router.post("/api/decks/defaults/reconcile")

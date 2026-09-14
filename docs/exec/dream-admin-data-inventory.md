@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: map public Voice four replacements and retained database dependencies. -->
@@ -37,8 +38,9 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | 生产入口 | 实际Admin领域合同/消费者 | 已替换范围 | 保留的迁移依赖 |
 | --- | --- | --- | --- |
 | `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG；read/publish/close同活动锁，shutdown后台owner和Factory后关闭HTTP | 全域startup/其它DB与正常业务验收仍开放 |
-| 公开Deck详情 | [deck_detail_data](../../backend/services/admin_data/deck_detail_data.py)：deck.detail | 单Admin owned aggregate；closed fields/owner int/ISO/原纯Memory解析/URL与nestedDeck匹配，无DB | Admin voiceRow emptytext→null投影差异需修正；其它list/create/default/install/内部helper继续开放 |
-| 公开Deck mutation | [deck_mutation_data](../../backend/services/admin_data/deck_mutation_data.py)：update/delete/toggle-publication/collect/sync-parent | 五公开写无DB；原结果/错误/闭集删除reason、four schemas、单Admin事务与unknown原UUID | list/create/default/provision、全局install/文件证据与原内部/fixture helper SQL仍开放 |
+| 公开Deck完整列表 | [deck_list_data](../../backend/services/admin_data/deck_list_data.py)：deck.list | published false/true两mode无DB；原counts/author字段/owner int/ISO，Admin过滤排序装饰，单read | 创建/default/provision/install/后台与正常业务仍待；列表原路径无default/文件依赖 |
+| 公开Deck详情 | [deck_detail_data](../../backend/services/admin_data/deck_detail_data.py)：deck.detail | 单Admin owned aggregate；closed fields/owner int/ISO/原纯Memory解析/URL与nestedDeck匹配，无DB | Admin voiceRow emptytext→null投影差异需修正；其它create/default/install/内部helper继续开放 |
+| 公开Deck mutation | [deck_mutation_data](../../backend/services/admin_data/deck_mutation_data.py)：update/delete/toggle-publication/collect/sync-parent | 五公开写无DB；原结果/错误/闭集删除reason、four schemas、单Admin事务与unknown原UUID | create/default/provision、全局install/文件证据与原内部/fixture helper SQL仍开放 |
 | 公开Voice mutation | [voice_data](../../backend/services/admin_data/voice_data.py)：create/update/delete/collect | 四路由无DB；four exact schemas，requirednullable/optional/rawMemory，原errors/unknownreceipt | 同模块Deck其余read/create/default/provision/plugin FS evidence与internal/fixture四helper SQL仍开放 |
 | 公开好友与邀请码 | [social_data](../../backend/services/admin_data/social_data.py)：九actual operation | 全部九路由无DB，原int/null/ISO/errors/images/unknownUUID；旧database九helper-before-I/O拒绝 | 其它daily-picture/import/System/后台SQL与正常业务验收仍开放 |
 | 公开Deck Claude Plugin refs | [deck_refs_data](../../backend/services/admin_data/deck_refs_data.py)：list/prepare/replace | 两公开GET/PUT无DB；无path的metadata→原artifact/CLI检查→source-bound Admin TX；原enabled/ISO与unknownUUID | 全局install/catalog/operation、serveradapter、runtimepacking、voice-memory/analysis仍有DB依赖 |
@@ -288,3 +290,67 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 ## 待验收
 
 每文件填实际 Admin operation/capability/commit 与 Dream 替换证据，最后执行生产无 DB driver/credentials/SQL/static-import 与公开入口失败验证。
+
+## 2026-09-15当前生产模块源码复核
+
+命令：`/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-current-sql-scan.py`，exit0/parse_errors=[]。扫描backend Python，排除tests、backend/script以及四个明确offline schema catalog/importer/legacy模块。当前48个模块包含513个以SQL关键字开头的execute/executemany源码调用候选；16个模块仍导入数据库driver/persistence。
+
+这些是源码候选，不等于已证明运行可达的生产SQL全集，也不能与baseline835字符串片段直接相减。变量SQL、repository自定义exec/pool/独立stdio DATABASE_URL等需继续入口追踪。无字面SQL的Notion/MCP/Product Repository/Runtime仍因persistence imports继续开放，不能报告closed。
+
+| 当前模块 | 字面SQL调用候选 | 变量execute候选 |
+| --- | --- | --- |
+| [backend/database.py](../../backend/database.py) | 144 | 5 |
+| [backend/services/story_workspace/dream_launch_infrastructure.py](../../backend/services/story_workspace/dream_launch_infrastructure.py) | 32 | 0 |
+| [backend/services/story_workspace/agent_integration.py](../../backend/services/story_workspace/agent_integration.py) | 23 | 0 |
+| [backend/services/deck_plugin/revocation_service.py](../../backend/services/deck_plugin/revocation_service.py) | 22 | 1 |
+| [backend/routers/story_workspace.py](../../backend/routers/story_workspace.py) | 20 | 6 |
+| [backend/services/story_workspace/dream_confirmation_service.py](../../backend/services/story_workspace/dream_confirmation_service.py) | 19 | 0 |
+| [backend/services/claude_agent/session_manager.py](../../backend/services/claude_agent/session_manager.py) | 18 | 0 |
+| [backend/services/workflow/run_service.py](../../backend/services/workflow/run_service.py) | 17 | 0 |
+| [backend/services/story_workspace/artifact_story_index_repository.py](../../backend/services/story_workspace/artifact_story_index_repository.py) | 16 | 1 |
+| [backend/services/claude_plugin/install_service.py](../../backend/services/claude_plugin/install_service.py) | 15 | 0 |
+| [backend/services/deck_plugin/binding_service.py](../../backend/services/deck_plugin/binding_service.py) | 13 | 0 |
+| [backend/services/story_workspace/preflight_builder.py](../../backend/services/story_workspace/preflight_builder.py) | 13 | 0 |
+| [backend/services/workflow/preflight_service.py](../../backend/services/workflow/preflight_service.py) | 13 | 0 |
+| [backend/services/deck/admin_gateway.py](../../backend/services/deck/admin_gateway.py) | 12 | 0 |
+| [backend/services/runtime_plugin/reconcile_service.py](../../backend/services/runtime_plugin/reconcile_service.py) | 12 | 0 |
+| [backend/services/deck/content_versioning.py](../../backend/services/deck/content_versioning.py) | 11 | 1 |
+| [backend/services/deck_plugin/release_service.py](../../backend/services/deck_plugin/release_service.py) | 11 | 0 |
+| [backend/services/deck_plugin/installation_service.py](../../backend/services/deck_plugin/installation_service.py) | 7 | 0 |
+| [backend/routers/claude_plugins.py](../../backend/routers/claude_plugins.py) | 6 | 0 |
+| [backend/schema/capabilities.py](../../backend/schema/capabilities.py) | 6 | 0 |
+| [backend/services/deck/builtin_plugin.py](../../backend/services/deck/builtin_plugin.py) | 6 | 0 |
+| [backend/services/deck_plugin/rollback_manager.py](../../backend/services/deck_plugin/rollback_manager.py) | 6 | 0 |
+| [backend/services/deck/runtime_context.py](../../backend/services/deck/runtime_context.py) | 5 | 0 |
+| [backend/services/deck_plugin/compatibility_service.py](../../backend/services/deck_plugin/compatibility_service.py) | 5 | 0 |
+| [backend/services/runtime_plugin/materialization_manager.py](../../backend/services/runtime_plugin/materialization_manager.py) | 5 | 0 |
+| [backend/services/claude_plugin/marketplace_service.py](../../backend/services/claude_plugin/marketplace_service.py) | 4 | 0 |
+| [backend/services/deck/story_workflow_application.py](../../backend/services/deck/story_workflow_application.py) | 4 | 0 |
+| [backend/services/deck_plugin/selection_validation_service.py](../../backend/services/deck_plugin/selection_validation_service.py) | 4 | 0 |
+| [backend/services/events/event_emitter.py](../../backend/services/events/event_emitter.py) | 4 | 0 |
+| [backend/services/story_workspace/dream_artifact_turn_hook.py](../../backend/services/story_workspace/dream_artifact_turn_hook.py) | 4 | 0 |
+| [backend/services/story_workspace/dream_auto_repair_service.py](../../backend/services/story_workspace/dream_auto_repair_service.py) | 4 | 0 |
+| [backend/claude_agent/service.py](../../backend/claude_agent/service.py) | 3 | 0 |
+| [backend/services/claude_plugin/deck_refs_service.py](../../backend/services/claude_plugin/deck_refs_service.py) | 3 | 0 |
+| [backend/services/story_workspace/dream_runtime_activation_service.py](../../backend/services/story_workspace/dream_runtime_activation_service.py) | 3 | 0 |
+| [backend/libs/claude_agent_kit/server/editor_tool.py](../../backend/libs/claude_agent_kit/server/editor_tool.py) | 2 | 0 |
+| [backend/libs/claude_agent_kit/server/story_workspace_tool.py](../../backend/libs/claude_agent_kit/server/story_workspace_tool.py) | 2 | 0 |
+| [backend/server.py](../../backend/server.py) | 2 | 0 |
+| [backend/services/claude_agent/remote_interaction_guard.py](../../backend/services/claude_agent/remote_interaction_guard.py) | 2 | 0 |
+| [backend/services/claude_plugin/workspace_packer.py](../../backend/services/claude_plugin/workspace_packer.py) | 2 | 0 |
+| [backend/services/deck/agent_type.py](../../backend/services/deck/agent_type.py) | 2 | 0 |
+| [backend/services/deck/chat_context.py](../../backend/services/deck/chat_context.py) | 2 | 0 |
+| [backend/services/story_workspace/artifact_story_index_reconcile.py](../../backend/services/story_workspace/artifact_story_index_reconcile.py) | 2 | 0 |
+| [backend/services/story_workspace/guidance_service.py](../../backend/services/story_workspace/guidance_service.py) | 2 | 0 |
+| [backend/routers/deck_plugins.py](../../backend/routers/deck_plugins.py) | 1 | 0 |
+| [backend/services/admin_product/identity.py](../../backend/services/admin_product/identity.py) | 1 | 0 |
+| [backend/services/story_workspace/dream_reentry_service.py](../../backend/services/story_workspace/dream_reentry_service.py) | 1 | 2 |
+| [backend/services/story_workspace/dream_thread_binding.py](../../backend/services/story_workspace/dream_thread_binding.py) | 1 | 0 |
+| [backend/tools/session_inspector.py](../../backend/tools/session_inspector.py) | 1 | 0 |
+| [backend/claude_mcp/repository.py](../../backend/claude_mcp/repository.py) | 0 | 5 |
+| [backend/claude_mcp/service.py](../../backend/claude_mcp/service.py) | 0 | 0 |
+| [backend/notion/store.py](../../backend/notion/store.py) | 0 | 1 |
+| [backend/persistence/postgres.py](../../backend/persistence/postgres.py) | 0 | 0 |
+| [backend/services/admin_product/runtime.py](../../backend/services/admin_product/runtime.py) | 0 | 0 |
+
+重点未关闭：database通用助手/Session与assistant，Story Workspace/PF/Run/source/dispatch/确认/产物Repository，Plugin install/catalog/refs-runtime/packer，Deck binding/content/runtime/Gateway，Editor/stdio、MCP/Notion/Product pools与startup。revocation_service仍有sqlite3源码import，必须继续按运行入口及Schema协议清理，不能新建SQLite fallback。普通用户/模型/共享FS/Runtime验证由实际入口及发布capability决定，不使用环境标签跳过。
