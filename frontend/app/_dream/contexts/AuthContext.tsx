@@ -2,10 +2,11 @@
 // [Output] React public user/authentication state with success-only logout and safe failure feedback.
 // [Pos] Browser auth context; Admin/Dream servers own all OAuth credentials.
 // [Sync] 2026-09-14: retire local OAuth storage/fragments/renewal and use the sole Admin login/register UI.
+// [Sync] 2026-09-15: commit only the current Browser owner snapshot after asynchronous session loading.
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { STORAGE_KEYS } from '../constants/storageKeys';
-import { loadBrowserSession, revokeBrowserSession, type BrowserUser } from '../lib/browserSession';
+import { isBrowserSessionCurrent, loadBrowserSession, revokeBrowserSession, type BrowserUser } from '../lib/browserSession';
 
 interface AuthContextType {
   user: BrowserUser | null;
@@ -29,7 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
     }
     void loadBrowserSession(fetch, abort.signal).then(session => {
-      if (!abort.signal.aborted) { setUser(session?.user ?? null); setAuthError(null); }
+      if (!abort.signal.aborted && isBrowserSessionCurrent(session)) { setUser(session?.user ?? null); setAuthError(null); }
     }).catch(() => {
       if (!abort.signal.aborted) setAuthError('Unable to check your session. Please try again.');
     }).finally(() => { if (!abort.signal.aborted) setIsLoading(false); });

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: specify abort/read identity and success-only logout snapshot ownership. -->
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
 <!-- [Pos] Dream consumer architecture; Admin owns API/DTO/domain/repository/ORM contracts. -->
@@ -185,6 +186,10 @@ server先按原顺序stop publisher/refresher/sink/sampler，再Factory.aclose�
 ## Runtime 环境阶段事实
 
 新增Admin/Auth服务器秘密由SDK最终merge空值tombstone和内部/外部stdio MCP显式env过滤保护，server os.environ原值保持，二次merge不能复活。确切键/执行模块/正常失败流程见 [SDK环境设计](../design/claude-agent/claude-sdk-env-design.md#8-adminauth-服务器秘密与子进程边界)。现有Gateway helper和Editor DATABASE_URL仍需Admin长期委托/领域DTO替换；这项保护不是完整无PG/无全局凭据验收。
+
+### Browser session 异步状态
+
+唯一browserSession owner保存immutable public snapshot，CSRF仅由该snapshot导出。read开始使用对象identity，每个fetch/body await与失败检查当前identity/AbortSignal；旧成功、401、parse错误或transport错误返回null且不修改当前owner。clear/logout开始失效旧read，logout失败仍保留snapshot，strict成功clear也失效期间read。AuthContext异步commit额外检查snapshot identity，旧null不能覆盖新session。deferred HTTP/body技术测试不启真实Browser/server/模型，保持同源Cookie/CSRF和Apps显式headers合同。
 
 ## Thread/message 消费端阶段事实
 

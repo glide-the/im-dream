@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: current Browser session identity fences aborted/stale responses and asynchronous user commits. -->
 <!-- [Input] Dream baseline auth/BFF and the Admin-owned contract when frozen. -->
 <!-- [Sync] 2026-09-15: bind public Agent Thread/SDK Session operations and scope original-ID recovery. -->
 <!-- [Output] Dream consumer design, authority retirement, topology and acceptance gates. -->
@@ -68,6 +69,8 @@ Next服务端使用Admin OAuth refresh grant，对同handle并发refresh做单�
 ## 正常流程、状态与失败反馈
 
 未登录 → 登录中 → callback校验 → 会话建立 → 已登录。拒绝、错误state、过期code返回未登录。refresh先保留现有会话，成功原子替换，invalid grant重新登录；Admin故障显示稍后重试，不解释为错误密码或删除数据。logout先等Admin成功撤销才清本BFF handle，失败保留会话并提示，不增加重复确认。
+
+Browser唯一owner保存strict immutable公开session snapshot，并从该snapshot导出内存CSRF。每个session读取取得当前read object identity，fetch/JSON await或catch后检查identity与AbortSignal；aborted/superseded返回null且不修改状态，旧401/失败不能清除新session或覆盖错误。clear与logout开始使已有read失效；logout失败保留已验证snapshot，strict success才清除并使期间pending读取失效。AuthContext在then提交前同时检查未abort与returned snapshot仍属当前owner，避免已返回但随后被clear/新session替换的user被再次显示。该规则只处理Browser异步状态，不修改服务端handle/refresh或MCP OAuth。
 
 业务前校验身份/scope，Admin再校验实体权限。401、403、409、capability不足、unavailable、timeout分别保留语义。日志仅记录request ID、operation、状态，不记录token/code/secret/正文。
 

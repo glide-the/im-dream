@@ -408,3 +408,19 @@ Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offtur
 唯一owner保存immutable public session snapshot并由其导出CSRF，AuthContext在异步then提交前检查returned snapshot仍为当前owner；过期null同样不能覆盖已加载session。保持当前同源Cookie/CSRF headers、Admin单一登录注册入口、公开profile与失败反馈，不改变server handle/refresh、MCP标准OAuth/Apps、SSE或任意业务DTO。不增加确认或产品限制。
 
 测试显式deferred fetch/JSON覆盖abort before-I/O/after-response/after-json、旧成功/旧401/旧失败、新请求顺序、clear/logout期间旧结果、failedrevoke保留、immutable/no OAuth headers。专用runner执行actual Node helpers与受影响typecheck，无Browser/网络/DB/model/服务。同步header/nearestfolder/README镜像/现行Auth设计/清单，其他全域DB/真实业务gate仍开放。
+
+阶段20实现状态：唯一Browser owner的immutable snapshot导出CSRF，read identity/abort在每个await/catch后检查；clear/logout start失效旧read，strict成功后清除，失败保留。AuthContext then current snapshot identity额外保护UI commit。deferred fetch/body覆盖旧成功/401/503/失败、abort/clear/failed与successful revoke期间请求，等CSRF不同snapshot也不可adopt；Luna Node/typecheck/doc gate进行中。
+
+阶段20技术回执：首轮native Node三文件命令exit1：20pass/1fail/0skip，browserSession与fileURL全通过；root误将原Playwright apiBase spec交给nativeNode，extensionless ESM前置失败，不是业务缺陷。无需source改动，复用无Browser/server配置，仅该apiBase文件 `2 passed (234ms)` exit0/0skip。full `pnpm exec tsc --noEmit --incremental false` exit0，无输出。doc checker29files/216links/120inventory/history3SHA/README parity/6sequence0fail（未render），diffcheck0。未启动Browser/network/PG/model/用户服务/SDKruntime，不重复已通过20Node/typecheck。
+
+## 阶段 21：公开 Deck Claude Plugin 引用三项消费端
+
+### Optimized Prompt · 2026-09-15
+
+读取actual Admin deckRuntimeDataDto/Service/Repository/Handler与60-op artifact，消费deck-plugin-refs.list/prepare/replace三项，要求identity/unified exact v1，OAuth用户级管理禁止所有entity grant。仅替换claude_plugins router里的GET/PUT /api/decks/{deck_id}/claude-plugins；global catalog/install/operation/background与runtime packing暂按实际依赖开放，不复制SQL/事务到HTTP或冒充内部授权。
+
+复用StrictDTO/ISO/统一actor/threadpool/error transport。闭集installation metadata无artifact path，prepare输入strip唯一installation IDs；Dream返回后验证selected IDs exact match且ready，复用PluginInstallService原artifact_store.get_artifact和CLI SemVer方法，将不依赖db的两个方法改staticmethod（原算法/调用不改），不构造假的db或另写digest/compatibility算法。public refs的enabled/order默认保留，order用实际PG integer技术范围；legacy无产品依据max32不成为新的产品配额，以实际Admin无此限制合同为准。
+
+只从prepare的server metadata生成package/version/digest/rawcompat source evidence，body不接受这些字段/actor/path。实际FS与CLI验证失败在replace前返回原安全error/status；Admin在同TX锁ownedDeck/installations并重检metadata/ready，refs语义变化推进draft，reorder/no-op保留原记录/时间。Dream保留public {deck_id,refs}及enabled的原0/1投影和ISO微秒，确认reply需matchDeck/IDs；replace unknown保留原UUID/outcome_unknown，不retry，prepare/read错误不制造write。不得用fixture称实际共享FS/CLI或真实模型验收。
+
+新增现行refs功能稿（背景问题/目标边界/概念规则/default-desired-effective-revision/状态失败影响验收），逻辑Deck Plugin历史设计与oldsource不删除/覆盖。同步headers/nearestfolders/README镜像/API/交互/入口清单。Luna验证actualFastAPI/Auth/DTO/MockTransport与明确命名temp artifact fixture、注入CLI版本的技术验证；DB fenced，public scopes/threehash/twoSchema/closed IDs/defaults/no-op/unknown/no blindretry，以及原artifact/CLI纯合同回归。无PG/model/真实账户/服务/SDKruntime/Browser、tmp协议或版本pin变更。runtime-read/voice-memory/analysis与全部其它数据库仍需后续实际消费接线。
