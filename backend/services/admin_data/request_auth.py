@@ -16,6 +16,7 @@
 # [Sync] 2026-09-15: register six typed public Session operations alongside Chat/profile/Workflow consumers.
 # [Sync] 2026-09-15: create exact server-persistence purpose grants for immutable Workflow turn bindings.
 # [Sync] 2026-09-15: register OAuth-only default Workspace ensure independently of Thread lookup.
+# [Sync] 2026-09-15: share the Run operation tuple with the registered public cancel consumer.
 # [Sync] 2026-09-15: provide request-bound Workflow provenance for immutable public Chat turn snapshots.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
 from __future__ import annotations

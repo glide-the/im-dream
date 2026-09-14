@@ -6,6 +6,7 @@
 # [Sync] 2026-09-15: execute Preflight through Admin; existing default Workspace lookup remains pending.
 # [Sync] 2026-09-15: consume full Run read/create/retry domains while retaining default Workspace SQL.
 # [Sync] 2026-09-15: replace Workflow ingress default SQL with OAuth-write Admin ensure; internal agent-output stays separate.
+# [Sync] 2026-09-15: cancel Run through Admin with the original reason/model/errors; Agent cancel remains owned by its service.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
@@ -48,7 +49,7 @@ from services.admin_data.errors import AdminDataError
 from services.admin_data.preflight_data import AdminPreflightData, PreflightExecutionInputDTO, PreflightInputDTO
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from services.admin_data.workspace_data import AdminWorkspaceData, WorkspaceDefaultInputDTO
-from services.admin_data.run_data import AdminRunData, RunCreateInputDTO, RunLookupInputDTO, RunRetryInputDTO
+from services.admin_data.run_data import AdminRunData, RunCancelInputDTO, RunCreateInputDTO, RunLookupInputDTO, RunRetryInputDTO
 
 try:
     from services.errors.error_registry import ApiRouteError, WORKFLOW_RUN_ROUTE_ERRORS, build_error_payload, workflow_run_route_error
@@ -1412,6 +1413,7 @@ class _RunCommandRoute(SafeRequestValidationRoute):
 
 _run_create_router = APIRouter(route_class=_RunCommandRoute)
 _run_retry_router = APIRouter(route_class=_RunCommandRoute)
+_run_cancel_router = APIRouter(route_class=_RunCommandRoute)
 
 
 @_run_create_router.post("/workflow-runs", status_code=201)
@@ -1689,12 +1691,12 @@ async def retry_workflow_run(
 router.include_router(_run_retry_router)
 
 
-@router.post("/workflow-runs/{workflow_run_id}/cancel")
+@_run_cancel_router.post("/workflow-runs/{workflow_run_id}/cancel")
 async def cancel_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunCancelRequest,
     current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    data: AdminRunData = Depends(_run_data),
 ):
     try:
         actor = _workflow_actor(current_user)
@@ -1703,7 +1705,18 @@ async def cancel_workflow_run(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(service.cancel_run(workflow_run_id, request, actor=actor))
+    try:
+        input_dto = RunCancelInputDTO(workspace_id=actor["workspace_id"], workflow_run_id=workflow_run_id,
+            reason_code=f"user_cancelled:{request.reason}")
+        if input_dto.workflow_run_id != workflow_run_id:
+            raise ValueError("Run path is invalid")
+    except ValueError:
+        error = workflow_run_route_error("WORKFLOW_RUN_NOT_FOUND")
+        return JSONResponse(status_code=error.status_code, content=build_error_payload(error.code))
+    return await invoke_admin_operation(current_user, data.cancel, input_dto, error_handler=_run_data_error)
+
+
+router.include_router(_run_cancel_router)
 
 
 @router.post("/runs/{workflow_run_id}/guidance", status_code=202)

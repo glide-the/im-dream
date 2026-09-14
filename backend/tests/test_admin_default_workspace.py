@@ -2,6 +2,7 @@
 # [Output] Default-before-domain, original text ID, scope/unknown-write and receipt technical evidence.
 # [Pos] Provider-free harness; Admin transport is injected, production default loader is retained.
 # [Sync] 2026-09-15: fence Dream SQL and exercise shared OAuth, complete PF/Run and no-resend recovery.
+# [Sync] 2026-09-15: share the real default ingress fixture with public Run cancel, without a copied loader.
 from __future__ import annotations
 
 import json
@@ -39,10 +40,11 @@ def boundary(monkeypatch):
 
     monkeypatch.setattr(database, "get_db", no_sql)
     monkeypatch.setattr(module, "get_story_workflow_run_application_service", no_sql)
+    monkeypatch.setattr(module, "get_story_workflow_run_service", no_sql)
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
     operations = [item.capability.model_dump() for item in (ENSURE_DEFAULT_WORKSPACE, READ_PREFLIGHT, EXECUTE_PREFLIGHT, *RUN_OPERATIONS)]
     schemas = [item.model_dump() for item in PREFLIGHT_EXECUTION_SCHEMA_REQUIREMENTS]
-    state = {"default": {"workspace_id": "existing-workspace-1"}, "receipt": None}
+    state = {"default": {"workspace_id": "existing-workspace-1"}, "receipt": None, "receipt_operation": "workspace-default.ensure", "cancel": {"run": run("cancelled")}}
     calls = []
 
     class ScopeVerifier(Verifier):
@@ -65,7 +67,7 @@ def boundary(monkeypatch):
             if request.url.path.endswith("/principal"):
                 value = {"subject": "opaque-ba-subject", "canonical_user_id": "42", "client_id": "dream-browser", "scopes": ["dream:read", "dream:write"] if token == "write-token" else ["dream:read"], "status": "active"}
             elif "/receipts/" in request.url.path:
-                assert request.method == "GET" and dict(request.url.params) == {"operation": "workspace-default.ensure"}
+                assert request.method == "GET" and dict(request.url.params) == {"operation": state["receipt_operation"]}
                 assert request.url.path.endswith("/" + rid)
                 calls.append(("receipt", rid, None))
                 value = state["receipt"]
@@ -90,7 +92,7 @@ def boundary(monkeypatch):
                     row = run()
                     if operation == "workflow-run.retry":
                         row["retry_of_run_id"] = RUN_ID
-                    value = {"run": row}
+                    value = state["cancel"] if operation == "workflow-run.cancel" else {"run": row}
             if isinstance(value, Exception):
                 raise value
             if isinstance(value, tuple):

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
 <!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
 <!-- [Input] Published Admin Run read/create/retry DTOs and original WorkflowRun/application semantics. -->
 <!-- [Output] Current consumer ownership, normal flow, states, failures and technical acceptance limits. -->
@@ -14,7 +15,7 @@
 
 GET `/api/story-workspace/workflow-runs/{workflow_run_id}` 保持原200，POST `/workflow-runs` 与 POST `/workflow-runs/{workflow_run_id}/retry` 保持原201，全部返回原完整28字段模型。这三个公开入口及其默认 Workspace 选择均使用已注册 Admin 操作，不调用 Dream SQL/service；其它生命周期入口独立追踪。
 
-本设计只消费已发布 read/create/retry。cancel、guidance、confirmation、隐藏 launch、Agent/model/binding/failure recorder、SystemConfig/内部 agent-output 默认 Workspace/Gateway-purpose/CLIEditor 等入口继续按迁移清单追踪。目录76与隔离技术测试不等于正常业务验收。
+本设计只消费已发布 read/create/retry/cancel。guidance、confirmation、隐藏 launch、Agent/model/binding/failure recorder、SystemConfig/内部 agent-output 默认 Workspace/Gateway-purpose/CLIEditor 等入口继续按迁移清单追踪。目录76与隔离技术测试不等于正常业务验收。
 
 ## 概念与规则
 
@@ -44,3 +45,11 @@ binding_revision/status_version为正安全整数；key最多255 Unicode codepoi
 [生产入口技术测试](../../backend/tests/test_admin_run_routes.py) 使用实际FastAPI/OAuth/client/DTO与MockHTTP。旧领域SQL/service被fence，该独立领域套件的default loader只在tests依赖注入；新增[默认初始化生产入口套件](../../backend/tests/test_admin_default_workspace.py)不覆盖loader，验证完整default→domain的授权/失败/顺序；覆盖十种状态、28字段/required nullable/微秒/时区、完整source/255 astral key、错配/原404与业务错误、scope/schema/hash、同UUID两态receipt及无重试。原SQLite技术fixture仍跳过行锁并发测试，不代表PG并发已验收。
 
 Admin安全回执中的Run72 remaining public230、atomic业务68/原wrapper cleanup exit1与独立SELECT cleanup3 exit0均保留各自范围。Root未重跑隔离PG或正常业务；普通账户、真实PostgreSQL、Admin可见Run/账本及模型验收由主协调执行。
+
+### 公开 Run cancel
+
+POST `/workflow-runs/{workflow_run_id}/cancel` 复用当前OAuth dream:write与已注册默认Workspace依赖，默认初始化先于领域取消。公开request模型保持reason的原default、Pydantic trim、min1/max500；这些是原协议约束，不新增产品额度或确认。消费者把原 `user_cancelled:{request.reason}` 作为required nullable reason_code wire（wire不trim、不加长度限制）；只传服务器Workspace/路径Run与reason，不传actor、target status、clock或Runtime facts。Admin按原生命周期规则转换为cancelled，同状态返回原结果，非法transition409；独立Run/history/receipt/audit事务与current owner/source校验由Admin执行。
+
+消费者要求exact identity/unified、版本1与实际hash d46995d76d34585e93303ff91b1c83c3bc5b028f27edfa840e1057256518647e。回复匹配actor/Workspace/路径Run/cancelled状态并通过原完整28字段模型，保持200与微秒JSON；bad path不trim修复，沿原404映射，原八业务error code/status复用。cancel POST使用原Run scoped safe validation，固定422无raw reason回显；reason从DTO repr排除。已发出timeout504/坏回复503保留安全UUID/unknown，不重发或推断rollback。显式同operation/input/UUID generic原两态receipt；committed再检查完整绑定/cancelled，absent不重发。
+
+[公开生产入口技术套件](../../backend/tests/test_admin_run_cancel.py)复用完整default fixture，无替代loader/Run handler，验证default→cancel、原reason/model/default/range、重复producer结果、原404/八errors、OAuth/schema/hash、wrong reply/unknown/receipt两态。重复请求用例只证明消费者不自行转换状态，数据库幂等由producer独立回执负责。旧application/WorkflowRunService/模型和其它Story函数保留；此Run状态接口不改Agent turn/resume/cancel/SSE、资源admission/lease、Runner/FS/TMPDIR，正常模型与其它生命周期持久化仍待验收。

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: inspect Workspace76 component receipts and prepare registered public Run cancel consumption. -->
 <!-- [Sync] 2026-09-15: record actual SystemConfig callsites and credential ownership without replacing an unpublished domain. -->
 <!-- [Sync] 2026-09-15: distinguish unregistered launch metadata candidates from the frozen72 catalog. -->
 <!-- [Sync] 2026-09-15: record shared-file Thread ownership and unchanged schema-gate extraction. -->
@@ -832,3 +833,38 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps
 SystemConfig身份回报详见[精确生产清单](dream-admin-data-inventory.md#systemconfig-生产读取与身份复查--阶段32后)：公开OAuth actor与Thread/Run server-persistence可按未来发布domain明确支持分别复用；Editor只具有editor-stdio/editor:read-write，未直接读取SystemConfig。internal dispatcher没有server owner、新domain未发布时不得以user ID/service key/新自签JWT补充授权。
 
 - `python3 /private/tmp/dream-admin-system-config-calls.py` **exit0/PASS**：6direct getter/1saver/3getter injection/2reader references，Editor与ContextBuilder direct getter=false/database_calls_executed=false；输出仅file/function/line/reference，未导入业务module或执行数据库调用。未来替换必须明确处理旧service skipping和Workspace初始化defaults，Admin unavailable不得用空对象悄悄继续；此分析未改旧行为。
+
+### Workspace76 新回执只读核对
+
+Root只读 `/private/tmp/ink-auth-migration-validation/workspace76-public-command-receipt.json`：`node --import tsx tests/integration/adminWorkspaceDefault.contract.ts` exit0/PASS，provider-free default Workspace 14cases/22originalGET/347assertions/17protected tables，initial same/distinct-original concurrency=true、actual entire original source=true。当前同目录atomic recovery command：`node --import tsx /private/tmp/ink-auth-migration-validation/workspace76-atomic-recovery.mts` exit0/PASS/90assertions，workspace_insert/receipt_insert/audit_insert三故障各503、whole17 full byte exact rollback/cleanup PASS；actual final COMMIT lostresponse一次，initial503/originalGET200/replay200、oneWorkspace/oneReceipt/oneAudit，actual original source=true。preservation command：`python3 /private/tmp/ink-auth-migration-validation/run-verify-workspace76-preservation.py` exit0/PASS/159assertions，125original tables全row保留/17first-preparation tables保留、5positive originals currentowner/digest/scopes、active owned fault functions0。
+
+以上为实际安全command receipt汇总，不重跑数据库/不修改producer冻结窗口；非正常账户/model/Runtime验收。Admin同步的prepare oracle23complete vectors只按source-only证据记录，捕获catalog/current-scope/frozen/binding，不代表实际SQL/Gateway/FS/provisioning；named prepare API未发布。failure候选尚未注册。SystemConfig producer候选由协调主任务独立推进，本任务只负责Dream精确身份回报及实际发布后的消费者，不新增另一Admin provider。
+
+## 阶段34：已注册公开 Workflow Run cancel
+
+### Optimized Prompt
+
+复用 run_data 的原28字段RunDTO、typed client、exact identity/unified gates与共享current OAuth actor，将公开 `/workflow-runs/{id}/cancel` 从旧application SQL改为实际 workflow-run.cancel。先对照旧cancel_run/transition_run和Admin command ingress/output schema/原generic receipt，保留原request reason的Pydantic trim/default/min1/max500及 `user_cancelled:{request.reason}` 编码，输入只含服务器Workspace/路径Run和requirednullable reason_code（wire无新trim或业务边界）。Admin承担状态转换、terminal replay、Run/history/receipt/audit事务及当前owner/冻结source校验；Dream不新增状态算法、clock、资源admission/lease或Runtime执行。Reply必须匹配canonical actor/Workspace/路径Run、cancelled状态，复用完整原模型。Bad path仍原Run-not-found404，ILLEGAL_RUN_TRANSITION/其它原八业务映射保持；共享safe request validation scoped到cancelPOST，raw reason/token不回显。
+
+公开cancel只接受OAuth dream:write，复用已注册76 default helper，原serverworkspace分支/default→cancel顺序保持。Unknown保留原UUID、显式原generic两态receipt，absent不重发；committed重新检查完整bounded result，不用当前状态覆盖原结果。将cancel注册到request owner，其余Run三op capability/DTO/key/source/PF replay规则保持。其他Story函数、旧application/WorkflowRunService/模型、Agent turn/resume/cancel/SSE、Runner/资源/共享FS/TMPDIR、SDK/Runtime pins字节不改。
+
+Tests调用公开生产FastAPI入口、实际default loader/sharedOAuth/client/DTO，MockHTTP只替代transport；fence旧DB/domain service，覆盖原200/28fields/时间、default/rawreason/默认reason、重复cancel、非法transition/404/401/403/schema/hash、reply错配/unknown stop/no retry、同UUID两态receipt。补充独立Run和完整default suite回归；不改技术fixture为生产fallback、不跑正常DB/models或扩大provider窗口。同步受影响header/folder/当前Auth/Run/PF/README/库存/计划，AST对照唯一改变函数与原字段约束/错误映射，其余业务source保持；运行有意义bounded suite、actual contract schema/SHA、Markdown inventory/history/README和diff验证后只提交本阶段明确拥有路径。
+
+### 阶段34实现与技术回执
+
+复用run_data增加cancel DTO/actualSHA/第四Run operation、原28字段返回和显式原两态receipt；reason_code required nullable/raw str/repr排除，无新业务边界。公开cancel采用原Run scoped安全validation与actual `_story_workflow_current_user` default依赖，保留原reason模型及 `user_cancelled:{request.reason}` 编码，reply匹配canonical actor/Workspace/路径Run/cancelled状态，原200/28fields/时间/八业务errors/404保持；未执行Agent取消或Runtime。共享完整default fixture仅在tests增加cancel结果/原receipt operation选项与旧factory fence，新生产入口测试无default/domain-handler override。
+
+六文件fresh suite **253pass/1skip/4.87s，exit0**：
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_run_cancel.py backend/tests/test_admin_default_workspace.py backend/tests/test_admin_run_routes.py backend/tests/test_admin_preflight_execution.py backend/tests/test_admin_request_auth.py backend/tests/test_workflow_run.py
+```
+
+唯一skip为原 `WorkflowRunConcurrencyTests.test_concurrent_same_scope_token_and_key_create_exactly_one_run`：legacy SQLite不能模拟PostgreSQL行锁并发，superseded by owned-PG contract；不据此报告PG真实并发验收。新cancel测试覆盖actualdefault→cancel/原reason默认trim/max500/rawwire/28fields/重复producer结果/八errors/404/OAuth/schema/hash/timeout504/错配unknown/同UUID两态receipt/committed重校验。
+
+- `env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage34-contract-check.py` **exit0/PASS**：actual76/client63/Run4、cancel input schema闭集逐项相同/输出与原read28schema全对象相同/two schemas/所有actual canonical SHA匹配；原reason JoinedStr与request constraints AST相同，旧Run aliases/三op assign/原28class与CRUD methods在显式cancel branch之外保持；其它Story functions/原Actor/Auth AST保持，497其它tracked backend Python字节不改。Normal acceptance=false。
+- `python3 /private/tmp/dream-admin-current-sql-scan.py` **exit0**：299modules/48SQL-bearing/513literal/16driver/35legacy imports/120directhelper/parse_errors=[]；声明scope内残留候选仍开放，不当作全可达SQL清零。
+- `python3 /private/tmp/dream-admin-doc-check.py` **exit0**：41files/434links/298folder entries/failures=[]，三历史原文SHA/README heading parity保持，6Mermaid只查数量未渲染。
+- `git diff --check` **exit0/no output**。受影响header/folder/README/现行Auth/Run/库存同步；没有正常DB/服务/models/CLI、资源/TMPDIR或Runtime/SDK pin操作。
+
+主任务已明确继续其余两个current-user默认resolver；本任务定位为 deck_plugin_binding._deck_current_user 与 deck_plugins._deck_plugin_current_user，下一阶段统一复用既有typed default consumer。后者额外SELECTrole尚需明确现有profile合同作用域/输出校验，不使用ID当凭据；后台和internal agent-output的原默认helper属于不同生产事务入口，不将公开ensure冒用为事务替换。SystemConfig producer候选由协调主任务负责，本任务精确身份表已写库存，实际published domain之后再消费。

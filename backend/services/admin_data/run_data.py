@@ -1,14 +1,15 @@
-# [Input] Published full Workflow Run read/create/retry contracts and the current OAuth actor.
+# [Input] Published full Workflow Run read/create/retry/cancel contracts and the current OAuth actor.
 # [Output] Original twenty-eight-field model, scoped atomic commands and explicit bounded receipts.
 # [Pos] Domain consumer; Admin owns Run state, token consumption, hashes and database commits.
 # [Sync] 2026-09-15: retain original lifecycle/time/key semantics without local SQL or runtime dispatch.
+# [Sync] 2026-09-15: consume named cancel with original reason text and bounded cancelled result/receipt.
 from __future__ import annotations
 
 import re
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from models.workflow_run import WorkflowRun
 from .chat_models import ChatStrictDTO, EntityId, PositiveSafeInteger, validate_timestamp_text
@@ -109,6 +110,10 @@ class RunRetryInputDTO(RunCreationCommonDTO):
     workflow_run_id: RunId
 
 
+class RunCancelInputDTO(RunLookupInputDTO):
+    reason_code: Annotated[str, StringConstraints(strip_whitespace=False)] | None = Field(repr=False)
+
+
 class RunOutputDTO(ChatStrictDTO):
     run: RunDTO
 
@@ -119,7 +124,9 @@ CREATE_RUN = DomainOperation(OperationCapabilityDTO(name="workflow-run.create", 
     input_schema_version=1, output_schema_version=1, contract_sha256="531d41a45a7a745b120a83c57a88bdb0cf40ffcdc52d245d56bc0d372342eb08"), RunCreateInputDTO, RunOutputDTO)
 RETRY_RUN = DomainOperation(OperationCapabilityDTO(name="workflow-run.retry", kind="write", user_scope="dream:write", background_scope=None,
     input_schema_version=1, output_schema_version=1, contract_sha256="01c72910ed713ce10c86e03c426f98549c81d1991cbaf05415b6bbcdbb8e9bd7"), RunRetryInputDTO, RunOutputDTO)
-RUN_OPERATIONS = (READ_RUN, CREATE_RUN, RETRY_RUN)
+CANCEL_RUN = DomainOperation(OperationCapabilityDTO(name="workflow-run.cancel", kind="write", user_scope="dream:write", background_scope=None,
+    input_schema_version=1, output_schema_version=1, contract_sha256="d46995d76d34585e93303ff91b1c83c3bc5b028f27edfa840e1057256518647e"), RunCancelInputDTO, RunOutputDTO)
+RUN_OPERATIONS = (READ_RUN, CREATE_RUN, RETRY_RUN, CANCEL_RUN)
 
 
 class AdminRunData:
@@ -133,6 +140,8 @@ class AdminRunData:
         invalid = run.created_by != self._canonical_user_id or run.workspace_id != input_dto.workspace_id
         if operation is READ_RUN:
             invalid |= run.workflow_run_id != input_dto.workflow_run_id
+        elif operation is CANCEL_RUN:
+            invalid |= run.workflow_run_id != input_dto.workflow_run_id or run.status != "cancelled"
         else:
             invalid |= run.idempotency_key != input_dto.idempotency_key
             invalid |= run.retry_of_run_id != (input_dto.workflow_run_id if operation is RETRY_RUN else None)
@@ -160,8 +169,11 @@ class AdminRunData:
     def retry(self, input_dto: RunRetryInputDTO, request_id: str, *, access_token: str):
         return self.execute(RETRY_RUN, input_dto, request_id, access_token=access_token)
 
+    def cancel(self, input_dto: RunCancelInputDTO, request_id: str, *, access_token: str):
+        return self.execute(CANCEL_RUN, input_dto, request_id, access_token=access_token)
+
     def receipt(self, operation, input_dto, request_id: str, *, access_token: str):
-        if operation is not CREATE_RUN and operation is not RETRY_RUN:
+        if operation is not CREATE_RUN and operation is not RETRY_RUN and operation is not CANCEL_RUN:
             raise AdminDataError("ADMIN_OPERATION_CONTRACT_INVALID", 503, request_id)
         if type(input_dto) is not operation.input_dto:
             raise AdminDataError("ADMIN_OPERATION_INPUT_INVALID", 400, request_id)
