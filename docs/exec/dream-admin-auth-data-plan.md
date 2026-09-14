@@ -1,6 +1,7 @@
 <!-- [Input] User delegation, Agent.md, AGENTS.md, baseline 7d38715c, and Admin-owned contracts when published. -->
 <!-- [Output] Executable Dream migration plan, dependency gates, and exact evidence inventory. -->
 <!-- [Pos] Dream implementation plan; Admin owns authentication, database transactions, and schema contracts. -->
+<!-- [Sync] 2026-09-15: implement bound Agent Thread/SDK Session consumers and scoped original-receipt recovery. -->
 <!-- [Sync] 2026-09-15: implement public Session consumers while retaining separate background authorization gates. -->
 <!-- [Sync] 2026-09-15: record atomic user-turn and factory-owned server persistence implementation and technical validation. -->
 <!-- [Sync] 2026-09-14: record ten implementation stages and current Auth/Chat/Resource/BFF/Runtime technical evidence. -->
@@ -347,3 +348,17 @@ Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offtur
 扩展当前server持久化owner的同一write barrier：任何unknown操作保留原operation/input/request ID，只有同操作同输入可查原receipt，absent或回执失败禁止后续不同写/推理；known user reservation仍复用，不重复POST。新Session回写严格以originalUUID执行，任何网络/响应未知不生成新ID盲重试。当前通用assistant DTO会经过Admin JSON number解析，raw词法与组合事务尚待actual raw assistant合同，因此该入口不得借本阶段假造codec或变更message parts。
 
 同步文件头/目录/现行设计/中英README/当前入口映射，专用runner验证actual DTO/Service/native on_message/cancel/unknown跨操作barrier/原receipt和Factory回归，严格MockTransport/explicitclock/fakeprovider/DBfence，无PG/真实模型/服务/Runtime子进程。Full-domain、Gateway/Editor、正常本机业务验收保持开放。
+
+阶段16实现状态：公开Service Thread resume/repair fallback读取与SDK init/final/repair Session更新接入exact owner，internal absent-owner原路径保持。共享pending记录actual operation/input/UUID；known user缓存不能绕过pending，Session仅最近确认可复用，A→B→A重新写。Thread读取也由Phase4 drain。范围明确：初始user unknown在推理前拒绝；SDK init unknown保持原callback日志/运行turn与cancel，owner随后不同写拒绝，旧assistant/Run DB尚不在该屏障内。actualService/native init/next-turn transcript/cancel、scope mismatch、跨操作receipt与mutable Session技术gate进行中。
+
+阶段16技术回执：首轮指定七pytest文件 `253 passed, 1 failed in 1.58s` exit1，无skip；唯一失败为新cancel测试对NormalizedAgentEvent使用字符串in断言。仅改该断言为actual event.payload exact finish/stop/cancelled+metadata turnId，并补lost Session参数后，fresh两文件 `62 passed in 1.16s` exit0无skip。其余首轮通过文件无源变更，不重复执行。actual Chat get/update-session capability/artifact/canonical SHA一致；server grant boundThread/Run/scopes与public优先typed owner/internal fallback检查exit0。docs19/194links/173inventory/history3SHA/README parity/6sequence0fail（未render），diff check0。无PG/network/model/账户/服务/SDKruntime，未清理并发文件。
+
+## 阶段 17：公开 Deck 内容版本五项消费端
+
+### Optimized Prompt · 2026-09-15
+
+读取Admin实际deckVoiceDto/Service/Repository/Handler与registered57 artifact，消费已public19/246验证的deck-content.state/preview/commit/history/detail五项。复用StrictDTO、Chat安全整数/ISO/canonical identity、统一request actor/threadpool/redacted error transport；Deck版本公开入口不再创建Dream PG service。CAS、snapshot/hash/preview/commit/immutable history事务只由Admin执行；同时要求actual unified/content-versions/canonical-storage三项物理capability，不使用Drizzle最新head。
+
+新增与actual closed v1 snapshot对应的只读DTO，snapshot_json保留原字符串，只校验shape，Dream最终用标准Python JSON decode回原snapshot dict，保持负零/float/bigint，不复制canonicalization/diff/hash算法。公开created_by保留原int、ISO微秒保持、detail保持原flat summary/snapshot响应。缺required nullable/extra/nonfinite/ID错配fail closed，写reply错配unknown。公开409保留closed current_draft_revision/current_version并使用安全固定错误message；提交unknown保留原UUID，不盲retry。原limit/description合同边界保持，不新增产品配额或确认。
+
+仅迁移这五public操作。Deck/Voice其他14操作、default plugin provisioning、refs/voice6以及Runtime消费者、Dream actualartifact_store/CLIcompat证据、internal content-version Service调用继续清单开放，不能用metadatafixture当FS/model验收。更新file headers/nearest folder/README镜像/现行设计/映射；dedicated runner经actualFastAPI/Auth/DTO/MockTransport验证三capability/hash/CAS/409/unknown/numeric snapshot/permissions/ID/微秒且DB fenced，无PG/网络/模型/用户服务/SDKruntime与pins变更。

@@ -1,6 +1,7 @@
 <!-- [Input] Current Dream/Admin/Gateway topology, supported versions, and user-visible MCP Apps workflow. -->
 <!-- [Output] Plain-language user and local-operator guide with deeper engineering details linked out. -->
 <!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
+<!-- [Sync] 2026-09-15: document bound Agent Thread resume and SDK Session writes plus remaining background domains. -->
 <!-- [Sync] 2026-09-15: document public Session Admin consumers and their separate background authorization dependency. -->
 <!-- [Sync] 2026-09-15: document atomic user reservations and the factory-owned server persistence grant lifecycle. -->
 <!-- [Sync] 2026-09-15: document retired standalone authority and explicit Admin OAuth/account checks in named scripts. -->
@@ -47,7 +48,7 @@ Resource reads/observer writes, shared request identity/profile, and Chat CRUD/h
 
 Public Chat also reads Admin's complete Workflow context before message reservation/SSE and passes an immutable actor/thread snapshot to Service, including ordinary-Chat null. Internal confirmation/launch dispatch and the remaining purpose consumers still require migration.
 
-Public user turns now reserve message/title through Admin's atomic confirmation guard command using raw Python JSON. A server-only Thread/Run persistence grant renews under Factory ownership and survives SSE disconnect; unknown writes keep their original receipt ID. Background assistant/session persistence, Gateway/Editor credentials and other database domains remain migration work.
+Public user turns now reserve message/title through Admin's atomic confirmation guard command using raw Python JSON. A server-only Thread/Run persistence grant renews under Factory ownership and survives SSE disconnect; unknown writes keep their original receipt ID. Public Agent Thread reads and SDK-native session ID updates also use that bound grant. User/session writes share original-receipt recovery, and only the latest confirmed Session update is reused. Background assistant persistence, writing Session context/tools, Gateway/Editor credentials and other database domains remain migration work.
 
 Public writing Session save/get/batch/list/range/aggregate/delete now use six typed Admin operations with explicit request OAuth. The original metadata/full-state responses, precise timestamps, timezone day keys and prose metrics remain; edit events publish only after confirmed writes. Shared closed Editor state DTOs omit absent optional fields. The current Session contract rejects Thread server-persistence grants, so background Session context/tools remain a separate migration dependency.
 

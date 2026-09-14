@@ -1,6 +1,7 @@
 <!-- [Input] Dream baseline Python AST and follow-up production rg scan. -->
 <!-- [Output] Per-file DB/transaction/permission evidence and pending Admin API mapping. -->
 <!-- [Pos] Dream migration inventory; Admin owns the eventual canonical API contract. -->
+<!-- [Sync] 2026-09-15: add public Agent Thread reads and SDK-native Session writes to actual consumer mappings. -->
 <!-- [Sync] 2026-09-15: distinguish baseline scans from actual resource/Chat/Workflow/user-turn/Session consumer mappings. -->
 <!-- [Sync] 2026-09-14: initial exhaustive candidate scan; candidates are not all reachable production SQL. -->
 
@@ -26,10 +27,11 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | --- | --- | --- | --- |
 | `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG，LKG/queue/drain原逻辑 | application共享连接的serialized shutdown及全域startup仍需复查 |
 | 共享身份与profile | [request_auth](../../backend/services/admin_data/request_auth.py)/[profile_data](../../backend/services/admin_data/profile_data.py)：JWT/JWKS→principal→user-profile.current | 公开Admin主体/canonical PK/strict profile；旧Dream authority退役 | Gateway subject与内部tool后台独立purpose仍需迁移 |
-| 公开Chat CRUD/history/ownership | [chat_data](../../backend/services/admin_data/chat_data.py)：14 typed methods | HTTP Thread/message入口已切换，公开响应/cursor/commit后close保留 | assistant/title/session后台消费者与Deck/settings/MCP仍有PG |
+| 公开Chat CRUD/history/ownership | [chat_data](../../backend/services/admin_data/chat_data.py)：14 typed methods | HTTP Thread/message入口已切换，公开响应/cursor/commit后close保留 | assistant等后台消费者与Deck/settings/MCP仍有PG |
 | 公开Chat Workflow上下文 | [workflow_data](../../backend/services/admin_data/workflow_data.py)：workflow-context.resolve | Admin完整provenance→immutable actor/thread snapshot，普通null不走旧PG mapper | 内部confirmation/launch及完整Run/preflight/lifecycle事务仍需迁移 |
 | 公开user-turn原子预留 | [user_message_data](../../backend/services/admin_data/user_message_data.py)/[turn_persistence](../../backend/services/admin_data/turn_persistence.py)：chat-user-message.persist | server-persistence exact Thread/Run；guard/message/title单Admin事务，known复用/unknown原receipt；Factory renew/cleanup | 原内部dispatcher guard保留，CLI/Editor各purpose与其余后台persist仍未切换 |
 | 公开写作Session CRUD/summary | [sessions router](../../backend/routers/sessions.py)/[session_data](../../backend/services/admin_data/session_data.py)：session.save/get/batch/list/text-list/delete | 路由无Dream DB；原metadata/state/microsecond/timezone/metrics/confirmed edit events | ContextBuilder、Session工具与Editor stdio仍有原DB入口；Session Handler拒Thread server grant |
+| 公开Agent Thread/SDK Session | [Service](../../backend/claude_agent/service.py)/[turn_persistence](../../backend/services/admin_data/turn_persistence.py)：chat-thread.get/update-session | resume读取与init/final/repair Session回写使用exact server grant；user/session共享unknown原receipt，最近Session复用；Thread读写drain | 内部dispatcher保持旧身份/PG，assistant raw/Run数据库写不在owner屏障内；Settings/MCP仍有PG |
 
 ## baseline逐文件扫描
 

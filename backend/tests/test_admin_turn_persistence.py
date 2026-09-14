@@ -1,6 +1,7 @@
 # [Input] Actual server persistence holder, synthetic DTO transport and explicitly controlled clock/threads.
 # [Output] Entity scope, known reservation reuse, original-ID recovery and shutdown drain evidence.
 # [Pos] Provider-free turn lifecycle tests; no PG/model/real service or alternate SSE implementation.
+# [Sync] 2026-09-15: validate Thread/SDK Session scope, native init callbacks and one cross-operation unknown barrier.
 # [Sync] 2026-09-15: validate server-only persistence authority and short-lock current snapshots.
 from __future__ import annotations
 
@@ -10,11 +11,13 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from threading import Event, Thread
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
 
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
+from services.admin_data.chat_data import GET_THREAD, UPDATE_SESSION
 from services.admin_data.delegation import RuntimeGrant
 from services.admin_data.delegation_keeper import RuntimeGrantKeeper
 from services.admin_data.turn_persistence import AdminTurnPersistence
@@ -30,20 +33,24 @@ def grant():
         ("dream:read", "dream:write"), NOW + timedelta(seconds=100), NOW + timedelta(hours=2))
 
 
-def holder(*, lose_response=False, block=None):
+def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch=None):
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_secret="s" * 32, service_client_id="dream-service")
     calls, receipt_states = [], ["absent", "committed"]
+    thread_row = {"id": "thread-1", "user_id": "42", "title": None, "deck_id": None, "voice_id": None,
+        "created_at": None, "updated_at": None, "claude_session_id": None, "agent_contract_version": None, **(thread_patch or {})}
+    operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION)
     def transport(request):
         request_id = request.headers["x-request-id"]
         calls.append(request)
         if request.url.path.endswith("/capabilities"):
-            value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:write"], "delegations": []}, "schema_capabilities": [], "operations": [PERSIST_USER_MESSAGE.capability.model_dump()]}
+            value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": [], "operations": [item.capability.model_dump() for item in operations]}
         elif "/receipts/" in request.url.path:
             assert request_id == "write-original"
             state = receipt_states.pop(0)
-            value = {"status": state, "request_id": request_id, "operation": PERSIST_USER_MESSAGE.capability.name}
+            operation = request.url.params["operation"]
+            value = {"status": state, "request_id": request_id, "operation": operation}
             if state == "committed":
-                value["result"] = {"message_id": "message-1", "confirmation_preserved": False}
+                value["result"] = {"changed": True} if operation == UPDATE_SESSION.capability.name else {"message_id": "message-1", "confirmation_preserved": False}
         else:
             assert request.headers["authorization"] == "Bearer " + TOKEN
             assert request_id == "write-original"
@@ -51,12 +58,19 @@ def holder(*, lose_response=False, block=None):
                 entered, release = block
                 entered.set()
                 assert release.wait(2), "Owned HTTP fixture did not release"
-            if lose_response:
+            name = request.url.path.rsplit("/", 1)[-1]
+            input_dto = json.loads(request.content)["input"]
+            if name == GET_THREAD.capability.name:
+                value = {"thread": thread_row}
+            elif name == UPDATE_SESSION.capability.name:
+                thread_row.update(claude_session_id=input_dto["claude_session_id"], agent_contract_version=input_dto["agent_contract_version"])
+                value = {"changed": True}
+            else:
+                value = {"message_id": input_dto["message_id"], "confirmation_preserved": False}
+            if lose_response or name == lose_operation:
                 raise httpx.ReadTimeout("synthetic private body")
-            message_id = json.loads(request.content)["input"]["message_id"]
-            value = {"message_id": message_id, "confirmation_preserved": False}
         return httpx.Response(200, json={"request_id": request_id, "data": value})
-    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(transport)), operations=(PERSIST_USER_MESSAGE,))
+    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(transport)), operations=operations)
     client.capabilities("capabilities-1")
     runtime = SimpleNamespace(closed=[], renew=lambda value, request_id: value, receipt=lambda *args: None)
     runtime.close = lambda: runtime.closed.append(True)
@@ -184,6 +198,193 @@ def test_service_reuses_atomic_public_reservation_with_pg_fenced(monkeypatch):
     service = ClaudeAgentService()
     asyncio.run(service._persist_user_message(SimpleNamespace(request=request)))
     assert len(calls) == 2 and request.message_id == "message-1"
+
+
+def session(value, session_id="44444444-4444-4444-8444-444444444444"):
+    return value.update_session(actor_id="42", thread_id="thread-1", session_id=session_id, contract_version="current")
+
+
+def test_thread_read_and_session_update_use_exact_server_authority():
+    value, calls, _ = holder()
+    row = value.thread(actor_id="42", thread_id="thread-1")
+    assert row.id == "thread-1" and row.user_id == "42" and row.claude_session_id is None
+    first = session(value)
+    assert session(value) is first
+    row = value.thread(actor_id="42", thread_id="thread-1")
+    assert row.claude_session_id == "44444444-4444-4444-8444-444444444444"
+    assert row.agent_contract_version == "current"
+    posts = [json.loads(request.content)["input"] for request in calls if request.method == "POST"]
+    assert posts == [{"thread_id": "thread-1"}, {"thread_id": "thread-1", "claude_session_id": row.claude_session_id, "agent_contract_version": "current"}, {"thread_id": "thread-1"}]
+    assert all(request.headers["authorization"] == "Bearer " + TOKEN for request in calls[1:])
+
+
+def test_mutable_session_identity_only_reuses_the_most_recent_confirmation():
+    value, calls, _ = holder()
+    session(value, "A")
+    session(value, "B")
+    session(value, "A")
+    session(value, "A")
+    assert [json.loads(request.content)["input"]["claude_session_id"] for request in calls[1:]] == ["A", "B", "A"]
+    assert value.thread(actor_id="42", thread_id="thread-1").claude_session_id == "A"
+
+
+@pytest.mark.parametrize("patch", [{"id": "other"}, {"user_id": "43"}])
+def test_thread_read_rejects_reply_entity_mismatch(patch):
+    value, calls, _ = holder(thread_patch=patch)
+    with pytest.raises(AdminDataError) as error:
+        value.thread(actor_id="42", thread_id="thread-1")
+    assert error.value.code == "ADMIN_RESPONSE_INVALID" and not error.value.outcome_unknown
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("operation", ["thread", "session"])
+@pytest.mark.parametrize("actor,thread", [("43", "thread-1"), ("42", "other")])
+def test_thread_and_session_reject_other_entities_before_io(operation, actor, thread):
+    value, calls, _ = holder()
+    with pytest.raises(AdminDataError, match="DREAM_DELEGATION_ENTITY_DENIED"):
+        if operation == "thread":
+            value.thread(actor_id=actor, thread_id=thread)
+        else:
+            value.update_session(actor_id=actor, thread_id=thread, session_id="A", contract_version="current")
+    assert len(calls) == 1
+
+
+def test_unknown_session_blocks_other_writes_including_known_user_and_recovers_original_receipt():
+    value, calls, _ = holder(lose_operation=UPDATE_SESSION.capability.name)
+    persist(value)
+    with pytest.raises(AdminDataError) as lost:
+        session(value)
+    assert lost.value.outcome_unknown and lost.value.request_id == "write-original"
+    for write in (lambda: persist(value), lambda: persist(value, message_id="other"), lambda: session(value, "B")):
+        with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN") as blocked:
+            write()
+        assert blocked.value.request_id == "write-original" and blocked.value.outcome_unknown
+    assert len(calls) == 3
+    with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):
+        session(value)
+    recovered = session(value)
+    assert recovered.changed is True and session(value) is recovered
+    assert persist(value).message_id == "message-1"
+    assert sum(request.method == "POST" and request.url.path.endswith(UPDATE_SESSION.capability.name) for request in calls) == 1
+    assert [request.url.params["operation"] for request in calls[-2:]] == [UPDATE_SESSION.capability.name] * 2
+
+
+def test_unknown_user_blocks_session_write_without_dispatch():
+    value, calls, _ = holder(lose_operation=PERSIST_USER_MESSAGE.capability.name)
+    with pytest.raises(AdminDataError):
+        persist(value)
+    with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):
+        session(value)
+    assert len(calls) == 2
+
+
+def test_close_drains_an_already_dispatched_thread_read():
+    entered, release, closed = Event(), Event(), Event()
+    value, calls, _ = holder(block=(entered, release))
+    rows, errors = [], []
+    def read():
+        try:
+            rows.append(value.thread(actor_id="42", thread_id="thread-1"))
+        except Exception as error:
+            errors.append(error)
+    worker = Thread(target=read)
+    closer = Thread(target=lambda: (value.close(), closed.set()))
+    worker.start()
+    try:
+        assert entered.wait(1)
+        closer.start()
+        assert not closed.wait(0.05)
+    finally:
+        release.set()
+        worker.join(2)
+        if closer.ident is not None:
+            closer.join(2)
+    assert closed.is_set() and not errors and rows[0].id == "thread-1" and len(calls) == 2
+
+
+def test_public_native_init_is_the_next_turn_resume_identity_with_thread_pg_fenced(monkeypatch, tmp_path):
+    import re
+    import claude_agent.service as service_module
+    from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService
+    from claude_agent.thread_pool import AgentRunState
+    from claude_agent_sdk.types import SystemMessage
+    from tests.test_claude_agent_service import _FakeBus, _FakeContextBuilder
+    value, calls, _ = holder()
+    service = ClaudeAgentService(context_builder=_FakeContextBuilder(), platform_model_resolver=lambda *_: "dream-balanced",
+        managed_mcp_runtime_snapshot_loader=SimpleNamespace(load=AsyncMock(return_value={})))
+    request = ClaudeAgentRunRequest(user_id="42", thread_id="thread-1", resume=True,
+        admin_workflow_resolution=AdminWorkflowResolution("42", "thread-1", None), admin_turn_persistence=value)
+    monkeypatch.setattr(service_module._db, "get_chat_thread", lambda *_: pytest.fail("Public Thread read must use Admin"))
+    monkeypatch.setattr(service_module._db, "update_chat_thread_claude_session", lambda *_: pytest.fail("Public SDK Session must use Admin"))
+    # Settings is an explicitly retained domain dependency, unrelated to the
+    # Thread authority verified here; use existing production DI and own FS.
+    monkeypatch.setattr(service_module._db, "get_system_config", lambda *_: {"workspace_enabled": True})
+    monkeypatch.setattr(service_module, "get_or_create_workspace", lambda *_args, **_kwargs: tmp_path.resolve())
+    new_id = "44444444-4444-4444-8444-444444444444"
+    async def scenario():
+        state = AgentRunState(session_id=request.thread_id)
+        fresh = await service.assemble_context(request, state=state, bus=_FakeBus(), runner=Mock())
+        assert fresh.run_options.thread_id is None
+        await service._persist_sdk_session_from_message(fresh, SimpleNamespace(data={"session_id": new_id}))
+        await service._persist_sdk_session_from_message(fresh, SystemMessage(subtype="error", data={"session_id": new_id}))
+        assert not any(item.url.path.endswith(UPDATE_SESSION.capability.name) for item in calls)
+        await service._persist_sdk_session_from_message(fresh, SystemMessage(subtype="init", data={"session_id": new_id}))
+        project = tmp_path / ".claude-home" / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", str(tmp_path.resolve()))
+        project.mkdir(parents=True)
+        (project / f"{new_id}.jsonl").write_text(json.dumps({"type": "user", "uuid": "fixture", "sessionId": new_id,
+            "message": {"role": "user", "content": "fixture"}}) + "\n")
+        resumed = await service.assemble_context(request, state=state, bus=_FakeBus(), runner=Mock())
+        assert resumed.run_options.resume and resumed.run_options.thread_id == new_id
+        assert resumed.request.thread_id == "thread-1" and resumed.request.admin_turn_persistence is value
+        await service._persist_sdk_session_from_message(resumed, SystemMessage(subtype="init", data={"session_id": new_id}))
+    asyncio.run(scenario())
+    assert sum(item.url.path.endswith(UPDATE_SESSION.capability.name) for item in calls) == 1
+
+
+@pytest.mark.parametrize("lose_session", [False, True])
+def test_public_native_init_persists_before_original_cancel_terminal_with_pg_fenced(monkeypatch, lose_session):
+    import claude_agent.service as service_module
+    from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService
+    from claude_agent.thread_pool import AgentRunState
+    from claude_agent.tool_confirmation_store import ToolConfirmationStore
+    from claude_agent_sdk.types import SystemMessage
+    value, calls, _ = holder(lose_operation=UPDATE_SESSION.capability.name if lose_session else None)
+    service = ClaudeAgentService(dream_artifact_turn_hook=Mock())
+    monkeypatch.setattr(service_module._db, "update_chat_thread_claude_session", lambda *_: pytest.fail("Public callback must use Admin"))
+    monkeypatch.setattr(service_module._db, "get_db", lambda: pytest.fail("Public user reservation must use Admin"))
+    # Raw assistant persistence has not migrated; inject only that retained
+    # boundary while executing the real service callbacks/cancel/SSE path.
+    partial = AsyncMock()
+    monkeypatch.setattr(service, "_persist_partial_assistant", partial)
+    async def scenario():
+        queue = asyncio.Queue()
+        request = ClaudeAgentRunRequest(user_id="42", thread_id="thread-1", message_id="message-1",
+            message_parts=[{"type": "text", "text": "original"}], admin_turn_persistence=value)
+        class CancelRunner:
+            async def run_streaming(self, opts, callbacks):
+                await callbacks.on_message(SystemMessage(subtype="init", data={"session_id": "A"}))
+                await callbacks.on_text_delta("partial")
+                raise asyncio.CancelledError()
+        execution = service_module._TurnExecution(request=request, state=AgentRunState(session_id="thread-1"),
+            runner=CancelRunner(), run_options=Mock(), turn_context=service_module._TurnContext(queue=queue, confirmation_store=ToolConfirmationStore()),
+            dream_artifact_turn_ticket=Mock())
+        with pytest.raises(asyncio.CancelledError):
+            await service.execute_session(execution)
+        frames = []
+        while not queue.empty():
+            frames.append(queue.get_nowait())
+        assert frames[-1] is None
+        assert frames[-2].payload() == {"type": "finish", "finishReason": "stop", "cancelled": True}
+        metadata = next(frame for frame in frames if frame is not None and frame.type == "message-metadata")
+        assert metadata.data["turnId"]
+    asyncio.run(scenario())
+    partial.assert_awaited_once()
+    assert partial.await_args.kwargs["turn_status"] == "cancelled"
+    assert [item.url.path.rsplit("/", 1)[-1] for item in calls[1:]] == [PERSIST_USER_MESSAGE.capability.name, UPDATE_SESSION.capability.name]
+    if lose_session:
+        with pytest.raises(AdminDataError, match="ADMIN_WRITE_RESULT_UNKNOWN"):
+            session(value, "B")
+        assert len(calls) == 3
 
 
 @pytest.mark.parametrize("cancel", [False, True])

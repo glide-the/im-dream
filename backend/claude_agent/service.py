@@ -3,6 +3,7 @@
 #         Reads database module for session persistence.
 # [Output] Provide ClaudeAgentRunRequest, ClaudeAgentService to thread_factory.py.
 # [Pos] core-business node in backend/claude_agent
+# [Sync] 2026-09-15: use bound server grants for public Thread resume reads and SDK-native Session updates.
 # [Sync] 2026-09-15: public user persistence uses one Admin atomic command and server-only renewed grant; internal guard stays intact.
 # [Sync] 2026-09-15: public Chat uses its actor/thread-bound immutable Admin Workflow snapshot; internal dispatcher mapper remains pending migration.
 # [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
@@ -1610,6 +1611,28 @@ class ClaudeAgentService:
         # until their typed Workflow command/service identity is connected.
         return await asyncio.to_thread(self._dream_context_mapper.resolve, actor_id=request.user_id, thread_id=request.thread_id)
 
+    @staticmethod
+    async def _thread_record(request: ClaudeAgentRunRequest) -> dict | None:
+        persistence = request.admin_turn_persistence
+        if persistence is not None:
+            if not isinstance(persistence, AdminTurnPersistence):
+                raise ValueError("Invalid server persistence owner")
+            row = await asyncio.to_thread(persistence.thread, actor_id=request.user_id, thread_id=request.thread_id)
+            return row.model_dump() if row is not None else None
+        return await asyncio.to_thread(_db.get_chat_thread, request.thread_id, int(request.user_id))
+
+    @staticmethod
+    async def _save_sdk_session(request: ClaudeAgentRunRequest, session_id: str) -> None:
+        persistence = request.admin_turn_persistence
+        if persistence is not None:
+            if not isinstance(persistence, AdminTurnPersistence):
+                raise ValueError("Invalid server persistence owner")
+            await asyncio.to_thread(persistence.update_session, actor_id=request.user_id, thread_id=request.thread_id,
+                session_id=session_id, contract_version=_AGENT_RUNTIME_CONTRACT_VERSION)
+            return
+        await asyncio.to_thread(_db.update_chat_thread_claude_session,
+            request.thread_id, session_id, _AGENT_RUNTIME_CONTRACT_VERSION)
+
     async def assemble_context(
         self,
         request: ClaudeAgentRunRequest,
@@ -1914,9 +1937,7 @@ class ClaudeAgentService:
 
         existing_session: Optional[dict] = None
         try:
-            existing_session = await asyncio.to_thread(
-                _db.get_chat_thread, request.thread_id, int(request.user_id)
-            )
+            existing_session = await self._thread_record(request)
         except Exception:
             raise RuntimeError("CLAUDE_RESUME_DATABASE_UNAVAILABLE") from None
 
@@ -2536,12 +2557,7 @@ class ClaudeAgentService:
         captured_session_id = str(getattr(result, "session_id", None) or "").strip()
         if captured_session_id:
             try:
-                await asyncio.to_thread(
-                    _db.update_chat_thread_claude_session,
-                    execution.request.thread_id,
-                    captured_session_id,
-                    _AGENT_RUNTIME_CONTRACT_VERSION,
-                )
+                await ClaudeAgentService._save_sdk_session(execution.request, captured_session_id)
                 return
             except Exception as exc:
                 raise DreamAutoRepairError(
@@ -2550,11 +2566,7 @@ class ClaudeAgentService:
                     cause=exc,
                 ) from exc
         try:
-            existing = await asyncio.to_thread(
-                _db.get_chat_thread,
-                execution.request.thread_id,
-                int(execution.request.user_id),
-            )
+            existing = await ClaudeAgentService._thread_record(execution.request)
         except Exception as exc:
             raise DreamAutoRepairError(
                 "DREAM_AUTO_REPAIR_RESUME_UNAVAILABLE",
@@ -2803,12 +2815,7 @@ class ClaudeAgentService:
         if session_id == resumed_session_id:
             return
         try:
-            await asyncio.to_thread(
-                _db.update_chat_thread_claude_session,
-                execution.request.thread_id,
-                session_id,
-                _AGENT_RUNTIME_CONTRACT_VERSION,
-            )
+            await self._save_sdk_session(execution.request, session_id)
         except Exception:
             logger.exception(
                 "Failed to persist observed Claude Session: thread_id=%s",
@@ -2901,13 +2908,7 @@ class ClaudeAgentService:
         captured_session_id = result.session_id if result else None
         if captured_session_id:
             try:
-                await loop.run_in_executor(
-                    None,
-                    _db.update_chat_thread_claude_session,
-                    thread_id,
-                    captured_session_id,
-                    _AGENT_RUNTIME_CONTRACT_VERSION,
-                )
+                await self._save_sdk_session(execution.request, captured_session_id)
             except Exception:
                 # The SDK on_message callback already owns eager Session
                 # persistence.  Its successful assistant row must not be

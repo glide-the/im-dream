@@ -1,6 +1,7 @@
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
 <!-- [Pos] Dream consumer architecture; Admin owns API/DTO/domain/repository/ORM contracts. -->
+<!-- [Sync] 2026-09-15: specify bound Thread/SDK Session operations, mutable confirmation reuse and scoped unknown recovery. -->
 <!-- [Sync] 2026-09-15: specify public Session projection/events and reusable closed Editor state DTOs. -->
 <!-- [Sync] 2026-09-15: specify atomic raw user persistence, short-lock renewal and terminal/cancel cleanup. -->
 <!-- [Sync] 2026-09-15: record standalone authority refusal and named script account validation; preserve outstanding domain gates. -->
@@ -216,7 +217,15 @@ Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先
 
 公开ingress在已验证Workflow上下文后以当前OAuth创建最小server-persistence idg：仅dream read/write、exactthread、authoritativeRun或普通null、无EditorSession。`AdminTurnPersistence`只在server保存该grant/typedclient；初始原子预留成功后Service复用同输入的已知result，不再拆三次DB调用或重发。unknown保留原UUID，后续只查原receipt；absent或读取失败继续阻止新写/推理，不能认为取消/超时表示rollback。reply message ID错配按unknown处理。内部confirmation/launch尚未连接其服务身份，继续执行原guard，不借公开迁移删除保护。
 
-Factory在原admission acquire之后启动该owner的独立renewal，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，先等待已dispatch同步writer，再停止/等待renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。此server grant不进入CLI/Editor env、SDK或Browser；Gateway/Editor独立目的、assistant/session和其他数据库领域仍需迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。
+Factory在原admission acquire之后启动该owner的独立renewal，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，先等待已dispatch同步writer，再停止/等待renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。此server grant不进入CLI/Editor env、SDK或Browser；Gateway/Editor独立目的、assistant/后台Session上下文和其他数据库领域仍需迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。
+
+### 公开 Agent Thread 恢复与 SDK Session 回写
+
+执行模块`ClaudeAgentService._thread_record/_save_sdk_session`在公开request含server owner时复用`AdminTurnPersistence`，调用实际`chat-thread.get/update-session`；只有缺owner的现存内部dispatcher保留原PG入口。读取仅发送thread_id并核对reply Thread与canonical actor；更新只发送thread_id/claude_session_id/agent_contract_version，grant不进入Runtime options。恢复仍执行原当前project transcript与contract版本检查；只有SDK-native init触发early write，final/repair使用同一helper，不改变取消/SSE/lease顺序。
+
+owner在单一activity锁中串行user/session命令及Thread读取，Phase4等待已dispatch的读写。未知写记录原operation/immutable input/request ID；不同操作或输入拒绝，已知user缓存也不能绕过pending。同操作同输入只能查原receipt，absent/读取失败继续unknown，committed恢复结果且不POST重试。Session是可变字段，只有最近一次确认的同输入更新可复用；A→B→A重新执行命令，user message identity冲突保持409。
+
+初始user预留unknown仍在SSE/推理前拒绝。SDK init回写unknown保留原callback日志处理，已经运行的turn与cancel继续既有路径，随后owner管理的不同写被拒绝；尚未迁移的assistant raw/Run/FS metadata数据库写不经过此owner，因此当前不是全域未知写屏障。验收通过actual Service/native SystemMessage/next-turn transcript/cancel和MockTransport/Thread DB fence，不代表正常本机数据库或模型验收。
 
 ### 公开 Session 与 Editor 状态边界
 

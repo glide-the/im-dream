@@ -20,6 +20,7 @@
 
 # Ink & Memory
 
+<!-- [Sync] 2026-09-15: 同步Agent Thread恢复/SDK Session回写与其余后台领域依赖。 -->
 <!-- [Sync] 2026-09-15: 同步公开Session的Admin消费端与独立后台授权依赖。 -->
 <!-- [Sync] 2026-09-15: 同步原子用户预留和Factory管理的服务器持久化委托生命周期。 -->
 <!-- [Sync] 2026-09-14: record the implemented Admin BFF/Browser boundary and remaining baseline migration gates. -->
@@ -46,7 +47,7 @@ Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话
 
 公开Chat在message预留/SSE前读取Admin完整Workflow上下文，并向Service传入不可变actor/thread snapshot，包含普通Chat null。内部confirmation/launch调度与其余purpose consumer仍需迁移。
 
-公开user-turn通过Admin原子confirmation guard命令预留message/title，使用raw Python JSON。server-only Thread/Run持久化grant由Factory管理续期，SSE disconnect后保持；未知写保存原receipt ID。后台assistant/session持久化、Gateway/Editor凭据及其他数据库领域仍需迁移。
+公开user-turn通过Admin原子confirmation guard命令预留message/title，使用raw Python JSON。server-only Thread/Run持久化grant由Factory管理续期，SSE disconnect后保持；未知写保存原receipt ID。公开Agent的Thread读取与SDK-native session ID回写也使用该绑定grant。user/session写共享原receipt恢复，Session仅复用最近一次确认回写。后台assistant持久化、写作Session上下文/工具、Gateway/Editor凭据及其他数据库领域仍需迁移。
 
 公开写作Session save/get/batch/list/range/aggregate/delete已使用六项typed Admin operation与显式request OAuth。保留原metadata/full-state响应、精确时间、时区日键和正文metrics；仅confirmed写入后发edit event。共享闭集Editor状态DTO省略未设置的optional字段。当前Session合同拒绝Thread server-persistence grant，后台Session上下文/工具仍是独立迁移依赖。
 
