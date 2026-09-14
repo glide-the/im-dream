@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index current Voice mutation design separately from retained Deck/Voice legacy flows. -->
 <!-- [Sync] 2026-09-15: replace social flows with Admin while preserving the original in history. -->
 <!-- [Input] Module business flows, current Admin consumers and byte-preserved pre-migration sequence source. -->
 <!-- [Output] Module flow reference with explicit current ownership and retained migration dependencies. -->
@@ -5,6 +6,8 @@
 <!-- [Sync] 2026-09-15: public user preferences use Admin; retain original whole source in history. -->
 
 认证/Session/Deck的现行程序行为以[Admin交互](../architecture/admin-auth-data-interaction.md)和各功能稿为准；本稿其余尚未更新的旧issuer/直接SQL说明仅是迁移依赖，不作为现行规范。[原十模块时序原文](history/pre-admin-user-preferences-20260915/sequence-diagrams.md)字节保持；用户偏好正常、状态、失败和验收见[现行稿](user-preferences-current.md)。
+
+Voice四公开mutation的现行正常、状态、失败与验收见[Voice CRUD现行稿](voice-crud-current.md)；下方模块8尚未更新的直接SQL只保留迁移依赖与历史流程。
 
 <!-- [Input] Current Next.js Dream Web modules and Python business routes/services. -->
 <!-- [Output] Current cross-module business sequence diagrams. -->

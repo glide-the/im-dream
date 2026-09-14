@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: share the existing present-fields serializer for optional Editor/Voice wire DTOs.
 # [Input] Admin chatThreadDto.ts closed wire projections and the shared final-history validator.
 # [Output] Strict Thread/message DTOs, preserving ISO microseconds and decimal canonical IDs.
 # [Pos] Chat domain consumer schema boundary; no ORM row, SQL or runtime state machine.
@@ -9,7 +10,7 @@ from datetime import datetime
 import re
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import ConfigDict, Field, JsonValue, field_validator, model_serializer, model_validator
 
 from chat_message_projection import validate_chat_history_final_projection
 from .models import CanonicalUserId, PrincipalDTO, StrictDTO
@@ -21,6 +22,14 @@ NonnegativeSafeInteger = Annotated[int, Field(ge=0, le=9_007_199_254_740_991)]
 
 class ChatStrictDTO(StrictDTO):
     model_config = ConfigDict(allow_inf_nan=False)
+
+
+class PresentFieldsDTO(ChatStrictDTO):
+    @model_serializer(mode="wrap")
+    def serialize_present_fields(self, handler):
+        # Optional wire fields are omitted; an explicitly supplied null is
+        # retained when allowed by that domain's field declaration.
+        return {key: value for key, value in handler(self).items() if key in self.model_fields_set}
 
 
 def validate_timestamp_text(value: str | None) -> str | None:

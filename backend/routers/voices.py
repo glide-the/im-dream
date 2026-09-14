@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# [Input] Consume database Deck/Voice APIs, the shared Deck-default service,
+# [Sync] 2026-09-15: four public Voice operations use Admin; Deck/default/plugin/internal data remains pending.
+# [Input] Consume typed Admin public Voice operations, database Deck APIs and the shared Deck-default service,
 #         and shared auth dependency.
 # [Output] Register /api/decks* and /api/voices* endpoints; new Deck creation
 #          fails closed unless its configured default plugin ref is verified;
@@ -15,7 +16,7 @@
 # [Sync] 2026-08-15: reconcile missing legacy default teams as well as empty plugin refs.
 # [Sync] 2026-08-16: map preserved child/runtime Deck deletion dependencies to HTTP 409.
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 import database
@@ -39,7 +40,12 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - package import compatibility
     from backend.services.deck.sharing import DeckSharingPolicyError
 
-from .deps import get_current_user
+from services.admin_data.voice_data import (
+    AdminVoiceData, VoiceCollectInputDTO, VoiceCreateRequestDTO, VoiceForkRequestDTO,
+    VoiceIdInputDTO, VoiceUpdateRequestDTO,
+)
+from services.admin_data.request_auth import AdminRequestAuth
+from .deps import SafeRequestValidationRoute, get_current_user, invoke_admin_operation
 
 router = APIRouter()
 
@@ -68,32 +74,9 @@ class DeckUpdateRequest(BaseModel):
     order_index: int = None
 
 
-class VoiceCreateRequest(BaseModel):
-    deck_id: str
-    name: str
-    system_prompt: str
-    name_zh: str = None
-    name_en: str = None
-    icon: str = None
-    color: str = None
-    memory_workspace_config: dict = None
-
-
-class VoiceUpdateRequest(BaseModel):
-    name: str = None
-    system_prompt: str = None
-    name_zh: str = None
-    name_en: str = None
-    icon: str = None
-    color: str = None
-    enabled: bool = None
-    order_index: int = None
-    thread_id: str = None
-    memory_workspace_config: dict = None
-
-
-class VoiceForkRequest(BaseModel):
-    target_deck_id: str
+VoiceCreateRequest = VoiceCreateRequestDTO
+VoiceUpdateRequest = VoiceUpdateRequestDTO
+VoiceForkRequest = VoiceForkRequestDTO
 
 
 @router.get("/api/decks")
@@ -257,69 +240,64 @@ def sync_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/api/voices")
-def create_voice(
-    request: VoiceCreateRequest, current_user: dict = Depends(get_current_user)
+class _VoiceRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid Voice request"
+
+
+_voice_router = APIRouter(route_class=_VoiceRoute)
+
+
+def _voice_data(request: Request) -> AdminVoiceData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminVoiceData(owner.client)
+
+
+def _voice_error(kind: str, voice_id: str | None = None):
+    def error(exc, request_id):
+        if not exc.outcome_unknown and exc.status_code == 404:
+            if exc.code == "DECK_ACCESS_DENIED" and kind in {"create", "collect"}:
+                raise HTTPException(status_code=400, detail="Deck not found or permission denied" if kind == "create" else "Target deck not found or permission denied")
+            if exc.code == "VOICE_ACCESS_DENIED" and kind == "collect":
+                raise HTTPException(status_code=400, detail=f"Voice {voice_id} not found")
+        raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code,
+            "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown})
+    return error
+
+
+@_voice_router.post("/api/voices")
+async def create_voice(
+    request: VoiceCreateRequest, current_user: dict = Depends(get_current_user), data: AdminVoiceData = Depends(_voice_data),
 ):
-    """Create a new voice in a user deck"""
-    user_id = current_user["user_id"]
-    try:
-        voice_id = database.create_voice(
-            user_id,
-            deck_id=request.deck_id,
-            name=request.name,
-            system_prompt=request.system_prompt,
-            name_zh=request.name_zh,
-            name_en=request.name_en,
-            icon=request.icon,
-            color=request.color,
-            memory_workspace_config=request.memory_workspace_config,
-        )
-        return {"voice_id": voice_id}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    result = await invoke_admin_operation(current_user, data.create, request.domain_input(), error_handler=_voice_error("create"))
+    return result.model_dump()
 
 
-@router.put("/api/voices/{voice_id}")
-def update_voice(
-    voice_id: str,
-    request: VoiceUpdateRequest,
-    current_user: dict = Depends(get_current_user),
+@_voice_router.put("/api/voices/{voice_id}")
+async def update_voice(
+    voice_id: str, request: VoiceUpdateRequest, current_user: dict = Depends(get_current_user), data: AdminVoiceData = Depends(_voice_data),
 ):
-    """Update a user voice"""
-    user_id = current_user["user_id"]
-    updates = {k: v for k, v in request.dict().items() if v is not None}
-
-    success = database.update_voice(user_id, voice_id, updates)
-    if not success:
-        raise HTTPException(
-            status_code=404, detail="Voice not found or permission denied"
-        )
+    result = await invoke_admin_operation(current_user, data.update, request.domain_input(voice_id), error_handler=_voice_error("update"))
+    if not result.changed:
+        raise HTTPException(status_code=404, detail="Voice not found or permission denied")
     return {"success": True}
 
 
-@router.delete("/api/voices/{voice_id}")
-def delete_voice(voice_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a user voice"""
-    user_id = current_user["user_id"]
-    success = database.delete_voice(user_id, voice_id)
-    if not success:
-        raise HTTPException(
-            status_code=404, detail="Voice not found or permission denied"
-        )
+@_voice_router.delete("/api/voices/{voice_id}")
+async def delete_voice(voice_id: str, current_user: dict = Depends(get_current_user), data: AdminVoiceData = Depends(_voice_data)):
+    result = await invoke_admin_operation(current_user, data.delete, VoiceIdInputDTO(voice_id=voice_id), error_handler=_voice_error("delete"))
+    if not result.changed:
+        raise HTTPException(status_code=404, detail="Voice not found or permission denied")
     return {"success": True}
 
 
-@router.post("/api/voices/{voice_id}/fork")
-def fork_voice(
-    voice_id: str,
-    request: VoiceForkRequest,
-    current_user: dict = Depends(get_current_user),
+@_voice_router.post("/api/voices/{voice_id}/fork")
+async def fork_voice(
+    voice_id: str, request: VoiceForkRequest, current_user: dict = Depends(get_current_user), data: AdminVoiceData = Depends(_voice_data),
 ):
-    """Fork a voice to a user deck"""
-    user_id = current_user["user_id"]
-    try:
-        new_voice_id = database.fork_voice(user_id, voice_id, request.target_deck_id)
-        return {"voice_id": new_voice_id}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    result = await invoke_admin_operation(current_user, data.collect, VoiceCollectInputDTO(voice_id=voice_id, target_deck_id=request.target_deck_id), error_handler=_voice_error("collect", voice_id))
+    return result.model_dump()
+
+
+router.include_router(_voice_router)

@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: reuse present-fields serialization; Editor optional-null validation remains domain-owned.
 # [Input] Actual Admin editorSessionDto.ts and existing strict JSON/time validators.
 # [Output] Closed EditorEngine state DTOs shared by Session HTTP and future Editor delegation consumers.
 # [Pos] Editor business schema boundary; no database entities or editor mutation algorithm.
@@ -6,14 +7,14 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, field_validator, model_serializer, model_validator
+from pydantic import Field, JsonValue, field_validator, model_validator
 
-from .chat_models import ChatStrictDTO, EntityId, validate_timestamp_text
+from .chat_models import PresentFieldsDTO, EntityId, validate_timestamp_text
 
 Number = int | float
 
 
-class EditorDTO(ChatStrictDTO):
+class EditorDTO(PresentFieldsDTO):
     @model_validator(mode="before")
     @classmethod
     def reject_null_optional_fields(cls, value):
@@ -23,12 +24,6 @@ class EditorDTO(ChatStrictDTO):
                 if field is not None and not field.is_required() and item is None and key != "selectedState":
                     raise ValueError("Optional Editor field cannot be null")
         return value
-
-    @model_serializer(mode="wrap")
-    def serialize_present_fields(self, handler):
-        # Zod optional fields are omitted, rather than injected as null. The
-        # explicitly nullable selectedState still retains a supplied null.
-        return {key: value for key, value in handler(self).items() if key in self.model_fields_set}
 
 
 class EditorTextCellDTO(EditorDTO):

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record four original Voice mutation results and safe unknown write IDs. -->
 <!-- [Sync] 2026-09-15: preserve nine social responses, closed business errors and unknown write IDs. -->
 <!-- [Sync] 2026-09-15: document source-bound Admin refs and safe public validation. -->
 <!-- [Sync] 2026-09-15: document typed Admin preference get/save, required nullable wire and unknown result behavior. -->
@@ -41,6 +42,8 @@
 **Base URL:** `http://localhost:8765` (dev backend) | `https://ink-backend.suoxya.com` (prod backend). Public app URLs in crawler files come from `INK_PUBLIC_BASE_URL`; backend API links come from `INK_BACKEND_PUBLIC_BASE_URL`.
 
 公开 `/api/friends` 的generate/use、requests/list/accept/reject、friends/list/remove、timeline/full九入口消费Admin当前OAuth领域合同。公开ID仍为整数，nullable时间保持微秒ISO；原closed `success:false/error` 返回400 detail，timeline null返回403，full null/empty返回404。写timeout/未知响应返回安全error_code、original request_id与outcome_unknown，不自动重发；用户body不提供acting user_id。邀请码policy/原子关系转换由Admin执行，原默认行为保持。详见[好友现行设计](../docs/design/social-friendship-current.md)。
+
+公开Voice POST/create、PUT/update、DELETE/delete、POST/fork分别消费voice.create/update/delete/collect。响应仍为voice_id或success:true；changed:false原404，create/fork closed错误原400；未知写保留original request_id/outcome_unknown，不自动重发。Memory仅接受finite对象，None省略/empty/false/0按原行为保留。详见[Voice现行稿](../docs/design/voice-crud-current.md)。
 
 ## Authentication
 

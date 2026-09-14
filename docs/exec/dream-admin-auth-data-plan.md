@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record Stage24 public Voice implementation and present-fields reuse. -->
 <!-- [Sync] 2026-09-15: record Stage23 consumer implementation and independent technical gate. -->
 <!-- [Sync] 2026-09-15: record Stage22 RED reproduction and synchronized metadata implementation. -->
 <!-- [Input] User delegation, Agent.md, AGENTS.md, baseline 7d38715c, and Admin-owned contracts when published. -->
@@ -478,3 +479,7 @@ Actor只有current request OAuth；missing/hash/schema/domain失败在公开入�
 Luna actualFastAPI/Auth/DTO/MockTransport/DBfence验证四public入口、requirednull/optional省略/empty/false/zero/Unicode/rawJSON数值、Memory默认不由Dream制造、actor字段/finite拒绝、fouractualhash/physicalcap、unknown原receipt、单POST/no-blindretry，以及原Deck routes回归不动FS/default行为。Provider-free，无PG/network/model/正常账户/Browser/用户服务/SDKRuntime/安装，不改变Agent/资源/SSE/lease/TMPDIR或pins。正常真实业务与全部生产DB仍开放。
 
 阶段24复用细化（shared source改动前）：统一transport会调用完整model_dump，optional wire字段必须只序列化model_fields_set，不能把默认None注入wire。将既有EditorDTO的present-fields wrap serializer提取为ChatStrictDTO同目录共享PresentFieldsDTO基类；Editor保留自身null检查，VoiceUpdates只复用序列化并按actualnullable允许显式null。原Editor/session合同需同批回归，不更改全局parser/model_dump或Other DTO。
+
+阶段24实现状态：fouractualhash/fourSchema已注册，四publicVoice functions无DB；create requirednullable/原Memory default交Admin，update原None省略/emptyfalsezero与raw数值/sort保持。shared PresentFieldsDTO只提取原Editor serializer，Editor null校验不变；四路由采用局部安全validation class，Deck其它函数不改。技术gate待运行；无PG/model/network/account/services/Browser/SDKRuntime，未改pins/tmp/Agent/SSE资源。
+
+阶段24 fresh技术回执：Luna usage限制仍不可用，primary执行指定八文件 `280 passed in 2.12s` exit0，无failure/skip。四actualhash/canonical/requirements/closedDTO shape comparator0；present-fields method与Editor optional-null method AST原样，其他Deck函数/整个database.py source unchanged，四公开Voice AST无DB。doc checker34files/254links/231inventory/history3SHA/README parity/6sequence计数0fail（未render），diff0。无PG/network/model/真实账户/Browser/services/SDKRuntime或pins/tmp/Agent/SSE资源改动；其他域与正常业务gate仍active。
