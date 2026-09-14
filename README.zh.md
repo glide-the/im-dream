@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
+<!-- [Sync] 2026-09-15: prepare registered fail/envelope consumers while retaining background ownership gaps. -->
 <!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
 <!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
 <!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
@@ -89,6 +90,8 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 公开 Preflight GET 使用 Admin owner-scoped 读取，不初始化 Workspace；POST 保留原 202、17 字段及显式原请求三态 receipt。Run 读取/创建/重试保留完整 28 字段及原 200/201。依赖默认 Workspace 的 Workflow 入口已在这些领域前使用注册的 Admin workspace-default.ensure，原文本 ID 保持；初始化要求 OAuth dream:write，服务器尚无 Workspace 的 Run GET 也遵守此要求。未知提交保留原请求 ID，不自动重发。系统配置、其他 lifecycle/launch 和 internal agent-output 持久化继续待迁移。详见[Preflight 规则](docs/design/workflow-preflight-read-current.md)和[Run 规则](docs/design/workflow-run-admin-consumer-current.md)。
 
 Story Workflow、Deck binding 与 Deck Plugin 的 current-user 依赖已共用 Admin 默认 Workspace resolver。Deck Plugin 角色查询复用当前 Admin profile 的 OAuth read scope/canonical ID 校验，原权限判断保留。其余领域和后台持久化继续待迁移。
+
+已注册 Run fail 与 launch failure-envelope 消费者保留历史 failed 回复、原始错误文本和原 receipt ID。生产 launch recorder 仍需 Admin turn owner，并保持两个独立提交；类型技术验证不等于正常模型验收。详见[失败规则](docs/design/dream-launch-admin-metadata-current.md)。
 
 公开 Workflow Run cancel 已使用注册的 Admin command，保留原 reason、完整 28 字段响应、业务错误和原请求有界 receipt。Agent 取消流程保持原行为。
 

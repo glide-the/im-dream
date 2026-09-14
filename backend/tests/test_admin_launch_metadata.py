@@ -2,6 +2,7 @@
 # [Output] Scoped source/claim/finish/receipt technical evidence without endpoint or Runtime claims.
 # [Pos] Provider-free harness; production launch wiring/default/prepare/Voice/failure remain SQL.
 # [Sync] 2026-09-15: reuse original application fingerprint/IDs and reject unknown writes without resend.
+# [Sync] 2026-09-15: include registered failure-envelope DTO/source in the shared original-receipt matrix.
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +17,7 @@ from pydantic import ValidationError
 
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
 from services.admin_data.launch_metadata_data import AdminLaunchMetadataData, AdminLaunchSourceRepository, CLAIM_LAUNCH, ENSURE_LAUNCH_SOURCE, FINISH_LAUNCH, LAUNCH_METADATA_OPERATIONS, LaunchClaimInputDTO, LaunchFinishInputDTO, LaunchSourceInputDTO
+from services.admin_data.launch_metadata_data import FAIL_LAUNCH_ENVELOPE, LaunchFailureInputDTO, LaunchFailureExpectation
 from services.admin_data.request_auth import AdminRequestActor
 from services.admin_data.workflow_data import WORKFLOW_SCHEMA_REQUIREMENTS
 from services.story_workspace.dream_launch_application_service import DreamLaunchApplicationService, DreamLaunchSource, _sha256
@@ -200,6 +202,10 @@ def test_explicit_same_uuid_generic_receipt_after_unknown_without_resend(boundar
     elif operation is FINISH_LAUNCH:
         dto = LaunchFinishInputDTO(workspace_id=WORKSPACE_ID, workflow_run_id=RUN_ID, claim_id=CLAIM_ID, accepted=True)
         value = {"finished": True, "workflow_run_id": RUN_ID, "thread_id": source.thread_id, "message_id": source.message_id}
+    elif operation is FAIL_LAUNCH_ENVELOPE:
+        dto = LaunchFailureInputDTO(workspace_id=WORKSPACE_ID, workflow_run_id=RUN_ID, error_code="original_failure")
+        value = {"updated": True, "workflow_run_id": RUN_ID, "thread_id": source.thread_id, "message_id": source.message_id, "error_code": dto.error_code}
+        source = LaunchFailureExpectation(source.thread_id, source.message_id)
     rid = str(uuid4())
     state["result"] = httpx.ReadTimeout("private goal")
     with pytest.raises(AdminDataError) as error:

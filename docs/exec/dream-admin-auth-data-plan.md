@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: inspect Workspace76 component receipts and prepare registered public Run cancel consumption. -->
+<!-- [Sync] 2026-09-15: prepare actual77 fail/envelope types and preserve production launch owner gaps. -->
 <!-- [Sync] 2026-09-15: record actual SystemConfig callsites and credential ownership without replacing an unpublished domain. -->
 <!-- [Sync] 2026-09-15: distinguish unregistered launch metadata candidates from the frozen72 catalog. -->
 <!-- [Sync] 2026-09-15: record shared-file Thread ownership and unchanged schema-gate extraction. -->
@@ -901,3 +902,30 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps
 - `git diff --check` **exit0/no output**。受影响folder/header/README/currentAuth/PF共享默认/Deck canonical设计/库存已同步；没有正常DB/服务/model业务操作，Runtime/SDK pins/资源/TMPDIR源不变。
 
 SystemConfig当前callsite/Thread或Run grant/Editor用途表仍在[精准清单](dream-admin-data-inventory.md#systemconfig-生产读取与身份复查--阶段32后)；Profile role使用公开OAuth，不把server-persistence/editor-stdio当作用途授权。协调主任务独立SystemConfig producer候选尚无已发布消费者合同。跨任务详细同步的既有自动审批拒绝未解除，结果写入本任务文件供复核，不重试发送或复制normal凭据。
+## 阶段36：已注册 Run fail 与 failure envelope 消费者准备
+
+### Optimized Prompt
+
+对照 actual77 导出的 workflow-run.fail 与 dream-launch-failure.envelope，复用 run_data 原28字段模型和 launch_metadata_data 的 client/two exact gates/显式 original receipt，增加闭集输入、原始失败文本、完整回复关联校验。fail 使用原服务器 Workspace/Run、required failed_step/error_code 和 requirednullable reason_code；三项失败文本不增加 trim、长度或编码规则。Admin 同 failed replay 返回原 Run，所以 Dream 只验证 actor/Workspace/Run/failed 状态及原模型，不强制历史失败参数等于本次参数。failure envelope 只发送 Workspace/Run/error_code，回复匹配原 Run/error 与服务器持有的 nullable source IDs，保持 raw IDs、bool 和 null；不得发送 source/context/metadata/codec 路径或改写 metadata。
+
+原流程先提交 Run FAILED，再以独立事务记录消息 failed/error/removeclaim。两个 typed operation 不合并事务、不推断是否提交、不自动重试；unknown 保留原 UUID，原 GET receipt absent 不触发重发，committed 重新关联检查。注册到现有 request owner 元组仅代表具备消费类型，原 launch builder/endpoint/dispatcher/failure recorder 尚无完整 Admin owner，不以 actor_id、共享 service key 或伪造 grant 接入后台，不宣称生产 SQL 已迁移。Runtime purpose/current Thread+Run 与 OAuth original GET 限制由已发布 Admin 边界校验；不新增 Dream 控制通道、状态算法或 runtime grant。
+
+限定代码所有权为两个现有领域模块与 request_auth 元组共享 header；新增 provider-free transport 测试复用旧 Run fixture 数据与实际 client/DTO，覆盖原失败 replay、原始文本、full source/reply mismatch、capability/hash、HTTP errors、unknown stop 和两态原 receipt，fence SQL。保持旧 launch/Agent/SSE/资源/lease/Runner/FS/TMPDIR/SDK pins 原字节；不调用正常 DB/model/CLI、不改 producer 冻结窗口。同步当前设计三基础/状态/失败/验收、headers/folders/README/库存与实际 technical receipts，运行 bounded pytest、actual contract/SHA、源码保护、Markdown inventory/diff 检查后只提交明确拥有路径。
+### 阶段36实现与技术回执
+
+两个现有domain module新增fail/envelope DTO/actualSHA、完整回复关联和原generic两态receipt；共享request owner原AST不改，只复用扩大后的operation tuple。Run fail只验证原actor/Workspace/Run/failed模型，same-failed历史详情可不同于本次raw失败参数。Envelope的raw nullable source IDs存于服务器immutable expectation，不发送caller source/context/metadata/codec；updatedfalse保留，true不能确认null source。Production launch builder/endpoint/dispatcher/failure recorder没有接线或字节修改；没有减少SQL库存、调用CLI/model/正常数据库或调整producer冻结资源。
+
+首个专用文件76passed/.81s/exit0；首次七文件回归375passed/2failed/4.24s/exit1，旧launch receipt参数矩阵遍历新第四operation却仍传source.ensure DTO，修复其failure DTO/source branch。第二次373passed/4failed/4.19s/exit1发现该测试缺新导入，修复测试import；没有放宽production校验。增加missing source与malformed original receipt覆盖后，fresh命令：
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_launch_failure.py backend/tests/test_admin_launch_metadata.py backend/tests/test_admin_run_routes.py backend/tests/test_admin_run_cancel.py backend/tests/test_admin_deck_default_workspace.py backend/tests/test_admin_request_auth.py backend/tests/test_admin_data_boundary.py
+```
+
+结果386passed/4.26s/exit0，无failed/skipped。只用实际consumer/client/DTO与MockHTTP，旧SQL fenced；没有重跑阶段35旧CLI integration（其原validate exit2前置失败仍保留），不冒充正常模型业务回执。
+
+`env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage36-contract-check.py` exit0/PASS：actual77每个自SHA、fail input/envelope input+output完整schema相等（仅去title/$schema/$defs、解ref并排序required/union）、fail full output与原read28 schema完全相同、两exact要求；client65/Run5/launch4、existingdomain方法移除唯一新增branch后AST相等、requestownerAST相等、499其它trackedbackend Python原bytes保持（含production launch/资源/Runner/FS/TMPDIR）。
+
+`python3 /private/tmp/dream-admin-doc-check.py` exit0：41files/445local links/277folder entries/failures=[]，三历史SHA保持、README标题一致、6Mermaid只计数未render。`python3 /private/tmp/dream-admin-current-sql-scan.py` exit0：299modules/47SQL-bearing/512literal/16drivers/34legacy imports/118helper、parse_errors=[]，与阶段35同声明范围，不把source candidates视为完整生产可达证明。最终docs/diff检查另以提交前实际结果记录。
+
+剩余：后台immutable owner链路与原source/claim/finish/failure生产SQL、完整prepare/Voice/Run start/其它domains、SystemConfig发布后actualcallsite迁移、GatewayCLIkey/CLIEditor、正常PG/Admin可见Run/账户/model验收及77primary故障/COMMIT-loss验证。Goal仍未完成；不升级SDK/Runtime pins、不部署/重启正常服务、不写外部任务消息。
+提交前最终文档检查 `python3 /private/tmp/dream-admin-doc-check.py` exit0：41files/446local links/277folder entries/failures=[]，historySHA/README标题保持；`git diff --check` exit0。只暂存本阶段15明确拥有路径，不包含其它任务docs/.folder、docs/exec/.folder、docs/stage/.folder、验证目录或pnpm缓存。

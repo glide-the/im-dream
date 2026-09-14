@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
+<!-- [Sync] 2026-09-15: map actual77 fail/envelope consumer preparation without subtracting retained SQL. -->
 <!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
 <!-- [Sync] 2026-09-15: record actual SystemConfig callsites and credential ownership without replacing an unpublished domain. -->
 <!-- [Sync] 2026-09-15: retain original launch commit ordering while candidate operations remain unregistered. -->
@@ -449,3 +450,9 @@ run_data复用Run28 model/two exact schemas增加cancel actualhash/requirednulla
 ### 阶段35三个公开默认 resolver
 
 [shared deps](../../backend/routers/deps.py)直接复用阶段33typed Story helper算法，三个wrapper统一调用，default resolver没有get_db/SQL。Deck Plugin role读取复用当前Profile OAuthread/canonicalID/rawrole，原permission/scope/DTO不改，失败不使用user fallback。当前scanner299/47SQL-bearing/512literal/16driver/34legacy imports/118helper、parse_errors=[]；完整声明scope的SQL/legacy tables按此次差异更新，不把源码候选视为全生产可达闭环。其余background/internal default helper、binding/control-plane领域DB/Runtime/Gateway/SystemConfig继续开放。artifact实际77的新dream-launch-failure.envelope只观察到注册，尚未消费；本阶段两个旧API specs不变、client63。
+## 阶段36：Run fail / failure envelope 类型消费准备
+
+现有 run_data 注册 workflow-run.fail，actual SHA79e2fbb8f96aa241b664657f03e77020d9cbd2cc8f8b67eeae89a02ea34ac31f；复用原28字段/current actor/Workspace/Run/failed 检查，不以本次失败参数覆盖原 same-failed replay。launch_metadata_data 注册 actual77 dream-launch-failure.envelope，SHA5967ae40f60858553f27f43dd83f021f93928e7c25c582d2e711d68df4d4e042；input仅Workspace/Run/rawerror，五字段reply匹配服务器nullable source/error/Run，updatedfalse保留，显式原两态receipt/no resend。两项同为v1/write/dream:write/bgnull与identity/unified两exactschema；requestclient65、resource2独立。
+
+本阶段没有选择原生产 launch builder/dispatcher/failure recorder；后者仍缺 Admin turn owner，SQL scanner不得减去其SQL。正常流程必须先确认 Run fail COMMIT，再独立写 failure envelope；unknown不能假定rollback或提交。OAuth/sameThread+Run server persistence写和OAuth-only original GET的权限由发布Admin边界负责，不增加Runtime recovery或caller actor/source/context/metadata/codec权限。当前全SQL/driver/legacy inventory范围保持，normalPG/model/Runtime/CLIEditor/SystemConfig其余迁移与77primary隔离故障验收继续独立追踪。
+阶段36fresh七文件provider-free回归386passed/4.26s/exit0，无failed/skipped；两次旧矩阵fixture/导入错误分别375pass2fail与373pass4fail均在计划保留。Actual77 contract check exit0/PASS，failinput/envelopeinput+output完整schema与published要求一致，failoutput原read28相同，client65/Run5/launch4、499其它trackedbackend Python bytes保持；原launch/resource/Runner/FS/TMPDIR没有接线或改动。Scanner299/47SQL-bearing/512literal/16driver/34legacy imports/118helper、parse_errors=[]保持阶段35范围。Normal账户/PG/model/Runtime及后台owner/生产SQL仍未验收，不能按operation注册计数宣布迁移完成。详见[执行计划](dream-admin-auth-data-plan.md#阶段36实现与技术回执)。

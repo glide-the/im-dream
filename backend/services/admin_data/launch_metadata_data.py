@@ -1,7 +1,8 @@
 # [Input] Registered launch metadata contracts, original source/context seams and current OAuth owner.
-# [Output] Typed source/claim/finish consumers and explicit original bounded receipts.
+# [Output] Typed source/claim/finish/failure consumers and explicit original bounded receipts.
 # [Pos] Metadata preparation; production endpoint wiring/prepare/Voice/failure SQL remains pending.
 # [Sync] 2026-09-15: reuse original command constraints and source callsite without changing runtime order.
+# [Sync] 2026-09-15: prepare independent failure-envelope consumption; original failure recorder remains pending.
 from __future__ import annotations
 
 from datetime import datetime
@@ -85,6 +86,19 @@ class LaunchFinishInputDTO(RunLookupInputDTO):
     claim_id: ClaimId
     accepted: bool
 
+
+class LaunchFailureInputDTO(RunLookupInputDTO):
+    error_code: Annotated[EntityId, StringConstraints(strip_whitespace=False)] = Field(repr=False)
+
+
+class LaunchFailureOutputDTO(ChatStrictDTO):
+    updated: bool
+    workflow_run_id: RunId
+    thread_id: str | None
+    message_id: str | None
+    error_code: EntityId = Field(repr=False)
+
+
 class LaunchUnclaimedDTO(ChatStrictDTO):
     claimed: Literal[False]
     workflow_run_id: RunId
@@ -127,7 +141,9 @@ CLAIM_LAUNCH = DomainOperation(OperationCapabilityDTO(name="dream-launch-dispatc
     input_schema_version=1, output_schema_version=1, contract_sha256="958549a9bfe4b02d8b31e1e538c81ffad020bb4525a328f542f865b377e8ec43"), LaunchClaimInputDTO, LaunchClaimOutputDTO)
 FINISH_LAUNCH = DomainOperation(OperationCapabilityDTO(name="dream-launch-dispatch.finish", kind="write", user_scope="dream:write", background_scope=None,
     input_schema_version=1, output_schema_version=1, contract_sha256="5aa3b738bef5319ee705f5851d83588e1d18dcaf37bdc5789267494fec480f2e"), LaunchFinishInputDTO, LaunchFinishOutputDTO)
-LAUNCH_METADATA_OPERATIONS = (ENSURE_LAUNCH_SOURCE, CLAIM_LAUNCH, FINISH_LAUNCH)
+FAIL_LAUNCH_ENVELOPE = DomainOperation(OperationCapabilityDTO(name="dream-launch-failure.envelope", kind="write", user_scope="dream:write", background_scope=None,
+    input_schema_version=1, output_schema_version=1, contract_sha256="5967ae40f60858553f27f43dd83f021f93928e7c25c582d2e711d68df4d4e042"), LaunchFailureInputDTO, LaunchFailureOutputDTO)
+LAUNCH_METADATA_OPERATIONS = (ENSURE_LAUNCH_SOURCE, CLAIM_LAUNCH, FINISH_LAUNCH, FAIL_LAUNCH_ENVELOPE)
 
 
 def _parse_json(value):
@@ -148,12 +164,25 @@ class LaunchSourceExpectation:
     request_fingerprint: str
 
 
+@dataclass(frozen=True, slots=True)
+class LaunchFailureExpectation:
+    thread_id: str | None
+    message_id: str | None
+
+
 class AdminLaunchMetadataData:
     def __init__(self, client: AdminDataClient, *, canonical_user_id: str):
         self._client = client
         self._canonical_user_id = canonical_user_id
 
     def _validate_reply(self, operation, input_dto, result, request_id, *, source=None, context=None, write=False):
+        if operation is FAIL_LAUNCH_ENVELOPE:
+            valid = isinstance(source, LaunchFailureExpectation) and result.workflow_run_id == input_dto.workflow_run_id
+            valid = valid and result.error_code == input_dto.error_code and (result.thread_id, result.message_id) == (source.thread_id, source.message_id)
+            valid = valid and (not result.updated or (result.thread_id is not None and result.message_id is not None))
+            if not valid:
+                raise invalid_response(request_id, write=write)
+            return result
         if operation is ENSURE_LAUNCH_SOURCE:
             if source is None or (result.source.thread_id, result.source.message_id, result.source.request_fingerprint) != (source.thread_id, source.message_id, source.request_fingerprint):
                 raise invalid_response(request_id, write=write)
@@ -177,14 +206,14 @@ class AdminLaunchMetadataData:
                 raise invalid_response(request_id, write=write)
         return result
 
-    def execute(self, operation, input_dto, request_id: str, *, access_token: str, source: DreamLaunchSource | LaunchSourceExpectation, context: StoryWorkspaceDreamRunContext | None = None):
+    def execute(self, operation, input_dto, request_id: str, *, access_token: str, source: DreamLaunchSource | LaunchSourceExpectation | LaunchFailureExpectation, context: StoryWorkspaceDreamRunContext | None = None):
         if not any(operation is item for item in LAUNCH_METADATA_OPERATIONS):
             raise AdminDataError("ADMIN_OPERATION_CONTRACT_INVALID", 503, request_id)
         require_workflow_capabilities(self._client, request_id)
         result = self._client.execute(operation, input_dto, request_id, access_token=access_token)
         return self._validate_reply(operation, input_dto, result, request_id, source=source, context=context, write=True)
 
-    def receipt(self, operation, input_dto, request_id: str, *, access_token: str, source: DreamLaunchSource | LaunchSourceExpectation, context: StoryWorkspaceDreamRunContext | None = None):
+    def receipt(self, operation, input_dto, request_id: str, *, access_token: str, source: DreamLaunchSource | LaunchSourceExpectation | LaunchFailureExpectation, context: StoryWorkspaceDreamRunContext | None = None):
         if not any(operation is item for item in LAUNCH_METADATA_OPERATIONS):
             raise AdminDataError("ADMIN_OPERATION_CONTRACT_INVALID", 503, request_id)
         if type(input_dto) is not operation.input_dto:

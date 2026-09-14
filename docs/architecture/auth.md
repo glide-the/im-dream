@@ -1,4 +1,5 @@
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
+<!-- [Sync] 2026-09-15: register typed fail/envelope without granting actor IDs background authority. -->
 <!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
 <!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
 <!-- [Sync] 2026-09-15: file reads consume current OAuth Thread ownership before unchanged file rules. -->
@@ -132,3 +133,8 @@ Workspace content/download 的 current OAuth 身份继续共用 get_current_user
 公开Run cancel复用OAuth-write/default ensure、原reason编码和两项exact schemas，调用workflow-run.cancel并返回绑定actor/Workspace/Run/cancelled的原28字段模型/200。Unknown使用原UUID/显式generic两态receipt/no resend；原业务error映射/scoped安全422与微秒保持。Agent cancel和其它生命周期生产入口不改，见[现行Run规则](../design/workflow-run-admin-consumer-current.md#公开-run-cancel)。
 
 三个公开默认resolver已共用routers.deps.resolve_admin_default_workspace，服务器workspace_id非空复用，否则OAuth-write/empty ensure/two exact schemas/原text ID/default-before-domain，unknown原UUID且不自动重发。Deck Plugin已有服务器role非空保持；缺role时复用AdminRequestAuth.current_profile，OAuth dream:read/identity v1/原profile hash及canonical ID匹配后取raw role，unavailable/timeout/错配不使用user fallback。原permission/scope/DTO判断不变，只有write且需profile的POST按已发布readscope403。三resolver均无default/role SQL；其它binding/control-plane provider及internal/background输出DB另行迁移。详见[共享默认规则](../design/workflow-preflight-read-current.md#三个公开-current-user-resolver)。
+### 已注册失败消费者与后台身份缺口
+
+Request owner 复用现有两个 operation tuple 注册 workflow-run.fail/dream-launch-failure.envelope，client65（资源两项独立）；这只建立 exact DTO/capability/hash 消费类型，不代表原后台 recorder 已接线。Run fail 只检查 current actor/Workspace/Run/failed 完整模型，保留同 failed 重放的历史详情；envelope 匹配服务器 source IDs 与原始 error，不接受 caller metadata/codec。
+
+Admin 写边界允许 OAuth dream:write 或同 Thread/Run server-persistence，original failure-envelope GET 仅 OAuth write/current owner。Dream 不能用 actor_id/service credential 推断此权限；旧 dispatcher 尚缺 immutable turn owner，因此保留原 recorder 作为迁移缺口。两个独立提交、unknown 原 UUID/no resend 和 technical/normal 验收边界以[Run规则](../design/workflow-run-admin-consumer-current.md#run-fail-类型准备)、[metadata规则](../design/dream-launch-admin-metadata-current.md#独立-failure-envelope-类型准备)为准。
