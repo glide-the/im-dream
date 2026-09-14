@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
 <!-- [Input] Published Admin Preflight read/execute/receipt DTOs and original Dream model semantics. -->
 <!-- [Output] Current ownership, state, failure and acceptance rules for reads and staged execution. -->
@@ -58,3 +59,9 @@ GET 坏路径 ID、缺失记录或其他 actor 继续返回原 WORKFLOW_PERMISSI
 default需identity/unified两项exact schema与实际hash 5fb0f70b1790979687090e6c04dd837f24ff0a4c0598d95d5085117e65aa2b95，OAuth-write-only；server-persistence/Editor bearer不替代公开授权。初始化失败停止后续PF/Run/launch。HTTP超时保持共享client的504、安全UUID和unknown；坏回复503/unknown，其他拒绝保持安全code/status。显式originalGET只查询原UUID/operation、空input digest、all-null scopes和当前owner，返回absent或committed原textID；absent不触发初始化。默认初始化是写操作，服务器尚无Workspace的Run GET等入口只有dream:read则403；已有服务器workspace_id继续原read路径，PF GET始终不初始化。
 
 [完整生产入口技术测试](../../backend/tests/test_admin_default_workspace.py)保留实际default loader，以MockHTTP替代Admin transport并fence旧DB/service；验证default先于PF/Run、原202/200/201/full模型、原textID、401/403/capability/unknown stop与同UUID两态receipt/no resend。原独立PF/Run领域套件继续用显式default DI隔离各自合同，不据单个套件冒称全项目SQL已迁移。internal agent-output仍直接调用旧default helper，SystemConfig/launch prepare/Voice/failure/其它Run持久化及正常业务验收仍待。
+
+### 三个公开 current-user resolver
+
+StoryWorkflow、Deck binding 和 Deck Plugin 均调用routers.deps的同一个默认helper。helper算法从阶段33的Story原typed实现直接抽取，服务器workspace_id分支、OAuthwrite/empty input/两schema/原text ID/unknown原UUID/停止业务操作与原两态receipt保持。DeckPlugin resolver额外角色查询复用已注册user-profile.current（identity.better-auth.v1版本1/实际hash、OAuth dream:read），AdminRequestAuth检查current profile ID与actor canonical ID相同。已有服务器role非空保持；新读取返回raw role，权限函数依原role/scopes判断，不猜alias。Profile不可用、超时、坏DTO/ID错配明确失败，不fallback user。POST只有write且需profile则403；GET需默认初始化仍要求write，已有服务器workspace_id可走原read路径。
+
+[新公开入口技术套件](../../backend/tests/test_admin_deck_default_workspace.py)保留生产resolver/sharedOAuth/client/DTO，DB fenced，只有尚未迁移的binding/control-plane业务provider使用显式tests DI；验证default→profile→domain、rawtext/serverworkspace/serverrole/权限拒绝、profile scopes/ID/capability/unknown停止。既有binding fixture用default DI隔离领域DTO/CAS，独立新套件验证真实认证/默认依赖。剩余后台/internal输出默认helper仍属于原业务事务，不能拿public ensure作为其授权或事务迁移证据。

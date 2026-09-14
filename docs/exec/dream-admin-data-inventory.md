@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
 <!-- [Sync] 2026-09-15: record actual SystemConfig callsites and credential ownership without replacing an unpublished domain. -->
 <!-- [Sync] 2026-09-15: retain original launch commit ordering while candidate operations remain unregistered. -->
@@ -52,6 +53,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | --- | --- | --- | --- |
 | `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG；read/publish/close同活动锁，shutdown后台owner和Factory后关闭HTTP | 全域startup/其它DB与正常业务验收仍开放 |
 | 公开Deck完整列表 | [deck_list_data](../../backend/services/admin_data/deck_list_data.py)：deck.list | published false/true两mode无DB；原counts/author字段/owner int/ISO，Admin过滤排序装饰，单read | 创建/default/provision/install/后台与正常业务仍待；列表原路径无default/文件依赖 |
+| 三公开default resolver/DeckPlugin role | [shared deps](../../backend/routers/deps.py)、既有current_profile | Story/Deck binding/DeckPlugin共享empty Admin ensure、原textID/服务器WS/Scope/unknown；role复用OAuthread/canonicalID/rawrole，三resolver无DB | 其余binding/control-plane provider、background/internal输出DB和正常验收仍待；目录77不替代全链 |
 | 公开Preflight读取/领域执行 | [preflight_data](../../backend/services/admin_data/preflight_data.py)：workflow-preflight.read/execute、独立original receipt reader | GET无default/旧service/SQL；POST领域操作交Admin，raw JSON/原202与17字段、actor-Deck-revision/three schemas、显式同ID三态receipt/no resend；generic receipt不改 | POST default已使用registered76 Admin ensure；SystemConfig/隐藏source仍待；目录76不替代全域Run/launch或正常验收；revision descriptor元数据差异待Admin修正 |
 | 公开Run读取/创建/重试/取消 | [run_data](../../backend/services/admin_data/run_data.py)：workflow-run.read/create/retry/cancel | 领域操作无旧service/SQL；原200/201/28required fields/lifecycle/微秒/key/source、actor/Workspace/ID或key-retry-source、two exact schemas/hash、显式generic原两态receipt/no resend；原error mapping共享 | 四个入口default已使用registered76 Admin ensure；guidance/confirmation/launch/Run其它持久化及正常验收仍待；原SQLite行锁并发skip保持，不宣称PG验收 |
 | 共享文件content/download Thread ownership | [workspace_data](../../backend/services/admin_data/workspace_data.py)：复用chat-thread.get | 两GET不再调用get_chat_thread，current OAuth/strict reply/actor-ID/four schemas，原Mode/path/FS顺序和404/503 | get_system_config的Mode/初始化读取与其他管理数据入口仍pending；原Workspace fixture已改实际Admin HTTP，正常共享文件/CLI验收另行 |
@@ -310,7 +312,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 
 ## 2026-09-15当前生产模块源码复核
 
-命令：`/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-current-sql-scan.py`，exit0/parse_errors=[]。扫描backend Python，排除tests、backend/script以及四个明确offline schema catalog/importer/legacy模块。当前48个模块包含513个以SQL关键字开头的execute/executemany源码调用候选；16个模块仍导入数据库driver/persistence。
+命令：`/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-current-sql-scan.py`，exit0/parse_errors=[]。扫描backend Python，排除tests、backend/script以及四个明确offline schema catalog/importer/legacy模块。当前47个模块包含512个以SQL关键字开头的execute/executemany源码调用候选；16个模块仍导入数据库driver/persistence。
 
 这些是源码候选，不等于已证明运行可达的生产SQL全集，也不能与baseline835字符串片段直接相减。变量SQL、repository自定义exec/pool/独立stdio DATABASE_URL等需继续入口追踪。无字面SQL的Notion/MCP/Product Repository/Runtime仍因persistence imports继续开放，不能报告closed。
 
@@ -359,7 +361,6 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | [backend/services/deck/chat_context.py](../../backend/services/deck/chat_context.py) | 2 | 0 |
 | [backend/services/story_workspace/artifact_story_index_reconcile.py](../../backend/services/story_workspace/artifact_story_index_reconcile.py) | 2 | 0 |
 | [backend/services/story_workspace/guidance_service.py](../../backend/services/story_workspace/guidance_service.py) | 2 | 0 |
-| [backend/routers/deck_plugins.py](../../backend/routers/deck_plugins.py) | 1 | 0 |
 | [backend/services/admin_product/identity.py](../../backend/services/admin_product/identity.py) | 1 | 0 |
 | [backend/services/story_workspace/dream_reentry_service.py](../../backend/services/story_workspace/dream_reentry_service.py) | 1 | 2 |
 | [backend/services/story_workspace/dream_thread_binding.py](../../backend/services/story_workspace/dream_thread_binding.py) | 1 | 0 |
@@ -378,7 +379,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 
 ### 通用database helper与DI调用候选
 
-阶段33后同一只读scanner扫描299模块并补扫嵌套import、直接导入helper与模块alias：35个模块仍导入legacy database，120处直接helper Call候选，exit0/parse_errors=[]。Workspace ownership helper已移除一次源码Call（由两GET调用），剩余两处SystemConfig；48字面SQL模块/513候选和16driver模块保持。以下同时列出零Call但仍把helper作为DI/default callback传递的模块；这些不能据零Call视为关闭。静态候选还可能含已退役/不可达路径，后续依公开入口与发布capability复核，不当作运行时调用次数。
+阶段35后同一只读scanner扫描299模块并补扫嵌套import、直接导入helper与模块alias：34个模块仍导入legacy database，118处直接helper Call候选，exit0/parse_errors=[]。Workspace ownership helper已移除一次源码Call（由两GET调用），剩余两处SystemConfig；当前47字面SQL模块/512候选与16driver模块；删除DeckPlugin resolver的roleSQL/default get_db和binding默认get_db，后台原事务保留。以下同时列出零Call但仍把helper作为DI/default callback传递的模块；这些不能据零Call视为关闭。静态候选还可能含已退役/不可达路径，后续依公开入口与发布capability复核，不当作运行时调用次数。
 
 | database引用模块 | 直接helper调用候选 |
 | --- | --- |
@@ -396,7 +397,6 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | [backend/libs/claude_agent_kit/server/story_workspace_tool.py](../../backend/libs/claude_agent_kit/server/story_workspace_tool.py) | 1 |
 | [backend/server.py](../../backend/server.py) | 4 |
 | [backend/services/story_workspace/guidance_service.py](../../backend/services/story_workspace/guidance_service.py) | 1 |
-| [backend/routers/deck_plugins.py](../../backend/routers/deck_plugins.py) | 1 |
 | [backend/services/story_workspace/dream_thread_binding.py](../../backend/services/story_workspace/dream_thread_binding.py) | 0 |
 | [backend/tools/session_inspector.py](../../backend/tools/session_inspector.py) | 5 |
 | [backend/claude_agent/context_builder.py](../../backend/claude_agent/context_builder.py) | 0 |
@@ -445,3 +445,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 ### 阶段34公开Run cancel
 
 run_data复用Run28 model/two exact schemas增加cancel actualhash/requirednullable raw reason/绑定cancelled结果和原两态receipt；request owner通过原tuple注册第四项Run操作。[公开cancel](../../backend/routers/story_workspace.py)复用actual default loader→Admin取消，原reason/default/范围/编码、200/28fields/八errors/404/scoped安全422/unknown UUID保持，旧application SQL不再由该公开函数调用；其余Story函数、原application/WorkflowRunService/Agent/Runtime/资源/FS/TMPDIR字节保持。剩余两个current-user default resolver在Deck插件/binding待下一阶段复用统一client，DeckPlugin roleSQL亦单独追踪；internal agent-output/后台输出默认helper保持，未将default初始化操作冒用为这些事务的授权。SystemConfig仍未发布，Coordinator独立provider候选不属于本任务。
+
+### 阶段35三个公开默认 resolver
+
+[shared deps](../../backend/routers/deps.py)直接复用阶段33typed Story helper算法，三个wrapper统一调用，default resolver没有get_db/SQL。Deck Plugin role读取复用当前Profile OAuthread/canonicalID/rawrole，原permission/scope/DTO不改，失败不使用user fallback。当前scanner299/47SQL-bearing/512literal/16driver/34legacy imports/118helper、parse_errors=[]；完整声明scope的SQL/legacy tables按此次差异更新，不把源码候选视为全生产可达闭环。其余background/internal default helper、binding/control-plane领域DB/Runtime/Gateway/SystemConfig继续开放。artifact实际77的新dream-launch-failure.envelope只观察到注册，尚未消费；本阶段两个旧API specs不变、client63。

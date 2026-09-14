@@ -5,6 +5,7 @@
 # [Sync] 2026-09-15: reuse one explicit actor/threadpool/error adapter for typed Chat and Session operations.
 # [Sync] 2026-09-15: allow a domain's safe error response through the same actor invocation path.
 # [Sync] 2026-09-15: reuse scoped typed-request validation with fixed errors and no raw body echo.
+# [Sync] 2026-09-15: share OAuth-write default Workspace resolution across three public current-user dependencies.
 # [Sync] 2026-05-25: extracted common dependency helpers from backend/server.py.
 # [Sync] 2026-06-23: allow auth dependencies to read system access tokens from
 #                    Authorization headers or OAuth login cookies.
@@ -30,6 +31,7 @@ from starlette.concurrency import run_in_threadpool
 
 from services.admin_data.errors import AdminDataError
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from services.admin_data.workspace_data import AdminWorkspaceData, WorkspaceDefaultInputDTO
 
 http_bearer = HTTPBearer(auto_error=False)
 
@@ -94,6 +96,19 @@ async def invoke_admin_operation(current_user: dict, method, input_dto, *, error
             return error_handler(exc, request_id)
         detail = {"error_code": exc.code, "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown}
         raise HTTPException(status_code=exc.status_code, detail=detail) from None
+
+
+async def resolve_admin_default_workspace(current_user: dict, owner: AdminRequestAuth) -> dict:
+    if current_user.get("workspace_id"):
+        return current_user
+    actor = current_user.get("_admin_actor")
+    if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    if "dream:write" not in actor.scopes:
+        raise HTTPException(status_code=403, detail="INSUFFICIENT_SCOPE")
+    data = AdminWorkspaceData(owner.client, canonical_user_id=actor.canonical_user_id)
+    result = await invoke_admin_operation(current_user, data.ensure_default, WorkspaceDefaultInputDTO())
+    return {**current_user, "workspace_id": result.workspace_id}
 
 
 def _count_mixed_words(text: str) -> int:

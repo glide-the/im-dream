@@ -868,3 +868,36 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps
 - `git diff --check` **exit0/no output**。受影响header/folder/README/现行Auth/Run/库存同步；没有正常DB/服务/models/CLI、资源/TMPDIR或Runtime/SDK pin操作。
 
 主任务已明确继续其余两个current-user默认resolver；本任务定位为 deck_plugin_binding._deck_current_user 与 deck_plugins._deck_plugin_current_user，下一阶段统一复用既有typed default consumer。后者额外SELECTrole尚需明确现有profile合同作用域/输出校验，不使用ID当凭据；后台和internal agent-output的原默认helper属于不同生产事务入口，不将公开ensure冒用为事务替换。SystemConfig producer候选由协调主任务负责，本任务精确身份表已写库存，实际published domain之后再消费。
+
+## 阶段35：三个公开 current-user 默认 Workspace resolver
+
+### Optimized Prompt
+
+按主协调明确要求把 StoryWorkflow、Deck binding、Deck Plugin 的公开默认Workspace resolver统一至已验证 workspace-default.ensure。复用既有workspace_data/client/DTO/immutable OAuth actor和共享 invoke_admin_operation，在routers/deps抽取现有Story helper的一次逻辑实现；保持服务器workspace_id复用、OAuthwrite-only、两exact schemas/实际hash、原textID/default-before-domain、unknown原UUID/显式原GET/no resend。三个wrapper调用同一helper，不在public resolver打开DB；其它domain DB dependencies/后台和internal输出事务仍单独追踪，不用公开ensure替代其事务。
+
+DeckPlugin resolver额外role SELECT复用现有 AdminRequestAuth.current_profile（profile合同已注册、原ID/rawrole与scopes），在已有服务器role为空时明确OAuth dream:read、currentProfile回复canonical ID匹配后取role；原serverrole非空继续保留，不猜role alias，不改变_permissions/_require_permission/_workspace_request或Admin管理边界。Profile unavailable不使用user role fallback，安全status/code/requestID；token仅write且需role projection按已发布readscope403，不扩权或把userID当credential。
+
+对照实际现有DeckPlugin/binding public routes和test fixture，provider-free测试调用公开生产路由/sharedOAuth/default/profile client/DTO；Fake domain仅通过tests DI替代尚未迁移的业务provider，旧DB fenced，不覆盖current-user resolver，不复制route/parser/state machine。验证三个default wrapper公共default→业务顺序、已有服务器Workspace分支、raw text ID、profile角色/ID匹配/权限拒绝、scope/capability/unknown stop/no auto-retry；复用已通过PF/Run/default suites回归。AST比较除三个wrapper/sharedhelper外的原route funcs/classes、原权限check/DTO和其它Agent/Runtime/resources/FS/TMPDIR不改；actual operation63仍无新provider/schema/authauthority。同步headers/folders/currentAuth/PF/default/Deck设计库存/README和计划，检查Markdown paths/history/README与diff后仅提交明确拥有路径，不跑normal PG/models/服务、SDK/Runtime pins。
+
+### 阶段35实现与技术回执
+
+三个wrapper统一调用routers.deps.resolve_admin_default_workspace，body直接抽取阶段33typed Story算法，现有server workspace/dream:write/empty input/two schemas/raw text ID/unknown原UUID/停止domain流程保持。DeckPlugin role复用既有AdminRequestAuth.current_profile，明确dream:read/原profile spec/identity1/ID检查，server role非空复用，缺role读取失败不使用user fallback。原权限/scopes/request/业务routes/classes不改。DeckPlugin resolver全部SQL/database import移除；binding与Story只移除default依赖，剩余领域/后台/internal输出SQL继续追踪。
+
+新actual公开Deck/binding套件不override三resolver/sharedOAuth/client/DTO，only remaining business provider在tests DI；旧DB fenced。共享default transport fixture扩展profile及explicit write-only token测试，生产模块无测试分支。旧binding domain fixtures明确override current resolver来隔离DTO/CAS，与新的actual默认/认证入口套件分别标注，匿名入口依旧真实auth拒绝。
+
+首次七文件命令包括旧 `test_deck_plugin_admin_integration.py`，**exit1/243pass/1skip/1fail/5.72s**。新默认/角色入口用例全部通过；唯一fail是原 `test_install_list_and_readiness_use_real_materialized_plugin` 自动调用真实 `claude plugin validate` 返回exit2，在未改的PluginInstallService CLI安装harness中失败。此次确实发生这一次CLI validate调用，不报告为provider-free/真实model验收；不读取/复制normal凭据、不变更TMPDIR协议、不用失败判断新页面/API有缺陷，不重跑该真实CLIharness。原fixture tearDown清理其自有tmp/DB，Root不清理正常服务或其它Agent资源。
+
+按本阶段目标重跑六文件provider-free命令 **242pass/1skip/5.19s，exit0**：
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_deck_default_workspace.py backend/tests/test_admin_default_workspace.py backend/tests/test_admin_run_cancel.py backend/tests/test_admin_run_routes.py backend/tests/test_admin_preflight_execution.py backend/tests/test_deck_plugin_binding.py
+```
+
+唯一skip为原 `test_concurrent_compare_and_swap_allows_only_one_revision`：legacy SQLite不能模拟PostgreSQL行锁并发，superseded by owned-PG contract。新套件覆盖actualdefault→role→business provider、raw text ID/既有serverworkspace/serverrole、原user权限拒绝、profile scopes/DTO/ID/capability/error、不fallbackuser、初始化unknown停profile/domain前。此技术suite不声称PG并发/normal account/model/Runtime验收。
+
+- `env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage35-contract-check.py` **exit0/PASS**：实际artifact此时**77**/client63，新增dream-launch-failure.envelope仅观察注册尚未消费；default/profile两个已消费capability/版本/hash和two default/identity-only profile要求匹配实际registry。原Storytyped算法body直接复用、三wrapper各一shared调用/无SQL，existing profile rawrole/readscope/ID方法复用；其它routes/permissions/classes/deps保持，496其余tracked backend Python字节不变，background/internal原defaulthelper保留。
+- `python3 /private/tmp/dream-admin-current-sql-scan.py` **exit0**：299modules/**47SQL-bearing/512literal/16driver/34legacy imports/118directhelper**、parse_errors=[]，相对阶段34减少DeckPlugin role SQL与两默认get_db；完整声明scope内当前SQL/legacy tables同步，未当作全可达SQL清零。
+- `python3 /private/tmp/dream-admin-doc-check.py` **exit0**：42files/438local links/300folder entries/failures=[]、三history SHA原文不改/README heading parity=true，6Mermaid只查数量。
+- `git diff --check` **exit0/no output**。受影响folder/header/README/currentAuth/PF共享默认/Deck canonical设计/库存已同步；没有正常DB/服务/model业务操作，Runtime/SDK pins/资源/TMPDIR源不变。
+
+SystemConfig当前callsite/Thread或Run grant/Editor用途表仍在[精准清单](dream-admin-data-inventory.md#systemconfig-生产读取与身份复查--阶段32后)；Profile role使用公开OAuth，不把server-persistence/editor-stdio当作用途授权。协调主任务独立SystemConfig producer候选尚无已发布消费者合同。跨任务详细同步的既有自动审批拒绝未解除，结果写入本任务文件供复核，不重试发送或复制normal凭据。

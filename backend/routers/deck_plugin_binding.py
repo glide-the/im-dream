@@ -1,3 +1,7 @@
+# [Input] Current Admin OAuth actor, shared default Workspace and existing binding domain DTO/providers.
+# [Output] Original authenticated binding/options/history/validation API projections.
+# [Pos] Public Deck binding ingress; default resolution has no Dream SQL.
+# [Sync] 2026-09-15: resolve default Workspace through the shared registered OAuth-write consumer.
 """Authenticated Deck Plugin binding, options, history, and validation endpoints.
 
 [Sync 2026-08-16] Add the folded Deck panel's owner-checked history read.
@@ -12,9 +16,9 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 import database
-from services.story_workspace.agent_integration import get_or_create_default_workspace
+from services.admin_data.request_auth import AdminRequestAuth
 
-from .deps import get_current_user
+from .deps import get_admin_request_auth, get_current_user, resolve_admin_default_workspace
 
 try:
     from backend.models.deck_plugin import (
@@ -111,16 +115,10 @@ def _requested_workspace(current_user: dict[str, Any]) -> str | None:
 
 async def _deck_current_user(
     current_user: dict[str, Any] = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> dict[str, Any]:
     """Ensure Deck binding always has the authenticated user's default workspace."""
-    if current_user.get("workspace_id"):
-        return current_user
-    db = database.get_db()
-    try:
-        workspace_id = get_or_create_default_workspace(db, int(current_user["user_id"]))
-    finally:
-        db.close()
-    return {**current_user, "workspace_id": workspace_id}
+    return await resolve_admin_default_workspace(current_user, owner)
 
 
 def _access_denied() -> JSONResponse:

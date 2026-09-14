@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
 <!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
 <!-- [Sync] 2026-09-15: file reads consume current OAuth Thread ownership before unchanged file rules. -->
@@ -129,3 +130,5 @@ Run read/create/retry使用当前OAuth read/write、identity/unified两项exact 
 Workspace content/download 的 current OAuth 身份继续共用 get_current_user；Thread ownership 改为 chat-thread.get 与原 strict DTO/four exact schema/hash，reply ID/actor 匹配后才执行原 Mode/path/existing filesystem。metadata 错配/不可用固定503/null404，无自动重试或PG fallback；原 ZIP/symlink/no-create/header保持。SystemConfig读取与其他文件管理metadata仍pending，技术测试不代表普通共享文件/真实Bash验收。
 
 公开Run cancel复用OAuth-write/default ensure、原reason编码和两项exact schemas，调用workflow-run.cancel并返回绑定actor/Workspace/Run/cancelled的原28字段模型/200。Unknown使用原UUID/显式generic两态receipt/no resend；原业务error映射/scoped安全422与微秒保持。Agent cancel和其它生命周期生产入口不改，见[现行Run规则](../design/workflow-run-admin-consumer-current.md#公开-run-cancel)。
+
+三个公开默认resolver已共用routers.deps.resolve_admin_default_workspace，服务器workspace_id非空复用，否则OAuth-write/empty ensure/two exact schemas/原text ID/default-before-domain，unknown原UUID且不自动重发。Deck Plugin已有服务器role非空保持；缺role时复用AdminRequestAuth.current_profile，OAuth dream:read/identity v1/原profile hash及canonical ID匹配后取raw role，unavailable/timeout/错配不使用user fallback。原permission/scope/DTO判断不变，只有write且需profile的POST按已发布readscope403。三resolver均无default/role SQL；其它binding/control-plane provider及internal/background输出DB另行迁移。详见[共享默认规则](../design/workflow-preflight-read-current.md#三个公开-current-user-resolver)。

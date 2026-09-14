@@ -1,3 +1,7 @@
+# [Input] Owned binding fixtures, production DTOs and isolated domain DI.
+# [Output] Binding state/history/CAS/API technical contracts; real auth/default ingress is verified separately.
+# [Pos] Explicit provider-free binding fixture tests, no production fallback.
+# [Sync] 2026-09-15: isolate the default resolver in existing binding-only fixtures after shared OAuth adoption.
 """Focused binding persistence, history, validation, concurrency, and API tests.
 
 [Sync 2026-08-16] Cover the folded Deck panel's append-only history response.
@@ -523,6 +527,9 @@ class BindingRouterTests(unittest.TestCase):
             "workspace_id": WORKSPACE_ID,
         }
         app.dependency_overrides[binding_router._binding_db] = lambda: self.fixture.db
+        # This suite isolates binding DTO/domain behavior with an owned fixture.
+        # Actual OAuth/default resolution is verified in the Admin ingress suite.
+        app.dependency_overrides[binding_router._deck_current_user] = app.dependency_overrides[binding_router.get_current_user]
         app.dependency_overrides[
             binding_router._selection_service
         ] = lambda: self.fixture.validator
@@ -693,6 +700,7 @@ class BindingRouterTests(unittest.TestCase):
         unauthorized_app.dependency_overrides[
             binding_router._binding_db
         ] = lambda: self.fixture.db
+        unauthorized_app.dependency_overrides[binding_router._deck_current_user] = unauthorized_app.dependency_overrides[binding_router.get_current_user]
         unauthorized_app.dependency_overrides[
             binding_router._selection_service
         ] = lambda: self.fixture.validator

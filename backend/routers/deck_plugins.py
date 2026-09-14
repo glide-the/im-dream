@@ -1,3 +1,7 @@
+# [Input] Current Admin OAuth/profile role, shared default Workspace and existing control-plane provider.
+# [Output] Original permission-scoped Deck Plugin API projections without resolver SQL.
+# [Pos] Logical Deck control-plane ingress; named domain providers retain business state.
+# [Sync] 2026-09-15: consume shared default Workspace and verified current profile role instead of local queries.
 """Logical Deck control-plane routes; domain services retain authoritative state."""
 
 from __future__ import annotations
@@ -5,14 +9,15 @@ from __future__ import annotations
 from typing import Any, Literal, Protocol
 import uuid
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-import database
-from services.story_workspace.agent_integration import get_or_create_default_workspace
+from starlette.concurrency import run_in_threadpool
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 
-from .deps import get_current_user
+from .deps import get_admin_request_auth, get_current_user, resolve_admin_default_workspace
 
 try:
     from services.errors.error_registry import ApiRouteError, build_error_payload
@@ -125,20 +130,21 @@ def _require_permission(
 
 async def _deck_plugin_current_user(
     current_user: dict[str, Any] = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> dict[str, Any]:
     """Resolve the authenticated user's owned Deck workspace for scoped admin."""
-    db = database.get_db()
+    resolved = await resolve_admin_default_workspace(current_user, owner)
+    if resolved.get("role"):
+        return resolved
+    actor = resolved.get("_admin_actor")
+    if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    request_id = str(uuid.uuid4())
     try:
-        user_id = int(current_user["user_id"])
-        workspace_id = current_user.get("workspace_id") or get_or_create_default_workspace(db, user_id)
-        user_row = db.execute("SELECT role FROM users WHERE id = %s", (user_id,)).fetchone()
-    finally:
-        db.close()
-    return {
-        **current_user,
-        "workspace_id": workspace_id,
-        "role": current_user.get("role") or (user_row["role"] if user_row else "user"),
-    }
+        profile = await run_in_threadpool(owner.current_profile, actor, request_id)
+    except AdminDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code, "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown}) from None
+    return {**resolved, "role": profile.role}
 
 
 def _workspace_request(

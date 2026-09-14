@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
 <!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
 <!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
@@ -87,6 +88,8 @@ Public invitations, friend requests, relationships and friend picture reads now 
 Public Deck owned/community lists now use one typed Admin operation, preserving original counts and author fields without filesystem or default-initialization steps.
 
 Public Preflight GET uses an owner-scoped Admin read without initializing a Workspace. POST preserves its 202 response, all 17 fields and explicit original three-state receipts. Run read/create/retry preserve all 28 fields and original 200/201 responses. Default-dependent Workflow ingress now uses the registered Admin workspace-default.ensure operation before these domains; it returns the original text ID and requires OAuth dream:write for initialization, including Run GET when no server Workspace is present. Unknown writes retain their original request ID without retries. System configuration and remaining lifecycle/launch/internal agent-output persistence need migration. See the [Preflight rules](docs/design/workflow-preflight-read-current.md) and [Run rules](docs/design/workflow-run-admin-consumer-current.md).
+
+Story Workflow, Deck binding and Deck Plugin current-user dependencies share the same Admin default Workspace resolver. Deck Plugin role lookup reuses the current Admin profile with OAuth read scope and canonical ID validation; existing permission checks remain. Remaining domain and background persistence still need migration.
 
 Public Workflow Run cancel now uses its registered Admin command, preserving the original reason, full 28-field response, business errors and bounded original receipt. Agent cancellation retains its existing behavior.
 

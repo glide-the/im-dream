@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: share current profile/explicit write-only secret scopes with the real Deck resolver harness.
 # [Input] Registered76 DTO/client and actual default-dependent FastAPI Workflow ingress.
 # [Output] Default-before-domain, original text ID, scope/unknown-write and receipt technical evidence.
 # [Pos] Provider-free harness; Admin transport is injected, production default loader is retained.
@@ -15,14 +16,15 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from routers.story_workspace import router
-from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
+from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError, OAuthPrincipalClaims
 from services.admin_data.preflight_data import EXECUTE_PREFLIGHT, READ_PREFLIGHT, PREFLIGHT_EXECUTION_SCHEMA_REQUIREMENTS
 from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.profile_data import CURRENT_PROFILE
 from services.admin_data.run_data import RUN_OPERATIONS
 from services.admin_data.workspace_data import AdminWorkspaceData, ENSURE_DEFAULT_WORKSPACE, WorkspaceDefaultInputDTO, WorkspaceDefaultOutputDTO
 from tests.test_admin_preflight_execution import request_body
 from tests.test_admin_preflight_routes import PREFLIGHT_ID, preflight
-from tests.test_admin_request_auth import Verifier
+from tests.test_admin_request_auth import Verifier, profile_value
 from tests.test_admin_run_routes import RUN_ID, body, run
 
 PREFIX = "/api/story-workspace"
@@ -42,15 +44,20 @@ def boundary(monkeypatch):
     monkeypatch.setattr(module, "get_story_workflow_run_application_service", no_sql)
     monkeypatch.setattr(module, "get_story_workflow_run_service", no_sql)
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
-    operations = [item.capability.model_dump() for item in (ENSURE_DEFAULT_WORKSPACE, READ_PREFLIGHT, EXECUTE_PREFLIGHT, *RUN_OPERATIONS)]
+    operations = [item.capability.model_dump() for item in (ENSURE_DEFAULT_WORKSPACE, READ_PREFLIGHT, EXECUTE_PREFLIGHT, *RUN_OPERATIONS, CURRENT_PROFILE)]
     schemas = [item.model_dump() for item in PREFLIGHT_EXECUTION_SCHEMA_REQUIREMENTS]
-    state = {"default": {"workspace_id": "existing-workspace-1"}, "receipt": None, "receipt_operation": "workspace-default.ensure", "cancel": {"run": run("cancelled")}}
+    state = {"default": {"workspace_id": "existing-workspace-1"}, "receipt": None, "receipt_operation": "workspace-default.ensure", "cancel": {"run": run("cancelled")}, "profile": {"user": profile_value()}}
     calls = []
 
     class ScopeVerifier(Verifier):
         def verify(self, token, *, required_scopes):
             if token.startswith("idg_"):
                 raise AdminDataError("INVALID_ACCESS_TOKEN", 401)
+            if token == "write-only-token":
+                scopes = frozenset({"dream:write"})
+                if not required_scopes <= scopes:
+                    raise AdminDataError("INSUFFICIENT_SCOPE", 403)
+                return OAuthPrincipalClaims("opaque-ba-subject", "dream-browser", scopes, "token-id", 100, 400)
             return super().verify(token, required_scopes=required_scopes)
 
     def handler(request):
@@ -63,9 +70,10 @@ def boundary(monkeypatch):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": schemas, "operations": operations}
         else:
             token = request.headers["authorization"].removeprefix("Bearer ")
-            assert token in {"read-token", "write-token"}
+            assert token in {"read-token", "write-token", "write-only-token"}
             if request.url.path.endswith("/principal"):
-                value = {"subject": "opaque-ba-subject", "canonical_user_id": "42", "client_id": "dream-browser", "scopes": ["dream:read", "dream:write"] if token == "write-token" else ["dream:read"], "status": "active"}
+                scopes = ["dream:read", "dream:write"] if token == "write-token" else ["dream:write"] if token == "write-only-token" else ["dream:read"]
+                value = {"subject": "opaque-ba-subject", "canonical_user_id": "42", "client_id": "dream-browser", "scopes": scopes, "status": "active"}
             elif "/receipts/" in request.url.path:
                 assert request.method == "GET" and dict(request.url.params) == {"operation": state["receipt_operation"]}
                 assert request.url.path.endswith("/" + rid)
@@ -78,7 +86,7 @@ def boundary(monkeypatch):
                 assert set(envelope) == {"request_id", "input"} and envelope["request_id"] == rid
                 calls.append((operation, rid, envelope["input"]))
                 if operation == "workspace-default.ensure":
-                    assert token == "write-token" and envelope["input"] == {}
+                    assert token in {"write-token", "write-only-token"} and envelope["input"] == {}
                     value = state["default"]
                 elif operation == "workflow-preflight.execute":
                     assert envelope["input"]["workspace_id"] == "existing-workspace-1"
@@ -87,6 +95,9 @@ def boundary(monkeypatch):
                     value = {"request_state": "committed", "preflight": pf}
                 elif operation == "workflow-preflight.read":
                     value = {"preflight": preflight()}
+                elif operation == "user-profile.current":
+                    assert envelope["input"] == {}
+                    value = state["profile"]
                 else:
                     assert envelope["input"]["workspace_id"] == "existing-workspace-1"
                     row = run()
@@ -101,7 +112,7 @@ def boundary(monkeypatch):
         return httpx.Response(200, json={"request_id": rid, "data": value})
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    client = AdminDataClient(config, client=http, operations=(ENSURE_DEFAULT_WORKSPACE, READ_PREFLIGHT, EXECUTE_PREFLIGHT, *RUN_OPERATIONS))
+    client = AdminDataClient(config, client=http, operations=(ENSURE_DEFAULT_WORKSPACE, READ_PREFLIGHT, EXECUTE_PREFLIGHT, *RUN_OPERATIONS, CURRENT_PROFILE))
     owner = AdminRequestAuth(config, client=client, verifier=ScopeVerifier())
     app = FastAPI()
     app.state.admin_request_auth = owner

@@ -7,6 +7,7 @@
 # [Sync] 2026-09-15: consume full Run read/create/retry domains while retaining default Workspace SQL.
 # [Sync] 2026-09-15: replace Workflow ingress default SQL with OAuth-write Admin ensure; internal agent-output stays separate.
 # [Sync] 2026-09-15: cancel Run through Admin with the original reason/model/errors; Agent cancel remains owned by its service.
+# [Sync] 2026-09-15: reuse the shared default Workspace resolver with Deck Plugin and binding ingress.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
@@ -44,11 +45,10 @@ from services.story_workspace.agent_integration import (
     get_or_create_default_workspace,
     store_agent_story_output,
 )
-from .deps import SafeRequestValidationRoute, get_admin_request_auth, get_current_user, invoke_admin_operation
+from .deps import SafeRequestValidationRoute, get_admin_request_auth, get_current_user, invoke_admin_operation, resolve_admin_default_workspace
 from services.admin_data.errors import AdminDataError
 from services.admin_data.preflight_data import AdminPreflightData, PreflightExecutionInputDTO, PreflightInputDTO
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
-from services.admin_data.workspace_data import AdminWorkspaceData, WorkspaceDefaultInputDTO
 from services.admin_data.run_data import AdminRunData, RunCancelInputDTO, RunCreateInputDTO, RunLookupInputDTO, RunRetryInputDTO
 
 try:
@@ -320,16 +320,7 @@ async def _story_workflow_current_user(
     current_user: dict[str, Any] = Depends(get_current_user),
     owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ) -> dict[str, Any]:
-    if current_user.get("workspace_id"):
-        return current_user
-    actor = current_user.get("_admin_actor")
-    if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
-        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
-    if "dream:write" not in actor.scopes:
-        raise HTTPException(status_code=403, detail="INSUFFICIENT_SCOPE")
-    data = AdminWorkspaceData(owner.client, canonical_user_id=actor.canonical_user_id)
-    result = await invoke_admin_operation(current_user, data.ensure_default, WorkspaceDefaultInputDTO())
-    return {**current_user, "workspace_id": result.workspace_id}
+    return await resolve_admin_default_workspace(current_user, owner)
 
 
 def _workflow_actor(current_user: dict[str, Any]) -> dict[str, str]:
