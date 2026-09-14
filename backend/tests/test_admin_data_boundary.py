@@ -2,12 +2,14 @@
 # [Output] Deterministic authentication/transport/unknown-commit contract receipts without PG/model calls.
 # [Pos] Provider-free tests for the unified Admin consumer boundary.
 # [Sync] 2026-09-14: cover auth/receipt security and exact closed Deck conflict feedback without upstream messages.
+# [Sync] 2026-09-15: controlled catalog refresh/execute concurrency retains exact contracts and per-request actor headers.
 """Invoke the real client/verifier through injected HTTP; no alternate production path."""
 
 from __future__ import annotations
 
 import json
 import time
+from threading import Event, Lock, Thread
 
 from cryptography.hazmat.primitives.asymmetric import ec
 import httpx
@@ -144,6 +146,125 @@ class PersistNoteOutput(StrictDTO):
 def operation():
     # Technical fixture DTO registered via the real composition API, never deployed.
     return DomainOperation(OperationCapabilityDTO(name="notes.persist", kind="write", user_scope="dream:write", background_scope=None, input_schema_version=1, output_schema_version=1, contract_sha256="a" * 64), PersistNoteInput, PersistNoteOutput)
+
+
+@pytest.mark.parametrize("refresh_result", ["valid", "missing", "hash", "failure"])
+def test_catalog_refresh_does_not_expose_intermediate_empty_advertisement(config, refresh_result):
+    spec = operation(); entered, release, started, done = Event(), Event(), Event(), Event()
+    refresh_errors, write_errors, results, calls = [], [], [], []
+
+    def handler(request):
+        request_id = request.headers["x-request-id"]
+        if request.url.path.endswith("/capabilities"):
+            value = auth_capabilities(config, (spec,))
+            if request_id == "refresh":
+                entered.set(); assert release.wait(2), "harness did not release catalog refresh"
+                if refresh_result == "failure": raise httpx.ReadTimeout("private catalog detail")
+                if refresh_result == "missing": value["operations"] = []
+                if refresh_result == "hash": value["operations"][0]["contract_sha256"] = "b" * 64
+            return response(value, request_id)
+        calls.append(request_id)
+        return response({"revision": 3}, request_id)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler)); client = AdminDataClient(config, client=http, operations=(spec,))
+    client.capabilities("bootstrap")
+
+    def refresh():
+        try: client.capabilities("refresh")
+        except BaseException as exc: refresh_errors.append(exc)
+
+    def write():
+        started.set()
+        try: results.append(client.execute(spec, PersistNoteInput(session_id="note-1", text="text"), "concurrent-write", access_token="actor-token"))
+        except BaseException as exc: write_errors.append(exc)
+        finally: done.set()
+
+    reader = Thread(target=refresh, name="stage22-catalog-refresh")
+    writer = Thread(target=write, name="stage22-catalog-write")
+    reader.start()
+    try:
+        assert entered.wait(2); writer.start(); assert started.wait(2)
+        assert not done.wait(0.05), "execute observed the intermediate catalog state"
+    finally:
+        release.set(); reader.join(2)
+        if writer.ident is not None: writer.join(2)
+        http.close()
+    assert not reader.is_alive() and not writer.is_alive()
+    if refresh_result == "valid":
+        assert not refresh_errors and not write_errors and results[0].revision == 3 and calls == ["concurrent-write"]
+    else:
+        assert not calls and not results and len(write_errors) == 1 and isinstance(write_errors[0], AdminDataError)
+        assert write_errors[0].request_id == "concurrent-write" and not write_errors[0].outcome_unknown
+        assert bool(refresh_errors) is (refresh_result == "failure")
+
+
+def test_catalog_sync_does_not_serialize_domain_http_or_mix_actor_headers(config):
+    spec = operation(); both_entered, release = Event(), Event(); guard = Lock(); calls, failures = [], []
+
+    def handler(request):
+        request_id = request.headers["x-request-id"]
+        if request.url.path.endswith("/capabilities"): return response(auth_capabilities(config, (spec,)), request_id)
+        with guard:
+            calls.append((request_id, request.headers["authorization"], json.loads(request.content)))
+            if len(calls) == 2: both_entered.set()
+        assert release.wait(2), "harness did not release domain HTTP"
+        return response({"revision": 3}, request_id)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler)); client = AdminDataClient(config, client=http, operations=(spec,))
+    client.capabilities("bootstrap")
+
+    def write(id):
+        try: client.execute(spec, PersistNoteInput(session_id=f"note-{id}", text=f"text-{id}"), f"write-{id}", access_token=f"actor-{id}")
+        except BaseException as exc: failures.append(exc)
+
+    workers = [Thread(target=write, args=(id,), name=f"stage22-domain-write-{id}") for id in (1, 2)]
+    for worker in workers: worker.start()
+    try:
+        assert both_entered.wait(2), "domain HTTP became globally serialized"
+    finally:
+        release.set()
+        for worker in workers: worker.join(2)
+        http.close()
+    assert not failures and all(not worker.is_alive() for worker in workers)
+    assert sorted(calls) == [(f"write-{id}", f"Bearer actor-{id}", {"request_id": f"write-{id}", "input": {"session_id": f"note-{id}", "text": f"text-{id}"}}) for id in (1, 2)]
+
+
+def test_multiple_catalog_refreshes_cannot_interleave_advertisement_updates(config):
+    spec = operation(); first_entered, second_started, second_entered, release = Event(), Event(), Event(), Event()
+    failures, calls = [], []
+
+    def handler(request):
+        request_id = request.headers["x-request-id"]; calls.append(request_id)
+        value = auth_capabilities(config, (spec,))
+        if request_id == "first":
+            first_entered.set(); assert release.wait(2), "harness did not release first refresh"
+        if request_id == "second":
+            second_entered.set(); value["operations"] = []
+        return response(value, request_id)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler)); client = AdminDataClient(config, client=http, operations=(spec,))
+    client.capabilities("bootstrap")
+
+    def refresh(id):
+        if id == "second": second_started.set()
+        try: client.capabilities(id)
+        except BaseException as exc: failures.append(exc)
+
+    first = Thread(target=refresh, args=("first",), name="stage22-first-refresh")
+    second = Thread(target=refresh, args=("second",), name="stage22-second-refresh")
+    first.start()
+    try:
+        assert first_entered.wait(2); second.start(); assert second_started.wait(2)
+        assert not second_entered.wait(0.05), "refreshes modified the shared advertisement concurrently"
+    finally:
+        release.set(); first.join(2)
+        if second.ident is not None: second.join(2)
+        http.close()
+    assert not failures and not first.is_alive() and not second.is_alive()
+    assert calls == ["bootstrap", "first", "second"]
+    with pytest.raises(AdminDataError) as exc:
+        client.execute(spec, PersistNoteInput(session_id="note-1", text="text"), "later-write", access_token="actor-token")
+    assert exc.value.code == "ADMIN_CAPABILITY_UNAVAILABLE" and calls == ["bootstrap", "first", "second"]
 
 
 def test_unadvertised_operation_cannot_dispatch(config):

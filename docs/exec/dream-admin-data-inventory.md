@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record catalog synchronization without closing outstanding domain migrations. -->
 <!-- [Sync] 2026-09-15: map three public refs consumers and remaining Runtime/install dependencies. -->
 <!-- [Sync] 2026-09-15: map Browser async snapshot ownership and remaining business verification. -->
 <!-- [Input] Dream baseline Python AST and follow-up production rg scan. -->
@@ -10,6 +11,8 @@
 <!-- [Sync] 2026-09-14: initial exhaustive candidate scan; candidates are not all reachable production SQL. -->
 
 # Dream 生产数据入口清单
+
+共享AdminClient已同步catalog readiness、refresh与operation广告检查；领域HTTP保持并发且未知提交原receipt语义不变。该改动只关闭metadata竞态，不减少其它生产DB迁移清单。
 
 ## 背景与问题
 

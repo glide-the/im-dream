@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record catalog refresh/readiness boundary without changing request authentication. -->
 <!-- [Sync] 2026-09-15: current Browser session identity fences aborted/stale responses and asynchronous user commits. -->
 <!-- [Input] Dream baseline auth/BFF and the Admin-owned contract when frozen. -->
 <!-- [Sync] 2026-09-15: bind public Agent Thread/SDK Session operations and scope original-ID recovery. -->
@@ -11,6 +12,8 @@
 <!-- [Sync] 2026-09-14: record the implemented Admin BFF and public issuer retirement; retain original history. -->
 
 # Dream 接入 Admin 认证
+
+统一Client的catalog refresh/readiness与广告检查共享同步边界。正在加载时其它已验证调用等待完整结果；失败清空ready/广告并由后续认证重新加载，不能沿用旧广告。领域HTTP保持并发、显式per-request token/DTO/UUID，认证校验、scope与原receipt语义不变。
 
 ## 背景与问题
 

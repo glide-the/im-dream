@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: synchronize Admin catalog refresh and retain concurrent domain HTTP. -->
 <!-- [Sync] 2026-09-15: public Deck Claude Plugin refs use Admin plus unchanged local artifact/CLI checks. -->
 <!-- [Sync] 2026-09-15: discard stale Browser session results and retain success-only logout. -->
 <!-- [Sync] 2026-09-15: serialize resource HTTP shutdown after producers and Factory drain. -->
@@ -66,6 +67,8 @@ Public Deck content state/preview/commit/history/detail now use five typed Admin
 Public Deck Claude Plugin refs now use Admin list/prepare/replace. Dream verifies the selected artifact and CLI compatibility with the existing checks before submitting source-bound evidence; other plugin installation/runtime data paths remain migration work.
 
 Public user preference get/save now use two OAuth-bound Admin operations. Missing records still return `{}`; null preserves saved fields, empty objects and strings remain values, and raw Python config JSON keeps numeric types. Default voices, system policy, first-login writes and background context remain separate domains.
+
+The shared Admin client serializes catalog refresh and capability checks. Failed refresh clears readiness for the next request to reload; domain HTTP remains concurrent and keeps each actor, DTO and request ID separate.
 
 ## What you can do
 

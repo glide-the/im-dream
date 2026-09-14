@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: specify shared catalog synchronization, failed refresh and per-request concurrent dispatch. -->
 <!-- [Sync] 2026-09-15: specify prepare/local verification/source recheck and unknown refs writes. -->
 <!-- [Sync] 2026-09-15: specify abort/read identity and success-only logout snapshot ownership. -->
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
@@ -13,6 +14,8 @@
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
+
+共享Client以同一catalog锁覆盖readiness、完整refresh与operation广告检查，调用方不会读取加载期间的空广告。fresh成功后按exact合同判断；失败仍清空ready/广告，下一RequestAuth重新加载。领域HTTP在短检查锁外执行，DTO/token/request_id只属于该请求；多个refresh按获取锁顺序完成，不互相覆盖。receipt维持原二态、原UUID且不自动重发。
 
 ## 背景与问题
 

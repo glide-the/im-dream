@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record Stage22 RED reproduction and synchronized metadata implementation. -->
 <!-- [Input] User delegation, Agent.md, AGENTS.md, baseline 7d38715c, and Admin-owned contracts when published. -->
 <!-- [Output] Executable Dream migration plan, dependency gates, and exact evidence inventory. -->
 <!-- [Pos] Dream implementation plan; Admin owns authentication, database transactions, and schema contracts. -->
@@ -440,3 +441,19 @@ Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offtur
 复用Client统一transport，增加catalog RLock；capabilities readiness读/刷新HTTP与execute广告检查共享同一lock。execute只在合同/type/scope/DTO生成的短检查阶段持锁，实际领域HTTP在锁外，既有RPC仍可并发；receipt保持原二态与originalID无重试，不改变刷新失败清空ready/advertisement与下一RequestAuth恢复。body/header仍per-request显式actor，无全局token状态；不引入TTL/缓存quota/租户/环境分支或全局HTTP串行。
 
 只改共享metadata同步和meaningful并发测试/相关headers/folder/README镜像/现行设计/清单。Luna先给当前源码复现failed命令回执，root修复后fresh client/共享Auth/各消费端相关合同；验证RPC可以同时dispatch、多个刷新不能交错修改广告、失败不使用旧广告、unknown原UUID不自动重发。全部MockTransport/ownedEventThreads，无PG/model/账户/network/服务/SDKruntime；当前资源/admission/lease/SSE/FS和所有未迁移领域保持边界，不把本阶段称全域完成。
+
+阶段22 RED技术回执：真实Client受控并发6用例命令exit1，`5 failed, 1 passed, 67 deselected in 0.21s`；四种refresh等待断言和双refresh交错断言复现，无PG/network。root增加catalog RLock覆盖readiness/完整refresh/短execute检查，领域HTTP锁外、receipt不改，fresh共享Client/Auth/领域合同待验。
+
+阶段22 fresh技术回执：指定十文件共享Client/Auth/领域集合 `324 passed in 2.47s` exit0，无failure/skip；六并发用例全部通过，私有广告/readiness仅Client内部访问，execute HTTP在锁外。doc checker exit0：30files/236links/202inventory/history3SHA/README parity/6sequence计数0fail（未render），diffcheck0。无PG/network/model/account/services/SDKruntime，无pyc或自有线程遗留。
+
+## 阶段 23：公开好友与邀请码九项消费端
+
+### Optimized Prompt · 2026-09-15
+
+读取actual Admin socialFriendshipDto/Service/Repository/Handler、69-op Registry与九operation artifact，复用统一StrictDTO/decimalPK/ISO/null/transport/actor/threadpool/原receipt。仅消费已通过provider-free公开9/230合同的friend-invite.generate/use、friend-request.list/accept/reject、friendship.list/remove/timeline/picture-full，全部OAuth-only和identity/unified exact gate，body不能传actor/user_id；不迁移或重建Adminpair/code锁、状态机/SQL/policy到Dream。
+
+替换routers/friends.py全部九个Dream DB入口，保留原公开整数ID、required nullable微秒时间、label/thumbnail/full图字段；closed success:false/error原400 detail，timeline null403/full falsey404，其余安全错误及unknown原UUID沿共享调用规则，不重发写。邀请码生成长度/有效期只由Admin显式policy默认6/604800执行；Dream不加限制或确认。pending只能recipient accept/reject，Admin保证同一码只消费一次、accept/reject唯一transition、rejected同方向重申保留rowID刷新时间，used_at非空不能再次消费；这些并发证明来自Admin真实公开技术回执，不在Dream复制模拟数据库。
+
+保留原database九helper的名字/签名以明确拒绝旧路径，移除它们的生产SQL并在任何连接前抛安全AdminDataError；不把任意user_id转为服务权限，不制造兼容DB fallback。其它daily-picture/导入SQL仍在清单，不借本阶段删除程序/测试/历史原文。新功能稿按背景问题/目标边界/概念规则写正常、状态、失败、影响、验收；非配置好友关系明确无revision，不假造CAS字段。现行sequence只改好友模块并引用已字节保存的原十模块history。
+
+同步受影响file headers/nearestfolders/中英README/API/架构/清单，避开协调own20docs。Luna用actualFastAPI/RequestAuth/Pydantic/MockTransport/DBfence验证全部九路由、原closed错误/null/empty/UTF8/数字时间/scopes/strict actor拒绝/hash drift/unknown原receipt及无blindretry，技术DTO与实际canonical/hash逐项比较。无PG/network/model/真实账户/Browser/服务/Runtime/共享FS，不改版本pins、TMPDIR、Agent/SSE资源语义；正常真实业务仍待既有parent验收。

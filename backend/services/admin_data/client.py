@@ -3,12 +3,14 @@
 # [Pos] Sole Admin authentication/data transport; domain adapters register explicit DTO operations.
 # [Sync] 2026-09-14: implement v1 contracts and shared bounded HTTP parsing and closed Deck conflict revisions without SQL/UOW emulation.
 # [Sync] 2026-09-15: expose catalog readiness so failed domain refreshes can recover through request authentication.
+# [Sync] 2026-09-15: synchronize catalog refresh/readiness/operation checks while keeping domain HTTP concurrent.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+from threading import RLock
 from typing import Generic, Literal, TypeVar
 
 import httpx
@@ -50,10 +52,12 @@ class AdminDataClient:
             raise AdminDataError("ADMIN_OPERATION_CONTRACT_INVALID", 503)
         self._advertised: dict[str, OperationCapabilityDTO] = {}
         self._capabilities_ready = False
+        self._catalog_lock = RLock()
 
     @property
     def capabilities_ready(self) -> bool:
-        return self._capabilities_ready
+        with self._catalog_lock:
+            return self._capabilities_ready
 
     def close(self) -> None:
         if self._owns_client:
@@ -79,20 +83,19 @@ class AdminDataClient:
             input_dto=input_dto, params=params, write=write)
 
     def capabilities(self, request_id: str) -> CapabilitiesDTO:
-        self._advertised = {}
-        self._capabilities_ready = False
-        result = self._request("GET", "/capabilities", request_id, CapabilitiesDTO)
-        auth = result.auth
-        if auth.issuer != self._config.issuer or auth.jwks_uri != self._config.jwks_uri or auth.resource != self._config.resource:
+        with self._catalog_lock:
             self._advertised = {}
-            raise invalid_response(request_id)
-        advertised = {item.name: item for item in result.operations}
-        if len(advertised) != len(result.operations):
-            self._advertised = {}
-            raise invalid_response(request_id)
-        self._advertised = advertised
-        self._capabilities_ready = True
-        return result
+            self._capabilities_ready = False
+            result = self._request("GET", "/capabilities", request_id, CapabilitiesDTO)
+            auth = result.auth
+            if auth.issuer != self._config.issuer or auth.jwks_uri != self._config.jwks_uri or auth.resource != self._config.resource:
+                raise invalid_response(request_id)
+            advertised = {item.name: item for item in result.operations}
+            if len(advertised) != len(result.operations):
+                raise invalid_response(request_id)
+            self._advertised = advertised
+            self._capabilities_ready = True
+            return result
 
     def principal(self, access_token: str, request_id: str) -> PrincipalDTO:
         return self._request("GET", "/principal", request_id, PrincipalDTO, access_token=access_token)
@@ -116,15 +119,18 @@ class AdminDataClient:
         return self._request("POST", "/browser-sessions/revoke", request.request_id, BrowserRevokedDTO, input_dto=request, write=True)
 
     def execute(self, operation: DomainOperation[InputT, OutputT], input_dto: InputT, request_id: str, *, access_token: str | None = None) -> OutputT:
-        name = operation.capability.name
-        if self._operations.get(name) is not operation or self._advertised.get(name) != operation.capability:
-            raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
-        if type(input_dto) is not operation.input_dto:
-            raise AdminDataError("ADMIN_OPERATION_INPUT_INVALID", 400, request_id)
-        if operation.capability.user_scope is not None and access_token is None:
-            raise AdminDataError("INVALID_ACCESS_TOKEN", 401, request_id)
-        OperationRequest = create_model("OperationRequest", __base__=RequestDTO, input=(operation.input_dto, ...))
-        body = OperationRequest(request_id=request_id, input=input_dto)
+        with self._catalog_lock:
+            name = operation.capability.name
+            if self._operations.get(name) is not operation or self._advertised.get(name) != operation.capability:
+                raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+            if type(input_dto) is not operation.input_dto:
+                raise AdminDataError("ADMIN_OPERATION_INPUT_INVALID", 400, request_id)
+            if operation.capability.user_scope is not None and access_token is None:
+                raise AdminDataError("INVALID_ACCESS_TOKEN", 401, request_id)
+            OperationRequest = create_model("OperationRequest", __base__=RequestDTO, input=(operation.input_dto, ...))
+            body = OperationRequest(request_id=request_id, input=input_dto)
+        # Each domain HTTP uses its own immutable DTO/actor/UUID outside the
+        # catalog boundary. Refresh locking must not serialize these requests.
         return self._request("POST", "/operations/" + name, request_id, operation.output_dto, input_dto=body, access_token=access_token, write=operation.capability.kind == "write")
 
     def receipt(self, operation: DomainOperation[InputT, OutputT], request_id: str, *, access_token: str | None = None) -> CommittedReceiptDTO[OutputT] | AbsentReceiptDTO:
