@@ -1,9 +1,10 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Authenticated Deck content-version endpoints and CAS error payloads.
 // [Output] Strict client DTOs for draft state, preview, commit, and immutable history.
 // [Pos] Deck aggregate version transport; runtime plugin semver stays in deckPluginApi.
 // [Sync] 2026-08-16: add CozeLoop-inspired explicit Deck content commits.
 
-import { STORAGE_KEYS } from '../constants/storageKeys';
 import { apiUrl } from '../lib/apiBase';
 
 export type DeckContentVersionStatus = 'unpublished' | 'draft' | 'published';
@@ -78,13 +79,13 @@ export class DeckVersionApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  if (!token) throw new Error('Not authenticated');
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) throw new Error('Not authenticated');
   const response = await fetch(apiUrl(path), {
     ...init,
     credentials: 'include',
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...browserRequestHeaders({}, csrfToken),
       'Content-Type': 'application/json',
       ...init?.headers,
     },

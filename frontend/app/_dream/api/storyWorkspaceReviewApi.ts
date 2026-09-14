@@ -1,8 +1,10 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
 // [Input] Authenticated Story Workspace detail, patch, and review endpoints.
 // [Output] Typed review mutations used by Dream's canonical review panel.
 // [Pos] Frontend Story Workspace review API adapter.
 
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 import type {
   StoryWorkspaceCharacter,
@@ -57,8 +59,8 @@ const RESOURCE_PATHS: Record<StoryWorkspaceReviewResourceType, string> = {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  const token = getAuthToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const csrfToken = getBrowserCsrfToken();
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
   if (init.body !== undefined) headers.set('Content-Type', 'application/json');
   headers.set('Accept', 'application/json');
   const response = await fetch(apiUrl(path), {

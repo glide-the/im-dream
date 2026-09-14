@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# [Input] Consume auth token helpers and common FastAPI dependency inputs.
-# [Output] Provide shared auth/date/text helpers to backend router modules.
+# [Input] Consume the Admin request-auth owner and common FastAPI dependency inputs.
+# [Output] Provide bearer-only canonical identity and shared date/text helpers to backend routers.
 # [Pos] shared dependency node in backend/routers
 # [Sync] 2026-05-25: extracted common dependency helpers from backend/server.py.
 # [Sync] 2026-06-23: allow auth dependencies to read system access tokens from
@@ -10,55 +10,53 @@
 #                    is past half of its lifetime.
 # [Sync] 2026-08-31: normalize PostgreSQL datetime and ISO-string timestamps as
 #                    UTC-aware values for timezone-correct calendar grouping.
+# [Sync] 2026-09-14: switch shared request authentication to Admin; remove local JWT/cookie/query renewal authority.
 
-import os
 from datetime import datetime, timezone
 import re
 from typing import Optional
+from uuid import uuid4
 
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
-import auth
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestAuth
 
 http_bearer = HTTPBearer(auto_error=False)
 
 
-def _bool_env(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+def get_admin_request_auth(request: Request, credentials: HTTPAuthorizationCredentials = Depends(http_bearer)) -> AdminRequestAuth:
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing authorization token")
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if owner is None:
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return owner
 
 
-def apply_token_renewal(request: Request, response: Response, user_data: dict) -> None:
-    """
-    Sliding expiration: when the presented access token is past half of its
-    lifetime, attach a freshly signed token to the response so active clients
-    never hit the 1-hour expiry. Bearer clients read the X-New-Access-Token
-    header; browser clients get their access_token cookie refreshed when one
-    was presented.
-    """
-    new_token = auth.maybe_renew_access_token(user_data)
-    if not new_token:
-        return
+async def get_admin_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+) -> dict:
+    """Production resource dependency: no cookie/query token or local JWT renewal."""
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing authorization token")
+    request_id = str(uuid4())
+    required_scopes = frozenset({"dream:read" if request.method in {"GET", "HEAD", "OPTIONS"} else "dream:write"})
+    try:
+        actor = await run_in_threadpool(owner.authenticate, credentials.credentials, request_id, required_scopes=required_scopes)
+    except AdminDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from None
+    request.state.admin_request_actor = actor
+    request.state.admin_request_id = request_id
+    return actor.current_user_projection()
 
-    response.headers[auth.NEW_ACCESS_TOKEN_HEADER] = new_token
 
-    if request.cookies.get("access_token") or request.cookies.get("token"):
-        samesite = os.environ.get("COOKIE_SAMESITE", "lax").strip().lower()
-        if samesite not in {"lax", "strict", "none"}:
-            samesite = "lax"
-        response.set_cookie(
-            "access_token",
-            new_token,
-            max_age=int(auth.ACCESS_TOKEN_EXPIRE_DELTA.total_seconds()),
-            secure=_bool_env("COOKIE_SECURE", False),
-            httponly=True,
-            samesite=samesite,
-            path="/",
-        )
+get_current_user = get_admin_current_user
 
 
 def _count_mixed_words(text: str) -> int:
@@ -84,31 +82,6 @@ def _count_mixed_words(text: str) -> int:
     )
     word_count += len([w for w in english_words.split() if w])
     return word_count
-
-
-def get_current_user(
-    request: Request,
-    response: Response,
-    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
-) -> dict:
-    """
-    Dependency to extract and verify JWT token from Authorization header.
-
-    Raises:
-        HTTPException 401 if token is missing or invalid
-    """
-    token = credentials.credentials if credentials else None
-    if not token:
-        token = request.cookies.get("access_token") or request.cookies.get("token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing authorization token")
-
-    user_data = auth.verify_access_token(token)
-    if not user_data:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    apply_token_renewal(request, response, user_data)
-    return user_data
 
 
 def _clean_timestamp(ts_raw: Optional[str | datetime]) -> Optional[datetime]:

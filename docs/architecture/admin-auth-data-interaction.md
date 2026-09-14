@@ -1,7 +1,7 @@
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
 <!-- [Pos] Dream consumer architecture; Admin owns API/DTO/domain/repository/ORM contracts. -->
-<!-- [Sync] 2026-09-14: review the target before production integration; capabilities not yet published. -->
+<!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
 
@@ -9,7 +9,7 @@
 
 Dream baseline `7d38715c` 的 Python/Next 架构保留，但 Python 登录 authority与全部生产DB访问移Admin。当前扫描108文件候选、835 SQL片段、159事务候选，见[清单](../exec/dream-admin-data-inventory.md)和[事务图](../exec/dream-admin-transaction-boundaries.json)。字符串片段与候选调用不等于全部可达SQL，后续必须补调用链和动态入口复查。
 
-本稿是目标与具体评审表。Admin规范v0.1是设计状态；运行能力尚未发布。Dream现阶段已有统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)，未接入生产路由/后台，不据局部源码声称迁移完成。
+本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile和Chat CRUD/history/ownership/初始message预留；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime purpose consumer/keeper仍待Agent与工具生命周期接线，其余数据库领域、旧issuer和正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
 
 ## 目标与边界
 
@@ -30,12 +30,12 @@ Next页面、FastAPI编排、Agent Runtime、Runner/ThreadFactory/service/EventB
 | BA与业务PK | BA sub为opaque ID，users.id仍业务PK | Admin显式subject_links；principal canonical_user_id十进制string | 映射/禁用/FK/billing验证，无邮箱自动合并 |
 | 长turn | 用户access最多300s，后台持久化不能因过期丢事件 | Admin绑定subject/thread/run/scopes/service/client的opaque delegation与renew | 续期/禁用/权限/未知提交、不改cancel/lease |
 | browser handle | Dream无DB，不能内存伪装durable session | Admin encrypted handle store，同client transaction/input绑定、refresh行锁 | PKCE/CSRF/并发refresh/原handle恢复 |
-| Voice/REST/SSE | Browser bases可直达8765，Next无upgrade handler | Dream同源BFF；Voice受限upgrade/proxy委托 | 同源Cookie/origin与真实WS入口验证 |
+| REST/SSE/Voice | Browser bases可直达8765，Next无upgrade handler | REST/SSE经Dream同源BFF；现有speech-recognition WS固定关闭1008 | 同源Cookie/origin与流代理验证；不启用ASR |
 | 写恢复 | HTTP超时不证明Admin事务rollback | request_id绑定输入摘要，业务+receipt单commit | 同键同值/异值/并发/unknown response/absent不重建ID |
 | 资源与Runtime | PG policy/provider/observer，server-ownedRuntime调参 | API独立provider/sink，LKG和模型metadata所有权保留 | monotonic revision/精确memory/global effort/最终model |
 | FS/metadata | tool和service直接SQL +共享FS | Admin授权DTO/CAS/checkpoint；Dream realpath/no-symlink/实体绑定 | 写文件未知metadata恢复与thread tmp精确路径 |
 
-### Google登录（目标流程，BFF未接生产）
+### Google登录（BFF已实现，正常本机Google待验收）
 
 ```mermaid
 sequenceDiagram
@@ -170,3 +170,31 @@ sequenceDiagram
 ## Runtime 环境阶段事实
 
 新增Admin/Auth服务器秘密由SDK最终merge空值tombstone和内部/外部stdio MCP显式env过滤保护，server os.environ原值保持，二次merge不能复活。确切键/执行模块/正常失败流程见 [SDK环境设计](../design/claude-agent/claude-sdk-env-design.md#8-adminauth-服务器秘密与子进程边界)。现有Gateway helper和Editor DATABASE_URL仍需Admin长期委托/领域DTO替换；这项保护不是完整无PG/无全局凭据验收。
+
+## Thread/message 消费端阶段事实
+
+14个Admin实际输入输出/hash已写入严格Chat DTO与typed consumer，actor token与原request_id显式提供。微秒ISO字符串校验后原样保持，canonical用户ID不按BA sub猜测。原Python最终正文校验已抽为 `backend/chat_message_projection.py`，database旧私有alias和新Message DTO调用同一函数；生成器未复制其规则。消息回复ID还必须匹配原显式message_id，否则写结果保持unknown并用原receipt恢复。
+
+Chat router的create/get/list/search/delete、bind Deck/select Voice与message list/page/process-detail/latest和初始user-message预留已接typed consumer；现有搜索器、公开parts投影和微秒/NULL游标保持。共享请求身份与me profile已接入Admin。后台persist/title/session仍需独立server委托，Deck context/settings等剩余直接DB入口未闭合；14个DTO不代表全域迁移完成。
+
+## 当前用户资料与请求 actor 的接入状态
+
+Admin `user-profile.current` 的闭集输入为空，输出仅当前调用主体的profile；Dream [typed consumer](../../backend/services/admin_data/profile_data.py)保留既有公开字段和微秒ISO字符串。canonical ID来自principal，与profile ID逐项比对，OAuth subject不转换为用户ID。profile不可通过runtime grant读取，不暴露token或密码字段。
+
+[请求认证owner](../../backend/services/admin_data/request_auth.py)验证JWT scope，再向Admin读取active principal，要求subject/client/scopes一致，生成不可变server-owned actor。生产async依赖在线程池执行HTTP I/O，并在请求state显式保存actor；共享`get_current_user`与storage/workspace复用同一依赖，没有cookie/query token或旧JWT renewal fallback。composition root在已有业务owners关闭后释放自有client/verifier。token非法401、scope不足403、Admin配置/网络/DTO失败503；profile ID不一致按无效上游响应处理，禁止回查Dream PG。旧签发入口和long-turn/tool接入仍待完成，不代表认证产品全链路迁移完成。
+
+## BFF API 请求规则
+
+Next运行时auth与API Route Handler接入同一私有BFF owner，旧generic API/auth/OAuth rewrites已移除。Browser handle cookie存在时只解析该handle，非法、重复或空cookie直接401，不采用附带Bearer；所有Browser写须exact Origin与handle-bound CSRF。无handle cookie的Device/native请求只接受显式OAuth Bearer，Python验证Admin签名/scope/principal；Origin存在时仍须exact match。请求Cookie、服务/actor覆盖头、代理身份头及响应cookie/renewal credential不转发；URL token/access_token拒绝400。共享HTTP transport复用原Claude代理body/abort/SSE flush，不新增parser/EventBus。Browser state与显式MCP Apps已接同一session/CSRF owner；候选源码与技术构建并非正常部署或真实业务证明。
+
+## Browser 与构建阶段事实
+
+AuthContext现从同源BFF session读取strict公开user与内存CSRF；登录注册单一入口进入Admin同页email/signup/Google UI，device entry转Admin device UI。37个Browser API/hook/Chat/XHR模块与明确Node Apps adapter采用该owner，文件URL回到当前origin且去除旧token。静态旧getter/storage读取/Bearer写/options.token均0，full frontend typecheck与production Next build已通过。仍需受影响业务journey与真实模型验收；legacy backend issuing、其余数据域/后台grant仍未闭合。Chat initial user reserve也已接typed message persist，沿用原identity与409/unknown回执，不使用短OAuth token承担后台persist。
+
+### Runtime purpose consumer 的当前边界
+
+Admin以`auth.delegations`单独返回create/renew/revoke/原request_id receipt的method、path、版本与实际双向DTO hash；只在三项identity schema capability全部published且匹配时广告。Dream server create同时检查三schema与四descriptor，调用独立create入口，不通过generic operation模拟。ID沿用非空text业务字段，不增加任意长度产品限制。
+
+共有HTTP函数接收显式URL/header/DTO和timeout/响应大小，不持有身份配置。Internal consumer注入service身份与必要用户Bearer；public Runtime consumer只持exact idg，prepared request不继承httpx client的Cookie、auth或默认key headers。响应校验原request_id、闭集DTO和purpose/thread/run/EditorSession/scopes；renew不能改变maximum或降低expiry。
+
+Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先查原receipt；absent继续保持pending，不新建动作。恢复原committed结果后仍以有效expiry判断是否可用，maximum不延长；到期或purpose不匹配时授权边界拒绝。后台异常只写安全diagnostics，不传播到Agent turn。当前仅consumer/keeper候选源码；Agent生命周期、CLI最小投影、Editor stdio和Workflow原确认保护接入仍未完成。

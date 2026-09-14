@@ -1,4 +1,6 @@
-// [Input] Consume backend REST/SSE endpoints, auth token storage, language storage, and session/deck request data.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
+// [Input] Consume backend REST/SSE endpoints, same-origin session and in-memory CSRF, language storage, and session/deck request data.
 // [Output] Provide frontend API helpers for sessions, decks, voices, Claude Agent SSE calls, analysis reports,
 //          Reflections section analysis, and Reflections section config (GET/PUT/DELETE).
 // [Pos] voice-api client node in frontend/app/_dream/api
@@ -182,13 +184,13 @@ function normalizeUserSession(session: unknown): UserSession {
  * Get auth headers for authenticated requests
  */
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  if (!token) {
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) {
     throw new Error('Not authenticated');
   }
   return {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
+    ...browserRequestHeaders({}, csrfToken)
   };
 }
 
@@ -233,7 +235,7 @@ export async function streamClaudeAgentTurn({
   onError: (error: Error) => void;
   signal?: AbortSignal;
 }): Promise<void> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  const csrfToken = getBrowserCsrfToken();
 
   let response: Response;
   try {
@@ -241,7 +243,7 @@ export async function streamClaudeAgentTurn({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        ...browserRequestHeaders({}, csrfToken),
       },
       body: JSON.stringify({
         id: threadId,
@@ -390,11 +392,11 @@ export interface ReflectionSectionConfig {
 export async function getReflectionsSectionConfig(
   section: 'echoes' | 'traits' | 'patterns'
 ): Promise<ReflectionSectionConfig> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  if (!token) throw new Error('Not authenticated');
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) throw new Error('Not authenticated');
 
   const res = await fetch(`${API_BASE}/api/reflections/config/${section}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...browserRequestHeaders({}, csrfToken) },
   });
   if (!res.ok) throw new Error(`Failed to fetch section config (${res.status})`);
   return await res.json() as ReflectionSectionConfig;
@@ -408,12 +410,12 @@ export async function saveReflectionsSectionConfig(
   section: 'echoes' | 'traits' | 'patterns',
   promptFiles: Record<string, string>
 ): Promise<{ saved: boolean; updatedFiles: string[] }> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  if (!token) throw new Error('Not authenticated');
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) throw new Error('Not authenticated');
 
   const res = await fetch(`${API_BASE}/api/reflections/config/${section}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...browserRequestHeaders({}, csrfToken) },
     body: JSON.stringify({ prompt_files: promptFiles }),
   });
   if (!res.ok) {
@@ -429,12 +431,12 @@ export async function saveReflectionsSectionConfig(
 export async function resetReflectionsSectionConfig(
   section: 'echoes' | 'traits' | 'patterns'
 ): Promise<void> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  if (!token) throw new Error('Not authenticated');
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) throw new Error('Not authenticated');
 
   const res = await fetch(`${API_BASE}/api/reflections/config/${section}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...browserRequestHeaders({}, csrfToken) },
   });
   if (!res.ok) throw new Error(`Failed to reset section config (${res.status})`);
 }
@@ -494,9 +496,9 @@ function currentFrontendLanguage(): string {
 }
 
 function authHeaders(extra?: Record<string, string>): HeadersInit {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  if (!token) throw new Error('Not authenticated');
-  return { ...(extra ?? {}), Authorization: `Bearer ${token}` };
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) throw new Error('Not authenticated');
+  return { ...(extra ?? {}), ...browserRequestHeaders({}, csrfToken) };
 }
 
 function normalizeReflectionResult(item: unknown): ReflectionResult {
@@ -1306,13 +1308,13 @@ export async function ensureVoiceThread(voiceId: string, existingThreadId?: stri
     return existingThreadId;
   }
 
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  if (!token) throw new Error('Not authenticated');
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) throw new Error('Not authenticated');
 
   // Create a new Claude-agent thread
   const res = await fetch(`${API_BASE}/api/claude-agent/threads`, {
     method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + token }
+    headers: { ...browserRequestHeaders({}, csrfToken) }
   });
   if (!res.ok) throw new Error('Failed to create Claude-agent thread');
   const { thread_id } = await res.json() as { thread_id: string };

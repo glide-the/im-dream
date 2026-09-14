@@ -1,7 +1,7 @@
 // [Input] Explicit Dream public origin/cookie secret and browser login/callback inputs.
 // [Output] Encrypted PKCE transaction cookies, restricted return locations and handle-bound CSRF.
 // [Pos] Server-only BFF boundary beneath the sole Next App Router; no OAuth token authority.
-// [Sync] 2026-09-14: prepare deterministic login/session security before production BFF cutover.
+// [Sync] 2026-09-14: enforce actual login/API session security and forbid invalid-cookie Bearer fallback.
 
 import {
   createCipheriv, createDecipheriv, createHash, createHmac,
@@ -102,7 +102,7 @@ export class BffLoginBoundary {
     this.#csrfKey = createHash('sha256').update('dream-bff-csrf\0').update(config.cookieSecret).digest();
   }
 
-  static fromEnvironment(environment: NodeJS.ProcessEnv = process.env): BffLoginBoundary {
+  static fromEnvironment(environment: Readonly<Record<string, string | undefined>> = process.env): BffLoginBoundary {
     const rawTTL = environment.INK_DREAM_BFF_LOGIN_TTL_SECONDS ?? '600';
     if (!/^[1-9][0-9]*$/.test(rawTTL)) throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
     return new BffLoginBoundary({
@@ -171,6 +171,11 @@ export class BffLoginBoundary {
     const handle = readCookie(request, this.handleCookieName);
     if (!handle || !/^dbr_[A-Za-z0-9_-]{43}$/.test(handle)) throw new BffBoundaryError('BFF_SESSION_REQUIRED', 401);
     return handle;
+  }
+
+  hasHandleCookie(request: Request): boolean {
+    return (request.headers.get('cookie') ?? '').split(';')
+      .some(part => part.trim().split('=', 1)[0] === this.handleCookieName);
   }
 
   handleCookie(handle: string, expiresAt: number): string {

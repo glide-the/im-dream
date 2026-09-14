@@ -20,9 +20,11 @@ visible failures. See the [resume contract and sequence diagram](docs/design/cla
 
 # Ink & Memory
 
-<!-- [Sync] 2026-09-14: distinguish the Admin DTO/authentication migration target from baseline startup. -->
+<!-- [Sync] 2026-09-14: record the implemented Admin BFF/Browser boundary and remaining baseline migration gates. -->
 
-Admin authentication/data-service migration is in progress on this implementation branch. The current startup commands below still describe the baseline direct-PostgreSQL path; they are not migration acceptance evidence. See the [consumer design](docs/architecture/admin-auth-data-interaction.md) and [execution/dependency gates](docs/exec/dream-admin-auth-data-plan.md). New Admin DTOs are strictly validated, and unpublished operations remain unavailable. The private BFF foundation requires explicit `INK_DREAM_PUBLIC_ORIGIN`, registered `INK_DREAM_BFF_REDIRECT_URI`, and server-only `INK_DREAM_BFF_COOKIE_SECRET` (at least 32 bytes); `INK_DREAM_BFF_LOGIN_TTL_SECONDS` defaults to 600. These helpers are not yet connected to public login routes.
+Admin authentication/data-service migration is in progress on this implementation branch. The current startup commands below still describe the baseline direct-PostgreSQL path; they are not migration acceptance evidence. See the [consumer design](docs/architecture/admin-auth-data-interaction.md) and [execution/dependency gates](docs/exec/dream-admin-auth-data-plan.md). New Admin DTOs are strictly validated, and unpublished operations remain unavailable. The private BFF foundation requires explicit `INK_DREAM_PUBLIC_ORIGIN`, registered `INK_DREAM_BFF_REDIRECT_URI`, and server-only `INK_DREAM_BFF_COOKIE_SECRET` (at least 32 bytes); `INK_DREAM_BFF_LOGIN_TTL_SECONDS` defaults to 600. The actual start/callback/session/logout Route Handlers and Browser session requests now use this boundary. Login, registration and Google authentication run in Admin; Browser state receives only public user fields and in-memory CSRF. REST/SSE/file requests use the Next origin; explicit speech WebSocket selection is retained while the backend speech feature remains disabled.
+
+The server consumer also requires explicit `INK_ADMIN_DREAM_BASE_URL`, its exact `INK_ADMIN_AUTH_ISSUER`, `INK_DREAM_API_RESOURCE`, and independent `INK_ADMIN_DREAM_SERVICE_CLIENT_ID`/`INK_ADMIN_DREAM_SERVICE_SECRET`. Configure the same registered public origin/callback and resource in Admin. Service credentials stay in the BFF/backend; public Runtime renewal receives only its purpose delegation.
 
 <!-- [Sync] 2026-09-14: document file-relative Next compilation roots and stopped-cache backup recovery. -->
 
@@ -38,7 +40,7 @@ Ink & Memory is a workspace for writing with AI. You can keep long-running conve
 
 This repository contains the Dream Web application and its FastAPI backend. Admin, PostgreSQL, the model Gateway, the public Python SDK, and the native Claude Runtime are maintained separately.
 
-Two resource-domain production methods now consume capability-gated Admin APIs. Admin/Auth server secrets are cleared from child environment overlays; remaining database/auth/Gateway/Editor paths still require migration.
+Resource reads/observer writes, shared request identity/profile, and Chat CRUD/history/ownership plus initial user-message reservation now consume Admin APIs. Runtime purpose creation/public renewal/receipt consumers are under technical validation; Agent lifecycle/Gateway/Editor wiring, other database domains and retired issuer endpoints still require migration. Admin/Auth server secrets are cleared from child environment overlays. These source and build checks do not establish real-account business acceptance.
 
 ## What you can do
 
@@ -340,7 +342,7 @@ The current source requires Runtime `0.1.9` and output `2.1.241 (Claude Code)`. 
 
 ### The Web page cannot reach an API or Voice
 
-Check that Admin is on `3000`, Dream is on `8765`, and Web is on `5173`. Next-to-Dream rewrites use `INK_BACKEND_INTERNAL_URL`; Browser REST/SSE uses the runtime `API_BASE_URL`; Voice uses the Browser `WS_BASE_URL` or the local `NEXT_PUBLIC_WS_BASE_URL` fallback.
+On this migration branch, REST/SSE/files stay on the Next origin and use authenticated Route Handlers. Configure the backend origin with server-only `INK_BACKEND_INTERNAL_URL` (or `BACKEND_URL`), and verify the Admin service configuration and BFF cookies. Generic API/auth rewrites are removed. Explicit speech WebSocket configuration is retained; speech recognition remains disabled in the backend.
 
 ### A build still asks for npm/Vite files
 

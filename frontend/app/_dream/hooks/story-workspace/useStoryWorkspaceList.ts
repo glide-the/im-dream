@@ -1,5 +1,7 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { apiUrl } from '../../lib/apiBase';
 import type {
   StoryWorkspaceListQuery,
@@ -58,8 +60,8 @@ export function useStoryWorkspaceList<T>(
 
       try {
         const headers = new Headers({ Accept: 'application/json' });
-        const token = getAuthToken();
-        if (token) headers.set('Authorization', `Bearer ${token}`);
+        const csrfToken = getBrowserCsrfToken();
+        for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
 
         const response = await fetch(apiUrl(`${endpoint}?${queryString}`), {
           credentials: 'include',

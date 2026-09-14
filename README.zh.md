@@ -19,9 +19,11 @@
 
 # Ink & Memory
 
-<!-- [Sync] 2026-09-14: distinguish the Admin DTO/authentication migration target from baseline startup. -->
+<!-- [Sync] 2026-09-14: record the implemented Admin BFF/Browser boundary and remaining baseline migration gates. -->
 
-本实现分支正在迁移至 Admin 认证与数据服务。下方当前启动命令仍描述 baseline PostgreSQL 直连路径，不能作为迁移验收证据。详见[消费端设计](docs/architecture/admin-auth-data-interaction.md)与[执行/依赖门槛](docs/exec/dream-admin-auth-data-plan.md)。新 Admin DTO 严格校验，未发布操作保持不可用。 私有 BFF 基础要求显式 `INK_DREAM_PUBLIC_ORIGIN`、已注册的 `INK_DREAM_BFF_REDIRECT_URI` 与仅服务端持有的 `INK_DREAM_BFF_COOKIE_SECRET`（至少 32 字节）；`INK_DREAM_BFF_LOGIN_TTL_SECONDS` 默认 600。这些 helper 尚未接入公开登录路由。
+本实现分支正在迁移至 Admin 认证与数据服务。下方当前启动命令仍描述 baseline PostgreSQL 直连路径，不能作为迁移验收证据。详见[消费端设计](docs/architecture/admin-auth-data-interaction.md)与[执行/依赖门槛](docs/exec/dream-admin-auth-data-plan.md)。新 Admin DTO 严格校验，未发布操作保持不可用。 私有 BFF 基础要求显式 `INK_DREAM_PUBLIC_ORIGIN`、已注册的 `INK_DREAM_BFF_REDIRECT_URI` 与仅服务端持有的 `INK_DREAM_BFF_COOKIE_SECRET`（至少 32 字节）；`INK_DREAM_BFF_LOGIN_TTL_SECONDS` 默认 600。实际 start/callback/session/logout Route Handler 与 Browser session 请求已接入该边界。登录、注册与 Google 认证由 Admin 执行；Browser 状态只接收公开用户字段与内存 CSRF。REST/SSE/文件请求使用 Next 同源地址；保留显式语音 WebSocket 选址，后端语音功能继续关闭。
+
+服务端 consumer 还要求显式 `INK_ADMIN_DREAM_BASE_URL`、其精确 `INK_ADMIN_AUTH_ISSUER`、`INK_DREAM_API_RESOURCE` 与独立 `INK_ADMIN_DREAM_SERVICE_CLIENT_ID`/`INK_ADMIN_DREAM_SERVICE_SECRET`。在 Admin 中配置同一已注册 public origin/callback 与 resource。Service 凭据只在 BFF/backend 持有；公开 Runtime 续期只接收自身 purpose 委托。
 
 <!-- [同步] 2026-09-14：补充配置文件相对的 Next 编译根目录与停止服务后的缓存备份恢复。 -->
 
@@ -37,7 +39,7 @@ Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话
 
 本仓库包含 Dream Web 应用与 FastAPI 后端。Admin、PostgreSQL、模型 Gateway、公开 Python SDK 和原生 Claude Runtime 由独立项目维护。
 
-两个资源领域生产方法已接入按 capability 校验的 Admin API。Admin/Auth 服务器秘密从子进程环境 overlay 中清空；其余数据库、认证、Gateway 和 Editor 路径仍待迁移。
+资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership 与初始 user-message 预留已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 正在技术验证；Agent 生命周期/Gateway/Editor 接线、其他数据库领域与旧 issuer 入口仍需迁移。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
 
 ## 你可以做什么
 
@@ -334,7 +336,7 @@ cd backend
 
 ### Web 页面无法连接 API 或语音
 
-确认 Admin 在 `3000`、Dream 在 `8765`、Web 在 `5173`。Next 到 Dream rewrite 使用 `INK_BACKEND_INTERNAL_URL`；Browser REST/SSE 使用运行时 `API_BASE_URL`；语音使用 Browser `WS_BASE_URL` 或本机 `NEXT_PUBLIC_WS_BASE_URL` fallback。
+本迁移分支的 REST/SSE/文件请求固定 Next 同源并通过认证 Route Handler。以仅服务端的 `INK_BACKEND_INTERNAL_URL`（或 `BACKEND_URL`）配置后端 origin，并检查 Admin service 配置与 BFF cookie。通用 API/auth rewrite 已移除。保留显式语音 WebSocket 配置；后端 speech recognition 继续关闭。
 
 ### 构建仍要求 npm/Vite 文件
 

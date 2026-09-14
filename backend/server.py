@@ -32,6 +32,7 @@
 # [Sync] 2026-08-24: print validated SDK distribution and resolved CLI identity
 #                    before the Claude Agent factory starts.
 # [Sync] 2026-09-13: startup identity now reflects SDK 0.2.145 and package-root Runtime 0.1.9 validation.
+# [Sync] 2026-09-14: bind the sole Admin request-auth owner and close its HTTP/JWKS after existing Agent drains; PG startup remains pending migration.
 # [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
 #                    PostgreSQL sink, and publisher lifecycle around the database.
 # [Sync] 2026-08-30: preserve the deployment-owned Claude Bash sandbox
@@ -169,6 +170,16 @@ app = FastAPI(
     description="Writing, Story Workspace, and Claude Agent API",
     version="2.0.0",
 )
+
+
+@app.on_event("startup")
+async def startup_admin_request_auth():
+    """Bind the sole server-owned OAuth request/data owner; missing settings fail closed."""
+    from services.admin_data import AdminDataConfig
+    from services.admin_data.request_auth import AdminRequestAuth
+
+    app.state.admin_request_auth = AdminRequestAuth(AdminDataConfig.from_env())
+
 
 print(f"🧾 Backend version: {BACKEND_VERSION}")
 
@@ -498,6 +509,16 @@ async def shutdown_database():
     """Close PostgreSQL only after every Agent/business owner has settled."""
 
     database.close_db()
+
+
+@app.on_event("shutdown")
+async def shutdown_admin_request_auth():
+    """Release application-owned HTTP/JWKS after every Agent/business owner drains."""
+    from starlette.concurrency import run_in_threadpool
+
+    owner = getattr(app.state, "admin_request_auth", None)
+    if owner is not None:
+        await run_in_threadpool(owner.close)
 
 
 

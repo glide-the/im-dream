@@ -1,10 +1,11 @@
 # [Input] Admin transport/protocol outcomes and stable request identifiers.
 # [Output] Redacted errors preserving status and unknown-commit recovery semantics.
 # [Pos] Shared Admin authentication/data consumer error boundary.
-# [Sync] 2026-09-14: introduce value-free failures without database fallback.
+# [Sync] 2026-09-14: retain only closed Deck version conflict revisions; never upstream messages.
 """Safe exceptions: never retain HTTP requests, tokens, URLs or response bodies."""
 
 from dataclasses import dataclass
+from .models import DeckVersionConflictDetailsDTO
 
 
 @dataclass
@@ -15,6 +16,7 @@ class AdminDataError(Exception):
     status_code: int
     request_id: str | None = None
     outcome_unknown: bool = False
+    details: DeckVersionConflictDetailsDTO | None = None
 
     def __str__(self) -> str:
         return f"{self.code} ({self.status_code})"

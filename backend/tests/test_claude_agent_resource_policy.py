@@ -52,7 +52,7 @@ class _Reader:
         value, updated_at = self.policy_row
         if isinstance(updated_at, datetime):
             updated_at = updated_at.isoformat()
-        return TypeAdapter(ResourcePolicyReadOutputDTO).validate_json(json.dumps({"status": "configured", "value": value, "updated_at": updated_at}))
+        return TypeAdapter(ResourcePolicyReadOutputDTO).validate_json(json.dumps({"status": "configured", "value": {"claudeCodeEffortLevel": None, **value}, "updated_at": updated_at}))
 
 
 _FALLBACK = AgentAdmissionConfig(

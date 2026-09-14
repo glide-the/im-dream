@@ -28,7 +28,7 @@ class DesiredResourcePolicyDTO(StrictDTO):
     runMemoryBudgetMib: PositiveSafeInteger
     memoryReserveMib: PositiveSafeInteger
     retryAfterSeconds: PositiveSafeInteger
-    claudeCodeEffortLevel: Literal["low", "medium", "high", "xhigh", "max"] | None = None
+    claudeCodeEffortLevel: Literal["low", "medium", "high", "xhigh", "max"] | None
 
     @field_validator("schemaVersion", mode="before")
     @classmethod

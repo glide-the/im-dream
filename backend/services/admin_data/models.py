@@ -1,7 +1,7 @@
 # [Input] Admin canonical authentication/service DTO definitions supplied on 2026-09-14.
 # [Output] Strict Pydantic request/response DTOs, separate from database entities.
 # [Pos] Unified Admin consumer wire-schema boundary, preserving canonical IDs as strings.
-# [Sync] 2026-09-14: require exact input/output versions and contract digest for operation discovery.
+# [Sync] 2026-09-14: require operation/delegation discovery digests and retain only exact Deck conflict details.
 """Only exact Admin wire DTOs; no PostgresRow, ORM entity or column projection."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Identifier = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")]
 OperationName = Annotated[str, Field(min_length=1)]
@@ -45,6 +45,22 @@ class AuthClientsDTO(StrictDTO):
     device: str = Field(min_length=1)
 
 
+class DelegationCapabilityDTO(StrictDTO):
+    name: Literal["runtime-delegation.create", "runtime-delegation.renew", "runtime-delegation.revoke", "runtime-delegation.receipt"]
+    method: Literal["GET", "POST"]
+    path: str
+    input_schema_version: Literal[1]
+    output_schema_version: Literal[1]
+    contract_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("input_schema_version", "output_schema_version", mode="before")
+    @classmethod
+    def require_integer_version(cls, value):
+        if type(value) is not int:
+            raise ValueError("Contract version must be an integer")
+        return value
+
+
 class AuthCapabilityDTO(StrictDTO):
     issuer: str
     jwks_uri: str
@@ -52,6 +68,7 @@ class AuthCapabilityDTO(StrictDTO):
     resource: str
     clients: AuthClientsDTO
     scopes: list[str]
+    delegations: list[DelegationCapabilityDTO]
 
 
 class SchemaCapabilityDTO(StrictDTO):
@@ -119,9 +136,23 @@ class BrowserRevokedDTO(StrictDTO):
     revoked: Literal[True]
 
 
+class DeckVersionConflictDetailsDTO(StrictDTO):
+    current_draft_revision: int = Field(ge=0, le=9_007_199_254_740_991)
+    current_version: int | None = Field(ge=0, le=9_007_199_254_740_991)
+
+
 class ErrorDTO(StrictDTO):
     code: Identifier
     message: str
+    details: DeckVersionConflictDetailsDTO | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_details_owner(cls, value):
+        if isinstance(value, dict) and "details" in value:
+            if value.get("code") != "DECK_VERSION_CONFLICT" or value["details"] is None:
+                raise ValueError("Unsupported domain error details")
+        return value
 
 
 class ErrorEnvelopeDTO(RequestDTO):

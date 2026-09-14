@@ -33,6 +33,7 @@
 #                    non-dot workspace path (files/, logs/, skills/, root files,
 #                    ordinary agent-created directories) is exportable; dot-prefixed
 #                    runtime surfaces (.dream, .claude, ...) stay unaddressable.
+# [Sync] 2026-09-14: reuse sole Admin bearer dependency; preserve file owner/path/Workspace Mode behavior.
 
 """Workspace file management API.
 
@@ -60,10 +61,8 @@ logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
-from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-import auth
 import database
 from libs.claude_agent_kit.server.workspace import (
     WorkspaceFileAccessError,
@@ -88,7 +87,7 @@ from libs.claude_agent_kit.server.workspace_file_sync import (
     save_buffer_to_workspace_files,
 )
 
-from .deps import apply_token_renewal, http_bearer
+from .deps import get_current_user
 
 router = APIRouter()
 
@@ -98,17 +97,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-def _require_workspace_auth(
-    request: Request,
-    response: Response,
-    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
-) -> dict:
-    token = credentials.credentials if credentials else None
-    user_data = auth.verify_access_token(token) if token else None
-    if not user_data:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    apply_token_renewal(request, response, user_data)
-    return user_data
+_require_workspace_auth = get_current_user
 
 
 # ---------------------------------------------------------------------------

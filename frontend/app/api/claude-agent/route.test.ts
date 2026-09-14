@@ -3,6 +3,7 @@
 // [Pos] Provider-free transport contract for the Next-to-Python Claude Agent boundary.
 // [Sync] 2026-09-06: cover reconnect GET and turn POST without a model, database, or browser.
 // [Sync] 2026-09-07: make test-server cleanup idempotent after streamed-request teardown.
+// [Sync] 2026-09-14: use explicit native OAuth protocol and server-owned BFF config after authentication cutover.
 
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
@@ -83,9 +84,14 @@ test('Claude Agent Route Handler streams reconnect GET before upstream completio
 
   const previousInternal = process.env.INK_BACKEND_INTERNAL_URL;
   const previousFallback = process.env.BACKEND_URL;
+  const bffKeys = ['INK_DREAM_PUBLIC_ORIGIN', 'INK_DREAM_BFF_REDIRECT_URI', 'INK_DREAM_BFF_COOKIE_SECRET'] as const;
+  const previousBff = bffKeys.map(key => process.env[key]);
   try {
     process.env.INK_BACKEND_INTERNAL_URL = await listen(server);
     delete process.env.BACKEND_URL;
+    process.env.INK_DREAM_PUBLIC_ORIGIN = 'https://frontend.example';
+    process.env.INK_DREAM_BFF_REDIRECT_URI = 'https://frontend.example/auth/callback';
+    process.env.INK_DREAM_BFF_COOKIE_SECRET = 's'.repeat(32);
 
     const reconnectResponse = await within(proxyClaudeAgentRequest(new Request(
       'https://frontend.example/api/claude-agent/threads/thread-1/stream?cursor=event-7',
@@ -141,6 +147,9 @@ test('Claude Agent Route Handler streams reconnect GET before upstream completio
     else process.env.INK_BACKEND_INTERNAL_URL = previousInternal;
     if (previousFallback === undefined) delete process.env.BACKEND_URL;
     else process.env.BACKEND_URL = previousFallback;
+    bffKeys.forEach((key, index) => {
+      if (previousBff[index] === undefined) delete process.env[key]; else process.env[key] = previousBff[index];
+    });
     releaseReconnect?.();
     await close(server);
   }
@@ -156,7 +165,7 @@ test('Claude Agent Route Handler fails closed without a backend origin', async (
       'https://frontend.example/api/claude-agent/threads/thread-1/status',
     ));
     assert.equal(response.status, 503);
-    assert.match(await response.text(), /not configured/);
+    assert.deepEqual(await response.json(), { detail: 'BFF_BACKEND_NOT_CONFIGURED' });
   } finally {
     if (previousInternal === undefined) delete process.env.INK_BACKEND_INTERNAL_URL;
     else process.env.INK_BACKEND_INTERNAL_URL = previousInternal;

@@ -1,4 +1,6 @@
-// [Input] Connector REST endpoints, auth token storage, and Notion resource selection payloads.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
+// [Input] Connector REST endpoints, same-origin session and in-memory CSRF, and Notion resource selection payloads.
 // [Output] Fail-closed frontend client helpers for connector CRUD/auth/sync plus the read-only Notion capability, Skill, and safe-file catalog.
 // [Pos] resource connector API client node in frontend/app/_dream/api
 // [Sync] 2026-07-04: add Notion resource connector API helpers with local fallback storage for the frontend task.
@@ -40,7 +42,7 @@
  * into browser-local authenticated/synced state.
  */
 
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { apiUrl } from '../lib/apiBase';
 
 export type ConnectorPlatform = 'notion';
@@ -719,10 +721,8 @@ async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers ?? {});
   headers.set('Accept', 'application/json');
 
-  const token = getAuthToken();
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
+  const csrfToken = getBrowserCsrfToken();
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) headers.set(name, value);
 
   if (init.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');

@@ -1,7 +1,7 @@
 # [Input] AdminDataConfig and exact Admin Pydantic DTO/registered domain contracts.
 # [Output] No-retry HTTP consumer with separate service/user authentication and receipt recovery.
 # [Pos] Sole Admin authentication/data transport; domain adapters register explicit DTO operations.
-# [Sync] 2026-09-14: implement v1 principal/capability/handle/receipt contracts without SQL/UOW emulation.
+# [Sync] 2026-09-14: implement v1 contracts and shared bounded HTTP parsing and closed Deck conflict revisions without SQL/UOW emulation.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
 from __future__ import annotations
@@ -11,15 +11,16 @@ import re
 from typing import Generic, Literal, TypeVar
 
 import httpx
-from pydantic import BaseModel, TypeAdapter, ValidationError, create_model
+from pydantic import BaseModel, TypeAdapter, create_model
 
 from .config import ADMIN_INTERNAL_PREFIX, AdminDataConfig
-from .errors import AdminDataError, invalid_response, unavailable
+from .errors import AdminDataError, invalid_response
+from .http_transport import request_admin_dto
 from .models import (
     AbsentReceiptDTO, BrowserExchangeDTO, BrowserHandleDTO, BrowserHandleRequestDTO,
     BrowserResolutionDTO, BrowserRevokedDTO, CapabilitiesDTO, CommittedReceiptDTO,
-    ErrorEnvelopeDTO, Identifier, OperationCapabilityDTO, PrincipalDTO,
-    RequestDTO, ResponseEnvelopeDTO, StrictDTO,
+    Identifier, OperationCapabilityDTO, PrincipalDTO,
+    RequestDTO, StrictDTO,
 )
 
 InputT = TypeVar("InputT", bound=StrictDTO)
@@ -64,39 +65,12 @@ class AdminDataClient:
         }
         if access_token is not None:
             headers["authorization"] = "Bearer " + access_token
-        adapter = TypeAdapter(ResponseEnvelopeDTO[output_type])
-        try:
-            with self._http.stream(method, self._config.base_url + ADMIN_INTERNAL_PREFIX + path,
-                headers=headers, params=params, json=input_dto.model_dump(mode="json") if input_dto is not None else None,
-                timeout=self._config.timeout_seconds, follow_redirects=False) as response:
-                status = response.status_code
-                raw = bytearray()
-                for chunk in response.iter_bytes():
-                    raw.extend(chunk)
-                    if len(raw) > self._config.max_response_bytes:
-                        raise invalid_response(request_id, write=write)
-        except httpx.TimeoutException:
-            raise AdminDataError("ADMIN_TIMEOUT", 504, request_id, write) from None
-        except httpx.HTTPError:
-            raise unavailable(request_id, write=write) from None
-        if not 200 <= status < 300:
-            if status not in {400, 401, 403, 404, 409, 422, 429, 503, 504}:
-                raise unavailable(request_id, write=write)
-            try:
-                error = ErrorEnvelopeDTO.model_validate_json(raw)
-                if error.request_id != request_id:
-                    raise invalid_response(request_id, write=write)
-            except ValidationError:
-                raise invalid_response(request_id, write=write) from None
-            # Never retain/render the upstream message, which can contain SQL/secrets.
-            raise AdminDataError(error.error.code, status, request_id, write and status >= 500)
-        try:
-            result = adapter.validate_json(raw)
-        except ValidationError:
-            raise invalid_response(request_id, write=write) from None
-        if result.request_id != request_id:
-            raise invalid_response(request_id, write=write)
-        return result.data
+        return request_admin_dto(self._http, method=method,
+            url=self._config.base_url + ADMIN_INTERNAL_PREFIX + path,
+            request_id=request_id, output_type=output_type, headers=headers,
+            timeout_seconds=self._config.timeout_seconds,
+            max_response_bytes=self._config.max_response_bytes,
+            input_dto=input_dto, params=params, write=write)
 
     def capabilities(self, request_id: str) -> CapabilitiesDTO:
         self._advertised = {}
@@ -114,6 +88,14 @@ class AdminDataClient:
 
     def principal(self, access_token: str, request_id: str) -> PrincipalDTO:
         return self._request("GET", "/principal", request_id, PrincipalDTO, access_token=access_token)
+
+    def _create_runtime_delegation(self, request, *, access_token: str):
+        # Special Admin ingress has its own strict DTO and published-schema gate.
+        from .delegation import DelegationCreatedDTO, DelegationCreateRequestDTO
+        if type(request) is not DelegationCreateRequestDTO:
+            raise AdminDataError("ADMIN_OPERATION_INPUT_INVALID", 400)
+        return self._request("POST", "/runtime-delegations", request.request_id,
+            DelegationCreatedDTO, input_dto=request, access_token=access_token, write=True)
 
     def exchange_browser_session(self, request: BrowserExchangeDTO) -> BrowserHandleDTO:
         return self._request("POST", "/browser-sessions/exchange", request.request_id, BrowserHandleDTO, input_dto=request, write=True)

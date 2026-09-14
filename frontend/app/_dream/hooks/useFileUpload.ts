@@ -1,4 +1,6 @@
-// [Input] Runtime API base config, AuthContext token, storage upload endpoints, and file proxy utility.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../lib/browserSession';
+// [Input] Runtime API base config, shared Browser session/header owner, storage upload endpoints, and file proxy utility.
 // [Output] File upload hook that supports server/direct upload and cross-origin backend URLs.
 // [Pos] file-upload hook node in frontend/app/_dream/hooks
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin deployments.
@@ -6,7 +8,7 @@
 //        (en + zh) via the shared i18n instance (module-level helpers cannot call hooks).
 import { useCallback, useEffect, useState } from 'react';
 import { toFileProxyUrl } from '../lib/toFileProxyUrl';
-import { getAuthToken } from '../contexts/AuthContext';
+
 import { API_BASE } from '../lib/apiBase';
 import i18n from '../i18n';
 
@@ -84,8 +86,8 @@ async function uploadWithXHR(
       }
     };
     xhr.onerror = () => reject(new Error(i18n.t('chat.upload.failed')));
-    const token = getAuthToken();
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    const csrfToken = getBrowserCsrfToken();
+    for (const [name, value] of Object.entries(browserRequestHeaders({}, csrfToken))) xhr.setRequestHeader(name, value);
     xhr.send(body);
   });
 }
@@ -104,7 +106,7 @@ async function serverUpload(
 
   const response = await fetch(`${API_BASE}/api/storage/upload`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+    headers: { ...browserRequestHeaders() },
     body: formData,
   });
 
@@ -143,7 +145,7 @@ export function useFileUpload() {
     async function fetchStorageInfo() {
       try {
         const response = await fetch(`${API_BASE}/api/storage`, {
-          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+          headers: { ...browserRequestHeaders() },
         });
         if (!response.ok) {
           throw new Error('Failed to load storage info');
@@ -197,7 +199,7 @@ export function useFileUpload() {
         if (info.supportsDirectUpload) {
           const uploadUrlResponse = await fetch(`${API_BASE}/api/storage/upload-url`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
+            headers: { 'Content-Type': 'application/json', ...browserRequestHeaders() },
             body: JSON.stringify({ filename, contentType }),
           });
 

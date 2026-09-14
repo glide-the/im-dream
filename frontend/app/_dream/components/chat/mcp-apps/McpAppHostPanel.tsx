@@ -1,5 +1,8 @@
 'use client';
 
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../../lib/browserSession';
+
 // [Input] Trusted saved MCP Apps call, current Thread identity, optional existing Chat ingress, and Host status.
 // [Output] Lifecycle-controlled same-origin Browser MCP Client plus Host adapter, or silent ordinary fallback.
 // [Pos] ToolMessagePart child; never replays the originating tools/call and never owns upstream authority.
@@ -15,7 +18,7 @@ import {
   UI_EXTENSION_CAPABILITIES,
 } from '@mcp-ui/client';
 
-import { getAuthToken } from '../../../contexts/AuthContext';
+
 import ImMcpAppHostAdapter, {
   McpAppBrowserError,
   type SendMcpAppUserMessage,
@@ -72,13 +75,13 @@ async function loadPolicy(
   serverRef: string,
   workspaceScope: string | null,
 ): Promise<McpAppsHostPolicy | null> {
-  const token = getAuthToken();
-  if (!token) return null;
+  const csrfToken = getBrowserCsrfToken();
+  if (!csrfToken) return null;
   const query = new URLSearchParams({ serverRef });
   if (workspaceScope) query.set('workspaceScope', workspaceScope);
   const response = await fetch(`/api/mcp-apps/phase1-status?${query.toString()}`, {
     cache: 'no-store',
-    headers: { authorization: `Bearer ${token}` },
+    headers: { ...browserRequestHeaders({}, csrfToken) },
     signal,
   });
   if (!response.ok) return null;
@@ -195,14 +198,14 @@ export default function McpAppHostPanel({
     };
     const connect = async () => {
       try {
-        const token = getAuthToken();
-        if (!token) return;
+        const csrfToken = getBrowserCsrfToken();
+        if (!csrfToken) return;
         const endpoint = new URL(
           `/api/mcp-apps/${encodeURIComponent(stableCall.serverRef)}`,
           window.location.origin,
         );
         const requestHeaders = {
-          authorization: `Bearer ${token}`,
+          ...browserRequestHeaders({}, csrfToken),
           'x-ink-mcp-apps-browser-session': browserSession,
           ...(stableCall.workspaceScope
             ? { 'x-ink-workspace-scope': stableCall.workspaceScope }

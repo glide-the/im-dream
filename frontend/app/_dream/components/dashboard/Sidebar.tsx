@@ -1,4 +1,6 @@
-// [Input] Runtime API base config, AuthContext token, system config endpoint, and dashboard icons.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../../lib/browserSession';
+// [Input] Runtime API base config, shared Browser session/header owner, system config endpoint, and dashboard icons.
 // [Output] Dashboard sidebar settings UI backed by backend system config.
 // [Pos] dashboard sidebar component node
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin system config requests.
@@ -11,7 +13,7 @@
 //                    saved model preference.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { API_BASE } from '../../lib/apiBase';
 import { emitWorkspaceModeChanged } from '../../lib/system-config-events';
 import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
@@ -56,7 +58,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
       try {
         const [response, catalog] = await Promise.all([
           fetch(`${API_BASE}/api/system-config`, {
-            headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+            headers: { ...browserRequestHeaders() },
           }),
           fetchGatewayModels(),
         ]);
@@ -104,7 +106,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
     try {
       const response = await fetch(`${API_BASE}/api/system-config`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
+        headers: { 'Content-Type': 'application/json', ...browserRequestHeaders() },
         body: JSON.stringify(patch),
       });
       return response.ok;

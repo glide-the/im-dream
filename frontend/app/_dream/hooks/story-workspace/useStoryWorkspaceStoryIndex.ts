@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { getBrowserCsrfToken, browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Actor-scoped Dream run identity and the dedicated Story Index REST projection.
 // [Output] Strict ETag reads with bounded Project title, last-good state, and one idempotent reconcile mutation.
 // [Pos] Story Workspace Story Index query boundary; independent from Episode Artifact CAS.
@@ -5,7 +7,7 @@
 //                    keeping strong If-Match request semantics.
 
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { apiUrl } from '../../lib/apiBase';
 import type {
   StoryWorkspaceStoryIndexErrorCode,
@@ -232,7 +234,7 @@ export type StoryWorkspaceStoryIndexFetchResult =
 
 export interface StoryWorkspaceStoryIndexFetchOptions {
   readonly fetchImpl?: typeof fetch;
-  readonly token?: string | null;
+  readonly csrfToken?: string | null;
   readonly etag?: string | null;
   readonly expectedRunId?: string;
   readonly signal?: AbortSignal;
@@ -244,7 +246,7 @@ export async function storyWorkspaceFetchStoryIndex(
   options: StoryWorkspaceStoryIndexFetchOptions = {},
 ): Promise<StoryWorkspaceStoryIndexFetchResult> {
   const headers = new Headers({ Accept: 'application/json' });
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, options.csrfToken))) headers.set(name, value);
   if (options.etag) headers.set('If-None-Match', storyWorkspaceQuotedEtag(options.etag));
   const response = await (options.fetchImpl ?? fetch)(endpoint, {
     credentials: 'include',
@@ -282,7 +284,7 @@ export async function storyWorkspaceFetchStoryIndex(
 
 export interface StoryWorkspaceStoryIndexReconcileOptions {
   readonly fetchImpl?: typeof fetch;
-  readonly token?: string | null;
+  readonly csrfToken?: string | null;
   readonly signal?: AbortSignal;
   readonly idempotencyKey?: string;
   readonly endpoint?: string;
@@ -314,7 +316,7 @@ export async function storyWorkspaceReconcileStoryIndex(
     'Content-Type': 'application/json',
     'If-Match': storyWorkspaceQuotedEtag(etag),
   });
-  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+  for (const [name, value] of Object.entries(browserRequestHeaders({}, options.csrfToken))) headers.set(name, value);
   const response = await (options.fetchImpl ?? fetch)(
     options.endpoint ?? storyWorkspaceStoryIndexReconcileEndpoint(runId),
     {
@@ -440,7 +442,7 @@ export function storyWorkspaceReduceStoryIndexFetch(
 
 export interface StoryWorkspaceStoryIndexUseOptions {
   readonly fetchImpl?: typeof fetch;
-  readonly token?: string | null;
+  readonly csrfToken?: string | null;
   readonly enabled?: boolean;
   readonly pollIntervalMs?: number;
 }
@@ -509,7 +511,7 @@ export function useStoryWorkspaceStoryIndex(
       apiUrl(storyWorkspaceStoryIndexEndpoint(normalizedRunId)),
       {
         fetchImpl: options.fetchImpl,
-        token: options.token === undefined ? getAuthToken() : options.token,
+        csrfToken: options.csrfToken === undefined ? getBrowserCsrfToken() : options.csrfToken,
         etag: etagRef.current,
         expectedRunId: normalizedRunId,
         signal: controller.signal,
@@ -547,7 +549,7 @@ export function useStoryWorkspaceStoryIndex(
         error: reason instanceof Error ? reason : new Error('Story index request failed.'),
       });
     });
-  }, [enabled, normalizedRunId, options.fetchImpl, options.token]);
+  }, [enabled, normalizedRunId, options.fetchImpl, options.csrfToken]);
 
   const reconcile = useCallback((requestedIdempotencyKey?: string) => {
     if (reconcileInFlightRef.current !== null) return reconcileInFlightRef.current;
@@ -571,7 +573,7 @@ export function useStoryWorkspaceStoryIndex(
     dispatch({ type: 'reconcile-start', runId: normalizedRunId, generation });
     const pending = storyWorkspaceReconcileStoryIndex(normalizedRunId, currentEtag, {
       fetchImpl: options.fetchImpl,
-      token: options.token === undefined ? getAuthToken() : options.token,
+      csrfToken: options.csrfToken === undefined ? getBrowserCsrfToken() : options.csrfToken,
       signal: controller.signal,
       idempotencyKey,
       endpoint: apiUrl(storyWorkspaceStoryIndexReconcileEndpoint(normalizedRunId)),
@@ -620,7 +622,7 @@ export function useStoryWorkspaceStoryIndex(
     });
     reconcileInFlightRef.current = pending;
     return pending;
-  }, [enabled, normalizedRunId, options.fetchImpl, options.token, refresh]);
+  }, [enabled, normalizedRunId, options.fetchImpl, options.csrfToken, refresh]);
 
   useEffect(() => {
     mountedRef.current = true;

@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Owned Claude thread id, canonical thread history/status REST endpoints.
 // [Output] One shared history -> status hydration snapshot for Chat and Dream shells.
 // [Pos] Minimal session hydration primitive; ChatPanel remains the only live reducer.
@@ -9,7 +11,7 @@
 //                    MCP descriptor bindings can add a safe App projection.
 
 import { isToolUIPart, type UIMessage } from 'ai';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { API_BASE } from '../../lib/apiBase';
 import { filterStoryWorkspaceControlMessages } from '../../lib/story-workspace-guidance';
 import {
@@ -141,7 +143,7 @@ export async function fetchClaudeThreadStatus(
   try {
     const response = await fetch(
       `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
-      { headers: { Authorization: `Bearer ${getAuthToken()}` } },
+      { headers: { ...browserRequestHeaders() } },
     );
     if (!response.ok) {
       throw new ClaudeThreadHydrationUnknownError(
@@ -183,7 +185,7 @@ export async function fetchClaudeThreadMessages(
     const response = await fetch(
       `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages${query}`,
       {
-        headers: { Authorization: `Bearer ${getAuthToken()}` },
+        headers: { ...browserRequestHeaders() },
         signal: options.signal,
       },
     );
@@ -266,7 +268,7 @@ export async function fetchClaudeThreadMessageProcess(
       + `/messages/${encodeURIComponent(messageId)}/process`,
       {
         cache: 'no-store',
-        headers: { Authorization: `Bearer ${getAuthToken()}` },
+        headers: { ...browserRequestHeaders() },
         signal,
       },
     );

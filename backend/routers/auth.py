@@ -11,11 +11,13 @@
 # [Sync] 2026-08-14: map transactional user/default-Free provisioning failure
 #                    to a retryable 503 instead of an email-conflict 400.
 # [Sync] 2026-08-14: provision new/empty accounts with the verified default Deck plugin.
+# [Sync] 2026-09-14: current-user profile reads now use the Admin typed operation; legacy login/import paths remain migration targets.
 
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 import auth
 import database
@@ -25,7 +27,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - package import compatibility
     from backend.services.deck.defaults import provision_default_screenplay_deck
 
-from .deps import get_current_user
+from services.admin_data.errors import AdminDataError
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from .deps import get_admin_request_auth, get_current_user
 
 router = APIRouter()
 
@@ -140,28 +144,38 @@ def _serialize_user(user: dict) -> dict:
     }
 
 
-def _get_current_user_info(current_user: dict) -> dict:
-    user = database.get_user_by_id(current_user["user_id"])
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    return _serialize_user(user)
+def _get_current_user_info(current_user: dict, owner: AdminRequestAuth, request_id: str) -> dict:
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    try:
+        return owner.current_profile(actor, request_id).dream_public_profile()
+    except AdminDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from None
 
 
 @router.get("/api/me")
-def get_current_user_info(current_user: dict = Depends(get_current_user)):
+async def get_current_user_info(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
     """
     Get current user info from token.
 
-    Requires Authorization header or system auth cookie.
+    Requires an Admin OAuth bearer; browser BFF injects it after handle resolution.
     """
-    return _get_current_user_info(current_user)
+    return await run_in_threadpool(_get_current_user_info, current_user, owner, request.state.admin_request_id)
 
 
 @router.get("/auth/me")
-def get_auth_current_user_info(current_user: dict = Depends(get_current_user)):
+async def get_auth_current_user_info(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
+):
     """Alias for OAuth-oriented clients."""
-    return _get_current_user_info(current_user)
+    return await run_in_threadpool(_get_current_user_info, current_user, owner, request.state.admin_request_id)
 
 
 @router.post("/auth/logout")

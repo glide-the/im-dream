@@ -33,7 +33,7 @@ def adapter(config, handler):
     def transport(request):
         if request.url.path.endswith("/capabilities"):
             return httpx.Response(200, json={"request_id": request.headers["x-request-id"], "data": {
-                "version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "algorithm": "ES256", "resource": config.resource, "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read"]},
+                "version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "algorithm": "ES256", "resource": config.resource, "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read"], "delegations": []},
                 "schema_capabilities": [], "operations": [operation.capability.model_dump() for operation in RESOURCE_OPERATIONS],
             }})
         return handler(request)
@@ -119,7 +119,7 @@ def test_changed_capability_never_sends_resource_operation(config):
     seen = []
     def handler(request):
         seen.append(request)
-        return httpx.Response(200, json={"request_id": request.headers["x-request-id"], "data": {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "algorithm": "ES256", "resource": config.resource, "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": []}, "schema_capabilities": [], "operations": [RESOURCE_POLICY_READ.capability.model_copy(update={"contract_sha256": "b" * 64}).model_dump()]}})
+        return httpx.Response(200, json={"request_id": request.headers["x-request-id"], "data": {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "algorithm": "ES256", "resource": config.resource, "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": [], "delegations": []}, "schema_capabilities": [], "operations": [RESOURCE_POLICY_READ.capability.model_copy(update={"contract_sha256": "b" * 64}).model_dump()]}})
     data = AdminResourceData(AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(handler)), operations=RESOURCE_OPERATIONS))
     loaded = ClaudeAgentResourcePolicyProvider(data.read_policy).load(AgentAdmissionConfig(1, 512, 128, 60))
     assert loaded.status == "unavailable" and len(seen) == 1

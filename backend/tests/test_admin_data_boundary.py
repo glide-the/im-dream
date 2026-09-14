@@ -1,7 +1,7 @@
 # [Input] Exact Admin DTOs and production consumer classes with injected HTTP/JWKS providers.
 # [Output] Deterministic authentication/transport/unknown-commit contract receipts without PG/model calls.
 # [Pos] Provider-free tests for the unified Admin consumer boundary.
-# [Sync] 2026-09-14: cover security fields, key caching/rotation, delegation headers and strict receipt recovery.
+# [Sync] 2026-09-14: cover auth/receipt security and exact closed Deck conflict feedback without upstream messages.
 """Invoke the real client/verifier through injected HTTP; no alternate production path."""
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def response(data, request_id="request-1"):
 
 
 def auth_capabilities(config, operations=()):
-    return {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "algorithm": "ES256", "resource": config.resource, "clients": {"browser": "dream-browser", "device": "dream-cli"}, "scopes": ["dream:read", "dream:write"]}, "schema_capabilities": [], "operations": [item.capability.model_dump() for item in operations]}
+    return {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "algorithm": "ES256", "resource": config.resource, "clients": {"browser": "dream-browser", "device": "dream-cli"}, "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": [], "operations": [item.capability.model_dump() for item in operations]}
 
 
 def test_separate_service_identity_user_delegation_and_canonical_mapping(config):
@@ -73,6 +73,32 @@ def test_redacted_error_preserves_status_and_request_id(config, status):
         client.principal("token", "request-1")
     assert exc.value.status_code == status and exc.value.request_id == "request-1"
     assert "credential" not in str(exc.value) and "secret SQL" not in repr(exc.value)
+
+
+@pytest.mark.parametrize("current_version", [None, 0, 9_007_199_254_740_991])
+def test_deck_version_conflict_retains_only_typed_revision_details(config, current_version):
+    details = {"current_draft_revision": 9_007_199_254_740_991, "current_version": current_version}
+    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(409, json={"error": {"code": "DECK_VERSION_CONFLICT", "message": "private SQL", "details": details}, "request_id": "request-1"}))))
+    with pytest.raises(AdminDataError) as exc:
+        client.principal("token", "request-1")
+    assert exc.value.code == "DECK_VERSION_CONFLICT" and exc.value.status_code == 409
+    assert exc.value.details.model_dump() == details
+    assert "private SQL" not in repr(exc.value)
+
+
+@pytest.mark.parametrize("code,details", [
+    ("OTHER_FAILURE", {"current_draft_revision": 1, "current_version": None}),
+    ("DECK_VERSION_CONFLICT", None),
+    ("DECK_VERSION_CONFLICT", {"current_draft_revision": True, "current_version": None}),
+    ("DECK_VERSION_CONFLICT", {"current_draft_revision": -1, "current_version": None}),
+    ("DECK_VERSION_CONFLICT", {"current_draft_revision": 9_007_199_254_740_992, "current_version": None}),
+    ("DECK_VERSION_CONFLICT", {"current_draft_revision": 1, "current_version": None, "sql": "private"}),
+])
+def test_unknown_or_invalid_error_details_fail_closed(config, code, details):
+    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(409, json={"error": {"code": code, "message": "private SQL", "details": details}, "request_id": "request-1"}))))
+    with pytest.raises(AdminDataError) as exc:
+        client.principal("token", "request-1")
+    assert exc.value.code == "ADMIN_RESPONSE_INVALID" and exc.value.details is None
 
 
 @pytest.mark.parametrize("payload", [{"data": principal(), "request_id": "other"}, {"data": principal(), "request_id": "request-1", "extra": "bad"}])

@@ -1,4 +1,6 @@
-// [Input] Consume ClaudeAgentChatTransport, WorkspaceContext, chat schema/types, file proxy utilities, AIInputDock/helpers, ChatMessageList, and auth token.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../../lib/browserSession';
+// [Input] Consume ClaudeAgentChatTransport, WorkspaceContext, chat schema/types, file proxy utilities, AIInputDock/helpers, ChatMessageList, and Browser session and CSRF.
 //         reconnectStreamNonce from ChatView; claude-agent-sse-utils for stream replay.
 // [Output] Coordinate chat transport, pending attachments/tool choice, message state, scrolling, and input/message layout.
 // [Pos] chat-panel component node in frontend/app/_dream/components/chat
@@ -100,7 +102,7 @@ import {
   resolveToolName,
   type PendingToolConfirmation,
 } from './toolConfirmation';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { registerChatExportSource } from '../../lib/chat-export-registry';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import {
@@ -347,7 +349,7 @@ export default function ChatPanel({
     void (async () => {
       try {
         const response = await fetch(`${API_BASE}/api/system-config`, {
-          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+          headers: { ...browserRequestHeaders() },
         });
         if (!response.ok) {
           return;
@@ -403,7 +405,7 @@ export default function ChatPanel({
     transport: new ClaudeAgentChatTransport({
       threadId,
       api: `${API_BASE}/api/claude-agent`,
-      headers: () => ({ 'Authorization': `Bearer ${getAuthToken()}` }),
+      headers: () => ({ ...browserRequestHeaders() }),
       prepareSendMessagesRequest: ({ messages: outgoingMessages, body, id }) => {
         const lastMessage = outgoingMessages.at(-1) as UIMessage | undefined;
         if (!lastMessage) {
@@ -864,7 +866,7 @@ export default function ChatPanel({
         const response = await fetch(
           `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(activeThreadId)}/stream`,
           {
-            headers: { Authorization: `Bearer ${getAuthToken()}` },
+            headers: { ...browserRequestHeaders() },
             signal: abort.signal,
           },
         );
@@ -973,7 +975,7 @@ export default function ChatPanel({
         `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/stop`,
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${getAuthToken()}` },
+          headers: { ...browserRequestHeaders() },
           signal: controller.signal,
         },
       );

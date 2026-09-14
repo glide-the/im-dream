@@ -1,3 +1,5 @@
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../../lib/browserSession';
 // [Input] Settings route section, existing resource/plugin managers, and the Work-owned Deck management surface.
 // [Output] Existing Settings shell with one Work category plus single-heading Notion and Claude MCP detail surfaces.
 // [Pos] Canonical Story Workspace Settings page and Work workbench route surface.
@@ -17,7 +19,7 @@ import ClaudePluginAdminPage from '../../components/claude-plugin-admin/ClaudePl
 import ConnectorNotionDetailPage from '../../components/dashboard/ConnectorNotionDetailPage';
 import ConnectorSettingsSection from '../../components/dashboard/ConnectorSettingsSection';
 import ModelConfigSection from '../../components/dashboard/ModelConfigSection';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { API_BASE } from '../../lib/apiBase';
 import type { StoryWorkspaceStaticRoute } from '../../router/storyWorkspacePath';
 import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
@@ -90,7 +92,7 @@ function AppearanceThemeSetting() {
     setThemeMode(mode);
     void fetch(`${API_BASE}/api/system-config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
+      headers: { 'Content-Type': 'application/json', ...browserRequestHeaders() },
       body: JSON.stringify({ theme: mode }),
     }).catch(() => undefined);
   }, []);

@@ -1,4 +1,6 @@
-// [Input] System config API, AuthContext token, dashboard design tokens.
+// [Sync] 2026-09-14: same-origin Cookie session with in-memory CSRF; no Browser OAuth Bearer/storage.
+import { browserRequestHeaders } from '../../lib/browserSession';
+// [Input] System config API, shared Browser session/header owner, dashboard design tokens.
 // [Output] Render Settings AI model/system-prompt/workspace/full-access/env controls.
 // [Pos] settings-model-config component node in frontend/app/_dream/components/dashboard
 // [Sync] 2026-06-09: add IM full-access approval toggle backed by
@@ -32,7 +34,7 @@
 // [Sync] 2026-08-14: hydrate an unsaved new user with Admin's callable
 //                    defaultModelAlias instead of leaving model selection blank.
 import { useCallback, useEffect, useState } from 'react';
-import { getAuthToken } from '../../contexts/AuthContext';
+
 import { emitImFullAccessChanged, emitWorkspaceModeChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
 import {
@@ -168,7 +170,7 @@ export default function ModelConfigSection() {
     const controller = new AbortController();
     void (async () => {
       const configRequest = fetch(`${API_BASE}/api/system-config`, {
-        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        headers: { ...browserRequestHeaders() },
         signal: controller.signal,
       });
       const modelsRequest = fetchGatewayModels(controller.signal);
@@ -219,7 +221,7 @@ export default function ModelConfigSection() {
     try {
       const response = await fetch(`${API_BASE}/api/system-config`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
+        headers: { 'Content-Type': 'application/json', ...browserRequestHeaders() },
         body: JSON.stringify(patch),
       });
       if (!response.ok) return null;
@@ -248,7 +250,7 @@ export default function ModelConfigSection() {
         setSaving(true);
         const response = await fetch(`${API_BASE}/api/system-config`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
+          headers: { 'Content-Type': 'application/json', ...browserRequestHeaders() },
           body: JSON.stringify({ model: value }),
         });
         if (response.ok) {
