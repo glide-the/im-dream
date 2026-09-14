@@ -929,3 +929,29 @@ env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps
 
 剩余：后台immutable owner链路与原source/claim/finish/failure生产SQL、完整prepare/Voice/Run start/其它domains、SystemConfig发布后actualcallsite迁移、GatewayCLIkey/CLIEditor、正常PG/Admin可见Run/账户/model验收及77primary故障/COMMIT-loss验证。Goal仍未完成；不升级SDK/Runtime pins、不部署/重启正常服务、不写外部任务消息。
 提交前最终文档检查 `python3 /private/tmp/dream-admin-doc-check.py` exit0：41files/446local links/277folder entries/failures=[]，historySHA/README标题保持；`git diff --check` exit0。只暂存本阶段15明确拥有路径，不包含其它任务docs/.folder、docs/exec/.folder、docs/stage/.folder、验证目录或pnpm缓存。
+## 阶段37：Workspace76 已实现消费者独立复核
+
+### Optimized Prompt
+
+继续原全量迁移goal，本轮只复核已释放Workspace76，不重写已正确的AdminWorkspaceData/resolve_admin_default_workspace或三个wrapper。独立机械验证交给mandatory Luna既有runner，精确cwd与provider-free focused pytest selection，只创建明确命名stage37/luna raw receipts/log，不调用正常PG/CLI/model/browser、不改producer77冻结或未注册SystemConfig/Reflection接口。原runner此前usage-limit errored，本轮按主任务要求发出一次同目标followup并等待真实回执，不reset credit/换模型/伪称已执行。
+
+主Agent并行只读源码：校验实际76strict empty/input+raw ID/schema/hash、currentcanonical/OAuth身份路径、original request GET/no auto retry；复核Admin已有created_at ASC/id ASC/null处理代码和Dream消费者仅relay原ID、不复制排序；记录实际公开路由及测试DI边界。以当前HEAD8447a80a为保护基准，3wrapper/文件权限调用顺序/TMP+FS源码不变；复用当前scanner snapshot列所有47 SQL候选模块/16driver/34legacy，不重复已有广域测试或据rg声称完整关闭。Story internal agent-output在原整体事务内的default SELECT/INSERT和store_agent_story_output写入继续pending，没有对应Admin完整业务API，不拆成跨事务ensure。仅在真实Luna命令/cwd/exit/raw output可读后接受独立验证；保存明确source artifact/闭环文件/剩余调用列表/cleanup/正常验收缺口，并继续原goal下一发布缺口，不将turn结束当goal完成。
+### 阶段37独立回执与实际闭环边界
+
+既有mandatory Luna runner本轮followup真实执行完成。Root已实际读取[command receipt](/private/tmp/dream-admin-stage37-workspace76-validation/luna/command-receipt.json)、[stdout](/private/tmp/dream-admin-stage37-workspace76-validation/luna/pytest.stdout.log)、[stderr](/private/tmp/dream-admin-stage37-workspace76-validation/luna/pytest.stderr.log)，确认exact argv/cwd/exit0、wall2541ms、原stdout `66 passed, 18 deselected in 2.12s`，stderr空。未声称不可观察的Fast mode元数据。命令为：
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_default_workspace.py backend/tests/test_admin_deck_default_workspace.py backend/tests/test_workspace_router.py -k 'default or original_workspace_text or original_uuid_two_state_receipt or receipt_identity or readonly_preflight or initialization_rejection or missing_exact_capability or admin_thread_reply_identity_and_dto_fail_before_mode_or_files or admin_thread_timeout_does_not_retry_or_access_mode_files or admin_schema_and_thread_hash_are_required_before_file_access or foreign_thread_is_hidden_before_workspace_probe'
+```
+
+runner报告首个receipt wrapper使用macOS不支持的 `date +%s%3N`，writer失败；换Python clock后同argv重跑并返回有效原命令回执。该wrapper失败不作为API缺陷。未生成pyc，只有专属output保留；使用synthetic MockTransport/显式fixture/临时workspace，没有正常PG/模型/CLI/network/账户/服务操作，未清理其它资源。18deselected是此focused selection之外，旧Story事务和其它真实business provider没有验收。
+
+Root source-only脚本首轮exit1：误填不存在的backend/claude_agent/runner.py、gitshow子命令128；通过rg file inventory找到实际libs/claude_agent_kit/server/{agent_runner,workspace,sdk_env}.py后只修验证脚本。fresh `python3 /private/tmp/dream-admin-stage37-workspace-source-check.py` exit0/PASS/164ms，[原receipt](/private/tmp/dream-admin-stage37-workspace76-validation/source/command-receipt.json)/[stdout](/private/tmp/dream-admin-stage37-workspace76-validation/source/source.stdout.log)/[stderr](/private/tmp/dream-admin-stage37-workspace76-validation/source/source.stderr.log)均实际读取；[完整source closure与47SQL/16driver/34legacy候选列表](/private/tmp/dream-admin-stage37-workspace76-validation/source/workspace76-source-closure.json)。源码检查不执行DB/模型，stderr空。
+
+实际default闭环文件为routers/deps.py的单shared resolver、story_workspace.py::_story_workflow_current_user、deck_plugin_binding.py::_deck_current_user、deck_plugins.py::_deck_plugin_current_user与services/admin_data/workspace_data.py：三wrapper各恰好一次shared调用，无oldDb/default execute；empty DTO/currentcanonical/OAuthwrite/rawID、wrong reply与503/noDBfallback由actual public consumer tests覆盖。Deckbinding/plugin的末端领域provider由test DI替代，故只接受resolver/role边界，不宣称该业务domain SQL已关闭。Profile复用既有current_profile canonicalID/readscope；不新增role fallback。
+
+文件权限闭环为workspace.py::{read_workspace_file_content_endpoint,download_workspace_file}和AdminWorkspaceData.exists_owned：Thread ownership先于Mode/path/FS，错ID/错actor/malformed/timeouts/missing schema/hash/foreignThread不进入Mode或文件probe。Source artifact含10文件与8447a80a字节比对，实际Runner/workspace/sdk_env及旧Story事务保持；这不替代正常Bash工具的TMPDIR真实回执。Admin默认选择保留原 `created_at ASC, id ASC LIMIT 1`，Drizzle `.orderBy(asc(created_at),asc(id))`未加NULL/coalesce分支；Dream只relayID，没有复制排序或NULL算法。76已释放public14cases/22originalGET/347assertions原command receipt只读，不重跑数据库。
+
+仍生产调用SQL：POST /api/story-workspace/internal/agent-output在story_workspace.py::receive_agent_story_output仍调用agent_integration.py::get_or_create_default_workspace（SELECT/INSERT）并执行原store_agent_story_output整体事务；没有完整Admin Story output业务API，不能拆成无一致性的ensure调用。旧background/internal default、launch/Agent integration与其它47SQL候选模块、16drivers、34legacy imports保留；当前scanner snapshot仍299/47/512/16/34/118、parseerrors=[]，完整scope与路径见artifact/库存，不按一次rg或已注册count宣布全迁移。
+
+下一发布缺口只读定位：server.health当前已无DB，是原liveness投影，不制造代码改动；startup_database仍init_db且剩余生产SQL依赖pool，不能先关闭造成运行时失败。Deck.create/default三API已注册，但default plugin evidence仍由旧SQL安装清单+真实FS/CLI verifier取得，尚不能冒用browser evidence。Preferences.default-voices实际只读config.VOICE_ARCHETYPES，已无DB；voice-analysis.list对应的旧load_voices_from_user_decks没有其它生产Python callsite，不制造替代实现。继续定位到ClaudeAgentService._persist_assistant_turn仍直接SQL，而公开Chat已带AdminTurnPersistence；下一阶段先核对现有registered chat-message.persist的DTO/原History projection/目的grant和生命周期再确定实际writer消费，不消费未注册SystemConfig/Reflection或预接77后台生产路径。
