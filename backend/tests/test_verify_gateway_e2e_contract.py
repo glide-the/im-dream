@@ -1,3 +1,7 @@
+# [Input] Named verifier pure/public contracts with fake responses and database fences.
+# [Output] Redacted model/account preflight and canonical verification regression evidence.
+# [Pos] Provider-free harness contract; never runs a real account/model acceptance.
+# [Sync] 2026-09-15: cover explicit Admin OAuth and account matching before I/O/model writes.
 from __future__ import annotations
 
 import json
@@ -5,6 +9,59 @@ import json
 import pytest
 
 from backend.script import verify_gateway_e2e as verifier
+
+
+@pytest.mark.parametrize("email,token", [("", "synthetic-oauth"), ("synthetic@example.com", ""), ("synthetic@example.com", "synthetic token")])
+def test_missing_authentication_stops_before_database_or_http(monkeypatch, capsys, email, token):
+    monkeypatch.setattr(verifier, "TARGET_MODEL_ALIAS", "synthetic-alias")
+    monkeypatch.setattr(verifier, "EXPECTED_UPSTREAM_MODEL", "synthetic-upstream")
+    monkeypatch.setattr(verifier, "TEST_EMAIL", email)
+    monkeypatch.setenv("INK_GATEWAY_E2E_ADMIN_ACCESS_TOKEN", token)
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid authentication must stop before I/O")
+    monkeypatch.setattr(verifier.database, "get_db", forbidden)
+    monkeypatch.setattr(verifier.requests, "get", forbidden)
+    assert verifier._safe_entrypoint() == 3
+    diagnostic = json.loads(capsys.readouterr().out)
+    assert diagnostic["phase"] == "authentication-contract"
+    assert "synthetic" not in json.dumps(diagnostic)
+
+
+@pytest.mark.parametrize("status,profile,accepted", [
+    (200, {"id": 7, "email": "synthetic@example.com"}, True),
+    (200, {"id": 7, "email": "other@example.com"}, False),
+    (200, {"id": True, "email": "synthetic@example.com"}, False),
+    (200, {"id": "7", "email": "synthetic@example.com"}, False),
+    (401, {}, False), (302, {}, False),
+])
+def test_oauth_account_profile_is_checked_without_redirects(monkeypatch, status, profile, accepted):
+    from types import SimpleNamespace
+    calls = []
+    closed = []
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        return SimpleNamespace(status_code=status, json=lambda: profile, close=lambda: closed.append(True))
+    monkeypatch.setattr(verifier.requests, "get", get)
+    headers = {"authorization": "Bearer synthetic-oauth"}
+    if accepted:
+        assert verifier._authenticated_account_id("synthetic@example.com", headers) == "7"
+    else:
+        with pytest.raises(verifier.AuthenticationContractError):
+            verifier._authenticated_account_id("synthetic@example.com", headers)
+    assert calls == [(f"{verifier.DREAM_BASE_URL}/api/me", {"headers": headers, "timeout": 10, "allow_redirects": False})]
+    assert closed == [True]
+
+
+def test_wrong_oauth_account_stops_before_database_or_model(monkeypatch):
+    monkeypatch.setattr(verifier, "TARGET_MODEL_ALIAS", "synthetic-alias")
+    monkeypatch.setattr(verifier, "EXPECTED_UPSTREAM_MODEL", "synthetic-upstream")
+    monkeypatch.setattr(verifier, "TEST_EMAIL", "synthetic@example.com")
+    monkeypatch.setenv("INK_GATEWAY_E2E_ADMIN_ACCESS_TOKEN", "synthetic-oauth")
+    from types import SimpleNamespace
+    monkeypatch.setattr(verifier.requests, "get", lambda *args, **kwargs: SimpleNamespace(status_code=200, json=lambda: {"id": 7, "email": "other@example.com"}, close=lambda: None))
+    monkeypatch.setattr(verifier.database, "get_db", lambda: pytest.fail("Wrong OAuth account must stop before database activity"))
+    with pytest.raises(verifier.AuthenticationContractError):
+        verifier.main()
 
 
 def _event(payload: dict, newline: str = "\n") -> bytes:

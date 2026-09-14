@@ -283,3 +283,27 @@ Chat主stream初始user-message reserve新增actual typed persist（OAuth reques
 阶段11 Python fresh gate：public retired auth/registration/request profile三文件 `46 passed in 0.64s` exit0；仍使用fake repository/cipher/discovery的MCP SDK外部OAuth `5 passed in 0.19s` exit0，原协议保留。docs19files/179links/166inventory/历史原文SHA与README结构/6sequence块0fail，diff0。接着补Next实际旧同路径薄adapter，静态login/register在generic proxy前直接返回410；不让旧请求先被401遮住迁移反馈。Next/currentauthority parser只读三项公开配置，不要求或读取private service凭据。fresh Node/type/build待回执。
 
 阶段11 Next fresh gate：`node --test app/api/_auth/retired-auth.test.ts app/api/_auth/handlers.test.ts app/api/_auth/login-boundary.test.ts` 27 pass/0 fail exit0；`pnpm exec tsc --noEmit --incremental false` exit0；`NODE_ENV=production pnpm exec next build` exit0，包含static/api/login/register/oauth/auth新路径，编译/类型/静态页面/优化完成。docs30files/179links/212concrete folder entries/history SHA/README parity/6sequence blocks0fail，diff0。保留本轮worktree构建产物，不访问正常数据库/模型/外部服务。
+
+## 阶段 12：关闭旧 standalone authority 与脚本自签
+
+### Optimized Prompt
+
+九条Python与八条Next旧HTTP方法已退役，继续关闭可调用的backend/auth.py旧密码/HS256/refresh/sliding authority。保留已有helper标识符供历史import与fixture，签发/密码校验接口明确抛安全retired exception，旧token验证/renewal仅拒绝；保留无authority的duration/sha256/header纯函数。不读取JWT/refresh secret、无默认key、不import bcrypt或jwt签发库，不引入另一个issuer或凭body猜principal。真正认证仍唯一Admin JWT verifier+freshprincipal+BFF。
+
+将import_diaries Agent标注改为必须显式--api-token/已配置secret中的Admin OAuth，去掉DB邮箱查询后自签与相关auth import；CLI/env参数内容不得打印。真实Gateway verifier必须显式现有email与AdminOAuth secret，无固定codex影子账户默认；在任何数据库/网络/模型调用前拒绝缺失凭据，保留已有显式model contract优先检查。其余校验/正文parser/计费流程不借本阶段重写，标注旧Gatewaysubject helper路径另待purpose迁移。未运行脚本，不能报正常模型验收。
+
+源码没有其它Authlib/bcrypt使用时，从pyproject移除这两项仅属于旧authority的依赖；先offline更新uv.lock/export requirements，保持所有剩余resolved版本与SDK/Runtime/project pins不变。manifest/lock/export原子同步；不修改用户venv、不重装SDK/浏览器、不用部署环境名切行为。同步backend/script/test headers/folder、README与现行Auth设计，保留3份历史原文。
+
+Luna运行真实retired helper/公开Auth/router/JWT boundary合同、现有verification纯合同（no script main realaction）、缺secret-before-I/O回归、lock/export一致与docsinventory检查。所有真实DB/model/用户数据保持未触碰；全域数据库与Agent grant接线继续active。
+
+阶段12 fresh技术回执：六文件集合 `101 passed in 0.78s` exit0；tomllib/requirements比较exit0，仅authlib/bcrypt移除，无新增包，其余版本/制品URL/hash/size保持；`uv lock --check --offline` exit0（隔离cache，仅resolver无install）。docs19files/179links/148folderentries/历史原文SHA/README结构/6sequence块0fail，diff0。两个script真实main未执行，PG/model/正常账户未触碰；后续Workflow/grant/全域DB继续active。
+
+## 阶段 13：Admin Workflow 上下文与公开 Chat 接线
+
+### Optimized Prompt · 2026-09-15
+
+消费实际workflowContextDto/Handler/Service与operation artifact，不复制Admin retry图/来源hash/数据库规则。唯一input thread_id，保留原StoryWorkspaceDreamRunContext十字段的非空/255/Run格式/正安全整数边界，strict required nullable agent_id，不用客户端传入的Run/Deck/actor作为上下文。Admin返回null明确普通Chat或经过完整校验的terminal leaf；409/权限/缺capability fail closed。Runtime create readiness增加已发布0033 dream.schema.unified.v1 exact digest，不能只匹配三项identity capabilities。
+
+公开Chat在已有Deck/Voice绑定后、初始message预留和SSE前读取Admin上下文，通过不可变服务器snapshot注入内部RunRequest；公开DTO不暴露该字段，service精确检查actor/thread后使用snapshot，不再对该公开入口调用旧PG mapper。内部持久化confirmation/launch dispatch仍保留原guard/mapper直到对应typed command和服务身份合同接好，不给缺scope/过期OAuth新增fallback。原admission比较、lease、EventBus、Runner、resume/cancel和SSE unchanged，后台long-turn grant生命周期另接，不能将snapshot准备称为完整Runtime迁移。
+
+同步涉及headers/folder/设计与README，Luna验证actual typed HTTP、真实公开Chat路由、null/十字段/actor-thread错配/required nullable/技术数值、capability drift和读失败-before-message/SSE。Provider-free无PG/model/用户服务。长turn三purpose、Editor/Gateway/其余域继续执行，目标保持active。

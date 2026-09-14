@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# [Input] Consume Markdown diary/note files plus user/date import options.
-# [Output] Upsert diary content as Ink & Memory editor sessions.
+# [Input] Markdown diary/note files, user/date options and explicit Admin OAuth for Agent labels.
+# [Output] Upsert editor sessions; Agent labels use public authenticated production routes, without local signing.
 # [Pos] backend/script import utility node.
+# [Sync] 2026-09-15: require explicit Admin OAuth before Agent-mode I/O; no local JWT generation.
 # [Sync] 2026-05-31: created dated diary importer for user_sessions.
 # [Sync] 2026-05-31: default import matching now uses file creation time before filename dates.
 # [Sync] 2026-05-31: imported text now prefixes the source filename as the first line.
@@ -9,19 +10,15 @@
 # [Sync] 2026-05-31: top-level stems like 思考笔记本-5-17.md resolve dates from the filename stem before creation time.
 # [Sync] 2026-05-31: imported sessions default selectedState to ok.
 # [Sync] 2026-06-01: imported sessions can infer and persist labels before writing user_sessions.
-# [Sync] 2026-06-05: add --label-mode agent: create thread via POST /api/claude-agent/threads then call POST /api/claude-agent; token auto-generated from user DB record via auth.create_access_token; --backend-url / INK_MEMORY_BACKEND_URL / --api-token configure the connection.
+# [History] 2026-06-05: Agent labels originally generated local tokens; this authority was retired on 2026-09-15.
 # [Sync] 2026-07-19: _agent_infer_labels now reads the final assistant text from
 #                    the "message-final" SSE frame instead of a follow-up
 #                    GET /api/claude-agent/threads/{id}/messages call, which
 #                    could race the backend's async assistant-message
 #                    persistence (finish is enqueued before persistence
 #                    completes) and intermittently return empty labels.
-# [Sync] 2026-07-19: load backend/.env (same as server.py) before importing auth
-#                    so the auto-generated --label-mode agent JWT is signed with
-#                    the running backend's real JWT_SECRET instead of auth.py's
-#                    dev-secret fallback; fixes 401 Unauthorized on
-#                    POST /api/claude-agent/threads when the script's shell
-#                    doesn't already export JWT_SECRET.
+# [History] 2026-07-19: loading backend/.env corrected the former local-token key;
+#                       local signing and its fallback were retired on 2026-09-15.
 # [Sync] 2026-07-19: --label-mode agent now sends toolChoice "none" (label
 #                    inference never needs tools) and enforces a wall-clock
 #                    AGENT_LABEL_STREAM_TIMEOUT_S deadline around the SSE read
@@ -71,18 +68,12 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-# Load backend/.env the same way server.py does *before* importing auth, so a
-# locally auto-generated JWT (see _build_agent_token) is signed with the same
-# JWT_SECRET the running backend process verifies against. Without this, auth
-# falls back to its dev-secret default whenever the script's shell doesn't
-# already export JWT_SECRET, and every --label-mode agent call fails with
-# 401 Unauthorized against a real backend.
+# Load server-owned import configuration; Agent calls require explicit Admin OAuth.
 from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(BACKEND_DIR / ".env", override=False)
 
 import database  # noqa: E402
-import auth as _auth  # noqa: E402
 
 try:
     import httpx as _httpx  # noqa: E402
@@ -204,16 +195,32 @@ def _process_entry_task(task: _EntryTask) -> DiaryEntry | None:
 
 
 def _build_agent_token(user_id: int) -> str:
-    """Generate a short-lived JWT for internal script-to-service calls."""
-    db = database.get_db()
-    try:
-        row = db.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
-        if not row:
-            raise SystemExit(f"Cannot build agent token: user {user_id} not found.")
-        email = row["email"]
-    finally:
-        db.close()
-    return _auth.create_access_token(user_id, email)
+    """Historical entry point refuses local signing, without reading the database."""
+    raise SystemExit("Agent labels require explicit --api-token or INK_MEMORY_IMPORT_API_TOKEN from Admin OAuth.")
+
+
+def _require_agent_token(raw: str | None) -> str:
+    token = str(raw or "").strip()
+    if not token or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in token):
+        raise SystemExit("Agent labels require explicit --api-token or INK_MEMORY_IMPORT_API_TOKEN from Admin OAuth.")
+    return token
+
+
+def _require_agent_account(backend_url: str, token: str, user_id: int) -> None:
+    """Bind label requests to the import account before creating any thread."""
+    if _httpx is None:
+        raise SystemExit("httpx is required for --label-mode agent.")
+    with _httpx.Client(timeout=30, trust_env=False, follow_redirects=False) as client:
+        response = client.get(
+            f"{backend_url.rstrip('/')}/api/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        try:
+            profile = response.json() if response.status_code == 200 else None
+        except ValueError:
+            profile = None
+    if not isinstance(profile, dict) or type(profile.get("id")) is not int or profile["id"] != user_id:
+        raise SystemExit("Admin OAuth account must match the import account.")
 
 
 def _agent_create_thread(backend_url: str, token: str, title: str | None = None) -> str:
@@ -469,9 +476,8 @@ def parse_args() -> argparse.Namespace:
         "--api-token",
         default=os.environ.get("INK_MEMORY_IMPORT_API_TOKEN"),
         help=(
-            "Bearer JWT to authenticate against the backend. "
-            "If omitted, a token is auto-generated from the resolved user record "
-            "(env INK_MEMORY_IMPORT_API_TOKEN)."
+            "Admin OAuth bearer required for Agent labels; use this option or "
+            "the INK_MEMORY_IMPORT_API_TOKEN secret. No local token is generated."
         ),
     )
     parser.add_argument(
@@ -1314,6 +1320,7 @@ def print_summary(entries: list[DiaryEntry], dry_run: bool) -> None:
 
 def main() -> None:
     args = parse_args()
+    explicit_agent_token = _require_agent_token(args.api_token) if args.label_mode == "agent" else None
     source_dir = resolve_source_dir(args.source_dir)
     user_id = resolve_user_id(args.email, args.user_id)
     tz = resolve_timezone(args.timezone, user_id)
@@ -1327,7 +1334,8 @@ def main() -> None:
     agent_ctx: AgentLabelContext | None = None
     if args.label_mode == "agent":
         backend_url = args.backend_url or DEFAULT_BACKEND_URL
-        token = args.api_token or _build_agent_token(user_id)
+        token = explicit_agent_token
+        _require_agent_account(backend_url, token, user_id)
         agent_ctx = AgentLabelContext(
             backend_url=backend_url, token=token, max_labels=args.max_labels
         )

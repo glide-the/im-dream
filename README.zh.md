@@ -1,6 +1,7 @@
 <!-- [输入] 当前 Dream/Admin/Gateway 拓扑、支持版本与用户可见的 MCP Apps 流程。 -->
 <!-- [输出] 面向普通用户和本机运行者的简明指南，深入工程细节通过链接下沉。 -->
 <!-- [定位] 仓库中文入口指南；README.md 是同结构的英文正文。 -->
+<!-- [同步] 2026-09-15：同步旧standalone认证退役与具名脚本的显式Admin OAuth/账户核对。 -->
 <!-- [同步] 2026-09-13：同步 MCP Apps 设计稿迁入 docs/design/claude-mcp 后的引用；不改实现或历史回执。 -->
 <!-- [同步] 2026-09-06：以快速启动和 MCP Apps 用法重组；用分层章节保留精确安装、所有权、安全与验证事实。 -->
 <!-- [同步] 2026-09-06：为 MCP 连接、App 设置和 Chat 交互步骤加入经过脱敏的真实组件截图。 -->
@@ -39,7 +40,7 @@ Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话
 
 本仓库包含 Dream Web 应用与 FastAPI 后端。Admin、PostgreSQL、模型 Gateway、公开 Python SDK 和原生 Claude Runtime 由独立项目维护。
 
-资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership 与初始 user-message 预留已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 正在技术验证；Agent 生命周期/Gateway/Editor 接线、其他数据库领域与旧 standalone auth helpers/scripts 仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径现返回明确410与已配置的Admin标准端点，不转发凭据。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
+资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership 与初始 user-message 预留已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 已通过聚焦技术检查；Agent 生命周期/Gateway/Editor 接线与其他数据库领域仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径返回明确410与已配置的Admin标准端点。Standalone auth helpers 拒绝本地认证权限；importer Agent标注和具名Gateway verifier必须使用显式Admin OAuth，并在业务写入/模型调用前核对正常生产profile账户。Authlib/bcrypt已移除，其余依赖版本不变。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
 
 ## 你可以做什么
 

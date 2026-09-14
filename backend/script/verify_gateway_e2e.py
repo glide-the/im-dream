@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# [Input] Explicit existing local account, Admin OAuth secret and model contract.
+# [Output] Redacted public Gateway/Dream verification receipts; never issues local login tokens.
+# [Pos] Named verification harness; not a runtime authority or automatic real-account runner.
+# [Sync] 2026-09-15: require explicit Admin OAuth/email before I/O, remove shadow-account default and local signing.
 """Run a real local Admin Gateway -> Dream -> Claude Agent smoke test.
 
 The command is intentionally pinned to the named local E2E canonical user. It
@@ -27,15 +31,12 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 load_dotenv(BACKEND_ROOT / ".env")
 
-import auth  # noqa: E402
 import database  # noqa: E402
 from services.admin_gateway.config import AdminGatewayConfig  # noqa: E402
 from services.admin_gateway.token import issue_gateway_subject_token  # noqa: E402
 
 
-TEST_EMAIL = os.environ.get(
-    "INK_GATEWAY_E2E_EMAIL", "codex-free-round55@ink-memory.test"
-)
+TEST_EMAIL = os.environ.get("INK_GATEWAY_E2E_EMAIL", "").strip()
 DREAM_BASE_URL = os.environ.get(
     "INK_GATEWAY_E2E_DREAM_BASE_URL", "http://127.0.0.1:8765"
 ).rstrip("/")
@@ -70,6 +71,39 @@ _DREAM_AUTHORITY_METADATA_KEYS = (
     "dispatch_status",
     "dispatchStatus",
 )
+
+
+class AuthenticationContractError(RuntimeError):
+    """An explicit existing account and Admin OAuth credential are required."""
+
+
+def _required_authentication_contract() -> tuple[str, str]:
+    token = os.environ.get("INK_GATEWAY_E2E_ADMIN_ACCESS_TOKEN", "").strip()
+    if not TEST_EMAIL or not token or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in token):
+        raise AuthenticationContractError("Explicit Admin OAuth authentication is required")
+    return TEST_EMAIL, token
+
+
+def _authenticated_account_id(email: str, auth_headers: dict[str, str]) -> str:
+    """Read the production profile before any database or model activity."""
+    response = requests.get(
+        f"{DREAM_BASE_URL}/api/me", headers=auth_headers,
+        timeout=10, allow_redirects=False,
+    )
+    try:
+        profile = response.json() if response.status_code == 200 else None
+    except ValueError:
+        profile = None
+    finally:
+        response.close()
+    if (
+        not isinstance(profile, dict)
+        or type(profile.get("id")) is not int
+        or profile["id"] <= 0
+        or profile.get("email") != email
+    ):
+        raise AuthenticationContractError("Admin OAuth account does not match the configured account")
+    return str(profile["id"])
 
 
 class ModelContractError(RuntimeError):
@@ -769,16 +803,21 @@ def _thread_receipt(
 
 def main() -> int:
     model_alias, expected_upstream_model = _required_model_contract()
+    email, dream_token = _required_authentication_contract()
+    auth_headers = {"authorization": f"Bearer {dream_token}"}
+    authenticated_user_id = _authenticated_account_id(email, auth_headers)
 
     connection = database.get_db()
     try:
         user = connection.execute(
             "SELECT id, email FROM users WHERE email = %s AND status = 'active'",
-            (TEST_EMAIL,),
+            (email,),
         ).fetchone()
         if user is None:
             raise RuntimeError("The local E2E canonical user is not provisioned")
         canonical_user_id = str(user[0])
+        if canonical_user_id != authenticated_user_id:
+            raise AuthenticationContractError("Admin OAuth account does not match the database account")
         projection = connection.execute(
             """
             SELECT id FROM platform_users
@@ -792,8 +831,6 @@ def main() -> int:
     finally:
         connection.close()
 
-    dream_token = auth.create_access_token(canonical_user_id, TEST_EMAIL)
-    auth_headers = {"authorization": f"Bearer {dream_token}"}
     dream_health = requests.get(f"{DREAM_BASE_URL}/api/health", timeout=10)
     if dream_health.status_code != 200:
         print(json.dumps({"phase": "dream-health", "status": dream_health.status_code}))
@@ -1140,6 +1177,8 @@ def _safe_entrypoint() -> int:
         if isinstance(exc, BusinessPreflightError):
             phase = exc.phase
             error_code = exc.error_code
+        elif isinstance(exc, AuthenticationContractError):
+            phase = "authentication-contract"
         elif isinstance(exc, ModelContractError):
             phase = "model-contract"
         elif isinstance(exc, SSEProtocolError):

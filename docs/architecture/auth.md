@@ -1,6 +1,7 @@
 <!-- [Input] Dream baseline auth/BFF and the Admin-owned contract when frozen. -->
 <!-- [Output] Dream consumer design, authority retirement, topology and acceptance gates. -->
 <!-- [Pos] Dream authentication consumer; Admin owns Better Auth, OAuth and signing keys. -->
+<!-- [Sync] 2026-09-15: retire standalone authority and require explicit OAuth/profile account matching in scripts. -->
 <!-- [Sync] 2026-09-14: record the implemented Admin BFF and public issuer retirement; retain original history. -->
 
 # Dream 接入 Admin 认证
@@ -75,6 +76,6 @@ Luna runner执行确定性技术验证并返回cwd/command/exit/output。真实�
 
 `/api/register`、`/api/login`、`/oauth/google/login/callback`、`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token` 和 Python `/auth/logout` 保留原路径并返回410 `DREAM_AUTHENTICATION_RETIRED`。配置解析出的Admin issuer/authorize/token/device/code/revoke/JWKS/verification/resource信息用于client迁移；不解析或转发密码、code、refresh和Cookie，不签本地token、不更新账户/device/refresh表。公开authority缺失或非法时503，不从Host/query猜目标。Browser由Next `/auth/start/callback/session/logout`执行既有PKCE/handle流程，密码、注册和Google功能在Admin唯一UI。
 
-Authlib在原两个issuer router中仅用于Dream Google/Device authority，现不再执行。Managed MCP外部server授权继续由标准 `mcp.client.auth.OAuthClientProvider`和TokenStorage执行，协议、加密存储、refresh和取消保持；Notion connector的现有credential/login不受本阶段影响。`backend/auth.py`旧standalone helpers以及两个维护/验收脚本调用仍待退役，不据九条HTTP路径关闭声称全部旧签发代码消失。typed `/api/me`/`/auth/me`与独立数据导入保持，导入DB还未迁移。
+Authlib在原两个issuer router中仅用于Dream Google/Device authority，现已退役，并与bcrypt一起从Python manifest/lock/export移除，其余依赖版本不变。Managed MCP外部server授权继续由标准 `mcp.client.auth.OAuthClientProvider`和TokenStorage执行，协议、加密存储、refresh和取消保持；Notion connector的现有credential/login不受本阶段影响。`backend/auth.py`保留历史helper标识符，本地签发/密码接口抛安全退役错误，旧token验证/renewal拒绝，只有duration/SHA-256/header纯函数保持；不读secret或默认key。两个维护/验收脚本必须显式提供Admin OAuth，缺失时在I/O前失败；公开 `/api/me` 必须匹配指定账户，错配时在thread/model/业务写入前失败。Gateway verifier的旧subject helper仍需purpose迁移。typed `/api/me`/`/auth/me`与独立数据导入保持，导入DB还未迁移。
 
 Next同名password/Google/Device/token薄adapter也返回410，login/register在generic proxy前执行，避免未登录401遮住迁移响应；Next `/auth/logout`仍执行实际BFF handle撤销。两端退役owner只读取三项公开authority配置，不要求private service凭据。

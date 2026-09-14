@@ -1,6 +1,7 @@
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
 <!-- [Pos] Dream consumer architecture; Admin owns API/DTO/domain/repository/ORM contracts. -->
+<!-- [Sync] 2026-09-15: record standalone authority refusal and named script account validation; preserve outstanding domain gates. -->
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
 # Dream / Admin 认证与数据交互
@@ -199,4 +200,4 @@ Admin以`auth.delegations`单独返回create/renew/revoke/原request_id receipt�
 
 Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先查原receipt；absent继续保持pending，不新建动作。恢复原committed结果后仍以有效expiry判断是否可用，maximum不延长；到期或purpose不匹配时授权边界拒绝。后台异常只写安全diagnostics，不传播到Agent turn。当前仅consumer/keeper候选源码；Agent生命周期、CLI最小投影、Editor stdio和Workflow原确认保护接入仍未完成。
 
-旧Dream password/Google/Device/token与Python local-cookie logout九条HTTP路径已改为明确410标准Admin authority迁移响应，不解析/转发敏感请求、不执行签发或相关DB动作。Standalone旧auth helpers/两个脚本与其他数据库领域仍待迁移；MCP SDK外部OAuth协议保持。此项不等于正常本机登录/模型验收。
+旧Dream password/Google/Device/token与Python local-cookie logout九条HTTP路径已改为明确410标准Admin authority迁移响应，不解析/转发敏感请求、不执行签发或相关DB动作。Standalone旧auth helpers已拒绝本地签发/密码/refresh权限，两个脚本改为显式Admin OAuth并核对正常生产profile账户；Authlib/bcrypt从manifest/lock/export原子移除，其余版本不变。Gateway subject helper、Agent purpose接线与其他数据库领域仍待迁移；MCP SDK外部OAuth协议保持。此项不等于正常本机登录/模型验收。
