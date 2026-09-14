@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record actual SystemConfig callsites and credential ownership without replacing an unpublished domain. -->
 <!-- [Sync] 2026-09-15: retain original launch commit ordering while candidate operations remain unregistered. -->
 <!-- [Sync] 2026-09-15: close content/download Thread ownership and retain missing SystemConfig/default capabilities. -->
 <!-- [Sync] 2026-09-15: close public Preflight GET independently of Workspace/SystemConfig/Run dependencies. -->
@@ -50,8 +51,8 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | --- | --- | --- | --- |
 | `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG；read/publish/close同活动锁，shutdown后台owner和Factory后关闭HTTP | 全域startup/其它DB与正常业务验收仍开放 |
 | 公开Deck完整列表 | [deck_list_data](../../backend/services/admin_data/deck_list_data.py)：deck.list | published false/true两mode无DB；原counts/author字段/owner int/ISO，Admin过滤排序装饰，单read | 创建/default/provision/install/后台与正常业务仍待；列表原路径无default/文件依赖 |
-| 公开Preflight读取/领域执行 | [preflight_data](../../backend/services/admin_data/preflight_data.py)：workflow-preflight.read/execute、独立original receipt reader | GET无default/旧service/SQL；POST领域操作交Admin，raw JSON/原202与17字段、actor-Deck-revision/three schemas、显式同ID三态receipt/no resend；generic receipt不改 | POST default Workspace仍SQL；default/SystemConfig/隐藏source仍待；目录75不替代全域Run/launch或正常验收；revision descriptor元数据差异待Admin修正 |
-| 公开Run读取/创建/重试 | [run_data](../../backend/services/admin_data/run_data.py)：workflow-run.read/create/retry | 领域操作无旧service/SQL；原200/201/28required fields/lifecycle/微秒/key/source、actor/Workspace/ID或key-retry-source、two exact schemas/hash、显式generic原两态receipt/no resend；原error mapping共享 | 三个入口default Workspace仍SQL；cancel/guidance/confirmation/launch/Run其它持久化及正常验收仍待；原SQLite行锁并发skip保持，不宣称PG验收 |
+| 公开Preflight读取/领域执行 | [preflight_data](../../backend/services/admin_data/preflight_data.py)：workflow-preflight.read/execute、独立original receipt reader | GET无default/旧service/SQL；POST领域操作交Admin，raw JSON/原202与17字段、actor-Deck-revision/three schemas、显式同ID三态receipt/no resend；generic receipt不改 | POST default已使用registered76 Admin ensure；SystemConfig/隐藏source仍待；目录76不替代全域Run/launch或正常验收；revision descriptor元数据差异待Admin修正 |
+| 公开Run读取/创建/重试 | [run_data](../../backend/services/admin_data/run_data.py)：workflow-run.read/create/retry | 领域操作无旧service/SQL；原200/201/28required fields/lifecycle/微秒/key/source、actor/Workspace/ID或key-retry-source、two exact schemas/hash、显式generic原两态receipt/no resend；原error mapping共享 | 三个入口default已使用registered76 Admin ensure；cancel/guidance/confirmation/launch/Run其它持久化及正常验收仍待；原SQLite行锁并发skip保持，不宣称PG验收 |
 | 共享文件content/download Thread ownership | [workspace_data](../../backend/services/admin_data/workspace_data.py)：复用chat-thread.get | 两GET不再调用get_chat_thread，current OAuth/strict reply/actor-ID/four schemas，原Mode/path/FS顺序和404/503 | get_system_config的Mode/初始化读取与其他管理数据入口仍pending；原Workspace fixture已改实际Admin HTTP，正常共享文件/CLI验收另行 |
 | 隐藏launch来源与dispatch | [launch_metadata_data](../../backend/services/admin_data/launch_metadata_data.py)：三registered75 types/原source seam；原[infrastructure](../../backend/services/story_workspace/dream_launch_infrastructure.py)待接线 | strict source/claim真假/10Context/raw JSON/finish、原command约束/callsite source IDs与fingerprint、current actor、同UUID两态receipt/no resend已技术准备；原application/builder/endpoint/router未变 | 生产endpoint只传actor/Workspace字符串，未选择新adapter；原source/claim/finish/prepare/Voice/failure SQL仍pending；launch75公开PG剩余37待primary，不声明完整PG/normal launch；default Workspace仍未注册 |
 | 公开Deck详情 | [deck_detail_data](../../backend/services/admin_data/deck_detail_data.py)：deck.detail | 单Admin owned aggregate；closed fields/owner int/ISO/原纯Memory解析/URL与nestedDeck匹配，无DB | Admin voiceRow emptytext→null投影差异需修正；其它create/default/install/内部helper继续开放 |
@@ -372,16 +373,16 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 
 ### Runtime/共享文件回归与授权依赖
 
-2026-09-15指定workspace/pipeline/sdk_env三文件技术合同105pass/8.35s exit0。只验证原本地路径/TMPDIR/artifact/SDK合同，未证明真实CLI、模型、共享文件HTTP OAuth或normal PostgreSQL链路。Gateway旧helper全局key/本地subject JWT与SystemConfig读取仍是迁移入口；Workspace HTTP生产已复用get_current_user/Admin共享身份，旧测试还patch retired verify_access_token且未配置Admin owner，harness待适配；生产Thread/SystemConfig metadata仍访问database，需统一Admin数据消费者，不能用旧auth mock声明完整链路closed。
+2026-09-15指定workspace/pipeline/sdk_env三文件技术合同105pass/8.35s exit0。只验证原本地路径/TMPDIR/artifact/SDK合同，未证明真实CLI、模型、共享文件HTTP OAuth或normal PostgreSQL链路。Gateway旧helper全局key/本地subject JWT与SystemConfig读取仍是迁移入口；该105项旧回执时Workspace harness尚未配置Admin owner；阶段29已适配实际OAuth/typed Thread lookup，生产Thread ownership无旧DB。当前两个SystemConfig getter仍待迁移；阶段33完整342项技术套件包含该已适配Workspace harness，不把旧auth mock当完整验收。
 
 ### 通用database helper与DI调用候选
 
-阶段29后同一只读scanner扫描297模块并补扫嵌套import、直接导入helper与模块alias：35个模块仍导入legacy database，121处直接helper Call候选，exit0/parse_errors=[]。Workspace ownership helper已移除一次源码Call（由两GET调用），剩余两处SystemConfig；48字面SQL模块/513候选和16driver模块保持。以下同时列出零Call但仍把helper作为DI/default callback传递的模块；这些不能据零Call视为关闭。静态候选还可能含已退役/不可达路径，后续依公开入口与发布capability复核，不当作运行时调用次数。
+阶段33后同一只读scanner扫描299模块并补扫嵌套import、直接导入helper与模块alias：35个模块仍导入legacy database，120处直接helper Call候选，exit0/parse_errors=[]。Workspace ownership helper已移除一次源码Call（由两GET调用），剩余两处SystemConfig；48字面SQL模块/513候选和16driver模块保持。以下同时列出零Call但仍把helper作为DI/default callback传递的模块；这些不能据零Call视为关闭。静态候选还可能含已退役/不可达路径，后续依公开入口与发布capability复核，不当作运行时调用次数。
 
 | database引用模块 | 直接helper调用候选 |
 | --- | --- |
 | [backend/services/story_workspace/dream_launch_infrastructure.py](../../backend/services/story_workspace/dream_launch_infrastructure.py) | 1 |
-| [backend/routers/story_workspace.py](../../backend/routers/story_workspace.py) | 2 |
+| [backend/routers/story_workspace.py](../../backend/routers/story_workspace.py) | 1 |
 | [backend/services/deck/admin_gateway.py](../../backend/services/deck/admin_gateway.py) | 1 |
 | [backend/services/deck_plugin/release_service.py](../../backend/services/deck_plugin/release_service.py) | 1 |
 | [backend/routers/claude_plugins.py](../../backend/routers/claude_plugins.py) | 9 |
@@ -415,3 +416,27 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | [backend/services/deck/defaults.py](../../backend/services/deck/defaults.py) | 3 |
 | [backend/services/story_workspace/dream_launch_endpoint_service.py](../../backend/services/story_workspace/dream_launch_endpoint_service.py) | 0 |
 | [backend/tools/session_inserter.py](../../backend/tools/session_inserter.py) | 3 |
+
+## SystemConfig 生产读取与身份复查 · 阶段32后
+
+当前源码 AST 复查得到六个直接 getter、一个直接 saver、三个 getter 注入引用及两个 reader 引用；后两个分别为实际调用和兼容函数转发。它们仍使用 `user_preferences.system_config_json`；已接入的 Preferences 五项字段不能覆盖此列。旧 save 用 `current.update(patch)` 合并已保存对象，保留未知 keys，更新时间并提交；SQL、owner 校验、并发/CAS、JSON 合并和持久化需要独立 Admin domain，尚未发布。Dream 继续负责公开键过滤、Gateway callable/modelAlias 校验及 env/sandbox/user keys 清理。
+
+| 生产位置 | 当前输入与行为 | 消费新 Admin domain 所需凭据与绑定 | 当前缺口 |
+| --- | --- | --- | --- |
+| [设置 GET](../../backend/routers/system_config.py#L229)、[PUT](../../backend/routers/system_config.py#L236) | get_current_user 返回当前账户；GET 一次读取，PUT 先清理 patch，再 save 和读取公开投影 | 复用 `_admin_actor: AdminRequestActor` 和 `AdminRequestAuth.client`，GET dream:read、PUT dream:write；canonical ID 只用于结果匹配 | 仍直接 get/save；模型目录旧客户端也仍需接线 |
+| [公开 Chat 模型选择](../../backend/routers/claude_agent.py#L660) | user_id/body.model 传纯 selection；helper 显式注入旧 getter | 在公开 ingress 的 immutable OAuth actor 上读取配置并提供 server-owned reader/snapshot；不把 ID 转成 credential | helper 只接 ID；[selection 两默认 reader](../../backend/services/admin_gateway/selection.py#L29)仍指向旧 getter |
+| [公开 Chat 附件](../../backend/routers/claude_agent.py#L1035) | Workspace Mode 和网络配置，位于附件下载/FS 同步前 | 当前 ingress 已有 OAuth actor，可复用；保留 Mode/path/FS 执行顺序 | 仍直接读取；失败当前 500，迁移必须定义 Admin unavailable 的安全错误 |
+| [Workspace 初始化](../../backend/routers/workspace.py#L152)、[Mode 校验](../../backend/routers/workspace.py#L211) | current_user ID；前者异常使用现有 defaults，后者异常 503、关闭时 409 | 两公开 GET 使用当前 OAuth dream:read；现有 Thread ownership 已由 Admin 验证，配置不使用 Editor token | 两次旧 getter 仍在；前者 fallback 不能冒称新 domain 的 fail-closed 行为 |
+| [Agent assemble_context](../../backend/claude_agent/service.py#L1655) | request.user_id；读取 prompt/env/IM/Workspace/sandbox 后再构造 Runner；当前异常日志并继续 | 公开普通 Chat/Run 已携带 `AdminTurnPersistence`，其 `current_grant(actor_id, thread_id)` 返回后台续期的 server-persistence idg，绑定同一 Thread 和 authoritative Run（普通 Chat 为 null）；新 domain 必须明确接受该 purpose、dream:read 和请求绑定，并在 Admin 验证 active owner | 当前仍 `int(request.user_id)` +旧 getter；持久化 owner 尚无配置读取方法，不能因它已接 Thread/Session 就宣称配置已迁移 |
+| [内部 Dream 模型选择](../../backend/claude_agent/service.py#L1706) | dream_context 非 null 后再次调用 `_platform_model_resolver(request.user_id, request.model)` | 同一 server-owned Thread/Run grant 或明确 OAuth ingress snapshot；内部 dispatcher 尚未向 request 接入该 owner，缺凭据应在新边界拒绝 | service 默认 resolver 仍调用旧 catalog/getter；不能使用全局 Gateway key 或 ID 补签 JWT 代替授权 |
+| [Editor stdio](../../backend/libs/claude_agent_kit/server/editor_mcp_stdio.py)、[Editor tool](../../backend/libs/claude_agent_kit/server/editor_tool.py#L270)、[ContextBuilder](../../backend/claude_agent/context_builder.py#L407) | 没有直接 SystemConfig getter；ContextBuilder 只接 service 传入的 configured_system_prompt。Editor state 和 recent sessions 则仍有独立 DB 读取 | Agent 服务中的配置读取仍走服务器 persistence 身份；Editor 子进程只能接已发布的 editor-stdio idg、editor:read/write 和绑定 Session，不能读取全账户 SystemConfig，也不能收到 server-persistence/OAuth/service/DB secret | [_editor_mcp_stdio_config](../../backend/libs/claude_agent_kit/server/agent_runner.py#L2202)当前仍投影 actor ID 与 DATABASE_URL，独立 Editor 迁移未关闭 |
+
+身份协议以实际 [delegation DTO](../../backend/services/admin_data/delegation.py#L25)为准：server-persistence 与 gateway-cli 的 editor_session_id 必须 null；只有 editor-stdio 可以具有非 null Editor Session。当前 Admin Editor handler 显式要求 editor-stdio 与 editor scope，其内部 OAuth 分支也要求对应 editor scope；不存在可复用的“Editor server-persistence” grant。配置 getter 的服务端身份与 Editor state 的子进程身份分别定义，不能为清理文档改 purpose/scopes。创建 grant 必须以真实 OAuth actor 授权，并由 Admin 检查 Thread/Run/Editor ownership 和 authoritative Workflow context；service credential 单独存在不能替代用户授权。
+
+阶段32后的只读 artifact 已见 76 个合同，新增 workspace-default.ensure；未见 SystemConfig 合同。此观察仅为本地 producer 源码/注册 artifact 证据，不代表正常服务部署或真实账户验收。
+
+### 阶段33默认 Workspace 接入范围
+
+[workspace_data](../../backend/services/admin_data/workspace_data.py)复用 existing typed consumer，新增empty ensure DTO/原text ID DTO/实际hash/two schema与显式原两态receipt；[Workflow ingress](../../backend/routers/story_workspace.py)不再在 `_story_workflow_current_user` 打开DB，保留服务器workspace_id分支。PF POST与Run read/create/retry的完整入口均调用actualAdmin default再领域操作，初始化OAuthwrite-only/unknown stop/no resend。独立 internal agent-output 的旧 default helper和get_db仍在，其他生命周期函数未改。SystemConfig六getter/一saver/三个injection/two reader证据保持；资源provider/Runtime/文件/TMPDIR不改，注册76数量不等于全SQL或正常模型验收。
+
+阶段33重跑当前扫描为299模块/48 SQL-bearing/513literal/16driver-persistence imports/35legacy imports/**120**direct legacy helper calls，parse_errors=[]/exit0；相对阶段32仅默认helper中的一次get_db移除，残留SQL模块/字面候选数量保持。以上为完整声明scope内源码候选，不是全生产可达SQL关闭证据。

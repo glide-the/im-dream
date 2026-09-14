@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
 <!-- [Input] Published Admin Run read/create/retry DTOs and original WorkflowRun/application semantics. -->
 <!-- [Output] Current consumer ownership, normal flow, states, failures and technical acceptance limits. -->
 <!-- [Pos] Current Run data migration rules; original lifecycle and launch designs remain indexed separately. -->
@@ -11,16 +12,16 @@
 
 ## 目标与边界
 
-GET `/api/story-workspace/workflow-runs/{workflow_run_id}` 保持原200，POST `/workflow-runs` 与 POST `/workflow-runs/{workflow_run_id}/retry` 保持原201，全部返回原完整28字段模型。这三个领域调用不再使用 Dream SQL/service；现有默认 Workspace 选择仍通过 `_story_workflow_current_user` 查询生产SQL，因此不能称整个入口无PG。
+GET `/api/story-workspace/workflow-runs/{workflow_run_id}` 保持原200，POST `/workflow-runs` 与 POST `/workflow-runs/{workflow_run_id}/retry` 保持原201，全部返回原完整28字段模型。这三个公开入口及其默认 Workspace 选择均使用已注册 Admin 操作，不调用 Dream SQL/service；其它生命周期入口独立追踪。
 
-本设计只消费已发布 read/create/retry。cancel、guidance、confirmation、隐藏 launch、Agent/model/binding/failure recorder、SystemConfig/default Workspace/Gateway-purpose/CLIEditor 等入口继续按迁移清单追踪。目录75与隔离技术测试不等于正常业务验收。
+本设计只消费已发布 read/create/retry。cancel、guidance、confirmation、隐藏 launch、Agent/model/binding/failure recorder、SystemConfig/内部 agent-output 默认 Workspace/Gateway-purpose/CLIEditor 等入口继续按迁移清单追踪。目录76与隔离技术测试不等于正常业务验收。
 
 ## 概念与规则
 
 ### 正常流程与状态
 
 1. 共享认证校验当前 Admin OAuth 与 principal，GET要求dream:read，POST要求dream:write；Thread/Run server grant不能代替公开OAuth。
-2. 保持原默认 Workspace 选择与 `_workflow_actor` 顺序。消费者匹配 identity/unified 两项 exact schema及三个 operation 的版本/hash，缺少任何项即fail closed。
+2. 默认 Workspace 通过 OAuth-write workspace-default.ensure，空输入、原文本ID和原两态receipt；服务器已有 workspace_id 保持复用，尚未绑定时即使 GET 也要求 dream:write，只有read则403且不执行领域操作。初始化失败停止，未知不自动重发。具体[默认规则](workflow-preflight-read-current.md#默认-workspace-初始化)与 `_workflow_actor` 顺序保持。消费者匹配 identity/unified 两项 exact schema及三个 operation 的版本/hash，缺少任何项即fail closed。
 3. Read仅传服务器Workspace与路径RunID。坏ID或前后空白按原Run-not-found返回registry404，不将DTO trim用作路径修复。
 4. Create只传Workspace、PF ID/token、业务key与三项required nullable source。Source必须全null或完整thread/message/aware time tuple；公开时间先用原datetime.fromisoformat解析，按Python微秒精度截断后传输，不计算token/hash/fingerprint/RunID。
 5. Retry只传原Run lookup、PF/token与新业务key。Admin读取原source并校验原failed/rejected/cancelled等前置条件；Dream不新增preread、状态转换或Runtime dispatch。
@@ -40,6 +41,6 @@ binding_revision/status_version为正安全整数；key最多255 Unicode codepoi
 
 [消费者](../../backend/services/admin_data/run_data.py)、[公开路由](../../backend/routers/story_workspace.py)、request-auth注册及原error mapping提取是本阶段范围。其他Story Workspace函数、原模型、PF三态/通用两态receipt、Runtime/资源LKG、共享文件和TMPDIR协议保持。
 
-[生产入口技术测试](../../backend/tests/test_admin_run_routes.py) 使用实际FastAPI/OAuth/client/DTO与MockHTTP。旧领域SQL/service被fence，default loader只在tests依赖注入；覆盖十种状态、28字段/required nullable/微秒/时区、完整source/255 astral key、错配/原404与业务错误、scope/schema/hash、同UUID两态receipt及无重试。原SQLite技术fixture仍跳过行锁并发测试，不代表PG并发已验收。
+[生产入口技术测试](../../backend/tests/test_admin_run_routes.py) 使用实际FastAPI/OAuth/client/DTO与MockHTTP。旧领域SQL/service被fence，该独立领域套件的default loader只在tests依赖注入；新增[默认初始化生产入口套件](../../backend/tests/test_admin_default_workspace.py)不覆盖loader，验证完整default→domain的授权/失败/顺序；覆盖十种状态、28字段/required nullable/微秒/时区、完整source/255 astral key、错配/原404与业务错误、scope/schema/hash、同UUID两态receipt及无重试。原SQLite技术fixture仍跳过行锁并发测试，不代表PG并发已验收。
 
 Admin安全回执中的Run72 remaining public230、atomic业务68/原wrapper cleanup exit1与独立SELECT cleanup3 exit0均保留各自范围。Root未重跑隔离PG或正常业务；普通账户、真实PostgreSQL、Admin可见Run/账本及模型验收由主协调执行。

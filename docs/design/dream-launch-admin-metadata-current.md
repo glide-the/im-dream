@@ -1,7 +1,9 @@
+<!-- [Sync] 2026-09-15: default Workspace is now registered76 and consumed; production launch composition stays pending. -->
 <!-- [Input] Registered launch75 metadata contracts and original Dream source/application/dispatch code. -->
 <!-- [Output] Current typed consumer and source seam rules, states, failures and wiring gaps. -->
 <!-- [Pos] Metadata migration preparation; original production launch design remains applicable. -->
 <!-- [Sync] 2026-09-15: prepare source/claim/finish without claiming old endpoint SQL has migrated. -->
+<!-- [Sync] 2026-09-15: record released launch75 component acceptance while retaining production wiring gaps. -->
 
 # Dream launch Admin metadata 消费现行设计
 
@@ -13,7 +15,7 @@ Admin目录75已注册source.ensure、dispatch.claim和dispatch.finish。Dream�
 
 准备[类型消费者与原source Protocol adapter](../../backend/services/admin_data/launch_metadata_data.py)，供后续生产composition root接线复用。三个operation使用OAuth dream:write、identity/unified两项exact schema与实际版本/hash，HTTP service credential和user token继续分别传输。
 
-当前仅完成类型与seam技术准备：新adapter尚未被生产endpoint/builder选择。原公开launch、source、claim/finish SQL仍存在；不能把注册或MockHTTP用例当作生产迁移、隔离PG全链通过或正常模型验收。default Workspace仍未注册，不猜hash，不以preferences替代SystemConfig。完整prepare/Agent/model/binding、Voice prompt读取、failure recorder和Runtime配置所有权继续追踪。
+当前仅完成类型与seam技术准备：新adapter尚未被生产endpoint/builder选择。原公开launch、source、claim/finish SQL仍存在；不能把注册或MockHTTP用例当作生产迁移、隔离PG全链通过或正常模型验收。default Workspace已注册76并接入公开Workflow ingress，不以Preferences五字段替代SystemConfig。完整prepare/Agent/model/binding、Voice prompt读取、failure recorder和Runtime配置所有权继续追踪。
 
 ## 概念与规则
 
@@ -35,4 +37,6 @@ finish只传Run lookup、issued claim ID和accepted boolean；回复匹配Run/so
 
 修改范围为新类型消费者/source adapter、request-auth注册及受影响文档。原application、endpoint、builder、路由、source/dispatcher SQL实现、Runtime/资源LKG/共享文件和TMPDIR协议保持。
 
-[技术测试](../../backend/tests/test_admin_launch_metadata.py) 使用实际client/DTO/HTTP和原application usecase source seam，fence Dream SQL；覆盖normal/replay/无Agent fingerprint、unknown停在PF前、claim真假/10Context/raw JSON/错配、finish accepted/false、同UUID receipt/stale/no resend、schema/hash/actor及原codepoint约束。它不证明真实OAuth签名、公开endpoint接线、实际Admin COMMIT/权限或普通账户/模型业务。launch75隔离公开验收仍由主协调执行并保留首轮harness失败与已提交source记录；正常数据库与Admin可见业务验收另行。
+[技术测试](../../backend/tests/test_admin_launch_metadata.py) 使用实际client/DTO/HTTP和原application usecase source seam，fence Dream SQL；覆盖normal/replay/无Agent fingerprint、unknown停在PF前、claim真假/10Context/raw JSON/错配、finish accepted/false、同UUID receipt/stale/no resend、schema/hash/actor及原codepoint约束。它不证明真实OAuth签名、公开endpoint接线、实际Admin COMMIT/权限或普通账户/模型业务。
+
+主协调已释放launch75隔离组件验收：remaining37/accepted1只读跳过、21原GET与974断言exit0；11事务故障/3实际final COMMIT丢响应308断言exit0；SELECT-only保留检查19断言exit0。Root只读核对命令回执和聚合计数，未重跑；原首轮命令exit1及已提交source保持。它们证明各自组件范围，不等于Dream旧endpoint接线、完整prepare/Runtime或正常数据库/账户/模型验收。

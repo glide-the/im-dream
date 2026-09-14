@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
 <!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
 <!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
 <!-- [Sync] 2026-09-15: consume Preflight execute and explicit original receipts; default Workspace remains pending. -->
@@ -84,7 +85,7 @@ Public invitations, friend requests, relationships and friend picture reads now 
 
 Public Deck owned/community lists now use one typed Admin operation, preserving original counts and author fields without filesystem or default-initialization steps.
 
-Public Preflight GET uses an owner-scoped Admin read without initializing a Workspace. POST delegates execution to Admin and preserves its 202 response and all 17 fields, with explicit original three-state receipts. Run read/create/retry also use Admin domains and preserve all 28 fields and original 200/201 responses. Unknown writes retain their original request ID without retries. Default-dependent routes still perform the Workspace SQL lookup; system configuration and remaining lifecycle/launch domains need migration. See the [Preflight rules](docs/design/workflow-preflight-read-current.md) and [Run rules](docs/design/workflow-run-admin-consumer-current.md).
+Public Preflight GET uses an owner-scoped Admin read without initializing a Workspace. POST preserves its 202 response, all 17 fields and explicit original three-state receipts. Run read/create/retry preserve all 28 fields and original 200/201 responses. Default-dependent Workflow ingress now uses the registered Admin workspace-default.ensure operation before these domains; it returns the original text ID and requires OAuth dream:write for initialization, including Run GET when no server Workspace is present. Unknown writes retain their original request ID without retries. System configuration and remaining lifecycle/launch/internal agent-output persistence need migration. See the [Preflight rules](docs/design/workflow-preflight-read-current.md) and [Run rules](docs/design/workflow-run-admin-consumer-current.md).
 
 Launch source/claim/finish typed consumers and the original application source adapter are prepared against registered75. The production endpoint still needs OAuth actor wiring, and prepare/Voice/failure SQL remains. See the [metadata preparation rules](docs/design/dream-launch-admin-metadata-current.md).
 

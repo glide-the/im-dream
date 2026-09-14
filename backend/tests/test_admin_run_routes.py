@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: retain isolated Run default DI; complete default ingress is verified separately.
 # [Input] Public Run read/create/retry handlers, shared OAuth and published full Run DTOs.
 # [Output] Full-state/time/source/key/error and explicit original receipt technical evidence.
 # [Pos] Provider-free production harness; default Workspace loader is test-only dependency injection.

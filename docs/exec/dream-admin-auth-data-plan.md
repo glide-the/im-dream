@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record actual SystemConfig callsites and credential ownership without replacing an unpublished domain. -->
 <!-- [Sync] 2026-09-15: distinguish unregistered launch metadata candidates from the frozen72 catalog. -->
 <!-- [Sync] 2026-09-15: record shared-file Thread ownership and unchanged schema-gate extraction. -->
 <!-- [Sync] 2026-09-15: record public Preflight read adoption and current 72-operation release boundaries. -->
@@ -792,3 +793,42 @@ git diff --check
 ```
 
 文档checker仍显式检查当前Run/launch设计与历史，backend folder动态范围随阶段改动变化，41/410/275不表示完整repository Markdown普查。Source importer/后台helper/Repository/pool/stdio与全域startup/health/SystemConfig/selected model/GatewayCLIkey等仍开放。launch75主协调报告首轮actor_id query层级harness预期错，实际400 USER_OVERRIDE_FORBIDDEN正确且首Source已提交/其余37待执行，Root未重跑或判业务缺陷。default Workspace候选21仍未注册。本轮不调用普通PG/账户/模型/Browser/Runtime、不改Admin/pins/TMPDIR，完整launch/普通数据与Admin可见账本验收仍由主协调完成。
+
+### launch75 窗口释放后的只读证据核对
+
+收到主协调释放75通知后，Root读取 `/private/tmp/ink-auth-migration-validation/launch75-*-command-receipt.json`，仅输出command/cwd/exit code与聚合计数，不读取凭据或输出正文，不执行DB/Runtime。实际命令均在Admin729f；`node --import tsx tests/integration/adminDreamLaunch.contract.ts` 原首轮exit1保留，continuation exit0记录cases37/skipped_accepted_cases1/prepared38/receipts21/assertions974/protected_tables17。`node --import tsx /private/tmp/ink-auth-migration-validation/launch75-atomic-recovery.mts` exit0，assertions308/selected_faults11/commit_losses3/private_keys_exported=false。`node --import tsx /private/tmp/ink-auth-migration-validation/verify-launch75-preservation.mts` exit0，assertions19/unrelated_full_relations8，scope为SELECT-only/designated new claim metadata changes/no original reset。
+
+主协调另报告cleanup11×2删除、原source/full8tables/旧rows保留正确，本轮仅核对上述三个aggregate命令结果，不称Root重跑故障、清理或完整38一次通过。注册75组件技术gate已释放；原旧endpoint OAuth actor传递与Source/dispatch选择、prepare/Voice/failure、default/SystemConfig/selected model/Gateway/CLI及正常业务仍pending。76 Workspace薄Ingress/原GET尚未实际注册，不提前消费。原阶段32生产代码及287/67测试结果不变，只同步当前设计/状态。
+
+### SystemConfig 当前调用点与身份回报
+
+[生产清单](dream-admin-data-inventory.md#systemconfig-生产读取与身份复查--阶段32后)已按实际 AST 和身份 DTO记录：六个直接 get、一个 save、三个 getter 注入引用及两个 reader 引用。公开设置/Chat/Workspace复用已有immutable OAuth actor；service配置读取可在新 domain 明确支持后复用 Thread/Run server-persistence，内部 dispatcher 仍缺 owner；Editor stdio 不直接读取配置，也无“Editor server-persistence” purpose。原 helper 合并未知 keys，Preferences 五字段不得冒称覆盖。此次只读分析不改 getter、异常行为、Runner 或权限接口。
+
+## 阶段33：已注册76默认 Workspace 消费者
+
+### Optimized Prompt
+
+核对 Admin 实际 76 项注册 artifact、operationRegistry、公开生产 named ingress、原 GET receipt、identity/unified exact schemas 后，复用 AdminDataClient/DomainOperation/StrictDTO 和共享 immutable OAuth actor，新增空输入的 workspace-default.ensure typed consumer。原文本 Workspace ID 原样返回，不强制 UUID、长度或 trim；Admin 独占 oldest-owned 的 created_at ASC/id ASC、账户锁、默认名称/settings、UUID、事务和 current-owner receipt。将 `_story_workflow_current_user` 的默认读取改为该 named operation，保留现有服务器 workspace_id 复用分支；独立 internal agent-output 的默认 SQL 仍保留并列明。注册写操作要求 dream:write，GET Run 等隐式 default 初始化若只有 dream:read 必须明确403，不猜新 readonly 合同、不扩权。PF GET 独立 read 继续无 default 初始化。未知提交只保留原UUID、显式读取原两态receipt，absent 不重发；自动初始化失败不得继续 PF/Run/launch。
+
+在 backend/tests 中调用实际 FastAPI/shared OAuth/client/DTO，禁止覆盖默认 loader；MockHTTP仅替代 Admin transport，旧 DB/旧 service fenced。覆盖真实 helper→default→PF/Run 的公开生产路径、原 status/full response、空输入/原文本ID、401/403/503、schema/hash 缺失、未知结果 stop-before-domain、同UUID receipt/no resend。保留独立 PF/Run合同测试的 DI fixture用于自身领域验证。更新受影响文件header/folder、现行设计稿/README/清单/本计划。AST核对其它Story routes/Runtime/SSE/resources/shared FS/原数据库实现字节保持；运行有意义的 bounded suite、Markdown库存路径/history/README及diff检查。全部属于 provider-free 技术验证，不运行正常服务、真实PG或模型，不改 pins。
+
+### 阶段33实现与独立技术回执
+
+Admin新同步与Root实际源码核对均确认76注册：workspace-default.ensure empty input、legacytext输出、OAuth-write-only、identity/unified两schema、actor-init先于receipt与originalGET empty digest/all-null scopes/current owner。Root核对operationRegistry、named ingress和receipt真实注册；producer报告20/20 ingress/originalGET、旧75 FULL/delegation/PFreceipt字节不变，首次隔离public/concurrency/fault尚待主协调，不据这些信息声称真实业务通过。
+
+实现复用 workspace_data module、shared DomainOperation/StrictDTO/require_workflow_capabilities/client 和immutable actor。公开Workflow默认helper中get_db移除，服务器已有workspace_id复用；default需dream:write，read-only且需初始化时403停止，PF GET独立read。ensure raw text ID无UUID/trim/额外长度限制；explicit generic两态receipt保留原UUID、不初始化或重发。internal agent-output原defaultSQL、其它Story functions、Agent/Runner/Runtime/资源LKG/共享文件/TMPDIR和SystemConfig原实现保持。受影响folder/header、README/现行Auth/PF/Run/launch设计和当前源码清单同步。
+
+原独立PF/Run套件保留default DI作为自身合同隔离；新增实际公开default-dependent套件无dependency override、fence DB/旧domain service，覆盖OAuth/client/empty default→PF202/Run200-201完整模型、legacy text/原serverworkspace分支、readscope/401-403、schema/hash失配、初始化unknown/rejection停领域调用前、同UUID原receipt两态/闭集/identity/no resend。首次七文件suite **exit1，336pass/1fail/7.19s**，失败为新测试误期待Timeout503，实际shared HTTP parser按既有合同返回504；保留此回执，修正测试状态预期，不改生产error handler。加原workspace分支与bad receipt五case后fresh七文件suite **342pass/7.11s，exit0，无失败/skips**：
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_default_workspace.py backend/tests/test_admin_preflight_execution.py backend/tests/test_admin_preflight_routes.py backend/tests/test_admin_run_routes.py backend/tests/test_admin_request_auth.py backend/tests/test_admin_data_boundary.py backend/tests/test_workspace_router.py
+```
+
+- `env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage33-contract-check.py` **exit0/PASS**：actual76/client62/default1/two exact schemas、实际SHA与input/output schema闭集逐项相同（原text min1，无修复）、registry/named ingress/originalGET注册；原serverworkspace branch、其它Story functions/Thread consumer methods、原Actor/Auth methods保持，剩余497 tracked backend Python字节或两测试header-only AST不变。SystemConfig domain仍未注册；normal_business_acceptance=false。
+- `python3 /private/tmp/dream-admin-current-sql-scan.py` **exit0**：299模块/48 SQL-bearing/513literal/16driver-persistence imports/35legacy imports/120directhelper/parse_errors=[]。源码候选scope声明不变；相对阶段32仅defaulthelper一次get_db消除，残留仍开放。
+- `python3 /private/tmp/dream-admin-doc-check.py` **exit0**：41files/431local links/297folder entries/failures=[]、三历史原文SHA不变/README heading parity=true，6 Mermaid仅数量检查，未声称渲染。
+- `git diff --check` **exit0，无输出**。正常本机Google/账户/PostgreSQL/模型/CLI及Admin可见Run/账本验收未执行；Runtime/SDK pins和既有服务未触碰。
+
+SystemConfig身份回报详见[精确生产清单](dream-admin-data-inventory.md#systemconfig-生产读取与身份复查--阶段32后)：公开OAuth actor与Thread/Run server-persistence可按未来发布domain明确支持分别复用；Editor只具有editor-stdio/editor:read-write，未直接读取SystemConfig。internal dispatcher没有server owner、新domain未发布时不得以user ID/service key/新自签JWT补充授权。
+
+- `python3 /private/tmp/dream-admin-system-config-calls.py` **exit0/PASS**：6direct getter/1saver/3getter injection/2reader references，Editor与ContextBuilder direct getter=false/database_calls_executed=false；输出仅file/function/line/reference，未导入业务module或执行数据库调用。未来替换必须明确处理旧service skipping和Workspace初始化defaults，Admin unavailable不得用空对象悄悄继续；此分析未改旧行为。

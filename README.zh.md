@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: consume registered76 OAuth-write default Workspace; original text ID/receipt and independent read scope stay explicit. -->
 <!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
 <!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
 <!-- [Sync] 2026-09-15: consume Preflight execute and explicit original receipts; default Workspace remains pending. -->
@@ -83,7 +84,7 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 
 公开Deck用户/社区列表已使用单项typed Admin operation，保留原计数与作者字段，不执行文件或默认初始化步骤。
 
-公开 Preflight GET 使用 Admin owner-scoped 读取，不初始化 Workspace；POST 领域执行保留原 202、17 字段及显式原请求三态 receipt。Run 读取/创建/重试也已使用 Admin 领域操作，保留完整 28 字段及原 200/201。未知提交保留原请求 ID，不自动重发。依赖默认 Workspace 的路由仍执行 SQL lookup；系统配置及其他 lifecycle/launch 领域继续待迁移。详见[Preflight 规则](docs/design/workflow-preflight-read-current.md)和[Run 规则](docs/design/workflow-run-admin-consumer-current.md)。
+公开 Preflight GET 使用 Admin owner-scoped 读取，不初始化 Workspace；POST 保留原 202、17 字段及显式原请求三态 receipt。Run 读取/创建/重试保留完整 28 字段及原 200/201。依赖默认 Workspace 的 Workflow 入口已在这些领域前使用注册的 Admin workspace-default.ensure，原文本 ID 保持；初始化要求 OAuth dream:write，服务器尚无 Workspace 的 Run GET 也遵守此要求。未知提交保留原请求 ID，不自动重发。系统配置、其他 lifecycle/launch 和 internal agent-output 持久化继续待迁移。详见[Preflight 规则](docs/design/workflow-preflight-read-current.md)和[Run 规则](docs/design/workflow-run-admin-consumer-current.md)。
 
 Launch source/claim/finish类型消费者和原application source adapter已按注册75准备。生产endpoint仍待传递当前OAuth actor，prepare/Voice/failure SQL也仍存在。详见[metadata准备规则](docs/design/dream-launch-admin-metadata-current.md)。
 

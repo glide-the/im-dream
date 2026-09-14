@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: keep isolated PF default DI; complete default ingress has a separate production-path suite.
 # [Input] Public PF POST/Auth/HTTP plus original request-state and receipt contracts.
 # [Output] Domain execution, raw Python JSON, three-state recovery and safe rejection evidence.
 # [Pos] Provider-free harness; default Workspace is explicitly injected, not a whole no-PG proof.
@@ -81,8 +82,8 @@ def boundary(monkeypatch):
     owner = AdminRequestAuth(config, client=client, verifier=ScopeVerifier())
     app = FastAPI()
     app.state.admin_request_auth = owner
-    # Harness-only default loader: the production default lookup is still a
-    # documented SQL dependency, and shared OAuth authentication is real here.
+    # Isolate this PF contract with a harness-only default loader. The separate
+    # default Workspace suite retains the production Admin loader end-to-end.
     async def current_workspace(current_user=Depends(get_current_user)):
         return {**current_user, "workspace_id": "existing-workspace-1"}
     app.dependency_overrides[_story_workflow_current_user] = current_workspace
