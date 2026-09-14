@@ -1,7 +1,7 @@
 // [Input] Explicit Admin service configuration and canonical v1 browser/principal/profile DTOs.
 // [Output] Bounded, no-retry server transport; OAuth credentials never leave this private module.
 // [Pos] BFF Admin consumer behind the sole Next App Router, independent of database entities.
-// [Sync] 2026-09-14: consume actual candidate contracts and explicit Runtime discovery; preserve callback transactions.
+// [Sync] 2026-09-14: share public authority parsing for retired endpoints; keep Runtime discovery and private callback credentials.
 import { z } from 'zod';
 import { BffBoundaryError } from './login-boundary.ts';
 
@@ -53,7 +53,7 @@ function required(environment: Readonly<Record<string, string | undefined>>, key
   return value;
 }
 
-export function adminBffConfig(environment: Readonly<Record<string, string | undefined>> = process.env): AdminBffConfig {
+export function publicAdminAuthority(environment: Readonly<Record<string, string | undefined>> = process.env): Readonly<{ origin: string; issuer: string; resource: string }> {
   const origin = required(environment, 'INK_ADMIN_DREAM_BASE_URL');
   try {
     const url = new URL(origin);
@@ -62,6 +62,12 @@ export function adminBffConfig(environment: Readonly<Record<string, string | und
   } catch { throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503); }
   const issuer = required(environment, 'INK_ADMIN_AUTH_ISSUER');
   const resource = required(environment, 'INK_DREAM_API_RESOURCE');
+  if (issuer !== origin + '/api/auth' || /\s/.test(resource)) throw new BffBoundaryError('BFF_CONFIGURATION_INVALID', 503);
+  return Object.freeze({ origin, issuer, resource });
+}
+
+export function adminBffConfig(environment: Readonly<Record<string, string | undefined>> = process.env): AdminBffConfig {
+  const { origin, issuer, resource } = publicAdminAuthority(environment);
   const serviceId = required(environment, 'INK_ADMIN_DREAM_SERVICE_CLIENT_ID');
   const serviceSecret = required(environment, 'INK_ADMIN_DREAM_SERVICE_SECRET');
   const timeoutMilliseconds = Math.ceil(Number(environment.INK_ADMIN_DREAM_TIMEOUT_SECONDS ?? '10') * 1_000);

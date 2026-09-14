@@ -1,12 +1,7 @@
-# [Input] Consume email and Google authentication routers with mocked
-#         persistence boundaries.
-# [Output] Verify duplicate-email classification and fail-closed new-user
-#          behavior when the canonical user/default-Free transaction cannot commit.
-# [Pos] auth registration contract test in backend/tests
-# [Sync] 2026-08-14: cover email and Google fail-closed behavior before
-#                    post-registration side effects.
-
-"""Registration boundary regressions for Admin-owned default Free provisioning."""
+# [Input] Canonical registration DB fixtures and retired public email/Google paths.
+# [Output] Preserve transactional provisioning regression checks and refuse Dream local authority.
+# [Pos] Registration migration contracts; Admin owns actual registration and default provisioning.
+# [Sync] 2026-09-14: public email/Google tests now assert explicit retirement, not local signing.
 
 from __future__ import annotations
 
@@ -16,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
@@ -142,68 +137,25 @@ class TestRegistrationProvisioningBoundary(unittest.TestCase):
         self.assertEqual(connection.rollbacks, 1)
         self.assertEqual(connection.closes, 1)
 
-    def test_email_registration_returns_503_when_default_free_transaction_fails(
-        self,
-    ) -> None:
+    def test_email_registration_is_retired_without_creating_a_user(self) -> None:
         with (
-            mock.patch.object(auth_router.auth, "hash_password", return_value="hash"),
-            mock.patch.object(
-                auth_router.database,
-                "create_user",
-                side_effect=auth_router.database.UserRegistrationUnavailable(),
-            ),
-            mock.patch.object(auth_router, "provision_default_screenplay_deck") as fork,
+            mock.patch.dict(os.environ, {"INK_ADMIN_DREAM_BASE_URL": "https://admin.example", "INK_ADMIN_AUTH_ISSUER": "https://admin.example/api/auth", "INK_DREAM_API_RESOURCE": "https://dream.example/api"}),
+            mock.patch.object(auth_router.database, "create_user", side_effect=AssertionError("Dream registration must not write")),
         ):
-            response = self.client.post(
-                "/api/register",
-                json={
-                    "email": "new-user@example.test",
-                    "password": "secret123",
-                    "display_name": "New User",
-                },
-            )
+            response = self.client.post("/api/register", json={"email": "new-user@example.test", "password": "secret123", "display_name": "New User"})
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.json()["error"]["code"], "DREAM_AUTHENTICATION_RETIRED")
 
-        self.assertEqual(response.status_code, 503, response.text)
-        self.assertEqual(
-            response.json(),
-            {"detail": "Registration service is temporarily unavailable"},
-        )
-        fork.assert_not_called()
-
-    def test_google_signup_reports_registration_unavailable(self) -> None:
+    def test_google_signup_is_retired_without_resolving_or_linking_accounts(self) -> None:
+        app = FastAPI(); app.include_router(oauth_router.router)
         with (
-            mock.patch.dict(os.environ, {"ENABLE_OAUTH_SIGNUP": "true"}),
-            mock.patch.object(
-                oauth_router.database,
-                "get_user_by_oauth_account",
-                return_value=None,
-            ),
-            mock.patch.object(
-                oauth_router.database,
-                "get_user_by_email",
-                return_value=None,
-            ),
-            mock.patch.object(oauth_router.auth, "hash_password", return_value="hash"),
-            mock.patch.object(
-                oauth_router.database,
-                "create_user",
-                side_effect=oauth_router.database.UserRegistrationUnavailable(),
-            ),
-            mock.patch.object(oauth_router, "provision_default_screenplay_deck") as fork,
+            mock.patch.dict(os.environ, {"INK_ADMIN_DREAM_BASE_URL": "https://admin.example", "INK_ADMIN_AUTH_ISSUER": "https://admin.example/api/auth", "INK_DREAM_API_RESOURCE": "https://dream.example/api"}),
+            mock.patch.object(auth_router.database, "create_user", side_effect=AssertionError("Dream Google signup must not write")),
+            TestClient(app) as client,
         ):
-            with self.assertRaises(HTTPException) as raised:
-                oauth_router._resolve_oauth_user(
-                    {
-                        "sub": "google-subject",
-                        "email": "new-google-user@example.test",
-                        "name": "Google User",
-                    },
-                    {},
-                )
-
-        self.assertEqual(raised.exception.status_code, 503)
-        self.assertEqual(raised.exception.detail, "registration_unavailable")
-        fork.assert_not_called()
+            response = client.get("/oauth/google/callback?code=synthetic-google-code&state=synthetic-state")
+        self.assertEqual(response.status_code, 410)
+        self.assertNotIn("synthetic-google-code", response.text)
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话
 
 本仓库包含 Dream Web 应用与 FastAPI 后端。Admin、PostgreSQL、模型 Gateway、公开 Python SDK 和原生 Claude Runtime 由独立项目维护。
 
-资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership 与初始 user-message 预留已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 正在技术验证；Agent 生命周期/Gateway/Editor 接线、其他数据库领域与旧 issuer 入口仍需迁移。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
+资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership 与初始 user-message 预留已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 正在技术验证；Agent 生命周期/Gateway/Editor 接线、其他数据库领域与旧 standalone auth helpers/scripts 仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径现返回明确410与已配置的Admin标准端点，不转发凭据。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
 
 ## 你可以做什么
 

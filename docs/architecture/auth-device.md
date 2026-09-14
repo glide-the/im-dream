@@ -1,7 +1,7 @@
 <!-- [Input] Admin OAuth Device Token contract and Dream navigation consumers. -->
 <!-- [Output] Device interaction, state/failure rules and acceptance gates. -->
 <!-- [Pos] Dream Device consumer; Admin owns device/refresh authority and persistence. -->
-<!-- [Sync] 2026-09-14: migrate the target authority and preserve original history. -->
+<!-- [Sync] 2026-09-14: record retired Dream Device paths and actual Admin standard endpoints; preserve history. -->
 
 # Dream Device OAuth 接入
 
@@ -35,3 +35,11 @@ pending继续等待；slow_down按返回interval退避；deny终止；expire重�
 错码可重新输入，过期提示重新申请；未登录先登录再恢复上下文；权限不足不approve。Admin unavailable/timeout提示稍后重试，不能本地批准或fallback PG。页面显示client/scopes/resource，不加技术配额、内部说明或重复确认。
 
 验收覆盖pending/approve/deny/slow_down/expire、兑换、重复并发、错误client/scope/resource、登录上下文恢复、refresh成功/轮转/撤销/未知结果。实际CLI公开OAuth协议与Dream API一起验证，session建立不能替代。全部生产device/refresh SQL迁Admin，保留现有用户PK/关系。技术fixture不能当真实用户验收。
+
+## 当前接入状态
+
+Dream旧`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token`返回明确410与server配置解析出的Admin标准端点；不创建/批准/消费短码、不签token或修改refresh状态。CLI直接使用Admin issuer的`/device/code`和`/oauth2/token`，verification URI为Admin `/auth/device`。Browser旧验证页通过Next `/auth/device`导航到Admin授权页，user_code只用于恢复短码上下文，不作为身份。缺合法Admin公开authority返回503；旧凭据不会被转发。
+
+上述源码与技术fixture不证明真实Device approve/deny/refresh已验收；正常本机Admin账号、注册client/scope/resource、可见Run/账本回执仍由协调真实业务阶段验证。
+
+Next保留同名旧Device/token410薄路径；actual `/auth/device`仍用于导航到Admin验证页。旧path不会先触发generic API认证或转发body。

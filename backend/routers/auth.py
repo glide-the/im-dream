@@ -1,33 +1,19 @@
 #!/usr/bin/env python3
-# [Input] Consume auth/database modules, Deck-default provisioning service, and
-#         shared current-user dependency.
-# [Output] Register authentication, logout, current-user, and first-login
-#          import routes; registration commits with Admin-owned default Free
-#          provisioning or fails closed.
-# [Pos] auth route node in backend/routers
-# [Sync] 2026-05-25: extracted auth and migration endpoints from backend/server.py.
-# [Sync] 2026-06-23: add /auth/me and /auth/logout aliases for OAuth and
-#                    Device Flow token clients while keeping /api/me.
-# [Sync] 2026-08-14: map transactional user/default-Free provisioning failure
-#                    to a retryable 503 instead of an email-conflict 400.
-# [Sync] 2026-08-14: provision new/empty accounts with the verified default Deck plugin.
-# [Sync] 2026-09-14: current-user profile reads now use the Admin typed operation; legacy login/import paths remain migration targets.
+# [Input] Typed Admin current-user identity and standalone legacy data-import requests.
+# [Output] Current profile/import routes and explicit 410 for retired password/local-cookie authority.
+# [Pos] Auth product adapter; Admin/BFF alone execute login, account creation and session revocation.
+# [Sync] 2026-09-14: stop local JWT/refresh issuance; preserve typed profile and independent imports.
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-import auth
 import database
 
-try:
-    from services.deck.defaults import provision_default_screenplay_deck
-except ModuleNotFoundError:  # pragma: no cover - package import compatibility
-    from backend.services.deck.defaults import provision_default_screenplay_deck
-
 from services.admin_data.errors import AdminDataError
+from services.admin_data.retired_auth import retired_authentication
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from .deps import get_admin_request_auth, get_current_user
 
@@ -61,76 +47,16 @@ class ImportDataRequest(BaseModel):
     oldDocument: Optional[str] = None
 
 
-@router.post("/api/register", response_model=TokenResponse)
-def register(request: RegisterRequest):
-    """
-    Register a new user.
-
-    Returns JWT token and user info.
-    """
-    if not request.email or not request.password:
-        raise HTTPException(status_code=400, detail="Email and password required")
-
-    if len(request.password) < 6:
-        raise HTTPException(
-            status_code=400, detail="Password must be at least 6 characters"
-        )
-
-    password_hash = auth.hash_password(request.password)
-
-    try:
-        user_id = database.create_user(
-            request.email, password_hash, request.display_name
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except database.UserRegistrationUnavailable:
-        raise HTTPException(
-            status_code=503,
-            detail="Registration service is temporarily unavailable",
-        ) from None
-
-    provision_default_screenplay_deck(user_id)
-    token = auth.create_access_token(user_id, request.email)
-
-    return {
-        "token": token,
-        "user": {
-            "id": user_id,
-            "email": request.email,
-            "display_name": request.display_name,
-        },
-    }
+@router.post("/api/register")
+def register():
+    """Retired password registration; Admin alone owns account creation."""
+    return retired_authentication()
 
 
-@router.post("/api/login", response_model=TokenResponse)
-def login(request: LoginRequest):
-    """
-    Login with email and password.
-
-    Returns JWT token and user info.
-    """
-    user = database.get_user_by_email(request.email)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    if not auth.verify_password(request.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    user_decks = database.get_user_decks(user["id"])
-    if len(user_decks) == 0:
-        provision_default_screenplay_deck(user["id"])
-
-    token = auth.create_access_token(user["id"], user["email"])
-
-    return {
-        "token": token,
-        "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "display_name": user["display_name"],
-        },
-    }
+@router.post("/api/login")
+def login():
+    """Retired password authentication; never parse or forward the body."""
+    return retired_authentication()
 
 
 def _serialize_user(user: dict) -> dict:
@@ -179,22 +105,9 @@ async def get_auth_current_user_info(
 
 
 @router.post("/auth/logout")
-def logout(
-    request: Request,
-    response: Response,
-    current_user: dict = Depends(get_current_user),
-):
-    """Clear auth cookies and revoke refresh tokens for the current session."""
-
-    refresh_token = request.cookies.get("refresh_token")
-    if refresh_token:
-        database.revoke_refresh_token(auth.hash_token(refresh_token))
-    else:
-        database.revoke_user_refresh_tokens(current_user["user_id"])
-
-    for cookie_name in ("access_token", "refresh_token", "token"):
-        response.delete_cookie(cookie_name, path="/")
-    return {"success": True}
+def logout():
+    """Retired local refresh-cookie logout; Next BFF revokes its Admin handle."""
+    return retired_authentication()
 
 
 @router.post("/api/import-local-data")

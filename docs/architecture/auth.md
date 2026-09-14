@@ -1,7 +1,7 @@
 <!-- [Input] Dream baseline auth/BFF and the Admin-owned contract when frozen. -->
 <!-- [Output] Dream consumer design, authority retirement, topology and acceptance gates. -->
 <!-- [Pos] Dream authentication consumer; Admin owns Better Auth, OAuth and signing keys. -->
-<!-- [Sync] 2026-09-14: change the target authority and retain original history. -->
+<!-- [Sync] 2026-09-14: record the implemented Admin BFF and public issuer retirement; retain original history. -->
 
 # Dream 接入 Admin 认证
 
@@ -9,13 +9,13 @@
 
 baseline `7d38715c` 中 `backend/auth.py` 自签 HS256 用户 token，`routers/oauth.py` 用 Authlib 做 Google 登录并按配置合并同邮箱账户，`routers/device_oauth.py` 自行维护 device/refresh 状态。浏览器读取 URL fragment/localStorage token，部分 API 直达 Python。这些实际实现与 Admin 唯一认证中心目标冲突。
 
-本稿是迁移目标与评审约束，尚不能作为实现或部署回执。状态见[执行计划](../exec/dream-admin-auth-data-plan.md)。[旧认证原文](history/pre-admin-auth-data-20260914/auth.md)完整保留接口和历史测试；其中旧 authority、邮箱自动合并与 DB 直连不再是目标规范。
+本稿记录迁移目标、当前源码范围与评审约束，不能作为正常部署或真实账户验收回执。状态见[执行计划](../exec/dream-admin-auth-data-plan.md)。[旧认证原文](history/pre-admin-auth-data-20260914/auth.md)完整保留接口和历史测试；其中旧 authority、邮箱自动合并与 DB 直连不再是目标规范。
 
 ## 目标与边界
 
 Admin 使用 Better Auth 内置 Google social sign-in、Admin callback、OAuth authorization/device/token、JWKS与账户映射。Dream Next 是同源 BFF；FastAPI 是 OAuth Resource Server 与业务编排，不能签用户登录 token、验证 Google token或维护另一套 session/refresh/device authority。Admin管理和Dream访问权限独立，同主体登录Dream不获得Admin管理。
 
-Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contract.md`。当前等待冻结；客户端实现前记录实际路径、版本和发布回执，本稿不自定 endpoint、claim 或 capability。跨项目业务设计见[认证与数据交互](admin-auth-data-interaction.md)。
+Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contract.md`。当前客户端已按实际DTO与路径消费；发布能力与本机业务回执分别记录，本稿不自定 endpoint、claim 或 capability。跨项目业务设计见[认证与数据交互](admin-auth-data-interaction.md)。
 
 ## 概念与规则
 
@@ -37,7 +37,7 @@ server-owned配置明确Dream public origin、Admin issuer/origin、注册callba
 
 当前本机事实由协调只读确认：Web配置同时出现`127.0.0.1:5173`与`localhost:5173`，Python为8765、Admin/Gateway为3000，Admin allowlist未覆盖所有Dream origin；这不是最终一致拓扑。实施必须选定一个显式Dream origin并对齐OAuth注册、Google callback、代理、Cookie/CORS/CSRF。gitignored用户环境不进commit。
 
-Voice WebSocket也必须校验origin并取得受限用户委托，不能将opaque handle当OAuth token或让旧query token绕开新验证。现行Next Route Handler不提供WebSocket upgrade；upgrade/proxy或一次性连接授权必须结合实际Voice路由和Admin契约确定，这是必需接入点。
+当前speech recognition按现行业务设计关闭，Python `/ws/speech-recognition` 返回1008。保留显式WS选址，但本迁移不启用语音、不新增WS授权scope或upgrade通道。未来恢复语音能力须另按实际业务/API合同校验origin与用户身份，不能用旧query token或opaque handle冒充OAuth token。
 
 ### JWT/JWKS与撤销
 
@@ -61,7 +61,7 @@ Next服务端使用Admin OAuth refresh grant，对同handle并发refresh做单�
 
 ## 正常流程、状态与失败反馈
 
-未登录 → 登录中 → callback校验 → 会话建立 → 已登录。拒绝、错误state、过期code返回未登录。refresh先保留现有会话，成功原子替换，invalid grant重新登录；Admin故障显示稍后重试，不解释为错误密码或删除数据。logout清本BFF handle并请求Admin撤销，保留失败范围，不增加重复确认。
+未登录 → 登录中 → callback校验 → 会话建立 → 已登录。拒绝、错误state、过期code返回未登录。refresh先保留现有会话，成功原子替换，invalid grant重新登录；Admin故障显示稍后重试，不解释为错误密码或删除数据。logout先等Admin成功撤销才清本BFF handle，失败保留会话并提示，不增加重复确认。
 
 业务前校验身份/scope，Admin再校验实体权限。401、403、409、capability不足、unavailable、timeout分别保留语义。日志仅记录request ID、operation、状态，不记录token/code/secret/正文。
 
@@ -70,3 +70,11 @@ Next服务端使用Admin OAuth refresh grant，对同handle并发refresh做单�
 依据[完整数据清单](../exec/dream-admin-data-inventory.md)迁移。验收覆盖Google redirect/callback/state/PKCE、Cookie/CORS/CSRF/origin、JWT各字段与kid刷新、并发refresh/撤销、Device、实体权限、REST/SSE/Voice/Node/stdio/background委托和旧authority静态复查、公开生产入口。
 
 Luna runner执行确定性技术验证并返回cwd/command/exit/output。真实验收必须正常本机Dream/Admin/Gateway/PG、用户指定现有账户实体模型限次、正常Admin可见Run与日志；fixture不能替代。发布按Admin expand/API capability → Dream兼容切换 → backfill/validate → contract；两端共同确定session/密钥回滚策略。
+
+## 当前旧入口与外部协议边界
+
+`/api/register`、`/api/login`、`/oauth/google/login/callback`、`/oauth/device/code`、`/oauth/device/verify` GET/POST、`/oauth/token` 和 Python `/auth/logout` 保留原路径并返回410 `DREAM_AUTHENTICATION_RETIRED`。配置解析出的Admin issuer/authorize/token/device/code/revoke/JWKS/verification/resource信息用于client迁移；不解析或转发密码、code、refresh和Cookie，不签本地token、不更新账户/device/refresh表。公开authority缺失或非法时503，不从Host/query猜目标。Browser由Next `/auth/start/callback/session/logout`执行既有PKCE/handle流程，密码、注册和Google功能在Admin唯一UI。
+
+Authlib在原两个issuer router中仅用于Dream Google/Device authority，现不再执行。Managed MCP外部server授权继续由标准 `mcp.client.auth.OAuthClientProvider`和TokenStorage执行，协议、加密存储、refresh和取消保持；Notion connector的现有credential/login不受本阶段影响。`backend/auth.py`旧standalone helpers以及两个维护/验收脚本调用仍待退役，不据九条HTTP路径关闭声称全部旧签发代码消失。typed `/api/me`/`/auth/me`与独立数据导入保持，导入DB还未迁移。
+
+Next同名password/Google/Device/token薄adapter也返回410，login/register在generic proxy前执行，避免未登录401遮住迁移响应；Next `/auth/logout`仍执行实际BFF handle撤销。两端退役owner只读取三项公开authority配置，不要求private service凭据。

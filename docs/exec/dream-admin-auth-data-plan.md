@@ -262,3 +262,24 @@ Chat主stream初始user-message reserve新增actual typed persist（OAuth reques
 | CLI/Editor | 后续各自最小purpose投影 | 无server/DB key，Editor exact Session | scope不可扩展；缺授权拒绝，不回退旧key |
 
 阶段10fresh technical gate：Python purpose/shared boundary/Chat adapter/public Chat/requestAuth/resource六文件集合 `193 passed in 1.29s` exit0；`node --test app/api/_auth/handlers.test.ts` 8 pass/0 fail exit0；`pnpm exec tsc --noEmit --incremental false` exit0；显式无webServer/browser的config `pnpm exec playwright test --config=/private/tmp/dream-admin-config-validation.mjs` 7 passed/512ms exit0。Docs checker40files/180local links/历史原文SHA与README结构一致/6sequence块/failures0，diff check0。实际create候选已按Admin非空text ID更新为61186...，不接受旧hashfallback；required auth.delegations四descriptor与三schema逐项匹配。仍未将keeper接入生产Agent lifecycle，也未用技术HTTP fixture冒充正常Admin业务回执。
+
+## 阶段 11：退役 Dream 旧签发与刷新入口
+
+### Optimized Prompt
+
+协调合同明确没有旧Dream POST本地token返回兼容或native密码转发要求。先列出现有外部协议依赖：routers/oauth.py的Authlib仅执行Google账号登入并签发Dream HMAC，routers/device_oauth.py的Authlib仅执行Dream Device/refresh；它们必须退役。Managed MCP仍由标准mcp.client.auth OAuthClientProvider/TokenStorage执行外部MCP server授权/refresh，不能删除、替换或放宽；Notion connector当前credential/login流程保持。两个明确命名的维护/验收脚本仍调用旧auth.create_access_token，它们不算生产路由关闭，后续改为显式Admin OAuth凭据，禁止给正常用户继续返回已被Resource Server拒绝的HMAC。
+
+保留/api/register、/api/login、/oauth/google/login/callback、/oauth/device/code/verify GET/POST、/oauth/token、/auth/logout原路径，统一明确410迁移DTO。根据server-owned已验证Admin origin/issuer/resource生成标准authorize/token/device/code/revoke/JWKS/verification端点与resource信息，不依据用户请求Host/query/credential控制目标，不转发密码、code、refresh或cookie，不读业务数据库、不读取Google/Admin secrets。未配置合法Admin公开authority时返回安全503且不猜host。BFF /auth/logout继续执行已实现的handle revoke；Python旧Cookie/user-wide refresh logout返回410，不能假装已撤销Admin会话。保留typed/api/me、/auth/me和独立import-local-data/mark-first-login业务。
+
+提取单一退役响应owner，薄路由不解析敏感body、不启动Authlib/OAuth/DB，也不新增HTTP转发或第二issuer。保留旧导入的request/response DTO标识符供接口历史引用，移除旧runtime authority实现后同步受影响headers/folder/README/现行Auth架构与调用链inventory。Luna通过公开FastAPI路径以synthetic敏感body和封住DB/HTTP的fixture验证全部410、无cookies/token/header/secret、configured endpoints精确、invalid/missing authority503、typedme仍运行；不用隔离fixture冒充本机真实OAuth/model验收。
+
+| 流程 | 执行owner/输入输出 | 正常 | 失败与恢复 |
+| --- | --- | --- | --- |
+| Old password/Google/Device/token | Dream退役owner，忽略原body/query/credential | 410标准Admin authority信息，不签token | 缺合法authority503，禁止猜测或转发敏感数据 |
+| Browser login/logout | 既有Next BFF/独立Admin owner | PKCE与handle revoke保持 | revoke失败保留cookie/session |
+| 外部MCP OAuth | 标准MCP SDK与现有credential repo | 外部协议与加密token合同保持 | 本阶段不改变refresh/权限/取消 |
+| Current profile/import | typedme与原独立数据业务 | canonical/profile字段保持 | 未迁移导入DB不计全域关闭 |
+
+阶段11 Python fresh gate：public retired auth/registration/request profile三文件 `46 passed in 0.64s` exit0；仍使用fake repository/cipher/discovery的MCP SDK外部OAuth `5 passed in 0.19s` exit0，原协议保留。docs19files/179links/166inventory/历史原文SHA与README结构/6sequence块0fail，diff0。接着补Next实际旧同路径薄adapter，静态login/register在generic proxy前直接返回410；不让旧请求先被401遮住迁移反馈。Next/currentauthority parser只读三项公开配置，不要求或读取private service凭据。fresh Node/type/build待回执。
+
+阶段11 Next fresh gate：`node --test app/api/_auth/retired-auth.test.ts app/api/_auth/handlers.test.ts app/api/_auth/login-boundary.test.ts` 27 pass/0 fail exit0；`pnpm exec tsc --noEmit --incremental false` exit0；`NODE_ENV=production pnpm exec next build` exit0，包含static/api/login/register/oauth/auth新路径，编译/类型/静态页面/优化完成。docs30files/179links/212concrete folder entries/history SHA/README parity/6sequence blocks0fail，diff0。保留本轮worktree构建产物，不访问正常数据库/模型/外部服务。
