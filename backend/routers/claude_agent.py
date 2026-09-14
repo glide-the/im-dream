@@ -2,6 +2,7 @@
 # [Input] Consume typed Admin Chat APIs, pending Deck/runtime providers, Claude Agent factory, Skill catalog and Admin actor.
 # [Output] Register /api/claude-agent* turn, thread, and common Skill catalog endpoints.
 # [Pos] claude-agent route node in backend/routers
+# [Sync] 2026-09-15: read Admin Workflow provenance before message/SSE and inject a server-owned immutable snapshot.
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-08-28: preserve validated model metadata across backend/services dual import identities.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
@@ -882,6 +883,7 @@ async def claude_agent_stream(
     body: ClaudeAgentRequestBody,
     current_user: dict = Depends(get_current_user),
     chat: AdminChatData = Depends(get_admin_chat_data),
+    owner: AdminRequestAuth = Depends(get_admin_request_auth),
 ):
     """SSE streaming endpoint for Claude Agent.
 
@@ -995,6 +997,20 @@ async def claude_agent_stream(
                     "message": "The conversation Agent changed concurrently. Reload and try again.",
                 },
             )
+
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    workflow_request_id = str(uuid4())
+    try:
+        workflow_resolution = await run_in_threadpool(owner.workflow_context, actor, thread_id, workflow_request_id)
+    except AdminDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code, "request_id": exc.request_id or workflow_request_id, "outcome_unknown": exc.outcome_unknown}) from None
+    if workflow_resolution.context is not None and (
+        workflow_resolution.context.deck_id != effective_deck_id
+        or workflow_resolution.context.agent_id != effective_voice_id
+    ):
+        raise HTTPException(status_code=409, detail={"error_code": "DREAM_THREAD_BINDING_CONFLICT", "request_id": workflow_request_id, "outcome_unknown": False})
 
     platform_model = await _resolve_platform_model_selection(user_id, body.model)
     if isinstance(platform_model, str):
@@ -1143,6 +1159,7 @@ async def claude_agent_stream(
         tool_choice=body.tool_choice,
         model=platform_model_alias,
         model_runtime_env=model_runtime_env,
+        admin_workflow_resolution=workflow_resolution,
         max_turns=body.max_turns,
         cwd=body.cwd,
         message_id=message_id,

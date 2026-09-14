@@ -43,6 +43,8 @@ This repository contains the Dream Web application and its FastAPI backend. Admi
 
 Resource reads/observer writes, shared request identity/profile, and Chat CRUD/history/ownership plus initial user-message reservation now consume Admin APIs. Runtime purpose creation/public renewal/receipt consumers have passed focused technical checks; Agent lifecycle/Gateway/Editor wiring and other database domains still require migration. Old password/Google/Device/token/local-cookie HTTP paths return explicit 410 with configured Admin standard endpoints. Standalone auth helpers refuse local authority; importer Agent labels and the named Gateway verifier require explicit Admin OAuth and a matching production profile before business writes/model calls. Authlib/bcrypt have been removed without changing remaining dependency versions. Admin/Auth server secrets are cleared from child environment overlays. These source and build checks do not establish real-account business acceptance.
 
+Public Chat also reads Admin's complete Workflow context before message reservation/SSE and passes an immutable actor/thread snapshot to Service, including ordinary-Chat null. Internal confirmation/launch dispatch and long-turn purpose wiring remain migration work.
+
 ## What you can do
 
 - **Write and reflect** — keep writing sessions, browse your timeline, and review reflections.

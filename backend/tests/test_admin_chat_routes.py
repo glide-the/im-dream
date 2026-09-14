@@ -1,6 +1,7 @@
 # [Input] Public production Chat routes with the real Admin DTO transport and explicit fake auth/runtime providers.
 # [Output] HTTP CRUD/history/process/cursor/permission/unknown-write regressions with Dream DB fenced off.
 # [Pos] Provider-free route contracts; no duplicate API, state machine, SSE parser or database fixture.
+# [Sync] 2026-09-15: verify Admin Workflow read precedes message/SSE and supplies immutable Service snapshot.
 # [Sync] 2026-09-14: verify actual production HTTP adapters and existing response projections.
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
 from services.admin_data.chat_data import CHAT_OPERATIONS
 from services.admin_data.profile_data import CURRENT_PROFILE
 from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.workflow_data import RESOLVE_WORKFLOW_CONTEXT, WORKFLOW_SCHEMA_REQUIREMENTS
 
 
 class StaticVerifier:
@@ -70,6 +72,7 @@ def boundary(monkeypatch):
         "chat-thread.list": {"threads": [summary]}, "chat-thread.search": {"threads": [{**summary, "messages_text": "Saved conversation"}]},
         "chat-thread.delete": {"changed": True}, "chat-message.list": {"messages": [message_value()]},
         "chat-message.persist": {"message_id": "public-message-1"},
+        "workflow-context.resolve": {"context": None},
         "chat-message.page": {"messages": [message_value(final=True)], "has_more": True, "latest_message_id": "message-1"},
         "chat-message.latest": {"message_id": "message-1"}, "chat-message.process-detail": {"message": message_value()},
     }
@@ -80,7 +83,7 @@ def boundary(monkeypatch):
         assert request.headers["X-Ink-Dream-Credential"] == config.service_secret
         if request.url.path.endswith("/capabilities"):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []},
-                "schema_capabilities": [], "operations": [op.capability.model_dump() for op in (*CHAT_OPERATIONS, CURRENT_PROFILE)]}
+                "schema_capabilities": [item.model_dump() for item in WORKFLOW_SCHEMA_REQUIREMENTS], "operations": [op.capability.model_dump() for op in (*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT)]}
         elif request.url.path.endswith("/principal"):
             value = {"subject": "opaque-subject", "canonical_user_id": "42", "client_id": "dream-browser", "scopes": ["dream:read"] if request.headers["authorization"] == "Bearer read-only" else ["dream:read", "dream:write"], "status": "active"}
         else:
@@ -95,7 +98,7 @@ def boundary(monkeypatch):
                 status, code = value
                 return httpx.Response(status, json={"request_id": request_id, "error": {"code": code, "message": "safe"}})
         return httpx.Response(200, json={"request_id": request_id, "data": value})
-    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(handler)), operations=(*CHAT_OPERATIONS, CURRENT_PROFILE))
+    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(handler)), operations=(*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT))
     app = FastAPI()
     app.state.admin_request_auth = AdminRequestAuth(config, client=client, verifier=StaticVerifier())
     app.include_router(routes.router)
@@ -222,9 +225,11 @@ def test_stream_reserves_original_user_identity_through_admin_before_runtime(bou
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
     assert response.status_code == 200 and response.headers["content-type"].startswith("text/event-stream")
     assert response.text == ": explicit-fake-runtime\n\n"
-    assert [call[0] for call in calls] == ["chat-thread.get", "chat-message.persist"]
+    assert [call[0] for call in calls] == ["chat-thread.get", "workflow-context.resolve", "chat-message.persist"]
     assert calls[-1][1] == {"thread_id": "owned-thread", "message_id": "public-message-1", "role": "user", "parts": [{"type": "text", "text": "Original user message"}], "metadata": None, "history_final_text": None, "history_process_available": False, "history_projection_version": None}
     assert len(factory.run_requests) == 1 and factory.run_requests[0].message_id == "public-message-1"
+    resolution = factory.run_requests[0].admin_workflow_resolution
+    assert resolution is not None and resolution.context_for(actor_id="42", thread_id="owned-thread") is None
 
 
 def test_stream_identity_conflict_preserves_public_409_without_starting_runtime(boundary):
@@ -234,4 +239,14 @@ def test_stream_identity_conflict_preserves_public_409_without_starting_runtime(
     assert response.status_code == 409 and not factory.run_requests
     assert response.json()["detail"]["error_code"] == "CHAT_MESSAGE_IDENTITY_CONFLICT"
     assert response.json()["detail"]["message"] == "The message identifier is already bound."
-    assert len(calls) == 2 and calls[-1][0] == "chat-message.persist"
+    assert len(calls) == 3 and calls[-1][0] == "chat-message.persist"
+
+
+@pytest.mark.parametrize("code,status", [("DREAM_THREAD_BINDING_CONFLICT", 409), ("DREAM_SCOPE_REQUIRED", 403), ("ADMIN_UNAVAILABLE", 503)])
+def test_workflow_read_failure_precedes_message_reservation_and_sse(boundary, code, status):
+    client, outputs, calls, factory = boundary
+    outputs["workflow-context.resolve"] = (status, code)
+    response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
+    assert response.status_code == status and response.json()["detail"]["error_code"] == code
+    assert [item[0] for item in calls] == ["chat-thread.get", "workflow-context.resolve"]
+    assert not factory.run_requests

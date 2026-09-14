@@ -194,10 +194,16 @@ AuthContext现从同源BFF session读取strict公开user与内存CSRF；登录�
 
 ### Runtime purpose consumer 的当前边界
 
-Admin以`auth.delegations`单独返回create/renew/revoke/原request_id receipt的method、path、版本与实际双向DTO hash；只在三项identity schema capability全部published且匹配时广告。Dream server create同时检查三schema与四descriptor，调用独立create入口，不通过generic operation模拟。ID沿用非空text业务字段，不增加任意长度产品限制。
+Admin以`auth.delegations`单独返回create/renew/revoke/原request_id receipt的method、path、版本与实际双向DTO hash；只在三项identity以及0033 `dream.schema.unified.v1` 全部published且匹配时广告。Dream server create同时检查这四项schema与四descriptor，调用独立create入口，不通过generic operation模拟。ID沿用非空text业务字段，不增加任意长度产品限制。
 
 共有HTTP函数接收显式URL/header/DTO和timeout/响应大小，不持有身份配置。Internal consumer注入service身份与必要用户Bearer；public Runtime consumer只持exact idg，prepared request不继承httpx client的Cookie、auth或默认key headers。响应校验原request_id、闭集DTO和purpose/thread/run/EditorSession/scopes；renew不能改变maximum或降低expiry。
 
 Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先查原receipt；absent继续保持pending，不新建动作。恢复原committed结果后仍以有效expiry判断是否可用，maximum不延长；到期或purpose不匹配时授权边界拒绝。后台异常只写安全diagnostics，不传播到Agent turn。当前仅consumer/keeper候选源码；Agent生命周期、CLI最小投影、Editor stdio和Workflow原确认保护接入仍未完成。
 
 旧Dream password/Google/Device/token与Python local-cookie logout九条HTTP路径已改为明确410标准Admin authority迁移响应，不解析/转发敏感请求、不执行签发或相关DB动作。Standalone旧auth helpers已拒绝本地签发/密码/refresh权限，两个脚本改为显式Admin OAuth并核对正常生产profile账户；Authlib/bcrypt从manifest/lock/export原子移除，其余版本不变。Gateway subject helper、Agent purpose接线与其他数据库领域仍待迁移；MCP SDK外部OAuth协议保持。此项不等于正常本机登录/模型验收。
+
+### 公开 Chat 的 Workflow 上下文
+
+执行模块`AdminWorkflowData`只发送`workflow-context.resolve`的`{thread_id}`；Admin在同一事务校验唯一线性retry leaf、冻结binding、workspace owner和启动message来源/fingerprint/父状态，经过完整校验的terminal leaf或普通Chat返回`context:null`。Dream strict校验实际十字段、required nullable agent_id、原255边界、Run格式和正JSON-safe revision，operation hash为`f395682ec6cf8f308df652a1aa2792cca86d102eb1fff62a4c6a59792bfc1e66`，同时匹配identity/unified物理capabilities。
+
+公开route在已有Deck/Voice绑定后、message预留与SSE前读取。409/权限/网络/capability/DTO失败直接返回安全错误，不写初始message、不启动runtime。成功时校验thread及当前Deck/Voice，并向内部RunRequest注入不可变`AdminWorkflowResolution`；公开DTO/SDK不含该字段。Service核对actor/thread，含ordinary null均直接复用，不调用旧PG mapper。snapshot不授予新增scope、长期runtime或CLI权限；内部confirmation/launch仍保留原guard/mapper，后续迁移其typed原子命令与三purpose生命周期。验收聚焦真实HTTP consumer、null/十字段、错配、失败-before-SSE和既有Service行为，技术fixture不代表正常本机业务回执。

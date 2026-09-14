@@ -1,6 +1,7 @@
 # [Input] Server-owned Admin client/verifier and explicit OAuth bearer credentials.
 # [Output] Immutable request actors with canonical user IDs and separate typed profile reads.
 # [Pos] Request authentication composition; no issuing, renewal, PG or ambient actor context.
+# [Sync] 2026-09-15: provide request-bound Workflow provenance for immutable public Chat turn snapshots.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from .config import AdminDataConfig
 from .errors import AdminDataError, invalid_response
 from .jwt_verifier import AdminJWTVerifier
 from .profile_data import AdminProfileData, CURRENT_PROFILE, UserProfileDTO
+from .workflow_data import AdminWorkflowData, AdminWorkflowResolution, RESOLVE_WORKFLOW_CONTEXT
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +40,12 @@ class AdminRequestAuth:
     """Application-owned connections; each request checks current Admin identity."""
 
     def __init__(self, config: AdminDataConfig, *, client: AdminDataClient | None = None, verifier: AdminJWTVerifier | None = None) -> None:
-        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, CURRENT_PROFILE))
+        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT))
         self._verifier = verifier or AdminJWTVerifier(config)
         self._owns_client = client is None
         self._owns_verifier = verifier is None
         self._profile = AdminProfileData(self.client)
+        self._workflow = AdminWorkflowData(self.client)
         self._capabilities_ready = False
         self._lock = RLock()
 
@@ -82,3 +85,16 @@ class AdminRequestAuth:
         finally:
             if self._owns_verifier:
                 self._verifier.close()
+
+    def workflow_context(self, actor: AdminRequestActor, thread_id: str, request_id: str) -> AdminWorkflowResolution:
+        if "dream:read" not in actor.scopes:
+            raise AdminDataError("INSUFFICIENT_SCOPE", 403, request_id)
+        try:
+            return self._workflow.resolve(thread_id, request_id, access_token=actor.access_token, canonical_user_id=actor.canonical_user_id)
+        except AdminDataError:
+            # A failed fresh capability fetch clears the client's advertisement.
+            # The next request must initialize it again instead of keeping an
+            # obsolete ready flag for other Chat/profile operations.
+            with self._lock:
+                self._capabilities_ready = False
+            raise

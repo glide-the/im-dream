@@ -3,6 +3,7 @@
 #         Reads database module for session persistence.
 # [Output] Provide ClaudeAgentRunRequest, ClaudeAgentService to thread_factory.py.
 # [Pos] core-business node in backend/claude_agent
+# [Sync] 2026-09-15: public Chat uses its actor/thread-bound immutable Admin Workflow snapshot; internal dispatcher mapper remains pending migration.
 # [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
@@ -278,6 +279,7 @@ from services.story_workspace.agent_integration import (
     store_agent_story_output,
 )
 from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
+from services.admin_data.workflow_data import AdminWorkflowResolution
 from services.story_workspace.dream_artifact_turn_hook import (
     DreamArtifactRepairability,
     DreamArtifactTurnHook,
@@ -1408,6 +1410,9 @@ class ClaudeAgentRunRequest:
     # Server-owned model Runtime projection. Public request DTOs never expose
     # this field; the authenticated Gateway catalog populates it.
     model_runtime_env: dict[str, str] = field(default_factory=dict)
+    # Public ingress supplies an immutable Admin-derived snapshot, including
+    # ordinary-Chat null. It is absent from the browser DTO and SDK options.
+    admin_workflow_resolution: AdminWorkflowResolution | None = field(default=None, repr=False)
     max_turns: int = int(os.getenv("INK_AGENT_MAX_TURNS", "100") or "100")
     cwd: Optional[str] = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -1592,6 +1597,16 @@ class ClaudeAgentService:
     # Phase 1: Context Assembly
     # ------------------------------------------------------------------
 
+    async def _resolve_dream_context(self, request: ClaudeAgentRunRequest) -> StoryWorkspaceDreamRunContext | None:
+        resolution = request.admin_workflow_resolution
+        if resolution is not None:
+            if not isinstance(resolution, AdminWorkflowResolution):
+                raise ValueError("Invalid server Workflow snapshot")
+            return resolution.context_for(actor_id=request.user_id, thread_id=request.thread_id)
+        # Existing durable internal dispatchers retain their production mapper
+        # until their typed Workflow command/service identity is connected.
+        return await asyncio.to_thread(self._dream_context_mapper.resolve, actor_id=request.user_id, thread_id=request.thread_id)
+
     async def assemble_context(
         self,
         request: ClaudeAgentRunRequest,
@@ -1608,14 +1623,10 @@ class ClaudeAgentService:
 
         Returns a ``_TurnExecution`` ready to pass to ``execute_session``.
         """
-        # Dream authority is derived from the authenticated actor + canonical
-        # Thread during Phase 1. The request and public Chat protocol never
-        # carry a Dream Run selector or context object.
-        dream_context = await asyncio.to_thread(
-            self._dream_context_mapper.resolve,
-            actor_id=request.user_id,
-            thread_id=request.thread_id,
-        )
+        # Public Chat supplies only its server-derived, actor/thread-bound
+        # snapshot. Browser DTOs never carry a Dream Run selector or context.
+        # Durable internal dispatchers still use their existing mapper here.
+        dream_context = await self._resolve_dream_context(request)
 
         # Load user-configured agent settings from system config before system
         # prompt and cwd resolution.  Settings SYSTEM_PROMPT participates in the

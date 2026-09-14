@@ -307,3 +307,15 @@ Luna运行真实retired helper/公开Auth/router/JWT boundary合同、现有veri
 公开Chat在已有Deck/Voice绑定后、初始message预留和SSE前读取Admin上下文，通过不可变服务器snapshot注入内部RunRequest；公开DTO不暴露该字段，service精确检查actor/thread后使用snapshot，不再对该公开入口调用旧PG mapper。内部持久化confirmation/launch dispatch仍保留原guard/mapper直到对应typed command和服务身份合同接好，不给缺scope/过期OAuth新增fallback。原admission比较、lease、EventBus、Runner、resume/cancel和SSE unchanged，后台long-turn grant生命周期另接，不能将snapshot准备称为完整Runtime迁移。
 
 同步涉及headers/folder/设计与README，Luna验证actual typed HTTP、真实公开Chat路由、null/十字段/actor-thread错配/required nullable/技术数值、capability drift和读失败-before-message/SSE。Provider-free无PG/model/用户服务。长turn三purpose、Editor/Gateway/其余域继续执行，目标保持active。
+
+阶段13 fresh技术回执：新Workflow consumer、公开Chat、requestAuth、delegation、data boundary、Chat/resource与原Service八文件 `251 passed in 1.38s` exit0；实际Workflow hash与canonical artifact匹配，四Runtime special hashes和create/discovery四项schema逐项匹配，非旧三schema checker。docs20files/179links/187folderentries/历史原文SHA/README结构/6sequence块0fail；tracked diff check0，新Python no-index仅预期内容差异exit1且无whitespace错误。无PG/model/账户/网络/SDK进程，内部dispatch/full-domain未迁移。
+
+## 阶段 14：原子 user-turn 与服务器持久化委托
+
+### Optimized Prompt · 2026-09-15
+
+Admin已提供actual chat-user-message.persist（hash2c5b20900ef867a237613e49a89b4073f4c0c89cd1d2161962f7132084696c37）：严格thread/message IDs、parts_json rawarray、metadata_json required nullable rawobject、title_candidate string；返回message_id与confirmation_preserved。Dream复用原extract_text_from_parts生成未截断candidate，Python json.dumps保留负零/float/bigint词法，禁NaN/非JSON；Admin唯一事务执行ownedThread锁、原storedconfirmationguard、rawmessage+仅缺title填充，不在Dream重写guard或模拟UOW。
+
+公开入口在已验证Workflow snapshot后创建最小server-persistence idg（dream read/write、exactthread/authoritativeRun、无EditorSession/Gatewayscope），credential只留server。使用独立server holder将已知原子预留交给Service，Service重复已确认同一输入不重发；未知提交保留原requestID，后续只能查原receipt，absent禁止新写/推理。先保持所有尚未接好typed的内部dispatch原guard，不能旧lease回写覆盖当前controlmetadata。接上有界grant后台renew、expiry/max failclosed与factory生命周期自有cleanup；不因SSE disconnect停止后台turn，不改变admission比较、lease、resume/cancel/EventBus/Runner。
+
+Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offturn错误仍只记safe diagnostics。Gateway/Editor各purpose后续独立接线，不把本阶段server idg投给CLI或替代wide/globalkey。验证 actual DTO/公开route/Service与clock/fakeProvider，没有PG/model/真实用户服务；保留SSE原实现。同步headers/folder/现行设计和证据，整体数据库/认证目标仍active。

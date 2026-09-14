@@ -8,6 +8,8 @@
 [Sync] 2026-08-22: document the v2.1-scoped Workspace thumbnail and shared accessible full-size modal presentation.
 [Sync] 2026-08-23: document authenticated in-memory Workspace image resolution for the existing Chat long-image exporter.
 [Sync] 2026-08-28: align env/desired/public replacement/effective snapshots to positive JSON-safe integers, exact combined-memory bytes, and monotonic no-restart LKG refresh.
+
+[Sync] 2026-09-15: public Chat reads Admin Workflow provenance before message/SSE and carries an immutable actor/thread snapshot; internal dispatch and remaining DB consumers still require migration.
 [Sync] 2026-08-31: remove the retired legacy session runtime from current architecture boundaries.
 [Sync] 2026-09-14: resource policy/observer composition consumes strict Admin APIs; LKG and runtime semantics remain unchanged.
 [Sync] 2026-09-06: name the self-owned SDK/Runtime contract explicitly and align the Web caller with the sole Next.js app/_dream source tree.
