@@ -19,6 +19,10 @@
 
 # Ink & Memory
 
+<!-- [Sync] 2026-09-14: distinguish the Admin DTO/authentication migration target from baseline startup. -->
+
+本实现分支正在迁移至 Admin 认证与数据服务。下方当前启动命令仍描述 baseline PostgreSQL 直连路径，不能作为迁移验收证据。详见[消费端设计](docs/architecture/admin-auth-data-interaction.md)与[执行/依赖门槛](docs/exec/dream-admin-auth-data-plan.md)。新 Admin DTO 严格校验，未发布操作保持不可用。 私有 BFF 基础要求显式 `INK_DREAM_PUBLIC_ORIGIN`、已注册的 `INK_DREAM_BFF_REDIRECT_URI` 与仅服务端持有的 `INK_DREAM_BFF_COOKIE_SECRET`（至少 32 字节）；`INK_DREAM_BFF_LOGIN_TTL_SECONDS` 默认 600。这些 helper 尚未接入公开登录路由。
+
 <!-- [同步] 2026-09-14：补充配置文件相对的 Next 编译根目录与停止服务后的缓存备份恢复。 -->
 
 <p align="center">
@@ -32,6 +36,8 @@
 Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话，用 Deck 和 Agent 组织可复用能力，连接 Notion 或 MCP Server 等外部工具，并把想法发展成结构化 Dream 工作流和创作资产。
 
 本仓库包含 Dream Web 应用与 FastAPI 后端。Admin、PostgreSQL、模型 Gateway、公开 Python SDK 和原生 Claude Runtime 由独立项目维护。
+
+两个资源领域生产方法已接入按 capability 校验的 Admin API。Admin/Auth 服务器秘密从子进程环境 overlay 中清空；其余数据库、认证、Gateway 和 Editor 路径仍待迁移。
 
 ## 你可以做什么
 

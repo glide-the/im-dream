@@ -20,6 +20,10 @@ visible failures. See the [resume contract and sequence diagram](docs/design/cla
 
 # Ink & Memory
 
+<!-- [Sync] 2026-09-14: distinguish the Admin DTO/authentication migration target from baseline startup. -->
+
+Admin authentication/data-service migration is in progress on this implementation branch. The current startup commands below still describe the baseline direct-PostgreSQL path; they are not migration acceptance evidence. See the [consumer design](docs/architecture/admin-auth-data-interaction.md) and [execution/dependency gates](docs/exec/dream-admin-auth-data-plan.md). New Admin DTOs are strictly validated, and unpublished operations remain unavailable. The private BFF foundation requires explicit `INK_DREAM_PUBLIC_ORIGIN`, registered `INK_DREAM_BFF_REDIRECT_URI`, and server-only `INK_DREAM_BFF_COOKIE_SECRET` (at least 32 bytes); `INK_DREAM_BFF_LOGIN_TTL_SECONDS` defaults to 600. These helpers are not yet connected to public login routes.
+
 <!-- [Sync] 2026-09-14: document file-relative Next compilation roots and stopped-cache backup recovery. -->
 
 <p align="center">
@@ -33,6 +37,8 @@ visible failures. See the [resume contract and sequence diagram](docs/design/cla
 Ink & Memory is a workspace for writing with AI. You can keep long-running conversations, organize reusable Decks and Agents, connect external tools such as Notion or MCP Servers, and turn ideas into structured Dream workflows and creative assets.
 
 This repository contains the Dream Web application and its FastAPI backend. Admin, PostgreSQL, the model Gateway, the public Python SDK, and the native Claude Runtime are maintained separately.
+
+Two resource-domain production methods now consume capability-gated Admin APIs. Admin/Auth server secrets are cleared from child environment overlays; remaining database/auth/Gateway/Editor paths still require migration.
 
 ## What you can do
 

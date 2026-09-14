@@ -1,5 +1,6 @@
 # [Sync] 2026-09-13: adapt correlated original-Runtime MCP text/array wire
 #                    results; retain approved call identity until execution ends.
+# [Sync] 2026-09-14: scrub Admin/Auth server-secret keys from every explicit stdio MCP env projection.
 # [Sync] 2026-09-12: constrain shell ZIP exports to literal, in-workspace,
 #                    non-dot, non-symlink inputs and outputs.
 # [Sync] 2026-09-11: allow built-in query tools (Read/Grep/Glob/LS/NotebookRead) to access symlinked/source files in DEFAULT_BUILTIN_SKILLS_ROOT while keeping write tools strictly confined.
@@ -300,6 +301,7 @@ from .story_workspace_tool import story_workspace_allowed_tool_names
 from .notion_read_hook import apply_notion_page_read_redirect
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
+    ADMIN_AUTH_SERVER_ONLY_ENV_NAMES,
     CLAUDE_AGENT_MAX_BUFFER_SIZE_ENV_NAME,
     CLAUDE_MCP_CONFIG_PROJECTION_DIRNAME,
     apply_claude_config_home_to_options,
@@ -452,7 +454,7 @@ def _write_mcp_config_projection(
             json.dump(
                 {
                     "mcpServers": {
-                        str(name): _mcp_config_json_value(config)
+                        str(name): _mcp_server_config_json_value(config)
                         for name, config in mcp_servers.items()
                     }
                 },
@@ -477,6 +479,17 @@ def _write_mcp_config_projection(
         except OSError:
             pass
         raise
+
+
+def _mcp_server_config_json_value(config: object) -> object:
+    """Project MCP configuration without restoring server authentication secrets."""
+    projected = _mcp_config_json_value(config)
+    if isinstance(projected, dict) and isinstance(projected.get("env"), dict):
+        projected["env"] = {
+            key: value for key, value in projected["env"].items()
+            if key not in ADMIN_AUTH_SERVER_ONLY_ENV_NAMES
+        }
+    return projected
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
 _STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
     story_workspace_allowed_tool_names()
@@ -2143,7 +2156,7 @@ def _stdio_env(
             if value:
                 _set_env_aliases(env, canonical_name, legacy_name, value)
     for key, value in (extra_env or {}).items():
-        if value is not None:
+        if value is not None and str(key) not in ADMIN_AUTH_SERVER_ONLY_ENV_NAMES:
             env[str(key)] = str(value)
     return env
 

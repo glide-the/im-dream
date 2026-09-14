@@ -3,6 +3,7 @@
 # [Output] Verify streaming callbacks, session_id extraction, bounded SDK message
 #          buffer/error guidance, on_text_done, tool events, confirmation, and env aliases.
 # [Pos] test node in backend/tests
+# [Sync] 2026-09-14: require empty Admin/Auth child tombstones while preserving existing env priority/routing assertions.
 # [Sync] 2026-09-12: execute an admitted ZIP command and reject dot-prefixed,
 #                    escaping, globbed, and symlinked archive paths.
 # [Sync] 2026-08-20: cover the server-owned SDK stdout buffer option and safe overflow hint.
@@ -3787,7 +3788,13 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
 
 class TestClaudeSdkEnvHelper(unittest.TestCase):
-    """Project dotenv loading only forwards SDK-level keys."""
+    """Project dotenv loading forwards SDK keys with server-secret child tombstones."""
+
+    def _assert_child_overlay(self, actual, expected):
+        for name in sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES:
+            self.assertIn(name, actual)
+            self.assertEqual(actual[name], "")
+        self.assertEqual({key: value for key, value in actual.items() if key not in sdk_env_module.ADMIN_AUTH_SERVER_ONLY_ENV_NAMES}, expected)
 
     def test_project_runtime_options_set_claude_code_retry_default_to_three(self):
         options = _SDK_OPTIONS()
@@ -3954,7 +3961,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             process_env={},
         )
 
-        self.assertEqual(loaded, {"ANTHROPIC_AUTH_TOKEN": "sk-test"})
+        self._assert_child_overlay(loaded, {"ANTHROPIC_AUTH_TOKEN": "sk-test"})
 
     def test_merge_project_dotenv_env_includes_process_sdk_env(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3980,7 +3987,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(
+        self._assert_child_overlay(
             loaded,
             {
                 "ANTHROPIC_MODEL": "dotenv-model",
@@ -3997,7 +4004,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             process_env={"ANTHROPIC_AUTH_TOKEN": "cloud-secret-token"},
         )
 
-        self.assertEqual(loaded, {"ANTHROPIC_AUTH_TOKEN": "explicit-token"})
+        self._assert_child_overlay(loaded, {"ANTHROPIC_AUTH_TOKEN": "explicit-token"})
 
     def test_apply_project_dotenv_to_options_reads_process_env_by_default(self):
         options = _SDK_OPTIONS()
@@ -4016,7 +4023,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
                 env_file=Path("/tmp/does-not-exist"),
             )
 
-        self.assertEqual(
+        self._assert_child_overlay(
             options.env,
             {
                 "ANTHROPIC_AUTH_TOKEN": "cloud-secret-token",
@@ -4042,7 +4049,7 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             },
         )
 
-        self.assertEqual(
+        self._assert_child_overlay(
             options.env,
             {
                 "ANTHROPIC_AUTH_TOKEN": "server-token",

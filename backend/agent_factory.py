@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-# [Input] Consume Claude Agent factory/controller, PostgreSQL policy provider/refresher,
-#         resource Observer/sampler/diagnostics, and the PostgreSQL latest-snapshot sink.
+# [Input] Consume Claude Agent factory/controller, Admin API policy provider/refresher,
+#         resource Observer/sampler/diagnostics, and the typed Admin latest-snapshot sink.
 # [Output] Provide shared Agent factory plus isolated resource observation/synchronization singletons.
 # [Pos] backend Claude Agent composition root; the only owner that resolves and refreshes desired resource policy.
+# [Sync] 2026-09-14: route resource reads/writes through Admin strict DTO APIs; no direct DB access.
 # [Sync] 2026-08-28: replace admission config only for a valid higher revision while every
 #                    refresh can atomically update coherent diagnostics/LKG provenance.
 # [Sync] 2026-08-28: scrub ambient Claude Code tuning and expose one public immutable
 #                    Runtime-policy snapshot to the thread factory.
 
-import database
+from datetime import datetime
+from uuid import UUID
+from services.admin_data.resource_data import AdminResourceData, ResourceObserverPublishInputDTO
 from claude_agent import ClaudeAgentThreadFactory
 from claude_agent.admission import AgentAdmissionConfig, ClaudeAgentAdmissionController
 from claude_agent.resource_diagnostics import (
@@ -33,10 +36,12 @@ from claude_agent.resource_postgres_sink import (
     ClaudeAgentResourcePostgresSink,
     ClaudeAgentResourcePublisher,
     ResourcePipelineMetrics,
+    ResourceSnapshotEnvelope,
 )
 
 clear_server_claude_code_runtime_parent_env()
-claude_agent_resource_policy_provider = ClaudeAgentResourcePolicyProvider(database.get_db)
+claude_agent_resource_data = AdminResourceData()
+claude_agent_resource_policy_provider = ClaudeAgentResourcePolicyProvider(claude_agent_resource_data.read_policy)
 claude_agent_resource_policy = claude_agent_resource_policy_provider.load(
     AgentAdmissionConfig.from_env()
 )
@@ -94,8 +99,17 @@ claude_agent_resource_policy_refresher = ClaudeAgentResourcePolicyRefresher(
     initial_result=claude_agent_resource_policy,
     interval_seconds=resource_policy_refresh_interval_from_env(),
 )
+
+
+def _publish_claude_agent_resource_snapshot(envelope: ResourceSnapshotEnvelope, instance_id: str, process_started_at: datetime) -> None:
+    claude_agent_resource_data.publish_observer(envelope.request_id, ResourceObserverPublishInputDTO(
+        instance_id=UUID(instance_id), process_started_at=process_started_at,
+        sampled_at=envelope.sampled_at, snapshot=envelope.snapshot,
+    ))
+
+
 claude_agent_resource_postgres_sink = ClaudeAgentResourcePostgresSink(
-    db_factory=database.get_db,
+    writer=_publish_claude_agent_resource_snapshot,
     metrics=claude_agent_resource_pipeline_metrics,
 )
 claude_agent_resource_publisher = ClaudeAgentResourcePublisher(

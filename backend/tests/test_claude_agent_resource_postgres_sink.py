@@ -1,7 +1,7 @@
-# [Input] Consume the capacity-one publisher/sink with strict DTO and injected PostgreSQL fakes.
-# [Output] Verify latest replacement, timeout isolation/serialization, typed-null DB-clock upsert/TTL, and privacy.
-# [Pos] Provider-free PostgreSQL resource synchronization tests in backend/tests.
-# [Sync] 2026-08-28: keep the strict global-effort snapshot field in sink/privacy fixtures.
+# [Input] Consume the capacity-one publisher/sink with strict DTO and injected Admin writers.
+# [Output] Verify latest replacement, timeout isolation/serialization, original write identity, and privacy.
+# [Pos] Provider-free Admin resource synchronization tests; historical test filename remains indexed.
+# [Sync] 2026-09-14: replace SQL assertions with actual writer DTO/identity checks; retain queue/timeout tests.
 
 from __future__ import annotations
 
@@ -18,13 +18,6 @@ from claude_agent.resource_postgres_sink import (
     ClaudeAgentResourcePostgresSink,
     ResourcePipelineMetrics,
 )
-from schema.capabilities import (
-    CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY,
-    CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
-    CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION,
-)
-
-
 def _snapshot(*, started: int = 0) -> ClaudeAgentResourceDiagnosticsDTO:
     values = {
         "max_concurrent_runs": 1,
@@ -100,44 +93,9 @@ def _snapshot(*, started: int = 0) -> ClaudeAgentResourceDiagnosticsDTO:
     )
 
 
-class _Cursor:
-    def __init__(self, row=None):
-        self._row = row
-
-    def fetchone(self):
-        return self._row
-
-
-class _Connection:
-    def __init__(self):
-        self.calls: list[tuple[str, tuple]] = []
-        self.closed = False
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        return False
-
-    def execute(self, query, parameters=()):
-        self.calls.append((query, parameters))
-        if "drizzle.schema_capabilities" in query:
-            assert parameters == (CLAUDE_AGENT_RESOURCE_OBSERVER_CAPABILITY,)
-            return _Cursor(
-                (
-                    CLAUDE_AGENT_RESOURCE_OBSERVER_VERSION,
-                    CLAUDE_AGENT_RESOURCE_OBSERVER_CONTRACT_SHA256,
-                )
-            )
-        return _Cursor()
-
-    def close(self):
-        self.closed = True
-
-
 def test_capacity_one_queue_replaces_oldest_without_backpressure() -> None:
     metrics = ResourcePipelineMetrics()
-    sink = ClaudeAgentResourcePostgresSink(db_factory=lambda: None, metrics=metrics)
+    sink = ClaudeAgentResourcePostgresSink(writer=lambda *_: None, metrics=metrics)
 
     sink.submit(_snapshot(started=1))
     sink.submit(_snapshot(started=2))
@@ -163,57 +121,29 @@ def test_producer_dto_rejects_consumer_contract_drift() -> None:
         )
 
 
-def test_upsert_and_ttl_use_exact_capability_and_closed_json() -> None:
-    connection = _Connection()
-    metrics = ResourcePipelineMetrics()
-    sink = ClaudeAgentResourcePostgresSink(
-        db_factory=lambda: connection,
-        metrics=metrics,
-    )
+def test_writer_receives_original_identity_request_and_closed_snapshot() -> None:
+    received = []
+    sink = ClaudeAgentResourcePostgresSink(writer=lambda *args: received.append(args), metrics=ResourcePipelineMetrics())
     UUID(sink.instance_id)
     snapshot = _snapshot(started=4)
     sink.submit(snapshot)
     envelope = sink._queue.get_nowait()
-
     sink._write_sync(envelope)
-
-    assert connection.closed is True
-    statements = [query for query, _ in connection.calls]
-    assert any("set_config('statement_timeout'" in query for query in statements)
-    assert any("ON CONFLICT (instance_id) DO UPDATE" in query for query in statements)
-    assert any("heartbeat_at = CURRENT_TIMESTAMP" in query for query in statements)
-    assert any(
-        "CASE WHEN %s::timestamptz IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END" in query
-        for query in statements
-    )
-    assert any("make_interval(days => %s)" in query for query in statements)
-    upsert_parameters = next(
-        parameters
-        for query, parameters in connection.calls
-        if query.startswith("INSERT INTO claude_agent_resource_snapshots")
-    )
-    assert upsert_parameters[2] is None
-    stored = json.loads(upsert_parameters[3])
-    assert stored == snapshot.model_dump(mode="json")
-    serialized = json.dumps(stored).lower()
-    for forbidden in (
-        "instance_id",
-        "hostname",
-        "pid",
-        "session_id",
-        "thread_id",
-        "authorization",
-        "token",
-        "prompt",
-    ):
+    assert received[0][0] is envelope
+    assert received[0][1] == sink.instance_id
+    assert received[0][2].tzinfo is not None
+    UUID(envelope.request_id)
+    assert envelope.sampled_at is None
+    serialized = json.dumps(envelope.snapshot.model_dump(mode="json")).lower()
+    for forbidden in ("instance_id", "hostname", "pid", "session_id", "thread_id", "authorization", "token", "prompt"):
         assert forbidden not in serialized
 
 
-def test_slow_database_timeout_is_counted_and_does_not_escape() -> None:
+def test_slow_api_timeout_is_counted_and_does_not_escape() -> None:
     async def exercise() -> None:
         metrics = ResourcePipelineMetrics()
         sink = ClaudeAgentResourcePostgresSink(
-            db_factory=lambda: None,
+            writer=lambda *_: None,
             metrics=metrics,
             write_timeout_seconds=0.05,
         )
@@ -239,7 +169,7 @@ def test_timed_out_driver_calls_never_overlap_or_overtake() -> None:
     async def exercise() -> None:
         metrics = ResourcePipelineMetrics()
         sink = ClaudeAgentResourcePostgresSink(
-            db_factory=lambda: None,
+            writer=lambda *_: None,
             metrics=metrics,
             write_timeout_seconds=0.02,
         )
@@ -272,11 +202,11 @@ def test_timed_out_driver_calls_never_overlap_or_overtake() -> None:
     asyncio.run(exercise())
 
 
-def test_database_error_isolated_by_worker_boundary() -> None:
+def test_api_error_isolated_by_worker_boundary() -> None:
     async def exercise() -> None:
         metrics = ResourcePipelineMetrics()
         sink = ClaudeAgentResourcePostgresSink(
-            db_factory=lambda: (_ for _ in ()).throw(OSError("secret DSN")),
+            writer=lambda *_: (_ for _ in ()).throw(OSError("private credential")),
             metrics=metrics,
         )
         sink.submit(_snapshot())

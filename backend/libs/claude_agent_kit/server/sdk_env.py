@@ -2,6 +2,7 @@
 # [Output] Provide helpers that validate Dream's SDK distribution, resolve its
 #          CLI runtime, merge subprocess env, bind Notion CLI env, and force project-only settings.
 # [Pos] SDK environment helper node in libs/claude_agent_kit/server
+# [Sync] 2026-09-14: keep Admin/Auth/BFF server secrets out of inherited CLI/MCP environments.
 # [Sync] 2026-05-08: centralize .env injection for ClaudeSDKClient subprocess options.
 # [Sync] 2026-08-28: reserve authenticated model max-output capability and scrub ambient output overrides.
 # [Sync] 2026-05-08: map TypeScript settingSources=["project"] to Python SDK extra_args.
@@ -179,6 +180,11 @@ _GATEWAY_COMPETING_CREDENTIAL_ENV_NAMES = (
     "ANTHROPIC_AUTH_TOKEN",
     "CLAUDE_CODE_OAUTH_TOKEN",
 )
+ADMIN_AUTH_SERVER_ONLY_ENV_NAMES = frozenset({
+    "INK_ADMIN_DREAM_SERVICE_SECRET", "DREAM_DATA_SERVICE_CLIENTS",
+    "BETTER_AUTH_SECRET", "AUTH_TOKEN_ENCRYPTION_KEY", "GOOGLE_CLIENT_SECRET",
+    "INK_DREAM_BFF_COOKIE_SECRET", "JWT_SECRET", "JWT_SECRET_KEY",
+})
 _USER_SDK_ENV_NAMES = frozenset(
     {
         "API_TIMEOUT_MS",
@@ -584,6 +590,17 @@ def apply_gateway_credential_tombstones(environment: dict[str, str]) -> None:
         environment[name] = ""
 
 
+def apply_admin_auth_credential_tombstones(environment: dict[str, str]) -> None:
+    """Hide server authentication secrets from the SDK's parent-env overlay.
+
+    Only the child overlay is changed. The server still needs these original
+    values for Admin requests and BFF cookies. Removing overlay entries would
+    expose the parent's values, so every reserved key has an empty tombstone.
+    """
+    for name in ADMIN_AUTH_SERVER_ONLY_ENV_NAMES:
+        environment[name] = ""
+
+
 def task_v2_enabled() -> bool:
     """Return whether the legacy v2 opt-in gate is set (claude-todo §5.1).
 
@@ -625,10 +642,9 @@ def project_dotenv_env(env_file: Optional[Path | str] = None) -> dict[str, str]:
 def process_sdk_env(process_env: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     """Return process env values suitable for ``ClaudeAgentOptions.env``.
 
-    Cloud Run injects Secret Manager values as regular environment variables,
-    not as a ``backend/.env`` file.  These values still need to be copied into
-    ``ClaudeAgentOptions.env`` because setting that field makes the SDK
-    subprocess use the explicit map instead of inheriting the whole parent env.
+    Required runtime values are copied into ``ClaudeAgentOptions.env``. The
+    SDK overlays that map onto the full parent environment; server secrets
+    must therefore be cleared at the final merge, rather than merely omitted.
     """
 
     source = os.environ if process_env is None else process_env
@@ -676,6 +692,7 @@ def merge_project_dotenv_env(
     ).lower() in _TRUE_ENV_VALUES
     if gateway_enabled:
         apply_gateway_credential_tombstones(merged)
+    apply_admin_auth_credential_tombstones(merged)
     return merged
 
 
@@ -1014,6 +1031,7 @@ def apply_user_sdk_env_to_options(
     # Remove any deprecated keys.
     for key in _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES:
         merged.pop(key, None)
+    apply_admin_auth_credential_tombstones(merged)
     options.env = merged
     return options
 

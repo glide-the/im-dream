@@ -1,0 +1,3387 @@
+{
+  "baseline": "7d38715c1a8f74cb5fb3dcb114320156eaf6b3e6",
+  "note": "Candidate transaction boundaries; nested helper commits/context and external FS must be reviewed. Never expose generic remote transaction/SQL.",
+  "transactions": [
+    {
+      "file": "backend/claude_agent/service.py",
+      "function": "_store_story_workspace_output_sync",
+      "line": 715,
+      "signature": "user_id: int, thread_id: str, payload: StoryWorkspaceAgentStoryPayload",
+      "commit_calls": [
+        {
+          "line": 753,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "chat_thread",
+        "decks"
+      ],
+      "domain_calls": [
+        "_db.get_db"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.capability_available_sync",
+      "line": 238,
+      "signature": "self",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 241,
+          "context": "self._capability_lock"
+        },
+        {
+          "line": 245,
+          "context": "self._uow(read_only=True)"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "drizzle.schema_capabilities"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.app_settings_capability_available_sync",
+      "line": 275,
+      "signature": "self",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 278,
+          "context": "self._capability_lock"
+        },
+        {
+          "line": 282,
+          "context": "self._uow(read_only=True)"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "drizzle.schema_capabilities"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.list_servers_sync",
+      "line": 309,
+      "signature": "self, actor_id: str, workspace_id: str | None=None",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 310,
+          "context": "self._uow(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.get_server_sync",
+      "line": 328,
+      "signature": "self, actor_id: str, identifier: str, workspace_id: str | None=None",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 329,
+          "context": "self._uow(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.get_app_settings_sync",
+      "line": 356,
+      "signature": "self, actor_id: str, server_id: str, workspace_id: str | None=None",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 362,
+          "context": "self._uow(read_only=True)"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "dream_mcp_servers"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.update_app_settings_sync",
+      "line": 401,
+      "signature": "self, actor_id: str, server_id: str, patch: McpAppSettingsPatch",
+      "commit_calls": [
+        {
+          "line": 453,
+          "call": "uow.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 407,
+          "context": "self._uow()"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "dream_mcp_servers"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.create_server_sync",
+      "line": 468,
+      "signature": "self, actor_id: str, create: McpServerCreate",
+      "commit_calls": [
+        {
+          "line": 517,
+          "call": "uow.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 471,
+          "context": "self._uow()"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "dream_mcp_servers",
+        "story_workspace_workspaces"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.update_server_sync",
+      "line": 530,
+      "signature": "self, actor_id: str, server_id: str, patch: McpServerPatch",
+      "commit_calls": [
+        {
+          "line": 629,
+          "call": "uow.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 531,
+          "context": "self._uow()"
+        }
+      ],
+      "sql_count": 4,
+      "tables": [
+        "OF",
+        "dream_mcp_credentials",
+        "dream_mcp_discovery_snapshots",
+        "dream_mcp_servers"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.delete_server_sync",
+      "line": 635,
+      "signature": "self, actor_id: str, server_id: str, expected_revision: int | None, workspace_id: str | None=None",
+      "commit_calls": [
+        {
+          "line": 662,
+          "call": "uow.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 636,
+          "context": "self._uow()"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "OF",
+        "dream_mcp_servers"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.get_credential_sync",
+      "line": 668,
+      "signature": "self, actor_id: str, server_id: str",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 669,
+          "context": "self._uow(read_only=True)"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "dream_mcp_credentials",
+        "dream_mcp_servers"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.upsert_credential_sync",
+      "line": 699,
+      "signature": "self, actor_id: str, server_id: str, *, kind: str, envelope: Any, expires_at: datetime | None=None",
+      "commit_calls": [
+        {
+          "line": 739,
+          "call": "uow.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 701,
+          "context": "self._uow()"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "SET",
+        "dream_mcp_credentials",
+        "dream_mcp_discovery_snapshots",
+        "dream_mcp_servers"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.delete_credential_sync",
+      "line": 751,
+      "signature": "self, actor_id: str, server_id: str",
+      "commit_calls": [
+        {
+          "line": 780,
+          "call": "uow.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 752,
+          "context": "self._uow()"
+        }
+      ],
+      "sql_count": 3,
+      "tables": [
+        "OF",
+        "dream_mcp_credentials",
+        "dream_mcp_discovery_snapshots"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.get_discovery_snapshot_sync",
+      "line": 793,
+      "signature": "self, actor_id: str, server: McpServerRecord",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 794,
+          "context": "self._uow(read_only=True)"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "dream_mcp_discovery_snapshots",
+        "dream_mcp_servers"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.save_discovery_snapshot_sync",
+      "line": 827,
+      "signature": "self, actor_id: str, server: McpServerRecord, result: Any, *, ttl_seconds: float=300.0",
+      "commit_calls": [
+        {
+          "line": 869,
+          "call": "uow.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 833,
+          "context": "self._uow()"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "SET",
+        "dream_mcp_discovery_snapshots",
+        "dream_mcp_servers"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.find_import_receipt_sync",
+      "line": 874,
+      "signature": "self, actor_id: str, source_hash: str",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 875,
+          "context": "self._uow(read_only=True)"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "dream_mcp_import_receipts"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/claude_mcp/repository.py",
+      "function": "PostgresMcpRepository.import_server_sync",
+      "line": 905,
+      "signature": "self, actor_id: str, create: McpServerCreate, source_hash: str, config_hash: str, *, run_id: str | None=None",
+      "commit_calls": [
+        {
+          "line": 972,
+          "call": "uow.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 910,
+          "context": "self._uow()"
+        }
+      ],
+      "sql_count": 4,
+      "tables": [
+        "dream_mcp_import_receipts",
+        "dream_mcp_servers"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "replace_deck_claude_plugin_refs",
+      "line": 320,
+      "signature": "db, deck_id: str, refs: list[dict]",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 333,
+          "context": "db"
+        }
+      ],
+      "sql_count": 4,
+      "tables": [
+        "deck_claude_plugin_refs",
+        "decks"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "backfill_builtin_deck_plugin_refs",
+      "line": 414,
+      "signature": "db, builtin_installation_id: str, package_spec: str, resolved_version: str, artifact_digest: str",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 434,
+          "context": "db"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "deck_claude_plugin_refs",
+        "deck_plugin_bindings"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "seed_system_decks",
+      "line": 459,
+      "signature": "",
+      "commit_calls": [
+        {
+          "line": 527,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "SET",
+        "decks",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "publish_deck",
+      "line": 630,
+      "signature": "deck_id: str, user_id: int",
+      "commit_calls": [
+        {
+          "line": 663,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 4,
+      "tables": [
+        "decks",
+        "users",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "unpublish_deck",
+      "line": 667,
+      "signature": "deck_id: str, user_id: int",
+      "commit_calls": [
+        {
+          "line": 678,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "decks"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "increment_deck_install_count",
+      "line": 682,
+      "signature": "deck_id: str",
+      "commit_calls": [
+        {
+          "line": 693,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "decks"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "reconcile_default_screenplay_deck_plugin_ref",
+      "line": 854,
+      "signature": "user_id: int, default_plugin_ref: dict",
+      "commit_calls": [
+        {
+          "line": 940,
+          "call": "db.commit"
+        },
+        {
+          "line": 922,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 4,
+      "tables": [
+        "deck_claude_plugin_refs",
+        "decks",
+        "users",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "create_deck",
+      "line": 949,
+      "signature": "user_id: int, name: str, description: str=None, name_zh: str=None, name_en: str=None, description_zh: str=None, description_en: str=None, icon: str=None, color: str=None, order_index: int=None, default_plugin_ref: Optional[dict]=None",
+      "commit_calls": [
+        {
+          "line": 982,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "decks"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "update_deck",
+      "line": 990,
+      "signature": "user_id: int, deck_id: str, updates: dict",
+      "commit_calls": [
+        {
+          "line": 1049,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 4,
+      "tables": [
+        "a",
+        "decks"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "delete_deck",
+      "line": 1057,
+      "signature": "user_id: int, deck_id: str",
+      "commit_calls": [
+        {
+          "line": 1110,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 7,
+      "tables": [
+        "chat_thread",
+        "deck_claude_plugin_refs",
+        "deck_plugin_bindings",
+        "deck_runtime_snapshots",
+        "decks"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "create_default_screenplay_deck",
+      "line": 1157,
+      "signature": "user_id: int, default_plugin_ref: dict",
+      "commit_calls": [
+        {
+          "line": 1167,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "fork_deck",
+      "line": 1175,
+      "signature": "user_id: int, deck_id: str, enabled: bool=True, default_plugin_ref: Optional[dict]=None",
+      "commit_calls": [
+        {
+          "line": 1271,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 5,
+      "tables": [
+        "deck_claude_plugin_refs",
+        "decks",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "sync_deck_with_parent",
+      "line": 1276,
+      "signature": "user_id: int, deck_id: str, force: bool=False",
+      "commit_calls": [
+        {
+          "line": 1358,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 6,
+      "tables": [
+        "decks",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "create_voice",
+      "line": 1411,
+      "signature": "user_id: int, deck_id: str, name: str, system_prompt: str, name_zh: str=None, name_en: str=None, icon: str=None, color: str=None, order_index: int=None, memory_workspace_config: dict=None",
+      "commit_calls": [
+        {
+          "line": 1455,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "decks",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "update_voice",
+      "line": 1463,
+      "signature": "user_id: int, voice_id: str, updates: dict",
+      "commit_calls": [
+        {
+          "line": 1552,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 6,
+      "tables": [
+        "a",
+        "decks",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "delete_voice",
+      "line": 1560,
+      "signature": "user_id: int, voice_id: str",
+      "commit_calls": [
+        {
+          "line": 1588,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 4,
+      "tables": [
+        "decks",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "fork_voice",
+      "line": 1596,
+      "signature": "user_id: int, voice_id: str, target_deck_id: str",
+      "commit_calls": [
+        {
+          "line": 1651,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 4,
+      "tables": [
+        "decks",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "create_user",
+      "line": 1661,
+      "signature": "email: str, password_hash: str, display_name: str=None, avatar_url: str=None, role: str='user'",
+      "commit_calls": [
+        {
+          "line": 1719,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "ai_models",
+        "platform_users",
+        "subscription_events",
+        "subscription_plan_entitlements",
+        "subscription_plan_versions",
+        "subscription_plans",
+        "subscription_usage_allowances",
+        "subscriptions",
+        "users"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "upsert_oauth_account",
+      "line": 1790,
+      "signature": "user_id: int, provider: str, provider_sub: str, email: str, access_token_encrypted: Optional[str]=None, refresh_token_encrypted: Optional[str]=None, id_token_encrypted: Optional[str]=None, expires_at: Optional[datetime]=None",
+      "commit_calls": [
+        {
+          "line": 1832,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "SET",
+        "a",
+        "oauth_accounts"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "create_refresh_token",
+      "line": 1837,
+      "signature": "user_id: int, token_hash: str, expires_at: datetime",
+      "commit_calls": [
+        {
+          "line": 1849,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "refresh_tokens"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "revoke_refresh_token",
+      "line": 1873,
+      "signature": "token_hash: str",
+      "commit_calls": [
+        {
+          "line": 1886,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "refresh_tokens"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "revoke_user_refresh_tokens",
+      "line": 1892,
+      "signature": "user_id: int",
+      "commit_calls": [
+        {
+          "line": 1905,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "refresh_tokens"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "create_device_authorization",
+      "line": 1911,
+      "signature": "client_id: str, device_code_hash: str, user_code_hash: str, scope: str, interval_seconds: int, expires_at: datetime",
+      "commit_calls": [
+        {
+          "line": 1942,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "device_authorizations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "update_device_authorization_status",
+      "line": 1986,
+      "signature": "authorization_id: int, status: str, user_id: Optional[int]=None",
+      "commit_calls": [
+        {
+          "line": 2012,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "device_authorizations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "record_device_authorization_poll",
+      "line": 2017,
+      "signature": "authorization_id: int, interval_seconds: Optional[int]=None",
+      "commit_calls": [
+        {
+          "line": 2042,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "device_authorizations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "save_session",
+      "line": 2119,
+      "signature": "user_id: int, session_id: str, editor_state: dict, name: str=None, created_at: Optional[Union[str, datetime]]=None, labels: Optional[list]=None",
+      "commit_calls": [
+        {
+          "line": 2136,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "SET",
+        "a",
+        "user_sessions"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "delete_session",
+      "line": 2309,
+      "signature": "user_id: int, session_id: str",
+      "commit_calls": [
+        {
+          "line": 2314,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "user_sessions"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "save_preferences",
+      "line": 2510,
+      "signature": "user_id: int, voice_configs: dict=None, meta_prompt: str=None, state_config: dict=None, selected_state: str=None, timezone: str=None",
+      "commit_calls": [
+        {
+          "line": 2534,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "SET",
+        "user_preferences"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "save_system_config",
+      "line": 2583,
+      "signature": "user_id: int, patch: dict",
+      "commit_calls": [
+        {
+          "line": 2606,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "user_preferences"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "set_first_login_completed",
+      "line": 2611,
+      "signature": "user_id: int",
+      "commit_calls": [
+        {
+          "line": 2632,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "user_preferences"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "save_analysis_report",
+      "line": 2638,
+      "signature": "user_id: int, report_type: str, report_data: dict, all_notes_text: str=None",
+      "commit_calls": [
+        {
+          "line": 2646,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "analysis_reports"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "import_user_data",
+      "line": 2674,
+      "signature": "user_id: int, sessions: list, pictures: list, preferences: dict, reports: list=None",
+      "commit_calls": [
+        {
+          "line": 2732,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 4,
+      "tables": [
+        "SET",
+        "analysis_reports",
+        "daily_pictures",
+        "user_preferences",
+        "user_sessions"
+      ],
+      "domain_calls": [
+        "report.get"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "generate_invite_code",
+      "line": 2739,
+      "signature": "user_id: int",
+      "commit_calls": [
+        {
+          "line": 2768,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "friend_invites"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "use_invite_code",
+      "line": 2773,
+      "signature": "code: str, requesting_user_id: int",
+      "commit_calls": [
+        {
+          "line": 2842,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 5,
+      "tables": [
+        "friend_invites",
+        "friendships",
+        "users"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "accept_friend_request",
+      "line": 2877,
+      "signature": "request_id: int, user_id: int",
+      "commit_calls": [
+        {
+          "line": 2907,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "friendships"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "reject_friend_request",
+      "line": 2912,
+      "signature": "request_id: int, user_id: int",
+      "commit_calls": [
+        {
+          "line": 2942,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "friendships"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "remove_friend",
+      "line": 2986,
+      "signature": "user_id: int, friend_id: int",
+      "commit_calls": [
+        {
+          "line": 3005,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "friendships"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "create_chat_thread",
+      "line": 3075,
+      "signature": "user_id: int, deck_id: Optional[str]=None, voice_id: Optional[str]=None, title: Optional[str]=None",
+      "commit_calls": [
+        {
+          "line": 3090,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "chat_thread"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "bind_chat_thread_deck",
+      "line": 3110,
+      "signature": "thread_id: str, user_id: int, deck_id: str",
+      "commit_calls": [
+        {
+          "line": 3122,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_thread"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "select_chat_thread_voice",
+      "line": 3134,
+      "signature": "thread_id: str, user_id: int, deck_id: str, voice_id: str, expected_voice_id: Optional[str]",
+      "commit_calls": [
+        {
+          "line": 3155,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_thread"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "delete_chat_thread",
+      "line": 3252,
+      "signature": "thread_id: str, user_id: int",
+      "commit_calls": [
+        {
+          "line": 3260,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "chat_thread"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "update_chat_thread_title",
+      "line": 3266,
+      "signature": "thread_id: str, title: str",
+      "commit_calls": [
+        {
+          "line": 3274,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_thread",
+        "the"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "update_chat_thread_claude_session",
+      "line": 3279,
+      "signature": "thread_id: str, claude_session_id: str, agent_contract_version: str",
+      "commit_calls": [
+        {
+          "line": 3297,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "chat_thread"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "save_chat_message",
+      "line": 3405,
+      "signature": "thread_id: str, role: str, parts: list, message_id: Optional[str]=None, metadata: Optional[dict]=None, history_final_text: Optional[str]=None, history_process_available: bool=False, history_projection_version: Optional[int]=None, parts_json: Optional[str]=None, metadata_json: Optional[str]=None",
+      "commit_calls": [
+        {
+          "line": 3548,
+          "call": "db.commit"
+        },
+        {
+          "line": 3508,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_message"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "get_voice_memory_config_by_thread",
+      "line": 3752,
+      "signature": "thread_id: str",
+      "commit_calls": [
+        {
+          "line": 3783,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "save_reflections_section_config",
+      "line": 3819,
+      "signature": "user_id: int, section: str, prompt_files: dict",
+      "commit_calls": [
+        {
+          "line": 3838,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "SET",
+        "reflections_section_configs"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "delete_reflections_section_config",
+      "line": 3843,
+      "signature": "user_id: int, section: str",
+      "commit_calls": [
+        {
+          "line": 3854,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "reflections_section_configs"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "create_reflection_task",
+      "line": 3896,
+      "signature": "user_id: int, sections: list[str], input_snapshot: Optional[dict]=None, agent_contract_version: str='reflections-agent-v1', task_id: Optional[str]=None",
+      "commit_calls": [
+        {
+          "line": 3925,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "reflection_task"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "update_reflection_task_status",
+      "line": 3931,
+      "signature": "task_id: str, status: str, *, workspace_path: Optional[str]=None, input_snapshot: Optional[dict]=None, error_summary: Optional[str]=None, started_at: Optional[str]=None, completed_at: Optional[str]=None",
+      "commit_calls": [
+        {
+          "line": 3963,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "reflection_task",
+        "task"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "replace_reflection_section_results",
+      "line": 4002,
+      "signature": "task_id: str, user_id: int, section: str, results: list[dict]",
+      "commit_calls": [
+        {
+          "line": 4038,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "reflection_result"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "append_reflection_task_event",
+      "line": 4084,
+      "signature": "task_id: str, event_type: str, payload: Optional[dict]=None, *, event_id: Optional[str]=None, sequence: Optional[int]=None, created_at: Optional[str]=None",
+      "commit_calls": [
+        {
+          "line": 4116,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "reflection_task_event"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/database.py",
+      "function": "_PooledConnectionLease.__exit__",
+      "line": 183,
+      "signature": "self, exc_type, exc, traceback",
+      "commit_calls": [
+        {
+          "line": 185,
+          "call": "self._connection.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/libs/claude_agent_kit/server/editor_tool.py",
+      "function": "_save_editor_state_to_db",
+      "line": 304,
+      "signature": "editor_session_id: str, user_id: int, editor_state: dict[str, Any]",
+      "commit_calls": [
+        {
+          "line": 333,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "user_sessions"
+      ],
+      "domain_calls": [
+        "database.get_db"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.create_connector",
+      "line": 680,
+      "signature": "self, user_id: int, name: str, platform: str='notion', config: Optional[dict[str, Any]]=None",
+      "commit_calls": [
+        {
+          "line": 700,
+          "call": "unit_of_work.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 687,
+          "context": "self._unit_of_work(read_only=False)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.insert_connector"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.list_connectors",
+      "line": 703,
+      "signature": "self, user_id: int",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 704,
+          "context": "self._unit_of_work(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.list_connectors"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.list_sync_candidates",
+      "line": 715,
+      "signature": "self",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 718,
+          "context": "self._unit_of_work(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.list_sync_candidates"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.get_connector",
+      "line": 729,
+      "signature": "self, connector_id: str, user_id: Optional[int]=None",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 732,
+          "context": "self._unit_of_work(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.get_connector"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.get_active_connector_for_user",
+      "line": 739,
+      "signature": "self, user_id: int",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 740,
+          "context": "self._unit_of_work(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.get_active_connector"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.update_connector",
+      "line": 747,
+      "signature": "self, connector_id: str, user_id: int, updates: Mapping[str, Any]",
+      "commit_calls": [
+        {
+          "line": 781,
+          "call": "unit_of_work.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 753,
+          "context": "self._unit_of_work(read_only=False)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.update_connector"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.delete_connector",
+      "line": 784,
+      "signature": "self, connector_id: str, user_id: int",
+      "commit_calls": [
+        {
+          "line": 788,
+          "call": "unit_of_work.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 785,
+          "context": "self._unit_of_work(read_only=False)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.delete_connector"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.save_auth_state",
+      "line": 791,
+      "signature": "self, connector_id: str, user_id: int, *, auth_status: str, config_patch: Optional[Mapping[str, Any]]=None, verification_url: Optional[str]=None, verification_code: Optional[str]=None, poll_interval_seconds: Optional[int]=None, error_detail: Optional[str]=None",
+      "commit_calls": [
+        {
+          "line": 828,
+          "call": "unit_of_work.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 803,
+          "context": "self._unit_of_work(read_only=False)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.update_connector"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.replace_connector_resources",
+      "line": 831,
+      "signature": "self, connector_id: str, user_id: int, databases: Iterable[Mapping[str, Any]], pages: Iterable[Mapping[str, Any]]",
+      "commit_calls": [
+        {
+          "line": 915,
+          "call": "unit_of_work.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 840,
+          "context": "self._unit_of_work(read_only=False)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.delete_selected_resources",
+        "repository.insert_resource",
+        "repository.list_resources",
+        "repository.update_connector"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.list_connector_resources",
+      "line": 918,
+      "signature": "self, connector_id: str, user_id: int",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 921,
+          "context": "self._unit_of_work(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.list_resources"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.delete_connector_resource",
+      "line": 929,
+      "signature": "self, connector_id: str, user_id: int, resource_id: str",
+      "commit_calls": [
+        {
+          "line": 938,
+          "call": "unit_of_work.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 932,
+          "context": "self._unit_of_work(read_only=False)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.delete_resource"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.save_snapshot",
+      "line": 941,
+      "signature": "self, connector_id: str, user_id: int, workspace_id: str, snapshot: CanonicalWorkspaceSnapshot | dict[str, Any], synced_resources: Iterable[Mapping[str, Any]]=()",
+      "commit_calls": [
+        {
+          "line": 1031,
+          "call": "unit_of_work.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 972,
+          "context": "self._unit_of_work(read_only=False)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.find_database_resource",
+        "repository.mark_resource_synced",
+        "repository.replace_resource_pages",
+        "repository.update_connector",
+        "repository.upsert_snapshot"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.get_current_snapshot",
+      "line": 1034,
+      "signature": "self, workspace_id: str, connector_id: str, user_id: int",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 1038,
+          "context": "self._unit_of_work(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.get_current_snapshot"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.get_snapshot",
+      "line": 1044,
+      "signature": "self, connector_id: str, snapshot_version: str, user_id: int",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 1047,
+          "context": "self._unit_of_work(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.get_snapshot"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.list_snapshots",
+      "line": 1054,
+      "signature": "self, connector_id: str, user_id: int",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 1057,
+          "context": "self._unit_of_work(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.list_snapshots"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.attach_thread_to_connector",
+      "line": 1070,
+      "signature": "self, connector_id: str, user_id: int, thread_id: str",
+      "commit_calls": [
+        {
+          "line": 1082,
+          "call": "unit_of_work.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 1073,
+          "context": "self._unit_of_work(read_only=False)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.attach_thread"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/notion/store.py",
+      "function": "NotionConnectorStore.get_connector_for_thread",
+      "line": 1085,
+      "signature": "self, thread_id: str, user_id: int",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 1088,
+          "context": "self._unit_of_work(read_only=True)"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "repository.get_connector_for_thread"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/persistence/unit_of_work.py",
+      "function": "PostgresUnitOfWork.commit",
+      "line": 181,
+      "signature": "self",
+      "commit_calls": [
+        {
+          "line": 185,
+          "call": "self.connection.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/routers/claude_plugins.py",
+      "function": "_run_install",
+      "line": 135,
+      "signature": "operation_id: str, package_spec: str, source_type: str, marketplace_entry_id: str | None=None",
+      "commit_calls": [
+        {
+          "line": 156,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "MarketplaceCatalogService(db).resolve_install_source",
+        "PluginInstallService(db).install",
+        "database.get_db"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/routers/claude_plugins.py",
+      "function": "install_plugin",
+      "line": 242,
+      "signature": "request: InstallRequest, background_tasks: BackgroundTasks, current_user: dict=Depends(get_current_user)",
+      "commit_calls": [
+        {
+          "line": 323,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "claude_plugin_operations"
+      ],
+      "domain_calls": [
+        "MarketplaceCatalogService(db).resolve_install_source",
+        "database.get_db"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/routers/claude_plugins.py",
+      "function": "finish_error",
+      "line": 144,
+      "signature": "code: str, summary: str",
+      "commit_calls": [
+        {
+          "line": 156,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/routers/deck_versions.py",
+      "function": "commit_version",
+      "line": 131,
+      "signature": "deck_id: str, request: DeckVersionCommitRequest, current_user: dict[str, Any]=Depends(get_current_user), service: DeckContentVersionService=Depends(_service)",
+      "commit_calls": [
+        {
+          "line": 138,
+          "call": "service.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/routers/story_workspace.py",
+      "function": "_patch_owned_row",
+      "line": 494,
+      "signature": "db: Any, table: str, resource_id: str, owner_column: str, user_id: int, values: dict[str, Any]",
+      "commit_calls": [
+        {
+          "line": 519,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [],
+      "domain_calls": [
+        "StoryWorkspacePublicStoryRepository(db).get_story_row"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/routers/story_workspace.py",
+      "function": "_transition_pending_review",
+      "line": 575,
+      "signature": "db: Any, user_id: int, resource_type: StoryWorkspaceResourceType, resource_id: str, action: StoryWorkspaceBatchAction, review_notes: Optional[str]=None",
+      "commit_calls": [
+        {
+          "line": 663,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 5,
+      "tables": [
+        "story_workspace_characters",
+        "story_workspace_scenes",
+        "story_workspace_story_characters"
+      ],
+      "domain_calls": [
+        "StoryWorkspacePublicStoryRepository(db).get_story_row"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/routers/story_workspace.py",
+      "function": "_archive_story",
+      "line": 680,
+      "signature": "db: Any, user_id: int, story_id: str",
+      "commit_calls": [
+        {
+          "line": 710,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "story_workspace_stories"
+      ],
+      "domain_calls": [
+        "StoryWorkspacePublicStoryRepository(db).get_story_row"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/routers/story_workspace.py",
+      "function": "_batch_review",
+      "line": 726,
+      "signature": "db: Any, user_id: int, request: _BatchReviewRequest",
+      "commit_calls": [
+        {
+          "line": 842,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 8,
+      "tables": [
+        "story_workspace_characters",
+        "story_workspace_scenes",
+        "story_workspace_story_characters"
+      ],
+      "domain_calls": [
+        "public_repository.get_story_row"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/routers/story_workspace.py",
+      "function": "get_workspace",
+      "line": 880,
+      "signature": "current_user: dict[str, Any]=Depends(get_current_user), db: Any=Depends(_story_db)",
+      "commit_calls": [
+        {
+          "line": 897,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "story_workspace_workspaces"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/admin_product/identity.py",
+      "function": "PostgresCanonicalUserRepository._find_active_sync",
+      "line": 56,
+      "signature": "self, canonical_user_id: str",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 59,
+          "context": "self._unit_of_work_factory()"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "users"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_agent/session_manager.py",
+      "function": "SessionManager.terminate_session",
+      "line": 280,
+      "signature": "self, agent_session_id: str, *, reason_code: str, failed_error_code: str | None=None, actor_context: AuthenticatedActorContext | None=None",
+      "commit_calls": [
+        {
+          "line": 317,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "agent_sessions"
+      ],
+      "domain_calls": [
+        "self._run_service.transition_run"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_agent/session_manager.py",
+      "function": "SessionManager._acquire_attempt",
+      "line": 629,
+      "signature": "self, *, run: WorkflowRun, receipt: RuntimeLoadReceipt, settings_json: str, settings_hash: str, plugin_set_hash: str, session_request_key: str",
+      "commit_calls": [
+        {
+          "line": 749,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 683,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 651,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 657,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 7,
+      "tables": [
+        "agent_sessions"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_agent/session_manager.py",
+      "function": "SessionManager._record_remote_start",
+      "line": 756,
+      "signature": "self, result: SessionStartResult, owner_token: str",
+      "commit_calls": [
+        {
+          "line": 775,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "agent_sessions"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_agent/session_manager.py",
+      "function": "SessionManager._mark_failed",
+      "line": 777,
+      "signature": "self, agent_session_id: str, *, error_code: str, reason_code: str",
+      "commit_calls": [
+        {
+          "line": 793,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "agent_sessions"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_agent/session_manager.py",
+      "function": "SessionManager._mark_compensation_pending",
+      "line": 795,
+      "signature": "self, agent_session_id: str",
+      "commit_calls": [
+        {
+          "line": 805,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "agent_sessions"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_plugin/install_service.py",
+      "function": "PluginInstallService.uninstall",
+      "line": 784,
+      "signature": "self, installation_id: str",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 795,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "claude_plugin_installations",
+        "deck_claude_plugin_refs"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_plugin/install_service.py",
+      "function": "PluginInstallService._begin_operation",
+      "line": 840,
+      "signature": "self, spec: PackageSpec, kind: str, *, operation_id: str | None=None, marketplace_entry_id: str | None=None",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 862,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "claude_plugin_operations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_plugin/install_service.py",
+      "function": "PluginInstallService._fail_operation",
+      "line": 886,
+      "signature": "self, operation: dict[str, Any], error: PluginInstallError",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 897,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_plugin/install_service.py",
+      "function": "PluginInstallService._finish_operation",
+      "line": 911,
+      "signature": "self, operation: dict[str, Any], *, installation_id: str, evidence: dict[str, Any], message: str, execution: cli.CliExecution | None, replayed: bool",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 932,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/claude_plugin/install_service.py",
+      "function": "PluginInstallService._record_success",
+      "line": 1097,
+      "signature": "self, spec: PackageSpec, operation: dict[str, Any], *, plugin_root: Path, source_type: str, cli_version: str, cli_git_commit_sha: str | None, execution: cli.CliExecution | None, evidence: dict[str, Any], compatibility: dict[str, Any] | None=None, marketplace_entry_id: str | None=None, approved_plugin_digest: str | None=None",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 1225,
+          "context": "self.db"
+        },
+        {
+          "line": 1212,
+          "context": "self.db"
+        },
+        {
+          "line": 1164,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [
+        "artifact_store.import_tree"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck/admin_gateway.py",
+      "function": "DeckPluginAdminService._materialize",
+      "line": 223,
+      "signature": "db: Any, _deck_plugin_id: str, _version: str, runtime_lock: DeckRuntimePluginLock",
+      "commit_calls": [
+        {
+          "line": 317,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "runtime_plugin_materializations"
+      ],
+      "domain_calls": [
+        "f'{placement.runtime_environment_id}\\x00local\\x00{entry.claude_code_plugin_id}\\x00{entry.resolved_version}\\x00{entry.artifact_digest}\\x00{artifact_set_hash}'.encode",
+        "hashlib.sha256(f'{placement.runtime_environment_id}\\x00local\\x00{entry.claude_code_plugin_id}\\x00{entry.resolved_version}\\x00{entry.artifact_digest}\\x00{artifact_set_hash}'.encode('utf-8')).hexdigest"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck/admin_gateway.py",
+      "function": "DeckPluginAdminService.reject_upgrade",
+      "line": 556,
+      "signature": "self, deck_plugin_id: str, request: Any, *, actor_id: str",
+      "commit_calls": [
+        {
+          "line": 576,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "deck_plugin_installations"
+      ],
+      "domain_calls": [
+        "self._db"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck/builtin_plugin.py",
+      "function": "_repair_legacy_builtin_release",
+      "line": 129,
+      "signature": "db: Any, existing: Any",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 205,
+          "context": "db"
+        }
+      ],
+      "sql_count": 3,
+      "tables": [
+        "deck_plugin_releases",
+        "deck_runtime_plugin_locks"
+      ],
+      "domain_calls": [
+        "repaired_manifest.runtime.model_dump"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck/builtin_plugin.py",
+      "function": "seed_builtin_deck_plugin",
+      "line": 246,
+      "signature": "db: Any",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 285,
+          "context": "db"
+        }
+      ],
+      "sql_count": 3,
+      "tables": [
+        "deck_plugin_releases",
+        "deck_runtime_plugin_locks"
+      ],
+      "domain_calls": [
+        "manifest.runtime.model_dump",
+        "manifest.runtime_configuration.model_dump",
+        "runtime_lock.model_dump_json"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck/content_versioning.py",
+      "function": "DeckContentVersionService.commit",
+      "line": 375,
+      "signature": "self, deck_id: str, actor_id: int, request: DeckVersionCommitRequest",
+      "commit_calls": [
+        {
+          "line": 428,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "deck_versions",
+        "decks"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/binding_service.py",
+      "function": "BindingService.save",
+      "line": 194,
+      "signature": "self, *, deck_id: str, actor_id: str, request: DeckPluginBindingUpdateRequest, requested_workspace_id: str | None=None",
+      "commit_calls": [
+        {
+          "line": 280,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 231,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "deck_plugin_bindings"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/binding_service.py",
+      "function": "BindingService.clear",
+      "line": 287,
+      "signature": "self, *, deck_id: str, actor_id: str, expected_binding_revision: int, requested_workspace_id: str | None=None",
+      "commit_calls": [
+        {
+          "line": 329,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "deck_plugin_bindings"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/compatibility_service.py",
+      "function": "CompatibilityService._update_installation",
+      "line": 491,
+      "signature": "self, row: Any, **updates: Any",
+      "commit_calls": [
+        {
+          "line": 518,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "columns",
+        "deck_plugin_installations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/installation_service.py",
+      "function": "InstallationService.install",
+      "line": 222,
+      "signature": "self, deck_plugin_id: str, version: str, scope: Scope, *, source_policy_id: str='default'",
+      "commit_calls": [
+        {
+          "line": 277,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 240,
+          "context": "self._write_lock"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "deck_plugin_installations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/installation_service.py",
+      "function": "InstallationService.uninstall",
+      "line": 523,
+      "signature": "self, installation_id: str, force: bool=False",
+      "commit_calls": [
+        {
+          "line": 559,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [
+        {
+          "line": 528,
+          "context": "self._write_lock"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "deck_plugin_installations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/installation_service.py",
+      "function": "InstallationService._update_row",
+      "line": 755,
+      "signature": "self, row: Any, **updates: Any",
+      "commit_calls": [
+        {
+          "line": 786,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "columns",
+        "deck_plugin_installations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/release_service.py",
+      "function": "DeckPluginReleaseService.create_draft",
+      "line": 129,
+      "signature": "self, manifest: DeckPluginManifestV1",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 141,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "deck_plugin_releases"
+      ],
+      "domain_calls": [
+        "parsed.runtime.model_dump_json"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/release_service.py",
+      "function": "DeckPluginReleaseService.validate_release",
+      "line": 188,
+      "signature": "self, release_id: str",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 195,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "deck_plugin_releases"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/release_service.py",
+      "function": "DeckPluginReleaseService.publish_with_lock",
+      "line": 232,
+      "signature": "self, release_id: str, marketplace_resolver: MarketplaceResolver, *, lock_generator: LockGenerator | None=None",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 242,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 4,
+      "tables": [
+        "deck_plugin_releases",
+        "deck_runtime_plugin_locks"
+      ],
+      "domain_calls": [
+        "runtime_lock.created_at.isoformat",
+        "runtime_lock.model_dump_json"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/release_service.py",
+      "function": "DeckPluginReleaseService._transition_published_release",
+      "line": 350,
+      "signature": "self, release_id: str, target: DeckPluginReleaseStatus",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 355,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "deck_plugin_releases"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/revocation_service.py",
+      "function": "SQLiteRevocationRepository._create_tables",
+      "line": 499,
+      "signature": "self",
+      "commit_calls": [
+        {
+          "line": 625,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 11,
+      "tables": [
+        "IF"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/revocation_service.py",
+      "function": "SQLiteRevocationRepository.commit_revocation",
+      "line": 721,
+      "signature": "self, record: SecurityRevocationRecord, manifest: RevocationImpactManifest, commands: Iterable[CancellationCommand], notifications: Iterable[NotificationOutboxEntry], effective_event: AuditEvent",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 730,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 4,
+      "tables": [
+        "revocation_cancel_commands",
+        "revocation_impact_manifests",
+        "revocation_quarantined_targets",
+        "security_revocations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/revocation_service.py",
+      "function": "SQLiteRevocationRepository.append_audit",
+      "line": 806,
+      "signature": "self, event: AuditEvent",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 807,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/revocation_service.py",
+      "function": "SQLiteRevocationRepository.append_incident",
+      "line": 810,
+      "signature": "self, incident: Incident",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 811,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "revocation_incidents"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/revocation_service.py",
+      "function": "SQLiteRevocationRepository.append_runtime_receipt",
+      "line": 829,
+      "signature": "self, receipt: RuntimeCommandReceipt",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 830,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 0,
+      "tables": [],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/deck_plugin/revocation_service.py",
+      "function": "SQLiteRevocationRepository.save_notification",
+      "line": 851,
+      "signature": "self, entry: NotificationOutboxEntry",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 852,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "revocation_notification_outbox"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/events/event_emitter.py",
+      "function": "EventEmitter.emit",
+      "line": 85,
+      "signature": "self, envelope: EventEnvelope",
+      "commit_calls": [
+        {
+          "line": 117,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "events"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/runtime_plugin/materialization_manager.py",
+      "function": "MaterializationManager._perform_materialization",
+      "line": 211,
+      "signature": "self, *, placement_context: RuntimePlacementContext, claude_code_plugin_id: str, resolved_version: str, artifact_digest: str, materialization_key: str",
+      "commit_calls": [
+        {
+          "line": 296,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 322,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "runtime_plugin_materializations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/runtime_plugin/materialization_manager.py",
+      "function": "MaterializationManager._begin_attempt",
+      "line": 325,
+      "signature": "self, *, placement_context: RuntimePlacementContext, claude_code_plugin_id: str, resolved_version: str, artifact_digest: str, materialization_key: str",
+      "commit_calls": [
+        {
+          "line": 385,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "runtime_plugin_materializations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/runtime_plugin/reconcile_service.py",
+      "function": "SqliteCliAuditSink.record",
+      "line": 275,
+      "signature": "self, record: CliAuditRecord",
+      "commit_calls": [
+        {
+          "line": 300,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "runtime_plugin_reconcile_attempts"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/runtime_plugin/reconcile_service.py",
+      "function": "ReconcileService._record_headless_attempt",
+      "line": 785,
+      "signature": "self, *, result: ReconcileResult, result_status: str, error_code: str | None",
+      "commit_calls": [
+        {
+          "line": 809,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "runtime_plugin_reconcile_attempts"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/runtime_plugin/reconcile_service.py",
+      "function": "ReconcileService._record_headless_failure",
+      "line": 811,
+      "signature": "self, *, attempt_id: str, placement_context: RuntimePlacementContext, error: ReconcileError, created_at: datetime",
+      "commit_calls": [
+        {
+          "line": 837,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 1,
+      "tables": [
+        "runtime_plugin_reconcile_attempts"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/runtime_plugin/reconcile_service.py",
+      "function": "ReconcileService._persist_receipt",
+      "line": 839,
+      "signature": "self, receipt: RuntimeLoadReceipt, activation_updates: list[tuple[str, str]]",
+      "commit_calls": [
+        {
+          "line": 911,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "runtime_load_receipt_entries",
+        "runtime_load_receipts",
+        "runtime_plugin_materializations"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/agent_integration.py",
+      "function": "get_or_create_default_workspace",
+      "line": 62,
+      "signature": "db: Any, user_id: int",
+      "commit_calls": [
+        {
+          "line": 83,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "story_workspace_workspaces"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/artifact_story_index_repository.py",
+      "function": "ArtifactStoryIndexRepository.upsert",
+      "line": 356,
+      "signature": "self, projection: ArtifactStoryProjection, *, expected_record: ArtifactStoryIndexRecord | None=None, require_expected_record: bool=False",
+      "commit_calls": [
+        {
+          "line": 534,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 480,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 436,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 8,
+      "tables": [
+        "cannot",
+        "one",
+        "returned",
+        "story_workspace_stories"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_artifact_turn_hook.py",
+      "function": "DreamArtifactTurnHook._synchronize_episode_registry",
+      "line": 967,
+      "signature": "cls, ticket: DreamArtifactTurnTicket, workflow_run: WorkflowRun, *, private_files: Mapping[str, bytes]",
+      "commit_calls": [
+        {
+          "line": 1062,
+          "call": "db.commit"
+        },
+        {
+          "line": 1091,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "chat_message",
+        "list",
+        "the"
+      ],
+      "domain_calls": [
+        "binding_service.activate_episode",
+        "binding_service.bind_first_episode",
+        "binding_service.discover_unique_canonical_project_story_slug",
+        "binding_service.ensure_next_episode",
+        "binding_service.read_canonical_project_total_episodes",
+        "binding_service.read_episode_registry",
+        "database.get_db"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_auto_repair_service.py",
+      "function": "settle_dream_auto_repair_message",
+      "line": 499,
+      "signature": "message_id: str, *, thread_id: str, expected_metadata: Mapping[str, Any], status: str",
+      "commit_calls": [
+        {
+          "line": 617,
+          "call": "db.commit"
+        },
+        {
+          "line": 550,
+          "call": "db.commit"
+        },
+        {
+          "line": 610,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "chat_message"
+      ],
+      "domain_calls": [
+        "database.get_db",
+        "stored.get"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_confirmation_service.py",
+      "function": "story_workspace_mark_dream_confirmation_dispatched",
+      "line": 396,
+      "signature": "db: Any, dispatch: StoryWorkspaceDreamConfirmationDispatch",
+      "commit_calls": [
+        {
+          "line": 470,
+          "call": "db.commit"
+        },
+        {
+          "line": 447,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_message"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_confirmation_service.py",
+      "function": "story_workspace_claim_dream_confirmation",
+      "line": 710,
+      "signature": "db: Any, dispatch: StoryWorkspaceDreamConfirmationDispatch, *, claim_id: str, clock: Callable[[], float], lease_duration_s: float",
+      "commit_calls": [
+        {
+          "line": 798,
+          "call": "db.commit"
+        },
+        {
+          "line": 745,
+          "call": "db.commit"
+        },
+        {
+          "line": 772,
+          "call": "db.commit"
+        },
+        {
+          "line": 761,
+          "call": "db.commit"
+        },
+        {
+          "line": 764,
+          "call": "db.commit"
+        },
+        {
+          "line": 767,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_message",
+        "chat_thread"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_confirmation_service.py",
+      "function": "_story_workspace_set_dream_confirmation_claim_lease",
+      "line": 822,
+      "signature": "db: Any, dispatch: StoryWorkspaceDreamConfirmationDispatch, *, clock: Callable[[], float], lease_duration_s: float",
+      "commit_calls": [
+        {
+          "line": 875,
+          "call": "db.commit"
+        },
+        {
+          "line": 855,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_message"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_confirmation_service.py",
+      "function": "StoryWorkspaceDreamConfirmationService.submit_confirmation",
+      "line": 1408,
+      "signature": "self, run_id: str, payload: StoryWorkspaceDreamConfirmationCommand, *, actor_id: str",
+      "commit_calls": [
+        {
+          "line": 1556,
+          "call": "self._db.commit"
+        },
+        {
+          "line": 1502,
+          "call": "self._db.commit"
+        },
+        {
+          "line": 1544,
+          "call": "self._db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_message",
+        "chat_thread"
+      ],
+      "domain_calls": [
+        "self._run_reader"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_launch_infrastructure.py",
+      "function": "DreamLaunchSourceRepository.ensure_source",
+      "line": 221,
+      "signature": "self, *, actor_id: str, workspace_id: str, deck_id: str, agent_id: str | None, goal: str, idempotency_key: str, request_fingerprint: str, thread_id: str, message_id: str",
+      "commit_calls": [
+        {
+          "line": 328,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 275,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 5,
+      "tables": [
+        "chat_message",
+        "chat_thread"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_launch_infrastructure.py",
+      "function": "DreamRuntimeProvisioningService._ensure_materialization",
+      "line": 604,
+      "signature": "self, runtime_lock: DeckRuntimePluginLock, installation: dict[str, Any]",
+      "commit_calls": [
+        {
+          "line": 672,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "runtime_plugin_materializations"
+      ],
+      "domain_calls": [
+        "f'{placement.runtime_environment_id}\\x00dream-launch\\x00{entry.claude_code_plugin_id}\\x00{entry.resolved_version}\\x00{entry.artifact_digest}\\x00{artifact_set_hash}'.encode",
+        "hashlib.sha256(f'{placement.runtime_environment_id}\\x00dream-launch\\x00{entry.claude_code_plugin_id}\\x00{entry.resolved_version}\\x00{entry.artifact_digest}\\x00{artifact_set_hash}'.encode('utf-8')).hexdigest"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_launch_infrastructure.py",
+      "function": "DreamLaunchEnvelopeDispatcher.__call__",
+      "line": 1058,
+      "signature": "self, *, actor_id: str, goal: str, source: DreamLaunchSource, context: StoryWorkspaceDreamRunContext",
+      "commit_calls": [
+        {
+          "line": 1110,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 1084,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 1087,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_message",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_launch_infrastructure.py",
+      "function": "DreamLaunchEnvelopeDispatcher._finish_claim",
+      "line": 1185,
+      "signature": "self, message_id: str, *, claim_id: str, status: str",
+      "commit_calls": [
+        {
+          "line": 1212,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 1203,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 2,
+      "tables": [
+        "chat_message"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/dream_launch_infrastructure.py",
+      "function": "DreamLaunchFailureRecorder.record",
+      "line": 1226,
+      "signature": "self, *, workflow_run_id: str, actor_id: str, message_id: str, error_code: str",
+      "commit_calls": [
+        {
+          "line": 1287,
+          "call": "db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "chat_message",
+        "workflow_runs"
+      ],
+      "domain_calls": [
+        "WorkflowRunService(db, token_secret=self._token_secret).transition_run",
+        "runtime_database.get_db"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/story_workspace/preflight_builder.py",
+      "function": "StoryWorkspacePreflightServiceBuilder.ensure_snapshot",
+      "line": 222,
+      "signature": "self, deck_id: str, profile_id: str, contract: str",
+      "commit_calls": [
+        {
+          "line": 309,
+          "call": "self._db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 5,
+      "tables": [
+        "deck_plugin_bindings",
+        "deck_runtime_snapshots",
+        "decks",
+        "voices"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/workflow/preflight_service.py",
+      "function": "PreflightService.consume_preflight_token",
+      "line": 321,
+      "signature": "self, token: str, *, binding_revision: int, input_data: dict, deck_runtime_snapshot_id: str, runtime_plugin_lock_id: str",
+      "commit_calls": [
+        {
+          "line": 416,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 368,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "workflow_preflights"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/workflow/preflight_service.py",
+      "function": "PreflightService._active_preflight",
+      "line": 498,
+      "signature": "self, request_fingerprint: str, now: datetime",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 503,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 2,
+      "tables": [
+        "workflow_preflights"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/workflow/preflight_service.py",
+      "function": "PreflightService._insert_checking",
+      "line": 526,
+      "signature": "self, *, preflight_id: str, request_fingerprint: str, deck_id: str, binding_revision: int, input_hash: str, actor: str, created_at: datetime, expires_at: datetime",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 538,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "workflow_preflights"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/workflow/preflight_service.py",
+      "function": "PreflightService._persist_binding",
+      "line": 563,
+      "signature": "self, preflight_id: str, binding: BindingReleaseContext",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 568,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "workflow_preflights"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/workflow/preflight_service.py",
+      "function": "PreflightService._persist_snapshot",
+      "line": 587,
+      "signature": "self, preflight_id: str, snapshot: DeckRuntimeSnapshotReceipt",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 592,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "workflow_preflights"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/workflow/preflight_service.py",
+      "function": "PreflightService._persist_passed",
+      "line": 608,
+      "signature": "self, preflight_id: str, snapshot: DeckRuntimeSnapshotReceipt, token: str, expires_at: datetime",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 615,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "workflow_preflights"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/workflow/preflight_service.py",
+      "function": "PreflightService._persist_failed",
+      "line": 635,
+      "signature": "self, preflight_id: str, check: PreflightCheck, error_code: str",
+      "commit_calls": [],
+      "transaction_contexts": [
+        {
+          "line": 641,
+          "context": "self.db"
+        }
+      ],
+      "sql_count": 1,
+      "tables": [
+        "workflow_preflights"
+      ],
+      "domain_calls": [],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/workflow/run_service.py",
+      "function": "WorkflowRunService.transition_run",
+      "line": 208,
+      "signature": "self, workflow_run_id: str, to_status: RunStatus | str, actor_context: AuthenticatedActorContext, *, reason_code: str | None=None, failed_step: str | None=None, error_code: str | None=None, runtime_load_receipt_id: str | None=None, agent_session_id: str | None=None, normalized_result_ready: bool=False, review_items_approved: bool=False",
+      "commit_calls": [
+        {
+          "line": 351,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 270,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 3,
+      "tables": [
+        "agent_sessions",
+        "current",
+        "workflow_runs"
+      ],
+      "domain_calls": [
+        "self._row_to_run",
+        "self._select_scoped_run",
+        "self._validate_agent_session_binding"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    },
+    {
+      "file": "backend/services/workflow/run_service.py",
+      "function": "WorkflowRunService._create_run",
+      "line": 386,
+      "signature": "self, *, preflight_id: str, preflight_token: str, idempotency_key: str, source_voice_thread_id: str | None, source_message_id: str | None, source_message_time: datetime | None, actor_context: AuthenticatedActorContext, retry_of_run_id: str | None, expected_retry_source: dict[str, Any] | None",
+      "commit_calls": [
+        {
+          "line": 590,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 487,
+          "call": "self.db.commit"
+        },
+        {
+          "line": 505,
+          "call": "self.db.commit"
+        }
+      ],
+      "transaction_contexts": [],
+      "sql_count": 5,
+      "tables": [
+        "workflow_run_token_consumptions",
+        "workflow_runs"
+      ],
+      "domain_calls": [
+        "self._consume_token_for_run",
+        "self._row_to_run"
+      ],
+      "admin_operation": "pending canonical operation; entire aggregate boundary must remain Admin-owned"
+    }
+  ]
+}

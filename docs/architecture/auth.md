@@ -1,340 +1,72 @@
-<!-- [输入] Next.js Dream Web 登录入口、Python Authlib/JWT 路由和 Admin-owned PostgreSQL 认证表。 -->
-<!-- [输出] 说明当前 Google OAuth/OIDC、系统 Token、账号绑定和 Device Flow 的身份边界。 -->
-<!-- [定位] 当前认证架构；数据库 DDL 由 Admin Drizzle 管理，本文不提供 Dream migration。 -->
-<!-- [同步] 2026-09-06：前端入口更新为唯一 Next.js App Router，并移除 Vite/SQLite 当前态叙述。 -->
+<!-- [Input] Dream baseline auth/BFF and the Admin-owned contract when frozen. -->
+<!-- [Output] Dream consumer design, authority retirement, topology and acceptance gates. -->
+<!-- [Pos] Dream authentication consumer; Admin owns Better Auth, OAuth and signing keys. -->
+<!-- [Sync] 2026-09-14: change the target authority and retain original history. -->
 
-# Google OAuth / OIDC 认证架构
+# Dream 接入 Admin 认证
 
-> 本文定义 Ink & Memory 当前的 Google OAuth / OIDC 实现。Python 后端是认证中心，Authlib 负责 OAuth/OIDC 协议能力；Next.js 16 App Router 只承载登录 UI、浏览器跳转和同源薄转发，不成为第二个认证中心。Google token 不等于本系统业务 token；业务 API 只识别 Python 后端签发的本系统 access token / refresh token。
+## 背景与问题
 
-## 1. 目标
+baseline `7d38715c` 中 `backend/auth.py` 自签 HS256 用户 token，`routers/oauth.py` 用 Authlib 做 Google 登录并按配置合并同邮箱账户，`routers/device_oauth.py` 自行维护 device/refresh 状态。浏览器读取 URL fragment/localStorage token，部分 API 直达 Python。这些实际实现与 Admin 唯一认证中心目标冲突。
 
-| 目标 | 说明 |
-| --- | --- |
-| 网页端 Google 登录 | `frontend/app/_dream/components/Auth/**` 提供登录 UI，跳转 Python `/oauth/google/login` |
-| 后端接管 OAuth callback | FastAPI 使用 Authlib 完成 state 校验、code 换 token、userinfo 解析 |
-| 复用现有用户体系 | 继续使用 Admin-owned PostgreSQL `users` 表，不迁移 Better Auth，不创建 Next.js 认证中心 |
-| 签发本系统 token | 登录成功后签发本系统 access token / refresh token |
-| 业务 API 统一鉴权 | 所有业务路由继续通过 `get_current_user` 获取 `user_id` |
-| 支持 Device Flow | 非浏览器设备通过 `/oauth/device/code` + `/oauth/token` 获得同类系统 token |
+本稿是迁移目标与评审约束，尚不能作为实现或部署回执。状态见[执行计划](../exec/dream-admin-auth-data-plan.md)。[旧认证原文](history/pre-admin-auth-data-20260914/auth.md)完整保留接口和历史测试；其中旧 authority、邮箱自动合并与 DB 直连不再是目标规范。
 
-## 2. 为什么采用 Python + Authlib
+## 目标与边界
 
-当前项目是 Next.js Web Shell + FastAPI 业务后端分层：
+Admin 使用 Better Auth 内置 Google social sign-in、Admin callback、OAuth authorization/device/token、JWKS与账户映射。Dream Next 是同源 BFF；FastAPI 是 OAuth Resource Server 与业务编排，不能签用户登录 token、验证 Google token或维护另一套 session/refresh/device authority。Admin管理和Dream访问权限独立，同主体登录Dream不获得Admin管理。
 
-| 现状 | 影响 |
-| --- | --- |
-| `backend/routers/auth.py` 已有 `/api/login`、`/api/register`、`/api/me` | Python 已经是认证中心 |
-| `backend/auth.py` 已有 PyJWT 和 bcrypt | 可增量扩展，不需要引入第二套用户体系 |
-| 业务路由普遍依赖 `Depends(get_current_user)` | 只要统一 token 校验，业务层无需知道登录方式 |
-| `backend/database.py` 通过 PostgreSQL helper 访问 Admin-owned Schema | OAuth 账号、refresh token 与 Device Flow 数据继续由 Python 使用，但任何 Schema 变更必须先在 Admin Drizzle 发布 capability |
+Admin唯一规范位于其仓库 `docs/architecture/admin-dream-auth-data-contract.md`。当前等待冻结；客户端实现前记录实际路径、版本和发布回执，本稿不自定 endpoint、claim 或 capability。跨项目业务设计见[认证与数据交互](admin-auth-data-interaction.md)。
 
-Authlib 负责协议细节：Google OIDC discovery、authorization redirect、OAuth state、callback token exchange、userinfo。项目代码负责本地用户绑定、token 签发、cookie/header 策略和业务权限。
+## 概念与规则
 
-## 3. 与 Better Auth / Next.js Auth 的取舍
-
-| 方案 | 优点 | 问题 | 当前结论 |
-| --- | --- | --- | --- |
-| Python + Authlib | 贴合当前 FastAPI 业务；一个用户体系；业务 API 不需要迁移 | 需要自己维护 OAuth 表、refresh token、Device Flow | 采用 |
-| Better Auth / Next.js Auth | 前端生态成熟，适合 Next.js 全栈 | 会让 Python 和 Next.js 分别维护身份、Token 和数据边界，破坏当前单一认证中心 | 不采用 |
-| 前端直接拿 Google token | 实现看似简单 | 泄漏 Google token，业务 API 无法统一权限，无法支持 Device Flow | 禁止 |
-
-## 4. Open WebUI 参考结论
-
-本项目参考 Open WebUI 的架构思想，不照搬代码：
-
-| Open WebUI 做法 | 当前项目采用方式 |
-| --- | --- |
-| 前端按钮跳 `/oauth/google/login` | 采用 |
-| Python Authlib client 注册 Google | 采用 |
-| `authorize_redirect` / `authorize_access_token` | 采用 |
-| userinfo 不完整时调用 userinfo endpoint | 采用 |
-| provider sub 优先绑定，email merge 可配置 | 采用 |
-| `ENABLE_OAUTH_SIGNUP` 控制 OAuth 新用户注册 | 采用 |
-| 登录成功签发自己的 JWT | 采用 |
-| SQLAlchemy 用户模型和 OAuth session 表 | 不照搬；Python 复用现有 PostgreSQL helper 和 Admin-owned Schema |
-| 大型多 provider / group / role 管理 | 一期不引入 |
-| Svelte 登录页和 cookie 读取方式 | 不照搬，改造现有 React AuthContext |
-
-## 5. Google OAuth 数据流
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant FE as Next.js Dream Web
-    participant BE as Python Backend
-    participant Google as Google OAuth
-    participant DB as Database
-
-    User->>FE: 点击 Google 登录
-    FE->>BE: GET /oauth/google/login
-    BE->>Google: Authlib authorize_redirect(state, scope)
-    Google-->>BE: GET /oauth/google/callback?code&state
-    BE->>Google: authorize_access_token
-    Google-->>BE: id_token / access_token
-    BE->>Google: userinfo（必要时）
-    Google-->>BE: sub / email / name / picture
-    BE->>DB: 按 provider + sub 查 oauth_accounts
-    alt 找到绑定用户
-        DB-->>BE: user_id
-    else 开启 email merge 且同邮箱用户存在
-        BE->>DB: 绑定 oauth_accounts 到已有 user_id
-    else 开启 OAuth signup
-        BE->>DB: 创建 users + oauth_accounts
-    else 不允许注册
-        BE-->>FE: 登录失败
-    end
-    BE->>BE: 签发本系统 access_token / refresh_token
-    BE-->>FE: Set-Cookie 或 redirect with success
-    FE->>BE: GET /auth/me 或 /api/me
-    BE-->>FE: 当前用户
-```
-
-## 6. API 路由设计
-
-| Method | Path | 认证 | 说明 |
-| --- | --- | --- | --- |
-| `GET` | `/oauth/google/login` | public | 发起 Google OAuth，后端生成 state 并 redirect |
-| `GET` | `/oauth/google/callback` | Google callback | 后端换 token、解析 userinfo、绑定本地用户、签发系统 token |
-| `POST` | `/auth/logout` | 当前登录态 | 删除 cookie，撤销 refresh token；兼容现有前端清 localStorage |
-| `GET` | `/auth/me` | access token | 返回当前用户；兼容别名 `/api/me` |
-| `POST` | `/oauth/token` | device / refresh | 支持 Device Code grant 和 refresh token grant |
-
-兼容策略：
-
-| 现有接口 | 保留方式 |
-| --- | --- |
-| `POST /api/login` | 继续用于邮箱密码登录 |
-| `POST /api/register` | 继续用于邮箱密码注册 |
-| `GET /api/me` | 保留；`/auth/me` 可作为新别名 |
-
-## 7. 环境变量设计
-
-```env
-WEBUI_URL=http://localhost:5173
-API_BASE_URL=http://localhost:8765
-
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_OPENID_CONFIG_URL=https://accounts.google.com/.well-known/openid-configuration
-GOOGLE_OAUTH_SCOPE=openid email profile
-GOOGLE_OAUTH_PROMPT=select_account
-
-ENABLE_OAUTH_SIGNUP=true
-OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
-OAUTH_ALLOWED_DOMAINS=
-
-JWT_SECRET=
-# legacy fallback: JWT_SECRET_KEY=
-# 默认 1h；认证请求会滑动续期（剩余不足一半时通过 X-New-Access-Token 头发放新 token）
-JWT_EXPIRES_IN=1h
-REFRESH_TOKEN_EXPIRES_IN=30d
-SESSION_SECRET_KEY=
-COOKIE_SECURE=false
-COOKIE_SAMESITE=lax
-INK_CORS_ALLOW_CREDENTIALS=true
-
-OAUTH_DEVICE_ALLOWED_CLIENT_IDS=
-DEVICE_CODE_EXPIRES_IN=600
-DEVICE_CODE_INTERVAL=5
-```
-
-实现补充：
-
-| 变量 | 默认值 | 说明 |
+| 边界 | 执行模块与判断 | 失败处理 |
 | --- | --- | --- |
-| `COOKIE_HTTPONLY` | `true` | Web auth cookie 在代码中固定为 HttpOnly |
-| `OAUTH_TOKEN_ENCRYPTION_KEY` | 空 | 当前 Google token 不落库；后续保存 Google token 时必须配置 |
-| `SESSION_SECRET_KEY` | `JWT_SECRET` fallback | OAuth state 使用 Starlette session cookie 签名 |
-| `INK_CORS_ALLOW_CREDENTIALS` | `false` | 跨域 cookie 登录时需显式开启 |
-| `OAUTH_DEVICE_ALLOWED_CLIENT_IDS` | 空 | 空表示允许任意非空 public `client_id`；生产可配置 allowlist |
-| `DEVICE_CODE_EXPIRES_IN` | `600` | Device Flow code 有效期 |
-| `DEVICE_CODE_INTERVAL` | `5` | 设备轮询最小间隔 |
+| Google身份认证 | Admin Better Auth校验state/code/OIDC与稳定provider subject | 登录页说明失败；Dream不签token |
+| 用户映射 | Admin保留users.id与业务FK，仅显式校验的关联流程绑定已有账户 | 同邮箱不自动合并；冲突返回明确错误 |
+| BFF登录 | Next发起code+PKCE；callback校验一次性state、code、固定redirect URI与PKCE | 拒绝缺失/重放/开放redirect，清该次登录状态 |
+| BFF会话 | Dream host-only HttpOnly opaque handle；tokens存服务端；Admin session只属Admin origin | 撤销/过期重新登录；服务故障保留可恢复状态 |
+| Dream API | 成熟JWT/JWKS库验证签名、闭集算法、issuer/audience、时间、subject与scope | 无效/过期/错误资源为401；scope不足403 |
+| Admin领域数据 | 独立service credential+用户access token或限定后台授权；Admin检查实体归属 | service不能凭body/header任意user_id改actor |
+| Admin管理 | 独立管理权限校验 | Dream scope不授予管理能力 |
 
-## 8. 数据表设计
+### 浏览器主拓扑与配置
 
-当前 Admin-owned PostgreSQL 已有 `users`：
+主拓扑：Dream同源BFF + PKCE → Admin OAuth authorization → Admin Google/login → Dream callback。Admin与Dream分别持有host-only cookie，无Domain共享，不因同网段推断cookie互通。生产HTTPS使用Secure/HttpOnly；SameSite与callback method按实际契约冻结。浏览器REST/SSE认证读写进入Dream origin；不能跨域转发任意Cookie或启用通配credential CORS。
 
-```txt
-id
-email
-password_hash
-display_name
-created_at
-```
+server-owned配置明确Dream public origin、Admin issuer/origin、注册callback URI、内部FastAPI URL。代理按部署配置确定origin，不相信任意forwarded header。BFF mutation校验origin/CSRF，return location限定同Dream origin页面并恢复device上下文。callback URL不能携带access/refresh token。
 
-不重复创建 `users`。下列结构只表达认证领域的逻辑字段，不是可在 Dream 执行的 DDL；当前 `oauth_accounts`、`refresh_tokens`、`device_authorizations` 已属于统一 Dream Schema capability。后续字段、索引或约束必须先由 Admin Drizzle 以前向 migration 发布，Dream 只消费已发布 capability。
+当前本机事实由协调只读确认：Web配置同时出现`127.0.0.1:5173`与`localhost:5173`，Python为8765、Admin/Gateway为3000，Admin allowlist未覆盖所有Dream origin；这不是最终一致拓扑。实施必须选定一个显式Dream origin并对齐OAuth注册、Google callback、代理、Cookie/CORS/CSRF。gitignored用户环境不进commit。
 
-### oauth_accounts
+Voice WebSocket也必须校验origin并取得受限用户委托，不能将opaque handle当OAuth token或让旧query token绕开新验证。现行Next Route Handler不提供WebSocket upgrade；upgrade/proxy或一次性连接授权必须结合实际Voice路由和Admin契约确定，这是必需接入点。
 
-当前实现只保存 provider 绑定关系和过期时间；Google token 不落库。`*_encrypted` 字段为后续需要调用 Google API 时的加密存储预留。
+### JWT/JWKS与撤销
 
-```sql
-CREATE TABLE IF NOT EXISTS oauth_accounts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  provider TEXT NOT NULL,
-  provider_sub TEXT NOT NULL,
-  email TEXT NOT NULL,
-  access_token_encrypted TEXT,
-  refresh_token_encrypted TEXT,
-  id_token_encrypted TEXT,
-  expires_at DATETIME,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(provider, provider_sub),
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
+API仅接受Admin目标OAuth access token。固定issuer、audience、算法集合，必需时间、非空subject、scope按规范校验；拒绝Google access/ID token、旧HS256、任意身份头、错误资源token。成熟库按配置缓存JWKS，未知kid触发受控刷新，失败不绕过验证，不逐请求下载JWKS。缓存/刷新失败与是否可用已有合法key必须按Admin契约冻结。
 
-### refresh_tokens
+session/refresh由Admin撤销；access token短寿命、introspection/deny-list适用范围、服务委托寿命和logout对存量token影响需要明确。不能声称离线JWT提供即时撤销。
 
-```sql
-CREATE TABLE IF NOT EXISTS refresh_tokens (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  token_hash TEXT UNIQUE NOT NULL,
-  expires_at DATETIME NOT NULL,
-  revoked_at DATETIME,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-);
-```
+### Refresh与兼容退役
 
-### device_authorizations
+Next服务端使用Admin OAuth refresh grant，对同handle并发refresh做单次交换/原子替换。invalid grant清会话；网络故障保留恢复状态；未知兑换结果按Admin请求恢复规则处理。Dream停止`X-New-Access-Token`滑动自签。CLI public client不持secret，使用[Device OAuth](auth-device.md)。
 
-详见 `docs/architecture/auth-device.md`。该表保存 `device_code_hash`、`user_code_hash`、状态、轮询间隔、过期时间和确认用户。
-
-## 9. 用户绑定策略
-
-| 顺序 | 条件 | 行为 |
-| --- | --- | --- |
-| 1 | `oauth_accounts(provider='google', provider_sub=sub)` 存在 | 直接登录绑定用户 |
-| 2 | 未绑定，`OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true` 且 `users.email=email` 存在 | 给已有用户新增 Google 绑定 |
-| 3 | 未绑定，`ENABLE_OAUTH_SIGNUP=true` | 创建本地用户和 Google 绑定 |
-| 4 | 未绑定且不允许 signup | 返回 403，不创建用户 |
-
-约束：
-
-1. `email` 必须来自 Google userinfo，并统一小写。
-2. 如配置 `OAUTH_ALLOWED_DOMAINS`，仅允许域名匹配的邮箱登录。
-3. 本地密码用户和 Google 用户共享同一 `users.id`。
-4. Google `sub` 是稳定外部身份主键，不能用 email 代替。
-
-## 10. 登录成功后的 token 策略
-
-| Token | 来源 | 用途 | 存储 |
-| --- | --- | --- | --- |
-| Google `id_token` | Google | 证明 Google 身份 | 当前不落库；不提供给业务 API |
-| Google `access_token` | Google | 后续调用 Google API | 当前不落库；不提供给前端 |
-| 本系统 `access_token` | Python 后端 | 调业务 API | Web 可 cookie 或前端内存；设备端 JSON |
-| 本系统 `refresh_token` | Python 后端 | 换新 access token | 明文只给客户端一次，DB 只保存 hash |
-
-JWT payload：
-
-```json
-{
-  "sub": "123",
-  "email": "user@example.com",
-  "typ": "access",
-  "exp": 1710000000,
-  "iat": 1709999100
-}
-```
-
-## 11. 安全边界
-
-1. 不把 `GOOGLE_CLIENT_SECRET` 暴露给前端。
-2. 不把 Google `access_token` 当作本系统业务 token。
-3. OAuth callback 必须校验 state，交给 Authlib 维护。
-4. JWT 必须设置 `exp`，生产环境使用强 `JWT_SECRET`。
-5. refresh token 必须只存 hash，支持撤销。
-6. Google token 如保存必须加密。
-7. 生产环境 cookie 必须 `Secure` + `HttpOnly` + 合理 `SameSite`。
-8. CORS 只允许可信前端域名，跨域 cookie 时显式启用 credentials。
-9. 认证失败返回统一错误结构，不泄漏 provider token、sub、内部 SQL。
-10. 业务 API 不读取 Google token，只读取本系统 token。
-
-## 12. 错误处理
-
-| 场景 | HTTP | 错误 |
-| --- | --- | --- |
-| Google callback state/code 无效 | 400 | `invalid_oauth_callback` |
-| Google userinfo 缺 email/sub | 400 | `invalid_oauth_userinfo` |
-| 邮箱域名不允许 | 403 | `oauth_domain_not_allowed` |
-| 新用户但禁用 OAuth signup | 403 | `oauth_signup_disabled` |
-| 同邮箱合并关闭且邮箱已存在 | 409 | `email_already_exists` |
-| JWT 无效或过期 | 401 | `invalid_or_expired_token` |
-| refresh token 被撤销 | 401 | `invalid_refresh_token` |
-
-统一响应：
-
-```json
-{
-  "error": "oauth_signup_disabled",
-  "detail": "OAuth signup is disabled."
-}
-```
-
-## 13. 测试清单
-
-| 用例 | 预期 |
+| baseline依赖 | 目标与退役条件 |
 | --- | --- |
-| 前端点击 Google 登录 | 跳转 `/oauth/google/login`，后端 redirect 到 Google |
-| Google callback 新用户且 signup 开启 | 创建 `users` + `oauth_accounts`，签发系统 token |
-| Google callback 新用户且 signup 禁用 | 返回 403 |
-| `OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true` | 同邮箱本地用户绑定 Google |
-| `OAUTH_MERGE_ACCOUNTS_BY_EMAIL=false` 且邮箱存在 | 返回 409 |
-| 登录成功后 `/auth/me` | 返回当前用户 |
-| 登录成功后业务 API | `get_current_user` 能解析 `user_id` |
-| logout | cookie 删除，refresh token 撤销 |
-| Google token 保存 | 当前不保存；如后续启用，数据库中必须为 encrypted，不出现明文 secret |
+| login/register、Google login/callback | 保留密码登录/注册/Google产品能力，认证迁Admin并恢复OAuth上下文；旧路径如保留仅明确导航/协议转发/错误，不签token |
+| auth/me、api/me | 保持profile DTO，主体来自Admin、数据来自领域接口 |
+| logout、oauth/token、Device | 按规范撤销/导航或兼容转发，不保留authority |
+| AuthContext/getAuthToken、localStorage、fragment、renewal interceptor | 改同源会话API；清旧token，不清其他用户数据 |
+| FastAPI dependency/SSE、Node MCP Apps、stdio tools、后台任务 | 消费Admin主体/受限委托，保持实体绑定与取消语义 |
+| Gateway subject token/product auth | 保持计费PK；Admin规范定义服务投影，不作为Dream登录authority |
+| Authlib/外部MCP OAuth | 先盘点调用依赖，只退役Dream登录authority，保留仍用外部协议 |
 
-## 14. 业务 API 鉴权时序图
+## 正常流程、状态与失败反馈
 
-```mermaid
-sequenceDiagram
-    participant Client as Next.js Dream Web / Device Client
-    participant Middleware as Python Auth Middleware
-    participant API as Business API
-    participant DB as Database
+未登录 → 登录中 → callback校验 → 会话建立 → 已登录。拒绝、错误state、过期code返回未登录。refresh先保留现有会话，成功原子替换，invalid grant重新登录；Admin故障显示稍后重试，不解释为错误密码或删除数据。logout清本BFF handle并请求Admin撤销，保留失败范围，不增加重复确认。
 
-    Client->>Middleware: 请求业务 API（Authorization 或 cookie）
-    Middleware->>Middleware: 校验本系统 JWT
-    Middleware->>Middleware: 解析 user_id
-    Middleware->>DB: 加载用户
-    DB-->>Middleware: 用户记录
-    Middleware->>API: 注入 current_user
-    API->>DB: 按 user_id 查询业务数据
-    DB-->>API: 业务数据
-    API-->>Client: 返回结果
-```
+业务前校验身份/scope，Admin再校验实体权限。401、403、409、capability不足、unavailable、timeout分别保留语义。日志仅记录request ID、operation、状态，不记录token/code/secret/正文。
 
-## 15. 与 Device Flow 的衔接
+## 影响范围、验收与发布
 
-Device Flow 复用相同用户体系和 token 签发器：
+依据[完整数据清单](../exec/dream-admin-data-inventory.md)迁移。验收覆盖Google redirect/callback/state/PKCE、Cookie/CORS/CSRF/origin、JWT各字段与kid刷新、并发refresh/撤销、Device、实体权限、REST/SSE/Voice/Node/stdio/background委托和旧authority静态复查、公开生产入口。
 
-```mermaid
-sequenceDiagram
-    participant Device as Device Client
-    participant BE as Python Backend
-    participant Browser as User Browser
-    participant Google as Google OAuth
-    participant DB as Database
-
-    Device->>BE: POST /oauth/device/code
-    BE-->>Device: device_code / user_code / verification_uri
-    Browser->>BE: GET /oauth/device/verify
-    alt 未登录
-        Browser->>BE: GET /oauth/google/login
-        BE->>Google: redirect
-        Google-->>BE: callback
-        BE->>DB: 创建或绑定本地用户
-    end
-    Browser->>BE: POST /oauth/device/verify approve
-    BE->>DB: 标记 approved
-    Device->>BE: POST /oauth/token
-    BE-->>Device: 本系统 access_token / refresh_token
-```
-
----
+Luna runner执行确定性技术验证并返回cwd/command/exit/output。真实验收必须正常本机Dream/Admin/Gateway/PG、用户指定现有账户实体模型限次、正常Admin可见Run与日志；fixture不能替代。发布按Admin expand/API capability → Dream兼容切换 → backfill/validate → contract；两端共同确定session/密钥回滚策略。
