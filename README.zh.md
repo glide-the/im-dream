@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: public friendship/invitation operations use the sole Admin data authority. -->
 <!-- [Sync] 2026-09-15: synchronize Admin catalog refresh and retain concurrent domain HTTP. -->
 <!-- [Sync] 2026-09-15: public Deck Claude Plugin refs use Admin plus unchanged local artifact/CLI checks. -->
 <!-- [Sync] 2026-09-15: Browser session过期响应不修改状态，注销仅成功后清除。 -->
@@ -68,6 +69,8 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 公开用户偏好get/save已使用两项OAuth Admin operation。未保存仍返回`{}`；null保留已有字段，空对象/空文本仍是明确值，raw Python配置JSON保持数值类型。默认Voice、System策略、first-login写与后台上下文仍是独立领域。
 
 共享Admin客户端串行刷新catalog与检查capability。刷新失败清空ready，由下一请求重新加载；领域HTTP保持并发，每次调用独立携带actor、DTO和请求ID。
+
+公开邀请码、好友申请/关系与好友历史图片已使用九项typed Admin operation。Admin执行邀请码policy和原子状态转换；Dream保留整数ID、label、时间、错误及未知写入ID。其它数据库域与正常真实业务验收仍需完成。
 
 ## 你可以做什么
 

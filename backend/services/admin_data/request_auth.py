@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: register nine OAuth-only invitation/friendship operations.
 # [Input] Server-owned Admin client/verifier and explicit OAuth bearer credentials.
 # [Output] Immutable request actors with canonical user IDs and separate typed profile reads.
 # [Pos] Request authentication composition; no issuing, renewal, PG or ambient actor context.
@@ -27,6 +28,7 @@ from .session_data import SESSION_OPERATIONS
 from .deck_version_data import DECK_VERSION_OPERATIONS
 from .preferences_data import PREFERENCES_OPERATIONS
 from .deck_refs_data import DECK_REFS_OPERATIONS
+from .social_data import SOCIAL_OPERATIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +54,7 @@ class AdminRequestAuth:
     """Application-owned connections; each request checks current Admin identity."""
 
     def __init__(self, config: AdminDataConfig, *, client: AdminDataClient | None = None, verifier: AdminJWTVerifier | None = None) -> None:
-        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, *SESSION_OPERATIONS, *DECK_VERSION_OPERATIONS, *PREFERENCES_OPERATIONS, *DECK_REFS_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
+        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, *SESSION_OPERATIONS, *DECK_VERSION_OPERATIONS, *PREFERENCES_OPERATIONS, *DECK_REFS_OPERATIONS, *SOCIAL_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
         self._verifier = verifier or AdminJWTVerifier(config)
         self._owns_client = client is None
         self._owns_verifier = verifier is None

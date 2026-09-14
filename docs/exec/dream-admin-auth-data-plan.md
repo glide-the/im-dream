@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record Stage23 consumer implementation and independent technical gate. -->
 <!-- [Sync] 2026-09-15: record Stage22 RED reproduction and synchronized metadata implementation. -->
 <!-- [Input] User delegation, Agent.md, AGENTS.md, baseline 7d38715c, and Admin-owned contracts when published. -->
 <!-- [Output] Executable Dream migration plan, dependency gates, and exact evidence inventory. -->
@@ -457,3 +458,23 @@ Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offtur
 保留原database九helper的名字/签名以明确拒绝旧路径，移除它们的生产SQL并在任何连接前抛安全AdminDataError；不把任意user_id转为服务权限，不制造兼容DB fallback。其它daily-picture/导入SQL仍在清单，不借本阶段删除程序/测试/历史原文。新功能稿按背景问题/目标边界/概念规则写正常、状态、失败、影响、验收；非配置好友关系明确无revision，不假造CAS字段。现行sequence只改好友模块并引用已字节保存的原十模块history。
 
 同步受影响file headers/nearestfolders/中英README/API/架构/清单，避开协调own20docs。Luna用actualFastAPI/RequestAuth/Pydantic/MockTransport/DBfence验证全部九路由、原closed错误/null/empty/UTF8/数字时间/scopes/strict actor拒绝/hash drift/unknown原receipt及无blindretry，技术DTO与实际canonical/hash逐项比较。无PG/network/model/真实账户/Browser/服务/Runtime/共享FS，不改版本pins、TMPDIR、Agent/SSE资源语义；正常真实业务仍待既有parent验收。
+
+阶段23实现状态：nineactual hashes/identity-unified已注册，公开九functions无database import/call；closed rawcode/decimalPK/nullable ISO与原projection/error/null图片保持，Admin控制policy/locks/TX。旧database九helper保留签名并在I/O前拒绝；current social design/sequence/history索引同步。Luna provider-free gate待运行；未触碰PG/account/network/model/service/Browser/FS/Runtime，全部目标仍active。
+
+阶段23首轮技术回执：六文件命令exit2，collection五文件受同一PydanticUserError阻塞，未执行用例；discriminator字段不允许mode=before field validator。root改为各分支model-before校验，仍严格拒绝非boolean，不取消union/闭集。另将新receipt fixture改为原status/result DTO，生产receipt未改。static9hash/requirements/AST comparator0，doc32files/243links/228inventory/history3/README/6sequence0，diff0；fresh同批待验。
+
+阶段23 fresh技术回执：Luna因usage limit停止，未返回修复后回执；primary直接运行原六文件命令 `257 passed in 2.30s` exit0，无failure/skip。runtime9 closed fields/type/null/enum、canonical/hash/requirements/ISO函数与旧9helper签名/其它database函数AST comparator最终0；custom checker初次按未sort canonical/empty required/ISO regex表达差异误拒，修正checker表示处理，未改产品或测试断言。另发现actualtimeline descriptor minimum=-MAX而actualZod链非负，Python保持0；记录Adminmetadata修正缺口而非假称bounds完全一致。actualAdmin安装Zod原链pure验证exit0：runtime_negative_accepted=false/runtime_zero_accepted=true/descriptor_minimum=-9007199254740991，无DB/Provider。doc checker33files/247links/228inventory/history3SHA/README parity/6sequence计数0fail（未render），diff0。无PG/network/model/account/Browser/services/SDKRuntime，未用reset credit/改依赖；Luna首轮collection失败仍保留。
+
+## 阶段 24：公开 Voice CRUD 四项消费端
+
+### Optimized Prompt · 2026-09-15
+
+消费actual已发布Deck19中的voice.create/update/delete/collect，复用统一StrictDTO、EntityId、SafeInteger、原JSON object helper与Deck version四schema exact gate，不能迁移成逐SQL远程调用。仅替换voices.py四公开Voice路由与其typed request模型，Deck十操作、default plugin evidence/安装catalog/其他后台仍按当前依赖开放。Admin控制ownedDeck/Voice行锁、创建默认Memory与order、内容/偏好/thread语义、draft revision及原UUID回执，不在Dream再写事务或state算法。
+
+公共create optional/null→wire requirednullable；原空Memory create使用Admin显式policy默认。update原None省略保留已保存值，emptytext/emptydict/false/0仍传，memory_workspace_config对象以Python原json.dumps（update sort_keys沿用原行为）产生rawstring，保留float/negativezero/bigint；公开finite/对象校验拒绝NaN/Inf且无原body echo，body禁止actor/id/evidence。只原thread_id设置由Admin新实体权限边界校验，不持scope更宽的Runtime purpose。四返回保留voice_id或success:true，changed:false原404；closed已知domain错误映射原create/fork安全400 detail，其他依原统一code/status/unknown ID，不使用上游message。
+
+Actor只有current request OAuth；missing/hash/schema/domain失败在公开入口与Admin独立failclosed。unknown只保留同operation原UUIDreceipt，无自动写retry。数据库四helper尚有内部/default/fixture消费者时保留明确清单依赖，不能借公开迁移破坏后台或清理程序/测试。同步受影响folder/file headers、README镜像、API/现行Voice功能稿与清单，保持现行/历史各自索引。
+
+Luna actualFastAPI/Auth/DTO/MockTransport/DBfence验证四public入口、requirednull/optional省略/empty/false/zero/Unicode/rawJSON数值、Memory默认不由Dream制造、actor字段/finite拒绝、fouractualhash/physicalcap、unknown原receipt、单POST/no-blindretry，以及原Deck routes回归不动FS/default行为。Provider-free，无PG/network/model/正常账户/Browser/用户服务/SDKRuntime/安装，不改变Agent/资源/SSE/lease/TMPDIR或pins。正常真实业务与全部生产DB仍开放。
+
+阶段24复用细化（shared source改动前）：统一transport会调用完整model_dump，optional wire字段必须只序列化model_fields_set，不能把默认None注入wire。将既有EditorDTO的present-fields wrap serializer提取为ChatStrictDTO同目录共享PresentFieldsDTO基类；Editor保留自身null检查，VoiceUpdates只复用序列化并按actualnullable允许显式null。原Editor/session合同需同批回归，不更改全局parser/model_dump或Other DTO。

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-15: nine old social helpers refuse before I/O; public friends use Admin DTOs.
 # [Input] Consume PostgreSQL connections, filesystem paths, JSON data, and optional session text extraction,
 #         and memory workspace defaults.
 # [Output] Provide persistence helpers for users, sessions, decks, voices, reports,
@@ -2479,33 +2480,8 @@ def get_daily_picture_full(user_id: int, date: str):
 
 
 def get_friend_picture_full(user_id: int, friend_id: int, date: str):
-    """Get full resolution image for a friend's specific date if users are friends."""
-    db = get_db()
-    try:
-        friendship = db.execute("""
-        SELECT id FROM friendships
-        WHERE status = 'accepted' AND (
-          (user_id = %s AND friend_id = %s) OR
-          (user_id = %s AND friend_id = %s)
-        )
-        """, (user_id, friend_id, friend_id, user_id)).fetchone()
-
-        if not friendship:
-            return None
-
-        row = db.execute("""
-        SELECT image_base64
-        FROM daily_pictures
-        WHERE user_id = %s AND date = %s
-        ORDER BY created_at DESC
-        LIMIT 1
-        """, (friend_id, date)).fetchone()
-
-        if row:
-            return row['image_base64']
-        return None
-    finally:
-        db.close()
+    """Retired: use the current-actor Admin social DTO consumer."""
+    _retired_social_data_access()
 
 # ========== User Preferences ==========
 
@@ -2738,313 +2714,42 @@ def import_user_data(user_id: int, sessions: list, pictures: list, preferences: 
 
 # ========== Friend System ==========
 
+def _retired_social_data_access() -> None:
+    from services.admin_data.errors import AdminDataError
+    raise AdminDataError("ADMIN_DATA_ACCESS_RETIRED", 503)
+
+
 def generate_invite_code(user_id: int) -> dict:
-    """
-    Generate a new friend invite code (6 chars, 7 days validity).
-    Returns: {code, expires_at}
-    """
-    import random
-    import string
-    from datetime import datetime, timedelta
-
-    db = get_db()
-    try:
-        # Generate unique 6-character code
-        while True:
-            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-            # Check if code already exists and is not expired
-            existing = db.execute(
-                "SELECT code FROM friend_invites WHERE code = %s AND expires_at > CURRENT_TIMESTAMP",
-                (code,)
-            ).fetchone()
-            if not existing:
-                break
-
-        expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-
-        db.execute("""
-        INSERT INTO friend_invites (code, user_id, expires_at)
-        VALUES (%s, %s, %s)
-        """, (code, user_id, expires_at))
-
-        db.commit()
-        return {"code": code, "expires_at": expires_at}
-    finally:
-        db.close()
+    """Retired: use the current-actor Admin social DTO consumer."""
+    _retired_social_data_access()
 
 def use_invite_code(code: str, requesting_user_id: int) -> dict:
-    """
-    Use an invite code to send a friend request.
-    Returns: {success, friend_request_id, inviter_id, inviter_name} or {success: False, error}
-    """
-    from datetime import datetime
-
-    db = get_db()
-    try:
-        # Validate invite code
-        invite = db.execute("""
-        SELECT user_id, expires_at, used_by
-        FROM friend_invites
-        WHERE code = %s
-        """, (code,)).fetchone()
-
-        if not invite:
-            return {"success": False, "error": "Invalid invite code"}
-
-        if invite['used_by']:
-            return {"success": False, "error": "Invite code already used"}
-
-        invite_expires_at = _parse_sql_datetime(invite['expires_at'])
-        if invite_expires_at is None:
-            return {"success": False, "error": "Invite code expired"}
-        if invite_expires_at.tzinfo is None:
-            invite_expires_at = invite_expires_at.replace(tzinfo=timezone.utc)
-        if invite_expires_at < datetime.now(timezone.utc):
-            return {"success": False, "error": "Invite code expired"}
-
-        inviter_id = invite['user_id']
-
-        if inviter_id == requesting_user_id:
-            return {"success": False, "error": "Cannot add yourself as friend"}
-
-        # Check if friendship already exists
-        existing = db.execute("""
-        SELECT id, status FROM friendships
-        WHERE (user_id = %s AND friend_id = %s) OR (user_id = %s AND friend_id = %s)
-        """, (requesting_user_id, inviter_id, inviter_id, requesting_user_id)).fetchone()
-
-        if existing:
-            if existing['status'] == 'accepted':
-                return {"success": False, "error": "Already friends"}
-            elif existing['status'] == 'pending':
-                return {"success": False, "error": "Friend request already pending"}
-
-        # Get inviter's display name
-        inviter = db.execute(
-            "SELECT display_name, email FROM users WHERE id = %s",
-            (inviter_id,)
-        ).fetchone()
-
-        # Create friendship request (requesting_user sends request to inviter)
-        cursor = db.execute("""
-        INSERT INTO friendships (user_id, friend_id, status)
-        VALUES (%s, %s, 'pending')
-        RETURNING id
-        """, (requesting_user_id, inviter_id))
-
-        friend_request_id = int(cursor.fetchone()["id"])
-
-        # Mark invite as used
-        db.execute("""
-        UPDATE friend_invites
-        SET used_by = %s, used_at = CURRENT_TIMESTAMP
-        WHERE code = %s
-        """, (requesting_user_id, code))
-
-        db.commit()
-
-        return {
-            "success": True,
-            "friend_request_id": friend_request_id,
-            "inviter_id": inviter_id,
-            "inviter_name": inviter['display_name'] or inviter['email']
-        }
-    finally:
-        db.close()
+    """Retired: use the current-actor Admin social DTO consumer."""
+    _retired_social_data_access()
 
 def get_friend_requests(user_id: int) -> list:
-    """
-    Get all pending friend requests FOR this user (others wanting to be friends).
-    Returns: [{id, requester_id, requester_name, created_at}]
-    """
-    db = get_db()
-    try:
-        rows = db.execute("""
-        SELECT f.id, f.user_id as requester_id, u.display_name, u.email, f.created_at
-        FROM friendships f
-        JOIN users u ON f.user_id = u.id
-        WHERE f.friend_id = %s AND f.status = 'pending'
-        ORDER BY f.created_at DESC
-        """, (user_id,)).fetchall()
-
-        return [{
-            "id": row['id'],
-            "requester_id": row['requester_id'],
-            "requester_name": row['display_name'] or row['email'],
-            "created_at": row['created_at']
-        } for row in rows]
-    finally:
-        db.close()
+    """Retired: use the current-actor Admin social DTO consumer."""
+    _retired_social_data_access()
 
 def accept_friend_request(request_id: int, user_id: int) -> dict:
-    """
-    Accept a friend request. user_id must be the friend_id in the request.
-    Returns: {success, error%s}
-    """
-    db = get_db()
-    try:
-        # Verify this request is for current user and is pending
-        request = db.execute("""
-        SELECT user_id, friend_id, status
-        FROM friendships
-        WHERE id = %s
-        """, (request_id,)).fetchone()
-
-        if not request:
-            return {"success": False, "error": "Request not found"}
-
-        if request['friend_id'] != user_id:
-            return {"success": False, "error": "Permission denied"}
-
-        if request['status'] != 'pending':
-            return {"success": False, "error": f"Request already {request['status']}"}
-
-        # Update status to accepted
-        db.execute("""
-        UPDATE friendships
-        SET status = 'accepted', updated_at = CURRENT_TIMESTAMP
-        WHERE id = %s
-        """, (request_id,))
-
-        db.commit()
-        return {"success": True}
-    finally:
-        db.close()
+    """Retired: use the current-actor Admin social DTO consumer."""
+    _retired_social_data_access()
 
 def reject_friend_request(request_id: int, user_id: int) -> dict:
-    """
-    Reject a friend request. user_id must be the friend_id in the request.
-    Returns: {success, error%s}
-    """
-    db = get_db()
-    try:
-        # Verify this request is for current user and is pending
-        request = db.execute("""
-        SELECT user_id, friend_id, status
-        FROM friendships
-        WHERE id = %s
-        """, (request_id,)).fetchone()
-
-        if not request:
-            return {"success": False, "error": "Request not found"}
-
-        if request['friend_id'] != user_id:
-            return {"success": False, "error": "Permission denied"}
-
-        if request['status'] != 'pending':
-            return {"success": False, "error": f"Request already {request['status']}"}
-
-        # Update status to rejected
-        db.execute("""
-        UPDATE friendships
-        SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
-        WHERE id = %s
-        """, (request_id,))
-
-        db.commit()
-        return {"success": True}
-    finally:
-        db.close()
+    """Retired: use the current-actor Admin social DTO consumer."""
+    _retired_social_data_access()
 
 def get_friends(user_id: int) -> list:
-    """
-    Get all accepted friends for this user.
-    Returns: [{friend_id, friend_name, friend_email, since}]
-    """
-    db = get_db()
-    try:
-        # Get friends where I sent the request
-        rows1 = db.execute("""
-        SELECT f.friend_id as friend_id, u.display_name, u.email, f.updated_at
-        FROM friendships f
-        JOIN users u ON f.friend_id = u.id
-        WHERE f.user_id = %s AND f.status = 'accepted'
-        """, (user_id,)).fetchall()
-
-        # Get friends where they sent the request
-        rows2 = db.execute("""
-        SELECT f.user_id as friend_id, u.display_name, u.email, f.updated_at
-        FROM friendships f
-        JOIN users u ON f.user_id = u.id
-        WHERE f.friend_id = %s AND f.status = 'accepted'
-        """, (user_id,)).fetchall()
-
-        all_friends = []
-        for row in rows1 + rows2:
-            all_friends.append({
-                "friend_id": row['friend_id'],
-                "friend_name": row['display_name'] or row['email'],
-                "friend_email": row['email'],
-                "since": row['updated_at']
-            })
-
-        # Sort by most recent first
-        all_friends.sort(key=lambda x: x['since'], reverse=True)
-
-        return all_friends
-    finally:
-        db.close()
+    """Retired: use the current-actor Admin social DTO consumer."""
+    _retired_social_data_access()
 
 def remove_friend(user_id: int, friend_id: int) -> dict:
-    """
-    Remove a friend relationship.
-    Returns: {success, error%s}
-    """
-    db = get_db()
-    try:
-        # Delete the friendship (bidirectional - delete either direction)
-        result = db.execute("""
-        DELETE FROM friendships
-        WHERE status = 'accepted' AND (
-          (user_id = %s AND friend_id = %s) OR
-          (user_id = %s AND friend_id = %s)
-        )
-        """, (user_id, friend_id, friend_id, user_id))
-
-        if result.rowcount == 0:
-            return {"success": False, "error": "Friendship not found"}
-
-        db.commit()
-        return {"success": True}
-    finally:
-        db.close()
+    """Retired: use the current-actor Admin social DTO consumer."""
+    _retired_social_data_access()
 
 def get_friend_timeline(user_id: int, friend_id: int, limit: int = 30) -> list:
-    """
-    Get friend's timeline pictures (only if they are friends).
-    Returns: [{date, base64, prompt, created_at}] or None if not friends
-    """
-    db = get_db()
-    try:
-        # Check if they are friends
-        friendship = db.execute("""
-        SELECT id FROM friendships
-        WHERE status = 'accepted' AND (
-          (user_id = %s AND friend_id = %s) OR
-          (user_id = %s AND friend_id = %s)
-        )
-        """, (user_id, friend_id, friend_id, user_id)).fetchone()
-
-        if not friendship:
-            return None  # Not friends, no access
-
-        # Get friend's timeline pictures (thumbnails)
-        rows = db.execute("""
-        SELECT date, COALESCE(thumbnail_base64, image_base64) as base64, prompt, created_at
-        FROM daily_pictures
-        WHERE user_id = %s
-        ORDER BY date DESC
-        LIMIT %s
-        """, (friend_id, limit)).fetchall()
-
-        return [{
-            "date": row['date'],
-            "base64": row['base64'],
-            "prompt": row['prompt'],
-            "created_at": row['created_at']
-        } for row in rows]
-    finally:
-        db.close()
+    """Retired: use the current-actor Admin social DTO consumer."""
+    _retired_social_data_access()
 
 def get_daily_pictures_range(user_id: int, start_date: Optional[str], end_date: Optional[str], limit: int = 30) -> list[dict]:
     """

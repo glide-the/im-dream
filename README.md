@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: public friendship/invitation operations use the sole Admin data authority. -->
 <!-- [Sync] 2026-09-15: synchronize Admin catalog refresh and retain concurrent domain HTTP. -->
 <!-- [Sync] 2026-09-15: public Deck Claude Plugin refs use Admin plus unchanged local artifact/CLI checks. -->
 <!-- [Sync] 2026-09-15: discard stale Browser session results and retain success-only logout. -->
@@ -69,6 +70,8 @@ Public Deck Claude Plugin refs now use Admin list/prepare/replace. Dream verifie
 Public user preference get/save now use two OAuth-bound Admin operations. Missing records still return `{}`; null preserves saved fields, empty objects and strings remain values, and raw Python config JSON keeps numeric types. Default voices, system policy, first-login writes and background context remain separate domains.
 
 The shared Admin client serializes catalog refresh and capability checks. Failed refresh clears readiness for the next request to reload; domain HTTP remains concurrent and keeps each actor, DTO and request ID separate.
+
+Public invitations, friend requests, relationships and friend picture reads now use nine typed Admin operations. Admin owns invitation policy and atomic transitions; Dream preserves integer IDs, labels, timestamps, errors and unknown write IDs. Other database domains and normal business acceptance remain open.
 
 ## What you can do
 

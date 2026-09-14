@@ -1,6 +1,7 @@
+<!-- [Sync] 2026-09-15: replace social flows with Admin while preserving the original in history. -->
 <!-- [Input] Module business flows, current Admin consumers and byte-preserved pre-migration sequence source. -->
 <!-- [Output] Module flow reference with explicit current ownership and retained migration dependencies. -->
-<!-- [Pos] Sequence index; focused current designs own authentication, Session, Deck and preferences rules. -->
+<!-- [Pos] Sequence index; focused current designs own authentication, Session, Deck, preferences and social rules. -->
 <!-- [Sync] 2026-09-15: public user preferences use Admin; retain original whole source in history. -->
 
 认证/Session/Deck的现行程序行为以[Admin交互](../architecture/admin-auth-data-interaction.md)和各功能稿为准；本稿其余尚未更新的旧issuer/直接SQL说明仅是迁移依赖，不作为现行规范。[原十模块时序原文](history/pre-admin-user-preferences-20260915/sequence-diagrams.md)字节保持；用户偏好正常、状态、失败和验收见[现行稿](user-preferences-current.md)。
@@ -429,73 +430,55 @@ sequenceDiagram
 
 ## 9. 好友系统模块
 
-### 9.1 生成邀请码 & 接受好友请求
+正常流程、状态、失败及验收以[现行稿](social-friendship-current.md)为准；旧SQL/锁缺口说明见已保留的[原文](history/pre-admin-user-preferences-20260915/sequence-diagrams.md)。
+
+### 9.1 生成邀请码与处理申请
 
 ```mermaid
 sequenceDiagram
-    actor UserA as 用户 A（邀请方）
-    actor UserB as 用户 B（被邀请方）
-    participant FE_A as Frontend A
-    participant FE_B as Frontend B
-    participant API as Backend API
-    participant DB as database.py
-
-    UserA->>FE_A: 点击「生成邀请码」
-    FE_A->>API: POST /api/friends/invite/generate
-    API->>DB: generate_invite_code(user_id_A)
-    Note over DB: 生成 6 位码，有效期 7 天
-    DB-->>API: {code, expires_at}
-    API-->>FE_A: 邀请码
-    FE_A-->>UserA: 显示邀请码
-
-    UserA->>UserB: 分享邀请码（线下/其他渠道）
-
-    UserB->>FE_B: 输入邀请码并提交
-    FE_B->>API: POST /api/friends/invite/use {code}
-    API->>DB: use_invite_code(code, user_id_B)
-    Note over DB: 验证码有效性，创建 pending 好友请求
-    DB-->>API: {success, request_id}
-    API-->>FE_B: 好友请求已发送
-
-    UserA->>FE_A: 打开好友请求列表
-    FE_A->>API: GET /api/friends/requests
-    API->>DB: get_friend_requests(user_id_A)
-    DB-->>API: [{request_id, from_user, status: "pending"}]
-    API-->>FE_A: 好友请求列表
-
-    UserA->>FE_A: 点击「接受」
-    FE_A->>API: POST /api/friends/requests/{request_id}/accept
-    API->>DB: accept_friend_request(request_id, user_id_A)
-    Note over DB: 更新 friendship status = 'accepted'
-    DB-->>API: {success}
-    API-->>FE_A: 好友关系已建立
+    actor A as 邀请方
+    actor B as 申请方
+    participant F as Dream Browser/BFF
+    participant D as Dream public routes/DTO client
+    participant P as Admin OAuth/domain/Drizzle
+    A->>F: 生成邀请码
+    F->>D: POST /api/friends/invite/generate
+    D->>P: 当前OAuth + service credential + UUID
+    P->>P: server policy生成code/expiry，事务回执
+    P-->>A: 原code/expires_at
+    A->>B: 线下分享code
+    B->>D: POST /api/friends/invite/use {code}
+    D->>P: exact UseInviteDTO + 当前OAuth + UUID
+    P->>P: 邀请码/pair锁、权限与状态检查
+    P->>P: pending + used_by/used_at + 原receipt同TX
+    P-->>D: closed success/result 或原业务error
+    D-->>B: 原整数ID/label或400 detail
+    A->>D: GET requests；POST request accept/reject
+    D->>P: 当前recipient OAuth + target requestID + UUID
+    P->>P: pair/行锁，pending只一个状态转换
+    P-->>A: 原success或400 detail
 ```
 
-### 9.2 查看好友时间线
+### 9.2 查看历史图片
 
 ```mermaid
 sequenceDiagram
-    actor User as 用户
-    participant FE as Frontend (FriendsView)
-    participant API as Backend API
-    participant DB as database.py
-
-    User->>FE: 点击某好友，查看其时间线
-    FE->>API: GET /api/friends/{friend_id}/timeline?limit=30
-    API->>DB: get_friend_timeline(user_id, friend_id, limit)
-    Note over DB: 校验双方为好友关系，获取缩略图列表
-    DB-->>API: [{date, thumbnail_base64, prompt}, ...]
-    API-->>FE: {pictures: [...]}
-    FE-->>User: 展示好友时间线缩略图
-
-    User->>FE: 点击某张缩略图，查看原图
-    FE->>API: GET /api/friends/{friend_id}/pictures/{date}/full
-    API->>DB: get_friend_picture_full(user_id, friend_id, date)
-    Note over DB: 再次校验好友关系后返回全图
-    DB-->>API: full_image_base64
-    API-->>FE: {image_base64}
-    FE-->>User: 展示全尺寸图片
+    actor U as 用户
+    participant D as Dream public routes/DTO client
+    participant P as Admin domain/Drizzle
+    U->>D: GET /api/friends/{friend_id}/timeline?limit=30
+    D->>P: current OAuth + decimal friendID + limit
+    P->>P: accepted关系检查，thumbnail/image fallback排序
+    P-->>D: pictures列表或null
+    D-->>U: 原图片字段或403
+    U->>D: GET /api/friends/{friend_id}/pictures/{date}/full
+    D->>P: current OAuth + friendID/date
+    P->>P: 再检查accepted关系与指定图片
+    P-->>D: image_base64或null/empty
+    D-->>U: 原全图wrapper或404
 ```
+
+写unknown只查同operation原UUID的receipt，absent不证明rollback或触发新写；其它模块旧流程仍是明确迁移依赖。
 
 ---
 

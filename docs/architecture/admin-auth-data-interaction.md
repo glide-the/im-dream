@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: define social identity, policy, original errors and unknown receipts. -->
 <!-- [Sync] 2026-09-15: specify shared catalog synchronization, failed refresh and per-request concurrent dispatch. -->
 <!-- [Sync] 2026-09-15: specify prepare/local verification/source recheck and unknown refs writes. -->
 <!-- [Sync] 2026-09-15: specify abort/read identity and success-only logout snapshot ownership. -->
@@ -16,6 +17,8 @@
 # Dream / Admin 认证与数据交互
 
 共享Client以同一catalog锁覆盖readiness、完整refresh与operation广告检查，调用方不会读取加载期间的空广告。fresh成功后按exact合同判断；失败仍清空ready/广告，下一RequestAuth重新加载。领域HTTP在短检查锁外执行，DTO/token/request_id只属于该请求；多个refresh按获取锁顺序完成，不互相覆盖。receipt维持原二态、原UUID且不自动重发。
+
+公开好友九操作只用current OAuth与identity/unified exact gate，Admin从subject确定actor，URL仅选择friend/request。Admin唯一执行邀请码policy/pair与code锁/状态转换/原receipt；Dream保留公开int PK/nullable微秒/label/thumbnail/full字段、closed业务400、timeline null403/full falsey404。写unknown原UUID只查receipt，无retry；旧database九helper在I/O前拒绝，其它图片/import/后台SQL未据此关闭。完整功能规则与验收见[好友现行稿](../design/social-friendship-current.md)。
 
 ## 背景与问题
 
