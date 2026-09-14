@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: validate code-owned closed Deck deletion reasons alongside existing conflict revisions.
 # [Input] Admin canonical authentication/service DTO definitions supplied on 2026-09-14.
 # [Output] Strict Pydantic request/response DTOs, separate from database entities.
 # [Pos] Unified Admin consumer wire-schema boundary, preserving canonical IDs as strings.
@@ -141,17 +142,24 @@ class DeckVersionConflictDetailsDTO(StrictDTO):
     current_version: int | None = Field(ge=0, le=9_007_199_254_740_991)
 
 
+class DeckDeleteBlockedDetailsDTO(StrictDTO):
+    reason: Literal["child_decks", "related_threads", "runtime_history", "referenced_records"]
+
+
 class ErrorDTO(StrictDTO):
     code: Identifier
     message: str
-    details: DeckVersionConflictDetailsDTO | None = None
+    details: DeckVersionConflictDetailsDTO | DeckDeleteBlockedDetailsDTO | None = None
 
     @model_validator(mode="before")
     @classmethod
     def validate_details_owner(cls, value):
         if isinstance(value, dict) and "details" in value:
-            if value.get("code") != "DECK_VERSION_CONFLICT" or value["details"] is None:
+            owner = {"DECK_VERSION_CONFLICT": DeckVersionConflictDetailsDTO,
+                     "DECK_DELETE_BLOCKED": DeckDeleteBlockedDetailsDTO}.get(value.get("code"))
+            if owner is None or value["details"] is None:
                 raise ValueError("Unsupported domain error details")
+            owner.model_validate(value["details"])
         return value
 
 

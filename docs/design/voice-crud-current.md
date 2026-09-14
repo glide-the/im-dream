@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Input] Actual four Admin Voice contracts and original public Voice request/response fields. -->
 <!-- [Output] Current Voice creation/update/delete/collection, Memory and revision behavior. -->
 <!-- [Pos] Public Voice mutation design; Deck/default/install/background migration remains separate. -->
@@ -12,7 +13,7 @@
 
 仅迁移POST `/api/voices`、PUT/DELETE `/api/voices/{voice_id}`、POST `/api/voices/{voice_id}/fork`。Admin已发布voice.create/update/delete/collect，必须匹配identity/unified/canonical-storage/content-versions四项exact schema和actual operation hash。全部用户OAuth；Runtime Thread/Run/Editor委托不能管理Voice。
 
-Deck CRUD/default/plugin evidence、其他Voice读取/运行消费及原database内部/fixture SQL继续列入迁移清单。本阶段不改变Agent、资源、SSE、共享文件、Runtime配置或版本pins，也不删除历史程序/测试。
+其余Deck read/create/default/plugin evidence、其他Voice读取/运行消费及原database内部/fixture SQL继续列入迁移清单。本阶段不改变Agent、资源、SSE、共享文件、Runtime配置或版本pins，也不删除历史程序/测试。
 
 ## 概念与规则
 
@@ -45,6 +46,6 @@ write timeout/断连/错误响应保留original UUID/outcome_unknown。恢复只
 
 ### 影响范围与验收
 
-[四公开路由](../../backend/routers/voices.py)、RequestAuth注册、wire/public DTO与可选序列化共享基类受影响；同模块Deck函数保持现有行为，未迁移SQL明确保留依赖。[测试](../../backend/tests/test_admin_voice_routes.py)使用实际FastAPI/RequestAuth/DTO/MockTransport、fenced Dream DB，验证nullable/省略/empty/false/zero、原rawJSON/数值、四hash/schema、safe错误/scopes、原receipt和单POST。原Editor/Session与Deck default/sharing合同同批回归。
+[四公开路由](../../backend/routers/voices.py)、RequestAuth注册、wire/public DTO与可选序列化共享基类受影响；同模块Deck五write已另按[Deck现行稿](deck-mutations-current.md)迁移；其余Deck函数保持现有行为，未迁移SQL明确保留依赖。[测试](../../backend/tests/test_admin_voice_routes.py)使用实际FastAPI/RequestAuth/DTO/MockTransport、fenced Dream DB，验证nullable/省略/empty/false/zero、原rawJSON/数值、四hash/schema、safe错误/scopes、原receipt和单POST。原Editor/Session与Deck default/sharing合同同批回归。
 
 技术PASS不代表正常本机Browser/真实账户/模型验收。真实业务仍需在普通服务与数据库中保留Run、日志及Admin可见记录供复核。

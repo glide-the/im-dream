@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: share the unchanged four-schema gate with Voice and Deck mutation consumers.
 # [Input] Five actual Admin Deck content-version hashes, schema capabilities and typed request OAuth.
 # [Output] Capability-gated original-ID consumers with entity checks and raw snapshot projection.
 # [Pos] Deck content-version HTTP adapter; Admin owns all CAS, canonicalization and durable transactions.
@@ -29,15 +30,19 @@ CONTENT_DETAIL = DomainOperation(OperationCapabilityDTO(name="deck-content.detai
 DECK_VERSION_OPERATIONS = (CONTENT_STATE, CONTENT_PREVIEW, CONTENT_COMMIT, CONTENT_HISTORY, CONTENT_DETAIL)
 
 
+def require_deck_capabilities(client: AdminDataClient, request_id: str) -> None:
+    capabilities = client.capabilities(request_id)
+    schemas = {item.capability: item for item in capabilities.schema_capabilities}
+    if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in DECK_VERSION_SCHEMA_REQUIREMENTS):
+        raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+
+
 class AdminDeckVersionData:
     def __init__(self, client: AdminDataClient):
         self._client = client
 
     def _execute(self, operation, input_dto, request_id, access_token):
-        capabilities = self._client.capabilities(request_id)
-        schemas = {item.capability: item for item in capabilities.schema_capabilities}
-        if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in DECK_VERSION_SCHEMA_REQUIREMENTS):
-            raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+        require_deck_capabilities(self._client, request_id)
         result = self._client.execute(operation, input_dto, request_id, access_token=access_token)
         if result.deck_id != input_dto.deck_id:
             raise invalid_response(request_id, write=operation.capability.kind == "write")

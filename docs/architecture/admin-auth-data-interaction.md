@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: define Voice current OAuth/Memory/optional fields and mutation receipts. -->
 <!-- [Sync] 2026-09-15: define social identity, policy, original errors and unknown receipts. -->
 <!-- [Sync] 2026-09-15: specify shared catalog synchronization, failed refresh and per-request concurrent dispatch. -->
@@ -22,6 +23,8 @@
 公开好友九操作只用current OAuth与identity/unified exact gate，Admin从subject确定actor，URL仅选择friend/request。Admin唯一执行邀请码policy/pair与code锁/状态转换/原receipt；Dream保留公开int PK/nullable微秒/label/thumbnail/full字段、closed业务400、timeline null403/full falsey404。写unknown原UUID只查receipt，无retry；旧database九helper在I/O前拒绝，其它图片/import/后台SQL未据此关闭。完整功能规则与验收见[好友现行稿](../design/social-friendship-current.md)。
 
 公开Voice四mutation只持current OAuth，exact四schema/actualhash；create optional→requirednullable，update原None省略/emptyfalsezero保留，Python rawMemory数值与原sort规则不经JS重编码。Admin执行defaults/order/ownedDeck-Voice锁/内容与thread/draft语义/TX回执；changed:false原404/closed create-fork原400，unknown原UUID无retry。Editor present-fields serializer提取共享base，Editor nullable检查不变。完整规则见[Voice现行稿](../design/voice-crud-current.md)。
+
+公开Deck update/delete/publish/collect/sync使用五项当前OAuth Admin写操作与four exact schema。Admin执行锁、字段比较/draft、发布切换/parent detach、收藏复制/计数、同步及原receipt单事务；Dream保留None省略/空falsezero与原结果/status，不再预读发布或拆分收藏。错误详情按code仅保留Version两revision或Delete四reason；unknown原UUID无retry。详见[Deck写操作现行稿](../design/deck-mutations-current.md)。
 
 ## 背景与问题
 

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: public Voice mutations consume four Admin commands with raw Memory JSON. -->
 <!-- [Sync] 2026-09-15: public friendship/invitation operations use the sole Admin data authority. -->
 <!-- [Sync] 2026-09-15: synchronize Admin catalog refresh and retain concurrent domain HTTP. -->
@@ -73,6 +74,8 @@ Public user preference get/save now use two OAuth-bound Admin operations. Missin
 The shared Admin client serializes catalog refresh and capability checks. Failed refresh clears readiness for the next request to reload; domain HTTP remains concurrent and keeps each actor, DTO and request ID separate.
 
 Public invitations, friend requests, relationships and friend picture reads now use nine typed Admin operations. Admin owns invitation policy and atomic transitions; Dream preserves integer IDs, labels, timestamps, errors and unknown write IDs. Other database domains and normal business acceptance remain open.
+
+Public Deck update/delete/publication/collection/parent-sync now use five Admin commands. Original results and dependency-conflict messages remain; Admin owns locks and transactions, and unknown writes retain their original request ID. [Current rules](docs/design/deck-mutations-current.md).
 
 Public Voice create/update/delete/collect now use four Admin commands. Raw Memory JSON and omitted/null/empty fields retain their original behavior; Admin owns defaults, order, locks and draft changes. Other Deck and background data consumers still require migration.
 

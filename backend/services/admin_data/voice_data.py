@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: reuse the unchanged shared Deck four-schema readiness check.
 # [Input] Actual four Admin Voice contracts, public request fields and current OAuth.
 # [Output] Closed raw Memory JSON commands and original Voice mutation results.
 # [Pos] Public Voice consumer; Admin owns default/order/row locks/draft revision/receipts.
@@ -10,7 +11,7 @@ from pydantic import JsonValue, field_validator
 
 from .chat_models import ChatStrictDTO, EntityId, PresentFieldsDTO
 from .client import AdminDataClient, DomainOperation
-from .deck_version_data import DECK_VERSION_SCHEMA_REQUIREMENTS
+from .deck_version_data import require_deck_capabilities
 from .deck_version_models import SafeInteger
 from .errors import AdminDataError
 from .models import OperationCapabilityDTO
@@ -130,10 +131,7 @@ class AdminVoiceData:
         self._client = client
 
     def _execute(self, operation, input_dto, request_id, access_token):
-        capabilities = self._client.capabilities(request_id)
-        schemas = {item.capability: item for item in capabilities.schema_capabilities}
-        if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in DECK_VERSION_SCHEMA_REQUIREMENTS):
-            raise AdminDataError('ADMIN_CAPABILITY_UNAVAILABLE', 503, request_id)
+        require_deck_capabilities(self._client, request_id)
         return self._client.execute(operation, input_dto, request_id, access_token=access_token)
 
     def create(self, input_dto, request_id, *, access_token):

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: public Voice mutations consume four Admin commands with raw Memory JSON. -->
 <!-- [Sync] 2026-09-15: public friendship/invitation operations use the sole Admin data authority. -->
 <!-- [Sync] 2026-09-15: synchronize Admin catalog refresh and retain concurrent domain HTTP. -->
@@ -72,6 +73,8 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 共享Admin客户端串行刷新catalog与检查capability。刷新失败清空ready，由下一请求重新加载；领域HTTP保持并发，每次调用独立携带actor、DTO和请求ID。
 
 公开邀请码、好友申请/关系与好友历史图片已使用九项typed Admin operation。Admin执行邀请码policy和原子状态转换；Dream保留整数ID、label、时间、错误及未知写入ID。其它数据库域与正常真实业务验收仍需完成。
+
+公开Deck update/delete/publication/collection/parent-sync已使用五项Admin command。原结果和依赖冲突反馈保留；Admin执行锁与事务，未知写保留原请求ID。[现行规则](docs/design/deck-mutations-current.md)。
 
 公开Voice create/update/delete/collect已使用四项Admin command。raw Memory JSON及省略/null/empty保持原规则；Admin执行defaults、order、行锁和draft变化。其余Deck及后台数据仍需迁移。
 

@@ -1,8 +1,12 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: record four original Voice mutation results and safe unknown write IDs. -->
 <!-- [Sync] 2026-09-15: preserve nine social responses, closed business errors and unknown write IDs. -->
 <!-- [Sync] 2026-09-15: document source-bound Admin refs and safe public validation. -->
 <!-- [Sync] 2026-09-15: document typed Admin preference get/save, required nullable wire and unknown result behavior. -->
 <!-- [Sync] 2026-09-15: document Admin-backed public Deck versions, exact capabilities and unknown-result recovery. -->
+
+五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../docs/design/deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
+
 # Ink & Memory API Documentation
 
 > [Sync] 2026-09-13: Claude Agent `resume` is intent only. After actor/thread

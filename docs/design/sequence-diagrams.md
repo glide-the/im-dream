@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: index current Voice mutation design separately from retained Deck/Voice legacy flows. -->
 <!-- [Sync] 2026-09-15: replace social flows with Admin while preserving the original in history. -->
 <!-- [Input] Module business flows, current Admin consumers and byte-preserved pre-migration sequence source. -->
@@ -15,6 +16,9 @@ Voice四公开mutation的现行正常、状态、失败与验收见[Voice CRUD�
 <!-- [Sync] 2026-09-06: replace the retired Vite frontend label with the sole Next.js app/_dream source boundary. -->
 <!-- [Sync] 2026-09-01: replace debounced random-Voice inspiration with manual persistent Suggestion Cells on one Session-owned Claude Thread. -->
 <!-- [Sync] 2026-08-31: replace daily-picture generation with historical read-only Timeline access and remove its scheduler/runtime. -->
+
+
+五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
 
 # Ink & Memory — 业务功能模块时序图
 

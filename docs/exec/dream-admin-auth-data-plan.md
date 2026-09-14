@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: record Stage24 public Voice implementation and present-fields reuse. -->
 <!-- [Sync] 2026-09-15: record Stage23 consumer implementation and independent technical gate. -->
 <!-- [Sync] 2026-09-15: record Stage22 RED reproduction and synchronized metadata implementation. -->
@@ -483,3 +484,21 @@ Luna actualFastAPI/Auth/DTO/MockTransport/DBfence验证四public入口、require
 阶段24实现状态：fouractualhash/fourSchema已注册，四publicVoice functions无DB；create requirednullable/原Memory default交Admin，update原None省略/emptyfalsezero与raw数值/sort保持。shared PresentFieldsDTO只提取原Editor serializer，Editor null校验不变；四路由采用局部安全validation class，Deck其它函数不改。技术gate待运行；无PG/model/network/account/services/Browser/SDKRuntime，未改pins/tmp/Agent/SSE资源。
 
 阶段24 fresh技术回执：Luna usage限制仍不可用，primary执行指定八文件 `280 passed in 2.12s` exit0，无failure/skip。四actualhash/canonical/requirements/closedDTO shape comparator0；present-fields method与Editor optional-null method AST原样，其他Deck函数/整个database.py source unchanged，四公开Voice AST无DB。doc checker34files/254links/231inventory/history3SHA/README parity/6sequence计数0fail（未render），diff0。无PG/network/model/真实账户/Browser/services/SDKRuntime或pins/tmp/Agent/SSE资源改动；其他域与正常业务gate仍active。
+
+## 阶段 25：公开 Deck 五项 mutation
+
+### Optimized Prompt · 2026-09-15
+
+消费actual已发布Deck19中的deck.update/delete/collect/toggle-publication/sync-parent，仅替换voices.py这五条公开路由。Deck list/detail/create/default/provision需要原defaults/FS证据仍保留依赖，不能拿候选DTO冒充已授权安装metadata。复用统一StrictDTO/PresentFields/EntityId/SafeInteger与four exact Deck schemas，OAuth-only，body拒acting user_id与原None省略、empty/false/0保持；Admin独立处理locks/CAS/draft/refs/Voices复制/发布与parent detach/collection计数/TX原receipt，不在Dream仿造组合事务。
+
+公开update/delete changed:false原404；publish返回原success/published，collect原deck_id，sync原success/synced_voices。仅known code映射旧safe sharing/default/self/private/parent业务错误与status，不能输出上游message。actual delete的DECK_DELETE_BLOCKED带closed reason：child_decks/related_threads/runtime_history/referenced_records。统一ErrorDTO现仅允许Version409details，需要按code增加这四枚举DTO并严格校验owner，AdminDataError类型随之扩展；保留Version两revision/null规则，拒错code/shape/extra/未知reason，failure仍unknown原UUID，不能把详情宽泛dict放行。删除反馈复用原DeckDeletionConflict纯message投影；其它数据错误按原safe code/UUID/outcome_unknown。
+
+所有write持current OAuth与原UUID；unknown只查同operation/原IDreceipt，无retry。原database相关helper尚有内部/fixture消费者保留清单，未据此删除程序/接口/测试/历史原文。同步affected headers/folders/README/API/现行mutation设计/原设计索引/清单，避免协调own文档。
+
+Luna unavailable usage已确认，本阶段primary执行bounded provider-free actualFastAPI/Auth/Pydantic/MockTransport/DBfence：五route/olderror、none/emptyfalsezero、原collection组合单operation、publish无需pre-read、sync事务owner仅Admin、delete四reason/strictowner/unknown原receipt、Version409旧边界及既有Deck policy/default/技术SQL fixture回归。旧route专用两case改实际HTTP owner合同，保留其它policy/SQLfixture测试。源码hash/requirements/DTO与untouchedDeck/Voice functions逐项比较。无PG/network/model/Browser/用户账户/服务/SDKRuntime/FS/迁移/secret/pin/tmp/Agent/SSE资源变化，整体goal继续active。
+
+阶段25复用细化（source改动前）：将Version/Voice原相同fourSchema fresh检查提取为deck_version_data.require_deck_capabilities，三adapter调用同一检查；原Version outer/nested identity和Voice返回语义保持，同批回归。共享transport不新增SQL/全局actor或重试。
+
+阶段25实现状态：five actualhash/four schemas已注册，五公开Deck writes无DB；update None省略/emptyfalsezero与原结果保留，publish无需Dream预读、collection复制计数单operation。共用原Version/Voice schema检查，Version identity/Voice语义不改；ErrorDTO按code保留两revision或四reason，安全反馈丢上游message。首轮primary九文件 `295 passed in 2.00s` exit0，无failure/skip；新增malformed结果/可选details用例与actual合同/文档gate待最终检查。无PG/network/model/真实账户/Browser/services/SDKRuntime或pins/tmp/Agent/SSE资源改动。
+
+阶段25最终技术回执：初始九文件295pass/2.00s后新增十项malformed结果/optional details，primary指定Deck文件 `63 passed in 0.95s` exit0，无failure/skip；未重复无变化的其它已通过文件。actual五canonical hashes/capabilities/four requirements/closedDTO comparator0，四reason与原schema gate/Version identity AST保持，其他Deck/Voice functions/database整体与原policy/deletion早期tests unchanged，五公开write无DB。doc checker35files/269links/234inventory/history3SHA/README parity/6sequence计数0fail（未render）；git diff --check exit0。正常业务、全部其余DB迁移仍active；本阶段不运行真实账户/PG/model/network/Browser/services。

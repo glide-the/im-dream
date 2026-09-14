@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: map public Voice four replacements and retained database dependencies. -->
 <!-- [Sync] 2026-09-15: map all nine social replacements and retired old database paths. -->
 <!-- [Sync] 2026-09-15: record catalog synchronization without closing outstanding domain migrations. -->
@@ -35,7 +36,8 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | 生产入口 | 实际Admin领域合同/消费者 | 已替换范围 | 保留的迁移依赖 |
 | --- | --- | --- | --- |
 | `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG；read/publish/close同活动锁，shutdown后台owner和Factory后关闭HTTP | 全域startup/其它DB与正常业务验收仍开放 |
-| 公开Voice mutation | [voice_data](../../backend/services/admin_data/voice_data.py)：create/update/delete/collect | 四路由无DB；four exact schemas，requirednullable/optional/rawMemory，原errors/unknownreceipt | 同模块Deck10/default/plugin FS evidence与internal/fixture四helper SQL仍开放 |
+| 公开Deck mutation | [deck_mutation_data](../../backend/services/admin_data/deck_mutation_data.py)：update/delete/toggle-publication/collect/sync-parent | 五公开写无DB；原结果/错误/闭集删除reason、four schemas、单Admin事务与unknown原UUID | list/detail/create/default/provision、全局install/文件证据与原内部/fixture helper SQL仍开放 |
+| 公开Voice mutation | [voice_data](../../backend/services/admin_data/voice_data.py)：create/update/delete/collect | 四路由无DB；four exact schemas，requirednullable/optional/rawMemory，原errors/unknownreceipt | 同模块Deck其余read/create/default/provision/plugin FS evidence与internal/fixture四helper SQL仍开放 |
 | 公开好友与邀请码 | [social_data](../../backend/services/admin_data/social_data.py)：九actual operation | 全部九路由无DB，原int/null/ISO/errors/images/unknownUUID；旧database九helper-before-I/O拒绝 | 其它daily-picture/import/System/后台SQL与正常业务验收仍开放 |
 | 公开Deck Claude Plugin refs | [deck_refs_data](../../backend/services/admin_data/deck_refs_data.py)：list/prepare/replace | 两公开GET/PUT无DB；无path的metadata→原artifact/CLI检查→source-bound Admin TX；原enabled/ISO与unknownUUID | 全局install/catalog/operation、serveradapter、runtimepacking、voice-memory/analysis仍有DB依赖 |
 | Browser session/AuthContext | [browserSession](../../frontend/app/_dream/lib/browserSession.ts)：current immutable public snapshot/CSRF | cancelled/superseded reads无状态修改；logout成功清除，failed保留；React只提交current snapshot | 正常Browser journey/真实业务与server配置仍待验收 |

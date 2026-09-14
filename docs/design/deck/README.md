@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: index current public Claude Plugin refs and outstanding install/runtime dependencies. -->
 <!-- [Input] Deck设计需求.pdf, CozeLoop draft/commit source, repository CRUD, and Admin schema authority. -->
 <!-- [Output] Canonical Deck management/content-version design index and delivery boundary. -->
@@ -5,6 +6,9 @@
 <!-- [Sync] 2026-08-16: implement durable drafts, immutable Deck vN commits, and Settings / Work ownership. -->
 <!-- [Sync] 2026-08-17: add the related Chat cleanup and corrected Deck deletion boundary. -->
 <!-- [Sync] 2026-08-17: make preview Demo launch follow the server-owned Chat/Dream Agent type. -->
+
+
+五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
 
 # Deck 管理与内容版本设计索引
 

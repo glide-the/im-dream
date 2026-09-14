@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: record catalog refresh/readiness boundary without changing request authentication. -->
 <!-- [Sync] 2026-09-15: current Browser session identity fences aborted/stale responses and asynchronous user commits. -->
 <!-- [Input] Dream baseline auth/BFF and the Admin-owned contract when frozen. -->
@@ -10,6 +11,9 @@
 <!-- [Sync] 2026-09-15: distinguish server turn persistence from CLI and Editor purpose grants. -->
 <!-- [Sync] 2026-09-15: retire standalone authority and require explicit OAuth/profile account matching in scripts. -->
 <!-- [Sync] 2026-09-14: record the implemented Admin BFF and public issuer retirement; retain original history. -->
+
+
+五公开Deck写操作的正常流程、状态、原错误/删除反馈与验收以[现行稿](../design/deck-mutations-current.md)为准；尚未迁移的list/detail/create/default/安装metadata保留依赖。
 
 # Dream 接入 Admin 认证
 

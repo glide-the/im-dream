@@ -3,6 +3,7 @@
 [Input] Owned Deck rows, related Chat threads, mutable plugin refs/bindings, and immutable runtime snapshots.
 [Output] Verify ordered transactional cleanup, rollback, ownership, and HTTP 409 mapping.
 [Pos] Focused Deck deletion tests in backend/tests.
+[Sync] 2026-09-15: actual public Admin deletion reason maps to the original safe message.
 [Sync] 2026-08-16: cover plugin-ref cleanup and fail-closed dependency conflicts.
 [Sync] 2026-08-17: separate related-thread conflicts from unused bindings and immutable snapshots.
 """
@@ -10,11 +11,10 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
+from tests.test_admin_deck_mutation_routes import boundary
 from psycopg.errors import ForeignKeyViolation
 
 import database
-from routers import voices as voices_router
 
 
 class _Result:
@@ -138,17 +138,9 @@ def test_delete_deck_classifies_unexpected_foreign_key_as_conflict(monkeypatch) 
     assert connection.closed is True
 
 
-def test_delete_route_maps_related_thread_conflict_to_409(monkeypatch) -> None:
-    monkeypatch.setattr(
-        voices_router.database,
-        "delete_deck",
-        lambda _user_id, _deck_id: (_ for _ in ()).throw(
-            database.DeckDeletionConflict("related_threads")
-        ),
-    )
-
-    with pytest.raises(HTTPException) as caught:
-        voices_router.delete_deck("deck-a", {"user_id": 28})
-
-    assert caught.value.status_code == 409
-    assert caught.value.detail == "Deck cannot be deleted while related Chat conversations still exist."
+def test_delete_route_maps_related_thread_conflict_to_409(boundary) -> None:
+    browser, _, outputs, *_ = boundary
+    outputs["deck.delete"] = (409, "DECK_DELETE_BLOCKED", {"reason": "related_threads"})
+    response = browser.delete("/api/decks/deck-a", headers={"authorization": "Bearer write-token"})
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Deck cannot be deleted while related Chat conversations still exist."}
