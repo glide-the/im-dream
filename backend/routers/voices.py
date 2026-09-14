@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-15: public Deck detail uses Admin; legacy Memory projection remains pure and shared.
 # [Sync] 2026-09-15: four public Voice operations use Admin; Deck/default/plugin/internal data remains pending.
 # [Sync] 2026-09-15: five public Deck mutations use Admin; deletion keeps code-owned closed dependency messages.
 # [Input] Consume typed Admin public Deck/Voice writes, database Deck reads and the shared Deck-default service,
@@ -37,6 +38,7 @@ except ModuleNotFoundError:  # pragma: no cover - package import compatibility
     )
 
 from services.admin_data.deck_mutation_data import AdminDeckMutationData, DeckUpdateRequestDTO
+from services.admin_data.deck_detail_data import AdminDeckDetailData
 from services.admin_data.deck_version_models import DeckIdInputDTO
 from services.admin_data.models import DeckDeleteBlockedDetailsDTO
 from services.admin_data.voice_data import (
@@ -100,12 +102,18 @@ def reconcile_deck_defaults(current_user: dict = Depends(get_current_user)):
         ) from None
 
 
+def _deck_detail_data(request: Request) -> AdminDeckDetailData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminDeckDetailData(owner.client)
+
+
 @router.get("/api/decks/{deck_id}")
-def get_deck(deck_id: str, current_user: dict = Depends(get_current_user)):
-    """Get deck with all voices"""
-    user_id = current_user["user_id"]
-    deck = database.get_deck_with_voices(user_id, deck_id)
-    if not deck:
+async def get_deck(deck_id: str, current_user: dict = Depends(get_current_user), data: AdminDeckDetailData = Depends(_deck_detail_data)):
+    """Read the owned Deck aggregate through Admin and restore its public fields."""
+    deck = await invoke_admin_operation(current_user, data.detail, DeckIdInputDTO(deck_id=deck_id))
+    if deck is None:
         raise HTTPException(status_code=404, detail="Deck not found")
     return deck
 

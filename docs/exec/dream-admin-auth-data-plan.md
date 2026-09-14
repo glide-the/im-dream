@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: record Stage24 public Voice implementation and present-fields reuse. -->
 <!-- [Sync] 2026-09-15: record Stage23 consumer implementation and independent technical gate. -->
@@ -502,3 +503,23 @@ Luna unavailable usage已确认，本阶段primary执行bounded provider-free ac
 阶段25实现状态：five actualhash/four schemas已注册，五公开Deck writes无DB；update None省略/emptyfalsezero与原结果保留，publish无需Dream预读、collection复制计数单operation。共用原Version/Voice schema检查，Version identity/Voice语义不改；ErrorDTO按code保留两revision或四reason，安全反馈丢上游message。首轮primary九文件 `295 passed in 2.00s` exit0，无failure/skip；新增malformed结果/可选details用例与actual合同/文档gate待最终检查。无PG/network/model/真实账户/Browser/services/SDKRuntime或pins/tmp/Agent/SSE资源改动。
 
 阶段25最终技术回执：初始九文件295pass/2.00s后新增十项malformed结果/optional details，primary指定Deck文件 `63 passed in 0.95s` exit0，无failure/skip；未重复无变化的其它已通过文件。actual五canonical hashes/capabilities/four requirements/closedDTO comparator0，四reason与原schema gate/Version identity AST保持，其他Deck/Voice functions/database整体与原policy/deletion早期tests unchanged，五公开write无DB。doc checker35files/269links/234inventory/history3SHA/README parity/6sequence计数0fail（未render）；git diff --check exit0。正常业务、全部其余DB迁移仍active；本阶段不运行真实账户/PG/model/network/Browser/services。
+
+## 阶段 26：公开 Deck 详情读取
+
+### Optimized Prompt · 2026-09-15
+
+消费已发布deck.detail，只替换GET /api/decks/{deck_id}。复用exact four Deck schemas/统一client/current OAuth/dream:read/EntityId/SafeInteger/时间与canonical ID校验，不把当前缺安装catalog的list/create/default/provision同步迁移。闭集Deck/Voice aggregate DTO只读取actual requirednullable字段，Admin计算agent type/binding revision/sharing/version状态、ownedDeck过滤与Voice排序，Dream不复制policy或SQL。验证outer Deck ID及每个Voice deck_id均匹配URL，拒错配；原null仍404 Deck not found。
+
+公共响应逐字段沿用原DBdict；owner decimalstring还原int、ISO微秒原样，Voice memory_workspace_config_json转原memory_workspace_config。原_parse_voice_row只对非空text json.loads，emptytext保留，invalid JSON为None，合法JSON不限object（array/scalar/null皆可）；复用原纯helper而非更严格的preferences config_object，避免误删legacy读能力。保留Pythonfloat/-0/bigint，公共JSON无法表达NaN/Inf时安全503，不heal/重写。wire deck_version_capability LiteralTrue须额外按exact bool拒1。
+
+独立provider-free actual FastAPI/Auth/DTO/MockTransport/DBfence验证正向完整字段、nullable/legacyMemory/numeric/time、outer/nested实体错配、malformed/extra/missing/boolean/安全整数/权限/cap漂移/null404、单read/no retry且拒委托。原Deck mutate/Voice/version/publicSession共享合同已有pass，仅按新增生产source影响执行适当相关测试；不碰正常PG/账户/model/network/Browser/services/SDKRuntime/pins/tmp/Agent/SSE资源。同步相关设计稿3基础/状态失败影响验收、README/目录/API/清单；真实普通业务gate与全域DB目标继续active。
+
+阶段26复用细化（source改动前）：原_parse_voice_row只在database内定义，无现有独立Memory投影模块。将同一纯函数原样提取到backend/voice_projection.py，database以同名import alias保留旧内部接口/调用，不引入数据库依赖到Admin DTO。新消费者只复用纯helper，原函数AST与其它database函数必须逐项验证。
+
+阶段26实现状态：one actualhash/four schemas/OAuth read已注册，public detail无DB、null404，outer/nestedDeck错配拒绝；闭集requirednullable/time/owner字段保持，pure helper提取原AST且database同名alias/其他functions unchanged。primary八文件 `246 passed in 1.84s` exit0无failure/skip。实际合同checker初次因整数exclusiveMinimum:0与minimum:1表示差异失败，按相同整数集合归一后exit0，未改产品DTO。
+
+阶段26实际Admin projection gap：voiceRow源执行 `if(raw!==null)JSON.parse(raw)` catch归null；Node JSON.parse(emptytext)回执null，而原Dream pure helper回执emptytext。本阶段consumer对响应empty仍保留原行为，但真实producer修正前不计该legacy值验收完成；Admin源只读未改。另未改变原invalid JSON→None/公共nonfinite安全503。完整普通业务/其他DB目标继续active。
+
+阶段26最终文档/源码技术回执：actual contract/closed DTO/exact four requirements/canonical hash/ISO与原pure helper AST/alias/其他database与router函数检查exit0；producer empty Memory语义gap明确保留。文档检查35files/280links/237inventory/history3SHA/README parity/6sequence计数0fail（未render），git diff --check exit0；之后更新write现行稿详情索引再检查引用。未跑正常业务/PG/model/network/Browser/服务，不宣称全部生产迁移完成。
+
+阶段26最后引用检查：35files/281links/237inventory，failures=[] exit0；历史与README/6sequence检查保持。

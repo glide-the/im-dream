@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: record four original Voice mutation results and safe unknown write IDs. -->
 <!-- [Sync] 2026-09-15: preserve nine social responses, closed business errors and unknown write IDs. -->
@@ -1137,3 +1138,5 @@ init_db()
 PUT accepts `{ "refs": [{ "plugin_installation_id": "...", "enabled": true, "order_index": 0 }] }`; enabled/order are optional, refs defaults empty. IDs are stripped and unique, order follows PostgreSQL integer bounds. Package/digest/compatibility/actor/path fields are rejected. Invalid request JSON/fields return fixed422 `{ "detail": "Invalid plugin request" }` without body echo. There is no arbitrary32-ref product quota.
 
 Admin prepares owner-scoped metadata; Dream runs its existing artifact/CLI checks before source-bound replace. Validation/verification failures do not send the write. Unknown writes retain `error.request_id` and `error.outcome_unknown`; no automatic retry. Other plugin install/catalog/runtime APIs remain separately staged. See the [current functional design](../docs/design/deck/deck-claude-plugin-refs-current.md).
+
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；无read retry或DB fallback。实际Admin producer目前将empty Memory归null，与原Dream保留emptytext不同，仍需修正且不计该值真实验收完成。详见[Deck详情现行规则](../docs/design/deck/deck-detail-version-history.md)。

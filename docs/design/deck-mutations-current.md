@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: owned detail read is tracked in its current design. -->
 <!-- [Input] Five published Admin Deck write contracts and original Dream public responses. -->
 <!-- [Output] Current update/delete/publication/collection/parent-sync rules and validation. -->
 <!-- [Pos] Deck write design; Admin owns durable policy and transaction execution. -->
@@ -12,7 +13,7 @@
 
 迁移 PUT/DELETE `/api/decks/{deck_id}` 和 POST `/api/decks/{deck_id}/publish`、`/fork`、`/sync`，分别使用 deck.update/delete/toggle-publication/collect/sync-parent。需要当前用户 OAuth、dream:write、五项实际 operation hash，以及 identity/unified/canonical-storage/content-versions 四项 exact schema。Runtime 委托不能管理 Deck。
 
-Deck 列表、详情、创建、默认初始化/修复、全局安装目录与文件证据仍保留迁移依赖。原内部数据库函数和技术 fixture 不因本稿删除。Agent、SSE、资源准入、共享文件、Runtime 配置及版本 pins 不受本阶段影响。
+Deck详情另按[现行读取规则](deck/deck-detail-version-history.md)迁移；Deck 列表、创建、默认初始化/修复、全局安装目录与文件证据仍保留迁移依赖。原内部数据库函数和技术 fixture 不因本稿删除。Agent、SSE、资源准入、共享文件、Runtime 配置及版本 pins 不受本阶段影响。
 
 ## 概念与规则
 

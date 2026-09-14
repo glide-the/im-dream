@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: index current public Claude Plugin refs and outstanding install/runtime dependencies. -->
 <!-- [Input] Deck设计需求.pdf, CozeLoop draft/commit source, repository CRUD, and Admin schema authority. -->
@@ -64,3 +65,5 @@ CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交�
 - [业务时序](./deck-business-sequences.md)
 - [需求追踪与测试矩阵](./deck-traceability.md)
 - [市场分发延期范围](../deck-register/README.md)
+
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；无read retry或DB fallback。实际Admin producer目前将empty Memory归null，与原Dream保留emptytext不同，仍需修正且不计该值真实验收完成。详见[Deck详情现行规则](deck-detail-version-history.md)。

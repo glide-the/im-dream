@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# [Sync] 2026-09-15: reuse the unchanged pure Voice Memory projection outside the database module.
 # [Sync] 2026-09-15: nine old social helpers refuse before I/O; public friends use Admin DTOs.
 # [Input] Consume PostgreSQL connections, filesystem paths, JSON data, and optional session text extraction,
 #         and memory workspace defaults.
@@ -71,6 +72,7 @@ from threading import RLock
 from typing import Any, Optional, Union
 import json
 from chat_message_projection import validate_chat_history_final_projection as _validate_chat_history_final_projection
+from voice_projection import _parse_voice_row
 from psycopg import Error as PostgresError
 from psycopg import IntegrityError as PostgresIntegrityError
 from psycopg.errors import ForeignKeyViolation
@@ -696,17 +698,6 @@ def increment_deck_install_count(deck_id: str):
         db.commit()
     finally:
         db.close()
-
-
-def _parse_voice_row(row: dict) -> dict:
-    """Parse a raw voices DB row, deserialising JSON columns."""
-    raw_config = row.get("memory_workspace_config")
-    if raw_config and isinstance(raw_config, str):
-        try:
-            row["memory_workspace_config"] = json.loads(raw_config)
-        except (json.JSONDecodeError, ValueError):
-            row["memory_workspace_config"] = None
-    return row
 
 
 def get_deck_with_voices(user_id: int, deck_id: str):

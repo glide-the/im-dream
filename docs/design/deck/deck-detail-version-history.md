@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Input] Deck/Agent/plugin form APIs, Admin content-version capability, and CozeLoop commit reference. -->
 <!-- [Output] Create/update/draft/explicit-commit and folded immutable history interaction contract. -->
 <!-- [Pos] Deck detail and content-version functional-unit design. -->
@@ -8,15 +9,29 @@
 
 ## 背景与问题
 
-Deck配置草稿与不可变内容版本必须保持独立，网络超时不能被当作事务回滚。原Dream版本路由创建PG Service，本轮公开五operation改为Admin领域消费端；其他Deck/Voice/Runtime入口仍是明确迁移依赖。
+Deck配置草稿与不可变内容版本必须保持独立，网络超时不能被当作事务回滚。原Dream版本路由创建PG Service，本轮公开五operation改为Admin领域消费端；公开Deck五write和Voice四write另按现行稿迁移；其余read/create/default/install/Runtime入口仍是明确迁移依赖。
 
 ## 目标与边界
 
-保留创建/表单/预览/提交/折叠历史的现有可见流程，不新增确认。Admin负责owner/schema/CAS、snapshot/hash和单事务版本追加；Dream负责当前request OAuth、闭集DTO与原响应投影，public版本路由无PG。未迁移创建/default plugin/其他表单或FS验证不得据此宣称完成。
+保留创建/表单/预览/提交/折叠历史的现有可见流程，不新增确认。Admin负责owner/schema/CAS、snapshot/hash和单事务版本追加；Dream负责当前request OAuth、闭集DTO与原响应投影，public版本路由无PG。Deck详情读已消费独立Admin aggregate，五write/四Voice规则分别见[Deck写现行稿](../deck-mutations-current.md)与[Voice现行稿](../voice-crud-current.md)。未迁移创建/default plugin/其他表单或FS验证不得据此宣称完成。
 
 ## 概念与规则
 
 草稿保存、preview、commit与history按下方原状态执行。公开版本state/preview/commit/history/detail要求identity/unified/content-versions/canonical-storage四项exact capability；缺失拒绝，不伪造版本。snapshot raw字符串只校验shape并还原dict，保留数值类型/负零/大整数、null和微秒。409使用远端已校验revision刷新预览；已确认失败与结果不明按第6节分别恢复。
+
+## Deck 当前配置详情读取
+
+GET `/api/decks/{deck_id}` 使用[deck.detail消费端](../../../backend/services/admin_data/deck_detail_data.py)与当前OAuth/dream:read，四exact schema和actual hash必须匹配。Admin依据主体过滤ownedDeck，计算agent_type/binding revision、sharing/content-version状态并排序Voice；Dream不重算policy、锁或SQL。null保留404 `Deck not found`，outer id与所有Voice deck_id均须匹配URL。
+
+default来自原Admin policy；desired是保存的Deck草稿配置，effective是本次已确认读取的保存值；draft与publication revision、不可变version保持独立，读取不推进状态。没有新CAS/配额/确认或write retry。
+
+原owner decimalstring投影为int，nullable/空文本/false/zero与ISO微秒保留。Memory raw text仅复用原[纯helper](../../../backend/voice_projection.py)：非空text json.loads，array/scalar/null皆可，emptytext保留，invalid JSON返回None；float/负零/bigint不经JavaScript重编码。公共JSON不能表达非有限值时安全503，不heal/写库。
+
+**Admin待修正差异**：实际voiceRow对所有非null raw执行JSON.parse，emptytext会转为null，而原Dream pure helper保留emptytext。consumer对empty响应的原行为已技术验证，实际producer修正/正常业务回执前不能声明该legacy值验收完成；同样保留producer对非JSON raw的现有规范化事实。
+
+闭集字段、requirednullable、canonical owner、布尔/安全整数/时间和outer/nested实体漂移均安全503，丢弃上游message。读取timeout返回原UUID/outcome_unknown:false，不retry或fallback。影响公开详情路由、RequestAuth注册、typed aggregate与纯helper提取；原database alias/其它函数保持。
+
+[测试](../../../backend/tests/test_admin_deck_detail_routes.py)实际调用FastAPI/Auth/DTO/MockTransport并禁止Dream PG，覆盖完整字段/legacy值、empty/float/-0/bigint、nullable、外层/Voice实体错配、malformed/权限/capability和单read/no retry；相关Deck/Voice/default/deletion/sharing技术合同同批回归。技术通过不代替普通本机服务/真实账户/模型/Admin可见记录的验收。
 
 ## 1. 创建后如何更新
 

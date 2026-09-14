@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: record catalog refresh/readiness boundary without changing request authentication. -->
 <!-- [Sync] 2026-09-15: current Browser session identity fences aborted/stale responses and asynchronous user commits. -->
@@ -106,3 +107,5 @@ Next同名password/Google/Device/token薄adapter也返回410，login/register在
 公开Deck内容版本五operation只使用当前request OAuth与Admin principal，schema要求identity/unified/content-versions/canonical-storage四项exact v1。管理权限不接受Thread或CLI/Editor purpose。共享actor invocation保持同一认证和threadpool，只由domain adapter生成安全错误响应。领域catalog刷新失败清除ready，下一认证重新加载后再执行profile/Chat等operation；不回退旧issuer/SQL。
 
 公开user-preferences.get/save只由当前OAuth用户管理；所有Runtime entity grant不能替代该授权。闭集字段不含body actor/firstlogin/systemconfig；identity/unified exact capabilities与Admin principal继续校验。原NULL partial merge/缺行{}保留，后台context/System/first-login与import仍独立。现行[用户偏好设计](../design/user-preferences-current.md)描述状态与失败，不以该领域扩大Runtime授权。
+
+公开GET /api/decks/{deck_id}消费deck.detail/current OAuth，four exact schemas/hash，outer与每个Voice deck_id必须匹配。原null404/owner int/时间/Memory值保持；无read retry或DB fallback。实际Admin producer目前将empty Memory归null，与原Dream保留emptytext不同，仍需修正且不计该值真实验收完成。详见[Deck详情现行规则](../design/deck/deck-detail-version-history.md)。
