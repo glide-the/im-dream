@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record public Preflight read adoption and current 72-operation release boundaries. -->
 <!-- [Sync] 2026-09-15: retain Runtime/shared-file technical regression and Gateway ownership gaps. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record unregistered Run create/retry and original hidden-source dispatch ordering. -->
@@ -607,3 +608,34 @@ Gateway只读源事实：Admin gateway/auth已接gateway-cli idg purpose；Dream
 Workspace文件HTTP生产身份已复用get_current_user/Admin共享依赖；旧测试fixture仍patch retired auth.verify_access_token且没有配置Admin owner，本轮未用它冒充Admin OAuth授权验收。生产Thread/SystemConfig metadata仍直接调用database，继续迁移，并适配实际DTO harness。所有源码/统计是技术状态，完整生产SQL/Repository与普通账户/模型/Admin可见业务目标未完成。
 
 当前SQL复核补充：同一scanner遍历nested/direct legacy database imports，35模块/122直接helper Call候选exit0；DI/default callable的零Call引用仍开放，完整路径另列清单。48字面SQL模块/513调用与16driver/persistence import模块保持；统计不能替代运行可达性证明。Workspace生产身份源码实际已共用get_current_user，未制造认证代码变更；仅Thread/SystemConfig数据与旧测试harness继续待迁移。
+
+## 阶段28：公开 Preflight 读取
+
+### Optimized Prompt · 2026-09-15
+
+先消费实际注册的 workflow-preflight.read，将 GET /api/story-workspace/workflow-preflights/{preflight_id} 接入当前 Admin OAuth/dream:read。源码 read_preflight 只按 created_by 和 ID 查询，不使用 workspace；这条 GET 移除无关 default Workspace 初始化与旧 application service 依赖。POST execute 与 Run 创建/重试、default Workspace、SystemConfig 仍分别迁移，不改变其他入口。
+
+复用 WORKFLOW_SCHEMA_REQUIREMENTS 的 identity/unified 两项 exact capability 与实际 read hash ddb0cf666b0dc24fcc4df3ef84be42232b5f907d3361c165eb4c6244bc912d73。新增闭集 input/output，保留完整 17 字段、required nullable、原字符串 strip、非负安全 revision、带时区且最多六位小数的 ISO 时间原文；复用原 WorkflowPreflight model 状态/失败字段/snapshot/token/精确微秒 expiry 检查，不复制状态机、不按 Dream 时钟重新判 token。响应 ID 与已认证 canonical actor 必须匹配。token 不进入 repr/错误日志。
+
+公共坏 ID（包括额外空白）与 Admin owner 拒绝保留原 WORKFLOW_PERMISSION_DENIED/404，其他 transport/DTO/capability 失败使用统一安全 code/request UUID/outcome_unknown 反馈，不回传上游正文、不重试读。测试走实际 FastAPI 生产依赖、Admin client/DTO 与 MockTransport，并 fence Dream get_db/default Workspace/旧 service；覆盖所有状态/nullable/token、微秒排序、owner/ID、两 schema/hash/scope、原404、超时同 UUID 无重试。更新现行设计、folder/header/README 镜像与逐入口清单，报告真实命令与技术范围。
+
+当前发布事实另行更新：实际目录 72 项，新增 Run create/retry 已注册，旧 70 项契约保持的通知须按规范核对；主协调的新公开集成验收仍 pending。读取已见本地 primary remaining-read 8cases/74assertions exit0、原 receipt permission tail 11assertions exit0，均为隔离技术证据，保留完整命令的历史失败，不能称一次全部成功。隐藏 launch-source.ensure 仍未注册。Runtime/资源 LKG/共享文件、版本 pins 与普通服务均保持原边界。
+
+阶段28源码细化：原 GET 的 _workflow_json 调用 WorkflowPreflight.model_dump(mode="json")，因此 wire 保留时间文本并按实际 DTO 拒绝时间前后空白，公共响应继续由原纯模型输出 datetime JSON（UTC为Z），不将新 wire 原文直接替换旧时间序列化。状态与公共投影都复用该模型，无需改它的源码。
+
+阶段28 fresh 技术回执：primary 实际执行以下命令；不接普通 PostgreSQL/账户/服务/网络/模型/Browser，不修改 Admin 源或 Runtime pins。
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_preflight_routes.py backend/tests/test_admin_request_auth.py backend/tests/test_admin_workflow_data.py backend/tests/test_workflow_preflight.py backend/tests/test_story_workspace_api.py backend/tests/test_admin_chat_routes.py
+# exit 0; 141 passed in 2.44s; no failures/skips
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage28-contract-check.py
+# exit 0; actual72 canonical descriptors/new Run hashes/full keys; read DTO/hash/two schemas, original model/Workflow/database/Runner/Workspace/auth methods/other routes unchanged
+/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-doc-check.py
+# exit 0; 35files/377links/242inventory, history3 exact bytes, README parity, 6Mermaid count, failures=[]; no rendering
+git diff --check
+# exit 0; no output
+```
+
+初次 pytest 命令误写不存在的 test_admin_workflow_context.py，exit4/no tests；按实际文件清单纠正为 test_admin_workflow_data.py 后才有上述通过结果。初次 AST checker 指向不存在的 server/runner.py，exit1；纠正为实际 agent_runner.py 后通过，没有改生产代码以迎合检查。72项 canonical hash 均自洽，create/retry匹配实际新hash/full Run keys；本轮没有早期70完整descriptor快照，故不声明历史70字节比较通过。revision metadata差异仅在比较器副本显式标注实际非负边界，未改目录/源/hash。
+
+已关闭本条公开 GET 的 SQL/service/default Workspace 依赖；旧 read/service 实现及其他入口仍存在，不将模块候选数量减少或 technical 模型测试当作全域/正常验收。Luna此前usage limit失败，本批由primary执行同provider-free边界；目标仍未完成，未同步跨任务消息。

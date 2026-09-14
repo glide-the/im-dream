@@ -2,6 +2,7 @@
 # [Input] Consume authenticated users, canonical PostgreSQL Story Workspace tables, and REST requests.
 # [Output] Publish user-scoped Story Workspace read and controlled-update API routes.
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
+# [Sync] 2026-09-15: read Preflight through Admin OAuth without default Workspace or Dream SQL.
 # [Sync] 2026-09-02: expose a body-free Episode index and explicit registry-member reads.
 
 """Authenticated, user-scoped REST API for the Story Workspace baseline."""
@@ -14,9 +15,9 @@ from datetime import datetime, timezone
 from typing import Any, Iterator, Optional, Protocol
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 import database
 from story_workspace.contracts import (
@@ -39,7 +40,10 @@ from services.story_workspace.agent_integration import (
     get_or_create_default_workspace,
     store_agent_story_output,
 )
-from .deps import get_current_user
+from .deps import get_current_user, invoke_admin_operation
+from services.admin_data.errors import AdminDataError
+from services.admin_data.preflight_data import AdminPreflightData, PreflightInputDTO
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 
 try:
     from services.errors.error_registry import ApiRouteError, build_error_payload
@@ -1333,20 +1337,33 @@ async def story_workspace_list_dream_runs(
     return await _workflow_call(service.list_dream_runs(actor=actor), by_alias=True)
 
 
+def _preflight_data(request: Request, current_user: dict = Depends(get_current_user)) -> AdminPreflightData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    actor = current_user.get("_admin_actor")
+    if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminPreflightData(owner.client, canonical_user_id=actor.canonical_user_id)
+
+
+def _preflight_read_error(exc: AdminDataError, request_id: str):
+    if exc.code == "WORKFLOW_PERMISSION_DENIED" and exc.status_code in {403, 404}:
+        return JSONResponse(status_code=404, content=build_error_payload("WORKFLOW_PERMISSION_DENIED"))
+    raise HTTPException(status_code=exc.status_code, detail={"error_code": exc.code, "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown})
+
+
 @router.get("/workflow-preflights/{preflight_id}")
 async def get_workflow_preflight(
     preflight_id: str,
-    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
-    service: StoryWorkflowRunService = Depends(get_story_workflow_run_service),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    data: AdminPreflightData = Depends(_preflight_data),
 ):
     try:
-        actor = _workflow_actor(current_user)
-    except ApiRouteError as exc:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=build_error_payload(exc.code),
-        )
-    return await _workflow_call(service.get_preflight(preflight_id, actor=actor))
+        input_dto = PreflightInputDTO(workflow_preflight_id=preflight_id)
+        if input_dto.workflow_preflight_id != preflight_id:
+            raise ValueError("Preflight path must match its original ID")
+    except (ValidationError, ValueError):
+        return JSONResponse(status_code=404, content=build_error_payload("WORKFLOW_PERMISSION_DENIED"))
+    return await invoke_admin_operation(current_user, data.read, input_dto, error_handler=_preflight_read_error)
 
 
 @router.post("/workflow-runs", status_code=201)

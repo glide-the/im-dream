@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: close public Preflight GET independently of Workspace/SystemConfig/Run dependencies. -->
 <!-- [Sync] 2026-09-15: retain Runtime/shared-file technical regression and Gateway ownership gaps. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -40,6 +41,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | --- | --- | --- | --- |
 | `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG；read/publish/close同活动锁，shutdown后台owner和Factory后关闭HTTP | 全域startup/其它DB与正常业务验收仍开放 |
 | 公开Deck完整列表 | [deck_list_data](../../backend/services/admin_data/deck_list_data.py)：deck.list | published false/true两mode无DB；原counts/author字段/owner int/ISO，Admin过滤排序装饰，单read | 创建/default/provision/install/后台与正常业务仍待；列表原路径无default/文件依赖 |
+| 公开Preflight读取 | [preflight_data](../../backend/services/admin_data/preflight_data.py)：workflow-preflight.read | GET不再初始化default Workspace或调用旧service/SQL；17字段/原状态/token/微秒datetime JSON/404、actor-ID、two exact schemas/hash | execute/Run/default Workspace/SystemConfig/隐藏source仍待；目录72不替代新增Run公开集成/正常验收；revision descriptor元数据差异待Admin修正 |
 | 公开Deck详情 | [deck_detail_data](../../backend/services/admin_data/deck_detail_data.py)：deck.detail | 单Admin owned aggregate；closed fields/owner int/ISO/原纯Memory解析/URL与nestedDeck匹配，无DB | Admin voiceRow emptytext→null投影差异需修正；其它create/default/install/内部helper继续开放 |
 | 公开Deck mutation | [deck_mutation_data](../../backend/services/admin_data/deck_mutation_data.py)：update/delete/toggle-publication/collect/sync-parent | 五公开写无DB；原结果/错误/闭集删除reason、four schemas、单Admin事务与unknown原UUID | create/default/provision、全局install/文件证据与原内部/fixture helper SQL仍开放 |
 | 公开Voice mutation | [voice_data](../../backend/services/admin_data/voice_data.py)：create/update/delete/collect | 四路由无DB；four exact schemas，requirednullable/optional/rawMemory，原errors/unknownreceipt | 同模块Deck其余read/create/default/provision/plugin FS evidence与internal/fixture四helper SQL仍开放 |

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -78,6 +79,8 @@ The shared Admin client serializes catalog refresh and capability checks. Failed
 Public invitations, friend requests, relationships and friend picture reads now use nine typed Admin operations. Admin owns invitation policy and atomic transitions; Dream preserves integer IDs, labels, timestamps, errors and unknown write IDs. Other database domains and normal business acceptance remain open.
 
 Public Deck owned/community lists now use one typed Admin operation, preserving original counts and author fields without filesystem or default-initialization steps.
+
+Public Preflight GET now uses an owner-scoped Admin read, preserving all 17 fields, lifecycle rules, precise datetime JSON and original 404 responses without initializing a Workspace. Execute, Run creation/retry, default Workspace and system configuration remain migration dependencies. See the [current read rules](docs/design/workflow-preflight-read-current.md).
 
 Public Deck detail now reads one typed Admin aggregate and restores original owner IDs, timestamps and legacy Memory values. An Admin producer difference for empty Memory remains documented for correction.
 

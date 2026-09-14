@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -77,6 +78,8 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 公开邀请码、好友申请/关系与好友历史图片已使用九项typed Admin operation。Admin执行邀请码policy和原子状态转换；Dream保留整数ID、label、时间、错误及未知写入ID。其它数据库域与正常真实业务验收仍需完成。
 
 公开Deck用户/社区列表已使用单项typed Admin operation，保留原计数与作者字段，不执行文件或默认初始化步骤。
+
+公开 Preflight GET 已使用 Admin owner-scoped 读取，保留完整 17 字段、状态规则、精确 datetime JSON 和原 404，不初始化 Workspace。Execute、Run 创建/重试、默认 Workspace 与系统配置仍是迁移依赖。详见[现行读取规则](docs/design/workflow-preflight-read-current.md)。
 
 公开Deck详情已读取单项typed Admin aggregate，还原原owner ID、时间和legacy Memory值。Admin producer对空Memory的投影差异仍列为待修正项。
 
