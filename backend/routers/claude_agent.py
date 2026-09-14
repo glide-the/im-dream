@@ -2,6 +2,7 @@
 # [Input] Consume typed Admin Chat APIs, pending Deck/runtime providers, Claude Agent factory, Skill catalog and Admin actor.
 # [Output] Register /api/claude-agent* turn, thread, and common Skill catalog endpoints.
 # [Pos] claude-agent route node in backend/routers
+# [Sync] 2026-09-15: reuse the shared typed Admin invocation adapter with unchanged Chat error semantics.
 # [Sync] 2026-09-15: reserve user message/title atomically with a server-only purpose grant; factory owns background renewal cleanup.
 # [Sync] 2026-09-15: read Admin Workflow provenance before message/SSE and inject a server-owned immutable snapshot.
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
@@ -131,23 +132,14 @@ from services.admin_data.chat_data import AdminChatData
 from services.admin_data import chat_models as chat_dto
 from services.admin_data.errors import AdminDataError
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
-from .deps import get_admin_request_auth, get_current_user
+from .deps import get_admin_request_auth, get_current_user, invoke_admin_operation
 
 
 def get_admin_chat_data(owner: AdminRequestAuth = Depends(get_admin_request_auth)) -> AdminChatData:
     return AdminChatData(owner.client)
 
 
-async def _chat_invoke(current_user: dict, method, input_dto):
-    actor = current_user.get("_admin_actor")
-    if not isinstance(actor, AdminRequestActor):
-        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
-    request_id = str(uuid4())
-    try:
-        return await run_in_threadpool(method, input_dto, request_id, access_token=actor.access_token)
-    except AdminDataError as exc:
-        detail = {"error_code": exc.code, "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown}
-        raise HTTPException(status_code=exc.status_code, detail=detail) from None
+_chat_invoke = invoke_admin_operation
 
 
 async def _admin_thread(current_user: dict, chat: AdminChatData, thread_id: str) -> dict | None:

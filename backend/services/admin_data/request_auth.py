@@ -1,6 +1,7 @@
 # [Input] Server-owned Admin client/verifier and explicit OAuth bearer credentials.
 # [Output] Immutable request actors with canonical user IDs and separate typed profile reads.
 # [Pos] Request authentication composition; no issuing, renewal, PG or ambient actor context.
+# [Sync] 2026-09-15: register six typed public Session operations alongside Chat/profile/Workflow consumers.
 # [Sync] 2026-09-15: create exact server-persistence purpose grants for immutable Workflow turn bindings.
 # [Sync] 2026-09-15: provide request-bound Workflow provenance for immutable public Chat turn snapshots.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
@@ -19,6 +20,7 @@ from .workflow_data import AdminWorkflowData, AdminWorkflowResolution, RESOLVE_W
 from .delegation import AdminDelegationCreator, AdminRuntimeClient, DelegationCreateInputDTO, RuntimeHttpConfig
 from .turn_persistence import AdminTurnPersistence
 from .user_message_data import PERSIST_USER_MESSAGE
+from .session_data import SESSION_OPERATIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +46,7 @@ class AdminRequestAuth:
     """Application-owned connections; each request checks current Admin identity."""
 
     def __init__(self, config: AdminDataConfig, *, client: AdminDataClient | None = None, verifier: AdminJWTVerifier | None = None) -> None:
-        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
+        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, *SESSION_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
         self._verifier = verifier or AdminJWTVerifier(config)
         self._owns_client = client is None
         self._owns_verifier = verifier is None

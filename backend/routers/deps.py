@@ -2,6 +2,7 @@
 # [Input] Consume the Admin request-auth owner and common FastAPI dependency inputs.
 # [Output] Provide bearer-only canonical identity and shared date/text helpers to backend routers.
 # [Pos] shared dependency node in backend/routers
+# [Sync] 2026-09-15: reuse one explicit actor/threadpool/error adapter for typed Chat and Session operations.
 # [Sync] 2026-05-25: extracted common dependency helpers from backend/server.py.
 # [Sync] 2026-06-23: allow auth dependencies to read system access tokens from
 #                    Authorization headers or OAuth login cookies.
@@ -23,7 +24,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from services.admin_data.errors import AdminDataError
-from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 
 http_bearer = HTTPBearer(auto_error=False)
 
@@ -57,6 +58,18 @@ async def get_admin_current_user(
 
 
 get_current_user = get_admin_current_user
+
+
+async def invoke_admin_operation(current_user: dict, method, input_dto):
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    request_id = str(uuid4())
+    try:
+        return await run_in_threadpool(method, input_dto, request_id, access_token=actor.access_token)
+    except AdminDataError as exc:
+        detail = {"error_code": exc.code, "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown}
+        raise HTTPException(status_code=exc.status_code, detail=detail) from None
 
 
 def _count_mixed_words(text: str) -> int:

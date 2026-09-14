@@ -20,6 +20,7 @@
 
 # Ink & Memory
 
+<!-- [Sync] 2026-09-15: 同步公开Session的Admin消费端与独立后台授权依赖。 -->
 <!-- [Sync] 2026-09-15: 同步原子用户预留和Factory管理的服务器持久化委托生命周期。 -->
 <!-- [Sync] 2026-09-14: record the implemented Admin BFF/Browser boundary and remaining baseline migration gates. -->
 
@@ -41,11 +42,13 @@ Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话
 
 本仓库包含 Dream Web 应用与 FastAPI 后端。Admin、PostgreSQL、模型 Gateway、公开 Python SDK 和原生 Claude Runtime 由独立项目维护。
 
-资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership 与初始 user-message 预留已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 已通过聚焦技术检查；Agent 生命周期/Gateway/Editor 接线与其他数据库领域仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径返回明确410与已配置的Admin标准端点。Standalone auth helpers 拒绝本地认证权限；importer Agent标注和具名Gateway verifier必须使用显式Admin OAuth，并在业务写入/模型调用前核对正常生产profile账户。Authlib/bcrypt已移除，其余依赖版本不变。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
+资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership 与初始 user-message 预留已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 已通过聚焦技术检查；服务器user-turn委托已接既有Factory生命周期；Gateway/Editor接线与其他数据库领域仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径返回明确410与已配置的Admin标准端点。Standalone auth helpers 拒绝本地认证权限；importer Agent标注和具名Gateway verifier必须使用显式Admin OAuth，并在业务写入/模型调用前核对正常生产profile账户。Authlib/bcrypt已移除，其余依赖版本不变。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
 
-公开Chat在message预留/SSE前读取Admin完整Workflow上下文，并向Service传入不可变actor/thread snapshot，包含普通Chat null。内部confirmation/launch调度与长turn purpose接线仍需迁移。
+公开Chat在message预留/SSE前读取Admin完整Workflow上下文，并向Service传入不可变actor/thread snapshot，包含普通Chat null。内部confirmation/launch调度与其余purpose consumer仍需迁移。
 
-公开user-turn通过Admin原子confirmation guard命令预留message/title，使用raw Python JSON。server-only Thread/Run持久化grant由Factory管理续期，SSE disconnect后保持；未知写保存原receipt ID。assistant/session持久化、Gateway/Editor凭据及其他数据库领域仍需迁移。
+公开user-turn通过Admin原子confirmation guard命令预留message/title，使用raw Python JSON。server-only Thread/Run持久化grant由Factory管理续期，SSE disconnect后保持；未知写保存原receipt ID。后台assistant/session持久化、Gateway/Editor凭据及其他数据库领域仍需迁移。
+
+公开写作Session save/get/batch/list/range/aggregate/delete已使用六项typed Admin operation与显式request OAuth。保留原metadata/full-state响应、精确时间、时区日键和正文metrics；仅confirmed写入后发edit event。共享闭集Editor状态DTO省略未设置的optional字段。当前Session合同拒绝Thread server-persistence grant，后台Session上下文/工具仍是独立迁移依赖。
 
 ## 你可以做什么
 

@@ -1,6 +1,7 @@
 <!-- [Input] User delegation, Agent.md, AGENTS.md, baseline 7d38715c, and Admin-owned contracts when published. -->
 <!-- [Output] Executable Dream migration plan, dependency gates, and exact evidence inventory. -->
 <!-- [Pos] Dream implementation plan; Admin owns authentication, database transactions, and schema contracts. -->
+<!-- [Sync] 2026-09-15: implement public Session consumers while retaining separate background authorization gates. -->
 <!-- [Sync] 2026-09-15: record atomic user-turn and factory-owned server persistence implementation and technical validation. -->
 <!-- [Sync] 2026-09-14: record ten implementation stages and current Auth/Chat/Resource/BFF/Runtime technical evidence. -->
 
@@ -32,7 +33,7 @@ Next 页面、FastAPI 业务编排、Runner/ThreadFactory/service/EventBus/SSE�
 
 验收：生成可重复扫描清单，检查全部直接 DB import/SQL/pool/UOW 与动态入口，确认 Next 是否存在 DB 访问；扫描不读取凭证或业务正文。风险：接口事务粒度不足会拆散一致性；身份映射错误会破坏数据归属；因此等待 Admin 契约再实现客户端，未就绪时继续独立设计和分析。
 
-### 依赖与执行状态
+### 阶段1初始依赖与执行状态 · 2026-09-14
 
 | 项目 | 状态 | 证据 |
 | --- | --- | --- |
@@ -332,3 +333,17 @@ Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offtur
 将公开/api/sessions save/get/batch/list/range/text-list/delete全部改typed Admin consumer，显式request actor token，保留原name/labels null保留语义、UTC范围、排序、微秒ISO、date_key时区和mixed-word metrics。list除去内部text:null，batch空列表不发数据请求，get missing原404，delete幂等success，update/delete SSE只在confirmed command之后publish；unknown保留原request ID/error且不发event/不retry。复用Chat现有authenticated threadpool/error调用规则为共同router helper，不复制另一套权限/parser/SSE。正常Browser/公开DTO不展示技术实现。
 
 只迁移实际可授权入口；当前Session Handler不接受Thread server-persistence grant，后台ContextBuilder/Session工具保留清单依赖，不能假造Editor或宽purpose来读所有Session。后续stdio仅exact existing Session editor-stdio idg，去除DATABASE_URL另阶段处理。同步nearest folder/file headers、中英README、现行设计与技术回执，测试走实际FastAPI入口/DTO、MockTransport/公开生产dependency、DB fenced，无PG/model/真实账户/服务，不改部署环境行为或pins。
+
+阶段15实现状态：six exact Session hashes已与实际48-op artifact逐项比较匹配；公开Session router无database import/call，统一helper直接复用原Chat actor/threadpool/safe error规则。原calendar/event回归已接actual公开FastAPI/auth/DTO，native datetime单独保留helper regression。新增闭集Editor状态、optional/null/finite/identity、metrics及confirmed/unknown edit events测试，Luna gate进行中；后台Session工具/Editor/全域仍未关闭。
+
+阶段15 fresh技术回执：指定八文件 `190 passed in 1.20s` exit0，无skip/失败。六Session capability/artifact/canonical SHA逐项一致；Editor全部closed字段/optional集合一致，仅selectedState可显式null。Session router AST无DB import/连接/execute/commit/rollback；共享helper的Chat错误语义由同批公开route测试覆盖。docs19files/192links/179inventory/history3SHA/README heading parity/6sequence计数0fail，未render；tracked diff0，新五Python no-index内层exit1仅内容差异，无whitespace错误。无PG/model/network/真实服务/SDKruntime，后台Session/Editor/其他领域继续待迁移。
+
+## 阶段 16：服务器 Thread 读取与 SDK Session 回写
+
+### Optimized Prompt · 2026-09-15
+
+消费已实际验证Chat14中的chat-thread.get/update-session，以既有server-persistence exact Thread/Run grant替换公开turn Service里的Thread resume/binding读取和SDK-native session ID/contract回写；不使用短用户OAuth、不扩大purpose、不传全局secret。复用AdminChatData、strict Thread DTO与immutable Workflow snapshot，保持SDK session identity、resume兼容检查、on_message/cancellation时持久化和Factory/SSE/lease顺序。内部dispatcher尚无对应server identity时保留原入口依赖，不能靠用户ID仿造后台actor。
+
+扩展当前server持久化owner的同一write barrier：任何unknown操作保留原operation/input/request ID，只有同操作同输入可查原receipt，absent或回执失败禁止后续不同写/推理；known user reservation仍复用，不重复POST。新Session回写严格以originalUUID执行，任何网络/响应未知不生成新ID盲重试。当前通用assistant DTO会经过Admin JSON number解析，raw词法与组合事务尚待actual raw assistant合同，因此该入口不得借本阶段假造codec或变更message parts。
+
+同步文件头/目录/现行设计/中英README/当前入口映射，专用runner验证actual DTO/Service/native on_message/cancel/unknown跨操作barrier/原receipt和Factory回归，严格MockTransport/explicitclock/fakeprovider/DBfence，无PG/真实模型/服务/Runtime子进程。Full-domain、Gateway/Editor、正常本机业务验收保持开放。

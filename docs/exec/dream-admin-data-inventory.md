@@ -1,6 +1,7 @@
 <!-- [Input] Dream baseline Python AST and follow-up production rg scan. -->
 <!-- [Output] Per-file DB/transaction/permission evidence and pending Admin API mapping. -->
 <!-- [Pos] Dream migration inventory; Admin owns the eventual canonical API contract. -->
+<!-- [Sync] 2026-09-15: distinguish baseline scans from actual resource/Chat/Workflow/user-turn/Session consumer mappings. -->
 <!-- [Sync] 2026-09-14: initial exhaustive candidate scan; candidates are not all reachable production SQL. -->
 
 # Dream 生产数据入口清单
@@ -17,9 +18,24 @@ Admin 接口列仅在规范实际就绪后填写。带锁/CAS/ON CONFLICT/Savepo
 
 actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须依据签名主体与服务身份校验实体归属，不能使用任意 user_id 头。非幂等写遵循 Admin 请求 ID 与未知提交恢复契约。
 
-## 逐文件映射
+## 当前源码入口映射
 
-| 文件 | 范围/SQL数 | 数据表 | 事务与并发证据 | 身份参数证据 | 目标接口/替换 |
+此表记录实际消费者范围，发布capability仍由Admin逐请求执行检查。技术合同通过不等于正常本机真实业务验收；完整startup/pool/159事务及其它生产入口继续开放。
+
+| 生产入口 | 实际Admin领域合同/消费者 | 已替换范围 | 保留的迁移依赖 |
+| --- | --- | --- | --- |
+| `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG，LKG/queue/drain原逻辑 | application共享连接的serialized shutdown及全域startup仍需复查 |
+| 共享身份与profile | [request_auth](../../backend/services/admin_data/request_auth.py)/[profile_data](../../backend/services/admin_data/profile_data.py)：JWT/JWKS→principal→user-profile.current | 公开Admin主体/canonical PK/strict profile；旧Dream authority退役 | Gateway subject与内部tool后台独立purpose仍需迁移 |
+| 公开Chat CRUD/history/ownership | [chat_data](../../backend/services/admin_data/chat_data.py)：14 typed methods | HTTP Thread/message入口已切换，公开响应/cursor/commit后close保留 | assistant/title/session后台消费者与Deck/settings/MCP仍有PG |
+| 公开Chat Workflow上下文 | [workflow_data](../../backend/services/admin_data/workflow_data.py)：workflow-context.resolve | Admin完整provenance→immutable actor/thread snapshot，普通null不走旧PG mapper | 内部confirmation/launch及完整Run/preflight/lifecycle事务仍需迁移 |
+| 公开user-turn原子预留 | [user_message_data](../../backend/services/admin_data/user_message_data.py)/[turn_persistence](../../backend/services/admin_data/turn_persistence.py)：chat-user-message.persist | server-persistence exact Thread/Run；guard/message/title单Admin事务，known复用/unknown原receipt；Factory renew/cleanup | 原内部dispatcher guard保留，CLI/Editor各purpose与其余后台persist仍未切换 |
+| 公开写作Session CRUD/summary | [sessions router](../../backend/routers/sessions.py)/[session_data](../../backend/services/admin_data/session_data.py)：session.save/get/batch/list/text-list/delete | 路由无Dream DB；原metadata/state/microsecond/timezone/metrics/confirmed edit events | ContextBuilder、Session工具与Editor stdio仍有原DB入口；Session Handler拒Thread server grant |
+
+## baseline逐文件扫描
+
+下表SQL数、函数行号与初始接口状态保留baseline扫描事实；当前替换状态以本稿上表及[逐阶段执行回执](dream-admin-auth-data-plan.md)为准。
+
+| 文件 | 范围/SQL数 | 数据表 | 事务与并发证据 | 身份参数证据 | 阶段1初始迁移依赖 |
 | --- | --- | --- | --- | --- | --- |
 | [backend/agent_factory.py](../../backend/agent_factory.py) | production / 0 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |
 | [backend/claude_agent/admission.py](../../backend/claude_agent/admission.py) | production / 0 | 依赖/工厂入口 | 详见 JSON 调用线索 | 需调用链核查 | 等待 Admin 规范；按原 aggregate 事务替换 |

@@ -1,6 +1,7 @@
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
 <!-- [Pos] Dream consumer architecture; Admin owns API/DTO/domain/repository/ORM contracts. -->
+<!-- [Sync] 2026-09-15: specify public Session projection/events and reusable closed Editor state DTOs. -->
 <!-- [Sync] 2026-09-15: specify atomic raw user persistence, short-lock renewal and terminal/cancel cleanup. -->
 <!-- [Sync] 2026-09-15: record standalone authority refusal and named script account validation; preserve outstanding domain gates. -->
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
@@ -11,7 +12,7 @@
 
 Dream baseline `7d38715c` 的 Python/Next 架构保留，但 Python 登录 authority与全部生产DB访问移Admin。当前扫描108文件候选、835 SQL片段、159事务候选，见[清单](../exec/dream-admin-data-inventory.md)和[事务图](../exec/dream-admin-transaction-boundaries.json)。字符串片段与候选调用不等于全部可达SQL，后续必须补调用链和动态入口复查。
 
-本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile和Chat CRUD/history/ownership/初始message预留；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime purpose consumer/keeper仍待Agent与工具生命周期接线，其余数据库领域、旧issuer和正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
+本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile和Chat CRUD/history/ownership/初始message预留；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime server-persistence consumer/keeper已接公开user-turn的Factory生命周期，CLI/Editor与其余后台持久化仍待接；旧Dream issuer已退役，其余数据库领域与正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
 
 ## 目标与边界
 
@@ -216,3 +217,9 @@ Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先
 公开ingress在已验证Workflow上下文后以当前OAuth创建最小server-persistence idg：仅dream read/write、exactthread、authoritativeRun或普通null、无EditorSession。`AdminTurnPersistence`只在server保存该grant/typedclient；初始原子预留成功后Service复用同输入的已知result，不再拆三次DB调用或重发。unknown保留原UUID，后续只查原receipt；absent或读取失败继续阻止新写/推理，不能认为取消/超时表示rollback。reply message ID错配按unknown处理。内部confirmation/launch尚未连接其服务身份，继续执行原guard，不借公开迁移删除保护。
 
 Factory在原admission acquire之后启动该owner的独立renewal，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，先等待已dispatch同步writer，再停止/等待renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。此server grant不进入CLI/Editor env、SDK或Browser；Gateway/Editor独立目的、assistant/session和其他数据库领域仍需迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。
+
+### 公开 Session 与 Editor 状态边界
+
+Admin `session.save/get/batch/list/text-list/delete`六operation负责owned Session持久化、state/writingThread绑定、name/labels null保留、UTC范围与排序。Dream复用闭集EditorEngine state DTO，覆盖text/widget/suggestion Cells、commentors/tasks/weight；optional在wire省略，只有selectedState可显式null，required nullable字段保留。有限JSON数值与微秒ISO按实际合同校验；错误state/ID/额外字段在I/O前返回安全400，Admin状态损坏返回503，missing get保持404。
+
+公开Session走同一已认证request actor/OAuth与shared threadpool/error adapter，无外部user ID。metadata list移除内部text:null，Dream保留时区date_key、mixed-word metrics与aggregate响应；空batch不发domain request。update/delete收到confirmed result才publish原user-scoped Edit Session event；unknown保留原request ID，不retry、不发event，业务状态按原receipt确认。此Session合同不接受Thread server-persistence grant，后台ContextBuilder/Session tools尚待独立合同，不能投影Editor或扩大purpose绕过权限。公开HTTP/DTO/DB-fenced技术验收不代表正常账户业务验收。

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# [Input] Consume database session storage APIs, edit-session events, and shared auth/date helpers.
+# [Input] Consume typed Admin Session APIs, edit-session events, and shared explicit actor/date helpers.
 # [Output] Register /api/sessions* endpoints and session event stream.
 # [Pos] session route node in backend/routers
+# [Sync] 2026-09-15: route all public Session storage through Admin; publish edit events only after confirmed writes.
 # [Sync] 2026-05-25: extracted session storage routes from backend/server.py.
 # [Sync] 2026-06-14: publish Edit Session update/delete events and expose
 #                    /api/sessions/events SSE for frontend Agent-write sync.
@@ -13,19 +14,34 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-import database
 from session_events import EditSessionEvent, session_event_bus
+from services.admin_data import session_models as dto
+from services.admin_data.request_auth import AdminRequestAuth
+from services.admin_data.session_data import AdminSessionData
 
 from .deps import (
     _clean_timestamp,
     _count_mixed_words,
     _validate_date_str,
+    get_admin_request_auth,
     get_current_user,
+    invoke_admin_operation,
 )
 
 router = APIRouter()
+
+
+def get_admin_session_data(owner: AdminRequestAuth = Depends(get_admin_request_auth)) -> AdminSessionData:
+    return AdminSessionData(owner.client)
+
+
+def _session_input(schema, **values):
+    try:
+        return schema.model_validate(values)
+    except ValidationError:
+        raise HTTPException(status_code=400, detail="Invalid session input") from None
 
 
 class SessionBatchRequest(BaseModel):
@@ -33,7 +49,7 @@ class SessionBatchRequest(BaseModel):
 
 
 @router.post("/api/sessions")
-async def save_session(request: dict, current_user: dict = Depends(get_current_user)):
+async def save_session(request: dict, current_user: dict = Depends(get_current_user), sessions: AdminSessionData = Depends(get_admin_session_data)):
     """
     Save or update a session.
 
@@ -56,14 +72,9 @@ async def save_session(request: dict, current_user: dict = Depends(get_current_u
             status_code=400, detail="session_id and editor_state required"
         )
 
-    await asyncio.to_thread(
-        database.save_session,
-        user_id,
-        session_id,
-        editor_state,
-        name,
-        labels=labels,
-    )
+    input_dto = _session_input(dto.SessionSaveInputDTO, session_id=session_id,
+        editor_state=editor_state, name=name, labels=labels, created_at=None)
+    await invoke_admin_operation(current_user, sessions.save, input_dto)
     asyncio.create_task(
         session_event_bus.publish(
             EditSessionEvent(
@@ -94,27 +105,28 @@ async def session_events(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/api/sessions")
-def list_sessions(
-    timezone: str = "Asia/Shanghai", current_user: dict = Depends(get_current_user)
+async def list_sessions(
+    timezone: str = "Asia/Shanghai", current_user: dict = Depends(get_current_user),
+    sessions: AdminSessionData = Depends(get_admin_session_data),
 ):
     """
     List all sessions for current user.
     Returns: Array of session metadata (without full editor state) plus local day key + first line.
     """
-    return list_sessions_with_range(None, None, timezone, current_user)
+    return await list_sessions_with_range(None, None, timezone, current_user, sessions)
 
 
 @router.get("/api/sessions/range")
-def list_sessions_with_range(
+async def list_sessions_with_range(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     timezone: str = "Asia/Shanghai",
     current_user: dict = Depends(get_current_user),
+    sessions: AdminSessionData = Depends(get_admin_session_data),
 ):
     """
     List sessions within an optional date range.
     """
-    user_id = current_user["user_id"]
     start_date = _validate_date_str(start_date)
     end_date = _validate_date_str(end_date)
     try:
@@ -124,13 +136,12 @@ def list_sessions_with_range(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid timezone")
 
-    if start_date or end_date:
-        sessions = database.list_sessions_in_range(user_id, start_date, end_date)
-    else:
-        sessions = database.list_sessions(user_id)
+    result = await invoke_admin_operation(current_user, sessions.list,
+        _session_input(dto.SessionListInputDTO, start_date=start_date, end_date=end_date, include_text=False))
 
     enriched = []
-    for s in sessions:
+    for item in result.sessions:
+        s = item.model_dump(exclude={"text"})
         dt = _clean_timestamp(s.get("created_at") or s.get("updated_at"))
         date_key = dt.astimezone(tz).strftime("%Y-%m-%d") if dt else None
         enriched.append({**s, "date_key": date_key})
@@ -139,32 +150,32 @@ def list_sessions_with_range(
 
 
 @router.post("/api/sessions/batch")
-def get_sessions_batch(
-    payload: SessionBatchRequest, current_user: dict = Depends(get_current_user)
+async def get_sessions_batch(
+    payload: SessionBatchRequest, current_user: dict = Depends(get_current_user),
+    sessions: AdminSessionData = Depends(get_admin_session_data),
 ):
     """
     Fetch multiple sessions (with editor_state) in a single request.
     """
-    user_id = current_user["user_id"]
     session_ids = payload.ids or []
 
     if not session_ids:
         return {"sessions": []}
 
-    sessions = database.get_sessions_batch(user_id, session_ids)
-    return {"sessions": sessions}
+    result = await invoke_admin_operation(current_user, sessions.batch,
+        _session_input(dto.SessionBatchInputDTO, session_ids=session_ids))
+    return result.model_dump()
 
 
 @router.get("/api/sessions/aggregate")
-def get_sessions_aggregate(
-    timezone: str = "Asia/Shanghai", current_user: dict = Depends(get_current_user)
+async def get_sessions_aggregate(
+    timezone: str = "Asia/Shanghai", current_user: dict = Depends(get_current_user),
+    sessions: AdminSessionData = Depends(get_admin_session_data),
 ):
     """
     Aggregate stats across all sessions for the user.
     Returns stats only (no concatenated text) and per-session summaries.
     """
-    user_id = current_user["user_id"]
-    sessions = database.get_all_sessions_with_text(user_id)
 
     total_entries = 0
     total_words = 0
@@ -178,7 +189,10 @@ def get_sessions_aggregate(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid timezone")
 
-    for s in sessions:
+    result = await invoke_admin_operation(current_user, sessions.text_list, dto.SessionTextListInputDTO())
+    records = [item.model_dump() for item in result.sessions]
+
+    for s in records:
         text = s.get("text", "") or ""
         if text.strip():
             total_entries += 1
@@ -210,7 +224,7 @@ def get_sessions_aggregate(
             "has_text": bool((s.get("text") or "").strip()),
             "word_count": len((s.get("text") or "").split()) if s.get("text") else 0,
         }
-        for s in sessions
+        for s in records
     ]
 
     return {
@@ -221,28 +235,31 @@ def get_sessions_aggregate(
 
 
 @router.get("/api/sessions/{session_id}")
-def get_session(session_id: str, current_user: dict = Depends(get_current_user)):
+async def get_session(session_id: str, current_user: dict = Depends(get_current_user), sessions: AdminSessionData = Depends(get_admin_session_data)):
     """
     Get a specific session by ID.
 
     Returns: Full session including editor_state
     """
-    user_id = current_user["user_id"]
-    session = database.get_session(user_id, session_id)
+    result = await invoke_admin_operation(current_user, sessions.get,
+        _session_input(dto.SessionIdInputDTO, session_id=session_id))
+    session = result.session
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    return session
+    return session.model_dump()
 
 
 @router.delete("/api/sessions/{session_id}")
 async def delete_session_endpoint(
-    session_id: str, current_user: dict = Depends(get_current_user)
+    session_id: str, current_user: dict = Depends(get_current_user),
+    sessions: AdminSessionData = Depends(get_admin_session_data),
 ):
     """Delete a session."""
     user_id = current_user["user_id"]
-    await asyncio.to_thread(database.delete_session, user_id, session_id)
+    await invoke_admin_operation(current_user, sessions.delete,
+        _session_input(dto.SessionIdInputDTO, session_id=session_id))
     asyncio.create_task(
         session_event_bus.publish(
             EditSessionEvent(

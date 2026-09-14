@@ -1,6 +1,7 @@
 <!-- [Input] Dream baseline auth/BFF and the Admin-owned contract when frozen. -->
 <!-- [Output] Dream consumer design, authority retirement, topology and acceptance gates. -->
 <!-- [Pos] Dream authentication consumer; Admin owns Better Auth, OAuth and signing keys. -->
+<!-- [Sync] 2026-09-15: public Session operations retain explicit request OAuth; server grants do not expand their scopes. -->
 <!-- [Sync] 2026-09-15: distinguish server turn persistence from CLI and Editor purpose grants. -->
 <!-- [Sync] 2026-09-15: retire standalone authority and require explicit OAuth/profile account matching in scripts. -->
 <!-- [Sync] 2026-09-14: record the implemented Admin BFF and public issuer retirement; retain original history. -->
@@ -84,3 +85,5 @@ Authlib在原两个issuer router中仅用于Dream Google/Device authority，现�
 公开user-turn先创建绑定当前Thread/authoritative Run、仅dream read/write的server-persistence委托，再调用Admin原子user message/title/confirmation事务；Service复用已确认的同一输入。未知写保留原request ID并只查询原receipt，absent阻止后续写与推理。Factory在既有admission后启动后台renew，SSE断开保留turn，terminal/cancel安排自有cleanup并由shutdown drain同步writer、renewal线程和独立HTTP client。凭据不进入Browser、CLI或Editor；assistant/session与其它后台领域仍待迁移，Gateway/Editor仍需独立purpose。详细状态与失败处理见[认证与数据交互](admin-auth-data-interaction.md)。
 
 Next同名password/Google/Device/token薄adapter也返回410，login/register在generic proxy前执行，避免未登录401遮住迁移响应；Next `/auth/logout`仍执行实际BFF handle撤销。两端退役owner只读取三项公开authority配置，不要求private service凭据。
+
+公开Session六operation由当前已认证request OAuth执行，继续绑定Admin principal；shared helper只投影该Bearer到指定typed consumer，不接受body actor ID、不做本地renew。Session read/write的工具与后台授权独立于Thread server-persistence，现行Handler拒绝该purpose；后续Editor只能消费exact existing Session的editor-stdio grant。失败/unknown和Edit Session事件规则见[交互设计](admin-auth-data-interaction.md)。
