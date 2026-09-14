@@ -33,6 +33,7 @@
 #                    before the Claude Agent factory starts.
 # [Sync] 2026-09-13: startup identity now reflects SDK 0.2.145 and package-root Runtime 0.1.9 validation.
 # [Sync] 2026-09-14: bind the sole Admin request-auth owner and close its HTTP/JWKS after existing Agent drains; PG startup remains pending migration.
+# [Sync] 2026-09-15: drain and close the resource Admin HTTP owner after background owners and factory shutdown.
 # [Sync] 2026-08-27: own the isolated Claude resource sampler, policy refresher,
 #                    PostgreSQL sink, and publisher lifecycle around the database.
 # [Sync] 2026-08-30: preserve the deployment-owned Claude Bash sandbox
@@ -209,6 +210,7 @@ async def startup_database():
 # ========== Claude Agent Factory ==========
 
 from agent_factory import (
+    claude_agent_resource_data,
     claude_agent_resource_postgres_sink,
     claude_agent_resource_policy_refresher,
     claude_agent_resource_publisher,
@@ -495,6 +497,10 @@ async def shutdown_claude_agent():
         await claude_agent_thread_factory.aclose()
     except Exception:
         logging.getLogger(__name__).exception("Claude Agent factory close failed")
+    try:
+        await asyncio.to_thread(claude_agent_resource_data.close)
+    except Exception:
+        logging.getLogger(__name__).exception("Claude Agent resource Admin client close failed")
     try:
         # No producer may retain the process-wide Redis connection after the
         # factory drain. ``aclose`` resets its slot for test/app reloads.

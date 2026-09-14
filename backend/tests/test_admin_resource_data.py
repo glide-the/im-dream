@@ -2,11 +2,18 @@
 # [Output] Resource state/LKG, wire identity, capability failure and unknown-write recovery evidence.
 # [Pos] Provider-free resource domain tests; no PG, real account or model access.
 # [Sync] 2026-09-14: exercise actual production adapters after the composition root cutover.
+# [Sync] 2026-09-15: verify active-request drain, irreversible owner close and actual shutdown handler ordering.
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import ast
+import asyncio
 import json
+import logging
+from pathlib import Path
+from threading import Event, Thread
+from types import SimpleNamespace
 from uuid import UUID
 
 import httpx
@@ -29,7 +36,7 @@ def config():
     return AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_secret="s" * 32, service_client_id="dream-web")
 
 
-def adapter(config, handler):
+def adapter(config, handler, *, monkeypatch=None):
     def transport(request):
         if request.url.path.endswith("/capabilities"):
             return httpx.Response(200, json={"request_id": request.headers["x-request-id"], "data": {
@@ -37,7 +44,14 @@ def adapter(config, handler):
                 "schema_capabilities": [], "operations": [operation.capability.model_dump() for operation in RESOURCE_OPERATIONS],
             }})
         return handler(request)
-    return AdminResourceData(AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(transport)), operations=RESOURCE_OPERATIONS))
+    http = httpx.Client(transport=httpx.MockTransport(transport))
+    if monkeypatch is not None:
+        # Select the real lazy, transport-owning production constructor while
+        # injecting only its HTTP transport/config, before any request.
+        monkeypatch.setattr("services.admin_data.resource_data.AdminDataConfig.from_env", lambda: config)
+        monkeypatch.setattr("services.admin_data.client.httpx.Client", lambda **_kwargs: http)
+        return AdminResourceData()
+    return AdminResourceData(AdminDataClient(config, client=http, operations=RESOURCE_OPERATIONS))
 
 
 POLICY = {"schemaVersion": 1, "revision": 7, "maxConcurrentRuns": 3, "runMemoryBudgetMib": 768, "memoryReserveMib": 256, "retryAfterSeconds": 120, "claudeCodeEffortLevel": "high"}
@@ -130,3 +144,103 @@ def test_observer_input_rejects_mismatched_sample_and_naive_time():
     for update in ({"sampled_at": datetime(2026, 9, 14, tzinfo=timezone.utc)}, {"process_started_at": datetime(2026, 9, 14)}):
         with pytest.raises(ValidationError):
             ResourceObserverPublishInputDTO.model_validate({**value.model_dump(), **update})
+
+
+@pytest.mark.parametrize("operation", ["read", "write"])
+def test_close_drains_dispatched_http_then_prevents_reopen(config, monkeypatch, operation):
+    entered, release, closing, closed = Event(), Event(), Event(), Event()
+    failures, calls = [], []
+
+    def handler(request):
+        calls.append(request.url.path)
+        entered.set()
+        assert release.wait(2), "harness did not release owned HTTP"
+        value = {"status": "configured", "value": POLICY, "updated_at": "2026-09-14T00:00:00Z"} if operation == "read" else {
+            "accepted": True, "heartbeat_at": "2026-09-14T00:00:01Z", "sampled_at": None}
+        return httpx.Response(200, json={"request_id": request.headers["x-request-id"], "data": value})
+
+    data = adapter(config, handler, monkeypatch=monkeypatch)
+
+    def run_request():
+        try:
+            data.read_policy() if operation == "read" else data.publish_observer("owned-write", observer_input())
+        except BaseException as exc:
+            failures.append(exc)
+
+    def run_close():
+        closing.set()
+        try:
+            data.close()
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            closed.set()
+
+    worker = Thread(target=run_request, name=f"stage19-resource-{operation}")
+    closer = Thread(target=run_close, name="stage19-resource-close")
+    worker.start()
+    try:
+        assert entered.wait(2)
+        closer.start()
+        assert closing.wait(2) and not closed.wait(0.05)
+        assert not data._client._http.is_closed
+    finally:
+        release.set()
+        worker.join(2)
+        if closer.ident is not None:
+            closer.join(2)
+        data.close()
+    assert not failures and not worker.is_alive() and not closer.is_alive()
+    assert closed.is_set() and data._client._http.is_closed
+    data.close()
+    with pytest.raises(AdminDataError) as read_error:
+        data.read_policy()
+    with pytest.raises(AdminDataError) as write_error:
+        data.publish_observer("later-write", observer_input())
+    assert read_error.value.code == write_error.value.code == "ADMIN_CONFIGURATION_INVALID"
+    assert len(calls) == 1
+    fallback = AgentAdmissionConfig(2, 640, 192, 90)
+    result = ClaudeAgentResourcePolicyProvider(data.read_policy).load(fallback)
+    assert result.status == "unavailable" and result.config is fallback
+
+
+def test_unused_owner_close_never_constructs_client_and_is_idempotent(monkeypatch):
+    monkeypatch.setattr("services.admin_data.resource_data.AdminDataConfig.from_env", lambda: pytest.fail("Closed owner must not construct a client"))
+    data = AdminResourceData()
+    data.close()
+    data.close()
+    with pytest.raises(AdminDataError):
+        data.read_policy()
+    assert data._client is None
+
+
+@pytest.mark.parametrize("fail_owner", [None, "publisher", "factory", "http"])
+def test_actual_shutdown_handler_closes_http_after_owners_and_factory(fail_owner):
+    # Compile only the production entry function to inject its owners;
+    # importing the full server would start unrelated config/Runtime composition.
+    source = Path(__file__).resolve().parents[1] / "server.py"
+    node = next(item for item in ast.parse(source.read_text()).body if isinstance(item, ast.AsyncFunctionDef) and item.name == "shutdown_claude_agent")
+    node.decorator_list = []
+    calls = []
+
+    def record(name):
+        calls.append(name)
+        if fail_owner == name:
+            raise RuntimeError("synthetic owner failure")
+
+    def owner(name):
+        async def stop():
+            record(name)
+        return SimpleNamespace(stop=stop, aclose=stop)
+
+    async def close_redis():
+        record("redis")
+
+    namespace = {"asyncio": asyncio, "logging": logging, "__name__": __name__,
+        "claude_agent_resource_publisher": owner("publisher"), "claude_agent_resource_policy_refresher": owner("refresher"),
+        "claude_agent_resource_postgres_sink": owner("sink"), "claude_agent_resource_sampler": owner("sampler"),
+        "claude_agent_thread_factory": owner("factory"), "claude_agent_resource_data": SimpleNamespace(close=lambda: record("http")),
+        "RedisStreamEventBus": SimpleNamespace(aclose=close_redis)}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(source), "exec"), namespace)
+    asyncio.run(namespace["shutdown_claude_agent"]())
+    assert calls == ["publisher", "refresher", "sink", "sampler", "factory", "http", "redis"]

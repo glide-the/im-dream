@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: serialize resource HTTP shutdown after producers and Factory drain. -->
 <!-- [Input] Current Dream/Admin/Gateway topology, supported versions, and user-visible MCP Apps workflow. -->
 <!-- [Output] Plain-language user and local-operator guide with deeper engineering details linked out. -->
 <!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
@@ -47,6 +48,8 @@ Ink & Memory is a workspace for writing with AI. You can keep long-running conve
 This repository contains the Dream Web application and its FastAPI backend. Admin, PostgreSQL, the model Gateway, the public Python SDK, and the native Claude Runtime are maintained separately.
 
 Resource reads/observer writes, shared request identity/profile, and Chat CRUD/history/ownership plus initial user-message reservation now consume Admin APIs. Runtime purpose creation/public renewal/receipt consumers have passed focused technical checks. The server user-turn grant now follows the existing Factory lifecycle; Gateway/Editor wiring and other database domains still require migration. Old password/Google/Device/token/local-cookie HTTP paths return explicit 410 with configured Admin standard endpoints. Standalone auth helpers refuse local authority; importer Agent labels and the named Gateway verifier require explicit Admin OAuth and a matching production profile before business writes/model calls. Authlib/bcrypt have been removed without changing remaining dependency versions. Admin/Auth server secrets are cleared from child environment overlays. These source and build checks do not establish real-account business acceptance.
+
+The resource Admin HTTP owner serializes background reads, observer writes and final close. Shutdown stops its producers and drains the Factory before closing it off the Agent turn; a closed owner cannot reopen or dispatch new requests.
 
 Public Chat also reads Admin's complete Workflow context before message reservation/SSE and passes an immutable actor/thread snapshot to Service, including ordinary-Chat null. Internal confirmation/launch dispatch and the remaining purpose consumers still require migration.
 

@@ -27,7 +27,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 
 | 生产入口 | 实际Admin领域合同/消费者 | 已替换范围 | 保留的迁移依赖 |
 | --- | --- | --- | --- |
-| `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG，LKG/queue/drain原逻辑 | application共享连接的serialized shutdown及全域startup仍需复查 |
+| `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG；read/publish/close同活动锁，shutdown后台owner和Factory后关闭HTTP | 全域startup/其它DB与正常业务验收仍开放 |
 | 共享身份与profile | [request_auth](../../backend/services/admin_data/request_auth.py)/[profile_data](../../backend/services/admin_data/profile_data.py)：JWT/JWKS→principal→user-profile.current | 公开Admin主体/canonical PK/strict profile；旧Dream authority退役 | Gateway subject与内部tool后台独立purpose仍需迁移 |
 | 公开Chat CRUD/history/ownership | [chat_data](../../backend/services/admin_data/chat_data.py)：14 typed methods | HTTP Thread/message入口已切换，公开响应/cursor/commit后close保留 | assistant等后台消费者与Deck/settings/MCP仍有PG |
 | 公开Chat Workflow上下文 | [workflow_data](../../backend/services/admin_data/workflow_data.py)：workflow-context.resolve | Admin完整provenance→immutable actor/thread snapshot，普通null不走旧PG mapper | 内部confirmation/launch及完整Run/preflight/lifecycle事务仍需迁移 |

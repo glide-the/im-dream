@@ -4,6 +4,7 @@
 # [Output] Provide shared Agent factory plus isolated resource observation/synchronization singletons.
 # [Pos] backend Claude Agent composition root; the only owner that resolves and refreshes desired resource policy.
 # [Sync] 2026-09-14: route resource reads/writes through Admin strict DTO APIs; no direct DB access.
+# [Sync] 2026-09-15: server shutdown drains and closes this composition-owned resource HTTP adapter.
 # [Sync] 2026-08-28: replace admission config only for a valid higher revision while every
 #                    refresh can atomically update coherent diagnostics/LKG provenance.
 # [Sync] 2026-08-28: scrub ambient Claude Code tuning and expose one public immutable

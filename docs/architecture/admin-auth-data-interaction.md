@@ -1,6 +1,7 @@
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
 <!-- [Pos] Dream consumer architecture; Admin owns API/DTO/domain/repository/ORM contracts. -->
+<!-- [Sync] 2026-09-15: define resource HTTP owner drain and final shutdown ordering. -->
 <!-- [Sync] 2026-09-15: define preference raw object projection, NULL merge and unknown-save recovery. -->
 <!-- [Sync] 2026-09-15: define OAuth-only Deck version consumers, four exact capabilities and unknown commit handling. -->
 <!-- [Sync] 2026-09-15: specify bound Thread/SDK Session operations, mutable confirmation reuse and scoped unknown recovery. -->
@@ -172,6 +173,14 @@ sequenceDiagram
 ## 首批生产资源接入事实
 
 `agent_factory`、`resource_policy.load` 和 `resource_postgres_sink._write_sync` 已改为Admin HTTP依赖，两个领域方法移除直接SQL。Admin提供真实双向contract SHA256：read `1559c28cd5fbfbbf1b01a35fe6853ba5ccec2f26f45a428ac26ce22d005b3c78`，publish `409dfce5218c0471d9612016305698bba7388eb8d37c34be40b50b10488c1114`，版本均1；运行时须匹配capabilities广告，候选hash不是发布证明。正常读取返回严格状态DTO；非法desired保留LKG，网络/权限/capability/响应漂移不会应用配置。后台observer unknown写仅原request_id receipt恢复，未找到回执不重发、不越过旧写。Agent admission/revision/lease/SSE和共享FS合同不变。其他领域和认证切换仍未闭合。
+
+### 资源 HTTP owner 当前生命周期
+
+背景与问题：refresher/sink取消后，已经dispatch的同步HTTP可能仍在完成；关闭transport不能与该请求并发。目标与边界：只关闭resource composition拥有的独立client，不改变LKG、revision、resource算法、queue或Agent lease，shared request-auth owner仍有自己的生命周期。
+
+概念与规则：AdminResourceData的read_policy/publish_observer/close共用原writer活动锁，整个capabilities/operation/receipt I/O在锁内。close等待已进入的操作，设closed后关闭client，重复close幂等；关闭后读写在创建client或HTTP前返回safe配置错误，provider按原unavailable规则保留fallback/LKG，不传播turn。未知observer write的原UUID记录保留，关闭不查receipt、不重发。
+
+server先按原顺序stop publisher/refresher/sink/sampler，再Factory.aclose，随后asyncio.to_thread(resource_data.close)，最后Redis、数据库和shared request-auth关闭。各owner异常继续原安全日志与后续释放；即使sink已有detached同步调用，活动锁也等待其完成。测试用actual adapter/MockTransport/Event/明确命名ownedthreads覆盖active read/write drain、closed/no reopen/idempotence和provider fallback；shutdown测试仅编译原production注册函数并注入owner，避免full server的其它Runtime/DB初始化，不复制关闭实现。全域startup与正常业务验收仍开放。
 
 ## Runtime 环境阶段事实
 

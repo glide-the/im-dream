@@ -2,6 +2,7 @@
 # [Output] Typed HTTP desired-policy reader and serialized observer writer with receipt recovery.
 # [Pos] Admin resource domain consumer; composition root owns its lifetime, never the Agent turn.
 # [Sync] 2026-09-14: consume real input/output contract hashes and retain unknown writes by original ID.
+# [Sync] 2026-09-15: serialize policy reads, observer writes and final close; closed owners cannot reopen.
 """Resource-domain adapter; no SQL, remote UOW, user impersonation or automatic replay."""
 
 from __future__ import annotations
@@ -92,26 +93,35 @@ class AdminResourceData:
         self._client = client
         self._client_lock = Lock()
         self._writer_lock = Lock()
+        self._closed = False
         self._pending: _PendingObserverWrite | None = None
 
     def _get_client(self) -> AdminDataClient:
         with self._client_lock:
+            if self._closed:
+                raise AdminDataError("ADMIN_CONFIGURATION_INVALID", 503)
             if self._client is None:
                 self._client = AdminDataClient(AdminDataConfig.from_env(), operations=RESOURCE_OPERATIONS)
             return self._client
 
     def close(self) -> None:
-        with self._client_lock:
-            if self._client is not None:
-                self._client.close()
+        # Drain dispatched background requests before closing their transport.
+        with self._writer_lock:
+            with self._client_lock:
+                if self._closed:
+                    return
+                self._closed = True
+                if self._client is not None:
+                    self._client.close()
 
     def read_policy(self) -> ResourcePolicyReadOutputDTO:
-        client = self._get_client()
-        client.capabilities(str(uuid4()))
-        return client.execute(RESOURCE_POLICY_READ, ResourcePolicyReadInputDTO(), str(uuid4())).root
+        with self._writer_lock:
+            client = self._get_client()
+            client.capabilities(str(uuid4()))
+            return client.execute(RESOURCE_POLICY_READ, ResourcePolicyReadInputDTO(), str(uuid4())).root
 
     def publish_observer(self, request_id: str, input_dto: ResourceObserverPublishInputDTO) -> None:
-        # Only the background worker enters this lock; submit and Agent turns never wait.
+        # Only background I/O/shutdown enters this lock; submit and Agent turns never wait.
         with self._writer_lock:
             client = self._get_client()
             if self._pending is not None:

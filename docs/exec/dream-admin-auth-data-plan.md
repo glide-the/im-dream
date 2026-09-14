@@ -394,3 +394,17 @@ Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offtur
 不改资源default/desired/effective/revision/LKG、admission判断顺序/比较/算法/lease、observer最新队列或未知写原receipt规则；关闭后的读取仍由原provider安全fallback，不传播Agent turn。全部操作只在off-turn reader/writer/shutdown；不增加turn PostgreSQL、restart/shell或环境标签路径。
 
 同步file headers/nearest folder/README镜像/现行设计/清单与计划；Luna以actual AdminResourceData/MockTransport/Event/ownedthreads验证close drain active policyread/observerwrite、无并发复用/reopen/新请求、repeat close与LKG，原policy/sink/pipeline回归。不启动真实server/DB/模型/Runtime/服务，不改tmp协议、版本pins或其他后台数据入口。
+
+阶段19实现状态：resource adapter原writer锁覆盖全部read/publish/close，closed前等待active HTTP且closed后不创建/dispatch；server Factory后to_thread关闭resource owner，再原Redis/db/sharedauth。保持原pipeline/LKG/unknown receipt与lease。新增actual lazy-owned HTTP Event/threads和unusedclosed/actual shutdown function DI失败隔离；Luna技术gate进行中。
+
+阶段19 fresh技术回执：指定五文件 `60 passed in 1.61s` exit0，无failure/skip。doc checker exit0：28files/215links/199inventory/history3SHA/README parity/6sequence计数0fail（未render），diff check0。actual server AST wiring检查0：Factory.aclose < resource_data.close < Redis.aclose；admission/lease/pipeline文件无变更。无PG/network/model/账户/服务/SDKruntime；本轮自有线程已结束，无pyc/端口/生成物清理。
+
+## 阶段 20：Browser session 过期异步结果边界
+
+### Optimized Prompt · 2026-09-15
+
+修复已取消或旧/auth/session请求在clear/logout/新session读取之后仍修改内存CSRF的问题。复用唯一browserSession owner及现有strict public DTO，使用对象identity记录当前read代次，不能引入OAuth/storage/token/时间阈值。每个await/catch后检查AbortSignal与read identity；aborted/superseded结果返回null且无状态修改/错误覆盖，旧401不能清除新session。clear与logout开始使已有read失效，logout失败仍保留已验证public session，只有strict成功receipt清除。
+
+唯一owner保存immutable public session snapshot并由其导出CSRF，AuthContext在异步then提交前检查returned snapshot仍为当前owner；过期null同样不能覆盖已加载session。保持当前同源Cookie/CSRF headers、Admin单一登录注册入口、公开profile与失败反馈，不改变server handle/refresh、MCP标准OAuth/Apps、SSE或任意业务DTO。不增加确认或产品限制。
+
+测试显式deferred fetch/JSON覆盖abort before-I/O/after-response/after-json、旧成功/旧401/旧失败、新请求顺序、clear/logout期间旧结果、failedrevoke保留、immutable/no OAuth headers。专用runner执行actual Node helpers与受影响typecheck，无Browser/网络/DB/model/服务。同步header/nearestfolder/README镜像/现行Auth设计/清单，其他全域DB/真实业务gate仍开放。
