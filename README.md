@@ -20,6 +20,8 @@ visible failures. See the [resume contract and sequence diagram](docs/design/cla
 
 # Ink & Memory
 
+<!-- [Sync] 2026-09-14: document file-relative Next compilation roots and stopped-cache backup recovery. -->
+
 <p align="center">
   <img src="assets/banner.png" alt="Ink & Memory" width="700" />
 </p>
@@ -303,6 +305,8 @@ Focused MCP Apps commands and the current provider-free evidence are listed in [
 For deployment profiles, see [deploy/README.md](deploy/README.md). AutoDL now builds the same canonical Next.js workspace with the frozen pnpm lock and includes the server-only MCP Apps runtime; legacy Vite/npm/dist release paths are unsupported. An Alibaba edge that relays the existing public domains to explicit NATAPP Dream/Admin origins uses the recoverable [edge-relay procedure](docs/deploy/natapp-edge-relay.md), not an inferred Compose upstream.
 
 ## Troubleshooting
+
+If Next reports `Could not find the module ... in the React Client Manifest`, check its compilation root and cache before changing application modules. `frontend/next.config.js` derives `turbopack.root` from its own file location, not the launch working directory or ancestor lockfiles. Stop the frontend, confirm `.next/dev/lock` has no active owner, move only `frontend/.next` to an independent backup, then restart to rebuild. Do not delete parent lockfiles, reinstall unrelated dependencies, move environment/database files, or weaken the client boundary. Configuration regression: `corepack pnpm --dir frontend exec playwright test e2e/next-config.test.ts --workers=1 --reporter=line` (no browser or service required).
 
 ### The App does not appear
 

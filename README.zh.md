@@ -19,6 +19,8 @@
 
 # Ink & Memory
 
+<!-- [同步] 2026-09-14：补充配置文件相对的 Next 编译根目录与停止服务后的缓存备份恢复。 -->
+
 <p align="center">
   <img src="assets/banner.png" alt="Ink & Memory" width="700" />
 </p>
@@ -297,6 +299,8 @@ MCP Apps 聚焦命令与当前 provider-free 证据请见 [MCP Apps 验收回执
 部署方式请见 [deploy/README.md](deploy/README.md)。AutoDL 现已使用同一个 Next.js workspace 与 frozen pnpm lock，并包含 server-only MCP Apps Runtime；旧 Vite/npm/dist 发布路径不再支持。阿里云边缘把现有公开域名转发到显式 NATAPP Dream/Admin origins 时，应使用可恢复的[边缘转发流程](docs/deploy/natapp-edge-relay.md)，不得从 Compose 或历史端口猜测上游。
 
 ## 故障排查
+
+如果 Next 报 `Could not find the module ... in the React Client Manifest`，先检查编译根目录与缓存，不要直接改业务模块。`frontend/next.config.js` 从自身文件位置确定 `turbopack.root`，不依赖启动 cwd 或祖先锁文件。停止前端，确认 `.next/dev/lock` 没有活跃进程，再仅将 `frontend/.next` 移到独立备份目录，重新启动生成缓存。不要删除父目录锁文件、重装无关依赖、移动环境/数据库文件或降低 client boundary。配置回归：`corepack pnpm --dir frontend exec playwright test e2e/next-config.test.ts --workers=1 --reporter=line`（无需浏览器或服务）。
 
 ### App 没有出现
 

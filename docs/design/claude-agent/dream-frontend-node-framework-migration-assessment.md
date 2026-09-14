@@ -6,6 +6,8 @@
 
 # Dream Web 当前 Next.js 架构与迁移历史
 
+<!-- [同步] 2026-09-14：补充 Next 编译根目录、缓存备份恢复及登录/刷新/Resources 验收规则，保留既有迁移历史。 -->
+
 > 代码基线：`54f3bbe539b086035bce5900618bf3d7ae5b9372`。
 >
 > 当前结论：Dream Web 已是 Next.js `16.1.6` + React `19.1.0` + pnpm workspace。`frontend/` 是唯一 workspace、Web package 和 Next 项目根；`frontend/app/**` 是唯一 App Router；`frontend/app/_dream/**` 是唯一 Dream 应用源码；`frontend/packages/mcp-apps-runtime/src/**` 是合法且唯一的 server-only MCP Apps Runtime package。
@@ -49,6 +51,16 @@
 - 不通过 `INK_ENVIRONMENT` 等部署环境名改变业务路径或 Apps 状态机。
 
 ## 3. 当前目录与 source ownership
+
+### 编译根目录与缓存恢复
+
+**背景与问题**：2026-09-14 本机 React Client Manifest 缺少 `client-shell.tsx` 和 Next `global-error` 的模块映射，日志模块前缀为 `[project]/project/ink-dream-memory/frontend/`。Next 自动根目录检测同时发现 frontend pnpm lock 和用户目录 lock，选择了仓库外的用户目录；旧编译缓存可能保留此前的模块标识，不能仅凭错误前缀认定缓存是唯一原因。HTTP 状态或服务 Ready 不足以证明 RSC 页面可渲染。
+
+**目标与边界**：`turbopack.root` 从 `next.config.js` 的真实文件位置确定为 frontend，Next 使用一致的 tracing 根目录。不升级 Next、不改 client-shell/错误边界、不删除祖先锁文件，不修改 Python、SDK/Runtime、MCP Apps 业务与路由策略。
+
+**概念与规则**：根目录是编译模块路径的相对基准，不是新的应用目录。配置变更后重启前端；服务停止且编译锁无活跃拥有者时，备份 `.next` 并重建，不搬动环境文件或业务数据。浏览器已有的旧 HMR 模块需刷新，不增加自动清理或重试业务请求的程序。
+
+**影响范围与验收**：保留 runtime-config no-cache header、Python API/auth/OAuth rewrites、Next MCP Apps/Agent 路由排除和 standalone 选项；配置回归通过现有 Playwright runner 执行 `e2e/next-config.test.ts`。另验证真实 Next 登录页面首次访问与刷新、RSC hydration、JS/CSS 资源及完整 API 拦截的 Resources 业务流程，不调用收费模型或修改数据库。缺失映射、浏览器 uncaught error 或不完整渲染仍判为失败；技术验证不是新的真实账户验收。
 
 ```text
 frontend/                              # 唯一 workspace/Web package/Next root
