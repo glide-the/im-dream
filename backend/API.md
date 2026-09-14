@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: document typed Admin preference get/save, required nullable wire and unknown result behavior. -->
 <!-- [Sync] 2026-09-15: document Admin-backed public Deck versions, exact capabilities and unknown-result recovery. -->
 # Ink & Memory API Documentation
 
@@ -718,6 +719,16 @@ when that date has no retained picture.
 
 ### GET `/api/preferences`
 
+Public preference get/save uses current OAuth and Admin's two typed operations
+with exact identity/unified capabilities. GET keeps missing-row `{}`, decoded
+config objects, nullable first-login integer and precise ISO timestamps. POST
+allows only voice_configs/meta_prompt/state_config/selected_state/timezone;
+null preserves stored fields, empty objects/strings remain explicit values.
+No body user ID, first-login or system policy write is accepted. Unknown save
+results keep their original request ID and are never automatically retried.
+Default voices remain local config; background/system/import domains are separate.
+
+
 Get user preferences.
 
 **Headers:** `Authorization: Bearer <token>`
@@ -751,7 +762,7 @@ Returns empty object `{}` if no preferences set.
 
 ### POST `/api/preferences`
 
-Save user preferences (partial updates supported).
+Save user preferences (partial updates supported). Only the five preference fields are accepted. Invalid fields, nonfinite numbers or malformed JSON return HTTP 422 with `{"detail":"Invalid preferences request"}`; the response does not echo submitted text.
 
 **Headers:** `Authorization: Bearer <token>`
 

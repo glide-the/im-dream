@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: 公开用户偏好使用两项OAuth Admin operation，保持原partial合并与raw JSON投影。 -->
 <!-- [Sync] 2026-09-15: 同步Admin Deck内容版本事务与其余Deck/Runtime消费端迁移边界。 -->
 <!-- [输入] 当前 Dream/Admin/Gateway 拓扑、支持版本与用户可见的 MCP Apps 流程。 -->
 <!-- [输出] 面向普通用户和本机运行者的简明指南，深入工程细节通过链接下沉。 -->
@@ -53,6 +54,8 @@ Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话
 公开写作Session save/get/batch/list/range/aggregate/delete已使用六项typed Admin operation与显式request OAuth。保留原metadata/full-state响应、精确时间、时区日键和正文metrics；仅confirmed写入后发edit event。共享闭集Editor状态DTO省略未设置的optional字段。当前Session合同拒绝Thread server-persistence grant，后台Session上下文/工具仍是独立迁移依赖。
 
 公开Deck内容state/preview/commit/history/detail已使用五项typed Admin operation与精确schema capability。Admin执行snapshot/hash/CAS/版本事务；Dream还原原rawsnapshot响应，保留安全冲突详情及未知提交ID，不自动重发。其余Deck/Voice操作、插件文件验证与Runtime消费端仍需迁移。
+
+公开用户偏好get/save已使用两项OAuth Admin operation。未保存仍返回`{}`；null保留已有字段，空对象/空文本仍是明确值，raw Python配置JSON保持数值类型。默认Voice、System策略、first-login写与后台上下文仍是独立领域。
 
 ## 你可以做什么
 

@@ -1,10 +1,3 @@
-<!-- [Input] Module business flows, current Admin consumers and byte-preserved pre-migration sequence source. -->
-<!-- [Output] Module flow reference with explicit current ownership and retained migration dependencies. -->
-<!-- [Pos] Sequence index; focused current designs own authentication, Session, Deck and preferences rules. -->
-<!-- [Sync] 2026-09-15: public user preferences use Admin; retain original whole source in history. -->
-
-认证/Session/Deck的现行程序行为以[Admin交互](../architecture/admin-auth-data-interaction.md)和各功能稿为准；本稿其余尚未更新的旧issuer/直接SQL说明仅是迁移依赖，不作为现行规范。[原十模块时序原文](history/pre-admin-user-preferences-20260915/sequence-diagrams.md)字节保持；用户偏好正常、状态、失败和验收见[现行稿](user-preferences-current.md)。
-
 <!-- [Input] Current Next.js Dream Web modules and Python business routes/services. -->
 <!-- [Output] Current cross-module business sequence diagrams. -->
 <!-- [Pos] Design-level sequence index; domain details remain in their focused documents. -->
@@ -124,7 +117,6 @@ sequenceDiagram
     actor User as 用户
     participant FE as Frontend
     participant Hook as useSessionLifecycle
-    participant Admin as Admin DTO/Service/Repository
     participant API as Backend API
     participant DB as database.py
 
@@ -149,11 +141,8 @@ sequenceDiagram
     end
 
     Hook->>API: GET /api/preferences
-    API->>Admin: user-preferences.get + current OAuth + original UUID
-    Admin->>DB: identity/unified/owner校验后读取原配置
-    DB-->>Admin: raw config JSON/nullable字段/微秒时间
-    Admin-->>API: closed preferences DTO
-    API->>API: raw JSON还原voice_configs/state_config，无SQL
+    API->>DB: get_preferences(user_id)
+    DB-->>API: 用户偏好（voice_configs, meta_prompt 等）
     API-->>Hook: preferences
     Hook->>FE: 渲染编辑器
     FE-->>User: 显示今日会话内容

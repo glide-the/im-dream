@@ -1,6 +1,7 @@
 <!-- [Input] User delegation, Agent.md, AGENTS.md, baseline 7d38715c, and Admin-owned contracts when published. -->
 <!-- [Output] Executable Dream migration plan, dependency gates, and exact evidence inventory. -->
 <!-- [Pos] Dream implementation plan; Admin owns authentication, database transactions, and schema contracts. -->
+<!-- [Sync] 2026-09-15: record preference consumers and their independent public technical evidence. -->
 <!-- [Sync] 2026-09-15: record five public Deck content-version consumers and exact contract gates. -->
 <!-- [Sync] 2026-09-15: implement bound Agent Thread/SDK Session consumers and scoped original-receipt recovery. -->
 <!-- [Sync] 2026-09-15: implement public Session consumers while retaining separate background authorization gates. -->
@@ -377,3 +378,19 @@ Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offtur
 公开GET保持未保存{}与voice_configs/state_config原dict、meta_prompt/selected_state/timezone/first_login_completed/微秒时间；POST把五optional公共字段转requirednullable wire，None沿用原COALESCE保留，空对象保存{}，JSON保持Pythonfloat/negativezero/bigint不经JS重编码。拒绝外部actor/firstlogin/systemconfig字段和错误形状，不增加产品配额/默认值/确认；stored config无法投影有效公共JSON时safe failclosed，不修数据库。不改变default-voices本地config端点、SYSTEM config/模型/Workspace/effort/Deck策略所有权。
 
 公开偏好路由移除Dream DB，仅typed two operation。其它System Config/first-login/导入/后台读取仍明确待迁移，不靠该合同扩大context授权。补actualFastAPI/Auth/DTO/MockTransport/DBfence的partial/null/emptyobject/numeric/time/permissions/invalid fields/unknown原UUIDno retry测试，同步nearest file/folder/README镜像/现行设计与旧时序索引；专用runner技术验收无PG/网络/模型/用户服务/SDKruntime，不改pins。
+
+阶段18实现状态：actual60 artifact两hash/identity-unified pins接入；public preferences router无database，shared invoke保持原scope/error/threadpool。closed publicfive optional→wirefive requirednullable，NULL/{}及emptytext/rawfloat/negativezero/bigint/offset微秒/readonlyfirstlogin保留；无法publicJSON投影的stored config503且无heal，写invalidtrue/timeout unknown原UUIDno retry。defaultvoices/System/Runtime/firstlogin/import/后台读取分开。Coordinator传入Admin真实受限public2/78 exit0技术回执（非normal业务），Dream独立Luna gate进行中。
+
+旧sequence source完整保存于docs/design/history/pre-admin-user-preferences-20260915/sequence-diagrams.md，原字节SHA256: 699f7ea4fe740b2f391c7a13b792b985df8b676fd211ba4dd9dfc64f8a1e7fc1；现行用户偏好单独功能稿与索引，原十模块功能/流程不删除，旧issuer/SQL不作为当前规范。
+
+阶段18验证发现并修复：初批五文件186pass；新增raw NaN请求后fresh偏好文件30pass/1fail（FastAPI默认validation detail回显NaN导致JSONResponse编码失败）。偏好局部APIRoute复用原typed校验/OpenAPI，将RequestValidationError转固定422且不回显input，补Inf/overflow/顶层数组/malformed正文用例；不增加全局业务分支。fresh偏好文件 `36 passed in 0.76s` exit0，无skip/failure。初批其它通过文件未修改，不重复运行。`python3 /private/tmp/dream-admin-doc-check.py` exit0：30files/216links/222inventory/history3SHA/README parity/6sequence计数0fail（未render）；`git diff --check` exit0。原sequence archive bytes_equal，SHA与上述原文一致。actual两operation hash/closed schema/identity-unified comparator已exit0。无PG/network/model/账户/用户服务/SDKruntime。
+
+## 阶段 19：资源 Admin HTTP owner 的序列化关闭
+
+### Optimized Prompt · 2026-09-15
+
+关闭清单中仍开放的资源Admin客户端生命周期缺口。复用AdminResourceData原writer串行锁，让policy read/publish/close共享同一活动边界；close等待已dispatch HTTP，标记closed后不重开/不接新request，重复close幂等。client只由resource composition root所有，server在原publisher/refresher/sink/sampler停机与factory drain后关闭该HTTP owner，不关闭别人的服务/连接。
+
+不改资源default/desired/effective/revision/LKG、admission判断顺序/比较/算法/lease、observer最新队列或未知写原receipt规则；关闭后的读取仍由原provider安全fallback，不传播Agent turn。全部操作只在off-turn reader/writer/shutdown；不增加turn PostgreSQL、restart/shell或环境标签路径。
+
+同步file headers/nearest folder/README镜像/现行设计/清单与计划；Luna以actual AdminResourceData/MockTransport/Event/ownedthreads验证close drain active policyread/observerwrite、无并发复用/reopen/新请求、repeat close与LKG，原policy/sink/pipeline回归。不启动真实server/DB/模型/Runtime/服务，不改tmp协议、版本pins或其他后台数据入口。

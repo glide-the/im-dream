@@ -1,6 +1,7 @@
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
 <!-- [Pos] Dream consumer architecture; Admin owns API/DTO/domain/repository/ORM contracts. -->
+<!-- [Sync] 2026-09-15: define preference raw object projection, NULL merge and unknown-save recovery. -->
 <!-- [Sync] 2026-09-15: define OAuth-only Deck version consumers, four exact capabilities and unknown commit handling. -->
 <!-- [Sync] 2026-09-15: specify bound Thread/SDK Session operations, mutable confirmation reuse and scoped unknown recovery. -->
 <!-- [Sync] 2026-09-15: specify public Session projection/events and reusable closed Editor state DTOs. -->
@@ -241,3 +242,9 @@ Admin `session.save/get/batch/list/text-list/delete`六operation负责owned Sess
 Admin负责snapshot/hash/diff、Deck锁、immutable append及latest/published revision同事务更新。Dream闭集校验v1 snapshot raw字符串，最终标准Python decode成原flat detail的snapshot dict；float/负零/bigint、required nullable、created_by公开int与微秒时间保持，不重算或改写canonical JSON。reply外层/nested Deck或selected version不匹配读503，commit按unknown处理。
 
 commit的positive safe CAS与原description/limit合同保持。409 conflict只携带已校验current_draft_revision/current_version及固定安全message；已确认事务失败保留草稿/旧vN，网络/响应结果不明保留原UUID/outcome_unknown、不自动POST重试，absent不能证明rollback。catalog fresh fetch失败清除ready，下次共享身份重新加载，避免其他领域沿用空广告。公开五operation技术验收无Dream PG；其他Deck/Voice14、refs/voice6的actualFS/CLI证据、Runtime和内部content-version消费者继续开放，正常业务验收独立。
+
+### 公开用户偏好边界
+
+`AdminPreferencesData`消费user-preferences.get/save两个actualoperation，current OAuth、identity/unified exact schema与closed input由同一transport/actor adapter校验；Admin用户级Service拒绝全部idg管理授权。POST只允许五optional公共字段，转voice_configs_json/meta_prompt/state_config_json/selected_state/timezone五requirednullable wire；rawJSON用Python生成，不经JS重编码。null执行原COALESCE保留，{}与空字符串仍保存；不接受外部actor/firstlogin/systemconfig写。偏好route handler将typed请求校验失败转固定422，不回显正文/input，避免非finite输入在框架错误响应编码时失败。
+
+GET null row仍{}；rawconfig还原原voice_configs/state_config对象，firstlogin整数/null只读，ISO offset/微秒保持。raw对象NaN/Infinity无法输出公共标准JSON时safe503/noheal。confirmed true返回原success；timeout/invalidwrite结果保留原UUID/outcome_unknown/no retry，不能由absent声明rollback。default-voices仍Dream config，System/Runtime策略/firstlogin/import/后台context仍独立；具体default/desired/effective/revision与状态见[现行稿](../design/user-preferences-current.md)，旧时序原文另存。actual公开DTO/DBfenced MockTransport是技术验收，与正常真实账户/模型验收分开。
