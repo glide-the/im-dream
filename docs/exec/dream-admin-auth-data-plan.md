@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record unregistered Run create/retry and original hidden-source dispatch ordering. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: record Stage24 public Voice implementation and present-fields reuse. -->
@@ -546,3 +547,13 @@ git diff --cached --check
 ```
 
 最后只读检查：registry仍70；Workflow公开Run/PF读取使用_story_workflow_current_user，其默认workspace由Dream数据库取得，尚无发布的workspace默认领域合同；PF70完整fault/interruption/unknown验证仍pending，不能消费未关闭gate。其他全域清单、Admin empty Memory projection与timeline descriptor差异、正常本机真实业务/模型验收继续保留。协调任务同步仍受此前auto-review拒绝及未回复授权限制，不重试或绕过。get_goal返回usageLimited（用户用量控制状态），本目标未标记complete/blocked；本轮代码与目录文档均已提交，未消耗reset credit。
+
+## Admin未注册Run创建/重试通知与Dream依赖复核
+
+Admin报告独立prospective实现25项源/原子性与9项OAuth ingress通过；本任务未重跑Admin测试，也未将该报告计为注册/发布/正常业务证明。只读workflowRunCreationDto与实际70 registry复核exit0：workflow-run.create/retry均未注册，shared PF70/Route/DTO/Registry冻结继续保留。
+
+create闭集输入为workspace_id/workflow_preflight_id/preflight_token/idempotency_key，加全null或完整source_voice_thread_id/source_message_id/source_message_time；retry为相同四项加workflow_run_id，不接受替换source。两输出复用既有完整{run:WorkflowRun}。key长度按原Python码点规则；Admin报告四项旧输出UTF16候选与原源码八例差异需修正，原完整schema/hash保持且等待解除冻结；Dream不按候选猜hash或发布capability。
+
+ensure_source属于Admin未来持久化领域实现，Dream只在实际发布后接消费者。当前Dream原Application由actor/workspace/key的canonical JSON推导UUIDv5 Thread/message，在PF与Run前原子确保隐藏来源。原ensure_source metadata不含workflowRunId；Run确认后Application进入原dispatcher，dispatch claim先保存workflowRunId/dreamContext与dispatchStatus=dispatching，再调用turn dispatcher。不能将通知中的“dispatch后才绑定”扩写为Runtime接受后才写绑定或改变原claim/lease/失败重入语义。原来源tuple、fingerprint、UUID与source先提交/Run后dispatch顺序均继续作为验收依据。Runtime/Agent编排仍Dream所有；尚无已发布ensure_source/dispatch领域capability，生产PG迁移保持pending。
+
+本轮仅文档记录，未修改production代码、Admin源、registry/hash/schema、服务/数据库/模型，也未发送跨任务消息。
