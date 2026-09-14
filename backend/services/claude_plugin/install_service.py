@@ -4,6 +4,7 @@
 [Output] Terminal operations, verified ready installations, immutable artifacts, and entry lineage.
 [Pos] Single production ClaudePlugin install pipeline used by Settings and Deck consumers.
 [Sync] 2026-08-19: verify remote URL/ref/commit/manifests/full-plugin digest without using local-path catalog constants for entry installs.
+[Sync] 2026-09-15: artifact and CLI checks are shared static methods for server-derived Admin metadata; algorithms unchanged.
 
 Every install flows through the same pipeline:
 
@@ -807,7 +808,8 @@ class PluginInstallService:
         assert updated is not None
         return updated
 
-    def check_cli_compatibility(self, record: dict[str, Any]) -> bool:
+    @staticmethod
+    def check_cli_compatibility(record: dict[str, Any]) -> bool:
         """SemVer compatibility of an installation against the current CLI."""
         try:
             compatibility = json.loads(record.get("compatibility_json") or "{}")
@@ -825,7 +827,8 @@ class PluginInstallService:
         except ValueError:
             return False
 
-    def verify_installation_artifact(self, record: dict[str, Any]) -> bool:
+    @staticmethod
+    def verify_installation_artifact(record: dict[str, Any]) -> bool:
         """Re-verify the artifact digest for an installation record."""
         try:
             artifact_store.get_artifact(

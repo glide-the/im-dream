@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: public Deck Claude Plugin refs use Admin plus unchanged local artifact/CLI checks. -->
 <!-- [Sync] 2026-09-15: Browser session过期响应不修改状态，注销仅成功后清除。 -->
 <!-- [Sync] 2026-09-15: 资源HTTP owner在producer和Factory结束后序列化关闭。 -->
 <!-- [Sync] 2026-09-15: 公开用户偏好使用两项OAuth Admin operation，保持原partial合并与raw JSON投影。 -->
@@ -60,6 +61,8 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 公开写作Session save/get/batch/list/range/aggregate/delete已使用六项typed Admin operation与显式request OAuth。保留原metadata/full-state响应、精确时间、时区日键和正文metrics；仅confirmed写入后发edit event。共享闭集Editor状态DTO省略未设置的optional字段。当前Session合同拒绝Thread server-persistence grant，后台Session上下文/工具仍是独立迁移依赖。
 
 公开Deck内容state/preview/commit/history/detail已使用五项typed Admin operation与精确schema capability。Admin执行snapshot/hash/CAS/版本事务；Dream还原原rawsnapshot响应，保留安全冲突详情及未知提交ID，不自动重发。其余Deck/Voice操作、插件文件验证与Runtime消费端仍需迁移。
+
+公开Deck Claude Plugin refs已使用Admin list/prepare/replace。Dream先复用原制品摘要与CLI兼容检查，再提交绑定来源metadata的evidence；其它Plugin安装/Runtime数据仍需迁移。
 
 公开用户偏好get/save已使用两项OAuth Admin operation。未保存仍返回`{}`；null保留已有字段，空对象/空文本仍是明确值，raw Python配置JSON保持数值类型。默认Voice、System策略、first-login写与后台上下文仍是独立领域。
 

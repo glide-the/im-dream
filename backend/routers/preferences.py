@@ -5,31 +5,18 @@
 # [Sync] 2026-05-25: extracted preference routes from backend/server.py.
 # [Sync] 2026-09-15: public preferences use two Admin operations; system/first-login policy remains separate.
 # [Sync] 2026-09-15: validation failures return fixed 422 JSON without echoing the request body.
+# [Sync] 2026-09-15: reuse the shared scoped validation route class; public preference error detail stays unchanged.
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 
 import config
 from services.admin_data.preferences_data import AdminPreferencesData, PreferencesGetInputDTO, PreferencesSaveRequestDTO
 from services.admin_data.request_auth import AdminRequestAuth
 
-from .deps import get_current_user, invoke_admin_operation
+from .deps import SafeRequestValidationRoute, get_current_user, invoke_admin_operation
 
-class _PreferencesRoute(APIRoute):
-    def get_route_handler(self):
-        handler = super().get_route_handler()
-
-        async def validate_request(request: Request):
-            try:
-                return await handler(request)
-            except RequestValidationError:
-                # Framework validation details include the raw input, which may
-                # contain nonfinite JSON numbers or private preference text.
-                return JSONResponse(status_code=422, content={"detail": "Invalid preferences request"})
-
-        return validate_request
+class _PreferencesRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid preferences request"
 
 
 router = APIRouter(route_class=_PreferencesRoute)

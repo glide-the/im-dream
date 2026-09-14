@@ -4,6 +4,7 @@
 # [Pos] shared dependency node in backend/routers
 # [Sync] 2026-09-15: reuse one explicit actor/threadpool/error adapter for typed Chat and Session operations.
 # [Sync] 2026-09-15: allow a domain's safe error response through the same actor invocation path.
+# [Sync] 2026-09-15: reuse scoped typed-request validation with fixed errors and no raw body echo.
 # [Sync] 2026-05-25: extracted common dependency helpers from backend/server.py.
 # [Sync] 2026-06-23: allow auth dependencies to read system access tokens from
 #                    Authorization headers or OAuth login cookies.
@@ -20,6 +21,9 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import Depends, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -28,6 +32,23 @@ from services.admin_data.errors import AdminDataError
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 
 http_bearer = HTTPBearer(auto_error=False)
+
+
+class SafeRequestValidationRoute(APIRoute):
+    validation_error_detail = "Invalid request"
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def validate_request(request: Request):
+            try:
+                return await handler(request)
+            except RequestValidationError:
+                # Framework details include raw input, including private text
+                # and numbers that cannot be encoded in a JSON response.
+                return JSONResponse(status_code=422, content={"detail": self.validation_error_detail})
+
+        return validate_request
 
 
 def get_admin_request_auth(request: Request, credentials: HTTPAuthorizationCredentials = Depends(http_bearer)) -> AdminRequestAuth:

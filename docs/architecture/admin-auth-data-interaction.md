@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: specify prepare/local verification/source recheck and unknown refs writes. -->
 <!-- [Sync] 2026-09-15: specify abort/read identity and success-only logout snapshot ownership. -->
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
@@ -262,3 +263,7 @@ commit的positive safe CAS与原description/limit合同保持。409 conflict只�
 `AdminPreferencesData`消费user-preferences.get/save两个actualoperation，current OAuth、identity/unified exact schema与closed input由同一transport/actor adapter校验；Admin用户级Service拒绝全部idg管理授权。POST只允许五optional公共字段，转voice_configs_json/meta_prompt/state_config_json/selected_state/timezone五requirednullable wire；rawJSON用Python生成，不经JS重编码。null执行原COALESCE保留，{}与空字符串仍保存；不接受外部actor/firstlogin/systemconfig写。偏好route handler将typed请求校验失败转固定422，不回显正文/input，避免非finite输入在框架错误响应编码时失败。
 
 GET null row仍{}；rawconfig还原原voice_configs/state_config对象，firstlogin整数/null只读，ISO offset/微秒保持。raw对象NaN/Infinity无法输出公共标准JSON时safe503/noheal。confirmed true返回原success；timeout/invalidwrite结果保留原UUID/outcome_unknown/no retry，不能由absent声明rollback。default-voices仍Dream config，System/Runtime策略/firstlogin/import/后台context仍独立；具体default/desired/effective/revision与状态见[现行稿](../design/user-preferences-current.md)，旧时序原文另存。actual公开DTO/DBfenced MockTransport是技术验收，与正常真实账户/模型验收分开。
+
+### 公开Deck Claude Plugin refs
+
+list/prepare/replace经当前OAuth与exactidentity/unified，拒绝全部entitygrant管理。prepared闭集installation无path，selectedIDs exact/unique/ready后由Dream原staticmethod验证制品摘要与CLI SemVer；body不接受package/digest/compat/actor。Admin按source evidence锁与重检当前ready/package/version/digest/rawcompat，在单TX refs/semanticdraft/receipt/audit，no-op/reorder不推进。Dream只校验replyDeck/IDs与原enabled0/1/ISO投影，unknown保留原UUID/no retry。共同scoped validation复用原偏好wrapper，固定422不回显正文；global install/catalog/runtime/Voice仍在清单开放。完整规则见[现行refs稿](../design/deck/deck-claude-plugin-refs-current.md)。

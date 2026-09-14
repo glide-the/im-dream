@@ -424,3 +424,19 @@ Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offtur
 只从prepare的server metadata生成package/version/digest/rawcompat source evidence，body不接受这些字段/actor/path。实际FS与CLI验证失败在replace前返回原安全error/status；Admin在同TX锁ownedDeck/installations并重检metadata/ready，refs语义变化推进draft，reorder/no-op保留原记录/时间。Dream保留public {deck_id,refs}及enabled的原0/1投影和ISO微秒，确认reply需matchDeck/IDs；replace unknown保留原UUID/outcome_unknown，不retry，prepare/read错误不制造write。不得用fixture称实际共享FS/CLI或真实模型验收。
 
 新增现行refs功能稿（背景问题/目标边界/概念规则/default-desired-effective-revision/状态失败影响验收），逻辑Deck Plugin历史设计与oldsource不删除/覆盖。同步headers/nearestfolders/README镜像/API/交互/入口清单。Luna验证actualFastAPI/Auth/DTO/MockTransport与明确命名temp artifact fixture、注入CLI版本的技术验证；DB fenced，public scopes/threehash/twoSchema/closed IDs/defaults/no-op/unknown/no blindretry，以及原artifact/CLI纯合同回归。无PG/model/真实账户/服务/SDKruntime/Browser、tmp协议或版本pin变更。runtime-read/voice-memory/analysis与全部其它数据库仍需后续实际消费接线。
+
+阶段21输入边界补充（source变更前）：typed refs与偏好同样必须安全拒绝raw非finite/错误形状，不回显RequestValidationError.input。将阶段18现有局部APIRoute校验wrapper移至同一routers.deps作为可复用route class，偏好仅保留原固定detail子类，Plugin router显式采用固定plugin detail；无全局handler/另一业务入口。既有偏好36合同必须同批回归，保留typed OpenAPI、status与原detail。
+
+阶段21实现状态：threeactual hashes与identity/unified接入；两个refs公开functions无DB/oldservice调用，stripuniqueIDs/closedinputs→prepareexactreadyIDs→原staticartifact/CLI→source evidence→Adminreplace，响应保持原enabled0/1与ISO。保留其它Plugin SQL入口依赖，移除无actualAdmin合同依据legacy32。Prefs与Plugin复用同一scoped validation route，原Prefsdetail不变。actualpublic tests+owned artifact/injectedCLI技术验证与原owner测试已适配；Luna gate进行中。
+
+阶段21 fresh技术回执：指定六文件 `194 passed in 1.63s` exit0，无failure/skip。三operation canonical/hash与两exact schema requirements、TS closed DTO/artifact、两个public函数无DB/oldservice comparator最终exit0；首次checker误拒允许的static/signature差异，修正checker后通过，无产品测试失败。原CLI/artifact算法只有staticmethod/self/header diff。doc checker33files/238links/229inventory/history3SHA/README parity/6sequence0fail（未render），tracked diff0；new2py no-index innerexit1/no output仅内容差异无whitespace。未访问PG/network/model/account/服务/SDKCLIruntime，无pyc；只清自有stage21-noindex临时输出。
+
+## 阶段 22：共享 capability catalog 并发刷新
+
+### Optimized Prompt · 2026-09-15
+
+修复统一Client共享catalog refresh在加载期间清空advertised导致其它已验证caller误判missingcapability的竞态。先以actualClient/MockTransport/Event/明确命名ownedthreads复现：initial广告成功，另一个refresh已dispatch但blocked时，execute不能直接因为中间空dict误503；refresh完成合法则继续原UUID，failed/missing/drift则无operation I/O failclosed。只用技术DTO注册fixture，不拷贝业务/SQL/身份状态机。
+
+复用Client统一transport，增加catalog RLock；capabilities readiness读/刷新HTTP与execute广告检查共享同一lock。execute只在合同/type/scope/DTO生成的短检查阶段持锁，实际领域HTTP在锁外，既有RPC仍可并发；receipt保持原二态与originalID无重试，不改变刷新失败清空ready/advertisement与下一RequestAuth恢复。body/header仍per-request显式actor，无全局token状态；不引入TTL/缓存quota/租户/环境分支或全局HTTP串行。
+
+只改共享metadata同步和meaningful并发测试/相关headers/folder/README镜像/现行设计/清单。Luna先给当前源码复现failed命令回执，root修复后fresh client/共享Auth/各消费端相关合同；验证RPC可以同时dispatch、多个刷新不能交错修改广告、失败不使用旧广告、unknown原UUID不自动重发。全部MockTransport/ownedEventThreads，无PG/model/账户/network/服务/SDKruntime；当前资源/admission/lease/SSE/FS和所有未迁移领域保持边界，不把本阶段称全域完成。

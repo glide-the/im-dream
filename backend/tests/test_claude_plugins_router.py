@@ -4,6 +4,7 @@
 [Output] Auth, platform-global catalog, entry-ID queue, terminal crash, operation, and Deck-ref route evidence.
 [Pos] Focused public ClaudePlugin API contract tests; no real business database writes.
 [Sync] 2026-08-19: cover identical catalogs, Remote Marketplace queueing, and background error termination.
+[Sync] 2026-09-15: Deck owner refs test uses actual OAuth/DTO/HTTP harness; legacy install/catalog fixtures stay separate.
 """
 
 from __future__ import annotations
@@ -210,22 +211,19 @@ def test_background_crash_finishes_the_public_operation_as_error() -> None:
     assert db.commits == 1
 
 
-def test_deck_owner_can_replace_only_own_deck_plugin_refs() -> None:
+def test_deck_owner_can_replace_only_own_deck_plugin_refs(monkeypatch) -> None:
     """Shared installation is admin-owned, but a Deck owner owns its bindings."""
-    service = mock.Mock()
-    service.replace_refs.return_value = [{"deck_id": "deck-7", "plugin_installation_id": "plugin-1"}]
-    with (
-        mock.patch.object(claude_plugins.database, "get_db", return_value=_Db()),
-        mock.patch.object(claude_plugins, "DeckPluginRefService", return_value=service),
-    ):
-        response = _client({"user_id": 7, "role": "user"}).put(
+    from tests.test_admin_deck_refs_routes import HEADERS, boundary
+
+    client, calls, *_ = boundary(monkeypatch, canonical_user_id="7")
+    with client:
+        response = client.put(
             "/api/decks/deck-7/claude-plugins",
+            headers=HEADERS,
             json={"refs": [{"plugin_installation_id": "plugin-1", "enabled": True, "order_index": 0}]},
         )
 
     assert response.status_code == 200
-    service.replace_refs.assert_called_once_with(
-        "deck-7",
-        "7",
-        [{"plugin_installation_id": "plugin-1", "enabled": True, "order_index": 0}],
-    )
+    assert [name for name, *_ in calls] == ["deck-plugin-refs.prepare", "deck-plugin-refs.replace"]
+    assert calls[1][1]["deck_id"] == "deck-7" and "user_id" not in calls[1][1]
+    assert calls[1][1]["refs"][0]["plugin_installation_id"] == "plugin-1"

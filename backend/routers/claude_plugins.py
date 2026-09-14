@@ -8,6 +8,7 @@ routes with terminal, client-safe errors.
 orchestration stays in focused services.
 [Sync] 2026-08-19: add exact entry-ID Marketplace installs and guarantee
 background failures leave the queued operation in an error terminal state.
+[Sync] 2026-09-15: public Deck refs use Admin operations with local artifact/CLI evidence; other install/catalog DB stays pending.
 """
 
 from __future__ import annotations
@@ -16,13 +17,16 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 import database
 
-from .deps import get_current_user
+from services.admin_data.deck_refs_data import AdminDeckRefsData, PublicRefsRequestDTO, RefsListInputDTO, RefsSelectionDTO
+from services.admin_data.request_auth import AdminRequestAuth
+
+from .deps import SafeRequestValidationRoute, get_current_user, invoke_admin_operation
 
 try:
     from services.errors.error_registry import build_error_payload
@@ -34,10 +38,6 @@ try:
         PLUGIN_SOURCE_UNKNOWN,
         PluginInstallError,
         PluginInstallService,
-    )
-    from services.claude_plugin.deck_refs_service import (
-        DeckPluginRefError,
-        DeckPluginRefService,
     )
     from services.claude_plugin.marketplace_service import (
         MARKETPLACE_CAPABILITY_MISSING,
@@ -58,10 +58,6 @@ except ModuleNotFoundError:
         PluginInstallError,
         PluginInstallService,
     )
-    from backend.services.claude_plugin.deck_refs_service import (
-        DeckPluginRefError,
-        DeckPluginRefService,
-    )
     from backend.services.claude_plugin.marketplace_service import (
         MARKETPLACE_CAPABILITY_MISSING,
         MARKETPLACE_ENTRY_NOT_FOUND,
@@ -72,7 +68,11 @@ except ModuleNotFoundError:
     )
 
 
-router = APIRouter(tags=["claude-plugins"])
+class _PluginRoute(SafeRequestValidationRoute):
+    validation_error_detail = "Invalid plugin request"
+
+
+router = APIRouter(tags=["claude-plugins"], route_class=_PluginRoute)
 
 _ERROR_STATUS = {
     PLUGIN_SPEC_INVALID: 422,
@@ -128,8 +128,22 @@ class InstallRequest(_Strict):
         return self
 
 
-class DeckRefsPutRequest(_Strict):
-    refs: list[dict[str, Any]] = Field(default_factory=list, max_length=32)
+DeckRefsPutRequest = PublicRefsRequestDTO
+
+
+def _refs_data(request: Request) -> AdminDeckRefsData:
+    owner = getattr(request.app.state, "admin_request_auth", None)
+    if not isinstance(owner, AdminRequestAuth):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    return AdminDeckRefsData(owner.client)
+
+
+def _refs_error(exc, request_id):
+    code = "DECK_ACCESS_DENIED" if exc.code == "ENTITY_NOT_FOUND" else exc.code
+    payload = build_error_payload(code, operation_id=exc.request_id or request_id)
+    payload["error"]["request_id"] = exc.request_id or request_id
+    payload["error"]["outcome_unknown"] = exc.outcome_unknown
+    return JSONResponse(status_code=exc.status_code, content=payload)
 
 
 def _run_install(
@@ -419,19 +433,8 @@ async def uninstall_plugin(installation_id: str, current_user: dict = Depends(ge
 
 
 @router.get("/api/decks/{deck_id}/claude-plugins")
-async def list_deck_plugins(deck_id: str, current_user: dict = Depends(get_current_user)):
-    db = database.get_db()
-    try:
-        try:
-            refs = DeckPluginRefService(db).list_refs(deck_id, str(current_user["user_id"]))
-        except DeckPluginRefError as exc:
-            return JSONResponse(
-                status_code=exc.status_code,
-                content=build_error_payload(exc.code),
-            )
-        return {"deck_id": deck_id, "refs": refs}
-    finally:
-        db.close()
+async def list_deck_plugins(deck_id: str, current_user: dict = Depends(get_current_user), data: AdminDeckRefsData = Depends(_refs_data)):
+    return await invoke_admin_operation(current_user, data.list, RefsListInputDTO(deck_id=deck_id), error_handler=_refs_error)
 
 
 @router.put("/api/decks/{deck_id}/claude-plugins")
@@ -439,18 +442,7 @@ async def put_deck_plugins(
     deck_id: str,
     request: DeckRefsPutRequest,
     current_user: dict = Depends(get_current_user),
+    data: AdminDeckRefsData = Depends(_refs_data),
 ):
-    db = database.get_db()
-    try:
-        try:
-            refs = DeckPluginRefService(db).replace_refs(
-                deck_id, str(current_user["user_id"]), request.refs
-            )
-        except DeckPluginRefError as exc:
-            return JSONResponse(
-                status_code=exc.status_code,
-                content=build_error_payload(exc.code),
-            )
-        return {"deck_id": deck_id, "refs": refs}
-    finally:
-        db.close()
+    selection = RefsSelectionDTO(deck_id=deck_id, refs=request.refs)
+    return await invoke_admin_operation(current_user, data.replace, selection, error_handler=_refs_error)

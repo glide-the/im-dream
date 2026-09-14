@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: public Deck Claude Plugin refs use Admin plus unchanged local artifact/CLI checks. -->
 <!-- [Sync] 2026-09-15: discard stale Browser session results and retain success-only logout. -->
 <!-- [Sync] 2026-09-15: serialize resource HTTP shutdown after producers and Factory drain. -->
 <!-- [Input] Current Dream/Admin/Gateway topology, supported versions, and user-visible MCP Apps workflow. -->
@@ -61,6 +62,8 @@ Public user turns now reserve message/title through Admin's atomic confirmation 
 Public writing Session save/get/batch/list/range/aggregate/delete now use six typed Admin operations with explicit request OAuth. The original metadata/full-state responses, precise timestamps, timezone day keys and prose metrics remain; edit events publish only after confirmed writes. Shared closed Editor state DTOs omit absent optional fields. The current Session contract rejects Thread server-persistence grants, so background Session context/tools remain a separate migration dependency.
 
 Public Deck content state/preview/commit/history/detail now use five typed Admin operations and exact schema capabilities. Admin executes snapshot/hash/CAS/version transactions; Dream restores the original raw snapshot response and preserves safe conflict details and unknown commit IDs without retrying. Other Deck/Voice operations, plugin filesystem verification and runtime consumers remain migration work.
+
+Public Deck Claude Plugin refs now use Admin list/prepare/replace. Dream verifies the selected artifact and CLI compatibility with the existing checks before submitting source-bound evidence; other plugin installation/runtime data paths remain migration work.
 
 Public user preference get/save now use two OAuth-bound Admin operations. Missing records still return `{}`; null preserves saved fields, empty objects and strings remain values, and raw Python config JSON keeps numeric types. Default voices, system policy, first-login writes and background context remain separate domains.
 

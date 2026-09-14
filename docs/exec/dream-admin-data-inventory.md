@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: map three public refs consumers and remaining Runtime/install dependencies. -->
 <!-- [Sync] 2026-09-15: map Browser async snapshot ownership and remaining business verification. -->
 <!-- [Input] Dream baseline Python AST and follow-up production rg scan. -->
 <!-- [Output] Per-file DB/transaction/permission evidence and pending Admin API mapping. -->
@@ -29,6 +30,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | 生产入口 | 实际Admin领域合同/消费者 | 已替换范围 | 保留的迁移依赖 |
 | --- | --- | --- | --- |
 | `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG；read/publish/close同活动锁，shutdown后台owner和Factory后关闭HTTP | 全域startup/其它DB与正常业务验收仍开放 |
+| 公开Deck Claude Plugin refs | [deck_refs_data](../../backend/services/admin_data/deck_refs_data.py)：list/prepare/replace | 两公开GET/PUT无DB；无path的metadata→原artifact/CLI检查→source-bound Admin TX；原enabled/ISO与unknownUUID | 全局install/catalog/operation、serveradapter、runtimepacking、voice-memory/analysis仍有DB依赖 |
 | Browser session/AuthContext | [browserSession](../../frontend/app/_dream/lib/browserSession.ts)：current immutable public snapshot/CSRF | cancelled/superseded reads无状态修改；logout成功清除，failed保留；React只提交current snapshot | 正常Browser journey/真实业务与server配置仍待验收 |
 | 共享身份与profile | [request_auth](../../backend/services/admin_data/request_auth.py)/[profile_data](../../backend/services/admin_data/profile_data.py)：JWT/JWKS→principal→user-profile.current | 公开Admin主体/canonical PK/strict profile；旧Dream authority退役 | Gateway subject与内部tool后台独立purpose仍需迁移 |
 | 公开Chat CRUD/history/ownership | [chat_data](../../backend/services/admin_data/chat_data.py)：14 typed methods | HTTP Thread/message入口已切换，公开响应/cursor/commit后close保留 | assistant等后台消费者与Deck/settings/MCP仍有PG |

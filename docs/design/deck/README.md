@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: index current public Claude Plugin refs and outstanding install/runtime dependencies. -->
 <!-- [Input] Deck设计需求.pdf, CozeLoop draft/commit source, repository CRUD, and Admin schema authority. -->
 <!-- [Output] Canonical Deck management/content-version design index and delivery boundary. -->
 <!-- [Pos] Deck product-design source of truth under docs/design/deck. -->
@@ -43,6 +44,8 @@ CozeLoop 只参考四件事：可恢复的可变草稿、显式提交、提交�
 - `deck_versions` 仅存用户显式提交的不可变 JSONB snapshot/hash；数据库拒绝 UPDATE/DELETE。
 - `decks.latest_version` 与 `published_draft_revision` 只在 commit 事务成功后推进。
 - Schema 只由 Admin Drizzle migration `0036` 发布 capability `dream.deck-content-versions.v1`；Dream 不做 DDL。
+
+公开Claude Plugin refs的Admin ownership、source evidence与状态以[现行refs稿](./deck-claude-plugin-refs-current.md)为准；global install/runtime packing仍是独立迁移项。
 
 ## 文档导航
 

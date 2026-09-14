@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: document source-bound Admin refs and safe public validation. -->
 <!-- [Sync] 2026-09-15: document typed Admin preference get/save, required nullable wire and unknown result behavior. -->
 <!-- [Sync] 2026-09-15: document Admin-backed public Deck versions, exact capabilities and unknown-result recovery. -->
 # Ink & Memory API Documentation
@@ -1117,3 +1118,12 @@ init_db()
 - `analysis_reports` - Analysis results
 - `auth_sessions` - Session tokens (optional)
 - `schema_version` - Migration tracking
+
+
+## Current Deck Claude Plugin refs
+
+`GET/PUT /api/decks/{deck_id}/claude-plugins` use current Admin OAuth through the same Browser BFF. Both return the original `{deck_id, refs}`; `enabled` remains public integer 0/1 and timestamps retain microseconds.
+
+PUT accepts `{ "refs": [{ "plugin_installation_id": "...", "enabled": true, "order_index": 0 }] }`; enabled/order are optional, refs defaults empty. IDs are stripped and unique, order follows PostgreSQL integer bounds. Package/digest/compatibility/actor/path fields are rejected. Invalid request JSON/fields return fixed422 `{ "detail": "Invalid plugin request" }` without body echo. There is no arbitrary32-ref product quota.
+
+Admin prepares owner-scoped metadata; Dream runs its existing artifact/CLI checks before source-bound replace. Validation/verification failures do not send the write. Unknown writes retain `error.request_id` and `error.outcome_unknown`; no automatic retry. Other plugin install/catalog/runtime APIs remain separately staged. See the [current functional design](../docs/design/deck/deck-claude-plugin-refs-current.md).
