@@ -2,6 +2,7 @@
 # [Output] Strict original seventeen-field Preflight projection and safe identity validation.
 # [Pos] Read consumer; Admin owns stored state, clock and token issuance.
 # [Sync] 2026-09-15: reuse original lifecycle validation without Workspace initialization or SQL.
+# [Sync] 2026-09-15: reuse the extracted identity/unified gate without changing the read projection.
 from __future__ import annotations
 
 import re
@@ -12,9 +13,9 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from models.workflow_preflight import WorkflowPreflight
 from .chat_models import ChatStrictDTO, EntityId, NonnegativeSafeInteger, validate_timestamp_text
 from .client import AdminDataClient, DomainOperation
-from .errors import AdminDataError, invalid_response
+from .errors import invalid_response
 from .models import OperationCapabilityDTO
-from .workflow_data import WORKFLOW_SCHEMA_REQUIREMENTS
+from .workflow_data import require_workflow_capabilities
 
 PreflightId = Annotated[str, Field(pattern=r"^pf_[0-9a-f]{32}$")]
 
@@ -76,10 +77,7 @@ class AdminPreflightData:
         self._canonical_user_id = canonical_user_id
 
     def read(self, input_dto: PreflightInputDTO, request_id: str, *, access_token: str):
-        capabilities = self._client.capabilities(request_id)
-        schemas = {item.capability: item for item in capabilities.schema_capabilities}
-        if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in WORKFLOW_SCHEMA_REQUIREMENTS):
-            raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+        require_workflow_capabilities(self._client, request_id)
         result = self._client.execute(READ_PREFLIGHT, input_dto, request_id, access_token=access_token)
         if result.preflight.workflow_preflight_id != input_dto.workflow_preflight_id or result.preflight.created_by != self._canonical_user_id:
             raise invalid_response(request_id)

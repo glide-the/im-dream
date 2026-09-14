@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
 <!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -80,6 +81,8 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 公开Deck用户/社区列表已使用单项typed Admin operation，保留原计数与作者字段，不执行文件或默认初始化步骤。
 
 公开 Preflight GET 已使用 Admin owner-scoped 读取，保留完整 17 字段、状态规则、精确 datetime JSON 和原 404，不初始化 Workspace。Execute、Run 创建/重试、默认 Workspace 与系统配置仍是迁移依赖。详见[现行读取规则](docs/design/workflow-preflight-read-current.md)。
+
+Workspace content/download 已通过 typed Admin Chat 操作检查 Thread 所有权，再执行原 Workspace Mode、路径与文件检查。缺失 Thread 保留 404，metadata 故障保留安全 503；文件、ZIP 与 no-create 行为保持。系统配置与其他文件管理数据依赖仍待迁移。
 
 公开Deck详情已读取单项typed Admin aggregate，还原原owner ID、时间和legacy Memory值。Admin producer对空Memory的投影差异仍列为待修正项。
 

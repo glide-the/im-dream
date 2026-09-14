@@ -6,6 +6,7 @@
 #          GET /api/workspace/files/content
 #          GET /api/workspace/files/download
 # [Pos] workspace route node in backend/routers
+# [Sync] 2026-09-15: content/download ownership uses Admin Thread reads before unchanged Mode/path/filesystem checks.
 # [Sync] 2026-05-25: initial implementation — ported from claude-agent-next-kit
 #         app/api/workspace/files/route.ts and app/api/workspace/files/download/route.ts.
 # [Sync] 2026-06-06: remove POST /api/workspace/memory-init (Voice scenario memory
@@ -87,7 +88,10 @@ from libs.claude_agent_kit.server.workspace_file_sync import (
     save_buffer_to_workspace_files,
 )
 
-from .deps import get_current_user
+from .deps import get_current_user, invoke_admin_operation
+from services.admin_data.chat_models import ThreadIdInputDTO
+from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from services.admin_data.workspace_data import AdminWorkspaceData
 
 router = APIRouter()
 
@@ -181,19 +185,23 @@ def _get_or_create_workspace_for_user(session_id: str, current_user: dict):
     )
 
 
-def _require_owned_workspace_thread(session_id: str, current_user: dict) -> None:
+async def _require_owned_workspace_thread(session_id: str, current_user: dict, request: Request) -> None:
     """Fail closed unless *session_id* is an authenticated user's Chat Thread."""
 
     try:
-        user_id = int(current_user.get("user_id"))
-        thread = database.get_chat_thread(session_id, user_id)
+        owner = getattr(request.app.state, "admin_request_auth", None)
+        actor = current_user.get("_admin_actor")
+        if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
+            raise ValueError("Invalid server-owned Workspace actor")
+        data = AdminWorkspaceData(owner.client, canonical_user_id=actor.canonical_user_id)
+        owned = await invoke_admin_operation(current_user, data.exists_owned, ThreadIdInputDTO(thread_id=session_id))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Workspace Thread ownership check failed safely")
         raise HTTPException(
             status_code=503,
             detail={"error": "Workspace access is temporarily unavailable", "code": "WORKSPACE_AUTH_UNAVAILABLE"},
         ) from exc
-    if thread is None:
+    if not owned:
         raise HTTPException(
             status_code=404,
             detail={"error": "Workspace file not found", "code": "WORKSPACE_NOT_FOUND"},
@@ -345,6 +353,7 @@ def _download_content_disposition(filename: str) -> str:
 
 @router.get("/api/workspace/files/content")
 async def read_workspace_file_content_endpoint(
+    request: Request,
     session_id: Annotated[str, Query(alias="sessionId")],
     path: Annotated[str, Query()],
     current_user: dict = Depends(_require_workspace_auth),
@@ -357,7 +366,7 @@ async def read_workspace_file_content_endpoint(
             detail={"error": "sessionId and path are required", "code": "INVALID_WORKSPACE_URI"},
         )
     _validate_session_id(session_id)
-    _require_owned_workspace_thread(session_id, current_user)
+    await _require_owned_workspace_thread(session_id, current_user, request)
     _require_workspace_mode_enabled(current_user)
     safe_path = _validate_workspace_content_path(path)
 
@@ -688,6 +697,7 @@ async def move_workspace_file_endpoint(
 
 @router.get("/api/workspace/files/download")
 async def download_workspace_file(
+    request: Request,
     session_id: Annotated[str, Query(alias="sessionId")],
     path: Annotated[str, Query()],
     current_user: dict = Depends(_require_workspace_auth),
@@ -705,7 +715,7 @@ async def download_workspace_file(
             detail={"error": "sessionId and path are required"},
         )
     _validate_session_id(session_id)
-    _require_owned_workspace_thread(session_id, current_user)
+    await _require_owned_workspace_thread(session_id, current_user, request)
     _require_workspace_mode_enabled(current_user)
     safe_path = _validate_workspace_download_path(path)
 

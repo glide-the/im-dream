@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: document Admin Thread ownership for shared file reads and remaining settings data. -->
 <!-- [Sync] 2026-09-15: document the independent Admin Preflight GET and remaining workflow domains. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -81,6 +82,8 @@ Public invitations, friend requests, relationships and friend picture reads now 
 Public Deck owned/community lists now use one typed Admin operation, preserving original counts and author fields without filesystem or default-initialization steps.
 
 Public Preflight GET now uses an owner-scoped Admin read, preserving all 17 fields, lifecycle rules, precise datetime JSON and original 404 responses without initializing a Workspace. Execute, Run creation/retry, default Workspace and system configuration remain migration dependencies. See the [current read rules](docs/design/workflow-preflight-read-current.md).
+
+Workspace content/download reads now check Thread ownership through the typed Admin Chat operation before the existing Workspace Mode, path and filesystem checks. Missing Threads retain 404; metadata failures retain safe 503 responses. File, ZIP and no-create behavior remains; system configuration and other file-management data dependencies are still pending.
 
 Public Deck detail now reads one typed Admin aggregate and restores original owner IDs, timestamps and legacy Memory values. An Admin producer difference for empty Memory remains documented for correction.
 

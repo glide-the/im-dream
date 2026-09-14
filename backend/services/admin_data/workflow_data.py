@@ -2,6 +2,7 @@
 # [Output] Strict ten-field context and immutable server-owned turn snapshot.
 # [Pos] Workflow read consumer; Admin alone validates retry/source/binding/database facts.
 # [Sync] 2026-09-15: connect public Chat provenance without duplicating the old PG mapper.
+# [Sync] 2026-09-15: share the unchanged identity/unified schema gate with Preflight reads.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,6 +21,13 @@ WORKFLOW_SCHEMA_REQUIREMENTS = (
     SchemaCapabilityDTO(capability="identity.better-auth.v1", version=1, contract_sha256="1dc05e229d3f4147923fcdfe117c4c4930a43bf9f31439d7b4bc83d2a0d04cd3"),
     SchemaCapabilityDTO(capability="dream.schema.unified.v1", version=1, contract_sha256="8b71cf5687f61dee884c3e6f2fb109c7a951b0789066a0f13583a7b67757fa71"),
 )
+
+
+def require_workflow_capabilities(client: AdminDataClient, request_id: str) -> None:
+    capabilities = client.capabilities(request_id)
+    schemas = {item.capability: item for item in capabilities.schema_capabilities}
+    if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in WORKFLOW_SCHEMA_REQUIREMENTS):
+        raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
 
 
 class WorkflowContextInputDTO(StrictDTO):
@@ -80,10 +88,7 @@ class AdminWorkflowData:
         self._client = client
 
     def resolve(self, thread_id: str, request_id: str, *, access_token: str, canonical_user_id: str) -> AdminWorkflowResolution:
-        capabilities = self._client.capabilities(request_id)
-        schemas = {item.capability: item for item in capabilities.schema_capabilities}
-        if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in WORKFLOW_SCHEMA_REQUIREMENTS):
-            raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+        require_workflow_capabilities(self._client, request_id)
         result = self._client.execute(RESOLVE_WORKFLOW_CONTEXT, WorkflowContextInputDTO(thread_id=thread_id), request_id, access_token=access_token)
         if result.context is not None and result.context.thread_id != thread_id:
             raise invalid_response(request_id)

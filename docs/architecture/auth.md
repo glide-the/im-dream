@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: file reads consume current OAuth Thread ownership before unchanged file rules. -->
 <!-- [Sync] 2026-09-15: consume public Preflight GET with canonical actor/ID matching and no Workspace SQL. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -115,3 +116,5 @@ Next同名password/Google/Device/token薄adapter也返回410，login/register在
 GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dream:read与four exact schema/hash。Admin处理过滤/计数/排序/policy；user保留total_voice_count并省略author_display_name，community保留author_display_name并省略total_voice_count。无默认初始化/文件检查/DB fallback/read retry。详见[现行规则](../design/deck/deck-detail-version-history.md)。
 
 GET /api/story-workspace/workflow-preflights/{preflight_id} 独立消费 workflow-preflight.read/current OAuth/dream:read 与 identity/unified exact schemas/hash，响应匹配 canonical actor 和 ID，复用原 17 字段状态/微秒与 datetime JSON。移除该读取无关 default Workspace 初始化；原坏 ID/owner/missing 404 保留，其他安全错误带原 UUID 无重试。详见[现行读取设计](../design/workflow-preflight-read-current.md)；POST execute、Run 创建/重试与隐藏 source 持久化仍为后续入口。
+
+Workspace content/download 的 current OAuth 身份继续共用 get_current_user；Thread ownership 改为 chat-thread.get 与原 strict DTO/four exact schema/hash，reply ID/actor 匹配后才执行原 Mode/path/existing filesystem。metadata 错配/不可用固定503/null404，无自动重试或PG fallback；原 ZIP/symlink/no-create/header保持。SystemConfig读取与其他文件管理metadata仍pending，技术测试不代表普通共享文件/真实Bash验收。

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: record shared-file Thread ownership and unchanged schema-gate extraction. -->
 <!-- [Sync] 2026-09-15: record public Preflight read adoption and current 72-operation release boundaries. -->
 <!-- [Sync] 2026-09-15: retain Runtime/shared-file technical regression and Gateway ownership gaps. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
@@ -639,3 +640,36 @@ git diff --check
 初次 pytest 命令误写不存在的 test_admin_workflow_context.py，exit4/no tests；按实际文件清单纠正为 test_admin_workflow_data.py 后才有上述通过结果。初次 AST checker 指向不存在的 server/runner.py，exit1；纠正为实际 agent_runner.py 后通过，没有改生产代码以迎合检查。72项 canonical hash 均自洽，create/retry匹配实际新hash/full Run keys；本轮没有早期70完整descriptor快照，故不声明历史70字节比较通过。revision metadata差异仅在比较器副本显式标注实际非负边界，未改目录/源/hash。
 
 已关闭本条公开 GET 的 SQL/service/default Workspace 依赖；旧 read/service 实现及其他入口仍存在，不将模块候选数量减少或 technical 模型测试当作全域/正常验收。Luna此前usage limit失败，本批由primary执行同provider-free边界；目标仍未完成，未同步跨任务消息。
+
+## 阶段29：共享文件读取的 Thread 数据入口
+
+### Optimized Prompt · 2026-09-15
+
+复核实际72目录与默认composition：公开owner注册54操作，其他18中resource两项已由独立composition接入，不能将非公开列表当剩余总数。SystemConfig/default Story Workspace均无已发布操作；原 default helper按actor读取oldest(created_at,id)或创建默认记录，不能用Deck default/PF execute/用户偏好替代。保留其pending并继续独立已有chat-thread.get。
+
+共享文件 content/download 生产身份已共用Admin get_current_user，原 _require_owned_workspace_thread 仍读Dream PG。复用AdminChatData/ThreadIdInputDTO/原闭集ThreadResultDTO、实际GET hash与identity/unified两exact requirements，验证reply Thread ID及canonical actor；null保持原404，capability/HTTP/DTO/owner错配保持固定WORKSPACE_AUTH_UNAVAILABLE/503，不泄露异常。Admin客户端由request.app的显式owner提供，OAuth只在线程池操作内传递；无用户ID输入、额外grant/PG fallback。
+
+两GET按原顺序session ID→Thread owner→Workspace Mode→public path→existing filesystem执行；仅增加Request DI与await owner查询，不改变文件路径、symlink、no-create、cache/MIME/ZIP/header、其他list/upload/delete/move入口或TMPDIR/Runtime协议。SystemConfig两读取仍pending。本批将Workflow原two-schema四行gate原样提取为共享require_workflow_capabilities，Workflow context/Preflight/Workspace复用，展开AST证明前两原行为未变。
+
+原Workspace测试fixture仍patch退役localJWT，先适配为实际OAuth owner/MockTransport/严格Thread projection并fence get_db/get_chat_thread，保留SystemConfig受控fixture与原临时FS实例。两owner-null案例改用受控Admin输出，其他业务断言原AST保持；增加两GET的scope/hash/schema/owner-ID/timeout拒绝且Mode/FS未调用的故障断言。跑相关Admin、原Workspace/SDK/packer技术合同，保持正常服务/PG/模型未触及。同步现行共享文件设计/folder/header/README与逐入口清单，精确报告闭合范围。
+
+阶段29规范细化（比较器实际失败后、修正源码前）：chat-thread.get 实际要求四项，除 identity/unified 还含 dream.chat-history-keyset-pagination.v1（a0dfe5f8d4b4330a9e17db07a8716d5d2bc25e291f3624f09005e79c01fc8ab0）和 dream.chat-history-final-projection.v1（50c27f86113c170064b0913bf052f9bd12884d3345c920d7b11468a768e0a432）。Workspace必须消费四项，不能只按Workflow两项推断。两项gate仅供原Workflow/Preflight复用；Workspace复用其两项值并检查完整四项，fixture按实际目录同步。此前296测试通过只属修正前技术结果，不计实际requirements闭合；修正后重新验证。
+
+阶段29实际结果：content/download复用当前OAuth/strict Thread DTO/实际four schemas与hash，null原404，所有metadata故障固定原503；Mode/path/FS顺序、GET其它body与文件规则及其他管理函数AST保持。原测试除setUp/tearDown与两Admin-null selector外，其余旧函数/断言AST保持；新增wrong actor/ID/DTO、four capability（含keyset/final）、timeout与非法OAuth均在Mode/FS前拒绝。两旧gate展开AST保持Workflow/Preflight行为，原ChatDTO/数据库/Runtime/Workspace源未变。
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_workspace_router.py backend/tests/test_admin_preflight_routes.py backend/tests/test_admin_workflow_data.py backend/tests/test_admin_request_auth.py backend/tests/test_admin_chat_data.py backend/tests/test_admin_chat_routes.py backend/tests/test_claude_agent_workspace.py backend/tests/test_claude_plugin_pipeline.py backend/tests/test_sdk_env.py
+# primary fresh after actual four-schema correction: exit 0; 296 passed in 11.78s; no failure/skip
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage29-contract-check.py
+# exit 0; actual Chat get/four requirements/hash; expanded old gates/other route bodies and assertions unchanged; metadata ownership DB-free, SystemConfig2 pending
+/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-doc-check.py
+# exit 0; 39files/392links/290inventory/history3 exact bytes/README parity/6Mermaid count/failures=[]; no rendering
+/Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-current-sql-scan.py
+# exit 0; 297modules,48SQL-bearing/513literal candidates,16driver/persistence imports,35legacy modules/121helper Call candidates,parse_errors=[]; not full runtime reachability proof
+git diff --check
+# exit 0; no output
+```
+
+规范checker最初因错误两项requirements假设exit1，按实际四项改消费者与fixture后重跑；后续checker因比较测试时引用上轮循环残留node而exit1，修正只读checker索引old[name]后通过，没有改生产代码或旧业务断言。文档checker初轮误将inline Markdown示例当链接、将明确“未迁移文件（跳过）”历史foreign清单当本目录成员；按Markdown code/该历史章节边界校验真实链接与现行inventory后通过，原示例/历史名称均保留。
+
+仅清理测试自有temporary workspace/HTTP context，未访问正常PG/账户/网络/模型/Browser/CLI provider，未重启服务/更改资源算法、LKG、Runtime版本或CLAUDE_CODE_TMPDIR协议。本阶段不声明SystemConfig/default Workspace/所有文件管理无PG，也不当作真实共享文件/Bash/模型验收；目标未完成，跨任务同步仍未发送。
