@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: distinguish unregistered launch metadata candidates from the frozen72 catalog. -->
 <!-- [Sync] 2026-09-15: record shared-file Thread ownership and unchanged schema-gate extraction. -->
 <!-- [Sync] 2026-09-15: record public Preflight read adoption and current 72-operation release boundaries. -->
 <!-- [Sync] 2026-09-15: retain Runtime/shared-file technical regression and Gateway ownership gaps. -->
@@ -673,3 +674,15 @@ git diff --check
 规范checker最初因错误两项requirements假设exit1，按实际四项改消费者与fixture后重跑；后续checker因比较测试时引用上轮循环残留node而exit1，修正只读checker索引old[name]后通过，没有改生产代码或旧业务断言。文档checker初轮误将inline Markdown示例当链接、将明确“未迁移文件（跳过）”历史foreign清单当本目录成员；按Markdown code/该历史章节边界校验真实链接与现行inventory后通过，原示例/历史名称均保留。
 
 仅清理测试自有temporary workspace/HTTP context，未访问正常PG/账户/网络/模型/Browser/CLI provider，未重启服务/更改资源算法、LKG、Runtime版本或CLAUDE_CODE_TMPDIR协议。本阶段不声明SystemConfig/default Workspace/所有文件管理无PG，也不当作真实共享文件/Bash/模型验收；目标未完成，跨任务同步仍未发送。
+
+### 72项冻结期间的 launch 候选复核 · 2026-09-15
+
+新通知与实际规范复核分开记录。当前目录仍72，Run create/retry已注册；按实际名称 dream-launch-source.ensure、dream-launch-dispatch.claim、dream-launch-dispatch.finish 查询，目录均无广告，operationRegistry亦未接入。不能将候选DTO/Handler/Repository视为已发布capability，不新增Dream消费者或猜hash。主协调正在Run故障/unknown COMMIT验收；通知报告独立剩余public22 denial+10GET/230assertions exit0/skipped6，原full28 exit1与六项fullbounded/core8原文保持，本轮只读该协作状态与Admin矩阵，不称Root重跑或一次完整通过。
+
+实际原Dream源码边界：ensure_source位于PF/Run之前，UUIDv5来源与fingerprint不变。dispatcher先在claim事务保存workflowRunId/dreamContext/dispatching/claim ID并COMMIT；随后独立读取Voice prompt、调用turn dispatcher。异常或accepted False以独立finish事务回pending，接受则回dispatched；finish要求当前dispatching与同claim ID，stale lease返回False，不能覆盖后来claim。_before_claim回调也保持在claim之前，不能借迁移改变Runtime准备/选择顺序。
+
+Admin候选实际DTO只让Dream发送owned Run lookup+instruction_text，或Run lookup+claim_id+accepted boolean；服务端从ownedRun/完整binding/sourceThread/message推导context、parts_json与runtime metadata_json，finish状态由accepted固定映射。claim receipt恢复后重新读取当前source，要求dispatching/同claim ID/fresh lease且parts/metadata/context匹配，否则拒绝旧claim；Runtime/Voice读取不进入这两个提交事务。现Root实现的原顺序已符合这个目标，本轮不制造业务代码变更。
+
+Admin矩阵报告未注册source23+ingress5、dispatch32（Service22/source4/Handler6）、type/lint/source gate exit0；Root未重跑这些命令，也未以它们代替公开PG或完整launch验收。Agent/model/binding prepare、failure recorder、公开PG与正常Runtime/完整launch仍pending。SystemConfig/default Workspace仍没有已发布operation；48SQL模块与动态Repository/stdio迁移继续开放。
+
+本次只读复核及文档命令：主venv Python /private/tmp/dream-admin-doc-check.py exit0，36files/394links/156inventory/history3 exact bytes/README parity/6Mermaid count/failures=[]（未render）；git diff --check exit0无输出。只更新这份执行记录及逐入口清单，不修改production/候选源码、服务、数据库、凭据、Runtime或模型，不重复已经通过的源码测试。
