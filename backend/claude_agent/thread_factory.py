@@ -4,6 +4,7 @@
 # [Output] Provide ClaudeAgentThreadFactory, build_session_id
 #          to HTTP route handlers in server.py.
 # [Pos] factory-entry node in backend/claude_agent
+# [Sync] 2026-09-15: start server-only grant renewal under the existing turn owner and drain its separate Phase 4 cleanup.
 # [Sync] 2026-05-22: adapted from Pawkeyland application/claude_agent/thread_factory.py.
 #                    session_id = user_id (no persona).
 #                    Removed pet/persona/mem0/IdentityService/volcresource dependencies.
@@ -458,6 +459,8 @@ class ClaudeAgentThreadFactory:
         current_request = request
         try:
             admission_lease = self._admission.try_acquire(session_id)
+            if request.admin_turn_persistence is not None:
+                request.admin_turn_persistence.start()
             await self._observers.emit_before_context_assembly(
                 session_id,
                 {"resume": current_request.resume},
@@ -594,6 +597,13 @@ class ClaudeAgentThreadFactory:
                         session_id,
                     )
         finally:
+            if request.admin_turn_persistence is not None:
+                # Cleanup belongs to Phase 4 and survives SSE disconnect or
+                # repeated cancellation. Register before dropping bg ownership
+                # so shutdown drains its own renewal thread/client as well.
+                cleanup_task = asyncio.create_task(asyncio.to_thread(request.admin_turn_persistence.close),
+                    name=f"claude-agent-persistence-close-{session_id}")
+                self._track_owned_task(self._phase4_tasks, cleanup_task)
             if admission_lease is not None:
                 admission_lease.release()
             state.turn_context = None

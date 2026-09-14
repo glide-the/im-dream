@@ -9,6 +9,7 @@
 [Sync] 2026-08-23: document authenticated in-memory Workspace image resolution for the existing Chat long-image exporter.
 [Sync] 2026-08-28: align env/desired/public replacement/effective snapshots to positive JSON-safe integers, exact combined-memory bytes, and monotonic no-restart LKG refresh.
 
+[Sync] 2026-09-15: atomic user reservation uses a server-only purpose grant; Factory owns renewal and terminal/cancel cleanup.
 [Sync] 2026-09-15: public Chat reads Admin Workflow provenance before message/SSE and carries an immutable actor/thread snapshot; internal dispatch and remaining DB consumers still require migration.
 [Sync] 2026-08-31: remove the retired legacy session runtime from current architecture boundaries.
 [Sync] 2026-09-14: resource policy/observer composition consumes strict Admin APIs; LKG and runtime semantics remain unchanged.
@@ -100,6 +101,12 @@ ThreadFactory (thread_factory.py)
 | Phase 4 | 触发 SessionObserver.on_session_ended | 仅在销毁时（close_thread / TTL 驱逐 / aclose）|
 
 ---
+
+### 当前 Admin user-turn 持久化边界
+
+公开Chat在返回SSE前读取Admin Workflow上下文，创建绑定actor、Thread与当前Run的server-persistence委托，并原子预留user message和缺失title。Admin执行原stored confirmation guard，Dream只保留原文本投影和raw JSON词法。Service复用已确认相同输入；unknown保留原request ID，只查原receipt，absent阻止新写与推理。
+
+Factory在既有admission成功后启动独立Keeper。current读取短锁snapshot，后台renew HTTP使用独立action锁；失败只更新安全diagnostics，有效grant保留到expiry/max边界。SSE断开不停止后台turn；terminal/cancel安排自有Phase4 cleanup，shutdown等待已dispatch的同步writer、renewal线程和独立HTTP client关闭。既有lease、EventBus、Runner与resume/cancel流程保持。该grant不投影给CLI或Editor，assistant/session及内部Workflow dispatcher仍待typed领域迁移。规则与验收见[Admin认证与数据交互](admin-auth-data-interaction.md)。
 
 ## 4. 迁移映射表（Pawkeyland → Ink & Memory）
 

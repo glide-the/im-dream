@@ -1,6 +1,7 @@
 # [Input] Immutable purpose grant, bearer-only Runtime client and explicit clock/scheduling settings.
 # [Output] Server-owned expiry renewal and original-ID recovery without propagating background failures.
 # [Pos] Authorization lifecycle owner; does not modify Agent leases, runtime, SSE or cancellation.
+# [Sync] 2026-09-15: renewal HTTP owns a separate action lock; current/diagnostics read only short snapshot locks.
 # [Sync] 2026-09-14: renew before expiry, preserve maximum lifetime and never replay an absent receipt.
 """Keep one opaque grant alive while its bounded Admin authorization permits it."""
 
@@ -50,6 +51,7 @@ class RuntimeGrantKeeper:
         self._pending_request_id: str | None = None
         self._last_error: str | None = None
         self._lock = threading.RLock()
+        self._action_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._renew_at = self._deadline(self._clock())
@@ -74,42 +76,56 @@ class RuntimeGrantKeeper:
                 self._clock() >= self._grant.expires_at, self._stop.is_set())
 
     def tick(self) -> None:
-        # Serialize actions and close. Unknown writes retain one ID; receipt
-        # recovery stays possible after expiry but cannot extend maximum life.
-        with self._lock:
-            if self._stop.is_set():
-                return
-            now = self._clock()
+        # Serialize network actions without holding the snapshot lock read by
+        # tool/turn permission checks. Unknown writes keep their original ID.
+        with self._action_lock:
             try:
-                if self._pending_request_id is not None:
-                    result = self._client.receipt(self._grant, "runtime-delegation.renew", self._pending_request_id)
+                with self._lock:
+                    if self._stop.is_set():
+                        return
+                    now = self._clock()
+                    grant = self._grant
+                    request_id = self._pending_request_id
+                    if request_id is None:
+                        if now >= grant.expires_at or now >= grant.maximum_expires_at:
+                            self._last_error = "DELEGATION_EXPIRED"
+                            return
+                        if now < self._renew_at:
+                            return
+                        request_id = self._request_id_factory()
+                        self._pending_request_id = request_id
+                        action = "renew"
+                    else:
+                        action = "receipt"
+                if action == "receipt":
+                    result = self._client.receipt(grant, "runtime-delegation.renew", request_id)
                     if isinstance(result, CommittedReceiptDTO):
-                        self._grant = self._grant.with_renewal(result.result, self._pending_request_id)
-                        self._pending_request_id = None
-                        self._last_error = None
-                        self._renew_at = self._deadline(now)
+                        renewed = grant.with_renewal(result.result, request_id)
+                        with self._lock:
+                            self._grant = renewed
+                            self._pending_request_id = None
+                            self._last_error = None
+                            self._renew_at = self._deadline(self._clock())
                     return
-                if now >= self._grant.expires_at or now >= self._grant.maximum_expires_at:
-                    self._last_error = "DELEGATION_EXPIRED"
-                    return
-                if now < self._renew_at:
-                    return
-                request_id = self._request_id_factory()
-                self._pending_request_id = request_id
                 try:
-                    self._grant = self._client.renew(self._grant, request_id)
+                    renewed = self._client.renew(grant, request_id)
                 except AdminDataError as error:
                     if not error.outcome_unknown:
-                        self._pending_request_id = None
+                        with self._lock:
+                            self._pending_request_id = None
                     raise
-                self._pending_request_id = None
-                self._last_error = None
-                self._renew_at = self._deadline(now)
+                with self._lock:
+                    self._grant = renewed
+                    self._pending_request_id = None
+                    self._last_error = None
+                    self._renew_at = self._deadline(self._clock())
             except AdminDataError as error:
-                self._last_error = error.code
+                with self._lock:
+                    self._last_error = error.code
             except Exception:
                 # Diagnostics contain a closed local code, never exception text.
-                self._last_error = "DELEGATION_BACKGROUND_FAILURE"
+                with self._lock:
+                    self._last_error = "DELEGATION_BACKGROUND_FAILURE"
 
     def start(self) -> None:
         with self._lock:

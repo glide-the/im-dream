@@ -1,6 +1,7 @@
 <!-- [Input] Current Dream/Admin/Gateway topology, supported versions, and user-visible MCP Apps workflow. -->
 <!-- [Output] Plain-language user and local-operator guide with deeper engineering details linked out. -->
 <!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
+<!-- [Sync] 2026-09-15: document atomic user reservations and the factory-owned server persistence grant lifecycle. -->
 <!-- [Sync] 2026-09-15: document retired standalone authority and explicit Admin OAuth/account checks in named scripts. -->
 <!-- [Sync] 2026-09-13: update MCP Apps design references after relocation to docs/design/claude-mcp; preserve implementation and historical evidence. -->
 <!-- [Sync] 2026-09-06: reorganize around getting started and using MCP Apps; retain exact setup, ownership, security, and validation facts in layered sections. -->
@@ -44,6 +45,8 @@ This repository contains the Dream Web application and its FastAPI backend. Admi
 Resource reads/observer writes, shared request identity/profile, and Chat CRUD/history/ownership plus initial user-message reservation now consume Admin APIs. Runtime purpose creation/public renewal/receipt consumers have passed focused technical checks; Agent lifecycle/Gateway/Editor wiring and other database domains still require migration. Old password/Google/Device/token/local-cookie HTTP paths return explicit 410 with configured Admin standard endpoints. Standalone auth helpers refuse local authority; importer Agent labels and the named Gateway verifier require explicit Admin OAuth and a matching production profile before business writes/model calls. Authlib/bcrypt have been removed without changing remaining dependency versions. Admin/Auth server secrets are cleared from child environment overlays. These source and build checks do not establish real-account business acceptance.
 
 Public Chat also reads Admin's complete Workflow context before message reservation/SSE and passes an immutable actor/thread snapshot to Service, including ordinary-Chat null. Internal confirmation/launch dispatch and long-turn purpose wiring remain migration work.
+
+Public user turns now reserve message/title through Admin's atomic confirmation guard command using raw Python JSON. A server-only Thread/Run persistence grant renews under Factory ownership and survives SSE disconnect; unknown writes keep their original receipt ID. Assistant/session persistence, Gateway/Editor credentials and other database domains remain migration work.
 
 ## What you can do
 

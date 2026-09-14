@@ -1,6 +1,7 @@
 <!-- [Input] User delegation, Agent.md, AGENTS.md, baseline 7d38715c, and Admin-owned contracts when published. -->
 <!-- [Output] Executable Dream migration plan, dependency gates, and exact evidence inventory. -->
 <!-- [Pos] Dream implementation plan; Admin owns authentication, database transactions, and schema contracts. -->
+<!-- [Sync] 2026-09-15: record atomic user-turn and factory-owned server persistence implementation and technical validation. -->
 <!-- [Sync] 2026-09-14: record ten implementation stages and current Auth/Chat/Resource/BFF/Runtime technical evidence. -->
 
 # Dream 接入 Admin 认证与数据服务执行计划
@@ -319,3 +320,15 @@ Admin已提供actual chat-user-message.persist（hash2c5b20900ef867a237613e49a89
 公开入口在已验证Workflow snapshot后创建最小server-persistence idg（dream read/write、exactthread/authoritativeRun、无EditorSession/Gatewayscope），credential只留server。使用独立server holder将已知原子预留交给Service，Service重复已确认同一输入不重发；未知提交保留原requestID，后续只能查原receipt，absent禁止新写/推理。先保持所有尚未接好typed的内部dispatch原guard，不能旧lease回写覆盖当前controlmetadata。接上有界grant后台renew、expiry/max failclosed与factory生命周期自有cleanup；不因SSE disconnect停止后台turn，不改变admission比较、lease、resume/cancel/EventBus/Runner。
 
 Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offturn错误仍只记safe diagnostics。Gateway/Editor各purpose后续独立接线，不把本阶段server idg投给CLI或替代wide/globalkey。验证 actual DTO/公开route/Service与clock/fakeProvider，没有PG/model/真实用户服务；保留SSE原实现。同步headers/folder/现行设计和证据，整体数据库/认证目标仍active。
+
+阶段14技术回执：十文件初轮 `325 passed, 1 failed in 1.58s` exit1，唯一新测试错误预期timeout503；实际transport既有`ADMIN_TIMEOUT/504`，原Chat参数测试也按504。仅更正新预期并增加exacterror code，不改transport、unknown/单POST/noRuntime/脱敏断言。fresh三受影响文件 `49 passed in 0.87s` exit0，无skip；其余277测试初轮通过且源码未再改。实际atomicuser/Workflow canonical DTO/hash及Runtime四special hash、create/discovery四schema与renew/revoke/receipt三schema全部比较exit0。docs20files/181links/191inventory/history3SHA/README结构/6sequence计数0fail，未render；tracked diff check0。无PG/model/账户/网络/用户服务，完整后台/CLI/Editor/数据库仍active。
+
+## 阶段 15：公开 Session 与复用 Editor 状态 DTO
+
+### Optimized Prompt · 2026-09-15
+
+读取Admin实际editorSessionDto/Service/Repository/Handler与已通过受限public103合同的八operation artifact。复用既有StrictDTO、EntityId、精确ISO时间校验和统一无retry transport，新增闭集EditorEngine cell/commentor/task/weight/state DTO供Session与后续Editor stdio共用；optional字段在wire省略，required nullable保持null，finite JSON值/当前state ID/writingThread归属依Admin合同failclosed。不新增任意业务限额、表列CRUD、remoteUOW或Dream SQL。
+
+将公开/api/sessions save/get/batch/list/range/text-list/delete全部改typed Admin consumer，显式request actor token，保留原name/labels null保留语义、UTC范围、排序、微秒ISO、date_key时区和mixed-word metrics。list除去内部text:null，batch空列表不发数据请求，get missing原404，delete幂等success，update/delete SSE只在confirmed command之后publish；unknown保留原request ID/error且不发event/不retry。复用Chat现有authenticated threadpool/error调用规则为共同router helper，不复制另一套权限/parser/SSE。正常Browser/公开DTO不展示技术实现。
+
+只迁移实际可授权入口；当前Session Handler不接受Thread server-persistence grant，后台ContextBuilder/Session工具保留清单依赖，不能假造Editor或宽purpose来读所有Session。后续stdio仅exact existing Session editor-stdio idg，去除DATABASE_URL另阶段处理。同步nearest folder/file headers、中英README、现行设计与技术回执，测试走实际FastAPI入口/DTO、MockTransport/公开生产dependency、DB fenced，无PG/model/真实账户/服务，不改部署环境行为或pins。

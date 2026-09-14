@@ -1,6 +1,7 @@
 # [Input] Server-owned Admin client/verifier and explicit OAuth bearer credentials.
 # [Output] Immutable request actors with canonical user IDs and separate typed profile reads.
 # [Pos] Request authentication composition; no issuing, renewal, PG or ambient actor context.
+# [Sync] 2026-09-15: create exact server-persistence purpose grants for immutable Workflow turn bindings.
 # [Sync] 2026-09-15: provide request-bound Workflow provenance for immutable public Chat turn snapshots.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
 from __future__ import annotations
@@ -15,6 +16,9 @@ from .errors import AdminDataError, invalid_response
 from .jwt_verifier import AdminJWTVerifier
 from .profile_data import AdminProfileData, CURRENT_PROFILE, UserProfileDTO
 from .workflow_data import AdminWorkflowData, AdminWorkflowResolution, RESOLVE_WORKFLOW_CONTEXT
+from .delegation import AdminDelegationCreator, AdminRuntimeClient, DelegationCreateInputDTO, RuntimeHttpConfig
+from .turn_persistence import AdminTurnPersistence
+from .user_message_data import PERSIST_USER_MESSAGE
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,12 +44,14 @@ class AdminRequestAuth:
     """Application-owned connections; each request checks current Admin identity."""
 
     def __init__(self, config: AdminDataConfig, *, client: AdminDataClient | None = None, verifier: AdminJWTVerifier | None = None) -> None:
-        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT))
+        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
         self._verifier = verifier or AdminJWTVerifier(config)
         self._owns_client = client is None
         self._owns_verifier = verifier is None
         self._profile = AdminProfileData(self.client)
         self._workflow = AdminWorkflowData(self.client)
+        self._delegations = AdminDelegationCreator(self.client)
+        self._runtime_http_config = RuntimeHttpConfig.from_server_config(config)
         self._capabilities_ready = False
         self._lock = RLock()
 
@@ -98,3 +104,19 @@ class AdminRequestAuth:
             with self._lock:
                 self._capabilities_ready = False
             raise
+
+    def turn_persistence(self, actor: AdminRequestActor, resolution: AdminWorkflowResolution, request_id: str) -> AdminTurnPersistence:
+        if not {"dream:read", "dream:write"} <= actor.scopes:
+            raise AdminDataError("INSUFFICIENT_SCOPE", 403, request_id)
+        context = resolution.context_for(actor_id=actor.canonical_user_id, thread_id=resolution.thread_id)
+        requested = DelegationCreateInputDTO(purpose="server-persistence", thread_id=resolution.thread_id,
+            run_id=context.workflow_run_id if context is not None else None, editor_session_id=None,
+            scopes=["dream:read", "dream:write"])
+        try:
+            grant = self._delegations.create(requested, access_token=actor.access_token, request_id=request_id)
+        except AdminDataError:
+            with self._lock:
+                self._capabilities_ready = False
+            raise
+        return AdminTurnPersistence(resolution, grant, self.client,
+            runtime_client_factory=lambda: AdminRuntimeClient(self._runtime_http_config))

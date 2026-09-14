@@ -1,6 +1,7 @@
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
 <!-- [Pos] Dream consumer architecture; Admin owns API/DTO/domain/repository/ORM contracts. -->
+<!-- [Sync] 2026-09-15: specify atomic raw user persistence, short-lock renewal and terminal/cancel cleanup. -->
 <!-- [Sync] 2026-09-15: record standalone authority refusal and named script account validation; preserve outstanding domain gates. -->
 <!-- [Sync] 2026-09-14: record actual BFF/Browser, request identity, Chat/resource consumers and pending Runtime/full-domain gates. -->
 
@@ -190,7 +191,7 @@ Next运行时auth与API Route Handler接入同一私有BFF owner，旧generic AP
 
 ## Browser 与构建阶段事实
 
-AuthContext现从同源BFF session读取strict公开user与内存CSRF；登录注册单一入口进入Admin同页email/signup/Google UI，device entry转Admin device UI。37个Browser API/hook/Chat/XHR模块与明确Node Apps adapter采用该owner，文件URL回到当前origin且去除旧token。静态旧getter/storage读取/Bearer写/options.token均0，full frontend typecheck与production Next build已通过。仍需受影响业务journey与真实模型验收；legacy backend issuing、其余数据域/后台grant仍未闭合。Chat initial user reserve也已接typed message persist，沿用原identity与409/unknown回执，不使用短OAuth token承担后台persist。
+AuthContext现从同源BFF session读取strict公开user与内存CSRF；登录注册单一入口进入Admin同页email/signup/Google UI，device entry转Admin device UI。37个Browser API/hook/Chat/XHR模块与明确Node Apps adapter采用该owner，文件URL回到当前origin且去除旧token。静态旧getter/storage读取/Bearer写/options.token均0，full frontend typecheck与production Next build已通过。仍需受影响业务journey与真实模型验收；旧Dream authority已退役，其余数据域/后台grant仍未闭合。Chat initial user reserve采用下方原子user-turn命令与server-persistence委托，沿用原identity与409/unknown回执，不使用短OAuth token承担后台persist。
 
 ### Runtime purpose consumer 的当前边界
 
@@ -207,3 +208,11 @@ Server keeper在expiry前运行后台renew。响应丢失保留原ID，后续先
 执行模块`AdminWorkflowData`只发送`workflow-context.resolve`的`{thread_id}`；Admin在同一事务校验唯一线性retry leaf、冻结binding、workspace owner和启动message来源/fingerprint/父状态，经过完整校验的terminal leaf或普通Chat返回`context:null`。Dream strict校验实际十字段、required nullable agent_id、原255边界、Run格式和正JSON-safe revision，operation hash为`f395682ec6cf8f308df652a1aa2792cca86d102eb1fff62a4c6a59792bfc1e66`，同时匹配identity/unified物理capabilities。
 
 公开route在已有Deck/Voice绑定后、message预留与SSE前读取。409/权限/网络/capability/DTO失败直接返回安全错误，不写初始message、不启动runtime。成功时校验thread及当前Deck/Voice，并向内部RunRequest注入不可变`AdminWorkflowResolution`；公开DTO/SDK不含该字段。Service核对actor/thread，含ordinary null均直接复用，不调用旧PG mapper。snapshot不授予新增scope、长期runtime或CLI权限；内部confirmation/launch仍保留原guard/mapper，后续迁移其typed原子命令与三purpose生命周期。验收聚焦真实HTTP consumer、null/十字段、错配、失败-before-SSE和既有Service行为，技术fixture不代表正常本机业务回执。
+
+### 原子 user-turn 与 server-persistence 生命周期
+
+`chat-user-message.persist`的input仅`thread_id/message_id/parts_json/metadata_json/title_candidate`；metadata required nullable，JSON保持Python float、负零、大整数表示，禁NaN/非JSON对象。Dream复用原`extract_text_from_parts`得到包含attachments协议的未截断candidate；Admin在单一事务执行ownedThread update lock、stored confirmation guard，保护当前dispatch lease/control metadata，非confirmation时写rawmessage并按原配置仅填missing title。output仅`message_id/confirmation_preserved`，actualhash `2c5b20900ef867a237613e49a89b4073f4c0c89cd1d2161962f7132084696c37`。
+
+公开ingress在已验证Workflow上下文后以当前OAuth创建最小server-persistence idg：仅dream read/write、exactthread、authoritativeRun或普通null、无EditorSession。`AdminTurnPersistence`只在server保存该grant/typedclient；初始原子预留成功后Service复用同输入的已知result，不再拆三次DB调用或重发。unknown保留原UUID，后续只查原receipt；absent或读取失败继续阻止新写/推理，不能认为取消/超时表示rollback。reply message ID错配按unknown处理。内部confirmation/launch尚未连接其服务身份，继续执行原guard，不借公开迁移删除保护。
+
+Factory在原admission acquire之后启动该owner的独立renewal，EventBus/Runner/lease/resume/cancel顺序保留。SSE disconnect只取消subscription，后台turn及grant继续；terminal/cancel注册自有Phase4 cleanup，先等待已dispatch同步writer，再停止/等待renewal线程并关闭独立Runtime client，application client仍由composition关闭。Keeper network action与current/diagnostics短锁分离；expiry/max/purpose/actor/thread边界拒绝，不扩大授权。此server grant不进入CLI/Editor env、SDK或Browser；Gateway/Editor独立目的、assistant/session和其他数据库领域仍需迁移。验收使用实际public route/Service/Factory与明确clock/MockTransport，覆盖unknown原ID、disconnect/cancel/drain、numeric/title和current不等待HTTP；未据此宣称正常本机模型验收。

@@ -20,6 +20,7 @@
 
 # Ink & Memory
 
+<!-- [Sync] 2026-09-15: 同步原子用户预留和Factory管理的服务器持久化委托生命周期。 -->
 <!-- [Sync] 2026-09-14: record the implemented Admin BFF/Browser boundary and remaining baseline migration gates. -->
 
 本实现分支正在迁移至 Admin 认证与数据服务。下方当前启动命令仍描述 baseline PostgreSQL 直连路径，不能作为迁移验收证据。详见[消费端设计](docs/architecture/admin-auth-data-interaction.md)与[执行/依赖门槛](docs/exec/dream-admin-auth-data-plan.md)。新 Admin DTO 严格校验，未发布操作保持不可用。 私有 BFF 基础要求显式 `INK_DREAM_PUBLIC_ORIGIN`、已注册的 `INK_DREAM_BFF_REDIRECT_URI` 与仅服务端持有的 `INK_DREAM_BFF_COOKIE_SECRET`（至少 32 字节）；`INK_DREAM_BFF_LOGIN_TTL_SECONDS` 默认 600。实际 start/callback/session/logout Route Handler 与 Browser session 请求已接入该边界。登录、注册与 Google 认证由 Admin 执行；Browser 状态只接收公开用户字段与内存 CSRF。REST/SSE/文件请求使用 Next 同源地址；保留显式语音 WebSocket 选址，后端语音功能继续关闭。
@@ -43,6 +44,8 @@ Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话
 资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership 与初始 user-message 预留已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 已通过聚焦技术检查；Agent 生命周期/Gateway/Editor 接线与其他数据库领域仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径返回明确410与已配置的Admin标准端点。Standalone auth helpers 拒绝本地认证权限；importer Agent标注和具名Gateway verifier必须使用显式Admin OAuth，并在业务写入/模型调用前核对正常生产profile账户。Authlib/bcrypt已移除，其余依赖版本不变。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
 
 公开Chat在message预留/SSE前读取Admin完整Workflow上下文，并向Service传入不可变actor/thread snapshot，包含普通Chat null。内部confirmation/launch调度与长turn purpose接线仍需迁移。
+
+公开user-turn通过Admin原子confirmation guard命令预留message/title，使用raw Python JSON。server-only Thread/Run持久化grant由Factory管理续期，SSE disconnect后保持；未知写保存原receipt ID。assistant/session持久化、Gateway/Editor凭据及其他数据库领域仍需迁移。
 
 ## 你可以做什么
 
