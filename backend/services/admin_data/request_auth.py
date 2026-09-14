@@ -1,6 +1,7 @@
 # [Sync] 2026-09-15: register the OAuth-only owner-scoped Preflight read.
 # [Sync] 2026-09-15: register the staged OAuth Preflight execute operation.
 # [Sync] 2026-09-15: register full Workflow Run read/create/retry OAuth operations.
+# [Sync] 2026-09-15: register launch metadata consumers; legacy endpoint wiring remains pending.
 # [Sync] 2026-09-15: register nine OAuth-only invitation/friendship operations.
 # [Sync] 2026-09-15: register four OAuth-only public Voice operations.
 # [Sync] 2026-09-15: register five OAuth-only public Deck mutations.
@@ -42,6 +43,7 @@ from .deck_detail_data import READ_DECK_DETAIL
 from .deck_list_data import LIST_DECKS
 from .preflight_data import EXECUTE_PREFLIGHT, READ_PREFLIGHT
 from .run_data import RUN_OPERATIONS
+from .launch_metadata_data import LAUNCH_METADATA_OPERATIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +69,7 @@ class AdminRequestAuth:
     """Application-owned connections; each request checks current Admin identity."""
 
     def __init__(self, config: AdminDataConfig, *, client: AdminDataClient | None = None, verifier: AdminJWTVerifier | None = None) -> None:
-        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, *SESSION_OPERATIONS, *DECK_VERSION_OPERATIONS, *PREFERENCES_OPERATIONS, *DECK_REFS_OPERATIONS, *SOCIAL_OPERATIONS, *VOICE_OPERATIONS, *DECK_MUTATION_OPERATIONS, *RUN_OPERATIONS, READ_DECK_DETAIL, LIST_DECKS, READ_PREFLIGHT, EXECUTE_PREFLIGHT, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
+        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, *SESSION_OPERATIONS, *DECK_VERSION_OPERATIONS, *PREFERENCES_OPERATIONS, *DECK_REFS_OPERATIONS, *SOCIAL_OPERATIONS, *VOICE_OPERATIONS, *DECK_MUTATION_OPERATIONS, *LAUNCH_METADATA_OPERATIONS, *RUN_OPERATIONS, READ_DECK_DETAIL, LIST_DECKS, READ_PREFLIGHT, EXECUTE_PREFLIGHT, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
         self._verifier = verifier or AdminJWTVerifier(config)
         self._owns_client = client is None
         self._owns_verifier = verifier is None

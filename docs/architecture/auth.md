@@ -2,6 +2,7 @@
 <!-- [Sync] 2026-09-15: consume public Preflight GET with canonical actor/ID matching and no Workspace SQL. -->
 <!-- [Sync] 2026-09-15: consume OAuth PF execute and its separate original receipts; keep default lookup explicit. -->
 <!-- [Sync] 2026-09-15: consume full Run read/create/retry OAuth domains and original scoped receipts. -->
+<!-- [Sync] 2026-09-15: prepare launch metadata/source seam; current actor endpoint wiring remains pending. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -120,5 +121,7 @@ GET /api/decks的published false/true两mode均消费deck.list/current OAuth/dre
 GET /api/story-workspace/workflow-preflights/{preflight_id} 独立消费 workflow-preflight.read/current OAuth/dream:read 与 identity/unified exact schemas/hash，响应匹配 canonical actor 和 ID，复用原 17 字段状态/微秒与 datetime JSON。移除该读取无关 default Workspace 初始化；原坏 ID/owner/missing 404 保留，其他安全错误带原 UUID 无重试。POST 使用 OAuth/dream:write、三项 exact schemas 与 workflow-preflight.execute，input_json沿原 canonical 参数编码，reply actor/Deck/revision匹配，保留202/17字段。独立服务器 receipt reader支持原 absent/in_progress/committed，不自动resume或重发；通用两态receipt保持。详见[现行消费设计](../design/workflow-preflight-read-current.md)；POST default Workspace仍有SQL，隐藏 source 持久化仍为后续入口。
 
 Run read/create/retry使用当前OAuth read/write、identity/unified两项exact schemas与已发布hash，原200/201和完整28字段/lifecycle/微秒JSON保持。Reply匹配actor/Workspace，read ID、write key/retry_of及Create source；相同key可保留原同语义PF ID。未知提交保留原UUID/unknown，显式generic两态receipt，不重发；原业务errors仅按实际code/status匹配投影。三个入口仍依赖default Workspace SQL，不能声明route全域无PG。详见[现行Run消费](../design/workflow-run-admin-consumer-current.md)。
+
+注册75的launch metadata类型消费者与原source adapter接服务端immutable AdminRequestActor/dream:write，不发送caller source IDs/fingerprint；claim匹配owned source/完整Context与当前actor/Workspace runtime metadata，finish只发issued claim/accepted。Unknown source停在PF前，原两态receipt显式读取/stale409不自动reclaim。现生产endpoint仅传actor/Workspace字符串，尚未选这些adapter；prepare/Voice/failure与source/dispatch生产SQL仍存在。详见[metadata准备设计](../design/dream-launch-admin-metadata-current.md)。
 
 Workspace content/download 的 current OAuth 身份继续共用 get_current_user；Thread ownership 改为 chat-thread.get 与原 strict DTO/four exact schema/hash，reply ID/actor 匹配后才执行原 Mode/path/existing filesystem。metadata 错配/不可用固定503/null404，无自动重试或PG fallback；原 ZIP/symlink/no-create/header保持。SystemConfig读取与其他文件管理metadata仍pending，技术测试不代表普通共享文件/真实Bash验收。

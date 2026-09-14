@@ -3,6 +3,7 @@
 <!-- [Sync] 2026-09-15: close public Preflight GET independently of Workspace/SystemConfig/Run dependencies. -->
 <!-- [Sync] 2026-09-15: consume PF execute/original receipts without claiming the default-dependent POST is DB-free. -->
 <!-- [Sync] 2026-09-15: consume full Run read/create/retry; other lifecycle and default dependencies stay open. -->
+<!-- [Sync] 2026-09-15: prepare launch metadata/source seam without counting retained production SQL as migrated. -->
 <!-- [Sync] 2026-09-15: retain Runtime/shared-file technical regression and Gateway ownership gaps. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -43,6 +44,8 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 
 阶段31只读源码扫描增加无SQL的run_data模块：298scanned/48SQL模块/513字面execute候选、16driver模块、35legacy import模块与121直接helper Call候选，exit0/parse_errors=[]。旧application方法仍供其他调用者使用，默认Workspace及动态Repository/stdio仍未迁移，不能以三个公开领域调用替换推断这些SQL已退出全域。阶段29的297扫描是当时历史，以下原baseline与现有候选表保留各自范围。
 
+阶段32新增无SQL的launch metadata模块，扫描299模块，其余48/513/16/35/121保持，parse_errors=[]/exit0；source seam仅类型准备，旧endpoint未接线，原launch32条SQL候选未消失。现有Admin typed资源provider保持，policy/admission/sdk_env补跑67pass exit0作为LKG/revision/safeint/精确内存/后台隔离/lease技术证据；startup/health/SystemConfig/selected model/GatewayCLIkey另行待迁移，不混记为provider缺口。
+
 | 生产入口 | 实际Admin领域合同/消费者 | 已替换范围 | 保留的迁移依赖 |
 | --- | --- | --- | --- |
 | `agent_factory`资源composition | [resource_data](../../backend/services/admin_data/resource_data.py)：resource-policy.read、resource-observer.publish | 独立provider/observer sink无PG；read/publish/close同活动锁，shutdown后台owner和Factory后关闭HTTP | 全域startup/其它DB与正常业务验收仍开放 |
@@ -50,7 +53,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | 公开Preflight读取/领域执行 | [preflight_data](../../backend/services/admin_data/preflight_data.py)：workflow-preflight.read/execute、独立original receipt reader | GET无default/旧service/SQL；POST领域操作交Admin，raw JSON/原202与17字段、actor-Deck-revision/three schemas、显式同ID三态receipt/no resend；generic receipt不改 | POST default Workspace仍SQL；default/SystemConfig/隐藏source仍待；目录75不替代全域Run/launch或正常验收；revision descriptor元数据差异待Admin修正 |
 | 公开Run读取/创建/重试 | [run_data](../../backend/services/admin_data/run_data.py)：workflow-run.read/create/retry | 领域操作无旧service/SQL；原200/201/28required fields/lifecycle/微秒/key/source、actor/Workspace/ID或key-retry-source、two exact schemas/hash、显式generic原两态receipt/no resend；原error mapping共享 | 三个入口default Workspace仍SQL；cancel/guidance/confirmation/launch/Run其它持久化及正常验收仍待；原SQLite行锁并发skip保持，不宣称PG验收 |
 | 共享文件content/download Thread ownership | [workspace_data](../../backend/services/admin_data/workspace_data.py)：复用chat-thread.get | 两GET不再调用get_chat_thread，current OAuth/strict reply/actor-ID/four schemas，原Mode/path/FS顺序和404/503 | get_system_config的Mode/初始化读取与其他管理数据入口仍pending；原Workspace fixture已改实际Admin HTTP，正常共享文件/CLI验收另行 |
-| 隐藏launch来源与dispatch | 原[dream_launch_application_service](../../backend/services/story_workspace/dream_launch_application_service.py)/[dream_launch_infrastructure](../../backend/services/story_workspace/dream_launch_infrastructure.py) | 阶段30实际目录75与registry已注册dream-launch-source.ensure/dream-launch-dispatch.claim/finish，Dream尚未消费；原source→PF/Run→claim COMMIT→Voice/Runtime→独立finish语义保持待迁移 | 注册前source23+ingress5/dispatch32仅Admin报告技术gate；注册不替代prepare/Agent-model-binding/failure recorder/publicPG/full normal launch；当前SQL仍pending，default Workspace仍未注册 |
+| 隐藏launch来源与dispatch | [launch_metadata_data](../../backend/services/admin_data/launch_metadata_data.py)：三registered75 types/原source seam；原[infrastructure](../../backend/services/story_workspace/dream_launch_infrastructure.py)待接线 | strict source/claim真假/10Context/raw JSON/finish、原command约束/callsite source IDs与fingerprint、current actor、同UUID两态receipt/no resend已技术准备；原application/builder/endpoint/router未变 | 生产endpoint只传actor/Workspace字符串，未选择新adapter；原source/claim/finish/prepare/Voice/failure SQL仍pending；launch75公开PG剩余37待primary，不声明完整PG/normal launch；default Workspace仍未注册 |
 | 公开Deck详情 | [deck_detail_data](../../backend/services/admin_data/deck_detail_data.py)：deck.detail | 单Admin owned aggregate；closed fields/owner int/ISO/原纯Memory解析/URL与nestedDeck匹配，无DB | Admin voiceRow emptytext→null投影差异需修正；其它create/default/install/内部helper继续开放 |
 | 公开Deck mutation | [deck_mutation_data](../../backend/services/admin_data/deck_mutation_data.py)：update/delete/toggle-publication/collect/sync-parent | 五公开写无DB；原结果/错误/闭集删除reason、four schemas、单Admin事务与unknown原UUID | create/default/provision、全局install/文件证据与原内部/fixture helper SQL仍开放 |
 | 公开Voice mutation | [voice_data](../../backend/services/admin_data/voice_data.py)：create/update/delete/collect | 四路由无DB；four exact schemas，requirednullable/optional/rawMemory，原errors/unknownreceipt | 同模块Deck其余read/create/default/provision/plugin FS evidence与internal/fixture四helper SQL仍开放 |

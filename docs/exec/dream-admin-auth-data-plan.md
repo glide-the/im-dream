@@ -753,3 +753,42 @@ git diff --check
 ```
 
 317/1是source reply/type guard补充后的fresh结果；之前315/1不替代它。原SQLitefixture只是技术回归，PG row-lock/Run正常链路不由这项skip或MockHTTP证明。本轮普通服务/PG/账户/模型/Browser/Runtime未调用；不修改Admin源码、SDK/Runtime pins或TMPDIR。默认Workspace/SystemConfig/selected model/purpose Gateway/CLIEditor、Run其它持久化与所有剩余SQL域继续开放。
+
+## 阶段32：已注册 launch metadata 类型消费者与原 source seam
+
+### Optimized Prompt · 2026-09-15
+
+实际75中source.ensure/dispatch.claim/finish已注册，公开隔离验收仍在进行，不能称其已完整通过。先按真实DTO/registry/Service/原application/infrastructure准备独立可复用消费者与原source Protocol adapter；不把尚未传递OAuth actor的旧endpoint假装接线完成。原endpoint只接actor/Workspace字符串，prepare、Voice读取、failure recorder及runtimeprovision仍SQL，当前任务记录这个身份与capability缺口，不消费未注册default Workspace。
+
+DTO复用现有StoryWorkspaceDreamLaunchCommand/Context字段metadata与validator，避免复制业务字符上限；source输入无Boundary whitespace，不normalize，nullable Agent required；context全10字段required nullable Agent、immutable/positive safeint、原Pydantic trim。UUID按实际Zod元数据pattern，claim为dlc_32hex，claim真假union与RootModel保持wire top-level不包root；raw parts_json/metadata_json不回显repr，标准JSON解析有限object/array，不复制运行时parser或重序列化。两个schemas与三项实际hash精确匹配，所有新域OAuthwrite，无user override/delegation控制通道。
+
+source adapter只接服务端immutable AdminRequestActor/client，保持原ensure_source Protocol签名；校验actor与原callsite给定source IDs/fingerprint，在实际Admin回复上匹配，不发送这些caller provenance。调用经worker thread，unknown不重发或继续PF；原application conditional Agent fingerprint/UUIDv5/先prepare后source→PF/Run流程源码不改。Claim消费者对原Source/Context全字段、Run/thread/message、当前actor/Workspace与原instruction parts/runtime metadata做匹配；不调用Voice/Runtime、不在Dream生成claim/status/lease或检查TTL。Finish只发issued claim+accepted bool并匹配Run/source，Runtime/Bash/Files/LKG仍原路径。
+
+原generic两态receipt显式同UUID操作读取，boundedsource/claim/finish重做对应检查；absent不推断rollback，claimtrue stale交Admin409，不自动重claim/resume/dispatch，保留原UUID未知结果。注册到请求owner但生产endpoint尚未选择adapter，源清单必须说typed/seam技术准备，原launch SQL未迁移，不能说公开整条无PG/normal launch完成。
+
+通过实际client/DTO/HTTP和原application usecase seam测试，校验schema/hash/闭集字段、source正常/重放/私密错配、no-agent fingerprint原callsite、claim真假/10context/raw JSON/status/issued ID、finish accepted/stale result、sameUUID receipt/timeout/no resend与OAuth owner。相关PF/Run技术回归、actual descriptor/原application/endpoint/builder/router/Runtime/model字节保持检查及docs mirror/history/链接清单。不开正常服务/PG/Gateway/模型/Browser，不改Admin、pins或TMPDIR。
+
+阶段32实际结果：三actual SHA/两项exact schemas/input-output closed shapes（claimed tagged union无root包装）、原command metadata与validator函数复用、10 Context required字段通过。Source expectation只包含原callsite已有的三个来源事实，不构造假timestamp；adapter接服务端immutable actor并在worker thread调用HTTP。Unknown/错配停在原application source seam，无PF/Run/dispatch。Claim fullContext/current actor-Workspace/raw instruction/metadata与sourceIDs匹配，finish仅issued claim+accepted，generic两态receipt显式同UUID读取，stale409不reclaim。生产endpoint/builder尚未选择这些adapter，source/claim/finish SQL仍保留；不将类型准备称作全生产入口迁移。
+
+源码导入检查曾因Pydantic discriminator字段before validator限制和bound classmethod validator复用方式返回exit1；先改为RootModel前置flag检查与原validator.__func__复用后，导入/raw instruction检查exit0，再开始完整技术测试；没有弱化validator/断言或修改普通服务。初次六文件281passed exit0之后补source unknown停PF前/full context值/非有限指数用例，fresh为287passed。
+
+主协调新要求的资源全系统gate：已有resource_policy.py/Admin typed provider/read background scope符合目标，源码保持，不制造改动。补跑现有policy/admission/sdk_env三文件，覆盖LKG/revision回滚与动态替换、safeint/组合内存精确边界、后台callback异常隔离、admission资源顺序/既有lease/后续acquire与SDK env约束；off-turn provider/Runtime主路径源码与原composition保持的证据按源码检查记录，不把67测试当作完整普通账户/远程模型/SSE验收。
+
+primary fresh命令：
+
+```sh
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_admin_launch_metadata.py backend/tests/test_story_workspace_dream_launch.py backend/tests/test_admin_run_routes.py backend/tests/test_admin_preflight_execution.py backend/tests/test_admin_data_boundary.py backend/tests/test_admin_request_auth.py
+# exit 0; 287 passed in 3.35s; no failures/skips
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-stage32-contract-check.py
+# exit 0; actual75/client61,3actual launch hashes/2schema/closed DTOs,original constraint+validator reuse/10required Context; original application/endpoint/builder/router/Runtime/Files/provider unchanged
+env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_claude_agent_resource_policy.py backend/tests/test_claude_agent_admission.py backend/tests/test_sdk_env.py
+# exit 0; 67 passed in 0.73s; existing provider unchanged
+env PYTHONDONTWRITEBYTECODE=1 /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-doc-check.py
+# exit 0; 41files/410links/275inventory,3 history original SHA,README parity,6Mermaid count/failures=[]; no render
+env PYTHONDONTWRITEBYTECODE=1 /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python /private/tmp/dream-admin-current-sql-scan.py
+# exit 0; 299scanned/48SQL modules/513literal candidates/16drivers/35legacy imports/121helper Calls,parse_errors=[]; static candidates,not full reachable runtime proof
+git diff --check
+# exit 0; no output
+```
+
+文档checker仍显式检查当前Run/launch设计与历史，backend folder动态范围随阶段改动变化，41/410/275不表示完整repository Markdown普查。Source importer/后台helper/Repository/pool/stdio与全域startup/health/SystemConfig/selected model/GatewayCLIkey等仍开放。launch75主协调报告首轮actor_id query层级harness预期错，实际400 USER_OVERRIDE_FORBIDDEN正确且首Source已提交/其余37待执行，Root未重跑或判业务缺陷。default Workspace候选21仍未注册。本轮不调用普通PG/账户/模型/Browser/Runtime、不改Admin/pins/TMPDIR，完整launch/普通数据与Admin可见账本验收仍由主协调完成。
