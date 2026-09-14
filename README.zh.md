@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: 同步Admin Deck内容版本事务与其余Deck/Runtime消费端迁移边界。 -->
 <!-- [输入] 当前 Dream/Admin/Gateway 拓扑、支持版本与用户可见的 MCP Apps 流程。 -->
 <!-- [输出] 面向普通用户和本机运行者的简明指南，深入工程细节通过链接下沉。 -->
 <!-- [定位] 仓库中文入口指南；README.md 是同结构的英文正文。 -->
@@ -50,6 +51,8 @@ Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话
 公开user-turn通过Admin原子confirmation guard命令预留message/title，使用raw Python JSON。server-only Thread/Run持久化grant由Factory管理续期，SSE disconnect后保持；未知写保存原receipt ID。公开Agent的Thread读取与SDK-native session ID回写也使用该绑定grant。user/session写共享原receipt恢复，Session仅复用最近一次确认回写。后台assistant持久化、写作Session上下文/工具、Gateway/Editor凭据及其他数据库领域仍需迁移。
 
 公开写作Session save/get/batch/list/range/aggregate/delete已使用六项typed Admin operation与显式request OAuth。保留原metadata/full-state响应、精确时间、时区日键和正文metrics；仅confirmed写入后发edit event。共享闭集Editor状态DTO省略未设置的optional字段。当前Session合同拒绝Thread server-persistence grant，后台Session上下文/工具仍是独立迁移依赖。
+
+公开Deck内容state/preview/commit/history/detail已使用五项typed Admin operation与精确schema capability。Admin执行snapshot/hash/CAS/版本事务；Dream还原原rawsnapshot响应，保留安全冲突详情及未知提交ID，不自动重发。其余Deck/Voice操作、插件文件验证与Runtime消费端仍需迁移。
 
 ## 你可以做什么
 

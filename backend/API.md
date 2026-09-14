@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: document Admin-backed public Deck versions, exact capabilities and unknown-result recovery. -->
 # Ink & Memory API Documentation
 
 > [Sync] 2026-09-13: Claude Agent `resume` is intent only. After actor/thread
@@ -919,9 +920,10 @@ history, and no longer permanently blocks deletion.
 ### GET `/api/decks/{deck_id}/version-state`
 
 Returns the owned Deck's aggregate `draft_revision`, latest immutable content
-version, clean/dirty status, and next vN. Returns structured `503
-DECK_VERSION_CAPABILITY_MISSING` until Admin Drizzle publishes
-`dream.deck-content-versions.v1`; ordinary Deck editing remains available.
+version, clean/dirty status, and next vN. The public route uses current request OAuth and typed Admin operations. It
+returns structured `503 ADMIN_CAPABILITY_UNAVAILABLE` unless exact identity,
+unified schema, content-version and canonical-storage capabilities are present;
+other Deck editing consumers remain a separate migration scope.
 
 ### POST `/api/decks/{deck_id}/versions/preview`
 
@@ -934,13 +936,25 @@ returns the target vN plus categorized changes. Preview never writes a version.
 Accepts the same expected values plus an optional 200-character description.
 Locks the Deck, repeats validation/diff/hash, appends an immutable `deck_versions`
 snapshot, and advances latest/published revision in one transaction. Stale facts
-or no changes return `409`; failures preserve the draft and previous vN.
+or no changes return `409`; confirmed transaction failures preserve the draft
+and previous vN. A timeout or invalid write response returns its original
+`request_id` and `outcome_unknown`; Dream never automatically retries the POST
+or treats an absent receipt as proof of rollback. Conflict responses retain
+only validated `current_draft_revision`/`current_version` and a safe message.
 
 ### GET `/api/decks/{deck_id}/versions`
 
 Returns owner-scoped immutable Deck content versions newest-first. Runtime plugin
 SemVer and binding revision are secondary snapshot/configuration facts and are
 not substituted for content vN.
+
+### GET `/api/decks/{deck_id}/versions/{version}`
+
+Returns the original flat version summary and `snapshot` object. Admin sends
+raw snapshot JSON; Dream validates its closed v1 shape then decodes it with
+Python, preserving float/negative-zero/bigint memory values, required nulls,
+creator integer and ISO microseconds. Admin owns all version transactions and
+canonicalization; the public version router has no Dream PG connection.
 
 ### GET `/api/voice-decks/{deck_id}/plugin-binding/history`
 

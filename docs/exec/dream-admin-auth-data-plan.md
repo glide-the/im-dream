@@ -1,6 +1,7 @@
 <!-- [Input] User delegation, Agent.md, AGENTS.md, baseline 7d38715c, and Admin-owned contracts when published. -->
 <!-- [Output] Executable Dream migration plan, dependency gates, and exact evidence inventory. -->
 <!-- [Pos] Dream implementation plan; Admin owns authentication, database transactions, and schema contracts. -->
+<!-- [Sync] 2026-09-15: record five public Deck content-version consumers and exact contract gates. -->
 <!-- [Sync] 2026-09-15: implement bound Agent Thread/SDK Session consumers and scoped original-receipt recovery. -->
 <!-- [Sync] 2026-09-15: implement public Session consumers while retaining separate background authorization gates. -->
 <!-- [Sync] 2026-09-15: record atomic user-turn and factory-owned server persistence implementation and technical validation. -->
@@ -362,3 +363,17 @@ Keeper current只能读短锁snapshot，HTTP renewal不持有hotpath锁；offtur
 新增与actual closed v1 snapshot对应的只读DTO，snapshot_json保留原字符串，只校验shape，Dream最终用标准Python JSON decode回原snapshot dict，保持负零/float/bigint，不复制canonicalization/diff/hash算法。公开created_by保留原int、ISO微秒保持、detail保持原flat summary/snapshot响应。缺required nullable/extra/nonfinite/ID错配fail closed，写reply错配unknown。公开409保留closed current_draft_revision/current_version并使用安全固定错误message；提交unknown保留原UUID，不盲retry。原limit/description合同边界保持，不新增产品配额或确认。
 
 仅迁移这五public操作。Deck/Voice其他14操作、default plugin provisioning、refs/voice6以及Runtime消费者、Dream actualartifact_store/CLIcompat证据、internal content-version Service调用继续清单开放，不能用metadatafixture当FS/model验收。更新file headers/nearest folder/README镜像/现行设计/映射；dedicated runner经actualFastAPI/Auth/DTO/MockTransport验证三capability/hash/CAS/409/unknown/numeric snapshot/permissions/ID/微秒且DB fenced，无PG/网络/模型/用户服务/SDKruntime与pins变更。
+
+阶段17实现状态：五actualhash已逐项匹配57artifact；物理requirements除三Deck领域schema外还包含identity，共four exact v1，复用Workflow已有identity/unified pins。public版本router无Dream database/PG Service，引入closed raw v1 snapshot shape，仅decode原响应，不复制hash/CAS。positive safe CAS严格输入、closed409 details/unknown原UUID、creatorint/微秒/selectedDeck-version绑定；共享actor invocation增加可选safe domain error handler，Chat/Session默认语义保持。client catalog fresh失败清空ready，下一共享auth重新载入，补cross-domain profile恢复用例。Luna技术gate进行中，otherDeck14/refs/voice6/FS/Runtime及内部版本Service仍开放。
+
+阶段17技术回执：首轮指定六pytest文件 `176 passed, 3 failed, 1 warning in 2.07s` exit1、无skip；三个失败同源为nested canonical ID validator绑定收到ValidationInfo。改显式classmethod调用原Principal validator，保留校验；新test cookie改client级设置后，fresh两文件 `66 passed in 0.99s` exit0，无skip/failure/warning。其余首轮通过文件无源变更未重跑。five capability/artifact/canonical SHA与four physicalrequirements实际匹配，TS closed fields/required nullable一致，public router AST无DB/_service，consumer无hash/CAS实现，exit0。既有明确命名SQLite fixture仅技术验证。docs24/203links/199inventory/history3SHA/README parity/6sequence0fail，Deck11sequences/交互6仅计数未render；tracked check0、新三文件no-index inner exit1且无输出，仅内容差异无whitespace error。无PG/network/model/用户服务/SDKruntime或pyc/并发清理。
+
+## 阶段 18：公开用户偏好两项消费端
+
+### Optimized Prompt · 2026-09-15
+
+读取Admin实际userPreferencesDto/Service/Repository/Handler与registered60 artifact，消费user-preferences.get/save两项actualhash；Admin公开受限合同尚在独立验证时只以广告+exact identity/unified schema failclosed，不将unit/metadatafixture声称正常业务验收。复用StrictDTO/requirednullable/rawobjecttext/ISO、shared actor/threadpool/safe errors与clientcatalog恢复，无user ID/runtimepurpose。只使用当前OAuth，不允许server-persistence/CLI/Editor grant管理preferences。
+
+公开GET保持未保存{}与voice_configs/state_config原dict、meta_prompt/selected_state/timezone/first_login_completed/微秒时间；POST把五optional公共字段转requirednullable wire，None沿用原COALESCE保留，空对象保存{}，JSON保持Pythonfloat/negativezero/bigint不经JS重编码。拒绝外部actor/firstlogin/systemconfig字段和错误形状，不增加产品配额/默认值/确认；stored config无法投影有效公共JSON时safe failclosed，不修数据库。不改变default-voices本地config端点、SYSTEM config/模型/Workspace/effort/Deck策略所有权。
+
+公开偏好路由移除Dream DB，仅typed two operation。其它System Config/first-login/导入/后台读取仍明确待迁移，不靠该合同扩大context授权。补actualFastAPI/Auth/DTO/MockTransport/DBfence的partial/null/emptyobject/numeric/time/permissions/invalid fields/unknown原UUIDno retry测试，同步nearest file/folder/README镜像/现行设计与旧时序索引；专用runner技术验收无PG/网络/模型/用户服务/SDKruntime，不改pins。

@@ -1,6 +1,7 @@
 # [Input] Server-owned Admin client/verifier and explicit OAuth bearer credentials.
 # [Output] Immutable request actors with canonical user IDs and separate typed profile reads.
 # [Pos] Request authentication composition; no issuing, renewal, PG or ambient actor context.
+# [Sync] 2026-09-15: register five capability-gated public Deck content-version operations.
 # [Sync] 2026-09-15: register six typed public Session operations alongside Chat/profile/Workflow consumers.
 # [Sync] 2026-09-15: create exact server-persistence purpose grants for immutable Workflow turn bindings.
 # [Sync] 2026-09-15: provide request-bound Workflow provenance for immutable public Chat turn snapshots.
@@ -21,6 +22,7 @@ from .delegation import AdminDelegationCreator, AdminRuntimeClient, DelegationCr
 from .turn_persistence import AdminTurnPersistence
 from .user_message_data import PERSIST_USER_MESSAGE
 from .session_data import SESSION_OPERATIONS
+from .deck_version_data import DECK_VERSION_OPERATIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +48,7 @@ class AdminRequestAuth:
     """Application-owned connections; each request checks current Admin identity."""
 
     def __init__(self, config: AdminDataConfig, *, client: AdminDataClient | None = None, verifier: AdminJWTVerifier | None = None) -> None:
-        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, *SESSION_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
+        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, *SESSION_OPERATIONS, *DECK_VERSION_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
         self._verifier = verifier or AdminJWTVerifier(config)
         self._owns_client = client is None
         self._owns_verifier = verifier is None
@@ -59,7 +61,7 @@ class AdminRequestAuth:
 
     def _ensure_capabilities(self, request_id: str) -> None:
         with self._lock:
-            if not self._capabilities_ready:
+            if not self._capabilities_ready or not self.client.capabilities_ready:
                 self.client.capabilities(request_id)
                 self._capabilities_ready = True
 

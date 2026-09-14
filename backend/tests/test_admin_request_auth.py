@@ -2,6 +2,7 @@
 # [Output] Provider-free claim/identity/profile/scope and public-boundary regression checks.
 # [Pos] Technical authentication contracts; no real users, PostgreSQL or model calls.
 # [Sync] 2026-09-14: exercise strict profile wire schemas and explicit request actor propagation.
+# [Sync] 2026-09-15: recover profile operations after a separate domain invalidates the capability catalog.
 from __future__ import annotations
 
 import json
@@ -37,13 +38,14 @@ class Verifier:
         return OAuthPrincipalClaims("opaque-ba-subject", "dream-browser", scopes, "token-id", 100, 400)
 
 
-def owner(config, *, principal_patch=None, profile_patch=None, fail_capabilities_once=False):
+def owner(config, *, principal_patch=None, profile_patch=None, fail_capabilities_once=False, fail_capabilities_at=None):
     calls = []
     def handler(request):
         calls.append(request)
         request_id = request.headers["x-request-id"]
         if request.url.path.endswith("/capabilities"):
-            if fail_capabilities_once and sum(item.url.path.endswith("/capabilities") for item in calls) == 1:
+            attempt = sum(item.url.path.endswith("/capabilities") for item in calls)
+            if (fail_capabilities_once and attempt == 1) or attempt == fail_capabilities_at:
                 return httpx.Response(503, json={"request_id": request_id, "error": {"code": "ADMIN_UNAVAILABLE", "message": "safe"}})
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "algorithm": "ES256", "resource": config.resource, "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": [], "operations": [CURRENT_PROFILE.capability.model_dump()]}
         elif request.url.path.endswith("/principal"):
@@ -92,6 +94,19 @@ def test_failed_capability_initialization_can_recover_without_caching_identity(c
         auth_owner.authenticate("read-token", "request-1", required_scopes=frozenset({"dream:read"}))
     auth_owner.authenticate("read-token", "request-2", required_scopes=frozenset({"dream:read"}))
     assert len(calls) == 3
+
+
+def test_request_auth_recovers_after_a_separate_domain_refresh_failure(config):
+    auth_owner, calls = owner(config, fail_capabilities_at=2)
+    actor = auth_owner.authenticate("read-token", "request-1", required_scopes=frozenset({"dream:read"}))
+    assert auth_owner.current_profile(actor, "profile-1").id == "42"
+    with pytest.raises(AdminDataError, match="ADMIN_UNAVAILABLE"):
+        auth_owner.client.capabilities("domain-refresh-1")
+    assert not auth_owner.client.capabilities_ready
+    actor = auth_owner.authenticate("read-token", "request-2", required_scopes=frozenset({"dream:read"}))
+    assert auth_owner.current_profile(actor, "profile-2").id == "42"
+    assert auth_owner.client.capabilities_ready
+    assert sum(item.url.path.endswith("/capabilities") for item in calls) == 3
 
 
 @pytest.mark.parametrize("field,value", [("id", 42), ("id", "9223372036854775808"), ("email", "invalid-email"), ("email", ".member@example.com"), ("created_at", "2026-02-29T00:00:00Z"), ("created_at", "2026-09-14T00:00:00"), ("auth_providers", ["password"]), ("password_hash", "synthetic")])

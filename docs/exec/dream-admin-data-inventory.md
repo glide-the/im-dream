@@ -1,6 +1,7 @@
 <!-- [Input] Dream baseline Python AST and follow-up production rg scan. -->
 <!-- [Output] Per-file DB/transaction/permission evidence and pending Admin API mapping. -->
 <!-- [Pos] Dream migration inventory; Admin owns the eventual canonical API contract. -->
+<!-- [Sync] 2026-09-15: record public Deck content-version replacement while retaining other Deck/Voice/Runtime dependencies. -->
 <!-- [Sync] 2026-09-15: add public Agent Thread reads and SDK-native Session writes to actual consumer mappings. -->
 <!-- [Sync] 2026-09-15: distinguish baseline scans from actual resource/Chat/Workflow/user-turn/Session consumer mappings. -->
 <!-- [Sync] 2026-09-14: initial exhaustive candidate scan; candidates are not all reachable production SQL. -->
@@ -32,6 +33,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | 公开user-turn原子预留 | [user_message_data](../../backend/services/admin_data/user_message_data.py)/[turn_persistence](../../backend/services/admin_data/turn_persistence.py)：chat-user-message.persist | server-persistence exact Thread/Run；guard/message/title单Admin事务，known复用/unknown原receipt；Factory renew/cleanup | 原内部dispatcher guard保留，CLI/Editor各purpose与其余后台persist仍未切换 |
 | 公开写作Session CRUD/summary | [sessions router](../../backend/routers/sessions.py)/[session_data](../../backend/services/admin_data/session_data.py)：session.save/get/batch/list/text-list/delete | 路由无Dream DB；原metadata/state/microsecond/timezone/metrics/confirmed edit events | ContextBuilder、Session工具与Editor stdio仍有原DB入口；Session Handler拒Thread server grant |
 | 公开Agent Thread/SDK Session | [Service](../../backend/claude_agent/service.py)/[turn_persistence](../../backend/services/admin_data/turn_persistence.py)：chat-thread.get/update-session | resume读取与init/final/repair Session回写使用exact server grant；user/session共享unknown原receipt，最近Session复用；Thread读写drain | 内部dispatcher保持旧身份/PG，assistant raw/Run数据库写不在owner屏障内；Settings/MCP仍有PG |
+| 公开Deck内容版本 | [deck_versions router](../../backend/routers/deck_versions.py)/[deck_version_data](../../backend/services/admin_data/deck_version_data.py)：deck-content.state/preview/commit/history/detail | router无Dream PG；four exact schema、Admin snapshot/hash/CAS/TX，rawsnapshot/creator int/微秒、safe409/unknown原UUID | 其他Deck/Voice14、refs/voice6与FS/CLI evidence/Runtime consumer、内部content_versioning仍待迁移 |
 
 ## baseline逐文件扫描
 

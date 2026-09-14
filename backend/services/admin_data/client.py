@@ -2,6 +2,7 @@
 # [Output] No-retry HTTP consumer with separate service/user authentication and receipt recovery.
 # [Pos] Sole Admin authentication/data transport; domain adapters register explicit DTO operations.
 # [Sync] 2026-09-14: implement v1 contracts and shared bounded HTTP parsing and closed Deck conflict revisions without SQL/UOW emulation.
+# [Sync] 2026-09-15: expose catalog readiness so failed domain refreshes can recover through request authentication.
 """Admin DTO client. HTTP failures never imply rollback of a dispatched write."""
 
 from __future__ import annotations
@@ -48,6 +49,11 @@ class AdminDataClient:
         ):
             raise AdminDataError("ADMIN_OPERATION_CONTRACT_INVALID", 503)
         self._advertised: dict[str, OperationCapabilityDTO] = {}
+        self._capabilities_ready = False
+
+    @property
+    def capabilities_ready(self) -> bool:
+        return self._capabilities_ready
 
     def close(self) -> None:
         if self._owns_client:
@@ -74,6 +80,7 @@ class AdminDataClient:
 
     def capabilities(self, request_id: str) -> CapabilitiesDTO:
         self._advertised = {}
+        self._capabilities_ready = False
         result = self._request("GET", "/capabilities", request_id, CapabilitiesDTO)
         auth = result.auth
         if auth.issuer != self._config.issuer or auth.jwks_uri != self._config.jwks_uri or auth.resource != self._config.resource:
@@ -84,6 +91,7 @@ class AdminDataClient:
             self._advertised = {}
             raise invalid_response(request_id)
         self._advertised = advertised
+        self._capabilities_ready = True
         return result
 
     def principal(self, access_token: str, request_id: str) -> PrincipalDTO:

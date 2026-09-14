@@ -3,6 +3,7 @@
 # [Output] Provide bearer-only canonical identity and shared date/text helpers to backend routers.
 # [Pos] shared dependency node in backend/routers
 # [Sync] 2026-09-15: reuse one explicit actor/threadpool/error adapter for typed Chat and Session operations.
+# [Sync] 2026-09-15: allow a domain's safe error response through the same actor invocation path.
 # [Sync] 2026-05-25: extracted common dependency helpers from backend/server.py.
 # [Sync] 2026-06-23: allow auth dependencies to read system access tokens from
 #                    Authorization headers or OAuth login cookies.
@@ -60,7 +61,7 @@ async def get_admin_current_user(
 get_current_user = get_admin_current_user
 
 
-async def invoke_admin_operation(current_user: dict, method, input_dto):
+async def invoke_admin_operation(current_user: dict, method, input_dto, *, error_handler=None):
     actor = current_user.get("_admin_actor")
     if not isinstance(actor, AdminRequestActor):
         raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
@@ -68,6 +69,8 @@ async def invoke_admin_operation(current_user: dict, method, input_dto):
     try:
         return await run_in_threadpool(method, input_dto, request_id, access_token=actor.access_token)
     except AdminDataError as exc:
+        if error_handler is not None:
+            return error_handler(exc, request_id)
         detail = {"error_code": exc.code, "request_id": exc.request_id or request_id, "outcome_unknown": exc.outcome_unknown}
         raise HTTPException(status_code=exc.status_code, detail=detail) from None
 

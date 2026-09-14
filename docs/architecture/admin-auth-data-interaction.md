@@ -1,6 +1,7 @@
 <!-- [Input] Admin canonical design v0.1, Dream entry/transaction scans and actual consumer DTO code. -->
 <!-- [Output] Dream implementation review, six cross-project flows, state/failure and release gates. -->
 <!-- [Pos] Dream consumer architecture; Admin owns API/DTO/domain/repository/ORM contracts. -->
+<!-- [Sync] 2026-09-15: define OAuth-only Deck version consumers, four exact capabilities and unknown commit handling. -->
 <!-- [Sync] 2026-09-15: specify bound Thread/SDK Session operations, mutable confirmation reuse and scoped unknown recovery. -->
 <!-- [Sync] 2026-09-15: specify public Session projection/events and reusable closed Editor state DTOs. -->
 <!-- [Sync] 2026-09-15: specify atomic raw user persistence, short-lock renewal and terminal/cancel cleanup. -->
@@ -232,3 +233,11 @@ owner在单一activity锁中串行user/session命令及Thread读取，Phase4等�
 Admin `session.save/get/batch/list/text-list/delete`六operation负责owned Session持久化、state/writingThread绑定、name/labels null保留、UTC范围与排序。Dream复用闭集EditorEngine state DTO，覆盖text/widget/suggestion Cells、commentors/tasks/weight；optional在wire省略，只有selectedState可显式null，required nullable字段保留。有限JSON数值与微秒ISO按实际合同校验；错误state/ID/额外字段在I/O前返回安全400，Admin状态损坏返回503，missing get保持404。
 
 公开Session走同一已认证request actor/OAuth与shared threadpool/error adapter，无外部user ID。metadata list移除内部text:null，Dream保留时区date_key、mixed-word metrics与aggregate响应；空batch不发domain request。update/delete收到confirmed result才publish原user-scoped Edit Session event；unknown保留原request ID，不retry、不发event，业务状态按原receipt确认。此Session合同不接受Thread server-persistence grant，后台ContextBuilder/Session tools尚待独立合同，不能投影Editor或扩大purpose绕过权限。公开HTTP/DTO/DB-fenced技术验收不代表正常账户业务验收。
+
+### 公开 Deck 内容版本边界
+
+`AdminDeckVersionData`消费state/preview/commit/history/detail五operation；当前request OAuth独立于Runtime purposes，Admin拒绝Thread grant作为Deck管理授权。Dream在domain调用前匹配identity/unified/content-versions/canonical-storage四项exact v1与operation hash，缺失/重复/错误version或hash时503；Admin继续逐事务验证物理ledger、principal/owner、CAS与输入。共享actor/threadpool adapter复用原权限规则，domain只定制安全JSON错误。
+
+Admin负责snapshot/hash/diff、Deck锁、immutable append及latest/published revision同事务更新。Dream闭集校验v1 snapshot raw字符串，最终标准Python decode成原flat detail的snapshot dict；float/负零/bigint、required nullable、created_by公开int与微秒时间保持，不重算或改写canonical JSON。reply外层/nested Deck或selected version不匹配读503，commit按unknown处理。
+
+commit的positive safe CAS与原description/limit合同保持。409 conflict只携带已校验current_draft_revision/current_version及固定安全message；已确认事务失败保留草稿/旧vN，网络/响应结果不明保留原UUID/outcome_unknown、不自动POST重试，absent不能证明rollback。catalog fresh fetch失败清除ready，下次共享身份重新加载，避免其他领域沿用空广告。公开五operation技术验收无Dream PG；其他Deck/Voice14、refs/voice6的actualFS/CLI证据、Runtime和内部content-version消费者继续开放，正常业务验收独立。

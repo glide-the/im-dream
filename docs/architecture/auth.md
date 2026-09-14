@@ -2,6 +2,7 @@
 <!-- [Sync] 2026-09-15: bind public Agent Thread/SDK Session operations and scope original-ID recovery. -->
 <!-- [Output] Dream consumer design, authority retirement, topology and acceptance gates. -->
 <!-- [Pos] Dream authentication consumer; Admin owns Better Auth, OAuth and signing keys. -->
+<!-- [Sync] 2026-09-15: Deck management uses current request OAuth; purpose grants do not authorize it. -->
 <!-- [Sync] 2026-09-15: public Session operations retain explicit request OAuth; server grants do not expand their scopes. -->
 <!-- [Sync] 2026-09-15: distinguish server turn persistence from CLI and Editor purpose grants. -->
 <!-- [Sync] 2026-09-15: retire standalone authority and require explicit OAuth/profile account matching in scripts. -->
@@ -90,3 +91,5 @@ Authlib在原两个issuer router中仅用于Dream Google/Device authority，现�
 Next同名password/Google/Device/token薄adapter也返回410，login/register在generic proxy前执行，避免未登录401遮住迁移响应；Next `/auth/logout`仍执行实际BFF handle撤销。两端退役owner只读取三项公开authority配置，不要求private service凭据。
 
 公开Session六operation由当前已认证request OAuth执行，继续绑定Admin principal；shared helper只投影该Bearer到指定typed consumer，不接受body actor ID、不做本地renew。Session read/write的工具与后台授权独立于Thread server-persistence，现行Handler拒绝该purpose；后续Editor只能消费exact existing Session的editor-stdio grant。失败/unknown和Edit Session事件规则见[交互设计](admin-auth-data-interaction.md)。
+
+公开Deck内容版本五operation只使用当前request OAuth与Admin principal，schema要求identity/unified/content-versions/canonical-storage四项exact v1。管理权限不接受Thread或CLI/Editor purpose。共享actor invocation保持同一认证和threadpool，只由domain adapter生成安全错误响应。领域catalog刷新失败清除ready，下一认证重新加载后再执行profile/Chat等operation；不回退旧issuer/SQL。

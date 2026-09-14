@@ -1,6 +1,7 @@
 <!-- [Input] Deck design units, Admin capability, Dream implementation, and QA lanes. -->
 <!-- [Output] Requirement-to-code/test/evidence traceability and test matrix. -->
 <!-- [Pos] Deck redesign acceptance ledger. -->
+<!-- [Sync] 2026-09-15: map public content-version consumers to Admin transaction owners and provider-free HTTP evidence. -->
 <!-- [Sync] 2026-08-17: trace typed preview Demo dispatch to Chat or the dedicated Dream workbench. -->
 
 # Deck 需求追踪矩阵与测试计划
@@ -40,8 +41,8 @@
 |---|---|---|---|
 | 草稿 CAS | `decks.draft_revision` | 所有受管写先锁 aggregate 后 advance | mutation 成功后刷新 state |
 | 当前版本 | `latest_version/published_draft_revision` | list/detail projection | 列表/头部状态 |
-| 不可变 commit | `deck_versions` + no-update/no-delete triggers | canonical snapshot/hash + append | preview/confirm/history |
-| capability | `dream.deck-content-versions.v1` receipt | 缺失时 version API 503 | 提交禁用、编辑可继续 |
+| 不可变 commit | `deck_versions` + no-update/no-delete triggers；Admin Repository canonical snapshot/hash + append TX | five typed consumer/rawsnapshot projection | preview/confirm/history |
+| capability | identity/unified/content-versions/canonical-storage四exact v1 ledger | typed consumer缺失/hash drift时version API503 | 提交禁用、编辑可继续 |
 
 ## 测试矩阵
 
@@ -67,3 +68,7 @@
 9. Deck 预览示例必须按服务端 `agent_type` 分流；DreamAgent 复用现有 Dream start 并进入独立 Dream 工作台，禁止降级为 Chat 预填。
 
 执行命令、退出码、通过数量和截图路径在本次最终交付中记录；未执行的真实业务车道必须说明原因。
+
+## 本轮公开内容版本消费端验收
+
+背景是Dream public版本路由旧PG service需要由Admin事务接管；目标仅five state/preview/commit/history/detail，其他Deck/Voice/Runtime消费者仍待迁移。执行代码为[typed data](../../../backend/services/admin_data/deck_version_data.py)、[closed snapshot DTO](../../../backend/services/admin_data/deck_version_models.py)与[public route](../../../backend/routers/deck_versions.py)，通过[actual HTTP technical tests](../../../backend/tests/test_admin_deck_version_routes.py)验证four capabilities/CAS/409/unknown原UUID/rawnumeric/microsecond/权限和ID。Admin owns snapshot/hash/append；Dream不复制算法。已确认失败回滚与网络unknown按[现行交互](../../architecture/admin-auth-data-interaction.md)区分，absent不表示rollback，正常真实业务仍独立验收。

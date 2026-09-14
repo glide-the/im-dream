@@ -1,6 +1,7 @@
 <!-- [Input] Current Dream/Admin/Gateway topology, supported versions, and user-visible MCP Apps workflow. -->
 <!-- [Output] Plain-language user and local-operator guide with deeper engineering details linked out. -->
 <!-- [Pos] Canonical English repository entry guide; README.zh.md is the same-structure Chinese mirror. -->
+<!-- [Sync] 2026-09-15: describe Admin-owned Deck content version transactions and remaining Deck/runtime consumers. -->
 <!-- [Sync] 2026-09-15: document bound Agent Thread resume and SDK Session writes plus remaining background domains. -->
 <!-- [Sync] 2026-09-15: document public Session Admin consumers and their separate background authorization dependency. -->
 <!-- [Sync] 2026-09-15: document atomic user reservations and the factory-owned server persistence grant lifecycle. -->
@@ -51,6 +52,8 @@ Public Chat also reads Admin's complete Workflow context before message reservat
 Public user turns now reserve message/title through Admin's atomic confirmation guard command using raw Python JSON. A server-only Thread/Run persistence grant renews under Factory ownership and survives SSE disconnect; unknown writes keep their original receipt ID. Public Agent Thread reads and SDK-native session ID updates also use that bound grant. User/session writes share original-receipt recovery, and only the latest confirmed Session update is reused. Background assistant persistence, writing Session context/tools, Gateway/Editor credentials and other database domains remain migration work.
 
 Public writing Session save/get/batch/list/range/aggregate/delete now use six typed Admin operations with explicit request OAuth. The original metadata/full-state responses, precise timestamps, timezone day keys and prose metrics remain; edit events publish only after confirmed writes. Shared closed Editor state DTOs omit absent optional fields. The current Session contract rejects Thread server-persistence grants, so background Session context/tools remain a separate migration dependency.
+
+Public Deck content state/preview/commit/history/detail now use five typed Admin operations and exact schema capabilities. Admin executes snapshot/hash/CAS/version transactions; Dream restores the original raw snapshot response and preserves safe conflict details and unknown commit IDs without retrying. Other Deck/Voice operations, plugin filesystem verification and runtime consumers remain migration work.
 
 ## What you can do
 
