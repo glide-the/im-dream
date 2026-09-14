@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: retain Runtime/shared-file technical regression and Gateway ownership gaps. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
@@ -354,3 +355,49 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | [backend/services/admin_product/runtime.py](../../backend/services/admin_product/runtime.py) | 0 | 0 |
 
 重点未关闭：database通用助手/Session与assistant，Story Workspace/PF/Run/source/dispatch/确认/产物Repository，Plugin install/catalog/refs-runtime/packer，Deck binding/content/runtime/Gateway，Editor/stdio、MCP/Notion/Product pools与startup。revocation_service仍有sqlite3源码import，必须继续按运行入口及Schema协议清理，不能新建SQLite fallback。普通用户/模型/共享FS/Runtime验证由实际入口及发布capability决定，不使用环境标签跳过。
+
+### Runtime/共享文件回归与授权依赖
+
+2026-09-15指定workspace/pipeline/sdk_env三文件技术合同105pass/8.35s exit0。只验证原本地路径/TMPDIR/artifact/SDK合同，未证明真实CLI、模型、共享文件HTTP OAuth或normal PostgreSQL链路。Gateway旧helper全局key/本地subject JWT与SystemConfig读取仍是迁移入口；Workspace HTTP生产已复用get_current_user/Admin共享身份，旧测试还patch retired verify_access_token且未配置Admin owner，harness待适配；生产Thread/SystemConfig metadata仍访问database，需统一Admin数据消费者，不能用旧auth mock声明完整链路closed。
+
+### 通用database helper与DI调用候选
+
+同一只读scanner补扫嵌套import、直接导入helper与模块alias：35个模块仍导入legacy database，122处直接helper Call候选，exit0/parse_errors=[]。以下同时列出零Call但仍把helper作为DI/default callback传递的模块；这些不能据零Call视为关闭。静态候选还可能含已退役/不可达路径，后续依公开入口与发布capability复核，不当作运行时调用次数。
+
+| database引用模块 | 直接helper调用候选 |
+| --- | --- |
+| [backend/services/story_workspace/dream_launch_infrastructure.py](../../backend/services/story_workspace/dream_launch_infrastructure.py) | 1 |
+| [backend/routers/story_workspace.py](../../backend/routers/story_workspace.py) | 2 |
+| [backend/services/deck/admin_gateway.py](../../backend/services/deck/admin_gateway.py) | 1 |
+| [backend/services/deck_plugin/release_service.py](../../backend/services/deck_plugin/release_service.py) | 1 |
+| [backend/routers/claude_plugins.py](../../backend/routers/claude_plugins.py) | 9 |
+| [backend/services/deck/story_workflow_application.py](../../backend/services/deck/story_workflow_application.py) | 14 |
+| [backend/services/story_workspace/dream_artifact_turn_hook.py](../../backend/services/story_workspace/dream_artifact_turn_hook.py) | 5 |
+| [backend/services/story_workspace/dream_auto_repair_service.py](../../backend/services/story_workspace/dream_auto_repair_service.py) | 2 |
+| [backend/claude_agent/service.py](../../backend/claude_agent/service.py) | 12 |
+| [backend/services/claude_plugin/deck_refs_service.py](../../backend/services/claude_plugin/deck_refs_service.py) | 1 |
+| [backend/libs/claude_agent_kit/server/editor_tool.py](../../backend/libs/claude_agent_kit/server/editor_tool.py) | 2 |
+| [backend/libs/claude_agent_kit/server/story_workspace_tool.py](../../backend/libs/claude_agent_kit/server/story_workspace_tool.py) | 1 |
+| [backend/server.py](../../backend/server.py) | 4 |
+| [backend/services/story_workspace/guidance_service.py](../../backend/services/story_workspace/guidance_service.py) | 1 |
+| [backend/routers/deck_plugins.py](../../backend/routers/deck_plugins.py) | 1 |
+| [backend/services/story_workspace/dream_thread_binding.py](../../backend/services/story_workspace/dream_thread_binding.py) | 0 |
+| [backend/tools/session_inspector.py](../../backend/tools/session_inspector.py) | 5 |
+| [backend/claude_agent/context_builder.py](../../backend/claude_agent/context_builder.py) | 0 |
+| [backend/claude_mcp/credentials.py](../../backend/claude_mcp/credentials.py) | 1 |
+| [backend/libs/claude_agent_kit/server/sessions_tool.py](../../backend/libs/claude_agent_kit/server/sessions_tool.py) | 1 |
+| [backend/notion/credentials.py](../../backend/notion/credentials.py) | 1 |
+| [backend/reflections_agent.py](../../backend/reflections_agent.py) | 15 |
+| [backend/routers/auth.py](../../backend/routers/auth.py) | 3 |
+| [backend/routers/claude_agent.py](../../backend/routers/claude_agent.py) | 2 |
+| [backend/routers/deck_plugin_binding.py](../../backend/routers/deck_plugin_binding.py) | 2 |
+| [backend/routers/pictures.py](../../backend/routers/pictures.py) | 3 |
+| [backend/routers/reflections.py](../../backend/routers/reflections.py) | 17 |
+| [backend/routers/reports.py](../../backend/routers/reports.py) | 2 |
+| [backend/routers/system_config.py](../../backend/routers/system_config.py) | 3 |
+| [backend/routers/voices.py](../../backend/routers/voices.py) | 1 |
+| [backend/routers/workspace.py](../../backend/routers/workspace.py) | 3 |
+| [backend/services/admin_gateway/selection.py](../../backend/services/admin_gateway/selection.py) | 0 |
+| [backend/services/deck/defaults.py](../../backend/services/deck/defaults.py) | 3 |
+| [backend/services/story_workspace/dream_launch_endpoint_service.py](../../backend/services/story_workspace/dream_launch_endpoint_service.py) | 0 |
+| [backend/tools/session_inserter.py](../../backend/tools/session_inserter.py) | 3 |

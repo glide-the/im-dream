@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: retain Runtime/shared-file technical regression and Gateway ownership gaps. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record unregistered Run create/retry and original hidden-source dispatch ordering. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -589,3 +590,20 @@ git diff --check
 ```
 
 本轮actual关闭入口：GET /api/decks published false/true；原database两list helper仅剩旧test调用，没有生产Python调用者，但函数SQL本体作为现有fixture/清理依赖保留，未将整个database模块报告关闭。全域目标继续未完成；协调报告PF八失败/unknown/UOW/expiry/reads/三阶段中断已补，末段receipt权限/文档核验尚未发布完成通知，consumer仍以发布capability与实际完整gate为准。资源/Runtime/共享FS本轮无业务变更或真实回归，不用provider-free读接口PASS冒充其验收。
+
+## 2026-09-15协调继续指令：Runtime与共享文件技术回归
+
+本轮actual关闭并提交GET /api/decks published false/true：4a0f6162。此前五write1794bd81与owned详情40f04ed4保持；公共Admin消费者统一strict DTO/client，无新direct fallback。主协调报告Preflight八检查失败、unknown/初始UOW rollback、expiry/reads/三阶段真实提交中断已补，末段原receipt权限与文档核验尚在冻结，发布通知前consumer保持pending。
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/private/tmp/dream-admin-data-test-deps:backend /Users/dmeck/project/ink-dream-memory/backend/.venv/bin/python -m pytest -q backend/tests/test_claude_agent_workspace.py backend/tests/test_claude_plugin_pipeline.py backend/tests/test_sdk_env.py
+# exit 0; 105 passed in 8.35s
+```
+
+实际执行已有production workspace/TMPDIR/sandbox、artifact/packer和SDK配置代码的provider-free技术合同：由临时工作区/受控SDK依赖与明确test内SQLite memory fixture验证，不接正常PG、Browser/用户服务、模型或真实Gateway/CLI provider；owned temp由test context释放。共享文件HTTP授权、真实Bash sandbox回执、真实CLI/模型与普通服务仍不计验收，本轮未改tmp协议/版本pins/Runtime算法或资源。
+
+Gateway只读源事实：Admin gateway/auth已接gateway-cli idg purpose；Dream SDK helper仍从AdminGatewayConfig读取global service key并签subject JWT，selected model仍读database.get_system_config。目的委托的消费端需服务器持有的immutable grant/config、既有keeper/cleanup与内部launch同路径接线，不能仅替换env文本或保留本地issuer fallback。SystemConfig与后台CLI/Editor/来源/dispatch持久化capability仍未完成，继续全域清单。
+
+Workspace文件HTTP生产身份已复用get_current_user/Admin共享依赖；旧测试fixture仍patch retired auth.verify_access_token且没有配置Admin owner，本轮未用它冒充Admin OAuth授权验收。生产Thread/SystemConfig metadata仍直接调用database，继续迁移，并适配实际DTO harness。所有源码/统计是技术状态，完整生产SQL/Repository与普通账户/模型/Admin可见业务目标未完成。
+
+当前SQL复核补充：同一scanner遍历nested/direct legacy database imports，35模块/122直接helper Call候选exit0；DI/default callable的零Call引用仍开放，完整路径另列清单。48字面SQL模块/513调用与16driver/persistence import模块保持；统计不能替代运行可达性证明。Workspace生产身份源码实际已共用get_current_user，未制造认证代码变更；仅Thread/SystemConfig数据与旧测试harness继续待迁移。
