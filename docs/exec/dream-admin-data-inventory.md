@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: close three current-user picture-history reads through Registry103 and record the fresh scanner. -->
 <!-- [Sync] 2026-09-15: close public local-data import and first-login writes through Registry101 and record the fresh current scanner. -->
 <!-- [Sync] 2026-09-15: close production SystemConfig calls through registered80 and record the fresh current scanner. -->
 <!-- [Sync] 2026-09-15: close public Reflections config calls through registered83 while retaining the ownerless task reader. -->
@@ -78,6 +79,7 @@ actor 参数提示仅是扫描证据，不能证明权限充分；Admin 必须�
 | 公开Deck内容版本 | [deck_versions router](../../backend/routers/deck_versions.py)/[deck_version_data](../../backend/services/admin_data/deck_version_data.py)：deck-content.state/preview/commit/history/detail | router无Dream PG；four exact schema、Admin snapshot/hash/CAS/TX，rawsnapshot/creator int/微秒、safe409/unknown原UUID | 其他Deck/Voice14、refs/voice6与FS/CLI evidence/Runtime consumer、内部content_versioning仍待迁移 |
 | 公开用户偏好 | [preferences router](../../backend/routers/preferences.py)/[preferences_data](../../backend/services/admin_data/preferences_data.py)：user-preferences.get/save | router无Dream DB；OAuth/2schema，requirednullable/rawobject/Python numeric/原NULL merge/{}/微秒、unknown原UUIDno retry | 后台context仍待；default-voices仍本地config，Runtime purpose不管理preferences |
 | 公开本地数据导入与first-login完成 | [auth router](../../backend/routers/auth.py)/[local_data_import](../../backend/services/admin_data/local_data_import.py)：local-data.import/first-login.complete | 三公开入口无Dream DB；Registry101 current OAuth、strict legacy request、四类独立解析、raw JSON、安全整数毫秒、Admin accepted counts；两write未知只查同operation原UUID receipt且不重发 | 正常Admin/PostgreSQL/真实账户导入另行验收；旧database helper定义只保留为未达生产路由的兼容候选 |
+| 当前用户图片历史 | [pictures router](../../backend/routers/pictures.py)/[picture_history_data](../../backend/services/admin_data/picture_history_data.py)：picture-history.list/full | 三公开入口无Dream DB；Registry103 current OAuth、nullable ISO范围、safe limit、原普通/范围prompt差异、nullable精确时间和full原404；无actor/friend/物理selector | 正常Admin/PostgreSQL/真实账户图片读取另行验收；好友timeline/full保持独立授权领域 |
 | 用户/Thread SystemConfig | [system_config_data](../../backend/services/admin_data/system_config_data.py)：user-system-config.get/patch、thread-system-config.get | Settings OAuth读写+fresh read；公开Chat单OAuth snapshot；活动turn exact grant；raw Python JSON、ten-field closed patch、no DB/default fallback；Gateway selector显式reader | ownerless内部dispatcher在配置前拒绝；正常Admin/PG/Gateway/共享FS业务验收仍待 |
 | 公开Reflections分区配置与memory-init | [reflections_config_data](../../backend/services/admin_data/reflections_config_data.py)：reflections-section-config.get/save/delete；[router](../../backend/routers/reflections.py) | current OAuth三operation；save/delete unknown仅原UUID committed typed receipt恢复、单次POST；Dream保留静态default/display/五文件过滤/partial merge；memory-init顺序为Admin Thread owner→Admin custom config→路径与FS | 后台Reflections worker无OAuth或领域grant，旧config read与task/event/result数据库路径保留；正常Admin/PG/共享FS业务验收仍待 |
 
@@ -127,6 +129,12 @@ user MCP配置只投影五个broker字段、`INK_AGENT_SESSION_RETRIEVAL_MODE`�
 `routers/auth.py`的`/api/import-local-data`、`/api/import-calendar-recovery`与`/api/mark-first-login-completed`已删除legacy `database`导入和三个helper调用。前两项把旧localStorage内容规范化为闭合Session、Picture、Preferences、Report DTO，并通过同一个`local-data.import`领域事务提交；first-login使用独立幂等`first-login.complete`。主导入的类别解析相互独立，calendar recovery非法时保持固定400，Report缺失旧时间字段时使用同一请求时钟。两项write的响应未知时只读取同operation、同OAuth、同request ID的原回执，不重发，也不回退Dream PostgreSQL。
 
 2026-09-15只读scanner覆盖310个production Python模块，排除tests、`backend/script`及四个明确offline schema/import/legacy模块；结果为46个literal SQL-bearing模块、504个literal SQL execute候选、16个driver/import模块、24个legacy database import模块、70个直接legacy helper Call候选，`parse_errors=[]`、exit0。`routers/auth.py`不再出现在legacy import/helper列表；`database.py`中的`import_user_data`与`set_first_login_completed`定义仍作为兼容源码候选保留。计数包含共享工作树并行改动，不能把全量差值归因于Registry101，也不代表正常Admin/PostgreSQL/账户导入验收。
+
+## Registry103当前用户图片历史边界
+
+`routers/pictures.py`的普通列表、范围列表与按日full入口已删除legacy `database`导入和三个helper调用。普通/范围入口共享`picture-history.list`，Dream把空白日期规范化为null并以canonical `YYYY-MM-DD`和非负safe limit构造闭合DTO；普通列表保留null prompt到空字符串映射，范围列表保留nullable prompt。full入口使用`picture-history.full`并把null或空图映射为原`404 Picture not found for this date`。两项均为current OAuth read，Admin从principal确定owner；capability、scope、transport与DTO失败不回退Dream PostgreSQL或好友操作。
+
+2026-09-15只读scanner覆盖311个production Python模块，结果为46个literal SQL-bearing模块、504个literal SQL execute候选、16个driver/import模块、23个legacy database import模块、67个直接legacy helper Call候选，`parse_errors=[]`、exit0。`routers/pictures.py`不再出现在legacy import/helper列表；三个database helper定义仍作为兼容源码候选保留。相对Registry101 snapshot只把本文件的一项legacy import与三项helper调用归因本阶段；其它共享工作树计数不据此解释，也不代表正常Admin/PostgreSQL/账户图片业务验收。
 
 ## baseline逐文件扫描
 

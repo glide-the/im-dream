@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: document Registry103 current-user picture-history reads and failure behavior. -->
 <!-- [Sync] 2026-09-15: document Registry101 aggregate import, calendar recovery and first-login completion. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
@@ -778,12 +779,14 @@ The endpoint returns `404` when the thread does not belong to the current user.
 
 ### GET `/api/pictures`
 
-Get recent daily pictures.
+Get recent daily pictures through Admin `picture-history.list`. Admin derives the
+owner from the current OAuth principal, orders records by date descending, and
+returns the stored thumbnail or falls back to the full image.
 
 **Headers:** `Authorization: Bearer <token>`
 
 **Query params:**
-- `limit` (optional, default 30) - Max number of pictures
+- `limit` (optional, default 30) - Nonnegative maximum number of pictures
 
 **Response:**
 ```json
@@ -793,7 +796,7 @@ Get recent daily pictures.
       "date": "2025-11-02",
       "image_base64": "iVBORw0KGgoAAAANSUhEUg...",
       "prompt": "A serene landscape...",
-      "created_at": "2025-11-02 05:22:41"
+      "created_at": "2025-11-02T05:22:41.123456Z"
     }
   ]
 }
@@ -807,12 +810,20 @@ Get historical picture thumbnails within an optional date range.
 
 **Headers:** `Authorization: Bearer <token>`
 
-**Query params:** `start_date`, `end_date`, `limit`.
+**Query params:** `start_date`, `end_date`, `limit`. Blank dates become `null`;
+nonblank values must be valid `YYYY-MM-DD` dates. Range boundaries are
+inclusive. This path preserves a nullable `prompt`, while the plain list keeps
+its original empty-string projection.
 
 ### GET `/api/pictures/{date}/full`
 
 Get the historical full-resolution image for one `YYYY-MM-DD` date. Returns `404`
 when that date has no retained picture.
+
+All three paths require current OAuth `dream:read` and the exact Registry103
+operation and identity/unified schema capabilities. Missing scope, capability,
+Admin transport, or malformed output fails explicitly without querying Dream
+PostgreSQL. Requests contain no user, friend, table, column, or SQL selector.
 
 ---
 

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: route current-user picture history reads through Admin Registry103. -->
 <!-- [Sync] 2026-09-15: record Admin-owned Deck detail and unchanged legacy Memory projection. -->
 <!-- [Sync] 2026-09-15: index five Admin Deck writes, shared schema gate and closed deletion feedback. -->
 <!-- [Sync] 2026-09-15: index current Voice mutation design separately from retained Deck/Voice legacy flows. -->
@@ -329,30 +330,32 @@ sequenceDiagram
 
 ## 7. 历史图片读取模块
 
-Timeline 只读取并展示数据库中已保留的历史图片，不提供生成、重绘或保存入口。
+Timeline 只读取并展示Admin中已保留的当前用户历史图片，不提供生成、重绘或保存入口。普通列表与范围列表共享`picture-history.list`；全尺寸读取使用`picture-history.full`。Dream验证日期与limit，Admin从OAuth principal确定owner并执行排序、范围过滤和图片选择。完整规则见[当前用户图片历史](picture-history-current.md)。
 
 ```mermaid
 sequenceDiagram
     actor User as 用户
     participant FE as Frontend
     participant API as GET /api/pictures/range
-    participant DB as database.py
+    participant Admin as Admin picture-history
     participant FullAPI as GET /api/pictures/{date}/full
 
     User->>FE: 打开 Timeline
     FE->>API: GET /api/pictures/range?start_date&end_date
-    API->>DB: get_daily_pictures_range(user_id, ...)
-    DB-->>API: 历史缩略图
+    API->>Admin: picture-history.list(start_date, end_date, limit)
+    Admin-->>API: owner历史缩略图或原图fallback
     API-->>FE: {pictures: [...]}
     FE-->>User: 展示历史图片
 
     User->>FE: 点击历史缩略图
     FE->>FullAPI: GET /api/pictures/{date}/full
-    FullAPI->>DB: get_daily_picture_full(user_id, date)
-    DB-->>FullAPI: full_image_base64
+    FullAPI->>Admin: picture-history.full(date)
+    Admin-->>FullAPI: 同日最新full_image_base64或null
     FullAPI-->>FE: {image_base64}
     FE-->>User: 展示全尺寸图片
 ```
+
+日期非法由Dream返回固定400；full结果为null或空字符串时保持`404 Picture not found for this date`。OAuth、权限、capability、Admin传输与DTO错误保持失败，不回退Dream数据库。普通列表把null prompt映射为空字符串，范围列表保留nullable prompt。
 
 ---
 
