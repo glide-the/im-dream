@@ -1,3 +1,4 @@
+# [Sync] 2026-09-16: register Registry133 launch replay lookup.
 # [Sync] 2026-09-16: register Registry122-126 Deck Plugin binding operations.
 # [Sync] 2026-09-16: compose Registry121 confirmation worker with Runtime and Session owner settings.
 # [Sync] 2026-09-16: register Registry120 Story confirmation OAuth/background operations.

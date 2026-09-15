@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-16: consume Registry133 and close production launch persistence through Admin DTO/ORM operations. -->
 <!-- [Sync] 2026-09-16: consume Registry130-132 launch Runtime operations and delete Dream provisioning SQL. -->
 <!-- [Sync] 2026-09-16: consume Registry127-129 Agent-type operations with local artifact verification and no Dream database fallback. -->
 <!-- [Sync] 2026-09-16: consume Registry121 claim-turn and inject claim-bound AdminTurnPersistence into confirmation Runtime. -->
@@ -37,26 +38,28 @@
 
 # Dream / Admin 认证与数据交互
 
-## Dream Launch Runtime（Registry130–132）
+## Dream Launch 数据与 Runtime（Registry130–133）
 
-公开 `POST /api/story-workspace/dream-runs/start` 继续接受 Deck、nullable Voice、目标和幂等 key。`_story_workflow_current_user` 先完成 Admin bearer 校验及 default Workspace 解析；路由只从 `_admin_actor` 取得当前 access token，并构造 request-scoped `AdminDreamLaunchRuntime`。Token 不进入 DTO、日志、repr、Agent 环境或共享文件。缺失 Admin owner/actor 直接返回配置失败。
+公开 `POST /api/story-workspace/dream-runs/start` 继续接受 Deck、nullable Voice、目标和幂等 key。`_story_workflow_current_user` 先完成 Admin bearer 校验及 default Workspace 解析；路由把同一 request-scoped `AdminDataClient`、`AdminRequestActor` 和 Runtime port 交给 endpoint。Token 不进入业务 DTO、日志、repr、Agent 环境或共享文件。缺失 Admin owner/actor 直接失败。
 
-启动适配器先调用 `runtime-scope`，因此 disabled/越权 Deck、错误 Workspace 或 Voice 仍在模型目录、source、Preflight 和 Run 写入前失败。随后保留原 idempotency lookup：没有既有 Run 时调用 current plan；既有 queued Run 重放时提交该 Run 和 source Thread 作为 replay identity。Admin 用 typed Drizzle Repository 派生 active binding 或 Run-frozen stale binding/lock；Dream 不提交 Plugin/version、revision 选择、lock、数据库或路径。plan 返回不含路径的 candidate，Dream 复用现有 `verify_agent_type_runtime` 从 server-owned artifact store 推导路径并校验 digest、manifest 与 Claude CLI，然后调用 prepare。prepare 未知提交只读取原 operation/request receipt，不自动重发。
+启动适配器先调用 `runtime-scope`，因此 disabled/越权 Deck、错误 Workspace 或 Voice 在模型目录和任何写入前失败。随后调用 Registry133 `dream-launch-replay.lookup`：Admin 从 current OAuth actor、Workspace 和业务 key 查找原 Run，并通过 typed Drizzle Repository 重新校验确定性 hidden source、Preflight owner/Deck 与 goal input hash。没有原 Run 才解析当前模型并调用 current plan；已有 Run 则提交冻结 Run/source identity 给 replay plan，不重新签发 Preflight token，也不按当前模型覆盖原配置。
+
+Runtime plan 返回不含路径的 candidate；Dream 复用 `verify_agent_type_runtime` 从 server-owned artifact store 推导路径并校验 digest、manifest 与 Claude CLI，再调用 prepare。之后 source ensure、Preflight execute/read、Run create/read、dispatch claim/finish 和 terminal failure 分别进入已注册 Admin DTO。Voice prompt 通过 `deck.detail` 读取；Dream 只执行 Agent turn 和任务 lifecycle。每个写操作结果未知时只查询相同 operation/request 的原 receipt，确认 committed 并重新校验 DTO 绑定后继续，禁止重发或回退 PostgreSQL。
 
 ```mermaid
 sequenceDiagram
   participant B as Dream Browser
   participant R as Dream Router
   participant L as Dream Launch Application
-  participant A as Admin Registry130-132
+  participant A as Admin Registry130-133 + domain DTOs
   participant F as Shared artifact + Claude CLI
   participant P as Admin PostgreSQL
   B->>R: start Deck/Voice/goal/idempotency key + bearer
   R->>R: Admin auth + default Workspace
   R->>L: command + actor + request Runtime port
-  L->>A: runtime-scope
+  L->>A: runtime-scope + replay.lookup
   A->>P: enabled Deck/Workspace/Voice ORM check
-  L->>L: existing idempotent Run lookup
+  A->>P: owned Run/source/Preflight ORM lookup
   alt new Run
     L->>A: runtime-plan(current)
     A->>P: active binding + configured lock/installation
@@ -69,11 +72,17 @@ sequenceDiagram
   L->>A: runtime-prepare + exact evidence
   A->>P: recheck + materialization + optional Workspace installation + receipt
   A-->>L: same binding + runtime_ready
-  L->>L: unchanged source/Preflight/Run/dispatch flow
+  L->>A: source.ensure + Preflight execute/read + Run create/read
+  A->>P: typed Drizzle transactions + original receipts
+  L->>A: dispatch.claim
+  A->>P: commit claim and frozen context
+  L->>L: Dream-owned Agent Runtime / EventBus / SSE
+  L->>A: dispatch.finish or Run fail then failure envelope
+  A->>P: commit terminal metadata
   L-->>B: accepted context or closed business error
 ```
 
-三个 operation SHA 为 `67dbe0a6eb7ddfd9bd1fa668e38f143add53201b725b19506af976319bba2b92`、`efd986cef6f891202c4d3ceb889d7491e8227dc097eeb009202a2be92549e9a6` 与 `d9c2faeb03b86cf562286f283e5bfcd3098e1da81c1b628c2e9aaa5a7b897882`。Registry129 prefix SHA 保持 `686f0668c72ca6114d894392d2dd2a2fde228b87fa31a1b858fd1dd553663881`，完整 Registry132 SHA 为 `6e0149b3d3354d081564af21349f364cc092087d5aadce0d5164654a6c005bb2`。本阶段没有 schema/migration 变更。Runner、ThreadFactory、EventBus、SSE、turn/resume/cancel、共享 Workspace、`.claude-tmp` 与资源策略 LKG 没有改变；launch 其余持久化仍在迁移清单中，不能据此宣称 Dream 全域数据库关闭。
+三个 Runtime operation SHA 为 `67dbe0a6eb7ddfd9bd1fa668e38f143add53201b725b19506af976319bba2b92`、`efd986cef6f891202c4d3ceb889d7491e8227dc097eeb009202a2be92549e9a6` 与 `d9c2faeb03b86cf562286f283e5bfcd3098e1da81c1b628c2e9aaa5a7b897882`；replay lookup SHA 为 `af4d06490d6d030d9aa0a3b68460c15813786130a85c5133b438439a3fcb11fb`。Registry129 prefix SHA 保持 `686f0668c72ca6114d894392d2dd2a2fde228b87fa31a1b858fd1dd553663881`，Registry132 prefix SHA 为 `6e0149b3d3354d081564af21349f364cc092087d5aadce0d5164654a6c005bb2`，完整 Registry133 SHA 为 `951a3ee9d26354d0094dafec6233a13638a430672ddacd730cefc95f654b5ec3`。没有 schema/migration 变更。Runner、ThreadFactory、EventBus、SSE、turn/resume/cancel、共享 Workspace、`.claude-tmp` 与资源策略 LKG 没有改变；launch 数据路径已关闭，但其它 Dream 生产数据库候选仍按全域清单处理。
 
 ## Deck Plugin Binding 与 Agent Type（Registry122–129）
 

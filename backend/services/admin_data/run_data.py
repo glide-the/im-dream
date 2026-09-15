@@ -1,9 +1,9 @@
 # [Input] Published full Workflow Run read/create/retry/cancel/fail contracts and the current data actor.
-# [Output] Original twenty-eight-field model, scoped atomic commands and explicit bounded receipts.
+# [Output] Original model, scoped atomic commands and bounded original-receipt recovery.
 # [Pos] Domain consumer; Admin owns Run state, token consumption, hashes and database commits.
 # [Sync] 2026-09-15: retain original lifecycle/time/key semantics without local SQL or runtime dispatch.
 # [Sync] 2026-09-15: consume named cancel with original reason text and bounded cancelled result/receipt.
-# [Sync] 2026-09-15: prepare named fail consumption; preserve historical same-failed replay details.
+# [Sync] 2026-09-16: recover create/fail only from their original committed receipts.
 from __future__ import annotations
 
 import re
@@ -196,3 +196,16 @@ class AdminRunData:
         if result.status == "committed":
             self._validate_reply(operation, input_dto, result.result, request_id)
         return result
+
+    def write_recovering(self, operation, input_dto, request_id: str, *, access_token: str):
+        if operation.capability.kind != "write":
+            raise AdminDataError("ADMIN_OPERATION_CONTRACT_INVALID", 503, request_id)
+        try:
+            return self.execute(operation, input_dto, request_id, access_token=access_token)
+        except AdminDataError as error:
+            if not error.outcome_unknown:
+                raise
+            receipt = self.receipt(operation, input_dto, request_id, access_token=access_token)
+            if receipt.status == "committed":
+                return self._validate_reply(operation, input_dto, receipt.result, request_id)
+            raise error

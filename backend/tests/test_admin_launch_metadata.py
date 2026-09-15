@@ -1,8 +1,7 @@
 # [Input] Registered launch metadata client/DTOs and the original application source Protocol.
-# [Output] Scoped source/claim/finish/receipt technical evidence without endpoint or Runtime claims.
-# [Pos] Provider-free harness; production launch wiring/default/prepare/Voice/failure remain SQL.
-# [Sync] 2026-09-15: reuse original application fingerprint/IDs and reject unknown writes without resend.
-# [Sync] 2026-09-15: include registered failure-envelope DTO/source in the shared original-receipt matrix.
+# [Output] Scoped replay/source/claim/finish/failure and bounded receipt-recovery evidence.
+# [Pos] Provider-free Admin DTO harness; production launch composition contains no SQL fallback.
+# [Sync] 2026-09-16: cover Registry133 and one original-receipt read after unknown writes.
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +16,7 @@ from pydantic import ValidationError
 
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
 from services.admin_data.launch_metadata_data import AdminLaunchMetadataData, AdminLaunchSourceRepository, CLAIM_LAUNCH, ENSURE_LAUNCH_SOURCE, FINISH_LAUNCH, LAUNCH_METADATA_OPERATIONS, LaunchClaimInputDTO, LaunchFinishInputDTO, LaunchSourceInputDTO
-from services.admin_data.launch_metadata_data import FAIL_LAUNCH_ENVELOPE, LaunchFailureInputDTO, LaunchFailureExpectation
+from services.admin_data.launch_metadata_data import FAIL_LAUNCH_ENVELOPE, LOOKUP_LAUNCH_REPLAY, LaunchFailureInputDTO, LaunchFailureExpectation
 from services.admin_data.request_auth import AdminRequestActor
 from services.admin_data.workflow_data import WORKFLOW_SCHEMA_REQUIREMENTS
 from services.story_workspace.dream_launch_application_service import DreamLaunchApplicationService, DreamLaunchSource, _sha256
@@ -101,6 +100,28 @@ def test_original_application_source_seam_normal_replay_and_conditional_fingerpr
     assert "source" not in calls[0][3] and "actor_id" not in calls[0][3]
 
 
+@pytest.mark.parametrize("replay", [None, {
+    "workflow_run_id": RUN_ID,
+    "workflow_preflight_id": "pf_" + "c" * 32,
+    "thread_id": "11111111-1111-5111-8111-111111111111",
+    "message_id": "22222222-2222-5222-8222-222222222222",
+}])
+def test_replay_lookup_uses_strict_read_dto_without_receipt_or_provenance_input(boundary, replay):
+    data, _, _, state, calls, *_, source_input, _, _ = boundary
+    state["result"] = {"replay": replay}
+
+    result = data.execute(
+        LOOKUP_LAUNCH_REPLAY,
+        source_input,
+        str(uuid4()),
+        access_token="write-token",
+    )
+
+    assert result.model_dump() == {"replay": replay}
+    assert calls == [("execute", calls[0][1], LOOKUP_LAUNCH_REPLAY.capability.name, source_input.model_dump())]
+    assert set(calls[0][3]) == {"workspace_id", "deck_id", "agent_id", "goal", "idempotency_key"}
+
+
 @pytest.mark.parametrize("patch", [{"thread_id": str(uuid4())}, {"request_fingerprint": "sha256:" + "f" * 64}, {"created": 0}, None])
 def test_source_unknown_or_bad_reply_stops_original_usecase_before_pf_run_dispatch(boundary, patch):
     _, client, actor, state, calls, *_ = boundary
@@ -116,7 +137,8 @@ def test_source_unknown_or_bad_reply_stops_original_usecase_before_pf_run_dispat
         state["result"] = wire
     with pytest.raises(AdminDataError) as error:
         asyncio.run(service.launch(value, actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID))
-    assert error.value.outcome_unknown and error.value.request_id == calls[0][1] and len(calls) == 1
+    assert error.value.code == "ADMIN_RESPONSE_INVALID" and error.value.request_id == calls[0][1]
+    assert len(calls) == 2 and calls[1][:3] == ("receipt", calls[0][1], ENSURE_LAUNCH_SOURCE.capability.name)
     assert len(fixture.binding_calls) == 1 and not fixture.preflight_calls and not fixture.run_calls and not fixture.dispatcher.calls
 
 
@@ -191,7 +213,7 @@ def test_finish_only_issued_claim_boolean_with_stale_false_preserved(boundary, a
     assert result.finished is finished and calls[0][3] == dto.model_dump()
 
 
-@pytest.mark.parametrize("operation", LAUNCH_METADATA_OPERATIONS)
+@pytest.mark.parametrize("operation", tuple(item for item in LAUNCH_METADATA_OPERATIONS if item.capability.kind == "write"))
 @pytest.mark.parametrize("status", ["absent", "committed"])
 def test_explicit_same_uuid_generic_receipt_after_unknown_without_resend(boundary, operation, status):
     data, _, _, state, calls, *_, source_input, source, context = boundary

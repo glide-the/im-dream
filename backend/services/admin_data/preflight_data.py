@@ -1,9 +1,9 @@
 # [Input] Published Preflight read/execute/original-receipt contracts and current OAuth actor.
-# [Output] Original seventeen-field projection, raw JSON execution and explicit three-state receipt.
+# [Output] Original projection, raw JSON execution and bounded original-receipt recovery.
 # [Pos] Domain consumer; Admin owns stored state, checks, clock and token issuance.
 # [Sync] 2026-09-15: reuse original lifecycle validation without Workspace initialization or SQL.
 # [Sync] 2026-09-15: reuse the extracted identity/unified gate without changing the read projection.
-# [Sync] 2026-09-15: consume staged execute and its separate original three-state receipt contract.
+# [Sync] 2026-09-16: recover an unknown execute only from its original committed receipt.
 from __future__ import annotations
 
 import json
@@ -178,3 +178,17 @@ class AdminPreflightData:
         if result.status != "absent" and result.result.preflight.created_by != self._canonical_user_id:
             raise invalid_response(request_id)
         return result
+
+    def execute_recovering(self, input_dto: PreflightExecutionInputDTO, request_id: str, *, access_token: str):
+        try:
+            return self.execute(input_dto, request_id, access_token=access_token)
+        except AdminDataError as error:
+            if not error.outcome_unknown:
+                raise
+            receipt = self.receipt(request_id, access_token=access_token)
+            if receipt.status == "committed":
+                result = receipt.result
+                if result.preflight.created_by != self._canonical_user_id or result.preflight.deck_id != input_dto.deck_id or result.preflight.binding_revision != input_dto.binding_revision:
+                    raise invalid_response(request_id, write=True)
+                return WorkflowPreflight.model_validate(result.preflight.model_dump()).model_dump(mode="json")
+            raise error

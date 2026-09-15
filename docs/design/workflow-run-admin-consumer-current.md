@@ -4,7 +4,7 @@
 <!-- [Output] Current consumer ownership, normal flow, states, failures and technical acceptance limits. -->
 <!-- [Pos] Current Run data migration rules; original lifecycle and launch designs remain indexed separately. -->
 <!-- [Sync] 2026-09-15: delegate three Run domain operations while retaining the default Workspace dependency. -->
-<!-- [Sync] 2026-09-15: prepare typed fail and original receipts without wiring the existing background recorder. -->
+<!-- [Sync] 2026-09-16: wire launch failure recording through Admin Run fail and failure-envelope DTO operations. -->
 
 # Run Admin 消费现行设计
 
@@ -16,7 +16,7 @@
 
 GET `/api/story-workspace/workflow-runs/{workflow_run_id}` 保持原200，POST `/workflow-runs` 与 POST `/workflow-runs/{workflow_run_id}/retry` 保持原201，全部返回原完整28字段模型。这三个公开入口及其默认 Workspace 选择均使用已注册 Admin 操作，不调用 Dream SQL/service；其它生命周期入口独立追踪。
 
-公开入口已消费 read/create/retry/cancel；已注册 fail 完成类型准备，尚未接入原后台 recorder。guidance、confirmation、隐藏 launch、Agent/model/binding/failure recorder、SystemConfig/内部 agent-output 默认 Workspace/Gateway-purpose/CLIEditor 等入口继续按迁移清单追踪。目录注册与隔离技术测试不等于正常业务验收。
+公开入口已消费 read/create/retry/cancel；生产 Dream launch 也通过同一 `AdminRunData` 消费 create/read/fail，并通过 Registry133 在当前 actor 范围恢复冻结 Run。guidance、confirmation、SystemConfig、内部 agent-output 与其它领域仍按迁移清单追踪。目录注册与隔离技术测试不等于正常业务验收。
 
 ## 概念与规则
 
@@ -54,10 +54,10 @@ POST `/workflow-runs/{workflow_run_id}/cancel` 复用当前OAuth dream:write与�
 消费者要求exact identity/unified、版本1与实际hash d46995d76d34585e93303ff91b1c83c3bc5b028f27edfa840e1057256518647e。回复匹配actor/Workspace/路径Run/cancelled状态并通过原完整28字段模型，保持200与微秒JSON；bad path不trim修复，沿原404映射，原八业务error code/status复用。cancel POST使用原Run scoped safe validation，固定422无raw reason回显；reason从DTO repr排除。已发出timeout504/坏回复503保留安全UUID/unknown，不重发或推断rollback。显式同operation/input/UUID generic原两态receipt；committed再检查完整绑定/cancelled，absent不重发。
 
 [公开生产入口技术套件](../../backend/tests/test_admin_run_cancel.py)复用完整default fixture，无替代loader/Run handler，验证default→cancel、原reason/model/default/range、重复producer结果、原404/八errors、OAuth/schema/hash、wrong reply/unknown/receipt两态。重复请求用例只证明消费者不自行转换状态，数据库幂等由producer独立回执负责。旧application/WorkflowRunService/模型和其它Story函数保留；此Run状态接口不改Agent turn/resume/cancel/SSE、资源admission/lease、Runner/FS/TMPDIR，正常模型与其它生命周期持久化仍待验收。
-### Run fail 类型准备
+### Run fail 生产接线
 
 Admin 已注册 workflow-run.fail v1/write/dream:write，实际 hash 为79e2fbb8f96aa241b664657f03e77020d9cbd2cc8f8b67eeae89a02ea34ac31f，复用 identity/unified 两项 exact schema。[消费者](../../backend/services/admin_data/run_data.py)输入为服务器 Workspace/Run、required failed_step/error_code 与 required nullable reason_code；三项失败文本保留原字符串，非空校验不 trim、不增加配额或 sentinel。状态转换、数据库 clock、transition/receipt/audit 原子提交及 current owner/frozen source 校验继续由 Admin 执行。
 
 回复使用原完整28字段模型，必须匹配 canonical actor/Workspace/Run 与 failed 状态。原 same-failed replay 不改历史 failed_step/error_code，消费者不要求它们等于本次请求，也不生成新 completed_at 或 status_version。timeout/回复错配保留原 UUID/unknown；显式同 operation/input/UUID 原两态 receipt，committed 重做完整绑定校验，absent 不重发。
 
-原 launch failure recorder 先提交 FAILED，再独立更新 source metadata；目前仍通过旧 SQL 路径执行，因为后台 dispatcher 尚未携带 Admin turn persistence owner。新类型不为 actor_id 增加授权、不创建服务账户替代 current owner、不合并这两个事务。公开 OAuth 与 same Thread/Run 的 server-persistence 授权由已发布 Admin 边界处理；original failure-envelope GET 只允许 OAuth write，不能凭 Runtime grant 恢复。正常验收必须再覆盖后台 owner 接线及两个真实提交边界。[类型技术测试](../../backend/tests/test_admin_launch_failure.py)仅验证实际 client/DTO/MockHTTP，无真实数据库或模型调用。
+生产 `DreamLaunchFailureRecorder` 使用请求绑定的 current OAuth owner，先调用 `workflow-run.fail`，仅在返回完整 failed Run 后调用 `dream-launch-failure.envelope`。两次写各自使用新的 request ID；超时只读取各自原 receipt，不盲重试。actor、Workspace、Run 和 source ID 均由服务端上下文或 Admin 已存事实校验，不创建通用后台账户，也不把两个原事务伪装为一次提交。[launch 组合测试](../../backend/tests/test_story_workspace_dream_launch_api.py)覆盖调用顺序、同 actor/client 接线和无 SQL；[类型测试](../../backend/tests/test_admin_launch_failure.py)继续覆盖单个 DTO/HTTP 契约。真实长时 token 过期与正常模型验收仍需在本机服务链路执行。
