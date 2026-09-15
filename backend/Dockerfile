@@ -8,6 +8,7 @@
 # [Sync] 2026-06-17: ensure standard sbin directories exist for bubblewrap rootfs mounts.
 # [Sync] 2026-09-13: atomically pair SDK 0.2.145 with Runtime 0.1.9 package-root cli.js.
 # [Sync] 2026-09-15: install Runtime 0.1.10 and require its restored plugin management entrypoint.
+# [Sync] 2026-09-15: validate the resolver's qualified package-root cli.js instead of the legacy bin alias.
 # [Sync] 2026-09-12: install Info-ZIP so approved ordinary-workspace archive
 #        commands execute in the production backend image.
 # [Sync] 2026-08-26: atomically pair the custom Agent SDK 0.2.144 with its
@@ -154,7 +155,7 @@ COPY . .
 # Exercise the same fail-closed resolver used by Agent turns and MCP
 # management. This proves the installed selector, release manifest and
 # capability evidence are mutually compatible before the image is emitted.
-RUN python -c "from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; path=resolve_claude_cli_path({'PATH':'/usr/local/bin:/usr/bin:/bin'}); assert path and path.endswith('/ink-claude-code-dream'), path"
+RUN python -c "from pathlib import Path; import subprocess; from libs.claude_agent_kit.server.sdk_env import resolve_claude_cli_path; path=resolve_claude_cli_path({'PATH':'/usr/local/bin:/usr/bin:/bin'}); candidate=Path(path); assert candidate.name == 'cli.js' and candidate.parent.name == 'ink-claude-code-dream', path; subprocess.run([path, 'plugin', '--help'], check=True, stdout=subprocess.DEVNULL)"
 
 EXPOSE 8765
 
