@@ -17,6 +17,7 @@
 # [Sync] 2026-09-11: give the download endpoint the same ownership, Workspace
 #                    Mode, public-path, no-create, and symlink contract as the
 #                    content endpoint for Chat explicit downloads.
+# [Sync] 2026-09-15: use typed Admin SystemConfig reads before every workspace filesystem operation.
 
 """Regression tests for the workspace file router."""
 from __future__ import annotations
@@ -49,6 +50,7 @@ from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
 from services.admin_data.chat_data import GET_THREAD
 from services.admin_data.request_auth import AdminRequestAuth
 from services.admin_data.workspace_data import WORKSPACE_SCHEMA_REQUIREMENTS
+from services.admin_data.system_config_data import GET_USER_SYSTEM_CONFIG
 from tests.test_admin_request_auth import Verifier
 
 
@@ -57,24 +59,11 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         os.environ["AGENT_CWD"] = self._tmp.name
 
-        self._thread_patch = unittest.mock.patch.object(
-            workspace_router.database,
-            "get_chat_thread",
-            side_effect=AssertionError("Workspace ownership must not query Dream PG"),
-        )
-        self._thread_patch.start()
-        self._db_patch = unittest.mock.patch.object(workspace_router.database, "get_db", side_effect=AssertionError("Workspace read must not open Dream PG"))
-        self._db_patch.start()
-        self._config_patch = unittest.mock.patch.object(
-            workspace_router.database,
-            "get_system_config",
-            return_value={"workspace_enabled": True},
-        )
-        self._config_patch.start()
+        self._system_config = {"workspace_enabled": True}
 
         config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_client_id="dream-service", service_secret="s" * 32)
         self._admin_schemas = [x.model_dump() for x in WORKSPACE_SCHEMA_REQUIREMENTS]
-        self._admin_operations = [GET_THREAD.capability.model_dump()]
+        self._admin_operations = [GET_THREAD.capability.model_dump(), GET_USER_SYSTEM_CONFIG.capability.model_dump()]
         self._admin_calls = []
         class WorkspaceVerifier(Verifier):
             def verify(self, token, *, required_scopes):
@@ -94,16 +83,21 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
                 if request.url.path.endswith("/principal"):
                     value = {"subject": "opaque-ba-subject", "canonical_user_id": "1", "client_id": "dream-browser", "scopes": ["dream:read", "dream:write"], "status": "active"}
                 else:
-                    self.assertTrue(request.url.path.endswith("/operations/chat-thread.get"))
+                    operation = request.url.path.rsplit("/", 1)[1]
                     body = json.loads(request.content)
                     self.assertEqual(set(body), {"request_id", "input"})
                     self.assertEqual(body["request_id"], rid)
-                    self.assertEqual(set(body["input"]), {"thread_id"})
                     self._admin_calls.append(rid)
-                    value = {"thread": self._thread_lookup(body["input"]["thread_id"])}
+                    if operation == "chat-thread.get":
+                        self.assertEqual(set(body["input"]), {"thread_id"})
+                        value = {"thread": self._thread_lookup(body["input"]["thread_id"])}
+                    else:
+                        self.assertEqual(operation, "user-system-config.get")
+                        self.assertEqual(body["input"], {})
+                        value = {"config_json": json.dumps(self._system_config, ensure_ascii=False, allow_nan=False)}
             return httpx.Response(200, json={"request_id": rid, "data": value})
         self._admin_http = httpx.Client(transport=httpx.MockTransport(handler))
-        admin = AdminDataClient(config, client=self._admin_http, operations=(GET_THREAD,))
+        admin = AdminDataClient(config, client=self._admin_http, operations=(GET_THREAD, GET_USER_SYSTEM_CONFIG))
         self._admin_owner = AdminRequestAuth(config, client=admin, verifier=WorkspaceVerifier())
         app = FastAPI()
         app.state.admin_request_auth = self._admin_owner
@@ -112,9 +106,6 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
-        self._config_patch.stop()
-        self._thread_patch.stop()
-        self._db_patch.stop()
         self._admin_owner.close()
         self._admin_http.close()
         os.environ.pop("AGENT_CWD", None)
@@ -130,14 +121,12 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
                     value = {**self._thread_lookup("owned-thread"), **patch}
                     with (
                         unittest.mock.patch.object(self, "_thread_lookup", return_value=value),
-                        unittest.mock.patch.object(workspace_router.database, "get_system_config") as mode,
                         unittest.mock.patch.object(workspace_router, "get_existing_workspace") as files,
                     ):
                         response = self.client.get("/api/workspace/files/" + endpoint, params={"sessionId": "owned-thread", "path": "files/result.txt"}, headers={"Authorization": "Bearer test-token"})
                     self.assertEqual(response.status_code, 503, response.text)
                     self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_AUTH_UNAVAILABLE")
                     self.assertNotIn("private", response.text)
-                    mode.assert_not_called()
                     files.assert_not_called()
 
     def test_admin_thread_timeout_does_not_retry_or_access_mode_files(self):
@@ -146,14 +135,12 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
                 before = len(self._admin_calls)
                 with (
                     unittest.mock.patch.object(self, "_thread_lookup", side_effect=httpx.ReadTimeout("private token")),
-                    unittest.mock.patch.object(workspace_router.database, "get_system_config") as mode,
                     unittest.mock.patch.object(workspace_router, "get_existing_workspace") as files,
                 ):
                     response = self.client.get("/api/workspace/files/" + endpoint, params={"sessionId": "owned-thread", "path": "files/result.txt"}, headers={"Authorization": "Bearer test-token"})
                 self.assertEqual(response.status_code, 503, response.text)
                 self.assertEqual(response.json()["detail"]["code"], "WORKSPACE_AUTH_UNAVAILABLE")
                 self.assertEqual(len(self._admin_calls), before + 1)
-                mode.assert_not_called()
                 files.assert_not_called()
 
     def test_admin_schema_and_thread_hash_are_required_before_file_access(self):
@@ -162,7 +149,7 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
             for mutation in ["missing-schema", "missing-keyset", "bad-schema", "bad-final", "duplicate-schema", "bad-operation"]:
                 with self.subTest(endpoint=endpoint, mutation=mutation):
                     self._admin_schemas = [dict(x) for x in original_schemas]
-                    self._admin_operations = [GET_THREAD.capability.model_dump()]
+                    self._admin_operations = [GET_THREAD.capability.model_dump(), GET_USER_SYSTEM_CONFIG.capability.model_dump()]
                     if mutation == "missing-schema":
                         self._admin_schemas.pop()
                     elif mutation == "missing-keyset":
@@ -177,13 +164,11 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
                         self._admin_operations[0]["contract_sha256"] = "0" * 64
                     before = len(self._admin_calls)
                     with (
-                        unittest.mock.patch.object(workspace_router.database, "get_system_config") as mode,
                         unittest.mock.patch.object(workspace_router, "get_existing_workspace") as files,
                     ):
                         response = self.client.get("/api/workspace/files/" + endpoint, params={"sessionId": "owned-thread", "path": "files/result.txt"}, headers={"Authorization": "Bearer test-token"})
                     self.assertEqual(response.status_code, 503, response.text)
                     self.assertEqual(len(self._admin_calls), before)
-                    mode.assert_not_called()
                     files.assert_not_called()
 
     def test_shared_oauth_rejects_missing_expired_and_runtime_grants(self):
@@ -362,9 +347,9 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
     def test_download_workspace_disabled_is_rejected_before_workspace_probe(self):
         with (
             unittest.mock.patch.object(
-                workspace_router.database,
-                "get_system_config",
-                return_value={"workspace_enabled": False},
+                self,
+                "_system_config",
+                {"workspace_enabled": False},
             ),
             unittest.mock.patch.object(
                 workspace_router,
@@ -477,9 +462,9 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
     def test_content_workspace_disabled_is_rejected_before_workspace_probe(self):
         with (
             unittest.mock.patch.object(
-                workspace_router.database,
-                "get_system_config",
-                return_value={"workspace_enabled": False},
+                self,
+                "_system_config",
+                {"workspace_enabled": False},
             ),
             unittest.mock.patch.object(
                 workspace_router,
@@ -585,9 +570,9 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
         self.assertNotIn("network", initial_settings["sandbox"])
 
         with unittest.mock.patch.object(
-            workspace_router.database,
-            "get_system_config",
-            return_value={
+            self,
+            "_system_config",
+            {
                 "workspace_enabled": True,
                 "sandbox_network_mode": "disabled",
                 "sandbox_network_allowed_domains": ["github.com"],
@@ -617,9 +602,9 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
         )
 
         with unittest.mock.patch.object(
-            workspace_router.database,
-            "get_system_config",
-            return_value={
+            self,
+            "_system_config",
+            {
                 "workspace_enabled": True,
                 "sandbox_fs_allowed_write_paths": ["/data/out", "/var/cache"],
             },

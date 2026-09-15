@@ -5,6 +5,7 @@
 # [Sync] 2026-09-15: validate server-only persistence authority and short-lock current snapshots.
 # [Sync] 2026-09-15: validate assistant full/partial DTOs, four schemas and shared pending barrier.
 # [Sync] 2026-09-15: validate Editor broker ownership beside the existing grant lifecycle.
+# [Sync] 2026-09-15: validate Thread SystemConfig uses the same exact draining grant.
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +27,7 @@ from services.admin_data.turn_persistence import AdminTurnPersistence
 from services.admin_data.user_message_data import PERSIST_USER_MESSAGE
 from services.admin_data.workflow_data import AdminWorkflowResolution
 from services.admin_data.workspace_data import WORKSPACE_SCHEMA_REQUIREMENTS
+from services.admin_data.system_config_data import GET_THREAD_SYSTEM_CONFIG
 
 NOW = datetime(2026, 9, 15, tzinfo=timezone.utc)
 TOKEN = "idg_" + "a" * 43
@@ -41,7 +43,7 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
     calls, receipt_states = [], ["absent", "committed"]
     thread_row = {"id": "thread-1", "user_id": "42", "title": None, "deck_id": None, "voice_id": None,
         "created_at": None, "updated_at": None, "claude_session_id": None, "agent_contract_version": None, **(thread_patch or {})}
-    operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE)
+    operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE, GET_THREAD_SYSTEM_CONFIG)
     schemas = [item.model_dump() for item in WORKSPACE_SCHEMA_REQUIREMENTS]
     if schema_fault == "missing": schemas.pop()
     elif schema_fault == "duplicate": schemas.append(dict(schemas[0]))
@@ -69,6 +71,9 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
             input_dto = json.loads(request.content)["input"]
             if name == GET_THREAD.capability.name:
                 value = {"thread": thread_row}
+            elif name == GET_THREAD_SYSTEM_CONFIG.capability.name:
+                assert input_dto == {"thread_id": "thread-1"}
+                value = {"config_json": '{"workspace_enabled":true}'}
             elif name == UPDATE_SESSION.capability.name:
                 thread_row.update(claude_session_id=input_dto["claude_session_id"], agent_contract_version=input_dto["agent_contract_version"])
                 value = {"changed": True}
@@ -311,6 +316,41 @@ def test_close_drains_an_already_dispatched_thread_read():
     assert closed.is_set() and not errors and rows[0].id == "thread-1" and len(calls) == 2
 
 
+def test_thread_system_config_read_uses_exact_grant_and_close_drains_it():
+    entered, release, closed = Event(), Event(), Event()
+    value, calls, _ = holder(block=(entered, release))
+    configs, errors = [], []
+
+    def read():
+        try:
+            configs.append(
+                value.system_config(actor_id="42", thread_id="thread-1")
+            )
+        except Exception as error:
+            errors.append(error)
+
+    worker = Thread(target=read)
+    closer = Thread(target=lambda: (value.close(), closed.set()))
+    worker.start()
+    try:
+        assert entered.wait(1)
+        closer.start()
+        assert not closed.wait(0.05)
+    finally:
+        release.set()
+        worker.join(2)
+        if closer.ident is not None:
+            closer.join(2)
+
+    assert closed.is_set() and not errors
+    assert configs == [{"workspace_enabled": True}]
+    assert len(calls) == 3
+    assert calls[-2].method == "GET" and calls[-2].url.path.endswith("/capabilities")
+    request = calls[-1]
+    assert request.headers["authorization"] == "Bearer " + TOKEN
+    assert request.url.path.endswith(GET_THREAD_SYSTEM_CONFIG.capability.name)
+
+
 def test_public_native_init_is_the_next_turn_resume_identity_with_thread_pg_fenced(monkeypatch, tmp_path):
     import re
     import claude_agent.service as service_module
@@ -325,9 +365,6 @@ def test_public_native_init_is_the_next_turn_resume_identity_with_thread_pg_fenc
         admin_workflow_resolution=AdminWorkflowResolution("42", "thread-1", None), admin_turn_persistence=value)
     monkeypatch.setattr(service_module._db, "get_chat_thread", lambda *_: pytest.fail("Public Thread read must use Admin"))
     monkeypatch.setattr(service_module._db, "update_chat_thread_claude_session", lambda *_: pytest.fail("Public SDK Session must use Admin"))
-    # Settings is an explicitly retained domain dependency, unrelated to the
-    # Thread authority verified here; use existing production DI and own FS.
-    monkeypatch.setattr(service_module._db, "get_system_config", lambda *_: {"workspace_enabled": True})
     monkeypatch.setattr(service_module, "get_or_create_workspace", lambda *_args, **_kwargs: tmp_path.resolve())
     new_id = "44444444-4444-4444-8444-444444444444"
     async def scenario():

@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: 用户与Thread SystemConfig持久化改用精确Admin合同。 -->
 <!-- [Sync] 2026-09-15: 公开complete/partial assistant持久化使用绑定的Admin turn owner与原receipt恢复。 -->
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: prepare registered fail/envelope consumers while retaining background ownership gaps. -->
@@ -64,7 +65,7 @@ Ink & Memory 是一个与 AI 一起写作的工作空间。你可以持续对话
 
 本仓库包含 Dream Web 应用与 FastAPI 后端。Admin、PostgreSQL、模型 Gateway、公开 Python SDK 和原生 Claude Runtime 由独立项目维护。
 
-资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership 与初始 user-message 预留已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 已通过聚焦技术检查；服务器user-turn委托已接既有Factory生命周期；Gateway/Editor接线与其他数据库领域仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径返回明确410与已配置的Admin标准端点。Standalone auth helpers 拒绝本地认证权限；importer Agent标注和具名Gateway verifier必须使用显式Admin OAuth，并在业务写入/模型调用前核对正常生产profile账户。Authlib/bcrypt已移除，其余依赖版本不变。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
+资源读取/Observer 写入、共享请求身份/profile、Chat CRUD/history/ownership、初始 user-message 预留、Editor 持久化及用户/Thread SystemConfig 已消费 Admin API。Runtime purpose 创建/公开续期/回执 consumer 已通过聚焦技术检查；服务器 user-turn 委托沿用既有 Factory 生命周期；Gateway CLI 凭据、内部 dispatcher 接线与其他数据库领域仍需迁移。旧 password/Google/Device/token/local-cookie HTTP 路径返回明确410与已配置的Admin标准端点。Standalone auth helpers 拒绝本地认证权限；importer Agent标注和具名Gateway verifier必须使用显式Admin OAuth，并在业务写入/模型调用前核对正常生产profile账户。Authlib/bcrypt已移除，其余依赖版本不变。Admin/Auth 服务器秘密从子进程环境 overlay 中清空。这些源码与构建检查不等于真实账户业务验收。
 
 Browser session读取丢弃取消或过期响应。注销使旧read失效，失败保留已验证session；AuthContext只提交当前公开snapshot。
 
@@ -80,7 +81,9 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 
 公开Deck Claude Plugin refs已使用Admin list/prepare/replace。Dream先复用原制品摘要与CLI兼容检查，再提交绑定来源metadata的evidence；其它Plugin安装/Runtime数据仍需迁移。
 
-公开用户偏好get/save已使用两项OAuth Admin operation。未保存仍返回`{}`；null保留已有字段，空对象/空文本仍是明确值，raw Python配置JSON保持数值类型。默认Voice、System策略、first-login写与后台上下文仍是独立领域。
+公开用户偏好get/save已使用两项OAuth Admin operation。未保存仍返回`{}`；null保留已有字段，空对象/空文本仍是明确值，raw Python配置JSON保持数值类型。默认Voice、first-login写与后台偏好上下文仍是独立领域；SystemConfig由下述专用operation处理。
+
+Settings GET/PUT 已使用 Admin 用户 SystemConfig operation；PUT 确认 patch 后执行一次独立 fresh read。公开 Chat 读取一份 OAuth snapshot，并复用于模型选择和附件。活动 turn 在 prompt、Workspace 或 Runtime 组装前通过精确 Thread persistence grant 读取。配置损坏或不可用时直接失败，不回退 Dream 数据库。Gateway 模型选择必须收到显式授权 snapshot，因此缺少 owner 的内部 dispatcher 仍是明确迁移依赖。
 
 共享Admin客户端串行刷新catalog与检查capability。刷新失败清空ready，由下一请求重新加载；领域HTTP保持并发，每次调用独立携带actor、DTO和请求ID。
 
@@ -88,7 +91,7 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 
 公开Deck用户/社区列表已使用单项typed Admin operation，保留原计数与作者字段，不执行文件或默认初始化步骤。
 
-公开 Preflight GET 使用 Admin owner-scoped 读取，不初始化 Workspace；POST 保留原 202、17 字段及显式原请求三态 receipt。Run 读取/创建/重试保留完整 28 字段及原 200/201。依赖默认 Workspace 的 Workflow 入口已在这些领域前使用注册的 Admin workspace-default.ensure，原文本 ID 保持；初始化要求 OAuth dream:write，服务器尚无 Workspace 的 Run GET 也遵守此要求。未知提交保留原请求 ID，不自动重发。系统配置、其他 lifecycle/launch 和 internal agent-output 持久化继续待迁移。详见[Preflight 规则](docs/design/workflow-preflight-read-current.md)和[Run 规则](docs/design/workflow-run-admin-consumer-current.md)。
+公开 Preflight GET 使用 Admin owner-scoped 读取，不初始化 Workspace；POST 保留原 202、17 字段及显式原请求三态 receipt。Run 读取/创建/重试保留完整 28 字段及原 200/201。依赖默认 Workspace 的 Workflow 入口已在这些领域前使用注册的 Admin workspace-default.ensure，原文本 ID 保持；初始化要求 OAuth dream:write，服务器尚无 Workspace 的 Run GET 也遵守此要求。未知提交保留原请求 ID，不自动重发。其他 lifecycle/launch 和 internal agent-output 持久化继续待迁移。详见[Preflight 规则](docs/design/workflow-preflight-read-current.md)和[Run 规则](docs/design/workflow-run-admin-consumer-current.md)。
 
 Story Workflow、Deck binding 与 Deck Plugin 的 current-user 依赖已共用 Admin 默认 Workspace resolver。Deck Plugin 角色查询复用当前 Admin profile 的 OAuth read scope/canonical ID 校验，原权限判断保留。其余领域和后台持久化继续待迁移。
 
@@ -98,7 +101,7 @@ Story Workflow、Deck binding 与 Deck Plugin 的 current-user 依赖已共用 A
 
 Launch source/claim/finish类型消费者和原application source adapter已按注册75准备。生产endpoint仍待传递当前OAuth actor，prepare/Voice/failure SQL也仍存在。详见[metadata准备规则](docs/design/dream-launch-admin-metadata-current.md)。
 
-Workspace content/download 已通过 typed Admin Chat 操作检查 Thread 所有权，再执行原 Workspace Mode、路径与文件检查。缺失 Thread 保留 404，metadata 故障保留安全 503；文件、ZIP 与 no-create 行为保持。系统配置与其他文件管理数据依赖仍待迁移。
+全部公开 Workspace 文件路由在文件系统访问前通过 OAuth 读取当前用户 SystemConfig。content/download 仍先检查 Thread 所有权，再执行 Workspace Mode、路径与文件检查。缺失 Thread 保留 404，配置或 metadata 故障返回安全 503；文件、ZIP 与 no-create 行为保持，其他文件管理数据依赖仍待迁移。
 
 公开Deck详情已读取单项typed Admin aggregate，还原原owner ID、时间和legacy Memory值。Admin producer对空Memory的投影差异仍列为待修正项。
 

@@ -11,6 +11,7 @@
 
 # Ink & Memory API Documentation
 
+> [Sync] 2026-09-15: Settings GET/PUT, Chat snapshots and active-turn SystemConfig reads use exact Admin operations; failures do not fall back to Dream persistence.
 > [Sync] 2026-09-13: Claude Agent `resume` is intent only. After actor/thread
 > authorization, the server verifies the DB Claude ID in the current Runtime
 > project. Missing records start a fresh Claude session in the same business
@@ -362,7 +363,9 @@ All fields are optional. Strings should be JSON-stringified.
 
 ### GET `/api/system-config`
 
-Returns the current user's Settings configuration as a JSON object.
+Returns the current user's Settings configuration as a JSON object. The route
+uses the request's OAuth actor with Admin `user-system-config.get`; invalid or
+unavailable Admin data fails closed and is not replaced by local defaults.
 
 Known fields include:
 
@@ -385,7 +388,9 @@ Known fields include:
 
 ### PUT `/api/system-config`
 
-Merges accepted fields into the current user's Settings configuration.
+Merges accepted fields into the current user's Settings configuration through
+Admin `user-system-config.patch`. After Admin confirms the patch, Dream performs
+an independent fresh `user-system-config.get` and returns that public projection.
 Unknown keys are ignored. `sandbox_network_mode` accepts `disabled`,
 `allowlist`, or `open`. `sandbox_network_allowed_domains` is sanitized to a
 flat domain-pattern list; use `open` mode instead of sending a bare `*`.

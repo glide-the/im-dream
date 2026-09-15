@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [Input] Consume workspace lib from libs/claude_agent_kit/server/workspace*,
+# [Input] Consume workspace lib, typed Admin Thread/SystemConfig reads,
 #         shared bearer auth, and FastAPI form/file helpers.
 # [Output] Register workspace file management endpoints:
 #          GET/POST/DELETE/PATCH /api/workspace/files
@@ -35,6 +35,7 @@
 #                    ordinary agent-created directories) is exportable; dot-prefixed
 #                    runtime surfaces (.dream, .claude, ...) stay unaddressable.
 # [Sync] 2026-09-14: reuse sole Admin bearer dependency; preserve file owner/path/Workspace Mode behavior.
+# [Sync] 2026-09-15: load Workspace Mode and sandbox settings through Admin before filesystem access.
 
 """Workspace file management API.
 
@@ -64,7 +65,6 @@ from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-import database
 from libs.claude_agent_kit.server.workspace import (
     WorkspaceFileAccessError,
     delete_workspace_file,
@@ -92,6 +92,7 @@ from .deps import get_current_user, invoke_admin_operation
 from services.admin_data.chat_models import ThreadIdInputDTO
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
 from services.admin_data.workspace_data import AdminWorkspaceData
+from services.admin_data.system_config_data import AdminSystemConfigData, SystemConfigGetInputDTO
 
 router = APIRouter()
 
@@ -149,18 +150,8 @@ def _coerce_string_list(value: object) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
-def _workspace_init_kwargs_for_user(current_user: dict) -> dict:
-    """Return Settings-backed workspace initialization kwargs for a user."""
-
-    try:
-        user_id = int(current_user.get("user_id"))
-        system_config = database.get_system_config(user_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Failed to load workspace settings from system_config; using defaults. Error: %s",
-            exc,
-        )
-        system_config = {}
+def _workspace_init_kwargs(system_config: dict) -> dict:
+    """Return initialization kwargs from one authorized SystemConfig snapshot."""
 
     return {
         "sandbox_enabled": resolve_sandbox_enabled(),
@@ -176,13 +167,34 @@ def _workspace_init_kwargs_for_user(current_user: dict) -> dict:
     }
 
 
-def _get_or_create_workspace_for_user(session_id: str, current_user: dict):
+def _get_or_create_workspace_for_user(session_id: str, system_config: dict):
     """Create or refresh a workspace without reverting user sandbox settings."""
 
     return get_or_create_workspace(
         session_id,
-        **_workspace_init_kwargs_for_user(current_user),
+        **_workspace_init_kwargs(system_config),
     )
+
+
+async def _load_system_config(current_user: dict, request: Request) -> dict:
+    """Load the current user's settings before any workspace filesystem call."""
+
+    try:
+        owner = getattr(request.app.state, "admin_request_auth", None)
+        actor = current_user.get("_admin_actor")
+        if not isinstance(owner, AdminRequestAuth) or not isinstance(actor, AdminRequestActor):
+            raise ValueError("Invalid server-owned Workspace actor")
+        return await invoke_admin_operation(
+            current_user,
+            AdminSystemConfigData(owner.client).get_user,
+            SystemConfigGetInputDTO(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Workspace SystemConfig check failed safely")
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Workspace access is temporarily unavailable", "code": "WORKSPACE_CONFIG_UNAVAILABLE"},
+        ) from exc
 
 
 async def _require_owned_workspace_thread(session_id: str, current_user: dict, request: Request) -> None:
@@ -208,18 +220,8 @@ async def _require_owned_workspace_thread(session_id: str, current_user: dict, r
         )
 
 
-def _require_workspace_mode_enabled(current_user: dict) -> None:
+def _require_workspace_mode_enabled(system_config: dict) -> None:
     """Require the actor's server-owned Workspace Mode configuration."""
-
-    try:
-        user_id = int(current_user.get("user_id"))
-        system_config = database.get_system_config(user_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Workspace Mode check failed safely")
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "Workspace access is temporarily unavailable", "code": "WORKSPACE_CONFIG_UNAVAILABLE"},
-        ) from exc
     if not bool(system_config.get("workspace_enabled", True)):
         raise HTTPException(
             status_code=409,
@@ -367,7 +369,8 @@ async def read_workspace_file_content_endpoint(
         )
     _validate_session_id(session_id)
     await _require_owned_workspace_thread(session_id, current_user, request)
-    _require_workspace_mode_enabled(current_user)
+    system_config = await _load_system_config(current_user, request)
+    _require_workspace_mode_enabled(system_config)
     safe_path = _validate_workspace_content_path(path)
 
     try:
@@ -412,6 +415,7 @@ async def read_workspace_file_content_endpoint(
 
 @router.get("/api/workspace/files")
 async def list_workspace_files_endpoint(
+    request: Request,
     session_id: Annotated[str, Query(alias="sessionId")],
     path: Annotated[str, Query()] = "",
     recursive: Annotated[str, Query()] = "",
@@ -428,6 +432,7 @@ async def list_workspace_files_endpoint(
     if not session_id:
         raise HTTPException(status_code=400, detail={"error": "sessionId is required"})
     _validate_session_id(session_id)
+    system_config = await _load_system_config(current_user, request)
 
     is_recursive = recursive in ("1", "true")
 
@@ -435,7 +440,7 @@ async def list_workspace_files_endpoint(
         workspace_root = get_workspace_root()
         workspace_full_path = workspace_root / session_id
         workspace_existed_before = workspace_full_path.exists()
-        workspace_path = _get_or_create_workspace_for_user(session_id, current_user)
+        workspace_path = _get_or_create_workspace_for_user(session_id, system_config)
         files = [_file_info_to_dict(f) for f in list_workspace_files(workspace_path, path)]
         tree = (
             [_tree_node_to_dict(n) for n in list_workspace_file_tree(workspace_path, path)]
@@ -483,6 +488,7 @@ async def list_workspace_files_endpoint(
 
 @router.post("/api/workspace/files")
 async def upload_workspace_files(
+    request: Request,
     session_id: Annotated[str, Form(alias="sessionId")],
     path: Annotated[Optional[str], Form()] = None,
     file: Annotated[List[UploadFile], FastAPIFile()] = (),
@@ -503,6 +509,7 @@ async def upload_workspace_files(
     if not session_id:
         raise HTTPException(status_code=400, detail={"error": "sessionId is required"})
     _validate_session_id(session_id)
+    system_config = await _load_system_config(current_user, request)
 
     target_path = (path or "").replace("\\", "/").strip("/")
 
@@ -510,7 +517,7 @@ async def upload_workspace_files(
         workspace_root = get_workspace_root()
         workspace_full_path = workspace_root / session_id
         workspace_existed_before = workspace_full_path.exists()
-        workspace_path = _get_or_create_workspace_for_user(session_id, current_user)
+        workspace_path = _get_or_create_workspace_for_user(session_id, system_config)
         workspace_created = not workspace_existed_before
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
@@ -604,6 +611,7 @@ class _DeleteFilesRequest(BaseModel):
 @router.delete("/api/workspace/files")
 async def delete_workspace_file_endpoint(
     body: _DeleteFilesRequest,
+    request: Request,
     current_user: dict = Depends(_require_workspace_auth),
 ) -> Response:
     """Delete a file or directory from a workspace.
@@ -618,9 +626,10 @@ async def delete_workspace_file_endpoint(
             detail={"error": "sessionId and path are required"},
         )
     _validate_session_id(body.sessionId)
+    system_config = await _load_system_config(current_user, request)
 
     try:
-        workspace_path = _get_or_create_workspace_for_user(body.sessionId, current_user)
+        workspace_path = _get_or_create_workspace_for_user(body.sessionId, system_config)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
@@ -654,6 +663,7 @@ class _MoveFilesRequest(BaseModel):
 @router.patch("/api/workspace/files")
 async def move_workspace_file_endpoint(
     body: _MoveFilesRequest,
+    request: Request,
     current_user: dict = Depends(_require_workspace_auth),
 ) -> Response:
     """Move or rename a file within a workspace.
@@ -668,9 +678,10 @@ async def move_workspace_file_endpoint(
             detail={"error": "sessionId, fromPath, and toPath are required"},
         )
     _validate_session_id(body.sessionId)
+    system_config = await _load_system_config(current_user, request)
 
     try:
-        workspace_path = _get_or_create_workspace_for_user(body.sessionId, current_user)
+        workspace_path = _get_or_create_workspace_for_user(body.sessionId, system_config)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
@@ -716,7 +727,8 @@ async def download_workspace_file(
         )
     _validate_session_id(session_id)
     await _require_owned_workspace_thread(session_id, current_user, request)
-    _require_workspace_mode_enabled(current_user)
+    system_config = await _load_system_config(current_user, request)
+    _require_workspace_mode_enabled(system_config)
     safe_path = _validate_workspace_download_path(path)
 
     try:

@@ -1,9 +1,10 @@
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
-# [Output] Atomic user reservations, bound assistant/Thread/SDK Session operations and original-ID recovery.
+# [Output] Atomic user reservations, bound assistant/Thread/SystemConfig/SDK Session operations and original-ID recovery.
 # [Pos] One factory-owned turn persistence owner; credentials never enter CLI/Editor/browser options.
 # [Sync] 2026-09-15: share the unknown-write barrier across user reservations and SDK Session updates; drain Thread reads.
 # [Sync] 2026-09-15: bind server persistence to the authoritative Thread/Run and preserve unknown writes.
 # [Sync] 2026-09-15: share the unknown barrier with complete/partial assistant writes and exact history schemas.
+# [Sync] 2026-09-15: read fresh Thread SystemConfig through the same draining persistence grant.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from .models import CommittedReceiptDTO, StrictDTO
 from .user_message_data import AdminUserMessageData, PERSIST_USER_MESSAGE, UserMessageInputDTO, UserMessageOutputDTO, user_message_input
 from .workflow_data import AdminWorkflowResolution
 from .workspace_data import require_workspace_capabilities
+from .system_config_data import AdminSystemConfigData
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,7 @@ class AdminTurnPersistence:
         self._client = client
         self._user_messages = AdminUserMessageData(client)
         self._chat = AdminChatData(client)
+        self._system_config = AdminSystemConfigData(client)
         self._runtime_client_factory = runtime_client_factory
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._settings = renewal_settings
@@ -109,6 +112,18 @@ class AdminTurnPersistence:
             if result.thread is not None and (result.thread.id != thread_id or result.thread.user_id != str(actor_id)):
                 raise invalid_response(request_id)
             return result.thread
+
+    def system_config(self, *, actor_id: str, thread_id: str) -> dict:
+        """Read the current Thread owner's config through this exact grant."""
+
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            request_id = self._request_id_factory()
+            return self._system_config.get_thread(
+                ThreadIdInputDTO(thread_id=thread_id),
+                request_id,
+                access_token=grant.token,
+            )
 
     def persist_assistant(self, *, actor_id: str, thread_id: str, message_id: str, parts: list,
         metadata: dict | None, history_final_text: str | None = None,

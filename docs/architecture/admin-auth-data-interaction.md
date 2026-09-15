@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: specify user and Thread SystemConfig operations, ordering and fail-closed consumers. -->
 <!-- [Sync] 2026-09-15: public Editor tools use exact Admin purpose grants, operations and original-ID receipts; stdio DB credentials are removed. -->
 <!-- [Sync] 2026-09-15: public assistant complete/partial writes use the bound turn owner; internal dispatcher SQL remains open. -->
 <!-- [Sync] 2026-09-15: record complete Admin Deck list modes and remaining SQL source candidates. -->
@@ -33,9 +34,9 @@
 
 ## 背景与问题
 
-Dream baseline `7d38715c` 的 Python/Next 架构保留，但 Python 登录 authority与全部生产DB访问移Admin。当前closure scanner覆盖504个模块，报告53个SQL-bearing、43个driver-import、110个legacy helper和470个cursor-call候选；这些数字是源码候选，不是全部可达SQL证明。既有[清单](../exec/dream-admin-data-inventory.md)、[事务图](../exec/dream-admin-transaction-boundaries.json)和current closure scan需要继续结合入口调用链复查。
+Dream baseline `7d38715c` 的 Python/Next 架构保留，但 Python 登录 authority与全部生产DB访问移Admin。阶段40已把用户与Thread SystemConfig生产读取/写入改为三个Admin operation；其后fresh closure scanner数字记录在[清单](../exec/dream-admin-data-inventory.md)。源码候选不等于生产可达SQL证明，仍需结合[事务图](../exec/dream-admin-transaction-boundaries.json)与入口调用链复查。
 
-本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile和Chat CRUD/history/ownership/初始message预留；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime server-persistence consumer/keeper已接公开user-turn、assistant完整/部分消息与Factory生命周期，Editor exact Session purpose已接公开Agent turn，CLI、内部dispatcher与其余后台持久化仍待接；旧Dream issuer已退役，其余数据库领域与正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
+本稿包含目标、评审与当前实现范围。Dream统一[客户端](../../backend/services/admin_data/client.py)、[严格DTO](../../backend/services/admin_data/models.py)与[JWT验证器](../../backend/services/admin_data/jwt_verifier.py)已接入Resource后台、共享请求身份/profile、Chat CRUD/history/ownership/初始message预留以及SystemConfig；Next BFF与Browser同源session已实现并通过类型/构建技术检查。Runtime server-persistence consumer/keeper已接公开user-turn、assistant完整/部分消息、Thread SystemConfig与Factory生命周期，Editor exact Session purpose已接公开Agent turn，CLI、缺owner的内部dispatcher与其余后台持久化仍待接；旧Dream issuer已退役，其余数据库领域与正常本机真实业务验收尚未完成；候选source/isolated proof不能代替正常部署能力。
 
 ## 目标与边界
 
@@ -179,6 +180,12 @@ sequenceDiagram
 
 ### 配置与状态
 
+用户SystemConfig由registered80的`user-system-config.get`、`user-system-config.patch`和`thread-system-config.get`提供。公开Settings GET使用current OAuth读取；PUT先在Dream执行公开字段清洗、模型与provider配对和Gateway目录校验，再向Admin提交closed ten-field patch。Admin只返回写入确认，Dream随后使用新的request ID执行独立GET，并从该结果生成原`{success,data}`响应。unknown写保留原request ID进入receipt恢复，不假定提交或自动重发。`config_json`由Python JSON decoder读取，保留任意精度整数、`1.0`、`-0.0`、Unicode与未知已保存字段；非法JSON、非object、NaN、Infinity或非有限嵌套数值按上游响应无效处理。
+
+公开Chat在Thread/message校验后使用current OAuth读取一份用户snapshot，并同时提供给模型选择和附件处理。活动turn使用Factory持有的`AdminTurnPersistence`，以同一actor/Thread、authoritative Run和`server-persistence` grant调用Thread SystemConfig；此读取与user/Session/assistant写共享关闭排空锁。配置必须在Workflow mapper、prompt、Workspace、文件同步和Runtime options之前成功；Admin unavailable、合同漂移或坏JSON均终止该路径，不保留Dream DB/default fallback。Gateway selector只接受显式authorized snapshot；缺少turn owner与reader的内部dispatcher在映射上下文前返回配置错误，等待其生产owner接线。
+
+全部公开Workspace文件入口在执行文件系统调用前读取current OAuth SystemConfig。list/upload/delete/move先做请求参数检查，再读配置；content/download先验证Thread所有权，再读配置，然后执行Mode、路径、realpath/no-symlink与文件操作。这样缺失Thread仍为404，而配置不可用安全返回503，且不会先访问共享FS。
+
 资源`default`由Dream配置提供，`desired`仅Admin持久化，`effective/revision`由Dream独立provider/composition的LKG拥有。合法更高revision替换；同rev同值仅diagnostics，同rev异值/回滚invalid；unavailable保留LKG。四值为JSON/TS正安全整数，组合memory bytes精确，不能把技术边界包装成产品配额或用0关闭保护。turn主路径不加policy HTTP查询。
 
 `global effort`来自policy LKG；compact/context/model max output来自最终选中的Admin模型，未配置不注入，用户/parent/workspace/env不可覆盖。`ai_models.max_output_tokens`只投影vendor-scoped CLI capability。`CLAUDE_CODE_TMPDIR={AGENT_CWD}/{thread_id}/.claude-tmp`、真实thread/0700/no-symlink/关闭Workspace Mode行为与sandbox精确路径全部保留。
@@ -213,7 +220,7 @@ server先按原顺序stop publisher/refresher/sink/sampler，再Factory.aclose�
 
 14个Admin实际输入输出/hash已写入严格Chat DTO与typed consumer，actor token与原request_id显式提供。微秒ISO字符串校验后原样保持，canonical用户ID不按BA sub猜测。原Python最终正文校验已抽为 `backend/chat_message_projection.py`，database旧私有alias和新Message DTO调用同一函数；生成器未复制其规则。消息回复ID还必须匹配原显式message_id，否则写结果保持unknown并用原receipt恢复。
 
-Chat router的create/get/list/search/delete、bind Deck/select Voice与message list/page/process-detail/latest、初始user-message预留和公开turn assistant回写已接typed consumer；现有搜索器、公开parts投影和微秒/NULL游标保持。共享请求身份与me profile已接入Admin。内部dispatcher persist/title/session与Deck context/settings等剩余直接DB入口未闭合；14个DTO不代表全域迁移完成。
+Chat router的create/get/list/search/delete、bind Deck/select Voice与message list/page/process-detail/latest、初始user-message预留、公开turn assistant回写和用户SystemConfig snapshot已接typed consumer；现有搜索器、公开parts投影和微秒/NULL游标保持。共享请求身份与me profile已接入Admin。内部dispatcher persist/title/session、Deck context及其缺失SystemConfig owner等剩余直接DB入口未闭合；现有DTO数量不代表全域迁移完成。
 
 ## 当前用户资料与请求 actor 的接入状态
 

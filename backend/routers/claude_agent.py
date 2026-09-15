@@ -6,6 +6,7 @@
 # [Sync] 2026-09-15: reserve user message/title atomically with a server-only purpose grant; factory owns background renewal cleanup.
 # [Sync] 2026-09-15: read Admin Workflow provenance before message/SSE and inject a server-owned immutable snapshot.
 # [Sync] 2026-09-15: create the turn-owned Admin Editor runtime before public Agent execution.
+# [Sync] 2026-09-15: reuse one OAuth SystemConfig snapshot for model selection and attachment preparation.
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-08-28: preserve validated model metadata across backend/services dual import identities.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
@@ -133,6 +134,7 @@ from services.admin_data.chat_data import AdminChatData
 from services.admin_data import chat_models as chat_dto
 from services.admin_data.errors import AdminDataError
 from services.admin_data.request_auth import AdminRequestActor, AdminRequestAuth
+from services.admin_data.system_config_data import AdminSystemConfigData, SystemConfigGetInputDTO
 from .deps import get_admin_request_auth, get_current_user, invoke_admin_operation
 
 
@@ -654,13 +656,21 @@ async def _load_current_user_mcp_app_resource_bindings(
 async def _resolve_platform_model_alias(
     user_id: int,
     client_model_alias: str | None,
+    system_config: Mapping[str, Any],
 ) -> str:
-    return (await _resolve_platform_model_selection(user_id, client_model_alias)).model_alias
+    return (
+        await _resolve_platform_model_selection(
+            user_id,
+            client_model_alias,
+            system_config,
+        )
+    ).model_alias
 
 
 async def _resolve_platform_model_selection(
     user_id: int,
     client_model_alias: str | None,
+    system_config: Mapping[str, Any],
 ) -> GatewayModel | str:
     try:
         return await asyncio.to_thread(
@@ -668,7 +678,7 @@ async def _resolve_platform_model_selection(
             user_id,
             client_model_alias,
             catalog_client_factory=GatewayModelCatalogClient,
-            system_config_reader=database.get_system_config,
+            system_config_reader=lambda _canonical_user_id: system_config,
         )
     except GatewayInferenceError as exc:
         raise HTTPException(
@@ -940,6 +950,15 @@ async def claude_agent_stream(
     if not message_text:
         raise HTTPException(status_code=400, detail="message text is required")
 
+    actor = current_user.get("_admin_actor")
+    if not isinstance(actor, AdminRequestActor):
+        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
+    system_config = await invoke_admin_operation(
+        current_user,
+        AdminSystemConfigData(owner.client).get_user,
+        SystemConfigGetInputDTO(),
+    )
+
     requested_deck_id = body.deck_id
     persisted_deck_id = thread.get("deck_id")
     requested_voice_id = body.voice_id
@@ -992,9 +1011,6 @@ async def claude_agent_stream(
                 },
             )
 
-    actor = current_user.get("_admin_actor")
-    if not isinstance(actor, AdminRequestActor):
-        raise HTTPException(status_code=503, detail="ADMIN_CONFIGURATION_INVALID")
     workflow_request_id = str(uuid4())
     try:
         workflow_resolution = await run_in_threadpool(owner.workflow_context, actor, thread_id, workflow_request_id)
@@ -1016,7 +1032,11 @@ async def claude_agent_stream(
                     "message": "The Editor Session identifier must be non-empty text.",
                 },
             )
-    platform_model = await _resolve_platform_model_selection(user_id, body.model)
+    platform_model = await _resolve_platform_model_selection(
+        user_id,
+        body.model,
+        system_config,
+    )
     if isinstance(platform_model, str):
         # Compatibility for isolated route tests/custom injection points that
         # intentionally resolve only an alias.
@@ -1038,7 +1058,6 @@ async def claude_agent_stream(
     attachment_payloads: list[AttachmentPayload] = []
     if body.attachments:
         try:
-            system_config = database.get_system_config(user_id)
             workspace_enabled = bool(system_config.get("workspace_enabled", True))
             workspace_path = None
             if workspace_enabled:

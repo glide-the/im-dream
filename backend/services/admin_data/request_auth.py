@@ -20,6 +20,7 @@
 # [Sync] 2026-09-15: share the Run operation tuple with the registered public cancel consumer.
 # [Sync] 2026-09-15: register fail/envelope consumer types; launch production identity wiring remains pending.
 # [Sync] 2026-09-15: provide request-bound Workflow provenance for immutable public Chat turn snapshots.
+# [Sync] 2026-09-15: register OAuth and persistence-grant SystemConfig consumers.
 # [Sync] 2026-09-14: own production shared request identity/profile connections; full BFF/runtime migration stays active.
 from __future__ import annotations
 
@@ -50,6 +51,7 @@ from .preflight_data import EXECUTE_PREFLIGHT, READ_PREFLIGHT
 from .run_data import RUN_OPERATIONS
 from .launch_metadata_data import LAUNCH_METADATA_OPERATIONS
 from .workspace_data import ENSURE_DEFAULT_WORKSPACE
+from .system_config_data import SYSTEM_CONFIG_OPERATIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +77,7 @@ class AdminRequestAuth:
     """Application-owned connections; each request checks current Admin identity."""
 
     def __init__(self, config: AdminDataConfig, *, client: AdminDataClient | None = None, verifier: AdminJWTVerifier | None = None) -> None:
-        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, *SESSION_OPERATIONS, *DECK_VERSION_OPERATIONS, *PREFERENCES_OPERATIONS, *DECK_REFS_OPERATIONS, *SOCIAL_OPERATIONS, *VOICE_OPERATIONS, *DECK_MUTATION_OPERATIONS, *LAUNCH_METADATA_OPERATIONS, *RUN_OPERATIONS, READ_DECK_DETAIL, LIST_DECKS, READ_PREFLIGHT, EXECUTE_PREFLIGHT, ENSURE_DEFAULT_WORKSPACE, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
+        self.client = client or AdminDataClient(config, operations=(*CHAT_OPERATIONS, *SESSION_OPERATIONS, *DECK_VERSION_OPERATIONS, *PREFERENCES_OPERATIONS, *SYSTEM_CONFIG_OPERATIONS, *DECK_REFS_OPERATIONS, *SOCIAL_OPERATIONS, *VOICE_OPERATIONS, *DECK_MUTATION_OPERATIONS, *LAUNCH_METADATA_OPERATIONS, *RUN_OPERATIONS, READ_DECK_DETAIL, LIST_DECKS, READ_PREFLIGHT, EXECUTE_PREFLIGHT, ENSURE_DEFAULT_WORKSPACE, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
         self._verifier = verifier or AdminJWTVerifier(config)
         self._owns_client = client is None
         self._owns_verifier = verifier is None

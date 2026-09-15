@@ -1,5 +1,5 @@
-# [Input] Consume backend/routers/system_config.py FastAPI router.
-# [Output] Verify Settings system-config save responses include sanitized data.
+# [Input] Consume the Settings router with an explicit Admin actor and typed SystemConfig adapter.
+# [Output] Verify sanitized Admin patches and fresh read response behavior without Dream database access.
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-25: cover PUT /api/system-config returning merged sandbox
 #                    network config so frontend Settings can hydrate after save.
@@ -7,6 +7,7 @@
 #                    only, trailing-slash strip, dedupe, caps) via PUT.
 # [Sync] 2026-08-30: reject the deployment-owned sandbox enablement key from
 #                    user env_vars and redact legacy stored copies.
+# [Sync] 2026-09-15: replace database mocks with the production Admin DTO invocation boundary.
 
 """Regression tests for the system-config router."""
 from __future__ import annotations
@@ -15,6 +16,7 @@ import sys
 import unittest
 import unittest.mock
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -24,56 +26,76 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from routers import system_config as system_config_router
+from services.admin_data.request_auth import AdminRequestActor
 
 
-class TestSystemConfigRouter(unittest.TestCase):
-    def setUp(self):
+class _SystemConfigData:
+    def __init__(self, config: dict):
+        self.config = config
+        self.calls: list[tuple[str, dict]] = []
+
+    def get_user(self, input_dto, _request_id, *, access_token):
+        assert access_token == "settings-token"
+        self.calls.append(("get", input_dto.model_dump(mode="json")))
+        return dict(self.config)
+
+    def patch_user(self, input_dto, _request_id, *, access_token):
+        assert access_token == "settings-token"
+        patch = input_dto.model_dump(mode="json")
+        self.calls.append(("patch", patch))
+        self.config.update(patch)
+        return SimpleNamespace(success=True)
+
+
+class _AdminRouterHarness:
+    def _start_admin_harness(self):
+        self.saved_config: dict = {}
+        self.admin_data = _SystemConfigData(self.saved_config)
+        self.admin_owner = SimpleNamespace(client=object())
+        actor = AdminRequestActor("subject", "7", "browser", frozenset({"dream:read", "dream:write"}), 1, 2, "settings-token")
         app = FastAPI()
-        app.dependency_overrides[system_config_router.get_current_user] = (
-            lambda: {"user_id": 7, "email": "settings@example.com"}
+        app.dependency_overrides[system_config_router.get_current_user] = lambda: {
+            "user_id": 7,
+            "email": "settings@example.com",
+            "_admin_actor": actor,
+        }
+        app.dependency_overrides[system_config_router.get_admin_request_auth] = lambda: self.admin_owner
+        self._data_patch = unittest.mock.patch.object(
+            system_config_router,
+            "AdminSystemConfigData",
+            return_value=self.admin_data,
         )
+        self._data_patch.start()
         app.include_router(system_config_router.router)
         self.client = TestClient(app)
 
-    def tearDown(self):
+    def _stop_admin_harness(self):
         self.client.close()
+        self._data_patch.stop()
+
+
+class TestSystemConfigRouter(_AdminRouterHarness, unittest.TestCase):
+    def setUp(self):
+        self._start_admin_harness()
+
+    def tearDown(self):
+        self._stop_admin_harness()
 
     def test_put_returns_merged_sanitized_sandbox_network_config(self):
-        saved_patch: dict = {}
-
-        def save_config(user_id: int, patch: dict) -> None:
-            self.assertEqual(user_id, 7)
-            saved_patch.update(patch)
-
-        def get_config(user_id: int) -> dict:
-            self.assertEqual(user_id, 7)
-            return {"workspace_enabled": True, **saved_patch}
-
-        with (
-            unittest.mock.patch.object(
-                system_config_router.database,
-                "save_system_config",
-                side_effect=save_config,
-            ),
-            unittest.mock.patch.object(
-                system_config_router.database,
-                "get_system_config",
-                side_effect=get_config,
-            ),
-        ):
-            response = self.client.put(
-                "/api/system-config",
-                json={
-                    "sandbox_network_mode": "allowlist",
-                    "sandbox_network_allowed_domains": [
-                        "HTTPS://Raw.GitHubUserContent.com/path/file.txt",
-                        "*.githubusercontent.com",
-                        "githubusercontent.com",
-                        "*",
-                        "raw.githubusercontent.com",
-                    ],
-                },
-            )
+        self.saved_config["workspace_enabled"] = True
+        response = self.client.put(
+            "/api/system-config",
+            json={
+                "sandbox_network_mode": "allowlist",
+                "sandbox_network_allowed_domains": [
+                    "HTTPS://Raw.GitHubUserContent.com/path/file.txt",
+                    "*.githubusercontent.com",
+                    "githubusercontent.com",
+                    "*",
+                    "raw.githubusercontent.com",
+                ],
+            },
+        )
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
@@ -92,46 +114,32 @@ class TestSystemConfigRouter(unittest.TestCase):
         )
 
     def test_put_rejects_secret_and_provider_routing_env_vars(self):
-        with (
-            unittest.mock.patch.object(
-                system_config_router.database,
-                "save_system_config",
-            ) as save_config,
-            unittest.mock.patch.object(
-                system_config_router.database,
-                "get_system_config",
-                return_value={},
-            ),
-        ):
-            response = self.client.put(
-                "/api/system-config",
-                json={
-                    "env_vars": {
+        response = self.client.put(
+            "/api/system-config",
+            json={
+                "env_vars": {
                     "ANTHROPIC_AUTH_TOKEN": "must-not-be-stored",
                     "ANTHROPIC_BASE_URL": "https://bypass.example",
                     "INK_AGENT_SANDBOX_ENABLED": "false",
-                    }
-                },
-            )
+                }
+            },
+        )
 
         self.assertEqual(response.status_code, 400, response.text)
-        save_config.assert_not_called()
+        self.assertEqual(self.admin_data.calls, [])
 
     def test_get_drops_legacy_secret_values(self):
-        with unittest.mock.patch.object(
-            system_config_router.database,
-            "get_system_config",
-            return_value={
-                "theme": "dark",
-                "env_vars": {
-                    "ANTHROPIC_AUTH_TOKEN": "legacy-secret",
-                    "ANTHROPIC_BASE_URL": "https://legacy.example",
-                    "INK_AGENT_SANDBOX_ENABLED": "false",
-                    "API_TIMEOUT_MS": "120000",
-                },
+        self.saved_config.update({
+            "theme": "dark",
+            "env_vars": {
+                "ANTHROPIC_AUTH_TOKEN": "legacy-secret",
+                "ANTHROPIC_BASE_URL": "https://legacy.example",
+                "INK_AGENT_SANDBOX_ENABLED": "false",
+                "CLAUDE_CODE_TMPDIR": "/private/tmp/private",
+                "API_TIMEOUT_MS": "120000",
             },
-        ):
-            response = self.client.get("/api/system-config")
+        })
+        response = self.client.get("/api/system-config")
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(
@@ -142,7 +150,6 @@ class TestSystemConfigRouter(unittest.TestCase):
     def test_put_model_accepts_only_admin_gateway_catalog_alias(self):
         from services.admin_gateway.models import GatewayModel, GatewayModelCatalog
 
-        saved_patch: dict = {}
         model = GatewayModel(
             model_alias="dream-balanced",
             display_name="Dream Balanced",
@@ -164,16 +171,6 @@ class TestSystemConfigRouter(unittest.TestCase):
                 "GatewayModelCatalogClient",
                 return_value=catalog,
             ),
-            unittest.mock.patch.object(
-                system_config_router.database,
-                "save_system_config",
-                side_effect=lambda _user_id, patch: saved_patch.update(patch),
-            ),
-            unittest.mock.patch.object(
-                system_config_router.database,
-                "get_system_config",
-                side_effect=lambda _user_id: dict(saved_patch),
-            ),
         ):
             response = self.client.put(
                 "/api/system-config",
@@ -181,7 +178,8 @@ class TestSystemConfigRouter(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(saved_patch, {"model": "dream-balanced", "provider": "gateway"})
+        self.assertEqual(self.saved_config, {"model": "dream-balanced", "provider": "gateway"})
+        self.assertEqual([name for name, _ in self.admin_data.calls], ["patch", "get"])
 
     def test_put_model_rejects_alias_not_returned_by_gateway(self):
         from services.admin_gateway.models import GatewayModelCatalog
@@ -194,10 +192,6 @@ class TestSystemConfigRouter(unittest.TestCase):
                 "GatewayModelCatalogClient",
                 return_value=catalog,
             ),
-            unittest.mock.patch.object(
-                system_config_router.database,
-                "save_system_config",
-            ) as save_config,
         ):
             response = self.client.put(
                 "/api/system-config",
@@ -205,7 +199,7 @@ class TestSystemConfigRouter(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 409, response.text)
-        save_config.assert_not_called()
+        self.assertEqual(self.admin_data.calls, [])
 
     def test_put_model_rejects_visible_but_uncallable_alias(self):
         from services.admin_gateway.models import GatewayModel, GatewayModelCatalog
@@ -227,13 +221,12 @@ class TestSystemConfigRouter(unittest.TestCase):
         catalog.fetch_catalog.return_value = GatewayModelCatalog((model,), None)
         with (
             unittest.mock.patch.object(system_config_router, "GatewayModelCatalogClient", return_value=catalog),
-            unittest.mock.patch.object(system_config_router.database, "save_system_config") as save_config,
         ):
             response = self.client.put("/api/system-config", json={"model": "dream-premium"})
 
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(response.json()["detail"]["requiredPlanCode"], "dream")
-        save_config.assert_not_called()
+        self.assertEqual(self.admin_data.calls, [])
 
 
 class TestSandboxFsAllowedWritePathsSanitizer(unittest.TestCase):
@@ -289,52 +282,28 @@ class TestSandboxFsAllowedWritePathsSanitizer(unittest.TestCase):
         self.assertEqual(result, [("/" + "a" * (limit + 50))[:limit]])
 
 
-class TestSandboxFsAllowedWritePathsPut(unittest.TestCase):
+class TestSandboxFsAllowedWritePathsPut(_AdminRouterHarness, unittest.TestCase):
     """PUT /api/system-config wires the fs write paths key like the domains key."""
 
     def setUp(self):
-        app = FastAPI()
-        app.dependency_overrides[system_config_router.get_current_user] = (
-            lambda: {"user_id": 7, "email": "settings@example.com"}
-        )
-        app.include_router(system_config_router.router)
-        self.client = TestClient(app)
+        self._start_admin_harness()
 
     def tearDown(self):
-        self.client.close()
+        self._stop_admin_harness()
 
     def test_put_returns_merged_sanitized_fs_write_paths(self):
-        saved_patch: dict = {}
-
-        def save_config(user_id: int, patch: dict) -> None:
-            saved_patch.update(patch)
-
-        def get_config(user_id: int) -> dict:
-            return {"workspace_enabled": True, **saved_patch}
-
-        with (
-            unittest.mock.patch.object(
-                system_config_router.database,
-                "save_system_config",
-                side_effect=save_config,
-            ),
-            unittest.mock.patch.object(
-                system_config_router.database,
-                "get_system_config",
-                side_effect=get_config,
-            ),
-        ):
-            response = self.client.put(
-                "/api/system-config",
-                json={
-                    "sandbox_fs_allowed_write_paths": [
-                        "/data/out/",
-                        "relative/bad",
-                        "/data/out",
-                        "/var/cache",
-                    ],
-                },
-            )
+        self.saved_config["workspace_enabled"] = True
+        response = self.client.put(
+            "/api/system-config",
+            json={
+                "sandbox_fs_allowed_write_paths": [
+                    "/data/out/",
+                    "relative/bad",
+                    "/data/out",
+                    "/var/cache",
+                ],
+            },
+        )
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()

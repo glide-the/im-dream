@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # [Sync] 2026-09-15: reuse the unchanged pure Voice Memory projection outside the database module.
 # [Sync] 2026-09-15: nine old social helpers refuse before I/O; public friends use Admin DTOs.
+# [Sync] 2026-09-15: retire direct SystemConfig SQL; all production consumers use Admin contracts.
 # [Input] Consume PostgreSQL connections, filesystem paths, JSON data, and optional session text extraction,
 #         and memory workspace defaults.
 # [Output] Provide persistence helpers for users, sessions, decks, voices, reports,
@@ -2527,54 +2528,17 @@ def get_preferences(user_id: int):
         db.close()
 
 def get_system_config(user_id: int) -> dict:
-    """Get per-user system config.
+    """Retired compatibility symbol; SystemConfig reads require Admin authority."""
 
-    Known keys include model/provider/system_prompt, workspace_enabled
-    (file workspace + per-thread Bash sandbox), sandbox_network_mode,
-    sandbox_network_allowed_domains, sandbox_fs_allowed_write_paths,
-    im_full_access_enabled, theme, and env_vars.
-
-    Returns an empty dict when no config has been saved yet.
-    """
-    db = get_db()
-    try:
-        row = db.execute(
-            "SELECT system_config_json FROM user_preferences WHERE user_id = %s",
-            (user_id,),
-        ).fetchone()
-        if row and row["system_config_json"]:
-            return json.loads(row["system_config_json"])
-        return {}
-    finally:
-        db.close()
+    del user_id
+    raise RuntimeError("SystemConfig persistence is owned by Admin")
 
 
 def save_system_config(user_id: int, patch: dict) -> None:
-    """Merge *patch* into the stored system config for *user_id*.
+    """Retired compatibility symbol; SystemConfig writes require Admin authority."""
 
-    Unknown keys are preserved so that future fields are not dropped on save.
-    """
-    db = get_db()
-    try:
-        existing = db.execute(
-            "SELECT system_config_json FROM user_preferences WHERE user_id = %s",
-            (user_id,),
-        ).fetchone()
-        if existing:
-            current = json.loads(existing["system_config_json"]) if existing["system_config_json"] else {}
-            current.update(patch)
-            db.execute(
-                "UPDATE user_preferences SET system_config_json = %s, updated_at = CURRENT_TIMESTAMP WHERE user_id = %s",
-                (json.dumps(current), user_id),
-            )
-        else:
-            db.execute(
-                "INSERT INTO user_preferences (user_id, system_config_json) VALUES (%s, %s)",
-                (user_id, json.dumps(patch)),
-            )
-        db.commit()
-    finally:
-        db.close()
+    del user_id, patch
+    raise RuntimeError("SystemConfig persistence is owned by Admin")
 
 
 def set_first_login_completed(user_id: int):

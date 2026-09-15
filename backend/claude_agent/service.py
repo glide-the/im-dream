@@ -1,13 +1,14 @@
 # [Sync] 2026-09-15: public complete/partial assistant writes use the bound Admin turn owner; internal SQL remains pending.
 # [Input] Consume libs/claude_agent_kit/types.py, libs/claude_agent_kit/runner.py,
 #         claude_agent/context_builder.py, claude_agent/tool_confirmation_store.py.
-#         Reads database module for session persistence.
+#         Reads Admin turn SystemConfig and retains pending database domains.
 # [Output] Provide ClaudeAgentRunRequest, ClaudeAgentService to thread_factory.py.
 # [Pos] core-business node in backend/claude_agent
 # [Sync] 2026-09-15: use bound server grants for public Thread resume reads and SDK-native Session updates.
 # [Sync] 2026-09-15: public user persistence uses one Admin atomic command and server-only renewed grant; internal guard stays intact.
 # [Sync] 2026-09-15: public Chat uses its actor/thread-bound immutable Admin Workflow snapshot; internal dispatcher mapper remains pending migration.
 # [Sync] 2026-09-15: Editor writes and post-tool refresh use the turn-owned Admin runtime; stdio receives no DB or Admin credential.
+# [Sync] 2026-09-15: require fresh Thread SystemConfig from the bound Admin turn owner before context assembly.
 # [Sync] 2026-09-13: verify current-project Claude resume IDs; fail closed on DB/storage errors and trust only SDK init receipts for early persistence.
 # [Sync] 2026-08-28: assemble immutable model/global Claude Code Runtime env snapshots
 #                    without reading PostgreSQL from the turn path or changing SSE semantics.
@@ -285,6 +286,7 @@ from services.story_workspace.agent_integration import (
 from services.story_workspace.dream_thread_binding import DreamThreadContextMapper
 from services.admin_data.workflow_data import AdminWorkflowResolution
 from services.admin_data.turn_persistence import AdminTurnPersistence
+from services.admin_data.errors import configuration_invalid
 from services.admin_data.editor_runtime import AdminEditorRuntime, EditorLoadInputDTO
 from services.story_workspace.dream_artifact_turn_hook import (
     DreamArtifactRepairability,
@@ -1568,6 +1570,7 @@ class ClaudeAgentService:
         platform_model_resolver: (
             Callable[[int | str, str | None], GatewayModel | str] | None
         ) = None,
+        system_config_reader: Callable[[int | str], Mapping[str, Any]] | None = None,
         claude_code_runtime_env_provider: (
             Callable[[], Mapping[str, str]] | None
         ) = None,
@@ -1583,6 +1586,9 @@ class ClaudeAgentService:
         self._platform_model_resolver = (
             platform_model_resolver or resolve_platform_model
         )
+        # Test harnesses may inject an authorized snapshot reader. The normal
+        # composition leaves this unset and must supply AdminTurnPersistence.
+        self._system_config_reader = system_config_reader
         self._claude_code_runtime_env_provider = (
             claude_code_runtime_env_provider or (lambda: {})
         )
@@ -1653,68 +1659,74 @@ class ClaudeAgentService:
 
         Returns a ``_TurnExecution`` ready to pass to ``execute_session``.
         """
-        # Public Chat supplies only its server-derived, actor/thread-bound
-        # snapshot. Browser DTOs never carry a Dream Run selector or context.
-        # Durable internal dispatchers still use their existing mapper here.
-        dream_context = await self._resolve_dream_context(request)
-
-        # Load user-configured agent settings from system config before system
+        # Load user-configured agent settings through the exact turn grant before
         # prompt and cwd resolution.  Settings SYSTEM_PROMPT participates in the
         # cached system_prompt, while the remaining flags feed AgentRunOptions
         # and per-thread workspace sandbox settings.
-        sys_cfg: dict[str, Any] = {}
-        system_config_loaded = False
-        settings_system_prompt = ""
+        persistence = request.admin_turn_persistence
+        if isinstance(persistence, AdminTurnPersistence):
+            sys_cfg = await asyncio.to_thread(
+                persistence.system_config,
+                actor_id=request.user_id,
+                thread_id=request.thread_id,
+            )
+        elif self._system_config_reader is not None:
+            sys_cfg = dict(
+                await asyncio.to_thread(self._system_config_reader, request.user_id)
+            )
+        else:
+            raise configuration_invalid()
+        system_config_loaded = True
+        settings_system_prompt = _coerce_settings_system_prompt(
+            sys_cfg.get("system_prompt")
+        )
+        raw_env = sys_cfg.get("env_vars") or {}
         user_env_vars: dict[str, str] = {}
-        im_full_access_enabled = False
-        workspace_enabled = True
-        sandbox_network_mode = "allowlist"
-        sandbox_network_allowed_domains: list[str] = []
-        sandbox_fs_allowed_write_paths: list[str] = []
-        try:
-            sys_cfg = _db.get_system_config(int(request.user_id))
-            system_config_loaded = True
-            settings_system_prompt = _coerce_settings_system_prompt(
-                sys_cfg.get("system_prompt")
-            )
-            raw_env = sys_cfg.get("env_vars") or {}
-            if isinstance(raw_env, dict):
-                user_env_vars = {
-                    str(k).strip(): str(v)
-                    for k, v in raw_env.items()
-                    if (
-                        str(k).strip()
-                        and str(k).strip() not in _TRUSTED_STORY_WORKSPACE_ENV_KEYS
-                        and v is not None
-                    )
-                }
-            im_full_access_enabled = bool(sys_cfg.get("im_full_access_enabled"))
-            workspace_enabled = bool(sys_cfg.get("workspace_enabled", True))
-            sandbox_network_mode = _coerce_sandbox_network_mode(
-                sys_cfg.get("sandbox_network_mode")
-            )
-            sandbox_network_allowed_domains = _coerce_string_list(
-                sys_cfg.get("sandbox_network_allowed_domains")
-            )
-            sandbox_fs_allowed_write_paths = _coerce_string_list(
-                sys_cfg.get("sandbox_fs_allowed_write_paths")
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to load user agent settings from system_config; skipping. Error: %s",
-                e,
-            )
+        if isinstance(raw_env, dict):
+            user_env_vars = {
+                str(k).strip(): str(v)
+                for k, v in raw_env.items()
+                if (
+                    str(k).strip()
+                    and str(k).strip() not in _TRUSTED_STORY_WORKSPACE_ENV_KEYS
+                    and v is not None
+                )
+            }
+        im_full_access_enabled = bool(sys_cfg.get("im_full_access_enabled"))
+        workspace_enabled = bool(sys_cfg.get("workspace_enabled", True))
+        sandbox_network_mode = _coerce_sandbox_network_mode(
+            sys_cfg.get("sandbox_network_mode")
+        )
+        sandbox_network_allowed_domains = _coerce_string_list(
+            sys_cfg.get("sandbox_network_allowed_domains")
+        )
+        sandbox_fs_allowed_write_paths = _coerce_string_list(
+            sys_cfg.get("sandbox_fs_allowed_write_paths")
+        )
+
+        # Public Chat supplies only its server-derived, actor/thread-bound
+        # snapshot. Browser DTOs never carry a Dream Run selector or context.
+        # Internal dispatchers without the owner above stop before their mapper.
+        dream_context = await self._resolve_dream_context(request)
 
         if dream_context is not None:
             # Internal Dream dispatchers bypass the public Chat router. Resolve
             # the live server-owned alias here so every Dream turn is subject
             # to the same catalog/entitlement boundary immediately before the
             # runner is assembled. Errors intentionally propagate fail-closed.
-            selected_model = await asyncio.to_thread(
-                self._platform_model_resolver,
-                request.user_id,
-                request.model,
-            )
+            if self._platform_model_resolver is resolve_platform_model:
+                selected_model = await asyncio.to_thread(
+                    self._platform_model_resolver,
+                    request.user_id,
+                    request.model,
+                    system_config_reader=lambda _canonical_user_id: sys_cfg,
+                )
+            else:
+                selected_model = await asyncio.to_thread(
+                    self._platform_model_resolver,
+                    request.user_id,
+                    request.model,
+                )
             if isinstance(selected_model, GatewayModel):
                 request.model = selected_model.model_alias
                 request.model_runtime_env = selected_model.claude_code_runtime_env()

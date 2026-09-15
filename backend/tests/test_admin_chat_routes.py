@@ -4,6 +4,7 @@
 # [Sync] 2026-09-15: gate public streaming on the bound server grant and atomic user reservation before runtime.
 # [Sync] 2026-09-15: verify exact Editor grant creation and pre-SSE owner cleanup on failure.
 # [Sync] 2026-09-15: verify Admin Workflow read precedes message/SSE and supplies immutable Service snapshot.
+# [Sync] 2026-09-15: read one OAuth SystemConfig snapshot before model and attachment preparation.
 # [Sync] 2026-09-14: verify actual production HTTP adapters and existing response projections.
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from services.admin_data.workflow_data import RESOLVE_WORKFLOW_CONTEXT, WORKFLOW
 from services.admin_data.delegation import DELEGATION_CAPABILITIES, RUNTIME_SCHEMA_REQUIREMENTS
 from services.admin_data.editor_runtime import EDITOR_RUNTIME_CAPABILITIES
 from services.admin_data.user_message_data import PERSIST_USER_MESSAGE
+from services.admin_data.system_config_data import SYSTEM_CONFIG_OPERATIONS
 
 
 class StaticVerifier:
@@ -63,7 +65,8 @@ def boundary(monkeypatch):
     async def bindings(user_id):
         return {}
     monkeypatch.setattr(routes, "_load_current_user_mcp_app_resource_bindings", bindings)
-    async def model_selection(user_id, client_model_alias):
+    async def model_selection(user_id, client_model_alias, system_config):
+        assert system_config == {"model": "explicit-fake-model", "workspace_enabled": True}
         return "explicit-fake-model"
     monkeypatch.setattr(routes, "_resolve_platform_model_selection", model_selection)
     factory.run_requests = []
@@ -79,6 +82,7 @@ def boundary(monkeypatch):
         "chat-thread.delete": {"changed": True}, "chat-message.list": {"messages": [message_value()]},
         "chat-message.persist": {"message_id": "public-message-1"},
         "workflow-context.resolve": {"context": None},
+        "user-system-config.get": {"config_json": '{"model":"explicit-fake-model","workspace_enabled":true}'},
         "chat-user-message.persist": {"message_id": "public-message-1", "confirmation_preserved": False},
         "runtime-delegation.create": {"token": "idg_" + "a" * 43, "purpose": "server-persistence", "thread_id": "owned-thread", "run_id": None,
             "editor_session_id": None, "scopes": ["dream:read", "dream:write"], "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
@@ -93,7 +97,7 @@ def boundary(monkeypatch):
         assert request.headers["X-Ink-Dream-Credential"] == config.service_secret
         if request.url.path.endswith("/capabilities"):
             value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": [item.model_dump() for item in DELEGATION_CAPABILITIES]},
-                "schema_capabilities": [item.model_dump() for item in RUNTIME_SCHEMA_REQUIREMENTS], "operations": [op.capability.model_dump() for op in (*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE)] + [op.model_dump() for op in EDITOR_RUNTIME_CAPABILITIES]}
+                "schema_capabilities": [item.model_dump() for item in RUNTIME_SCHEMA_REQUIREMENTS], "operations": [op.capability.model_dump() for op in (*CHAT_OPERATIONS, *SYSTEM_CONFIG_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE)] + [op.model_dump() for op in EDITOR_RUNTIME_CAPABILITIES]}
         elif request.url.path.endswith("/principal"):
             value = {"subject": "opaque-subject", "canonical_user_id": "42", "client_id": "dream-browser", "scopes": ["dream:read"] if request.headers["authorization"] == "Bearer read-only" else ["dream:read", "dream:write"], "status": "active"}
         else:
@@ -110,7 +114,7 @@ def boundary(monkeypatch):
                 status, code = value
                 return httpx.Response(status, json={"request_id": request_id, "error": {"code": code, "message": "safe"}})
         return httpx.Response(200, json={"request_id": request_id, "data": value})
-    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(handler)), operations=(*CHAT_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
+    client = AdminDataClient(config, client=httpx.Client(transport=httpx.MockTransport(handler)), operations=(*CHAT_OPERATIONS, *SYSTEM_CONFIG_OPERATIONS, CURRENT_PROFILE, RESOLVE_WORKFLOW_CONTEXT, PERSIST_USER_MESSAGE))
     app = FastAPI()
     app.state.admin_request_auth = AdminRequestAuth(config, client=client, verifier=StaticVerifier())
     app.include_router(routes.router)
@@ -237,7 +241,7 @@ def test_stream_reserves_original_user_identity_through_admin_before_runtime(bou
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
     assert response.status_code == 200 and response.headers["content-type"].startswith("text/event-stream")
     assert response.text == ": explicit-fake-runtime\n\n"
-    assert [call[0] for call in calls] == ["chat-thread.get", "workflow-context.resolve", "runtime-delegation.create", "chat-user-message.persist"]
+    assert [call[0] for call in calls] == ["chat-thread.get", "user-system-config.get", "workflow-context.resolve", "runtime-delegation.create", "chat-user-message.persist"]
     assert calls[-2][1] == {"purpose": "server-persistence", "thread_id": "owned-thread", "run_id": None, "editor_session_id": None, "scopes": ["dream:read", "dream:write"]}
     assert calls[-1][1] == {"thread_id": "owned-thread", "message_id": "public-message-1", "parts_json": '[{"type":"text","text":"Original user message"}]', "metadata_json": None, "title_candidate": "Original user message"}
     assert len(factory.run_requests) == 1 and factory.run_requests[0].message_id == "public-message-1"
@@ -260,7 +264,7 @@ def test_stream_identity_conflict_preserves_public_409_without_starting_runtime(
     assert response.status_code == 409 and not factory.run_requests
     assert response.json()["detail"]["error_code"] == "CHAT_MESSAGE_IDENTITY_CONFLICT"
     assert response.json()["detail"]["message"] == "The message identifier is already bound."
-    assert len(calls) == 4 and calls[-1][0] == "chat-user-message.persist"
+    assert len(calls) == 5 and calls[-1][0] == "chat-user-message.persist"
     assert closed == ["turn", "editor"]
 
 
@@ -285,12 +289,13 @@ def test_editor_grant_is_exact_and_precedes_user_reservation(boundary):
     assert response.status_code == 200 and len(factory.run_requests) == 1
     assert [item[0] for item in calls] == [
         "chat-thread.get",
+        "user-system-config.get",
         "workflow-context.resolve",
         "runtime-delegation.create",
         "runtime-delegation.create",
         "chat-user-message.persist",
     ]
-    assert calls[3][1] == {
+    assert calls[4][1] == {
         "purpose": "editor-stdio",
         "thread_id": "owned-thread",
         "run_id": None,
@@ -339,7 +344,7 @@ def test_workflow_read_failure_precedes_message_reservation_and_sse(boundary, co
     outputs["workflow-context.resolve"] = (status, code)
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
     assert response.status_code == status and response.json()["detail"]["error_code"] == code
-    assert [item[0] for item in calls] == ["chat-thread.get", "workflow-context.resolve"]
+    assert [item[0] for item in calls] == ["chat-thread.get", "user-system-config.get", "workflow-context.resolve"]
     assert not factory.run_requests
 
 
@@ -348,7 +353,7 @@ def test_server_grant_failure_precedes_message_or_runtime(boundary):
     outputs["runtime-delegation.create"] = (403, "DELEGATION_SCOPE_NOT_CONSENTED")
     response = request(client, "POST", "/api/claude-agent", json={"id": "owned-thread", "message": {"id": "public-message-1", "parts": [{"type": "text", "text": "Original user message"}]}})
     assert response.status_code == 403 and not factory.run_requests
-    assert [item[0] for item in calls] == ["chat-thread.get", "workflow-context.resolve", "runtime-delegation.create"]
+    assert [item[0] for item in calls] == ["chat-thread.get", "user-system-config.get", "workflow-context.resolve", "runtime-delegation.create"]
 
 
 def test_atomic_reservation_unknown_is_not_retried_or_started(boundary):

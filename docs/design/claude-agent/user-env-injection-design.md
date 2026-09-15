@@ -1,8 +1,43 @@
 > **关联文档**: [ClaudeSDKClient 项目 env 注入方案设计](./claude-sdk-env-design.md)
 > **[Sync] 2026-05-27**: 新增 — 按用户存储的 env 变量注入 Claude SDK 子进程方案。
+> **[Sync] 2026-09-15**: SystemConfig 已改由 Admin 用户/Thread operation 持久化和读取；活动 turn 缺少精确 persistence owner 或配置损坏时在上下文组装前失败。服务器控制的 Runtime、TMPDIR、身份绑定及凭据键不能由用户配置写入或覆盖。
 > **[Sync] 2026-06-22**: Settings 入口收束 — 用户环境变量控件只在 Workspace Mode 开启时显示，因为该配置面向 workspace runtime / Skills / MCP 工具上下文。
 
 # 按用户存储的 SDK Env 注入方案设计
+
+> 本文第1—11节保留2026-05原方案及其验收历史，其中直接Dream数据库读取、读取失败后跳过、用户覆盖模型/认证Runtime键和明文凭据建议均已废弃。当前执行合同以本节为准；历史示例不得作为实现依据。
+
+## 现行合同（2026-09-15）
+
+### 背景与问题
+
+SystemConfig同时影响prompt、Workspace Mode、sandbox、MCP和SDK env。若不同消费者分别查询或在失败时采用默认值，同一turn可能使用不一致配置；Dream直接读取PostgreSQL也违反Admin唯一数据边界。模型、compact/context/output、effort、`CLAUDE_CODE_TMPDIR`和actor/Thread/Run绑定键由服务器拥有，不能接受用户env覆盖。
+
+### 目标与边界
+
+公开Settings使用current OAuth调用`user-system-config.get/patch`；PUT仅提交清洗后的closed字段，并在写确认后以新request ID重新GET。公开Chat在业务身份检查后读取一次OAuth snapshot并复用。活动Agent turn通过`AdminTurnPersistence.system_config()`和exact `server-persistence` Thread/Run grant读取；读取发生在Workflow mapper、prompt、Workspace与Runner options之前。Admin不可用、合同不匹配、JSON损坏或缺少turn owner均停止上下文组装，不采用Dream数据库或空配置。
+
+### 概念与规则
+
+- Dream只把`env_vars`中允许的普通用户键投影到`mcp_env`和`user_sdk_env`；写入路由与Admin DTO都拒绝秘密键，以及模型Runtime、Admin/Gateway连接、TMPDIR和身份绑定键。
+- `sdk_env.py`在子进程最终合并时再次过滤。全局effort来自resource-policy LKG；compact/context/model max output来自最终Gateway model；TMPDIR来自规范化Thread workspace。用户、Browser、Deck、Plugin、workspace及parent env不能覆盖这些值。
+- 配置值不写日志、SSE或错误正文。GET只返回公开投影；被拒绝的env键既不持久化也不回显。
+- Thread Session复用时，每个新turn重新读取配置；Settings变更在下一turn生效。读取不缓存到跨turn的Agent状态，也不改变Factory、SSE、admission、lease或取消语义。
+
+```mermaid
+sequenceDiagram
+    participant Svc as ClaudeAgentService
+    participant Owner as AdminTurnPersistence
+    participant Admin as Admin SystemConfig
+    participant Runner as ClaudeAgentRunner
+    Svc->>Owner: system_config(actor_id, thread_id)
+    Owner->>Admin: thread-system-config.get(exact grant)
+    Admin-->>Owner: config_json
+    Owner-->>Svc: validated Python object
+    Svc->>Svc: prompt/Workspace/sandbox/env projection
+    Svc->>Runner: AgentRunOptions
+    Note over Svc,Admin: failure stops before mapper, filesystem and Runner
+```
 
 > **落地路径**: `backend/libs/claude_agent_kit/`, `backend/claude_agent/service.py`
 > **影响入口**: `sdk_env.py`、`AgentRunOptions`、`ClaudeAgentRunner.run_streaming()`、`ClaudeAgentService`

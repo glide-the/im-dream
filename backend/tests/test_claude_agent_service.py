@@ -16,7 +16,7 @@
 # [Sync] 2026-06-21: cover sandbox network policy handoff to workspace init.
 # [Sync] 2026-06-22: cover Settings SYSTEM_PROMPT handoff into system_prompt
 #                    assembly, config-change cache rebuild, and config-load
-#                    failure fallback.
+#                    failure termination.
 # [Sync] 2026-06-25: cover CancelledError stop path emitting finish and stream sentinel.
 # [Sync] 2026-07-04: cover workspace-local Notion snapshot attach and
 #                    workspace_context Notion block rendering.
@@ -61,6 +61,7 @@
 # [Sync] 2026-09-04: require unexpected Dream post-turn synchronization
 #                    failures to retain the committed assistant and use the
 #                    existing typed workbench-sync error contract.
+# [Sync] 2026-09-15: inject SystemConfig only through the explicit test harness boundary.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -90,7 +91,7 @@ import claude_mcp.service as claude_mcp_service_module
 import claude_agent.workspace_context as workspace_context_module
 from claude_agent.service import (
     ClaudeAgentRunRequest,
-    ClaudeAgentService,
+    ClaudeAgentService as _ProductionClaudeAgentService,
     _TurnContext,
 )
 from claude_agent.thread_pool import AgentRunState
@@ -104,6 +105,19 @@ from libs.claude_agent_kit.types import (
 )
 from services.admin_gateway.models import GatewayModel
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
+
+
+class ClaudeAgentService(_ProductionClaudeAgentService):
+    """Test-only DI for legacy context cases without a public turn owner."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault(
+            "system_config_reader",
+            lambda user_id: service_module._db.get_system_config(int(user_id)),
+        )
+        super().__init__(*args, **kwargs)
+
+
 class _FakeContextBuilder:
     def __init__(self) -> None:
         self.system_prompt_calls: list[tuple[str, str | None]] = []
@@ -1120,7 +1134,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             "system-prompt:7:new settings prompt",
         )
 
-    async def test_system_config_load_failure_builds_prompt_without_settings_prompt(self):
+    async def test_system_config_load_failure_stops_before_context_or_workspace(self):
         builder = _FakeContextBuilder()
         service = ClaudeAgentService(context_builder=builder)
         state = AgentRunState(session_id="thread_service_config_failure")
@@ -1142,29 +1156,58 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     service_module._db,
                     "get_chat_thread",
                     return_value=None,
-                ),
+                ) as get_chat_thread,
                 unittest.mock.patch.object(
                     service_module,
                     "get_or_create_workspace",
                     return_value=workspace_path,
-                ),
+                ) as get_or_create_workspace,
             ):
-                execution = await service.assemble_context(
+                with self.assertRaisesRegex(RuntimeError, "system_config unavailable"):
+                    await service.assemble_context(
+                        request,
+                        state=state,
+                        bus=_FakeBus(),
+                        runner=unittest.mock.Mock(),
+                    )
+
+        self.assertEqual(builder.system_prompt_calls, [])
+        get_chat_thread.assert_not_called()
+        get_or_create_workspace.assert_not_called()
+
+    async def test_production_service_without_turn_owner_fails_before_legacy_or_context(self):
+        builder = _FakeContextBuilder()
+        service = _ProductionClaudeAgentService(context_builder=builder)
+        state = AgentRunState(session_id="thread_service_ownerless")
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_service_ownerless",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with (
+            unittest.mock.patch.object(
+                service_module._db,
+                "get_system_config",
+                side_effect=AssertionError("legacy SystemConfig must not run"),
+            ) as legacy_config,
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_workspace",
+                side_effect=AssertionError("workspace must not run"),
+            ) as get_or_create_workspace,
+        ):
+            with self.assertRaisesRegex(Exception, "ADMIN_CONFIGURATION_INVALID"):
+                await service.assemble_context(
                     request,
                     state=state,
                     bus=_FakeBus(),
                     runner=unittest.mock.Mock(),
                 )
 
-        self.assertEqual(builder.system_prompt_calls, [("7", None)])
-        self.assertEqual(execution.run_options.system_prompt, "system-prompt:7")
-        self.assertEqual(
-            execution.run_options.mcp_env,
-            {
-                "INK_AGENT_USER_ID": "7",
-                "INK_AGENT_THREAD_ID": "thread_service_config_failure",
-            },
-        )
+        legacy_config.assert_not_called()
+        get_or_create_workspace.assert_not_called()
+        self.assertEqual(builder.system_prompt_calls, [])
 
 
 class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):

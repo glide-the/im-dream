@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: route user and Thread SystemConfig persistence through exact Admin contracts. -->
 <!-- [Sync] 2026-09-15: public complete/partial assistant persistence uses the bound Admin turn owner and original receipt recovery. -->
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: prepare registered fail/envelope consumers while retaining background ownership gaps. -->
@@ -65,7 +66,7 @@ Ink & Memory is a workspace for writing with AI. You can keep long-running conve
 
 This repository contains the Dream Web application and its FastAPI backend. Admin, PostgreSQL, the model Gateway, the public Python SDK, and the native Claude Runtime are maintained separately.
 
-Resource reads/observer writes, shared request identity/profile, and Chat CRUD/history/ownership plus initial user-message reservation now consume Admin APIs. Runtime purpose creation/public renewal/receipt consumers have passed focused technical checks. The server user-turn grant now follows the existing Factory lifecycle; Gateway/Editor wiring and other database domains still require migration. Old password/Google/Device/token/local-cookie HTTP paths return explicit 410 with configured Admin standard endpoints. Standalone auth helpers refuse local authority; importer Agent labels and the named Gateway verifier require explicit Admin OAuth and a matching production profile before business writes/model calls. Authlib/bcrypt have been removed without changing remaining dependency versions. Admin/Auth server secrets are cleared from child environment overlays. These source and build checks do not establish real-account business acceptance.
+Resource reads/observer writes, shared request identity/profile, Chat CRUD/history/ownership, initial user-message reservation, Editor persistence, and user/Thread SystemConfig now consume Admin APIs. Runtime purpose creation/public renewal/receipt consumers have passed focused technical checks. The server user-turn grant follows the existing Factory lifecycle; Gateway CLI credentials, internal dispatch wiring, and other database domains still require migration. Old password/Google/Device/token/local-cookie HTTP paths return explicit 410 with configured Admin standard endpoints. Standalone auth helpers refuse local authority; importer Agent labels and the named Gateway verifier require explicit Admin OAuth and a matching production profile before business writes/model calls. Authlib/bcrypt have been removed without changing remaining dependency versions. Admin/Auth server secrets are cleared from child environment overlays. These source and build checks do not establish real-account business acceptance.
 
 Browser session checks discard cancelled or superseded results. Logout invalidates pending reads while keeping the last validated session on failure; the auth context commits only the current public snapshot.
 
@@ -81,7 +82,9 @@ Public Deck content state/preview/commit/history/detail now use five typed Admin
 
 Public Deck Claude Plugin refs now use Admin list/prepare/replace. Dream verifies the selected artifact and CLI compatibility with the existing checks before submitting source-bound evidence; other plugin installation/runtime data paths remain migration work.
 
-Public user preference get/save now use two OAuth-bound Admin operations. Missing records still return `{}`; null preserves saved fields, empty objects and strings remain values, and raw Python config JSON keeps numeric types. Default voices, system policy, first-login writes and background context remain separate domains.
+Public user preference get/save now use two OAuth-bound Admin operations. Missing records still return `{}`; null preserves saved fields, empty objects and strings remain values, and raw Python config JSON keeps numeric types. Default voices, first-login writes and background preference context remain separate domains; SystemConfig is handled by the dedicated operations below.
+
+Settings GET/PUT now use Admin's `user-system-config.get/patch`; PUT returns a fresh independent read after a confirmed patch. Public Chat reads one OAuth-bound snapshot and reuses it for model selection and attachments. Active turns use `thread-system-config.get` through the exact Thread persistence grant before prompt, Workspace or Runtime assembly. Corrupt or unavailable configuration fails closed without a Dream database fallback. Gateway model selection requires an explicit authorized snapshot, so ownerless internal dispatch remains a named migration dependency.
 
 The shared Admin client serializes catalog refresh and capability checks. Failed refresh clears readiness for the next request to reload; domain HTTP remains concurrent and keeps each actor, DTO and request ID separate.
 
@@ -89,7 +92,7 @@ Public invitations, friend requests, relationships and friend picture reads now 
 
 Public Deck owned/community lists now use one typed Admin operation, preserving original counts and author fields without filesystem or default-initialization steps.
 
-Public Preflight GET uses an owner-scoped Admin read without initializing a Workspace. POST preserves its 202 response, all 17 fields and explicit original three-state receipts. Run read/create/retry preserve all 28 fields and original 200/201 responses. Default-dependent Workflow ingress now uses the registered Admin workspace-default.ensure operation before these domains; it returns the original text ID and requires OAuth dream:write for initialization, including Run GET when no server Workspace is present. Unknown writes retain their original request ID without retries. System configuration and remaining lifecycle/launch/internal agent-output persistence need migration. See the [Preflight rules](docs/design/workflow-preflight-read-current.md) and [Run rules](docs/design/workflow-run-admin-consumer-current.md).
+Public Preflight GET uses an owner-scoped Admin read without initializing a Workspace. POST preserves its 202 response, all 17 fields and explicit original three-state receipts. Run read/create/retry preserve all 28 fields and original 200/201 responses. Default-dependent Workflow ingress now uses the registered Admin workspace-default.ensure operation before these domains; it returns the original text ID and requires OAuth dream:write for initialization, including Run GET when no server Workspace is present. Unknown writes retain their original request ID without retries. Remaining lifecycle/launch/internal agent-output persistence still needs migration. See the [Preflight rules](docs/design/workflow-preflight-read-current.md) and [Run rules](docs/design/workflow-run-admin-consumer-current.md).
 
 Story Workflow, Deck binding and Deck Plugin current-user dependencies share the same Admin default Workspace resolver. Deck Plugin role lookup reuses the current Admin profile with OAuth read scope and canonical ID validation; existing permission checks remain. Remaining domain and background persistence still need migration.
 
@@ -99,7 +102,7 @@ Public Workflow Run cancel now uses its registered Admin command, preserving the
 
 Launch source/claim/finish typed consumers and the original application source adapter are prepared against registered75. The production endpoint still needs OAuth actor wiring, and prepare/Voice/failure SQL remains. See the [metadata preparation rules](docs/design/dream-launch-admin-metadata-current.md).
 
-Workspace content/download reads now check Thread ownership through the typed Admin Chat operation before the existing Workspace Mode, path and filesystem checks. Missing Threads retain 404; metadata failures retain safe 503 responses. File, ZIP and no-create behavior remains; system configuration and other file-management data dependencies are still pending.
+All public Workspace file routes read the current user's SystemConfig through OAuth before filesystem access. Content/download keep Thread ownership checks first, then apply Workspace Mode, path and filesystem checks. Missing Threads retain 404; configuration or metadata failures return safe 503 responses. File, ZIP and no-create behavior remains; other file-management data dependencies are still pending.
 
 Public Deck detail now reads one typed Admin aggregate and restores original owner IDs, timestamps and legacy Memory values. An Admin producer difference for empty Memory remains documented for correction.
 
