@@ -3,6 +3,7 @@
 # [Pos] File metadata consumer; no filesystem, configuration or database access.
 # [Sync] 2026-09-15: reuse registered76 empty-input default operation and original two-state receipt.
 # [Sync] 2026-09-15: reuse strict Chat DTO and exact schema gate before any file access.
+# [Sync] 2026-09-15: share the unchanged four-schema gate with bound assistant persistence.
 from __future__ import annotations
 
 from .chat_data import AdminChatData
@@ -37,6 +38,13 @@ WORKSPACE_SCHEMA_REQUIREMENTS = (
 )
 
 
+def require_workspace_capabilities(client: AdminDataClient, request_id: str) -> None:
+    capabilities = client.capabilities(request_id)
+    schemas = {item.capability: item for item in capabilities.schema_capabilities}
+    if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in WORKSPACE_SCHEMA_REQUIREMENTS):
+        raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+
+
 class AdminWorkspaceData:
     def __init__(self, client: AdminDataClient, *, canonical_user_id: str):
         self._client = client
@@ -52,10 +60,7 @@ class AdminWorkspaceData:
         return self._client.receipt(ENSURE_DEFAULT_WORKSPACE, request_id, access_token=access_token)
 
     def exists_owned(self, input_dto: ThreadIdInputDTO, request_id: str, *, access_token: str) -> bool:
-        capabilities = self._client.capabilities(request_id)
-        schemas = {item.capability: item for item in capabilities.schema_capabilities}
-        if len(schemas) != len(capabilities.schema_capabilities) or any(schemas.get(item.capability) != item for item in WORKSPACE_SCHEMA_REQUIREMENTS):
-            raise AdminDataError("ADMIN_CAPABILITY_UNAVAILABLE", 503, request_id)
+        require_workspace_capabilities(self._client, request_id)
         result = self._chat.get_thread(input_dto, request_id, access_token=access_token)
         if result.thread is None:
             return False

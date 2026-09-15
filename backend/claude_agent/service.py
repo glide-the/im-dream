@@ -1,3 +1,4 @@
+# [Sync] 2026-09-15: public complete/partial assistant writes use the bound Admin turn owner; internal SQL remains pending.
 # [Input] Consume libs/claude_agent_kit/types.py, libs/claude_agent_kit/runner.py,
 #         claude_agent/context_builder.py, claude_agent/tool_confirmation_store.py.
 #         Reads database module for session persistence.
@@ -2749,8 +2750,6 @@ class ClaudeAgentService:
         ``is_partial=True`` in metadata so the frontend can show an appropriate
         indicator.  If no collectible events exist the call is a no-op.
         """
-        import database
-
         turn_ctx = execution.turn_context
         if not turn_ctx or not turn_ctx.collected_parts:
             return
@@ -2777,8 +2776,8 @@ class ClaudeAgentService:
             asst_metadata["toolCount"] = tool_count
 
         def _save_partial() -> None:
-            database.save_chat_message(
-                thread_id, "assistant",
+            self._save_assistant_message(
+                execution.request,
                 parts=asst_parts,
                 metadata=asst_metadata,
             )
@@ -2831,8 +2830,6 @@ class ClaudeAgentService:
         saves the assistant message + updates claude_session_id on chat_thread.
         Aligned with better-chatbot onFinish / chatRepository.upsertMessage.
         """
-        import database
-
         thread_id = execution.request.thread_id
         assistant_text: str = result.full_text if result else ""
         turn_ctx = execution.turn_context
@@ -2879,8 +2876,8 @@ class ClaudeAgentService:
             if tool_count:
                 asst_metadata["toolCount"] = tool_count
 
-            database.save_chat_message(
-                thread_id, "assistant",
+            self._save_assistant_message(
+                execution.request,
                 parts=asst_parts,
                 metadata=asst_metadata or None,
                 history_final_text=(
@@ -2917,6 +2914,24 @@ class ClaudeAgentService:
                     "Failed to persist completed Claude Session for thread_id=%s",
                     thread_id,
                 )
+
+    def _save_assistant_message(self, request: ClaudeAgentRunRequest, *, parts: list, metadata: dict | None,
+        history_final_text: str | None = None, history_process_available: bool = False,
+        history_projection_version: int | None = None) -> None:
+        persistence = request.admin_turn_persistence
+        if persistence is not None:
+            if not isinstance(persistence, AdminTurnPersistence):
+                raise ValueError("Invalid server persistence owner")
+            persistence.persist_assistant(actor_id=request.user_id, thread_id=request.thread_id, message_id=str(uuid4()),
+                parts=parts, metadata=metadata, history_final_text=history_final_text,
+                history_process_available=history_process_available, history_projection_version=history_projection_version)
+            return
+        # Existing internal dispatchers retain their mapper/SQL until their
+        # authoritative turn owner is connected; public Chat supplies it.
+        import database
+        database.save_chat_message(request.thread_id, "assistant", parts=parts, metadata=metadata,
+            history_final_text=history_final_text, history_process_available=history_process_available,
+            history_projection_version=history_projection_version)
 
     # Keep _persist_turn as a legacy alias used by test stubs / older callers.
     async def _persist_turn(

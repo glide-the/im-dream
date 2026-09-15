@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: 公开complete/partial assistant持久化使用绑定的Admin turn owner与原receipt恢复。 -->
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: prepare registered fail/envelope consumers while retaining background ownership gaps. -->
 <!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
@@ -71,7 +72,7 @@ Browser session读取丢弃取消或过期响应。注销使旧read失效，失�
 
 公开Chat在message预留/SSE前读取Admin完整Workflow上下文，并向Service传入不可变actor/thread snapshot，包含普通Chat null。内部confirmation/launch调度与其余purpose consumer仍需迁移。
 
-公开user-turn通过Admin原子confirmation guard命令预留message/title，使用raw Python JSON。server-only Thread/Run持久化grant由Factory管理续期，SSE disconnect后保持；未知写保存原receipt ID。公开Agent的Thread读取与SDK-native session ID回写也使用该绑定grant。user/session写共享原receipt恢复，Session仅复用最近一次确认回写。后台assistant持久化、写作Session上下文/工具、Gateway/Editor凭据及其他数据库领域仍需迁移。
+公开user-turn通过Admin原子confirmation guard命令预留message/title，使用raw Python JSON。server-only Thread/Run持久化grant由Factory管理续期，SSE disconnect后保持；未知写保存原receipt ID。公开Agent的Thread读取、SDK-native session ID回写和complete/cancelled/error assistant消息都使用该绑定grant。user/session/assistant写共享原receipt恢复，Session仅复用最近一次确认回写。内部dispatcher的assistant写、写作Session上下文/工具、Gateway/Editor凭据及其他数据库领域仍需迁移。
 
 公开写作Session save/get/batch/list/range/aggregate/delete已使用六项typed Admin operation与显式request OAuth。保留原metadata/full-state响应、精确时间、时区日键和正文metrics；仅confirmed写入后发edit event。共享闭集Editor状态DTO省略未设置的optional字段。当前Session合同拒绝Thread server-persistence grant，后台Session上下文/工具仍是独立迁移依赖。
 

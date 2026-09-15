@@ -1,8 +1,9 @@
 # [Input] Server-only persistence grant, immutable Workflow resolution and typed Admin client.
-# [Output] Atomic user reservations, bound Thread/SDK Session operations and original-ID recovery.
+# [Output] Atomic user reservations, bound assistant/Thread/SDK Session operations and original-ID recovery.
 # [Pos] One factory-owned turn persistence owner; credentials never enter CLI/Editor/browser options.
 # [Sync] 2026-09-15: share the unknown-write barrier across user reservations and SDK Session updates; drain Thread reads.
 # [Sync] 2026-09-15: bind server persistence to the authoritative Thread/Run and preserve unknown writes.
+# [Sync] 2026-09-15: share the unknown barrier with complete/partial assistant writes and exact history schemas.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,8 +12,8 @@ from threading import Lock, RLock
 from typing import Callable
 from uuid import uuid4
 
-from .chat_data import AdminChatData, UPDATE_SESSION
-from .chat_models import ChatThreadDTO, ChangedResultDTO, ThreadIdInputDTO, ThreadSessionInputDTO
+from .chat_data import AdminChatData, PERSIST_MESSAGE, UPDATE_SESSION
+from .chat_models import ChatThreadDTO, ChangedResultDTO, MessagePersistInputDTO, MessagePersistResultDTO, ThreadIdInputDTO, ThreadSessionInputDTO
 from .client import AdminDataClient, DomainOperation
 from .delegation import AdminRuntimeClient, RuntimeGrant
 from .delegation_keeper import RuntimeGrantKeeper, RuntimeRenewalSettings
@@ -20,6 +21,7 @@ from .errors import AdminDataError, configuration_invalid, invalid_response
 from .models import CommittedReceiptDTO, StrictDTO
 from .user_message_data import AdminUserMessageData, PERSIST_USER_MESSAGE, UserMessageInputDTO, UserMessageOutputDTO, user_message_input
 from .workflow_data import AdminWorkflowResolution
+from .workspace_data import require_workspace_capabilities
 
 
 @dataclass(frozen=True)
@@ -108,6 +110,16 @@ class AdminTurnPersistence:
                 raise invalid_response(request_id)
             return result.thread
 
+    def persist_assistant(self, *, actor_id: str, thread_id: str, message_id: str, parts: list,
+        metadata: dict | None, history_final_text: str | None = None,
+        history_process_available: bool = False, history_projection_version: int | None = None) -> MessagePersistResultDTO:
+        input_dto = MessagePersistInputDTO(thread_id=thread_id, message_id=message_id, role="assistant", parts=parts,
+            metadata=metadata, history_final_text=history_final_text, history_process_available=history_process_available,
+            history_projection_version=history_projection_version)
+        with self._write_lock:
+            grant = self.current_grant(actor_id=actor_id, thread_id=thread_id)
+            return self._write(PERSIST_MESSAGE, input_dto, grant)
+
     def update_session(self, *, actor_id: str, thread_id: str, session_id: str, contract_version: str) -> ChangedResultDTO:
         input_dto = ThreadSessionInputDTO(thread_id=thread_id, claude_session_id=session_id, agent_contract_version=contract_version)
         with self._write_lock:
@@ -120,13 +132,15 @@ class AdminTurnPersistence:
         # Every caller holds the same activity lock. Unknown results block a
         # different operation as well as a different input; receipts retain
         # the original operation and immutable input held by this owner.
-        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION:
+        if operation is not PERSIST_USER_MESSAGE and operation is not UPDATE_SESSION and operation is not PERSIST_MESSAGE:
             raise configuration_invalid()
         pending = self._pending
         if pending is not None:
             if pending.operation is not operation or pending.input_dto != input_dto:
                 raise AdminDataError("ADMIN_WRITE_RESULT_UNKNOWN", 503, pending.request_id, True)
             try:
+                if operation is PERSIST_MESSAGE:
+                    require_workspace_capabilities(self._client, pending.request_id)
                 receipt = self._client.receipt(operation, pending.request_id, access_token=grant.token)
             except AdminDataError as error:
                 raise AdminDataError(error.code, error.status_code, pending.request_id, True) from None
@@ -138,6 +152,9 @@ class AdminTurnPersistence:
         try:
             if operation is PERSIST_USER_MESSAGE:
                 result = self._user_messages.persist(input_dto, pending.request_id, access_token=grant.token)
+            elif operation is PERSIST_MESSAGE:
+                require_workspace_capabilities(self._client, pending.request_id)
+                result = self._chat.persist_message(input_dto, pending.request_id, access_token=grant.token)
             else:
                 result = self._chat.update_session(input_dto, pending.request_id, access_token=grant.token)
         except AdminDataError as error:
@@ -153,6 +170,9 @@ class AdminTurnPersistence:
             if result.message_id != pending.input_dto.message_id:
                 raise invalid_response(pending.request_id, write=True)
             self._writes[result.message_id] = _UserWrite(pending.input_dto, pending.request_id, result)
+        elif pending.operation is PERSIST_MESSAGE:
+            if result.message_id != pending.input_dto.message_id:
+                raise invalid_response(pending.request_id, write=True)
         else:
             # Session identity is mutable: A -> B -> A must write A again.
             self._session_write = (pending.input_dto, result)

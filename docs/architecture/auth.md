@@ -1,3 +1,4 @@
+<!-- [Sync] 2026-09-15: public assistant complete/partial writes use the bound server-persistence grant and original receipt recovery. -->
 <!-- [Sync] 2026-09-15: three public default resolvers share registered Admin ensure; Deck Plugin role reuses current profile. -->
 <!-- [Sync] 2026-09-15: register typed fail/envelope without granting actor IDs background authority. -->
 <!-- [Sync] 2026-09-15: consume registered Run cancel with original reason/full result and bounded receipts; other lifecycle gaps remain. -->
@@ -106,9 +107,9 @@ Authlib在原两个issuer router中仅用于Dream Google/Device authority，现�
 
 公开Chat以当前OAuth读取Admin唯一Workflow上下文，在message/SSE前拒绝权限、绑定、capability或DTO失败；immutable snapshot只带已认证actor/thread和原上下文，不含credential，不向Browser/SDK投影。Service包括普通null均复用该snapshot，内部confirmation/launch仍待typed服务身份迁移；不能据此声明后台long-turn授权已完成。
 
-公开Agent的Thread resume读取和SDK init/final/repair Session回写复用该exact Thread/Run server-persistence grant。`AdminTurnPersistence`校验reply Thread/canonical actor，未知user/session写共用原operation/input/UUID恢复；最近一次确认Session才可复用，A→B→A必须重新写。SDK init失败继续原日志处理，已经运行的turn/cancel保持原语义；未迁移assistant/Run写不属于此owner，不能据此宣称全域未知写屏障。
+公开Agent的Thread resume读取、SDK init/final/repair Session回写和assistant完整/部分消息复用该exact Thread/Run server-persistence grant。`AdminTurnPersistence`校验reply Thread/canonical actor，未知user/session/assistant写共用原operation/input/UUID恢复；最近一次确认Session才可复用，A→B→A必须重新写。SDK init失败继续原日志处理，已经运行的turn/cancel保持原语义；内部dispatcher assistant与Run写不属于此owner，不能据此宣称全域未知写屏障。
 
-公开user-turn先创建绑定当前Thread/authoritative Run、仅dream read/write的server-persistence委托，再调用Admin原子user message/title/confirmation事务；Service复用已确认的同一输入。未知写保留原request ID并只查询原receipt，absent阻止后续写与推理。Factory在既有admission后启动后台renew，SSE断开保留turn，terminal/cancel安排自有cleanup并由shutdown drain同步writer、renewal线程和独立HTTP client。凭据不进入Browser、CLI或Editor；assistant/后台Session上下文与其它后台领域仍待迁移，Gateway/Editor仍需独立purpose。详细状态与失败处理见[认证与数据交互](admin-auth-data-interaction.md)。
+公开user-turn先创建绑定当前Thread/authoritative Run、仅dream read/write的server-persistence委托，再调用Admin原子user message/title/confirmation事务；Service复用已确认的同一输入。成功assistant与cancel/error partial在同一owner内调用既有Chat消息operation，先检查四项exact schema，再提交原parts/metadata/history字段。未知写保留原request ID并只查询原receipt，absent阻止后续写与推理。Factory在既有admission后启动后台renew，SSE断开保留turn，terminal/cancel安排自有cleanup并由shutdown drain同步writer、renewal线程和独立HTTP client。凭据不进入Browser、CLI或Editor；内部dispatcher assistant、后台Session上下文与其它后台领域仍待迁移，Gateway/Editor仍需独立purpose。详细状态与失败处理见[认证与数据交互](admin-auth-data-interaction.md)。
 
 Next同名password/Google/Device/token薄adapter也返回410，login/register在generic proxy前执行，避免未登录401遮住迁移响应；Next `/auth/logout`仍执行实际BFF handle撤销。两端退役owner只读取三项公开authority配置，不要求private service凭据。
 

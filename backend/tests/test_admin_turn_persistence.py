@@ -3,6 +3,7 @@
 # [Pos] Provider-free turn lifecycle tests; no PG/model/real service or alternate SSE implementation.
 # [Sync] 2026-09-15: validate Thread/SDK Session scope, native init callbacks and one cross-operation unknown barrier.
 # [Sync] 2026-09-15: validate server-only persistence authority and short-lock current snapshots.
+# [Sync] 2026-09-15: validate assistant full/partial DTOs, four schemas and shared pending barrier.
 from __future__ import annotations
 
 import asyncio
@@ -17,12 +18,13 @@ import httpx
 import pytest
 
 from services.admin_data import AdminDataClient, AdminDataConfig, AdminDataError
-from services.admin_data.chat_data import GET_THREAD, UPDATE_SESSION
+from services.admin_data.chat_data import GET_THREAD, PERSIST_MESSAGE, UPDATE_SESSION
 from services.admin_data.delegation import RuntimeGrant
 from services.admin_data.delegation_keeper import RuntimeGrantKeeper
 from services.admin_data.turn_persistence import AdminTurnPersistence
 from services.admin_data.user_message_data import PERSIST_USER_MESSAGE
 from services.admin_data.workflow_data import AdminWorkflowResolution
+from services.admin_data.workspace_data import WORKSPACE_SCHEMA_REQUIREMENTS
 
 NOW = datetime(2026, 9, 15, tzinfo=timezone.utc)
 TOKEN = "idg_" + "a" * 43
@@ -33,24 +35,28 @@ def grant():
         ("dream:read", "dream:write"), NOW + timedelta(seconds=100), NOW + timedelta(hours=2))
 
 
-def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch=None):
+def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch=None, schema_fault=None, assistant_patch=None):
     config = AdminDataConfig(base_url="https://admin.example", issuer="https://admin.example/api/auth", resource="https://dream.example/api", service_secret="s" * 32, service_client_id="dream-service")
     calls, receipt_states = [], ["absent", "committed"]
     thread_row = {"id": "thread-1", "user_id": "42", "title": None, "deck_id": None, "voice_id": None,
         "created_at": None, "updated_at": None, "claude_session_id": None, "agent_contract_version": None, **(thread_patch or {})}
-    operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION)
+    operations = (PERSIST_USER_MESSAGE, GET_THREAD, UPDATE_SESSION, PERSIST_MESSAGE)
+    schemas = [item.model_dump() for item in WORKSPACE_SCHEMA_REQUIREMENTS]
+    if schema_fault == "missing": schemas.pop()
+    elif schema_fault == "duplicate": schemas.append(dict(schemas[0]))
+    elif isinstance(schema_fault, int): schemas[schema_fault]["contract_sha256"] = "0" * 64
     def transport(request):
         request_id = request.headers["x-request-id"]
         calls.append(request)
         if request.url.path.endswith("/capabilities"):
-            value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": [], "operations": [item.capability.model_dump() for item in operations]}
+            value = {"version": "1", "auth": {"issuer": config.issuer, "jwks_uri": config.jwks_uri, "resource": config.resource, "algorithm": "ES256", "clients": {"browser": "dream-browser", "device": "dream-device"}, "scopes": ["dream:read", "dream:write"], "delegations": []}, "schema_capabilities": schemas, "operations": [item.capability.model_dump() for item in operations]}
         elif "/receipts/" in request.url.path:
             assert request_id == "write-original"
             state = receipt_states.pop(0)
             operation = request.url.params["operation"]
             value = {"status": state, "request_id": request_id, "operation": operation}
             if state == "committed":
-                value["result"] = {"changed": True} if operation == UPDATE_SESSION.capability.name else {"message_id": "message-1", "confirmation_preserved": False}
+                value["result"] = {"changed": True} if operation == UPDATE_SESSION.capability.name else ({"message_id": "message-1"} if operation == PERSIST_MESSAGE.capability.name else {"message_id": "message-1", "confirmation_preserved": False})
         else:
             assert request.headers["authorization"] == "Bearer " + TOKEN
             assert request_id == "write-original"
@@ -65,6 +71,8 @@ def holder(*, lose_response=False, lose_operation=None, block=None, thread_patch
             elif name == UPDATE_SESSION.capability.name:
                 thread_row.update(claude_session_id=input_dto["claude_session_id"], agent_contract_version=input_dto["agent_contract_version"])
                 value = {"changed": True}
+            elif name == PERSIST_MESSAGE.capability.name:
+                value = {"message_id": input_dto["message_id"], **(assistant_patch or {})}
             else:
                 value = {"message_id": input_dto["message_id"], "confirmation_preserved": False}
             if lose_response or name == lose_operation:
@@ -437,3 +445,130 @@ def test_original_factory_keeps_grant_on_disconnect_and_drains_it_on_terminal(mo
             await factory.aclose()
         assert runtime.closed == [True] and not value._keeper._thread.is_alive()
     asyncio.run(scenario())
+def assistant_write(value, **changes):
+    args = {"actor_id": "42", "thread_id": "thread-1", "message_id": "message-1",
+        "parts": [{"type": "text", "text": "  原结果\n"}],
+        "metadata": {"turnId": "turn-original", "turnStatus": "completed", "finalPartIndex": 0,
+            "durationMs": 1250, "usage": {"inputTokens": 3, "outputTokens": 2, "totalTokens": 5}},
+        "history_final_text": "  原结果\n", "history_process_available": False, "history_projection_version": 1}
+    return value.persist_assistant(**{**args, **changes})
+
+
+def test_assistant_uses_original_complete_history_DTO_and_current_grant():
+    value, calls, _ = holder()
+    result = assistant_write(value)
+    request = next(item for item in calls if item.url.path.endswith(PERSIST_MESSAGE.capability.name))
+    body = json.loads(request.content)
+    assert result.message_id == "message-1"
+    assert request.headers["authorization"] == "Bearer " + TOKEN
+    assert set(body["input"]) == {"thread_id", "message_id", "role", "parts", "metadata", "history_final_text", "history_process_available", "history_projection_version"}
+    assert body["input"]["role"] == "assistant" and body["input"]["history_final_text"] == "  原结果\n"
+    assert body["input"]["metadata"]["usage"]["totalTokens"] == 5
+    assert TOKEN not in request.content.decode() and value._pending is None
+
+
+@pytest.mark.parametrize("actor,thread", [("43", "thread-1"), ("42", "another-thread")])
+def test_assistant_rejects_wrong_actor_or_thread_before_io(actor, thread):
+    value, calls, _ = holder()
+    before = len(calls)
+    with pytest.raises(AdminDataError): assistant_write(value, actor_id=actor, thread_id=thread)
+    assert len(calls) == before
+
+
+@pytest.mark.parametrize("fault", ["missing", "duplicate", 0, 1, 2, 3])
+def test_assistant_requires_four_exact_schemas_before_command(fault):
+    value, calls, _ = holder(schema_fault=fault)
+    before = len(calls)
+    with pytest.raises(AdminDataError) as error: assistant_write(value)
+    assert error.value.code == "ADMIN_CAPABILITY_UNAVAILABLE"
+    assert value._pending is None
+    assert all(item.method == "GET" and item.url.path.endswith("/capabilities") for item in calls[before:])
+
+
+@pytest.mark.parametrize("patch", [{"message_id": "another-message"}, {"message_id": None}, {"extra": "private"}])
+def test_assistant_bad_reply_retains_original_pending_identity(patch):
+    value, calls, _ = holder(assistant_patch=patch)
+    with pytest.raises(AdminDataError) as error: assistant_write(value)
+    assert error.value.code == "ADMIN_RESPONSE_INVALID" and error.value.outcome_unknown
+    assert value._pending.operation is PERSIST_MESSAGE and value._pending.request_id == "write-original"
+    assert sum(item.url.path.endswith(PERSIST_MESSAGE.capability.name) for item in calls) == 1
+
+
+def test_unknown_assistant_blocks_user_session_and_new_assistant_then_only_recovers_original():
+    value, calls, _ = holder(lose_operation=PERSIST_MESSAGE.capability.name)
+    with pytest.raises(AdminDataError) as error: assistant_write(value)
+    assert error.value.request_id == "write-original" and error.value.outcome_unknown
+    before = len(calls)
+    for method in [lambda: value.persist_user(actor_id="42", thread_id="thread-1", message_id="user-other", parts=[{"type":"text","text":"user"}], metadata=None),
+        lambda: value.update_session(actor_id="42", thread_id="thread-1", session_id="native", contract_version="v1"),
+        lambda: assistant_write(value, message_id="another-message")]:
+        with pytest.raises(AdminDataError) as result: method()
+        assert result.value.request_id == "write-original" and result.value.outcome_unknown
+    assert len(calls) == before
+    with pytest.raises(AdminDataError): assistant_write(value)  # Original absent does not resend.
+    result = assistant_write(value)
+    assert result.message_id == "message-1" and value._pending is None
+    assert sum(item.url.path.endswith(PERSIST_MESSAGE.capability.name) for item in calls) == 1
+    reads = [item for item in calls if "/receipts/" in item.url.path]
+    assert len(reads) == 2 and all(item.method == "GET" and item.url.path.endswith("write-original") and item.url.params["operation"] == PERSIST_MESSAGE.capability.name for item in reads)
+
+
+@pytest.mark.parametrize("operation", [PERSIST_USER_MESSAGE, UPDATE_SESSION], ids=lambda item:item.capability.name)
+def test_unknown_existing_writer_blocks_assistant_before_io(operation):
+    value, calls, _ = holder(lose_operation=operation.capability.name)
+    with pytest.raises(AdminDataError):
+        if operation is PERSIST_USER_MESSAGE:
+            value.persist_user(actor_id="42", thread_id="thread-1", message_id="user-1", parts=[{"type":"text","text":"user"}], metadata=None)
+        else:
+            value.update_session(actor_id="42", thread_id="thread-1", session_id="native", contract_version="v1")
+    before = len(calls)
+    with pytest.raises(AdminDataError) as error: assistant_write(value)
+    assert error.value.outcome_unknown and len(calls) == before
+
+
+@pytest.mark.parametrize("outcome", ["completed", "cancelled", "error"])
+def test_public_execute_session_persists_original_assistant_parts_with_SQL_fenced(monkeypatch, outcome):
+    import database
+    import claude_agent.service as service_module
+    from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService
+    from claude_agent.thread_pool import AgentRunState
+    from claude_agent.tool_confirmation_store import ToolConfirmationStore
+    from libs.claude_agent_kit.types import AgentRunResult
+    from tests.test_claude_agent_service import _FakeContextBuilder
+    value, calls, _ = holder()
+    monkeypatch.setattr(database, "save_chat_message", lambda *_a, **_kw: pytest.fail("Public assistant must not write SQL"))
+    monkeypatch.setattr(database, "get_db", lambda *_a, **_kw: pytest.fail("Public turn persistence must not open SQL"))
+    class Runner:
+        async def run_streaming(self, opts, callbacks):
+            await callbacks.on_text_delta("原文结果")
+            if outcome == "cancelled": raise asyncio.CancelledError
+            await callbacks.on_text_done("原文结果")
+            return AgentRunResult(full_text="原文结果", session_id=None, success=outcome=="completed",
+                error="synthetic failure" if outcome=="error" else None,
+                usage={"input_tokens":3,"output_tokens":2}, duration_ms=1250)
+    service = ClaudeAgentService(context_builder=_FakeContextBuilder(), platform_model_resolver=lambda *_:"dream-balanced",
+        managed_mcp_runtime_snapshot_loader=SimpleNamespace(load=AsyncMock(return_value={})))
+    async def scenario():
+        request = ClaudeAgentRunRequest(user_id="42",thread_id="thread-1",message_id="user-1",
+            message_parts=[{"type":"text","text":"用户文本"}],model="dream-balanced",admin_turn_persistence=value,
+            admin_workflow_resolution=AdminWorkflowResolution("42","thread-1",None))
+        execution = service_module._TurnExecution(request=request,state=AgentRunState(session_id="thread-1"),runner=Runner(),run_options=Mock(),
+            turn_context=service_module._TurnContext(queue=asyncio.Queue(),confirmation_store=ToolConfirmationStore()))
+        if outcome == "cancelled":
+            with pytest.raises(asyncio.CancelledError): await service.execute_session(execution)
+        else: await service.execute_session(execution)
+        return execution
+    execution = asyncio.run(scenario())
+    assistant = [item for item in calls if item.url.path.endswith(PERSIST_MESSAGE.capability.name)]
+    assert len(assistant)==1
+    dto = json.loads(assistant[0].content)["input"]
+    assert dto["parts"]==[{"type":"text","text":"原文结果"}] and dto["metadata"]["turnStatus"]==outcome
+    assert dto["metadata"]["chatModel"]=={"provider":"gateway","model":"dream-balanced"}
+    assert dto["metadata"]["turnId"]==execution.state.current_turn_id
+    assert dto["message_id"] not in {execution.request.message_id, execution.state.current_turn_id}
+    if outcome=="completed":
+        assert (dto["history_final_text"],dto["history_process_available"],dto["history_projection_version"])==("原文结果",False,1)
+        assert dto["metadata"]["durationMs"]==1250 and dto["metadata"]["usage"]["totalTokens"]==5
+    else:
+        assert dto["metadata"]["is_partial"] is True
+        assert (dto["history_final_text"],dto["history_process_available"],dto["history_projection_version"])==(None,False,None)
